@@ -22,6 +22,8 @@ project uses [Semantic Versioning](https://semver.org/).
   render in 8–9 ms at 1280×800 on 32 threads, with output identical for any
   thread count. Z toggles wireframe.
 - Exact click picking from the ID buffer.
+- Binary size budget raised from 64 KiB to 256 KiB (now ~67 KB); the
+  masterplan target remains < 2 MB for v1.0.
 - Arenas keep memory that is in use resident instead of releasing it every
   frame (released after sustained low use).
 
