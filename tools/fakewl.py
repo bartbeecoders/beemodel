@@ -260,10 +260,14 @@ class Fake:
         self.send(self.find('wp_fractional_scale_v1')[0], 0, struct.pack('<I', s120))
         self.pump(0.5, until_frame=True)
 
-    def shot(self, name):
+    def image(self):
         from PIL import Image
         w, h, data = self.frame
-        img = Image.frombuffer('RGBX', (w, h), data, 'raw', 'BGRX', 0, 1).convert('RGB')
+        return Image.frombuffer('RGBX', (w, h), data, 'raw', 'BGRX', 0, 1).convert('RGB')
+
+    def shot(self, name):
+        w, h, _ = self.frame
+        img = self.image()
         path = os.path.join(OUT, name)
         img.save(path)
         print(f'  shot {path} ({w}x{h}, frame #{self.frames}, cursor shape {self.cursor})')
@@ -610,6 +614,8 @@ def files():
     check(ok, 'view.screenshot writes a PNG of the window')
     if ok:
         Image.open(f'{T}/s.png').load()   # decodes: CRC / zlib / adler are valid
+        size = os.path.getsize(f'{T}/s.png')
+        check(size < 1280 * 800 * 3 // 8, f'screenshot is deflate-compressed ({size // 1024} KiB)')
     open(f'{T}/bad.bee', 'wb').write(b'BEEM\x01\x00\x00\x00MESH\xff\xff\xff\x7f garbage')
     rows = [ICON(r) for r in range(4)]
     cmd(f'file.open {T}/bad.bee')
@@ -720,6 +726,29 @@ def mcp():
     check(text.startswith('ok') and not err, 'operators are callable as tools (op_view_toggle_grid)')
     text, err = m.tool('no_such_tool')
     check(err, 'unknown tool reports isError')
+    r = m.call('tools/call', {'name': 'viewport_capture', 'arguments': {}})
+    content = (r or {}).get('result', {}).get('content', [])
+    img = [c for c in content if c.get('type') == 'image']
+    ok = len(img) == 1 and img[0].get('mimeType') == 'image/png'
+    if ok:
+        import base64, io
+        from PIL import Image
+        data = base64.b64decode(img[0]['data'])
+        im = Image.open(io.BytesIO(data)).convert('RGB')
+        w, h = im.size
+        ok = 300 < w < 1280 and 300 < h < 800 and f'{w} x {h}' in content[0].get('text', '')
+        open(os.path.join(OUT, '31_capture.png'), 'wb').write(data)
+        print(f'     capture {w}x{h}, {len(data) // 1024} KiB PNG')
+    check(ok, 'viewport_capture returns the viewport as a base64 PNG image block')
+    r = m.call('tools/call', {'name': 'viewport_capture', 'arguments': {'area': 'window'}})
+    img = [c for c in (r or {}).get('result', {}).get('content', []) if c.get('type') == 'image']
+    if img:
+        from PIL import Image
+        import base64, io
+        win = Image.open(io.BytesIO(base64.b64decode(img[0]['data']))).convert('RGB')
+        f.pump(0.3)
+        same = win.tobytes() == f.image().tobytes()
+    check(img and win.size == (1280, 800) and same, 'viewport_capture area=window matches the presented frame')
     r = m.call('resources/read', {'uri': 'bee://scene'})
     txt = (r or {}).get('result', {}).get('contents', [{}])[0].get('text', '')
     check('"objects"' in txt, 'resources/read bee://scene')

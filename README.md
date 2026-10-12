@@ -87,6 +87,8 @@ For Claude Desktop (or any MCP client using stdio), add this to its config:
 * `scene_summary` and `create_primitive`;
 * `set_transform`, `select` and `delete`;
 * `run_operator`, `undo` and `redo`;
+* `viewport_capture`, so the agent can see the scene: it returns a PNG of the
+  viewport (or of the whole window, with `area: "window"`);
 * every agent-safe operator as `op_<id>`, for example `op_file_save`.
 
 The scene is also available as the resource `bee://scene`.
@@ -135,6 +137,7 @@ src/scene.s     objects, selection, transforms, object operators
 src/mesh.s      polygon meshes and primitive generators
 src/json.s      lazy JSON reader + writer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
+src/png.s       PNG encoder (row filters, LZ77 + Huffman deflate)
 src/log.s       string builder + console log
 src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
 src/const.inc   syscalls, opcodes, layout metrics, theme colours
