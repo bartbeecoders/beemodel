@@ -37,6 +37,11 @@
 .globl edit_median
 .globl sel_mode
 .globl do_sel_all
+.globl need_edit
+.globl poly_sel
+.globl build_adj
+.globl adj_off
+.globl adj_nb
 
 .equ KEY_TAB,   15
 .equ KEY_1,     2
@@ -96,7 +101,7 @@ OPERATOR op_edit_toggle, "mode.toggle_edit", "Edit Mode", do_toggle, chk_edit, k
 OPERATOR op_selmode_v, "mesh.select_mode_vertex", "Vertex Select Mode", set_selmode, chk_selmode, 0, KEY_1, OPF_AI_SAFE|OPF_QUIET, doc="Edit mode: pick vertices"
 OPERATOR op_selmode_e, "mesh.select_mode_edge", "Edge Select Mode", set_selmode, chk_selmode, 1, KEY_2, OPF_AI_SAFE|OPF_QUIET, doc="Edit mode: pick edges"
 OPERATOR op_selmode_f, "mesh.select_mode_face", "Face Select Mode", set_selmode, chk_selmode, 2, KEY_3, OPF_AI_SAFE|OPF_QUIET, doc="Edit mode: pick faces"
-OPERATOR op_mesh_all, "mesh.select_all", "Select All / None (Mesh)", do_sel_all, flags=OPF_AI_SAFE|OPF_QUIET, doc="Edit mode: select every vertex, or none if some are selected"
+OPERATOR op_mesh_all, "mesh.select_all", "Select All / None (Mesh)", do_sel_all, key=KEY_A, flags=OPF_AI_SAFE|OPF_QUIET|OPF_EDIT, doc="Edit mode: select every vertex, or none if some are selected"
 OPERATOR op_mesh_inv, "mesh.select_invert", "Invert Selection", do_sel_invert, key=KEY_I|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET, doc="Edit mode: invert the vertex selection"
 OPERATOR op_mesh_linked, "mesh.select_linked", "Select Linked", do_sel_linked, key=KEY_L|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET, doc="Edit mode: grow the selection over every connected part"
 OPERATOR op_mesh_box, "mesh.select_box", "Box Select", do_box_arm, key=KEY_B, flags=OPF_QUIET, doc="Edit mode: drag a rectangle to select (Ctrl subtracts)"

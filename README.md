@@ -71,6 +71,26 @@ redo every change (create, delete, duplicate, transforms). Selected objects get 
 - **Visibility.** Hidden vertices and edges are neither drawn nor picked; wireframe mode (Z)
   shows and picks everything.
 
+Modeling tools, also in the **Mesh** menu:
+
+| Key | Tool |
+|---|---|
+| **E** | Extrude the selected faces and slide them along the normal (edges extrude to new faces) |
+| **Alt+E** | Extrude every face along its own normal |
+| **I** | Inset faces; move the mouse or type a thickness |
+| **X** / **Del** | Delete vertices, edges or faces, by select mode |
+| **Ctrl+X** | Dissolve into n-gons |
+| **M** | Merge at the centre; collapse and merge-by-distance are in the menu |
+| **F** | Fill a hole or make a face |
+| **Shift+D** | Duplicate the selected faces |
+| **Shift+N** | Recalculate normals |
+
+The menu also has Subdivide and Flip Normals.
+
+Typed values work like in transforms (`E 1 ⏎`, `I 0.2 ⏎`), and each tool is a single undo step.
+Scripts and agents call the same operators with the value as the argument:
+`op("mesh.inset", 0.1)`.
+
 Files: **Ctrl+S** saves (`.bee`), **Ctrl+O** opens, and File › Import / Export
 handle **OBJ** and **STL**. Commands take paths on the command line, for
 example `file.save ~/BeeModel/chair.bee` or `file.import_stl ~/part.stl`.

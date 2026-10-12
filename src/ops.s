@@ -144,11 +144,18 @@ dispatch_key:
     jae     2f
     cmp     [rdi+OP_KEY], eax
     je      3f
-    add     rdi, OP_SIZE
+4:  add     rdi, OP_SIZE
     jmp     1b
 2:  xor     eax, eax
     ret
-3:  call    run_op
+3:  cmp     dword ptr [rip+edit_obj], 0 # the same key can mean different
+    je      5f                          # things in object and edit mode
+    test    dword ptr [rdi+OP_FLAGS], OPF_OBJECT
+    jnz     4b
+    jmp     6f
+5:  test    dword ptr [rdi+OP_FLAGS], OPF_EDIT
+    jnz     4b
+6:  call    run_op
     mov     eax, 1
     ret
 

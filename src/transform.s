@@ -24,6 +24,9 @@
 .globl gizmo_pick
 .globl gizmo_hover
 .globl vp_prepare
+.globl tm_custom
+.globl tm_noundo
+.globl tm_start_value
 
 .equ TM_MAX,        MAX_OBJECTS
 .equ TS_H,          0               # snapshot entry: handle, loc, rot, scale
@@ -34,7 +37,12 @@
 .section .bss
 .align 8
 tm_snap:        .skip TM_MAX*TS_SZ
-tm_mode:        .skip 4             # 0 none, 1 grab, 2 rotate, 3 scale
+tm_mode:        .skip 4             # 0 none, 1 grab, 2 rotate, 3 scale, 4 value
+tm_noundo:      .skip 4             # the caller already recorded the undo step
+.align 8
+tm_vfn:         .skip 8             # value mode: apply(xmm0 = value)
+tm_vcancel:     .skip 8
+tm_vconfirm:    .skip 8
 tm_axis:        .skip 4             # 0 free, 1 X, 2 Y, 3 Z
 tm_drag:        .skip 4             # started by a gizmo drag: release confirms
 tm_area:        .skip 4
@@ -71,12 +79,10 @@ tf_pick:        .float 8.0
 tf_big:         .float 1.0e30
 tf_ring:        .float 0.9
 tf_box:         .float 0.08
-axis_vec:       .float 1,0,0,  0,1,0,  0,0,1
-axis_col:       .long COL_AXIS_X, COL_AXIS_Y, COL_AXIS_Z
 s_move:         .asciz "Move"
 s_rotate:       .asciz "Rotate"
 s_scale:        .asciz "Scale"
-s_ax:           .asciz "  XYZ"
+s_ax:           .asciz "  XYZN"
 s_sep:          .asciz "  "
 s_deg:          .asciz " deg"
 s_comma:        .asciz ", "
@@ -84,8 +90,16 @@ s_cursor:       .asciz "|"
 s_hint:         .asciz "    X/Y/Z axis   Ctrl snap   type a value   Enter / LMB confirm   Esc / RMB cancel"
 s_none:         .asciz "  nothing selected"
 s_cancelled:    .asciz "  transform cancelled"
+.align 16
+tf_absm:        .long 0x7fffffff, 0, 0, 0
+
+.section .data
 .align 8
-mode_names:     .quad 0, s_move, s_rotate, s_scale
+mode_names:     .quad 0, s_move, s_rotate, s_scale, 0   # 4: value mode (label set at start)
+axis_vec:       .float 1,0,0,  0,1,0,  0,0,1
+tm_custom:      .float 0,1,0                # axis 4: a direction set by the caller (normal)
+axis_col:       .long COL_AXIS_X, COL_AXIS_Y, COL_AXIS_Z, COL_ACCENT
+.section .rodata
 
 OPERATOR op_grab,   "transform.grab",   "Grab / Move", op_tm_start, arg=1, key=KEY_G, flags=OPF_QUIET, doc="Move the selection (X/Y/Z constrain, Ctrl snaps)"
 OPERATOR op_rotate, "transform.rotate", "Rotate",      op_tm_start, arg=2, key=KEY_R, flags=OPF_QUIET, doc="Rotate the selection with the mouse"
@@ -190,15 +204,20 @@ tm_start:
     jne     .Lts_out
     cmp     dword ptr [rip+edit_obj], 0 # edit mode: the selected vertices
     je      0f
+    cmp     dword ptr [rip+tm_noundo], 0
+    jne     81f
     lea     rcx, [rip+mode_names]
     mov     rdi, [rcx+r12*8]
     call    undo_push
-    lea     rdi, [rip+tm_pivot]
+81: lea     rdi, [rip+tm_pivot]
     call    edit_tm_snapshot
     mov     [rip+tm_n], eax
     test    eax, eax
     jnz     .Lts_common
+    cmp     dword ptr [rip+tm_noundo], 0
+    jne     82f
     call    undo_drop_last
+82: mov     dword ptr [rip+tm_noundo], 0
     lea     rdi, [rip+s_none]
     call    log_line
     jmp     .Lts_out
@@ -296,6 +315,50 @@ tm_start:
     pop     rbx
     ret
 
+# tm_start_value(rdi=apply, rsi=cancel, rdx=confirm, rcx=label) - a modal
+#   value (inset thickness, extrude distance...) for the edit selection: the
+#   pointer's distance change to the selection centre, typed digits, Ctrl
+#   snaps to 0.1. apply(xmm0) rebuilds from the caller's source each update.
+#   The caller's operator already recorded the undo step.
+tm_start_value:
+    push    rbx
+    sub     rsp, 16
+    cmp     dword ptr [rip+tm_mode], 0
+    jne     9f
+    mov     [rip+tm_vfn], rdi
+    mov     [rip+tm_vcancel], rsi
+    mov     [rip+tm_vconfirm], rdx
+    mov     [rip+mode_names+32], rcx
+    mov     edi, [rip+vp_area]
+    test    edi, edi
+    js      9f
+    lea     rdi, [rip+tm_pivot]
+    call    edit_median
+    mov     edi, [rip+vp_area]
+    mov     [rip+tm_area], edi
+    call    vp_prepare
+    lea     rdi, [rip+tm_pivot]
+    call    proj_world
+    movss   [rip+tm_cx], xmm0
+    movss   [rip+tm_cy], xmm1
+    movss   [rip+tm_depth], xmm2
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    pointer_px
+    movss   xmm0, [rip+tm_mx]
+    movss   [rip+tm_sx], xmm0
+    movss   xmm0, [rip+tm_my]
+    movss   [rip+tm_sy], xmm0
+    mov     dword ptr [rip+tm_mode], 4
+    mov     dword ptr [rip+tm_axis], 0
+    mov     dword ptr [rip+tm_drag], 0
+    mov     dword ptr [rip+tm_numlen], 0
+    mov     dword ptr [rip+tm_noundo], 0
+    call    tm_update
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
 # tm_motion(edi=x, esi=y logical)
 tm_motion:
     call    pointer_px
@@ -303,7 +366,10 @@ tm_motion:
 
 # restore - put every snapshotted transform back
 restore:
-    cmp     dword ptr [rip+edit_obj], 0
+    cmp     dword ptr [rip+tm_mode], 4  # value mode rebuilds from its source
+    jne     0f
+    ret
+0:  cmp     dword ptr [rip+edit_obj], 0
     jne     edit_tm_restore
     push    rbx
     xor     ebx, ebx
@@ -385,7 +451,46 @@ tm_update:
     je      .Ltu_rotate
     cmp     eax, 3
     je      .Ltu_scale
+    cmp     eax, 4
+    je      .Ltu_value
     jmp     .Ltu_out
+
+# ---- value mode: |pointer distance change| in world units at the pivot ---------------
+.Ltu_value:
+    cmp     dword ptr [rip+tm_numlen], 0
+    je      1f
+    lea     rsi, [rip+tm_num]
+    mov     ecx, [rip+tm_numlen]
+    call    parse_num
+    jmp     3f
+1:  movss   xmm0, [rip+tm_mx]
+    subss   xmm0, [rip+tm_cx]
+    mulss   xmm0, xmm0
+    movss   xmm1, [rip+tm_my]
+    subss   xmm1, [rip+tm_cy]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    sqrtss  xmm0, xmm0
+    movss   xmm2, [rip+tm_sx]
+    subss   xmm2, [rip+tm_cx]
+    mulss   xmm2, xmm2
+    movss   xmm1, [rip+tm_sy]
+    subss   xmm1, [rip+tm_cy]
+    mulss   xmm1, xmm1
+    addss   xmm2, xmm1
+    sqrtss  xmm2, xmm2
+    subss   xmm0, xmm2
+    andps   xmm0, [rip+tf_absm]
+    mulss   xmm0, [rip+tm_depth]
+    divss   xmm0, [rip+vp_focal]
+    test    dword ptr [rip+key_mods], MOD_CTRL
+    jz      3f
+    movss   xmm1, [rip+tf_one]
+    divss   xmm1, [rip+tf_ten]
+    call    round_to
+3:  movss   [rip+tm_value], xmm0
+    call    [rip+tm_vfn]
+    jmp     .Ltu_text
 
 # ---- grab: delta vector in [rsp] ----------------------------------------------------
 .Ltu_grab:
@@ -443,7 +548,18 @@ tm_update:
     movss   [rsp], xmm1
     movss   [rsp+4], xmm1
     movss   [rsp+8], xmm1
+    cmp     eax, 4
+    je      1f
     movss   [rsp+rax*4-4], xmm0
+    jmp     .Ltg_apply
+1:  xor     ecx, ecx                    # custom direction (e.g. a normal)
+2:  lea     rdx, [rip+tm_custom]
+    movss   xmm1, [rdx+rcx*4]
+    mulss   xmm1, xmm0
+    movss   [rsp+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
     jmp     .Ltg_apply
 .Ltg_free:                              # in the view plane at pivot depth
     movss   xmm4, [rip+tm_depth]
@@ -866,13 +982,17 @@ tm_confirm:
     cmp     dword ptr [rip+tm_mode], 0
     je      9f
     call    tm_update
-    cmp     dword ptr [rip+edit_obj], 0
+    cmp     dword ptr [rip+tm_mode], 4
+    jne     0f
+    call    [rip+tm_vconfirm]
+    jmp     2f
+0:  cmp     dword ptr [rip+edit_obj], 0
     je      1f
     call    edit_tm_end                 # bounding box after a component edit
     jmp     2f
 1:  mov     edi, [rip+tm_mode]
     call    macro_transform
-2:
+2:  mov     dword ptr [rip+tm_noundo], 0
     mov     dword ptr [rip+tm_mode], 0
     mov     dword ptr [rip+tm_drag], 0
     lea     rdi, [rip+tm_text]          # drop the input cursor from the log
@@ -892,8 +1012,15 @@ tm_confirm:
 tm_cancel:
     cmp     dword ptr [rip+tm_mode], 0
     je      9f
-    call    restore
+    cmp     dword ptr [rip+tm_mode], 4
+    jne     1f
+    call    [rip+tm_vcancel]
+    jmp     2f
+1:  call    restore
+2:  cmp     dword ptr [rip+tm_noundo], 0
+    jne     3f
     call    undo_drop_last
+3:  mov     dword ptr [rip+tm_noundo], 0
     mov     dword ptr [rip+tm_mode], 0
     mov     dword ptr [rip+tm_drag], 0
     lea     rdi, [rip+s_cancelled]

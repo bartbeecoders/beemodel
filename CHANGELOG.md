@@ -19,7 +19,21 @@ project uses [Semantic Versioning](https://semver.org/).
 
   Geometry is copy-on-write, so undo snapshots keep the previous mesh.
 - BeeScript mesh functions: `edit`, `verts`, `edges`, `faces`, `vpos`,
-  `selected`, `vsel`, `vselect`.
+  `selected`, `vsel`, `vselect`, `volume`.
+- Mesh operators (edit mode, Mesh menu). Each one is a single undo step.
+  - **Building:** extrude region (E, slides along the normal), extrude edges,
+    extrude individual faces (Alt+E), inset (I), duplicate (Shift+D),
+    subdivide.
+  - **Removing:** delete vertices / edges / faces (X), dissolve into n-gons
+    (Ctrl+X).
+  - **Merging:** at center (M), collapse, by distance.
+  - **Faces and normals:** fill / make face (F), flip normals, recalculate
+    normals (Shift+N, consistent and outwards).
+
+  Scripts and agents pass the distance as the operator argument.
+- Keys can depend on the mode (operator flags `OPF_EDIT` / `OPF_OBJECT`):
+  X, A, F and Shift+D mean the mesh versions in edit mode. Home resets the
+  camera in either mode.
 
 ### Changed
 - Meshes store a vertex selection and a triangle-to-polygon map.

@@ -22,6 +22,8 @@
 .equ OPF_AI_SAFE, 2     # may be exposed to automation without confirmation
 .equ OPF_UNDO,    4     # records an undo step (once undo exists)
 .equ OPF_HIDDEN,  8     # alias binding: not listed in the palette
+.equ OPF_EDIT,    16    # its key only works in edit mode
+.equ OPF_OBJECT,  32    # its key only works in object mode
 
 # key binding modifiers (pre-shifted into the high half of OP_KEY)
 .equ KM_SHIFT,  MOD_SHIFT << 16
