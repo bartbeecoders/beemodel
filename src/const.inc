@@ -258,3 +258,45 @@
 .equ MENU_AREA,         5
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
+
+# ---- meshes (mesh.s) ----------------------------------------------------------------
+.equ ME_NVERTS,     0
+.equ ME_NPOLYS,     4
+.equ ME_NLOOPS,     8
+.equ ME_NEDGES,     12
+.equ ME_NTRIS,      16
+.equ ME_CAPV,       20
+.equ ME_CAPL,       24
+.equ ME_CAPP,       28
+.equ ME_POS,        32      # float[3] per vertex
+.equ ME_POFF,       40      # u32 loop offset per polygon (+1 sentinel)
+.equ ME_LOOPS,      48      # u32 vertex index per loop
+.equ ME_EDGES,      56      # u32 pair per edge
+.equ ME_TRIS,       64      # u32 triple per triangle (fan triangulation)
+.equ ME_BMIN,       72      # float[3]
+.equ ME_BMAX,       84      # float[3]
+.equ ME_BYTES,      96      # size of the mapping (for munmap)
+.equ ME_HDR,        128
+
+# ---- objects (scene.s) -------------------------------------------------------------
+.equ OB_NAME,       0       # 32 bytes
+.equ OB_LOC,        32      # float[3]
+.equ OB_ROT,        44      # float[3] radians, Euler XYZ
+.equ OB_SCALE,      56      # float[3]
+.equ OB_COLOR,      68
+.equ OB_MESH,       72      # mesh pointer
+.equ OB_FLAGS,      80
+.equ OB_TYPE,       84
+.equ OB_SZ,         128
+.equ OBF_SELECTED,  1
+.equ OT_MESH,       0
+.equ OT_LIGHT,      1
+.equ OT_CAMERA,     2
+.equ MAX_OBJECTS,   4096
+.equ KEY_A,             30
+.equ KEY_D,             32
+.equ KEY_X,             45
+.equ KEY_DELETE,        111
+.equ DRAG_PENDING,      6       # LMB down in a viewport: click (select) or drag (orbit)
+.equ COL_SELECTED,      0xe0862a
+.equ COL_ACTIVE,        0xffc24a

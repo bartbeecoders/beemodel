@@ -34,13 +34,6 @@ OPERATOR op_tool_select, "tool.select", "Select", op_set_tool, op_check_tool, 0,
 OPERATOR op_tool_move,   "tool.move",   "Move",   op_set_tool, op_check_tool, 1, KEY_W, doc="Move tool"
 OPERATOR op_tool_rotate, "tool.rotate", "Rotate", op_set_tool, op_check_tool, 2, KEY_E, doc="Rotate tool"
 OPERATOR op_tool_scale,  "tool.scale",  "Scale",  op_set_tool, op_check_tool, 3, KEY_R, doc="Scale tool"
-# ---- Create -------------------------------------------------------------------
-OPERATOR op_add_cube,     "create.cube",     "Cube",     op_create, arg=0, doc="Add a cube primitive"
-OPERATOR op_add_sphere,   "create.sphere",   "Sphere",   op_create, arg=1, doc="Add a UV sphere primitive"
-OPERATOR op_add_cylinder, "create.cylinder", "Cylinder", op_create, arg=2, doc="Add a cylinder primitive"
-OPERATOR op_add_plane,    "create.plane",    "Plane",    op_create, arg=3, doc="Add a plane primitive"
-OPERATOR op_add_light,    "create.light",    "Light",    op_create, arg=4, doc="Add a point light"
-OPERATOR op_add_camera,   "create.camera",   "Camera",   op_create, arg=5, doc="Add a camera"
 # ---- Console ------------------------------------------------------------------
 OPERATOR op_console_focus, "console.focus", "Command Line", do_console_focus, key=KEY_ENTER, flags=OPF_QUIET|OPF_AI_SAFE, doc="Focus the console command line"
 OPERATOR op_console_clear, "console.clear", "Clear Console", do_console_clear, key=KEY_L|KM_CTRL, flags=OPF_QUIET|OPF_AI_SAFE, doc="Clear the console log"
@@ -52,7 +45,6 @@ OPERATOR op_help_about, "help.about",     "About BeeModel",     op_about, doc="S
 .section .rodata
 s_log_prompt:   .asciz "> "
 s_log_todo:     .asciz "  not implemented yet - waiting for the modeling core"
-s_log_create:   .asciz "  queued - mesh creation lands with the modeling core"
 s_about_ver:    .asciz "  BeeModel "
 s_about1:       .asciz "  A 3D modeling shell written in pure x86-64 assembly"
 s_about2:       .asciz "  Talks the Wayland wire protocol directly; no libc, no toolkits"
@@ -357,10 +349,6 @@ do_console_list_ops:
     jmp     1b
 9:  pop     rbx
     ret
-
-op_create:
-    lea     rdi, [rip+s_log_create]
-    jmp     log_line
 
 op_about:
     lea     rdi, [rip+s_about_ver]

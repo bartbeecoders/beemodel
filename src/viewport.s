@@ -8,6 +8,8 @@
 .include "macros.inc"
 
 # exports
+.globl vp_pick
+.globl cam_setup
 .globl cam_dist
 .globl cam_pitch
 .globl cam_tx
@@ -55,13 +57,6 @@ f_def_pitch:.float 0.5
 f_def_dist: .float 18.0
 
 .equ GRID_N, 10
-
-# Demo object: unit cube (2x2x2) resting on the ground plane
-cube_verts:
-    .float -1,0,-1,   1,0,-1,   1,0,1,   -1,0,1
-    .float -1,2,-1,   1,2,-1,   1,2,1,   -1,2,1
-cube_edges:
-    .byte 0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7
 
 s_vp_label: .asciz "Perspective  |  Grid 1 m"
 s_vp_hint:  .asciz "LMB orbit   MMB / Shift+LMB pan   Wheel zoom   F reset   G grid"
@@ -500,30 +495,7 @@ viewport_draw:
     call    line3d
 
 .Lvp_object:
-    # ---- demo cube -------------------------------------------------------------
-    mov     r13d, 0xb4b8c0
-    cmp     dword ptr [rip+selected_obj], 3
-    jne     1f
-    mov     r13d, COL_OBJECT
-1:  xor     ebx, ebx
-    lea     r14, [rip+cube_edges]
-    lea     r15, [rip+cube_verts]
-2:  movzx   eax, byte ptr [r14+rbx*2]
-    lea     rax, [rax+rax*2]
-    movss   xmm0, [r15+rax*4]
-    movss   xmm1, [r15+rax*4+4]
-    movss   xmm2, [r15+rax*4+8]
-    movzx   eax, byte ptr [r14+rbx*2+1]
-    lea     rax, [rax+rax*2]
-    movss   xmm3, [r15+rax*4]
-    movss   xmm4, [r15+rax*4+4]
-    movss   xmm5, [r15+rax*4+8]
-    call    set_lp
-    mov     edx, r13d
-    call    line3d
-    inc     ebx
-    cmp     ebx, 12
-    jb      2b
+    call    draw_objects
 
     # ---- orientation gizmo (bottom-left) -----------------------------------
     mov     r12d, [rip+cvs_x0]
@@ -597,8 +569,241 @@ axis_colors: .long COL_AXIS_X, COL_AXIS_Y, COL_AXIS_Z
 .align 8
 axis_labels: .quad s_ax_x, s_ax_y, s_ax_z
 f_half:      .float 0.5
+f_huge:      .float 1.0e30
+f_nhuge:     .float -1.0e30
+f_slack:     .float 4.0
 f_120:       .float 120.0
 .text
+
+# -----------------------------------------------------------------------------
+# Scene objects: wireframes through each object's matrix
+# -----------------------------------------------------------------------------
+draw_objects:
+    push    rbx
+    push    r12
+    push    r13
+    xor     r12d, r12d                  # pass 0: unselected, 1: selected
+1:  xor     ebx, ebx
+2:  cmp     ebx, [rip+obj_count]
+    jae     6f
+    mov     edi, ebx
+    call    obj_at
+    mov     ecx, [rax+OB_FLAGS]
+    and     ecx, OBF_SELECTED
+    cmp     ecx, r12d
+    jne     5f
+    mov     r13d, [rax+OB_COLOR]
+    test    r12d, r12d
+    jz      4f
+    mov     r13d, COL_SELECTED
+    lea     rcx, [rip+obj_list]
+    mov     ecx, [rcx+rbx*4]
+    cmp     ecx, [rip+active_obj]
+    jne     4f
+    mov     r13d, COL_ACTIVE
+4:  mov     rdi, rax
+    mov     esi, r13d
+    call    draw_obj_wire
+5:  inc     ebx
+    jmp     2b
+6:  inc     r12d
+    cmp     r12d, 2
+    jb      1b
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# world_verts(rdi=object) -> rax = world-space positions (frame arena), ecx = n
+world_verts:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 56
+    mov     rbx, rdi
+    mov     rsi, rsp
+    call    obj_matrix
+    mov     r12, [rbx+OB_MESH]
+    mov     r13d, [r12+ME_NVERTS]
+    lea     rdi, [rip+frame_arena]
+    imul    esi, r13d, 12
+    call    arena_alloc
+    mov     r14, rax
+    test    rax, rax
+    jz      9f
+    xor     ebx, ebx
+1:  cmp     ebx, r13d
+    jae     9f
+    imul    rcx, rbx, 12
+    mov     rsi, [r12+ME_POS]
+    add     rsi, rcx
+    lea     rdx, [r14+rcx]
+    mov     rdi, rsp
+    call    xform_point
+    inc     ebx
+    jmp     1b
+9:  mov     rax, r14
+    mov     ecx, r13d
+    add     rsp, 56
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# draw_obj_wire(rdi=object, esi=color)
+draw_obj_wire:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r15d, esi
+    mov     r12, [rdi+OB_MESH]
+    call    world_verts
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    xor     ebx, ebx
+1:  cmp     ebx, [r12+ME_NEDGES]
+    jae     9f
+    mov     rcx, [r12+ME_EDGES]
+    mov     eax, [rcx+rbx*8]
+    imul    rax, rax, 12
+    mov     rdx, [r13+rax]
+    mov     [rip+lp0], rdx
+    mov     edx, [r13+rax+8]
+    mov     [rip+lp0+8], edx
+    mov     eax, [rcx+rbx*8+4]
+    imul    rax, rax, 12
+    mov     rdx, [r13+rax]
+    mov     [rip+lp1], rdx
+    mov     edx, [r13+rax+8]
+    mov     [rip+lp1+8], edx
+    mov     edx, r15d
+    call    line3d
+    inc     ebx
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# vp_pick(edi=x, esi=y logical) -> eax = handle of the object whose projected
+# bounds contain the point (smallest bounds wins), 0 if none. Needs cam_setup.
+vp_pick:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 40
+    call    to_px
+    mov     [rsp+24], eax               # physical x
+    mov     edi, esi
+    call    to_px
+    mov     [rsp+28], eax               # physical y
+    xor     ebp, ebp                    # best handle
+    movss   xmm0, [rip+f_huge]
+    movss   [rsp+32], xmm0              # best area
+    xor     ebx, ebx
+.Lpk_obj:
+    cmp     ebx, [rip+obj_count]
+    jae     .Lpk_done
+    mov     edi, ebx
+    call    obj_at
+    mov     rdi, rax
+    call    world_verts
+    test    rax, rax
+    jz      .Lpk_next
+    mov     r12, rax
+    mov     r13d, ecx
+    movss   xmm0, [rip+f_huge]          # screen bounds
+    movss   [rsp], xmm0
+    movss   [rsp+4], xmm0
+    movss   xmm0, [rip+f_nhuge]
+    movss   [rsp+8], xmm0
+    movss   [rsp+12], xmm0
+    xor     r14d, r14d                  # projected count
+    xor     r15d, r15d
+1:  cmp     r15d, r13d
+    jae     3f
+    imul    rdi, r15, 12
+    add     rdi, r12
+    lea     rsi, [rip+la]
+    call    to_cam
+    movss   xmm0, [rip+la+8]
+    comiss  xmm0, [rip+f_near]
+    jb      2f
+    lea     rdi, [rip+la]
+    lea     rsi, [rsp+16]
+    call    project
+    movss   xmm0, [rsp+16]
+    movss   xmm1, [rsp+20]
+    movss   xmm2, [rsp]
+    minss   xmm2, xmm0
+    movss   [rsp], xmm2
+    movss   xmm2, [rsp+4]
+    minss   xmm2, xmm1
+    movss   [rsp+4], xmm2
+    movss   xmm2, [rsp+8]
+    maxss   xmm2, xmm0
+    movss   [rsp+8], xmm2
+    movss   xmm2, [rsp+12]
+    maxss   xmm2, xmm1
+    movss   [rsp+12], xmm2
+    inc     r14d
+2:  inc     r15d
+    jmp     1b
+3:  test    r14d, r14d
+    jz      .Lpk_next
+    cvtsi2ss xmm0, dword ptr [rsp+24]   # inside (with a few pixels slack)?
+    cvtsi2ss xmm1, dword ptr [rsp+28]
+    movss   xmm2, [rsp]
+    subss   xmm2, [rip+f_slack]
+    comiss  xmm0, xmm2
+    jb      .Lpk_next
+    movss   xmm2, [rsp+8]
+    addss   xmm2, [rip+f_slack]
+    comiss  xmm0, xmm2
+    ja      .Lpk_next
+    movss   xmm2, [rsp+4]
+    subss   xmm2, [rip+f_slack]
+    comiss  xmm1, xmm2
+    jb      .Lpk_next
+    movss   xmm2, [rsp+12]
+    addss   xmm2, [rip+f_slack]
+    comiss  xmm1, xmm2
+    ja      .Lpk_next
+    movss   xmm0, [rsp+8]               # area of the bounds
+    subss   xmm0, [rsp]
+    addss   xmm0, [rip+f_slack]
+    movss   xmm1, [rsp+12]
+    subss   xmm1, [rsp+4]
+    addss   xmm1, [rip+f_slack]
+    mulss   xmm0, xmm1
+    comiss  xmm0, [rsp+32]
+    jae     .Lpk_next
+    movss   [rsp+32], xmm0
+    lea     rax, [rip+obj_list]
+    mov     ebp, [rax+rbx*4]
+.Lpk_next:
+    inc     ebx
+    jmp     .Lpk_obj
+.Lpk_done:
+    mov     eax, ebp
+    add     rsp, 40
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
 
 # -----------------------------------------------------------------------------
 # Camera controls

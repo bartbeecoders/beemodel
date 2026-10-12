@@ -44,6 +44,12 @@ between them. Each area's header lets you switch its editor (3D Viewport,
 Tools, Outliner, Properties, Console), maximize it (Ctrl+Space), split it side
 by side or top/bottom, or close it. Every viewport keeps its own camera.
 
+The default scene has a Camera, a Light and a Cube. Add objects from the
+Create menu or the tools area, click objects in the viewport or the outliner
+to select them (Shift extends), **A** selects all or none, **X** / **Del**
+deletes and **Shift+D** duplicates. Properties shows the active object's
+transform and mesh statistics.
+
 Press **F3** for the command palette: type part of any command name and press
 Enter.
 
@@ -84,6 +90,8 @@ src/mem.s       arenas and generational-handle pools
 src/selftest.s  --selftest unit tests + benchmark
 src/areas.s     area tree, editors, splitting / closing / maximizing
 src/palette.s   F3 command palette (fuzzy operator search)
+src/scene.s     objects, selection, transforms, object operators
+src/mesh.s      polygon meshes and primitive generators
 src/log.s       string builder + console log
 src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

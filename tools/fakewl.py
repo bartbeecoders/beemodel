@@ -444,6 +444,37 @@ def areas_and_palette():
     f.keymap('tests/keymaps/us.xkb')
     f.enter(600, 300)
     PANE = 0x2a2e36
+
+    # ---- scene: outliner rows (icon colour per type), selection, edit ops
+    ICON = lambda row: px(f, 1037, 94 + 20 * row)
+    ROWBG = lambda row: px(f, 1025, 86 + 20 * row)
+    SEL = 0x6b5420
+    check([ICON(r) for r in range(3)] == [0x61afef, 0xe5c07b, 0xb4b8c0],
+          'outliner lists the default Camera, Light and Cube')
+    check(ROWBG(2) == SEL, 'the default cube starts selected')
+    f.click(300, 560)                    # empty viewport: deselect all
+    check(ROWBG(2) != SEL, 'clicking empty space deselects')
+    f.click(590, 300)                    # click the cube
+    check(ROWBG(2) == SEL, 'clicking the cube in the viewport selects it')
+    f.click(1080, 94)                    # outliner: click Camera row
+    check(ROWBG(0) == SEL and ROWBG(2) != SEL, 'outliner click selects the Camera only')
+    f.mods(1); f.click(1080, 134); f.mods(0)   # Shift+click Cube: extend
+    check(ROWBG(0) == SEL and ROWBG(2) == SEL, 'Shift+click extends the selection')
+    f.move(600, 300)
+    f.key(45)                            # X deletes Camera and Cube
+    check(ICON(0) == 0xe5c07b and ICON(1) == PANE, 'X deletes the selected objects')
+    f.key(61); f.type('torus'); f.key(28)      # palette: add a torus
+    check(ICON(1) == 0xb4b8c0 and ROWBG(1) == SEL, 'palette create.torus adds a selected torus')
+    f.move(600, 300)
+    f.mods(1); f.key(32); f.mods(0)      # Shift+D duplicates it
+    check(ICON(2) == 0xb4b8c0 and ROWBG(2) == SEL and ROWBG(1) != SEL,
+          'Shift+D duplicates; the copy becomes the selection')
+    f.key(30)                            # A: something selected -> none
+    check(ROWBG(2) != SEL, 'A deselects all')
+    f.key(30)                            # A again -> all
+    check(all(ROWBG(r) == SEL for r in range(3)), 'A selects all')
+    f.shot('22_scene_ops.png')
+
     check(px(f, 4, 300) == PANE, 'default layout: tools area on the left')
     f.click(194, 68)                     # Tools header: close button
     check(px(f, 4, 300) != PANE, 'area close button removes the tools area')
