@@ -26,7 +26,6 @@
 .globl wb_len
 .globl parse_float
 .globl skip_space
-.globl png_write
 .globl ensure_dir
 .globl default_dir
 .globl cache_dir
@@ -55,8 +54,6 @@ path_buf:       .skip 512
 tmp_path:       .skip 520
 dir_buf:        .skip 512
 statb:          .skip 144
-crc_table:      .skip 1024
-crc_ready:      .skip 4
 
 .section .rodata
 s_home:         .asciz "HOME="
@@ -70,7 +67,6 @@ s_empty:        .asciz ""
 d_million:      .double 1000000.0
 d_ten:          .double 10.0
 d_one:          .double 1.0
-png_sig:        .byte 0x89, 'P', 'N', 'G', 13, 10, 26, 10
 
 .text
 
@@ -645,207 +641,6 @@ parse_float:
     xor     eax, eax
     test    r9d, r9d
     setnz   al
-    ret
-
-# -----------------------------------------------------------------------------
-# PNG writer: png_write(rdi=path, rsi=XRGB pixels, edx=width, ecx=height,
-#                       r8d=stride in pixels) -> eax = 0 ok
-#   uncompressed deflate ("stored" blocks) - fast, no compressor needed
-# -----------------------------------------------------------------------------
-crc_init:
-    cmp     dword ptr [rip+crc_ready], 0
-    jne     9f
-    lea     rdi, [rip+crc_table]
-    xor     ecx, ecx
-1:  mov     eax, ecx
-    mov     edx, 8
-2:  shr     eax, 1
-    jnc     3f
-    xor     eax, 0xedb88320
-3:  dec     edx
-    jnz     2b
-    mov     [rdi+rcx*4], eax
-    inc     ecx
-    cmp     ecx, 256
-    jb      1b
-    mov     dword ptr [rip+crc_ready], 1
-9:  ret
-
-# crc32(rsi=data, rdx=bytes) -> eax
-crc32:
-    lea     r8, [rip+crc_table]
-    mov     eax, -1
-1:  test    rdx, rdx
-    jz      2f
-    movzx   ecx, byte ptr [rsi]
-    xor     ecx, eax
-    and     ecx, 255
-    shr     eax, 8
-    xor     eax, [r8+rcx*4]
-    inc     rsi
-    dec     rdx
-    jmp     1b
-2:  not     eax
-    ret
-
-# wb_u32be(edi)
-wb_u32be:
-    bswap   edi
-    jmp     wb_u32
-
-# png_chunk_end(rbx=chunk start offset in wb) - patch length, append CRC
-png_chunk_end:
-    mov     rax, [rip+wb_len]
-    mov     rdx, rax
-    sub     rdx, rbx
-    sub     rdx, 8                      # data length (without length + type)
-    mov     rcx, [rip+wb_ptr]
-    mov     r9d, edx
-    bswap   r9d
-    mov     [rcx+rbx], r9d
-    lea     rsi, [rcx+rbx+4]            # crc over type + data
-    add     rdx, 4
-    call    crc32
-    mov     edi, eax
-    jmp     wb_u32be
-
-png_write:
-    push    rbx
-    push    rbp
-    push    r12
-    push    r13
-    push    r14
-    push    r15
-    sub     rsp, 24
-    mov     [rsp], rdi                  # path
-    mov     r12, rsi                    # pixels
-    mov     r13d, edx                   # width
-    mov     r14d, ecx                   # height
-    mov     r15d, r8d                   # stride
-    call    crc_init
-    call    wb_reset
-    lea     rsi, [rip+png_sig]
-    mov     edx, 8
-    call    wb_bytes
-    # IHDR
-    mov     rbx, [rip+wb_len]
-    xor     edi, edi
-    call    wb_u32
-    mov     edi, 0x52444849             # "IHDR"
-    call    wb_u32
-    mov     edi, r13d
-    call    wb_u32be
-    mov     edi, r14d
-    call    wb_u32be
-    mov     edi, 0x00000208             # depth 8, colour type 2 (RGB)
-    call    wb_u32                      # (+ compression 0, filter 0)
-    xor     edi, edi
-    call    wb_char                     # interlace 0
-    mov     rax, [rip+wb_len]           # drop the extra zero byte of wb_u32
-    call    png_chunk_end
-    # IDAT: zlib header, stored blocks of raw scanlines, adler32
-    mov     rbx, [rip+wb_len]
-    xor     edi, edi
-    call    wb_u32
-    mov     edi, 0x54414449             # "IDAT"
-    call    wb_u32
-    mov     edi, 0x78
-    call    wb_char
-    mov     edi, 0x01
-    call    wb_char
-    lea     eax, [r13+r13*2+1]          # bytes per scanline
-    mov     ebp, eax
-    imul    rax, r14                    # total raw bytes
-    mov     [rsp+8], rax
-    mov     dword ptr [rsp+16], 1       # adler a
-    mov     dword ptr [rsp+20], 0       # adler b
-    xor     ecx, ecx                    # row
-    xor     r8d, r8d                    # bytes in the current block
-.Lpw_row:
-    cmp     ecx, r14d
-    jae     .Lpw_done
-    push    rcx
-    mov     edi, ebp                    # room for a block header + the row
-    add     edi, 16
-    call    wb_reserve
-    pop     rcx
-    # one stored block per row (rows are < 64 KiB for widths < 21845)
-    mov     rdi, rax
-    lea     edx, [rcx+1]
-    xor     eax, eax
-    cmp     edx, r14d
-    sete    al                          # BFINAL on the last row
-    mov     [rdi], al
-    mov     [rdi+1], bp                 # LEN
-    mov     eax, ebp
-    not     eax
-    mov     [rdi+3], ax                 # NLEN
-    mov     byte ptr [rdi+5], 0         # filter: none
-    add     rdi, 6
-    mov     eax, ecx
-    imul    eax, r15d
-    lea     rsi, [r12+rax*4]
-    xor     edx, edx
-1:  cmp     edx, r13d                   # XRGB -> RGB
-    jae     2f
-    mov     eax, [rsi+rdx*4]
-    mov     r9d, eax
-    shr     r9d, 16
-    mov     [rdi], r9b
-    mov     [rdi+1], ah
-    mov     [rdi+2], al
-    add     rdi, 3
-    inc     edx
-    jmp     1b
-2:  # adler32 over the row (filter byte + pixels)
-    mov     rsi, [rip+wb_ptr]
-    add     rsi, [rip+wb_len]
-    add     rsi, 5
-    mov     edx, ebp
-    mov     r9d, [rsp+16]
-    mov     r10d, [rsp+20]
-3:  movzx   eax, byte ptr [rsi]
-    add     r9d, eax
-    cmp     r9d, 65521
-    jb      31f
-    sub     r9d, 65521
-31: add     r10d, r9d
-    cmp     r10d, 65521
-    jb      32f
-    sub     r10d, 65521
-32: inc     rsi
-    dec     edx
-    jnz     3b
-    mov     [rsp+16], r9d
-    mov     [rsp+20], r10d
-    lea     eax, [rbp+5]
-    add     [rip+wb_len], rax
-    inc     ecx
-    jmp     .Lpw_row
-.Lpw_done:
-    mov     edi, [rsp+20]               # adler32 = b << 16 | a, big endian
-    shl     edi, 16
-    or      edi, [rsp+16]
-    call    wb_u32be
-    call    png_chunk_end
-    # IEND
-    mov     rbx, [rip+wb_len]
-    xor     edi, edi
-    call    wb_u32
-    mov     edi, 0x444e4549             # "IEND"
-    call    wb_u32
-    call    png_chunk_end
-    mov     rdi, [rsp]
-    mov     rsi, [rip+wb_ptr]
-    mov     rdx, [rip+wb_len]
-    call    file_write_atomic
-    add     rsp, 24
-    pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
-    pop     rbp
-    pop     rbx
     ret
 
 .section .note.GNU-stack,"",@progbits

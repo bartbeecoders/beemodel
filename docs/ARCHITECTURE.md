@@ -32,7 +32,8 @@ stays private to the module.
 | `raster.s` | Solid viewport rasterizer: parallel setup, binning and tiles; depth + ID buffers; selection outline; picking |
 | `transform.s` | Modal grab / rotate / scale, constraints, snapping, numeric input, gizmos |
 | `undo.s` | Undo / redo history of scene snapshots (shared, reference-counted meshes) |
-| `fileio.s` | Paths (`~`, default dirs, mkdir -p), mmap reads, atomic writes, growable buffer, number text I/O, PNG writer |
+| `fileio.s` | Paths (`~`, default dirs, mkdir -p), mmap reads, atomic writes, growable buffer, number text I/O |
+| `png.s` | PNG encoder: Sub/Up row filters, deflate (LZ77 hash matching, fixed Huffman), CRC-32, Adler-32 |
 | `formats.s` | `.bee`, OBJ and STL import/export, file operators, autosave |
 | `json.s` | Lazy JSON reader (walks text on demand) and writer on the growable buffer |
 | `mcp.s` | MCP server: unix socket, JSON-RPC dispatch, tools, resources; `--mcp-bridge` relay |

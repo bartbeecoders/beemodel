@@ -43,6 +43,8 @@ cl_fd:          .long -1, -1, -1, -1
 .align 8
 out_state:      .skip 24                # response buffer (swapped with wb)
 txt_state:      .skip 24                # tool text buffer
+img_state:      .skip 24                # PNG of a capture
+has_image:      .skip 4
 cl_len:         .skip 8*MAX_CLIENTS
 cl_buf:         .skip CIN_CAP*MAX_CLIENTS
 addr:           .skip 112
@@ -109,7 +111,8 @@ r_init_c:       .asciz "},\"instructions\":\"BeeModel is a 3D modeler. Units are
 r_tools_a:      .asciz "{\"tools\":["
 r_tools_b:      .asciz "]}"
 r_content_a:    .asciz "{\"content\":[{\"type\":\"text\",\"text\":"
-r_content_b:    .asciz "}],\"isError\":"
+r_content_b:    .asciz "}"
+r_content_c:    .asciz "],\"isError\":"
 r_true:         .asciz "true"
 r_false:        .asciz "false"
 r_res_list:     .asciz "{\"resources\":[{\"uri\":\"bee://scene\",\"name\":\"Scene\",\"description\":\"Objects, transforms and mesh sizes as JSON\",\"mimeType\":\"application/json\"}]}"
@@ -128,6 +131,7 @@ curated_tools:
     .ascii "{\"name\":\"select\",\"description\":\"Select objects by name (the last one becomes active). extend keeps the current selection.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"names\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"extend\":{\"type\":\"boolean\"}},\"required\":[\"names\"]}},"
     .ascii "{\"name\":\"delete\",\"description\":\"Delete objects by name.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"names\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"names\"]}},"
     .ascii "{\"name\":\"run_operator\",\"description\":\"Run any BeeModel operator by id (see console.list_ops), with an optional text argument such as a file path.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"arg\":{\"type\":\"string\"}},\"required\":[\"id\"]}},"
+    .ascii "{\"name\":\"viewport_capture\",\"description\":\"Look at the scene: a PNG image of the 3D viewport as it is now (area: viewport or window).\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"area\":{\"type\":\"string\",\"enum\":[\"viewport\",\"window\"]}}}},"
     .ascii "{\"name\":\"undo\",\"description\":\"Undo the last change.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
     .asciz "{\"name\":\"redo\",\"description\":\"Redo the last undone change.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
 c_scene:        .asciz "scene_summary"
@@ -137,6 +141,15 @@ c_select:       .asciz "select"
 c_delete:       .asciz "delete"
 c_run:          .asciz "run_operator"
 c_undo:         .asciz "undo"
+c_capture:      .asciz "viewport_capture"
+k_area:         .asciz "area"
+s_window:       .asciz "window"
+s_capture:      .asciz "PNG capture "
+s_x_:           .asciz " x "
+s_px:           .asciz " px"
+r_img_a:        .asciz ",{\"type\":\"image\",\"mimeType\":\"image/png\",\"data\":\""
+r_img_b:        .asciz "\"}"
+b64:            .ascii "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 c_redo:         .asciz "redo"
 k_new_name:     .asciz "new_name"
 k_idkey:        .asciz "id"
@@ -700,6 +713,7 @@ tools_call:
     call    buf_swap
     call    wb_reset
     mov     dword ptr [rip+is_error], 0
+    mov     dword ptr [rip+has_image], 0
     mov     byte ptr [rip+tool], 0
     mov     qword ptr [rip+targs], 0
     mov     rsi, [rip+params]
@@ -748,6 +762,17 @@ tools_call:
     mov     rsi, [rip+txt_state]
     call    jb_q
     lea     rsi, [rip+r_content_b]
+    call    wb_str
+    cmp     dword ptr [rip+has_image], 0
+    je      31f
+    lea     rsi, [rip+r_img_a]          # image content: base64 PNG
+    call    wb_str
+    mov     rsi, [rip+img_state]
+    mov     rdx, [rip+img_state+8]
+    call    base64
+    lea     rsi, [rip+r_img_b]
+    call    wb_str
+31: lea     rsi, [rip+r_content_c]
     call    wb_str
     lea     rsi, [rip+r_false]
     cmp     dword ptr [rip+is_error], 0
@@ -913,6 +938,11 @@ dispatch_tool:
     call    str_eq
     test    eax, eax
     jnz     .Ldt_undo
+    lea     rdi, [rip+tool]
+    lea     rsi, [rip+c_capture]
+    call    str_eq
+    test    eax, eax
+    jnz     .Ldt_capture
     lea     rdi, [rip+tool]
     lea     rsi, [rip+c_redo]
     call    str_eq
@@ -1098,6 +1128,21 @@ dispatch_tool:
     call    fail
     jmp     .Ldt_out
 
+.Ldt_capture:
+    lea     rdi, [rip+k_area]
+    lea     rsi, [rip+sbuf2]
+    mov     edx, 16
+    call    arg_str
+    xor     edi, edi
+    test    eax, eax
+    jle     1f
+    lea     rdi, [rip+sbuf2]
+    lea     rsi, [rip+s_window]
+    call    str_eq
+    mov     edi, eax
+1:  call    capture
+    jmp     .Ldt_out
+
 .Ldt_undo:
     lea     rdi, [rip+s_edit_undo]
     xor     esi, esi
@@ -1118,6 +1163,209 @@ dispatch_tool:
     call    fail
 .Ldt_out:
     add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# capture(edi=1 for the whole window) - render the UI off screen, crop and
+# encode as PNG into img_state; describes it in the text buffer
+capture:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 40
+    mov     [rsp+32], edi
+    mov     edi, [rip+win_w]            # physical size of the window
+    call    to_px
+    mov     r12d, eax
+    mov     edi, [rip+win_h]
+    call    to_px
+    mov     r13d, eax
+    lea     rdi, [rip+frame_arena]
+    mov     esi, r12d
+    imul    esi, r13d
+    shl     esi, 2
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lcap_fail
+    mov     r14, rax
+    mov     rax, [rip+fb_ptr]           # draw into the off-screen buffer
+    mov     [rsp], rax
+    mov     eax, [rip+fb_w]
+    mov     [rsp+8], eax
+    mov     eax, [rip+fb_h]
+    mov     [rsp+12], eax
+    mov     [rip+fb_ptr], r14
+    mov     [rip+fb_w], r12d
+    mov     [rip+fb_h], r13d
+    call    ui_draw
+    mov     rax, [rsp]
+    mov     [rip+fb_ptr], rax
+    mov     eax, [rsp+8]
+    mov     [rip+fb_w], eax
+    mov     eax, [rsp+12]
+    mov     [rip+fb_h], eax
+    xor     ebx, ebx                    # crop rectangle (physical)
+    xor     ebp, ebp
+    mov     r15d, r12d
+    mov     eax, r13d
+    mov     [rsp+16], eax
+    cmp     dword ptr [rsp+32], 0
+    jne     2f
+    mov     edi, [rip+vp_area]          # the viewport body
+    test    edi, edi
+    js      2f
+    call    area_node_rect
+    mov     [rsp+24], rax
+    mov     edi, [rax+12]
+    call    to_px
+    mov     ebx, eax
+    mov     rax, [rsp+24]
+    mov     edi, [rax+16]
+    add     edi, PANE_HDR_H
+    call    to_px
+    mov     ebp, eax
+    mov     rax, [rsp+24]
+    mov     edi, [rax+12]
+    add     edi, [rax+20]
+    call    to_px
+    mov     r15d, eax
+    mov     rax, [rsp+24]
+    mov     edi, [rax+16]
+    add     edi, [rax+24]
+    call    to_px
+    mov     [rsp+16], eax
+2:  sub     r15d, ebx                   # width
+    jle     .Lcap_fail
+    mov     eax, [rsp+16]
+    sub     eax, ebp                    # height
+    jle     .Lcap_fail
+    mov     [rsp+16], eax
+    lea     rdi, [rip+img_state]        # encode into the image buffer
+    call    buf_swap
+    call    wb_reset
+    mov     eax, ebp
+    imul    eax, r12d
+    add     eax, ebx
+    lea     rsi, [r14+rax*4]
+    mov     edx, r15d
+    mov     ecx, [rsp+16]
+    mov     r8d, r12d
+    call    png_encode
+    mov     ebx, eax
+    lea     rdi, [rip+img_state]
+    call    buf_swap
+    test    ebx, ebx
+    jz      .Lcap_fail
+    mov     dword ptr [rip+has_image], 1
+    lea     rsi, [rip+s_capture]        # "PNG capture W x H px"
+    call    wb_str
+    mov     edi, r15d
+    call    wb_int
+    lea     rsi, [rip+s_x_]
+    call    wb_str
+    mov     edi, [rsp+16]
+    call    wb_int
+    lea     rsi, [rip+s_px]
+    call    wb_str
+    jmp     .Lcap_out
+.Lcap_fail:
+    lea     rdi, [rip+e_missing]
+    xor     esi, esi
+    call    fail
+.Lcap_out:
+    add     rsp, 40
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# base64(rsi=data, rdx=bytes) - appended to wb
+base64:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rsi
+    mov     r13, rdx
+    mov     rax, rdx                    # output size = 4 * ceil(n / 3)
+    add     rax, 2
+    xor     edx, edx
+    mov     ecx, 3
+    div     rcx
+    shl     rax, 2
+    mov     rdi, rax
+    push    rax
+    call    wb_reserve
+    pop     rcx
+    test    rax, rax
+    jz      9f
+    add     [rip+wb_len], rcx
+    mov     rdi, rax
+    lea     r8, [rip+b64]
+1:  cmp     r13, 3
+    jb      2f
+    movzx   eax, byte ptr [r12]
+    shl     eax, 16
+    movzx   ecx, byte ptr [r12+1]
+    shl     ecx, 8
+    or      eax, ecx
+    movzx   ecx, byte ptr [r12+2]
+    or      eax, ecx
+    mov     ecx, eax
+    shr     ecx, 18
+    mov     cl, [r8+rcx]
+    mov     [rdi], cl
+    mov     ecx, eax
+    shr     ecx, 12
+    and     ecx, 63
+    mov     cl, [r8+rcx]
+    mov     [rdi+1], cl
+    mov     ecx, eax
+    shr     ecx, 6
+    and     ecx, 63
+    mov     cl, [r8+rcx]
+    mov     [rdi+2], cl
+    and     eax, 63
+    mov     al, [r8+rax]
+    mov     [rdi+3], al
+    add     r12, 3
+    sub     r13, 3
+    add     rdi, 4
+    jmp     1b
+2:  test    r13, r13                    # 1 or 2 bytes left: pad with '='
+    jz      9f
+    movzx   eax, byte ptr [r12]
+    shl     eax, 16
+    cmp     r13, 2
+    jb      3f
+    movzx   ecx, byte ptr [r12+1]
+    shl     ecx, 8
+    or      eax, ecx
+3:  mov     ecx, eax
+    shr     ecx, 18
+    mov     cl, [r8+rcx]
+    mov     [rdi], cl
+    mov     ecx, eax
+    shr     ecx, 12
+    and     ecx, 63
+    mov     cl, [r8+rcx]
+    mov     [rdi+1], cl
+    mov     byte ptr [rdi+2], '='
+    mov     byte ptr [rdi+3], '='
+    cmp     r13, 2
+    jb      9f
+    mov     ecx, eax
+    shr     ecx, 6
+    and     ecx, 63
+    mov     cl, [r8+rcx]
+    mov     [rdi+2], cl
+9:  pop     r13
     pop     r12
     pop     rbx
     ret

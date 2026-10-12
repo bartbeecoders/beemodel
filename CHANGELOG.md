@@ -13,7 +13,15 @@ project uses [Semantic Versioning](https://semver.org/).
   `create_primitive`, `set_transform`, `select`, `delete`, `run_operator`,
   `undo`, `redo`, plus every agent-safe operator as `op_<id>`. Resource:
   `bee://scene`. Agent edits are undoable and echoed in the console.
+- `viewport_capture` MCP tool. The UI is rendered off-screen, so the image
+  shows the scene right after the agent's last edit. The tool returns an MCP
+  image block holding the viewport (or the whole window) as a PNG.
 - Own JSON reader / writer.
+
+### Changed
+- PNG files are now compressed. The encoder picks a Sub or Up filter per row
+  and then deflates the data (LZ77 plus fixed Huffman codes). A 1280×800
+  screenshot drops from about 3 MB to about 150 KB.
 
 ## [0.3.0] - 2026-10-12
 
