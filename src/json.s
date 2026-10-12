@@ -11,6 +11,7 @@
 
 # exports
 .globl j_end
+.globl j_valid
 .globl j_ws
 .globl j_skip
 .globl j_find
@@ -406,5 +407,272 @@ buf_swap:
     cmp     ecx, 3
     jb      1b
     ret
+
+# -----------------------------------------------------------------------------
+# j_valid(rsi=text, rdx=end) -> eax = 1 if the text is exactly one JSON value
+#   (strict RFC 8259 syntax; nesting limited to 64 levels)
+# -----------------------------------------------------------------------------
+j_valid:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, rdx                    # end
+    xor     ebx, ebx                    # depth
+    call    jv_ws
+    call    jv_value
+    test    eax, eax
+    jz      1f
+    call    jv_ws
+    xor     eax, eax
+    cmp     rsi, r12
+    sete    al
+1:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+jv_ws:
+1:  cmp     rsi, r12
+    jae     2f
+    mov     al, [rsi]
+    cmp     al, ' '
+    je      3f
+    cmp     al, 9
+    je      3f
+    cmp     al, 10
+    je      3f
+    cmp     al, 13
+    jne     2f
+3:  inc     rsi
+    jmp     1b
+2:  ret
+
+# jv_lit(rdi=literal) - the text at rsi must spell it
+jv_lit:
+1:  mov     al, [rdi]
+    test    al, al
+    jz      2f
+    cmp     rsi, r12
+    jae     3f
+    cmp     al, [rsi]
+    jne     3f
+    inc     rsi
+    inc     rdi
+    jmp     1b
+2:  mov     eax, 1
+    ret
+3:  xor     eax, eax
+    ret
+
+jv_value:
+    cmp     rsi, r12
+    jae     .Ljv_no
+    movzx   eax, byte ptr [rsi]
+    cmp     al, '{'
+    je      .Ljv_object
+    cmp     al, '['
+    je      .Ljv_array
+    cmp     al, '"'
+    je      jv_string
+    cmp     al, '-'
+    je      jv_number
+    lea     ecx, [rax-'0']
+    cmp     ecx, 9
+    jbe     jv_number
+    lea     rdi, [rip+jv_true]
+    cmp     al, 't'
+    je      jv_lit
+    lea     rdi, [rip+jv_false]
+    cmp     al, 'f'
+    je      jv_lit
+    lea     rdi, [rip+jv_null]
+    cmp     al, 'n'
+    je      jv_lit
+.Ljv_no:
+    xor     eax, eax
+    ret
+.Ljv_object:
+    inc     ebx
+    cmp     ebx, 64
+    ja      .Ljv_deep
+    inc     rsi
+    call    jv_ws
+    cmp     rsi, r12
+    jae     .Ljv_deep
+    cmp     byte ptr [rsi], '}'
+    je      3f
+1:  call    jv_ws
+    cmp     rsi, r12
+    jae     .Ljv_deep
+    cmp     byte ptr [rsi], '"'
+    jne     .Ljv_deep
+    call    jv_string
+    test    eax, eax
+    jz      .Ljv_deep
+    call    jv_ws
+    cmp     rsi, r12
+    jae     .Ljv_deep
+    cmp     byte ptr [rsi], ':'
+    jne     .Ljv_deep
+    inc     rsi
+    call    jv_ws
+    call    jv_value
+    test    eax, eax
+    jz      .Ljv_deep
+    call    jv_ws
+    cmp     rsi, r12
+    jae     .Ljv_deep
+    cmp     byte ptr [rsi], ','
+    jne     2f
+    inc     rsi
+    jmp     1b
+2:  cmp     byte ptr [rsi], '}'
+    jne     .Ljv_deep
+3:  inc     rsi
+    dec     ebx
+    mov     eax, 1
+    ret
+.Ljv_array:
+    inc     ebx
+    cmp     ebx, 64
+    ja      .Ljv_deep
+    inc     rsi
+    call    jv_ws
+    cmp     rsi, r12
+    jae     .Ljv_deep
+    cmp     byte ptr [rsi], ']'
+    je      3f
+1:  call    jv_ws
+    call    jv_value
+    test    eax, eax
+    jz      .Ljv_deep
+    call    jv_ws
+    cmp     rsi, r12
+    jae     .Ljv_deep
+    cmp     byte ptr [rsi], ','
+    jne     2f
+    inc     rsi
+    jmp     1b
+2:  cmp     byte ptr [rsi], ']'
+    jne     .Ljv_deep
+3:  inc     rsi
+    dec     ebx
+    mov     eax, 1
+    ret
+.Ljv_deep:
+    xor     eax, eax
+    ret
+
+# jv_string - rsi at the opening quote
+jv_string:
+    inc     rsi
+1:  cmp     rsi, r12
+    jae     8f
+    movzx   eax, byte ptr [rsi]
+    inc     rsi
+    cmp     al, '"'
+    je      9f
+    cmp     al, 0x20
+    jb      8f                          # raw control characters are invalid
+    cmp     al, '\\'
+    jne     1b
+    cmp     rsi, r12
+    jae     8f
+    movzx   eax, byte ptr [rsi]
+    inc     rsi
+    lea     rdi, [rip+jv_escapes]
+2:  mov     cl, [rdi]
+    test    cl, cl
+    jz      8f
+    cmp     al, cl
+    je      3f
+    inc     rdi
+    jmp     2b
+3:  cmp     al, 'u'
+    jne     1b
+    mov     ecx, 4                      # \uXXXX
+4:  cmp     rsi, r12
+    jae     8f
+    movzx   eax, byte ptr [rsi]
+    inc     rsi
+    lea     edx, [rax-'0']
+    cmp     edx, 9
+    jbe     5f
+    or      eax, 0x20
+    sub     eax, 'a'
+    cmp     eax, 5
+    ja      8f
+5:  dec     ecx
+    jnz     4b
+    jmp     1b
+8:  xor     eax, eax
+    ret
+9:  mov     eax, 1
+    ret
+
+# jv_number: -?(0|[1-9][0-9]*)(.[0-9]+)?([eE][+-]?[0-9]+)?
+jv_number:
+    cmp     byte ptr [rsi], '-'
+    jne     1f
+    inc     rsi
+1:  call    jv_digit
+    jz      .Ljn_no
+    cmp     byte ptr [rsi-1], '0'       # no leading zeros
+    je      2f
+11: call    jv_digit
+    jnz     11b
+2:  cmp     rsi, r12
+    jae     .Ljn_yes
+    cmp     byte ptr [rsi], '.'
+    jne     3f
+    inc     rsi
+    call    jv_digit
+    jz      .Ljn_no
+21: call    jv_digit
+    jnz     21b
+3:  cmp     rsi, r12
+    jae     .Ljn_yes
+    mov     al, [rsi]
+    or      al, 0x20
+    cmp     al, 'e'
+    jne     .Ljn_yes
+    inc     rsi
+    cmp     rsi, r12
+    jae     .Ljn_no
+    cmp     byte ptr [rsi], '+'
+    je      31f
+    cmp     byte ptr [rsi], '-'
+    jne     32f
+31: inc     rsi
+32: call    jv_digit
+    jz      .Ljn_no
+33: call    jv_digit
+    jnz     33b
+.Ljn_yes:
+    mov     eax, 1
+    ret
+.Ljn_no:
+    xor     eax, eax
+    ret
+# jv_digit - consume one digit: ZF clear if there was one
+jv_digit:
+    cmp     rsi, r12
+    jae     1f
+    movzx   eax, byte ptr [rsi]
+    sub     eax, '0'
+    cmp     eax, 9
+    ja      1f
+    inc     rsi
+    or      eax, 1                      # ZF = 0
+    ret
+1:  xor     eax, eax                    # ZF = 1
+    ret
+
+.section .rodata
+jv_true:        .asciz "true"
+jv_false:       .asciz "false"
+jv_null:        .asciz "null"
+jv_escapes:     .asciz "\"\\\\/bfnrtu"
+.text
 
 .section .note.GNU-stack,"",@progbits

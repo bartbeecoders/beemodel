@@ -80,7 +80,7 @@ For Claude Desktop (or any MCP client using stdio), add this to its config:
 { "mcpServers": { "beemodel": { "command": "/path/to/beemodel", "args": ["--mcp-bridge"] } } }
 ```
 
-`--mcp-bridge` relays stdio to the running app's socket
+Full details: [docs/MCP.md](docs/MCP.md). `--mcp-bridge` relays stdio to the running app's socket
 (`$XDG_RUNTIME_DIR/beemodel.sock`; `BEEMODEL_SOCKET` overrides it, and
 `BEEMODEL_NO_MCP=1` turns the server off). Tools:
 
