@@ -233,8 +233,10 @@
 .equ AR_BASE,       0
 .equ AR_CAP,        8
 .equ AR_USED,       16
-.equ AR_HWM,        24
-.equ ARENA_SZ,      32
+.equ AR_PEAK,       24      # most used since the last reset
+.equ AR_WARM,       32      # bytes kept resident across resets
+.equ AR_LOW,        40      # consecutive resets well below the warm size
+.equ ARENA_SZ,      48
 .equ PL_BASE,       0
 .equ PL_GENS,       8
 .equ PL_ELEM,       16
@@ -243,7 +245,7 @@
 .equ PL_FREE,       28
 .equ PL_NEXT,       32
 .equ POOL_SZ,       40
-.equ FRAME_ARENA_BYTES, 0x4000000     # 64 MiB reserved, touched lazily
+.equ FRAME_ARENA_BYTES, 0x40000000    # 1 GiB reserved, touched lazily
 
 # ---- areas & palette -------------------------------------------------------------
 .equ HIT_AREA_TYPE,     18
@@ -300,3 +302,4 @@
 .equ DRAG_PENDING,      6       # LMB down in a viewport: click (select) or drag (orbit)
 .equ COL_SELECTED,      0xe0862a
 .equ COL_ACTIVE,        0xffc24a
+.equ COL_SOLID,         0xbfc3ca

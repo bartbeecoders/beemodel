@@ -22,7 +22,8 @@
 
 .equ MAP_RESERVE,   0x4022              # private | anonymous | noreserve
 .equ MADV_DONTNEED, 4
-.equ ARENA_WARM,    0x100000            # keep the first 1 MiB resident
+.equ ARENA_WARM,    0x100000            # always keep the first 1 MiB resident
+.equ ARENA_DECAY,   120                 # resets of low use before shrinking
 
 .section .bss
 .align 8
@@ -53,7 +54,9 @@ arena_init:
     mov     [rbx+AR_BASE], rax
     xor     ecx, ecx
     mov     [rbx+AR_USED], rcx
-    mov     [rbx+AR_HWM], rcx
+    mov     [rbx+AR_PEAK], rcx
+    mov     qword ptr [rbx+AR_WARM], ARENA_WARM
+    mov     [rbx+AR_LOW], rcx
     test    rax, rax
     setnz   al
     movzx   eax, al
@@ -69,32 +72,53 @@ arena_alloc:
     cmp     rdx, [rdi+AR_CAP]
     ja      8f
     mov     [rdi+AR_USED], rdx
-    cmp     rdx, [rdi+AR_HWM]
+    cmp     rdx, [rdi+AR_PEAK]
     jbe     1f
-    mov     [rdi+AR_HWM], rdx
+    mov     [rdi+AR_PEAK], rdx
 1:  add     rax, [rdi+AR_BASE]
     ret
 8:  xor     eax, eax
     ret
 
-# arena_reset(rdi=arena) - drop everything; release memory above the warm size
+# arena_reset(rdi=arena) - O(1) reset. Pages stay resident while they are
+# being used (no page faults every frame); after ARENA_DECAY resets that used
+# less than half, everything above max(peak, 1 MiB) goes back to the kernel.
 arena_reset:
+    mov     rax, [rdi+AR_PEAK]
     mov     qword ptr [rdi+AR_USED], 0
-    mov     rax, [rdi+AR_HWM]
-    cmp     rax, ARENA_WARM
+    mov     qword ptr [rdi+AR_PEAK], 0
+    mov     rcx, [rdi+AR_WARM]
+    cmp     rax, rcx
     jbe     1f
+    mov     [rdi+AR_WARM], rax          # grew: keep it all warm
+    mov     qword ptr [rdi+AR_LOW], 0
+    ret
+1:  shr     rcx, 1
+    cmp     rax, rcx
+    jae     2f
+    inc     qword ptr [rdi+AR_LOW]
+    cmp     qword ptr [rdi+AR_LOW], ARENA_DECAY
+    jb      9f
+    mov     rcx, ARENA_WARM             # shrink to max(peak, 1 MiB)
+    cmp     rax, rcx
+    cmovb   rax, rcx
+    add     rax, 4095
+    and     rax, -4096
+    mov     rsi, [rdi+AR_WARM]
+    mov     [rdi+AR_WARM], rax
+    mov     qword ptr [rdi+AR_LOW], 0
+    sub     rsi, rax
+    jbe     9f
     push    rdi
-    lea     rsi, [rax-ARENA_WARM]
-    add     rsi, 4095
-    and     rsi, -4096
-    mov     rdi, [rdi+AR_BASE]
-    add     rdi, ARENA_WARM
+    add     rax, [rdi+AR_BASE]
+    mov     rdi, rax
     mov     edx, MADV_DONTNEED
     mov     eax, SYS_MADVISE
     syscall
     pop     rdi
-    mov     qword ptr [rdi+AR_HWM], ARENA_WARM
-1:  ret
+    ret
+2:  mov     qword ptr [rdi+AR_LOW], 0
+9:  ret
 
 # -----------------------------------------------------------------------------
 # pool_init(rdi=pool, esi=element size, edx=capacity) -> eax = 1 on success

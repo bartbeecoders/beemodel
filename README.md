@@ -50,6 +50,9 @@ to select them (Shift extends), **A** selects all or none, **X** / **Del**
 deletes and **Shift+D** duplicates. Properties shows the active object's
 transform and mesh statistics.
 
+The viewport is solid-shaded by a multithreaded software rasterizer (Z toggles
+wireframe). Selected objects get an orange outline, the active one gold.
+
 Press **F3** for the command palette: type part of any command name and press
 Enter.
 
