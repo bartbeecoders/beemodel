@@ -100,6 +100,7 @@ s_ed_tools:     .asciz "Tools"
 s_ed_outliner:  .asciz "Outliner"
 s_ed_props:     .asciz "Properties"
 s_ed_console:   .asciz "Console"
+s_ed_activity:  .asciz "AI Activity"
 s_h_create:     .asciz "CREATE"
 s_p_camera:     .asciz "Viewport camera"
 s_p_yaw:        .asciz "Yaw"
@@ -125,11 +126,11 @@ s_xx:           .asciz " x "
 s_last_area:    .asciz "  the last area cannot be closed"
 s_no_room:      .asciz "  no room for more areas"
 .align 8
-editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console
-editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw
+editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity
+editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw
 area_btn_ops:   .quad op_area_close, op_area_split_stack, op_area_split_side, op_area_maximize
 items_area:     .quad op_area_type_vp, op_area_type_tools, op_area_type_outl
-                .quad op_area_type_props, op_area_type_console
+                .quad op_area_type_props, op_area_type_console, op_area_type_activity
 
 # ---- operators ------------------------------------------------------------------
 OPERATOR op_area_split_side,  "area.split_side",  "Split Area Side by Side", op_area_split, arg=K_HSPLIT, doc="Split the active area into two side by side"
@@ -141,6 +142,8 @@ OPERATOR op_area_type_tools,  "area.type_tools",      "Tools",       op_area_typ
 OPERATOR op_area_type_outl,   "area.type_outliner",   "Outliner",    op_area_type, op_check_area_type, ED_OUTLINER, doc="Show the outliner in the active area"
 OPERATOR op_area_type_props,  "area.type_properties", "Properties",  op_area_type, op_check_area_type, ED_PROPS,    doc="Show the properties in the active area"
 OPERATOR op_area_type_console,"area.type_console",    "Console",     op_area_type, op_check_area_type, ED_CONSOLE,  doc="Show the console in the active area"
+OPERATOR op_area_type_activity,"area.type_activity", "AI Activity", op_area_type, op_check_area_type, ED_ACTIVITY, doc="Show what AI agents did in the active area"
+OPERATOR op_view_activity, "view.toggle_activity", "AI Activity Pane", op_toggle_activity, op_has_editor, ED_ACTIVITY, 0, doc="Show or hide the AI Activity area (next to the console)"
 OPERATOR op_view_tools,    "view.toggle_tools",    "Tools Pane",    op_toggle_tools,    op_has_editor, ED_TOOLS,    KEY_T, doc="Show or hide the tools area"
 OPERATOR op_view_outliner, "view.toggle_outliner", "Outliner Pane", op_toggle_sidebar,  op_has_editor, ED_OUTLINER, KEY_N, doc="Show or hide the outliner and properties areas"
 OPERATOR op_view_console,  "view.toggle_console",  "Console Pane",  op_toggle_console,  op_has_editor, ED_CONSOLE,  0,     doc="Show or hide the console area"
@@ -463,6 +466,8 @@ area_hit:
     je      .Lah_outliner
     cmp     ecx, ED_CONSOLE
     je      .Lah_console
+    cmp     ecx, ED_ACTIVITY
+    je      .Lah_activity
 .Lah_pane:
     mov     eax, HIT_PANE
     mov     edx, r13d
@@ -504,6 +509,15 @@ area_hit:
     jae     .Lah_pane2
     mov     edx, eax
     mov     eax, HIT_OUTLINER
+    jmp     .Lah_ret
+.Lah_activity:
+    mov     edi, ebx
+    mov     esi, r12d
+    call    act_btn_hit
+    test    eax, eax
+    jz      .Lah_pane
+    mov     eax, HIT_ACT_REVERT
+    mov     edx, r13d
     jmp     .Lah_ret
 .Lah_console:
     call    console_field
@@ -1670,6 +1684,34 @@ op_toggle_sidebar:
 9:  ret
 
 # console: below the viewport the user worked in last
+# the AI Activity area: beside the console (or under the viewport)
+op_toggle_activity:
+    mov     edi, ED_ACTIVITY
+    call    find_editor
+    test    eax, eax
+    js      1f
+    mov     edi, ED_ACTIVITY
+    jmp     close_all
+1:  mov     edi, ED_CONSOLE
+    call    find_editor
+    test    eax, eax
+    js      2f
+    mov     edi, eax
+    mov     esi, K_HSPLIT
+    mov     edx, 32768
+    mov     ecx, ED_ACTIVITY
+    xor     r8d, r8d
+    jmp     split_with
+2:  mov     edi, [rip+vp_area]
+    test    edi, edi
+    jns     3f
+    mov     edi, [rip+area_root]
+3:  mov     esi, K_VSPLIT
+    mov     edx, 51826
+    mov     ecx, ED_ACTIVITY
+    xor     r8d, r8d
+    jmp     split_with
+
 op_toggle_console:
     mov     edi, ED_CONSOLE
     call    find_editor

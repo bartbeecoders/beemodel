@@ -84,6 +84,11 @@ s_m_edit:       .asciz "Edit"
 s_m_view:       .asciz "View"
 s_m_create:     .asciz "Create"
 s_m_help:       .asciz "Help"
+s_m_ai:         .asciz "AI"
+s_ai_pfx:       .asciz "AI: "
+s_ai_conn:      .asciz " ("
+s_ai_conn2:     .asciz " connected)"
+s_ai_gap:       .asciz "     "
 
 
 
@@ -95,9 +100,9 @@ s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero 
 s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize panes"
 
 .align 8
-menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_help
-menu_items:     .quad items_file, items_edit, items_view, items_create, items_help, items_area
-menu_counts:    .long 14, 13, 13, 10, 3, 5
+menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_ai, s_m_help
+menu_items:     .quad items_file, items_edit, items_view, items_create, items_ai, items_help, items_area
+menu_counts:    .long 14, 13, 13, 10, 6, 3, 6
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
@@ -112,6 +117,8 @@ items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_light, op_add_camera
 items_help:     .quad op_help_keys, op_console_ops, op_help_about
+items_ai:       .quad op_view_activity, op_agent_revert, 0
+                .quad op_agent_read, op_agent_edit, op_agent_files
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -697,7 +704,12 @@ ui_button:
     mov     eax, [rip+key_mods]
     mov     [rip+press_mods], eax
     jmp     .Lbt_done
-6:  cmp     ebx, HIT_TOOL
+6:  cmp     ebx, HIT_ACT_REVERT
+    jne     61f
+    lea     rdi, [rip+op_agent_revert]
+    call    run_op
+    jmp     .Lbt_done
+61: cmp     ebx, HIT_TOOL
     jne     7f
     lea     rax, [rip+tool_ops]
     mov     rdi, [rax+r12*8]
@@ -1194,8 +1206,26 @@ draw_statusbar:
     add     esi, 3
     mov     ecx, COL_TEXT_DIM
     call    draw_text
-    # right: "<fb KiB> KiB framebuffer   W x H"
+    # right: "AI: edit (1 connected)     <fb KiB> KiB framebuffer   W x H"
     call    fmt_reset
+    lea     rdi, [rip+s_ai_pfx]
+    call    fmt_str
+    mov     edi, [rip+agent_tier]
+    call    agent_tier_name
+    mov     rdi, rax
+    call    fmt_str
+    call    mcp_clients
+    test    eax, eax
+    jz      3f
+    push    rax
+    lea     rdi, [rip+s_ai_conn]
+    call    fmt_str
+    pop     rdi
+    call    fmt_int
+    lea     rdi, [rip+s_ai_conn2]
+    call    fmt_str
+3:  lea     rdi, [rip+s_ai_gap]
+    call    fmt_str
     mov     edi, [rip+pool_size]
     shr     edi, 10
     call    fmt_int

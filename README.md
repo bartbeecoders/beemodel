@@ -94,6 +94,20 @@ For Claude Desktop (or any MCP client using stdio), add this to its config:
 
 The scene is also available as the resource `bee://scene`.
 
+Agents work under three safeguards:
+
+- **Permissions.** The **AI** menu sets what agents may do:
+  - *Read Only*: look at the scene;
+  - *Edit Scene* (the default): look at and edit it;
+  - *Edit + Files*: also open, save, import, export and take screenshots.
+
+  The status bar shows the current level and how many agents are connected. To start with a
+  different level, set `BEEMODEL_AGENT_PERMISSION=read|edit|files`.
+- **Change sets.** Each agent request is one named undo step, such as `Agent: set_transform`.
+- **AI Activity.** **AI → AI Activity Pane** lists recent agent calls: their status, whether they
+  changed the scene, and the result. Its **Revert last agent change** button undoes the newest
+  change set.
+
 ### BeeScript
 
 BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not

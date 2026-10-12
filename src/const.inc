@@ -139,7 +139,7 @@
 .equ DRAG_ORBIT,        4
 .equ DRAG_PAN,          5
 
-.equ NUM_MENUS,         5
+.equ NUM_MENUS,         6
 .equ NUM_TOOLS,         10
 .equ NUM_OUTLINER,      4
 
@@ -157,6 +157,8 @@
 .equ COL_SPLIT,         0x16181c
 .equ COL_SPLIT_HOT,     0xf2b134
 .equ COL_REC,         0xe5484d
+.equ COL_OK,          0x4cb86a
+.equ COL_WARN,        0xe0a030
 .equ COL_ACCENT,        0xf2b134
 .equ COL_ACCENT_DARK,   0x6b5420
 .equ COL_BTN,           0x363b45
@@ -253,12 +255,14 @@
 .equ HIT_AREA_BTN,      19
 .equ HIT_AREA_HDR,      20
 .equ HIT_PALETTE,       21
+.equ HIT_ACT_REVERT,    22
 .equ ED_VIEWPORT,       0
 .equ ED_TOOLS,          1
 .equ ED_OUTLINER,       2
 .equ ED_PROPS,          3
 .equ ED_CONSOLE,        4
-.equ MENU_AREA,         5
+.equ ED_ACTIVITY,       5
+.equ MENU_AREA,         6
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
 

@@ -28,6 +28,16 @@ project uses [Semantic Versioning](https://semver.org/).
     `script.run` plays a macro or any `.bees` file back.
   - `script_eval` MCP tool. Agent scripts may only run agent-safe operators.
   - `beemodel --eval 'code'` / `--run file.bees` run scripts without a window.
+- Safe agent edits:
+  - **Permission tiers** (read-only / edit / files), set in the new AI menu
+    and enforced for every tool, `run_operator` and `script_eval`. The
+    default is edit, so file access must be granted by the user. The status
+    bar shows the tier and how many agents are connected.
+  - **Change sets.** Each agent request is one undo step, labeled
+    `Agent: <tool>`. Undo steps now keep their own copy of the label.
+  - **AI Activity editor** (AI → AI Activity Pane, or any area's editor
+    menu). It lists recent agent calls and has a one-click
+    **Revert last agent change** button (`agent.revert`).
 - Own JSON reader / writer.
 
 ### Changed
