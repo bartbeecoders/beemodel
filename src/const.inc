@@ -124,9 +124,7 @@
 .equ HIT_BTN_CLOSE,     4
 .equ HIT_MENU_TITLE,    5
 .equ HIT_MENU_ITEM,     6
-.equ HIT_SPLIT_L,       7
-.equ HIT_SPLIT_R,       8
-.equ HIT_SPLIT_B,       9
+.equ HIT_SPLITTER,      7
 .equ HIT_CANVAS,        10
 .equ HIT_TOOL,          11
 .equ HIT_PANE,          12
@@ -137,9 +135,7 @@
 
 # ---- Drag modes ------------------------------------------------------------
 .equ DRAG_NONE,         0
-.equ DRAG_SPLIT_L,      1
-.equ DRAG_SPLIT_R,      2
-.equ DRAG_SPLIT_B,      3
+.equ DRAG_SPLITTER,     1
 .equ DRAG_ORBIT,        4
 .equ DRAG_PAN,          5
 
@@ -248,3 +244,17 @@
 .equ PL_NEXT,       32
 .equ POOL_SZ,       40
 .equ FRAME_ARENA_BYTES, 0x4000000     # 64 MiB reserved, touched lazily
+
+# ---- areas & palette -------------------------------------------------------------
+.equ HIT_AREA_TYPE,     18
+.equ HIT_AREA_BTN,      19
+.equ HIT_AREA_HDR,      20
+.equ HIT_PALETTE,       21
+.equ ED_VIEWPORT,       0
+.equ ED_TOOLS,          1
+.equ ED_OUTLINER,       2
+.equ ED_PROPS,          3
+.equ ED_CONSOLE,        4
+.equ MENU_AREA,         5
+.equ KEY_SPACE,         57
+.equ KEY_F3,            61

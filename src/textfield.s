@@ -13,6 +13,12 @@
 .globl tf_click
 .globl tf_set_focus
 .globl tf_focus
+.globl tf_select
+.globl tf_clear
+.globl tf_buf
+.globl tf_len
+.globl tfi_console
+.globl tfi_palette
 
 .equ TF_CAP,        240                 # max bytes of text
 .equ HIST_N,        8
@@ -31,20 +37,32 @@
 .equ COL_INPUT_BG,  0x1f2228
 .equ COL_SELECTION, 0x5a4a1e
 
+.section .data
+.align 8
+tf_cur:         .quad tfi_console       # instance whose state is loaded below
+
 .section .bss
 .align 8
+# ---- per-instance state (swapped by tf_select) ----
+tf_state:
 tf_clast:       .skip 8                 # last op offered by Tab completion
 tf_buf:         .skip 256
 tf_prefix:      .skip 64
-hist:           .skip HIST_N*HIST_LEN
 tf_len:         .skip 4
 tf_caret:       .skip 4
 tf_anchor:      .skip 4
-tf_focus:       .skip 4
 tf_scroll:      .skip 4
 tf_text_x:      .skip 4
 tf_tab:         .skip 4
 tf_plen:        .skip 4
+.equ TF_STATE_SZ, . - tf_state
+# ---- instances ----
+.align 8
+tfi_console:    .skip TF_STATE_SZ
+tfi_palette:    .skip TF_STATE_SZ
+# ---- console-only ----
+hist:           .skip HIST_N*HIST_LEN
+tf_focus:       .skip 4
 hist_n:         .skip 4
 hist_age:       .skip 4
 
@@ -57,8 +75,29 @@ s_placeholder:  .asciz "Press Enter to type a command (Tab completes, Up = histo
 
 .text
 
-# tf_set_focus(edi = 0/1)
+# tf_select(rdi=instance) - make that field's state the current one
+tf_select:
+    mov     rax, [rip+tf_cur]
+    cmp     rax, rdi
+    je      9f
+    push    rdi
+    lea     rsi, [rip+tf_state]         # save the current instance
+    mov     rdi, rax
+    mov     ecx, TF_STATE_SZ
+    rep     movsb
+    pop     rsi                         # load the new one
+    mov     [rip+tf_cur], rsi
+    lea     rdi, [rip+tf_state]
+    mov     ecx, TF_STATE_SZ
+    rep     movsb
+9:  ret
+
+# tf_set_focus(edi = 0/1)  - console command line focus
 tf_set_focus:
+    push    rdi
+    lea     rdi, [rip+tfi_console]
+    call    tf_select
+    pop     rdi
     cmp     edi, [rip+tf_focus]
     je      1f
     mov     [rip+tf_focus], edi
@@ -525,6 +564,16 @@ tf_key:
     pop     rbx
     ret
 
+# tf_is_focused -> eax: the palette field always is; the console when focused
+tf_is_focused:
+    lea     rax, [rip+tfi_palette]
+    cmp     [rip+tf_cur], rax
+    je      1f
+    mov     eax, [rip+tf_focus]
+    ret
+1:  mov     eax, 1
+    ret
+
 # tf_px(edi=byte offset) -> eax = pixel width of tf_buf[0..offset)
 tf_px:
     mov     esi, edi
@@ -535,6 +584,10 @@ tf_px:
 # tf_click(edi=x) - focus and place the caret at the nearest character edge
 # -----------------------------------------------------------------------------
 tf_click:
+    push    rdi
+    lea     rdi, [rip+tfi_console]
+    call    tf_select
+    pop     rdi
     push    rbx
     push    r12
     push    r13
@@ -604,7 +657,8 @@ tf_draw:
     mov     edx, r13d
     mov     ecx, TF_H
     mov     r8d, COL_SEPARATOR
-    cmp     dword ptr [rip+tf_focus], 0
+    call    tf_is_focused
+    test    eax, eax
     je      1f
     mov     r8d, COL_ACCENT
 1:  call    rect_outline
@@ -642,7 +696,8 @@ tf_draw:
 
     cmp     dword ptr [rip+tf_len], 0
     jne     5f
-    cmp     dword ptr [rip+tf_focus], 0
+    call    tf_is_focused
+    test    eax, eax
     jne     5f
     mov     edi, ebp
     lea     esi, [r12+3]
@@ -676,7 +731,8 @@ tf_draw:
     lea     rdx, [rip+tf_buf]
     mov     ecx, COL_TEXT
     call    draw_text
-    cmp     dword ptr [rip+tf_focus], 0
+    call    tf_is_focused
+    test    eax, eax
     je      9f
     lea     edi, [rbp+r15-1]            # caret bar
     lea     esi, [r12+3]

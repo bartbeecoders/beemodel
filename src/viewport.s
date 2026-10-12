@@ -658,6 +658,11 @@ vp_zoom:
 OPERATOR op_view_grid,      "view.toggle_grid",  "Ground Grid",  op_toggle_flag, op_check_flag, show_grid, KEY_G, doc="Show or hide the ground grid and axes"
 OPERATOR op_view_reset_cam, "view.reset_camera", "Reset Camera", op_reset_camera, key=KEY_F, doc="Return the viewport camera to its default view"
 op_reset_camera:
+    mov     edi, [rip+vp_area]
+    call    cam_load
+    call    vp_reset
+    mov     edi, [rip+vp_area]
+    jmp     cam_store
 vp_reset:
     movss   xmm0, [rip+f_def_yaw]
     movss   [rip+cam_yaw], xmm0

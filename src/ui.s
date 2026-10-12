@@ -7,10 +7,18 @@
 .include "macros.inc"
 
 # exports
+.globl menu_open
+.globl hover_idx
+.globl hover_id
+.globl drag_mode
+.globl cont_y1
+.globl cont_y0
+.globl is_hot
+.globl outliner_cols
+.globl outliner_names
+.globl tool_ops
+.globl selected_obj
 .globl ui_key_repeat
-.globl show_left
-.globl show_right
-.globl show_bottom
 .globl active_tool
 .globl cur_shape
 .globl cvs_x0
@@ -34,12 +42,6 @@
 
 .section .data
 .align 4
-left_w:         .long 210
-right_w:        .long 260
-bottom_h:       .long 150
-show_left:      .long 1
-show_right:     .long 1
-show_bottom:    .long 1
 show_grid:      .long 1
 menu_open:      .long -1
 active_tool:    .long 0
@@ -61,11 +63,6 @@ press_serial:   .skip 4
 # layout (recomputed by ui_layout)
 cont_y0:        .skip 4
 cont_y1:        .skip 4
-lx1:            .skip 4
-mx0:            .skip 4
-mx1:            .skip 4
-rx0:            .skip 4
-by0:            .skip 4
 cvs_x0:         .skip 4
 cvs_y0:         .skip 4
 cvs_x1:         .skip 4
@@ -92,23 +89,7 @@ s_t_light:      .asciz "Light"
 s_t_grid:       .asciz "Grid"
 s_t_cube:       .asciz "Cube"
 
-s_h_tools:      .asciz "TOOLS"
-s_h_create:     .asciz "CREATE"
-s_h_outliner:   .asciz "OUTLINER"
-s_h_props:      .asciz "PROPERTIES"
-s_h_console:    .asciz "CONSOLE"
 
-s_p_camera:     .asciz "Viewport camera"
-s_p_yaw:        .asciz "Yaw"
-s_p_pitch:      .asciz "Pitch"
-s_p_dist:       .asciz "Distance"
-s_p_target:     .asciz "Target"
-s_p_canvas:     .asciz "Canvas"
-s_p_grid:       .asciz "Grid"
-s_on:           .asciz "on"
-s_off:          .asciz "off"
-s_deg:          .asciz " deg"
-s_comma:        .asciz ", "
 s_x:            .asciz " x "
 s_kib:          .asciz " KiB framebuffer   "
 s_ready:        .asciz "Ready"
@@ -119,14 +100,15 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_help
-menu_items:     .quad items_file, items_edit, items_view, items_create, items_help
-menu_counts:    .long 5, 4, 7, 6, 3
+menu_items:     .quad items_file, items_edit, items_view, items_create, items_help, items_area
+menu_counts:    .long 5, 6, 12, 6, 3, 5
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
 items_file:     .quad op_file_new, op_file_open, op_file_save, 0, op_file_exit
-items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_edit_prefs
+items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_palette_open, 0, op_edit_prefs
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
+                .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
                 .quad op_view_grid, op_view_reset_cam, op_console_clear
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -151,25 +133,6 @@ clamp:
     cmovl   eax, esi
     ret
 
-# tool_y(edi=i) -> eax
-tool_y:
-    mov     eax, edi
-    imul    eax, TOOL_BTN_H+TOOL_BTN_GAP
-    add     eax, [rip+cont_y0]
-    add     eax, PANE_HDR_H+10
-    cmp     edi, 4
-    jb      1f
-    add     eax, 28                     # room for the "CREATE" caption
-1:  ret
-
-# row_y(edi=i) -> eax  (outliner rows)
-row_y:
-    mov     eax, edi
-    imul    eax, ROW_H
-    add     eax, [rip+cont_y0]
-    add     eax, PANE_HDR_H+4
-    ret
-
 # item_op(edi=menu, esi=index) -> rax = operator (0 = separator)
 item_op:
     lea     rax, [rip+menu_items]
@@ -189,82 +152,7 @@ ui_layout:
     sub     eax, STATUS_H
     mov     [rip+cont_y1], eax
 
-    # horizontal: L / R widths with minimums, then shrink to fit the window
-    xor     ebx, ebx                    # L
-    xor     r12d, r12d                  # R
-    mov     r13d, [rip+win_w]
-    sub     r13d, MIN_CANVAS_W          # avail = W - splitters - min canvas
-    cmp     dword ptr [rip+show_left], 0
-    je      1f
-    mov     ebx, [rip+left_w]
-    mov     eax, MIN_LEFT
-    cmp     ebx, eax
-    cmovl   ebx, eax
-    sub     r13d, SPLIT
-1:  cmp     dword ptr [rip+show_right], 0
-    je      2f
-    mov     r12d, [rip+right_w]
-    mov     eax, MIN_RIGHT
-    cmp     r12d, eax
-    cmovl   r12d, eax
-    sub     r13d, SPLIT
-2:  lea     eax, [rbx+r12]
-    sub     eax, r13d                   # excess
-    jle     4f
-    test    r12d, r12d                  # take it from the right pane first
-    jz      3f
-    lea     ecx, [r12-MIN_RIGHT]
-    cmp     ecx, eax
-    cmova   ecx, eax
-    sub     r12d, ecx
-    sub     eax, ecx
-3:  test    ebx, ebx
-    jz      4f
-    lea     ecx, [rbx-MIN_LEFT]
-    cmp     ecx, eax
-    cmova   ecx, eax
-    sub     ebx, ecx
-4:  cmp     dword ptr [rip+show_left], 0
-    je      5f
-    mov     [rip+left_w], ebx
-5:  cmp     dword ptr [rip+show_right], 0
-    je      6f
-    mov     [rip+right_w], r12d
-6:  mov     [rip+lx1], ebx
-    xor     eax, eax
-    test    ebx, ebx
-    jz      7f
-    lea     eax, [rbx+SPLIT]
-7:  mov     [rip+mx0], eax
-    mov     [rip+cvs_x0], eax
-    mov     eax, [rip+win_w]
-    sub     eax, r12d
-    mov     [rip+rx0], eax
-    test    r12d, r12d
-    jz      8f
-    sub     eax, SPLIT
-8:  mov     [rip+mx1], eax
-    mov     [rip+cvs_x1], eax
-
-    # vertical: bottom console pane
-    mov     dword ptr [rip+cvs_y0], TITLE_H+MENU_H
-    mov     eax, [rip+cont_y1]
-    cmp     dword ptr [rip+show_bottom], 0
-    je      9f
-    mov     edi, [rip+bottom_h]
-    mov     esi, MIN_BOTTOM
-    mov     edx, [rip+cont_y1]
-    sub     edx, [rip+cont_y0]
-    sub     edx, SPLIT+MIN_CANVAS_H
-    call    clamp
-    mov     [rip+bottom_h], eax
-    mov     ecx, [rip+cont_y1]
-    sub     ecx, eax
-    mov     [rip+by0], ecx
-    lea     eax, [rcx-SPLIT]
-    jmp     10f
-9:  mov     [rip+by0], eax
-10: mov     [rip+cvs_y1], eax
+    call    area_layout
 
     # menu bar title positions
     mov     ebx, 4
@@ -284,13 +172,26 @@ ui_layout:
     mov     edi, [rip+menu_open]
     test    edi, edi
     js      14f
-    mov     eax, [r13+rdi*4]
-    mov     ecx, [rip+win_w]
+    cmp     edi, MENU_AREA              # editor-type menu hangs off an area header
+    jne     15f
+    push    rdi
+    mov     edi, [rip+active_area]
+    call    area_node_rect
+    pop     rdi
+    mov     ecx, [rax+12]
+    mov     [rip+drop_x], ecx
+    mov     ecx, [rax+16]
+    add     ecx, PANE_HDR_H
+    mov     [rip+drop_y], ecx
+    mov     eax, [rip+drop_x]
+    jmp     16f
+15: mov     eax, [r13+rdi*4]
+    mov     dword ptr [rip+drop_y], TITLE_H+MENU_H
+16: mov     ecx, [rip+win_w]
     sub     ecx, MENU_DROP_W
     cmp     eax, ecx
     cmovg   eax, ecx
     mov     [rip+drop_x], eax
-    mov     dword ptr [rip+drop_y], TITLE_H+MENU_H
     mov     dword ptr [rip+drop_w], MENU_DROP_W
     lea     rax, [rip+menu_counts]
     mov     ecx, [rax+rdi*4]
@@ -324,7 +225,15 @@ hit_test:
     mov     ebx, edi
     mov     r12d, esi
     call    ui_layout
-
+    cmp     dword ptr [rip+pal_open], 0 # the palette is the topmost layer
+    je      0f
+    call    palette_hit
+    cmp     eax, -1
+    je      0f
+    mov     edx, eax
+    mov     eax, HIT_PALETTE
+    jmp     .Lht_ret
+0:
     # open dropdown sits on top of everything
     mov     edi, [rip+menu_open]
     test    edi, edi
@@ -436,94 +345,9 @@ hit_test:
     cmp     r12d, [rip+cont_y1]
     jge     .Lht_ret
 
-    cmp     dword ptr [rip+show_left], 0
-    je      .Lht_right
-    cmp     ebx, [rip+lx1]
-    jge     2f
-    xor     r13d, r13d                  # tool buttons
-    cmp     ebx, 8
-    jl      3f
-    mov     eax, [rip+lx1]
-    sub     eax, 8
-    cmp     ebx, eax
-    jge     3f
-1:  mov     edi, r13d
-    call    tool_y
-    cmp     r12d, eax
-    jl      4f
-    add     eax, TOOL_BTN_H
-    cmp     r12d, eax
-    jge     4f
-    mov     eax, HIT_TOOL
-    mov     edx, r13d
-    jmp     .Lht_ret
-4:  inc     r13d
-    cmp     r13d, NUM_TOOLS
-    jb      1b
-3:  mov     eax, HIT_PANE
-    xor     edx, edx
-    jmp     .Lht_ret
-2:  mov     eax, HIT_SPLIT_L
-    cmp     ebx, [rip+mx0]
-    jl      .Lht_ret
-
-.Lht_right:
-    cmp     dword ptr [rip+show_right], 0
-    je      .Lht_bottom
-    cmp     ebx, [rip+rx0]
-    jl      2f
-    xor     r13d, r13d
-1:  mov     edi, r13d
-    call    row_y
-    cmp     r12d, eax
-    jl      3f
-    add     eax, ROW_H
-    cmp     r12d, eax
-    jge     3f
-    mov     eax, HIT_OUTLINER
-    mov     edx, r13d
-    jmp     .Lht_ret
-3:  inc     r13d
-    cmp     r13d, NUM_OUTLINER
-    jb      1b
-    mov     eax, HIT_PANE
-    mov     edx, 1
-    jmp     .Lht_ret
-2:  mov     eax, HIT_SPLIT_R
-    cmp     ebx, [rip+mx1]
-    jge     .Lht_ret
-
-.Lht_bottom:
-    cmp     dword ptr [rip+show_bottom], 0
-    je      .Lht_canvas
-    mov     eax, HIT_PANE
-    mov     edx, 2
-    cmp     r12d, [rip+by0]
-    jl      1f
-    mov     ecx, [rip+cont_y1]          # command line row
-    sub     ecx, TF_H+6
-    cmp     r12d, ecx
-    jl      .Lht_ret
-    add     ecx, TF_H
-    cmp     r12d, ecx
-    jge     .Lht_ret
-    mov     ecx, [rip+mx0]
-    add     ecx, 6
-    cmp     ebx, ecx
-    jl      .Lht_ret
-    mov     ecx, [rip+mx1]
-    sub     ecx, 6
-    cmp     ebx, ecx
-    jge     .Lht_ret
-    mov     eax, HIT_CONSOLE_INPUT
-    jmp     .Lht_ret
-1:
-    mov     eax, HIT_SPLIT_B
-    cmp     r12d, [rip+cvs_y1]
-    jge     .Lht_ret
-.Lht_canvas:
-    mov     eax, HIT_CANVAS
-    xor     edx, edx
+    mov     edi, ebx
+    mov     esi, r12d
+    call    area_hit
 .Lht_ret:
     pop     r14
     pop     r13
@@ -533,14 +357,11 @@ hit_test:
 
 # cursor_for(edi=hit id, esi=index) -> eax = cursor shape
 cursor_for:
-    mov     eax, CUR_EW
-    cmp     edi, HIT_SPLIT_L
-    je      9f
-    cmp     edi, HIT_SPLIT_R
-    je      9f
-    mov     eax, CUR_NS
-    cmp     edi, HIT_SPLIT_B
-    je      9f
+    cmp     edi, HIT_SPLITTER
+    jne     1f
+    mov     edi, esi
+    jmp     splitter_cursor
+1:
     mov     eax, CUR_CROSSHAIR
     cmp     edi, HIT_CANVAS
     je      9f
@@ -578,55 +399,29 @@ ui_motion:
     test    eax, eax
     jz      .Lmo_hover
     mov     dword ptr [rip+dirty], 1
-    cmp     eax, DRAG_SPLIT_L
-    jne     1f
-    sub     edi, SPLIT/2
-    mov     edx, [rip+win_w]
-    sub     edx, SPLIT+MIN_CANVAS_W
-    cmp     dword ptr [rip+show_right], 0
-    je      11f
-    sub     edx, [rip+right_w]
-    sub     edx, SPLIT
-11: mov     esi, MIN_LEFT
-    call    clamp
-    mov     [rip+left_w], eax
-    mov     edi, CUR_EW
-    jmp     .Lmo_cursor
-1:  cmp     eax, DRAG_SPLIT_R
-    jne     2f
-    mov     eax, [rip+win_w]
-    sub     eax, edi
-    sub     eax, SPLIT/2
-    mov     edi, eax
-    mov     edx, [rip+win_w]
-    sub     edx, SPLIT+MIN_CANVAS_W
-    cmp     dword ptr [rip+show_left], 0
-    je      21f
-    sub     edx, [rip+left_w]
-    sub     edx, SPLIT
-21: mov     esi, MIN_RIGHT
-    call    clamp
-    mov     [rip+right_w], eax
-    mov     edi, CUR_EW
-    jmp     .Lmo_cursor
-2:  cmp     eax, DRAG_SPLIT_B
+    cmp     eax, DRAG_SPLITTER
     jne     3f
-    mov     eax, [rip+cont_y1]
-    sub     eax, esi
-    sub     eax, SPLIT/2
-    mov     [rip+bottom_h], eax         # clamped by ui_layout
-    mov     edi, CUR_NS
+    call    area_drag                   # edi/esi = pointer
+    mov     edi, [rip+drag_node]
+    call    splitter_cursor
+    mov     edi, eax
     jmp     .Lmo_cursor
-3:  cmp     eax, DRAG_ORBIT
-    jne     4f
+3:  push    rax                         # orbit / pan the dragged viewport
+    mov     edi, [rip+drag_node]
+    call    cam_load
+    pop     rax
     mov     edi, ebx
     mov     esi, r12d
+    cmp     eax, DRAG_ORBIT
+    jne     4f
     call    vp_orbit
+    mov     edi, [rip+drag_node]
+    call    cam_store
     mov     edi, CUR_GRABBING
     jmp     .Lmo_cursor
-4:  mov     edi, ebx
-    mov     esi, r12d
-    call    vp_pan
+4:  call    vp_pan
+    mov     edi, [rip+drag_node]
+    call    cam_store
     mov     edi, CUR_MOVE
     jmp     .Lmo_cursor
 
@@ -645,7 +440,24 @@ ui_motion:
     je      1f
     mov     [rip+menu_open], edx
     mov     dword ptr [rip+dirty], 1
-1:  cmp     r13d, [rip+hover_id]
+1:  cmp     dword ptr [rip+menu_open], 0
+    jge     11f
+    mov     eax, [rip+hit_area]         # the area under the pointer is active
+    test    eax, eax
+    js      11f
+    cmp     eax, [rip+active_area]
+    je      11f
+    mov     [rip+active_area], eax
+    mov     dword ptr [rip+dirty], 1
+11: cmp     r13d, HIT_PALETTE           # hovering a result selects it
+    jne     12f
+    test    edx, edx
+    js      12f
+    cmp     edx, [rip+pal_sel]
+    je      12f
+    mov     [rip+pal_sel], edx
+    mov     dword ptr [rip+dirty], 1
+12: cmp     r13d, [rip+hover_id]
     jne     2f
     cmp     edx, [rip+hover_idx]
     je      3f
@@ -699,7 +511,19 @@ ui_button:
     jz      .Lbt_release
 
     # ---------------- press ----------------
-    cmp     ebx, HIT_CONSOLE_INPUT
+    cmp     dword ptr [rip+pal_open], 0
+    je      0f
+    cmp     ebx, HIT_PALETTE            # click a result to run it
+    jne     .Lbt_palclose
+    test    r12d, r12d
+    js      .Lbt_done
+    mov     [rip+pal_sel], r12d
+    call    palette_run
+    jmp     .Lbt_done
+.Lbt_palclose:
+    call    palette_close               # click outside closes
+    jmp     .Lbt_done
+0:  cmp     ebx, HIT_CONSOLE_INPUT
     jne     1f
     mov     dword ptr [rip+menu_open], -1
     mov     edi, [rip+ptr_x]
@@ -727,6 +551,8 @@ ui_button:
     jne     1f
     cmp     ebx, HIT_CANVAS
     jne     .Lbt_done
+    mov     [rip+drag_node], r12d
+    mov     [rip+vp_area], r12d
     mov     dword ptr [rip+drag_mode], DRAG_PAN
     mov     edi, CUR_MOVE
     call    set_cursor
@@ -771,15 +597,28 @@ ui_button:
     jne     4f
     mov     [rip+menu_open], r12d
     jmp     .Lbt_done
-4:  cmp     ebx, HIT_SPLIT_L
-    jb      5f
-    cmp     ebx, HIT_SPLIT_B
-    ja      5f
-    lea     eax, [rbx-HIT_SPLIT_L+DRAG_SPLIT_L]
-    mov     [rip+drag_mode], eax
+4:  cmp     ebx, HIT_SPLITTER
+    jne     41f
+    mov     [rip+drag_node], r12d
+    mov     dword ptr [rip+drag_mode], DRAG_SPLITTER
+    jmp     .Lbt_done
+41: cmp     ebx, HIT_AREA_BTN           # area header buttons run operators
+    jne     42f
+    mov     eax, [rip+hit_area]
+    mov     [rip+active_area], eax
+    lea     rax, [rip+area_btn_ops]
+    mov     rdi, [rax+r12*8]
+    call    run_op
+    jmp     .Lbt_done
+42: cmp     ebx, HIT_AREA_TYPE          # editor type menu
+    jne     5f
+    mov     [rip+active_area], r12d
+    mov     dword ptr [rip+menu_open], MENU_AREA
     jmp     .Lbt_done
 5:  cmp     ebx, HIT_CANVAS
     jne     6f
+    mov     [rip+drag_node], r12d
+    mov     [rip+vp_area], r12d
     mov     eax, DRAG_ORBIT
     mov     ecx, DRAG_PAN
     test    dword ptr [rip+key_mods], MOD_SHIFT
@@ -865,7 +704,19 @@ ui_axis:
     pop     rdi
     cmp     eax, HIT_CANVAS
     jne     9f
+    push    rdi
+    push    rdx
+    mov     [rip+vp_area], edx
+    mov     edi, edx
+    call    cam_load
+    pop     rdx
+    pop     rdi
+    push    rdx
+    sub     rsp, 8
     call    vp_zoom
+    add     rsp, 8
+    pop     rdi
+    call    cam_store
     mov     dword ptr [rip+dirty], 1
 9:  ret
 
@@ -905,6 +756,14 @@ ui_key_repeat:
 ui_key_press:
     push    rbx
     mov     ebx, edi
+    cmp     dword ptr [rip+pal_open], 0  # the palette takes every key
+    je      0f
+    call    kb_sym
+    mov     esi, eax
+    mov     edi, ebx
+    call    palette_key
+    jmp     9f
+0:
     cmp     ebx, KEY_ESC
     jne     1f
     cmp     dword ptr [rip+menu_open], 0
@@ -914,6 +773,8 @@ ui_key_press:
     jmp     9f
 1:  cmp     dword ptr [rip+tf_focus], 0
     je      2f
+    lea     rdi, [rip+tfi_console]
+    call    tf_select
     mov     edi, ebx
     call    kb_sym
     mov     esi, eax
@@ -939,21 +800,12 @@ ui_draw:
     call    reset_clip
     call    draw_titlebar
     call    draw_menubar
-    cmp     dword ptr [rip+show_left], 0
-    je      1f
-    call    draw_left_pane
-1:  cmp     dword ptr [rip+show_right], 0
-    je      2f
-    call    draw_right_pane
-2:  cmp     dword ptr [rip+show_bottom], 0
-    je      3f
-    call    draw_bottom_pane
-3:  call    viewport_draw
+    call    area_draw_all
     call    draw_statusbar
     cmp     dword ptr [rip+menu_open], 0
     jl      4f
     call    draw_dropdown
-4:  ret
+4:  jmp     palette_draw
 
 # is_hot(edi=hit id, esi=index) -> eax = 1 if hovered
 is_hot:
@@ -964,43 +816,6 @@ is_hot:
     jne     1f
     inc     eax
 1:  ret
-
-# splitter_color(edi=hit id, esi=drag mode) -> eax
-splitter_color:
-    mov     eax, COL_SPLIT_HOT
-    cmp     esi, [rip+drag_mode]
-    je      1f
-    cmp     edi, [rip+hover_id]
-    je      1f
-    mov     eax, COL_SPLIT
-1:  ret
-
-# pane_header(edi=x, esi=y, edx=w, rcx=title)
-pane_header:
-    push    rbx
-    push    r12
-    push    r13
-    mov     ebx, edi
-    mov     r12d, esi
-    mov     r13, rcx
-    mov     ecx, PANE_HDR_H
-    mov     r8d, COL_PANE_HDR
-    call    fill_rect
-    mov     edi, ebx
-    mov     esi, r12d
-    mov     edx, 3
-    mov     ecx, PANE_HDR_H
-    mov     r8d, COL_ACCENT
-    call    fill_rect
-    lea     edi, [rbx+12]
-    lea     esi, [r12+4]
-    mov     rdx, r13
-    mov     ecx, COL_TEXT_DIM
-    call    draw_text
-    pop     r13
-    pop     r12
-    pop     rbx
-    ret
 
 # ---- title bar ---------------------------------------------------------------
 draw_titlebar:
@@ -1188,394 +1003,6 @@ draw_menubar:
     mov     ecx, 1
     mov     r8d, COL_SPLIT
     call    fill_rect
-    pop     r13
-    pop     r12
-    pop     rbx
-    ret
-
-# ---- left pane: tools ----------------------------------------------------------
-draw_left_pane:
-    push    rbx
-    push    r12
-    push    r13
-    push    r14
-    push    r15
-    xor     edi, edi
-    mov     esi, [rip+cont_y0]
-    mov     edx, [rip+lx1]
-    mov     ecx, [rip+cont_y1]
-    sub     ecx, esi
-    mov     r8d, COL_PANE_BG
-    call    fill_rect
-    xor     edi, edi
-    mov     esi, [rip+cont_y0]
-    mov     edx, [rip+lx1]
-    mov     ecx, [rip+cont_y1]
-    call    set_clip
-    xor     edi, edi
-    mov     esi, [rip+cont_y0]
-    mov     edx, [rip+lx1]
-    lea     rcx, [rip+s_h_tools]
-    call    pane_header
-    mov     edi, 4
-    call    tool_y
-    lea     esi, [rax-22]
-    mov     edi, 12
-    lea     rdx, [rip+s_h_create]
-    mov     ecx, COL_TEXT_DIM
-    call    draw_text
-
-    xor     ebx, ebx
-1:  lea     rax, [rip+tool_ops]
-    mov     r15, [rax+rbx*8]            # operator
-    mov     edi, ebx
-    call    tool_y
-    mov     r12d, eax                   # y
-    mov     r13d, COL_BTN               # background
-    mov     r14d, COL_TEXT              # foreground
-    mov     edi, HIT_TOOL
-    mov     esi, ebx
-    call    is_hot
-    test    eax, eax
-    jz      2f
-    mov     r13d, COL_BTN_HOVER
-2:  mov     rdi, r15
-    call    op_checked
-    cmp     eax, 1
-    jne     3f
-    mov     r13d, COL_ACCENT
-    mov     r14d, COL_TEXT_DARK
-3:  mov     edi, 8
-    mov     esi, r12d
-    mov     edx, [rip+lx1]
-    sub     edx, 16
-    mov     ecx, TOOL_BTN_H
-    mov     r8d, r13d
-    call    fill_rect
-    mov     edi, 16                     # glyph: filled for tools, hollow for create
-    lea     esi, [r12+9]
-    mov     edx, 8
-    mov     ecx, 8
-    mov     r8d, r14d
-    cmp     ebx, 4
-    jae     4f
-    call    fill_rect
-    jmp     5f
-4:  call    rect_outline
-5:  mov     edi, 34
-    lea     esi, [r12+5]
-    mov     rdx, [r15+OP_LABEL]
-    mov     ecx, r14d
-    call    draw_text
-    mov     edi, [r15+OP_KEY]
-    call    fmt_key
-    test    rax, rax
-    jz      6f
-    mov     rdx, rax
-    mov     edi, [rip+lx1]
-    sub     edi, 28
-    lea     esi, [r12+5]
-    mov     ecx, COL_TEXT_DIM
-    cmp     r14d, COL_TEXT_DARK
-    jne     51f
-    mov     ecx, COL_TEXT_DARK
-51: call    draw_text
-6:  inc     ebx
-    cmp     ebx, NUM_TOOLS
-    jb      1b
-    call    reset_clip
-
-    mov     edi, HIT_SPLIT_L
-    mov     esi, DRAG_SPLIT_L
-    call    splitter_color
-    mov     r8d, eax
-    mov     edi, [rip+lx1]
-    mov     esi, [rip+cont_y0]
-    mov     edx, SPLIT
-    mov     ecx, [rip+cont_y1]
-    sub     ecx, esi
-    call    fill_rect
-    pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
-    pop     rbx
-    ret
-
-# ---- right pane: outliner + properties ----------------------------------------
-# prop_row(edi=y, rsi=label) - label at left, current fmt_buf as value
-prop_row:
-    push    rbx
-    push    r12
-    mov     ebx, edi
-    mov     r12, rsi
-    mov     edi, [rip+rx0]
-    add     edi, 14
-    mov     esi, ebx
-    mov     rdx, r12
-    mov     ecx, COL_TEXT_DIM
-    call    draw_text
-    mov     edi, [rip+rx0]
-    add     edi, 100
-    mov     esi, ebx
-    lea     rdx, [rip+fmt_buf]
-    mov     ecx, COL_TEXT
-    call    draw_text
-    pop     r12
-    pop     rbx
-    ret
-
-draw_right_pane:
-    push    rbx
-    push    r12
-    push    r13
-    mov     edi, [rip+rx0]
-    mov     esi, [rip+cont_y0]
-    mov     edx, [rip+right_w]
-    mov     ecx, [rip+cont_y1]
-    sub     ecx, esi
-    mov     r8d, COL_PANE_BG
-    call    fill_rect
-    mov     edi, [rip+rx0]
-    mov     esi, [rip+cont_y0]
-    mov     edx, [rip+win_w]
-    mov     ecx, [rip+cont_y1]
-    call    set_clip
-    mov     edi, [rip+rx0]
-    mov     esi, [rip+cont_y0]
-    mov     edx, [rip+right_w]
-    lea     rcx, [rip+s_h_outliner]
-    call    pane_header
-
-    xor     ebx, ebx
-1:  mov     edi, ebx
-    call    row_y
-    mov     r12d, eax
-    mov     r8d, COL_ACCENT_DARK
-    cmp     ebx, [rip+selected_obj]
-    je      2f
-    mov     edi, HIT_OUTLINER
-    mov     esi, ebx
-    call    is_hot
-    test    eax, eax
-    jz      3f
-    mov     r8d, COL_HOVER
-2:  mov     edi, [rip+rx0]
-    add     edi, 4
-    mov     esi, r12d
-    mov     edx, [rip+right_w]
-    sub     edx, 8
-    mov     ecx, ROW_H
-    call    fill_rect
-3:  mov     edi, [rip+rx0]
-    add     edi, 14
-    lea     esi, [r12+6]
-    mov     edx, 8
-    mov     ecx, 8
-    lea     rax, [rip+outliner_cols]
-    mov     r8d, [rax+rbx*4]
-    call    fill_rect
-    mov     edi, [rip+rx0]
-    add     edi, 30
-    lea     esi, [r12+2]
-    lea     rax, [rip+outliner_names]
-    mov     rdx, [rax+rbx*8]
-    mov     ecx, COL_TEXT
-    call    draw_text
-    inc     ebx
-    cmp     ebx, NUM_OUTLINER
-    jb      1b
-
-    mov     edi, NUM_OUTLINER
-    call    row_y
-    lea     r12d, [rax+10]
-    mov     edi, [rip+rx0]
-    mov     esi, r12d
-    mov     edx, [rip+right_w]
-    lea     rcx, [rip+s_h_props]
-    call    pane_header
-    add     r12d, PANE_HDR_H+8
-    mov     edi, [rip+rx0]
-    add     edi, 14
-    mov     esi, r12d
-    lea     rdx, [rip+s_p_camera]
-    mov     ecx, COL_ACCENT
-    call    draw_text
-    add     r12d, 20
-
-    call    fmt_reset
-    movss   xmm0, [rip+cam_yaw]
-    call    fmt_deg
-    lea     rdi, [rip+s_deg]
-    call    fmt_str
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_yaw]
-    call    prop_row
-    add     r12d, 18
-
-    call    fmt_reset
-    movss   xmm0, [rip+cam_pitch]
-    call    fmt_deg
-    lea     rdi, [rip+s_deg]
-    call    fmt_str
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_pitch]
-    call    prop_row
-    add     r12d, 18
-
-    call    fmt_reset
-    movss   xmm0, [rip+cam_dist]
-    call    fmt_fix1
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_dist]
-    call    prop_row
-    add     r12d, 18
-
-    call    fmt_reset
-    movss   xmm0, [rip+cam_tx]
-    call    fmt_fix1
-    lea     rdi, [rip+s_comma]
-    call    fmt_str
-    movss   xmm0, [rip+cam_ty]
-    call    fmt_fix1
-    lea     rdi, [rip+s_comma]
-    call    fmt_str
-    movss   xmm0, [rip+cam_tz]
-    call    fmt_fix1
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_target]
-    call    prop_row
-    add     r12d, 26
-
-    call    fmt_reset
-    mov     edi, [rip+cvs_x1]
-    sub     edi, [rip+cvs_x0]
-    call    fmt_int
-    lea     rdi, [rip+s_x]
-    call    fmt_str
-    mov     edi, [rip+cvs_y1]
-    sub     edi, [rip+cvs_y0]
-    call    fmt_int
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_canvas]
-    call    prop_row
-    add     r12d, 18
-
-    call    fmt_reset
-    lea     rdi, [rip+s_on]
-    cmp     dword ptr [rip+show_grid], 0
-    jne     4f
-    lea     rdi, [rip+s_off]
-4:  call    fmt_str
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_grid]
-    call    prop_row
-    call    reset_clip
-
-    mov     edi, HIT_SPLIT_R
-    mov     esi, DRAG_SPLIT_R
-    call    splitter_color
-    mov     r8d, eax
-    mov     edi, [rip+mx1]
-    mov     esi, [rip+cont_y0]
-    mov     edx, SPLIT
-    mov     ecx, [rip+cont_y1]
-    sub     ecx, esi
-    call    fill_rect
-    pop     r13
-    pop     r12
-    pop     rbx
-    ret
-
-# ---- bottom pane: console ------------------------------------------------------
-draw_bottom_pane:
-    push    rbx
-    push    r12
-    push    r13
-    push    r14
-    mov     edi, [rip+mx0]
-    mov     esi, [rip+by0]
-    mov     edx, [rip+mx1]
-    sub     edx, edi
-    mov     ecx, [rip+cont_y1]
-    sub     ecx, esi
-    mov     r8d, COL_PANE_BG
-    call    fill_rect
-    mov     edi, [rip+mx0]
-    mov     esi, [rip+by0]
-    mov     edx, [rip+mx1]
-    mov     ecx, [rip+cont_y1]
-    call    set_clip
-    mov     edi, [rip+mx0]
-    mov     esi, [rip+by0]
-    mov     edx, [rip+mx1]
-    sub     edx, edi
-    lea     rcx, [rip+s_h_console]
-    call    pane_header
-    mov     edi, FONT_MONO
-    call    text_use
-
-    # visible lines = min((h - header - 8) / 18, lines logged, ring size)
-    mov     eax, [rip+cont_y1]
-    sub     eax, [rip+by0]
-    sub     eax, PANE_HDR_H+8+TF_H+6
-    jle     9f
-    xor     edx, edx
-    mov     ecx, 18
-    div     ecx
-    mov     ebx, eax
-    mov     eax, [rip+log_head]
-    cmp     ebx, eax
-    cmova   ebx, eax
-    mov     eax, LOG_LINES
-    cmp     ebx, eax
-    cmova   ebx, eax
-    test    ebx, ebx
-    jz      9f
-    # newest line at the bottom
-    mov     r12d, [rip+cont_y1]
-    sub     r12d, 22+TF_H+6             # y of newest line
-    mov     r13d, [rip+log_head]
-1:  dec     r13d
-    mov     eax, r13d
-    and     eax, LOG_LINES-1
-    imul    eax, LOG_LINE_LEN
-    lea     r14, [rip+log_buf]
-    add     r14, rax
-    mov     ecx, COL_TEXT
-    cmp     byte ptr [r14], '>'
-    jne     2f
-    mov     ecx, COL_ACCENT
-2:  mov     edi, [rip+mx0]
-    add     edi, 12
-    mov     esi, r12d
-    mov     rdx, r14
-    call    draw_text
-    sub     r12d, 18
-    dec     ebx
-    jnz     1b
-9:  mov     edi, [rip+mx0]              # command line
-    add     edi, 6
-    mov     esi, [rip+cont_y1]
-    sub     esi, TF_H+6
-    mov     edx, [rip+mx1]
-    sub     edx, [rip+mx0]
-    sub     edx, 12
-    call    tf_draw
-    mov     edi, FONT_UI
-    call    text_use
-    call    reset_clip
-    mov     edi, HIT_SPLIT_B
-    mov     esi, DRAG_SPLIT_B
-    call    splitter_color
-    mov     r8d, eax
-    mov     edi, [rip+mx0]
-    mov     esi, [rip+cvs_y1]
-    mov     edx, [rip+mx1]
-    sub     edx, edi
-    mov     ecx, SPLIT
-    call    fill_rect
-    pop     r14
     pop     r13
     pop     r12
     pop     rbx

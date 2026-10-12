@@ -370,8 +370,53 @@ def main():
         f.proc.kill(); rc = None
     check(rc == 0, f'typed file.exit quits cleanly (rc={rc})')
     check(f.frames >= 50, f'frames rendered ({f.frames})')
+    areas_and_palette()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
     sys.exit(1 if FAILS else 0)
+
+
+def areas_and_palette():
+    """Second instance at the default 1280x800 layout: area headers, splits,
+    maximize, editor types and the F3 command palette."""
+    print('  -- areas & command palette --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    PANE = 0x2a2e36
+    check(px(f, 4, 300) == PANE, 'default layout: tools area on the left')
+    f.click(194, 68)                     # Tools header: close button
+    check(px(f, 4, 300) != PANE, 'area close button removes the tools area')
+    f.key(20)                            # T brings it back
+    check(px(f, 4, 300) == PANE, 'T re-creates the tools area')
+    f.move(600, 300)
+    f.click(955, 68)                     # Viewport header: split side by side
+    check(px(f, 613, 300) in (0x16181c, 0xf2b134), 'split side by side adds a splitter in the viewport')
+    f.drag(400, 300, 470, 330)           # orbit only the left viewport
+    f.shot('17_two_viewports.png')
+    f.move(800, 300)
+    f.mods(4); f.key(57); f.mods(0)      # Ctrl+Space maximizes the hovered area
+    check(px(f, 4, 300) != PANE, 'Ctrl+Space maximizes the active area')
+    f.shot('18_maximized_area.png')
+    f.mods(4); f.key(57); f.mods(0)
+    check(px(f, 4, 300) == PANE, 'Ctrl+Space again restores the layout')
+    f.click(680, 68)                     # right viewport: editor type menu
+    f.shot('19_editor_type_menu.png')
+    f.click(700, 140)                    # third entry: Outliner
+    f.shot('20_viewport_became_outliner.png')
+    f.key(61)                            # F3 opens the command palette
+    f.type('spl')
+    f.shot('21_palette_split.png')
+    f.key(1)                             # Esc closes it
+    f.key(61)
+    f.type('exit')                       # fuzzy search, Enter runs the best hit
+    f.key(28)
+    f.pump(0.5)
+    try:
+        rc = f.proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        f.proc.kill(); rc = None
+    check(rc == 0, f'F3 "exit" + Enter quits through the palette (rc={rc})')
 
 
 if __name__ == '__main__':

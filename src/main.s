@@ -25,6 +25,7 @@ _start:
 1:  and     rsp, -16
 
     call    text_init
+    call    area_init
     call    jobs_init
     lea     rdi, [rip+frame_arena]
     mov     esi, FRAME_ARENA_BYTES
