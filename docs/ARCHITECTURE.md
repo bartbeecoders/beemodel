@@ -20,6 +20,8 @@ stays private to the module.
 | `viewport.s` | Camera, projection, clipping, grid/axes/gizmo, plus the viewport's own operators |
 | `keyboard.s` | XKB text-keymap parser, key → Unicode (Shift/Caps/AltGr levels, dead keys), layout-aware shortcut codes, key repeat (timerfd) |
 | `textfield.s` | Single-line UTF-8 text field: caret, selection, history, Tab completion; the console command line |
+| `ttf.s` | TrueType engine: cmap 4/12, loca/glyf (simple + composite), hmtx, anti-aliased rasterizer, glyph cache |
+| `text.s` | Font selection, UTF-8 text drawing (alpha blended), text measurement, bitmap fallback |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -102,6 +104,24 @@ AltGr works however the compositor serializes it.
   Undo on AZERTY and QWERTZ too.
 * **Repeat**: only while a text field has focus, using the compositor's
   `repeat_info` rate and delay.
+
+## Text
+
+`text.s` loads a sans font for the UI and a monospace font for the console.
+It looks in the usual system paths (Noto, DejaVu, Liberation); override with
+`BEEMODEL_FONT` / `BEEMODEL_MONO_FONT` (a `.ttf` path, or `none`). No font is
+embedded, which keeps the binary small. Without a usable font, everything falls
+back to the 8×16 bitmap font.
+
+`ttf.s` reads TrueType outlines (`glyf`, including composite glyphs such as
+accented letters). It flattens the quadratic curves and accumulates signed
+edge coverage into a float buffer; a prefix sum then gives exact pixel area
+coverage. A small gamma table keeps light text on the dark theme from looking
+thin. Rendered glyphs (8-bit alpha) are cached per font and code point in a
+hash table backed by a 4 MiB arena, and are alpha-blended into the framebuffer.
+
+Text is proportional, so layout code measures with `text_width` /
+`text_width_n` instead of assuming 8-pixel cells.
 
 ## Event loop & rendering
 

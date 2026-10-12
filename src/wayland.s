@@ -9,6 +9,7 @@
 .include "const.inc"
 
 # exports
+.globl getenv
 .globl sock_fd
 .globl alloc_id
 .globl create_window

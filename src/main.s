@@ -24,6 +24,7 @@ _start:
     call    handle_cli_args             # --version / --help exit here
 1:  and     rsp, -16
 
+    call    text_init
     call    wl_connect
 
     call    alloc_id                    # wl_display.get_registry

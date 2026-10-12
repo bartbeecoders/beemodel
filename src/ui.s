@@ -273,8 +273,8 @@ ui_layout:
 11: mov     [r13+r12*4], ebx
     lea     rax, [rip+menu_titles]
     mov     rdi, [rax+r12*8]
-    call    str_len
-    lea     ebx, [rbx+rax*8+20]
+    call    text_width
+    lea     ebx, [rbx+rax+20]
     inc     r12d
     cmp     r12d, NUM_MENUS
     jb      11b
@@ -1512,6 +1512,8 @@ draw_bottom_pane:
     sub     edx, edi
     lea     rcx, [rip+s_h_console]
     call    pane_header
+    mov     edi, FONT_MONO
+    call    text_use
 
     # visible lines = min((h - header - 8) / 18, lines logged, ring size)
     mov     eax, [rip+cont_y1]
@@ -1560,6 +1562,8 @@ draw_bottom_pane:
     sub     edx, [rip+mx0]
     sub     edx, 12
     call    tf_draw
+    mov     edi, FONT_UI
+    call    text_use
     call    reset_clip
     mov     edi, HIT_SPLIT_B
     mov     esi, DRAG_SPLIT_B
@@ -1621,9 +1625,9 @@ draw_statusbar:
     call    fmt_str
     mov     edi, [rip+win_h]
     call    fmt_int
+    lea     rdi, [rip+fmt_buf]
+    call    text_width
     mov     edi, [rip+win_w]
-    mov     eax, [rip+fmt_pos]
-    shl     eax, 3
     sub     edi, eax
     sub     edi, 12
     mov     esi, [rip+cont_y1]
@@ -1729,8 +1733,7 @@ draw_dropdown:
     jz      5f
     push    rax
     mov     rdi, rax
-    call    str_len
-    shl     eax, 3
+    call    text_width
     mov     edi, r15d
     add     edi, [rip+drop_w]
     sub     edi, 12

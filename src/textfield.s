@@ -525,31 +525,59 @@ tf_key:
     pop     rbx
     ret
 
+# tf_px(edi=byte offset) -> eax = pixel width of tf_buf[0..offset)
+tf_px:
+    mov     esi, edi
+    lea     rdi, [rip+tf_buf]
+    jmp     text_width_n
+
 # -----------------------------------------------------------------------------
-# tf_click(edi=x) - focus and place the caret under the pointer
+# tf_click(edi=x) - focus and place the caret at the nearest character edge
 # -----------------------------------------------------------------------------
 tf_click:
     push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
     mov     ebx, edi
     mov     edi, 1
     call    tf_set_focus
-    mov     eax, ebx
-    sub     eax, [rip+tf_text_x]
-    add     eax, CHAR_W/2
-    jns     1f
-    xor     eax, eax
-1:  shr     eax, 3
-    add     eax, [rip+tf_scroll]
+    mov     edi, FONT_MONO
+    call    text_use
+    mov     [rsp], eax
+    sub     ebx, [rip+tf_text_x]
+    add     ebx, [rip+tf_scroll]        # target x within the text
+    xor     r12d, r12d                  # candidate position
+    xor     r13d, r13d                  # its x
+1:  cmp     r12d, [rip+tf_len]
+    jae     3f
+    mov     eax, r12d
+    call    tf_next
+    mov     r14d, eax
     mov     edi, eax
-    call    byte_of_cp
-    mov     [rip+tf_caret], eax
-    mov     [rip+tf_anchor], eax
+    call    tf_px                       # x of the next edge
+    lea     ecx, [r13+rax]
+    shr     ecx, 1                      # midpoint of this character
+    cmp     ebx, ecx
+    jl      3f
+    mov     r12d, r14d
+    mov     r13d, eax
+    jmp     1b
+3:  mov     [rip+tf_caret], r12d
+    mov     [rip+tf_anchor], r12d
+    mov     edi, [rsp]
+    call    text_use
     mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 
 # -----------------------------------------------------------------------------
-# tf_draw(edi=x, esi=y, edx=w) - height TF_H
+# tf_draw(edi=x, esi=y, edx=w) - height TF_H, drawn in the monospace font
 # -----------------------------------------------------------------------------
 tf_draw:
     push    rbx
@@ -558,9 +586,16 @@ tf_draw:
     push    r13
     push    r14
     push    r15
+    sub     rsp, 8
     mov     ebx, edi
     mov     r12d, esi
     mov     r13d, edx
+    mov     edi, FONT_MONO
+    call    text_use
+    mov     [rsp], eax
+    mov     edi, ebx
+    mov     esi, r12d
+    mov     edx, r13d
     mov     ecx, TF_H
     mov     r8d, COL_INPUT_BG
     call    fill_rect
@@ -580,32 +615,28 @@ tf_draw:
     call    draw_text
     lea     ebp, [rbx+24]               # text origin
     mov     [rip+tf_text_x], ebp
+    lea     r14d, [r13-32]              # visible text width
 
-    # visible columns and scroll so the caret stays in view
-    lea     eax, [r13-32]
-    shr     eax, 3
-    mov     r14d, eax                   # visible chars
-    test    r14d, r14d
-    jnz     2f
-    inc     r14d
-2:  mov     edi, [rip+tf_caret]
-    call    cp_count
-    mov     r15d, eax                   # caret code point
-    mov     eax, [rip+tf_scroll]
-    cmp     r15d, eax
-    jae     3f
-    mov     eax, r15d
-3:  lea     ecx, [rax+r14-1]
+    # keep the caret in view: scroll is in pixels
+    mov     edi, [rip+tf_caret]
+    call    tf_px
+    mov     r15d, eax                   # caret x
+    mov     ecx, [rip+tf_scroll]
     cmp     r15d, ecx
-    jbe     4f
-    mov     eax, r15d
-    sub     eax, r14d
-    inc     eax
-4:  mov     [rip+tf_scroll], eax
+    jge     2f
+    mov     ecx, r15d
+2:  mov     eax, r15d
+    sub     eax, ecx
+    cmp     eax, r14d
+    jle     3f
+    mov     ecx, r15d
+    sub     ecx, r14d
+3:  mov     [rip+tf_scroll], ecx
+    sub     ebp, ecx                    # x of byte 0 on screen
 
     lea     edx, [rbx+r13-4]            # clip to the field interior
     lea     ecx, [r12+TF_H-1]
-    mov     edi, ebp
+    lea     edi, [rbx+24]
     lea     esi, [r12+1]
     call    set_clip
 
@@ -627,41 +658,36 @@ tf_draw:
     jb      51f
     xchg    edi, esi
 51: push    rsi
-    call    cp_count
-    mov     r14d, eax                   # selection start cp
-    pop     rdi
-    call    cp_count
-    sub     eax, r14d
-    shl     eax, 3
-    mov     edx, eax
-    mov     edi, r14d
-    sub     edi, [rip+tf_scroll]
-    shl     edi, 3
-    add     edi, ebp
+    sub     rsp, 8
+    call    tf_px
+    mov     r14d, eax                   # selection start x
+    mov     edi, [rsp+8]
+    call    tf_px
+    add     rsp, 16
+    lea     edx, [rax]
+    sub     edx, r14d
+    lea     edi, [rbp+r14]
     lea     esi, [r12+3]
     mov     ecx, CHAR_H
     mov     r8d, COL_SELECTION
     call    fill_rect
-6:  mov     edi, [rip+tf_scroll]
-    call    byte_of_cp
-    lea     rdx, [rip+tf_buf]
-    add     rdx, rax
-    mov     edi, ebp
+6:  mov     edi, ebp
     lea     esi, [r12+3]
+    lea     rdx, [rip+tf_buf]
     mov     ecx, COL_TEXT
     call    draw_text
     cmp     dword ptr [rip+tf_focus], 0
     je      9f
-    mov     edi, r15d                   # caret bar
-    sub     edi, [rip+tf_scroll]
-    shl     edi, 3
-    lea     edi, [rbp+rdi-1]
+    lea     edi, [rbp+r15-1]            # caret bar
     lea     esi, [r12+3]
     mov     edx, 2
     mov     ecx, CHAR_H
     mov     r8d, COL_ACCENT
     call    fill_rect
 9:  call    reset_clip
+    mov     edi, [rsp]
+    call    text_use
+    add     rsp, 8
     pop     r15
     pop     r14
     pop     r13
