@@ -14,10 +14,7 @@
 .globl cont_y1
 .globl cont_y0
 .globl is_hot
-.globl outliner_cols
-.globl outliner_names
 .globl tool_ops
-.globl selected_obj
 .globl ui_key_repeat
 .globl active_tool
 .globl cur_shape
@@ -31,7 +28,6 @@
 .globl s_app_title
 .globl s_log_hello
 .globl s_log_hello2
-.globl selected_obj
 .globl show_grid
 .globl ui_axis
 .globl ui_button
@@ -45,7 +41,6 @@
 show_grid:      .long 1
 menu_open:      .long -1
 active_tool:    .long 0
-selected_obj:   .long 3
 
 .section .bss
 .align 4
@@ -60,6 +55,9 @@ cur_shape:      .skip 4
 key_mods:       .skip 4
 last_click:     .skip 4
 press_serial:   .skip 4
+press_x:        .skip 4
+press_y:        .skip 4
+press_mods:     .skip 4
 # layout (recomputed by ui_layout)
 cont_y0:        .skip 4
 cont_y1:        .skip 4
@@ -84,40 +82,34 @@ s_m_view:       .asciz "View"
 s_m_create:     .asciz "Create"
 s_m_help:       .asciz "Help"
 
-s_t_camera:     .asciz "Camera"
-s_t_light:      .asciz "Light"
-s_t_grid:       .asciz "Grid"
-s_t_cube:       .asciz "Cube"
 
 
 s_x:            .asciz " x "
 s_kib:          .asciz " KiB framebuffer   "
 s_ready:        .asciz "Ready"
 
-s_log_sel:      .asciz "> Selected: "
 s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero libraries"
 s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize panes"
 
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_help, items_area
-menu_counts:    .long 5, 6, 12, 6, 3, 5
+menu_counts:    .long 5, 10, 12, 10, 3, 5
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
 items_file:     .quad op_file_new, op_file_open, op_file_save, 0, op_file_exit
-items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_palette_open, 0, op_edit_prefs
+items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_select_all, op_duplicate, op_delete, 0
+                .quad op_palette_open, 0, op_edit_prefs
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
                 .quad op_view_grid, op_view_reset_cam, op_console_clear
-items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
-                .quad op_add_light, op_add_camera
+items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
+                .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_light, op_add_camera
 items_help:     .quad op_help_keys, op_console_ops, op_help_about
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
-outliner_names: .quad s_t_camera, s_t_light, s_t_grid, s_t_cube
-outliner_cols:  .long 0x61afef, 0xe5c07b, 0x7f8794, COL_OBJECT
 
 .text
 
@@ -398,7 +390,27 @@ ui_motion:
     mov     eax, [rip+drag_mode]
     test    eax, eax
     jz      .Lmo_hover
-    mov     dword ptr [rip+dirty], 1
+    cmp     eax, DRAG_PENDING
+    jne     0f
+    mov     ecx, edi                    # moved far enough to be a drag?
+    sub     ecx, [rip+press_x]
+    mov     edx, ecx
+    neg     edx
+    cmovs   edx, ecx
+    mov     ecx, esi
+    sub     ecx, [rip+press_y]
+    mov     r8d, ecx
+    neg     r8d
+    cmovs   r8d, ecx
+    add     edx, r8d
+    cmp     edx, 3
+    jle     .Lmo_out
+    mov     eax, DRAG_ORBIT
+    mov     ecx, DRAG_PAN
+    test    dword ptr [rip+press_mods], MOD_SHIFT
+    cmovnz  eax, ecx
+    mov     [rip+drag_mode], eax
+0:  mov     dword ptr [rip+dirty], 1
     cmp     eax, DRAG_SPLITTER
     jne     3f
     call    area_drag                   # edi/esi = pointer
@@ -470,6 +482,7 @@ ui_motion:
     mov     edi, eax
 .Lmo_cursor:
     call    set_cursor
+.Lmo_out:
     pop     r13
     pop     r12
     pop     rbx
@@ -615,18 +628,17 @@ ui_button:
     mov     [rip+active_area], r12d
     mov     dword ptr [rip+menu_open], MENU_AREA
     jmp     .Lbt_done
-5:  cmp     ebx, HIT_CANVAS
+5:  cmp     ebx, HIT_CANVAS            # click selects, drag orbits / pans
     jne     6f
     mov     [rip+drag_node], r12d
     mov     [rip+vp_area], r12d
-    mov     eax, DRAG_ORBIT
-    mov     ecx, DRAG_PAN
-    test    dword ptr [rip+key_mods], MOD_SHIFT
-    cmovnz  eax, ecx
-    mov     [rip+drag_mode], eax
-    mov     edi, [rip+ptr_x]
-    mov     esi, [rip+ptr_y]
-    call    ui_motion                   # update the cursor
+    mov     dword ptr [rip+drag_mode], DRAG_PENDING
+    mov     eax, [rip+ptr_x]
+    mov     [rip+press_x], eax
+    mov     eax, [rip+ptr_y]
+    mov     [rip+press_y], eax
+    mov     eax, [rip+key_mods]
+    mov     [rip+press_mods], eax
     jmp     .Lbt_done
 6:  cmp     ebx, HIT_TOOL
     jne     7f
@@ -634,18 +646,23 @@ ui_button:
     mov     rdi, [rax+r12*8]
     call    run_op
     jmp     .Lbt_done
-7:  cmp     ebx, HIT_OUTLINER
+7:  cmp     ebx, HIT_OUTLINER           # click an object row to select it
     jne     .Lbt_done
-    mov     [rip+selected_obj], r12d
-    lea     rax, [rip+outliner_names]
-    mov     rsi, [rax+r12*8]
-    lea     rdi, [rip+s_log_sel]
-    call    log_pair
+    lea     rax, [rip+obj_list]
+    mov     edi, [rax+r12*4]
+    mov     esi, [rip+key_mods]
+    and     esi, MOD_SHIFT
+    call    obj_click_select
     jmp     .Lbt_done
 
     # ---------------- release ----------------
 .Lbt_release:
-    cmp     dword ptr [rip+drag_mode], 0
+    cmp     dword ptr [rip+drag_mode], DRAG_PENDING
+    jne     0f
+    mov     dword ptr [rip+drag_mode], 0
+    call    viewport_click
+    jmp     .Lbt_done
+0:  cmp     dword ptr [rip+drag_mode], 0
     je      1f
     mov     dword ptr [rip+drag_mode], 0
     mov     edi, [rip+ptr_x]
@@ -702,7 +719,18 @@ ui_axis:
     mov     esi, [rip+ptr_y]
     call    hit_test
     pop     rdi
-    cmp     eax, HIT_CANVAS
+    cmp     eax, HIT_OUTLINER
+    je      8f
+    cmp     eax, HIT_PANE
+    jne     7f
+    push    rdi
+    mov     edi, edx
+    call    area_editor
+    pop     rdi
+    cmp     eax, ED_OUTLINER
+    je      8f
+    jmp     9f
+7:  cmp     eax, HIT_CANVAS
     jne     9f
     push    rdi
     push    rdx
@@ -719,6 +747,50 @@ ui_axis:
     call    cam_store
     mov     dword ptr [rip+dirty], 1
 9:  ret
+8:  mov     eax, [rip+outl_scroll]      # outliner: 1 row per notch
+    test    edi, edi
+    js      81f
+    inc     eax
+    jmp     82f
+81: dec     eax
+82: mov     ecx, [rip+obj_count]
+    dec     ecx
+    cmp     eax, ecx
+    cmovg   eax, ecx
+    xor     ecx, ecx
+    cmp     eax, ecx
+    cmovl   eax, ecx
+    mov     [rip+outl_scroll], eax
+    mov     dword ptr [rip+dirty], 1
+    ret
+
+# viewport_click - LMB released without dragging: pick in that viewport
+viewport_click:
+    push    rbx
+    mov     edi, [rip+drag_node]
+    call    area_node_rect
+    mov     ecx, [rax+12]               # canvas = area below its header
+    mov     [rip+cvs_x0], ecx
+    add     ecx, [rax+20]
+    mov     [rip+cvs_x1], ecx
+    mov     ecx, [rax+16]
+    add     ecx, PANE_HDR_H
+    mov     [rip+cvs_y0], ecx
+    mov     ecx, [rax+16]
+    add     ecx, [rax+24]
+    mov     [rip+cvs_y1], ecx
+    mov     edi, [rip+drag_node]
+    call    cam_load
+    call    cam_setup
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    vp_pick
+    mov     edi, eax
+    mov     esi, [rip+press_mods]
+    and     esi, MOD_SHIFT
+    call    obj_click_select
+    pop     rbx
+    ret
 
 # ui_key(edi=evdev key, esi=state) - Esc closes menus, everything else is
 # looked up in the operator keymap (ops.s: dispatch_key)

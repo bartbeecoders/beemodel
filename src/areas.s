@@ -31,6 +31,7 @@
 .globl items_area
 .globl splitter_cursor
 .globl console_ensure
+.globl area_editor
 .globl area_btn_ops
 
 # node layout (32 bytes)
@@ -107,6 +108,14 @@ s_p_target:     .asciz "Target"
 s_p_canvas:     .asciz "Canvas"
 s_p_grid:       .asciz "Grid"
 s_p_areas:      .asciz "Areas"
+s_p_loc:        .asciz "Location"
+s_p_rot:        .asciz "Rotation"
+s_p_scale:      .asciz "Scale"
+s_p_mesh:       .asciz "Mesh"
+s_no_active:    .asciz "No active object"
+s_v:            .asciz " v, "
+s_e:            .asciz " e, "
+s_f:            .asciz " f"
 s_on:           .asciz "on"
 s_off:          .asciz "off"
 s_deg:          .asciz " deg"
@@ -333,6 +342,12 @@ set_body:
     mov     [rip+ed_h], ecx
     ret
 
+# area_editor(edi=node) -> eax = editor shown by that leaf
+area_editor:
+    call    node_ptr
+    movzx   eax, byte ptr [rax+N_ED]
+    ret
+
 # splitter_cursor(edi=split node) -> eax = cursor shape
 splitter_cursor:
     call    node_ptr
@@ -476,21 +491,19 @@ area_hit:
     jb      4b
     jmp     .Lah_pane2
 .Lah_outliner:
-    xor     r13d, r13d
-6:  mov     edi, r13d
-    call    row_y
-    cmp     r12d, eax
-    jl      7f
-    add     eax, ROW_H
-    cmp     r12d, eax
-    jge     7f
+    mov     eax, r12d                   # row under the pointer -> object
+    sub     eax, [rip+ed_y]
+    sub     eax, 4
+    js      .Lah_pane2
+    xor     edx, edx
+    mov     ecx, ROW_H
+    div     ecx
+    add     eax, [rip+outl_scroll]
+    cmp     eax, [rip+obj_count]
+    jae     .Lah_pane2
+    mov     edx, eax
     mov     eax, HIT_OUTLINER
-    mov     edx, r13d
     jmp     .Lah_ret
-7:  inc     r13d
-    cmp     r13d, NUM_OUTLINER
-    jb      6b
-    jmp     .Lah_pane2
 .Lah_console:
     call    console_field
     cmp     r12d, esi
@@ -927,15 +940,28 @@ ed_tools_draw:
 ed_outliner_draw:
     push    rbx
     push    r12
-    xor     ebx, ebx
-1:  mov     edi, ebx
+    push    r13
+    push    r14
+    xor     ebx, ebx                    # visible row
+1:  mov     r13d, ebx
+    add     r13d, [rip+outl_scroll]     # object index
+    cmp     r13d, [rip+obj_count]
+    jae     9f
+    mov     edi, ebx
     call    row_y
     mov     r12d, eax
+    mov     ecx, [rip+ed_y]
+    add     ecx, [rip+ed_h]
+    cmp     r12d, ecx
+    jge     9f
+    mov     edi, r13d
+    call    obj_at
+    mov     r14, rax
     mov     r8d, COL_ACCENT_DARK
-    cmp     ebx, [rip+selected_obj]
-    je      2f
+    test    dword ptr [r14+OB_FLAGS], OBF_SELECTED
+    jnz     2f
     mov     edi, HIT_OUTLINER
-    mov     esi, ebx
+    mov     esi, r13d
     call    is_hot
     test    eax, eax
     jz      3f
@@ -947,24 +973,52 @@ ed_outliner_draw:
     sub     edx, 8
     mov     ecx, ROW_H
     call    fill_rect
-3:  mov     edi, [rip+ed_x]
+3:  mov     edi, [rip+ed_x]             # type icon
     add     edi, 14
     lea     esi, [r12+6]
     mov     edx, 8
     mov     ecx, 8
-    lea     rax, [rip+outliner_cols]
-    mov     r8d, [rax+rbx*4]
+    mov     r8d, [r14+OB_COLOR]
     call    fill_rect
-    mov     edi, [rip+ed_x]
+    mov     ecx, COL_TEXT               # name; the active object in gold
+    lea     rax, [rip+obj_list]
+    mov     eax, [rax+r13*4]
+    cmp     eax, [rip+active_obj]
+    jne     4f
+    mov     ecx, COL_ACTIVE
+4:  mov     edi, [rip+ed_x]
     add     edi, 30
     lea     esi, [r12+2]
-    lea     rax, [rip+outliner_names]
-    mov     rdx, [rax+rbx*8]
-    mov     ecx, COL_TEXT
+    mov     rdx, r14
     call    draw_text
     inc     ebx
-    cmp     ebx, NUM_OUTLINER
-    jb      1b
+    jmp     1b
+9:  pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# fmt_vec3(rdi=float[3], esi=1 to show degrees) - "x, y, z" into fmt_buf
+fmt_vec3:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    xor     r13d, r13d
+1:  movss   xmm0, [rbx+r13*4]
+    test    r12d, r12d
+    jz      2f
+    mulss   xmm0, [rip+f_rad2deg]
+2:  call    fmt_fix1
+    inc     r13d
+    cmp     r13d, 3
+    jae     3f
+    lea     rdi, [rip+s_comma]
+    call    fmt_str
+    jmp     1b
+3:  pop     r13
     pop     r12
     pop     rbx
     ret
@@ -994,10 +1048,72 @@ prop_row:
 ed_props_draw:
     push    rbx
     push    r12
-    mov     edi, [rip+vp_area]          # the camera of the last used viewport
-    call    cam_load
     mov     r12d, [rip+ed_y]
     add     r12d, 8
+    mov     edi, [rip+active_obj]       # ---- active object
+    call    obj_get
+    test    rax, rax
+    jnz     11f
+    mov     edi, [rip+ed_x]
+    add     edi, 14
+    mov     esi, r12d
+    lea     rdx, [rip+s_no_active]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+    add     r12d, 30
+    jmp     12f
+11: mov     rbx, rax
+    mov     edi, [rip+ed_x]
+    add     edi, 14
+    mov     esi, r12d
+    mov     rdx, rbx
+    mov     ecx, COL_ACTIVE
+    call    draw_text
+    add     r12d, 20
+    call    fmt_reset
+    lea     rdi, [rbx+OB_LOC]
+    xor     esi, esi
+    call    fmt_vec3
+    mov     edi, r12d
+    lea     rsi, [rip+s_p_loc]
+    call    prop_row
+    add     r12d, 18
+    call    fmt_reset
+    lea     rdi, [rbx+OB_ROT]
+    mov     esi, 1
+    call    fmt_vec3
+    mov     edi, r12d
+    lea     rsi, [rip+s_p_rot]
+    call    prop_row
+    add     r12d, 18
+    call    fmt_reset
+    lea     rdi, [rbx+OB_SCALE]
+    xor     esi, esi
+    call    fmt_vec3
+    mov     edi, r12d
+    lea     rsi, [rip+s_p_scale]
+    call    prop_row
+    add     r12d, 18
+    call    fmt_reset                   # mesh statistics
+    mov     rbx, [rbx+OB_MESH]
+    mov     edi, [rbx+ME_NVERTS]
+    call    fmt_int
+    lea     rdi, [rip+s_v]
+    call    fmt_str
+    mov     edi, [rbx+ME_NEDGES]
+    call    fmt_int
+    lea     rdi, [rip+s_e]
+    call    fmt_str
+    mov     edi, [rbx+ME_NPOLYS]
+    call    fmt_int
+    lea     rdi, [rip+s_f]
+    call    fmt_str
+    mov     edi, r12d
+    lea     rsi, [rip+s_p_mesh]
+    call    prop_row
+    add     r12d, 30
+12: mov     edi, [rip+vp_area]          # ---- camera of the last used viewport
+    call    cam_load
     mov     edi, [rip+ed_x]
     add     edi, 14
     mov     esi, r12d

@@ -27,6 +27,8 @@ stays private to the module.
 | `selftest.s` | `--selftest`: allocator and job-system tests plus a benchmark (run in CI) |
 | `areas.s` | Area tree (splits + leaf areas), layout, hit testing, headers, the five editors, area operators |
 | `palette.s` | F3 command palette: fuzzy search over the operator table |
+| `scene.s` | Objects (pool + ordered list), unique names, selection, TRS matrices, object operators |
+| `mesh.s` | Polygon meshes (loops, n-gons), edge/triangle derivation, primitive generators |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -194,6 +196,28 @@ F3 opens `palette.s`: a text field (a second instance of `textfield.s`; field
 state is swapped with `tf_select`) and up to 14 operators ranked by label
 prefix, then word or id prefix, then substring, then subsequence. Anything in
 the operator table, including future operators, is searchable automatically.
+
+## Scene & meshes
+
+Objects live in a `mem.s` pool, so a handle is `generation << 24 | index`. An
+ordered list of handles keeps the outliner order. An object is 128 bytes:
+name, location, rotation (Euler XYZ, radians), scale, colour, mesh pointer,
+flags and type (mesh, light, camera). `obj_matrix` builds the 3×4 world
+matrix `T · Rz·Ry·Rx · S`. Names are made unique Blender-style (`Cube`,
+`Cube.001`, …).
+
+A mesh is a single `mmap` block: a header, then flat arrays of positions,
+polygon offsets and loops (vertex indices per polygon, so n-gons are
+native), unique edges and a fan triangulation. `mesh_finish` derives the
+edges (hash table in the frame arena), the triangles and the bounding box.
+The primitives (cube, plane, grid, UV sphere, cylinder, cone, torus, plus
+the camera and light gizmos) are generated in code.
+
+The viewport draws each object's edges through its matrix (unselected first,
+then the selection in orange and the active object in gold). A click in a
+viewport (press and release without moving more than 3 px) picks the object
+with the smallest projected bounds under the pointer. Dragging still
+orbits.
 
 ## Event loop & rendering
 

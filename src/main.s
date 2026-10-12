@@ -26,10 +26,11 @@ _start:
 
     call    text_init
     call    area_init
-    call    jobs_init
     lea     rdi, [rip+frame_arena]
     mov     esi, FRAME_ARENA_BYTES
     call    arena_init
+    call    scene_init
+    call    jobs_init
     call    wl_connect
 
     call    alloc_id                    # wl_display.get_registry

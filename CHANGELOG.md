@@ -6,6 +6,17 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Scene with real objects: a Blender-like default scene (Camera, Light,
+  Cube); objects have a name, location, rotation, scale and a mesh.
+- Polygon meshes with n-gons, derived edges and triangles; primitives: cube,
+  plane, grid, UV sphere, cylinder, cone, torus.
+- Selection: click in the viewport or the outliner (Shift extends), A to
+  select all / none; X / Delete removes, Shift+D duplicates (unique names
+  like Cube.001).
+- The outliner lists the scene's objects and scrolls; Properties shows the
+  active object's transform and mesh statistics.
+
 ## [0.2.0] - 2026-10-12
 
 Phase 1 of the masterplan, "Foundations": the runtime every modeling feature

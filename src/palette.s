@@ -225,6 +225,8 @@ refilter:
     jae     4f
     cmp     dword ptr [rip+pal_n], PAL_MAX
     jae     9f
+    test    dword ptr [rbx+OP_FLAGS], OPF_HIDDEN
+    jnz     3f
     mov     rdi, rbx
     call    score
     cmp     eax, r12d

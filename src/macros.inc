@@ -21,6 +21,7 @@
 .equ OPF_QUIET,   1     # don't echo to the console when run
 .equ OPF_AI_SAFE, 2     # may be exposed to automation without confirmation
 .equ OPF_UNDO,    4     # records an undo step (once undo exists)
+.equ OPF_HIDDEN,  8     # alias binding: not listed in the palette
 
 # key binding modifiers (pre-shifted into the high half of OP_KEY)
 .equ KM_SHIFT,  MOD_SHIFT << 16
