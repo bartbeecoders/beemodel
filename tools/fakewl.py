@@ -245,12 +245,14 @@ class Fake:
 
     US = {**{c: k for k, c in enumerate('1234567890', 2)}, **{c: k for k, c in enumerate('qwertyuiop', 16)},
           **{c: k for k, c in enumerate('asdfghjkl', 30)}, **{c: k for k, c in enumerate('zxcvbnm', 44)},
-          '.': 52, '-': 12, ' ': 57, '/': 53}
+          '.': 52, '-': 12, ' ': 57, '/': 53, '=': 13, ',': 51, ';': 39, "'": 40, '[': 26, ']': 27}
+    US_SHIFT = {'_': 12, '(': 10, ')': 11, '"': 40, '+': 13, '{': 26, '}': 27, '*': 9, '<': 51, '>': 52,
+                '#': 4, '%': 6, '!': 2, ':': 39}
 
     def type(self, text):
         for ch in text:
-            shift = ch == '_' or ch.isupper()
-            code = 12 if ch == '_' else self.US[ch.lower()]
+            shift = ch in self.US_SHIFT or ch.isupper()
+            code = self.US_SHIFT[ch] if ch in self.US_SHIFT else self.US[ch.lower()]
             if shift: self.mods(1)
             self.keyev(code, 1); self.keyev(code, 0)
             if shift: self.mods(0)
@@ -443,6 +445,8 @@ def main():
     undo_redo()
     files()
     mcp()
+    scripting()
+    beescript_cli()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
     sys.exit(1 if FAILS else 0)
@@ -630,6 +634,7 @@ def files():
 
 
 import json
+import tempfile
 
 
 class Mcp:
@@ -770,6 +775,105 @@ def mcp():
     b.stdin.close(); b.wait(timeout=5)
     f.shot('30_mcp.png')
     f.proc.kill()
+
+
+def scripting():
+    """BeeScript: console REPL, one undo step per run, macros, script_eval."""
+    print('  -- BeeScript --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(*project((0, 1, 0)))
+    m = Mcp(f)
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.2)
+    def names():
+        t = m.tool('scene_summary')[0]
+        return [o['name'] for o in json.loads(t.split('\n')[0])['objects']] if t else []
+    def obj(n):
+        t = m.tool('scene_summary')[0]
+        return {o['name']: o for o in json.loads(t.split('\n')[0])['objects']}.get(n)
+    cmd('x = 3')
+    cmd('add("cube", "Tower" + x, 4, 0, 0)')
+    f.pump(0.3)
+    check('Tower3' in names() and bright(px(f, *project((4, 0, 0)))),
+          'console runs BeeScript: variables persist, add() places "Tower3" at (4,0,0)')
+    cmd('for i in 0..3 { add("sphere", "B" + i, -4, i * 2, 0) }')
+    check({'B0', 'B1', 'B2'} <= set(names()), 'a for loop adds three spheres')
+    f.key(1)                                   # leave the command line
+    f.mods(4); f.key(44); f.mods(0)            # Ctrl+Z
+    n = names()
+    check('B0' not in n and 'B2' not in n and 'Tower3' in n, 'the whole script is one undo step')
+    f.shot('32_script_console.png')
+    # macro: record a created cone and a typed move, replay it in a new scene
+    cmd('script.record')
+    cmd('create.cone')
+    f.key(1)
+    f.move(*project((0, 1, 0)))
+    f.key(34); f.key(45); f.key(3); f.key(28)  # G X 2 Enter
+    cmd('script.record')
+    path = os.path.join(f.home, 'BeeModel', 'scripts', 'macro.bees')
+    mac = open(path).read() if os.path.exists(path) else ''
+    check('op("create.cone")' in mac and 'move("Cone", 2, 0, 0)' in mac,
+          f'macro recorded as BeeScript ({mac.count(chr(10))} lines)')
+    cmd('file.new')
+    check('Cone' not in names(), 'file.new clears the scene')
+    cmd('script.run')
+    c = obj('Cone')
+    check(c is not None and c['location'] == [2, 0, 0], 'script.run replays the macro: Cone at (2,0,0)')
+    # agents
+    text, err = m.tool('script_eval', {'code': 'for i in 0..4 { add("cube", "M" + i, i * 2, 0, -4) }\nprint(count(), "objects")\ncount()'})
+    check(not err and 'objects' in text and '= ' in text and {'M0', 'M3'} <= set(names()),
+          f'script_eval runs for an agent: {text.splitlines()[0] if text else ""}')
+    m.tool('undo')
+    check('M0' not in names() and 'Cone' in names(), 'one undo reverts the agent script')
+    text, err = m.tool('script_eval', {'code': 'op("file.exit")'})
+    check(err and 'not allowed for agents' in text and f.proc.poll() is None,
+          'agent scripts may only run agent-safe operators')
+    text, err = m.tool('script_eval', {'code': 'x = (1 +'})
+    check(err and text.startswith('error: line 1'), 'script errors come back as isError with the line')
+    f.shot('33_script_agent.png')
+    f.proc.kill()
+
+
+def beescript_cli():
+    """The language itself, headless: beemodel --eval."""
+    print('  -- BeeScript language (--eval) --')
+    env = dict(os.environ, HOME=tempfile.mkdtemp(prefix='bee-eval-'), XDG_CACHE_HOME='')
+    cases = [
+        ('print(1 + 2 * 3, (1 + 2) * 3, 7 % 3, -7 % 3, 10 / 4)', '7 9 1 2 2.5'),
+        ('print(2m + 50cm, 10mm, 1km, 180deg / pi, 1e3, 1.5e-2)', '2.5 0.01 1000 1 1000 0.015'),
+        ('print(0.1 + 0.2, 1 / 3, 2 / 3, 1e20, 0.00001234, -0.5)', '0.3 0.333333 0.666667 1e20 1.234e-5 -0.5'),
+        ('print("a" + 1, "x" == "x", 1 != 1, not nil, 3 > 2 and 2 > 3, 0 or "y")', 'a1 1 0 1 0 y'),
+        ('fn fib(n) { if n < 2 { return n }\n return fib(n - 1) + fib(n - 2) }\nprint(fib(20))', '6765'),
+        ('s = 0\nfor i in 0..10 { if i == 3 { continue }\n if i == 6 { break }\n s += i }\nprint(s)', '12'),
+        ('i = 0; while i < 5 { i += 2 }; print(i)', '6'),
+        ('if 0 { print(1) } else if 2 > 1 { print(2) } else { print(3) }', '2'),
+        ('print(pow(2, 10), pow(4, 0.5), round(2.5), floor(-0.5), abs(-2), min(3, 1), max(3, 1))', '1024 2 3 -1 2 1 3'),
+        ('print(sin(90deg), cos(180deg), atan2(1, 0) / 1deg, sqrt(16), len("four"), num("2.5"))', '1 -1 90 4 4 2.5'),
+        ('seed(7); a = rand(); seed(7); print(a == rand(), a >= 0 and a < 1)', '1 1'),
+        ('print(count(), name(2), active())', '3 Cube Cube'),
+        ('b = add("torus", "T", 1, 2, 3); move(b, 0, 5, 0); print(b, get(b, "y"), count())', 'T 5 4'),
+        ('x = 1 + nil', 'error: line 1: + needs two numbers, or a text'),
+        ('\n\nprint(y)', 'error: line 3: not defined: y'),
+        ('for i in 0..3 {', 'error: line 1: missing }'),
+        ('fn f(a) { return a }\nf()', 'error: line 2: wrong number of arguments for f'),
+        ('while 1 { }', 'error: line 1: stopped after 500 million steps (endless loop?)'),
+    ]
+    bad = []
+    for code, want in cases:
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=20)
+        got = r.stdout.strip()
+        if got != want or (r.returncode != 0) != want.startswith('error'):
+            bad.append(f'{code!r}: got {got!r} (rc {r.returncode}), want {want!r}')
+    for b in bad:
+        print('     ' + b)
+    check(not bad, f'{len(cases) - len(bad)}/{len(cases)} language cases')
+    t0 = time.time()
+    r = subprocess.run([BIN, '--eval', 's = 0\nfor i in 0..1000000 { s += i }\nprint(s)'], env=env,
+                       capture_output=True, text=True, timeout=20)
+    ms = (time.time() - t0) * 1000
+    check(r.stdout.strip() == '499999500000' and ms < 1000, f'1M loop iterations in {ms:.0f} ms')
 
 
 def raster_stress():

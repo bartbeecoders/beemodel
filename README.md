@@ -89,9 +89,25 @@ For Claude Desktop (or any MCP client using stdio), add this to its config:
 * `run_operator`, `undo` and `redo`;
 * `viewport_capture`, so the agent can see the scene: it returns a PNG of the
   viewport (or of the whole window, with `area: "window"`);
+* `script_eval`, which runs BeeScript (see below) as one undo step;
 * every agent-safe operator as `op_<id>`, for example `op_file_save`.
 
 The scene is also available as the resource `bee://scene`.
+
+### BeeScript
+
+BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not
+operator ids run as BeeScript:
+
+```
+for i in 0..10 { add("cube", "Step" + i, i * 2m, 0, 0) }
+fn twice(a) { return a * 2 }
+```
+
+Numbers carry units (`2m`, `20cm`, `45deg`), and a whole run is one undo step.
+**Edit → Record Macro** records your actions as a script. Scripts can also run without a window:
+`beemodel --eval '...'` or `beemodel --run file.bees`. The full reference is in
+[docs/BEESCRIPT.md](docs/BEESCRIPT.md).
 
 Press **F3** for the command palette: type part of any command name and press
 Enter.
@@ -138,6 +154,7 @@ src/mesh.s      polygon meshes and primitive generators
 src/json.s      lazy JSON reader + writer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
 src/png.s       PNG encoder (row filters, LZ77 + Huffman deflate)
+src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/log.s       string builder + console log
 src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

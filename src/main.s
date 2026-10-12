@@ -20,6 +20,7 @@ _start:
     cmp     qword ptr [rsp], 2
     jb      1f
     mov     rbx, [rsp+16]               # argv[1]
+    mov     r12, [rsp+24]               # argv[2] (0 if absent)
     and     rsp, -16
     call    handle_cli_args             # --version / --help exit here
 1:  and     rsp, -16
@@ -101,8 +102,18 @@ _start:
     lea     rdi, [rip+e_globals]
     call    fatal
 
-# handle_cli_args(rbx = argv[1])
+# handle_cli_args(rbx = argv[1], r12 = argv[2])
 handle_cli_args:
+    mov     rdi, rbx
+    lea     rsi, [rip+s_arg_eval]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_eval
+    mov     rdi, rbx
+    lea     rsi, [rip+s_arg_run]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_run
     mov     rdi, rbx
     lea     rsi, [rip+s_arg_version]
     call    str_eq
@@ -163,6 +174,35 @@ handle_cli_args:
     mov     edi, eax
     mov     eax, SYS_EXIT_GROUP
     syscall
+.Lcli_eval:                             # beemodel --eval 'code'
+    sub     rsp, 8
+    test    r12, r12
+    jz      .Lcli_need
+    call    headless_init
+    mov     rdi, r12
+    xor     esi, esi
+    call    script_eval
+    jmp     .Lcli_script_out
+.Lcli_run:                              # beemodel --run file.bees
+    sub     rsp, 8
+    test    r12, r12
+    jz      .Lcli_need
+    call    headless_init
+    mov     rdi, r12
+    call    script_run_file
+.Lcli_script_out:                       # what the script printed -> stdout
+    mov     r13d, eax
+    mov     edi, 1
+    lea     rsi, [rip+script_out]
+    mov     edx, [rip+script_out_len]
+    mov     eax, SYS_WRITE
+    syscall
+    mov     edi, r13d
+    mov     eax, SYS_EXIT_GROUP
+    syscall
+.Lcli_need:
+    lea     rdi, [rip+e_need_arg]
+    call    fatal
 .Lcli_list_ops:
     call    list_ops
     jmp     .Lquit
@@ -170,6 +210,19 @@ handle_cli_args:
     lea     rdi, [rip+s_help]
     call    write_out
     jmp     .Lquit
+
+# headless_init - the scene without a window (--eval / --run)
+headless_init:
+    sub     rsp, 8
+    call    text_init
+    call    area_init
+    lea     rdi, [rip+frame_arena]
+    mov     esi, FRAME_ARENA_BYTES
+    call    arena_init
+    call    scene_init
+    call    jobs_init
+    add     rsp, 8
+    ret
 
 # write_out(rdi=asciz) - write a string to stdout
 write_out:
@@ -193,9 +246,13 @@ s_arg_selftest: .asciz "--selftest"
 s_arg_bridge:   .asciz "--mcp-bridge"
 s_arg_help:     .asciz "--help"
 s_arg_h:        .asciz "-h"
+s_arg_eval:     .asciz "--eval"
+s_arg_run:      .asciz "--run"
+e_need_arg:     .asciz "beemodel: --eval needs BeeScript code, --run a file\n"
 s_ver_prefix:   .asciz "beemodel "
 e_bad_arg:      .asciz "beemodel: unknown argument: "
 s_help:         .ascii "Usage: beemodel [--version | --list-ops | --selftest | --mcp-bridge | --help]\n"
+                .ascii "       beemodel --eval 'BeeScript' | --run file.bees   (no window)\n"
                 .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
                 .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
 .include "version.inc"

@@ -13,6 +13,8 @@
 
 # exports
 .globl undo_push
+.globl undo_group_begin
+.globl undo_group_end
 .globl undo_drop_last
 .globl undo_bytes
 .globl undo_depth
@@ -28,6 +30,10 @@
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
+.align 8
+group_label:    .skip 8
+group_depth:    .skip 4
+group_pushed:   .skip 4
 .align 8
 undo_stack:     .skip 8*MAX_STEPS
 redo_stack:     .skip 8*MAX_STEPS
@@ -45,6 +51,7 @@ s_hist:         .asciz "  undo history (oldest first):"
 s_hist_mem:     .asciz " KiB of snapshots"
 s_bullet:       .asciz "    "
 s_unnamed:      .asciz "change"
+s_in_group:     .asciz "  undo / redo wait until the running script or agent request is done"
 
 OPERATOR op_edit_undo,  "edit.undo",  "Undo", op_undo, key=KEY_Z|KM_CTRL, flags=OPF_QUIET|OPF_AI_SAFE, doc="Undo the last change"
 OPERATOR op_edit_redo,  "edit.redo",  "Redo", op_redo, key=KEY_Z|KM_CTRL|KM_SHIFT, flags=OPF_QUIET|OPF_AI_SAFE, doc="Redo the last undone change"
@@ -260,7 +267,13 @@ clear_redo:
 # undo_push(rdi=label) - record the current scene before a change
 # -----------------------------------------------------------------------------
 undo_push:
-    push    rbx
+    cmp     dword ptr [rip+group_depth], 0
+    je      2f
+    cmp     dword ptr [rip+group_pushed], 0  # a group records only its first change
+    jne     8f
+    mov     dword ptr [rip+group_pushed], 1
+    mov     rdi, [rip+group_label]
+2:  push    rbx
     test    rdi, rdi
     jnz     1f
     lea     rdi, [rip+s_unnamed]
@@ -282,8 +295,28 @@ undo_push:
 9:  pop     rbx
     ret
 
+8:  ret
+
+# undo_group_begin(rdi=label) - changes until undo_group_end are one step
+#   (a script run, an agent request). The snapshot is taken lazily, by the
+#   first change, so a group that changes nothing leaves no step behind.
+undo_group_begin:
+    cmp     dword ptr [rip+group_depth], 0
+    jne     1f
+    mov     [rip+group_label], rdi
+    mov     dword ptr [rip+group_pushed], 0
+1:  inc     dword ptr [rip+group_depth]
+    ret
+undo_group_end:
+    cmp     dword ptr [rip+group_depth], 0
+    je      1f
+    dec     dword ptr [rip+group_depth]
+1:  ret
+
 # undo_drop_last - the change did not happen after all (cancel, no-op)
 undo_drop_last:
+    cmp     dword ptr [rip+group_depth], 0  # inside a group the step stays
+    jne     9f
     mov     eax, [rip+undo_depth]
     test    eax, eax
     jz      9f
@@ -341,7 +374,13 @@ swap_states:
     pop     rbx
     ret
 
+in_group:
+    lea     rdi, [rip+s_in_group]
+    jmp     log_line
+
 op_undo:
+    cmp     dword ptr [rip+group_depth], 0
+    jne     in_group
     lea     rdi, [rip+undo_stack]
     lea     rsi, [rip+undo_depth]
     lea     rdx, [rip+redo_stack]
@@ -355,6 +394,8 @@ op_undo:
 9:  ret
 
 op_redo:
+    cmp     dword ptr [rip+group_depth], 0
+    jne     in_group
     lea     rdi, [rip+redo_stack]
     lea     rsi, [rip+redo_depth]
     lea     rdx, [rip+undo_stack]

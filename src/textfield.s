@@ -72,8 +72,8 @@ hist_age:       .skip 4
 s_prompt:       .asciz ">"
 s_echo:         .asciz "$ "
 s_unknown:      .asciz "  unknown command: "
-s_unknown_hint: .asciz "  Tab completes operator ids - console.list_ops lists them all"
-s_placeholder:  .asciz "Press Enter to type a command (Tab completes, Up = history)"
+s_unknown_hint: .asciz "  Tab completes operator ids - console.list_ops lists them all; other lines run as BeeScript"
+s_placeholder:  .asciz "Enter: type a command or BeeScript (Tab completes, Up = history)"
 
 .text
 
@@ -542,6 +542,7 @@ tf_key:
     mov     rcx, rbx                    # "op.id argument": split at the first space
     lea     rdx, [rip+cmd_arg]
     mov     byte ptr [rdx], 0
+    xor     r13d, r13d                  # where the space was
 41: mov     al, [rcx]
     test    al, al
     jz      44f
@@ -549,7 +550,8 @@ tf_key:
     je      42f
     inc     rcx
     jmp     41b
-42: mov     byte ptr [rcx], 0           # terminate the id, copy the argument
+42: mov     r13, rcx
+    mov     byte ptr [rcx], 0           # terminate the id, copy the argument
 43: inc     rcx
     cmp     byte ptr [rcx], ' '
     je      43b
@@ -574,7 +576,22 @@ tf_key:
     call    run_op
     mov     qword ptr [rip+op_arg], 0
     jmp     .Ltf_yes
-5:  lea     rdi, [rip+s_unknown]
+5:  test    r13, r13                    # not an operator: BeeScript
+    jz      51f
+    mov     byte ptr [r13], ' '
+51: mov     rdi, rbx                    # an operator id that does not exist?
+    call    looks_like_op
+    test    eax, eax
+    jnz     52f
+    mov     rdi, rbx
+    xor     esi, esi
+    call    script_eval
+    call    tf_clear
+    jmp     .Ltf_yes
+52: test    r13, r13
+    jz      53f
+    mov     byte ptr [r13], 0
+53: lea     rdi, [rip+s_unknown]
     mov     rsi, rbx
     call    log_pair
     lea     rdi, [rip+s_unknown_hint]
@@ -590,6 +607,43 @@ tf_key:
 9:  pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# looks_like_op(rdi=line) -> eax = 1 if the first word is "word.word" made of
+#   letters, digits and _ only (a mistyped operator id, not a script)
+looks_like_op:
+    xor     edx, edx                    # dots seen
+    movzx   eax, byte ptr [rdi]         # starts with a letter
+    or      eax, 0x20
+    sub     eax, 'a'
+    cmp     eax, 25
+    ja      4f
+1:  movzx   eax, byte ptr [rdi]
+    test    eax, eax
+    jz      3f
+    cmp     al, ' '
+    je      3f
+    cmp     al, '.'
+    jne     2f
+    inc     edx
+    inc     rdi
+    jmp     1b
+2:  cmp     al, '_'
+    je      21f
+    lea     ecx, [rax-'0']
+    cmp     ecx, 9
+    jbe     21f
+    or      eax, 0x20
+    sub     eax, 'a'
+    cmp     eax, 25
+    ja      4f
+21: inc     rdi
+    jmp     1b
+3:  xor     eax, eax
+    test    edx, edx
+    setnz   al
+    ret
+4:  xor     eax, eax
     ret
 
 # tf_is_focused -> eax: the palette field always is; the console when focused
