@@ -65,6 +65,32 @@ Without a path, the command line opens pre-filled. **F12** saves a PNG
 screenshot. The scene autosaves every 25 changes (`file.recover` restores
 it).
 
+### AI agents (MCP)
+
+BeeModel is an MCP server. While it runs, an agent such as Claude Code can
+inspect and edit the scene you are looking at. Every change is undoable.
+
+```
+claude mcp add beemodel -- /path/to/beemodel --mcp-bridge
+```
+
+For Claude Desktop (or any MCP client using stdio), add this to its config:
+
+```json
+{ "mcpServers": { "beemodel": { "command": "/path/to/beemodel", "args": ["--mcp-bridge"] } } }
+```
+
+`--mcp-bridge` relays stdio to the running app's socket
+(`$XDG_RUNTIME_DIR/beemodel.sock`; `BEEMODEL_SOCKET` overrides it, and
+`BEEMODEL_NO_MCP=1` turns the server off). Tools:
+
+* `scene_summary` and `create_primitive`;
+* `set_transform`, `select` and `delete`;
+* `run_operator`, `undo` and `redo`;
+* every agent-safe operator as `op_<id>`, for example `op_file_save`.
+
+The scene is also available as the resource `bee://scene`.
+
 Press **F3** for the command palette: type part of any command name and press
 Enter.
 
@@ -107,6 +133,8 @@ src/areas.s     area tree, editors, splitting / closing / maximizing
 src/palette.s   F3 command palette (fuzzy operator search)
 src/scene.s     objects, selection, transforms, object operators
 src/mesh.s      polygon meshes and primitive generators
+src/json.s      lazy JSON reader + writer
+src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
 src/log.s       string builder + console log
 src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

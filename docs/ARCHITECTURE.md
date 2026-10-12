@@ -34,6 +34,8 @@ stays private to the module.
 | `undo.s` | Undo / redo history of scene snapshots (shared, reference-counted meshes) |
 | `fileio.s` | Paths (`~`, default dirs, mkdir -p), mmap reads, atomic writes, growable buffer, number text I/O, PNG writer |
 | `formats.s` | `.bee`, OBJ and STL import/export, file operators, autosave |
+| `json.s` | Lazy JSON reader (walks text on demand) and writer on the growable buffer |
+| `mcp.s` | MCP server: unix socket, JSON-RPC dispatch, tools, resources; `--mcp-bridge` relay |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -313,6 +315,30 @@ half-written file.
   (zlib stored blocks, with our own CRC-32 and Adler-32).
 * Every 25 recorded changes the scene is autosaved to
   `$XDG_CACHE_HOME/beemodel/autosave.bee`; `file.recover` loads it.
+
+## MCP server
+
+At start-up the app listens on `$XDG_RUNTIME_DIR/beemodel-<pid>.sock`, and
+the symlink `beemodel.sock` points at the newest instance. Each connection
+sends newline-delimited JSON-RPC 2.0, which is exactly the MCP stdio framing.
+`beemodel --mcp-bridge` therefore only relays bytes between stdin/stdout and
+the socket; Claude Code and other clients launch it like a normal stdio
+server.
+
+The listener and its clients are part of the main `poll`, so requests run on
+the UI thread between frames. Agents need no locking and see exactly what the
+user sees. Every change goes through `run_op` or `undo_push`, which makes it
+undoable like a user action.
+
+* `json.s` does not build a tree: `j_find`, `j_str`, `j_num`, `j_first`
+  and `j_next` walk the request text on demand.
+* Responses are written with the `wb_*` buffer. `buf_swap` gives the server
+  its own response and text buffers, so a tool that writes files does not
+  collide with the reply.
+* `tools/list` = curated tools (static schemas) + one `op_<id>` tool per
+  operator flagged `OPF_AI_SAFE`. Exit, for example, is not agent-safe.
+* `tools/call` returns the tool's own text plus every console line the
+  call produced, so agents see the same feedback as the user.
 
 ## Event loop & rendering
 

@@ -19,6 +19,9 @@
 .globl active_obj
 .globl outl_scroll
 .globl scene_pool
+.globl obj_find
+.globl obj_rename
+.globl select_none
 .globl scene_clear
 .globl scene_defaults
 
@@ -87,6 +90,54 @@ obj_get:
     mov     esi, edi
     lea     rdi, [rip+scene_pool]
     jmp     pool_get
+
+# obj_find(rdi=name) -> eax = handle of the object with that name, or 0
+obj_find:
+    push    rbx
+    push    r12
+    mov     r12, rdi
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     8f
+    mov     edi, ebx
+    call    obj_at
+    mov     rdi, rax
+    mov     rsi, r12
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+    inc     ebx
+    jmp     1b
+2:  lea     rax, [rip+obj_list]
+    mov     eax, [rax+rbx*4]
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r12
+    pop     rbx
+    ret
+
+# obj_rename(edi=handle, rsi=new name) - unique, like Blender (Name.001)
+obj_rename:
+    push    rbx
+    push    r12
+    sub     rsp, 40
+    mov     r12, rsi
+    call    obj_get
+    test    rax, rax
+    jz      9f
+    mov     rbx, rax
+    mov     byte ptr [rbx], 0           # free the old name while checking
+    lea     rdi, [rsp]
+    mov     rsi, r12
+    call    unique_name
+    mov     rdi, rbx
+    lea     rsi, [rsp]
+    mov     ecx, 32
+    rep     movsb
+9:  add     rsp, 40
+    pop     r12
+    pop     rbx
+    ret
 
 # obj_at(edi=list index) -> rax = object
 obj_at:
