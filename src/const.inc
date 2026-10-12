@@ -192,3 +192,14 @@
 .equ KEY_N,             49
 .equ KEY_F1,            59
 .equ MOD_ALT,           8
+.equ KEY_ENTER,         28
+.equ KEY_L,             38
+
+# ---- console command line ------------------------------------------------------
+.equ TF_H,              22
+.equ HIT_CONSOLE_INPUT, 17
+.equ CUR_TEXT,          9
+.equ SYS_POLL,          7
+.equ POLLIN,            1
+.equ POLLERR,           8
+.equ POLLHUP,           16

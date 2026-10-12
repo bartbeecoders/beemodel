@@ -17,6 +17,8 @@
 .globl list_ops
 .globl op_toggle_flag
 .globl op_check_flag
+.globl find_op_by_name
+.globl key_chars
 
 # ---- File ---------------------------------------------------------------------
 OPERATOR op_file_new,   "file.new",   "New Scene", op_todo, key=KEY_N|KM_CTRL, doc="Start a new empty scene"
@@ -43,6 +45,10 @@ OPERATOR op_add_cylinder, "create.cylinder", "Cylinder", op_create, arg=2, doc="
 OPERATOR op_add_plane,    "create.plane",    "Plane",    op_create, arg=3, doc="Add a plane primitive"
 OPERATOR op_add_light,    "create.light",    "Light",    op_create, arg=4, doc="Add a point light"
 OPERATOR op_add_camera,   "create.camera",   "Camera",   op_create, arg=5, doc="Add a camera"
+# ---- Console ------------------------------------------------------------------
+OPERATOR op_console_focus, "console.focus", "Command Line", do_console_focus, key=KEY_ENTER, flags=OPF_QUIET|OPF_AI_SAFE, doc="Focus the console command line"
+OPERATOR op_console_clear, "console.clear", "Clear Console", do_console_clear, key=KEY_L|KM_CTRL, flags=OPF_QUIET|OPF_AI_SAFE, doc="Clear the console log"
+OPERATOR op_console_ops,   "console.list_ops", "List Operators", do_console_list_ops, doc="List every operator id in the console"
 # ---- Help ---------------------------------------------------------------------
 OPERATOR op_help_keys,  "help.shortcuts", "Keyboard Shortcuts", op_shortcuts, key=KEY_F1, doc="List all key bindings in the console"
 OPERATOR op_help_about, "help.about",     "About BeeModel",     op_about, doc="Show version information"
@@ -131,10 +137,13 @@ op_checked:
 
 # dispatch_key(edi=evdev code) -> eax = 1 if an operator handled it
 dispatch_key:
-    mov     eax, [rip+key_mods]
-    and     eax, MOD_SHIFT|MOD_CTRL|MOD_ALT
+    push    rbx
+    call    kb_layout_code              # letters follow the active layout
+    mov     ebx, eax
+    call    kb_canon_mods
     shl     eax, 16
-    or      eax, edi
+    or      eax, ebx
+    pop     rbx
     lea     rdi, [rip+__start_bee_ops]
     lea     rdx, [rip+__stop_bee_ops]
 1:  cmp     rdi, rdx
@@ -147,6 +156,29 @@ dispatch_key:
     ret
 3:  call    run_op
     mov     eax, 1
+    ret
+
+# find_op_by_name(rdi=asciz id) -> rax = operator or 0
+find_op_by_name:
+    push    rbx
+    push    r12
+    mov     r12, rdi
+    lea     rbx, [rip+__start_bee_ops]
+1:  lea     rax, [rip+__stop_bee_ops]
+    cmp     rbx, rax
+    jae     3f
+    mov     rdi, r12
+    mov     rsi, [rbx+OP_NAME]
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+    add     rbx, OP_SIZE
+    jmp     1b
+2:  mov     rax, rbx
+    jmp     4f
+3:  xor     eax, eax
+4:  pop     r12
+    pop     rbx
     ret
 
 # -----------------------------------------------------------------------------
@@ -297,6 +329,37 @@ op_check_tool:
     xor     eax, eax
     cmp     edi, [rip+active_tool]
     sete    al
+    ret
+
+do_console_focus:
+    mov     dword ptr [rip+show_bottom], 1
+    mov     edi, 1
+    jmp     tf_set_focus
+
+do_console_clear:
+    mov     dword ptr [rip+log_head], 0
+    ret
+
+do_console_list_ops:
+    push    rbx
+    lea     rbx, [rip+__start_bee_ops]
+1:  lea     rax, [rip+__stop_bee_ops]
+    cmp     rbx, rax
+    jae     9f
+    call    fmt_reset
+    lea     rdi, [rip+s_two_sp]
+    call    fmt_str
+    mov     rdi, [rbx+OP_NAME]
+    call    fmt_str
+    mov     edi, 26
+    call    fmt_pad
+    mov     rdi, [rbx+OP_LABEL]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+    add     rbx, OP_SIZE
+    jmp     1b
+9:  pop     rbx
     ret
 
 op_create:

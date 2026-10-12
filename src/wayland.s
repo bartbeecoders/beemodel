@@ -9,6 +9,7 @@
 .include "const.inc"
 
 # exports
+.globl sock_fd
 .globl alloc_id
 .globl create_window
 .globl dirty
@@ -61,6 +62,8 @@ slen:           .skip 4
 msg_start:      .skip 4
 rlen:           .skip 4
 sock_fd:        .skip 4
+fdq:            .skip 64
+fdq_n:          .skip 4
 
 # protocol object ids (0 = not created)
 id_registry:    .skip 4
@@ -444,8 +447,8 @@ wl_read_dispatch:
     jle     8f
     add     [rip+rlen], eax
 
-    # Close any fds we were handed (only wl_keyboard.keymap sends one and
-    # BeeModel does not need the XKB keymap: evdev keycodes are enough).
+    # Queue the fds we were handed; the message that owns them (only
+    # wl_keyboard.keymap today) pops them in order, as libwayland does.
     lea     r12, [rip+rctl]
     mov     r13, [rip+rmsg+40]
     add     r13, r12                    # end of control data
@@ -467,8 +470,7 @@ wl_read_dispatch:
     push    rcx
     push    rdx
     mov     edi, [rdx]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    fdq_push
     pop     rdx
     pop     rcx
     add     rdx, 4
@@ -514,6 +516,44 @@ wl_read_dispatch:
     ret
 8:  lea     rdi, [rip+e_lost]
     call    fatal
+
+# fdq_push(edi=fd) - queue a received fd (oldest is closed if the queue is full)
+fdq_push:
+    mov     eax, [rip+fdq_n]
+    cmp     eax, 16
+    jb      1f
+    push    rdi
+    mov     edi, [rip+fdq]
+    mov     eax, SYS_CLOSE
+    syscall
+    call    fdq_pop_raw
+    pop     rdi
+    mov     eax, [rip+fdq_n]
+1:  lea     rcx, [rip+fdq]
+    mov     [rcx+rax*4], edi
+    inc     dword ptr [rip+fdq_n]
+    ret
+
+# fdq_pop -> eax = oldest queued fd or -1
+fdq_pop:
+    mov     eax, -1
+    cmp     dword ptr [rip+fdq_n], 0
+    je      1f
+    mov     eax, [rip+fdq]
+fdq_pop_raw:
+    push    rax
+    lea     rcx, [rip+fdq]
+    xor     edx, edx
+2:  lea     r8d, [rdx+1]
+    cmp     r8d, [rip+fdq_n]
+    jae     3f
+    mov     r9d, [rcx+r8*4]
+    mov     [rcx+rdx*4], r9d
+    inc     edx
+    jmp     2b
+3:  dec     dword ptr [rip+fdq_n]
+    pop     rax
+1:  ret
 
 # -----------------------------------------------------------------------------
 # wl_roundtrip - wl_display.sync and wait for its done event
@@ -856,10 +896,35 @@ ev_pointer:
 ev_keyboard:
     cmp     r13d, 3
     je      1f
+    test    r13d, r13d
+    je      2f
+    cmp     r13d, 2
+    je      3f
+    cmp     r13d, 5
+    je      4f
     cmp     r13d, 4
     jne     ev_done
-    mov     eax, [r12+4]                # modifiers: mods_depressed
+    mov     eax, [r12+4]                # modifiers(serial, depressed, latched, locked, group)
     mov     [rip+key_mods], eax
+    mov     eax, [r12+8]
+    mov     [rip+mods_latched], eax
+    mov     eax, [r12+12]
+    mov     [rip+mods_locked], eax
+    jmp     ev_done
+2:  call    fdq_pop                     # keymap(format, fd, size)
+    mov     esi, eax
+    test    esi, esi
+    js      ev_done
+    mov     edi, [r12]
+    mov     edx, [r12+4]
+    call    kb_keymap
+    jmp     ev_done
+3:  call    kb_repeat_stop              # leave
+    jmp     ev_done
+4:  mov     eax, [r12]                  # repeat_info(rate, delay)
+    mov     [rip+rep_rate], eax
+    mov     eax, [r12+4]
+    mov     [rip+rep_delay], eax
     jmp     ev_done
 1:  mov     edi, [r12+8]                # key(serial, time, key, state)
     mov     esi, [r12+12]

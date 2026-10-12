@@ -18,6 +18,8 @@ stays private to the module.
 | `ui.s` | Layout, hit testing, pointer/keyboard handling, title bar, menus, panes, status bar |
 | `ops.s` | The operator spine: application operators, `run_op`, key dispatch, shortcut text, `--list-ops` |
 | `viewport.s` | Camera, projection, clipping, grid/axes/gizmo, plus the viewport's own operators |
+| `keyboard.s` | XKB text-keymap parser, key → Unicode (Shift/Caps/AltGr levels, dead keys), layout-aware shortcut codes, key repeat (timerfd) |
+| `textfield.s` | Single-line UTF-8 text field: caret, selection, history, Tab completion; the console command line |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -83,10 +85,29 @@ bindings and MCP tools (phase 3).
 3. Reference the operator from a menu list (`items_*`) or `tool_ops` in `ui.s`
    if it should appear there. The key binding works without this step.
 
+## Keyboard
+
+The compositor sends its XKB keymap as text through `wl_keyboard.keymap`
+(the fd travels as `SCM_RIGHTS`, which is why `wayland.s` keeps a queue of
+received fds). `keyboard.s` parses the keycode names and the first group of
+every `key <NAME> { [ … ] }` into a 256 × 4-level table of code points. It
+also reads the index of the `LevelThree` and `Alt` virtual modifiers, so
+AltGr works however the compositor serializes it.
+
+* **Typing** (`kb_sym`): Shift picks level 2, Caps Lock flips letters only,
+  and AltGr adds 2. Dead keys compose with the next character (`kb_compose`).
+* **Shortcuts** (`dispatch_key`): a letter key is first translated to the
+  QWERTY position carrying the same letter (`kb_layout_code`). Bindings are
+  written as QWERTY codes, but they follow the label on the key: Ctrl+Z is
+  Undo on AZERTY and QWERTZ too.
+* **Repeat**: only while a text field has focus, using the compositor's
+  `repeat_info` rate and delay.
+
 ## Event loop & rendering
 
-`main.s` loops over: flush outgoing requests, block in `recvmsg`, dispatch the
-events, and render if something changed. `render` draws into whichever of the
+`main.s` loops over: flush outgoing requests, `poll` the Wayland socket and the
+key-repeat `timerfd`, dispatch whatever is ready, and render if something
+changed. `render` draws into whichever of the
 two shm buffers is free, then attaches, damages, requests a frame callback and
 commits. It does not draw again until the frame callback arrives, so rendering
 never outpaces the display, and CPU use is 0% while idle.

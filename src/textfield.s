@@ -1,0 +1,673 @@
+# =============================================================================
+#  BeeModel - single-line text field (UTF-8), used as the console command
+#  line: caret, selection, history, Tab completion of operator ids, dead keys.
+#  Enter runs the typed operator id through the operator spine.
+# =============================================================================
+.intel_syntax noprefix
+.include "const.inc"
+.include "macros.inc"
+
+# exports
+.globl tf_key
+.globl tf_draw
+.globl tf_click
+.globl tf_set_focus
+.globl tf_focus
+
+.equ TF_CAP,        240                 # max bytes of text
+.equ HIST_N,        8
+.equ HIST_LEN,      256
+.equ KEY_BACKSPACE, 14
+.equ KEY_TAB,       15
+.equ KEY_A,         30
+.equ KEY_KPENTER,   96
+.equ KEY_HOME,      102
+.equ KEY_UP,        103
+.equ KEY_LEFT,      105
+.equ KEY_RIGHT,     106
+.equ KEY_END,       107
+.equ KEY_DOWN,      108
+.equ KEY_DELETE,    111
+.equ COL_INPUT_BG,  0x1f2228
+.equ COL_SELECTION, 0x5a4a1e
+
+.section .bss
+.align 8
+tf_clast:       .skip 8                 # last op offered by Tab completion
+tf_buf:         .skip 256
+tf_prefix:      .skip 64
+hist:           .skip HIST_N*HIST_LEN
+tf_len:         .skip 4
+tf_caret:       .skip 4
+tf_anchor:      .skip 4
+tf_focus:       .skip 4
+tf_scroll:      .skip 4
+tf_text_x:      .skip 4
+tf_tab:         .skip 4
+tf_plen:        .skip 4
+hist_n:         .skip 4
+hist_age:       .skip 4
+
+.section .rodata
+s_prompt:       .asciz ">"
+s_echo:         .asciz "$ "
+s_unknown:      .asciz "  unknown command: "
+s_unknown_hint: .asciz "  Tab completes operator ids - console.list_ops lists them all"
+s_placeholder:  .asciz "Press Enter to type a command (Tab completes, Up = history)"
+
+.text
+
+# tf_set_focus(edi = 0/1)
+tf_set_focus:
+    cmp     edi, [rip+tf_focus]
+    je      1f
+    mov     [rip+tf_focus], edi
+    mov     dword ptr [rip+dirty], 1
+    mov     dword ptr [rip+kb_dead], 0
+    test    edi, edi
+    jnz     1f
+    mov     eax, [rip+tf_caret]         # drop the selection on blur
+    mov     [rip+tf_anchor], eax
+    call    kb_repeat_stop
+1:  ret
+
+# ---- UTF-8 cursor helpers ---------------------------------------------------
+# tf_prev(eax=pos) -> eax = start of the previous code point
+tf_prev:
+    lea     rcx, [rip+tf_buf]
+1:  test    eax, eax
+    jz      2f
+    dec     eax
+    movzx   edx, byte ptr [rcx+rax]
+    and     edx, 0xc0
+    cmp     edx, 0x80
+    je      1b
+2:  ret
+
+# tf_next(eax=pos) -> eax = start of the next code point
+tf_next:
+    lea     rcx, [rip+tf_buf]
+    cmp     eax, [rip+tf_len]
+    jae     2f
+1:  inc     eax
+    cmp     eax, [rip+tf_len]
+    jae     2f
+    movzx   edx, byte ptr [rcx+rax]
+    and     edx, 0xc0
+    cmp     edx, 0x80
+    je      1b
+2:  ret
+
+# cp_count(edi=byte end) -> eax = code points in tf_buf[0..end)
+cp_count:
+    lea     rcx, [rip+tf_buf]
+    xor     eax, eax
+    xor     edx, edx
+1:  cmp     edx, edi
+    jae     2f
+    movzx   r8d, byte ptr [rcx+rdx]
+    and     r8d, 0xc0
+    cmp     r8d, 0x80
+    je      3f
+    inc     eax
+3:  inc     edx
+    jmp     1b
+2:  ret
+
+# byte_of_cp(edi=code point index) -> eax = byte offset
+byte_of_cp:
+    xor     eax, eax
+    mov     esi, edi
+1:  test    esi, esi
+    jz      2f
+    cmp     eax, [rip+tf_len]
+    jae     2f
+    call    tf_next
+    dec     esi
+    jmp     1b
+2:  ret
+
+# tf_delete(edi=start, esi=end) - remove bytes, caret/anchor -> start
+tf_delete:
+    lea     rcx, [rip+tf_buf]
+    mov     edx, [rip+tf_len]
+    mov     r8d, edi
+    mov     r9d, esi
+1:  cmp     r9d, edx                    # shift the tail left
+    jae     2f
+    mov     al, [rcx+r9]
+    mov     [rcx+r8], al
+    inc     r8d
+    inc     r9d
+    jmp     1b
+2:  sub     esi, edi
+    sub     edx, esi
+    mov     [rip+tf_len], edx
+    mov     byte ptr [rcx+rdx], 0
+    mov     [rip+tf_caret], edi
+    mov     [rip+tf_anchor], edi
+    ret
+
+# tf_delete_sel -> eax = 1 if a selection was removed
+tf_delete_sel:
+    mov     edi, [rip+tf_anchor]
+    mov     esi, [rip+tf_caret]
+    cmp     edi, esi
+    je      1f
+    jb      2f
+    xchg    edi, esi
+2:  call    tf_delete
+    mov     eax, 1
+    ret
+1:  xor     eax, eax
+    ret
+
+# tf_insert(edi=code point)
+tf_insert:
+    push    rbx
+    sub     rsp, 16
+    mov     ebx, edi
+    call    tf_delete_sel
+    # encode UTF-8 into [rsp], length in ecx
+    mov     eax, ebx
+    cmp     eax, 0x80
+    jae     1f
+    mov     [rsp], al
+    mov     ecx, 1
+    jmp     4f
+1:  cmp     eax, 0x800
+    jae     2f
+    shr     eax, 6
+    or      al, 0xc0
+    mov     [rsp], al
+    mov     eax, ebx
+    and     al, 0x3f
+    or      al, 0x80
+    mov     [rsp+1], al
+    mov     ecx, 2
+    jmp     4f
+2:  cmp     eax, 0x10000
+    jae     3f
+    shr     eax, 12
+    or      al, 0xe0
+    mov     [rsp], al
+    mov     eax, ebx
+    shr     eax, 6
+    and     al, 0x3f
+    or      al, 0x80
+    mov     [rsp+1], al
+    mov     eax, ebx
+    and     al, 0x3f
+    or      al, 0x80
+    mov     [rsp+2], al
+    mov     ecx, 3
+    jmp     4f
+3:  shr     eax, 18
+    or      al, 0xf0
+    mov     [rsp], al
+    mov     eax, ebx
+    shr     eax, 12
+    and     al, 0x3f
+    or      al, 0x80
+    mov     [rsp+1], al
+    mov     eax, ebx
+    shr     eax, 6
+    and     al, 0x3f
+    or      al, 0x80
+    mov     [rsp+2], al
+    mov     eax, ebx
+    and     al, 0x3f
+    or      al, 0x80
+    mov     [rsp+3], al
+    mov     ecx, 4
+4:  mov     edx, [rip+tf_len]
+    lea     eax, [rdx+rcx]
+    cmp     eax, TF_CAP
+    ja      9f                          # full
+    lea     r8, [rip+tf_buf]
+    mov     r9d, edx                    # shift the tail right by ecx
+5:  cmp     r9d, [rip+tf_caret]
+    jbe     6f
+    dec     r9d
+    mov     al, [r8+r9]
+    lea     r10d, [r9+rcx]
+    mov     [r8+r10], al
+    jmp     5b
+6:  mov     r9d, [rip+tf_caret]
+    xor     r10d, r10d
+7:  mov     al, [rsp+r10]
+    mov     [r8+r9], al
+    inc     r9d
+    inc     r10d
+    cmp     r10d, ecx
+    jb      7b
+    add     [rip+tf_len], ecx
+    mov     [rip+tf_caret], r9d
+    mov     [rip+tf_anchor], r9d
+    mov     eax, [rip+tf_len]
+    mov     byte ptr [r8+rax], 0
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# tf_load(rsi=asciz) - replace the text, caret at the end
+tf_load:
+    lea     rdi, [rip+tf_buf]
+    xor     ecx, ecx
+1:  mov     al, [rsi+rcx]
+    mov     [rdi+rcx], al
+    test    al, al
+    jz      2f
+    inc     ecx
+    cmp     ecx, TF_CAP
+    jb      1b
+    mov     byte ptr [rdi+rcx], 0
+2:  mov     [rip+tf_len], ecx
+    mov     [rip+tf_caret], ecx
+    mov     [rip+tf_anchor], ecx
+    ret
+
+tf_clear:
+    xor     eax, eax
+    mov     [rip+tf_len], eax
+    mov     [rip+tf_caret], eax
+    mov     [rip+tf_anchor], eax
+    mov     [rip+tf_scroll], eax
+    mov     byte ptr [rip+tf_buf], 0
+    ret
+
+# -----------------------------------------------------------------------------
+# tf_key(edi=evdev code, esi=symbol from kb_sym) -> eax = 1 if consumed
+# -----------------------------------------------------------------------------
+tf_key:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12d, esi
+    call    kb_canon_mods
+    mov     r13d, eax
+    mov     dword ptr [rip+dirty], 1
+    cmp     ebx, KEY_TAB
+    je      .Ltf_tab
+    mov     dword ptr [rip+tf_tab], 0
+
+    cmp     ebx, KEY_ESC
+    jne     1f
+    xor     edi, edi
+    call    tf_set_focus
+    jmp     .Ltf_yes
+1:  cmp     ebx, KEY_ENTER
+    je      .Ltf_submit
+    cmp     ebx, KEY_KPENTER
+    je      .Ltf_submit
+    cmp     ebx, KEY_BACKSPACE
+    jne     2f
+    call    tf_delete_sel
+    test    eax, eax
+    jnz     .Ltf_yes
+    mov     eax, [rip+tf_caret]
+    test    eax, eax
+    jz      .Ltf_yes
+    call    tf_prev
+    mov     edi, eax
+    mov     esi, [rip+tf_caret]
+    call    tf_delete
+    jmp     .Ltf_yes
+2:  cmp     ebx, KEY_DELETE
+    jne     3f
+    call    tf_delete_sel
+    test    eax, eax
+    jnz     .Ltf_yes
+    mov     eax, [rip+tf_caret]
+    call    tf_next
+    mov     esi, eax
+    mov     edi, [rip+tf_caret]
+    call    tf_delete
+    jmp     .Ltf_yes
+3:  cmp     ebx, KEY_LEFT
+    jne     4f
+    mov     eax, [rip+tf_caret]
+    call    tf_prev
+    jmp     .Ltf_move
+4:  cmp     ebx, KEY_RIGHT
+    jne     5f
+    mov     eax, [rip+tf_caret]
+    call    tf_next
+    jmp     .Ltf_move
+5:  cmp     ebx, KEY_HOME
+    jne     6f
+    xor     eax, eax
+    jmp     .Ltf_move
+6:  cmp     ebx, KEY_END
+    jne     7f
+    mov     eax, [rip+tf_len]
+    jmp     .Ltf_move
+7:  cmp     ebx, KEY_UP
+    je      .Ltf_hist_up
+    cmp     ebx, KEY_DOWN
+    je      .Ltf_hist_down
+    test    r13d, MOD_CTRL|MOD_ALT
+    jz      8f
+    test    r13d, MOD_CTRL              # Ctrl+A selects all, other chords
+    jz      .Ltf_no                     # fall through to the keymap
+    mov     edi, ebx
+    call    kb_layout_code
+    cmp     eax, KEY_A
+    jne     .Ltf_no
+    mov     dword ptr [rip+tf_anchor], 0
+    mov     eax, [rip+tf_len]
+    mov     [rip+tf_caret], eax
+    jmp     .Ltf_yes
+8:  test    r12d, r12d
+    js      .Ltf_dead                   # 0x8000000k = dead key
+    cmp     r12d, 0x20
+    jb      .Ltf_no                     # not a character
+    cmp     r12d, 0x7f
+    je      .Ltf_no
+    mov     edi, [rip+kb_dead]
+    test    edi, edi
+    jz      81f
+    mov     dword ptr [rip+kb_dead], 0
+    mov     esi, r12d
+    call    kb_compose
+    test    eax, eax
+    jz      81f
+    mov     r12d, eax
+81: mov     edi, r12d
+    call    tf_insert
+    jmp     .Ltf_yes
+
+.Ltf_dead:
+    and     r12d, 0xff
+    mov     [rip+kb_dead], r12d
+    jmp     .Ltf_yes
+
+# eax = new caret position; Shift extends the selection
+.Ltf_move:
+    mov     [rip+tf_caret], eax
+    test    r13d, MOD_SHIFT
+    jnz     .Ltf_yes
+    mov     [rip+tf_anchor], eax
+    jmp     .Ltf_yes
+
+.Ltf_hist_up:
+    mov     eax, [rip+hist_n]
+    test    eax, eax
+    jz      .Ltf_yes
+    mov     ecx, HIST_N
+    cmp     eax, ecx
+    cmova   eax, ecx                    # entries available
+    mov     edx, [rip+hist_age]
+    inc     edx
+    cmp     edx, eax
+    jae     .Ltf_yes
+    mov     [rip+hist_age], edx
+    jmp     .Ltf_hist_load
+.Ltf_hist_down:
+    mov     edx, [rip+hist_age]
+    test    edx, edx
+    js      .Ltf_yes
+    dec     edx
+    mov     [rip+hist_age], edx
+    jns     .Ltf_hist_load
+    call    tf_clear
+    jmp     .Ltf_yes
+.Ltf_hist_load:                         # edx = age (0 = newest)
+    mov     eax, [rip+hist_n]
+    dec     eax
+    sub     eax, edx
+    and     eax, HIST_N-1
+    imul    eax, HIST_LEN
+    lea     rsi, [rip+hist]
+    add     rsi, rax
+    call    tf_load
+    jmp     .Ltf_yes
+
+.Ltf_tab:                               # cycle through matching operator ids
+    cmp     dword ptr [rip+tf_tab], 0
+    jne     1f
+    mov     dword ptr [rip+tf_tab], 1
+    mov     qword ptr [rip+tf_clast], 0
+    mov     ecx, [rip+tf_len]
+    cmp     ecx, 63
+    jbe     2f
+    mov     ecx, 63
+2:  mov     [rip+tf_plen], ecx
+    lea     rsi, [rip+tf_buf]
+    lea     rdi, [rip+tf_prefix]
+    rep     movsb
+1:  mov     rbx, [rip+tf_clast]
+    test    rbx, rbx
+    jz      3f
+    add     rbx, OP_SIZE
+    jmp     4f
+3:  lea     rbx, [rip+__start_bee_ops]
+4:  xor     r13d, r13d                  # wrapped once?
+5:  lea     rax, [rip+__stop_bee_ops]
+    cmp     rbx, rax
+    jb      6f
+    test    r13d, r13d
+    jnz     .Ltf_yes                    # no match at all
+    inc     r13d
+    lea     rbx, [rip+__start_bee_ops]
+6:  mov     rsi, [rbx+OP_NAME]
+    lea     rdi, [rip+tf_prefix]
+    mov     ecx, [rip+tf_plen]
+    test    ecx, ecx                    # empty prefix matches everything
+    jz      7f
+    repe    cmpsb
+    je      7f
+    add     rbx, OP_SIZE
+    jmp     5b
+7:  mov     [rip+tf_clast], rbx
+    mov     rsi, [rbx+OP_NAME]
+    call    tf_load
+    jmp     .Ltf_yes
+
+.Ltf_submit:
+    cmp     dword ptr [rip+tf_len], 0
+    je      .Ltf_yes
+    # remember in history
+    mov     eax, [rip+hist_n]
+    and     eax, HIST_N-1
+    imul    eax, HIST_LEN
+    lea     rdi, [rip+hist]
+    add     rdi, rax
+    lea     rsi, [rip+tf_buf]
+    mov     ecx, [rip+tf_len]
+    inc     ecx
+    rep     movsb
+    inc     dword ptr [rip+hist_n]
+    mov     dword ptr [rip+hist_age], -1
+    # trim spaces
+    lea     rbx, [rip+tf_buf]
+1:  cmp     byte ptr [rbx], ' '
+    jne     2f
+    inc     rbx
+    jmp     1b
+2:  mov     eax, [rip+tf_len]
+    lea     rcx, [rip+tf_buf]
+3:  test    eax, eax
+    jz      4f
+    cmp     byte ptr [rcx+rax-1], ' '
+    jne     4f
+    dec     eax
+    jmp     3b
+4:  mov     byte ptr [rcx+rax], 0
+    lea     rdi, [rip+s_echo]
+    mov     rsi, rbx
+    call    log_pair
+    mov     rdi, rbx
+    call    find_op_by_name
+    test    rax, rax
+    jz      5f
+    mov     r12, rax
+    call    tf_clear
+    mov     rdi, r12
+    call    run_op
+    jmp     .Ltf_yes
+5:  lea     rdi, [rip+s_unknown]
+    mov     rsi, rbx
+    call    log_pair
+    lea     rdi, [rip+s_unknown_hint]
+    call    log_line
+    call    tf_clear
+    jmp     .Ltf_yes
+
+.Ltf_no:
+    xor     eax, eax
+    jmp     9f
+.Ltf_yes:
+    mov     eax, 1
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# tf_click(edi=x) - focus and place the caret under the pointer
+# -----------------------------------------------------------------------------
+tf_click:
+    push    rbx
+    mov     ebx, edi
+    mov     edi, 1
+    call    tf_set_focus
+    mov     eax, ebx
+    sub     eax, [rip+tf_text_x]
+    add     eax, CHAR_W/2
+    jns     1f
+    xor     eax, eax
+1:  shr     eax, 3
+    add     eax, [rip+tf_scroll]
+    mov     edi, eax
+    call    byte_of_cp
+    mov     [rip+tf_caret], eax
+    mov     [rip+tf_anchor], eax
+    mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# tf_draw(edi=x, esi=y, edx=w) - height TF_H
+# -----------------------------------------------------------------------------
+tf_draw:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     ebx, edi
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     ecx, TF_H
+    mov     r8d, COL_INPUT_BG
+    call    fill_rect
+    mov     edi, ebx
+    mov     esi, r12d
+    mov     edx, r13d
+    mov     ecx, TF_H
+    mov     r8d, COL_SEPARATOR
+    cmp     dword ptr [rip+tf_focus], 0
+    je      1f
+    mov     r8d, COL_ACCENT
+1:  call    rect_outline
+    lea     edi, [rbx+8]
+    lea     esi, [r12+3]
+    lea     rdx, [rip+s_prompt]
+    mov     ecx, COL_ACCENT
+    call    draw_text
+    lea     ebp, [rbx+24]               # text origin
+    mov     [rip+tf_text_x], ebp
+
+    # visible columns and scroll so the caret stays in view
+    lea     eax, [r13-32]
+    shr     eax, 3
+    mov     r14d, eax                   # visible chars
+    test    r14d, r14d
+    jnz     2f
+    inc     r14d
+2:  mov     edi, [rip+tf_caret]
+    call    cp_count
+    mov     r15d, eax                   # caret code point
+    mov     eax, [rip+tf_scroll]
+    cmp     r15d, eax
+    jae     3f
+    mov     eax, r15d
+3:  lea     ecx, [rax+r14-1]
+    cmp     r15d, ecx
+    jbe     4f
+    mov     eax, r15d
+    sub     eax, r14d
+    inc     eax
+4:  mov     [rip+tf_scroll], eax
+
+    lea     edx, [rbx+r13-4]            # clip to the field interior
+    lea     ecx, [r12+TF_H-1]
+    mov     edi, ebp
+    lea     esi, [r12+1]
+    call    set_clip
+
+    cmp     dword ptr [rip+tf_len], 0
+    jne     5f
+    cmp     dword ptr [rip+tf_focus], 0
+    jne     5f
+    mov     edi, ebp
+    lea     esi, [r12+3]
+    lea     rdx, [rip+s_placeholder]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+    jmp     9f
+
+5:  mov     edi, [rip+tf_anchor]        # selection highlight
+    mov     esi, [rip+tf_caret]
+    cmp     edi, esi
+    je      6f
+    jb      51f
+    xchg    edi, esi
+51: push    rsi
+    call    cp_count
+    mov     r14d, eax                   # selection start cp
+    pop     rdi
+    call    cp_count
+    sub     eax, r14d
+    shl     eax, 3
+    mov     edx, eax
+    mov     edi, r14d
+    sub     edi, [rip+tf_scroll]
+    shl     edi, 3
+    add     edi, ebp
+    lea     esi, [r12+3]
+    mov     ecx, CHAR_H
+    mov     r8d, COL_SELECTION
+    call    fill_rect
+6:  mov     edi, [rip+tf_scroll]
+    call    byte_of_cp
+    lea     rdx, [rip+tf_buf]
+    add     rdx, rax
+    mov     edi, ebp
+    lea     esi, [r12+3]
+    mov     ecx, COL_TEXT
+    call    draw_text
+    cmp     dword ptr [rip+tf_focus], 0
+    je      9f
+    mov     edi, r15d                   # caret bar
+    sub     edi, [rip+tf_scroll]
+    shl     edi, 3
+    lea     edi, [rbp+rdi-1]
+    lea     esi, [r12+3]
+    mov     edx, 2
+    mov     ecx, CHAR_H
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+9:  call    reset_clip
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+.section .note.GNU-stack,"",@progbits

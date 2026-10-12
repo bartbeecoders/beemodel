@@ -195,6 +195,36 @@ class Fake:
         self.serial += 1
         self.send(kb, 4, struct.pack('<IIIII', self.serial, depressed, 0, 0, 0))
 
+    def keymap(self, path):
+        data = open(path, 'rb').read() + b'\0'
+        fd = os.memfd_create('keymap')
+        os.write(fd, data)
+        kb = self.find('wl_keyboard')[0]
+        msg = struct.pack('<IIII', kb, (16 << 16) | 0, 1, len(data))
+        socket.send_fds(self.c, [msg], [fd])
+        os.close(fd)
+        self.pump(0.2)
+
+    def repeat_info(self, rate, delay):
+        self.send(self.find('wl_keyboard')[0], 5, struct.pack('<ii', rate, delay))
+
+    def keyev(self, code, down):
+        self.serial += 1
+        self.send(self.find('wl_keyboard')[0], 3, struct.pack('<IIII', self.serial, 0, code, int(down)))
+
+    US = {**{c: k for k, c in enumerate('1234567890', 2)}, **{c: k for k, c in enumerate('qwertyuiop', 16)},
+          **{c: k for k, c in enumerate('asdfghjkl', 30)}, **{c: k for k, c in enumerate('zxcvbnm', 44)},
+          '.': 52, '-': 12, ' ': 57}
+
+    def type(self, text):
+        for ch in text:
+            shift = ch == '_' or ch.isupper()
+            code = 12 if ch == '_' else self.US[ch.lower()]
+            if shift: self.mods(1)
+            self.keyev(code, 1); self.keyev(code, 0)
+            if shift: self.mods(0)
+        self.pump(until_frame=True)
+
     def shot(self, name):
         from PIL import Image
         w, h, data = self.frame
@@ -272,13 +302,40 @@ def main():
     f.configure(1600, 900, states=(1, 4)); f.pump(0.5, until_frame=True)
     check(f.frame[:2] == (1600, 900), 'maximized configure honoured')
     f.shot('09_maximized.png')
-    f.click(1600 - 23, 16)               # close button
+    f.move(1600 - 23, 16)                # hover close (clicking it is tested in 0.1.0)
+    check(px(f, 1600 - 10, 3) == 0xe81123, 'close button hover is red')
+
+    # ---- keyboard: real XKB keymaps, delivered over an fd like Hyprland does
+    f.keymap('tests/keymaps/be.xkb')     # Belgian AZERTY
+    f.key(44)                            # physical QWERTY-Z = label W on AZERTY
+    check(px(f, 150, 125) == 0xf2b134, 'AZERTY: key labelled W selects Move')
+    f.key(16)                            # physical QWERTY-Q = label A: unbound
+    check(px(f, 150, 125) == 0xf2b134, 'AZERTY: key labelled A does not trigger Q')
+    f.keymap('tests/keymaps/us.xkb')
+    f.repeat_info(60, 120)
+    f.move(800, 400)
+    f.key(28)                            # Enter focuses the command line
+    f.shot('10_command_line_focus.png')
+    f.type('file.ex')
+    f.key(15)                            # Tab completes to file.exit
+    f.shot('11_tab_completion.png')
+    before = f.frames
+    f.keyev(45, 1); f.pump(0.45); f.keyev(45, 0); f.pump(0.1)   # hold X: repeats
+    check(f.frames - before >= 3, f'key repeat redraws while held ({f.frames - before} frames)')
+    f.mods(4); f.key(30); f.mods(0)      # Ctrl+A selects all
+    f.shot('12_select_all.png')
+    f.key(14)                            # Backspace clears the selection
+    f.type('view.toggle_grid')
+    f.key(28)                            # run it
+    f.type('nope'); f.key(28)            # unknown command is reported, app lives on
+    f.shot('13_console_commands.png')
+    f.type('file.exit'); f.key(28)       # quit through the command line
     f.pump(0.5)
     try:
         rc = f.proc.wait(timeout=2)
     except subprocess.TimeoutExpired:
         f.proc.kill(); rc = None
-    check(rc == 0, f'close button exits cleanly (rc={rc})')
+    check(rc == 0, f'typed file.exit quits cleanly (rc={rc})')
     check(f.frames >= 50, f'frames rendered ({f.frames})')
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
     sys.exit(1 if FAILS else 0)

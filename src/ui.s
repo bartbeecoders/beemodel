@@ -7,6 +7,7 @@
 .include "macros.inc"
 
 # exports
+.globl ui_key_repeat
 .globl show_left
 .globl show_right
 .globl show_bottom
@@ -119,17 +120,17 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_help
-menu_counts:    .long 5, 4, 6, 6, 2
+menu_counts:    .long 5, 4, 7, 6, 3
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
 items_file:     .quad op_file_new, op_file_open, op_file_save, 0, op_file_exit
 items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_edit_prefs
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
-                .quad op_view_grid, op_view_reset_cam
+                .quad op_view_grid, op_view_reset_cam, op_console_clear
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
-items_help:     .quad op_help_keys, op_help_about
+items_help:     .quad op_help_keys, op_console_ops, op_help_about
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -498,7 +499,25 @@ hit_test:
     mov     eax, HIT_PANE
     mov     edx, 2
     cmp     r12d, [rip+by0]
+    jl      1f
+    mov     ecx, [rip+cont_y1]          # command line row
+    sub     ecx, TF_H+6
+    cmp     r12d, ecx
+    jl      .Lht_ret
+    add     ecx, TF_H
+    cmp     r12d, ecx
     jge     .Lht_ret
+    mov     ecx, [rip+mx0]
+    add     ecx, 6
+    cmp     ebx, ecx
+    jl      .Lht_ret
+    mov     ecx, [rip+mx1]
+    sub     ecx, 6
+    cmp     ebx, ecx
+    jge     .Lht_ret
+    mov     eax, HIT_CONSOLE_INPUT
+    jmp     .Lht_ret
+1:
     mov     eax, HIT_SPLIT_B
     cmp     r12d, [rip+cvs_y1]
     jge     .Lht_ret
@@ -524,6 +543,9 @@ cursor_for:
     je      9f
     mov     eax, CUR_CROSSHAIR
     cmp     edi, HIT_CANVAS
+    je      9f
+    mov     eax, CUR_TEXT
+    cmp     edi, HIT_CONSOLE_INPUT
     je      9f
     mov     eax, CUR_DEFAULT
     cmp     edi, HIT_EDGE
@@ -677,6 +699,14 @@ ui_button:
     jz      .Lbt_release
 
     # ---------------- press ----------------
+    cmp     ebx, HIT_CONSOLE_INPUT
+    jne     1f
+    mov     dword ptr [rip+menu_open], -1
+    mov     edi, [rip+ptr_x]
+    call    tf_click
+    jmp     .Lbt_done
+1:  xor     edi, edi                    # clicking anywhere else blurs it
+    call    tf_set_focus
     mov     eax, [rip+menu_open]
     test    eax, eax
     js      .Lbt_nomenu
@@ -843,16 +873,63 @@ ui_axis:
 # looked up in the operator keymap (ops.s: dispatch_key)
 ui_key:
     cmp     esi, 1
+    je      1f
+    test    esi, esi                    # release: stop repeating that key
+    jnz     9f
+    cmp     edi, [rip+rep_code]
     jne     9f
-    cmp     edi, KEY_ESC
+    jmp     kb_repeat_stop
+1:  push    rbx
+    mov     ebx, edi
+    call    ui_key_press
+    cmp     dword ptr [rip+tf_focus], 0 # repeat only while typing
+    je      2f
+    lea     rax, [rip+modifier_keys]
+3:  movzx   ecx, byte ptr [rax]
+    test    ecx, ecx
+    jz      4f
+    cmp     ecx, ebx
+    je      2f
+    inc     rax
+    jmp     3b
+4:  mov     edi, ebx
+    call    kb_repeat_start
+2:  pop     rbx
+9:  ret
+
+# ui_key_repeat(edi=evdev) - timer tick for a held key
+ui_key_repeat:
+    cmp     dword ptr [rip+tf_focus], 0
+    je      kb_repeat_stop
+# ui_key_press(edi=evdev) - one key stroke: menus, text field, then keymap
+ui_key_press:
+    push    rbx
+    mov     ebx, edi
+    cmp     ebx, KEY_ESC
     jne     1f
     cmp     dword ptr [rip+menu_open], 0
     jl      1f
     mov     dword ptr [rip+menu_open], -1
     mov     dword ptr [rip+dirty], 1
+    jmp     9f
+1:  cmp     dword ptr [rip+tf_focus], 0
+    je      2f
+    mov     edi, ebx
+    call    kb_sym
+    mov     esi, eax
+    mov     edi, ebx
+    call    tf_key
+    test    eax, eax
+    jnz     9f
+2:  mov     edi, ebx
+    call    dispatch_key
+9:  pop     rbx
     ret
-1:  jmp     dispatch_key
-9:  ret
+
+.section .rodata
+#                Ctrl Shift Alt RShift RCtrl RAlt Meta Caps NumLk
+modifier_keys: .byte 29, 42, 56, 54, 97, 100, 125, 126, 58, 69, 0
+.text
 
 # =============================================================================
 #  Drawing
@@ -1439,7 +1516,7 @@ draw_bottom_pane:
     # visible lines = min((h - header - 8) / 18, lines logged, ring size)
     mov     eax, [rip+cont_y1]
     sub     eax, [rip+by0]
-    sub     eax, PANE_HDR_H+8
+    sub     eax, PANE_HDR_H+8+TF_H+6
     jle     9f
     xor     edx, edx
     mov     ecx, 18
@@ -1455,7 +1532,7 @@ draw_bottom_pane:
     jz      9f
     # newest line at the bottom
     mov     r12d, [rip+cont_y1]
-    sub     r12d, 22                    # y of newest line
+    sub     r12d, 22+TF_H+6             # y of newest line
     mov     r13d, [rip+log_head]
 1:  dec     r13d
     mov     eax, r13d
@@ -1475,7 +1552,15 @@ draw_bottom_pane:
     sub     r12d, 18
     dec     ebx
     jnz     1b
-9:  call    reset_clip
+9:  mov     edi, [rip+mx0]              # command line
+    add     edi, 6
+    mov     esi, [rip+cont_y1]
+    sub     esi, TF_H+6
+    mov     edx, [rip+mx1]
+    sub     edx, [rip+mx0]
+    sub     edx, 12
+    call    tf_draw
+    call    reset_clip
     mov     edi, HIT_SPLIT_B
     mov     esi, DRAG_SPLIT_B
     call    splitter_color
