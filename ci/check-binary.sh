@@ -15,4 +15,11 @@ readelf -l "$BIN" | grep -q INTERP && fail "has a program interpreter (dynamic l
 readelf -d "$BIN" 2>&1 | grep -q NEEDED && fail "depends on shared libraries"
 readelf -lW "$BIN" | awk '$1=="LOAD" && $7 ~ /RWE/ {exit 1}' || fail "RWX LOAD segment"
 "$BIN" --version | grep -Eq '^beemodel [0-9]+\.[0-9]+\.[0-9]+' || fail "--version output"
+ops=$("$BIN" --list-ops)
+n=$(wc -l <<<"$ops")
+dups=$(awk '{print $1}' <<<"$ops" | sort | uniq -d)
+(( n >= 20 )) || fail "--list-ops lists only $n operators"
+[[ -z "$dups" ]] || fail "duplicate operator ids: $dups"
+grep -q '^file.exit  *Ctrl+Q ' <<<"$ops" || fail "file.exit should be bound to Ctrl+Q"
+echo "operators: $n registered"
 echo "binary checks passed"

@@ -3,6 +3,26 @@
 #  and Liang-Barsky clipping, wireframe rendering. Scalar SSE math; sin/cos
 #  come from the x87 FSINCOS instruction (no libm).
 # =============================================================================
+.intel_syntax noprefix
+.include "const.inc"
+.include "macros.inc"
+
+# exports
+.globl cam_dist
+.globl cam_pitch
+.globl cam_tx
+.globl cam_ty
+.globl cam_tz
+.globl cam_yaw
+.globl f_rad2deg
+.globl f_ten
+.globl right
+.globl up
+.globl viewport_draw
+.globl vp_orbit
+.globl vp_pan
+.globl vp_reset
+.globl vp_zoom
 
 .section .data
 .align 4
@@ -615,6 +635,10 @@ vp_zoom:
     movss   [rip+cam_dist], xmm0
     ret
 
+# ---- viewport operators (registered into the operator spine) --------------
+OPERATOR op_view_grid,      "view.toggle_grid",  "Ground Grid",  op_toggle_flag, op_check_flag, show_grid, KEY_G, doc="Show or hide the ground grid and axes"
+OPERATOR op_view_reset_cam, "view.reset_camera", "Reset Camera", op_reset_camera, key=KEY_F, doc="Return the viewport camera to its default view"
+op_reset_camera:
 vp_reset:
     movss   xmm0, [rip+f_def_yaw]
     movss   [rip+cam_yaw], xmm0
@@ -627,3 +651,5 @@ vp_reset:
     movss   [rip+cam_ty], xmm0
     movss   [rip+cam_tz], xmm0
     ret
+
+.section .note.GNU-stack,"",@progbits

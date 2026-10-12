@@ -4,6 +4,25 @@
 #  Every primitive honours the clip rectangle [clip_x0,clip_x1) x
 #  [clip_y0,clip_y1). Coordinates are signed 32-bit, colors 0x00RRGGBB.
 # =============================================================================
+.intel_syntax noprefix
+.include "const.inc"
+
+# exports
+.globl clip_x0
+.globl clip_x1
+.globl clip_y0
+.globl clip_y1
+.globl draw_line
+.globl draw_text
+.globl fb_h
+.globl fb_ptr
+.globl fb_w
+.globl fill_rect
+.globl fill_vgradient
+.globl rect_outline
+.globl reset_clip
+.globl set_clip
+.globl str_len
 
 .section .bss
 .align 8
@@ -355,3 +374,5 @@ draw_line:
     pop     rbp
     pop     rbx
     ret
+
+.section .note.GNU-stack,"",@progbits

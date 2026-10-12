@@ -5,6 +5,40 @@
 #  strings = u32 length (incl. NUL) + bytes padded to 4. File descriptors travel
 #  as SCM_RIGHTS ancillary data. No libwayland - everything is hand rolled.
 # =============================================================================
+.intel_syntax noprefix
+.include "const.inc"
+
+# exports
+.globl alloc_id
+.globl create_window
+.globl dirty
+.globl e_globals
+.globl envp
+.globl fatal
+.globl id_compositor
+.globl id_registry
+.globl id_seat
+.globl id_shm
+.globl id_toplevel
+.globl id_wm_base
+.globl msg0
+.globl msg1
+.globl msg2
+.globl msg3
+.globl pool_size
+.globl quit_flag
+.globl render
+.globl s_newline
+.globl set_cursor
+.globl str_eq
+.globl win_flags
+.globl win_h
+.globl win_w
+.globl wl_connect
+.globl wl_flush
+.globl wl_read_dispatch
+.globl wl_roundtrip
+.globl write_err
 
 .section .data
 .align 4
@@ -1102,3 +1136,5 @@ set_cursor:
     mov     esi, CURSOR_DEV_SET_SHAPE
     jmp     msg2
 9:  ret
+
+.section .note.GNU-stack,"",@progbits

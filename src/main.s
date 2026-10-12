@@ -12,6 +12,7 @@
 
 .text
 .globl _start
+.globl write_out
 _start:
     mov     rax, [rsp]                  # argc
     lea     rax, [rsp+rax*8+16]         # envp = argv + argc + 1
@@ -79,6 +80,11 @@ handle_cli_args:
     test    eax, eax
     jnz     .Lcli_version
     mov     rdi, rbx
+    lea     rsi, [rip+s_arg_list_ops]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_list_ops
+    mov     rdi, rbx
     lea     rsi, [rip+s_arg_help]
     call    str_eq
     test    eax, eax
@@ -102,6 +108,9 @@ handle_cli_args:
     lea     rdi, [rip+s_newline]
     call    write_out
     jmp     .Lquit
+.Lcli_list_ops:
+    call    list_ops
+    jmp     .Lquit
 .Lcli_help:
     lea     rdi, [rip+s_help]
     call    write_out
@@ -120,22 +129,15 @@ write_out:
 .section .rodata
 s_arg_version:  .asciz "--version"
 s_arg_v:        .asciz "-v"
+s_arg_list_ops: .asciz "--list-ops"
 s_arg_help:     .asciz "--help"
 s_arg_h:        .asciz "-h"
 s_ver_prefix:   .asciz "beemodel "
 e_bad_arg:      .asciz "beemodel: unknown argument: "
-s_help:         .ascii "Usage: beemodel [--version | --help]\n"
+s_help:         .ascii "Usage: beemodel [--version | --list-ops | --help]\n"
                 .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
                 .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
 .include "version.inc"
 .text
-
-.include "wayland.s"
-.include "draw.s"
-.include "viewport.s"
-.include "ui.s"
-
-.section .rodata
-.include "font.inc"
 
 .section .note.GNU-stack,"",@progbits

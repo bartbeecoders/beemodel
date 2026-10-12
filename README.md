@@ -35,7 +35,9 @@ chmod +x beemodel-0.1.0-linux-x86_64.bin && ./beemodel-0.1.0-linux-x86_64.bin
 | Canvas | Software 3D viewport: perspective orbit camera, ground grid, XYZ axes, demo wireframe cube, orientation gizmo. LMB orbit, MMB or Shift+LMB pan, wheel zoom, F reset, G grid. |
 | Status bar | Last command, framebuffer size, window size. |
 
-Keys: Q/W/E/R tools, G grid, F reset camera, Esc close menu, Ctrl+Q quit.
+Keys: Q/W/E/R tools, T tools pane, N outliner pane, G grid, F reset camera,
+F1 list all shortcuts, Esc close menu, Ctrl+Q quit. Run `beemodel --list-ops` to
+see every operator with its id, binding and description.
 
 ## Performance & memory
 
@@ -54,14 +56,21 @@ Keys: Q/W/E/R tools, G grid, F reset camera, Esc close menu, Ctrl+Q quit.
 ## Source layout
 
 ```
-src/main.s      entry point + event loop
+src/main.s      entry point, CLI flags, event loop
 src/wayland.s   socket, message encode/decode, SCM_RIGHTS, shm buffers, dispatch
 src/draw.s      framebuffer primitives: rects, gradient, text, lines, clipping
-src/ui.s        layout, hit testing, input, menus, panes, console log
-src/viewport.s  camera, projection, clipping, grid/axes/gizmo rendering
+src/ui.s        layout, hit testing, input, menus, panes, status bar
+src/ops.s       operator spine: operator table, runner, keymap, --list-ops
+src/viewport.s  camera, projection, clipping, grid/axes/gizmo (+ its operators)
+src/log.s       string builder + console log
+src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
 src/const.inc   syscalls, opcodes, layout metrics, theme colours
-src/font.inc    8x16 glyph bitmaps (generated, see tools/genfont.py)
+src/macros.inc  operator record layout + OPERATOR macro
 ```
+
+Each `.s` file is a separate module linked by `ld`. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the calling convention, the
+operator spine and how to add an action.
 
 ## Dev tools (optional, Python; not needed to build or run)
 

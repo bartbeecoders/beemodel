@@ -1,0 +1,345 @@
+# =============================================================================
+#  BeeModel - operator spine: the application's operator table, the runner,
+#  key dispatch and shortcut formatting.
+#
+#  Add an action = add one OPERATOR line (in any module) and reference it from
+#  a menu or tool list if it should appear there. Its key binding, shortcut
+#  label, console echo and --list-ops entry come for free.
+# =============================================================================
+.intel_syntax noprefix
+.include "const.inc"
+.include "macros.inc"
+
+.globl run_op
+.globl op_checked
+.globl dispatch_key
+.globl fmt_key
+.globl list_ops
+.globl op_toggle_flag
+.globl op_check_flag
+
+# ---- File ---------------------------------------------------------------------
+OPERATOR op_file_new,   "file.new",   "New Scene", op_todo, key=KEY_N|KM_CTRL, doc="Start a new empty scene"
+OPERATOR op_file_open,  "file.open",  "Open...",   op_todo, key=KEY_O|KM_CTRL, doc="Open a .bee scene file"
+OPERATOR op_file_save,  "file.save",  "Save",      op_todo, key=KEY_S|KM_CTRL, doc="Save the scene"
+OPERATOR op_file_exit,  "file.exit",  "Exit",      op_exit, key=KEY_Q|KM_CTRL, flags=0, doc="Quit BeeModel"
+# ---- Edit ---------------------------------------------------------------------
+OPERATOR op_edit_undo,  "edit.undo",  "Undo",      op_todo, key=KEY_Z|KM_CTRL, doc="Undo the last change"
+OPERATOR op_edit_redo,  "edit.redo",  "Redo",      op_todo, key=KEY_Z|KM_CTRL|KM_SHIFT, doc="Redo the last undone change"
+OPERATOR op_edit_prefs, "edit.preferences", "Preferences...", op_todo, doc="Open the preferences editor"
+# ---- View (panes) -------------------------------------------------------------
+OPERATOR op_view_tools,    "view.toggle_tools",    "Tools Pane",    op_toggle_flag, op_check_flag, show_left,   KEY_T, doc="Show or hide the tools pane"
+OPERATOR op_view_outliner, "view.toggle_outliner", "Outliner Pane", op_toggle_flag, op_check_flag, show_right,  KEY_N, doc="Show or hide the outliner and properties pane"
+OPERATOR op_view_console,  "view.toggle_console",  "Console Pane",  op_toggle_flag, op_check_flag, show_bottom, 0,     doc="Show or hide the console pane"
+# ---- Tools --------------------------------------------------------------------
+OPERATOR op_tool_select, "tool.select", "Select", op_set_tool, op_check_tool, 0, KEY_Q, doc="Selection tool"
+OPERATOR op_tool_move,   "tool.move",   "Move",   op_set_tool, op_check_tool, 1, KEY_W, doc="Move tool"
+OPERATOR op_tool_rotate, "tool.rotate", "Rotate", op_set_tool, op_check_tool, 2, KEY_E, doc="Rotate tool"
+OPERATOR op_tool_scale,  "tool.scale",  "Scale",  op_set_tool, op_check_tool, 3, KEY_R, doc="Scale tool"
+# ---- Create -------------------------------------------------------------------
+OPERATOR op_add_cube,     "create.cube",     "Cube",     op_create, arg=0, doc="Add a cube primitive"
+OPERATOR op_add_sphere,   "create.sphere",   "Sphere",   op_create, arg=1, doc="Add a UV sphere primitive"
+OPERATOR op_add_cylinder, "create.cylinder", "Cylinder", op_create, arg=2, doc="Add a cylinder primitive"
+OPERATOR op_add_plane,    "create.plane",    "Plane",    op_create, arg=3, doc="Add a plane primitive"
+OPERATOR op_add_light,    "create.light",    "Light",    op_create, arg=4, doc="Add a point light"
+OPERATOR op_add_camera,   "create.camera",   "Camera",   op_create, arg=5, doc="Add a camera"
+# ---- Help ---------------------------------------------------------------------
+OPERATOR op_help_keys,  "help.shortcuts", "Keyboard Shortcuts", op_shortcuts, key=KEY_F1, doc="List all key bindings in the console"
+OPERATOR op_help_about, "help.about",     "About BeeModel",     op_about, doc="Show version information"
+
+.section .rodata
+s_log_prompt:   .asciz "> "
+s_log_todo:     .asciz "  not implemented yet - waiting for the modeling core"
+s_log_create:   .asciz "  queued - mesh creation lands with the modeling core"
+s_about_ver:    .asciz "  BeeModel "
+s_about1:       .asciz "  A 3D modeling shell written in pure x86-64 assembly"
+s_about2:       .asciz "  Talks the Wayland wire protocol directly; no libc, no toolkits"
+s_keys_mouse:   .asciz "  Mouse: LMB orbit | MMB or Shift+LMB pan | wheel zoom | Esc closes menus"
+s_two_sp:       .asciz "  "
+s_k_ctrl:       .asciz "Ctrl+"
+s_k_shift:      .asciz "Shift+"
+s_k_alt:        .asciz "Alt+"
+s_k_esc:        .asciz "Esc"
+s_k_bksp:       .asciz "Backspace"
+s_k_tab:        .asciz "Tab"
+s_k_enter:      .asciz "Enter"
+s_k_space:      .asciz "Space"
+s_k_home:       .asciz "Home"
+s_k_del:        .asciz "Del"
+s_k_f11:        .asciz "F11"
+s_k_f12:        .asciz "F12"
+s_k_unknown:    .asciz "Key?"
+
+# evdev codes 0..57 -> printable character (0 = see key_special)
+key_chars:
+    .byte 0, 0
+    .ascii "1234567890-="
+    .byte 0, 0
+    .ascii "QWERTYUIOP[]"
+    .byte 0, 0
+    .ascii "ASDFGHJKL;'`"
+    .byte 0
+    .ascii "\\ZXCVBNM,./"
+    .byte 0, '*', 0, 0
+.equ KEY_CHARS_N, . - key_chars
+.align 8
+key_special:                            # code:u64, name:ptr
+    .quad 1, s_k_esc
+    .quad 14, s_k_bksp
+    .quad 15, s_k_tab
+    .quad 28, s_k_enter
+    .quad 57, s_k_space
+    .quad 87, s_k_f11
+    .quad 88, s_k_f12
+    .quad 102, s_k_home
+    .quad 111, s_k_del
+    .quad 0, 0
+
+.section .bss
+keybuf:         .skip 32
+linebuf:        .skip 160
+
+.text
+
+# -----------------------------------------------------------------------------
+# run_op(rdi=op) - echo to the console, execute, request a redraw
+# -----------------------------------------------------------------------------
+run_op:
+    push    rbx
+    mov     rbx, rdi
+    test    dword ptr [rbx+OP_FLAGS], OPF_QUIET
+    jnz     1f
+    lea     rdi, [rip+s_log_prompt]
+    mov     rsi, [rbx+OP_LABEL]
+    call    log_pair
+1:  mov     rdi, [rbx+OP_ARG]
+    mov     rsi, rbx
+    call    [rbx+OP_EXEC]
+    mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# op_checked(rdi=op) -> eax = 1 checked, 0 unchecked, -1 not a toggle
+op_checked:
+    mov     rax, [rdi+OP_CHECK]
+    test    rax, rax
+    jz      1f
+    mov     rdi, [rdi+OP_ARG]
+    jmp     rax
+1:  mov     eax, -1
+    ret
+
+# dispatch_key(edi=evdev code) -> eax = 1 if an operator handled it
+dispatch_key:
+    mov     eax, [rip+key_mods]
+    and     eax, MOD_SHIFT|MOD_CTRL|MOD_ALT
+    shl     eax, 16
+    or      eax, edi
+    lea     rdi, [rip+__start_bee_ops]
+    lea     rdx, [rip+__stop_bee_ops]
+1:  cmp     rdi, rdx
+    jae     2f
+    cmp     [rdi+OP_KEY], eax
+    je      3f
+    add     rdi, OP_SIZE
+    jmp     1b
+2:  xor     eax, eax
+    ret
+3:  call    run_op
+    mov     eax, 1
+    ret
+
+# -----------------------------------------------------------------------------
+# fmt_key(edi=binding) -> rax = asciz like "Ctrl+Shift+Z" (static), 0 if none
+# -----------------------------------------------------------------------------
+fmt_key:
+    test    edi, edi
+    jnz     1f
+    xor     eax, eax
+    ret
+1:  push    rbx
+    push    r12
+    mov     ebx, edi
+    lea     r12, [rip+keybuf]
+    test    ebx, KM_CTRL
+    jz      2f
+    lea     rsi, [rip+s_k_ctrl]
+    call    kb_append
+2:  test    ebx, KM_SHIFT
+    jz      3f
+    lea     rsi, [rip+s_k_shift]
+    call    kb_append
+3:  test    ebx, KM_ALT
+    jz      4f
+    lea     rsi, [rip+s_k_alt]
+    call    kb_append
+4:  movzx   eax, bx                     # key code
+    cmp     eax, KEY_CHARS_N
+    jae     5f
+    lea     rcx, [rip+key_chars]
+    movzx   ecx, byte ptr [rcx+rax]
+    test    ecx, ecx
+    jz      5f
+    mov     [r12], cl
+    inc     r12
+    jmp     9f
+5:  cmp     eax, KEY_F1                 # F1..F10 = 59..68
+    jb      6f
+    cmp     eax, KEY_F1+9
+    ja      6f
+    mov     byte ptr [r12], 'F'
+    inc     r12
+    sub     eax, KEY_F1-1
+    cmp     eax, 10
+    jb      51f
+    mov     byte ptr [r12], '1'
+    inc     r12
+    sub     eax, 10
+51: add     al, '0'
+    mov     [r12], al
+    inc     r12
+    jmp     9f
+6:  lea     rcx, [rip+key_special]
+61: mov     rdx, [rcx]
+    test    rdx, rdx
+    jz      62f
+    cmp     rdx, rax
+    je      63f
+    add     rcx, 16
+    jmp     61b
+62: lea     rsi, [rip+s_k_unknown]
+    call    kb_append
+    jmp     9f
+63: mov     rsi, [rcx+8]
+    call    kb_append
+9:  mov     byte ptr [r12], 0
+    lea     rax, [rip+keybuf]
+    pop     r12
+    pop     rbx
+    ret
+
+# kb_append(rsi=asciz) - append at r12 (caller-owned cursor)
+kb_append:
+1:  mov     al, [rsi]
+    test    al, al
+    jz      2f
+    mov     [r12], al
+    inc     r12
+    inc     rsi
+    jmp     1b
+2:  ret
+
+# -----------------------------------------------------------------------------
+# list_ops - print the operator table to stdout (beemodel --list-ops)
+#   <id> <shortcut> <label> - <doc>
+# -----------------------------------------------------------------------------
+list_ops:
+    push    rbx
+    push    r12
+    push    r13
+    lea     rbx, [rip+__start_bee_ops]
+1:  lea     rax, [rip+__stop_bee_ops]
+    cmp     rbx, rax
+    jae     9f
+    call    fmt_reset
+    mov     rdi, [rbx+OP_NAME]
+    call    fmt_str
+    mov     edi, 24
+    call    fmt_pad
+    mov     edi, [rbx+OP_KEY]
+    call    fmt_key
+    test    rax, rax
+    jz      2f
+    mov     rdi, rax
+    call    fmt_str
+2:  mov     edi, 40
+    call    fmt_pad
+    mov     rdi, [rbx+OP_LABEL]
+    call    fmt_str
+    mov     edi, 62
+    call    fmt_pad
+    mov     rdi, [rbx+OP_DOC]
+    call    fmt_str
+    mov     edi, 10
+    call    fmt_char
+    lea     rdi, [rip+fmt_buf]
+    call    write_out
+    add     rbx, OP_SIZE
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# =============================================================================
+#  Operator implementations: exec(rdi=arg, rsi=op), check(rdi=arg) -> eax
+# =============================================================================
+op_todo:
+    lea     rdi, [rip+s_log_todo]
+    jmp     log_line
+
+op_exit:
+    mov     dword ptr [rip+quit_flag], 1
+    ret
+
+# toggles a u32 flag whose address is the operator argument
+op_toggle_flag:
+    xor     dword ptr [rdi], 1
+    ret
+op_check_flag:
+    mov     eax, [rdi]
+    ret
+
+op_set_tool:
+    mov     [rip+active_tool], edi
+    ret
+op_check_tool:
+    xor     eax, eax
+    cmp     edi, [rip+active_tool]
+    sete    al
+    ret
+
+op_create:
+    lea     rdi, [rip+s_log_create]
+    jmp     log_line
+
+op_about:
+    lea     rdi, [rip+s_about_ver]
+    lea     rsi, [rip+s_version]
+    call    log_pair
+    lea     rdi, [rip+s_about1]
+    call    log_line
+    lea     rdi, [rip+s_about2]
+    jmp     log_line
+
+# op_shortcuts - every bound operator, generated from the table
+op_shortcuts:
+    push    rbx
+    lea     rdi, [rip+s_keys_mouse]
+    call    log_line
+    lea     rbx, [rip+__start_bee_ops]
+1:  lea     rax, [rip+__stop_bee_ops]
+    cmp     rbx, rax
+    jae     9f
+    mov     edi, [rbx+OP_KEY]
+    test    edi, edi
+    jz      2f
+    call    fmt_reset
+    lea     rdi, [rip+s_two_sp]
+    call    fmt_str
+    mov     edi, [rbx+OP_KEY]
+    call    fmt_key
+    mov     rdi, rax
+    call    fmt_str
+    mov     edi, 18
+    call    fmt_pad
+    mov     rdi, [rbx+OP_LABEL]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+2:  add     rbx, OP_SIZE
+    jmp     1b
+9:  pop     rbx
+    ret
+
+.section .note.GNU-stack,"",@progbits
