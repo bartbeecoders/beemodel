@@ -14,6 +14,13 @@
 .globl _start
 .globl write_out
 _start:
+    lea     rdi, [rip+__bss_start]      # big, mostly idle buffers: keep THP
+    and     rdi, -4096                  # from backing them with 2 MiB pages
+    lea     rsi, [rip+_end]
+    sub     rsi, rdi
+    mov     edx, MADV_NOHUGEPAGE
+    mov     eax, SYS_MADVISE
+    syscall
     mov     rax, [rsp]                  # argc
     lea     rax, [rsp+rax*8+16]         # envp = argv + argc + 1
     mov     [rip+envp], rax

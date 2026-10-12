@@ -106,6 +106,11 @@ s_uri_scene:    .asciz "bee://scene"
 r_head:         .asciz "{\"jsonrpc\":\"2.0\",\"id\":"
 r_result:       .asciz ",\"result\":"
 r_tail:         .asciz "}\n"
+r_err_parse:    .asciz ",\"error\":{\"code\":-32700,\"message\":\"Parse error\"}}\n"
+r_err_invalid:  .asciz ",\"error\":{\"code\":-32600,\"message\":\"Invalid Request\"}}\n"
+r_null:         .asciz "null"
+k_result:       .asciz "result"
+k_error:        .asciz "error"
 r_err_method:   .asciz ",\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}\n"
 r_empty:        .asciz "{}"
 r_init_a:       .asciz "{\"protocolVersion\":"
@@ -495,10 +500,20 @@ handle_message:
     mov     [rip+msg_start], rdi
     lea     rax, [rdi+rsi]
     mov     [rip+j_end], rax
+    mov     qword ptr [rip+id_ptr], 0
+    mov     rsi, rdi                    # strict syntax check first
+    mov     rdx, rax
+    call    j_valid
+    test    eax, eax
+    jz      .Lhm_parse
+    mov     rsi, [rip+msg_start]        # a single object (no batches)
+    call    j_ws
+    cmp     byte ptr [rsi], '{'
+    jne     .Lhm_invalid
     mov     byte ptr [rip+method], 0
     mov     qword ptr [rip+id_ptr], 0
     mov     qword ptr [rip+params], 0
-    mov     rsi, rdi
+    mov     rsi, [rip+msg_start]
     lea     rdi, [rip+k_method]
     call    j_find
     test    rax, rax
@@ -523,6 +538,20 @@ handle_message:
     mov     [rip+params], rax
     cmp     qword ptr [rip+id_ptr], 0
     je      9f                          # notifications get no answer
+    cmp     byte ptr [rip+method], 0
+    jne     3f
+    mov     rsi, [rip+msg_start]        # no method: a response to us is fine,
+    lea     rdi, [rip+k_result]         # anything else is an invalid request
+    call    j_find
+    test    rax, rax
+    jnz     9f
+    mov     rsi, [rip+msg_start]
+    lea     rdi, [rip+k_error]
+    call    j_find
+    test    rax, rax
+    jnz     9f
+    jmp     .Lhm_invalid
+3:
     lea     rdi, [rip+out_state]        # build the response in our buffer
     call    buf_swap
     call    wb_reset
@@ -637,6 +666,28 @@ handle_message:
     call    wb_str
 .Lhm_end:
     lea     rsi, [rip+r_tail]
+    call    wb_str
+    jmp     .Lhm_send
+.Lhm_parse:                             # -32700, id null
+    lea     rdi, [rip+r_err_parse]
+    jmp     1f
+.Lhm_invalid:                           # -32600, with the id if there is one
+    lea     rdi, [rip+r_err_invalid]
+1:  push    rdi
+    lea     rdi, [rip+out_state]
+    call    buf_swap
+    call    wb_reset
+    lea     rsi, [rip+r_head]
+    call    wb_str
+    mov     rsi, [rip+id_ptr]
+    test    rsi, rsi
+    jz      2f
+    mov     rdx, [rip+id_len]
+    call    wb_bytes
+    jmp     3f
+2:  lea     rsi, [rip+r_null]
+    call    wb_str
+3:  pop     rsi
     call    wb_str
 .Lhm_send:
     call    send_out

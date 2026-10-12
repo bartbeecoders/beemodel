@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-13
+
+Phase 3 of the masterplan, "AI-native layer": AI agents become first-class
+users of BeeModel. They can see, script and edit the scene, under
+permissions the user controls, and the user can revert their changes.
+
 ### Added
 - MCP server for AI agents. The running app listens on
   `$XDG_RUNTIME_DIR/beemodel.sock`, and `beemodel --mcp-bridge` connects
@@ -38,12 +44,23 @@ project uses [Semantic Versioning](https://semver.org/).
   - **AI Activity editor** (AI → AI Activity Pane, or any area's editor
     menu). It lists recent agent calls and has a one-click
     **Revert last agent change** button (`agent.revert`).
-- Own JSON reader / writer.
+- Own JSON reader / writer, with a strict RFC 8259 validator for incoming
+  messages.
+- MCP conformance suite in CI. It drives a full session through
+  `--mcp-bridge` like Claude Code does, and checks:
+  - tool schemas and the result shape of every curated tool;
+  - JSON-RPC error codes (-32700 / -32600 / -32601);
+  - id echo, split writes and 60 KiB requests;
+  - UTF-8 round trips and concurrent clients.
+- `docs/MCP.md`: connecting Claude Code / Claude Desktop, and the tools,
+  permissions and protocol details.
 
 ### Changed
 - PNG files are now compressed. The encoder picks a Sub or Up filter per row
   and then deflates the data (LZ77 plus fixed Huffman codes). A 1280×800
   screenshot drops from about 3 MB to about 150 KB.
+- `.bss` is excluded from transparent huge pages, so the large, mostly idle
+  script buffers cost no memory until they are used.
 
 ## [0.3.0] - 2026-10-12
 
@@ -182,7 +199,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/bartbeecoders/beemodel/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bartbeecoders/beemodel/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/bartbeecoders/beemodel/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bartbeecoders/beemodel/releases/tag/v0.1.0

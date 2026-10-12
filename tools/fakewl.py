@@ -447,6 +447,7 @@ def main():
     mcp()
     scripting()
     beescript_cli()
+    mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
     sys.exit(1 if FAILS else 0)
@@ -913,6 +914,153 @@ def beescript_cli():
                        capture_output=True, text=True, timeout=20)
     ms = (time.time() - t0) * 1000
     check(r.stdout.strip() == '499999500000' and ms < 1000, f'1M loop iterations in {ms:.0f} ms')
+
+
+class Bridge:
+    """An MCP client over `beemodel --mcp-bridge` (stdio), like Claude Code."""
+    def __init__(self, fake):
+        self.f = fake
+        self.p = subprocess.Popen([BIN, '--mcp-bridge'], env=fake.env, stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE)
+        os.set_blocking(self.p.stdout.fileno(), False)
+        self.buf = b''
+
+    def write(self, data):
+        self.p.stdin.write(data); self.p.stdin.flush()
+
+    def read(self, timeout=5.0, want=None):
+        """Next message (or the one with id == want); None on timeout."""
+        end = time.time() + timeout
+        while time.time() < end:
+            while b'\n' in self.buf:
+                line, self.buf = self.buf.split(b'\n', 1)
+                msg = json.loads(line)
+                if want is None or msg.get('id') == want:
+                    return msg
+            self.f.pump(0.02)
+            try:
+                chunk = os.read(self.p.stdout.fileno(), 1 << 20)
+                if chunk: self.buf += chunk
+            except BlockingIOError:
+                pass
+        return None
+
+    def call(self, rid, method, params=None):
+        msg = {'jsonrpc': '2.0', 'id': rid, 'method': method}
+        if params is not None: msg['params'] = params
+        self.write(json.dumps(msg).encode() + b'\n')
+        return self.read(want=rid)
+
+    def close(self):
+        self.p.stdin.close(); self.p.wait(timeout=5)
+
+
+def mcp_conformance():
+    """MCP / JSON-RPC conformance through the stdio bridge and the socket."""
+    print('  -- MCP conformance --')
+    import re
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    b = Bridge(f)
+    bad = []
+    def expect(cond, what):
+        if not cond: bad.append(what)
+    r = b.call(1, 'initialize', {'protocolVersion': '2025-06-18', 'capabilities': {},
+                                 'clientInfo': {'name': 'conformance', 'version': '1'}})
+    res = (r or {}).get('result', {})
+    version = open('VERSION').read().strip()
+    expect(r and r.get('jsonrpc') == '2.0' and r.get('id') == 1, 'initialize: jsonrpc 2.0 + id')
+    expect(res.get('protocolVersion') == '2025-06-18', 'initialize: protocol version echoed')
+    expect('tools' in res.get('capabilities', {}) and 'resources' in res.get('capabilities', {}),
+           'initialize: tools + resources capabilities')
+    expect(res.get('serverInfo') == {'name': 'beemodel', 'version': version}, 'initialize: serverInfo')
+    expect(isinstance(res.get('instructions'), str), 'initialize: instructions')
+    b.write(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
+    r = b.call(2, 'ping')
+    expect(r and r.get('id') == 2 and r.get('result') == {}, 'notification: no reply; ping -> {}')
+    tools = (b.call(3, 'tools/list') or {}).get('result', {}).get('tools', [])
+    names = [t.get('name') for t in tools]
+    expect(len(names) == len(set(names)) and len(names) > 20, f'tools/list: {len(names)} unique tools')
+    for t in tools:
+        sch = t.get('inputSchema', {})
+        if not (re.fullmatch(r'[A-Za-z0-9_-]{1,64}', t.get('name', '')) and isinstance(t.get('description'), str)
+                and sch.get('type') == 'object' and isinstance(sch.get('properties', {}), dict)
+                and set(sch.get('required', [])) <= set(sch.get('properties', {}))):
+            bad.append(f'tool schema: {t.get("name")}')
+    calls = [('scene_summary', {}), ('create_primitive', {'type': 'cube', 'name': 'Conf'}),
+             ('set_transform', {'name': 'Conf', 'location': [1, 2, 3]}), ('select', {'names': ['Conf']}),
+             ('viewport_capture', {}), ('script_eval', {'code': 'count()'}), ('run_operator', {'id': 'view.toggle_grid'}),
+             ('op_view_toggle_grid', {}), ('delete', {'names': ['Conf']}), ('undo', {}), ('redo', {})]
+    rid = 10
+    for name, args in calls:
+        rid += 1
+        r = b.call(rid, 'tools/call', {'name': name, 'arguments': args})
+        res = (r or {}).get('result', {})
+        content = res.get('content')
+        ok = (isinstance(content, list) and content and all(c.get('type') in ('text', 'image') for c in content)
+              and all(isinstance(c.get('text'), str) for c in content if c['type'] == 'text')
+              and all(c.get('mimeType') == 'image/png' and isinstance(c.get('data'), str) for c in content if c['type'] == 'image')
+              and res.get('isError') is False)
+        expect(ok, f'tools/call {name}: content shape / isError false')
+    r = b.call(30, 'tools/call', {'name': 'no_such_tool', 'arguments': {}})
+    expect((r or {}).get('result', {}).get('isError') is True, 'unknown tool: result.isError (not a protocol error)')
+    r = b.call(31, 'tools/call', {'name': 'create_primitive', 'arguments': {}})
+    expect((r or {}).get('result', {}).get('isError') is True, 'missing required argument: isError')
+    r = b.call(32, 'resources/list')
+    rs = (r or {}).get('result', {}).get('resources', [])
+    expect(rs and all('uri' in x and 'name' in x for x in rs), 'resources/list')
+    r = b.call(33, 'resources/read', {'uri': 'bee://scene'})
+    c = (r or {}).get('result', {}).get('contents', [{}])[0]
+    expect(c.get('uri') == 'bee://scene' and c.get('mimeType') == 'application/json' and json.loads(c.get('text', 'null')),
+           'resources/read: uri, mimeType, JSON text')
+    expect((b.call(34, 'no/such') or {}).get('error', {}).get('code') == -32601, 'unknown method: -32601')
+    for rid in ('abc-1', 9007199254740991, 0, -5):
+        r = b.call(rid, 'ping')
+        expect(r is not None and r.get('id') == rid and type(r.get('id')) == type(rid), f'id echoed: {rid!r}')
+    b.write(b'{"jsonrpc": "2.0", "id": 40, "met')      # one message in two writes
+    f.pump(0.2)
+    b.write(b'hod": "ping"}\n')
+    expect((b.read(want=40) or {}).get('result') == {}, 'a message split across writes')
+    b.write(b'{not json\n')
+    r = b.read()
+    expect(r and r.get('id') is None and r.get('error', {}).get('code') == -32700, 'malformed JSON: -32700, id null')
+    b.write(b'[{"jsonrpc":"2.0","id":41,"method":"ping"}]\n')
+    r = b.read()
+    expect(r and r.get('error', {}).get('code') == -32600, 'batch arrays: -32600 (removed in 2025-06-18)')
+    b.write(b'{"jsonrpc":"2.0","id":42}\n')
+    r = b.read()
+    expect(r and r.get('id') == 42 and r.get('error', {}).get('code') == -32600, 'no method: -32600 with the id')
+    b.write(b'{"jsonrpc":"2.0","id":43,"result":{}}\n')
+    expect((b.call(44, 'ping') or {}).get('id') == 44, 'responses from the client are ignored')
+    big = 'x = 0\n' + ''.join(f'x += {i}\n' for i in range(20000)) + 'x'
+    big = big[:64000].rsplit('\n', 1)[0] + '\nx'
+    r = b.call(45, 'tools/call', {'name': 'script_eval', 'arguments': {'code': big}})
+    expect(r and r['result']['content'][0]['text'].startswith('= '),
+           f'large request ({len(json.dumps(big)) // 1024} KiB, {big.count(chr(10))} script lines)')
+    r = b.call(46, 'tools/call', {'name': 'create_primitive', 'arguments': {'type': 'cube', 'name': 'Kubus-\u00e9\u2603'}})
+    t = (b.call(47, 'tools/call', {'name': 'scene_summary', 'arguments': {}}) or {})['result']['content'][0]['text']
+    expect('Kubus-\u00e9\u2603' in [o['name'] for o in json.loads(t.split('\n')[0])['objects']], 'UTF-8 names round-trip')
+    # three socket clients at once, requests interleaved
+    cs = [Mcp(f) for _ in range(3)]
+    for i, c in enumerate(cs):
+        c.send({'jsonrpc': '2.0', 'id': 100 + i, 'method': 'ping'})
+    got = []
+    for i, c in enumerate(cs):
+        end = time.time() + 3
+        while time.time() < end and b'\n' not in c.buf:
+            f.pump(0.02)
+            try:
+                c.buf += c.s.recv(65536)
+            except BlockingIOError:
+                pass
+        got.append(json.loads(c.buf.split(b'\n')[0]).get('id') if b'\n' in c.buf else None)
+    expect(got == [100, 101, 102], f'concurrent clients get their own replies ({got})')
+    for c in cs: c.s.close()
+    b.close()
+    for x in bad:
+        print('     ' + x)
+    check(not bad and f.proc.poll() is None, f'MCP conformance: {len(bad)} problem(s), server alive')
+    f.proc.kill()
 
 
 def raster_stress():

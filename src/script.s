@@ -34,7 +34,7 @@
 .equ T_STR,     3
 
 .equ TK_SZ,     24      # type u32, line u32, len u32, pad, value u64
-.equ TOK_MAX,   16384
+.equ TOK_MAX,   65536       # a 64 KiB source can never run out
 .equ MAIN_CODE, 131072
 .equ FN_CODE,   262144
 .equ G_MAX,     512

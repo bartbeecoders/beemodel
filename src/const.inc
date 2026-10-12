@@ -27,6 +27,7 @@
 .equ PROT_RW,           3
 .equ MAP_SHARED,        1
 .equ MADV_REMOVE,       9
+.equ MADV_NOHUGEPAGE,   15
 
 # ---- Buffers ---------------------------------------------------------------
 .equ SBUF_SIZE,         4096
