@@ -131,7 +131,8 @@ s_log_todo:     .asciz "  not implemented yet - waiting for the modeling core"
 s_log_create:   .asciz "  queued - mesh creation lands with the modeling core"
 s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero libraries"
 s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize panes"
-s_about1:       .asciz "  BeeModel 0.1 - a 3D modeling shell written in pure x86-64 assembly"
+s_about1:       .asciz "  A 3D modeling shell written in pure x86-64 assembly"
+s_about_ver:    .asciz "  BeeModel "
 s_about2:       .asciz "  Talks the Wayland wire protocol directly; no libc, no toolkits"
 s_keys1:        .asciz "  LMB drag orbit | MMB or Shift+LMB pan | wheel zoom"
 s_keys2:        .asciz "  Q/W/E/R tools | G grid | F reset camera | Esc close menu | Ctrl+Q quit"
@@ -1108,6 +1109,9 @@ exec_cmd:
     jmp     9f
 6:  cmp     ebx, CMD_ABOUT
     jne     7f
+    lea     rdi, [rip+s_about_ver]
+    lea     rsi, [rip+s_version]
+    call    log_pair
     lea     rdi, [rip+s_about1]
     call    log_line
     lea     rdi, [rip+s_about2]

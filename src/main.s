@@ -16,7 +16,12 @@ _start:
     mov     rax, [rsp]                  # argc
     lea     rax, [rsp+rax*8+16]         # envp = argv + argc + 1
     mov     [rip+envp], rax
+    cmp     qword ptr [rsp], 2
+    jb      1f
+    mov     rbx, [rsp+16]               # argv[1]
     and     rsp, -16
+    call    handle_cli_args             # --version / --help exit here
+1:  and     rsp, -16
 
     call    wl_connect
 
@@ -60,6 +65,70 @@ _start:
 .Lmissing:
     lea     rdi, [rip+e_globals]
     call    fatal
+
+# handle_cli_args(rbx = argv[1])
+handle_cli_args:
+    mov     rdi, rbx
+    lea     rsi, [rip+s_arg_version]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_version
+    mov     rdi, rbx
+    lea     rsi, [rip+s_arg_v]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_version
+    mov     rdi, rbx
+    lea     rsi, [rip+s_arg_help]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_help
+    mov     rdi, rbx
+    lea     rsi, [rip+s_arg_h]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_help
+    lea     rdi, [rip+e_bad_arg]
+    call    write_err
+    mov     rdi, rbx
+    call    write_err
+    lea     rdi, [rip+s_newline]
+    call    fatal
+.Lcli_version:
+    lea     rdi, [rip+s_ver_prefix]
+    call    write_out
+    lea     rdi, [rip+s_version]
+    call    write_out
+    lea     rdi, [rip+s_newline]
+    call    write_out
+    jmp     .Lquit
+.Lcli_help:
+    lea     rdi, [rip+s_help]
+    call    write_out
+    jmp     .Lquit
+
+# write_out(rdi=asciz) - write a string to stdout
+write_out:
+    mov     rsi, rdi
+    call    str_len
+    mov     edx, eax
+    mov     edi, 1
+    mov     eax, SYS_WRITE
+    syscall
+    ret
+
+.section .rodata
+s_arg_version:  .asciz "--version"
+s_arg_v:        .asciz "-v"
+s_arg_help:     .asciz "--help"
+s_arg_h:        .asciz "-h"
+s_ver_prefix:   .asciz "beemodel "
+e_bad_arg:      .asciz "beemodel: unknown argument: "
+s_help:         .ascii "Usage: beemodel [--version | --help]\n"
+                .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
+                .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
+.include "version.inc"
+.text
 
 .include "wayland.s"
 .include "draw.s"

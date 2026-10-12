@@ -199,21 +199,48 @@ class Fake:
         print(f'  shot {path} ({w}x{h}, frame #{self.frames}, cursor shape {self.cursor})')
 
 
+FAILS = []
+
+
+def check(cond, msg):
+    print(('  ok   ' if cond else '  FAIL ') + msg)
+    if not cond:
+        FAILS.append(msg)
+
+
+def px(f, x, y):
+    w, h, data = f.frame
+    b, g, r, _ = data[(y * w + x) * 4:(y * w + x) * 4 + 4]
+    return (r << 16) | (g << 8) | b
+
+
 def main():
     f = Fake()
     f.pump(1.0, until_frame=True)
-    assert f.frame, 'no frame received'
+    check(f.frame is not None, 'first frame committed')
+    if not f.frame:
+        sys.exit(1)
+    check(f.frame[:2] == (1280, 800), 'default window size 1280x800')
+    check(px(f, 640, 5) == 0x1b1d22, 'title bar background')
+    check(px(f, 13, 15) == 0xf2b134, 'honeycomb logo drawn')
     f.shot('01_initial.png')
     f.enter(640, 400)
+    check(f.cursor == 8, 'crosshair cursor over canvas')
     f.click(20, 44)                      # File menu
+    check(px(f, 100, 70) != px(f, 700, 70), 'File dropdown visible')
     f.shot('02_menu_file.png')
     f.move(130, 44)                      # slide to "View"
     f.move(150, 96)                      # hover an item
     f.shot('03_menu_view.png')
     f.click(150, 120)                    # View > Console Pane (toggle off)
+    check(px(f, 600, 700) != 0x2a2e36, 'console pane hidden')
     f.shot('04_console_hidden.png')
     f.click(130, 44); f.click(150, 120)  # toggle it back on
+    check(px(f, 600, 700) == 0x2a2e36, 'console pane shown again')
+    f.move(212, 300)
+    check(f.cursor == 26, 'ew-resize cursor on splitter')
     f.drag(212, 300, 330, 300)           # left splitter
+    check(px(f, 300, 450) == 0x2a2e36, 'left pane widened by drag')
     f.drag(1017, 300, 900, 300)          # right splitter
     f.drag(600, 625, 600, 520)           # bottom splitter
     f.shot('05_splitters.png')
@@ -222,19 +249,25 @@ def main():
     f.click(1060, 93)                    # outliner: select Camera
     f.shot('06_orbit_zoom.png')
     f.key(34)                            # G: grid off
-    f.move(1220, 10)                     # hover close button
+    f.move(1250, 10)                     # hover close button
+    check(px(f, 1240, 3) == 0xe81123, 'close button hover is red')
     f.shot('07_grid_off_close_hover.png')
     f.configure(900, 560); f.pump(0.5, until_frame=True)
+    check(f.frame[:2] == (900, 560), 'resize to 900x560 honoured')
     f.shot('08_resized.png')
     f.configure(1600, 900, states=(1, 4)); f.pump(0.5, until_frame=True)
+    check(f.frame[:2] == (1600, 900), 'maximized configure honoured')
     f.shot('09_maximized.png')
     f.click(1600 - 23, 16)               # close button
     f.pump(0.5)
-    rc = f.proc.wait(timeout=2)
-    print('  exit code', rc, '| frames', f.frames)
-    reqs = {}
-    for r in f.requests: reqs[r] = reqs.get(r, 0) + 1
-    print('  requests', sorted(reqs.items()))
+    try:
+        rc = f.proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        f.proc.kill(); rc = None
+    check(rc == 0, f'close button exits cleanly (rc={rc})')
+    check(f.frames >= 50, f'frames rendered ({f.frames})')
+    print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
+    sys.exit(1 if FAILS else 0)
 
 
 if __name__ == '__main__':
