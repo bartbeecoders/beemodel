@@ -36,7 +36,12 @@ chmod +x beemodel-0.1.0-linux-x86_64.bin && ./beemodel-0.1.0-linux-x86_64.bin
 | Status bar | Last command, framebuffer size, window size. |
 
 Keys: Q/W/E/R tools, T tools pane, N outliner pane, G grid, F reset camera,
-F1 list all shortcuts, Esc close menu, Ctrl+Q quit. Run `beemodel --list-ops` to
+F1 list all shortcuts, Ctrl+L clear console, Esc close menu, Ctrl+Q quit.
+Shortcuts follow your keyboard layout (Ctrl+Z is the key labelled Z on AZERTY too).
+
+Press **Enter** to type into the console command line. Any operator id runs
+(e.g. `view.toggle_grid`). Tab completes and cycles through ids, Up/Down
+browse the history, and `console.list_ops` lists every id. Run `beemodel --list-ops` to
 see every operator with its id, binding and description.
 
 ## Performance & memory
@@ -62,6 +67,8 @@ src/draw.s      framebuffer primitives: rects, gradient, text, lines, clipping
 src/ui.s        layout, hit testing, input, menus, panes, status bar
 src/ops.s       operator spine: operator table, runner, keymap, --list-ops
 src/viewport.s  camera, projection, clipping, grid/axes/gizmo (+ its operators)
+src/keyboard.s  XKB keymap parser, levels, dead keys, layout-aware shortcuts, key repeat
+src/textfield.s UTF-8 text field (console command line)
 src/log.s       string builder + console log
 src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
 src/const.inc   syscalls, opcodes, layout metrics, theme colours
@@ -75,6 +82,9 @@ operator spine and how to add an action.
 ## Dev tools (optional, Python; not needed to build or run)
 
 * `tools/genfont.py` regenerates `src/font.inc` from a PSF console font.
+* `tools/genkeysyms.py` regenerates `src/keysyms.inc` (keysym names → Unicode).
+* `tests/keymaps/*.xkb` are real US, Belgian and German keymaps, used by the
+  headless tests.
 * `tools/fakewl.py` is a headless fake Wayland compositor. It runs the app,
   injects pointer and keyboard input, and saves PNG screenshots of each step to
   `build/shots/` (needs Pillow). It tests the app in isolation, without touching

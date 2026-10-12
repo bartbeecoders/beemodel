@@ -42,6 +42,7 @@ _start:
     je      .Lmissing
 
     call    create_window
+    call    kb_timer_init
     lea     rdi, [rip+s_log_hello]
     call    log_line
     lea     rdi, [rip+s_log_hello2]
@@ -50,8 +51,27 @@ _start:
 .Lloop:
     mov     edi, -1
     call    wl_flush
+    # sleep until the compositor talks to us or the key-repeat timer fires
+    lea     rdi, [rip+pollfds]
+    mov     eax, [rip+sock_fd]
+    mov     [rdi], eax
+    mov     dword ptr [rdi+4], POLLIN
+    mov     eax, [rip+rep_fd]
+    mov     [rdi+8], eax
+    mov     dword ptr [rdi+12], POLLIN
+    mov     esi, 2
+    mov     edx, -1
+    mov     eax, SYS_POLL
+    syscall
+    cmp     rax, -4                     # EINTR
+    je      .Lloop
+    test    word ptr [rip+pollfds+6], POLLIN|POLLERR|POLLHUP
+    jz      1f
     call    wl_read_dispatch
-    cmp     dword ptr [rip+quit_flag], 0
+1:  test    word ptr [rip+pollfds+14], POLLIN
+    jz      2f
+    call    kb_on_timer
+2:  cmp     dword ptr [rip+quit_flag], 0
     jne     .Lquit
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
@@ -125,6 +145,10 @@ write_out:
     mov     eax, SYS_WRITE
     syscall
     ret
+
+.section .bss
+.align 8
+pollfds:        .skip 16                # struct pollfd[2]
 
 .section .rodata
 s_arg_version:  .asciz "--version"

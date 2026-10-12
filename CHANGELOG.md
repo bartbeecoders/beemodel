@@ -14,6 +14,17 @@ project uses [Semantic Versioning](https://semver.org/).
 - New key bindings: T (tools pane), N (outliner pane), F1 (shortcut list in the
   console), Ctrl+N/O/S/Z, Ctrl+Shift+Z.
 - docs/ARCHITECTURE.md: modules, calling convention, how to add an operator.
+- Real keyboard support without libxkbcommon: the XKB keymap sent by the
+  compositor is parsed in assembly. Shift / Caps Lock / AltGr levels and dead
+  keys (accents) work for any layout.
+- Layout-aware shortcuts: bindings follow the key label, so Ctrl+Z is Undo on
+  AZERTY and QWERTZ keyboards too.
+- Key repeat using the compositor's rate and delay (timerfd).
+- Console command line: a UTF-8 text field with caret, selection (Shift,
+  Ctrl+A), history (Up/Down) and Tab completion of operator ids. Enter runs any
+  operator by id.
+- New operators: console.focus (Enter), console.clear (Ctrl+L),
+  console.list_ops.
 
 ### Changed
 - Source split into separate modules (object files) with explicit exports.

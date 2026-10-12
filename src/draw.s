@@ -233,6 +233,10 @@ draw_text:
     test    eax, eax
     jz      .Ldt_done
     inc     r14
+    mov     ecx, eax                    # UTF-8 continuation byte: no glyph
+    and     ecx, 0xc0
+    cmp     ecx, 0x80
+    je      .Ldt_char
     cmp     r12d, [rip+clip_x1]
     jge     .Ldt_next                   # right of clip
     lea     ecx, [r12+CHAR_W]
