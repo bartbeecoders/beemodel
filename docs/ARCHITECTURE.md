@@ -25,6 +25,8 @@ stays private to the module.
 | `jobs.s` | Worker threads (raw `clone`), futex sleep/wake, `parallel_for` |
 | `mem.s` | Bump arenas (frame / per-thread scratch) and pools with generational handles |
 | `selftest.s` | `--selftest`: allocator and job-system tests plus a benchmark (run in CI) |
+| `areas.s` | Area tree (splits + leaf areas), layout, hit testing, headers, the five editors, area operators |
+| `palette.s` | F3 command palette: fuzzy search over the operator table |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -166,6 +168,32 @@ range. Reset is O(1), and anything touched beyond 1 MiB is given back with
 fixed-size slots with a free list. A handle is
 `generation << 24 | index`, so a freed handle can never reach the slot's next
 occupant. This is the basis for the scene ECS.
+
+## Areas & editors
+
+The content region is a binary tree (`areas.s`, max 32 nodes). A node is
+either a **split** (`K_HSPLIT` side by side, `K_VSPLIT` stacked, with a 16.16
+ratio for the first child) or a **leaf area** hosting an editor: 3D Viewport,
+Tools, Outliner, Properties or Console. `area_layout` assigns rectangles
+recursively (minimum 60 px per side), `area_hit` walks the tree for splitters,
+area headers and editor contents, and `area_draw_all` draws headers, editor
+bodies (each clipped to its area) and splitters.
+
+Every area header has an editor-type menu (it reuses the operator-driven
+dropdown) plus maximize, split side by side, split stacked and close. Splitting
+moves the node's content to a new slot and turns the node into a split, so
+references stay valid. Closing lets the sibling take the parent's slot. Each
+3D Viewport area has its own camera (`cam_load` / `cam_store` swap it in and
+out of the globals the viewport code uses), and Properties shows the camera of
+the viewport you last used. The area under the pointer is the **active area**
+that area operators act on.
+
+## Command palette
+
+F3 opens `palette.s`: a text field (a second instance of `textfield.s`; field
+state is swapped with `tf_select`) and up to 14 operators ranked by label
+prefix, then word or id prefix, then substring, then subsequence. Anything in
+the operator table, including future operators, is searchable automatically.
 
 ## Event loop & rendering
 

@@ -39,6 +39,14 @@ Keys: Q/W/E/R tools, T tools pane, N outliner pane, G grid, F reset camera,
 F1 list all shortcuts, Ctrl+L clear console, Esc close menu, Ctrl+Q quit.
 Shortcuts follow your keyboard layout (Ctrl+Z is the key labelled Z on AZERTY too).
 
+The window is divided into **areas** like Blender's. Drag the splitters
+between them. Each area's header lets you switch its editor (3D Viewport,
+Tools, Outliner, Properties, Console), maximize it (Ctrl+Space), split it side
+by side or top/bottom, or close it. Every viewport keeps its own camera.
+
+Press **F3** for the command palette: type part of any command name and press
+Enter.
+
 Press **Enter** to type into the console command line. Any operator id runs
 (e.g. `view.toggle_grid`). Tab completes and cycles through ids, Up/Down
 browse the history, and `console.list_ops` lists every id. Run `beemodel --list-ops` to
@@ -74,6 +82,8 @@ src/text.s      font selection, UTF-8 text drawing and measurement
 src/jobs.s      worker threads, futex, parallel_for
 src/mem.s       arenas and generational-handle pools
 src/selftest.s  --selftest unit tests + benchmark
+src/areas.s     area tree, editors, splitting / closing / maximizing
+src/palette.s   F3 command palette (fuzzy operator search)
 src/log.s       string builder + console log
 src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

@@ -44,6 +44,16 @@ project uses [Semantic Versioning](https://semver.org/).
 - `--selftest`: built-in tests for the allocators and the job system, plus a
   benchmark (12× faster with 32 threads on the reference machine). Runs in
   CI.
+- Area system like Blender's: the window is a tree of resizable areas. Each
+  area has a header to switch its editor (3D Viewport, Tools, Outliner,
+  Properties, Console) and to maximize (Ctrl+Space), split side by side or
+  top/bottom, or close it. Each viewport has its own camera.
+- Command palette (F3): fuzzy search over every command, showing its id and
+  shortcut. Up/Down select, Enter runs.
+
+### Changed
+- Tools / Outliner / Console toggles (T, N, View menu) now add and remove
+  areas; the Properties pane is now its own area.
 
 ### Changed
 - Source split into separate modules (object files) with explicit exports.

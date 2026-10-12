@@ -29,10 +29,6 @@ OPERATOR op_file_exit,  "file.exit",  "Exit",      op_exit, key=KEY_Q|KM_CTRL, f
 OPERATOR op_edit_undo,  "edit.undo",  "Undo",      op_todo, key=KEY_Z|KM_CTRL, doc="Undo the last change"
 OPERATOR op_edit_redo,  "edit.redo",  "Redo",      op_todo, key=KEY_Z|KM_CTRL|KM_SHIFT, doc="Redo the last undone change"
 OPERATOR op_edit_prefs, "edit.preferences", "Preferences...", op_todo, doc="Open the preferences editor"
-# ---- View (panes) -------------------------------------------------------------
-OPERATOR op_view_tools,    "view.toggle_tools",    "Tools Pane",    op_toggle_flag, op_check_flag, show_left,   KEY_T, doc="Show or hide the tools pane"
-OPERATOR op_view_outliner, "view.toggle_outliner", "Outliner Pane", op_toggle_flag, op_check_flag, show_right,  KEY_N, doc="Show or hide the outliner and properties pane"
-OPERATOR op_view_console,  "view.toggle_console",  "Console Pane",  op_toggle_flag, op_check_flag, show_bottom, 0,     doc="Show or hide the console pane"
 # ---- Tools --------------------------------------------------------------------
 OPERATOR op_tool_select, "tool.select", "Select", op_set_tool, op_check_tool, 0, KEY_Q, doc="Selection tool"
 OPERATOR op_tool_move,   "tool.move",   "Move",   op_set_tool, op_check_tool, 1, KEY_W, doc="Move tool"
@@ -332,7 +328,7 @@ op_check_tool:
     ret
 
 do_console_focus:
-    mov     dword ptr [rip+show_bottom], 1
+    call    console_ensure
     mov     edi, 1
     jmp     tf_set_focus
 
