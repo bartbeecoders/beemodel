@@ -164,10 +164,14 @@ draw_text:
     push    r15
     sub     rsp, 8
     mov     ebp, eax                    # slot
-    mov     r12d, edi
-    shl     r12d, 16                    # pen, 16.16
     mov     r14, rdx
     mov     r15d, ecx
+    call    to_px                       # physical pen x
+    mov     r12d, eax
+    shl     r12d, 16                    # pen, 16.16
+    mov     edi, esi
+    call    to_px
+    mov     esi, eax                    # physical row top
     mov     eax, ebp
     imul    eax, FNT_SZ
     lea     rcx, [rip+fonts]
@@ -209,9 +213,11 @@ draw_text:
     pop     rax
 3:  add     r12d, [rax+16]
     jmp     2b
-9:  mov     eax, r12d
-    add     eax, 0x8000
-    sar     eax, 16
+9:  movsxd  rax, r12d                  # back to logical x
+    imul    rax, [rip+ui_inv16q]
+    sar     rax, 31                     # round(x / 2^32)
+    inc     rax
+    sar     rax, 1
     add     rsp, 8
     pop     r15
     pop     r14
@@ -346,9 +352,18 @@ text_width_n:
     jmp     2b
 3:  add     ebx, CHAR_W << 16
     jmp     2b
-8:  mov     eax, ebx
+8:  test    ebp, ebp                    # bitmap widths are already logical
+    js      81f
+    movsxd  rax, ebx
+    imul    rax, [rip+ui_inv16q]
+    sar     rax, 31                     # round(x / 2^32)
+    inc     rax
+    sar     rax, 1
+    jmp     82f
+81: mov     eax, ebx
     add     eax, 0x8000
     sar     eax, 16
+82:
     add     rsp, 8
     pop     r13
     pop     r12

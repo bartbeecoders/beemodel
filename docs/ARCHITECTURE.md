@@ -123,6 +123,24 @@ hash table backed by a 4 MiB arena, and are alpha-blended into the framebuffer.
 Text is proportional, so layout code measures with `text_width` /
 `text_width_n` instead of assuming 8-pixel cells.
 
+## HiDPI / fractional scaling
+
+When the compositor offers `wp_fractional_scale_v1` and `wp_viewporter`,
+BeeModel receives a preferred scale (in 1/120 steps, e.g. 180 = 150%):
+
+* the shm buffer is allocated at **physical** size (`phys_w × phys_h`) and a
+  `wp_viewport` destination maps it back onto the **logical** window size;
+* all UI code (layout, hit testing, input) stays in logical coordinates;
+  pointer events already arrive that way;
+* only the primitives convert to physical pixels: `fill_rect`, `set_clip`,
+  `draw_line`, `fill_vgradient`, `draw_text` (one 16.16 multiply, skipped at
+  100%). Rectangles scale their *edges*, so adjacent panes stay seamless;
+* fonts are re-rasterized at the physical size, and the 3D projection works in
+  physical pixels, so text and geometry are sharp rather than upscaled.
+
+The `*_px` variants (`fill_rect_px`, `draw_line_px`, `set_clip_px`) take
+physical coordinates directly.
+
 ## Event loop & rendering
 
 `main.s` loops over: flush outgoing requests, `poll` the Wayland socket and the

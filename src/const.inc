@@ -227,3 +227,8 @@
 .equ FONT_MONO,     1
 .equ UI_FONT_PX,    15
 .equ MONO_FONT_PX,  14
+
+# ---- fractional scaling ----------------------------------------------------------
+.equ WP_FSCALE_MGR_GET,           1
+.equ WP_VIEWPORTER_GET,           1
+.equ WP_VIEWPORT_SET_DESTINATION, 2

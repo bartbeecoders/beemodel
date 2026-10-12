@@ -16,7 +16,8 @@ BIN = os.path.join(os.path.dirname(__file__), '..', 'build', 'beemodel')
 os.makedirs(OUT, exist_ok=True)
 
 GLOBALS = [(1, 'wl_compositor', 4), (2, 'wl_shm', 1), (3, 'xdg_wm_base', 2),
-           (4, 'wl_seat', 5), (5, 'wp_cursor_shape_manager_v1', 1)]
+           (4, 'wl_seat', 5), (5, 'wp_cursor_shape_manager_v1', 1),
+           (6, 'wp_fractional_scale_manager_v1', 1), (7, 'wp_viewporter', 1)]
 
 
 def wstr(s):
@@ -112,6 +113,12 @@ class Fake:
             self.objs[u(0)] = 'wl_keyboard'
         elif iface == 'wp_cursor_shape_manager_v1' and op == 1:
             self.objs[u(0)] = 'wp_cursor_shape_device_v1'
+        elif iface == 'wp_fractional_scale_manager_v1' and op == 1:
+            self.objs[u(0)] = 'wp_fractional_scale_v1'
+        elif iface == 'wp_viewporter' and op == 1:
+            self.objs[u(0)] = 'wp_viewport'
+        elif iface == 'wp_viewport' and op == 2:
+            self.dest = (u(0), u(1))
         elif iface == 'wp_cursor_shape_device_v1' and op == 1:
             self.cursor = u(1)
         elif iface == 'wl_shm' and op == 0:               # create_pool(id, fd, size)
@@ -225,6 +232,10 @@ class Fake:
             if shift: self.mods(0)
         self.pump(until_frame=True)
 
+    def scale(self, s120):
+        self.send(self.find('wp_fractional_scale_v1')[0], 0, struct.pack('<I', s120))
+        self.pump(0.5, until_frame=True)
+
     def shot(self, name):
         from PIL import Image
         w, h, data = self.frame
@@ -329,6 +340,21 @@ def main():
     f.key(28)                            # run it
     f.type('nope'); f.key(28)            # unknown command is reported, app lives on
     f.shot('13_console_commands.png')
+    # ---- fractional scaling: buffer in physical pixels, viewport = logical
+    for s120, name in ((180, '15_scale_150.png'), (240, '16_scale_200.png')):
+        f.scale(s120)
+        pw, ph = 1600 * s120 // 120, 900 * s120 // 120
+        check(f.frame[:2] == (pw, ph), f'scale {s120/120:.2f}: buffer {f.frame[0]}x{f.frame[1]} == {pw}x{ph}')
+        check(getattr(f, 'dest', None) == (1600, 900), f'scale {s120/120:.2f}: viewport destination is logical 1600x900')
+        check(px(f, pw // 2, 3) == 0x1b1d22, f'scale {s120/120:.2f}: title bar spans the scaled buffer')
+        f.shot(name)
+    f.click(20, 44)                      # logical input still hits "File" at 200%
+    check(px(f, 150 * 2, 70 * 2) == 0x2d313a, 'scale 2.00: File menu opens from logical coordinates')
+    f.key(1)                             # Esc closes the menu
+    f.scale(120)
+    f.key(28)                            # clicking the menu blurred the command line
+    check(f.frame[:2] == (1600, 900), 'back to 100%')
+
     # Unicode via the Belgian layout: AE02 = e-acute, AD11 = dead circumflex
     f.keymap('tests/keymaps/be.xkb')
     f.key(3); f.key(26); f.key(18); f.mods(1); f.key(26); f.mods(0); f.key(18)

@@ -87,6 +87,12 @@ sync_done:      .skip 4
 
 # window state
 win_w:          .skip 4
+phys_w:         .skip 4
+phys_h:         .skip 4
+id_fscale_mgr:  .skip 4
+id_viewporter:  .skip 4
+id_fscale:      .skip 4
+id_viewport:    .skip 4
 win_h:          .skip 4
 pend_w:         .skip 4
 pend_h:         .skip 4
@@ -115,6 +121,8 @@ s_shm:          .asciz "wl_shm"
 s_wm_base:      .asciz "xdg_wm_base"
 s_seat:         .asciz "wl_seat"
 s_cursor_mgr:   .asciz "wp_cursor_shape_manager_v1"
+s_fscale_mgr:   .asciz "wp_fractional_scale_manager_v1"
+s_viewporter:   .asciz "wp_viewporter"
 s_memfd_name:   .asciz "beemodel-fb"
 e_connect:      .asciz "beemodel: cannot connect to the Wayland display\n"
 e_lost:         .asciz "beemodel: Wayland connection lost\n"
@@ -642,6 +650,8 @@ wl_dispatch:
     je      ev_seat
     cmp     edi, [rip+id_sync_cb]
     je      ev_sync_done
+    cmp     edi, [rip+id_fscale]
+    je      ev_fscale
 ev_done:
     pop     r15
     pop     r14
@@ -723,6 +733,28 @@ ev_registry:
     mov     [rip+id_seat], eax
     jmp     ev_done
 4:  mov     rdi, rbx
+    lea     rsi, [rip+s_fscale_mgr]
+    call    str_eq
+    test    eax, eax
+    jz      41f
+    mov     edx, 1
+    lea     rsi, [rip+s_fscale_mgr]
+    mov     edi, r14d
+    call    wl_bind
+    mov     [rip+id_fscale_mgr], eax
+    jmp     ev_done
+41: mov     rdi, rbx
+    lea     rsi, [rip+s_viewporter]
+    call    str_eq
+    test    eax, eax
+    jz      42f
+    mov     edx, 1
+    lea     rsi, [rip+s_viewporter]
+    mov     edi, r14d
+    call    wl_bind
+    mov     [rip+id_viewporter], eax
+    jmp     ev_done
+42: mov     rdi, rbx
     lea     rsi, [rip+s_cursor_mgr]
     call    str_eq
     test    eax, eax
@@ -732,6 +764,20 @@ ev_registry:
     mov     edi, r14d
     call    wl_bind
     mov     [rip+id_cursor_mgr], eax
+    jmp     ev_done
+
+ev_fscale:                              # preferred_scale(scale / 120)
+    mov     edi, [r12]
+    call    set_ui_scale
+    test    eax, eax
+    jz      ev_done
+    mov     edi, FONT_UI                # re-rasterize fonts for the new scale
+    mov     esi, UI_FONT_PX
+    call    font_set_size
+    mov     edi, FONT_MONO
+    mov     esi, MONO_FONT_PX
+    call    font_set_size
+    mov     dword ptr [rip+dirty], 1
     jmp     ev_done
 
 ev_sync_done:
@@ -943,7 +989,25 @@ create_window:
     mov     esi, WL_COMPOSITOR_CREATE_SURFACE
     call    msg1
 
+    cmp     dword ptr [rip+id_fscale_mgr], 0
+    je      1f
+    cmp     dword ptr [rip+id_viewporter], 0
+    je      1f
     call    alloc_id
+    mov     [rip+id_fscale], eax
+    mov     edx, eax
+    mov     ecx, [rip+id_surface]
+    mov     edi, [rip+id_fscale_mgr]
+    mov     esi, WP_FSCALE_MGR_GET
+    call    msg2
+    call    alloc_id
+    mov     [rip+id_viewport], eax
+    mov     edx, eax
+    mov     ecx, [rip+id_surface]
+    mov     edi, [rip+id_viewporter]
+    mov     esi, WP_VIEWPORTER_GET
+    call    msg2
+1:  call    alloc_id
     mov     [rip+id_xdg_surface], eax
     mov     edx, eax
     mov     ecx, [rip+id_surface]
@@ -989,10 +1053,10 @@ ensure_buffers:
     push    rbx
     push    r12
     push    r13
-    mov     eax, [rip+win_w]
+    mov     eax, [rip+phys_w]
     cmp     eax, [rip+buf_w]
     jne     1f
-    mov     eax, [rip+win_h]
+    mov     eax, [rip+phys_h]
     cmp     eax, [rip+buf_h]
     jne     1f
     cmp     dword ptr [rip+id_buf], 0
@@ -1006,10 +1070,10 @@ ensure_buffers:
     mov     edi, [rip+id_buf+4]
     mov     esi, WL_BUFFER_DESTROY
     call    msg0
-2:  mov     r12d, [rip+win_w]
+2:  mov     r12d, [rip+phys_w]
     shl     r12d, 2                     # stride
     mov     r13d, r12d
-    imul    r13d, [rip+win_h]           # bytes per buffer
+    imul    r13d, [rip+phys_h]           # bytes per buffer
     lea     ebx, [r13+r13]              # bytes needed for both
     cmp     ebx, [rip+pool_size]
     jbe     5f
@@ -1102,9 +1166,9 @@ ensure_buffers:
     mov     edi, r13d
     imul    edi, ebx
     call    put_u32                     # offset
-    mov     edi, [rip+win_w]
+    mov     edi, [rip+phys_w]
     call    put_u32
-    mov     edi, [rip+win_h]
+    mov     edi, [rip+phys_h]
     call    put_u32
     mov     edi, r12d
     call    put_u32                     # stride
@@ -1114,9 +1178,9 @@ ensure_buffers:
     inc     ebx
     cmp     ebx, 2
     jb      7b
-    mov     eax, [rip+win_w]
+    mov     eax, [rip+phys_w]
     mov     [rip+buf_w], eax
-    mov     eax, [rip+win_h]
+    mov     eax, [rip+phys_h]
     mov     [rip+buf_h], eax
 9:  pop     r13
     pop     r12
@@ -1134,6 +1198,12 @@ render:
     cmp     dword ptr [rip+frame_pending], 0
     jne     9f                          # wait for the compositor's frame callback
     push    rbx
+    mov     edi, [rip+win_w]            # buffer is physical: logical x scale
+    call    to_px
+    mov     [rip+phys_w], eax
+    mov     edi, [rip+win_h]
+    call    to_px
+    mov     [rip+phys_h], eax
     call    ensure_buffers
     xor     ebx, ebx
     cmp     dword ptr [rip+buf_busy], 0
@@ -1141,9 +1211,9 @@ render:
     inc     ebx
     cmp     dword ptr [rip+buf_busy+4], 0
     jne     8f                          # both busy: retry on release
-1:  mov     eax, [rip+win_w]
+1:  mov     eax, [rip+phys_w]
     mov     [rip+fb_w], eax
-    mov     ecx, [rip+win_h]
+    mov     ecx, [rip+phys_h]
     mov     [rip+fb_h], ecx
     imul    eax, ecx
     shl     rax, 2
@@ -1161,7 +1231,14 @@ render:
     xor     ecx, ecx
     xor     r8d, r8d
     call    msg3
-    mov     edi, [rip+id_surface]
+    mov     edi, [rip+id_viewport]      # map the buffer onto the logical size
+    test    edi, edi
+    jz      1f
+    mov     esi, WP_VIEWPORT_SET_DESTINATION
+    mov     edx, [rip+win_w]
+    mov     ecx, [rip+win_h]
+    call    msg2
+1:  mov     edi, [rip+id_surface]
     mov     esi, WL_SURFACE_DAMAGE
     call    msg_begin
     xor     edi, edi
