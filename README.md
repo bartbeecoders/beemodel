@@ -108,6 +108,13 @@ operator spine and how to add an action.
 * `tools/genkeysyms.py` regenerates `src/keysyms.inc` (keysym names → Unicode).
 * `tests/keymaps/*.xkb` are real US, Belgian and German keymaps, used by the
   headless tests.
+* Golden images (`tests/golden/*.png`) are compared pixel by pixel when the
+  harness runs with `BEEMODEL_GOLDEN=check` and the bitmap font
+  (`BEEMODEL_FONT=none BEEMODEL_MONO_FONT=none`), which keeps them identical on
+  every machine. After an intended visual change, regenerate them with
+  `BEEMODEL_GOLDEN=update` and review the PNG diff in the PR. The harness also
+  enforces budgets: first frame < 500 ms, input-to-frame latency < 16 ms,
+  private memory < 16 MiB.
 * `tools/fakewl.py` is a headless fake Wayland compositor. It runs the app,
   injects pointer and keyboard input, and saves PNG screenshots of each step to
   `build/shots/` (needs Pillow). It tests the app in isolation, without touching
