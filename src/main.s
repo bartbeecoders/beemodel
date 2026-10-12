@@ -25,6 +25,10 @@ _start:
 1:  and     rsp, -16
 
     call    text_init
+    call    jobs_init
+    lea     rdi, [rip+frame_arena]
+    mov     esi, FRAME_ARENA_BYTES
+    call    arena_init
     call    wl_connect
 
     call    alloc_id                    # wl_display.get_registry
@@ -101,6 +105,11 @@ handle_cli_args:
     test    eax, eax
     jnz     .Lcli_version
     mov     rdi, rbx
+    lea     rsi, [rip+s_arg_selftest]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_selftest
+    mov     rdi, rbx
     lea     rsi, [rip+s_arg_list_ops]
     call    str_eq
     test    eax, eax
@@ -129,6 +138,12 @@ handle_cli_args:
     lea     rdi, [rip+s_newline]
     call    write_out
     jmp     .Lquit
+.Lcli_selftest:
+    call    jobs_init
+    call    selftest
+    mov     edi, eax
+    mov     eax, SYS_EXIT_GROUP
+    syscall
 .Lcli_list_ops:
     call    list_ops
     jmp     .Lquit
@@ -155,11 +170,12 @@ pollfds:        .skip 16                # struct pollfd[2]
 s_arg_version:  .asciz "--version"
 s_arg_v:        .asciz "-v"
 s_arg_list_ops: .asciz "--list-ops"
+s_arg_selftest: .asciz "--selftest"
 s_arg_help:     .asciz "--help"
 s_arg_h:        .asciz "-h"
 s_ver_prefix:   .asciz "beemodel "
 e_bad_arg:      .asciz "beemodel: unknown argument: "
-s_help:         .ascii "Usage: beemodel [--version | --list-ops | --help]\n"
+s_help:         .ascii "Usage: beemodel [--version | --list-ops | --selftest | --help]\n"
                 .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
                 .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
 .include "version.inc"

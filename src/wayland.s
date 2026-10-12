@@ -1198,6 +1198,8 @@ render:
     cmp     dword ptr [rip+frame_pending], 0
     jne     9f                          # wait for the compositor's frame callback
     push    rbx
+    lea     rdi, [rip+frame_arena]
+    call    arena_reset
     mov     edi, [rip+win_w]            # buffer is physical: logical x scale
     call    to_px
     mov     [rip+phys_w], eax

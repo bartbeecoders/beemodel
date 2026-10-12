@@ -35,6 +35,15 @@ project uses [Semantic Versioning](https://semver.org/).
 - HiDPI / fractional scaling (`wp_fractional_scale_v1` + `wp_viewporter`):
   the UI renders natively at 125%, 150%, 200% and other scales, with crisp
   text and geometry instead of compositor upscaling.
+- Job system: worker threads on every core (raw `clone` + `futex`, 0% CPU
+  when idle) and `parallel_for` with atomic chunk claiming; the viewport
+  background is already filled in parallel. `BEEMODEL_THREADS` limits the
+  thread count.
+- Memory: bump arenas (per frame and per thread, giving memory back to the
+  kernel after spikes) and pools with generational handles.
+- `--selftest`: built-in tests for the allocators and the job system, plus a
+  benchmark (12× faster with 32 threads on the reference machine). Runs in
+  CI.
 
 ### Changed
 - Source split into separate modules (object files) with explicit exports.
