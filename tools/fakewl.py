@@ -562,13 +562,16 @@ def files():
     ICON = lambda row: px(f, 1037, 94 + 20 * row)
     def cmd(c):
         f.key(28); f.type(c); f.key(28); f.pump(0.2)
-    cmd(f'file.save {T}/a.bee')
-    data = open(f'{T}/a.bee', 'rb').read() if os.path.exists(f'{T}/a.bee') else b''
-    check(data[:4] == b'BEEM', f'file.save writes a .bee file ({len(data)} bytes)')
+    name = 's1_234567890.bee'                  # every digit: guards the keymap parser
+    cmd(f'file.save {T}/{name}')
+    data = open(f'{T}/{name}', 'rb').read() if os.path.exists(f'{T}/{name}') else b''
+    check(data[:4] == b'BEEM', f'file.save writes a .bee file ({len(data)} bytes, typed digits 0-9)')
+    if data[:4] != b'BEEM':
+        f.shot('files_save_failed.png')
     f.key(1)                                   # leave the command line
     f.move(*project((0, 1, 0))); f.key(45)     # delete the cube
     check(ICON(2) == 0x2a2e36, 'cube deleted before reopening')
-    cmd(f'file.open {T}/a.bee')
+    cmd(f'file.open {T}/{name}')
     check(ICON(2) == 0xb4b8c0 and bright(px(f, *project((0, 1, 0)))), 'file.open restores the saved scene')
     cmd(f'file.export_obj {T}/a.obj')
     obj = open(f'{T}/a.obj').read().split('\n') if os.path.exists(f'{T}/a.obj') else []

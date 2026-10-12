@@ -36,6 +36,11 @@ project uses [Semantic Versioning](https://semver.org/).
   (`file.save ~/x.bee`); without one, the command line opens pre-filled.
 - Shift+D shares the mesh with the original (copy-on-write arrives with
   edit mode), so duplicates cost almost no memory.
+### Fixed
+- Keymap parser: the word "aliases" inside the keycodes section name was
+  taken for an `alias` statement, which swallowed the Escape and **1** keys
+  (& on AZERTY). Digits now all type correctly.
+
 ### Changed
 - G, R and S now start transforms (Blender layout). The grid toggle moved to
   Shift+G, and the tools to Shift+Q / W / E / R.
