@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.1.0/beemodel-0.1.0-linux-x86_64.bin
-chmod +x beemodel-0.1.0-linux-x86_64.bin && ./beemodel-0.1.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.3.0/beemodel-0.3.0-linux-x86_64.bin
+chmod +x beemodel-0.3.0-linux-x86_64.bin && ./beemodel-0.3.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
