@@ -280,65 +280,80 @@ rect_outline:
 
 # -----------------------------------------------------------------------------
 # fill_vgradient(edi=x, esi=y, edx=w, ecx=h, r8d=top color, r9d=bottom color)
+#   rows are independent, so they are filled in parallel by the job system
 # -----------------------------------------------------------------------------
 fill_vgradient:
-    push    rbx
-    push    rbp
-    push    r12
-    push    r13
-    push    r14
-    push    r15
     test    ecx, ecx
     jle     9f
-    mov     r14d, r8d
-    mov     r15d, r9d
+    push    rbx
+    mov     [rip+gr_top], r8d
+    mov     [rip+gr_bot], r9d
     call    scale4                      # physical rows give a smooth ramp
-    mov     ebx, edi
-    mov     ebp, esi
+    mov     [rip+gr_x], edi
+    mov     [rip+gr_y], esi
+    mov     [rip+gr_w], edx
+    mov     [rip+gr_h], ecx
+    lea     rdi, [rip+grad_rows]
+    xor     esi, esi
+    mov     edx, ecx
+    mov     ecx, 48                     # rows per chunk
+    call    parallel_for
+    pop     rbx
+9:  ret
+
+# grad_rows(rdi=ctx, esi=first row, edx=end row) - job body
+grad_rows:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, esi
     mov     r12d, edx
-    mov     r13d, ecx                   # h
-    xor     ecx, ecx                    # row
-1:  push    rcx
+1:  cmp     ebx, r12d
+    jae     9f
     # color = top + (bot - top) * row / h, per channel
-    xor     r8d, r8d
+    xor     r13d, r13d
     mov     r10d, 16
 2:  mov     ecx, r10d
-    mov     eax, r14d
+    mov     eax, [rip+gr_top]
     shr     eax, cl
     and     eax, 255
-    mov     edx, r15d
+    mov     edx, [rip+gr_bot]
     shr     edx, cl
     and     edx, 255
-    sub     edx, eax                    # delta (signed)
+    sub     edx, eax
     mov     r11d, eax
     mov     eax, edx
-    imul    eax, [rsp]                  # * row
+    imul    eax, ebx
     cdq
-    idiv    r13d
+    idiv    dword ptr [rip+gr_h]
     add     eax, r11d
     shl     eax, cl
-    or      r8d, eax
+    or      r13d, eax
     sub     r10d, 8
     jns     2b
-    mov     edi, ebx
-    mov     esi, ebp
-    add     esi, [rsp]
-    mov     edx, r12d
+    mov     edi, [rip+gr_x]
+    mov     esi, [rip+gr_y]
+    add     esi, ebx
+    mov     edx, [rip+gr_w]
     mov     ecx, 1
+    mov     r8d, r13d
     call    fill_rect_px
-    pop     rcx
-    inc     ecx
-    cmp     ecx, r13d
-    jb      1b
-9:  pop     r15
-    pop     r14
-    pop     r13
+    inc     ebx
+    jmp     1b
+9:  pop     r13
     pop     r12
-    pop     rbp
     pop     rbx
     ret
 
-# -----------------------------------------------------------------------------
+.section .bss
+gr_x:   .skip 4
+gr_y:   .skip 4
+gr_w:   .skip 4
+gr_h:   .skip 4
+gr_top: .skip 4
+gr_bot: .skip 4
+.text
+
 # draw_text_bitmap(edi=x, esi=y, rdx=asciz, ecx=color) -> eax = x after
 #   8x16 bitmap font (fallback when no TrueType font is available), glyphs fully outside the clip are skipped.
 # -----------------------------------------------------------------------------

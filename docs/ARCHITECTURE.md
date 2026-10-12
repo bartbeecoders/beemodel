@@ -22,6 +22,9 @@ stays private to the module.
 | `textfield.s` | Single-line UTF-8 text field: caret, selection, history, Tab completion; the console command line |
 | `ttf.s` | TrueType engine: cmap 4/12, loca/glyf (simple + composite), hmtx, anti-aliased rasterizer, glyph cache |
 | `text.s` | Font selection, UTF-8 text drawing (alpha blended), text measurement, bitmap fallback |
+| `jobs.s` | Worker threads (raw `clone`), futex sleep/wake, `parallel_for` |
+| `mem.s` | Bump arenas (frame / per-thread scratch) and pools with generational handles |
+| `selftest.s` | `--selftest`: allocator and job-system tests plus a benchmark (run in CI) |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -140,6 +143,29 @@ BeeModel receives a preferred scale (in 1/120 steps, e.g. 180 = 150%):
 
 The `*_px` variants (`fill_rect_px`, `draw_line_px`, `set_clip_px`) take
 physical coordinates directly.
+
+## Threads & memory
+
+`jobs_init` starts one worker per CPU (minus the UI thread). The workers are
+created with a raw `clone(CLONE_VM|CLONE_THREAD|…)` on their own 256 KiB stacks,
+and `BEEMODEL_THREADS=n` overrides the count. Idle workers sleep in
+`futex_wait`, so an idle BeeModel uses 0% CPU.
+
+`parallel_for(fn, ctx, count, grain)` publishes a job. Workers and the caller
+claim `grain`-sized chunks with one `lock xadd` each; that dynamic claiming
+balances uneven work the way work stealing does for data-parallel loops. The
+caller returns once every chunk is done. A chunk function receives
+`(ctx, begin, end, thread index, scratch arena)`. The thread's scratch arena is
+reset before each chunk, and `jobs_cancel` stops further claiming. Nested calls
+run inline. The viewport background is the first user, with rows filled in
+parallel; the Phase 2 rasterizer will be the main one.
+
+Memory: `arena_*` is a bump allocator over a reserved (`MAP_NORESERVE`)
+range. Reset is O(1), and anything touched beyond 1 MiB is given back with
+`MADV_DONTNEED`. The frame arena resets every frame. `pool_*` stores
+fixed-size slots with a free list. A handle is
+`generation << 24 | index`, so a freed handle can never reach the slot's next
+occupant. This is the basis for the scene ECS.
 
 ## Event loop & rendering
 

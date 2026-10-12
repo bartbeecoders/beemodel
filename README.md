@@ -71,6 +71,9 @@ src/keyboard.s  XKB keymap parser, levels, dead keys, layout-aware shortcuts, ke
 src/textfield.s UTF-8 text field (console command line)
 src/ttf.s       TrueType parser, anti-aliased rasterizer, glyph cache
 src/text.s      font selection, UTF-8 text drawing and measurement
+src/jobs.s      worker threads, futex, parallel_for
+src/mem.s       arenas and generational-handle pools
+src/selftest.s  --selftest unit tests + benchmark
 src/log.s       string builder + console log
 src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
 src/const.inc   syscalls, opcodes, layout metrics, theme colours
@@ -80,6 +83,10 @@ src/macros.inc  operator record layout + OPERATOR macro
 Text is rendered with your system's TrueType fonts (Noto / DejaVu /
 Liberation, found automatically). Set `BEEMODEL_FONT` / `BEEMODEL_MONO_FONT`
 to a `.ttf` path to choose others, or to `none` for the built-in bitmap font.
+
+BeeModel uses every core: worker threads (one per CPU) sleep until there is
+parallel work. `BEEMODEL_THREADS=n` limits them. `beemodel --selftest` runs
+the built-in allocator and job-system tests and a small benchmark.
 
 Each `.s` file is a separate module linked by `ld`. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the calling convention, the

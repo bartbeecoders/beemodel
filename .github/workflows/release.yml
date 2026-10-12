@@ -26,6 +26,9 @@ jobs:
       - name: Binary policy checks
         run: ci/check-binary.sh build/beemodel
 
+      - name: Self-test
+        run: ./build/beemodel --selftest
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

@@ -232,3 +232,19 @@
 .equ WP_FSCALE_MGR_GET,           1
 .equ WP_VIEWPORTER_GET,           1
 .equ WP_VIEWPORT_SET_DESTINATION, 2
+
+# ---- memory (mem.s) ----------------------------------------------------------------
+.equ AR_BASE,       0
+.equ AR_CAP,        8
+.equ AR_USED,       16
+.equ AR_HWM,        24
+.equ ARENA_SZ,      32
+.equ PL_BASE,       0
+.equ PL_GENS,       8
+.equ PL_ELEM,       16
+.equ PL_CAP,        20
+.equ PL_COUNT,      24
+.equ PL_FREE,       28
+.equ PL_NEXT,       32
+.equ POOL_SZ,       40
+.equ FRAME_ARENA_BYTES, 0x4000000     # 64 MiB reserved, touched lazily

@@ -29,6 +29,12 @@ jobs:
       - name: Binary policy checks
         run: ci/check-binary.sh build/beemodel
 
+      - name: Self-test (allocators, job system, benchmark)
+        run: |
+          ./build/beemodel --selftest
+          BEEMODEL_THREADS=0 ./build/beemodel --selftest
+          BEEMODEL_THREADS=3 ./build/beemodel --selftest
+
       - name: Build (debug, with symbols)
         run: ./build.sh debug && ./build.sh release
 
