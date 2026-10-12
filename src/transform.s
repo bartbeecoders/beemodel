@@ -27,6 +27,8 @@
 .globl tm_custom
 .globl tm_noundo
 .globl tm_start_value
+.globl tm_vint
+.globl tm_wheel
 
 .equ TM_MAX,        MAX_OBJECTS
 .equ TS_H,          0               # snapshot entry: handle, loc, rot, scale
@@ -39,6 +41,7 @@
 tm_snap:        .skip TM_MAX*TS_SZ
 tm_mode:        .skip 4             # 0 none, 1 grab, 2 rotate, 3 scale, 4 value
 tm_noundo:      .skip 4             # the caller already recorded the undo step
+tm_vint:        .skip 4             # value mode: an integer the wheel changes (0 = none)
 .align 8
 tm_vfn:         .skip 8             # value mode: apply(xmm0 = value)
 tm_vcancel:     .skip 8
@@ -90,6 +93,7 @@ s_cursor:       .asciz "|"
 s_hint:         .asciz "    X/Y/Z axis   Ctrl snap   type a value   Enter / LMB confirm   Esc / RMB cancel"
 s_none:         .asciz "  nothing selected"
 s_cancelled:    .asciz "  transform cancelled"
+s_times:        .asciz "   segments "
 .align 16
 tf_absm:        .long 0x7fffffff, 0, 0, 0
 
@@ -358,6 +362,24 @@ tm_start_value:
 9:  add     rsp, 16
     pop     rbx
     ret
+
+# tm_wheel(edi=+1 / -1) - value mode: change the integer (segments, cuts)
+tm_wheel:
+    cmp     dword ptr [rip+tm_mode], 4
+    jne     9f
+    cmp     dword ptr [rip+tm_vint], 0
+    je      9f
+    mov     eax, [rip+tm_vint]
+    sub     eax, edi                    # wheel up (negative) adds
+    cmp     eax, 1
+    jge     1f
+    mov     eax, 1
+1:  cmp     eax, 64
+    jle     2f
+    mov     eax, 64
+2:  mov     [rip+tm_vint], eax
+    jmp     tm_update
+9:  ret
 
 # tm_motion(edi=x, esi=y logical)
 tm_motion:
@@ -873,7 +895,16 @@ tm_update:
     mov     [rcx+rax-2], dl
     mov     byte ptr [rcx+rax-3], '.'
 .Ltt_done:
-    lea     rsi, [rip+fmt_buf]          # keep a copy for the overlay
+    cmp     dword ptr [rip+tm_mode], 4  # value mode: "   segments 3"
+    jne     6f
+    cmp     dword ptr [rip+tm_vint], 0
+    je      6f
+    lea     rdi, [rip+s_times]
+    call    fmt_str
+    mov     edi, [rip+tm_vint]
+    call    fmt_int
+6:  lea     rsi, [rip+fmt_buf]          # keep a copy for the overlay
+
     lea     rdi, [rip+tm_text]
     mov     ecx, 95
 5:  mov     al, [rsi]

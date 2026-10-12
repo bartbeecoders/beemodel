@@ -514,6 +514,8 @@ viewport_draw:
     call    raster_scene
 1:  call    draw_objects                # wires (all objects, or non-meshes)
     call    edit_draw                   # edit mode: edges, vertices, faces
+    call    etool_draw                  # loop cut / knife previews
+    call    cursor_draw                 # the 3D cursor
     call    gizmo_draw
     call    tm_draw
 

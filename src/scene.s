@@ -452,7 +452,7 @@ op_select_all_t:
 # -----------------------------------------------------------------------------
 # Operators
 # -----------------------------------------------------------------------------
-# op_create(rdi=primitive index) - new object at the origin, selected
+# op_create(rdi=primitive index) - new object at the 3D cursor, selected
 op_create:
     push    rbx
     push    r12
@@ -473,6 +473,10 @@ op_create:
     call    obj_click_select
     mov     edi, r12d
     call    obj_get
+    mov     rcx, [rip+cursor_pos]       # at the 3D cursor
+    mov     [rax+OB_LOC], rcx
+    mov     ecx, [rip+cursor_pos+8]
+    mov     [rax+OB_LOC+8], ecx
     mov     rsi, rax
     cmp     dword ptr [rip+op_quiet], 0     # quiet inside scripts (loops)
     jne     9f

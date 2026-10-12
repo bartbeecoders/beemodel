@@ -31,6 +31,19 @@ project uses [Semantic Versioning](https://semver.org/).
     normals (Shift+N, consistent and outwards).
 
   Scripts and agents pass the distance as the operator argument.
+- More modeling tools:
+  - **loop cut** (Ctrl+R): a hover preview, the wheel sets the number of
+    cuts; scripts pass an edge and a count;
+  - **bevel** (Ctrl+B): the width is dragged or typed, the wheel adds
+    segments for round profiles, and corner patches close the gaps where
+    beveled edges meet;
+  - **knife** (K) for cuts through the visible faces, and **bisect** for a
+    plane cut; both use one plane-cut core;
+  - **bridge edge loops** between two boundary loops;
+  - **spin**, which sweeps a profile around the 3D cursor (steps, angle,
+    axis).
+- 3D cursor: Shift+right click places it on the surface or the ground; new
+  objects are created there. View › Reset 3D Cursor puts it back.
 - Keys can depend on the mode (operator flags `OPF_EDIT` / `OPF_OBJECT`):
   X, A, F and Shift+D mean the mesh versions in edit mode. Home resets the
   camera in either mode.
@@ -88,6 +101,7 @@ permissions the user controls, and the user can revert their changes.
   permissions and protocol details.
 
 ### Changed
+- `--list-ops` no longer truncates long descriptions.
 - PNG files are now compressed. The encoder picks a Sub or Up filter per row
   and then deflates the data (LZ77 plus fixed Huffman codes). A 1280×800
   screenshot drops from about 3 MB to about 150 KB.
