@@ -85,6 +85,7 @@ s_m_view:       .asciz "View"
 s_m_create:     .asciz "Create"
 s_m_help:       .asciz "Help"
 s_m_ai:         .asciz "AI"
+s_m_mesh:       .asciz "Mesh"
 s_ai_pfx:       .asciz "AI: "
 s_ai_conn:      .asciz " ("
 s_ai_conn2:     .asciz " connected)"
@@ -100,9 +101,9 @@ s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero 
 s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize panes"
 
 .align 8
-menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_ai, s_m_help
-menu_items:     .quad items_file, items_edit, items_view, items_create, items_ai, items_help, items_area
-menu_counts:    .long 14, 14, 13, 10, 6, 3, 6
+menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_ai, s_m_help
+menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh, items_ai, items_help, items_area
+menu_counts:    .long 14, 14, 13, 10, 19, 6, 3, 6
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8

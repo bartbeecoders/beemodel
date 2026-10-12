@@ -40,6 +40,7 @@ OPERATOR op_help_about, "help.about",     "About BeeModel",     op_about, doc="S
 
 .section .rodata
 s_log_prompt:   .asciz "> "
+s_nl:           .asciz "\n"
 s_log_todo:     .asciz "  not implemented yet - waiting for the modeling core"
 s_about_ver:    .asciz "  BeeModel "
 s_about1:       .asciz "  A 3D modeling shell written in pure x86-64 assembly"
@@ -144,11 +145,18 @@ dispatch_key:
     jae     2f
     cmp     [rdi+OP_KEY], eax
     je      3f
-    add     rdi, OP_SIZE
+4:  add     rdi, OP_SIZE
     jmp     1b
 2:  xor     eax, eax
     ret
-3:  call    run_op
+3:  cmp     dword ptr [rip+edit_obj], 0 # the same key can mean different
+    je      5f                          # things in object and edit mode
+    test    dword ptr [rdi+OP_FLAGS], OPF_OBJECT
+    jnz     4b
+    jmp     6f
+5:  test    dword ptr [rdi+OP_FLAGS], OPF_EDIT
+    jnz     4b
+6:  call    run_op
     mov     eax, 1
     ret
 
@@ -282,13 +290,15 @@ list_ops:
     call    fmt_pad
     mov     rdi, [rbx+OP_LABEL]
     call    fmt_str
+    mov     edi, ' '
+    call    fmt_char
     mov     edi, 62
     call    fmt_pad
+    lea     rdi, [rip+fmt_buf]          # the doc goes out on its own: no limit
+    call    write_out
     mov     rdi, [rbx+OP_DOC]
-    call    fmt_str
-    mov     edi, 10
-    call    fmt_char
-    lea     rdi, [rip+fmt_buf]
+    call    write_out
+    lea     rdi, [rip+s_nl]
     call    write_out
     add     rbx, OP_SIZE
     jmp     1b

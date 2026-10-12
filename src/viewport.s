@@ -902,7 +902,8 @@ vp_zoom:
 # ---- viewport operators (registered into the operator spine) --------------
 OPERATOR op_view_wire,      "view.toggle_wireframe", "Wireframe", op_toggle_flag, op_check_flag, vp_shading, KEY_Z, doc="Switch the viewport between solid shading and wireframe"
 OPERATOR op_view_grid,      "view.toggle_grid",  "Ground Grid",  op_toggle_flag, op_check_flag, show_grid, KEY_G|KM_SHIFT, doc="Show or hide the ground grid and axes"
-OPERATOR op_view_reset_cam, "view.reset_camera", "Reset Camera", op_reset_camera, key=KEY_F, doc="Return the viewport camera to its default view"
+OPERATOR op_view_reset_cam, "view.reset_camera", "Reset Camera", op_reset_camera, key=KEY_F, flags=OPF_AI_SAFE|OPF_OBJECT, doc="Return the viewport camera to its default view (F in object mode, Home anywhere)"
+OPERATOR op_view_reset_home, "view.reset_camera_home", "Reset Camera", op_reset_camera, key=102, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Return the viewport camera to its default view"
 op_reset_camera:
     mov     edi, [rip+vp_area]
     call    cam_load

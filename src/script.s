@@ -202,6 +202,7 @@ f_1e15:         .double 1.0e15
 f_1em4:         .double 1.0e-4
 f_inf:          .double 1.0e308
 f_2m53:         .double 1.1102230246251565e-16
+f_sixth:        .double 0.16666666666666666
 # number units: name (8 bytes, zero padded), factor
 units:          .ascii "m\0\0\0\0\0\0\0"
                 .double 1.0
@@ -354,7 +355,9 @@ builtins:
     .quad bn_vselect, b_vselect
     .long 1, 16
     .quad bn_vsel, b_vsel
-    .long 2, 2
+    .long 2, 3
+    .quad bn_volume, b_volume
+    .long 1, 1
 builtins_end:
 .equ B_SZ, 24
 
@@ -405,6 +408,7 @@ bn_selected:    .asciz "selected"
 bn_vpos:        .asciz "vpos"
 bn_vselect:     .asciz "vselect"
 bn_vsel:        .asciz "vsel"
+bn_volume:      .asciz "volume"
 e_not_mesh:     .asciz "not a mesh: "
 e_axis:         .asciz "axis must be 0, 1 or 2 (or \"x\", \"y\", \"z\")"
 
@@ -3829,21 +3833,89 @@ b_vpos:
     xor     esi, esi
     jmp     sc_rt
 
-# vsel(name, i) - 1 if that vertex is selected
+# volume(name) - signed volume in object space (negative = inside out)
+b_volume:
+    sub     rsp, 8
+    call    a_mesh
+    add     rsp, 8
+    mov     r8, [rax+ME_TRIS]
+    mov     r9, [rax+ME_POS]
+    mov     ecx, [rax+ME_NTRIS]
+    xorpd   xmm7, xmm7
+1:  test    ecx, ecx
+    jz      2f
+    dec     ecx
+    lea     rdx, [rcx+rcx*2]
+    mov     eax, [r8+rdx*4]
+    lea     rax, [rax+rax*2]
+    lea     r10, [r9+rax*4]             # v0
+    mov     eax, [r8+rdx*4+4]
+    lea     rax, [rax+rax*2]
+    lea     r11, [r9+rax*4]             # v1
+    mov     eax, [r8+rdx*4+8]
+    lea     rax, [rax+rax*2]
+    lea     rdx, [r9+rax*4]             # v2
+    cvtss2sd xmm0, [r11+4]              # v0 . (v1 x v2) in doubles
+    cvtss2sd xmm1, [rdx+8]
+    mulsd   xmm0, xmm1
+    cvtss2sd xmm1, [r11+8]
+    cvtss2sd xmm2, [rdx+4]
+    mulsd   xmm1, xmm2
+    subsd   xmm0, xmm1
+    cvtss2sd xmm1, [r10]
+    mulsd   xmm0, xmm1
+    cvtss2sd xmm3, [r11+8]
+    cvtss2sd xmm1, [rdx]
+    mulsd   xmm3, xmm1
+    cvtss2sd xmm1, [r11]
+    cvtss2sd xmm2, [rdx+8]
+    mulsd   xmm1, xmm2
+    subsd   xmm3, xmm1
+    cvtss2sd xmm1, [r10+4]
+    mulsd   xmm3, xmm1
+    addsd   xmm0, xmm3
+    cvtss2sd xmm3, [r11]
+    cvtss2sd xmm1, [rdx+4]
+    mulsd   xmm3, xmm1
+    cvtss2sd xmm1, [r11+4]
+    cvtss2sd xmm2, [rdx]
+    mulsd   xmm1, xmm2
+    subsd   xmm3, xmm1
+    cvtss2sd xmm1, [r10+8]
+    mulsd   xmm3, xmm1
+    addsd   xmm0, xmm3
+    addsd   xmm7, xmm0
+    jmp     1b
+2:  movsd   xmm0, xmm7
+    mulsd   xmm0, [rip+f_sixth]
+    jmp     ret_num
+
+# vsel(name, i) - 1 if that vertex is selected; vsel(name, i, flag) sets it
 b_vsel:
     push    rbx
     push    r12
-    sub     rsp, 8
+    push    r13
     mov     rbx, rdi
+    mov     r13d, esi
     call    a_mesh
     mov     r12, rax
     lea     rdi, [rbx+16]
     mov     rsi, r12
     call    vidx
-    mov     rcx, [r12+ME_VSEL]
+    cmp     r13d, 3
+    jb      1f
+    push    rax
+    lea     rdi, [rbx+32]
+    call    truthy
+    mov     ecx, eax
+    pop     rax
+    mov     rdx, [r12+ME_VSEL]
+    mov     [rdx+rax], cl
+    mov     dword ptr [rip+dirty], 1
+1:  mov     rcx, [r12+ME_VSEL]
     movzx   eax, byte ptr [rcx+rax]
     cvtsi2sd xmm0, eax
-    add     rsp, 8
+    pop     r13
     pop     r12
     pop     rbx
     jmp     ret_num

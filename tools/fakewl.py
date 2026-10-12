@@ -446,6 +446,7 @@ def main():
     files()
     mcp()
     edit_mode()
+    mesh_ops()
     scripting()
     beescript_cli()
     mcp_conformance()
@@ -864,6 +865,48 @@ def edit_mode():
     f.shot('36_edit_loop.png')
     f.mods(4); f.key(38); f.mods(0)             # Ctrl+L: everything connected
     check(q('selected("G")') == '= 121', 'Ctrl+L selects linked geometry')
+    f.proc.kill()
+
+
+def mesh_ops():
+    """Modeling operators driven from the keyboard (modal) and checked by script."""
+    print('  -- mesh operators --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(*project((0, 1, 0)))
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.key(15); f.key(4)                         # Tab, face mode
+    f.click(*project((0.2, 2, -0.3)))           # top face
+    f.key(18); f.type('1'); f.key(28)           # E 1 Enter: extrude along the normal
+    check(q('print(faces("Cube"), volume("Cube"))') == '10 12' and q('vpos("Cube", 8, "y")') in ('= 2', '= 1'),
+          'E extrudes the top face and moves it 1 m along its normal')
+    f.shot('37_extrude.png')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: extrude + move is one step
+    check(q('print(faces("Cube"), volume("Cube"))') == '6 8', 'one undo removes the whole extrusion')
+    f.click(*project((0.2, 2, -0.3)))
+    f.key(23); f.type('0.3'); f.key(28)         # I 0.3 Enter
+    check(q('print(faces("Cube"), verts("Cube"), selected("Cube"))') == '10 12 4', 'I insets the face (0.3 m)')
+    f.key(23); f.key(1)                         # I, then Esc: nothing changes
+    check(q('faces("Cube")') == '= 10', 'Esc cancels a modal inset')
+    f.mods(4); f.key(44); f.mods(0)             # undo: the inset (Esc left no step)
+    check(q('faces("Cube")') == '= 6', 'a cancelled inset leaves no undo step')
+    f.click(*project((0.2, 2, -0.3)))
+    f.key(45)                                   # X: delete the face
+    check(q('print(faces("Cube"), verts("Cube"))') == '5 8', 'X deletes the selected face')
+    q('vselect("Cube", 4, 5, 6, 7)')
+    f.key(33)                                   # F: fill the hole again
+    check(q('print(faces("Cube"), volume("Cube"))') == '6 8', 'F fills the hole (normal outwards)')
+    q('vselect("Cube", 0, 1, 2, 3, 4, 5, 6, 7); op("mesh.subdivide")\n'
+      'vselect("Cube")\nfor i in 0..verts("Cube") { if vpos("Cube", i, "y") == 1 { vsel("Cube", i, 1) } }')
+    f.mods(4); f.key(45); f.mods(0)             # Ctrl+X dissolve the 4 top faces into one
+    n = q('faces("Cube")')
+    flipped = q('for i in 0..verts("Cube") { vsel("Cube", i, 1) }\nop("mesh.flip_normals"); vselect("Cube")\nvolume("Cube")')
+    f.mods(1); f.key(49); f.mods(0)             # Shift+N recalculate (all: nothing selected)
+    check(n == '= 21' and float(flipped[2:]) < -7.9 and float(q('volume("Cube")')[2:]) > 7.9,
+          f'Ctrl+X dissolves the top faces into one ({n}); Shift+N turns flipped faces outwards')
+    f.shot('38_mesh_ops.png')
     f.proc.kill()
 
 

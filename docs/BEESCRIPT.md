@@ -93,12 +93,13 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `count()` | The number of objects |
 | `name(i)` | The name of the `i`-th object in the outliner, starting at 0 |
 | `active()` | The active object's name, or `nil` |
-| `op(id, [arg])` | Runs any operator, e.g. `op("file.save", "~/a.bee")` |
+| `op(id, [arg])` | Runs any operator, e.g. `op("file.save", "~/a.bee")` or, in edit mode, `op("mesh.extrude", 2)` |
 | `edit(name)` / `edit()` | Enters edit mode on a mesh (it becomes active) / leaves edit mode |
 | `verts(name)` `edges(name)` `faces(name)` | Mesh sizes |
 | `vpos(name, i, axis)` | A vertex coordinate in object space; axis is `0`-`2` or `"x"` / `"y"` / `"z"` |
 | `selected(name)` | How many vertices are selected (the edit-mode selection) |
-| `vsel(name, i)` | 1 if vertex `i` is selected |
+| `vsel(name, i)` / `vsel(name, i, flag)` | 1 if vertex `i` is selected / select or deselect it |
+| `volume(name)` | Signed mesh volume; it is negative when the normals point inwards |
 | `vselect(name, i...)` | Selects exactly these vertices; `vselect(name)` deselects all |
 
 ### Math and text

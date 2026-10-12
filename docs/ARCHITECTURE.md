@@ -34,6 +34,7 @@ stays private to the module.
 | `undo.s` | Undo / redo history of scene snapshots (shared, reference-counted meshes) |
 | `fileio.s` | Paths (`~`, default dirs, mkdir -p), mmap reads, atomic writes, growable buffer, number text I/O |
 | `edit.s` | Edit mode: per-vertex selection stored in the mesh; copy-on-write geometry, so undo snapshots keep old meshes; depth-tested overlays and picking; edge loops; linked; box select; component transforms |
+| `meshops.s` | Mesh operators: extrude, inset, delete, merge, dissolve, fill, subdivide, duplicate, normals. Each builds a new mesh, so undo keeps the old one; modal ones use the transform value mode |
 | `agent.s` | Agent safety: permission tiers (read-only / edit / files) and their operators, the activity ring, the AI Activity editor, one-click revert |
 | `script.s` | BeeScript: lexer, one-pass bytecode compiler, stack VM (doubles, texts, nil), semispace text heap, scene builtins, macro recorder |
 | `png.s` | PNG encoder: Sub/Up row filters, deflate (LZ77 hash matching, fixed Huffman), CRC-32, Adler-32 |

@@ -79,10 +79,10 @@ OPERATOR op_add_camera,   "create.camera",   "Camera",   op_create, arg=5, flags
 OPERATOR op_add_cone,     "create.cone",     "Cone",     op_create, arg=6, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a cone"
 OPERATOR op_add_torus,    "create.torus",    "Torus",    op_create, arg=7, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a torus"
 OPERATOR op_add_grid,     "create.grid",     "Grid",     op_create, arg=8, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a subdivided grid"
-OPERATOR op_select_all,   "object.select_all", "Select All / None", op_select_all_t, key=KEY_A, doc="Select every object, or none if some are selected"
-OPERATOR op_delete,       "object.delete",   "Delete",   op_delete_sel, key=KEY_X, flags=OPF_AI_SAFE|OPF_UNDO, doc="Delete the selected objects"
-OPERATOR op_delete_key,   "object.delete_key", "Delete", op_delete_sel, key=KEY_DELETE, flags=OPF_HIDDEN|OPF_UNDO, doc="Delete the selected objects (Delete key)"
-OPERATOR op_duplicate,    "object.duplicate", "Duplicate", op_duplicate_sel, key=KEY_D|KM_SHIFT, flags=OPF_AI_SAFE|OPF_UNDO, doc="Duplicate the selected objects"
+OPERATOR op_select_all,   "object.select_all", "Select All / None", op_select_all_t, key=KEY_A, flags=OPF_AI_SAFE|OPF_OBJECT, doc="Select every object, or none if some are selected"
+OPERATOR op_delete,       "object.delete",   "Delete",   op_delete_sel, key=KEY_X, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Delete the selected objects"
+OPERATOR op_delete_key,   "object.delete_key", "Delete", op_delete_sel, key=KEY_DELETE, flags=OPF_HIDDEN|OPF_UNDO|OPF_OBJECT, doc="Delete the selected objects (Delete key)"
+OPERATOR op_duplicate,    "object.duplicate", "Duplicate", op_duplicate_sel, key=KEY_D|KM_SHIFT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Duplicate the selected objects"
 
 .text
 
@@ -426,8 +426,6 @@ obj_click_select:
     ret
 
 op_select_all_t:
-    cmp     dword ptr [rip+edit_obj], 0 # edit mode: the mesh's vertices
-    jne     do_sel_all
     push    rbx
     xor     ebx, ebx                    # any selected?
 1:  cmp     ebx, [rip+obj_count]
