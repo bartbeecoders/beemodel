@@ -6,6 +6,24 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Edit mode (Tab) for mesh objects:
+  - vertex, edge and face select modes (1 / 2 / 3);
+  - click, Shift+click, select all / none (A), invert (Ctrl+I), box select
+    (B, Ctrl subtracts), edge loops (Alt+click) and select linked (Ctrl+L);
+  - G / R / S on the selection, with axis constraints, snapping, typed values
+    and gizmos;
+  - overlays (edges, vertex dots, face dots, a tint on selected faces) that are
+    depth tested against the rasterizer's depth buffer, so hidden elements are
+    neither drawn nor picked.
+
+  Geometry is copy-on-write, so undo snapshots keep the previous mesh.
+- BeeScript mesh functions: `edit`, `verts`, `edges`, `faces`, `vpos`,
+  `selected`, `vsel`, `vselect`.
+
+### Changed
+- Meshes store a vertex selection and a triangle-to-polygon map.
+
 ## [0.4.0] - 2026-10-13
 
 Phase 3 of the masterplan, "AI-native layer": AI agents become first-class

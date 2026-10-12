@@ -18,6 +18,7 @@
 .globl mesh_add_vert
 .globl mesh_add_poly
 .globl mesh_finish
+.globl mesh_bbox
 .globl prim_cube
 .globl prim_plane
 .globl prim_grid
@@ -79,13 +80,13 @@ mesh_new:
     mov     r12d, edi
     mov     r13d, esi
     mov     r14d, edx
-    # bytes = hdr + 12v + 4(p+1) + 4l + 8l + 12l
+    # bytes = hdr + 12v + 4(p+1) + 4l + 8l + 12l + 4l (tri -> poly) + v (sel)
     mov     eax, r12d
-    imul    rax, rax, 12
+    imul    rax, rax, 13
     lea     rcx, [r14+1]
     lea     rax, [rax+rcx*4]
     mov     rcx, r13
-    imul    rcx, rcx, 24
+    imul    rcx, rcx, 28
     add     rax, rcx
     add     rax, ME_HDR+4095
     and     rax, -4096
@@ -130,6 +131,11 @@ mesh_set_ptrs:
     mov     [rax+ME_EDGES], rcx
     lea     rcx, [rcx+rdx*8]
     mov     [rax+ME_TRIS], rcx
+    lea     rcx, [rcx+rdx*8]            # 12 bytes per loop
+    lea     rcx, [rcx+rdx*4]
+    mov     [rax+ME_TPOLY], rcx
+    lea     rcx, [rcx+rdx*4]
+    mov     [rax+ME_VSEL], rcx
     ret
 
 # mesh_ref(rdi=mesh) / mesh_unref(rdi=mesh) - meshes are shared by objects
@@ -269,6 +275,9 @@ mesh_finish:
     mov     [r10+rdx*4+4], r11d
     mov     r11d, [r9+rax*4]
     mov     [r10+rdx*4+8], r11d
+    mov     edx, [rbx+ME_NTRIS]         # its polygon
+    mov     r10, [rbx+ME_TPOLY]
+    mov     [r10+rdx*4], r12d
     inc     dword ptr [rbx+ME_NTRIS]
     inc     ecx
     jmp     3b
@@ -314,6 +323,21 @@ mesh_finish:
     inc     r12d
     jmp     .Lmf_poly
 .Lmf_bbox:
+    mov     rdi, rbx
+    call    mesh_bbox
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# mesh_bbox(rdi=mesh) - bounding box of the positions
+mesh_bbox:
+    push    rbx
+    mov     rbx, rdi
     movss   xmm0, [rip+mf_big]          # min
     movss   xmm1, xmm0
     movss   xmm2, xmm0
@@ -339,12 +363,6 @@ mesh_finish:
     movss   [rbx+ME_BMAX], xmm3
     movss   [rbx+ME_BMAX+4], xmm4
     movss   [rbx+ME_BMAX+8], xmm5
-    add     rsp, 8
-    pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
-    pop     rbp
     pop     rbx
     ret
 

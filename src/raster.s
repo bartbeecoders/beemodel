@@ -19,6 +19,11 @@
 .globl raster_scene
 .globl raster_pick
 .globl vp_shading
+.globl rs_depth
+.globl rs_x0
+.globl rs_y0
+.globl rs_w
+.globl rs_h
 
 .equ TILE_SHIFT,    4
 .equ TILE,          1 << TILE_SHIFT
@@ -30,6 +35,7 @@
 .equ RO_ID,         24
 .equ RO_COL,        28
 .equ RO_OBJ,        32
+.equ RO_PSEL,       40              # edit mode: selected-polygon flags
 .equ RO_SZ,         48
 .equ CHUNKS,    128
 .equ BUF_ROUND,     0x100000
@@ -198,6 +204,13 @@ raster_scene:
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     31f
     mov     [r14+RO_OBJ], rax
+    xor     ecx, ecx                    # the edit object tints its selection
+    cmp     dword ptr [rip+rs_mode], 0  # (colour pass only)
+    jne     32f
+    cmp     rax, [rip+edit_ro_obj]
+    jne     32f
+    mov     rcx, [rip+edit_psel]
+32: mov     [r14+RO_PSEL], rcx
     mov     r15, [rax+OB_MESH]
     mov     [r14+RO_MESH], r15
     mov     [r14+RO_BASE], r13d
@@ -540,7 +553,16 @@ job_tris:
     inc     r13d                        # past this object's triangles
     jmp     .Ljt_loop
 3:  mov     r15, [r14+RO_MESH]
-    mov     rcx, [r15+ME_TRIS]
+    mov     dword ptr [rsp+16], COL_SOLID
+    mov     rcx, [r14+RO_PSEL]          # selected polygon (edit mode)?
+    test    rcx, rcx
+    jz      31f
+    mov     rdx, [r15+ME_TPOLY]
+    mov     edx, [rdx+rax*4]
+    cmp     byte ptr [rcx+rdx], 0
+    je      31f
+    mov     dword ptr [rsp+16], COL_FACE_SEL
+31: mov     rcx, [r15+ME_TRIS]
     imul    rax, rax, 12
     mov     edi, [rcx+rax]
     mov     esi, [rcx+rax+4]
@@ -552,7 +574,7 @@ job_tris:
     add     rdi, r8
     add     rsi, r8
     add     rdx, r8
-    mov     ecx, [r14+RO_COL]
+    mov     ecx, [rsp+16]
     mov     r8d, [r14+RO_ID]
     mov     r9d, ebp
     call    setup_tri                   # eax = triangles kept (0..2)

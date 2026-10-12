@@ -55,6 +55,7 @@ s_log_add:      .asciz "  added "
 s_log_del:      .asciz "  objects deleted: "
 s_log_dup:      .asciz "  duplicated: "
 s_log_nosel:    .asciz "  nothing selected"
+s_edit_unsup:   .asciz "  not available in edit mode yet (Tab returns to object mode)"
 .align 8
 # create.* argument -> (generator, name, type)
 prim_table:     .quad prim_cube,     s_cube,     OT_MESH
@@ -382,6 +383,11 @@ select_none:
 9:  pop     rbx
     ret
 
+# edit_unsupported - object operators wait for mesh versions (#39)
+edit_unsupported:
+    lea     rdi, [rip+s_edit_unsup]
+    jmp     log_line
+
 # obj_click_select(edi=handle or 0, esi=extend) - Blender-style click
 obj_click_select:
     push    rbx
@@ -420,6 +426,8 @@ obj_click_select:
     ret
 
 op_select_all_t:
+    cmp     dword ptr [rip+edit_obj], 0 # edit mode: the mesh's vertices
+    jne     do_sel_all
     push    rbx
     xor     ebx, ebx                    # any selected?
 1:  cmp     ebx, [rip+obj_count]
@@ -479,6 +487,8 @@ op_create:
 
 # op_delete_sel - remove selected objects (keeps list order)
 op_delete_sel:
+    cmp     dword ptr [rip+edit_obj], 0
+    jne     edit_unsupported
     push    rbx
     push    r12
     push    r13
@@ -538,6 +548,8 @@ op_delete_sel:
 # op_duplicate_sel - copy selected objects (mesh included) 2.5 m along +X;
 # the copies become the selection
 op_duplicate_sel:
+    cmp     dword ptr [rip+edit_obj], 0
+    jne     edit_unsupported
     push    rbx
     push    r12
     push    r13

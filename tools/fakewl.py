@@ -445,6 +445,7 @@ def main():
     undo_redo()
     files()
     mcp()
+    edit_mode()
     scripting()
     beescript_cli()
     mcp_conformance()
@@ -814,6 +815,55 @@ def mcp():
     check(json.loads(line or b'{}').get('id') == 7, '--mcp-bridge relays JSON-RPC over stdio')
     b.stdin.close(); b.wait(timeout=5)
     f.shot('30_mcp.png')
+    f.proc.kill()
+
+
+def edit_mode():
+    """Edit mode: select vertices / edges / faces, transform them, undo."""
+    print('  -- edit mode --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(*project((0, 1, 0)))
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    corner = project((1, 2, 1))                 # cube vertex 6, facing the camera
+    f.key(15)                                   # Tab
+    check(px(f, *corner) == 0x0b0c0e, 'Tab enters edit mode: vertex dots are drawn')
+    f.click(*corner)
+    check(q('selected("Cube")') == '= 1' and q('vsel("Cube", 6)') == '= 1' and px(f, *corner) == 0xffa233,
+          'clicking a vertex selects it')
+    f.key(34); f.key(45); f.key(3); f.key(28)   # G X 2 Enter
+    f.pump(0.2)
+    check(q('vpos("Cube", 6, "x")') == '= 3' and q('get("Cube", "x")') == '= 0'
+          and px(f, *project((3, 2, 1))) == 0xffa233, 'G X 2 moves the vertex, not the object')
+    f.shot('34_edit_vertex.png')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    check(q('vpos("Cube", 6, "x")') == '= 1', 'undo restores the vertex')
+    f.key(4)                                    # 3: face mode
+    f.click(*project((0.2, 2, -0.3)))           # the top face
+    top = q('selected("Cube")'), [q(f'vsel("Cube", {i})') for i in (4, 5, 6, 7)]
+    c = px(f, *project((0.3, 2, 0.3)))
+    r, g, b = c >> 16, (c >> 8) & 255, c & 255
+    check(top == ('= 4', ['= 1'] * 4) and r > g > b, 'face mode: clicking the top face selects it (tinted)')
+    f.shot('35_edit_face.png')
+    f.key(30)                                   # A: some selected -> none
+    n0 = q('selected("Cube")')
+    f.key(30)                                   # A: all
+    check(n0 == '= 0' and q('selected("Cube")') == '= 8', 'A deselects, then selects everything')
+    f.key(2); f.key(30)                         # vertex mode, deselect all
+    f.key(48)                                   # B, then drag around the corner
+    f.drag(corner[0] - 15, corner[1] - 15, corner[0] + 15, corner[1] + 15)
+    check(q('selected("Cube")') == '= 1' and q('vsel("Cube", 6)') == '= 1', 'B box-selects the vertex inside')
+    f.key(15)                                   # Tab: back to object mode
+    q('delete("Cube"); g = add("grid", "G"); scale(g, 4); edit(g)')
+    f.pump(0.3)
+    f.mods(8); f.click(*project((1.6, 0, 0))); f.mods(0)   # Alt+click a grid edge on z = 0
+    row = q('n = 0\nfor i in 0..verts("G") { if vsel("G", i) { if vpos("G", i, "z") == 0 { n += 1 } } }\nn')
+    check(q('selected("G")') == '= 11' and row == '= 11', 'Alt+click selects the whole edge loop (11 vertices)')
+    f.shot('36_edit_loop.png')
+    f.mods(4); f.key(38); f.mods(0)             # Ctrl+L: everything connected
+    check(q('selected("G")') == '= 121', 'Ctrl+L selects linked geometry')
     f.proc.kill()
 
 
