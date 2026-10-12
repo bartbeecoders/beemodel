@@ -172,8 +172,9 @@ raster_scene:
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     11f
     inc     r12d
-    mov     rcx, [rax+OB_MESH]
-    add     r13d, [rcx+ME_NTRIS]
+    mov     rdi, rax
+    call    obj_eval
+    add     r13d, [rax+ME_NTRIS]
 11: inc     ebx
     jmp     1b
 2:  mov     [rip+rs_nobjs], r12d
@@ -211,7 +212,9 @@ raster_scene:
     jne     32f
     mov     rcx, [rip+edit_psel]
 32: mov     [r14+RO_PSEL], rcx
-    mov     r15, [rax+OB_MESH]
+    mov     rdi, rax
+    call    obj_eval
+    mov     r15, rax
     mov     [r14+RO_MESH], r15
     mov     [r14+RO_BASE], r13d
     mov     ecx, [r15+ME_NTRIS]

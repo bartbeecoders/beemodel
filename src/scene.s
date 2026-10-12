@@ -310,11 +310,12 @@ scene_clear:
     jae     2f
     mov     edi, ebx
     call    obj_at
-    mov     rdi, [rax+OB_MESH]
-    call    mesh_unref
+    mov     rdi, rax
+    call    obj_data_unref
     inc     ebx
     jmp     1b
-2:  lea     rdi, [rip+scene_pool]
+2:  call    eval_flush
+    lea     rdi, [rip+scene_pool]
     call    pool_clear
     mov     dword ptr [rip+obj_count], 0
     mov     dword ptr [rip+active_obj], 0
@@ -503,8 +504,8 @@ op_delete_sel:
     call    obj_at
     test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
     jz      1b
-    mov     rdi, [rax+OB_MESH]
-    call    mesh_unref
+    mov     rdi, rax
+    call    obj_data_unref
     lea     rax, [rip+obj_list]
     mov     r12d, [rax+rbx*4]
     cmp     r12d, [rip+active_obj]
@@ -586,6 +587,11 @@ op_duplicate_sel:
     lea     rdi, [rax+32]
     mov     ecx, 40
     rep     movsb
+    mov     rdi, [r12+OB_MODS]          # the modifier stack is shared too
+    mov     [rax+OB_MODS], rdi
+    push    rax
+    call    mods_ref
+    pop     rax
     movss   xmm0, [rax+OB_LOC]
     addss   xmm0, [rip+sf_dup]
     movss   [rax+OB_LOC], xmm0

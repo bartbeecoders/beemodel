@@ -103,8 +103,8 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_ai, s_m_help
-menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_ai, items_help, items_area
-menu_counts:    .long 14, 14, 13, 10, 27, 6, 3, 6
+menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_ai, items_help, items_area, items_modadd
+menu_counts:    .long 14, 14, 13, 10, 27, 6, 3, 6, 7
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
@@ -178,7 +178,13 @@ ui_layout:
     mov     edi, [rip+menu_open]
     test    edi, edi
     js      14f
-    cmp     edi, MENU_AREA              # editor-type menu hangs off an area header
+    cmp     edi, MENU_MODADD            # modifier types: at the Add button
+    jne     17f
+    mov     eax, [rip+md_y]
+    mov     [rip+drop_y], eax
+    mov     eax, [rip+md_x]
+    jmp     16f
+17: cmp     edi, MENU_AREA              # editor-type menu hangs off an area header
     jne     15f
     push    rdi
     mov     edi, [rip+active_area]
@@ -423,8 +429,12 @@ ui_motion:
     call    box_move                    # edi / esi = the pointer
     jmp     .Lmo_out
 76: cmp     eax, DRAG_REDO
-    jne     77f
+    jne     75f
     call    redo_drag_move              # edi = pointer x
+    jmp     .Lmo_out
+75: cmp     eax, DRAG_MODS
+    jne     77f
+    call    mods_drag_move
     jmp     .Lmo_out
 77: cmp     eax, DRAG_PENDING
     jne     0f
@@ -717,7 +727,15 @@ ui_button:
     mov     [rip+active_area], r12d
     mov     dword ptr [rip+menu_open], MENU_AREA
     jmp     .Lbt_done
-5:  cmp     ebx, HIT_REDO               # drag a value of the redo panel
+5:  cmp     ebx, HIT_MODS               # modifier stack: buttons / fields
+    jne     56f
+    mov     edi, r12d
+    call    mods_drag_begin
+    test    r12d, 0x20000
+    jz      .Lbt_done
+    mov     dword ptr [rip+drag_mode], DRAG_MODS
+    jmp     .Lbt_done
+56: cmp     ebx, HIT_REDO               # drag a value of the redo panel
     jne     55f
     mov     edi, r12d
     call    redo_drag_begin

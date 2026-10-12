@@ -123,8 +123,8 @@ snapshot:
     lea     rdi, [rbx+ST_HDR+rax]
     mov     ecx, OB_SZ
     rep     movsb
-    mov     rdi, [rdi-OB_SZ+OB_MESH]    # the snapshot holds a reference
-    call    mesh_ref
+    lea     rdi, [rdi-OB_SZ]            # the snapshot holds references
+    call    obj_data_ref
     inc     r12d
     jmp     2b
 8:  mov     rax, rbx
@@ -146,8 +146,8 @@ release:
     jae     2f
     mov     eax, r12d
     shl     eax, 7
-    mov     rdi, [rbx+ST_HDR+rax+OB_MESH]
-    call    mesh_unref
+    lea     rdi, [rbx+ST_HDR+rax]
+    call    obj_data_unref
     inc     r12d
     jmp     1b
 2:  mov     rax, [rbx+ST_BYTES]
@@ -172,11 +172,12 @@ restore_step:
     jae     2f
     mov     edi, r12d
     call    obj_at
-    mov     rdi, [rax+OB_MESH]
-    call    mesh_unref
+    mov     rdi, rax
+    call    obj_data_unref
     inc     r12d
     jmp     1b
-2:  lea     rdi, [rip+scene_pool]
+2:  call    eval_flush
+    lea     rdi, [rip+scene_pool]
     call    pool_clear
     mov     dword ptr [rip+obj_count], 0
     mov     dword ptr [rip+active_obj], 0
@@ -195,8 +196,8 @@ restore_step:
     lea     rsi, [rbx+ST_HDR+rax]
     mov     ecx, OB_SZ
     rep     movsb
-    mov     rdi, [rdi-OB_SZ+OB_MESH]
-    call    mesh_ref
+    lea     rdi, [rdi-OB_SZ]
+    call    obj_data_ref
     mov     eax, [rip+obj_count]
     lea     rcx, [rip+obj_list]
     mov     [rcx+rax*4], r13d

@@ -42,6 +42,20 @@ project uses [Semantic Versioning](https://semver.org/).
   - **bridge edge loops** between two boundary loops;
   - **spin**, which sweeps a profile around the 3D cursor (steps, angle,
     axis).
+- Modifier stack: Mirror, Array, Solidify, Subdivision Surface, Bevel,
+  Decimate and Remesh.
+  - Non-destructive and cached per object.
+  - Edited in the Properties editor (add, toggle, reorder, apply, remove,
+    drag values); undoable.
+  - Saved in `.bee` files (MODS chunk).
+  - Scriptable: `modifier`, `modset`, `modapply`, `modremove`, `modcount`,
+    `everts`, `efaces`.
+  - Shown to agents in `scene_summary`.
+
+  Subdivision is a parallel Catmull–Clark with cached topology. On a
+  102,400-quad mesh, level 3 (6.5 M faces) builds in about 125 ms, and an
+  edit updates it in about 19 ms.
+- BeeScript: `vmove` (move a vertex) and `clock()`.
 - Redo panel: adjust the last operation. Extrude, individual extrude,
   inset, bevel, loop cut, merge by distance and spin report their values.
   Drag or scroll a value, use F9 to type, or call `edit.redo_last

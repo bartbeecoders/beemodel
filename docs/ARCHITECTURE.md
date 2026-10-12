@@ -37,6 +37,9 @@ stays private to the module.
 | `meshops.s` | Mesh operators: extrude, inset, delete, merge, dissolve, fill, subdivide, duplicate, normals. Each builds a new mesh, so undo keeps the old one; modal ones use the transform value mode |
 | `meshops2.s` | Loop cut (ring walk), knife and bisect (one plane-cut core), bridge, spin, bevel (offset corner points, arcs, corner patches), the 3D cursor, and the interactive edit tools the UI routes input to |
 | `redo.s` | Redo panel: operators declare parameters (`OPERATOR … params=`) and report the values used; the panel and `edit.redo_last` restore the top undo snapshot and run the operator again without a new step |
+| `mods.s` | Modifier stacks: reference-counted, copy-on-write blocks shared with undo; an evaluation cache per object keyed weakly on mesh and stack versions (freeing a mesh notifies the caches); Mirror, Array, Solidify; the properties UI; save / load |
+| `mods2.s` | Bevel (by angle), Decimate (vertex clustering), Remesh (ray-parity voxels, surface nets, smoothing) |
+| `subsurf.s` | Catmull–Clark on corner arrays: level 0 is hashed once, deeper levels are derived arithmetically, every pass runs in parallel; topology is cached so edits only recompute positions |
 | `agent.s` | Agent safety: permission tiers (read-only / edit / files) and their operators, the activity ring, the AI Activity editor, one-click revert |
 | `script.s` | BeeScript: lexer, one-pass bytecode compiler, stack VM (doubles, texts, nil), semispace text heap, scene builtins, macro recorder |
 | `png.s` | PNG encoder: Sub/Up row filters, deflate (LZ77 hash matching, fixed Huffman), CRC-32, Adler-32 |

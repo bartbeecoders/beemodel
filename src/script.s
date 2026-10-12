@@ -203,6 +203,7 @@ f_1em4:         .double 1.0e-4
 f_inf:          .double 1.0e308
 f_2m53:         .double 1.1102230246251565e-16
 f_sixth:        .double 0.16666666666666666
+f_1000:         .double 1000.0
 # number units: name (8 bytes, zero padded), factor
 units:          .ascii "m\0\0\0\0\0\0\0"
                 .double 1.0
@@ -358,6 +359,24 @@ builtins:
     .long 2, 3
     .quad bn_volume, b_volume
     .long 1, 1
+    .quad bn_modifier, b_modifier
+    .long 2, 2
+    .quad bn_modset, b_modset
+    .long 4, 4
+    .quad bn_modapply, b_modapply
+    .long 2, 2
+    .quad bn_modremove, b_modremove
+    .long 2, 2
+    .quad bn_modcount, b_modcount
+    .long 1, 1
+    .quad bn_everts, b_everts
+    .long 1, 1
+    .quad bn_efaces, b_efaces
+    .long 1, 1
+    .quad bn_clock, b_clock
+    .long 0, 0
+    .quad bn_vmove, b_vmove
+    .long 5, 5
 builtins_end:
 .equ B_SZ, 24
 
@@ -409,6 +428,17 @@ bn_vpos:        .asciz "vpos"
 bn_vselect:     .asciz "vselect"
 bn_vsel:        .asciz "vsel"
 bn_volume:      .asciz "volume"
+bn_modifier:    .asciz "modifier"
+bn_modset:      .asciz "modset"
+bn_modapply:    .asciz "modapply"
+bn_modremove:   .asciz "modremove"
+bn_modcount:    .asciz "modcount"
+bn_everts:      .asciz "everts"
+bn_efaces:      .asciz "efaces"
+bn_clock:       .asciz "clock"
+bn_vmove:       .asciz "vmove"
+e_modtype:      .asciz "modifier types: mirror array solidify subsurf bevel decimate remesh; got "
+e_modidx:       .asciz "no modifier with that index / parameter"
 e_not_mesh:     .asciz "not a mesh: "
 e_axis:         .asciz "axis must be 0, 1 or 2 (or \"x\", \"y\", \"z\")"
 
@@ -3832,6 +3862,240 @@ b_vpos:
 3:  lea     rdi, [rip+e_axis]
     xor     esi, esi
     jmp     sc_rt
+
+# a_meshobj(rdi=value) -> rax = the named mesh object
+a_meshobj:
+    push    rbx
+    mov     rbx, rdi
+    call    a_mesh                      # checks it is a mesh
+    mov     edi, ecx
+    call    obj_get
+    pop     rbx
+    ret
+
+# modifier(name, type) -> index of the new modifier
+b_modifier:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     r12, rax
+    mov     rdi, rax
+    call    type_by_name
+    test    eax, eax
+    jz      1f
+    mov     r13d, eax
+    mov     rdi, rbx
+    call    a_meshobj
+    mov     rbx, rax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, rbx
+    mov     esi, r13d
+    call    mod_add
+    test    eax, eax
+    js      2f
+    cvtsi2sd xmm0, eax
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+1:  lea     rdi, [rip+e_modtype]
+    mov     rsi, r12
+    jmp     sc_rt
+2:  lea     rdi, [rip+e_modidx]
+    xor     esi, esi
+    jmp     sc_rt
+
+# modset(name, index, parameter, value) - parameter by name or number
+b_modset:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    lea     rdi, [rbx+48]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp], xmm0
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r13d, xmm0                # index
+    mov     rdi, rbx
+    call    a_meshobj
+    mov     r12, rax
+    mov     rdi, r12
+    mov     esi, r13d
+    call    stack_index
+    test    rax, rax
+    jz      8f
+    mov     r14, rax
+    lea     rdi, [rbx+32]               # parameter: text or number
+    cmp     dword ptr [rdi], T_STR
+    jne     1f
+    mov     rsi, [rdi+8]
+    mov     rdi, r14
+    call    mod_param_index
+    jmp     2f
+1:  call    a_num
+    cvttsd2si eax, xmm0
+2:  test    eax, eax
+    js      8f
+    push    rax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    pop     rdx
+    mov     rdi, r12
+    mov     esi, r13d
+    movss   xmm0, [rsp]
+    call    mod_param_set
+    test    eax, eax
+    jz      8f
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+8:  lea     rdi, [rip+e_modidx]
+    xor     esi, esi
+    jmp     sc_rt
+
+# modapply(name, index) / modremove(name, index)
+b_modapply:
+    lea     rax, [rip+mod_apply]
+    jmp     mod_index_call
+b_modremove:
+    lea     rax, [rip+mod_remove]
+mod_index_call:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r13, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r12d, xmm0
+    mov     rdi, rbx
+    call    a_meshobj
+    mov     rbx, rax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, rbx
+    mov     esi, r12d
+    call    r13
+    test    eax, eax
+    jz      8f
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+8:  lea     rdi, [rip+e_modidx]
+    xor     esi, esi
+    jmp     sc_rt
+
+b_modcount:
+    sub     rsp, 8
+    call    a_meshobj
+    add     rsp, 8
+    xor     ecx, ecx
+    mov     rax, [rax+OB_MODS]
+    test    rax, rax
+    jz      1f
+    mov     ecx, [rax+4]
+1:  cvtsi2sd xmm0, ecx
+    jmp     ret_num
+
+# everts(name) / efaces(name) - after modifiers
+b_everts:
+    mov     edx, ME_NVERTS
+    jmp     eval_count
+b_efaces:
+    mov     edx, ME_NPOLYS
+eval_count:
+    push    rdx
+    call    a_meshobj
+    mov     rdi, rax
+    call    obj_eval
+    pop     rdx
+    cvtsi2sd xmm0, dword ptr [rax+rdx]
+    jmp     ret_num
+
+# vmove(name, i, x, y, z) - move a vertex (object space). The mesh is copied
+#   first if an undo step or another object shares it; edits in place bump
+#   its version so modifiers re-evaluate.
+b_vmove:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 24
+    mov     rbx, rdi
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp], xmm0
+    lea     rdi, [rbx+48]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+4], xmm0
+    lea     rdi, [rbx+64]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+8], xmm0
+    mov     rdi, rbx
+    call    a_meshobj
+    mov     r12, rax                    # object
+    lea     rdi, [rbx+16]
+    mov     rsi, [r12+OB_MESH]
+    call    vidx
+    mov     r13d, eax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, [r12+OB_MESH]          # unshare
+    cmp     dword ptr [rdi+ME_REFS], 1
+    jbe     1f
+    call    mesh_copy
+    test    rax, rax
+    jz      1f
+    mov     rdi, [r12+OB_MESH]
+    mov     [r12+OB_MESH], rax
+    call    mesh_unref
+1:  mov     r14, [r12+OB_MESH]
+    mov     rax, [r14+ME_POS]
+    lea     rcx, [r13+r13*2]
+    mov     rdx, [rsp]
+    mov     [rax+rcx*4], rdx
+    mov     edx, [rsp+8]
+    mov     [rax+rcx*4+8], edx
+    inc     dword ptr [r14+108]         # ME_VER
+    mov     rdi, r14
+    call    mesh_bbox
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 24
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# clock() - milliseconds (monotonic), to time scripts
+b_clock:
+    sub     rsp, 24
+    mov     edi, 1                      # CLOCK_MONOTONIC
+    lea     rsi, [rsp]
+    mov     eax, 228                    # clock_gettime
+    syscall
+    cvtsi2sd xmm0, qword ptr [rsp]
+    mulsd   xmm0, [rip+f_1000]
+    cvtsi2sd xmm1, qword ptr [rsp+8]
+    divsd   xmm1, [rip+f_1e6]
+    addsd   xmm0, xmm1
+    add     rsp, 24
+    jmp     ret_num
 
 # volume(name) - signed volume in object space (negative = inside out)
 b_volume:

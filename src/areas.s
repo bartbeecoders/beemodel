@@ -480,6 +480,8 @@ area_hit:
     je      .Lah_console
     cmp     ecx, ED_ACTIVITY
     je      .Lah_activity
+    cmp     ecx, ED_PROPS
+    je      .Lah_props
 .Lah_pane:
     mov     eax, HIT_PANE
     mov     edx, r13d
@@ -521,6 +523,15 @@ area_hit:
     jae     .Lah_pane2
     mov     edx, eax
     mov     eax, HIT_OUTLINER
+    jmp     .Lah_ret
+.Lah_props:                             # modifier buttons and fields
+    mov     edi, ebx
+    mov     esi, r12d
+    call    mods_props_hit
+    test    eax, eax
+    js      .Lah_pane
+    mov     edx, eax
+    mov     eax, HIT_MODS
     jmp     .Lah_ret
 .Lah_activity:
     mov     edi, ebx
@@ -1143,7 +1154,11 @@ ed_props_draw:
     mov     edi, r12d
     lea     rsi, [rip+s_p_mesh]
     call    prop_row
-    add     r12d, 30
+    add     r12d, 12
+    mov     edi, r12d                   # ---- the modifier stack
+    call    mods_props_draw
+    mov     r12d, eax
+    add     r12d, 18
 12: mov     edi, [rip+vp_area]          # ---- camera of the last used viewport
     call    cam_load
     mov     edi, [rip+ed_x]

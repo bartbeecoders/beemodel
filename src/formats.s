@@ -25,6 +25,7 @@
 .equ TAG_MESH,      0x4853454d          # "MESH"
 .equ TAG_OBJS,      0x534a424f          # "OBJS"
 .equ TAG_VIEW,      0x57454956          # "VIEW"
+.equ TAG_MODS,      0x53444f4d          # "MODS"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -35,6 +36,8 @@ mesh_tab:       .skip 8*MAX_FILE_MESHES
 fbase:          .skip 8                 # mapped input file
 fsize:          .skip 8
 chunk_at:       .skip 8
+mods_chunk:     .skip 8
+mods_size:      .skip 4
 n_mesh_tab:     .skip 4
 msg_buf:        .skip 600
 
@@ -215,6 +218,10 @@ bee_save:
     inc     ebx
     jmp     5b
 6:  call    chunk_end
+    mov     edi, TAG_MODS               # MODS (modifier stacks)
+    call    chunk_begin
+    call    mods_write
+    call    chunk_end
     mov     edi, TAG_VIEW               # VIEW
     call    chunk_begin
     mov     r12d, -1                    # active object index
@@ -378,6 +385,7 @@ bee_load:
     jne     .Lbl_bad
     xor     r14, r14                    # OBJS chunk
     xor     r15, r15                    # VIEW chunk
+    mov     qword ptr [rip+mods_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -409,8 +417,14 @@ bee_load:
     mov     r13d, ebp
     jmp     23f
 22: cmp     eax, TAG_VIEW
-    jne     23f
+    jne     24f
     lea     r15, [rbx+8]
+    jmp     23f
+24: cmp     eax, TAG_MODS
+    jne     23f
+    lea     rax, [rbx+8]
+    mov     [rip+mods_chunk], rax
+    mov     [rip+mods_size], ebp
 23: lea     rbx, [rbx+rbp+8]            # unknown chunks are skipped
     jmp     2b
 3:  test    r14, r14
@@ -469,7 +483,12 @@ bee_load:
     inc     dword ptr [rip+obj_count]
     inc     ebx
     jmp     6b
-7:  test    r15, r15                    # view state
+7:  mov     rdi, [rip+mods_chunk]       # modifier stacks
+    test    rdi, rdi
+    jz      70f
+    mov     esi, [rip+mods_size]
+    call    mods_read
+70: test    r15, r15                    # view state
     jz      8f
     mov     eax, [r15]
     cmp     eax, [rip+obj_count]
@@ -557,7 +576,9 @@ obj_export:
     mov     rdi, r12                    # world-space vertices
     call    world_verts
     mov     r13, rax
-    mov     r12, [r12+OB_MESH]
+    mov     rdi, r12
+    call    obj_eval
+    mov     r12, rax
     xor     ecx, ecx
 2:  cmp     ecx, [r12+ME_NVERTS]
     jae     3f
@@ -893,8 +914,11 @@ stl_export:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     7f
-    mov     r12, [rax+OB_MESH]
     mov     rdi, rax
+    push    rax
+    call    obj_eval
+    mov     r12, rax
+    pop     rdi
     call    world_verts
     mov     r13, rax
     xor     r14d, r14d

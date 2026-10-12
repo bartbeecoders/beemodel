@@ -100,6 +100,25 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `selected(name)` | How many vertices are selected (the edit-mode selection) |
 | `vsel(name, i)` / `vsel(name, i, flag)` | 1 if vertex `i` is selected / select or deselect it |
 | `volume(name)` | Signed mesh volume; it is negative when the normals point inwards |
+| `vmove(name, i, x, y, z)` | Moves a vertex (object space) |
+| `modifier(name, type)` | Adds `mirror`, `array`, `solidify`, `subsurf`, `bevel`, `decimate` or `remesh`; returns its index |
+| `modset(name, i, param, value)` | Sets a value, e.g. `modset(c, 0, "levels", 3)` |
+| `modapply(name, i)` / `modremove(name, i)` | Applies a modifier to the mesh / removes it |
+| `modcount(name)` | Number of modifiers in the stack |
+| `everts(name)` / `efaces(name)` | Vertex and face counts after the modifiers |
+| `clock()` | Milliseconds (monotonic), for timing |
+
+The modifier values are:
+
+| Modifier | Values |
+|---|---|
+| mirror | `axis` (0-2), `merge` |
+| array | `count`, `x`, `y`, `z` (offset relative to the size) |
+| solidify | `thickness` |
+| subsurf | `levels` |
+| bevel | `width`, `segments`, `angle` |
+| decimate | `ratio` |
+| remesh | `voxel` |
 | `vselect(name, i...)` | Selects exactly these vertices; `vselect(name)` deselects all |
 
 ### Math and text

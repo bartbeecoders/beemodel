@@ -155,6 +155,9 @@ mesh_unref:
 mesh_free:
     test    rdi, rdi
     jz      1f
+    push    rdi
+    call    mesh_forget                 # caches keyed on it let go
+    pop     rdi
     mov     rsi, [rdi+ME_BYTES]
     mov     eax, SYS_MUNMAP
     syscall
