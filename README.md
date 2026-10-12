@@ -51,7 +51,11 @@ deletes and **Shift+D** duplicates. Properties shows the active object's
 transform and mesh statistics.
 
 The viewport is solid-shaded by a multithreaded software rasterizer (Z toggles
-wireframe). Selected objects get an orange outline, the active one gold.
+wireframe). Move, rotate and scale objects like in Blender: **G**, **R**,
+**S**, then optionally **X/Y/Z** to lock an axis, **Ctrl** to snap, or type a
+value (`G X 2 ⏎`). **Enter** / left click confirms, **Esc** / right click
+cancels. The Move / Rotate / Scale tools (Shift+W/E/R) show gizmos you can
+drag. The grid toggle is **Shift+G**. Selected objects get an orange outline, the active one gold.
 
 Press **F3** for the command palette: type part of any command name and press
 Enter.

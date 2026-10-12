@@ -22,6 +22,12 @@ project uses [Semantic Versioning](https://semver.org/).
   render in 8–9 ms at 1280×800 on 32 threads, with output identical for any
   thread count. Z toggles wireframe.
 - Exact click picking from the ID buffer.
+- Modal transforms like Blender's: G / R / S with X/Y/Z constraints, Ctrl
+  snapping (1 m, 15°, 0.1), typed values, Enter / LMB to confirm and Esc /
+  RMB to cancel. Move / Rotate / Scale tool gizmos can be dragged.
+### Changed
+- G, R and S now start transforms (Blender layout). The grid toggle moved to
+  Shift+G, and the tools to Shift+Q / W / E / R.
 - Binary size budget raised from 64 KiB to 256 KiB (now ~67 KB); the
   masterplan target remains < 2 MB for v1.0.
 - Arenas keep memory that is in use resident instead of releasing it every

@@ -355,16 +355,15 @@ def main():
     f.wheel(-10); f.wheel(-10)           # zoom in
     f.click(1060, 93)                    # outliner: select Camera
     f.shot('06_orbit_zoom.png')
-    f.key(17)                            # W: Move tool via the operator keymap
-    check(px(f, 150, 125) == 0xf2b134, 'W activates the Move tool')
+    f.mods(1); f.key(17); f.mods(0)      # Shift+W: Move tool via the operator keymap
+    check(px(f, 150, 125) == 0xf2b134, 'Shift+W activates the Move tool')
     f.key(20)                            # T: hide tools pane
     check(px(f, 4, 300) != 0x2a2e36, 'T hides the tools pane')
     f.mods(4); f.key(20); f.mods(0)      # Ctrl+T is not bound: no change
     check(px(f, 4, 300) != 0x2a2e36, 'Ctrl+T does not trigger the T binding')
     f.key(20)
     check(px(f, 4, 300) == 0x2a2e36, 'T shows the tools pane again')
-    f.key(16)                            # Q: back to Select
-    f.key(34)                            # G: grid off
+    f.mods(1); f.key(16); f.key(34); f.mods(0)   # Shift+Q: Select, Shift+G: grid off
     f.move(1250, 10)                     # hover close button
     check(px(f, 1240, 3) == 0xe81123, 'close button hover is red')
     f.shot('07_grid_off_close_hover.png')
@@ -379,10 +378,10 @@ def main():
 
     # ---- keyboard: real XKB keymaps, delivered over an fd like Hyprland does
     f.keymap('tests/keymaps/be.xkb')     # Belgian AZERTY
-    f.key(44)                            # physical QWERTY-Z = label W on AZERTY
-    check(px(f, 150, 125) == 0xf2b134, 'AZERTY: key labelled W selects Move')
-    f.key(16)                            # physical QWERTY-Q = label A: unbound
-    check(px(f, 150, 125) == 0xf2b134, 'AZERTY: key labelled A does not trigger Q')
+    f.mods(1); f.key(44); f.mods(0)      # Shift + physical QWERTY-Z = label W on AZERTY
+    check(px(f, 150, 125) == 0xf2b134, 'AZERTY: Shift + key labelled W selects Move')
+    f.mods(1); f.key(16); f.mods(0)      # Shift + physical QWERTY-Q = label A: unbound
+    check(px(f, 150, 125) == 0xf2b134, 'AZERTY: Shift + key labelled A does not trigger Shift+Q')
     f.keymap('tests/keymaps/us.xkb')
     f.repeat_info(60, 120)
     f.move(800, 400)
@@ -432,9 +431,86 @@ def main():
     check(rc == 0, f'typed file.exit quits cleanly (rc={rc})')
     check(f.frames >= 50, f'frames rendered ({f.frames})')
     areas_and_palette()
+    transforms()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
     sys.exit(1 if FAILS else 0)
+
+
+import math
+
+
+def project(p, yaw=0.7853982, pitch=0.5, dist=18.0, target=(0, 0, 0),
+            canvas=(214, 80, 1014, 623)):
+    """Mirror of cam_setup + project in viewport.s (default viewport, 100%)."""
+    sy, cy, sp, cp = math.sin(yaw), math.cos(yaw), math.sin(pitch), math.cos(pitch)
+    right = (cy, 0, -sy); up = (-sp * sy, cp, -sp * cy); fwd = (-cp * sy, -sp, -cp * cy)
+    eye = [target[i] - fwd[i] * dist for i in range(3)]
+    d = [p[i] - eye[i] for i in range(3)]
+    dot = lambda a, b: sum(a[i] * b[i] for i in range(3))
+    x0, y0, x1, y1 = canvas
+    f = (y1 - y0) * 1.07
+    z = dot(d, fwd)
+    return (int((x0 + x1) / 2 + f * dot(d, right) / z), int((y0 + y1) / 2 - f * dot(d, up) / z))
+
+
+def bright(c):
+    return ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255) > 3 * 100
+
+
+def transforms():
+    """G / R / S modal transforms, constraints, numeric input, cancel, gizmo."""
+    print('  -- transforms --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(*project((0, 1, 0)))
+    view = lambda: [px(f, x, y) for x in range(240, 1000, 7) for y in range(100, 600, 7)]
+    c0 = project((0, 1, 0))
+    check(bright(px(f, *c0)), 'the default cube is drawn at the origin')
+    before = view()
+    f.key(34)                            # G: grab
+    f.move(c0[0] + 120, c0[1] + 40)
+    moved = view()
+    f.key(1)                             # Esc: cancel restores exactly
+    check(moved != before and view() == before, 'G + move changes the view, Esc restores it exactly')
+    f.move(*c0)
+    f.key(34); f.key(45); f.type('2'); f.key(28)     # G X 2 Enter
+    c2 = project((2, 1, 0))
+    check(bright(px(f, *c2)) and not bright(px(f, *project((-0.8, 1, 0)))),
+          'G X 2 Enter moves the cube to x = 2')
+    f.shot('24_grab_x2.png')
+    rot0 = view()
+    f.move(*c2)
+    f.key(19); f.key(44); f.type('45'); f.key(28)    # R Z 45 Enter
+    check(view() != rot0, 'R Z 45 rotates the cube')
+    f.key(19); f.key(44); f.type('-45'); f.key(28)   # and back
+    corners = [project((2 + sx * 0.85, 1 + sy * 0.85, sz * 0.85))  # inside the 2 m cube only
+               for sx in (-1, 1) for sy in (-1, 1) for sz in (-1, 1)]
+    lit = lambda: sum(bright(px(f, *c)) for c in corners)
+    s0, big = view(), lit()
+    f.key(31); f.type('.5'); f.key(28)               # S .5 Enter
+    small = lit()
+    check(view() != s0 and big >= 6 and small <= big // 2 and bright(px(f, *c2)),
+          f'S .5 scales the cube down around its centre ({big} -> {small} lit probes)')
+    f.shot('25_rotate_scale.png')
+    f.key(34)                            # RMB cancels too
+    f.move(c2[0] + 60, c2[1])
+    f.button(True, 0x111); f.button(False, 0x111)
+    check(bright(px(f, *c2)), 'right click cancels a transform')
+    # gizmo: Move tool, drag the X handle
+    f.mods(1); f.key(17); f.mods(0)      # Shift+W: Move tool
+    f.move(*c2)
+    tipx = project((2.6, 1, 0))
+    mid = ((c2[0] + tipx[0]) // 2, (c2[1] + tipx[1]) // 2)
+    dx, dy = tipx[0] - c2[0], tipx[1] - c2[1]
+    n = math.hypot(dx, dy)
+    end = (int(mid[0] + dx / n * 100), int(mid[1] + dy / n * 100))
+    f.shot('26_move_gizmo.png')
+    f.drag(mid[0], mid[1], end[0], end[1], steps=6)
+    check(not bright(px(f, *project((1.6, 1, 0)))), 'dragging the gizmo X handle moves the cube along X')
+    f.shot('27_gizmo_dragged.png')
+    f.proc.kill()
 
 
 def raster_stress():

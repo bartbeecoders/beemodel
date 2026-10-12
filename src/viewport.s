@@ -8,6 +8,10 @@
 .include "macros.inc"
 
 # exports
+.globl project
+.globl lp1
+.globl lp0
+.globl line3d
 .globl fwd
 .globl eye
 .globl world_verts
@@ -67,7 +71,7 @@ f_def_dist: .float 18.0
 .equ GRID_N, 10
 
 s_vp_label: .asciz "Perspective  |  Grid 1 m"
-s_vp_hint:  .asciz "LMB orbit   MMB / Shift+LMB pan   Wheel zoom   F reset   G grid"
+s_vp_hint:  .asciz "Click select   LMB drag orbit   MMB pan   Wheel zoom   G/R/S transform   Z wireframe   F reset"
 s_ax_x:     .asciz "X"
 s_ax_y:     .asciz "Y"
 s_ax_z:     .asciz "Z"
@@ -508,6 +512,8 @@ viewport_draw:
     xor     edi, edi                    # solid: rasterize meshes (+ outline)
     call    raster_scene
 1:  call    draw_objects                # wires (all objects, or non-meshes)
+    call    gizmo_draw
+    call    tm_draw
 
     # ---- orientation gizmo (bottom-left) -----------------------------------
     mov     r12d, [rip+cvs_x0]
@@ -893,7 +899,7 @@ vp_zoom:
 
 # ---- viewport operators (registered into the operator spine) --------------
 OPERATOR op_view_wire,      "view.toggle_wireframe", "Wireframe", op_toggle_flag, op_check_flag, vp_shading, KEY_Z, doc="Switch the viewport between solid shading and wireframe"
-OPERATOR op_view_grid,      "view.toggle_grid",  "Ground Grid",  op_toggle_flag, op_check_flag, show_grid, KEY_G, doc="Show or hide the ground grid and axes"
+OPERATOR op_view_grid,      "view.toggle_grid",  "Ground Grid",  op_toggle_flag, op_check_flag, show_grid, KEY_G|KM_SHIFT, doc="Show or hide the ground grid and axes"
 OPERATOR op_view_reset_cam, "view.reset_camera", "Reset Camera", op_reset_camera, key=KEY_F, doc="Return the viewport camera to its default view"
 op_reset_camera:
     mov     edi, [rip+vp_area]

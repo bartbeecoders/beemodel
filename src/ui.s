@@ -7,6 +7,8 @@
 .include "macros.inc"
 
 # exports
+.globl ptr_y
+.globl ptr_x
 .globl menu_open
 .globl hover_idx
 .globl hover_id
@@ -377,7 +379,12 @@ edge_cursors: .byte  1, 27,27, 1,26,29,28, 1,26,28,29, 1, 1, 1, 1, 1
 # -----------------------------------------------------------------------------
 # ui_motion(edi=x, esi=y)
 ui_motion:
-    push    rbx
+    cmp     dword ptr [rip+tm_mode], 0
+    je      0f
+    mov     [rip+ptr_x], edi
+    mov     [rip+ptr_y], esi
+    jmp     tm_motion
+0:  push    rbx
     push    r12
     push    r13
     mov     ebx, edi
@@ -461,7 +468,24 @@ ui_motion:
     je      11f
     mov     [rip+active_area], eax
     mov     dword ptr [rip+dirty], 1
-11: cmp     r13d, HIT_PALETTE           # hovering a result selects it
+11: cmp     r13d, HIT_CANVAS            # gizmo handle under the pointer?
+    jne     14f
+    push    rdx
+    sub     rsp, 8
+    mov     edi, edx
+    call    vp_prepare
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    gizmo_pick
+    add     rsp, 8
+    pop     rdx
+    jmp     15f
+14: xor     eax, eax
+15: cmp     eax, [rip+gizmo_hover]
+    je      13f
+    mov     [rip+gizmo_hover], eax
+    mov     dword ptr [rip+dirty], 1
+13: cmp     r13d, HIT_PALETTE           # hovering a result selects it
     jne     12f
     test    edx, edx
     js      12f
@@ -516,7 +540,25 @@ ui_button:
     mov     [rip+press_serial], edx
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
-    call    hit_test
+    cmp     dword ptr [rip+tm_mode], 0
+    je      0f
+    test    r15d, r15d                  # transform running: LMB confirms,
+    jz      .Lbt_tm_rel                 # RMB cancels, releasing a gizmo drag
+    cmp     r14d, BTN_RIGHT             # confirms
+    jne     .Lbt_tm_left
+    call    tm_cancel
+    jmp     .Lbt_done
+.Lbt_tm_left:
+    cmp     r14d, BTN_LEFT
+    jne     .Lbt_done
+    call    tm_confirm
+    jmp     .Lbt_done
+.Lbt_tm_rel:
+    cmp     dword ptr [rip+tm_drag], 0
+    je      .Lbt_done
+    call    tm_confirm
+    jmp     .Lbt_done
+0:  call    hit_test
     mov     ebx, eax
     mov     r12d, edx
     mov     dword ptr [rip+dirty], 1
@@ -630,8 +672,20 @@ ui_button:
     jmp     .Lbt_done
 5:  cmp     ebx, HIT_CANVAS            # click selects, drag orbits / pans
     jne     6f
-    mov     [rip+drag_node], r12d
     mov     [rip+vp_area], r12d
+    mov     edi, r12d                   # a gizmo handle starts a transform
+    call    vp_prepare
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    gizmo_pick
+    test    eax, eax
+    jz      51f
+    mov     esi, eax
+    mov     edi, [rip+active_tool]
+    mov     edx, 1
+    call    tm_start
+    jmp     .Lbt_done
+51: mov     [rip+drag_node], r12d
     mov     dword ptr [rip+drag_mode], DRAG_PENDING
     mov     eax, [rip+ptr_x]
     mov     [rip+press_x], eax
@@ -834,6 +888,8 @@ ui_key_repeat:
     je      kb_repeat_stop
 # ui_key_press(edi=evdev) - one key stroke: menus, text field, then keymap
 ui_key_press:
+    cmp     dword ptr [rip+tm_mode], 0  # a running transform takes every key
+    jne     tm_key
     push    rbx
     mov     ebx, edi
     cmp     dword ptr [rip+pal_open], 0  # the palette takes every key

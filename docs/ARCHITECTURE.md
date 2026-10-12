@@ -30,6 +30,7 @@ stays private to the module.
 | `scene.s` | Objects (pool + ordered list), unique names, selection, TRS matrices, object operators |
 | `mesh.s` | Polygon meshes (loops, n-gons), edge/triangle derivation, primitive generators |
 | `raster.s` | Solid viewport rasterizer: parallel setup, binning and tiles; depth + ID buffers; selection outline; picking |
+| `transform.s` | Modal grab / rotate / scale, constraints, snapping, numeric input, gizmos |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -248,6 +249,29 @@ passes in ID-only mode and reads the pixel under the cursor.
 On the reference machine (32 threads) a scene of about 1.2 M triangles
 orbits at 8–9 ms per frame at 1280×800. The output is identical for any
 thread count, so golden images stay exact.
+
+## Transforms
+
+`transform.s` implements Blender-style modal transforms. G, R and S (or
+dragging a handle of the Move / Rotate / Scale tool gizmo) snapshot the
+selected objects' location, rotation and scale and compute a pivot at their
+median point. Every update starts again from the snapshot, so Esc or a right
+click restores the originals exactly, and nothing drifts.
+
+* **Grab:** free movement happens in the view plane at the pivot's depth.
+  With X / Y / Z, the pointer motion is projected onto the axis' on-screen
+  direction (pixels per world unit), so the object follows the mouse.
+* **Rotate:** uses the pointer's angle around the pivot on screen,
+  accumulated across ±π, around the constrained axis (Y if none). The angle
+  is flipped when the axis points away from the viewer. Locations orbit the
+  pivot, and the Euler component of that axis changes.
+* **Scale:** the ratio of the pointer's distance to the pivot now and at
+  the start, per axis or uniform, relative to the pivot.
+* **Ctrl snapping:** 1 m, 15°, 0.1 steps.
+* **Numeric input:** typed text (`G X 2.5 ⏎`) replaces the mouse value. It
+  accepts the digit row, the keypad, `.` `,` and `-`.
+
+While a transform runs it receives every pointer, button and key event.
 
 ## Event loop & rendering
 
