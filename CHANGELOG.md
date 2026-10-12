@@ -16,6 +16,16 @@ project uses [Semantic Versioning](https://semver.org/).
   like Cube.001).
 - The outliner lists the scene's objects and scrolls; Properties shows the
   active object's transform and mesh statistics.
+- Solid shading: a multithreaded tile rasterizer (parallel setup, binning
+  and rasterization, SSE 4-pixel edge functions, depth and object-ID
+  buffers) with Blender-style selection outlines. About 1.2 M triangles
+  render in 8–9 ms at 1280×800 on 32 threads, with output identical for any
+  thread count. Z toggles wireframe.
+- Exact click picking from the ID buffer.
+- Binary size budget raised from 64 KiB to 256 KiB (now ~67 KB); the
+  masterplan target remains < 2 MB for v1.0.
+- Arenas keep memory that is in use resident instead of releasing it every
+  frame (released after sustained low use).
 
 ## [0.2.0] - 2026-10-12
 

@@ -8,6 +8,14 @@
 .include "macros.inc"
 
 # exports
+.globl fwd
+.globl eye
+.globl world_verts
+.globl vp_focal
+.globl vp_cy
+.globl vp_cx
+.globl to_cam
+.globl f_near
 .globl vp_pick
 .globl cam_setup
 .globl cam_dist
@@ -495,7 +503,11 @@ viewport_draw:
     call    line3d
 
 .Lvp_object:
-    call    draw_objects
+    cmp     dword ptr [rip+vp_shading], 0
+    jne     1f
+    xor     edi, edi                    # solid: rasterize meshes (+ outline)
+    call    raster_scene
+1:  call    draw_objects                # wires (all objects, or non-meshes)
 
     # ---- orientation gizmo (bottom-left) -----------------------------------
     mov     r12d, [rip+cvs_x0]
@@ -588,7 +600,11 @@ draw_objects:
     jae     6f
     mov     edi, ebx
     call    obj_at
-    mov     ecx, [rax+OB_FLAGS]
+    cmp     dword ptr [rip+vp_shading], 0   # solid mode draws meshes as shaded
+    jne     3f
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    je      5f
+3:  mov     ecx, [rax+OB_FLAGS]
     and     ecx, OBF_SELECTED
     cmp     ecx, r12d
     jne     5f
@@ -695,6 +711,20 @@ draw_obj_wire:
 # vp_pick(edi=x, esi=y logical) -> eax = handle of the object whose projected
 # bounds contain the point (smallest bounds wins), 0 if none. Needs cam_setup.
 vp_pick:
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    raster_pick                 # exact: the ID buffer
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+    test    eax, eax
+    jz      vp_pick_bounds
+    lea     rcx, [rip+obj_list]
+    mov     eax, [rcx+rax*4-4]
+    ret
+# vp_pick_bounds - lights and cameras have no surface: use projected bounds
+vp_pick_bounds:
     push    rbx
     push    rbp
     push    r12
@@ -716,6 +746,8 @@ vp_pick:
     jae     .Lpk_done
     mov     edi, ebx
     call    obj_at
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    je      .Lpk_next
     mov     rdi, rax
     call    world_verts
     test    rax, rax
@@ -860,6 +892,7 @@ vp_zoom:
     ret
 
 # ---- viewport operators (registered into the operator spine) --------------
+OPERATOR op_view_wire,      "view.toggle_wireframe", "Wireframe", op_toggle_flag, op_check_flag, vp_shading, KEY_Z, doc="Switch the viewport between solid shading and wireframe"
 OPERATOR op_view_grid,      "view.toggle_grid",  "Ground Grid",  op_toggle_flag, op_check_flag, show_grid, KEY_G, doc="Show or hide the ground grid and axes"
 OPERATOR op_view_reset_cam, "view.reset_camera", "Reset Camera", op_reset_camera, key=KEY_F, doc="Return the viewport camera to its default view"
 op_reset_camera:

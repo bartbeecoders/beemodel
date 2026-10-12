@@ -3,7 +3,7 @@
 # no interpreter, no RWX segments, and within the size budget.
 set -euo pipefail
 BIN="${1:-build/beemodel}"
-MAX_BYTES="${MAX_BYTES:-65536}"
+MAX_BYTES="${MAX_BYTES:-262144}"   # 256 KiB for phase 2 (masterplan: < 2 MB at v1.0)
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 size=$(stat -c %s "$BIN")

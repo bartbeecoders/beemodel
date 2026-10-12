@@ -18,6 +18,7 @@ GOLDEN_MODE = os.environ.get('BEEMODEL_GOLDEN', '')        # '', 'check', 'updat
 RSS_BUDGET_KB = 16 * 1024          # private (anonymous) memory incl. glyph caches
 FIRST_FRAME_BUDGET_MS = 500        # process start -> first committed frame
 FRAME_BUDGET_MS = 16.0             # average input -> committed frame while dragging
+STRESS_BUDGET_MS = 33.0            # ~300k triangles on a 4-core CI runner
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else 'build/shots'
 BIN = os.path.join(os.path.dirname(__file__), '..', 'build', 'beemodel')
@@ -431,8 +432,31 @@ def main():
     check(rc == 0, f'typed file.exit quits cleanly (rc={rc})')
     check(f.frames >= 50, f'frames rendered ({f.frames})')
     areas_and_palette()
+    raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
     sys.exit(1 if FAILS else 0)
+
+
+def raster_stress():
+    """~300k triangles (256 toruses + cubes): orbit latency budget."""
+    print('  -- rasterizer stress --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    f.key(61); f.type('torus'); f.key(28)
+    f.move(600, 300)
+    for _ in range(8):                   # select all + duplicate = doubling
+        f.key(30); f.key(30)
+        f.mods(1); f.key(32); f.mods(0)
+    f.key(30)                            # nothing selected
+    f.latencies = []
+    f.drag(600, 300, 700, 330, steps=12)
+    lat = sorted(f.latencies[1:])        # the first frame grows the buffers
+    ms = lat[len(lat) // 2] if lat else 1e9
+    check(ms < STRESS_BUDGET_MS, f'~300k triangles: orbit frame {ms:.1f} ms median (budget {STRESS_BUDGET_MS} ms)')
+    f.shot('23_stress.png')
+    f.proc.kill()
 
 
 def areas_and_palette():
@@ -456,6 +480,11 @@ def areas_and_palette():
     check(ROWBG(2) != SEL, 'clicking empty space deselects')
     f.click(590, 300)                    # click the cube
     check(ROWBG(2) == SEL, 'clicking the cube in the viewport selects it')
+    solid = px(f, 600, 330)
+    f.key(44)                            # Z: wireframe
+    wire = px(f, 600, 330)
+    f.key(44)                            # Z: back to solid
+    check(solid != wire and px(f, 600, 330) == solid, 'Z toggles solid / wireframe shading')
     f.click(1080, 94)                    # outliner: click Camera row
     check(ROWBG(0) == SEL and ROWBG(2) != SEL, 'outliner click selects the Camera only')
     f.mods(1); f.click(1080, 134); f.mods(0)   # Shift+click Cube: extend

@@ -29,6 +29,7 @@ stays private to the module.
 | `palette.s` | F3 command palette: fuzzy search over the operator table |
 | `scene.s` | Objects (pool + ordered list), unique names, selection, TRS matrices, object operators |
 | `mesh.s` | Polygon meshes (loops, n-gons), edge/triangle derivation, primitive generators |
+| `raster.s` | Solid viewport rasterizer: parallel setup, binning and tiles; depth + ID buffers; selection outline; picking |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -213,11 +214,40 @@ edges (hash table in the frame arena), the triangles and the bounding box.
 The primitives (cube, plane, grid, UV sphere, cylinder, cone, torus, plus
 the camera and light gizmos) are generated in code.
 
-The viewport draws each object's edges through its matrix (unselected first,
-then the selection in orange and the active object in gold). A click in a
-viewport (press and release without moving more than 3 px) picks the object
-with the smallest projected bounds under the pointer. Dragging still
-orbits.
+In wireframe mode (Z) the viewport draws each object's edges through its
+matrix. In solid mode (the default) meshes go through the rasterizer
+below; lights and cameras stay wireframes. A click in a viewport (press and
+release without moving more than 3 px) picks the object under the pointer
+from the ID buffer. Dragging still orbits.
+
+## Solid rasterizer
+
+`raster.s` renders every mesh object into the viewport canvas (physical
+pixels) in five passes. Every pass except the cheap bookkeeping runs on all
+cores through `parallel_for`:
+
+1. **records**: one entry per mesh object (triangle base, camera-space vertex
+   array) and a global triangle numbering;
+2. **vertices**: one combined `view · model` 3×4 matrix per object, applied
+   to every vertex;
+3. **triangles**: in static chunks. Each triangle is flat-shaded (two-sided
+   headlight), near-plane clipped (Sutherland–Hodgman, up to 2 output
+   triangles), projected, and culled when it is off the canvas or covers no
+   pixel centre. Kept triangles are written compactly into the chunk's own
+   output range, so no atomics are needed and the order is deterministic;
+4. **binning**: into 16×16 tiles with a per-(chunk, tile) count matrix;
+   the prefix sum gives every chunk private cursors, so filling is also
+   atomic-free and keeps triangle order;
+5. **raster**: tiles in parallel, 4 pixels per step with SSE edge functions;
+   depth is 1/z (perspective correct) and every pixel also gets its object ID.
+
+A post-pass draws a 2 px selection outline wherever the ID changes next to a
+selected object (orange, or gold for the active object). Picking re-runs the
+passes in ID-only mode and reads the pixel under the cursor.
+
+On the reference machine (32 threads) a scene of about 1.2 M triangles
+orbits at 8–9 ms per frame at 1280×800. The output is identical for any
+thread count, so golden images stay exact.
 
 ## Event loop & rendering
 

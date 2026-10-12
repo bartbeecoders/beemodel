@@ -9,6 +9,7 @@
 .include "const.inc"
 
 # exports
+.globl write_err
 .globl getenv
 .globl sock_fd
 .globl alloc_id

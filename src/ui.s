@@ -94,7 +94,7 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_help, items_area
-menu_counts:    .long 5, 10, 12, 10, 3, 5
+menu_counts:    .long 5, 10, 13, 10, 3, 5
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
@@ -103,7 +103,7 @@ items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_select_all, op_duplicate
                 .quad op_palette_open, 0, op_edit_prefs
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
-                .quad op_view_grid, op_view_reset_cam, op_console_clear
+                .quad op_view_wire, op_view_grid, op_view_reset_cam, op_console_clear
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_light, op_add_camera
 items_help:     .quad op_help_keys, op_console_ops, op_help_about
@@ -782,9 +782,17 @@ viewport_click:
     mov     edi, [rip+drag_node]
     call    cam_load
     call    cam_setup
+    mov     edi, [rip+cvs_x0]
+    mov     esi, [rip+cvs_y0]
+    mov     edx, [rip+cvs_x1]
+    mov     ecx, [rip+cvs_y1]
+    call    set_clip
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
     call    vp_pick
+    push    rax
+    call    reset_clip
+    pop     rax
     mov     edi, eax
     mov     esi, [rip+press_mods]
     and     esi, MOD_SHIFT
