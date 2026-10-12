@@ -829,6 +829,8 @@ tm_confirm:
     cmp     dword ptr [rip+tm_mode], 0
     je      9f
     call    tm_update
+    mov     edi, [rip+tm_mode]
+    call    macro_transform
     mov     dword ptr [rip+tm_mode], 0
     mov     dword ptr [rip+tm_drag], 0
     lea     rdi, [rip+tm_text]          # drop the input cursor from the log

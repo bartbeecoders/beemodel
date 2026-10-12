@@ -156,6 +156,7 @@
 .equ COL_PANE_HDR,      0x323741
 .equ COL_SPLIT,         0x16181c
 .equ COL_SPLIT_HOT,     0xf2b134
+.equ COL_REC,         0xe5484d
 .equ COL_ACCENT,        0xf2b134
 .equ COL_ACCENT_DARK,   0x6b5420
 .equ COL_BTN,           0x363b45

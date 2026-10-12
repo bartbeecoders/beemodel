@@ -18,6 +18,7 @@
 .globl op_toggle_flag
 .globl op_check_flag
 .globl find_op_by_name
+.globl op_quiet
 .globl key_chars
 
 # ---- File ---------------------------------------------------------------------
@@ -85,6 +86,8 @@ key_special:                            # code:u64, name:ptr
     .quad 0, 0
 
 .section .bss
+.align 4
+op_quiet:       .skip 4
 keybuf:         .skip 32
 linebuf:        .skip 160
 
@@ -98,6 +101,8 @@ run_op:
     mov     rbx, rdi
     test    dword ptr [rbx+OP_FLAGS], OPF_QUIET
     jnz     1f
+    cmp     dword ptr [rip+op_quiet], 0     # scripts run operators silently
+    jne     1f
     lea     rdi, [rip+s_log_prompt]
     mov     rsi, [rbx+OP_LABEL]
     call    log_pair
@@ -109,6 +114,8 @@ run_op:
     mov     rsi, rbx
     call    [rbx+OP_EXEC]
     mov     dword ptr [rip+dirty], 1
+    mov     rdi, rbx                    # macro recording
+    call    macro_op
     pop     rbx
     ret
 

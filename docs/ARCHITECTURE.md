@@ -33,6 +33,7 @@ stays private to the module.
 | `transform.s` | Modal grab / rotate / scale, constraints, snapping, numeric input, gizmos |
 | `undo.s` | Undo / redo history of scene snapshots (shared, reference-counted meshes) |
 | `fileio.s` | Paths (`~`, default dirs, mkdir -p), mmap reads, atomic writes, growable buffer, number text I/O |
+| `script.s` | BeeScript: lexer, one-pass bytecode compiler, stack VM (doubles, texts, nil), semispace text heap, scene builtins, macro recorder |
 | `png.s` | PNG encoder: Sub/Up row filters, deflate (LZ77 hash matching, fixed Huffman), CRC-32, Adler-32 |
 | `formats.s` | `.bee`, OBJ and STL import/export, file operators, autosave |
 | `json.s` | Lazy JSON reader (walks text on demand) and writer on the growable buffer |

@@ -468,6 +468,8 @@ op_create:
     mov     edi, r12d
     call    obj_get
     mov     rsi, rax
+    cmp     dword ptr [rip+op_quiet], 0     # quiet inside scripts (loops)
+    jne     9f
     lea     rdi, [rip+s_log_add]
     call    log_pair
 9:  add     rsp, 8

@@ -107,7 +107,7 @@ r_err_method:   .asciz ",\"error\":{\"code\":-32601,\"message\":\"Method not fou
 r_empty:        .asciz "{}"
 r_init_a:       .asciz "{\"protocolVersion\":"
 r_init_b:       .asciz ",\"capabilities\":{\"tools\":{},\"resources\":{}},\"serverInfo\":{\"name\":\"beemodel\",\"version\":"
-r_init_c:       .asciz "},\"instructions\":\"BeeModel is a 3D modeler. Units are meters, Y is up, rotations are Euler XYZ in degrees (rotation_deg). Every change is undoable (undo tool). Start with scene_summary; create objects with create_primitive, place them with set_transform.\"}"
+r_init_c:       .asciz "},\"instructions\":\"BeeModel is a 3D modeler. Units are meters, Y is up, rotations are Euler XYZ in degrees (rotation_deg). Every change is undoable (undo tool). Start with scene_summary; create objects with create_primitive, place them with set_transform; use script_eval (BeeScript) for loops and bulk edits; look at the result with viewport_capture.\"}"
 r_tools_a:      .asciz "{\"tools\":["
 r_tools_b:      .asciz "]}"
 r_content_a:    .asciz "{\"content\":[{\"type\":\"text\",\"text\":"
@@ -132,6 +132,7 @@ curated_tools:
     .ascii "{\"name\":\"delete\",\"description\":\"Delete objects by name.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"names\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}}},\"required\":[\"names\"]}},"
     .ascii "{\"name\":\"run_operator\",\"description\":\"Run any BeeModel operator by id (see console.list_ops), with an optional text argument such as a file path.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"arg\":{\"type\":\"string\"}},\"required\":[\"id\"]}},"
     .ascii "{\"name\":\"viewport_capture\",\"description\":\"Look at the scene: a PNG image of the 3D viewport as it is now (area: viewport or window).\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"area\":{\"type\":\"string\",\"enum\":[\"viewport\",\"window\"]}}}},"
+    .ascii "{\"name\":\"script_eval\",\"description\":\"Run BeeScript, BeeModel's scripting language, as one undo step; returns what it prints plus the last value. Best for bulk or procedural edits. Syntax: x = 2m; for i in 0..10 { add(\\\"cube\\\", \\\"C\\\" + i, i * 2, 0, 0) }; if a > 1 and b { } else { }; while c { }; fn f(a) { return a * 2 }. Units: m cm mm km deg rad (angles are radians, 45deg works). Scene: add(type, [name], [x, y, z]) -> name; move / rotate / scale(name, x, y, z); scale(name, s); get(name, prop) and set(name, prop, v) with prop x y z rx ry rz sx sy sz; select(names...); delete(names...); rename(old, new); exists(name); count(); name(i); active(); op(id, [arg]). Also print(...), str, num, len, sin, cos, tan, sqrt, abs, floor, round, min, max, pow, atan2, deg, rad, rand, seed, pi.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"description\":\"BeeScript source\"}},\"required\":[\"code\"]}},"
     .ascii "{\"name\":\"undo\",\"description\":\"Undo the last change.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
     .asciz "{\"name\":\"redo\",\"description\":\"Redo the last undone change.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
 c_scene:        .asciz "scene_summary"
@@ -142,6 +143,8 @@ c_delete:       .asciz "delete"
 c_run:          .asciz "run_operator"
 c_undo:         .asciz "undo"
 c_capture:      .asciz "viewport_capture"
+c_script:       .asciz "script_eval"
+k_code:         .asciz "code"
 k_area:         .asciz "area"
 s_window:       .asciz "window"
 s_capture:      .asciz "PNG capture "
@@ -944,6 +947,11 @@ dispatch_tool:
     test    eax, eax
     jnz     .Ldt_capture
     lea     rdi, [rip+tool]
+    lea     rsi, [rip+c_script]
+    call    str_eq
+    test    eax, eax
+    jnz     .Ldt_script
+    lea     rdi, [rip+tool]
     lea     rsi, [rip+c_redo]
     call    str_eq
     test    eax, eax
@@ -1126,6 +1134,32 @@ dispatch_tool:
 1:  lea     rdi, [rip+e_no_op]
     lea     rsi, [rip+sbuf2]
     call    fail
+    jmp     .Ldt_out
+
+.Ldt_script:
+    lea     rdi, [rip+k_code]
+    lea     rsi, [rip+script_src_buf]
+    mov     edx, 65536
+    call    arg_str
+    test    eax, eax
+    jle     .Ldt_missing
+    lea     rdi, [rip+script_src_buf]
+    mov     esi, 1                      # agent: only agent-safe operators
+    call    script_eval
+    mov     ebx, eax
+    lea     rsi, [rip+script_out]       # its output, not the console copy
+    mov     edx, [rip+script_out_len]
+    call    wb_bytes
+    mov     eax, [rip+log_head]
+    mov     [rip+log_mark], eax
+    test    ebx, ebx
+    jz      1f
+    mov     dword ptr [rip+is_error], 1
+    jmp     .Ldt_out
+1:  cmp     dword ptr [rip+script_out_len], 0
+    jne     .Ldt_out
+    lea     rsi, [rip+s_ok]
+    call    wb_str
     jmp     .Ldt_out
 
 .Ldt_capture:

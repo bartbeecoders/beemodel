@@ -16,6 +16,18 @@ project uses [Semantic Versioning](https://semver.org/).
 - `viewport_capture` MCP tool. The UI is rendered off-screen, so the image
   shows the scene right after the agent's last edit. The tool returns an MCP
   image block holding the viewport (or the whole window) as a PNG.
+- BeeScript, a scripting language compiled in one pass to bytecode for a
+  stack VM. It has numbers with units (`2m`, `45deg`), texts, variables, `if`,
+  `while`, `for i in 0..n`, functions and recursion, plus scene, math and text
+  builtins. Reference: `docs/BEESCRIPT.md`.
+  - Console lines that are not operator ids run as BeeScript, with REPL-style
+    echo; variables and functions persist between lines.
+  - A script run is one undo step: undo now supports grouped changes.
+  - Macro recording (Edit → Record Macro) saves operators, selection clicks
+    and G/R/S results as BeeScript in `~/BeeModel/scripts/macro.bees`;
+    `script.run` plays a macro or any `.bees` file back.
+  - `script_eval` MCP tool. Agent scripts may only run agent-safe operators.
+  - `beemodel --eval 'code'` / `--run file.bees` run scripts without a window.
 - Own JSON reader / writer.
 
 ### Changed
