@@ -6,6 +6,11 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-12
+
+Phase 1 of the masterplan, "Foundations": the runtime every modeling feature
+will build on.
+
 ### Added
 - Operator spine: every action is declared once with the `OPERATOR` macro and
   collected by the linker into one table. Menus, tool buttons, check marks,
@@ -55,6 +60,12 @@ project uses [Semantic Versioning](https://semver.org/).
 - Tools / Outliner / Console toggles (T, N, View menu) now add and remove
   areas; the Properties pane is now its own area.
 
+### Testing
+- Golden-image regression tests (pixel diff against `tests/golden`).
+- Performance and memory budgets checked in CI: first frame in about 4 ms,
+  median input-to-frame latency about 0.6 ms at 1280×800, about 2.3 MiB of
+  private memory.
+
 ### Changed
 - Source split into separate modules (object files) with explicit exports.
 - Help › Keyboard Shortcuts is generated from the operator table.
@@ -84,5 +95,6 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/bartbeecoders/beemodel/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bartbeecoders/beemodel/releases/tag/v0.1.0

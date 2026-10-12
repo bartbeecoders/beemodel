@@ -50,10 +50,11 @@ jobs:
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 120 python tools/fakewl.py build/shots
 
-      - name: Headless UI test (bitmap font fallback)
+      - name: Headless UI test (bitmap font fallback + golden images)
         env:
           BEEMODEL_FONT: none
           BEEMODEL_MONO_FONT: none
+          BEEMODEL_GOLDEN: check
         run: timeout 120 python tools/fakewl.py build/shots-bitmap
 
       - name: Upload screenshots

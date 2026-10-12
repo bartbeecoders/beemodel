@@ -11,6 +11,14 @@ usage: tools/fakewl.py [outdir]
 """
 import mmap, os, select, socket, struct, subprocess, sys, tempfile, time
 
+GOLDEN_DIR = os.path.join(os.path.dirname(__file__), '..', 'tests', 'golden')
+GOLDEN = {'01_initial.png', '03_menu_view.png', '17_two_viewports.png',
+          '19_editor_type_menu.png', '21_palette_split.png'}
+GOLDEN_MODE = os.environ.get('BEEMODEL_GOLDEN', '')        # '', 'check', 'update'
+RSS_BUDGET_KB = 16 * 1024          # private (anonymous) memory incl. glyph caches
+FIRST_FRAME_BUDGET_MS = 500        # process start -> first committed frame
+FRAME_BUDGET_MS = 16.0             # average input -> committed frame while dragging
+
 OUT = sys.argv[1] if len(sys.argv) > 1 else 'build/shots'
 BIN = os.path.join(os.path.dirname(__file__), '..', 'build', 'beemodel')
 os.makedirs(OUT, exist_ok=True)
@@ -33,7 +41,11 @@ class Fake:
         srv.bind(self.path)
         srv.listen(1)
         env = dict(os.environ, WAYLAND_DISPLAY=self.path)
+        self.t0 = time.time()
         self.proc = subprocess.Popen([BIN], env=env)
+        self.first_frame_ms = None
+        self.t_input = None                 # input sent, waiting for its frame
+        self.latencies = []
         srv.settimeout(5)
         self.c, _ = srv.accept()
         self.buf, self.fds = b'', []
@@ -145,6 +157,11 @@ class Fake:
             mem = self.pools[pid][1]
             self.frame = (w, h, bytes(mem[off:off + stride * h]))
             self.frames += 1
+            if self.first_frame_ms is None:
+                self.first_frame_ms = (time.time() - self.t0) * 1000
+            if self.t_input is not None:
+                self.latencies.append((time.time() - self.t_input) * 1000)
+                self.t_input = None
             self.send(self.attached, 0)                   # release
             self.attached = None
             if getattr(self, 'pending_cb', None):
@@ -169,8 +186,10 @@ class Fake:
         self.pump(until_frame=True)
 
     def move(self, x, y, wait=True):
+        self.t_input = time.time()
         self.send(self.ptr(), 2, struct.pack('<Iii', 0, x * 256, y * 256))
         if wait: self.pump(until_frame=True)
+        self.t_input = None                 # no change -> no frame: not a sample
 
     def button(self, pressed, btn=0x110):
         self.serial += 1
@@ -243,9 +262,41 @@ class Fake:
         path = os.path.join(OUT, name)
         img.save(path)
         print(f'  shot {path} ({w}x{h}, frame #{self.frames}, cursor shape {self.cursor})')
+        if GOLDEN_MODE and name in GOLDEN:
+            golden(img, name)
+
+    def rss_anon_kb(self):
+        for line in open(f'/proc/{self.proc.pid}/status'):
+            if line.startswith('RssAnon:'):
+                return int(line.split()[1])
 
 
 FAILS = []
+
+
+def golden(img, name):
+    """Compare a frame with tests/golden/<name> (or rewrite it in update mode)."""
+    from PIL import Image, ImageChops
+    ref_path = os.path.join(GOLDEN_DIR, name)
+    if GOLDEN_MODE == 'update':
+        os.makedirs(GOLDEN_DIR, exist_ok=True)
+        img.save(ref_path, optimize=True)
+        print(f'  golden updated: {ref_path}')
+        return
+    if not os.path.exists(ref_path):
+        check(False, f'golden {name}: reference missing (run with BEEMODEL_GOLDEN=update)')
+        return
+    ref = Image.open(ref_path).convert('RGB')
+    if ref.size != img.size:
+        check(False, f'golden {name}: size {img.size} != {ref.size}')
+        return
+    diff = ImageChops.difference(img, ref)
+    bad = sum(1 for px in diff.getdata() if max(px) > 8)
+    total = img.size[0] * img.size[1]
+    ok = bad <= total // 2000                  # <= 0.05% of the pixels
+    if not ok:
+        diff.point(lambda v: 255 if v > 8 else 0).save(os.path.join(OUT, 'diff_' + name))
+    check(ok, f'golden {name}: {bad} of {total} pixels differ')
 
 
 def check(cond, msg):
@@ -267,6 +318,8 @@ def main():
     if not f.frame:
         sys.exit(1)
     check(f.frame[:2] == (1280, 800), 'default window size 1280x800')
+    check(f.first_frame_ms < FIRST_FRAME_BUDGET_MS,
+          f'first frame after {f.first_frame_ms:.0f} ms (budget {FIRST_FRAME_BUDGET_MS} ms)')
     check(px(f, 640, 5) == 0x1b1d22, 'title bar background')
     check(px(f, 13, 15) == 0xf2b134, 'honeycomb logo drawn')
     f.shot('01_initial.png')
@@ -285,10 +338,17 @@ def main():
     check(px(f, 1005, 662) == 0x2a2e36, 'console pane shown again')
     f.move(212, 300)
     check(f.cursor == 26, 'ew-resize cursor on splitter')
+    f.latencies = []
     f.drag(212, 300, 330, 300)           # left splitter
     check(px(f, 300, 450) == 0x2a2e36, 'left pane widened by drag')
     f.drag(1017, 300, 900, 300)          # right splitter
     f.drag(600, 625, 600, 520)           # bottom splitter
+    lat = sorted(f.latencies)
+    ms = lat[len(lat) // 2] if lat else 0
+    check(ms < FRAME_BUDGET_MS, f'input-to-frame latency {ms:.2f} ms median, '
+          f'{lat[-1] if lat else 0:.2f} ms worst (budget {FRAME_BUDGET_MS} ms, {len(lat)} frames)')
+    kb = f.rss_anon_kb()
+    check(kb < RSS_BUDGET_KB, f'private memory {kb} KiB (budget {RSS_BUDGET_KB} KiB)')
     f.shot('05_splitters.png')
     f.drag(600, 300, 700, 340)           # orbit
     f.wheel(-10); f.wheel(-10)           # zoom in
