@@ -349,6 +349,14 @@ font_set_size:
     add     rax, rdi
     cmp     dword ptr [rax+FNT_LOADED], 0
     je      9f
+    push    rax
+    mov     edi, esi
+    call    to_px                       # logical em size -> physical
+    mov     esi, eax
+    mov     edi, CHAR_H
+    call    to_px
+    cvtsi2ss xmm3, eax                  # physical text row height
+    pop     rax
     mov     [rax+FNT_PX], esi
     cvtsi2ss xmm0, esi
     cvtsi2ss xmm1, dword ptr [rax+FNT_UPEM]
@@ -359,8 +367,8 @@ font_set_size:
     cvtsi2ss xmm2, dword ptr [rax+FNT_DESCU]
     mulss   xmm2, xmm0
     addss   xmm1, xmm2                  # asc + desc (desc < 0)
+    addss   xmm1, xmm3                  # centre of the (scaled) text row
     mulss   xmm1, [rip+f_half]
-    addss   xmm1, [rip+f_eight]         # centre of a 16px row
     cvtss2si ecx, xmm1
     mov     [rax+FNT_BASELINE], ecx
     call    glyph_cache_flush

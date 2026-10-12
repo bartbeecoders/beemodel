@@ -8,6 +8,14 @@
 .include "const.inc"
 
 # exports
+.globl to_px
+.globl to_lg
+.globl set_ui_scale
+.globl fill_rect_px
+.globl draw_line_px
+.globl ui_s120
+.globl ui_s16q
+.globl ui_inv16q
 .globl clip_x0
 .globl clip_x1
 .globl clip_y0
@@ -24,6 +32,12 @@
 .globl set_clip
 .globl str_len
 
+.section .data
+.align 8
+ui_s16q:    .quad 65536                 # UI scale, 16.16 (logical -> physical)
+ui_inv16q:  .quad 65536                 # 1 / scale, 16.16
+ui_s120:    .long 120                   # UI scale in 1/120 (wp_fractional_scale)
+
 .section .bss
 .align 8
 fb_ptr:     .skip 8
@@ -36,6 +50,90 @@ clip_y1:    .skip 4
 
 .text
 
+# -----------------------------------------------------------------------------
+# Scaling. UI code works in logical (surface) coordinates; the primitives
+# below map them to physical framebuffer pixels. At 100% this is skipped.
+# -----------------------------------------------------------------------------
+# to_px(edi=logical) -> eax = physical   (only rax/flags clobbered)
+to_px:
+    movsxd  rax, edi
+    imul    rax, [rip+ui_s16q]
+    add     rax, 0x8000
+    sar     rax, 16
+    ret
+
+# to_lg(edi=physical) -> eax = logical
+to_lg:
+    movsxd  rax, edi
+    imul    rax, [rip+ui_inv16q]
+    add     rax, 0x8000
+    sar     rax, 16
+    ret
+
+# set_ui_scale(edi = scale in 1/120) -> eax = 1 if it changed
+set_ui_scale:
+    xor     eax, eax
+    test    edi, edi
+    jz      9f
+    cmp     edi, [rip+ui_s120]
+    je      9f
+    mov     [rip+ui_s120], edi
+    mov     eax, edi
+    shl     rax, 16
+    xor     edx, edx
+    mov     ecx, 120
+    div     rcx
+    mov     [rip+ui_s16q], rax
+    mov     eax, 120 << 16
+    xor     edx, edx
+    div     rdi
+    mov     [rip+ui_inv16q], rax
+    mov     eax, 1
+9:  ret
+
+# scale4(edi=x, esi=y, edx=w, ecx=h) -> physical x, y, w, h in the same
+# registers; non-empty input never becomes empty
+scale4:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    lea     r13d, [rdi+rdx]             # x1
+    lea     r14d, [rsi+rcx]             # y1
+    mov     ebx, edx
+    mov     r12d, ecx
+    push    rsi
+    call    to_px
+    mov     r8d, eax                    # x0
+    pop     rdi
+    call    to_px
+    mov     r9d, eax                    # y0
+    mov     edi, r13d
+    call    to_px
+    mov     edx, eax
+    sub     edx, r8d
+    mov     edi, r14d
+    call    to_px
+    mov     ecx, eax
+    sub     ecx, r9d
+    test    ebx, ebx
+    jle     1f
+    cmp     edx, 1
+    jge     1f
+    mov     edx, 1
+1:  test    r12d, r12d
+    jle     2f
+    cmp     ecx, 1
+    jge     2f
+    mov     ecx, 1
+2:  mov     edi, r8d
+    mov     esi, r9d
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # reset_clip - clip = whole framebuffer
 reset_clip:
     mov     dword ptr [rip+clip_x0], 0
@@ -46,8 +144,35 @@ reset_clip:
     mov     [rip+clip_y1], eax
     ret
 
-# set_clip(edi=x0, esi=y0, edx=x1, ecx=y1) - intersected with the framebuffer
+# set_clip(edi=x0, esi=y0, edx=x1, ecx=y1) - logical, intersected with the
+# framebuffer
 set_clip:
+    cmp     dword ptr [rip+ui_s120], 120
+    je      set_clip_px
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, esi
+    mov     r12d, edx
+    mov     r13d, ecx
+    call    to_px
+    push    rax
+    mov     edi, ebx
+    call    to_px
+    mov     ebx, eax
+    mov     edi, r12d
+    call    to_px
+    mov     r12d, eax
+    mov     edi, r13d
+    call    to_px
+    mov     ecx, eax
+    pop     rdi
+    mov     esi, ebx
+    mov     edx, r12d
+    pop     r13
+    pop     r12
+    pop     rbx
+set_clip_px:
     xor     eax, eax
     cmp     edi, eax
     cmovl   edi, eax
@@ -66,9 +191,16 @@ set_clip:
     ret
 
 # -----------------------------------------------------------------------------
-# fill_rect(edi=x, esi=y, edx=w, ecx=h, r8d=color)
+# fill_rect(edi=x, esi=y, edx=w, ecx=h, r8d=color) - logical coordinates
+# fill_rect_px - same in physical pixels
 # -----------------------------------------------------------------------------
 fill_rect:
+    cmp     dword ptr [rip+ui_s120], 120
+    je      fill_rect_px
+    push    r8
+    call    scale4
+    pop     r8
+fill_rect_px:
     add     edx, edi                    # x1
     add     ecx, esi                    # y1
     mov     eax, [rip+clip_x0]
@@ -158,12 +290,13 @@ fill_vgradient:
     push    r15
     test    ecx, ecx
     jle     9f
+    mov     r14d, r8d
+    mov     r15d, r9d
+    call    scale4                      # physical rows give a smooth ramp
     mov     ebx, edi
     mov     ebp, esi
     mov     r12d, edx
     mov     r13d, ecx                   # h
-    mov     r14d, r8d
-    mov     r15d, r9d
     xor     ecx, ecx                    # row
 1:  push    rcx
     # color = top + (bot - top) * row / h, per channel
@@ -192,7 +325,7 @@ fill_vgradient:
     add     esi, [rsp]
     mov     edx, r12d
     mov     ecx, 1
-    call    fill_rect
+    call    fill_rect_px
     pop     rcx
     inc     ecx
     cmp     ecx, r13d
@@ -210,6 +343,8 @@ fill_vgradient:
 #   8x16 bitmap font (fallback when no TrueType font is available), glyphs fully outside the clip are skipped.
 # -----------------------------------------------------------------------------
 draw_text_bitmap:
+    cmp     dword ptr [rip+ui_s120], 120
+    jne     draw_text_bitmap_scaled
     push    rbx
     push    rbp
     push    r12
@@ -300,6 +435,67 @@ draw_text_bitmap:
     pop     rbx
     ret
 
+# draw_text_bitmap_scaled - slow path of the bitmap font for scaled output
+draw_text_bitmap_scaled:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     r14, rdx
+    mov     r15d, ecx
+1:  movzx   eax, byte ptr [r14]
+    test    eax, eax
+    jz      9f
+    inc     r14
+    mov     ecx, eax
+    and     ecx, 0xc0
+    cmp     ecx, 0x80
+    je      1b
+    sub     eax, 32
+    cmp     eax, 94
+    jbe     2f
+    mov     eax, '?'-32
+2:  shl     eax, 4
+    lea     rbx, [rip+font_8x16]
+    add     rbx, rax
+    xor     ebp, ebp                    # row
+3:  movzx   eax, byte ptr [rbx+rbp]
+    mov     dword ptr [rsp], 0          # col
+4:  mov     ecx, 7
+    sub     ecx, [rsp]
+    movzx   eax, byte ptr [rbx+rbp]
+    bt      eax, ecx
+    jnc     5f
+    mov     edi, r12d
+    add     edi, [rsp]
+    lea     esi, [r13+rbp]
+    mov     edx, 1
+    mov     ecx, 1
+    mov     r8d, r15d
+    call    fill_rect
+5:  inc     dword ptr [rsp]
+    cmp     dword ptr [rsp], 8
+    jb      4b
+    inc     ebp
+    cmp     ebp, CHAR_H
+    jb      3b
+    add     r12d, CHAR_W
+    jmp     1b
+9:  mov     eax, r12d
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
 # str_len(rdi) -> eax
 str_len:
     xor     eax, eax
@@ -310,9 +506,38 @@ str_len:
 2:  ret
 
 # -----------------------------------------------------------------------------
-# draw_line(edi=x0, esi=y0, edx=x1, ecx=y1, r8d=color) - Bresenham, clipped
+# draw_line(edi=x0, esi=y0, edx=x1, ecx=y1, r8d=color) - logical endpoints
+# draw_line_px - Bresenham in physical pixels, clipped
 # -----------------------------------------------------------------------------
 draw_line:
+    cmp     dword ptr [rip+ui_s120], 120
+    je      draw_line_px
+    push    rbx
+    push    r12
+    push    r13
+    push    r8
+    mov     ebx, esi
+    mov     r12d, edx
+    mov     r13d, ecx
+    call    to_px
+    push    rax
+    mov     edi, ebx
+    call    to_px
+    mov     ebx, eax
+    mov     edi, r12d
+    call    to_px
+    mov     r12d, eax
+    mov     edi, r13d
+    call    to_px
+    mov     ecx, eax
+    pop     rdi
+    mov     esi, ebx
+    mov     edx, r12d
+    pop     r8
+    pop     r13
+    pop     r12
+    pop     rbx
+draw_line_px:
     push    rbx
     push    rbp
     push    r12

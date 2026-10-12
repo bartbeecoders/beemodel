@@ -156,24 +156,42 @@ cam_setup:
     subss   xmm1, xmm0
     movss   [rip+eye+8], xmm1
 
-    mov     eax, [rip+cvs_y1]           # focal length in pixels
-    sub     eax, [rip+cvs_y0]
+    # canvas in physical pixels (the projection draws straight into them)
+    push    rbx
+    push    r12
+    push    r13
+    mov     edi, [rip+cvs_x0]
+    call    to_px
+    mov     ebx, eax
+    mov     edi, [rip+cvs_x1]
+    call    to_px
+    add     ebx, eax                    # x0 + x1
+    mov     edi, [rip+cvs_y0]
+    call    to_px
+    mov     r12d, eax
+    mov     edi, [rip+cvs_y1]
+    call    to_px
+    mov     r13d, eax
+    sub     eax, r12d                   # physical height
     cvtsi2ss xmm0, eax
     mulss   xmm0, [rip+f_focal_k]
-    movss   [rip+vp_focal], xmm0
-    movss   xmm1, [rip+cam_dist]
+    movss   [rip+vp_focal], xmm0        # focal length in pixels
+    movss   xmm1, [rip+cam_dist]        # world units per logical pixel
     divss   xmm1, xmm0
-    movss   [rip+px_world], xmm1        # world units per pixel at the target
-    mov     eax, [rip+cvs_x0]
-    add     eax, [rip+cvs_x1]
-    cvtsi2ss xmm0, eax
+    cvtsi2ss xmm2, dword ptr [rip+ui_s120]
+    mulss   xmm1, xmm2
+    divss   xmm1, [rip+f_120]
+    movss   [rip+px_world], xmm1
+    cvtsi2ss xmm0, ebx
     mulss   xmm0, [rip+f_half]
     movss   [rip+vp_cx], xmm0
-    mov     eax, [rip+cvs_y0]
-    add     eax, [rip+cvs_y1]
+    lea     eax, [r12+r13]
     cvtsi2ss xmm0, eax
     mulss   xmm0, [rip+f_half]
     movss   [rip+vp_cy], xmm0
+    pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # to_cam(rdi=world vec3, rsi=out camera-space vec3)
@@ -365,7 +383,7 @@ line3d:
     addss   xmm0, [r12+4]
     cvtss2si ecx, xmm0
     mov     r8d, ebx
-    call    draw_line
+    call    draw_line_px
 9:  add     rsp, 8
     pop     r12
     pop     rbx
@@ -579,6 +597,7 @@ axis_colors: .long COL_AXIS_X, COL_AXIS_Y, COL_AXIS_Z
 .align 8
 axis_labels: .quad s_ax_x, s_ax_y, s_ax_z
 f_half:      .float 0.5
+f_120:       .float 120.0
 .text
 
 # -----------------------------------------------------------------------------

@@ -32,6 +32,9 @@ project uses [Semantic Versioning](https://semver.org/).
 - Full Unicode text (UTF-8): accented and international characters display
   correctly. `BEEMODEL_FONT` / `BEEMODEL_MONO_FONT` select fonts; `none`
   keeps the bitmap font.
+- HiDPI / fractional scaling (`wp_fractional_scale_v1` + `wp_viewporter`):
+  the UI renders natively at 125%, 150%, 200% and other scales, with crisp
+  text and geometry instead of compositor upscaling.
 
 ### Changed
 - Source split into separate modules (object files) with explicit exports.
