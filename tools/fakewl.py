@@ -469,6 +469,15 @@ def project(p, yaw=0.7853982, pitch=0.5, dist=18.0, target=(0, 0, 0),
     return (int((x0 + x1) / 2 + f * dot(d, right) / z), int((y0 + y1) / 2 - f * dot(d, up) / z))
 
 
+def log_lines(f):
+    """Console text is not readable from pixels; ask over MCP instead."""
+    m = Mcp(f)
+    r = m.call('tools/call', {'name': 'op_edit_undo_history', 'arguments': {}})
+    m.s.close()
+    t = (r or {}).get('result', {}).get('content', [{}])[0].get('text', '')
+    return t.split('\n')
+
+
 def bright(c):
     return ((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255) > 3 * 100
 
@@ -724,7 +733,37 @@ def mcp():
     check('Ball' in names, 'undo brings it back')
     path = os.path.join(f.home, 'agent.bee')
     text, err = m.tool('run_operator', {'id': 'file.save', 'arg': path})
-    check(os.path.exists(path) and not err, 'run_operator file.save writes the scene')
+    check(err and 'permission denied' in text and not os.path.exists(path),
+          'file access needs the "files" permission (default: edit)')
+    f.keymap('tests/keymaps/us.xkb')
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.2); f.key(1)
+    cmd('agent.permission_files')
+    text, err = m.tool('run_operator', {'id': 'file.save', 'arg': path})
+    check(os.path.exists(path) and not err, 'after the user allows files, run_operator file.save writes the scene')
+    cmd('agent.permission_read')
+    text, err = m.tool('create_primitive', {'type': 'cone', 'name': 'Nope'})
+    names = [o['name'] for o in json.loads(m.tool('scene_summary')[0].split('\n')[0])['objects']]
+    check(err and 'Nope' not in names, 'read-only agents can look but not edit')
+    cmd('agent.permission_edit')
+    m.tool('create_primitive', {'type': 'cone', 'name': 'Spike', 'location': [-3, 0, 2]})
+    m.tool('set_transform', {'name': 'Spike', 'scale': [1, 3, 1]})
+    cmd('edit.undo_history')
+    hist = [l.strip() for l in log_lines(f)]
+    check('Agent: create_primitive' in hist and 'Agent: set_transform' in hist,
+          'each agent request is one named undo step')
+    cmd('view.toggle_activity')
+    f.pump(0.3)
+    f.shot('31_ai_activity.png')
+    img = f.image()
+    btn = [(x, y) for y in range(560, 800, 2) for x in range(600, 1280, 2) if img.getpixel((x, y)) == (0xe5, 0x48, 0x4d)]
+    if btn:
+        bx = sum(p[0] for p in btn) // len(btn); by = sum(p[1] for p in btn) // len(btn)
+        f.click(bx, by); f.pump(0.3)
+    o = {o['name']: o for o in json.loads(m.tool('scene_summary')[0].split('\n')[0])['objects']}
+    check(btn and 'Spike' in o and o['Spike']['scale'] == [1, 1, 1],
+          'AI Activity: one click reverts the last agent change')
+    cmd('view.toggle_activity')
     text, err = m.tool('run_operator', {'id': 'file.exit'})
     check(err and f.proc.poll() is None, 'operators that are not agent-safe are refused')
     text, err = m.tool('op_view_toggle_grid')

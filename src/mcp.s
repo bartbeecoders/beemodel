@@ -21,6 +21,7 @@
 .globl mcp_pollfds
 .globl mcp_handle
 .globl mcp_bridge
+.globl mcp_clients
 
 .equ MAX_CLIENTS,   4
 .equ CIN_CAP,       0x40000             # 256 KiB per client request buffer
@@ -44,6 +45,8 @@ cl_fd:          .long -1, -1, -1, -1
 out_state:      .skip 24                # response buffer (swapped with wb)
 txt_state:      .skip 24                # tool text buffer
 img_state:      .skip 24                # PNG of a capture
+tool_op:        .skip 8
+agent_label:    .skip 112
 has_image:      .skip 4
 cl_len:         .skip 8*MAX_CLIENTS
 cl_buf:         .skip CIN_CAP*MAX_CLIENTS
@@ -144,6 +147,11 @@ c_run:          .asciz "run_operator"
 c_undo:         .asciz "undo"
 c_capture:      .asciz "viewport_capture"
 c_script:       .asciz "script_eval"
+s_agent_pfx:    .asciz "Agent: "
+e_perm_a:       .asciz "permission denied: "
+e_perm_b:       .asciz " needs the '"
+e_perm_c:       .asciz "' permission and agents are set to '"
+e_perm_d:       .asciz "'. The user can change this in BeeModel's AI menu."
 k_code:         .asciz "code"
 k_area:         .asciz "area"
 s_window:       .asciz "window"
@@ -222,6 +230,7 @@ sockaddr:
 # -----------------------------------------------------------------------------
 mcp_init:
     push    rbx
+    call    agent_init
     lea     rdi, [rip+s_env_off]
     call    getenv
     test    rax, rax
@@ -710,6 +719,7 @@ tools_list:
 tools_call:
     push    rbx
     push    r12
+    push    r13
     lea     rdi, [rip+out_state]        # park the response, open the text
     call    buf_swap
     lea     rdi, [rip+txt_state]
@@ -739,7 +749,34 @@ tools_call:
     call    log_pair
     mov     eax, [rip+log_head]
     mov     [rip+log_mark], eax
+    xor     r12d, r12d                  # made an undo step?
+    xor     r13d, r13d                  # 2 = refused
+    call    tool_tier                   # permission
+    cmp     eax, [rip+agent_tier]
+    jbe     11f
+    mov     edi, eax
+    call    deny
+    mov     r13d, 2
+    jmp     13f
+11: mov     ebx, eax
+    test    ebx, ebx                    # read-only tools change nothing
+    jz      12f
+    call    is_undo_tool                # undo / redo work on change sets
+    test    eax, eax
+    jnz     12f
+    lea     rdi, [rip+agent_label]      # one undo step per request
+    lea     rsi, [rip+s_agent_pfx]
+    call    cat
+    lea     rsi, [rip+tool]
+    call    cat
+    lea     rdi, [rip+agent_label]
+    call    undo_group_begin
     call    dispatch_tool
+    call    undo_group_end
+    mov     r12d, eax
+    jmp     13f
+12: call    dispatch_tool
+13:
     # append what the tool printed to the console
     mov     ebx, [rip+log_mark]
 2:  cmp     ebx, [rip+log_head]
@@ -756,6 +793,14 @@ tools_call:
     jmp     2b
 3:  xor     edi, edi
     call    wb_char
+    lea     rdi, [rip+tool]             # AI Activity
+    mov     esi, r13d
+    test    esi, esi
+    jnz     32f
+    mov     esi, [rip+is_error]
+32: mov     edx, r12d
+    mov     rcx, [rip+wb_ptr]
+    call    act_record
     lea     rdi, [rip+txt_state]        # back to the response
     call    buf_swap
     lea     rdi, [rip+out_state]
@@ -784,8 +829,134 @@ tools_call:
 4:  call    wb_str
     mov     edi, '}'
     call    wb_char
+    pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# tool_tier -> eax = permission the requested tool needs (0 read, 1 edit,
+#   2 files); tool_op = the operator it runs, if any
+tool_tier:
+    push    rbx
+    mov     qword ptr [rip+tool_op], 0
+    lea     rdi, [rip+tool]
+    lea     rsi, [rip+c_scene]
+    call    str_eq
+    test    eax, eax
+    jnz     .Ltt_read
+    lea     rdi, [rip+tool]
+    lea     rsi, [rip+c_capture]
+    call    str_eq
+    test    eax, eax
+    jnz     .Ltt_read
+    lea     rdi, [rip+tool]
+    lea     rsi, [rip+c_run]
+    call    str_eq
+    test    eax, eax
+    jz      2f
+    lea     rdi, [rip+k_idkey]          # run_operator: its operator decides
+    lea     rsi, [rip+sbuf2]
+    mov     edx, 64
+    call    arg_str
+    lea     rdi, [rip+sbuf2]
+    call    find_op_by_name
+    test    rax, rax
+    jz      .Ltt_edit
+    jmp     .Ltt_op
+2:  lea     rbx, [rip+__start_bee_ops]  # op_<id>
+3:  lea     rax, [rip+__stop_bee_ops]
+    cmp     rbx, rax
+    jae     .Ltt_edit
+    mov     rdi, rbx
+    lea     rsi, [rip+sbuf2]
+    call    tool_name
+    lea     rdi, [rip+tool]
+    lea     rsi, [rip+sbuf2]
+    call    str_eq
+    test    eax, eax
+    jnz     4f
+    add     rbx, OP_SIZE
+    jmp     3b
+4:  mov     rax, rbx
+.Ltt_op:
+    mov     [rip+tool_op], rax
+    mov     rdi, rax
+    call    op_tier
+    pop     rbx
+    ret
+.Ltt_read:
+    xor     eax, eax
+    pop     rbx
+    ret
+.Ltt_edit:
+    mov     eax, 1
+    pop     rbx
+    ret
+
+# is_undo_tool -> eax = 1 for undo / redo (tools or operators)
+is_undo_tool:
+    lea     rdi, [rip+tool]
+    lea     rsi, [rip+c_undo]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    lea     rdi, [rip+tool]
+    lea     rsi, [rip+c_redo]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     rax, [rip+tool_op]
+    lea     rcx, [rip+op_edit_undo]
+    cmp     rax, rcx
+    je      2f
+    lea     rcx, [rip+op_edit_redo]
+    cmp     rax, rcx
+    je      2f
+    lea     rcx, [rip+op_agent_revert]
+    cmp     rax, rcx
+    je      2f
+    xor     eax, eax
+1:  ret
+2:  mov     eax, 1
+    ret
+
+# deny(edi=tier needed) - the permission error for the agent
+deny:
+    push    rbx
+    mov     ebx, edi
+    mov     dword ptr [rip+is_error], 1
+    lea     rsi, [rip+e_perm_a]
+    call    wb_str
+    lea     rsi, [rip+tool]
+    call    wb_str
+    lea     rsi, [rip+e_perm_b]
+    call    wb_str
+    mov     edi, ebx
+    call    agent_tier_name
+    mov     rsi, rax
+    call    wb_str
+    lea     rsi, [rip+e_perm_c]
+    call    wb_str
+    mov     edi, [rip+agent_tier]
+    call    agent_tier_name
+    mov     rsi, rax
+    call    wb_str
+    lea     rsi, [rip+e_perm_d]
+    call    wb_str
+    pop     rbx
+    ret
+
+# mcp_clients -> eax = connected agents
+mcp_clients:
+    xor     eax, eax
+    xor     ecx, ecx
+    lea     rdx, [rip+cl_fd]
+1:  cmp     dword ptr [rdx+rcx*4], -1
+    je      2f
+    inc     eax
+2:  inc     ecx
+    cmp     ecx, MAX_CLIENTS
+    jb      1b
     ret
 
 # fail(rdi=message, rsi=detail or 0)

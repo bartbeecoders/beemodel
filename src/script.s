@@ -472,6 +472,7 @@ e_op_script:    .asciz "scripts can't start scripts: "
 e_op_modal:     .asciz "interactive operators can't run from scripts: "
 e_op_undo:      .asciz "undo / redo can't run inside a script (the script is one undo step): "
 e_op_agent:     .asciz "operator not allowed for agents: "
+e_op_perm:      .asciz "permission denied (the user has not given agents file access): "
 
 OPERATOR op_script_record, "script.record", "Record Macro", do_record, check=chk_record, flags=OPF_QUIET, doc="Start / stop recording your actions as a BeeScript macro"
 OPERATOR op_script_run, "script.run", "Run Script...", do_run, flags=0, doc="Run a BeeScript file: script.run [path] (default: the last macro)"
@@ -3639,6 +3640,10 @@ b_op:
     je      1f
     test    dword ptr [rbx+OP_FLAGS], OPF_AI_SAFE
     jz      .Lbop_agent
+    mov     rdi, rbx                    # and the agent permission tier
+    call    op_tier
+    cmp     eax, [rip+agent_tier]
+    ja      .Lbop_perm
 1:  mov     byte ptr [rip+op_argbuf], 0
     cmp     r12d, 2
     jb      2f
@@ -3669,6 +3674,9 @@ b_op:
     jmp     2f
 .Lbop_undo:
     lea     rdi, [rip+e_op_undo]
+    jmp     2f
+.Lbop_perm:
+    lea     rdi, [rip+e_op_perm]
     jmp     2f
 .Lbop_agent:
     lea     rdi, [rip+e_op_agent]

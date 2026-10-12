@@ -15,6 +15,7 @@
 .globl undo_push
 .globl undo_group_begin
 .globl undo_group_end
+.globl undo_top_label
 .globl undo_drop_last
 .globl undo_bytes
 .globl undo_depth
@@ -26,7 +27,8 @@
 .equ ST_ACTIVE,     4
 .equ ST_BYTES,      8
 .equ ST_LABEL,      16
-.equ ST_HDR,        32
+.equ ST_NAME,       32      # the label, copied (64 bytes)
+.equ ST_HDR,        96
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -88,7 +90,18 @@ snapshot:
 1:  mov     rbx, rax
     mov     [rbx+ST_COUNT], r12d
     mov     [rbx+ST_BYTES], r13
-    mov     [rbx+ST_LABEL], r14
+    lea     rdi, [rbx+ST_NAME]          # own copy: agent labels are built
+    mov     [rbx+ST_LABEL], rdi
+    xor     ecx, ecx
+21: mov     al, [r14+rcx]
+    mov     [rdi+rcx], al
+    test    al, al
+    jz      22f
+    inc     ecx
+    cmp     ecx, 63
+    jb      21b
+    mov     byte ptr [rdi+rcx], 0
+22:
     mov     dword ptr [rbx+ST_ACTIVE], -1
     xor     r12d, r12d
 2:  cmp     r12d, [rip+obj_count]
@@ -307,10 +320,24 @@ undo_group_begin:
     mov     dword ptr [rip+group_pushed], 0
 1:  inc     dword ptr [rip+group_depth]
     ret
-undo_group_end:
+undo_group_end:                         # -> eax = 1 if the group made a step
+    xor     eax, eax
     cmp     dword ptr [rip+group_depth], 0
     je      1f
     dec     dword ptr [rip+group_depth]
+    jnz     1f
+    mov     eax, [rip+group_pushed]
+1:  ret
+
+# undo_top_label -> rax = label of the newest undo step, or 0
+undo_top_label:
+    xor     eax, eax
+    mov     ecx, [rip+undo_depth]
+    test    ecx, ecx
+    jz      1f
+    lea     rax, [rip+undo_stack]
+    mov     rax, [rax+rcx*8-8]
+    mov     rax, [rax+ST_LABEL]
 1:  ret
 
 # undo_drop_last - the change did not happen after all (cancel, no-op)
@@ -357,10 +384,11 @@ swap_states:
     mov     rdi, rbx
     call    restore_step
     dec     dword ptr [r13]
-    push    qword ptr [rbx+ST_LABEL]
     mov     rdi, rbx
     call    release
-    pop     rsi                         # label
+    mov     eax, [r15]                  # the label lives on in the new step
+    mov     rax, [r14+rax*8-8]
+    mov     rsi, [rax+ST_LABEL]
     mov     rdi, [rsp]                  # prefix
     call    log_pair
     mov     eax, 1
