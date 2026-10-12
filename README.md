@@ -1,5 +1,8 @@
 # BeeModel
 
+[![CI](https://github.com/bartbeecoders/beemodel/actions/workflows/ci.yml/badge.svg)](https://github.com/bartbeecoders/beemodel/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/bartbeecoders/beemodel)](https://github.com/bartbeecoders/beemodel/releases)
+
 A shell for a 3D modeling tool, written entirely in x86-64 assembly (GNU as,
 Intel syntax). It uses no libc, no libwayland and no toolkit. The program talks to
 the Linux kernel through raw syscalls and to the compositor through the Wayland
@@ -12,6 +15,15 @@ wire protocol on a UNIX socket.
 ```
 
 Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, GNOME, KDE...).
+
+### Download a release
+
+Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
+
+```
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.1.0/beemodel-0.1.0-linux-x86_64.bin
+chmod +x beemodel-0.1.0-linux-x86_64.bin && ./beemodel-0.1.0-linux-x86_64.bin
+```
 
 ## What's in the shell
 
@@ -58,3 +70,18 @@ src/font.inc    8x16 glyph bitmaps (generated, see tools/genfont.py)
   injects pointer and keyboard input, and saves PNG screenshots of each step to
   `build/shots/` (needs Pillow). It tests the app in isolation, without touching
   your desktop.
+
+## Development workflow
+
+* `main` is always releasable. All work happens on a branch (`feat/…`, `fix/…`,
+  `ci/…`) and is merged through a pull request once CI is green.
+* CI (`.github/workflows/ci.yml`) runs on every PR and push to `main`. It builds
+  release and debug binaries, runs `ci/check-binary.sh` (static, no shared
+  libraries, no RWX segments, size budget of 64 KiB) and runs the headless UI test.
+  Screenshots are uploaded as a workflow artifact.
+* **Releasing:** bump `VERSION`, move the `[Unreleased]` notes in `CHANGELOG.md`
+  into a new version section, and merge via a PR. Then tag:
+  `git tag -a v0.2.0 -m "BeeModel 0.2.0" && git push origin v0.2.0`.
+  The release workflow checks that the tag matches `VERSION`, builds, tests and
+  packages the app (`./package.sh`), and publishes a GitHub release with notes
+  taken from the changelog.

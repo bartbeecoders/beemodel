@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, test & publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match VERSION
+        run: |
+          v="$(tr -d '[:space:]' < VERSION)"
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != VERSION v$v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: ./build.sh release
+
+      - name: Binary policy checks
+        run: ci/check-binary.sh build/beemodel
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Headless UI test
+        run: |
+          python -m pip install --quiet pillow
+          timeout 120 python tools/fakewl.py build/shots
+
+      - name: Package
+        run: ./package.sh
+
+      - name: Release notes from CHANGELOG
+        run: |
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" {on=1; next}
+            on && /^## \[/ {exit}
+            on {print}' CHANGELOG.md > dist/NOTES.md
+          test -s dist/NOTES.md || { echo "no CHANGELOG entry for $VERSION"; exit 1; }
+          cat dist/NOTES.md
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "BeeModel $VERSION" \
+            --notes-file dist/NOTES.md \
+            dist/beemodel-*.tar.gz dist/beemodel-*.bin dist/SHA256SUMS build/shots/01_initial.png

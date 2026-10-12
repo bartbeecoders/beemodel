@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Verify the release binary honours the project rules: static, no libraries,
+# no interpreter, no RWX segments, and within the size budget.
+set -euo pipefail
+BIN="${1:-build/beemodel}"
+MAX_BYTES="${MAX_BYTES:-65536}"
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+size=$(stat -c %s "$BIN")
+echo "size: $size bytes (budget $MAX_BYTES)"
+(( size <= MAX_BYTES )) || fail "binary exceeds size budget"
+
+readelf -h "$BIN" | grep -q 'Type:.*EXEC' || fail "not a static executable"
+readelf -l "$BIN" | grep -q INTERP && fail "has a program interpreter (dynamic linking)"
+readelf -d "$BIN" 2>&1 | grep -q NEEDED && fail "depends on shared libraries"
+readelf -lW "$BIN" | awk '$1=="LOAD" && $7 ~ /RWE/ {exit 1}' || fail "RWX LOAD segment"
+"$BIN" --version | grep -Eq '^beemodel [0-9]+\.[0-9]+\.[0-9]+' || fail "--version output"
+echo "binary checks passed"
