@@ -339,6 +339,22 @@ builtins:
     .long 0, 0
     .quad bn_op, b_op
     .long 1, 2
+    .quad bn_edit, b_edit
+    .long 0, 1
+    .quad bn_verts, b_verts
+    .long 1, 1
+    .quad bn_edges, b_edges
+    .long 1, 1
+    .quad bn_faces, b_faces
+    .long 1, 1
+    .quad bn_selected, b_selected
+    .long 1, 1
+    .quad bn_vpos, b_vpos
+    .long 3, 3
+    .quad bn_vselect, b_vselect
+    .long 1, 16
+    .quad bn_vsel, b_vsel
+    .long 2, 2
 builtins_end:
 .equ B_SZ, 24
 
@@ -381,6 +397,16 @@ bn_count:       .asciz "count"
 bn_name:        .asciz "name"
 bn_active:      .asciz "active"
 bn_op:          .asciz "op"
+bn_edit:        .asciz "edit"
+bn_verts:       .asciz "verts"
+bn_edges:       .asciz "edges"
+bn_faces:       .asciz "faces"
+bn_selected:    .asciz "selected"
+bn_vpos:        .asciz "vpos"
+bn_vselect:     .asciz "vselect"
+bn_vsel:        .asciz "vsel"
+e_not_mesh:     .asciz "not a mesh: "
+e_axis:         .asciz "axis must be 0, 1 or 2 (or \"x\", \"y\", \"z\")"
 
 s_ind:          .asciz "  "
 s_error:        .asciz "error: "
@@ -3682,6 +3708,190 @@ b_op:
     lea     rdi, [rip+e_op_agent]
 2:  mov     rsi, r13
     jmp     sc_rt
+
+# a_mesh(rdi=value) -> rax = mesh of the named mesh object, ecx = handle
+a_mesh:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_obj
+    mov     r12d, eax
+    mov     edi, eax
+    call    obj_get
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    jne     1f
+    mov     rax, [rax+OB_MESH]
+    mov     ecx, r12d
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+1:  lea     rdi, [rip+e_not_mesh]
+    mov     rsi, [rbx+8]
+    jmp     sc_rt
+
+# edit(name) - edit mode on that mesh (it becomes active); edit() leaves it
+b_edit:
+    sub     rsp, 8
+    test    esi, esi
+    jnz     1f
+    call    edit_exit
+    add     rsp, 8
+    jmp     ret_nil
+1:  call    a_mesh
+    mov     [rip+active_obj], ecx
+    mov     [rip+edit_obj], ecx
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    jmp     ret_nil
+
+b_verts:
+    mov     edx, ME_NVERTS
+    jmp     mesh_count
+b_edges:
+    mov     edx, ME_NEDGES
+    jmp     mesh_count
+b_faces:
+    mov     edx, ME_NPOLYS
+mesh_count:
+    push    rdx
+    call    a_mesh
+    pop     rdx
+    cvtsi2sd xmm0, dword ptr [rax+rdx]
+    jmp     ret_num
+
+# selected(name) - how many vertices are selected (edit mode selection)
+b_selected:
+    sub     rsp, 8
+    call    a_mesh
+    add     rsp, 8
+    mov     rdx, [rax+ME_VSEL]
+    mov     ecx, [rax+ME_NVERTS]
+    xor     eax, eax
+1:  test    ecx, ecx
+    jz      2f
+    dec     ecx
+    movzx   r8d, byte ptr [rdx+rcx]
+    add     eax, r8d
+    jmp     1b
+2:  cvtsi2sd xmm0, eax
+    jmp     ret_num
+
+# vidx(rdi=value, rsi=mesh) -> eax = vertex index (checked)
+vidx:
+    push    rsi
+    call    a_num
+    pop     rsi
+    cvttsd2si rax, xmm0
+    test    rax, rax
+    js      1f
+    mov     ecx, [rsi+ME_NVERTS]
+    cmp     rax, rcx
+    jae     1f
+    ret
+1:  lea     rdi, [rip+e_range]
+    xor     esi, esi
+    jmp     sc_rt
+
+# vpos(name, i, axis) - a vertex coordinate (object space); axis 0-2 or "x"..
+b_vpos:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    call    a_mesh
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    mov     rsi, r12
+    call    vidx
+    mov     r13d, eax
+    lea     rdi, [rbx+32]               # axis
+    cmp     dword ptr [rdi], T_STR
+    jne     1f
+    mov     rax, [rdi+8]
+    movzx   eax, byte ptr [rax]
+    sub     eax, 'x'
+    jmp     2f
+1:  call    a_num
+    cvttsd2si eax, xmm0
+2:  cmp     eax, 2
+    ja      3f
+    mov     rcx, [r12+ME_POS]
+    lea     rdx, [r13+r13*2]
+    add     rdx, rax
+    cvtss2sd xmm0, [rcx+rdx*4]
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+3:  lea     rdi, [rip+e_axis]
+    xor     esi, esi
+    jmp     sc_rt
+
+# vsel(name, i) - 1 if that vertex is selected
+b_vsel:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_mesh
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    mov     rsi, r12
+    call    vidx
+    mov     rcx, [r12+ME_VSEL]
+    movzx   eax, byte ptr [rcx+rax]
+    cvtsi2sd xmm0, eax
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# vselect(name, i...) - exactly these vertices selected; vselect(name) = none
+b_vselect:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_mesh
+    mov     r13, rax
+    mov     r14d, 1                     # check the indices first
+1:  cmp     r14d, r12d
+    jae     2f
+    mov     eax, r14d
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    mov     rsi, r13
+    call    vidx
+    inc     r14d
+    jmp     1b
+2:  mov     rdi, [r13+ME_VSEL]
+    mov     ecx, [r13+ME_NVERTS]
+    xor     eax, eax
+    rep     stosb
+    mov     r14d, 1
+3:  cmp     r14d, r12d
+    jae     4f
+    mov     eax, r14d
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    mov     rsi, r13
+    call    vidx
+    mov     rcx, [r13+ME_VSEL]
+    mov     byte ptr [rcx+rax], 1
+    inc     r14d
+    jmp     3b
+4:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
 
 # has_prefix(rdi=text, rsi=prefix) -> eax
 has_prefix:

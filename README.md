@@ -58,6 +58,19 @@ cancels. The Move / Rotate / Scale tools (Shift+W/E/R) show gizmos you can
 drag. The grid toggle is **Shift+G**. **Ctrl+Z** / **Ctrl+Shift+Z** undo and
 redo every change (create, delete, duplicate, transforms). Selected objects get an orange outline, the active one gold.
 
+**Tab** switches the active mesh into **edit mode**:
+
+- **Select modes.** **1 / 2 / 3** pick vertices, edges or faces. Click to select;
+  **Shift**+click extends, **A** selects all or none, **Ctrl+I** inverts.
+- **Selection tools.** **B** then drag box-selects (**Ctrl** subtracts),
+  **Alt**+click selects an edge loop and **Ctrl+L** grows the selection to
+  linked geometry.
+- **Transforms.** **G / R / S** move, rotate and scale the selection, with the same
+  constraints, snapping and typed values as objects.
+- **Undo.** Every edit is undoable.
+- **Visibility.** Hidden vertices and edges are neither drawn nor picked; wireframe mode (Z)
+  shows and picks everything.
+
 Files: **Ctrl+S** saves (`.bee`), **Ctrl+O** opens, and File › Import / Export
 handle **OBJ** and **STL**. Commands take paths on the command line, for
 example `file.save ~/BeeModel/chair.bee` or `file.import_stl ~/part.stl`.

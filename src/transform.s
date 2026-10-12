@@ -188,7 +188,21 @@ tm_start:
     call    area_editor
     cmp     eax, ED_VIEWPORT
     jne     .Lts_out
-    # snapshot the selection, pivot = median of the locations
+    cmp     dword ptr [rip+edit_obj], 0 # edit mode: the selected vertices
+    je      0f
+    lea     rcx, [rip+mode_names]
+    mov     rdi, [rcx+r12*8]
+    call    undo_push
+    lea     rdi, [rip+tm_pivot]
+    call    edit_tm_snapshot
+    mov     [rip+tm_n], eax
+    test    eax, eax
+    jnz     .Lts_common
+    call    undo_drop_last
+    lea     rdi, [rip+s_none]
+    call    log_line
+    jmp     .Lts_out
+0:  # snapshot the selection, pivot = median of the locations
     xorps   xmm0, xmm0
     movss   [rip+tm_pivot], xmm0
     movss   [rip+tm_pivot+4], xmm0
@@ -242,6 +256,7 @@ tm_start:
     lea     rcx, [rip+mode_names]       # one undo step for the whole transform
     mov     rdi, [rcx+r12*8]
     call    undo_push
+.Lts_common:
     mov     edi, [rip+vp_area]
     mov     [rip+tm_area], edi
     call    vp_prepare
@@ -288,6 +303,8 @@ tm_motion:
 
 # restore - put every snapshotted transform back
 restore:
+    cmp     dword ptr [rip+edit_obj], 0
+    jne     edit_tm_restore
     push    rbx
     xor     ebx, ebx
 1:  cmp     ebx, [rip+tm_n]
@@ -462,7 +479,12 @@ tm_update:
     mov     [rdi], rax
     mov     eax, [rsi+8]
     mov     [rdi+8], eax
-    xor     ebx, ebx
+    cmp     dword ptr [rip+edit_obj], 0
+    je      0f
+    lea     rdi, [rsp]
+    call    edit_tm_grab
+    jmp     .Ltu_text
+0:  xor     ebx, ebx
 4:  cmp     ebx, [rip+tm_n]
     jae     .Ltu_text
     imul    rcx, rbx, TS_SZ
@@ -554,7 +576,15 @@ tm_update:
     jb      31f
     xor     eax, eax
 31: mov     [rsp+28], eax
-    xor     ebx, ebx
+    cmp     dword ptr [rip+edit_obj], 0
+    je      0f
+    mov     edi, r12d
+    movss   xmm0, [rsp+20]
+    movss   xmm1, [rsp+24]
+    lea     rsi, [rip+tm_pivot]
+    call    edit_tm_rotate
+    jmp     .Ltu_text
+0:  xor     ebx, ebx
 4:  cmp     ebx, [rip+tm_n]
     jae     .Ltu_text
     imul    rcx, rbx, TS_SZ
@@ -621,6 +651,13 @@ tm_update:
 .Lsc_have:
     movss   [rip+tm_value], xmm0
     movss   [rsp+16], xmm0
+    cmp     dword ptr [rip+edit_obj], 0
+    je      0f
+    mov     edi, [rip+tm_axis]
+    lea     rsi, [rip+tm_pivot]
+    call    edit_tm_scale
+    jmp     .Ltu_text
+0:
     xor     ebx, ebx
 2:  cmp     ebx, [rip+tm_n]
     jae     .Ltu_text
@@ -829,8 +866,13 @@ tm_confirm:
     cmp     dword ptr [rip+tm_mode], 0
     je      9f
     call    tm_update
-    mov     edi, [rip+tm_mode]
+    cmp     dword ptr [rip+edit_obj], 0
+    je      1f
+    call    edit_tm_end                 # bounding box after a component edit
+    jmp     2f
+1:  mov     edi, [rip+tm_mode]
     call    macro_transform
+2:
     mov     dword ptr [rip+tm_mode], 0
     mov     dword ptr [rip+tm_drag], 0
     lea     rdi, [rip+tm_text]          # drop the input cursor from the log
@@ -923,6 +965,14 @@ gizmo_origin:
     mov     ecx, [rip+active_tool]
     test    ecx, ecx
     jz      9f
+    cmp     dword ptr [rip+edit_obj], 0 # edit mode: the selected vertices
+    je      0f
+    lea     rdi, [rip+g_tmp+16]
+    call    edit_median
+    test    eax, eax
+    jz      9f
+    jmp     .Lgo_len
+0:
     xorps   xmm0, xmm0
     movss   [rsp], xmm0                 # count
     lea     rdx, [rip+g_tmp+16]
@@ -960,6 +1010,7 @@ gizmo_origin:
     inc     ecx
     cmp     ecx, 3
     jb      3b
+.Lgo_len:
     lea     rdi, [rip+g_tmp+16]         # length = GIZMO_PX on screen
     call    proj_world
     mov     eax, GIZMO_PX

@@ -158,6 +158,10 @@
 .equ COL_SPLIT,         0x16181c
 .equ COL_SPLIT_HOT,     0xf2b134
 .equ COL_REC,         0xe5484d
+.equ COL_EDIT_WIRE,   0x0b0c0e
+.equ COL_EDIT_SEL,    0xffa233
+.equ COL_FACE_SEL,    0xe0a060
+.equ DRAG_BOX,          7
 .equ COL_OK,          0x4cb86a
 .equ COL_WARN,        0xe0a030
 .equ COL_ACCENT,        0xf2b134
@@ -285,6 +289,8 @@
 .equ ME_BMAX,       84      # float[3]
 .equ ME_BYTES,      96      # size of the mapping (for munmap)
 .equ ME_REFS,       104     # objects + undo steps using this mesh
+.equ ME_VSEL,       112     # u8 per vertex: selected in edit mode
+.equ ME_TPOLY,      120     # u32 per triangle: its polygon
 .equ ME_HDR,        128
 
 # ---- objects (scene.s) -------------------------------------------------------------

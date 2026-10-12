@@ -102,14 +102,14 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_ai, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_ai, items_help, items_area
-menu_counts:    .long 14, 13, 13, 10, 6, 3, 6
+menu_counts:    .long 14, 14, 13, 10, 6, 3, 6
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
 items_file:     .quad op_file_new, op_file_open, op_file_save, op_file_saveas, 0
                 .quad op_import_obj, op_import_stl, op_export_obj, op_export_stl, 0
                 .quad op_screenshot, op_recover, 0, op_file_exit
-items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_select_all, op_duplicate, op_delete, 0
+items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_edit_toggle, op_select_all, op_duplicate, op_delete, 0
                 .quad op_palette_open, 0, op_script_record, op_script_run, 0, op_edit_prefs
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
@@ -407,7 +407,11 @@ ui_motion:
     mov     eax, [rip+drag_mode]
     test    eax, eax
     jz      .Lmo_hover
-    cmp     eax, DRAG_PENDING
+    cmp     eax, DRAG_BOX
+    jne     77f
+    call    box_move                    # edi / esi = the pointer
+    jmp     .Lmo_out
+77: cmp     eax, DRAG_PENDING
     jne     0f
     mov     ecx, edi                    # moved far enough to be a drag?
     sub     ecx, [rip+press_x]
@@ -696,7 +700,16 @@ ui_button:
     call    tm_start
     jmp     .Lbt_done
 51: mov     [rip+drag_node], r12d
-    mov     dword ptr [rip+drag_mode], DRAG_PENDING
+    cmp     dword ptr [rip+box_armed], 0  # B was pressed: box select
+    je      52f
+    cmp     dword ptr [rip+edit_obj], 0
+    je      52f
+    mov     dword ptr [rip+drag_mode], DRAG_BOX
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    box_begin
+    jmp     .Lbt_done
+52: mov     dword ptr [rip+drag_mode], DRAG_PENDING
     mov     eax, [rip+ptr_x]
     mov     [rip+press_x], eax
     mov     eax, [rip+ptr_y]
@@ -717,6 +730,7 @@ ui_button:
     jmp     .Lbt_done
 7:  cmp     ebx, HIT_OUTLINER           # click an object row to select it
     jne     .Lbt_done
+    call    edit_exit                   # (leaves edit mode)
     lea     rax, [rip+obj_list]
     mov     edi, [rax+r12*4]
     mov     esi, [rip+key_mods]
@@ -727,7 +741,15 @@ ui_button:
 
     # ---------------- release ----------------
 .Lbt_release:
-    cmp     dword ptr [rip+drag_mode], DRAG_PENDING
+    cmp     dword ptr [rip+drag_mode], DRAG_BOX
+    jne     77f
+    mov     dword ptr [rip+drag_mode], 0
+    call    vp_setup_drag
+    mov     edi, [rip+key_mods]
+    call    box_finish
+    call    reset_clip
+    jmp     .Lbt_done
+77: cmp     dword ptr [rip+drag_mode], DRAG_PENDING
     jne     0f
     mov     dword ptr [rip+drag_mode], 0
     call    viewport_click
@@ -837,6 +859,33 @@ ui_axis:
 # viewport_click - LMB released without dragging: pick in that viewport
 viewport_click:
     push    rbx
+    call    vp_setup_drag
+    cmp     dword ptr [rip+edit_obj], 0 # edit mode: components
+    je      1f
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    mov     edx, [rip+press_mods]
+    call    edit_click
+    call    reset_clip
+    pop     rbx
+    ret
+1:  mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    vp_pick
+    push    rax
+    call    reset_clip
+    pop     rax
+    mov     edi, eax
+    mov     esi, [rip+press_mods]
+    and     esi, MOD_SHIFT
+    call    obj_click_select
+    call    macro_select
+    pop     rbx
+    ret
+
+# vp_setup_drag - canvas, camera and clip of the viewport drag_node
+vp_setup_drag:
+    push    rbx
     mov     edi, [rip+drag_node]
     call    area_node_rect
     mov     ecx, [rax+12]               # canvas = area below its header
@@ -857,17 +906,6 @@ viewport_click:
     mov     edx, [rip+cvs_x1]
     mov     ecx, [rip+cvs_y1]
     call    set_clip
-    mov     edi, [rip+ptr_x]
-    mov     esi, [rip+ptr_y]
-    call    vp_pick
-    push    rax
-    call    reset_clip
-    pop     rax
-    mov     edi, eax
-    mov     esi, [rip+press_mods]
-    and     esi, MOD_SHIFT
-    call    obj_click_select
-    call    macro_select
     pop     rbx
     ret
 

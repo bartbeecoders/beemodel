@@ -507,11 +507,13 @@ viewport_draw:
     call    line3d
 
 .Lvp_object:
+    call    edit_prepare                # edit mode: selected faces
     cmp     dword ptr [rip+vp_shading], 0
     jne     1f
     xor     edi, edi                    # solid: rasterize meshes (+ outline)
     call    raster_scene
 1:  call    draw_objects                # wires (all objects, or non-meshes)
+    call    edit_draw                   # edit mode: edges, vertices, faces
     call    gizmo_draw
     call    tm_draw
 
