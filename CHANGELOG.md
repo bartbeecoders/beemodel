@@ -6,6 +6,11 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-12
+
+Phase 2 of the masterplan, "Scene, viewport & files": BeeModel becomes a
+small but real 3D editor.
+
 ### Added
 - Scene with real objects: a Blender-like default scene (Camera, Light,
   Cube); objects have a name, location, rotation, scale and a mesh.
@@ -138,6 +143,7 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/bartbeecoders/beemodel/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/bartbeecoders/beemodel/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/bartbeecoders/beemodel/releases/tag/v0.1.0
