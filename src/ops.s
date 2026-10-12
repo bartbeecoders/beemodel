@@ -40,6 +40,7 @@ OPERATOR op_help_about, "help.about",     "About BeeModel",     op_about, doc="S
 
 .section .rodata
 s_log_prompt:   .asciz "> "
+s_nl:           .asciz "\n"
 s_log_todo:     .asciz "  not implemented yet - waiting for the modeling core"
 s_about_ver:    .asciz "  BeeModel "
 s_about1:       .asciz "  A 3D modeling shell written in pure x86-64 assembly"
@@ -289,13 +290,15 @@ list_ops:
     call    fmt_pad
     mov     rdi, [rbx+OP_LABEL]
     call    fmt_str
+    mov     edi, ' '
+    call    fmt_char
     mov     edi, 62
     call    fmt_pad
+    lea     rdi, [rip+fmt_buf]          # the doc goes out on its own: no limit
+    call    write_out
     mov     rdi, [rbx+OP_DOC]
-    call    fmt_str
-    mov     edi, 10
-    call    fmt_char
-    lea     rdi, [rip+fmt_buf]
+    call    write_out
+    lea     rdi, [rip+s_nl]
     call    write_out
     add     rbx, OP_SIZE
     jmp     1b
