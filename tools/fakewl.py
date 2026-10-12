@@ -447,6 +447,7 @@ def main():
     mcp()
     edit_mode()
     mesh_ops()
+    mesh_tools()
     scripting()
     beescript_cli()
     mcp_conformance()
@@ -907,6 +908,51 @@ def mesh_ops():
     check(n == '= 21' and float(flipped[2:]) < -7.9 and float(q('volume("Cube")')[2:]) > 7.9,
           f'Ctrl+X dissolves the top faces into one ({n}); Shift+N turns flipped faces outwards')
     f.shot('38_mesh_ops.png')
+    f.proc.kill()
+
+
+def mesh_tools():
+    """Loop cut, knife, bevel (modal), the 3D cursor."""
+    print('  -- loop cut, knife, bevel, cursor --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(*project((0, 1, 0)))
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.key(15)                                   # Tab
+    f.mods(4); f.key(19); f.mods(0)             # Ctrl+R: loop cut tool
+    f.move(*project((1, 0.7, 1))); f.pump(0.2)  # hover the front vertical edge
+    f.shot('39_loopcut_preview.png')
+    f.click(*project((1, 0.7, 1)))
+    check(q('print(faces("Cube"), verts("Cube"), volume("Cube"))') == '10 12 8', 'Ctrl+R + click cuts a loop around the cube')
+    f.mods(4); f.key(44); f.mods(0)             # undo
+    check(q('faces("Cube")') == '= 6', 'undo removes the loop cut')
+    f.key(37)                                   # K: knife across the top face
+    f.click(*project((-1.3, 2, 0.2))); f.click(*project((1.3, 2, -0.2)))
+    f.key(28)
+    n = q('faces("Cube")')
+    check(n != '= 6' and q('volume("Cube")') == '= 8', f'the knife splits faces ({n}), volume unchanged')
+    f.mods(4); f.key(44); f.mods(0)
+    q('vselect("Cube", 5, 6)')
+    f.mods(4); f.key(48); f.mods(0)             # Ctrl+B 0.2 Enter
+    f.type('0.2'); f.key(28)
+    check(q('print(verts("Cube"), faces("Cube"), volume("Cube"))') == '10 7 7.96', 'Ctrl+B 0.2 bevels the edge (volume 7.96)')
+    f.mods(4); f.key(44); f.mods(0)
+    q('vselect("Cube", 5, 6)')
+    f.mods(4); f.key(48); f.mods(0)             # Ctrl+B, wheel: 3 segments
+    f.wheel(-1); f.wheel(-1)
+    f.type('0.3'); f.key(28)
+    check(q('print(verts("Cube"), faces("Cube"))') == '14 11', 'the wheel sets bevel segments (3)')
+    f.shot('40_bevel.png')
+    f.key(15)                                   # object mode; Shift+RMB places the cursor
+    f.mods(1); f.click(*project((4, 0, 4)), btn=0x111); f.mods(0)
+    q('add("cylinder", "Cyl")')
+    cyl = [o for o in json.loads(m.tool('scene_summary')[0].split('\n')[0])['objects'] if o['name'] == 'Cyl']
+    loc = cyl[0]['location'] if cyl else None
+    check(loc is not None and abs(loc[0] - 4) < 0.3 and abs(loc[2] - 4) < 0.3 and abs(loc[1]) < 0.05,
+          f'Shift+RMB places the 3D cursor on the ground; new objects appear there {loc}')
+    f.shot('41_cursor.png')
     f.proc.kill()
 
 

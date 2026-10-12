@@ -84,8 +84,13 @@ Modeling tools, also in the **Mesh** menu:
 | **F** | Fill a hole or make a face |
 | **Shift+D** | Duplicate the selected faces |
 | **Shift+N** | Recalculate normals |
+| **Ctrl+R** | Loop cut: hover an edge, the wheel sets the number of cuts, click to cut |
+| **Ctrl+B** | Bevel the selected edges: drag the width, the wheel sets segments |
+| **K** | Knife: click points across the visible faces, Enter cuts |
 
-The menu also has Subdivide and Flip Normals.
+The menu also has Subdivide, Flip Normals, Bisect (a plane cut), Bridge Edge Loops (joins two
+boundary loops) and Spin (sweeps a profile around the **3D cursor**). **Shift+right click**
+places the 3D cursor on the surface or the ground, and new objects are created there.
 
 Typed values work like in transforms (`E 1 ⏎`, `I 0.2 ⏎`), and each tool is a single undo step.
 Scripts and agents call the same operators with the value as the argument:

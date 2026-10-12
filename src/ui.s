@@ -7,6 +7,7 @@
 .include "macros.inc"
 
 # exports
+.globl vp_setup_drag
 .globl ptr_y
 .globl ptr_x
 .globl menu_open
@@ -102,8 +103,8 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_ai, s_m_help
-menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh, items_ai, items_help, items_area
-menu_counts:    .long 14, 14, 13, 10, 19, 6, 3, 6
+menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_ai, items_help, items_area
+menu_counts:    .long 14, 14, 13, 10, 27, 6, 3, 6
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
@@ -395,6 +396,15 @@ ui_motion:
     mov     [rip+ptr_x], edi
     mov     [rip+ptr_y], esi
     jmp     tm_motion
+0:  cmp     dword ptr [rip+etool], 0    # edit tools follow the pointer
+    je      0f
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    etool_motion
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
 0:  push    rbx
     push    r12
     push    r13
@@ -627,7 +637,25 @@ ui_button:
     mov     edi, CUR_MOVE
     call    set_cursor
     jmp     .Lbt_done
-1:  cmp     r14d, BTN_LEFT
+1:  cmp     r14d, BTN_RIGHT             # right button in a viewport
+    jne     13f
+    cmp     ebx, HIT_CANVAS
+    jne     .Lbt_done
+    cmp     dword ptr [rip+etool], 0    # cancels an edit tool,
+    je      12f
+    call    etool_cancel
+    jmp     .Lbt_done
+12: test    dword ptr [rip+key_mods], MOD_SHIFT  # Shift: places the 3D cursor
+    jz      .Lbt_done
+    mov     [rip+vp_area], r12d
+    mov     [rip+drag_node], r12d
+    call    vp_setup_drag
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    cursor_place
+    call    reset_clip
+    jmp     .Lbt_done
+13: cmp     r14d, BTN_LEFT
     jne     .Lbt_done
 
     cmp     ebx, HIT_EDGE
@@ -688,6 +716,12 @@ ui_button:
 5:  cmp     ebx, HIT_CANVAS            # click selects, drag orbits / pans
     jne     6f
     mov     [rip+vp_area], r12d
+    cmp     dword ptr [rip+etool], 0    # an edit tool takes the clicks
+    je      54f
+    mov     edi, [rip+key_mods]
+    call    etool_press
+    jmp     .Lbt_done
+54:
     mov     edi, r12d                   # a gizmo handle starts a transform
     call    vp_prepare
     mov     edi, [rip+ptr_x]
@@ -807,7 +841,15 @@ ui_axis:
     jnz     9f
     test    esi, esi
     jz      9f
-    push    rsi
+    mov     edi, esi                    # direction: -1 / +1
+    sar     edi, 31
+    or      edi, 1
+    cmp     dword ptr [rip+tm_mode], 4  # a value modal: segments / cuts
+    je      tm_wheel
+    cmp     dword ptr [rip+etool], 0    # an edit tool (loop cut: cuts)
+    je      0f
+    jmp     etool_wheel
+0:  push    rsi
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
     call    hit_test
@@ -963,7 +1005,13 @@ ui_key_press:
     mov     dword ptr [rip+menu_open], -1
     mov     dword ptr [rip+dirty], 1
     jmp     9f
-1:  cmp     dword ptr [rip+tf_focus], 0
+1:  cmp     dword ptr [rip+etool], 0    # edit tools: Enter / Esc / ...
+    je      11f
+    mov     edi, ebx
+    call    etool_key
+    test    eax, eax
+    jnz     9f
+11: cmp     dword ptr [rip+tf_focus], 0
     je      2f
     lea     rdi, [rip+tfi_console]
     call    tf_select

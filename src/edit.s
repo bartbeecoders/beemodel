@@ -37,6 +37,13 @@
 .globl edit_median
 .globl sel_mode
 .globl do_sel_all
+.globl ex_setup
+.globl ex_to_world
+.globl ex_to_local
+.globl edit_pick_edge
+.globl edit_pick_vertex
+.globl visible
+.globl pv
 .globl need_edit
 .globl poly_sel
 .globl build_adj
@@ -1943,6 +1950,94 @@ store_local:
     inc     ebx
     cmp     ebx, 3
     jb      1b
+    pop     rbx
+    ret
+
+# ex_setup - mtx / minv of the edit object (for ex_to_world / ex_to_local)
+ex_setup:
+    sub     rsp, 8
+    call    edit_get
+    test    rax, rax
+    jz      1f
+    mov     rdi, rax
+    lea     rsi, [rip+mtx]
+    call    obj_matrix
+    call    invert3
+1:  add     rsp, 8
+    ret
+
+# ex_to_world(rsi=local float[3], rdx=out) / ex_to_local(rsi=world, rdx=out)
+ex_to_world:
+    lea     rdi, [rip+mtx]
+    jmp     xform_point
+ex_to_local:
+    movss   xmm0, [rsi]
+    subss   xmm0, [rip+mtx+12]
+    movss   xmm1, [rsi+4]
+    subss   xmm1, [rip+mtx+28]
+    movss   xmm2, [rsi+8]
+    subss   xmm2, [rip+mtx+44]
+    lea     r8, [rip+minv]
+    xor     ecx, ecx
+1:  movss   xmm3, [r8]
+    mulss   xmm3, xmm0
+    movss   xmm4, [r8+4]
+    mulss   xmm4, xmm1
+    addss   xmm3, xmm4
+    movss   xmm4, [r8+8]
+    mulss   xmm4, xmm2
+    addss   xmm3, xmm4
+    movss   [rdx+rcx*4], xmm3
+    add     r8, 12
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    ret
+
+# edit_pick_edge(edi=x, esi=y logical) -> eax, edx = the edge under the
+#   pointer (eax = -1: none). edit_pick_vertex -> eax = vertex or -1.
+#   Need cam_setup + clip of the viewport.
+edit_pick_edge:
+    mov     eax, 1
+    jmp     pick_common
+edit_pick_vertex:
+    xor     eax, eax
+pick_common:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r14d, eax
+    call    to_px
+    cvtsi2ss xmm0, eax
+    movss   [rip+pick_x], xmm0
+    mov     edi, esi
+    call    to_px
+    cvtsi2ss xmm0, eax
+    movss   [rip+pick_y], xmm0
+    mov     eax, -1
+    mov     edx, -1
+    call    edit_get
+    test    rax, rax
+    jz      9f
+    mov     rbx, rax
+    call    project_all
+    test    rax, rax
+    mov     eax, -1
+    mov     edx, -1
+    jz      9f
+    mov     r13, [rip+pv]
+    mov     rbx, [rbx+OB_MESH]
+    test    r14d, r14d
+    jz      1f
+    call    pick_edge
+    jmp     9f
+1:  call    pick_vertex
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 

@@ -18,6 +18,35 @@
 # exports
 .globl items_mesh
 .globl edit_replace
+.globl fa
+.globl fa_fill
+.globl eh_new
+.globl eh_slot
+.globl ukey
+.globl dkey
+.globl edge_faces
+.globl ef_find
+.globl ef_f1
+.globl ef_f2
+.globl ef_cnt
+.globl ef_n
+.globl copy_verts
+.globl copy_vert
+.globl add_vert_at
+.globl clear_vsel
+.globl poly_copy
+.globl mo_commit
+.globl mo_fail
+.globl normalize
+.globl poly_normal
+.globl nrm
+.globl sel_polys
+.globl scr
+.globl interactive
+.globl arg_value
+.globl recalc_all
+.globl world_dir
+.globl poly_center
 
 .equ KEY_I,     23
 .equ KEY_M,     50
@@ -2215,6 +2244,12 @@ rebuild_flipped:
 # Recalculate: walk over shared edges making neighbours consistent, then
 # point each connected part outwards (positive signed volume)
 do_recalc:
+    mov     dword ptr [rip+rc_all], 0
+    jmp     recalc_common
+# recalc_all - every face of the edit mesh (after spin, bridge...)
+recalc_all:
+    mov     dword ptr [rip+rc_all], 1
+recalc_common:
     push    rbx
     push    r12
     push    r13
@@ -2230,8 +2265,11 @@ do_recalc:
     test    rax, rax
     jz      .Lrc_drop
     mov     r12, rax
+    cmp     dword ptr [rip+rc_all], 0
+    jne     0f
     test    ecx, ecx
     jnz     1f
+0:
     mov     rdi, r12
     mov     ecx, [rbx+ME_NPOLYS]
     mov     al, 1
@@ -3240,6 +3278,7 @@ group_outline:
 .section .bss
 .align 8
 go_mesh:        .skip 8
+rc_all:         .skip 4
 go_next:        .skip 8
 cell_tab:       .skip 8
 .text
