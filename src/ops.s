@@ -26,8 +26,6 @@ OPERATOR op_file_open,  "file.open",  "Open...",   op_todo, key=KEY_O|KM_CTRL, d
 OPERATOR op_file_save,  "file.save",  "Save",      op_todo, key=KEY_S|KM_CTRL, doc="Save the scene"
 OPERATOR op_file_exit,  "file.exit",  "Exit",      op_exit, key=KEY_Q|KM_CTRL, flags=0, doc="Quit BeeModel"
 # ---- Edit ---------------------------------------------------------------------
-OPERATOR op_edit_undo,  "edit.undo",  "Undo",      op_todo, key=KEY_Z|KM_CTRL, doc="Undo the last change"
-OPERATOR op_edit_redo,  "edit.redo",  "Redo",      op_todo, key=KEY_Z|KM_CTRL|KM_SHIFT, doc="Redo the last undone change"
 OPERATOR op_edit_prefs, "edit.preferences", "Preferences...", op_todo, doc="Open the preferences editor"
 # ---- Tools --------------------------------------------------------------------
 OPERATOR op_tool_select, "tool.select", "Select", op_set_tool, op_check_tool, 0, KEY_Q|KM_SHIFT, doc="Selection tool"
@@ -106,7 +104,11 @@ run_op:
     lea     rdi, [rip+s_log_prompt]
     mov     rsi, [rbx+OP_LABEL]
     call    log_pair
-1:  mov     rdi, [rbx+OP_ARG]
+1:  test    dword ptr [rbx+OP_FLAGS], OPF_UNDO
+    jz      2f
+    mov     rdi, [rbx+OP_LABEL]         # record the scene before the change
+    call    undo_push
+2:  mov     rdi, [rbx+OP_ARG]
     mov     rsi, rbx
     call    [rbx+OP_EXEC]
     mov     dword ptr [rip+dirty], 1

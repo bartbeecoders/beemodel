@@ -64,15 +64,15 @@ prim_table:     .quad prim_cube,     s_cube,     OT_MESH
 type_colors:    .long 0xb4b8c0, 0xe5c07b, 0x61afef
 
 # ---- operators ---------------------------------------------------------------------
-OPERATOR op_add_cube,     "create.cube",     "Cube",     op_create, arg=0, doc="Add a cube"
-OPERATOR op_add_sphere,   "create.sphere",   "UV Sphere", op_create, arg=1, doc="Add a UV sphere"
-OPERATOR op_add_cylinder, "create.cylinder", "Cylinder", op_create, arg=2, doc="Add a cylinder"
-OPERATOR op_add_plane,    "create.plane",    "Plane",    op_create, arg=3, doc="Add a plane"
-OPERATOR op_add_light,    "create.light",    "Light",    op_create, arg=4, doc="Add a point light"
-OPERATOR op_add_camera,   "create.camera",   "Camera",   op_create, arg=5, doc="Add a camera"
-OPERATOR op_add_cone,     "create.cone",     "Cone",     op_create, arg=6, doc="Add a cone"
-OPERATOR op_add_torus,    "create.torus",    "Torus",    op_create, arg=7, doc="Add a torus"
-OPERATOR op_add_grid,     "create.grid",     "Grid",     op_create, arg=8, doc="Add a subdivided grid"
+OPERATOR op_add_cube,     "create.cube",     "Cube",     op_create, arg=0, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a cube"
+OPERATOR op_add_sphere,   "create.sphere",   "UV Sphere", op_create, arg=1, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a UV sphere"
+OPERATOR op_add_cylinder, "create.cylinder", "Cylinder", op_create, arg=2, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a cylinder"
+OPERATOR op_add_plane,    "create.plane",    "Plane",    op_create, arg=3, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a plane"
+OPERATOR op_add_light,    "create.light",    "Light",    op_create, arg=4, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a point light"
+OPERATOR op_add_camera,   "create.camera",   "Camera",   op_create, arg=5, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a camera"
+OPERATOR op_add_cone,     "create.cone",     "Cone",     op_create, arg=6, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a cone"
+OPERATOR op_add_torus,    "create.torus",    "Torus",    op_create, arg=7, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a torus"
+OPERATOR op_add_grid,     "create.grid",     "Grid",     op_create, arg=8, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a subdivided grid"
 OPERATOR op_select_all,   "object.select_all", "Select All / None", op_select_all_t, key=KEY_A, doc="Select every object, or none if some are selected"
 OPERATOR op_delete,       "object.delete",   "Delete",   op_delete_sel, key=KEY_X, flags=OPF_AI_SAFE|OPF_UNDO, doc="Delete the selected objects"
 OPERATOR op_delete_key,   "object.delete_key", "Delete", op_delete_sel, key=KEY_DELETE, flags=OPF_HIDDEN|OPF_UNDO, doc="Delete the selected objects (Delete key)"
@@ -223,7 +223,7 @@ obj_new:
     mov     eax, ebx
     jmp     9f
 8:  mov     rdi, r14                    # no room: drop the mesh
-    call    mesh_free
+    call    mesh_unref
     xor     eax, eax
 9:  add     rsp, 8
     pop     r14
@@ -412,7 +412,7 @@ op_delete_sel:
     test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
     jz      1b
     mov     rdi, [rax+OB_MESH]
-    call    mesh_free
+    call    mesh_unref
     lea     rax, [rip+obj_list]
     mov     r12d, [rax+rbx*4]
     cmp     r12d, [rip+active_obj]
@@ -435,6 +435,7 @@ op_delete_sel:
     jmp     1b
 5:  test    r13d, r13d
     jnz     6f
+    call    undo_drop_last              # nothing changed
     lea     rdi, [rip+s_log_nosel]
     call    log_line
     jmp     9f
@@ -473,9 +474,9 @@ op_duplicate_sel:
     jz      4f
     mov     r12, rax
     and     dword ptr [r12+OB_FLAGS], ~OBF_SELECTED
-    mov     rdi, [r12+OB_MESH]
-    call    mesh_copy
-    mov     r14, rax
+    mov     r14, [r12+OB_MESH]          # meshes are immutable: share it
+    mov     rdi, r14
+    call    mesh_ref
     mov     rdi, r12
     call    base_name
     mov     edi, [r12+OB_TYPE]
@@ -501,6 +502,7 @@ op_duplicate_sel:
     jmp     1b
 5:  test    r15d, r15d
     jnz     6f
+    call    undo_drop_last              # nothing changed
     lea     rdi, [rip+s_log_nosel]
     call    log_line
     jmp     9f

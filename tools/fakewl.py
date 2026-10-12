@@ -432,6 +432,7 @@ def main():
     check(f.frames >= 50, f'frames rendered ({f.frames})')
     areas_and_palette()
     transforms()
+    undo_redo()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
     sys.exit(1 if FAILS else 0)
@@ -510,6 +511,40 @@ def transforms():
     f.drag(mid[0], mid[1], end[0], end[1], steps=6)
     check(not bright(px(f, *project((1.6, 1, 0)))), 'dragging the gizmo X handle moves the cube along X')
     f.shot('27_gizmo_dragged.png')
+    f.proc.kill()
+
+
+def undo_redo():
+    """Ctrl+Z / Ctrl+Shift+Z over transforms, delete and create."""
+    print('  -- undo / redo --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    c0, c2 = project((0, 1, 0)), project((2, 1, 0))
+    f.enter(*c0)
+    ICON = lambda row: px(f, 1037, 94 + 20 * row)
+    undo = lambda: (f.mods(4), f.key(44), f.mods(0))
+    redo = lambda: (f.mods(5), f.key(44), f.mods(0))
+    f.key(34); f.key(45); f.type('2'); f.key(28)     # G X 2
+    check(bright(px(f, *c2)) and not bright(px(f, *project((-0.8, 1, 0)))), 'cube moved to x = 2')
+    undo()
+    check(bright(px(f, *project((-0.8, 1, 0)))) and not bright(px(f, *project((2.8, 1, 0)))),
+          'Ctrl+Z puts the cube back at the origin')
+    redo()
+    check(bright(px(f, *c2)) and not bright(px(f, *project((-0.8, 1, 0)))), 'Ctrl+Shift+Z moves it to x = 2 again')
+    f.key(45)                            # X: delete the cube
+    check(ICON(2) == 0x2a2e36, 'X deletes the cube')
+    undo()
+    check(ICON(2) == 0xb4b8c0 and bright(px(f, *c2)), 'Ctrl+Z brings the deleted cube back where it was')
+    f.key(61); f.type('torus'); f.key(28)            # create, then undo it
+    check(ICON(3) == 0xb4b8c0, 'palette adds a torus')
+    undo()
+    check(ICON(3) == 0x2a2e36, 'Ctrl+Z removes the torus again')
+    f.move(*c2)
+    f.key(34); f.move(c2[0] + 80, c2[1]); f.key(1)   # cancelled grab: no step
+    undo()                               # undoes the redo'd move instead
+    check(bright(px(f, *project((-0.8, 1, 0)))), 'a cancelled transform leaves no undo step')
+    f.shot('28_undo.png')
     f.proc.kill()
 
 

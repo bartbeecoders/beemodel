@@ -278,6 +278,7 @@
 .equ ME_BMIN,       72      # float[3]
 .equ ME_BMAX,       84      # float[3]
 .equ ME_BYTES,      96      # size of the mapping (for munmap)
+.equ ME_REFS,       104     # objects + undo steps using this mesh
 .equ ME_HDR,        128
 
 # ---- objects (scene.s) -------------------------------------------------------------

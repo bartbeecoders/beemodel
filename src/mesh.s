@@ -12,6 +12,8 @@
 # exports
 .globl mesh_new
 .globl mesh_free
+.globl mesh_ref
+.globl mesh_unref
 .globl mesh_copy
 .globl mesh_add_vert
 .globl mesh_add_poly
@@ -101,6 +103,7 @@ mesh_new:
     xor     eax, eax
     jmp     9f
 1:  mov     [rax+ME_BYTES], rbx
+    mov     dword ptr [rax+ME_REFS], 1
     mov     [rax+ME_CAPV], r12d
     mov     [rax+ME_CAPL], r13d
     mov     [rax+ME_CAPP], r14d
@@ -128,6 +131,20 @@ mesh_set_ptrs:
     lea     rcx, [rcx+rdx*8]
     mov     [rax+ME_TRIS], rcx
     ret
+
+# mesh_ref(rdi=mesh) / mesh_unref(rdi=mesh) - meshes are shared by objects
+# and undo snapshots; the last reference frees the mesh
+mesh_ref:
+    test    rdi, rdi
+    jz      1f
+    inc     dword ptr [rdi+ME_REFS]
+1:  ret
+mesh_unref:
+    test    rdi, rdi
+    jz      1f
+    dec     dword ptr [rdi+ME_REFS]
+    jz      mesh_free
+1:  ret
 
 mesh_free:
     test    rdi, rdi

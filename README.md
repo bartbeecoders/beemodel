@@ -55,7 +55,8 @@ wireframe). Move, rotate and scale objects like in Blender: **G**, **R**,
 **S**, then optionally **X/Y/Z** to lock an axis, **Ctrl** to snap, or type a
 value (`G X 2 ⏎`). **Enter** / left click confirms, **Esc** / right click
 cancels. The Move / Rotate / Scale tools (Shift+W/E/R) show gizmos you can
-drag. The grid toggle is **Shift+G**. Selected objects get an orange outline, the active one gold.
+drag. The grid toggle is **Shift+G**. **Ctrl+Z** / **Ctrl+Shift+Z** undo and
+redo every change (create, delete, duplicate, transforms). Selected objects get an orange outline, the active one gold.
 
 Press **F3** for the command palette: type part of any command name and press
 Enter.
