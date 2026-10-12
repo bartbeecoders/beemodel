@@ -93,6 +93,15 @@ boundary loops) and Spin (sweeps a profile around the **3D cursor**). **Shift+ri
 places the 3D cursor on the surface or the ground, and new objects are created there.
 
 Typed values work like in transforms (`E 1 ⏎`, `I 0.2 ⏎`), and each tool is a single undo step.
+
+The **redo panel** (bottom left of the viewport) shows the values of the last tool:
+distance, thickness, width and segments, cuts, steps and angle.
+
+- **Drag** a value, or scroll over it, and the tool runs again with the new value.
+- **F9** puts the values on the command line to type.
+- Agents can call `edit.redo_last "values"`.
+
+It all stays one undo step.
 Scripts and agents call the same operators with the value as the argument:
 `op("mesh.inset", 0.1)`.
 

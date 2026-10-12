@@ -28,6 +28,8 @@
 .globl tm_noundo
 .globl tm_start_value
 .globl tm_vint
+.globl tm_axis
+.globl tm_value
 .globl tm_wheel
 
 .equ TM_MAX,        MAX_OBJECTS
@@ -1013,6 +1015,7 @@ tm_confirm:
     cmp     dword ptr [rip+tm_mode], 0
     je      9f
     call    tm_update
+    call    lastop_confirm              # the redo panel's values
     cmp     dword ptr [rip+tm_mode], 4
     jne     0f
     call    [rip+tm_vconfirm]
@@ -1043,6 +1046,7 @@ tm_confirm:
 tm_cancel:
     cmp     dword ptr [rip+tm_mode], 0
     je      9f
+    call    lastop_cancel
     cmp     dword ptr [rip+tm_mode], 4
     jne     1f
     call    [rip+tm_vcancel]

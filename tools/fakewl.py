@@ -448,6 +448,7 @@ def main():
     edit_mode()
     mesh_ops()
     mesh_tools()
+    redo_panel()
     scripting()
     beescript_cli()
     mcp_conformance()
@@ -953,6 +954,35 @@ def mesh_tools():
     check(loc is not None and abs(loc[0] - 4) < 0.3 and abs(loc[2] - 4) < 0.3 and abs(loc[1]) < 0.05,
           f'Shift+RMB places the 3D cursor on the ground; new objects appear there {loc}')
     f.shot('41_cursor.png')
+    f.proc.kill()
+
+
+def redo_panel():
+    """Adjust the last operation: panel drag, F9, agents; still one undo step."""
+    print('  -- redo panel --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(*project((0, 1, 0)))
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.key(15); f.key(4)
+    f.click(*project((0.2, 2, -0.3)))           # top face
+    f.key(18); f.type('1'); f.key(28)           # E 1 Enter
+    f.pump(0.2)
+    panel = px(f, 322, 548)
+    f.shot('42_redo_panel.png')
+    check(q('volume("Cube")') == '= 12' and panel == 0x2d313a, 'after E 1 the redo panel shows the distance')
+    text, err = m.tool('run_operator', {'id': 'edit.redo_last', 'arg': '2'})
+    check(not err and q('volume("Cube")') == '= 16', 'an agent re-runs it with distance 2 (edit.redo_last)')
+    f.drag(470, 577, 570, 577, steps=4)         # +100 px * 0.01 = +1 m
+    check(q('volume("Cube")') == '= 20', 'dragging the value re-runs the extrusion (3 m)')
+    f.key(67)                                   # F9: values on the command line
+    f.key(14); f.type('0.5'); f.key(28)
+    check(q('volume("Cube")') == '= 10', 'F9 + a typed value (0.5 m)')
+    f.key(1)
+    f.mods(4); f.key(44); f.mods(0)             # one undo: the cube again
+    check(q('print(volume("Cube"), faces("Cube"))') == '8 6', 'all of it is still one undo step')
     f.proc.kill()
 
 

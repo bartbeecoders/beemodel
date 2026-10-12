@@ -966,6 +966,9 @@ is_undo_tool:
     lea     rcx, [rip+op_agent_revert]
     cmp     rax, rcx
     je      2f
+    lea     rcx, [rip+op_redo_last]     # adjusting the last operation re-runs it
+    cmp     rax, rcx                    # from its own undo step
+    je      2f
     xor     eax, eax
 1:  ret
 2:  mov     eax, 1

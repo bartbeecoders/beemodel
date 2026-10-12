@@ -55,6 +55,8 @@ r_m:            .skip 4             # ring edges
 r_nf:           .skip 4             # ring faces
 r_closed:       .skip 4
 lc_valid:       .skip 4
+lc_a:           .skip 4
+lc_b:           .skip 4
 kn_n:           .skip 4
 pc_limit:       .skip 4             # 1: knife (segment range + visibility)
 ptr_lx:         .skip 4             # pointer (logical) for previews
@@ -93,12 +95,12 @@ items_mesh2:    .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
                 .quad op_m_del_v, op_m_del_e, op_m_del_f, 0
                 .quad op_m_dup, op_m_flip, op_m_recalc, 0, op_cursor_reset
 
-OPERATOR op_m_loopcut, "mesh.loopcut", "Loop Cut", do_loopcut, key=KEY_R|KM_CTRL, flags=OPF_AI_SAFE|OPF_EDIT, doc="Cut a ring of quads: Ctrl+R then click; scripts: mesh.loopcut \"a b [cuts]\""
+OPERATOR op_m_loopcut, "mesh.loopcut", "Loop Cut", do_loopcut, key=KEY_R|KM_CTRL, flags=OPF_AI_SAFE|OPF_EDIT, doc="Cut a ring of quads: Ctrl+R then click; scripts: mesh.loopcut \"a b [cuts]\"", params=p_loopcut
 OPERATOR op_m_knife, "mesh.knife", "Knife", do_knife, key=KEY_K, flags=OPF_EDIT|OPF_QUIET, doc="Draw a cut across the visible faces: click points, Enter cuts"
 OPERATOR op_m_bisect, "mesh.bisect", "Bisect", do_bisect, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Cut the mesh with a plane: mesh.bisect \"px py pz nx ny nz\" (world; default: horizontal through the 3D cursor)"
-OPERATOR op_m_bevel, "mesh.bevel", "Bevel", do_bevel, key=KEY_B|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Bevel the selected edges: drag the width, wheel = segments; scripts: mesh.bevel \"width [segments]\""
+OPERATOR op_m_bevel, "mesh.bevel", "Bevel", do_bevel, key=KEY_B|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Bevel the selected edges: drag the width, wheel = segments; scripts: mesh.bevel \"width [segments]\"", params=p_bevel
 OPERATOR op_m_bridge, "mesh.bridge", "Bridge Edge Loops", do_bridge, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Join two selected boundary loops with a band of quads"
-OPERATOR op_m_spin, "mesh.spin", "Spin", do_spin, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Sweep the selected edges around the 3D cursor: mesh.spin \"[steps] [degrees] [x|y|z]\" (12 360 y)"
+OPERATOR op_m_spin, "mesh.spin", "Spin", do_spin, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Sweep the selected edges around the 3D cursor: mesh.spin \"[steps] [degrees] [x|y|z]\" (12 360 y)", params=p_spin
 OPERATOR op_cursor_reset, "view.cursor_reset", "Reset 3D Cursor", do_cursor_reset, flags=OPF_AI_SAFE, doc="Put the 3D cursor back at the origin (Shift+right click places it)"
 
 .text
@@ -368,6 +370,8 @@ etool_motion:                           # edi, esi = logical pointer
     test    eax, eax
     js      8f
     mov     ebx, eax
+    mov     [rip+lc_a], eax
+    mov     [rip+lc_b], edx
     push    rdx
     call    edit_get
     pop     rdx
@@ -423,6 +427,7 @@ etool_press:
     mov     rbx, [rax+OB_MESH]
     mov     edi, [rip+lc_cuts]
     call    loopcut_build
+    call    lc_report
 1:  call    etool_cancel
     jmp     9f
 2:  cmp     dword ptr [rip+etool], ET_KNIFE
@@ -638,10 +643,15 @@ do_loopcut:
     call    ring_find
     test    eax, eax
     jz      .Llc_ring
+    cvttss2si eax, [rsp]
+    mov     [rip+lc_a], eax
+    cvttss2si eax, [rsp+4]
+    mov     [rip+lc_b], eax
     lea     rdi, [rip+s_lbl_loop]
     call    undo_push
     mov     edi, [rip+lc_cuts]
     call    loopcut_build
+    call    lc_report
     jmp     9f
 .Llc_args:
     lea     rdi, [rip+s_no_edge]
@@ -653,6 +663,22 @@ do_loopcut:
 9:  add     rsp, 32
     pop     r12
     pop     rbx
+    ret
+
+# lc_report - the redo panel: edge a b and the cuts
+lc_report:
+    sub     rsp, 24
+    cvtsi2ss xmm0, dword ptr [rip+lc_a]
+    movss   [rsp], xmm0
+    cvtsi2ss xmm0, dword ptr [rip+lc_b]
+    movss   [rsp+4], xmm0
+    cvtsi2ss xmm0, dword ptr [rip+lc_cuts]
+    movss   [rsp+8], xmm0
+    lea     rdi, [rip+op_m_loopcut]
+    lea     rsi, [rsp]
+    mov     edx, 3
+    call    lastop_set
+    add     rsp, 24
     ret
 
 # arg_nums(rdi=out float[], esi=max) -> eax = count of numbers in op_arg
@@ -2234,6 +2260,25 @@ do_spin:
     call    mo_commit
     call    merge_seam                  # (open spins over 360 already join)
     call    recalc_all
+    cvtsi2ss xmm0, dword ptr [rsp+8]    # the redo panel: steps, angle, axis
+    movss   [rsp+60], xmm0
+    movss   xmm0, [rsp+12]
+    movss   [rsp+64], xmm0
+    mov     eax, 1                      # axis index: the non-zero component
+    xorps   xmm1, xmm1
+    ucomiss xmm1, [rsp+16]
+    jne     71f
+    ucomiss xmm1, [rsp+24]
+    je      72f
+    mov     eax, 2
+    jmp     72f
+71: xor     eax, eax
+72: cvtsi2ss xmm0, eax
+    movss   [rsp+68], xmm0
+    lea     rdi, [rip+op_m_spin]
+    lea     rsi, [rsp+60]
+    mov     edx, 3
+    call    lastop_set
     jmp     9f
 .Lsp_need:
     lea     rdi, [rip+s_spin_need]
@@ -2297,6 +2342,9 @@ do_bevel:
     test    eax, eax
     jz      1f
     mov     dword ptr [rip+tm_vint], 1  # segments, the wheel changes them
+    lea     rdi, [rip+op_m_bevel]
+    mov     esi, 3
+    call    lastop_pending
     lea     rdi, [rip+bv_apply]
     lea     rsi, [rip+bv_cancel]
     lea     rdx, [rip+bv_confirm]
@@ -2319,9 +2367,16 @@ do_bevel:
     cmp     ecx, 64
     jg      2f
     mov     [rip+tm_vint], ecx
-2:  call    bv_apply
+2:  movss   [rsp], xmm0                 # (width, segments) for the redo panel
+    cvtsi2ss xmm1, dword ptr [rip+tm_vint]
+    movss   [rsp+4], xmm1
+    call    bv_apply
     call    bv_confirm
     mov     dword ptr [rip+tm_vint], 0
+    lea     rdi, [rip+op_m_bevel]
+    lea     rsi, [rsp]
+    mov     edx, 2
+    call    lastop_set
     jmp     9f
 .Lbv_need:
     lea     rdi, [rip+s_bevel_need]

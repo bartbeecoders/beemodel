@@ -16,6 +16,9 @@
 .globl undo_group_begin
 .globl undo_group_end
 .globl undo_top_label
+.globl undo_restore_top
+.globl undo_suppress
+.globl group_depth
 .globl undo_drop_last
 .globl undo_bytes
 .globl undo_depth
@@ -35,6 +38,7 @@
 .align 8
 group_label:    .skip 8
 group_depth:    .skip 4
+undo_suppress:  .skip 4
 group_pushed:   .skip 4
 .align 8
 undo_stack:     .skip 8*MAX_STEPS
@@ -280,6 +284,8 @@ clear_redo:
 # undo_push(rdi=label) - record the current scene before a change
 # -----------------------------------------------------------------------------
 undo_push:
+    cmp     dword ptr [rip+undo_suppress], 0  # re-running an operation (redo panel)
+    jne     8f
     cmp     dword ptr [rip+group_depth], 0
     je      2f
     cmp     dword ptr [rip+group_pushed], 0  # a group records only its first change
@@ -299,6 +305,7 @@ undo_push:
     lea     rsi, [rip+undo_depth]
     mov     rdx, rbx
     call    push_on
+    mov     qword ptr [rip+lo_op], 0    # a new step: the redo panel moves on
     call    trim_bytes
     inc     dword ptr [rip+changes]     # autosave every AUTOSAVE_EVERY changes
     cmp     dword ptr [rip+changes], AUTOSAVE_EVERY
@@ -329,6 +336,21 @@ undo_group_end:                         # -> eax = 1 if the group made a step
     mov     eax, [rip+group_pushed]
 1:  ret
 
+# undo_restore_top -> eax = 1: the scene as the newest undo step recorded it
+#   (the step stays: the redo panel runs its operation again from there)
+undo_restore_top:
+    xor     eax, eax
+    mov     ecx, [rip+undo_depth]
+    test    ecx, ecx
+    jz      1f
+    sub     rsp, 8
+    lea     rax, [rip+undo_stack]
+    mov     rdi, [rax+rcx*8-8]
+    call    restore_step
+    add     rsp, 8
+    mov     eax, 1
+1:  ret
+
 # undo_top_label -> rax = label of the newest undo step, or 0
 undo_top_label:
     xor     eax, eax
@@ -342,6 +364,8 @@ undo_top_label:
 
 # undo_drop_last - the change did not happen after all (cancel, no-op)
 undo_drop_last:
+    cmp     dword ptr [rip+undo_suppress], 0
+    jne     9f
     cmp     dword ptr [rip+group_depth], 0  # inside a group the step stays
     jne     9f
     mov     eax, [rip+undo_depth]
