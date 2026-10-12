@@ -189,6 +189,7 @@ j_selected:     .asciz ",\"selected\":"
 j_active:       .asciz ",\"active\":"
 j_verts:        .asciz ",\"vertices\":"
 j_faces:        .asciz ",\"faces\":"
+j_mods:         .asciz ",\"modifiers\":["
 .align 4
 f_deg2rad:      .float 0.017453293
 f_rad2deg_:     .float 57.29578
@@ -1740,7 +1741,35 @@ scene_json:
     mov     rax, [r12+OB_MESH]
     mov     edi, [rax+ME_NPOLYS]
     call    wb_int
-    mov     edi, '}'
+    mov     rax, [r12+OB_MODS]          # "modifiers":["subsurf", ...]
+    test    rax, rax
+    jz      8f
+    cmp     dword ptr [rax+4], 0
+    je      8f
+    lea     rsi, [rip+j_mods]
+    call    wb_str
+    xor     ecx, ecx
+5:  mov     rax, [r12+OB_MODS]
+    cmp     ecx, [rax+4]
+    jae     7f
+    push    rcx
+    test    ecx, ecx
+    jz      6f
+    mov     edi, ','
+    call    wb_char
+6:  mov     rax, [r12+OB_MODS]
+    mov     ecx, [rsp]
+    imul    ecx, ecx, 48
+    mov     eax, [rax+16+rcx]           # type
+    lea     rcx, [rip+mod_keys]
+    mov     rsi, [rcx+rax*8]
+    call    jb_q
+    pop     rcx
+    inc     ecx
+    jmp     5b
+7:  mov     edi, ']'
+    call    wb_char
+8:  mov     edi, '}'
     call    wb_char
     inc     ebx
     jmp     1b

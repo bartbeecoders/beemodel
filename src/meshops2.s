@@ -20,6 +20,9 @@
 .globl cursor_place
 .globl cursor_draw
 .globl items_mesh2
+.globl build_bevel
+.globl bv_angle
+.globl bv_cos
 
 .equ KEY_R,     19
 .equ KEY_B,     48
@@ -2448,6 +2451,8 @@ bv_cpt:         .skip 8             # per loop: the corner's own point
 bv_along:       .skip 8             # hash (v -> other) : point moved along that edge
 bv_arc:         .skip 8             # per edge slot: 2 ends x (segments - 1) arc points
 bv_dst:         .skip 8
+bv_angle:       .skip 4             # 1: bevel edges sharper than bv_cos
+bv_cos:         .skip 4
 .text
 
 # build_bevel(rdi=src, esi=segments, xmm0=width) -> rax = new mesh
@@ -2481,10 +2486,12 @@ build_bevel:
     mov     rax, [rbx+ME_VSEL]
     mov     edi, [r8+r12*8]
     mov     esi, [r8+r12*8+4]
+    cmp     dword ptr [rip+bv_angle], 0  # modifier: by angle, not selection
+    jne     22f
     mov     cl, [rax+rdi]
     and     cl, [rax+rsi]
     jz      21f
-    push    r8
+22: push    r8
     call    ef_find
     pop     r8
     test    eax, eax
@@ -2492,7 +2499,17 @@ build_bevel:
     mov     rcx, [rip+ef_cnt]
     cmp     dword ptr [rcx+rax*4], 2
     jne     21f
-    mov     rcx, [rip+bv_bev]
+    cmp     dword ptr [rip+bv_angle], 0
+    je      23f
+    push    r8
+    push    rax
+    call    sharp_edge                  # eax = 1 if the faces meet sharply
+    mov     ecx, eax
+    pop     rax
+    pop     r8
+    test    ecx, ecx
+    jz      21f
+23: mov     rcx, [rip+bv_bev]
     mov     byte ptr [rcx+rax], 1
 21: inc     r12d
     jmp     2b
@@ -2801,6 +2818,45 @@ build_bevel:
     pop     r15
     pop     r14
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# sharp_edge(eax=edge slot) -> eax = 1 if its two faces' normals differ by
+#   more than the bevel modifier's angle (bv_cos = cos(angle))
+sharp_edge:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     r12d, eax
+    mov     rdi, rbx
+    mov     rcx, [rip+ef_f1]
+    mov     esi, [rcx+r12*4]
+    call    poly_normal
+    lea     rdi, [rip+nrm]
+    call    normalize
+    mov     rax, [rip+nrm]
+    mov     [rsp], rax
+    mov     eax, [rip+nrm+8]
+    mov     [rsp+8], eax
+    mov     rdi, rbx
+    mov     rcx, [rip+ef_f2]
+    mov     esi, [rcx+r12*4]
+    call    poly_normal
+    lea     rdi, [rip+nrm]
+    call    normalize
+    movss   xmm0, [rsp]
+    mulss   xmm0, [rip+nrm]
+    movss   xmm1, [rsp+4]
+    mulss   xmm1, [rip+nrm+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+8]
+    mulss   xmm1, [rip+nrm+8]
+    addss   xmm0, xmm1
+    xor     eax, eax
+    comiss  xmm0, [rip+bv_cos]
+    setb    al
+    add     rsp, 24
     pop     r12
     pop     rbx
     ret

@@ -767,6 +767,10 @@ edit_prepare:
     test    rax, rax
     jz      9f
     mov     rbx, rax
+    mov     rdi, rbx                    # modifiers change the triangles:
+    call    mods_on                     # no face tint then
+    test    eax, eax
+    jnz     9f
     mov     r12, [rbx+OB_MESH]
     lea     rdi, [rip+frame_arena]
     mov     esi, [r12+ME_NPOLYS]
@@ -1925,6 +1929,20 @@ invert3:
     mov     [rdi+32], eax
     ret
 
+# bump - the edit mesh changed in place (evaluation caches look at this)
+bump:
+    mov     rax, [rip+ev_pos]
+    test    rax, rax
+    jz      1f
+    sub     rsp, 8
+    call    edit_get
+    add     rsp, 8
+    test    rax, rax
+    jz      1f
+    mov     rax, [rax+OB_MESH]
+    inc     dword ptr [rax+108]
+1:  ret
+
 # store_local(r14=entry, xmm0..2 = new world position) - via the inverse
 store_local:
     subss   xmm0, [rip+mtx+12]
@@ -2059,7 +2077,8 @@ edit_tm_restore:
     add     rsi, EV_SZ
     inc     ebx
     jmp     1b
-9:  pop     rbx
+9:  call    bump
+    pop     rbx
     ret
 
 # edit_tm_grab(rdi=world delta)
@@ -2082,7 +2101,8 @@ edit_tm_grab:
     add     r14, EV_SZ
     inc     ebx
     jmp     1b
-9:  pop     r15
+9:  call    bump
+    pop     r15
     pop     r14
     pop     rbx
     ret
@@ -2138,7 +2158,8 @@ edit_tm_rotate:
     add     r14, EV_SZ
     inc     ebx
     jmp     3b
-9:  add     rsp, 32
+9:  call    bump
+    add     rsp, 32
     pop     r15
     pop     r14
     pop     r13
@@ -2181,7 +2202,8 @@ edit_tm_scale:
     add     r14, EV_SZ
     inc     ebx
     jmp     1b
-9:  add     rsp, 24
+9:  call    bump
+    add     rsp, 24
     pop     r15
     pop     r14
     pop     r12

@@ -14,6 +14,8 @@
 .globl arena_init
 .globl arena_alloc
 .globl arena_reset
+.globl fa_mark
+.globl fa_release
 .globl pool_init
 .globl pool_alloc
 .globl pool_free
@@ -80,6 +82,18 @@ arena_alloc:
     ret
 8:  xor     eax, eax
     ret
+
+# fa_mark -> rax = how much of the frame arena is in use; fa_release(rdi=mark)
+#   gives back everything allocated since (operators and evaluations that run
+#   many times between frames, e.g. inside a script loop)
+fa_mark:
+    mov     rax, [rip+frame_arena+AR_USED]
+    ret
+fa_release:
+    cmp     rdi, [rip+frame_arena+AR_USED]
+    ja      1f
+    mov     [rip+frame_arena+AR_USED], rdi
+1:  ret
 
 # arena_reset(rdi=arena) - O(1) reset. Pages stay resident while they are
 # being used (no page faults every frame); after ARENA_DECAY resets that used

@@ -449,6 +449,7 @@ def main():
     mesh_ops()
     mesh_tools()
     redo_panel()
+    modifiers_ui()
     scripting()
     beescript_cli()
     mcp_conformance()
@@ -983,6 +984,32 @@ def redo_panel():
     f.key(1)
     f.mods(4); f.key(44); f.mods(0)             # one undo: the cube again
     check(q('print(volume("Cube"), faces("Cube"))') == '8 6', 'all of it is still one undo step')
+    f.proc.kill()
+
+
+def modifiers_ui():
+    """The modifier stack in the properties editor."""
+    print('  -- modifiers --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.mods(4); f.key(3); f.mods(0)              # Ctrl+2: subdivision surface
+    check(q('print(modcount("Cube"), efaces("Cube"))') == '1 96', 'Ctrl+2 adds a Subsurf modifier (level 2)')
+    f.drag(1150, 355, 1162, 355, steps=3)       # levels +1
+    check(q('efaces("Cube")') == '= 384', 'dragging the levels field re-evaluates (level 3)')
+    f.mods(4); f.key(44); f.mods(0)
+    check(q('efaces("Cube")') == '= 96', 'one undo reverts the whole drag')
+    f.click(1238, 311); f.pump(0.2)             # + Add -> Mirror
+    f.click(1098, 339); f.pump(0.2)
+    check(q('modcount("Cube")') == '= 2', 'the Add menu adds a Mirror modifier')
+    f.shot('43_modifiers.png')
+    f.click(1249, 334); f.pump(0.2)             # x on the first (Subsurf)
+    check(q('print(modcount("Cube"), efaces("Cube"))') == '1 12', 'the x button removes Subsurf (Mirror stays)')
+    f.click(1214, 334); f.pump(0.2)             # Apply the Mirror
+    check(q('print(modcount("Cube"), verts("Cube"), faces("Cube"))') == '0 16 12', 'Apply makes the mirror part of the mesh')
     f.proc.kill()
 
 

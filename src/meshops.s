@@ -18,6 +18,7 @@
 # exports
 .globl items_mesh
 .globl edit_replace
+.globl mesh_compact
 .globl fa
 .globl fa_fill
 .globl eh_new
@@ -26,6 +27,7 @@
 .globl dkey
 .globl edge_faces
 .globl ef_find
+.globl ef_tab
 .globl ef_f1
 .globl ef_f2
 .globl ef_cnt

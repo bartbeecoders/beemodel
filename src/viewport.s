@@ -651,7 +651,9 @@ world_verts:
     mov     rbx, rdi
     mov     rsi, rsp
     call    obj_matrix
-    mov     r12, [rbx+OB_MESH]
+    mov     rdi, rbx                    # what is drawn: after modifiers
+    call    obj_eval
+    mov     r12, rax
     mov     r13d, [r12+ME_NVERTS]
     lea     rdi, [rip+frame_arena]
     imul    esi, r13d, 12
@@ -687,7 +689,10 @@ draw_obj_wire:
     push    r14
     push    r15
     mov     r15d, esi
-    mov     r12, [rdi+OB_MESH]
+    push    rdi
+    call    obj_eval
+    pop     rdi
+    mov     r12, rax
     call    world_verts
     test    rax, rax
     jz      9f

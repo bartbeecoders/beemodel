@@ -160,6 +160,8 @@
 .equ COL_REC,         0xe5484d
 .equ COL_FIELD,       0x1d2025
 .equ HIT_REDO,          23
+.equ HIT_MODS,          24
+.equ DRAG_MODS,         9
 .equ DRAG_REDO,         8
 .equ COL_EDIT_WIRE,   0x0b0c0e
 .equ COL_EDIT_SEL,    0xffa233
@@ -271,6 +273,7 @@
 .equ ED_CONSOLE,        4
 .equ ED_ACTIVITY,       5
 .equ MENU_AREA,         7
+.equ MENU_MODADD,       8
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
 
@@ -305,6 +308,7 @@
 .equ OB_MESH,       72      # mesh pointer
 .equ OB_FLAGS,      80
 .equ OB_TYPE,       84
+.equ OB_MODS,       88      # modifier stack (mods.s), or 0
 .equ OB_SZ,         128
 .equ OBF_SELECTED,  1
 .equ OT_MESH,       0

@@ -111,9 +111,15 @@ run_op:
     jz      2f
     mov     rdi, [rbx+OP_LABEL]         # record the scene before the change
     call    undo_push
-2:  mov     rdi, [rbx+OP_ARG]
+2:  call    fa_mark                     # its scratch memory goes back after
+    push    rax
+    sub     rsp, 8
+    mov     rdi, [rbx+OP_ARG]
     mov     rsi, rbx
     call    [rbx+OP_EXEC]
+    add     rsp, 8
+    pop     rdi
+    call    fa_release
     mov     dword ptr [rip+dirty], 1
     mov     rdi, rbx                    # macro recording
     call    macro_op
