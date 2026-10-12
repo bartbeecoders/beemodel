@@ -6,6 +6,15 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- MCP server for AI agents. The running app listens on
+  `$XDG_RUNTIME_DIR/beemodel.sock`, and `beemodel --mcp-bridge` connects
+  Claude Code / Claude Desktop over stdio. Tools: `scene_summary`,
+  `create_primitive`, `set_transform`, `select`, `delete`, `run_operator`,
+  `undo`, `redo`, plus every agent-safe operator as `op_<id>`. Resource:
+  `bee://scene`. Agent edits are undoable and echoed in the console.
+- Own JSON reader / writer.
+
 ## [0.3.0] - 2026-10-12
 
 Phase 2 of the masterplan, "Scene, viewport & files": BeeModel becomes a
