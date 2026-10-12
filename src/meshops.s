@@ -86,15 +86,15 @@ items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, 0
                 .quad op_m_del_v, op_m_del_e, op_m_del_f, 0
                 .quad op_m_dup, op_m_flip, op_m_recalc
 
-OPERATOR op_m_extrude, "mesh.extrude", "Extrude", do_extrude, key=KEY_E, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Extrude the selected faces (or edges) and move them along the normal: mesh.extrude [distance]"
-OPERATOR op_m_extrude_ind, "mesh.extrude_individual", "Extrude Individual Faces", do_extrude_ind, key=KEY_E|KM_ALT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Extrude every selected face along its own normal: mesh.extrude_individual [distance]"
-OPERATOR op_m_inset, "mesh.inset", "Inset Faces", do_inset, key=KEY_I, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Inset every selected face: mesh.inset [thickness]"
+OPERATOR op_m_extrude, "mesh.extrude", "Extrude", do_extrude, key=KEY_E, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Extrude the selected faces (or edges) and move them along the normal: mesh.extrude [distance]", params=p_extrude
+OPERATOR op_m_extrude_ind, "mesh.extrude_individual", "Extrude Individual Faces", do_extrude_ind, key=KEY_E|KM_ALT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Extrude every selected face along its own normal: mesh.extrude_individual [distance]", params=p_extrude_ind
+OPERATOR op_m_inset, "mesh.inset", "Inset Faces", do_inset, key=KEY_I, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Inset every selected face: mesh.inset [thickness]", params=p_inset
 OPERATOR op_m_subdivide, "mesh.subdivide", "Subdivide", do_subdivide, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Split the selected faces (quads into four)"
 OPERATOR op_m_fill, "mesh.fill", "Fill / Make Face", do_fill, key=KEY_F, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Make a face from the selected vertices (fills holes)"
 OPERATOR op_m_dissolve, "mesh.dissolve", "Dissolve", do_dissolve, key=KEY_X|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Dissolve the selection by select mode: merge the faces around it into n-gons"
 OPERATOR op_m_merge_c, "mesh.merge_center", "Merge at Center", do_merge_c, key=KEY_M, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Merge all selected vertices into one at their centre"
 OPERATOR op_m_merge_col, "mesh.merge_collapse", "Merge Collapse", do_merge_col, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Merge each connected group of selected vertices at its centre"
-OPERATOR op_m_merge_d, "mesh.merge_distance", "Merge by Distance", do_merge_d, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Merge selected vertices closer than a distance: mesh.merge_distance [0.0001]"
+OPERATOR op_m_merge_d, "mesh.merge_distance", "Merge by Distance", do_merge_d, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Merge selected vertices closer than a distance: mesh.merge_distance [0.0001]", params=p_merge_d
 OPERATOR op_m_del, "mesh.delete", "Delete", do_delete, key=KEY_X, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT|OPF_HIDDEN, doc="Delete by select mode: vertices, edges or faces"
 OPERATOR op_m_del_key, "mesh.delete_key", "Delete", do_delete, key=KEY_DELETE, flags=OPF_UNDO|OPF_EDIT|OPF_HIDDEN, doc="Delete by select mode (Delete key)"
 OPERATOR op_m_del_v, "mesh.delete_vertices", "Delete Vertices", do_del_v, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Delete the selected vertices and their faces"
@@ -996,6 +996,9 @@ do_extrude:
     mov     eax, [rsp+8]
     mov     [rip+tm_custom+8], eax
     mov     dword ptr [rip+tm_noundo], 1
+    lea     rdi, [rip+op_m_extrude]     # the redo panel gets the distance
+    mov     esi, 1
+    call    lastop_pending
     mov     edi, 1
     mov     esi, 4
     xor     edx, edx
@@ -1003,8 +1006,13 @@ do_extrude:
     jmp     .Lex_out
 3:  movss   xmm0, [rip+mf_one]          # scripts: the argument (1 m)
     call    arg_value
+    movss   [rsp+12], xmm0
     lea     rdi, [rsp]
     call    move_selected
+    lea     rdi, [rip+op_m_extrude]
+    lea     rsi, [rsp+12]
+    mov     edx, 1
+    call    lastop_set
     jmp     .Lex_out
 
 .Lex_edges:                             # ---- edges: a strip of new faces ----
@@ -1442,6 +1450,10 @@ value_op:
     call    interactive
     test    eax, eax
     jz      1f
+    call    vo_op                       # the redo panel gets the value
+    mov     rdi, rax
+    mov     esi, 2
+    call    lastop_pending
     lea     rdi, [rip+mo_apply]
     lea     rsi, [rip+mo_cancel]
     lea     rdx, [rip+mo_confirm]
@@ -1453,8 +1465,14 @@ value_op:
     jmp     9f
 1:  movss   xmm0, [rsp]                 # scripts: the argument
     call    arg_value
+    movss   [rsp+8], xmm0
     call    mo_apply
     call    mo_confirm
+    call    vo_op
+    mov     rdi, rax
+    lea     rsi, [rsp+8]
+    mov     edx, 1
+    call    lastop_set
     jmp     9f
 .Lvo_none:
     lea     rdi, [rip+s_f_faces]
@@ -1465,6 +1483,14 @@ value_op:
 9:  add     rsp, 16
     pop     rbx
     ret
+
+# vo_op -> rax = the operator of value_op's kind
+vo_op:
+    lea     rax, [rip+op_m_inset]
+    cmp     dword ptr [rip+mo_kind], 1
+    je      1f
+    lea     rax, [rip+op_m_extrude_ind]
+1:  ret
 
 # mo_apply(xmm0=value) - rebuild from mo_src and swap in
 mo_apply:
@@ -2861,7 +2887,13 @@ merge_kind:
     jmp     81b
 84: mov     rdi, r15
     call    mo_commit
-    call    fmt_reset
+    cmp     dword ptr [rsp+48], 2       # by distance: the redo panel's value
+    jne     85f
+    lea     rdi, [rip+op_m_merge_d]
+    lea     rsi, [rsp+8]
+    mov     edx, 1
+    call    lastop_set
+85: call    fmt_reset
     lea     rdi, [rip+s_merged]
     call    fmt_str
     mov     edi, r14d

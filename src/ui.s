@@ -419,8 +419,12 @@ ui_motion:
     test    eax, eax
     jz      .Lmo_hover
     cmp     eax, DRAG_BOX
-    jne     77f
+    jne     76f
     call    box_move                    # edi / esi = the pointer
+    jmp     .Lmo_out
+76: cmp     eax, DRAG_REDO
+    jne     77f
+    call    redo_drag_move              # edi = pointer x
     jmp     .Lmo_out
 77: cmp     eax, DRAG_PENDING
     jne     0f
@@ -713,7 +717,13 @@ ui_button:
     mov     [rip+active_area], r12d
     mov     dword ptr [rip+menu_open], MENU_AREA
     jmp     .Lbt_done
-5:  cmp     ebx, HIT_CANVAS            # click selects, drag orbits / pans
+5:  cmp     ebx, HIT_REDO               # drag a value of the redo panel
+    jne     55f
+    mov     edi, r12d
+    call    redo_drag_begin
+    mov     dword ptr [rip+drag_mode], DRAG_REDO
+    jmp     .Lbt_done
+55: cmp     ebx, HIT_CANVAS            # click selects, drag orbits / pans
     jne     6f
     mov     [rip+vp_area], r12d
     cmp     dword ptr [rip+etool], 0    # an edit tool takes the clicks
@@ -865,7 +875,14 @@ ui_axis:
     cmp     eax, ED_OUTLINER
     je      8f
     jmp     9f
-7:  cmp     eax, HIT_CANVAS
+7:  cmp     eax, HIT_REDO               # wheel on a redo panel value
+    jne     71f
+    mov     esi, edi
+    sar     esi, 31
+    or      esi, 1
+    mov     edi, edx
+    jmp     redo_wheel
+71: cmp     eax, HIT_CANVAS
     jne     9f
     push    rdi
     push    rdx

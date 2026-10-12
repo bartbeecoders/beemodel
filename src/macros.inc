@@ -16,6 +16,7 @@
 .equ OP_ARG,    40      # u64  argument passed to exec/check
 .equ OP_KEY,    48      # u32  key binding: evdev code | (modifiers << 16)
 .equ OP_FLAGS,  52      # u32  OPF_*
+.equ OP_PARAMS, 56      # ptr  parameter list for the redo panel (redo.s), or 0
 .equ OP_SIZE,   64
 
 .equ OPF_QUIET,   1     # don't echo to the console when run
@@ -31,7 +32,7 @@
 .equ KM_ALT,    MOD_ALT << 16
 
 #  OPERATOR sym, "id", "Label", exec [, check, arg, key, flags, "doc"]
-.macro OPERATOR sym, name, label, exec, check=0, arg=0, key=0, flags=OPF_AI_SAFE, doc
+.macro OPERATOR sym, name, label, exec, check=0, arg=0, key=0, flags=OPF_AI_SAFE, doc, params=0
     .pushsection .rodata
 .Lop_name\@:  .asciz "\name"
 .Lop_label\@: .asciz "\label"
@@ -43,6 +44,6 @@
 \sym:
     .quad .Lop_name\@, .Lop_label\@, \exec, \check, .Lop_doc\@, \arg
     .long \key, \flags
-    .quad 0
+    .quad \params
     .popsection
 .endm

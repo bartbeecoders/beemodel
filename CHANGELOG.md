@@ -42,6 +42,11 @@ project uses [Semantic Versioning](https://semver.org/).
   - **bridge edge loops** between two boundary loops;
   - **spin**, which sweeps a profile around the 3D cursor (steps, angle,
     axis).
+- Redo panel: adjust the last operation. Extrude, individual extrude,
+  inset, bevel, loop cut, merge by distance and spin report their values.
+  Drag or scroll a value, use F9 to type, or call `edit.redo_last
+  "values"` (also for agents): the operator runs again from its undo
+  snapshot and stays one undo step.
 - 3D cursor: Shift+right click places it on the surface or the ground; new
   objects are created there. View › Reset 3D Cursor puts it back.
 - Keys can depend on the mode (operator flags `OPF_EDIT` / `OPF_OBJECT`):

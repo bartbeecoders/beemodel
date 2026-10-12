@@ -577,6 +577,7 @@ viewport_draw:
     lea     rdx, [rip+s_vp_hint]
     mov     ecx, COL_TEXT_DIM
     call    draw_text
+    call    redo_draw                   # adjust the last operation (on top)
     call    reset_clip
     pop     r15
     pop     r14

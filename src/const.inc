@@ -158,6 +158,9 @@
 .equ COL_SPLIT,         0x16181c
 .equ COL_SPLIT_HOT,     0xf2b134
 .equ COL_REC,         0xe5484d
+.equ COL_FIELD,       0x1d2025
+.equ HIT_REDO,          23
+.equ DRAG_REDO,         8
 .equ COL_EDIT_WIRE,   0x0b0c0e
 .equ COL_EDIT_SEL,    0xffa233
 .equ COL_FACE_SEL,    0xe0a060
