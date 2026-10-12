@@ -190,6 +190,11 @@ class Fake:
             self.send(kb, 3, struct.pack('<IIII', self.serial, 0, code, st))
         self.pump(until_frame=True)
 
+    def mods(self, depressed):
+        kb = self.find('wl_keyboard')[0]
+        self.serial += 1
+        self.send(kb, 4, struct.pack('<IIIII', self.serial, depressed, 0, 0, 0))
+
     def shot(self, name):
         from PIL import Image
         w, h, data = self.frame
@@ -248,6 +253,15 @@ def main():
     f.wheel(-10); f.wheel(-10)           # zoom in
     f.click(1060, 93)                    # outliner: select Camera
     f.shot('06_orbit_zoom.png')
+    f.key(17)                            # W: Move tool via the operator keymap
+    check(px(f, 150, 125) == 0xf2b134, 'W activates the Move tool')
+    f.key(20)                            # T: hide tools pane
+    check(px(f, 4, 300) != 0x2a2e36, 'T hides the tools pane')
+    f.mods(4); f.key(20); f.mods(0)      # Ctrl+T is not bound: no change
+    check(px(f, 4, 300) != 0x2a2e36, 'Ctrl+T does not trigger the T binding')
+    f.key(20)
+    check(px(f, 4, 300) == 0x2a2e36, 'T shows the tools pane again')
+    f.key(16)                            # Q: back to Select
     f.key(34)                            # G: grid off
     f.move(1250, 10)                     # hover close button
     check(px(f, 1240, 3) == 0xe81123, 'close button hover is red')

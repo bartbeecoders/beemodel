@@ -6,6 +6,20 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Operator spine: every action is declared once with the `OPERATOR` macro and
+  collected by the linker into one table. Menus, tool buttons, check marks,
+  shortcut labels and the keymap are all driven by it.
+- `--list-ops` prints every operator (id, key binding, label, description).
+- New key bindings: T (tools pane), N (outliner pane), F1 (shortcut list in the
+  console), Ctrl+N/O/S/Z, Ctrl+Shift+Z.
+- docs/ARCHITECTURE.md: modules, calling convention, how to add an operator.
+
+### Changed
+- Source split into separate modules (object files) with explicit exports.
+- Help › Keyboard Shortcuts is generated from the operator table.
+- Redo is now Ctrl+Shift+Z.
+
 ## [0.1.0] - 2026-10-12
 
 First release: the application shell that the 3D modeling tool will be built on.

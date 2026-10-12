@@ -2,6 +2,34 @@
 #  BeeModel - application shell: layout, client-side decorations, menus,
 #  resizable panes, hit testing, input handling and the console log.
 # =============================================================================
+.intel_syntax noprefix
+.include "const.inc"
+.include "macros.inc"
+
+# exports
+.globl show_left
+.globl show_right
+.globl show_bottom
+.globl active_tool
+.globl cur_shape
+.globl cvs_x0
+.globl cvs_x1
+.globl cvs_y0
+.globl cvs_y1
+.globl enter_serial
+.globl key_mods
+.globl s_app_id
+.globl s_app_title
+.globl s_log_hello
+.globl s_log_hello2
+.globl selected_obj
+.globl show_grid
+.globl ui_axis
+.globl ui_button
+.globl ui_draw
+.globl ui_key
+.globl ui_leave
+.globl ui_motion
 
 .section .data
 .align 4
@@ -46,11 +74,6 @@ drop_x:         .skip 4
 drop_y:         .skip 4
 drop_w:         .skip 4
 drop_h:         .skip 4
-# console ring buffer + string builder
-log_head:       .skip 4
-fmt_pos:        .skip 4
-log_buf:        .skip LOG_LINES*LOG_LINE_LEN
-fmt_buf:        .skip 128
 
 .section .rodata
 s_app_title:    .asciz "BeeModel"
@@ -63,45 +86,10 @@ s_m_view:       .asciz "View"
 s_m_create:     .asciz "Create"
 s_m_help:       .asciz "Help"
 
-s_i_new:        .asciz "New Scene"
-s_i_open:       .asciz "Open..."
-s_i_save:       .asciz "Save"
-s_i_exit:       .asciz "Exit"
-s_i_undo:       .asciz "Undo"
-s_i_redo:       .asciz "Redo"
-s_i_prefs:      .asciz "Preferences..."
-s_i_tleft:      .asciz "Tools Pane"
-s_i_tright:     .asciz "Outliner Pane"
-s_i_tbottom:    .asciz "Console Pane"
-s_i_grid:       .asciz "Ground Grid"
-s_i_resetcam:   .asciz "Reset Camera"
-s_i_about:      .asciz "About BeeModel"
-s_i_keys:       .asciz "Keyboard Shortcuts"
-
-s_k_ctrl_n:     .asciz "Ctrl+N"
-s_k_ctrl_o:     .asciz "Ctrl+O"
-s_k_ctrl_s:     .asciz "Ctrl+S"
-s_k_ctrl_q:     .asciz "Ctrl+Q"
-s_k_ctrl_z:     .asciz "Ctrl+Z"
-s_k_ctrl_y:     .asciz "Ctrl+Y"
-s_k_g:          .asciz "G"
-s_k_f:          .asciz "F"
-
-s_t_select:     .asciz "Select"
-s_t_move:       .asciz "Move"
-s_t_rotate:     .asciz "Rotate"
-s_t_scale:      .asciz "Scale"
-s_t_cube:       .asciz "Cube"
-s_t_sphere:     .asciz "Sphere"
-s_t_cylinder:   .asciz "Cylinder"
-s_t_plane:      .asciz "Plane"
-s_t_light:      .asciz "Light"
 s_t_camera:     .asciz "Camera"
+s_t_light:      .asciz "Light"
 s_t_grid:       .asciz "Grid"
-s_k_q:          .asciz "Q"
-s_k_w:          .asciz "W"
-s_k_e:          .asciz "E"
-s_k_r:          .asciz "R"
+s_t_cube:       .asciz "Cube"
 
 s_h_tools:      .asciz "TOOLS"
 s_h_create:     .asciz "CREATE"
@@ -124,62 +112,27 @@ s_x:            .asciz " x "
 s_kib:          .asciz " KiB framebuffer   "
 s_ready:        .asciz "Ready"
 
-s_log_prompt:   .asciz "> "
-s_log_tool:     .asciz "> Tool: "
 s_log_sel:      .asciz "> Selected: "
-s_log_todo:     .asciz "  not implemented yet - waiting for the modeling core"
-s_log_create:   .asciz "  queued - mesh creation lands with the modeling core"
 s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero libraries"
 s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize panes"
-s_about1:       .asciz "  A 3D modeling shell written in pure x86-64 assembly"
-s_about_ver:    .asciz "  BeeModel "
-s_about2:       .asciz "  Talks the Wayland wire protocol directly; no libc, no toolkits"
-s_keys1:        .asciz "  LMB drag orbit | MMB or Shift+LMB pan | wheel zoom"
-s_keys2:        .asciz "  Q/W/E/R tools | G grid | F reset camera | Esc close menu | Ctrl+Q quit"
 
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_help
 menu_counts:    .long 5, 4, 6, 6, 2
 
-# item = cmd:u32, pad:u32, label:ptr, shortcut:ptr  (24 bytes)
-.macro ITEM cmd, label, key
-    .long \cmd, 0
-    .quad \label, \key
-.endm
+# Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
-items_file:
-    ITEM CMD_NEW,  s_i_new,  s_k_ctrl_n
-    ITEM CMD_OPEN, s_i_open, s_k_ctrl_o
-    ITEM CMD_SAVE, s_i_save, s_k_ctrl_s
-    ITEM CMD_SEP,  0, 0
-    ITEM CMD_EXIT, s_i_exit, s_k_ctrl_q
-items_edit:
-    ITEM CMD_UNDO,  s_i_undo,  s_k_ctrl_z
-    ITEM CMD_REDO,  s_i_redo,  s_k_ctrl_y
-    ITEM CMD_SEP,   0, 0
-    ITEM CMD_PREFS, s_i_prefs, 0
-items_view:
-    ITEM CMD_TOGGLE_LEFT,   s_i_tleft,    0
-    ITEM CMD_TOGGLE_RIGHT,  s_i_tright,   0
-    ITEM CMD_TOGGLE_BOTTOM, s_i_tbottom,  0
-    ITEM CMD_SEP,           0, 0
-    ITEM CMD_TOGGLE_GRID,   s_i_grid,     s_k_g
-    ITEM CMD_RESET_CAM,     s_i_resetcam, s_k_f
-items_create:
-    ITEM CMD_ADD_CUBE,   s_t_cube,     0
-    ITEM CMD_ADD_SPHERE, s_t_sphere,   0
-    ITEM CMD_ADD_CYL,    s_t_cylinder, 0
-    ITEM CMD_ADD_PLANE,  s_t_plane,    0
-    ITEM CMD_ADD_LIGHT,  s_t_light,    0
-    ITEM CMD_ADD_CAMERA, s_t_camera,   0
-items_help:
-    ITEM CMD_SHORTCUTS, s_i_keys,  0
-    ITEM CMD_ABOUT,     s_i_about, 0
-
-tool_names:     .quad s_t_select, s_t_move, s_t_rotate, s_t_scale
-                .quad s_t_cube, s_t_sphere, s_t_cylinder, s_t_plane, s_t_light, s_t_camera
-tool_keys:      .quad s_k_q, s_k_w, s_k_e, s_k_r, 0, 0, 0, 0, 0, 0
+items_file:     .quad op_file_new, op_file_open, op_file_save, 0, op_file_exit
+items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_edit_prefs
+items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
+                .quad op_view_grid, op_view_reset_cam
+items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
+                .quad op_add_light, op_add_camera
+items_help:     .quad op_help_keys, op_help_about
+tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
+                .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
+                .quad op_add_light, op_add_camera
 outliner_names: .quad s_t_camera, s_t_light, s_t_grid, s_t_cube
 outliner_cols:  .long 0x61afef, 0xe5c07b, 0x7f8794, COL_OBJECT
 
@@ -216,149 +169,11 @@ row_y:
     add     eax, PANE_HDR_H+4
     ret
 
-# item_ptr(edi=menu, esi=index) -> rax
-item_ptr:
+# item_op(edi=menu, esi=index) -> rax = operator (0 = separator)
+item_op:
     lea     rax, [rip+menu_items]
     mov     rax, [rax+rdi*8]
-    lea     rcx, [rsi+rsi*2]
-    lea     rax, [rax+rcx*8]
-    ret
-
-# -----------------------------------------------------------------------------
-# String builder + console log
-# -----------------------------------------------------------------------------
-fmt_reset:
-    mov     dword ptr [rip+fmt_pos], 0
-    mov     byte ptr [rip+fmt_buf], 0
-    ret
-
-# fmt_char(edi=char)
-fmt_char:
-    mov     eax, [rip+fmt_pos]
-    cmp     eax, 126
-    jae     1f
-    lea     rcx, [rip+fmt_buf]
-    mov     [rcx+rax], dil
-    mov     byte ptr [rcx+rax+1], 0
-    inc     eax
-    mov     [rip+fmt_pos], eax
-1:  ret
-
-# fmt_str(rdi=asciz)
-fmt_str:
-    push    rbx
-    mov     rbx, rdi
-1:  movzx   edi, byte ptr [rbx]
-    test    edi, edi
-    jz      2f
-    call    fmt_char
-    inc     rbx
-    jmp     1b
-2:  pop     rbx
-    ret
-
-# fmt_int(edi=signed int)
-fmt_int:
-    push    rbx
-    sub     rsp, 16
-    mov     eax, edi
-    test    eax, eax
-    jns     1f
-    push    rax
-    mov     edi, '-'
-    call    fmt_char
-    pop     rax
-    neg     eax
-1:  xor     ebx, ebx                    # digit count
-    mov     ecx, 10
-2:  xor     edx, edx
-    div     ecx
-    add     dl, '0'
-    mov     [rsp+rbx], dl
-    inc     ebx
-    test    eax, eax
-    jnz     2b
-3:  dec     ebx
-    movzx   edi, byte ptr [rsp+rbx]
-    call    fmt_char
-    test    ebx, ebx
-    jnz     3b
-    add     rsp, 16
-    pop     rbx
-    ret
-
-# fmt_fix1(xmm0=float) - one decimal
-fmt_fix1:
-    push    rbx
-    mulss   xmm0, [rip+f_ten]
-    cvtss2si ebx, xmm0
-    test    ebx, ebx
-    jns     1f
-    mov     edi, '-'
-    call    fmt_char
-    neg     ebx
-1:  mov     eax, ebx
-    xor     edx, edx
-    mov     ecx, 10
-    div     ecx
-    mov     ebx, edx
-    mov     edi, eax
-    call    fmt_int
-    mov     edi, '.'
-    call    fmt_char
-    lea     edi, [rbx+'0']
-    call    fmt_char
-    pop     rbx
-    ret
-
-# fmt_deg(xmm0=radians) - wrapped to [0,360)
-fmt_deg:
-    mulss   xmm0, [rip+f_rad2deg]
-    mulss   xmm0, [rip+f_ten]
-    cvtss2si eax, xmm0
-    cdq
-    mov     ecx, 3600
-    idiv    ecx
-    test    edx, edx
-    jns     1f
-    add     edx, 3600
-1:  cvtsi2ss xmm0, edx
-    divss   xmm0, [rip+f_ten]
-    jmp     fmt_fix1
-
-# log_line(rdi=asciz) - append to the console ring buffer
-log_line:
-    mov     eax, [rip+log_head]
-    and     eax, LOG_LINES-1
-    imul    eax, LOG_LINE_LEN
-    lea     rdx, [rip+log_buf]
-    add     rdx, rax
-    xor     ecx, ecx
-1:  mov     al, [rdi+rcx]
-    mov     [rdx+rcx], al
-    test    al, al
-    jz      2f
-    inc     ecx
-    cmp     ecx, LOG_LINE_LEN-1
-    jb      1b
-    mov     byte ptr [rdx+rcx], 0
-2:  inc     dword ptr [rip+log_head]
-    mov     dword ptr [rip+dirty], 1
-    ret
-
-# log_pair(rdi=prefix, rsi=text)
-log_pair:
-    push    rbx
-    mov     rbx, rsi
-    push    rdi
-    call    fmt_reset
-    pop     rdi
-    call    fmt_str
-    mov     rdi, rbx
-    call    fmt_str
-    lea     rdi, [rip+fmt_buf]
-    call    log_line
-    pop     rbx
+    mov     rax, [rax+rsi*8]
     ret
 
 # -----------------------------------------------------------------------------
@@ -483,12 +298,12 @@ ui_layout:
     mov     edx, 8                      # 4px padding top + bottom
 12: test    ecx, ecx
     jz      13f
-    cmp     dword ptr [rax], CMD_SEP
+    cmp     qword ptr [rax], 0
     mov     esi, MENU_ITEM_H
     mov     edi, MENU_SEP_H
     cmove   esi, edi
     add     edx, esi
-    add     rax, 24
+    add     rax, 8
     dec     ecx
     jmp     12b
 13: mov     [rip+drop_h], edx
@@ -535,17 +350,17 @@ hit_test:
 1:  cmp     edx, r13d
     jae     3f
     mov     esi, MENU_ITEM_H
-    cmp     dword ptr [r14], CMD_SEP
+    cmp     qword ptr [r14], 0
     jne     2f
     mov     esi, MENU_SEP_H
 2:  add     ecx, esi
     cmp     r12d, ecx
     jl      4f
-    add     r14, 24
+    add     r14, 8
     inc     edx
     jmp     1b
 4:  mov     eax, HIT_MENU_ITEM
-    cmp     dword ptr [r14], CMD_SEP
+    cmp     qword ptr [r14], 0
     jne     .Lht_ret
     mov     edx, -1
     jmp     .Lht_ret
@@ -946,8 +761,9 @@ ui_button:
     jmp     .Lbt_done
 6:  cmp     ebx, HIT_TOOL
     jne     7f
-    mov     edi, r12d
-    call    tool_activate
+    lea     rax, [rip+tool_ops]
+    mov     rdi, [rax+r12*8]
+    call    run_op
     jmp     .Lbt_done
 7:  cmp     ebx, HIT_OUTLINER
     jne     .Lbt_done
@@ -992,11 +808,12 @@ ui_button:
     js      .Lbt_done
     mov     edi, [rip+menu_open]
     mov     esi, r12d
-    call    item_ptr
+    call    item_op
     mov     dword ptr [rip+menu_open], -1
-    mov     edi, [rax]
-    mov     rsi, [rax+8]
-    call    exec_cmd
+    test    rax, rax
+    jz      .Lbt_done
+    mov     rdi, rax
+    call    run_op
 .Lbt_done:
     pop     r15
     pop     r14
@@ -1022,136 +839,20 @@ ui_axis:
     mov     dword ptr [rip+dirty], 1
 9:  ret
 
-# ui_key(edi=evdev key, esi=state)
+# ui_key(edi=evdev key, esi=state) - Esc closes menus, everything else is
+# looked up in the operator keymap (ops.s: dispatch_key)
 ui_key:
     cmp     esi, 1
     jne     9f
     cmp     edi, KEY_ESC
     jne     1f
+    cmp     dword ptr [rip+menu_open], 0
+    jl      1f
     mov     dword ptr [rip+menu_open], -1
     mov     dword ptr [rip+dirty], 1
     ret
-1:  test    dword ptr [rip+key_mods], MOD_CTRL
-    jz      2f
-    cmp     edi, KEY_Q
-    jne     9f
-    mov     dword ptr [rip+quit_flag], 1
-    ret
-2:  cmp     edi, KEY_Q                  # Q W E R = evdev 16..19 -> tools 0..3
-    jb      3f
-    cmp     edi, KEY_Q+3
-    ja      3f
-    sub     edi, KEY_Q
-    jmp     tool_activate
-3:  mov     esi, 0
-    cmp     edi, KEY_G
-    jne     4f
-    mov     edi, CMD_TOGGLE_GRID
-    lea     rsi, [rip+s_i_grid]
-    jmp     exec_cmd
-4:  cmp     edi, KEY_F
-    jne     9f
-    mov     edi, CMD_RESET_CAM
-    lea     rsi, [rip+s_i_resetcam]
-    jmp     exec_cmd
+1:  jmp     dispatch_key
 9:  ret
-
-# tool_activate(edi=tool index)
-tool_activate:
-    push    rbx
-    mov     ebx, edi
-    lea     rax, [rip+tool_names]
-    mov     rsi, [rax+rbx*8]
-    cmp     ebx, 4
-    jae     1f
-    mov     [rip+active_tool], ebx
-    lea     rdi, [rip+s_log_tool]
-    call    log_pair
-    pop     rbx
-    ret
-1:  lea     edi, [rbx-4+CMD_ADD_CUBE]
-    call    exec_cmd
-    pop     rbx
-    ret
-
-# -----------------------------------------------------------------------------
-# exec_cmd(edi=command, rsi=label)
-# -----------------------------------------------------------------------------
-exec_cmd:
-    push    rbx
-    mov     ebx, edi
-    lea     rdi, [rip+s_log_prompt]
-    call    log_pair
-    mov     dword ptr [rip+dirty], 1
-    cmp     ebx, CMD_EXIT
-    jne     1f
-    mov     dword ptr [rip+quit_flag], 1
-    jmp     9f
-1:  cmp     ebx, CMD_TOGGLE_LEFT
-    jne     2f
-    xor     dword ptr [rip+show_left], 1
-    jmp     9f
-2:  cmp     ebx, CMD_TOGGLE_RIGHT
-    jne     3f
-    xor     dword ptr [rip+show_right], 1
-    jmp     9f
-3:  cmp     ebx, CMD_TOGGLE_BOTTOM
-    jne     4f
-    xor     dword ptr [rip+show_bottom], 1
-    jmp     9f
-4:  cmp     ebx, CMD_TOGGLE_GRID
-    jne     5f
-    xor     dword ptr [rip+show_grid], 1
-    jmp     9f
-5:  cmp     ebx, CMD_RESET_CAM
-    jne     6f
-    call    vp_reset
-    jmp     9f
-6:  cmp     ebx, CMD_ABOUT
-    jne     7f
-    lea     rdi, [rip+s_about_ver]
-    lea     rsi, [rip+s_version]
-    call    log_pair
-    lea     rdi, [rip+s_about1]
-    call    log_line
-    lea     rdi, [rip+s_about2]
-    call    log_line
-    jmp     9f
-7:  cmp     ebx, CMD_SHORTCUTS
-    jne     8f
-    lea     rdi, [rip+s_keys1]
-    call    log_line
-    lea     rdi, [rip+s_keys2]
-    call    log_line
-    jmp     9f
-8:  lea     rdi, [rip+s_log_todo]
-    cmp     ebx, CMD_ADD_CUBE
-    jb      81f
-    cmp     ebx, CMD_ADD_CAMERA
-    ja      81f
-    lea     rdi, [rip+s_log_create]
-81: call    log_line
-9:  pop     rbx
-    ret
-
-# cmd_checked(edi=cmd) -> eax = 1 checked, 0 unchecked, -1 not a toggle
-cmd_checked:
-    lea     rax, [rip+show_left]
-    cmp     edi, CMD_TOGGLE_LEFT
-    je      1f
-    lea     rax, [rip+show_right]
-    cmp     edi, CMD_TOGGLE_RIGHT
-    je      1f
-    lea     rax, [rip+show_bottom]
-    cmp     edi, CMD_TOGGLE_BOTTOM
-    je      1f
-    lea     rax, [rip+show_grid]
-    cmp     edi, CMD_TOGGLE_GRID
-    je      1f
-    mov     eax, -1
-    ret
-1:  mov     eax, [rax]
-    ret
 
 # =============================================================================
 #  Drawing
@@ -1421,6 +1122,7 @@ draw_left_pane:
     push    r12
     push    r13
     push    r14
+    push    r15
     xor     edi, edi
     mov     esi, [rip+cont_y0]
     mov     edx, [rip+lx1]
@@ -1447,7 +1149,9 @@ draw_left_pane:
     call    draw_text
 
     xor     ebx, ebx
-1:  mov     edi, ebx
+1:  lea     rax, [rip+tool_ops]
+    mov     r15, [rax+rbx*8]            # operator
+    mov     edi, ebx
     call    tool_y
     mov     r12d, eax                   # y
     mov     r13d, COL_BTN               # background
@@ -1458,7 +1162,9 @@ draw_left_pane:
     test    eax, eax
     jz      2f
     mov     r13d, COL_BTN_HOVER
-2:  cmp     ebx, [rip+active_tool]
+2:  mov     rdi, r15
+    call    op_checked
+    cmp     eax, 1
     jne     3f
     mov     r13d, COL_ACCENT
     mov     r14d, COL_TEXT_DARK
@@ -1481,19 +1187,19 @@ draw_left_pane:
 4:  call    rect_outline
 5:  mov     edi, 34
     lea     esi, [r12+5]
-    lea     rax, [rip+tool_names]
-    mov     rdx, [rax+rbx*8]
+    mov     rdx, [r15+OP_LABEL]
     mov     ecx, r14d
     call    draw_text
-    lea     rax, [rip+tool_keys]
-    mov     rdx, [rax+rbx*8]
-    test    rdx, rdx
+    mov     edi, [r15+OP_KEY]
+    call    fmt_key
+    test    rax, rax
     jz      6f
+    mov     rdx, rax
     mov     edi, [rip+lx1]
     sub     edi, 28
     lea     esi, [r12+5]
     mov     ecx, COL_TEXT_DIM
-    cmp     ebx, [rip+active_tool]
+    cmp     r14d, COL_TEXT_DARK
     jne     51f
     mov     ecx, COL_TEXT_DARK
 51: call    draw_text
@@ -1512,6 +1218,7 @@ draw_left_pane:
     mov     ecx, [rip+cont_y1]
     sub     ecx, esi
     call    fill_rect
+    pop     r15
     pop     r14
     pop     r13
     pop     r12
@@ -1879,7 +1586,7 @@ draw_dropdown:
     add     r12d, 4                     # y
     mov     r15d, [rip+drop_x]
     xor     ebx, ebx
-1:  cmp     dword ptr [r14], CMD_SEP
+1:  cmp     qword ptr [r14], 0
     jne     2f
     lea     edi, [r15+8]
     lea     esi, [r12+4]
@@ -1908,8 +1615,8 @@ draw_dropdown:
     mov     ecx, MENU_ITEM_H
     mov     r8d, COL_ACCENT
     call    fill_rect
-3:  mov     edi, [r14]                  # check mark for toggles
-    call    cmd_checked
+3:  mov     rdi, [r14]                  # check mark for toggles
+    call    op_checked
     cmp     eax, 1
     jne     4f
     lea     edi, [r15+9]
@@ -1926,12 +1633,17 @@ draw_dropdown:
     call    draw_line
 4:  lea     edi, [r15+26]
     lea     esi, [r12+4]
-    mov     rdx, [r14+8]
+    mov     rax, [r14]
+    mov     rdx, [rax+OP_LABEL]
     mov     ecx, COL_TEXT
     call    draw_text
-    mov     rdi, [r14+16]               # shortcut, right aligned
-    test    rdi, rdi
+    mov     rax, [r14]                  # shortcut derived from the binding
+    mov     edi, [rax+OP_KEY]
+    call    fmt_key
+    test    rax, rax
     jz      5f
+    push    rax
+    mov     rdi, rax
     call    str_len
     shl     eax, 3
     mov     edi, r15d
@@ -1939,11 +1651,11 @@ draw_dropdown:
     sub     edi, 12
     sub     edi, eax
     lea     esi, [r12+4]
-    mov     rdx, [r14+16]
+    pop     rdx
     mov     ecx, COL_TEXT_DIM
     call    draw_text
 5:  add     r12d, MENU_ITEM_H
-6:  add     r14, 24
+6:  add     r14, 8
     inc     ebx
     cmp     ebx, r13d
     jb      1b
@@ -1953,3 +1665,5 @@ draw_dropdown:
     pop     r12
     pop     rbx
     ret
+
+.section .note.GNU-stack,"",@progbits

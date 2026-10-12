@@ -143,29 +143,6 @@
 .equ DRAG_ORBIT,        4
 .equ DRAG_PAN,          5
 
-# ---- Commands --------------------------------------------------------------
-.equ CMD_SEP,           0
-.equ CMD_NEW,           1
-.equ CMD_OPEN,          2
-.equ CMD_SAVE,          3
-.equ CMD_EXIT,          4
-.equ CMD_UNDO,          5
-.equ CMD_REDO,          6
-.equ CMD_PREFS,         7
-.equ CMD_TOGGLE_LEFT,   8
-.equ CMD_TOGGLE_RIGHT,  9
-.equ CMD_TOGGLE_BOTTOM, 10
-.equ CMD_RESET_CAM,     11
-.equ CMD_TOGGLE_GRID,   12
-.equ CMD_ADD_CUBE,      13
-.equ CMD_ADD_SPHERE,    14
-.equ CMD_ADD_CYL,       15
-.equ CMD_ADD_PLANE,     16
-.equ CMD_ADD_LIGHT,     17
-.equ CMD_ADD_CAMERA,    18
-.equ CMD_ABOUT,         19
-.equ CMD_SHORTCUTS,     20
-
 .equ NUM_MENUS,         5
 .equ NUM_TOOLS,         10
 .equ NUM_OUTLINER,      4
@@ -203,3 +180,15 @@
 .equ COL_OBJECT,        0xf2b134
 .equ COL_CANVAS_TOP,    0x3d424c
 .equ COL_CANVAS_BOT,    0x1f2227
+
+# ---- more evdev key codes (operator key bindings) ---------------------------
+.equ KEY_W,             17
+.equ KEY_E,             18
+.equ KEY_R,             19
+.equ KEY_T,             20
+.equ KEY_O,             24
+.equ KEY_S,             31
+.equ KEY_Z,             44
+.equ KEY_N,             49
+.equ KEY_F1,            59
+.equ MOD_ALT,           8
