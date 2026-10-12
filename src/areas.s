@@ -10,6 +10,7 @@
 .include "macros.inc"
 
 # exports
+.globl ed_node
 .globl area_layout
 .globl area_hit
 .globl area_draw_all
@@ -917,10 +918,15 @@ ed_tools_draw:
     call    fmt_key
     test    rax, rax
     jz      6f
-    mov     rdx, rax
+    mov     rdx, rax                    # shortcut, right aligned
+    push    rdx
+    mov     rdi, rax
+    call    text_width
+    pop     rdx
     mov     edi, [rip+ed_x]
     add     edi, [rip+ed_w]
-    sub     edi, 28
+    sub     edi, 16
+    sub     edi, eax
     lea     esi, [r12+5]
     mov     ecx, COL_TEXT_DIM
     cmp     r14d, COL_TEXT_DARK

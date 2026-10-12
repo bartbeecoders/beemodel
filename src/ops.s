@@ -30,10 +30,10 @@ OPERATOR op_edit_undo,  "edit.undo",  "Undo",      op_todo, key=KEY_Z|KM_CTRL, d
 OPERATOR op_edit_redo,  "edit.redo",  "Redo",      op_todo, key=KEY_Z|KM_CTRL|KM_SHIFT, doc="Redo the last undone change"
 OPERATOR op_edit_prefs, "edit.preferences", "Preferences...", op_todo, doc="Open the preferences editor"
 # ---- Tools --------------------------------------------------------------------
-OPERATOR op_tool_select, "tool.select", "Select", op_set_tool, op_check_tool, 0, KEY_Q, doc="Selection tool"
-OPERATOR op_tool_move,   "tool.move",   "Move",   op_set_tool, op_check_tool, 1, KEY_W, doc="Move tool"
-OPERATOR op_tool_rotate, "tool.rotate", "Rotate", op_set_tool, op_check_tool, 2, KEY_E, doc="Rotate tool"
-OPERATOR op_tool_scale,  "tool.scale",  "Scale",  op_set_tool, op_check_tool, 3, KEY_R, doc="Scale tool"
+OPERATOR op_tool_select, "tool.select", "Select", op_set_tool, op_check_tool, 0, KEY_Q|KM_SHIFT, doc="Selection tool"
+OPERATOR op_tool_move,   "tool.move",   "Move",   op_set_tool, op_check_tool, 1, KEY_W|KM_SHIFT, doc="Move tool"
+OPERATOR op_tool_rotate, "tool.rotate", "Rotate", op_set_tool, op_check_tool, 2, KEY_E|KM_SHIFT, doc="Rotate tool"
+OPERATOR op_tool_scale,  "tool.scale",  "Scale",  op_set_tool, op_check_tool, 3, KEY_R|KM_SHIFT, doc="Scale tool"
 # ---- Console ------------------------------------------------------------------
 OPERATOR op_console_focus, "console.focus", "Command Line", do_console_focus, key=KEY_ENTER, flags=OPF_QUIET|OPF_AI_SAFE, doc="Focus the console command line"
 OPERATOR op_console_clear, "console.clear", "Clear Console", do_console_clear, key=KEY_L|KM_CTRL, flags=OPF_QUIET|OPF_AI_SAFE, doc="Clear the console log"
