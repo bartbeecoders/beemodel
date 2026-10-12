@@ -1,0 +1,629 @@
+# =============================================================================
+#  BeeModel - 3D viewport: orbit camera, perspective projection, near-plane
+#  and Liang-Barsky clipping, wireframe rendering. Scalar SSE math; sin/cos
+#  come from the x87 FSINCOS instruction (no libm).
+# =============================================================================
+
+.section .data
+.align 4
+cam_yaw:    .float 0.7853982
+cam_pitch:  .float 0.5
+cam_dist:   .float 18.0
+cam_tx:     .float 0.0
+cam_ty:     .float 0.0
+cam_tz:     .float 0.0
+
+.section .rodata
+.align 4
+f_near:     .float 0.05
+f_zero:     .float 0.0
+f_one:      .float 1.0
+f_focal_k:  .float 1.07                 # 0.5 / tan(25deg) -> 50deg vertical fov
+f_orbit_k:  .float 0.008
+f_pitch_max:.float 1.55
+f_pitch_min:.float -1.55
+f_zoom_in:  .float 0.9090909
+f_zoom_out: .float 1.1
+f_dist_min: .float 1.5
+f_dist_max: .float 400.0
+f_gizmo:    .float 34.0
+f_axis_y:   .float 3.0
+f_rad2deg:  .float 57.29578
+f_ten:      .float 10.0
+f_def_yaw:  .float 0.7853982
+f_def_pitch:.float 0.5
+f_def_dist: .float 18.0
+
+.equ GRID_N, 10
+
+# Demo object: unit cube (2x2x2) resting on the ground plane
+cube_verts:
+    .float -1,0,-1,   1,0,-1,   1,0,1,   -1,0,1
+    .float -1,2,-1,   1,2,-1,   1,2,1,   -1,2,1
+cube_edges:
+    .byte 0,1, 1,2, 2,3, 3,0, 4,5, 5,6, 6,7, 7,4, 0,4, 1,5, 2,6, 3,7
+
+s_vp_label: .asciz "Perspective  |  Grid 1 m"
+s_vp_hint:  .asciz "LMB orbit   MMB / Shift+LMB pan   Wheel zoom   F reset   G grid"
+s_ax_x:     .asciz "X"
+s_ax_y:     .asciz "Y"
+s_ax_z:     .asciz "Z"
+
+.section .bss
+.align 16
+eye:        .skip 12
+right:      .skip 12
+up:         .skip 12
+fwd:        .skip 12
+vp_focal:   .skip 4
+vp_cx:      .skip 4
+vp_cy:      .skip 4
+px_world:   .skip 4
+sin_y:      .skip 4
+cos_y:      .skip 4
+sin_p:      .skip 4
+cos_p:      .skip 4
+lp0:        .skip 12                    # world-space line endpoints (input)
+lp1:        .skip 12
+la:         .skip 12                    # camera-space endpoints
+lb:         .skip 12
+lb_buf:     .skip 16                    # x0,y0,x1,y1 screen floats
+tmpf:       .skip 4
+
+.text
+
+# -----------------------------------------------------------------------------
+# cam_setup - build the camera basis for the current canvas rectangle
+# -----------------------------------------------------------------------------
+cam_setup:
+    fld     dword ptr [rip+cam_yaw]
+    fsincos
+    fstp    dword ptr [rip+cos_y]
+    fstp    dword ptr [rip+sin_y]
+    fld     dword ptr [rip+cam_pitch]
+    fsincos
+    fstp    dword ptr [rip+cos_p]
+    fstp    dword ptr [rip+sin_p]
+
+    movss   xmm0, [rip+cos_y]           # right = (cy, 0, -sy)
+    movss   [rip+right], xmm0
+    xorps   xmm1, xmm1
+    movss   [rip+right+4], xmm1
+    subss   xmm1, [rip+sin_y]
+    movss   [rip+right+8], xmm1
+
+    movss   xmm0, [rip+sin_p]           # up = (-sp*sy, cp, -sp*cy)
+    mulss   xmm0, [rip+sin_y]
+    xorps   xmm1, xmm1
+    subss   xmm1, xmm0
+    movss   [rip+up], xmm1
+    movss   xmm0, [rip+cos_p]
+    movss   [rip+up+4], xmm0
+    movss   xmm0, [rip+sin_p]
+    mulss   xmm0, [rip+cos_y]
+    xorps   xmm1, xmm1
+    subss   xmm1, xmm0
+    movss   [rip+up+8], xmm1
+
+    movss   xmm0, [rip+cos_p]           # fwd = -(cp*sy, sp, cp*cy)
+    mulss   xmm0, [rip+sin_y]
+    xorps   xmm1, xmm1
+    subss   xmm1, xmm0
+    movss   [rip+fwd], xmm1
+    xorps   xmm1, xmm1
+    subss   xmm1, [rip+sin_p]
+    movss   [rip+fwd+4], xmm1
+    movss   xmm0, [rip+cos_p]
+    mulss   xmm0, [rip+cos_y]
+    xorps   xmm1, xmm1
+    subss   xmm1, xmm0
+    movss   [rip+fwd+8], xmm1
+
+    movss   xmm2, [rip+cam_dist]        # eye = target - fwd * dist
+    movss   xmm0, [rip+fwd]
+    mulss   xmm0, xmm2
+    movss   xmm1, [rip+cam_tx]
+    subss   xmm1, xmm0
+    movss   [rip+eye], xmm1
+    movss   xmm0, [rip+fwd+4]
+    mulss   xmm0, xmm2
+    movss   xmm1, [rip+cam_ty]
+    subss   xmm1, xmm0
+    movss   [rip+eye+4], xmm1
+    movss   xmm0, [rip+fwd+8]
+    mulss   xmm0, xmm2
+    movss   xmm1, [rip+cam_tz]
+    subss   xmm1, xmm0
+    movss   [rip+eye+8], xmm1
+
+    mov     eax, [rip+cvs_y1]           # focal length in pixels
+    sub     eax, [rip+cvs_y0]
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+f_focal_k]
+    movss   [rip+vp_focal], xmm0
+    movss   xmm1, [rip+cam_dist]
+    divss   xmm1, xmm0
+    movss   [rip+px_world], xmm1        # world units per pixel at the target
+    mov     eax, [rip+cvs_x0]
+    add     eax, [rip+cvs_x1]
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+f_half]
+    movss   [rip+vp_cx], xmm0
+    mov     eax, [rip+cvs_y0]
+    add     eax, [rip+cvs_y1]
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+f_half]
+    movss   [rip+vp_cy], xmm0
+    ret
+
+# to_cam(rdi=world vec3, rsi=out camera-space vec3)
+to_cam:
+    movss   xmm0, [rdi]
+    subss   xmm0, [rip+eye]
+    movss   xmm1, [rdi+4]
+    subss   xmm1, [rip+eye+4]
+    movss   xmm2, [rdi+8]
+    subss   xmm2, [rip+eye+8]
+    movss   xmm3, xmm0                  # x = d . right   (right.y == 0)
+    mulss   xmm3, [rip+right]
+    movss   xmm4, xmm2
+    mulss   xmm4, [rip+right+8]
+    addss   xmm3, xmm4
+    movss   [rsi], xmm3
+    movss   xmm3, xmm0                  # y = d . up
+    mulss   xmm3, [rip+up]
+    movss   xmm4, xmm1
+    mulss   xmm4, [rip+up+4]
+    addss   xmm3, xmm4
+    movss   xmm4, xmm2
+    mulss   xmm4, [rip+up+8]
+    addss   xmm3, xmm4
+    movss   [rsi+4], xmm3
+    movss   xmm3, xmm0                  # z = d . fwd
+    mulss   xmm3, [rip+fwd]
+    movss   xmm4, xmm1
+    mulss   xmm4, [rip+fwd+4]
+    addss   xmm3, xmm4
+    movss   xmm4, xmm2
+    mulss   xmm4, [rip+fwd+8]
+    addss   xmm3, xmm4
+    movss   [rsi+8], xmm3
+    ret
+
+# clip_near(rdi=point behind the near plane, rsi=point in front) - moves rdi
+clip_near:
+    movss   xmm0, [rip+f_near]
+    subss   xmm0, [rdi+8]
+    movss   xmm1, [rsi+8]
+    subss   xmm1, [rdi+8]
+    divss   xmm0, xmm1                  # t
+    movss   xmm1, [rsi]
+    subss   xmm1, [rdi]
+    mulss   xmm1, xmm0
+    addss   xmm1, [rdi]
+    movss   [rdi], xmm1
+    movss   xmm1, [rsi+4]
+    subss   xmm1, [rdi+4]
+    mulss   xmm1, xmm0
+    addss   xmm1, [rdi+4]
+    movss   [rdi+4], xmm1
+    movss   xmm1, [rip+f_near]
+    movss   [rdi+8], xmm1
+    ret
+
+# project(rdi=camera-space vec3, rsi=out 2 floats)
+project:
+    movss   xmm2, [rip+vp_focal]
+    divss   xmm2, [rdi+8]
+    movss   xmm0, [rdi]
+    mulss   xmm0, xmm2
+    addss   xmm0, [rip+vp_cx]
+    movss   [rsi], xmm0
+    movss   xmm1, [rdi+4]
+    mulss   xmm1, xmm2
+    movss   xmm0, [rip+vp_cy]
+    subss   xmm0, xmm1
+    movss   [rsi+4], xmm0
+    ret
+
+# lb_edge(xmm0=p, xmm1=q) ; u0 in xmm6, u1 in xmm7 ; eax=1 -> fully clipped
+lb_edge:
+    xorps   xmm2, xmm2
+    comiss  xmm0, xmm2
+    je      3f
+    divss   xmm1, xmm0                  # r = q / p
+    jb      1f
+    minss   xmm7, xmm1                  # p > 0: leaving edge
+    jmp     2f
+1:  maxss   xmm6, xmm1                  # p < 0: entering edge
+2:  comiss  xmm6, xmm7
+    ja      4f
+    xor     eax, eax
+    ret
+3:  comiss  xmm1, xmm2                  # parallel: outside if q < 0
+    jb      4f
+    xor     eax, eax
+    ret
+4:  mov     eax, 1
+    ret
+
+# -----------------------------------------------------------------------------
+# line3d(edx=color) - draws lp0 -> lp1 (world space)
+# -----------------------------------------------------------------------------
+line3d:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edx
+    lea     rdi, [rip+lp0]
+    lea     rsi, [rip+la]
+    call    to_cam
+    lea     rdi, [rip+lp1]
+    lea     rsi, [rip+lb]
+    call    to_cam
+    movss   xmm7, [rip+f_near]
+    movss   xmm0, [rip+la+8]
+    movss   xmm1, [rip+lb+8]
+    comiss  xmm0, xmm7
+    jae     1f
+    comiss  xmm1, xmm7
+    jb      9f                          # both behind the camera
+    lea     rdi, [rip+la]
+    lea     rsi, [rip+lb]
+    call    clip_near
+    jmp     2f
+1:  comiss  xmm1, xmm7
+    jae     2f
+    lea     rdi, [rip+lb]
+    lea     rsi, [rip+la]
+    call    clip_near
+2:  lea     r12, [rip+lb_buf]
+    lea     rdi, [rip+la]
+    mov     rsi, r12
+    call    project
+    lea     rdi, [rip+lb]
+    lea     rsi, [r12+8]
+    call    project
+
+    # Liang-Barsky against the clip rect
+    xorps   xmm6, xmm6                  # u0
+    movss   xmm7, [rip+f_one]           # u1
+    movss   xmm4, [r12+8]
+    subss   xmm4, [r12]                 # dx
+    movss   xmm5, [r12+12]
+    subss   xmm5, [r12+4]               # dy
+
+    xorps   xmm0, xmm0                  # left:   p=-dx q=x0-xmin
+    subss   xmm0, xmm4
+    cvtsi2ss xmm1, dword ptr [rip+clip_x0]
+    movss   xmm2, [r12]
+    subss   xmm2, xmm1
+    movss   xmm1, xmm2
+    call    lb_edge
+    test    eax, eax
+    jnz     9f
+    movss   xmm0, xmm4                  # right:  p=dx q=xmax-x0
+    mov     eax, [rip+clip_x1]
+    dec     eax
+    cvtsi2ss xmm1, eax
+    subss   xmm1, [r12]
+    call    lb_edge
+    test    eax, eax
+    jnz     9f
+    xorps   xmm0, xmm0                  # top:    p=-dy q=y0-ymin
+    subss   xmm0, xmm5
+    cvtsi2ss xmm1, dword ptr [rip+clip_y0]
+    movss   xmm2, [r12+4]
+    subss   xmm2, xmm1
+    movss   xmm1, xmm2
+    call    lb_edge
+    test    eax, eax
+    jnz     9f
+    movss   xmm0, xmm5                  # bottom: p=dy q=ymax-y0
+    mov     eax, [rip+clip_y1]
+    dec     eax
+    cvtsi2ss xmm1, eax
+    subss   xmm1, [r12+4]
+    call    lb_edge
+    test    eax, eax
+    jnz     9f
+
+    movss   xmm0, xmm4                  # x0' = x0 + u0*dx
+    mulss   xmm0, xmm6
+    addss   xmm0, [r12]
+    cvtss2si edi, xmm0
+    movss   xmm0, xmm5                  # y0' = y0 + u0*dy
+    mulss   xmm0, xmm6
+    addss   xmm0, [r12+4]
+    cvtss2si esi, xmm0
+    movss   xmm0, xmm4                  # x1' = x0 + u1*dx
+    mulss   xmm0, xmm7
+    addss   xmm0, [r12]
+    cvtss2si edx, xmm0
+    movss   xmm0, xmm5                  # y1' = y0 + u1*dy
+    mulss   xmm0, xmm7
+    addss   xmm0, [r12+4]
+    cvtss2si ecx, xmm0
+    mov     r8d, ebx
+    call    draw_line
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# set_lp(xmm0..xmm2 -> lp0, xmm3..xmm5 -> lp1)
+set_lp:
+    movss   [rip+lp0], xmm0
+    movss   [rip+lp0+4], xmm1
+    movss   [rip+lp0+8], xmm2
+    movss   [rip+lp1], xmm3
+    movss   [rip+lp1+4], xmm4
+    movss   [rip+lp1+8], xmm5
+    ret
+
+# -----------------------------------------------------------------------------
+# viewport_draw - render the canvas area
+# -----------------------------------------------------------------------------
+viewport_draw:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     edi, [rip+cvs_x0]
+    mov     esi, [rip+cvs_y0]
+    mov     edx, [rip+cvs_x1]
+    sub     edx, edi
+    mov     ecx, [rip+cvs_y1]
+    sub     ecx, esi
+    mov     r8d, COL_CANVAS_TOP
+    mov     r9d, COL_CANVAS_BOT
+    call    fill_vgradient
+    mov     edi, [rip+cvs_x0]
+    mov     esi, [rip+cvs_y0]
+    mov     edx, [rip+cvs_x1]
+    mov     ecx, [rip+cvs_y1]
+    call    set_clip
+    call    cam_setup
+
+    cmp     dword ptr [rip+show_grid], 0
+    je      .Lvp_object
+    # ---- ground grid ---------------------------------------------------------
+    mov     ebx, -GRID_N
+.Lvp_grid:
+    test    ebx, ebx
+    jz      .Lvp_gnext                  # the axes are drawn on top later
+    mov     r12d, COL_GRID
+    mov     eax, ebx
+    cdq
+    mov     ecx, 5
+    idiv    ecx
+    test    edx, edx
+    jnz     1f
+    mov     r12d, COL_GRID_MAJOR
+1:  cvtsi2ss xmm0, ebx                  # line parallel to Z at x = i
+    xorps   xmm1, xmm1
+    mov     eax, -GRID_N
+    cvtsi2ss xmm2, eax
+    movss   xmm3, xmm0
+    xorps   xmm4, xmm4
+    mov     eax, GRID_N
+    cvtsi2ss xmm5, eax
+    call    set_lp
+    mov     edx, r12d
+    call    line3d
+    mov     eax, -GRID_N                # line parallel to X at z = i
+    cvtsi2ss xmm0, eax
+    xorps   xmm1, xmm1
+    cvtsi2ss xmm2, ebx
+    mov     eax, GRID_N
+    cvtsi2ss xmm3, eax
+    xorps   xmm4, xmm4
+    movss   xmm5, xmm2
+    call    set_lp
+    mov     edx, r12d
+    call    line3d
+.Lvp_gnext:
+    inc     ebx
+    cmp     ebx, GRID_N
+    jle     .Lvp_grid
+
+    # ---- world axes ------------------------------------------------------------
+    mov     eax, -GRID_N                # X (red)
+    cvtsi2ss xmm0, eax
+    xorps   xmm1, xmm1
+    xorps   xmm2, xmm2
+    neg     eax
+    cvtsi2ss xmm3, eax
+    xorps   xmm4, xmm4
+    xorps   xmm5, xmm5
+    call    set_lp
+    mov     edx, COL_AXIS_X
+    call    line3d
+    xorps   xmm0, xmm0                  # Z (blue)
+    xorps   xmm1, xmm1
+    mov     eax, -GRID_N
+    cvtsi2ss xmm2, eax
+    xorps   xmm3, xmm3
+    xorps   xmm4, xmm4
+    neg     eax
+    cvtsi2ss xmm5, eax
+    call    set_lp
+    mov     edx, COL_AXIS_Z
+    call    line3d
+    xorps   xmm0, xmm0                  # Y (green, up)
+    xorps   xmm1, xmm1
+    xorps   xmm2, xmm2
+    xorps   xmm3, xmm3
+    movss   xmm4, [rip+f_axis_y]
+    xorps   xmm5, xmm5
+    call    set_lp
+    mov     edx, COL_AXIS_Y
+    call    line3d
+
+.Lvp_object:
+    # ---- demo cube -------------------------------------------------------------
+    mov     r13d, 0xb4b8c0
+    cmp     dword ptr [rip+selected_obj], 3
+    jne     1f
+    mov     r13d, COL_OBJECT
+1:  xor     ebx, ebx
+    lea     r14, [rip+cube_edges]
+    lea     r15, [rip+cube_verts]
+2:  movzx   eax, byte ptr [r14+rbx*2]
+    lea     rax, [rax+rax*2]
+    movss   xmm0, [r15+rax*4]
+    movss   xmm1, [r15+rax*4+4]
+    movss   xmm2, [r15+rax*4+8]
+    movzx   eax, byte ptr [r14+rbx*2+1]
+    lea     rax, [rax+rax*2]
+    movss   xmm3, [r15+rax*4]
+    movss   xmm4, [r15+rax*4+4]
+    movss   xmm5, [r15+rax*4+8]
+    call    set_lp
+    mov     edx, r13d
+    call    line3d
+    inc     ebx
+    cmp     ebx, 12
+    jb      2b
+
+    # ---- orientation gizmo (bottom-left) -----------------------------------
+    mov     r12d, [rip+cvs_x0]
+    add     r12d, 50
+    mov     r13d, [rip+cvs_y1]
+    sub     r13d, 50
+    xor     ebx, ebx                    # axis 0..2
+.Lvp_giz:
+    lea     rax, [rip+right]
+    movss   xmm0, [rax+rbx*4]
+    mulss   xmm0, [rip+f_gizmo]
+    cvtss2si r14d, xmm0
+    add     r14d, r12d                  # tip x
+    lea     rax, [rip+up]
+    movss   xmm0, [rax+rbx*4]
+    mulss   xmm0, [rip+f_gizmo]
+    cvtss2si r15d, xmm0
+    neg     r15d
+    add     r15d, r13d                  # tip y
+    lea     rax, [rip+axis_colors]
+    mov     eax, [rax+rbx*4]
+    mov     [rip+tmpf], eax
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, r15d
+    mov     r8d, eax
+    call    draw_line
+    lea     edi, [r12+1]
+    mov     esi, r13d
+    lea     edx, [r14+1]
+    mov     ecx, r15d
+    mov     r8d, [rip+tmpf]
+    call    draw_line
+    lea     edi, [r14-3]
+    lea     esi, [r15-7]
+    lea     rax, [rip+axis_labels]
+    mov     rdx, [rax+rbx*8]
+    mov     ecx, [rip+tmpf]
+    call    draw_text
+    inc     ebx
+    cmp     ebx, 3
+    jb      .Lvp_giz
+
+    # ---- overlay text ---------------------------------------------------------
+    mov     edi, [rip+cvs_x0]
+    add     edi, 10
+    mov     esi, [rip+cvs_y0]
+    add     esi, 8
+    lea     rdx, [rip+s_vp_label]
+    mov     ecx, COL_TEXT
+    call    draw_text
+    mov     edi, [rip+cvs_x0]
+    add     edi, 10
+    mov     esi, [rip+cvs_y0]
+    add     esi, 26
+    lea     rdx, [rip+s_vp_hint]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+    call    reset_clip
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+.section .rodata
+.align 8
+axis_colors: .long COL_AXIS_X, COL_AXIS_Y, COL_AXIS_Z
+.align 8
+axis_labels: .quad s_ax_x, s_ax_y, s_ax_z
+f_half:      .float 0.5
+.text
+
+# -----------------------------------------------------------------------------
+# Camera controls
+# -----------------------------------------------------------------------------
+# vp_orbit(edi=dx, esi=dy)
+vp_orbit:
+    cvtsi2ss xmm0, edi
+    mulss   xmm0, [rip+f_orbit_k]
+    movss   xmm1, [rip+cam_yaw]
+    subss   xmm1, xmm0
+    movss   [rip+cam_yaw], xmm1
+    cvtsi2ss xmm0, esi
+    mulss   xmm0, [rip+f_orbit_k]
+    addss   xmm0, [rip+cam_pitch]
+    maxss   xmm0, [rip+f_pitch_min]
+    minss   xmm0, [rip+f_pitch_max]
+    movss   [rip+cam_pitch], xmm0
+    ret
+
+# vp_pan(edi=dx, esi=dy) - drag the scene with the pointer
+vp_pan:
+    cvtsi2ss xmm0, edi
+    mulss   xmm0, [rip+px_world]        # world dx
+    cvtsi2ss xmm1, esi
+    mulss   xmm1, [rip+px_world]        # world dy
+    xor     eax, eax
+    lea     rcx, [rip+cam_tx]
+    lea     rdx, [rip+right]
+    lea     r8, [rip+up]
+1:  movss   xmm2, [rdx+rax*4]
+    mulss   xmm2, xmm0
+    movss   xmm3, [r8+rax*4]
+    mulss   xmm3, xmm1
+    movss   xmm4, [rcx+rax*4]
+    subss   xmm4, xmm2
+    addss   xmm4, xmm3
+    movss   [rcx+rax*4], xmm4
+    inc     eax
+    cmp     eax, 3
+    jb      1b
+    ret
+
+# vp_zoom(edi = >0 zoom out, <0 zoom in)
+vp_zoom:
+    movss   xmm0, [rip+cam_dist]
+    test    edi, edi
+    js      1f
+    mulss   xmm0, [rip+f_zoom_out]
+    jmp     2f
+1:  mulss   xmm0, [rip+f_zoom_in]
+2:  maxss   xmm0, [rip+f_dist_min]
+    minss   xmm0, [rip+f_dist_max]
+    movss   [rip+cam_dist], xmm0
+    ret
+
+vp_reset:
+    movss   xmm0, [rip+f_def_yaw]
+    movss   [rip+cam_yaw], xmm0
+    movss   xmm0, [rip+f_def_pitch]
+    movss   [rip+cam_pitch], xmm0
+    movss   xmm0, [rip+f_def_dist]
+    movss   [rip+cam_dist], xmm0
+    xorps   xmm0, xmm0
+    movss   [rip+cam_tx], xmm0
+    movss   [rip+cam_ty], xmm0
+    movss   [rip+cam_tz], xmm0
+    ret

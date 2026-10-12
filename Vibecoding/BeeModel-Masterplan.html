@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeeModel Masterplan</title>
+<style>
+:root {
+  --bg: #f6f4ef; --panel: #ffffff; --panel-2: #f0ede6; --ink: #1d1f24; --ink-2: #4a4f5a;
+  --ink-3: #7a808c; --line: #e2ded5; --accent: #c98a0b; --accent-soft: #fbefd2;
+  --blue: #2f6fb3; --green: #3d8a4a; --red: #b8434f; --violet: #6b4fb3;
+  --code-bg: #f3f1ec; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171b; --panel: #1d2026; --panel-2: #23272e; --ink: #e4e6ea; --ink-2: #b4b9c2;
+    --ink-3: #828895; --line: #2e333b; --accent: #f2b134; --accent-soft: #3a2f16;
+    --blue: #61afef; --green: #98c379; --red: #e06c75; --violet: #b49cf0;
+    --code-bg: #181a1f; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171b; --panel: #1d2026; --panel-2: #23272e; --ink: #e4e6ea; --ink-2: #b4b9c2;
+  --ink-3: #828895; --line: #2e333b; --accent: #f2b134; --accent-soft: #3a2f16;
+  --blue: #61afef; --green: #98c379; --red: #e06c75; --violet: #b49cf0;
+  --code-bg: #181a1f; --shadow: none;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+code, pre, .mono { font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, monospace; font-size: .88em; }
+code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; line-height: 1.45; }
+pre code { background: none; padding: 0; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); max-width: 1320px; margin: 0 auto; }
+nav.toc {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 28px 18px 28px 24px; border-right: 1px solid var(--line); font-size: 14px;
+}
+nav.toc .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; margin-bottom: 18px; }
+nav.toc ol { list-style: none; padding: 0; margin: 0; counter-reset: s; }
+nav.toc li { counter-increment: s; }
+nav.toc li a { display: block; padding: 4px 8px; border-radius: 6px; color: var(--ink-2); }
+nav.toc li a::before { content: counter(s) ". "; color: var(--ink-3); }
+nav.toc li a:hover { background: var(--panel-2); text-decoration: none; color: var(--ink); }
+main { padding: 40px 48px 120px; min-width: 0; }
+.hex { width: 22px; height: 24px; background: var(--accent); clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); flex: none; }
+
+header.hero { margin-bottom: 40px; }
+header.hero .kicker { color: var(--accent); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; }
+header.hero h1 { font-size: 42px; line-height: 1.1; margin: 8px 0 14px; letter-spacing: -.02em; }
+header.hero p.lede { font-size: 19px; color: var(--ink-2); max-width: 820px; margin: 0; }
+.meta { margin-top: 18px; color: var(--ink-3); font-size: 14px; }
+
+section { margin-top: 64px; }
+section > h2 { font-size: 28px; letter-spacing: -.01em; margin: 0 0 6px; padding-top: 8px; }
+section > .sub { color: var(--ink-3); margin: 0 0 22px; }
+h3 { font-size: 19px; margin: 30px 0 10px; }
+h4 { font-size: 15px; margin: 18px 0 6px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; }
+p, li { color: var(--ink); }
+.muted { color: var(--ink-3); }
+
+.grid { display: grid; gap: 16px; }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 18px 20px; box-shadow: var(--shadow);
+}
+.card h3, .card h4 { margin-top: 0; }
+.card ul { padding-left: 20px; margin: 8px 0 0; }
+.card li { margin: 3px 0; }
+.card.accent { border-left: 4px solid var(--accent); }
+.card.blue { border-left: 4px solid var(--blue); }
+.card.green { border-left: 4px solid var(--green); }
+.card.red { border-left: 4px solid var(--red); }
+.card.violet { border-left: 4px solid var(--violet); }
+
+.callout { background: var(--accent-soft); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px; padding: 14px 18px; margin: 18px 0; }
+.callout strong:first-child { color: var(--accent); }
+
+.tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-2); margin: 0 4px 4px 0; white-space: nowrap; }
+.tag.b { color: var(--blue); } .tag.g { color: var(--green); } .tag.r { color: var(--red); } .tag.a { color: var(--accent); } .tag.v { color: var(--violet); }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 14px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: var(--panel-2); font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.phase { display: grid; grid-template-columns: 74px minmax(0,1fr); gap: 18px; margin: 18px 0; }
+.phase .pn { font-size: 13px; font-weight: 700; color: var(--accent); text-align: right; padding-top: 20px; }
+.phase .pn b { display: block; font-size: 30px; color: var(--ink); line-height: 1; }
+.phase .card h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.exit { margin-top: 10px; font-size: 14px; color: var(--ink-2); border-top: 1px dashed var(--line); padding-top: 8px; }
+.exit b { color: var(--green); }
+
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.diagram text { font-family: ui-sans-serif, system-ui, sans-serif; }
+
+.pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.toggle-theme { margin-top: 18px; font-size: 13px; background: var(--panel-2); color: var(--ink-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+
+@media (max-width: 980px) {
+  .layout { grid-template-columns: minmax(0,1fr); }
+  nav.toc { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 16px; }
+  nav.toc ol { columns: 2; }
+  main { padding: 24px 16px 80px; }
+  .g2, .g3 { grid-template-columns: minmax(0,1fr); }
+  header.hero h1 { font-size: 32px; }
+  .phase { grid-template-columns: minmax(0,1fr); gap: 4px; }
+  .phase .pn { text-align: left; padding-top: 0; }
+  .phase .pn b { display: inline; font-size: 20px; margin-right: 6px; }
+}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc">
+  <div class="brand"><span class="hex"></span>BeeModel Masterplan</div>
+  <ol>
+    <li><a href="#vision">Vision &amp; principles</a></li>
+    <li><a href="#baseline">Where we are</a></li>
+    <li><a href="#architecture">Architecture</a></li>
+    <li><a href="#operators">The operator spine</a></li>
+    <li><a href="#data">Data model &amp; files</a></li>
+    <li><a href="#platform">Platform layer</a></li>
+    <li><a href="#render">Rendering</a></li>
+    <li><a href="#modeling">Polygon modeling</a></li>
+    <li><a href="#cad">CAD &amp; precision</a></li>
+    <li><a href="#procedural">Nodes &amp; procedural</a></li>
+    <li><a href="#sculpt">Sculpt, UV, paint</a></li>
+    <li><a href="#anim">Animation &amp; simulation</a></li>
+    <li><a href="#engine">Engine-grade features</a></li>
+    <li><a href="#ai">AI &amp; MCP</a></li>
+    <li><a href="#ux">UX &amp; workspaces</a></li>
+    <li><a href="#collab">Collaboration &amp; versioning</a></li>
+    <li><a href="#wild">Out-of-the-box ideas</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#budgets">Performance budgets</a></li>
+    <li><a href="#engineering">Engineering practice</a></li>
+    <li><a href="#risks">Risks &amp; decisions</a></li>
+  </ol>
+  <button class="toggle-theme" id="themeBtn" type="button">Toggle light / dark</button>
+</nav>
+
+<main>
+<header class="hero">
+  <div class="kicker">Product &amp; technical plan</div>
+  <h1>From a 25&nbsp;KB shell to a complete 3D modeling suite</h1>
+  <p class="lede">How BeeModel grows from today's assembly-language Wayland shell into a full modeler. It combines Blender's polygon and sculpting workflow, a CAD tool's parametric precision, and Unreal Engine's real-time, node-driven, large-world thinking. It is AI-native from the start: every action can be driven by an agent through a built-in MCP server. Through all of it, the original rule holds: hand-written x86-64, no libraries, and performance and memory first.</p>
+  <div class="meta">BeeModel · Vibecoding/BeeModel-Masterplan.html · Target machine: Ryzen-class 16C/32T with AVX-512, RTX 4080 SUPER, Hyprland (Wayland), 3× 1080p monitors at scale 1</div>
+</header>
+
+<!-- ============================================================ -->
+<section id="vision">
+  <h2>Vision &amp; principles</h2>
+  <p class="sub">What BeeModel is, and the rules every later decision is checked against.</p>
+
+  <div class="callout"><strong>North star.</strong> A professional 3D modeler that starts in under 50&nbsp;ms, fits in under 2&nbsp;MB, stays responsive with 100 million triangles, and that a human and an AI agent can operate together. Both use the same commands, the same undo history and the same permissions.</div>
+
+  <div class="grid g3">
+    <div class="card accent"><h3>1 · Zero dependencies</h3>The shipped binary links nothing: no libc, libwayland, Vulkan loader, FreeType or zlib. Every format, protocol and algorithm we need is written in assembly. Python and other dev-time code generators are allowed if they emit assembly sources that are committed to the repo.</div>
+    <div class="card accent"><h3>2 · Memory is a feature</h3>Data-oriented layouts (struct-of-arrays), arenas instead of malloc-per-object, mmap'd files and compact 32-bit indices. Every subsystem gets a memory budget, and CI fails when one is exceeded.</div>
+    <div class="card accent"><h3>3 · Never block the human</h3>The UI thread only reads snapshots. Heavy work goes to a job system on all 32 hardware threads. Every long operation can be cancelled and reports progress.</div>
+    <div class="card blue"><h3>4 · One operator table</h3>Every action is declared once, with name, parameters, types, ranges, docs and undo behaviour. From that single declaration we generate the menus, hotkeys, property panels, BeeScript bindings and MCP tools (see <a href="#operators">the operator spine</a>).</div>
+    <div class="card blue"><h3>5 · Non-destructive by default</h3>Modifier stacks, parametric feature trees and node graphs keep the original intent editable. Destructive edits stay possible but are always journaled.</div>
+    <div class="card blue"><h3>6 · Agents are first-class users</h3>AI changes go through the same operator layer and the same undo history, and are shown as reviewable change sets. AI never gets a private back door into the data.</div>
+  </div>
+
+  <h3>Who it is for</h3>
+  <div class="grid g3">
+    <div class="card"><h4>Artists</h4>Hard-surface and organic modeling, sculpting, UVs, texture paint and quick renders. Benchmark: Blender's modeling and sculpting workflow.</div>
+    <div class="card"><h4>Makers &amp; engineers</h4>Sketch → constrain → extrude, exact dimensions, fillets, assemblies, drawings and 3MF/STEP export. Benchmarks: FreeCAD, Fusion and Onshape for parts.</div>
+    <div class="card"><h4>Technical &amp; world builders</h4>Procedural nodes, scattering, LODs, huge scenes and a play mode. Benchmarks: Unreal Engine's PCG, Blueprints and Nanite-style geometry.</div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="baseline">
+  <h2>Where we are</h2>
+  <p class="sub">The shell delivered so far, and what it already proves.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Area</th><th>Status today</th><th>What it proves</th></tr>
+    <tr><td>Wayland client</td><td>Hand-written wire protocol: registry, compositor, shm (memfd, double buffer), xdg-shell, seat/pointer/keyboard, cursor-shape-v1</td><td>We can talk to any compositor without libwayland. The pattern extends to every other protocol we need.</td></tr>
+    <tr><td>Event loop</td><td>Blocking <code>recvmsg</code>, redraws paced by frame callbacks, 0% CPU when idle</td><td>The architecture is fast and power-friendly by default.</td></tr>
+    <tr><td>Shell UI</td><td>App-drawn title bar, menus, 3 resizable panes, status bar, console log</td><td>Immediate-mode UI in assembly is workable.</td></tr>
+    <tr><td>Viewport</td><td>Orbit/pan/zoom camera, perspective, near-plane and Liang–Barsky clipping, grid, gizmo</td><td>The SSE math core is in place for the 3D pipeline.</td></tr>
+    <tr><td>Footprint</td><td>25 KB binary, ~60 KB private RAM plus the framebuffer</td><td>The baseline every later phase is measured against.</td></tr>
+    <tr><td>Testing</td><td><code>tools/fakewl.py</code> headless fake compositor with input injection and screenshots</td><td>The seed of the golden-image test suite.</td></tr>
+  </table></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="architecture">
+  <h2>Architecture</h2>
+  <p class="sub">Layers, threads and how data flows. Each layer may call only the layers below it.</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 980 520" role="img" aria-label="Layered architecture diagram of BeeModel">
+    <defs>
+      <style>
+        .bx { fill: var(--panel-2); stroke: var(--line); stroke-width: 1.2; }
+        .bxa { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.2; }
+        .t { fill: var(--ink); font-size: 14px; font-weight: 600; }
+        .s { fill: var(--ink-3); font-size: 11.5px; }
+        .lbl { fill: var(--ink-2); font-size: 12px; font-weight: 700; letter-spacing: .06em; }
+        .ar { stroke: var(--ink-3); stroke-width: 1.4; fill: none; marker-end: url(#ah); }
+      </style>
+      <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="var(--ink-3)"/></marker>
+    </defs>
+    <!-- surfaces -->
+    <text class="lbl" x="20" y="28">SURFACES</text>
+    <rect class="bx" x="20" y="38" width="170" height="58" rx="8"/><text class="t" x="34" y="62">Editors &amp; panels</text><text class="s" x="34" y="82">viewport, outliner, nodes</text>
+    <rect class="bx" x="205" y="38" width="170" height="58" rx="8"/><text class="t" x="219" y="62">Command palette</text><text class="s" x="219" y="82">fuzzy search, pie menus</text>
+    <rect class="bx" x="390" y="38" width="170" height="58" rx="8"/><text class="t" x="404" y="62">BeeScript REPL</text><text class="s" x="404" y="82">macros, plugins</text>
+    <rect class="bxa" x="575" y="38" width="190" height="58" rx="8"/><text class="t" x="589" y="62">MCP server</text><text class="s" x="589" y="82">stdio · unix socket · http</text>
+    <rect class="bx" x="780" y="38" width="180" height="58" rx="8"/><text class="t" x="794" y="62">CLI / headless</text><text class="s" x="794" y="82">batch, CI, render farm</text>
+    <!-- arrows down -->
+    <path class="ar" d="M105 96 V128"/><path class="ar" d="M290 96 V128"/><path class="ar" d="M475 96 V128"/><path class="ar" d="M670 96 V128"/><path class="ar" d="M870 96 V128"/>
+    <!-- operator spine -->
+    <rect class="bxa" x="20" y="130" width="940" height="56" rx="8"/>
+    <text class="t" x="36" y="154">Operator spine — one declarative table → UI · hotkeys · script · MCP · undo · docs</text>
+    <text class="s" x="36" y="173">validate params → permission check → transaction begin → execute (jobs) → journal → notify subscribers</text>
+    <path class="ar" d="M490 186 V214"/>
+    <!-- core -->
+    <text class="lbl" x="20" y="210">CORE</text>
+    <rect class="bx" x="20" y="218" width="225" height="70" rx="8"/><text class="t" x="34" y="242">Document &amp; ECS</text><text class="s" x="34" y="262">entities, components,</text><text class="s" x="34" y="277">dependency graph</text>
+    <rect class="bx" x="258" y="218" width="225" height="70" rx="8"/><text class="t" x="272" y="242">Geometry kernels</text><text class="s" x="272" y="262">half-edge mesh · SDF · B-rep</text><text class="s" x="272" y="277">NURBS · exact predicates</text>
+    <rect class="bx" x="496" y="218" width="225" height="70" rx="8"/><text class="t" x="510" y="242">Evaluators</text><text class="s" x="510" y="262">modifiers · feature tree</text><text class="s" x="510" y="277">node VM · constraint solver</text>
+    <rect class="bx" x="734" y="218" width="226" height="70" rx="8"/><text class="t" x="748" y="242">History &amp; journal</text><text class="s" x="748" y="262">undo tree · change sets</text><text class="s" x="748" y="277">CRDT ops · autosave</text>
+    <path class="ar" d="M490 288 V316"/>
+    <!-- engines -->
+    <text class="lbl" x="20" y="312">ENGINES</text>
+    <rect class="bx" x="20" y="320" width="300" height="62" rx="8"/><text class="t" x="34" y="345">Renderer</text><text class="s" x="34" y="365">tile rasterizer · path tracer · BVH · denoise</text>
+    <rect class="bx" x="340" y="320" width="300" height="62" rx="8"/><text class="t" x="354" y="345">Job system</text><text class="s" x="354" y="365">work stealing · futex · 32 threads · fibers</text>
+    <rect class="bx" x="660" y="320" width="300" height="62" rx="8"/><text class="t" x="674" y="345">I/O &amp; formats</text><text class="s" x="674" y="365">.bee · glTF · OBJ · STL · 3MF · STEP · PNG · EXR</text>
+    <path class="ar" d="M490 382 V410"/>
+    <!-- platform -->
+    <text class="lbl" x="20" y="406">PLATFORM</text>
+    <rect class="bx" x="20" y="414" width="940" height="88" rx="8"/>
+    <text class="t" x="36" y="440">Platform layer — raw syscalls only</text>
+    <text class="s" x="36" y="462">Wayland (xdg-shell, fractional-scale, viewporter, data-device, text-input, tablet-v2, cursor-shape) · XKB keymap parser · D-Bus wire client (portals)</text>
+    <text class="s" x="36" y="482">memfd/mmap arenas · clone/futex threads · io_uring file I/O · epoll/timerfd · TrueType rasterizer · inotify (asset hot-reload) · unix/TCP sockets</text>
+  </svg>
+  </div>
+
+  <h3>Threading model</h3>
+  <div class="grid g2">
+    <div class="card"><h4>UI / main thread</h4>Owns the Wayland socket, input, layout and composition of the final frame. It never waits on a lock that a worker might hold. It reads immutable <em>scene snapshots</em> through an atomically swapped pointer: an epoch-based read-copy-update (RCU) scheme with retired generations freed in batches.</div>
+    <div class="card"><h4>Workers (N = cores − 1)</h4>A work-stealing job system built on <code>clone(CLONE_VM|CLONE_THREAD…)</code> and <code>futex</code>. Jobs are 64-byte descriptors in lock-free Chase–Lev deques. Long jobs check a cancellation flag every few milliseconds. Fibers let jobs wait for each other without blocking a thread.</div>
+    <div class="card"><h4>Render threads</h4>Viewport tiles (64×64) are shaded in parallel, with one AVX-512 lane group per 4×4 quad. The path tracer runs as a low-priority background job that keeps refining while the camera is still.</div>
+    <div class="card"><h4>Service thread</h4>MCP and collaboration sockets, autosave and file watching, all on <code>epoll</code>. Incoming commands are queued onto the operator spine and executed in order like any other user action.</div>
+  </div>
+
+  <h3>Memory architecture</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Allocator</th><th>Used for</th><th>Notes</th></tr>
+    <tr><td>Frame arena</td><td>Per-frame UI, text layout, temporary math</td><td>Bump pointer, reset every frame, zero fragmentation</td></tr>
+    <tr><td>Job arenas</td><td>Per-job scratch memory</td><td>Thread-local, released when the job completes</td></tr>
+    <tr><td>Pool / slab</td><td>Entities, components, fixed-size records</td><td>Generational 32-bit handles (24-bit index + 8-bit generation) instead of pointers</td></tr>
+    <tr><td>Chunked SoA buffers</td><td>Vertex positions, normals, UVs, attributes</td><td>64 KiB chunks, copy-on-write between snapshots, so undo stores only the chunks that changed</td></tr>
+    <tr><td>Virtual reservations</td><td>Huge meshes and sculpt data</td><td>Reserve address space with <code>mmap(PROT_NONE)</code> and commit on demand; <code>MADV_DONTNEED</code> on shrink</td></tr>
+    <tr><td>Mapped files</td><td>Opening .bee documents</td><td>Zero-copy: chunks are used straight from the page cache</td></tr>
+  </table></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="operators">
+  <h2>The operator spine</h2>
+  <p class="sub">The most important design decision. Every feature in this plan plugs into it.</p>
+  <p>Every user-visible action (extrude, add cube, set material, export, toggle pane) is an <strong>operator</strong>, declared once with assembly macros. A dev-time generator turns that table into six things:</p>
+  <div class="grid g3">
+    <div class="card"><h4>1 · UI</h4>Menu entries, toolbar buttons and an auto-generated "last operator" redo panel with live-editable parameters, as in Blender's F9 panel.</div>
+    <div class="card"><h4>2 · Input</h4>Default keymap entries, pie-menu slots and modal handlers (grab, rotate, scale with numeric input).</div>
+    <div class="card"><h4>3 · BeeScript</h4>A typed function binding, e.g. <code>mesh.extrude(dist: 0.5, axis: "normal")</code>.</div>
+    <div class="card violet"><h4>4 · MCP tool</h4>A JSON Schema generated from the parameter table, with the doc string as the tool description.</div>
+    <div class="card"><h4>5 · Undo journal</h4>A compact binary record of the operator id and parameters, so the history can be replayed and synchronized.</div>
+    <div class="card"><h4>6 · Docs &amp; tests</h4>A generated reference page, plus a fuzz target that feeds random valid parameters.</div>
+  </div>
+<pre><code># src/ops/mesh_extrude.s  — declaration (sketch)
+OPERATOR mesh_extrude, "Extrude Region", flags=UNDO|MODAL|AI_SAFE
+    PARAM_F32   distance,  "Distance",  default=0.0,  min=-1e6, max=1e6, unit=LENGTH
+    PARAM_ENUM  axis,      "Axis",      default=NORMAL, values=NORMAL|X|Y|Z|VIEW
+    PARAM_BOOL  dissolve,  "Dissolve orthogonal edges", default=0
+    POLL        poll_edit_mesh_has_faces      # when is it available?
+    EXEC        exec_mesh_extrude             # pure: (doc snapshot, params) -> delta
+    MODAL       modal_translate_along_axis    # interactive variant
+    DOC         "Extrude selected faces along their normals."
+END_OPERATOR</code></pre>
+  <div class="callout"><strong>Why this matters.</strong> With this design, adding a feature makes it available to the AI, the script, the menu, the hotkey and the redo panel at the same time. It also means an agent can never do anything a user cannot see, undo or audit.</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="data">
+  <h2>Data model &amp; files</h2>
+  <p class="sub">An entity-component scene, several geometry representations, and a native format built for speed and diffs.</p>
+
+  <div class="grid g2">
+    <div class="card"><h3>Scene: ECS + dependency graph</h3>
+      <ul>
+        <li>Entities: objects, collections, lights, cameras, sketches, node groups, materials.</li>
+        <li>Components are stored as SoA tables per type, e.g. Transform, MeshRef, ModifierStack, FeatureTree, Material, Physics, Tags.</li>
+        <li>A directed acyclic dependency graph (parent → child, modifier inputs, constraints, drivers) is evaluated incrementally. Only dirty nodes are recomputed, in parallel waves.</li>
+        <li>Collections, layers and Unreal-style <em>data layers</em> let you stream parts of a scene in and out.</li>
+      </ul></div>
+    <div class="card"><h3>Geometry representations</h3>
+      <ul>
+        <li><b>Edit mesh</b>: half-edge / BMesh-style with n-gons, loops, seams, creases and custom attributes. Used for interactive editing.</li>
+        <li><b>Render mesh</b>: triangulated, quantized, organized into meshlets (128 triangles each). Used for display and export.</li>
+        <li><b>SDF / F-rep</b>: implicit solids for blending and smooth booleans, meshed with dual contouring.</li>
+        <li><b>B-rep + NURBS</b>: exact CAD solids (later phase).</li>
+        <li><b>Curves</b>: Bézier, NURBS and 2D sketch geometry.</li>
+        <li><b>Point clouds &amp; volumes</b>: scatter output, scans and VDB-like sparse grids.</li>
+      </ul></div>
+  </div>
+
+  <h3>Native format: <code>.bee</code></h3>
+  <div class="grid g2">
+    <div class="card"><ul>
+      <li>A chunked binary container: header, chunk table, then 64 KiB-aligned chunks that can be mmap'd straight into memory.</li>
+      <li>Each chunk is content-addressed by a hash we implement ourselves (BLAKE3). Identical chunks are stored once, and file diffs are cheap.</li>
+      <li>Optional per-chunk LZ4-style compression (own implementation, decompresses at about 4 GB/s per core).</li>
+      <li>An embedded operator journal: the file can be replayed, inspected and "time-travelled".</li>
+      <li>A low-resolution preview thumbnail plus a JSON metadata chunk so other tools (and AI agents) can inspect the file.</li>
+      <li>A forward-compatible schema: unknown chunks are preserved on save.</li>
+    </ul></div>
+    <div class="card"><h4>Import / export (all hand-written)</h4>
+      <div class="pill-row">
+        <span class="tag g">OBJ/MTL</span><span class="tag g">STL ascii+bin</span><span class="tag g">PLY</span><span class="tag g">glTF 2.0 / GLB</span>
+        <span class="tag b">3MF (zip+xml)</span><span class="tag b">DXF / SVG</span><span class="tag b">FBX (binary, read)</span><span class="tag b">USD(A) subset</span>
+        <span class="tag a">STEP AP214/242</span><span class="tag a">IGES</span><span class="tag r">PNG · JPEG · EXR · HDR</span><span class="tag r">PDF drawings</span>
+      </div>
+      <p class="muted" style="margin-top:10px">This needs our own inflate/deflate (glTF textures, PNG, 3MF zip), XML and JSON parsers, and a baseline JPEG decoder. Every importer is fuzzed from day one.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="platform">
+  <h2>Platform layer</h2>
+  <p class="sub">What the shell still needs before it can host a professional tool.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Capability</th><th>How (no libraries)</th><th>Priority</th></tr>
+    <tr><td>Real keyboard layouts &amp; text</td><td>Parse the XKB text keymap from the <code>wl_keyboard.keymap</code> fd ourselves: keycodes, types, modifiers, levels. Key repeat via <code>timerfd</code>. Compose/dead keys.</td><td><span class="tag r">P0</span></td></tr>
+    <tr><td>Unicode text rendering</td><td>TrueType/OpenType parser (glyf, cmap, kern/GPOS basics) plus our own anti-aliased scanline rasterizer and a glyph atlas cache. Ship one embedded open font and read system fonts from <code>/usr/share/fonts</code>.</td><td><span class="tag r">P0</span></td></tr>
+    <tr><td>HiDPI &amp; fractional scaling</td><td><code>wp_fractional_scale_v1</code> + <code>wp_viewporter</code>. UI metrics in logical units, rendered at the device scale.</td><td><span class="tag r">P0</span></td></tr>
+    <tr><td>Clipboard and drag &amp; drop</td><td><code>wl_data_device</code>: copy/paste objects as .bee chunks or text; drop files to import them.</td><td><span class="tag a">P1</span></td></tr>
+    <tr><td>File dialogs</td><td>A built-in file browser with thumbnails, plus an optional xdg-desktop-portal FileChooser through our own minimal D-Bus wire-protocol client.</td><td><span class="tag a">P1</span></td></tr>
+    <tr><td>Multi-window</td><td>Tear-off editors as extra xdg_toplevels (e.g. a node editor on monitor 2, the viewport on monitor 1). Popups via <code>xdg_popup</code> so menus can extend past the window.</td><td><span class="tag a">P1</span></td></tr>
+    <tr><td>Pen tablets</td><td><code>zwp_tablet_v2</code>: pressure, tilt and eraser, needed for sculpting and painting.</td><td><span class="tag b">P2</span></td></tr>
+    <tr><td>3D mice &amp; gamepads</td><td>Read <code>/dev/input/event*</code> (evdev) directly for SpaceMouse 6-DoF navigation and fly-through.</td><td><span class="tag b">P2</span></td></tr>
+    <tr><td>Fast file I/O</td><td><code>io_uring</code> for parallel asset loading; <code>inotify</code> to hot-reload textures and scripts.</td><td><span class="tag b">P2</span></td></tr>
+    <tr><td>Crash safety</td><td>A signal handler writes the journal tail, and a recovery file is offered on next start. Autosave is a background job that writes only dirty chunks.</td><td><span class="tag r">P0</span></td></tr>
+  </table></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="render">
+  <h2>Rendering</h2>
+  <p class="sub">CPU-first, built to use all 32 threads and AVX-512, with a GPU path that stays outside the core.</p>
+
+  <div class="grid g2">
+    <div class="card accent"><h3>Viewport rasterizer</h3><ul>
+      <li>Binned, tiled triangle rasterizer: 64×64 tiles, per-tile triangle lists, multithreaded.</li>
+      <li>AVX-512 edge functions test 16 pixels per instruction, with a hierarchical-Z early reject.</li>
+      <li>A visibility buffer (triangle id + instance id), shaded in a deferred pass. Overdraw cost becomes close to zero.</li>
+      <li>Meshlet culling (frustum, back-face cone, occlusion against last frame's depth pyramid), as in Unreal's Nanite.</li>
+      <li>Modes: wireframe, solid + cavity + AO, MatCap, X-ray, material preview, CAD hidden-line, zebra stripes and curvature for surface quality checks.</li>
+      <li>Overlays: anti-aliased lines (Xiaolin Wu), gizmos, measurements, snapping hints.</li>
+      <li>Temporal anti-aliasing plus progressive refinement while the camera is still.</li>
+    </ul></div>
+    <div class="card accent"><h3>Path tracer ("Hive")</h3><ul>
+      <li>A BVH8 built in parallel with binned SAH and traversed with AVX-512 (8-wide nodes, 16-ray packets for primary rays).</li>
+      <li>Unidirectional path tracing with multiple importance sampling and next-event estimation. Later: ReSTIR-style resampling for many lights.</li>
+      <li>Principled BSDF (Disney/OpenPBR subset): metal, dielectric, clearcoat, sheen, subsurface (random walk), thin film.</li>
+      <li>HDRI environments with importance sampling, sun &amp; sky model, area/spot/IES lights.</li>
+      <li>Our own denoiser: À-trous wavelet / SVGF guided by albedo and normal buffers; later a small learned denoiser running on our own int8/AVX-512 VNNI inference code.</li>
+      <li>Output: PNG, EXR (half/float, our own PIZ/zip codecs), render passes and AOVs.</li>
+    </ul></div>
+  </div>
+
+  <div class="callout"><strong>GPU decision (RTX 4080 SUPER).</strong> NVIDIA's userspace driver is closed, so talking to the GPU from pure assembly would mean using undocumented ioctls. That is fragile and possibly unworkable. Plan: the core stays CPU-only and library-free. A separate, optional <code>beemodel-gpu</code> helper process may load Vulkan and accelerate path tracing and booleans, connected through a shared-memory ring buffer. If it is missing, everything still works. This keeps the "no libraries" rule for the product core while leaving the door open.</div>
+</section>
+
+<!-- ============================================================ -->
+<section id="modeling">
+  <h2>Polygon modeling</h2>
+  <p class="sub">Blender-class editing, where every tool is an operator with an interactive (modal) variant.</p>
+  <div class="grid g3">
+    <div class="card"><h4>Selection</h4><ul>
+      <li>Vertex / edge / face / object modes</li><li>Box, lasso, circle, paint select</li><li>Loop, ring, linked, shortest path</li><li>Select similar (normal, area, material)</li><li>Grow/shrink, checker deselect</li><li>GPU-free picking via the visibility buffer</li></ul></div>
+    <div class="card"><h4>Core tools</h4><ul>
+      <li>Grab / rotate / scale with axis locks and typed values ("G X 2.5 ⏎")</li><li>Extrude (region, individual, along normals)</li><li>Inset, bevel (vertex/edge, profiles)</li><li>Loop cut &amp; slide, knife, bisect</li><li>Bridge loops, fill, grid fill, poke</li><li>Merge, dissolve, collapse, rip, split</li><li>Spin, screw, solidify, mirror</li></ul></div>
+    <div class="card"><h4>Modifier stack</h4><ul>
+      <li>Subdivision (Catmull–Clark, Loop) with creases</li><li>Mirror, array, boolean, bevel, solidify</li><li>Remesh (voxel, quad), decimate, weld</li><li>Deform: lattice, curve, displace, smooth</li><li>Weighted normals, edge split</li><li>Each modifier evaluated as a parallel job with cached results</li></ul></div>
+    <div class="card"><h4>Snapping &amp; precision</h4><ul>
+      <li>Increment, vertex, edge, face, edge midpoint, perpendicular, grid</li><li>3D cursor and custom pivots</li><li>Transform orientations (global, local, normal, view, custom)</li><li>Exact numeric entry with units and expressions ("=12mm*2")</li></ul></div>
+    <div class="card"><h4>Topology quality</h4><ul>
+      <li>Non-manifold, zero-area and flipped-normal detection with viewport highlights</li><li>Pole and n-gon overlays</li><li>Automatic mesh repair operator</li><li>Quad retopology tools: shrinkwrap snapping, poly-build</li></ul></div>
+    <div class="card"><h4>Robust booleans</h4><ul>
+      <li>Exact geometric predicates (Shewchuk-style adaptive orient3d) in assembly</li><li>Mesh arrangement with plane-based geometry so booleans never fail on coplanar faces</li><li>Fast mode (float) and exact mode (expansion arithmetic)</li></ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="cad">
+  <h2>CAD &amp; precision</h2>
+  <p class="sub">The parametric, constraint-driven side, aimed at makers and engineers.</p>
+  <div class="grid g2">
+    <div class="card blue"><h3>Sketcher + constraint solver</h3><ul>
+      <li>2D sketches on planes or faces: lines, arcs, circles, splines, slots, polygons.</li>
+      <li>Constraints: coincident, parallel, perpendicular, tangent, equal, symmetric, horizontal/vertical, fixed, dimensions (distance, angle, radius).</li>
+      <li>Solver: Newton–Raphson / Levenberg–Marquardt on the constraint graph, split into independent subsystems (DR-planning).</li>
+      <li>Degrees-of-freedom display: under-constrained geometry is blue, fully constrained geometry is black, conflicts are red with an explanation.</li>
+      <li>Automatic constraint inference while drawing (snaps that become constraints).</li>
+    </ul></div>
+    <div class="card blue"><h3>Feature tree (parametric history)</h3><ul>
+      <li>Pad/extrude, pocket, revolve, sweep, loft, shell, draft, rib.</li>
+      <li>Fillet and chamfer (variable radius), hole wizard (ISO/ANSI threads), patterns (linear, circular, along a curve).</li>
+      <li>Parameters table and expressions, e.g. <code>wall = 2mm; width = 10*wall</code>, with design variants (configurations).</li>
+      <li>Rollback bar, edit any feature, and robust topological naming: persistent ids that survive upstream edits, the classic CAD pain point.</li>
+    </ul></div>
+    <div class="card blue"><h3>Solid kernel strategy</h3><ul>
+      <li><b>Stage 1:</b> features evaluated on meshes plus exact booleans. Good enough for 3D printing.</li>
+      <li><b>Stage 2:</b> an SDF/F-rep kernel for smooth blends, variable fillets and lattices (great for additive manufacturing).</li>
+      <li><b>Stage 3:</b> a B-rep kernel with NURBS surfaces, surface–surface intersection, and STEP AP242 export. The largest single item in this plan, so it is deliberately last.</li>
+    </ul></div>
+    <div class="card blue"><h3>Engineering outputs</h3><ul>
+      <li>Units (mm, in, m), tolerances, and measurement tools (distance, angle, area, volume, mass with material density).</li>
+      <li>Assemblies with mates/joints and interference checks.</li>
+      <li>2D drawings: orthographic and section views, dimensions, title block, export to SVG/DXF/PDF (our own PDF writer).</li>
+      <li>Fabrication checks: wall thickness, overhangs, manifoldness, printability heat-map, 3MF export.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="procedural">
+  <h2>Nodes &amp; procedural generation</h2>
+  <p class="sub">Combines Blender's geometry nodes, Unreal's Blueprints and PCG, and Houdini-style thinking.</p>
+  <div class="grid g2">
+    <div class="card violet"><h3>One node editor, many graph types</h3><ul>
+      <li>Geometry nodes (mesh/point/curve/volume operations on attribute fields).</li>
+      <li>Shader nodes for materials, compiled to the renderer's shading VM.</li>
+      <li>Logic graphs (Blueprint-like) for interactive behaviour in play mode.</li>
+      <li>Compositor nodes for post-processing renders.</li>
+      <li>Fast canvas: thousands of nodes, minimap, reroutes, frames, groups as reusable assets.</li>
+    </ul></div>
+    <div class="card violet"><h3>Node VM</h3><ul>
+      <li>Graphs compile to a compact bytecode, then to a <em>vectorized</em> interpreter where each opcode processes 16 elements (AVX-512).</li>
+      <li>Later: a template JIT that emits x86-64 straight into an <code>mmap</code>'d executable page. We are already writing assembly, so a JIT is a natural fit.</li>
+      <li>Lazy evaluation, per-node caching and incremental re-evaluation when a parameter changes.</li>
+      <li>Fields &amp; attributes: per-vertex, per-face, per-instance, per-point.</li>
+    </ul></div>
+    <div class="card violet"><h3>PCG &amp; scattering</h3><ul>
+      <li>Poisson-disk and blue-noise scattering on surfaces with density maps.</li>
+      <li>Rule-based placement (slope, altitude, exclusion volumes), splines with mesh deformation.</li>
+      <li>Wave Function Collapse and L-systems for tiles, buildings and plants.</li>
+      <li>Terrain: heightfield erosion (hydraulic/thermal) as a parallel job.</li>
+    </ul></div>
+    <div class="card violet"><h3>Instancing at scale</h3><ul>
+      <li>Millions of instances as transform arrays sharing meshlets.</li>
+      <li>Hierarchical LOD and impostors for distant clusters.</li>
+      <li>"Realize instances" turns instances into real geometry on demand.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="sculpt">
+  <h2>Sculpt, UV &amp; paint</h2>
+  <p class="sub">Organic modeling at scale.</p>
+  <div class="grid g3">
+    <div class="card"><h4>Sculpting</h4><ul>
+      <li>Brushes: draw, clay strips, crease, inflate, grab, snake hook, smooth, flatten, pinch, layer</li>
+      <li>Dynamic topology (local subdivide/collapse) and multiresolution levels</li>
+      <li>Masks, face sets, symmetry, stroke stabilizer, tablet pressure curves</li>
+      <li>Target: 50M vertices at 60 fps strokes, using a BVH-partitioned mesh where only touched nodes are updated</li></ul></div>
+    <div class="card"><h4>UV unwrapping</h4><ul>
+      <li>Seams, LSCM and ABF++ unwrap (our own sparse conjugate-gradient solver)</li>
+      <li>Smart projection, packing with rotation (skyline / MaxRects)</li>
+      <li>Distortion heat-map, texel density tools</li>
+      <li>Automatic seam suggestion (also available as an AI tool)</li></ul></div>
+    <div class="card"><h4>Texture paint &amp; baking</h4><ul>
+      <li>Paint in the viewport and in the 2D image editor, with layered textures</li>
+      <li>Bake normal, AO, curvature and ID maps from high-poly to low-poly using the path tracer's BVH</li>
+      <li>Vertex colours and attribute painting</li>
+      <li>Triplanar and decal projection</li></ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="anim">
+  <h2>Animation &amp; simulation</h2>
+  <p class="sub">Enough to animate products, characters and mechanisms.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Animation</h3><ul>
+      <li>Keyframes on any property, including operator parameters and node inputs (everything is animatable through the property system).</li>
+      <li>Timeline, dope sheet, graph editor with Bézier handles, NLA-style action layers.</li>
+      <li>Armatures with linear-blend and dual-quaternion skinning (AVX-512), automatic weights (heat diffusion), FK/IK (FABRIK + CCD), constraints.</li>
+      <li>Shape keys, drivers (expressions), motion paths, onion skinning.</li>
+      <li>Mechanism animation for CAD: joints driven by parameters (gears, hinges, sliders).</li>
+    </ul></div>
+    <div class="card"><h3>Simulation</h3><ul>
+      <li>Rigid bodies: our own physics (GJK/EPA, sequential impulses, sleeping, convex decomposition).</li>
+      <li>Cloth and soft bodies: XPBD solver, self-collision through a spatial hash.</li>
+      <li>Particles and fluids (later): SPH / FLIP for small-scale effects.</li>
+      <li>Results are cached to disk in .bee chunks and can be scrubbed on the timeline.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="engine">
+  <h2>Engine-grade features</h2>
+  <p class="sub">Unreal-inspired capabilities that turn a modeler into a world-building tool.</p>
+  <div class="grid g3">
+    <div class="card"><h4>Virtualized geometry</h4>Meshlet DAG with continuous LOD (Nanite-like), streamed from mmap'd .bee chunks. Billions of source triangles on screen with a bounded memory budget.</div>
+    <div class="card"><h4>World partition</h4>Scenes are split into grid cells streamed by camera distance, so very large maps stay editable within the RAM budget.</div>
+    <div class="card"><h4>Content browser</h4>An asset library with thumbnails, tags, search and dependencies, drag-and-drop into the scene, and "asset packs" stored as content-addressed .bee files.</div>
+    <div class="card"><h4>Play mode</h4>Press F5 to walk or fly through the scene with physics and logic graphs running. Changes made during play can be kept or discarded, as in Unreal's PIE.</div>
+    <div class="card"><h4>Lighting tools</h4>Light probes, a lightmap baker (path-tracer based) and an export-ready glTF scene with KHR extensions for game engines.</div>
+    <div class="card"><h4>Live link</h4>Stream the scene over a socket to a running game engine or another BeeModel (see <a href="#collab">collaboration</a>), so changes appear instantly.</div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="ai">
+  <h2>AI &amp; MCP</h2>
+  <p class="sub">An AI-native modeler: BeeModel works as an MCP server, with no TLS stack and no API keys inside the binary.</p>
+
+  <div class="callout"><strong>Key insight.</strong> In MCP, the AI host (Claude Code, Claude Desktop or any other MCP client) owns the model and the network connection. BeeModel only has to <em>serve</em> tools over a local transport. That keeps the zero-library rule: we need JSON-RPC and a JSON parser, not TLS or HTTPS. MCP <em>sampling</em> also lets BeeModel's own in-app assistant borrow the host's model.</div>
+
+  <h3>MCP server design</h3>
+  <div class="grid g2">
+    <div class="card violet"><h4>Transports</h4><ul>
+      <li><b>stdio</b>: <code>beemodel --mcp</code> runs a headless instance (batch generation, CI).</li>
+      <li><b>Attach to a running app</b>: the GUI listens on <code>$XDG_RUNTIME_DIR/beemodel-&lt;pid&gt;.sock</code>, and <code>beemodel --mcp-bridge</code> forwards stdio to that socket. The agent then edits the scene you are looking at, live.</li>
+      <li><b>Streamable HTTP</b> on 127.0.0.1 (plain HTTP, local only) for clients that prefer HTTP.</li>
+      <li>JSON-RPC 2.0 with our own streaming JSON parser/writer in assembly. Images are encoded as PNG + base64 by our own encoders.</li>
+    </ul>
+<pre><code>// Claude Code / Desktop config
+{ "mcpServers": {
+    "beemodel": { "command": "beemodel",
+                  "args": ["--mcp-bridge"] } } }</code></pre>
+    </div>
+    <div class="card violet"><h4>Capabilities</h4><ul>
+      <li><b>Tools</b>: generated automatically from the operator spine (hundreds), plus a curated, AI-friendly top layer (below).</li>
+      <li><b>Resources</b>: <code>bee://scene/tree</code>, <code>bee://selection</code>, <code>bee://object/{id}</code>, <code>bee://history</code>, <code>bee://viewport.png</code>, <code>bee://docs/operators</code>. Subscriptions push change notifications.</li>
+      <li><b>Prompts</b>: "model this from a description", "make this printable", "retopologize for games", "explain this scene".</li>
+      <li><b>Sampling</b>: lets the in-app assistant panel ask the host's LLM for completions.</li>
+      <li><b>Elicitation</b>: BeeModel can ask the user structured questions mid-task (e.g. "which units?").</li>
+    </ul></div>
+  </div>
+
+  <h3>Curated AI tool layer</h3>
+  <div class="table-wrap"><table>
+    <tr><th>Tool</th><th>Purpose</th><th>Notes</th></tr>
+    <tr><td><code>scene_summary</code></td><td>A compact, token-efficient description of the scene: objects, bounds, materials, hierarchy</td><td>Level-of-detail parameter so large scenes stay within the context window</td></tr>
+    <tr><td><code>query</code></td><td>Find entities by name, type, tag, spatial region or attribute expression</td><td>Returns stable ids</td></tr>
+    <tr><td><code>create_primitive</code> / <code>create_from_sketch</code></td><td>Add parametric primitives or sketch-based features with exact dimensions</td><td>Units are explicit, so the model never has to guess</td></tr>
+    <tr><td><code>run_operator</code></td><td>Run any registered operator with validated parameters</td><td>The schema is in <code>op.list</code>; denied operators are filtered out</td></tr>
+    <tr><td><code>eval_beescript</code></td><td>Run a BeeScript snippet as one atomic transaction</td><td>Sandboxed: no file or network access unless granted</td></tr>
+    <tr><td><code>viewport_capture</code></td><td>Render the view (or a camera) to PNG, optionally with id/normal/depth passes</td><td>Closes the <em>vision loop</em>: look → change → look again</td></tr>
+    <tr><td><code>measure</code> / <code>analyze</code></td><td>Distances, volume, mass, wall thickness, manifoldness, printability, polycount</td><td>Facts instead of guesses</td></tr>
+    <tr><td><code>checkpoint</code> / <code>undo</code> / <code>diff</code></td><td>Name a restore point, roll back, or diff two states</td><td>Lets an agent explore safely</td></tr>
+    <tr><td><code>propose_changes</code></td><td>Apply changes as a <em>ghost preview</em> the user accepts or rejects</td><td>The default mode for agent edits</td></tr>
+    <tr><td><code>export</code> / <code>render</code></td><td>Write glTF, STL, 3MF or STEP; start a path-traced render job</td><td>Long-running jobs report MCP progress notifications</td></tr>
+  </table></div>
+
+  <h3>AI features inside the app</h3>
+  <div class="grid g3">
+    <div class="card"><h4>Assistant panel</h4>A chat docked like any other editor. It uses MCP sampling through the attached host, or a local OpenAI-compatible endpoint (llama.cpp/Ollama on localhost over plain HTTP). It can see the selection and viewport, and it acts only through operators.</div>
+    <div class="card"><h4>Natural-language command palette</h4>Type "bevel the top edges 2 mm" into F3. Exact operator matches come first; otherwise the request is resolved by AI into a previewed operator sequence.</div>
+    <div class="card"><h4>Text / image → blockout</h4>A description or a reference photo becomes a block-out made of parametric primitives and sketches. Because it is parametric, every number can still be edited afterwards.</div>
+    <div class="card"><h4>Sketch-to-solid</h4>Draw a rough 2D sketch. The AI suggests constraints, dimensions and the likely feature (extrude, revolve, sweep), and you confirm.</div>
+    <div class="card"><h4>Design reviewer</h4>An agent checks printability, manufacturability (draft angles, undercuts), game-readiness (polycount, UV overlap) and topology, and leaves comments pinned in 3D.</div>
+    <div class="card"><h4>Procedural co-pilot</h4>Describe the behaviour you want ("scatter rocks on slopes above 30°") and get a node graph you can inspect and tweak, not an opaque mesh.</div>
+    <div class="card"><h4>Coach mode</h4>The AI watches the operator journal and suggests faster workflows ("you can use loop cut here"), turning BeeModel into a tutor.</div>
+    <div class="card"><h4>Auto-organize</h4>Names objects, builds collections, assigns materials by role and writes scene documentation.</div>
+    <div class="card"><h4>Local smart features (no LLM)</h4>Constraint inference, seam suggestion, retopology flow fields and denoising all run as our own algorithms or tiny AVX-512 int8 networks, so they work offline and instantly.</div>
+  </div>
+
+  <h3>Trust, safety &amp; control</h3>
+  <div class="grid g2">
+    <div class="card red"><ul>
+      <li><b>Change sets</b>: every agent session is one named, collapsible group in the undo tree, shown in an "AI activity" panel with a diff and Accept / Reject / Revert-to-here.</li>
+      <li><b>Permission tiers</b>: read-only · propose (ghost preview) · edit · edit + file I/O. Set per client and per tool, and shown in the status bar.</li>
+      <li><b>Prompt-injection hygiene</b>: object names, file metadata and script comments are passed as data, never as instructions. Tool results label their sources.</li>
+    </ul></div>
+    <div class="card red"><ul>
+      <li><b>Sandboxed scripts</b>: BeeScript has no syscalls. File and network access go only through operators that need a grant.</li>
+      <li><b>Budgets</b>: limits on operation count, geometry growth (e.g. "max +5M triangles") and wall time per session.</li>
+      <li><b>Full audit log</b>: who did what (human, agent, script, collaborator), stored in the journal and replayable.</li>
+      <li><b>Local-first</b>: nothing leaves the machine unless the user's own MCP host sends it.</li>
+    </ul></div>
+  </div>
+
+  <h3>BeeScript</h3>
+  <p>A small, fast embedded language that AI agents, macros and plugins all share:</p>
+  <div class="grid g2">
+    <div class="card"><ul>
+      <li>Expression-oriented syntax that LLMs write reliably (close to Python/Lua), with units as literals (<code>12mm</code>, <code>45deg</code>).</li>
+      <li>Compiles to the same bytecode VM as the node graphs, so it runs fast and is sandboxed by construction.</li>
+      <li>Records macros: any UI session can be exported as BeeScript.</li>
+      <li>Plugins are BeeScript modules, or external processes that talk the MCP-style protocol, so a crashing plugin cannot take the app down.</li>
+    </ul></div>
+<pre><code>let base = box(w: 80mm, d: 50mm, h: 4mm)
+let post = cylinder(r: 3mm, h: 20mm)
+for p in base.top.corners(inset: 6mm) {
+  place(post, at: p)
+}
+fillet(base.edges.vertical, 2mm)
+check.printable(min_wall: 1.2mm)</code></pre>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="ux">
+  <h2>UX &amp; workspaces</h2>
+  <p class="sub">Fast for experts, discoverable for beginners.</p>
+  <div class="grid g3">
+    <div class="card"><h4>Areas &amp; editors</h4>Blender-style area system: split and join any pane, and each area can host any editor (viewport, outliner, properties, nodes, timeline, UV/image, console, spreadsheet, asset browser, AI). Layouts are saved as <em>workspaces</em> (Modeling, Sculpt, CAD, Shading, Animation, World).</div>
+    <div class="card"><h4>Command palette</h4>F3 / Ctrl+K: fuzzy search over every operator, setting and asset, showing shortcuts and recent commands. Every operator is reachable here because of the operator spine.</div>
+    <div class="card"><h4>Pie &amp; radial menus</h4>Gesture-speed access to modes, pivots, snapping and shading. Hold and flick, no reading required.</div>
+    <div class="card"><h4>Gizmos</h4>Move, rotate and scale gizmos with plane handles, plus CAD manipulators (drag a dimension arrow to change a parameter) and a navigation cube.</div>
+    <div class="card"><h4>Keymaps</h4>Fully remappable, with presets: BeeModel, Blender-like, Maya-like and CAD-like. Conflict detection, and all shortcuts shown in tooltips.</div>
+    <div class="card"><h4>Spreadsheet</h4>Inspect and edit raw attributes (vertices, faces, instances) in a virtualized table. Useful for debugging nodes and for AI explanations.</div>
+    <div class="card"><h4>Themes &amp; accessibility</h4>Theme tokens (the current dark theme becomes the default), a high-contrast mode, UI scale, colour-blind-safe axis colours, full keyboard navigation and reduced motion.</div>
+    <div class="card"><h4>Onboarding</h4>Interactive tutorials driven by the journal: "do this step, I'll check". Sample scenes, plus an empty-state viewport with quick actions.</div>
+    <div class="card"><h4>Multi-monitor</h4>Built for your 3-screen setup: tear-off editors, a dedicated render window, and the node editor on a second screen.</div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="collab">
+  <h2>Collaboration &amp; versioning</h2>
+  <p class="sub">Git-like history for 3D, and live co-editing.</p>
+  <div class="grid g2">
+    <div class="card green"><h3>Versioned scenes</h3><ul>
+      <li>Content-addressed chunks plus the operator journal give commits, branches and merges for models.</li>
+      <li>Visual diff: a side-by-side or overlay viewport highlighting added, removed and modified geometry.</li>
+      <li>Three-way merge at entity and feature-tree level, with manual conflict resolution.</li>
+      <li>Can store directly in a git repository as text-free binary that still diffs well, because unchanged chunks are deduplicated.</li>
+    </ul></div>
+    <div class="card green"><h3>Live multi-user</h3><ul>
+      <li>Operation-based CRDT on top of the journal. Every operator is already a serializable, replayable event.</li>
+      <li>Peer-to-peer over TCP on a LAN, or over an SSH tunnel for remote work (TLS deliberately left to the tunnel).</li>
+      <li>Presence: collaborators' cameras and selections are visible, with "follow user" mode.</li>
+      <li>AI agents join as collaborators with their own cursor and permission tier.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="wild">
+  <h2>Out-of-the-box ideas</h2>
+  <p class="sub">Differentiators that are cheap to build <em>because</em> of the architecture choices above.</p>
+  <div class="grid g3">
+    <div class="card accent"><h4>Time-travel scrubber</h4>Drag a slider through the whole editing history and watch the model rebuild, because the journal is replayable. Branch from any point.</div>
+    <div class="card accent"><h4>Live parameter brushing</h4>Hover any number in the feature tree and scrub it while the model updates in real time. Ctrl-drag shows a "variation strip" of 9 alternative values side by side.</div>
+    <div class="card accent"><h4>Design-space explorer</h4>Mark parameters as variable and give a goal (lightest part with wall ≥ 1.5 mm). An optimizer, or an AI agent, explores the options and shows a gallery of variants.</div>
+    <div class="card accent"><h4>Explainable geometry</h4>Click any face and see why it exists: which feature, node or operator, and whether a human or an agent created it.</div>
+    <div class="card accent"><h4>Deterministic everything</h4>Fixed-order parallel reductions and our own math functions give bit-identical results on every machine. Renders and simulations are reproducible, which is great for tests and collaboration.</div>
+    <div class="card accent"><h4>Instant start</h4>A target of under 50 ms from launch to an interactive viewport, plus a <code>--resident</code> daemon mode that opens new windows in under 5 ms.</div>
+    <div class="card accent"><h4>Headless BeeModel as a service</h4>The same binary runs as a CLI batch tool or an MCP server in CI: generate parametric parts from a spreadsheet, auto-export LODs, check printability on pull requests.</div>
+    <div class="card accent"><h4>Physical-world loop</h4>Import photogrammetry and LiDAR point clouds, fit planes and primitives automatically, and export straight to a 3MF slicer profile. Scan → model → print in one tool.</div>
+    <div class="card accent"><h4>Spectator links</h4>Stream the viewport as a compressed video-like tile stream to a minimal HTML viewer for reviews, with no install needed on the viewer's side.</div>
+    <div class="card accent"><h4>Self-profiling HUD</h4>Ctrl+Shift+P overlays per-subsystem frame time, memory per arena and job-graph occupancy. Performance becomes visible, which matches the project's priorities.</div>
+    <div class="card accent"><h4>Procedural "recipes" from meshes</h4>Ask the AI to turn a dumb imported mesh into an editable feature tree or node graph that rebuilds it (inverse procedural modeling).</div>
+    <div class="card accent"><h4>Tiny-binary bragging rights</h4>A public size budget per release ("v1.0: complete modeler in 1.9 MB") enforced in CI.</div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="roadmap">
+  <h2>Roadmap</h2>
+  <p class="sub">Ten phases, ordered by dependency. Effort is given as relative size (S / M / L / XL) rather than dates. Each phase ends with a usable product and measurable exit criteria.</p>
+
+  <div class="phase"><div class="pn"><b>0</b>done</div><div class="card"><h3>Shell <span class="tag g">complete</span></h3>
+    Wayland client, app-drawn title bar, menus, resizable panes, orbit viewport, console, build/run scripts, fake-compositor test harness.
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>1</b>M</div><div class="card"><h3>Foundations <span class="tag r">platform</span><span class="tag r">runtime</span></h3>
+    <ul>
+      <li>Split into multiple object files with a documented internal calling convention; operator spine macros and code generator.</li>
+      <li>Job system (clone/futex, work stealing), arenas, handles, RCU snapshots.</li>
+      <li>XKB keymap parser, text input fields, key repeat, clipboard.</li>
+      <li>TrueType rasterizer and Unicode text; fractional scaling.</li>
+      <li>Area system (split/join, any editor anywhere), command palette, themes, preferences file.</li>
+      <li>Golden-image tests in CI using the fake compositor.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> type into fields on any keyboard layout · F3 lists every operator · 32 workers idle at 0% CPU · binary &lt; 150 KB.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>2</b>L</div><div class="card"><h3>Scene, viewport &amp; files <span class="tag b">core</span></h3>
+    <ul>
+      <li>ECS scene, dependency graph, outliner with drag/drop, properties editor generated from the component schema.</li>
+      <li>Half-edge mesh, primitives, object mode transforms with gizmos, snapping, numeric input.</li>
+      <li>Multithreaded AVX-512 tile rasterizer: solid, wireframe, MatCap, cavity/AO; visibility-buffer picking.</li>
+      <li>Undo tree with chunked copy-on-write; .bee format with mmap loading; autosave and crash recovery.</li>
+      <li>OBJ, STL, PLY, glTF import/export; PNG reader and writer (our own deflate).</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> open a 10M-triangle glTF in &lt; 1 s · orbit at 60 fps on 1080p · 1000-step undo under 64 MB.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>3</b>M</div><div class="card"><h3>AI-native layer <span class="tag v">MCP</span><span class="tag v">BeeScript</span></h3>
+    <ul>
+      <li>JSON parser/writer, JSON-RPC, MCP server (stdio, unix socket bridge, local HTTP), tools generated from operators.</li>
+      <li>Curated tools, resources with subscriptions, viewport capture to PNG, checkpoints and change sets.</li>
+      <li>BeeScript compiler and VM, REPL in the console editor, macro recording.</li>
+      <li>AI activity panel, permission tiers, ghost previews.</li>
+    </ul>
+    <p class="muted">Placed early on purpose: the AI layer validates the operator spine's design while the operator count is still small, and from here on every new feature is automatically agent-ready.</p>
+    <div class="exit"><b>Exit:</b> Claude Code can attach to a running BeeModel, build a described scene with primitives, take a screenshot, refine it, and the user can review and revert the whole session in one click.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>4</b>XL</div><div class="card"><h3>Polygon modeling <span class="tag a">modeling</span></h3>
+    <ul>
+      <li>Edit mode with all selection tools; extrude, inset, bevel, loop cut, knife, bridge, merge, dissolve, spin.</li>
+      <li>Modal tools with typed input; redo panel; modifier stack (subdivision, mirror, array, solidify, bevel, boolean, remesh, decimate).</li>
+      <li>Exact predicates and robust mesh booleans.</li>
+      <li>Mesh analysis overlays and the repair operator.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> model a hard-surface reference object end-to-end · booleans pass the stress corpus with 0 failures · subdivision level 3 on a 100k-quad mesh updates in &lt; 30 ms.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>5</b>L</div><div class="card"><h3>Materials &amp; rendering <span class="tag a">render</span></h3>
+    <ul>
+      <li>PBR materials, shader node graphs, material preview mode with environment lighting.</li>
+      <li>"Hive" path tracer: BVH8 + AVX-512, MIS, principled BSDF, HDRI importance sampling, denoiser.</li>
+      <li>Render window, passes, EXR/PNG output, JPEG/HDR textures.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> a converged 1080p product shot in &lt; 10 s on 32 threads · viewport stays interactive while rendering.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>6</b>XL</div><div class="card"><h3>CAD <span class="tag b">precision</span></h3>
+    <ul>
+      <li>Sketcher with constraint solver and DOF colouring; parameters and expressions.</li>
+      <li>Feature tree (pad, pocket, revolve, sweep, loft, fillet, chamfer, shell, patterns, holes) on the mesh+exact kernel, with persistent naming.</li>
+      <li>SDF/F-rep kernel for blends and lattices; measurement tools, units, mass properties.</li>
+      <li>3MF, DXF/SVG export; 2D drawings with PDF output; printability analysis.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> design a printable enclosure from sketches with dimensions, change one parameter, everything rebuilds correctly, and the 3MF file opens in a slicer.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>7</b>L</div><div class="card"><h3>Sculpt, UV &amp; paint <span class="tag a">organic</span></h3>
+    <ul>
+      <li>Sculpt mode with BVH-partitioned mesh, brushes, dyntopo, multires, masks, tablet support.</li>
+      <li>UV editor, LSCM/ABF unwrap, packing; texture paint; high-to-low baking.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> 20M-vertex sculpt at 60 fps strokes · memory under 2× the raw mesh size.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>8</b>L</div><div class="card"><h3>Nodes &amp; procedural <span class="tag v">nodes</span></h3>
+    <ul>
+      <li>Node editor UI; geometry nodes on the vectorized VM; node groups as assets.</li>
+      <li>Scattering, instancing at scale, curves, terrain, WFC/L-systems; template JIT.</li>
+      <li>AI procedural co-pilot.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> 1M scattered instances placed in &lt; 200 ms and rendered at interactive rates.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>9</b>L</div><div class="card"><h3>Animation &amp; simulation <span class="tag g">motion</span></h3>
+    <ul>
+      <li>Keyframes, dope sheet, graph editor, armatures, skinning, IK, shape keys, drivers.</li>
+      <li>Rigid bodies, XPBD cloth, cache system; mechanism animation for CAD assemblies.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> rigged character plays back at 60 fps · 1000 rigid bodies simulate in real time.</div>
+  </div></div>
+
+  <div class="phase"><div class="pn"><b>10</b>XL</div><div class="card"><h3>Engine-grade &amp; collaboration <span class="tag b">scale</span><span class="tag g">team</span></h3>
+    <ul>
+      <li>Meshlet DAG virtualized geometry, world partition streaming, content browser.</li>
+      <li>Play mode with logic graphs; live link.</li>
+      <li>Versioned scenes with visual diff and merge; live CRDT co-editing; B-rep/NURBS kernel and STEP import/export.</li>
+      <li>Optional <code>beemodel-gpu</code> helper process.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> 1 billion source triangles navigable under 8 GB RAM · two users and an AI agent editing one scene live · STEP round-trips through FreeCAD.</div>
+  </div></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="budgets">
+  <h2>Performance budgets</h2>
+  <p class="sub">Enforced in CI with benchmarks on the reference machine. A regression above 5% fails the build.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Metric</th><th>Budget</th><th>How it is measured</th></tr>
+    <tr><td>Binary size (v1.0, all features)</td><td class="num">&lt; 2 MB</td><td>stripped static ELF</td></tr>
+    <tr><td>Cold start → first frame</td><td class="num">&lt; 50 ms</td><td>fake compositor timestamp</td></tr>
+    <tr><td>Idle CPU</td><td class="num">0.0 %</td><td>no wakeups without events (verified with perf)</td></tr>
+    <tr><td>Empty-scene private RAM</td><td class="num">&lt; 8 MB</td><td>RssAnon excluding the framebuffer</td></tr>
+    <tr><td>Input → photon (UI)</td><td class="num">&lt; 1 frame</td><td>event timestamp → commit</td></tr>
+    <tr><td>Viewport, 10M triangles, solid</td><td class="num">≥ 60 fps</td><td>1080p, 32 threads</td></tr>
+    <tr><td>Mesh memory</td><td class="num">≤ 40 B / triangle</td><td>render mesh, quantized</td></tr>
+    <tr><td>Undo step overhead</td><td class="num">≈ changed chunks only</td><td>COW chunk accounting</td></tr>
+    <tr><td>MCP tool call latency (simple)</td><td class="num">&lt; 2 ms</td><td>socket round trip</td></tr>
+    <tr><td>Autosave stall</td><td class="num">0 ms on UI thread</td><td>background job writes snapshot chunks</td></tr>
+  </table></div>
+</section>
+
+<!-- ============================================================ -->
+<section id="engineering">
+  <h2>Engineering practice</h2>
+  <p class="sub">How a codebase of hundreds of thousands of assembly lines stays maintainable.</p>
+  <div class="grid g2">
+    <div class="card"><h3>Code organization</h3><ul>
+      <li>One module per subsystem, separate object files, explicit export lists; an internal ABI based on SysV with a documented register contract for hot paths.</li>
+      <li>Macro library: <code>PROC/ENDPROC</code> with automatic save/restore, struct offset generators, <code>OPERATOR</code>/<code>PARAM</code>, SoA table declarations, assertions in debug builds.</li>
+      <li>Dev-time generators (Python) produce tables: operators, schemas, fonts, keymaps, shader opcodes. Their output is committed so the build stays <code>as</code> + <code>ld</code> only.</li>
+      <li>Runtime CPU dispatch: AVX-512 → AVX2 → SSE4.2 code paths, so other machines work too.</li>
+    </ul></div>
+    <div class="card"><h3>Quality</h3><ul>
+      <li>Golden-image tests via the fake compositor, using scripted input and pixel diffs with tolerance.</li>
+      <li>Reference implementations in Python/NumPy for math kernels, with differential testing against the assembly version.</li>
+      <li>Fuzzing of every importer and of the MCP/JSON layer (coverage-guided, using a small harness binary).</li>
+      <li>Determinism tests: same journal → identical .bee hash on every run.</li>
+      <li>Benchmarks and memory budgets in CI; a <code>perf</code>-friendly debug build with symbols.</li>
+      <li>MCP conformance tests against real clients (Claude Code) as part of release checks.</li>
+    </ul></div>
+    <div class="card"><h3>Documentation</h3><ul>
+      <li>Generated operator reference (also served as an MCP resource).</li>
+      <li>Architecture decision records (ADRs) in <code>Vibecoding/</code> for every major choice.</li>
+      <li>Annotated "reading guide" for the source: start with main.s, then follow one operator end-to-end.</li>
+    </ul></div>
+    <div class="card"><h3>AI-assisted development</h3><ul>
+      <li>Claude Code works on the repo with the fake compositor as its eyes, generating screenshots per change.</li>
+      <li>BeeModel's own MCP server lets agents test the app functionally (create, measure, export) in CI.</li>
+      <li>Strict review checklists for register clobbers, stack alignment and clipping bounds, the classic assembly bugs.</li>
+    </ul></div>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section id="risks">
+  <h2>Risks &amp; decisions</h2>
+  <p class="sub">The hard parts, named up front, with a plan for each.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr>
+    <tr><td>Scale of an all-assembly codebase</td><td>Slow progress, subtle bugs</td><td>Macro library, generators, differential tests against reference implementations, strict module boundaries, AI pair programming with screenshot verification.</td></tr>
+    <tr><td>B-rep / NURBS kernel complexity</td><td>Could absorb years</td><td>Deferred to the last phase; mesh+exact and SDF kernels cover printing and most hobby CAD first. STEP export from tessellated B-rep as an intermediate step.</td></tr>
+    <tr><td>No GPU access without libraries</td><td>Slower renders than GPU tools</td><td>AVX-512 + 32 threads is very capable; optional out-of-process GPU helper; progressive rendering hides latency.</td></tr>
+    <tr><td>TLS for cloud AI</td><td>Cannot call cloud APIs directly</td><td>Not needed: MCP host and sampling handle the cloud; local models use localhost HTTP. Our own TLS 1.3 only if strongly demanded, isolated in a helper process.</td></tr>
+    <tr><td>XKB, Unicode, IME edge cases</td><td>Broken input for some users</td><td>Phase 1 priority; test against many layouts; text-input-v3 for IME.</td></tr>
+    <tr><td>Topological naming in parametric CAD</td><td>Features break after upstream edits</td><td>Persistent ids generated from operation history plus geometric signatures; dedicated test corpus.</td></tr>
+    <tr><td>Agent misuse / prompt injection</td><td>Unwanted destructive edits</td><td>Ghost-preview default, permission tiers, budgets, change sets with one-click revert, data-not-instructions labelling.</td></tr>
+    <tr><td>Portability (other CPUs/OSes)</td><td>Limited audience</td><td>Explicitly out of scope for v1 (x86-64 Linux/Wayland). CPU-feature dispatch covers older x86. Platform layer isolated so a future port touches one module.</td></tr>
+  </table></div>
+
+  <h3>Open questions to decide next</h3>
+  <div class="grid g2">
+    <div class="card"><ul>
+      <li>BeeScript syntax: Python-like vs Lua-like? (affects how reliably LLMs write it)</li>
+      <li>Default keymap: Blender-compatible from day one, or our own with a Blender preset?</li>
+      <li>License model and whether the MCP tool schema is published as an open standard.</li>
+    </ul></div>
+    <div class="card"><ul>
+      <li>Which CAD scope for v1.0: parts only, or parts + assemblies?</li>
+      <li>Should the optional GPU helper be built at all, or should we commit fully to CPU?</li>
+      <li>Collaboration: LAN-first, or a relay server (which would need TLS)?</li>
+    </ul></div>
+  </div>
+</section>
+
+<p class="muted" style="margin-top:56px">BeeModel masterplan · written for the Vibecoding track · last updated 2026-10-12</p>
+</main>
+</div>
+<script>
+(function () {
+  var btn = document.getElementById('themeBtn');
+  var root = document.documentElement;
+  try { var saved = localStorage.getItem('bee-theme'); if (saved) root.setAttribute('data-theme', saved); } catch (e) {}
+  btn.addEventListener('click', function () {
+    var cur = root.getAttribute('data-theme') ||
+      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    var next = cur === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('bee-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
