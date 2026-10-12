@@ -19,6 +19,8 @@
 .globl active_obj
 .globl outl_scroll
 .globl scene_pool
+.globl scene_clear
+.globl scene_defaults
 
 .section .bss
 .align 8
@@ -242,11 +244,36 @@ set3:
 
 # scene_init - pool + Blender-like default scene (Camera, Light, Cube)
 scene_init:
-    push    rbx
     lea     rdi, [rip+scene_pool]
     mov     esi, OB_SZ
     mov     edx, MAX_OBJECTS
     call    pool_init
+    jmp     scene_defaults
+
+# scene_clear - remove every object (meshes are released)
+scene_clear:
+    push    rbx
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    mov     rdi, [rax+OB_MESH]
+    call    mesh_unref
+    inc     ebx
+    jmp     1b
+2:  lea     rdi, [rip+scene_pool]
+    call    pool_clear
+    mov     dword ptr [rip+obj_count], 0
+    mov     dword ptr [rip+active_obj], 0
+    mov     dword ptr [rip+outl_scroll], 0
+    mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# scene_defaults - add Camera, Light and Cube
+scene_defaults:
+    push    rbx
     call    prim_camera
     mov     rdx, rax
     mov     edi, OT_CAMERA

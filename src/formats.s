@@ -1,0 +1,1439 @@
+# =============================================================================
+#  BeeModel - file formats and file operators.
+#
+#  .bee  native, chunked little-endian binary:
+#        "BEEM" u32 version, then chunks: tag u32, size u32, data
+#          MESH  nverts, npolys, nloops, positions f32[3n], offsets u32[p+1],
+#                loops u32[l]           (each shared mesh is written once)
+#          OBJS  count, records: name[32], loc/rot/scale f32[9], colour,
+#                type, flags, mesh index (u32, -1 = none)
+#          VIEW  active index, grid, shading, camera f32[6]
+#  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
+#  STL   import (binary or ASCII, vertices welded) / export (binary)
+# =============================================================================
+.intel_syntax noprefix
+.include "const.inc"
+.include "macros.inc"
+
+# exports
+.globl cur_path
+.globl autosave
+.globl console_prefill
+
+.equ BEE_MAGIC,     0x4d454542          # "BEEM"
+.equ BEE_VERSION,   1
+.equ TAG_MESH,      0x4853454d          # "MESH"
+.equ TAG_OBJS,      0x534a424f          # "OBJS"
+.equ TAG_VIEW,      0x57454956          # "VIEW"
+.equ OBJ_REC,       84
+.equ MAX_FILE_MESHES, MAX_OBJECTS
+
+.section .bss
+.align 8
+cur_path:       .skip 512               # current .bee file ("" = untitled)
+mesh_tab:       .skip 8*MAX_FILE_MESHES
+fbase:          .skip 8                 # mapped input file
+fsize:          .skip 8
+chunk_at:       .skip 8
+n_mesh_tab:     .skip 4
+msg_buf:        .skip 600
+
+.section .rodata
+s_bee_ext:      .asciz ".bee"
+s_obj_head:     .asciz "# BeeModel OBJ export\n"
+s_o:            .asciz "o "
+s_v:            .asciz "v "
+s_f:            .asciz "f"
+s_nl:           .asciz "\n"
+s_sp:           .asciz " "
+s_stl_head:     .ascii "BeeModel binary STL                                                             "
+s_saved:        .asciz "  saved "
+s_opened:       .asciz "  opened "
+s_exported:     .asciz "  exported "
+s_imported:     .asciz "  imported "
+s_shot:         .asciz "  screenshot "
+s_err_write:    .asciz "  could not write "
+s_err_read:     .asciz "  could not read "
+s_err_format:   .asciz "  not a valid file: "
+s_autosaved:    .asciz "  autosaved to "
+s_autosave:     .asciz "/autosave.bee"
+s_pf_open:      .asciz "file.open ~/BeeModel/"
+s_pf_save:      .asciz "file.save ~/BeeModel/untitled.bee"
+s_pf_iobj:      .asciz "file.import_obj ~/"
+s_pf_istl:      .asciz "file.import_stl ~/"
+s_pf_eobj:      .asciz "file.export_obj ~/BeeModel/scene.obj"
+s_pf_estl:      .asciz "file.export_stl ~/BeeModel/scene.stl"
+s_shot_name:    .asciz "/screenshot.png"
+s_untitled_obj: .asciz "Imported"
+
+OPERATOR op_file_new,   "file.new",   "New Scene",   op_new,   key=KEY_N|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO, doc="Start again from the default scene"
+OPERATOR op_file_open,  "file.open",  "Open...",     op_open,  key=KEY_O|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO, doc="Open a .bee scene: file.open <path>"
+OPERATOR op_file_save,  "file.save",  "Save",        op_save,  key=KEY_S|KM_CTRL, doc="Save the scene: file.save [path]"
+OPERATOR op_file_saveas,"file.save_as", "Save As...", op_save_as, key=KEY_S|KM_CTRL|KM_SHIFT, doc="Save the scene under a new name"
+OPERATOR op_import_obj, "file.import_obj", "Import OBJ...", op_iobj, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import a Wavefront OBJ: file.import_obj <path>"
+OPERATOR op_import_stl, "file.import_stl", "Import STL...", op_istl, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import an STL (binary or ASCII): file.import_stl <path>"
+OPERATOR op_export_obj, "file.export_obj", "Export OBJ...", op_eobj, doc="Export mesh objects as OBJ: file.export_obj <path>"
+OPERATOR op_export_stl, "file.export_stl", "Export STL...", op_estl, doc="Export mesh objects as binary STL: file.export_stl <path>"
+OPERATOR op_screenshot, "view.screenshot", "Screenshot",   op_shot, key=KEY_F12, doc="Save the window as PNG: view.screenshot [path]"
+OPERATOR op_recover,    "file.recover",  "Recover Autosave", op_recover_x, flags=OPF_AI_SAFE|OPF_UNDO, doc="Open the last autosave"
+
+.text
+
+# has_arg -> ZF set when the operator got no argument
+has_arg:
+    mov     rax, [rip+op_arg]
+    test    rax, rax
+    jz      1f
+    cmp     byte ptr [rax], 0
+1:  ret
+
+# console_prefill(rdi=text) - put text on the command line and focus it
+console_prefill:
+    push    rbx
+    mov     rbx, rdi
+    call    console_ensure
+    lea     rdi, [rip+tfi_console]
+    call    tf_select
+    mov     rsi, rbx
+    call    tf_load
+    mov     edi, 1
+    call    tf_set_focus
+    pop     rbx
+    ret
+
+# report(rdi=prefix, rsi=path) - "  saved /path"
+report:
+    jmp     log_pair
+
+# -----------------------------------------------------------------------------
+# .bee writer
+# -----------------------------------------------------------------------------
+# chunk_begin(edi=tag) -> rbx = start offset (callee keeps rbx)
+chunk_begin:
+    mov     rax, [rip+wb_len]
+    mov     [rip+chunk_at], rax
+    call    wb_u32
+    xor     edi, edi
+    jmp     wb_u32
+chunk_end:
+    mov     rcx, [rip+chunk_at]
+    mov     rax, [rip+wb_len]
+    sub     rax, rcx
+    sub     rax, 8
+    mov     rdx, [rip+wb_ptr]
+    mov     [rdx+rcx+4], eax
+    ret
+
+# mesh_index(rdi=mesh) -> eax = index in mesh_tab (added when new)
+mesh_index:
+    xor     eax, eax
+1:  cmp     eax, [rip+n_mesh_tab]
+    jae     2f
+    lea     rcx, [rip+mesh_tab]
+    cmp     [rcx+rax*8], rdi
+    je      9f
+    inc     eax
+    jmp     1b
+2:  cmp     eax, MAX_FILE_MESHES
+    jae     9f
+    lea     rcx, [rip+mesh_tab]
+    mov     [rcx+rax*8], rdi
+    inc     dword ptr [rip+n_mesh_tab]
+9:  ret
+
+# bee_save(rdi=path) -> eax = 0 on success
+bee_save:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r14, rdi
+    call    wb_reset
+    mov     edi, BEE_MAGIC
+    call    wb_u32
+    mov     edi, BEE_VERSION
+    call    wb_u32
+    mov     dword ptr [rip+n_mesh_tab], 0
+    xor     ebx, ebx                    # collect the distinct meshes
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    mov     rdi, [rax+OB_MESH]
+    call    mesh_index
+    inc     ebx
+    jmp     1b
+2:  xor     r12d, r12d                  # MESH chunks
+3:  cmp     r12d, [rip+n_mesh_tab]
+    jae     4f
+    lea     rax, [rip+mesh_tab]
+    mov     r13, [rax+r12*8]
+    mov     edi, TAG_MESH
+    call    chunk_begin
+    mov     edi, [r13+ME_NVERTS]
+    call    wb_u32
+    mov     edi, [r13+ME_NPOLYS]
+    call    wb_u32
+    mov     edi, [r13+ME_NLOOPS]
+    call    wb_u32
+    mov     rsi, [r13+ME_POS]
+    imul    edx, [r13+ME_NVERTS], 12
+    call    wb_bytes
+    mov     rsi, [r13+ME_POFF]
+    mov     edx, [r13+ME_NPOLYS]
+    lea     edx, [rdx*4+4]
+    call    wb_bytes
+    mov     rsi, [r13+ME_LOOPS]
+    mov     edx, [r13+ME_NLOOPS]
+    shl     edx, 2
+    call    wb_bytes
+    call    chunk_end
+    inc     r12d
+    jmp     3b
+4:  mov     edi, TAG_OBJS               # OBJS
+    call    chunk_begin
+    mov     edi, [rip+obj_count]
+    call    wb_u32
+    xor     ebx, ebx
+5:  cmp     ebx, [rip+obj_count]
+    jae     6f
+    mov     edi, ebx
+    call    obj_at
+    mov     r13, rax
+    mov     rsi, r13                    # name + loc/rot/scale + colour
+    mov     edx, 72
+    call    wb_bytes
+    mov     edi, [r13+OB_TYPE]
+    call    wb_u32
+    mov     edi, [r13+OB_FLAGS]
+    call    wb_u32
+    mov     rdi, [r13+OB_MESH]
+    call    mesh_index
+    mov     edi, eax
+    call    wb_u32
+    inc     ebx
+    jmp     5b
+6:  call    chunk_end
+    mov     edi, TAG_VIEW               # VIEW
+    call    chunk_begin
+    mov     r12d, -1                    # active object index
+    xor     ebx, ebx
+7:  cmp     ebx, [rip+obj_count]
+    jae     8f
+    lea     rax, [rip+obj_list]
+    mov     eax, [rax+rbx*4]
+    cmp     eax, [rip+active_obj]
+    jne     71f
+    mov     r12d, ebx
+71: inc     ebx
+    jmp     7b
+8:  mov     edi, r12d
+    call    wb_u32
+    mov     edi, [rip+show_grid]
+    call    wb_u32
+    mov     edi, [rip+vp_shading]
+    call    wb_u32
+    mov     edi, [rip+vp_area]
+    call    cam_load
+    lea     rsi, [rip+cam_yaw]
+    mov     edx, 24
+    call    wb_bytes
+    call    chunk_end
+    mov     rdi, r14
+    mov     rsi, [rip+wb_ptr]
+    mov     rdx, [rip+wb_len]
+    call    file_write_atomic
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# .bee reader
+# -----------------------------------------------------------------------------
+# need(rsi=pointer, rdx=bytes) -> CF=1 if [pointer, pointer+bytes) leaves the file
+need:
+    mov     rax, [rip+fbase]
+    add     rax, [rip+fsize]
+    lea     rcx, [rsi+rdx]
+    cmp     rcx, rax
+    ja      1f
+    clc
+    ret
+1:  stc
+    ret
+
+# mesh_from(rsi=MESH chunk data, edx=chunk size) -> rax = mesh or 0
+mesh_from:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12, rsi
+    cmp     edx, 12
+    jb      8f
+    mov     r13d, [r12]                 # verts
+    mov     r14d, [r12+4]               # polys
+    mov     r15d, [r12+8]               # loops
+    cmp     r13d, 0x1000000             # sanity limits
+    ja      8f
+    cmp     r14d, 0x1000000
+    ja      8f
+    cmp     r15d, 0x4000000
+    ja      8f
+    mov     eax, r13d                   # the chunk must hold all arrays
+    imul    rax, rax, 12
+    lea     rcx, [r14*4+4]
+    add     rax, rcx
+    lea     rcx, [r15*4]
+    add     rax, rcx
+    add     rax, 12
+    cmp     rax, rdx
+    ja      8f
+    mov     edi, r13d
+    mov     esi, r15d
+    mov     edx, r14d
+    call    mesh_new
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    lea     rsi, [r12+12]               # positions
+    mov     rdi, [rbx+ME_POS]
+    imul    ecx, r13d, 12
+    rep     movsb
+    mov     rdi, [rbx+ME_POFF]          # polygon offsets
+    lea     ecx, [r14*4+4]
+    rep     movsb
+    mov     rdi, [rbx+ME_LOOPS]
+    lea     ecx, [r15*4]
+    rep     movsb
+    mov     rax, [rbx+ME_POFF]          # validate offsets and indices
+    xor     ecx, ecx
+    xor     edx, edx                    # previous offset
+1:  cmp     ecx, r14d
+    ja      2f
+    mov     r8d, [rax+rcx*4]
+    cmp     r8d, edx
+    jb      7f
+    cmp     r8d, r15d
+    ja      7f
+    mov     edx, r8d
+    inc     ecx
+    jmp     1b
+2:  test    r14d, r14d
+    jz      21f
+    cmp     dword ptr [rax], 0
+    jne     7f
+21: mov     rax, [rbx+ME_LOOPS]
+    xor     ecx, ecx
+3:  cmp     ecx, r15d
+    jae     4f
+    cmp     [rax+rcx*4], r13d
+    jae     7f
+    inc     ecx
+    jmp     3b
+4:  mov     [rbx+ME_NVERTS], r13d
+    mov     [rbx+ME_NPOLYS], r14d
+    mov     [rbx+ME_NLOOPS], r15d
+    mov     rdi, rbx
+    call    mesh_finish
+    mov     rax, rbx
+    jmp     9f
+7:  mov     rdi, rbx
+    call    mesh_free
+8:  xor     eax, eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bee_load(rdi=path) -> eax = 0 ok, 1 unreadable, 2 bad format
+bee_load:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    call    file_read
+    test    rax, rax
+    jnz     1f
+    mov     eax, 1
+    jmp     .Lbl_out
+1:  mov     [rip+fbase], rax
+    mov     [rip+fsize], rdx
+    mov     dword ptr [rip+n_mesh_tab], 0
+    cmp     rdx, 8
+    jb      .Lbl_bad
+    cmp     dword ptr [rax], BEE_MAGIC
+    jne     .Lbl_bad
+    cmp     dword ptr [rax+4], BEE_VERSION
+    jne     .Lbl_bad
+    xor     r14, r14                    # OBJS chunk
+    xor     r15, r15                    # VIEW chunk
+    lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
+2:  mov     rsi, rbx
+    mov     edx, 8
+    call    need
+    jc      3f
+    mov     ebp, [rbx+4]                # size
+    lea     rsi, [rbx+8]
+    mov     edx, ebp
+    call    need
+    jc      .Lbl_bad
+    mov     eax, [rbx]
+    cmp     eax, TAG_MESH
+    jne     21f
+    cmp     dword ptr [rip+n_mesh_tab], MAX_FILE_MESHES
+    jae     .Lbl_bad
+    lea     rsi, [rbx+8]
+    mov     edx, ebp
+    call    mesh_from
+    test    rax, rax
+    jz      .Lbl_bad
+    mov     ecx, [rip+n_mesh_tab]
+    lea     rdx, [rip+mesh_tab]
+    mov     [rdx+rcx*8], rax
+    inc     dword ptr [rip+n_mesh_tab]
+    jmp     23f
+21: cmp     eax, TAG_OBJS
+    jne     22f
+    lea     r14, [rbx+8]
+    mov     r13d, ebp
+    jmp     23f
+22: cmp     eax, TAG_VIEW
+    jne     23f
+    lea     r15, [rbx+8]
+23: lea     rbx, [rbx+rbp+8]            # unknown chunks are skipped
+    jmp     2b
+3:  test    r14, r14
+    jz      .Lbl_bad
+    mov     r12d, [r14]                 # object count
+    cmp     r12d, MAX_OBJECTS
+    ja      .Lbl_bad
+    imul    eax, r12d, OBJ_REC
+    add     eax, 4
+    cmp     eax, r13d
+    ja      .Lbl_bad
+    # all records must point at a loaded mesh
+    xor     ecx, ecx
+4:  cmp     ecx, r12d
+    jae     5f
+    imul    eax, ecx, OBJ_REC
+    mov     eax, [r14+4+rax+80]
+    cmp     eax, [rip+n_mesh_tab]
+    jae     .Lbl_bad
+    inc     ecx
+    jmp     4b
+5:  call    scene_clear                 # replace the scene
+    xor     ebx, ebx
+6:  cmp     ebx, r12d
+    jae     7f
+    lea     rdi, [rip+scene_pool]
+    call    pool_alloc
+    mov     ebp, eax
+    mov     esi, eax
+    lea     rdi, [rip+scene_pool]
+    call    pool_get
+    mov     rdi, rax
+    imul    ecx, ebx, OBJ_REC
+    lea     rsi, [r14+4+rcx]
+    push    rsi
+    mov     ecx, 72                     # name, transform, colour
+    rep     movsb
+    pop     rsi
+    lea     rdi, [rdi-72]
+    mov     eax, [rsi+72]
+    mov     [rdi+OB_TYPE], eax
+    mov     eax, [rsi+76]
+    mov     [rdi+OB_FLAGS], eax
+    mov     byte ptr [rdi+31], 0        # names are always terminated
+    mov     eax, [rsi+80]
+    lea     rcx, [rip+mesh_tab]
+    mov     rax, [rcx+rax*8]
+    mov     [rdi+OB_MESH], rax
+    push    rdi
+    mov     rdi, rax
+    call    mesh_ref
+    pop     rdi
+    mov     eax, [rip+obj_count]
+    lea     rcx, [rip+obj_list]
+    mov     [rcx+rax*4], ebp
+    inc     dword ptr [rip+obj_count]
+    inc     ebx
+    jmp     6b
+7:  test    r15, r15                    # view state
+    jz      8f
+    mov     eax, [r15]
+    cmp     eax, [rip+obj_count]
+    jae     71f
+    lea     rcx, [rip+obj_list]
+    mov     eax, [rcx+rax*4]
+    mov     [rip+active_obj], eax
+71: mov     eax, [r15+4]
+    and     eax, 1
+    mov     [rip+show_grid], eax
+    mov     eax, [r15+8]
+    and     eax, 1
+    mov     [rip+vp_shading], eax
+    lea     rsi, [r15+12]
+    lea     rdi, [rip+cam_yaw]
+    mov     ecx, 24
+    rep     movsb
+    mov     edi, [rip+vp_area]
+    call    cam_store
+8:  call    drop_table_refs
+    mov     rdi, [rip+fbase]
+    mov     rsi, [rip+fsize]
+    call    file_unmap
+    xor     eax, eax
+    jmp     .Lbl_out
+.Lbl_bad:
+    call    drop_table_refs
+    mov     rdi, [rip+fbase]
+    mov     rsi, [rip+fsize]
+    call    file_unmap
+    mov     eax, 2
+.Lbl_out:
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# the loader's own references (objects took theirs)
+drop_table_refs:
+    push    rbx
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+n_mesh_tab]
+    jae     9f
+    lea     rax, [rip+mesh_tab]
+    mov     rdi, [rax+rbx*8]
+    call    mesh_unref
+    inc     ebx
+    jmp     1b
+9:  mov     dword ptr [rip+n_mesh_tab], 0
+    pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# OBJ export / import
+# -----------------------------------------------------------------------------
+obj_export:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r15, rdi
+    call    wb_reset
+    lea     rsi, [rip+s_obj_head]
+    call    wb_str
+    mov     r14d, 1                     # OBJ indices are 1-based and global
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     8f
+    mov     edi, ebx
+    call    obj_at
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    jne     7f
+    mov     r12, rax
+    lea     rsi, [rip+s_o]
+    call    wb_str
+    mov     rsi, r12
+    call    wb_str
+    lea     rsi, [rip+s_nl]
+    call    wb_str
+    mov     rdi, r12                    # world-space vertices
+    call    world_verts
+    mov     r13, rax
+    mov     r12, [r12+OB_MESH]
+    xor     ecx, ecx
+2:  cmp     ecx, [r12+ME_NVERTS]
+    jae     3f
+    push    rcx
+    lea     rsi, [rip+s_v]
+    call    wb_str
+    mov     rcx, [rsp]
+    imul    rcx, rcx, 12
+    movss   xmm0, [r13+rcx]
+    call    wb_float
+    lea     rsi, [rip+s_sp]
+    call    wb_str
+    mov     rcx, [rsp]
+    imul    rcx, rcx, 12
+    movss   xmm0, [r13+rcx+4]
+    call    wb_float
+    lea     rsi, [rip+s_sp]
+    call    wb_str
+    mov     rcx, [rsp]
+    imul    rcx, rcx, 12
+    movss   xmm0, [r13+rcx+8]
+    call    wb_float
+    lea     rsi, [rip+s_nl]
+    call    wb_str
+    pop     rcx
+    inc     ecx
+    jmp     2b
+3:  xor     ecx, ecx                    # faces
+4:  cmp     ecx, [r12+ME_NPOLYS]
+    jae     6f
+    push    rcx
+    lea     rsi, [rip+s_f]
+    call    wb_str
+    mov     rcx, [rsp]
+    mov     rax, [r12+ME_POFF]
+    mov     r13d, [rax+rcx*4]
+    mov     eax, [rax+rcx*4+4]
+    mov     [rsp+4], eax                # (high half of the saved rcx slot)
+5:  cmp     r13d, [rsp+4]
+    jae     51f
+    mov     edi, ' '
+    call    wb_char
+    mov     rax, [r12+ME_LOOPS]
+    mov     edi, [rax+r13*4]
+    add     edi, r14d
+    call    wb_int
+    inc     r13d
+    jmp     5b
+51: lea     rsi, [rip+s_nl]
+    call    wb_str
+    pop     rcx
+    mov     ecx, ecx
+    inc     ecx
+    jmp     4b
+6:  add     r14d, [r12+ME_NVERTS]
+7:  inc     ebx
+    jmp     1b
+8:  mov     rdi, r15
+    mov     rsi, [rip+wb_ptr]
+    mov     rdx, [rip+wb_len]
+    call    file_write_atomic
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# line_end(rsi=pos, rdx=end) -> rax = start of the next line
+line_end:
+    mov     rax, rsi
+1:  cmp     rax, rdx
+    jae     2f
+    cmp     byte ptr [rax], 10
+    je      3f
+    inc     rax
+    jmp     1b
+3:  inc     rax
+2:  ret
+
+# obj_import(rdi=path) -> eax = 0 ok, 1 unreadable, 2 bad
+obj_import:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 280                    # [rsp] face index scratch (64 u32)
+    mov     [rsp+256], rdi
+    call    file_read
+    test    rax, rax
+    jnz     1f
+    mov     eax, 1
+    jmp     .Loi_out
+1:  mov     [rip+fbase], rax
+    mov     [rip+fsize], rdx
+    mov     rbx, rax
+    lea     r15, [rax+rdx]              # end
+    # pass 1: count vertices, faces, loops
+    xor     r12d, r12d
+    xor     r13d, r13d
+    xor     r14d, r14d
+    mov     rsi, rbx
+2:  cmp     rsi, r15
+    jae     4f
+    lea     rax, [rsi+1]
+    cmp     rax, r15
+    jae     4f
+    mov     ax, [rsi]
+    cmp     ax, 0x2076                  # "v "
+    jne     21f
+    inc     r12d
+    jmp     3f
+21: cmp     ax, 0x2066                  # "f "
+    jne     3f
+    inc     r13d
+    lea     rcx, [rsi+2]                # count the index tokens
+22: cmp     rcx, r15
+    jae     3f
+    movzx   eax, byte ptr [rcx]
+    cmp     al, 10
+    je      3f
+    cmp     al, ' '
+    je      23f
+    cmp     al, 9
+    je      23f
+    cmp     al, 13
+    je      23f
+    cmp     byte ptr [rcx-1], ' '       # start of a token
+    je      24f
+    cmp     byte ptr [rcx-1], 9
+    jne     23f
+24: inc     r14d
+23: inc     rcx
+    jmp     22b
+3:  mov     rdx, r15
+    call    line_end
+    mov     rsi, rax
+    jmp     2b
+4:  test    r12d, r12d
+    jz      .Loi_bad
+    test    r13d, r13d
+    jz      .Loi_bad
+    mov     edi, r12d
+    mov     esi, r14d
+    mov     edx, r13d
+    call    mesh_new
+    test    rax, rax
+    jz      .Loi_bad
+    mov     rbp, rax
+    # pass 2: build
+    mov     rsi, rbx
+5:  cmp     rsi, r15
+    jae     8f
+    lea     rax, [rsi+1]
+    cmp     rax, r15
+    jae     8f
+    mov     ax, [rsi]
+    cmp     ax, 0x2076
+    jne     6f
+    add     rsi, 2
+    mov     rdx, r15
+    call    parse_float
+    movss   [rsp+264], xmm0
+    call    parse_float
+    movss   [rsp+268], xmm0
+    call    parse_float
+    movss   xmm2, xmm0
+    movss   xmm0, [rsp+264]
+    movss   xmm1, [rsp+268]
+    push    rsi
+    mov     rdi, rbp
+    call    mesh_add_vert
+    pop     rsi
+    jmp     7f
+6:  cmp     ax, 0x2066
+    jne     7f
+    add     rsi, 2
+    xor     r13d, r13d                  # indices in this face
+61: call    skip_space
+    cmp     rsi, r15
+    jae     65f
+    movzx   eax, byte ptr [rsi]
+    cmp     al, 10
+    je      65f
+    cmp     al, 13
+    je      65f
+    xor     r8d, r8d                    # parse a (possibly negative) integer
+    xor     r9d, r9d
+    cmp     al, '-'
+    jne     62f
+    mov     r9d, 1
+    inc     rsi
+62: cmp     rsi, r15
+    jae     63f
+    movzx   eax, byte ptr [rsi]
+    sub     eax, '0'
+    cmp     eax, 9
+    ja      63f
+    imul    r8d, r8d, 10
+    add     r8d, eax
+    inc     rsi
+    jmp     62b
+63: cmp     rsi, r15                    # skip "/vt/vn"
+    jae     64f
+    movzx   eax, byte ptr [rsi]
+    cmp     al, ' '
+    je      64f
+    cmp     al, 9
+    je      64f
+    cmp     al, 10
+    je      64f
+    cmp     al, 13
+    je      64f
+    inc     rsi
+    jmp     63b
+64: test    r9d, r9d                    # negative: relative to the vertices so far
+    jz      641f
+    mov     eax, [rbp+ME_NVERTS]
+    sub     eax, r8d
+    jmp     642f
+641:lea     eax, [r8-1]
+642:cmp     eax, [rbp+ME_NVERTS]
+    jae     61b                         # out of range: dropped
+    cmp     r13d, 64
+    jae     61b
+    mov     [rsp+r13*4], eax
+    inc     r13d
+    jmp     61b
+65: cmp     r13d, 3
+    jb      7f
+    push    rsi
+    mov     rdi, rbp
+    lea     rsi, [rsp+8]
+    mov     edx, r13d
+    call    mesh_add_poly
+    pop     rsi
+7:  mov     rdx, r15
+    call    line_end
+    mov     rsi, rax
+    jmp     5b
+8:  cmp     dword ptr [rbp+ME_NPOLYS], 0
+    jne     81f
+    mov     rdi, rbp
+    call    mesh_free
+    jmp     .Loi_bad
+81: mov     rdi, rbp
+    call    mesh_finish
+    mov     rdi, [rsp+256]              # name = file name without extension
+    call    import_name
+    mov     rdx, rbp
+    mov     edi, OT_MESH
+    mov     rsi, rax
+    call    obj_new
+    test    eax, eax
+    jz      82f
+    mov     edi, eax
+    xor     esi, esi
+    call    obj_click_select
+82: mov     rdi, [rip+fbase]
+    mov     rsi, [rip+fsize]
+    call    file_unmap
+    xor     eax, eax
+    jmp     .Loi_out
+.Loi_bad:
+    mov     rdi, [rip+fbase]
+    mov     rsi, [rip+fsize]
+    call    file_unmap
+    mov     eax, 2
+.Loi_out:
+    add     rsp, 280
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# import_name(rdi=path) -> rax = msg_buf with the base name, extension removed
+import_name:
+    call    basename
+    lea     rdi, [rip+msg_buf]
+    xor     ecx, ecx
+1:  mov     dl, [rax+rcx]
+    mov     [rdi+rcx], dl
+    test    dl, dl
+    jz      2f
+    inc     ecx
+    cmp     ecx, 26
+    jb      1b
+    mov     byte ptr [rdi+rcx], 0
+2:  mov     edx, ecx                    # cut at the last '.'
+3:  test    edx, edx
+    jz      5f
+    dec     edx
+    cmp     byte ptr [rdi+rdx], '.'
+    jne     3b
+    test    edx, edx
+    jz      5f
+    mov     byte ptr [rdi+rdx], 0
+5:  cmp     byte ptr [rdi], 0
+    jne     6f
+    lea     rax, [rip+s_untitled_obj]
+    ret
+6:  mov     rax, rdi
+    ret
+
+# -----------------------------------------------------------------------------
+# STL export (binary) / import (binary or ASCII, welded)
+# -----------------------------------------------------------------------------
+stl_export:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 56
+    mov     [rsp+48], rdi
+    call    wb_reset
+    lea     rsi, [rip+s_stl_head]
+    mov     edx, 80
+    call    wb_bytes
+    xor     edi, edi                    # triangle count, patched below
+    call    wb_u32
+    xor     r15d, r15d
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     8f
+    mov     edi, ebx
+    call    obj_at
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    jne     7f
+    mov     r12, [rax+OB_MESH]
+    mov     rdi, rax
+    call    world_verts
+    mov     r13, rax
+    xor     r14d, r14d
+2:  cmp     r14d, [r12+ME_NTRIS]
+    jae     7f
+    mov     rax, [r12+ME_TRIS]
+    imul    rcx, r14, 12
+    mov     edx, [rax+rcx]
+    imul    rdx, rdx, 12
+    add     rdx, r13
+    mov     esi, [rax+rcx+4]
+    imul    rsi, rsi, 12
+    add     rsi, r13
+    mov     edi, [rax+rcx+8]
+    imul    rdi, rdi, 12
+    add     rdi, r13
+    mov     [rsp], rdx                  # a b c
+    mov     [rsp+8], rsi
+    mov     [rsp+16], rdi
+    # normal = normalize((b-a) x (c-a))
+    movss   xmm0, [rsi]
+    subss   xmm0, [rdx]
+    movss   xmm1, [rsi+4]
+    subss   xmm1, [rdx+4]
+    movss   xmm2, [rsi+8]
+    subss   xmm2, [rdx+8]
+    movss   xmm3, [rdi]
+    subss   xmm3, [rdx]
+    movss   xmm4, [rdi+4]
+    subss   xmm4, [rdx+4]
+    movss   xmm5, [rdi+8]
+    subss   xmm5, [rdx+8]
+    movss   xmm6, xmm1
+    mulss   xmm6, xmm5
+    movss   xmm7, xmm2
+    mulss   xmm7, xmm4
+    subss   xmm6, xmm7                  # nx
+    movss   xmm8, xmm2
+    mulss   xmm8, xmm3
+    movss   xmm7, xmm0
+    mulss   xmm7, xmm5
+    subss   xmm8, xmm7                  # ny
+    movss   xmm9, xmm0
+    mulss   xmm9, xmm4
+    movss   xmm7, xmm1
+    mulss   xmm7, xmm3
+    subss   xmm9, xmm7                  # nz
+    movss   xmm10, xmm6
+    mulss   xmm10, xmm6
+    movss   xmm7, xmm8
+    mulss   xmm7, xmm8
+    addss   xmm10, xmm7
+    movss   xmm7, xmm9
+    mulss   xmm7, xmm9
+    addss   xmm10, xmm7
+    sqrtss  xmm10, xmm10
+    maxss   xmm10, [rip+f_near]
+    divss   xmm6, xmm10
+    divss   xmm8, xmm10
+    divss   xmm9, xmm10
+    movss   [rsp+24], xmm6
+    movss   [rsp+28], xmm8
+    movss   [rsp+32], xmm9
+    lea     rsi, [rsp+24]
+    mov     edx, 12
+    call    wb_bytes
+    mov     rsi, [rsp]
+    mov     edx, 12
+    call    wb_bytes
+    mov     rsi, [rsp+8]
+    mov     edx, 12
+    call    wb_bytes
+    mov     rsi, [rsp+16]
+    mov     edx, 12
+    call    wb_bytes
+    xor     edi, edi                    # attribute byte count (u16)
+    call    wb_char
+    xor     edi, edi
+    call    wb_char
+    inc     r15d
+    inc     r14d
+    jmp     2b
+7:  inc     ebx
+    jmp     1b
+8:  mov     rax, [rip+wb_ptr]
+    mov     [rax+80], r15d
+    mov     rdi, [rsp+48]
+    mov     rsi, [rip+wb_ptr]
+    mov     rdx, [rip+wb_len]
+    call    file_write_atomic
+    add     rsp, 56
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# stl_import(rdi=path) -> eax = 0 ok, 1 unreadable, 2 bad
+stl_import:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 40
+    mov     [rsp+32], rdi
+    call    file_read
+    test    rax, rax
+    jnz     1f
+    mov     eax, 1
+    jmp     .Lsi_out
+1:  mov     [rip+fbase], rax
+    mov     [rip+fsize], rdx
+    mov     rbx, rax
+    lea     r15, [rax+rdx]
+    # binary when 84 + 50 * count == size
+    xor     r12d, r12d                  # triangles
+    cmp     rdx, 84
+    jb      2f
+    mov     eax, [rbx+80]
+    imul    rax, rax, 50
+    add     rax, 84
+    cmp     rax, rdx
+    jne     2f
+    mov     r12d, [rbx+80]
+    mov     dword ptr [rsp+24], 1       # binary
+    jmp     3f
+2:  mov     dword ptr [rsp+24], 0       # ASCII: count "vertex" tokens / 3
+    mov     rsi, rbx
+21: cmp     rsi, r15
+    jae     22f
+    call    skip_space
+    lea     rax, [rsi+6]
+    cmp     rax, r15
+    ja      22f
+    cmp     dword ptr [rsi], 0x74726576 # "vert"
+    jne     23f
+    cmp     word ptr [rsi+4], 0x7865    # "ex"
+    jne     23f
+    inc     r12d
+23: mov     rdx, r15
+    call    line_end
+    mov     rsi, rax
+    jmp     21b
+22: mov     eax, r12d
+    xor     edx, edx
+    mov     ecx, 3
+    div     ecx
+    mov     r12d, eax
+3:  test    r12d, r12d
+    jz      .Lsi_bad
+    cmp     r12d, 0x1000000
+    ja      .Lsi_bad
+    # positions of every corner (frame arena), then weld
+    lea     rdi, [rip+frame_arena]
+    imul    esi, r12d, 36
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lsi_bad
+    mov     r13, rax                    # corners
+    cmp     dword ptr [rsp+24], 0
+    je      4f
+    lea     rsi, [rbx+84]               # binary: skip normals and attributes
+    mov     rdi, r13
+    mov     ecx, r12d
+31: push    rcx
+    lea     rsi, [rsi+12]
+    mov     ecx, 36
+    rep     movsb
+    add     rsi, 2
+    pop     rcx
+    dec     ecx
+    jnz     31b
+    jmp     5f
+4:  mov     rsi, rbx                    # ASCII: "vertex x y z"
+    xor     r14d, r14d                  # corners read
+41: cmp     rsi, r15
+    jae     5f
+    call    skip_space
+    lea     rax, [rsi+6]
+    cmp     rax, r15
+    ja      5f
+    cmp     dword ptr [rsi], 0x74726576
+    jne     43f
+    cmp     word ptr [rsi+4], 0x7865
+    jne     43f
+    lea     eax, [r12+r12*2]
+    cmp     r14d, eax
+    jae     5f
+    add     rsi, 6
+    mov     rdx, r15
+    imul    rdi, r14, 12
+    add     rdi, r13
+    push    rdi
+    call    parse_float
+    mov     rdi, [rsp]
+    movss   [rdi], xmm0
+    call    parse_float
+    mov     rdi, [rsp]
+    movss   [rdi+4], xmm0
+    call    parse_float
+    pop     rdi
+    movss   [rdi+8], xmm0
+    inc     r14d
+43: mov     rdx, r15
+    call    line_end
+    mov     rsi, rax
+    jmp     41b
+5:  # weld: hash of the exact position bits -> vertex index
+    lea     eax, [r12+r12*2]            # corners
+    mov     [rsp+28], eax
+    lea     ecx, [rax+rax]
+    mov     ebp, 16
+51: cmp     ebp, ecx
+    jae     52f
+    add     ebp, ebp
+    jmp     51b
+52: lea     rdi, [rip+frame_arena]
+    lea     esi, [rbp*4]
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lsi_bad
+    mov     r14, rax                    # hash: vertex index + 1 (0 = empty)
+    mov     rdi, rax
+    mov     ecx, ebp
+    xor     eax, eax
+    rep     stosd
+    mov     edi, [rsp+28]               # worst case: every corner unique
+    mov     esi, edi
+    mov     edx, r12d
+    call    mesh_new
+    test    rax, rax
+    jz      .Lsi_bad
+    mov     r15, rax                    # (end pointer no longer needed)
+    xor     ebx, ebx                    # triangle
+6:  cmp     ebx, r12d
+    jae     8f
+    xor     ecx, ecx
+61: cmp     ecx, 3
+    jae     7f
+    push    rcx
+    lea     eax, [rbx+rbx*2]
+    add     eax, ecx
+    imul    rax, rax, 12
+    lea     rsi, [r13+rax]              # this corner
+    mov     eax, [rsi]                  # hash the 12 bytes
+    imul    eax, eax, 0x2545f491
+    xor     eax, [rsi+4]
+    imul    eax, eax, 0x2545f491
+    xor     eax, [rsi+8]
+    imul    eax, eax, 0x2545f491
+    shr     eax, 7
+    lea     edx, [rbp-1]
+    and     eax, edx
+62: mov     ecx, [r14+rax*4]
+    test    ecx, ecx
+    jz      64f
+    dec     ecx                         # compare with the existing vertex
+    imul    r8, rcx, 12
+    add     r8, [r15+ME_POS]
+    mov     r9, [rsi]
+    cmp     r9, [r8]
+    jne     63f
+    mov     r9d, [rsi+8]
+    cmp     r9d, [r8+8]
+    je      65f
+63: inc     eax
+    and     eax, edx
+    jmp     62b
+64: push    rax                         # new vertex
+    push    rsi
+    movss   xmm0, [rsi]
+    movss   xmm1, [rsi+4]
+    movss   xmm2, [rsi+8]
+    mov     rdi, r15
+    call    mesh_add_vert
+    mov     ecx, eax
+    pop     rsi
+    pop     rax
+    lea     edx, [rcx+1]
+    mov     [r14+rax*4], edx
+65: pop     rax                         # corner slot
+    mov     [rsp+rax*4], ecx
+    lea     ecx, [rax+1]
+    jmp     61b
+7:  mov     rdi, r15
+    lea     rsi, [rsp]
+    mov     edx, 3
+    call    mesh_add_poly
+    inc     ebx
+    jmp     6b
+8:  mov     rdi, r15
+    call    mesh_finish
+    mov     rdi, [rsp+32]
+    call    import_name
+    mov     rdx, r15
+    mov     edi, OT_MESH
+    mov     rsi, rax
+    call    obj_new
+    test    eax, eax
+    jz      81f
+    mov     edi, eax
+    xor     esi, esi
+    call    obj_click_select
+81: mov     rdi, [rip+fbase]
+    mov     rsi, [rip+fsize]
+    call    file_unmap
+    xor     eax, eax
+    jmp     .Lsi_out
+.Lsi_bad:
+    mov     rdi, [rip+fbase]
+    mov     rsi, [rip+fsize]
+    call    file_unmap
+    mov     eax, 2
+.Lsi_out:
+    add     rsp, 40
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# Operators
+# -----------------------------------------------------------------------------
+# result(eax=status, rdi=ok prefix) - log "  saved <path_buf>" or an error
+result:
+    test    eax, eax
+    jnz     1f
+    lea     rsi, [rip+path_buf]
+    jmp     log_pair
+1:  lea     rdi, [rip+s_err_read]
+    cmp     eax, 2
+    jne     2f
+    lea     rdi, [rip+s_err_format]
+2:  cmp     eax, 0
+    jge     3f
+    lea     rdi, [rip+s_err_write]
+3:  lea     rsi, [rip+path_buf]
+    jmp     log_pair
+
+set_cur_path:                           # cur_path = path_buf
+    lea     rsi, [rip+path_buf]
+    lea     rdi, [rip+cur_path]
+    mov     ecx, 512
+    rep     movsb
+    ret
+
+op_new:
+    call    scene_clear
+    call    scene_defaults
+    mov     byte ptr [rip+cur_path], 0
+    ret
+
+op_open:
+    call    has_arg
+    jnz     1f
+    call    undo_drop_last              # nothing opened yet
+    lea     rdi, [rip+s_pf_open]
+    jmp     console_prefill
+1:  mov     rdi, [rip+op_arg]
+    call    path_expand
+    mov     rdi, rax
+    call    bee_load
+    push    rax
+    test    eax, eax
+    jnz     2f
+    call    set_cur_path
+    jmp     3f
+2:  call    undo_drop_last
+3:  pop     rax
+    lea     rdi, [rip+s_opened]
+    jmp     result
+
+op_save:
+    call    has_arg
+    jz      0f
+    mov     rdi, [rip+op_arg]
+    jmp     1f
+0:  cmp     byte ptr [rip+cur_path], 0  # no argument: the current file
+    je      op_save_as
+    lea     rdi, [rip+cur_path]
+1:  call    path_expand
+    call    default_dir                 # make sure ~/BeeModel exists
+    lea     rdi, [rip+path_buf]
+    call    bee_save
+    push    rax
+    test    eax, eax
+    jnz     2f
+    call    set_cur_path
+2:  pop     rax
+    lea     rdi, [rip+s_saved]
+    jmp     result
+
+op_save_as:
+    lea     rdi, [rip+s_pf_save]
+    jmp     console_prefill
+
+op_iobj:
+    call    has_arg
+    jnz     1f
+    call    undo_drop_last
+    lea     rdi, [rip+s_pf_iobj]
+    jmp     console_prefill
+1:  mov     rdi, [rip+op_arg]
+    call    path_expand
+    mov     rdi, rax
+    call    obj_import
+    test    eax, eax
+    jz      2f
+    push    rax
+    call    undo_drop_last
+    pop     rax
+2:  lea     rdi, [rip+s_imported]
+    jmp     result
+
+op_istl:
+    call    has_arg
+    jnz     1f
+    call    undo_drop_last
+    lea     rdi, [rip+s_pf_istl]
+    jmp     console_prefill
+1:  mov     rdi, [rip+op_arg]
+    call    path_expand
+    mov     rdi, rax
+    call    stl_import
+    test    eax, eax
+    jz      2f
+    push    rax
+    call    undo_drop_last
+    pop     rax
+2:  lea     rdi, [rip+s_imported]
+    jmp     result
+
+op_eobj:
+    call    has_arg
+    jnz     1f
+    lea     rdi, [rip+s_pf_eobj]
+    jmp     console_prefill
+1:  mov     rdi, [rip+op_arg]
+    call    path_expand
+    call    default_dir
+    lea     rdi, [rip+path_buf]
+    call    obj_export
+    lea     rdi, [rip+s_exported]
+    jmp     result
+
+op_estl:
+    call    has_arg
+    jnz     1f
+    lea     rdi, [rip+s_pf_estl]
+    jmp     console_prefill
+1:  mov     rdi, [rip+op_arg]
+    call    path_expand
+    call    default_dir
+    lea     rdi, [rip+path_buf]
+    call    stl_export
+    lea     rdi, [rip+s_exported]
+    jmp     result
+
+op_shot:
+    call    has_arg
+    jnz     1f
+    call    default_dir                 # ~/BeeModel/screenshot.png
+    mov     rsi, rax
+    lea     rdi, [rip+path_buf]
+2:  mov     al, [rsi]
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    test    al, al
+    jnz     2b
+    dec     rdi
+    lea     rsi, [rip+s_shot_name]
+3:  mov     al, [rsi]
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    test    al, al
+    jnz     3b
+    jmp     4f
+1:  mov     rdi, [rip+op_arg]
+    call    path_expand
+4:  lea     rdi, [rip+path_buf]         # the last presented frame
+    mov     rsi, [rip+fb_ptr]
+    mov     edx, [rip+fb_w]
+    mov     ecx, [rip+fb_h]
+    mov     r8d, edx
+    call    png_write
+    lea     rdi, [rip+s_shot]
+    jmp     result
+
+# autosave_path -> path_buf = <cache>/autosave.bee
+autosave_path:
+    call    cache_dir
+    mov     rsi, rax
+    lea     rdi, [rip+path_buf]
+1:  mov     al, [rsi]
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    test    al, al
+    jnz     1b
+    dec     rdi
+    lea     rsi, [rip+s_autosave]
+2:  mov     al, [rsi]
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    test    al, al
+    jnz     2b
+    ret
+
+autosave:
+    call    autosave_path
+    lea     rdi, [rip+path_buf]
+    call    bee_save
+    test    eax, eax
+    jnz     1f
+    lea     rdi, [rip+s_autosaved]
+    lea     rsi, [rip+path_buf]
+    jmp     log_pair
+1:  ret
+
+op_recover_x:
+    call    autosave_path
+    lea     rdi, [rip+path_buf]
+    call    bee_load
+    test    eax, eax
+    jz      1f
+    push    rax
+    call    undo_drop_last
+    pop     rax
+1:  lea     rdi, [rip+s_opened]
+    jmp     result
+
+.section .note.GNU-stack,"",@progbits

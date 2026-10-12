@@ -28,6 +28,12 @@ project uses [Semantic Versioning](https://semver.org/).
 - Undo / redo (Ctrl+Z / Ctrl+Shift+Z) for create, delete, duplicate and
   transforms. Snapshots share reference-counted meshes; the history is
   bounded (256 steps / 64 MiB). Edit › Undo History lists the steps.
+- Files: native `.bee` save / open (chunked, atomic writes, validated on
+  load), OBJ import / export, STL import (binary + ASCII, welded) / export,
+  PNG screenshots (F12), autosave every 25 changes, `file.recover`. The
+  title bar shows the current file.
+- Operators accept a text argument from the command line
+  (`file.save ~/x.bee`); without one, the command line opens pre-filled.
 - Shift+D shares the mesh with the original (copy-on-write arrives with
   edit mode), so duplicates cost almost no memory.
 ### Changed

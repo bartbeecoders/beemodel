@@ -32,6 +32,8 @@ stays private to the module.
 | `raster.s` | Solid viewport rasterizer: parallel setup, binning and tiles; depth + ID buffers; selection outline; picking |
 | `transform.s` | Modal grab / rotate / scale, constraints, snapping, numeric input, gizmos |
 | `undo.s` | Undo / redo history of scene snapshots (shared, reference-counted meshes) |
+| `fileio.s` | Paths (`~`, default dirs, mkdir -p), mmap reads, atomic writes, growable buffer, number text I/O, PNG writer |
+| `formats.s` | `.bee`, OBJ and STL import/export, file operators, autosave |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -288,6 +290,29 @@ pushes the current scene onto the redo stack and rebuilds the scene from the
 step (`pool_clear`, then re-create the objects). Redo is the mirror image.
 The history keeps at most 256 steps and 64 MiB and drops the oldest step
 when full. `edit.undo_history` lists the steps in the console.
+
+## Files
+
+Operators take an optional text argument from the command line
+(`file.save ~/models/chair.bee`). The console splits at the first space,
+copies the argument, and `op_arg` points at it while the operator runs.
+Operators that need a path but get none pre-fill the command line
+(`file.open ~/BeeModel/`), since there is no file dialog yet. Saves write
+`<path>.tmp` and `rename` it into place, so a crash can never leave a
+half-written file.
+
+* `.bee` is chunked binary (`BEEM`, version, then `MESH` / `OBJS` / `VIEW`
+  chunks of tag + size + data). Each shared mesh is written once.
+  Unknown chunks are skipped. The loader checks every size, offset and
+  index against the file before touching the scene.
+* OBJ export writes world-space vertices and n-gon faces per mesh object.
+  Import reads one object: `v`, and `f` with `v/vt/vn` and negative indices.
+* STL export is binary. Import detects binary or ASCII and welds identical
+  corners back into shared vertices with a hash table.
+* `view.screenshot` (F12) writes the last presented frame as a PNG
+  (zlib stored blocks, with our own CRC-32 and Adler-32).
+* Every 25 recorded changes the scene is autosaved to
+  `$XDG_CACHE_HOME/beemodel/autosave.bee`; `file.recover` loads it.
 
 ## Event loop & rendering
 

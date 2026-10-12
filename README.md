@@ -58,6 +58,13 @@ cancels. The Move / Rotate / Scale tools (Shift+W/E/R) show gizmos you can
 drag. The grid toggle is **Shift+G**. **Ctrl+Z** / **Ctrl+Shift+Z** undo and
 redo every change (create, delete, duplicate, transforms). Selected objects get an orange outline, the active one gold.
 
+Files: **Ctrl+S** saves (`.bee`), **Ctrl+O** opens, and File › Import / Export
+handle **OBJ** and **STL**. Commands take paths on the command line, for
+example `file.save ~/BeeModel/chair.bee` or `file.import_stl ~/part.stl`.
+Without a path, the command line opens pre-filled. **F12** saves a PNG
+screenshot. The scene autosaves every 25 changes (`file.recover` restores
+it).
+
 Press **F3** for the command palette: type part of any command name and press
 Enter.
 

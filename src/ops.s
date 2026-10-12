@@ -21,9 +21,6 @@
 .globl key_chars
 
 # ---- File ---------------------------------------------------------------------
-OPERATOR op_file_new,   "file.new",   "New Scene", op_todo, key=KEY_N|KM_CTRL, doc="Start a new empty scene"
-OPERATOR op_file_open,  "file.open",  "Open...",   op_todo, key=KEY_O|KM_CTRL, doc="Open a .bee scene file"
-OPERATOR op_file_save,  "file.save",  "Save",      op_todo, key=KEY_S|KM_CTRL, doc="Save the scene"
 OPERATOR op_file_exit,  "file.exit",  "Exit",      op_exit, key=KEY_Q|KM_CTRL, flags=0, doc="Quit BeeModel"
 # ---- Edit ---------------------------------------------------------------------
 OPERATOR op_edit_prefs, "edit.preferences", "Preferences...", op_todo, doc="Open the preferences editor"
