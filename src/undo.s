@@ -19,6 +19,7 @@
 
 .equ MAX_STEPS,     256
 .equ MAX_BYTES,     0x4000000       # 64 MiB of snapshots
+.equ AUTOSAVE_EVERY, 25
 .equ ST_COUNT,      0
 .equ ST_ACTIVE,     4
 .equ ST_BYTES,      8
@@ -33,6 +34,7 @@ redo_stack:     .skip 8*MAX_STEPS
 undo_bytes:     .skip 8
 undo_depth:     .skip 4
 redo_depth:     .skip 4
+changes:        .skip 4
 
 .section .rodata
 s_undo:         .asciz "  undo: "
@@ -272,6 +274,11 @@ undo_push:
     mov     rdx, rbx
     call    push_on
     call    trim_bytes
+    inc     dword ptr [rip+changes]     # autosave every AUTOSAVE_EVERY changes
+    cmp     dword ptr [rip+changes], AUTOSAVE_EVERY
+    jb      9f
+    mov     dword ptr [rip+changes], 0
+    call    autosave
 9:  pop     rbx
     ret
 

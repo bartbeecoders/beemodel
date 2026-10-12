@@ -41,7 +41,9 @@ class Fake:
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         srv.bind(self.path)
         srv.listen(1)
-        env = dict(os.environ, WAYLAND_DISPLAY=self.path)
+        self.home = tempfile.mkdtemp()      # never touch the real ~/BeeModel or cache
+        env = dict(os.environ, WAYLAND_DISPLAY=self.path, HOME=self.home,
+                   XDG_CACHE_HOME=os.path.join(self.home, 'cache'))
         self.t0 = time.time()
         self.proc = subprocess.Popen([BIN], env=env)
         self.first_frame_ms = None
@@ -241,7 +243,7 @@ class Fake:
 
     US = {**{c: k for k, c in enumerate('1234567890', 2)}, **{c: k for k, c in enumerate('qwertyuiop', 16)},
           **{c: k for k, c in enumerate('asdfghjkl', 30)}, **{c: k for k, c in enumerate('zxcvbnm', 44)},
-          '.': 52, '-': 12, ' ': 57}
+          '.': 52, '-': 12, ' ': 57, '/': 53}
 
     def type(self, text):
         for ch in text:
@@ -433,6 +435,7 @@ def main():
     areas_and_palette()
     transforms()
     undo_redo()
+    files()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
     sys.exit(1 if FAILS else 0)
@@ -545,6 +548,75 @@ def undo_redo():
     undo()                               # undoes the redo'd move instead
     check(bright(px(f, *project((-0.8, 1, 0)))), 'a cancelled transform leaves no undo step')
     f.shot('28_undo.png')
+    f.proc.kill()
+
+
+def files():
+    """.bee round trip, OBJ / STL export + import, screenshot, autosave."""
+    print('  -- files --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(*project((0, 1, 0)))
+    T = f.home
+    ICON = lambda row: px(f, 1037, 94 + 20 * row)
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.2)
+    name = 's1_234567890.bee'                  # every digit: guards the keymap parser
+    cmd(f'file.save {T}/{name}')
+    data = open(f'{T}/{name}', 'rb').read() if os.path.exists(f'{T}/{name}') else b''
+    check(data[:4] == b'BEEM', f'file.save writes a .bee file ({len(data)} bytes, typed digits 0-9)')
+    if data[:4] != b'BEEM':
+        f.shot('files_save_failed.png')
+    f.key(1)                                   # leave the command line
+    f.move(*project((0, 1, 0))); f.key(45)     # delete the cube
+    check(ICON(2) == 0x2a2e36, 'cube deleted before reopening')
+    cmd(f'file.open {T}/{name}')
+    check(ICON(2) == 0xb4b8c0 and bright(px(f, *project((0, 1, 0)))), 'file.open restores the saved scene')
+    cmd(f'file.export_obj {T}/a.obj')
+    obj = open(f'{T}/a.obj').read().split('\n') if os.path.exists(f'{T}/a.obj') else []
+    vs = [l for l in obj if l.startswith('v ')]
+    fs = [l for l in obj if l.startswith('f ')]
+    ys = sorted({float(l.split()[2]) for l in vs})
+    check(len(vs) == 8 and len(fs) == 6 and all(len(l.split()) == 5 for l in fs) and ys == [0.0, 2.0],
+          'OBJ export: 8 world-space vertices, 6 quads')
+    cmd(f'file.export_stl {T}/a.stl')
+    stl = open(f'{T}/a.stl', 'rb').read() if os.path.exists(f'{T}/a.stl') else b''
+    check(len(stl) == 84 + 50 * 12 and struct.unpack_from('<I', stl, 80)[0] == 12, 'STL export: 12 triangles, binary layout')
+    with open(f'{T}/tet.obj', 'w') as o:
+        o.write('# tetrahedron\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nvt 0 0\nvn 0 0 1\n'
+                'f 1/1/1 3/1/1 2/1/1\nf 1 2 4\nf -4 -1 -2\nf 2 3 4\n')
+    cmd(f'file.import_obj {T}/tet.obj')
+    check(ICON(3) == 0xb4b8c0, 'OBJ import adds an object (v/vt/vn and negative indices)')
+    cmd(f'file.import_stl {T}/a.stl')
+    check(ICON(4) == 0xb4b8c0 or ICON(3) == 0xb4b8c0, 'binary STL import adds an object')
+    cmd(f'file.export_obj {T}/b.obj')
+    blocks = open(f'{T}/b.obj').read().split('\no ')
+    welded = [b for b in blocks if b.startswith('a\n')]
+    check(welded and sum(1 for l in welded[0].split('\n') if l.startswith('v ')) == 8,
+          'STL import welds 36 corners back into 8 vertices')
+    with open(f'{T}/tri.stl', 'w') as o:
+        o.write('solid t\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\n'
+                'vertex 0 1.5e0 0\nendloop\nendfacet\nendsolid t\n')
+    cmd(f'file.import_stl {T}/tri.stl')
+    cmd(f'file.export_obj {T}/c.obj')
+    check('o tri' in open(f'{T}/c.obj').read(), 'ASCII STL import')
+    cmd(f'view.screenshot {T}/s.png')
+    from PIL import Image
+    ok = os.path.exists(f'{T}/s.png') and Image.open(f'{T}/s.png').size == (1280, 800)
+    check(ok, 'view.screenshot writes a PNG of the window')
+    if ok:
+        Image.open(f'{T}/s.png').load()   # decodes: CRC / zlib / adler are valid
+    open(f'{T}/bad.bee', 'wb').write(b'BEEM\x01\x00\x00\x00MESH\xff\xff\xff\x7f garbage')
+    rows = [ICON(r) for r in range(4)]
+    cmd(f'file.open {T}/bad.bee')
+    check([ICON(r) for r in range(4)] == rows, 'a corrupt .bee is rejected, the scene stays')
+    cmd('create.cube')                   # 25 recorded changes -> autosave
+    for _ in range(26):
+        f.key(28); f.key(103); f.key(28)     # Enter, Up (history), Enter
+    auto = os.path.join(T, 'cache', 'beemodel', 'autosave.bee')
+    check(os.path.exists(auto) and open(auto, 'rb').read(4) == b'BEEM', 'autosave after 25 changes')
+    f.shot('29_files.png')
     f.proc.kill()
 
 

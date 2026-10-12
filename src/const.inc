@@ -304,3 +304,4 @@
 .equ COL_SELECTED,      0xe0862a
 .equ COL_ACTIVE,        0xffc24a
 .equ COL_SOLID,         0xbfc3ca
+.equ KEY_F12,           88

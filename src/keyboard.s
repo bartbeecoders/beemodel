@@ -364,6 +364,21 @@ km_parse:
     jne     3f
     cmp     dword ptr [rbx], 0x61696c61 # "alia"
     jne     3f
+    cmp     byte ptr [rbx+4], 's'       # the whole word "alias", not part of
+    jne     3f                          # a name such as "evdev_aliases(...)"
+    movzx   ecx, byte ptr [rbx+5]
+    cmp     cl, ' '
+    je      11f
+    cmp     cl, 9
+    jne     3f
+11: movzx   ecx, byte ptr [rbx-1]
+    cmp     cl, ' '
+    je      12f
+    cmp     cl, 9
+    je      12f
+    cmp     cl, 10
+    jne     3f
+12:
     # alias <A> = <B>;
     mov     rdi, rbx
     mov     rsi, rbp

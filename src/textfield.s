@@ -8,6 +8,7 @@
 .include "macros.inc"
 
 # exports
+.globl tf_load
 .globl tf_key
 .globl tf_draw
 .globl tf_click
@@ -62,6 +63,7 @@ tfi_console:    .skip TF_STATE_SZ
 tfi_palette:    .skip TF_STATE_SZ
 # ---- console-only ----
 hist:           .skip HIST_N*HIST_LEN
+cmd_arg:        .skip 256
 tf_focus:       .skip 4
 hist_n:         .skip 4
 hist_age:       .skip 4
@@ -537,14 +539,40 @@ tf_key:
     lea     rdi, [rip+s_echo]
     mov     rsi, rbx
     call    log_pair
-    mov     rdi, rbx
+    mov     rcx, rbx                    # "op.id argument": split at the first space
+    lea     rdx, [rip+cmd_arg]
+    mov     byte ptr [rdx], 0
+41: mov     al, [rcx]
+    test    al, al
+    jz      44f
+    cmp     al, ' '
+    je      42f
+    inc     rcx
+    jmp     41b
+42: mov     byte ptr [rcx], 0           # terminate the id, copy the argument
+43: inc     rcx
+    cmp     byte ptr [rcx], ' '
+    je      43b
+    xor     r8d, r8d
+45: mov     al, [rcx+r8]
+    mov     [rdx+r8], al
+    test    al, al
+    jz      44f
+    inc     r8d
+    cmp     r8d, 255
+    jb      45b
+    mov     byte ptr [rdx+r8], 0
+44: mov     rdi, rbx
     call    find_op_by_name
     test    rax, rax
     jz      5f
     mov     r12, rax
     call    tf_clear
+    lea     rax, [rip+cmd_arg]          # the argument survives the clear
+    mov     [rip+op_arg], rax
     mov     rdi, r12
     call    run_op
+    mov     qword ptr [rip+op_arg], 0
     jmp     .Ltf_yes
 5:  lea     rdi, [rip+s_unknown]
     mov     rsi, rbx
