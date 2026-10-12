@@ -50,6 +50,7 @@ _start:
 
     call    create_window
     call    kb_timer_init
+    call    mcp_init
     lea     rdi, [rip+s_log_hello]
     call    log_line
     lea     rdi, [rip+s_log_hello2]
@@ -66,7 +67,10 @@ _start:
     mov     eax, [rip+rep_fd]
     mov     [rdi+8], eax
     mov     dword ptr [rdi+12], POLLIN
-    mov     esi, 2
+    lea     rdi, [rip+pollfds+16]       # + MCP listener and clients
+    call    mcp_pollfds
+    lea     esi, [rax+2]
+    lea     rdi, [rip+pollfds]
     mov     edx, -1
     mov     eax, SYS_POLL
     syscall
@@ -78,7 +82,9 @@ _start:
 1:  test    word ptr [rip+pollfds+14], POLLIN
     jz      2f
     call    kb_on_timer
-2:  cmp     dword ptr [rip+quit_flag], 0
+2:  lea     rdi, [rip+pollfds+16]
+    call    mcp_handle
+    cmp     dword ptr [rip+quit_flag], 0
     jne     .Lquit
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
@@ -86,6 +92,7 @@ _start:
     jmp     .Lloop
 
 .Lquit:
+    call    mcp_shutdown
     xor     edi, edi
     mov     eax, SYS_EXIT_GROUP
     syscall
@@ -106,6 +113,11 @@ handle_cli_args:
     call    str_eq
     test    eax, eax
     jnz     .Lcli_version
+    mov     rdi, rbx
+    lea     rsi, [rip+s_arg_bridge]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_bridge
     mov     rdi, rbx
     lea     rsi, [rip+s_arg_selftest]
     call    str_eq
@@ -140,6 +152,11 @@ handle_cli_args:
     lea     rdi, [rip+s_newline]
     call    write_out
     jmp     .Lquit
+.Lcli_bridge:
+    call    mcp_bridge
+    mov     edi, eax
+    mov     eax, SYS_EXIT_GROUP
+    syscall
 .Lcli_selftest:
     call    jobs_init
     call    selftest
@@ -166,18 +183,19 @@ write_out:
 
 .section .bss
 .align 8
-pollfds:        .skip 16                # struct pollfd[2]
+pollfds:        .skip 8*16              # struct pollfd: Wayland, repeat timer, MCP
 
 .section .rodata
 s_arg_version:  .asciz "--version"
 s_arg_v:        .asciz "-v"
 s_arg_list_ops: .asciz "--list-ops"
 s_arg_selftest: .asciz "--selftest"
+s_arg_bridge:   .asciz "--mcp-bridge"
 s_arg_help:     .asciz "--help"
 s_arg_h:        .asciz "-h"
 s_ver_prefix:   .asciz "beemodel "
 e_bad_arg:      .asciz "beemodel: unknown argument: "
-s_help:         .ascii "Usage: beemodel [--version | --list-ops | --selftest | --help]\n"
+s_help:         .ascii "Usage: beemodel [--version | --list-ops | --selftest | --mcp-bridge | --help]\n"
                 .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
                 .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
 .include "version.inc"

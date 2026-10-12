@@ -43,7 +43,9 @@ class Fake:
         srv.listen(1)
         self.home = tempfile.mkdtemp()      # never touch the real ~/BeeModel or cache
         env = dict(os.environ, WAYLAND_DISPLAY=self.path, HOME=self.home,
-                   XDG_CACHE_HOME=os.path.join(self.home, 'cache'))
+                   XDG_CACHE_HOME=os.path.join(self.home, 'cache'),
+                   XDG_RUNTIME_DIR=self.home)       # MCP socket lands here
+        self.env = env
         self.t0 = time.time()
         self.proc = subprocess.Popen([BIN], env=env)
         self.first_frame_ms = None
@@ -436,6 +438,7 @@ def main():
     transforms()
     undo_redo()
     files()
+    mcp()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
     sys.exit(1 if FAILS else 0)
@@ -617,6 +620,126 @@ def files():
     auto = os.path.join(T, 'cache', 'beemodel', 'autosave.bee')
     check(os.path.exists(auto) and open(auto, 'rb').read(4) == b'BEEM', 'autosave after 25 changes')
     f.shot('29_files.png')
+    f.proc.kill()
+
+
+import json
+
+
+class Mcp:
+    """Minimal MCP client over BeeModel's unix socket (newline-delimited
+    JSON-RPC), pumping the fake compositor while it waits."""
+    def __init__(self, fake):
+        self.f, self.next_id = fake, 1
+        self.s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        for _ in range(50):
+            try:
+                self.s.connect(os.path.join(fake.home, 'beemodel.sock')); break
+            except OSError:
+                fake.pump(0.1)
+        self.s.setblocking(False)
+        self.buf = b''
+
+    def send(self, obj):
+        self.s.sendall(json.dumps(obj).encode() + b'\n')
+
+    def call(self, method, params=None, timeout=5.0):
+        rid = self.next_id; self.next_id += 1
+        msg = {'jsonrpc': '2.0', 'id': rid, 'method': method}
+        if params is not None: msg['params'] = params
+        self.send(msg)
+        end = time.time() + timeout
+        while time.time() < end:
+            self.f.pump(0.02)
+            try:
+                chunk = self.s.recv(1 << 20)
+                if chunk: self.buf += chunk
+            except BlockingIOError:
+                pass
+            while b'\n' in self.buf:
+                line, self.buf = self.buf.split(b'\n', 1)
+                r = json.loads(line)
+                if r.get('id') == rid:
+                    return r
+        return None
+
+    def tool(self, name, args=None):
+        r = self.call('tools/call', {'name': name, 'arguments': args or {}})
+        res = (r or {}).get('result', {})
+        return res.get('content', [{}])[0].get('text', ''), res.get('isError')
+
+
+def mcp():
+    """MCP server: protocol, tools, resources, errors and the stdio bridge."""
+    print('  -- MCP --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.enter(600, 300)
+    m = Mcp(f)
+    r = m.call('initialize', {'protocolVersion': '2025-06-18', 'capabilities': {},
+                              'clientInfo': {'name': 'test', 'version': '1'}})
+    res = (r or {}).get('result', {})
+    check(res.get('serverInfo', {}).get('name') == 'beemodel' and res.get('protocolVersion') == '2025-06-18',
+          'initialize: server info and protocol version')
+    m.send({'jsonrpc': '2.0', 'method': 'notifications/initialized'})   # no answer expected
+    r = m.call('tools/list')
+    names = [t['name'] for t in (r or {}).get('result', {}).get('tools', [])]
+    check({'scene_summary', 'create_primitive', 'set_transform', 'select', 'delete', 'undo'} <= set(names)
+          and 'op_file_save' in names and 'op_file_exit' not in names,
+          f'tools/list: curated tools + {len(names)} total, unsafe operators hidden')
+    text, err = m.tool('scene_summary')
+    objs = json.loads(text.split('\n')[0]).get('objects', []) if text else []
+    check([o['name'] for o in objs] == ['Camera', 'Light', 'Cube'] and objs[2]['location'] == [0, 1, 0],
+          'scene_summary returns the default scene as JSON')
+    text, err = m.tool('create_primitive', {'type': 'sphere', 'name': 'Ball', 'location': [3, 1, 0]})
+    f.pump(0.3)
+    check(text.startswith('Ball') and not err and bright(px(f, *project((3, 1, 0)))),
+          'create_primitive adds "Ball" at (3,1,0) - visible in the viewport')
+    text, err = m.tool('set_transform', {'name': 'Ball', 'location': [0, 3, 0], 'scale': [0.5, 0.5, 0.5],
+                                         'rotation_deg': [0, 45, 0]})
+    objs = json.loads(m.tool('scene_summary')[0].split('\n')[0])['objects']
+    ball = [o for o in objs if o['name'] == 'Ball']
+    check(ball and ball[0]['location'] == [0, 3, 0] and ball[0]['scale'] == [0.5, 0.5, 0.5]
+          and abs(ball[0]['rotation_deg'][1] - 45) < 0.01, 'set_transform moves, rotates and scales')
+    m.tool('select', {'names': ['Cube']})
+    objs = json.loads(m.tool('scene_summary')[0].split('\n')[0])['objects']
+    check([o['name'] for o in objs if o['selected']] == ['Cube'] and [o['name'] for o in objs if o['active']] == ['Cube'],
+          'select makes the Cube the selected, active object')
+    m.tool('delete', {'names': ['Ball']})
+    names = [o['name'] for o in json.loads(m.tool('scene_summary')[0].split('\n')[0])['objects']]
+    check('Ball' not in names, 'delete removes Ball')
+    m.tool('undo')
+    names = [o['name'] for o in json.loads(m.tool('scene_summary')[0].split('\n')[0])['objects']]
+    check('Ball' in names, 'undo brings it back')
+    path = os.path.join(f.home, 'agent.bee')
+    text, err = m.tool('run_operator', {'id': 'file.save', 'arg': path})
+    check(os.path.exists(path) and not err, 'run_operator file.save writes the scene')
+    text, err = m.tool('run_operator', {'id': 'file.exit'})
+    check(err and f.proc.poll() is None, 'operators that are not agent-safe are refused')
+    text, err = m.tool('op_view_toggle_grid')
+    check(text.startswith('ok') and not err, 'operators are callable as tools (op_view_toggle_grid)')
+    text, err = m.tool('no_such_tool')
+    check(err, 'unknown tool reports isError')
+    r = m.call('resources/read', {'uri': 'bee://scene'})
+    txt = (r or {}).get('result', {}).get('contents', [{}])[0].get('text', '')
+    check('"objects"' in txt, 'resources/read bee://scene')
+    r = m.call('no/such/method')
+    check((r or {}).get('error', {}).get('code') == -32601, 'unknown method: JSON-RPC error -32601')
+    # the stdio bridge, as Claude Code would launch it
+    b = subprocess.Popen([BIN, '--mcp-bridge'], env=f.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    b.stdin.write(json.dumps({'jsonrpc': '2.0', 'id': 7, 'method': 'ping'}).encode() + b'\n'); b.stdin.flush()
+    line = b''
+    end = time.time() + 5
+    os.set_blocking(b.stdout.fileno(), False)
+    while time.time() < end and not line.endswith(b'\n'):
+        f.pump(0.05)
+        try:
+            line += os.read(b.stdout.fileno(), 65536)
+        except BlockingIOError:
+            pass
+    check(json.loads(line or b'{}').get('id') == 7, '--mcp-bridge relays JSON-RPC over stdio')
+    b.stdin.close(); b.wait(timeout=5)
+    f.shot('30_mcp.png')
     f.proc.kill()
 
 
