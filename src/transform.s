@@ -87,9 +87,9 @@ s_cancelled:    .asciz "  transform cancelled"
 .align 8
 mode_names:     .quad 0, s_move, s_rotate, s_scale
 
-OPERATOR op_grab,   "transform.grab",   "Grab / Move", op_tm_start, arg=1, key=KEY_G, flags=OPF_QUIET|OPF_UNDO, doc="Move the selection (X/Y/Z constrain, Ctrl snaps)"
-OPERATOR op_rotate, "transform.rotate", "Rotate",      op_tm_start, arg=2, key=KEY_R, flags=OPF_QUIET|OPF_UNDO, doc="Rotate the selection with the mouse"
-OPERATOR op_scale,  "transform.scale",  "Scale",       op_tm_start, arg=3, key=KEY_S, flags=OPF_QUIET|OPF_UNDO, doc="Scale the selection with the mouse"
+OPERATOR op_grab,   "transform.grab",   "Grab / Move", op_tm_start, arg=1, key=KEY_G, flags=OPF_QUIET, doc="Move the selection (X/Y/Z constrain, Ctrl snaps)"
+OPERATOR op_rotate, "transform.rotate", "Rotate",      op_tm_start, arg=2, key=KEY_R, flags=OPF_QUIET, doc="Rotate the selection with the mouse"
+OPERATOR op_scale,  "transform.scale",  "Scale",       op_tm_start, arg=3, key=KEY_S, flags=OPF_QUIET, doc="Scale the selection with the mouse"
 
 .text
 
@@ -239,6 +239,9 @@ tm_start:
     inc     ecx
     cmp     ecx, 3
     jb      4b
+    lea     rcx, [rip+mode_names]       # one undo step for the whole transform
+    mov     rdi, [rcx+r12*8]
+    call    undo_push
     mov     edi, [rip+vp_area]
     mov     [rip+tm_area], edi
     call    vp_prepare
@@ -846,6 +849,7 @@ tm_cancel:
     cmp     dword ptr [rip+tm_mode], 0
     je      9f
     call    restore
+    call    undo_drop_last
     mov     dword ptr [rip+tm_mode], 0
     mov     dword ptr [rip+tm_drag], 0
     lea     rdi, [rip+s_cancelled]

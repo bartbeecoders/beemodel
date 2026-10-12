@@ -18,6 +18,7 @@
 .globl pool_alloc
 .globl pool_free
 .globl pool_get
+.globl pool_clear
 .globl frame_arena
 
 .equ MAP_RESERVE,   0x4022              # private | anonymous | noreserve
@@ -211,6 +212,14 @@ pool_get:
     add     rax, [rdi+PL_BASE]
     ret
 8:  xor     eax, eax
+    ret
+
+# pool_clear(rdi=pool) - forget every slot (generations are kept, so old
+# handles stay stale)
+pool_clear:
+    mov     dword ptr [rdi+PL_COUNT], 0
+    mov     dword ptr [rdi+PL_FREE], -1
+    mov     dword ptr [rdi+PL_NEXT], 0
     ret
 
 # pool_free(rdi=pool, esi=handle) -> eax = 1 if freed

@@ -31,6 +31,7 @@ stays private to the module.
 | `mesh.s` | Polygon meshes (loops, n-gons), edge/triangle derivation, primitive generators |
 | `raster.s` | Solid viewport rasterizer: parallel setup, binning and tiles; depth + ID buffers; selection outline; picking |
 | `transform.s` | Modal grab / rotate / scale, constraints, snapping, numeric input, gizmos |
+| `undo.s` | Undo / redo history of scene snapshots (shared, reference-counted meshes) |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |
 | `font.s` | Embedded 8×16 bitmap font |
 
@@ -272,6 +273,21 @@ click restores the originals exactly, and nothing drifts.
   accepts the digit row, the keypad, `.` `,` and `-`.
 
 While a transform runs it receives every pointer, button and key event.
+
+## Undo / redo
+
+Before an operator flagged `OPF_UNDO` runs, `run_op` calls `undo_push`. A
+transform records its step when it starts and drops it again on cancel, and
+operators that end up changing nothing drop theirs too. A step is a snapshot
+of every object record (128 bytes) in outliner order, plus which one was
+active, stored in its own mapping.
+
+Meshes are immutable and reference counted (`mesh_ref` / `mesh_unref`), so
+snapshots and duplicated objects share geometry instead of copying it. Undo
+pushes the current scene onto the redo stack and rebuilds the scene from the
+step (`pool_clear`, then re-create the objects). Redo is the mirror image.
+The history keeps at most 256 steps and 64 MiB and drops the oldest step
+when full. `edit.undo_history` lists the steps in the console.
 
 ## Event loop & rendering
 

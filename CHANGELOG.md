@@ -25,6 +25,11 @@ project uses [Semantic Versioning](https://semver.org/).
 - Modal transforms like Blender's: G / R / S with X/Y/Z constraints, Ctrl
   snapping (1 m, 15°, 0.1), typed values, Enter / LMB to confirm and Esc /
   RMB to cancel. Move / Rotate / Scale tool gizmos can be dragged.
+- Undo / redo (Ctrl+Z / Ctrl+Shift+Z) for create, delete, duplicate and
+  transforms. Snapshots share reference-counted meshes; the history is
+  bounded (256 steps / 64 MiB). Edit › Undo History lists the steps.
+- Shift+D shares the mesh with the original (copy-on-write arrives with
+  edit mode), so duplicates cost almost no memory.
 ### Changed
 - G, R and S now start transforms (Blender layout). The grid toggle moved to
   Shift+G, and the tools to Shift+Q / W / E / R.
