@@ -203,3 +203,27 @@
 .equ POLLIN,            1
 .equ POLLERR,           8
 .equ POLLHUP,           16
+
+# ---- TrueType font struct (ttf.s) ---------------------------------------------
+.equ FNT_BASE,      0       # mapped file
+.equ FNT_SIZE,      8
+.equ FNT_GLYF,      16
+.equ FNT_LOCA,      24
+.equ FNT_HMTX,      32
+.equ FNT_CMAP,      40      # chosen cmap subtable
+.equ FNT_CMAPFMT,   48
+.equ FNT_UPEM,      52
+.equ FNT_LOCFMT,    56
+.equ FNT_NHM,       60
+.equ FNT_NGLYPH,    64
+.equ FNT_SCALE,     68      # float px per font unit
+.equ FNT_LOADED,    80
+.equ FNT_PX,        84
+.equ FNT_BASELINE,  88      # baseline offset inside a CHAR_H text row
+.equ FNT_ASCU,      92
+.equ FNT_DESCU,     96
+.equ FNT_SZ,        128
+.equ FONT_UI,       0
+.equ FONT_MONO,     1
+.equ UI_FONT_PX,    15
+.equ MONO_FONT_PX,  14

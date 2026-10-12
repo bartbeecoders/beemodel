@@ -37,15 +37,25 @@ jobs:
           python-version: "3.12"
 
       - name: Install test dependencies
-        run: python -m pip install --quiet pillow
+        run: |
+          python -m pip install --quiet pillow
+          sudo apt-get install -y --no-install-recommends fonts-dejavu-core >/dev/null
 
-      - name: Headless UI test (fake Wayland compositor)
+      - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 120 python tools/fakewl.py build/shots
+
+      - name: Headless UI test (bitmap font fallback)
+        env:
+          BEEMODEL_FONT: none
+          BEEMODEL_MONO_FONT: none
+        run: timeout 120 python tools/fakewl.py build/shots-bitmap
 
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: build/shots/
+          path: |
+            build/shots/
+            build/shots-bitmap/
           if-no-files-found: ignore

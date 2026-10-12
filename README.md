@@ -69,11 +69,17 @@ src/ops.s       operator spine: operator table, runner, keymap, --list-ops
 src/viewport.s  camera, projection, clipping, grid/axes/gizmo (+ its operators)
 src/keyboard.s  XKB keymap parser, levels, dead keys, layout-aware shortcuts, key repeat
 src/textfield.s UTF-8 text field (console command line)
+src/ttf.s       TrueType parser, anti-aliased rasterizer, glyph cache
+src/text.s      font selection, UTF-8 text drawing and measurement
 src/log.s       string builder + console log
 src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
 src/const.inc   syscalls, opcodes, layout metrics, theme colours
 src/macros.inc  operator record layout + OPERATOR macro
 ```
+
+Text is rendered with your system's TrueType fonts (Noto / DejaVu /
+Liberation, found automatically). Set `BEEMODEL_FONT` / `BEEMODEL_MONO_FONT`
+to a `.ttf` path to choose others, or to `none` for the built-in bitmap font.
 
 Each `.s` file is a separate module linked by `ld`. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the calling convention, the

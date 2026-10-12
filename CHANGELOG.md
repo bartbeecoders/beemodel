@@ -25,6 +25,13 @@ project uses [Semantic Versioning](https://semver.org/).
   operator by id.
 - New operators: console.focus (Enter), console.clear (Ctrl+L),
   console.list_ops.
+- TrueType text, with no FreeType: our own TrueType parser (cmap 4/12,
+  composite glyphs), an anti-aliased signed-area rasterizer, a glyph cache and
+  alpha blending. The UI uses a proportional sans font and the console a
+  monospace font, both loaded from the system (Noto / DejaVu / Liberation).
+- Full Unicode text (UTF-8): accented and international characters display
+  correctly. `BEEMODEL_FONT` / `BEEMODEL_MONO_FONT` select fonts; `none`
+  keeps the bitmap font.
 
 ### Changed
 - Source split into separate modules (object files) with explicit exports.

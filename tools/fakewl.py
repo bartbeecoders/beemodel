@@ -268,10 +268,10 @@ def main():
     f.move(150, 96)                      # hover an item
     f.shot('03_menu_view.png')
     f.click(150, 120)                    # View > Console Pane (toggle off)
-    check(px(f, 600, 700) != 0x2a2e36, 'console pane hidden')
+    check(px(f, 1005, 662) != 0x2a2e36, 'console pane hidden')
     f.shot('04_console_hidden.png')
     f.click(130, 44); f.click(150, 120)  # toggle it back on
-    check(px(f, 600, 700) == 0x2a2e36, 'console pane shown again')
+    check(px(f, 1005, 662) == 0x2a2e36, 'console pane shown again')
     f.move(212, 300)
     check(f.cursor == 26, 'ew-resize cursor on splitter')
     f.drag(212, 300, 330, 300)           # left splitter
@@ -329,6 +329,13 @@ def main():
     f.key(28)                            # run it
     f.type('nope'); f.key(28)            # unknown command is reported, app lives on
     f.shot('13_console_commands.png')
+    # Unicode via the Belgian layout: AE02 = e-acute, AD11 = dead circumflex
+    f.keymap('tests/keymaps/be.xkb')
+    f.key(3); f.key(26); f.key(18); f.mods(1); f.key(26); f.mods(0); f.key(18)
+    f.shot('14_unicode_dead_keys.png')
+    f.mods(4); f.key(16); f.mods(0)      # Ctrl + key labelled A (AZERTY) selects all
+    f.key(14)
+    f.keymap('tests/keymaps/us.xkb')
     f.type('file.exit'); f.key(28)       # quit through the command line
     f.pump(0.5)
     try:

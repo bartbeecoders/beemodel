@@ -13,7 +13,7 @@
 .globl clip_y0
 .globl clip_y1
 .globl draw_line
-.globl draw_text
+.globl draw_text_bitmap
 .globl fb_h
 .globl fb_ptr
 .globl fb_w
@@ -206,10 +206,10 @@ fill_vgradient:
     ret
 
 # -----------------------------------------------------------------------------
-# draw_text(edi=x, esi=y, rdx=asciz, ecx=color) -> eax = x after last glyph
-#   8x16 bitmap font, glyphs fully outside the clip are skipped.
+# draw_text_bitmap(edi=x, esi=y, rdx=asciz, ecx=color) -> eax = x after
+#   8x16 bitmap font (fallback when no TrueType font is available), glyphs fully outside the clip are skipped.
 # -----------------------------------------------------------------------------
-draw_text:
+draw_text_bitmap:
     push    rbx
     push    rbp
     push    r12
