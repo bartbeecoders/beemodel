@@ -309,6 +309,7 @@
 .equ OB_FLAGS,      80
 .equ OB_TYPE,       84
 .equ OB_MODS,       88      # modifier stack (mods.s), or 0
+.equ OB_MAT,        96      # material: index + 1 in the scene's materials, 0 = none
 .equ OB_SZ,         128
 .equ OBF_SELECTED,  1
 .equ OT_MESH,       0

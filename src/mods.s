@@ -44,6 +44,7 @@
 .globl md_y
 .globl active_mesh_obj
 .globl mod_param_set_obj
+.globl fmt_val3
 
 .equ MB_N,      2048            # blocks in the pool
 .equ MB_REFS,   0
@@ -2507,6 +2508,11 @@ mods_props_hit:
 # mods_drag_begin(edi=hit code) - buttons act at once; fields start a drag
 #   (one undo step for the whole drag)
 mods_drag_begin:
+    xor     eax, eax                    # the material section's?
+    test    edi, 0x40000
+    setnz   al
+    mov     [rip+md_mat], eax
+    jnz     mats_drag_begin
     push    rbx
     push    r12
     sub     rsp, 8
@@ -2570,6 +2576,8 @@ mods_drag_begin:
 
 # mods_drag_move(edi=x logical)
 mods_drag_move:
+    cmp     dword ptr [rip+md_mat], 0
+    jne     mats_drag_move
     push    rbx
     push    r12
     push    r13
@@ -2664,6 +2672,7 @@ btn_ops:        .quad 0, 0, op_mod_remove, op_mod_up, op_mod_down, op_mod_apply,
 arg_buf:        .skip 16
 ev_mark:        .skip 8
 ev_owner:       .skip 8
+md_mat:         .skip 4
 mw_tmp:         .skip MOD_SZ*MOD_MAX
 cc_mark:        .skip 8
 md_x:           .skip 4

@@ -92,6 +92,7 @@ k_type:         .asciz "type"
 k_location:     .asciz "location"
 k_rotation:     .asciz "rotation_deg"
 k_scale:        .asciz "scale"
+k_name_m:       .asciz "name"
 k_names:        .asciz "names"
 k_extend:       .asciz "extend"
 k_arg:          .asciz "arg"
@@ -133,7 +134,7 @@ s_op_prefix:    .asciz "op_"
 s_dash:         .asciz " - "
 # curated tools (schemas are static JSON)
 curated_tools:
-    .ascii "{\"name\":\"scene_summary\",\"description\":\"List every object: name, type, location, rotation_deg, scale, selection and mesh size.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
+    .ascii "{\"name\":\"scene_summary\",\"description\":\"List every object (name, type, location, rotation_deg, scale, selection, mesh size, modifiers, material) and every material with its values.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
     .ascii "{\"name\":\"create_primitive\",\"description\":\"Add an object. type: cube, sphere, cylinder, cone, torus, plane, grid, light or camera. Default size: 2 m cube / 1 m radius. Optional name, location, rotation_deg, scale (3 numbers each).\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"type\":{\"type\":\"string\",\"enum\":[\"cube\",\"sphere\",\"cylinder\",\"cone\",\"torus\",\"plane\",\"grid\",\"light\",\"camera\"]},\"name\":{\"type\":\"string\"},\"location\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"rotation_deg\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"scale\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"required\":[\"type\"]}},"
     .ascii "{\"name\":\"set_transform\",\"description\":\"Change an object's location, rotation_deg and/or scale (3 numbers each), or rename it with new_name.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"name\":{\"type\":\"string\"},\"new_name\":{\"type\":\"string\"},\"location\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"rotation_deg\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}},\"scale\":{\"type\":\"array\",\"items\":{\"type\":\"number\"}}},\"required\":[\"name\"]}},"
     .ascii "{\"name\":\"select\",\"description\":\"Select objects by name (the last one becomes active). extend keeps the current selection.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"names\":{\"type\":\"array\",\"items\":{\"type\":\"string\"}},\"extend\":{\"type\":\"boolean\"}},\"required\":[\"names\"]}},"
@@ -182,6 +183,9 @@ s_ok:           .asciz "ok"
 # scene summary JSON pieces
 j_objs_a:       .asciz "{\"units\":\"meters, Y up, rotation_deg = Euler XYZ\",\"objects\":["
 j_objs_b:       .asciz "]}"
+j_objs_b2:      .asciz "]}"
+j_material:     .asciz ",\"material\":"
+j_mats:         .asciz "],\"materials\":["
 j_type_names:   .asciz "mesh"
                 .asciz "light"
                 .asciz "camera"
@@ -1769,12 +1773,95 @@ scene_json:
     jmp     5b
 7:  mov     edi, ']'
     call    wb_char
-8:  mov     edi, '}'
+8:  mov     rdi, r12                    # "material":"Gold"
+    call    mat_of
+    test    eax, eax
+    js      81f
+    push    rax
+    lea     rsi, [rip+j_material]
+    call    wb_str
+    pop     rdi
+    call    mat_get
+    mov     rsi, rax
+    call    jb_q
+81: mov     edi, '}'
     call    wb_char
     inc     ebx
     jmp     1b
-9:  lea     rsi, [rip+j_objs_b]
+9:  call    mats_json                   # ],"materials":[...]}
+    lea     rsi, [rip+j_objs_b2]
     call    wb_str
+    pop     r12
+    pop     rbx
+    ret
+
+# mats_json - closes the objects array and writes the materials:
+#   ],"materials":[{"name":"Gold","base":[1,0.766,0.336],"metallic":1,...}
+mats_json:
+    push    rbx
+    push    r12
+    push    r13
+    lea     rsi, [rip+j_mats]
+    call    wb_str
+    xor     ebx, ebx
+1:  call    mat_count
+    cmp     ebx, eax
+    jae     9f
+    test    ebx, ebx
+    jz      2f
+    mov     edi, ','
+    call    wb_char
+2:  mov     edi, '{'
+    call    wb_char
+    lea     rsi, [rip+k_name_m]
+    call    jb_key
+    mov     edi, ebx
+    call    mat_get
+    mov     rsi, rax
+    call    jb_q
+    xor     r12d, r12d                  # every parameter
+3:  cmp     r12d, 11
+    jae     6f
+    mov     edi, ','
+    call    wb_char
+    imul    eax, r12d, 32
+    lea     rcx, [rip+mat_params]
+    mov     rsi, [rcx+rax]
+    call    jb_key
+    imul    eax, r12d, 32
+    lea     rcx, [rip+mat_params]
+    cmp     dword ptr [rcx+rax+12], 3
+    jne     5f
+    mov     edi, '['                    # a colour
+    call    wb_char
+    xor     r13d, r13d
+4:  test    r13d, r13d
+    jz      41f
+    mov     edi, ','
+    call    wb_char
+41: mov     edi, ebx
+    mov     esi, r12d
+    mov     edx, r13d
+    call    mat_param_get
+    call    jb_num
+    inc     r13d
+    cmp     r13d, 3
+    jb      4b
+    mov     edi, ']'
+    call    wb_char
+    jmp     51f
+5:  mov     edi, ebx
+    mov     esi, r12d
+    xor     edx, edx
+    call    mat_param_get
+    call    jb_num
+51: inc     r12d
+    jmp     3b
+6:  mov     edi, '}'
+    call    wb_char
+    inc     ebx
+    jmp     1b
+9:  pop     r13
     pop     r12
     pop     rbx
     ret

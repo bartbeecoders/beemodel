@@ -222,7 +222,9 @@ raster_scene:
     add     r13d, ecx
     lea     ecx, [rbx+1]
     mov     [r14+RO_ID], ecx
-    mov     dword ptr [r14+RO_COL], COL_SOLID
+    mov     rdi, [r14+RO_OBJ]           # its material's colour
+    call    mat_display_color
+    mov     [r14+RO_COL], eax
     lea     rdi, [rip+frame_arena]      # camera-space vertices
     imul    esi, [r15+ME_NVERTS], 12
     call    arena_alloc
@@ -556,7 +558,8 @@ job_tris:
     inc     r13d                        # past this object's triangles
     jmp     .Ljt_loop
 3:  mov     r15, [r14+RO_MESH]
-    mov     dword ptr [rsp+16], COL_SOLID
+    mov     ecx, [r14+RO_COL]
+    mov     [rsp+16], ecx
     mov     rcx, [r14+RO_PSEL]          # selected polygon (edit mode)?
     test    rcx, rcx
     jz      31f

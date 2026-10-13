@@ -454,6 +454,7 @@ def main():
     booleans()
     analysis_repair()
     hardsurface_walkthrough()
+    materials_ui()
     scripting()
     beescript_cli()
     modeling_budgets()
@@ -1137,6 +1138,46 @@ def hardsurface_walkthrough():
     check(size > 84 and (size - 84) % 50 == 0, f'exported as STL ({(size - 84) // 50 if size else 0} triangles)')
     dt = time.time() - t0
     check(dt < WALKTHROUGH_BUDGET_S, f'the whole walkthrough in {dt:.1f} s (budget {WALKTHROUGH_BUDGET_S} s)')
+    f.proc.kill()
+
+
+def materials_ui():
+    """Materials: + New in Properties, dragging a value, undo, the viewport
+    colour, files, scripts and agents."""
+    print('  -- materials --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    grey = px(f, *project((0.3, 2, 0.3)))
+    f.click(1238, 341); f.pump(0.3)             # Material: + New
+    check(q('print(matof("Cube"), matget("Material", "roughness"))') == 'Material 0.5',
+          'Properties > Material > + New makes a material and gives it to the cube')
+    f.drag(1140, 425, 1180, 425, steps=4)       # roughness +40 px
+    r = q('matget("Material", "roughness")')
+    check(r == '= 0.7', f'dragging roughness changes it ({r})')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    check(q('matget("Material", "roughness")') == '= 0.5', 'one undo reverts the whole drag')
+    q('matset("Material", "base", 1, 0.766, 0.336)')
+    f.pump(0.3)
+    gold = px(f, *project((0.3, 2, 0.3)))
+    check(gold != grey and (gold >> 16) > (gold & 0xff) + 40, f'the viewport shows the base colour ({gold:06x}, was {grey:06x})')
+    f.shot('47_material.png')
+    s = json.loads(m.tool('scene_summary')[0].split('\n')[0])
+    cube = [o for o in s['objects'] if o['name'] == 'Cube'][0]
+    check(cube.get('material') == 'Material' and s['materials'][0]['base'] == [1, 0.766, 0.336],
+          'scene_summary shows the material and its values to agents')
+    f.mods(4); f.key(44); f.mods(0)             # undo the colour, then the + New
+    f.mods(4); f.key(44); f.mods(0)
+    check(q('print(matof("Cube"), count())') == 'nil 3', 'undo removes the material again')
+    f.mods(5); f.key(44); f.mods(0)             # Ctrl+Shift+Z twice
+    f.mods(5); f.key(44); f.mods(0)
+    check(q('print(matof("Cube"), matget("Material", "base", 1))') == 'Material 0.766', 'redo brings it back')
+    path = os.path.join(f.home, 'mat.bee')
+    q(f'op("file.save", "{path}"); op("file.new"); op("file.open", "{path}")')
+    check(q('print(matof("Cube"), matget("Material", "base", 1))') == 'Material 0.766', 'materials are saved and opened')
     f.proc.kill()
 
 

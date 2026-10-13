@@ -6,6 +6,26 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Materials with principled parameters:
+  - base colour, metallic, roughness, specular, IOR;
+  - transmission;
+  - emission and its strength;
+  - clearcoat and its roughness;
+  - alpha.
+
+  Where they appear:
+  - **Scene:** one material table, shared with undo (copy-on-write), and
+    a per-object assignment.
+  - **Properties › Material:** + New, drag the name to pick another
+    material, drag values, x to remove.
+  - **Viewport:** solid shading shows the base colour.
+  - **Files:** saved in `.bee` (MATS and OMAT chunks) and exported as
+    MTL with OBJ.
+  - **Scripts and agents:** BeeScript `material`, `matset`, `matget`,
+    `assign`, `matof`; the `material.new / assign / set / remove`
+    operators; materials in `scene_summary`.
+
 ## [0.5.0] - 2026-10-13
 
 Phase 4 of the masterplan, "Polygon modeling". BeeModel becomes a modeler: edit
