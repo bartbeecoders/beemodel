@@ -508,6 +508,8 @@ builtins:
     .long 0, 0
     .quad bn_infill, b_infill
     .long 5, 5
+    .quad bn_thinnest, b_thinnest
+    .long 1, 1
 builtins_end:
 .equ B_SZ, 24
 
@@ -643,6 +645,7 @@ bn_sdist:      .asciz "sdist"
 bn_smesh:      .asciz "smesh"
 bn_sclear:     .asciz "sclear"
 bn_infill:      .asciz "infill"
+bn_thinnest:    .asciz "thinnest"
 .align 8
 fw_lat:         .quad fw_gyroid
                 .long 0, 0
@@ -657,6 +660,7 @@ s_shape:        .asciz "Shape"
 .align 4
 sd_one:         .float 1.0
 sd_half:        .float 0.5
+sd_big:         .float 1.0e29
 e_no_face:      .asciz "no such face"
 e_ft_long:      .asciz "a feature value is 31 characters at most: "
 e_ft_word:      .asciz "not understood here: "
@@ -5808,6 +5812,36 @@ b_infill:
     pop     r12
     pop     rbx
     jmp     ret_num
+
+# thinnest(object) -> its thinnest wall (scene units; nil when no ray meets
+#   another face): from each face straight in to the next
+b_thinnest:
+    push    rbx
+    sub     rsp, 16
+    call    a_meshobj
+    mov     rbx, rax
+    mov     rdi, rax
+    call    th_faces
+    test    rax, rax
+    jz      8f
+    mov     rcx, [rbx+OB_MESH]
+    mov     edx, [rcx+ME_NPOLYS]
+    movss   xmm0, [rip+sd_big]
+    xor     ecx, ecx
+1:  cmp     ecx, edx
+    jae     2f
+    minss   xmm0, [rax+rcx*4]
+    inc     ecx
+    jmp     1b
+2:  comiss  xmm0, [rip+sd_big]
+    jae     8f
+    cvtss2sd xmm0, xmm0
+    add     rsp, 16
+    pop     rbx
+    jmp     ret_num
+8:  add     rsp, 16
+    pop     rbx
+    jmp     ret_nil
 
 # feature(index, slot 0..2 | 3 = suppressed, value) -> its status afterwards
 #   (0 = ok)

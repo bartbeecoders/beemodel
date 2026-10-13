@@ -235,7 +235,9 @@ Scripts and agents call the same operators with the value as the argument:
 
 Files: **Ctrl+S** saves (`.bee`), **Ctrl+O** opens, and File › Import / Export
 handle **OBJ** (with MTL materials), **STL** and **glTF 2.0** (`.glb` / `.gltf`, with PBR
-materials). Commands take paths on the command line, for
+materials). For making things there is **3MF** for 3D printers (millimetres,
+Z up), **DXF** and **SVG** of a sketch, and **PDF** drawings (front / top /
+right views with hidden lines and dimensions). Commands take paths on the command line, for
 example `file.save ~/BeeModel/chair.bee` or `file.import_stl ~/part.stl`.
 Without a path, the command line opens pre-filled. **Shift+F12** saves a PNG
 screenshot. The scene autosaves every 25 changes (`file.recover` restores
@@ -372,6 +374,9 @@ src/exr.s       OpenEXR writer (half floats, ZIP)
 src/formats.s   .bee files, OBJ / STL import + export, file operators
 src/mtl.s       MTL import (OBJ materials)
 src/gltf.s      glTF 2.0 import / export
+src/fab.s       3MF export, DXF / SVG of sketches
+src/drawing.s   PDF drawings: views, hidden lines, dimensions
+src/print.s     printability: wall thickness, print check
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay

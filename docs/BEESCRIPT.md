@@ -130,6 +130,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `feature(i, slot, value)` | Changes a feature's value: slot 0 the first value (distance, depth, diameter, wall, radius, step), 1 the second (a hole's depth), 3 suppressed (1) or not (0); returns its status |
 | `area(object)`, `mass(object)`, `centroid(object, axis)` | Mass properties in world space and scene units: surface area, mass in grams (volume x the material's `density` in g/cm^3; no material: 1), centre of mass (`"x"`, `"y"`, `"z"` or 0..2) |
 | `fangle(object, face a, face b)` | The angle between two faces' normals (radians; `deg()` converts) |
+| `thinnest(object)` | The thinnest wall (scene units): from every face straight in to the next face; `nil` when nothing is behind any face |
 | `measurement()` | The measure tool's current result (Shift+M in the viewport): the distance between two clicked points, the angle at the middle one of three (radians), or `nil` |
 | `infill(body, shell, "gyroid" \| "grid", cell, wall)` | A lattice filling a shell's cavity (reaching a quarter wall into the walls), kept as its own closed shell in the body; slicers join overlapping shells |
 | `features()`, `fstatus(i)` | The number of features; a feature's status: 0 ok, 1 sketch missing, 2 no closed profile, 3 the geometry failed, 4 a value does not evaluate, 5 nothing to work on, 6 bad reference, 7 suppressed, 8 body missing |

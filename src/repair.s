@@ -18,17 +18,24 @@
 .globl an_count
 .globl analysis_draw
 .globl an_flags
+.globl an_check
+.globl mesh_analyze
+.globl an_res
+.globl an_fcls
 
 .equ AN_NORMALS,  1
 .equ AN_NONMAN,   2
 .equ AN_BOUND,    4
 .equ AN_DEGEN,    8
 .equ AN_OVER,     16
+.equ AN_THIN,     32                # print.s: wall thickness
 
 .equ EC_BOUND,    1             # edge classes
 .equ EC_NONMAN,   2
 .equ FC_DEGEN,    1             # face classes
 .equ FC_OVER,     2
+.equ FC_THIN,     4                 # wall under the minimum
+.equ FC_THIN2,    8                 #  under twice it
 
 .equ SCR_MAX,     65536         # meshops.s's scratch polygon
 .equ COL_AN_NORMAL, 0xa8e050
@@ -36,6 +43,8 @@
 .equ COL_AN_NONMAN, 0xf04848
 .equ COL_AN_DEGEN,  0xe050e0
 .equ COL_AN_OVER,   0xf08040
+.equ COL_AN_THIN,   0xff3030
+.equ COL_AN_THIN2,  0xf0d040
 
 .section .bss
 .align 8
@@ -81,7 +90,8 @@ s_an_title:     .asciz "Analysis: "
 s_an_b:         .asciz " boundary  "
 s_an_n:         .asciz " non-manifold  "
 s_an_d:         .asciz " degenerate  "
-s_an_o:         .asciz " overhang"
+s_an_o:         .asciz " overhang  "
+s_an_t:         .asciz " thin"
 s_an_l:         .asciz " loose  "
 s_rp_head:      .asciz "repair: merged "
 s_rp_deg:       .asciz " vertices, removed "
@@ -228,6 +238,34 @@ mesh_analyze:
 52: inc     r15d
     jmp     .Lma_poly
 .Lma_edges:
+    test    dword ptr [rip+an_flags], AN_THIN   # wall thickness classes
+    jz      .Lma_e0
+    mov     rdi, rbp
+    call    th_faces
+    test    rax, rax
+    jz      .Lma_e0
+    mov     [rsp+24], rax
+    call    th_minw
+    movss   [rsp+32], xmm0
+    addss   xmm0, xmm0
+    movss   [rsp+36], xmm0
+    xor     r15d, r15d
+1:  cmp     r15d, [rbx+ME_NPOLYS]
+    jae     .Lma_e0
+    mov     rax, [rsp+24]
+    movss   xmm0, [rax+r15*4]
+    mov     rcx, [rip+an_fcls]
+    comiss  xmm0, [rsp+32]
+    jae     2f
+    or      byte ptr [rcx+r15], FC_THIN
+    inc     dword ptr [rip+an_res+20]
+    jmp     3f
+2:  comiss  xmm0, [rsp+36]
+    jae     3f
+    or      byte ptr [rcx+r15], FC_THIN2
+3:  inc     r15d
+    jmp     1b
+.Lma_e0:
     xor     r15d, r15d
 1:  cmp     r15d, [rbx+ME_NEDGES]
     jae     3f
@@ -608,7 +646,15 @@ analysis_draw:
     jz      31f
     test    dword ptr [rip+an_flags], AN_DEGEN
     jnz     33f
-31: mov     ebp, COL_AN_OVER
+31: test    dword ptr [rip+an_flags], AN_THIN
+    jz      32f
+    mov     ebp, COL_AN_THIN
+    test    r15d, FC_THIN
+    jnz     33f
+    mov     ebp, COL_AN_THIN2
+    test    r15d, FC_THIN2
+    jnz     33f
+32: mov     ebp, COL_AN_OVER
     test    r15d, FC_OVER
     jz      34f
     test    dword ptr [rip+an_flags], AN_OVER
@@ -663,7 +709,7 @@ analysis_draw:
     lea     rdi, [rip+s_an_title]
     call    fmt_str
     xor     r14d, r14d
-4:  cmp     r14d, 5
+4:  cmp     r14d, 6
     jae     5f
     lea     rax, [rip+an_res]
     mov     edi, [rax+r14*4]
@@ -806,7 +852,7 @@ normal_line:
 
 .section .rodata
 .align 8
-an_legend:      .quad s_an_b, s_an_n, s_an_d, s_an_l, s_an_o
+an_legend:      .quad s_an_b, s_an_n, s_an_d, s_an_l, s_an_o, s_an_t
 .text
 
 # =============================================================================

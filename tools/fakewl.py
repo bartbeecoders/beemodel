@@ -9,7 +9,7 @@ and writes PNG screenshots. Runs completely isolated from the real desktop.
 
 usage: tools/fakewl.py [outdir]
 """
-import mmap, os, select, socket, struct, subprocess, sys, tempfile, time
+import mmap, os, re, select, shutil, socket, struct, subprocess, sys, tempfile, time
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), '..', 'tests', 'golden')
 GOLDEN = {'01_initial.png', '03_menu_view.png', '17_two_viewports.png',
@@ -470,6 +470,7 @@ def main():
     features()
     measuring()
     sdf_kernel()
+    fabrication()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2189,6 +2190,94 @@ def sdf_kernel():
       'c = ssub(b, smove(scyl(0.4, 6), 0, 1, 0))\nsmesh("Blend", c, 96)\nselect("Blend")')
     f.pump(0.3)
     f.shot('65_sdf_blend.png')
+    f.proc.kill()
+
+
+def fabrication():
+    """3MF (zip + model XML) for printing, DXF / SVG of sketches, PDF drawings,
+    and the printability checks."""
+    print('  -- fabrication: 3MF, DXF, SVG, PDF, print check --')
+    import zipfile, xml.etree.ElementTree as ET
+    home = tempfile.mkdtemp(prefix='bee-fab-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+        return (r.stdout + r.stderr).strip()
+    p3, pd, ps, pp = (os.path.join(home, n) for n in ('part.3mf', 'base.dxf', 'base.svg', 'part.pdf'))
+    out = run('op("scene.units", "mm")\ndelete("Cube")\ns = sketch("Base", "XZ")\nr = rect(s, 0, 0, 60, 40)\n'
+              'arc(s, 30, 20, 8, 0, rad(120))\ncircle(s, 10, 10, 3)\nb = pad("Box", s, "30mm")\nsh = shell("Box", b, "2mm")\n'
+              f'op("file.export_3mf", "{p3}")\nselect("Base")\nop("file.export_dxf", "{pd}")\nop("file.export_svg", "{ps}")\n'
+              f'select("Box")\nop("file.export_pdf", "{pp}")\nprint(volume("Box"), thinnest("Box"))')
+    vol = float(out.split()[0]) if out else 0
+    try:
+        z = zipfile.ZipFile(p3)
+        names = sorted(z.namelist())
+        bad = z.testzip()
+        ct = z.read('[Content_Types].xml').decode()
+        root = ET.fromstring(z.read('3D/3dmodel.model'))
+        ns = {'m': 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'}
+        objs = root.findall('.//m:object', ns)
+        V = [tuple(float(v.get(k)) for k in 'xyz') for v in objs[0].findall('.//m:vertex', ns)]
+        T = [tuple(int(t.get(k)) for k in ('v1', 'v2', 'v3')) for t in objs[0].findall('.//m:triangle', ns)]
+        v3 = sum(V[a][0] * (V[b][1] * V[c][2] - V[b][2] * V[c][1]) - V[a][1] * (V[b][0] * V[c][2] - V[b][2] * V[c][0])
+                 + V[a][2] * (V[b][0] * V[c][1] - V[b][1] * V[c][0]) for a, b, c in T) / 6
+        from collections import Counter
+        ec = Counter((a, b) for t in T for a, b in ((t[0], t[1]), (t[1], t[2]), (t[2], t[0])))
+        closed = all(ec[(b, a)] == 1 and n == 1 for (a, b), n in ec.items())
+        zs = [v[2] for v in V]
+        ok = (bad is None and names == ['3D/3dmodel.model', '[Content_Types].xml', '_rels/.rels'] and '3dmodel' in ct
+              and root.get('unit') == 'millimeter' and len(objs) == 1 and abs(v3 - vol) < 0.01 * vol and closed
+              and abs(min(zs)) < 1e-3 and abs(max(zs) - 30) < 1e-3 and len(root.findall('.//m:item', ns)) == 1)
+        info = f'{names}, volume {v3:.0f} vs {vol:.0f}, closed {closed}, z {min(zs):.1f}..{max(zs):.1f}'
+    except Exception as e:
+        ok, info = False, repr(e)
+    check(ok, f'3MF: a valid zip of the three parts, millimetres, Z up, closed, the same volume ({info})')
+    try:
+        d = open(pd).read().split('\n')
+        pairs = list(zip(d[0::2], d[1::2]))
+        kinds = [v for c, v in pairs if c.strip() == '0']
+        units = [pairs[i + 1][1] for i, (c, v) in enumerate(pairs) if v == '$INSUNITS']
+        ok = kinds.count('LINE') == 4 and kinds.count('CIRCLE') == 1 and kinds.count('ARC') == 1 and kinds[-1] == 'EOF' and units == ['4']
+        info = f'{kinds.count("LINE")} lines, {kinds.count("CIRCLE")} circle, {kinds.count("ARC")} arc, units {units}'
+    except Exception as e:
+        ok, info = False, repr(e)
+    check(ok, f'DXF of the sketch: entities and millimetre units ({info})')
+    try:
+        svg = ET.parse(ps).getroot()
+        sn = '{http://www.w3.org/2000/svg}'
+        cnt = (len(svg.findall(f'.//{sn}line')), len(svg.findall(f'.//{sn}circle')), len(svg.findall(f'.//{sn}path')))
+        ok = cnt == (4, 1, 1) and svg.get('width') == '70.000000mm'
+        info = f'{cnt}, width {svg.get("width")}'
+    except Exception as e:
+        ok, info = False, repr(e)
+    check(ok, f'SVG of the sketch ({info})')
+    try:
+        pdf = open(pp, 'rb').read()
+        start = int(pdf.rsplit(b'startxref', 1)[1].split()[0])
+        rows = pdf[start:].split(b'\n')[3:8]
+        offs_ok = all(pdf[int(r[:10]):].startswith(b'%d 0 obj' % (i + 1)) for i, r in enumerate(rows))
+        n = re.search(rb'/Length (\d+)', pdf)
+        body = pdf[n.end():].split(b'stream\n', 1)[1]
+        ok = pdf.startswith(b'%PDF-1.4') and offs_ok and body[int(n.group(1)):].startswith(b'\nendstream') and b'FRONT' in body and b'(60) Tj' in body
+        info = f'{len(pdf)} bytes, xref {offs_ok}'
+        if ok and shutil.which('pdftoppm'):
+            subprocess.run(['pdftoppm', '-png', '-r', '60', '-singlefile', pp, os.path.join(OUT, '67_drawing')], timeout=60)
+    except Exception as e:
+        ok, info = False, repr(e)
+    check(ok, f'PDF drawing: exact xref, views, dimensions ({info})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('op("scene.units", "cm")\ndelete("Cube")\ns = sketch("Base", "XZ")\nr = rect(s, -3, -2, 6, 4)\nb = pad("Case", s, "3cm")\n'
+      'sh = shell("Case", b, "0.6mm")\nselect("Case")')
+    text, err = m.tool('run_operator', {'id': 'mesh.print_check', 'arg': '1'})
+    t = (text or '')
+    ok = 'Case: closed, thinnest wall 0.6' in t and 'faces under 1 mm' in t and 'size 60 x 40 x 30 mm' in t
+    check(ok, f'mesh.print_check: closed, thinnest wall, size (Z up, mm) ({t.strip()[-120:]})')
+    m.tool('run_operator', {'id': 'view.show_thickness', 'arg': '1'})
+    f.pump(0.3)
+    f.shot('66_thin_walls.png')
     f.proc.kill()
 
 
