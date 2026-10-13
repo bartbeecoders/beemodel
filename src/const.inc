@@ -329,7 +329,8 @@
 .equ ME_VCOL,       144     # u32 0xAARRGGBB per vertex (own mapping), or 0
 .equ ME_INST,       152     # instances (inst.s: a reference-counted block), or 0
 .equ ME_PNRM,       160     # float[3] per vertex (own mapping): point normals, or 0
-.equ ME_HDR,        168
+.equ ME_CURVE,      168     # the curve it was made from (curve.s), or 0
+.equ ME_HDR,        176
 
 # ---- objects (scene.s) -------------------------------------------------------------
 .equ OB_NAME,       0       # 32 bytes

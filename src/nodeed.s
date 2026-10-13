@@ -45,6 +45,7 @@
 .equ NSOCK_R,   4                       # socket half size
 .equ COLW,      200                     # auto layout: column step
 .equ MENU_W,    170
+.equ MROWS,     18                      # the add menu: rows a column
 
 .equ COL_NE_BG,     0x23262c
 .equ COL_NE_GRID,   0x2b2f36
@@ -1457,17 +1458,19 @@ ne_draw_menu:
     push    r12
     push    r13
     push    r14
-    sub     rsp, 8
-    call    ne_ntypes
-    mov     r14d, eax
-    lea     ecx, [rax+1]
+    push    r15
+    call    ne_menu_size
+    mov     r14d, eax                   # rows
+    mov     r15d, edx                   # columns
+    lea     ecx, [r14+1]
     imul    ecx, ecx, NROW
     add     ecx, 6
     mov     edi, [rip+ne_mx]
     sub     edi, 1
     mov     esi, [rip+ne_my]
     sub     esi, 1
-    mov     edx, MENU_W+2
+    imul    edx, r15d, MENU_W
+    add     edx, 2
     mov     r8d, COL_DROP_BORDER
     call    fill_rect
     lea     ecx, [r14+1]
@@ -1475,7 +1478,7 @@ ne_draw_menu:
     add     ecx, 4
     mov     edi, [rip+ne_mx]
     mov     esi, [rip+ne_my]
-    mov     edx, MENU_W
+    imul    edx, r15d, MENU_W
     mov     r8d, COL_DROP_BG
     call    fill_rect
     mov     edi, [rip+ne_mx]
@@ -1487,15 +1490,24 @@ ne_draw_menu:
     call    draw_text
     call    ne_menu_item                # (the one under the pointer)
     mov     r13d, eax
+    call    ne_ntypes
+    mov     r14d, eax
     mov     ebx, 1
 1:  cmp     ebx, r14d
     ja      9f
-    imul    r12d, ebx, NROW
+    lea     eax, [rbx-1]                # column, row
+    xor     edx, edx
+    mov     ecx, MROWS
+    div     ecx
+    imul    r15d, eax, MENU_W
+    add     r15d, [rip+ne_mx]
+    lea     r12d, [rdx+1]
+    imul    r12d, r12d, NROW
     add     r12d, [rip+ne_my]
     add     r12d, 2
     cmp     ebx, r13d
     jne     2f
-    mov     edi, [rip+ne_mx]
+    mov     edi, r15d
     mov     esi, r12d
     mov     edx, MENU_W
     mov     ecx, NROW
@@ -1504,27 +1516,47 @@ ne_draw_menu:
 2:  mov     edi, ebx
     call    ne_title
     mov     rdx, rax
-    mov     edi, [rip+ne_mx]
-    add     edi, 12
+    lea     edi, [r15+12]
     lea     esi, [r12+2]
     mov     ecx, COL_TEXT
     call    draw_text
     inc     ebx
     jmp     1b
-9:  add     rsp, 8
+9:  pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
     ret
 
+# ne_menu_size -> eax = the add menu's rows, edx = its columns
+ne_menu_size:
+    sub     rsp, 8
+    call    ne_ntypes
+    add     rsp, 8
+    lea     ecx, [rax+MROWS-1]
+    push    rax
+    mov     eax, ecx
+    xor     edx, edx
+    mov     ecx, MROWS
+    div     ecx
+    mov     edx, eax
+    pop     rax
+    cmp     eax, MROWS
+    jbe     1f
+    mov     eax, MROWS
+1:  ret
+
 # ne_menu_item -> eax = the type under the pointer in the menu (0: none)
 ne_menu_item:
+    push    rbx
     mov     eax, [rip+ptr_x]
     sub     eax, [rip+ne_mx]
     js      8f
-    cmp     eax, MENU_W
-    jae     8f
+    xor     edx, edx
+    mov     ecx, MENU_W
+    div     ecx
+    mov     ebx, eax                    # column
     mov     eax, [rip+ptr_y]
     sub     eax, [rip+ne_my]
     sub     eax, 2
@@ -1534,14 +1566,18 @@ ne_menu_item:
     div     ecx
     test    eax, eax
     jz      8f
-    push    rax
-    call    ne_ntypes
-    mov     ecx, eax
-    pop     rax
-    cmp     eax, ecx
+    cmp     eax, MROWS
     ja      8f
+    imul    ebx, ebx, MROWS
+    add     ebx, eax
+    call    ne_ntypes                   # (past the last: none)
+    cmp     ebx, eax
+    ja      8f
+    mov     eax, ebx
+    pop     rbx
     ret
 8:  xor     eax, eax
+    pop     rbx
     ret
 
 # ne_hit(edi=x, esi=y; layout of the last drawing) -> eax = what (0 none,
@@ -2484,7 +2520,7 @@ do_ne_add_menu:
     mov     dword ptr [rip+ne_menu], 1
     mov     eax, [rip+ptr_x]
     mov     [rip+ne_mx], eax
-    call    ne_ntypes                   # (all of it inside the body)
+    call    ne_menu_size                # (all of it inside the body)
     inc     eax
     imul    eax, eax, NROW
     add     eax, 6

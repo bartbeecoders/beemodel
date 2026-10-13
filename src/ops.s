@@ -160,6 +160,9 @@ dispatch_key:
     test    ecx, ecx
     mov     ecx, OPF_NODE
     jnz     100f
+    mov     ecx, OPF_CURVE              # curve edit mode: its keys first
+    cmp     dword ptr [rip+cve_obj], 0
+    jne     100f
     mov     ecx, OPF_SKETCH             # sketch / sculpt / paint mode: their
     cmp     dword ptr [rip+skm_obj], 0  #  keys first
     jne     100f
@@ -189,7 +192,7 @@ dispatch_key:
     jmp     1b
 2:  xor     eax, eax
     ret
-3:  test    dword ptr [rdi+OP_FLAGS], OPF_SKETCH|OPF_SCULPT|OPF_UV|OPF_PAINT|OPF_NODE # (not outside their modes)
+3:  test    dword ptr [rdi+OP_FLAGS], OPF_SKETCH|OPF_SCULPT|OPF_UV|OPF_PAINT|OPF_NODE|OPF_CURVE # (not outside their modes)
     jnz     4b
     cmp     dword ptr [rip+edit_obj], 0 # the same key can mean different
     je      5f                          # things in object and edit mode

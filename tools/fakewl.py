@@ -528,6 +528,7 @@ def main():
     geometry_nodes()
     node_groups()
     instancing()
+    curves()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3301,6 +3302,104 @@ def instancing():
     shot = sum(1 for y in range(250, 550, 3) for x in range(300, 900, 3) if img.getpixel((x, y))[0] > 150)
     f.shot('91_instances.png')
     check(ms < INSTANCE_FRAME_MS and shot > 500, f'100k instances orbit at {ms:.1f} ms a frame (budget {INSTANCE_FRAME_MS} ms)')
+    f.proc.kill()
+
+
+def curves():
+    """Curves: Bezier and poly splines (auto handles make a round circle),
+    swept into tubes or along a profile curve, edited by operators and in
+    curve edit mode (click, G, E, Ctrl+click, X), saved, exported as OBJ
+    lines; the curve nodes (line, circle, to mesh, resample, trim, fillet,
+    to points)."""
+    print('  -- curves --')
+    home = tempfile.mkdtemp(prefix='bee-cv-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('c = curve("bezier")\nprint(cpoints(c), everts(c), efaces(c))\n'
+            'k = curve("circle", "Ring")\nprint(clength(k))\n'
+            'op("curve.set", "bevel 0.05")\nprint(everts(k), efaces(k))\nop("curve.set", "bevel 0")\n'
+            'p = curve("path")\nop("curve.set", "bevel 0.1")\nop("curve.set", "fill 1")\nprint(everts(p), efaces(p))\n'
+            'op("curve.set", "profile Ring")\nprint(everts(p), efaces(p))\n'
+            'op("curve.point", "3 1 0")\nprint(cpoints(p), clength(p))\n'
+            'op("curve.select", "4 5")\nop("curve.subdivide")\nprint(cpoints(p), clength(p))\n'
+            'op("curve.select", "0")\nop("curve.delete")\nprint(cpoints(p), clength(p))\n'
+            'op("curve.select", "5")\nop("curve.extrude", "1 0 0")\nprint(cpoints(p), clength(p))\n'
+            'select(c)\nl0 = clength(c)\nop("curve.select", "all")\nop("curve.subdivide")\nprint(cpoints(c), clength(c) - l0)\n'
+            'op("curve.select", "1")\nop("curve.move", "1 1 0 0.5")\nprint(cpos(c, 1, "z"))\n'
+            'op("file.save", "~/BeeModel/c.bee")\nop("file.new")\nop("file.open", "~/BeeModel/c.bee")\n'
+            'print(cpoints("Path"), everts("Path"), cpoints("Ring"), cpos("BezierCurve", 1, "z"))\n'
+            'op("file.export_obj", "~/BeeModel/c.obj")\n'
+            'select("Path")\nop("curve.to_mesh")\nprint(cpoints("Path"), everts("Path"))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+    out = r.stdout.split()
+    try:
+        v = [float(x) for x in out]
+    except Exception:
+        v = []
+    ok = len(v) == 27
+    check(ok and v[0:3] == [2, 13, 12] and abs(v[3] - 2 * math.pi) < 0.02 and v[4:6] == [384, 384],
+          f'a Bezier curve sampled per span; a 4-point circle is round (length {out[3:4]}); a bevel sweeps it ({out[:6]})')
+    check(ok and v[6:10] == [40, 34, 240, 194], f'an open path swept with caps, then along a profile curve ({out[6:10]})')
+    check(ok and v[10] == 6 and abs(v[11] - (4 + math.sqrt(2))) < 1e-4 and v[12] == 7 and abs(v[13] - v[11]) < 1e-4
+          and v[14] == 6 and abs(v[15] - v[11] + 1) < 1e-4 and v[16] == 7 and abs(v[17] - v[11]) < 1e-4,
+          f'points added, subdivided (shape kept), deleted, extruded ({out[10:18]})')
+    check(ok and v[18] == 3 and abs(v[19]) < 0.01 and v[20] == 0.5,
+          f'a Bezier span split in two keeps its shape; a point moved ({out[18:21]})')
+    objl = open(os.path.join(home, 'BeeModel', 'c.obj')).read().split('\n') if os.path.exists(os.path.join(home, 'BeeModel', 'c.obj')) else []
+    check(ok and v[21:25] == [7, 336, 4, 0.5] and sum(1 for x in objl if x.startswith('l ')) == 72
+          and v[25] == -1 and v[26] == 336, f'saved and opened again; OBJ export writes lines; to mesh ({out[21:28]})')
+    code = ('t = gtree("C")\no = gnode(t, "output")\ncc = gnode(t, "curve_circle", 32, 2)\nglink(t, cc, o, 1)\n'
+            'mm = modifier("Cube", "geometry")\nmodset("Cube", mm, "tree", t)\nprint(everts("Cube"), efaces("Cube"))\n'
+            'rs = gnode(t, "resample", 4)\nglink(t, cc, rs, 1)\nfi = gnode(t, "fillet", 0.5, 4)\nglink(t, rs, fi, 1)\n'
+            'glink(t, fi, o, 1)\nprint(everts("Cube"), efaces("Cube"))\n'
+            'tm = gnode(t, "curve_to_mesh", 0.1, 6, 0)\nglink(t, fi, tm, 1)\nglink(t, tm, o, 1)\nprint(everts("Cube"), efaces("Cube"))\n'
+            'tr = gnode(t, "trim", 0.25, 0.75)\nglink(t, cc, tr, 1)\nglink(t, tr, o, 1)\nprint(everts("Cube"), efaces("Cube"))\n'
+            'cl = gnode(t, "curve_line")\npf = gnode(t, "curve_circle", 4, 0.2)\nglink(t, cl, tm, 1)\nglink(t, pf, tm, 2)\n'
+            'glink(t, tm, o, 1)\nprint(everts("Cube"), efaces("Cube"))\n'
+            'cp = gnode(t, "curve_to_points", 10)\nglink(t, cc, cp, 1)\ncu = gnode(t, "cube", 0.2)\n'
+            'ip = gnode(t, "instance", 1, 1, 0)\nglink(t, cp, ip, 1)\nglink(t, cu, ip, 2)\nglink(t, ip, o, 1)\nprint(instances("Cube"))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+    out = r.stdout.split()
+    check(out == ['32', '32', '20', '20', '120', '120', '17', '16', '8', '4', '10'],
+          f'curve nodes: circle, resample + fillet, to mesh, trim, line along a profile, to points ({out})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube")\nc = curve("bezier")')
+    p0, p1 = project((-1, 0, 0)), project((1, 0, 0))
+    f.enter(*project((0, 0, 1.5)))
+    f.key(15)                                   # Tab
+    f.pump(0.2)
+    check(px(f, *p0) == 0x161616 and px(f, *p1) == 0x161616, 'Tab enters curve edit mode: control points drawn')
+    f.click(*p0)
+    check(px(f, *p0) == 0xffa030, 'clicking a control point selects it')
+    f.key(34); f.key(44); f.key(3); f.key(28)   # G Z 2 Enter
+    f.pump(0.2)
+    gz = q('cpos("BezierCurve", 0, "z")')
+    check(gz == '= 2' and px(f, *project((-1, 0, 2))) == 0xffa030, f'G Z 2 moves the point (its handles along) ({gz})')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    check(q('cpos("BezierCurve", 0, "z")') == '= 0', 'undo puts it back')
+    f.key(18)                                   # E: extrude, then move
+    f.move(p0[0] - 60, p0[1] + 10)
+    f.click(p0[0] - 60, p0[1] + 10)
+    f.pump(0.2)
+    n1 = q('cpoints("BezierCurve")')
+    x1 = q('cpos("BezierCurve", 0, "x")')
+    f.mods(4); f.click(*project((-2, 0, 3))); f.mods(0)    # Ctrl+click: a point there
+    f.pump(0.2)
+    n2 = q('cpoints("BezierCurve")')
+    check(n1 == '= 3' and x1 not in ('= -1', '') and n2 == '= 4', f'E extrudes the end point, Ctrl+click adds one ({n1} {x1} {n2})')
+    f.shot('92_curve_edit.png')
+    f.key(45)                                   # X: the selected one goes
+    check(q('cpoints("BezierCurve")') == '= 3', 'X deletes the selected point')
+    f.key(15)
+    q('op("curve.set", "bevel 0.15")')
+    f.pump(0.3)
+    nf = q('efaces("BezierCurve")')
+    check(px(f, *p1) != 0x161616 and nf == '= 192', f'Tab leaves; a bevel makes a tube ({nf})')
+    f.shot('93_curve_tube.png')
     f.proc.kill()
 
 

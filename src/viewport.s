@@ -522,6 +522,7 @@ viewport_draw:
     call    gizmo_draw
     call    tm_draw
     call    skm_overlay                 # sketch mode: points, labels, tools
+    call    cve_overlay                 # curve edit mode: points, handles
     call    sculpt_overlay              # sculpt mode: the brush, settings
     call    paint_overlay               # texture paint: the same
 
@@ -620,7 +621,14 @@ draw_objects:
     cmp     dword ptr [rip+vp_shading], 1   # shaded modes draw meshes raster
     je      3f
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
-    je      5f
+    jne     3f
+    push    rax                         # (but lines - curves - as wires)
+    mov     rdi, rax
+    call    edge_only
+    mov     ecx, eax
+    pop     rax
+    test    ecx, ecx
+    jz      5f
 3:  mov     ecx, [rax+OB_FLAGS]
     and     ecx, OBF_SELECTED
     cmp     ecx, r12d
@@ -654,6 +662,20 @@ draw_objects:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# edge_only(rdi=mesh object) -> eax = 1 when what it shows has lines but no
+#   faces (a curve without a bevel): drawn as a wire, picked by its bounds
+edge_only:
+    sub     rsp, 8
+    call    obj_eval
+    add     rsp, 8
+    xor     ecx, ecx
+    cmp     dword ptr [rax+ME_NTRIS], 0
+    jne     1f
+    cmp     dword ptr [rax+ME_NEDGES], 0
+    setne   cl
+1:  mov     eax, ecx
     ret
 
 # world_verts(rdi=object) -> rax = world-space positions (frame arena), ecx = n
@@ -778,8 +800,15 @@ vp_pick_bounds:
     mov     edi, ebx
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
-    je      .Lpk_next
+    jne     1f
+    push    rax                         # meshes: the ID buffer, unless lines
     mov     rdi, rax
+    call    edge_only
+    mov     ecx, eax
+    pop     rax
+    test    ecx, ecx
+    jz      .Lpk_next
+1:  mov     rdi, rax
     call    world_verts
     test    rax, rax
     jz      .Lpk_next

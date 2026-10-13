@@ -18,6 +18,8 @@
 .globl etool_draw
 .globl etool_setup
 .globl world_px
+.globl view_ray
+.globl tmp3
 .globl cursor_pos
 .globl cursor_place
 .globl cursor_draw

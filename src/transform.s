@@ -113,6 +113,13 @@ OPERATOR op_scale,  "transform.scale",  "Scale",       op_tm_start, arg=3, key=K
 
 .text
 
+# tm_comp -> eax = nonzero in a component mode (mesh or curve edit mode):
+#   the edit_tm_* functions move the selected parts (eax only)
+tm_comp:
+    mov     eax, [rip+edit_obj]
+    or      eax, [rip+cve_obj]
+    ret
+
 op_tm_start:
     xor     esi, esi
     xor     edx, edx
@@ -208,7 +215,8 @@ tm_start:
     call    area_editor
     cmp     eax, ED_VIEWPORT
     jne     .Lts_out
-    cmp     dword ptr [rip+edit_obj], 0 # edit mode: the selected vertices
+    call    tm_comp
+    test    eax, eax # edit mode: the selected vertices
     je      0f
     cmp     dword ptr [rip+tm_noundo], 0
     jne     81f
@@ -393,7 +401,8 @@ restore:
     cmp     dword ptr [rip+tm_mode], 4  # value mode rebuilds from its source
     jne     0f
     ret
-0:  cmp     dword ptr [rip+edit_obj], 0
+0:  call    tm_comp
+    test    eax, eax
     jne     edit_tm_restore
     push    rbx
     xor     ebx, ebx
@@ -619,7 +628,8 @@ tm_update:
     mov     [rdi], rax
     mov     eax, [rsi+8]
     mov     [rdi+8], eax
-    cmp     dword ptr [rip+edit_obj], 0
+    call    tm_comp
+    test    eax, eax
     je      0f
     lea     rdi, [rsp]
     call    edit_tm_grab
@@ -716,7 +726,8 @@ tm_update:
     jb      31f
     xor     eax, eax
 31: mov     [rsp+28], eax
-    cmp     dword ptr [rip+edit_obj], 0
+    call    tm_comp
+    test    eax, eax
     je      0f
     mov     edi, r12d
     movss   xmm0, [rsp+20]
@@ -791,7 +802,8 @@ tm_update:
 .Lsc_have:
     movss   [rip+tm_value], xmm0
     movss   [rsp+16], xmm0
-    cmp     dword ptr [rip+edit_obj], 0
+    call    tm_comp
+    test    eax, eax
     je      0f
     mov     edi, [rip+tm_axis]
     lea     rsi, [rip+tm_pivot]
@@ -1020,7 +1032,8 @@ tm_confirm:
     jne     0f
     call    [rip+tm_vconfirm]
     jmp     2f
-0:  cmp     dword ptr [rip+edit_obj], 0
+0:  call    tm_comp
+    test    eax, eax
     je      1f
     call    edit_tm_end                 # bounding box after a component edit
     jmp     2f
@@ -1127,7 +1140,8 @@ gizmo_origin:
     mov     ecx, [rip+active_tool]
     test    ecx, ecx
     jz      9f
-    cmp     dword ptr [rip+edit_obj], 0 # edit mode: the selected vertices
+    call    tm_comp
+    test    eax, eax # edit mode: the selected vertices
     je      0f
     lea     rdi, [rip+g_tmp+16]
     call    edit_median

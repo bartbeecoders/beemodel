@@ -368,6 +368,42 @@ their triangles, binned into screen tiles across the threads): a million are pla
 12 ms and orbit at about 35 ms a frame on a 32-thread desktop. *Realize Instances* turns them into
 plain geometry; the path tracer takes them as triangles (4 million at most).
 
+**Curves.** *Create > Bezier Curve / Bezier Circle / Path* adds a curve: Bezier or poly splines
+of control points with handles (auto, aligned, vector or free; auto handles make a 4-point circle
+round), a resolution per span, a radius and a tilt per point. **Tab** edits the points: click
+selects (Shift adds), **G / R / S** move them and their handles, **E** extrudes an end, **Ctrl+click**
+adds a point at the pointer, **W** subdivides (the shape kept), **X** deletes, **V** cycles the
+handle type, **Alt+C** opens or closes a spline. `curve.set bevel 0.1` sweeps it into a tube
+(`sides`, `fill` caps), `curve.set profile <curve>` along another curve's shape, with frames that
+stay upright on the ground and spread a closed path's twist. What a curve makes is an ordinary
+mesh, so modifiers, materials, rendering and export just work (OBJ writes a bare curve as `l`
+lines); `curve.to_mesh` turns it into that mesh for good. The curve nodes - Curve Line, Curve Circle, Curve to Mesh,
+Resample, Trim, Fillet, Curve to Points - work on chains of 2-point polygons, so a Geometry
+Nodes modifier on a curve object reads its curve:
+
+```
+delete("Cube")
+c = curve("circle", "Rail")
+t = gtree("Fence")
+i = gnode(t, "input")                  # the curve the modifier is on
+o = gnode(t, "output")
+tube = gnode(t, "curve_to_mesh", 0.04, 8)
+glink(t, i, tube, 1)                   # the rail: a tube along it
+cp = gnode(t, "curve_to_points", 12)   # 12 upright points along it
+glink(t, i, cp, 1)
+post = gnode(t, "cylinder", 0.03, 0.8)
+ip = gnode(t, "instance", 0, 0, 0)
+glink(t, cp, ip, 1)
+glink(t, post, ip, 2)
+j = gnode(t, "join")
+glink(t, tube, j, 1)
+glink(t, ip, j, 2)
+glink(t, j, o, 1)
+m = modifier("Rail", "geometry")
+modset("Rail", m, "tree", t)
+print(instances("Rail"))               # 12
+```
+
 **Node groups.** A Group node runs another tree as one node: inside, the Group Input gives the
 group node's geometry, value and vector (fields from outside reach in), the Group Output is what
 it returns; groups nest. In the node editor, Shift-click several nodes and **Ctrl+G** moves them
@@ -587,6 +623,7 @@ src/geonodes.s  geometry nodes: evaluation, field compiler, tree.* operators
 src/fieldvm.s   the field VM: per-point programs in SSE blocks
 src/asset.s     assets: trees and materials saved, loaded, the Asset Browser
 src/inst.s      instances: the block, realizing, the viewport's instance pass
+src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
 src/paint.s     texture painting: projected dabs, UV-space dabs, stroke history
 src/layers.s    paint layers: stack, blend modes, composite, saving
 src/vcol.s      vertex colours: vertex paint, tinting, files
@@ -636,7 +673,7 @@ operator spine and how to add an action.
   `ci/…`) and is merged through a pull request once CI is green.
 * CI (`.github/workflows/ci.yml`) runs on every PR and push to `main`. It builds
   release and debug binaries, runs `ci/check-binary.sh` (static, no shared
-  libraries, no RWX segments, size budget of 256 KiB) and runs the headless UI test.
+  libraries, no RWX segments, size budget of 1 MiB) and runs the headless UI test.
   Screenshots are uploaded as a workflow artifact.
 * **Releasing:** bump `VERSION`, move the `[Unreleased]` notes in `CHANGELOG.md`
   into a new version section, and merge via a PR. Then tag:

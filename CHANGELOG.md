@@ -47,6 +47,29 @@ project uses [Semantic Versioning](https://semver.org/).
     on 32 threads.
   - **Path tracer:** takes instances as triangles, up to 4 million.
   - **BeeScript:** `instances()`.
+- Curves:
+  - **Objects:** Bezier and poly splines (*Create > Bezier Curve / Bezier
+    Circle / Path*, `curve.add`) with a resolution per span and, per
+    point, a radius, a tilt and a handle type (auto, aligned, vector,
+    free). A curve object's mesh is what the curve makes, so modifiers,
+    materials, rendering and export work on it unchanged.
+  - **Sweeps:** a bevel radius and sides (with caps) or a profile curve
+    sweep it into a mesh. Frames are parallel transported from the world
+    up, a closed path's twist is spread over it, and tilt turns them.
+  - **Curve edit mode (Tab):** click / Shift-click selection of points
+    and handles, G / R / S, E extrude, Ctrl+click to add a point, W
+    subdivide (the shape kept), X delete, V handle type, Alt+C cyclic.
+  - **Operators:** `curve.*` (add, set, point, spline, select, move,
+    extrude, subdivide, delete, cyclic, handle, tilt, radius, to_mesh).
+    **BeeScript:** `curve`, `cpoints`, `cpos`, `clength`.
+  - **Files:** curves are saved in `.bee` files (CURV). OBJ export writes
+    bare curves as `l` lines, and import reads them back as 2-point
+    polygons.
+  - **Curve nodes:** Curve Line, Curve Circle, Curve to Mesh (a profile
+    curve or a round tube), Resample Curve, Trim Curve, Fillet Curve and
+    Curve to Points (upright point normals for instancing). In geometry
+    nodes a curve is a chain of 2-point polygons.
+  - The node editor's Shift+A menu wraps into columns.
 - Assets: `tree.save_asset` (with the groups the tree runs) and
   `material.save_asset` write to `~/BeeModel/assets`; `asset.load` adds one
   to any scene, `asset.list` lists them; the Asset Browser area adds one

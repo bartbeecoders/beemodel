@@ -272,6 +272,9 @@ mesh_uv_free:
 4:  mov     rdi, [rbx+ME_INST]
     mov     qword ptr [rbx+ME_INST], 0
     call    inst_unref
+    mov     rdi, [rbx+ME_CURVE]         # (and a curve)
+    mov     qword ptr [rbx+ME_CURVE], 0
+    call    cv_unref
     pop     rbx
     ret
 uv_unmap:
