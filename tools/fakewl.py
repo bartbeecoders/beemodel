@@ -513,6 +513,7 @@ def main():
     fabrication()
     sculpting()
     tablet()
+    dyntopo()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2455,6 +2456,92 @@ def tablet():
           f'the stabilizer holds a short wobble, follows a long stroke ({d_click:.5f}, {d_short:.5f}, {d_long:.5f})')
     f.shot('70_stabilizer.png')
     f.proc.kill()
+
+
+def mesh_quality(path):
+    """An OBJ's triangles: (open or odd edges, zero-area, smallest angle in
+    degrees, edges whose two triangles face apart)."""
+    import math
+    V, F = [], []
+    for line in open(path):
+        p = line.split()
+        if p and p[0] == 'v':
+            V.append(tuple(map(float, p[1:4])))
+        elif p and p[0] == 'f':
+            F.append(tuple(int(x.split('/')[0]) - 1 for x in p[1:]))
+    sub = lambda a, b: [a[i] - b[i] for i in range(3)]
+    cross = lambda a, b: [a[1]*b[2] - a[2]*b[1], a[2]*b[0] - a[0]*b[2], a[0]*b[1] - a[1]*b[0]]
+    dot = lambda a, b: sum(a[i] * b[i] for i in range(3))
+    half, zero, minang, normal = {}, 0, 180.0, {}
+    for i, f in enumerate(F):
+        a, b, c = (V[j] for j in f)
+        n = cross(sub(b, a), sub(c, a))
+        ln = math.sqrt(dot(n, n))
+        if ln < 1e-12:
+            zero += 1
+        normal[i] = [x / (ln or 1) for x in n]
+        for k in range(3):
+            half[(f[k], f[(k + 1) % 3])] = half.get((f[k], f[(k + 1) % 3]), []) + [i]
+            p, q, r = V[f[k]], V[f[(k + 1) % 3]], V[f[(k + 2) % 3]]
+            u, w = sub(q, p), sub(r, p)
+            d = math.sqrt(dot(u, u) * dot(w, w)) or 1
+            minang = min(minang, math.degrees(math.acos(max(-1, min(1, dot(u, w) / d)))))
+    odd = sum(1 for (a, b), ts in half.items() if len(ts) != 1 or len(half.get((b, a), [])) != 1)
+    folds = sum(1 for (a, b), ts in half.items() if a < b and len(ts) == 1 and len(half.get((b, a), [])) == 1
+                and dot(normal[ts[0]], normal[half[(b, a)][0]]) < -0.5)
+    return odd, zero, minang, folds
+
+
+def dyntopo():
+    """Dynamic topology: strokes split long edges and collapse short ones
+    under the brush, keeping a closed, fold-free surface; undo is exact."""
+    print('  -- dynamic topology --')
+    home = tempfile.mkdtemp(prefix='bee-dyn-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    ball = 'delete("Cube")\nadd("sphere", "Ball")\nselect("Ball")\nop("object.sculpt_mode")\nop("sculpt.dyntopo")\n'
+    r = subprocess.run([BIN, '--eval', ball + 'op("sculpt.detail_finer")\nop("sculpt.detail_finer")\n'
+                        'sculpt("Ball", "draw", 0, 0.9, 0.4, 0.4, 0.7, 0.5, 0.3, 0.5)\n'
+                        'sculpt("Ball", "snake hook", 0.2, 0.95, 0.2, 0.6, 1.4, 0.2, 0.2, 0.5)\n'
+                        'print(verts("Ball"), manifold("Ball"))\nop("file.export_obj", "~/BeeModel/dyn.obj")'],
+                       env=env, capture_output=True, text=True, timeout=120)
+    out = (r.stdout + r.stderr).split()
+    try:
+        odd, zero, ang, folds = mesh_quality(os.path.join(home, 'BeeModel', 'dyn.obj'))
+        ok = int(out[0]) > 1500 and out[1] == '1' and odd == 0 and zero == 0 and ang > 2 and folds == 0
+    except Exception as e:
+        ok, odd, zero, ang, folds = False, 0, 0, 0, repr(e)
+    check(ok, f'a draw and a snake-hook stroke refine 482 vertices to {out[:1]}: closed, no slivers '
+              f'(smallest angle {ang:.1f} deg), no folds ({odd} odd edges, {zero} flat, {folds} folds)')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube")\nadd("sphere", "Ball", 0, 1, 0)\nscale("Ball", 3)\nselect("Ball")')
+    f.mods(4); f.key(15); f.mods(0)             # Ctrl+Tab, Ctrl+D, Ctrl+[ twice
+    f.mods(4); f.key(32); f.mods(0)
+    f.mods(4); f.key(26); f.key(26); f.mods(0)
+    f.pump(0.3)
+    v0 = q('print(verts("Ball"), volume("Ball"))')
+    f.drag(560, 320, 680, 370, steps=30)
+    f.pump(0.3)
+    v1 = q('print(verts("Ball"), manifold("Ball"))').split()
+    f.shot('71_dyntopo.png')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the mesh before
+    f.pump(0.4)
+    v2 = q('print(verts("Ball"), volume("Ball"))')
+    check(int(v1[0]) > 2 * int(v0.split()[0]) and v1[1] == '1' and v2 == v0,
+          f'Ctrl+D: a stroke adds detail under the brush ({v0.split()[0]} -> {v1[0]} vertices, closed); Ctrl+Z restores it')
+    f.proc.kill()
+    r = subprocess.run([BIN, '--eval', 'delete("Cube")\nadd("sphere", "Ball")\nmodifier("Ball", "subsurf")\n'
+                        'modset("Ball", 0, "levels", 2)\nmodapply("Ball", 0)\nselect("Ball")\nop("object.sculpt_mode")\n'
+                        'op("sculpt.dyntopo")\nv = verts("Ball")\nfor i in 0..6 {\n op("sculpt.detail_coarser")\n}\n'
+                        'sculpt("Ball", "smooth", 0, 1, 0, 0.3, 0.9, 0.3, 0.6, 0.5)\nprint(v, verts("Ball"), manifold("Ball"))'],
+                       env=env, capture_output=True, text=True, timeout=120)
+    out = (r.stdout + r.stderr).split()
+    check(len(out) == 3 and int(out[1]) < int(out[0]) and out[2] == '1',
+          f'a coarser detail collapses a dense patch, still closed ({out})')
 
 
 class Bridge:
