@@ -131,6 +131,8 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `area(object)`, `mass(object)`, `centroid(object, axis)` | Mass properties in world space and scene units: surface area, mass in grams (volume x the material's `density` in g/cm^3; no material: 1), centre of mass (`"x"`, `"y"`, `"z"` or 0..2) |
 | `fangle(object, face a, face b)` | The angle between two faces' normals (radians; `deg()` converts) |
 | `thinnest(object)` | The thinnest wall (scene units): from every face straight in to the next face; `nil` when nothing is behind any face |
+| `sculpt(object, brush, x1, y1, z1, x2, y2, z2, radius, strength)` | A sculpt stroke from one world point to the other (enters sculpt mode on the object): `"draw"`, `"clay strips"`, `"crease"`, `"inflate"`, `"grab"`, `"snake hook"`, `"smooth"`, `"flatten"`, `"pinch"`, `"layer"` or `"mask"`; radius in scene units, strength 0..1 (negative inverts). One undo step |
+| `frames()`, `frametime(k)` | How many frames have been drawn; how long the k-th last one took to draw (0 = the latest, up to 255 back), in milliseconds |
 | `measurement()` | The measure tool's current result (Shift+M in the viewport): the distance between two clicked points, the angle at the middle one of three (radians), or `nil` |
 | `infill(body, shell, "gyroid" \| "grid", cell, wall)` | A lattice filling a shell's cavity (reaching a quarter wall into the walls), kept as its own closed shell in the body; slicers join overlapping shells |
 | `features()`, `fstatus(i)` | The number of features; a feature's status: 0 ok, 1 sketch missing, 2 no closed profile, 3 the geometry failed, 4 a value does not evaluate, 5 nothing to work on, 6 bad reference, 7 suppressed, 8 body missing |

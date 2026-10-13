@@ -145,15 +145,19 @@ dispatch_key:
     shl     eax, 16
     or      eax, ebx
     pop     rbx
-    cmp     dword ptr [rip+skm_obj], 0  # sketch mode: its keys first
+    mov     ecx, OPF_SKETCH             # sketch / sculpt mode: their keys
+    cmp     dword ptr [rip+skm_obj], 0  #  first
+    jne     100f
+    mov     ecx, OPF_SCULPT
+    cmp     dword ptr [rip+sc_obj], 0
     je      0f
-    lea     rdi, [rip+__start_bee_ops]
+100: lea     rdi, [rip+__start_bee_ops]
     lea     rdx, [rip+__stop_bee_ops]
 101: cmp     rdi, rdx
     jae     0f
     cmp     [rdi+OP_KEY], eax
     jne     102f
-    test    dword ptr [rdi+OP_FLAGS], OPF_SKETCH
+    test    [rdi+OP_FLAGS], ecx
     jnz     6f
 102: add     rdi, OP_SIZE
     jmp     101b
@@ -167,7 +171,7 @@ dispatch_key:
     jmp     1b
 2:  xor     eax, eax
     ret
-3:  test    dword ptr [rdi+OP_FLAGS], OPF_SKETCH    # (not outside sketches)
+3:  test    dword ptr [rdi+OP_FLAGS], OPF_SKETCH|OPF_SCULPT # (not outside their modes)
     jnz     4b
     cmp     dword ptr [rip+edit_obj], 0 # the same key can mean different
     je      5f                          # things in object and edit mode

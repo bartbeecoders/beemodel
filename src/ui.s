@@ -449,7 +449,24 @@ ui_motion:
     pop     rsi
     pop     rdi
     jmp     .Lmo_out
-761:cmp     eax, DRAG_REDO
+761:cmp     eax, DRAG_SCULPT
+    jne     762f
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    vp_setup_drag
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    sculpt_hover
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    sculpt_drag
+    call    reset_clip
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+    jmp     .Lmo_out
+762:cmp     eax, DRAG_REDO
     jne     75f
     call    redo_drag_move              # edi = pointer x
     jmp     .Lmo_out
@@ -515,6 +532,9 @@ ui_motion:
     mov     esi, [rip+ptr_y]
     mov     edx, [rip+hit_area]
     call    skm_hover
+    mov     edi, [rip+ptr_x]            # the sculpt brush follows it
+    mov     esi, [rip+ptr_y]
+    call    sculpt_hover
     pop     rax
     pop     rdx
     # sliding across the menu bar while a menu is open switches menus
@@ -801,7 +821,20 @@ ui_button:
     mov     esi, [rip+ptr_y]
     call    box_begin
     jmp     .Lbt_done
-52: cmp     dword ptr [rip+skm_obj], 0  # sketch mode: grab a point?
+52: cmp     dword ptr [rip+sc_obj], 0   # sculpt mode: a stroke on the mesh?
+    je      521f
+    call    vp_setup_drag
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    sculpt_press
+    push    rax
+    call    reset_clip
+    pop     rax
+    test    eax, eax
+    jz      53f
+    mov     dword ptr [rip+drag_mode], DRAG_SCULPT
+    jmp     .Lbt_done
+521:cmp     dword ptr [rip+skm_obj], 0  # sketch mode: grab a point?
     je      53f
     call    vp_setup_drag
     mov     edi, [rip+ptr_x]
@@ -859,7 +892,12 @@ ui_button:
     mov     dword ptr [rip+drag_mode], 0
     call    viewport_click
     jmp     .Lbt_done
-78: cmp     dword ptr [rip+drag_mode], DRAG_SKETCH
+78: cmp     dword ptr [rip+drag_mode], DRAG_SCULPT
+    jne     781f
+    mov     dword ptr [rip+drag_mode], 0
+    call    sculpt_release
+    jmp     .Lbt_done
+781:cmp     dword ptr [rip+drag_mode], DRAG_SKETCH
     jne     0f
     mov     dword ptr [rip+drag_mode], 0
     call    skm_release

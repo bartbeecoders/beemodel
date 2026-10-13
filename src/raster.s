@@ -192,6 +192,10 @@ raster_scene:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     11f
+    lea     rcx, [rip+obj_list]         # (the sculpt object draws itself)
+    mov     ecx, [rcx+rbx*4]
+    cmp     ecx, [rip+sc_obj]
+    je      11f
     inc     r12d
     mov     rdi, rax
     call    obj_eval
@@ -225,6 +229,10 @@ raster_scene:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     31f
+    lea     rcx, [rip+obj_list]
+    mov     ecx, [rcx+rbx*4]
+    cmp     ecx, [rip+sc_obj]
+    je      31f
     mov     [r14+RO_OBJ], rax
     xor     ecx, ecx                    # the edit object tints its selection
     cmp     dword ptr [rip+rs_mode], 0  # (colour pass only)

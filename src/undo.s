@@ -22,6 +22,7 @@
 .globl undo_drop_last
 .globl undo_bytes
 .globl undo_depth
+.globl undo_attach_delta
 
 .equ MAX_STEPS,     256
 .equ MAX_BYTES,     0x4000000       # 64 MiB of snapshots
@@ -33,7 +34,8 @@
 .equ ST_MATS,       24      # the material block it saw (a reference)
 .equ ST_NAME,       32      # the label, copied (64 bytes)
 .equ ST_CAD,        96      # the CAD document it saw (a reference)
-.equ ST_HDR,        104
+.equ ST_DELTA,      104     # sculpt: vertex positions changed in place, or 0
+.equ ST_HDR,        112
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -162,6 +164,16 @@ release:
     call    mat_unref
     mov     rdi, [rbx+ST_CAD]
     call    cad_unref
+    mov     rdi, [rbx+ST_DELTA]         # its delta goes too
+    test    rdi, rdi
+    jz      3f
+    mov     rsi, [rdi+16]
+    sub     [rip+undo_bytes], rsi
+    add     rsi, 4095
+    and     rsi, -4096
+    mov     eax, SYS_MUNMAP
+    syscall
+3:
     mov     rax, [rbx+ST_BYTES]
     sub     [rip+undo_bytes], rax
     mov     rdi, rbx
@@ -427,7 +439,18 @@ swap_states:
     call    snapshot                    # the scene as it is now
     test    rax, rax
     jz      8f
-    mov     rdi, r14
+    mov     rdi, [rbx+ST_DELTA]         # positions changed in place: put
+    test    rdi, rdi                    #  them back (or forward), and the
+    jz      1f                          #  delta goes the other way with the
+    push    rax                         #  new step
+    push    rax
+    call    apply_delta
+    pop     rax
+    pop     rax
+    mov     rcx, [rbx+ST_DELTA]
+    mov     [rax+ST_DELTA], rcx
+    mov     qword ptr [rbx+ST_DELTA], 0
+1:  mov     rdi, r14
     mov     rsi, r15
     mov     rdx, rax
     call    push_on
@@ -450,6 +473,70 @@ swap_states:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# apply_delta(rdi=delta) - its positions into its mesh (direction 0: the
+#   old ones, 1: the new), then the direction flips
+#   delta: +0 mesh, +8 count, +12 direction, +16 bytes, +32 indices, then
+#   old xyz, new xyz
+apply_delta:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     ecx, [rbx+8]
+    lea     r8, [rbx+32]                # indices
+    lea     r9, [r8+rcx*4]              # old
+    cmp     dword ptr [rbx+12], 0
+    je      1f
+    imul    eax, ecx, 12
+    add     r9, rax                     # new
+1:  mov     r10, [rbx]
+    mov     r10, [r10+ME_POS]
+    xor     edx, edx
+2:  cmp     edx, ecx
+    jae     3f
+    mov     eax, [r8+rdx*4]
+    lea     rax, [rax+rax*2]
+    lea     r11, [r10+rax*4]
+    imul    eax, edx, 12
+    mov     r12, [r9+rax]
+    mov     [r11], r12
+    mov     r12d, [r9+rax+8]
+    mov     [r11+8], r12d
+    inc     edx
+    jmp     2b
+3:  xor     dword ptr [rbx+12], 1
+    mov     rdi, [rbx]
+    call    mesh_bbox
+    mov     rdi, [rbx]
+    call    mesh_forget
+    mov     rdi, [rbx]
+    call    sculpt_after_undo
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# undo_attach_delta(rdi=delta) - the newest undo step carries it (sculpt
+#   strokes change their mesh in place)
+undo_attach_delta:
+    mov     eax, [rip+undo_depth]
+    test    eax, eax
+    jz      8f
+    lea     rcx, [rip+undo_stack]
+    mov     rcx, [rcx+rax*8-8]
+    cmp     qword ptr [rcx+ST_DELTA], 0
+    jne     8f
+    mov     [rcx+ST_DELTA], rdi
+    mov     rax, [rdi+16]
+    add     [rip+undo_bytes], rax
+    ret
+8:  mov     rsi, [rdi+16]               # nowhere to keep it
+    add     rsi, 4095
+    and     rsi, -4096
+    mov     eax, SYS_MUNMAP
+    syscall
     ret
 
 in_group:
