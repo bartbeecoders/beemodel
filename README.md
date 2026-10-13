@@ -332,6 +332,33 @@ To make things:
 - **Signed-distance shapes** (`sunion`, `sgyroid`, `smesh`, ...): blend and
   lattice shapes into closed meshes.
 
+### Geometry nodes
+
+A **Geometry Nodes** modifier runs a node tree on the mesh below it: the Group Input is that
+mesh, the Group Output what the object shows. Nodes make and change geometry - grid, cube, UV
+sphere, cylinder, mesh line, transform, join, set position, extrude, subdivision surface, mesh
+boolean, merge by distance - and **fields** give a value or vector per point: position, normal,
+index, value, combine / separate XYZ, math, vector math, noise and random. A field compiles to
+a small program for the field VM, which runs it 256 points at a time in SSE loops across the
+job threads (noise on a million-point grid: about 25 ms on top of making the grid). Trees are
+saved in `.bee` files and undo with the scene; the Node Editor shows the active object's tree
+(Tab switches to its material).
+
+```
+t = gtree("Terrain")
+o = gnode(t, "output")
+g = gnode(t, "grid", 6, 60)            # size, subdivisions
+sp = gnode(t, "set_position")
+n = gnode(t, "noise", 0.6, 3)          # scale, detail
+c = gnode(t, "combine_xyz")
+glink(t, g, sp, 1)                     # from, to, input [, output]
+glink(t, n, c, 2)                      # noise -> Y
+glink(t, c, sp, 3)                     # -> Offset
+glink(t, sp, o, 1)
+m = modifier("Cube", "geometry")
+modset("Cube", m, "tree", t)
+```
+
 ### Sculpting
 
 Ctrl+Tab puts the active mesh in **sculpt mode**. It handles tens of
@@ -535,7 +562,10 @@ src/dyntopo.s   dynamic topology: edge split / collapse under the brush
 src/multires.s  multiresolution: per-level displacements, level sculpting
 src/uv.s        UV maps: seams, LSCM unwrap (CG solver), smart projection, packing
 src/uved.s      the UV editor area: islands, transforms, heat map, texel density
-src/nodeed.s    the node editor area: shader graphs drawn and edited
+src/nodeed.s    the node editor area: shader graphs and node trees drawn and edited
+src/ntree.s     node trees: the block, nodes, links, files
+src/geonodes.s  geometry nodes: evaluation, field compiler, tree.* operators
+src/fieldvm.s   the field VM: per-point programs in SSE blocks
 src/paint.s     texture painting: projected dabs, UV-space dabs, stroke history
 src/layers.s    paint layers: stack, blend modes, composite, saving
 src/vcol.s      vertex colours: vertex paint, tinting, files

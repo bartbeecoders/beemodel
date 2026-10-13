@@ -32,6 +32,7 @@
 .include "macros.inc"
 
 .globl graph_shade
+.globl fbm
 .globl graph_add
 .globl graph_link
 .globl graph_set

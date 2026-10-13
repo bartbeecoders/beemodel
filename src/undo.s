@@ -37,7 +37,8 @@
 .equ ST_NAME,       32      # the label, copied (64 bytes)
 .equ ST_CAD,        96      # the CAD document it saw (a reference)
 .equ ST_DELTA,      104     # sculpt: vertex positions changed in place, or 0
-.equ ST_HDR,        112
+.equ ST_TREES,      112     # the node trees it saw (a reference)
+.equ ST_HDR,        120
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -119,6 +120,9 @@ snapshot:
     mov     rdi, [rip+cad_cur]          # the CAD document, shared
     mov     [rbx+ST_CAD], rdi
     call    cad_ref
+    mov     rdi, [rip+nt_cur]           # the node trees, shared
+    mov     [rbx+ST_TREES], rdi
+    call    nt_ref
     xor     r12d, r12d
 2:  cmp     r12d, [rip+obj_count]
     jae     8f
@@ -166,6 +170,8 @@ release:
     call    mat_unref
     mov     rdi, [rbx+ST_CAD]
     call    cad_unref
+    mov     rdi, [rbx+ST_TREES]
+    call    nt_unref
     mov     rdi, [rbx+ST_DELTA]         # its delta goes too
     test    rdi, rdi
     jz      3f
@@ -215,6 +221,13 @@ restore_step:
     mov     rax, [rbx+ST_CAD]
     mov     [rip+cad_cur], rax
     call    cad_unref
+    mov     rdi, [rbx+ST_TREES]         # the node trees it saw
+    call    nt_ref
+    mov     rdi, [rip+nt_cur]
+    mov     rax, [rbx+ST_TREES]
+    mov     [rip+nt_cur], rax
+    call    nt_unref
+    inc     dword ptr [rip+nt_ver]
     call    cad_sync
     lea     rdi, [rip+scene_pool]
     call    pool_clear

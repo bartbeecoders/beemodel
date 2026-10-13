@@ -16,6 +16,20 @@ project uses [Semantic Versioning](https://semver.org/).
 - Shader graph links may go either way: the graph keeps itself in evaluation
   order and refuses loops (`material.link`). New operators
   `material.node_delete`, `material.node_move`; BeeScript `nodeinfo`.
+- Geometry nodes:
+  - **Modifier:** a Geometry Nodes modifier runs a node tree on the mesh
+    below it.
+  - **Nodes:** 15 geometry nodes (primitives, transform, join, set
+    position, extrude, subdivide, boolean, merge by distance) and 10 field
+    nodes (position, normal, index, value, combine / separate XYZ, math,
+    vector math, noise, random).
+  - **Field VM:** fields compile to programs for a block-vectorized SSE VM
+    run across the job threads.
+  - **Storage:** trees are saved in `.bee` files (NTRE) and undo with the
+    scene.
+  - **Editing:** the node editor shows the active object's tree (Tab: its
+    material). Operators `tree.*`; BeeScript `gtree`, `gnode`, `glink`,
+    `gset`, `ginfo`.
 
 ## [0.8.0] - 2026-10-13
 

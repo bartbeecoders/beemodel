@@ -324,6 +324,7 @@ scene_clear:
 2:  call    eval_flush
     mov     dword ptr [rip+uid_next], 1
     call    mats_reset
+    call    nt_reset
     call    image_clear                 # (and the world)
     call    cad_reset                   # (units, parameters)
     lea     rdi, [rip+scene_pool]
