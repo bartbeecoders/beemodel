@@ -338,7 +338,20 @@
 .equ ME_ARM,        176     # an armature's bones (arm.s: its display mesh), or 0
 .equ ME_WGT,        184     # skin weights: 4 bones (u8) + 4 weights (f32) a
                             #  vertex (own mapping), or 0
-.equ ME_HDR,        192
+.equ ME_SHAPE,      192     # shape keys (shape.s: its own mapping), or 0
+.equ ME_HDR,        208
+
+# ---- rigging data in the animation block (anim.s, rig.s) -----------------------------
+.equ AN_NCON_,      44      # constraints, drivers in use
+.equ AN_NDRV_,      48
+.equ AN_CON_,       35392   # (anim.s checks it follows its layers)
+.equ CN_MAX_,       64
+.equ CN_SZ_,        192
+.equ AN_DRV_,       AN_CON_ + CN_MAX_*CN_SZ_
+.equ DR_MAX_,       32
+.equ DR_SZ_,        256
+.equ AN_RIGEND_,    AN_DRV_ + DR_MAX_*DR_SZ_
+.equ K_SHAPE_,      6       # a shape key's value (an animation channel kind)
 
 # ---- objects (scene.s) -------------------------------------------------------------
 .equ OB_NAME,       0       # 32 bytes

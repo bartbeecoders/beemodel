@@ -393,6 +393,12 @@ builtins:
     .long 3, 3
     .quad bn_bones, b_bones
     .long 1, 1
+    .quad bn_prop, b_prop
+    .long 1, 1
+    .quad bn_shapes, b_shapes
+    .long 1, 1
+    .quad bn_bonepos, b_bonepos
+    .long 3, 3
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -650,6 +656,9 @@ bn_frame:       .asciz "frame"
 bn_armature:    .asciz "armature"
 bn_evpos:       .asciz "evpos"
 bn_bones:       .asciz "bones"
+bn_prop:        .asciz "prop"
+bn_shapes:      .asciz "shapes"
+bn_bonepos:     .asciz "bonepos"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -2998,8 +3007,14 @@ vm_callb:
     sub     rbx, rcx                    # rbx = first argument = result slot
     imul    eax, eax, B_SZ
     lea     rcx, [rip+builtins]
+    lea     rcx, [rcx+rax+8]
+    push    rcx
+    push    rsi                         # (the argument count)
+    call    rig_eval                    # (what the script changed, rigged)
+    pop     rsi
+    pop     rcx
     mov     rdi, rbx
-    call    [rcx+rax+8]
+    call    [rcx]
     mov     [rbx], rax
     mov     [rbx+8], rdx
     add     rbx, 16
@@ -4631,6 +4646,88 @@ b_wpaint:
     add     rsp, 40
     pop     r12
     pop     rbx
+    jmp     ret_num
+
+# prop(path) -> what any animation path's property is now (nil: nothing)
+b_prop:
+    sub     rsp, 8
+    call    a_str
+    mov     rsi, rax
+    call    an_path
+    test    eax, eax
+    jz      8f
+    mov     edi, [rip+ap_kind]
+    mov     esi, [rip+ap_a]
+    mov     edx, [rip+ap_b]
+    mov     ecx, [rip+ap_c]
+    xor     r8d, r8d
+    call    an_chan
+    test    eax, eax
+    jz      8f
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+8:  add     rsp, 8
+    jmp     ret_nil
+
+# bonepos(armature, bone, axis) -> where a bone's tail is posed (IK too),
+#   in the world (nil: no such bone)
+b_bonepos:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     rbx, rdi
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     r12, rax
+    mov     rdi, rax
+    call    arm_of
+    test    rax, rax
+    jz      8f
+    mov     r13, rax
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     rdi, r13
+    mov     rsi, rax
+    call    arm_find_bone
+    test    eax, eax
+    js      8f
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    call    a_str
+    movzx   eax, byte ptr [rax]
+    sub     eax, 'x'
+    cmp     eax, 2
+    ja      8f
+    mov     ebx, eax
+    mov     rdi, r12
+    mov     esi, r13d
+    lea     rdx, [rsp]
+    call    bone_tail
+    cvtss2sd xmm0, [rsp+rbx*4]
+    add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# shapes(name) -> a mesh's shape keys, the Basis too (0: none)
+b_shapes:
+    sub     rsp, 8
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     rdi, rax
+    call    sk_count
+    add     rsp, 8
+    cvtsi2sd xmm0, eax
     jmp     ret_num
 
 # bones(name) -> an armature's bone count (-1: not an armature)

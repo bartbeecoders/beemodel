@@ -92,6 +92,8 @@ dr_code:        .skip 4             # drag: mod << 8 | param
 dr_x0:          .skip 4
 dr_v0:          .skip 4
 mb_inited:      .skip 4
+.align 8
+mb_empty:       .skip MB_HDR            # an empty stack
 tmp_vals:       .skip 64
 
 .section .rodata
@@ -609,11 +611,18 @@ obj_eval:
     push    r14
     push    r15
     mov     rbx, rdi
-    call    mods_on
-    test    eax, eax
-    jz      .Loe_base
     cmp     dword ptr [rbx+OB_TYPE], OT_MESH
     jne     .Loe_base
+    call    mods_on
+    test    eax, eax
+    jnz     96f
+    mov     rdi, [rbx+OB_MESH]          # (or shape keys move it)
+    test    rdi, rdi
+    jz      .Loe_base
+    call    sk_active
+    test    eax, eax
+    jz      .Loe_base
+96:
     mov     rax, rbx                    # cache slot: hash of the object pointer
     shr     rax, 7
     and     eax, EV_N-1
@@ -622,7 +631,10 @@ obj_eval:
     add     r12, rax
     mov     r13, [rbx+OB_MESH]
     mov     r14, [rbx+OB_MODS]
-    cmp     [r12], rbx
+    test    r14, r14
+    jnz     97f
+    lea     r14, [rip+mb_empty]         # (no stack: shape keys alone)
+97: cmp     [r12], rbx
     jne     1f
     cmp     [r12+8], r13
     jne     1f
@@ -663,7 +675,17 @@ obj_eval:
     mov     r15, r13                    # current = base (not owned)
     mov     rdi, r13
     call    mesh_ref                    # own a reference while chaining
-    xor     ecx, ecx
+    mov     rdi, r15                    # shape keys first
+    call    sk_mix
+    test    rax, rax
+    jz      98f
+    push    rax
+    push    rax
+    mov     rdi, r15
+    call    mesh_unref
+    pop     r15
+    pop     rax
+98: xor     ecx, ecx
 2:  cmp     ecx, [r14+MB_COUNT]
     jae     3f
     push    rcx

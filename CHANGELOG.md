@@ -23,6 +23,14 @@ project uses [Semantic Versioning](https://semver.org/).
   - **Automatic weights:** by bone heat: each bone's heat equation is solved on the mesh, and the four strongest bones are kept. `arm.parent <mesh> <armature>` sets up both.
   - **Weight paint (Ctrl+W):** paints the active bone's weights, shown as a heat map. `paint.weight` sets the value; BeeScript has `wpaint`.
   - **BeeScript:** `armature`, `bones`, `weight`, `evpos`. Bones are saved in ARMT and weights in MWGT.
+- Rigging:
+  - **Object constraints:** copy location / rotation / scale (chosen axes, optionally added to the object's own), track to (an axis at the target, another up), limit location / rotation / scale, child of. Each has an influence and can be muted. They work on the object's own transform, so moving or keying a constrained object still works. `constraint.add`, `constraint.remove`, `constraint.set`, `constraint.list`.
+  - **IK:** a bone's chain (any length) reaches for a target object, by FABRIK or CCD, and bends towards an optional pole object. The rest of the armature and skinned meshes follow, and so does dragging the target. `constraint.add Rig:Hand ik Goal chain 2 pole Knee`.
+  - **Drivers:** a property set by an expression (with units and functions) of named other properties and `frame`, e.g. `anim.driver Door:ry a=Handle:rz a*2`. Any animation path can be driven or drive.
+  - **Shape keys:** relative to the Basis, mixed before the modifiers. `shape.add Smile` stores the mesh as a key; edit, then `shape.add Smile` again stores the edit and brings the Basis back. Values (`shape:Cube:Smile`) can be keyed and driven. Saved in MSHK; constraints and drivers are saved with the animation.
+  - **Motion paths:** the selected objects' (in pose mode, the selected bones') paths over the frame range, with a dot a frame and larger dots at keys. `anim.motion_paths`.
+  - **Onion skins:** the active object a few frames before (red) and after (green), as wires that follow playback. `anim.onion 2 2 4`.
+  - **BeeScript:** `prop(path)` (any property by its animation path), `bonepos`, `shapes`.
 - Dope Sheet, Graph Editor and action layers:
   - **Dope Sheet:** a row of keys for each curve. Click selects (Shift adds), a drag moves the selected keys by whole frames, Shift+D copies them ten frames on, X deletes, A selects all or none.
   - **Graph Editor:** every curve fitted to the view, with a selected key's Bezier handles. Dragging a key moves it in frame and value; dragging a handle shapes it and makes it free.
