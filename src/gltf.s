@@ -70,6 +70,8 @@ g_acc_max:      .asciz "],\"max\":["
 g_acc_ind2:     .asciz ",\"componentType\":5125,\"type\":\"SCALAR\",\"count\":"
 g_acc_uv2:      .asciz ",\"componentType\":5126,\"type\":\"VEC2\",\"count\":"
 g_tex0:         .asciz ",\"TEXCOORD_0\":"
+g_col0:         .asciz ",\"COLOR_0\":"
+g_acc_col2:     .asciz ",\"componentType\":5126,\"type\":\"VEC3\",\"count\":"
 g_views:        .asciz "],\"bufferViews\":["
 g_view:         .asciz "{\"buffer\":0,\"byteOffset\":"
 g_vlen:         .asciz ",\"byteLength\":"
@@ -129,6 +131,7 @@ k_coatrf:       .asciz "clearcoatRoughnessFactor"
 s_gmat:         .asciz "glTF material"
 s_gobj:         .asciz "glTF"
 .align 4
+gf_inv255:      .float 0.003921569
 gf_one:         .float 1.0
 gf_half:        .float 0.5
 gf_zero:        .float 0.0
@@ -147,6 +150,8 @@ gx_nv:          .skip 4*MAX_EXP
 gx_off:         .skip 8*MAX_EXP         # positions offset in the buffer
 gx_uv:          .skip 4*MAX_EXP         # with UVs: its UV accessor (else -1)
 gx_nuv:         .skip 4                 # meshes with UVs
+gx_vc:          .skip 4*MAX_EXP         # with vertex colours: its colour
+gx_nvc:         .skip 4                 #  accessor (else -1); how many
 gx_path:        .skip 512
 # import
 gi_json:        .skip 8                 # text start / end
@@ -284,6 +289,7 @@ gltf_export:
 3:  # the mesh objects and the buffer size
     mov     dword ptr [rip+gx_n], 0
     mov     dword ptr [rip+gx_nuv], 0
+    mov     dword ptr [rip+gx_nvc], 0
     xor     r15, r15                    # bytes
     xor     ebx, ebx
 4:  cmp     ebx, [rip+obj_count]
@@ -327,7 +333,18 @@ gltf_export:
     mov     edx, [r8+rcx*4]
     shl     rdx, 3
     add     r15, rdx
-42: inc     dword ptr [rip+gx_n]
+42: lea     r8, [rip+gx_vc]             # (then colours: linear rgb)
+    mov     dword ptr [r8+rcx*4], -1
+    cmp     qword ptr [rax+ME_VCOL], 0
+    je      43f
+    mov     edx, [rip+gx_nvc]
+    mov     [r8+rcx*4], edx
+    inc     dword ptr [rip+gx_nvc]
+    lea     r8, [rip+gx_nv]
+    mov     edx, [r8+rcx*4]
+    imul    rdx, rdx, 12
+    add     r15, rdx
+43: inc     dword ptr [rip+gx_n]
 41: inc     ebx
     jmp     4b
 5:  cmp     dword ptr [rip+gx_n], 0
@@ -356,8 +373,7 @@ gltf_export:
     je      61f
     mov     rsi, r13                    # (with UVs)
     call    gx_fill_uv
-    inc     r12d
-    jmp     6b
+    jmp     62f
 61: mov     rsi, [r13+ME_POS]
     mov     ecx, [r13+ME_NVERTS]
     imul    ecx, ecx, 12
@@ -366,7 +382,17 @@ gltf_export:
     mov     ecx, [r13+ME_NTRIS]
     imul    ecx, ecx, 12
     rep     movsb
-    inc     r12d
+62: lea     rax, [rip+gx_vc]            # colours after
+    cmp     dword ptr [rax+r12*4], -1
+    je      63f
+    mov     rdi, r12
+    call    gx_col_off
+    mov     rdi, rax
+    mov     rsi, r13
+    lea     rax, [rip+gx_uv]
+    mov     edx, [rax+r12*4]
+    call    gx_fill_col
+63: inc     r12d
     jmp     6b
 7:  # the JSON
     call    wb_reset
@@ -462,7 +488,21 @@ gltf_export:
     mov     eax, [rip+gx_n]
     lea     edi, [rdi+rax*2]
     call    int_out
-21: lea     rsi, [rip+g_ind]
+21: lea     rax, [rip+gx_vc]            # (colours: 2n + uvs + its number)
+    mov     eax, [rax+r12*4]
+    cmp     eax, -1
+    je      22f
+    push    rax
+    push    rax
+    lea     rsi, [rip+g_col0]
+    call    wb_str
+    pop     rdi
+    pop     rax
+    mov     eax, [rip+gx_n]
+    lea     edi, [rdi+rax*2]
+    add     edi, [rip+gx_nuv]
+    call    int_out
+22: lea     rsi, [rip+g_ind]
     call    wb_str
     lea     edi, [r12+r12+1]
     call    int_out
@@ -676,7 +716,35 @@ gltf_export:
     call    wb_char
 31: inc     r12d
     jmp     3b
-4:
+4:  xor     r12d, r12d                  # colour accessors (views after)
+5:  cmp     r12d, [rip+gx_n]
+    jae     6f
+    lea     rax, [rip+gx_vc]
+    mov     eax, [rax+r12*4]
+    cmp     eax, -1
+    je      51f
+    push    rax
+    push    rax
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+g_acc_pos]
+    call    wb_str
+    pop     rdi
+    pop     rax
+    mov     eax, [rip+gx_n]
+    lea     edi, [rdi+rax*2]
+    add     edi, [rip+gx_nuv]
+    call    int_out
+    lea     rsi, [rip+g_acc_col2]
+    call    wb_str
+    lea     rax, [rip+gx_nv]
+    mov     edi, [rax+r12*4]
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
+51: inc     r12d
+    jmp     5b
+6:
     lea     rsi, [rip+g_views]
     call    wb_str
     xor     r12d, r12d
@@ -761,7 +829,36 @@ gltf_export:
     call    wb_char
 31: inc     r12d
     jmp     3b
-4:
+4:  xor     r12d, r12d                  # colour views: after the UVs
+5:  cmp     r12d, [rip+gx_n]
+    jae     6f
+    lea     rax, [rip+gx_vc]
+    cmp     dword ptr [rax+r12*4], -1
+    je      51f
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+g_view]
+    call    wb_str
+    mov     edi, r12d
+    call    gx_col_off
+    sub     rax, [rip+gx_bin]
+    mov     rdi, rax
+    call    wb_int
+    lea     rsi, [rip+g_vlen]
+    call    wb_str
+    lea     rax, [rip+gx_nv]
+    mov     edi, [rax+r12*4]
+    imul    edi, edi, 12
+    call    int_out
+    lea     rsi, [rip+g_vtarget]
+    call    wb_str
+    mov     edi, 34962
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
+51: inc     r12d
+    jmp     5b
+6:
     lea     rsi, [rip+g_bufs]
     call    wb_str
     mov     rdi, [rip+gx_binsz]
@@ -808,6 +905,76 @@ gltf_export:
     pop     r13
     pop     r12
     pop     rbp
+    pop     rbx
+    ret
+
+# gx_col_off(edi=export) -> rax = where its colours go in the buffer:
+#   after positions, indices and UVs
+gx_col_off:
+    lea     rax, [rip+gx_off]
+    mov     rax, [rax+rdi*8]
+    add     rax, [rip+gx_bin]
+    lea     rcx, [rip+gx_nv]
+    mov     ecx, [rcx+rdi*4]
+    lea     rdx, [rcx+rcx*2]
+    lea     rax, [rax+rdx*4]
+    lea     rdx, [rip+gx_ntri]
+    mov     edx, [rdx+rdi*4]
+    lea     rdx, [rdx+rdx*2]
+    lea     rax, [rax+rdx*4]
+    lea     rdx, [rip+gx_uv]
+    cmp     dword ptr [rdx+rdi*4], -1
+    je      1f
+    lea     rax, [rax+rcx*8]
+1:  ret
+
+# gx_fill_col(rdi=out, rsi=mesh with colours, edx=its UV accessor: -1 a
+#   vertex a vertex, else a vertex a loop) - linear rgb floats
+gx_fill_col:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r12, rdi
+    mov     rbx, rsi
+    mov     r14d, edx
+    xor     r13d, r13d
+1:  mov     eax, [rbx+ME_NVERTS]
+    cmp     r14d, -1
+    je      2f
+    mov     eax, [rbx+ME_NLOOPS]
+2:  cmp     r13d, eax
+    jae     9f
+    mov     eax, r13d                   # the vertex
+    cmp     r14d, -1
+    je      3f
+    mov     rcx, [rbx+ME_LOOPS]
+    mov     eax, [rcx+rax*4]
+3:  mov     rcx, [rbx+ME_VCOL]
+    mov     eax, [rcx+rax*4]
+    mov     [rsp], eax
+    mov     ecx, 16
+4:  mov     eax, [rsp]
+    shr     eax, cl
+    and     eax, 0xff
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+gf_inv255]
+    push    rcx
+    push    rcx
+    call    srgb_to_lin
+    pop     rcx
+    pop     rcx
+    movss   [r12], xmm0
+    add     r12, 4
+    sub     ecx, 8
+    jns     4b
+    inc     r13d
+    jmp     1b
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 

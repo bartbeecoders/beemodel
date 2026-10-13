@@ -8,6 +8,8 @@
 #  drops the oldest step when full.
 # =============================================================================
 .intel_syntax noprefix
+.globl op_undo
+.globl op_redo
 .include "const.inc"
 .include "macros.inc"
 

@@ -531,6 +531,10 @@ builtins:
     .long 5, 8
     .quad bn_layer, b_layer
     .long 2, 4
+    .quad bn_vpaint, b_vpaint
+    .long 5, 8
+    .quad bn_vcol, b_vcol
+    .long 3, 3
     .quad bn_frametime, b_frametime
     .long 1, 1
 builtins_end:
@@ -679,6 +683,8 @@ bn_imgset:      .asciz "imgset"
 bn_uvmap:       .asciz "uvmap"
 bn_paint:       .asciz "paint"
 bn_layer:       .asciz "layer"
+bn_vpaint:      .asciz "vpaint"
+bn_vcol:        .asciz "vcol"
 .align 8
 layer_ops:      .quad lo_count, lo_add, lo_active, lo_opac, lo_blend, lo_vis, lo_remove, lo_merge, 0
 lo_count:       .asciz "count"
@@ -4951,6 +4957,106 @@ b_paint:
     call    paint_dab_world
     cvtsi2sd xmm0, eax
     add     rsp, 32
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# vpaint(object, x, y, z, radius [, r, g, b]) - vertex paint around that
+#   world point (one undo step) -> 1
+b_vpaint:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 32
+    mov     rbx, rdi
+    mov     r12d, esi
+    xor     ecx, ecx                    # x y z radius
+1:  push    rcx
+    push    rcx
+    lea     eax, [rcx+1]
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    pop     rcx
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 4
+    jb      1b
+    cmp     r12d, 8                     # a colour
+    jb      3f
+    mov     r13d, 0xff
+    mov     ecx, 5
+2:  push    rcx
+    push    rcx
+    mov     eax, ecx
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    pop     rcx
+    cvttsd2si eax, xmm0
+    test    eax, eax
+    jns     21f
+    xor     eax, eax
+21: cmp     eax, 255
+    jbe     22f
+    mov     eax, 255
+22: shl     r13d, 8
+    or      r13d, eax
+    inc     ecx
+    cmp     ecx, 8
+    jb      2b
+    mov     [rip+pt_col], r13d
+3:  mov     rdi, rbx
+    call    a_meshobj
+    mov     rdi, rbx
+    call    a_obj
+    mov     edi, eax
+    lea     rsi, [rsp]
+    movss   xmm0, [rsp+12]
+    call    vp_dab_world
+    cvtsi2sd xmm0, eax
+    add     rsp, 32
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# vcol(object, vertex, channel) -> its vertex colour's red, green, blue or
+#   alpha (0..3: 0..255; -1: no colours)
+b_vcol:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    call    a_mesh
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r13d, xmm0
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si ecx, xmm0
+    mov     eax, -1
+    mov     rdx, [r12+ME_VCOL]
+    test    rdx, rdx
+    jz      9f
+    cmp     r13d, [r12+ME_NVERTS]
+    jae     9f
+    cmp     ecx, 3
+    ja      9f
+    mov     eax, [rdx+r13*4]
+    neg     ecx                         # 0 r: >> 16, 1 g: 8, 2 b: 0, 3 a: 24
+    add     ecx, 2
+    shl     ecx, 3
+    jns     1f
+    mov     ecx, 24
+1:  shr     eax, cl
+    and     eax, 0xff
+9:  cvtsi2sd xmm0, eax
     pop     r13
     pop     r12
     pop     rbx

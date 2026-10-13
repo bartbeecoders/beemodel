@@ -520,6 +520,7 @@ def main():
     uv_textures()
     texture_paint()
     paint_layers()
+    vertex_paint()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2891,6 +2892,64 @@ def paint_layers():
     n = q('print(layer("tex", "count"), layer("tex", "active"))')
     check(n == '2 1', f'Shift+N in texture paint adds a layer and paints it ({n})')
     f.proc.kill()
+
+
+def vertex_paint():
+    """Vertex colours: Shift+V strokes paint the visible vertices (one undo
+    step each); the solid view, the path tracer, OBJ, glTF and .bee keep
+    them."""
+    print('  -- vertex paint --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube")\nadd("sphere", "Ball", 0, 1, 0)\nscale("Ball", 2)\nmodifier("Ball", "subsurf")\n'
+      'modapply("Ball", 0)\nselect("Ball")\nop("paint.color", "230 30 30")\n'
+      'fn reds() {\n s = 0\n for i in 0..verts("Ball") {\n  g = vcol("Ball", i, 1)\n  if g >= 0 { if g < 120 { s += 1 } }\n }\n return s\n}')
+    reds = lambda: int(float(q('print(reds())')))
+    f.mods(1); f.key(47); f.mods(0)             # Shift+V
+    f.pump(0.3)
+    f.drag(570, 300, 650, 340, steps=10)
+    f.pump(0.3)
+    a = reds()
+    img = f.image()
+    vp = sum(1 for y in range(240, 400, 2) for x in range(520, 720, 2)
+             if (lambda p: p[0] > p[1] + 50 and p[0] > p[2] + 50)(img.getpixel((x, y))))
+    f.shot('83_vertex_paint.png')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the scene's undo
+    f.pump(0.3)
+    b = reds()
+    check(a > 20 and vp > 50 and b == 0, f'a stroke paints {a} vertices, the solid view shows it ({vp} px); Ctrl+Z undoes ({b})')
+    f.proc.kill()
+    home = tempfile.mkdtemp(prefix='bee-vc-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    r = subprocess.run([BIN, '--eval', 'delete("Cube")\nadd("sphere", "Ball", 0, 1, 0)\nscale("Ball", 2)\n'
+                        'vpaint("Ball", 2, 1, 0, 1.6, 0, 0, 255)\nrender("~/BeeModel/vc.png", 160, 100, 8)\n'
+                        'op("file.export_obj", "~/BeeModel/vc.obj")\nop("file.export_gltf", "~/BeeModel/vc.glb")\n'
+                        'op("file.save", "~/BeeModel/vc.bee")'], env=env, capture_output=True, text=True, timeout=120)
+    from PIL import Image
+    im = Image.open(os.path.join(home, 'BeeModel', 'vc.png')).convert('RGB')
+    blue = sum(1 for y in range(im.height) for x in range(im.width)
+               if (lambda p: p[2] > p[0] + 50 and p[2] > p[1] + 30)(im.getpixel((x, y))))
+    vs = [l.split() for l in open(os.path.join(home, 'BeeModel', 'vc.obj')) if l.startswith('v ')]
+    check(blue > 100 and all(len(v) == 7 for v in vs), f'the path tracer tints by them ({blue} px); OBJ: v x y z r g b')
+    back = subprocess.run([BIN, '--eval', 'op("file.open", "~/BeeModel/vc.bee")\ns = 0\nfor i in 0..verts("Ball") {\n'
+                           ' r = vcol("Ball", i, 0)\n if r >= 0 { if r < 100 { s += 1 } }\n}\nprint(s)'], env=env, capture_output=True, text=True, timeout=60)
+    n = (back.stdout + back.stderr).split()
+    check(n and int(n[0]) >= 5, f'the .bee file keeps them ({n} strongly blue)')
+    if shutil.which('blender'):
+        script = os.path.join(home, 'vccheck.py')
+        open(script, 'w').write('import bpy, sys\nbpy.ops.wm.read_factory_settings(use_empty=True)\n'
+                                'bpy.ops.import_scene.gltf(filepath=sys.argv[-1])\n'
+                                'm = [o for o in bpy.data.objects if o.type == "MESH"][0].data\n'
+                                'a = m.color_attributes\nprint("VCOL", len(a))\n')
+        r = subprocess.run(['blender', '-b', '--factory-startup', '--python', script, '--',
+                            os.path.join(home, 'BeeModel', 'vc.glb')], capture_output=True, text=True, timeout=300)
+        line = [l for l in r.stdout.splitlines() if l.startswith('VCOL')]
+        check(line == ['VCOL 1'], f'Blender reads glTF COLOR_0 ({line})')
 
 
 class Bridge:

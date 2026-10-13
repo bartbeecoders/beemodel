@@ -18,6 +18,7 @@
 .globl mesh_uv_alloc
 .globl mesh_seam_alloc
 .globl mesh_uv_free
+.globl mesh_vcol_alloc
 .globl mesh_add_vert
 .globl mesh_add_poly
 .globl mesh_finish
@@ -193,6 +194,30 @@ mesh_seam_alloc:
     mov     [rdi+ME_SEAM], rax
 1:  ret
 
+# mesh_vcol_alloc(rdi=mesh) -> rax = its vertex colours (made white when it
+#   had none; 0: no memory)
+mesh_vcol_alloc:
+    mov     rax, [rdi+ME_VCOL]
+    test    rax, rax
+    jnz     1f
+    push    rdi
+    mov     esi, [rdi+ME_CAPV]
+    shl     rsi, 2
+    call    uv_map
+    pop     rdi
+    test    rax, rax
+    jz      1f
+    mov     [rdi+ME_VCOL], rax
+    push    rdi
+    mov     rdi, rax
+    mov     rcx, [rsp]
+    mov     ecx, [rcx+ME_CAPV]
+    mov     eax, -1
+    rep     stosd
+    pop     rdi
+    mov     rax, [rdi+ME_VCOL]
+1:  ret
+
 # uv_map(esi=bytes) -> rax = zeroed private mapping, or 0
 uv_map:
     add     rsi, 4095
@@ -228,7 +253,14 @@ mesh_uv_free:
     mov     esi, [rbx+ME_CAPL]
     call    uv_unmap
     mov     qword ptr [rbx+ME_SEAM], 0
-2:  pop     rbx
+2:  mov     rdi, [rbx+ME_VCOL]
+    test    rdi, rdi
+    jz      3f
+    mov     esi, [rbx+ME_CAPV]
+    shl     rsi, 2
+    call    uv_unmap
+    mov     qword ptr [rbx+ME_VCOL], 0
+3:  pop     rbx
     ret
 uv_unmap:
     add     rsi, 4095
@@ -288,7 +320,17 @@ mesh_copy:
     mov     rsi, [rbx+ME_SEAM]
     mov     ecx, [rbx+ME_NLOOPS]
     rep     movsb
-2:  pop     rax
+2:  cmp     qword ptr [rbx+ME_VCOL], 0  # (and vertex colours)
+    je      3f
+    mov     rdi, [rsp]
+    call    mesh_vcol_alloc
+    test    rax, rax
+    jz      3f
+    mov     rdi, rax
+    mov     rsi, [rbx+ME_VCOL]
+    mov     ecx, [rbx+ME_NVERTS]
+    rep     movsd
+3:  pop     rax
 9:  pop     rbx
     ret
 

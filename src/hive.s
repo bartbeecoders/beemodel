@@ -22,6 +22,9 @@
 .globl hv_tm
 .globl hv_to
 .globl hv_tuv
+.globl hv_tvc
+.globl hv_only
+.globl hv_free_all
 .globl hv_mats
 .globl hv_nmats
 .globl hv_cam
@@ -50,6 +53,8 @@ hv_tn:          .skip 8             # f32[n][9]  corner normals
 hv_tm:          .skip 8             # u32[n]     material (0 = default)
 hv_to:          .skip 8             # f32[n][9]  object-space v0, e1, e2 (shader graphs)
 hv_tuv:         .skip 8             # f32[n][6]  UVs (u0 NaN: none, box)
+hv_tvc:         .skip 8             # u32[n][3]  vertex colours (0: none)
+hv_only:        .skip 8             # set: only this object (baking)
 hv_mats:        .skip 8             # material snapshots (128 bytes, 0 = default)
 hv_nodes:       .skip 8             # BVH4
 hv_root:        .skip 4             # root reference
@@ -157,7 +162,12 @@ hive_build:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     11f
-    mov     rdi, rax
+    mov     rcx, [rip+hv_only]          # (one object only: baking)
+    test    rcx, rcx
+    jz      10f
+    cmp     rax, rcx
+    jne     11f
+10: mov     rdi, rax
     call    obj_eval
     add     r12d, [rax+ME_NTRIS]
 11: inc     ebx
@@ -194,6 +204,12 @@ hive_build:
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_tuv], rax
+    imul    edi, r12d, 12
+    add     edi, 64
+    call    hv_map
+    test    rax, rax
+    jz      .Lhb_fail
+    mov     [rip+hv_tvc], rax
     imul    edi, r12d, 12
     add     edi, 64
     call    hv_map
@@ -244,7 +260,12 @@ hive_build:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     .Lhb_onext
-    mov     r14, rax                    # object
+    mov     rcx, [rip+hv_only]
+    test    rcx, rcx
+    jz      1f
+    cmp     rax, rcx
+    jne     .Lhb_onext
+1:  mov     r14, rax                    # object
     call    fa_mark
     mov     [rsp], rax
     mov     rdi, r14
@@ -359,7 +380,25 @@ put_tri:
     mov     esi, edi
     mov     rdi, r15
     call    tri_uvs
-    pop     r9
+    mov     rdi, [rsp+24]               # vertex colours (none: 0)
+    mov     rax, rbx
+    imul    rax, rax, 12
+    add     rax, [rip+hv_tvc]
+    mov     dword ptr [rax], 0
+    mov     rcx, [r15+ME_VCOL]
+    test    rcx, rcx
+    jz      1f
+    mov     rdx, [r15+ME_TRIS]
+    lea     esi, [rdi+rdi*2]
+    xor     r8d, r8d
+2:  mov     r9d, [rdx+rsi*4]
+    mov     r9d, [rcx+r9*4]
+    mov     [rax+r8*4], r9d
+    inc     esi
+    inc     r8d
+    cmp     r8d, 3
+    jb      2b
+1:  pop     r9
     pop     r8
     pop     rdx
     pop     rdi
@@ -1384,6 +1423,26 @@ reorder_tris:
     inc     ebx
     jmp     43b
 44: mov     [rip+hv_tuv], r13
+    imul    edi, r12d, 12               # colours, the same order
+    add     edi, 64
+    call    hv_map
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    xor     ebx, ebx
+45: cmp     ebx, r12d
+    jae     46f
+    mov     rax, [rip+b_prim]
+    mov     eax, [rax+rbx*4]
+    imul    rsi, rax, 12
+    add     rsi, [rip+hv_tvc]
+    imul    rdi, rbx, 12
+    add     rdi, r13
+    mov     ecx, 12
+    rep     movsb
+    inc     ebx
+    jmp     45b
+46: mov     [rip+hv_tvc], r13
     lea     edi, [r12*4+64]             # materials
     call    hv_map
     test    rax, rax
