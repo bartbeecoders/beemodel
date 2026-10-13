@@ -411,6 +411,8 @@ builtins:
     .long 4, 4
     .quad bn_nodeset, b_nodeset
     .long 4, 6
+    .quad bn_nodeinfo, b_nodeinfo
+    .long 3, 4
     .quad bn_socket, b_socket
     .long 3, 3
     .quad bn_param, b_param
@@ -615,6 +617,16 @@ bn_node:        .asciz "node"
 bn_link:        .asciz "link"
 bn_nodeset:     .asciz "nodeset"
 bn_socket:      .asciz "socket"
+bn_nodeinfo:    .asciz "nodeinfo"
+.align 8
+ni_whats:       .quad ni_count, ni_type, ni_link, ni_sock, ni_x, ni_y, ni_value, 0
+ni_count:       .asciz "count"
+ni_type:        .asciz "type"
+ni_link:        .asciz "link"
+ni_sock:        .asciz "socket"
+ni_x:           .asciz "x"
+ni_y:           .asciz "y"
+ni_value:       .asciz "value"
 bn_param:       .asciz "param"
 bn_sketch:      .asciz "sketch"
 bn_point:       .asciz "point"
@@ -5285,15 +5297,16 @@ b_link:
     mov     esi, r13d
     mov     edx, r14d
     mov     ecx, r15d
-    call    graph_link
+    call    graph_link_any
     test    eax, eax
     jz      8f
-    pop     r15
+    cvtsi2sd xmm0, eax                  # (to's number: linking backwards
+    pop     r15                         #  renumbers)
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
-    jmp     ret_nil
+    jmp     ret_num
 8:  lea     rdi, [rip+e_node_bad]
     xor     esi, esi
     jmp     sc_rt
@@ -5352,6 +5365,53 @@ b_nodeset:
     jmp     sc_rt
 
 # socket(material, base|metallic|roughness|emission|normal, node or nil)
+# nodeinfo(material, node, "count" | "type" | "link" | "socket" | "x" | "y"
+#   | "value" [, k]) -> the node count, its type (1 image .. 9 normalmap),
+#   the node feeding its input k, the node driving socket k (0 base .. 4
+#   normal), its place in the node editor (node 0: the output), its value k
+#   (1..4); -1: none
+b_nodeinfo:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r14d, esi
+    call    a_mat
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    lea     rsi, [rip+ni_whats]
+    call    uv_kind
+    mov     [rsp], eax
+    xor     ecx, ecx
+    cmp     r14d, 4
+    jb      1f
+    lea     rdi, [rbx+48]
+    call    a_int
+    mov     ecx, eax
+1:  mov     edi, r12d
+    mov     esi, r13d
+    cmp     dword ptr [rsp], 6
+    jne     2f
+    mov     edx, ecx                    # a value (a number)
+    call    graph_value
+    cvtss2sd xmm0, xmm0
+    jmp     3f
+2:  mov     edx, [rsp]
+    call    graph_info
+    cvtsi2sd xmm0, eax
+3:
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
 b_socket:
     push    rbx
     push    r12

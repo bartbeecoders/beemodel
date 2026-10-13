@@ -6,6 +6,17 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- The Node Editor area: the active material's shader graph as boxes, sockets
+  and wires. Shift+A adds a node at the pointer; header drags move nodes;
+  socket drags link, pick up and unplug links and drive the Material Output;
+  value drags edit numbers, choices and images; X deletes; middle or
+  empty-space drags pan, Home fits. Positions are kept in the material (saved
+  and undone with it); unplaced nodes are laid out by depth.
+- Shader graph links may go either way: the graph keeps itself in evaluation
+  order and refuses loops (`material.link`). New operators
+  `material.node_delete`, `material.node_move`; BeeScript `nodeinfo`.
+
 ## [0.8.0] - 2026-10-13
 
 Phase 7 of the masterplan, "Sculpting, texturing & UV". BeeModel sculpts

@@ -37,6 +37,14 @@
 .globl graph_set
 .globl graph_socket
 .globl graph_clear
+.globl graph_own
+.globl graph_info
+.globl graph_value
+.globl graph_link_any
+.globl graph_delete
+.globl graph_sort
+.globl op_mat_node_delete
+.globl op_mat_node_move
 .globl graph_type_index
 .globl graph_socket_index
 .globl graph_type_names
@@ -54,6 +62,8 @@
 .equ ND_TYPE,   0
 .equ ND_IN,     4                       # 3 x (u32 link, f32[3] value)
 .equ ND_P,      52                      # f32[4]
+.equ ND_POS,    68                      # i16 x, y in the node editor (0, 0: not placed)
+.equ GR_OUTPOS,  152                     # i16 x, y: the material output node
 .equ MAX_NODES, 12
 .equ NSOCK,     5
 .equ T_IMAGE,   1
@@ -158,7 +168,9 @@ gw_word:        .skip 64
 s_g_need:       .asciz "  material.node <material> image|noise|checker|gradient|mix|ramp|math|bump [values]"
 s_g_full:       .asciz "  a material holds 12 nodes"
 s_g_node:       .asciz "  node "
-s_g_linkneed:   .asciz "  material.link <material> <from node> <to node> <input 1-3> (from before to)"
+s_g_linkneed:   .asciz "  material.link <material> <from node> <to node> <input 1-3> (no loops)"
+s_g_delneed:    .asciz "  material.node_delete <material> <node>"
+s_g_moveneed:   .asciz "  material.node_move <material> <node (0: the output)> <x> <y>"
 s_g_setneed:    .asciz "  material.node_set <material> <node> <slot: 1-3 inputs, 4-7 values> <x> [y z]"
 s_g_sockneed:   .asciz "  material.socket <material> base|metallic|roughness|emission|normal <node|none>"
 s_g_ok:         .asciz "  graph: "
@@ -167,9 +179,11 @@ s_g_unknown:    .asciz "  no material named "
 s_g_none:       .asciz "none"
 
 OPERATOR op_mat_node, "material.node", "Add Shader Node", do_mat_node, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a node to a material's graph: material.node <material> <type> [values] (image: <image> [size])"
-OPERATOR op_mat_link, "material.link", "Link Shader Nodes", do_mat_link, flags=OPF_AI_SAFE|OPF_UNDO, doc="Feed a node into a later node's input: material.link <material> <from> <to> <input 1-3>"
+OPERATOR op_mat_link, "material.link", "Link Shader Nodes", do_mat_link, flags=OPF_AI_SAFE|OPF_UNDO, doc="Feed a node into a later node's input: material.link <material> <from> <to> <input 1-3> (any order; the graph is kept in evaluation order)"
 OPERATOR op_mat_node_set, "material.node_set", "Set Shader Node Value", do_mat_node_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set a node input (1-3) or value (4-7): material.node_set <material> <node> <slot> <x> [y z]"
 OPERATOR op_mat_socket, "material.socket", "Connect Material Socket", do_mat_socket, flags=OPF_AI_SAFE|OPF_UNDO, doc="Drive base, metallic, roughness, emission or normal by a node: material.socket <material> <socket> <node|none>"
+OPERATOR op_mat_node_delete, "material.node_delete", "Delete Shader Node", do_mat_node_delete, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a node from a material's graph (its links go): material.node_delete <material> <node>"
+OPERATOR op_mat_node_move, "material.node_move", "Move Shader Node", do_mat_node_move, flags=OPF_AI_SAFE|OPF_UNDO|OPF_QUIET, doc="Place a node in the node editor: material.node_move <material> <node (0: the output)> <x> <y>"
 OPERATOR op_mat_nodes_clear, "material.nodes_clear", "Clear Shader Nodes", do_mat_nodes_clear, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a material's graph: material.nodes_clear <material>"
 
 .text
@@ -1254,6 +1268,7 @@ name_index:
     ret
 
 # own(edi=material) -> rax = its record, writable (0 if none)
+graph_own:
 own:
     push    rbx
     mov     ebx, edi
@@ -1439,6 +1454,350 @@ graph_socket:
     jmp     9f
 8:  xor     eax, eax
 9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# graph_info(edi=material, esi=node, edx=what, ecx=k) -> eax: what 0 the
+#   node count, 1 the node's type, 2 the node feeding its input k (1..3;
+#   0: none), 3 the node driving socket k (0..4), 4 its x, 5 its y (node 0:
+#   the output) - -1 when there is no such thing
+graph_info:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     r14d, ecx
+    call    mat_count
+    cmp     edi, eax
+    mov     eax, -1
+    jae     9f
+    call    mat_get
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    mov     eax, [rbx+GR_N]
+    test    r13d, r13d
+    jz      9f
+    cmp     r13d, 3
+    jne     1f
+    cmp     r14d, NSOCK
+    jae     8f
+    mov     eax, [rbx+GR_SOCK+r14*4]
+    jmp     9f
+1:  lea     rdx, [rbx+GR_OUTPOS]        # the node (0: the output)
+    test    r12d, r12d
+    jz      2f
+    js      8f
+    cmp     r12d, [rbx+GR_N]
+    ja      8f
+    lea     ecx, [r12-1]
+    imul    ecx, ecx, NODE_SZ
+    lea     rdx, [rbx+GR_NODES+rcx]
+    cmp     r13d, 1
+    jne     11f
+    mov     eax, [rdx+ND_TYPE]
+    jmp     9f
+11: cmp     r13d, 2
+    jne     12f
+    lea     eax, [r14-1]
+    cmp     eax, 3
+    jae     8f
+    shl     eax, 4
+    mov     eax, [rdx+ND_IN+rax]
+    jmp     9f
+12: add     rdx, ND_POS
+2:  cmp     r13d, 4
+    jne     3f
+    movsx   eax, word ptr [rdx]
+    jmp     9f
+3:  cmp     r13d, 5
+    jne     8f
+    movsx   eax, word ptr [rdx+2]
+    jmp     9f
+8:  mov     eax, -1
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# graph_value(edi=material, esi=node, edx=value 1..4) -> xmm0 (0 if none)
+graph_value:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, esi
+    mov     r13d, edx
+    xorps   xmm0, xmm0
+    call    mat_count
+    cmp     edi, eax
+    jae     9f
+    call    mat_get
+    test    rax, rax
+    jz      9f
+    test    r12d, r12d
+    jle     9f
+    cmp     r12d, [rax+GR_N]
+    ja      9f
+    lea     ecx, [r13-1]
+    cmp     ecx, 4
+    jae     9f
+    lea     edx, [r12-1]
+    imul    edx, edx, NODE_SZ
+    add     rax, rdx
+    movss   xmm0, [rax+GR_NODES+ND_P+rcx*4]
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# graph_sort(rdi=record) -> eax = 1: the nodes in evaluation order (every
+#   link from an earlier node; among the ready ones the lowest first), links
+#   and sockets renumbered; 0: a loop (nothing changed)
+graph_sort:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, NODE_SZ*MAX_NODES+64
+    mov     rbx, rdi
+    mov     r12d, [rbx+GR_N]
+    lea     rdi, [rsp]                  # placed: [rsp + 0..11], new index
+    mov     ecx, 16                     #  of each old one: [rsp + 16..]
+    xor     eax, eax
+    rep     stosb
+    xor     r13d, r13d                  # placed so far
+.Lgsrt_round:
+    cmp     r13d, r12d
+    jae     .Lgsrt_permute
+    xor     r14d, r14d                  # the lowest ready one
+1:  cmp     r14d, r12d
+    jae     .Lgsrt_loop
+    cmp     byte ptr [rsp+r14], 0
+    jne     3f
+    imul    eax, r14d, NODE_SZ
+    lea     rdx, [rbx+GR_NODES+rax+ND_IN]
+    xor     ecx, ecx
+2:  mov     eax, [rdx]
+    test    eax, eax
+    jz      21f
+    dec     eax
+    cmp     eax, r12d
+    jae     21f
+    cmp     byte ptr [rsp+rax], 0       # (an input not placed yet)
+    je      3f
+21: add     rdx, 16
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    mov     byte ptr [rsp+r14], 1       # ready: next in order
+    mov     [rsp+16+r14], r13b
+    inc     r13d
+    jmp     .Lgsrt_round
+3:  inc     r14d
+    jmp     1b
+.Lgsrt_loop:
+    xor     eax, eax
+    jmp     .Lgsrt_out
+.Lgsrt_permute:
+    lea     rsi, [rbx+GR_NODES]         # a copy, then each to its place
+    lea     rdi, [rsp+64]
+    imul    ecx, r12d, NODE_SZ
+    rep     movsb
+    xor     r14d, r14d
+4:  cmp     r14d, r12d
+    jae     6f
+    movzx   eax, byte ptr [rsp+16+r14]
+    imul    eax, eax, NODE_SZ
+    lea     rdi, [rbx+GR_NODES+rax]
+    imul    eax, r14d, NODE_SZ
+    lea     rsi, [rsp+64+rax]
+    mov     ecx, NODE_SZ
+    rep     movsb
+    inc     r14d
+    jmp     4b
+6:  xor     r14d, r14d                  # links renumbered
+7:  cmp     r14d, r12d
+    jae     8f
+    imul    eax, r14d, NODE_SZ
+    lea     rdx, [rbx+GR_NODES+rax+ND_IN]
+    xor     ecx, ecx
+71: mov     eax, [rdx]
+    test    eax, eax
+    jz      72f
+    dec     eax
+    movzx   eax, byte ptr [rsp+16+rax]
+    inc     eax
+    mov     [rdx], eax
+72: add     rdx, 16
+    inc     ecx
+    cmp     ecx, 3
+    jb      71b
+    inc     r14d
+    jmp     7b
+8:  xor     ecx, ecx                    # and the sockets
+81: mov     eax, [rbx+GR_SOCK+rcx*4]
+    test    eax, eax
+    jz      82f
+    dec     eax
+    movzx   eax, byte ptr [rsp+16+rax]
+    inc     eax
+    mov     [rbx+GR_SOCK+rcx*4], eax
+82: inc     ecx
+    cmp     ecx, NSOCK
+    jb      81b
+    mov     eax, 1
+.Lgsrt_out:
+    add     rsp, NODE_SZ*MAX_NODES+64
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# graph_link_any(edi=material, esi=from, edx=to, ecx=input 1..3) -> eax =
+#   the node fed, renumbered (0: no such nodes, or the link would make a
+#   loop - nothing changed)
+graph_link_any:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     r14d, ecx
+    call    own
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    test    r12d, r12d
+    jle     8f
+    test    r13d, r13d
+    jle     8f
+    cmp     r12d, r13d
+    je      8f
+    cmp     r12d, [rbx+GR_N]
+    ja      8f
+    cmp     r13d, [rbx+GR_N]
+    ja      8f
+    lea     eax, [r14-1]
+    cmp     eax, 3
+    jae     8f
+    lea     ecx, [r13-1]
+    imul    ecx, ecx, NODE_SZ
+    shl     eax, 4
+    add     ecx, eax
+    lea     r15, [rbx+GR_NODES+rcx+ND_IN]
+    mov     eax, [r15]                  # (kept to put back)
+    push    rax
+    push    rax
+    mov     [r15], r12d
+    lea     ecx, [r13-1]                # the fed node marked to find it after
+    imul    ecx, ecx, NODE_SZ
+    or      dword ptr [rbx+GR_NODES+rcx+ND_TYPE], 0x80000000
+    mov     rdi, rbx
+    call    graph_sort
+    test    eax, eax
+    jnz     1f
+    pop     rax                         # a loop: back as it was
+    pop     rax
+    mov     [r15], eax
+    lea     ecx, [r13-1]
+    imul    ecx, ecx, NODE_SZ
+    and     dword ptr [rbx+GR_NODES+rcx+ND_TYPE], 0x7fffffff
+    jmp     8f
+1:  pop     rax
+    pop     rax
+    xor     ecx, ecx                    # where the fed node went
+2:  imul    edx, ecx, NODE_SZ
+    test    dword ptr [rbx+GR_NODES+rdx+ND_TYPE], 0x80000000
+    jnz     3f
+    inc     ecx
+    cmp     ecx, [rbx+GR_N]
+    jb      2b
+    jmp     8f
+3:  and     dword ptr [rbx+GR_NODES+rdx+ND_TYPE], 0x7fffffff
+    lea     eax, [rcx+1]
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# graph_delete(edi=material, esi=node) -> eax = 1: the node gone, the
+#   later ones one down, links and sockets to it unplugged
+graph_delete:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12d, esi
+    call    own
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    test    r12d, r12d
+    jle     8f
+    cmp     r12d, [rbx+GR_N]
+    ja      8f
+    imul    eax, r12d, NODE_SZ          # the later ones down
+    lea     rsi, [rbx+GR_NODES+rax]
+    lea     rdi, [rsi-NODE_SZ]
+    mov     ecx, [rbx+GR_N]
+    sub     ecx, r12d
+    imul    ecx, ecx, NODE_SZ
+    rep     movsb
+    dec     dword ptr [rbx+GR_N]
+    mov     edi, [rbx+GR_N]             # (the last record cleared)
+    imul    edi, edi, NODE_SZ
+    lea     rdi, [rbx+GR_NODES+rdi]
+    xor     eax, eax
+    mov     ecx, NODE_SZ
+    rep     stosb
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+GR_N]
+    jae     4f
+    imul    eax, ecx, NODE_SZ
+    lea     rdx, [rbx+GR_NODES+rax+ND_IN]
+    xor     r8d, r8d
+2:  mov     eax, [rdx]
+    cmp     eax, r12d
+    jb      3f
+    jne     21f
+    mov     dword ptr [rdx], 0          # fed by it: its constant again
+    jmp     3f
+21: dec     dword ptr [rdx]
+3:  add     rdx, 16
+    inc     r8d
+    cmp     r8d, 3
+    jb      2b
+    inc     ecx
+    jmp     1b
+4:  xor     ecx, ecx
+5:  mov     eax, [rbx+GR_SOCK+rcx*4]
+    cmp     eax, r12d
+    jb      7f
+    jne     6f
+    mov     dword ptr [rbx+GR_SOCK+rcx*4], 0
+    jmp     7f
+6:  dec     dword ptr [rbx+GR_SOCK+rcx*4]
+7:  inc     ecx
+    cmp     ecx, NSOCK
+    jb      5b
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
     pop     r12
     pop     rbx
     ret
@@ -1638,10 +1997,10 @@ do_mat_link:
     mov     esi, [rsp]
     mov     edx, [rsp+4]
     mov     ecx, [rsp+8]
-    call    graph_link
+    call    graph_link_any
     test    eax, eax
     jz      .Lml_need
-    mov     edi, [rsp+4]
+    mov     edi, eax
     call    say_node
     jmp     9f
 .Lml_need:
@@ -1756,6 +2115,106 @@ do_mat_socket:
 .Lmk_drop:
     call    undo_drop_last
 9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# material.node_delete <material> <node>
+do_mat_node_delete:
+    sub     rsp, 24
+    mov     rsi, [rip+op_arg]
+    call    arg_mat
+    test    eax, eax
+    js      8f
+    mov     [rsp], eax
+    call    arg_num
+    test    eax, eax
+    jz      7f
+    cvttss2si esi, xmm0
+    mov     edi, [rsp]
+    call    graph_delete
+    test    eax, eax
+    jz      7f
+    add     rsp, 24
+    ret
+7:  lea     rdi, [rip+s_g_delneed]
+    call    log_line
+8:  call    undo_drop_last
+    add     rsp, 24
+    ret
+
+# material.node_move <material> <node (0: output)> <x> <y>
+do_mat_node_move:
+    push    rbx
+    sub     rsp, 16
+    mov     rsi, [rip+op_arg]
+    call    arg_mat
+    test    eax, eax
+    js      8f
+    mov     [rsp], eax
+    call    arg_num
+    test    eax, eax
+    jz      7f
+    cvttss2si ebx, xmm0
+    call    arg_num
+    test    eax, eax
+    jz      7f
+    cvttss2si eax, xmm0
+    mov     [rsp+4], eax
+    call    arg_num
+    test    eax, eax
+    jz      7f
+    cvttss2si eax, xmm0
+    mov     [rsp+8], eax
+    mov     edi, [rsp]
+    mov     esi, ebx
+    mov     edx, [rsp+4]
+    mov     ecx, [rsp+8]
+    call    graph_place
+    test    eax, eax
+    jz      7f
+    add     rsp, 16
+    pop     rbx
+    ret
+7:  lea     rdi, [rip+s_g_moveneed]
+    call    log_line
+8:  call    undo_drop_last
+    add     rsp, 16
+    pop     rbx
+    ret
+
+# graph_place(edi=material, esi=node (0: the output), edx=x, ecx=y) -> eax = 1
+.globl graph_place
+graph_place:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, esi
+    mov     r12d, edx
+    mov     r13d, ecx
+    call    own
+    test    rax, rax
+    jz      8f
+    test    r12w, r12w                  # ((0, 0) means not placed)
+    jnz     1f
+    test    r13w, r13w
+    jnz     1f
+    mov     r13d, 1
+1:  lea     rdx, [rax+GR_OUTPOS]
+    test    ebx, ebx
+    jz      2f
+    js      8f
+    cmp     ebx, [rax+GR_N]
+    ja      8f
+    lea     ecx, [rbx-1]
+    imul    ecx, ecx, NODE_SZ
+    lea     rdx, [rax+GR_NODES+rcx+ND_POS]
+2:  mov     [rdx], r12w
+    mov     [rdx+2], r13w
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
     pop     r12
     pop     rbx
     ret

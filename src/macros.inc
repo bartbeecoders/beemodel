@@ -29,6 +29,7 @@
 .equ OPF_SCULPT,  128   # its key only works in sculpt mode (and wins there)
 .equ OPF_UV,      256   # its key only works over a UV editor (and wins there)
 .equ OPF_PAINT,   512   # its key only works in texture paint (and wins there)
+.equ OPF_NODE,    1024  # its key only works over a node editor (and wins there)
 
 # key binding modifiers (pre-shifted into the high half of OP_KEY)
 .equ KM_SHIFT,  MOD_SHIFT << 16
