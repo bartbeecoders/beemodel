@@ -115,8 +115,8 @@ k_error:        .asciz "error"
 r_err_method:   .asciz ",\"error\":{\"code\":-32601,\"message\":\"Method not found\"}}\n"
 r_empty:        .asciz "{}"
 r_init_a:       .asciz "{\"protocolVersion\":"
-r_init_b:       .asciz ",\"capabilities\":{\"tools\":{},\"resources\":{}},\"serverInfo\":{\"name\":\"beemodel\",\"version\":"
-r_init_c:       .asciz "},\"instructions\":\"BeeModel is a 3D modeler. Units are meters, Y is up, rotations are Euler XYZ in degrees (rotation_deg). Every change is undoable (undo tool). Start with scene_summary; create objects with create_primitive, place them with set_transform; use script_eval (BeeScript) for loops and bulk edits; look at the result with viewport_capture.\"}"
+r_init_b:       .asciz ",\"capabilities\":{\"tools\":{},\"resources\":{},\"prompts\":{}},\"serverInfo\":{\"name\":\"beemodel\",\"version\":"
+r_init_c:       .asciz "},\"instructions\":\"BeeModel is a 3D modeler. Units are meters, Y is up, rotations are Euler XYZ in degrees (rotation_deg). Every change is undoable (undo tool). Start with scene_summary; create objects with create_primitive, place them with set_transform; use script_eval (BeeScript) for loops and bulk edits; look at the result with viewport_capture. For node setups (procedural geometry) use the procedural prompt: node_types, describe_graph, propose_begin / propose_end around the tree.* operators, then proposal_status.\"}"
 r_tools_a:      .asciz "{\"tools\":["
 r_tools_b:      .asciz "]}"
 r_content_a:    .asciz "{\"content\":[{\"type\":\"text\",\"text\":"
@@ -124,7 +124,12 @@ r_content_b:    .asciz "}"
 r_content_c:    .asciz "],\"isError\":"
 r_true:         .asciz "true"
 r_false:        .asciz "false"
-r_res_list:     .asciz "{\"resources\":[{\"uri\":\"bee://scene\",\"name\":\"Scene\",\"description\":\"Objects, transforms and mesh sizes as JSON\",\"mimeType\":\"application/json\"}]}"
+r_res_list:     .asciz "{\"resources\":[{\"uri\":\"bee://scene\",\"name\":\"Scene\",\"description\":\"Objects, transforms and mesh sizes as JSON\",\"mimeType\":\"application/json\"},{\"uri\":\"bee://graphs\",\"name\":\"Node graphs\",\"description\":\"Every geometry node tree (nodes, links, constants, values) and the co-pilot proposal's state as JSON\",\"mimeType\":\"application/json\"}]}"
+r_res_ga:       .asciz "{\"contents\":[{\"uri\":\"bee://graphs\",\"mimeType\":\"application/json\",\"text\":"
+s_uri_graphs:   .asciz "bee://graphs"
+m_prompts_list: .asciz "prompts/list"
+m_prompts_get:  .asciz "prompts/get"
+k_goal:         .asciz "goal"
 r_res_a:        .asciz "{\"contents\":[{\"uri\":\"bee://scene\",\"mimeType\":\"application/json\",\"text\":"
 r_res_b:        .asciz "}]}"
 t_op_a:         .asciz "{\"name\":"
@@ -628,6 +633,16 @@ handle_message:
     call    str_eq
     test    eax, eax
     jnz     .Lhm_rread
+    lea     rdi, [rip+method]
+    lea     rsi, [rip+m_prompts_list]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lhm_plist
+    lea     rdi, [rip+method]
+    lea     rsi, [rip+m_prompts_get]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lhm_pget
     lea     rsi, [rip+r_err_method]
     call    wb_str
     jmp     .Lhm_send
@@ -685,19 +700,70 @@ handle_message:
     lea     rsi, [rip+r_res_list]
     call    wb_str
     jmp     .Lhm_end
+.Lhm_plist:
+    lea     rsi, [rip+r_result]
+    call    wb_str
+    call    cp_prompts_list
+    jmp     .Lhm_end
+.Lhm_pget:                              # params.arguments.goal
+    lea     rsi, [rip+r_result]
+    call    wb_str
+    mov     byte ptr [rip+sbuf1], 0
+    mov     rsi, [rip+params]
+    test    rsi, rsi
+    jz      1f
+    lea     rdi, [rip+k_arguments]
+    call    j_find
+    test    rax, rax
+    jz      1f
+    mov     rsi, rax
+    lea     rdi, [rip+k_goal]
+    call    j_find
+    test    rax, rax
+    jz      1f
+    mov     rsi, rax
+    lea     rdi, [rip+sbuf1]
+    mov     edx, 500
+    call    j_str
+1:  lea     rsi, [rip+sbuf1]
+    call    cp_prompt_get
+    jmp     .Lhm_end
 .Lhm_rread:
     lea     rsi, [rip+r_result]
     call    wb_str
-    lea     rdi, [rip+txt_state]        # summary into the text buffer
+    xor     ebx, ebx                    # bee://graphs, else the scene
+    mov     rsi, [rip+params]
+    test    rsi, rsi
+    jz      2f
+    lea     rdi, [rip+k_uri]
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     rsi, rax
+    lea     rdi, [rip+sbuf2]
+    mov     edx, 64
+    call    j_str
+    lea     rdi, [rip+sbuf2]
+    lea     rsi, [rip+s_uri_graphs]
+    call    str_eq
+    mov     ebx, eax
+2:  lea     rdi, [rip+txt_state]        # summary into the text buffer
     call    buf_swap
     call    wb_reset
+    test    ebx, ebx
+    jnz     3f
     call    scene_json
-    xor     edi, edi
+    jmp     4f
+3:  call    cp_graphs_json
+4:  xor     edi, edi
     call    wb_char
     lea     rdi, [rip+txt_state]        # back to the response
     call    buf_swap
     lea     rsi, [rip+r_res_a]
-    call    wb_str
+    test    ebx, ebx
+    jz      5f
+    lea     rsi, [rip+r_res_ga]
+5:  call    wb_str
     mov     rsi, [rip+txt_state]
     call    jb_q
     lea     rsi, [rip+r_res_b]
@@ -762,6 +828,8 @@ tools_list:
     lea     rsi, [rip+r_tools_a]
     call    wb_str
     lea     rsi, [rip+curated_tools]
+    call    wb_str
+    lea     rsi, [rip+cp_tools_json]
     call    wb_str
     lea     rbx, [rip+__start_bee_ops]
 1:  lea     rax, [rip+__stop_bee_ops]
@@ -928,6 +996,10 @@ tools_call:
 tool_tier:
     push    rbx
     mov     qword ptr [rip+tool_op], 0
+    lea     rdi, [rip+tool]             # the co-pilot's (copilot.s)
+    call    cp_tier
+    test    eax, eax
+    jns     9f
     lea     rdi, [rip+tool]
     lea     rsi, [rip+c_scene]
     call    str_eq
@@ -979,7 +1051,7 @@ tool_tier:
     ret
 .Ltt_edit:
     mov     eax, 1
-    pop     rbx
+9:  pop     rbx
     ret
 
 # is_undo_tool -> eax = 1 for undo / redo (tools or operators)
@@ -1052,6 +1124,8 @@ mcp_clients:
     ret
 
 # fail(rdi=message, rsi=detail or 0)
+.globl mcp_fail
+mcp_fail:
 fail:
     mov     dword ptr [rip+is_error], 1
     push    rsi
@@ -1064,6 +1138,8 @@ fail:
 1:  ret
 
 # arg_str(rdi=key, rsi=dest, edx=cap) -> eax = length (-1 if missing)
+.globl mcp_arg_str
+mcp_arg_str:
 arg_str:
     push    rsi
     push    rdx
@@ -1219,6 +1295,10 @@ dispatch_tool:
     call    str_eq
     test    eax, eax
     jnz     .Ldt_redo
+    lea     rdi, [rip+tool]             # the co-pilot's tools
+    call    cp_dispatch
+    test    eax, eax
+    jnz     .Ldt_out
     # op_<id>: compare against every agent-safe operator's tool name
     lea     rbx, [rip+__start_bee_ops]
 1:  lea     rax, [rip+__stop_bee_ops]

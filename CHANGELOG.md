@@ -83,6 +83,10 @@ project uses [Semantic Versioning](https://semver.org/).
   one core instead of ~4.7 ms in the VM. `BEEMODEL_JIT=0` / `=sse` choose
   the path. `--selftest` runs 150 random programs through the VM and both
   paths and compares every output bit.
+- The procedural co-pilot (MCP):
+  - **Tools:** `node_types` lists the node catalogue (sockets, values, choices, defaults). `describe_graph` and the `bee://graphs` resource give trees as JSON.
+  - **Proposals:** `propose_begin` / `propose_end` / `proposal_status` let an agent build a node setup the user previews in the viewport. A banner offers Accept (Enter) and Revert (Esc); the proposal is one undo step either way.
+  - **Prompt:** the MCP prompt `procedural` gives an agent this flow for a goal.
 - Assets: `tree.save_asset` (with the groups the tree runs) and
   `material.save_asset` write to `~/BeeModel/assets`; `asset.load` adds one
   to any scene, `asset.list` lists them; the Asset Browser area adds one

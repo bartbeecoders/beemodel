@@ -278,9 +278,13 @@ Full details: [docs/MCP.md](docs/MCP.md). `--mcp-bridge` relays stdio to the run
 * `viewport_capture`, so the agent can see the scene: it returns a PNG of the
   viewport (or of the whole window, with `area: "window"`);
 * `script_eval`, which runs BeeScript (see below) as one undo step;
-* every agent-safe operator as `op_<id>`, for example `op_file_save`.
+* every agent-safe operator as `op_<id>`, for example `op_file_save`;
+* the procedural co-pilot: `node_types` (the node catalogue), `describe_graph`, and
+  `propose_begin` / `propose_end` / `proposal_status`. An agent builds a node setup, the
+  viewport shows it with an **Accept** / **Revert** banner (Enter / Esc), and either way it is
+  one undo step. The MCP prompt `procedural` hands an agent this flow for a goal.
 
-The scene is also available as the resource `bee://scene`.
+The scene is also available as the resource `bee://scene`, and the node trees as `bee://graphs`.
 
 Agents work under three safeguards:
 
@@ -649,6 +653,7 @@ src/bake.s      baking normal / AO / curvature maps, high to low
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
+src/copilot.s   the procedural co-pilot: node catalogue, graphs as JSON, proposals
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours
