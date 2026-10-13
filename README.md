@@ -400,6 +400,15 @@ material - per triangle in the solid view, smoothly in the material
 preview and the path tracer - and go to OBJ (`v x y z r g b`), glTF
 (`COLOR_0`) and `.bee` files. Scripts: `vpaint(...)`, `vcol(...)`.
 
+**Baking**: `object.bake <low> <high> <normal|ao|curvature> <image>
+[distance]` (or `bake(...)` in scripts) bakes a high-poly mesh's detail
+into an image through the low-poly mesh's UVs, with the path tracer's BVH:
+a tangent-space normal map, ambient occlusion (48 rays per texel), or
+curvature (light convex, dark concave). Rays start a cage distance outside
+the low surface (5% of its size unless given); island borders are dilated
+so seams do not show. A bake is one texture-paint undo step. 1024 x 1024
+from a 127k-triangle mesh: about 0.2 s for normals, 0.7 s for AO.
+
 ### BeeScript
 
 BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not
@@ -508,6 +517,7 @@ src/uved.s      the UV editor area: islands, transforms, heat map, texel density
 src/paint.s     texture painting: projected dabs, UV-space dabs, stroke history
 src/layers.s    paint layers: stack, blend modes, composite, saving
 src/vcol.s      vertex colours: vertex paint, tinting, files
+src/bake.s      baking normal / AO / curvature maps, high to low
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay

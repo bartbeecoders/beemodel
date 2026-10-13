@@ -149,6 +149,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `layer(image, op [, layer [, value]])` | Paint layers: `"count"`, `"add"` (a transparent layer above, made active; returns its number), `"active"` (with a layer: paint it; without: which one), `"opacity"` (0..1), `"blend"` (0 normal, 1 multiply, 2 add), `"visible"` (0 / 1), `"remove"`, `"merge"` (flatten into the image) |
 | `vpaint(object, x, y, z, radius [, r, g, b])` | Vertex paint around that world point (one undo step) |
 | `vcol(object, vertex, channel)` | A vertex colour's red, green, blue or alpha (0..3; 0..255), -1 without colours |
+| `bake(low, high, kind, image [, distance])` | Bake the high mesh's `"normal"`, `"ao"` or `"curvature"` map into the image through the low mesh's UVs (cage distance: 5% of the low mesh's size unless given); the texels baked, -1 without UVs or for a float image. Undo: `op("paint.undo")` |
 | `uvmap(object, su, sv, du, dv)` | Every UV of the mesh becomes (u su + du, v sv + dv): tiling, offsets |
 | `imgpixel(image, x, y, channel)` | A pixel's red, green, blue or alpha (0..3): 0..255 for 8-bit images, linear values for HDR |
 | `render(path [, width, height, samples, denoise])` | Path-traces the scene with Hive into a PNG (the camera object, or the viewport's view), denoised when `denoise` is 1; returns the milliseconds. Defaults 640 x 360, 64 samples, no denoising |
