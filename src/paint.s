@@ -20,6 +20,8 @@
 .include "macros.inc"
 
 .globl pt_obj
+.globl pt_record
+.globl pt_record_end
 .globl paint_press
 .globl paint_drag
 .globl paint_release
@@ -96,6 +98,8 @@ pt_col:         .long 0xffd04020        # 0xAARRGGBB
 pt_obj:         .skip 4                 # the object (0: off)
 pt_stroking:    .skip 4
 pt_img:         .skip 8                 # its image (header)
+pt_rsave:       .skip 8                 # (pt_record: the image painted,
+pt_rvp:         .skip 4                 #  vertex mode, kept)
 pt_lx:          .skip 4                 # the last dab (physical, float)
 pt_ly:          .skip 4
 pt_hx:          .skip 4                 # the pointer (logical) for the ring
@@ -486,6 +490,39 @@ stroke_finish:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# pt_record(rdi=image) - what the image is now goes into the texture paint
+#   history as one step when pt_record_end runs (baking)
+pt_record:
+    mov     rax, [rip+pt_img]
+    mov     [rip+pt_rsave], rax
+    mov     eax, [rip+vp_on]
+    mov     [rip+pt_rvp], eax
+    mov     dword ptr [rip+vp_on], 0
+    mov     [rip+pt_img], rdi
+    jmp     stroke_start
+
+# pt_record_end - the whole image as one step
+pt_record_end:
+    sub     rsp, 8
+    cmp     dword ptr [rip+pt_stroking], 0
+    je      1f
+    mov     rax, [rip+pt_img]
+    mov     dword ptr [rip+pt_bx0], 0
+    mov     dword ptr [rip+pt_by0], 0
+    mov     ecx, [rax+IM_W]
+    dec     ecx
+    mov     [rip+pt_bx1], ecx
+    mov     ecx, [rax+IM_H]
+    dec     ecx
+    mov     [rip+pt_by1], ecx
+    call    stroke_finish
+1:  mov     rax, [rip+pt_rsave]
+    mov     [rip+pt_img], rax
+    mov     eax, [rip+pt_rvp]
+    mov     [rip+vp_on], eax
+    add     rsp, 8
     ret
 
 # pt_hist_clear - every stroke forgotten (the layers changed under them)

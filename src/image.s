@@ -726,6 +726,8 @@ image_pixel:
     ret
 
 # word(rsi=text) -> im_word = the next word, rsi after it, eax = length
+.globl im_next_word
+.globl im_word
 im_next_word:
     lea     rdi, [rip+im_word]
     xor     ecx, ecx

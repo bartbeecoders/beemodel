@@ -25,6 +25,7 @@
 .globl hv_tvc
 .globl hv_only
 .globl hv_free_all
+.globl corner_normals
 .globl hv_mats
 .globl hv_nmats
 .globl hv_cam

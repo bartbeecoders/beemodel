@@ -521,6 +521,7 @@ def main():
     texture_paint()
     paint_layers()
     vertex_paint()
+    baking()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2950,6 +2951,62 @@ def vertex_paint():
                             os.path.join(home, 'BeeModel', 'vc.glb')], capture_output=True, text=True, timeout=300)
         line = [l for l in r.stdout.splitlines() if l.startswith('VCOL')]
         check(line == ['VCOL 1'], f'Blender reads glTF COLOR_0 ({line})')
+
+
+def baking():
+    """Baking: a high mesh's normal, ambient occlusion and curvature maps
+    through a low mesh's UVs; one texture paint undo step each."""
+    print('  -- baking --')
+    home = tempfile.mkdtemp(prefix='bee-bake-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    stat = ('fn stat(img, ch, lo, hi) {\n n = 0\n for y in 0..64 {\n  for x in 0..64 {\n'
+            '   v = imgpixel(img, x, y, ch)\n   if v >= lo { if v <= hi { n += 1 } }\n  }\n }\n return n\n}\n')
+    r = subprocess.run([BIN, '--eval', stat +
+                        'op("image.new", "fl 64 64")\nop("image.new", "nm 64 64")\nop("image.new", "ao 64 64")\n'
+                        'op("image.new", "cv 64 64")\nop("image.new", "cr 64 64")\n'
+                        'seams("Cube", "sharp")\nunwrap("Cube")\n'
+                        'add("cube", "Big", 0, 1, 0)\nscale("Big", 1.05)\n'
+                        'a = bake("Cube", "Big", "normal", "fl", 0.3)\n'
+                        'print(a, stat("fl", 2, 250, 255), stat("fl", 0, 120, 136))\n'
+                        'add("sphere", "B", 0, 2.0, 0)\nscale("B", 0.7)\nboolean("Big", "B", "union")\n'
+                        'bake("Cube", "Big", "ao", "ao", 0.3)\nbake("Cube", "Big", "curvature", "cr", 0.3)\n'
+                        'print(stat("ao", 0, 140, 235), stat("ao", 0, 250, 255), stat("cr", 0, 0, 120))\n'
+                        'add("sphere", "Ball", 0, 1, 0)\nscale("Ball", 1.3)\nmodifier("Ball", "subsurf")\nmodapply("Ball", 0)\n'
+                        'bake("Cube", "Ball", "normal", "nm", 0.8)\nbake("Cube", "Ball", "curvature", "cv", 0.8)\n'
+                        'print(stat("nm", 0, 0, 90), stat("nm", 0, 166, 255), stat("cv", 0, 136, 180), stat("cv", 0, 0, 120))\n'
+                        'p = imgpixel("cv", 32, 20, 0)\nop("paint.undo")\nq = imgpixel("cv", 32, 20, 0)\n'
+                        'op("paint.redo")\nprint(p, q, imgpixel("cv", 32, 20, 0), bake("Ball", "Cube", "ao", "ao"))\n'
+                        'op("image.save", "nm ~/BeeModel/nm.png")\nop("image.save", "ao ~/BeeModel/ao.png")\n'
+                        'op("image.save", "cr ~/BeeModel/cr.png")\n'],
+                       env=env, capture_output=True, text=True, timeout=120)
+    out = (r.stdout + r.stderr).split()
+    try:
+        v = [int(float(x)) for x in out[:13]]
+    except Exception:
+        v = []
+    check(len(v) == 13 and v[0] > 2000 and v[1] > 2000 and v[2] > 2000,
+          f'a flat high mesh bakes a flat normal map ({out[:3]})')
+    check(len(v) == 13 and v[3] > 20 and v[4] > 1500 and v[5] >= 4,
+          f'ambient occlusion darkens around a dome, curvature marks its crease dark ({out[3:6]})')
+    check(len(v) == 13 and v[6] > 200 and v[7] > 200 and v[8] > 1500 and v[9] == 0,
+          f'a sphere bakes tilting normals and convex curvature ({out[6:10]})')
+    check(len(v) == 13 and v[10] != v[11] and v[12] == v[10] and out[13] == '-1',
+          f'a bake is one texture paint undo step; no UVs: -1 ({out[10:14]})')
+    for n in ('nm', 'ao', 'cr'):
+        p = os.path.join(home, 'BeeModel', n + '.png')
+        if os.path.exists(p):
+            shutil.copy(p, os.path.join(OUT, '84_bake_' + n + '.png'))
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('op("image.new", "ao 32 32")\nseams("Cube", "sharp")\nunwrap("Cube")\n'
+      'add("sphere", "Ball", 0, 1, 0)\nscale("Ball", 1.3)')
+    text, err = m.tool('run_operator', {'id': 'object.bake', 'arg': 'Cube Ball normal ao 0.8'})
+    n = q('s = 0\nfor y in 0..32 { for x in 0..32 { if imgpixel("ao", x, y, 2) > 200 { s += 1 } } }\nprint(s)')
+    check(not err and n.isdigit() and int(n) > 300, f'agents bake with object.bake ({n}, {err})')
+    f.proc.kill()
 
 
 class Bridge:
