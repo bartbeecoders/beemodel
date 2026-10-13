@@ -23,6 +23,7 @@
 .globl build_bevel
 .globl bv_angle
 .globl bv_cos
+.globl bv_pred
 
 .equ KEY_R,     19
 .equ KEY_B,     48
@@ -2454,6 +2455,10 @@ bv_arc:         .skip 8             # per edge slot: 2 ends x (segments - 1) arc
 bv_dst:         .skip 8
 bv_angle:       .skip 4             # 1: bevel edges sharper than bv_cos
 bv_cos:         .skip 4
+.align 8
+bv_pred:        .skip 8
+bv_done:        .skip 8
+bv_arch:        .skip 8             # hash: an arc's two ends -> who made it             # per vertex: a face closed its round             # 0, or fn(edi, esi = edge ends, rdx = mesh) -> eax
 .text
 
 # build_bevel(rdi=src, esi=segments, xmm0=width) -> rax = new mesh
@@ -2505,6 +2510,19 @@ build_bevel:
     push    r8
     push    rax
     call    sharp_edge                  # eax = 1 if the faces meet sharply
+    mov     ecx, eax
+    pop     rax
+    pop     r8
+    test    ecx, ecx
+    jz      21f
+    cmp     qword ptr [rip+bv_pred], 0  # and a caller's test (features)
+    je      23f
+    push    r8
+    push    rax
+    mov     edi, [r8+r12*8]
+    mov     esi, [r8+r12*8+4]
+    mov     rdx, rbx
+    call    [rip+bv_pred]
     mov     ecx, eax
     pop     rax
     pop     r8
@@ -2585,6 +2603,11 @@ build_bevel:
     inc     r15d
     jmp     .Lbb_p1
 .Lbb_arcs:
+    mov     edi, [rbx+ME_NVERTS]        # vertices whose round is closed (no patch)
+    call    fa
+    test    rax, rax
+    jz      .Lbb_fail2
+    mov     [rip+bv_done], rax
     # ---- arc points per beveled edge end (segments > 1) --------------------
     mov     eax, [rip+bv_seg]
     dec     eax
@@ -2597,6 +2620,12 @@ build_bevel:
     mov     [rip+bv_arc], rax
     cmp     dword ptr [rip+bv_seg], 1
     je      .Lbb_faces
+    mov     edi, [rip+ef_n]             # arcs by their two ends (shared)
+    add     edi, edi
+    call    eh_new
+    test    rax, rax
+    jz      .Lbb_fail2
+    mov     [rip+bv_arch], rax
     mov     r8, [rbx+ME_EDGES]
     xor     r12d, r12d                  # edges
 5:  cmp     r12d, [rbx+ME_NEDGES]
@@ -2635,6 +2664,9 @@ build_bevel:
     mov     rcx, [rip+bv_cpt]
     mov     eax, [rcx+rax*4]
     mov     [rsp+52], eax
+    call    arc_share                   # the same two ends at this corner:
+    test    eax, eax                    #  one arc (rounded edges meeting)
+    jnz     58f
     mov     r13d, 1                     # j = 1 .. s - 1
 52: cmp     r13d, [rip+bv_seg]
     jae     58f
@@ -2802,6 +2834,9 @@ build_bevel:
     mov     rdx, [rsp+88]
     cmp     byte ptr [rdx+r15], 0
     je      89f
+    mov     rdx, [rip+bv_done]
+    cmp     byte ptr [rdx+r15], 0
+    jne     89f
     mov     edi, r15d
     call    corner_patch
 89: inc     r15d
@@ -3078,14 +3113,183 @@ corner_rep:
     lea     rcx, [rip+scr]
     mov     [rcx+rbp*4], eax
     inc     ebp
+    mov     [rsp], eax
     mov     edi, [rsp+16+16]            # v -> w
     mov     esi, [rsp+16+20]
     call    along_or_v
+    mov     [rsp+4], eax
+    mov     edi, [rsp+16+16]            # (a rounded edge ending here: its arc
+    mov     esi, [rsp]                  #  between the two)
+    mov     edx, eax
+    call    arc_fill
+    mov     eax, [rsp+4]
     lea     rcx, [rip+scr]
     mov     [rcx+rbp*4], eax
     inc     ebp
     add     rsp, 8
     ret
+
+# arc_share (build_bevel's arc pass: slot [rsp+8+40], end ebp, ends P1 / P2
+#   at [rsp+8+48 / 52]) -> eax = 1 if an earlier edge end made the arc between
+#   these two points: its points are used (in this direction); else 0 and
+#   this one is registered
+arc_share:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    mov     edi, [rsp+32+48]
+    mov     esi, [rsp+32+52]
+    call    ukey
+    mov     rsi, rax
+    mov     rdi, [rip+bv_arch]
+    call    eh_slot
+    xor     ecx, ecx                    # this one runs high -> low?
+    mov     r8d, [rsp+32+48]
+    cmp     r8d, [rsp+32+52]
+    seta    cl
+    mov     r12d, [rsp+32+40]           # our arc base: (slot * 2 + end) (s - 1)
+    lea     r12d, [r12+r12]
+    add     r12d, ebp
+    mov     r13d, [rip+bv_seg]
+    dec     r13d
+    test    edx, edx
+    jnz     1f
+    lea     edx, [r12+r12]              # new: (slot * 2 + end) * 2 + dir
+    add     edx, ecx
+    mov     [rax], edx
+    xor     eax, eax
+    jmp     9f
+1:  mov     edx, [rax]                  # theirs
+    mov     eax, edx
+    and     edx, 1
+    shr     eax, 1
+    imul    eax, r13d                   # their base
+    imul    r12d, r13d                  # ours
+    mov     rsi, [rip+bv_arc]
+    xor     r8d, r8d                    # k = 0 .. s - 2
+2:  cmp     r8d, r13d
+    jae     8f
+    mov     r9d, r8d                    # same direction: k, else s - 2 - k
+    cmp     edx, ecx
+    je      3f
+    lea     r9d, [r13-1]
+    sub     r9d, r8d
+3:  add     r9d, eax
+    mov     r9d, [rsi+r9*4]
+    lea     r10d, [r12+r8]
+    mov     [rsi+r10*4], r9d
+    inc     r8d
+    jmp     2b
+8:  mov     eax, [rsp+32+44]            # v: no corner patch
+    mov     rcx, [rip+bv_done]
+    mov     byte ptr [rcx+rax], 1
+    mov     eax, 1
+9:  add     rsp, 8
+    pop     r13
+    pop     r12
+    ret
+
+# arc_fill(edi=v, esi=a, edx=b) - when a beveled edge ends at v with its strip
+#   running from a to b (or back), its arc points go into scr at ebp, a to b
+#   (a face at v that touches none of the edge's faces closes the round)
+arc_fill:
+    cmp     dword ptr [rip+bv_seg], 1
+    jbe     99f
+    cmp     esi, edx
+    je      99f
+    cmp     esi, edi
+    je      99f
+    cmp     edx, edi
+    je      99f
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 24
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     r14d, edx
+    xor     r15d, r15d                  # edges
+1:  cmp     r15d, [rbx+ME_NEDGES]
+    jae     9f
+    mov     r8, [rbx+ME_EDGES]
+    mov     edi, [r8+r15*8]
+    mov     esi, [r8+r15*8+4]
+    xor     ecx, ecx                    # which end is v
+    cmp     edi, r12d
+    je      2f
+    mov     ecx, 1
+    cmp     esi, r12d
+    jne     8f
+2:  mov     [rsp], ecx
+    call    ef_find
+    test    eax, eax
+    js      8f
+    mov     rcx, [rip+bv_bev]
+    cmp     byte ptr [rcx+rax], 0
+    je      8f
+    mov     [rsp+4], eax                # slot
+    mov     rcx, [rip+ef_f1]            # its strip's ends at v
+    mov     edi, [rcx+rax*4]
+    mov     esi, r12d
+    call    corner_of
+    mov     rcx, [rip+bv_cpt]
+    mov     eax, [rcx+rax*4]
+    mov     [rsp+8], eax
+    mov     rcx, [rip+ef_f2]
+    mov     eax, [rsp+4]
+    mov     edi, [rcx+rax*4]
+    mov     esi, r12d
+    call    corner_of
+    mov     rcx, [rip+bv_cpt]
+    mov     eax, [rcx+rax*4]
+    mov     edx, 1                      # forwards
+    cmp     [rsp+8], r13d
+    jne     3f
+    cmp     eax, r14d
+    je      4f
+3:  mov     edx, -1                     # backwards
+    cmp     [rsp+8], r14d
+    jne     8f
+    cmp     eax, r13d
+    jne     8f
+4:  mov     [rsp+12], edx
+    mov     rcx, [rip+bv_done]          # (no corner patch here then)
+    mov     byte ptr [rcx+r12], 1
+    mov     ecx, [rip+bv_seg]           # arc[slot][end][j - 1], j = 1 .. s - 1
+    dec     ecx
+    mov     eax, [rsp+4]
+    imul    eax, ecx
+    shl     eax, 1
+    mov     edx, [rsp]
+    imul    edx, ecx
+    add     eax, edx                    # arc[slot][end][0]
+    mov     r8d, 0                      # k = 0 .. s - 2
+    cmp     dword ptr [rsp+12], 0
+    jg      5f
+    lea     r8d, [rcx-1]
+5:  test    r8d, r8d
+    js      9f
+    cmp     r8d, ecx
+    jae     9f
+    cmp     ebp, 65536 - 8              # (scr: SCR_MAX)
+    jae     9f
+    lea     edx, [rax+r8]
+    mov     rsi, [rip+bv_arc]
+    mov     edx, [rsi+rdx*4]
+    lea     rsi, [rip+scr]
+    mov     [rsi+rbp*4], edx
+    inc     ebp
+    add     r8d, [rsp+12]
+    jmp     5b
+8:  inc     r15d
+    jmp     1b
+9:  add     rsp, 24
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+99: ret
 
 # along_or_v(edi=v, esi=other) -> eax = point slid from v towards other, or v
 along_or_v:

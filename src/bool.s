@@ -115,6 +115,7 @@ cdt_t:          .skip CDT_MAXT*12
 cdt_ax:         .skip 8             # projection axes
 cdt_flip:       .skip 4
 cdt_onedge:     .skip 4
+cf_depth:       .skip 4
 .align 8
 es_t:           .skip CDT_MAXP*8
 es_id:          .skip CDT_MAXP*4
@@ -3013,6 +3014,44 @@ cdt_edge_pts:
     pop     rbx
     ret
 
+# near_edge(edi=a, esi=b, edx=p local, xmm0=threshold from the triangle's
+#   area) -> eax = 1 if p is on a-b: |o2| within that, or within 1e-7 of the
+#   edge's length (computed edge points carry rounding a few orders above
+#   that; a point taken off its line by it would leave a sliver no flip can
+#   repair)
+near_edge:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    movsd   [rsp], xmm0
+    mov     ebx, edi
+    mov     r12d, esi
+    call    o2
+    andpd   xmm0, [rip+bd_abs]
+    movsd   [rsp+8], xmm0
+    lea     rax, [rip+cdt_xy]
+    mov     ecx, ebx
+    shl     ecx, 4
+    mov     edx, r12d
+    shl     edx, 4
+    movsd   xmm1, [rax+rdx]
+    subsd   xmm1, [rax+rcx]
+    movsd   xmm2, [rax+rdx+8]
+    subsd   xmm2, [rax+rcx+8]
+    mulsd   xmm1, xmm1
+    mulsd   xmm2, xmm2
+    addsd   xmm1, xmm2
+    mulsd   xmm1, [rip+cf_edge]
+    maxsd   xmm1, [rsp]
+    xor     eax, eax
+    movsd   xmm0, [rsp+8]
+    comisd  xmm0, xmm1
+    setbe   al
+    add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
 # cdt_insert(edi=global vertex) -> eax = 1: split the triangle (or edge)
 #   holding it
 cdt_insert:
@@ -3095,24 +3134,24 @@ cdt_insert:
     mov     edi, r14d
     mov     esi, r15d
     mov     edx, r12d
-    call    o2
-    andpd   xmm0, [rip+bd_abs]
-    comisd  xmm0, [rsp+16]
-    jbe     .Lci_e0
+    movsd   xmm0, [rsp+16]
+    call    near_edge
+    test    eax, eax
+    jnz     .Lci_e0
     mov     edi, r15d
     mov     esi, ebp
     mov     edx, r12d
-    call    o2
-    andpd   xmm0, [rip+bd_abs]
-    comisd  xmm0, [rsp+16]
-    jbe     .Lci_e1
+    movsd   xmm0, [rsp+16]
+    call    near_edge
+    test    eax, eax
+    jnz     .Lci_e1
     mov     edi, ebp
     mov     esi, r14d
     mov     edx, r12d
-    call    o2
-    andpd   xmm0, [rip+bd_abs]
-    comisd  xmm0, [rsp+16]
-    jbe     .Lci_e2
+    movsd   xmm0, [rsp+16]
+    call    near_edge
+    test    eax, eax
+    jnz     .Lci_e2
 .Lci_inner:                             # interior: (a b p) (b c p) (c a p)
     mov     edi, r13d
     mov     esi, r14d
@@ -3439,9 +3478,93 @@ cdt_force:
     jmp     1b
 .Lcf_nextpass:
     cmp     dword ptr [rsp+28], 0
-    jne     .Lcf_fail
+    jne     .Lcf_split
     mov     dword ptr [rsp+28], 1
     jmp     .Lcf_pass
+.Lcf_split:
+    # nothing crosses p-q strictly: it runs through a vertex v (a point
+    #   that is on it in fact) - recover p-v and v-q
+    cmp     dword ptr [rip+cf_depth], 64
+    jae     .Lcf_fail
+    lea     rax, [rip+cdt_xy]
+    mov     ecx, r12d
+    shl     ecx, 4
+    mov     edx, r13d
+    shl     edx, 4
+    movsd   xmm4, [rax+rdx]             # d = q - p, L2 = d . d
+    subsd   xmm4, [rax+rcx]
+    movsd   xmm5, [rax+rdx+8]
+    subsd   xmm5, [rax+rcx+8]
+    movsd   xmm6, xmm4
+    mulsd   xmm6, xmm4
+    movsd   xmm7, xmm5
+    mulsd   xmm7, xmm5
+    addsd   xmm6, xmm7
+    xorpd   xmm7, xmm7
+    comisd  xmm6, xmm7
+    jbe     .Lcf_fail
+    mov     ebp, -1                     # the v nearest p
+    movsd   xmm8, [rip+cf_two]
+    xor     r14d, r14d
+51: cmp     r14d, [rip+cdt_n]
+    jae     52f
+    cmp     r14d, r12d
+    je      53f
+    cmp     r14d, r13d
+    je      53f
+    mov     r15d, r14d
+    shl     r15d, 4
+    movsd   xmm0, [rax+r15]             # w = v - p
+    subsd   xmm0, [rax+rcx]
+    movsd   xmm1, [rax+r15+8]
+    subsd   xmm1, [rax+rcx+8]
+    movsd   xmm2, xmm0                  # t = w . d / L2
+    mulsd   xmm2, xmm4
+    movsd   xmm3, xmm1
+    mulsd   xmm3, xmm5
+    addsd   xmm2, xmm3
+    divsd   xmm2, xmm6
+    comisd  xmm2, [rip+cf_eps]
+    jbe     53f
+    movsd   xmm3, [rip+cf_one]
+    subsd   xmm3, [rip+cf_eps]
+    comisd  xmm2, xmm3
+    jae     53f
+    mulsd   xmm0, xmm5                  # cross = wx dy - wy dx; on the line
+    mulsd   xmm1, xmm4                  #  if cross^2 <= 1e-18 L2^2
+    subsd   xmm0, xmm1
+    mulsd   xmm0, xmm0
+    movsd   xmm3, xmm6
+    mulsd   xmm3, xmm6
+    mulsd   xmm3, [rip+cf_tol]
+    comisd  xmm0, xmm3
+    ja      53f
+    comisd  xmm2, xmm8
+    jae     53f
+    movsd   xmm8, xmm2
+    mov     ebp, r14d
+53: inc     r14d
+    jmp     51b
+52: test    ebp, ebp
+    js      .Lcf_fail
+    lea     rax, [rip+cdt_id]           # (cdt_force takes global ids)
+    mov     ecx, [rax+r13*4]
+    mov     [rsp], ecx                  # q
+    mov     ecx, [rax+rbp*4]
+    mov     [rsp+4], ecx                # v
+    inc     dword ptr [rip+cf_depth]
+    mov     edi, [rax+r12*4]
+    mov     esi, ecx
+    call    cdt_force
+    test    eax, eax
+    jz      54f
+    mov     edi, [rsp+4]
+    mov     esi, [rsp]
+    call    cdt_force
+54: dec     dword ptr [rip+cf_depth]
+    test    eax, eax
+    jz      .Lcf_fail
+    jmp     .Lcf_ok
 .Lcf_ok:
     mov     eax, 1
     jmp     9f
@@ -3478,6 +3601,11 @@ bd_sign:        .quad 0x8000000000000000, 0
 bd_rel:         .double 1.0e-9
 bd_flatpen:     .double 1.0e200
 bd_flat:        .double 1.0e-13
+cf_two:         .double 2.0
+cf_one:         .double 1.0
+cf_eps:         .double 1.0e-9
+cf_tol:         .double 1.0e-18
+cf_edge:        .double 1.0e-7
 .text
 
 # =============================================================================
@@ -4099,6 +4227,9 @@ ray_tri:
     mov     edx, [rsp+8]
     lea     rcx, [rip+ray_q]
     call    ray_orient
+    mov     ecx, eax                    # both ends on its plane: a flat
+    or      ecx, ebx                    #  triangle (a sliver an earlier
+    jz      .Lrt_no                     #  boolean kept), nothing to cross
     test    eax, eax
     jz      .Lrt_tie
     test    ebx, ebx

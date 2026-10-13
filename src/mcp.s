@@ -193,6 +193,9 @@ j_custom:       .asciz "custom"
 j_params:       .asciz ",\"parameters\":["
 k_expression:   .asciz "expression"
 k_value:        .asciz "value"
+j_features:     .asciz ",\"features\":["
+k_body:         .asciz "body"
+k_status:       .asciz "status"
 j_nodes:        .asciz ",\"nodes\":["
 j_ntype:        .asciz "{\"type\":"
 j_nvals:        .asciz ",\"values\":["
@@ -2024,6 +2027,54 @@ mats_json:
     inc     ebx
     jmp     96b
 97: mov     edi, ']'
+    call    wb_char
+    lea     rsi, [rip+j_features]       # ,"features":[{"type":..,"body":..,
+    call    wb_str                      #  "status":..}]
+    xor     ebx, ebx
+98: call    feat_count
+    cmp     ebx, eax
+    jae     99f
+    test    ebx, ebx
+    jz      981f
+    mov     edi, ','
+    call    wb_char
+981:mov     edi, '{'
+    call    wb_char
+    lea     rsi, [rip+k_type]
+    call    jb_key
+    mov     edi, ebx
+    call    feat_rec
+    mov     r12, rax
+    mov     edi, [r12]
+    call    feat_type_name
+    mov     rsi, rax
+    call    jb_q
+    mov     edi, [r12+4]                # its body
+    call    obj_by_uid
+    test    rax, rax
+    jz      982f
+    mov     r13, rax
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_body]
+    call    jb_key
+    mov     rsi, r13
+    call    jb_q
+982:mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_status]
+    call    jb_key
+    mov     edi, ebx
+    call    feat_status
+    mov     edi, eax
+    call    feat_status_name
+    mov     rsi, rax
+    call    jb_q
+    mov     edi, '}'
+    call    wb_char
+    inc     ebx
+    jmp     98b
+99: mov     edi, ']'
     call    wb_char
     pop     r13
     pop     r12

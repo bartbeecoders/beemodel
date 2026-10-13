@@ -17,6 +17,7 @@
 #          MGRF  shader graphs: count, then 896 bytes per material
 #          CADD  the CAD document: unit (mm, double), parameters
 #          SKCH  sketches: count, then (object index, sketch block) each
+#          UIDS  persistent object ids: count, one per object, the next id
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
@@ -43,6 +44,7 @@
 .equ TAG_MGRF,      0x4652474d          # "MGRF"
 .equ TAG_CADD,      0x44444143          # "CADD"
 .equ TAG_SKCH,      0x48434b53          # "SKCH"
+.equ TAG_UIDS,      0x53444955          # "UIDS"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -68,6 +70,8 @@ wrld_chunk:     .skip 8
 mgrf_chunk:     .skip 8
 cadd_chunk:     .skip 8
 skch_chunk:     .skip 8
+uids_chunk:     .skip 8
+uids_size:      .skip 4
 skch_size:      .skip 4
 cadd_size:      .skip 4
 mgrf_size:      .skip 4
@@ -298,6 +302,10 @@ bee_save:
     call    chunk_begin
     call    sketches_write
     call    chunk_end
+    mov     edi, TAG_UIDS
+    call    chunk_begin
+    call    uids_write
+    call    chunk_end
     mov     edi, TAG_IMGS               # IMGS, WRLD
     call    chunk_begin
     call    images_write
@@ -363,6 +371,80 @@ bee_save:
 # -----------------------------------------------------------------------------
 # .bee reader
 # -----------------------------------------------------------------------------
+# uids_write - UIDS: count, each object's id, the next id
+uids_write:
+    push    rbx
+    sub     rsp, 16
+    mov     edi, [rip+obj_count]
+    call    wb_u32
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    mov     edi, [rax+OB_UID]
+    call    wb_u32
+    inc     ebx
+    jmp     1b
+2:  mov     edi, [rip+uid_next]
+    call    wb_u32
+    add     rsp, 16
+    pop     rbx
+    ret
+
+# uids_fresh - number the objects 1.. (files from before ids)
+uids_fresh:
+    push    rbx
+    sub     rsp, 16
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    lea     ecx, [rbx+1]
+    mov     [rax+OB_UID], ecx
+    inc     ebx
+    jmp     1b
+2:  inc     ebx
+    mov     [rip+uid_next], ebx
+    add     rsp, 16
+    pop     rbx
+    ret
+
+# uids_read(rdi=data, esi=bytes) - ids back on the objects (same order)
+uids_read:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rdi
+    mov     r13d, esi
+    cmp     r13d, 8
+    jb      9f
+    mov     eax, [r12]
+    cmp     eax, [rip+obj_count]
+    jne     9f
+    lea     ecx, [rax*4+8]
+    cmp     ecx, r13d
+    ja      9f
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    mov     ecx, [r12+4+rbx*4]
+    mov     [rax+OB_UID], ecx
+    inc     ebx
+    jmp     1b
+2:  mov     eax, [rip+obj_count]
+    mov     eax, [r12+4+rax*4]
+    cmp     eax, [rip+uid_next]
+    jbe     9f
+    mov     [rip+uid_next], eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # rndr_read(rdi=RNDR data) - the render settings, kept in range
 rndr_read:
     mov     eax, [rdi]
@@ -522,6 +604,7 @@ bee_load:
     mov     qword ptr [rip+mgrf_chunk], 0
     mov     qword ptr [rip+cadd_chunk], 0
     mov     qword ptr [rip+skch_chunk], 0
+    mov     qword ptr [rip+uids_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -580,7 +663,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_SKCH
+28: cmp     eax, TAG_UIDS
+    jne     278f
+    lea     rax, [rbx+8]
+    mov     [rip+uids_chunk], rax
+    mov     [rip+uids_size], ebp
+    jmp     23f
+278:cmp     eax, TAG_SKCH
     jne     279f
     lea     rax, [rbx+8]
     mov     [rip+skch_chunk], rax
@@ -670,7 +759,13 @@ bee_load:
     inc     dword ptr [rip+obj_count]
     inc     ebx
     jmp     6b
-7:  mov     rdi, [rip+cadd_chunk]       # the CAD document
+7:  call    uids_fresh                  # persistent ids (before features)
+    mov     rdi, [rip+uids_chunk]
+    test    rdi, rdi
+    jz      771f
+    mov     esi, [rip+uids_size]
+    call    uids_read
+771:mov     rdi, [rip+cadd_chunk]       # the CAD document
     test    rdi, rdi
     jz      77f
     mov     esi, [rip+cadd_size]

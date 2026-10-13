@@ -72,6 +72,8 @@ xs_a:           .skip 12
 xs_b:           .skip 12
 xs_ids:         .skip 8
 
+.section .bss
+cr_depth:       .skip 4
 .text
 
 # skx_create(rdi=name, esi=plane, xmm0=offset (double)) -> eax = handle or 0
@@ -162,7 +164,14 @@ skx_end:
     mov     [rbx+OB_MESH], rax
     call    mesh_unref
 1:  mov     dword ptr [rip+dirty], 1
-    mov     eax, [r12+SK_DOF]
+    cmp     dword ptr [rip+cr_depth], 0 # features built on this sketch follow
+    jne     2f
+    mov     edi, [rbx+OB_UID]
+    call    feat_uses
+    test    eax, eax
+    jz      2f
+    call    feat_rebuild
+2:  mov     eax, [r12+SK_DOF]
     jmp     9f
 8:  mov     eax, -1
 9:  add     rsp, 8
@@ -665,6 +674,7 @@ cad_rebuild:
     push    rbx
     push    r12
     sub     rsp, 8
+    inc     dword ptr [rip+cr_depth]    # (sketches: no feature rebuild each)
     xor     ebx, ebx
 1:  cmp     ebx, [rip+obj_count]
     jae     9f
@@ -678,7 +688,9 @@ cad_rebuild:
     call    skx_end
 2:  inc     ebx
     jmp     1b
-9:  add     rsp, 8
+9:  dec     dword ptr [rip+cr_depth]
+    call    feat_rebuild                # then the solids made from them
+    add     rsp, 8
     pop     r12
     pop     rbx
     ret

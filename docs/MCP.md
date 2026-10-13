@@ -26,7 +26,7 @@ Start BeeModel first. The bridge connects to the newest running instance. The st
 
 | Tool | What it does |
 |---|---|
-| `scene_summary` | Lists the objects as JSON: names, types, transforms, selection, mesh sizes, modifiers and material, plus every material with its values and shader graph (nodes, values, inputs and links, sockets), the images and the world (HDRI, strength, rotation) |
+| `scene_summary` | Lists the objects as JSON: names, types, transforms, selection, mesh sizes, modifiers and material, plus every material with its values and shader graph (nodes, values, inputs and links, sockets), the images, the world (HDRI, strength, rotation), the scene units and parameters, sketches and the feature tree (type, body, status) |
 | `create_primitive` | Adds `{type, name?, location?, rotation_deg?, scale?}`; returns the final name |
 | `set_transform` | Changes `{name, location?, rotation_deg?, scale?, new_name?}` |
 | `select` / `delete` | Selects or deletes `{names: [...]}`; `select` also takes `extend` |

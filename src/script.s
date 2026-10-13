@@ -441,6 +441,28 @@ builtins:
     .long 2, 2
     .quad bn_expr, b_expr
     .long 1, 1
+    .quad bn_pad, b_pad
+    .long 3, 4
+    .quad bn_pocket, b_pocket
+    .long 3, 4
+    .quad bn_revolve, b_revolve
+    .long 3, 4
+    .quad bn_hole, b_hole
+    .long 3, 4
+    .quad bn_shell, b_shell
+    .long 3, 4
+    .quad bn_fillet, b_fillet
+    .long 2, 3
+    .quad bn_chamfer, b_chamfer
+    .long 2, 3
+    .quad bn_pattern, b_pattern
+    .long 5, 6
+    .quad bn_feature, b_feature
+    .long 3, 3
+    .quad bn_features, b_features
+    .long 0, 0
+    .quad bn_fstatus, b_fstatus
+    .long 1, 1
 builtins_end:
 .equ B_SZ, 24
 
@@ -544,6 +566,75 @@ e_sk_full:      .asciz "the sketch is full"
 e_sk_ctype:     .asciz "unknown constraint (coincident horizontal vertical parallel perpendicular equal tangent fixed distance hdistance vdistance radius diameter angle length online oncircle midpoint symmetric): "
 e_sk_ref:       .asciz "no such point or entity"
 bn_expr:        .asciz "expr"
+bn_pad:         .asciz "pad"
+bn_pocket:      .asciz "pocket"
+bn_revolve:     .asciz "revolve"
+bn_hole:        .asciz "hole"
+bn_shell:       .asciz "shell"
+bn_fillet:      .asciz "fillet"
+bn_chamfer:     .asciz "chamfer"
+bn_pattern:     .asciz "pattern"
+bn_feature:     .asciz "feature"
+bn_features:    .asciz "features"
+bn_fstatus:     .asciz "fstatus"
+e_ft_long:      .asciz "a feature value is 31 characters at most: "
+e_ft_word:      .asciz "not understood here: "
+e_ft_full:      .asciz "the scene holds 64 features"
+e_ft_ref:       .asciz "no such feature"
+e_ft_body:      .asciz "the body is not a mesh: "
+s_body:         .asciz "Body"
+.align 8
+fw_modes:       .quad fw_sym
+                .long 1, 0
+                .quad fw_rev
+                .long 2, 0
+                .quad fw_thru
+                .long 4, 0
+                .quad fw_bottom
+                .long 2, 0
+                .quad 0
+fw_axes:        .quad fw_x
+                .long 0, 0
+                .quad fw_y
+                .long 1, 0
+                .quad fw_z
+                .long 2, 0
+                .quad fw_u
+                .long 0, 0
+                .quad fw_v
+                .long 1, 0
+                .quad 0
+fw_sels:        .quad fw_all
+                .long 0, 0
+                .quad fw_vert
+                .long 1, 0
+                .quad fw_horiz
+                .long 2, 0
+                .quad fw_top
+                .long 3, 0
+                .quad fw_bottom
+                .long 4, 0
+                .quad 0
+fw_circ:        .quad fw_circular
+                .long 1, 0
+                .quad fw_linear
+                .long 0, 0
+                .quad 0
+fw_sym:         .asciz "symmetric"
+fw_rev:         .asciz "reverse"
+fw_thru:        .asciz "through"
+fw_bottom:      .asciz "bottom"
+fw_x:           .asciz "x"
+fw_y:           .asciz "y"
+fw_z:           .asciz "z"
+fw_u:           .asciz "u"
+fw_v:           .asciz "v"
+fw_all:         .asciz "all"
+fw_vert:        .asciz "vertical"
+fw_horiz:       .asciz "horizontal"
+fw_top:         .asciz "top"
+fw_circular:    .asciz "circular"
+fw_linear:      .asciz "linear"
 e_param:        .asciz "parameter: "
 e_noparam:      .asciz "no parameter named "
 e_node_type:    .asciz "unknown node type (image noise checker gradient mix ramp math bump): "
@@ -5328,6 +5419,347 @@ b_skinfo:
     add     rsp, 8
     pop     r12
     pop     rbx
+    jmp     ret_num
+
+# ---- features ---------------------------------------------------------------
+# fb_new(edi=type) - a fresh record in ft_tmp
+fb_new:
+    push    rdi
+    lea     rdi, [rip+ft_tmp]
+    xor     eax, eax
+    mov     ecx, 128
+    rep     stosb
+    pop     rax
+    mov     [rip+ft_tmp], eax
+    ret
+
+# fb_slot(rdi=value, esi=slot) - a number, or an expression text that works
+fb_slot:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    shl     esi, 5
+    lea     r12, [rip+ft_tmp+32]
+    add     r12, rsi
+    cmp     dword ptr [rbx], T_STR
+    je      1f
+    call    a_num
+    mov     byte ptr [r12], 1
+    movsd   [r12+8], xmm0
+    jmp     9f
+1:  mov     rdi, rbx
+    call    a_val                       # (errors if it does not evaluate)
+    mov     rsi, [rbx+8]
+    xor     ecx, ecx
+2:  mov     al, [rsi+rcx]
+    mov     [r12+rcx], al
+    test    al, al
+    jz      9f
+    inc     ecx
+    cmp     ecx, 32
+    jb      2b
+    lea     rdi, [rip+e_ft_long]
+    jmp     sc_rt
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# fb_word(rdi=value, rsi=table) -> eax = the word's number (error if unknown)
+fb_word:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rsi
+    call    a_str
+    mov     r13, rax
+1:  mov     rsi, [r12]
+    test    rsi, rsi
+    jz      8f
+    mov     rdi, r13
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+    add     r12, 16
+    jmp     1b
+2:  mov     eax, [r12+8]
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+8:  lea     rdi, [rip+e_ft_word]
+    mov     rsi, r13
+    jmp     sc_rt
+
+# fb_finish(rdi=body value) -> xmm0 = the new feature's index: an undo step,
+#   the body (a new mesh object when there is none), the feature
+fb_finish:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    a_str
+    mov     rbx, rax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, rbx
+    call    obj_find
+    test    eax, eax
+    jz      1f
+    mov     edi, eax
+    call    obj_get
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    jne     7f
+    jmp     2f
+1:  mov     edi, 8                      # an empty mesh until it is built
+    mov     esi, 8
+    mov     edx, 8
+    call    mesh_new
+    test    rax, rax
+    jz      6f
+    mov     r12, rax
+    mov     rdi, rax
+    call    mesh_finish
+    mov     edi, OT_MESH
+    mov     rsi, rbx
+    mov     rdx, r12
+    call    obj_new
+    test    eax, eax
+    jz      6f
+    mov     edi, eax
+    call    obj_get
+2:  mov     eax, [rax+OB_UID]
+    mov     [rip+ft_tmp+4], eax
+    lea     rdi, [rip+ft_tmp]
+    call    feat_add
+    test    eax, eax
+    js      6f
+    cvtsi2sd xmm0, eax
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+6:  lea     rdi, [rip+e_ft_full]
+    xor     esi, esi
+    jmp     sc_rt
+7:  lea     rdi, [rip+e_ft_body]
+    mov     rsi, rbx
+    jmp     sc_rt
+
+# pad / pocket(body, sketch, distance [, "symmetric" | "reverse" | "through"])
+#   -> the feature's index
+b_pad:
+    mov     edx, 1
+    jmp     fb_extrude
+b_pocket:
+    mov     edx, 2
+    jmp     fb_extrude
+# revolve(body, sketch, angle [, "u" | "v": the sketch axis])
+b_revolve:
+    mov     edx, 3
+    jmp     fb_extrude
+# hole(body, sketch, diameter [, depth]): at every loose point (no depth:
+#   through)
+b_hole:
+    mov     edx, 4
+fb_extrude:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     edi, edx
+    call    fb_new
+    lea     rdi, [rbx+16]
+    call    a_sketch
+    mov     eax, [rax+OB_UID]
+    mov     [rip+ft_tmp+8], eax
+    lea     rdi, [rbx+32]
+    xor     esi, esi
+    call    fb_slot
+    cmp     r12d, 4
+    jb      3f
+    lea     rdi, [rbx+48]
+    cmp     r13d, 3
+    je      1f
+    cmp     r13d, 4
+    je      2f
+    lea     rsi, [rip+fw_modes]
+    call    fb_word
+    mov     [rip+ft_tmp+16], eax
+    jmp     3f
+1:  lea     rsi, [rip+fw_axes]
+    call    fb_word
+    and     eax, 1
+    mov     [rip+ft_tmp+28], eax
+    jmp     3f
+2:  mov     esi, 1                      # the hole's depth
+    call    fb_slot
+3:  mov     rdi, rbx
+    call    fb_finish
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# shell(body, pad feature, wall [, "bottom": open below instead of above])
+b_shell:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     edi, 5
+    call    fb_new
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     [rip+ft_tmp+12], eax
+    lea     rdi, [rbx+32]
+    xor     esi, esi
+    call    fb_slot
+    cmp     r12d, 4
+    jb      1f
+    lea     rdi, [rbx+48]
+    lea     rsi, [rip+fw_modes]
+    call    fb_word
+    and     eax, 2
+    mov     [rip+ft_tmp+16], eax
+1:  mov     rdi, rbx
+    call    fb_finish
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# fillet / chamfer(body, size [, "all" | "vertical" | "horizontal" | "top" |
+#   "bottom"]): the body's sharp edges
+b_fillet:
+    mov     edx, 6
+    jmp     fb_edges
+b_chamfer:
+    mov     edx, 7
+fb_edges:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     edi, edx
+    call    fb_new
+    lea     rdi, [rbx+16]
+    xor     esi, esi
+    call    fb_slot
+    cmp     r12d, 3
+    jb      1f
+    lea     rdi, [rbx+32]
+    lea     rsi, [rip+fw_sels]
+    call    fb_word
+    mov     [rip+ft_tmp+12], eax
+1:  mov     rdi, rbx
+    call    fb_finish
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# pattern(body, feature, count, spacing | angle, "x" | "y" | "z"
+#   [, "circular": turns about that axis; angle 0 = a full turn])
+b_pattern:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     edi, 8
+    call    fb_new
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     [rip+ft_tmp+12], eax
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     [rip+ft_tmp+20], eax
+    lea     rdi, [rbx+48]
+    xor     esi, esi
+    call    fb_slot
+    lea     rdi, [rbx+64]
+    lea     rsi, [rip+fw_axes]
+    call    fb_word
+    mov     [rip+ft_tmp+28], eax
+    cmp     r12d, 6
+    jb      1f
+    lea     rdi, [rbx+80]
+    lea     rsi, [rip+fw_circ]
+    call    fb_word
+    add     [rip+ft_tmp], eax           # 8 linear, 9 circular
+1:  mov     rdi, rbx
+    call    fb_finish
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# feature(index, slot 0..2 | 3 = suppressed, value) -> its status afterwards
+#   (0 = ok)
+b_feature:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     rbx, rdi
+    call    a_int
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    xor     eax, eax
+    mov     [rsp], rax
+    lea     rdi, [rbx+32]
+    cmp     dword ptr [rdi], T_STR
+    jne     1f
+    mov     rax, [rdi+8]
+    mov     [rsp], rax
+    call    a_val                       # (it has to work)
+    jmp     2f
+1:  call    a_num
+    movsd   [rsp+8], xmm0
+2:  lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     rdx, [rsp]
+    movsd   xmm0, [rsp+8]
+    call    feat_slot_set
+    test    eax, eax
+    jz      8f
+    mov     edi, r12d
+    call    feat_status
+    cvtsi2sd xmm0, eax
+    add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  lea     rdi, [rip+e_ft_ref]
+    xor     esi, esi
+    jmp     sc_rt
+
+# features() -> how many; fstatus(index) -> 0 ok, 1 sketch missing, 2 no
+#   closed profile, 3 geometry failed, 4 bad value, 5 nothing to work on,
+#   6 bad reference, 7 suppressed, 8 body missing
+b_features:
+    sub     rsp, 8
+    call    feat_count
+    cvtsi2sd xmm0, eax
+    add     rsp, 8
+    jmp     ret_num
+b_fstatus:
+    sub     rsp, 8
+    call    a_int
+    mov     edi, eax
+    call    feat_status
+    cvtsi2sd xmm0, eax
+    add     rsp, 8
     jmp     ret_num
 
 # matof(object) -> its material's name, or nil

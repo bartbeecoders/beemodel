@@ -49,6 +49,7 @@
 .globl recalc_all
 .globl world_dir
 .globl poly_center
+.globl mesh_flat_merge
 
 .equ KEY_I,     23
 .equ KEY_M,     50
@@ -71,6 +72,7 @@ mf_tenth:       .float 0.1
 mf_eps:         .float 1.0e-12
 mf_tiny:        .float 1.0e-4
 mf_dist0:       .float 0.0001
+mf_flatdot:     .float 0.99999
 mf_min_dot:     .float 0.2
 s_lbl_ext:      .asciz "Extrude"
 s_lbl_inset:    .asciz "Inset"
@@ -3164,6 +3166,204 @@ do_dissolve:
     jmp     9f
 .Lds_drop:
     call    undo_drop_last
+9:  add     rsp, 56
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# mesh_flat_merge(rdi=finished mesh) -> rax = a new finished mesh in which
+#   neighbouring faces in one plane are one polygon again (booleans leave
+#   cut faces as triangles; bevels want the faces), or 0 if none merge. A
+#   group that is not one simple loop (a ring around a hole) keeps its faces.
+mesh_flat_merge:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 56
+    mov     rbx, rdi
+    call    edge_faces
+    test    eax, eax
+    jz      .Lfm_none
+    mov     edi, [rbx+ME_NPOLYS]        # union-find parents
+    shl     edi, 2
+    call    fa
+    test    rax, rax
+    jz      .Lfm_none
+    mov     r12, rax
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+ME_NPOLYS]
+    jae     2f
+    mov     [r12+rcx*4], ecx
+    inc     ecx
+    jmp     1b
+2:  mov     edi, [rip+ef_n]             # merged-edge flags per edge slot
+    call    fa
+    test    rax, rax
+    jz      .Lfm_none
+    mov     r13, rax
+    mov     edi, [rbx+ME_NPOLYS]        # unit normals
+    imul    edi, edi, 12
+    call    fa
+    test    rax, rax
+    jz      .Lfm_none
+    mov     r14, rax
+    xor     r15d, r15d
+3:  cmp     r15d, [rbx+ME_NPOLYS]
+    jae     4f
+    mov     rdi, rbx
+    mov     esi, r15d
+    call    poly_normal
+    lea     rdi, [rip+nrm]
+    call    normalize
+    lea     rax, [r15+r15*2]
+    mov     rcx, [rip+nrm]
+    mov     [r14+rax*4], rcx
+    mov     ecx, [rip+nrm+8]
+    mov     [r14+rax*4+8], ecx
+    inc     r15d
+    jmp     3b
+4:  xor     ebp, ebp                    # edges between faces in one plane
+5:  cmp     ebp, [rip+ef_n]
+    jae     .Lfm_union
+    mov     rcx, [rip+ef_cnt]
+    cmp     dword ptr [rcx+rbp*4], 2
+    jne     51f
+    mov     rcx, [rip+ef_f1]
+    mov     eax, [rcx+rbp*4]
+    mov     rcx, [rip+ef_f2]
+    mov     edx, [rcx+rbp*4]
+    lea     rax, [rax+rax*2]
+    lea     rdx, [rdx+rdx*2]
+    movss   xmm0, [r14+rax*4]
+    mulss   xmm0, [r14+rdx*4]
+    movss   xmm1, [r14+rax*4+4]
+    mulss   xmm1, [r14+rdx*4+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [r14+rax*4+8]
+    mulss   xmm1, [r14+rdx*4+8]
+    addss   xmm0, xmm1
+    comiss  xmm0, [rip+mf_flatdot]
+    jb      51f
+    mov     byte ptr [r13+rbp], 1
+51: inc     ebp
+    jmp     5b
+.Lfm_union:
+    xor     ebp, ebp
+6:  cmp     ebp, [rip+ef_n]
+    jae     7f
+    cmp     byte ptr [r13+rbp], 0
+    je      61f
+    mov     rcx, [rip+ef_f1]
+    mov     edi, [rcx+rbp*4]
+    call    uf_find
+    mov     r14d, eax
+    mov     rcx, [rip+ef_f2]
+    mov     edi, [rcx+rbp*4]
+    call    uf_find
+    cmp     eax, r14d
+    je      61f
+    mov     [r12+rax*4], r14d
+61: inc     ebp
+    jmp     6b
+7:  mov     edi, [rbx+ME_NPOLYS]        # group sizes
+    shl     edi, 2
+    call    fa
+    test    rax, rax
+    jz      .Lfm_none
+    mov     r14, rax
+    xor     ecx, ecx
+71: cmp     ecx, [rbx+ME_NPOLYS]
+    jae     72f
+    mov     edi, ecx
+    push    rcx
+    call    uf_find
+    pop     rcx
+    mov     [r12+rcx*4], eax
+    inc     dword ptr [r14+rax*4]
+    inc     ecx
+    jmp     71b
+72: mov     edi, [rbx+ME_NVERTS]
+    mov     esi, -1
+    call    fa_fill
+    test    rax, rax
+    jz      .Lfm_none
+    mov     [rip+go_next], rax
+    mov     [rip+go_mesh], rbx
+    xor     ebp, ebp                    # groups that are not one loop stay
+73: cmp     ebp, [rbx+ME_NPOLYS]
+    jae     74f
+    cmp     [r12+rbp*4], ebp
+    jne     731f
+    cmp     dword ptr [r14+rbp*4], 1
+    jbe     731f
+    mov     edi, ebp
+    call    group_outline
+    test    eax, eax
+    jnz     731f
+    mov     dword ptr [r14+rbp*4], 1
+731:inc     ebp
+    jmp     73b
+74: mov     edi, [rbx+ME_NVERTS]
+    add     edi, 8
+    mov     esi, [rbx+ME_NLOOPS]
+    add     esi, 8
+    mov     edx, [rbx+ME_NPOLYS]
+    add     edx, 8
+    call    mesh_new
+    test    rax, rax
+    jz      .Lfm_none
+    mov     r15, rax
+    mov     rdi, r15
+    mov     rsi, rbx
+    call    copy_verts
+    mov     dword ptr [rsp+32], 0       # groups merged
+    xor     ebp, ebp
+.Lfm_poly:
+    cmp     ebp, [rbx+ME_NPOLYS]
+    jae     .Lfm_end
+    mov     eax, [r12+rbp*4]
+    cmp     dword ptr [r14+rax*4], 1
+    jbe     .Lfm_single
+    cmp     eax, ebp
+    jne     .Lfm_pnext
+    mov     edi, ebp
+    call    group_outline
+    test    eax, eax
+    jz      .Lfm_pnext
+    mov     rdi, r15
+    lea     rsi, [rip+scr]
+    mov     edx, eax
+    call    mesh_add_poly
+    inc     dword ptr [rsp+32]
+    jmp     .Lfm_pnext
+.Lfm_single:
+    mov     rdi, r15
+    mov     rsi, rbx
+    mov     edx, ebp
+    xor     ecx, ecx
+    xor     r8d, r8d
+    call    poly_copy
+.Lfm_pnext:
+    inc     ebp
+    jmp     .Lfm_poly
+.Lfm_end:
+    cmp     dword ptr [rsp+32], 0
+    jne     8f
+    mov     rdi, r15
+    call    mesh_unref
+.Lfm_none:
+    xor     eax, eax
+    jmp     9f
+8:  mov     rdi, r15
+    call    mesh_finish
+    mov     rax, r15
 9:  add     rsp, 56
     pop     rbp
     pop     r15

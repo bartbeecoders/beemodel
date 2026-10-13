@@ -34,6 +34,8 @@
 .globl op_param_remove
 .globl op_param_list
 .globl op_scene_units
+.globl feat_count
+.globl feat_rec
 
 .equ CD_REFS,    0
 .equ CD_BYTES,   4
@@ -45,7 +47,11 @@
 .equ PR_NAME,    0                      # 24
 .equ PR_EXPR,    24                     # 92
 .equ PR_VAL,     120                    # double (the last good value; files)
-.equ CD_SZ,      CD_PARAMS + MAX_PARAMS*PR_SZ
+.equ CD_NFEAT,   12
+.equ CD_FEATS,   CD_PARAMS + MAX_PARAMS*PR_SZ
+.equ MAX_FEATS,  64
+.equ FT_SZ,      128                    # feature.s
+.equ CD_SZ,      CD_FEATS + MAX_FEATS*FT_SZ
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -217,6 +223,21 @@ param_count:
     mov     eax, [rax+CD_NPARAM]
     ret
 1:  xor     eax, eax
+    ret
+
+# feat_count -> eax = features; feat_rec(edi=index) -> rax = the record
+feat_count:
+    mov     rax, [rip+cad_cur]
+    test    rax, rax
+    jz      1f
+    mov     eax, [rax+CD_NFEAT]
+    ret
+1:  xor     eax, eax
+    ret
+feat_rec:
+    mov     rax, [rip+cad_cur]
+    imul    edi, edi, FT_SZ
+    lea     rax, [rax+CD_FEATS+rdi]
     ret
 
 # param_rec(edi=index) -> rax = the record
@@ -530,7 +551,21 @@ cad_write:
     call    wb_bytes
     inc     ebx
     jmp     1b
-9:  add     rsp, 16
+9:  call    feat_count                  # then the features
+    mov     [rsp+8], eax
+    mov     edi, eax
+    call    wb_u32
+    xor     ebx, ebx
+2:  cmp     ebx, [rsp+8]
+    jae     3f
+    mov     edi, ebx
+    call    feat_rec
+    mov     rsi, rax
+    mov     edx, FT_SZ
+    call    wb_bytes
+    inc     ebx
+    jmp     2b
+3:  add     rsp, 16
     pop     rbx
     ret
 
@@ -571,7 +606,23 @@ cad_read:
     mov     byte ptr [rax+CD_PARAMS+rdx+PR_EXPR+91], 0
     inc     ecx
     jmp     2b
-3:  call    cad_sync
+3:  imul    ecx, r13d, PR_SZ            # features (newer files)
+    lea     edx, [rcx+16]
+    cmp     edx, r12d
+    ja      4f
+    mov     edx, [rbx+rcx+12]
+    cmp     edx, MAX_FEATS
+    ja      4f
+    imul    r8d, edx, FT_SZ
+    lea     r9d, [rcx+r8+16]
+    cmp     r9d, r12d
+    ja      4f
+    mov     [rax+CD_NFEAT], edx
+    lea     rsi, [rbx+rcx+16]
+    lea     rdi, [rax+CD_FEATS]
+    mov     ecx, r8d
+    rep     movsb
+4:  call    cad_sync
 9:  pop     r13
     pop     r12
     pop     rbx
