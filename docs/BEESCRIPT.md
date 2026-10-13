@@ -106,7 +106,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `manifold(name)` | 1 if the mesh is closed and consistently oriented (every edge used once in each direction) |
 | `analyze(name, what)` | Counts `"boundary"` edges (one face), `"nonmanifold"` edges (more than two faces, or two facing the same way), `"degenerate"` faces (no area), `"loose"` vertices (no face) or `"overhang"` faces (facing down steeper than 45°, or the angle `view.show_overhangs` was given) |
 | `material(name)` | The material with that name, created (with default values) if there is none; returns its name |
-| `matset(mat, param, value [, g, b])` | Sets a material value: `base`, `metallic`, `roughness`, `specular`, `ior`, `transmission`, `emission`, `strength`, `clearcoat`, `coat_roughness`, `alpha`. Colours (`base`, `emission`) take three numbers, linear 0-1 |
+| `matset(mat, param, value [, g, b])` | Sets a material value: `base`, `metallic`, `roughness`, `specular`, `ior`, `transmission`, `emission`, `strength`, `clearcoat`, `coat_roughness`, `alpha`, `density` (g/cm^3, for mass). Colours (`base`, `emission`) take three numbers, linear 0-1 |
 | `matget(mat, param [, component])` | Reads one material value |
 | `assign(object, mat)` | Gives a mesh a material; `""` removes it |
 | `matof(object)` | The name of its material, or `nil` |
@@ -128,6 +128,9 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `fillet(body, radius [, edges])`, `chamfer(body, size [, edges])` | Rounds / cuts the body's sharp edges: `"all"` (default), `"vertical"`, `"horizontal"`, `"top"` or `"bottom"` (Y is up) |
 | `pattern(body, feature, count, step, axis [, "circular"])` | Repeats an earlier pad, pocket, hole, revolve or shell along `"x"`, `"y"` or `"z"` (step = spacing), or about that axis through the origin (step = the total angle; 0 = a full turn) |
 | `feature(i, slot, value)` | Changes a feature's value: slot 0 the first value (distance, depth, diameter, wall, radius, step), 1 the second (a hole's depth), 3 suppressed (1) or not (0); returns its status |
+| `area(object)`, `mass(object)`, `centroid(object, axis)` | Mass properties in world space and scene units: surface area, mass in grams (volume x the material's `density` in g/cm^3; no material: 1), centre of mass (`"x"`, `"y"`, `"z"` or 0..2) |
+| `fangle(object, face a, face b)` | The angle between two faces' normals (radians; `deg()` converts) |
+| `measurement()` | The measure tool's current result (Shift+M in the viewport): the distance between two clicked points, the angle at the middle one of three (radians), or `nil` |
 | `features()`, `fstatus(i)` | The number of features; a feature's status: 0 ok, 1 sketch missing, 2 no closed profile, 3 the geometry failed, 4 a value does not evaluate, 5 nothing to work on, 6 bad reference, 7 suppressed, 8 body missing |
 | `node(material, type [, values...])` | Adds a shader node and returns its number (1..12). Types: `image` (image name, size), `noise` (scale, detail, roughness), `checker` (scale), `gradient` (axis 0/1/2, scale, offset), `mix` (mode 0 mix 1 add 2 multiply 3 subtract 4 screen), `ramp` (position 0, position 1), `math` (op 0 add 1 subtract 2 multiply 3 divide 4 power 5 min 6 max 7 greater 8 sine 9 abs), `bump` (strength, distance) |
 | `link(material, from, to, input)` | Feeds node `from` into input 1..3 of a later node `to` |

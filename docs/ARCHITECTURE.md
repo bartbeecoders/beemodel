@@ -51,6 +51,7 @@ stays private to the module.
 | `sketchobj.s` | Sketch objects: creation, display meshes, status-coloured drawing, `cad_rebuild`, the SKCH chunk |
 | `prof.s` | Profiles from sketches: closed loops (welded ends, arcs and circles tessellated, even-odd nesting), ear clipping with hole bridging, prisms, revolutions, offsets, hole circles; meshes oriented by signed volume |
 | `feature.s` | The feature tree (records in the CAD document): pad, pocket, revolve, hole, shell, fillet, chamfer, linear / circular patterns, replayed in order with `mesh_boolean` and `build_bevel` into each body |
+| `measure.s` | Mass properties (area, signed-tetrahedron volume, centre of mass, mass from material density) in world space, `object.measure`, the measure tool (vertex-snapped clicks: distance, angle) |
 | `sketchui.s` | Sketch mode: tools, snapping and inference, picking, point dragging, constraint keys, dimensions, the overlay |
 | `gltf.s` | glTF 2.0: export (.glb chunks or .gltf with base64), import (node tree baked, welded, PBR + KHR extensions, data: / external / GLB buffers) on the lazy JSON reader |
 | `mtl.s` | MTL import for OBJ: principled values from Kd Ke Ni d Tr Ns Tf Pr Pm Pc Pcr, map_Kd as a texture graph |

@@ -1893,7 +1893,7 @@ mats_json:
     mov     rsi, rax
     call    jb_q
     xor     r12d, r12d                  # every parameter
-3:  cmp     r12d, 11
+3:  cmp     r12d, 12
     jae     6f
     mov     edi, ','
     call    wb_char
