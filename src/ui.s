@@ -427,7 +427,9 @@ ui_motion:
     sub     r12d, [rip+ptr_y]           # dy
     mov     [rip+ptr_x], edi
     mov     [rip+ptr_y], esi
-    cmp     dword ptr [rip+uved_tm], 0  # UV editor: a transform or a pan
+    cmp     dword ptr [rip+uved_tm], 0  # UV editor: a transform, a pan, a
+    jne     761f                        #  paint stroke
+    cmp     dword ptr [rip+uved_paint_on], 0
     jne     761f
     cmp     dword ptr [rip+uved_pan_on], 0
     je      762f
@@ -472,7 +474,21 @@ ui_motion:
     pop     rsi
     pop     rdi
     jmp     .Lmo_out
-762:cmp     eax, DRAG_REDO
+762:cmp     eax, DRAG_PAINT             # a texture paint stroke
+    jne     763f
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    vp_setup_drag
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    paint_drag
+    call    reset_clip
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+    jmp     .Lmo_out
+763:cmp     eax, DRAG_REDO
     jne     75f
     call    redo_drag_move              # edi = pointer x
     jmp     .Lmo_out
@@ -541,6 +557,9 @@ ui_motion:
     mov     edi, [rip+ptr_x]            # the sculpt brush follows it
     mov     esi, [rip+ptr_y]
     call    sculpt_hover
+    mov     edi, [rip+ptr_x]            # (and the paint brush)
+    mov     esi, [rip+ptr_y]
+    call    paint_hover
     pop     rax
     pop     rdx
     # sliding across the menu bar while a menu is open switches menus
@@ -861,7 +880,20 @@ ui_button:
     jz      53f
     mov     dword ptr [rip+drag_mode], DRAG_SCULPT
     jmp     .Lbt_done
-521:cmp     dword ptr [rip+skm_obj], 0  # sketch mode: grab a point?
+521:cmp     dword ptr [rip+pt_obj], 0   # texture paint: a stroke
+    je      522f
+    call    vp_setup_drag
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    paint_press
+    push    rax
+    call    reset_clip
+    pop     rax
+    test    eax, eax
+    jz      53f
+    mov     dword ptr [rip+drag_mode], DRAG_PAINT
+    jmp     .Lbt_done
+522:cmp     dword ptr [rip+skm_obj], 0  # sketch mode: grab a point?
     je      53f
     call    vp_setup_drag
     mov     edi, [rip+ptr_x]
@@ -925,7 +957,12 @@ ui_button:
     mov     dword ptr [rip+drag_mode], 0
     call    sculpt_release
     jmp     .Lbt_done
-781:cmp     dword ptr [rip+drag_mode], DRAG_SKETCH
+781:cmp     dword ptr [rip+drag_mode], DRAG_PAINT
+    jne     782f
+    mov     dword ptr [rip+drag_mode], 0
+    call    paint_release
+    jmp     .Lbt_done
+782:cmp     dword ptr [rip+drag_mode], DRAG_SKETCH
     jne     0f
     mov     dword ptr [rip+drag_mode], 0
     call    skm_release

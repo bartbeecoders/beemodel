@@ -23,6 +23,7 @@
 .globl uved_key
 .globl uved_tm
 .globl uved_pan_on
+.globl uved_paint_on
 
 .equ UV_HDR,    18                      # header line (logical px)
 .equ UV_NONE,   0xffffffff
@@ -76,6 +77,7 @@ ue_seln:        .skip 4
 ue_heat:        .skip 4                 # 0 off, 1 area, 2 angle
 uved_tm:        .skip 4                 # transform: 0 none, 1 G, 2 S, 3 R
 uved_pan_on:    .skip 4
+uved_paint_on:  .skip 4                 # a texture paint stroke in UV space
 ue_rx:          .skip 4                 # the last drawn body (logical)
 ue_ry:          .skip 4
 ue_rw:          .skip 4
@@ -307,6 +309,14 @@ ed_uved_draw:
     jz      .Lud_none
     mov     rbx, rax
     mov     [rsp+40], rdx
+    mov     rdi, rdx                    # its texture under the layout
+    call    paint_target
+    test    rax, rax
+    jz      21f
+    mov     rdi, rax
+    call    ue_image_draw
+21: mov     rax, rbx
+    mov     rdx, [rsp+40]
     call    ue_selection
     mov     r14, rax
     cmp     dword ptr [rip+ue_heat], 0
@@ -377,6 +387,81 @@ ed_uved_draw:
     mov     ecx, COL_TEXT
     call    draw_text
     add     rsp, 56
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ue_image_draw(rdi=image) - the image over the unit square (nearest texel,
+#   physical pixels, clipped)
+ue_image_draw:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 24
+    mov     rbx, rdi
+    cvtsi2ss xmm7, dword ptr [rip+ui_s120]  # physical -> logical: x 120 / s
+    movss   xmm0, [rip+ue_s120]
+    divss   xmm0, xmm7
+    movss   [rsp], xmm0
+    mov     r14d, [rip+clip_y0]
+1:  cmp     r14d, [rip+clip_y1]
+    jge     9f
+    cvtsi2ss xmm1, r14d                 # v of this row
+    addss   xmm1, [rip+ue_half]
+    mulss   xmm1, [rsp]
+    movss   xmm2, [rip+ue_oy]
+    subss   xmm2, xmm1
+    divss   xmm2, [rip+ue_s]
+    addss   xmm2, [rip+ue_cy]
+    xorps   xmm3, xmm3
+    comiss  xmm2, xmm3
+    jb      8f
+    comiss  xmm2, [rip+ue_one]
+    jae     8f
+    movss   xmm3, [rip+ue_one]          # texel row: (1 - v) h
+    subss   xmm3, xmm2
+    cvtsi2ss xmm4, dword ptr [rbx+4]
+    mulss   xmm3, xmm4
+    cvttss2si r15d, xmm3
+    mov     r13d, [rip+clip_x0]
+2:  cmp     r13d, [rip+clip_x1]
+    jge     8f
+    cvtsi2ss xmm1, r13d
+    addss   xmm1, [rip+ue_half]
+    mulss   xmm1, [rsp]
+    subss   xmm1, [rip+ue_ox]
+    divss   xmm1, [rip+ue_s]
+    addss   xmm1, [rip+ue_cx]
+    xorps   xmm3, xmm3
+    comiss  xmm1, xmm3
+    jb      7f
+    comiss  xmm1, [rip+ue_one]
+    jae     7f
+    cvtsi2ss xmm4, dword ptr [rbx]
+    mulss   xmm1, xmm4
+    cvttss2si eax, xmm1
+    mov     ecx, r15d
+    imul    ecx, [rbx]
+    add     ecx, eax
+    mov     eax, [rbx+64+rcx*4]
+    and     eax, 0xffffff
+    mov     ecx, r14d
+    imul    ecx, [rip+fb_w]
+    add     ecx, r13d
+    mov     rdx, [rip+fb_ptr]
+    mov     [rdx+rcx*4], eax
+7:  inc     r13d
+    jmp     2b
+8:  inc     r14d
+    jmp     1b
+9:  add     rsp, 24
     pop     rbp
     pop     r15
     pop     r14
@@ -759,7 +844,20 @@ uved_press:
     jmp     8f
 2:  cmp     ebx, BTN_LEFT
     jne     9f
+    cmp     dword ptr [rip+pt_obj], 0   # texture paint: a stroke here
+    je      3f
+    call    ue_view
     mov     edi, r12d
+    mov     esi, r13d
+    call    ue_to_uv
+    movss   xmm2, [rip+pt_radius]
+    divss   xmm2, [rip+ue_s]
+    call    paint_uv_press
+    test    eax, eax
+    jz      3f
+    mov     dword ptr [rip+uved_paint_on], 1
+    jmp     8f
+3:  mov     edi, r12d
     mov     esi, r13d
     call    ue_click
 8:  mov     dword ptr [rip+dirty], 1
@@ -776,12 +874,28 @@ uved_press:
 
 uved_release:
     mov     dword ptr [rip+uved_pan_on], 0
-    ret
+    cmp     dword ptr [rip+uved_paint_on], 0
+    je      1f
+    mov     dword ptr [rip+uved_paint_on], 0
+    jmp     paint_release
+1:  ret
 
 # uved_motion(edi, esi = pointer) -> eax = 1 when taken (pan, transform)
 uved_motion:
     cmp     dword ptr [rip+uved_tm], 0
     jne     ue_tm_move
+    cmp     dword ptr [rip+uved_paint_on], 0
+    je      1f
+    sub     rsp, 8
+    call    ue_view
+    call    ue_to_uv
+    movss   xmm2, [rip+pt_radius]
+    divss   xmm2, [rip+ue_s]
+    call    paint_uv_drag
+    add     rsp, 8
+    mov     eax, 1
+    ret
+1:
     cmp     dword ptr [rip+uved_pan_on], 0
     je      8f
     call    ue_view
