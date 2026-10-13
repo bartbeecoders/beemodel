@@ -104,6 +104,7 @@ s_ed_props:     .asciz "Properties"
 s_ed_console:   .asciz "Console"
 s_ed_activity:  .asciz "AI Activity"
 s_ed_render:    .asciz "Render"
+s_ed_uved:      .asciz "UV Editor"
 s_h_create:     .asciz "CREATE"
 s_p_camera:     .asciz "Viewport camera"
 s_p_yaw:        .asciz "Yaw"
@@ -140,11 +141,12 @@ s_xx:           .asciz " x "
 s_last_area:    .asciz "  the last area cannot be closed"
 s_no_room:      .asciz "  no room for more areas"
 .align 8
-editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity, s_ed_render
-editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw, ed_render_draw
+editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity, s_ed_render, s_ed_uved
+editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw, ed_render_draw, ed_uved_draw
 area_btn_ops:   .quad op_area_close, op_area_split_stack, op_area_split_side, op_area_maximize
 items_area:     .quad op_area_type_vp, op_area_type_tools, op_area_type_outl
                 .quad op_area_type_props, op_area_type_console, op_area_type_activity, op_area_type_render
+                .quad op_area_type_uved
 
 # ---- operators ------------------------------------------------------------------
 OPERATOR op_area_split_side,  "area.split_side",  "Split Area Side by Side", op_area_split, arg=K_HSPLIT, doc="Split the active area into two side by side"
@@ -158,6 +160,7 @@ OPERATOR op_area_type_props,  "area.type_properties", "Properties",  op_area_typ
 OPERATOR op_area_type_console,"area.type_console",    "Console",     op_area_type, op_check_area_type, ED_CONSOLE,  doc="Show the console in the active area"
 OPERATOR op_area_type_activity,"area.type_activity", "AI Activity", op_area_type, op_check_area_type, ED_ACTIVITY, doc="Show what AI agents did in the active area"
 OPERATOR op_area_type_render,"area.type_render",   "Render",      op_area_type, op_check_area_type, ED_RENDER,   doc="Show the render in the active area"
+OPERATOR op_area_type_uved,"area.type_uv_editor",  "UV Editor",   op_area_type, op_check_area_type, ED_UVED,     doc="Show the UV editor in the active area"
 OPERATOR op_view_activity, "view.toggle_activity", "AI Activity Pane", op_toggle_activity, op_has_editor, ED_ACTIVITY, 0, doc="Show or hide the AI Activity area (next to the console)"
 OPERATOR op_view_tools,    "view.toggle_tools",    "Tools Pane",    op_toggle_tools,    op_has_editor, ED_TOOLS,    KEY_T, doc="Show or hide the tools area"
 OPERATOR op_view_outliner, "view.toggle_outliner", "Outliner Pane", op_toggle_sidebar,  op_has_editor, ED_OUTLINER, KEY_N, doc="Show or hide the outliner and properties areas"
@@ -497,6 +500,11 @@ area_hit:
     je      .Lah_activity
     cmp     ecx, ED_PROPS
     je      .Lah_props
+    cmp     ecx, ED_UVED
+    jne     .Lah_pane
+    mov     eax, HIT_UVED
+    mov     edx, r13d
+    jmp     .Lah_ret
 .Lah_pane:
     mov     eax, HIT_PANE
     mov     edx, r13d
@@ -894,6 +902,20 @@ draw_leaf:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# uved_active -> eax = 1 when the active area is a UV editor
+.globl uved_active
+uved_active:
+    mov     edi, [rip+active_area]
+    test    edi, edi
+    js      1f
+    call    area_editor
+    cmp     eax, ED_UVED
+    jne     1f
+    mov     eax, 1
+    ret
+1:  xor     eax, eax
     ret
 
 # ---- editors (draw into ed_x/ed_y/ed_w/ed_h; ed_node = the area) ----------------

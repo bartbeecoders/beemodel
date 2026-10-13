@@ -105,7 +105,7 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_render, s_m_ai, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_render, items_ai, items_help, items_area, items_modadd
-menu_counts:    .long 20, 20, 22, 10, 27, 8, 6, 3, 7, 9
+menu_counts:    .long 20, 20, 22, 10, 27, 8, 6, 3, 8, 9
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
@@ -427,7 +427,13 @@ ui_motion:
     sub     r12d, [rip+ptr_y]           # dy
     mov     [rip+ptr_x], edi
     mov     [rip+ptr_y], esi
-
+    cmp     dword ptr [rip+uved_tm], 0  # UV editor: a transform or a pan
+    jne     761f
+    cmp     dword ptr [rip+uved_pan_on], 0
+    je      762f
+761: call    uved_motion
+    jmp     .Lmo_out
+762:
     mov     eax, [rip+drag_mode]
     test    eax, eax
     jz      .Lmo_hover
@@ -628,7 +634,16 @@ ui_button:
     mov     [rip+press_serial], edx
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
-    cmp     dword ptr [rip+tm_mode], 0
+    cmp     dword ptr [rip+uved_tm], 0  # a UV transform: a press ends it
+    je      761f
+    test    r15d, r15d
+    jz      .Lbt_done
+    mov     edi, r14d
+    mov     esi, [rip+ptr_x]
+    mov     edx, [rip+ptr_y]
+    call    uved_press
+    jmp     .Lbt_done
+761: cmp     dword ptr [rip+tm_mode], 0
     je      0f
     test    r15d, r15d                  # transform running: LMB confirms,
     jz      .Lbt_tm_rel                 # RMB cancels, releasing a gizmo drag
@@ -654,7 +669,19 @@ ui_button:
     jz      .Lbt_release
 
     # ---------------- press ----------------
+    cmp     ebx, HIT_UVED               # the UV editor: select, pan
+    jne     762f
     cmp     dword ptr [rip+pal_open], 0
+    jne     762f
+    cmp     dword ptr [rip+menu_open], 0
+    jge     762f
+    mov     edi, r14d
+    mov     esi, [rip+ptr_x]
+    mov     edx, [rip+ptr_y]
+    call    uved_press
+    test    eax, eax
+    jnz     .Lbt_done
+762: cmp     dword ptr [rip+pal_open], 0
     je      0f
     cmp     ebx, HIT_PALETTE            # click a result to run it
     jne     .Lbt_palclose
@@ -879,6 +906,7 @@ ui_button:
 
     # ---------------- release ----------------
 .Lbt_release:
+    call    uved_release                # (a UV pan ends)
     cmp     dword ptr [rip+drag_mode], DRAG_BOX
     jne     77f
     mov     dword ptr [rip+drag_mode], 0
@@ -967,7 +995,11 @@ ui_axis:
     mov     esi, [rip+ptr_y]
     call    hit_test
     pop     rdi
-    cmp     eax, HIT_OUTLINER
+    cmp     eax, HIT_UVED               # the UV editor zooms
+    jne     761f
+    neg     edi
+    jmp     uved_wheel
+761: cmp     eax, HIT_OUTLINER
     je      8f
     cmp     eax, HIT_PANE
     jne     7f
@@ -1117,6 +1149,8 @@ ui_key_repeat:
 ui_key_press:
     cmp     dword ptr [rip+tm_mode], 0  # a running transform takes every key
     jne     tm_key
+    cmp     dword ptr [rip+uved_tm], 0  # (a UV one too)
+    jne     uved_key
     push    rbx
     mov     ebx, edi
     cmp     dword ptr [rip+pal_open], 0  # the palette takes every key

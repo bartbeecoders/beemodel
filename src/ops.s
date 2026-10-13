@@ -145,6 +145,14 @@ dispatch_key:
     shl     eax, 16
     or      eax, ebx
     pop     rbx
+    mov     ecx, OPF_UV                 # over a UV editor, its keys first
+    push    rax
+    call    uved_active
+    mov     ecx, eax
+    pop     rax
+    test    ecx, ecx
+    mov     ecx, OPF_UV
+    jnz     100f
     mov     ecx, OPF_SKETCH             # sketch / sculpt mode: their keys
     cmp     dword ptr [rip+skm_obj], 0  #  first
     jne     100f
@@ -171,7 +179,7 @@ dispatch_key:
     jmp     1b
 2:  xor     eax, eax
     ret
-3:  test    dword ptr [rdi+OP_FLAGS], OPF_SKETCH|OPF_SCULPT # (not outside their modes)
+3:  test    dword ptr [rdi+OP_FLAGS], OPF_SKETCH|OPF_SCULPT|OPF_UV # (not outside their modes)
     jnz     4b
     cmp     dword ptr [rip+edit_obj], 0 # the same key can mean different
     je      5f                          # things in object and edit mode

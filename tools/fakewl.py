@@ -516,6 +516,7 @@ def main():
     dyntopo()
     multires()
     uv_maps()
+    uv_editor()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2678,6 +2679,64 @@ def uv_maps():
     f.pump(0.2)
     n = q('print(uvstat("Cube", "islands"), uvstat("Cube", "overlap"))')
     check(n.split()[:1] == ['6'], f'edit mode: A, Ctrl+E (seams on every edge), U (unwrap) -> {n}')
+    f.proc.kill()
+
+
+def uv_editor():
+    """The UV editor area: islands shown, a click selects one, G / S move and
+    scale with the pointer (Esc puts back, a click keeps, Ctrl+Z undoes), D
+    the distortion heat map."""
+    print('  -- UV editor --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('seams("Cube", "sharp")\nunwrap("Cube")\nselect("Cube")')
+    f.move(600, 700)                            # the console area becomes it
+    f.pump(0.2)
+    q('op("area.type_uv_editor")')
+    f.pump(0.3)
+    img = f.image()
+    lit = sum(1 for y in range(670, 770, 2) for x in range(560, 670, 2) if img.getpixel((x, y))[0] > 150)
+    f.shot('74_uv_editor.png')
+    check(lit > 50, f'the UV editor shows the islands ({lit} edge pixels)')
+    inside = lambda: q('print(uvstat("Cube", "inside"))')
+    f.click(580, 700)                           # an island; G off the square
+    f.move(580, 700); f.key(34)
+    f.move(900, 700)
+    f.pump(0.2)
+    moved = inside()
+    f.key(1)                                    # Esc: back
+    f.pump(0.2)
+    back = inside()
+    f.move(580, 700); f.key(34)                 # again, kept by a click
+    f.move(900, 700)
+    f.click(900, 700)
+    f.pump(0.2)
+    kept = inside()
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    f.pump(0.2)
+    undone = inside()
+    check((moved, back, kept, undone) == ('0', '1', '0', '1'),
+          f'click selects an island; G moves it, Esc puts it back, a click keeps it, Ctrl+Z undoes ({moved} {back} {kept} {undone})')
+    f.key(30); f.key(30)                        # A (none), A (all)
+    f.move(620, 715); f.key(31)                 # S near the centre, out
+    f.move(800, 760)
+    f.click(800, 760)
+    f.pump(0.2)
+    check(inside() == '0' and q('print(uvstat("Cube", "islands"))') == '6', 'A then S scales every island')
+    q('delete("Cube")\nadd("sphere", "Ball")\nunwrap("Ball", "smart")\nselect("Ball")')
+    f.move(600, 700)
+    f.key(32)                                   # D: area distortion
+    f.pump(0.3)
+    img = f.image()
+    px = [img.getpixel((x, y)) for y in range(670, 775, 2) for x in range(470, 760, 2)]
+    red = sum(1 for p in px if p[0] > p[1] + 40)
+    blue = sum(1 for p in px if p[2] > p[1] + 40)
+    f.shot('75_uv_heat.png')
+    check(red + blue > 20, f'D: the heat map shows distorted triangles (red {red}, blue {blue})')
     f.proc.kill()
 
 
