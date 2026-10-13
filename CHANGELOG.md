@@ -21,13 +21,14 @@ samples plus the denoiser stay within 4.5 levels RMS of a 512-sample
 reference. At 1920 × 1080 that takes about 5 s on 32 threads (the budget is
 10 s, scaled to the runner's cores). The same scene also renders at 1080p in
 the Render area while the viewport is orbited, with a median frame time of
-about 30 ms.
+about 15 ms.
 
 ### Added
 - The product-shot scene (`tests/product_shot.bees`) and its benchmark
   (fakewl `product_shot`).
 - The render's resolve (tone mapping into the Render area) runs on all
-  cores.
+  cores and only redoes the rows that have new samples. While a 1080p render
+  runs, frames take about 15 ms on 4 threads.
 - glTF 2.0 and MTL:
   - **Export:** `file.export_gltf <path>` writes `.glb` (binary chunks)
     or `.gltf` (base64 buffer). Mesh objects become nodes with
@@ -179,6 +180,9 @@ about 30 ms.
 - The screenshot moved from F12 to **Shift+F12**; F12 now renders.
 
 ### Fixed
+- Hive's table of its own mappings had room for 8 entries but accepted 16.
+  Renders that needed a ninth buffer (the denoiser's, a file's) could
+  overwrite the variables after it.
 - Hive's per-triangle texture data (box UVs) were not reordered with the
   BVH's leaf order, so textures on multi-triangle meshes came out
   scrambled. The object-space data that replaces them is reordered.

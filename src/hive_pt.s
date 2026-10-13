@@ -19,6 +19,7 @@
 .globl hive_start
 .globl hive_pass
 .globl hive_resolve
+.globl hive_resolve_new
 .globl hive_tick
 .globl hv_w
 .globl hv_h
@@ -2287,6 +2288,15 @@ hive_start:
     test    rax, rax
     jz      8f
     mov     [rip+hv_m2], rax
+    lea     edi, [r13*4+64]             # rows resolved: none yet (-1)
+    call    pt_map
+    test    rax, rax
+    jz      8f
+    mov     [rip+rv_done], rax
+    mov     rdi, rax
+    mov     ecx, r13d
+    mov     eax, -1
+    rep     stosd
     mov     dword ptr [rip+hv_den_on], 0
     mov     qword ptr [rip+dn_base], 0
     mov     dword ptr [rip+hv_next], 0
@@ -2445,6 +2455,13 @@ job_rows:
 # hive_resolve(rdi=XRGB out, esi=stride in pixels) - the chosen pass:
 #   beauty (ACES + sRGB), albedo, normal (0.5 + 0.5 n), depth (exp(-d / 12))
 hive_resolve:
+    mov     dword ptr [rip+rv_inc], 0
+    jmp     resolve_go
+# hive_resolve_new(rdi=XRGB out, esi=stride) - only the rows with samples
+#   since their last resolve into this buffer (the beauty without denoise)
+hive_resolve_new:
+    mov     dword ptr [rip+rv_inc], 1
+resolve_go:
     sub     rsp, 8
     mov     [rip+rv_out], rdi
     mov     [rip+rv_stride], esi
@@ -2473,7 +2490,15 @@ job_resolve:
     jae     9f
     mov     rax, [rip+hv_rowspp]        # this row's samples
     mov     eax, [rax+r13*4]
-    test    eax, eax
+    mov     rcx, [rip+rv_done]          # (incremental: unchanged rows stay)
+    test    rcx, rcx
+    jz      20f
+    cmp     dword ptr [rip+rv_inc], 0
+    je      19f
+    cmp     [rcx+r13*4], eax
+    je      5f
+19: mov     [rcx+r13*4], eax
+20: test    eax, eax
     jnz     21f
     mov     eax, 1
 21: cvtsi2ss xmm7, eax
@@ -2618,9 +2643,8 @@ hive_tick:
 1:  mov     eax, [rip+hv_spp]
     cmp     eax, [rip+hv_target]
     jae     8f
-    mov     r13d, [rip+n_workers]       # a band: four rows per thread
-    inc     r13d
-    shl     r13d, 2
+    mov     r13d, [rip+n_workers]       # a band: a row per thread (a slice
+    inc     r13d                        #  overshoots its time by one band)
     mov     esi, [rip+hv_next]          # rows [next, next + band)
     lea     edx, [rsi+r13]
     cmp     edx, [rip+hv_h]
@@ -2846,14 +2870,16 @@ pt_mdepth:      .float -0.1202          # -1 / (12 ln 2): exp(-d / 12) via 2^x
 
 .section .bss
 .align 8
-pt_maps:        .skip 8*16
+pt_maps:        .skip 16*16             # 16 mappings: pointer, bytes
 pt_nmaps:       .skip 4
 hv_debug:       .skip 4
 hv_den_on:      .skip 4                 # beauty shows hv_den (denoised)
 hv_env:         .skip 4                 # the world is an HDRI (no studio sky, sun)
 rv_stride:      .skip 4
+rv_inc:         .skip 4
 .align 8
 rv_out:         .skip 8
+rv_done:        .skip 8                 # u32[h]: samples of each row when resolved
 .align 8
 hv_den:         .skip 8                 # f32[w*h][4] denoised radiance
 
