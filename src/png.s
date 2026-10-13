@@ -13,6 +13,7 @@
 .globl png_encode
 .globl png_write
 .globl deflate_buf
+.globl zip_crc32
 
 .equ HASH_SIZE,     32768
 .equ WINDOW,        32768
@@ -335,6 +336,16 @@ deflate:
     pop     rbp
     pop     rbx
     ret
+
+# zip_crc32(rsi=data, rdx=bytes) -> eax (tables made on first use)
+zip_crc32:
+    push    rsi
+    push    rdx
+    sub     rsp, 8
+    call    init_tables
+    add     rsp, 8
+    pop     rdx
+    pop     rsi
 
 # crc32(rsi=data, rdx=bytes) -> eax
 crc32:

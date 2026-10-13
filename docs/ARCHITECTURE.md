@@ -53,6 +53,9 @@ stays private to the module.
 | `feature.s` | The feature tree (records in the CAD document): pad, pocket, revolve, hole, shell, fillet, chamfer, linear / circular patterns, replayed in order with `mesh_boolean` and `build_bevel` into each body |
 | `measure.s` | Mass properties (area, signed-tetrahedron volume, centre of mass, mass from material density) in world space, `object.measure`, the measure tool (vertex-snapped clicks: distance, angle) |
 | `sdf.s` | Signed-distance shapes: node graph (primitives, lattices, smooth booleans, shells, transforms, extruded profiles), parallel sampling, marching tetrahedra (six per cube, orientation from tetrahedron parity: always manifold) |
+| `fab.s` | 3MF export (a zip written by hand: stored and deflated parts, CRC-32, central directory; millimetres, Z up), DXF and SVG of sketches |
+| `drawing.s` | Drawings to PDF: three third-angle views, per-view depth buffers for hidden lines, sharp / boundary / silhouette edges, dimensions, title block, a hand-written PDF with an exact xref |
+| `print.s` | Printability: wall thickness per face (rays inward through a triangle grid, cached), the thin-wall overlay classes, `mesh.print_check` |
 | `sketchui.s` | Sketch mode: tools, snapping and inference, picking, point dragging, constraint keys, dimensions, the overlay |
 | `gltf.s` | glTF 2.0: export (.glb chunks or .gltf with base64), import (node tree baked, welded, PBR + KHR extensions, data: / external / GLB buffers) on the lazy JSON reader |
 | `mtl.s` | MTL import for OBJ: principled values from Kd Ke Ni d Tr Ns Tf Pr Pm Pc Pcr, map_Kd as a texture graph |
