@@ -44,33 +44,14 @@
 .globl sc_strength
 .globl sc_sym
 .globl op_sculpt_mode
+.globl sculpt_build
+.globl sc_obj, sc_mesh, sc_nodes, sc_nnodes, sc_tri, sc_tri_b, sc_vl, sc_vl_b
+.globl sc_nvl, sc_nv, sc_nt, sv_pos, sv_tris, sc_vn, sc_vn_b, sc_mask
+.globl sc_mask_b, sc_masked, sc_stamp, sc_stamp_b, sc_rec, sc_rec_b, sc_acc
+.globl sc_acc_b, sc_maxedge, sc_hits, sc_nh, sc_lchg, sc_stroking
+.globl sc_brush_now, dab_p, salloc, sfree, smap, reach, node_box
 
-.equ LEAF,      1024                    # triangles per leaf (at most)
-.equ ND_SZ,     48
-.equ ND_MIN,    0
-.equ ND_MAX,    12
-.equ ND_TOFF,   24
-.equ ND_TN,     28
-.equ ND_VOFF,   32
-.equ ND_VN,     36
-.equ ND_FLAGS,  40
-.equ ND_VOWN,   44                      # the first ones in its list: its own
-.equ TILE_SH,   4
-.equ TILE,      1 << TILE_SH
-.equ MAP_ANON_PRIV, 0x22
-# brushes
-.equ B_DRAW,    0
-.equ B_CLAY,    1
-.equ B_CREASE,  2
-.equ B_INFLATE, 3
-.equ B_GRAB,    4
-.equ B_SNAKE,   5
-.equ B_SMOOTH,  6
-.equ B_FLATTEN, 7
-.equ B_PINCH,   8
-.equ B_LAYER,   9
-.equ B_MASK,    10
-.equ NBRUSH,    11
+.include "sculpt.inc"
 
 .section .rodata
 .align 16
@@ -114,6 +95,7 @@ s_hud_pstr:     .asciz " strength"
 s_hud_prad:     .asciz " radius"
 s_hud_poff:     .asciz " -"
 s_hud_gap:      .asciz "   "
+s_hud_dyn:      .asciz "dyntopo "
 .align 8
 curve_names:    .quad s_soft, s_linear, s_hard
 s_soft:         .asciz " (soft)"
@@ -442,6 +424,7 @@ sculpt_exit:
 
 sculpt_free:
     sub     rsp, 8
+    call    dyn_free
     lea     rdi, [rip+sc_nodes]
     lea     rsi, [rip+sc_nodes_b]
     call    sfree
@@ -544,42 +527,45 @@ sculpt_build:
     mov     [rip+sv_pos], rax
     mov     rax, [r12+ME_TRIS]
     mov     [rip+sv_tris], rax
+    call    dyn_alloc                   # dyntopo: its own copy, with room
+    test    eax, eax
+    jz      .Lsb_fail
     mov     rdi, rbx
     lea     rsi, [rip+sc_m]
     call    obj_matrix
     lea     rdi, [rip+sc_m]
     lea     rsi, [rip+sc_mi]
     call    sdf_invert
-    # per-vertex arrays
-    mov     edx, [rip+sc_nv]
+    # per-vertex arrays (with dyntopo's room)
+    mov     edx, [rip+sc_capv]
     imul    rdx, rdx, 12
     lea     rdi, [rip+sc_vn]
     lea     rsi, [rip+sc_vn_b]
     call    salloc
     test    rax, rax
     jz      .Lsb_fail
-    mov     edx, [rip+sc_nv]
+    mov     edx, [rip+sc_capv]
     lea     rdi, [rip+sc_mask]
     lea     rsi, [rip+sc_mask_b]
     call    salloc
     test    rax, rax
     jz      .Lsb_fail
     mov     dword ptr [rip+sc_masked], 0
-    mov     edx, [rip+sc_nv]
+    mov     edx, [rip+sc_capv]
     shl     rdx, 2
     lea     rdi, [rip+sc_stamp]
     lea     rsi, [rip+sc_stamp_b]
     call    salloc
     test    rax, rax
     jz      .Lsb_fail
-    mov     edx, [rip+sc_nv]
+    mov     edx, [rip+sc_capv]
     lea     rdi, [rip+sc_rec]
     lea     rsi, [rip+sc_rec_b]
     call    salloc
     test    rax, rax
     jz      .Lsb_fail
     # triangle ids 0 .. n, then partitioned into leaves
-    mov     edx, [rip+sc_nt]
+    mov     edx, [rip+sc_capt]
     shl     rdx, 2
     lea     rdi, [rip+sc_tri]
     lea     rsi, [rip+sc_tri_b]
@@ -677,7 +663,10 @@ sculpt_build:
     jnz     6f
     mov     [rip+sc_nvl], r13d
     mov     edx, r13d
-    shl     rdx, 2
+    cmp     dword ptr [rip+sc_dyn], 0   # (dyntopo: room for the lists to
+    je      51f                         #  move as they grow)
+    lea     edx, [rdx+rdx+65536]
+51: shl     rdx, 2
     lea     rdi, [rip+sc_vl]
     lea     rsi, [rip+sc_vl_b]
     call    salloc
@@ -685,7 +674,8 @@ sculpt_build:
     jz      .Lsb_fail
     mov     ebp, 1
     jmp     .Lsb_vpass
-6:  # boxes, the longest edge, all normals; drawing records
+6:  call    dyn_tail                    # pool room, owners, a carried mask
+    # boxes, the longest edge, all normals; drawing records
     xor     r14d, r14d
 7:  cmp     r14d, [rip+sc_nnodes]
     jae     8f
@@ -1711,8 +1701,11 @@ plan_records:
     jmp     3f
 2:  mov     eax, [r12+20]
     cmp     eax, [r13+12]
-    je      3f                          # (the same stride: the same room)
-    imul    ecx, ebx, ND_SZ             # changed (grown, shrunk, now splats):
+    jne     22f
+    mov     rcx, [rip+sc_lchg]          # the same stride and unchanged: the
+    cmp     byte ptr [rcx+rbx], 0       #  same room (changed: dyntopo may
+    je      3f                          #  have given it more vertices)
+22:     imul    ecx, ebx, ND_SZ             # changed (grown, shrunk, now splats):
     add     rcx, [rip+sc_nodes]         #  its room, if it fits, else at the
     mov     eax, [rcx+ND_VN]            #  end, else everything again
     xor     edx, edx
@@ -3318,7 +3311,7 @@ smooth_gather:
     sub     rsp, 8
     cmp     qword ptr [rip+sc_acc], 0
     jne     1f
-    mov     edx, [rip+sc_nv]
+    mov     edx, [rip+sc_capv]
     shl     rdx, 4
     lea     rdi, [rip+sc_acc]
     lea     rsi, [rip+sc_acc_b]
@@ -3673,6 +3666,9 @@ do_dab:
     movss   [rsp], xmm0
 2:  movss   xmm0, [rsp]
     call    dab
+    movss   xmm0, [rsp]                 # dyntopo: the detail there
+    xor     edi, edi
+    call    dyn_after_dab
     test    dword ptr [rip+sc_sym], 1
     jz      9f
     mov     rax, [rip+dab_p]            # mirrored: x -> -x (and the move)
@@ -3689,6 +3685,9 @@ do_dab:
     movss   [rip+dab_move], xmm1
     movss   xmm0, [rsp]
     call    dab
+    movss   xmm0, [rsp]
+    mov     edi, 1
+    call    dyn_after_dab
     mov     rax, [rsp+8]
     mov     [rip+dab_p], rax
     mov     eax, [rsp+16]
@@ -3750,6 +3749,7 @@ stroke_begin:
     mov     dword ptr [rip+sc_d_n], 0
     mov     dword ptr [rip+sc_g_n], 0
     mov     dword ptr [rip+sc_stroking], 1
+    call    dyn_reset
     lea     rdi, [rip+s_sculpt]
     call    undo_push
     pop     rbx
@@ -3768,6 +3768,8 @@ stroke_end:
     mov     ebx, [rip+sc_d_n]
     test    ebx, ebx
     jz      8f
+    cmp     dword ptr [rip+sc_dyn], 0   # dyntopo: the mesh is replaced (the
+    jne     8f                          #  undo step keeps the old one)
     mov     edi, ebx                    # block: header 32, idx, old, new
     imul    rdi, rdi, 28
     add     rdi, 32
@@ -3816,7 +3818,11 @@ stroke_end:
     inc     ecx
     jmp     3b
 4:  mov     dword ptr [rip+sc_d_n], 0
-    call    mesh_box_leaves
+    cmp     dword ptr [rip+sc_dyn], 0
+    je      5f
+    call    dyn_commit
+    jmp     9f
+5:  call    mesh_box_leaves
     mov     rdi, [rip+sc_mesh]
     call    mesh_forget
     mov     dword ptr [rip+dirty], 1
@@ -4604,12 +4610,25 @@ sculpt_overlay:
     call    fmt_reset                   # "stabilizer 25   pen: strength (soft)"
     xor     ebx, ebx
     cmp     dword ptr [rip+sc_lazy], 0
-    je      11f
+    je      10f
     lea     rdi, [rip+s_hud_lazy]
     call    fmt_str
     mov     edi, [rip+sc_lazy]
     call    fmt_int
     inc     ebx
+10: cmp     dword ptr [rip+sc_dyn], 0
+    je      11f
+    test    ebx, ebx
+    jz      101f
+    lea     rdi, [rip+s_hud_gap]
+    call    fmt_str
+101:inc     ebx
+    lea     rdi, [rip+s_hud_dyn]
+    call    fmt_str
+    cvttss2si edi, [rip+dyn_detail]
+    call    fmt_int
+    lea     rdi, [rip+s_px]
+    call    fmt_str
 11: cmp     dword ptr [rip+in_pen], 0   # (once a pen has been seen)
     je      14f
     test    ebx, ebx

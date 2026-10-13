@@ -333,6 +333,11 @@ Ctrl inverts it, Shift+X mirrors strokes across X. Each stroke is one undo
 step that stores only the vertices it moved. Scripts sculpt too:
 `sculpt("Ball", "draw", 0, 1, 0.3, 0.2, 1, 0.3, 0.3, 0.5)`.
 
+**Dynamic topology** (Ctrl+D): brushes split edges longer than the detail
+size and collapse shorter ones as they go, so detail appears where you
+sculpt (Ctrl+`[` `]` set the detail, in screen pixels). The mesh becomes
+triangles; each stroke's undo step keeps the mesh before it.
+
 A **pen tablet** works through the Wayland tablet protocol: pressure scales
 the strength (and, with *Pressure: Radius*, the radius) through a soft,
 linear or hard curve (`sculpt.pressure_curve`); the eraser end inverts the
@@ -442,6 +447,7 @@ src/fab.s       3MF export, DXF / SVG of sketches
 src/drawing.s   PDF drawings: views, hidden lines, dimensions
 src/print.s     printability: wall thickness, print check
 src/sculpt.s    sculpt mode: leaf BVH, brushes, delta undo, splat drawing
+src/dyntopo.s   dynamic topology: edge split / collapse under the brush
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
