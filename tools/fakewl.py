@@ -530,6 +530,7 @@ def main():
     instancing()
     curves()
     procedural()
+    copilot()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3456,6 +3457,66 @@ def procedural():
     check(ok and v[15:17] == [144, 36] and v[17] == 72 and v[18] in (48 * 5, 48 * 14),
           f'wave function collapse: ramps fit only up-then-down; ramps and blocks never touch ({out[15:19]})')
     print(r.stderr[-300:] if not ok else '', end='')
+
+
+def copilot():
+    """The procedural co-pilot over MCP: the node catalogue, a tree described
+    as JSON (tool and bee://graphs), the procedural prompt; a proposal built
+    through the tree operators, shown in a banner, reverted with Esc (the
+    scene as before), then accepted with a click and undone in one step."""
+    print('  -- procedural co-pilot --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    types = json.loads(m.tool('node_types')[0] or '{}').get('geometry_nodes', [])
+    grid = next((t for t in types if t.get('type') == 'grid'), {})
+    math_ = next((t for t in types if t.get('type') == 'math'), {})
+    check(len(types) >= 39 and [v['name'] for v in grid.get('values', [])] == ['Size', 'Subdivisions']
+          and grid['outputs'][0]['kind'] == 'geometry' and 'Modulo' in math_['values'][0].get('choices', []),
+          f'node_types: {len(types)} types with slots, kinds, defaults, choices')
+    pr = m.call('prompts/get', {'name': 'procedural', 'arguments': {'goal': 'a rocky hill'}})
+    txt = ((pr or {}).get('result', {}).get('messages') or [{}])[0].get('content', {}).get('text', '')
+    check('a rocky hill' in txt and 'propose_begin' in txt and m.call('prompts/list')['result']['prompts'][0]['name'] == 'procedural',
+          'the procedural prompt walks an agent through a proposal for a goal')
+    m.tool('propose_begin', {'title': 'Flatten into a grid'})
+    m.tool('op_tree_new', {'arg': 'Rocks'})
+    m.tool('op_tree_node', {'arg': 'Rocks output'})
+    m.tool('op_tree_node', {'arg': 'Rocks grid 4 20'})
+    m.tool('op_tree_link', {'arg': 'Rocks 2 1 1'})
+    ev = m.tool('script_eval', {'code': 'm = modifier("Cube", "geometry")\nmodset("Cube", m, "tree", 1)\neverts("Cube")'})[0]
+    g = json.loads(m.tool('describe_graph', {'tree': 'Rocks'})[0] or '{}')
+    check(ev.strip() == '= 441' and g.get('proposal') == 'building' and len(g.get('nodes', [])) == 2
+          and g['nodes'][0]['inputs'][0].get('from') == {'node': 2, 'output': 0} and g['nodes'][1]['values'][:2] == [4, 20],
+          'a proposal builds a tree through the operators; describe_graph shows its links and values')
+    m.tool('propose_end')
+    f.pump(0.3)
+    banner = px(f, 733, 134), px(f, 990, 134)
+    f.shot('94_copilot_proposal.png')
+    f.key(1)                                    # Esc: revert
+    f.pump(0.3)
+    st = m.tool('proposal_status')[0]
+    after = m.tool('script_eval', {'code': 'print(everts("Cube"), count())'})[0].strip()
+    res = m.call('resources/read', {'uri': 'bee://graphs'})
+    gr = json.loads(res['result']['contents'][0]['text'])
+    check(banner == (0x3f8f5a, 0x8f3f3f) and st == '"reverted"' and after.startswith('8 3') and gr == {'trees': [], 'proposal': 'reverted'},
+          f'the banner offers Accept / Revert; Esc takes the whole proposal back ({after!r})')
+    m.tool('propose_begin', {'title': 'Again'})
+    m.tool('script_eval', {'code': 't = gtree("Rocks")\no = gnode(t, "output")\ng = gnode(t, "grid", 4, 20)\nglink(t, g, o, 1)\n'
+                                   'm = modifier("Cube", "geometry")\nmodset("Cube", m, "tree", t)'})
+    m.tool('create_primitive', {'type': 'sphere'})
+    m.tool('propose_end')
+    f.pump(0.3)
+    f.click(790, 141)                           # Accept
+    f.pump(0.2)
+    acc = m.tool('proposal_status')[0], m.tool('script_eval', {'code': 'print(everts("Cube"), count())'})[0].strip()
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: all of it at once
+    f.pump(0.2)
+    und = m.tool('script_eval', {'code': 'print(everts("Cube"), count())'})[0].strip()
+    check(acc[0] == '"accepted"' and acc[1].startswith('441 4') and und.startswith('8 3'),
+          f'Accept keeps it as one undo step ({acc} -> {und!r})')
+    f.proc.kill()
 
 
 class Bridge:

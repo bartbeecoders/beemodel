@@ -1133,7 +1133,15 @@ ui_axis:
 viewport_click:
     push    rbx
     call    vp_setup_drag
-    cmp     dword ptr [rip+cve_obj], 0  # curve edit mode: its points
+    mov     edi, [rip+ptr_x]            # an AI proposal's buttons
+    mov     esi, [rip+ptr_y]
+    call    cp_click
+    test    eax, eax
+    jz      99f
+    call    reset_clip
+    pop     rbx
+    ret
+99: cmp     dword ptr [rip+cve_obj], 0  # curve edit mode: its points
     je      100f
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
@@ -1274,7 +1282,11 @@ ui_key_press:
     call    tf_key
     test    eax, eax
     jnz     9f
-2:  cmp     ebx, KEY_ESC                # Esc: sketch mode first
+2:  mov     edi, ebx                    # an AI proposal: Enter / Esc
+    call    cp_key
+    test    eax, eax
+    jnz     9f
+    cmp     ebx, KEY_ESC                # Esc: sketch mode first
     jne     21f
     call    skm_escape
     test    eax, eax
