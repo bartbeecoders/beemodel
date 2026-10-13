@@ -170,6 +170,7 @@
 .equ HIT_MODS,          24
 .equ HIT_UVED,          25
 .equ HIT_NODES,         26
+.equ HIT_ASSETS,        27
 .equ DRAG_MODS,         9
 .equ DRAG_REDO,         8
 .equ COL_EDIT_WIRE,   0x0b0c0e
@@ -295,6 +296,7 @@
 .equ ED_RENDER,         6
 .equ ED_UVED,           7
 .equ ED_NODES,          8
+.equ ED_ASSETS,         9
 .equ MENU_AREA,         8
 .equ MENU_MODADD,       9
 .equ KEY_SPACE,         57

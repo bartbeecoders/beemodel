@@ -60,6 +60,7 @@
 .equ COL_NE_SOCK_N, 0x6363c7            # vectors / normals
 .equ COL_NE_SOCK_G, 0x00d6a3            # geometry
 .equ COL_NE_GEO,    0x1d725e            # geometry nodes' headers
+.equ COL_NE_GRP,    0x6e5418            # group nodes
 
 .section .rodata
 .align 4
@@ -88,7 +89,10 @@ s_tp_node:      .asciz "tree.node"
 s_tp_delete:    .asciz "tree.node_delete"
 s_tp_set:       .asciz "tree.node_set"
 s_ne_ghead:     .asciz "Geometry: "
-s_ne_gkeys:     .asciz "     Shift+A add  X delete  Home fit  Tab material"
+s_ne_grhead:    .asciz "Group: "
+s_ne_grkeys:    .asciz "     Shift+A add  X delete  Ctrl+G group  Tab back"
+s_tp_group:     .asciz "tree.group"
+s_ne_gkeys:     .asciz "     Shift+A add  X delete  Ctrl+G group  Tab material / into a group"
 s_ne_tabgeo:    .asciz "  Tab geometry"
 s_op_socket:    .asciz "material.socket"
 s_op_node:      .asciz "material.node"
@@ -222,6 +226,10 @@ ne_coly:        .skip 4*16
 ne_kind:        .skip 4                 # 0 a material's graph, 1 a node tree
 ne_pref:        .skip 4                 # 1: the material even with a tree
 ne_maxn:        .skip 4
+.align 8
+ne_selm:        .skip 8                 # selected nodes (bit n: node n)
+ne_path:        .skip 4*8               # groups entered: their tree numbers
+ne_pathn:       .skip 4
 ne_sel:         .skip 4                 # the selected node (0: none)
 ne_drag:        .skip 4                 # 0 none, 1 move, 2 wire from an output,
                                         #  3 wire from an input, 4 from a
@@ -248,6 +256,7 @@ OPERATOR op_ne_add,    "node.add_menu", "Add Node...", do_ne_add_menu, key=KEY_A
 OPERATOR op_ne_del,    "node.delete", "Delete Node", do_ne_delete, key=KEY_X, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: remove the selected node"
 OPERATOR op_ne_del2,   "node.delete_key", "Delete Node", do_ne_delete, key=KEY_DELETE, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, doc="Node editor: remove the selected node"
 OPERATOR op_ne_tab,    "node.toggle_tree", "Material / Geometry Nodes", do_ne_tab, key=KEY_TAB, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the active object's material graph or its geometry node tree"
+OPERATOR op_ne_group,  "node.group", "Make Node Group", do_ne_group, key=KEY_G|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected geometry nodes into a group (a new tree run by one node)"
 OPERATOR op_ne_fit,    "node.view_fit", "Fit Node View", do_ne_fit, key=KEY_HOME, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: every node in view"
 
 # ne_rec -> rax = the record shown (0: none): the active object's geometry
@@ -259,7 +268,22 @@ ne_rec:
     mov     dword ptr [rip+ne_mat], -1
     mov     dword ptr [rip+ne_kind], 0
     mov     dword ptr [rip+ne_maxn], 12
-    mov     edi, [rip+active_obj]
+    mov     ecx, [rip+ne_pathn]         # inside a group: that tree
+    test    ecx, ecx
+    jz      0f
+    lea     rax, [rip+ne_path]
+    mov     edi, [rax+rcx*4-4]
+    dec     edi
+    mov     [rip+ne_mat], edi
+    call    nt_get
+    test    rax, rax
+    jz      71f
+    mov     dword ptr [rip+ne_kind], 1
+    mov     dword ptr [rip+ne_maxn], 48
+    jmp     9f
+71: mov     dword ptr [rip+ne_pathn], 0  # (gone: back out)
+    mov     dword ptr [rip+ne_mat], -1
+0:  mov     edi, [rip+active_obj]
     test    edi, edi
     jz      8f
     call    obj_get
@@ -793,6 +817,8 @@ ne_value_text:
     je      1f
     cmp     ecx, 2
     je      2f
+    cmp     ecx, 4
+    je      4f
     cmp     ecx, 3
     jne     3f
     cvtss2si edi, xmm0                  # a whole number
@@ -825,6 +851,13 @@ ne_value_text:
     lea     rax, [rax+IR_NAME]
     jmp     9f
 21: lea     rax, [rip+s_ne_noimg]
+    jmp     9f
+4:  cvtss2si edi, xmm0                  # a tree (number)
+    dec     edi
+    js      21b
+    call    nt_get
+    test    rax, rax
+    jz      21b
 9:  pop     r14
     pop     r13
     pop     r12
@@ -899,6 +932,9 @@ ed_nodes_draw:
     cmp     dword ptr [rip+ne_kind], 0
     je      31f
     lea     rdx, [rip+s_ne_ghead]
+    cmp     dword ptr [rip+ne_pathn], 0
+    je      31f
+    lea     rdx, [rip+s_ne_grhead]
 31: mov     ecx, COL_TEXT_DIM
     call    draw_text
     mov     edi, eax
@@ -914,6 +950,9 @@ ed_nodes_draw:
     cmp     dword ptr [rip+ne_kind], 0
     je      32f
     lea     rdx, [rip+s_ne_gkeys]
+    cmp     dword ptr [rip+ne_pathn], 0
+    je      32f
+    lea     rdx, [rip+s_ne_grkeys]
 32: mov     ecx, COL_TEXT_DIM
     call    draw_text
     cmp     dword ptr [rip+ne_kind], 0  # (a material with a tree too: Tab)
@@ -1078,10 +1117,11 @@ ne_box:
     mov     ecx, [r8+rbx*4]
     add     ecx, 2
     mov     r8d, COL_NE_EDGE
-    cmp     ebx, [rip+ne_sel]
-    jne     1f
     test    ebx, ebx
     jz      1f
+    mov     rax, [rip+ne_selm]
+    bt      rax, rbx
+    jnc     1f
     mov     r8d, COL_ACCENT
 1:  call    fill_rect
     lea     r8, [rip+ne_lx]
@@ -1144,8 +1184,11 @@ ne_draw_node:
     mov     ecx, [r13+ND_TYPE]          # header colour by kind
     cmp     dword ptr [rip+ne_kind], 0
     je      11f
-    mov     esi, COL_NE_OUT             # (trees: group in / out, geometry,
-    cmp     ecx, 2                      #  fields)
+    mov     esi, COL_NE_GRP             # (trees: groups, group in / out,
+    cmp     ecx, 26                     #  geometry, fields)
+    je      1f
+    mov     esi, COL_NE_OUT
+    cmp     ecx, 2
     jbe     1f
     mov     esi, COL_NE_GEO
     cmp     ecx, 15
@@ -1824,8 +1867,18 @@ nodeed_press:
     jmp     .Lnp_taken
 31: mov     dword ptr [rip+ne_drag], 4
     jmp     .Lnp_taken
-4:  mov     edx, [rip+ne_dn]            # on a node: selected
-    mov     [rip+ne_sel], edx
+4:  mov     edx, [rip+ne_dn]            # on a node: selected (Shift: added,
+    mov     [rip+ne_sel], edx           #  or taken out again)
+    mov     rcx, [rip+ne_selm]
+    test    dword ptr [rip+key_mods], MOD_SHIFT
+    jz      41f
+    btc     rcx, rdx
+    jmp     42f
+41: bt      rcx, rdx                    # (a selected one: the selection
+    jc      42f                         #  stays)
+    xor     ecx, ecx
+    bts     rcx, rdx
+42: mov     [rip+ne_selm], rcx
     cmp     eax, 5
     jne     5f
     mov     dword ptr [rip+ne_drag], 5  # a value
@@ -1854,6 +1907,7 @@ nodeed_press:
     jmp     .Lnp_taken
 .Lnp_pan:
     mov     dword ptr [rip+ne_sel], 0
+    mov     qword ptr [rip+ne_selm], 0
     mov     dword ptr [rip+ne_drag], 7
     mov     eax, [rip+ne_panx]
     mov     [rip+ne_a0], eax
@@ -2129,8 +2183,15 @@ ne_new_value:
     dec     ecx
     jmp     4f
 2:  cmp     r13d, 2
-    jne     3f
+    jne     21f
     mov     ecx, [rip+img_count]        # an image: 1..count (0: none)
+    jmp     4f
+21: cmp     r13d, 4
+    jne     3f
+    push    rax                         # a tree: 1..count (0: none)
+    call    nt_count
+    mov     ecx, eax
+    pop     rax
     jmp     4f
 3:  mov     ecx, 16                     # whole: 1..16
     cmp     eax, 1
@@ -2358,9 +2419,44 @@ ne_place:
 1:  ret
 
 do_ne_tab:
-    xor     dword ptr [rip+ne_pref], 1
-    mov     dword ptr [rip+ne_sel], 0
+    push    rbx
+    call    ne_rec                      # a group selected: into it
+    test    rax, rax
+    jz      2f
+    cmp     dword ptr [rip+ne_kind], 0
+    je      2f
+    mov     ecx, [rip+ne_sel]
+    test    ecx, ecx
+    jz      2f
+    cmp     ecx, [rax+GR_N]
+    ja      2f
+    dec     ecx
+    imul    ecx, ecx, NODE_SZ
+    cmp     dword ptr [rax+GR_NODES+rcx+ND_TYPE], 26
+    jne     2f
+    cvttss2si ebx, [rax+GR_NODES+rcx+ND_P]
+    lea     edi, [rbx-1]
+    test    edi, edi
+    js      2f
+    call    nt_get
+    test    rax, rax
+    jz      2f
+    mov     ecx, [rip+ne_pathn]
+    cmp     ecx, 8
+    jae     2f
+    lea     rax, [rip+ne_path]
+    mov     [rax+rcx*4], ebx
+    inc     dword ptr [rip+ne_pathn]
+    jmp     8f
+2:  cmp     dword ptr [rip+ne_pathn], 0  # inside one: back out
+    je      3f
+    dec     dword ptr [rip+ne_pathn]
+    jmp     8f
+3:  xor     dword ptr [rip+ne_pref], 1  # else the material / the tree
+8:  mov     dword ptr [rip+ne_sel], 0
+    mov     qword ptr [rip+ne_selm], 0
     mov     dword ptr [rip+dirty], 1
+    pop     rbx
     ret
 
 # nodeed_wheel(edi = steps) - scroll
@@ -2407,25 +2503,69 @@ do_ne_add_menu:
     ret
 
 do_ne_delete:
+    push    rbx
+    push    r12
     sub     rsp, 8
+    mov     rbx, [rip+ne_selm]          # the selected ones, last first
     mov     eax, [rip+ne_sel]
+    test    rbx, rbx
+    jnz     1f
     test    eax, eax
     jz      9f
+    bts     rbx, rax
+1:  bsr     r12, rbx
+    jz      8f
+    btr     rbx, r12
+    test    r12d, r12d
+    jz      8f
     call    ne_rec
     test    rax, rax
-    jz      9f
-    mov     ecx, [rip+ne_sel]
-    cmp     ecx, [rax+GR_N]
-    ja      9f
+    jz      8f
+    cmp     r12d, [rax+GR_N]
+    ja      1b
     call    ne_arg_start
-    mov     edi, [rip+ne_sel]
+    mov     edi, r12d
     call    fmt_int
     call    ne_arg_done
     lea     rdi, [rip+s_op_delete]
     lea     rsi, [rip+s_tp_delete]
     call    ne_run2
-    mov     dword ptr [rip+ne_sel], 0
+    jmp     1b
+8:  mov     dword ptr [rip+ne_sel], 0
+    mov     qword ptr [rip+ne_selm], 0
 9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# node.group (Ctrl+G) - tree.group with the selection
+do_ne_group:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    ne_rec
+    test    rax, rax
+    jz      9f
+    cmp     dword ptr [rip+ne_kind], 0
+    je      9f
+    mov     rbx, [rip+ne_selm]
+    test    rbx, rbx
+    jz      9f
+    call    ne_arg_start
+1:  bsf     r12, rbx
+    jz      2f
+    btr     rbx, r12
+    mov     edi, r12d
+    call    ne_arg_int
+    jmp     1b
+2:  call    ne_arg_done
+    lea     rdi, [rip+s_tp_group]
+    call    ne_run
+    mov     dword ptr [rip+ne_sel], 0
+    mov     qword ptr [rip+ne_selm], 0
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
     ret
 
 # node.view_fit - the nodes' box at the body's top left (a margin)

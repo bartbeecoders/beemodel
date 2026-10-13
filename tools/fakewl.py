@@ -524,6 +524,7 @@ def main():
     baking()
     node_editor()
     geometry_nodes()
+    node_groups()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3176,6 +3177,75 @@ def geometry_nodes():
     f.key(15)
     f.pump(0.3)
     check(geo2 == 0, f'Tab shows the material instead ({geo2})')
+    f.proc.kill()
+
+
+def node_groups():
+    """Node groups and assets: a group node runs another tree (fields cross
+    into it); Shift-click several nodes and Ctrl+G makes one, Tab goes into
+    it and back; trees (with their groups) and materials saved as assets
+    come back into other scenes; the Asset Browser lists them and adds one
+    with a click."""
+    print('  -- node groups, assets --')
+    home = tempfile.mkdtemp(prefix='bee-ng-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    run = lambda code: subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=60).stdout.split()
+    out = run('g = gtree("Lift")\ngi = gnode(g, "input")\ngo = gnode(g, "output")\nsp = gnode(g, "set_position")\n'
+              'c = gnode(g, "combine_xyz")\nglink(g, gi, sp, 1, 0)\nglink(g, gi, c, 2, 1)\nglink(g, c, sp, 3)\nglink(g, sp, go, 1)\n'
+              't = gtree("Main")\no = gnode(t, "output")\ngr = gnode(t, "grid", 2, 2)\ngrp = gnode(t, "group", g)\n'
+              'glink(t, gr, grp, 1)\np = gnode(t, "position")\nsx = gnode(t, "separate_xyz")\nglink(t, p, sx, 1)\n'
+              'glink(t, sx, grp, 2, 0)\nglink(t, grp, o, 1)\n'
+              'add("cube", "M", 0, 0, 0)\nmm = modifier("M", "geometry")\nmodset("M", mm, "tree", t)\nmodapply("M", 0)\n'
+              'print(verts("M"), vpos("M", 0, 0), vpos("M", 0, 1), vpos("M", 8, 0), vpos("M", 8, 1))\n'
+              'material("Gold")\nmatset("Gold", "metallic", 1)\nn = node("Gold", "noise", 3)\nsocket("Gold", "base", n)\n'
+              'op("tree.save_asset", "Main")\nop("material.save_asset", "Gold")')
+    check(out == ['9', '-1', '-1', '1', '1'], f'a group node runs its tree; a field from outside lifts each point by its x ({out})')
+    out = run('op("asset.load", "Main")\nop("asset.load", "Gold")\n'
+              'print(ginfo(1, 0, "count"), ginfo(2, 0, "count"), ginfo(1, 3, "value", 1), matget("Gold", "metallic"), nodeinfo("Gold", 0, "count"))')
+    check(out == ['5', '4', '2', '1', '1'], f'a tree saved as an asset comes back with its group; a material with its graph ({out})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    shutil.copytree(os.path.join(home, 'BeeModel', 'assets'), os.path.join(f.home, 'BeeModel', 'assets'))
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('t = gtree("Terrain")\no = gnode(t, "output")\ng = gnode(t, "grid", 6, 30)\nsp = gnode(t, "set_position")\n'
+      'glink(t, g, sp, 1)\nn = gnode(t, "noise", 0.6, 3, 0.5)\nc = gnode(t, "combine_xyz")\nglink(t, n, c, 2)\n'
+      'glink(t, c, sp, 3)\nglink(t, sp, o, 1)\nmm = modifier("Cube", "geometry")\nmodset("Cube", mm, "tree", t)\nselect("Cube")')
+    ev = q('print(everts("Cube"), area("Cube"))')
+    f.move(600, 700)
+    f.pump(0.2)
+    q('op("area.type_node_editor")\nop("area.maximize")')
+    f.pump(0.4)
+    f.click(60, 130)                            # grid, then Shift: combine,
+    f.mods(1)                                   #  noise, set position
+    f.click(260, 130); f.click(60, 230); f.click(460, 130)
+    f.mods(0)
+    f.pump(0.2)
+    f.mods(4); f.key(34); f.mods(0)             # Ctrl+G
+    f.pump(0.3)
+    a = (q('print(ginfo(1, 0, "count"), ginfo(2, 0, "count"), ginfo(1, 2, "type"))'), q('print(everts("Cube"))'))
+    f.click(60, 130)                            # the group: Tab into it
+    f.key(15)
+    f.pump(0.3)
+    img = f.image()
+    inside = sum(1 for x in range(0, 900, 4) if img.getpixel((x, 125)) == (0x1d, 0x72, 0x5e))
+    f.shot('89_node_group.png')
+    f.key(15)                                   # Tab: back
+    f.pump(0.3)
+    img = f.image()
+    grp = sum(1 for x in range(0, 300, 4) if img.getpixel((x, 125)) == (0x6e, 0x54, 0x18))
+    check(a == ('2 6 26', ev.split()[0]) and inside > 30 and grp > 20,
+          f'Shift-click, Ctrl+G: one group node, the same result; Tab into it and back ({a} {inside} {grp})')
+    q('op("area.type_asset_browser")')
+    f.pump(0.5)
+    f.shot('90_asset_browser.png')
+    f.click(200, 105 + 22 + 10)                 # the first asset (Gold)
+    f.pump(0.3)
+    n = q('print(matget("Gold", "metallic"))')
+    check(n == '1', f'the asset browser lists the assets; a click adds one ({n})')
     f.proc.kill()
 
 

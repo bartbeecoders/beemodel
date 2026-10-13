@@ -30,6 +30,14 @@ project uses [Semantic Versioning](https://semver.org/).
   - **Editing:** the node editor shows the active object's tree (Tab: its
     material). Operators `tree.*`; BeeScript `gtree`, `gnode`, `glink`,
     `gset`, `ginfo`.
+- Node groups: a Group node runs another tree (geometry, value and vector
+  through its Group Input; fields cross the boundary; 8 levels deep).
+  Shift-click and Ctrl+G make one from the selection (`tree.group`), Tab
+  goes into a group and back.
+- Assets: `tree.save_asset` (with the groups the tree runs) and
+  `material.save_asset` write to `~/BeeModel/assets`; `asset.load` adds one
+  to any scene, `asset.list` lists them; the Asset Browser area adds one
+  with a click.
 
 ## [0.8.0] - 2026-10-13
 

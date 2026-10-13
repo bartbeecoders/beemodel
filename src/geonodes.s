@@ -15,7 +15,10 @@
 #  cylinder, mesh line, transform, join geometry, set position, extrude
 #  mesh, subdivision surface, mesh boolean, merge by distance, realize
 #  instances; position, normal, index, value, combine XYZ, separate XYZ,
-#  math, vector math, noise texture, random value.
+#  math, vector math, noise texture, random value; group (another tree run
+#  as one node: its Group Input gives the group node's geometry, value and
+#  vector - fields cross the boundary - and its Group Output the result;
+#  groups nest 8 deep).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -29,6 +32,7 @@
 .globl gn_type_index
 .globl gn_ntypes
 .globl op_tree_new
+.globl gn_make_group
 
 .equ GR_N,      128
 .equ GR_NODES,  160
@@ -36,8 +40,10 @@
 .equ ND_TYPE,   0
 .equ ND_IN,     4
 .equ ND_P,      52
+.equ ND_POS,    68
 .equ NT_MAXN,   48
-.equ GN_NTYPES, 25
+.equ GN_NTYPES, 26
+.equ GN_LEVELS, 8
 # types
 .equ T_GIN,     1
 .equ T_GOUT,    2
@@ -64,6 +70,7 @@
 .equ T_VMATH,   23
 .equ T_NOISE,   24
 .equ T_RANDOM,  25
+.equ T_GROUP,   26
 # field VM (fieldvm.s)
 .equ OP_CONST,  1
 .equ OP_PX,     2
@@ -103,7 +110,7 @@ gn_ntypes:      .long GN_NTYPES
 .align 8
 gn_type_names:  .quad k_gin, k_gout, k_grid, k_cube, k_sphere, k_cyl, k_line, k_xform, k_join, k_setpos
                 .quad k_extrude, k_subd, k_bool, k_merge, k_realize, k_pos, k_normal, k_index, k_value
-                .quad k_combine, k_sep, k_math, k_vmath, k_noise, k_random, 0
+                .quad k_combine, k_sep, k_math, k_vmath, k_noise, k_random, k_group, 0
 k_gin:          .asciz "input"
 k_gout:         .asciz "output"
 k_grid:         .asciz "grid"
@@ -129,9 +136,10 @@ k_math:         .asciz "math"
 k_vmath:        .asciz "vector_math"
 k_noise:        .asciz "noise"
 k_random:       .asciz "random"
+k_group:        .asciz "group"
 gn_titles:      .quad 0, n_gin, n_gout, n_grid, n_cube, n_sphere, n_cyl, n_line, n_xform, n_join, n_setpos
                 .quad n_extrude, n_subd, n_bool, n_merge, n_realize, n_pos, n_normal, n_index, n_value
-                .quad n_combine, n_sep, n_math, n_vmath, n_noise, n_random
+                .quad n_combine, n_sep, n_math, n_vmath, n_noise, n_random, n_group
 n_gin:          .asciz "Group Input"
 n_gout:         .asciz "Group Output"
 n_grid:         .asciz "Grid"
@@ -157,11 +165,12 @@ n_math:         .asciz "Math"
 n_vmath:        .asciz "Vector Math"
 n_noise:        .asciz "Noise Texture"
 n_random:       .asciz "Random Value"
+n_group:        .asciz "Group"
 # per type (as the node editor reads it): input names, input kinds (0
 #   geometry, 1 value, 2 vector), value names, value kinds (0 number, 1
 #   choice, 3 whole), choices, output names, output kinds
 gn_meta:        .quad 0, 0, 0, 0, 0, 0, 0
-                .quad nil3, k000, nil4, k0000, 0, o_geo, k000              # group input
+                .quad nil3, k000, nil4, k0000, 0, o_gin, k012              # group input
                 .quad i_geo, k000, nil4, k0000, 0, nil3, k000              # group output
                 .quad nil3, k000, p_grid, k0300, 0, o_mesh, k000           # grid
                 .quad nil3, k000, p_size, k0000, 0, o_mesh, k000           # cube
@@ -186,6 +195,8 @@ gn_meta:        .quad 0, 0, 0, 0, 0, 0, 0
                 .quad i_abf, k221, p_op, k1000, ch_vmath, o_vv, k210       # vector math
                 .quad i_vector, k222, p_noise, k0000, 0, o_noise, k120     # noise
                 .quad nil3, k000, p_random, k0000, 0, o_value, k111        # random
+                .quad i_group, k012, p_tree, k4000, 0, o_geo, k000         # group
+k4000:          .byte 4, 0, 0, 0
 nil3:           .quad 0, 0, 0
 nil4:           .quad 0, 0, 0, 0
 k000:           .byte 0, 0, 0, 0
@@ -213,6 +224,9 @@ i_xyz:          .quad s_x, s_y, s_z
 i_vector:       .quad s_vector, 0, 0
 i_ab:           .quad s_a, s_b, 0
 i_abf:          .quad s_a, s_b, s_factor
+i_group:        .quad s_geo, s_value, s_vector
+o_gin:          .quad s_geo, s_value, s_vector
+p_tree:         .quad s_tree, 0, 0, 0
 o_geo:          .quad s_geo, 0, 0
 o_mesh:         .quad s_mesh, 0, 0
 o_pos:          .quad s_position, 0, 0
@@ -278,6 +292,7 @@ s_rough:        .asciz "Roughness"
 s_min:          .asciz "Min"
 s_max:          .asciz "Max"
 s_seed:         .asciz "Seed"
+s_tree:         .asciz "Tree"
 c_union:        .asciz "Union"
 c_diff:         .asciz "Difference"
 c_isect:        .asciz "Intersect"
@@ -330,6 +345,7 @@ gn_defaults:    .float 0, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # input
                 .float 0, 0, 0, 0,  0, 0, 0,  0, 0, 0,  1, 1, 1     # vector math
                 .float 5, 2, 0.5, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0   # noise
                 .float 0, 1, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # random
+                .float 0, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # group
 gz_deg:         .float 0.017453292
 gz_half:        .float 0.5
 gz_third:       .float 0.33333334
@@ -341,8 +357,10 @@ s_tree_linkneed:.asciz "  tree.link <tree> <from[:output]> <to> <input 1-3> (no 
 s_tree_setneed: .asciz "  tree.node_set <tree> <node> <slot> <x> [y z]"
 s_tree_delneed: .asciz "  tree.node_delete <tree> <node>"
 s_tree_moveneed:.asciz "  tree.node_move <tree> <node> <x> <y>"
+s_tree_groupneed:.asciz "  tree.group <tree> <node> [node ...] (not the group input / output)"
 s_tree_none:    .asciz "  no node tree named: "
 s_tree_made:    .asciz "  node tree: "
+s_group_name:   .asciz "Group"
 
 .section .bss
 .align 8
@@ -351,7 +369,11 @@ gn_inmesh:      .skip 8                 #  the modifier's input mesh
 gn_res:         .skip 8*NT_MAXN         # each node's mesh (owned), once
 gn_depth:       .skip 4
 # field compilation
-gc_regs:        .skip NT_MAXN*3*3       # per node, output, component: register + 1
+gc_regs:        .skip NT_MAXN*9*GN_LEVELS   # per level, node, output, component: register + 1
+gn_level:       .skip 4                 # groups entered
+gn_save:        .skip GN_LEVELS*(8*NT_MAXN+16)  # the outer level's state
+gn_ctx_rec:     .skip 8*GN_LEVELS       # per level: the tree holding its group
+gn_ctx_node:    .skip 4*GN_LEVELS       #  node, and that node
 gc_prog:        .skip GC_MAXI*IN_SZ
 gc_n:           .skip 4
 gc_r:           .skip 4                 # registers used
@@ -361,6 +383,9 @@ gc_uses:        .skip 4                 # inputs read: 1 position, 2 normal, 4 i
 gc_out:         .skip 12                # the registers of the field asked for
 gc_tmp:         .skip 64
 gn_word:        .skip 8
+mg_map:         .skip 4*NT_MAXN         # make group: old -> new (inner / outer)
+mg_map2:        .skip 4*NT_MAXN
+mg_tmp:         .skip NODE_SZ*(NT_MAXN+1)
 
 .text
 OPERATOR op_tree_new, "tree.new", "New Node Tree", do_tree_new, flags=OPF_AI_SAFE|OPF_UNDO, doc="A new, empty geometry node tree: tree.new [name]"
@@ -368,6 +393,7 @@ OPERATOR op_tree_node, "tree.node", "Add Geometry Node", do_tree_node, flags=OPF
 OPERATOR op_tree_link, "tree.link", "Link Geometry Nodes", do_tree_link, flags=OPF_AI_SAFE|OPF_UNDO, doc="Feed a node's output into an input: tree.link <tree> <from[:output]> <to> <input 1-3> (the tree keeps itself in evaluation order)"
 OPERATOR op_tree_set, "tree.node_set", "Set Geometry Node Value", do_tree_set, flags=OPF_AI_SAFE|OPF_UNDO|OPF_QUIET, doc="Set a node input (1-3) or value (4-7): tree.node_set <tree> <node> <slot> <x> [y z]"
 OPERATOR op_tree_del, "tree.node_delete", "Delete Geometry Node", do_tree_del, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a node from a tree: tree.node_delete <tree> <node>"
+OPERATOR op_tree_group, "tree.group", "Make Node Group", do_tree_group, flags=OPF_AI_SAFE|OPF_UNDO, doc="Move nodes into a new tree run by one Group node: tree.group <tree> <node> [node ...]"
 OPERATOR op_tree_move, "tree.node_move", "Move Geometry Node", do_tree_move, flags=OPF_AI_SAFE|OPF_UNDO|OPF_QUIET, doc="Place a node in the node editor: tree.node_move <tree> <node> <x> <y>"
 
 # gn_type_index(rdi=name) -> eax = type (1..) or -1
@@ -695,6 +721,43 @@ do_tree_del:
     pop     rbx
     ret
 
+# tree.group <tree> <node> [node ...]
+do_tree_group:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rsi, [rip+op_arg]
+    call    gn_arg_tree
+    test    eax, eax
+    js      8f
+    mov     ebx, eax
+    xor     r12d, r12d                  # the mask
+1:  call    gn_arg_num
+    test    eax, eax
+    jz      2f
+    cvttss2si eax, xmm0
+    cmp     eax, 1
+    jl      1b
+    cmp     eax, NT_MAXN
+    ja      1b
+    bts     r12, rax
+    jmp     1b
+2:  mov     edi, ebx
+    mov     rsi, r12
+    call    gn_make_group
+    test    eax, eax
+    jz      7f
+    mov     edi, eax
+    call    say_tnode
+    jmp     9f
+7:  lea     rdi, [rip+s_tree_groupneed]
+    call    log_line
+8:  call    undo_drop_last
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # tree.node_move <tree> <node> <x> <y>
 do_tree_move:
     push    rbx
@@ -861,6 +924,8 @@ gn_geo:
     je      .Lgg_merge
     cmp     eax, T_REALIZE
     je      .Lgg_pass
+    cmp     eax, T_GROUP
+    je      .Lgg_group
     xor     eax, eax
     jmp     .Lgg_done
 .Lgg_input:
@@ -1225,6 +1290,26 @@ gn_geo:
     pop     rax
     pop     rax
     jmp     .Lgg_done
+.Lgg_group:                             # another tree, one level in
+    mov     edi, r12d
+    xor     esi, esi
+    call    gn_input_geo
+    mov     r14, rax                    # (its geometry: the inner input)
+    cvttss2si edi, [r13+ND_P]
+    mov     esi, r12d
+    mov     rdx, r14
+    call    gn_group_eval
+    test    rax, rax
+    jnz     1f
+    mov     rax, r14                    # (no such tree, too deep: through)
+    jmp     .Lgg_done
+1:  push    rax
+    push    rax
+    mov     rdi, r14
+    call    mesh_unref
+    pop     rax
+    pop     rax
+    jmp     .Lgg_done
 .Lgg_fail:
     xor     eax, eax
     jmp     .Lgg_done
@@ -1255,6 +1340,448 @@ gn_geo:
     add     rsp, 104
     pop     rbp
     pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gn_meta_row(edi=type) -> rax = its gn_meta row or 0
+gn_meta_row:
+    xor     eax, eax
+    test    edi, edi
+    jle     9f
+    cmp     edi, GN_NTYPES
+    ja      9f
+    imul    eax, edi, 56
+    lea     rcx, [rip+gn_meta]
+    add     rax, rcx
+9:  ret
+
+# gn_make_group(edi=tree, rsi=selected nodes (bit n = node n)) -> eax = the
+#   group node made in the tree (0: nothing to group). The selected nodes go
+#   into a new tree between a Group Input and a Group Output; links into
+#   them from outside come through the Group Input (its geometry, value and
+#   vector: the first of each kind), the first geometry output used outside
+#   becomes the group's output.
+gn_make_group:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 72
+    mov     [rsp], edi                  # tree
+    mov     r12, rsi                    # mask
+    mov     edi, [rsp]
+    call    nt_get
+    test    rax, rax
+    jz      .Lmg_none
+    mov     ecx, [rax+GR_N]             # valid nodes, not group in / out
+    mov     [rsp+4], ecx
+    btr     r12, 0
+    xor     edx, edx
+1:  inc     edx
+    cmp     edx, ecx
+    ja      2f
+    bt      r12, rdx
+    jnc     1b
+    lea     r8d, [rdx-1]
+    imul    r8d, r8d, NODE_SZ
+    mov     r9d, [rax+GR_NODES+r8+ND_TYPE]
+    cmp     r9d, T_GIN
+    je      11f
+    cmp     r9d, T_GOUT
+    jne     1b
+11: btr     r12, rdx
+    jmp     1b
+2:  lea     ecx, [rcx+1]                # (bits above n)
+    cmp     ecx, 63
+    ja      21f
+    mov     rax, -1
+    shl     rax, cl
+    not     rax
+    and     r12, rax
+21: test    r12, r12
+    jz      .Lmg_none
+    lea     rdi, [rip+s_group_name]     # the inner tree
+    call    nt_new
+    test    eax, eax
+    js      .Lmg_none
+    mov     [rsp+8], eax
+    mov     edi, eax
+    mov     esi, T_GIN
+    call    gn_add
+    mov     edi, [rsp+8]
+    mov     esi, T_GOUT
+    call    gn_add
+    lea     rdi, [rip+mg_map]
+    xor     eax, eax
+    mov     ecx, NT_MAXN
+    rep     stosd
+    mov     dword ptr [rsp+12], 2       # inner node count
+    xor     r13d, r13d                  # the selected nodes copied in
+3:  inc     r13d
+    cmp     r13d, [rsp+4]
+    ja      4f
+    bt      r12, r13
+    jnc     3b
+    mov     edi, [rsp+8]
+    call    nt_own
+    mov     rbx, rax
+    mov     edi, [rsp]
+    call    nt_get
+    lea     ecx, [r13-1]
+    imul    ecx, ecx, NODE_SZ
+    lea     rsi, [rax+GR_NODES+rcx]
+    mov     ecx, [rbx+GR_N]
+    imul    ecx, ecx, NODE_SZ
+    lea     rdi, [rbx+GR_NODES+rcx]
+    mov     ecx, NODE_SZ
+    rep     movsb
+    inc     dword ptr [rbx+GR_N]
+    mov     eax, [rbx+GR_N]
+    lea     rcx, [rip+mg_map]
+    mov     [rcx+r13*4-4], eax
+    jmp     3b
+4:  mov     edi, [rsp+8]                # inner links: inside kept, outside
+    call    nt_own                      #  through the group input
+    mov     rbx, rax
+    mov     dword ptr [rsp+16], 0       # ext: geometry, value, vector links
+    mov     dword ptr [rsp+20], 0
+    mov     dword ptr [rsp+24], 0
+    mov     r13d, 3
+5:  cmp     r13d, [rbx+GR_N]
+    ja      6f
+    lea     eax, [r13-1]
+    imul    eax, eax, NODE_SZ
+    lea     r14, [rbx+GR_NODES+rax]
+    mov     edi, [r14+ND_TYPE]
+    call    gn_meta_row
+    mov     r15, rax
+    xor     ebp, ebp
+51: mov     eax, ebp
+    shl     eax, 4
+    mov     ecx, [r14+ND_IN+rax]
+    movzx   edx, cx
+    test    edx, edx
+    jz      58f
+    cmp     edx, [rsp+4]
+    ja      57f
+    bt      r12, rdx
+    jnc     52f
+    lea     r8, [rip+mg_map]            # inside: renumbered
+    mov     edx, [r8+rdx*4-4]
+    and     ecx, 0xffff0000
+    or      ecx, edx
+    mov     [r14+ND_IN+rax], ecx
+    jmp     58f
+52: xor     r8d, r8d                    # outside: by the input's kind
+    test    r15, r15
+    jz      53f
+    mov     r9, [r15+8]
+    movzx   r8d, byte ptr [r9+rbp]
+    cmp     r8d, 2
+    jbe     53f
+    xor     r8d, r8d
+53: cmp     dword ptr [rsp+16+r8*4], 0
+    jne     54f
+    mov     [rsp+16+r8*4], ecx
+54: mov     ecx, r8d                    # group input (node 1), output kind
+    shl     ecx, 16
+    or      ecx, 1
+    mov     [r14+ND_IN+rax], ecx
+    jmp     58f
+57: mov     dword ptr [r14+ND_IN+rax], 0
+58: inc     ebp
+    cmp     ebp, 3
+    jb      51b
+    inc     r13d
+    jmp     5b
+6:  mov     dword ptr [rsp+28], 0       # the output: a selected node's
+    mov     edi, [rsp]                  #  geometry used outside
+    call    nt_get
+    mov     rbx, rax
+    xor     r13d, r13d
+7:  inc     r13d
+    cmp     r13d, [rsp+4]
+    ja      8f
+    bt      r12, r13
+    jc      7b
+    lea     eax, [r13-1]
+    imul    eax, eax, NODE_SZ
+    lea     r14, [rbx+GR_NODES+rax]
+    xor     ebp, ebp
+71: mov     eax, ebp
+    shl     eax, 4
+    mov     ecx, [r14+ND_IN+rax]
+    movzx   edx, cx
+    test    edx, edx
+    jz      72f
+    cmp     edx, [rsp+4]
+    ja      72f
+    bt      r12, rdx
+    jnc     72f
+    lea     eax, [rdx-1]                # its output: geometry?
+    imul    eax, eax, NODE_SZ
+    mov     edi, [rbx+GR_NODES+rax+ND_TYPE]
+    push    rcx
+    push    rcx
+    call    gn_meta_row
+    pop     rcx
+    pop     rcx
+    test    rax, rax
+    jz      72f
+    mov     r8, [rax+48]
+    mov     edx, ecx
+    shr     edx, 16
+    and     edx, 0xff
+    cmp     byte ptr [r8+rdx], 0
+    jne     72f
+    mov     [rsp+28], ecx
+    jmp     8f
+72: inc     ebp
+    cmp     ebp, 3
+    jb      71b
+    jmp     7b
+8:  mov     ecx, [rsp+28]               # inner Group Output <- it
+    test    ecx, ecx
+    jz      81f
+    movzx   edx, cx
+    lea     r8, [rip+mg_map]
+    mov     edx, [r8+rdx*4-4]
+    and     ecx, 0xffff0000
+    or      ecx, edx
+    push    rcx
+    push    rcx
+    mov     edi, [rsp+16+8]
+    call    nt_own
+    pop     rcx
+    pop     rcx
+    mov     [rax+GR_NODES+NODE_SZ+ND_IN], ecx   # (node 2: the output)
+81: # the outer tree: the others kept, a group node after them
+    mov     edi, [rsp]
+    call    nt_own
+    mov     rbx, rax
+    lea     rdi, [rip+mg_map2]
+    xor     eax, eax
+    mov     ecx, NT_MAXN
+    rep     stosd
+    xor     r14d, r14d                  # kept so far
+    xor     r13d, r13d
+    xor     r15d, r15d                  # the selected nodes' place (sum)
+    xor     ebp, ebp
+9:  inc     r13d
+    cmp     r13d, [rsp+4]
+    ja      10f
+    lea     eax, [r13-1]
+    imul    eax, eax, NODE_SZ
+    lea     rsi, [rbx+GR_NODES+rax]
+    bt      r12, r13
+    jnc     91f
+    movsx   eax, word ptr [rsi+ND_POS]  # (selected: where they were)
+    add     r15d, eax
+    movsx   eax, word ptr [rsi+ND_POS+2]
+    add     ebp, eax
+    jmp     9b
+91: imul    eax, r14d, NODE_SZ
+    lea     rdi, [rip+mg_tmp]
+    add     rdi, rax
+    mov     ecx, NODE_SZ
+    rep     movsb
+    inc     r14d
+    lea     rcx, [rip+mg_map2]
+    mov     [rcx+r13*4-4], r14d
+    jmp     9b
+10: inc     r14d                        # the group node
+    mov     [rsp+32], r14d
+    lea     eax, [r14-1]
+    imul    eax, eax, NODE_SZ
+    lea     rdi, [rip+mg_tmp]
+    add     rdi, rax
+    push    rdi
+    push    rdi
+    xor     eax, eax
+    mov     ecx, NODE_SZ/4
+    rep     stosd
+    pop     rdi
+    pop     rdi
+    mov     dword ptr [rdi+ND_TYPE], T_GROUP
+    mov     eax, [rsp+8]
+    inc     eax
+    cvtsi2ss xmm0, eax
+    movss   [rdi+ND_P], xmm0
+    xor     ecx, ecx                    # its inputs: the outside links
+101:mov     eax, [rsp+16+rcx*4]
+    movzx   edx, ax
+    test    edx, edx
+    jz      102f
+    lea     r8, [rip+mg_map2]
+    mov     edx, [r8+rdx*4-4]
+    and     eax, 0xffff0000
+    or      eax, edx
+    test    edx, edx
+    jnz     103f
+102:xor     eax, eax
+103:mov     r8d, ecx
+    shl     r8d, 4
+    mov     [rdi+ND_IN+r8], eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      101b
+    popcnt  rcx, r12                    # its place: the selection's middle
+    mov     eax, r15d
+    cdq
+    idiv    ecx
+    mov     [rdi+ND_POS], ax
+    mov     eax, ebp
+    cdq
+    idiv    ecx
+    mov     [rdi+ND_POS+2], ax
+    xor     r13d, r13d                  # the kept nodes' links renumbered
+11: cmp     r13d, r14d
+    jae     12f
+    imul    eax, r13d, NODE_SZ
+    lea     rdi, [rip+mg_tmp]
+    lea     rdi, [rdi+rax+ND_IN]
+    lea     eax, [r13+1]
+    cmp     eax, [rsp+32]
+    je      114f
+    xor     ebp, ebp
+111:mov     ecx, [rdi]
+    movzx   edx, cx
+    test    edx, edx
+    jz      113f
+    cmp     edx, [rsp+4]
+    ja      112f
+    bt      r12, rdx
+    jc      115f
+    lea     r8, [rip+mg_map2]
+    mov     edx, [r8+rdx*4-4]
+    and     ecx, 0xffff0000
+    or      ecx, edx
+    mov     [rdi], ecx
+    jmp     113f
+115:cmp     ecx, [rsp+28]               # the group's output: the group node
+    jne     112f
+    mov     ecx, [rsp+32]
+    mov     [rdi], ecx
+    jmp     113f
+112:mov     dword ptr [rdi], 0
+113:add     rdi, 16
+    inc     ebp
+    cmp     ebp, 3
+    jb      111b
+114:inc     r13d
+    jmp     11b
+12: lea     rsi, [rip+mg_tmp]           # back into the tree
+    lea     rdi, [rbx+GR_NODES]
+    imul    ecx, r14d, NODE_SZ
+    rep     movsb
+    mov     ecx, [rsp+4]                # (the rest cleared)
+    sub     ecx, r14d
+    jle     13f
+    imul    ecx, ecx, NODE_SZ
+    xor     eax, eax
+    rep     stosb
+13: mov     [rbx+GR_N], r14d
+    mov     eax, [rsp+32]
+    jmp     .Lmg_out
+.Lmg_none:
+    xor     eax, eax
+.Lmg_out:
+    add     rsp, 72
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gn_group_eval(edi=tree number, esi=the group node, rdx=its input mesh or
+#   0) -> rax = the inner tree's result (a new reference) or 0
+gn_group_eval:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, esi
+    mov     r13, rdx
+    dec     edi
+    js      8f
+    mov     ecx, [rip+gn_level]
+    cmp     ecx, GN_LEVELS-1
+    jae     8f
+    call    nt_get
+    test    rax, rax
+    jz      8f
+    cmp     rax, [rip+gn_rec]           # (itself: never)
+    je      8f
+    mov     r14, rax
+    mov     ecx, [rip+gn_level]         # the outer state saved
+    imul    ecx, ecx, 8*NT_MAXN+16
+    lea     rbx, [rip+gn_save]
+    add     rbx, rcx
+    lea     rsi, [rip+gn_res]
+    mov     rdi, rbx
+    mov     ecx, NT_MAXN
+    rep     movsq
+    mov     rax, [rip+gn_rec]
+    mov     [rdi], rax
+    mov     rax, [rip+gn_inmesh]
+    mov     [rdi+8], rax
+    mov     ecx, [rip+gn_level]         # the context of the level entered
+    inc     ecx
+    lea     rax, [rip+gn_ctx_rec]
+    mov     rdx, [rip+gn_rec]
+    mov     [rax+rcx*8], rdx
+    lea     rax, [rip+gn_ctx_node]
+    mov     [rax+rcx*4], r12d
+    mov     [rip+gn_level], ecx
+    mov     [rip+gn_rec], r14
+    mov     [rip+gn_inmesh], r13
+    lea     rdi, [rip+gn_res]
+    xor     eax, eax
+    mov     ecx, NT_MAXN
+    rep     stosq
+    xor     r15d, r15d                  # its Group Output's geometry
+    xor     ecx, ecx
+1:  cmp     ecx, [r14+GR_N]
+    jae     3f
+    cmp     ecx, NT_MAXN
+    jae     3f
+    imul    eax, ecx, NODE_SZ
+    cmp     dword ptr [r14+GR_NODES+rax+ND_TYPE], T_GOUT
+    je      2f
+    inc     ecx
+    jmp     1b
+2:  lea     edi, [rcx+1]
+    xor     esi, esi
+    call    gn_input_geo
+    mov     r15, rax
+3:  xor     r12d, r12d                  # the inner meshes go
+4:  lea     rax, [rip+gn_res]
+    mov     rdi, [rax+r12*8]
+    call    mesh_unref
+    inc     r12d
+    cmp     r12d, NT_MAXN
+    jb      4b
+    lea     rsi, [rbx]                  # the outer state back
+    lea     rdi, [rip+gn_res]
+    mov     ecx, NT_MAXN
+    rep     movsq
+    mov     rax, [rsi]
+    mov     [rip+gn_rec], rax
+    mov     rax, [rsi+8]
+    mov     [rip+gn_inmesh], rax
+    dec     dword ptr [rip+gn_level]
+    mov     rax, r15
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r15
     pop     r14
     pop     r13
     pop     r12
@@ -1378,7 +1905,7 @@ gn_fields:
     mov     r15, r8
     lea     rdi, [rip+gc_regs]          # a fresh program
     xor     eax, eax
-    mov     ecx, NT_MAXN*9
+    mov     ecx, NT_MAXN*9*GN_LEVELS
     rep     stosb
     mov     dword ptr [rip+gc_n], 0
     mov     dword ptr [rip+gc_r], 0
@@ -1865,9 +2392,12 @@ gc_out_of:
     cmp     r13d, 2
     jbe     1f
     xor     r13d, r13d
-1:  lea     eax, [r12-1]                # compiled already?
+1:  lea     eax, [r12-1]                # compiled already? (this level's)
     imul    eax, eax, 9
     lea     ecx, [r13+r13*2]
+    add     eax, ecx
+    mov     ecx, [rip+gn_level]
+    imul    ecx, ecx, NT_MAXN*9
     add     eax, ecx
     lea     r14, [rip+gc_regs]
     add     r14, rax                    # its three slots
@@ -1913,6 +2443,8 @@ gc_out_of:
     je      .Lgo_noise
     cmp     eax, T_RANDOM
     je      .Lgo_random
+    cmp     eax, T_GIN
+    je      .Lgo_gin
     xorps   xmm0, xmm0                  # (not a field: 0)
     call    gc_const
     mov     [rip+gc_out], eax
@@ -2072,6 +2604,49 @@ gc_out_of:
     movss   xmm2, [r15+ND_P+4]
     xorps   xmm3, xmm3
     call    gc_ins
+    jmp     .Lgo_val
+.Lgo_gin:                               # a group's value / vector: the group
+    mov     ecx, [rip+gn_level]         #  node's input, in the outer tree
+    test    ecx, ecx
+    jz      .Lgo_zero
+    test    r13d, r13d
+    jz      .Lgo_zero
+    dec     ecx
+    lea     rax, [rip+gn_ctx_rec]
+    mov     rdi, [rax+rcx*8+8]
+    lea     rax, [rip+gn_ctx_node]
+    mov     edi, [rax+rcx*4+4]
+    mov     rax, [rip+gn_rec]
+    mov     [rsp+48], rax
+    lea     rax, [rip+gn_ctx_rec]
+    mov     rax, [rax+rcx*8+8]
+    mov     [rip+gn_rec], rax
+    dec     dword ptr [rip+gn_level]
+    mov     esi, r13d                   # (input 1: value, 2: vector)
+    lea     edx, [r13]
+    inc     dword ptr [rip+gc_depth]
+    call    gc_input
+    dec     dword ptr [rip+gc_depth]
+    inc     dword ptr [rip+gn_level]
+    mov     rax, [rsp+48]
+    mov     [rip+gn_rec], rax
+    mov     eax, [rip+gc_out]
+    mov     [rsp], eax
+    cmp     r13d, 1
+    je      .Lgo_val
+    mov     eax, [rip+gc_out+4]
+    mov     [rsp+4], eax
+    mov     eax, [rip+gc_out+8]
+    mov     [rsp+8], eax
+    jmp     .Lgo_vec
+.Lgo_zero:
+    xorps   xmm0, xmm0
+    call    gc_const
+    mov     [rsp], eax
+    mov     [rsp+4], eax
+    mov     [rsp+8], eax
+    cmp     r13d, 2
+    je      .Lgo_vec
 .Lgo_val:
     mov     eax, [rsp]
     mov     [rip+gc_out], eax
