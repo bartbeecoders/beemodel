@@ -523,6 +523,7 @@ def main():
     vertex_paint()
     baking()
     node_editor()
+    geometry_nodes()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3084,6 +3085,97 @@ def node_editor():
     i = info(0, 'count')
     check(g == ('4', '3', '800', '400') and h == '3' and i == '4',
           f'Shift+A adds a node at the pointer, X deletes it, Ctrl+Z brings it back ({g} {h} {i})')
+    f.proc.kill()
+
+
+def geometry_nodes():
+    """Geometry nodes: a node tree run by a modifier - primitives, transform,
+    join, set position by fields (noise, math, random, vector math on the
+    field VM), extrude, subdivide, boolean, merge; saved in .bee files; the
+    node editor shows and edits trees (Shift+A, links, Tab to the material)."""
+    print('  -- geometry nodes --')
+    home = tempfile.mkdtemp(prefix='bee-gn-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    measure = ('fn measure(t, kind) {\n add("cube", "M", 0, 0, 0)\n mm = modifier("M", "geometry")\n'
+               ' modset("M", mm, "tree", t)\n modapply("M", 0)\n r = verts("M")\n'
+               ' if kind == 1 { r = area("M") }\n if kind == 2 { r = volume("M") }\n delete("M")\n return r\n}\n')
+    r = subprocess.run([BIN, '--eval', measure +
+        't = gtree("T")\no = gnode(t, "output")\ng = gnode(t, "grid", 4, 40)\nsp = gnode(t, "set_position")\n'
+        'glink(t, g, sp, 1)\nglink(t, sp, o, 1)\nprint(measure(t, 0), measure(t, 1))\n'
+        'n = gnode(t, "noise", 1.5, 2, 0.5)\nc = gnode(t, "combine_xyz")\nglink(t, n, c, 2)\nglink(t, c, sp, 3)\n'
+        'print(measure(t, 1))\np = gnode(t, "position")\nsx = gnode(t, "separate_xyz")\nglink(t, p, sx, 1)\n'
+        'mt = gnode(t, "math", 8)\nglink(t, sx, mt, 1, 0)\nglink(t, mt, sp, 2)\nprint(measure(t, 1))\n'
+        'u = gtree("U")\nuo = gnode(u, "output")\ncu = gnode(u, "cube", 2)\nsp2 = gnode(u, "sphere", 1.5)\n'
+        'b = gnode(u, "boolean", 1)\nglink(u, cu, b, 1)\nglink(u, sp2, b, 2)\nglink(u, b, uo, 1)\nprint(measure(u, 2))\n'
+        'j = gnode(u, "join")\nglink(u, cu, j, 1)\nglink(u, cu, j, 2)\nmg = gnode(u, "merge", 0.001)\n'
+        'glink(u, j, mg, 1)\nglink(u, j, uo, 1)\na = measure(u, 0)\nglink(u, mg, uo, 1)\nprint(a, measure(u, 0))\n'
+        'x = gnode(u, "transform", 0, 0, 90)\ngset(u, x, 3, 2, 1, 1)\nglink(u, cu, x, 1)\nglink(u, x, uo, 1)\n'
+        'print(measure(u, 2))\ne = gnode(u, "extrude", 0.5)\nglink(u, cu, e, 1)\nglink(u, e, uo, 1)\nprint(measure(u, 0))\n'
+        'sd = gnode(u, "subdivide", 2)\nglink(u, cu, sd, 1)\nglink(u, sd, uo, 1)\nprint(measure(u, 0))\n'
+        'v = gtree("V")\nvo = gnode(v, "output")\nvs = gnode(v, "sphere", 1)\nvp = gnode(v, "set_position")\n'
+        'rn = gnode(v, "random", 0, 0.2, 3)\nnm = gnode(v, "normal")\nvm = gnode(v, "vector_math", 3)\n'
+        'glink(v, nm, vm, 1)\nglink(v, rn, vm, 3)\nglink(v, vs, vp, 1)\nglink(v, vm, vp, 3)\nglink(v, vp, vo, 1)\n'
+        'print(measure(v, 2))\nmm = modifier("Cube", "geometry")\nmodset("Cube", mm, "tree", t)\n'
+        'op("file.save", "~/BeeModel/gn.bee")\nglink(v, vp, vs, 1)\n'],
+        env=env, capture_output=True, text=True, timeout=120)
+    out = r.stdout.split()
+    try:
+        v = [float(x) for x in out[:11]]
+    except Exception:
+        v = []
+    ok = len(v) == 11
+    check(ok and v[0] == 1681 and abs(v[1] - 16) < 0.01 and v[2] > 17 and 16 < v[3] < v[2],
+          f'a grid; noise through set position; a selection field limits it ({out[:4]})')
+    check(ok and 0.05 < v[4] < 0.2 and v[5] == 16 and v[6] == 8 and abs(v[7] - 16) < 0.01 and v[8] > 8 and v[9] == 98,
+          f'boolean, join and merge by distance, transform, extrude and subdivide ({out[4:10]})')
+    check(ok and 4.3 < v[10] < 5.5 and 'no such node tree, node or input' in r.stdout + r.stderr,
+          f'random lengths along the normals (volume {out[10:11]}); a loop is refused')
+    r = subprocess.run([BIN, '--eval', 'op("file.open", "~/BeeModel/gn.bee")\nprint(everts("Cube"), ginfo(1, 0, "count"), ginfo(2, 0, "count"))'],
+                       env=env, capture_output=True, text=True, timeout=60)
+    check(r.stdout.split()[:3] == ['1681', '8', '9'], f'the trees and the modifier come back from the .bee file ({r.stdout.split()[:3]})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('t = gtree("Terrain")\no = gnode(t, "output")\ng = gnode(t, "grid", 6, 30)\nsp = gnode(t, "set_position")\n'
+      'glink(t, g, sp, 1)\nn = gnode(t, "noise", 0.6, 3, 0.5)\nc = gnode(t, "combine_xyz")\nglink(t, n, c, 2)\n'
+      'glink(t, c, sp, 3)\nglink(t, sp, o, 1)\nmm = modifier("Cube", "geometry")\nmodset("Cube", mm, "tree", t)\nselect("Cube")')
+    f.pump(0.3)
+    f.shot('87_geometry_nodes_viewport.png')
+    f.move(600, 700)
+    f.pump(0.2)
+    q('op("area.type_node_editor")\nop("area.maximize")')
+    f.pump(0.5)
+    img = f.image()
+    geo = sum(1 for x in range(0, 900, 4) if img.getpixel((x, 125)) == (0x1d, 0x72, 0x5e))
+    f.shot('88_geometry_node_editor.png')
+    check(geo > 30, f'the node editor shows the object\'s tree ({geo})')
+    gi = lambda *a: q('print(ginfo(1, %s))' % ', '.join('"%s"' % x if isinstance(x, str) else str(x) for x in a))
+    f.move(820, 200)
+    f.mods(1); f.key(30); f.mods(0)             # Shift+A
+    f.pump(0.2)
+    f.click(850, 200 + 2 + 4 * 18 + 9)          # the 4th type: Cube
+    f.pump(0.2)
+    a = (gi(0, 'count'), gi(6, 'type'))
+    f.drag(990, 229, 420, 168, steps=10)        # its Mesh output -> Set Position's Geometry
+    f.pump(0.2)
+    b = gi(3, 'link', 1)
+    ev = q('print(everts("Cube"))')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    f.pump(0.3)
+    c = gi(3, 'link', 1)
+    check(a == ('6', '4') and b == '6' and ev == '8' and c == '2',
+          f'Shift+A adds a geometry node, a drag links it (the cube is displaced instead), Ctrl+Z undoes ({a} {b} {ev} {c})')
+    f.key(15)                                   # Tab: the material's graph
+    f.pump(0.3)
+    img = f.image()
+    geo2 = sum(1 for x in range(0, 900, 4) if img.getpixel((x, 125)) == (0x1d, 0x72, 0x5e))
+    f.key(15)
+    f.pump(0.3)
+    check(geo2 == 0, f'Tab shows the material instead ({geo2})')
     f.proc.kill()
 
 

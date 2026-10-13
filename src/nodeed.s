@@ -58,6 +58,8 @@
 .equ COL_NE_SOCK_C, 0xe3c84a            # colour sockets
 .equ COL_NE_SOCK_V, 0xa1a1a1            # values
 .equ COL_NE_SOCK_N, 0x6363c7            # vectors / normals
+.equ COL_NE_SOCK_G, 0x00d6a3            # geometry
+.equ COL_NE_GEO,    0x1d725e            # geometry nodes' headers
 
 .section .rodata
 .align 4
@@ -74,13 +76,20 @@ s_ne_out:       .asciz "Material Output"
 s_ne_color:     .asciz "Color"
 s_ne_value:     .asciz "Value"
 s_ne_normal:    .asciz "Normal"
-.align 8
-ne_out_label:   .quad 0, s_ne_color, s_ne_color, s_ne_color, s_ne_color, s_ne_color, s_ne_color, s_ne_value, s_ne_normal, s_ne_normal
-ne_out_col:     .long 0, COL_NE_SOCK_C, COL_NE_SOCK_C, COL_NE_SOCK_C, COL_NE_SOCK_C, COL_NE_SOCK_C, COL_NE_SOCK_C, COL_NE_SOCK_V, COL_NE_SOCK_N, COL_NE_SOCK_N
+.align 4
+ne_kind_col:    .long COL_NE_SOCK_G, COL_NE_SOCK_V, COL_NE_SOCK_N, COL_NE_SOCK_C
 s_ne_noimg:     .asciz "(none)"
+s_ne_implicit:  .asciz "position"
 s_ne_add:       .asciz "Add node"
-s_ne_full:      .asciz "  node editor: a graph holds 12 nodes"
+s_ne_full:      .asciz "  node editor: the graph is full (12 shader nodes, 48 in a tree)"
 s_op_link:      .asciz "material.link"
+s_tp_link:      .asciz "tree.link"
+s_tp_node:      .asciz "tree.node"
+s_tp_delete:    .asciz "tree.node_delete"
+s_tp_set:       .asciz "tree.node_set"
+s_ne_ghead:     .asciz "Geometry: "
+s_ne_gkeys:     .asciz "     Shift+A add  X delete  Home fit  Tab material"
+s_ne_tabgeo:    .asciz "  Tab geometry"
 s_op_socket:    .asciz "material.socket"
 s_op_node:      .asciz "material.node"
 s_op_delete:    .asciz "material.node_delete"
@@ -106,19 +115,26 @@ o_metal:        .asciz "Metallic"
 o_rough:        .asciz "Roughness"
 o_emit:         .asciz "Emission"
 o_normal:       .asciz "Normal"
-# per type: input names (3), input kinds (0 colour, 1 value, 2 vector), value
-#   names (4), value kinds (0 number, 1 choice, 2 image, 3 whole number),
-#   the choices
-ne_meta:        .quad 0, 0, 0, 0, 0
-                .quad in_image, ik_vec1, pn_image, pk_image, 0
-                .quad in_noise, ik_vec1, pn_noise, pk_noise, 0
-                .quad in_checker, ik_col2, pn_scale, pk_num1, 0
-                .quad in_none, ik_vec1, pn_grad, pk_grad, ch_axis
-                .quad in_mix, ik_mix, pn_mode, pk_choice, ch_mix
-                .quad in_ramp, ik_mix, pn_ramp, pk_num2, 0
-                .quad in_math, ik_val2, pn_op, pk_choice, ch_math
-                .quad in_bump, ik_val2, pn_bump, pk_num2, 0
-                .quad in_nmap, ik_col2, pn_strength, pk_num1, 0
+# per type (as geonodes.s's gn_meta): input names (3), input kinds (0
+#   geometry, 1 value, 2 vector, 3 colour), value names (4), value kinds (0
+#   number, 1 choice, 2 image, 3 whole number), the choices, output names
+#   (3), output kinds
+ne_meta:        .quad 0, 0, 0, 0, 0, 0, 0
+                .quad in_image, ik_vec1, pn_image, pk_image, 0, so_color, sk_col
+                .quad in_noise, ik_vec1, pn_noise, pk_noise, 0, so_color, sk_col
+                .quad in_checker, ik_col2, pn_scale, pk_num1, 0, so_color, sk_col
+                .quad in_none, ik_vec1, pn_grad, pk_grad, ch_axis, so_color, sk_col
+                .quad in_mix, ik_mix, pn_mode, pk_choice, ch_mix, so_color, sk_col
+                .quad in_ramp, ik_mix, pn_ramp, pk_num2, 0, so_color, sk_col
+                .quad in_math, ik_val2, pn_op, pk_choice, ch_math, so_value, sk_val
+                .quad in_bump, ik_val2, pn_bump, pk_num2, 0, so_normal, sk_vec
+                .quad in_nmap, ik_col2, pn_strength, pk_num1, 0, so_normal, sk_vec
+so_color:       .quad s_ne_color, 0, 0
+so_value:       .quad s_ne_value, 0, 0
+so_normal:      .quad s_ne_normal, 0, 0
+sk_col:         .byte 3, 0, 0, 0
+sk_val:         .byte 1, 0, 0, 0
+sk_vec:         .byte 2, 0, 0, 0
 in_none:        .quad 0, 0, 0
 in_image:       .quad i_vector, 0, 0
 in_noise:       .quad i_offset, 0, 0
@@ -129,8 +145,8 @@ in_math:        .quad i_value1, i_value2, 0
 in_bump:        .quad i_height, 0, 0
 in_nmap:        .quad i_color, 0, 0
 ik_vec1:        .byte 2, 2, 2
-ik_col2:        .byte 0, 0, 0
-ik_mix:         .byte 1, 0, 0
+ik_col2:        .byte 3, 3, 3
+ik_mix:         .byte 1, 3, 3
 ik_val2:        .byte 1, 1, 1
 pn_image:       .quad p_image, p_size, 0, 0
 pn_noise:       .quad p_scale, p_detail, p_rough, 0
@@ -196,13 +212,16 @@ ne_panx:        .skip 4                 # the view: where graph (0, 0) is
 ne_pany:        .skip 4                 #  (from the body's top left)
 ne_mat:         .skip 4                 # the material shown (-1: none)
 ne_n:           .skip 4                 # its nodes when drawn
-ne_lx:          .skip 4*13              # their boxes on screen (0: the output)
-ne_ly:          .skip 4*13
-ne_lh:          .skip 4*13
-ne_gx:          .skip 4*13              # and in the graph (laid out)
-ne_gy:          .skip 4*13
-ne_depth:       .skip 4*13
+ne_lx:          .skip 4*49              # their boxes on screen (0: the output)
+ne_ly:          .skip 4*49
+ne_lh:          .skip 4*49
+ne_gx:          .skip 4*49              # and in the graph (laid out)
+ne_gy:          .skip 4*49
+ne_depth:       .skip 4*49
 ne_coly:        .skip 4*16
+ne_kind:        .skip 4                 # 0 a material's graph, 1 a node tree
+ne_pref:        .skip 4                 # 1: the material even with a tree
+ne_maxn:        .skip 4
 ne_sel:         .skip 4                 # the selected node (0: none)
 ne_drag:        .skip 4                 # 0 none, 1 move, 2 wire from an output,
                                         #  3 wire from an input, 4 from a
@@ -228,28 +247,51 @@ ne_argbuf:      .skip 160
 OPERATOR op_ne_add,    "node.add_menu", "Add Node...", do_ne_add_menu, key=KEY_A|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the menu of node types at the pointer"
 OPERATOR op_ne_del,    "node.delete", "Delete Node", do_ne_delete, key=KEY_X, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: remove the selected node"
 OPERATOR op_ne_del2,   "node.delete_key", "Delete Node", do_ne_delete, key=KEY_DELETE, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, doc="Node editor: remove the selected node"
+OPERATOR op_ne_tab,    "node.toggle_tree", "Material / Geometry Nodes", do_ne_tab, key=KEY_TAB, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the active object's material graph or its geometry node tree"
 OPERATOR op_ne_fit,    "node.view_fit", "Fit Node View", do_ne_fit, key=KEY_HOME, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: every node in view"
 
-# ne_target -> eax = the material of the active object (-1: none)
-ne_target:
-    sub     rsp, 8
+# ne_rec -> rax = the record shown (0: none): the active object's geometry
+#   node tree (its first Geometry Nodes modifier's) unless the material is
+#   asked for (Tab), else its material's graph; ne_kind, ne_mat (the tree or
+#   material index), ne_maxn set
+ne_rec:
+    push    rbx
+    mov     dword ptr [rip+ne_mat], -1
+    mov     dword ptr [rip+ne_kind], 0
+    mov     dword ptr [rip+ne_maxn], 12
     mov     edi, [rip+active_obj]
     test    edi, edi
     jz      8f
     call    obj_get
     test    rax, rax
     jz      8f
-    mov     rdi, rax
-    call    mat_of
+    mov     rbx, rax
+    cmp     dword ptr [rip+ne_pref], 0
+    jne     3f
+    mov     rdx, [rbx+OB_MODS]          # a Geometry Nodes modifier with a tree
+    test    rdx, rdx
+    jz      3f
+    xor     ecx, ecx
+1:  cmp     ecx, [rdx+4]
+    jae     3f
+    imul    eax, ecx, 48
+    cmp     dword ptr [rdx+16+rax], 10
+    jne     2f
+    cvttss2si eax, [rdx+16+rax+8]
+    dec     eax
+    js      2f
+    mov     [rip+ne_mat], eax
+    mov     edi, eax
+    call    nt_get
+    test    rax, rax
+    jz      2f
+    mov     dword ptr [rip+ne_kind], 1
+    mov     dword ptr [rip+ne_maxn], 48
     jmp     9f
-8:  mov     eax, -1
-9:  add     rsp, 8
-    ret
-
-# ne_rec -> rax = the record shown (0: none; ne_mat set)
-ne_rec:
-    sub     rsp, 8
-    call    ne_target
+2:  inc     ecx
+    jmp     1b
+3:  mov     rdi, rbx                    # the material
+    call    mat_of
     mov     [rip+ne_mat], eax
     test    eax, eax
     js      8f
@@ -257,20 +299,68 @@ ne_rec:
     call    mat_get
     jmp     9f
 8:  xor     eax, eax
-9:  add     rsp, 8
+9:  pop     rbx
     ret
 
-# ne_meta_of(edi=type) -> rax = its meta row (5 pointers) or 0
+# ne_ntypes -> eax = the node types of the kind shown
+ne_ntypes:
+    mov     eax, NTYPES
+    cmp     dword ptr [rip+ne_kind], 0
+    je      1f
+    mov     eax, [rip+gn_ntypes]
+1:  ret
+
+# ne_title(edi=type) -> rax = its name
+ne_title:
+    lea     rax, [rip+ne_titles]
+    cmp     dword ptr [rip+ne_kind], 0
+    je      1f
+    lea     rax, [rip+gn_titles]
+1:  mov     rax, [rax+rdi*8]
+    ret
+
+# ne_meta_of(edi=type) -> rax = its meta row (7 pointers) or 0
 ne_meta_of:
+    push    rdi
+    call    ne_ntypes
+    pop     rdi
+    mov     ecx, eax
     xor     eax, eax
     test    edi, edi
     jle     9f
-    cmp     edi, NTYPES
+    cmp     edi, ecx
     ja      9f
-    imul    eax, edi, 40
+    imul    eax, edi, 56
     lea     rcx, [rip+ne_meta]
-    add     rax, rcx
+    cmp     dword ptr [rip+ne_kind], 0
+    je      1f
+    lea     rcx, [rip+gn_meta]
+1:  add     rax, rcx
 9:  ret
+
+# ne_nouts(edi=type) -> eax = its outputs
+ne_nouts:
+    call    ne_meta_of
+    test    rax, rax
+    jz      8f
+    mov     rcx, [rax+40]
+    xor     eax, eax
+1:  cmp     eax, 3
+    jae     9f
+    cmp     qword ptr [rcx+rax*8], 0
+    je      9f
+    inc     eax
+    jmp     1b
+8:  xor     eax, eax
+9:  ret
+
+# ne_link_node(eax = a link) -> eax = its node (ecx = the output it takes)
+ne_link_node:
+    mov     ecx, eax
+    shr     ecx, 16
+    and     ecx, 0xff
+    movzx   eax, ax
+    ret
 
 # ne_counts(edi=type) -> eax = inputs, edx = values
 ne_counts:
@@ -302,6 +392,25 @@ ne_counts:
     xor     edx, edx
     ret
 
+# ne_height(edi=type) -> eax = a node's box height
+ne_height:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    call    ne_nouts
+    mov     r12d, eax
+    mov     edi, ebx
+    call    ne_counts
+    add     eax, edx
+    add     eax, r12d
+    imul    eax, eax, NROW
+    add     eax, NHDR+6
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
 # ne_layout(rdi=record) - every node's box (graph and screen), ne_n
 ne_layout:
     push    rbx
@@ -309,48 +418,71 @@ ne_layout:
     push    r13
     push    r14
     push    r15
+    push    rbp
+    sub     rsp, 8
     mov     rbx, rdi
     mov     r12d, [rbx+GR_N]
-    cmp     r12d, 12
+    cmp     r12d, [rip+ne_maxn]
     jbe     1f
-    mov     r12d, 12
+    mov     r12d, [rip+ne_maxn]
 1:  mov     [rip+ne_n], r12d
     lea     rdi, [rip+ne_coly]          # columns' next free y
     mov     ecx, 16
     mov     eax, 20
     rep     stosd
-    xor     r13d, r13d                  # each node: depth, height, place
-    xor     r15d, r15d                  # (the deepest)
+    lea     rdi, [rip+ne_depth]
+    mov     ecx, 49
+    xor     eax, eax
+    rep     stosd
+    mov     ebp, 4                      # depths: 1 + the deepest input (a
+.Lnl_pass:                              #  few passes: links go any way)
+    xor     r13d, r13d
 2:  cmp     r13d, r12d
-    jae     6f
+    jae     .Lnl_passed
     imul    r14d, r13d, NODE_SZ
     lea     r14, [rbx+GR_NODES+r14]
-    xor     edx, edx                    # depth: 1 + its inputs' deepest
+    xor     edx, edx
     xor     ecx, ecx
 3:  imul    eax, ecx, 16
-    mov     eax, [r14+ND_IN+rax]
+    movzx   eax, word ptr [r14+ND_IN+rax]
     test    eax, eax
     jz      31f
-    cmp     eax, r13d                   # (an earlier node)
+    cmp     eax, r12d
     ja      31f
     lea     r8, [rip+ne_depth]
-    mov     eax, [r8+rax*4]             # (index = node, 1-based)
+    mov     eax, [r8+rax*4]
     inc     eax
     cmp     eax, edx
     cmovg   edx, eax
 31: inc     ecx
     cmp     ecx, 3
     jb      3b
-    lea     r8, [rip+ne_depth]
+    cmp     edx, 15
+    jbe     32f
+    mov     edx, 15
+32: lea     r8, [rip+ne_depth]
     mov     [r8+r13*4+4], edx
+    inc     r13d
+    jmp     2b
+.Lnl_passed:
+    dec     ebp
+    jnz     .Lnl_pass
+    xor     r15d, r15d                  # (the deepest)
+    xor     r13d, r13d                  # boxes
+4:  cmp     r13d, r12d
+    jae     6f
+    imul    r14d, r13d, NODE_SZ
+    lea     r14, [rbx+GR_NODES+r14]
+    lea     r8, [rip+ne_depth]
+    mov     edx, [r8+r13*4+4]
     cmp     edx, r15d
     cmova   r15d, edx
-    mov     edi, [r14+ND_TYPE]          # height
-    call    ne_counts
-    add     eax, edx
-    inc     eax
-    imul    eax, eax, NROW
-    add     eax, NHDR+6
+    mov     edi, [r14+ND_TYPE]
+    push    rdx
+    push    rdx
+    call    ne_height
+    pop     rdx
+    pop     rdx
     lea     r8, [rip+ne_lh]
     mov     [r8+r13*4+4], eax
     movsx   ecx, word ptr [r14+ND_POS]
@@ -358,12 +490,7 @@ ne_layout:
     mov     edi, ecx
     or      edi, esi
     jnz     5f
-    lea     r8, [rip+ne_depth]          # not placed: its column
-    mov     edx, [r8+r13*4+4]
-    cmp     edx, 15
-    jbe     4f
-    mov     edx, 15
-4:  imul    ecx, edx, COLW
+    imul    ecx, edx, COLW              # not placed: its depth's column
     add     ecx, 20
     lea     r8, [rip+ne_coly]
     mov     esi, [r8+rdx*4]
@@ -374,23 +501,29 @@ ne_layout:
     lea     r8, [rip+ne_gy]
     mov     [r8+r13*4+4], esi
     inc     r13d
-    jmp     2b
-6:  mov     dword ptr [rip+ne_lh], NHDR+5*NROW+6   # the output
-    movsx   ecx, word ptr [rbx+GR_OUTPOS]
+    jmp     4b
+6:  mov     dword ptr [rip+ne_lh], NHDR+5*NROW+6   # the material output
+    cmp     dword ptr [rip+ne_kind], 0
+    je      61f
+    mov     dword ptr [rip+ne_lh], 0    # (trees: none)
+    mov     dword ptr [rip+ne_gx], -30000
+    mov     dword ptr [rip+ne_gy], -30000
+    jmp     7f
+61: movsx   ecx, word ptr [rbx+GR_OUTPOS]
     movsx   esi, word ptr [rbx+GR_OUTPOS+2]
     mov     eax, ecx
     or      eax, esi
-    jnz     7f
+    jnz     62f
     lea     eax, [r15+1]
     test    r12d, r12d
-    jnz     61f
+    jnz     63f
     xor     eax, eax
-61: imul    ecx, eax, COLW
+63: imul    ecx, eax, COLW
     add     ecx, 20
     mov     esi, 20
-7:  mov     [rip+ne_gx], ecx
+62: mov     [rip+ne_gx], ecx
     mov     [rip+ne_gy], esi
-    xor     ecx, ecx                    # on screen
+7:  xor     ecx, ecx                    # on screen
 8:  cmp     ecx, r12d
     ja      9f
     lea     r8, [rip+ne_gx]
@@ -407,14 +540,16 @@ ne_layout:
     mov     [r8+rcx*4], eax
     inc     ecx
     jmp     8b
-9:  pop     r15
+9:  add     rsp, 8
+    pop     rbp
+    pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
     ret
 
-# ne_out_xy(edi=node) -> eax, edx = its output socket on screen
+# ne_out_xy(edi=node, esi=output k) -> eax, edx = that output socket
 ne_out_xy:
     lea     r8, [rip+ne_lx]
     mov     eax, [r8+rdi*4]
@@ -422,6 +557,8 @@ ne_out_xy:
     lea     r8, [rip+ne_ly]
     mov     edx, [r8+rdi*4]
     add     edx, NHDR+NROW/2
+    imul    esi, esi, NROW
+    add     edx, esi
     ret
 
 # ne_in_xy(rbx=record, edi=node (0: the output), esi=input k / socket) ->
@@ -437,12 +574,19 @@ ne_in_xy:
     push    rax
     push    rdx
     push    rsi
+    push    rbx
     lea     eax, [rdi-1]
     imul    eax, eax, NODE_SZ
-    mov     edi, [rbx+GR_NODES+rax+ND_TYPE]
+    mov     ebx, [rbx+GR_NODES+rax+ND_TYPE]
+    mov     edi, ebx
+    call    ne_nouts
+    push    rax
+    mov     edi, ebx
     call    ne_counts
+    pop     rcx
+    add     ecx, edx                    # after the outputs and the values
+    pop     rbx
     pop     rsi
-    lea     ecx, [rdx+1]                # after the output and the values
     add     esi, ecx
     pop     rdx
     pop     rax
@@ -651,7 +795,13 @@ ne_value_text:
     je      2f
     cmp     ecx, 3
     jne     3f
-    roundss xmm0, xmm0, 0
+    cvtss2si edi, xmm0                  # a whole number
+    push    rdi
+    call    fmt_reset
+    pop     rdi
+    call    fmt_int
+    lea     rax, [rip+fmt_buf]
+    jmp     9f
 3:  call    ne_fmt_num
     lea     rax, [rip+fmt_buf]
     jmp     9f
@@ -740,13 +890,16 @@ ed_nodes_draw:
     mov     rbx, rax
     mov     rdi, rbx
     call    ne_layout
-    # header line: the material, the keys
+    # header line: the material or tree, the keys
     mov     edi, [rip+ed_x]
     add     edi, 8
     mov     esi, [rip+ed_y]
     add     esi, 3
     lea     rdx, [rip+s_ne_head]
-    mov     ecx, COL_TEXT_DIM
+    cmp     dword ptr [rip+ne_kind], 0
+    je      31f
+    lea     rdx, [rip+s_ne_ghead]
+31: mov     ecx, COL_TEXT_DIM
     call    draw_text
     mov     edi, eax
     mov     esi, [rip+ed_y]
@@ -758,8 +911,22 @@ ed_nodes_draw:
     mov     esi, [rip+ed_y]
     add     esi, 3
     lea     rdx, [rip+s_ne_keys]
+    cmp     dword ptr [rip+ne_kind], 0
+    je      32f
+    lea     rdx, [rip+s_ne_gkeys]
+32: mov     ecx, COL_TEXT_DIM
+    call    draw_text
+    cmp     dword ptr [rip+ne_kind], 0  # (a material with a tree too: Tab)
+    jne     33f
+    cmp     dword ptr [rip+ne_pref], 0
+    je      33f
+    mov     edi, eax
+    mov     esi, [rip+ed_y]
+    add     esi, 3
+    lea     rdx, [rip+s_ne_tabgeo]
     mov     ecx, COL_TEXT_DIM
     call    draw_text
+33:
     # wires: node inputs, then the material sockets
     mov     r12d, 1
 4:  cmp     r12d, [rip+ne_n]
@@ -774,12 +941,15 @@ ed_nodes_draw:
 41: cmp     r14d, [rsp+32]
     jae     44f
     imul    eax, r14d, 16
-    mov     r15d, [r13+ND_IN+rax]
+    mov     eax, [r13+ND_IN+rax]
+    call    ne_link_node
+    mov     r15d, eax
     test    r15d, r15d
     jz      43f
     cmp     r15d, [rip+ne_n]
     ja      43f
     mov     edi, r15d
+    mov     esi, ecx
     call    ne_out_xy
     mov     [rsp], eax
     mov     [rsp+4], edx
@@ -797,6 +967,8 @@ ed_nodes_draw:
 44: inc     r12d
     jmp     4b
 45: xor     r14d, r14d
+    cmp     dword ptr [rip+ne_kind], 0  # (trees: no material sockets)
+    jne     5f
 46: cmp     r14d, 5
     jae     5f
     mov     r15d, [rbx+GR_SOCK+r14*4]
@@ -805,6 +977,7 @@ ed_nodes_draw:
     cmp     r15d, [rip+ne_n]
     ja      47f
     mov     edi, r15d
+    xor     esi, esi
     call    ne_out_xy
     mov     [rsp], eax
     mov     [rsp+4], edx
@@ -827,12 +1000,16 @@ ed_nodes_draw:
     call    ne_draw_node
     inc     r12d
     jmp     51b
-59: call    ne_draw_output
+59: cmp     dword ptr [rip+ne_kind], 0
+    jne     591f
+    call    ne_draw_output
+591:
     # a wire being dragged
     mov     eax, [rip+ne_drag]
     cmp     eax, 2
     jne     61f
     mov     edi, [rip+ne_dn]
+    mov     esi, [rip+ne_dk]
     call    ne_out_xy
     mov     edi, eax
     mov     esi, edx
@@ -958,20 +1135,36 @@ ne_draw_node:
     jz      .Ldn_out
     mov     r14, rax
     mov     edi, [r13+ND_TYPE]
+    call    ne_nouts
+    mov     [rsp+20], eax               # outputs
+    mov     edi, [r13+ND_TYPE]
     call    ne_counts
     mov     [rsp], eax                  # inputs
     mov     [rsp+4], edx                # values
     mov     ecx, [r13+ND_TYPE]          # header colour by kind
-    mov     esi, COL_NE_TEX
+    cmp     dword ptr [rip+ne_kind], 0
+    je      11f
+    mov     esi, COL_NE_OUT             # (trees: group in / out, geometry,
+    cmp     ecx, 2                      #  fields)
+    jbe     1f
+    mov     esi, COL_NE_GEO
+    cmp     ecx, 15
+    jbe     1f
+    mov     esi, COL_NE_CONV
+    jmp     1f
+11: mov     esi, COL_NE_TEX
     cmp     ecx, 5
     jb      1f
     mov     esi, COL_NE_CONV
     cmp     ecx, 8
     jb      1f
     mov     esi, COL_NE_VEC
-1:  lea     rax, [rip+ne_titles]
-    mov     rdx, [rax+rcx*8]
+1:  mov     [rsp+24], esi
+    mov     edi, ecx
+    call    ne_title
+    mov     rdx, rax
     mov     edi, r12d
+    mov     esi, [rsp+24]
     call    ne_box
     lea     r8, [rip+ne_lx]
     mov     eax, [r8+r12*4]
@@ -980,29 +1173,37 @@ ne_draw_node:
     mov     eax, [r8+r12*4]
     add     eax, NHDR
     mov     [rsp+12], eax               # row 0's top
-    # row 0: the output
+    # the outputs
+    xor     r15d, r15d
+5:  cmp     r15d, [rsp+20]
+    jae     6f
+    imul    edx, r15d, NROW
+    add     edx, [rsp+12]
+    add     edx, 2
     mov     esi, [rsp+8]
     add     esi, NW-10
-    mov     edx, [rsp+12]
-    add     edx, 2
-    mov     ecx, [r13+ND_TYPE]
-    lea     rax, [rip+ne_out_label]
-    mov     rdi, [rax+rcx*8]
+    mov     rax, [r14+40]
+    mov     rdi, [rax+r15*8]
     mov     ecx, COL_TEXT
     call    ne_right_text
     mov     edi, r12d
+    mov     esi, r15d
     call    ne_out_xy
     mov     edi, eax
     mov     esi, edx
-    mov     ecx, [r13+ND_TYPE]
-    lea     rax, [rip+ne_out_col]
+    mov     rax, [r14+48]
+    movzx   ecx, byte ptr [rax+r15]
+    lea     rax, [rip+ne_kind_col]
     mov     edx, [rax+rcx*4]
     call    ne_sock
+    inc     r15d
+    jmp     5b
     # the values
-    xor     r15d, r15d
+6:  xor     r15d, r15d
 2:  cmp     r15d, [rsp+4]
     jae     3f
-    lea     eax, [r15+1]
+    mov     eax, [rsp+20]
+    add     eax, r15d
     imul    eax, eax, NROW
     add     eax, [rsp+12]
     mov     [rsp+16], eax
@@ -1039,20 +1240,16 @@ ne_draw_node:
 4:  cmp     r15d, [rsp]
     jae     .Ldn_out
     mov     eax, [rsp+4]
-    lea     eax, [rax+r15+1]
+    add     eax, [rsp+20]
+    add     eax, r15d
     imul    eax, eax, NROW
     add     eax, [rsp+12]
     mov     [rsp+16], eax
     mov     rax, [r14+8]                # socket colour by kind
     movzx   ebp, byte ptr [rax+r15]
-    mov     edx, COL_NE_SOCK_C
-    cmp     ebp, 1
-    jne     41f
-    mov     edx, COL_NE_SOCK_V
-41: cmp     ebp, 2
-    jne     42f
-    mov     edx, COL_NE_SOCK_N
-42: mov     edi, [rsp+8]
+    lea     rax, [rip+ne_kind_col]
+    mov     edx, [rax+rbp*4]
+    mov     edi, [rsp+8]
     mov     esi, [rsp+16]
     add     esi, NROW/2
     call    ne_sock
@@ -1069,8 +1266,10 @@ ne_draw_node:
     jne     49f
     cmp     ebp, 1
     je      45f
-    test    ebp, ebp
-    jnz     49f
+    cmp     ebp, 2
+    je      46f
+    cmp     ebp, 3
+    jne     49f
     lea     rsi, [r13+ND_IN+rax+4]      # a colour: a swatch
     call    ne_rgb
     mov     r8d, eax
@@ -1091,6 +1290,24 @@ ne_draw_node:
     add     edx, 2
     mov     ecx, COL_TEXT_DIM
     call    ne_right_text
+    jmp     49f
+46: cmp     dword ptr [rip+ne_kind], 0  # a vector (trees): x y z
+    je      49f
+    lea     rdi, [rip+s_ne_implicit]    # (noise unlinked: the position)
+    cmp     dword ptr [r13+ND_TYPE], 24
+    jne     47f
+    test    r15d, r15d
+    jz      48f
+47: lea     rsi, [r13+ND_IN+rax+4]
+    call    ne_fmt_vec
+    lea     rdi, [rip+fmt_buf]
+48:
+    mov     esi, [rsp+8]
+    add     esi, NW-10
+    mov     edx, [rsp+16]
+    add     edx, 2
+    mov     ecx, COL_TEXT_DIM
+    call    ne_right_text
 49: inc     r15d
     jmp     4b
 .Ldn_out:
@@ -1100,6 +1317,28 @@ ne_draw_node:
     pop     r14
     pop     r13
     pop     r12
+    ret
+
+# ne_fmt_vec(rsi=float[3]) - "x y z" (one decimal each) into fmt_buf
+ne_fmt_vec:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, rsi
+    call    fmt_reset
+    xor     ebx, ebx
+1:  movss   xmm0, [r12+rbx*4]
+    call    fmt_fix1
+    cmp     ebx, 2
+    je      2f
+    mov     edi, ' '
+    call    fmt_char
+2:  inc     ebx
+    cmp     ebx, 3
+    jb      1b
+    add     rsp, 8
+    pop     r12
+    pop     rbx
     ret
 
 # ne_rgb(rsi=float[3] linear) -> eax = 0xRRGGBB (sqrt as gamma)
@@ -1174,18 +1413,26 @@ ne_draw_menu:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    sub     rsp, 8
+    call    ne_ntypes
+    mov     r14d, eax
+    lea     ecx, [rax+1]
+    imul    ecx, ecx, NROW
+    add     ecx, 6
     mov     edi, [rip+ne_mx]
     sub     edi, 1
     mov     esi, [rip+ne_my]
     sub     esi, 1
     mov     edx, MENU_W+2
-    mov     ecx, (NTYPES+1)*NROW+6
     mov     r8d, COL_DROP_BORDER
     call    fill_rect
+    lea     ecx, [r14+1]
+    imul    ecx, ecx, NROW
+    add     ecx, 4
     mov     edi, [rip+ne_mx]
     mov     esi, [rip+ne_my]
     mov     edx, MENU_W
-    mov     ecx, (NTYPES+1)*NROW+4
     mov     r8d, COL_DROP_BG
     call    fill_rect
     mov     edi, [rip+ne_mx]
@@ -1198,7 +1445,7 @@ ne_draw_menu:
     call    ne_menu_item                # (the one under the pointer)
     mov     r13d, eax
     mov     ebx, 1
-1:  cmp     ebx, NTYPES
+1:  cmp     ebx, r14d
     ja      9f
     imul    r12d, ebx, NROW
     add     r12d, [rip+ne_my]
@@ -1211,8 +1458,9 @@ ne_draw_menu:
     mov     ecx, NROW
     mov     r8d, COL_HOVER
     call    fill_rect
-2:  lea     rax, [rip+ne_titles]
-    mov     rdx, [rax+rbx*8]
+2:  mov     edi, ebx
+    call    ne_title
+    mov     rdx, rax
     mov     edi, [rip+ne_mx]
     add     edi, 12
     lea     esi, [r12+2]
@@ -1220,7 +1468,9 @@ ne_draw_menu:
     call    draw_text
     inc     ebx
     jmp     1b
-9:  pop     r13
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -1241,7 +1491,11 @@ ne_menu_item:
     div     ecx
     test    eax, eax
     jz      8f
-    cmp     eax, NTYPES
+    push    rax
+    call    ne_ntypes
+    mov     ecx, eax
+    pop     rax
+    cmp     eax, ecx
     ja      8f
     ret
 8:  xor     eax, eax
@@ -1269,14 +1523,26 @@ ne_hit:
     mov     r14d, 1
 1:  cmp     r14d, [rip+ne_n]
     ja      3f
+    lea     eax, [r14-1]                # its outputs
+    imul    eax, eax, NODE_SZ
+    mov     edi, [rbx+GR_NODES+rax+ND_TYPE]
+    call    ne_nouts
+    mov     [rsp+4], eax
+    xor     r15d, r15d
+12: cmp     r15d, [rsp+4]
+    jae     11f
     mov     edi, r14d
+    mov     esi, r15d
     call    ne_out_xy
     call    ne_near
     test    eax, eax
-    jz      11f
+    jz      13f
     mov     eax, 2
     mov     edx, r14d
+    mov     ecx, r15d
     jmp     .Lnh_out
+13: inc     r15d
+    jmp     12b
 11: lea     eax, [r14-1]
     imul    eax, eax, NODE_SZ
     mov     edi, [rbx+GR_NODES+rax+ND_TYPE]
@@ -1300,6 +1566,8 @@ ne_hit:
 21: inc     r14d
     jmp     1b
 3:  xor     r15d, r15d                  # the material sockets
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     4f
 31: cmp     r15d, 5
     jae     4f
     xor     edi, edi
@@ -1341,14 +1609,17 @@ ne_hit:
     xor     edx, edx
     mov     ecx, NROW
     div     ecx
-    mov     ebp, eax                    # row: 0 output, then values, inputs
+    mov     ebp, eax                    # row: outputs, then values, inputs
     lea     eax, [r14-1]
     imul    eax, eax, NODE_SZ
     mov     edi, [rbx+GR_NODES+rax+ND_TYPE]
+    mov     [rsp+8], edi
+    call    ne_nouts
+    sub     ebp, eax
+    js      48f
+    mov     edi, [rsp+8]
     call    ne_counts
-    test    ebp, ebp
-    jz      48f
-    lea     ecx, [rbp-1]
+    mov     ecx, ebp
     cmp     ecx, edx
     jae     44f
     mov     eax, 5
@@ -1413,6 +1684,11 @@ ne_in_box:
 8:  xor     eax, eax
     ret
 
+# ne_run2(rdi=the material operator, rsi=the tree one) - by what is shown
+ne_run2:
+    cmp     dword ptr [rip+ne_kind], 0
+    je      ne_run
+    mov     rdi, rsi
 # ne_run(rdi=operator id; the argument in ne_argbuf) - as if typed
 ne_run:
     push    rbx
@@ -1432,8 +1708,7 @@ ne_run:
 ne_arg_start:
     push    rbx
     call    fmt_reset
-    mov     edi, [rip+ne_mat]
-    call    mat_get
+    call    ne_rec                      # (material or tree: the name first)
     mov     rdi, rax
     call    fmt_str
     mov     edi, ' '
@@ -1516,7 +1791,10 @@ nodeed_press:
     mov     edi, [rip+ne_dn]
     mov     edx, [rip+ne_dk]
     call    ne_unlink
-    mov     [rip+ne_dn], r14d
+    mov     eax, r14d                   # (from its node's output)
+    call    ne_link_node
+    mov     [rip+ne_dn], eax
+    mov     [rip+ne_dk], ecx
     mov     dword ptr [rip+ne_drag], 2
     jmp     .Lnp_taken
 21: mov     dword ptr [rip+ne_drag], 3
@@ -1541,6 +1819,7 @@ nodeed_press:
     lea     rdi, [rip+s_op_socket]
     call    ne_run
     mov     [rip+ne_dn], r14d
+    mov     dword ptr [rip+ne_dk], 0
     mov     dword ptr [rip+ne_drag], 2
     jmp     .Lnp_taken
 31: mov     dword ptr [rip+ne_drag], 4
@@ -1626,7 +1905,8 @@ ne_unlink:
     jb      1b
     call    ne_arg_done
     lea     rdi, [rip+s_op_set]
-    call    ne_run
+    lea     rsi, [rip+s_tp_set]
+    call    ne_run2
     pop     r13
     pop     r12
     pop     rbx
@@ -1761,7 +2041,7 @@ nodeed_motion:
     mov     ecx, r13d
     sub     ecx, [rip+ne_y0]
     add     ecx, [rip+ne_b0]
-    call    graph_place
+    call    ne_place
     jmp     .Lnm_yes
 3:  cmp     eax, 5
     je      4f
@@ -1783,8 +2063,12 @@ nodeed_motion:
     sub     edx, 3                      # (inputs: 1..3)
 41: lea     rcx, [rsp]
     mov     r8d, 1
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     42f
     call    graph_set
-    add     rsp, 16
+    jmp     43f
+42: call    nt_set
+43: add     rsp, 16
 .Lnm_yes:
     mov     eax, 1
     jmp     9f
@@ -1907,9 +2191,10 @@ nodeed_release:
     mov     esi, ecx
     call    ne_socket
     jmp     9f
-1:  mov     edi, [rip+ne_dn]            # material.link from to input
+1:  mov     edi, [rip+ne_dn]            # link from to input
     mov     esi, edx
     mov     edx, ecx
+    mov     ecx, [rip+ne_dk]
     call    ne_link
     jmp     9f
 .Lnr_from_in:                           # onto an output
@@ -1939,27 +2224,42 @@ nodeed_release:
     pop     rbx
     ret
 
-# ne_link(edi=from, esi=to, edx=input 0..2) - material.link
+# ne_link(edi=from, esi=to, edx=input 0..2, ecx=from's output) -
+#   material.link / tree.link (a loop: it says so, does nothing)
 ne_link:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    sub     rsp, 8
     mov     ebx, edi
     mov     r12d, esi
     mov     r13d, edx
+    mov     r14d, ecx
     cmp     ebx, r12d
     je      9f
     call    ne_arg_start
     mov     edi, ebx
-    call    ne_arg_int
+    call    fmt_int
+    cmp     dword ptr [rip+ne_kind], 0  # (trees: from:output)
+    je      1f
+    mov     edi, ':'
+    call    fmt_char
+    mov     edi, r14d
+    call    fmt_int
+1:  mov     edi, ' '
+    call    fmt_char
     mov     edi, r12d
     call    ne_arg_int
     lea     edi, [r13+1]
     call    ne_arg_int
     call    ne_arg_done
-    lea     rdi, [rip+s_op_link]        # (a loop: it says so, does nothing)
-    call    ne_run
-9:  pop     r13
+    lea     rdi, [rip+s_op_link]
+    lea     rsi, [rip+s_tp_link]
+    call    ne_run2
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -1987,7 +2287,8 @@ ne_socket:
     pop     rbx
     ret
 
-# ne_add_node(edi=type) - material.node, placed where the menu was
+# ne_add_node(edi=type) - material.node / tree.node, placed where the
+#   menu was
 ne_add_node:
     push    rbx
     push    r12
@@ -1996,17 +2297,23 @@ ne_add_node:
     call    ne_rec
     test    rax, rax
     jz      9f
-    cmp     dword ptr [rax+GR_N], 12
+    mov     ecx, [rax+GR_N]
+    cmp     ecx, [rip+ne_maxn]
     jb      1f
     lea     rdi, [rip+s_ne_full]
     call    log_line
     jmp     9f
-1:  mov     r12d, [rax+GR_N]
+1:  mov     r12d, ecx
     call    ne_arg_start
     lea     rax, [rip+graph_type_names]
-    mov     rdi, [rax+rbx*8-8]
+    cmp     dword ptr [rip+ne_kind], 0
+    je      11f
+    lea     rax, [rip+gn_type_names]
+11: mov     rdi, [rax+rbx*8-8]
     call    fmt_str
-    cmp     ebx, 1                      # an image node: the first image
+    cmp     dword ptr [rip+ne_kind], 0  # an image node: the first image
+    jne     2f
+    cmp     ebx, 1
     jne     2f
     cmp     dword ptr [rip+img_count], 0
     je      2f
@@ -2018,7 +2325,8 @@ ne_add_node:
     call    fmt_str
 2:  call    ne_arg_done
     lea     rdi, [rip+s_op_node]
-    call    ne_run
+    lea     rsi, [rip+s_tp_node]
+    call    ne_run2
     call    ne_rec                      # added: placed at the menu
     test    rax, rax
     jz      9f
@@ -2034,10 +2342,25 @@ ne_add_node:
     mov     ecx, [rip+ne_my]
     sub     ecx, [rip+ne_by]
     sub     ecx, [rip+ne_pany]
-    call    graph_place
+    call    ne_place
 9:  add     rsp, 8
     pop     r12
     pop     rbx
+    ret
+
+# ne_place(edi=material / tree, esi=node, edx=x, ecx=y) - by what is shown
+ne_place:
+    cmp     dword ptr [rip+ne_kind], 0
+    je      graph_place
+    test    esi, esi                    # (trees: no output node)
+    jz      1f
+    jmp     nt_place
+1:  ret
+
+do_ne_tab:
+    xor     dword ptr [rip+ne_pref], 1
+    mov     dword ptr [rip+ne_sel], 0
+    mov     dword ptr [rip+dirty], 1
     ret
 
 # nodeed_wheel(edi = steps) - scroll
@@ -2065,8 +2388,21 @@ do_ne_add_menu:
     mov     dword ptr [rip+ne_menu], 1
     mov     eax, [rip+ptr_x]
     mov     [rip+ne_mx], eax
+    call    ne_ntypes                   # (all of it inside the body)
+    inc     eax
+    imul    eax, eax, NROW
+    add     eax, 6
+    mov     ecx, [rip+ne_by]
+    add     ecx, [rip+ne_bh]
+    sub     ecx, eax
     mov     eax, [rip+ptr_y]
-    mov     [rip+ne_my], eax
+    cmp     eax, ecx
+    jle     1f
+    mov     eax, ecx
+1:  cmp     eax, [rip+ne_by]
+    jge     2f
+    mov     eax, [rip+ne_by]
+2:  mov     [rip+ne_my], eax
 9:  add     rsp, 8
     ret
 
@@ -2086,7 +2422,8 @@ do_ne_delete:
     call    fmt_int
     call    ne_arg_done
     lea     rdi, [rip+s_op_delete]
-    call    ne_run
+    lea     rsi, [rip+s_tp_delete]
+    call    ne_run2
     mov     dword ptr [rip+ne_sel], 0
 9:  add     rsp, 8
     ret
@@ -2104,6 +2441,9 @@ do_ne_fit:
     mov     r12d, 0x7fffffff            # the smallest graph x, y
     mov     r13d, 0x7fffffff
     xor     ecx, ecx
+    cmp     dword ptr [rip+ne_kind], 0  # (trees: no output node)
+    je      1f
+    inc     ecx
 1:  cmp     ecx, [rip+ne_n]
     ja      2f
     lea     r8, [rip+ne_gx]

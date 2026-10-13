@@ -11,6 +11,7 @@
 
 # exports
 .globl mesh_new
+.globl prim_grid_n
 .globl mesh_free
 .globl mesh_ref
 .globl mesh_unref

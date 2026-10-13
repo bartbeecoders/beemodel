@@ -17,6 +17,7 @@
 
 # exports
 .globl items_mesh
+.globl build_extrude_ind
 .globl edit_replace
 .globl mesh_compact
 .globl fa

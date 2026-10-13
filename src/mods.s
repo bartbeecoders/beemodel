@@ -72,7 +72,8 @@
 .equ MT_REMESH,   7
 .equ MT_BOOLEAN,  8
 .equ MT_MULTIRES, 9
-.equ MT_COUNT,    10
+.equ MT_GEONODES, 10
+.equ MT_COUNT,    11
 .equ PF_OBJECT,   2             # parameter flag: an object handle (raw bits)
 
 .section .bss
@@ -116,10 +117,11 @@ mn_decimate:    .asciz "Decimate"
 mn_remesh:      .asciz "Remesh"
 mn_boolean:     .asciz "Boolean"
 mn_multires:    .asciz "Multires"
+mn_geonodes:    .asciz "Geo Nodes"
 .align 8
-mod_names:      .quad mn_none, mn_mirror, mn_array, mn_solidify, mn_subsurf, mn_bevel, mn_decimate, mn_remesh, mn_boolean, mn_multires
-mod_keys:       .quad 0, mk_mirror, mk_array, mk_solidify, mk_subsurf, mk_bevel, mk_decimate, mk_remesh, mk_boolean, mk_multires
-mod_params:     .quad 0, mp_mirror, mp_array, mp_solidify, mp_subsurf, mp_bevel, mp_decimate, mp_remesh, mp_boolean, mp_multires
+mod_names:      .quad mn_none, mn_mirror, mn_array, mn_solidify, mn_subsurf, mn_bevel, mn_decimate, mn_remesh, mn_boolean, mn_multires, mn_geonodes
+mod_keys:       .quad 0, mk_mirror, mk_array, mk_solidify, mk_subsurf, mk_bevel, mk_decimate, mk_remesh, mk_boolean, mk_multires, mk_geonodes
+mod_params:     .quad 0, mp_mirror, mp_array, mp_solidify, mp_subsurf, mp_bevel, mp_decimate, mp_remesh, mp_boolean, mp_multires, mp_geonodes
 mk_mirror:      .asciz "mirror"
 mk_array:       .asciz "array"
 mk_solidify:    .asciz "solidify"
@@ -129,6 +131,8 @@ mk_decimate:    .asciz "decimate"
 mk_remesh:      .asciz "remesh"
 mk_boolean:     .asciz "boolean"
 mk_multires:    .asciz "multires"
+mk_geonodes:    .asciz "geometry"
+pn_tree:        .asciz "tree"
 pn_object:      .asciz "object"
 pn_operation:   .asciz "operation"
 pn_axis:        .asciz "axis"
@@ -200,6 +204,10 @@ mp_boolean:     .long 2, 0                  # operation: 0 union, 1 difference,
                 .quad pn_operation
                 .long 1
                 .float 1, 0, 2, 1, 0
+mp_geonodes:    .long 1, 0                  # the tree: its place + 1 (0: none)
+                .quad pn_tree
+                .long 1
+                .float 1, 0, 64, 0, 0
 mp_multires:    .long 2, 0                  # levels, the level shown and
                 .quad pn_levels             #  sculpted (0: the base)
                 .long 1
@@ -220,7 +228,7 @@ s_down:         .asciz "v"
 s_on:           .asciz "on"
 s_off:          .asciz "off"
 s_no_mesh:      .asciz "  modifiers need an active mesh object"
-s_bad_type:     .asciz "  modifier types: mirror array solidify subsurf bevel decimate remesh boolean"
+s_bad_type:     .asciz "  modifier types: mirror array solidify subsurf bevel decimate remesh boolean multires geometry"
 s_bad_index:    .asciz "  no modifier with that index"
 s_full:         .asciz "  the stack holds 8 modifiers"
 s_applied:      .asciz "  modifier applied: "
@@ -229,7 +237,7 @@ s_axes:         .ascii "XYZ"
 .align 8
 items_modadd:   .quad op_mod_mirror, op_mod_array, op_mod_solidify, op_mod_subsurf
                 .quad op_mod_bevel, op_mod_decimate, op_mod_remesh, op_mod_boolean
-                .quad op_mod_multires
+                .quad op_mod_multires, op_mod_geonodes
 
 OPERATOR op_mod_add, "object.modifier_add", "Add Modifier", do_mod_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a modifier to the active mesh: object.modifier_add mirror|array|solidify|subsurf|bevel|decimate|remesh|boolean|multires"
 OPERATOR op_mod_mirror, "object.modifier_add_mirror", "Mirror", do_mod_add_n, arg=MT_MIRROR, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Mirror modifier"
@@ -241,6 +249,7 @@ OPERATOR op_mod_decimate, "object.modifier_add_decimate", "Decimate", do_mod_add
 OPERATOR op_mod_remesh, "object.modifier_add_remesh", "Remesh", do_mod_add_n, arg=MT_REMESH, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Remesh modifier"
 OPERATOR op_mod_boolean, "object.modifier_add_boolean", "Boolean", do_mod_add_n, arg=MT_BOOLEAN, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Boolean modifier (the other selected mesh is its object)"
 OPERATOR op_mod_multires, "object.modifier_add_multires", "Multiresolution", do_mod_add_n, arg=MT_MULTIRES, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Multires modifier: subdivision levels that keep sculpted detail (sculpt at any level)"
+OPERATOR op_mod_geonodes, "object.modifier_add_geometry", "Geometry Nodes", do_mod_add_n, arg=MT_GEONODES, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Geometry Nodes modifier (its tree: modifier_set index tree <tree number>)"
 OPERATOR op_mod_remove, "object.modifier_remove", "Remove Modifier", do_mod_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a modifier: object.modifier_remove [index]"
 OPERATOR op_mod_apply, "object.modifier_apply", "Apply Modifier", do_mod_apply, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make a modifier (and those above it) part of the mesh: object.modifier_apply [index]"
 OPERATOR op_mod_set, "object.modifier_set", "Set Modifier Value", do_mod_set, flags=OPF_AI_SAFE|OPF_UNDO|OPF_QUIET, doc="Change a value: object.modifier_set \"index parameter value\" (e.g. 0 levels 3)"
@@ -698,8 +707,15 @@ mod_eval:
     je      mod_boolean
     cmp     eax, MT_MULTIRES
     je      mod_multires
+    cmp     eax, MT_GEONODES
+    je      mod_geonodes
     xor     eax, eax
     ret
+
+# mod_geonodes(rdi=mesh, rsi=modifier) -> rax = its tree's result or 0
+mod_geonodes:
+    cvttss2si esi, [rsi+MD_P]
+    jmp     gn_eval
 
 # mod_boolean(rdi=mesh, rsi=modifier) -> rax = the mesh combined with the
 #   object's base mesh (in place), or 0 (no object, or it failed)
@@ -755,7 +771,14 @@ mods_deps:
     xor     r13, [rbx+OB_MRES]
     imul    r13, rax
     jmp     3f
-21: cmp     dword ptr [rsi+MD_TYPE], MT_BOOLEAN
+21: cmp     dword ptr [rsi+MD_TYPE], MT_GEONODES
+    jne     22f
+    mov     rax, 0x9E3779B97F4A7C15     # geometry nodes: the trees' version
+    mov     ecx, [rip+nt_ver]
+    xor     r13, rcx
+    imul    r13, rax
+    jmp     3f
+22: cmp     dword ptr [rsi+MD_TYPE], MT_BOOLEAN
     jne     3f
     mov     edi, [rsi+MD_P]
     mov     rax, 0x9E3779B97F4A7C15

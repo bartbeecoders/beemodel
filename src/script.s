@@ -413,6 +413,16 @@ builtins:
     .long 4, 6
     .quad bn_nodeinfo, b_nodeinfo
     .long 3, 4
+    .quad bn_gtree, b_gtree
+    .long 1, 1
+    .quad bn_gnode, b_gnode
+    .long 2, 6
+    .quad bn_glink, b_glink
+    .long 4, 5
+    .quad bn_gset, b_gset
+    .long 4, 6
+    .quad bn_ginfo, b_ginfo
+    .long 3, 4
     .quad bn_socket, b_socket
     .long 3, 3
     .quad bn_param, b_param
@@ -618,6 +628,16 @@ bn_link:        .asciz "link"
 bn_nodeset:     .asciz "nodeset"
 bn_socket:      .asciz "socket"
 bn_nodeinfo:    .asciz "nodeinfo"
+bn_gtree:       .asciz "gtree"
+bn_gnode:       .asciz "gnode"
+bn_glink:       .asciz "glink"
+bn_gset:        .asciz "gset"
+bn_ginfo:       .asciz "ginfo"
+e_tree_bad:     .asciz "no such node tree, node or input"
+e_gtype:        .asciz "unknown geometry node type: "
+.align 8
+gi_whats:       .quad ni_count, ni_type, ni_link, gi_output, ni_x, ni_y, ni_value, 0
+gi_output:      .asciz "output"
 .align 8
 ni_whats:       .quad ni_count, ni_type, ni_link, ni_sock, ni_x, ni_y, ni_value, 0
 ni_count:       .asciz "count"
@@ -5365,6 +5385,263 @@ b_nodeset:
     jmp     sc_rt
 
 # socket(material, base|metallic|roughness|emission|normal, node or nil)
+# gtree(name) -> the node tree's number (made when there is none)
+b_gtree:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    a_str
+    mov     rbx, rax
+    mov     rdi, rax
+    call    nt_find
+    test    eax, eax
+    jns     1f
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, rbx
+    call    nt_new
+    test    eax, eax
+    js      8f
+1:  inc     eax
+    cvtsi2sd xmm0, eax
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  lea     rdi, [rip+e_tree_bad]
+    xor     esi, esi
+    jmp     sc_rt
+
+# a_tree(rdi=value) -> eax = tree index (from its number), errors out
+a_tree:
+    sub     rsp, 8
+    call    a_int
+    dec     eax
+    js      8f
+    push    rax
+    push    rax
+    call    nt_count
+    mov     ecx, eax
+    pop     rax
+    pop     rax
+    cmp     eax, ecx
+    jae     8f
+    add     rsp, 8
+    ret
+8:  lea     rdi, [rip+e_tree_bad]
+    xor     esi, esi
+    jmp     sc_rt
+
+# gnode(tree, type [, values...]) -> the new node's number
+b_gnode:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r15d, esi
+    call    a_tree
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     r14, rax
+    mov     rdi, rax
+    call    gn_type_index
+    test    eax, eax
+    js      7f
+    mov     r13d, eax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     edi, r12d
+    mov     esi, r13d
+    lea     eax, [rsi-1]
+    imul    eax, eax, 52
+    lea     rdx, [rip+gn_defaults]
+    add     rdx, rax
+    call    nt_add
+    test    eax, eax
+    js      8f
+    mov     r13d, eax
+    mov     r14d, 2                     # values (4..7)
+1:  cmp     r14d, r15d
+    jae     2f
+    mov     eax, r14d
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp], xmm0
+    mov     edi, r12d
+    mov     esi, r13d
+    lea     edx, [r14+2]
+    lea     rcx, [rsp]
+    mov     r8d, 1
+    call    nt_set
+    inc     r14d
+    jmp     1b
+2:  cvtsi2sd xmm0, r13d
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+7:  lea     rdi, [rip+e_gtype]
+    mov     rsi, r14
+    jmp     sc_rt
+8:  lea     rdi, [rip+e_tree_bad]
+    xor     esi, esi
+    jmp     sc_rt
+
+# glink(tree, from, to, input [, output]) -> to's number (a loop is an error)
+b_glink:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r15d, esi
+    call    a_tree
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     r14d, eax
+    lea     rdi, [rbx+48]
+    call    a_int
+    mov     [rsp], eax
+    mov     dword ptr [rsp+4], 0
+    cmp     r15d, 5
+    jb      1f
+    lea     rdi, [rbx+64]
+    call    a_int
+    mov     [rsp+4], eax
+1:  lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, [rsp]
+    mov     r8d, [rsp+4]
+    call    nt_link
+    test    eax, eax
+    jz      8f
+    cvtsi2sd xmm0, eax
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  lea     rdi, [rip+e_tree_bad]
+    xor     esi, esi
+    jmp     sc_rt
+
+# gset(tree, node, slot, x [, y, z]) - an input's constant (1-3) or a value (4-7)
+b_gset:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r15d, esi
+    call    a_tree
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     r14d, eax
+    xor     ecx, ecx
+1:  lea     eax, [rcx+3]
+    cmp     eax, r15d
+    jae     2f
+    push    rcx
+    push    rcx
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    pop     rcx
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+rcx*4], xmm0
+    inc     ecx
+    jmp     1b
+2:  mov     [rsp+12], ecx
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    lea     rcx, [rsp]
+    mov     r8d, [rsp+12]
+    call    nt_set
+    test    eax, eax
+    jz      8f
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+8:  lea     rdi, [rip+e_tree_bad]
+    xor     esi, esi
+    jmp     sc_rt
+
+# ginfo(tree, node, "count" | "type" | "link" | "output" | "x" | "y" |
+#   "value" [, k]) -> as nodeinfo, for a node tree ("output": which output
+#   the link into input k takes)
+b_ginfo:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r14d, esi
+    call    a_tree
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    lea     rsi, [rip+gi_whats]
+    call    uv_kind
+    mov     [rsp], eax
+    xor     ecx, ecx
+    cmp     r14d, 4
+    jb      1f
+    lea     rdi, [rbx+48]
+    call    a_int
+    mov     ecx, eax
+1:  mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, [rsp]
+    call    nt_info
+    cmp     dword ptr [rsp], 6
+    je      2f
+    cvtsi2sd xmm0, eax
+    jmp     3f
+2:  cvtss2sd xmm0, xmm0
+3:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
 # nodeinfo(material, node, "count" | "type" | "link" | "socket" | "x" | "y"
 #   | "value" [, k]) -> the node count, its type (1 image .. 9 normalmap),
 #   the node feeding its input k, the node driving socket k (0 base .. 4

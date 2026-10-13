@@ -15,6 +15,7 @@
 
 # exports
 .globl mesh_analyze
+.globl mesh_merge_dist
 .globl an_count
 .globl analysis_draw
 .globl an_flags
@@ -975,6 +976,32 @@ do_repair:
     pop     r14
     pop     r13
     pop     r12
+    pop     rbx
+    ret
+
+# mesh_merge_dist(rdi=finished mesh, xmm0=distance) -> rax = a copy with
+#   points closer than the distance welded (faces that collapse dropped), or 0
+mesh_merge_dist:
+    push    rbx
+    push    rbp
+    sub     rsp, 40
+    mov     rbx, rdi
+    movss   [rip+rp_dist], xmm0
+    lea     rdi, [rip+rp_cnt]
+    xor     eax, eax
+    mov     ecx, 8
+    rep     stosd
+    call    rp_merge
+    test    eax, eax
+    jz      8f
+    call    rp_polys
+    test    eax, eax
+    jz      8f
+    call    rp_build
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 40
+    pop     rbp
     pop     rbx
     ret
 

@@ -52,6 +52,7 @@
 .equ TAG_IMGD,      0x44474D49          # "IMGD"
 .equ TAG_ILAY,      0x59414C49          # "ILAY"
 .equ TAG_MVCL,      0x4C43564D          # "MVCL"
+.equ TAG_NTRE,      0x4552544E          # "NTRE"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -93,6 +94,8 @@ ilay_chunk:     .skip 8
 ilay_size:      .skip 4
 .align 8
 mvcl_chunk:     .skip 8
+ntre_chunk:     .skip 8
+ntre_size:      .skip 4
 mvcl_size:      .skip 4
 .align 8
 uids_size:      .skip 4
@@ -328,6 +331,10 @@ bee_save:
     mov     edi, TAG_MGRF
     call    chunk_begin
     call    graphs_write
+    call    chunk_end
+    mov     edi, TAG_NTRE               # NTRE (geometry node trees)
+    call    chunk_begin
+    call    nt_write
     call    chunk_end
     mov     edi, TAG_CADD
     call    chunk_begin
@@ -786,6 +793,7 @@ bee_load:
     mov     qword ptr [rip+imgd_chunk], 0
     mov     qword ptr [rip+ilay_chunk], 0
     mov     qword ptr [rip+mvcl_chunk], 0
+    mov     qword ptr [rip+ntre_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -844,7 +852,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_MVCL
+28: cmp     eax, TAG_NTRE
+    jne     272f
+    lea     rax, [rbx+8]
+    mov     [rip+ntre_chunk], rax
+    mov     [rip+ntre_size], ebp
+    jmp     23f
+272:cmp     eax, TAG_MVCL
     jne     273f
     lea     rax, [rbx+8]
     mov     [rip+mvcl_chunk], rax
@@ -986,7 +1000,12 @@ bee_load:
     jz      774f
     mov     esi, [rip+mvcl_size]
     call    mvcl_read
-774:mov     rdi, [rip+mres_chunk]       # multires displacements
+774:mov     rdi, [rip+ntre_chunk]       # geometry node trees
+    test    rdi, rdi
+    jz      775f
+    mov     esi, [rip+ntre_size]
+    call    nt_read
+775:mov     rdi, [rip+mres_chunk]       # multires displacements
     test    rdi, rdi
     jz      772f
     mov     esi, [rip+mres_size]
