@@ -359,6 +359,16 @@ m = modifier("Cube", "geometry")
 modset("Cube", m, "tree", t)
 ```
 
+**Node groups.** A Group node runs another tree as one node: inside, the Group Input gives the
+group node's geometry, value and vector (fields from outside reach in), the Group Output is what
+it returns; groups nest. In the node editor, Shift-click several nodes and **Ctrl+G** moves them
+into a new group; **Tab** on a group node goes inside, Tab again comes back (`tree.group` does it
+from scripts and agents).
+
+**Assets.** `tree.save_asset <tree>` saves a tree with every group it runs, `material.save_asset
+<material>` a material with its graph, to `~/BeeModel/assets`; `asset.load <name>` adds one to
+any scene. The **Asset Browser** area lists the folder: a click adds the asset.
+
 ### Sculpting
 
 Ctrl+Tab puts the active mesh in **sculpt mode**. It handles tens of
@@ -566,6 +576,7 @@ src/nodeed.s    the node editor area: shader graphs and node trees drawn and edi
 src/ntree.s     node trees: the block, nodes, links, files
 src/geonodes.s  geometry nodes: evaluation, field compiler, tree.* operators
 src/fieldvm.s   the field VM: per-point programs in SSE blocks
+src/asset.s     assets: trees and materials saved, loaded, the Asset Browser
 src/paint.s     texture painting: projected dabs, UV-space dabs, stroke history
 src/layers.s    paint layers: stack, blend modes, composite, saving
 src/vcol.s      vertex colours: vertex paint, tinting, files
