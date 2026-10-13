@@ -167,6 +167,7 @@
 .equ COL_EDIT_SEL,    0xffa233
 .equ COL_FACE_SEL,    0xe0a060
 .equ DRAG_BOX,          7
+.equ DRAG_SKETCH,       10      # a sketch point follows the pointer
 .equ COL_OK,          0x4cb86a
 .equ COL_WARN,        0xe0a030
 .equ COL_ACCENT,        0xf2b134
@@ -311,11 +312,13 @@
 .equ OB_TYPE,       84
 .equ OB_MODS,       88      # modifier stack (mods.s), or 0
 .equ OB_MAT,        96      # material: index + 1 in the scene's materials, 0 = none
+.equ OB_SKETCH,     104     # a sketch object's sketch block (sketch.s), or 0
 .equ OB_SZ,         128
 .equ OBF_SELECTED,  1
 .equ OT_MESH,       0
 .equ OT_LIGHT,      1
 .equ OT_CAMERA,     2
+.equ OT_SKETCH,     3
 .equ MAX_OBJECTS,   4096
 .equ KEY_A,             30
 .equ KEY_D,             32
@@ -326,3 +329,8 @@
 .equ COL_ACTIVE,        0xffc24a
 .equ COL_SOLID,         0xbfc3ca
 .equ KEY_F12,           88
+.equ KEY_C,             46
+.equ KEY_H,             35
+.equ KEY_V,             47
+.equ KEY_P,             25
+.equ KEY_M,             50

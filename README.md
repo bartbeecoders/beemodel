@@ -176,6 +176,18 @@ material preview uses it too. Image paths and the world are saved with the scene
 everything that depends on it follows. The parameters are listed in Properties, saved with the
 scene, and part of undo.
 
+**Sketches.** `sketch("Base", "XY")` (or Create in a script) makes a sketch object. Tab enters
+sketch mode, which has these tools and keys:
+
+- **Tools:** L draws lines, O circles and R rectangles.
+- **Constraints:** C H V E P N T F M add them.
+- **Dimensions:** D, then type a value or an expression such as `width`.
+- **Other:** X deletes; dragging a point moves it while the solver keeps the constraints.
+
+A damped Newton solver keeps every constraint. Lines are blue while free and light when fully
+constrained, conflicts are red, and the status line counts the remaining degrees of freedom. Change a
+parameter and the sketch follows.
+
 **Shader graphs.** A material can hold a small node graph that drives its base colour,
 roughness, metallic, emission and normal:
 

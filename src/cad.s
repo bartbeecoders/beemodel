@@ -725,6 +725,7 @@ do_param_set:
     call    fmt_str
     lea     rdi, [rip+fmt_buf]
     call    log_line
+    call    cad_rebuild                 # sketches follow
     add     rsp, 8
     ret
 .Ldp_bad:
@@ -754,6 +755,7 @@ do_param_remove:
     lea     rdi, [rip+s_p_gone]
     lea     rsi, [rip+cw_name]
     call    log_pair
+    call    cad_rebuild
     xor     ecx, ecx                    # whatever used it now fails: say so
 1:  push    rcx
     call    param_count
@@ -848,6 +850,7 @@ do_scene_units:
     movsd   xmm0, [rcx+rbx*8]
     movsd   [rax+CD_UNIT], xmm0
     call    cad_sync
+    call    cad_rebuild
     lea     rdi, [rip+s_u_set]
     lea     rsi, [rip+cw_name]
     call    log_pair

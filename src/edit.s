@@ -170,7 +170,15 @@ edit_cow:
 
 do_toggle:
     sub     rsp, 8
-    cmp     dword ptr [rip+edit_obj], 0
+    cmp     dword ptr [rip+skm_obj], 0  # sketches: sketch mode
+    jne     101f
+    call    skm_can
+    test    eax, eax
+    jz      102f
+101: call    skm_toggle
+    add     rsp, 8
+    ret
+102: cmp     dword ptr [rip+edit_obj], 0
     je      1f
     call    edit_exit
     add     rsp, 8

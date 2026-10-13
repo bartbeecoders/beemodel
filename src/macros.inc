@@ -25,6 +25,7 @@
 .equ OPF_HIDDEN,  8     # alias binding: not listed in the palette
 .equ OPF_EDIT,    16    # its key only works in edit mode
 .equ OPF_OBJECT,  32    # its key only works in object mode
+.equ OPF_SKETCH,  64    # its key only works in sketch mode (and wins there)
 
 # key binding modifiers (pre-shifted into the high half of OP_KEY)
 .equ KM_SHIFT,  MOD_SHIFT << 16

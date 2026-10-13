@@ -411,6 +411,34 @@ builtins:
     .long 3, 3
     .quad bn_param, b_param
     .long 1, 2
+    .quad bn_sketch, b_sketch
+    .long 2, 3
+    .quad bn_point, b_point
+    .long 3, 3
+    .quad bn_line, b_line
+    .long 3, 5
+    .quad bn_circle, b_circle
+    .long 4, 4
+    .quad bn_arc, b_arc
+    .long 6, 6
+    .quad bn_rect, b_rect
+    .long 5, 5
+    .quad bn_pt, b_pt
+    .long 3, 3
+    .quad bn_con, b_con
+    .long 3, 6
+    .quad bn_dof, b_dof
+    .long 1, 1
+    .quad bn_conflicts, b_conflicts
+    .long 1, 1
+    .quad bn_sx, b_sx
+    .long 2, 2
+    .quad bn_sy, b_sy
+    .long 2, 2
+    .quad bn_sr, b_sr
+    .long 2, 2
+    .quad bn_skinfo, b_skinfo
+    .long 2, 2
     .quad bn_expr, b_expr
     .long 1, 1
 builtins_end:
@@ -490,6 +518,31 @@ bn_link:        .asciz "link"
 bn_nodeset:     .asciz "nodeset"
 bn_socket:      .asciz "socket"
 bn_param:       .asciz "param"
+bn_sketch:      .asciz "sketch"
+bn_point:       .asciz "point"
+bn_line:        .asciz "line"
+bn_circle:      .asciz "circle"
+bn_arc:         .asciz "arc"
+bn_rect:        .asciz "rect"
+bn_pt:          .asciz "pt"
+bn_con:         .asciz "con"
+bn_dof:         .asciz "dof"
+bn_conflicts:   .asciz "conflicts"
+bn_sx:          .asciz "sx"
+bn_sy:          .asciz "sy"
+bn_sr:          .asciz "sr"
+bn_skinfo:      .asciz "skinfo"
+s_ki_points:    .asciz "points"
+s_ki_ents:      .asciz "entities"
+s_ki_cons:      .asciz "constraints"
+s_plane_xy:     .asciz "XY"
+s_plane_xz:     .asciz "XZ"
+s_plane_yz:     .asciz "YZ"
+e_no_sketch:    .asciz "no sketch called "
+e_sk_plane:     .asciz "sketch plane: XY, XZ or YZ, not "
+e_sk_full:      .asciz "the sketch is full"
+e_sk_ctype:     .asciz "unknown constraint (coincident horizontal vertical parallel perpendicular equal tangent fixed distance hdistance vdistance radius diameter angle length online oncircle midpoint symmetric): "
+e_sk_ref:       .asciz "no such point or entity"
 bn_expr:        .asciz "expr"
 e_param:        .asciz "parameter: "
 e_noparam:      .asciz "no parameter named "
@@ -4722,6 +4775,7 @@ b_param:
     call    param_set
     test    eax, eax
     jz      8f
+    call    cad_rebuild                 # sketches follow
 1:  mov     rdi, r12
     call    param_find
     test    eax, eax
@@ -4754,6 +4808,527 @@ b_expr:
 8:  lea     rdi, [rip+e_param]
     mov     rsi, [rip+expr_err]
     jmp     sc_rt
+
+# a_val(rdi=value) -> xmm0 (double): a number, or an expression text
+a_val:
+    cmp     dword ptr [rdi], T_STR
+    jne     a_num
+    push    rbx
+    mov     rbx, [rdi+8]
+    mov     rdi, rbx
+    call    expr_eval
+    test    eax, eax
+    jz      1f
+    pop     rbx
+    ret
+1:  lea     rdi, [rip+e_param]
+    mov     rsi, [rip+expr_err]
+    jmp     sc_rt
+
+# a_sketch(rdi=value) -> rax = the sketch object (error if none)
+a_sketch:
+    push    rbx
+    call    a_str
+    mov     rbx, rax
+    mov     rdi, rax
+    call    skx_get
+    test    rax, rax
+    jz      1f
+    pop     rbx
+    ret
+1:  lea     rdi, [rip+e_no_sketch]
+    mov     rsi, rbx
+    jmp     sc_rt
+
+# sk_edit(rdi=value) -> rbx = object, r12 = its sketch (ours): an undo step
+#   for the script, then copy-on-write (callers keep rbx / r12 callee-saved)
+sk_edit:
+    sub     rsp, 8
+    call    a_sketch
+    mov     rbx, rax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, rbx
+    call    skx_begin
+    mov     r12, rax
+    add     rsp, 8
+    ret
+
+# sk_done(eax=index) - solve, show, return the index (or the full error)
+sk_done:
+    test    eax, eax
+    js      8f
+    push    rax
+    mov     rdi, rbx
+    call    skx_end
+    pop     rax
+    cvtsi2sd xmm0, eax
+    ret
+8:  lea     rdi, [rip+e_sk_full]
+    xor     esi, esi
+    jmp     sc_rt
+
+# sketch(name, "XY" | "XZ" | "YZ" [, offset]) -> the new sketch's name
+b_sketch:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 24
+    mov     rbx, rdi
+    mov     r14d, esi
+    call    a_str
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     r13, rax
+    xor     ecx, ecx                    # the plane
+    lea     rsi, [rip+s_plane_xy]
+    mov     rdi, r13
+    call    str_eq
+    xor     ecx, ecx
+    test    eax, eax
+    jnz     1f
+    mov     rdi, r13
+    lea     rsi, [rip+s_plane_xz]
+    call    str_eq
+    mov     ecx, 1
+    test    eax, eax
+    jnz     1f
+    mov     rdi, r13
+    lea     rsi, [rip+s_plane_yz]
+    call    str_eq
+    mov     ecx, 2
+    test    eax, eax
+    jz      8f
+1:  mov     [rsp], ecx
+    xorpd   xmm0, xmm0
+    movsd   [rsp+8], xmm0
+    cmp     r14d, 3
+    jb      2f
+    lea     rdi, [rbx+32]
+    call    a_val
+    movsd   [rsp+8], xmm0
+2:  lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, r12
+    mov     esi, [rsp]
+    movsd   xmm0, [rsp+8]
+    call    skx_create
+    test    eax, eax
+    jz      9f
+    mov     edi, eax
+    add     rsp, 24
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_name
+8:  lea     rdi, [rip+e_sk_plane]
+    mov     rsi, r13
+    jmp     sc_rt
+9:  lea     rdi, [rip+e_sk_full]
+    xor     esi, esi
+    jmp     sc_rt
+
+# point(sketch, x, y) -> its index
+b_point:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     r13, rdi
+    lea     rdi, [r13+16]
+    call    a_val
+    movsd   [rsp], xmm0
+    lea     rdi, [r13+32]
+    call    a_val
+    movsd   [rsp+8], xmm0
+    mov     rdi, r13
+    call    sk_edit
+    mov     rdi, r12
+    movsd   xmm0, [rsp]
+    movsd   xmm1, [rsp+8]
+    call    sk_add_point
+    call    sk_done
+    add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# line(sketch, x1, y1, x2, y2) or line(sketch, point a, point b) -> entity
+b_line:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 40
+    mov     r13, rdi
+    mov     r14d, esi
+    xor     ecx, ecx                    # the numbers
+1:  lea     eax, [rcx+1]
+    cmp     eax, r14d
+    jae     2f
+    push    rcx
+    push    rcx
+    shl     eax, 4
+    lea     rdi, [r13+rax]
+    call    a_val
+    pop     rcx
+    pop     rcx
+    movsd   [rsp+rcx*8], xmm0
+    inc     ecx
+    jmp     1b
+2:  mov     rdi, r13
+    call    sk_edit
+    cmp     r14d, 3
+    jne     3f
+    cvttsd2si esi, qword ptr [rsp]      # two points
+    cvttsd2si edx, qword ptr [rsp+8]
+    cmp     esi, [r12+12]
+    jae     8f
+    cmp     edx, [r12+12]
+    jae     8f
+    mov     rdi, r12
+    call    sk_add_line
+    jmp     4f
+3:  cmp     r14d, 5
+    jne     8f
+    mov     rdi, r12
+    movsd   xmm0, [rsp]
+    movsd   xmm1, [rsp+8]
+    movsd   xmm2, [rsp+16]
+    movsd   xmm3, [rsp+24]
+    call    skx_line_xy
+4:  call    sk_done
+    add     rsp, 40
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  lea     rdi, [rip+e_sk_ref]
+    xor     esi, esi
+    jmp     sc_rt
+
+# circle(sketch, cx, cy, r) -> entity
+b_circle:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 32
+    mov     r13, rdi
+    lea     rdi, [r13+16]
+    call    a_val
+    movsd   [rsp], xmm0
+    lea     rdi, [r13+32]
+    call    a_val
+    movsd   [rsp+8], xmm0
+    lea     rdi, [r13+48]
+    call    a_val
+    movsd   [rsp+16], xmm0
+    mov     rdi, r13
+    call    sk_edit
+    mov     rdi, r12
+    movsd   xmm0, [rsp]
+    movsd   xmm1, [rsp+8]
+    movsd   xmm2, [rsp+16]
+    call    skx_circle_xy
+    call    sk_done
+    add     rsp, 32
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# arc(sketch, cx, cy, r, from angle, to angle) -> entity (angles: radians,
+#   or expressions like "90deg"; counter-clockwise)
+b_arc:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 48
+    mov     r13, rdi
+    xor     ecx, ecx
+1:  cmp     ecx, 5
+    jae     2f
+    push    rcx
+    push    rcx
+    lea     eax, [rcx+1]
+    shl     eax, 4
+    lea     rdi, [r13+rax]
+    call    a_val
+    pop     rcx
+    pop     rcx
+    movsd   [rsp+rcx*8], xmm0
+    inc     ecx
+    jmp     1b
+2:  mov     rdi, r13
+    call    sk_edit
+    mov     rdi, r12
+    movsd   xmm0, [rsp]
+    movsd   xmm1, [rsp+8]
+    movsd   xmm2, [rsp+16]
+    movsd   xmm3, [rsp+24]
+    movsd   xmm4, [rsp+32]
+    call    skx_arc_xy
+    call    sk_done
+    add     rsp, 48
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# rect(sketch, x, y, width, height) -> the first of its four lines
+b_rect:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 32
+    mov     r13, rdi
+    xor     ecx, ecx
+1:  cmp     ecx, 4
+    jae     2f
+    push    rcx
+    push    rcx
+    lea     eax, [rcx+1]
+    shl     eax, 4
+    lea     rdi, [r13+rax]
+    call    a_val
+    pop     rcx
+    pop     rcx
+    movsd   [rsp+rcx*8], xmm0
+    inc     ecx
+    jmp     1b
+2:  mov     rdi, r13
+    call    sk_edit
+    mov     rdi, r12
+    movsd   xmm0, [rsp]
+    movsd   xmm1, [rsp+8]
+    movsd   xmm2, [rsp+16]
+    movsd   xmm3, [rsp+24]
+    call    skx_rect
+    call    sk_done
+    add     rsp, 32
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# pt(sketch, entity, which) -> its point: line 0 start 1 end; circle 0
+#   centre; arc 0 centre 1 start 2 end
+b_pt:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    call    a_sketch
+    mov     r12, [rax+OB_SKETCH]
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r13d, xmm0
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si edx, xmm0
+    mov     rdi, r12
+    mov     esi, r13d
+    call    sk_ent_point
+    test    eax, eax
+    js      8f
+    cvtsi2sd xmm0, eax
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  lea     rdi, [rip+e_sk_ref]
+    xor     esi, esi
+    jmp     sc_rt
+
+# con(sketch, type, a [, b [, c]] [, value]) -> constraint index. Point
+#   constraints take point indices, the others entities; distance, hdistance,
+#   vdistance, radius, diameter, length and angle end with a value (a number
+#   or an expression text, kept so parameters drive it)
+b_con:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 48
+    mov     r13, rdi
+    mov     r14d, esi
+    lea     rdi, [r13+16]
+    call    a_str
+    mov     r15, rax
+    mov     rdi, rax
+    call    sk_con_type
+    test    eax, eax
+    js      .Lbc_type
+    mov     [rsp+40], eax
+    mov     dword ptr [rsp], -1         # a b c
+    mov     dword ptr [rsp+4], -1
+    mov     dword ptr [rsp+8], -1
+    xorpd   xmm0, xmm0
+    movsd   [rsp+16], xmm0              # value
+    mov     qword ptr [rsp+24], 0       # expression text
+    mov     eax, [rsp+40]               # does it take a value?
+    xor     ecx, ecx
+    cmp     eax, 9                      # distance hdistance vdistance radius
+    jb      1f
+    cmp     eax, 13                     #  angle (9..13)
+    jbe     2f
+1:  cmp     eax, 18                     # length, diameter
+    jb      3f
+2:  mov     ecx, 1
+3:  mov     [rsp+44], ecx
+    mov     eax, r14d                   # references: args 2 .. (n - value)
+    sub     eax, 2
+    sub     eax, ecx
+    cmp     eax, 1
+    jl      .Lbc_ref
+    cmp     eax, 3
+    jg      .Lbc_ref
+    mov     [rsp+36], eax
+    xor     ebx, ebx
+4:  cmp     ebx, [rsp+36]
+    jae     5f
+    lea     eax, [rbx+2]
+    shl     eax, 4
+    lea     rdi, [r13+rax]
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp+rbx*4], eax
+    inc     ebx
+    jmp     4b
+5:  cmp     dword ptr [rsp+44], 0       # the value
+    je      6f
+    lea     eax, [r14-1]
+    shl     eax, 4
+    lea     rdi, [r13+rax]
+    cmp     dword ptr [rdi], T_STR
+    jne     51f
+    mov     rax, [rdi+8]
+    mov     [rsp+24], rax
+51: call    a_val
+    movsd   [rsp+16], xmm0
+6:  mov     rdi, r13
+    call    sk_edit
+    mov     rdi, r12
+    mov     esi, [rsp+40]
+    mov     edx, [rsp]
+    mov     ecx, [rsp+4]
+    mov     r8d, [rsp+8]
+    movsd   xmm0, [rsp+16]
+    mov     r9, [rsp+24]
+    call    sk_add_con
+    call    sk_done
+    add     rsp, 48
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+.Lbc_type:
+    lea     rdi, [rip+e_sk_ctype]
+    mov     rsi, r15
+    jmp     sc_rt
+.Lbc_ref:
+    lea     rdi, [rip+e_sk_ref]
+    xor     esi, esi
+    jmp     sc_rt
+
+# dof(sketch) -> degrees of freedom left; conflicts(sketch) -> how many
+b_dof:
+    sub     rsp, 8
+    call    a_sketch
+    mov     rax, [rax+OB_SKETCH]
+    cvtsi2sd xmm0, dword ptr [rax+24]
+    add     rsp, 8
+    jmp     ret_num
+b_conflicts:
+    sub     rsp, 8
+    call    a_sketch
+    mov     rax, [rax+OB_SKETCH]
+    cvtsi2sd xmm0, dword ptr [rax+28]
+    add     rsp, 8
+    jmp     ret_num
+
+# sx / sy(sketch, point) -> its coordinate; sr(sketch, entity) -> radius
+b_sx:
+    xor     eax, eax
+    jmp     sk_coord
+b_sy:
+    mov     eax, 1
+    jmp     sk_coord
+b_sr:
+    mov     eax, 2
+sk_coord:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r13d, eax
+    call    a_sketch
+    mov     r12, [rax+OB_SKETCH]
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si eax, xmm0
+    test    eax, eax
+    js      8f
+    cmp     r13d, 2
+    je      2f
+    cmp     eax, [r12+12]
+    jae     8f
+    mov     rdi, r12
+    mov     esi, eax
+    call    sk_point_xy
+    cmp     r13d, 1
+    jne     1f
+    movsd   xmm0, xmm1
+1:  pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+2:  cmp     eax, [r12+16]
+    jae     8f
+    imul    eax, eax, 32
+    movsd   xmm0, [r12+64+256*24+rax+16]
+    jmp     1b
+8:  lea     rdi, [rip+e_sk_ref]
+    xor     esi, esi
+    jmp     sc_rt
+
+# skinfo(sketch, "points" | "entities" | "constraints") -> how many
+b_skinfo:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_sketch
+    mov     r12, [rax+OB_SKETCH]
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     rbx, rax
+    mov     rdi, rax
+    lea     rsi, [rip+s_ki_points]
+    call    str_eq
+    mov     ecx, 12
+    test    eax, eax
+    jnz     1f
+    mov     rdi, rbx
+    lea     rsi, [rip+s_ki_ents]
+    call    str_eq
+    mov     ecx, 16
+    test    eax, eax
+    jnz     1f
+    mov     ecx, 20
+1:  cvtsi2sd xmm0, dword ptr [r12+rcx]
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_num
 
 # matof(object) -> its material's name, or nil
 b_matof:

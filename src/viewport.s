@@ -519,6 +519,7 @@ viewport_draw:
     call    cursor_draw                 # the 3D cursor
     call    gizmo_draw
     call    tm_draw
+    call    skm_overlay                 # sketch mode: points, labels, tools
 
     # ---- orientation gizmo (bottom-left) -----------------------------------
     mov     r12d, [rip+cvs_x0]
@@ -629,7 +630,16 @@ draw_objects:
     cmp     ecx, [rip+active_obj]
     jne     4f
     mov     r13d, COL_ACTIVE
-4:  mov     rdi, rax
+4:  cmp     dword ptr [rax+OB_TYPE], OT_SKETCH
+    jne     41f
+    mov     rdi, rax                    # sketches: their entities, coloured
+    xor     esi, esi                    #  by status when selected
+    test    r12d, r12d
+    jnz     42f
+    mov     esi, r13d
+42: call    skx_draw
+    jmp     5f
+41: mov     rdi, rax
     mov     esi, r13d
     call    draw_obj_wire
 5:  inc     ebx

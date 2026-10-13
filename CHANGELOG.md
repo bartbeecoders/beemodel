@@ -7,6 +7,33 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Sketches with a constraint solver:
+  - **Sketch objects:** a new object type on the XY, XZ or YZ plane (with
+    an offset), placed by the object's transform. It holds points, lines,
+    circles and arcs in a copy-on-write block that undo shares.
+  - **Constraints:** coincident, horizontal, vertical, parallel,
+    perpendicular, equal, tangent, fixed, distance (also horizontal /
+    vertical), length, radius, diameter, angle, point on line / circle,
+    midpoint and symmetric. Dimensions may be expressions, so parameters
+    drive them.
+  - **Solver:** damped Gauss-Newton (Levenberg-Marquardt) in doubles,
+    one connected group of unknowns at a time. The Jacobian's rank gives
+    the degrees of freedom left and which points and entities are fully
+    constrained. Equations that stay unsatisfied are conflicts.
+  - **Sketch mode** (Tab):
+    - tools: L lines (chains reuse points and level / plumb segments
+      become horizontal / vertical), O circles, R rectangles;
+    - click to select, drag points as the sketch solves;
+    - constraint keys C H V E P N T F M, D for a dimension typed on the
+      command line (expressions too), X to delete;
+    - entities coloured by status, constraint labels, and a status line
+      with the DOF.
+  - **Scripts and files:**
+    - BeeScript `sketch`, `point`, `line`, `circle`, `arc`, `rect`, `pt`,
+      `con`, `dof`, `conflicts`, `sx`, `sy`, `sr`, `skinfo`;
+    - sketches re-solve when parameters or units change;
+    - saved in `.bee` (SKCH);
+    - shown in Properties and to agents in `scene_summary`.
 - Parameters, expressions and scene units, the base of the CAD phase:
   - **Units:** `scene.units mm|cm|m|in` sets what one scene unit is
     (metres by default).

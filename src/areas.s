@@ -117,6 +117,17 @@ s_p_loc:        .asciz "Location"
 s_p_rot:        .asciz "Rotation"
 s_p_scale:      .asciz "Scale"
 s_p_mesh:       .asciz "Mesh"
+s_p_sketch:     .asciz "Sketch"
+s_p_dof:        .asciz "DOF"
+s_sk_comma:     .asciz " plane, "
+s_sk_ents:      .asciz " entities, "
+s_sk_cons:      .asciz " constraints"
+s_sk_bad:       .asciz ", conflicts "
+.align 8
+sk_planes_p:    .quad s_pl_xy, s_pl_xz, s_pl_yz
+s_pl_xy:        .asciz "XY"
+s_pl_xz:        .asciz "XZ"
+s_pl_yz:        .asciz "YZ"
 s_no_active:    .asciz "No active object"
 s_v:            .asciz " v, "
 s_e:            .asciz " e, "
@@ -1148,7 +1159,53 @@ ed_props_draw:
     lea     rsi, [rip+s_p_scale]
     call    prop_row
     add     r12d, 18
-    call    fmt_reset                   # mesh statistics
+    mov     rax, [rbx+OB_SKETCH]        # a sketch: its plane, sizes, DOF
+    test    rax, rax
+    jz      113f
+    push    rax
+    sub     rsp, 8
+    call    fmt_reset
+    mov     rax, [rsp+8]
+    mov     eax, [rax+8]
+    lea     rcx, [rip+sk_planes_p]
+    mov     rdi, [rcx+rax*8]
+    call    fmt_str
+    lea     rdi, [rip+s_sk_comma]
+    call    fmt_str
+    mov     rax, [rsp+8]
+    mov     edi, [rax+16]
+    call    fmt_int
+    lea     rdi, [rip+s_sk_ents]
+    call    fmt_str
+    mov     rax, [rsp+8]
+    mov     edi, [rax+20]
+    call    fmt_int
+    lea     rdi, [rip+s_sk_cons]
+    call    fmt_str
+    mov     edi, r12d
+    lea     rsi, [rip+s_p_sketch]
+    call    prop_row
+    add     r12d, 18
+    call    fmt_reset
+    mov     rax, [rsp+8]
+    mov     edi, [rax+24]
+    call    fmt_int
+    mov     rax, [rsp+8]
+    cmp     dword ptr [rax+28], 0
+    je      112f
+    lea     rdi, [rip+s_sk_bad]
+    call    fmt_str
+    mov     rax, [rsp+8]
+    mov     edi, [rax+28]
+    call    fmt_int
+112:mov     edi, r12d
+    lea     rsi, [rip+s_p_dof]
+    call    prop_row
+    add     rsp, 16
+    add     r12d, 12
+    mov     edi, r12d
+    jmp     114f
+113:call    fmt_reset                   # mesh statistics
     mov     rbx, [rbx+OB_MESH]
     mov     edi, [rbx+ME_NVERTS]
     call    fmt_int
@@ -1167,7 +1224,7 @@ ed_props_draw:
     call    prop_row
     add     r12d, 12
     mov     edi, r12d                   # ---- the modifier stack
-    call    mods_props_draw
+114:call    mods_props_draw
     mov     edi, eax                    # ---- the material
     call    mats_props_draw
     mov     r12d, eax

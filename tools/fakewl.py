@@ -466,6 +466,7 @@ def main():
     gltf_mtl()
     product_shot()
     params_units()
+    sketcher()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -1918,6 +1919,104 @@ def params_units():
     check((text or '').strip() == '30', f'agents change a parameter and dependents follow ({text!r})')
     f.pump(0.3)
     f.shot('60_parameters.png')
+    f.proc.kill()
+
+
+def sketcher():
+    """Sketches: the constraint solver (DOF, dimensions driven by parameters,
+    conflicts), files, and sketch mode in the viewport."""
+    print('  -- sketcher --')
+    home = tempfile.mkdtemp(prefix='bee-sk-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=60)
+        return (r.stdout + r.stderr).strip()
+    out = run('op("scene.units", "mm")\nparam("width", "20mm")\ns = sketch("Base", "XY")\nr = rect(s, 0, 0, 10, 5)\n'
+              'a = dof(s)\ncon(s, "fixed", pt(s, r, 0))\nb = dof(s)\ncon(s, "length", r, "width")\nc = dof(s)\n'
+              'con(s, "length", r + 1, 8)\nprint(a, b, c, dof(s), conflicts(s), sx(s, pt(s, r + 1, 1)), sy(s, pt(s, r + 1, 1)))\n'
+              'param("width", "30mm")\nprint(sx(s, pt(s, r + 1, 1)), dof(s))\n'
+              'k = circle(s, 15, 4, 2)\ncon(s, "radius", k, "2mm")\ncon(s, "tangent", r + 2, k)\nprint(sy(s, pt(s, k, 0)), sr(s, k), dof(s))\n'
+              'con(s, "length", r + 1, 9)\nprint(conflicts(s))')
+    lines = out.splitlines()
+    check(lines[:4] == ['4 2 1 0 0 20 8', '30 0', '6 2 1', '2'],
+          f'a dimensioned rectangle: DOF 4 > 2 > 1 > 0, a parameter drives it, tangency, conflicts ({lines})')
+    out = run('s = sketch("G", "XY")\na = line(s, 0, 0, 4, 1)\nb = line(s, 1, 3, 3, 5)\ncon(s, "fixed", pt(s, a, 0))\n'
+              'con(s, "horizontal", a)\ncon(s, "perpendicular", a, b)\ncon(s, "equal", a, b)\ncon(s, "length", a, 4)\n'
+              'print(round(sy(s, pt(s, a, 1)) * 1000), round((sx(s, pt(s, b, 1)) - sx(s, pt(s, b, 0))) * 1000), round(abs(sy(s, pt(s, b, 1)) - sy(s, pt(s, b, 0))) * 1000))\n'
+              'c = line(s, 0, 0, 3, 3)\ncon(s, "coincident", pt(s, c, 0), pt(s, a, 0))\ncon(s, "angle", a, c, "30deg")\ncon(s, "length", c, 2)\n'
+              'print(round(sx(s, pt(s, c, 1)) * 1000), round(sy(s, pt(s, c, 1)) * 1000))\n'
+              'p = point(s, 1, 1)\ncon(s, "midpoint", p, a)\nprint(round(sx(s, p) * 1000), round(sy(s, p) * 1000))\n'
+              'k = arc(s, 0, 0, 2, 0, "90deg")\ncon(s, "radius", k, 3)\no = pt(s, k, 0)\n'
+              'print(round(sqrt(pow(sx(s, pt(s, k, 1)) - sx(s, o), 2) + pow(sy(s, pt(s, k, 1)) - sy(s, o), 2)) * 1000), '
+              'round(sqrt(pow(sx(s, pt(s, k, 2)) - sx(s, o), 2) + pow(sy(s, pt(s, k, 2)) - sy(s, o), 2)) * 1000))')
+    lines = out.splitlines()
+    check(lines == ['0 0 4000', '1732 1000', '2000 0', '3000 3000'],
+          f'perpendicular, equal, angle 30deg, midpoint and an arc radius solve exactly ({lines})')
+    bee = os.path.join(home, 'sk.bee')
+    run(f'op("scene.units", "mm")\nparam("w", "12mm")\ns = sketch("Base", "XZ", 5)\nr = rect(s, 0, 0, 10, 5)\n'
+        f'con(s, "length", r, "w")\ncircle(s, 3, 3, 1)\nop("file.save", "{bee}")')
+    out = run(f'op("file.open", "{bee}")\ns = "Base"\nprint(skinfo(s, "entities"), skinfo(s, "constraints"), dof(s), '
+              f'sx(s, 1) - sx(s, 0))\nparam("w", "15mm")\nprint(sx(s, 1) - sx(s, 0))')
+    check(out.splitlines() == ['5 9 6 12', '15'], f'sketches are saved in .bee and stay driven by parameters ({out.splitlines()})')
+    # sketch mode
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.2)
+    q('delete("Cube")\nparam("width", "7")\ns = sketch("Plate", "XZ")\nselect("Plate")')
+    f.key(15)                                   # Tab: sketch mode
+    f.pump(0.2)
+    P = lambda x, z: project((x, 0, z))
+    f.key(38)                                   # L, a closed outline
+    for x, z in [(-3, 2), (3, 2), (3, -2), (-3, -2), (-3, 2)]:
+        f.click(*P(x, z)); f.pump(0.05)
+    f.key(1)                                    # Esc ends the tool
+    info = q('s = "Plate"\nprint(skinfo(s, "entities"), skinfo(s, "points"), skinfo(s, "constraints"), dof(s))')
+    check(info == '4 4 4 4', f'L draws a closed outline: shared corners, H / V inferred, 4 DOF ({info})')
+    f.key(24)                                   # O, a circle
+    f.click(*P(0, 0)); f.click(*P(1, 0))
+    f.key(1)
+    info = q('s = "Plate"\nprint(skinfo(s, "entities"), dof(s))')
+    check(info == '5 7', f'O draws a circle (centre, then a point) ({info})')
+    f.shot('61_sketch_mode.png')
+    f.click(*P(0, 2)); f.pump(0.1)              # the top edge, D, "width"
+    f.key(32)
+    f.pump(0.2)
+    f.type('width'); f.key(28); f.pump(0.3)
+    w = q('s = "Plate"\nprint(sx(s, 1) - sx(s, 0), dof(s))')
+    cmd('param.set width 9')
+    w2 = q('s = "Plate"\nprint(sx(s, 1) - sx(s, 0))')
+    check(w == '7 6' and w2 == '9', f'D dimensions the selection with an expression; the parameter drives it ({w}, then {w2})')
+    f.key(1)
+    corner = q('s = "Plate"\nprint(sx(s, 2), sy(s, 2))').split()
+    cx, cz = float(corner[0]), -float(corner[1])      # (XZ: v = -z)
+    f.drag(*P(cx, cz), *P(cx + 1, cz - 1), steps=6)
+    f.pump(0.2)
+    moved = q('s = "Plate"\nprint(sy(s, 2), sx(s, 1) - sx(s, 0))').split()
+    check(abs(float(moved[0]) - (-cz + 1)) < 0.2 and moved[1] == '9',
+          f'dragging a corner moves it while the dimension holds ({corner} -> {moved})')
+    f.click(*P(0, 0.98)); f.pump(0.1)           # the circle, X
+    f.key(45)
+    n = q('print(skinfo("Plate", "entities"))')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    n2 = q('print(skinfo("Plate", "entities"))')
+    check(n == '4' and n2 == '5', f'X deletes the selection; Ctrl+Z brings it back ({n}, {n2})')
+    t = m.tool('scene_summary')[0]
+    try:
+        o = [o for o in json.loads(t.split('\n')[0])['objects'] if o['name'] == 'Plate'][0]
+        ok = o['type'] == 'sketch' and o['sketch']['plane'] == 'XZ' and o['sketch']['entities'] == 5
+    except Exception as e:
+        ok, o = False, e
+    check(ok, f'scene_summary shows agents the sketch ({str(o)[:80]})')
+    f.key(1); f.key(1); f.key(1)                # Esc until sketch mode ends
+    f.pump(0.2)
+    f.key(15)                                   # Tab again: back in
+    f.pump(0.2)
+    f.shot('62_sketch_dimensioned.png')
     f.proc.kill()
 
 

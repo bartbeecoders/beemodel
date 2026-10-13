@@ -28,6 +28,7 @@ xd_half:        .double 0.5
 xd_pi:          .double 3.14159265358979323846
 xd_e:           .double 2.71828182845904523536
 xd_deg:         .double 0.017453292519943295
+.align 16
 xd_abs:         .quad 0x7fffffffffffffff, 0
 # units: name (8 bytes, zero padded), mm per unit (0: an angle factor follows)
 units_tab:

@@ -113,6 +113,11 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `image(path)` | Loads a PNG, JPEG or Radiance HDR image into the scene; returns its name |
 | `imgsize(image, axis)` | Width (axis 0) or height (1) |
 | (textures, world) | `op("material.texture", "Wood " + img + " 0.5")`, `op("world.hdri", sky)`, `op("world.strength", 2)` |
+| `sketch(name, plane [, offset])` | A new sketch object on the `"XY"`, `"XZ"` or `"YZ"` plane; returns its name |
+| `point(s, x, y)`, `line(s, x1, y1, x2, y2)` or `line(s, p1, p2)`, `circle(s, cx, cy, r)`, `arc(s, cx, cy, r, from, to)`, `rect(s, x, y, w, h)` | Sketch geometry (numbers or expressions); return point / entity indices. `rect` adds its corner, horizontal and vertical constraints and returns the first of its four lines |
+| `pt(s, entity, which)` | An entity's point: line 0 start, 1 end; circle 0 centre; arc 0 centre, 1 start, 2 end |
+| `con(s, type, a [, b [, c]] [, value])` | A constraint: `coincident`, `horizontal`, `vertical`, `parallel`, `perpendicular`, `equal`, `tangent`, `fixed`, `distance`, `hdistance`, `vdistance`, `length`, `radius`, `diameter`, `angle`, `online`, `oncircle`, `midpoint`, `symmetric`. Point constraints take point indices, the others entities; dimensions end with a value or an expression text (kept, so parameters drive it) |
+| `dof(s)`, `conflicts(s)`, `sx(s, p)`, `sy(s, p)`, `sr(s, e)`, `skinfo(s, "points" \| "entities" \| "constraints")` | The solved sketch: degrees of freedom left, conflicting constraints, coordinates, radii, sizes |
 | `param(name [, expression])` | Sets a parameter (an expression with units, e.g. `"10*wall + 2mm"`, or a number) and returns its value in scene units; with one argument, reads it |
 | `expr(text)` | Evaluates an expression with units and parameters (lengths in scene units, angles in radians) |
 | `node(material, type [, values...])` | Adds a shader node and returns its number (1..12). Types: `image` (image name, size), `noise` (scale, detail, roughness), `checker` (scale), `gradient` (axis 0/1/2, scale, offset), `mix` (mode 0 mix 1 add 2 multiply 3 subtract 4 screen), `ramp` (position 0, position 1), `math` (op 0 add 1 subtract 2 multiply 3 divide 4 power 5 min 6 max 7 greater 8 sine 9 abs), `bump` (strength, distance) |
