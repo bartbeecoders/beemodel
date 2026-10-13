@@ -171,6 +171,11 @@ writes PNG or OpenEXR. `material.texture <material> <image> [size]` puts an imag
 equirectangular HDRI (`world.strength`, `world.rotation`). Hive importance-samples it, and the
 material preview uses it too. Image paths and the world are saved with the scene.
 
+**Parameters and units.** `scene.units mm` makes one unit a millimetre. `param.set wall 2mm` and
+`param.set width 10*wall + 1cm` define parameters with expressions and units. Change `wall` and
+everything that depends on it follows. The parameters are listed in Properties, saved with the
+scene, and part of undo.
+
 **Shader graphs.** A material can hold a small node graph that drives its base colour,
 roughness, metallic, emission and normal:
 

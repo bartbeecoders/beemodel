@@ -465,6 +465,7 @@ def main():
     shader_graph()
     gltf_mtl()
     product_shot()
+    params_units()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -1862,6 +1863,61 @@ def product_shot():
             break
     f.shot('59_product_shot_window.png')
     check(done is not None, f'the 1080p render finishes in the window ({done:.0f} s)' if done else 'the 1080p render finishes')
+    f.proc.kill()
+
+
+def params_units():
+    """Parameters and expressions with units: values, errors, undo, files,
+    the Properties table and agents."""
+    print('  -- parameters and units --')
+    home = tempfile.mkdtemp(prefix='bee-par-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=60)
+        return (r.stdout + r.stderr).strip()
+    out = run('op("scene.units", "mm")\nprint(param("wall", "2mm"), param("width", "10*wall + 1cm"), param("angle", "30deg"), '
+              'param("s", "sin(angle) * 2"), param("big", "max(width, 3in) / 2"))\n'
+              'print(expr("2^10"), expr("sqrt(16) + abs(-3) + floor(2.7) + ceil(2.1) + round(2.5)"), expr("1e3mm"))\n'
+              'op("scene.units", "m")\nprint(param("wall"), param("width"), expr("2mm"), expr("1in"))')
+    check(out.split('\n') == ['2 30 0.523599 1 38.1', '1024 15 1000', '0.002 0.03 0.002 0.0254'],
+          f'expressions: units, parameters, functions; values follow the scene units ({out.splitlines()[:3]})')
+    errs = [run('param("a", "1")\nparam("b", "a*2")\nparam("a", "b + 1")'), run('print(expr("1 +"))'),
+            run('param("sin", "3")'), run('param("2x", "3")'), run('print(expr("nope * 2"))')]
+    want = ['cycle', 'syntax error', 'function or constant', 'a parameter name', 'unknown name']
+    check(all(w in e for w, e in zip(want, errs)), f'cycles, syntax errors and bad names are refused ({[e[-30:] for e in errs]})')
+    bee = os.path.join(home, 'p.bee')
+    run(f'op("scene.units", "mm")\nparam("wall", "2mm")\nparam("width", "10*wall")\nop("file.save", "{bee}")')
+    out = run(f'op("file.open", "{bee}")\nprint(param("width"), expr("1cm"))')
+    check(out == '20 10', f'parameters and units are saved in .bee ({out})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.2)
+    cmd('scene.units mm')
+    cmd('param.set wall 2mm')
+    cmd('param.set width = 10*wall')
+    check(q('print(param("width"))') == '20', 'param.set from the command line (one undo step each)')
+    f.key(1)
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    check('no parameter named width' in q('print(param("width"))'), 'Ctrl+Z removes the last parameter')
+    f.mods(5); f.key(44); f.mods(0)             # Ctrl+Shift+Z
+    check(q('print(param("width"))') == '20', 'Ctrl+Shift+Z brings it back')
+    t = m.tool('scene_summary')[0]
+    try:
+        js = json.loads(t.split('\n')[0])
+        ok = js['units'] == 'mm' and [(p['name'], p['expression'], p['value']) for p in js['parameters']] == [
+            ('wall', '2mm', 2), ('width', '10*wall', 20)]
+    except Exception as e:
+        ok, js = False, e
+    check(ok, 'scene_summary shows agents the units and the parameters')
+    text, err = m.tool('script_eval', {'code': 'op("param.set", "wall 3mm")\nprint(param("width"))'})
+    check((text or '').strip() == '30', f'agents change a parameter and dependents follow ({text!r})')
+    f.pump(0.3)
+    f.shot('60_parameters.png')
     f.proc.kill()
 
 

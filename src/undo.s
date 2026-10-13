@@ -32,7 +32,8 @@
 .equ ST_LABEL,      16
 .equ ST_MATS,       24      # the material block it saw (a reference)
 .equ ST_NAME,       32      # the label, copied (64 bytes)
-.equ ST_HDR,        96
+.equ ST_CAD,        96      # the CAD document it saw (a reference)
+.equ ST_HDR,        104
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -111,6 +112,9 @@ snapshot:
     mov     rdi, [rip+mat_cur]          # the materials, shared
     mov     [rbx+ST_MATS], rdi
     call    mat_ref
+    mov     rdi, [rip+cad_cur]          # the CAD document, shared
+    mov     [rbx+ST_CAD], rdi
+    call    cad_ref
     xor     r12d, r12d
 2:  cmp     r12d, [rip+obj_count]
     jae     8f
@@ -156,6 +160,8 @@ release:
     jmp     1b
 2:  mov     rdi, [rbx+ST_MATS]
     call    mat_unref
+    mov     rdi, [rbx+ST_CAD]
+    call    cad_unref
     mov     rax, [rbx+ST_BYTES]
     sub     [rip+undo_bytes], rax
     mov     rdi, rbx
@@ -189,6 +195,13 @@ restore_step:
     mov     rax, [rbx+ST_MATS]
     mov     [rip+mat_cur], rax
     call    mat_unref
+    mov     rdi, [rbx+ST_CAD]           # the CAD document it saw
+    call    cad_ref
+    mov     rdi, [rip+cad_cur]
+    mov     rax, [rbx+ST_CAD]
+    mov     [rip+cad_cur], rax
+    call    cad_unref
+    call    cad_sync
     lea     rdi, [rip+scene_pool]
     call    pool_clear
     mov     dword ptr [rip+obj_count], 0

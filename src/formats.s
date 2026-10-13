@@ -15,6 +15,7 @@
 #                again on open, in order: materials refer to them by index)
 #          WRLD  the world: HDRI image + 1, strength, rotation
 #          MGRF  shader graphs: count, then 896 bytes per material
+#          CADD  the CAD document: unit (mm, double), parameters
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
@@ -39,6 +40,7 @@
 .equ TAG_IMGS,      0x53474d49          # "IMGS"
 .equ TAG_WRLD,      0x444c5257          # "WRLD"
 .equ TAG_MGRF,      0x4652474d          # "MGRF"
+.equ TAG_CADD,      0x44444143          # "CADD"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -62,6 +64,8 @@ oi_path:        .skip 768
 imgs_chunk:     .skip 8
 wrld_chunk:     .skip 8
 mgrf_chunk:     .skip 8
+cadd_chunk:     .skip 8
+cadd_size:      .skip 4
 mgrf_size:      .skip 4
 imgs_size:      .skip 4
 mats_size:      .skip 4
@@ -281,6 +285,10 @@ bee_save:
     mov     edi, TAG_MGRF
     call    chunk_begin
     call    graphs_write
+    call    chunk_end
+    mov     edi, TAG_CADD
+    call    chunk_begin
+    call    cad_write
     call    chunk_end
     mov     edi, TAG_IMGS               # IMGS, WRLD
     call    chunk_begin
@@ -504,6 +512,7 @@ bee_load:
     mov     qword ptr [rip+imgs_chunk], 0
     mov     qword ptr [rip+wrld_chunk], 0
     mov     qword ptr [rip+mgrf_chunk], 0
+    mov     qword ptr [rip+cadd_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -562,7 +571,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_MGRF
+28: cmp     eax, TAG_CADD
+    jne     280f
+    lea     rax, [rbx+8]
+    mov     [rip+cadd_chunk], rax
+    mov     [rip+cadd_size], ebp
+    jmp     23f
+280:cmp     eax, TAG_MGRF
     jne     281f
     lea     rax, [rbx+8]
     mov     [rip+mgrf_chunk], rax
@@ -640,7 +655,12 @@ bee_load:
     inc     dword ptr [rip+obj_count]
     inc     ebx
     jmp     6b
-7:  mov     rdi, [rip+imgs_chunk]       # images (before what uses them)
+7:  mov     rdi, [rip+cadd_chunk]       # the CAD document
+    test    rdi, rdi
+    jz      77f
+    mov     esi, [rip+cadd_size]
+    call    cad_read
+77: mov     rdi, [rip+imgs_chunk]       # images (before what uses them)
     test    rdi, rdi
     jz      74f
     mov     esi, [rip+imgs_size]

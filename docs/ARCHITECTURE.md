@@ -45,6 +45,8 @@ stays private to the module.
 | `jpeg.s` | Baseline JPEG: Huffman, SSE float IDCT, bilinear chroma upsampling, YCbCr |
 | `exr.s` | OpenEXR writer: half-float scanlines, ZIP blocks through png.s's deflate |
 | `image.s` | The scene's images: load, name, save, `image.*` operators |
+| `expr.s` | Expressions with units (recursive descent, doubles): lengths to scene units, angles to radians, functions, parameter names |
+| `cad.s` | The CAD document (copy-on-write, shared with undo): scene units, parameters with cached evaluation and cycle detection, `param.*` / `scene.units` operators, the CADD chunk |
 | `gltf.s` | glTF 2.0: export (.glb chunks or .gltf with base64), import (node tree baked, welded, PBR + KHR extensions, data: / external / GLB buffers) on the lazy JSON reader |
 | `mtl.s` | MTL import for OBJ: principled values from Kd Ke Ni d Tr Ns Tf Pr Pm Pc Pcr, map_Kd as a texture graph |
 | `graph.s` | Shader graphs: node storage in the material record, evaluation (Perlin fBm noise, checker, gradient, mix, ramp, math, images), sockets, Blinn bump, editing and the `material.node*` operators |
