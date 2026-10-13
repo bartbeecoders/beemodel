@@ -29,7 +29,7 @@ stays private to the module.
 | `palette.s` | F3 command palette: fuzzy search over the operator table |
 | `scene.s` | Objects (pool + ordered list), unique names, selection, TRS matrices, object operators |
 | `mesh.s` | Polygon meshes (loops, n-gons), edge/triangle derivation, primitive generators |
-| `raster.s` | Solid viewport rasterizer: parallel setup, binning and tiles; depth + ID buffers; selection outline; picking |
+| `raster.s` | Viewport rasterizer: parallel setup, binning and tiles; depth, ID and visibility (triangle) buffers; selection outline; picking |
 | `transform.s` | Modal grab / rotate / scale, constraints, snapping, numeric input, gizmos |
 | `undo.s` | Undo / redo history of scene snapshots (shared, reference-counted meshes) |
 | `fileio.s` | Paths (`~`, default dirs, mkdir -p), mmap reads, atomic writes, growable buffer, number text I/O |
@@ -39,6 +39,7 @@ stays private to the module.
 | `redo.s` | Redo panel: operators declare parameters (`OPERATOR … params=`) and report the values used; the panel and `edit.redo_last` restore the top undo snapshot and run the operator again without a new step |
 | `mods.s` | Modifier stacks: reference-counted, copy-on-write blocks shared with undo; an evaluation cache per object keyed weakly on mesh and stack versions (freeing a mesh notifies the caches); Mirror, Array, Solidify; the properties UI; save / load |
 | `mods2.s` | Bevel (by angle), Decimate (vertex clustering), Remesh (ray-parity voxels, surface nets, smoothing) |
+| `preview.s` | Material preview: shades the rasterizer's visibility buffer per pixel (ray / triangle barycentrics, auto-smoothed corner normals, principled BSDF, studio environment, ACES) |
 | `material.s` | Principled materials: a reference-counted, copy-on-write block shared with undo steps, per-object assignment (`OB_MAT`), the MATS / OMAT chunks, MTL values, the Properties section and the `material.*` operators |
 | `repair.s` | Mesh analysis (edges by face count and direction, faces by area and overhang, loose vertices), the View › Show … overlays, and `mesh.repair`: merge by distance (spatial hash), degenerate and duplicate faces, hole filling from boundary loops, consistent outward normals (flood fill plus signed volume per part) |
 | `bool.s` | Mesh booleans: snapping to a dyadic grid, exact 128-bit orient3d with a symbolic perturbation of the second mesh (along its normals, plus a per-vertex tie breaker), grid-accelerated triangle pairs, welding, per-triangle constrained triangulation, region flooding and exact ray-parity classification; the `object.boolean` operators, the Boolean modifier's evaluation and `manifold` |

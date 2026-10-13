@@ -24,6 +24,10 @@
 .globl rs_y0
 .globl rs_w
 .globl rs_h
+.globl rs_tri
+.globl rs_tris
+.globl rs_objs
+.globl rs_nobjs
 
 .equ TILE_SHIFT,    4
 .equ TILE,          1 << TILE_SHIFT
@@ -43,12 +47,14 @@
 
 .section .data
 .align 4
-vp_shading:     .long 0             # 0 = solid, 1 = wireframe
+vp_shading:     .long 0             # 0 = solid, 1 = wireframe, 2 = material
 
 .section .bss
 .align 8
 rs_depth:       .skip 8
 rs_id:          .skip 8
+rs_tri:         .skip 8             # visibility buffer: triangle record + 1
+rs_tdelta:      .skip 8             # rs_tri - rs_id
 rs_cap:         .skip 8
 rs_tris:        .skip 8
 rs_toff:        .skip 8
@@ -108,6 +114,10 @@ rs_ensure:
     mov     rsi, [rip+rs_cap]
     mov     eax, SYS_MUNMAP
     syscall
+    mov     rdi, [rip+rs_tri]
+    mov     rsi, [rip+rs_cap]
+    mov     eax, SYS_MUNMAP
+    syscall
 1:  xor     edi, edi
     mov     rsi, rbx
     mov     edx, PROT_RW
@@ -126,6 +136,17 @@ rs_ensure:
     mov     eax, SYS_MMAP
     syscall
     mov     [rip+rs_id], rax
+    xor     edi, edi
+    mov     rsi, rbx
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8d, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    mov     [rip+rs_tri], rax
+    sub     rax, [rip+rs_id]
+    mov     [rip+rs_tdelta], rax
     mov     [rip+rs_cap], rbx
 9:  pop     rbx
     ret
@@ -327,6 +348,10 @@ raster_scene:
     call    parallel_for
     cmp     dword ptr [rip+rs_mode], 0
     jne     .Lrs_out
+    cmp     dword ptr [rip+vp_shading], 2   # material preview: shade
+    jne     1f
+    call    preview_shade
+1:
     call    build_sel_table
     test    rax, rax
     jz      .Lrs_out
@@ -558,6 +583,7 @@ job_tris:
     inc     r13d                        # past this object's triangles
     jmp     .Ljt_loop
 3:  mov     r15, [r14+RO_MESH]
+    mov     [rsp+20], eax               # the local triangle
     mov     ecx, [r14+RO_COL]
     mov     [rsp+16], ecx
     mov     rcx, [r14+RO_PSEL]          # selected polygon (edit mode)?
@@ -584,7 +610,16 @@ job_tris:
     mov     r8d, [r14+RO_ID]
     mov     r9d, ebp
     call    setup_tri                   # eax = triangles kept (0..2)
-    add     ebp, eax
+    test    eax, eax                    # their records: the local triangle
+    jz      34f
+    imul    rcx, rbp, TRI_SZ
+    add     rcx, [rip+rs_tris]
+    mov     edx, [rsp+20]
+    mov     [rcx+44], edx
+    cmp     eax, 2
+    jb      34f
+    mov     [rcx+TRI_SZ+44], edx
+34: add     ebp, eax
     inc     ebx
     jmp     .Ljt_loop
 .Ljt_done:
@@ -970,6 +1005,14 @@ raster_tile:
     pop     rax
     mov     rdi, [rip+rs_id]
     lea     rdi, [rdi+rax*4]
+    push    rax
+    push    rcx
+    xor     eax, eax
+    rep     stosd
+    pop     rcx
+    pop     rax
+    mov     rdi, [rip+rs_tri]
+    lea     rdi, [rdi+rax*4]
     xor     eax, eax
     rep     stosd
     inc     ebx
@@ -1015,6 +1058,17 @@ raster_tri:
     and     rsp, -16
     mov     [rsp+192], rax
     mov     rbx, rdi
+    mov     r9, rdx                     # record index + 1 (visibility buffer;
+    mov     r10, rcx                    #  the clip rect stays in edx / ecx)
+    mov     rax, rdi
+    sub     rax, [rip+rs_tris]
+    xor     edx, edx
+    mov     ecx, TRI_SZ
+    div     rcx
+    inc     eax
+    mov     [rsp+152], eax
+    mov     rdx, r9
+    mov     rcx, r10
     # local copies (v1/v2 swapped for clockwise triangles)
     movss   xmm0, [rbx]
     movss   xmm1, [rbx+4]
@@ -1247,6 +1301,10 @@ raster_tri:
     movss   [r11+rdi*4], xmm7
     mov     esi, [rsp+148]
     mov     [rdx+rdi*4], esi
+    mov     esi, [rsp+152]              # its triangle
+    add     rdx, [rip+rs_tdelta]
+    mov     [rdx+rdi*4], esi
+    sub     rdx, [rip+rs_tdelta]
     cmp     dword ptr [rip+rs_mode], 0
     jne     3f
     mov     esi, [rsp+144]

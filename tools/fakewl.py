@@ -19,6 +19,7 @@ RSS_BUDGET_KB = 16 * 1024          # private (anonymous) memory incl. glyph cach
 FIRST_FRAME_BUDGET_MS = 500        # process start -> first committed frame
 FRAME_BUDGET_MS = 16.0             # average input -> committed frame while dragging
 STRESS_BUDGET_MS = 33.0            # ~300k triangles on a 4-core CI runner
+PREVIEW_BUDGET_MS = 66.0           # the same in material preview (per-pixel PBR)
 WALKTHROUGH_BUDGET_S = 20.0        # the hard-surface walkthrough, end to end
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else 'build/shots'
@@ -1060,7 +1061,7 @@ def analysis_repair():
     check(q('print(analyze("Cube", "boundary"), analyze("Cube", "overhang"), manifold("Cube"))') == '4 1 0',
           'analyze(): the deleted top face leaves 4 boundary edges, the bottom overhangs')
     f.click(130, 44); f.pump(0.2)              # View > Show Boundary Edges
-    f.click(200, 411); f.pump(0.3)
+    f.click(200, 435); f.pump(0.3)
     img = f.image().crop((214, 80, 1014, 620))
     cyan = sum(1 for c in img.getdata() if c == (0x40, 0xe0, 0xe0))
     check(cyan > 100, f'View > Show Boundary Edges marks the hole ({cyan} px)')
@@ -1165,6 +1166,13 @@ def materials_ui():
     gold = px(f, *project((0.3, 2, 0.3)))
     check(gold != grey and (gold >> 16) > (gold & 0xff) + 40, f'the viewport shows the base colour ({gold:06x}, was {grey:06x})')
     f.shot('47_material.png')
+    f.mods(1); f.key(44); f.mods(0)             # Shift+Z: material preview
+    f.pump(0.3)
+    top, side = px(f, *project((0.3, 2, 0.3))), px(f, *project((1, 1, 0.2)))
+    check(top != gold and top != side and (side >> 16) > (side & 0xff),
+          f'Shift+Z: material preview lights the material ({top:06x} top, {side:06x} side)')
+    f.shot('48_material_preview.png')
+    f.mods(1); f.key(44); f.mods(0)             # back to solid
     s = json.loads(m.tool('scene_summary')[0].split('\n')[0])
     cube = [o for o in s['objects'] if o['name'] == 'Cube'][0]
     check(cube.get('material') == 'Material' and s['materials'][0]['base'] == [1, 0.766, 0.336],
@@ -1472,6 +1480,13 @@ def raster_stress():
     ms = lat[len(lat) // 2] if lat else 1e9
     check(ms < STRESS_BUDGET_MS, f'~300k triangles: orbit frame {ms:.1f} ms median (budget {STRESS_BUDGET_MS} ms)')
     f.shot('23_stress.png')
+    f.mods(1); f.key(44); f.mods(0)      # Shift+Z: material preview
+    f.pump(0.3)
+    f.latencies = []
+    f.drag(700, 330, 600, 300, steps=12)
+    lat = sorted(f.latencies[1:])
+    ms = lat[len(lat) // 2] if lat else 1e9
+    check(ms < PREVIEW_BUDGET_MS, f'~300k triangles, material preview: orbit frame {ms:.1f} ms median (budget {PREVIEW_BUDGET_MS} ms)')
     f.proc.kill()
 
 

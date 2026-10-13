@@ -790,8 +790,8 @@ visible:
     comiss  xmm2, xmm3
     jbe     9f
     mov     eax, 1
-    cmp     dword ptr [rip+vp_shading], 0
-    jne     9f
+    cmp     dword ptr [rip+vp_shading], 1   # wireframe: all visible
+    je      9f
     cvttss2si ecx, xmm0
     cvttss2si edx, xmm1
     sub     ecx, [rip+rs_x0]
