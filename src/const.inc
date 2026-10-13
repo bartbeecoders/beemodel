@@ -140,7 +140,7 @@
 .equ DRAG_ORBIT,        4
 .equ DRAG_PAN,          5
 
-.equ NUM_MENUS,         7
+.equ NUM_MENUS,         8
 .equ NUM_TOOLS,         10
 .equ NUM_OUTLINER,      4
 
@@ -272,8 +272,9 @@
 .equ ED_PROPS,          3
 .equ ED_CONSOLE,        4
 .equ ED_ACTIVITY,       5
-.equ MENU_AREA,         7
-.equ MENU_MODADD,       8
+.equ ED_RENDER,         6
+.equ MENU_AREA,         8
+.equ MENU_MODADD,       9
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
 

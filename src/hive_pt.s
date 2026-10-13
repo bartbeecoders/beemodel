@@ -27,6 +27,9 @@
 .globl hv_active
 .globl hv_ms
 .globl hive_render_file
+.globl hv_pass
+.globl hv_next
+.globl now_ms
 
 .equ MAP_ANON_PRIV, 0x22
 .equ RAY_O,     0
@@ -73,6 +76,11 @@ hv_target:      .skip 4
 hv_active:      .skip 4             # a progressive render is running
 hv_ms:          .skip 4             # milliseconds spent
 hv_seed:        .skip 4
+hv_pass:        .skip 4             # resolve: 0 beauty, 1 albedo, 2 normal, 3 depth
+hv_next:        .skip 4             # the next row of the running pass
+.align 8
+hv_aux:         .skip 8             # f32[w*h][7]: albedo, normal, depth
+hv_rowspp:      .skip 8             # u32[h]: samples in each row
 .align 8
 hv_lcdf:        .skip 8             # emissive triangles: CDF over (area * power)
 hv_ltri:        .skip 8             # their triangle
@@ -1687,16 +1695,22 @@ mis:
 .equ PF_CTX,    304             # BSDF context (160)
 .equ PF_SZ,     480
 
-# trace_path(xmm0=sx, xmm1=sy (screen -1..1), rdi=L out[3]; r15 = rng)
+# trace_path(xmm0=sx, xmm1=sy (screen -1..1), rdi=L out[3], rsi=aux out[7]
+#   (albedo, normal, depth of the first hit); r15 = rng)
 trace_path:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    rbp
-    sub     rsp, PF_SZ
+    sub     rsp, PF_SZ+16
     mov     r14, rdi
     lea     rbx, [rsp]
+    mov     [rsp+PF_SZ], rsi
+    xor     eax, eax                    # aux: nothing (a miss) unless hit
+    mov     ecx, 7
+1:  mov     [rsi+rcx*4-4], eax
+    loop    1b
     # camera ray
     xor     ecx, ecx
 1:  lea     rax, [rip+hv_cam]
@@ -1845,7 +1859,20 @@ trace_path:
     lea     rcx, [rbx+PF_WO]
     mov     r8d, [rbx+PF_OUT]
     call    bsdf_init
-    # next-event estimation
+    cmp     dword ptr [rbx+PF_DEPTH], 0 # the first hit: the aux passes
+    jne     79f
+    mov     rax, [rbx+PF_SZ]
+    mov     rcx, [rbx+PF_CTX+C_BASE]
+    mov     [rax], rcx
+    mov     ecx, [rbx+PF_CTX+C_BASE+8]
+    mov     [rax+8], ecx
+    mov     rcx, [rbx+PF_NS]
+    mov     [rax+12], rcx
+    mov     ecx, [rbx+PF_NS+8]
+    mov     [rax+20], ecx
+    mov     ecx, [rbx+PF_RAY+RAY_T]
+    mov     [rax+24], ecx
+79: # next-event estimation
     lea     rdi, [rbx+PF_P]
     lea     rsi, [rbx+PF_CTX+C_N]
     lea     rdx, [rbx+PF_LS]
@@ -1962,7 +1989,7 @@ trace_path:
     mov     [r14], rax
     mov     eax, [rbx+PF_L+8]
     mov     [r14+8], eax
-    add     rsp, PF_SZ
+    add     rsp, PF_SZ+16
     pop     rbp
     pop     r14
     pop     r13
@@ -2119,6 +2146,19 @@ hive_start:
     test    rax, rax
     jz      8f
     mov     [rip+hv_accum], rax
+    mov     eax, r12d
+    imul    eax, r13d
+    imul    edi, eax, 28
+    call    pt_map
+    test    rax, rax
+    jz      8f
+    mov     [rip+hv_aux], rax
+    lea     edi, [r13*4+64]
+    call    pt_map
+    test    rax, rax
+    jz      8f
+    mov     [rip+hv_rowspp], rax
+    mov     dword ptr [rip+hv_next], 0
     call    light_prep
     mov     dword ptr [rip+hv_debug], 0 # BEEMODEL_HIVE_DEBUG=1 normals,
     lea     rdi, [rip+s_env_dbg]        #  2 sky light only
@@ -2145,6 +2185,7 @@ hive_start:
 # hive_pass - one more sample per pixel (rows in parallel)
 hive_pass:
     sub     rsp, 8
+    mov     dword ptr [rip+hv_next], 0
     lea     rdi, [rip+job_rows]
     xor     esi, esi
     mov     edx, [rip+hv_h]
@@ -2162,7 +2203,7 @@ job_rows:
     push    r14
     push    r15
     push    rbp
-    sub     rsp, 56
+    sub     rsp, 72
     mov     r12d, esi
     mov     r13d, edx
 .Ljr_row:
@@ -2214,7 +2255,19 @@ job_rows:
     divss   xmm1, xmm2
     movss   xmm0, [rsp+8]
     lea     rdi, [rsp+16]
+    lea     rsi, [rsp+28]
     call    trace_path
+    imul    rax, rbp, 28                # aux
+    add     rax, [rip+hv_aux]
+    xor     ecx, ecx
+3:  movss   xmm0, [rsp+28+rcx*4]
+    ucomiss xmm0, xmm0
+    jp      4f
+    addss   xmm0, [rax+rcx*4]
+    movss   [rax+rcx*4], xmm0
+4:  inc     ecx
+    cmp     ecx, 7
+    jb      3b
     lea     rax, [rbp+rbp*2]            # accumulate (NaNs dropped)
     shl     rax, 2
     add     rax, [rip+hv_accum]
@@ -2230,10 +2283,12 @@ job_rows:
     inc     r14d
     jmp     .Ljr_px
 .Ljr_next:
+    mov     rax, [rip+hv_rowspp]        # this row has one more sample
+    inc     dword ptr [rax+r12*4]
     inc     r12d
     jmp     .Ljr_row
 .Ljr_out:
-    add     rsp, 56
+    add     rsp, 72
     pop     rbp
     pop     r15
     pop     r14
@@ -2242,40 +2297,84 @@ job_rows:
     pop     rbx
     ret
 
-# hive_resolve(rdi=XRGB out, esi=stride in pixels) - average, ACES, sRGB
+# hive_resolve(rdi=XRGB out, esi=stride in pixels) - the chosen pass:
+#   beauty (ACES + sRGB), albedo, normal (0.5 + 0.5 n), depth (exp(-d / 12))
 hive_resolve:
     push    rbx
     push    r12
     push    r13
     push    r14
+    push    r15
     mov     rbx, rdi
     mov     r12d, esi
-    mov     eax, [rip+hv_spp]
-    test    eax, eax
-    jnz     1f
-    mov     eax, 1
-1:  cvtsi2ss xmm7, eax
-    movss   xmm6, [rip+pt_one]
-    divss   xmm6, xmm7
     xor     r13d, r13d                  # y
 2:  cmp     r13d, [rip+hv_h]
     jae     9f
+    mov     rax, [rip+hv_rowspp]        # this row's samples
+    mov     eax, [rax+r13*4]
+    test    eax, eax
+    jnz     21f
+    mov     eax, 1
+21: cvtsi2ss xmm7, eax
+    movss   xmm6, [rip+pt_one]
+    divss   xmm6, xmm7
     xor     r14d, r14d
 3:  cmp     r14d, [rip+hv_w]
     jae     5f
     mov     eax, r13d
     imul    eax, [rip+hv_w]
     add     eax, r14d
-    lea     rax, [rax+rax*2]
-    shl     rax, 2
-    add     rax, [rip+hv_accum]
+    mov     r15d, eax                   # pixel
     xor     edx, edx                    # packed
     xor     ecx, ecx
-4:  movss   xmm0, [rax+rcx*4]
+4:  mov     eax, [rip+hv_pass]
+    test    eax, eax
+    jnz     41f
+    lea     rax, [r15+r15*2]            # beauty
+    shl     rax, 2
+    add     rax, [rip+hv_accum]
+    movss   xmm0, [rax+rcx*4]
     mulss   xmm0, xmm6
     maxss   xmm0, [rip+pt_zero]
-    call    aces_srgb                   # xmm0 -> eax 0..255 (keeps rax? no)
-    shl     edx, 8
+    call    aces_srgb
+    jmp     48f
+41: imul    rax, r15, 28
+    add     rax, [rip+hv_aux]
+    cmp     dword ptr [rip+hv_pass], 1
+    jne     42f
+    movss   xmm0, [rax+rcx*4]           # albedo
+    jmp     47f
+42: cmp     dword ptr [rip+hv_pass], 2
+    jne     43f
+    movss   xmm0, [rax+12+rcx*4]        # normal
+    mulss   xmm0, xmm6
+    mulss   xmm0, [rip+pt_half]
+    addss   xmm0, [rip+pt_half]
+    movss   xmm1, xmm0
+    jmp     46f
+43: movss   xmm0, [rax+24]              # depth: exp(-d / 12) (0: none)
+    mulss   xmm0, xmm6
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     46f
+    mulss   xmm0, [rip+pt_mdepth]
+    push    rcx
+    push    rdx
+    call    exp2_pt
+    pop     rdx
+    pop     rcx
+    movss   xmm1, xmm0
+    jmp     46f
+47: mulss   xmm0, xmm6                  # straight values: sRGB-ish
+    minss   xmm0, [rip+pt_one]
+    maxss   xmm0, [rip+pt_zero]
+    sqrtss  xmm1, xmm0
+46: minss   xmm1, [rip+pt_one]
+    maxss   xmm1, [rip+pt_zero]
+    mulss   xmm1, [rip+pt_255]
+    addss   xmm1, [rip+pt_half]
+    cvttss2si r8d, xmm1
+48: shl     edx, 8
     or      edx, r8d
     inc     ecx
     cmp     ecx, 3
@@ -2288,10 +2387,30 @@ hive_resolve:
     jmp     3b
 5:  inc     r13d
     jmp     2b
-9:  pop     r14
+9:  pop     r15
+    pop     r14
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# exp2_pt(xmm0) -> 2^x (x87)
+exp2_pt:
+    sub     rsp, 8
+    movss   [rsp], xmm0
+    fld     dword ptr [rsp]
+    fld     st(0)
+    frndint
+    fsub    st(1), st(0)
+    fxch    st(1)
+    f2xm1
+    fld1
+    faddp   st(1), st(0)
+    fscale
+    fstp    st(1)
+    fstp    dword ptr [rsp]
+    movss   xmm0, [rsp]
+    add     rsp, 8
     ret
 
 # aces_srgb(xmm0=linear) -> r8d = 0..255 (only xmm0..3 and r8 change)
@@ -2314,20 +2433,37 @@ aces_srgb:
     cvttss2si r8d, xmm1
     ret
 
-# hive_tick(edi=budget ms) -> eax = 1 while samples remain: passes until the
-#   budget is used (the UI stays responsive between ticks)
+# hive_tick(edi=budget ms) -> eax = 1 while samples remain: bands of rows
+#   until the budget is used, so a frame never waits for a whole pass (the
+#   UI stays responsive at any resolution); rows count their own samples
 hive_tick:
     push    rbx
     push    r12
-    sub     rsp, 24
+    push    r13
     mov     r12d, edi
     call    now_ms
     mov     rbx, rax
 1:  mov     eax, [rip+hv_spp]
     cmp     eax, [rip+hv_target]
     jae     8f
-    call    hive_pass
-    call    now_ms
+    mov     r13d, [rip+n_workers]       # a band: four rows per thread
+    inc     r13d
+    shl     r13d, 2
+    mov     esi, [rip+hv_next]
+    lea     edx, [rsi+r13]
+    cmp     edx, [rip+hv_h]
+    jbe     2f
+    mov     edx, [rip+hv_h]
+2:  mov     [rip+hv_next], edx
+    lea     rdi, [rip+job_rows]
+    mov     ecx, 1
+    call    parallel_for
+    mov     eax, [rip+hv_next]
+    cmp     eax, [rip+hv_h]
+    jb      3f
+    mov     dword ptr [rip+hv_next], 0  # a pass is complete
+    inc     dword ptr [rip+hv_spp]
+3:  call    now_ms
     mov     rcx, rax
     sub     rcx, rbx
     cmp     ecx, r12d
@@ -2339,7 +2475,7 @@ hive_tick:
     sub     rax, rbx
     add     [rip+hv_ms], eax
     xor     eax, eax
-9:  add     rsp, 24
+9:  pop     r13
     pop     r12
     pop     rbx
     ret
@@ -2370,6 +2506,15 @@ hive_render_file:
     push    rbx
     push    r12
     push    r13
+    push    rdi
+    push    rsi
+    push    rdx
+    push    rcx
+    call    render_abort                # the Render area's samples are gone
+    pop     rcx
+    pop     rdx
+    pop     rsi
+    pop     rdi
     mov     rbx, rdi
     mov     edi, esi
     mov     esi, edx
@@ -2508,6 +2653,7 @@ do_render_image:
 .section .rodata
 .align 4
 pt_amin_spec:   .float 0.0025           # alpha below this: a mirror
+pt_mdepth:      .float -0.1202          # -1 / (12 ln 2): exp(-d / 12) via 2^x
 
 .section .bss
 .align 8
