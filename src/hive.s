@@ -21,6 +21,7 @@
 .globl hv_tn
 .globl hv_tm
 .globl hv_to
+.globl hv_tuv
 .globl hv_mats
 .globl hv_nmats
 .globl hv_cam
@@ -48,6 +49,7 @@ hv_tv:          .skip 8             # f32[n][9]  v0 e1 e2
 hv_tn:          .skip 8             # f32[n][9]  corner normals
 hv_tm:          .skip 8             # u32[n]     material (0 = default)
 hv_to:          .skip 8             # f32[n][9]  object-space v0, e1, e2 (shader graphs)
+hv_tuv:         .skip 8             # f32[n][6]  UVs (u0 NaN: none, box)
 hv_mats:        .skip 8             # material snapshots (128 bytes, 0 = default)
 hv_nodes:       .skip 8             # BVH4
 hv_root:        .skip 4             # root reference
@@ -186,6 +188,12 @@ hive_build:
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_to], rax
+    imul    edi, r12d, 24
+    add     edi, 64
+    call    hv_map
+    test    rax, rax
+    jz      .Lhb_fail
+    mov     [rip+hv_tuv], rax
     imul    edi, r12d, 12
     add     edi, 64
     call    hv_map
@@ -339,6 +347,22 @@ put_tri:
     lea     rdx, [rdx+rdx*2]
     lea     r8, [r8+r8*2]
     lea     r9, [r9+r9*2]
+    push    rdi                         # UVs (none: NaN)
+    push    rdx
+    push    r8
+    push    r9
+    mov     rdx, rbx
+    lea     rdx, [rdx+rdx*2]
+    shl     rdx, 3
+    add     rdx, [rip+hv_tuv]
+    mov     dword ptr [rdx], 0x7fc00000
+    mov     esi, edi
+    mov     rdi, r15
+    call    tri_uvs
+    pop     r9
+    pop     r8
+    pop     rdx
+    pop     rdi
     mov     rax, [r15+ME_POS]           # object space: v0, e1, e2
     lea     r10, [rbx+rbx*8]
     shl     r10, 2
@@ -1339,6 +1363,27 @@ reorder_tris:
     inc     ebx
     jmp     41b
 42: mov     [rip+hv_to], r13
+    imul    edi, r12d, 24               # UVs, the same order
+    add     edi, 64
+    call    hv_map
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    xor     ebx, ebx
+43: cmp     ebx, r12d
+    jae     44f
+    mov     rax, [rip+b_prim]
+    mov     eax, [rax+rbx*4]
+    lea     rsi, [rax+rax*2]
+    shl     rsi, 3
+    add     rsi, [rip+hv_tuv]
+    lea     rdi, [rbx+rbx*2]
+    lea     rdi, [r13+rdi*8]
+    mov     ecx, 24
+    rep     movsb
+    inc     ebx
+    jmp     43b
+44: mov     [rip+hv_tuv], r13
     lea     edi, [r12*4+64]             # materials
     call    hv_map
     test    rax, rax

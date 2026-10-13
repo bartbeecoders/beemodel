@@ -517,6 +517,7 @@ def main():
     multires()
     uv_maps()
     uv_editor()
+    uv_textures()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2737,6 +2738,62 @@ def uv_editor():
     blue = sum(1 for p in px if p[2] > p[1] + 40)
     f.shot('75_uv_heat.png')
     check(red + blue > 20, f'D: the heat map shows distorted triangles (red {red}, blue {blue})')
+    f.proc.kill()
+
+
+def uv_textures():
+    """Image textures follow the UVs (path tracer and material preview); new
+    and painted images are saved inside .bee files."""
+    print('  -- UV textures --')
+    home = tempfile.mkdtemp(prefix='bee-uvtex-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    setup = ('op("image.new", "tex 8 1")\nfor x in 0..8 {\n if x < 4 { imgset("tex", x, 0, 255, 0, 0) } '
+             'else { imgset("tex", x, 0, 0, 0, 255) }\n}\nmaterial("M")\nn = node("M", "image", "tex", 1)\n'
+             'socket("M", "base", n)\nassign("Cube", "M")\nseams("Cube", "sharp")\nunwrap("Cube")\n'
+             'uvmap("Cube", 0.3, 0.5, 0.05, 0.25)\n')
+    r = subprocess.run([BIN, '--eval', setup + 'render("~/BeeModel/red.png", 96, 64, 4)\n'
+                        'uvmap("Cube", 1, 1, 0.5, 0)\nrender("~/BeeModel/blue.png", 96, 64, 4)\n'
+                        'op("file.save", "~/BeeModel/tex.bee")'], env=env, capture_output=True, text=True, timeout=120)
+    def count(path):
+        from PIL import Image
+        im = Image.open(path).convert('RGB')
+        px = [im.getpixel((x, y)) for y in range(im.height) for x in range(im.width)]
+        red = sum(1 for p in px if p[0] > p[2] + 60 and p[0] > p[1] + 60)
+        blue = sum(1 for p in px if p[2] > p[0] + 60 and p[2] > p[1] + 40)
+        return red, blue
+    try:
+        a = count(os.path.join(home, 'BeeModel', 'red.png'))
+        b = count(os.path.join(home, 'BeeModel', 'blue.png'))
+        ok = a[0] > 300 and a[1] == 0 and b[1] > 300 and b[0] == 0
+    except Exception as e:
+        ok, a, b = False, repr(e), (r.stdout + r.stderr)[-200:]
+    check(ok, f'the path tracer samples the image through the UVs: left half red {a}, right half blue {b}')
+    r = subprocess.run([BIN, '--eval', 'op("file.open", "~/BeeModel/tex.bee")\n'
+                        'print(imgsize("tex", 0), imgpixel("tex", 1, 0, 0), imgpixel("tex", 6, 0, 2), uvstat("Cube", "islands"))'],
+                       env=env, capture_output=True, text=True, timeout=60)
+    out = (r.stdout + r.stderr).split()
+    check(out == ['8', '255', '255', '6'], f'a new, painted image and the UVs come back from the .bee file ({out})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q(setup)
+    f.mods(1); f.key(44); f.mods(0)             # Shift+Z: material preview
+    f.pump(0.5)
+    def vp():
+        img = f.image()
+        px = [img.getpixel((x, y)) for y in range(220, 420, 3) for x in range(520, 720, 3)]
+        return (sum(1 for p in px if p[0] > p[2] + 60 and p[0] > p[1] + 60),
+                sum(1 for p in px if p[2] > p[0] + 60 and p[2] > p[1] + 40))
+    a = vp()
+    f.shot('79_uv_texture.png')
+    q('uvmap("Cube", 1, 1, 0.5, 0)')
+    f.pump(0.5)
+    b = vp()
+    check(a[0] > 5 * a[1] and b[1] > 5 * b[0], f'the material preview too: red / blue {a} then {b} (axis lines are the rest)')
     f.proc.kill()
 
 

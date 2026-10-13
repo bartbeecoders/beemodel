@@ -1,10 +1,11 @@
 # =============================================================================
 #  BeeModel - textures: bilinear image lookups and box projection
 #
-#  Until meshes carry UVs (phase 7), a textured surface is box-projected in
-#  object space: each triangle takes the two axes across its face normal's
-#  largest component, so cubes map one image per side and the texture
-#  follows the object when it moves. Lookups wrap (repeat), are bilinear and
+#  Meshes with UVs are textured through them (the renderers hand the
+#  triangle's UVs to the shader graph). Without UVs a textured surface is
+#  box-projected in object space: each triangle takes the two axes across
+#  its face normal's largest component, so cubes map one image per side and
+#  the texture follows the object when it moves. Lookups wrap (repeat), are bilinear and
 #  return linear colour (8-bit images are sRGB, decoded through a table).
 # =============================================================================
 .intel_syntax noprefix

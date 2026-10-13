@@ -49,6 +49,7 @@ s_file_pfx:     .asciz "file."
 s_render_img:   .asciz "render.image"
 s_render_save:  .asciz "render.save"
 s_image_pfx:    .asciz "image."
+s_image_new:    .asciz "image.new"
 s_shot:         .asciz "view.screenshot"
 s_agent_pfx:    .asciz "Agent:"
 s_revert:       .asciz "Revert last agent change"
@@ -137,11 +138,17 @@ op_tier:
     call    str_eq
     test    eax, eax
     jnz     1f
+    mov     rdi, rbx                    # (a new image is no file)
+    lea     rsi, [rip+s_image_new]
+    call    str_eq
+    test    eax, eax
+    jnz     2f
     mov     rdi, rbx                    # images come from / go to files
     lea     rsi, [rip+s_image_pfx]
     call    prefix
     test    eax, eax
     jnz     1f
+2:
     mov     eax, 1
     pop     rbx
     ret

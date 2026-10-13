@@ -2075,6 +2075,13 @@ hit_graph:
     lea     rdi, [rbx+PF_SC+68]
     mov     ecx, 3
     rep     movsd
+    mov     rax, [rip+hv_tuv]           # its UVs (or none: box)
+    lea     rcx, [r12+r12*2]
+    lea     rax, [rax+rcx*8]
+    cmp     dword ptr [rax], 0x7fc00000
+    jne     1f
+    xor     eax, eax
+1:  mov     [rbx+PF_SC+120], rax
     mov     rsi, r13                    # the material's own values
     lea     rdi, [rbx+PF_MAT]
     mov     ecx, 32

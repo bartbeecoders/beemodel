@@ -638,7 +638,16 @@ pv_graph:
     mov     [rsp+68], rax
     mov     eax, [r12+SH_N+8]
     mov     [rsp+76], eax
-    mov     rdi, rbx
+    mov     qword ptr [rsp+120], 0      # the mesh's UVs, if it has them
+    mov     rdi, [r14+RO_MESH]
+    mov     esi, r15d
+    lea     rdx, [rsp+176]
+    call    tri_uvs
+    test    eax, eax
+    jz      11f
+    lea     rax, [rsp+176]
+    mov     [rsp+120], rax
+11: mov     rdi, rbx
     lea     rsi, [rsp]
     call    graph_shade
     mov     eax, [rsp+112]              # what it drives
