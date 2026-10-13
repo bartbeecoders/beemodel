@@ -47,6 +47,9 @@ jobs:
           python -m pip install --quiet pillow
           sudo apt-get install -y --no-install-recommends fonts-dejavu-core >/dev/null
 
+      - name: Boolean stress corpus (exact identities, closed results)
+        run: timeout 300 python tests/bool_stress.py build/beemodel --cases 300
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 120 python tools/fakewl.py build/shots
 

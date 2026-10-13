@@ -647,15 +647,12 @@ prim_cyl_impl:
     call    mesh_add_poly
     inc     r13d
     jmp     5b
-7:  # caps (n-gons): bottom reversed, top forward
+7:  # caps (n-gons), facing out: bottom forward, top reversed
     lea     r14, [rip+pbuf]
     xor     ecx, ecx
 8:  cmp     ecx, r12d
     jae     9f
-    mov     eax, r12d
-    dec     eax
-    sub     eax, ecx
-    mov     [r14+rcx*4], eax
+    mov     [r14+rcx*4], ecx
     inc     ecx
     jmp     8b
 9:  mov     rdi, rbx
@@ -667,7 +664,8 @@ prim_cyl_impl:
     xor     ecx, ecx
 10: cmp     ecx, r12d
     jae     101f
-    lea     eax, [rcx+32]
+    mov     eax, 63
+    sub     eax, ecx
     mov     [r14+rcx*4], eax
     inc     ecx
     jmp     10b
@@ -870,13 +868,13 @@ prim_torus:
     cmp     ecx, 12
     jb      62f
     xor     ecx, ecx
-62: lea     edx, [rax+r13]
+62: lea     edx, [rax+r13]             # facing out
     mov     [r14], edx
-    lea     edx, [r15+r13]
+    lea     edx, [rax+rcx]
     mov     [r14+4], edx
     lea     edx, [r15+rcx]
     mov     [r14+8], edx
-    lea     edx, [rax+rcx]
+    lea     edx, [r15+r13]
     mov     [r14+12], edx
     push    rax
     mov     rdi, rbx

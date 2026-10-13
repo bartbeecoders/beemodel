@@ -56,6 +56,22 @@ project uses [Semantic Versioning](https://semver.org/).
   102,400-quad mesh, level 3 (6.5 M faces) builds in about 125 ms, and an
   edit updates it in about 19 ms.
 - BeeScript: `vmove` (move a vertex) and `clock()`.
+- Mesh booleans: union, difference and intersection that stay exact on
+  degenerate input (faces on faces, edges on edges, identical meshes,
+  angles typed to six decimals).
+  - Edit › Boolean Union / Difference / Intersect and `object.boolean
+    union|difference|intersect [keep]` combine the active mesh with another
+    selected one, as one undo step.
+  - A Boolean modifier reads another object's mesh and follows it when that
+    object moves; it is saved in `.bee` files.
+  - BeeScript `boolean(a, b, kind)` and `manifold(name)`.
+  - Exact integer predicates with a symbolic perturbation. Faces lying on
+    each other resolve as expected: a flush cut goes through, touching
+    solids fuse, and A − A is empty.
+  - A stress corpus runs in CI. It checks the volume identities and closed
+    results on 300 cases (general position, coincident and identical
+    operands). A sphere with 63k triangles minus one with 16k takes about
+    90 ms.
 - Redo panel: adjust the last operation. Extrude, individual extrude,
   inset, bevel, loop cut, merge by distance and spin report their values.
   Drag or scroll a value, use F9 to type, or call `edit.redo_last
@@ -69,6 +85,10 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - Meshes store a vertex selection and a triangle-to-polygon map.
+
+### Fixed
+- Cylinder and cone caps and the whole torus were wound inwards; all
+  primitives are now closed solids facing out.
 
 ## [0.4.0] - 2026-10-13
 

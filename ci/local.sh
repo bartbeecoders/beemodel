@@ -8,6 +8,7 @@ ci/check-binary.sh build/beemodel
 BEEMODEL_THREADS=0 ./build/beemodel --selftest
 BEEMODEL_THREADS=3 ./build/beemodel --selftest
 ./build.sh debug >/dev/null && ./build.sh >/dev/null
+timeout 300 python3 tests/bool_stress.py build/beemodel --cases 300
 timeout 300 python3 tools/fakewl.py build/shots
 BEEMODEL_FONT=none BEEMODEL_MONO_FONT=none BEEMODEL_GOLDEN=check \
     timeout 300 python3 tools/fakewl.py build/shots-bitmap

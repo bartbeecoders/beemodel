@@ -39,6 +39,7 @@ stays private to the module.
 | `redo.s` | Redo panel: operators declare parameters (`OPERATOR … params=`) and report the values used; the panel and `edit.redo_last` restore the top undo snapshot and run the operator again without a new step |
 | `mods.s` | Modifier stacks: reference-counted, copy-on-write blocks shared with undo; an evaluation cache per object keyed weakly on mesh and stack versions (freeing a mesh notifies the caches); Mirror, Array, Solidify; the properties UI; save / load |
 | `mods2.s` | Bevel (by angle), Decimate (vertex clustering), Remesh (ray-parity voxels, surface nets, smoothing) |
+| `bool.s` | Mesh booleans: snapping to a dyadic grid, exact 128-bit orient3d with a symbolic perturbation of the second mesh (along its normals, plus a per-vertex tie breaker), grid-accelerated triangle pairs, welding, per-triangle constrained triangulation, region flooding and exact ray-parity classification; the `object.boolean` operators, the Boolean modifier's evaluation and `manifold` |
 | `subsurf.s` | Catmull–Clark on corner arrays: level 0 is hashed once, deeper levels are derived arithmetically, every pass runs in parallel; topology is cached so edits only recompute positions |
 | `agent.s` | Agent safety: permission tiers (read-only / edit / files) and their operators, the activity ring, the AI Activity editor, one-click revert |
 | `script.s` | BeeScript: lexer, one-pass bytecode compiler, stack VM (doubles, texts, nil), semispace text heap, scene builtins, macro recorder |

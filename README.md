@@ -111,6 +111,19 @@ object's stack.
 | Bevel | Bevels edges sharper than an angle |
 | Decimate | Reduces to a ratio of the vertices |
 | Remesh | Rebuilds the surface as voxel-based quads |
+| Boolean | Union, difference or intersection with another object's mesh; follows that object when it moves |
+
+**Booleans.** Edit › Boolean Union / Difference / Intersect combine the active mesh with another
+selected one: the other mesh is used up, and the operation is one undo step. They use exact
+integer predicates with a symbolic perturbation, so they stay correct on degenerate input:
+
+- faces lying on faces;
+- identical meshes;
+- primitives rotated by a quarter turn typed as `1.570796`.
+
+Faces on faces come out the way you would want: a flush cut goes through, touching solids fuse,
+and A − A is empty. A stress corpus in CI checks the volume identities and closed results on
+every change.
 
 Modifiers are saved in `.bee` files. Scripts use `modifier`, `modset`, `modapply` and `modremove`;
 agents see an object's modifiers in `scene_summary`.

@@ -377,6 +377,10 @@ builtins:
     .long 0, 0
     .quad bn_vmove, b_vmove
     .long 5, 5
+    .quad bn_boolean, b_boolean
+    .long 3, 3
+    .quad bn_manifold, b_manifold
+    .long 1, 1
 builtins_end:
 .equ B_SZ, 24
 
@@ -437,6 +441,9 @@ bn_everts:      .asciz "everts"
 bn_efaces:      .asciz "efaces"
 bn_clock:       .asciz "clock"
 bn_vmove:       .asciz "vmove"
+bn_boolean:     .asciz "boolean"
+bn_manifold:    .asciz "manifold"
+s_bool_op:      .asciz "object.boolean"
 e_modtype:      .asciz "modifier types: mirror array solidify subsurf bevel decimate remesh; got "
 e_modidx:       .asciz "no modifier with that index / parameter"
 e_not_mesh:     .asciz "not a mesh: "
@@ -3917,10 +3924,15 @@ b_modset:
     push    r14
     sub     rsp, 8
     mov     rbx, rdi
-    lea     rdi, [rbx+48]
-    call    a_num
+    lea     rdi, [rbx+48]               # a name: an object (its handle)
+    cmp     dword ptr [rdi], T_STR
+    jne     3f
+    call    a_obj
+    movd    xmm0, eax
+    jmp     4f
+3:  call    a_num
     cvtsd2ss xmm0, xmm0
-    movss   [rsp], xmm0
+4:  movss   [rsp], xmm0
     lea     rdi, [rbx+16]
     call    a_num
     cvttsd2si r13d, xmm0                # index
@@ -4027,6 +4039,54 @@ eval_count:
 # vmove(name, i, x, y, z) - move a vertex (object space). The mesh is copied
 #   first if an undo step or another object shares it; edits in place bump
 #   its version so modifiers re-evaluate.
+# boolean(a, b, kind) - a becomes a (op) b, b is deleted
+b_boolean:
+    push    rbx
+    sub     rsp, 32
+    mov     rbx, rdi
+    movdqu  xmm0, [rbx+16]              # select(b, a): a is active
+    movdqu  [rsp], xmm0
+    movdqu  xmm0, [rbx]
+    movdqu  [rsp+16], xmm0
+    lea     rdi, [rsp]
+    mov     esi, 2
+    call    b_select
+    lea     rdi, [rip+s_bool_op]
+    call    find_op_by_name
+    mov     [rsp], rax
+    cmp     dword ptr [rip+sc_agent], 0
+    je      1f
+    mov     rdi, rax
+    call    op_tier
+    cmp     eax, [rip+agent_tier]
+    ja      8f
+1:  lea     rdi, [rbx+32]               # the kind as text
+    lea     rsi, [rip+op_argbuf]
+    lea     rdx, [rip+op_argbuf+512]
+    call    val_to
+    mov     byte ptr [rax], 0
+    lea     rax, [rip+op_argbuf]
+    mov     [rip+op_arg], rax
+    mov     rdi, [rsp]
+    call    run_op
+    mov     qword ptr [rip+op_arg], 0
+    add     rsp, 32
+    pop     rbx
+    jmp     ret_nil
+8:  lea     rdi, [rip+e_op_perm]
+    lea     rsi, [rip+s_bool_op]
+    jmp     sc_rt
+
+# manifold(name) -> 1 if the mesh is closed and consistently oriented
+b_manifold:
+    sub     rsp, 8
+    call    a_mesh
+    mov     rdi, rax
+    call    mesh_manifold
+    add     rsp, 8
+    cvtsi2sd xmm0, eax
+    jmp     ret_num
+
 b_vmove:
     push    rbx
     push    r12
