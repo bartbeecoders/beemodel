@@ -49,6 +49,7 @@
 .equ T_CHAMFER,  7
 .equ T_LPAT,     8
 .equ T_CPAT,     9
+.equ T_INFILL,   10
 .equ S_OK,       0
 .equ S_SKETCH,   1
 .equ S_PROFILE,  2
@@ -70,6 +71,7 @@ fd_one:         .double 1.0
 fd_two:         .double 2.0
 fd_three:       .double 3.0
 fd_ov:          .double 0.02
+fd_q3:          .double 0.75
 fd_2pi:         .double 6.28318530717958647692
 fd_2pim:        .double 6.2831
 fd_vtol:        .float 0.99
@@ -77,9 +79,13 @@ fd_htol:        .float 0.01
 fd_ztol:        .float 1.0e-4
 fd_cos:         .float 0.9                      # edges sharper than ~25 deg
 f_one:          .float 1.0
+ff_half:        .float 0.5
+ff_quarter:     .float 0.25
+ff_23:          .float 0.6666667
+ff_sixth:       .float 0.16666667
 ident:          .float 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0
 type_names:     .quad tn_0, tn_pad, tn_pocket, tn_revolve, tn_hole, tn_shell
-                .quad tn_fillet, tn_chamfer, tn_lpat, tn_cpat
+                .quad tn_fillet, tn_chamfer, tn_lpat, tn_cpat, tn_infill
 tn_0:           .asciz "?"
 tn_pad:         .asciz "Pad"
 tn_pocket:      .asciz "Pocket"
@@ -90,6 +96,7 @@ tn_fillet:      .asciz "Fillet"
 tn_chamfer:     .asciz "Chamfer"
 tn_lpat:        .asciz "Pattern"
 tn_cpat:        .asciz "Circular pattern"
+tn_infill:      .asciz "Infill"
 status_names:   .quad sn_ok, sn_sketch, sn_profile, sn_geom, sn_value, sn_empty
                 .quad sn_ref, sn_off, sn_body
 sn_ok:          .asciz "ok"
@@ -135,7 +142,7 @@ slot_val:
 
 # feat_type_name(edi) / feat_status_name(edi) -> rax
 feat_type_name:
-    cmp     edi, T_CPAT
+    cmp     edi, T_INFILL
     jbe     1f
     xor     edi, edi
 1:  lea     rax, [rip+type_names]
@@ -404,6 +411,8 @@ apply:
     je      .Lap_pattern
     cmp     eax, T_CPAT
     je      .Lap_pattern
+    cmp     eax, T_INFILL
+    je      .Lap_infill
     cmp     eax, T_PAD
     jb      .Lap_ref
     cmp     eax, T_SHELL
@@ -567,6 +576,11 @@ apply:
 .Lap_ok:
     xor     eax, eax
     jmp     .Lap_out
+.Lap_infill:
+    mov     rdi, rbx
+    mov     esi, r12d
+    call    infill
+    jmp     .Lap_out
 .Lap_empty:
     mov     eax, S_EMPTY
     jmp     .Lap_out
@@ -577,6 +591,228 @@ apply:
     mov     eax, S_GEOM
 .Lap_out:
     add     rsp, 112
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# infill(rdi=feature, esi=body slot) -> eax = status: a lattice (FT_AXIS 0
+#   gyroid, 1 grid of struts; cell, wall / strut slots) filling the cavity
+#   of an earlier shell (FT_REF), reaching half into its walls, joined to
+#   the body
+infill:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 200
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     eax, [rbx+FT_REF]           # the shell, and its pad
+    cmp     eax, [rip+fr_cur]
+    jae     .Lin_ref
+    mov     edi, eax
+    call    feat_rec
+    mov     r13, rax
+    cmp     dword ptr [r13+FT_TYPE], T_SHELL
+    jne     .Lin_ref
+    mov     eax, [r13+FT_BODY]
+    cmp     eax, [rbx+FT_BODY]
+    jne     .Lin_ref
+    mov     eax, [r13+FT_REF]
+    cmp     eax, [rip+fr_cur]
+    jae     .Lin_ref
+    mov     edi, eax
+    call    feat_rec
+    mov     r14, rax
+    cmp     dword ptr [r14+FT_TYPE], T_PAD
+    jne     .Lin_ref
+    mov     edi, [r14+FT_SKETCH]
+    call    obj_by_uid
+    test    rax, rax
+    jz      .Lin_sketch
+    cmp     dword ptr [rax+OB_TYPE], OT_SKETCH
+    jne     .Lin_sketch
+    cmp     qword ptr [rax+OB_SKETCH], 0
+    je      .Lin_sketch
+    mov     r15, rax
+    lea     rdi, [r13+FT_X]             # the wall
+    call    slot_val
+    test    eax, eax
+    jz      .Lin_value
+    movsd   [rsp], xmm0
+    lea     rdi, [rbx+FT_X]             # cell, lattice wall
+    call    slot_val
+    test    eax, eax
+    jz      .Lin_value
+    movsd   [rsp+8], xmm0
+    lea     rdi, [rbx+FT_X+32]
+    call    slot_val
+    test    eax, eax
+    jz      .Lin_value
+    movsd   [rsp+16], xmm0
+    xorpd   xmm1, xmm1
+    comisd  xmm0, xmm1
+    jbe     .Lin_value
+    movsd   xmm0, [rsp+8]
+    comisd  xmm0, xmm1
+    jbe     .Lin_value
+    lea     rdi, [r14+FT_X]             # the pad's extent
+    call    slot_val
+    test    eax, eax
+    jz      .Lin_value
+    mov     rdi, r14
+    call    pad_range
+    mov     rdi, [r15+OB_SKETCH]        # the cavity, half a wall bigger
+    call    prof_build
+    call    prof_count
+    test    eax, eax
+    jz      .Lin_profile
+    movsd   xmm0, [rsp]                 # the lattice reaches a quarter wall
+    mulsd   xmm0, [rip+fd_q3]           #  into the walls: the outline moved
+    movsd   [rsp+24], xmm0              #  in by three quarters of one
+    call    prof_offset
+    movsd   xmm0, [rip+fr_w]
+    movsd   xmm1, [rip+fr_w+8]
+    test    dword ptr [r13+FT_FLAGS], FF_REV
+    jnz     1f
+    addsd   xmm0, [rsp+24]              # open top: up to the top
+    jmp     2f
+1:  subsd   xmm1, [rsp+24]              # open bottom: from the bottom
+2:  mov     eax, [rip+sdf_n]            # (these nodes go again)
+    mov     [rsp+32], eax
+    mov     rax, [r15+OB_SKETCH]
+    mov     edi, [rax+8]                # SK_PLANE
+    cvtsd2ss xmm2, xmm1
+    cvtsd2ss xmm1, xmm0
+    cvtsd2ss xmm0, [rax+32]             # SK_OFFSET
+    call    sdf_prism
+    test    eax, eax
+    jz      .Lin_geom
+    mov     [rsp+40], eax               # the cavity (sketch-local)
+    mov     rdi, r15                    # placed like the sketch object
+    lea     rsi, [rsp+48]
+    call    obj_matrix
+    lea     rdi, [rsp+48]
+    lea     rsi, [rsp+96]
+    call    sdf_invert
+    mov     edi, 14                     # S_XFORM
+    mov     esi, [rsp+40]
+    xor     edx, edx
+    xor     ecx, ecx
+    lea     r8, [rsp+96]
+    lea     r9, [rsp+48]
+    call    sdf_new
+    mov     [rsp+44], eax
+    cvtsd2ss xmm0, [rsp+8]              # the lattice: cell, wall (grid:
+    movss   [rsp+144], xmm0             #  strut radius)
+    cvtsd2ss xmm0, [rsp+16]
+    cmp     dword ptr [rbx+FT_AXIS], 1
+    jne     3f
+    mulss   xmm0, [rip+ff_half]
+3:  movss   [rsp+148], xmm0
+    mov     qword ptr [rsp+152], 0
+    mov     qword ptr [rsp+160], 0
+    mov     edi, 5                      # S_GYROID / S_GRID
+    add     edi, [rbx+FT_AXIS]
+    xor     esi, esi
+    xor     edx, edx
+    lea     rcx, [rsp+144]
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    sdf_new
+    mov     esi, eax
+    mov     edx, [rsp+44]
+    mov     edi, 12                     # S_ISECT
+    xor     ecx, ecx
+    xor     r8d, r8d
+    xor     r9d, r9d
+    test    esi, esi
+    jz      .Lin_free
+    test    edx, edx
+    jz      .Lin_free
+    call    sdf_new
+    mov     r14d, eax
+    test    eax, eax
+    jz      .Lin_free
+    mov     edi, eax                    # cells along the largest side
+    call    sdf_bounds
+    xorps   xmm0, xmm0
+    xor     ecx, ecx
+6:  movss   xmm1, [rax+12+rcx*4]
+    subss   xmm1, [rax+rcx*4]
+    maxss   xmm0, xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      6b
+    cvtsd2ss xmm1, [rsp+8]              # voxel: a sixth of a cell, at most
+    mulss   xmm1, [rip+ff_sixth]        #  2/3 of the wall (thinner walls
+    cvtsd2ss xmm2, [rsp+16]             #  mesh into holes)
+    mulss   xmm2, [rip+ff_23]
+    minss   xmm1, xmm2
+    divss   xmm0, xmm1
+    cvttss2si esi, xmm0
+    cmp     esi, 16
+    jge     61f
+    mov     esi, 16
+61: cmp     esi, 256
+    jle     62f
+    mov     esi, 256
+62: mov     edi, r14d
+    call    sdf_mesh
+    mov     rbp, rax
+    mov     edi, [rsp+40]
+    call    sdf_prism_free
+    mov     ecx, [rsp+32]
+    mov     [rip+sdf_n], ecx
+    test    rbp, rbp
+    jz      .Lin_geom
+    lea     rax, [rip+bd_mesh]          # the body with the lattice as a
+    mov     r14, [rax+r12*8]            #  shell of its own (slicers join
+    test    r14, r14                    #  overlapping shells)
+    jz      7f
+    mov     rdi, r14
+    mov     rsi, rbp
+    call    mesh_append
+    mov     r15, rax
+    mov     rdi, rbp
+    call    mesh_unref
+    test    r15, r15
+    jz      .Lin_geom
+    mov     rdi, r14
+    call    mesh_unref
+    mov     rbp, r15
+7:  lea     rax, [rip+bd_mesh]
+    mov     [rax+r12*8], rbp
+    xor     eax, eax
+    jmp     .Lin_out
+.Lin_free:
+    mov     edi, [rsp+40]
+    call    sdf_prism_free
+    mov     ecx, [rsp+32]
+    mov     [rip+sdf_n], ecx
+    jmp     .Lin_geom
+.Lin_geom:
+    mov     eax, S_GEOM
+    jmp     .Lin_out
+.Lin_ref:
+    mov     eax, S_REF
+    jmp     .Lin_out
+.Lin_sketch:
+    mov     eax, S_SKETCH
+    jmp     .Lin_out
+.Lin_profile:
+    mov     eax, S_PROFILE
+    jmp     .Lin_out
+.Lin_value:
+    mov     eax, S_VALUE
+.Lin_out:
+    add     rsp, 200
+    pop     rbp
     pop     r15
     pop     r14
     pop     r13

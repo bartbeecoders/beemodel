@@ -117,6 +117,10 @@ cdt_flip:       .skip 4
 cdt_onedge:     .skip 4
 cf_depth:       .skip 4
 .align 8
+rgs:            .skip 128           # ray grids: B's, A's
+rg_stamp:       .skip 8
+rg_serial:      .skip 4
+.align 8
 es_t:           .skip CDT_MAXP*8
 es_id:          .skip CDT_MAXP*4
 .align 8
@@ -177,6 +181,9 @@ mesh_boolean:
     mov     [rsp], rax
 .Lmb_try:
     mov     dword ptr [rip+fail_flag], 0
+    mov     dword ptr [rip+rgs+RG_BUILT], 0     # (ray grids: per try)
+    mov     dword ptr [rip+rgs+64+RG_BUILT], 0
+    mov     qword ptr [rip+rg_stamp], 0
     call    load_inputs
     test    eax, eax
     jz      .Lmb_fail
@@ -3606,6 +3613,10 @@ cf_one:         .double 1.0
 cf_eps:         .double 1.0e-9
 cf_tol:         .double 1.0e-18
 cf_edge:        .double 1.0e-7
+rc_2m16:        .double 1.52587890625e-05
+rc_one:         .double 1.0
+rc_tiny:        .double 1.0e-30
+rc_pad:         .double 0.01
 .text
 
 # =============================================================================
@@ -4090,23 +4101,12 @@ frag_inside:
     inc     ecx
     cmp     ecx, 3
     jb      4b
-    xor     ebp, ebp                    # crossings
-    mov     r12d, 0                     # triangles of the other mesh
-    mov     r13d, [rip+nta]
-    test    r15d, r15d
-    jnz     5f
-    mov     r12d, [rip+nta]
-    mov     r13d, [rip+nt]
-5:  cmp     r12d, r13d
-    jae     .Lfin_done
-    mov     edi, r12d
-    mov     esi, r15d
-    call    ray_tri                     # eax = 1 cross, 0 no, -1 degenerate
+    mov     esi, r15d                   # crossings with the other mesh's
+    call    ray_count                   #  triangles along the ray
     test    eax, eax
     js      .Lfin_next_dir
-    add     ebp, eax
-    inc     r12d
-    jmp     5b
+    mov     ebp, eax
+    jmp     .Lfin_done
 .Lfin_next_dir:
     inc     r14d
     jmp     .Lfin_dir
@@ -4124,6 +4124,457 @@ frag_inside:
     pop     r12
     pop     rbx
     ret
+
+# =============================================================================
+#  Ray casting through a grid: the classification rays only meet the
+#  triangles in the cells they pass (built on first use, per mesh, in snapped
+#  integer units; a triangle sits in every cell its padded box touches)
+# =============================================================================
+.equ RG_BUILT, 0
+.equ RG_N,     4
+.equ RG_MIN,   8
+.equ RG_INV,   32
+.equ RG_OFF,   40
+.equ RG_TRI,   48
+.equ RG_SZ,    64
+
+# ray_count(esi=1: A's triangles, 0: B's) -> eax = crossings of ray_p ->
+#   ray_q (ray_tri, ray_isb = esi), -1 when one is degenerate
+ray_count:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 168
+    mov     r15d, esi
+    lea     rbx, [rip+rgs]
+    mov     eax, r15d
+    shl     eax, 6
+    add     rbx, rax
+    cmp     dword ptr [rbx+RG_BUILT], 0
+    jne     1f
+    mov     edi, r15d
+    call    rg_build
+    test    eax, eax
+    jz      .Lrc_all                    # (no memory: every triangle)
+1:  cmp     qword ptr [rip+rg_stamp], 0
+    jne     2f
+    mov     edi, [rip+nt]
+    shl     edi, 2
+    call    fa
+    test    rax, rax
+    jz      .Lrc_all
+    mov     [rip+rg_stamp], rax
+2:  inc     dword ptr [rip+rg_serial]
+    # o, d in grid units
+    cvtsi2sd xmm7, dword ptr [rbx+RG_N]
+    xor     ecx, ecx
+3:  lea     rax, [rip+ray_p]
+    cvtsi2sd xmm0, qword ptr [rax+rcx*8]
+    mulsd   xmm0, [rip+rc_2m16]
+    subsd   xmm0, [rbx+RG_MIN+rcx*8]
+    mulsd   xmm0, [rbx+RG_INV]
+    movsd   [rsp+rcx*8], xmm0           # o
+    lea     rax, [rip+ray_q]
+    cvtsi2sd xmm1, qword ptr [rax+rcx*8]
+    mulsd   xmm1, [rip+rc_2m16]
+    subsd   xmm1, [rbx+RG_MIN+rcx*8]
+    mulsd   xmm1, [rbx+RG_INV]
+    subsd   xmm1, xmm0
+    movsd   [rsp+24+rcx*8], xmm1        # d
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    xorpd   xmm5, xmm5                  # t0, t1: inside [0, n]^3
+    movsd   xmm6, [rip+rc_one]
+    xor     ecx, ecx
+4:  movsd   xmm1, [rsp+24+rcx*8]
+    movsd   xmm0, [rsp+rcx*8]
+    movsd   xmm2, xmm1
+    andpd   xmm2, [rip+bd_abs]
+    comisd  xmm2, [rip+rc_tiny]
+    ja      41f
+    xorpd   xmm2, xmm2                  # parallel: inside the slab or never
+    comisd  xmm0, xmm2
+    jb      .Lrc_none
+    comisd  xmm0, xmm7
+    ja      .Lrc_none
+    jmp     43f
+41: xorpd   xmm2, xmm2                  # (0 - o) / d, (n - o) / d
+    subsd   xmm2, xmm0
+    divsd   xmm2, xmm1
+    movsd   xmm3, xmm7
+    subsd   xmm3, xmm0
+    divsd   xmm3, xmm1
+    movsd   xmm4, xmm2
+    minsd   xmm4, xmm3
+    maxsd   xmm2, xmm3
+    maxsd   xmm5, xmm4
+    minsd   xmm6, xmm2
+43: inc     ecx
+    cmp     ecx, 3
+    jb      4b
+    comisd  xmm5, xmm6
+    ja      .Lrc_none
+    movsd   [rsp+48], xmm6              # t1
+    # the first cell, steps, tMax, tDelta
+    xor     ecx, ecx
+5:  movsd   xmm0, [rsp+24+rcx*8]
+    mulsd   xmm0, xmm5
+    addsd   xmm0, [rsp+rcx*8]
+    cvttsd2si eax, xmm0
+    test    eax, eax
+    jns     51f
+    xor     eax, eax
+51: mov     edx, [rbx+RG_N]
+    dec     edx
+    cmp     eax, edx
+    jle     52f
+    mov     eax, edx
+52: mov     [rsp+56+rcx*4], eax         # cell
+    movsd   xmm1, [rsp+24+rcx*8]
+    movsd   xmm2, xmm1
+    andpd   xmm2, [rip+bd_abs]
+    comisd  xmm2, [rip+rc_tiny]
+    ja      53f
+    mov     dword ptr [rsp+68+rcx*4], 0 # no steps along it
+    movsd   xmm3, [rip+bd_big]
+    movsd   [rsp+80+rcx*8], xmm3
+    movsd   [rsp+104+rcx*8], xmm3
+    jmp     55f
+53: mov     edx, 1
+    xorpd   xmm4, xmm4
+    comisd  xmm1, xmm4
+    ja      54f
+    mov     edx, -1
+54: mov     [rsp+68+rcx*4], edx
+    cvtsi2sd xmm3, eax                  # the next boundary
+    cmp     edx, 1
+    jne     541f
+    addsd   xmm3, [rip+rc_one]
+541:subsd   xmm3, [rsp+rcx*8]
+    divsd   xmm3, xmm1
+    movsd   [rsp+80+rcx*8], xmm3        # tMax
+    movsd   xmm3, [rip+rc_one]
+    divsd   xmm3, xmm2
+    movsd   [rsp+104+rcx*8], xmm3       # tDelta
+55: inc     ecx
+    cmp     ecx, 3
+    jb      5b
+    xor     ebp, ebp                    # crossings
+.Lrc_cell:
+    mov     eax, [rsp+64]               # visit: (z n + y) n + x
+    imul    eax, [rbx+RG_N]
+    add     eax, [rsp+60]
+    imul    eax, [rbx+RG_N]
+    add     eax, [rsp+56]
+    mov     rcx, [rbx+RG_OFF]
+    mov     r12d, [rcx+rax*4]
+    mov     r13d, [rcx+rax*4+4]
+6:  cmp     r12d, r13d
+    jae     7f
+    mov     rcx, [rbx+RG_TRI]
+    mov     r14d, [rcx+r12*4]           # global triangle
+    mov     rcx, [rip+rg_stamp]
+    mov     eax, [rip+rg_serial]
+    cmp     [rcx+r14*4], eax
+    je      61f
+    mov     [rcx+r14*4], eax
+    mov     edi, r14d
+    mov     esi, r15d
+    call    ray_tri
+    test    eax, eax
+    js      .Lrc_out
+    add     ebp, eax
+61: inc     r12d
+    jmp     6b
+7:  xor     ecx, ecx                    # the axis whose boundary comes first
+    movsd   xmm0, [rsp+80]
+    mov     edx, 1
+71: movsd   xmm1, [rsp+80+rdx*8]
+    comisd  xmm1, xmm0
+    jae     72f
+    movsd   xmm0, xmm1
+    mov     ecx, edx
+72: inc     edx
+    cmp     edx, 3
+    jb      71b
+    comisd  xmm0, [rsp+48]              # past t1: done
+    ja      .Lrc_done
+    mov     eax, [rsp+68+rcx*4]
+    test    eax, eax
+    jz      .Lrc_done
+    add     eax, [rsp+56+rcx*4]
+    js      .Lrc_done
+    cmp     eax, [rbx+RG_N]
+    jge     .Lrc_done
+    mov     [rsp+56+rcx*4], eax
+    movsd   xmm0, [rsp+80+rcx*8]
+    addsd   xmm0, [rsp+104+rcx*8]
+    movsd   [rsp+80+rcx*8], xmm0
+    jmp     .Lrc_cell
+.Lrc_all:                               # fallback: every triangle
+    xor     ebp, ebp
+    xor     r12d, r12d
+    mov     r13d, [rip+nta]
+    test    r15d, r15d
+    jnz     8f
+    mov     r12d, [rip+nta]
+    mov     r13d, [rip+nt]
+8:  cmp     r12d, r13d
+    jae     .Lrc_done
+    mov     edi, r12d
+    mov     esi, r15d
+    call    ray_tri
+    test    eax, eax
+    js      .Lrc_out
+    add     ebp, eax
+    inc     r12d
+    jmp     8b
+.Lrc_none:
+    xor     ebp, ebp
+.Lrc_done:
+    mov     eax, ebp
+.Lrc_out:
+    add     rsp, 168
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# rg_build(edi=1: A's triangles, 0: B's) -> eax = 1 (rgs[side] ready)
+rg_build:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 104
+    lea     rbx, [rip+rgs]
+    mov     eax, edi
+    shl     eax, 6
+    add     rbx, rax
+    xor     r12d, r12d                  # triangles lo .. hi
+    mov     r13d, [rip+nta]
+    test    edi, edi
+    jnz     1f
+    mov     r12d, [rip+nta]
+    mov     r13d, [rip+nt]
+1:  mov     [rsp+96], r12d
+    mov     eax, r13d                   # g: the cube root of the count,
+    sub     eax, r12d                   #  1 .. 128
+    mov     ecx, 1
+2:  mov     edx, ecx
+    imul    edx, ecx
+    imul    edx, ecx
+    cmp     edx, eax
+    jae     3f
+    cmp     ecx, 128
+    jae     3f
+    inc     ecx
+    jmp     2b
+3:  mov     [rbx+RG_N], ecx
+    movsd   xmm0, [rip+bd_big]          # bounds of its vertices
+    movsd   xmm1, xmm0
+    movsd   xmm2, xmm0
+    movsd   xmm3, [rip+bd_nbig]
+    movsd   xmm4, xmm3
+    movsd   xmm5, xmm3
+    mov     r14d, r12d
+4:  cmp     r14d, r13d
+    jae     5f
+    xor     r15d, r15d
+41: mov     rax, [rip+tri]
+    lea     rcx, [r14+r14*2]
+    add     rcx, r15
+    mov     eax, [rax+rcx*4]
+    lea     rax, [rax+rax*2]
+    mov     rcx, [rip+vi]
+    cvtsi2sd xmm6, qword ptr [rcx+rax*8]
+    minsd   xmm0, xmm6
+    maxsd   xmm3, xmm6
+    cvtsi2sd xmm6, qword ptr [rcx+rax*8+8]
+    minsd   xmm1, xmm6
+    maxsd   xmm4, xmm6
+    cvtsi2sd xmm6, qword ptr [rcx+rax*8+16]
+    minsd   xmm2, xmm6
+    maxsd   xmm5, xmm6
+    inc     r15d
+    cmp     r15d, 3
+    jb      41b
+    inc     r14d
+    jmp     4b
+5:  movsd   [rbx+RG_MIN], xmm0
+    movsd   [rbx+RG_MIN+8], xmm1
+    movsd   [rbx+RG_MIN+16], xmm2
+    subsd   xmm3, xmm0
+    subsd   xmm4, xmm1
+    subsd   xmm5, xmm2
+    maxsd   xmm3, xmm4
+    maxsd   xmm3, xmm5
+    mulsd   xmm3, [rip+bd_1001]
+    addsd   xmm3, [rip+rc_one]
+    cvtsi2sd xmm6, dword ptr [rbx+RG_N]
+    divsd   xmm6, xmm3
+    movsd   [rbx+RG_INV], xmm6
+    mov     eax, [rbx+RG_N]             # offsets
+    imul    eax, eax
+    imul    eax, [rbx+RG_N]
+    mov     [rsp+100], eax
+    lea     edi, [rax*4+8]
+    call    fa
+    test    rax, rax
+    jz      .Lrb_fail
+    mov     [rbx+RG_OFF], rax
+    xor     ebp, ebp                    # pass 0 count, 1 fill
+.Lrb_pass:
+    mov     r14d, [rsp+96]
+.Lrb_tri:
+    cmp     r14d, r13d
+    jae     .Lrb_pend
+    xor     r15d, r15d                  # its padded box, in cells
+    movsd   xmm0, [rip+bd_big]
+    movsd   xmm1, xmm0
+    movsd   xmm2, xmm0
+    movsd   xmm3, [rip+bd_nbig]
+    movsd   xmm4, xmm3
+    movsd   xmm5, xmm3
+6:  mov     rax, [rip+tri]
+    lea     rcx, [r14+r14*2]
+    add     rcx, r15
+    mov     eax, [rax+rcx*4]
+    lea     rax, [rax+rax*2]
+    mov     rcx, [rip+vi]
+    cvtsi2sd xmm6, qword ptr [rcx+rax*8]
+    minsd   xmm0, xmm6
+    maxsd   xmm3, xmm6
+    cvtsi2sd xmm6, qword ptr [rcx+rax*8+8]
+    minsd   xmm1, xmm6
+    maxsd   xmm4, xmm6
+    cvtsi2sd xmm6, qword ptr [rcx+rax*8+16]
+    minsd   xmm2, xmm6
+    maxsd   xmm5, xmm6
+    inc     r15d
+    cmp     r15d, 3
+    jb      6b
+    movsd   [rsp], xmm0
+    movsd   [rsp+8], xmm1
+    movsd   [rsp+16], xmm2
+    movsd   [rsp+24], xmm3
+    movsd   [rsp+32], xmm4
+    movsd   [rsp+40], xmm5
+    xor     ecx, ecx
+61: movsd   xmm0, [rsp+rcx*8]
+    subsd   xmm0, [rbx+RG_MIN+rcx*8]
+    mulsd   xmm0, [rbx+RG_INV]
+    subsd   xmm0, [rip+rc_pad]
+    cvttsd2si eax, xmm0
+    call    rg_clamp
+    mov     [rsp+48+rcx*4], eax
+    movsd   xmm0, [rsp+24+rcx*8]
+    subsd   xmm0, [rbx+RG_MIN+rcx*8]
+    mulsd   xmm0, [rbx+RG_INV]
+    addsd   xmm0, [rip+rc_pad]
+    cvttsd2si eax, xmm0
+    call    rg_clamp
+    mov     [rsp+60+rcx*4], eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      61b
+    mov     r8d, [rsp+56]               # z
+7:  cmp     r8d, [rsp+68]
+    ja      .Lrb_tnext
+    mov     r9d, [rsp+52]               # y
+71: cmp     r9d, [rsp+64]
+    ja      .Lrb_znext
+    mov     r10d, [rsp+48]              # x
+72: cmp     r10d, [rsp+60]
+    ja      .Lrb_ynext
+    mov     eax, r8d
+    imul    eax, [rbx+RG_N]
+    add     eax, r9d
+    imul    eax, [rbx+RG_N]
+    add     eax, r10d
+    mov     rcx, [rbx+RG_OFF]
+    test    ebp, ebp
+    jnz     73f
+    inc     dword ptr [rcx+rax*4+4]
+    jmp     74f
+73: mov     edx, [rcx+rax*4]
+    inc     dword ptr [rcx+rax*4]
+    mov     rcx, [rbx+RG_TRI]
+    mov     [rcx+rdx*4], r14d
+74: inc     r10d
+    jmp     72b
+.Lrb_ynext:
+    inc     r9d
+    jmp     71b
+.Lrb_znext:
+    inc     r8d
+    jmp     7b
+.Lrb_tnext:
+    inc     r14d
+    jmp     .Lrb_tri
+.Lrb_pend:
+    test    ebp, ebp
+    jnz     .Lrb_fix
+    mov     rcx, [rbx+RG_OFF]           # prefix sums
+    xor     eax, eax
+    xor     edx, edx
+8:  cmp     edx, [rsp+100]
+    jae     81f
+    add     eax, [rcx+rdx*4+4]
+    mov     [rcx+rdx*4+4], eax
+    inc     edx
+    jmp     8b
+81: lea     edi, [rax*4+8]
+    call    fa
+    test    rax, rax
+    jz      .Lrb_fail
+    mov     [rbx+RG_TRI], rax
+    mov     ebp, 1
+    jmp     .Lrb_pass
+.Lrb_fix:
+    mov     rcx, [rbx+RG_OFF]
+    mov     edx, [rsp+100]
+9:  test    edx, edx
+    jz      91f
+    mov     eax, [rcx+rdx*4-4]
+    mov     [rcx+rdx*4], eax
+    dec     edx
+    jmp     9b
+91: mov     dword ptr [rcx], 0
+    mov     dword ptr [rbx+RG_BUILT], 1
+    mov     eax, 1
+    jmp     .Lrb_out
+.Lrb_fail:
+    xor     eax, eax
+.Lrb_out:
+    add     rsp, 104
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+rg_clamp:
+    test    eax, eax
+    jns     1f
+    xor     eax, eax
+    ret
+1:  mov     edx, [rbx+RG_N]
+    dec     edx
+    cmp     eax, edx
+    jle     2f
+    mov     eax, edx
+2:  ret
 
 # cross_d(rdi=&u, rsi=&v, rdx=&out double[3]) / dot_d(rdi, rsi) -> xmm0
 cross_d:

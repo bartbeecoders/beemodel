@@ -469,6 +469,7 @@ def main():
     sketcher()
     features()
     measuring()
+    sdf_kernel()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2138,6 +2139,56 @@ def measuring():
     check(d == '2' and a == '900', f'the measure tool: two corners 2 m apart, a right angle at the third ({d}, {a})')
     f.key(1); f.pump(0.1)                       # Esc ends it
     check(q('print(measurement())') == 'nil', 'Esc ends the measure tool')
+    f.proc.kill()
+
+
+def sdf_kernel():
+    """Signed-distance shapes: primitives, smooth booleans, shells, lattices,
+    meshed closed by marching tetrahedra; lattice infill as a feature."""
+    print('  -- SDF kernel --')
+    home = tempfile.mkdtemp(prefix='bee-sdf-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+        return (r.stdout + r.stderr).strip()
+    out = run('s = ssphere(1)\nprint(sdist(s, 0, 0, 0), sdist(s, 2, 0, 0), sdist(sbox(2, 4, 6), 0, 3, 0), '
+              'round(sdist(storus(2, 0.5), 2, 0, 0) * 100))\nsmesh("Ball", s, 32)\n'
+              'print(round(volume("Ball") * 100), manifold("Ball"))\n'
+              'b = sunion(smove(s, 1, 0, 0), sbox(2, 2, 2), 0.3)\nsmesh("Blob", b, 48)\n'
+              'r = srot(sbox(2, 1, 1), 0, 0, rad(45))\nsmesh("Rot", r, 48)\n'
+              'h = sshell(ssphere(2), 0.2)\nsmesh("Hollow", h, 64)\n'
+              'k = ssub(sbox(2, 2, 2), scyl(0.5, 3), 0.1)\nsmesh("Bored", k, 48)\n'
+              'print(manifold("Blob"), round(volume("Rot") * 10), manifold("Rot"), round(volume("Hollow")), manifold("Hollow"), manifold("Bored"))')
+    # a unit sphere: 4.19 (meshed: a little less); a box 2 rotated 45 deg; a 0.2 shell of r 2: 4 pi 4 0.2 = 10.05;
+    # a gyroid wall of 0.15 fills about 3.1 x 0.15 = 46% of its cells
+    check(out.splitlines() == ['-1 1 1 -50', '418 1', '1 20 1 10 1 1'],
+          f'distances, and closed meshes of blends, transforms, shells and cuts ({out.splitlines()})')
+    t0 = time.time()
+    out = run('g = sisect(sgyroid(1, 0.15), sbox(4, 4, 4))\nt = clock()\nsmesh("Gyro", g, 96)\n'
+              'print(manifold("Gyro"), round(volume("Gyro") / 64 * 100))\n'
+              'k = sisect(sgrid(1, 0.2), sbox(4, 4, 4))\nsmesh("Grid", k, 96)\nprint(manifold("Grid"), round(volume("Grid") * 10))\n'
+              'smesh("Bad", sgyroid(1, 0.1))')
+    lines = out.splitlines()
+    check(len(lines) == 3 and lines[0].startswith('1 ') and 30 < int(lines[0].split()[1]) < 60 and lines[1].startswith('1 ')
+          and 'unbounded' in lines[2],
+          f'gyroid and grid lattices mesh closed; an unbounded shape is refused ({lines}, {time.time() - t0:.1f} s)')
+    out = run('op("scene.units", "mm")\nparam("cell", "10mm")\ns = sketch("Base", "XZ")\nrect(s, 0, 0, 60, 40)\n'
+              'b = pad("Box", s, "30mm")\nsh = shell("Box", b, "2mm")\nf = infill("Box", sh, "gyroid", "cell", "1mm")\n'
+              'v = volume("Box")\nprint(fstatus(f), manifold("Box"), round((v - 15552) / 1000))\n'
+              'param("cell", "15mm")\nprint(fstatus(f), manifold("Box"), volume("Box") < v)\n'
+              'g = infill("Box", sh, "grid", "10mm", "1.5mm")\nfeature(f, 3, 1)\nprint(fstatus(g), manifold("Box"), round(volume("Box") - 15552))')
+    lines = out.splitlines()
+    ok = (len(lines) == 3 and lines[0].split()[:2] == ['0', '1'] and 10 <= int(lines[0].split()[2]) <= 25
+          and lines[1] == '0 1 1' and lines[2].split()[:2] == ['0', '1'] and 800 < int(lines[2].split()[2]) < 3000)
+    check(ok, f'gyroid and grid infill inside a shelled box, driven by a parameter ({lines})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube")\nb = sunion(smove(ssphere(1), 0, 1.6, 0), sbox(2.4, 1.2, 2.4, 0.2), 0.5)\n'
+      'c = ssub(b, smove(scyl(0.4, 6), 0, 1, 0))\nsmesh("Blend", c, 96)\nselect("Blend")')
+    f.pump(0.3)
+    f.shot('65_sdf_blend.png')
     f.proc.kill()
 
 
