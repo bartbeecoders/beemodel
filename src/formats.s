@@ -53,6 +53,7 @@
 .equ TAG_ILAY,      0x59414C49          # "ILAY"
 .equ TAG_MVCL,      0x4C43564D          # "MVCL"
 .equ TAG_NTRE,      0x4552544E          # "NTRE"
+.equ TAG_CURV,      0x56525543          # "CURV"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -96,6 +97,9 @@ ilay_size:      .skip 4
 mvcl_chunk:     .skip 8
 ntre_chunk:     .skip 8
 ntre_size:      .skip 4
+curv_chunk:     .skip 8
+oi_line:        .skip 4                 # OBJ import: an "l" line
+curv_size:      .skip 4
 mvcl_size:      .skip 4
 .align 8
 uids_size:      .skip 4
@@ -133,6 +137,7 @@ s_vt:           .asciz "vt "
 .align 4
 fo_inv255:      .float 0.003921569
 s_f:            .asciz "f"
+s_l:            .asciz "l"
 s_nl:           .asciz "\n"
 s_sp:           .asciz " "
 s_stl_head:     .ascii "BeeModel binary STL                                                             "
@@ -336,6 +341,10 @@ bee_save:
     call    chunk_begin
     call    nt_write
     call    chunk_end
+    mov     edi, TAG_CURV               # CURV (the curves meshes come from)
+    call    chunk_begin
+    call    curv_write
+    call    chunk_end
     mov     edi, TAG_CADD
     call    chunk_begin
     call    cad_write
@@ -443,6 +452,75 @@ uids_write:
 2:  mov     edi, [rip+uid_next]
     call    wb_u32
     add     rsp, 16
+    pop     rbx
+    ret
+
+# curv_write - per mesh (mesh_tab order) made by a curve: index, points,
+#   the curve block from its spline count on (curve.s)
+curv_write:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+n_mesh_tab]
+    jae     9f
+    lea     rax, [rip+mesh_tab]
+    mov     rax, [rax+rbx*8]
+    mov     r12, [rax+ME_CURVE]
+    test    r12, r12
+    jz      8f
+    mov     edi, ebx
+    call    wb_u32
+    mov     edi, [r12+8]                # (CV_NPTS)
+    call    wb_u32
+    lea     rsi, [r12+4]
+    mov     edx, [r12+8]
+    imul    edx, edx, 48
+    add     edx, 572                    # (CV_PTS - 4 + points * CP_SZ)
+    call    wb_bytes
+8:  inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# curv_read(rdi=data, esi=bytes) - curves back on the loaded meshes
+curv_read:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rdi
+    mov     r13d, esi
+1:  cmp     r13d, 8
+    jb      9f
+    mov     eax, [r12+4]                # points
+    cmp     eax, 4000000
+    ja      9f
+    imul    eax, eax, 48
+    add     eax, 580                    # its record
+    cmp     eax, r13d
+    ja      9f
+    mov     ebx, eax
+    mov     ecx, [r12]
+    cmp     ecx, [rip+n_mesh_tab]
+    jae     8f
+    lea     rsi, [r12+8]
+    mov     edx, [r12+4]
+    call    cv_load
+    test    rax, rax
+    jz      8f
+    mov     ecx, [r12]
+    lea     rdx, [rip+mesh_tab]
+    mov     rdx, [rdx+rcx*8]
+    mov     rdi, [rdx+ME_CURVE]
+    mov     [rdx+ME_CURVE], rax
+    call    cv_unref
+8:  add     r12, rbx
+    sub     r13d, ebx
+    jmp     1b
+9:  pop     r13
+    pop     r12
     pop     rbx
     ret
 
@@ -794,6 +872,7 @@ bee_load:
     mov     qword ptr [rip+ilay_chunk], 0
     mov     qword ptr [rip+mvcl_chunk], 0
     mov     qword ptr [rip+ntre_chunk], 0
+    mov     qword ptr [rip+curv_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -852,7 +931,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_NTRE
+28: cmp     eax, TAG_CURV
+    jne     281f
+    lea     rax, [rbx+8]
+    mov     [rip+curv_chunk], rax
+    mov     [rip+curv_size], ebp
+    jmp     23f
+281:cmp     eax, TAG_NTRE
     jne     272f
     lea     rax, [rbx+8]
     mov     [rip+ntre_chunk], rax
@@ -1000,7 +1085,12 @@ bee_load:
     jz      774f
     mov     esi, [rip+mvcl_size]
     call    mvcl_read
-774:mov     rdi, [rip+ntre_chunk]       # geometry node trees
+774:mov     rdi, [rip+curv_chunk]       # curves
+    test    rdi, rdi
+    jz      7741f
+    mov     esi, [rip+curv_size]
+    call    curv_read
+7741:mov     rdi, [rip+ntre_chunk]       # geometry node trees
     test    rdi, rdi
     jz      775f
     mov     esi, [rip+ntre_size]
@@ -1260,6 +1350,11 @@ obj_export:
 31: xor     ecx, ecx                    # faces
 4:  cmp     ecx, [r12+ME_NPOLYS]
     jae     6f
+    mov     rax, [r12+ME_POFF]          # 2 corners (curves): a line
+    mov     edx, [rax+rcx*4+4]
+    sub     edx, [rax+rcx*4]
+    cmp     edx, 2
+    je      45f
     push    rcx
     lea     rsi, [rip+s_f]
     call    wb_str
@@ -1289,6 +1384,30 @@ obj_export:
     call    wb_str
     pop     rcx
     mov     ecx, ecx
+    inc     ecx
+    jmp     4b
+45: push    rcx
+    push    rcx
+    lea     rsi, [rip+s_l]
+    call    wb_str
+    xor     r13d, r13d
+46: mov     edi, ' '
+    call    wb_char
+    mov     rcx, [rsp]
+    mov     rax, [r12+ME_POFF]
+    mov     eax, [rax+rcx*4]
+    add     eax, r13d
+    mov     rdx, [r12+ME_LOOPS]
+    mov     edi, [rdx+rax*4]
+    add     edi, r14d
+    call    wb_int
+    inc     r13d
+    cmp     r13d, 2
+    jb      46b
+    lea     rsi, [rip+s_nl]
+    call    wb_str
+    pop     rcx
+    pop     rcx
     inc     ecx
     jmp     4b
 6:  add     r14d, [r12+ME_NVERTS]
@@ -1503,7 +1622,34 @@ obj_import:
     jne     21f
     inc     r12d
     jmp     3f
-21: cmp     ax, 0x2066                  # "f "
+21: cmp     ax, 0x206c                  # "l a b c": 2-point polygons
+    jne     211f
+    lea     rcx, [rsi+2]
+    mov     edx, -1                     # tokens - 1
+212:cmp     rcx, r15
+    jae     214f
+    movzx   eax, byte ptr [rcx]
+    cmp     al, 10
+    je      214f
+    cmp     al, ' '
+    je      213f
+    cmp     al, 9
+    je      213f
+    cmp     al, 13
+    je      213f
+    cmp     byte ptr [rcx-1], ' '
+    je      215f
+    cmp     byte ptr [rcx-1], 9
+    jne     213f
+215:inc     edx
+213:inc     rcx
+    jmp     212b
+214:test    edx, edx
+    jle     3f
+    add     r13d, edx
+    lea     r14d, [r14+rdx*2]
+    jmp     3f
+211:cmp     ax, 0x2066                  # "f "
     jne     3f
     inc     r13d
     lea     rcx, [rsi+2]                # count the index tokens
@@ -1600,9 +1746,14 @@ obj_import:
 681:mov     byte ptr [rdi+rdx], 0
     jmp     7f
 69: mov     ax, [rsi]
-    cmp     ax, 0x2066
+    mov     dword ptr [rip+oi_line], 0
+    cmp     ax, 0x206c
+    jne     691f
+    mov     dword ptr [rip+oi_line], 1
+    jmp     692f
+691:cmp     ax, 0x2066
     jne     7f
-    add     rsi, 2
+692:add     rsi, 2
     xor     r13d, r13d                  # indices in this face
 61: call    skip_space
     cmp     rsi, r15
@@ -1654,7 +1805,23 @@ obj_import:
     mov     [rsp+r13*4], eax
     inc     r13d
     jmp     61b
-65: cmp     r13d, 3
+65: cmp     dword ptr [rip+oi_line], 0
+    je      651f
+    xor     ecx, ecx                    # a line: its consecutive pairs
+652:lea     eax, [rcx+1]
+    cmp     eax, r13d
+    jae     7f
+    push    rcx
+    push    rsi
+    mov     rdi, rbp
+    lea     rsi, [rsp+16+rcx*4]
+    mov     edx, 2
+    call    mesh_add_poly
+    pop     rsi
+    pop     rcx
+    inc     ecx
+    jmp     652b
+651:cmp     r13d, 3
     jb      7f
     push    rsi
     mov     rdi, rbp

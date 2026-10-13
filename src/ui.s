@@ -122,7 +122,8 @@ items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_an_normals, op_an_nonman, op_an_bound, op_an_degen, op_an_over, op_show_thin
                 .quad op_view_measure
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
-                .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_light, op_add_camera
+                .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_bezier, op_add_ccircle
+                .quad op_add_path, 0, op_add_light, op_add_camera
 items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_render_save, 0
                 .quad op_render_denoise, op_render_settings
 items_help:     .quad op_help_keys, op_console_ops, op_help_about
@@ -1132,7 +1133,16 @@ ui_axis:
 viewport_click:
     push    rbx
     call    vp_setup_drag
-    cmp     dword ptr [rip+skm_obj], 0  # sketch mode: its tools
+    cmp     dword ptr [rip+cve_obj], 0  # curve edit mode: its points
+    je      100f
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    mov     edx, [rip+press_mods]
+    call    cve_click
+    call    reset_clip
+    pop     rbx
+    ret
+100: cmp     dword ptr [rip+skm_obj], 0  # sketch mode: its tools
     je      101f
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]

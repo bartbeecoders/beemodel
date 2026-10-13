@@ -11,7 +11,7 @@
 #  program for the field VM (fieldvm.s), which runs it over the points in
 #  blocks.
 #
-#  The types (1..25): group input, group output, grid, cube, UV sphere,
+#  The types (1..35): group input, group output, grid, cube, UV sphere,
 #  cylinder, mesh line, transform, join geometry, set position, extrude
 #  mesh, subdivision surface, mesh boolean, merge by distance, realize
 #  instances; position, normal, index, value, combine XYZ, separate XYZ,
@@ -22,7 +22,10 @@
 #  a seed, an optional minimum distance; the points keep their faces'
 #  normals), instance on points (another geometry placed at every point:
 #  aligned to the point's normal or up, a fixed or random turn about it, a
-#  scale field - instances stay instances, inst.s, until realized).
+#  scale field - instances stay instances, inst.s, until realized); curve
+#  line, curve circle, curve to mesh (a profile curve, else a round tube),
+#  resample, trim, fillet and curve to points (curve.s: a curve is a chain
+#  of 2-point polygons).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -46,7 +49,7 @@
 .equ ND_P,      52
 .equ ND_POS,    68
 .equ NT_MAXN,   48
-.equ GN_NTYPES, 28
+.equ GN_NTYPES, 35
 .equ GN_LEVELS, 8
 # types
 .equ T_GIN,     1
@@ -77,6 +80,13 @@
 .equ T_GROUP,   26
 .equ T_DIST,    27
 .equ T_INST,    28
+.equ T_CLINE,   29
+.equ T_CCIRCLE, 30
+.equ T_C2MESH,  31
+.equ T_RESAMPLE,32
+.equ T_TRIM,    33
+.equ T_FILLET,  34
+.equ T_C2PTS,   35
 # field VM (fieldvm.s)
 .equ OP_CONST,  1
 .equ OP_PX,     2
@@ -116,7 +126,8 @@ gn_ntypes:      .long GN_NTYPES
 .align 8
 gn_type_names:  .quad k_gin, k_gout, k_grid, k_cube, k_sphere, k_cyl, k_line, k_xform, k_join, k_setpos
                 .quad k_extrude, k_subd, k_bool, k_merge, k_realize, k_pos, k_normal, k_index, k_value
-                .quad k_combine, k_sep, k_math, k_vmath, k_noise, k_random, k_group, k_dist, k_inst, 0
+                .quad k_combine, k_sep, k_math, k_vmath, k_noise, k_random, k_group, k_dist, k_inst
+                .quad k_cline, k_ccircle, k_c2mesh, k_resample, k_trim, k_fillet, k_c2pts, 0
 k_gin:          .asciz "input"
 k_gout:         .asciz "output"
 k_grid:         .asciz "grid"
@@ -145,9 +156,17 @@ k_random:       .asciz "random"
 k_group:        .asciz "group"
 k_dist:         .asciz "distribute"
 k_inst:         .asciz "instance"
+k_cline:        .asciz "curve_line"
+k_ccircle:      .asciz "curve_circle"
+k_c2mesh:       .asciz "curve_to_mesh"
+k_resample:     .asciz "resample"
+k_trim:         .asciz "trim"
+k_fillet:       .asciz "fillet"
+k_c2pts:        .asciz "curve_to_points"
 gn_titles:      .quad 0, n_gin, n_gout, n_grid, n_cube, n_sphere, n_cyl, n_line, n_xform, n_join, n_setpos
                 .quad n_extrude, n_subd, n_bool, n_merge, n_realize, n_pos, n_normal, n_index, n_value
                 .quad n_combine, n_sep, n_math, n_vmath, n_noise, n_random, n_group, n_dist, n_inst
+                .quad n_cline, n_ccircle, n_c2mesh, n_resample, n_trim, n_fillet, n_c2pts
 n_gin:          .asciz "Group Input"
 n_gout:         .asciz "Group Output"
 n_grid:         .asciz "Grid"
@@ -176,6 +195,13 @@ n_random:       .asciz "Random Value"
 n_group:        .asciz "Group"
 n_dist:         .asciz "Distribute Points on Faces"
 n_inst:         .asciz "Instance on Points"
+n_cline:        .asciz "Curve Line"
+n_ccircle:      .asciz "Curve Circle"
+n_c2mesh:       .asciz "Curve to Mesh"
+n_resample:     .asciz "Resample Curve"
+n_trim:         .asciz "Trim Curve"
+n_fillet:       .asciz "Fillet Curve"
+n_c2pts:        .asciz "Curve to Points"
 # per type (as the node editor reads it): input names, input kinds (0
 #   geometry, 1 value, 2 vector), value names, value kinds (0 number, 1
 #   choice, 3 whole), choices, output names, output kinds
@@ -208,6 +234,15 @@ gn_meta:        .quad 0, 0, 0, 0, 0, 0, 0
                 .quad i_group, k012, p_tree, k4000, 0, o_geo, k000         # group
                 .quad i_mesh, k000, p_dist3, k0300, 0, o_points, k000      # distribute
                 .quad i_inst, k001, p_inst, k1130, ch_rot, o_inst, k000    # instance
+                .quad i_cline, k220, nil4, k0000, 0, o_curve, k000         # curve line
+                .quad nil3, k000, p_ccircle, k3000, 0, o_curve, k000       # curve circle
+                .quad i_c2mesh, k000, p_c2mesh, k0330, 0, o_mesh, k000     # curve to mesh
+                .quad i_curve, k000, p_resample, k3000, 0, o_curve, k000   # resample
+                .quad i_curve, k000, p_trim, k0000, 0, o_curve, k000       # trim
+                .quad i_curve, k000, p_fillet, k0300, 0, o_curve, k000     # fillet
+                .quad i_curve, k000, p_count, k3000, 0, o_points, k000     # curve to points
+k220:           .byte 2, 2, 0, 0
+k0330:          .byte 0, 3, 3, 0
 k001:           .byte 0, 0, 1, 0
 k0300b:         .byte 0, 3, 0, 0
 k1130:          .byte 1, 1, 3, 0
@@ -229,6 +264,16 @@ k210:           .byte 2, 1, 0, 0
 k120:           .byte 1, 2, 0, 0
 .align 8
 i_geo:          .quad s_geo, 0, 0
+i_cline:        .quad s_start, s_end, 0
+i_c2mesh:       .quad s_curve, s_profile, 0
+i_curve:        .quad s_curve, 0, 0
+o_curve:        .quad s_curve, 0, 0
+p_ccircle:      .quad s_resolution, s_radius, 0, 0
+p_c2mesh:       .quad s_radius, s_sides, s_fill, 0
+p_resample:     .quad s_count, s_length, 0, 0
+p_trim:         .quad s_start, s_end, 0, 0
+p_fillet:       .quad s_radius, s_count, 0, 0
+p_count:        .quad s_count, 0, 0, 0
 i_mesh:         .quad s_mesh, 0, 0
 i_xform:        .quad s_geo, s_transl, s_scale
 i_join:         .quad s_geo, s_geo, s_geo
@@ -295,6 +340,14 @@ s_value:        .asciz "Value"
 s_fac:          .asciz "Fac"
 s_color:        .asciz "Color"
 s_size:         .asciz "Size"
+s_start:        .asciz "Start"
+s_end:          .asciz "End"
+s_curve:        .asciz "Curve"
+s_profile:      .asciz "Profile Curve"
+s_resolution:   .asciz "Resolution"
+s_sides:        .asciz "Sides"
+s_fill:         .asciz "Fill Caps"
+s_length:       .asciz "Length"
 s_subdiv:       .asciz "Subdivisions"
 s_radius:       .asciz "Radius"
 s_depth:        .asciz "Depth"
@@ -378,13 +431,20 @@ gn_defaults:    .float 0, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # input
                 .float 0, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # group
                 .float 10, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0    # distribute
                 .float 1, 1, 0, 0,  0, 0, 0,  0, 0, 0,  1, 1, 1     # instance
+                .float 0, 0, 0, 0,  0, 0, 0,  0, 1, 0,  0, 0, 0     # curve line
+                .float 32, 1, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0    # curve circle
+                .float 0.1, 8, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0   # curve to mesh
+                .float 10, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0    # resample
+                .float 0, 1, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # trim
+                .float 0.25, 4, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0  # fillet
+                .float 10, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0    # curve to points
 gz_deg:         .float 0.017453292
 gz_half:        .float 0.5
 gz_third:       .float 0.33333334
 gz_one:         .float 1.0
 gz_tiny:        .float 1.0e-12
 gz_ident:       .float 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0
-s_tree_need:    .asciz "  tree.node <tree> <type> [values]: input output grid cube sphere cylinder line transform join set_position extrude subdivide boolean merge realize position normal index value combine_xyz separate_xyz math vector_math noise random"
+s_tree_need:    .asciz "  tree.node <tree> <type> [values]: input output grid cube sphere cylinder line transform join set_position extrude subdivide boolean merge realize position normal index value combine_xyz separate_xyz math vector_math noise random group distribute instance curve_line curve_circle curve_to_mesh resample trim fillet curve_to_points"
 s_tree_linkneed:.asciz "  tree.link <tree> <from[:output]> <to> <input 1-3> (no loops)"
 s_tree_setneed: .asciz "  tree.node_set <tree> <node> <slot> <x> [y z]"
 s_tree_delneed: .asciz "  tree.node_delete <tree> <node>"
@@ -962,7 +1022,75 @@ gn_geo:
     je      .Lgg_dist
     cmp     eax, T_INST
     je      .Lgg_inst
+    cmp     eax, T_CLINE
+    je      .Lgg_cline
+    cmp     eax, T_CCIRCLE
+    je      .Lgg_ccircle
+    cmp     eax, T_C2MESH
+    je      .Lgg_c2mesh
+    lea     rcx, [rip+cn_resample]
+    cmp     eax, T_RESAMPLE
+    je      .Lgg_curve
+    lea     rcx, [rip+cn_trim]
+    cmp     eax, T_TRIM
+    je      .Lgg_curve
+    lea     rcx, [rip+cn_fillet]
+    cmp     eax, T_FILLET
+    je      .Lgg_curve
+    lea     rcx, [rip+cn_points]
+    cmp     eax, T_C2PTS
+    je      .Lgg_curve
     xor     eax, eax
+    jmp     .Lgg_done
+.Lgg_cline:                             # curves (curve.s): chains of lines
+    mov     rsi, r13
+    call    cn_line
+    jmp     .Lgg_done
+.Lgg_ccircle:
+    mov     rsi, r13
+    call    cn_circle
+    jmp     .Lgg_done
+.Lgg_curve:                             # rcx = fn(rdi=curve, rsi=node)
+    mov     [rsp], rcx
+    mov     edi, r12d
+    xor     esi, esi
+    call    gn_input_geo
+    test    rax, rax
+    jz      .Lgg_done
+    mov     r14, rax
+    mov     rdi, rax
+    mov     rsi, r13
+    call    [rsp]
+    push    rax
+    push    rax
+    mov     rdi, r14
+    call    mesh_unref
+    pop     rax
+    pop     rax
+    jmp     .Lgg_done
+.Lgg_c2mesh:                            # curve, profile
+    mov     edi, r12d
+    xor     esi, esi
+    call    gn_input_geo
+    test    rax, rax
+    jz      .Lgg_done
+    mov     r14, rax
+    mov     edi, r12d
+    mov     esi, 1
+    call    gn_input_geo
+    mov     r15, rax
+    mov     rdi, r14
+    mov     rdx, r15
+    mov     rsi, r13
+    call    cn_to_mesh
+    push    rax
+    push    rax
+    mov     rdi, r14
+    call    mesh_unref
+    mov     rdi, r15
+    call    mesh_unref
+    pop     rax
+    pop     rax
     jmp     .Lgg_done
 .Lgg_input:
     mov     rax, [rip+gn_inmesh]
