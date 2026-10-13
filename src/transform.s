@@ -118,6 +118,7 @@ OPERATOR op_scale,  "transform.scale",  "Scale",       op_tm_start, arg=3, key=K
 tm_comp:
     mov     eax, [rip+edit_obj]
     or      eax, [rip+cve_obj]
+    or      eax, [rip+arm_mode]
     ret
 
 op_tm_start:

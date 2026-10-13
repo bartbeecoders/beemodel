@@ -275,6 +275,17 @@ mesh_uv_free:
     mov     rdi, [rbx+ME_CURVE]         # (and a curve)
     mov     qword ptr [rbx+ME_CURVE], 0
     call    cv_unref
+    mov     rdi, [rbx+ME_ARM]           # (an armature's bones)
+    mov     qword ptr [rbx+ME_ARM], 0
+    call    arm_unref
+    mov     rdi, [rbx+ME_WGT]           # (skin weights)
+    test    rdi, rdi
+    jz      5f
+    mov     esi, [rbx+ME_CAPV]
+    imul    rsi, rsi, 20
+    call    uv_unmap
+    mov     qword ptr [rbx+ME_WGT], 0
+5:
     pop     rbx
     ret
 uv_unmap:
@@ -362,7 +373,56 @@ mesh_copy:
     mov     rax, [rsp]
     mov     [rax+ME_INST], rdi
     call    inst_ref
-5:  pop     rax
+5:  cmp     qword ptr [rbx+ME_WGT], 0   # (skin weights)
+    je      6f
+    mov     rdi, [rsp]
+    call    mesh_wgt_alloc
+    test    rax, rax
+    jz      6f
+    mov     rdi, rax
+    mov     rsi, [rbx+ME_WGT]
+    mov     ecx, [rbx+ME_NVERTS]
+    imul    ecx, ecx, 5
+    rep     movsd
+6:  pop     rax
+9:  pop     rbx
+    ret
+
+# mesh_wgt_alloc(rdi=mesh) -> rax = its skin weights (made: no bones, 0xff,
+#   weights 0) or 0
+.globl mesh_wgt_alloc
+mesh_wgt_alloc:
+    push    rbx
+    mov     rbx, rdi
+    mov     rax, [rbx+ME_WGT]
+    test    rax, rax
+    jnz     9f
+    mov     esi, [rbx+ME_CAPV]
+    imul    rsi, rsi, 20
+    add     rsi, 4095
+    and     rsi, -4096
+    jnz     1f
+    mov     esi, 4096
+1:  xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jb      2f
+    xor     eax, eax
+    jmp     9f
+2:  mov     [rbx+ME_WGT], rax
+    mov     ecx, [rbx+ME_CAPV]          # no bones yet
+    xor     edx, edx
+3:  cmp     edx, ecx
+    jae     9f
+    imul    r8, rdx, 20
+    mov     dword ptr [rax+r8], -1
+    inc     edx
+    jmp     3b
 9:  pop     rbx
     ret
 

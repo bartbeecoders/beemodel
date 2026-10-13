@@ -32,6 +32,7 @@
 .equ OPF_NODE,    1024  # its key only works over a node editor (and wins there)
 .equ OPF_CURVE,   2048  # its key only works in curve edit mode (and wins there)
 .equ OPF_ANIMED,  4096  # its key only works over a dope sheet / graph editor (and wins there)
+.equ OPF_ARM,     8192  # its key only works in armature edit / pose mode (and wins there)
 
 # key binding modifiers (pre-shifted into the high half of OP_KEY)
 .equ KM_SHIFT,  MOD_SHIFT << 16

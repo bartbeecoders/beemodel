@@ -15,6 +15,14 @@ project uses [Semantic Versioning](https://semver.org/).
   - **Timeline area:** shows the frame, the range, the ticks and the selected objects' keys; dragging in it scrubs.
   - **Storage:** keys and the range are saved in `.bee` files (ANIM) and undo with the scene.
   - **Operators:** `anim.*` (insert_key, delete_key, key, unkey, frame, play, range, interpolation).
+- Armatures and skinning:
+  - **Armatures:** bones (rest head, tail and roll, parents, joined chains) and poses (location, Euler rotation, scale in the bone's axes). *Create > Armature*, `arm.bone`, `arm.pose`.
+  - **Armature edit mode (Tab):** click joints, G / R / S, E extrudes a joined bone, X deletes (skin weights follow).
+  - **Pose mode (Ctrl+Tab):** click bones, G / R / S in their own frames, I keys them, Alt+R clears. Bone poses are animation channels (`bone:Rig:Upper:rz`).
+  - **Armature modifier:** deforms a mesh by four weights a vertex, with linear blend or dual quaternion skinning, in parallel.
+  - **Automatic weights:** by bone heat: each bone's heat equation is solved on the mesh, and the four strongest bones are kept. `arm.parent <mesh> <armature>` sets up both.
+  - **Weight paint (Ctrl+W):** paints the active bone's weights, shown as a heat map. `paint.weight` sets the value; BeeScript has `wpaint`.
+  - **BeeScript:** `armature`, `bones`, `weight`, `evpos`. Bones are saved in ARMT and weights in MWGT.
 - Dope Sheet, Graph Editor and action layers:
   - **Dope Sheet:** a row of keys for each curve. Click selects (Shift adds), a drag moves the selected keys by whole frames, Shift+D copies them ten frames on, X deletes, A selects all or none.
   - **Graph Editor:** every curve fitted to the view, with a selected key's Bezier handles. Dragging a key moves it in frame and value; dragging a handle shapes it and makes it free.

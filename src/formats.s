@@ -55,6 +55,9 @@
 .equ TAG_NTRE,      0x4552544E          # "NTRE"
 .equ TAG_CURV,      0x56525543          # "CURV"
 .equ TAG_ANIM,      0x4D494E41          # "ANIM"
+.equ TAG_ARMT,      0x544D5241          # "ARMT"
+.equ TAG_MWGT,      0x5447574D          # "MWGT"
+.equ AR_SZ_,        64 + 128*128
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -101,6 +104,10 @@ ntre_size:      .skip 4
 curv_chunk:     .skip 8
 anim_chunk:     .skip 8
 anim_size:      .skip 4
+armt_chunk:     .skip 8
+armt_size:      .skip 4
+mwgt_chunk:     .skip 8
+mwgt_size:      .skip 4
 oi_line:        .skip 4                 # OBJ import: an "l" line
 curv_size:      .skip 4
 mvcl_size:      .skip 4
@@ -352,6 +359,14 @@ bee_save:
     call    chunk_begin
     call    an_write
     call    chunk_end
+    mov     edi, TAG_ARMT               # ARMT (armatures' bones)
+    call    chunk_begin
+    call    armt_write
+    call    chunk_end
+    mov     edi, TAG_MWGT               # MWGT (skin weights)
+    call    chunk_begin
+    call    mwgt_write
+    call    chunk_end
     mov     edi, TAG_CADD
     call    chunk_begin
     call    cad_write
@@ -459,6 +474,133 @@ uids_write:
 2:  mov     edi, [rip+uid_next]
     call    wb_u32
     add     rsp, 16
+    pop     rbx
+    ret
+
+# armt_write - per mesh with bones: index, the block from its bone count on
+armt_write:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+n_mesh_tab]
+    jae     9f
+    lea     rax, [rip+mesh_tab]
+    mov     rax, [rax+rbx*8]
+    mov     r12, [rax+ME_ARM]
+    test    r12, r12
+    jz      8f
+    mov     edi, ebx
+    call    wb_u32
+    lea     rsi, [r12+4]
+    mov     edx, AR_SZ_-4
+    call    wb_bytes
+8:  inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+armt_read:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rdi
+    mov     r13d, esi
+1:  cmp     r13d, AR_SZ_
+    jb      9f
+    mov     ecx, [r12]
+    cmp     ecx, [rip+n_mesh_tab]
+    jae     8f
+    lea     rsi, [r12+4]
+    mov     edx, AR_SZ_-4
+    call    arm_load
+    test    rax, rax
+    jz      8f
+    mov     ecx, [r12]
+    lea     rdx, [rip+mesh_tab]
+    mov     rdx, [rdx+rcx*8]
+    mov     rdi, [rdx+ME_ARM]
+    mov     [rdx+ME_ARM], rax
+    call    arm_unref
+8:  add     r12, AR_SZ_
+    sub     r13d, AR_SZ_
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# mwgt_write - per mesh with weights: index, vertices, 20 bytes each
+mwgt_write:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+n_mesh_tab]
+    jae     9f
+    lea     rax, [rip+mesh_tab]
+    mov     r12, [rax+rbx*8]
+    cmp     qword ptr [r12+ME_WGT], 0
+    je      8f
+    mov     edi, ebx
+    call    wb_u32
+    mov     edi, [r12+ME_NVERTS]
+    call    wb_u32
+    mov     rsi, [r12+ME_WGT]
+    mov     edx, [r12+ME_NVERTS]
+    imul    edx, edx, 20
+    call    wb_bytes
+8:  inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+mwgt_read:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r12, rdi
+    mov     r13d, esi
+1:  cmp     r13d, 8
+    jb      9f
+    mov     eax, [r12+4]
+    cmp     eax, 0x8000000
+    ja      9f
+    imul    eax, eax, 20
+    add     eax, 8
+    cmp     eax, r13d
+    ja      9f
+    mov     r14d, eax
+    mov     ecx, [r12]
+    cmp     ecx, [rip+n_mesh_tab]
+    jae     8f
+    lea     rdx, [rip+mesh_tab]
+    mov     rbx, [rdx+rcx*8]
+    mov     eax, [r12+4]
+    cmp     eax, [rbx+ME_NVERTS]
+    jne     8f
+    mov     rdi, rbx
+    call    mesh_wgt_alloc
+    test    rax, rax
+    jz      8f
+    mov     rdi, rax
+    lea     rsi, [r12+8]
+    mov     ecx, [r12+4]
+    imul    ecx, ecx, 20
+    rep     movsb
+8:  add     r12, r14
+    sub     r13d, r14d
+    jmp     1b
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 
@@ -881,6 +1023,8 @@ bee_load:
     mov     qword ptr [rip+ntre_chunk], 0
     mov     qword ptr [rip+curv_chunk], 0
     mov     qword ptr [rip+anim_chunk], 0
+    mov     qword ptr [rip+armt_chunk], 0
+    mov     qword ptr [rip+mwgt_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -939,7 +1083,19 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_ANIM
+28: cmp     eax, TAG_ARMT
+    jne     283f
+    lea     rax, [rbx+8]
+    mov     [rip+armt_chunk], rax
+    mov     [rip+armt_size], ebp
+    jmp     23f
+283:cmp     eax, TAG_MWGT
+    jne     284f
+    lea     rax, [rbx+8]
+    mov     [rip+mwgt_chunk], rax
+    mov     [rip+mwgt_size], ebp
+    jmp     23f
+284:cmp     eax, TAG_ANIM
     jne     282f
     lea     rax, [rbx+8]
     mov     [rip+anim_chunk], rax
@@ -1104,7 +1260,17 @@ bee_load:
     jz      7741f
     mov     esi, [rip+curv_size]
     call    curv_read
-7741:mov     rdi, [rip+anim_chunk]       # animation
+7741:mov     rdi, [rip+armt_chunk]       # armatures
+    test    rdi, rdi
+    jz      7743f
+    mov     esi, [rip+armt_size]
+    call    armt_read
+7743:mov     rdi, [rip+mwgt_chunk]       # skin weights
+    test    rdi, rdi
+    jz      7744f
+    mov     esi, [rip+mwgt_size]
+    call    mwgt_read
+7744:mov     rdi, [rip+anim_chunk]       # animation
     test    rdi, rdi
     jz      7742f
     mov     esi, [rip+anim_size]
