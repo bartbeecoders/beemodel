@@ -464,6 +464,7 @@ def main():
     textures_world()
     shader_graph()
     gltf_mtl()
+    product_shot()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -1798,6 +1799,70 @@ def gltf_mtl():
     red = img and sum(1 for p in img.getdata() if p[0] > p[1] + 80) > 30
     check(vals[:4] == ['Painted', '0.766', '0.3', '0.2'] and abs(float(vals[4]) - math.sqrt(2 / 102)) < 1e-3 and red,
           f'MTL with OBJ: values, Ns -> roughness, usemtl, map_Kd texture ({vals})')
+
+
+PRODUCT_SHOT_MS = 10000.0          # 1080p, converged, on 32 threads (scaled below)
+PRODUCT_RMSE = 4.5                 # 32 samples + denoise vs 512 samples, 240 x 135 (levels)
+
+
+def product_shot():
+    """The v0.6 benchmark: a product shot rendered to convergence (32
+    samples + the denoiser) within budget, and the UI responsive while the
+    same scene renders at 1080p in the Render area."""
+    print('  -- product-shot benchmark --')
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-shot-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    scene = open(os.path.join(os.path.dirname(__file__), '..', 'tests', 'product_shot.bees')).read()
+    def render(w, h, spp, dn, name):
+        p = os.path.join(home, name)
+        r = subprocess.run([BIN, '--eval', scene + f'\nprint(render("{p}", {w}, {h}, {spp}, {dn}))'],
+                           env=env, capture_output=True, text=True, timeout=600)
+        try:
+            return p, float(r.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            return p, 1e9
+    # converged: close to a 512-sample reference
+    ref, _ = render(240, 135, 512, 0, 'ref.png')
+    cv, _ = render(240, 135, 32, 1, 'cv.png')
+    a, b = Image.open(ref).convert('RGB').tobytes(), Image.open(cv).convert('RGB').tobytes()
+    rmse = (sum((x - y) ** 2 for x, y in zip(a, b)) / len(a)) ** 0.5
+    check(rmse < PRODUCT_RMSE, f'32 samples + denoise converge (rmse {rmse:.2f} levels against 512 samples, budget {PRODUCT_RMSE})')
+    # the time: 1080p on big machines, a quarter of it on small ones
+    cpus = os.cpu_count() or 4
+    w, h, part = (1920, 1080, 1.0) if cpus >= 16 else (960, 540, 0.25)
+    budget = PRODUCT_SHOT_MS * part * 32 / cpus
+    p, ms = render(w, h, 32, 1, 'shot.png')
+    check(ms < budget, f'product shot {w} x {h}, 32 samples + denoise: {ms:.0f} ms (budget {budget:.0f} ms on {cpus} threads)')
+    if os.path.exists(p):
+        Image.open(p).save(os.path.join(OUT, '58_product_shot.png'))
+    # interactive: the same scene at 1080p in the Render area
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(400, 300)
+    m = Mcp(f)
+    m.tool('script_eval', {'code': scene})
+    m.tool('script_eval', {'code': 'op("render.settings", "1920 1080 32")'})
+    f.key(88)                                   # F12
+    f.pump(0.5)
+    f.latencies = []
+    for i in range(3):
+        f.drag(400, 300, 440 + 20 * i, 320, steps=8)
+    lat = sorted(f.latencies)
+    med = lat[len(lat) // 2] if lat else 1e9
+    check(med < RENDER_LATENCY_MS, f'orbiting while it renders at 1080p: median {med:.0f} ms per frame (budget {RENDER_LATENCY_MS:.0f})')
+    t0 = time.time()                            # finished: the frames stop
+    done = None
+    while time.time() - t0 < 180:
+        n0 = f.frames
+        f.pump(1.0)
+        if f.frames == n0:
+            done = time.time() - t0
+            break
+    f.shot('59_product_shot_window.png')
+    check(done is not None, f'the 1080p render finishes in the window ({done:.0f} s)' if done else 'the 1080p render finishes')
+    f.proc.kill()
 
 
 class Bridge:

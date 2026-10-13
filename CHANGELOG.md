@@ -6,7 +6,28 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-13
+
+Phase 5 of the masterplan, "Materials & rendering". BeeModel renders:
+
+- **Materials:** principled materials, optionally with shader graphs.
+- **Hive:** a CPU path tracer with a denoiser and HDRI lighting.
+- **Render window:** stays interactive while it refines.
+- **Files:** readers and writers for the usual image formats, and glTF.
+
+A product-shot benchmark runs in CI. It renders a studio scene (car paint,
+gold, glass, a light strip, a noise-bumped plinth) to convergence: 32
+samples plus the denoiser stay within 4.5 levels RMS of a 512-sample
+reference. At 1920 × 1080 that takes about 5 s on 32 threads (the budget is
+10 s, scaled to the runner's cores). The same scene also renders at 1080p in
+the Render area while the viewport is orbited, with a median frame time of
+about 30 ms.
+
 ### Added
+- The product-shot scene (`tests/product_shot.bees`) and its benchmark
+  (fakewl `product_shot`).
+- The render's resolve (tone mapping into the Render area) runs on all
+  cores.
 - glTF 2.0 and MTL:
   - **Export:** `file.export_gltf <path>` writes `.glb` (binary chunks)
     or `.gltf` (base64 buffer). Mesh objects become nodes with
@@ -486,7 +507,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/bartbeecoders/beemodel/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bartbeecoders/beemodel/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bartbeecoders/beemodel/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bartbeecoders/beemodel/compare/v0.2.0...v0.3.0

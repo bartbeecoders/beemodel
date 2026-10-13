@@ -2445,15 +2445,31 @@ job_rows:
 # hive_resolve(rdi=XRGB out, esi=stride in pixels) - the chosen pass:
 #   beauty (ACES + sRGB), albedo, normal (0.5 + 0.5 n), depth (exp(-d / 12))
 hive_resolve:
+    sub     rsp, 8
+    mov     [rip+rv_out], rdi
+    mov     [rip+rv_stride], esi
+    lea     rdi, [rip+job_resolve]      # rows in parallel
+    xor     esi, esi
+    mov     edx, [rip+hv_h]
+    mov     ecx, 8
+    call    parallel_for
+    add     rsp, 8
+    ret
+
+# job_resolve(ctx, esi=first row, edx=end)
+job_resolve:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
-    mov     rbx, rdi
-    mov     r12d, esi
-    xor     r13d, r13d                  # y
-2:  cmp     r13d, [rip+hv_h]
+    push    rbp
+    sub     rsp, 8
+    mov     rbx, [rip+rv_out]
+    mov     r12d, [rip+rv_stride]
+    mov     r13d, esi                   # y
+    mov     ebp, edx
+2:  cmp     r13d, ebp
     jae     9f
     mov     rax, [rip+hv_rowspp]        # this row's samples
     mov     eax, [rax+r13*4]
@@ -2541,7 +2557,9 @@ hive_resolve:
     jmp     3b
 5:  inc     r13d
     jmp     2b
-9:  pop     r15
+9:  add     rsp, 8
+    pop     rbp
+    pop     r15
     pop     r14
     pop     r13
     pop     r12
@@ -2833,6 +2851,9 @@ pt_nmaps:       .skip 4
 hv_debug:       .skip 4
 hv_den_on:      .skip 4                 # beauty shows hv_den (denoised)
 hv_env:         .skip 4                 # the world is an HDRI (no studio sky, sun)
+rv_stride:      .skip 4
+.align 8
+rv_out:         .skip 8
 .align 8
 hv_den:         .skip 8                 # f32[w*h][4] denoised radiance
 
