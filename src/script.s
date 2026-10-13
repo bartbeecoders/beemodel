@@ -515,6 +515,14 @@ builtins:
     .long 10, 10
     .quad bn_frames, b_frames
     .long 0, 0
+    .quad bn_unwrap, b_unwrap
+    .long 1, 2
+    .quad bn_uvpack, b_uvpack
+    .long 1, 1
+    .quad bn_seams, b_seams
+    .long 2, 2
+    .quad bn_uvstat, b_uvstat
+    .long 2, 2
     .quad bn_frametime, b_frametime
     .long 1, 1
 builtins_end:
@@ -655,6 +663,26 @@ bn_infill:      .asciz "infill"
 bn_thinnest:    .asciz "thinnest"
 bn_sculpt:      .asciz "sculpt"
 bn_frames:      .asciz "frames"
+bn_unwrap:      .asciz "unwrap"
+bn_uvpack:      .asciz "uvpack"
+bn_seams:       .asciz "seams"
+bn_uvstat:      .asciz "uvstat"
+s_smart:        .asciz "smart"
+.align 8
+seam_modes:     .quad sm_mark, sm_clear, sm_sharp, sm_none, 0
+sm_mark:        .asciz "mark"
+sm_clear:       .asciz "clear"
+sm_sharp:       .asciz "sharp"
+sm_none:        .asciz "none"
+.align 8
+uvstat_kinds:   .quad uk_isl, uk_angle, uk_area, uk_flip, uk_over, uk_in, 0
+uk_isl:         .asciz "islands"
+uk_angle:       .asciz "angle"
+uk_area:        .asciz "area"
+uk_flip:        .asciz "flipped"
+uk_over:        .asciz "overlap"
+uk_in:          .asciz "inside"
+e_uv_kind:      .asciz "unknown kind: "
 bn_frametime:   .asciz "frametime"
 e_brush:        .asciz "sculpt brushes: draw, clay strips, crease, inflate, grab, snake hook, smooth, flatten, pinch, layer, mask - not "
 .align 8
@@ -5893,6 +5921,131 @@ b_sculpt:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# unwrap(object [, "smart"]) -> islands: LSCM along the seams (or a smart
+#   projection), packed into 0..1
+b_unwrap:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_meshobj
+    mov     rdi, rax
+    call    uv_cow
+    mov     r13, rax
+    xor     esi, esi
+    cmp     r12d, 2
+    jb      1f
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     rdi, rax
+    lea     rsi, [rip+s_smart]
+    call    str_eq
+    mov     esi, eax
+1:  mov     rdi, r13
+    test    rdi, rdi
+    jz      2f
+    call    uv_unwrap
+    jmp     3f
+2:  mov     eax, -1
+3:  cvtsi2sd xmm0, eax
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# uvpack(object) -> islands (-1: no UVs)
+b_uvpack:
+    sub     rsp, 8
+    call    a_meshobj
+    mov     rdi, rax
+    call    uv_cow
+    mov     rdi, rax
+    mov     eax, -1
+    test    rdi, rdi
+    jz      1f
+    call    uv_pack
+1:  cvtsi2sd xmm0, eax
+    add     rsp, 8
+    jmp     ret_num
+
+# uv_kind(rdi=value, rsi=names (0 ended)) -> eax = the index of the name
+uv_kind:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rsi
+    call    a_str
+    mov     rbx, rax
+    xor     r13d, r13d
+1:  mov     rsi, [r12+r13*8]
+    test    rsi, rsi
+    jz      8f
+    mov     rdi, rbx
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+    inc     r13d
+    jmp     1b
+2:  mov     eax, r13d
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+8:  lea     rdi, [rip+e_uv_kind]
+    mov     rsi, rbx
+    jmp     sc_rt
+
+# seams(object, "mark" | "clear" | "sharp" | "none") -> seam edges: mark /
+#   clear those between selected vertices, every edge over 30 degrees, or
+#   none
+b_seams:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    lea     rdi, [rbx+16]
+    lea     rsi, [rip+seam_modes]
+    call    uv_kind
+    mov     r12d, eax
+    mov     rdi, rbx
+    call    a_meshobj
+    mov     rdi, rax
+    call    uv_cow
+    mov     rdi, rax
+    mov     eax, -1
+    test    rdi, rdi
+    jz      1f
+    mov     esi, r12d
+    call    uv_seams
+1:  cvtsi2sd xmm0, eax
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# uvstat(object, "islands" | "angle" | "area" | "flipped" | "overlap" |
+#   "inside") -> that measure of its UVs (-1: none)
+b_uvstat:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    lea     rdi, [rbx+16]
+    lea     rsi, [rip+uvstat_kinds]
+    call    uv_kind
+    mov     r12d, eax
+    mov     rdi, rbx
+    call    a_mesh
+    mov     rdi, rax
+    mov     esi, r12d
+    call    uv_stat
+    cvtss2sd xmm0, xmm0
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_num
 
 # frames() -> how many frames have been drawn; frametime(k) -> how long the
 #   k-th last one (0: the latest, up to 255 back) took to draw, milliseconds

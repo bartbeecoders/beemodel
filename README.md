@@ -354,6 +354,17 @@ cycles a **stabilizer** (off, 10, 25, 50 px): the stroke trails the pointer
 on a string, so wobbles shorter than it never reach the surface. Without a
 tablet nothing changes: the mouse is full pressure.
 
+### UV maps
+
+In edit mode, **Ctrl+E** marks the edges between selected vertices as UV
+seams (red; Ctrl+Shift+E clears them) and *Seams from Sharp Edges* marks
+every edge over 30 degrees. **U** unwraps along the seams with least
+squares conformal maps (our own sparse conjugate-gradient solver, per
+island), **Shift+U** projects groups of faces facing alike flat, and both
+pack the islands into the unit square: one texel density, each island
+turned to its smallest box, placed on a skyline. UVs and seams are saved in
+`.bee` files and exported to OBJ (`vt`) and glTF (`TEXCOORD_0`).
+
 ### BeeScript
 
 BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not
@@ -457,6 +468,7 @@ src/print.s     printability: wall thickness, print check
 src/sculpt.s    sculpt mode: leaf BVH, brushes, delta undo, splat drawing
 src/dyntopo.s   dynamic topology: edge split / collapse under the brush
 src/multires.s  multiresolution: per-level displacements, level sculpting
+src/uv.s        UV maps: seams, LSCM unwrap (CG solver), smart projection, packing
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay

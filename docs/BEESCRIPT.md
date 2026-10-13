@@ -132,6 +132,10 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `fangle(object, face a, face b)` | The angle between two faces' normals (radians; `deg()` converts) |
 | `thinnest(object)` | The thinnest wall (scene units): from every face straight in to the next face; `nil` when nothing is behind any face |
 | `sculpt(object, brush, x1, y1, z1, x2, y2, z2, radius, strength)` | A sculpt stroke from one world point to the other (enters sculpt mode on the object): `"draw"`, `"clay strips"`, `"crease"`, `"inflate"`, `"grab"`, `"snake hook"`, `"smooth"`, `"flatten"`, `"pinch"`, `"layer"` or `"mask"`; radius in scene units, strength 0..1 (negative inverts). One undo step |
+| `unwrap(object [, "smart"])` | UV-unwraps the mesh: least squares conformal maps along its seams (or a smart projection of faces facing alike), islands packed into 0..1; returns the islands |
+| `uvpack(object)` | Packs its UV islands again: same texel density, smallest boxes, inside 0..1 |
+| `seams(object, "mark" \| "clear" \| "sharp" \| "none")` | UV seams: mark / clear the edges between selected vertices, every edge sharper than 30 degrees, or none; returns the seam edges |
+| `uvstat(object, what)` | A measure of its UVs: `"islands"`, `"angle"` (mean angle distortion, degrees), `"area"` (area distortion, 0..2), `"flipped"` (triangles turned over), `"overlap"` (share of UV area covered twice), `"inside"` (1: all in 0..1); -1 without UVs |
 | `frames()`, `frametime(k)` | How many frames have been drawn; how long the k-th last one took to draw (0 = the latest, up to 255 back), in milliseconds |
 | `measurement()` | The measure tool's current result (Shift+M in the viewport): the distance between two clicked points, the angle at the middle one of three (radians), or `nil` |
 | `infill(body, shell, "gyroid" \| "grid", cell, wall)` | A lattice filling a shell's cavity (reaching a quarter wall into the walls), kept as its own closed shell in the body; slicers join overlapping shells |

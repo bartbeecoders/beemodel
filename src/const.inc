@@ -172,6 +172,7 @@
 .equ DRAG_REDO,         8
 .equ COL_EDIT_WIRE,   0x0b0c0e
 .equ COL_EDIT_SEL,    0xffa233
+.equ COL_SEAM,          0xe8483c  # UV seams in edit mode
 .equ COL_FACE_SEL,    0xe0a060
 .equ DRAG_BOX,          7
 .equ DRAG_SKETCH,       10      # a sketch point follows the pointer
@@ -202,6 +203,7 @@
 # ---- more evdev key codes (operator key bindings) ---------------------------
 .equ KEY_W,             17
 .equ KEY_E,             18
+.equ KEY_U,             22
 .equ KEY_R,             19
 .equ KEY_T,             20
 .equ KEY_O,             24
@@ -305,9 +307,13 @@
 .equ ME_BMAX,       84      # float[3]
 .equ ME_BYTES,      96      # size of the mapping (for munmap)
 .equ ME_REFS,       104     # objects + undo steps using this mesh
+.equ ME_VER,        108     # bumped when edited in place
 .equ ME_VSEL,       112     # u8 per vertex: selected in edit mode
 .equ ME_TPOLY,      120     # u32 per triangle: its polygon
-.equ ME_HDR,        128
+.equ ME_UV,         128     # float[2] per loop (own mapping), or 0: no UVs
+.equ ME_SEAM,       136     # u8 per loop: its edge (to the next loop) is a
+                            #  UV seam (own mapping), or 0
+.equ ME_HDR,        144
 
 # ---- objects (scene.s) -------------------------------------------------------------
 .equ OB_NAME,       0       # 32 bytes
