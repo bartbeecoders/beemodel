@@ -16,6 +16,8 @@
 .globl etool_wheel
 .globl etool_cancel
 .globl etool_draw
+.globl etool_setup
+.globl world_px
 .globl cursor_pos
 .globl cursor_place
 .globl cursor_draw
@@ -33,6 +35,7 @@
 .equ KN_MAX,    64                  # knife points
 .equ ET_LOOP,   1
 .equ ET_KNIFE,  2
+.equ ET_MEASURE, 3                      # measure.s
 
 .section .data
 .align 4
@@ -412,6 +415,7 @@ etool_wheel:                            # edi = -1 / +1
 
 etool_cancel:
     mov     dword ptr [rip+etool], 0
+    call    measure_reset
     mov     dword ptr [rip+kn_n], 0
     mov     dword ptr [rip+lc_valid], 0
     mov     dword ptr [rip+dirty], 1
@@ -419,6 +423,8 @@ etool_cancel:
 
 # etool_press(edi=modifiers) - a left click in the viewport
 etool_press:
+    cmp     dword ptr [rip+etool], ET_MEASURE
+    je      measure_press
     push    rbx
     cmp     dword ptr [rip+etool], ET_LOOP
     jne     2f
@@ -476,6 +482,8 @@ etool_key:
 
 # etool_draw - previews (in the viewport being drawn)
 etool_draw:
+    cmp     dword ptr [rip+etool], ET_MEASURE
+    je      measure_draw
     push    rbx
     push    r12
     push    r13

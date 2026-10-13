@@ -463,6 +463,16 @@ builtins:
     .long 0, 0
     .quad bn_fstatus, b_fstatus
     .long 1, 1
+    .quad bn_area, b_area
+    .long 1, 1
+    .quad bn_mass, b_mass
+    .long 1, 1
+    .quad bn_centroid, b_centroid
+    .long 2, 2
+    .quad bn_fangle, b_fangle
+    .long 3, 3
+    .quad bn_measurement, b_measurement
+    .long 0, 0
 builtins_end:
 .equ B_SZ, 24
 
@@ -577,6 +587,12 @@ bn_pattern:     .asciz "pattern"
 bn_feature:     .asciz "feature"
 bn_features:    .asciz "features"
 bn_fstatus:     .asciz "fstatus"
+bn_area:        .asciz "area"
+bn_mass:        .asciz "mass"
+bn_centroid:    .asciz "centroid"
+bn_fangle:      .asciz "fangle"
+bn_measurement: .asciz "measurement"
+e_no_face:      .asciz "no such face"
 e_ft_long:      .asciz "a feature value is 31 characters at most: "
 e_ft_word:      .asciz "not understood here: "
 e_ft_full:      .asciz "the scene holds 64 features"
@@ -644,7 +660,7 @@ e_image:        .asciz "image: could not load "
 e_no_image:     .asciz "no image called "
 e_render:       .asciz "render: could not render or write "
 e_no_mat:       .asciz "no material named "
-e_mat_param:    .asciz "material parameters: base metallic roughness specular ior transmission emission strength clearcoat coat_roughness alpha, not "
+e_mat_param:    .asciz "material parameters: base metallic roughness specular ior transmission emission strength clearcoat coat_roughness alpha density, not "
 e_mat_full:     .asciz "the scene holds 1024 materials"
 an_kind_names:  .asciz "boundary"
                 .asciz "nonmanifold"
@@ -5761,6 +5777,110 @@ b_fstatus:
     cvtsi2sd xmm0, eax
     add     rsp, 8
     jmp     ret_num
+
+# area(object) / mass(object) / centroid(object, axis): mass properties in
+#   world space (scene units; mass in grams from the material's density)
+b_area:
+    sub     rsp, 8
+    call    a_meshobj
+    mov     rdi, rax
+    call    mass_props
+    movsd   xmm0, [rip+mp_area]
+    add     rsp, 8
+    jmp     ret_num
+b_mass:
+    sub     rsp, 8
+    call    a_meshobj
+    mov     rdi, rax
+    call    mass_props
+    movsd   xmm0, [rip+mp_mass]
+    add     rsp, 8
+    jmp     ret_num
+b_centroid:
+    push    rbx
+    mov     rbx, rdi
+    call    a_meshobj
+    mov     rdi, rax
+    call    mass_props
+    lea     rdi, [rbx+16]               # axis: "x" / "y" / "z" or 0..2
+    cmp     dword ptr [rdi], T_STR
+    jne     1f
+    mov     rax, [rdi+8]
+    movzx   eax, byte ptr [rax]
+    sub     eax, 'x'
+    jmp     2f
+1:  call    a_num
+    cvttsd2si eax, xmm0
+2:  cmp     eax, 2
+    ja      3f
+    lea     rcx, [rip+mp_cen]
+    movsd   xmm0, [rcx+rax*8]
+    pop     rbx
+    jmp     ret_num
+3:  lea     rdi, [rip+e_axis]
+    xor     esi, esi
+    jmp     sc_rt
+
+# measurement() -> the measure tool's result: a distance (two points), an
+#   angle in radians (three), or nil
+b_measurement:
+    sub     rsp, 8
+    call    measure_value
+    add     rsp, 8
+    test    eax, eax
+    jz      ret_nil
+    jmp     ret_num
+
+# fangle(object, face a, face b) -> the angle between their normals (radians)
+b_fangle:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 56
+    mov     rbx, rdi
+    call    a_mesh
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     r14d, eax
+    cmp     r13d, [r12+ME_NPOLYS]
+    jae     8f
+    cmp     r14d, [r12+ME_NPOLYS]
+    jae     8f
+    mov     rdi, r12
+    mov     esi, r13d
+    call    poly_normal
+    cvtss2sd xmm0, [rip+nrm]
+    movsd   [rsp], xmm0
+    cvtss2sd xmm0, [rip+nrm+4]
+    movsd   [rsp+8], xmm0
+    cvtss2sd xmm0, [rip+nrm+8]
+    movsd   [rsp+16], xmm0
+    mov     rdi, r12
+    mov     esi, r14d
+    call    poly_normal
+    cvtss2sd xmm0, [rip+nrm]
+    movsd   [rsp+24], xmm0
+    cvtss2sd xmm0, [rip+nrm+4]
+    movsd   [rsp+32], xmm0
+    cvtss2sd xmm0, [rip+nrm+8]
+    movsd   [rsp+40], xmm0
+    lea     rdi, [rsp]
+    lea     rsi, [rsp+24]
+    call    vangle
+    add     rsp, 56
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  lea     rdi, [rip+e_no_face]
+    xor     esi, esi
+    jmp     sc_rt
 
 # matof(object) -> its material's name, or nil
 b_matof:

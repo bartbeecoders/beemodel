@@ -468,6 +468,7 @@ def main():
     params_units()
     sketcher()
     features()
+    measuring()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2090,6 +2091,53 @@ def features():
         ok, fl = False, e
     check(ok, f'scene_summary lists the features for agents ({str(fl)[:80]})')
     f.shot('63_features.png')
+    f.proc.kill()
+
+
+def measuring():
+    """Mass properties (area, volume, centre, mass from density), face angles,
+    object.measure for the console / agents, and the measure tool."""
+    print('  -- measuring --')
+    home = tempfile.mkdtemp(prefix='bee-ms-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=60)
+        return (r.stdout + r.stderr).strip()
+    out = run('print(area("Cube"), volume("Cube"), mass("Cube"), centroid("Cube", "x"), centroid("Cube", "y"), '
+              'round(deg(fangle("Cube", 0, 1))))\nmove("Cube", 1, 2, 3)\nscale("Cube", 2, 1, 1)\n'
+              'print(area("Cube"), centroid("Cube", "x"), centroid("Cube", "y"), centroid("Cube", "z"))')
+    # the 2 m cube: 24 m^2, 8 m^3 = 8e6 cm^3 of density 1; scaled x2 in x: 40 m^2, centre at its location
+    check(out.splitlines() == ['24 8 8000000 0 1 180', '40 1 2 3'],
+          f'area, volume, mass, centre of mass (world space) and face angles ({out.splitlines()})')
+    bee = os.path.join(home, 'ms.bee')
+    out = run(f'op("scene.units", "mm")\nm = material("PLA")\nmatset(m, "density", 1.24)\nassign("Cube", m)\n'
+              f'print(mass("Cube"))\nop("file.save", "{bee}")')
+    out2 = run(f'op("file.open", "{bee}")\nprint(mass("Cube"), matget("PLA", "density"))')
+    # 2 mm cube of PLA: 8 mm^3 = 0.008 cm^3 x 1.24 g/cm^3
+    check(out == '0.00992' and out2 == '0.00992 1.24', f'mass from the material density, kept in .bee ({out}, {out2})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('select("Cube")')
+    text, err = m.tool('run_operator', {'id': 'object.measure'})
+    check('Cube: volume 8 m^3, area 24 m^2, mass 8000 kg, centre 0, 1, 0 m' in (text or ''),
+          f'object.measure reports in scene units ({(text or "").strip()[-90:]})')
+    f.mods(1); f.key(50); f.mods(0)             # Shift+M: the measure tool
+    f.pump(0.1)
+    for p in [(1, 2, 1), (-1, 2, 1)]:
+        x, y = project(p)
+        f.click(x + 4, y + 3); f.pump(0.1)      # (a little off: snaps to the corner)
+    d = q('print(measurement())')
+    x, y = project((-1, 2, -1))
+    f.click(x, y); f.pump(0.1)
+    a = q('print(round(deg(measurement()) * 10))')
+    f.shot('64_measure.png')
+    check(d == '2' and a == '900', f'the measure tool: two corners 2 m apart, a right angle at the third ({d}, {a})')
+    f.key(1); f.pump(0.1)                       # Esc ends it
+    check(q('print(measurement())') == 'nil', 'Esc ends the measure tool')
     f.proc.kill()
 
 

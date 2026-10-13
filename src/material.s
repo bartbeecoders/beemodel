@@ -62,8 +62,9 @@
 .equ MA_COAT,   80
 .equ MA_COATR,  84
 .equ MA_ALPHA,  88
+.equ MA_DENS,   92                      # g/cm^3 (0 in older files: 1)
 .equ MA_MAX,    1024
-.equ NPARAMS,   11
+.equ NPARAMS,   12
 .equ PR_SZ,     32              # name ptr, offset, comps, step, min, max
 
 .section .bss
@@ -87,6 +88,7 @@ ma_def:         .float 0.8, 0.8, 0.8        # base
                 .float 0.0                  # transmission
                 .float 1.0, 1.0, 1.0, 0.0   # emission, strength
                 .float 0.0, 0.03, 1.0       # clearcoat, its roughness, alpha
+                .float 1.0                  # density (g/cm^3)
 mz_255:         .float 255.0
 mz_half:        .float 0.5
 mz_one:         .float 1.0
@@ -103,6 +105,7 @@ pn_estr:        .asciz "strength"
 pn_coat:        .asciz "clearcoat"
 pn_coatr:       .asciz "coat_roughness"
 pn_alpha:       .asciz "alpha"
+pn_dens:        .asciz "density"
 .align 8
 mat_params:     .quad pn_base
                 .long MA_BASE, 3
@@ -137,12 +140,15 @@ mat_params:     .quad pn_base
                 .quad pn_alpha
                 .long MA_ALPHA, 1
                 .float 0.005, 0, 1, 0
+                .quad pn_dens
+                .long MA_DENS, 1
+                .float 0.01, 0, 25, 0
 s_p_material:   .asciz "Material"
 lb_ior:         .asciz "IOR"
 lb_coatr:       .asciz "coat rough."
 .align 8
 mat_labels:     .quad pn_base, pn_metal, pn_rough, pn_spec, lb_ior, pn_trans
-                .quad pn_emit, pn_estr, pn_coat, lb_coatr, pn_alpha
+                .quad pn_emit, pn_estr, pn_coat, lb_coatr, pn_alpha, pn_dens
 s_none:         .asciz "-"
 s_new:          .asciz "+ New"
 s_x:            .asciz "x"
@@ -337,7 +343,7 @@ mat_new:
     pop     rdi
     lea     rsi, [rip+ma_def]           # defaults
     lea     rdi, [rdi+MA_BASE]
-    mov     ecx, 60
+    mov     ecx, 64
     rep     movsb
     inc     dword ptr [rbx+MB_COUNT]
     mov     edi, r13d                   # its name: given, or "Material",
@@ -655,7 +661,10 @@ mats_read:
     mov     ecx, MA_FILE
     rep     movsb
     mov     byte ptr [rdi-MA_FILE+31], 0    # names terminated
-    inc     edx
+    cmp     dword ptr [rdi-MA_FILE+MA_DENS], 0  # (older files: water)
+    jne     2f
+    mov     dword ptr [rdi-MA_FILE+MA_DENS], 0x3f800000
+2:  inc     edx
     jmp     1b
 9:  pop     r13
     pop     r12
