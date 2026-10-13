@@ -14,7 +14,12 @@ project uses [Semantic Versioning](https://semver.org/).
   - **Frames:** setting a frame shows the scene there. Space plays (looping over the frame range at the scene's fps), Left / Right step, Shift+Left / Right jump to the ends.
   - **Timeline area:** shows the frame, the range, the ticks and the selected objects' keys; dragging in it scrubs.
   - **Storage:** keys and the range are saved in `.bee` files (ANIM) and undo with the scene.
-  - **Operators:** `anim.*` (insert_key, delete_key, key, unkey, frame, play, range, interpolation). **BeeScript:** `frame`, `key`, `unkey`, `keyed`, with paths like `"Cube:x"`, `"material:Red:roughness"`, `"modifier:Cube:0:levels"` and `"node:Tree:3:5"`.
+  - **Operators:** `anim.*` (insert_key, delete_key, key, unkey, frame, play, range, interpolation).
+- Dope Sheet, Graph Editor and action layers:
+  - **Dope Sheet:** a row of keys for each curve. Click selects (Shift adds), a drag moves the selected keys by whole frames, Shift+D copies them ten frames on, X deletes, A selects all or none.
+  - **Graph Editor:** every curve fitted to the view, with a selected key's Bezier handles. Dragging a key moves it in frame and value; dragging a handle shapes it and makes it free.
+  - **Key operators:** `anim.select_keys`, `move_keys`, `scale_keys`, `duplicate_keys`, `delete_keys`, `handle_type`, `handle`.
+  - **Actions:** `anim.action <name>` keeps the selected objects' keys as a clip. `anim.layer <action> [object] [start] [influence] [replace|add] [repeat]` plays it on top of the scene, NLA-style, and `layer_set` / `layer_remove` change layers. Actions and layers are saved in the ANIM chunk. **BeeScript:** `frame`, `key`, `unkey`, `keyed`, with paths like `"Cube:x"`, `"material:Red:roughness"`, `"modifier:Cube:0:levels"` and `"node:Tree:3:5"`.
 
 ## [0.9.0] - 2026-10-13
 

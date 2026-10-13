@@ -436,7 +436,13 @@ ui_motion:
     je      762f
 761: call    uved_motion
     jmp     .Lmo_out
-762: cmp     dword ptr [rip+tl_drag], 0  # the timeline: a scrub
+762: cmp     dword ptr [rip+ae_drag], 0  # dope sheet / graph editor drags
+    je      7622f
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    ae_motion
+    jmp     .Lmo_out
+7622: cmp     dword ptr [rip+tl_drag], 0  # the timeline: a scrub
     je      7621f
     mov     edi, [rip+ptr_x]
     call    tl_motion
@@ -719,7 +725,20 @@ ui_button:
     call    nodeed_press
     test    eax, eax
     jnz     .Lbt_done
-764: cmp     ebx, HIT_TIMELINE           # the timeline: a scrub
+764: cmp     ebx, HIT_ANIMED             # dope sheet, graph editor
+    jne     7642f
+    cmp     dword ptr [rip+pal_open], 0
+    jne     7642f
+    mov     edi, [rip+active_area]
+    call    area_editor
+    mov     ecx, eax
+    mov     edi, r14d
+    mov     esi, [rip+ptr_x]
+    mov     edx, [rip+ptr_y]
+    call    ae_press
+    test    eax, eax
+    jnz     .Lbt_done
+7642: cmp     ebx, HIT_TIMELINE           # the timeline: a scrub
     jne     7641f
     cmp     dword ptr [rip+pal_open], 0
     jne     7641f
@@ -992,6 +1011,7 @@ ui_button:
     call    uved_release                # (a UV pan ends)
     call    nodeed_release              # (a node editor drag too)
     call    tl_release                  # (and a timeline scrub)
+    call    ae_release                  # (and key drags)
     cmp     dword ptr [rip+drag_mode], DRAG_BOX
     jne     77f
     mov     dword ptr [rip+drag_mode], 0

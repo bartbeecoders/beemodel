@@ -443,6 +443,11 @@ key("node:Valley:3:4", 50, 8, "linear")
 frame(13)                              # the scene at frame 13
 ```
 
+The **Dope Sheet** shows each curve's keys in a row (drag to retime, Shift+D to copy, X to
+delete); the **Graph Editor** shows the curves with their Bezier handles (drag keys and handles).
+`anim.action` keeps keys as a reusable clip and `anim.layer` plays clips on top of each other on
+any object - replace or add, with an influence and repeats.
+
 **Node groups.** A Group node runs another tree as one node: inside, the Group Input gives the
 group node's geometry, value and vector (fields from outside reach in), the Group Output is what
 it returns; groups nest. In the node editor, Shift-click several nodes and **Ctrl+G** moves them
@@ -673,7 +678,8 @@ src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
 src/copilot.s   the procedural co-pilot: node catalogue, graphs as JSON, proposals
-src/anim.s      animation: keyframes, F-curves, playback, the Timeline area
+src/anim.s      animation: keyframes, F-curves, playback, actions and layers, the Timeline
+src/animed.s    the Dope Sheet and the Graph Editor
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

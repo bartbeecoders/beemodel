@@ -532,6 +532,7 @@ def main():
     procedural()
     copilot()
     animation()
+    anim_editors()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3592,6 +3593,69 @@ def animation():
     f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the second key goes
     d = q('print(keyed("Cube:x", 25))')
     check(d == '0', f'Ctrl+Z takes the last keys back ({d})')
+    f.proc.kill()
+
+
+def anim_editors():
+    """The Dope Sheet (rows of keys: click selects, a drag moves whole
+    frames, Shift+D copies, X deletes) and the Graph Editor (curves fitted
+    to the view: a key dragged up changes its value); key edits by operator
+    (select, move, scale, duplicate, delete, handles); actions played as
+    layers (replace / add, influence, repeats, mute)."""
+    print('  -- dope sheet, graph editor, action layers --')
+    home = tempfile.mkdtemp(prefix='bee-ae-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('key("Cube:x", 1, 0)\nkey("Cube:x", 11, 10)\nkey("Cube:y", 11, 5)\n'
+            'op("anim.select_keys", "Cube:x 11")\nop("anim.move_keys", "10 2")\n'
+            'print(keyed("Cube:x", 21), keyed("Cube:x", 11), keyed("Cube:y", 11))\n'
+            'op("anim.select_keys", "frame 1")\nop("anim.duplicate_keys", "40")\nprint(keyed("Cube:x", 41), keyed("Cube:x", 1))\n'
+            'op("anim.select_keys", "all")\nop("anim.scale_keys", "2")\nprint(keyed("Cube:x", 41), keyed("Cube:x", 81))\n'
+            'op("anim.select_keys", "Cube:x 41")\nop("anim.delete_keys")\nprint(keyed("Cube:x", 41))\n'
+            'op("anim.handle", "Cube:x 1 right 10 30")\nprint(keyed("Cube:x", 11) > 5)\n'
+            'op("anim.select_keys", "Cube:x 1")\nop("anim.handle_type", "auto")\nprint(keyed("Cube:x", 11))\n'
+            'op("file.new")\nkey("Cube:x", 1, 0)\nkey("Cube:x", 21, 10, "linear")\nkey("Cube:x", 41, 10)\n'
+            'op("anim.action", "Slide")\nadd("cube", "B", 0, 3, 0)\nop("anim.layer", "Slide B 100 1 replace 2")\n'
+            'frame(111)\nb1 = get("B", "x")\nframe(151)\nprint(b1 > 5, abs(get("B", "x") - b1) < 0.001, get("B", "y"))\n'
+            'op("anim.layer_set", "1 mode 1")\nop("anim.layer_set", "1 influence 0.5")\nset("B", "x", 1)\nframe(111)\n'
+            'print(abs(get("B", "x") - 1 - b1 / 2) < 0.001)\nop("anim.layer_set", "1 mute 1")\nset("B", "x", 1)\nframe(111)\nprint(get("B", "x"))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=60)
+    out = [l.strip() for l in r.stdout.split('\n')]
+    check(out[:6] == ['12 6 5', '0 0', '12 0', '0', '1', '0'],
+          f'keys selected, moved, copied, stretched, deleted, a handle shaped and made auto again ({out[:6]})')
+    check(out[6:9] == ['1 1 3', '1', '1'], f'an action plays as a layer on another object: repeats, add at half influence, mute ({out[6:9]})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.enter(600, 300)
+    q('key("Cube:x", 1, 0)\nkey("Cube:x", 40, 4)\nkey("Cube:x", 80, -2)\nkey("Cube:y", 20, 1)\nkey("Cube:y", 60, 3)\nframe(30)')
+    f.move(600, 700)
+    q('op("area.type_dope_sheet")')
+    f.pump(0.3)
+    f.shot('96_dope_sheet.png')
+    ex, ey, ew = 214, 652, 801                  # the bottom area (as laid out)
+    kx = lambda fr, x0, w: int(x0 + (fr - 1) / 249 * w + 0.5)
+    x40 = kx(40, ex + 170, ew - 190)
+    f.drag(x40, ey + 46 + 9, x40 + 25, ey + 46 + 9, steps=6)   # ~10 frames on
+    a = q('print(keyed("Cube:x", 50), keyed("Cube:x", 40) != 4)')
+    f.move(600, 700)
+    f.mods(1); f.key(32); f.mods(0)             # Shift+D: ten frames on
+    b = q('print(keyed("Cube:x", 60))')
+    f.key(45)                                   # X: the copy goes
+    c = q('print(keyed("Cube:x", 60) != 4, keyed("Cube:x", 50))')
+    check(a == '4 1' and b == '4' and c == '1 4', f'the dope sheet: a key dragged ten frames on, Shift+D copies it, X deletes ({a}, {b}, {c})')
+    q('unkey("Cube:y", 20)\nunkey("Cube:y", 60)\nunkey("Cube:x", 50)\nunkey("Cube:x", 80)\nkey("Cube:x", 100, 10, "linear")\n'
+      'op("anim.interpolation", "linear")\nop("area.type_graph_editor")')
+    f.pump(0.3)
+    gx0, gw, gy0, gh = ex + 50, ew - 70, ey + 46, 126 - 58
+    y10 = gy0 + gh - int(11 / 12 * gh)
+    x100 = kx(100, gx0, gw)
+    f.drag(x100, y10, x100, y10 - 10, steps=5)  # the key at 100 up
+    d = q('print(keyed("Cube:x", 100) > 10.5)')
+    f.shot('97_graph_editor.png')
+    check(d == '1', f'the graph editor: a key dragged up gets a higher value ({d})')
     f.proc.kill()
 
 

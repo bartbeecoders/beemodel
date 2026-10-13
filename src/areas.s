@@ -108,6 +108,8 @@ s_ed_uved:      .asciz "UV Editor"
 s_ed_nodes:     .asciz "Node Editor"
 s_ed_assets:    .asciz "Asset Browser"
 s_ed_timeline:  .asciz "Timeline"
+s_ed_dopesheet: .asciz "Dope Sheet"
+s_ed_graph:     .asciz "Graph Editor"
 s_h_create:     .asciz "CREATE"
 s_p_camera:     .asciz "Viewport camera"
 s_p_yaw:        .asciz "Yaw"
@@ -144,12 +146,13 @@ s_xx:           .asciz " x "
 s_last_area:    .asciz "  the last area cannot be closed"
 s_no_room:      .asciz "  no room for more areas"
 .align 8
-editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity, s_ed_render, s_ed_uved, s_ed_nodes, s_ed_assets, s_ed_timeline
-editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw, ed_render_draw, ed_uved_draw, ed_nodes_draw, ed_assets_draw, ed_timeline_draw
+editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity, s_ed_render, s_ed_uved, s_ed_nodes, s_ed_assets, s_ed_timeline, s_ed_dopesheet, s_ed_graph
+editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw, ed_render_draw, ed_uved_draw, ed_nodes_draw, ed_assets_draw, ed_timeline_draw, ed_dopesheet_draw, ed_graph_draw
 area_btn_ops:   .quad op_area_close, op_area_split_stack, op_area_split_side, op_area_maximize
 items_area:     .quad op_area_type_vp, op_area_type_tools, op_area_type_outl
                 .quad op_area_type_props, op_area_type_console, op_area_type_activity, op_area_type_render
                 .quad op_area_type_uved, op_area_type_nodes, op_area_type_assets, op_area_type_timeline
+                .quad op_area_type_dopesheet, op_area_type_graph
 
 # ---- operators ------------------------------------------------------------------
 OPERATOR op_area_split_side,  "area.split_side",  "Split Area Side by Side", op_area_split, arg=K_HSPLIT, doc="Split the active area into two side by side"
@@ -166,6 +169,8 @@ OPERATOR op_area_type_render,"area.type_render",   "Render",      op_area_type, 
 OPERATOR op_area_type_uved,"area.type_uv_editor",  "UV Editor",   op_area_type, op_check_area_type, ED_UVED,     doc="Show the UV editor in the active area"
 OPERATOR op_area_type_assets,"area.type_asset_browser", "Asset Browser", op_area_type, op_check_area_type, ED_ASSETS, doc="Show the saved node trees and materials (~/BeeModel/assets) in the active area"
 OPERATOR op_area_type_timeline,"area.type_timeline", "Timeline", op_area_type, op_check_area_type, ED_TIMELINE, doc="Show the timeline (frames, keys, playback) in the active area"
+OPERATOR op_area_type_dopesheet,"area.type_dope_sheet", "Dope Sheet", op_area_type, op_check_area_type, ED_DOPESHEET, doc="Show every curve's keys in rows in the active area"
+OPERATOR op_area_type_graph,"area.type_graph_editor", "Graph Editor", op_area_type, op_check_area_type, ED_GRAPH, doc="Show the animation curves with their handles in the active area"
 OPERATOR op_area_type_nodes,"area.type_node_editor", "Node Editor", op_area_type, op_check_area_type, ED_NODES,   doc="Show the node editor (the active material's shader graph) in the active area"
 OPERATOR op_view_activity, "view.toggle_activity", "AI Activity Pane", op_toggle_activity, op_has_editor, ED_ACTIVITY, 0, doc="Show or hide the AI Activity area (next to the console)"
 OPERATOR op_view_tools,    "view.toggle_tools",    "Tools Pane",    op_toggle_tools,    op_has_editor, ED_TOOLS,    KEY_T, doc="Show or hide the tools area"
@@ -512,8 +517,15 @@ area_hit:
     mov     edx, r13d
     jmp     .Lah_ret
 11: cmp     ecx, ED_TIMELINE
-    jne     2f
+    jne     12f
     mov     eax, HIT_TIMELINE
+    mov     edx, r13d
+    jmp     .Lah_ret
+12: cmp     ecx, ED_DOPESHEET
+    je      13f
+    cmp     ecx, ED_GRAPH
+    jne     2f
+13: mov     eax, HIT_ANIMED
     mov     edx, r13d
     jmp     .Lah_ret
 2:  cmp     ecx, ED_NODES
@@ -938,6 +950,23 @@ nodeed_active:
     ret
 1:  xor     eax, eax
     ret
+
+# animed_active -> eax = the active area's editor when it is a dope sheet or
+#   a graph editor, else 0
+.globl animed_active
+animed_active:
+    mov     edi, [rip+active_area]
+    test    edi, edi
+    js      1f
+    sub     rsp, 8
+    call    area_editor
+    add     rsp, 8
+    cmp     eax, ED_DOPESHEET
+    je      2f
+    cmp     eax, ED_GRAPH
+    je      2f
+1:  xor     eax, eax
+2:  ret
 
 # uved_active -> eax = 1 when the active area is a UV editor
 .globl uved_active
