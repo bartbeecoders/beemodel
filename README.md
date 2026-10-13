@@ -454,6 +454,12 @@ bones and **I** keys them. `arm.parent <mesh> <armature>` skins a mesh with auto
 (bone heat diffusion); the Armature modifier deforms it by linear blend or dual quaternion
 skinning, and **Ctrl+W** paints weights over a heat map.
 
+**Physics.** `rigid.add` makes the selected objects rigid bodies: boxes, spheres, capsules,
+convex hulls, or compounds of convex parts cut from the mesh. They fall, collide, rest and sleep
+when you play past the scene's start, and come back when you return to it. Joints (fixed,
+hinge, point) tie them together or to the world. 1000 boxes tumbling into a heap simulate
+faster than real time.
+
 **Rigging.** Constraints copy, track, limit or parent an object to another
 (`constraint.add Cam track_to Target`). An IK constraint on a bone makes its chain reach for a
 target and bend towards a pole (`constraint.add Rig:Hand ik Goal chain 2 pole Knee`); drag the
@@ -696,6 +702,8 @@ src/animed.s    the Dope Sheet and the Graph Editor
 src/arm.s       armatures: bones, poses, skinning (LBS / DQS), automatic weights, modes
 src/rig.s       constraints, IK (FABRIK / CCD), drivers, motion paths, onion skins
 src/shape.s     shape keys
+src/collide.s   convex collision: support functions, GJK, EPA
+src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, islands, joints
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

@@ -2573,7 +2573,7 @@ mp_haskey:
 3:  test    r11d, r11d
     jz      5f
     imul    rax, r10, KY_SZ_
-    lea     rax, [r8+AN_RIGEND_+rax]
+    lea     rax, [r8+AN_KEYSOFF_+rax]
     movss   xmm1, [rax]
     subss   xmm1, xmm0
     andps   xmm1, [rip+rf_absm]
