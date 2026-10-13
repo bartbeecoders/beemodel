@@ -515,6 +515,7 @@ def main():
     tablet()
     dyntopo()
     multires()
+    uv_maps()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2591,6 +2592,92 @@ def multires():
       ' modapply("Ball.001", 0)\n v = volume("Ball.001")\n delete("Ball.001")\n return v\n}')
     d2 = vol(2)
     check(abs(d2 - c2) < 1e-6, f'the displacements are saved in the .bee file ({d2 - c2:+.1e})')
+    f.proc.kill()
+
+
+def uv_maps():
+    """UV maps: seams, LSCM unwrap, smart projection, packing; the measures;
+    .bee, OBJ and glTF keep them; the edit-mode keys."""
+    print('  -- UV maps --')
+    home = tempfile.mkdtemp(prefix='bee-uv-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+        return (r.stdout + r.stderr).strip()
+    stats = '", "angle"), uvstat("{0}", "area"), uvstat("{0}", "flipped"), uvstat("{0}", "overlap"), uvstat("{0}", "inside"))'
+    st = lambda o: 'print(uvstat("' + o + '", "islands"), uvstat("' + o + stats.format(o)
+    out = run('print(seams("Cube", "sharp"), unwrap("Cube"))\n' + st('Cube') + '\n'
+              'op("file.save", "~/BeeModel/uv.bee")\nop("file.export_obj", "~/BeeModel/uv.obj")\n'
+              'op("file.export_gltf", "~/BeeModel/uv.glb")').splitlines()
+    try:
+        s, isl = out[0].split()
+        n, ang, area, flip, over, inside = map(float, out[1].split())
+        ok = s == '12' and isl == '6' and n == 6 and ang < 0.01 and area < 0.01 and flip == 0 and over == 0 and inside == 1
+    except Exception:
+        ok = False
+    check(ok, f'a cube: 12 sharp edges become seams, 6 islands, no distortion, no overlap, inside 0..1 ({out[:2]})')
+    back = run('op("file.open", "~/BeeModel/uv.bee")\n' + st('Cube') + '\nprint(seams("Cube", "mark"))').splitlines()
+    check(back[:1] == out[1:2] and back[1:2] == ['12'], f'the .bee file keeps UVs and seams ({back})')
+    obj = open(os.path.join(home, 'BeeModel', 'uv.obj')).read().splitlines()
+    vts = [l for l in obj if l.startswith('vt ')]
+    fs = [l for l in obj if l.startswith('f ')]
+    check(len(vts) == 24 and all('/' in w for f in fs for w in f.split()[1:]), f'OBJ: {len(vts)} vt, faces v/vt')
+    import struct, json
+    glb = open(os.path.join(home, 'BeeModel', 'uv.glb'), 'rb').read()
+    jl = struct.unpack_from('<I', glb, 12)[0]
+    g = json.loads(glb[20:20 + jl])
+    binoff = 20 + jl + 8
+    prim = g['meshes'][0]['primitives'][0]
+    acc = g['accessors'][prim['attributes'].get('TEXCOORD_0', 0)]
+    bv = g['bufferViews'][acc['bufferView']]
+    uv = struct.unpack_from('<%df' % (acc['count'] * 2), glb, binoff + bv['byteOffset'])
+    check('TEXCOORD_0' in prim['attributes'] and acc['type'] == 'VEC2' and 0 <= min(uv) and max(uv) <= 1,
+          f'glTF: TEXCOORD_0 ({acc["count"]} loops, {min(uv):.3f}..{max(uv):.3f})')
+    if shutil.which('blender'):
+        script = os.path.join(home, 'uvcheck.py')
+        open(script, 'w').write('import bpy, sys\nbpy.ops.wm.read_factory_settings(use_empty=True)\n'
+                                'bpy.ops.import_scene.gltf(filepath=sys.argv[-1])\n'
+                                'm = [o for o in bpy.data.objects if o.type == "MESH"][0].data\n'
+                                'print("UVLAYERS", len(m.uv_layers), len(m.uv_layers[0].data) if m.uv_layers else 0)\n')
+        r = subprocess.run(['blender', '-b', '--factory-startup', '--python', script, '--',
+                            os.path.join(home, 'BeeModel', 'uv.glb')], capture_output=True, text=True, timeout=300)
+        line = [l for l in r.stdout.splitlines() if l.startswith('UVLAYERS')]
+        check(line and line[0].split()[1] == '1' and int(line[0].split()[2]) > 0, f'Blender reads the UVs ({line})')
+    # a cylinder cut along its side: developable, so no distortion
+    pre = 'delete("Cube")\nadd("cylinder", "C")\n'
+    pts = [tuple(map(float, l.split())) for l in run(pre + 'for i in 0..verts("C") {\n print(vpos("C", i, 0), vpos("C", i, 2))\n}').splitlines()]
+    side = [i for i, (x, z) in enumerate(pts) if abs(z) < 1e-4 and x > 0]
+    out = run(pre + 'seams("C", "sharp")\nvselect("C", ' + ', '.join(map(str, side)) + ')\nseams("C", "mark")\n'
+              'unwrap("C")\n' + st('C')).split()
+    try:
+        n, ang, area, flip, over, inside = map(float, out)
+        ok = n == 3 and ang < 0.5 and flip == 0 and over < 0.002 and inside == 1
+    except Exception:
+        ok = False
+    check(ok, f'a cylinder cut along its side unwraps flat: 3 islands, angles kept ({out})')
+    out = run('delete("Cube")\nadd("sphere", "B")\nprint(unwrap("B", "smart"))\n' + st('B')).splitlines()
+    try:
+        n, ang, area, flip, over, inside = map(float, out[1].split())
+        ok = n >= 4 and flip == 0 and over < 0.002 and inside == 1
+    except Exception:
+        ok = False
+    check(ok, f'smart projection of a sphere: islands without overlap or flips ({out})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('select("Cube")')
+    f.key(15)                                   # Tab: edit mode
+    f.key(30)                                   # A: all
+    f.mods(4); f.key(18); f.mods(0)             # Ctrl+E: seams
+    f.pump(0.2)
+    f.shot('73_seams.png')
+    f.key(22)                                   # U: unwrap
+    f.pump(0.2)
+    n = q('print(uvstat("Cube", "islands"), uvstat("Cube", "overlap"))')
+    check(n.split()[:1] == ['6'], f'edit mode: A, Ctrl+E (seams on every edge), U (unwrap) -> {n}')
     f.proc.kill()
 
 

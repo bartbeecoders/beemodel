@@ -28,7 +28,7 @@ stays private to the module.
 | `areas.s` | Area tree (splits + leaf areas), layout, hit testing, headers, the five editors, area operators |
 | `palette.s` | F3 command palette: fuzzy search over the operator table |
 | `scene.s` | Objects (pool + ordered list), unique names, selection, TRS matrices, object operators |
-| `mesh.s` | Polygon meshes (loops, n-gons), edge/triangle derivation, primitive generators |
+| `mesh.s` | Polygon meshes (loops, n-gons), edge/triangle derivation, primitive generators; optional per-loop UVs and seam flags in their own mappings (copied with the mesh, freed with it) |
 | `raster.s` | Viewport rasterizer: parallel setup, binning and tiles; depth, ID and visibility (triangle) buffers; selection outline; picking |
 | `transform.s` | Modal grab / rotate / scale, constraints, snapping, numeric input, gizmos |
 | `undo.s` | Undo / redo history of scene snapshots (shared, reference-counted meshes) |
@@ -58,6 +58,7 @@ stays private to the module.
 | `sculpt.s` | Sculpt mode: a BVH of ~1024-triangle leaves (vertex lists with owned vertices first), parallel brush dabs over the leaves in reach (atomic float sums, per-leaf slots for the undo deltas), normals refreshed once a frame in the dirty sphere, tile-parallel drawing (splats with a stride for dense leaves, triangles for near ones) from per-leaf splat records kept while the view stays, ray picking nearest leaf first, mask and X symmetry |
 | `dyntopo.s` | Dynamic topology for sculpt mode: a growable working copy of the triangles; per dab region an edge hash of the leaves around, longest-edge bisection over the detail size, edge collapse under 0.4 of it (link condition, valence, no flips or slivers), then only the touched leaves' triangle / vertex lists (moved within the pools when they outgrow their room), vertex ownership, boxes; at stroke end the copy becomes the object's mesh |
 | `multires.s` | Multiresolution: per-level displacements on the object (`OB_MRES`, a reference-counted block shared with undo like meshes, with the base topology's fingerprint) added by subsurf after each level; sculpting level k on a copy whose stroke moves land in D_k; propagate down (subsurf in fit mode: each level the finest's vertices); the MRES chunk |
+| `uv.s` | UV maps: loop topology (next, twin through a directed-edge hash), islands and UV vertices by union-find across non-seam edges, LSCM per island (each triangle in its own plane, two pinned vertices, matrix-free Jacobi-preconditioned conjugate gradients in doubles), smart projection (flood fill within 66 degrees of a seed's normal), packing (texel density, smallest box over 2-degree turns, skyline), seams, measures (angle / area distortion, flips, overlap on a grid) |
 | `print.s` | Printability: wall thickness per face (rays inward through a triangle grid, cached), the thin-wall overlay classes, `mesh.print_check` |
 | `sketchui.s` | Sketch mode: tools, snapping and inference, picking, point dragging, constraint keys, dimensions, the overlay |
 | `gltf.s` | glTF 2.0: export (.glb chunks or .gltf with base64), import (node tree baked, welded, PBR + KHR extensions, data: / external / GLB buffers) on the lazy JSON reader |

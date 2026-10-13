@@ -46,6 +46,7 @@
 .equ TAG_SKCH,      0x48434b53          # "SKCH"
 .equ TAG_UIDS,      0x53444955          # "UIDS"
 .equ TAG_MRES,      0x5345524D          # "MRES"
+.equ TAG_MUVS,      0x5356554D          # "MUVS"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -72,8 +73,13 @@ mgrf_chunk:     .skip 8
 cadd_chunk:     .skip 8
 skch_chunk:     .skip 8
 uids_chunk:     .skip 8
+ox_vt:          .skip 4                 # OBJ export: the next vt number
+.align 8
 mres_chunk:     .skip 8
 mres_size:      .skip 4
+.align 8
+muvs_chunk:     .skip 8
+muvs_size:      .skip 4
 .align 8
 uids_size:      .skip 4
 skch_size:      .skip 4
@@ -106,6 +112,7 @@ s_illum:        .asciz "illum 2\n"
 .align 4
 mt_one:         .float 1.0
 s_v:            .asciz "v "
+s_vt:           .asciz "vt "
 s_f:            .asciz "f"
 s_nl:           .asciz "\n"
 s_sp:           .asciz " "
@@ -258,7 +265,11 @@ bee_save:
     call    chunk_end
     inc     r12d
     jmp     3b
-4:  mov     edi, TAG_OBJS               # OBJS
+4:  mov     edi, TAG_MUVS               # MUVS (UVs and seams of the meshes)
+    call    chunk_begin
+    call    muvs_write
+    call    chunk_end
+    mov     edi, TAG_OBJS               # OBJS
     call    chunk_begin
     mov     edi, [rip+obj_count]
     call    wb_u32
@@ -397,6 +408,135 @@ uids_write:
 2:  mov     edi, [rip+uid_next]
     call    wb_u32
     add     rsp, 16
+    pop     rbx
+    ret
+
+# muvs_write - per mesh (mesh_tab order) with UVs or seams: index, flags
+#   (1 UVs, 2 seams), loops, the UVs (u v floats), the seams (a byte a loop,
+#   to a multiple of 4)
+muvs_write:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+n_mesh_tab]
+    jae     9f
+    lea     rax, [rip+mesh_tab]
+    mov     r12, [rax+rbx*8]
+    xor     eax, eax
+    cmp     qword ptr [r12+ME_UV], 0
+    je      2f
+    or      eax, 1
+2:  cmp     qword ptr [r12+ME_SEAM], 0
+    je      3f
+    or      eax, 2
+3:  test    eax, eax
+    jz      8f
+    mov     [rsp], eax
+    mov     edi, ebx
+    call    wb_u32
+    mov     edi, [rsp]
+    call    wb_u32
+    mov     edi, [r12+ME_NLOOPS]
+    call    wb_u32
+    test    dword ptr [rsp], 1
+    jz      4f
+    mov     rsi, [r12+ME_UV]
+    mov     edx, [r12+ME_NLOOPS]
+    shl     edx, 3
+    call    wb_bytes
+4:  test    dword ptr [rsp], 2
+    jz      8f
+    mov     rsi, [r12+ME_SEAM]
+    mov     edx, [r12+ME_NLOOPS]
+    add     edx, 3
+    and     edx, -4
+    call    wb_bytes
+8:  inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# muvs_read(rdi=data, esi=bytes) - back on the loaded meshes (when their
+#   loops match)
+muvs_read:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12, rdi
+    mov     r13d, esi
+1:  cmp     r13d, 12
+    jb      9f
+    mov     r14d, [r12+4]               # flags
+    mov     r15d, [r12+8]               # loops
+    cmp     r15d, 0x10000000
+    jae     9f
+    xor     eax, eax                    # its size
+    test    r14d, 1
+    jz      2f
+    lea     eax, [r15*8]
+2:  test    r14d, 2
+    jz      3f
+    lea     ecx, [r15+3]
+    and     ecx, -4
+    add     eax, ecx
+3:  add     eax, 12
+    cmp     eax, r13d
+    ja      9f
+    mov     ecx, [r12]                  # the mesh
+    cmp     ecx, [rip+n_mesh_tab]
+    jae     8f
+    lea     rax, [rip+mesh_tab]
+    mov     rbx, [rax+rcx*8]
+    cmp     r15d, [rbx+ME_NLOOPS]
+    jne     8f
+    lea     rsi, [r12+12]
+    test    r14d, 1
+    jz      4f
+    push    rsi
+    mov     rdi, rbx
+    call    mesh_uv_alloc
+    pop     rsi
+    test    rax, rax
+    jz      8f
+    mov     rdi, rax
+    lea     ecx, [r15*8]
+    rep     movsb
+4:  test    r14d, 2
+    jz      8f
+    push    rsi
+    mov     rdi, rbx
+    call    mesh_seam_alloc
+    pop     rsi
+    test    rax, rax
+    jz      8f
+    mov     rdi, rax
+    mov     ecx, r15d
+    rep     movsb
+8:  mov     eax, [r12+4]                # (the record's size again)
+    xor     ecx, ecx
+    test    eax, 1
+    jz      81f
+    mov     ecx, [r12+8]
+    shl     ecx, 3
+81: test    eax, 2
+    jz      82f
+    mov     edx, [r12+8]
+    add     edx, 3
+    and     edx, -4
+    add     ecx, edx
+82: add     ecx, 12
+    add     r12, rcx
+    sub     r13d, ecx
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 
@@ -614,6 +754,7 @@ bee_load:
     mov     qword ptr [rip+skch_chunk], 0
     mov     qword ptr [rip+uids_chunk], 0
     mov     qword ptr [rip+mres_chunk], 0
+    mov     qword ptr [rip+muvs_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -672,7 +813,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_MRES
+28: cmp     eax, TAG_MUVS
+    jne     276f
+    lea     rax, [rbx+8]
+    mov     [rip+muvs_chunk], rax
+    mov     [rip+muvs_size], ebp
+    jmp     23f
+276:cmp     eax, TAG_MRES
     jne     277f
     lea     rax, [rbx+8]
     mov     [rip+mres_chunk], rax
@@ -780,7 +927,12 @@ bee_load:
     jz      771f
     mov     esi, [rip+uids_size]
     call    uids_read
-771:mov     rdi, [rip+mres_chunk]       # multires displacements
+771:mov     rdi, [rip+muvs_chunk]       # UVs and seams
+    test    rdi, rdi
+    jz      773f
+    mov     esi, [rip+muvs_size]
+    call    muvs_read
+773:mov     rdi, [rip+mres_chunk]       # multires displacements
     test    rdi, rdi
     jz      772f
     mov     esi, [rip+mres_size]
@@ -916,6 +1068,7 @@ obj_export:
     lea     rsi, [rip+s_nl]
     call    wb_str
 0:  mov     r14d, 1                     # OBJ indices are 1-based and global
+    mov     dword ptr [rip+ox_vt], 1
     xor     ebx, ebx
 1:  cmp     ebx, [rip+obj_count]
     jae     8f
@@ -976,7 +1129,32 @@ obj_export:
     pop     rcx
     inc     ecx
     jmp     2b
-3:  xor     ecx, ecx                    # faces
+3:  cmp     qword ptr [r12+ME_UV], 0    # UVs: a vt per loop
+    je      31f
+    xor     ecx, ecx
+32: cmp     ecx, [r12+ME_NLOOPS]
+    jae     31f
+    push    rcx
+    push    rcx
+    lea     rsi, [rip+s_vt]
+    call    wb_str
+    mov     rcx, [rsp]
+    mov     rax, [r12+ME_UV]
+    movss   xmm0, [rax+rcx*8]
+    call    wb_float
+    lea     rsi, [rip+s_sp]
+    call    wb_str
+    mov     rcx, [rsp]
+    mov     rax, [r12+ME_UV]
+    movss   xmm0, [rax+rcx*8+4]
+    call    wb_float
+    lea     rsi, [rip+s_nl]
+    call    wb_str
+    pop     rcx
+    pop     rcx
+    inc     ecx
+    jmp     32b
+31: xor     ecx, ecx                    # faces
 4:  cmp     ecx, [r12+ME_NPOLYS]
     jae     6f
     push    rcx
@@ -995,7 +1173,14 @@ obj_export:
     mov     edi, [rax+r13*4]
     add     edi, r14d
     call    wb_int
-    inc     r13d
+    cmp     qword ptr [r12+ME_UV], 0    # v/vt
+    je      52f
+    mov     edi, '/'
+    call    wb_char
+    mov     edi, [rip+ox_vt]
+    add     edi, r13d
+    call    wb_int
+52: inc     r13d
     jmp     5b
 51: lea     rsi, [rip+s_nl]
     call    wb_str
@@ -1004,6 +1189,10 @@ obj_export:
     inc     ecx
     jmp     4b
 6:  add     r14d, [r12+ME_NVERTS]
+    cmp     qword ptr [r12+ME_UV], 0
+    je      7f
+    mov     eax, [r12+ME_NLOOPS]
+    add     [rip+ox_vt], eax
 7:  inc     ebx
     jmp     1b
 8:  mov     rdi, r15

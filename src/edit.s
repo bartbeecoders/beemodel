@@ -987,6 +987,58 @@ dot:
     pop     rbx
     ret
 
+# seams_draw(rdi=mesh, rsi=projected vertices) - its UV seams, red
+seams_draw:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     r12, rsi
+    cmp     qword ptr [rbx+ME_SEAM], 0
+    je      9f
+    xor     r13d, r13d                  # polygon
+1:  cmp     r13d, [rbx+ME_NPOLYS]
+    jae     9f
+    mov     rax, [rbx+ME_POFF]
+    mov     r14d, [rax+r13*4]
+    mov     r15d, [rax+r13*4+4]
+2:  cmp     r14d, r15d
+    jae     5f
+    mov     rax, [rbx+ME_SEAM]
+    cmp     byte ptr [rax+r14], 0
+    je      4f
+    mov     rcx, [rbx+ME_LOOPS]
+    mov     eax, [rcx+r14*4]
+    lea     edx, [r14+1]                # the next loop round
+    cmp     edx, r15d
+    jb      3f
+    mov     rdx, [rbx+ME_POFF]
+    mov     edx, [rdx+r13*4]
+3:  mov     edx, [rcx+rdx*4]
+    imul    rax, rax, 12
+    imul    rdx, rdx, 12
+    lea     rdi, [r12+rax]
+    lea     rsi, [r12+rdx]
+    xorps   xmm0, xmm0
+    comiss  xmm0, [rdi+8]
+    jae     4f
+    comiss  xmm0, [rsi+8]
+    jae     4f
+    mov     edx, COL_SEAM
+    call    dline
+4:  inc     r14d
+    jmp     2b
+5:  inc     r13d
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # edit_draw - overlays in the viewport being drawn (cam_setup done)
 edit_draw:
     push    rbx
@@ -1035,6 +1087,9 @@ edit_draw:
 4:  inc     r15d
     cmp     r15d, 2
     jb      .Led_pass
+    mov     rdi, r12                    # UV seams over them
+    mov     rsi, r13
+    call    seams_draw
     cmp     dword ptr [rip+sel_mode], 2
     je      .Led_faces
     cmp     dword ptr [rip+sel_mode], 0

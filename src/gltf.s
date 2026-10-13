@@ -68,6 +68,8 @@ g_acc_pos2:     .asciz ",\"componentType\":5126,\"type\":\"VEC3\",\"count\":"
 g_acc_min:      .asciz ",\"min\":["
 g_acc_max:      .asciz "],\"max\":["
 g_acc_ind2:     .asciz ",\"componentType\":5125,\"type\":\"SCALAR\",\"count\":"
+g_acc_uv2:      .asciz ",\"componentType\":5126,\"type\":\"VEC2\",\"count\":"
+g_tex0:         .asciz ",\"TEXCOORD_0\":"
 g_views:        .asciz "],\"bufferViews\":["
 g_view:         .asciz "{\"buffer\":0,\"byteOffset\":"
 g_vlen:         .asciz ",\"byteLength\":"
@@ -143,6 +145,8 @@ gx_obj:         .skip 4*MAX_EXP         # their list indices
 gx_ntri:        .skip 4*MAX_EXP
 gx_nv:          .skip 4*MAX_EXP
 gx_off:         .skip 8*MAX_EXP         # positions offset in the buffer
+gx_uv:          .skip 4*MAX_EXP         # with UVs: its UV accessor (else -1)
+gx_nuv:         .skip 4                 # meshes with UVs
 gx_path:        .skip 512
 # import
 gi_json:        .skip 8                 # text start / end
@@ -279,6 +283,7 @@ gltf_export:
     mov     [rip+gx_glb], eax
 3:  # the mesh objects and the buffer size
     mov     dword ptr [rip+gx_n], 0
+    mov     dword ptr [rip+gx_nuv], 0
     xor     r15, r15                    # bytes
     xor     ebx, ebx
 4:  cmp     ebx, [rip+obj_count]
@@ -296,7 +301,15 @@ gltf_export:
     lea     rdx, [rip+gx_obj]
     mov     [rdx+rcx*4], ebx
     mov     edx, [rax+ME_NVERTS]
-    lea     r8, [rip+gx_nv]
+    lea     r8, [rip+gx_uv]             # UVs: a vertex per loop, + UVs
+    mov     dword ptr [r8+rcx*4], -1
+    cmp     qword ptr [rax+ME_UV], 0
+    je      40f
+    mov     edx, [rip+gx_nuv]
+    mov     [r8+rcx*4], edx
+    inc     dword ptr [rip+gx_nuv]
+    mov     edx, [rax+ME_NLOOPS]
+40: lea     r8, [rip+gx_nv]
     mov     [r8+rcx*4], edx
     mov     r9d, [rax+ME_NTRIS]
     lea     r8, [rip+gx_ntri]
@@ -307,7 +320,14 @@ gltf_export:
     add     r15, rdx
     imul    r9, r9, 12
     add     r15, r9
-    inc     dword ptr [rip+gx_n]
+    lea     r8, [rip+gx_uv]             # (then UVs)
+    cmp     dword ptr [r8+rcx*4], -1
+    je      42f
+    lea     r8, [rip+gx_nv]
+    mov     edx, [r8+rcx*4]
+    shl     rdx, 3
+    add     r15, rdx
+42: inc     dword ptr [rip+gx_n]
 41: inc     ebx
     jmp     4b
 5:  cmp     dword ptr [rip+gx_n], 0
@@ -331,7 +351,14 @@ gltf_export:
     lea     rax, [rip+gx_off]
     mov     rdi, [rax+r12*8]
     add     rdi, [rip+gx_bin]
-    mov     rsi, [r13+ME_POS]
+    lea     rax, [rip+gx_uv]
+    cmp     dword ptr [rax+r12*4], -1
+    je      61f
+    mov     rsi, r13                    # (with UVs)
+    call    gx_fill_uv
+    inc     r12d
+    jmp     6b
+61: mov     rsi, [r13+ME_POS]
     mov     ecx, [r13+ME_NVERTS]
     imul    ecx, ecx, 12
     rep     movsb
@@ -422,7 +449,20 @@ gltf_export:
     call    wb_str
     lea     edi, [r12+r12]              # accessors 2i, 2i + 1
     call    int_out
-    lea     rsi, [rip+g_ind]
+    lea     rax, [rip+gx_uv]            # (UVs: 2n + its number)
+    mov     eax, [rax+r12*4]
+    cmp     eax, -1
+    je      21f
+    push    rax
+    push    rax
+    lea     rsi, [rip+g_tex0]
+    call    wb_str
+    pop     rdi
+    pop     rax
+    mov     eax, [rip+gx_n]
+    lea     edi, [rdi+rax*2]
+    call    int_out
+21: lea     rsi, [rip+g_ind]
     call    wb_str
     lea     edi, [r12+r12+1]
     call    int_out
@@ -553,7 +593,8 @@ gltf_export:
     call    int_out
     lea     rsi, [rip+g_acc_pos2]
     call    wb_str
-    mov     edi, [r13+ME_NVERTS]
+    lea     rax, [rip+gx_nv]            # (with UVs: loops)
+    mov     edi, [rax+r12*4]
     call    int_out
     mov     ecx, 3                      # bounds from the positions
     lea     rdi, [rsp]
@@ -608,6 +649,34 @@ gltf_export:
     inc     r12d
     jmp     1b
 .Lgx_views:
+    xor     r12d, r12d                  # UV accessors (bufferViews 2n + k)
+3:  cmp     r12d, [rip+gx_n]
+    jae     4f
+    lea     rax, [rip+gx_uv]
+    mov     eax, [rax+r12*4]
+    cmp     eax, -1
+    je      31f
+    push    rax
+    push    rax
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+g_acc_pos]
+    call    wb_str
+    pop     rdi
+    pop     rax
+    mov     eax, [rip+gx_n]
+    lea     edi, [rdi+rax*2]
+    call    int_out
+    lea     rsi, [rip+g_acc_uv2]
+    call    wb_str
+    lea     rax, [rip+gx_nv]
+    mov     edi, [rax+r12*4]
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
+31: inc     r12d
+    jmp     3b
+4:
     lea     rsi, [rip+g_views]
     call    wb_str
     xor     r12d, r12d
@@ -657,6 +726,42 @@ gltf_export:
     inc     r12d
     jmp     1b
 .Lgx_buf:
+    xor     r12d, r12d                  # UV views: after the indices
+3:  cmp     r12d, [rip+gx_n]
+    jae     4f
+    lea     rax, [rip+gx_uv]
+    cmp     dword ptr [rax+r12*4], -1
+    je      31f
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+g_view]
+    call    wb_str
+    lea     rax, [rip+gx_off]
+    mov     rdi, [rax+r12*8]
+    lea     rax, [rip+gx_nv]
+    mov     ecx, [rax+r12*4]
+    imul    rcx, rcx, 12
+    add     rdi, rcx
+    lea     rax, [rip+gx_ntri]
+    mov     ecx, [rax+r12*4]
+    imul    rcx, rcx, 12
+    add     rdi, rcx
+    call    wb_int
+    lea     rsi, [rip+g_vlen]
+    call    wb_str
+    lea     rax, [rip+gx_nv]
+    mov     edi, [rax+r12*4]
+    shl     edi, 3
+    call    int_out
+    lea     rsi, [rip+g_vtarget]
+    call    wb_str
+    mov     edi, 34962
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
+31: inc     r12d
+    jmp     3b
+4:
     lea     rsi, [rip+g_bufs]
     call    wb_str
     mov     rdi, [rip+gx_binsz]
@@ -703,6 +808,80 @@ gltf_export:
     pop     r13
     pop     r12
     pop     rbp
+    pop     rbx
+    ret
+
+# gx_fill_uv(rdi=out, rsi=mesh with UVs) - a vertex per loop (its
+#   vertex's position), the triangles over loops, then the loops' UVs (v
+#   down, as glTF has it)
+gx_fill_uv:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rsi
+    mov     r12, rdi
+    xor     ecx, ecx                    # positions
+1:  cmp     ecx, [rbx+ME_NLOOPS]
+    jae     2f
+    mov     rax, [rbx+ME_LOOPS]
+    mov     eax, [rax+rcx*4]
+    lea     rax, [rax+rax*2]
+    shl     rax, 2
+    add     rax, [rbx+ME_POS]
+    mov     rdx, [rax]
+    mov     [r12], rdx
+    mov     edx, [rax+8]
+    mov     [r12+8], edx
+    add     r12, 12
+    inc     ecx
+    jmp     1b
+2:  xor     r13d, r13d                  # triangles: corner -> its loop
+3:  cmp     r13d, [rbx+ME_NTRIS]
+    jae     6f
+    mov     rax, [rbx+ME_TPOLY]
+    mov     r14d, [rax+r13*4]
+    xor     r15d, r15d
+4:  mov     rax, [rbx+ME_TRIS]
+    lea     ecx, [r13+r13*2]
+    add     ecx, r15d
+    mov     esi, [rax+rcx*4]            # the vertex: its loop in the polygon
+    mov     rax, [rbx+ME_POFF]
+    mov     ecx, [rax+r14*4]
+    mov     edx, [rax+r14*4+4]
+    mov     r8, [rbx+ME_LOOPS]
+    mov     r9d, ecx
+41: cmp     ecx, edx
+    jae     42f
+    cmp     [r8+rcx*4], esi
+    je      43f
+    inc     ecx
+    jmp     41b
+42: mov     ecx, r9d
+43: mov     [r12], ecx
+    add     r12, 4
+    inc     r15d
+    cmp     r15d, 3
+    jb      4b
+    inc     r13d
+    jmp     3b
+6:  xor     ecx, ecx                    # UVs: (u, 1 - v)
+7:  cmp     ecx, [rbx+ME_NLOOPS]
+    jae     9f
+    mov     rax, [rbx+ME_UV]
+    mov     edx, [rax+rcx*8]
+    mov     [r12], edx
+    movss   xmm0, [rip+gf_one]
+    subss   xmm0, [rax+rcx*8+4]
+    movss   [r12+4], xmm0
+    add     r12, 8
+    inc     ecx
+    jmp     7b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 

@@ -15,6 +15,9 @@
 .globl mesh_ref
 .globl mesh_unref
 .globl mesh_copy
+.globl mesh_uv_alloc
+.globl mesh_seam_alloc
+.globl mesh_uv_free
 .globl mesh_add_vert
 .globl mesh_add_poly
 .globl mesh_finish
@@ -158,11 +161,83 @@ mesh_free:
     jz      1f
     push    rdi
     call    mesh_forget                 # caches keyed on it let go
+    mov     rdi, [rsp]                  # its UVs and seams
+    call    mesh_uv_free
     pop     rdi
     mov     rsi, [rdi+ME_BYTES]
     mov     eax, SYS_MUNMAP
     syscall
 1:  ret
+
+# mesh_uv_alloc(rdi=mesh) -> rax = its UVs (made, zero, when it had none;
+#   0: no memory). mesh_seam_alloc: the same for its seams.
+mesh_uv_alloc:
+    mov     rax, [rdi+ME_UV]
+    test    rax, rax
+    jnz     1f
+    push    rdi
+    mov     esi, [rdi+ME_CAPL]
+    shl     rsi, 3
+    call    uv_map
+    pop     rdi
+    mov     [rdi+ME_UV], rax
+1:  ret
+mesh_seam_alloc:
+    mov     rax, [rdi+ME_SEAM]
+    test    rax, rax
+    jnz     1f
+    push    rdi
+    mov     esi, [rdi+ME_CAPL]
+    call    uv_map
+    pop     rdi
+    mov     [rdi+ME_SEAM], rax
+1:  ret
+
+# uv_map(esi=bytes) -> rax = zeroed private mapping, or 0
+uv_map:
+    add     rsi, 4095
+    and     rsi, -4096
+    jnz     1f
+    mov     esi, 4096
+1:  xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jb      2f
+    xor     eax, eax
+2:  ret
+
+# mesh_uv_free(rdi=mesh) - its UVs and seams go
+mesh_uv_free:
+    push    rbx
+    mov     rbx, rdi
+    mov     rdi, [rbx+ME_UV]
+    test    rdi, rdi
+    jz      1f
+    mov     esi, [rbx+ME_CAPL]
+    shl     rsi, 3
+    call    uv_unmap
+    mov     qword ptr [rbx+ME_UV], 0
+1:  mov     rdi, [rbx+ME_SEAM]
+    test    rdi, rdi
+    jz      2f
+    mov     esi, [rbx+ME_CAPL]
+    call    uv_unmap
+    mov     qword ptr [rbx+ME_SEAM], 0
+2:  pop     rbx
+    ret
+uv_unmap:
+    add     rsi, 4095
+    and     rsi, -4096
+    jnz     1f
+    mov     esi, 4096
+1:  mov     eax, SYS_MUNMAP
+    syscall
+    ret
 
 # mesh_copy(rdi=mesh) -> rax = independent copy
 mesh_copy:
@@ -191,6 +266,29 @@ mesh_copy:
     lea     rdi, [rax+ME_BMIN]
     mov     ecx, 24
     rep     movsb
+    push    rax                         # its UVs and seams, copied
+    cmp     qword ptr [rbx+ME_UV], 0
+    je      1f
+    mov     rdi, rax
+    call    mesh_uv_alloc
+    test    rax, rax
+    jz      1f
+    mov     rdi, rax
+    mov     rsi, [rbx+ME_UV]
+    mov     ecx, [rbx+ME_NLOOPS]
+    shl     rcx, 3
+    rep     movsb
+1:  cmp     qword ptr [rbx+ME_SEAM], 0
+    je      2f
+    mov     rdi, [rsp]
+    call    mesh_seam_alloc
+    test    rax, rax
+    jz      2f
+    mov     rdi, rax
+    mov     rsi, [rbx+ME_SEAM]
+    mov     ecx, [rbx+ME_NLOOPS]
+    rep     movsb
+2:  pop     rax
 9:  pop     rbx
     ret
 
