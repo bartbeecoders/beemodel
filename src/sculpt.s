@@ -232,6 +232,17 @@ sd_tlist:       .skip 8
 sd_ntx:         .skip 4
 sd_nty:         .skip 4
 sd_hover:       .skip 4                 # the pointer over the canvas
+sdc_col:        .skip 8                 # the tile cache: the viewport's colour
+sdc_col_b:      .skip 8                 #  and depth after the last frame's
+sdc_dep:        .skip 8                 #  sculpt drawing, so a stroke frame
+sdc_dep_b:      .skip 8                 #  redraws only the tiles of the leaves
+sdc_prev:       .skip 8                 #  it changed (per leaf: last frame's
+sdc_prev_b:     .skip 8                 #  sd_nodes entry)
+sdc_key:        .skip 24                # rs_x0 rs_y0 rs_w rs_h fb_w leaves
+sdc_valid:      .skip 4                 # 1: the cache is the last frame
+sdc_use:        .skip 4                 # this frame: clean tiles from it
+sdc_store:      .skip 4                 # this frame: tiles drawn go into it
+sdc_dirty:      .skip 8                 # per tile: 1 = draw (frame arena)
 sd_hx:          .skip 4
 sd_hy:          .skip 4
 
@@ -417,6 +428,7 @@ shared_mesh:
 sculpt_exit:
     sub     rsp, 8
     call    sculpt_free
+    call    sdc_free
     call    mr_drop
     mov     dword ptr [rip+sc_obj], 0
     mov     qword ptr [rip+sc_mesh], 0
@@ -1332,6 +1344,8 @@ sculpt_draw:
     dec     edx
     jmp     9b
 91: mov     dword ptr [rcx], 0
+    mov     edi, [rsp+32]               # which tiles to draw (strokes: few)
+    call    cache_plan
     lea     rdi, [rip+job_proj]
     xor     esi, esi
     mov     edx, [rip+sc_nnodes]
@@ -1343,6 +1357,7 @@ sculpt_draw:
     mov     edx, [rsp+32]
     mov     ecx, 1
     call    parallel_for
+    call    cache_done
 
 .Lsd_out:
     add     rsp, 72
@@ -1502,6 +1517,233 @@ job_leaves:
     pop     rbx
     ret
 
+# cache_plan(edi=tiles) - whether this frame draws only the tiles of the
+#   leaves that changed (a stroke, the same view and viewport as the cached
+#   frame): sdc_use, sdc_dirty; sdc_store: the drawn tiles are kept
+cache_plan:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 40
+    mov     r12d, edi
+    mov     dword ptr [rip+sdc_use], 0
+    mov     dword ptr [rip+sdc_store], 0
+    mov     eax, [rip+rs_w]             # the buffers: viewport sized
+    imul    eax, [rip+rs_h]
+    lea     rbx, [rax*4]
+    cmp     rbx, [rip+sdc_col_b]
+    jbe     1f
+    call    sdc_free
+    lea     rdi, [rip+sdc_col]
+    lea     rsi, [rip+sdc_col_b]
+    mov     rdx, rbx
+    call    salloc
+    test    rax, rax
+    jz      .Lcp_none
+    lea     rdi, [rip+sdc_dep]
+    lea     rsi, [rip+sdc_dep_b]
+    mov     rdx, rbx
+    call    salloc
+    test    rax, rax
+    jz      .Lcp_none
+1:  mov     ebx, [rip+sc_nnodes]        # last frame's leaf rectangles
+    shl     rbx, 5
+    cmp     rbx, [rip+sdc_prev_b]
+    jbe     2f
+    mov     dword ptr [rip+sdc_valid], 0
+    lea     rdi, [rip+sdc_prev]
+    lea     rsi, [rip+sdc_prev_b]
+    call    sfree
+    lea     rdi, [rip+sdc_prev]
+    lea     rsi, [rip+sdc_prev_b]
+    mov     rdx, rbx
+    call    salloc
+    test    rax, rax
+    jz      .Lcp_none
+2:  mov     eax, [rip+rs_x0]            # the same viewport as the cache?
+    mov     [rsp], eax
+    mov     eax, [rip+rs_y0]
+    mov     [rsp+4], eax
+    mov     eax, [rip+rs_w]
+    mov     [rsp+8], eax
+    mov     eax, [rip+rs_h]
+    mov     [rsp+12], eax
+    mov     eax, [rip+fb_w]
+    mov     [rsp+16], eax
+    mov     eax, [rip+sc_nnodes]
+    mov     [rsp+20], eax
+    lea     rsi, [rsp]
+    lea     rdi, [rip+sdc_key]
+    mov     ecx, 6
+    repe    cmpsd
+    je      3f
+    mov     dword ptr [rip+sdc_valid], 0
+    lea     rsi, [rsp]
+    lea     rdi, [rip+sdc_key]
+    mov     ecx, 6
+    rep     movsd
+3:  mov     dword ptr [rip+sdc_store], 1
+    cmp     dword ptr [rip+sdc_valid], 0
+    je      .Lcp_out
+    cmp     dword ptr [rip+sc_full], 0  # (the view changed: everything)
+    jne     .Lcp_out
+    cmp     dword ptr [rip+sc_stroking], 0
+    je      .Lcp_out
+    lea     rdi, [rip+frame_arena]      # the tiles of the changed leaves
+    lea     esi, [r12+16]
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lcp_out
+    mov     [rip+sdc_dirty], rax
+    mov     rdi, rax
+    mov     ecx, r12d
+    xor     eax, eax
+    rep     stosb
+    xor     r13d, r13d
+4:  cmp     r13d, [rip+sc_nnodes]
+    jae     6f
+    mov     rcx, [rip+sc_lchg]
+    cmp     byte ptr [rcx+r13], 0
+    je      5f
+    mov     edi, r13d                   # where it is
+    shl     edi, 5
+    add     rdi, [rip+sd_nodes]
+    call    mark_tiles
+    mov     edi, r13d                   # where it was
+    shl     edi, 5
+    add     rdi, [rip+sdc_prev]
+    call    mark_tiles
+5:  inc     r13d
+    jmp     4b
+6:  mov     dword ptr [rip+sdc_use], 1
+    jmp     .Lcp_out
+.Lcp_none:
+    call    sdc_free
+.Lcp_out:
+    add     rsp, 40
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# mark_tiles(rdi=x0 y0 x1 y1 mode (inclusive pixels; mode 0: none)) - its
+#   tiles in sdc_dirty
+mark_tiles:
+    cmp     dword ptr [rdi+16], 0
+    je      9f
+    mov     r8d, [rdi+4]
+    sar     r8d, TILE_SH
+    test    r8d, r8d
+    jns     1f
+    xor     r8d, r8d
+1:  mov     r9d, [rdi+12]
+    sar     r9d, TILE_SH
+    cmp     r9d, [rip+sd_nty]
+    jl      2f
+    mov     r9d, [rip+sd_nty]
+    dec     r9d
+2:  cmp     r8d, r9d
+    jg      9f
+    mov     r10d, [rdi]
+    sar     r10d, TILE_SH
+    test    r10d, r10d
+    jns     3f
+    xor     r10d, r10d
+3:  mov     r11d, [rdi+8]
+    sar     r11d, TILE_SH
+    cmp     r11d, [rip+sd_ntx]
+    jl      4f
+    mov     r11d, [rip+sd_ntx]
+    dec     r11d
+4:  cmp     r10d, r11d
+    jg      8f
+    mov     eax, r8d
+    imul    eax, [rip+sd_ntx]
+    add     eax, r10d
+    mov     rcx, [rip+sdc_dirty]
+    mov     byte ptr [rcx+rax], 1
+    inc     r10d
+    jmp     4b
+8:  inc     r8d                         # (the next row)
+    jmp     2b
+9:  ret
+
+# cache_done - this frame's leaf rectangles kept; the cache is this frame
+cache_done:
+    cmp     dword ptr [rip+sdc_store], 0
+    je      9f
+    mov     rsi, [rip+sd_nodes]
+    mov     rdi, [rip+sdc_prev]
+    mov     ecx, [rip+sc_nnodes]
+    shl     ecx, 2
+    rep     movsq
+    mov     dword ptr [rip+sdc_valid], 1
+9:  ret
+
+# tile_copy(rdi=tile box x0 y0 x1 y1 (x1, y1 exclusive), esi=1 from the
+#   cache, 0 into it) - its colour and depth
+tile_copy:
+    push    rbx
+    mov     ebx, esi
+    mov     r8d, [rdi]
+    mov     r9d, [rdi+4]
+    mov     r10d, [rdi+8]
+    sub     r10d, r8d                   # width
+    jle     9f
+    mov     r11d, [rdi+12]
+1:  cmp     r9d, r11d
+    jge     9f
+    mov     eax, r9d                    # the viewport row: depth, cache
+    imul    eax, [rip+rs_w]
+    add     eax, r8d
+    mov     edx, [rip+rs_y0]            # the framebuffer row
+    add     edx, r9d
+    imul    edx, [rip+fb_w]
+    add     edx, [rip+rs_x0]
+    add     edx, r8d
+    mov     rsi, [rip+fb_ptr]
+    lea     rsi, [rsi+rdx*4]
+    mov     rdi, [rip+sdc_col]
+    lea     rdi, [rdi+rax*4]
+    test    ebx, ebx
+    jz      2f
+    xchg    rsi, rdi
+2:  mov     ecx, r10d
+    rep     movsd
+    mov     rsi, [rip+rs_depth]
+    lea     rsi, [rsi+rax*4]
+    mov     rdi, [rip+sdc_dep]
+    lea     rdi, [rdi+rax*4]
+    test    ebx, ebx
+    jz      3f
+    xchg    rsi, rdi
+3:  mov     ecx, r10d
+    rep     movsd
+    inc     r9d
+    jmp     1b
+9:  pop     rbx
+    ret
+
+# sdc_free - the tile cache goes
+sdc_free:
+    sub     rsp, 8
+    mov     dword ptr [rip+sdc_valid], 0
+    mov     dword ptr [rip+sdc_store], 0
+    mov     dword ptr [rip+sdc_use], 0
+    lea     rdi, [rip+sdc_col]
+    lea     rsi, [rip+sdc_col_b]
+    call    sfree
+    lea     rdi, [rip+sdc_dep]
+    lea     rsi, [rip+sdc_dep_b]
+    call    sfree
+    lea     rdi, [rip+sdc_prev]
+    lea     rsi, [rip+sdc_prev_b]
+    call    sfree
+    add     rsp, 8
+    ret
+
 # tile_job(rdi=ctx, esi=begin, edx=end) - draw the leaves of each tile
 tile_job:
     push    rbx
@@ -1534,11 +1776,20 @@ tile_job:
     mov     eax, [rip+rs_h]
 2:  mov     [rsp+20], eax               # y1
     mov     eax, [rsp]
-    mov     rcx, [rip+sd_toff]
+    cmp     dword ptr [rip+sdc_use], 0  # a clean tile: the last frame's
+    je      21f
+    mov     rcx, [rip+sdc_dirty]
+    cmp     byte ptr [rcx+rax], 0
+    jne     21f
+    lea     rdi, [rsp+8]
+    mov     esi, 1
+    call    tile_copy
+    jmp     .Ltj_next
+21: mov     rcx, [rip+sd_toff]
     mov     r12d, [rcx+rax*4]
     mov     r13d, [rcx+rax*4+4]
 3:  cmp     r12d, r13d
-    jae     .Ltj_next
+    jae     .Ltj_store
     mov     rcx, [rip+sd_tlist]
     mov     r14d, [rcx+r12*4]           # leaf
     mov     eax, r14d
@@ -1553,6 +1804,12 @@ tile_job:
 4:  call    draw_tris
 5:  inc     r12d
     jmp     3b
+.Ltj_store:
+    cmp     dword ptr [rip+sdc_store], 0    # (kept for the next frame)
+    je      .Ltj_next
+    lea     rdi, [rsp+8]
+    xor     esi, esi
+    call    tile_copy
 .Ltj_next:
     inc     dword ptr [rsp]
     jmp     .Ltj_tile
@@ -1706,7 +1963,13 @@ plan_records:
     je      2f
     mov     dword ptr [r13+12], 0       # not splats: no records to keep
     jmp     3f
-2:  mov     eax, [r12+20]
+2:  cmp     dword ptr [rip+sc_stroking], 0  # a stroke keeps each leaf's
+    je      23f                         #  splat stride (and so its room;
+    mov     eax, [r13+12]               #  without this, growing leaves fill
+    test    eax, eax                    #  the spare and every leaf is laid
+    jz      23f                         #  out again); its end lays them out
+    mov     [r12+20], eax               #  for the view again
+23: mov     eax, [r12+20]
     cmp     eax, [r13+12]
     jne     22f
     mov     rcx, [rip+sc_lchg]          # the same stride and unchanged: the
@@ -4120,6 +4383,7 @@ sculpt_drag:
 sculpt_release:
     sub     rsp, 8
     call    stroke_end
+    mov     dword ptr [rip+sc_full], 1  # (the splat strides for the view)
     add     rsp, 8
     ret
 

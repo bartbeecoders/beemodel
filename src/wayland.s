@@ -15,6 +15,8 @@
 .globl in_pen
 .globl fr_ns
 .globl fr_count
+.globl fr_work
+.globl fr_wk
 .globl getenv
 .globl sock_fd
 .globl alloc_id
@@ -58,6 +60,9 @@ in_pressure:    .float 1.0              # the pen's pressure 0..1 (mouse: 1)
 .equ FR_RING, 256
 fr_ns:          .skip FR_RING*8         # the last frames' drawing times
 fr_count:       .skip 4                 # frames drawn
+.align 8
+fr_wk:          .skip FR_RING*8         # their input work (sculpt strokes)
+fr_work:        .skip 8                 # (since the last frame)
 .align 8
 fr_t0:          .skip 8
 sbuf:           .skip SBUF_SIZE
@@ -1439,6 +1444,10 @@ render:
     and     ecx, FR_RING-1
     lea     rdx, [rip+fr_ns]
     mov     [rdx+rcx*8], rax
+    mov     rax, [rip+fr_work]
+    lea     rdx, [rip+fr_wk]
+    mov     [rdx+rcx*8], rax
+    mov     qword ptr [rip+fr_work], 0
     inc     dword ptr [rip+fr_count]
 
     lea     rcx, [rip+buf_busy]
@@ -1484,6 +1493,7 @@ render:
 9:  ret
 
 # mono_ns -> rax = monotonic clock, nanoseconds
+.globl mono_ns
 mono_ns:
     sub     rsp, 24
     mov     edi, 1                      # CLOCK_MONOTONIC

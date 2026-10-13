@@ -62,6 +62,12 @@ jobs:
       - name: Enclosure walkthrough (3MF read by lib3mf, sliced by PrusaSlicer)
         run: timeout 600 python tests/enclosure.py build/beemodel --require-lib3mf --require-slicer
 
+      - name: Sculpt and paint walkthrough (sculpt, bake, paint layers, vertex colours, .bee)
+        run: timeout 300 python tests/sculpt_paint.py build/beemodel build/shots
+
+      - name: Sculpting at scale (25M vertices, frame times, memory)
+        run: timeout 900 python tests/sculpt20m.py build/beemodel --frame-ms 100
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 300 python tools/fakewl.py build/shots
 

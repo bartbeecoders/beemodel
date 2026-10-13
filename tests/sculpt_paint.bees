@@ -1,0 +1,109 @@
+# Sculpt and paint - the v0.8 walkthrough: a stone creature head.
+#
+# A dense ball is sculpted (brow, eye sockets, nose, mouth, cheeks, horns),
+# its detail is baked into maps of a light, unwrapped ball, and the light
+# head is painted: a base coat, a multiplied layer of moss, the baked
+# ambient occlusion in its material and the normal map for the sculpted
+# shape. A pedestal gets vertex colours. Everything is saved in one .bee
+# file, the maps as PNG files, and the path tracer renders it.
+#
+#   beemodel --eval "$(cat tests/sculpt_paint.bees)"     (writes ~/BeeModel/)
+
+delete("Cube")
+cy = 0.6                                  # the head's centre height
+
+# ---- the light head: 2k faces, unwrapped ------------------------------------
+add("sphere", "Head", 0, cy, 0)
+modifier("Head", "subsurf")
+modapply("Head", 0)
+print("islands", unwrap("Head", "smart"))
+
+# ---- the dense head: 130k faces, sculpted -----------------------------------
+add("sphere", "Sculpt", 0, cy, 0)
+modifier("Sculpt", "subsurf")
+modset("Sculpt", 0, "levels", 4)
+modapply("Sculpt", 0)
+t = clock()
+sculpt("Sculpt", "clay strips", -0.55, cy + 0.45, 0.85, 0.55, cy + 0.45, 0.85, 0.22, 0.8)  # the brow
+sculpt("Sculpt", "draw", -0.36, cy + 0.18, 0.95, -0.34, cy + 0.18, 0.95, 0.2, -1)        # eye sockets
+sculpt("Sculpt", "draw", 0.36, cy + 0.18, 0.95, 0.34, cy + 0.18, 0.95, 0.2, -1)
+sculpt("Sculpt", "draw", 0, cy + 0.05, 1.02, 0, cy - 0.20, 1.0, 0.14, 1)                  # the nose
+sculpt("Sculpt", "crease", -0.35, cy - 0.42, 0.92, 0.35, cy - 0.42, 0.92, 0.1, 1)        # the mouth
+sculpt("Sculpt", "inflate", -0.62, cy - 0.20, 0.72, -0.6, cy - 0.25, 0.74, 0.25, 0.6)     # cheeks
+sculpt("Sculpt", "inflate", 0.62, cy - 0.20, 0.72, 0.6, cy - 0.25, 0.74, 0.25, 0.6)
+sculpt("Sculpt", "snake hook", -0.5, cy + 0.80, 0.2, -0.7, cy + 1.40, 0.1, 0.18, 1)        # horns
+sculpt("Sculpt", "snake hook", 0.5, cy + 0.80, 0.2, 0.7, cy + 1.40, 0.1, 0.18, 1)
+sculpt("Sculpt", "smooth", -0.6, cy + 0.45, 0.85, 0.6, cy + 0.45, 0.85, 0.2, 0.5)
+print("sculpted", verts("Sculpt"), manifold("Sculpt"), round((clock() - t)))
+
+# ---- bake the dense head into the light one's maps ------------------------
+op("image.new", "head_col 1024 1024")
+op("image.new", "head_nm 1024 1024")
+op("image.new", "head_ao 1024 1024")
+op("image.new", "head_cv 1024 1024")
+t = clock()
+print("baked", bake("Head", "Sculpt", "normal", "head_nm", 0.6), bake("Head", "Sculpt", "ao", "head_ao", 0.6),
+      bake("Head", "Sculpt", "curvature", "head_cv", 0.6), round(clock() - t))
+move("Sculpt", 2.6, cy, -1.2)
+
+# ---- the material: painted colour x AO, the normal map ----------------------
+material("Stone")
+col = node("Stone", "image", "head_col", 1)
+ao = node("Stone", "image", "head_ao", 1)
+mul = node("Stone", "mix", 2)
+link("Stone", col, mul, 2)
+link("Stone", ao, mul, 3)
+nm = node("Stone", "image", "head_nm", 1)
+nmap = node("Stone", "normalmap", 1)
+link("Stone", nm, nmap, 1)
+socket("Stone", "base", mul)
+socket("Stone", "normal", nmap)
+matset("Stone", "roughness", 0.8)
+assign("Head", "Stone")
+
+# ---- paint: a base coat, then moss on a multiplied layer ------------------
+fn coat(r, g, b, every, size) {
+ n = 0
+ for i in 0..24 {
+  for k in 1..12 {
+   if (i * 7 + k * 3) % every == 0 {
+    p = k * 0.2618                        # around the ball's surface
+    a = i * 0.2618 + k * 0.13
+    n += paint("Head", sin(p) * sin(a), cy + cos(p), sin(p) * cos(a), size, r, g, b)
+   }
+  }
+ }
+ return n
+}
+t = clock()
+print("coat", coat(150, 142, 128, 1, 0.45))
+moss = layer("head_col", "add")
+layer("head_col", "blend", moss, 1)                     # multiply
+print("moss", coat(90, 150, 70, 11, 0.2))
+layer("head_col", "opacity", moss, 0.6)
+print("painted", layer("head_col", "count"), round(clock() - t))
+
+# ---- a pedestal with vertex colours -----------------------------------------
+add("cylinder", "Pedestal", 0, -1.25, 0)
+scale("Pedestal", 0.75)
+modifier("Pedestal", "subsurf")
+modset("Pedestal", 0, "levels", 3)
+modapply("Pedestal", 0)
+op("paint.color", "70 60 52")
+vpaint("Pedestal", 0, -1.25, 0, 3)
+op("paint.color", "200 170 90")
+n = 0
+for i in 0..12 {
+ n += vpaint("Pedestal", sin(i * 0.5236) * 0.7, -1.0, cos(i * 0.5236) * 0.7, 0.3)
+}
+print("vpaint", n, vcol("Pedestal", 0, 0))
+
+# ---- save, the maps as PNG, a render ----------------------------------------
+op("file.save", "~/BeeModel/sculpt_paint.bee")
+op("image.save", "head_col ~/BeeModel/head_col.png")
+op("image.save", "head_nm ~/BeeModel/head_nm.png")
+op("image.save", "head_ao ~/BeeModel/head_ao.png")
+op("image.save", "head_cv ~/BeeModel/head_cv.png")
+t = clock()
+render("~/BeeModel/sculpt_paint.png", 960, 540, 64)
+print("rendered", round(clock() - t))

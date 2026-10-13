@@ -462,6 +462,8 @@ ui_motion:
     push    rdi
     push    rsi
     sub     rsp, 8
+    call    mono_ns                     # (the stroke's work: frametime)
+    mov     [rsp], rax
     call    vp_setup_drag
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
@@ -470,6 +472,9 @@ ui_motion:
     mov     esi, [rip+ptr_y]
     call    sculpt_drag
     call    reset_clip
+    call    mono_ns
+    sub     rax, [rsp]
+    add     [rip+fr_work], rax
     add     rsp, 8
     pop     rsi
     pop     rdi
