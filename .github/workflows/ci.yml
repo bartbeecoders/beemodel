@@ -65,6 +65,9 @@ jobs:
       - name: Sculpt and paint walkthrough (sculpt, bake, paint layers, vertex colours, .bee)
         run: timeout 300 python tests/sculpt_paint.py build/beemodel build/shots
 
+      - name: Procedural walkthrough (terrain, scattering, a million instances)
+        run: timeout 300 python tests/procedural.py build/beemodel build/shots
+
       - name: Sculpting at scale (25M vertices, frame times, memory)
         run: timeout 900 python tests/sculpt20m.py build/beemodel --frame-ms 250
 

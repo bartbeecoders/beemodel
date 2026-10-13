@@ -6,6 +6,45 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-13
+
+Phase 8 of the masterplan, "Nodes & procedural". BeeModel builds geometry
+from node graphs:
+
+- **Node editor:** shader graphs and geometry node trees as boxes and
+  wires, with groups and an asset library.
+- **Geometry nodes:** 39 node types run by a Geometry Nodes modifier. Their
+  fields compile to a block-vectorized VM, and a template JIT turns hot
+  programs into AVX / SSE machine code.
+- **Scattering and instancing:** a million instances, placed in
+  milliseconds and drawn without being realized.
+- **Curves:** Bezier and poly splines, edited in a curve edit mode and
+  swept into tubes or along profiles, plus curve nodes.
+- **Generators:** terrain with erosion, L-systems and wave function
+  collapse.
+- **Procedural co-pilot:** AI agents build node setups as proposals that
+  the user accepts or reverts in one step.
+
+The exit checks:
+- **`tools/fakewl.py` (instancing):** places a million instances in under
+  200 ms and orbits 100k of them in the window.
+- **`tests/procedural.bees`:** builds an eroded valley with scattered rocks
+  and L-system plants from one tree, a curve rail with posts from a second,
+  and a meadow of a million instances from a third. It saves and renders
+  the scene. `tests/procedural.py` checks the numbers, the budgets and the
+  reopened file.
+
+Benchmark on a 32-thread desktop (Ryzen 9 7950X):
+- **A million instances:** placed in 13–16 ms (scattered by area, then a
+  matrix each). The viewport orbits them at 11.4 ms a frame at the median
+  (14.1 ms at the 95th percentile): small ones become depth-tested splats,
+  near ones their triangles, binned into tiles across the threads.
+- **Field programs:** 1M points x 42 instructions take 4.7 ms in the VM on
+  one core, 2.0 ms compiled (AVX), and 0.3 ms compiled on all cores.
+- **Procedural walkthrough:** 1.5 s end to end. That covers a 200 x 200
+  terrain with 200k erosion droplets and 401 rocks and plants (0.26 s), the
+  rail, the meadow, the save and a 960x540 render.
+
 ### Added
 - The Node Editor area: the active material's shader graph as boxes, sockets
   and wires. Shift+A adds a node at the pointer; header drags move nodes;
@@ -833,7 +872,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/bartbeecoders/beemodel/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/bartbeecoders/beemodel/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/bartbeecoders/beemodel/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/bartbeecoders/beemodel/compare/v0.5.0...v0.6.0

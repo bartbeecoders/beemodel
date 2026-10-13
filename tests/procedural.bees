@@ -1,0 +1,101 @@
+# A procedural valley - the v0.9 walkthrough.
+#
+# One geometry node tree makes the land: a ridged noise terrain, eroded by
+# 200k water droplets, with rocks scattered on it (distributed by area,
+# kept apart, instanced with random turns) and plants grown by an
+# L-system (instanced upright). A Bezier curve makes a rail across the
+# valley: a second tree sweeps it into a tube and stands posts along it
+# (curve to mesh, curve to points, instance). A third tree scatters a million blades of grass on
+# a meadow - placed, not realized. Everything is saved in one .bee file and
+# the path tracer renders it.
+#
+#   beemodel --eval "$(cat tests/procedural.bees)"     (writes ~/BeeModel/)
+
+delete("Cube")
+
+# ---- the land ------------------------------------------------------------------
+add("plane", "Land", 0, 0, 0)
+t = gtree("Valley")
+o = gnode(t, "output")
+tr = gnode(t, "terrain", 40, 200, 7, 3)        # size, resolution, height, seed
+gset(t, tr, 1, 1.6, 6, 0.6)                     # noise: scale, detail, ridged
+er = gnode(t, "erode", 200000, 0.3, 3)          # droplets, strength, seed
+glink(t, tr, er, 1)
+dr = gnode(t, "distribute", 0.12, 1, 1.5)       # rocks: density, seed, spacing
+glink(t, er, dr, 1)
+rk = gnode(t, "sphere", 0.45)
+ri = gnode(t, "instance", 1, 1, 5)              # random turn, along the normal
+glink(t, dr, ri, 1)
+glink(t, rk, ri, 2)
+dp = gnode(t, "distribute", 0.25, 2, 1.2)       # plants
+glink(t, er, dp, 1)
+pl = gnode(t, "lsystem", 0, 3, 0.03, 0.12)      # preset plant, iterations, radius, step
+pn = gnode(t, "instance", 1, 0, 9)              # random turn, upright
+glink(t, dp, pn, 1)
+glink(t, pl, pn, 2)
+j = gnode(t, "join")
+glink(t, er, j, 1)
+glink(t, ri, j, 2)
+glink(t, pn, j, 3)
+glink(t, j, o, 1)
+c0 = clock()
+m = modifier("Land", "geometry")
+modset("Land", m, "tree", t)
+print("land", everts("Land"), instances("Land"), round(clock() - c0))
+assign("Land", material("Earth"))
+matset("Earth", "base", 0.36, 0.42, 0.24)
+matset("Earth", "roughness", 0.9)
+
+# ---- the rail: a curve, swept, with posts ------------------------------------------
+b = curve("empty", "Bridge")
+op("curve.spline", "bezier")
+op("curve.point", "-16 8 -6")
+op("curve.point", "0 6.5 0")
+op("curve.point", "16 8 6")
+op("curve.set", "resolution 24")
+p = gtree("Posts")
+po = gnode(p, "output")
+pin = gnode(p, "input")
+tube = gnode(p, "curve_to_mesh", 0.12, 10, 0)
+glink(p, pin, tube, 1)
+cp = gnode(p, "curve_to_points", 16)
+glink(p, pin, cp, 1)
+post = gnode(p, "cylinder", 0.08, 1.6)
+pi2 = gnode(p, "instance", 0, 0, 0)
+glink(p, cp, pi2, 1)
+glink(p, post, pi2, 2)
+pj = gnode(p, "join")
+glink(p, tube, pj, 1)
+glink(p, pi2, pj, 2)
+glink(p, pj, po, 1)
+mb = modifier("Bridge", "geometry")
+modset("Bridge", mb, "tree", p)
+print("bridge", cpoints("Bridge"), round(clength("Bridge") * 100) / 100, instances("Bridge"), efaces("Bridge"))
+assign("Bridge", material("Wood"))
+matset("Wood", "base", 0.45, 0.3, 0.16)
+
+# ---- a meadow of a million blades ---------------------------------------------------
+add("plane", "Meadow", 0, -40, 0)
+g = gtree("Meadow")
+go = gnode(g, "output")
+gg = gnode(g, "grid", 40, 1)
+gd = gnode(g, "distribute", 625, 4, 0)          # 1600 m2 x 625 = 1M points
+gb = gnode(g, "cube", 0.05)
+gi = gnode(g, "instance", 1, 1, 2)
+glink(g, gg, gd, 1)
+glink(g, gd, gi, 1)
+glink(g, gb, gi, 2)
+glink(g, gi, go, 1)
+c0 = clock()
+mm = modifier("Meadow", "geometry")
+modset("Meadow", mm, "tree", g)
+print("meadow", instances("Meadow"), round(clock() - c0))
+
+# ---- save, render (the meadow saved, not rendered) -------------------------------------
+move("Camera", 37, 27, 35)
+move("Light", 6, 30, 14)
+op("file.save", "~/BeeModel/procedural.bee")
+delete("Meadow")
+c0 = clock()
+render("~/BeeModel/procedural.png", 960, 540, 32)
+print("rendered", round(clock() - c0))
