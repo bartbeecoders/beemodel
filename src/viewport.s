@@ -512,6 +512,7 @@ viewport_draw:
     je      1f
     xor     edi, edi                    # solid: rasterize meshes (+ outline)
     call    raster_scene
+    call    sculpt_draw                 # the sculpt mesh: its own path
 1:  call    draw_objects                # wires (all objects, or non-meshes)
     call    edit_draw                   # edit mode: edges, vertices, faces
     call    analysis_draw               # View > Show ... overlays
@@ -520,6 +521,7 @@ viewport_draw:
     call    gizmo_draw
     call    tm_draw
     call    skm_overlay                 # sketch mode: points, labels, tools
+    call    sculpt_overlay              # sculpt mode: the brush, settings
 
     # ---- orientation gizmo (bottom-left) -----------------------------------
     mov     r12d, [rip+cvs_x0]

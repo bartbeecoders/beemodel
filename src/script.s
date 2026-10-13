@@ -191,6 +191,7 @@ mac_len:        .skip 4
 rng_state:      .quad 0x9E3779B97F4A7C15
 
 .section .rodata
+fr_million:     .double 1000000.0
 .align 16
 f_sign:         .quad 0x8000000000000000, 0
 f_abs:          .quad 0x7fffffffffffffff, 0
@@ -510,6 +511,12 @@ builtins:
     .long 5, 5
     .quad bn_thinnest, b_thinnest
     .long 1, 1
+    .quad bn_sculpt, b_sculpt
+    .long 10, 10
+    .quad bn_frames, b_frames
+    .long 0, 0
+    .quad bn_frametime, b_frametime
+    .long 1, 1
 builtins_end:
 .equ B_SZ, 24
 
@@ -646,6 +653,10 @@ bn_smesh:      .asciz "smesh"
 bn_sclear:     .asciz "sclear"
 bn_infill:      .asciz "infill"
 bn_thinnest:    .asciz "thinnest"
+bn_sculpt:      .asciz "sculpt"
+bn_frames:      .asciz "frames"
+bn_frametime:   .asciz "frametime"
+e_brush:        .asciz "sculpt brushes: draw, clay strips, crease, inflate, grab, snake hook, smooth, flatten, pinch, layer, mask - not "
 .align 8
 fw_lat:         .quad fw_gyroid
                 .long 0, 0
@@ -5811,6 +5822,95 @@ b_infill:
     pop     r13
     pop     r12
     pop     rbx
+    jmp     ret_num
+
+# sculpt(object, brush, x1, y1, z1, x2, y2, z2, radius, strength) - a stroke
+#   from one world point to the other (sculpt mode on the object; negative
+#   strength inverts), one undo step
+b_sculpt:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 56
+    mov     rbx, rdi
+    call    a_meshobj                   # (in sculpt mode on it)
+    mov     rdi, rbx
+    call    a_obj
+    mov     r12d, eax
+    cmp     eax, [rip+sc_obj]
+    je      1f
+    mov     edi, eax
+    call    sculpt_enter
+    test    eax, eax
+    jz      9f
+1:  lea     rdi, [rbx+16]               # the brush, by name
+    call    a_str
+    mov     r13, rax
+    xor     r14d, r14d
+2:  cmp     r14d, 11
+    jae     8f
+    lea     rax, [rip+brush_names]
+    mov     rsi, [rax+r14*8]
+    mov     rdi, r13
+    call    str_eq
+    test    eax, eax
+    jnz     3f
+    inc     r14d
+    jmp     2b
+3:  xor     ecx, ecx                    # the points, radius, strength
+4:  push    rcx
+    push    rcx
+    lea     eax, [rcx+2]
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_val
+    pop     rcx
+    pop     rcx
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 8
+    jb      4b
+    mov     edi, r14d
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+12]
+    movss   xmm0, [rsp+24]
+    movss   xmm1, [rsp+28]
+    call    sculpt_dab_world
+    add     rsp, 56
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+8:  lea     rdi, [rip+e_brush]
+    mov     rsi, r13
+    jmp     sc_rt
+9:  add     rsp, 56
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# frames() -> how many frames have been drawn; frametime(k) -> how long the
+#   k-th last one (0: the latest, up to 255 back) took to draw, milliseconds
+b_frames:
+    mov     eax, [rip+fr_count]
+    cvtsi2sd xmm0, rax
+    jmp     ret_num
+b_frametime:
+    sub     rsp, 8
+    call    a_int
+    add     rsp, 8
+    mov     ecx, [rip+fr_count]
+    sub     ecx, eax
+    dec     ecx
+    and     ecx, 255
+    lea     rdx, [rip+fr_ns]
+    cvtsi2sd xmm0, qword ptr [rdx+rcx*8]
+    divsd   xmm0, [rip+fr_million]
     jmp     ret_num
 
 # thinnest(object) -> its thinnest wall (scene units; nil when no ray meets

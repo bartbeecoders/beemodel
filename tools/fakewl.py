@@ -471,6 +471,7 @@ def main():
     measuring()
     sdf_kernel()
     fabrication()
+    sculpting()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2278,6 +2279,82 @@ def fabrication():
     m.tool('run_operator', {'id': 'view.show_thickness', 'arg': '1'})
     f.pump(0.3)
     f.shot('66_thin_walls.png')
+    f.proc.kill()
+
+
+SCULPT_BUDGET_MS = 33.0           # a stroke frame on a 500k-vertex mesh (CI: 4 cores)
+
+
+def sculpting():
+    """Sculpt mode: brushes, mask, symmetry, undo by deltas, drawing and
+    stroke speed on a dense mesh."""
+    print('  -- sculpting --')
+    home = tempfile.mkdtemp(prefix='bee-sc-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+        return (r.stdout + r.stderr).strip()
+    ball = 'delete("Cube")\nadd("sphere", "Ball")\nmodifier("Ball", "subsurf")\nmodset("Ball", 0, "levels", 3)\nmodapply("Ball", 0)\n'
+    want = {'draw': 1, 'clay strips': 1, 'inflate': 1, 'layer': 1, 'crease': -1, 'flatten': 0, 'pinch': 0, 'smooth': -1}
+    code = ball + 'v = volume("Ball")\n'
+    for b, sgn in want.items():
+        code += f'sculpt("Ball", "{b}", 0, 0.9, 0.3, 0.1, 0.9, 0.3, 0.3, 0.6)\nw = volume("Ball")\nprint("{b}", w - v, manifold("Ball"))\nv = w\n'
+    out = run(code)
+    got = {}
+    for line in out.splitlines():
+        *name, d, man = line.split()
+        got[' '.join(name)] = (float(d), man)
+    ok = len(got) == len(want) and all(got[b][1] == '1' and (abs(got[b][0]) > 1e-5 if sgn == 0 else got[b][0] * sgn > 0)
+                                       for b, sgn in want.items())
+    # (flatten after the crease fills its groove; pinch only gathers)
+    check(ok, f'brushes raise, carve, smooth and keep the mesh closed ({ {k: round(v[0], 4) for k, v in got.items()} })')
+    out = run(ball + 'v = volume("Ball")\nop("object.sculpt_mode")\nselect("Ball")\nsculpt("Ball", "mask", 0, 0, 0, 0, 0, 0, 5, 1)\n'
+              'sculpt("Ball", "draw", 0, 0.9, 0.3, 0.1, 0.9, 0.3, 0.3, 1)\nprint(volume("Ball") - v)\n'
+              'op("sculpt.mask_clear")\nsculpt("Ball", "draw", 0.5, 0.7, 0.3, 0.55, 0.7, 0.3, 0.2, 1)\nd1 = volume("Ball") - v\n'
+              'op("sculpt.symmetry_x")\nv = volume("Ball")\nsculpt("Ball", "draw", 0.5, 0.7, -0.3, 0.55, 0.7, -0.3, 0.2, 1)\nd2 = volume("Ball") - v\n'
+              'print(round(d2 / d1 * 10))')
+    lines = out.splitlines()
+    check(len(lines) == 2 and abs(float(lines[0])) < 1e-6 and lines[1] in ('19', '20', '21'),
+          f'a full mask holds the surface; X symmetry doubles the stroke ({lines})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube")\nadd("sphere", "Ball", 0, 1, 0)\nscale("Ball", 2)\nmodifier("Ball", "subsurf")\nmodset("Ball", 0, "levels", 5)\n'
+      'modapply("Ball", 0)\nselect("Ball")')
+    n = q('print(verts("Ball"))')
+    v0 = q('print(volume("Ball"))')
+    f.mods(4); f.key(15); f.mods(0)             # Ctrl+Tab: sculpt mode
+    f.pump(0.5)
+    n0 = int(float(q('print(frames())')))
+    f.drag(560, 300, 680, 340, steps=24)
+    f.pump(0.2)
+    # the app's own drawing times (frametime) of the stroke's frames
+    ft = [float(x) for x in q('s = str(frames())\nfor k in 0..200 {\n s = s + " " + str(frametime(k))\n}\nprint(s)').split()]
+    lat = sorted(ft[2:int(ft[0]) - n0])
+    ms = lat[len(lat) // 2] if lat else 1e9
+    v1 = q('print(volume("Ball"))')
+    check(float(v1) > float(v0) and ms < SCULPT_BUDGET_MS and len(lat) > 10,
+          f'a stroke on {n} vertices raises the surface: {len(lat)} frames drawn in {ms:.1f} ms median '
+          f'(budget {SCULPT_BUDGET_MS} ms) ({v0} -> {v1})')
+    f.shot('68_sculpt.png')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: by deltas, exact
+    f.pump(0.3)
+    v2 = q('print(volume("Ball"))')
+    f.mods(5); f.key(44); f.mods(0)             # Ctrl+Shift+Z
+    f.pump(0.3)
+    v3 = q('print(volume("Ball"))')
+    check(v2 == v0 and v3 == v1, f'Ctrl+Z puts every vertex back, Ctrl+Shift+Z sculpts it again ({v2}, {v3})')
+    f.key(31)                                   # S: the smooth brush
+    f.pump(0.1)
+    f.drag(600, 300, 640, 320, steps=8)
+    f.pump(0.2)
+    v4 = q('print(volume("Ball"))')
+    f.mods(4); f.key(15); f.mods(0)             # Ctrl+Tab: back
+    f.pump(0.2)
+    check(float(v4) < float(v3), f'S picks the smooth brush; Ctrl+Tab leaves sculpt mode ({v3} -> {v4})')
     f.proc.kill()
 
 

@@ -322,6 +322,17 @@ To make things:
 - **Signed-distance shapes** (`sunion`, `sgyroid`, `smesh`, ...): blend and
   lattice shapes into closed meshes.
 
+### Sculpting
+
+Ctrl+Tab puts the active mesh in **sculpt mode** (millions of vertices: a
+subdivided 22M-vertex ball strokes at about 7 ms a frame). Brushes: X draw,
+C clay strips, Shift+C crease, I inflate, G grab, K snake hook, S smooth
+(Shift with any brush), Shift+T flatten, P pinch, L layer, M mask (Alt+M
+clears, Ctrl+I inverts). `[` `]` size the brush, Shift+`[` `]` its strength,
+Ctrl inverts it, Shift+X mirrors strokes across X. Each stroke is one undo
+step that stores only the vertices it moved. Scripts sculpt too:
+`sculpt("Ball", "draw", 0, 1, 0.3, 0.2, 1, 0.3, 0.3, 0.5)`.
+
 ### BeeScript
 
 BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not
@@ -422,6 +433,7 @@ src/sdf.s       signed-distance shapes, marching tetrahedra
 src/fab.s       3MF export, DXF / SVG of sketches
 src/drawing.s   PDF drawings: views, hidden lines, dimensions
 src/print.s     printability: wall thickness, print check
+src/sculpt.s    sculpt mode: leaf BVH, brushes, delta undo, splat drawing
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay

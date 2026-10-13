@@ -10,6 +10,8 @@
 
 # exports
 .globl write_err
+.globl fr_ns
+.globl fr_count
 .globl getenv
 .globl sock_fd
 .globl alloc_id
@@ -49,6 +51,11 @@ next_id:        .long 2                 # 1 is always wl_display
 
 .section .bss
 .align 64
+.equ FR_RING, 256
+fr_ns:          .skip FR_RING*8         # the last frames' drawing times
+fr_count:       .skip 4                 # frames drawn
+.align 8
+fr_t0:          .skip 8
 sbuf:           .skip SBUF_SIZE
 rbuf:           .skip RBUF_SIZE
 rctl:           .skip 256
@@ -1223,7 +1230,16 @@ render:
     imul    rax, rbx
     add     rax, [rip+pool_ptr]
     mov     [rip+fb_ptr], rax
+    call    mono_ns
+    mov     [rip+fr_t0], rax
     call    ui_draw
+    call    mono_ns                     # how long it took (frametime())
+    sub     rax, [rip+fr_t0]
+    mov     ecx, [rip+fr_count]
+    and     ecx, FR_RING-1
+    lea     rdx, [rip+fr_ns]
+    mov     [rdx+rcx*8], rax
+    inc     dword ptr [rip+fr_count]
 
     lea     rcx, [rip+buf_busy]
     mov     dword ptr [rcx+rbx*4], 1
@@ -1266,6 +1282,19 @@ render:
     mov     dword ptr [rip+dirty], 0
 8:  pop     rbx
 9:  ret
+
+# mono_ns -> rax = monotonic clock, nanoseconds
+mono_ns:
+    sub     rsp, 24
+    mov     edi, 1                      # CLOCK_MONOTONIC
+    mov     rsi, rsp
+    mov     eax, 228                    # clock_gettime
+    syscall
+    mov     rax, [rsp]
+    imul    rax, rax, 1000000000
+    add     rax, [rsp+8]
+    add     rsp, 24
+    ret
 
 # -----------------------------------------------------------------------------
 # set_cursor(edi = cursor-shape-v1 shape) - only sends when it changes

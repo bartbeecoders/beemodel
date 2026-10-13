@@ -168,6 +168,7 @@
 .equ COL_FACE_SEL,    0xe0a060
 .equ DRAG_BOX,          7
 .equ DRAG_SKETCH,       10      # a sketch point follows the pointer
+.equ DRAG_SCULPT,       11      # a sculpt stroke
 .equ COL_OK,          0x4cb86a
 .equ COL_WARN,        0xe0a030
 .equ COL_ACCENT,        0xf2b134
@@ -335,3 +336,8 @@
 .equ KEY_V,             47
 .equ KEY_P,             25
 .equ KEY_M,             50
+.equ KEY_TAB,           15
+.equ KEY_I,             23
+.equ KEY_K,             37
+.equ KEY_LEFTBRACE,     26
+.equ KEY_RIGHTBRACE,    27
