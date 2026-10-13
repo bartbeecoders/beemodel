@@ -64,6 +64,13 @@
 .equ XDG_TOPLEVEL_SET_MINIMIZED,    13
 .equ CURSOR_MGR_GET_POINTER,        1
 .equ CURSOR_DEV_SET_SHAPE,          1
+.equ CURSOR_MGR_GET_TABLET_TOOL,   2
+.equ TAB_MGR_GET_SEAT,              0
+.equ TAB_TOOLS,                     8
+.equ TOOL_PEN,                      0x140
+.equ TOOL_ERASER,                   0x141
+.equ BTN_STYLUS,                    0x14b
+.equ BTN_STYLUS2,                   0x14c
 
 .equ WL_SHM_FORMAT_XRGB8888,        1
 

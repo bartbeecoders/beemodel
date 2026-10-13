@@ -333,6 +333,14 @@ Ctrl inverts it, Shift+X mirrors strokes across X. Each stroke is one undo
 step that stores only the vertices it moved. Scripts sculpt too:
 `sculpt("Ball", "draw", 0, 1, 0.3, 0.2, 1, 0.3, 0.3, 0.5)`.
 
+A **pen tablet** works through the Wayland tablet protocol: pressure scales
+the strength (and, with *Pressure: Radius*, the radius) through a soft,
+linear or hard curve (`sculpt.pressure_curve`); the eraser end inverts the
+brush; the stylus buttons are the middle and right mouse buttons. Shift+S
+cycles a **stabilizer** (off, 10, 25, 50 px): the stroke trails the pointer
+on a string, so wobbles shorter than it never reach the surface. Without a
+tablet nothing changes: the mouse is full pressure.
+
 ### BeeScript
 
 BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not
@@ -374,7 +382,7 @@ see every operator with its id, binding and description.
 
 ```
 src/main.s      entry point, CLI flags, event loop (a render slice per turn)
-src/wayland.s   socket, message encode/decode, SCM_RIGHTS, shm buffers, dispatch
+src/wayland.s   socket, message encode/decode, SCM_RIGHTS, shm buffers, dispatch, tablets
 src/draw.s      framebuffer primitives: rects, gradient, text, lines, clipping
 src/ui.s        layout, hit testing, input, menus, status bar
 src/areas.s     area tree, editors, splitting / closing / maximizing

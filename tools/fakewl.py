@@ -28,7 +28,8 @@ os.makedirs(OUT, exist_ok=True)
 
 GLOBALS = [(1, 'wl_compositor', 4), (2, 'wl_shm', 1), (3, 'xdg_wm_base', 2),
            (4, 'wl_seat', 5), (5, 'wp_cursor_shape_manager_v1', 1),
-           (6, 'wp_fractional_scale_manager_v1', 1), (7, 'wp_viewporter', 1)]
+           (6, 'wp_fractional_scale_manager_v1', 1), (7, 'wp_viewporter', 1),
+           (8, 'zwp_tablet_manager_v2', 1)]
 
 
 def wstr(s):
@@ -130,8 +131,10 @@ class Fake:
             self.objs[u(0)] = 'wl_pointer'
         elif iface == 'wl_seat' and op == 1:
             self.objs[u(0)] = 'wl_keyboard'
-        elif iface == 'wp_cursor_shape_manager_v1' and op == 1:
+        elif iface == 'wp_cursor_shape_manager_v1' and op in (1, 2):
             self.objs[u(0)] = 'wp_cursor_shape_device_v1'
+        elif iface == 'zwp_tablet_manager_v2' and op == 0:
+            self.objs[u(0)] = 'zwp_tablet_seat_v2'
         elif iface == 'wp_fractional_scale_manager_v1' and op == 1:
             self.objs[u(0)] = 'wp_fractional_scale_v1'
         elif iface == 'wp_viewporter' and op == 1:
@@ -222,6 +225,43 @@ class Fake:
             self.serial += 1
             self.send(kb, 3, struct.pack('<IIII', self.serial, 0, code, st))
         self.pump(until_frame=True)
+
+    # ---- a tablet (zwp_tablet_v2): tools on the tablet seat ------------------
+    def pen_add(self, eraser=False):
+        """A new tool on the tablet seat (a pen, or a pen's eraser end)."""
+        seat = self.find('zwp_tablet_seat_v2')[0]
+        if not hasattr(self, 'tablet'):
+            self.next_srv = 0xff000000
+            self.tablet = self.next_srv; self.next_srv += 1
+            self.send(seat, 0, struct.pack('<I', self.tablet))          # tablet_added
+            self.send(self.tablet, 4)                                    # done
+        tool = self.next_srv; self.next_srv += 1
+        self.objs[tool] = 'zwp_tablet_tool_v2'
+        self.send(seat, 1, struct.pack('<I', tool))                     # tool_added
+        self.send(tool, 0, struct.pack('<I', 0x141 if eraser else 0x140))  # type
+        self.send(tool, 3, struct.pack('<I', 1))                        # capability: pressure
+        self.send(tool, 4)                                               # done
+        self.pump(0.05)
+        return tool
+
+    def pen_stroke(self, tool, pts, pressure):
+        """Into proximity, down at the first point, through the others with this
+        pressure (0..1; a list: one a point), up, out. One frame a point."""
+        ps = pressure if isinstance(pressure, list) else [pressure] * len(pts)
+        frame = lambda: self.send(tool, 18, struct.pack('<I', int(time.time() * 1000) & 0xffffffff))
+        self.serial += 1
+        self.send(tool, 6, struct.pack('<III', self.serial, self.tablet, self.surf()))  # proximity_in
+        for i, ((x, y), p) in enumerate(zip(pts, ps)):
+            self.send(tool, 10, struct.pack('<ii', x * 256, y * 256))   # motion
+            self.send(tool, 11, struct.pack('<I', int(p * 65535)))      # pressure
+            if i == 0:
+                self.serial += 1
+                self.send(tool, 8, struct.pack('<I', self.serial))      # down
+            frame()
+            self.pump(until_frame=True)
+        self.send(tool, 9); frame()                                      # up
+        self.send(tool, 7); frame()                                      # proximity_out
+        self.pump(0.2)
 
     def mods(self, depressed):
         kb = self.find('wl_keyboard')[0]
@@ -472,6 +512,7 @@ def main():
     sdf_kernel()
     fabrication()
     sculpting()
+    tablet()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2355,6 +2396,64 @@ def sculpting():
     f.mods(4); f.key(15); f.mods(0)             # Ctrl+Tab: back
     f.pump(0.2)
     check(float(v4) < float(v3), f'S picks the smooth brush; Ctrl+Tab leaves sculpt mode ({v3} -> {v4})')
+    f.proc.kill()
+
+
+def tablet():
+    """A pen through zwp_tablet_v2: pressure scales the brush, the eraser end
+    inverts it, the stabilizer holds short wobbles; the mouse still works."""
+    print('  -- tablet, pressure, stabilizer --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube")\nadd("sphere", "Ball", 0, 1, 0)\nscale("Ball", 2)\nmodifier("Ball", "subsurf")\nmodset("Ball", 0, "levels", 3)\n'
+      'modapply("Ball", 0)\nselect("Ball")')
+    f.mods(4); f.key(15); f.mods(0)             # Ctrl+Tab: sculpt mode
+    f.pump(0.3)
+    pen = f.pen_add()
+    path = [(560 + 6 * i, 300 + 2 * i) for i in range(16)]
+    vol = lambda: float(q('print(volume("Ball"))'))
+    undo = lambda: (f.mods(4), f.key(44), f.mods(0), f.pump(0.2))
+    v0 = vol()
+    f.pen_stroke(pen, path, 1.0)
+    d_full = vol() - v0
+    undo()
+    f.pen_stroke(pen, path, 0.25)
+    d_light = vol() - v0
+    undo()
+    check(d_full > 0 and 0.1 * d_full < d_light < 0.5 * d_full,
+          f'pen pressure scales the strength: full {d_full:.5f}, a quarter {d_light:.5f}')
+    f.shot('69_pen.png')
+    q('op("sculpt.pressure_curve")\nop("sculpt.pressure_curve")')   # linear -> hard -> soft
+    f.pen_stroke(pen, path, 0.25)
+    d_soft = vol() - v0
+    undo()
+    check(d_soft > 1.5 * d_light, f'the soft curve gives a light touch more ({d_soft:.5f})')
+    eraser = f.pen_add(eraser=True)
+    f.pen_stroke(eraser, path, 1.0)
+    d_er = vol() - v0
+    undo()
+    check(d_er < 0, f'the eraser end inverts the brush ({d_er:.5f})')
+    v1 = vol()
+    for _ in range(3):                          # Shift+S: 10, 25, 50 px
+        f.mods(1); f.key(31); f.mods(0)
+    f.click(600, 310)                           # a click: one dab
+    f.pump(0.2)
+    d_click = vol() - v1
+    undo()
+    f.drag(600, 310, 630, 320, steps=6)         # within the string: no more
+    f.pump(0.2)
+    d_short = vol() - v1
+    undo()
+    f.drag(560, 300, 700, 340, steps=20)        # beyond it: the stroke trails
+    f.pump(0.2)
+    d_long = vol() - v1
+    check(d_short == d_click and d_long > 3 * d_click,
+          f'the stabilizer holds a short wobble, follows a long stroke ({d_click:.5f}, {d_short:.5f}, {d_long:.5f})')
+    f.shot('70_stabilizer.png')
     f.proc.kill()
 
 
