@@ -27,6 +27,12 @@
 .include "macros.inc"
 
 .globl an_cur
+.globl an_eval
+.globl an_curve
+.globl an_keyp
+.globl an_range
+.globl an_sel_all
+.globl an_own_g
 .globl an_frame
 .globl an_play
 .globl an_ref
@@ -54,6 +60,8 @@
 .equ AN_START,  24                      # the scene's frame range, fps
 .equ AN_END,    28
 .equ AN_FPS,    32
+.equ AN_NACT,   36                      # actions, layers
+.equ AN_NLAY,   40
 .equ AN_CUR,    64
 .equ AN_MAXC,   1024
 .equ CU_SZ,     32
@@ -63,7 +71,23 @@
 .equ CU_C,      12
 .equ CU_FIRST,  16
 .equ CU_N,      20
-.equ AN_KEYS,   AN_CUR + AN_MAXC*CU_SZ
+.equ CU_ACT,    24                      # 0: the scene's own curves, else an action
+.equ AN_ACT,    AN_CUR + AN_MAXC*CU_SZ  # actions: name, the frames they span
+.equ AN_MAXA,   32
+.equ AC_SZ,     48
+.equ AC_START,  32
+.equ AC_END,    36
+.equ AN_LAY,    AN_ACT + AN_MAXA*AC_SZ  # layers: an action played on the scene
+.equ AN_MAXL,   32
+.equ LY_SZ,     32
+.equ LY_ACT,    0                       # the action (1..)
+.equ LY_TARGET, 4                       # the object it moves (uid; 0: as keyed)
+.equ LY_START,  8                       # the frame it starts at
+.equ LY_INFL,   12                      # influence 0..1
+.equ LY_MODE,   16                      # 0 replace, 1 add
+.equ LY_REPEAT, 20                      # times it plays
+.equ LY_MUTE,   24
+.equ AN_KEYS,   AN_LAY + AN_MAXL*LY_SZ
 .equ KY_SZ,     32
 .equ KY_F,      0
 .equ KY_V,      4
@@ -99,6 +123,10 @@ ap_kind:        .skip 4                 # a parsed path
 ap_a:           .skip 4
 ap_b:           .skip 4
 ap_c:           .skip 4
+ap_act:         .skip 4                 # (0: the scene's curves)
+ap_sel:         .skip 4                 # a key written: selected?
+ap_ht:          .skip 4                 #  its handle type,
+ap_h:           .skip 16                #  and (free) handles
 ap_word:        .skip 128
 tl_drag:        .skip 4
 tl_x0:          .skip 4                 # the timeline as last drawn
@@ -230,6 +258,10 @@ an_own:
     pop     rbx
     ret
 
+# an_own_g - an_own for the editors
+an_own_g:
+    jmp     an_own
+
 # an_find(edi=kind, esi=a, edx=b, ecx=c) -> eax = its curve, or -1
 an_find:
     mov     r8, [rip+an_cur]
@@ -247,6 +279,9 @@ an_find:
     cmp     [r9+AN_CUR+CU_B], edx
     jne     2f
     cmp     [r9+AN_CUR+CU_C], ecx
+    jne     2f
+    mov     r10d, [rip+ap_act]
+    cmp     [r9+AN_CUR+CU_ACT], r10d
     jne     2f
     ret
 2:  inc     eax
@@ -307,6 +342,8 @@ an_key:
     mov     ecx, [rbx+AN_NKEY]
     mov     [rax+CU_FIRST], ecx
     mov     dword ptr [rax+CU_N], 0
+    mov     ecx, [rip+ap_act]
+    mov     [rax+CU_ACT], ecx
     mov     eax, [rbx+AN_NCUR]
     inc     dword ptr [rbx+AN_NCUR]
 1:  mov     r12d, eax                   # the curve
@@ -335,6 +372,8 @@ an_key:
     mov     [rax+KY_V], ecx
     mov     ecx, [rsp+8]
     mov     [rax+KY_INT], cl
+    mov     rdi, rax
+    call    ap_extras
     jmp     .Lak_done
 4:  mov     r15d, [r13+CU_FIRST]        # insert at r15 = first + place
     add     r15d, r14d
@@ -363,6 +402,7 @@ an_key:
     mov     [rdi+KY_V], ecx
     mov     ecx, [rsp+8]
     mov     [rdi+KY_INT], cl
+    call    ap_extras
     inc     dword ptr [rbx+AN_NKEY]
     inc     dword ptr [r13+CU_N]
     lea     ecx, [r12+1]                # later curves start one later
@@ -388,6 +428,21 @@ an_key:
     pop     r12
     pop     rbx
     ret
+
+# ap_extras(rdi=key) - its selection and handle type from ap_sel / ap_ht
+#   (a free key keeps ap_h's handles)
+ap_extras:
+    mov     al, [rip+ap_sel]
+    mov     [rdi+KY_SEL], al
+    mov     al, [rip+ap_ht]
+    mov     [rdi+KY_HT], al
+    test    al, al
+    jz      1f
+    mov     rax, [rip+ap_h]
+    mov     [rdi+KY_HLX], rax
+    mov     rax, [rip+ap_h+8]
+    mov     [rdi+KY_HRX], rax
+1:  ret
 
 # an_unkey(xmm0=frame; ap_* the channel) -> eax = 1 when a key went (a curve
 #   left without keys goes too)
@@ -862,15 +917,23 @@ an_chan:
 an_apply:
     push    rbx
     push    r12
-    sub     rsp, 24
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 32
     movss   [rip+an_frame], xmm0
     mov     dword ptr [rip+dirty], 1
     mov     rbx, [rip+an_cur]
     test    rbx, rbx
     jz      9f
-    xor     r12d, r12d
+    xor     r12d, r12d                  # the scene's own curves
 1:  cmp     r12d, [rbx+AN_NCUR]
-    jae     9f
+    jae     .Lap_layers
+    mov     rdi, rbx
+    mov     esi, r12d
+    call    an_curve
+    cmp     dword ptr [rax+CU_ACT], 0
+    jne     2f
     mov     rdi, rbx
     mov     esi, r12d
     movss   xmm0, [rip+an_frame]
@@ -884,10 +947,98 @@ an_apply:
     mov     ecx, [rax+CU_C]
     mov     r8d, 1
     call    an_chan
-    mov     rbx, [rip+an_cur]           # (a write may not change it, but)
-    inc     r12d
+2:  inc     r12d
     jmp     1b
-9:  add     rsp, 24
+.Lap_layers:                            # then each layer, in order, on top
+    xor     r13d, r13d
+3:  cmp     r13d, [rbx+AN_NLAY]
+    jae     9f
+    imul    r14, r13, LY_SZ
+    lea     r14, [rbx+AN_LAY+r14]
+    cmp     dword ptr [r14+LY_MUTE], 0
+    jne     8f
+    mov     eax, [r14+LY_ACT]           # its action's local frame
+    dec     eax
+    cmp     eax, [rbx+AN_NACT]
+    jae     8f
+    imul    r15, rax, AC_SZ
+    lea     r15, [rbx+AN_ACT+r15]
+    movss   xmm0, [rip+an_frame]
+    subss   xmm0, [r14+LY_START]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jb      8f                          # (not started)
+    movss   xmm1, [r15+AC_END]          # length; past its repeats: done
+    subss   xmm1, [r15+AC_START]
+    maxss   xmm1, [rip+af_one]
+    movss   xmm2, xmm1
+    mulss   xmm2, [r14+LY_REPEAT]
+    comiss  xmm0, xmm2
+    ja      8f
+    divss   xmm0, xmm1                  # within one play: fmod
+    roundss xmm3, xmm0, 1
+    subss   xmm0, xmm3
+    mulss   xmm0, xmm1
+    addss   xmm0, [r15+AC_START]
+    movss   [rsp], xmm0
+    xor     r12d, r12d
+4:  cmp     r12d, [rbx+AN_NCUR]
+    jae     8f
+    mov     rdi, rbx
+    mov     esi, r12d
+    call    an_curve
+    mov     ecx, [r14+LY_ACT]
+    cmp     [rax+CU_ACT], ecx
+    jne     7f
+    mov     ecx, [rax+CU_KIND]          # its channel, on the layer's target
+    mov     [rsp+8], ecx
+    mov     ecx, [rax+CU_A]
+    mov     edx, [r14+LY_TARGET]
+    test    edx, edx
+    jz      5f
+    cmp     dword ptr [rsp+8], K_OBJ
+    je      51f
+    cmp     dword ptr [rsp+8], K_MOD
+    jne     5f
+51: mov     ecx, edx
+5:  mov     [rsp+12], ecx
+    mov     ecx, [rax+CU_B]
+    mov     [rsp+16], ecx
+    mov     ecx, [rax+CU_C]
+    mov     [rsp+20], ecx
+    mov     rdi, rbx
+    mov     esi, r12d
+    movss   xmm0, [rsp]
+    call    an_eval
+    movss   [rsp+24], xmm0              # the action's value
+    mov     edi, [rsp+8]                # and the property's now
+    mov     esi, [rsp+12]
+    mov     edx, [rsp+16]
+    mov     ecx, [rsp+20]
+    xor     r8d, r8d
+    call    an_chan
+    test    eax, eax
+    jz      7f
+    movss   xmm1, [rsp+24]
+    cmp     dword ptr [r14+LY_MODE], 0
+    jne     6f
+    subss   xmm1, xmm0                  # replace: lerp(now, action, influence)
+6:  mulss   xmm1, [r14+LY_INFL]         # add: now + action x influence
+    addss   xmm0, xmm1
+    mov     edi, [rsp+8]
+    mov     esi, [rsp+12]
+    mov     edx, [rsp+16]
+    mov     ecx, [rsp+20]
+    mov     r8d, 1
+    call    an_chan
+7:  inc     r12d
+    jmp     4b
+8:  inc     r13d
+    jmp     3b
+9:  add     rsp, 32
+    pop     r15
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -1925,6 +2076,8 @@ tl_keys:
     mov     esi, r12d
     call    an_curve
     mov     r13, rax
+    cmp     dword ptr [r13+CU_ACT], 0
+    jne     8f
     mov     eax, [r13+CU_KIND]
     cmp     eax, K_OBJ
     je      2f
@@ -2086,3 +2239,990 @@ an_read:
     pop     r12
     pop     rbx
     ret
+
+# =============================================================================
+#  Editing keys (the dope sheet, the graph editor, scripts), actions, layers
+# =============================================================================
+.globl an_sel_count
+
+OPERATOR op_an_sel,    "anim.select_keys", "Select Keys",     do_an_sel, flags=OPF_AI_SAFE|OPF_QUIET, doc="Select keys: anim.select_keys all | none | <path> <frame> [extend] | frame <f> (every curve's key there)"
+OPERATOR op_an_move,   "anim.move_keys",   "Move Keys",       do_an_move, flags=OPF_AI_SAFE|OPF_UNDO, doc="Move the selected keys: anim.move_keys <frames> [value]"
+OPERATOR op_an_scale,  "anim.scale_keys",  "Scale Keys",      do_an_scale, flags=OPF_AI_SAFE|OPF_UNDO, doc="Stretch the selected keys in time around the current frame: anim.scale_keys <factor>"
+OPERATOR op_an_delk,   "anim.delete_keys", "Delete Keys",     do_an_delk, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove the selected keys"
+OPERATOR op_an_dup,    "anim.duplicate_keys", "Duplicate Keys", do_an_dup, flags=OPF_AI_SAFE|OPF_UNDO, doc="Copy the selected keys some frames on (the copies are selected): anim.duplicate_keys <frames>"
+OPERATOR op_an_ht,     "anim.handle_type", "Key Handle Type", do_an_ht, flags=OPF_AI_SAFE|OPF_UNDO, doc="Handles of the selected keys: anim.handle_type <auto|free>"
+OPERATOR op_an_handle, "anim.handle",      "Set Key Handle",  do_an_handle, flags=OPF_AI_SAFE|OPF_UNDO, doc="One key's handle (it becomes free): anim.handle <path> <frame> <left|right> <frames> <value> (relative to the key)"
+OPERATOR op_an_action, "anim.action",      "New Action",      do_an_action, flags=OPF_AI_SAFE|OPF_UNDO, doc="Keep the selected objects' keys as a named action (a clip layers can play): anim.action <name>"
+OPERATOR op_an_layer,  "anim.layer",       "Add Action Layer", do_an_layer, flags=OPF_AI_SAFE|OPF_UNDO, doc="Play an action on top of the scene: anim.layer <action> [object|-] [start frame] [influence] [replace|add] [repeat]"
+OPERATOR op_an_lset,   "anim.layer_set",   "Set Layer",       do_an_lset, flags=OPF_AI_SAFE|OPF_UNDO, doc="Change a layer (1..): anim.layer_set <layer> <influence|start|repeat|mode|mute> <value> (mode: 0 replace, 1 add)"
+OPERATOR op_an_lrem,   "anim.layer_remove", "Remove Layer",   do_an_lrem, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a layer: anim.layer_remove <layer>"
+
+.section .rodata
+k_all:          .asciz "all"
+k_none:         .asciz "none"
+k_frame:        .asciz "frame"
+k_extend:       .asciz "extend"
+k_auto:         .asciz "auto"
+k_free:         .asciz "free"
+k_left:         .asciz "left"
+k_right:        .asciz "right"
+k_dash:         .asciz "-"
+k_replace:      .asciz "replace"
+k_add:          .asciz "add"
+k_infl:         .asciz "influence"
+k_start:        .asciz "start"
+k_repeat:       .asciz "repeat"
+k_mode:         .asciz "mode"
+k_mute:         .asciz "mute"
+.align 8
+lset_keys:      .quad k_infl, k_start, k_repeat, k_mode, k_mute, 0
+s_an_nosel:     .asciz "  no keys selected"
+s_an_noact:     .asciz "  no action named "
+s_an_acts:      .asciz "  the selected objects have no keys to make an action of"
+s_an_full:      .asciz "  no room for more actions / layers"
+s_an_lay:       .asciz "  anim.layer_set <layer 1..> <influence|start|repeat|mode|mute> <value>"
+.text
+
+# an_selected_each(rdi=fn(rbx=block, r12=curve record, r13=key)) - each
+#   selected key of the scene's curves
+an_selected_each:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r15, rdi
+    mov     rbx, [rip+an_cur]
+    test    rbx, rbx
+    jz      9f
+    xor     r14d, r14d
+1:  cmp     r14d, [rbx+AN_NCUR]
+    jae     9f
+    imul    r12, r14, CU_SZ
+    lea     r12, [rbx+AN_CUR+r12]
+    cmp     dword ptr [r12+CU_ACT], 0
+    jne     4f
+    xor     ecx, ecx
+2:  cmp     ecx, [r12+CU_N]
+    jae     4f
+    mov     eax, [r12+CU_FIRST]
+    add     eax, ecx
+    imul    r13, rax, KY_SZ
+    lea     r13, [rbx+AN_KEYS+r13]
+    cmp     byte ptr [r13+KY_SEL], 0
+    je      3f
+    push    rcx
+    push    rcx
+    call    r15
+    pop     rcx
+    pop     rcx
+3:  inc     ecx
+    jmp     2b
+4:  inc     r14d
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# an_sel_count -> eax = selected keys
+an_sel_count:
+    mov     dword ptr [rip+ae_n], 0
+    lea     rdi, [rip+.Lsc_one]
+    call    an_selected_each
+    mov     eax, [rip+ae_n]
+    ret
+.Lsc_one:
+    inc     dword ptr [rip+ae_n]
+    ret
+
+# an_collect - the selected keys into ae_buf (channel, act, frame, value,
+#   interpolation, handles, handle type), then gone from their curves
+#   -> eax = how many
+.equ AE_SZ,     48
+an_collect:
+    push    rbx
+    sub     rsp, 16
+    call    an_sel_count
+    mov     ebx, eax
+    test    eax, eax
+    jz      9f
+    imul    esi, eax, AE_SZ
+    add     esi, 16
+    lea     rdi, [rip+frame_arena]
+    call    arena_alloc
+    test    rax, rax
+    jz      8f
+    mov     [rip+ae_buf], rax
+    mov     dword ptr [rip+ae_n], 0
+    lea     rdi, [rip+.Lco_one]
+    call    an_selected_each
+    xor     edi, edi                    # gone: every selected key
+    call    an_own
+    test    rax, rax
+    jz      8f
+    call    an_del_selected
+    mov     eax, [rip+ae_n]
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 16
+    pop     rbx
+    ret
+.Lco_one:                               # r12 = curve, r13 = key
+    mov     eax, [rip+ae_n]
+    imul    rax, rax, AE_SZ
+    add     rax, [rip+ae_buf]
+    mov     rcx, [r12+CU_KIND]
+    mov     [rax], rcx
+    mov     rcx, [r12+CU_B]
+    mov     [rax+8], rcx
+    mov     ecx, [r12+CU_ACT]
+    mov     [rax+16], ecx
+    mov     rcx, [r13+KY_F]             # frame, value
+    mov     [rax+20], rcx
+    mov     rcx, [r13+KY_HLX]           # handles
+    mov     [rax+28], rcx
+    mov     rcx, [r13+KY_HRX]
+    mov     [rax+36], rcx
+    mov     cl, [r13+KY_INT]
+    mov     [rax+44], cl
+    mov     cl, [r13+KY_HT]
+    mov     [rax+45], cl
+    inc     dword ptr [rip+ae_n]
+    ret
+
+# an_del_selected - every selected key of the scene's curves goes (curves
+#   left empty too)
+an_del_selected:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, [rip+an_cur]
+    test    rbx, rbx
+    jz      9f
+    mov     r12d, [rbx+AN_NCUR]
+1:  test    r12d, r12d
+    jz      9f
+    dec     r12d
+    imul    r13, r12, CU_SZ
+    lea     r13, [rbx+AN_CUR+r13]
+    cmp     dword ptr [r13+CU_ACT], 0
+    jne     1b
+    mov     r14d, [r13+CU_N]
+2:  test    r14d, r14d
+    jz      5f
+    dec     r14d
+    mov     eax, [r13+CU_FIRST]
+    add     eax, r14d
+    imul    rdi, rax, KY_SZ
+    lea     rdi, [rbx+AN_KEYS+rdi]
+    cmp     byte ptr [rdi+KY_SEL], 0
+    je      2b
+    lea     rsi, [rdi+KY_SZ]            # this key out
+    mov     ecx, [rbx+AN_NKEY]
+    sub     ecx, eax
+    dec     ecx
+    imul    rcx, rcx, KY_SZ
+    rep     movsb
+    dec     dword ptr [rbx+AN_NKEY]
+    dec     dword ptr [r13+CU_N]
+    lea     ecx, [r12+1]
+3:  cmp     ecx, [rbx+AN_NCUR]
+    jae     2b
+    imul    rax, rcx, CU_SZ
+    dec     dword ptr [rbx+AN_CUR+rax+CU_FIRST]
+    inc     ecx
+    jmp     3b
+5:  cmp     dword ptr [r13+CU_N], 0     # empty: the curve goes
+    jne     6f
+    mov     rdi, r13
+    lea     rsi, [r13+CU_SZ]
+    mov     ecx, [rbx+AN_NCUR]
+    sub     ecx, r12d
+    dec     ecx
+    imul    rcx, rcx, CU_SZ
+    rep     movsb
+    dec     dword ptr [rbx+AN_NCUR]
+    jmp     1b
+6:  mov     rdi, rbx
+    mov     esi, r12d
+    call    an_handles
+    jmp     1b
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# an_reinsert(xmm0=frame offset, xmm1=value offset, xmm2=frame scale, xmm3 =
+#   scale pivot) - the collected keys back, moved (and selected)
+an_reinsert:
+    push    rbx
+    push    r12
+    sub     rsp, 40
+    movss   [rsp], xmm0
+    movss   [rsp+4], xmm1
+    movss   [rsp+8], xmm2
+    movss   [rsp+12], xmm3
+    mov     dword ptr [rip+ap_sel], 1
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+ae_n]
+    jae     9f
+    imul    r12, rbx, AE_SZ
+    add     r12, [rip+ae_buf]
+    mov     eax, [r12]
+    mov     [rip+ap_kind], eax
+    mov     eax, [r12+4]
+    mov     [rip+ap_a], eax
+    mov     eax, [r12+8]
+    mov     [rip+ap_b], eax
+    mov     eax, [r12+12]
+    mov     [rip+ap_c], eax
+    mov     eax, [r12+16]
+    mov     [rip+ap_act], eax
+    movzx   eax, byte ptr [r12+45]
+    mov     [rip+ap_ht], eax
+    mov     rax, [r12+28]
+    mov     [rip+ap_h], rax
+    mov     rax, [r12+36]
+    mov     [rip+ap_h+8], rax
+    movss   xmm0, [r12+20]              # (f - pivot) scale + pivot + offset
+    subss   xmm0, [rsp+12]
+    mulss   xmm0, [rsp+8]
+    addss   xmm0, [rsp+12]
+    addss   xmm0, [rsp]
+    movss   xmm1, [r12+24]
+    addss   xmm1, [rsp+4]
+    movzx   edi, byte ptr [r12+44]
+    call    an_key
+    inc     ebx
+    jmp     1b
+9:  xor     eax, eax
+    mov     [rip+ap_sel], eax
+    mov     [rip+ap_ht], eax
+    mov     [rip+ap_act], eax
+    add     rsp, 40
+    pop     r12
+    pop     rbx
+    ret
+
+# an_sel_all(edi=0/1) - every key of the scene's curves
+an_sel_all:
+    mov     rcx, [rip+an_cur]
+    test    rcx, rcx
+    jz      9f
+    xor     eax, eax
+1:  cmp     eax, [rcx+AN_NKEY]
+    jae     9f
+    imul    rdx, rax, KY_SZ
+    mov     [rcx+AN_KEYS+rdx+KY_SEL], dil
+    inc     eax
+    jmp     1b
+9:  mov     dword ptr [rip+dirty], 1
+    ret
+
+# anim.select_keys all | none | frame <f> | <path> <frame> [extend]
+do_an_sel:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     rsi, [rip+op_arg]
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      9f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_all]
+    call    str_eq
+    test    eax, eax
+    jz      1f
+    mov     edi, 1
+    call    an_sel_all
+    jmp     9f
+1:  lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_none]
+    call    str_eq
+    test    eax, eax
+    jz      2f
+    xor     edi, edi
+    call    an_sel_all
+    jmp     9f
+2:  lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_frame]
+    call    str_eq
+    test    eax, eax
+    jz      4f
+    mov     rsi, r12                    # frame f: every key there, alone
+    call    an_num
+    test    eax, eax
+    jz      9f
+    movss   [rsp], xmm0
+    xor     edi, edi
+    call    an_sel_all
+    mov     rcx, [rip+an_cur]
+    test    rcx, rcx
+    jz      9f
+    xor     eax, eax
+3:  cmp     eax, [rcx+AN_NKEY]
+    jae     9f
+    imul    rdx, rax, KY_SZ
+    movss   xmm0, [rcx+AN_KEYS+rdx+KY_F]
+    subss   xmm0, [rsp]
+    andps   xmm0, [rip+af_absm]
+    comiss  xmm0, [rip+af_tiny]
+    jae     31f
+    mov     byte ptr [rcx+AN_KEYS+rdx+KY_SEL], 1
+31: inc     eax
+    jmp     3b
+4:  lea     rsi, [rip+im_word]          # a path, a frame
+    call    an_copy16
+    mov     rsi, r12
+    call    an_num
+    test    eax, eax
+    jz      9f
+    movss   [rsp], xmm0
+    call    im_next_word
+    xor     ebx, ebx
+    test    eax, eax
+    jz      5f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_extend]
+    call    str_eq
+    mov     ebx, eax
+5:  test    ebx, ebx
+    jnz     6f
+    xor     edi, edi
+    call    an_sel_all
+6:  movss   xmm0, [rsp]
+    lea     rsi, [rip+an_pathbuf]
+    call    an_key_at
+    test    rax, rax
+    jz      9f
+    mov     byte ptr [rax+KY_SEL], 1
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
+# an_key_at(rsi=path, xmm0=frame) -> rax = that key (the scene's), or 0
+an_key_at:
+    push    rbx
+    sub     rsp, 16
+    movss   [rsp], xmm0
+    call    an_path
+    test    eax, eax
+    jz      8f
+    mov     edi, [rip+ap_kind]
+    mov     esi, [rip+ap_a]
+    mov     edx, [rip+ap_b]
+    mov     ecx, [rip+ap_c]
+    call    an_find
+    test    eax, eax
+    js      8f
+    mov     rdi, [rip+an_cur]
+    mov     esi, eax
+    call    an_curve
+    mov     rbx, rax
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+CU_N]
+    jae     8f
+    mov     esi, [rbx+CU_FIRST]
+    add     esi, ecx
+    mov     rdi, [rip+an_cur]
+    call    an_keyp
+    movss   xmm0, [rax+KY_F]
+    subss   xmm0, [rsp]
+    andps   xmm0, [rip+af_absm]
+    comiss  xmm0, [rip+af_tiny]
+    jb      9f
+    inc     ecx
+    jmp     1b
+8:  xor     eax, eax
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# anim.move_keys <frames> [value]
+do_an_move:
+    sub     rsp, 24
+    mov     rsi, [rip+op_arg]
+    call    an_num
+    test    eax, eax
+    jz      8f
+    movss   [rsp], xmm0
+    xorps   xmm0, xmm0
+    movss   [rsp+4], xmm0
+    call    an_num
+    test    eax, eax
+    jz      1f
+    movss   [rsp+4], xmm0
+1:  call    an_collect
+    test    eax, eax
+    jz      8f
+    movss   xmm0, [rsp]
+    movss   xmm1, [rsp+4]
+    movss   xmm2, [rip+af_one]
+    xorps   xmm3, xmm3
+    call    an_reinsert
+    jmp     9f
+8:  call    an_nosel
+9:  add     rsp, 24
+    ret
+an_nosel:
+    sub     rsp, 8
+    call    undo_drop_last
+    lea     rdi, [rip+s_an_nosel]
+    call    log_line
+    add     rsp, 8
+    ret
+
+# anim.scale_keys <factor> - around the current frame
+do_an_scale:
+    sub     rsp, 24
+    mov     rsi, [rip+op_arg]
+    call    an_num
+    test    eax, eax
+    jz      8f
+    movss   [rsp], xmm0
+    call    an_collect
+    test    eax, eax
+    jz      8f
+    xorps   xmm0, xmm0
+    xorps   xmm1, xmm1
+    movss   xmm2, [rsp]
+    movss   xmm3, [rip+an_frame]
+    call    an_reinsert
+    jmp     9f
+8:  call    an_nosel
+9:  add     rsp, 24
+    ret
+
+do_an_delk:
+    sub     rsp, 8
+    call    an_sel_count
+    test    eax, eax
+    jz      8f
+    xor     edi, edi
+    call    an_own
+    call    an_del_selected
+    jmp     9f
+8:  call    an_nosel
+9:  add     rsp, 8
+    ret
+
+# anim.duplicate_keys <frames> - copies (selected), the originals stay
+do_an_dup:
+    sub     rsp, 24
+    mov     rsi, [rip+op_arg]
+    call    an_num
+    test    eax, eax
+    jz      8f
+    movss   [rsp], xmm0
+    call    an_collect                  # (they go ... )
+    test    eax, eax
+    jz      8f
+    xorps   xmm0, xmm0                  # (... and come back, unselected)
+    xorps   xmm1, xmm1
+    movss   xmm2, [rip+af_one]
+    xorps   xmm3, xmm3
+    call    an_reinsert
+    xor     edi, edi
+    call    an_sel_all
+    movss   xmm0, [rsp]                 # the copies
+    xorps   xmm1, xmm1
+    movss   xmm2, [rip+af_one]
+    xorps   xmm3, xmm3
+    call    an_reinsert
+    jmp     9f
+8:  call    an_nosel
+9:  add     rsp, 24
+    ret
+
+# anim.handle_type <auto|free>
+do_an_ht:
+    sub     rsp, 8
+    mov     rsi, [rip+op_arg]
+    call    im_next_word
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_free]
+    call    str_eq
+    mov     [rip+ae_n], eax
+    xor     edi, edi
+    call    an_own
+    lea     rdi, [rip+.Lht_one]
+    call    an_selected_each
+    call    an_all_handles
+    add     rsp, 8
+    ret
+.Lht_one:
+    mov     eax, [rip+ae_n]
+    mov     [r13+KY_HT], al
+    ret
+
+# an_all_handles - auto handles of every curve made again
+an_all_handles:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, [rip+an_cur]
+    test    rbx, rbx
+    jz      9f
+    xor     r12d, r12d
+1:  cmp     r12d, [rbx+AN_NCUR]
+    jae     9f
+    mov     rdi, rbx
+    mov     esi, r12d
+    call    an_handles
+    inc     r12d
+    jmp     1b
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# anim.handle <path> <frame> <left|right> <frames> <value>
+do_an_handle:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     rsi, [rip+op_arg]
+    call    im_next_word
+    test    eax, eax
+    jz      8f
+    mov     r12, rsi
+    lea     rsi, [rip+im_word]
+    call    an_copy16
+    mov     rsi, r12
+    call    an_num
+    test    eax, eax
+    jz      8f
+    movss   [rsp], xmm0
+    call    im_next_word
+    mov     r12, rsi
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_right]
+    call    str_eq
+    mov     ebx, eax                    # 1 right, 0 left
+    mov     rsi, r12
+    call    an_num
+    test    eax, eax
+    jz      8f
+    movss   [rsp+4], xmm0
+    call    an_num
+    test    eax, eax
+    jz      8f
+    movss   [rsp+8], xmm0
+    xor     edi, edi
+    call    an_own
+    movss   xmm0, [rsp]
+    lea     rsi, [rip+an_pathbuf]
+    call    an_key_at
+    test    rax, rax
+    jz      8f
+    mov     byte ptr [rax+KY_HT], 1
+    lea     rcx, [rax+KY_HLX]
+    test    ebx, ebx
+    jz      1f
+    lea     rcx, [rax+KY_HRX]
+1:  movss   xmm0, [rsp+4]
+    movss   [rcx], xmm0
+    movss   xmm0, [rsp+8]
+    movss   [rcx+4], xmm0
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+8:  call    undo_drop_last
+9:  add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
+# anim.action <name> - the selected objects' keys copied into a new action
+do_an_action:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rsi, [rip+op_arg]
+    call    im_next_word
+    test    eax, eax
+    jz      .Lac_bad
+    mov     rbx, [rip+an_cur]           # how many keys it takes
+    test    rbx, rbx
+    jz      .Lac_none
+    xor     r13d, r13d
+    xor     r12d, r12d
+1:  cmp     r12d, [rbx+AN_NCUR]
+    jae     2f
+    mov     rdi, rbx
+    mov     esi, r12d
+    call    an_obj_curve
+    test    eax, eax
+    jz      11f
+    imul    rax, r12, CU_SZ
+    add     r13d, [rbx+AN_CUR+rax+CU_N]
+11: inc     r12d
+    jmp     1b
+2:  test    r13d, r13d
+    jz      .Lac_none
+    mov     edi, r13d
+    call    an_own
+    test    rax, rax
+    jz      .Lac_none
+    mov     rbx, rax
+    mov     eax, [rbx+AN_NACT]
+    cmp     eax, AN_MAXA
+    jae     .Lac_full
+    imul    r14, rax, AC_SZ             # the action: its name, its frames
+    lea     r14, [rbx+AN_ACT+r14]
+    mov     rdi, r14
+    lea     rsi, [rip+im_word]
+    mov     ecx, 31
+3:  mov     al, [rsi]
+    mov     [rdi], al
+    test    al, al
+    jz      4f
+    inc     rsi
+    inc     rdi
+    dec     ecx
+    jnz     3b
+    mov     byte ptr [rdi], 0
+4:  mov     eax, [rip+af_big]
+    mov     [r14+AC_START], eax
+    mov     eax, [rip+af_nbig]
+    mov     [r14+AC_END], eax
+    inc     dword ptr [rbx+AN_NACT]
+    mov     r15d, [rbx+AN_NACT]         # its number
+    mov     r13d, [rbx+AN_NCUR]         # (the curves there are now)
+    xor     r12d, r12d
+5:  cmp     r12d, r13d
+    jae     .Lac_done
+    mov     rdi, rbx
+    mov     esi, r12d
+    call    an_obj_curve
+    test    eax, eax
+    jz      7f
+    mov     eax, [rbx+AN_NCUR]          # a copy of the curve, its keys at the end
+    cmp     eax, AN_MAXC
+    jae     .Lac_full
+    imul    rdi, rax, CU_SZ
+    lea     rdi, [rbx+AN_CUR+rdi]
+    imul    rsi, r12, CU_SZ
+    lea     rsi, [rbx+AN_CUR+rsi]
+    mov     rcx, [rsi]
+    mov     [rdi], rcx
+    mov     rcx, [rsi+8]
+    mov     [rdi+8], rcx
+    mov     ecx, [rbx+AN_NKEY]
+    mov     [rdi+CU_FIRST], ecx
+    mov     ecx, [rsi+CU_N]
+    mov     [rdi+CU_N], ecx
+    mov     [rdi+CU_ACT], r15d
+    inc     dword ptr [rbx+AN_NCUR]
+    mov     eax, [rsi+CU_FIRST]         # the keys
+    imul    rsi, rax, KY_SZ
+    lea     rsi, [rbx+AN_KEYS+rsi]
+    mov     eax, [rbx+AN_NKEY]
+    imul    rdi, rax, KY_SZ
+    lea     rdi, [rbx+AN_KEYS+rdi]
+    add     [rbx+AN_NKEY], ecx
+    xor     edx, edx
+6:  cmp     edx, ecx
+    jae     7f
+    movss   xmm0, [rsi+KY_F]            # (its frames)
+    minss   xmm0, [r14+AC_START]
+    movss   [r14+AC_START], xmm0
+    movss   xmm0, [rsi+KY_F]
+    maxss   xmm0, [r14+AC_END]
+    movss   [r14+AC_END], xmm0
+    push    rcx
+    mov     ecx, KY_SZ
+    rep     movsb
+    pop     rcx
+    inc     edx
+    jmp     6b
+7:  inc     r12d
+    jmp     5b
+.Lac_done:
+    jmp     .Lac_out
+.Lac_full:
+    lea     rdi, [rip+s_an_full]
+    call    log_line
+    jmp     .Lac_out
+.Lac_none:
+    lea     rdi, [rip+s_an_acts]
+    call    log_line
+.Lac_bad:
+    call    undo_drop_last
+.Lac_out:
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# an_obj_curve(rdi=block, esi=curve) -> eax = 1 for a scene curve of a
+#   selected object (its transform or modifiers)
+an_obj_curve:
+    sub     rsp, 8
+    call    an_curve
+    xor     ecx, ecx
+    cmp     dword ptr [rax+CU_ACT], 0
+    jne     9f
+    mov     edx, [rax+CU_KIND]
+    cmp     edx, K_OBJ
+    je      1f
+    cmp     edx, K_MOD
+    jne     9f
+1:  mov     edi, [rax+CU_A]
+    call    obj_by_uid
+    xor     ecx, ecx
+    test    rax, rax
+    jz      9f
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    setnz   cl
+9:  mov     eax, ecx
+    add     rsp, 8
+    ret
+
+# an_action_find(rdi=name) -> eax = its number (1..), or 0
+an_action_find:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rdi
+    xor     eax, eax
+    mov     rbx, [rip+an_cur]
+    test    rbx, rbx
+    jz      9f
+    xor     r13d, r13d
+1:  cmp     r13d, [rbx+AN_NACT]
+    jae     8f
+    imul    rsi, r13, AC_SZ
+    lea     rsi, [rbx+AN_ACT+rsi]
+    mov     rdi, r12
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+    inc     r13d
+    jmp     1b
+2:  lea     eax, [r13+1]
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# anim.layer <action> [object|-] [start] [influence] [replace|add] [repeat]
+do_an_layer:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 32
+    mov     rsi, [rip+op_arg]
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lal_bad
+    lea     rdi, [rip+im_word]
+    call    an_action_find
+    test    eax, eax
+    jz      .Lal_noact
+    mov     [rsp], eax                  # action
+    mov     dword ptr [rsp+4], 0        # target
+    call    an_range
+    cvtsi2ss xmm0, eax
+    movss   [rsp+8], xmm0               # start: the range's
+    mov     eax, [rip+af_one]
+    mov     [rsp+12], eax               # influence 1
+    mov     dword ptr [rsp+16], 0       # replace
+    mov     [rsp+20], eax               # once
+    mov     rsi, r12
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      5f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_dash]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    lea     rdi, [rip+im_word]
+    call    obj_find
+    test    eax, eax
+    jz      .Lal_bad
+    mov     edi, eax
+    call    obj_get
+    mov     eax, [rax+OB_UID]
+    mov     [rsp+4], eax
+1:  mov     rsi, r12
+    call    an_num
+    test    eax, eax
+    jz      5f
+    movss   [rsp+8], xmm0
+    call    an_num
+    test    eax, eax
+    jz      5f
+    movss   [rsp+12], xmm0
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      5f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_add]
+    call    str_eq
+    mov     [rsp+16], eax
+    mov     rsi, r12
+    call    an_num
+    test    eax, eax
+    jz      5f
+    movss   [rsp+20], xmm0
+5:  xor     edi, edi
+    call    an_own
+    test    rax, rax
+    jz      .Lal_bad
+    mov     ecx, [rax+AN_NLAY]
+    cmp     ecx, AN_MAXL
+    jae     .Lal_full
+    imul    rdi, rcx, LY_SZ
+    lea     rdi, [rax+AN_LAY+rdi]
+    inc     dword ptr [rax+AN_NLAY]
+    lea     rsi, [rsp]
+    mov     ecx, 24
+    rep     movsb
+    mov     dword ptr [rdi], 0          # (not muted)
+    movss   xmm0, [rip+an_frame]
+    call    an_apply
+    jmp     9f
+.Lal_full:
+    lea     rdi, [rip+s_an_full]
+    call    log_line
+    jmp     .Lal_bad
+.Lal_noact:
+    lea     rdi, [rip+s_an_noact]
+    lea     rsi, [rip+im_word]
+    call    log_pair
+.Lal_bad:
+    call    undo_drop_last
+9:  add     rsp, 32
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# anim.layer_set <layer> <influence|start|repeat|mode|mute> <value>
+do_an_lset:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     rsi, [rip+op_arg]
+    call    an_num
+    test    eax, eax
+    jz      8f
+    cvttss2si ebx, xmm0
+    dec     ebx
+    call    im_next_word
+    mov     r12, rsi
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+lset_keys]
+    call    an_word_index
+    test    eax, eax
+    js      8f
+    mov     [rsp], eax
+    mov     rsi, r12
+    call    an_num
+    test    eax, eax
+    jz      8f
+    movss   [rsp+4], xmm0
+    xor     edi, edi
+    call    an_own
+    test    rax, rax
+    jz      8f
+    cmp     ebx, [rax+AN_NLAY]
+    jae     8f
+    imul    rcx, rbx, LY_SZ
+    lea     rcx, [rax+AN_LAY+rcx]
+    mov     eax, [rsp]
+    movss   xmm0, [rsp+4]
+    cmp     eax, 0
+    jne     1f
+    movss   [rcx+LY_INFL], xmm0
+    jmp     7f
+1:  cmp     eax, 1
+    jne     2f
+    movss   [rcx+LY_START], xmm0
+    jmp     7f
+2:  cmp     eax, 2
+    jne     3f
+    movss   [rcx+LY_REPEAT], xmm0
+    jmp     7f
+3:  cvttss2si edx, xmm0
+    cmp     eax, 3
+    jne     4f
+    mov     [rcx+LY_MODE], edx
+    jmp     7f
+4:  mov     [rcx+LY_MUTE], edx
+7:  movss   xmm0, [rip+an_frame]
+    call    an_apply
+    jmp     9f
+8:  lea     rdi, [rip+s_an_lay]
+    call    log_line
+    call    undo_drop_last
+9:  add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
+# anim.layer_remove <layer>
+do_an_lrem:
+    sub     rsp, 8
+    mov     rsi, [rip+op_arg]
+    call    an_num
+    test    eax, eax
+    jz      8f
+    cvttss2si edx, xmm0
+    dec     edx
+    push    rdx
+    push    rdx
+    xor     edi, edi
+    call    an_own
+    pop     rdx
+    pop     rdx
+    test    rax, rax
+    jz      8f
+    cmp     edx, [rax+AN_NLAY]
+    jae     8f
+    imul    rdi, rdx, LY_SZ
+    lea     rdi, [rax+AN_LAY+rdi]
+    lea     rsi, [rdi+LY_SZ]
+    mov     ecx, [rax+AN_NLAY]
+    sub     ecx, edx
+    dec     ecx
+    imul    ecx, ecx, LY_SZ
+    rep     movsb
+    dec     dword ptr [rax+AN_NLAY]
+    jmp     9f
+8:  call    undo_drop_last
+9:  add     rsp, 8
+    ret
+
+.section .rodata
+.align 4
+af_big:         .float 1.0e30
+af_nbig:        .float -1.0e30
+.section .bss
+.align 8
+ae_buf:         .skip 8
+ae_n:           .skip 4
+.text

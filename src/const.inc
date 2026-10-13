@@ -172,6 +172,7 @@
 .equ HIT_NODES,         26
 .equ HIT_ASSETS,        27
 .equ HIT_TIMELINE,      28
+.equ HIT_ANIMED,        29
 .equ DRAG_MODS,         9
 .equ DRAG_REDO,         8
 .equ COL_EDIT_WIRE,   0x0b0c0e
@@ -299,6 +300,8 @@
 .equ ED_NODES,          8
 .equ ED_ASSETS,         9
 .equ ED_TIMELINE,       10
+.equ ED_DOPESHEET,      11
+.equ ED_GRAPH,          12
 .equ MENU_AREA,         8
 .equ MENU_MODADD,       9
 .equ KEY_SPACE,         57
