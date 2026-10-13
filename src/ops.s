@@ -153,6 +153,13 @@ dispatch_key:
     test    ecx, ecx
     mov     ecx, OPF_UV
     jnz     100f
+    push    rax                         # over a node editor: its keys
+    call    nodeed_active
+    mov     ecx, eax
+    pop     rax
+    test    ecx, ecx
+    mov     ecx, OPF_NODE
+    jnz     100f
     mov     ecx, OPF_SKETCH             # sketch / sculpt / paint mode: their
     cmp     dword ptr [rip+skm_obj], 0  #  keys first
     jne     100f
@@ -182,7 +189,7 @@ dispatch_key:
     jmp     1b
 2:  xor     eax, eax
     ret
-3:  test    dword ptr [rdi+OP_FLAGS], OPF_SKETCH|OPF_SCULPT|OPF_UV|OPF_PAINT # (not outside their modes)
+3:  test    dword ptr [rdi+OP_FLAGS], OPF_SKETCH|OPF_SCULPT|OPF_UV|OPF_PAINT|OPF_NODE # (not outside their modes)
     jnz     4b
     cmp     dword ptr [rip+edit_obj], 0 # the same key can mean different
     je      5f                          # things in object and edit mode

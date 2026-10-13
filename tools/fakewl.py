@@ -522,6 +522,7 @@ def main():
     paint_layers()
     vertex_paint()
     baking()
+    node_editor()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -1700,9 +1701,11 @@ def shader_graph():
                      'matset(m, "base", 0, 0, 0)\nmatset(m, "strength", 1)')
     vals = [lum(e.getpixel((x, y))) for y in range(25, 70, 3) for x in range(55, 105, 3)]
     check(max(vals) > 230 and min(vals) < 60, f'an emission socket makes a pattern of light ({min(vals):.0f}..{max(vals):.0f})')
-    # links only go forward; bad types are refused
-    out = run(GRAPH_SCENE + 'a = node(m, "noise")\nb = node(m, "ramp")\nlink(m, b, a, 1)')
-    check('no such node' in out, 'a link to an earlier node is refused (no loops)')
+    # a link backwards re-sorts the graph; a loop is refused
+    out = run(GRAPH_SCENE + 'a = node(m, "noise")\nb = node(m, "ramp")\nprint(link(m, b, a, 1))\n'
+              'print(nodeinfo(m, 1, "type"), nodeinfo(m, 2, "link", 1))\nlink(m, 2, 1, 1)')
+    check(out.split()[:3] == ['2', '6', '1'] and 'no such node' in out,
+          f'a link backwards re-sorts the graph; a loop is refused ({out.split()[:3]})')
     out = run(GRAPH_SCENE + 'node(m, "teapot")')
     check('unknown node type' in out, 'an unknown node type is refused')
     # files: the graph comes back
@@ -3019,6 +3022,68 @@ def baking():
     text, err = m.tool('run_operator', {'id': 'object.bake', 'arg': 'Cube Ball normal ao 0.8'})
     n = q('s = 0\nfor y in 0..32 { for x in 0..32 { if imgpixel("ao", x, y, 2) > 200 { s += 1 } } }\nprint(s)')
     check(not err and n.isdigit() and int(n) > 300, f'agents bake with object.bake ({n}, {err})')
+    f.proc.kill()
+
+
+def node_editor():
+    """The node editor area: the active material's graph drawn and edited
+    with the pointer - values dragged, links made and picked up, material
+    sockets driven, loops refused, nodes moved, added (Shift+A), deleted (X),
+    every change undoable."""
+    print('  -- node editor --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('material("M")\nassign("Cube", "M")\nselect("Cube")\nn = node("M", "noise", 3)\nr = node("M", "ramp")\n'
+      'link("M", n, r, 1)\nsocket("M", "base", r)\nb = node("M", "bump", 1, 0.1)\nlink("M", n, b, 1)\nsocket("M", "normal", b)')
+    f.move(600, 700)                            # the console area becomes it
+    f.pump(0.2)
+    q('op("area.type_node_editor")\nop("area.maximize")')
+    f.pump(0.5)
+    img = f.image()
+    boxes = sum(1 for x in range(0, 640, 4) if img.getpixel((x, 125)) in ((0x6b, 0x4f, 0x96), (0x2f, 0x65, 0x89), (0x8a, 0x3b, 0x3b)))
+    f.shot('86_node_editor.png')
+    check(boxes > 60, f'the graph is drawn: noise, ramp, bump and the material output laid out by depth ({boxes})')
+    info = lambda *a: q('print(nodeinfo("M", %s))' % ', '.join('"%s"' % x if isinstance(x, str) else str(x) for x in a))
+    f.drag(100, 168, 200, 168, steps=10)        # Scale: 3 + 100 px x 0.01
+    f.pump(0.2)
+    a = info(1, 'value', 1)
+    f.drag(190, 150, 220, 221, steps=8)         # noise -> ramp Color 0
+    f.pump(0.2)
+    b = info(2, 'link', 2)
+    f.drag(220, 357, 600, 500, steps=8)         # bump Height picked up, dropped
+    f.pump(0.2)
+    c = info(3, 'link', 1)
+    f.drag(190, 150, 420, 185, steps=8)         # noise -> Roughness
+    f.pump(0.2)
+    d = info(0, 'socket', 2)
+    check((a, b, c, d) == ('4', '1', '0', '1'),
+          f'dragging a value, linking, picking a link up and driving a material socket ({a} {b} {c} {d})')
+    f.drag(390, 149, 20, 222, steps=8)          # ramp -> noise Offset: a loop
+    f.pump(0.2)
+    e = info(1, 'link', 1)
+    f.drag(60, 130, 60, 430, steps=8)           # noise moved down 300
+    f.pump(0.2)
+    y = info(1, 'y')
+    check(e == '0' and y == '320', f'a loop is refused; a header drag moves the node ({e}, y {y})')
+    f.move(800, 500)
+    f.mods(1); f.key(30); f.mods(0)             # Shift+A
+    f.pump(0.2)
+    f.click(830, 565)                           # Checker Texture
+    f.pump(0.2)
+    g = (info(0, 'count'), info(4, 'type'), info(4, 'x'), info(4, 'y'))
+    f.click(830, 515)                           # selected, X
+    f.key(45)
+    f.pump(0.2)
+    h = info(0, 'count')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    f.pump(0.2)
+    i = info(0, 'count')
+    check(g == ('4', '3', '800', '400') and h == '3' and i == '4',
+          f'Shift+A adds a node at the pointer, X deletes it, Ctrl+Z brings it back ({g} {h} {i})')
     f.proc.kill()
 
 

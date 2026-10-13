@@ -204,8 +204,17 @@ link(m, n, b, 1)
 socket(m, "normal", b)
 ```
 
-The node types are image, noise, checker, gradient, mix, ramp, math and bump. Agents see the graph in
-`scene_summary` and edit it with the `material.node*` commands. The node editor arrives in phase 8.
+The node types are image, noise, checker, gradient, mix, ramp, math, bump and normalmap. Agents see
+the graph in `scene_summary` and edit it with the `material.node*` commands.
+
+The **Node Editor** (any area's type menu) shows the active object's material graph as boxes and
+wires, laid out by depth until you move them. **Shift+A** adds a node at the pointer, dragging a
+header moves it, dragging from an output to an input or a Material Output socket links them (from a
+linked input it picks the link up; dropped on empty space it is gone), dragging a value sideways
+changes it, **X** deletes the selected node, middle or empty-space drags pan, Home fits. Links may go
+either way: the graph keeps itself in evaluation order and refuses loops. Every change is an undo
+step and an operator (`material.link`, `material.node_move`, `material.node_delete`, ...), and
+`nodeinfo(...)` reads the graph back in scripts.
 
 **Analysis and repair.** View › Show Normals / Non-manifold / Boundary Edges / Degenerate Faces /
 Overhangs mark problems on the active mesh, with a count of each in the viewport.
@@ -493,7 +502,7 @@ src/mods.s      modifier stack (+ mods2.s)
 src/bool.s      exact mesh booleans (snapped, 128-bit orient3d, per-triangle CDT)
 src/repair.s    mesh analysis and repair
 src/material.s  principled materials (copy-on-write, undoable), Properties UI
-src/graph.s     shader graphs: nodes, sockets, evaluation, bump
+src/graph.s     shader graphs: nodes, sockets, evaluation, bump, normal maps, sorting
 src/texture.s   image lookups, box projection
 src/env.s       the world: HDRI lookups, importance sampling, SH irradiance
 src/hive.s      Hive path tracer: triangle soup, SAH BVH4, SSE traversal
@@ -526,6 +535,7 @@ src/dyntopo.s   dynamic topology: edge split / collapse under the brush
 src/multires.s  multiresolution: per-level displacements, level sculpting
 src/uv.s        UV maps: seams, LSCM unwrap (CG solver), smart projection, packing
 src/uved.s      the UV editor area: islands, transforms, heat map, texel density
+src/nodeed.s    the node editor area: shader graphs drawn and edited
 src/paint.s     texture painting: projected dabs, UV-space dabs, stroke history
 src/layers.s    paint layers: stack, blend modes, composite, saving
 src/vcol.s      vertex colours: vertex paint, tinting, files
