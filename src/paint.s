@@ -33,6 +33,10 @@
 .globl pt_radius
 .globl pt_col
 .globl pt_hist_clear
+.globl pt_mat
+.globl pt_cam
+.globl pt_screen
+.globl pt_strength
 
 .equ IM_W,      0
 .equ IM_H,      4
@@ -76,6 +80,7 @@ s_pt_r:         .asciz "  radius "
 s_pt_s:         .asciz "  strength "
 s_pt_keys:      .asciz "  ([ ] radius, Shift+[ ] strength, Shift+N layer, PgUp/PgDn)"
 s_pt_layer:     .asciz "  layer "
+s_vp_hud:       .asciz "Vertex Paint"
 s_pt_colhelp:   .asciz "  paint.color <r> <g> <b> (0-255)"
 s_pt_nohist:    .asciz "  texture paint: nothing to undo"
 s_pt_noredo:    .asciz "  texture paint: nothing to redo"
@@ -180,6 +185,7 @@ do_paint_mode:
     cmp     dword ptr [rip+pt_obj], 0
     je      1f
     mov     dword ptr [rip+pt_obj], 0
+    mov     dword ptr [rip+vp_on], 0
     lea     rdi, [rip+s_pt_off]
     call    log_line
     jmp     9f
@@ -200,6 +206,7 @@ do_paint_mode:
     call    sculpt_exit
 3:  mov     eax, [rip+active_obj]
     mov     [rip+pt_obj], eax
+    mov     dword ptr [rip+vp_on], 0
     call    fmt_reset
     lea     rdi, [rip+s_pt_on]
     call    fmt_str
@@ -325,7 +332,8 @@ do_pt_layer:
 # =============================================================================
 #  Strokes
 # =============================================================================
-# pt_valid -> rax = the image painted (the mode left when it is gone)
+# pt_valid -> rax = the image painted (the mode left when it is gone;
+#   vertex paint: the object, a mesh)
 pt_valid:
     push    rbx
     mov     edi, [rip+pt_obj]
@@ -335,6 +343,13 @@ pt_valid:
     test    rax, rax
     jz      7f
     mov     rbx, rax
+    cmp     dword ptr [rip+vp_on], 0
+    je      1f
+    cmp     dword ptr [rbx+OB_TYPE], OT_MESH
+    jne     7f
+    pop     rbx
+    ret
+1:
     mov     rdi, rax
     call    paint_target
     test    rax, rax
@@ -392,6 +407,8 @@ stroke_finish:
     cmp     dword ptr [rip+pt_stroking], 0
     je      9f
     mov     dword ptr [rip+pt_stroking], 0
+    cmp     dword ptr [rip+vp_on], 0    # (vertex paint: the undo step was
+    jne     9f                          #  taken at the start)
     mov     eax, [rip+pt_bx1]
     test    eax, eax
     js      8f                          # (nothing changed)
@@ -507,7 +524,12 @@ hist_free:
 # do_pt_undo(edi = 0 undo, 1 redo) - the entry's pixels and the image's
 #   swap places
 do_pt_undo:
-    push    rbx
+    cmp     dword ptr [rip+vp_on], 0    # (vertex paint: the scene's undo)
+    je      0f
+    test    edi, edi
+    jnz     op_redo
+    jmp     op_undo
+0:  push    rbx
     push    r12
     push    r13
     test    edi, edi
@@ -589,8 +611,15 @@ paint_press:
     call    pt_valid
     test    rax, rax
     jz      8f
-    call    stroke_start
-    mov     edi, ebx
+    cmp     dword ptr [rip+vp_on], 0    # vertex paint: an undo step
+    je      1f
+    call    vp_stroke_start
+    test    rax, rax
+    jz      8f
+    mov     dword ptr [rip+pt_stroking], 1
+    jmp     2f
+1:  call    stroke_start
+2:  mov     edi, ebx
     call    to_px
     cvtsi2ss xmm0, eax
     movss   [rip+pt_lx], xmm0
@@ -786,9 +815,22 @@ pt_screen:
     movss   xmm1, xmm4
     ret
 
-# pt_dab(xmm0 = x, xmm1 = y: physical) - one dab
+# pt_dab(xmm0 = x, xmm1 = y: physical) - one dab (vertex paint: its own)
 pt_dab:
-    push    rbx
+    cmp     dword ptr [rip+vp_on], 0
+    je      1f
+    movss   xmm2, [rip+pt_radius]
+    sub     rsp, 24
+    movss   [rsp], xmm0
+    movss   [rsp+4], xmm1
+    movss   xmm1, xmm2
+    call    ui_scale_f
+    movss   xmm2, xmm1
+    movss   xmm0, [rsp]
+    movss   xmm1, [rsp+4]
+    add     rsp, 24
+    jmp     vp_dab
+1:  push    rbx
     push    r12
     push    r13
     push    r14
@@ -1611,12 +1653,18 @@ paint_overlay:
     cmp     dword ptr [rip+pt_obj], 0
     je      9f
     call    fmt_reset                   # "Texture Paint: image  radius ..."
-    lea     rdi, [rip+s_pt_hud]
+    cmp     dword ptr [rip+vp_on], 0
+    je      701f
+    lea     rdi, [rip+s_vp_hud]
+    call    fmt_str
+    jmp     702f
+701:lea     rdi, [rip+s_pt_hud]
     call    fmt_str
     mov     rdi, [rip+pt_img]
     call    pt_img_name
     mov     rdi, rax
     call    fmt_str
+702:
     lea     rdi, [rip+s_pt_r]
     call    fmt_str
     cvttss2si edi, [rip+pt_radius]
@@ -1625,7 +1673,11 @@ paint_overlay:
     call    fmt_str
     movss   xmm0, [rip+pt_strength]
     call    fmt_val3
-    mov     rax, [rip+pt_img]           # "  layer 2/3"
+    cmp     dword ptr [rip+vp_on], 0    # "  layer 2/3"
+    jne     1f
+    mov     rax, [rip+pt_img]
+    test    rax, rax
+    jz      1f
     cmp     qword ptr [rax+IM_LAYERS], 0
     je      1f
     lea     rdi, [rip+s_pt_layer]

@@ -22,6 +22,8 @@
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
 .intel_syntax noprefix
+.globl mesh_tab
+.globl n_mesh_tab
 .include "const.inc"
 .include "macros.inc"
 
@@ -49,6 +51,7 @@
 .equ TAG_MUVS,      0x5356554D          # "MUVS"
 .equ TAG_IMGD,      0x44474D49          # "IMGD"
 .equ TAG_ILAY,      0x59414C49          # "ILAY"
+.equ TAG_MVCL,      0x4C43564D          # "MVCL"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -89,6 +92,9 @@ imgd_size:      .skip 4
 ilay_chunk:     .skip 8
 ilay_size:      .skip 4
 .align 8
+mvcl_chunk:     .skip 8
+mvcl_size:      .skip 4
+.align 8
 uids_size:      .skip 4
 skch_size:      .skip 4
 cadd_size:      .skip 4
@@ -121,6 +127,8 @@ s_illum:        .asciz "illum 2\n"
 mt_one:         .float 1.0
 s_v:            .asciz "v "
 s_vt:           .asciz "vt "
+.align 4
+fo_inv255:      .float 0.003921569
 s_f:            .asciz "f"
 s_nl:           .asciz "\n"
 s_sp:           .asciz " "
@@ -276,6 +284,10 @@ bee_save:
 4:  mov     edi, TAG_MUVS               # MUVS (UVs and seams of the meshes)
     call    chunk_begin
     call    muvs_write
+    call    chunk_end
+    mov     edi, TAG_MVCL               # MVCL (their vertex colours)
+    call    chunk_begin
+    call    mvcl_write
     call    chunk_end
     mov     edi, TAG_OBJS               # OBJS
     call    chunk_begin
@@ -773,6 +785,7 @@ bee_load:
     mov     qword ptr [rip+muvs_chunk], 0
     mov     qword ptr [rip+imgd_chunk], 0
     mov     qword ptr [rip+ilay_chunk], 0
+    mov     qword ptr [rip+mvcl_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -831,7 +844,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_ILAY
+28: cmp     eax, TAG_MVCL
+    jne     273f
+    lea     rax, [rbx+8]
+    mov     [rip+mvcl_chunk], rax
+    mov     [rip+mvcl_size], ebp
+    jmp     23f
+273:cmp     eax, TAG_ILAY
     jne     274f
     lea     rax, [rbx+8]
     mov     [rip+ilay_chunk], rax
@@ -962,7 +981,12 @@ bee_load:
     jz      773f
     mov     esi, [rip+muvs_size]
     call    muvs_read
-773:mov     rdi, [rip+mres_chunk]       # multires displacements
+773:mov     rdi, [rip+mvcl_chunk]       # vertex colours
+    test    rdi, rdi
+    jz      774f
+    mov     esi, [rip+mvcl_size]
+    call    mvcl_read
+774:mov     rdi, [rip+mres_chunk]       # multires displacements
     test    rdi, rdi
     jz      772f
     mov     esi, [rip+mres_size]
@@ -1164,7 +1188,27 @@ obj_export:
     imul    rcx, rcx, 12
     movss   xmm0, [r13+rcx+8]
     call    wb_float
-    lea     rsi, [rip+s_nl]
+    cmp     qword ptr [r12+ME_VCOL], 0  # vertex colours: r g b (0..1)
+    je      22f
+    mov     edx, 16
+21: push    rdx
+    push    rdx
+    lea     rsi, [rip+s_sp]
+    call    wb_str
+    mov     rcx, [rsp+16]
+    mov     rax, [r12+ME_VCOL]
+    mov     eax, [rax+rcx*4]
+    mov     ecx, [rsp]
+    shr     eax, cl
+    and     eax, 0xff
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+fo_inv255]
+    call    wb_float
+    pop     rdx
+    pop     rdx
+    sub     edx, 8
+    jns     21b
+22: lea     rsi, [rip+s_nl]
     call    wb_str
     pop     rcx
     inc     ecx

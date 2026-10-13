@@ -602,7 +602,17 @@ job_tris:
     cmp     byte ptr [rcx+rdx], 0
     je      31f
     mov     dword ptr [rsp+16], COL_FACE_SEL
-31: mov     rcx, [r15+ME_TRIS]
+31: cmp     dword ptr [rsp+16], COL_FACE_SEL  # vertex colours tint it
+    je      311f
+    cmp     qword ptr [r15+ME_VCOL], 0
+    je      311f
+    mov     rdi, r15
+    mov     esi, [rsp+20]
+    mov     edx, [rsp+16]
+    call    vcol_avg
+    mov     [rsp+16], eax
+    mov     eax, [rsp+20]
+311:mov     rcx, [r15+ME_TRIS]
     imul    rax, rax, 12
     mov     edi, [rcx+rax]
     mov     esi, [rcx+rax+4]

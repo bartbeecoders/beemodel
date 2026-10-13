@@ -394,6 +394,12 @@ flattens. Each layer has an opacity, a blend mode (normal, multiply, add)
 and can be hidden (`layer(image, ...)` in scripts); the image is their
 composite, and the stack is saved in the `.bee` file.
 
+**Vertex colours**: Shift+V paints the active mesh's vertices with the same
+brush (visible ones only; each stroke is an undo step). They tint the
+material - per triangle in the solid view, smoothly in the material
+preview and the path tracer - and go to OBJ (`v x y z r g b`), glTF
+(`COLOR_0`) and `.bee` files. Scripts: `vpaint(...)`, `vcol(...)`.
+
 ### BeeScript
 
 BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not
@@ -501,6 +507,7 @@ src/uv.s        UV maps: seams, LSCM unwrap (CG solver), smart projection, packi
 src/uved.s      the UV editor area: islands, transforms, heat map, texel density
 src/paint.s     texture painting: projected dabs, UV-space dabs, stroke history
 src/layers.s    paint layers: stack, blend modes, composite, saving
+src/vcol.s      vertex colours: vertex paint, tinting, files
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay

@@ -553,7 +553,24 @@ job_shade:
     je      1f
     lea     rsi, [rsp]
     call    pv_graph
-1:  lea     rdi, [rsp]
+1:  mov     rdi, [r14+RO_MESH]          # vertex colours tint the base
+    cmp     qword ptr [rdi+ME_VCOL], 0
+    je      12f
+    movss   xmm0, [rsp+SH_SZ+20]
+    movss   xmm1, [rsp+SH_SZ+24]
+    sub     rsp, 16
+    mov     esi, r15d
+    lea     rdx, [rsp]
+    call    vcol_lin
+    xor     ecx, ecx
+11: movss   xmm0, [rsp+16+SH_BASE+rcx*4]
+    mulss   xmm0, [rsp+rcx*4]
+    movss   [rsp+16+SH_BASE+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      11b
+    add     rsp, 16
+12: lea     rdi, [rsp]
     call    shade
     mov     eax, r12d                   # write the pixel
     add     eax, [rip+rs_y0]

@@ -1876,10 +1876,50 @@ trace_path:
     call    tri_material
     mov     r13, rax
     test    r13, r13
-    jz      7f
-    cmp     dword ptr [r13+128], 0
-    je      65f
+    jnz     63f
+    mov     rax, [rip+hv_tvc]           # (no material: the default, made
+    lea     rcx, [r12+r12*2]            #  here when colours tint it)
+    cmp     dword ptr [rax+rcx*4], 0
+    je      7f
+    lea     rdi, [rbx+PF_MAT]
+    xor     eax, eax
+    mov     ecx, 32
+    rep     stosd
+    lea     rsi, [rip+mat_def]
+    lea     rdi, [rbx+PF_MAT+32]
+    mov     ecx, 8
+    rep     movsd
+    lea     r13, [rbx+PF_MAT]
+    jmp     64f
+63: cmp     dword ptr [r13+128], 0
+    je      64f
     call    hit_graph
+64: mov     rax, [rip+hv_tvc]           # vertex colours tint the base
+    lea     rcx, [r12+r12*2]
+    lea     rsi, [rax+rcx*4]
+    cmp     dword ptr [rsi], 0
+    je      65f
+    lea     rax, [rbx+PF_MAT]           # (the material's copy, to change)
+    cmp     r13, rax
+    je      641f
+    push    rsi
+    mov     rsi, r13
+    lea     rdi, [rbx+PF_MAT]
+    mov     ecx, 32
+    rep     movsd
+    pop     rsi
+    lea     r13, [rbx+PF_MAT]
+641:movss   xmm0, [rbx+PF_RAY+RAY_U]
+    movss   xmm1, [rbx+PF_RAY+RAY_V]
+    lea     rdx, [rbx+PF_TMP]
+    call    vcol_lin3
+    xor     ecx, ecx
+642:movss   xmm0, [r13+32+rcx*4]
+    mulss   xmm0, [rbx+PF_TMP+rcx*4]
+    movss   [r13+32+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      642b
 65: # emission
     movss   xmm0, [r13+76]
     xorps   xmm1, xmm1

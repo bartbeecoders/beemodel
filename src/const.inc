@@ -322,7 +322,8 @@
 .equ ME_UV,         128     # float[2] per loop (own mapping), or 0: no UVs
 .equ ME_SEAM,       136     # u8 per loop: its edge (to the next loop) is a
                             #  UV seam (own mapping), or 0
-.equ ME_HDR,        144
+.equ ME_VCOL,       144     # u32 0xAARRGGBB per vertex (own mapping), or 0
+.equ ME_HDR,        152
 
 # ---- objects (scene.s) -------------------------------------------------------------
 .equ OB_NAME,       0       # 32 bytes
