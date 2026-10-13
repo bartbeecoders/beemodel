@@ -110,6 +110,9 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `matget(mat, param [, component])` | Reads one material value |
 | `assign(object, mat)` | Gives a mesh a material; `""` removes it |
 | `matof(object)` | The name of its material, or `nil` |
+| `image(path)` | Loads a PNG, JPEG or Radiance HDR image into the scene; returns its name |
+| `imgsize(image, axis)` | Width (axis 0) or height (1) |
+| `imgpixel(image, x, y, channel)` | A pixel's red, green, blue or alpha (0..3): 0..255 for 8-bit images, linear values for HDR |
 | `render(path [, width, height, samples, denoise])` | Path-traces the scene with Hive into a PNG (the camera object, or the viewport's view), denoised when `denoise` is 1; returns the milliseconds. Defaults 640 x 360, 64 samples, no denoising |
 | `modifier(name, type)` | Adds `mirror`, `array`, `solidify`, `subsurf`, `bevel`, `decimate`, `remesh` or `boolean`; returns its index. A boolean takes the other selected mesh as its object |
 | `modset(name, i, param, value)` | Sets a value, e.g. `modset(c, 0, "levels", 3)`; an object value is a name: `modset(c, 0, "object", "Cutter")` |

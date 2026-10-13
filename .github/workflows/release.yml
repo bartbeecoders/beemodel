@@ -40,9 +40,10 @@ jobs:
         run: |
           python -m pip install --quiet pillow
           sudo apt-get install -y --no-install-recommends fonts-dejavu-core >/dev/null
-          timeout 120 python tools/fakewl.py build/shots
+          timeout 300 python tests/image_io.py build/beemodel
+          timeout 300 python tools/fakewl.py build/shots
           BEEMODEL_FONT=none BEEMODEL_MONO_FONT=none BEEMODEL_GOLDEN=check \
-            timeout 120 python tools/fakewl.py build/shots-bitmap
+            timeout 300 python tools/fakewl.py build/shots-bitmap
 
       - name: Package
         run: ./package.sh

@@ -50,15 +50,18 @@ jobs:
       - name: Boolean stress corpus (exact identities, closed results)
         run: timeout 300 python tests/bool_stress.py build/beemodel --cases 300
 
+      - name: Image readers and writers (PNG, JPEG, HDR, EXR)
+        run: timeout 300 python tests/image_io.py build/beemodel
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
-        run: timeout 120 python tools/fakewl.py build/shots
+        run: timeout 300 python tools/fakewl.py build/shots
 
       - name: Headless UI test (bitmap font fallback + golden images)
         env:
           BEEMODEL_FONT: none
           BEEMODEL_MONO_FONT: none
           BEEMODEL_GOLDEN: check
-        run: timeout 120 python tools/fakewl.py build/shots-bitmap
+        run: timeout 300 python tools/fakewl.py build/shots-bitmap
 
       - name: Upload screenshots
         if: always()

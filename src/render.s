@@ -55,6 +55,7 @@ s_rn_done:      .asciz "  render finished: "
 s_rn_stopped:   .asciz "  render stopped: "
 s_rn_in:        .asciz " samples, "
 s_rn_spp:       .asciz " samples"
+s_rn_exr:       .asciz ".exr"
 s_rn_dn:        .asciz "  denoise: "
 s_rn_on:        .asciz "on"
 s_rn_off:       .asciz "off"
@@ -85,10 +86,11 @@ s_pl_depth:     .asciz "Depth"
 .align 8
 pass_labels:    .quad s_pl_beauty, s_pl_albedo, s_pl_normal, s_pl_depth
 f_1000:         .float 1000.0
+f_one:          .float 1.0
 
 OPERATOR op_render_start, "render.start", "Render", do_render_start, key=KEY_F12, flags=OPF_AI_SAFE|OPF_QUIET, doc="Start a progressive render in the Render area (the scene at the render settings)"
 OPERATOR op_render_stop, "render.stop", "Stop Render", do_render_stop, flags=OPF_AI_SAFE|OPF_QUIET, doc="Stop the running render (keeps the samples so far)"
-OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, doc="Save the render as PNG: render.save <path> [beauty|albedo|normal|depth]"
+OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, doc="Save the render as PNG, or .exr (linear half floats): render.save <path> [beauty|albedo|normal|depth]"
 OPERATOR op_render_pass, "render.pass", "Next Render Pass", do_render_pass, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)"
 OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>"
 OPERATOR op_render_denoise, "render.denoise", "Denoise", do_render_denoise, check_denoise, flags=OPF_AI_SAFE|OPF_QUIET, doc="Toggle denoising the beauty pass when a render ends (guided by albedo, normal, depth)"
@@ -397,12 +399,27 @@ do_render_save:
     test    eax, eax
     js      .Lsv_badpass
     mov     r12d, eax
-1:  mov     [rip+hv_pass], r12d
+1:  lea     rdi, [rsp]
+    call    path_expand
+    lea     rdi, [rip+path_buf]         # .exr: linear floats
+    call    str_len
+    cmp     eax, 4
+    jb      2f
+    lea     rdi, [rip+path_buf]
+    lea     rdi, [rdi+rax-4]
+    lea     rsi, [rip+s_rn_exr]
+    call    str_eq
+    test    eax, eax
+    jz      2f
+    mov     edi, r12d
+    call    save_exr
+    test    eax, eax
+    jnz     .Lsv_fail
+    jmp     3f
+2:  mov     [rip+hv_pass], r12d
     call    rn_resolve
     mov     [rip+hv_pass], r13d
     mov     dword ptr [rip+rn_stale], 1
-    lea     rdi, [rsp]
-    call    path_expand
     lea     rdi, [rip+path_buf]
     mov     rsi, [rip+rn_img]
     mov     edx, [rip+hv_w]
@@ -411,7 +428,7 @@ do_render_save:
     call    png_write
     test    eax, eax
     jnz     .Lsv_fail
-    call    fmt_reset
+3:  call    fmt_reset
     lea     rdi, [rip+s_rn_saved]
     call    fmt_str
     lea     rdi, [rip+path_buf]
@@ -432,6 +449,96 @@ do_render_save:
     lea     rdi, [rip+s_rn_savefail]
 8:  call    log_line
 9:  add     rsp, 272
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# save_exr(edi=pass) -> eax = 0 ok: path_buf <- the pass as linear half floats
+#   (beauty: denoised when shown so; depth in all three channels)
+save_exr:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r15d, edi
+    mov     eax, [rip+hv_w]
+    imul    eax, [rip+hv_h]
+    mov     r12d, eax
+    lea     rdi, [rax+rax*2]
+    shl     rdi, 2
+    call    vmap
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    xor     r13d, r13d                  # pixel
+1:  cmp     r13d, r12d
+    jae     5f
+    mov     eax, r13d                   # 1 / samples of its row
+    xor     edx, edx
+    div     dword ptr [rip+hv_w]
+    mov     rcx, [rip+hv_rowspp]
+    mov     eax, [rcx+rax*4]
+    xorps   xmm7, xmm7
+    test    eax, eax
+    jz      2f
+    cvtsi2ss xmm1, eax
+    movss   xmm7, [rip+f_one]
+    divss   xmm7, xmm1
+2:  lea     r14, [r13+r13*2]
+    lea     r14, [rbx+r14*4]            # destination
+    xor     ecx, ecx
+3:  test    r15d, r15d
+    jnz     31f
+    cmp     dword ptr [rip+hv_den_on], 0
+    je      30f
+    mov     rax, r13                    # denoised (a mean already)
+    shl     rax, 4
+    add     rax, [rip+hv_den]
+    movss   xmm0, [rax+rcx*4]
+    jmp     4f
+30: lea     rax, [r13+r13*2]
+    shl     rax, 2
+    add     rax, [rip+hv_accum]
+    movss   xmm0, [rax+rcx*4]
+    mulss   xmm0, xmm7
+    jmp     4f
+31: imul    rax, r13, 28
+    add     rax, [rip+hv_aux]
+    lea     edx, [r15-1]                # albedo 0, normal 12, depth 24
+    imul    edx, edx, 12
+    cmp     r15d, 3
+    jne     32f
+    movss   xmm0, [rax+24]
+    mulss   xmm0, xmm7
+    jmp     4f
+32: add     rax, rdx
+    movss   xmm0, [rax+rcx*4]
+    mulss   xmm0, xmm7
+4:  movss   [r14+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    inc     r13d
+    jmp     1b
+5:  lea     rdi, [rip+path_buf]
+    mov     rsi, rbx
+    mov     edx, [rip+hv_w]
+    mov     ecx, [rip+hv_h]
+    mov     r8d, 3
+    mov     r9d, 1
+    call    exr_write
+    mov     r13d, eax
+    mov     rdi, rbx
+    lea     rsi, [r12+r12*2]
+    shl     rsi, 2
+    call    vunmap
+    mov     eax, r13d
+    jmp     9f
+8:  mov     eax, -12
+9:  pop     r15
+    pop     r14
     pop     r13
     pop     r12
     pop     rbx

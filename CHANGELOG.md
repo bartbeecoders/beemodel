@@ -7,6 +7,23 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Image files, all with our own code:
+  - **inflate:** stored, fixed and dynamic Huffman blocks, with a 10-bit
+    lookup table.
+  - **PNG reader:** every colour type and bit depth, all five filters,
+    Adam7 interlacing and tRNS.
+  - **JPEG decoder:** baseline (SOF0/1), any chroma subsampling, restart
+    markers, SSE float IDCT, libjpeg-style fancy upsampling. It matches
+    Pillow to within 3 levels.
+  - **Radiance HDR reader:** RGBE, RLE or flat, top-down or bottom-up.
+  - **OpenEXR writer:** half floats, ZIP blocks (predictor + deflate).
+    `oiiotool` reads the files.
+  - **Commands:** `image.load` / `image.save` (PNG or EXR);
+    `render.save <path>.exr` writes linear passes.
+  - **BeeScript:** `image(path)`, `imgsize`, `imgpixel`.
+  - **Agents:** image commands need file access.
+  - **Tests:** `tests/image_io.py` checks 30 PNG variants exactly, eight
+    JPEG kinds against Pillow, HDR exactly and EXR round trips.
 - A denoiser for Hive renders: an edge-avoiding à-trous wavelet filter
   (after Dammertz et al. and SVGF):
   - **Guides:** the albedo, normal and depth passes. It filters the

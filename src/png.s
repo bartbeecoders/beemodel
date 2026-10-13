@@ -12,6 +12,7 @@
 # exports
 .globl png_encode
 .globl png_write
+.globl deflate_buf
 
 .equ HASH_SIZE,     32768
 .equ WINDOW,        32768
@@ -197,6 +198,17 @@ put_match:
 4:  pop     r12
     pop     rbx
     ret
+
+# deflate_buf(rsi=data, rdx=length, rdi=output) -> rax = output end (raw
+#   deflate, fixed codes; the output needs length * 9 / 8 + 64 bytes)
+deflate_buf:
+    push    rdi
+    push    rsi
+    push    rdx
+    call    init_tables
+    pop     rdx
+    pop     rsi
+    pop     rdi
 
 # deflate(rsi=data, rdx=length, rdi=output) -> rax = output end
 deflate:
