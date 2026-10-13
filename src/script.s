@@ -395,6 +395,12 @@ builtins:
     .long 1, 1
     .quad bn_render, b_render
     .long 1, 5
+    .quad bn_image, b_image
+    .long 1, 1
+    .quad bn_imgsize, b_imgsize
+    .long 2, 2
+    .quad bn_imgpixel, b_imgpixel
+    .long 4, 4
 builtins_end:
 .equ B_SZ, 24
 
@@ -464,6 +470,11 @@ bn_matget:      .asciz "matget"
 bn_assign:      .asciz "assign"
 bn_matof:       .asciz "matof"
 bn_render:      .asciz "render"
+bn_image:       .asciz "image"
+bn_imgsize:     .asciz "imgsize"
+bn_imgpixel:    .asciz "imgpixel"
+e_image:        .asciz "image: could not load "
+e_no_image:     .asciz "no image called "
 e_render:       .asciz "render: could not render or write "
 e_no_mat:       .asciz "no material named "
 e_mat_param:    .asciz "material parameters: base metallic roughness specular ior transmission emission strength clearcoat coat_roughness alpha, not "
@@ -4332,6 +4343,109 @@ b_render:
 8:  lea     rdi, [rip+e_render]
     mov     rsi, [rsp]
     jmp     sc_rt
+
+# image(path) -> the new image's name: loads PNG, JPEG or Radiance HDR
+b_image:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    a_str
+    mov     rbx, rax
+    cmp     dword ptr [rip+sc_agent], 0 # agents need file access
+    je      1f
+    cmp     dword ptr [rip+agent_tier], 2
+    jb      7f
+1:  mov     rdi, rbx
+    call    path_expand
+    lea     rdi, [rip+path_buf]
+    call    image_load
+    test    eax, eax
+    js      8f
+    imul    eax, eax, 256               # its record starts with the name
+    lea     rsi, [rip+img_tab]
+    add     rsi, rax
+    call    sh_dup
+    mov     rdx, rax
+    mov     eax, T_STR
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+7:  lea     rdi, [rip+e_op_perm]
+    lea     rsi, [rip+bn_image]
+    jmp     sc_rt
+8:  lea     rdi, [rip+e_image]
+    mov     rsi, rbx
+    jmp     sc_rt
+
+# a_image(rdi=value) -> eax = image index (error if there is none)
+a_image:
+    push    rbx
+    call    a_str
+    mov     rbx, rax
+    mov     rdi, rax
+    call    image_find
+    test    eax, eax
+    js      1f
+    pop     rbx
+    ret
+1:  lea     rdi, [rip+e_no_image]
+    mov     rsi, rbx
+    jmp     sc_rt
+
+# imgsize(image, axis) -> width (0) or height (1)
+b_imgsize:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_image
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si ebx, xmm0
+    mov     edi, r12d
+    call    image_ptr
+    mov     ecx, [rax]
+    test    ebx, ebx
+    jz      2f
+    mov     ecx, [rax+4]
+2:  cvtsi2sd xmm0, ecx
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# imgpixel(image, x, y, channel) -> 0..255 (8-bit) or linear (HDR)
+b_imgpixel:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    call    a_image
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r13d, xmm0
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si r14d, xmm0
+    lea     rdi, [rbx+48]
+    call    a_num
+    cvttsd2si r15d, xmm0
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, r15d
+    call    image_pixel
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
 
 # matof(object) -> its material's name, or nil
 b_matof:

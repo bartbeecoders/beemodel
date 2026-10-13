@@ -161,8 +161,12 @@ writes a PNG. A 480 × 270 image with 64 samples takes about a third of a second
 stops. A finished or stopped render is denoised (guided by the albedo, normal and depth
 passes; Render › Denoise turns it off), so 16 samples look close to 256. The Render menu
 switches passes (beauty, albedo, normal, depth) and saves them
-(`render.save <path> [pass]`); `render.settings <width> <height> <samples>` sets the size and
-samples, which are saved with the scene.
+(`render.save <path> [pass]`, PNG or linear half-float `.exr`); `render.settings <width>
+<height> <samples>` sets the size and samples, which are saved with the scene.
+
+**Images.** `image.load <path>` reads PNG (every colour type, depth and interlacing), baseline
+JPEG and Radiance HDR files, all with BeeModel's own decoders; `image.save <name> <path>`
+writes PNG or OpenEXR.
 
 **Analysis and repair.** View › Show Normals / Non-manifold / Boundary Edges / Degenerate Faces /
 Overhangs mark problems on the active mesh, with a count of each in the viewport.
