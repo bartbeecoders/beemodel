@@ -187,16 +187,22 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 <!-- ============================================================ -->
 <section id="baseline">
   <h2>Where we are</h2>
-  <p class="sub">The shell delivered so far, and what it already proves.</p>
+  <p class="sub">Status on 13 October 2026: phases 0–8 are shipped (v0.1.0 – v0.9.0) and phase 9 is in progress (v0.10.0). Every phase has its own GitHub milestone with one PR per issue and a tagged release.</p>
   <div class="table-wrap"><table>
-    <tr><th>Area</th><th>Status today</th><th>What it proves</th></tr>
-    <tr><td>Wayland client</td><td>Hand-written wire protocol: registry, compositor, shm (memfd, double buffer), xdg-shell, seat/pointer/keyboard, cursor-shape-v1</td><td>We can talk to any compositor without libwayland. The pattern extends to every other protocol we need.</td></tr>
-    <tr><td>Event loop</td><td>Blocking <code>recvmsg</code>, redraws paced by frame callbacks, 0% CPU when idle</td><td>The architecture is fast and power-friendly by default.</td></tr>
-    <tr><td>Shell UI</td><td>App-drawn title bar, menus, 3 resizable panes, status bar, console log</td><td>Immediate-mode UI in assembly is workable.</td></tr>
-    <tr><td>Viewport</td><td>Orbit/pan/zoom camera, perspective, near-plane and Liang–Barsky clipping, grid, gizmo</td><td>The SSE math core is in place for the 3D pipeline.</td></tr>
-    <tr><td>Footprint</td><td>25 KB binary, ~60 KB private RAM plus the framebuffer</td><td>The baseline every later phase is measured against.</td></tr>
-    <tr><td>Testing</td><td><code>tools/fakewl.py</code> headless fake compositor with input injection and screenshots</td><td>The seed of the golden-image test suite.</td></tr>
+    <tr><th>Phase</th><th>Release</th><th>Status</th><th>Exit check</th></tr>
+    <tr><td>0 · Shell</td><td>v0.1.0</td><td><span class="tag g">done</span></td><td>Wayland client, app-drawn UI and the fake-compositor harness.</td></tr>
+    <tr><td>1 · Foundations</td><td>v0.2.0</td><td><span class="tag g">done</span></td><td>Job system, XKB, TrueType, areas, the command palette and golden images in CI.</td></tr>
+    <tr><td>2 · Scene, viewport &amp; files</td><td>v0.3.0</td><td><span class="tag g">done</span></td><td>Tile rasterizer, undo, the .bee format, OBJ / STL / PLY / glTF, PNG.</td></tr>
+    <tr><td>3 · AI-native layer</td><td>v0.4.0</td><td><span class="tag g">done</span></td><td>MCP server, BeeScript, change sets and the AI panel.</td></tr>
+    <tr><td>4 · Polygon modeling</td><td>v0.5.0</td><td><span class="tag g">done</span></td><td>Edit mode, the modal tools, the modifier stack and exact booleans.</td></tr>
+    <tr><td>5 · Materials &amp; rendering</td><td>v0.6.0</td><td><span class="tag g">done</span></td><td>Converged 1080p product shot in about 5 s on 32 threads (budget 10 s).</td></tr>
+    <tr><td>6 · CAD</td><td>v0.7.0</td><td><span class="tag g">done</span></td><td>Parametric enclosure: rebuilds on a parameter change and its 3MF slices in PrusaSlicer, in 0.65 s.</td></tr>
+    <tr><td>7 · Sculpt, UV &amp; paint</td><td>v0.8.0</td><td><span class="tag g">done</span></td><td>Strokes on a 25.2M-vertex sculpt at 11.2 ms median per frame (60 fps).</td></tr>
+    <tr><td>8 · Nodes &amp; procedural</td><td>v0.9.0</td><td><span class="tag g">done</span></td><td>A million instances placed in 13–16 ms (budget 200 ms) and orbited at 11.4 ms per frame.</td></tr>
+    <tr><td>9 · Animation &amp; simulation</td><td>v0.10.0</td><td><span class="tag a">in progress</span></td><td>Done: keyframes and the timeline (#123), the dope sheet, graph editor and action layers (#124), armatures, skinning (LBS / DQS), automatic weights and weight paint (#125). Next: IK, constraints, shape keys and drivers (#126), CAD mechanisms (#127), rigid bodies (#128), XPBD cloth (#129), the simulation cache (#130), then the release (#131).</td></tr>
+    <tr><td>10 · Engine-grade &amp; collaboration</td><td>v0.11.0</td><td><span class="tag">planned</span></td><td>—</td></tr>
   </table></div>
+  <p class="muted">Footprint: the static binary is about 590 KB (the CI budget is 1 MiB) and still links nothing. CI runs <code>ci/local.sh</code> on every PR: the build, the headless fake-compositor suite with golden images, MCP conformance, the rasterizer stress test and every phase's walkthrough scene.</p>
 </section>
 
 <!-- ============================================================ -->
@@ -690,7 +696,7 @@ check.printable(min_wall: 1.2mm)</code></pre>
     Wayland client, app-drawn title bar, menus, resizable panes, orbit viewport, console, build/run scripts, fake-compositor test harness.
   </div></div>
 
-  <div class="phase"><div class="pn"><b>1</b>M</div><div class="card"><h3>Foundations <span class="tag r">platform</span><span class="tag r">runtime</span></h3>
+  <div class="phase"><div class="pn"><b>1</b>done</div><div class="card"><h3>Foundations <span class="tag r">platform</span><span class="tag r">runtime</span> <span class="tag g">shipped v0.2.0</span></h3>
     <ul>
       <li>Split into multiple object files with a documented internal calling convention; operator spine macros and code generator.</li>
       <li>Job system (clone/futex, work stealing), arenas, handles, RCU snapshots.</li>
@@ -702,7 +708,7 @@ check.printable(min_wall: 1.2mm)</code></pre>
     <div class="exit"><b>Exit:</b> type into fields on any keyboard layout · F3 lists every operator · 32 workers idle at 0% CPU · binary &lt; 150 KB.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>2</b>L</div><div class="card"><h3>Scene, viewport &amp; files <span class="tag b">core</span></h3>
+  <div class="phase"><div class="pn"><b>2</b>done</div><div class="card"><h3>Scene, viewport &amp; files <span class="tag b">core</span> <span class="tag g">shipped v0.3.0</span></h3>
     <ul>
       <li>ECS scene, dependency graph, outliner with drag/drop, properties editor generated from the component schema.</li>
       <li>Half-edge mesh, primitives, object mode transforms with gizmos, snapping, numeric input.</li>
@@ -713,7 +719,7 @@ check.printable(min_wall: 1.2mm)</code></pre>
     <div class="exit"><b>Exit:</b> open a 10M-triangle glTF in &lt; 1 s · orbit at 60 fps on 1080p · 1000-step undo under 64 MB.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>3</b>M</div><div class="card"><h3>AI-native layer <span class="tag v">MCP</span><span class="tag v">BeeScript</span></h3>
+  <div class="phase"><div class="pn"><b>3</b>done</div><div class="card"><h3>AI-native layer <span class="tag v">MCP</span><span class="tag v">BeeScript</span> <span class="tag g">shipped v0.4.0</span></h3>
     <ul>
       <li>JSON parser/writer, JSON-RPC, MCP server (stdio, unix socket bridge, local HTTP), tools generated from operators.</li>
       <li>Curated tools, resources with subscriptions, viewport capture to PNG, checkpoints and change sets.</li>
@@ -724,7 +730,7 @@ check.printable(min_wall: 1.2mm)</code></pre>
     <div class="exit"><b>Exit:</b> Claude Code can attach to a running BeeModel, build a described scene with primitives, take a screenshot, refine it, and the user can review and revert the whole session in one click.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>4</b>XL</div><div class="card"><h3>Polygon modeling <span class="tag a">modeling</span></h3>
+  <div class="phase"><div class="pn"><b>4</b>done</div><div class="card"><h3>Polygon modeling <span class="tag a">modeling</span> <span class="tag g">shipped v0.5.0</span></h3>
     <ul>
       <li>Edit mode with all selection tools; extrude, inset, bevel, loop cut, knife, bridge, merge, dissolve, spin.</li>
       <li>Modal tools with typed input; redo panel; modifier stack (subdivision, mirror, array, solidify, bevel, boolean, remesh, decimate).</li>
@@ -734,7 +740,7 @@ check.printable(min_wall: 1.2mm)</code></pre>
     <div class="exit"><b>Exit:</b> model a hard-surface reference object end-to-end · booleans pass the stress corpus with 0 failures · subdivision level 3 on a 100k-quad mesh updates in &lt; 30 ms.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>5</b>L</div><div class="card"><h3>Materials &amp; rendering <span class="tag a">render</span></h3>
+  <div class="phase"><div class="pn"><b>5</b>done</div><div class="card"><h3>Materials &amp; rendering <span class="tag a">render</span> <span class="tag g">shipped v0.6.0</span></h3>
     <ul>
       <li>PBR materials, shader node graphs, material preview mode with environment lighting.</li>
       <li>"Hive" path tracer: BVH8 + AVX-512, MIS, principled BSDF, HDRI importance sampling, denoiser.</li>
@@ -743,7 +749,7 @@ check.printable(min_wall: 1.2mm)</code></pre>
     <div class="exit"><b>Exit:</b> a converged 1080p product shot in &lt; 10 s on 32 threads · viewport stays interactive while rendering.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>6</b>XL</div><div class="card"><h3>CAD <span class="tag b">precision</span></h3>
+  <div class="phase"><div class="pn"><b>6</b>done</div><div class="card"><h3>CAD <span class="tag b">precision</span> <span class="tag g">shipped v0.7.0</span></h3>
     <ul>
       <li>Sketcher with constraint solver and DOF colouring; parameters and expressions.</li>
       <li>Feature tree (pad, pocket, revolve, sweep, loft, fillet, chamfer, shell, patterns, holes) on the mesh+exact kernel, with persistent naming.</li>
@@ -753,7 +759,7 @@ check.printable(min_wall: 1.2mm)</code></pre>
     <div class="exit"><b>Exit:</b> design a printable enclosure from sketches with dimensions, change one parameter, everything rebuilds correctly, and the 3MF file opens in a slicer.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>7</b>L</div><div class="card"><h3>Sculpt, UV &amp; paint <span class="tag a">organic</span></h3>
+  <div class="phase"><div class="pn"><b>7</b>done</div><div class="card"><h3>Sculpt, UV &amp; paint <span class="tag a">organic</span> <span class="tag g">shipped v0.8.0</span></h3>
     <ul>
       <li>Sculpt mode with BVH-partitioned mesh, brushes, dyntopo, multires, masks, tablet support.</li>
       <li>UV editor, LSCM/ABF unwrap, packing; texture paint; high-to-low baking.</li>
@@ -761,7 +767,7 @@ check.printable(min_wall: 1.2mm)</code></pre>
     <div class="exit"><b>Exit:</b> 20M-vertex sculpt at 60 fps strokes · memory under 2× the raw mesh size.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>8</b>L</div><div class="card"><h3>Nodes &amp; procedural <span class="tag v">nodes</span></h3>
+  <div class="phase"><div class="pn"><b>8</b>done</div><div class="card"><h3>Nodes &amp; procedural <span class="tag v">nodes</span> <span class="tag g">shipped v0.9.0</span></h3>
     <ul>
       <li>Node editor UI; geometry nodes on the vectorized VM; node groups as assets.</li>
       <li>Scattering, instancing at scale, curves, terrain, WFC/L-systems; template JIT.</li>
@@ -770,11 +776,12 @@ check.printable(min_wall: 1.2mm)</code></pre>
     <div class="exit"><b>Exit:</b> 1M scattered instances placed in &lt; 200 ms and rendered at interactive rates.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>9</b>L</div><div class="card"><h3>Animation &amp; simulation <span class="tag g">motion</span></h3>
+  <div class="phase"><div class="pn"><b>9</b>now</div><div class="card"><h3>Animation &amp; simulation <span class="tag g">motion</span> <span class="tag a">in progress · v0.10.0</span></h3>
     <ul>
       <li>Keyframes, dope sheet, graph editor, armatures, skinning, IK, shape keys, drivers.</li>
       <li>Rigid bodies, XPBD cloth, cache system; mechanism animation for CAD assemblies.</li>
     </ul>
+    <p class="muted">Done: keyframes and the timeline; the dope sheet, graph editor and action layers; armatures with LBS / DQS skinning, automatic weights and weight paint. In progress: IK, constraints, shape keys, drivers, motion paths and onion skinning. Still to come: CAD mechanisms, rigid bodies, XPBD cloth and the simulation cache.</p>
     <div class="exit"><b>Exit:</b> rigged character plays back at 60 fps · 1000 rigid bodies simulate in real time.</div>
   </div></div>
 
