@@ -37,6 +37,13 @@ s_t6:       .asciz "pool: slot reuse gets a new generation"
 s_t7:       .asciz "pool: full pool returns handle 0"
 s_t8:       .asciz "parallel_for: every element written exactly once"
 s_t9:       .asciz "parallel_for: work spread over worker threads"
+s_t10:      .asciz "field JIT: 150 random programs give the VM's bits (SSE and AVX paths)"
+s_jit:      .asciz "field program, 1M elements x 42 instructions: VM "
+s_jit2:     .asciz " ms, JIT "
+s_jit3:     .asciz " ms ("
+s_avx:      .asciz "AVX)\n"
+s_sse:      .asciz "SSE)\n"
+s_off:      .asciz "off)\n"
 s_workers:  .asciz "  workers: "
 s_threads:  .asciz " | threads that ran chunks: "
 s_serial:   .asciz "  bench (8M elements): serial "
@@ -336,6 +343,36 @@ selftest:
     call    fmt_fix1
     lea     rdi, [rip+s_ms_end]
     call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    write_out
+
+    call    fvj_selftest                # the field JIT against the VM
+    lea     rdi, [rip+s_t10]
+    call    check
+    mov     edi, 1000000
+    call    fvj_bench
+    mov     r13, rax
+    mov     r14, rdx
+    call    fmt_reset
+    lea     rdi, [rip+s_jit]
+    call    fmt_str
+    cvtsi2ss xmm0, r13
+    divss   xmm0, [rip+f_1000]
+    call    fmt_fix1
+    lea     rdi, [rip+s_jit2]
+    call    fmt_str
+    cvtsi2ss xmm0, r14
+    divss   xmm0, [rip+f_1000]
+    call    fmt_fix1
+    lea     rdi, [rip+s_jit3]
+    call    fmt_str
+    lea     rdi, [rip+s_off]
+    cmp     dword ptr [rip+fvj_mode], 1
+    jb      1f
+    lea     rdi, [rip+s_sse]
+    je      1f
+    lea     rdi, [rip+s_avx]
+1:  call    fmt_str
     lea     rdi, [rip+fmt_buf]
     call    write_out
 

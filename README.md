@@ -340,7 +340,11 @@ sphere, cylinder, mesh line, transform, join, set position, extrude, subdivision
 boolean, merge by distance - and **fields** give a value or vector per point: position, normal,
 index, value, combine / separate XYZ, math, vector math, noise and random. A field compiles to
 a small program for the field VM, which runs it 256 points at a time in SSE loops across the
-job threads (noise on a million-point grid: about 25 ms on top of making the grid). Trees are
+job threads (noise on a million-point grid: about 25 ms on top of making the grid). Programs run
+on enough points are compiled to machine code at run time by a template JIT (AVX, else SSE;
+`BEEMODEL_JIT=0` turns it off, `=sse` keeps to SSE): 1M points x 42 instructions take ~2 ms on
+one core against ~4.7 ms in the VM, and the self-test checks the JIT bit for bit against the VM
+on random programs. Trees are
 saved in `.bee` files and undo with the scene; the Node Editor shows the active object's tree
 (Tab switches to its material).
 
@@ -633,6 +637,7 @@ src/nodeed.s    the node editor area: shader graphs and node trees drawn and edi
 src/ntree.s     node trees: the block, nodes, links, files
 src/geonodes.s  geometry nodes: evaluation, field compiler, tree.* operators
 src/fieldvm.s   the field VM: per-point programs in SSE blocks
+src/fvjit.s     the field JIT: templates to x86-64 (AVX / SSE), differential self-test
 src/asset.s     assets: trees and materials saved, loaded, the Asset Browser
 src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
@@ -656,7 +661,7 @@ to a `.ttf` path to choose others, or to `none` for the built-in bitmap font.
 
 BeeModel uses every core: worker threads (one per CPU) sleep until there is
 parallel work. `BEEMODEL_THREADS=n` limits them. `beemodel --selftest` runs
-the built-in allocator and job-system tests and a small benchmark.
+the built-in allocator, job-system and field-JIT tests and small benchmarks.
 
 Each `.s` file is a separate module linked by `ld`. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the calling convention, the
