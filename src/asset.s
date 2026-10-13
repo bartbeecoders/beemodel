@@ -593,8 +593,57 @@ ab_rescan:
     mov     edi, r12d
     mov     eax, SYS_CLOSE
     syscall
+    call    ab_sort
 9:  pop     r15
     pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ab_sort - the list by name (insertion sort; a few dozen at most)
+ab_sort:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 80
+    mov     ebx, 1
+1:  cmp     ebx, [rip+ab_n]
+    jae     9f
+    mov     r12d, ebx
+2:  test    r12d, r12d                  # while name[j-1] > name[j]: swap
+    jz      5f
+    lea     rdi, [rip+ab_names]
+    mov     eax, r12d
+    shl     eax, 6
+    lea     rsi, [rdi+rax]              # name[j]
+    lea     rdi, [rsi-64]               # name[j-1]
+    xor     ecx, ecx
+3:  mov     al, [rdi+rcx]
+    mov     dl, [rsi+rcx]
+    cmp     al, dl
+    ja      4f
+    jb      5f
+    test    al, al
+    jz      5f
+    inc     ecx
+    jmp     3b
+4:  mov     ecx, 8                      # swap the names
+41: mov     rax, [rdi+rcx*8-8]
+    mov     rdx, [rsi+rcx*8-8]
+    mov     [rdi+rcx*8-8], rdx
+    mov     [rsi+rcx*8-8], rax
+    loop    41b
+    lea     rax, [rip+ab_kinds]         # and the kinds
+    mov     ecx, [rax+r12*4]
+    mov     edx, [rax+r12*4-4]
+    mov     [rax+r12*4], edx
+    mov     [rax+r12*4-4], ecx
+    dec     r12d
+    jmp     2b
+5:  inc     ebx
+    jmp     1b
+9:  add     rsp, 80
     pop     r13
     pop     r12
     pop     rbx

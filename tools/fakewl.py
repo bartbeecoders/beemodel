@@ -3242,7 +3242,7 @@ def node_groups():
     q('op("area.type_asset_browser")')
     f.pump(0.5)
     f.shot('90_asset_browser.png')
-    f.click(200, 105 + 22 + 10)                 # the first asset (Gold)
+    f.click(200, 112)                           # the first asset (Gold: by name)
     f.pump(0.3)
     n = q('print(matget("Gold", "metallic"))')
     check(n == '1', f'the asset browser lists the assets; a click adds one ({n})')
