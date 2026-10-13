@@ -527,6 +527,8 @@ builtins:
     .long 6, 7
     .quad bn_uvmap, b_uvmap
     .long 5, 5
+    .quad bn_paint, b_paint
+    .long 5, 8
     .quad bn_frametime, b_frametime
     .long 1, 1
 builtins_end:
@@ -673,6 +675,7 @@ bn_seams:       .asciz "seams"
 bn_uvstat:      .asciz "uvstat"
 bn_imgset:      .asciz "imgset"
 bn_uvmap:       .asciz "uvmap"
+bn_paint:       .asciz "paint"
 s_smart:        .asciz "smart"
 .align 8
 seam_modes:     .quad sm_mark, sm_clear, sm_sharp, sm_none, 0
@@ -4820,6 +4823,70 @@ b_imgset:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# paint(object, x, y, z, radius [, r, g, b]) - a dab of texture paint
+#   around that world point (the brush colour, or this one; 0..255) -> 1,
+#   0 when the object has no image to paint
+b_paint:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 32
+    mov     rbx, rdi
+    mov     r12d, esi
+    xor     ecx, ecx                    # x y z radius
+1:  push    rcx
+    push    rcx
+    lea     eax, [rcx+1]
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    pop     rcx
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 4
+    jb      1b
+    cmp     r12d, 8                     # a colour
+    jb      3f
+    mov     r13d, 0xff
+    mov     ecx, 5
+2:  push    rcx
+    push    rcx
+    mov     eax, ecx
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    pop     rcx
+    cvttsd2si eax, xmm0
+    test    eax, eax
+    jns     21f
+    xor     eax, eax
+21: cmp     eax, 255
+    jbe     22f
+    mov     eax, 255
+22: shl     r13d, 8
+    or      r13d, eax
+    inc     ecx
+    cmp     ecx, 8
+    jb      2b
+    mov     [rip+pt_col], r13d
+3:  mov     rdi, rbx
+    call    a_meshobj
+    mov     rdi, rbx
+    call    a_obj
+    mov     edi, eax
+    lea     rsi, [rsp]
+    movss   xmm0, [rsp+12]
+    call    paint_dab_world
+    cvtsi2sd xmm0, eax
+    add     rsp, 32
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
 
 # uvmap(object, su, sv, du, dv) - every UV becomes (u su + du, v sv + dv)
 b_uvmap:

@@ -518,6 +518,7 @@ def main():
     uv_maps()
     uv_editor()
     uv_textures()
+    texture_paint()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2794,6 +2795,55 @@ def uv_textures():
     f.pump(0.5)
     b = vp()
     check(a[0] > 5 * a[1] and b[1] > 5 * b[0], f'the material preview too: red / blue {a} then {b} (axis lines are the rest)')
+    f.proc.kill()
+
+
+def texture_paint():
+    """Texture paint: strokes in the viewport land on the visible surface
+    through the UVs, Ctrl+Z / Ctrl+Shift+Z step the stroke history, the UV
+    editor paints in UV space, scripts paint too; painting is saved."""
+    print('  -- texture paint --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('op("image.new", "tex 64 64")\nmaterial("M")\nn = node("M", "image", "tex", 1)\nsocket("M", "base", n)\n'
+      'assign("Cube", "M")\nseams("Cube", "sharp")\nunwrap("Cube")\nselect("Cube")\n'
+      'fn red() {\n s = 0\n for y in 0..64 {\n  for x in 0..64 {\n   if imgpixel("tex", x, y, 0) > 180 '
+      '{ if imgpixel("tex", x, y, 1) < 100 { s += 1 } }\n  }\n }\n return s\n}')
+    red = lambda: int(float(q('print(red())')))
+    f.mods(1); f.key(44); f.mods(0)             # Shift+Z: material preview
+    f.mods(1); f.key(15); f.mods(0)             # Shift+Tab: texture paint
+    f.pump(0.3)
+    q('op("paint.color", "230 20 20")')
+    f.drag(585, 320, 640, 345, steps=10)        # across the front faces
+    f.pump(0.3)
+    a = red()
+    f.shot('80_texture_paint.png')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z (paint history)
+    f.pump(0.2)
+    b = red()
+    f.mods(5); f.key(44); f.mods(0)             # Ctrl+Shift+Z
+    f.pump(0.2)
+    c = red()
+    check(a > 20 and b == 0 and c == a, f'a stroke paints {a} texels; Ctrl+Z clears them ({b}), Ctrl+Shift+Z restores ({c})')
+    f.move(600, 700)                            # the UV editor: paint there
+    f.pump(0.2)
+    q('op("area.type_uv_editor")')
+    f.pump(0.3)
+    f.drag(560, 690, 600, 720, steps=8)
+    f.pump(0.3)
+    d = red()
+    f.shot('81_uv_paint.png')
+    check(d > c, f'the UV editor paints in UV space ({c} -> {d})')
+    e = q('print(paint("Cube", 0, 2, 0, 0.6, 20, 20, 230))\nprint(imgpixel("tex", 0, 0, 3))')
+    q('op("file.save", "~/BeeModel/painted.bee")')
+    q('op("file.open", "~/BeeModel/painted.bee")\nfn red() {\n s = 0\n for y in 0..64 {\n  for x in 0..64 {\n'
+      '   if imgpixel("tex", x, y, 0) > 180 { if imgpixel("tex", x, y, 1) < 100 { s += 1 } }\n  }\n }\n return s\n}')
+    g = red()
+    check(e.split()[:1] == ['1'] and g == d, f'paint() from scripts; the painted image comes back from the .bee file ({g} red texels)')
     f.proc.kill()
 
 

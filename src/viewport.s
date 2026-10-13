@@ -522,6 +522,7 @@ viewport_draw:
     call    tm_draw
     call    skm_overlay                 # sketch mode: points, labels, tools
     call    sculpt_overlay              # sculpt mode: the brush, settings
+    call    paint_overlay               # texture paint: the same
 
     # ---- orientation gizmo (bottom-left) -----------------------------------
     mov     r12d, [rip+cvs_x0]

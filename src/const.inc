@@ -181,6 +181,7 @@
 .equ DRAG_BOX,          7
 .equ DRAG_SKETCH,       10      # a sketch point follows the pointer
 .equ DRAG_SCULPT,       11      # a sculpt stroke
+.equ DRAG_PAINT,        12
 .equ COL_OK,          0x4cb86a
 .equ COL_WARN,        0xe0a030
 .equ COL_ACCENT,        0xf2b134
