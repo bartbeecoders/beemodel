@@ -6,6 +6,16 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Keyframes and the timeline:
+  - **Keys:** anything a script can set can be keyed: object transforms, material values, modifier parameters, node inputs and values.
+  - **F-curves:** Bezier with auto-clamped handles (flat at extremes, never overshooting), linear or constant interpolation.
+  - **Keys in the window:** I keys the selected objects' location, rotation and scale at the frame; Alt+I removes those keys.
+  - **Frames:** setting a frame shows the scene there. Space plays (looping over the frame range at the scene's fps), Left / Right step, Shift+Left / Right jump to the ends.
+  - **Timeline area:** shows the frame, the range, the ticks and the selected objects' keys; dragging in it scrubs.
+  - **Storage:** keys and the range are saved in `.bee` files (ANIM) and undo with the scene.
+  - **Operators:** `anim.*` (insert_key, delete_key, key, unkey, frame, play, range, interpolation). **BeeScript:** `frame`, `key`, `unkey`, `keyed`, with paths like `"Cube:x"`, `"material:Red:roughness"`, `"modifier:Cube:0:levels"` and `"node:Tree:3:5"`.
+
 ## [0.9.0] - 2026-10-13
 
 Phase 8 of the masterplan, "Nodes & procedural". BeeModel builds geometry

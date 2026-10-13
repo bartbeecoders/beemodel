@@ -54,6 +54,7 @@
 .equ TAG_MVCL,      0x4C43564D          # "MVCL"
 .equ TAG_NTRE,      0x4552544E          # "NTRE"
 .equ TAG_CURV,      0x56525543          # "CURV"
+.equ TAG_ANIM,      0x4D494E41          # "ANIM"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -98,6 +99,8 @@ mvcl_chunk:     .skip 8
 ntre_chunk:     .skip 8
 ntre_size:      .skip 4
 curv_chunk:     .skip 8
+anim_chunk:     .skip 8
+anim_size:      .skip 4
 oi_line:        .skip 4                 # OBJ import: an "l" line
 curv_size:      .skip 4
 mvcl_size:      .skip 4
@@ -344,6 +347,10 @@ bee_save:
     mov     edi, TAG_CURV               # CURV (the curves meshes come from)
     call    chunk_begin
     call    curv_write
+    call    chunk_end
+    mov     edi, TAG_ANIM               # ANIM (keyframes, the frame range)
+    call    chunk_begin
+    call    an_write
     call    chunk_end
     mov     edi, TAG_CADD
     call    chunk_begin
@@ -873,6 +880,7 @@ bee_load:
     mov     qword ptr [rip+mvcl_chunk], 0
     mov     qword ptr [rip+ntre_chunk], 0
     mov     qword ptr [rip+curv_chunk], 0
+    mov     qword ptr [rip+anim_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -931,7 +939,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_CURV
+28: cmp     eax, TAG_ANIM
+    jne     282f
+    lea     rax, [rbx+8]
+    mov     [rip+anim_chunk], rax
+    mov     [rip+anim_size], ebp
+    jmp     23f
+282:cmp     eax, TAG_CURV
     jne     281f
     lea     rax, [rbx+8]
     mov     [rip+curv_chunk], rax
@@ -1090,7 +1104,12 @@ bee_load:
     jz      7741f
     mov     esi, [rip+curv_size]
     call    curv_read
-7741:mov     rdi, [rip+ntre_chunk]       # geometry node trees
+7741:mov     rdi, [rip+anim_chunk]       # animation
+    test    rdi, rdi
+    jz      7742f
+    mov     esi, [rip+anim_size]
+    call    an_read
+7742:mov     rdi, [rip+ntre_chunk]       # geometry node trees
     test    rdi, rdi
     jz      775f
     mov     esi, [rip+ntre_size]

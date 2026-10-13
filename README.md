@@ -429,6 +429,20 @@ valley with scattered rocks and L-system plants, a second sweeps a curve into a 
 a third scatters a million blades of grass (placed in ~15 ms, orbiting at ~11 ms a frame); the
 scene is saved and rendered.
 
+**Animation.** Anything a script can set can be keyed. **I** keys the selected objects'
+location, rotation and scale at the current frame. **Space** plays the frame range at the scene's
+fps, **Left** / **Right** step through it, and the **Timeline** area shows the keys and scrubs when
+you drag in it. Keys blend with auto-clamped Bezier curves (never overshooting), linearly or in steps:
+
+```
+key("Cube:x", 1, 0)
+key("Cube:x", 25, 4)                   # Bezier by default
+key("material:Red:roughness", 1, 0.1)
+key("node:Valley:3:4", 1, 2)           # a node value: the terrain's height
+key("node:Valley:3:4", 50, 8, "linear")
+frame(13)                              # the scene at frame 13
+```
+
 **Node groups.** A Group node runs another tree as one node: inside, the Group Input gives the
 group node's geometry, value and vector (fields from outside reach in), the Group Output is what
 it returns; groups nest. In the node editor, Shift-click several nodes and **Ctrl+G** moves them
@@ -659,6 +673,7 @@ src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
 src/copilot.s   the procedural co-pilot: node catalogue, graphs as JSON, proposals
+src/anim.s      animation: keyframes, F-curves, playback, the Timeline area
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

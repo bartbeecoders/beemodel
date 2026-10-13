@@ -385,6 +385,14 @@ builtins:
     .long 3, 3
     .quad bn_lsystem, b_lsystem
     .long 5, 7
+    .quad bn_frame, b_frame
+    .long 0, 1
+    .quad bn_key, b_key
+    .long 2, 4
+    .quad bn_unkey, b_unkey
+    .long 2, 2
+    .quad bn_keyed, b_keyed
+    .long 2, 2
     .quad bn_wfc, b_wfc
     .long 6, 6
     .quad bn_everts, b_everts
@@ -628,6 +636,10 @@ bn_cpoints:     .asciz "cpoints"
 bn_clength:     .asciz "clength"
 bn_cpos:        .asciz "cpos"
 bn_lsystem:     .asciz "lsystem"
+bn_frame:       .asciz "frame"
+bn_key:         .asciz "key"
+bn_unkey:       .asciz "unkey"
+bn_keyed:       .asciz "keyed"
 bn_wfc:         .asciz "wfc"
 bn_efaces:      .asciz "efaces"
 bn_clock:       .asciz "clock"
@@ -870,6 +882,11 @@ s_bool_op:      .asciz "object.boolean"
 e_modtype:      .asciz "modifier types: mirror array solidify subsurf bevel decimate remesh; got "
 e_modidx:       .asciz "no modifier with that index / parameter"
 e_not_mesh:     .asciz "not a mesh: "
+e_key_path:     .asciz "key: no such property (paths: \"Cube:x\" .. sz, \"material:M:roughness\", \"modifier:Cube:0:levels\", \"node:Tree:3:5\"): "
+e_key_interp:   .asciz "key: interpolation is \"constant\", \"linear\" or \"bezier\""
+s_constant:     .asciz "constant"
+s_linear:       .asciz "linear"
+s_bezier:       .asciz "bezier"
 e_lsystem:      .asciz "lsystem: nothing drawn (no F in the result?)"
 e_wfc_tile:     .asciz "wfc: no tile object named "
 e_wfc_tiles:    .asciz "wfc: 1 to 16 tile objects, as one text: \"Road Grass Corner\""
@@ -4528,6 +4545,130 @@ b_cpos:
     mov     esi, r13d
     call    cv_cpos
     pop     r13
+    pop     r12
+    pop     rbx
+    test    eax, eax
+    jz      ret_nil
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# frame([n]) -> the frame the scene shows (with n: go there first)
+b_frame:
+    sub     rsp, 8
+    test    esi, esi
+    jz      1f
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    call    an_set_frame
+1:  cvtss2sd xmm0, [rip+an_frame]
+    add     rsp, 8
+    jmp     ret_num
+
+# key(path, frame [, value [, interpolation]]) -> the curve's key count
+#   (no value: the property's value now)
+b_key:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_str
+    mov     r13, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp], xmm0
+    mov     dword ptr [rsp+4], 0x7fc00000
+    mov     dword ptr [rsp+8], 2
+    cmp     r12d, 3
+    jb      1f
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+4], xmm0
+    cmp     r12d, 4
+    jb      1f
+    lea     rdi, [rbx+48]
+    call    a_str
+    mov     r12, rax
+    mov     dword ptr [rsp+8], 0
+    mov     rdi, r12
+    lea     rsi, [rip+s_constant]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     dword ptr [rsp+8], 1
+    mov     rdi, r12
+    lea     rsi, [rip+s_linear]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     dword ptr [rsp+8], 2
+    mov     rdi, r12
+    lea     rsi, [rip+s_bezier]
+    call    str_eq
+    test    eax, eax
+    jz      7f
+1:  lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rsi, r13
+    movss   xmm0, [rsp]
+    movss   xmm1, [rsp+4]
+    mov     edi, [rsp+8]
+    call    an_path_key
+    test    eax, eax
+    js      8f
+    cvtsi2sd xmm0, eax
+    add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+7:  lea     rdi, [rip+e_key_interp]
+    xor     esi, esi
+    jmp     sc_rt
+8:  lea     rdi, [rip+e_key_path]
+    mov     rsi, r13
+    jmp     sc_rt
+
+# unkey(path, frame) -> 1 when a key went
+b_unkey:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_str
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp], xmm0
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rsi, r12
+    movss   xmm0, [rsp]
+    call    an_path_unkey
+    cvtsi2sd xmm0, eax
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# keyed(path, frame) -> its curve's value at that frame (nil: no curve)
+b_keyed:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_str
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    mov     rsi, r12
+    call    an_path_eval
+    add     rsp, 8
     pop     r12
     pop     rbx
     test    eax, eax
