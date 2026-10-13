@@ -24,6 +24,8 @@
 .globl select_none
 .globl scene_clear
 .globl scene_defaults
+.globl op_delete_sel
+.globl edit_unsupported
 
 .section .bss
 .align 8

@@ -6,7 +6,8 @@
 #  obj_eval returns what is drawn and exported: the base mesh run through the
 #  enabled modifiers, cached per object until the mesh or the stack changes.
 #
-#  Modifiers: mirror, array, solidify, subdivision surface (Catmull-Clark).
+#  Modifiers: mirror, array, solidify, subdivision surface (Catmull-Clark),
+#  bevel, decimate, remesh, boolean (with another object's mesh).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -41,6 +42,8 @@
 .globl stack_index
 .globl md_x
 .globl md_y
+.globl active_mesh_obj
+.globl mod_param_set_obj
 
 .equ MB_N,      2048            # blocks in the pool
 .equ MB_REFS,   0
@@ -54,7 +57,8 @@
 .equ MD_FLAGS,  4               # bit 0: enabled
 .equ MD_P,      8
 .equ EV_N,      1024            # evaluation cache entries
-.equ EV_SZ,     48              # obj, mesh, mesh ver, mods, mods ver, result
+.equ EV_SZ,     56              # obj, mesh, mesh ver, mods, mods ver, result,
+                                #  dependencies (other objects the stack reads)
 .equ ME_VER,    108             # mesh header: bumped when edited in place
 
 .equ MT_MIRROR,   1
@@ -64,7 +68,9 @@
 .equ MT_BEVEL,    5
 .equ MT_DECIMATE, 6
 .equ MT_REMESH,   7
-.equ MT_COUNT,    8
+.equ MT_BOOLEAN,  8
+.equ MT_COUNT,    9
+.equ PF_OBJECT,   2             # parameter flag: an object handle (raw bits)
 
 .section .bss
 .align 16
@@ -105,10 +111,11 @@ mn_subsurf:     .asciz "Subsurf"
 mn_bevel:       .asciz "Bevel"
 mn_decimate:    .asciz "Decimate"
 mn_remesh:      .asciz "Remesh"
+mn_boolean:     .asciz "Boolean"
 .align 8
-mod_names:      .quad mn_none, mn_mirror, mn_array, mn_solidify, mn_subsurf, mn_bevel, mn_decimate, mn_remesh
-mod_keys:       .quad 0, mk_mirror, mk_array, mk_solidify, mk_subsurf, mk_bevel, mk_decimate, mk_remesh
-mod_params:     .quad 0, mp_mirror, mp_array, mp_solidify, mp_subsurf, mp_bevel, mp_decimate, mp_remesh
+mod_names:      .quad mn_none, mn_mirror, mn_array, mn_solidify, mn_subsurf, mn_bevel, mn_decimate, mn_remesh, mn_boolean
+mod_keys:       .quad 0, mk_mirror, mk_array, mk_solidify, mk_subsurf, mk_bevel, mk_decimate, mk_remesh, mk_boolean
+mod_params:     .quad 0, mp_mirror, mp_array, mp_solidify, mp_subsurf, mp_bevel, mp_decimate, mp_remesh, mp_boolean
 mk_mirror:      .asciz "mirror"
 mk_array:       .asciz "array"
 mk_solidify:    .asciz "solidify"
@@ -116,6 +123,9 @@ mk_subsurf:     .asciz "subsurf"
 mk_bevel:       .asciz "bevel"
 mk_decimate:    .asciz "decimate"
 mk_remesh:      .asciz "remesh"
+mk_boolean:     .asciz "boolean"
+pn_object:      .asciz "object"
+pn_operation:   .asciz "operation"
 pn_axis:        .asciz "axis"
 pn_merge:       .asciz "merge"
 pn_count:       .asciz "count"
@@ -177,6 +187,17 @@ mp_remesh:      .long 1, 0
                 .quad pn_voxel
                 .long 0
                 .float 0.01, 0.01, 100, 0.1, 0
+mp_boolean:     .long 2, 0                  # operation: 0 union, 1 difference,
+                .quad pn_object             #  2 intersect
+                .long PF_OBJECT
+                .float 1, 0, 0, 0, 0
+                .quad pn_operation
+                .long 1
+                .float 1, 0, 2, 1, 0
+s_none:         .asciz "-"
+s_op_names:     .asciz "union"
+                .asciz "difference"
+                .asciz "intersect"
 s_mods:         .asciz "Modifiers"
 s_add_mod:      .asciz "+ Add"
 s_apply:        .asciz "Apply"
@@ -186,7 +207,7 @@ s_down:         .asciz "v"
 s_on:           .asciz "on"
 s_off:          .asciz "off"
 s_no_mesh:      .asciz "  modifiers need an active mesh object"
-s_bad_type:     .asciz "  modifier types: mirror array solidify subsurf bevel decimate remesh"
+s_bad_type:     .asciz "  modifier types: mirror array solidify subsurf bevel decimate remesh boolean"
 s_bad_index:    .asciz "  no modifier with that index"
 s_full:         .asciz "  the stack holds 8 modifiers"
 s_applied:      .asciz "  modifier applied: "
@@ -194,9 +215,9 @@ s_axes:         .ascii "XYZ"
 
 .align 8
 items_modadd:   .quad op_mod_mirror, op_mod_array, op_mod_solidify, op_mod_subsurf
-                .quad op_mod_bevel, op_mod_decimate, op_mod_remesh
+                .quad op_mod_bevel, op_mod_decimate, op_mod_remesh, op_mod_boolean
 
-OPERATOR op_mod_add, "object.modifier_add", "Add Modifier", do_mod_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a modifier to the active mesh: object.modifier_add mirror|array|solidify|subsurf|bevel|decimate|remesh"
+OPERATOR op_mod_add, "object.modifier_add", "Add Modifier", do_mod_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a modifier to the active mesh: object.modifier_add mirror|array|solidify|subsurf|bevel|decimate|remesh|boolean"
 OPERATOR op_mod_mirror, "object.modifier_add_mirror", "Mirror", do_mod_add_n, arg=MT_MIRROR, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Mirror modifier"
 OPERATOR op_mod_array, "object.modifier_add_array", "Array", do_mod_add_n, arg=MT_ARRAY, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add an Array modifier"
 OPERATOR op_mod_solidify, "object.modifier_add_solidify", "Solidify", do_mod_add_n, arg=MT_SOLIDIFY, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Solidify modifier"
@@ -204,6 +225,7 @@ OPERATOR op_mod_subsurf, "object.modifier_add_subsurf", "Subdivision Surface", d
 OPERATOR op_mod_bevel, "object.modifier_add_bevel", "Bevel", do_mod_add_n, arg=MT_BEVEL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Bevel modifier"
 OPERATOR op_mod_decimate, "object.modifier_add_decimate", "Decimate", do_mod_add_n, arg=MT_DECIMATE, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Decimate modifier"
 OPERATOR op_mod_remesh, "object.modifier_add_remesh", "Remesh", do_mod_add_n, arg=MT_REMESH, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Remesh modifier"
+OPERATOR op_mod_boolean, "object.modifier_add_boolean", "Boolean", do_mod_add_n, arg=MT_BOOLEAN, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Boolean modifier (the other selected mesh is its object)"
 OPERATOR op_mod_remove, "object.modifier_remove", "Remove Modifier", do_mod_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a modifier: object.modifier_remove [index]"
 OPERATOR op_mod_apply, "object.modifier_apply", "Apply Modifier", do_mod_apply, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make a modifier (and those above it) part of the mesh: object.modifier_apply [index]"
 OPERATOR op_mod_set, "object.modifier_set", "Set Modifier Value", do_mod_set, flags=OPF_AI_SAFE|OPF_UNDO|OPF_QUIET, doc="Change a value: object.modifier_set \"index parameter value\" (e.g. 0 levels 3)"
@@ -357,7 +379,35 @@ mods_write:
     pop     rdx
     test    edx, edx
     jz      3f
+    push    rdx                         # a copy where object handles become
+    lea     rdi, [rip+mw_tmp]           #  1 + their place in the scene
     lea     rsi, [r12+MB_HDR]
+    imul    ecx, edx, MOD_SZ
+    rep     movsb
+    pop     rdx
+    xor     ecx, ecx
+4:  cmp     ecx, edx
+    jae     5f
+    imul    eax, ecx, MOD_SZ
+    lea     r8, [rip+mw_tmp]
+    add     r8, rax
+    cmp     dword ptr [r8+MD_TYPE], MT_BOOLEAN
+    jne     6f
+    mov     eax, [r8+MD_P]
+    xor     r9d, r9d
+    lea     r10, [rip+obj_list]
+7:  cmp     r9d, [rip+obj_count]
+    jae     71f
+    cmp     [r10+r9*4], eax
+    je      72f
+    inc     r9d
+    jmp     7b
+71: mov     r9d, -1                     # (gone: none)
+72: inc     r9d
+    mov     [r8+MD_P], r9d
+6:  inc     ecx
+    jmp     4b
+5:  lea     rsi, [rip+mw_tmp]
     imul    edx, edx, MOD_SZ
     call    wb_bytes
 3:  inc     ebx
@@ -416,7 +466,18 @@ mods_read:
     jb      22f
     mov     dword ptr [rax+MB_HDR+rdx+MD_TYPE], MT_MIRROR
     mov     dword ptr [rax+MB_HDR+rdx+MD_FLAGS], 0
-22: inc     ecx
+22: cmp     r8d, MT_BOOLEAN             # 1 + a place in the scene -> handle
+    jne     23f
+    mov     r9d, [rax+MB_HDR+rdx+MD_P]
+    xor     r10d, r10d
+    dec     r9d
+    js      24f
+    cmp     r9d, [rip+obj_count]
+    jae     24f
+    lea     r10, [rip+obj_list]
+    mov     r10d, [r10+r9*4]
+24: mov     [rax+MB_HDR+rdx+MD_P], r10d
+23: inc     ecx
     jmp     2b
 21: push    rax
     mov     edi, r14d
@@ -529,6 +590,11 @@ obj_eval:
     mov     eax, [r14+MB_VER]
     cmp     [r12+32], eax
     jne     1f
+    mov     rdi, rbx
+    mov     rsi, r14
+    call    mods_deps
+    cmp     [r12+48], rax
+    jne     1f
     mov     rax, [r12+40]
     test    rax, rax
     jnz     .Loe_out
@@ -543,6 +609,11 @@ obj_eval:
     mov     [r12+24], r14
     mov     eax, [r14+MB_VER]
     mov     [r12+32], eax
+    mov     rdi, rbx
+    mov     rsi, r14
+    call    mods_deps
+    mov     [r12+48], rax
+    mov     [rip+ev_owner], rbx         # (modifiers that read other objects)
     call    fa_mark                     # scratch memory of the chain
     mov     [rip+ev_mark], rax
     mov     r15, r13                    # current = base (not owned)
@@ -600,8 +671,105 @@ mod_eval:
     je      mod_decimate
     cmp     eax, MT_REMESH
     je      mod_remesh
+    cmp     eax, MT_BOOLEAN
+    je      mod_boolean
     xor     eax, eax
     ret
+
+# mod_boolean(rdi=mesh, rsi=modifier) -> rax = the mesh combined with the
+#   object's base mesh (in place), or 0 (no object, or it failed)
+mod_boolean:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     edi, [r12+MD_P]
+    test    edi, edi
+    jz      8f
+    call    obj_get
+    test    rax, rax
+    jz      8f
+    cmp     rax, [rip+ev_owner]
+    je      8f
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    jne     8f
+    mov     r13, rax
+    cvttss2si ecx, [r12+MD_P+4]
+    mov     rdi, [rip+ev_owner]
+    mov     rsi, r13
+    mov     rdx, rbx
+    call    bool_with
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# mods_deps(rdi=object, rsi=stack) -> rax = a stamp of what the stack reads
+#   from other objects (0: nothing): their transforms and meshes, and the
+#   object's own transform (a boolean works in its frame)
+mods_deps:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12, rsi
+    xor     r13d, r13d                  # stamp
+    xor     r14d, r14d
+1:  cmp     r14d, [r12+MB_COUNT]
+    jae     9f
+    imul    eax, r14d, MOD_SZ
+    lea     rsi, [r12+MB_HDR+rax]
+    cmp     dword ptr [rsi+MD_TYPE], MT_BOOLEAN
+    jne     3f
+    mov     edi, [rsi+MD_P]
+    mov     rax, 0x9E3779B97F4A7C15
+    xor     r13, rdi
+    imul    r13, rax
+    test    edi, edi
+    jz      2f
+    call    obj_get
+    test    rax, rax
+    jz      2f
+    mov     rdi, rax
+    call    dep_mix                     # the other object
+2:  mov     rdi, rbx                    # this one
+    call    dep_mix
+3:  inc     r14d
+    jmp     1b
+9:  mov     rax, r13
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# dep_mix(rdi=object) - r13 = mix(r13, its location / rotation / scale,
+#   mesh pointer and mesh version)
+dep_mix:
+    mov     r8, 0x9E3779B97F4A7C15
+    xor     ecx, ecx
+1:  mov     eax, [rdi+OB_LOC+rcx*4]
+    xor     r13, rax
+    imul    r13, r8
+    rol     r13, 17
+    inc     ecx
+    cmp     ecx, 9
+    jb      1b
+    mov     rax, [rdi+OB_MESH]
+    xor     r13, rax
+    imul    r13, r8
+    test    rax, rax
+    jz      2f
+    mov     eax, [rax+ME_VER]
+    xor     r13, rax
+    imul    r13, r8
+2:  ret
 
 
 # copy_polys(rdi=dst, rsi=src, edx=vertex offset, ecx=reverse) - all polygons
@@ -1459,7 +1627,15 @@ mod_add:
     mov     [rdi+MD_P+r9*4], r11d
     inc     r9d
     jmp     2b
-3:  mov     eax, ecx
+3:  cmp     r12d, MT_BOOLEAN            # a boolean: the other selected mesh
+    jne     4f
+    push    rcx
+    push    rdi
+    call    other_selected
+    pop     rdi
+    pop     rcx
+    mov     [rdi+MD_P], eax
+4:  mov     eax, ecx
     inc     dword ptr [r13+MB_COUNT]
     mov     dword ptr [rip+dirty], 1
     jmp     9f
@@ -1469,6 +1645,36 @@ mod_add:
 9:  pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# other_selected(rbx=object) -> eax = handle of the first other selected
+#   mesh object, or 0
+other_selected:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    xor     r12d, r12d
+1:  cmp     r12d, [rip+obj_count]
+    jae     8f
+    lea     rax, [rip+obj_list]
+    mov     r13d, [rax+r12*4]
+    mov     edi, r13d
+    call    obj_get
+    inc     r12d
+    test    rax, rax
+    jz      1b
+    cmp     rax, rbx
+    je      1b
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      1b
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    jne     1b
+    mov     eax, r13d
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r13
+    pop     r12
     ret
 
 # type_by_name(rdi=text) -> eax = type or 0
@@ -1854,6 +2060,8 @@ mod_param_set:
     imul    ecx, r13d, 32
     lea     rdx, [rdx+8+rcx]            # the parameter record
     movss   xmm0, [rsp]
+    cmp     dword ptr [rdx+8], PF_OBJECT  # an object: the bits are a handle
+    je      1f
     maxss   xmm0, [rdx+16]
     minss   xmm0, [rdx+20]
     cmp     dword ptr [rdx+8], 0        # integers round
@@ -1875,6 +2083,15 @@ mod_param_set:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# mod_param_set_obj(rdi=object, esi=modifier, edx=parameter, ecx=handle)
+#   -> eax = 1
+mod_param_set_obj:
+    sub     rsp, 8
+    movd    xmm0, ecx
+    call    mod_param_set
+    add     rsp, 8
     ret
 
 # object.modifier_set "index parameter value"
@@ -2133,7 +2350,24 @@ mods_props_draw:
     inc     dword ptr [rip+pr_rows]
 31: call    fmt_reset                   # the value
     mov     rax, [rsp+24]
-    movss   xmm0, [r14+MD_P+r15*4]
+    cmp     dword ptr [rax+8], PF_OBJECT
+    jne     34f
+    mov     edi, [r14+MD_P+r15*4]       # an object: its name
+    lea     rdx, [rip+s_none]
+    test    edi, edi
+    jz      35f
+    call    obj_get
+    lea     rdx, [rip+s_none]
+    test    rax, rax
+    jz      35f
+    lea     rdx, [rax+OB_NAME]
+35: mov     edi, [rip+ed_x]
+    add     edi, 116
+    mov     esi, r12d
+    mov     ecx, COL_TEXT
+    call    draw_text
+    jmp     36f
+34: movss   xmm0, [r14+MD_P+r15*4]
     cmp     dword ptr [rax+8], 0
     je      32f
     cvtss2si edi, xmm0
@@ -2146,7 +2380,7 @@ mods_props_draw:
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_TEXT
     call    draw_text
-    add     r12d, 20
+36: add     r12d, 20
     inc     r15d
     jmp     3b
 5:  add     r12d, 6
@@ -2362,7 +2596,41 @@ mods_drag_move:
     and     ecx, 0xff
     imul    ecx, ecx, 32
     lea     rdx, [rdx+8+rcx]
-    cvtsi2ss xmm0, ebx
+    cmp     dword ptr [rdx+8], PF_OBJECT
+    jne     2f
+    mov     eax, ebx                    # an object: one per 20 px through
+    cdq                                 #  the scene's list
+    mov     ecx, 20
+    idiv    ecx
+    mov     r8d, eax
+    xor     eax, eax                    # where the start value sits
+    mov     ecx, [rip+dr_v0]
+    lea     r9, [rip+obj_list]
+21: cmp     eax, [rip+obj_count]
+    jae     22f
+    cmp     [r9+rax*4], ecx
+    je      22f
+    inc     eax
+    jmp     21b
+22: add     eax, r8d
+    jns     23f
+    xor     eax, eax
+23: mov     ecx, [rip+obj_count]
+    dec     ecx
+    js      9f
+    cmp     eax, ecx
+    jle     24f
+    mov     eax, ecx
+24: mov     ecx, [r9+rax*4]
+    mov     rdi, r12
+    mov     esi, r13d
+    shr     esi, 8
+    and     esi, 0xff
+    mov     edx, r13d
+    and     edx, 0xff
+    call    mod_param_set_obj
+    jmp     9f
+2:  cvtsi2ss xmm0, ebx
     cmp     dword ptr [rdx+8], 0
     je      1f
     divss   xmm0, [rip+mz_ten]          # integers: one per 10 px
@@ -2395,6 +2663,8 @@ btn_ops:        .quad 0, 0, op_mod_remove, op_mod_up, op_mod_down, op_mod_apply,
 .section .bss
 arg_buf:        .skip 16
 ev_mark:        .skip 8
+ev_owner:       .skip 8
+mw_tmp:         .skip MOD_SZ*MOD_MAX
 cc_mark:        .skip 8
 md_x:           .skip 4
 md_y:           .skip 4

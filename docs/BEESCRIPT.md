@@ -101,8 +101,11 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `vsel(name, i)` / `vsel(name, i, flag)` | 1 if vertex `i` is selected / select or deselect it |
 | `volume(name)` | Signed mesh volume; it is negative when the normals point inwards |
 | `vmove(name, i, x, y, z)` | Moves a vertex (object space) |
-| `modifier(name, type)` | Adds `mirror`, `array`, `solidify`, `subsurf`, `bevel`, `decimate` or `remesh`; returns its index |
-| `modset(name, i, param, value)` | Sets a value, e.g. `modset(c, 0, "levels", 3)` |
+| `vselect(name, i...)` | Selects exactly these vertices; `vselect(name)` deselects all |
+| `boolean(a, b, kind)` | `a` becomes `a` union / difference / intersect `b` (`"union"`, `"difference"`, `"intersect"`); `b` is deleted. One undo step |
+| `manifold(name)` | 1 if the mesh is closed and consistently oriented (every edge used once in each direction) |
+| `modifier(name, type)` | Adds `mirror`, `array`, `solidify`, `subsurf`, `bevel`, `decimate`, `remesh` or `boolean`; returns its index. A boolean takes the other selected mesh as its object |
+| `modset(name, i, param, value)` | Sets a value, e.g. `modset(c, 0, "levels", 3)`; an object value is a name: `modset(c, 0, "object", "Cutter")` |
 | `modapply(name, i)` / `modremove(name, i)` | Applies a modifier to the mesh / removes it |
 | `modcount(name)` | Number of modifiers in the stack |
 | `everts(name)` / `efaces(name)` | Vertex and face counts after the modifiers |
@@ -119,7 +122,18 @@ The modifier values are:
 | bevel | `width`, `segments`, `angle` |
 | decimate | `ratio` |
 | remesh | `voxel` |
-| `vselect(name, i...)` | Selects exactly these vertices; `vselect(name)` deselects all |
+| boolean | `object` (a name), `operation` (0 union, 1 difference, 2 intersect) |
+
+```
+add("cube", "Plate", 0, 0, 0)
+scale("Plate", 2, 0.2, 2)
+for i in 0..4 {
+  add("cylinder", "Hole", i - 1.5, 0, 0)
+  scale("Hole", 0.3, 1, 0.3)
+  boolean("Plate", "Hole", "difference")
+}
+print(faces("Plate"), manifold("Plate"))
+```
 
 ### Math and text
 

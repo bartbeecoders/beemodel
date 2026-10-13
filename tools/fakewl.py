@@ -450,6 +450,7 @@ def main():
     mesh_tools()
     redo_panel()
     modifiers_ui()
+    booleans()
     scripting()
     beescript_cli()
     mcp_conformance()
@@ -1010,6 +1011,34 @@ def modifiers_ui():
     check(q('print(modcount("Cube"), efaces("Cube"))') == '1 12', 'the x button removes Subsurf (Mirror stays)')
     f.click(1214, 334); f.pump(0.2)             # Apply the Mirror
     check(q('print(modcount("Cube"), verts("Cube"), faces("Cube"))') == '0 16 12', 'Apply makes the mirror part of the mesh')
+    f.proc.kill()
+
+
+def booleans():
+    """Mesh booleans: the Edit menu operators, one undo step, the modifier."""
+    print('  -- booleans --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('add("cube", "Cutter", 1, 1.5, 1); scale("Cutter", 0.6); select("Cutter", "Cube")')
+    f.click(70, 44); f.pump(0.2)                # Edit > Boolean Difference
+    f.click(140, 258); f.pump(0.3)
+    r = q('print(exists("Cutter"), manifold("Cube"), round(volume("Cube") * 1000))').split()
+    check(r == ['0', '1', '7604'], f'Edit > Boolean Difference cuts the corner (closed, volume {r[-1] if r else "?"} / 7604)')
+    f.shot('44_boolean.png')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    check(q('print(exists("Cutter"), faces("Cube"))') == '1 6', 'one undo brings back both objects')
+    q('select("Cutter", "Cube"); modifier("Cube", "boolean")')
+    r = q('print(faces("Cube"), efaces("Cube") > 6, manifold("Cube"))')
+    check(r == '6 1 1', 'a Boolean modifier takes the other selected mesh, the base stays 6 faces')
+    q('move("Cutter", 5, 0, 0)')
+    check(q('efaces("Cube")') == '= 6', 'moving its object re-evaluates the modifier')
+    q('modset("Cube", 0, "operation", 0); move("Cutter", 1, 1.5, 1)')
+    r = q('modapply("Cube", 0); print(manifold("Cube"), round(volume("Cube") * 1000))')
+    check(r == '1 9332', f'union through the modifier, applied: closed, volume {r} / 1 9332')
     f.proc.kill()
 
 
