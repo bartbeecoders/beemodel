@@ -448,6 +448,12 @@ delete); the **Graph Editor** shows the curves with their Bezier handles (drag k
 `anim.action` keeps keys as a reusable clip and `anim.layer` plays clips on top of each other on
 any object - replace or add, with an influence and repeats.
 
+**Armatures.** *Create > Armature* makes a skeleton. In armature edit mode (**Tab**) you click
+joints, move them with G / R / S and **E**xtrude new bones; in pose mode (**Ctrl+Tab**) you turn
+bones and **I** keys them. `arm.parent <mesh> <armature>` skins a mesh with automatic weights
+(bone heat diffusion); the Armature modifier deforms it by linear blend or dual quaternion
+skinning, and **Ctrl+W** paints weights over a heat map.
+
 **Node groups.** A Group node runs another tree as one node: inside, the Group Input gives the
 group node's geometry, value and vector (fields from outside reach in), the Group Output is what
 it returns; groups nest. In the node editor, Shift-click several nodes and **Ctrl+G** moves them
@@ -680,6 +686,7 @@ src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
 src/copilot.s   the procedural co-pilot: node catalogue, graphs as JSON, proposals
 src/anim.s      animation: keyframes, F-curves, playback, actions and layers, the Timeline
 src/animed.s    the Dope Sheet and the Graph Editor
+src/arm.s       armatures: bones, poses, skinning (LBS / DQS), automatic weights, modes
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

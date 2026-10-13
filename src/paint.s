@@ -83,6 +83,7 @@ s_pt_s:         .asciz "  strength "
 s_pt_keys:      .asciz "  ([ ] radius, Shift+[ ] strength, Shift+N layer, PgUp/PgDn)"
 s_pt_layer:     .asciz "  layer "
 s_vp_hud:       .asciz "Vertex Paint"
+s_wp_hud:       .asciz "Weight Paint"
 s_pt_colhelp:   .asciz "  paint.color <r> <g> <b> (0-255)"
 s_pt_nohist:    .asciz "  texture paint: nothing to undo"
 s_pt_noredo:    .asciz "  texture paint: nothing to redo"
@@ -1693,7 +1694,10 @@ paint_overlay:
     cmp     dword ptr [rip+vp_on], 0
     je      701f
     lea     rdi, [rip+s_vp_hud]
-    call    fmt_str
+    cmp     dword ptr [rip+vp_on], 2
+    jne     7011f
+    lea     rdi, [rip+s_wp_hud]
+7011:call   fmt_str
     jmp     702f
 701:lea     rdi, [rip+s_pt_hud]
     call    fmt_str

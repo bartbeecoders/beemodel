@@ -102,6 +102,7 @@
 .equ K_MAT,     2
 .equ K_MOD,     3
 .equ K_NODE,    4
+.equ K_BONE,    5
 .equ GR_N,      128
 .equ GR_NODES,  160
 .equ NODE_SZ,   72
@@ -788,7 +789,19 @@ an_chan:
     je      .Lch_mod
     cmp     ebx, K_NODE
     je      .Lch_node
+    cmp     ebx, K_BONE
+    je      .Lch_bone
     jmp     .Lch_fail
+.Lch_bone:                              # a bone's pose (arm.s)
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, r15d
+    movss   xmm0, [rsp]
+    call    arm_chan
+    test    eax, eax
+    jz      .Lch_fail
+    jmp     .Lch_ok
 .Lch_obj:
     mov     edi, r12d
     call    obj_by_uid
@@ -1035,7 +1048,8 @@ an_apply:
     jmp     4b
 8:  inc     r13d
     jmp     3b
-9:  add     rsp, 32
+9:  call    arm_refresh                 # armatures show their new pose
+    add     rsp, 32
     pop     r15
     pop     r14
     pop     r13
@@ -1172,6 +1186,11 @@ an_path:
     call    str_eq
     test    eax, eax
     jnz     .Lap_node
+    lea     rdi, [rip+ap_word]
+    lea     rsi, [rip+k_bone]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lap_bone
     lea     rdi, [rip+ap_word]          # an object: its property
     call    obj_find
     test    eax, eax
@@ -1262,6 +1281,55 @@ an_path:
     js      .Lap_bad
     mov     [rip+ap_c], eax
     mov     dword ptr [rip+ap_kind], K_MOD
+    jmp     .Lap_ok
+.Lap_bone:                              # bone:Armature:Bone:rx
+    mov     rsi, r12
+    call    ap_field
+    mov     r12, rsi
+    lea     rdi, [rip+ap_word]
+    call    obj_find
+    test    eax, eax
+    jz      .Lap_bad
+    mov     edi, eax
+    call    obj_get
+    mov     rbx, rax
+    mov     eax, [rax+OB_UID]
+    mov     [rip+ap_a], eax
+    mov     rdi, rbx
+    call    arm_of
+    test    rax, rax
+    jz      .Lap_bad
+    mov     rbx, rax
+    mov     rsi, r12
+    call    ap_field
+    mov     r12, rsi
+    mov     rdi, rbx
+    lea     rsi, [rip+ap_word]
+    call    arm_find_bone
+    test    eax, eax
+    js      .Lap_bad
+    mov     [rip+ap_b], eax
+    mov     rsi, r12
+    call    ap_field
+    test    eax, eax
+    jle     .Lap_bad
+    xor     ecx, ecx
+5:  cmp     ecx, 9
+    jae     .Lap_bad
+    lea     rax, [rip+obj_props]
+    mov     rsi, [rax+rcx*8]
+    lea     rdi, [rip+ap_word]
+    push    rcx
+    push    rcx
+    call    str_eq
+    pop     rcx
+    pop     rcx
+    test    eax, eax
+    jnz     6f
+    inc     ecx
+    jmp     5b
+6:  mov     [rip+ap_c], ecx
+    mov     dword ptr [rip+ap_kind], K_BONE
     jmp     .Lap_ok
 .Lap_node:
     mov     rsi, r12
@@ -1395,6 +1463,7 @@ an_path_eval:
 k_material:     .asciz "material"
 k_modifier:     .asciz "modifier"
 k_node:         .asciz "node"
+k_bone:         .asciz "bone"
 .align 8
 obj_props:      .quad p_x, p_y, p_z, p_rx, p_ry, p_rz, p_sx, p_sy, p_sz
 p_x:            .asciz "x"
@@ -1482,6 +1551,24 @@ for_sel_objs:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# an_bone_key(edi=armature uid, esi=bone, edx=property) - keyed at the
+#   current frame with its value now
+.globl an_bone_key
+an_bone_key:
+    sub     rsp, 8
+    mov     dword ptr [rip+ap_kind], K_BONE
+    mov     [rip+ap_a], edi
+    mov     [rip+ap_b], esi
+    mov     [rip+ap_c], edx
+    xor     ecx, ecx
+    call    arm_chan
+    movss   xmm1, xmm0
+    movss   xmm0, [rip+an_frame]
+    mov     edi, 2
+    call    an_key
+    add     rsp, 8
     ret
 
 # key_obj(edi=uid, xmm0=frame) - its nine transform channels, as they are

@@ -524,6 +524,7 @@ viewport_draw:
     call    skm_overlay                 # sketch mode: points, labels, tools
     call    cve_overlay                 # curve edit mode: points, handles
     call    cp_draw                     # an AI proposal: Accept / Revert
+    call    arm_overlay                 # armature modes: bones, joints
     call    sculpt_overlay              # sculpt mode: the brush, settings
     call    paint_overlay               # texture paint: the same
 

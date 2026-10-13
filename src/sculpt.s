@@ -311,7 +311,14 @@ sculpt_check:
 # =============================================================================
 do_sculpt_mode:
     sub     rsp, 8
-    cmp     dword ptr [rip+sc_obj], 0
+    cmp     dword ptr [rip+sc_obj], 0   # (an armature: pose mode instead)
+    jne     100f
+    call    arm_ctrl_tab
+    test    eax, eax
+    jz      100f
+    add     rsp, 8
+    ret
+100:cmp     dword ptr [rip+sc_obj], 0
     je      1f
     call    sculpt_exit
     lea     rdi, [rip+s_left]

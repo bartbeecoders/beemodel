@@ -533,6 +533,7 @@ def main():
     copilot()
     animation()
     anim_editors()
+    armatures()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3656,6 +3657,81 @@ def anim_editors():
     d = q('print(keyed("Cube:x", 100) > 10.5)')
     f.shot('97_graph_editor.png')
     check(d == '1', f'the graph editor: a key dragged up gets a higher value ({d})')
+    f.proc.kill()
+
+
+def armatures():
+    """Armatures: bones (rest heads / tails, parents, joined chains) and
+    poses; a mesh skinned by automatic weights (bone heat), linear blend
+    and dual quaternion; bones keyed and played; weights painted; the
+    armature saved. In the window: Ctrl+Tab poses (click a bone, R Z 90,
+    I keys it), Tab edits (click a tail, E extrudes a bone)."""
+    print('  -- armatures, skinning --')
+    home = tempfile.mkdtemp(prefix='bee-ar-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('delete("Cube")\na = armature("Rig")\nop("arm.bone", "Upper Bone 0 1 0 0 2 0")\n'
+            'add("cylinder", "Arm", 0, 1, 0)\nmodifier("Arm", "subsurf")\nmodset("Arm", 0, "levels", 3)\nmodapply("Arm", 0)\n'
+            'scale("Arm", 0.3)\nprint(verts("Arm"), bones("Rig"))\nc0 = clock()\nop("arm.parent", "Arm Rig")\nprint(clock() - c0)\n'
+            'n = verts("Arm")\ntop = 0\nlow = 0\nbad = 0\nmx = -9\nmn = 9\nfor i in 0..n {\n y = vpos("Arm", i, "y")\n'
+            ' if y + vpos("Arm", i, "x") > mx {\n  mx = y + vpos("Arm", i, "x")\n  top = i\n }\n if y < mn {\n  mn = y\n  low = i\n }\n'
+            ' if abs(weight("Arm", i, 0) + weight("Arm", i, 1) - 1) > 0.001 { bad += 1 }\n}\n'
+            'print(bad, weight("Arm", top, 1) > 0.5, weight("Arm", low, 0) > 0.9)\n'
+            'x0 = evpos("Arm", top, "x")\nselect("Rig")\nop("arm.pose", "Upper rot 0 0 90")\nx1 = evpos("Arm", top, "x")\n'
+            'print(x0 > 0.5, x1 < 0, abs(evpos("Arm", low, "x") - vpos("Arm", low, "x")) < 0.05)\n'
+            'modset("Arm", 0, "mode", 1)\nx2 = evpos("Arm", top, "x")\ny2 = evpos("Arm", top, "y")\n'
+            'modset("Arm", 0, "mode", 0)\nprint(x2 != x1, y2 > evpos("Arm", top, "y"))\n'
+            'op("arm.clear_pose")\nkey("bone:Rig:Upper:rz", 1, 0)\nkey("bone:Rig:Upper:rz", 21, 1.5708)\n'
+            'frame(1)\nf1 = evpos("Arm", top, "x")\nframe(21)\nprint(abs(f1 - x0) < 0.0001, abs(evpos("Arm", top, "x") - x1) < 0.0001)\n'
+            'w0 = weight("Arm", top, 0)\nprint(wpaint("Arm", 0, 1.3, 0, 1, 0, 1), weight("Arm", top, 0) > w0)\n'
+            'op("file.save", "~/BeeModel/r.bee")\nop("file.new")\nop("file.open", "~/BeeModel/r.bee")\n'
+            'print(bones("Rig"), abs(evpos("Arm", top, "x") - x1) > 0.0001, weight("Arm", top, 0) > w0)\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+    out = [l.strip() for l in r.stdout.split('\n')]
+    try:
+        aw = float(out[1])
+    except Exception:
+        aw = 1e9
+    check(out[0] == '3074 2' and aw < 500 and out[2] == '0 1 1',
+          f'automatic weights by bone heat for 3074 vertices in {out[1:2]} ms: they sum to one, the far ends belong to their bones ({out[:3]})')
+    check(out[3] == '1 1 1' and out[4] == '1 1',
+          f'a posed bone bends the skin (the other end stays); dual quaternions keep the volume ({out[3:5]})')
+    check(out[5] == '1 1' and out[6] == '1 1' and out[7] == '2 1 1',
+          f'bones keyed and played; weights painted; the armature and weights saved ({out[5:8]})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.enter(600, 300)
+    q('delete("Cube")\na = armature("Rig")\nop("arm.bone", "Upper Bone 0 1 0 0 2 0")\nadd("cylinder", "Arm", 0, 1, 0)\n'
+      'scale("Arm", 0.3)\nop("arm.parent", "Arm Rig")\nselect("Rig")')
+    f.mods(4); f.key(15); f.mods(0)             # Ctrl+Tab: pose mode
+    f.click(*project((0, 1.5, 0)))              # the upper bone
+    f.key(19); f.key(44); f.type('90'); f.key(28)   # R Z 90 Enter
+    f.key(23)                                   # I: key it
+    a = q('print(keyed("bone:Rig:Upper:rz", 1), keyed("bone:Rig:Bone:rz", 1))')
+    f.shot('98_pose_mode.png')
+    f.mods(4); f.key(15); f.mods(0)
+    f.key(15)                                   # Tab: armature edit mode
+    tail = project((0, 2, 0))
+    f.click(*tail)
+    f.key(18)                                   # E: a new bone from the tail
+    f.move(tail[0] + 40, tail[1] - 40)
+    f.click(tail[0] + 40, tail[1] - 40)
+    b = q('print(bones("Rig"))')
+    f.key(15)
+    check(a == '1.570796 nil' and b == '3', f'pose mode: a bone clicked, turned 90 degrees and keyed; edit mode: E extrudes a bone ({a}, {b})')
+    q('select("Arm")')
+    f.mods(4); f.key(17); f.mods(0)             # Ctrl+W: weight paint
+    f.pump(0.3)
+    img = f.image()
+    heat = sum(1 for y in range(290, 340, 2) for x in range(590, 640, 2)
+               if (lambda c: max(c) - min(c) > 80)(img.getpixel((x, y))))
+    w0 = q('print(weight("Arm", 0, 0) + weight("Arm", 0, 1))')
+    f.shot('99_weight_paint.png')
+    f.mods(4); f.key(17); f.mods(0)
+    check(heat > 20 and w0 == '1', f'Ctrl+W shows the weights as heat ({heat} coloured pixels)')
     f.proc.kill()
 
 

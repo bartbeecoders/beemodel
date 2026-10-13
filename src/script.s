@@ -387,6 +387,16 @@ builtins:
     .long 5, 7
     .quad bn_frame, b_frame
     .long 0, 1
+    .quad bn_armature, b_armature
+    .long 0, 1
+    .quad bn_evpos, b_evpos
+    .long 3, 3
+    .quad bn_bones, b_bones
+    .long 1, 1
+    .quad bn_wpaint, b_wpaint
+    .long 7, 7
+    .quad bn_weight, b_weight
+    .long 3, 3
     .quad bn_key, b_key
     .long 2, 4
     .quad bn_unkey, b_unkey
@@ -637,6 +647,11 @@ bn_clength:     .asciz "clength"
 bn_cpos:        .asciz "cpos"
 bn_lsystem:     .asciz "lsystem"
 bn_frame:       .asciz "frame"
+bn_armature:    .asciz "armature"
+bn_evpos:       .asciz "evpos"
+bn_bones:       .asciz "bones"
+bn_wpaint:      .asciz "wpaint"
+bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
 bn_unkey:       .asciz "unkey"
 bn_keyed:       .asciz "keyed"
@@ -4550,6 +4565,160 @@ b_cpos:
     test    eax, eax
     jz      ret_nil
     cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# armature([name]) -> the name of a new armature (one bone, up 1, at the
+#   origin), selected and active
+b_armature:
+    push    rbx
+    xor     eax, eax
+    test    esi, esi
+    jz      1f
+    call    a_str
+1:  mov     rbx, rax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rsi, rbx
+    call    arm_create
+    test    eax, eax
+    jz      8f
+    mov     ebx, eax
+    mov     edi, eax
+    xor     esi, esi
+    call    obj_click_select
+    mov     edi, ebx
+    pop     rbx
+    jmp     ret_name
+8:  pop     rbx
+    jmp     ret_nil
+
+# wpaint(object, x, y, z, radius, bone, weight) - skin weight for a bone (by
+#   number) painted around a world point (one undo step); 0: no armature
+b_wpaint:
+    push    rbx
+    push    r12
+    sub     rsp, 40
+    mov     rbx, rdi
+    xor     ecx, ecx                    # x y z radius weight
+1:  push    rcx
+    push    rcx
+    lea     eax, [rcx+1]
+    cmp     ecx, 4
+    jb      2f
+    mov     eax, 6
+2:  shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    pop     rcx
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 5
+    jb      1b
+    lea     rdi, [rbx+80]
+    call    a_num
+    cvttsd2si r12d, xmm0
+    mov     rdi, rbx
+    call    a_obj
+    mov     edi, eax
+    lea     rsi, [rsp]
+    movss   xmm0, [rsp+12]
+    mov     edx, r12d
+    movss   xmm1, [rsp+16]
+    call    wp_dab_world
+    cvtsi2sd xmm0, eax
+    add     rsp, 40
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# bones(name) -> an armature's bone count (-1: not an armature)
+b_bones:
+    sub     rsp, 8
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     rdi, rax
+    call    arm_of
+    add     rsp, 8
+    mov     ecx, -1
+    test    rax, rax
+    jz      1f
+    mov     ecx, [rax+4]
+1:  cvtsi2sd xmm0, ecx
+    jmp     ret_num
+
+# evpos(name, i, axis) - vertex i of the mesh as shown (after modifiers)
+b_evpos:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    call    a_meshobj
+    mov     rdi, rax
+    call    obj_eval
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r13d, xmm0
+    cmp     r13d, [r12+ME_NVERTS]
+    jae     8f
+    lea     rdi, [rbx+32]
+    call    a_str
+    movzx   eax, byte ptr [rax]
+    sub     eax, 'x'
+    cmp     eax, 2
+    ja      8f
+    mov     rcx, [r12+ME_POS]
+    lea     rdx, [r13+r13*2]
+    add     rdx, rax
+    cvtss2sd xmm0, [rcx+rdx*4]
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# weight(name, i, bone) - vertex i's skin weight for a bone (by number)
+b_weight:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    call    a_mesh
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r13d, xmm0
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si ecx, xmm0
+    xorps   xmm0, xmm0
+    mov     r8, [r12+ME_WGT]
+    test    r8, r8
+    jz      2f
+    cmp     r13d, [r12+ME_NVERTS]
+    jae     2f
+    imul    rax, r13, 20
+    add     r8, rax
+    xor     edx, edx
+1:  cmp     edx, 4
+    jae     2f
+    movzx   eax, byte ptr [r8+rdx]
+    cmp     eax, ecx
+    jne     11f
+    movss   xmm0, [r8+4+rdx*4]
+    jmp     2f
+11: inc     edx
+    jmp     1b
+2:  cvtss2sd xmm0, xmm0
+    pop     r13
+    pop     r12
+    pop     rbx
     jmp     ret_num
 
 # frame([n]) -> the frame the scene shows (with n: go there first)

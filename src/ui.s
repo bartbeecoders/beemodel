@@ -1177,7 +1177,16 @@ viewport_click:
     call    reset_clip
     pop     rbx
     ret
-99: cmp     dword ptr [rip+cve_obj], 0  # curve edit mode: its points
+99: mov     edi, [rip+ptr_x]            # armature modes: joints, bones
+    mov     esi, [rip+ptr_y]
+    mov     edx, [rip+press_mods]
+    call    arm_click_at
+    test    eax, eax
+    jz      98f
+    call    reset_clip
+    pop     rbx
+    ret
+98: cmp     dword ptr [rip+cve_obj], 0  # curve edit mode: its points
     je      100f
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]

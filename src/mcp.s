@@ -216,6 +216,7 @@ j_type_names:   .asciz "mesh"
                 .asciz "light"
                 .asciz "camera"
                 .asciz "sketch"
+                .asciz "armature"
 j_selected:     .asciz ",\"selected\":"
 j_active:       .asciz ",\"active\":"
 j_verts:        .asciz ",\"vertices\":"
@@ -236,7 +237,7 @@ spn_yz:         .asciz "YZ"
 f_deg2rad:      .float 0.017453293
 f_rad2deg_:     .float 57.29578
 .align 8
-type_name_ptrs: .quad j_type_names, j_type_names+5, j_type_names+11, j_type_names+18
+type_name_ptrs: .quad j_type_names, j_type_names+5, j_type_names+11, j_type_names+18, j_type_names+25
 nanos:          .quad 0, 100000000      # 100 ms
 
 .text

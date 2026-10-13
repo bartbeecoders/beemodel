@@ -335,7 +335,10 @@
 .equ ME_INST,       152     # instances (inst.s: a reference-counted block), or 0
 .equ ME_PNRM,       160     # float[3] per vertex (own mapping): point normals, or 0
 .equ ME_CURVE,      168     # the curve it was made from (curve.s), or 0
-.equ ME_HDR,        176
+.equ ME_ARM,        176     # an armature's bones (arm.s: its display mesh), or 0
+.equ ME_WGT,        184     # skin weights: 4 bones (u8) + 4 weights (f32) a
+                            #  vertex (own mapping), or 0
+.equ ME_HDR,        192
 
 # ---- objects (scene.s) -------------------------------------------------------------
 .equ OB_NAME,       0       # 32 bytes
@@ -353,10 +356,12 @@
 .equ OB_MRES,       120     # multires displacements (multires.s), or 0
 .equ OB_SZ,         128
 .equ OBF_SELECTED,  1
+.equ OBF_ARM_DIRTY, 0x100   # an armature whose pose changed (shown anew after a frame)
 .equ OT_MESH,       0
 .equ OT_LIGHT,      1
 .equ OT_CAMERA,     2
 .equ OT_SKETCH,     3
+.equ OT_ARMATURE,   4
 .equ MAX_OBJECTS,   4096
 .equ KEY_A,             30
 .equ KEY_D,             32

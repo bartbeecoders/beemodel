@@ -175,8 +175,11 @@ do_toggle:
     sub     rsp, 8
     call    cve_tab                     # curves: curve edit mode
     test    eax, eax
+    jnz     99f
+    call    arm_tab                     # armatures: armature edit mode
+    test    eax, eax
     jz      100f
-    add     rsp, 8
+99: add     rsp, 8
     ret
 100:    cmp     dword ptr [rip+skm_obj], 0  # sketches: sketch mode
     jne     101f
@@ -1819,6 +1822,8 @@ box_finish:
 # -----------------------------------------------------------------------------
 # edit_median(rdi=out world vec3) -> eax = selected vertex count
 edit_median:
+    cmp     dword ptr [rip+arm_mode], 0 # (armature modes: joints, bones)
+    jne     arm_median
     cmp     dword ptr [rip+cve_obj], 0  # (curve edit mode: its points)
     jne     cve_median
     push    rbx
@@ -1885,6 +1890,8 @@ edit_median:
 # edit_tm_snapshot(rdi=pivot out) -> eax = count. Call after undo_push: the
 #   mesh is made unshared first, then the selected vertices are recorded.
 edit_tm_snapshot:
+    cmp     dword ptr [rip+arm_mode], 0 # (armature modes: joints, bones)
+    jne     arm_tm_snapshot
     cmp     dword ptr [rip+cve_obj], 0  # (curve edit mode: its points)
     jne     cve_tm_snapshot
     push    rbx
@@ -2192,6 +2199,8 @@ pick_common:
     ret
 
 edit_tm_restore:
+    cmp     dword ptr [rip+arm_mode], 0 # (armature modes: joints, bones)
+    jne     arm_tm_restore
     cmp     dword ptr [rip+cve_obj], 0  # (curve edit mode: its points)
     jne     cve_tm_restore
     push    rbx
@@ -2217,6 +2226,8 @@ edit_tm_restore:
 
 # edit_tm_grab(rdi=world delta)
 edit_tm_grab:
+    cmp     dword ptr [rip+arm_mode], 0 # (armature modes: joints, bones)
+    jne     arm_tm_grab
     cmp     dword ptr [rip+cve_obj], 0  # (curve edit mode: its points)
     jne     cve_tm_grab
     push    rbx
@@ -2246,6 +2257,8 @@ edit_tm_grab:
 # edit_tm_rotate(edi=axis 1..3, xmm0=sin, xmm1=cos, rsi=pivot) - the two
 #   other components rotate: (Y,Z) for X, (Z,X) for Y, (X,Y) for Z
 edit_tm_rotate:
+    cmp     dword ptr [rip+arm_mode], 0 # (armature modes: joints, bones)
+    jne     arm_tm_rotate
     cmp     dword ptr [rip+cve_obj], 0  # (curve edit mode: its points)
     jne     cve_tm_rotate
     push    rbx
@@ -2307,6 +2320,8 @@ edit_tm_rotate:
 
 # edit_tm_scale(xmm0=factor, edi=axis 0 all / 1..3, rsi=pivot)
 edit_tm_scale:
+    cmp     dword ptr [rip+arm_mode], 0 # (armature modes: joints, bones)
+    jne     arm_tm_scale
     cmp     dword ptr [rip+cve_obj], 0  # (curve edit mode: its points)
     jne     cve_tm_scale
     push    rbx
@@ -2352,6 +2367,8 @@ edit_tm_scale:
 
 # edit_tm_end - the bounding box follows the moved vertices
 edit_tm_end:
+    cmp     dword ptr [rip+arm_mode], 0
+    jne     arm_tm_end
     cmp     dword ptr [rip+cve_obj], 0  # (curve edit mode: its points)
     jne     cve_tm_end
     sub     rsp, 8

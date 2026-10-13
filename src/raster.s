@@ -607,6 +607,17 @@ job_tris:
     mov     dword ptr [rsp+16], COL_FACE_SEL
 31: cmp     dword ptr [rsp+16], COL_FACE_SEL  # vertex colours tint it
     je      311f
+    cmp     dword ptr [rip+vp_on], 2    # (weight paint: the weights' heat)
+    jne     312f
+    mov     rdi, r15
+    mov     esi, [rsp+20]
+    call    wp_tint
+    test    eax, eax
+    js      312f
+    mov     [rsp+16], eax
+    mov     eax, [rsp+20]
+    jmp     311f
+312:mov     eax, [rsp+20]
     cmp     qword ptr [r15+ME_VCOL], 0
     je      311f
     mov     rdi, r15
