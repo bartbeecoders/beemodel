@@ -139,7 +139,8 @@ The Material section of Properties shows the active mesh's material.
 - **Drag** the name to pick another material, or drag a value to change it.
 - **x** removes it.
 
-The solid viewport shows the base colour. Materials are saved in `.bee` files and exported as MTL next to an OBJ. Scripts use
+The solid viewport shows the base colour; **View › Material Preview** (Shift+Z) shades every pixel
+with the full material under a studio environment. Materials are saved in `.bee` files and exported as MTL next to an OBJ. Scripts use
 `material`, `matset`, `matget`, `assign` and `matof`; agents see them in `scene_summary` and use
 the `material.*` operators.
 

@@ -25,6 +25,18 @@ project uses [Semantic Versioning](https://semver.org/).
   - **Scripts and agents:** BeeScript `material`, `matset`, `matget`,
     `assign`, `matof`; the `material.new / assign / set / remove`
     operators; materials in `scene_summary`.
+- Material preview, a viewport mode (View › Material Preview, Shift+Z):
+  - every pixel is shaded with its object's principled material (Lambert +
+    GGX specular with Fresnel, clearcoat, approximate transmission,
+    emission);
+  - lighting is a studio environment (sky / ground, split-sum
+    approximation) plus three softbox lights, then ACES tone mapping;
+  - the rasterizer now keeps a visibility buffer (the triangle of each
+    pixel), and the shading pass works from it;
+  - per-corner normals smooth faces closer than 30°, so cubes stay sharp
+    and spheres look round;
+  - a 300k-triangle scene orbits in about 6 ms on 32 threads, with a CI
+    budget.
 
 ## [0.5.0] - 2026-10-13
 

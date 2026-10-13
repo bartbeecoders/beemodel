@@ -175,8 +175,8 @@ cursor_place:
     js      2f
     cmp     edx, [rip+rs_h]
     jge     2f
-    cmp     dword ptr [rip+vp_shading], 0
-    jne     2f
+    cmp     dword ptr [rip+vp_shading], 1
+    je      2f
     imul    edx, [rip+rs_w]
     add     edx, ecx
     mov     rax, [rip+rs_depth]

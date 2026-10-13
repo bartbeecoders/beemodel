@@ -508,8 +508,8 @@ viewport_draw:
 
 .Lvp_object:
     call    edit_prepare                # edit mode: selected faces
-    cmp     dword ptr [rip+vp_shading], 0
-    jne     1f
+    cmp     dword ptr [rip+vp_shading], 1   # (wireframe: no raster)
+    je      1f
     xor     edi, edi                    # solid: rasterize meshes (+ outline)
     call    raster_scene
 1:  call    draw_objects                # wires (all objects, or non-meshes)
@@ -612,8 +612,8 @@ draw_objects:
     jae     6f
     mov     edi, ebx
     call    obj_at
-    cmp     dword ptr [rip+vp_shading], 0   # solid mode draws meshes as shaded
-    jne     3f
+    cmp     dword ptr [rip+vp_shading], 1   # shaded modes draw meshes raster
+    je      3f
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     je      5f
 3:  mov     ecx, [rax+OB_FLAGS]
@@ -909,7 +909,25 @@ vp_zoom:
     ret
 
 # ---- viewport operators (registered into the operator spine) --------------
-OPERATOR op_view_wire,      "view.toggle_wireframe", "Wireframe", op_toggle_flag, op_check_flag, vp_shading, KEY_Z, doc="Switch the viewport between solid shading and wireframe"
+OPERATOR op_view_wire,      "view.toggle_wireframe", "Wireframe", op_shading_set, op_shading_is, 1, KEY_Z, doc="Switch the viewport between solid shading and wireframe"
+OPERATOR op_view_matprev,   "view.toggle_material_preview", "Material Preview", op_shading_set, op_shading_is, 2, KEY_Z|KM_SHIFT, doc="Shade the viewport with each object's material under a studio light (Shift+Z)"
+
+.text
+# op_shading_set(edi=mode) - that mode, or solid when it is already on;
+#   op_shading_is(edi=mode) -> eax = 1 when on
+op_shading_set:
+    xor     eax, eax
+    cmp     [rip+vp_shading], edi
+    je      1f
+    mov     eax, edi
+1:  mov     [rip+vp_shading], eax
+    mov     dword ptr [rip+dirty], 1
+    ret
+op_shading_is:
+    xor     eax, eax
+    cmp     [rip+vp_shading], edi
+    sete    al
+    ret
 OPERATOR op_view_grid,      "view.toggle_grid",  "Ground Grid",  op_toggle_flag, op_check_flag, show_grid, KEY_G|KM_SHIFT, doc="Show or hide the ground grid and axes"
 OPERATOR op_view_reset_cam, "view.reset_camera", "Reset Camera", op_reset_camera, key=KEY_F, flags=OPF_AI_SAFE|OPF_OBJECT, doc="Return the viewport camera to its default view (F in object mode, Home anywhere)"
 OPERATOR op_view_reset_home, "view.reset_camera_home", "Reset Camera", op_reset_camera, key=102, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Return the viewport camera to its default view"
