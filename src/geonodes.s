@@ -18,7 +18,11 @@
 #  math, vector math, noise texture, random value; group (another tree run
 #  as one node: its Group Input gives the group node's geometry, value and
 #  vector - fields cross the boundary - and its Group Output the result;
-#  groups nest 8 deep).
+#  groups nest 8 deep); distribute points on faces (by area and density,
+#  a seed, an optional minimum distance; the points keep their faces'
+#  normals), instance on points (another geometry placed at every point:
+#  aligned to the point's normal or up, a fixed or random turn about it, a
+#  scale field - instances stay instances, inst.s, until realized).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -42,7 +46,7 @@
 .equ ND_P,      52
 .equ ND_POS,    68
 .equ NT_MAXN,   48
-.equ GN_NTYPES, 26
+.equ GN_NTYPES, 28
 .equ GN_LEVELS, 8
 # types
 .equ T_GIN,     1
@@ -71,6 +75,8 @@
 .equ T_NOISE,   24
 .equ T_RANDOM,  25
 .equ T_GROUP,   26
+.equ T_DIST,    27
+.equ T_INST,    28
 # field VM (fieldvm.s)
 .equ OP_CONST,  1
 .equ OP_PX,     2
@@ -110,7 +116,7 @@ gn_ntypes:      .long GN_NTYPES
 .align 8
 gn_type_names:  .quad k_gin, k_gout, k_grid, k_cube, k_sphere, k_cyl, k_line, k_xform, k_join, k_setpos
                 .quad k_extrude, k_subd, k_bool, k_merge, k_realize, k_pos, k_normal, k_index, k_value
-                .quad k_combine, k_sep, k_math, k_vmath, k_noise, k_random, k_group, 0
+                .quad k_combine, k_sep, k_math, k_vmath, k_noise, k_random, k_group, k_dist, k_inst, 0
 k_gin:          .asciz "input"
 k_gout:         .asciz "output"
 k_grid:         .asciz "grid"
@@ -137,9 +143,11 @@ k_vmath:        .asciz "vector_math"
 k_noise:        .asciz "noise"
 k_random:       .asciz "random"
 k_group:        .asciz "group"
+k_dist:         .asciz "distribute"
+k_inst:         .asciz "instance"
 gn_titles:      .quad 0, n_gin, n_gout, n_grid, n_cube, n_sphere, n_cyl, n_line, n_xform, n_join, n_setpos
                 .quad n_extrude, n_subd, n_bool, n_merge, n_realize, n_pos, n_normal, n_index, n_value
-                .quad n_combine, n_sep, n_math, n_vmath, n_noise, n_random, n_group
+                .quad n_combine, n_sep, n_math, n_vmath, n_noise, n_random, n_group, n_dist, n_inst
 n_gin:          .asciz "Group Input"
 n_gout:         .asciz "Group Output"
 n_grid:         .asciz "Grid"
@@ -166,6 +174,8 @@ n_vmath:        .asciz "Vector Math"
 n_noise:        .asciz "Noise Texture"
 n_random:       .asciz "Random Value"
 n_group:        .asciz "Group"
+n_dist:         .asciz "Distribute Points on Faces"
+n_inst:         .asciz "Instance on Points"
 # per type (as the node editor reads it): input names, input kinds (0
 #   geometry, 1 value, 2 vector), value names, value kinds (0 number, 1
 #   choice, 3 whole), choices, output names, output kinds
@@ -196,6 +206,11 @@ gn_meta:        .quad 0, 0, 0, 0, 0, 0, 0
                 .quad i_vector, k222, p_noise, k0000, 0, o_noise, k120     # noise
                 .quad nil3, k000, p_random, k0000, 0, o_value, k111        # random
                 .quad i_group, k012, p_tree, k4000, 0, o_geo, k000         # group
+                .quad i_mesh, k000, p_dist3, k0300, 0, o_points, k000      # distribute
+                .quad i_inst, k001, p_inst, k1130, ch_rot, o_inst, k000    # instance
+k001:           .byte 0, 0, 1, 0
+k0300b:         .byte 0, 3, 0, 0
+k1130:          .byte 1, 1, 3, 0
 k4000:          .byte 4, 0, 0, 0
 nil3:           .quad 0, 0, 0
 nil4:           .quad 0, 0, 0, 0
@@ -226,6 +241,12 @@ i_ab:           .quad s_a, s_b, 0
 i_abf:          .quad s_a, s_b, s_factor
 i_group:        .quad s_geo, s_value, s_vector
 o_gin:          .quad s_geo, s_value, s_vector
+o_points:       .quad s_points, 0, 0
+o_inst:         .quad s_instances, 0, 0
+i_inst:         .quad s_points, s_instance, s_scale
+p_dist3:        .quad s_density, s_seed, s_mindist, 0
+p_inst:         .quad s_rotation, s_align, s_seed, 0
+ch_rot:         .quad 2, c_fixed, c_randrot
 p_tree:         .quad s_tree, 0, 0, 0
 o_geo:          .quad s_geo, 0, 0
 o_mesh:         .quad s_mesh, 0, 0
@@ -293,6 +314,15 @@ s_min:          .asciz "Min"
 s_max:          .asciz "Max"
 s_seed:         .asciz "Seed"
 s_tree:         .asciz "Tree"
+s_points:       .asciz "Points"
+s_instances:    .asciz "Instances"
+s_instance:     .asciz "Instance"
+s_density:      .asciz "Density"
+s_mindist:      .asciz "Distance Min"
+s_rotation:     .asciz "Rotation"
+s_align:        .asciz "Align"
+c_fixed:        .asciz "Fixed"
+c_randrot:      .asciz "Random"
 c_union:        .asciz "Union"
 c_diff:         .asciz "Difference"
 c_isect:        .asciz "Intersect"
@@ -346,6 +376,8 @@ gn_defaults:    .float 0, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # input
                 .float 5, 2, 0.5, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0   # noise
                 .float 0, 1, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # random
                 .float 0, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # group
+                .float 10, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0    # distribute
+                .float 1, 1, 0, 0,  0, 0, 0,  0, 0, 0,  1, 1, 1     # instance
 gz_deg:         .float 0.017453292
 gz_half:        .float 0.5
 gz_third:       .float 0.33333334
@@ -923,9 +955,13 @@ gn_geo:
     cmp     eax, T_MERGE
     je      .Lgg_merge
     cmp     eax, T_REALIZE
-    je      .Lgg_pass
+    je      .Lgg_realize
     cmp     eax, T_GROUP
     je      .Lgg_group
+    cmp     eax, T_DIST
+    je      .Lgg_dist
+    cmp     eax, T_INST
+    je      .Lgg_inst
     xor     eax, eax
     jmp     .Lgg_done
 .Lgg_input:
@@ -935,6 +971,68 @@ gn_geo:
     mov     edi, r12d
     xor     esi, esi
     call    gn_input_geo
+    jmp     .Lgg_done
+.Lgg_realize:                           # instances into plain geometry
+    mov     edi, r12d
+    xor     esi, esi
+    call    gn_input_geo
+    test    rax, rax
+    jz      .Lgg_done
+    cmp     qword ptr [rax+ME_INST], 0
+    je      .Lgg_done
+    mov     r14, rax
+    mov     rdi, rax
+    call    inst_realize
+    push    rax
+    push    rax
+    mov     rdi, r14
+    call    mesh_unref
+    pop     rax
+    pop     rax
+    jmp     .Lgg_done
+.Lgg_dist:
+    mov     edi, r12d
+    xor     esi, esi
+    call    gn_input_geo
+    test    rax, rax
+    jz      .Lgg_done
+    mov     r14, rax
+    mov     rdi, r14
+    mov     rsi, r13
+    call    gn_distribute
+    push    rax
+    push    rax
+    mov     rdi, r14
+    call    mesh_unref
+    pop     rax
+    pop     rax
+    jmp     .Lgg_done
+.Lgg_inst:
+    mov     edi, r12d                   # points, instance
+    xor     esi, esi
+    call    gn_input_geo
+    test    rax, rax
+    jz      .Lgg_done
+    mov     r14, rax
+    mov     edi, r12d
+    mov     esi, 1
+    call    gn_input_geo
+    mov     r15, rax
+    test    r15, r15
+    jz      .Lgg_keep_r14
+    mov     rdi, r14
+    mov     rsi, r15
+    mov     edx, r12d
+    mov     rcx, r13
+    call    gn_instance
+    push    rax
+    push    rax
+    mov     rdi, r14
+    call    mesh_unref
+    mov     rdi, r15
+    call    mesh_unref
+    pop     rax
+    pop     rax
     jmp     .Lgg_done
 .Lgg_grid:
     cvttss2si edi, [r13+ND_P+4]
@@ -1079,7 +1177,19 @@ gn_geo:
 6:  mov     rdi, r14
     call    mesh_bbox
     inc     dword ptr [r14+ME_VER]
-    mov     rax, r14
+    mov     rdi, [r14+ME_INST]          # instances: placed by it too
+    test    rdi, rdi
+    jz      7f
+    lea     rsi, [rsp+16]
+    call    inst_xform
+    push    rax
+    push    rax
+    mov     rdi, [r14+ME_INST]
+    call    inst_unref
+    pop     rax
+    pop     rax
+    mov     [r14+ME_INST], rax
+7:  mov     rax, r14
     jmp     .Lgg_done
 .Lgg_join:                              # the inputs appended in order
     xor     r14d, r14d                  # (the result so far)
@@ -1102,7 +1212,14 @@ gn_geo:
     call    mesh_append
     push    rax
     push    rax
-    mov     rdi, r14
+    test    rax, rax                    # (instances: both lists)
+    jz      21f
+    mov     rdi, [r14+ME_INST]
+    mov     rsi, [r15+ME_INST]
+    call    inst_merge
+    mov     rcx, [rsp]
+    mov     [rcx+ME_INST], rax
+21: mov     rdi, r14
     call    mesh_unref
     mov     rdi, r15
     call    mesh_unref
@@ -1788,6 +1905,740 @@ gn_group_eval:
     pop     rbx
     ret
 
+# =============================================================================
+#  Scattering
+# =============================================================================
+.section .bss
+.align 8
+gd_mesh:        .skip 8                 # distribute: the source, the points,
+gd_out:         .skip 8
+gd_off:         .skip 8                 #  per triangle: its first point
+gd_density:     .skip 4
+gd_seed:        .skip 4
+gi_pts:         .skip 8                 # instance on points: the points,
+gi_ib:          .skip 8                 #  the block, the scales, the node
+gi_scale:       .skip 8
+gi_rot:         .skip 4
+gi_align:       .skip 4
+gi_seed:        .skip 4
+.section .rodata
+.align 4
+gz_2pi:         .float 6.2831853
+gz_inv24:       .float 5.9604645e-8
+.text
+
+# gn_hash(edi, esi, edx) -> eax: 32 mixed bits; gn_u01 -> xmm0 in [0, 1)
+gn_hash:
+    imul    edi, edi, 0x27d4eb2d
+    imul    esi, esi, 0x165667b1
+    imul    edx, edx, 0x9e3779b1
+    xor     edi, esi
+    xor     edi, edx
+    mov     eax, edi
+    shr     eax, 15
+    xor     eax, edi
+    imul    eax, eax, 0x2c1b3c6d
+    mov     edx, eax
+    shr     edx, 12
+    xor     eax, edx
+    imul    eax, eax, 0x297a2d39
+    mov     edx, eax
+    shr     edx, 15
+    xor     eax, edx
+    ret
+gn_u01:
+    call    gn_hash
+    shr     eax, 8
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+gz_inv24]
+    ret
+
+# gd_tri(rdi=mesh, esi=triangle, rdx=out float[9] corners, r8 = out normal
+#   (unit) float[3]) -> xmm0 = its area
+gd_tri:
+    push    rbx
+    mov     rbx, rdx
+    lea     eax, [rsi+rsi*2]
+    mov     rcx, [rdi+ME_TRIS]
+    lea     rcx, [rcx+rax*4]
+    xor     eax, eax
+1:  mov     edx, [rcx+rax*4]
+    lea     rdx, [rdx+rdx*2]
+    shl     rdx, 2
+    add     rdx, [rdi+ME_POS]
+    imul    r9d, eax, 12
+    mov     r10, [rdx]
+    mov     [rbx+r9], r10
+    mov     r10d, [rdx+8]
+    mov     [rbx+r9+8], r10d
+    inc     eax
+    cmp     eax, 3
+    jb      1b
+    movss   xmm0, [rbx+12]              # e1 = v1 - v0, e2 = v2 - v0
+    subss   xmm0, [rbx]
+    movss   xmm1, [rbx+16]
+    subss   xmm1, [rbx+4]
+    movss   xmm2, [rbx+20]
+    subss   xmm2, [rbx+8]
+    movss   xmm3, [rbx+24]
+    subss   xmm3, [rbx]
+    movss   xmm4, [rbx+28]
+    subss   xmm4, [rbx+4]
+    movss   xmm5, [rbx+32]
+    subss   xmm5, [rbx+8]
+    movss   xmm6, xmm1                  # n = e1 x e2
+    mulss   xmm6, xmm5
+    movss   xmm7, xmm2
+    mulss   xmm7, xmm4
+    subss   xmm6, xmm7
+    movss   xmm7, xmm2
+    mulss   xmm7, xmm3
+    mulss   xmm5, xmm0
+    subss   xmm7, xmm5
+    mulss   xmm0, xmm4
+    mulss   xmm1, xmm3
+    subss   xmm0, xmm1
+    movss   [r8], xmm6
+    movss   [r8+4], xmm7
+    movss   [r8+8], xmm0
+    mulss   xmm6, xmm6
+    mulss   xmm7, xmm7
+    mulss   xmm0, xmm0
+    addss   xmm6, xmm7
+    addss   xmm6, xmm0
+    sqrtss  xmm6, xmm6                  # |n| = 2 area
+    maxss   xmm6, [rip+gz_tiny]
+    movss   xmm1, [rip+gz_one]
+    divss   xmm1, xmm6
+    movss   xmm0, [r8]
+    mulss   xmm0, xmm1
+    movss   [r8], xmm0
+    movss   xmm0, [r8+4]
+    mulss   xmm0, xmm1
+    movss   [r8+4], xmm0
+    movss   xmm0, [r8+8]
+    mulss   xmm0, xmm1
+    movss   [r8+8], xmm0
+    movss   xmm0, xmm6
+    mulss   xmm0, [rip+gz_half]
+    pop     rbx
+    ret
+
+# gd_count(esi=triangle) -> eax = its points: area x density, rounded by
+#   chance (the seed)
+gd_count:
+    push    rbx
+    sub     rsp, 64
+    mov     ebx, esi
+    mov     rdi, [rip+gd_mesh]
+    lea     rdx, [rsp]
+    lea     r8, [rsp+48]
+    call    gd_tri
+    mulss   xmm0, [rip+gd_density]
+    movss   [rsp+40], xmm0
+    mov     edi, ebx
+    mov     esi, [rip+gd_seed]
+    mov     edx, 0x51ed
+    call    gn_u01
+    addss   xmm0, [rsp+40]
+    cvttss2si eax, xmm0
+    test    eax, eax
+    jns     1f
+    xor     eax, eax
+1:  add     rsp, 64
+    pop     rbx
+    ret
+
+# gn_distribute(rdi=mesh, rsi=node) -> rax = the points (a new mesh: no
+#   faces, point normals), or 0
+gn_distribute:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     [rip+gd_mesh], rdi
+    movss   xmm0, [r12+ND_P]
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    movss   [rip+gd_density], xmm0
+    cvttss2si eax, [r12+ND_P+4]
+    mov     [rip+gd_seed], eax
+    mov     edi, [rbx+ME_NTRIS]         # per triangle: how many, where
+    lea     edi, [rdi*4+16]
+    call    gn_fa
+    test    rax, rax
+    jz      8f
+    mov     [rip+gd_off], rax
+    lea     rdi, [rip+gd_job_count]
+    xor     esi, esi
+    mov     edx, [rbx+ME_NTRIS]
+    mov     ecx, 256
+    call    parallel_for
+    mov     rcx, [rip+gd_off]           # offsets
+    xor     eax, eax
+    xor     edx, edx
+1:  cmp     edx, [rbx+ME_NTRIS]
+    jae     2f
+    mov     r8d, [rcx+rdx*4]
+    mov     [rcx+rdx*4], eax
+    add     eax, r8d
+    jc      8f
+    cmp     eax, 50000000               # (a bound: 50 million points)
+    ja      8f
+    inc     edx
+    jmp     1b
+2:  mov     [rcx+rdx*4], eax
+    mov     r13d, eax                   # points
+    lea     edi, [rax+1]
+    mov     esi, 4
+    mov     edx, 2
+    call    mesh_new
+    test    rax, rax
+    jz      8f
+    mov     r14, rax
+    mov     [rip+gd_out], rax
+    mov     rdi, r14
+    call    mesh_pnrm_alloc
+    test    rax, rax
+    jz      7f
+    mov     [r14+ME_NVERTS], r13d
+    lea     rdi, [rip+gd_job_place]
+    xor     esi, esi
+    mov     edx, [rbx+ME_NTRIS]
+    mov     ecx, 64
+    call    parallel_for
+    movss   xmm0, [r12+ND_P+8]          # a minimum distance: thinned
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     3f
+    mov     rdi, r14
+    call    gd_thin
+3:  mov     rdi, r14
+    call    mesh_finish
+    mov     rax, r14
+    jmp     9f
+7:  mov     rdi, r14
+    call    mesh_unref
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+gd_job_count:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, esi
+    mov     r13d, edx
+1:  cmp     r12d, r13d
+    jae     9f
+    mov     esi, r12d
+    call    gd_count
+    mov     rcx, [rip+gd_off]
+    mov     [rcx+r12*4], eax
+    inc     r12d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gd_job_place(esi, edx) - each triangle's points: uniform on it (two
+#   random numbers each), its normal
+gd_job_place:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 88
+    mov     r12d, esi
+    mov     r13d, edx
+.Lgp_tri:
+    cmp     r12d, r13d
+    jae     .Lgp_out
+    mov     rcx, [rip+gd_off]
+    mov     r14d, [rcx+r12*4]           # its first point, its count
+    mov     r15d, [rcx+r12*4+4]
+    sub     r15d, r14d
+    jz      .Lgp_next
+    mov     rdi, [rip+gd_mesh]
+    mov     esi, r12d
+    lea     rdx, [rsp]
+    lea     r8, [rsp+48]
+    call    gd_tri
+    xor     ebx, ebx
+.Lgp_pt:
+    cmp     ebx, r15d
+    jae     .Lgp_next
+    mov     edi, r12d                   # r1, r2
+    mov     esi, ebx
+    mov     edx, [rip+gd_seed]
+    call    gn_u01
+    movss   [rsp+64], xmm0
+    lea     edi, [r12+0x3779]
+    mov     esi, ebx
+    mov     edx, [rip+gd_seed]
+    call    gn_u01
+    movss   xmm1, xmm0                  # b1 = s (1 - r2), b2 = s r2,
+    sqrtss  xmm2, [rsp+64]              #  b0 = 1 - s
+    movss   xmm3, [rip+gz_one]
+    subss   xmm3, xmm1
+    mulss   xmm3, xmm2                  # b1
+    mulss   xmm1, xmm2                  # b2
+    movss   xmm0, [rip+gz_one]
+    subss   xmm0, xmm2                  # b0
+    lea     eax, [r14+rbx]
+    lea     rax, [rax+rax*2]
+    shl     rax, 2
+    mov     rdx, [rip+gd_out]
+    mov     rdi, [rdx+ME_POS]
+    add     rdi, rax
+    mov     rsi, [rdx+ME_PNRM]
+    add     rsi, rax
+    xor     ecx, ecx
+1:  movss   xmm4, [rsp+rcx*4]
+    mulss   xmm4, xmm0
+    movss   xmm5, [rsp+12+rcx*4]
+    mulss   xmm5, xmm3
+    addss   xmm4, xmm5
+    movss   xmm5, [rsp+24+rcx*4]
+    mulss   xmm5, xmm1
+    addss   xmm4, xmm5
+    movss   [rdi+rcx*4], xmm4
+    mov     eax, [rsp+48+rcx*4]
+    mov     [rsi+rcx*4], eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    inc     ebx
+    jmp     .Lgp_pt
+.Lgp_next:
+    inc     r12d
+    jmp     .Lgp_tri
+.Lgp_out:
+    add     rsp, 88
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gd_thin(rdi=points mesh; [r12+ND_P+8] = the distance) - points closer than
+#   it to one kept earlier dropped (a grid of cells that size, a hash table)
+gd_thin:
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 48
+    mov     rbx, rdi
+    movss   xmm0, [r12+ND_P+8]
+    movss   [rsp], xmm0                 # d
+    mulss   xmm0, xmm0
+    movss   [rsp+4], xmm0               # d^2
+    movss   xmm0, [rip+gz_one]
+    divss   xmm0, [rsp]
+    movss   [rsp+8], xmm0               # 1 / d
+    mov     ebp, [rbx+ME_NVERTS]
+    lea     edi, [rbp*2+16]             # table: 2n buckets (power of two)
+    mov     eax, 1
+1:  cmp     eax, edi
+    jae     2f
+    shl     eax, 1
+    jmp     1b
+2:  mov     [rsp+12], eax               # buckets
+    lea     edi, [rax*4+16]
+    call    gn_fa
+    test    rax, rax
+    jz      9f
+    mov     r13, rax                    # heads (-1)
+    mov     rdi, rax
+    mov     ecx, [rsp+12]
+    mov     eax, -1
+    rep     stosd
+    lea     edi, [rbp*4+16]
+    call    gn_fa
+    test    rax, rax
+    jz      9f
+    mov     r14, rax                    # next in bucket
+    xor     r15d, r15d                  # kept
+    xor     ecx, ecx                    # each point in order
+.Lgt_pt:
+    cmp     ecx, ebp
+    jae     .Lgt_done
+    mov     [rsp+16], ecx
+    lea     rax, [rcx+rcx*2]
+    shl     rax, 2
+    add     rax, [rbx+ME_POS]
+    mov     [rsp+40], rax
+    xor     edx, edx                    # its cell
+3:  movss   xmm0, [rax+rdx*4]
+    mulss   xmm0, [rsp+8]
+    roundss xmm0, xmm0, 1
+    cvttss2si r8d, xmm0
+    mov     [rsp+20+rdx*4], r8d
+    inc     edx
+    cmp     edx, 3
+    jb      3b
+    mov     dword ptr [rsp+32], -1      # the 27 cells around: anyone near?
+.Lgt_cell:
+    inc     dword ptr [rsp+32]
+    mov     eax, [rsp+32]
+    cmp     eax, 27
+    jae     .Lgt_keep
+    xor     edx, edx
+    mov     ecx, 3
+    div     ecx
+    lea     r8d, [rdx-1]
+    xor     edx, edx
+    div     ecx
+    lea     r9d, [rdx-1]
+    lea     r10d, [rax-1]
+    add     r8d, [rsp+20]
+    add     r9d, [rsp+24]
+    add     r10d, [rsp+28]
+    call    gt_bucket                   # eax = bucket
+    mov     eax, [r13+rax*4]
+.Lgt_walk:
+    test    eax, eax
+    js      .Lgt_cell
+    lea     rdx, [rax+rax*2]
+    shl     rdx, 2
+    add     rdx, [rbx+ME_POS]
+    mov     rcx, [rsp+40]
+    movss   xmm0, [rdx]
+    subss   xmm0, [rcx]
+    mulss   xmm0, xmm0
+    movss   xmm1, [rdx+4]
+    subss   xmm1, [rcx+4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [rdx+8]
+    subss   xmm1, [rcx+8]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    comiss  xmm0, [rsp+4]
+    jb      .Lgt_drop
+    mov     eax, [r14+rax*4]
+    jmp     .Lgt_walk
+.Lgt_keep:                              # kept: moved down to r15, in its cell
+    mov     ecx, [rsp+16]
+    lea     rsi, [rcx+rcx*2]
+    shl     rsi, 2
+    lea     rdi, [r15+r15*2]
+    shl     rdi, 2
+    mov     rax, [rbx+ME_POS]
+    mov     rdx, [rax+rsi]
+    mov     [rax+rdi], rdx
+    mov     edx, [rax+rsi+8]
+    mov     [rax+rdi+8], edx
+    mov     rax, [rbx+ME_PNRM]
+    mov     rdx, [rax+rsi]
+    mov     [rax+rdi], rdx
+    mov     edx, [rax+rsi+8]
+    mov     [rax+rdi+8], edx
+    mov     r8d, [rsp+20]
+    mov     r9d, [rsp+24]
+    mov     r10d, [rsp+28]
+    call    gt_bucket
+    mov     edx, [r13+rax*4]
+    mov     [r14+r15*4], edx
+    mov     [r13+rax*4], r15d
+    mov     rax, [rbx+ME_POS]           # (the kept copy is the one tested:
+    lea     rdi, [r15+r15*2]            #  positions at r15 now)
+    shl     rdi, 2
+    add     rdi, rax
+    inc     r15d
+.Lgt_drop:
+    mov     ecx, [rsp+16]
+    inc     ecx
+    jmp     .Lgt_pt
+.Lgt_done:
+    mov     [rbx+ME_NVERTS], r15d
+9:  add     rsp, 48
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# gt_bucket(r8d, r9d, r10d = cell; [rsp+8+12] of gd_thin = buckets) -> eax
+gt_bucket:
+    imul    eax, r8d, 0x8da6b343
+    imul    edx, r9d, 0xd8163841
+    xor     eax, edx
+    imul    edx, r10d, 0xcb1ab31f
+    xor     eax, edx
+    mov     edx, [rsp+8+12]
+    dec     edx
+    and     eax, edx
+    ret
+
+# gn_instance(rdi=points, rsi=instance mesh, edx=node, rcx=node record) ->
+#   rax = a new mesh with no geometry of its own and an instance of the
+#   mesh at every point, or 0
+gn_instance:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 32
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     r13d, edx
+    mov     r14, rcx
+    mov     [rip+gi_pts], rbx
+    cvttss2si eax, [r14+ND_P]
+    mov     [rip+gi_rot], eax
+    cvttss2si eax, [r14+ND_P+4]
+    mov     [rip+gi_align], eax
+    cvttss2si eax, [r14+ND_P+8]
+    mov     [rip+gi_seed], eax
+    mov     rdi, rbx                    # the scale field (input 3)
+    mov     esi, r13d
+    mov     edx, 2
+    mov     ecx, -1
+    lea     r8, [rsp]
+    call    gn_fields
+    test    eax, eax
+    jz      8f
+    mov     rax, [rsp]
+    mov     [rip+gi_scale], rax
+    mov     edi, [rbx+ME_NVERTS]        # the block
+    call    inst_new
+    test    rax, rax
+    jz      8f
+    mov     r15, rax
+    mov     [rip+gi_ib], rax
+    mov     ecx, [rbx+ME_NVERTS]
+    mov     [r15+4], ecx                # (its count)
+    mov     rdi, r15
+    mov     rsi, r12
+    call    inst_proto
+    lea     rdi, [rip+gi_job]
+    xor     esi, esi
+    mov     edx, [rbx+ME_NVERTS]
+    mov     ecx, 4096
+    call    parallel_for
+    mov     edi, 8                      # the mesh carrying them
+    mov     esi, 8
+    mov     edx, 2
+    call    mesh_new
+    test    rax, rax
+    jz      7f
+    mov     [rax+ME_INST], r15
+    push    rax
+    push    rax
+    mov     rdi, rax
+    call    mesh_finish
+    pop     rax
+    pop     rax
+    jmp     9f
+7:  mov     rdi, r15
+    call    inst_unref
+8:  xor     eax, eax
+9:  add     rsp, 32
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gi_job(esi, edx) - each point's matrix: an up axis (the point's normal,
+#   or Y), turned about it (random: by the seed), scaled, at the point
+gi_job:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 96
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     rdi, [rip+gi_ib]
+    call    inst_mats
+    mov     r14, rax
+    mov     rbx, [rip+gi_pts]
+.Lgj_pt:
+    cmp     r12d, r13d
+    jae     .Lgj_out
+    xorps   xmm0, xmm0                  # up: Y, or the normal
+    movss   [rsp], xmm0
+    movss   [rsp+8], xmm0
+    movss   xmm0, [rip+gz_one]
+    movss   [rsp+4], xmm0
+    cmp     dword ptr [rip+gi_align], 0
+    je      2f
+    mov     rax, [rbx+ME_PNRM]
+    test    rax, rax
+    jz      2f
+    lea     ecx, [r12+r12*2]
+    lea     rax, [rax+rcx*4]
+    movss   xmm0, [rax]                 # (a zero normal: Y)
+    mulss   xmm0, xmm0
+    movss   xmm1, [rax+4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [rax+8]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    comiss  xmm0, [rip+gz_tiny]
+    jbe     2f
+    mov     rcx, [rax]
+    mov     [rsp], rcx
+    mov     ecx, [rax+8]
+    mov     [rsp+8], ecx
+2:  # a side axis: perpendicular to up (x of a = x if up isn't near x)
+    movss   xmm0, [rsp]
+    andps   xmm0, [rip+gz_abs]
+    comiss  xmm0, [rip+gz_half]
+    jae     21f
+    xorps   xmm0, xmm0                  # s = (1 0 0) x up = (0, -uz, uy)
+    movss   [rsp+16], xmm0
+    xorps   xmm0, xmm0
+    subss   xmm0, [rsp+8]
+    movss   [rsp+20], xmm0
+    mov     eax, [rsp+4]
+    mov     [rsp+24], eax
+    jmp     22f
+21: movss   xmm0, [rsp+8]               # s = (0 0 1) x up = (-uy, ux, 0)
+    xorps   xmm0, xmm0
+    subss   xmm0, [rsp+4]
+    movss   [rsp+16], xmm0
+    mov     eax, [rsp]
+    mov     [rsp+20], eax
+    mov     dword ptr [rsp+24], 0
+22: lea     rdi, [rsp+16]
+    call    gz_unit
+    # t = up x s
+    movss   xmm0, [rsp+4]
+    mulss   xmm0, [rsp+24]
+    movss   xmm1, [rsp+8]
+    mulss   xmm1, [rsp+20]
+    subss   xmm0, xmm1
+    movss   [rsp+32], xmm0
+    movss   xmm0, [rsp+8]
+    mulss   xmm0, [rsp+16]
+    movss   xmm1, [rsp]
+    mulss   xmm1, [rsp+24]
+    subss   xmm0, xmm1
+    movss   [rsp+36], xmm0
+    movss   xmm0, [rsp]
+    mulss   xmm0, [rsp+20]
+    movss   xmm1, [rsp+4]
+    mulss   xmm1, [rsp+16]
+    subss   xmm0, xmm1
+    movss   [rsp+40], xmm0
+    lea     rdi, [rsp]
+    call    gz_unit
+    lea     rdi, [rsp+32]
+    call    gz_unit
+    # a turn about up: angle 0, or random
+    xorps   xmm0, xmm0
+    cmp     dword ptr [rip+gi_rot], 0
+    je      3f
+    mov     edi, r12d
+    mov     esi, [rip+gi_seed]
+    mov     edx, 0x7a11
+    call    gn_u01
+    mulss   xmm0, [rip+gz_2pi]
+3:  call    sincos                      # s' = s c + t s, t' = t c - s s
+    movss   [rsp+48], xmm0
+    movss   [rsp+52], xmm1
+    xor     ecx, ecx
+4:  movss   xmm2, [rsp+16+rcx*4]
+    mulss   xmm2, [rsp+52]
+    movss   xmm3, [rsp+32+rcx*4]
+    mulss   xmm3, [rsp+48]
+    addss   xmm2, xmm3
+    movss   xmm3, [rsp+32+rcx*4]
+    mulss   xmm3, [rsp+52]
+    movss   xmm4, [rsp+16+rcx*4]
+    mulss   xmm4, [rsp+48]
+    subss   xmm3, xmm4
+    movss   [rsp+64+rcx*4], xmm2        # x axis
+    movss   [rsp+80+rcx*4], xmm3        # z axis
+    inc     ecx
+    cmp     ecx, 3
+    jb      4b
+    mov     rax, [rip+gi_scale]         # scale, the point
+    movss   xmm5, [rax+r12*4]
+    imul    eax, r12d, 48
+    lea     rdi, [r14+rax]
+    lea     ecx, [r12+r12*2]
+    shl     rcx, 2
+    add     rcx, [rbx+ME_POS]
+    xor     edx, edx                    # rows: (x z? ) M[r] = (X[r] Y[r] Z[r]) s, p[r]
+5:  movss   xmm0, [rsp+64+rdx*4]
+    mulss   xmm0, xmm5
+    movss   [rdi], xmm0
+    movss   xmm0, [rsp+rdx*4]
+    mulss   xmm0, xmm5
+    movss   [rdi+4], xmm0
+    movss   xmm0, [rsp+80+rdx*4]
+    mulss   xmm0, xmm5
+    movss   [rdi+8], xmm0
+    mov     eax, [rcx+rdx*4]
+    mov     [rdi+12], eax
+    add     rdi, 16
+    inc     edx
+    cmp     edx, 3
+    jb      5b
+    inc     r12d
+    jmp     .Lgj_pt
+.Lgj_out:
+    add     rsp, 96
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gz_unit(rdi=float[3]) - normalized
+gz_unit:
+    movss   xmm0, [rdi]
+    mulss   xmm0, xmm0
+    movss   xmm1, [rdi+4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [rdi+8]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    sqrtss  xmm0, xmm0
+    maxss   xmm0, [rip+gz_tiny]
+    movss   xmm1, [rip+gz_one]
+    divss   xmm1, xmm0
+    movss   xmm0, [rdi]
+    mulss   xmm0, xmm1
+    movss   [rdi], xmm0
+    movss   xmm0, [rdi+4]
+    mulss   xmm0, xmm1
+    movss   [rdi+4], xmm0
+    movss   xmm0, [rdi+8]
+    mulss   xmm0, xmm1
+    movss   [rdi+8], xmm0
+    ret
+
+.section .rodata
+.align 16
+gz_abs:         .long 0x7fffffff, 0, 0, 0
+.text
+
 # gn_matrix(rdi=out float[12] rows (3x3 | t), rsi=transform node) - R(z)
 #   R(y) R(x) S, then T (inputs: translation 2, scale 3; values: degrees)
 gn_matrix:
@@ -2046,10 +2897,29 @@ gn_inputs:
     add     rsi, 12
     inc     ecx
     jmp     3b
-4:  test    dword ptr [rip+gc_uses], 2  # normals: when read
-    jz      7f
+4:  test    dword ptr [rip+gc_uses], 2  # normals: when read (points: their
+    jz      7f                          #  own)
+    cmp     qword ptr [rbx+ME_PNRM], 0
+    jne     5f
     mov     rdi, rbx
     call    gn_vnormals
+    jmp     7f
+5:  mov     rsi, [rbx+ME_PNRM]
+    mov     r8, [rip+fv_ctx+FC_IN+24]
+    mov     r9, [rip+fv_ctx+FC_IN+32]
+    mov     r10, [rip+fv_ctx+FC_IN+40]
+    xor     ecx, ecx
+6:  cmp     ecx, [rbx+ME_NVERTS]
+    jae     7f
+    mov     eax, [rsi]
+    mov     [r8+rcx*4], eax
+    mov     eax, [rsi+4]
+    mov     [r9+rcx*4], eax
+    mov     eax, [rsi+8]
+    mov     [r10+rcx*4], eax
+    add     rsi, 12
+    inc     ecx
+    jmp     6b
 7:  mov     eax, 1
     jmp     9f
 8:  xor     eax, eax

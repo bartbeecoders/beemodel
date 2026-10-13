@@ -21,6 +21,8 @@ FRAME_BUDGET_MS = 16.0             # average input -> committed frame while drag
 STRESS_BUDGET_MS = 33.0            # ~300k triangles on a 4-core CI runner
 PREVIEW_BUDGET_MS = 66.0           # the same in material preview (per-pixel PBR)
 WALKTHROUGH_BUDGET_S = 20.0        # the hard-surface walkthrough, end to end
+PLACE_BUDGET_MS = 200              # a million instances scattered (4-core CI)
+INSTANCE_FRAME_MS = 100            # 100k instances drawn (4-core CI)
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else 'build/shots'
 BIN = os.path.join(os.path.dirname(__file__), '..', 'build', 'beemodel')
@@ -525,6 +527,7 @@ def main():
     node_editor()
     geometry_nodes()
     node_groups()
+    instancing()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3246,6 +3249,58 @@ def node_groups():
     f.pump(0.3)
     n = q('print(matget("Gold", "metallic"))')
     check(n == '1', f'the asset browser lists the assets; a click adds one ({n})')
+    f.proc.kill()
+
+
+def instancing():
+    """Scattering and instancing: points distributed on faces by area and
+    density (thinned to a minimum distance), a geometry instanced on every
+    point (aligned to the normal, turned, scaled), kept as instances - a
+    million placed in milliseconds and drawn in the viewport without being
+    realized - or realized into plain geometry; the path tracer sees them."""
+    print('  -- scattering, instancing --')
+    home = tempfile.mkdtemp(prefix='bee-in-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    r = subprocess.run([BIN, '--eval', 't = gtree("S")\no = gnode(t, "output")\ng = gnode(t, "grid", 10, 10)\n'
+        'd = gnode(t, "distribute", 5, 1, 0)\nc = gnode(t, "cube", 0.1)\nip = gnode(t, "instance", 1, 1, 7)\n'
+        'glink(t, g, d, 1)\nglink(t, d, ip, 1)\nglink(t, c, ip, 2)\nglink(t, d, o, 1)\n'
+        'mm = modifier("Cube", "geometry")\nmodset("Cube", mm, "tree", t)\nprint(everts("Cube"))\n'
+        'glink(t, ip, o, 1)\nprint(instances("Cube"), everts("Cube"))\nr = gnode(t, "realize")\nglink(t, ip, r, 1)\n'
+        'glink(t, r, o, 1)\nprint(everts("Cube"), efaces("Cube"), instances("Cube"))\ngset(t, d, 6, 0.3)\n'
+        'glink(t, d, o, 1)\nprint(everts("Cube"))\ngset(t, d, 6, 0)\ngset(t, d, 4, 10000)\nglink(t, ip, o, 1)\n'
+        'c0 = clock()\nprint(instances("Cube"), clock() - c0)\ngset(t, d, 4, 2)\nglink(t, ip, o, 1)\n'
+        'render("~/BeeModel/inst.png", 160, 90, 4)'], env=env, capture_output=True, text=True, timeout=120)
+    out = r.stdout.split()
+    try:
+        v = [float(x) for x in out[:9]]
+    except Exception:
+        v = []
+    check(len(v) == 9 and 450 < v[0] < 550 and v[1] == v[0] and v[2] == 0 and v[3] == 8 * v[0] and v[4] == 6 * v[0]
+          and v[5] == 0 and v[6] < v[0], f'points by area and density, instanced, realized, thinned by a distance ({out[:7]})')
+    check(len(v) == 9 and v[7] == 1000000 and v[8] < PLACE_BUDGET_MS and os.path.exists(os.path.join(home, 'BeeModel', 'inst.png')),
+          f'a million instances placed in {out[8:9]} ms (budget {PLACE_BUDGET_MS} ms); the path tracer renders them')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nt = gtree("S")\no = gnode(t, "output")\ng = gnode(t, "grid", 12, 40)\n'
+      'd = gnode(t, "distribute", 100000 / 144, 1, 0)\nglink(t, g, d, 1)\nci = gnode(t, "cube", 0.12)\n'
+      'ip = gnode(t, "instance", 1, 1, 7)\nglink(t, d, ip, 1)\nglink(t, ci, ip, 2)\nj = gnode(t, "join")\n'
+      'glink(t, g, j, 1)\nglink(t, ip, j, 2)\nglink(t, j, o, 1)\nmm = modifier("Ground", "geometry")\nmodset("Ground", mm, "tree", t)')
+    f.pump(0.5)
+    n0 = int(float(q('print(frames())')))
+    for i in range(4):
+        f.drag(560, 450, 600 + i * 10, 452, steps=6)
+    f.pump(0.3)
+    ft = [float(x) for x in q(f'n = frames() - {n0}\nfor k in 1..n {{\n print(frametime(k))\n}}').split()]
+    ms = sorted(ft)[len(ft) // 2] if ft else 1e9
+    img = f.image()
+    shot = sum(1 for y in range(250, 550, 3) for x in range(300, 900, 3) if img.getpixel((x, y))[0] > 150)
+    f.shot('91_instances.png')
+    check(ms < INSTANCE_FRAME_MS and shot > 500, f'100k instances orbit at {ms:.1f} ms a frame (budget {INSTANCE_FRAME_MS} ms)')
     f.proc.kill()
 
 

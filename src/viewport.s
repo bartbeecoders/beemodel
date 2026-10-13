@@ -513,6 +513,7 @@ viewport_draw:
     xor     edi, edi                    # solid: rasterize meshes (+ outline)
     call    raster_scene
     call    sculpt_draw                 # the sculpt mesh: its own path
+    call    inst_draw                   # instances: splats and triangles
 1:  call    draw_objects                # wires (all objects, or non-meshes)
     call    edit_draw                   # edit mode: edges, vertices, faces
     call    analysis_draw               # View > Show ... overlays

@@ -33,6 +33,7 @@
 .globl hv_npoints
 .globl hv_ready
 
+.equ HV_IBUDGET, 4000000          # instance triangles the path tracer takes
 .equ MAP_ANON_PRIV, 0x22
 .equ LEAF_MAX,  15
 .equ NBINS,     16
@@ -56,6 +57,7 @@ hv_to:          .skip 8             # f32[n][9]  object-space v0, e1, e2 (shader
 hv_tuv:         .skip 8             # f32[n][6]  UVs (u0 NaN: none, box)
 hv_tvc:         .skip 8             # u32[n][3]  vertex colours (0: none)
 hv_only:        .skip 8             # set: only this object (baking)
+hv_ibud:        .skip 4             # instance triangles still allowed
 hv_mats:        .skip 8             # material snapshots (128 bytes, 0 = default)
 hv_nodes:       .skip 8             # BVH4
 hv_root:        .skip 4             # root reference
@@ -156,6 +158,7 @@ hive_build:
     sub     rsp, 56
     call    hv_free_all
     xor     r12d, r12d                  # triangles
+    mov     dword ptr [rip+hv_ibud], HV_IBUDGET
     xor     ebx, ebx
 1:  cmp     ebx, [rip+obj_count]
     jae     2f
@@ -171,6 +174,9 @@ hive_build:
 10: mov     rdi, rax
     call    obj_eval
     add     r12d, [rax+ME_NTRIS]
+    mov     rdi, rax                    # its instances: triangles (a budget)
+    call    hv_inst_count
+    add     r12d, eax
 11: inc     ebx
     jmp     1b
 2:  mov     [rip+hv_n], r12d
@@ -253,6 +259,7 @@ hive_build:
     jmp     3b
 4:  # triangles, object by object
     xor     r13d, r13d                  # global triangle
+    mov     dword ptr [rip+hv_ibud], HV_IBUDGET
     xor     ebx, ebx
 .Lhb_obj:
     cmp     ebx, [rip+obj_count]
@@ -298,6 +305,9 @@ hive_build:
     jmp     5b
 6:  mov     edi, [rsp+12]
     call    corner_normals              # (rbp, r15) -> hv_tn of the object
+    mov     rdi, r14                    # then its instances
+    mov     esi, [rsp+8]
+    call    hv_inst_emit
 .Lhb_orel:
     mov     rdi, [rsp]
     call    fa_release
@@ -351,6 +361,139 @@ hive_build:
     pop     r15
     pop     r14
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hv_inst_count(rdi=mesh) -> eax = the triangles its instances add (whole
+#   instances while the budget lasts; hv_ibud spent)
+hv_inst_count:
+    push    rbx
+    push    r12
+    push    r13
+    xor     r13d, r13d
+    mov     rbx, [rdi+ME_INST]
+    test    rbx, rbx
+    jz      9f
+    mov     rdi, rbx
+    call    inst_pids
+    mov     r12, rax
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+4]                # (IB_N)
+    jae     9f
+    movzx   eax, byte ptr [r12+rcx]
+    mov     rdx, [rbx+24+rax*8]         # (IB_PROTO)
+    mov     eax, [rdx+ME_NTRIS]
+    cmp     eax, [rip+hv_ibud]
+    ja      9f
+    sub     [rip+hv_ibud], eax
+    add     r13d, eax
+    inc     ecx
+    jmp     1b
+9:  mov     eax, r13d
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hv_inst_emit(rdi=object, esi=material + 1; hive_build's r13 = the next
+#   global triangle, advanced) - its mesh's instances as world triangles
+#   (as counted: the same budget)
+hv_inst_emit:
+    push    rbx
+    push    r12
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 128
+    mov     rbx, rdi
+    mov     [rsp+120], esi
+    mov     rdi, rbx
+    call    obj_eval
+    mov     r12, [rax+ME_INST]
+    test    r12, r12
+    jz      9f
+    mov     rdi, rbx                    # the object's matrix at +0
+    lea     rsi, [rsp]
+    call    obj_matrix
+    mov     dword ptr [rsp+112], 0      # instance
+1:  mov     ecx, [rsp+112]
+    cmp     ecx, [r12+4]
+    jae     9f
+    mov     rdi, r12
+    call    inst_pids
+    mov     ecx, [rsp+112]
+    movzx   eax, byte ptr [rax+rcx]
+    mov     r15, [r12+24+rax*8]         # the prototype
+    mov     eax, [r15+ME_NTRIS]
+    cmp     eax, [rip+hv_ibud]
+    ja      9f
+    sub     [rip+hv_ibud], eax
+    lea     rdi, [rsp+48]               # W x M at +48
+    lea     rsi, [rsp]
+    mov     rdx, r12
+    add     rdx, 128                    # (IB_DATA)
+    imul    eax, ecx, 48
+    add     rdx, rax
+    call    inst_mul
+    call    fa_mark
+    mov     [rsp+104], rax
+    lea     rdi, [rip+frame_arena]      # the prototype's points, placed
+    mov     esi, [r15+ME_NVERTS]
+    imul    esi, esi, 12
+    add     esi, 16
+    call    arena_alloc
+    test    rax, rax
+    jz      8f
+    mov     rbp, rax
+    xor     ecx, ecx
+2:  cmp     ecx, [r15+ME_NVERTS]
+    jae     3f
+    imul    eax, ecx, 12
+    mov     rdx, [r15+ME_POS]
+    add     rdx, rax
+    lea     rdi, [rbp+rax]
+    xor     r8d, r8d
+21: movss   xmm0, [rsp+48+r8]
+    mulss   xmm0, [rdx]
+    movss   xmm1, [rsp+52+r8]
+    mulss   xmm1, [rdx+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+56+r8]
+    mulss   xmm1, [rdx+8]
+    addss   xmm0, xmm1
+    addss   xmm0, [rsp+60+r8]
+    mov     eax, r8d
+    shr     eax, 2
+    movss   [rdi+rax], xmm0
+    add     r8d, 16
+    cmp     r8d, 48
+    jb      21b
+    inc     ecx
+    jmp     2b
+3:  mov     [rsp+108], r13d             # its triangles, its normals
+    xor     r14d, r14d
+4:  cmp     r14d, [r15+ME_NTRIS]
+    jae     5f
+    mov     edi, r14d
+    mov     esi, r13d
+    call    put_tri
+    mov     eax, [rsp+120]
+    mov     rdx, [rip+hv_tm]
+    mov     [rdx+r13*4], eax
+    inc     r13d
+    inc     r14d
+    jmp     4b
+5:  mov     edi, [rsp+108]
+    call    corner_normals
+8:  mov     rdi, [rsp+104]
+    call    fa_release
+    inc     dword ptr [rsp+112]
+    jmp     1b
+9:  add     rsp, 128
+    pop     rbp
+    pop     r15
+    pop     r14
     pop     r12
     pop     rbx
     ret

@@ -261,7 +261,18 @@ mesh_uv_free:
     shl     rsi, 2
     call    uv_unmap
     mov     qword ptr [rbx+ME_VCOL], 0
-3:  pop     rbx
+3:  mov     rdi, [rbx+ME_PNRM]          # point normals, instances
+    test    rdi, rdi
+    jz      4f
+    mov     esi, [rbx+ME_CAPV]
+    lea     rsi, [rsi+rsi*2]
+    shl     rsi, 2
+    call    uv_unmap
+    mov     qword ptr [rbx+ME_PNRM], 0
+4:  mov     rdi, [rbx+ME_INST]
+    mov     qword ptr [rbx+ME_INST], 0
+    call    inst_unref
+    pop     rbx
     ret
 uv_unmap:
     add     rsi, 4095
@@ -331,7 +342,54 @@ mesh_copy:
     mov     rsi, [rbx+ME_VCOL]
     mov     ecx, [rbx+ME_NVERTS]
     rep     movsd
-3:  pop     rax
+3:  cmp     qword ptr [rbx+ME_PNRM], 0  # (point normals)
+    je      4f
+    mov     rdi, [rsp]
+    call    mesh_pnrm_alloc
+    test    rax, rax
+    jz      4f
+    mov     rdi, rax
+    mov     rsi, [rbx+ME_PNRM]
+    mov     ecx, [rbx+ME_NVERTS]
+    lea     ecx, [rcx+rcx*2]
+    rep     movsd
+4:  mov     rdi, [rbx+ME_INST]          # (instances: shared)
+    test    rdi, rdi
+    jz      5f
+    mov     rax, [rsp]
+    mov     [rax+ME_INST], rdi
+    call    inst_ref
+5:  pop     rax
+9:  pop     rbx
+    ret
+
+# mesh_pnrm_alloc(rdi=mesh) -> rax = its point normals (made, zero) or 0
+.globl mesh_pnrm_alloc
+mesh_pnrm_alloc:
+    push    rbx
+    mov     rbx, rdi
+    mov     rax, [rbx+ME_PNRM]
+    test    rax, rax
+    jnz     9f
+    mov     esi, [rbx+ME_CAPV]
+    lea     rsi, [rsi+rsi*2]
+    shl     rsi, 2
+    add     rsi, 4095
+    and     rsi, -4096
+    jnz     1f
+    mov     esi, 4096
+1:  xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jb      2f
+    xor     eax, eax
+    jmp     9f
+2:  mov     [rbx+ME_PNRM], rax
 9:  pop     rbx
     ret
 

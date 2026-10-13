@@ -34,6 +34,19 @@ project uses [Semantic Versioning](https://semver.org/).
   through its Group Input; fields cross the boundary; 8 levels deep).
   Shift-click and Ctrl+G make one from the selection (`tree.group`), Tab
   goes into a group and back.
+- Scattering and instancing:
+  - **Distribute Points on Faces:** by area and density, with a seed. An
+    optional minimum distance thins the points, and the points keep their
+    faces' normals.
+  - **Instance on Points:** places a geometry at every point, aligned to
+    the normal or up, turned at random, scaled by a field. Instances stay
+    instances (a prototype and a matrix each) until *Realize Instances*.
+  - **Viewport:** draws instances without realizing them. Instances under
+    3 px become depth-tested squares, the others their front faces, binned
+    into tiles. A million are placed in ~12 ms and orbit at ~35 ms a frame
+    on 32 threads.
+  - **Path tracer:** takes instances as triangles, up to 4 million.
+  - **BeeScript:** `instances()`.
 - Assets: `tree.save_asset` (with the groups the tree runs) and
   `material.save_asset` write to `~/BeeModel/assets`; `asset.load` adds one
   to any scene, `asset.list` lists them; the Asset Browser area adds one
