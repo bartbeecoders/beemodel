@@ -49,7 +49,7 @@
 .equ ND_P,      52
 .equ ND_POS,    68
 .equ NT_MAXN,   48
-.equ GN_NTYPES, 35
+.equ GN_NTYPES, 39
 .equ GN_LEVELS, 8
 # types
 .equ T_GIN,     1
@@ -87,6 +87,10 @@
 .equ T_TRIM,    33
 .equ T_FILLET,  34
 .equ T_C2PTS,   35
+.equ T_TERRAIN, 36
+.equ T_TERRACE, 37
+.equ T_ERODE,   38
+.equ T_LSYS,    39
 # field VM (fieldvm.s)
 .equ OP_CONST,  1
 .equ OP_PX,     2
@@ -127,7 +131,8 @@ gn_ntypes:      .long GN_NTYPES
 gn_type_names:  .quad k_gin, k_gout, k_grid, k_cube, k_sphere, k_cyl, k_line, k_xform, k_join, k_setpos
                 .quad k_extrude, k_subd, k_bool, k_merge, k_realize, k_pos, k_normal, k_index, k_value
                 .quad k_combine, k_sep, k_math, k_vmath, k_noise, k_random, k_group, k_dist, k_inst
-                .quad k_cline, k_ccircle, k_c2mesh, k_resample, k_trim, k_fillet, k_c2pts, 0
+                .quad k_cline, k_ccircle, k_c2mesh, k_resample, k_trim, k_fillet, k_c2pts
+                .quad k_terrain, k_terrace, k_erode, k_lsys, 0
 k_gin:          .asciz "input"
 k_gout:         .asciz "output"
 k_grid:         .asciz "grid"
@@ -163,10 +168,15 @@ k_resample:     .asciz "resample"
 k_trim:         .asciz "trim"
 k_fillet:       .asciz "fillet"
 k_c2pts:        .asciz "curve_to_points"
+k_terrain:      .asciz "terrain"
+k_terrace:      .asciz "terrace"
+k_erode:        .asciz "erode"
+k_lsys:         .asciz "lsystem"
 gn_titles:      .quad 0, n_gin, n_gout, n_grid, n_cube, n_sphere, n_cyl, n_line, n_xform, n_join, n_setpos
                 .quad n_extrude, n_subd, n_bool, n_merge, n_realize, n_pos, n_normal, n_index, n_value
                 .quad n_combine, n_sep, n_math, n_vmath, n_noise, n_random, n_group, n_dist, n_inst
                 .quad n_cline, n_ccircle, n_c2mesh, n_resample, n_trim, n_fillet, n_c2pts
+                .quad n_terrain, n_terrace, n_erode, n_lsys
 n_gin:          .asciz "Group Input"
 n_gout:         .asciz "Group Output"
 n_grid:         .asciz "Grid"
@@ -202,6 +212,10 @@ n_resample:     .asciz "Resample Curve"
 n_trim:         .asciz "Trim Curve"
 n_fillet:       .asciz "Fillet Curve"
 n_c2pts:        .asciz "Curve to Points"
+n_terrain:      .asciz "Terrain"
+n_terrace:      .asciz "Terrace"
+n_erode:        .asciz "Erosion"
+n_lsys:         .asciz "L-System"
 # per type (as the node editor reads it): input names, input kinds (0
 #   geometry, 1 value, 2 vector), value names, value kinds (0 number, 1
 #   choice, 3 whole), choices, output names, output kinds
@@ -241,6 +255,14 @@ gn_meta:        .quad 0, 0, 0, 0, 0, 0, 0
                 .quad i_curve, k000, p_trim, k0000, 0, o_curve, k000       # trim
                 .quad i_curve, k000, p_fillet, k0300, 0, o_curve, k000     # fillet
                 .quad i_curve, k000, p_count, k3000, 0, o_points, k000     # curve to points
+                .quad i_noise, k200, p_terrain, k0303, 0, o_mesh, k000     # terrain
+                .quad i_mesh, k000, p_terrace, k3000, 0, o_mesh, k000      # terrace
+                .quad i_mesh, k000, p_erode, k3030, 0, o_mesh, k000        # erode
+                .quad nil3, k000, p_lsys, k1300, ch_lsys, o_curve, k000    # l-system
+k200:           .byte 2, 0, 0, 0
+k0303:          .byte 0, 3, 0, 3
+k3030:          .byte 3, 0, 3, 0
+k1300:          .byte 1, 3, 0, 0
 k220:           .byte 2, 2, 0, 0
 k0330:          .byte 0, 3, 3, 0
 k001:           .byte 0, 0, 1, 0
@@ -274,6 +296,12 @@ p_resample:     .quad s_count, s_length, 0, 0
 p_trim:         .quad s_start, s_end, 0, 0
 p_fillet:       .quad s_radius, s_count, 0, 0
 p_count:        .quad s_count, 0, 0, 0
+i_noise:        .quad s_noise, 0, 0
+p_terrain:      .quad s_size, s_resolution, s_height, s_seed
+p_terrace:      .quad s_steps, s_smooth, 0, 0
+p_erode:        .quad s_droplets, s_strength, s_seed, 0
+p_lsys:         .quad s_preset, s_iterations, s_radius, s_stepl
+ch_lsys:        .quad 4, c_plant, c_bush, c_tree, c_koch
 i_mesh:         .quad s_mesh, 0, 0
 i_xform:        .quad s_geo, s_transl, s_scale
 i_join:         .quad s_geo, s_geo, s_geo
@@ -348,6 +376,19 @@ s_resolution:   .asciz "Resolution"
 s_sides:        .asciz "Sides"
 s_fill:         .asciz "Fill Caps"
 s_length:       .asciz "Length"
+s_noise:        .asciz "Noise (scale, detail, ridged)"
+s_height:       .asciz "Height"
+s_steps:        .asciz "Steps"
+s_smooth:       .asciz "Smooth"
+s_droplets:     .asciz "Droplets"
+s_strength:     .asciz "Strength"
+s_preset:       .asciz "Preset"
+s_iterations:   .asciz "Iterations"
+s_stepl:        .asciz "Step"
+c_plant:        .asciz "Plant"
+c_bush:         .asciz "Bush"
+c_tree:         .asciz "Tree"
+c_koch:         .asciz "Koch Island"
 s_subdiv:       .asciz "Subdivisions"
 s_radius:       .asciz "Radius"
 s_depth:        .asciz "Depth"
@@ -438,13 +479,17 @@ gn_defaults:    .float 0, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # input
                 .float 0, 1, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0     # trim
                 .float 0.25, 4, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0  # fillet
                 .float 10, 0, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0    # curve to points
+                .float 10, 64, 2, 0,  2, 6, 0,  0, 0, 0,  0, 0, 0   # terrain
+                .float 6, 0.3, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0   # terrace
+                .float 20000, 0.3, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0   # erode
+                .float 0, 4, 0, 0.1,  0, 0, 0,  0, 0, 0,  0, 0, 0   # l-system
 gz_deg:         .float 0.017453292
 gz_half:        .float 0.5
 gz_third:       .float 0.33333334
 gz_one:         .float 1.0
 gz_tiny:        .float 1.0e-12
 gz_ident:       .float 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0
-s_tree_need:    .asciz "  tree.node <tree> <type> [values]: input output grid cube sphere cylinder line transform join set_position extrude subdivide boolean merge realize position normal index value combine_xyz separate_xyz math vector_math noise random group distribute instance curve_line curve_circle curve_to_mesh resample trim fillet curve_to_points"
+s_tree_need:    .asciz "  tree.node <tree> <type> [values]: input output grid cube sphere cylinder line transform join set_position extrude subdivide boolean merge realize position normal index value combine_xyz separate_xyz math vector_math noise random group distribute instance curve_line curve_circle curve_to_mesh resample trim fillet curve_to_points terrain terrace erode lsystem"
 s_tree_linkneed:.asciz "  tree.link <tree> <from[:output]> <to> <input 1-3> (no loops)"
 s_tree_setneed: .asciz "  tree.node_set <tree> <node> <slot> <x> [y z]"
 s_tree_delneed: .asciz "  tree.node_delete <tree> <node>"
@@ -1040,11 +1085,29 @@ gn_geo:
     lea     rcx, [rip+cn_points]
     cmp     eax, T_C2PTS
     je      .Lgg_curve
+    lea     rcx, [rip+tg_terrace]
+    cmp     eax, T_TERRACE
+    je      .Lgg_curve
+    lea     rcx, [rip+tg_erode]
+    cmp     eax, T_ERODE
+    je      .Lgg_curve
+    cmp     eax, T_TERRAIN
+    je      .Lgg_terrain
+    cmp     eax, T_LSYS
+    je      .Lgg_lsys
     xor     eax, eax
     jmp     .Lgg_done
 .Lgg_cline:                             # curves (curve.s): chains of lines
     mov     rsi, r13
     call    cn_line
+    jmp     .Lgg_done
+.Lgg_terrain:                           # generators (procgen.s)
+    mov     rsi, r13
+    call    tg_terrain
+    jmp     .Lgg_done
+.Lgg_lsys:
+    mov     rsi, r13
+    call    tg_lsystem
     jmp     .Lgg_done
 .Lgg_ccircle:
     mov     rsi, r13

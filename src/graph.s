@@ -33,6 +33,7 @@
 
 .globl graph_shade
 .globl fbm
+.globl perlin
 .globl graph_add
 .globl graph_link
 .globl graph_set

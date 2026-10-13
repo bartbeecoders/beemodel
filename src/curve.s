@@ -25,6 +25,13 @@
 .include "macros.inc"
 
 .globl cv_new
+.globl ch_sweep
+.globl ch_to_lines
+.globl prof_circle
+.globl ch_ep
+.globl ch_tab
+.globl ch_n
+.globl ch_total
 .globl op_add_bezier
 .globl op_add_ccircle
 .globl op_add_path

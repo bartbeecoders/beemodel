@@ -404,6 +404,18 @@ modset("Rail", m, "tree", t)
 print(instances("Rail"))               # 12
 ```
 
+**Procedural generators.** The *Terrain* node makes a heightfield from octaves of noise (smooth
+or ridged), *Terrace* steps it, *Erosion* runs water droplets over it that carve gullies and fill
+valleys (100k droplets in well under a second). L-systems grow plants:
+
+```
+lsystem("Fern", "X", "X=F+[[X]-X]-F[-FX]+X; F=FF", 5, 25, 0.05, 0.03)   # tapering tubes
+```
+
+and wave function collapse lays out tiles: `wfc("Town", 12, 12, 1, 7, "Road Corner Grass House")`
+fills a 12 x 12 grid with those objects in four turns each, so that what touches matches - which
+faces fit is read from the tiles' own vertices, no rules to write.
+
 **Node groups.** A Group node runs another tree as one node: inside, the Group Input gives the
 group node's geometry, value and vector (fields from outside reach in), the Group Output is what
 it returns; groups nest. In the node editor, Shift-click several nodes and **Ctrl+G** moves them
@@ -624,6 +636,7 @@ src/fieldvm.s   the field VM: per-point programs in SSE blocks
 src/asset.s     assets: trees and materials saved, loaded, the Asset Browser
 src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
+src/procgen.s   terrain, erosion, L-systems, wave function collapse
 src/paint.s     texture painting: projected dabs, UV-space dabs, stroke history
 src/layers.s    paint layers: stack, blend modes, composite, saving
 src/vcol.s      vertex colours: vertex paint, tinting, files
