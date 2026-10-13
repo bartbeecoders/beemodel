@@ -536,6 +536,7 @@ def main():
     armatures()
     rigging()
     rigid_bodies()
+    physics_panel()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3915,6 +3916,60 @@ def rigid_bodies():
           f'Space plays the pile falling; the start brings it back ({y0} -> {y1} -> {y2})')
     f.proc.kill()
 
+def physics_panel():
+    """The Physics section of the Properties area: + Rigid Body makes the
+    active object one; its type and shape buttons step through them; a
+    drag on Mass changes it (one undo step); a joint shows with x to remove
+    it; while it plays, what the simulation does; x removes the body."""
+    print('  -- physics panel --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip().split('\n')[0]
+    rb = lambda: q('print(rigid("Cube", "type"), rigid("Cube", "shape"), round(rigid("Cube", "mass") * 10))')
+    f.enter(600, 300)
+    q('select("Cube")')
+    f.pump(0.2)
+    f.click(1215, 393)                          # + Rigid Body
+    f.pump(0.2)
+    a = rb()
+    f.click(1160, 417)                          # Active -> Passive
+    f.click(1230, 417)                          # Box -> Sphere
+    f.pump(0.2)
+    b = rb()
+    f.drag(1150, 439, 1250, 439, steps=5)       # Mass: +100 px x 0.02
+    f.pump(0.2)
+    c = rb()
+    f.shot('104_physics_panel.png')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the drag back
+    f.pump(0.2)
+    c2 = rb()
+    check(a == '1 0 10' and b == '2 1 10' and c == '2 1 30' and c2 == '2 1 10',
+          f'the physics panel: + Rigid Body, Active/Passive, the shape, Mass dragged and undone ({a}, {b}, {c}, {c2})')
+    q('add("plane", "Ground", 0, 0, 0)\nscale("Ground", 6)\nselect("Ground")\nop("rigid.add", "passive box")\n'
+      'select("Cube")\nop("rigid.add", "active box")\nmove("Cube", 0, 3, 0)\nadd("cube", "Probe", 4, 2, 0)\nscale("Probe", 0.3)\nselect("Probe")\n'
+      'op("rigid.add", "active box")\nop("rigid.joint", "point Probe world pivot 4 3 0")')
+    f.pump(0.2)
+    img = f.image()
+    joint = sum(1 for x in range(1130, 1240, 2) if max(img.getpixel((x, 519))[:3]) > 150)
+    f.move(600, 300)
+    f.key(57)                                   # Space: the status line
+    f.pump(0.8)
+    f.key(57)
+    f.pump(0.2)
+    f.shot('105_physics_running.png')
+    img = f.image()
+    status = sum(1 for y in range(616, 630) for x in range(1130, 1260, 2) if max(img.getpixel((x, y))[:3]) > 90)
+    d = q('print(get("Cube", "y") < 2.5, frame() > 5)')
+    f.mods(1); f.key(105); f.mods(0)            # back to the start
+    f.pump(0.2)
+    f.click(1253, 393)                          # x: Probe no longer a body
+    f.pump(0.2)
+    e = q('print(rigid("Probe", "type"), get("Cube", "y"))')
+    check(d == '1 1' and e == 'nil 3' and joint > 5 and status > 10,
+          f'the physics panel: a joint listed, the simulation shown while playing, x removes the body ({d}, {e}, {joint}, {status})')
+    f.proc.kill()
 
 class Bridge:
     """An MCP client over `beemodel --mcp-bridge` (stdio), like Claude Code."""

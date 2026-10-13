@@ -401,6 +401,8 @@ builtins:
     .long 3, 3
     .quad bn_rbinfo, b_rbinfo
     .long 1, 1
+    .quad bn_rigid, b_rigid
+    .long 2, 2
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -662,6 +664,7 @@ bn_prop:        .asciz "prop"
 bn_shapes:      .asciz "shapes"
 bn_bonepos:     .asciz "bonepos"
 bn_rbinfo:      .asciz "rbinfo"
+bn_rigid:       .asciz "rigid"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -4729,6 +4732,31 @@ b_rbinfo:
     cvttsd2si edi, xmm0
     call    rb_info
     add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# rigid(name, prop) -> an object's rigid body setting: "type" (1 active,
+#   2 passive), "shape" (0 box, 1 sphere, 2 capsule, 3 hull, 4 compound),
+#   "mass", "friction", "bounce", "damping"; nil when it is not a body
+b_rigid:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     r12d, [rax+OB_UID]
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     edi, r12d
+    mov     rsi, rax
+    call    rb_get
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    test    eax, eax
+    jz      ret_nil
     cvtss2sd xmm0, xmm0
     jmp     ret_num
 

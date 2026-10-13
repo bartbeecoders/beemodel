@@ -589,6 +589,11 @@ area_hit:
     mov     edi, ebx
     mov     esi, r12d
     call    mods_props_hit
+    test    eax, eax
+    jns     1f
+    mov     edi, ebx
+    mov     esi, r12d
+    call    rb_props_hit
 1:
     test    eax, eax
     js      .Lah_pane
@@ -1313,6 +1318,8 @@ ed_props_draw:
 114:call    mods_props_draw
     mov     edi, eax                    # ---- the material
     call    mats_props_draw
+    mov     edi, eax                    # ---- physics (physui.s)
+    call    rb_props_draw
     mov     r12d, eax
     add     r12d, 18
 12: mov     edi, r12d                   # ---- parameters
