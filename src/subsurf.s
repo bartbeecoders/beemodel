@@ -17,6 +17,10 @@
 
 # exports
 .globl subsurf_eval
+.globl subsurf_mr
+.globl subsurf_fit
+.globl ss_off
+.globl ss_total
 .globl subsurf_flush
 .globl subsurf_forget
 
@@ -41,7 +45,8 @@
 .equ SE_AL,     32              # 48 (ptr, size) pairs
 .equ SE_LV,     32+48*16
 .equ SE_POS,    SE_LV+MAXLV*LV_SZ
-.equ SE_SZ,     SE_POS+(MAXLV+1)*8
+.equ SE_MR,     SE_POS+(MAXLV+1)*8   # 1: multires (displaced) positions
+.equ SE_SZ,     SE_MR+8
 .equ SS_N,      4
 .equ GRAIN,     4096
 .equ ME_VER,    108
@@ -58,6 +63,12 @@ jpout:          .skip 8
 jout:           .skip 8             # output mesh (last level)
 jbox:           .skip 8             # per chunk bounding boxes
 ss_entry:       .skip 8
+ss_mr:          .skip 8             # the evaluation asked for: multires,
+ss_disp:        .skip 8             #  displacements (level 1, 2, ... one
+ss_dispn:       .skip 4             #  after the other) or 0, how many,
+ss_fit:         .skip 8             #  fit targets (the finest positions)
+ss_off:         .skip 4             # after: the last level's displacements'
+ss_total:       .skip 4             #  offset, and the end of them
 ss_mark:        .skip 8
 
 .section .rodata
@@ -177,6 +188,34 @@ se_alloc:
 # subsurf_eval(rdi=mesh, esi=levels 1..6) -> rax = subdivided mesh (a new
 #   reference) or 0
 subsurf_eval:
+    mov     qword ptr [rip+ss_mr], 0
+    mov     qword ptr [rip+ss_disp], 0
+    mov     qword ptr [rip+ss_fit], 0
+    jmp     ss_eval
+
+# subsurf_mr(rdi=mesh, esi=levels, rdx=displacements (float[3] each, levels
+#   1.. in order) or 0, ecx=how many) -> rax = the displaced subdivision (a
+#   new reference; its own cache entries) or 0. Levels the displacements do
+#   not cover get none.
+subsurf_mr:
+    mov     qword ptr [rip+ss_mr], 1
+    mov     [rip+ss_disp], rdx
+    mov     [rip+ss_dispn], ecx
+    mov     qword ptr [rip+ss_fit], 0
+    jmp     ss_eval
+
+# subsurf_fit(rdi=mesh, esi=levels, rdx=displacements out (ss_total of
+#   them), rcx=targets: the finest level's positions) -> rax = as
+#   subsurf_mr: each level j becomes the targets' first vertices, D_j what
+#   it takes over S(level j-1); the finest level is the targets exactly
+subsurf_fit:
+    mov     qword ptr [rip+ss_mr], 1
+    mov     [rip+ss_disp], rdx
+    mov     dword ptr [rip+ss_dispn], 0x7fffffff
+    mov     [rip+ss_fit], rcx
+    jmp     ss_eval
+
+ss_eval:
     push    rbx
     push    r12
     push    r13
@@ -191,6 +230,9 @@ subsurf_eval:
     cmp     [rbx+SE_BASE], r12
     jne     11f
     cmp     [rbx+SE_LEVELS], r13d
+    jne     11f
+    mov     rax, [rip+ss_mr]
+    cmp     [rbx+SE_MR], rax
     jne     11f
     cmp     qword ptr [rbx+SE_OUT], 0
     jne     .Lse_hit
@@ -207,6 +249,8 @@ subsurf_eval:
     call    se_clear
     mov     [rbx+SE_BASE], r12
     mov     [rbx+SE_LEVELS], r13d
+    mov     rax, [rip+ss_mr]
+    mov     [rbx+SE_MR], rax
     call    build
     test    eax, eax
     jnz     .Lse_hit
@@ -861,6 +905,9 @@ positions:
     push    r13
     push    r14
     sub     rsp, 8
+    xor     r14d, r14d                  # displacements so far
+    mov     dword ptr [rip+ss_off], 0
+    mov     dword ptr [rip+ss_total], 0
     xor     r12d, r12d                  # k
 1:  cmp     r12d, [rbx+SE_LEVELS]
     jae     2f
@@ -886,7 +933,18 @@ positions:
     mov     edx, [r13+LV_V]
     mov     ecx, GRAIN
     call    parallel_for
-    inc     r12d
+    mov     eax, [r13+LV_V]             # level k+1's vertices: V + E + F
+    add     eax, [r13+LV_E]
+    add     eax, [r13+LV_F]
+    mov     [rip+ss_off], r14d
+    add     r14d, eax
+    mov     [rip+ss_total], r14d
+    cmp     qword ptr [rip+ss_mr], 0
+    je      11f
+    mov     edi, eax
+    mov     rsi, [rbx+SE_POS+r12*8+8]
+    call    displace
+11: inc     r12d
     jmp     1b
 2:  mov     rdi, [rbx+SE_OUT]           # bounding box, versions
     call    out_bbox
@@ -897,6 +955,41 @@ positions:
     pop     r13
     pop     r12
     ret
+
+# displace(edi=vertices, rsi=their positions; ss_off: where their
+#   displacements start) - multires: + D (when they are all there), or fit:
+#   D = target - position, position = target
+displace:
+    mov     ecx, [rip+ss_off]
+    mov     rdx, [rip+ss_disp]
+    test    rdx, rdx
+    jz      9f
+    lea     eax, [rcx+rdi]
+    cmp     eax, [rip+ss_dispn]
+    ja      9f
+    lea     rcx, [rcx+rcx*2]
+    lea     rdx, [rdx+rcx*4]            # this level's D
+    lea     ecx, [rdi+rdi*2]            # floats
+    mov     r8, [rip+ss_fit]
+    test    r8, r8
+    jnz     2f
+1:  test    ecx, ecx
+    jz      9f
+    dec     ecx
+    movss   xmm0, [rsi+rcx*4]
+    addss   xmm0, [rdx+rcx*4]
+    movss   [rsi+rcx*4], xmm0
+    jmp     1b
+2:  test    ecx, ecx
+    jz      9f
+    dec     ecx
+    movss   xmm0, [r8+rcx*4]
+    movss   xmm1, xmm0
+    subss   xmm1, [rsi+rcx*4]
+    movss   [rdx+rcx*4], xmm1
+    movss   [rsi+rcx*4], xmm0
+    jmp     2b
+9:  ret
 
 # j_fp - face points at V + E + f (average of the face's vertices)
 j_fp:

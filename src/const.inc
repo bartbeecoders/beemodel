@@ -322,6 +322,7 @@
 .equ OB_MAT,        96      # material: index + 1 in the scene's materials, 0 = none
 .equ OB_SKETCH,     104     # a sketch object's sketch block (sketch.s), or 0
 .equ OB_UID,        112     # persistent id (features refer to objects by it)
+.equ OB_MRES,       120     # multires displacements (multires.s), or 0
 .equ OB_SZ,         128
 .equ OBF_SELECTED,  1
 .equ OT_MESH,       0

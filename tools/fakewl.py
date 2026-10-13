@@ -514,6 +514,7 @@ def main():
     sculpting()
     tablet()
     dyntopo()
+    multires()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2542,6 +2543,55 @@ def dyntopo():
     out = (r.stdout + r.stderr).split()
     check(len(out) == 3 and int(out[1]) < int(out[0]) and out[2] == '1',
           f'a coarser detail collapses a dense patch, still closed ({out})')
+
+
+def multires():
+    """Multires: sculpt at a level, finer levels follow, coarser keep theirs;
+    propagate down; undo; the detail survives a save and load."""
+    print('  -- multiresolution --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube")\nadd("sphere", "Ball", 0, 1, 0)\nscale("Ball", 2)\nmodifier("Ball", "multires")\nselect("Ball")\n'
+      'fn ev(lv) {\n modset("Ball", 0, "level", lv)\n select("Ball")\n op("object.duplicate")\n'
+      ' modapply("Ball.001", 0)\n v = volume("Ball.001")\n n = verts("Ball.001")\n delete("Ball.001")\n'
+      ' modset("Ball", 0, "level", 2)\n select("Ball")\n return v\n}')
+    vol = lambda lv: float(q(f'print(ev({lv}))'))
+    p2, p1 = vol(2), vol(1)
+    stroke = lambda: (f.mods(4), f.key(15), f.mods(0), f.pump(0.3),     # Ctrl+Tab: sculpt level 2
+                      f.drag(560, 300, 680, 340, steps=24), f.pump(0.3))
+    stroke()
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the stroke
+    f.pump(0.3)
+    f.mods(4); f.key(15); f.mods(0)
+    f.pump(0.2)
+    u2 = vol(2)
+    stroke()                                    # (again)
+    f.shot('72_multires.png')
+    f.mods(4); f.key(15); f.mods(0)
+    f.pump(0.2)
+    a2, a1 = vol(2), vol(1)
+    check(a2 > p2 + 1e-4 and a1 == p1 and u2 == p2,
+          f'a stroke at level 2 adds detail there ({a2 - p2:+.5f}), level 1 keeps its shape ({a1 - p1:+.6f}); '
+          f'Ctrl+Z takes it back ({u2 - p2:+.6f})')
+    q('modset("Ball", 0, "level", 1)\nselect("Ball")\nop("object.sculpt_mode")\n'
+      'sculpt("Ball", "inflate", 0, -0.8, 0.8, 0.3, -0.6, 0.8, 0.6, 0.5)\nop("object.sculpt_mode")')
+    b1, b2 = vol(1), vol(2)
+    check(b1 > a1 + 1e-4 and abs((b2 - a2) - (b1 - a1)) < 0.3 * (b1 - a1),
+          f'a stroke at level 1 carries up to level 2 ({b1 - a1:+.5f} -> {b2 - a2:+.5f}), the level-2 detail kept')
+    q('select("Ball")\nop("multires.propagate_down")')
+    c1, c2 = vol(1), vol(2)
+    check(abs(c2 - b2) < 1e-5 and abs(c1 - b1) > 1e-4,
+          f'propagate down: level 1 takes the finest shape ({c1 - b1:+.5f}), level 2 stays ({c2 - b2:+.1e})')
+    q('op("file.save", "~/BeeModel/multires.bee")\nop("file.open", "~/BeeModel/multires.bee")\n'
+      'fn ev(lv) {\n modset("Ball", 0, "level", lv)\n select("Ball")\n op("object.duplicate")\n'
+      ' modapply("Ball.001", 0)\n v = volume("Ball.001")\n delete("Ball.001")\n return v\n}')
+    d2 = vol(2)
+    check(abs(d2 - c2) < 1e-6, f'the displacements are saved in the .bee file ({d2 - c2:+.1e})')
+    f.proc.kill()
 
 
 class Bridge:

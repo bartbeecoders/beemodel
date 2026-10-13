@@ -105,7 +105,7 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_render, s_m_ai, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_render, items_ai, items_help, items_area, items_modadd
-menu_counts:    .long 20, 20, 22, 10, 27, 8, 6, 3, 7, 8
+menu_counts:    .long 20, 20, 22, 10, 27, 8, 6, 3, 7, 9
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8

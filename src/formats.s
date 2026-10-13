@@ -45,6 +45,7 @@
 .equ TAG_CADD,      0x44444143          # "CADD"
 .equ TAG_SKCH,      0x48434b53          # "SKCH"
 .equ TAG_UIDS,      0x53444955          # "UIDS"
+.equ TAG_MRES,      0x5345524D          # "MRES"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -71,6 +72,9 @@ mgrf_chunk:     .skip 8
 cadd_chunk:     .skip 8
 skch_chunk:     .skip 8
 uids_chunk:     .skip 8
+mres_chunk:     .skip 8
+mres_size:      .skip 4
+.align 8
 uids_size:      .skip 4
 skch_size:      .skip 4
 cadd_size:      .skip 4
@@ -305,6 +309,10 @@ bee_save:
     mov     edi, TAG_UIDS
     call    chunk_begin
     call    uids_write
+    call    chunk_end
+    mov     edi, TAG_MRES               # MRES (multires displacements)
+    call    chunk_begin
+    call    mres_write
     call    chunk_end
     mov     edi, TAG_IMGS               # IMGS, WRLD
     call    chunk_begin
@@ -605,6 +613,7 @@ bee_load:
     mov     qword ptr [rip+cadd_chunk], 0
     mov     qword ptr [rip+skch_chunk], 0
     mov     qword ptr [rip+uids_chunk], 0
+    mov     qword ptr [rip+mres_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -663,7 +672,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_UIDS
+28: cmp     eax, TAG_MRES
+    jne     277f
+    lea     rax, [rbx+8]
+    mov     [rip+mres_chunk], rax
+    mov     [rip+mres_size], ebp
+    jmp     23f
+277:cmp     eax, TAG_UIDS
     jne     278f
     lea     rax, [rbx+8]
     mov     [rip+uids_chunk], rax
@@ -765,7 +780,12 @@ bee_load:
     jz      771f
     mov     esi, [rip+uids_size]
     call    uids_read
-771:mov     rdi, [rip+cadd_chunk]       # the CAD document
+771:mov     rdi, [rip+mres_chunk]       # multires displacements
+    test    rdi, rdi
+    jz      772f
+    mov     esi, [rip+mres_size]
+    call    mres_read
+772:mov     rdi, [rip+cadd_chunk]       # the CAD document
     test    rdi, rdi
     jz      77f
     mov     esi, [rip+cadd_size]

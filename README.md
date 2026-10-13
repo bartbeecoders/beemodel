@@ -112,6 +112,7 @@ object's stack.
 | Decimate | Reduces to a ratio of the vertices |
 | Remesh | Rebuilds the surface as voxel-based quads |
 | Boolean | Union, difference or intersection with another object's mesh; follows that object when it moves |
+| Multires | Subdivision levels that keep sculpted detail as displacements: sculpt at any level, finer levels follow; *Propagate Down* gives coarser levels the finest shape |
 
 **Booleans.** Edit › Boolean Union / Difference / Intersect combine the active mesh with another
 selected one: the other mesh is used up, and the operation is one undo step. They use exact
@@ -333,6 +334,13 @@ Ctrl inverts it, Shift+X mirrors strokes across X. Each stroke is one undo
 step that stores only the vertices it moved. Scripts sculpt too:
 `sculpt("Ball", "draw", 0, 1, 0.3, 0.2, 1, 0.3, 0.3, 0.5)`.
 
+**Multiresolution**: with a Multires modifier first in the stack, sculpt
+mode sculpts its `level` (0: the base cage). A stroke becomes displacements
+at that level, so finer levels keep their own detail on top and coarser
+levels keep their shape; `multires.propagate_down` refits the coarser
+levels to the finest. The displacements are saved in `.bee` files and
+undo with the stroke.
+
 **Dynamic topology** (Ctrl+D): brushes split edges longer than the detail
 size and collapse shorter ones as they go, so detail appears where you
 sculpt (Ctrl+`[` `]` set the detail, in screen pixels). The mesh becomes
@@ -448,6 +456,7 @@ src/drawing.s   PDF drawings: views, hidden lines, dimensions
 src/print.s     printability: wall thickness, print check
 src/sculpt.s    sculpt mode: leaf BVH, brushes, delta undo, splat drawing
 src/dyntopo.s   dynamic topology: edge split / collapse under the brush
+src/multires.s  multiresolution: per-level displacements, level sculpting
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
