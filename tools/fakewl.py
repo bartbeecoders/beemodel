@@ -19,6 +19,7 @@ RSS_BUDGET_KB = 16 * 1024          # private (anonymous) memory incl. glyph cach
 FIRST_FRAME_BUDGET_MS = 500        # process start -> first committed frame
 FRAME_BUDGET_MS = 16.0             # average input -> committed frame while dragging
 STRESS_BUDGET_MS = 33.0            # ~300k triangles on a 4-core CI runner
+WALKTHROUGH_BUDGET_S = 20.0        # the hard-surface walkthrough, end to end
 
 OUT = sys.argv[1] if len(sys.argv) > 1 else 'build/shots'
 BIN = os.path.join(os.path.dirname(__file__), '..', 'build', 'beemodel')
@@ -452,8 +453,10 @@ def main():
     modifiers_ui()
     booleans()
     analysis_repair()
+    hardsurface_walkthrough()
     scripting()
     beescript_cli()
+    modeling_budgets()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -1076,6 +1079,67 @@ def analysis_repair():
     f.proc.kill()
 
 
+def hardsurface_walkthrough():
+    """A small hard-surface part, start to finish, mostly from the keyboard and
+    the menus: pocket, through hole (boolean), beveled edges (modifier), a
+    closed result that survives save / open and exports."""
+    print('  -- hard-surface walkthrough --')
+    t0 = time.time()
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(*project((0, 1, 0)))
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.2); f.key(1)
+    f.key(15); f.key(4)                         # Tab, face mode
+    f.click(*project((0.2, 2, -0.3)))           # the top face
+    f.key(23); f.type('0.3'); f.key(28)         # I 0.3: inset
+    f.key(18); f.type('-0.5'); f.key(28)        # E -0.5: a pocket
+    f.key(15)                                   # object mode
+    check(q('print(faces("Cube"), round(volume("Cube") * 100))') == '14 702',
+          'inset + extrude down: a 1.4 x 1.4 x 0.5 pocket in the top')
+    f.click(181, 44); f.pump(0.2)              # Create > Cylinder (at the 3D cursor)
+    f.click(200, 120); f.pump(0.3)
+    f.key(31); f.type('0.3'); f.key(28)         # S 0.3
+    f.key(31); f.key(21); f.type('4'); f.key(28)  # S Y 4: 2.4 tall
+    f.key(34); f.key(21); f.type('1'); f.key(28)  # G Y 1: through the part
+    f.mods(1); f.click(*project((0.9, 0.5, 1))); f.mods(0)   # Shift+click the cube
+    check(q('print(active())') == 'Cube', 'Shift+click makes the cube active, the cylinder stays selected')
+    f.click(70, 44); f.pump(0.2)               # Edit > Boolean Difference
+    f.click(140, 258); f.pump(0.3)
+    r = q('print(exists("Cylinder"), manifold("Cube"), round(volume("Cube") * 1000))').split()
+    check(r[:2] == ['0', '1'] and r[2] == '6599', f'Edit > Boolean Difference drills the hole: closed, volume {r[2] if len(r) > 2 else "?"} / 6599')
+    f.click(1238, 311); f.pump(0.2)            # Properties: + Add > Bevel
+    f.click(1095, 435); f.pump(0.3)
+    r = q('print(modcount("Cube"), efaces("Cube") > faces("Cube"))')
+    check(r == '1 1', 'the Bevel modifier rounds the edges (more faces after it)')
+    f.move(*project((0, 1, 0)))
+    for _ in range(6):
+        f.wheel(-1)                             # zoom in on the part
+    f.pump(0.2)
+    f.shot('46_walkthrough.png')
+    f.click(1214, 334); f.pump(0.3)            # Apply
+    r = q('print(modcount("Cube"), manifold("Cube"), analyze("Cube", "nonmanifold"), analyze("Cube", "degenerate"))')
+    check(r == '0 1 0 0', f'applied: closed, no non-manifold edges, no degenerate faces ({r})')
+    path = os.path.join(f.home, 'part.bee')
+    stl = os.path.join(f.home, 'part.stl')
+    v = q('print(faces("Cube"), round(volume("Cube") * 1000))')
+    cmd(f'file.save {path}')
+    cmd('file.new')
+    cmd(f'file.open {path}')
+    check(q('print(faces("Cube"), round(volume("Cube") * 1000))') == v, f'saved and opened again: the same part ({v})')
+    q('select("Cube")')
+    cmd(f'file.export_stl {stl}')
+    tris = int(q('print(faces("Cube"))') or 0)
+    size = os.path.getsize(stl) if os.path.exists(stl) else 0
+    check(size > 84 and (size - 84) % 50 == 0, f'exported as STL ({(size - 84) // 50 if size else 0} triangles)')
+    dt = time.time() - t0
+    check(dt < WALKTHROUGH_BUDGET_S, f'the whole walkthrough in {dt:.1f} s (budget {WALKTHROUGH_BUDGET_S} s)')
+    f.proc.kill()
+
+
 def scripting():
     """BeeScript: console REPL, one undo step per run, macros, script_eval."""
     print('  -- BeeScript --')
@@ -1173,6 +1237,32 @@ def beescript_cli():
                        capture_output=True, text=True, timeout=20)
     ms = (time.time() - t0) * 1000
     check(r.stdout.strip() == '499999500000' and ms < 1000, f'1M loop iterations in {ms:.0f} ms')
+
+
+MODELING_BUDGETS_MS = {           # tests/perf_modeling.bees, on a 4-core CI runner
+    'subsurf_build': 150.0,         # level 2 over a 127k-face sphere (508k faces)
+    'subsurf_update': 30.0,         # the same after a vertex moved (cached topology)
+    'analyze': 60.0,                # boundary / non-manifold / ... of 127k faces
+    'repair': 400.0,                # mesh.repair on 127k faces
+    'boolean': 1000.0,              # 254k triangles minus a slab, closed result
+}
+
+
+def modeling_budgets():
+    """Performance budgets of the modeling core (headless, BeeScript timings)."""
+    print('  -- modeling performance budgets --')
+    env = dict(os.environ, HOME=tempfile.mkdtemp(prefix='bee-perf-'), XDG_CACHE_HOME='')
+    path = os.path.join(os.path.dirname(__file__), '..', 'tests', 'perf_modeling.bees')
+    r = subprocess.run([BIN, '--run', path], env=env, capture_output=True, text=True, timeout=120)
+    got = {}
+    for line in r.stdout.splitlines():
+        p = line.split()
+        if len(p) >= 2 and p[0] in MODELING_BUDGETS_MS:
+            got[p[0]] = (float(p[1]), p[2:])
+    for name, budget in MODELING_BUDGETS_MS.items():
+        ms, extra = got.get(name, (None, []))
+        ok = ms is not None and ms < budget and (name != 'boolean' or extra == ['1'])
+        check(ok, f'{name}: {ms if ms is None else round(ms, 1)} ms (budget {budget:.0f} ms)')
 
 
 class Bridge:

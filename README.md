@@ -9,7 +9,7 @@ the Linux kernel through raw syscalls and to the compositor through the Wayland
 wire protocol on a UNIX socket.
 
 ```
-./build.sh          # assemble + link  -> build/beemodel  (~25 KB static ELF)
+./build.sh          # assemble + link  -> build/beemodel  (~210 KB static ELF)
 ./build.sh debug    # same, with symbols (for gdb)
 ./run.sh            # rebuilds if sources changed, then starts the app
 ```
@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.3.0/beemodel-0.3.0-linux-x86_64.bin
-chmod +x beemodel-0.3.0-linux-x86_64.bin && ./beemodel-0.3.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.5.0/beemodel-0.5.0-linux-x86_64.bin
+chmod +x beemodel-0.5.0-linux-x86_64.bin && ./beemodel-0.5.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -30,9 +30,9 @@ chmod +x beemodel-0.3.0-linux-x86_64.bin && ./beemodel-0.3.0-linux-x86_64.bin
 | Area | Details |
 |------|---------|
 | Title bar | Client-side decoration: logo, title, minimize / maximize-restore / close. Drag to move; double-click to maximize. Edges resize floating windows. |
-| Menu bar | File, Edit, View, Create, Help dropdowns. Hover switches between open menus, check marks show toggles, shortcuts are listed, Esc closes. |
+| Menu bar | File, Edit, View, Create, Mesh, AI, Help dropdowns. Hover switches between open menus, check marks show toggles, shortcuts are listed, Esc closes. |
 | Panes | Tools (left), Outliner + Properties (right), Console (bottom). Drag the splitters to resize; View menu shows/hides each pane. |
-| Canvas | Software 3D viewport: perspective orbit camera, ground grid, XYZ axes, demo wireframe cube, orientation gizmo. LMB orbit, MMB or Shift+LMB pan, wheel zoom, F reset, G grid. |
+| Canvas | Software 3D viewport (solid shading or wireframe): perspective orbit camera, ground grid, XYZ axes, orientation gizmo. LMB orbit, MMB or Shift+LMB pan, wheel zoom, F reset, G grid. |
 | Status bar | Last command, framebuffer size, window size. |
 
 Keys: Q/W/E/R tools, T tools pane, N outliner pane, G grid, F reset camera,

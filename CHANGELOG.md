@@ -6,6 +6,21 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-13
+
+Phase 4 of the masterplan, "Polygon modeling". BeeModel becomes a modeler: edit
+mode with the usual tools, adjustable last operations, a modifier stack,
+robust booleans, and mesh analysis and repair.
+
+A hard-surface walkthrough runs in CI on every change. It builds a part from
+the keyboard and the menus:
+
+1. a pocket (inset, extrude);
+2. a through hole (boolean);
+3. rounded edges (Bevel modifier).
+
+It checks that the part is closed, then saves, reopens and exports it.
+
 ### Added
 - Edit mode (Tab) for mesh objects:
   - vertex, edge and face select modes (1 / 2 / 3);
@@ -71,7 +86,17 @@ project uses [Semantic Versioning](https://semver.org/).
   - A stress corpus runs in CI. It checks the volume identities and closed
     results on 300 cases (general position, coincident and identical
     operands). A sphere with 63k triangles minus one with 16k takes about
-    90 ms.
+    40 ms.
+- Performance budgets for the modeling core run in CI
+  (`tests/perf_modeling.bees`). The local times are:
+
+  | Operation | Size | Time |
+  |---|---|---|
+  | Subdivision build | 508k faces | ~11 ms |
+  | Subdivision update | same mesh | ~1 ms |
+  | Analysis | 127k faces | ~10 ms |
+  | Repair | 127k faces | ~75 ms |
+  | Boolean | 254k triangles | ~170 ms |
 - Redo panel: adjust the last operation. Extrude, individual extrude,
   inset, bevel, loop cut, merge by distance and spin report their values.
   Drag or scroll a value, use F9 to type, or call `edit.redo_last
@@ -82,7 +107,6 @@ project uses [Semantic Versioning](https://semver.org/).
 - Keys can depend on the mode (operator flags `OPF_EDIT` / `OPF_OBJECT`):
   X, A, F and Shift+D mean the mesh versions in edit mode. Home resets the
   camera in either mode.
-
 - Mesh analysis and repair.
   - **Overlays** for the active mesh (View › Show …), with counts in the
     viewport:
@@ -103,6 +127,14 @@ project uses [Semantic Versioning](https://semver.org/).
 ### Fixed
 - Cylinder and cone caps and the whole torus were wound inwards, and the
   plane and grid faced down. All primitives now face out (up).
+- Bevel (the tool and the modifier) is fixed for widths larger than nearby
+  edges, such as around a hole cut by a boolean, where thin triangles meet
+  the beveled edge:
+  - offsets are clamped so neighbouring corner points never cross;
+  - the strips across beveled edges are oriented from the topology, not
+    from their shape.
+
+  The result stays closed.
 
 ## [0.4.0] - 2026-10-13
 
@@ -298,7 +330,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/bartbeecoders/beemodel/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bartbeecoders/beemodel/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/bartbeecoders/beemodel/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/bartbeecoders/beemodel/compare/v0.1.0...v0.2.0

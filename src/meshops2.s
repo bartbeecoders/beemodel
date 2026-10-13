@@ -76,6 +76,7 @@ m2_tiny:        .float 1.0e-12
 m2_d2r:         .float 0.017453292
 m2_2pi:         .float 6.2831853
 m2_minsin:      .float 0.05
+m2_clamp:       .float 0.45
 m2_bevel0:      .float 0.1
 m2_r10:         .float 10.0
 m2_snap2:       .float 100.0        # knife vertex snap: 10 px
@@ -2900,15 +2901,15 @@ is_bev:
 #   [rsp+8+12 .. 28] (one level up) gets its offset point in bv_cpt
 corner_point:
     push    rbp
-    sub     rsp, 64
+    sub     rsp, 80
     mov     rax, [rbx+ME_POS]           # dp = norm(u - v), dn = norm(w - v)
-    mov     ecx, [rsp+64+16+12]
+    mov     ecx, [rsp+80+16+12]
     lea     rcx, [rcx+rcx*2]
     lea     r8, [rax+rcx*4]             # u
-    mov     ecx, [rsp+64+16+16]
+    mov     ecx, [rsp+80+16+16]
     lea     rcx, [rcx+rcx*2]
     lea     r9, [rax+rcx*4]             # v
-    mov     ecx, [rsp+64+16+20]
+    mov     ecx, [rsp+80+16+20]
     lea     rcx, [rcx+rcx*2]
     lea     r10, [rax+rcx*4]            # w
     xor     ecx, ecx
@@ -2923,6 +2924,12 @@ corner_point:
     inc     ecx
     cmp     ecx, 3
     jb      1b
+    lea     rdi, [rsp]                  # the edge lengths, for the clamp
+    call    vlen3
+    movss   [rsp+64], xmm0
+    lea     rdi, [rsp+16]
+    call    vlen3
+    movss   [rsp+68], xmm0
     lea     rdi, [rsp]
     call    normalize
     lea     rdi, [rsp+16]
@@ -2952,13 +2959,18 @@ corner_point:
     movss   xmm1, [rip+bv_w]
     divss   xmm1, xmm0
     movss   [rsp+48], xmm1              # k = width / sin
-    mov     eax, [rsp+64+16+24]         # bp
-    mov     edx, [rsp+64+16+28]         # bn
+    mov     eax, [rsp+80+16+24]         # bp
+    mov     edx, [rsp+80+16+28]         # bn
     test    eax, eax
     jz      .Lcp_along_prev
     test    edx, edx
     jz      .Lcp_along_next
-    xor     ecx, ecx                    # both: v + (dp + dn) k, a new point
+    movss   xmm0, [rsp+64]              # both: no further than 45% of the
+    minss   xmm0, [rsp+68]              #  shorter edge (clamped: points of
+    mulss   xmm0, [rip+m2_clamp]        #  neighbouring corners never cross)
+    minss   xmm0, [rsp+48]
+    movss   [rsp+48], xmm0
+    xor     ecx, ecx                    # v + (dp + dn) k, a new point
 2:  movss   xmm0, [rsp+rcx*4]
     addss   xmm0, [rsp+16+rcx*4]
     mulss   xmm0, [rsp+48]
@@ -2974,12 +2986,17 @@ corner_point:
     jmp     .Lcp_store
 .Lcp_along_next:                        # bp only: slide along v -> w
     lea     rbp, [rsp+16]
-    mov     esi, [rsp+64+16+20]
+    mov     esi, [rsp+80+16+20]
+    movss   xmm0, [rsp+68]
     jmp     3f
 .Lcp_along_prev:                        # bn only: slide along v -> u
     lea     rbp, [rsp]
-    mov     esi, [rsp+64+16+12]
-3:  mov     edi, [rsp+64+16+16]         # shared per (v, other): the first wins
+    mov     esi, [rsp+80+16+12]
+    movss   xmm0, [rsp+64]
+3:  mulss   xmm0, [rip+m2_clamp]        # at most 45% of that edge
+    minss   xmm0, [rsp+48]
+    movss   [rsp+48], xmm0
+    mov     edi, [rsp+80+16+16]         # shared per (v, other): the first wins
     call    dkey
     mov     rsi, rax
     mov     rdi, [rip+bv_along]
@@ -3009,8 +3026,21 @@ corner_point:
 .Lcp_store:
     mov     rcx, [rip+bv_cpt]
     mov     [rcx+r12*4], eax
-    add     rsp, 64
+    add     rsp, 80
     pop     rbp
+    ret
+
+# vlen3(rdi=float[3]) -> xmm0 = length
+vlen3:
+    movss   xmm0, [rdi]
+    mulss   xmm0, xmm0
+    movss   xmm1, [rdi+4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [rdi+8]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    sqrtss  xmm0, xmm0
     ret
 
 # corner_of(edi=polygon, esi=vertex) -> eax = its loop index (of rbx)
@@ -3136,85 +3166,31 @@ strip_pt:
     pop     rbx
     ret
 
-# strip_orient - the quad at build_bevel's [rsp+8+56..68] should face like
-#   the two faces of its edge (slot [rsp+8+40]); reverse it if not
+# strip_orient - the quad at build_bevel's [rsp+8+56..68] (row 0 on F1's
+#   side) must run against F1 along the edge (slot [rsp+8+40], ends [rsp+8+
+#   32 / 36]): F1 walks end 0 -> end 1, so the strip walks back - decided
+#   by the topology, not by the quad's shape (which twists next to slivers)
 strip_orient:
     push    r12
     push    r13
     sub     rsp, 40
-    mov     rdi, rbx                    # n(F1) + n(F2)
     mov     rcx, [rip+ef_f1]
     mov     eax, [rsp+64+40]
-    mov     esi, [rcx+rax*4]
-    call    poly_normal
-    mov     rax, [rip+nrm]
-    mov     [rsp], rax
-    mov     eax, [rip+nrm+8]
-    mov     [rsp+8], eax
-    mov     rdi, rbx
-    mov     rcx, [rip+ef_f2]
-    mov     eax, [rsp+64+40]
-    mov     esi, [rcx+rax*4]
-    call    poly_normal
-    movss   xmm0, [rsp]
-    addss   xmm0, [rip+nrm]
-    movss   [rsp], xmm0
-    movss   xmm0, [rsp+4]
-    addss   xmm0, [rip+nrm+4]
-    movss   [rsp+4], xmm0
-    movss   xmm0, [rsp+8]
-    addss   xmm0, [rip+nrm+8]
-    movss   [rsp+8], xmm0
-    # quad normal ~ (p2 - p0) x (p3 - p1)
-    mov     rax, [r14+ME_POS]
+    mov     r12d, [rcx+rax*4]           # F1
+    mov     edi, r12d
+    mov     esi, [rsp+64+32]            # where end 0 is in F1
+    call    corner_of
+    mov     r8, [rbx+ME_POFF]
+    lea     ecx, [rax+1]                # the corner after it
+    cmp     ecx, [r8+r12*4+4]
+    jb      1f
+    mov     ecx, [r8+r12*4]
+1:  mov     r9, [rbx+ME_LOOPS]
+    mov     ecx, [r9+rcx*4]
     lea     r8, [rsp+64+56]
-    mov     ecx, [r8]
-    lea     rcx, [rcx+rcx*2]
-    lea     r9, [rax+rcx*4]             # p0
-    mov     ecx, [r8+4]
-    lea     rcx, [rcx+rcx*2]
-    lea     r10, [rax+rcx*4]            # p1
-    mov     ecx, [r8+8]
-    lea     rcx, [rcx+rcx*2]
-    lea     r11, [rax+rcx*4]            # p2
-    mov     ecx, [r8+12]
-    lea     rcx, [rcx+rcx*2]
-    lea     rcx, [rax+rcx*4]            # p3
-    xor     edx, edx
-1:  movss   xmm0, [r11+rdx*4]
-    subss   xmm0, [r9+rdx*4]
-    movss   [rsp+16+rdx*4], xmm0        # d1 = p2 - p0
-    movss   xmm0, [rcx+rdx*4]
-    subss   xmm0, [r10+rdx*4]
-    movss   [rsp+28+rdx*4], xmm0        # d2 = p3 - p1
-    inc     edx
-    cmp     edx, 3
-    jb      1b
-    movss   xmm0, [rsp+20]              # (d1 x d2) . n
-    mulss   xmm0, [rsp+36]
-    movss   xmm1, [rsp+24]
-    mulss   xmm1, [rsp+32]
-    subss   xmm0, xmm1
-    mulss   xmm0, [rsp]
-    movss   xmm2, [rsp+24]
-    mulss   xmm2, [rsp+28]
-    movss   xmm1, [rsp+16]
-    mulss   xmm1, [rsp+36]
-    subss   xmm2, xmm1
-    mulss   xmm2, [rsp+4]
-    addss   xmm0, xmm2
-    movss   xmm2, [rsp+16]
-    mulss   xmm2, [rsp+32]
-    movss   xmm1, [rsp+20]
-    mulss   xmm1, [rsp+28]
-    subss   xmm2, xmm1
-    mulss   xmm2, [rsp+8]
-    addss   xmm0, xmm2
-    xorps   xmm1, xmm1
-    comiss  xmm0, xmm1
-    jae     9f
-    mov     eax, [r8]                   # reverse: p0 p3 p2 p1
-    mov     ecx, [r8+4]
+    cmp     ecx, [rsp+64+36]            # F1 walks end 0 -> end 1: reverse
+    jne     9f
+    mov     ecx, [r8+4]                 # p0 p3 p2 p1
     mov     edx, [r8+12]
     mov     [r8+4], edx
     mov     [r8+12], ecx
