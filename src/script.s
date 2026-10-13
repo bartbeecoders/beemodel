@@ -393,6 +393,8 @@ builtins:
     .long 2, 2
     .quad bn_matof, b_matof
     .long 1, 1
+    .quad bn_render, b_render
+    .long 1, 4
 builtins_end:
 .equ B_SZ, 24
 
@@ -461,6 +463,8 @@ bn_matset:      .asciz "matset"
 bn_matget:      .asciz "matget"
 bn_assign:      .asciz "assign"
 bn_matof:       .asciz "matof"
+bn_render:      .asciz "render"
+e_render:       .asciz "render: could not render or write "
 e_no_mat:       .asciz "no material named "
 e_mat_param:    .asciz "material parameters: base metallic roughness specular ior transmission emission strength clearcoat coat_roughness alpha, not "
 e_mat_full:     .asciz "the scene holds 1024 materials"
@@ -4260,6 +4264,66 @@ b_assign:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# render(path [, width, height, samples]) -> milliseconds: the path tracer
+#   into a PNG (the camera object, or the viewport)
+b_render:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13d, 640
+    mov     r14d, 360
+    mov     r15d, 64
+    cmp     r12d, 2
+    jb      1f
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r13d, xmm0
+1:  cmp     r12d, 3
+    jb      2f
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si r14d, xmm0
+2:  cmp     r12d, 4
+    jb      3f
+    lea     rdi, [rbx+48]
+    call    a_num
+    cvttsd2si r15d, xmm0
+3:  mov     rdi, rbx
+    call    a_str
+    mov     [rsp], rax
+    cmp     dword ptr [rip+sc_agent], 0 # agents need file access
+    je      31f
+    cmp     dword ptr [rip+agent_tier], 2
+    jb      7f
+31: mov     rdi, [rsp]
+    call    path_expand
+    lea     rdi, [rip+path_buf]
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, r15d
+    call    hive_render_file
+    test    eax, eax
+    js      8f
+    cvtsi2sd xmm0, eax
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+7:  lea     rdi, [rip+e_op_perm]
+    lea     rsi, [rip+bn_render]
+    jmp     sc_rt
+8:  lea     rdi, [rip+e_render]
+    mov     rsi, [rsp]
+    jmp     sc_rt
 
 # matof(object) -> its material's name, or nil
 b_matof:

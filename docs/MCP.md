@@ -47,7 +47,7 @@ Start BeeModel first. The bridge connects to the newest running instance. The st
 |---|---|
 | Read Only | Use `scene_summary`, `viewport_capture` and the resources |
 | Edit Scene (default) | Also use every editing tool, scene operators and BeeScript |
-| Edit + Files | Also open, save, import, export and take screenshots |
+| Edit + Files | Also open, save, import, export, take screenshots and render images |
 
 `BEEMODEL_AGENT_PERMISSION=read|edit|files` sets the level at startup.
 

@@ -459,6 +459,7 @@ def main():
     scripting()
     beescript_cli()
     modeling_budgets()
+    hive_render()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -1312,6 +1313,66 @@ def modeling_budgets():
         ms, extra = got.get(name, (None, []))
         ok = ms is not None and ms < budget and (name != 'boolean' or extra == ['1'])
         check(ok, f'{name}: {ms if ms is None else round(ms, 1)} ms (budget {budget:.0f} ms)')
+
+
+HIVE_SCENE = (
+    'add("plane", "Floor"); scale("Floor", 6)\n'
+    'g = material("Gold"); matset(g, "base", 1, 0.766, 0.336); matset(g, "metallic", 1); matset(g, "roughness", 0.25); assign("Cube", g)\n'
+    'r = material("Red"); matset(r, "base", 0.8, 0.05, 0.04); matset(r, "roughness", 0.4); matset(r, "clearcoat", 1)\n'
+    'add("sphere", "S", 2.5, 1, 0.5); assign("S", r)\n'
+    'c = material("Glass"); matset(c, "transmission", 1); matset(c, "roughness", 0.02)\n'
+    'add("sphere", "G", -0.5, 0.8, 2.6); scale("G", 0.8); assign("G", c)\n')
+HIVE_BUDGET_MS = 4000.0            # 480 x 270 x 64 samples on a 4-core CI runner
+
+
+def hive_render():
+    """The Hive path tracer, headless: a material scene, energy, budgets."""
+    print('  -- Hive path tracer --')
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-hive-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code, extra=None):
+        e = dict(env, **(extra or {}))
+        r = subprocess.run([BIN, '--eval', code], env=e, capture_output=True, text=True, timeout=120)
+        return r.stdout.strip()
+    out = os.path.join(home, 'shot.png')
+    ms = run(HIVE_SCENE + f'print(render("{out}", 480, 270, 64))')
+    ok = os.path.exists(out) and Image.open(out).size == (480, 270)
+    check(ok, f'render() path-traces the scene into a 480 x 270 PNG ({ms} ms)')
+    if ok:
+        Image.open(out).save(os.path.join(OUT, '49_hive.png'))
+    try:
+        t = float(ms)
+    except ValueError:
+        t = 1e9
+    check(t < HIVE_BUDGET_MS, f'480 x 270 x 64 samples in {t:.0f} ms (budget {HIVE_BUDGET_MS:.0f} ms)')
+    # white furnace: a white diffuse sphere in a uniform sky disappears
+    furn = os.path.join(home, 'f.png')
+    base = ('delete("Cube"); delete("Light"); m = material("M"); matset(m, "roughness", 1); matset(m, "specular", 0); '
+            'add("sphere", "S", 0, 0, 0); scale("S", 2); assign("S", m); ')
+    run(base + f'matset(m, "base", 1, 1, 1); render("{furn}", 160, 90, 128)', {'BEEMODEL_HIVE_DEBUG': '3'})
+    im = Image.open(furn).convert('RGB')
+    c, bg = im.getpixel((80, 45)), im.getpixel((2, 2))
+    check(abs(c[0] - bg[0]) <= 2, f'white furnace: the sphere vanishes ({c[0]} vs {bg[0]} around it)')
+    run(base + f'matset(m, "base", 0.5, 0.5, 0.5); render("{furn}", 160, 90, 128)', {'BEEMODEL_HIVE_DEBUG': '3'})
+    c = Image.open(furn).convert('RGB').getpixel((80, 45))
+    check(abs(c[0] - 156) <= 3, f'... and a 50% grey one reflects half (pixel {c[0]}, expected 156)')
+    # convergence: the noise falls like 1 / sqrt(samples)
+    sds = []
+    for n in (4, 64):
+        p = os.path.join(home, f'c{n}.png')
+        run(f'add("plane", "Floor"); scale("Floor", 6); render("{p}", 160, 90, {n})', {'BEEMODEL_HIVE_DEBUG': '2'})
+        g = [v[1] for v in Image.open(p).convert('RGB').crop((0, 75, 40, 90)).getdata()]
+        mean = sum(g) / len(g)
+        sds.append((sum((v - mean) ** 2 for v in g) / len(g)) ** 0.5)
+    check(sds[1] < sds[0] / 2.5, f'noise falls with samples (sd {sds[0]:.1f} at 4, {sds[1]:.1f} at 64)')
+    # agents: rendering writes a file, so it needs file access
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    m = Mcp(f)
+    text, err = m.tool('script_eval', {'code': f'render("{os.path.join(home, "a.png")}", 32, 18, 1)'})
+    check(err and 'permission' in text, 'agents need file access to render')
+    f.proc.kill()
 
 
 class Bridge:

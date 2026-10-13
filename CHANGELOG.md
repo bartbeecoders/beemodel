@@ -25,6 +25,22 @@ project uses [Semantic Versioning](https://semver.org/).
   - **Scripts and agents:** BeeScript `material`, `matset`, `matget`,
     `assign`, `matof`; the `material.new / assign / set / remove`
     operators; materials in `scene_summary`.
+- Hive, a path tracer (CPU, all cores):
+  - **Scene and BVH:** a world-space triangle soup with auto-smoothed
+    normals, and a binned-SAH BVH collapsed to 4-wide nodes traversed with
+    SSE.
+  - **Light transport:** path tracing with next-event estimation and
+    multiple importance sampling over the studio sky (cosine), a sun disc,
+    light objects (points) and emissive triangles (area × power).
+  - **Materials:** the principled BSDF covers Lambert, GGX reflection
+    (metallic workflow), rough dielectric transmission with Fresnel and
+    total internal reflection, and clearcoat.
+  - **Sampling:** Russian roulette and a firefly clamp.
+  - **Output:** progressive passes into a float buffer, ACES resolve,
+    `render.image` and BeeScript `render()`. Agents need file access to
+    render.
+  - **Tests:** a white-furnace energy check, a convergence check and a
+    time budget.
 - Material preview, a viewport mode (View › Material Preview, Shift+Z):
   - every pixel is shaded with its object's principled material (Lambert +
     GGX specular with Fresnel, clearcoat, approximate transmission,

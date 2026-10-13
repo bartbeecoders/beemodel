@@ -46,6 +46,7 @@ s_d1:           .asciz "Agents may look at and edit the scene"
 s_d2:           .asciz "Agents may edit the scene and read / write files"
 s_now:          .asciz "  "
 s_file_pfx:     .asciz "file."
+s_render_pfx:   .asciz "render."
 s_shot:         .asciz "view.screenshot"
 s_agent_pfx:    .asciz "Agent:"
 s_revert:       .asciz "Revert last agent change"
@@ -121,6 +122,11 @@ op_tier:
     mov     rdi, rbx
     lea     rsi, [rip+s_shot]
     call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     rdi, rbx                    # renders write image files
+    lea     rsi, [rip+s_render_pfx]
+    call    prefix
     test    eax, eax
     jnz     1f
     mov     eax, 1
