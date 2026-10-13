@@ -529,6 +529,7 @@ def main():
     node_groups()
     instancing()
     curves()
+    procedural()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3401,6 +3402,60 @@ def curves():
     check(px(f, *p1) != 0x161616 and nf == '= 192', f'Tab leaves; a bevel makes a tube ({nf})')
     f.shot('93_curve_tube.png')
     f.proc.kill()
+
+
+def procedural():
+    """Procedural generators: a noise terrain (fBm / ridged), terraced and
+    eroded by droplets (deterministic per seed, inside its range, a budget);
+    L-systems drawn by the turtle as lines or tapering tubes (and the
+    L-system node's presets); wave function collapse over tile objects with
+    adjacency read from their faces."""
+    print('  -- terrain, L-systems, wave function collapse --')
+    home = tempfile.mkdtemp(prefix='bee-pg-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('delete("Cube")\nt = gtree("T")\no = gnode(t, "output")\ntr = gnode(t, "terrain", 10, 64, 2, 1)\n'
+            'glink(t, tr, o, 1)\nadd("plane", "Land", 0, 0, 0)\nm = modifier("Land", "geometry")\n'
+            'modset("Land", m, "tree", t)\nprint(everts("Land"), efaces("Land"))\n'
+            'er = gnode(t, "erode", 100000, 0.3, 1)\nglink(t, tr, er, 1)\nglink(t, er, o, 1)\n'
+            'c0 = clock()\nprint(everts("Land"), clock() - c0)\n'
+            'te = gnode(t, "terrace", 4, 0.01)\nglink(t, tr, te, 1)\nglink(t, te, o, 1)\n'
+            'add("plane", "A", 0, 0, 0)\nma = modifier("A", "geometry")\nmodset("A", ma, "tree", t)\nmodapply("A", ma)\n'
+            'glink(t, er, o, 1)\nadd("plane", "B", 0, 0, 0)\nmb = modifier("B", "geometry")\nmodset("B", mb, "tree", t)\nmodapply("B", mb)\n'
+            'add("plane", "C", 0, 0, 0)\nmc = modifier("C", "geometry")\nmodset("C", mc, "tree", t)\nmodapply("C", mc)\n'
+            'glink(t, tr, o, 1)\nadd("plane", "D", 0, 0, 0)\nmd = modifier("D", "geometry")\nmodset("D", md, "tree", t)\nmodapply("D", md)\n'
+            'lo = 99\nhi = -99\nflat = 0\nsame = 0\nmoved = 0\n'
+            'for i in 0..verts("D") {\n y = vpos("D", i, "y")\n if y < lo { lo = y }\n if y > hi { hi = y }\n'
+            ' if vpos("B", i, "y") == vpos("C", i, "y") { same += 1 }\n'
+            ' if vpos("B", i, "y") != y { moved += 1 }\n}\n'
+            'st = (hi - lo) / 4\nfor i in 0..verts("A") {\n k = (vpos("A", i, "y") - lo) / st\n'
+            ' if k - floor(k + 0.5) < 0.02 { if floor(k + 0.5) - k < 0.02 { flat += 1 } }\n}\n'
+            'print(lo, hi, flat, same, moved)\n'
+            'k = lsystem("Koch", "F-F-F-F", "F=F-F+F+FF-F-F+F", 2, 90, 0.1)\nprint(everts(k), efaces(k))\n'
+            'p = lsystem("Fern", "X", "X=F+[[X]-X]-F[-FX]+X; F=FF", 4, 25, 0.05, 0.03)\nprint(everts(p), efaces(p))\n'
+            'l = gtree("L")\nlo2 = gnode(l, "output")\nls = gnode(l, "lsystem", 3, 2, 0, 0.1)\nglink(l, ls, lo2, 1)\n'
+            'add("plane", "Isle", 0, 0, 0)\nml = modifier("Isle", "geometry")\nmodset("Isle", ml, "tree", l)\nprint(everts("Isle"), efaces("Isle"))\n'
+            'add("plane", "Ramp", 5, 0, 0)\nfor i in 0..4 {\n x = vpos("Ramp", i, "x")\n z = vpos("Ramp", i, "z")\n'
+            ' vmove("Ramp", i, x / 2, x / 2, z / 2)\n}\nadd("cube", "Block", 8, 0, 0)\nscale("Block", 0.5)\n'
+            'w = wfc("Hills", 6, 6, 1, 1, "Ramp")\nprint(everts(w), efaces(w))\n'
+            'n = 0\nfor i in 0..verts(w) {\n if vpos(w, i, "y") > 0.4 { n += 1 }\n}\nprint(n)\n'
+            'b = wfc("Mix", 4, 4, 3, 7, "Ramp Block")\nprint(everts(b) + efaces(b))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+    out = r.stdout.split()
+    try:
+        v = [float(x) for x in out]
+    except Exception:
+        v = []
+    ok = len(v) == 19
+    check(ok and v[0:3] == [4225, 4096, 4225] and v[3] < 1000 and 0 <= v[5] - v[4] <= 2.001 and v[5] - v[4] > 0.5,
+          f'a 64 x 64 noise terrain within its height; 100k erosion droplets in {out[3:4]} ms ({out[:6]})')
+    check(ok and v[6] > 0.8 * 4225 and v[7] == 4225 and v[8] > 1000,
+          f'terraces: most heights on 4 steps; erosion is the same for a seed and moves the ground ({out[6:9]})')
+    check(ok and v[9:11] == [257, 256] and v[11] > 1000 and v[12] > 1000 and v[13:15] == [257, 256],
+          f'L-systems: a Koch island as lines, a fern as tubes, the node\'s preset ({out[9:15]})')
+    check(ok and v[15:17] == [144, 36] and v[17] == 72 and v[18] in (48 * 5, 48 * 14),
+          f'wave function collapse: ramps fit only up-then-down; ramps and blocks never touch ({out[15:19]})')
+    print(r.stderr[-300:] if not ok else '', end='')
 
 
 class Bridge:

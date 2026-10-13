@@ -383,6 +383,10 @@ builtins:
     .long 1, 1
     .quad bn_cpos, b_cpos
     .long 3, 3
+    .quad bn_lsystem, b_lsystem
+    .long 5, 7
+    .quad bn_wfc, b_wfc
+    .long 6, 6
     .quad bn_everts, b_everts
     .long 1, 1
     .quad bn_efaces, b_efaces
@@ -623,6 +627,8 @@ bn_curve:       .asciz "curve"
 bn_cpoints:     .asciz "cpoints"
 bn_clength:     .asciz "clength"
 bn_cpos:        .asciz "cpos"
+bn_lsystem:     .asciz "lsystem"
+bn_wfc:         .asciz "wfc"
 bn_efaces:      .asciz "efaces"
 bn_clock:       .asciz "clock"
 bn_vmove:       .asciz "vmove"
@@ -864,6 +870,9 @@ s_bool_op:      .asciz "object.boolean"
 e_modtype:      .asciz "modifier types: mirror array solidify subsurf bevel decimate remesh; got "
 e_modidx:       .asciz "no modifier with that index / parameter"
 e_not_mesh:     .asciz "not a mesh: "
+e_lsystem:      .asciz "lsystem: nothing drawn (no F in the result?)"
+e_wfc_tile:     .asciz "wfc: no tile object named "
+e_wfc_tiles:    .asciz "wfc: 1 to 16 tile objects, as one text: \"Road Grass Corner\""
 e_curve_kind:   .asciz "curve(kind [, name]): bezier, circle, path or empty"
 e_axis:         .asciz "axis must be 0, 1 or 2 (or \"x\", \"y\", \"z\")"
 
@@ -4525,6 +4534,152 @@ b_cpos:
     jz      ret_nil
     cvtss2sd xmm0, xmm0
     jmp     ret_num
+
+# lsystem(name, axiom, rules, iterations, angle [, step [, radius]]) -> the
+#   name of a new object: the turtle's lines, or tubes with a radius
+b_lsystem:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 24
+    mov     rbx, rdi
+    mov     r12d, esi
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     r13, rax                    # axiom
+    lea     rdi, [rbx+32]
+    call    a_str
+    mov     r14, rax                    # rules
+    lea     rdi, [rbx+48]
+    call    a_int
+    mov     [rsp], eax
+    lea     rdi, [rbx+64]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+4], xmm0
+    mov     dword ptr [rsp+8], 0x3f800000   # step 1
+    mov     dword ptr [rsp+12], 0           # radius 0
+    cmp     r12d, 6
+    jb      1f
+    lea     rdi, [rbx+80]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+8], xmm0
+    cmp     r12d, 7
+    jb      1f
+    lea     rdi, [rbx+96]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+12], xmm0
+1:  lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, r13
+    mov     rsi, r14
+    mov     edx, [rsp]
+    movss   xmm0, [rsp+4]
+    movss   xmm1, [rsp+8]
+    movss   xmm2, [rsp+12]
+    call    ls_build
+    test    rax, rax
+    jz      8f
+    cmp     dword ptr [rax+ME_NVERTS], 0
+    je      7f
+    mov     r13, rax
+    mov     rdi, rbx
+    call    a_str
+    mov     rsi, rax
+    mov     edi, OT_MESH
+    mov     rdx, r13
+    call    obj_new
+    test    eax, eax
+    jz      8f
+    jmp     .Lsel_ret
+7:  mov     rdi, rax
+    call    mesh_unref
+8:  lea     rdi, [rip+e_lsystem]
+    xor     esi, esi
+    jmp     sc_rt
+.Lsel_ret:                              # eax = a new object: selected, active
+    mov     ebx, eax
+    mov     edi, eax
+    xor     esi, esi
+    call    obj_click_select
+    mov     edi, ebx
+    add     rsp, 24
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_name
+
+# wfc(name, nx, nz, layers, seed, "tile tile ...") -> the name of a new
+#   object: the tiles placed by wave function collapse on an nx x nz grid,
+#   layers high (cells 1 x 1 x 1: a tile spans -0.5..0.5 on each axis);
+#   nil when it cannot be solved
+b_wfc:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 24
+    mov     rbx, rdi
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     [rip+wf_nx], eax
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     [rip+wf_nz], eax
+    lea     rdi, [rbx+48]
+    call    a_int
+    mov     [rip+wf_ny], eax
+    lea     rdi, [rbx+64]
+    call    a_int
+    mov     [rip+wf_seed], eax
+    lea     rdi, [rbx+80]
+    call    a_str
+    mov     rsi, rax
+    mov     dword ptr [rip+wf_nt], 0
+1:  call    im_next_word
+    test    eax, eax
+    jz      2f
+    cmp     dword ptr [rip+wf_nt], 16
+    jae     3f
+    push    rsi
+    sub     rsp, 8
+    lea     rdi, [rip+im_word]
+    call    obj_find
+    add     rsp, 8
+    pop     rsi
+    test    eax, eax
+    jz      4f
+    mov     ecx, [rip+wf_nt]
+    lea     rdx, [rip+wf_tiles]
+    mov     [rdx+rcx*4], eax
+    inc     dword ptr [rip+wf_nt]
+    jmp     1b
+2:  cmp     dword ptr [rip+wf_nt], 0
+    je      3f
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, rbx
+    call    a_str
+    mov     rdi, rax
+    call    wfc_run
+    test    eax, eax
+    jnz     .Lsel_ret
+    add     rsp, 24
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+3:  lea     rdi, [rip+e_wfc_tiles]
+    xor     esi, esi
+    jmp     sc_rt
+4:  lea     rdi, [rip+e_wfc_tile]
+    lea     rsi, [rip+im_word]
+    jmp     sc_rt
 
 # instances(name) -> the instances on the evaluated mesh (geometry nodes)
 b_instances:

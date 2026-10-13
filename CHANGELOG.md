@@ -70,6 +70,13 @@ project uses [Semantic Versioning](https://semver.org/).
     Curve to Points (upright point normals for instancing). In geometry
     nodes a curve is a chain of 2-point polygons.
   - The node editor's Shift+A menu wraps into columns.
+- Procedural generators:
+  - **Terrain nodes:**
+    - *Terrain* is a heightfield grid from octaves of Perlin noise, smooth (fBm) or ridged, mixed.
+    - *Terrace* sets flat steps with smooth risers.
+    - *Erosion* is hydraulic erosion by droplets that carry sediment down slopes and drop it where they slow, through a brush, deterministic per seed; 100k droplets on a 64 x 64 grid take ~75 ms.
+  - **L-systems:** BeeScript `lsystem(name, axiom, rules, iterations, angle [, step, radius])` rewrites the axiom by rules. A 3D turtle (F f + - & ^ \ / | [ ] !) draws lines, or tubes that thin with every branch. The *L-System* node has plant, bush, tree and Koch island presets.
+  - **Wave function collapse:** `wfc(name, nx, nz, layers, seed, "tiles")` fills a 2D or 3D grid with tile objects in four turns. Which tiles may touch comes from the vertices on their faces, with no rules to write. A contradiction restarts with the next seed.
 - Assets: `tree.save_asset` (with the groups the tree runs) and
   `material.save_asset` write to `~/BeeModel/assets`; `asset.load` adds one
   to any scene, `asset.list` lists them; the Asset Browser area adds one
