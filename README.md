@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.6.0/beemodel-0.6.0-linux-x86_64.bin
-chmod +x beemodel-0.6.0-linux-x86_64.bin && ./beemodel-0.6.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.7.0/beemodel-0.7.0-linux-x86_64.bin
+chmod +x beemodel-0.7.0-linux-x86_64.bin && ./beemodel-0.7.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -286,6 +286,42 @@ Agents work under three safeguards:
   changed the scene, and the result. Its **Revert last agent change** button undoes the newest
   change set.
 
+### CAD and fabrication
+
+Parts are designed from **parameters** (`param.set wall 2mm`, expressions with
+units) and **sketches** with constraints and dimensions (Tab enters sketch
+mode on a sketch object). **Features** turn sketches into solids: pad, pocket,
+revolve, hole, shell, fillet, chamfer, linear and circular patterns, and
+lattice infill. The tree rebuilds when any parameter or sketch changes, and
+undo and `.bee` files keep it.
+
+```
+op("scene.units", "mm")
+param("w", "80mm")
+s = sketch("Base", "XZ")
+r = rect(s, 0, 0, 80, 50)
+con(s, "length", r, "w")
+b = pad("Case", s, "30mm")
+fillet("Case", "4mm", "vertical")
+shell("Case", b, "2mm")
+param("w", "100mm")             # the case widens; rounds and walls follow
+```
+
+[tests/enclosure.bees](tests/enclosure.bees) is a complete printable enclosure
+(case, lid with lip and vents) built this way.
+
+To make things:
+- **3MF** for printers: File › Export 3MF writes millimetres, Z up.
+- **DXF / SVG** of a sketch.
+- **PDF drawings**: front, top and right views with hidden lines and dimensions.
+- **Print check** (Edit menu): reports whether the part is closed, the
+  thinnest wall, overhangs and size. *View › Show Thin Walls* marks walls
+  under a minimum.
+- **Measure tool** (Shift+M): distances and angles. `object.measure`
+  reports volume, area, mass (from material density) and centre of mass.
+- **Signed-distance shapes** (`sunion`, `sgyroid`, `smesh`, ...): blend and
+  lattice shapes into closed meshes.
+
 ### BeeScript
 
 BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not
@@ -374,6 +410,15 @@ src/exr.s       OpenEXR writer (half floats, ZIP)
 src/formats.s   .bee files, OBJ / STL import + export, file operators
 src/mtl.s       MTL import (OBJ materials)
 src/gltf.s      glTF 2.0 import / export
+src/expr.s      expressions with units
+src/cad.s       the CAD document: units, parameters, the feature records
+src/sketch.s    sketches and the constraint solver
+src/sketchobj.s sketch objects, display, rebuild
+src/sketchui.s  sketch mode
+src/prof.s      profiles from sketches: loops, caps, prisms, revolutions
+src/feature.s   the feature tree and its rebuild
+src/measure.s   mass properties, the measure tool
+src/sdf.s       signed-distance shapes, marching tetrahedra
 src/fab.s       3MF export, DXF / SVG of sketches
 src/drawing.s   PDF drawings: views, hidden lines, dimensions
 src/print.s     printability: wall thickness, print check

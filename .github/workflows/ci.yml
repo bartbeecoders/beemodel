@@ -53,6 +53,15 @@ jobs:
       - name: Image readers and writers (PNG, JPEG, HDR, EXR)
         run: timeout 300 python tests/image_io.py build/beemodel
 
+      - name: Install the 3MF checkers (lib3mf, PrusaSlicer)
+        run: |
+          python -m pip install --quiet lib3mf
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y --no-install-recommends prusa-slicer xvfb >/dev/null
+
+      - name: Enclosure walkthrough (3MF read by lib3mf, sliced by PrusaSlicer)
+        run: timeout 600 python tests/enclosure.py build/beemodel --require-lib3mf --require-slicer
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 300 python tools/fakewl.py build/shots
 

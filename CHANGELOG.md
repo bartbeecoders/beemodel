@@ -6,7 +6,92 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-13
+
+Phase 6 of the masterplan, "CAD & digital fabrication". BeeModel designs
+parts to make:
+
+- **Parametric parts:** parameters with units drive constrained sketches.
+- **Features:** pads, pockets, holes, shells, fillets and patterns, in a
+  tree that rebuilds whenever anything changes.
+- **Implicit shapes:** signed-distance blends and lattices.
+- **Output:** 3MF for printers, DXF / SVG of sketches, and PDF drawings.
+
+The exit check, `tests/enclosure.bees`, designs an electronics enclosure
+from dimensioned sketches: a filleted, shelled case with a cable hole, and
+a lid with a fitted lip and vents. All dimensions are parameters. Changing
+the width (80 to 100 mm) rebuilds everything, and both 3MF files are read
+by lib3mf in strict mode and sliced by PrusaSlicer in CI.
+
+Benchmark on a 32-thread desktop:
+- **Enclosure:** both bodies (10 features) are built, rebuilt after the
+  parameter change and exported twice as 3MF plus a PDF drawing in
+  0.65 s in total.
+- **Gyroid lattice:** a 96-cell mesh (250k triangles) in 0.1 s.
+- **Gyroid infill:** an infill for a 60 × 40 × 30 mm shelled box in
+  0.3 s.
+
 ### Added
+- The feature tree:
+  - **Features:** pad (symmetric / reverse), pocket (through / reverse /
+    symmetric), revolve (full or partial), hole (at a sketch's loose
+    points), shell (open top or bottom), fillet and chamfer with edge
+    selectors (all / vertical / horizontal / top / bottom), linear and
+    circular patterns, and infill.
+  - **How it works:** features live in the CAD document (undo, `.bee`)
+    and refer to bodies and sketches by persistent object ids. The tree
+    replays in order with exact booleans and bevels after any change.
+  - **Values and status:** values may be expressions. Each feature
+    reports a status (ok, missing sketch, no profile, geometry failed,
+    ...), and a feature that would open a closed body fails without
+    changing it.
+  - **Where to see it:** Properties and `scene_summary`.
+  - **BeeScript:** `pad pocket revolve hole shell fillet chamfer pattern
+    infill feature features fstatus`.
+- Profiles from sketches (`prof.s`):
+  - **Loops:** closed loops with welded ends, arcs and circles
+    tessellated, and even-odd nesting into material and holes.
+  - **Caps:** ear clipping with hole bridging (n-gon caps when there is
+    no hole).
+  - **Solids:** prisms, revolutions and inward offsets.
+- Measurement and mass properties:
+  - **Tool:** the measure tool (Shift+M) snaps to vertices or the
+    surface and gives the distance with its components, and the angle at
+    a middle point.
+  - **Mass properties:** area, volume, centre of mass and mass, from a
+    new per-material `density` (g/cm^3), in world space and scene units.
+  - **Reporting:** `object.measure` sends them to the console, the
+    status bar and agents.
+  - **BeeScript:** `area mass centroid fangle measurement`.
+- The SDF / F-rep kernel (`sdf.s`):
+  - **Shapes:** sphere, box (rounded), cylinder, torus, and gyroid and
+    strut-grid lattices.
+  - **Operations:** smooth union, subtraction and intersection, shells,
+    moves and turns, and extruded profiles.
+  - **Meshing:** the field is sampled on all threads and meshed by
+    marching tetrahedra, so the result is always closed and manifold.
+  - **BeeScript:** `ssphere sbox scyl storus sgyroid sgrid sunion ssub
+    sisect sshell smove srot sdist smesh sclear`.
+- Fabrication output:
+  - **3MF:** a zip written by our own code (deflate, CRC-32) with every
+    mesh in millimetres, Z up.
+  - **DXF and SVG** of a sketch (construction geometry on its own layer
+    or dashed).
+  - **PDF drawings:** front, top and right views in third-angle
+    projection with hidden lines dashed (a depth buffer per view),
+    sharp and silhouette edges, overall dimensions and a title block,
+    written by hand with an exact xref.
+- Printability:
+  - **Wall thickness:** measured per face with rays through a triangle
+    grid. *View › Show Thin Walls* colours faces under the minimum red
+    and under twice it yellow.
+  - **Print check:** `mesh.print_check` reports whether the part is
+    closed, the thinnest wall, the overhang area (excluding the bed) and
+    the size.
+  - **BeeScript:** `thinnest()`.
+- `tests/enclosure.py`: the walkthrough, checked by our own 3MF reader,
+  by lib3mf (strict) and by PrusaSlicer. It runs in CI and in
+  `ci/local.sh`.
 - Sketches with a constraint solver:
   - **Sketch objects:** a new object type on the XY, XZ or YZ plane (with
     an offset), placed by the object's transform. It holds points, lines,
@@ -49,6 +134,23 @@ project uses [Semantic Versioning](https://semver.org/).
     `.bee` (CADD chunk). Properties lists them with their values.
   - **Scripts and agents:** BeeScript `param(name [, expression])` and
     `expr(text)`; `scene_summary` shows the units and the parameters.
+
+### Changed
+- Booleans:
+  - **Edge points:** a point within 1e-7 of an edge's length splits it
+    in the triangulation. A constraint through a vertex is split there.
+  - **Classification:** rays walk a grid of triangles, so large meshes
+    classify in milliseconds. Flat triangles are not crossed.
+  - **Capacity:** room for more intersection segments.
+- Feature booleans clean their result: vertices closer than 1e-4 of the
+  size are welded and flat triangles go into their neighbours, so chains
+  of booleans stay robust.
+- `mesh_finish` fans skip flat ears, so polygons with corners in a line
+  triangulate without zero-area triangles.
+- Bevels:
+  - partial edge sets with several segments are manifold;
+  - the faces at a rounded edge's ends take the arc;
+  - rounded edges meeting at a corner share it.
 
 ## [0.6.0] - 2026-10-13
 
@@ -555,7 +657,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/bartbeecoders/beemodel/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/bartbeecoders/beemodel/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bartbeecoders/beemodel/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/bartbeecoders/beemodel/compare/v0.3.0...v0.4.0

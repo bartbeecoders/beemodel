@@ -22,6 +22,7 @@
 .globl mesh_analyze
 .globl an_res
 .globl an_fcls
+.globl mesh_clean
 
 .equ AN_NORMALS,  1
 .equ AN_NONMAN,   2
@@ -76,6 +77,7 @@ rp_cnt:         .skip 32            # merged, degenerate, duplicate, holes,
 rp_dist:        .skip 4
 
 .section .rodata
+mc_rel:         .float 1.0e-4
 .align 4
 an_f45:         .float 45.0
 an_deg2rad:     .float 0.017453292
@@ -973,6 +975,49 @@ do_repair:
     pop     r14
     pop     r13
     pop     r12
+    pop     rbx
+    ret
+
+# mesh_clean(rdi=finished mesh) -> rax = a repaired copy (vertices at one
+#   place welded - 1e-4 of the size -, degenerate and duplicate faces gone,
+#   holes filled, normals consistent), or 0. Feature booleans run it so the
+#   next boolean sees no slivers (which no perturbation can orient).
+mesh_clean:
+    push    rbx
+    push    rbp
+    sub     rsp, 40
+    mov     rbx, rdi
+    lea     rdi, [rip+rp_cnt]
+    xor     eax, eax
+    mov     ecx, 8
+    rep     stosd
+    movss   xmm0, [rbx+ME_BMAX]         # the distance: 1e-6 of the size
+    subss   xmm0, [rbx+ME_BMIN]
+    movss   xmm1, [rbx+ME_BMAX+4]
+    subss   xmm1, [rbx+ME_BMIN+4]
+    maxss   xmm0, xmm1
+    movss   xmm1, [rbx+ME_BMAX+8]
+    subss   xmm1, [rbx+ME_BMIN+8]
+    maxss   xmm0, xmm1
+    mulss   xmm0, [rip+mc_rel]
+    movss   [rip+rp_dist], xmm0
+    call    rp_merge
+    test    eax, eax
+    jz      8f
+    call    rp_polys
+    test    eax, eax
+    jz      8f
+    call    rp_fill
+    test    eax, eax
+    jz      8f
+    call    rp_orient
+    test    eax, eax
+    jz      8f
+    call    rp_build
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 40
+    pop     rbp
     pop     rbx
     ret
 

@@ -50,6 +50,7 @@
 .globl world_dir
 .globl poly_center
 .globl mesh_flat_merge
+.globl mesh_drop_flats
 
 .equ KEY_I,     23
 .equ KEY_M,     50
@@ -73,6 +74,7 @@ mf_eps:         .float 1.0e-12
 mf_tiny:        .float 1.0e-4
 mf_dist0:       .float 0.0001
 mf_flatdot:     .float 0.99999
+mf_flat2:       .float 1.0e-12
 mf_min_dot:     .float 0.2
 s_lbl_ext:      .asciz "Extrude"
 s_lbl_inset:    .asciz "Inset"
@@ -3371,6 +3373,308 @@ mesh_flat_merge:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# mesh_drop_flats(rdi=finished mesh) -> rax = a copy without flat triangles
+#   (three corners in a line - booleans leave them against T-junctions), or
+#   0 when it has none. Each goes into the polygon across its long edge: the
+#   middle corner is inserted there, so the surface stays closed. Repeats
+#   while flats are left (a few passes at most).
+mesh_drop_flats:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 56
+    mov     rbx, rdi
+    mov     qword ptr [rsp+40], 0       # the result so far (0: the input)
+    mov     dword ptr [rsp+48], 0       # passes
+.Ldf_pass:
+    cmp     dword ptr [rsp+48], 8
+    jae     .Ldf_done
+    inc     dword ptr [rsp+48]
+    # directed edge -> polygon
+    mov     edi, [rbx+ME_NLOOPS]
+    call    eh_new
+    test    rax, rax
+    jz      .Ldf_done
+    mov     r12, rax
+    xor     r15d, r15d
+1:  cmp     r15d, [rbx+ME_NPOLYS]
+    jae     2f
+    mov     rax, [rbx+ME_POFF]
+    mov     ecx, [rax+r15*4]
+    mov     edx, [rax+r15*4+4]
+    mov     [rsp], ecx
+    mov     [rsp+4], edx
+    mov     [rsp+8], ecx
+11: mov     ecx, [rsp+8]
+    cmp     ecx, [rsp+4]
+    jae     12f
+    mov     rax, [rbx+ME_LOOPS]
+    mov     edi, [rax+rcx*4]
+    lea     edx, [rcx+1]
+    cmp     edx, [rsp+4]
+    jb      13f
+    mov     edx, [rsp]
+13: mov     esi, [rax+rdx*4]
+    call    dkey
+    mov     rsi, rax
+    mov     rdi, r12
+    call    eh_slot
+    mov     [rax], r15d
+    inc     dword ptr [rsp+8]
+    jmp     11b
+12: inc     r15d
+    jmp     1b
+2:  # flats: their long edge (a, b) and middle m; the neighbour holds (b, a)
+    mov     edi, [rbx+ME_NPOLYS]        # per polygon: 1 = dropped
+    add     edi, 8
+    call    fa
+    test    rax, rax
+    jz      .Ldf_done
+    mov     r13, rax
+    mov     edi, [rbx+ME_NLOOPS]        # (b, a) -> m + 1
+    call    eh_new
+    test    rax, rax
+    jz      .Ldf_done
+    mov     r14, rax
+    xor     ebp, ebp                    # flats taken this pass
+    xor     r15d, r15d
+3:  cmp     r15d, [rbx+ME_NPOLYS]
+    jae     .Ldf_build
+    mov     rax, [rbx+ME_POFF]
+    mov     ecx, [rax+r15*4]
+    mov     edx, [rax+r15*4+4]
+    sub     edx, ecx
+    cmp     edx, 3
+    jne     39f
+    mov     rax, [rbx+ME_LOOPS]
+    mov     edi, [rax+rcx*4]
+    mov     esi, [rax+rcx*4+4]
+    mov     edx, [rax+rcx*4+8]
+    mov     [rsp+16], edi
+    mov     [rsp+20], esi
+    mov     [rsp+24], edx
+    call    tri_flat                    # eax = middle corner slot 0..2, or -1
+    test    eax, eax
+    js      39f
+    mov     ecx, eax                    # the triangle (m, n, p): its long
+    mov     r8d, [rsp+16+rcx*4]         #  edge runs n -> p, the neighbour
+    lea     edx, [rcx+1]                #  across it has p -> n
+    cmp     edx, 3
+    jb      31f
+    xor     edx, edx
+31: mov     r9d, [rsp+16+rdx*4]         # n
+    inc     edx
+    cmp     edx, 3
+    jb      32f
+    xor     edx, edx
+32: mov     r10d, [rsp+16+rdx*4]        # p
+    mov     [rsp+28], r8d
+    mov     [rsp+32], r9d
+    mov     [rsp+36], r10d
+    mov     edi, r10d                   # the neighbour (p -> n), not flat-
+    mov     esi, r9d                    #  dropped already, no other insert
+    call    dkey
+    lea     rsi, [rax+1]
+    push    rax
+    mov     rdi, r12
+    call    eh_get
+    mov     ecx, eax
+    pop     rax
+    test    ecx, ecx
+    js      39f
+    cmp     byte ptr [r13+rcx], 0
+    jne     39f
+    mov     [rsp+8], ecx
+    mov     rsi, rax
+    mov     rdi, r14
+    call    eh_slot
+    test    edx, edx                    # (that edge already takes a corner)
+    jnz     39f
+    mov     ecx, [rsp+28]
+    inc     ecx
+    mov     [rax], ecx                  # m + 1
+    mov     byte ptr [r13+r15], 1       # this one goes
+    mov     ecx, [rsp+8]
+    mov     byte ptr [r13+rcx], 2       # (that one must stay this pass)
+    inc     ebp
+39: inc     r15d
+    jmp     3b
+.Ldf_build:
+    test    ebp, ebp
+    jz      .Ldf_done
+    mov     edi, [rbx+ME_NVERTS]
+    add     edi, 8
+    mov     esi, [rbx+ME_NLOOPS]
+    add     esi, ebp
+    add     esi, 8
+    mov     edx, [rbx+ME_NPOLYS]
+    add     edx, 8
+    call    mesh_new
+    test    rax, rax
+    jz      .Ldf_done
+    mov     r15, rax
+    mov     rdi, r15
+    mov     rsi, rbx
+    call    copy_verts
+    xor     ecx, ecx                    # polygons, corners inserted
+4:  cmp     ecx, [rbx+ME_NPOLYS]
+    jae     5f
+    cmp     byte ptr [r13+rcx], 1
+    je      49f
+    mov     [rsp+8], ecx
+    mov     rax, [rbx+ME_POFF]
+    mov     edx, [rax+rcx*4]
+    mov     r8d, [rax+rcx*4+4]
+    mov     [rsp], edx
+    mov     [rsp+4], r8d
+    xor     ebp, ebp                    # written into scr
+41: cmp     edx, [rsp+4]
+    jae     48f
+    mov     [rsp+12], edx
+    mov     rax, [rbx+ME_LOOPS]
+    mov     edi, [rax+rdx*4]
+    lea     rcx, [rip+scr]
+    mov     [rcx+rbp*4], edi
+    inc     ebp
+    lea     ecx, [rdx+1]                # an insert on this edge?
+    cmp     ecx, [rsp+4]
+    jb      42f
+    mov     ecx, [rsp]
+42: mov     esi, [rax+rcx*4]
+    call    dkey
+    lea     rsi, [rax+1]
+    mov     rdi, r14
+    call    eh_get
+    test    eax, eax
+    jle     43f
+    dec     eax
+    lea     rcx, [rip+scr]
+    mov     [rcx+rbp*4], eax
+    inc     ebp
+43: mov     edx, [rsp+12]
+    inc     edx
+    cmp     ebp, 65536 - 4
+    jb      41b
+48: mov     rdi, r15
+    lea     rsi, [rip+scr]
+    mov     edx, ebp
+    call    mesh_add_poly
+    mov     ecx, [rsp+8]
+49: inc     ecx
+    jmp     4b
+5:  mov     rdi, r15
+    call    mesh_finish
+    mov     rdi, [rsp+40]               # the previous pass's copy goes
+    call    mesh_unref
+    mov     [rsp+40], r15
+    mov     rbx, r15
+    jmp     .Ldf_pass
+.Ldf_done:
+    mov     rax, [rsp+40]
+    add     rsp, 56
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tri_flat([rsp+8+16..24] = the caller's triangle corners; rbx = mesh) ->
+#   eax = the slot of the corner lying between the other two, or -1
+tri_flat:
+    sub     rsp, 8
+    mov     r8, [rbx+ME_POS]
+    mov     eax, [rsp+16+16]
+    lea     rax, [rax+rax*2]
+    lea     r9, [r8+rax*4]
+    mov     eax, [rsp+16+20]
+    lea     rax, [rax+rax*2]
+    lea     r10, [r8+rax*4]
+    mov     eax, [rsp+16+24]
+    lea     rax, [rax+rax*2]
+    lea     r11, [r8+rax*4]
+    movss   xmm0, [r10]                 # e1 = b - a, e2 = c - a
+    subss   xmm0, [r9]
+    movss   xmm1, [r10+4]
+    subss   xmm1, [r9+4]
+    movss   xmm2, [r10+8]
+    subss   xmm2, [r9+8]
+    movss   xmm3, [r11]
+    subss   xmm3, [r9]
+    movss   xmm4, [r11+4]
+    subss   xmm4, [r9+4]
+    movss   xmm5, [r11+8]
+    subss   xmm5, [r9+8]
+    movss   xmm6, xmm1                  # |e1 x e2|^2
+    mulss   xmm6, xmm5
+    movss   xmm7, xmm2
+    mulss   xmm7, xmm4
+    subss   xmm6, xmm7
+    mulss   xmm6, xmm6
+    movss   xmm7, xmm2
+    mulss   xmm7, xmm3
+    movss   xmm8, xmm0
+    mulss   xmm8, xmm5
+    subss   xmm7, xmm8
+    mulss   xmm7, xmm7
+    addss   xmm6, xmm7
+    movss   xmm7, xmm0
+    mulss   xmm7, xmm4
+    movss   xmm8, xmm1
+    mulss   xmm8, xmm3
+    subss   xmm7, xmm8
+    mulss   xmm7, xmm7
+    addss   xmm6, xmm7
+    movss   xmm7, xmm0                  # |e1|^2, |e2|^2, |e2 - e1|^2
+    mulss   xmm7, xmm0
+    movss   xmm8, xmm1
+    mulss   xmm8, xmm1
+    addss   xmm7, xmm8
+    movss   xmm8, xmm2
+    mulss   xmm8, xmm2
+    addss   xmm7, xmm8                  # ab^2
+    movss   xmm8, xmm3
+    mulss   xmm8, xmm3
+    movss   xmm9, xmm4
+    mulss   xmm9, xmm4
+    addss   xmm8, xmm9
+    movss   xmm9, xmm5
+    mulss   xmm9, xmm5
+    addss   xmm8, xmm9                  # ac^2
+    subss   xmm3, xmm0
+    subss   xmm4, xmm1
+    subss   xmm5, xmm2
+    mulss   xmm3, xmm3
+    mulss   xmm4, xmm4
+    mulss   xmm5, xmm5
+    addss   xmm3, xmm4
+    addss   xmm3, xmm5                  # bc^2
+    movss   xmm9, xmm7                  # flat: |cross|^2 <= 1e-12 longest^4
+    maxss   xmm9, xmm8
+    maxss   xmm9, xmm3
+    movss   xmm10, xmm9
+    mulss   xmm10, xmm9
+    mulss   xmm10, [rip+mf_flat2]
+    mov     eax, -1
+    comiss  xmm6, xmm10
+    ja      9f
+    xorps   xmm10, xmm10                # (a point: nothing to do)
+    comiss  xmm9, xmm10
+    jbe     9f
+    xor     eax, eax                    # the middle one is opposite the long edge
+    comiss  xmm3, xmm9                  #  bc longest -> a (slot 0)
+    jae     9f
+    mov     eax, 1                      # ac longest -> b
+    comiss  xmm8, xmm9
+    jae     9f
+    mov     eax, 2                      # ab longest -> c
+9:  add     rsp, 8
     ret
 
 # uf_find(edi) -> eax = root (r12 = parents), with path halving
