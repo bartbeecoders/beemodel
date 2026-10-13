@@ -144,6 +144,8 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `link(material, from, to, input)` | Feeds node `from` into input 1..3 of a later node `to` |
 | `nodeset(material, node, slot, x [, y, z])` | Sets an input's constant (slots 1-3; one value fills all three) or a value (slots 4-7 = the type's values above) |
 | `socket(material, socket, node)` | Drives `base`, `metallic`, `roughness`, `emission` or `normal` (a bump node) by a node; `nil` unplugs |
+| `imgset(image, x, y, r, g, b [, a])` | Sets an 8-bit image's pixel (0..255); the image is then saved inside `.bee` files |
+| `uvmap(object, su, sv, du, dv)` | Every UV of the mesh becomes (u su + du, v sv + dv): tiling, offsets |
 | `imgpixel(image, x, y, channel)` | A pixel's red, green, blue or alpha (0..3): 0..255 for 8-bit images, linear values for HDR |
 | `render(path [, width, height, samples, denoise])` | Path-traces the scene with Hive into a PNG (the camera object, or the viewport's view), denoised when `denoise` is 1; returns the milliseconds. Defaults 640 x 360, 64 samples, no denoising |
 | `modifier(name, type)` | Adds `mirror`, `array`, `solidify`, `subsurf`, `bevel`, `decimate`, `remesh`, `boolean` or `multires`; returns its index. A boolean takes the other selected mesh as its object |

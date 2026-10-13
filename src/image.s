@@ -21,6 +21,10 @@
 .globl image_pixel
 .globl op_image_load
 .globl op_image_save
+.globl image_new
+.globl imgd_write
+.globl imgd_read
+.globl image_rec
 
 .equ MAX_IMAGES, 64
 .equ IR_NAME,  0
@@ -31,12 +35,15 @@
 .equ IM_H,     4
 .equ IM_FMT,   8
 .equ IM_DATA,  64
+.equ IM_DIRTY, 24                       # (header) 1: painted / new - saved
+                                        #  inside .bee files as PNG
 
 .section .bss
 .align 8
 img_tab:        .skip IR_SZ*MAX_IMAGES
 img_count:      .skip 4
 im_name:        .skip 32
+im_name_arg:    .skip 32
 im_word:        .skip 264
 
 .section .rodata
@@ -49,6 +56,8 @@ s_im_nofile:    .asciz "cannot read the file"
 s_im_full:      .asciz "  image: too many images"
 s_im_need:      .asciz "  image.load <path> (PNG, JPEG, HDR)"
 s_im_needsave:  .asciz "  image.save <name> <path.png|path.exr>"
+s_im_neednew:   .asciz "  image.new <name> [width height]"
+s_im_new:       .asciz "  image new: "
 s_im_none:      .asciz "  image: no image called "
 s_im_saved:     .asciz "  image saved: "
 s_im_savefail:  .asciz "  image: could not write the file"
@@ -56,6 +65,7 @@ s_exr:          .asciz ".exr"
 s_image:        .asciz "image"
 
 OPERATOR op_image_load, "image.load", "Load Image...", do_image_load, doc="Load a PNG, JPEG or Radiance HDR image into the scene: image.load <path>"
+OPERATOR op_image_new, "image.new", "New Image...", do_image_new, flags=OPF_AI_SAFE, doc="A new image to paint on: image.new <name> [width height] (1024 x 1024 grey)"
 OPERATOR op_image_save, "image.save", "Save Image...", do_image_save, doc="Save a scene image: image.save <name> <path.png|path.exr>"
 
 .text
@@ -325,6 +335,250 @@ image_load_keep:
     pop     rbx
     ret
 
+# image_rec(edi=index) -> rax = its record (name, image at +32)
+image_rec:
+    jmp     rec
+
+# im_int(rdi=digits) -> eax (decimal)
+im_int:
+    xor     eax, eax
+1:  movzx   ecx, byte ptr [rdi]
+    sub     ecx, '0'
+    cmp     ecx, 9
+    ja      2f
+    imul    eax, eax, 10
+    add     eax, ecx
+    inc     rdi
+    jmp     1b
+2:  ret
+
+# image_placeholder(rdi=name) - a record with no image yet
+image_placeholder:
+    sub     rsp, 8
+    cmp     dword ptr [rip+img_count], MAX_IMAGES
+    jae     9f
+    call    base_name
+    call    unique
+    mov     edi, [rip+img_count]
+    call    rec
+    mov     qword ptr [rax+IR_IMG], 0
+    mov     byte ptr [rax+IR_PATH], 0
+    mov     rdi, rax
+    lea     rsi, [rip+im_name]
+    mov     ecx, 32
+    rep     movsb
+    inc     dword ptr [rip+img_count]
+9:  add     rsp, 8
+    ret
+
+# image_new(rdi=name, esi=width, edx=height, ecx=colour 0xAARRGGBB) -> eax =
+#   its index (-1: none): an 8-bit image of that colour, marked to be saved
+#   inside .bee files
+image_new:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12, rdi
+    mov     r13d, esi
+    mov     r14d, edx
+    mov     r15d, ecx
+    cmp     dword ptr [rip+img_count], MAX_IMAGES
+    jae     8f
+    lea     eax, [r13-1]                # 1 .. 16384 a side
+    cmp     eax, 16384
+    jae     8f
+    lea     eax, [r14-1]
+    cmp     eax, 16384
+    jae     8f
+    mov     edi, r13d
+    mov     esi, r14d
+    xor     edx, edx
+    call    img_alloc
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    mov     dword ptr [rbx+IM_DIRTY], 1
+    lea     rdi, [rbx+IM_DATA]
+    mov     eax, r15d
+    mov     ecx, r13d
+    imul    ecx, r14d
+    rep     stosd
+    mov     rdi, r12
+    call    base_name
+    call    unique
+    mov     edi, [rip+img_count]
+    call    rec
+    mov     [rax+IR_IMG], rbx
+    mov     byte ptr [rax+IR_PATH], 0
+    mov     rdi, rax
+    lea     rsi, [rip+im_name]
+    mov     ecx, 32
+    rep     movsb
+    mov     eax, [rip+img_count]
+    inc     dword ptr [rip+img_count]
+    jmp     9f
+8:  mov     eax, -1
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+do_image_new:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rsi, [rip+op_arg]
+    call    im_next_word
+    test    eax, eax
+    jz      7f
+    mov     r12, rsi
+    lea     rdi, [rip+im_name_arg]      # (the name, kept)
+    lea     rsi, [rip+im_word]
+    mov     ecx, 32
+    rep     movsb
+    mov     ebx, 1024
+    mov     r13d, 1024
+    mov     rsi, r12
+    call    im_next_word
+    test    eax, eax
+    jz      1f
+    mov     r12, rsi
+    lea     rdi, [rip+im_word]
+    call    im_int
+    mov     ebx, eax
+    mov     r13d, eax
+    mov     rsi, r12
+    call    im_next_word
+    test    eax, eax
+    jz      1f
+    lea     rdi, [rip+im_word]
+    call    im_int
+    mov     r13d, eax
+1:  lea     rdi, [rip+im_name_arg]
+    mov     esi, ebx
+    mov     edx, r13d
+    mov     ecx, 0xff808080
+    call    image_new
+    test    eax, eax
+    js      7f
+    mov     edi, eax
+    call    rec
+    lea     rdi, [rip+s_im_new]
+    mov     rsi, rax
+    call    log_pair
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+7:  lea     rdi, [rip+s_im_neednew]
+    call    log_line
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# im_embedded(edi=index) -> eax = 1 when it is saved inside the .bee file
+#   (made here, or painted: 8-bit only)
+im_embedded:
+    call    rec
+    mov     rcx, [rax+IR_IMG]
+    test    rcx, rcx
+    jz      8f
+    cmp     dword ptr [rcx+IM_FMT], 0
+    jne     8f
+    cmp     dword ptr [rcx+IM_DIRTY], 0
+    jne     1f
+    cmp     byte ptr [rax+IR_PATH], 0
+    jne     8f
+1:  mov     eax, 1
+    ret
+8:  xor     eax, eax
+    ret
+
+# imgd_write - IMGD chunk body: per embedded image u32 index, u32 bytes,
+#   the PNG
+imgd_write:
+    push    rbx
+    push    r12
+    push    r13
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+img_count]
+    jae     9f
+    mov     edi, ebx
+    call    im_embedded
+    test    eax, eax
+    jz      2f
+    mov     edi, ebx
+    call    rec
+    mov     r12, [rax+IR_IMG]
+    mov     edi, ebx
+    call    wb_u32
+    mov     r13, [rip+wb_len]           # (the length, filled in after)
+    xor     edi, edi
+    call    wb_u32
+    lea     rsi, [r12+IM_DATA]
+    mov     edx, [r12+IM_W]
+    mov     ecx, [r12+IM_H]
+    mov     r8d, edx
+    call    png_encode
+    mov     rax, [rip+wb_len]
+    sub     rax, r13
+    sub     rax, 4
+    mov     rcx, [rip+wb_ptr]
+    mov     [rcx+r13], eax
+2:  inc     ebx
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# imgd_read(rdi=data, esi=bytes) - embedded images into their records
+imgd_read:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r12, rdi
+    mov     r13d, esi
+1:  cmp     r13d, 8
+    jb      9f
+    mov     ebx, [r12]
+    mov     r14d, [r12+4]
+    lea     eax, [r14+8]
+    cmp     eax, r13d
+    ja      9f
+    cmp     ebx, [rip+img_count]
+    jae     2f
+    lea     rdi, [r12+8]
+    mov     esi, r14d
+    call    img_decode
+    test    rax, rax
+    jz      2f
+    mov     dword ptr [rax+IM_DIRTY], 1 # (stays inside the file)
+    push    rax
+    mov     edi, ebx
+    call    rec
+    pop     rcx
+    mov     rdi, [rax+IR_IMG]           # (a placeholder before)
+    mov     [rax+IR_IMG], rcx
+    test    rdi, rdi
+    jz      2f
+    call    img_free
+2:  lea     eax, [r14+8]
+    add     r12, rax
+    sub     r13d, eax
+    jmp     1b
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # images_write - IMGS chunk body: count, then per image u32 length + path
 images_write:
     push    rbx
@@ -335,7 +589,26 @@ images_write:
     xor     ebx, ebx
 1:  cmp     ebx, [rip+img_count]
     jae     9f
+    mov     edi, ebx                    # (embedded: 1, then the name)
+    call    im_embedded
+    test    eax, eax
+    jz      3f
     mov     edi, ebx
+    call    rec
+    mov     r12, rax
+    mov     rdi, rax
+    call    str_len
+    lea     edi, [rax+1]
+    push    rax
+    call    wb_u32
+    mov     edi, 1
+    call    wb_char
+    pop     rdx
+    mov     rsi, r12
+    call    wb_bytes
+    inc     ebx
+    jmp     1b
+3:  mov     edi, ebx
     call    rec
     lea     r12, [rax+IR_PATH]
     mov     rdi, r12
@@ -384,7 +657,13 @@ images_read:
     add     r12, rcx
     rep     movsb
     mov     byte ptr [rdi], 0
-    lea     rdi, [rsp]
+    cmp     byte ptr [rsp], 1           # embedded: a named placeholder (IMGD
+    jne     2f                          #  fills it)
+    lea     rdi, [rsp+1]
+    call    image_placeholder
+    inc     ebx
+    jmp     1b
+2:  lea     rdi, [rsp]
     call    image_load_keep
     inc     ebx
     jmp     1b

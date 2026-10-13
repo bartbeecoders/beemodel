@@ -47,6 +47,7 @@
 .equ TAG_UIDS,      0x53444955          # "UIDS"
 .equ TAG_MRES,      0x5345524D          # "MRES"
 .equ TAG_MUVS,      0x5356554D          # "MUVS"
+.equ TAG_IMGD,      0x44474D49          # "IMGD"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -80,6 +81,9 @@ mres_size:      .skip 4
 .align 8
 muvs_chunk:     .skip 8
 muvs_size:      .skip 4
+.align 8
+imgd_chunk:     .skip 8
+imgd_size:      .skip 4
 .align 8
 uids_size:      .skip 4
 skch_size:      .skip 4
@@ -325,9 +329,13 @@ bee_save:
     call    chunk_begin
     call    mres_write
     call    chunk_end
-    mov     edi, TAG_IMGS               # IMGS, WRLD
+    mov     edi, TAG_IMGS               # IMGS, IMGD (images inside), WRLD
     call    chunk_begin
     call    images_write
+    call    chunk_end
+    mov     edi, TAG_IMGD
+    call    chunk_begin
+    call    imgd_write
     call    chunk_end
     mov     edi, TAG_WRLD
     call    chunk_begin
@@ -755,6 +763,7 @@ bee_load:
     mov     qword ptr [rip+uids_chunk], 0
     mov     qword ptr [rip+mres_chunk], 0
     mov     qword ptr [rip+muvs_chunk], 0
+    mov     qword ptr [rip+imgd_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -813,7 +822,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_MUVS
+28: cmp     eax, TAG_IMGD
+    jne     275f
+    lea     rax, [rbx+8]
+    mov     [rip+imgd_chunk], rax
+    mov     [rip+imgd_size], ebp
+    jmp     23f
+275:cmp     eax, TAG_MUVS
     jne     276f
     lea     rax, [rbx+8]
     mov     [rip+muvs_chunk], rax
@@ -947,6 +962,11 @@ bee_load:
     jz      74f
     mov     esi, [rip+imgs_size]
     call    images_read
+    mov     rdi, [rip+imgd_chunk]       # images saved inside
+    test    rdi, rdi
+    jz      74f
+    mov     esi, [rip+imgd_size]
+    call    imgd_read
 74: mov     rax, [rip+wrld_chunk]       # the world
     test    rax, rax
     jz      75f

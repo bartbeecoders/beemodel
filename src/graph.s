@@ -75,6 +75,8 @@
 .equ SC_ROUGH,  96
 .equ SC_EMIT,   100
 .equ SC_FLAGS,  112                     # 1 base 2 metallic 4 roughness 8 emission 16 normal
+.equ SC_UVP,    120                     # the triangle's UVs (6 floats) or 0:
+                                        #  box projection
 .equ SC_SZ,     128
 # evaluation frame
 .equ EV_P,      0                       # object position
@@ -884,11 +886,19 @@ graph_shade:
     inc     ecx
     cmp     ecx, 3
     jb      1b
-    lea     rdi, [r12+SC_P0O]
+    mov     rsi, [r12+SC_UVP]           # the mesh's UVs, else a box
+    test    rsi, rsi
+    jz      11f
+    lea     rdi, [r12+SC_SZ]
+    mov     ecx, 6
+    rep     movsd
+    jmp     12f
+11: lea     rdi, [r12+SC_P0O]
     mov     rsi, r15
     lea     rdx, [r15+12]
     lea     rcx, [r12+SC_SZ]
     call    box_uv
+12:
     movss   xmm0, [r12+SC_U]            # the point itself
     movss   xmm1, [r12+SC_V]
     call    at

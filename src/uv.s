@@ -31,6 +31,7 @@
 .globl uv_stat
 .globl uv_cow
 .globl uv_select_island
+.globl tri_uvs
 .globl tri_area3
 .globl tri_area2
 .globl angle3
@@ -2935,6 +2936,51 @@ cover_tri:
     jmp     2b
 9:  add     rsp, 40
     pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tri_uvs(rdi=mesh, esi=triangle, rdx=out u0 v0 u1 v1 u2 v2) -> eax = 1
+#   (0: the mesh has no UVs)
+tri_uvs:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    xor     eax, eax
+    mov     r8, [rdi+ME_UV]
+    test    r8, r8
+    jz      9f
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13, rdx
+    mov     rax, [rbx+ME_TPOLY]
+    mov     r14d, [rax+r12*4]
+    xor     r9d, r9d
+1:  mov     rax, [rbx+ME_TRIS]
+    lea     ecx, [r12+r12*2]
+    add     ecx, r9d
+    mov     esi, [rax+rcx*4]
+    mov     rax, [rbx+ME_POFF]          # its loop in the polygon
+    mov     ecx, [rax+r14*4]
+    mov     edx, [rax+r14*4+4]
+    mov     r10, [rbx+ME_LOOPS]
+    mov     r11d, ecx
+2:  cmp     ecx, edx
+    jae     3f
+    cmp     [r10+rcx*4], esi
+    je      4f
+    inc     ecx
+    jmp     2b
+3:  mov     ecx, r11d
+4:  mov     rax, [r8+rcx*8]
+    mov     [r13+r9*8], rax
+    inc     r9d
+    cmp     r9d, 3
+    jb      1b
+    mov     eax, 1
+9:  pop     r14
     pop     r13
     pop     r12
     pop     rbx

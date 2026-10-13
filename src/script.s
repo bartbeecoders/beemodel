@@ -523,6 +523,10 @@ builtins:
     .long 2, 2
     .quad bn_uvstat, b_uvstat
     .long 2, 2
+    .quad bn_imgset, b_imgset
+    .long 6, 7
+    .quad bn_uvmap, b_uvmap
+    .long 5, 5
     .quad bn_frametime, b_frametime
     .long 1, 1
 builtins_end:
@@ -667,6 +671,8 @@ bn_unwrap:      .asciz "unwrap"
 bn_uvpack:      .asciz "uvpack"
 bn_seams:       .asciz "seams"
 bn_uvstat:      .asciz "uvstat"
+bn_imgset:      .asciz "imgset"
+bn_uvmap:       .asciz "uvmap"
 s_smart:        .asciz "smart"
 .align 8
 seam_modes:     .quad sm_mark, sm_clear, sm_sharp, sm_none, 0
@@ -4737,6 +4743,132 @@ b_imgpixel:
     pop     r12
     pop     rbx
     jmp     ret_num
+
+# imgset(image, x, y, r, g, b [, a]) - an 8-bit image's pixel (0..255;
+#   the image is then saved inside .bee files)
+b_imgset:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r15d, esi
+    call    a_image
+    mov     edi, eax
+    call    image_ptr
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r13d, xmm0
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si r14d, xmm0
+    mov     dword ptr [rsp], 255        # alpha
+    xor     ecx, ecx                    # r g b (a) -> a r g b
+1:  lea     eax, [rcx+3]
+    cmp     eax, r15d
+    jae     2f
+    push    rcx
+    push    rcx
+    lea     eax, [rcx+3]
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    pop     rcx
+    cvttsd2si eax, xmm0
+    test    eax, eax
+    jns     11f
+    xor     eax, eax
+11: cmp     eax, 255
+    jbe     12f
+    mov     eax, 255
+12: cmp     ecx, 3
+    jne     13f
+    mov     [rsp], eax
+    jmp     14f
+13: mov     [rsp+4+rcx*4], eax
+14: inc     ecx
+    jmp     1b
+2:  test    r12, r12
+    jz      9f
+    cmp     dword ptr [r12+8], 0        # (8-bit only)
+    jne     9f
+    cmp     r13d, [r12]
+    jae     9f
+    cmp     r14d, [r12+4]
+    jae     9f
+    mov     eax, [rsp]
+    shl     eax, 8
+    or      eax, [rsp+4]
+    shl     eax, 8
+    or      eax, [rsp+8]
+    shl     eax, 8
+    or      eax, [rsp+12]
+    mov     ecx, r14d
+    imul    ecx, [r12]
+    add     ecx, r13d
+    mov     [r12+64+rcx*4], eax
+    mov     dword ptr [r12+24], 1       # (painted: inside the .bee)
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# uvmap(object, su, sv, du, dv) - every UV becomes (u su + du, v sv + dv)
+b_uvmap:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     rbx, rdi
+    xor     ecx, ecx
+1:  push    rcx
+    push    rcx
+    lea     eax, [rcx+1]
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    pop     rcx
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 4
+    jb      1b
+    mov     rdi, rbx
+    call    a_meshobj
+    mov     rdi, rax
+    call    uv_cow
+    test    rax, rax
+    jz      9f
+    mov     rdx, [rax+ME_UV]
+    test    rdx, rdx
+    jz      9f
+    inc     dword ptr [rax+ME_VER]
+    mov     ecx, [rax+ME_NLOOPS]
+2:  test    ecx, ecx
+    jz      9f
+    dec     ecx
+    movss   xmm0, [rdx+rcx*8]
+    mulss   xmm0, [rsp]
+    addss   xmm0, [rsp+8]
+    movss   [rdx+rcx*8], xmm0
+    movss   xmm0, [rdx+rcx*8+4]
+    mulss   xmm0, [rsp+4]
+    addss   xmm0, [rsp+12]
+    movss   [rdx+rcx*8+4], xmm0
+    jmp     2b
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 24
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
 
 # node(material, type [, values...]) -> the node's number (1..12); an image
 #   node takes an image name first, then its size

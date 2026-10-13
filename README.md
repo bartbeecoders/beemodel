@@ -363,7 +363,11 @@ squares conformal maps (our own sparse conjugate-gradient solver, per
 island), **Shift+U** projects groups of faces facing alike flat, and both
 pack the islands into the unit square: one texel density, each island
 turned to its smallest box, placed on a skyline. UVs and seams are saved in
-`.bee` files and exported to OBJ (`vt`) and glTF (`TEXCOORD_0`).
+`.bee` files and exported to OBJ (`vt`) and glTF (`TEXCOORD_0`). Image
+textures follow the UVs in the material preview and the path tracer (an
+image node's size 1 covers the unit square once; meshes without UVs keep
+box projection). `image.new <name> [width height]` makes an image to paint
+on; new and painted images are saved inside the `.bee` file as PNG.
 
 The **UV Editor** (any area's type menu) shows the active mesh's layout over
 the unit square: a click selects the island under the pointer (Shift adds),
