@@ -517,18 +517,18 @@ prim_grid_n:
     xor     r14d, r14d
 5:  cmp     r14d, r12d
     jae     51f
-    lea     ecx, [r12+1]                # quad (r,c) (r,c+1) (r+1,c+1) (r+1,c)
-    mov     eax, r13d
+    lea     ecx, [r12+1]                # quad (r,c) (r+1,c) (r+1,c+1) (r,c+1):
+    mov     eax, r13d                   #  facing up (+Y)
     imul    eax, ecx
     add     eax, r14d
     lea     rdx, [rip+pbuf]
     mov     [rdx], eax
     lea     r8d, [rax+1]
     add     eax, ecx
-    mov     [rdx+12], eax
+    mov     [rdx+4], eax
     inc     eax
     mov     [rdx+8], eax
-    mov     [rdx+4], r8d
+    mov     [rdx+12], r8d
     mov     rdi, rbx
     mov     rsi, rdx
     mov     edx, 4

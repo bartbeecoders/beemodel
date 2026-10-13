@@ -104,7 +104,7 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_ai, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_ai, items_help, items_area, items_modadd
-menu_counts:    .long 14, 18, 13, 10, 27, 6, 3, 6, 8
+menu_counts:    .long 14, 19, 19, 10, 27, 6, 3, 6, 8
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
@@ -112,11 +112,12 @@ items_file:     .quad op_file_new, op_file_open, op_file_save, op_file_saveas, 0
                 .quad op_import_obj, op_import_stl, op_export_obj, op_export_stl, 0
                 .quad op_screenshot, op_recover, 0, op_file_exit
 items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_edit_toggle, op_select_all, op_duplicate, op_delete, 0
-                .quad op_bool_union, op_bool_diff, op_bool_isect, 0
+                .quad op_bool_union, op_bool_diff, op_bool_isect, op_repair, 0
                 .quad op_palette_open, 0, op_script_record, op_script_run, 0, op_edit_prefs
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
-                .quad op_view_wire, op_view_grid, op_view_reset_cam, op_console_clear
+                .quad op_view_wire, op_view_grid, op_view_reset_cam, op_console_clear, 0
+                .quad op_an_normals, op_an_nonman, op_an_bound, op_an_degen, op_an_over
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_light, op_add_camera
 items_help:     .quad op_help_keys, op_console_ops, op_help_about

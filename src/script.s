@@ -381,6 +381,8 @@ builtins:
     .long 3, 3
     .quad bn_manifold, b_manifold
     .long 1, 1
+    .quad bn_analyze, b_analyze
+    .long 2, 2
 builtins_end:
 .equ B_SZ, 24
 
@@ -443,6 +445,14 @@ bn_clock:       .asciz "clock"
 bn_vmove:       .asciz "vmove"
 bn_boolean:     .asciz "boolean"
 bn_manifold:    .asciz "manifold"
+bn_analyze:     .asciz "analyze"
+an_kind_names:  .asciz "boundary"
+                .asciz "nonmanifold"
+                .asciz "degenerate"
+                .asciz "loose"
+                .asciz "overhang"
+                .byte 0
+e_an_kind:      .asciz "analyze: boundary, nonmanifold, degenerate, loose or overhang, not "
 s_bool_op:      .asciz "object.boolean"
 e_modtype:      .asciz "modifier types: mirror array solidify subsurf bevel decimate remesh; got "
 e_modidx:       .asciz "no modifier with that index / parameter"
@@ -4075,6 +4085,48 @@ b_boolean:
     jmp     ret_nil
 8:  lea     rdi, [rip+e_op_perm]
     lea     rsi, [rip+s_bool_op]
+    jmp     sc_rt
+
+# analyze(name, what) -> how many boundary edges / non-manifold edges /
+#   degenerate faces / loose vertices / overhanging faces
+b_analyze:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r13, rdi
+    lea     rdi, [r13+16]
+    call    a_str
+    mov     r12, rax
+    lea     rbx, [rip+an_kind_names]
+    xor     r14d, r14d
+1:  cmp     byte ptr [rbx], 0
+    je      8f
+    mov     rdi, r12
+    mov     rsi, rbx
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+3:  inc     rbx                         # the next name
+    cmp     byte ptr [rbx-1], 0
+    jne     3b
+    inc     r14d
+    jmp     1b
+2:  mov     rdi, r13
+    call    a_meshobj
+    mov     rdi, rax
+    mov     esi, r14d
+    call    an_count
+    cvtsi2sd xmm0, eax
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  lea     rdi, [rip+e_an_kind]
+    mov     rsi, r12
     jmp     sc_rt
 
 # manifold(name) -> 1 if the mesh is closed and consistently oriented

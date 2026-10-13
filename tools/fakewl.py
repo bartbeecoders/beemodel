@@ -451,6 +451,7 @@ def main():
     redo_panel()
     modifiers_ui()
     booleans()
+    analysis_repair()
     scripting()
     beescript_cli()
     mcp_conformance()
@@ -1039,6 +1040,39 @@ def booleans():
     q('modset("Cube", 0, "operation", 0); move("Cutter", 1, 1.5, 1)')
     r = q('modapply("Cube", 0); print(manifold("Cube"), round(volume("Cube") * 1000))')
     check(r == '1 9332', f'union through the modifier, applied: closed, volume {r} / 1 9332')
+    f.proc.kill()
+
+
+def analysis_repair():
+    """Mesh analysis overlays (View > Show ...) and Edit > Repair Mesh."""
+    print('  -- analysis and repair --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('edit("Cube"); op("mesh.select_mode_face"); vselect("Cube", 4, 5, 6, 7); op("mesh.delete"); edit(); select("Cube")')
+    check(q('print(analyze("Cube", "boundary"), analyze("Cube", "overhang"), manifold("Cube"))') == '4 1 0',
+          'analyze(): the deleted top face leaves 4 boundary edges, the bottom overhangs')
+    f.click(130, 44); f.pump(0.2)              # View > Show Boundary Edges
+    f.click(200, 411); f.pump(0.3)
+    img = f.image().crop((214, 80, 1014, 620))
+    cyan = sum(1 for c in img.getdata() if c == (0x40, 0xe0, 0xe0))
+    check(cyan > 100, f'View > Show Boundary Edges marks the hole ({cyan} px)')
+    f.shot('45_analysis.png')
+    f.click(70, 44); f.pump(0.2)               # Edit > Repair Mesh
+    f.click(140, 306); f.pump(0.3)
+    check(q('print(analyze("Cube", "boundary"), manifold("Cube"), faces("Cube"))') == '0 1 6',
+          'Edit > Repair Mesh fills the hole: closed, 6 faces')
+    img = f.image().crop((214, 80, 1014, 620))
+    cyan = sum(1 for c in img.getdata() if c == (0x40, 0xe0, 0xe0))
+    check(cyan == 0, 'no boundary left to mark')
+    f.mods(4); f.key(44); f.mods(0)            # Ctrl+Z
+    check(q('analyze("Cube", "boundary")') == '= 4', 'one undo brings the hole back')
+    r = q('add("sphere", "S", 4, 0, 0); edit("S"); op("mesh.select_all"); op("mesh.flip_normals"); edit()\n'
+          'select("S"); a = volume("S"); op("mesh.repair", "0.001"); print(a < 0, volume("S") > 0, manifold("S"))')
+    check(r == '1 1 1', 'repair turns an inside-out sphere outward')
     f.proc.kill()
 
 

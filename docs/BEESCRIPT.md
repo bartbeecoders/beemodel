@@ -104,6 +104,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `vselect(name, i...)` | Selects exactly these vertices; `vselect(name)` deselects all |
 | `boolean(a, b, kind)` | `a` becomes `a` union / difference / intersect `b` (`"union"`, `"difference"`, `"intersect"`); `b` is deleted. One undo step |
 | `manifold(name)` | 1 if the mesh is closed and consistently oriented (every edge used once in each direction) |
+| `analyze(name, what)` | Counts `"boundary"` edges (one face), `"nonmanifold"` edges (more than two faces, or two facing the same way), `"degenerate"` faces (no area), `"loose"` vertices (no face) or `"overhang"` faces (facing down steeper than 45°, or the angle `view.show_overhangs` was given) |
 | `modifier(name, type)` | Adds `mirror`, `array`, `solidify`, `subsurf`, `bevel`, `decimate`, `remesh` or `boolean`; returns its index. A boolean takes the other selected mesh as its object |
 | `modset(name, i, param, value)` | Sets a value, e.g. `modset(c, 0, "levels", 3)`; an object value is a name: `modset(c, 0, "object", "Cutter")` |
 | `modapply(name, i)` / `modremove(name, i)` | Applies a modifier to the mesh / removes it |
