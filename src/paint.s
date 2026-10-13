@@ -32,11 +32,13 @@
 .globl paint_dab_world
 .globl pt_radius
 .globl pt_col
+.globl pt_hist_clear
 
 .equ IM_W,      0
 .equ IM_H,      4
 .equ IM_FMT,    8
 .equ IM_DIRTY,  24
+.equ IM_LAYERS, 32
 .equ IM_DATA,   64
 .equ GR_N,      128
 .equ GR_NODES,  160
@@ -72,7 +74,8 @@ s_pt_off:       .asciz "  texture paint off"
 s_pt_hud:       .asciz "Texture Paint: "
 s_pt_r:         .asciz "  radius "
 s_pt_s:         .asciz "  strength "
-s_pt_keys:      .asciz "  ([ ] radius, Shift+[ ] strength, paint.color r g b, Ctrl+Z undo)"
+s_pt_keys:      .asciz "  ([ ] radius, Shift+[ ] strength, Shift+N layer, PgUp/PgDn)"
+s_pt_layer:     .asciz "  layer "
 s_pt_colhelp:   .asciz "  paint.color <r> <g> <b> (0-255)"
 s_pt_nohist:    .asciz "  texture paint: nothing to undo"
 s_pt_noredo:    .asciz "  texture paint: nothing to redo"
@@ -98,13 +101,15 @@ pt_m:           .skip 48                # local -> world
 pt_mi:          .skip 48                # world -> local
 # the stroke's changes: a copy of the image at its start, the box touched
 pt_before:      .skip 8
+pt_buf:         .skip 8                 # the buffer this stroke paints
 pt_beforeb:     .skip 8
 pt_bx0:         .skip 4
 pt_by0:         .skip 4
 pt_bx1:         .skip 4
 pt_by1:         .skip 4
-# history: per stroke image, box, pixels (the other state), its bytes
-pt_hist:        .skip HIST_N*32
+# history: per stroke image, box (x y w h), pixels (the other state), the
+#   buffer painted (the image's or a layer's)
+pt_hist:        .skip HIST_N*48
 pt_hn:          .skip 4                 # strokes kept
 pt_hpos:        .skip 4                 # undone back to here (redo above)
 
@@ -115,6 +120,10 @@ OPERATOR op_pt_rad_up, "paint.radius_up", "Bigger Brush", do_pt_radius, arg=1, k
 OPERATOR op_pt_str_dn, "paint.strength_down", "Weaker", do_pt_strength, arg=0, key=KEY_LEFTBRACE|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: strength - 0.1"
 OPERATOR op_pt_str_up, "paint.strength_up", "Stronger", do_pt_strength, arg=1, key=KEY_RIGHTBRACE|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: strength + 0.1"
 OPERATOR op_pt_color, "paint.color", "Brush Colour", do_pt_color, flags=OPF_AI_SAFE|OPF_QUIET, doc="Texture paint: the brush colour: paint.color <r> <g> <b> (0-255)"
+OPERATOR op_pt_ladd, "paint.layer_add", "New Paint Layer", do_pt_layer, arg=0, key=KEY_N|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: a new transparent layer above, painted from now on"
+OPERATOR op_pt_lup, "paint.layer_up", "Layer Above", do_pt_layer, arg=1, key=KEY_PAGEUP, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: paint the layer above"
+OPERATOR op_pt_ldn, "paint.layer_down", "Layer Below", do_pt_layer, arg=2, key=KEY_PAGEDOWN, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: paint the layer below"
+OPERATOR op_pt_lmerge, "paint.layer_merge", "Merge Layers", do_pt_layer, arg=3, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: flatten the layers into the image"
 OPERATOR op_pt_undo, "paint.undo", "Undo Stroke", do_pt_undo, arg=0, key=KEY_Z|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: undo the last stroke"
 OPERATOR op_pt_redo, "paint.redo", "Redo Stroke", do_pt_undo, arg=1, key=KEY_Z|KM_CTRL|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: redo a stroke"
 
@@ -273,6 +282,46 @@ do_pt_color:
     pop     rbx
     ret
 
+# do_pt_layer(edi = 0 new, 1 above, 2 below, 3 merge)
+do_pt_layer:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    call    pt_valid
+    test    rax, rax
+    jz      9f
+    mov     r12, rax
+    xorps   xmm0, xmm0
+    test    ebx, ebx
+    jnz     1f
+    mov     rdi, r12                    # new
+    mov     esi, 1
+    call    lay_op
+    jmp     9f
+1:  cmp     ebx, 3
+    jne     2f
+    mov     rdi, r12                    # merge
+    mov     esi, 7
+    call    lay_op
+    jmp     9f
+2:  mov     rdi, r12                    # above / below: active +- 1
+    mov     esi, 8
+    call    lay_op
+    lea     edx, [rax+1]
+    cmp     ebx, 1
+    je      3f
+    lea     edx, [rax-1]
+3:  mov     rdi, r12
+    mov     esi, 2
+    xorps   xmm0, xmm0
+    call    lay_op
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
 # =============================================================================
 #  Strokes
 # =============================================================================
@@ -313,8 +362,14 @@ stroke_start:
     call    salloc
     test    rax, rax
     jz      9f
-    mov     rdi, rax
-    lea     rsi, [rbx+IM_DATA]
+    push    rax                         # (the buffer painted)
+    push    rax
+    mov     rdi, rbx
+    call    lay_target
+    mov     [rip+pt_buf], rax
+    mov     rsi, rax
+    pop     rdi
+    pop     rdi
     mov     ecx, [rbx+IM_W]
     imul    ecx, [rbx+IM_H]
     rep     movsd
@@ -352,8 +407,8 @@ stroke_finish:
     xor     edi, edi
     call    hist_free
     lea     rdi, [rip+pt_hist]
-    lea     rsi, [rdi+32]
-    mov     ecx, (HIST_N-1)*32
+    lea     rsi, [rdi+48]
+    mov     ecx, (HIST_N-1)*48
     rep     movsb
     dec     dword ptr [rip+pt_hn]
 3:  mov     r12d, [rip+pt_bx1]          # box size
@@ -390,9 +445,11 @@ stroke_finish:
     inc     ecx
     jmp     4b
 5:  mov     eax, [rip+pt_hn]
-    shl     eax, 5
+    imul    eax, eax, 48
     lea     rdi, [rip+pt_hist]
     add     rdi, rax
+    mov     rax, [rip+pt_buf]
+    mov     [rdi+32], rax
     mov     [rdi], rbx                  # image
     mov     eax, [rip+pt_bx0]
     mov     [rdi+8], eax
@@ -414,9 +471,24 @@ stroke_finish:
     pop     rbx
     ret
 
+# pt_hist_clear - every stroke forgotten (the layers changed under them)
+pt_hist_clear:
+    push    rbx
+1:  mov     ebx, [rip+pt_hn]
+    test    ebx, ebx
+    jz      2f
+    dec     ebx
+    mov     [rip+pt_hn], ebx
+    mov     edi, ebx
+    call    hist_free
+    jmp     1b
+2:  mov     dword ptr [rip+pt_hpos], 0
+    pop     rbx
+    ret
+
 # hist_free(edi=entry) - its pixels go
 hist_free:
-    shl     edi, 5
+    imul    edi, edi, 48
     lea     rax, [rip+pt_hist]
     add     rax, rdi
     mov     rdi, [rax+24]
@@ -450,7 +522,7 @@ do_pt_undo:
     cmp     eax, [rip+pt_hn]
     jae     6f
     inc     dword ptr [rip+pt_hpos]
-2:  shl     eax, 5
+2:  imul    eax, eax, 48
     lea     rbx, [rip+pt_hist]
     add     rbx, rax
     mov     r12, [rbx]                  # image
@@ -462,7 +534,8 @@ do_pt_undo:
     add     eax, ecx
     imul    eax, [r12+IM_W]
     add     eax, [rbx+8]
-    lea     rsi, [r12+IM_DATA+rax*4]
+    mov     rsi, [rbx+32]
+    lea     rsi, [rsi+rax*4]
     mov     eax, ecx
     imul    eax, [rbx+16]
     lea     rdi, [r13+rax*4]
@@ -478,6 +551,16 @@ do_pt_undo:
 41: inc     ecx
     jmp     3b
 5:  mov     dword ptr [r12+IM_DIRTY], 1
+    mov     rdi, r12                    # (layers: the composite there)
+    mov     esi, [rbx+8]
+    mov     edx, [rbx+12]
+    mov     ecx, [rbx+16]
+    add     ecx, esi
+    dec     ecx
+    mov     r8d, [rbx+20]
+    add     r8d, edx
+    dec     r8d
+    call    lay_rect
     call    pt_changed
     jmp     9f
 6:  lea     rdi, [rip+s_pt_noredo]
@@ -1023,7 +1106,8 @@ pt_tri_texels:
     ret
 
 # pt_blend(rbx=image, edi=x, esi=y, xmm0=amount 0..1) - towards the brush
-#   colour; the stroke's box grows
+#   colour in the buffer painted (a layer: its alpha rises too, then the
+#   composite there); the stroke's box grows
 pt_blend:
     cmp     edi, [rip+pt_bx0]
     jge     1f
@@ -1037,13 +1121,23 @@ pt_blend:
 3:  cmp     esi, [rip+pt_by1]
     jle     4f
     mov     [rip+pt_by1], esi
-4:  mov     eax, esi
+4:  push    rdi
+    push    rsi
+    mov     eax, esi
     imul    eax, [rbx+IM_W]
     add     eax, edi
-    lea     r8, [rbx+IM_DATA+rax*4]
+    mov     r8, [rip+pt_buf]
+    lea     r8, [r8+rax*4]
     mov     r9d, [r8]
     mov     r10d, [rip+pt_col]
-    xor     r11d, r11d                  # the three channels
+    cmp     qword ptr [rbx+IM_LAYERS], 0
+    je      40f
+    mov     eax, r9d                    # a layer: transparent takes the
+    shr     eax, 24                     #  brush colour outright
+    test    eax, eax
+    jnz     40f
+    mov     r9d, r10d
+40: xor     r11d, r11d                  # the three channels
     xor     ecx, ecx
 5:  mov     eax, r9d
     shr     eax, cl
@@ -1063,9 +1157,30 @@ pt_blend:
     add     ecx, 8
     cmp     ecx, 24
     jb      5b
-    or      r11d, 0xff000000
+    mov     eax, r9d                    # alpha: a + (255 - a) amount
+    shr     eax, 24
+    cvtsi2ss xmm1, eax
+    movss   xmm2, [rip+pf_255]
+    subss   xmm2, xmm1
+    mulss   xmm2, xmm0
+    addss   xmm1, xmm2
+    addss   xmm1, [rip+pf_half]
+    cvttss2si eax, xmm1
+    cmp     qword ptr [rbx+IM_LAYERS], 0
+    jne     6f
+    mov     eax, 0xff                   # (no layers: opaque)
+6:  shl     eax, 24
+    or      r11d, eax
     mov     [r8], r11d
-    ret
+    pop     rsi
+    pop     rdi
+    cmp     qword ptr [rbx+IM_LAYERS], 0
+    je      7f
+    mov     edx, esi
+    mov     esi, edi
+    mov     rdi, rbx
+    jmp     lay_texel
+7:  ret
 
 # =============================================================================
 #  The UV editor: dabs in UV space
@@ -1510,7 +1625,23 @@ paint_overlay:
     call    fmt_str
     movss   xmm0, [rip+pt_strength]
     call    fmt_val3
-    lea     rdi, [rip+s_pt_keys]
+    mov     rax, [rip+pt_img]           # "  layer 2/3"
+    cmp     qword ptr [rax+IM_LAYERS], 0
+    je      1f
+    lea     rdi, [rip+s_pt_layer]
+    call    fmt_str
+    mov     rax, [rip+pt_img]
+    mov     rax, [rax+IM_LAYERS]
+    mov     edi, [rax+4]
+    call    fmt_int
+    mov     edi, '/'
+    call    fmt_char
+    mov     rax, [rip+pt_img]
+    mov     rax, [rax+IM_LAYERS]
+    mov     edi, [rax]
+    dec     edi
+    call    fmt_int
+1:  lea     rdi, [rip+s_pt_keys]
     call    fmt_str
     mov     edi, [rip+cvs_x0]
     add     edi, 10

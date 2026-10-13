@@ -529,6 +529,8 @@ builtins:
     .long 5, 5
     .quad bn_paint, b_paint
     .long 5, 8
+    .quad bn_layer, b_layer
+    .long 2, 4
     .quad bn_frametime, b_frametime
     .long 1, 1
 builtins_end:
@@ -676,6 +678,17 @@ bn_uvstat:      .asciz "uvstat"
 bn_imgset:      .asciz "imgset"
 bn_uvmap:       .asciz "uvmap"
 bn_paint:       .asciz "paint"
+bn_layer:       .asciz "layer"
+.align 8
+layer_ops:      .quad lo_count, lo_add, lo_active, lo_opac, lo_blend, lo_vis, lo_remove, lo_merge, 0
+lo_count:       .asciz "count"
+lo_add:         .asciz "add"
+lo_active:      .asciz "active"
+lo_opac:        .asciz "opacity"
+lo_blend:       .asciz "blend"
+lo_vis:         .asciz "visible"
+lo_remove:      .asciz "remove"
+lo_merge:       .asciz "merge"
 s_smart:        .asciz "smart"
 .align 8
 seam_modes:     .quad sm_mark, sm_clear, sm_sharp, sm_none, 0
@@ -4823,6 +4836,61 @@ b_imgset:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# layer(image, "count" | "add" | "active" | "opacity" | "blend" | "visible" |
+#   "remove" | "merge" [, layer [, value]]) -> the count, the new layer, the
+#   active layer (set with a layer, read without), 0 / -1
+b_layer:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 24
+    mov     rbx, rdi
+    mov     r14d, esi
+    call    a_image
+    mov     edi, eax
+    call    image_ptr
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    lea     rsi, [rip+layer_ops]
+    call    uv_kind
+    mov     r13d, eax
+    mov     dword ptr [rsp], -1         # layer, value
+    xorps   xmm0, xmm0
+    movss   [rsp+4], xmm0
+    cmp     r14d, 3
+    jb      1f
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp], eax
+    cmp     r14d, 4
+    jb      1f
+    lea     rdi, [rbx+48]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+4], xmm0
+1:  cmp     r13d, 2                     # "active" without a layer: read it
+    jne     2f
+    cmp     r14d, 3
+    jae     2f
+    mov     r13d, 8
+2:  mov     eax, -1
+    test    r12, r12
+    jz      3f
+    mov     rdi, r12
+    mov     esi, r13d
+    mov     edx, [rsp]
+    movss   xmm0, [rsp+4]
+    call    lay_op
+3:  cvtsi2sd xmm0, eax
+    add     rsp, 24
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
 
 # paint(object, x, y, z, radius [, r, g, b]) - a dab of texture paint
 #   around that world point (the brush colour, or this one; 0..255) -> 1,

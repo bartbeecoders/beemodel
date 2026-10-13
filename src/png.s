@@ -11,6 +11,7 @@
 
 # exports
 .globl png_encode
+.globl png_encode_rgba
 .globl png_write
 .globl deflate_buf
 .globl zip_crc32
@@ -19,6 +20,8 @@
 .equ WINDOW,        32768
 
 .section .bss
+pe_bpp:         .skip 4                 # PNG out: bytes a pixel (3 / 4)
+.align 8
 .align 8
 crc_table:      .skip 1024
 lit_code:       .skip 2*288             # bit-reversed fixed Huffman codes
@@ -386,9 +389,15 @@ chunk_end:
 
 # -----------------------------------------------------------------------------
 # png_encode(rsi=XRGB pixels, edx=width, ecx=height, r8d=stride in pixels)
-#   appends a PNG file to wb -> eax = 1 on success
+#   appends a PNG file to wb -> eax = 1 on success. png_encode_rgba: the
+#   same with the alpha (ARGB pixels, an RGBA PNG)
 # -----------------------------------------------------------------------------
+png_encode_rgba:
+    mov     dword ptr [rip+pe_bpp], 4
+    jmp     pe_go
 png_encode:
+    mov     dword ptr [rip+pe_bpp], 3
+pe_go:
     push    rbx
     push    rbp
     push    r12
@@ -401,7 +410,9 @@ png_encode:
     mov     r14d, ecx
     mov     r15d, r8d
     call    init_tables
-    lea     eax, [r13+r13*2+1]          # bytes per filtered row
+    mov     eax, r13d                   # bytes per filtered row
+    imul    eax, [rip+pe_bpp]
+    inc     eax
     mov     ebp, eax
     imul    rax, r14
     mov     [rsp], rax                  # raw (filtered) size
@@ -433,13 +444,19 @@ png_encode:
 1:  cmp     ecx, r13d
     jae     2f
     mov     eax, [rsi+rcx*4]
-    lea     edx, [rcx+rcx*2]
+    mov     edx, ecx
+    imul    edx, [rip+pe_bpp]
     mov     r8d, eax
     shr     r8d, 16
     mov     [rdi+rdx], r8b
     mov     [rdi+rdx+1], ah
     mov     [rdi+rdx+2], al
-    inc     ecx
+    cmp     dword ptr [rip+pe_bpp], 4   # (RGBA: then A)
+    jne     11f
+    mov     r8d, eax
+    shr     r8d, 24
+    mov     [rdi+rdx+3], r8b
+11: inc     ecx
     jmp     1b
 2:  mov     r10, rdi                    # cur
     mov     r11, [rsp+16]               # prev = the other buffer
@@ -458,9 +475,11 @@ png_encode:
     jae     5f
     movzx   esi, byte ptr [r10+rax]
     xor     edi, edi
-    cmp     eax, 3
+    cmp     eax, [rip+pe_bpp]
     jb      31f
-    movzx   edi, byte ptr [r10+rax-3]
+    mov     edi, eax
+    sub     edi, [rip+pe_bpp]
+    movzx   edi, byte ptr [r10+rdi]
 31: push    rsi
     sub     esi, edi                    # sub residual as signed byte
     movsx   esi, sil
@@ -492,9 +511,12 @@ png_encode:
     movzx   esi, byte ptr [r10+rax]
     cmp     edi, 1
     jne     61f
-    cmp     eax, 3
+    cmp     eax, [rip+pe_bpp]
     jb      7f
-    sub     sil, [r10+rax-3]
+    push    rax
+    sub     eax, [rip+pe_bpp]
+    sub     sil, [r10+rax]
+    pop     rax
     jmp     7f
 61: test    r9d, r9d
     jz      7f
@@ -519,8 +541,11 @@ png_encode:
     call    wb_u32be
     mov     edi, r14d
     call    wb_u32be
-    mov     edi, 0x00000208             # 8 bit RGB, deflate, adaptive filter
-    call    wb_u32
+    mov     edi, 0x00000208             # 8 bit RGB (or RGBA: 6), deflate,
+    cmp     dword ptr [rip+pe_bpp], 4   #  adaptive filter
+    jne     11f
+    mov     edi, 0x00000608
+11: call    wb_u32
     xor     edi, edi
     call    wb_char                     # no interlace
     call    chunk_end

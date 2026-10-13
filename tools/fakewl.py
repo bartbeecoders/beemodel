@@ -519,6 +519,7 @@ def main():
     uv_editor()
     uv_textures()
     texture_paint()
+    paint_layers()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -2844,6 +2845,51 @@ def texture_paint():
       '   if imgpixel("tex", x, y, 0) > 180 { if imgpixel("tex", x, y, 1) < 100 { s += 1 } }\n  }\n }\n return s\n}')
     g = red()
     check(e.split()[:1] == ['1'] and g == d, f'paint() from scripts; the painted image comes back from the .bee file ({g} red texels)')
+    f.proc.kill()
+
+
+def paint_layers():
+    """Paint layers: painting goes to the active layer, visibility and
+    opacity change the composite, the stack is saved, merge flattens."""
+    print('  -- paint layers --')
+    home = tempfile.mkdtemp(prefix='bee-lay-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    top = ('fn top() {\n s = 0\n for y in 0..32 {\n  for x in 0..32 {\n'
+           '   if imgpixel("tex", x, y, 0) > imgpixel("tex", x, y, 1) + 60 { s += 1 }\n  }\n }\n return s\n}\n')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', top + code], env=env, capture_output=True, text=True, timeout=60)
+        return (r.stdout + r.stderr).split()
+    out = run('op("image.new", "tex 32 32")\nmaterial("M")\nn = node("M", "image", "tex", 1)\nsocket("M", "base", n)\n'
+              'assign("Cube", "M")\nseams("Cube", "sharp")\nunwrap("Cube")\nprint(layer("tex", "add"))\n'
+              'paint("Cube", 0, 2, 0, 0.6, 255, 0, 0)\na = top()\nlayer("tex", "visible", 1, 0)\nb = top()\n'
+              'layer("tex", "visible", 1, 1)\nlayer("tex", "opacity", 1, 0.2)\nc = top()\nlayer("tex", "opacity", 1, 1)\n'
+              'print(a, b, c, layer("tex", "count"))\nop("file.save", "~/BeeModel/lay.bee")')
+    try:
+        ok = out[0] == '1' and int(out[1]) > 10 and out[2] == '0' and int(out[3]) < int(out[1]) and out[4] == '2'
+    except Exception:
+        ok = False
+    check(ok, f'a layer takes the paint; hiding it or 20% opacity shows less ({out})')
+    out = run('op("file.open", "~/BeeModel/lay.bee")\nprint(layer("tex", "count"), top())\n'
+              'layer("tex", "visible", 1, 0)\nprint(top())\nlayer("tex", "visible", 1, 1)\nlayer("tex", "merge")\n'
+              'print(layer("tex", "count"), top())')
+    check(len(out) == 5 and out[0] == '2' and int(out[1]) > 10 and out[2] == '0' and out[3] == '1' and out[4] == out[1],
+          f'the layers come back from the .bee file; merge flattens them ({out})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('op("image.new", "tex 32 32")\nmaterial("M")\nn = node("M", "image", "tex", 1)\nsocket("M", "base", n)\n'
+      'assign("Cube", "M")\nseams("Cube", "sharp")\nunwrap("Cube")\nselect("Cube")')
+    f.mods(1); f.key(15); f.mods(0)             # Shift+Tab
+    f.mods(1); f.key(49); f.mods(0)             # Shift+N: a layer
+    f.pump(0.2)
+    f.drag(585, 320, 640, 345, steps=8)
+    f.pump(0.2)
+    f.shot('82_paint_layer.png')
+    n = q('print(layer("tex", "count"), layer("tex", "active"))')
+    check(n == '2 1', f'Shift+N in texture paint adds a layer and paints it ({n})')
     f.proc.kill()
 
 
