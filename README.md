@@ -359,6 +359,15 @@ m = modifier("Cube", "geometry")
 modset("Cube", m, "tree", t)
 ```
 
+**Scattering and instancing.** *Distribute Points on Faces* scatters points by area and density
+(a seed; a minimum distance thins them) and the points keep their faces' normals. *Instance on
+Points* places another geometry at every point - aligned to the normal or up, turned at random,
+scaled by a field - as **instances**: one prototype mesh and a matrix each, never copied. The
+viewport draws them directly (instances under ~3 pixels as depth-tested squares, bigger ones as
+their triangles, binned into screen tiles across the threads): a million are placed in about
+12 ms and orbit at about 35 ms a frame on a 32-thread desktop. *Realize Instances* turns them into
+plain geometry; the path tracer takes them as triangles (4 million at most).
+
 **Node groups.** A Group node runs another tree as one node: inside, the Group Input gives the
 group node's geometry, value and vector (fields from outside reach in), the Group Output is what
 it returns; groups nest. In the node editor, Shift-click several nodes and **Ctrl+G** moves them
@@ -577,6 +586,7 @@ src/ntree.s     node trees: the block, nodes, links, files
 src/geonodes.s  geometry nodes: evaluation, field compiler, tree.* operators
 src/fieldvm.s   the field VM: per-point programs in SSE blocks
 src/asset.s     assets: trees and materials saved, loaded, the Asset Browser
+src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/paint.s     texture painting: projected dabs, UV-space dabs, stroke history
 src/layers.s    paint layers: stack, blend modes, composite, saving
 src/vcol.s      vertex colours: vertex paint, tinting, files

@@ -373,6 +373,8 @@ builtins:
     .long 2, 2
     .quad bn_modcount, b_modcount
     .long 1, 1
+    .quad bn_instances, b_instances
+    .long 1, 1
     .quad bn_everts, b_everts
     .long 1, 1
     .quad bn_efaces, b_efaces
@@ -608,6 +610,7 @@ bn_modapply:    .asciz "modapply"
 bn_modremove:   .asciz "modremove"
 bn_modcount:    .asciz "modcount"
 bn_everts:      .asciz "everts"
+bn_instances:   .asciz "instances"
 bn_efaces:      .asciz "efaces"
 bn_clock:       .asciz "clock"
 bn_vmove:       .asciz "vmove"
@@ -4424,6 +4427,18 @@ b_modcount:
     jmp     ret_num
 
 # everts(name) / efaces(name) - after modifiers
+# instances(name) -> the instances on the evaluated mesh (geometry nodes)
+b_instances:
+    sub     rsp, 8
+    call    a_meshobj
+    mov     rdi, rax
+    call    obj_eval
+    mov     rdi, rax
+    call    inst_count
+    add     rsp, 8
+    cvtsi2sd xmm0, eax
+    jmp     ret_num
+
 b_everts:
     mov     edx, ME_NVERTS
     jmp     eval_count
