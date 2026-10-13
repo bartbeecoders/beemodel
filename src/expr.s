@@ -9,8 +9,9 @@
 #
 #  Lengths become scene units (mm cm m in ft), angles radians (deg rad);
 #  plain numbers stay as typed. Names are pi, e, or parameters (cad.s
-#  evaluates those, with cycle detection). Functions: sin cos tan asin acos
-#  atan sqrt abs min max floor ceil round. Doubles throughout.
+#  evaluates those, with cycle detection; a driver's variables come first,
+#  rig.s). Functions: sin cos tan asin acos atan sqrt abs min max floor
+#  ceil round. Doubles throughout.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -419,9 +420,16 @@ parse_primary:
     mov     [rsp+24], rax
     mov     eax, [rip+ex_depth]
     mov     [rsp+16], eax
+    mov     rax, [rip+expr_name_hook]   # (a driver's variables: rig.s)
+    test    rax, rax
+    jz      51f
     lea     rdi, [rip+ex_word]
+    call    rax
+    test    eax, eax
+    jnz     52f
+51: lea     rdi, [rip+ex_word]
     call    param_lookup                # -> xmm0, eax = 1 if known
-    mov     rcx, [rsp+24]
+52: mov     rcx, [rsp+24]
     mov     [rip+ex_p], rcx
     mov     ecx, [rsp+16]
     mov     [rip+ex_depth], ecx

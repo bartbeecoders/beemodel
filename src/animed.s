@@ -39,7 +39,7 @@
 .equ KY_HRY,    20
 .equ KY_SEL,    26
 .equ AN_CUR_,   64
-.equ AN_KEYS_,  64 + 32*1024 + 32*48 + 32*32  # (anim.s: AN_KEYS)
+.equ AN_KEYS_,  AN_RIGEND_              # (anim.s: AN_KEYS)
 .equ KY_HT,     25
 .equ K_OBJ,     1
 .equ K_MAT,     2

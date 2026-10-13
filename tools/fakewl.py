@@ -534,6 +534,7 @@ def main():
     animation()
     anim_editors()
     armatures()
+    rigging()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3732,6 +3733,101 @@ def armatures():
     f.shot('99_weight_paint.png')
     f.mods(4); f.key(17); f.mods(0)
     check(heat > 20 and w0 == '1', f'Ctrl+W shows the weights as heat ({heat} coloured pixels)')
+    f.proc.kill()
+
+def rigging():
+    """Rigging: object constraints (copy, limit, track to, child of, with
+    influence), IK chains (FABRIK and CCD, a pole, out of reach), drivers,
+    shape keys (stored, mixed, keyed, driven), all saved. In the window:
+    motion paths, onion skins, a constraint undone with Ctrl+Z, an IK goal
+    dragged with G."""
+    print('  -- rigging: constraints, IK, drivers, shape keys --')
+    home = tempfile.mkdtemp(prefix='bee-rig-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    r1 = lambda *v: ' '.join(str(round(x, 3)) for x in v)
+    code = ('add("sphere", "T", 3, 2, 1)\nop("constraint.add", "Cube copy_location T axes xz")\n'
+            'print(get("Cube", "x"), get("Cube", "y"), get("Cube", "z"))\nmove("T", 5, 2, -1)\n'
+            'op("constraint.add", "Cube limit_location axes x min -10 0 0 max 4 0 0")\nprint(get("Cube", "x"), get("Cube", "z"))\n'
+            'op("constraint.remove", "Cube")\nprint(get("Cube", "x"), get("Cube", "z"))\n'
+            'add("camera", "Cam", 0, 0, 10)\nop("constraint.add", "Cam track_to T")\n'
+            'print(round(get("Cam", "rx") * 1000), round(get("Cam", "ry") * 1000))\n'
+            'add("cube", "Kid", 6, 2, -1)\nop("constraint.add", "Kid child_of T")\nmove("T", 5, 3, -1)\nrotate("T", 0, 1.5708, 0)\n'
+            'print(round(get("Kid", "x") * 100), round(get("Kid", "y") * 100), round(get("Kid", "z") * 100))\n'
+            'op("anim.driver", "Cube:sy a=T:x b=T:y a*2+b+frame")\nprint(get("Cube", "sy"))\n'
+            'move("T", 1, 1, 1)\nprint(get("Cube", "sy"))\n'
+            'a = armature("Rig")\nop("arm.bone", "Upper Bone 0 1 0 0 2 0")\nop("arm.bone", "Hand Upper 0 2 0 0 2.5 0")\n'
+            'add("sphere", "Goal", 1, 1.2, 0.3)\nadd("sphere", "Knee", 0, 1, -3)\n'
+            'op("constraint.add", "Rig:Upper ik Goal chain 2 pole Knee")\n'
+            'print(round(bonepos("Rig", "Upper", "x") * 1000), round(bonepos("Rig", "Upper", "y") * 1000), round(bonepos("Rig", "Upper", "z") * 1000), bonepos("Rig", "Bone", "z") < -0.2)\n'
+            'op("constraint.remove", "Rig")\nop("constraint.add", "Rig:Upper ik Goal chain 2 solver ccd iterations 50")\n'
+            'print(round(bonepos("Rig", "Upper", "x") * 100), round(bonepos("Rig", "Upper", "y") * 100), round(bonepos("Rig", "Upper", "z") * 100))\n'
+            'move("Goal", 5, 0, 0)\nprint(round(bonepos("Rig", "Upper", "x") * 1000), round(bonepos("Rig", "Upper", "y") * 1000))\n'
+            'select("Cube")\nop("shape.add", "Smile")\ny0 = vpos("Cube", 0, "y")\n'
+            'vmove("Cube", 0, vpos("Cube", 0, "x"), y0 + 1, vpos("Cube", 0, "z"))\nop("shape.add", "Smile")\n'
+            'print(shapes("Cube"), vpos("Cube", 0, "y") == y0, evpos("Cube", 0, "y") == y0)\n'
+            'op("shape.set", "Smile 0.5")\nprint(evpos("Cube", 0, "y") - y0)\n'
+            'key("shape:Cube:Smile", 1, 0)\nkey("shape:Cube:Smile", 11, 1)\nframe(11)\nprint(evpos("Cube", 0, "y") - y0)\n'
+            'add("sphere", "Dial", 4, 0, 0)\nop("anim.driver", "shape:Cube:Smile d=Dial:x d/8")\nframe(1)\n'
+            'print(prop("shape:Cube:Smile"), evpos("Cube", 0, "y") - y0)\n'
+            'op("file.save", "~/BeeModel/rig.bee")\nop("file.new")\nop("file.open", "~/BeeModel/rig.bee")\n'
+            'move("Dial", 2, 0, 0)\nprint(shapes("Cube"), prop("shape:Cube:Smile"), get("Cube", "sy"), round(bonepos("Rig", "Upper", "x") * 100))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+    out = [l.strip() for l in r.stdout.split('\n')]
+    out += [''] * 16
+    check(out[0] == '3 1 1' and out[1] == '4 -1' and out[2] == '0 0' and out[3] == '164 -427' and out[4] == '500 300 -200',
+          f'constraints: copy location (x z), limit, removed (the object its own again), track to, child of ({out[:5]})')
+    check(out[5] == '14' and out[6] == '4', f'a driver: a*2 + b + frame of two other properties, following them ({out[5:7]})')
+    check(out[7] == '1000 1200 300 1' and out[8] == '100 120 30' and out[9] == '2000 0',
+          f'IK: FABRIK reaches the goal with the knee towards the pole; CCD too; out of reach: straight at it ({out[7:10]})')
+    check(out[10] == '2 1 1' and out[11] == '0.5' and out[12] == '1' and out[13] == '0.5 0.5',
+          f'shape keys: stored (the Basis back), mixed, keyed, driven ({out[10:14]})')
+    check(out[14] == '2 0.25 4 200', f'constraints, drivers and shape keys saved and reopened, still live ({out[14]})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.enter(600, 300)
+    q('key("Cube:x", 1, -4)\nkey("Cube:x", 21, 4)\nkey("Cube:y", 1, 0)\nkey("Cube:y", 11, 3)\nkey("Cube:y", 21, 0)\n'
+      'select("Cube")\nop("anim.motion_paths")\nframe(11)')
+    f.pump(0.3)
+    img = f.image()
+    count = lambda cols: sum(1 for y in range(80, 620, 2) for x in range(214, 1014, 2) if img.getpixel((x, y))[:3] in cols)
+    path = count({(0x7a, 0xa6, 0xff)})
+    keys = count({(0xff, 0xd2, 0x7a)})
+    f.shot('100_motion_paths.png')
+    q('op("anim.motion_paths", "clear")\nop("anim.onion", "2 2 4")')
+    f.pump(0.3)
+    img = f.image()
+    red = count({(0xf0, 0x60, 0x60), (0x78, 0x30, 0x30)})
+    green = count({(0x60, 0xd0, 0x70), (0x30, 0x68, 0x38)})
+    f.shot('101_onion_skins.png')
+    q('op("anim.onion", "off")')
+    check(path > 40 and keys > 5 and red > 20 and green > 20,
+          f'motion paths ({path} path, {keys} key pixels); onion skins before and after ({red} red, {green} green pixels)')
+    q('add("sphere", "T", 3, 2, 1)\nscale("T", 0.2)')
+    q('op("constraint.add", "Cube copy_location T")')
+    a = q('print(get("Cube", "x"), get("Cube", "y"))')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    f.pump(0.2)
+    b = q('print(get("Cube", "x"), get("Cube", "y"))')
+    check(a == '3 2' and b == '0 3', f'a constraint undone with Ctrl+Z gives the object back ({a} -> {b})')
+    q('delete("Cube")\ndelete("T")\na = armature("Rig")\nop("arm.bone", "Upper Bone 0 1 0 0 2 0")\n'
+      'add("sphere", "Goal", 1.5, 1, 0)\nscale("Goal", 0.15)\nop("constraint.add", "Rig:Upper ik Goal chain 2")\nselect("Goal")')
+    t0 = q('print(round(bonepos("Rig", "Upper", "x") * 100), round(bonepos("Rig", "Upper", "y") * 100))')
+    g = project((1.5, 1, 0))
+    f.move(*g)
+    f.key(34)                                   # G: the goal follows the mouse
+    f.move(g[0] - 50, g[1] + 10)
+    f.pump(0.2)
+    f.shot('102_ik_drag.png')
+    f.click(g[0] - 50, g[1] + 10)
+    t1 = q('d = pow(bonepos("Rig", "Upper", "x") - get("Goal", "x"), 2) + pow(bonepos("Rig", "Upper", "y") - get("Goal", "y"), 2) + pow(bonepos("Rig", "Upper", "z") - get("Goal", "z"), 2)\n'
+           'print(round(sqrt(d) * 1000), round(get("Goal", "x") * 100), round(sqrt(pow(get("Goal", "x"), 2) + pow(get("Goal", "y"), 2) + pow(get("Goal", "z"), 2)) * 100))')
+    w = t1.split()
+    check(t0 == '150 100' and len(w) == 3 and int(w[0]) <= 5 and w[1] != '150' and int(w[2]) < 200,
+          f'IK: dragging the goal with G, the chain follows ({t0} -> tip off the goal, goal x, its distance: {t1})')
     f.proc.kill()
 
 

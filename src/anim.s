@@ -21,6 +21,8 @@
 #    modifier     modifier:Cube:0:levels          (index, parameter)
 #    node         node:Valley:3:5[:component]     (tree, node, slot 1-3
 #                                                  inputs, 4-7 values)
+#    bone         bone:Rig:Upper:rz               (a pose, in its axes)
+#    shape key    shape:Cube:Smile                (its value)
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -46,6 +48,12 @@
 .globl an_path_unkey
 .globl an_path_eval
 .globl an_set_frame
+.globl an_chan
+.globl an_path
+.globl ap_kind
+.globl ap_a
+.globl ap_b
+.globl ap_c
 .globl ed_timeline_draw
 .globl tl_press
 .globl tl_motion
@@ -87,7 +95,10 @@
 .equ LY_MODE,   16                      # 0 replace, 1 add
 .equ LY_REPEAT, 20                      # times it plays
 .equ LY_MUTE,   24
-.equ AN_KEYS,   AN_LAY + AN_MAXL*LY_SZ
+.if AN_LAY + AN_MAXL*LY_SZ - AN_CON_
+.error "AN_CON_ must follow the layers"
+.endif
+.equ AN_KEYS,   AN_RIGEND_              # (constraints and drivers: rig.s)
 .equ KY_SZ,     32
 .equ KY_F,      0
 .equ KY_V,      4
@@ -103,6 +114,7 @@
 .equ K_MOD,     3
 .equ K_NODE,    4
 .equ K_BONE,    5
+.equ K_SHAPE,   K_SHAPE_
 .equ GR_N,      128
 .equ GR_NODES,  160
 .equ NODE_SZ,   72
@@ -791,7 +803,16 @@ an_chan:
     je      .Lch_node
     cmp     ebx, K_BONE
     je      .Lch_bone
-    jmp     .Lch_fail
+    cmp     ebx, K_SHAPE
+    jne     .Lch_fail
+    mov     edi, r12d                   # a shape key's value (shape.s)
+    mov     esi, r13d
+    mov     edx, r15d
+    movss   xmm0, [rsp]
+    call    sk_chan
+    test    eax, eax
+    jz      .Lch_fail
+    jmp     .Lch_ok
 .Lch_bone:                              # a bone's pose (arm.s)
     mov     edi, r12d
     mov     esi, r13d
@@ -1048,7 +1069,8 @@ an_apply:
     jmp     4b
 8:  inc     r13d
     jmp     3b
-9:  call    arm_refresh                 # armatures show their new pose
+9:  call    rig_eval                    # drivers, constraints (rig.s)
+    call    arm_refresh                 # armatures show their new pose
     add     rsp, 32
     pop     r15
     pop     r14
@@ -1191,6 +1213,11 @@ an_path:
     call    str_eq
     test    eax, eax
     jnz     .Lap_bone
+    lea     rdi, [rip+ap_word]
+    lea     rsi, [rip+k_shape]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lap_shape
     lea     rdi, [rip+ap_word]          # an object: its property
     call    obj_find
     test    eax, eax
@@ -1331,6 +1358,32 @@ an_path:
 6:  mov     [rip+ap_c], ecx
     mov     dword ptr [rip+ap_kind], K_BONE
     jmp     .Lap_ok
+.Lap_shape:                             # shape:Cube:Smile
+    mov     rsi, r12
+    call    ap_field
+    mov     r12, rsi
+    lea     rdi, [rip+ap_word]
+    call    obj_find
+    test    eax, eax
+    jz      .Lap_bad
+    mov     edi, eax
+    call    obj_get
+    mov     rbx, rax
+    mov     eax, [rax+OB_UID]
+    mov     [rip+ap_a], eax
+    mov     rsi, r12
+    call    ap_field
+    test    eax, eax
+    jle     .Lap_bad
+    mov     rdi, rbx
+    lea     rsi, [rip+ap_word]
+    call    sk_find                     # (shape.s)
+    test    eax, eax
+    jle     .Lap_bad                    # (not the basis)
+    mov     [rip+ap_b], eax
+    mov     dword ptr [rip+ap_c], 0
+    mov     dword ptr [rip+ap_kind], K_SHAPE
+    jmp     .Lap_ok
 .Lap_node:
     mov     rsi, r12
     call    ap_field
@@ -1464,6 +1517,7 @@ k_material:     .asciz "material"
 k_modifier:     .asciz "modifier"
 k_node:         .asciz "node"
 k_bone:         .asciz "bone"
+k_shape:        .asciz "shape"
 .align 8
 obj_props:      .quad p_x, p_y, p_z, p_rx, p_ry, p_rz, p_sx, p_sy, p_sz
 p_x:            .asciz "x"
@@ -1498,7 +1552,7 @@ OPERATOR op_an_range,  "anim.range",      "Frame Range",      do_an_range, flags
 OPERATOR op_an_interp, "anim.interpolation", "Interpolation", do_an_interp, flags=OPF_AI_SAFE|OPF_UNDO, doc="How the selected objects' keys blend into the next: anim.interpolation <constant|linear|bezier>"
 
 .section .rodata
-s_an_bad:       .asciz "  no such property to key (paths: Cube:x, material:M:roughness, modifier:Cube:0:levels, node:Tree:3:5): "
+s_an_bad:       .asciz "  no such property to key (paths: Cube:x, material:M:roughness, modifier:Cube:0:levels, node:Tree:3:5, bone:Rig:Bone:rz, shape:Cube:Smile): "
 s_an_none:      .asciz "  nothing selected to key"
 s_an_range_bad: .asciz "  anim.range <start> <end> [fps]"
 s_an_keyed:     .asciz "  keyed at frame "

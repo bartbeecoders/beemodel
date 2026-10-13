@@ -33,6 +33,15 @@
 .globl arm_skin
 .globl arm_pose_mats
 .globl arm_load
+.globl arm_bone
+.globl am_m
+.globl am_r
+.globl am_ov
+.globl am_ovf
+.globl am_owner
+.globl m_mul
+.globl m_inv
+.globl pose_from_mat
 
 .equ AR_REFS,   0
 .equ AR_N,      4
@@ -83,6 +92,9 @@ s_bone:         .asciz "Bone"
 am_m:           .skip 48*AR_MAXB        # pose matrices (armature space)
 am_r:           .skip 48*AR_MAXB        # rest matrices
 am_k:           .skip 48*AR_MAXB        # skin matrices (in the mesh's space)
+am_ov:          .skip 48*AR_MAXB        # IK's poses (rig.s), used where
+am_ovf:         .skip AR_MAXB           #  these are set
+am_owner:       .skip 8                 # the armature object posed (IK), or 0
 am_t:           .skip 64
 am_t2:          .skip 64
 .text
@@ -430,8 +442,29 @@ norm3:
     divss   xmm2, xmm3
 1:  ret
 
-# arm_pose_mats(rdi=block) - am_r (rest) and am_m (pose) for every bone
+# arm_pose_mats(rdi=block) - am_r (rest) and am_m (pose) for every bone;
+#   then, when am_owner has IK constraints, their chains solved (rig.s) and
+#   the bones posed again with those poses
 arm_pose_mats:
+    push    rbx
+    mov     rbx, rdi
+    lea     rdi, [rip+am_ovf]
+    xor     eax, eax
+    mov     ecx, AR_MAXB
+    rep     stosb
+    mov     rdi, rbx
+    call    pose_pass
+    mov     rdi, rbx
+    mov     rsi, [rip+am_owner]
+    call    rig_ik
+    test    eax, eax
+    jz      1f
+    mov     rdi, rbx
+    call    pose_pass
+1:  pop     rbx
+    ret
+
+pose_pass:
     push    rbx
     push    r12
     push    r13
@@ -449,9 +482,20 @@ arm_pose_mats:
     add     rsi, rax
     mov     rdi, r13
     call    rest_mat
+    lea     rax, [rip+am_ovf]
+    cmp     byte ptr [rax+r12], 0
+    jne     4f
     lea     rdi, [r13+BN_LOC-OB_LOC]    # P (obj_matrix reads the same layout)
     lea     rsi, [rsp]
     call    obj_matrix
+    jmp     5f
+4:  imul    rsi, r12, 48                # (IK's)
+    lea     rax, [rip+am_ov]
+    add     rsi, rax
+    lea     rdi, [rsp]
+    mov     ecx, 48
+    rep     movsb
+5:
     imul    rdx, r12, 48
     lea     rax, [rip+am_r]
     add     rdx, rax
@@ -612,6 +656,7 @@ arm_mesh:
 arm_rebuild:
     push    rbx
     mov     rbx, rdi
+    mov     [rip+am_owner], rdi
     call    arm_of
     test    rax, rax
     jz      9f
@@ -634,6 +679,7 @@ arm_edit:
     push    r12
     sub     rsp, 8
     mov     rbx, rdi
+    mov     [rip+am_owner], rdi
     call    arm_of
     test    rax, rax
     jz      9f
@@ -765,6 +811,7 @@ arm_create:
     test    rax, rax
     jz      8f
     mov     rbx, rax
+    mov     qword ptr [rip+am_owner], 0
     xorps   xmm0, xmm0
     movups  [rsp], xmm0
     movups  [rsp+16], xmm0
@@ -910,6 +957,7 @@ arm_skin:
     test    rax, rax
     jz      8f
     mov     r13, rax                    # the armature object
+    mov     [rip+am_owner], rax
     mov     rdi, rax
     call    arm_of
     test    rax, rax
@@ -2510,6 +2558,7 @@ arm_ctrl_tab:
 au_setup:
     push    rbx
     mov     rbx, rdi
+    mov     [rip+am_owner], rdi
     lea     rsi, [rip+au_a]
     call    obj_matrix
     lea     rdi, [rip+au_ai]

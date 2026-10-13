@@ -57,6 +57,7 @@
 .equ TAG_ANIM,      0x4D494E41          # "ANIM"
 .equ TAG_ARMT,      0x544D5241          # "ARMT"
 .equ TAG_MWGT,      0x5447574D          # "MWGT"
+.equ TAG_MSHK,      0x4B48534D          # "MSHK"
 .equ AR_SZ_,        64 + 128*128
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
@@ -108,6 +109,8 @@ armt_chunk:     .skip 8
 armt_size:      .skip 4
 mwgt_chunk:     .skip 8
 mwgt_size:      .skip 4
+mshk_chunk:     .skip 8
+mshk_size:      .skip 4
 oi_line:        .skip 4                 # OBJ import: an "l" line
 curv_size:      .skip 4
 mvcl_size:      .skip 4
@@ -366,6 +369,10 @@ bee_save:
     mov     edi, TAG_MWGT               # MWGT (skin weights)
     call    chunk_begin
     call    mwgt_write
+    call    chunk_end
+    mov     edi, TAG_MSHK               # MSHK (shape keys)
+    call    chunk_begin
+    call    mshk_write
     call    chunk_end
     mov     edi, TAG_CADD
     call    chunk_begin
@@ -1025,6 +1032,7 @@ bee_load:
     mov     qword ptr [rip+anim_chunk], 0
     mov     qword ptr [rip+armt_chunk], 0
     mov     qword ptr [rip+mwgt_chunk], 0
+    mov     qword ptr [rip+mshk_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -1090,10 +1098,16 @@ bee_load:
     mov     [rip+armt_size], ebp
     jmp     23f
 283:cmp     eax, TAG_MWGT
-    jne     284f
+    jne     285f
     lea     rax, [rbx+8]
     mov     [rip+mwgt_chunk], rax
     mov     [rip+mwgt_size], ebp
+    jmp     23f
+285:cmp     eax, TAG_MSHK
+    jne     284f
+    lea     rax, [rbx+8]
+    mov     [rip+mshk_chunk], rax
+    mov     [rip+mshk_size], ebp
     jmp     23f
 284:cmp     eax, TAG_ANIM
     jne     282f
@@ -1270,7 +1284,12 @@ bee_load:
     jz      7744f
     mov     esi, [rip+mwgt_size]
     call    mwgt_read
-7744:mov     rdi, [rip+anim_chunk]       # animation
+7744:mov     rdi, [rip+mshk_chunk]       # shape keys
+    test    rdi, rdi
+    jz      7745f
+    mov     esi, [rip+mshk_size]
+    call    mshk_read
+7745:mov     rdi, [rip+anim_chunk]       # animation
     test    rdi, rdi
     jz      7742f
     mov     esi, [rip+anim_size]

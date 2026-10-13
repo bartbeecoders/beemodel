@@ -285,7 +285,9 @@ mesh_uv_free:
     imul    rsi, rsi, 20
     call    uv_unmap
     mov     qword ptr [rbx+ME_WGT], 0
-5:
+5:  mov     rdi, [rbx+ME_SHAPE]         # (shape keys)
+    mov     qword ptr [rbx+ME_SHAPE], 0
+    call    sk_free
     pop     rbx
     ret
 uv_unmap:
@@ -384,7 +386,11 @@ mesh_copy:
     mov     ecx, [rbx+ME_NVERTS]
     imul    ecx, ecx, 5
     rep     movsd
-6:  pop     rax
+6:  mov     rdi, [rbx+ME_SHAPE]         # (shape keys)
+    call    sk_dup
+    mov     rcx, [rsp]
+    mov     [rcx+ME_SHAPE], rax
+    pop     rax
 9:  pop     rbx
     ret
 

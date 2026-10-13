@@ -454,6 +454,13 @@ bones and **I** keys them. `arm.parent <mesh> <armature>` skins a mesh with auto
 (bone heat diffusion); the Armature modifier deforms it by linear blend or dual quaternion
 skinning, and **Ctrl+W** paints weights over a heat map.
 
+**Rigging.** Constraints copy, track, limit or parent an object to another
+(`constraint.add Cam track_to Target`). An IK constraint on a bone makes its chain reach for a
+target and bend towards a pole (`constraint.add Rig:Hand ik Goal chain 2 pole Knee`); drag the
+target with G and the arm follows. Drivers set one property from an expression of others
+(`anim.driver Door:ry a=Handle:rz a*2`), shape keys store a mesh's poses to blend and key
+(`shape.add Smile`), and `anim.motion_paths` and `anim.onion` show motion in the viewport.
+
 **Node groups.** A Group node runs another tree as one node: inside, the Group Input gives the
 group node's geometry, value and vector (fields from outside reach in), the Group Output is what
 it returns; groups nest. In the node editor, Shift-click several nodes and **Ctrl+G** moves them
@@ -687,6 +694,8 @@ src/copilot.s   the procedural co-pilot: node catalogue, graphs as JSON, proposa
 src/anim.s      animation: keyframes, F-curves, playback, actions and layers, the Timeline
 src/animed.s    the Dope Sheet and the Graph Editor
 src/arm.s       armatures: bones, poses, skinning (LBS / DQS), automatic weights, modes
+src/rig.s       constraints, IK (FABRIK / CCD), drivers, motion paths, onion skins
+src/shape.s     shape keys
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

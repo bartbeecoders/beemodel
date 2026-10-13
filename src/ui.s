@@ -1363,6 +1363,7 @@ modifier_keys: .byte 29, 42, 56, 54, 97, 100, 125, 126, 58, 69, 0
 # =============================================================================
 ui_draw:
     call    an_tick                     # playback: the frame the clock says
+    call    rig_tick                    # drivers, constraints, onion skins
     call    ui_layout
     call    reset_clip
     call    draw_titlebar

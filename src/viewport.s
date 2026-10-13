@@ -525,6 +525,7 @@ viewport_draw:
     call    cve_overlay                 # curve edit mode: points, handles
     call    cp_draw                     # an AI proposal: Accept / Revert
     call    arm_overlay                 # armature modes: bones, joints
+    call    rig_draw                    # motion paths, onion skins
     call    sculpt_overlay              # sculpt mode: the brush, settings
     call    paint_overlay               # texture paint: the same
 

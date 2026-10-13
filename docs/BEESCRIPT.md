@@ -152,11 +152,14 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `lsystem(name, axiom, rules, iterations, angle [, step [, radius]])` | A new object drawn by an L-system: `rules` like `"X=F+[[X]-X]-F[-FX]+X; F=FF"` rewrite the axiom `iterations` times (at most 8 million characters), then a turtle starting at the origin heading up reads it: `F`/`G` draw a step, `f` moves, `+ -` turn, `& ^` pitch, `\ /` roll by `angle` degrees, `\|` turns round, `[ ]` open and close a branch (thinner by 0.7), `!` thins. Without a radius: lines (a curve for the curve nodes); with one: hexagonal tubes. Returns its name |
 | `wfc(name, nx, nz, layers, seed, tiles)` | Wave function collapse: a new object of tile objects (`tiles`: their names in one text, up to 16) on an nx x nz grid, `layers` high. A tile is its object's mesh, turned and scaled like the object (wherever it stands), in a cell from -0.5 to 0.5 on each axis; with its four quarter turns. Two tiles fit side by side (or on top) when the vertices on their touching faces coincide. Returns its name, or `nil` when no arrangement is found in 20 tries |
 | `frame([n])` | The frame the scene shows; with `n`, goes there first (every keyed property takes its value at that frame) |
-| `key(path, frame [, value [, interpolation]])` | Keys a property at a frame (no value: its value now; interpolation `"bezier"` (default: auto-clamped handles), `"linear"` or `"constant"`); returns how many keys its curve has. Paths: `"Cube:x"`, `y`, `z`, `rx` .. `rz` (radians), `sx` .. `sz`; `"material:Red:roughness"` (`:k` picks a colour component); `"modifier:Cube:0:levels"` (index, parameter); `"node:Tree:3:5"` (tree, node, slot 1-3 an input's constant (`:k` a component), 4-7 a value); `"bone:Rig:Upper:rz"` (a bone's pose: `x` .. `sz` in its own axes) |
+| `key(path, frame [, value [, interpolation]])` | Keys a property at a frame (no value: its value now; interpolation `"bezier"` (default: auto-clamped handles), `"linear"` or `"constant"`); returns how many keys its curve has. Paths: `"Cube:x"`, `y`, `z`, `rx` .. `rz` (radians), `sx` .. `sz`; `"material:Red:roughness"` (`:k` picks a colour component); `"modifier:Cube:0:levels"` (index, parameter); `"node:Tree:3:5"` (tree, node, slot 1-3 an input's constant (`:k` a component), 4-7 a value); `"bone:Rig:Upper:rz"` (a bone's pose: `x` .. `sz` in its own axes); `"shape:Cube:Smile"` (a shape key's value) |
 | `unkey(path, frame)` | Removes that key (1 when there was one) |
 | `keyed(path, frame)` | The value the property's curve gives at a frame, `nil` when it has none |
 | `armature([name])` | A new armature (one bone, `Bone`, from the origin up 1 m), selected and active; returns its name. Bones: `op("arm.bone", "Upper Bone 0 1 0 0 2 0")` (name, parent or `-`, head, tail; a head on the parent's tail joins them); poses: `op("arm.pose", "Upper rot 0 0 90")` (`loc` / `rot` degrees / `scale`, in the bone's own axes); skinning: `op("arm.parent", "Body Rig")` (an Armature modifier and automatic weights; add `dual` for dual quaternions), `modset(mesh, i, "mode", 1)` |
 | `bones(name)` | An armature's bone count (-1: not an armature) |
+| `bonepos(armature, bone, axis)` | Where a bone's tail is, posed (IK too), in the world |
+| `prop(path)` | What any property is now, by its animation path (`"Cube:x"`, `"shape:Cube:Smile"`, ...); nil when the path names nothing |
+| `shapes(name)` | A mesh's shape keys, the Basis too (0: none). Make them with `op("shape.add", "Smile")` (stores the mesh as it is; edit it, then `shape.add` again stores the edit and brings the Basis back), set them with `op("shape.set", "Smile 0.5")` or key `"shape:Cube:Smile"` |
 | `weight(mesh, vertex, bone)` | A vertex's skin weight for a bone (by number, 0..) |
 | `wpaint(mesh, x, y, z, radius, bone, weight)` | Paints skin weight for a bone around a world point (one undo step); 0 when the mesh has no armature |
 | `evpos(mesh, vertex, axis)` | A vertex's position as shown: after modifiers (skinning, ...); `vpos` gives the base mesh's |
@@ -179,6 +182,13 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `modcount(name)` | Number of modifiers in the stack |
 | `everts(name)` / `efaces(name)` | Vertex and face counts after the modifiers |
 | `clock()` | Milliseconds (monotonic), for timing |
+
+Rigging runs through operators: `op("constraint.add", "Cube copy_location Target axes xz")` (also
+`copy_rotation`, `copy_scale`, `track_to` (`track -z up y`), `limit_location` / `limit_rotation` /
+`limit_scale` (`min x y z max x y z`, rotations in degrees), `child_of`, and on a bone `ik`:
+`op("constraint.add", "Rig:Hand ik Goal chain 2 pole Knee solver fabrik")`), `constraint.remove`,
+`constraint.set <n> influence 0.5`. Drivers: `op("anim.driver", "Door:ry a=Handle:rz a*2 + sin(frame/10)")`.
+Constraints and drivers apply before each builtin a script calls, so it reads their results.
 
 The modifier values are:
 

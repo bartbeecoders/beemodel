@@ -120,6 +120,7 @@ run_op:
     add     rsp, 8
     pop     rdi
     call    fa_release
+    call    rig_eval                    # (drivers and constraints follow)
     mov     dword ptr [rip+dirty], 1
     mov     rdi, rbx                    # macro recording
     call    macro_op
