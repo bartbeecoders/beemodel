@@ -207,16 +207,28 @@ j_mats:         .asciz "],\"materials\":["
 j_type_names:   .asciz "mesh"
                 .asciz "light"
                 .asciz "camera"
+                .asciz "sketch"
 j_selected:     .asciz ",\"selected\":"
 j_active:       .asciz ",\"active\":"
 j_verts:        .asciz ",\"vertices\":"
 j_faces:        .asciz ",\"faces\":"
 j_mods:         .asciz ",\"modifiers\":["
+j_sk:           .asciz ",\"sketch\":{\"plane\":"
+j_sk_pts:       .asciz ",\"points\":"
+j_sk_ents:      .asciz ",\"entities\":"
+j_sk_cons:      .asciz ",\"constraints\":"
+j_sk_dof:       .asciz ",\"dof\":"
+j_sk_bad:       .asciz ",\"conflicts\":"
+.align 8
+sk_plane_names: .quad spn_xy, spn_xz, spn_yz
+spn_xy:         .asciz "XY"
+spn_xz:         .asciz "XZ"
+spn_yz:         .asciz "YZ"
 .align 4
 f_deg2rad:      .float 0.017453293
 f_rad2deg_:     .float 57.29578
 .align 8
-type_name_ptrs: .quad j_type_names, j_type_names+5, j_type_names+11
+type_name_ptrs: .quad j_type_names, j_type_names+5, j_type_names+11, j_type_names+18
 nanos:          .quad 0, 100000000      # 100 ms
 
 .text
@@ -1791,7 +1803,47 @@ scene_json:
     jmp     5b
 7:  mov     edi, ']'
     call    wb_char
-8:  mov     rdi, r12                    # "material":"Gold"
+8:  mov     rax, [r12+OB_SKETCH]        # "sketch":{"plane":..,"dof":..}
+    test    rax, rax
+    jz      89f
+    push    rax
+    sub     rsp, 8
+    lea     rsi, [rip+j_sk]
+    call    wb_str
+    mov     rax, [rsp+8]
+    mov     eax, [rax+8]
+    lea     rcx, [rip+sk_plane_names]
+    mov     rsi, [rcx+rax*8]
+    call    jb_q
+    lea     rsi, [rip+j_sk_pts]
+    call    wb_str
+    mov     rax, [rsp+8]
+    mov     edi, [rax+12]
+    call    wb_int
+    lea     rsi, [rip+j_sk_ents]
+    call    wb_str
+    mov     rax, [rsp+8]
+    mov     edi, [rax+16]
+    call    wb_int
+    lea     rsi, [rip+j_sk_cons]
+    call    wb_str
+    mov     rax, [rsp+8]
+    mov     edi, [rax+20]
+    call    wb_int
+    lea     rsi, [rip+j_sk_dof]
+    call    wb_str
+    mov     rax, [rsp+8]
+    movsxd  rdi, dword ptr [rax+24]
+    call    wb_int
+    lea     rsi, [rip+j_sk_bad]
+    call    wb_str
+    mov     rax, [rsp+8]
+    mov     edi, [rax+28]
+    call    wb_int
+    mov     edi, '}'
+    call    wb_char
+    add     rsp, 16
+89: mov     rdi, r12                    # "material":"Gold"
     call    mat_of
     test    eax, eax
     js      81f

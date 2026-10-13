@@ -16,6 +16,7 @@
 #          WRLD  the world: HDRI image + 1, strength, rotation
 #          MGRF  shader graphs: count, then 896 bytes per material
 #          CADD  the CAD document: unit (mm, double), parameters
+#          SKCH  sketches: count, then (object index, sketch block) each
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
@@ -41,6 +42,7 @@
 .equ TAG_WRLD,      0x444c5257          # "WRLD"
 .equ TAG_MGRF,      0x4652474d          # "MGRF"
 .equ TAG_CADD,      0x44444143          # "CADD"
+.equ TAG_SKCH,      0x48434b53          # "SKCH"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -65,6 +67,8 @@ imgs_chunk:     .skip 8
 wrld_chunk:     .skip 8
 mgrf_chunk:     .skip 8
 cadd_chunk:     .skip 8
+skch_chunk:     .skip 8
+skch_size:      .skip 4
 cadd_size:      .skip 4
 mgrf_size:      .skip 4
 imgs_size:      .skip 4
@@ -290,6 +294,10 @@ bee_save:
     call    chunk_begin
     call    cad_write
     call    chunk_end
+    mov     edi, TAG_SKCH
+    call    chunk_begin
+    call    sketches_write
+    call    chunk_end
     mov     edi, TAG_IMGS               # IMGS, WRLD
     call    chunk_begin
     call    images_write
@@ -513,6 +521,7 @@ bee_load:
     mov     qword ptr [rip+wrld_chunk], 0
     mov     qword ptr [rip+mgrf_chunk], 0
     mov     qword ptr [rip+cadd_chunk], 0
+    mov     qword ptr [rip+skch_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -571,7 +580,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_CADD
+28: cmp     eax, TAG_SKCH
+    jne     279f
+    lea     rax, [rbx+8]
+    mov     [rip+skch_chunk], rax
+    mov     [rip+skch_size], ebp
+    jmp     23f
+279:cmp     eax, TAG_CADD
     jne     280f
     lea     rax, [rbx+8]
     mov     [rip+cadd_chunk], rax
@@ -692,7 +707,12 @@ bee_load:
     jz      73f
     mov     esi, [rip+omat_size]
     call    omat_read
-73: mov     rdi, [rip+mods_chunk]       # modifier stacks
+73: mov     rdi, [rip+skch_chunk]       # sketches
+    test    rdi, rdi
+    jz      731f
+    mov     esi, [rip+skch_size]
+    call    sketches_read
+731:mov     rdi, [rip+mods_chunk]       # modifier stacks
     test    rdi, rdi
     jz      70f
     mov     esi, [rip+mods_size]

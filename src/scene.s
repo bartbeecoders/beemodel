@@ -69,7 +69,7 @@ prim_table:     .quad prim_cube,     s_cube,     OT_MESH
                 .quad prim_cone,     s_cone,     OT_MESH
                 .quad prim_torus,    s_torus,    OT_MESH
                 .quad prim_grid,     s_grid,     OT_MESH
-type_colors:    .long 0xb4b8c0, 0xe5c07b, 0x61afef
+type_colors:    .long 0xb4b8c0, 0xe5c07b, 0x61afef, 0x8a9bb0
 
 # ---- operators ---------------------------------------------------------------------
 OPERATOR op_add_cube,     "create.cube",     "Cube",     op_create, arg=0, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a cube"

@@ -295,6 +295,8 @@ obj_data_ref:
     call    mesh_ref
     mov     rdi, [rbx+OB_MODS]
     call    mods_ref
+    mov     rdi, [rbx+OB_SKETCH]
+    call    sk_ref
     pop     rbx
     ret
 obj_data_unref:
@@ -304,6 +306,8 @@ obj_data_unref:
     call    mesh_unref
     mov     rdi, [rbx+OB_MODS]
     call    mods_unref
+    mov     rdi, [rbx+OB_SKETCH]
+    call    sk_unref
     pop     rbx
     ret
 

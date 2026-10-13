@@ -433,7 +433,21 @@ ui_motion:
     jne     76f
     call    box_move                    # edi / esi = the pointer
     jmp     .Lmo_out
-76: cmp     eax, DRAG_REDO
+76: cmp     eax, DRAG_SKETCH
+    jne     761f
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    vp_setup_drag
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    skm_drag
+    call    reset_clip
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+    jmp     .Lmo_out
+761:cmp     eax, DRAG_REDO
     jne     75f
     call    redo_drag_move              # edi = pointer x
     jmp     .Lmo_out
@@ -493,6 +507,14 @@ ui_motion:
     mov     esi, [rip+ptr_y]
     call    hit_test
     mov     r13d, eax
+    push    rdx
+    push    rax
+    mov     edi, [rip+ptr_x]            # sketch tools preview at the pointer
+    mov     esi, [rip+ptr_y]
+    mov     edx, [rip+hit_area]
+    call    skm_hover
+    pop     rax
+    pop     rdx
     # sliding across the menu bar while a menu is open switches menus
     cmp     eax, HIT_MENU_TITLE
     jne     1f
@@ -777,7 +799,20 @@ ui_button:
     mov     esi, [rip+ptr_y]
     call    box_begin
     jmp     .Lbt_done
-52: mov     dword ptr [rip+drag_mode], DRAG_PENDING
+52: cmp     dword ptr [rip+skm_obj], 0  # sketch mode: grab a point?
+    je      53f
+    call    vp_setup_drag
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    skm_press
+    push    rax
+    call    reset_clip
+    pop     rax
+    test    eax, eax
+    jz      53f
+    mov     dword ptr [rip+drag_mode], DRAG_SKETCH
+    jmp     .Lbt_done
+53: mov     dword ptr [rip+drag_mode], DRAG_PENDING
     mov     eax, [rip+ptr_x]
     mov     [rip+press_x], eax
     mov     eax, [rip+ptr_y]
@@ -818,9 +853,14 @@ ui_button:
     call    reset_clip
     jmp     .Lbt_done
 77: cmp     dword ptr [rip+drag_mode], DRAG_PENDING
-    jne     0f
+    jne     78f
     mov     dword ptr [rip+drag_mode], 0
     call    viewport_click
+    jmp     .Lbt_done
+78: cmp     dword ptr [rip+drag_mode], DRAG_SKETCH
+    jne     0f
+    mov     dword ptr [rip+drag_mode], 0
+    call    skm_release
     jmp     .Lbt_done
 0:  cmp     dword ptr [rip+drag_mode], 0
     je      1f
@@ -943,7 +983,16 @@ ui_axis:
 viewport_click:
     push    rbx
     call    vp_setup_drag
-    cmp     dword ptr [rip+edit_obj], 0 # edit mode: components
+    cmp     dword ptr [rip+skm_obj], 0  # sketch mode: its tools
+    je      101f
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    mov     edx, [rip+press_mods]
+    call    skm_click
+    call    reset_clip
+    pop     rbx
+    ret
+101: cmp     dword ptr [rip+edit_obj], 0 # edit mode: components
     je      1f
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
@@ -1062,7 +1111,17 @@ ui_key_press:
     call    tf_key
     test    eax, eax
     jnz     9f
-2:  cmp     ebx, KEY_ESC                # Esc stops a running render
+2:  cmp     ebx, KEY_ESC                # Esc: sketch mode first
+    jne     21f
+    call    skm_escape
+    test    eax, eax
+    jnz     9f
+    cmp     dword ptr [rip+hv_active], 0    # ... a running render
+    je      21f
+    lea     rdi, [rip+op_render_stop]
+    call    run_op
+    jmp     9f
+    cmp     ebx, KEY_ESC                # (stops a running render)
     jne     21f
     cmp     dword ptr [rip+hv_active], 0
     je      21f
