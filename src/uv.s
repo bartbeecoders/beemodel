@@ -30,6 +30,11 @@
 .globl uv_seams
 .globl uv_stat
 .globl uv_cow
+.globl uv_select_island
+.globl tri_area3
+.globl tri_area2
+.globl angle3
+.globl angle2
 
 .equ UV_NONE,   0xffffffff
 
@@ -2929,6 +2934,53 @@ cover_tri:
 8:  inc     r14d
     jmp     2b
 9:  add     rsp, 40
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# uv_select_island(rdi=mesh, esi=polygon, rdx=per-loop flags) - its UV
+#   island's loops get 1
+uv_select_island:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13, rdx
+    call    fa_mark
+    mov     r14, rax
+    mov     rdi, rbx
+    call    uv_topo
+    test    eax, eax
+    jz      8f
+    mov     edi, 1
+    call    ut_islands
+    mov     rax, [rip+ut_pisl]
+    mov     edi, [rax+r12*4]
+    mov     rax, [rip+ut_ioff]
+    mov     r15d, [rax+rdi*4]
+    mov     r12d, [rax+rdi*4+4]
+1:  cmp     r15d, r12d
+    jae     8f
+    mov     rax, [rip+ut_ipoly]
+    mov     eax, [rax+r15*4]
+    mov     rdx, [rbx+ME_POFF]
+    mov     ecx, [rdx+rax*4]
+    mov     edx, [rdx+rax*4+4]
+2:  cmp     ecx, edx
+    jae     3f
+    mov     byte ptr [r13+rcx], 1
+    inc     ecx
+    jmp     2b
+3:  inc     r15d
+    jmp     1b
+8:  mov     rdi, r14
+    call    fa_release
+    pop     r15
     pop     r14
     pop     r13
     pop     r12

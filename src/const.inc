@@ -168,11 +168,15 @@
 .equ COL_FIELD,       0x1d2025
 .equ HIT_REDO,          23
 .equ HIT_MODS,          24
+.equ HIT_UVED,          25
 .equ DRAG_MODS,         9
 .equ DRAG_REDO,         8
 .equ COL_EDIT_WIRE,   0x0b0c0e
 .equ COL_EDIT_SEL,    0xffa233
 .equ COL_SEAM,          0xe8483c  # UV seams in edit mode
+.equ COL_UV_SQUARE,     0x2c3038  # UV editor: the unit square,
+.equ COL_UV_GRID,       0x3a3f48  #  its grid,
+.equ COL_UV_EDGE,       0xb8bcc4  #  UV edges
 .equ COL_FACE_SEL,    0xe0a060
 .equ DRAG_BOX,          7
 .equ DRAG_SKETCH,       10      # a sketch point follows the pointer
@@ -204,6 +208,7 @@
 .equ KEY_W,             17
 .equ KEY_E,             18
 .equ KEY_U,             22
+.equ KEY_HOME,          102
 .equ KEY_R,             19
 .equ KEY_T,             20
 .equ KEY_O,             24
@@ -284,6 +289,7 @@
 .equ ED_CONSOLE,        4
 .equ ED_ACTIVITY,       5
 .equ ED_RENDER,         6
+.equ ED_UVED,           7
 .equ MENU_AREA,         8
 .equ MENU_MODADD,       9
 .equ KEY_SPACE,         57

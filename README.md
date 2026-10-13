@@ -365,6 +365,14 @@ pack the islands into the unit square: one texel density, each island
 turned to its smallest box, placed on a skyline. UVs and seams are saved in
 `.bee` files and exported to OBJ (`vt`) and glTF (`TEXCOORD_0`).
 
+The **UV Editor** (any area's type menu) shows the active mesh's layout over
+the unit square: a click selects the island under the pointer (Shift adds),
+**A** all / none, **G** / **S** / **R** move, scale and rotate the selected
+islands (a click or Enter keeps it, right click or Esc puts it back), middle
+drag pans, the wheel zooms, Home fits. **D** cycles a distortion heat map
+(area: blue where the UVs are squeezed, red where stretched; angle), and
+the header gives the islands and the texel density of a 1024 px map.
+
 ### BeeScript
 
 BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not
@@ -469,6 +477,7 @@ src/sculpt.s    sculpt mode: leaf BVH, brushes, delta undo, splat drawing
 src/dyntopo.s   dynamic topology: edge split / collapse under the brush
 src/multires.s  multiresolution: per-level displacements, level sculpting
 src/uv.s        UV maps: seams, LSCM unwrap (CG solver), smart projection, packing
+src/uved.s      the UV editor area: islands, transforms, heat map, texel density
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
