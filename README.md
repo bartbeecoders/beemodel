@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.8.0/beemodel-0.8.0-linux-x86_64.bin
-chmod +x beemodel-0.8.0-linux-x86_64.bin && ./beemodel-0.8.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.9.0/beemodel-0.9.0-linux-x86_64.bin
+chmod +x beemodel-0.9.0-linux-x86_64.bin && ./beemodel-0.9.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -423,6 +423,11 @@ lsystem("Fern", "X", "X=F+[[X]-X]-F[-FX]+X; F=FF", 5, 25, 0.05, 0.03)   # taperi
 and wave function collapse lays out tiles: `wfc("Town", 12, 12, 1, 7, "Road Corner Grass House")`
 fills a 12 x 12 grid with those objects in four turns each, so that what touches matches - which
 faces fit is read from the tiles' own vertices, no rules to write.
+
+[tests/procedural.bees](tests/procedural.bees) puts it together: one tree makes an eroded
+valley with scattered rocks and L-system plants, a second sweeps a curve into a rail with posts,
+a third scatters a million blades of grass (placed in ~15 ms, orbiting at ~11 ms a frame); the
+scene is saved and rendered.
 
 **Node groups.** A Group node runs another tree as one node: inside, the Group Input gives the
 group node's geometry, value and vector (fields from outside reach in), the Group Output is what
