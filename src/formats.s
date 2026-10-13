@@ -56,6 +56,9 @@ mats_chunk:     .skip 8
 mtl_base:       .skip 8
 mtl_buf:        .skip 512
 omat_chunk:     .skip 8
+oi_mtllib:      .skip 256
+oi_usemtl:      .skip 256
+oi_path:        .skip 768
 imgs_chunk:     .skip 8
 wrld_chunk:     .skip 8
 mgrf_chunk:     .skip 8
@@ -106,6 +109,8 @@ s_pf_save:      .asciz "file.save ~/BeeModel/untitled.bee"
 s_pf_iobj:      .asciz "file.import_obj ~/"
 s_pf_istl:      .asciz "file.import_stl ~/"
 s_pf_eobj:      .asciz "file.export_obj ~/BeeModel/scene.obj"
+s_pf_igltf:     .asciz "file.import_gltf ~/"
+s_pf_egltf:     .asciz "file.export_gltf ~/BeeModel/scene.glb"
 s_pf_estl:      .asciz "file.export_stl ~/BeeModel/scene.stl"
 s_shot_name:    .asciz "/screenshot.png"
 s_untitled_obj: .asciz "Imported"
@@ -117,6 +122,8 @@ OPERATOR op_file_saveas,"file.save_as", "Save As...", op_save_as, key=KEY_S|KM_C
 OPERATOR op_import_obj, "file.import_obj", "Import OBJ...", op_iobj, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import a Wavefront OBJ: file.import_obj <path>"
 OPERATOR op_import_stl, "file.import_stl", "Import STL...", op_istl, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import an STL (binary or ASCII): file.import_stl <path>"
 OPERATOR op_export_obj, "file.export_obj", "Export OBJ...", op_eobj, doc="Export mesh objects as OBJ: file.export_obj <path>"
+OPERATOR op_import_gltf, "file.import_gltf", "Import glTF...", op_igltf, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import a glTF 2.0 scene (.gltf or .glb): file.import_gltf <path>"
+OPERATOR op_export_gltf, "file.export_gltf", "Export glTF...", op_egltf, doc="Export mesh objects and materials as glTF 2.0 (.glb binary, .gltf text): file.export_gltf <path>"
 OPERATOR op_export_stl, "file.export_stl", "Export STL...", op_estl, doc="Export mesh objects as binary STL: file.export_stl <path>"
 OPERATOR op_screenshot, "view.screenshot", "Screenshot",   op_shot, key=KEY_F12|KM_SHIFT, doc="Save the window as PNG: view.screenshot [path]"
 OPERATOR op_recover,    "file.recover",  "Recover Autosave", op_recover_x, flags=OPF_AI_SAFE|OPF_UNDO, doc="Open the last autosave"
@@ -1023,6 +1030,8 @@ obj_import:
     push    r15
     sub     rsp, 280                    # [rsp] face index scratch (64 u32)
     mov     [rsp+256], rdi
+    mov     byte ptr [rip+oi_mtllib], 0
+    mov     byte ptr [rip+oi_usemtl], 0
     call    file_read
     test    rax, rax
     jnz     1f
@@ -1109,7 +1118,42 @@ obj_import:
     call    mesh_add_vert
     pop     rsi
     jmp     7f
-6:  cmp     ax, 0x2066
+6:  mov     rcx, r15                    # mtllib / usemtl: the first of each
+    sub     rcx, rsi
+    cmp     rcx, 8
+    jb      69f
+    mov     rcx, [rsi]
+    shl     rcx, 8                      # (7 bytes: "mtllib ")
+    mov     rdx, 0x2062696c6c746d00
+    cmp     rcx, rdx
+    jne     66f
+    lea     rdi, [rip+oi_mtllib]
+    jmp     67f
+66: mov     rdx, 0x206c746d65737500     # "usemtl "
+    cmp     rcx, rdx
+    jne     69f
+    lea     rdi, [rip+oi_usemtl]
+67: cmp     byte ptr [rdi], 0
+    jne     7f
+    lea     rcx, [rsi+7]
+    xor     edx, edx
+68: cmp     rcx, r15
+    jae     681f
+    mov     al, [rcx]
+    cmp     al, 10
+    je      681f
+    cmp     al, 13
+    je      681f
+    cmp     edx, 250
+    jae     681f
+    mov     [rdi+rdx], al
+    inc     rcx
+    inc     edx
+    jmp     68b
+681:mov     byte ptr [rdi+rdx], 0
+    jmp     7f
+69: mov     ax, [rsi]
+    cmp     ax, 0x2066
     jne     7f
     add     rsi, 2
     xor     r13d, r13d                  # indices in this face
@@ -1190,9 +1234,11 @@ obj_import:
     call    obj_new
     test    eax, eax
     jz      82f
+    mov     [rsp+272], eax
     mov     edi, eax
     xor     esi, esi
     call    obj_click_select
+    call    obj_materials               # mtllib + usemtl
 82: mov     rdi, [rip+fbase]
     mov     rsi, [rip+fsize]
     call    file_unmap
@@ -1210,6 +1256,61 @@ obj_import:
     pop     r13
     pop     r12
     pop     rbp
+    pop     rbx
+    ret
+
+# obj_materials (obj_import's frame, one level up: [rsp+8+256] = the OBJ
+#   path, [rsp+8+272] = the new object) - read the MTL, assign usemtl
+obj_materials:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    cmp     byte ptr [rip+oi_mtllib], 0
+    je      9f
+    mov     rsi, [rsp+32+256]           # the OBJ's folder + the MTL's name
+    lea     rdi, [rip+oi_path]
+    xor     ecx, ecx
+    xor     edx, edx
+1:  mov     al, [rsi+rcx]
+    test    al, al
+    jz      2f
+    cmp     ecx, 500
+    jae     2f
+    mov     [rdi+rcx], al
+    inc     ecx
+    cmp     al, '/'
+    jne     1b
+    mov     edx, ecx
+    jmp     1b
+2:  lea     rsi, [rip+oi_mtllib]
+    xor     ecx, ecx
+3:  mov     al, [rsi+rcx]
+    lea     r8d, [rdx+rcx]
+    cmp     r8d, 760
+    jae     4f
+    mov     [rdi+r8], al
+    inc     ecx
+    test    al, al
+    jnz     3b
+4:  lea     rdi, [rip+oi_path]
+    call    mtl_import
+    cmp     byte ptr [rip+oi_usemtl], 0
+    je      9f
+    lea     rdi, [rip+oi_usemtl]
+    mov     byte ptr [rdi+31], 0
+    call    mat_find
+    test    eax, eax
+    js      9f
+    mov     r12d, eax
+    mov     edi, [rsp+32+272]
+    call    obj_get
+    test    rax, rax
+    jz      9f
+    mov     rdi, rax
+    mov     esi, r12d
+    call    mat_assign
+9:  add     rsp, 8
+    pop     r12
     pop     rbx
     ret
 
@@ -1710,6 +1811,37 @@ op_istl:
     call    undo_drop_last
     pop     rax
 2:  lea     rdi, [rip+s_imported]
+    jmp     result
+
+op_igltf:
+    call    has_arg
+    jnz     1f
+    call    undo_drop_last
+    lea     rdi, [rip+s_pf_igltf]
+    jmp     console_prefill
+1:  mov     rdi, [rip+op_arg]
+    call    path_expand
+    mov     rdi, rax
+    call    gltf_import
+    test    eax, eax
+    jz      2f
+    push    rax
+    call    undo_drop_last
+    pop     rax
+2:  lea     rdi, [rip+s_imported]
+    jmp     result
+
+op_egltf:
+    call    has_arg
+    jnz     1f
+    lea     rdi, [rip+s_pf_egltf]
+    jmp     console_prefill
+1:  mov     rdi, [rip+op_arg]
+    call    path_expand
+    call    default_dir
+    lea     rdi, [rip+path_buf]
+    call    gltf_export
+    lea     rdi, [rip+s_exported]
     jmp     result
 
 op_eobj:

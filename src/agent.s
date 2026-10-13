@@ -91,6 +91,7 @@ agent_init:
     ret
 
 # prefix(rdi=text, rsi=prefix) -> eax = 1 if text starts with it
+.globl prefix
 prefix:
 1:  mov     al, [rsi]
     test    al, al

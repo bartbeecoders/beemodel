@@ -217,7 +217,8 @@ Scripts and agents call the same operators with the value as the argument:
 `op("mesh.inset", 0.1)`.
 
 Files: **Ctrl+S** saves (`.bee`), **Ctrl+O** opens, and File › Import / Export
-handle **OBJ** and **STL**. Commands take paths on the command line, for
+handle **OBJ** (with MTL materials), **STL** and **glTF 2.0** (`.glb` / `.gltf`, with PBR
+materials). Commands take paths on the command line, for
 example `file.save ~/BeeModel/chair.bee` or `file.import_stl ~/part.stl`.
 Without a path, the command line opens pre-filled. **Shift+F12** saves a PNG
 screenshot. The scene autosaves every 25 changes (`file.recover` restores

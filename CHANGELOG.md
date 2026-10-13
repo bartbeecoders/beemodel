@@ -7,6 +7,22 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- glTF 2.0 and MTL:
+  - **Export:** `file.export_gltf <path>` writes `.glb` (binary chunks)
+    or `.gltf` (base64 buffer). Mesh objects become nodes with
+    translation, a quaternion from our Euler angles, and scale, plus u32
+    triangles and positions with bounds. Materials become
+    metallic-roughness PBR with emission (KHR_materials_emissive_strength
+    above 1), transmission, IOR and clearcoat. Blender reads the files.
+  - **Import:** `file.import_gltf <path>` reads `.glb` and `.gltf` with
+    embedded, `data:` or external buffers. It walks the default scene's
+    node tree (TRS or matrices) and bakes each triangle primitive's world
+    transform into a new object. Equal positions are welded, so meshes
+    stay connected, and materials map back with their extensions.
+  - **MTL with OBJ:** OBJ import reads `mtllib` and assigns the first
+    `usemtl`. The MTL reader handles Kd, Ke, Ni, d / Tr, Ns (to
+    roughness), Tf, the PBR keys Pr / Pm / Pc / Pcr and map_Kd (the image
+    becomes the base colour).
 - Shader graphs: a material can hold up to 12 nodes.
   - **Nodes:** image, noise (Perlin fBm), checker, gradient, mix (mix /
     add / multiply / subtract / screen), colour ramp, math (ten

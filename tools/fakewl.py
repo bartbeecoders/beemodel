@@ -463,6 +463,7 @@ def main():
     render_window()
     textures_world()
     shader_graph()
+    gltf_mtl()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -1679,6 +1680,124 @@ def shader_graph():
     f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the whole script run
     check(q('print(matof("Cube"))') == 'nil', 'one undo removes the material and its graph (one script run)')
     f.proc.kill()
+
+
+def gltf_fixture(path, external=False):
+    """A small glTF by hand: a parent (TRS) with a child (matrix) holding a
+    tetrahedron (u16 indices) and a material with extensions. Returns the
+    tetrahedron's expected world-space corners."""
+    import base64
+    pts = [(0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0, 1)]
+    idx = [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3]
+    data = b''.join(struct.pack('<3f', *p) for p in pts) + struct.pack('<12H', *idx)
+    q = (0, math.sin(math.pi / 4), 0, math.cos(math.pi / 4))       # 90 deg about y
+    parent_t, parent_s = (1, 2, 3), (2, 2, 2)
+    child_m = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.5, 0, 0, 1]   # column-major: translate x 0.5
+    def rot_y90(v): return (v[2], v[1], -v[0])
+    exp = []
+    for p in pts:
+        c = (p[0] + 0.5, p[1], p[2])
+        s_ = tuple(c[i] * parent_s[i] for i in range(3))
+        r = rot_y90(s_)
+        exp.append(tuple(r[i] + parent_t[i] for i in range(3)))
+    buf = {'byteLength': len(data)}
+    if external:
+        open(path[:-5] + '.bin', 'wb').write(data)
+        buf['uri'] = os.path.basename(path[:-5] + '.bin')
+    else:
+        buf['uri'] = 'data:application/octet-stream;base64,' + base64.b64encode(data).decode()
+    g = {'asset': {'version': '2.0'}, 'scene': 0, 'scenes': [{'nodes': [0]}],
+         'nodes': [{'name': 'Rig', 'translation': list(parent_t), 'rotation': list(q), 'scale': list(parent_s), 'children': [1]},
+                   {'name': 'Tetra', 'matrix': child_m, 'mesh': 0}],
+         'meshes': [{'name': 'tet', 'primitives': [{'attributes': {'POSITION': 0}, 'indices': 1, 'material': 0}]}],
+         'materials': [{'name': 'Paint', 'pbrMetallicRoughness': {'baseColorFactor': [0.1, 0.5, 0.9, 1], 'metallicFactor': 0.25,
+                        'roughnessFactor': 0.75}, 'emissiveFactor': [0, 0, 0],
+                        'extensions': {'KHR_materials_ior': {'ior': 1.6}, 'KHR_materials_clearcoat': {'clearcoatFactor': 0.4}}}],
+         'accessors': [{'bufferView': 0, 'componentType': 5126, 'type': 'VEC3', 'count': 4, 'min': [0, 0, 0], 'max': [1, 1, 1]},
+                       {'bufferView': 1, 'componentType': 5123, 'type': 'SCALAR', 'count': 12}],
+         'bufferViews': [{'buffer': 0, 'byteOffset': 0, 'byteLength': 48}, {'buffer': 0, 'byteOffset': 48, 'byteLength': 24}],
+         'buffers': [buf]}
+    open(path, 'w').write(json.dumps(g))
+    return exp
+
+
+def gltf_mtl():
+    """glTF 2.0 export / import (.glb, .gltf, hierarchies, PBR) and MTL with OBJ."""
+    print('  -- glTF and MTL --')
+    home = tempfile.mkdtemp(prefix='bee-gltf-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+        return r.stdout.strip()
+    # import a hand-made file: hierarchy, TRS + matrix, u16 indices, extensions
+    for ext in (False, True):
+        p = os.path.join(home, f'fix{int(ext)}.gltf')
+        exp = gltf_fixture(p, ext)
+        out = run(f'op("file.import_gltf", "{p}")\nn = "Tetra"\nprint(verts(n), faces(n), matof(n))\n'
+                  f'for v in 0..verts(n) {{ print(vpos(n, v, 0), vpos(n, v, 1), vpos(n, v, 2)) }}\n'
+                  f'print(matget("Paint", "base", 2), matget("Paint", "metallic"), matget("Paint", "roughness"), '
+                  f'matget("Paint", "ior"), matget("Paint", "clearcoat"))').splitlines()
+        try:
+            head = out[0].split()
+            got = sorted(tuple(round(float(x), 3) for x in l.split()) for l in out[1:5])
+            vals = [float(x) for x in out[5].split()]
+            ok = (head == ['4', '4', 'Paint'] and got == sorted(tuple(round(c, 3) for c in e) for e in exp)
+                  and all(abs(a - b) < 1e-3 for a, b in zip(vals, [0.9, 0.25, 0.75, 1.6, 0.4])))
+        except (IndexError, ValueError):
+            ok = False
+        check(ok, f'glTF import ({"external .bin" if ext else "data: URI"}): node tree baked, PBR + extensions ({out[:2]})')
+    # our export, read back: positions (world, as OBJ export writes them) and materials
+    scene = ('m = material("Gold")\nmatset(m, "base", 1, 0.766, 0.336)\nmatset(m, "metallic", 1)\nmatset(m, "roughness", 0.3)\n'
+             'matset(m, "emission", 1, 0.5, 0.25)\nmatset(m, "strength", 4)\nmatset(m, "transmission", 0.2)\nassign("Cube", m)\n'
+             'add("cone", "Spike", 2, 0.5, -1)\nrotate("Spike", 30, 45, 60)\nscale("Spike", 1, 2, 0.5)\n')
+    for kind in ('glb', 'gltf'):
+        f = os.path.join(home, f'out.{kind}')
+        o = os.path.join(home, f'ref_{kind}.obj')
+        run(scene + f'op("file.export_gltf", "{f}")\nop("file.export_obj", "{o}")')
+        ref = sorted(tuple(round(float(x), 3) for x in l.split()[1:4]) for l in open(o) if l.startswith('v '))
+        out = run(f'delete("Cube")\nop("file.import_gltf", "{f}")\nprint(count(), matget("Gold", "base", 1), matget("Gold", "metallic"), '
+                  f'matget("Gold", "roughness"), matget("Gold", "strength"), matget("Gold", "transmission"), matof("Cube"))')
+        res = run(f'delete("Cube")\nop("file.import_gltf", "{f}")\n'
+                  'for v in 0..verts("Cube") { print(vpos("Cube", v, 0), vpos("Cube", v, 1), vpos("Cube", v, 2)) }\n'
+                  'for v in 0..verts("Spike") { print(vpos("Spike", v, 0), vpos("Spike", v, 1), vpos("Spike", v, 2)) }')
+        got = sorted(tuple(round(float(x), 3) for x in l.split()) for l in res.splitlines() if l.strip())
+        close = len(got) == len(ref) and all(max(abs(a - b) for a, b in zip(g, r)) < 2e-3 for g, r in zip(got, ref))
+        vals = out.split()
+        mat_ok = vals[1:7] == ['0.766', '1', '0.3', '4', '0.2', 'Gold']
+        check(close and mat_ok, f'.{kind} export reads back: {len(got)} world-space corners match, materials too ({vals[1:7]})')
+    # an independent reader, when there is one
+    import shutil
+    if shutil.which('blender'):
+        script = os.path.join(home, 'bl.py')
+        open(script, 'w').write(
+            'import bpy, sys\nbpy.ops.wm.read_factory_settings(use_empty=True)\n'
+            'bpy.ops.import_scene.gltf(filepath=sys.argv[-1])\n'
+            'print("BL", sorted((o.name, len(o.data.vertices), o.active_material.name if o.active_material else "-") '
+            'for o in bpy.context.scene.objects if o.type == "MESH"))\n')
+        r = subprocess.run(['blender', '-b', '--factory-startup', '--python', script, '--', os.path.join(home, 'out.glb')],
+                           capture_output=True, text=True, timeout=180)
+        line = [l for l in r.stdout.splitlines() if l.startswith('BL ')]
+        check(line and "('Cube', 8, 'Gold')" in line[0] and "'Spike'" in line[0], f'Blender reads the .glb ({line[0][3:80] if line else r.stderr[-80:]})')
+    # MTL with OBJ: values and a map_Kd texture
+    from PIL import Image
+    tex = os.path.join(home, 'red.png')
+    Image.new('RGB', (8, 8), (220, 20, 20)).save(tex)
+    o = os.path.join(home, 'm.obj')
+    run(scene + f'op("file.export_obj", "{o}")')
+    with open(os.path.join(home, 'm.mtl'), 'a') as mf:
+        mf.write('\nnewmtl Painted\nKd 0.5 0.5 0.5\nNs 100\nmap_Kd -bm 1 red.png\n')
+    with open(o) as of:
+        body = of.read().replace('usemtl Gold', 'usemtl Painted', 1)
+    open(o, 'w').write(body)
+    pic = os.path.join(home, 'mtl.png')
+    out = run(f'op("file.new")\ndelete("Cube")\nop("file.import_obj", "{o}")\nn = name(count() - 1)\n'
+              f'print(matof(n), matget("Gold", "base", 1), matget("Gold", "roughness"), matget("Gold", "transmission"), '
+              f'matget("Painted", "roughness"))\nrender("{pic}", 96, 54, 8)')
+    vals = out.split()
+    img = Image.open(pic).convert('RGB') if os.path.exists(pic) else None
+    red = img and sum(1 for p in img.getdata() if p[0] > p[1] + 80) > 30
+    check(vals[:4] == ['Painted', '0.766', '0.3', '0.2'] and abs(float(vals[4]) - math.sqrt(2 / 102)) < 1e-3 and red,
+          f'MTL with OBJ: values, Ns -> roughness, usemtl, map_Kd texture ({vals})')
 
 
 class Bridge:
