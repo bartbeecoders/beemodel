@@ -40,7 +40,8 @@ stays private to the module.
 | `mods.s` | Modifier stacks: reference-counted, copy-on-write blocks shared with undo; an evaluation cache per object keyed weakly on mesh and stack versions (freeing a mesh notifies the caches); Mirror, Array, Solidify; the properties UI; save / load |
 | `mods2.s` | Bevel (by angle), Decimate (vertex clustering), Remesh (ray-parity voxels, surface nets, smoothing) |
 | `hive.s` | The Hive path tracer's scene: a world-space triangle soup with auto-smoothed corner normals and material snapshots, a binned-SAH BVH collapsed to 4-wide nodes, SSE ray traversal (nearest and any hit) |
-| `hive_pt.s` | Hive's light transport: path tracing with next-event estimation and MIS over sky, sun, point and emissive-triangle lights; the principled BSDF (Lambert, GGX, rough dielectric, clearcoat); parallel progressive passes, ACES resolve, `render.image` |
+| `render.s` | The Render window: `render.start / stop / pass / save / settings`, the time-sliced `render_tick` the main loop calls, and the Render editor (the chosen pass fit to the area, with a status line) |
+| `hive_pt.s` | Hive's light transport: path tracing with next-event estimation and MIS over sky, sun, point and emissive-triangle lights; the principled BSDF (Lambert, GGX, rough dielectric, clearcoat); parallel progressive passes with albedo, normal and depth AOVs, ACES resolve, `render.image` |
 | `preview.s` | Material preview: shades the rasterizer's visibility buffer per pixel (ray / triangle barycentrics, auto-smoothed corner normals, principled BSDF, studio environment, ACES) |
 | `material.s` | Principled materials: a reference-counted, copy-on-write block shared with undo steps, per-object assignment (`OB_MAT`), the MATS / OMAT chunks, MTL values, the Properties section and the `material.*` operators |
 | `repair.s` | Mesh analysis (edges by face count and direction, faces by area and overhang, loose vertices), the View › Show … overlays, and `mesh.repair`: merge by distance (spatial hash), degenerate and duplicate faces, hole filling from boundary loops, consistent outward normals (flood fill plus signed volume per part) |
@@ -327,7 +328,7 @@ half-written file.
   Import reads one object: `v`, and `f` with `v/vt/vn` and negative indices.
 * STL export is binary. Import detects binary or ASCII and welds identical
   corners back into shared vertices with a hash table.
-* `view.screenshot` (F12) writes the last presented frame as a PNG
+* `view.screenshot` (Shift+F12) writes the last presented frame as a PNG
   (zlib stored blocks, with our own CRC-32 and Adler-32).
 * Every 25 recorded changes the scene is autosaved to
   `$XDG_CACHE_HOME/beemodel/autosave.bee`; `file.recover` loads it.
@@ -364,6 +365,12 @@ changed. `render` draws into whichever of the
 two shm buffers is free, then attaches, damages, requests a frame callback and
 commits. It does not draw again until the frame callback arrives, so rendering
 never outpaces the display, and CPU use is 0% while idle.
+
+While a render runs (`hv_active`), `poll` does not wait. Each turn
+`render_tick` gives Hive about 14 ms (`hive_tick`), in bands of rows across
+the job threads. Each row counts its own samples, so a partly done pass
+resolves correctly. The Render editor resolves the image only when it draws,
+so samples that arrive between frames cost nothing extra.
 
 ## Testing
 

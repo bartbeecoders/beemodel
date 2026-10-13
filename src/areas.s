@@ -30,6 +30,8 @@
 .globl ed_w
 .globl ed_h
 .globl items_area
+.globl split_with
+.globl find_editor
 .globl splitter_cursor
 .globl console_ensure
 .globl area_editor
@@ -101,6 +103,7 @@ s_ed_outliner:  .asciz "Outliner"
 s_ed_props:     .asciz "Properties"
 s_ed_console:   .asciz "Console"
 s_ed_activity:  .asciz "AI Activity"
+s_ed_render:    .asciz "Render"
 s_h_create:     .asciz "CREATE"
 s_p_camera:     .asciz "Viewport camera"
 s_p_yaw:        .asciz "Yaw"
@@ -126,11 +129,11 @@ s_xx:           .asciz " x "
 s_last_area:    .asciz "  the last area cannot be closed"
 s_no_room:      .asciz "  no room for more areas"
 .align 8
-editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity
-editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw
+editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity, s_ed_render
+editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw, ed_render_draw
 area_btn_ops:   .quad op_area_close, op_area_split_stack, op_area_split_side, op_area_maximize
 items_area:     .quad op_area_type_vp, op_area_type_tools, op_area_type_outl
-                .quad op_area_type_props, op_area_type_console, op_area_type_activity
+                .quad op_area_type_props, op_area_type_console, op_area_type_activity, op_area_type_render
 
 # ---- operators ------------------------------------------------------------------
 OPERATOR op_area_split_side,  "area.split_side",  "Split Area Side by Side", op_area_split, arg=K_HSPLIT, doc="Split the active area into two side by side"
@@ -143,6 +146,7 @@ OPERATOR op_area_type_outl,   "area.type_outliner",   "Outliner",    op_area_typ
 OPERATOR op_area_type_props,  "area.type_properties", "Properties",  op_area_type, op_check_area_type, ED_PROPS,    doc="Show the properties in the active area"
 OPERATOR op_area_type_console,"area.type_console",    "Console",     op_area_type, op_check_area_type, ED_CONSOLE,  doc="Show the console in the active area"
 OPERATOR op_area_type_activity,"area.type_activity", "AI Activity", op_area_type, op_check_area_type, ED_ACTIVITY, doc="Show what AI agents did in the active area"
+OPERATOR op_area_type_render,"area.type_render",   "Render",      op_area_type, op_check_area_type, ED_RENDER,   doc="Show the render in the active area"
 OPERATOR op_view_activity, "view.toggle_activity", "AI Activity Pane", op_toggle_activity, op_has_editor, ED_ACTIVITY, 0, doc="Show or hide the AI Activity area (next to the console)"
 OPERATOR op_view_tools,    "view.toggle_tools",    "Tools Pane",    op_toggle_tools,    op_has_editor, ED_TOOLS,    KEY_T, doc="Show or hide the tools area"
 OPERATOR op_view_outliner, "view.toggle_outliner", "Outliner Pane", op_toggle_sidebar,  op_has_editor, ED_OUTLINER, KEY_N, doc="Show or hide the outliner and properties areas"

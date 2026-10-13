@@ -80,7 +80,10 @@ _start:
     lea     esi, [rax+2]
     lea     rdi, [rip+pollfds]
     mov     edx, -1
-    mov     eax, SYS_POLL
+    cmp     dword ptr [rip+hv_active], 0  # rendering: just look, never wait
+    je      0f
+    xor     edx, edx
+0:  mov     eax, SYS_POLL
     syscall
     cmp     rax, -4                     # EINTR
     je      .Lloop
@@ -94,6 +97,7 @@ _start:
     call    mcp_handle
     cmp     dword ptr [rip+quit_flag], 0
     jne     .Lquit
+    call    render_tick                 # a slice of the progressive render
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render

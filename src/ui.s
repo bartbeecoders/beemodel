@@ -87,6 +87,7 @@ s_m_create:     .asciz "Create"
 s_m_help:       .asciz "Help"
 s_m_ai:         .asciz "AI"
 s_m_mesh:       .asciz "Mesh"
+s_m_render:     .asciz "Render"
 s_ai_pfx:       .asciz "AI: "
 s_ai_conn:      .asciz " ("
 s_ai_conn2:     .asciz " connected)"
@@ -102,9 +103,9 @@ s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero 
 s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize panes"
 
 .align 8
-menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_ai, s_m_help
-menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_ai, items_help, items_area, items_modadd
-menu_counts:    .long 14, 19, 20, 10, 27, 6, 3, 6, 8
+menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_render, s_m_ai, s_m_help
+menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_render, items_ai, items_help, items_area, items_modadd
+menu_counts:    .long 14, 19, 20, 10, 27, 7, 6, 3, 7, 8
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
@@ -120,6 +121,8 @@ items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_an_normals, op_an_nonman, op_an_bound, op_an_degen, op_an_over
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_light, op_add_camera
+items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_render_save, 0
+                .quad op_render_settings
 items_help:     .quad op_help_keys, op_console_ops, op_help_about
 items_ai:       .quad op_view_activity, op_agent_revert, 0
                 .quad op_agent_read, op_agent_edit, op_agent_files
@@ -1059,7 +1062,14 @@ ui_key_press:
     call    tf_key
     test    eax, eax
     jnz     9f
-2:  mov     edi, ebx
+2:  cmp     ebx, KEY_ESC                # Esc stops a running render
+    jne     21f
+    cmp     dword ptr [rip+hv_active], 0
+    je      21f
+    lea     rdi, [rip+op_render_stop]
+    call    run_op
+    jmp     9f
+21: mov     edi, ebx
     call    dispatch_key
 9:  pop     rbx
     ret

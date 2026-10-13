@@ -7,6 +7,20 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The Render window:
+  - **F12** (Render › Render) starts a progressive render in a Render area
+    beside the viewport, opening the area if needed. The main loop spends
+    about 14 ms of each turn on more samples, in bands of rows, so the UI
+    stays live at any resolution. **Esc** (or Render › Stop) stops it.
+  - **Status line:** size, samples so far, time and the shown pass.
+  - **Passes:** albedo, normal and depth from the first hit, next to the
+    beauty pass. `render.pass` switches between them, and
+    `render.save <path> [pass]` writes any of them as PNG.
+  - **Settings:** `render.settings <w> <h> <samples>` (default
+    960 × 540 × 128), saved in `.bee` (RNDR chunk).
+  - **Agents** can start, stop and inspect renders with edit access;
+    saving needs file access.
+  - **Editor type:** Render is a new editor type (`area.type_render`).
 - Materials with principled parameters:
   - base colour, metallic, roughness, specular, IOR;
   - transmission;
@@ -53,6 +67,9 @@ project uses [Semantic Versioning](https://semver.org/).
     and spheres look round;
   - a 300k-triangle scene orbits in about 6 ms on 32 threads, with a CI
     budget.
+
+### Changed
+- The screenshot moved from F12 to **Shift+F12**; F12 now renders.
 
 ## [0.5.0] - 2026-10-13
 

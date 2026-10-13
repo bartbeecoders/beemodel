@@ -10,6 +10,7 @@
 #          VIEW  active index, grid, shading, camera f32[6]
 #          MODS  modifier stacks;  MATS  materials (count, 128-byte records);
 #          OMAT  per object: material index + 1 (0 = none)
+#          RNDR  render settings: width, height, samples, shown pass
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
@@ -30,6 +31,7 @@
 .equ TAG_MODS,      0x53444f4d          # "MODS"
 .equ TAG_MATS,      0x5354414d          # "MATS"
 .equ TAG_OMAT,      0x54414d4f          # "OMAT"
+.equ TAG_RNDR,      0x52444e52          # "RNDR"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -104,7 +106,7 @@ OPERATOR op_import_obj, "file.import_obj", "Import OBJ...", op_iobj, flags=OPF_A
 OPERATOR op_import_stl, "file.import_stl", "Import STL...", op_istl, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import an STL (binary or ASCII): file.import_stl <path>"
 OPERATOR op_export_obj, "file.export_obj", "Export OBJ...", op_eobj, doc="Export mesh objects as OBJ: file.export_obj <path>"
 OPERATOR op_export_stl, "file.export_stl", "Export STL...", op_estl, doc="Export mesh objects as binary STL: file.export_stl <path>"
-OPERATOR op_screenshot, "view.screenshot", "Screenshot",   op_shot, key=KEY_F12, doc="Save the window as PNG: view.screenshot [path]"
+OPERATOR op_screenshot, "view.screenshot", "Screenshot",   op_shot, key=KEY_F12|KM_SHIFT, doc="Save the window as PNG: view.screenshot [path]"
 OPERATOR op_recover,    "file.recover",  "Recover Autosave", op_recover_x, flags=OPF_AI_SAFE|OPF_UNDO, doc="Open the last autosave"
 
 .text
@@ -257,6 +259,17 @@ bee_save:
     call    chunk_begin
     call    omat_write
     call    chunk_end
+    mov     edi, TAG_RNDR               # RNDR (render settings)
+    call    chunk_begin
+    mov     edi, [rip+rn_w]
+    call    wb_u32
+    mov     edi, [rip+rn_h]
+    call    wb_u32
+    mov     edi, [rip+rn_spp]
+    call    wb_u32
+    mov     edi, [rip+hv_pass]
+    call    wb_u32
+    call    chunk_end
     mov     edi, TAG_VIEW               # VIEW
     call    chunk_begin
     mov     r12d, -1                    # active object index
@@ -296,6 +309,28 @@ bee_save:
 # -----------------------------------------------------------------------------
 # .bee reader
 # -----------------------------------------------------------------------------
+# rndr_read(rdi=RNDR data) - the render settings, kept in range
+rndr_read:
+    mov     eax, [rdi]
+    mov     ecx, [rdi+4]
+    mov     edx, [rdi+8]
+    lea     esi, [rax-1]
+    cmp     esi, 8192
+    jae     9f
+    lea     esi, [rcx-1]
+    cmp     esi, 8192
+    jae     9f
+    lea     esi, [rdx-1]
+    cmp     esi, 65536
+    jae     9f
+    mov     [rip+rn_w], eax
+    mov     [rip+rn_h], ecx
+    mov     [rip+rn_spp], edx
+    mov     eax, [rdi+12]
+    and     eax, 3
+    mov     [rip+hv_pass], eax
+9:  ret
+
 # need(rsi=pointer, rdx=bytes) -> CF=1 if [pointer, pointer+bytes) leaves the file
 need:
     mov     rax, [rip+fbase]
@@ -470,10 +505,17 @@ bee_load:
     mov     [rip+mats_size], ebp
     jmp     23f
 26: cmp     eax, TAG_OMAT
-    jne     23f
+    jne     27f
     lea     rax, [rbx+8]
     mov     [rip+omat_chunk], rax
     mov     [rip+omat_size], ebp
+    jmp     23f
+27: cmp     eax, TAG_RNDR
+    jne     23f
+    cmp     ebp, 16
+    jb      23f
+    lea     rdi, [rbx+8]
+    call    rndr_read
 23: lea     rbx, [rbx+rbp+8]            # unknown chunks are skipped
     jmp     2b
 3:  test    r14, r14

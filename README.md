@@ -157,6 +157,11 @@ sees (or the viewport, without one) with the same principled materials:
 `render.image <path> [width height samples]`, or `render(path, w, h, samples)` from a script,
 writes a PNG. A 480 × 270 image with 64 samples takes about a third of a second on 32 threads.
 
+**F12** renders into a Render area beside the viewport, refining while you keep working; **Esc**
+stops. The Render menu switches passes (beauty, albedo, normal, depth) and saves them
+(`render.save <path> [pass]`); `render.settings <width> <height> <samples>` sets the size and
+samples, which are saved with the scene.
+
 **Analysis and repair.** View › Show Normals / Non-manifold / Boundary Edges / Degenerate Faces /
 Overhangs mark problems on the active mesh, with a count of each in the viewport.
 
@@ -187,7 +192,7 @@ Scripts and agents call the same operators with the value as the argument:
 Files: **Ctrl+S** saves (`.bee`), **Ctrl+O** opens, and File › Import / Export
 handle **OBJ** and **STL**. Commands take paths on the command line, for
 example `file.save ~/BeeModel/chair.bee` or `file.import_stl ~/part.stl`.
-Without a path, the command line opens pre-filled. **F12** saves a PNG
+Without a path, the command line opens pre-filled. **Shift+F12** saves a PNG
 screenshot. The scene autosaves every 25 changes (`file.recover` restores
 it).
 
