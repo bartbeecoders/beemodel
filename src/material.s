@@ -22,7 +22,7 @@
 .globl mat_find
 .globl mat_new
 .globl mat_set
-.globl mat_set_tex
+.globl mat_cow
 .globl mat_param_index
 .globl mat_param_get
 .globl mat_assign
@@ -31,6 +31,8 @@
 .globl mats_reset
 .globl mats_write
 .globl mats_read
+.globl graphs_write
+.globl graphs_read
 .globl omat_write
 .globl omat_read
 .globl mats_props_draw
@@ -45,7 +47,9 @@
 .equ MB_CAP,    8
 .equ MB_BYTES,  12
 .equ MB_HDR,    16
-.equ MA_SZ,     128
+.equ MA_SZ,     1024                    # 128 principled + the node graph
+.equ MA_SHIFT,  10
+.equ MA_FILE,   128                     # the principled part (MATS records)
 .equ MA_NAME,   0
 .equ MA_BASE,   32
 .equ MA_METAL,  44
@@ -58,8 +62,6 @@
 .equ MA_COAT,   80
 .equ MA_COATR,  84
 .equ MA_ALPHA,  88
-.equ MA_TEX,    92                      # base colour image + 1 (0 = none)
-.equ MA_TSIZE,  96                      # object units per repeat (0 = 1)
 .equ MA_MAX,    1024
 .equ NPARAMS,   11
 .equ PR_SZ,     32              # name ptr, offset, comps, step, min, max
@@ -161,7 +163,7 @@ s_dot:          .asciz "."
 OPERATOR op_mat_new, "material.new", "New Material", do_mat_new, flags=OPF_AI_SAFE|OPF_UNDO, doc="Create a material and give it to the active mesh: material.new [name]"
 OPERATOR op_mat_assign, "material.assign", "Assign Material", do_mat_assign, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give the active mesh a material: material.assign <name> (none = no material)"
 OPERATOR op_mat_set, "material.set", "Set Material Value", do_mat_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set a material value: material.set <name> base|metallic|roughness|specular|ior|transmission|emission|strength|clearcoat|coat_roughness|alpha <values>"
-OPERATOR op_mat_texture, "material.texture", "Material Texture", do_mat_texture, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give a material a base colour image, box-projected: material.texture <name> <image|none> [size]"
+OPERATOR op_mat_texture, "material.texture", "Material Texture", do_mat_texture, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give a material a base colour image, box-projected (a one-node graph): material.texture <name> <image|none> [size]"
 OPERATOR op_mat_remove, "material.remove", "Remove Material", do_mat_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Delete a material (objects using it get none): material.remove <name>"
 
 .text
@@ -203,7 +205,7 @@ mat_get:
     cmp     edi, [rax+MB_COUNT]
     jae     8f
     mov     ecx, edi
-    shl     ecx, 7
+    shl     ecx, MA_SHIFT
     lea     rax, [rax+MB_HDR+rcx]
     ret
 8:  xor     eax, eax
@@ -214,7 +216,7 @@ mat_alloc:
     push    rbx
     mov     ebx, edi
     mov     eax, ebx
-    shl     eax, 7
+    shl     eax, MA_SHIFT
     add     eax, MB_HDR+4095
     and     eax, -4096
     push    rax
@@ -235,7 +237,7 @@ mat_alloc:
     mov     dword ptr [rax+MB_COUNT], 0
     mov     edx, ecx                    # what the mapping really holds
     sub     edx, MB_HDR
-    shr     edx, 7
+    shr     edx, MA_SHIFT
     mov     [rax+MB_CAP], edx
     mov     [rax+MB_BYTES], ecx
 9:  pop     rbx
@@ -268,7 +270,7 @@ mat_cow:
     jz      2f
     mov     ecx, [rbx+MB_COUNT]
     mov     [rax+MB_COUNT], ecx
-    shl     ecx, 7
+    shl     ecx, MA_SHIFT
     lea     rsi, [rbx+MB_HDR]
     lea     rdi, [rax+MB_HDR]
     rep     movsb
@@ -326,7 +328,7 @@ mat_new:
     mov     rbx, rax
     mov     r13d, [rbx+MB_COUNT]
     mov     eax, r13d
-    shl     eax, 7
+    shl     eax, MA_SHIFT
     lea     rdi, [rbx+MB_HDR+rax]
     push    rdi
     xor     eax, eax
@@ -601,14 +603,16 @@ mats_write:
     mov     [rsp], eax
     mov     edi, eax
     call    wb_u32
-    mov     eax, [rsp]
-    test    eax, eax
-    jz      9f
-    mov     rsi, [rip+mat_cur]
-    add     rsi, MB_HDR
-    mov     edx, eax
-    shl     edx, 7
+    xor     ebx, ebx                    # the principled part of each
+1:  cmp     ebx, [rsp]
+    jae     9f
+    mov     edi, ebx
+    call    mat_get
+    mov     rsi, rax
+    mov     edx, MA_FILE
     call    wb_bytes
+    inc     ebx
+    jmp     1b
 9:  add     rsp, 16
     pop     rbx
     ret
@@ -627,7 +631,7 @@ mats_read:
     cmp     r13d, MA_MAX
     ja      9f
     mov     eax, r13d
-    shl     eax, 7
+    imul    eax, eax, MA_FILE
     add     eax, 4
     cmp     eax, r12d
     ja      9f
@@ -640,24 +644,126 @@ mats_read:
     jz      9f
     mov     [rip+mat_cur], rax
     mov     [rax+MB_COUNT], r13d
-    lea     rdi, [rax+MB_HDR]
-    lea     rsi, [rbx+4]
-    mov     ecx, r13d
-    shl     ecx, 7
-    rep     movsb
-    xor     ecx, ecx                    # names terminated
-1:  cmp     ecx, r13d
+    lea     rsi, [rbx+4]                # file records -> memory records
+    xor     edx, edx
+1:  cmp     edx, r13d
     jae     9f
     mov     rax, [rip+mat_cur]
-    mov     edx, ecx
-    shl     edx, 7
-    mov     byte ptr [rax+MB_HDR+rdx+31], 0
-    inc     ecx
+    mov     edi, edx
+    shl     edi, MA_SHIFT
+    lea     rdi, [rax+MB_HDR+rdi]
+    mov     ecx, MA_FILE
+    rep     movsb
+    mov     byte ptr [rdi-MA_FILE+31], 0    # names terminated
+    inc     edx
     jmp     1b
 9:  pop     r13
     pop     r12
     pop     rbx
     ret
+
+# graphs_write - MGRF chunk body: count, then each material's graph part
+graphs_write:
+    push    rbx
+    sub     rsp, 16
+    call    mat_count
+    mov     [rsp], eax
+    mov     edi, eax
+    call    wb_u32
+    xor     ebx, ebx
+1:  cmp     ebx, [rsp]
+    jae     9f
+    mov     edi, ebx
+    call    mat_get
+    lea     rsi, [rax+MA_FILE]
+    mov     edx, MA_SZ-MA_FILE
+    call    wb_bytes
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# graphs_read(rdi=chunk data, esi=size) - after mats_read; bad graphs
+#   (counts, links, sockets) are cleared
+graphs_read:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    cmp     r12d, 4
+    jb      9f
+    mov     r13d, [rbx]
+    call    mat_count
+    cmp     r13d, eax
+    cmova   r13d, eax
+    mov     eax, r13d
+    imul    eax, eax, MA_SZ-MA_FILE
+    add     eax, 4
+    cmp     eax, r12d
+    ja      9f
+    lea     rsi, [rbx+4]
+    xor     r14d, r14d
+1:  cmp     r14d, r13d
+    jae     9f
+    mov     edi, r14d
+    call    mat_get
+    lea     rdi, [rax+MA_FILE]
+    mov     ecx, MA_SZ-MA_FILE
+    rep     movsb
+    mov     rdi, rax                    # sanity: node count, links, sockets
+    push    rsi
+    call    graph_check
+    pop     rsi
+    inc     r14d
+    jmp     1b
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# graph_check(rdi=record) - zero the graph if it does not make sense
+graph_check:
+    mov     eax, [rdi+128]
+    cmp     eax, 12
+    ja      8f
+    xor     ecx, ecx                    # sockets <= n
+1:  cmp     [rdi+132+rcx*4], eax
+    ja      8f
+    inc     ecx
+    cmp     ecx, 5
+    jb      1b
+    xor     ecx, ecx                    # node k's links < k + 1
+2:  cmp     ecx, eax
+    jae     9f
+    imul    edx, ecx, 72
+    mov     r8d, [rdi+160+rdx]
+    dec     r8d
+    cmp     r8d, 8
+    jae     8f
+    xor     r9d, r9d
+3:  imul    r10d, r9d, 16
+    add     r10d, edx
+    mov     r8d, [rdi+164+r10]
+    cmp     r8d, ecx
+    ja      8f
+    inc     r9d
+    cmp     r9d, 3
+    jb      3b
+    inc     ecx
+    jmp     2b
+8:  push    rdi
+    lea     rdi, [rdi+128]
+    xor     eax, eax
+    mov     ecx, (MA_SZ-128)/4
+    rep     stosd
+    pop     rdi
+9:  ret
 
 omat_write:
     push    rbx
@@ -943,35 +1049,6 @@ do_mat_remove:
     pop     rbx
     ret
 
-# mat_set_tex(edi=material, esi=image + 1 (0 = none), xmm0=size) -> eax = 1
-mat_set_tex:
-    push    rbx
-    push    r12
-    sub     rsp, 24
-    movss   [rsp], xmm0
-    mov     ebx, edi
-    mov     r12d, esi
-    call    mat_count
-    cmp     ebx, eax
-    jae     8f
-    xor     edi, edi
-    call    mat_cow
-    test    rax, rax
-    jz      8f
-    mov     edi, ebx
-    call    mat_get
-    mov     [rax+MA_TEX], r12d
-    movss   xmm0, [rsp]
-    movss   [rax+MA_TSIZE], xmm0
-    mov     dword ptr [rip+dirty], 1
-    mov     eax, 1
-    jmp     9f
-8:  xor     eax, eax
-9:  add     rsp, 24
-    pop     r12
-    pop     rbx
-    ret
-
 # material.texture <material> <image|none> [size]
 do_mat_texture:
     push    rbx
@@ -1012,11 +1089,35 @@ do_mat_texture:
     test    eax, eax
     js      .Lmt_noimage
     lea     r12d, [rax+1]
-2:  mov     edi, ebx
-    mov     esi, r12d
-    movss   xmm0, [rsp+64]
-    call    mat_set_tex
-    call    fmt_reset
+2:  mov     edi, ebx                    # a one-node graph: image -> base
+    call    graph_clear
+    test    r12d, r12d
+    jz      21f
+    mov     edi, ebx
+    mov     esi, 1
+    call    graph_add
+    test    eax, eax
+    js      21f
+    mov     r13d, eax
+    cvtsi2ss xmm0, r12d
+    movss   [rsp+68], xmm0
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 4
+    lea     rcx, [rsp+68]
+    mov     r8d, 1
+    call    graph_set
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 5
+    lea     rcx, [rsp+64]
+    mov     r8d, 1
+    call    graph_set
+    mov     edi, ebx
+    xor     esi, esi
+    mov     edx, r13d
+    call    graph_socket
+21: call    fmt_reset
     lea     rdi, [rip+s_m_tex]
     call    fmt_str
     lea     rdi, [rsp]
@@ -1064,9 +1165,9 @@ mat_delete:
     mov     ecx, [rbx+MB_COUNT]         # close the gap
     sub     ecx, r12d
     dec     ecx
-    shl     ecx, 7
+    shl     ecx, MA_SHIFT
     mov     eax, r12d
-    shl     eax, 7
+    shl     eax, MA_SHIFT
     lea     rdi, [rbx+MB_HDR+rax]
     lea     rsi, [rdi+MA_SZ]
     rep     movsb

@@ -361,7 +361,6 @@ bsdf_init:
     sub     rsp, 24
     mov     rbx, rdi
     mov     r12, rsi
-    mov     [rsp+16], r9                # a texture colour for the base, or 0
     test    r12, r12
     jnz     1f
     lea     r12, [rip+mat_def]
@@ -401,14 +400,7 @@ bsdf_init:
     mov     [rbx+C_BASE], rax
     mov     eax, [r12+40]
     mov     [rbx+C_BASE+8], eax
-    mov     rcx, [rsp+16]
-    test    rcx, rcx
-    jz      11f
-    mov     rax, [rcx]
-    mov     [rbx+C_BASE], rax
-    mov     eax, [rcx+8]
-    mov     [rbx+C_BASE+8], eax
-11:
+
     mov     eax, [r12+44]
     mov     [rbx+C_METAL], eax
     movss   xmm0, [r12+48]              # alpha = roughness^2
@@ -1224,6 +1216,8 @@ light_prep:
     call    tri_material
     test    rax, rax
     jz      11f
+    cmp     dword ptr [rax+144], 0      # (a graph drives the emission: no
+    jne     11f                         #  light sampling, found by bounces)
     lea     rdi, [rax+64]               # emission * strength
     call    lum
     mulss   xmm0, [rax+76]
@@ -1283,7 +1277,7 @@ tri_material:
     mov     eax, [rax+rdi*4]
     test    eax, eax
     jz      1f
-    shl     rax, 7
+    shl     rax, 10
     add     rax, [rip+hv_mats]
     ret
 1:  xor     eax, eax
@@ -1741,9 +1735,9 @@ mis:
 .equ PF_OUT,    252             # outside flag
 .equ PF_TMP,    256             # 48
 .equ PF_CTX,    304             # BSDF context (160)
-.equ PF_TEX,    464             # the texture colour here (12)
-.equ PF_UV,     476             # (8)
-.equ PF_SZ,     496
+.equ PF_MAT,    464             # the material here, after its graph (128)
+.equ PF_SC,     592             # the graph's shading context (152)
+.equ PF_SZ,     752
 
 # trace_path(xmm0=sx, xmm1=sy (screen -1..1), rdi=L out[3], rsi=aux out[7]
 #   (albedo, normal, depth of the first hit); r15 = rng)
@@ -1876,12 +1870,16 @@ trace_path:
     jb      68b
     jmp     .Ltp_done
 69:
-    # emission
+    # the material (a graph overrides values and the normal here)
     mov     edi, r12d
     call    tri_material
     mov     r13, rax
     test    r13, r13
     jz      7f
+    cmp     dword ptr [r13+128], 0
+    je      65f
+    call    hit_graph
+65: # emission
     movss   xmm0, [r13+76]
     xorps   xmm1, xmm1
     comiss  xmm0, xmm1
@@ -1907,41 +1905,8 @@ trace_path:
     jb      62b
     lea     rsi, [rbx+PF_TMP]
     call    add_beta_l
-7:  # the BSDF here (a textured base: box-projected coordinates)
-    xor     r9d, r9d
-    test    r13, r13
-    jz      71f
-    cmp     dword ptr [r13+92], 0
-    je      71f
-    mov     rax, [rip+hv_tuv]           # uv = w0 uv0 + u uv1 + v uv2
-    lea     rcx, [r12+r12*2]
-    lea     rax, [rax+rcx*8]
-    movss   xmm2, [rip+pt_one]
-    subss   xmm2, [rbx+PF_RAY+RAY_U]
-    subss   xmm2, [rbx+PF_RAY+RAY_V]
-    xor     ecx, ecx
-72: movss   xmm0, [rax+rcx*4]
-    mulss   xmm0, xmm2
-    movss   xmm1, [rax+8+rcx*4]
-    mulss   xmm1, [rbx+PF_RAY+RAY_U]
-    addss   xmm0, xmm1
-    movss   xmm1, [rax+16+rcx*4]
-    mulss   xmm1, [rbx+PF_RAY+RAY_V]
-    addss   xmm0, xmm1
-    movss   [rbx+PF_UV+rcx*4], xmm0
-    inc     ecx
-    cmp     ecx, 2
-    jb      72b
-    mov     rdi, r13
-    movss   xmm0, [rbx+PF_UV]
-    movss   xmm1, [rbx+PF_UV+4]
-    lea     rsi, [rbx+PF_TEX]
-    call    mat_texel
-    xor     r9d, r9d
-    test    eax, eax
-    jz      71f
-    lea     r9, [rbx+PF_TEX]
-71: lea     rdi, [rbx+PF_CTX]
+7:  # the BSDF here
+    lea     rdi, [rbx+PF_CTX]
     mov     rsi, r13
     lea     rdx, [rbx+PF_NS]
     lea     rcx, [rbx+PF_WO]
@@ -2083,6 +2048,72 @@ trace_path:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# hit_graph(rbx=path frame, r12d=triangle, r13=material) - evaluate the
+#   material's graph here: r13 -> PF_MAT with the results, PF_NS bumped
+hit_graph:
+    push    r14
+    mov     rax, [rip+hv_to]            # object-space corner and edges
+    lea     rcx, [r12+r12*8]
+    lea     rsi, [rax+rcx*4]
+    lea     rdi, [rbx+PF_SC]
+    mov     ecx, 9
+    rep     movsd
+    mov     eax, [rbx+PF_RAY+RAY_U]
+    mov     [rbx+PF_SC+36], eax
+    mov     eax, [rbx+PF_RAY+RAY_V]
+    mov     [rbx+PF_SC+40], eax
+    mov     rax, [rip+hv_tv]            # world edges, the shading normal
+    lea     rcx, [r12+r12*8]
+    lea     rsi, [rax+rcx*4+12]
+    lea     rdi, [rbx+PF_SC+44]
+    mov     ecx, 6
+    rep     movsd
+    lea     rsi, [rbx+PF_NS]
+    lea     rdi, [rbx+PF_SC+68]
+    mov     ecx, 3
+    rep     movsd
+    mov     rsi, r13                    # the material's own values
+    lea     rdi, [rbx+PF_MAT]
+    mov     ecx, 32
+    rep     movsd
+    mov     rdi, r13
+    lea     rsi, [rbx+PF_SC]
+    call    graph_shade
+    lea     r13, [rbx+PF_MAT]
+    mov     r14d, [rbx+PF_SC+112]       # what it drives
+    test    r14d, 1
+    jz      1f
+    lea     rsi, [rbx+PF_SC+80]
+    lea     rdi, [r13+32]
+    mov     ecx, 3
+    rep     movsd
+1:  test    r14d, 2
+    jz      2f
+    mov     eax, [rbx+PF_SC+92]
+    mov     [r13+44], eax
+2:  test    r14d, 4
+    jz      3f
+    mov     eax, [rbx+PF_SC+96]
+    mov     [r13+48], eax
+3:  test    r14d, 8
+    jz      4f
+    lea     rsi, [rbx+PF_SC+100]
+    lea     rdi, [r13+64]
+    mov     ecx, 3
+    rep     movsd
+    xorps   xmm0, xmm0                  # (no strength yet: 1)
+    comiss  xmm0, [r13+76]
+    jb      4f
+    mov     dword ptr [r13+76], 0x3f800000
+4:  test    r14d, 16
+    jz      5f
+    lea     rsi, [rbx+PF_SC+68]
+    lea     rdi, [rbx+PF_NS]
+    mov     ecx, 3
+    rep     movsd
+5:  pop     r14
     ret
 
 # add_beta_l(rsi=radiance[3]; rbx = the path frame) - L += beta * radiance,

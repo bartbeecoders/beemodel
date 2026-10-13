@@ -171,6 +171,24 @@ writes PNG or OpenEXR. `material.texture <material> <image> [size]` puts an imag
 equirectangular HDRI (`world.strength`, `world.rotation`). Hive importance-samples it, and the
 material preview uses it too. Image paths and the world are saved with the scene.
 
+**Shader graphs.** A material can hold a small node graph that drives its base colour,
+roughness, metallic, emission and normal:
+
+```
+m = material("Stone")
+n = node(m, "noise", 3, 5, 0.55)
+r = node(m, "ramp")
+link(m, n, r, 1)
+nodeset(m, r, 2, 0.6, 0.15, 0.05)
+socket(m, "base", r)
+b = node(m, "bump", 2, 0.2)
+link(m, n, b, 1)
+socket(m, "normal", b)
+```
+
+The node types are image, noise, checker, gradient, mix, ramp, math and bump. Agents see the graph in
+`scene_summary` and edit it with the `material.node*` commands. The node editor arrives in phase 8.
+
 **Analysis and repair.** View › Show Normals / Non-manifold / Boundary Edges / Degenerate Faces /
 Overhangs mark problems on the active mesh, with a count of each in the viewport.
 

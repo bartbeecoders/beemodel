@@ -45,6 +45,7 @@ stays private to the module.
 | `jpeg.s` | Baseline JPEG: Huffman, SSE float IDCT, bilinear chroma upsampling, YCbCr |
 | `exr.s` | OpenEXR writer: half-float scanlines, ZIP blocks through png.s's deflate |
 | `image.s` | The scene's images: load, name, save, `image.*` operators |
+| `graph.s` | Shader graphs: node storage in the material record, evaluation (Perlin fBm noise, checker, gradient, mix, ramp, math, images), sockets, Blinn bump, editing and the `material.node*` operators |
 | `texture.s` | Image lookups (bilinear, repeating, sRGB table) and object-space box projection |
 | `env.s` | The world: HDRI lookups, a 2D CDF for importance sampling, SH9 irradiance and a blurred copy for the preview, `world.*` operators |
 | `denoise.s` | Hive's denoiser: demodulation by albedo, variance from luminance moments, five edge-avoiding à-trous passes guided by normal, depth and luminance, in parallel rows |

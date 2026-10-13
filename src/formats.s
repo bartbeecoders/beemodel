@@ -14,6 +14,7 @@
 #          IMGS  image files (count, then u32 length + path each; loaded
 #                again on open, in order: materials refer to them by index)
 #          WRLD  the world: HDRI image + 1, strength, rotation
+#          MGRF  shader graphs: count, then 896 bytes per material
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
@@ -37,6 +38,7 @@
 .equ TAG_RNDR,      0x52444e52          # "RNDR"
 .equ TAG_IMGS,      0x53474d49          # "IMGS"
 .equ TAG_WRLD,      0x444c5257          # "WRLD"
+.equ TAG_MGRF,      0x4652474d          # "MGRF"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -56,6 +58,8 @@ mtl_buf:        .skip 512
 omat_chunk:     .skip 8
 imgs_chunk:     .skip 8
 wrld_chunk:     .skip 8
+mgrf_chunk:     .skip 8
+mgrf_size:      .skip 4
 imgs_size:      .skip 4
 mats_size:      .skip 4
 omat_size:      .skip 4
@@ -266,6 +270,10 @@ bee_save:
     mov     edi, TAG_OMAT
     call    chunk_begin
     call    omat_write
+    call    chunk_end
+    mov     edi, TAG_MGRF
+    call    chunk_begin
+    call    graphs_write
     call    chunk_end
     mov     edi, TAG_IMGS               # IMGS, WRLD
     call    chunk_begin
@@ -488,6 +496,7 @@ bee_load:
     mov     qword ptr [rip+omat_chunk], 0
     mov     qword ptr [rip+imgs_chunk], 0
     mov     qword ptr [rip+wrld_chunk], 0
+    mov     qword ptr [rip+mgrf_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -546,7 +555,13 @@ bee_load:
     mov     [rip+imgs_chunk], rax
     mov     [rip+imgs_size], ebp
     jmp     23f
-28: cmp     eax, TAG_WRLD
+28: cmp     eax, TAG_MGRF
+    jne     281f
+    lea     rax, [rbx+8]
+    mov     [rip+mgrf_chunk], rax
+    mov     [rip+mgrf_size], ebp
+    jmp     23f
+281:cmp     eax, TAG_WRLD
     jne     29f
     cmp     ebp, 12
     jb      23f
@@ -640,6 +655,11 @@ bee_load:
     jz      72f
     mov     esi, [rip+mats_size]
     call    mats_read
+    mov     rdi, [rip+mgrf_chunk]       # their graphs
+    test    rdi, rdi
+    jz      72f
+    mov     esi, [rip+mgrf_size]
+    call    graphs_read
 72: mov     rdi, [rip+omat_chunk]
     test    rdi, rdi
     jz      73f

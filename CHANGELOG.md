@@ -7,6 +7,28 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Shader graphs: a material can hold up to 12 nodes.
+  - **Nodes:** image, noise (Perlin fBm), checker, gradient, mix (mix /
+    add / multiply / subtract / screen), colour ramp, math (ten
+    operations) and bump.
+  - **Sockets:** nodes drive the base colour, metallic, roughness,
+    emission and the normal.
+  - **Evaluation:** Hive and the material preview evaluate graphs per
+    shading point. Coordinates are object space, or the box projection
+    for images. Bump re-evaluates the graph a little along the
+    triangle's edges and tilts the normal (Blinn).
+  - **Safety:** links only point to earlier nodes, so graphs cannot loop.
+  - **Editing:**
+    - BeeScript `node`, `link`, `nodeset`, `socket`;
+    - operators `material.node / link / node_set / socket / nodes_clear`;
+    - every change is undoable.
+  - **Agents:** `scene_summary` shows each graph (nodes, values, inputs,
+    links, sockets).
+  - **Files:** graphs are saved in `.bee` (MGRF; damaged graphs are
+    cleared).
+  - **Textures:** `material.texture` now builds a one-node graph.
+  - **Records:** material records are now 1 KiB in memory. The MATS chunk
+    keeps its 128-byte records, so 0.5 files still open.
 - Image textures and an HDRI world:
   - **Textures:** `material.texture <material> <image|none> [size]` gives
     a material a base-colour image. Until UVs arrive it is box-projected in
@@ -118,6 +140,11 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ### Changed
 - The screenshot moved from F12 to **Shift+F12**; F12 now renders.
+
+### Fixed
+- Hive's per-triangle texture data (box UVs) were not reordered with the
+  BVH's leaf order, so textures on multi-triangle meshes came out
+  scrambled. The object-space data that replaces them is reordered.
 
 ## [0.5.0] - 2026-10-13
 

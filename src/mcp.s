@@ -188,6 +188,13 @@ j_images:       .asciz "],\"images\":["
 j_world:        .asciz "],\"world\":{\"hdri\":"
 j_null:         .asciz "null"
 k_texture:      .asciz "texture"
+j_nodes:        .asciz ",\"nodes\":["
+j_ntype:        .asciz "{\"type\":"
+j_nvals:        .asciz ",\"values\":["
+j_nins:         .asciz "],\"inputs\":["
+j_nlink:        .asciz "{\"link\":"
+j_nend:         .asciz "]}"
+j_socks:        .asciz "],\"sockets\":{"
 k_strength:     .asciz "strength"
 k_rotation_w:   .asciz "rotation"
 j_material:     .asciz ",\"material\":"
@@ -1863,22 +1870,10 @@ mats_json:
     call    jb_num
 51: inc     r12d
     jmp     3b
-6:  mov     edi, ebx                    # a texture: "texture":"image"
+6:  mov     edi, ebx                    # the shader graph
     call    mat_get
-    mov     edi, [rax+92]
-    test    edi, edi
-    jz      61f
-    dec     edi
-    cmp     edi, [rip+img_count]
-    jae     61f
-    imul    r13d, edi, 256
-    mov     edi, ','
-    call    wb_char
-    lea     rsi, [rip+k_texture]
-    call    jb_key
-    lea     rsi, [rip+img_tab]
-    add     rsi, r13
-    call    jb_q
+    mov     rdi, rax
+    call    graph_json
 61: mov     edi, '}'
     call    wb_char
     inc     ebx
@@ -1926,6 +1921,163 @@ mats_json:
     call    jb_num
     mov     edi, '}'                    # (the caller closes the summary)
     call    wb_char
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# graph_json(rdi=material record) - ,"texture":..,"nodes":[..],"sockets":{..}
+graph_json:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, [rbx+128]             # nodes
+    test    r12d, r12d
+    jz      .Lgj_out
+    cmp     r12d, 12
+    jbe     1f
+    mov     r12d, 12
+1:  mov     eax, [rbx+132]              # "texture": the image behind base
+    test    eax, eax
+    jz      2f
+    cmp     eax, r12d
+    ja      2f
+    dec     eax
+    imul    eax, eax, 72
+    cmp     dword ptr [rbx+160+rax], 1
+    jne     2f
+    cvttss2si edi, dword ptr [rbx+160+rax+52]
+    dec     edi
+    js      2f
+    cmp     edi, [rip+img_count]
+    jae     2f
+    imul    r13d, edi, 256
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_texture]
+    call    jb_key
+    lea     rsi, [rip+img_tab]
+    add     rsi, r13
+    call    jb_q
+2:  lea     rsi, [rip+j_nodes]          # ,"nodes":[
+    call    wb_str
+    xor     r13d, r13d
+3:  cmp     r13d, r12d
+    jae     .Lgj_socks
+    test    r13d, r13d
+    jz      31f
+    mov     edi, ','
+    call    wb_char
+31: imul    eax, r13d, 72
+    lea     r14, [rbx+160+rax]
+    lea     rsi, [rip+j_ntype]          # {"type":
+    call    wb_str
+    mov     eax, [r14]
+    dec     eax
+    cmp     eax, 8
+    jae     32f
+    lea     rcx, [rip+graph_type_names]
+    mov     rsi, [rcx+rax*8]
+    call    jb_q
+    jmp     33f
+32: lea     rsi, [rip+j_null]
+    call    wb_str
+33: lea     rsi, [rip+j_nvals]          # ,"values":[
+    call    wb_str
+    xor     ecx, ecx
+34: push    rcx
+    test    ecx, ecx
+    jz      341f
+    mov     edi, ','
+    call    wb_char
+341:mov     rcx, [rsp]
+    movss   xmm0, [r14+52+rcx*4]
+    call    jb_num
+    pop     rcx
+    inc     ecx
+    cmp     ecx, 4
+    jb      34b
+    lea     rsi, [rip+j_nins]           # ],"inputs":[
+    call    wb_str
+    xor     ecx, ecx
+35: push    rcx
+    test    ecx, ecx
+    jz      351f
+    mov     edi, ','
+    call    wb_char
+351:mov     rcx, [rsp]
+    shl     ecx, 4
+    lea     rax, [r14+4+rcx]
+    mov     edx, [rax]
+    test    edx, edx
+    jz      352f
+    lea     rsi, [rip+j_nlink]          # {"link":n}
+    call    wb_str
+    mov     rcx, [rsp]
+    shl     ecx, 4
+    cvtsi2ss xmm0, dword ptr [r14+4+rcx]
+    call    jb_num
+    mov     edi, '}'
+    call    wb_char
+    jmp     353f
+352:mov     edi, '['                    # [x,y,z]
+    call    wb_char
+    mov     rcx, [rsp]
+    shl     ecx, 4
+    movss   xmm0, [r14+8+rcx]
+    call    jb_num
+    mov     edi, ','
+    call    wb_char
+    mov     rcx, [rsp]
+    shl     ecx, 4
+    movss   xmm0, [r14+12+rcx]
+    call    jb_num
+    mov     edi, ','
+    call    wb_char
+    mov     rcx, [rsp]
+    shl     ecx, 4
+    movss   xmm0, [r14+16+rcx]
+    call    jb_num
+    mov     edi, ']'
+    call    wb_char
+353:pop     rcx
+    inc     ecx
+    cmp     ecx, 3
+    jb      35b
+    lea     rsi, [rip+j_nend]           # ]}
+    call    wb_str
+    inc     r13d
+    jmp     3b
+.Lgj_socks:
+    lea     rsi, [rip+j_socks]          # ],"sockets":{
+    call    wb_str
+    xor     r13d, r13d
+    xor     r14d, r14d                  # written
+4:  cmp     r13d, 5
+    jae     5f
+    mov     eax, [rbx+132+r13*4]
+    test    eax, eax
+    jz      41f
+    test    r14d, r14d
+    jz      42f
+    mov     edi, ','
+    call    wb_char
+42: lea     rcx, [rip+graph_socket_names]
+    mov     rsi, [rcx+r13*8]
+    call    jb_key
+    cvtsi2ss xmm0, dword ptr [rbx+132+r13*4]
+    call    jb_num
+    inc     r14d
+41: inc     r13d
+    jmp     4b
+5:  mov     edi, '}'
+    call    wb_char
+.Lgj_out:
+    add     rsp, 8
+    pop     r14
     pop     r13
     pop     r12
     pop     rbx

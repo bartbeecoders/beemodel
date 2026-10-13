@@ -545,14 +545,14 @@ job_shade:
     mov     rax, [rip+pv_mat]           # material values
     mov     rsi, [rax+rbp*8]
     call    load_material
-    mov     rax, [rip+pv_mat]           # a textured base
+    mov     rax, [rip+pv_mat]           # a shader graph
     mov     rdi, [rax+rbp*8]
     test    rdi, rdi
     jz      1f
-    cmp     dword ptr [rdi+92], 0
+    cmp     dword ptr [rdi+128], 0
     je      1f
     lea     rsi, [rsp]
-    call    pv_texture
+    call    pv_graph
 1:  lea     rdi, [rsp]
     call    shade
     mov     eax, r12d                   # write the pixel
@@ -579,53 +579,104 @@ job_shade:
     pop     rbx
     ret
 
-# pv_texture(rdi=material record, rsi=job_shade's frame; r14 = object
-#   record, r15d = local triangle) - SH_BASE from the box-projected image
-pv_texture:
+# pv_graph(rdi=material record, rsi=job_shade's frame; r14 = object record,
+#   r15d = local triangle) - the material's graph at this pixel: values and
+#   the normal into the scratch
+pv_graph:
     push    rbx
     push    r12
-    sub     rsp, 40
+    sub     rsp, 200
     mov     rbx, rdi
     mov     r12, rsi
-    mov     r8, [r14+RO_MESH]
+    mov     r8, [r14+RO_MESH]           # the triangle's corners
     mov     rax, [r8+ME_TRIS]
     lea     rcx, [r15+r15*2]
     mov     edx, [rax+rcx*4]
     mov     esi, [rax+rcx*4+4]
     mov     edi, [rax+rcx*4+8]
-    mov     r9, [r8+ME_POS]
     lea     rdx, [rdx+rdx*2]
     lea     rsi, [rsi+rsi*2]
     lea     rdi, [rdi+rdi*2]
-    lea     rdi, [r9+rdi*4]             # p2 -> rdx below
-    lea     rsi, [r9+rsi*4]
-    lea     rax, [r9+rdx*4]
-    mov     rdx, rdi
-    mov     rdi, rax
-    lea     rcx, [rsp]
-    call    box_uv
-    movss   xmm2, [rip+pf_one]          # uv = w0 uv0 + u uv1 + v uv2
-    subss   xmm2, [r12+SH_SZ+20]
-    subss   xmm2, [r12+SH_SZ+24]
+    mov     r9, [r8+ME_POS]             # object space: p0, e1, e2
+    mov     r10, [r14+RO_CV]            # camera space: edges
     xor     ecx, ecx
-1:  movss   xmm0, [rsp+rcx*4]
-    mulss   xmm0, xmm2
-    movss   xmm1, [rsp+8+rcx*4]
-    mulss   xmm1, [r12+SH_SZ+20]
-    addss   xmm0, xmm1
-    movss   xmm1, [rsp+16+rcx*4]
-    mulss   xmm1, [r12+SH_SZ+24]
-    addss   xmm0, xmm1
-    movss   [rsp+24+rcx*4], xmm0
+1:  lea     rax, [r9+rdx*4]
+    movss   xmm0, [rax+rcx*4]
+    movss   [rsp+rcx*4], xmm0
+    lea     rax, [r9+rsi*4]
+    movss   xmm1, [rax+rcx*4]
+    subss   xmm1, xmm0
+    movss   [rsp+12+rcx*4], xmm1
+    lea     rax, [r9+rdi*4]
+    movss   xmm1, [rax+rcx*4]
+    subss   xmm1, xmm0
+    movss   [rsp+24+rcx*4], xmm1
+    lea     rax, [r10+rdx*4]
+    movss   xmm0, [rax+rcx*4]
+    lea     rax, [r10+rsi*4]
+    movss   xmm1, [rax+rcx*4]
+    subss   xmm1, xmm0
+    movss   [rsp+152+rcx*4], xmm1       # (camera e1, e2 for now)
+    lea     rax, [r10+rdi*4]
+    movss   xmm1, [rax+rcx*4]
+    subss   xmm1, xmm0
+    movss   [rsp+164+rcx*4], xmm1
     inc     ecx
-    cmp     ecx, 2
+    cmp     ecx, 3
     jb      1b
+    mov     eax, [r12+SH_SZ+20]         # u, v
+    mov     [rsp+36], eax
+    mov     eax, [r12+SH_SZ+24]
+    mov     [rsp+40], eax
+    lea     rsi, [rsp+152]              # the edges in world space
+    lea     rdi, [rsp+44]
+    call    cam_to_world
+    lea     rsi, [rsp+164]
+    lea     rdi, [rsp+56]
+    call    cam_to_world
+    mov     rax, [r12+SH_N]             # the normal
+    mov     [rsp+68], rax
+    mov     eax, [r12+SH_N+8]
+    mov     [rsp+76], eax
     mov     rdi, rbx
-    movss   xmm0, [rsp+24]
-    movss   xmm1, [rsp+28]
-    lea     rsi, [r12+SH_BASE]
-    call    mat_texel
-    add     rsp, 40
+    lea     rsi, [rsp]
+    call    graph_shade
+    mov     eax, [rsp+112]              # what it drives
+    test    eax, 1
+    jz      2f
+    mov     rcx, [rsp+80]
+    mov     [r12+SH_BASE], rcx
+    mov     ecx, [rsp+88]
+    mov     [r12+SH_BASE+8], ecx
+2:  test    eax, 2
+    jz      3f
+    mov     ecx, [rsp+92]
+    mov     [r12+SH_METAL], ecx
+3:  test    eax, 4
+    jz      4f
+    mov     ecx, [rsp+96]
+    mov     [r12+SH_ROUGH], ecx
+4:  test    eax, 8
+    jz      5f
+    movss   xmm1, [rbx+76]              # emission x strength (none yet: 1)
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    ja      41f
+    movss   xmm1, [rip+pf_one]
+41: xor     ecx, ecx
+42: movss   xmm0, [rsp+100+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [r12+SH_EMIT+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      42b
+5:  test    eax, 16
+    jz      6f
+    mov     rcx, [rsp+68]
+    mov     [r12+SH_N], rcx
+    mov     ecx, [rsp+76]
+    mov     [r12+SH_N+8], ecx
+6:  add     rsp, 200
     pop     r12
     pop     rbx
     ret
