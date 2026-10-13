@@ -144,6 +144,19 @@ with the full material under a studio environment. Materials are saved in `.bee`
 `material`, `matset`, `matget`, `assign` and `matof`; agents see them in `scene_summary` and use
 the `material.*` operators.
 
+**Rendering.** Hive is BeeModel's path tracer (CPU, every core). It renders what the camera object
+sees (or the viewport, without one) with the same principled materials:
+
+- glass refracts;
+- metal reflects;
+- clearcoat shines;
+- emissive faces light the scene;
+- light objects act as point lights;
+- a studio sky and sun light everything.
+
+`render.image <path> [width height samples]`, or `render(path, w, h, samples)` from a script,
+writes a PNG. A 480 × 270 image with 64 samples takes about a third of a second on 32 threads.
+
 **Analysis and repair.** View › Show Normals / Non-manifold / Boundary Edges / Degenerate Faces /
 Overhangs mark problems on the active mesh, with a count of each in the viewport.
 
