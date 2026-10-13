@@ -38,7 +38,8 @@
 .equ ST_CAD,        96      # the CAD document it saw (a reference)
 .equ ST_DELTA,      104     # sculpt: vertex positions changed in place, or 0
 .equ ST_TREES,      112     # the node trees it saw (a reference)
-.equ ST_HDR,        120
+.equ ST_ANIM,       120     # the animation it saw (a reference)
+.equ ST_HDR,        128
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -123,6 +124,9 @@ snapshot:
     mov     rdi, [rip+nt_cur]           # the node trees, shared
     mov     [rbx+ST_TREES], rdi
     call    nt_ref
+    mov     rdi, [rip+an_cur]           # the animation, shared
+    mov     [rbx+ST_ANIM], rdi
+    call    an_ref
     xor     r12d, r12d
 2:  cmp     r12d, [rip+obj_count]
     jae     8f
@@ -172,6 +176,8 @@ release:
     call    cad_unref
     mov     rdi, [rbx+ST_TREES]
     call    nt_unref
+    mov     rdi, [rbx+ST_ANIM]
+    call    an_unref
     mov     rdi, [rbx+ST_DELTA]         # its delta goes too
     test    rdi, rdi
     jz      3f
@@ -228,6 +234,12 @@ restore_step:
     mov     [rip+nt_cur], rax
     call    nt_unref
     inc     dword ptr [rip+nt_ver]
+    mov     rdi, [rbx+ST_ANIM]          # the animation it saw
+    call    an_ref
+    mov     rdi, [rip+an_cur]
+    mov     rax, [rbx+ST_ANIM]
+    mov     [rip+an_cur], rax
+    call    an_unref
     call    cad_sync
     lea     rdi, [rip+scene_pool]
     call    pool_clear

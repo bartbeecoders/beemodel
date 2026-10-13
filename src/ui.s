@@ -436,7 +436,12 @@ ui_motion:
     je      762f
 761: call    uved_motion
     jmp     .Lmo_out
-762: cmp     dword ptr [rip+ne_drag], 0  # node editor: a drag, the menu
+762: cmp     dword ptr [rip+tl_drag], 0  # the timeline: a scrub
+    je      7621f
+    mov     edi, [rip+ptr_x]
+    call    tl_motion
+    jmp     .Lmo_out
+7621: cmp     dword ptr [rip+ne_drag], 0  # node editor: a drag, the menu
     jne     763f
     cmp     dword ptr [rip+ne_menu], 0
     je      764f
@@ -714,7 +719,17 @@ ui_button:
     call    nodeed_press
     test    eax, eax
     jnz     .Lbt_done
-764: cmp     ebx, HIT_ASSETS             # the asset browser: a click adds
+764: cmp     ebx, HIT_TIMELINE           # the timeline: a scrub
+    jne     7641f
+    cmp     dword ptr [rip+pal_open], 0
+    jne     7641f
+    mov     edi, r14d
+    mov     esi, [rip+ptr_x]
+    mov     edx, [rip+ptr_y]
+    call    tl_press
+    test    eax, eax
+    jnz     .Lbt_done
+7641: cmp     ebx, HIT_ASSETS             # the asset browser: a click adds
     jne     765f
     cmp     dword ptr [rip+pal_open], 0
     jne     765f
@@ -976,6 +991,7 @@ ui_button:
 .Lbt_release:
     call    uved_release                # (a UV pan ends)
     call    nodeed_release              # (a node editor drag too)
+    call    tl_release                  # (and a timeline scrub)
     cmp     dword ptr [rip+drag_mode], DRAG_BOX
     jne     77f
     mov     dword ptr [rip+drag_mode], 0
@@ -1317,6 +1333,7 @@ modifier_keys: .byte 29, 42, 56, 54, 97, 100, 125, 126, 58, 69, 0
 #  Drawing
 # =============================================================================
 ui_draw:
+    call    an_tick                     # playback: the frame the clock says
     call    ui_layout
     call    reset_clip
     call    draw_titlebar

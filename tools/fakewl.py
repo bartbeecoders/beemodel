@@ -531,6 +531,7 @@ def main():
     curves()
     procedural()
     copilot()
+    animation()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3516,6 +3517,81 @@ def copilot():
     und = m.tool('script_eval', {'code': 'print(everts("Cube"), count())'})[0].strip()
     check(acc[0] == '"accepted"' and acc[1].startswith('441 4') and und.startswith('8 3'),
           f'Accept keeps it as one undo step ({acc} -> {und!r})')
+    f.proc.kill()
+
+
+def animation():
+    """Keyframes: any property a script can set (object transforms,
+    material values, modifier parameters, node inputs) keyed with Bezier
+    (auto-clamped), linear or constant blends; the scene at a frame; saved
+    in .bee files. In the window: I keys the selection, the Timeline area
+    shows the range and keys and scrubs, Space plays, arrows step, Ctrl+Z
+    takes keys back."""
+    print('  -- keyframes, timeline --')
+    home = tempfile.mkdtemp(prefix='bee-an-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('print(key("Cube:x", 1, 0), key("Cube:x", 25, 4), key("Cube:x", 49, 4))\n'
+            'print(keyed("Cube:x", 13), keyed("Cube:x", 37), keyed("Cube:x", 100))\n'
+            'print(key("Cube:ry", 1, 0, "linear"), key("Cube:ry", 11, 1), keyed("Cube:ry", 6))\n'
+            'print(key("Cube:sy", 1, 1, "constant"), key("Cube:sy", 11, 2), keyed("Cube:sy", 10.9))\n'
+            'frame(13)\nprint(frame(), get("Cube", "x"))\n'
+            'm = material("Red")\nassign("Cube", m)\nkey("material:Red:roughness", 1, 0.1)\nkey("material:Red:roughness", 21, 0.9)\n'
+            'mm = modifier("Cube", "subsurf")\nkey("modifier:Cube:0:levels", 1, 0)\nkey("modifier:Cube:0:levels", 11, 3)\n'
+            't = gtree("T")\no = gnode(t, "output")\ng = gnode(t, "grid", 2, 2)\nglink(t, g, o, 1)\n'
+            'key("node:T:2:5", 1, 2)\nkey("node:T:2:5", 11, 10)\nadd("plane", "P", 0, 0, 0)\nmp = modifier("P", "geometry")\n'
+            'modset("P", mp, "tree", t)\nframe(11)\nprint(matget("Red", "roughness"), everts("Cube"), everts("P"))\n'
+            'frame(1)\nprint(everts("Cube"), everts("P"))\n'
+            'print(unkey("Cube:x", 25), keyed("Cube:x", 25))\nop("anim.range", "1 120 30")\n'
+            'op("file.save", "~/BeeModel/a.bee")\nop("file.new")\nprint(keyed("Cube:x", 13))\nop("file.open", "~/BeeModel/a.bee")\n'
+            'print(frame(), keyed("Cube:x", 25), keyed("modifier:Cube:0:levels", 11))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=60)
+    out = r.stdout.split('\n')
+    def nums(i):
+        try:
+            return [float(x) for x in out[i].split()]
+        except Exception:
+            return []
+    check(nums(0) == [1, 2, 3] and nums(1) == [2, 4, 4] and nums(2) == [1, 2, 0.5] and nums(3) == [1, 2, 1]
+          and nums(4) == [13, 2], f'Bezier (flat at extremes), linear and constant keys; the scene at frame 13 ({out[:5]})')
+    check(nums(5) == [0.5, 386, 121] and nums(6) == [8, 9],
+          f'material values, modifier parameters and node inputs keyed: the scene follows the frame ({out[5:7]})')
+    check(nums(7) == [1, 2] and out[8].strip() == 'nil' and nums(9) == [1, 2, 3],
+          f'a key removed; keys and the frame come back from the .bee file ({out[7:10]})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.enter(600, 300)
+    q('frame(1)')
+    f.key(23)                                   # I: key the selection
+    q('frame(25)\nset("Cube", "x", 4)')
+    f.key(23)
+    k = q('print(keyed("Cube:x", 13), keyed("Cube:sz", 13))')
+    check(k == '2 1', f'I keys the selected object\'s transform at the frame ({k})')
+    f.move(600, 700)
+    q('op("area.type_timeline")')
+    f.pump(0.3)
+    f.shot('95_timeline.png')
+    f.drag(300, 690, 400, 690, steps=6)        # scrub
+    fr = q('print(frame(), get("Cube", "x"))').split()
+    check(len(fr) == 2 and float(fr[0]) > 30 and float(fr[1]) == 4,
+          f'dragging in the timeline scrubs the scene ({fr})')
+    q('frame(13)')
+    f.move(600, 300)
+    f.key(106)                                  # Right: one frame on
+    a = q('print(frame())')
+    f.key(57)                                   # Space: play
+    f.pump(0.6)
+    f.key(57)                                   # Space: pause
+    b = q('print(frame())')
+    f.pump(0.2)
+    c = q('print(frame())')
+    check(a == '14' and float(b) > 14 and b == c, f'Right steps a frame; Space plays and pauses ({a} -> {b}, {c})')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the second key goes
+    d = q('print(keyed("Cube:x", 25))')
+    check(d == '0', f'Ctrl+Z takes the last keys back ({d})')
     f.proc.kill()
 
 

@@ -1489,6 +1489,8 @@ render:
     call    msg0
     mov     dword ptr [rip+frame_pending], 1
     mov     dword ptr [rip+dirty], 0
+    mov     eax, [rip+an_play]          # playing: the next frame too
+    or      [rip+dirty], eax
 8:  pop     rbx
 9:  ret
 
