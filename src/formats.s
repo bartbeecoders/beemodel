@@ -11,6 +11,9 @@
 #          MODS  modifier stacks;  MATS  materials (count, 128-byte records);
 #          OMAT  per object: material index + 1 (0 = none)
 #          RNDR  render settings: width, height, samples, shown pass, denoise
+#          IMGS  image files (count, then u32 length + path each; loaded
+#                again on open, in order: materials refer to them by index)
+#          WRLD  the world: HDRI image + 1, strength, rotation
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
@@ -32,6 +35,8 @@
 .equ TAG_MATS,      0x5354414d          # "MATS"
 .equ TAG_OMAT,      0x54414d4f          # "OMAT"
 .equ TAG_RNDR,      0x52444e52          # "RNDR"
+.equ TAG_IMGS,      0x53474d49          # "IMGS"
+.equ TAG_WRLD,      0x444c5257          # "WRLD"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -49,6 +54,9 @@ mats_chunk:     .skip 8
 mtl_base:       .skip 8
 mtl_buf:        .skip 512
 omat_chunk:     .skip 8
+imgs_chunk:     .skip 8
+wrld_chunk:     .skip 8
+imgs_size:      .skip 4
 mats_size:      .skip 4
 omat_size:      .skip 4
 n_mesh_tab:     .skip 4
@@ -259,6 +267,19 @@ bee_save:
     call    chunk_begin
     call    omat_write
     call    chunk_end
+    mov     edi, TAG_IMGS               # IMGS, WRLD
+    call    chunk_begin
+    call    images_write
+    call    chunk_end
+    mov     edi, TAG_WRLD
+    call    chunk_begin
+    mov     edi, [rip+env_idx]
+    call    wb_u32
+    mov     edi, [rip+env_str]
+    call    wb_u32
+    mov     edi, [rip+env_rot]
+    call    wb_u32
+    call    chunk_end
     mov     edi, TAG_RNDR               # RNDR (render settings)
     call    chunk_begin
     mov     edi, [rip+rn_w]
@@ -465,6 +486,8 @@ bee_load:
     mov     qword ptr [rip+mods_chunk], 0
     mov     qword ptr [rip+mats_chunk], 0
     mov     qword ptr [rip+omat_chunk], 0
+    mov     qword ptr [rip+imgs_chunk], 0
+    mov     qword ptr [rip+wrld_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -517,7 +540,20 @@ bee_load:
     mov     [rip+omat_chunk], rax
     mov     [rip+omat_size], ebp
     jmp     23f
-27: cmp     eax, TAG_RNDR
+27: cmp     eax, TAG_IMGS
+    jne     28f
+    lea     rax, [rbx+8]
+    mov     [rip+imgs_chunk], rax
+    mov     [rip+imgs_size], ebp
+    jmp     23f
+28: cmp     eax, TAG_WRLD
+    jne     29f
+    cmp     ebp, 12
+    jb      23f
+    lea     rax, [rbx+8]
+    mov     [rip+wrld_chunk], rax
+    jmp     23f
+29: cmp     eax, TAG_RNDR
     jne     23f
     cmp     ebp, 16
     jb      23f
@@ -582,7 +618,24 @@ bee_load:
     inc     dword ptr [rip+obj_count]
     inc     ebx
     jmp     6b
-7:  mov     rdi, [rip+mats_chunk]       # materials, then who uses them
+7:  mov     rdi, [rip+imgs_chunk]       # images (before what uses them)
+    test    rdi, rdi
+    jz      74f
+    mov     esi, [rip+imgs_size]
+    call    images_read
+74: mov     rax, [rip+wrld_chunk]       # the world
+    test    rax, rax
+    jz      75f
+    mov     ecx, [rax]
+    cmp     ecx, [rip+img_count]
+    jbe     76f
+    xor     ecx, ecx
+76: mov     [rip+env_idx], ecx
+    mov     ecx, [rax+4]
+    mov     [rip+env_str], ecx
+    mov     ecx, [rax+8]
+    mov     [rip+env_rot], ecx
+75: mov     rdi, [rip+mats_chunk]       # materials, then who uses them
     test    rdi, rdi
     jz      72f
     mov     esi, [rip+mats_size]

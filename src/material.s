@@ -22,6 +22,7 @@
 .globl mat_find
 .globl mat_new
 .globl mat_set
+.globl mat_set_tex
 .globl mat_param_index
 .globl mat_param_get
 .globl mat_assign
@@ -57,6 +58,8 @@
 .equ MA_COAT,   80
 .equ MA_COATR,  84
 .equ MA_ALPHA,  88
+.equ MA_TEX,    92                      # base colour image + 1 (0 = none)
+.equ MA_TSIZE,  96                      # object units per repeat (0 = 1)
 .equ MA_MAX,    1024
 .equ NPARAMS,   11
 .equ PR_SZ,     32              # name ptr, offset, comps, step, min, max
@@ -148,12 +151,17 @@ s_m_unknown:    .asciz "  no material named "
 s_m_bad:        .asciz "  material.set <name> <parameter> <values...>"
 s_m_full:       .asciz "  the scene holds 1024 materials"
 s_m_removed:    .asciz "  material removed: "
+s_m_texbad:     .asciz "  material.texture <material> <image|none> [size in object units]"
+s_m_noimage:    .asciz "  no image named "
+s_m_tex:        .asciz "  material texture: "
+s_m_none:       .asciz "none"
 s_drag:         .asciz "Material"
 s_dot:          .asciz "."
 
 OPERATOR op_mat_new, "material.new", "New Material", do_mat_new, flags=OPF_AI_SAFE|OPF_UNDO, doc="Create a material and give it to the active mesh: material.new [name]"
 OPERATOR op_mat_assign, "material.assign", "Assign Material", do_mat_assign, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give the active mesh a material: material.assign <name> (none = no material)"
 OPERATOR op_mat_set, "material.set", "Set Material Value", do_mat_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set a material value: material.set <name> base|metallic|roughness|specular|ior|transmission|emission|strength|clearcoat|coat_roughness|alpha <values>"
+OPERATOR op_mat_texture, "material.texture", "Material Texture", do_mat_texture, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give a material a base colour image, box-projected: material.texture <name> <image|none> [size]"
 OPERATOR op_mat_remove, "material.remove", "Remove Material", do_mat_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Delete a material (objects using it get none): material.remove <name>"
 
 .text
@@ -931,6 +939,113 @@ do_mat_remove:
     call    log_line
     call    undo_drop_last
 9:  add     rsp, 40
+    pop     r12
+    pop     rbx
+    ret
+
+# mat_set_tex(edi=material, esi=image + 1 (0 = none), xmm0=size) -> eax = 1
+mat_set_tex:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    movss   [rsp], xmm0
+    mov     ebx, edi
+    mov     r12d, esi
+    call    mat_count
+    cmp     ebx, eax
+    jae     8f
+    xor     edi, edi
+    call    mat_cow
+    test    rax, rax
+    jz      8f
+    mov     edi, ebx
+    call    mat_get
+    mov     [rax+MA_TEX], r12d
+    movss   xmm0, [rsp]
+    movss   [rax+MA_TSIZE], xmm0
+    mov     dword ptr [rip+dirty], 1
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
+# material.texture <material> <image|none> [size]
+do_mat_texture:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 80
+    mov     rdi, [rip+op_arg]
+    test    rdi, rdi
+    jz      .Lmt_bad
+    lea     rsi, [rsp]
+    call    arg_word                    # material
+    lea     rsi, [rsp+32]
+    mov     rdi, rax
+    call    arg_word                    # image
+    mov     r13, rax
+    cmp     byte ptr [rsp+32], 0
+    je      .Lmt_bad
+    mov     dword ptr [rsp+64], 0x3f800000  # size 1
+    mov     rsi, r13
+    lea     rdx, [rsi+32]
+    call    parse_float
+    test    eax, eax
+    jz      1f
+    movss   [rsp+64], xmm0
+1:  lea     rdi, [rsp]
+    call    mat_find
+    test    eax, eax
+    js      .Lmt_unknown
+    mov     ebx, eax
+    xor     r12d, r12d                  # "none": no image
+    lea     rdi, [rsp+32]
+    lea     rsi, [rip+s_m_none]
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+    lea     rdi, [rsp+32]
+    call    image_find
+    test    eax, eax
+    js      .Lmt_noimage
+    lea     r12d, [rax+1]
+2:  mov     edi, ebx
+    mov     esi, r12d
+    movss   xmm0, [rsp+64]
+    call    mat_set_tex
+    call    fmt_reset
+    lea     rdi, [rip+s_m_tex]
+    call    fmt_str
+    lea     rdi, [rsp]
+    call    fmt_str
+    mov     edi, ' '
+    call    fmt_char
+    lea     rdi, [rsp+32]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+    jmp     9f
+.Lmt_noimage:
+    lea     rdi, [rip+s_m_noimage]
+    lea     rsi, [rsp+32]
+    call    log_pair
+    call    undo_drop_last
+    jmp     9f
+.Lmt_unknown:
+    lea     rdi, [rip+s_m_unknown]
+    lea     rsi, [rsp]
+    call    log_pair
+    call    undo_drop_last
+    jmp     9f
+.Lmt_bad:
+    lea     rdi, [rip+s_m_texbad]
+    call    log_line
+    call    undo_drop_last
+9:  add     rsp, 80
+    pop     r13
     pop     r12
     pop     rbx
     ret

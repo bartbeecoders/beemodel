@@ -112,6 +112,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `matof(object)` | The name of its material, or `nil` |
 | `image(path)` | Loads a PNG, JPEG or Radiance HDR image into the scene; returns its name |
 | `imgsize(image, axis)` | Width (axis 0) or height (1) |
+| (textures, world) | `op("material.texture", "Wood " + img + " 0.5")`, `op("world.hdri", sky)`, `op("world.strength", 2)` |
 | `imgpixel(image, x, y, channel)` | A pixel's red, green, blue or alpha (0..3): 0..255 for 8-bit images, linear values for HDR |
 | `render(path [, width, height, samples, denoise])` | Path-traces the scene with Hive into a PNG (the camera object, or the viewport's view), denoised when `denoise` is 1; returns the milliseconds. Defaults 640 x 360, 64 samples, no denoising |
 | `modifier(name, type)` | Adds `mirror`, `array`, `solidify`, `subsurf`, `bevel`, `decimate`, `remesh` or `boolean`; returns its index. A boolean takes the other selected mesh as its object |

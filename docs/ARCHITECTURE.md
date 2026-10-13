@@ -45,6 +45,8 @@ stays private to the module.
 | `jpeg.s` | Baseline JPEG: Huffman, SSE float IDCT, bilinear chroma upsampling, YCbCr |
 | `exr.s` | OpenEXR writer: half-float scanlines, ZIP blocks through png.s's deflate |
 | `image.s` | The scene's images: load, name, save, `image.*` operators |
+| `texture.s` | Image lookups (bilinear, repeating, sRGB table) and object-space box projection |
+| `env.s` | The world: HDRI lookups, a 2D CDF for importance sampling, SH9 irradiance and a blurred copy for the preview, `world.*` operators |
 | `denoise.s` | Hive's denoiser: demodulation by albedo, variance from luminance moments, five edge-avoiding à-trous passes guided by normal, depth and luminance, in parallel rows |
 | `render.s` | The Render window: `render.start / stop / pass / save / settings`, the time-sliced `render_tick` the main loop calls, and the Render editor (the chosen pass fit to the area, with a status line) |
 | `hive_pt.s` | Hive's light transport: path tracing with next-event estimation and MIS over sky, sun, point and emissive-triangle lights; the principled BSDF (Lambert, GGX, rough dielectric, clearcoat); parallel progressive passes with albedo, normal and depth AOVs, ACES resolve, `render.image` |

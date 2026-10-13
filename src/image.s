@@ -15,6 +15,9 @@
 .globl image_find
 .globl image_ptr
 .globl image_clear
+.globl image_load_keep
+.globl images_write
+.globl images_read
 .globl image_pixel
 .globl op_image_load
 .globl op_image_save
@@ -109,6 +112,7 @@ image_clear:
     inc     ebx
     jmp     1b
 2:  mov     dword ptr [rip+img_count], 0
+    call    env_forget                  # (its tables point into the images)
     pop     rbx
     ret
 
@@ -275,6 +279,116 @@ image_load:
     call    log_line
 8:  mov     eax, -1
 9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# image_load_keep(rdi=path) - load, or keep a place (no pixels) for a file
+#   that is missing now: materials and the world refer to images by index
+image_load_keep:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, rdi
+    call    image_load
+    test    eax, eax
+    jns     9f
+    cmp     dword ptr [rip+img_count], MAX_IMAGES
+    jae     9f
+    mov     rdi, r12
+    call    base_name
+    call    unique
+    mov     edi, [rip+img_count]
+    call    rec
+    mov     rbx, rax
+    mov     qword ptr [rbx+IR_IMG], 0
+    lea     rsi, [rip+im_name]
+    mov     rdi, rbx
+    mov     ecx, 32
+    rep     movsb
+    lea     rdi, [rbx+IR_PATH]
+    mov     rsi, r12
+    xor     ecx, ecx
+1:  mov     al, [rsi+rcx]
+    cmp     ecx, IR_SZ-IR_PATH-1
+    jae     2f
+    mov     [rdi+rcx], al
+    inc     ecx
+    test    al, al
+    jnz     1b
+2:  mov     byte ptr [rdi+rcx], 0
+    inc     dword ptr [rip+img_count]
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# images_write - IMGS chunk body: count, then per image u32 length + path
+images_write:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     edi, [rip+img_count]
+    call    wb_u32
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+img_count]
+    jae     9f
+    mov     edi, ebx
+    call    rec
+    lea     r12, [rax+IR_PATH]
+    mov     rdi, r12
+    call    str_len
+    mov     edi, eax
+    push    rax
+    call    wb_u32
+    pop     rdx
+    mov     rsi, r12
+    call    wb_bytes
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# images_read(rdi=IMGS data, esi=bytes) - load them again, in order
+images_read:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 264
+    mov     r12, rdi
+    lea     r13, [rdi+rsi]
+    cmp     esi, 4
+    jb      9f
+    mov     r14d, [r12]
+    add     r12, 4
+    xor     ebx, ebx
+1:  cmp     ebx, r14d
+    jae     9f
+    lea     rax, [r12+4]
+    cmp     rax, r13
+    ja      9f
+    mov     ecx, [r12]
+    add     r12, 4
+    cmp     ecx, 255
+    ja      9f
+    lea     rax, [r12+rcx]
+    cmp     rax, r13
+    ja      9f
+    lea     rdi, [rsp]
+    mov     rsi, r12
+    add     r12, rcx
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    lea     rdi, [rsp]
+    call    image_load_keep
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 264
     pop     r14
     pop     r13
     pop     r12

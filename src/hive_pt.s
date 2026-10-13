@@ -308,7 +308,9 @@ sky_rad:
     mov     [rsi+4], eax
     mov     [rsi+8], eax
     ret
-0:  movss   xmm0, [rdi+4]
+0:  cmp     dword ptr [rip+hv_env], 0
+    jne     env_rad
+    movss   xmm0, [rdi+4]
     xorps   xmm1, xmm1
     comiss  xmm0, xmm1
     jbe     2f
@@ -336,6 +338,8 @@ sky_rad:
 # in_sun(rdi=direction) -> eax = 1 inside the disc
 in_sun:
     xor     eax, eax
+    cmp     dword ptr [rip+hv_env], 0
+    jne     1f
     cmp     dword ptr [rip+hv_debug], 2
     jae     1f
     lea     rsi, [rip+sun_dir]
@@ -357,6 +361,7 @@ bsdf_init:
     sub     rsp, 24
     mov     rbx, rdi
     mov     r12, rsi
+    mov     [rsp+16], r9                # a texture colour for the base, or 0
     test    r12, r12
     jnz     1f
     lea     r12, [rip+mat_def]
@@ -396,6 +401,14 @@ bsdf_init:
     mov     [rbx+C_BASE], rax
     mov     eax, [r12+40]
     mov     [rbx+C_BASE+8], eax
+    mov     rcx, [rsp+16]
+    test    rcx, rcx
+    jz      11f
+    mov     rax, [rcx]
+    mov     [rbx+C_BASE], rax
+    mov     eax, [rcx+8]
+    mov     [rbx+C_BASE+8], eax
+11:
     mov     eax, [r12+44]
     mov     [rbx+C_METAL], eax
     movss   xmm0, [r12+48]              # alpha = roughness^2
@@ -1498,6 +1511,8 @@ light_sample:
     mov     dword ptr [r13+LS_DELTA], 1
     jmp     .Lls_ok
 .Lls_sun:                               # a direction in the sun's cone
+    cmp     dword ptr [rip+hv_env], 0
+    jne     .Lls_none
     call    rnd
     movss   [rsp+4], xmm0
     call    rnd
@@ -1543,6 +1558,8 @@ light_sample:
     movss   [r13+LS_PDF], xmm0
     jmp     .Lls_ok
 .Lls_sky:                               # cosine about n
+    cmp     dword ptr [rip+hv_env], 0
+    jne     .Lls_env
     call    rnd
     movss   [rsp+4], xmm0
     call    rnd
@@ -1587,6 +1604,29 @@ light_sample:
     comiss  xmm0, [rip+pt_tiny]
     jbe     .Lls_none
     movss   [r13+LS_PDF], xmm0
+    jmp     .Lls_ok
+.Lls_env:                               # the HDRI by its CDF
+    call    rnd
+    movss   [rsp+4], xmm0
+    call    rnd
+    movss   [rsp+8], xmm0
+    call    rnd
+    movss   [rsp+12], xmm0
+    call    rnd
+    movss   xmm3, xmm0
+    movss   xmm0, [rsp+4]
+    movss   xmm1, [rsp+8]
+    movss   xmm2, [rsp+12]
+    lea     rdi, [r13+LS_WI]
+    call    env_sample
+    mulss   xmm0, [rsp]                 # x p(choice)
+    comiss  xmm0, [rip+pt_tiny]
+    jbe     .Lls_none
+    movss   [r13+LS_PDF], xmm0
+    mov     dword ptr [r13+LS_DIST], 0x7149f2ca
+    lea     rdi, [r13+LS_WI]
+    lea     rsi, [r13+LS_LI]
+    call    env_rad
 .Lls_ok:
     mov     eax, 1
     jmp     9f
@@ -1701,7 +1741,9 @@ mis:
 .equ PF_OUT,    252             # outside flag
 .equ PF_TMP,    256             # 48
 .equ PF_CTX,    304             # BSDF context (160)
-.equ PF_SZ,     480
+.equ PF_TEX,    464             # the texture colour here (12)
+.equ PF_UV,     476             # (8)
+.equ PF_SZ,     496
 
 # trace_path(xmm0=sx, xmm1=sy (screen -1..1), rdi=L out[3], rsi=aux out[7]
 #   (albedo, normal, depth of the first hit); r15 = rng)
@@ -1757,13 +1799,18 @@ trace_path:
     cmp     dword ptr [rbx+PF_SPEC], 0
     jne     2f
     # sky weight: pdf_b vs p_choice cos / pi (cos at the previous point:
-    #   PF_NS of that point, kept)
-    lea     rdi, [rbx+PF_NS]
+    #   PF_NS of that point, kept), or the HDRI's pdf
+    cmp     dword ptr [rip+hv_env], 0
+    je      11f
+    lea     rdi, [rbx+PF_RAY+RAY_D]
+    call    env_pdf
+    jmp     12f
+11: lea     rdi, [rbx+PF_NS]
     lea     rsi, [rbx+PF_RAY+RAY_D]
     call    dot3
     maxss   xmm0, [rip+pt_zero]
     mulss   xmm0, [rip+pt_inv_pi]
-    cvtsi2ss xmm1, dword ptr [rip+hv_nslots]
+12: cvtsi2ss xmm1, dword ptr [rip+hv_nslots]
     divss   xmm0, xmm1
     movss   xmm1, xmm0
     movss   xmm0, [rbx+PF_PREV]
@@ -1860,8 +1907,41 @@ trace_path:
     jb      62b
     lea     rsi, [rbx+PF_TMP]
     call    add_beta_l
-7:  # the BSDF here
-    lea     rdi, [rbx+PF_CTX]
+7:  # the BSDF here (a textured base: box-projected coordinates)
+    xor     r9d, r9d
+    test    r13, r13
+    jz      71f
+    cmp     dword ptr [r13+92], 0
+    je      71f
+    mov     rax, [rip+hv_tuv]           # uv = w0 uv0 + u uv1 + v uv2
+    lea     rcx, [r12+r12*2]
+    lea     rax, [rax+rcx*8]
+    movss   xmm2, [rip+pt_one]
+    subss   xmm2, [rbx+PF_RAY+RAY_U]
+    subss   xmm2, [rbx+PF_RAY+RAY_V]
+    xor     ecx, ecx
+72: movss   xmm0, [rax+rcx*4]
+    mulss   xmm0, xmm2
+    movss   xmm1, [rax+8+rcx*4]
+    mulss   xmm1, [rbx+PF_RAY+RAY_U]
+    addss   xmm0, xmm1
+    movss   xmm1, [rax+16+rcx*4]
+    mulss   xmm1, [rbx+PF_RAY+RAY_V]
+    addss   xmm0, xmm1
+    movss   [rbx+PF_UV+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 2
+    jb      72b
+    mov     rdi, r13
+    movss   xmm0, [rbx+PF_UV]
+    movss   xmm1, [rbx+PF_UV+4]
+    lea     rsi, [rbx+PF_TEX]
+    call    mat_texel
+    xor     r9d, r9d
+    test    eax, eax
+    jz      71f
+    lea     r9, [rbx+PF_TEX]
+71: lea     rdi, [rbx+PF_CTX]
     mov     rsi, r13
     lea     rdx, [rbx+PF_NS]
     lea     rcx, [rbx+PF_WO]
@@ -2142,6 +2222,9 @@ hive_start:
     mov     r13d, esi
     mov     [rip+hv_target], edx
     call    pt_unmap_all
+    call    tex_init
+    call    env_prep
+    mov     [rip+hv_env], eax
     call    hive_build
     test    eax, eax
     jz      8f
@@ -2718,6 +2801,7 @@ pt_maps:        .skip 8*16
 pt_nmaps:       .skip 4
 hv_debug:       .skip 4
 hv_den_on:      .skip 4                 # beauty shows hv_den (denoised)
+hv_env:         .skip 4                 # the world is an HDRI (no studio sky, sun)
 .align 8
 hv_den:         .skip 8                 # f32[w*h][4] denoised radiance
 
