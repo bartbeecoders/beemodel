@@ -178,8 +178,16 @@ rn_resolve:
     sub     rsp, 8
     mov     rdi, [rip+rn_img]
     mov     esi, [rip+hv_w]
-    call    hive_resolve
-    mov     dword ptr [rip+rn_stale], 0
+    cmp     dword ptr [rip+rn_stale], 2 # 2: only new samples (beauty, raw)
+    jne     1f
+    cmp     dword ptr [rip+hv_pass], 0
+    jne     1f
+    cmp     dword ptr [rip+hv_den_on], 0
+    jne     1f
+    call    hive_resolve_new
+    jmp     2f
+1:  call    hive_resolve
+2:  mov     dword ptr [rip+rn_stale], 0
     add     rsp, 8
     ret
 
@@ -281,7 +289,10 @@ render_tick:
     mov     edi, RN_SLICE_MS
     call    hive_tick
     mov     dword ptr [rip+hv_den_on], 0     # newer samples than the denoised
-    mov     dword ptr [rip+rn_stale], 1
+    cmp     dword ptr [rip+rn_stale], 0      # (2: new rows only, unless more)
+    jne     1f
+    mov     dword ptr [rip+rn_stale], 2
+1:
     mov     dword ptr [rip+dirty], 1
     test    eax, eax
     jnz     9f

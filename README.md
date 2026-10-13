@@ -9,7 +9,7 @@ the Linux kernel through raw syscalls and to the compositor through the Wayland
 wire protocol on a UNIX socket.
 
 ```
-./build.sh          # assemble + link  -> build/beemodel  (~210 KB static ELF)
+./build.sh          # assemble + link  -> build/beemodel  (~300 KB static ELF)
 ./build.sh debug    # same, with symbols (for gdb)
 ./run.sh            # rebuilds if sources changed, then starts the app
 ```
@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.5.0/beemodel-0.5.0-linux-x86_64.bin
-chmod +x beemodel-0.5.0-linux-x86_64.bin && ./beemodel-0.5.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.6.0/beemodel-0.6.0-linux-x86_64.bin
+chmod +x beemodel-0.6.0-linux-x86_64.bin && ./beemodel-0.6.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -307,29 +307,59 @@ see every operator with its id, binding and description.
 ## Source layout
 
 ```
-src/main.s      entry point, CLI flags, event loop
+src/main.s      entry point, CLI flags, event loop (a render slice per turn)
 src/wayland.s   socket, message encode/decode, SCM_RIGHTS, shm buffers, dispatch
 src/draw.s      framebuffer primitives: rects, gradient, text, lines, clipping
-src/ui.s        layout, hit testing, input, menus, panes, status bar
+src/ui.s        layout, hit testing, input, menus, status bar
+src/areas.s     area tree, editors, splitting / closing / maximizing
+src/palette.s   F3 command palette (fuzzy operator search)
 src/ops.s       operator spine: operator table, runner, keymap, --list-ops
-src/viewport.s  camera, projection, clipping, grid/axes/gizmo (+ its operators)
 src/keyboard.s  XKB keymap parser, levels, dead keys, layout-aware shortcuts, key repeat
 src/textfield.s UTF-8 text field (console command line)
 src/ttf.s       TrueType parser, anti-aliased rasterizer, glyph cache
 src/text.s      font selection, UTF-8 text drawing and measurement
+src/font.s      embedded bitmap font (data in src/font.inc)
 src/jobs.s      worker threads, futex, parallel_for
 src/mem.s       arenas and generational-handle pools
-src/selftest.s  --selftest unit tests + benchmark
-src/areas.s     area tree, editors, splitting / closing / maximizing
-src/palette.s   F3 command palette (fuzzy operator search)
-src/scene.s     objects, selection, transforms, object operators
-src/mesh.s      polygon meshes and primitive generators
-src/json.s      lazy JSON reader + writer
-src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
-src/png.s       PNG encoder (row filters, LZ77 + Huffman deflate)
-src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/log.s       string builder + console log
-src/font.s      embedded font (data in src/font.inc, see tools/genfont.py)
+src/selftest.s  --selftest unit tests + benchmark
+src/scene.s     objects, selection, transforms, object operators
+src/undo.s      undo / redo snapshots
+src/redo.s      adjust-last-operation panel
+src/transform.s G / R / S modal transforms, constraints, numeric input
+src/viewport.s  camera, projection, grid / axes / gizmos, overlays
+src/raster.s    multithreaded triangle rasterizer, depth + visibility buffers
+src/preview.s   material preview shading (principled, studio or HDRI, graphs)
+src/mesh.s      polygon meshes and primitive generators
+src/edit.s      edit mode: selection, picking, overlays
+src/meshops.s   mesh operators (extrude, inset, loop cut, ...)
+src/meshops2.s  more mesh operators (bevel, bridge, ...)
+src/subsurf.s   Catmull-Clark subdivision
+src/mods.s      modifier stack (+ mods2.s)
+src/bool.s      exact mesh booleans (snapped, 128-bit orient3d, per-triangle CDT)
+src/repair.s    mesh analysis and repair
+src/material.s  principled materials (copy-on-write, undoable), Properties UI
+src/graph.s     shader graphs: nodes, sockets, evaluation, bump
+src/texture.s   image lookups, box projection
+src/env.s       the world: HDRI lookups, importance sampling, SH irradiance
+src/hive.s      Hive path tracer: triangle soup, SAH BVH4, SSE traversal
+src/hive_pt.s   Hive light transport: NEE + MIS, principled BSDF, passes
+src/denoise.s   edge-avoiding a-trous denoiser (albedo / normal / depth)
+src/render.s    the Render window and render.* operators
+src/image.s     the scene's images, image.* operators
+src/imgread.s   PNG and Radiance HDR readers
+src/inflate.s   inflate + zlib
+src/jpeg.s      baseline JPEG decoder
+src/png.s       PNG encoder (row filters, LZ77 + Huffman deflate)
+src/exr.s       OpenEXR writer (half floats, ZIP)
+src/formats.s   .bee files, OBJ / STL import + export, file operators
+src/mtl.s       MTL import (OBJ materials)
+src/gltf.s      glTF 2.0 import / export
+src/json.s      lazy JSON reader + writer
+src/fileio.s    paths, files, the write buffer
+src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
+src/agent.s     agent permissions, activity log, revert
+src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours
 src/macros.inc  operator record layout + OPERATOR macro
 ```
