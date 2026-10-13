@@ -216,6 +216,8 @@
 .equ KEY_S,             31
 .equ KEY_Z,             44
 .equ KEY_N,             49
+.equ KEY_PAGEUP,        104
+.equ KEY_PAGEDOWN,      109
 .equ KEY_F1,            59
 .equ MOD_ALT,           8
 .equ KEY_ENTER,         28

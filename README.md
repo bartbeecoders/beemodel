@@ -388,6 +388,12 @@ under the layout. `[` `]` size the brush, Shift+`[` `]` its strength,
 `paint.color r g b` sets the colour; Ctrl+Z / Ctrl+Shift+Z step through the
 strokes. Scripts paint with `paint(object, x, y, z, radius [, r, g, b])`.
 
+Paint **layers**: Shift+N adds a transparent layer above (painted from then
+on), PageUp / PageDown pick the layer painted, `paint.layer_merge`
+flattens. Each layer has an opacity, a blend mode (normal, multiply, add)
+and can be hidden (`layer(image, ...)` in scripts); the image is their
+composite, and the stack is saved in the `.bee` file.
+
 ### BeeScript
 
 BeeScript is a small scripting language built into BeeModel. Lines typed in the console that are not
@@ -494,6 +500,7 @@ src/multires.s  multiresolution: per-level displacements, level sculpting
 src/uv.s        UV maps: seams, LSCM unwrap (CG solver), smart projection, packing
 src/uved.s      the UV editor area: islands, transforms, heat map, texel density
 src/paint.s     texture painting: projected dabs, UV-space dabs, stroke history
+src/layers.s    paint layers: stack, blend modes, composite, saving
 src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay

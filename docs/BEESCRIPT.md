@@ -146,6 +146,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `socket(material, socket, node)` | Drives `base`, `metallic`, `roughness`, `emission` or `normal` (a bump node) by a node; `nil` unplugs |
 | `imgset(image, x, y, r, g, b [, a])` | Sets an 8-bit image's pixel (0..255); the image is then saved inside `.bee` files |
 | `paint(object, x, y, z, radius [, r, g, b])` | A dab of texture paint around that world point (radius in scene units, colour 0..255, else the brush colour) on the object's material image; one stroke in the paint history; 0 when there is no image to paint |
+| `layer(image, op [, layer [, value]])` | Paint layers: `"count"`, `"add"` (a transparent layer above, made active; returns its number), `"active"` (with a layer: paint it; without: which one), `"opacity"` (0..1), `"blend"` (0 normal, 1 multiply, 2 add), `"visible"` (0 / 1), `"remove"`, `"merge"` (flatten into the image) |
 | `uvmap(object, su, sv, du, dv)` | Every UV of the mesh becomes (u su + du, v sv + dv): tiling, offsets |
 | `imgpixel(image, x, y, channel)` | A pixel's red, green, blue or alpha (0..3): 0..255 for 8-bit images, linear values for HDR |
 | `render(path [, width, height, samples, denoise])` | Path-traces the scene with Hive into a PNG (the camera object, or the viewport's view), denoised when `denoise` is 1; returns the milliseconds. Defaults 640 x 360, 64 samples, no denoising |

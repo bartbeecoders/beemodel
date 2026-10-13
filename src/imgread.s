@@ -135,7 +135,12 @@ img_alloc:
 img_free:
     test    rdi, rdi
     jz      1f
-    mov     rsi, [rdi+IM_MAPSZ]
+    cmp     qword ptr [rdi+32], 0       # (its paint layers first)
+    je      2f
+    push    rdi
+    call    lay_free
+    pop     rdi
+2:  mov     rsi, [rdi+IM_MAPSZ]
     mov     eax, SYS_MUNMAP
     syscall
 1:  ret
