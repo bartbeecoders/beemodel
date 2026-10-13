@@ -131,6 +131,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `area(object)`, `mass(object)`, `centroid(object, axis)` | Mass properties in world space and scene units: surface area, mass in grams (volume x the material's `density` in g/cm^3; no material: 1), centre of mass (`"x"`, `"y"`, `"z"` or 0..2) |
 | `fangle(object, face a, face b)` | The angle between two faces' normals (radians; `deg()` converts) |
 | `measurement()` | The measure tool's current result (Shift+M in the viewport): the distance between two clicked points, the angle at the middle one of three (radians), or `nil` |
+| `infill(body, shell, "gyroid" \| "grid", cell, wall)` | A lattice filling a shell's cavity (reaching a quarter wall into the walls), kept as its own closed shell in the body; slicers join overlapping shells |
 | `features()`, `fstatus(i)` | The number of features; a feature's status: 0 ok, 1 sketch missing, 2 no closed profile, 3 the geometry failed, 4 a value does not evaluate, 5 nothing to work on, 6 bad reference, 7 suppressed, 8 body missing |
 | `node(material, type [, values...])` | Adds a shader node and returns its number (1..12). Types: `image` (image name, size), `noise` (scale, detail, roughness), `checker` (scale), `gradient` (axis 0/1/2, scale, offset), `mix` (mode 0 mix 1 add 2 multiply 3 subtract 4 screen), `ramp` (position 0, position 1), `math` (op 0 add 1 subtract 2 multiply 3 divide 4 power 5 min 6 max 7 greater 8 sine 9 abs), `bump` (strength, distance) |
 | `link(material, from, to, input)` | Feeds node `from` into input 1..3 of a later node `to` |
@@ -193,6 +194,27 @@ Fillets and chamfers work on the faces next to the edges they round; a face
 that a hole or pocket has turned into a ring cannot take a round yet, so
 round edges before cutting into the faces next to them (the feature then
 reports status 3 and leaves the body as it was).
+
+### Signed-distance shapes
+
+Shapes made of signed distance fields (numbers are shape ids; lengths may be
+expressions with units). They combine smoothly and turn into closed meshes:
+
+| Function | Shape |
+|---|---|
+| `ssphere(r)`, `sbox(x, y, z [, rounding])`, `scyl(r, height)`, `storus(R, r)` | Primitives at the origin (full sizes; cylinder and torus about Y) |
+| `sgyroid(cell, wall)`, `sgrid(cell, strut diameter)` | Endless lattices (intersect them with a solid before meshing) |
+| `sunion(a, b [, k])`, `ssub(a, b [, k])`, `sisect(a, b [, k])` | Booleans; `k` > 0 blends them over that radius |
+| `sshell(a, wall)` | A wall of that thickness centred on the surface |
+| `smove(a, x, y, z)`, `srot(a, rx, ry, rz)` | Moved / turned copies (radians, Euler XYZ) |
+| `sdist(a, x, y, z)` | The signed distance at a point (negative inside) |
+| `smesh(name, a [, cells])` | A new mesh object: the shape sampled on a grid (`cells` along the largest side, default 64, at most 512, in parallel) and meshed by marching tetrahedra - always closed and manifold |
+| `sclear()` | Forgets every shape (ids start again) |
+
+```
+b = sunion(smove(ssphere(1), 0, 1.6, 0), sbox(2.4, 1.2, 2.4, 0.2), 0.5)
+smesh("Knob", ssub(b, smove(scyl(0.4, 6), 0, 1, 0)), 96)
+```
 
 ### Math and text
 

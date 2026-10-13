@@ -23,6 +23,10 @@
 .globl prof_offset
 .globl prof_points
 .globl pf_nl
+.globl pf_np
+.globl pf_ls
+.globl pf_ln
+.globl pf_pt
 
 .equ SK_NPT,     12
 .equ SK_NENT,    16

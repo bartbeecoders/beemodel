@@ -134,6 +134,9 @@
 
 .section .bss
 .align 16
+sd_p:           .skip 32
+sd_obj:         .skip OB_SZ
+.align 16
 toks:           .skip TOK_MAX*TK_SZ
 main_code:      .skip MAIN_CODE
 fn_code:        .skip FN_CODE
@@ -473,6 +476,38 @@ builtins:
     .long 3, 3
     .quad bn_measurement, b_measurement
     .long 0, 0
+    .quad bn_ssphere, b_ssphere
+    .long 1, 1
+    .quad bn_sbox, b_sbox
+    .long 3, 4
+    .quad bn_scyl, b_scyl
+    .long 2, 2
+    .quad bn_storus, b_storus
+    .long 2, 2
+    .quad bn_sgyroid, b_sgyroid
+    .long 2, 2
+    .quad bn_sgrid, b_sgrid
+    .long 2, 2
+    .quad bn_sunion, b_sunion
+    .long 2, 3
+    .quad bn_ssub, b_ssub
+    .long 2, 3
+    .quad bn_sisect, b_sisect
+    .long 2, 3
+    .quad bn_sshell, b_sshell
+    .long 2, 2
+    .quad bn_smove, b_smove
+    .long 4, 4
+    .quad bn_srot, b_srot
+    .long 4, 4
+    .quad bn_sdist, b_sdist
+    .long 4, 4
+    .quad bn_smesh, b_smesh
+    .long 2, 3
+    .quad bn_sclear, b_sclear
+    .long 0, 0
+    .quad bn_infill, b_infill
+    .long 5, 5
 builtins_end:
 .equ B_SZ, 24
 
@@ -592,6 +627,36 @@ bn_mass:        .asciz "mass"
 bn_centroid:    .asciz "centroid"
 bn_fangle:      .asciz "fangle"
 bn_measurement: .asciz "measurement"
+bn_ssphere:    .asciz "ssphere"
+bn_sbox:       .asciz "sbox"
+bn_scyl:       .asciz "scyl"
+bn_storus:     .asciz "storus"
+bn_sgyroid:    .asciz "sgyroid"
+bn_sgrid:      .asciz "sgrid"
+bn_sunion:     .asciz "sunion"
+bn_ssub:       .asciz "ssub"
+bn_sisect:     .asciz "sisect"
+bn_sshell:     .asciz "sshell"
+bn_smove:      .asciz "smove"
+bn_srot:       .asciz "srot"
+bn_sdist:      .asciz "sdist"
+bn_smesh:      .asciz "smesh"
+bn_sclear:     .asciz "sclear"
+bn_infill:      .asciz "infill"
+.align 8
+fw_lat:         .quad fw_gyroid
+                .long 0, 0
+                .quad fw_gridw
+                .long 1, 0
+                .quad 0
+fw_gyroid:      .asciz "gyroid"
+fw_gridw:       .asciz "grid"
+e_sdf:          .asciz "shape: "
+e_sdf_id:       .asciz "no such shape"
+s_shape:        .asciz "Shape"
+.align 4
+sd_one:         .float 1.0
+sd_half:        .float 0.5
 e_no_face:      .asciz "no such face"
 e_ft_long:      .asciz "a feature value is 31 characters at most: "
 e_ft_word:      .asciz "not understood here: "
@@ -5715,6 +5780,35 @@ b_pattern:
     pop     rbx
     jmp     ret_num
 
+# infill(body, shell feature, "gyroid" | "grid", cell, wall) - a lattice in
+#   the shell's cavity (wall: the gyroid's thickness, the struts' diameter)
+b_infill:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     edi, 10
+    call    fb_new
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     [rip+ft_tmp+12], eax
+    lea     rdi, [rbx+32]
+    lea     rsi, [rip+fw_lat]
+    call    fb_word
+    mov     [rip+ft_tmp+28], eax
+    lea     rdi, [rbx+48]
+    xor     esi, esi
+    call    fb_slot
+    lea     rdi, [rbx+64]
+    mov     esi, 1
+    call    fb_slot
+    mov     rdi, rbx
+    call    fb_finish
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
 # feature(index, slot 0..2 | 3 = suppressed, value) -> its status afterwards
 #   (0 = ok)
 b_feature:
@@ -5881,6 +5975,373 @@ b_fangle:
 8:  lea     rdi, [rip+e_no_face]
     xor     esi, esi
     jmp     sc_rt
+
+# ---- signed-distance shapes (sdf.s): numbers are node ids ------------------
+# sd_args(rdi=values, esi=first, edx=count) -> sd_p[0..count) = their values
+#   (numbers or expressions with units), as floats
+sd_args:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    xor     r13d, r13d
+1:  cmp     r13d, edx
+    jae     9f
+    push    rdx
+    push    rdx
+    lea     eax, [r12+r13]
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_val
+    pop     rdx
+    pop     rdx
+    cvtsd2ss xmm0, xmm0
+    lea     rax, [rip+sd_p]
+    movss   [rax+r13*4], xmm0
+    inc     r13d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# sd_id(rdi=value) -> eax = a valid node id (error otherwise)
+sd_id:
+    sub     rsp, 8
+    call    a_int
+    test    eax, eax
+    jle     8f
+    push    rax
+    push    rax
+    call    sdf_count
+    mov     ecx, eax
+    pop     rax
+    pop     rdx
+    cmp     eax, ecx
+    jae     8f
+    add     rsp, 8
+    ret
+8:  lea     rdi, [rip+e_sdf_id]
+    xor     esi, esi
+    jmp     sc_rt
+
+# sd_make(edi=type, esi=a, edx=b; sd_p params) -> a number (the id)
+sd_make:
+    sub     rsp, 8
+    lea     rcx, [rip+sd_p]
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    sdf_new
+    add     rsp, 8
+sd_ret:
+    test    eax, eax
+    jz      1f
+    cvtsi2sd xmm0, eax
+    jmp     ret_num
+1:  lea     rdi, [rip+e_sdf]
+    mov     rsi, [rip+sdf_err]
+    jmp     sc_rt
+
+sd_zero:
+    lea     rdi, [rip+sd_p]
+    xor     eax, eax
+    mov     ecx, 6
+    rep     stosd
+    ret
+
+# ssphere(r), sbox(x, y, z [, rounding]) (full sizes), scyl(r, height) (along
+#   Y), storus(R, r) (about Y), sgyroid(cell, wall), sgrid(cell, strut
+#   diameter): centred at the origin
+b_ssphere:
+    push    rdi
+    call    sd_zero
+    pop     rdi
+    xor     esi, esi
+    mov     edx, 1
+    call    sd_args
+    mov     edi, 1
+    jmp     sd_leaf
+b_sbox:
+    push    rdi
+    push    rsi
+    call    sd_zero
+    pop     rdx
+    pop     rdi
+    xor     esi, esi
+    call    sd_args
+    movss   xmm1, [rip+sd_half]
+    xor     ecx, ecx
+1:  lea     rax, [rip+sd_p]
+    movss   xmm0, [rax+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [rax+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     edi, 2
+    jmp     sd_leaf
+b_scyl:
+    mov     ecx, 3
+    jmp     sd_two
+b_storus:
+    mov     ecx, 4
+    jmp     sd_two
+b_sgyroid:
+    mov     ecx, 5
+    jmp     sd_two
+b_sgrid:
+    mov     ecx, 6
+sd_two:
+    push    rcx
+    push    rdi
+    call    sd_zero
+    pop     rdi
+    xor     esi, esi
+    mov     edx, 2
+    call    sd_args
+    pop     rdi
+    cmp     edi, 6                      # grid: a diameter -> radius
+    jne     sd_leaf
+    movss   xmm0, [rip+sd_p+4]
+    mulss   xmm0, [rip+sd_half]
+    movss   [rip+sd_p+4], xmm0
+sd_leaf:
+    xor     esi, esi
+    xor     edx, edx
+    jmp     sd_make
+
+# sunion / ssub / sisect(a, b [, smoothing radius])
+b_sunion:
+    mov     ecx, 10
+    jmp     sd_bool
+b_ssub:
+    mov     ecx, 11
+    jmp     sd_bool
+b_sisect:
+    mov     ecx, 12
+sd_bool:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r15d, ecx
+    call    sd_zero
+    mov     rdi, rbx
+    call    sd_id
+    mov     r13d, eax
+    lea     rdi, [rbx+16]
+    call    sd_id
+    mov     r14d, eax
+    cmp     r12d, 3
+    jb      1f
+    mov     rdi, rbx
+    mov     esi, 2
+    mov     edx, 1
+    call    sd_args
+1:  mov     edi, r15d
+    mov     esi, r13d
+    mov     edx, r14d
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     sd_make
+
+# sshell(a, thickness): a wall centred on the surface
+b_sshell:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    sd_zero
+    mov     rdi, rbx
+    call    sd_id
+    mov     r12d, eax
+    mov     rdi, rbx
+    mov     esi, 1
+    mov     edx, 1
+    call    sd_args
+    mov     edi, 13
+    mov     esi, r12d
+    xor     edx, edx
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     sd_make
+
+# smove(a, x, y, z) / srot(a, rx, ry, rz) (radians, Euler XYZ like objects)
+b_smove:
+    xor     ecx, ecx
+    jmp     sd_xf
+b_srot:
+    mov     ecx, 1
+sd_xf:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 128
+    mov     rbx, rdi
+    mov     r13d, ecx
+    call    sd_zero
+    mov     rdi, rbx
+    call    sd_id
+    mov     r12d, eax
+    mov     rdi, rbx
+    mov     esi, 1
+    mov     edx, 3
+    call    sd_args
+    lea     rdi, [rip+sd_obj]           # a stand-in object: location or
+    xor     eax, eax                    #  rotation, scale 1
+    mov     ecx, OB_SZ
+    rep     stosb
+    movss   xmm0, [rip+sd_one]
+    movss   [rip+sd_obj+OB_SCALE], xmm0
+    movss   [rip+sd_obj+OB_SCALE+4], xmm0
+    movss   [rip+sd_obj+OB_SCALE+8], xmm0
+    lea     rax, [rip+sd_obj+OB_LOC]
+    test    r13d, r13d
+    jz      1f
+    lea     rax, [rip+sd_obj+OB_ROT]
+1:  mov     rcx, [rip+sd_p]
+    mov     [rax], rcx
+    mov     ecx, [rip+sd_p+8]
+    mov     [rax+8], ecx
+    lea     rdi, [rip+sd_obj]
+    lea     rsi, [rsp]                  # forward
+    call    obj_matrix
+    xor     ecx, ecx                    # inverse: R^T, -R^T t
+2:  xor     edx, edx
+3:  mov     eax, edx                    # inv[c][d] = fwd[d][c]
+    shl     eax, 4
+    lea     r8, [rsp+rax]
+    movss   xmm0, [r8+rcx*4]
+    mov     eax, ecx
+    shl     eax, 4
+    lea     r8, [rsp+64+rax]
+    movss   [r8+rdx*4], xmm0
+    inc     edx
+    cmp     edx, 3
+    jb      3b
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    xor     ecx, ecx
+4:  mov     eax, ecx                    # -(row c . t)
+    shl     eax, 4
+    lea     r8, [rsp+64+rax]
+    movss   xmm0, [r8]
+    mulss   xmm0, [rsp+12]
+    movss   xmm1, [r8+4]
+    mulss   xmm1, [rsp+28]
+    addss   xmm0, xmm1
+    movss   xmm1, [r8+8]
+    mulss   xmm1, [rsp+44]
+    addss   xmm0, xmm1
+    xorps   xmm1, xmm1
+    subss   xmm1, xmm0
+    movss   [r8+12], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      4b
+    call    sd_zero
+    mov     edi, 14
+    mov     esi, r12d
+    xor     edx, edx
+    lea     rcx, [rip+sd_p]
+    lea     r8, [rsp+64]
+    lea     r9, [rsp]
+    call    sdf_new
+    add     rsp, 128
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     sd_ret
+
+# sdist(a, x, y, z) -> the signed distance there
+b_sdist:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    sd_id
+    mov     r12d, eax
+    mov     rdi, rbx
+    mov     esi, 1
+    mov     edx, 3
+    call    sd_args
+    mov     edi, r12d
+    movss   xmm0, [rip+sd_p]
+    movss   xmm1, [rip+sd_p+4]
+    movss   xmm2, [rip+sd_p+8]
+    call    sdf_eval
+    cvtss2sd xmm0, xmm0
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# smesh(name, a [, cells along the largest side, default 64]) -> the new mesh
+#   object's name (a closed mesh, dual contouring)
+b_smesh:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r14d, esi
+    call    a_str
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    sd_id
+    mov     r13d, eax
+    mov     esi, 64
+    cmp     r14d, 3
+    jb      1f
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     esi, eax
+    cmp     esi, 512
+    jbe     1f
+    mov     esi, 512
+1:  mov     edi, r13d
+    call    sdf_mesh
+    test    rax, rax
+    jz      8f
+    mov     r13, rax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     edi, OT_MESH
+    mov     rsi, r12
+    mov     rdx, r13
+    call    obj_new
+    test    eax, eax
+    jz      7f
+    mov     edi, eax
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_name
+7:  lea     rdi, [rip+e_ft_full]
+    xor     esi, esi
+    jmp     sc_rt
+8:  lea     rdi, [rip+e_sdf]
+    mov     rsi, [rip+sdf_err]
+    jmp     sc_rt
+
+# sclear() - forget every shape node
+b_sclear:
+    sub     rsp, 8
+    call    sdf_clear
+    add     rsp, 8
+    jmp     ret_nil
 
 # matof(object) -> its material's name, or nil
 b_matof:
