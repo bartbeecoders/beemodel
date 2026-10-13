@@ -18,10 +18,13 @@
 
 .globl fv_run
 .globl fv_ctx
+.globl fv_scalar1
+.globl fv_scratch
 
 .equ FV_B,      256                     # elements per block
 .equ FV_REGS,   64
 .equ FV_THREADS, 65                     # (the last: a nested call)
+.equ FV_JIT_MIN, 1024                   # elements worth compiling for
 .equ IN_SZ,     24
 # ops
 .equ OP_CONST,  1
@@ -71,6 +74,7 @@ fv_noff:        .float 0, 0, 0, 17.31, 41.77, 7.13, 31.59, 3.23, 23.41
 .section .bss
 .align 64
 fv_ctx:         .skip FC_SZ
+fv_jfn:         .skip 8                 # the compiled program, or 0
 .align 64
 fv_scratch:     .skip FV_THREADS*FV_REGS*FV_B*4
 
@@ -79,7 +83,12 @@ fv_scratch:     .skip FV_THREADS*FV_REGS*FV_B*4
 # fv_run - run fv_ctx's program over its elements (parallel)
 fv_run:
     sub     rsp, 8
-    mov     edx, [rip+fv_ctx+FC_N]
+    mov     qword ptr [rip+fv_jfn], 0   # enough elements: compiled (fvjit.s)
+    cmp     dword ptr [rip+fv_ctx+FC_N], FV_JIT_MIN
+    jb      1f
+    call    fvj_get
+    mov     [rip+fv_jfn], rax
+1:  mov     edx, [rip+fv_ctx+FC_N]
     add     edx, FV_B-1
     shr     edx, 8                      # blocks
     jz      9f
@@ -122,6 +131,17 @@ fv_job:
     jbe     3f
     mov     ecx, FV_B
 3:  mov     [rsp+12], ecx               # elements in it
+    mov     rax, [rip+fv_jfn]           # a whole block, compiled: run that
+    test    rax, rax
+    jz      31f
+    cmp     ecx, FV_B
+    jne     31f
+    mov     rdi, rbp
+    mov     esi, [rsp+8]
+    lea     rdx, [rip+fv_ctx]
+    call    rax
+    jmp     .Lfj_next
+31: mov     ecx, [rsp+12]
     add     ecx, 3                      # (whole SSE groups)
     shr     ecx, 2
     mov     [rsp+16], ecx
@@ -316,7 +336,10 @@ fv_job:
 
 # the per-element ones: pow, mod, sin, cos, noise, rand
 .Lop_scalar:
-    mov     [rsp+20], eax
+    movzx   eax, byte ptr [r12+4]       # c
+    shl     eax, 10
+    add     rax, rbp
+    mov     [rsp+32], rax
     xor     r8d, r8d
 .Lsc_el:
     cmp     r8d, [rsp+12]
@@ -324,119 +347,10 @@ fv_job:
     mov     [rsp+24], r8d
     movss   xmm0, [r14+r8*4]
     movss   xmm1, [r15+r8*4]
-    mov     eax, [rsp+20]
-    cmp     eax, OP_POW
-    je      .Lsc_pow
-    cmp     eax, OP_MOD
-    je      .Lsc_mod
-    cmp     eax, OP_SIN
-    je      .Lsc_sin
-    cmp     eax, OP_COS
-    je      .Lsc_cos
-    cmp     eax, OP_NOISE
-    je      .Lsc_noise
-    cmp     eax, OP_RAND
-    je      .Lsc_rand
-    xorps   xmm0, xmm0
-    jmp     .Lsc_put
-.Lsc_pow:                               # a^b = 2^(b log2 a), a > 0 (else 0)
-    xorps   xmm2, xmm2
-    comiss  xmm0, xmm2
-    jbe     .Lsc_zero
-    movss   [rsp+28], xmm1
-    movss   [rsp+32], xmm0
-    fld     dword ptr [rsp+28]
-    fld     dword ptr [rsp+32]
-    fyl2x
-    fld     st(0)
-    frndint
-    fsub    st(1), st(0)
-    fxch    st(1)
-    f2xm1
-    fld1
-    faddp   st(1), st(0)
-    fscale
-    fstp    st(1)
-    fstp    dword ptr [rsp+28]
-    movss   xmm0, [rsp+28]
-    jmp     .Lsc_put
-.Lsc_zero:
-    xorps   xmm0, xmm0
-    jmp     .Lsc_put
-.Lsc_mod:                               # a - b floor(a / b)
-    xorps   xmm2, xmm2
-    comiss  xmm1, xmm2
-    je      .Lsc_zero
-    movss   xmm2, xmm0
-    divss   xmm2, xmm1
-    roundss xmm2, xmm2, 1
-    mulss   xmm2, xmm1
-    subss   xmm0, xmm2
-    jmp     .Lsc_put
-.Lsc_sin:
-    movss   [rsp+28], xmm0
-    fld     dword ptr [rsp+28]
-    fsin
-    fstp    dword ptr [rsp+28]
-    movss   xmm0, [rsp+28]
-    jmp     .Lsc_put
-.Lsc_cos:
-    movss   [rsp+28], xmm0
-    fld     dword ptr [rsp+28]
-    fcos
-    fstp    dword ptr [rsp+28]
-    movss   xmm0, [rsp+28]
-    jmp     .Lsc_put
-.Lsc_noise:                             # fbm(a, b, c + offsets)
-    movzx   eax, byte ptr [r12+4]
-    shl     eax, 10
-    add     rax, rbp
-    cvttss2si ecx, [r12+20]             # offset set 0..2
-    and     ecx, 3
-    cmp     ecx, 2
-    jbe     1f
-    xor     ecx, ecx
-1:  lea     ecx, [rcx+rcx*2]
-    lea     rdx, [rip+fv_noff]
-    addss   xmm0, [rdx+rcx*4]
-    addss   xmm1, [rdx+rcx*4+4]
+    mov     rax, [rsp+32]
     movss   xmm2, [rax+r8*4]
-    addss   xmm2, [rdx+rcx*4+8]
-    movss   [rsp+32], xmm0
-    movss   [rsp+36], xmm1
-    movss   [rsp+40], xmm2
-    lea     rdi, [rsp+32]
-    movss   xmm0, [r12+8]               # scale, detail, roughness
-    cvttss2si ecx, [r12+12]
-    movss   xmm1, [r12+16]
-    call    fbm
-    mov     r8d, [rsp+24]
-    jmp     .Lsc_put
-.Lsc_rand:                              # hash(index, seed) -> min..max
-    cvttss2si eax, xmm0
-    cvttss2si edx, [r12+8]
-    imul    eax, eax, 0x27d4eb2d
-    imul    edx, edx, 0x165667b1
-    xor     eax, edx
-    mov     edx, eax
-    shr     edx, 15
-    xor     eax, edx
-    imul    eax, eax, 0x2c1b3c6d
-    mov     edx, eax
-    shr     edx, 12
-    xor     eax, edx
-    imul    eax, eax, 0x297a2d39
-    mov     edx, eax
-    shr     edx, 15
-    xor     eax, edx
-    shr     eax, 8
-    cvtsi2ss xmm0, eax
-    mulss   xmm0, [rip+fv_inv24]
-    movss   xmm1, [r12+16]              # min + (max - min) u
-    subss   xmm1, [r12+12]
-    mulss   xmm0, xmm1
-    addss   xmm0, [r12+12]
-.Lsc_put:
+    mov     rdi, r12
+    call    fv_scalar1
     mov     r8d, [rsp+24]
     movss   [rbx+r8*4], xmm0
     inc     r8d
@@ -469,6 +383,123 @@ fv_job:
     pop     r14
     pop     r13
     pop     r12
+    pop     rbx
+    ret
+
+
+# fv_scalar1(rdi=instruction, xmm0=a, xmm1=b, xmm2=c) -> xmm0: pow, mod,
+#   sin, cos, noise, rand for one element (the interpreter and the JIT)
+fv_scalar1:
+    push    rbx
+    sub     rsp, 48
+    mov     rbx, rdi
+    movzx   eax, byte ptr [rbx]
+    cmp     eax, OP_POW
+    je      .Lsc_pow
+    cmp     eax, OP_MOD
+    je      .Lsc_mod
+    cmp     eax, OP_SIN
+    je      .Lsc_sin
+    cmp     eax, OP_COS
+    je      .Lsc_cos
+    cmp     eax, OP_NOISE
+    je      .Lsc_noise
+    cmp     eax, OP_RAND
+    je      .Lsc_rand
+.Lsc_zero:
+    xorps   xmm0, xmm0
+    jmp     .Lsc_put
+.Lsc_pow:                               # a^b = 2^(b log2 a), a > 0 (else 0)
+    xorps   xmm2, xmm2
+    comiss  xmm0, xmm2
+    jbe     .Lsc_zero
+    movss   [rsp+28], xmm1
+    movss   [rsp+32], xmm0
+    fld     dword ptr [rsp+28]
+    fld     dword ptr [rsp+32]
+    fyl2x
+    fld     st(0)
+    frndint
+    fsub    st(1), st(0)
+    fxch    st(1)
+    f2xm1
+    fld1
+    faddp   st(1), st(0)
+    fscale
+    fstp    st(1)
+    fstp    dword ptr [rsp+28]
+    movss   xmm0, [rsp+28]
+    jmp     .Lsc_put
+.Lsc_mod:                               # a - b floor(a / b)
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    je      .Lsc_zero
+    movss   xmm2, xmm0
+    divss   xmm2, xmm1
+    roundss xmm2, xmm2, 1
+    mulss   xmm2, xmm1
+    subss   xmm0, xmm2
+    jmp     .Lsc_put
+.Lsc_sin:
+    movss   [rsp+28], xmm0
+    fld     dword ptr [rsp+28]
+    fsin
+    fstp    dword ptr [rsp+28]
+    movss   xmm0, [rsp+28]
+    jmp     .Lsc_put
+.Lsc_cos:
+    movss   [rsp+28], xmm0
+    fld     dword ptr [rsp+28]
+    fcos
+    fstp    dword ptr [rsp+28]
+    movss   xmm0, [rsp+28]
+    jmp     .Lsc_put
+.Lsc_noise:                             # fbm(a, b, c + offsets)
+    cvttss2si ecx, [rbx+20]             # offset set 0..2
+    and     ecx, 3
+    cmp     ecx, 2
+    jbe     1f
+    xor     ecx, ecx
+1:  lea     ecx, [rcx+rcx*2]
+    lea     rdx, [rip+fv_noff]
+    addss   xmm0, [rdx+rcx*4]
+    addss   xmm1, [rdx+rcx*4+4]
+    addss   xmm2, [rdx+rcx*4+8]
+    movss   [rsp+32], xmm0
+    movss   [rsp+36], xmm1
+    movss   [rsp+40], xmm2
+    lea     rdi, [rsp+32]
+    movss   xmm0, [rbx+8]               # scale, detail, roughness
+    cvttss2si ecx, [rbx+12]
+    movss   xmm1, [rbx+16]
+    call    fbm
+    jmp     .Lsc_put
+.Lsc_rand:                              # hash(index, seed) -> min..max
+    cvttss2si eax, xmm0
+    cvttss2si edx, [rbx+8]
+    imul    eax, eax, 0x27d4eb2d
+    imul    edx, edx, 0x165667b1
+    xor     eax, edx
+    mov     edx, eax
+    shr     edx, 15
+    xor     eax, edx
+    imul    eax, eax, 0x2c1b3c6d
+    mov     edx, eax
+    shr     edx, 12
+    xor     eax, edx
+    imul    eax, eax, 0x297a2d39
+    mov     edx, eax
+    shr     edx, 15
+    xor     eax, edx
+    shr     eax, 8
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+fv_inv24]
+    movss   xmm1, [rbx+16]              # min + (max - min) u
+    subss   xmm1, [rbx+12]
+    mulss   xmm0, xmm1
+    addss   xmm0, [rbx+12]
+.Lsc_put:
+    add     rsp, 48
     pop     rbx
     ret
 

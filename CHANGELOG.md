@@ -77,6 +77,12 @@ project uses [Semantic Versioning](https://semver.org/).
     - *Erosion* is hydraulic erosion by droplets that carry sediment down slopes and drop it where they slow, through a brush, deterministic per seed; 100k droplets on a 64 x 64 grid take ~75 ms.
   - **L-systems:** BeeScript `lsystem(name, axiom, rules, iterations, angle [, step, radius])` rewrites the axiom by rules. A 3D turtle (F f + - & ^ \ / | [ ] !) draws lines, or tubes that thin with every branch. The *L-System* node has plant, bush, tree and Koch island presets.
   - **Wave function collapse:** `wfc(name, nx, nz, layers, seed, "tiles")` fills a 2D or 3D grid with tile objects in four turns. Which tiles may touch comes from the vertices on their faces, with no rules to write. A contradiction restarts with the next seed.
+- A template JIT for field programs: a program run over 1024 or more points
+  is compiled to x86-64 at run time from code templates, with AVX (8 lanes)
+  or SSE (4 lanes), and cached. 1M points x 42 instructions take ~2 ms on
+  one core instead of ~4.7 ms in the VM. `BEEMODEL_JIT=0` / `=sse` choose
+  the path. `--selftest` runs 150 random programs through the VM and both
+  paths and compares every output bit.
 - Assets: `tree.save_asset` (with the groups the tree runs) and
   `material.save_asset` write to `~/BeeModel/assets`; `asset.load` adds one
   to any scene, `asset.list` lists them; the Asset Browser area adds one
