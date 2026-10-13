@@ -16,6 +16,8 @@
 .globl rn_w
 .globl rn_h
 .globl rn_spp
+.globl rn_denoise
+.globl op_render_denoise
 .globl op_render_start
 .globl op_render_stop
 .globl op_render_save
@@ -32,6 +34,7 @@
 rn_w:           .long 960               # render settings (saved in .bee)
 rn_h:           .long 540
 rn_spp:         .long 128
+rn_denoise:     .long 1                 # denoise when the render ends
 
 .section .bss
 .align 8
@@ -52,6 +55,10 @@ s_rn_done:      .asciz "  render finished: "
 s_rn_stopped:   .asciz "  render stopped: "
 s_rn_in:        .asciz " samples, "
 s_rn_spp:       .asciz " samples"
+s_rn_dn:        .asciz "  denoise: "
+s_rn_on:        .asciz "on"
+s_rn_off:       .asciz "off"
+s_rn_dnd:       .asciz "   denoised"
 s_rn_sec:       .asciz " s"
 s_rn_none:      .asciz "  render: no image yet (F12 renders)"
 s_rn_saved:     .asciz "  render saved: "
@@ -80,19 +87,46 @@ pass_labels:    .quad s_pl_beauty, s_pl_albedo, s_pl_normal, s_pl_depth
 f_1000:         .float 1000.0
 
 OPERATOR op_render_start, "render.start", "Render", do_render_start, key=KEY_F12, flags=OPF_AI_SAFE|OPF_QUIET, doc="Start a progressive render in the Render area (the scene at the render settings)"
-OPERATOR op_render_stop, "render.stop", "Stop Render", do_render_stop, check_active, flags=OPF_AI_SAFE|OPF_QUIET, doc="Stop the running render (keeps the samples so far)"
-OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, check_have, doc="Save the render as PNG: render.save <path> [beauty|albedo|normal|depth]"
-OPERATOR op_render_pass, "render.pass", "Next Render Pass", do_render_pass, check_have, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)"
+OPERATOR op_render_stop, "render.stop", "Stop Render", do_render_stop, flags=OPF_AI_SAFE|OPF_QUIET, doc="Stop the running render (keeps the samples so far)"
+OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, doc="Save the render as PNG: render.save <path> [beauty|albedo|normal|depth]"
+OPERATOR op_render_pass, "render.pass", "Next Render Pass", do_render_pass, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)"
 OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>"
+OPERATOR op_render_denoise, "render.denoise", "Denoise", do_render_denoise, check_denoise, flags=OPF_AI_SAFE|OPF_QUIET, doc="Toggle denoising the beauty pass when a render ends (guided by albedo, normal, depth)"
 
 .text
 
-check_active:
-    mov     eax, [rip+hv_active]
+check_denoise:
+    mov     eax, [rip+rn_denoise]
     ret
 
-check_have:
-    mov     eax, [rip+rn_have]
+# denoise_now - a finished or stopped render gets denoised (when wanted)
+denoise_now:
+    sub     rsp, 8
+    mov     dword ptr [rip+hv_den_on], 0
+    cmp     dword ptr [rip+rn_denoise], 0
+    je      1f
+    cmp     dword ptr [rip+rn_have], 0
+    je      1f
+    call    hive_denoise
+1:  mov     dword ptr [rip+rn_stale], 1
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    ret
+
+# ---- render.denoise ---------------------------------------------------------
+do_render_denoise:
+    sub     rsp, 8
+    xor     dword ptr [rip+rn_denoise], 1
+    cmp     dword ptr [rip+hv_active], 0
+    jne     1f
+    call    denoise_now
+1:  lea     rdi, [rip+s_rn_dn]
+    lea     rsi, [rip+s_rn_off]
+    cmp     dword ptr [rip+rn_denoise], 0
+    je      2f
+    lea     rsi, [rip+s_rn_on]
+2:  call    log_pair
+    add     rsp, 8
     ret
 
 # render_abort - something else used the tracer (render.image): forget ours
@@ -226,8 +260,7 @@ do_render_stop:
     cmp     dword ptr [rip+hv_active], 0
     je      9f
     mov     dword ptr [rip+hv_active], 0
-    mov     dword ptr [rip+rn_stale], 1
-    mov     dword ptr [rip+dirty], 1
+    call    denoise_now
     call    fmt_reset
     lea     rdi, [rip+s_rn_stopped]
     call    fmt_str
@@ -245,11 +278,13 @@ render_tick:
     je      9f
     mov     edi, RN_SLICE_MS
     call    hive_tick
+    mov     dword ptr [rip+hv_den_on], 0     # newer samples than the denoised
     mov     dword ptr [rip+rn_stale], 1
     mov     dword ptr [rip+dirty], 1
     test    eax, eax
     jnz     9f
     mov     dword ptr [rip+hv_active], 0     # all samples done
+    call    denoise_now
     call    fmt_reset
     lea     rdi, [rip+s_rn_done]
     call    fmt_str
@@ -518,6 +553,12 @@ ed_render_draw:
     mov     eax, [rip+hv_pass]
     lea     rcx, [rip+pass_labels]
     mov     rdi, [rcx+rax*8]
+    call    fmt_str
+    cmp     dword ptr [rip+hv_den_on], 0
+    je      2f
+    cmp     dword ptr [rip+hv_pass], 0
+    jne     2f
+    lea     rdi, [rip+s_rn_dnd]
     call    fmt_str
 2:  mov     edi, [rip+ed_x]
     add     edi, 12

@@ -29,6 +29,13 @@
 .globl hive_render_file
 .globl hv_pass
 .globl hv_next
+.globl hv_m2
+.globl hv_aux
+.globl hv_accum
+.globl hv_rowspp
+.globl pt_map
+.globl hv_den
+.globl hv_den_on
 .globl now_ms
 
 .equ MAP_ANON_PRIV, 0x22
@@ -81,6 +88,7 @@ hv_next:        .skip 4             # the next row of the running pass
 .align 8
 hv_aux:         .skip 8             # f32[w*h][7]: albedo, normal, depth
 hv_rowspp:      .skip 8             # u32[h]: samples in each row
+hv_m2:          .skip 8             # f32[w*h]: sum of squared luminance
 .align 8
 hv_lcdf:        .skip 8             # emissive triangles: CDF over (area * power)
 hv_ltri:        .skip 8             # their triangle
@@ -132,10 +140,10 @@ s_env_dbg:      .asciz "BEEMODEL_HIVE_DEBUG="
 s_rendered_x:   .asciz " x "
 s_rendered_s:   .asciz " px, "
 s_rendered_ms:  .asciz " samples, ms: "
-s_render_need:  .asciz "  render.image <path.png> [width height samples]"
+s_render_need:  .asciz "  render.image <path.png> [width height samples [denoise 0|1]]"
 s_render_fail:  .asciz "  render: out of memory"
 
-OPERATOR op_render_image, "render.image", "Render Image", do_render_image, flags=OPF_AI_SAFE, doc="Path-trace the scene (camera object, or the viewport) into a PNG: render.image <path> [width height samples]"
+OPERATOR op_render_image, "render.image", "Render Image", do_render_image, flags=OPF_AI_SAFE, doc="Path-trace the scene (camera object, or the viewport) into a PNG: render.image <path> [width height samples [denoise]]"
 
 .text
 
@@ -2158,6 +2166,15 @@ hive_start:
     test    rax, rax
     jz      8f
     mov     [rip+hv_rowspp], rax
+    mov     eax, r12d
+    imul    eax, r13d
+    lea     edi, [rax*4]
+    call    pt_map
+    test    rax, rax
+    jz      8f
+    mov     [rip+hv_m2], rax
+    mov     dword ptr [rip+hv_den_on], 0
+    mov     qword ptr [rip+dn_base], 0
     mov     dword ptr [rip+hv_next], 0
     call    light_prep
     mov     dword ptr [rip+hv_debug], 0 # BEEMODEL_HIVE_DEBUG=1 normals,
@@ -2195,7 +2212,7 @@ hive_pass:
     add     rsp, 8
     ret
 
-# job_rows(ctx, esi=first row, edx=end)
+# job_rows(rdi=first row of the job range, esi=begin, edx=end)
 job_rows:
     push    rbx
     push    r12
@@ -2204,8 +2221,8 @@ job_rows:
     push    r15
     push    rbp
     sub     rsp, 72
-    mov     r12d, esi
-    mov     r13d, edx
+    lea     r12d, [rsi+rdi]
+    lea     r13d, [rdx+rdi]
 .Ljr_row:
     cmp     r12d, r13d
     jae     .Ljr_out
@@ -2268,7 +2285,21 @@ job_rows:
 4:  inc     ecx
     cmp     ecx, 7
     jb      3b
-    lea     rax, [rbp+rbp*2]            # accumulate (NaNs dropped)
+    movss   xmm0, [rsp+16]              # luminance^2 (the variance estimate)
+    mulss   xmm0, [rip+pt_lum]
+    movss   xmm1, [rsp+20]
+    mulss   xmm1, [rip+pt_lum+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+24]
+    mulss   xmm1, [rip+pt_lum+8]
+    addss   xmm0, xmm1
+    ucomiss xmm0, xmm0
+    jp      5f
+    mulss   xmm0, xmm0
+    mov     rax, [rip+hv_m2]
+    addss   xmm0, [rax+rbp*4]
+    movss   [rax+rbp*4], xmm0
+5:  lea     rax, [rbp+rbp*2]            # accumulate (NaNs dropped)
     shl     rax, 2
     add     rax, [rip+hv_accum]
     xor     ecx, ecx
@@ -2330,7 +2361,16 @@ hive_resolve:
 4:  mov     eax, [rip+hv_pass]
     test    eax, eax
     jnz     41f
-    lea     rax, [r15+r15*2]            # beauty
+    cmp     dword ptr [rip+hv_den_on], 0
+    je      40f
+    mov     rax, r15                    # denoised beauty (already a mean)
+    shl     rax, 4
+    add     rax, [rip+hv_den]
+    movss   xmm0, [rax+rcx*4]
+    maxss   xmm0, [rip+pt_zero]
+    call    aces_srgb
+    jmp     48f
+40: lea     rax, [r15+r15*2]            # beauty
     shl     rax, 2
     add     rax, [rip+hv_accum]
     movss   xmm0, [rax+rcx*4]
@@ -2449,12 +2489,13 @@ hive_tick:
     mov     r13d, [rip+n_workers]       # a band: four rows per thread
     inc     r13d
     shl     r13d, 2
-    mov     esi, [rip+hv_next]
+    mov     esi, [rip+hv_next]          # rows [next, next + band)
     lea     edx, [rsi+r13]
     cmp     edx, [rip+hv_h]
     jbe     2f
     mov     edx, [rip+hv_h]
 2:  mov     [rip+hv_next], edx
+    sub     edx, esi
     lea     rdi, [rip+job_rows]
     mov     ecx, 1
     call    parallel_for
@@ -2506,6 +2547,9 @@ hive_render_file:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    push    r15
+    mov     r14d, r8d                   # denoise?
     push    rdi
     push    rsi
     push    rdx
@@ -2515,6 +2559,8 @@ hive_render_file:
     pop     rdx
     pop     rsi
     pop     rdi
+    mov     r15d, [rip+hv_pass]         # files get the beauty pass
+    mov     dword ptr [rip+hv_pass], 0
     mov     rbx, rdi
     mov     edi, esi
     mov     esi, edx
@@ -2529,7 +2575,10 @@ hive_render_file:
     jae     2f
     call    hive_pass
     jmp     1b
-2:  call    now_ms
+2:  test    r14d, r14d
+    jz      21f
+    call    hive_denoise
+21: call    now_ms
     sub     rax, r12
     mov     [rip+hv_ms], eax
     mov     eax, [rip+hv_w]             # resolve and write
@@ -2553,7 +2602,10 @@ hive_render_file:
     mov     eax, [rip+hv_ms]
     jmp     9f
 8:  mov     eax, -1
-9:  pop     r13
+9:  mov     [rip+hv_pass], r15d
+    pop     r15
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -2592,8 +2644,9 @@ do_render_image:
     mov     dword ptr [rsp], 640        # defaults
     mov     dword ptr [rsp+4], 360
     mov     dword ptr [rsp+8], 64
+    mov     dword ptr [rsp+12], 0       # denoise
     xor     ebx, ebx
-3:  cmp     ebx, 3
+3:  cmp     ebx, 4
     jae     4f
     lea     rdx, [rsi+32]
     push    rsi
@@ -2602,8 +2655,11 @@ do_render_image:
     test    eax, eax
     jz      4f
     cvttss2si eax, xmm0
+    cmp     ebx, 3
+    je      31f
     cmp     eax, 1
     jl      4f
+31:
     mov     [rsp+rbx*4], eax
     inc     ebx
     jmp     3b
@@ -2613,6 +2669,7 @@ do_render_image:
     mov     esi, [rsp]
     mov     edx, [rsp+4]
     mov     ecx, [rsp+8]
+    mov     r8d, [rsp+12]
     call    hive_render_file
     test    eax, eax
     js      .Lri_fail
@@ -2660,5 +2717,8 @@ pt_mdepth:      .float -0.1202          # -1 / (12 ln 2): exp(-d / 12) via 2^x
 pt_maps:        .skip 8*16
 pt_nmaps:       .skip 4
 hv_debug:       .skip 4
+hv_den_on:      .skip 4                 # beauty shows hv_den (denoised)
+.align 8
+hv_den:         .skip 8                 # f32[w*h][4] denoised radiance
 
 .section .note.GNU-stack,"",@progbits

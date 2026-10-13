@@ -105,7 +105,7 @@ s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize pa
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_render, s_m_ai, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_render, items_ai, items_help, items_area, items_modadd
-menu_counts:    .long 14, 19, 20, 10, 27, 7, 6, 3, 7, 8
+menu_counts:    .long 14, 19, 20, 10, 27, 8, 6, 3, 7, 8
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
@@ -122,7 +122,7 @@ items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_light, op_add_camera
 items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_render_save, 0
-                .quad op_render_settings
+                .quad op_render_denoise, op_render_settings
 items_help:     .quad op_help_keys, op_console_ops, op_help_about
 items_ai:       .quad op_view_activity, op_agent_revert, 0
                 .quad op_agent_read, op_agent_edit, op_agent_files

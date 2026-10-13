@@ -40,6 +40,7 @@ stays private to the module.
 | `mods.s` | Modifier stacks: reference-counted, copy-on-write blocks shared with undo; an evaluation cache per object keyed weakly on mesh and stack versions (freeing a mesh notifies the caches); Mirror, Array, Solidify; the properties UI; save / load |
 | `mods2.s` | Bevel (by angle), Decimate (vertex clustering), Remesh (ray-parity voxels, surface nets, smoothing) |
 | `hive.s` | The Hive path tracer's scene: a world-space triangle soup with auto-smoothed corner normals and material snapshots, a binned-SAH BVH collapsed to 4-wide nodes, SSE ray traversal (nearest and any hit) |
+| `denoise.s` | Hive's denoiser: demodulation by albedo, variance from luminance moments, five edge-avoiding à-trous passes guided by normal, depth and luminance, in parallel rows |
 | `render.s` | The Render window: `render.start / stop / pass / save / settings`, the time-sliced `render_tick` the main loop calls, and the Render editor (the chosen pass fit to the area, with a status line) |
 | `hive_pt.s` | Hive's light transport: path tracing with next-event estimation and MIS over sky, sun, point and emissive-triangle lights; the principled BSDF (Lambert, GGX, rough dielectric, clearcoat); parallel progressive passes with albedo, normal and depth AOVs, ACES resolve, `render.image` |
 | `preview.s` | Material preview: shades the rasterizer's visibility buffer per pixel (ray / triangle barycentrics, auto-smoothed corner normals, principled BSDF, studio environment, ACES) |

@@ -10,7 +10,7 @@
 #          VIEW  active index, grid, shading, camera f32[6]
 #          MODS  modifier stacks;  MATS  materials (count, 128-byte records);
 #          OMAT  per object: material index + 1 (0 = none)
-#          RNDR  render settings: width, height, samples, shown pass
+#          RNDR  render settings: width, height, samples, shown pass, denoise
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
@@ -269,6 +269,8 @@ bee_save:
     call    wb_u32
     mov     edi, [rip+hv_pass]
     call    wb_u32
+    mov     edi, [rip+rn_denoise]
+    call    wb_u32
     call    chunk_end
     mov     edi, TAG_VIEW               # VIEW
     call    chunk_begin
@@ -329,6 +331,11 @@ rndr_read:
     mov     eax, [rdi+12]
     and     eax, 3
     mov     [rip+hv_pass], eax
+    cmp     esi, 20                     # (since 0.6: denoise)
+    jb      9f
+    mov     eax, [rdi+16]
+    and     eax, 1
+    mov     [rip+rn_denoise], eax
 9:  ret
 
 # need(rsi=pointer, rdx=bytes) -> CF=1 if [pointer, pointer+bytes) leaves the file
@@ -515,6 +522,7 @@ bee_load:
     cmp     ebp, 16
     jb      23f
     lea     rdi, [rbx+8]
+    mov     esi, ebp
     call    rndr_read
 23: lea     rbx, [rbx+rbp+8]            # unknown chunks are skipped
     jmp     2b

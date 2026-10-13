@@ -158,7 +158,9 @@ sees (or the viewport, without one) with the same principled materials:
 writes a PNG. A 480 × 270 image with 64 samples takes about a third of a second on 32 threads.
 
 **F12** renders into a Render area beside the viewport, refining while you keep working; **Esc**
-stops. The Render menu switches passes (beauty, albedo, normal, depth) and saves them
+stops. A finished or stopped render is denoised (guided by the albedo, normal and depth
+passes; Render › Denoise turns it off), so 16 samples look close to 256. The Render menu
+switches passes (beauty, albedo, normal, depth) and saves them
 (`render.save <path> [pass]`); `render.settings <width> <height> <samples>` sets the size and
 samples, which are saved with the scene.
 
