@@ -810,6 +810,51 @@ pt:
 #   c d; orient_gen(edi=1: stop at the first non-zero coefficient, 0: all
 #   ten into og_c) -> eax = sign
 orient_gen:
+    test    edi, edi                    # fast path: the exact determinant
+    jz      orient_full                 #  alone decides almost always
+    sub     rsp, 88
+    mov     rax, [rip+og_p+24]          # rows a-d, b-d, c-d on the stack
+    mov     rcx, [rip+og_p]
+    mov     rdx, [rcx]
+    sub     rdx, [rax]
+    mov     [rsp], rdx
+    mov     rdx, [rcx+8]
+    sub     rdx, [rax+8]
+    mov     [rsp+8], rdx
+    mov     rdx, [rcx+16]
+    sub     rdx, [rax+16]
+    mov     [rsp+16], rdx
+    mov     rcx, [rip+og_p+8]
+    mov     rdx, [rcx]
+    sub     rdx, [rax]
+    mov     [rsp+24], rdx
+    mov     rdx, [rcx+8]
+    sub     rdx, [rax+8]
+    mov     [rsp+32], rdx
+    mov     rdx, [rcx+16]
+    sub     rdx, [rax+16]
+    mov     [rsp+40], rdx
+    mov     rcx, [rip+og_p+16]
+    mov     rdx, [rcx]
+    sub     rdx, [rax]
+    mov     [rsp+48], rdx
+    mov     rdx, [rcx+8]
+    sub     rdx, [rax+8]
+    mov     [rsp+56], rdx
+    mov     rdx, [rcx+16]
+    sub     rdx, [rax+16]
+    mov     [rsp+64], rdx
+    lea     rdi, [rsp]
+    lea     rsi, [rsp+24]
+    lea     rdx, [rsp+48]
+    call    det3
+    add     rsp, 88
+    call    sgn128
+    test    eax, eax
+    jz      1f
+    ret
+1:  mov     edi, 1
+orient_full:
     push    rbx
     push    r12
     push    r13

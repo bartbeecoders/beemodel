@@ -71,7 +71,7 @@ rp_dist:        .skip 4
 an_f45:         .float 45.0
 an_deg2rad:     .float 0.017453292
 an_fone:        .float 1.0
-an_feps:        .float 1.0e-12
+an_feps:        .float 1.0e-20
 an_fnlen:       .float 0.4
 an_fdist:       .float 0.0001
 an_fhalf:       .float 0.5
