@@ -120,6 +120,15 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `dof(s)`, `conflicts(s)`, `sx(s, p)`, `sy(s, p)`, `sr(s, e)`, `skinfo(s, "points" \| "entities" \| "constraints")` | The solved sketch: degrees of freedom left, conflicting constraints, coordinates, radii, sizes |
 | `param(name [, expression])` | Sets a parameter (an expression with units, e.g. `"10*wall + 2mm"`, or a number) and returns its value in scene units; with one argument, reads it |
 | `expr(text)` | Evaluates an expression with units and parameters (lengths in scene units, angles in radians) |
+| `pad(body, sketch, distance [, "symmetric" \| "reverse"])` | Extrudes the sketch's closed profiles along its normal into the body (a mesh object, made when missing); returns the feature's index |
+| `pocket(body, sketch, depth [, "through" \| "reverse" \| "symmetric"])` | Cuts the profiles into the body, down from the sketch |
+| `revolve(body, sketch, angle [, "u" \| "v"])` | Turns the profiles about the sketch's u (default) or v axis; a full turn closes |
+| `hole(body, sketch, diameter [, depth])` | A hole at every loose point of the sketch (no depth: through) |
+| `shell(body, pad, wall [, "bottom"])` | Hollows a pad: walls of that thickness, open at the top (or the bottom) |
+| `fillet(body, radius [, edges])`, `chamfer(body, size [, edges])` | Rounds / cuts the body's sharp edges: `"all"` (default), `"vertical"`, `"horizontal"`, `"top"` or `"bottom"` (Y is up) |
+| `pattern(body, feature, count, step, axis [, "circular"])` | Repeats an earlier pad, pocket, hole, revolve or shell along `"x"`, `"y"` or `"z"` (step = spacing), or about that axis through the origin (step = the total angle; 0 = a full turn) |
+| `feature(i, slot, value)` | Changes a feature's value: slot 0 the first value (distance, depth, diameter, wall, radius, step), 1 the second (a hole's depth), 3 suppressed (1) or not (0); returns its status |
+| `features()`, `fstatus(i)` | The number of features; a feature's status: 0 ok, 1 sketch missing, 2 no closed profile, 3 the geometry failed, 4 a value does not evaluate, 5 nothing to work on, 6 bad reference, 7 suppressed, 8 body missing |
 | `node(material, type [, values...])` | Adds a shader node and returns its number (1..12). Types: `image` (image name, size), `noise` (scale, detail, roughness), `checker` (scale), `gradient` (axis 0/1/2, scale, offset), `mix` (mode 0 mix 1 add 2 multiply 3 subtract 4 screen), `ramp` (position 0, position 1), `math` (op 0 add 1 subtract 2 multiply 3 divide 4 power 5 min 6 max 7 greater 8 sine 9 abs), `bump` (strength, distance) |
 | `link(material, from, to, input)` | Feeds node `from` into input 1..3 of a later node `to` |
 | `nodeset(material, node, slot, x [, y, z])` | Sets an input's constant (slots 1-3; one value fills all three) or a value (slots 4-7 = the type's values above) |
@@ -156,6 +165,31 @@ for i in 0..4 {
 }
 print(faces("Plate"), manifold("Plate"))
 ```
+
+Features make a parametric part: values may be expression texts, so every
+feature follows the parameters and sketches it uses, and the whole tree
+rebuilds in order whenever one of them changes:
+
+```
+op("scene.units", "mm")
+param("w", "60mm")
+param("wall", "2mm")
+s = sketch("Base", "XZ")
+r = rect(s, 0, 0, 60, 40)
+con(s, "length", r, "w")
+b = pad("Box", s, "30mm")
+fillet("Box", "3mm", "vertical")
+shell("Box", b, "wall")
+f = sketch("Front", "XY")
+point(f, 30, 15)
+hole("Box", f, "5mm", "4mm")
+param("w", "80mm")              # the box grows, rounds and holes follow
+```
+
+Fillets and chamfers work on the faces next to the edges they round; a face
+that a hole or pocket has turned into a ring cannot take a round yet, so
+round edges before cutting into the faces next to them (the feature then
+reports status 3 and leaves the body as it was).
 
 ### Math and text
 

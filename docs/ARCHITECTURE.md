@@ -49,6 +49,8 @@ stays private to the module.
 | `cad.s` | The CAD document (copy-on-write, shared with undo): scene units, parameters with cached evaluation and cycle detection, `param.*` / `scene.units` operators, the CADD chunk |
 | `sketch.s` | Sketch blocks (points, lines, circles, arcs, constraints), the residual equations, the Levenberg-Marquardt solver per component, rank / null-space DOF analysis, deletion with compaction |
 | `sketchobj.s` | Sketch objects: creation, display meshes, status-coloured drawing, `cad_rebuild`, the SKCH chunk |
+| `prof.s` | Profiles from sketches: closed loops (welded ends, arcs and circles tessellated, even-odd nesting), ear clipping with hole bridging, prisms, revolutions, offsets, hole circles; meshes oriented by signed volume |
+| `feature.s` | The feature tree (records in the CAD document): pad, pocket, revolve, hole, shell, fillet, chamfer, linear / circular patterns, replayed in order with `mesh_boolean` and `build_bevel` into each body |
 | `sketchui.s` | Sketch mode: tools, snapping and inference, picking, point dragging, constraint keys, dimensions, the overlay |
 | `gltf.s` | glTF 2.0: export (.glb chunks or .gltf with base64), import (node tree baked, welded, PBR + KHR extensions, data: / external / GLB buffers) on the lazy JSON reader |
 | `mtl.s` | MTL import for OBJ: principled values from Kd Ke Ni d Tr Ns Tf Pr Pm Pc Pcr, map_Kd as a texture graph |

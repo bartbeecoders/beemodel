@@ -467,6 +467,7 @@ def main():
     product_shot()
     params_units()
     sketcher()
+    features()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -960,7 +961,7 @@ def mesh_tools():
     f.mods(4); f.key(48); f.mods(0)             # Ctrl+B, wheel: 3 segments
     f.wheel(-1); f.wheel(-1)
     f.type('0.3'); f.key(28)
-    check(q('print(verts("Cube"), faces("Cube"))') == '14 11', 'the wheel sets bevel segments (3)')
+    check(q('print(verts("Cube"), faces("Cube"))') == '14 9', 'the wheel sets bevel segments (3; the end faces take the round)')
     f.shot('40_bevel.png')
     f.key(15)                                   # object mode; Shift+RMB places the cursor
     f.mods(1); f.click(*project((4, 0, 4)), btn=0x111); f.mods(0)
@@ -2017,6 +2018,78 @@ def sketcher():
     f.key(15)                                   # Tab again: back in
     f.pump(0.2)
     f.shot('62_sketch_dimensioned.png')
+    f.proc.kill()
+
+
+def features():
+    """The feature tree: pad, pocket, revolve, hole, shell, fillet, chamfer
+    and patterns rebuild from parametric sketches; files, undo, agents."""
+    print('  -- feature tree --')
+    home = tempfile.mkdtemp(prefix='bee-ft-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+        return (r.stdout + r.stderr).strip()
+    box = ('op("scene.units", "mm")\nparam("w", "60mm")\nparam("d", "40mm")\nparam("h", "30mm")\nparam("wall", "2mm")\n'
+           'delete("Cube")\ns = sketch("Base", "XZ")\nr = rect(s, 0, 0, 60, 40)\ncon(s, "fixed", pt(s, r, 0))\n'
+           'con(s, "length", r, "w")\ncon(s, "length", r + 1, "d")\nb = pad("Box", s, "h")\nsh = shell("Box", b, "wall")\n'
+           'fr = sketch("Front", "XY")\npoint(fr, 30, 15)\nho = hole("Box", fr, "5mm", "4mm")\n')
+    out = run(box + 'print(fstatus(b), fstatus(sh), fstatus(ho), round(volume("Box")), manifold("Box"), features())\n'
+              'param("w", "80mm")\nprint(round(volume("Box")), manifold("Box"))\n'
+              'fl = fillet("Box", "1mm", "vertical")\nprint(fstatus(fl), round(volume("Box")), manifold("Box"))')
+    # 60 x 40 x 30 shelled 2mm (open top) = 15552, a 5mm hole (32-gon) through the 2mm front wall;
+    # rounding edges that end in the ring-shaped top face is refused and changes nothing
+    check(out.splitlines() == ['0 0 0 15513 1 3', '19353 1', '3 19353 1'],
+          f'pad, shell and hole build a box; a parameter rebuilds it; a fillet it cannot make fails cleanly ({out.splitlines()})')
+    out = run('q = sketch("P", "XY")\nrect(q, 2, 0, 3, 5)\nv = revolve("Ring", q, "360deg", "v")\n'
+              'h = revolve("Half", q, "180deg", "v")\nprint(round(volume("Ring") * 10), manifold("Ring"), round(volume("Half") * 10), manifold("Half"))\n'
+              'k = sketch("K", "XZ")\nrect(k, 0, 0, 10, 10)\np = pad("Blk", k, 10)\nf = fillet("Blk", 1, "vertical")\n'
+              'print(round(volume("Blk") * 10), manifold("Blk"))\nc = chamfer("Blk", 1, "top")\nprint(manifold("Blk"), fstatus(c))\n'
+              'feature(f, 3, 1)\nprint(round(volume("Blk") * 10), manifold("Blk"))')
+    # a ring r 2..5, 5 high: pi 21 5 = 329.9 (64 steps: 329.3); the 4-segment fillets take 7.5 off
+    # 1000; chamfering the top edges alone takes 4 x 5 - 4 x 1/3 (the corners)
+    check(out.splitlines() == ['3293 1 1647 1', '9925 1', '1 0', '9813 1'],
+          f'revolve (full and part turns), fillet and chamfer by edge selectors, suppressing a feature ({out.splitlines()})')
+    out = run('op("scene.units", "mm")\nparam("dp", "2mm")\nq = sketch("Q", "XZ")\nrect(q, 0, 0, 20, 10)\np = pad("Bar", q, 10)\n'
+              'w = sketch("W", "XZ", 10)\ncircle(w, 3, 3, 1)\nk = pocket("Bar", w, "dp")\nl = pattern("Bar", k, 4, "4mm", "x")\n'
+              'print(fstatus(l), round(volume("Bar") * 10), manifold("Bar"))\nbad = 0\nfor i in 1..9 {\nparam("dp", str(i * 0.5) + "mm")\n'
+              'if fstatus(l) != 0 or manifold("Bar") != 1 { bad = bad + 1 }\n}\nprint(bad)\n'
+              'g = sketch("G", "XZ")\ncircle(g, 0, 0, 10)\nd = pad("Disc", g, 2)\nm = sketch("M", "XZ", 2)\ncircle(m, 6, 0, 1)\n'
+              'n = pocket("Disc", m, 0, "through")\nc = pattern("Disc", n, 6, 0, "y", "circular")\nprint(fstatus(c), round(volume("Disc")), manifold("Disc"))')
+    # four 2mm pockets r 1 (64-gon): 2000 - 4 x 6.27; six through holes in a 2mm disc r 10
+    check(out.splitlines() == ['0 19749 1', '0', '0 590 1'],
+          f'linear and circular patterns; pockets of every depth keep the body closed ({out.splitlines()})')
+    bee = os.path.join(home, 'ft.bee')
+    run(box + f'op("file.save", "{bee}")')
+    out = run(f'op("file.open", "{bee}")\nprint(features(), round(volume("Box")))\nparam("h", "40mm")\nprint(round(volume("Box")), manifold("Box"))')
+    # h 40: 60 x 40 x 40 - 56 x 36 x 38 - the hole = 19392 - 39
+    check(out.splitlines() == ['3 15513', '19353 1'], f'features are saved in .bee and rebuild after loading ({out.splitlines()})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('op("scene.units", "cm")\ndelete("Cube")\nparam("w", "6cm")\ns = sketch("Base", "XZ")\nr = rect(s, -3, -2, 6, 4)\n'
+      'con(s, "length", r, "w")\npad("Case", s, "3cm")\nselect("Case")')
+    q('shell("Case", 0, "2mm")')
+    v1 = q('print(round(volume("Case") * 1000))')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the shell goes
+    f.pump(0.2)
+    v0 = q('print(round(volume("Case") * 1000), features())')
+    f.mods(5); f.key(44); f.mods(0)             # Ctrl+Shift+Z: back again
+    f.pump(0.2)
+    v2 = q('print(round(volume("Case") * 1000), features())')
+    check(v1 == '15552' and v0 == '72000 1' and v2 == '15552 2',
+          f'Ctrl+Z takes a feature back with its geometry, Ctrl+Shift+Z redoes it ({v1}, {v0}, {v2})')
+    t = m.tool('scene_summary')[0]
+    try:
+        fl = json.loads(t.split('\n')[0])['features']
+        ok = fl == [{'type': 'Pad', 'body': 'Case', 'status': 'ok'}, {'type': 'Shell', 'body': 'Case', 'status': 'ok'}]
+    except Exception as e:
+        ok, fl = False, e
+    check(ok, f'scene_summary lists the features for agents ({str(fl)[:80]})')
+    f.shot('63_features.png')
     f.proc.kill()
 
 

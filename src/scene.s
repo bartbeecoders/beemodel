@@ -14,6 +14,8 @@
 .globl obj_at
 .globl obj_new
 .globl obj_matrix
+.globl obj_by_uid
+.globl uid_next
 .globl xform_point
 .globl obj_click_select
 .globl active_obj
@@ -269,6 +271,9 @@ obj_new:
     movss   [rax+OB_SCALE+8], xmm0
     mov     [rax+OB_TYPE], r12d
     mov     [rax+OB_MESH], r14
+    mov     ecx, [rip+uid_next]         # a persistent id
+    inc     dword ptr [rip+uid_next]
+    mov     [rax+OB_UID], ecx
     lea     rcx, [rip+type_colors]
     mov     ecx, [rcx+r12*4]
     mov     [rax+OB_COLOR], ecx
@@ -317,6 +322,7 @@ scene_clear:
     inc     ebx
     jmp     1b
 2:  call    eval_flush
+    mov     dword ptr [rip+uid_next], 1
     call    mats_reset
     call    image_clear                 # (and the world)
     call    cad_reset                   # (units, parameters)
@@ -597,6 +603,11 @@ op_duplicate_sel:
     push    rax
     call    mods_ref
     pop     rax
+    mov     rdi, [r12+OB_SKETCH]        # ... and a sketch
+    mov     [rax+OB_SKETCH], rdi
+    push    rax
+    call    sk_ref
+    pop     rax
     movss   xmm0, [rax+OB_LOC]
     addss   xmm0, [rip+sf_dup]
     movss   [rax+OB_LOC], xmm0
@@ -626,6 +637,27 @@ op_duplicate_sel:
     ret
 
 # -----------------------------------------------------------------------------
+# obj_by_uid(edi=uid) -> rax = the object, or 0
+obj_by_uid:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12d, edi
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     8f
+    mov     edi, ebx
+    call    obj_at
+    cmp     [rax+OB_UID], r12d
+    je      9f
+    inc     ebx
+    jmp     1b
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
 # obj_matrix(rdi=object, rsi=float[12]) - row-major 3x4 = T * Rz*Ry*Rx * S
 # -----------------------------------------------------------------------------
 obj_matrix:
@@ -726,5 +758,9 @@ xform_point:
     cmp     ecx, 3
     jb      1b
     ret
+
+.section .data
+.align 4
+uid_next:       .long 1                 # the next object's persistent id
 
 .section .note.GNU-stack,"",@progbits

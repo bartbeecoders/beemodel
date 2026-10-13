@@ -37,6 +37,7 @@
 mf_one:     .float 1.0
 mf_half:    .float 0.5
 mf_neg1:    .float -1.0
+mf_flat:    .float 1.0e-10
 mf_2pi:     .float 6.2831853
 mf_pi:      .float 3.1415927
 mf_big:     .float 1.0e30
@@ -226,6 +227,153 @@ mesh_add_poly:
     ret
 
 # -----------------------------------------------------------------------------
+# ear_tris (mesh_finish: rbx mesh, r12d polygon, r13d / r14d its loops) -
+#   its triangles: the fan, except that a flat ear (three corners in a line)
+#   waits until it is not flat; convex polygons get exactly the fan
+ear_tris:
+    push    rbp
+    push    r15
+    sub     rsp, 1032
+    mov     r9, [rbx+ME_LOOPS]
+    mov     ebp, r14d                   # n
+    sub     ebp, r13d
+    xor     ecx, ecx
+1:  cmp     ecx, ebp
+    jae     2f
+    lea     eax, [r13+rcx]
+    mov     eax, [r9+rax*4]
+    mov     [rsp+rcx*4], eax
+    inc     ecx
+    jmp     1b
+2:  mov     r15d, 1                     # tip
+    xor     r8d, r8d                    # flat ears in a row
+.Let_top:
+    cmp     ebp, 3
+    jbe     .Let_rest
+    cmp     r8d, ebp
+    jae     .Let_rest
+    cmp     r15d, ebp
+    jb      3f
+    xor     r15d, r15d
+3:  lea     eax, [r15+rbp-1]            # prev, next
+    xor     edx, edx
+    div     ebp
+    mov     r10d, edx
+    lea     eax, [r15+1]
+    xor     edx, edx
+    div     ebp
+    mov     r11d, edx
+    mov     edi, [rsp+r10*4]
+    mov     esi, [rsp+r15*4]
+    mov     edx, [rsp+r11*4]
+    call    flat3
+    test    eax, eax
+    jz      4f
+    inc     r15d                        # flat: the next corner first
+    inc     r8d
+    jmp     .Let_top
+4:  mov     edi, [rsp+r10*4]
+    mov     esi, [rsp+r15*4]
+    mov     edx, [rsp+r11*4]
+    call    emit_tri
+    mov     ecx, r15d                   # the tip leaves
+5:  lea     eax, [rcx+1]
+    cmp     eax, ebp
+    jae     6f
+    mov     eax, [rsp+rax*4]
+    mov     [rsp+rcx*4], eax
+    inc     ecx
+    jmp     5b
+6:  dec     ebp
+    xor     r8d, r8d
+    jmp     .Let_top
+.Let_rest:
+    mov     ecx, 1                      # what is left: a fan
+7:  lea     eax, [rcx+1]
+    cmp     eax, ebp
+    jae     9f
+    mov     edi, [rsp]
+    mov     esi, [rsp+rcx*4]
+    mov     edx, [rsp+rax*4]
+    push    rcx
+    call    emit_tri
+    pop     rcx
+    inc     ecx
+    jmp     7b
+9:  add     rsp, 1032
+    pop     r15
+    pop     rbp
+    ret
+
+# emit_tri(edi, esi, edx; rbx mesh, r12d polygon)
+emit_tri:
+    mov     ecx, [rbx+ME_NTRIS]
+    lea     rax, [rcx+rcx*2]
+    mov     r10, [rbx+ME_TRIS]
+    mov     [r10+rax*4], edi
+    mov     [r10+rax*4+4], esi
+    mov     [r10+rax*4+8], edx
+    mov     r10, [rbx+ME_TPOLY]
+    mov     [r10+rcx*4], r12d
+    inc     dword ptr [rbx+ME_NTRIS]
+    ret
+
+# flat3(edi, esi, edx = vertices; rbx mesh) -> eax = 1 if they are (nearly)
+#   in a line: |(b - a) x (c - a)|^2 <= 1e-10 |b - a|^2 |c - a|^2
+flat3:
+    mov     rax, [rbx+ME_POS]
+    lea     rdi, [rdi+rdi*2]
+    lea     rsi, [rsi+rsi*2]
+    lea     rdx, [rdx+rdx*2]
+    movss   xmm0, [rax+rsi*4]           # u = b - a
+    subss   xmm0, [rax+rdi*4]
+    movss   xmm1, [rax+rsi*4+4]
+    subss   xmm1, [rax+rdi*4+4]
+    movss   xmm2, [rax+rsi*4+8]
+    subss   xmm2, [rax+rdi*4+8]
+    movss   xmm3, [rax+rdx*4]           # w = c - a
+    subss   xmm3, [rax+rdi*4]
+    movss   xmm4, [rax+rdx*4+4]
+    subss   xmm4, [rax+rdi*4+4]
+    movss   xmm5, [rax+rdx*4+8]
+    subss   xmm5, [rax+rdi*4+8]
+    movss   xmm6, xmm1                  # x = uy wz - uz wy
+    mulss   xmm6, xmm5
+    movss   xmm7, xmm2
+    mulss   xmm7, xmm4
+    subss   xmm6, xmm7
+    mulss   xmm6, xmm6
+    movss   xmm7, xmm2                  # y = uz wx - ux wz
+    mulss   xmm7, xmm3
+    movss   xmm8, xmm0
+    mulss   xmm8, xmm5
+    subss   xmm7, xmm8
+    mulss   xmm7, xmm7
+    addss   xmm6, xmm7
+    movss   xmm7, xmm0                  # z = ux wy - uy wx
+    mulss   xmm7, xmm4
+    movss   xmm8, xmm1
+    mulss   xmm8, xmm3
+    subss   xmm7, xmm8
+    mulss   xmm7, xmm7
+    addss   xmm6, xmm7
+    mulss   xmm0, xmm0                  # |u|^2 |w|^2 1e-10
+    mulss   xmm1, xmm1
+    mulss   xmm2, xmm2
+    addss   xmm0, xmm1
+    addss   xmm0, xmm2
+    mulss   xmm3, xmm3
+    mulss   xmm4, xmm4
+    mulss   xmm5, xmm5
+    addss   xmm3, xmm4
+    addss   xmm3, xmm5
+    mulss   xmm0, xmm3
+    mulss   xmm0, [rip+mf_flat]
+    xor     eax, eax
+    comiss  xmm6, xmm0
+    setbe   al
+    ret
+
 # mesh_finish(rdi=mesh) - unique edges, fan triangles, bounding box
 # -----------------------------------------------------------------------------
 mesh_finish:
@@ -263,9 +411,19 @@ mesh_finish:
     mov     r8, [rbx+ME_POFF]
     mov     r13d, [r8+r12*4]            # first loop
     mov     r14d, [r8+r12*4+4]          # end loop
-    # fan triangles (v0, vi, vi+1)
+    # fan triangles (v0, vi, vi+1); polygons with corners in a straight
+    # line (cuts leave them) skip the flat ones
     mov     r9, [rbx+ME_LOOPS]
-    lea     ecx, [r13+1]
+    mov     eax, r14d
+    sub     eax, r13d
+    cmp     eax, 4
+    jb      31f
+    cmp     eax, 256
+    ja      31f
+    call    ear_tris
+    mov     r9, [rbx+ME_LOOPS]
+    jmp     4f
+31: lea     ecx, [r13+1]
 3:  lea     eax, [rcx+1]
     cmp     eax, r14d
     jae     4f

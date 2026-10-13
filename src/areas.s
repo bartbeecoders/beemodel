@@ -1231,6 +1231,8 @@ ed_props_draw:
     add     r12d, 18
 12: mov     edi, r12d                   # ---- parameters
     call    cad_props_draw
+    mov     edi, eax                    # ---- features
+    call    feat_props_draw
     mov     r12d, eax
     mov     edi, [rip+vp_area]          # ---- camera of the last used viewport
     call    cam_load
