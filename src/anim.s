@@ -98,7 +98,7 @@
 .if AN_LAY + AN_MAXL*LY_SZ - AN_CON_
 .error "AN_CON_ must follow the layers"
 .endif
-.equ AN_KEYS,   AN_RIGEND_              # (constraints and drivers: rig.s)
+.equ AN_KEYS,   AN_KEYSOFF_             # (constraints, drivers: rig.s; physics: rbody.s)
 .equ KY_SZ,     32
 .equ KY_F,      0
 .equ KY_V,      4
@@ -1069,7 +1069,9 @@ an_apply:
     jmp     4b
 8:  inc     r13d
     jmp     3b
-9:  call    rig_eval                    # drivers, constraints (rig.s)
+9:  movss   xmm0, [rip+an_frame]        # rigid bodies (rbody.s)
+    call    rb_frame
+    call    rig_eval                    # drivers, constraints (rig.s)
     call    arm_refresh                 # armatures show their new pose
     add     rsp, 32
     pop     r15

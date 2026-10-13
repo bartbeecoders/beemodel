@@ -351,6 +351,17 @@
 .equ DR_MAX_,       32
 .equ DR_SZ_,        256
 .equ AN_RIGEND_,    AN_DRV_ + DR_MAX_*DR_SZ_
+.equ AN_NRB_,       52      # rigid bodies, joints in use (rbody.s)
+.equ AN_NJT_,       56
+.equ AN_RW_,        AN_RIGEND_          # the physics world: gravity, rate, iterations
+.equ RW_SZ_,        32
+.equ AN_RB_,        AN_RW_ + RW_SZ_     # rigid bodies
+.equ RB_MAX_,       1024
+.equ RB_SZ_,        80
+.equ AN_JT_,        AN_RB_ + RB_MAX_*RB_SZ_   # joints
+.equ JT_MAX_,       128
+.equ JT_SZ_,        64
+.equ AN_KEYSOFF_,   AN_JT_ + JT_MAX_*JT_SZ_   # then the keys
 .equ K_SHAPE_,      6       # a shape key's value (an animation channel kind)
 
 # ---- objects (scene.s) -------------------------------------------------------------

@@ -535,6 +535,7 @@ def main():
     anim_editors()
     armatures()
     rigging()
+    rigid_bodies()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3828,6 +3829,90 @@ def rigging():
     w = t1.split()
     check(t0 == '150 100' and len(w) == 3 and int(w[0]) <= 5 and w[1] != '150' and int(w[2]) < 200,
           f'IK: dragging the goal with G, the chain follows ({t0} -> tip off the goal, goal x, its distance: {t1})')
+    f.proc.kill()
+
+def rigid_bodies():
+    """Rigid bodies: a box lands flat and sleeps, a stack of five stands, a
+    hull, a compound (a ball drops through a torus's hole; on its hull it
+    stays on top), joints (a hinge swings about its axis, a pendulum keeps
+    its length, a fixed pair stays together), the settings saved; 1000
+    tumbling boxes faster than real time. In the window: Space plays a pile
+    falling, the start brings it back."""
+    print('  -- rigid bodies --')
+    home = tempfile.mkdtemp(prefix='bee-rb-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 20)\nselect("Ground")\nop("rigid.add", "passive box")\n'
+            'add("cube", "Box", -6, 3, 0)\nscale("Box", 0.5)\nselect("Box")\nop("rigid.add", "active box")\n'
+            'for i in 0..5 {\n n = "S" + str(i)\n add("cube", n, 6 + 0.1 * (i % 2), 0.5 + i * 1.05, 0)\n scale(n, 0.5)\n select(n)\n op("rigid.add", "active box")\n}\n'
+            'add("cone", "Cone", -3, 2, -4)\nselect("Cone")\nop("rigid.add", "active hull")\n'
+            'add("torus", "Ring", 0, 0.3, -6)\nselect("Ring")\nop("rigid.add", "passive compound")\n'
+            'add("sphere", "Ball", 0, 2, -6)\nscale("Ball", 0.3)\nselect("Ball")\nop("rigid.add", "active sphere")\n'
+            'add("torus", "Ring2", 6, 0.3, -6)\nselect("Ring2")\nop("rigid.add", "passive hull")\n'
+            'add("sphere", "Ball2", 6, 2, -6)\nscale("Ball2", 0.3)\nselect("Ball2")\nop("rigid.add", "active sphere")\n'
+            'add("cube", "Flap", 0, 4, 6.6)\nscale("Flap", 0.6, 0.1, 0.6)\nselect("Flap")\nop("rigid.add", "active box")\n'
+            'op("rigid.joint", "hinge Flap world pivot 0 4 6 axis 1 0 0")\n'
+            'add("cube", "Bob", 6, 4, 6)\nscale("Bob", 0.3)\nselect("Bob")\nop("rigid.add", "active box")\nop("rigid.joint", "point Bob world pivot 4 4 6")\n'
+            'add("cube", "Glue", -4, 5, 6)\nscale("Glue", 0.4)\nadd("cube", "Glued", -3.2, 5, 6)\nscale("Glued", 0.4)\n'
+            'select("Glue", "Glued")\nop("rigid.add", "active box")\nop("rigid.joint", "fixed Glued Glue")\n'
+            'frame(2)\nprint(rbinfo(0), rbinfo(7))\nlow = 9\non = 0\n'
+            'for f in 3..121 {\n frame(f)\n if get("Flap", "y") < low { low = get("Flap", "y") }\n if f == 40 { on = get("Ball2", "y") > 0.5 }\n}\n'
+            'print(round(get("Box", "y") * 100), round(get("Box", "rx") * 100), round(get("Box", "rz") * 100), round(get("S4", "y") * 100), rbinfo(2))\n'
+            'print(round(get("Cone", "y") * 100), get("Ball", "y") < 0.4, on)\n'
+            'print(round(sqrt(pow(get("Flap", "y") - 4, 2) + pow(get("Flap", "z") - 6, 2)) * 100), round(get("Flap", "x") * 100), low < 3.45)\n'
+            'print(round(sqrt(pow(get("Bob", "x") - 4, 2) + pow(get("Bob", "y") - 4, 2) + pow(get("Bob", "z") - 6, 2)) * 100), round((get("Glued", "x") - get("Glue", "x")) * 100), round(get("Glue", "y") * 100))\n'
+            'b = get("Box", "y")\nop("file.save", "~/BeeModel/rb.bee")\nop("file.new")\nop("file.open", "~/BeeModel/rb.bee")\n'
+            'frame(1)\nprint(round(get("Box", "y") * 100))\nframe(120)\nprint(abs(get("Box", "y") - b) < 0.01)\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+    out = [l.strip() for l in r.stdout.split('\n')] + [''] * 10
+    w1 = out[1].split()
+    check(out[0] == '16 31' and len(w1) == 5 and w1[0] == '50' and abs(int(w1[1])) <= 1 and abs(int(w1[2])) <= 1
+          and 445 <= int(w1[3]) <= 455 and int(w1[4]) <= 3,
+          f'a box lands flat; a stack of five stands; they sleep (the swinging ones do not) ({out[:2]})')
+    check(out[2] in ('99 1 1', '100 1 1', '101 1 1'), f'a cone as its hull; a ball drops through a torus (compound) but stays on its hull ({out[2]})')
+    w3, w4 = out[3].split(), out[4].split()
+    check(len(w3) == 3 and abs(int(w3[0]) - 60) <= 2 and w3[1] == '0' and w3[2] == '1' and len(w4) == 3
+          and abs(int(w4[0]) - 200) <= 2 and abs(int(w4[1]) - 80) <= 1 and w4[2] == '40',
+          f'joints: a hinge swings about its axis, a pendulum keeps its length, a fixed pair lands together ({out[3:5]})')
+    check(out[5] == '300' and out[6] == '1', f'the start and the settings saved: reopened, it simulates the same ({out[5:7]})')
+    # 1000 boxes tumbling into a heap: ten seconds simulated
+    code = ('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 40)\n'
+            'for k in 0..10 {\n for i in 0..10 {\n  for j in 0..10 {\n   n = "B" + str(k * 100 + i * 10 + j)\n'
+            '   add("cube", n, i * 1.2 - 6 + 0.6 * (k % 2), 1 + k * 1.2, j * 1.2 - 6 + 0.6 * (k % 2))\n'
+            '   rotate(n, 0.1 * k, 0.37 * k + 0.1 * i, 0.05 * j)\n   scale(n, 0.5)\n  }\n }\n}\n'
+            'select()\nop("object.select_all")\nop("rigid.add", "active box")\nselect("Ground")\nop("rigid.add", "passive box")\n'
+            'sim = 0\nworst = 0\nfor f in 2..241 {\n frame(f)\n sim += rbinfo(4)\n if rbinfo(4) > worst { worst = rbinfo(4) }\n}\n'
+            'lo = 99\nfor k in 0..10 { for i in 0..10 { for j in 0..10 {\n y = get("B" + str(k * 100 + i * 10 + j), "y")\n if y < lo { lo = y }\n} } }\n'
+            'print(rbinfo(0), sim, worst, lo > 0.4, rbinfo(1))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=600)
+    w = (r.stdout.strip().split('\n') or [''])[-1].split()
+    ok = len(w) == 5 and w[0] == '1001' and w[3] == '1'
+    sim = float(w[1]) if ok else 1e9
+    check(ok and sim < 10000 * (2 if os.environ.get('CI') else 1),
+          f'1000 boxes tumble into a heap: 10 s simulated in {sim / 1000:.1f} s (the slowest frame {w[2] if ok else "?"} ms of 41.7), {w[4] if ok else "?"} contacts, none through the ground')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.enter(600, 300)
+    q('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 8)\n'
+      'for k in 0..4 {\n for i in 0..5 {\n  n = "P" + str(k * 10 + i)\n  add("cube", n, i * 1.1 - 2.2 + 0.5 * (k % 2), 1 + k * 1.3, 0.3 * k)\n'
+      '  rotate(n, 0.2 * k, 0.3 * i, 0.1)\n  scale(n, 0.5)\n }\n}\nselect()\nop("object.select_all")\nop("rigid.add", "active box")\n'
+      'select("Ground")\nop("rigid.add", "passive box")\nselect()')
+    y0 = q('print(get("P34", "y"))')
+    f.move(600, 300)
+    f.key(57)                                   # Space: play
+    f.pump(1.5)
+    f.shot('103_rigid_bodies.png')
+    f.key(57)
+    y1 = q('print(get("P34", "y"), frame() > 20)')
+    f.mods(1); f.key(105); f.mods(0)            # Shift+Left: the start
+    f.pump(0.2)
+    y2 = q('print(get("P34", "y"))')
+    w = y1.split()
+    check(len(w) == 2 and float(w[0]) < float(y0) - 1 and w[1] == '1' and y2 == y0,
+          f'Space plays the pile falling; the start brings it back ({y0} -> {y1} -> {y2})')
     f.proc.kill()
 
 

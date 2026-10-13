@@ -399,6 +399,8 @@ builtins:
     .long 1, 1
     .quad bn_bonepos, b_bonepos
     .long 3, 3
+    .quad bn_rbinfo, b_rbinfo
+    .long 1, 1
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -659,6 +661,7 @@ bn_bones:       .asciz "bones"
 bn_prop:        .asciz "prop"
 bn_shapes:      .asciz "shapes"
 bn_bonepos:     .asciz "bonepos"
+bn_rbinfo:      .asciz "rbinfo"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -4717,6 +4720,17 @@ b_bonepos:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# rbinfo(k) -> the simulation: 0 bodies, 1 contact points, 2 awake, 3
+#   islands, 4 the last frame's time (ms), 5 manifolds, 6 steps, 7 parts
+b_rbinfo:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    rb_info
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
 
 # shapes(name) -> a mesh's shape keys, the Basis too (0: none)
 b_shapes:

@@ -327,6 +327,7 @@ scene_clear:
     call    nt_reset
     call    an_reset                    # (and the animation)
     call    rig_reset                   #  (motion paths, onion skins)
+    call    rb_reset                    #  (the simulation)
     call    image_clear                 # (and the world)
     call    cad_reset                   # (units, parameters)
     lea     rdi, [rip+scene_pool]
