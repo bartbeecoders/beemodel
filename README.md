@@ -125,6 +125,24 @@ Faces on faces come out the way you would want: a flush cut goes through, touchi
 and A − A is empty. A stress corpus in CI checks the volume identities and closed results on
 every change.
 
+**Materials** follow the principled model the renderer uses:
+
+- base colour, metallic, roughness, specular and IOR;
+- transmission;
+- emission and its strength;
+- clearcoat and its roughness;
+- alpha.
+
+The Material section of Properties shows the active mesh's material.
+
+- **+ New** makes one.
+- **Drag** the name to pick another material, or drag a value to change it.
+- **x** removes it.
+
+The solid viewport shows the base colour. Materials are saved in `.bee` files and exported as MTL next to an OBJ. Scripts use
+`material`, `matset`, `matget`, `assign` and `matof`; agents see them in `scene_summary` and use
+the `material.*` operators.
+
 **Analysis and repair.** View › Show Normals / Non-manifold / Boundary Edges / Degenerate Faces /
 Overhangs mark problems on the active mesh, with a count of each in the viewport.
 

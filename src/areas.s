@@ -524,10 +524,16 @@ area_hit:
     mov     edx, eax
     mov     eax, HIT_OUTLINER
     jmp     .Lah_ret
-.Lah_props:                             # modifier buttons and fields
+.Lah_props:                             # material, modifier buttons and fields
+    mov     edi, ebx
+    mov     esi, r12d
+    call    mats_props_hit
+    test    eax, eax
+    jns     1f
     mov     edi, ebx
     mov     esi, r12d
     call    mods_props_hit
+1:
     test    eax, eax
     js      .Lah_pane
     mov     edx, eax
@@ -1157,6 +1163,8 @@ ed_props_draw:
     add     r12d, 12
     mov     edi, r12d                   # ---- the modifier stack
     call    mods_props_draw
+    mov     edi, eax                    # ---- the material
+    call    mats_props_draw
     mov     r12d, eax
     add     r12d, 18
 12: mov     edi, [rip+vp_area]          # ---- camera of the last used viewport

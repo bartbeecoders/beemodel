@@ -383,6 +383,16 @@ builtins:
     .long 1, 1
     .quad bn_analyze, b_analyze
     .long 2, 2
+    .quad bn_material, b_material
+    .long 1, 1
+    .quad bn_matset, b_matset
+    .long 3, 5
+    .quad bn_matget, b_matget
+    .long 2, 3
+    .quad bn_assign, b_assign
+    .long 2, 2
+    .quad bn_matof, b_matof
+    .long 1, 1
 builtins_end:
 .equ B_SZ, 24
 
@@ -446,6 +456,14 @@ bn_vmove:       .asciz "vmove"
 bn_boolean:     .asciz "boolean"
 bn_manifold:    .asciz "manifold"
 bn_analyze:     .asciz "analyze"
+bn_material:    .asciz "material"
+bn_matset:      .asciz "matset"
+bn_matget:      .asciz "matget"
+bn_assign:      .asciz "assign"
+bn_matof:       .asciz "matof"
+e_no_mat:       .asciz "no material named "
+e_mat_param:    .asciz "material parameters: base metallic roughness specular ior transmission emission strength clearcoat coat_roughness alpha, not "
+e_mat_full:     .asciz "the scene holds 1024 materials"
 an_kind_names:  .asciz "boundary"
                 .asciz "nonmanifold"
                 .asciz "degenerate"
@@ -4086,6 +4104,179 @@ b_boolean:
 8:  lea     rdi, [rip+e_op_perm]
     lea     rsi, [rip+s_bool_op]
     jmp     sc_rt
+
+# material(name) -> name: the material with that name, created if missing
+b_material:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    a_str
+    mov     r12, rax
+    mov     rdi, rax
+    call    mat_find
+    test    eax, eax
+    jns     1f
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, r12
+    call    mat_new
+    test    eax, eax
+    js      8f
+1:  mov     edi, eax
+    call    mat_get
+    mov     rsi, rax
+    call    sh_dup
+    mov     rdx, rax
+    mov     eax, T_STR
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+8:  lea     rdi, [rip+e_mat_full]
+    xor     esi, esi
+    jmp     sc_rt
+
+# a_mat(rdi=value) -> eax = material index (error if there is none)
+a_mat:
+    push    rbx
+    call    a_str
+    mov     rbx, rax
+    mov     rdi, rax
+    call    mat_find
+    test    eax, eax
+    js      1f
+    pop     rbx
+    ret
+1:  lea     rdi, [rip+e_no_mat]
+    mov     rsi, rbx
+    jmp     sc_rt
+
+# a_mparam(rdi=value) -> eax = parameter index
+a_mparam:
+    push    rbx
+    call    a_str
+    mov     rbx, rax
+    mov     rdi, rax
+    call    mat_param_index
+    test    eax, eax
+    js      1f
+    pop     rbx
+    ret
+1:  lea     rdi, [rip+e_mat_param]
+    mov     rsi, rbx
+    jmp     sc_rt
+
+# matset(material, parameter, value [, value, value]) - colours take three
+b_matset:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     r15d, esi                   # argument count
+    call    a_mat
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_mparam
+    mov     r13d, eax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    xor     r14d, r14d                  # components
+1:  lea     eax, [r14+2]
+    cmp     eax, r15d
+    jae     9f
+    mov     eax, r14d
+    shl     eax, 4
+    lea     rdi, [rbx+32+rax]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    call    mat_set
+    inc     r14d
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# matget(material, parameter [, component]) -> number
+b_matget:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    xor     r13d, r13d
+    cmp     esi, 3
+    jb      1f
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si r13d, xmm0
+1:  mov     rdi, rbx
+    call    a_mat
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_mparam
+    mov     edi, r12d
+    mov     esi, eax
+    mov     edx, r13d
+    call    mat_param_get
+    cvtss2sd xmm0, xmm0
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
+# assign(object, material) - "" or nil: no material
+b_assign:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_meshobj
+    mov     r12, rax
+    mov     esi, -1
+    lea     rdi, [rbx+16]
+    cmp     dword ptr [rdi], T_STR
+    jne     1f
+    mov     rax, [rdi+8]
+    cmp     byte ptr [rax], 0
+    je      1f
+    call    a_mat
+    mov     esi, eax
+1:  push    rsi
+    sub     rsp, 8
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    add     rsp, 8
+    pop     rsi
+    mov     rdi, r12
+    call    mat_assign
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# matof(object) -> its material's name, or nil
+b_matof:
+    sub     rsp, 8
+    call    a_meshobj
+    mov     rdi, rax
+    call    mat_of
+    add     rsp, 8
+    test    eax, eax
+    js      ret_nil
+    mov     edi, eax
+    call    mat_get
+    mov     rsi, rax
+    call    sh_dup
+    mov     rdx, rax
+    mov     eax, T_STR
+    ret
 
 # analyze(name, what) -> how many boundary edges / non-manifold edges /
 #   degenerate faces / loose vertices / overhanging faces

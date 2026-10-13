@@ -30,6 +30,7 @@
 .equ ST_ACTIVE,     4
 .equ ST_BYTES,      8
 .equ ST_LABEL,      16
+.equ ST_MATS,       24      # the material block it saw (a reference)
 .equ ST_NAME,       32      # the label, copied (64 bytes)
 .equ ST_HDR,        96
 .equ MAP_ANON_PRIV, 0x22
@@ -107,6 +108,9 @@ snapshot:
     mov     byte ptr [rdi+rcx], 0
 22:
     mov     dword ptr [rbx+ST_ACTIVE], -1
+    mov     rdi, [rip+mat_cur]          # the materials, shared
+    mov     [rbx+ST_MATS], rdi
+    call    mat_ref
     xor     r12d, r12d
 2:  cmp     r12d, [rip+obj_count]
     jae     8f
@@ -150,7 +154,9 @@ release:
     call    obj_data_unref
     inc     r12d
     jmp     1b
-2:  mov     rax, [rbx+ST_BYTES]
+2:  mov     rdi, [rbx+ST_MATS]
+    call    mat_unref
+    mov     rax, [rbx+ST_BYTES]
     sub     [rip+undo_bytes], rax
     mov     rdi, rbx
     mov     rsi, rax
@@ -177,6 +183,12 @@ restore_step:
     inc     r12d
     jmp     1b
 2:  call    eval_flush
+    mov     rdi, [rbx+ST_MATS]          # the materials it saw
+    call    mat_ref
+    mov     rdi, [rip+mat_cur]
+    mov     rax, [rbx+ST_MATS]
+    mov     [rip+mat_cur], rax
+    call    mat_unref
     lea     rdi, [rip+scene_pool]
     call    pool_clear
     mov     dword ptr [rip+obj_count], 0

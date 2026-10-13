@@ -8,6 +8,8 @@
 #          OBJS  count, records: name[32], loc/rot/scale f32[9], colour,
 #                type, flags, mesh index (u32, -1 = none)
 #          VIEW  active index, grid, shading, camera f32[6]
+#          MODS  modifier stacks;  MATS  materials (count, 128-byte records);
+#          OMAT  per object: material index + 1 (0 = none)
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
@@ -26,6 +28,8 @@
 .equ TAG_OBJS,      0x534a424f          # "OBJS"
 .equ TAG_VIEW,      0x57454956          # "VIEW"
 .equ TAG_MODS,      0x53444f4d          # "MODS"
+.equ TAG_MATS,      0x5354414d          # "MATS"
+.equ TAG_OMAT,      0x54414d4f          # "OMAT"
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
 
@@ -38,6 +42,13 @@ fsize:          .skip 8
 chunk_at:       .skip 8
 mods_chunk:     .skip 8
 mods_size:      .skip 4
+.align 8
+mats_chunk:     .skip 8
+mtl_base:       .skip 8
+mtl_buf:        .skip 512
+omat_chunk:     .skip 8
+mats_size:      .skip 4
+omat_size:      .skip 4
 n_mesh_tab:     .skip 4
 msg_buf:        .skip 600
 
@@ -45,6 +56,22 @@ msg_buf:        .skip 600
 s_bee_ext:      .asciz ".bee"
 s_obj_head:     .asciz "# BeeModel OBJ export\n"
 s_o:            .asciz "o "
+s_mtllib:       .asciz "mtllib "
+s_usemtl:       .asciz "usemtl "
+s_mtl_head:     .asciz "# BeeModel MTL export (PBR extension: Pr Pm Pc Pcr)\n"
+s_newmtl:       .asciz "\nnewmtl "
+s_kd:           .asciz "\nKd "
+s_ke:           .asciz "Ke "
+s_ni:           .asciz "Ni "
+s_d:            .asciz "d "
+s_pr:           .asciz "Pr "
+s_pm:           .asciz "Pm "
+s_pc:           .asciz "Pc "
+s_pcr:          .asciz "Pcr "
+s_tf:           .asciz "Tf "
+s_illum:        .asciz "illum 2\n"
+.align 4
+mt_one:         .float 1.0
 s_v:            .asciz "v "
 s_f:            .asciz "f"
 s_nl:           .asciz "\n"
@@ -222,6 +249,14 @@ bee_save:
     call    chunk_begin
     call    mods_write
     call    chunk_end
+    mov     edi, TAG_MATS               # MATS, OMAT (materials)
+    call    chunk_begin
+    call    mats_write
+    call    chunk_end
+    mov     edi, TAG_OMAT
+    call    chunk_begin
+    call    omat_write
+    call    chunk_end
     mov     edi, TAG_VIEW               # VIEW
     call    chunk_begin
     mov     r12d, -1                    # active object index
@@ -386,6 +421,8 @@ bee_load:
     xor     r14, r14                    # OBJS chunk
     xor     r15, r15                    # VIEW chunk
     mov     qword ptr [rip+mods_chunk], 0
+    mov     qword ptr [rip+mats_chunk], 0
+    mov     qword ptr [rip+omat_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -421,10 +458,22 @@ bee_load:
     lea     r15, [rbx+8]
     jmp     23f
 24: cmp     eax, TAG_MODS
-    jne     23f
+    jne     25f
     lea     rax, [rbx+8]
     mov     [rip+mods_chunk], rax
     mov     [rip+mods_size], ebp
+    jmp     23f
+25: cmp     eax, TAG_MATS
+    jne     26f
+    lea     rax, [rbx+8]
+    mov     [rip+mats_chunk], rax
+    mov     [rip+mats_size], ebp
+    jmp     23f
+26: cmp     eax, TAG_OMAT
+    jne     23f
+    lea     rax, [rbx+8]
+    mov     [rip+omat_chunk], rax
+    mov     [rip+omat_size], ebp
 23: lea     rbx, [rbx+rbp+8]            # unknown chunks are skipped
     jmp     2b
 3:  test    r14, r14
@@ -483,7 +532,17 @@ bee_load:
     inc     dword ptr [rip+obj_count]
     inc     ebx
     jmp     6b
-7:  mov     rdi, [rip+mods_chunk]       # modifier stacks
+7:  mov     rdi, [rip+mats_chunk]       # materials, then who uses them
+    test    rdi, rdi
+    jz      72f
+    mov     esi, [rip+mats_size]
+    call    mats_read
+72: mov     rdi, [rip+omat_chunk]
+    test    rdi, rdi
+    jz      73f
+    mov     esi, [rip+omat_size]
+    call    omat_read
+73: mov     rdi, [rip+mods_chunk]       # modifier stacks
     test    rdi, rdi
     jz      70f
     mov     esi, [rip+mods_size]
@@ -555,10 +614,21 @@ obj_export:
     push    r14
     push    r15
     mov     r15, rdi
+    mov     rdi, r15                    # materials: name.mtl next to it
+    call    mtl_path
     call    wb_reset
     lea     rsi, [rip+s_obj_head]
     call    wb_str
-    mov     r14d, 1                     # OBJ indices are 1-based and global
+    call    mat_count
+    test    eax, eax
+    jz      0f
+    lea     rsi, [rip+s_mtllib]
+    call    wb_str
+    mov     rsi, [rip+mtl_base]
+    call    wb_str
+    lea     rsi, [rip+s_nl]
+    call    wb_str
+0:  mov     r14d, 1                     # OBJ indices are 1-based and global
     xor     ebx, ebx
 1:  cmp     ebx, [rip+obj_count]
     jae     8f
@@ -573,7 +643,20 @@ obj_export:
     call    wb_str
     lea     rsi, [rip+s_nl]
     call    wb_str
-    mov     rdi, r12                    # world-space vertices
+    mov     rdi, r12                    # usemtl
+    call    mat_of
+    test    eax, eax
+    js      0f
+    push    rax
+    lea     rsi, [rip+s_usemtl]
+    call    wb_str
+    pop     rdi
+    call    mat_get
+    mov     rsi, rax
+    call    wb_str
+    lea     rsi, [rip+s_nl]
+    call    wb_str
+0:  mov     rdi, r12                    # world-space vertices
     call    world_verts
     mov     r13, rax
     mov     rdi, r12
@@ -640,11 +723,157 @@ obj_export:
     mov     rsi, [rip+wb_ptr]
     mov     rdx, [rip+wb_len]
     call    file_write_atomic
-    pop     r15
+    call    mat_count
+    test    eax, eax
+    jz      9f
+    call    mtl_write
+9:  pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# mtl_path(rdi=OBJ path) - mtl_buf = the path with .obj -> .mtl (or + .mtl),
+#   mtl_base = its file name
+mtl_path:
+    lea     rsi, [rip+mtl_buf]
+    xor     ecx, ecx
+1:  mov     al, [rdi+rcx]
+    mov     [rsi+rcx], al
+    test    al, al
+    jz      2f
+    inc     ecx
+    cmp     ecx, 500
+    jb      1b
+    mov     byte ptr [rsi+rcx], 0
+2:  cmp     ecx, 4                      # ends in .obj?
+    jb      3f
+    cmp     dword ptr [rsi+rcx-4], 0x6a626f2e   # ".obj"
+    jne     3f
+    mov     dword ptr [rsi+rcx-4], 0x6c746d2e   # ".mtl"
+    jmp     4f
+3:  mov     dword ptr [rsi+rcx], 0x6c746d2e
+    mov     byte ptr [rsi+rcx+4], 0
+4:  mov     [rip+mtl_base], rsi         # the part after the last /
+    xor     ecx, ecx
+5:  mov     al, [rsi+rcx]
+    test    al, al
+    jz      9f
+    cmp     al, '/'
+    jne     6f
+    lea     rax, [rsi+rcx+1]
+    mov     [rip+mtl_base], rax
+6:  inc     ecx
+    jmp     5b
+9:  ret
+
+# mtl_write - every material as OBJ's MTL (with the PBR extension)
+mtl_write:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    wb_reset
+    lea     rsi, [rip+s_mtl_head]
+    call    wb_str
+    xor     ebx, ebx
+1:  call    mat_count
+    cmp     ebx, eax
+    jae     8f
+    mov     edi, ebx
+    call    mat_get
+    mov     r12, rax
+    lea     rsi, [rip+s_newmtl]
+    call    wb_str
+    mov     rsi, r12
+    call    wb_str
+    lea     rdi, [rip+s_kd]             # Kd = base colour
+    lea     rsi, [r12+32]
+    call    mtl_vec
+    lea     rdi, [rip+s_ke]             # Ke = emission * strength
+    movss   xmm0, [r12+76]
+    lea     rsi, [r12+64]
+    call    mtl_vec_k
+    lea     rdi, [rip+s_ni]
+    movss   xmm0, [r12+56]
+    call    mtl_val
+    lea     rdi, [rip+s_d]
+    movss   xmm0, [r12+88]
+    call    mtl_val
+    lea     rdi, [rip+s_pr]
+    movss   xmm0, [r12+48]
+    call    mtl_val
+    lea     rdi, [rip+s_pm]
+    movss   xmm0, [r12+44]
+    call    mtl_val
+    lea     rdi, [rip+s_pc]
+    movss   xmm0, [r12+80]
+    call    mtl_val
+    lea     rdi, [rip+s_pcr]
+    movss   xmm0, [r12+84]
+    call    mtl_val
+    lea     rdi, [rip+s_tf]             # transmission as the filter
+    movss   xmm0, [r12+60]
+    sub     rsp, 16
+    movss   [rsp], xmm0
+    movss   [rsp+4], xmm0
+    movss   [rsp+8], xmm0
+    lea     rsi, [rsp]
+    call    mtl_vec
+    add     rsp, 16
+    lea     rsi, [rip+s_illum]
+    call    wb_str
+    inc     ebx
+    jmp     1b
+8:  lea     rdi, [rip+mtl_buf]
+    mov     rsi, [rip+wb_ptr]
+    mov     rdx, [rip+wb_len]
+    call    file_write_atomic
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# mtl_vec(rdi=key with space, rsi=float[3]) / mtl_vec_k(.., xmm0 = factor)
+mtl_vec:
+    movss   xmm0, [rip+mt_one]
+mtl_vec_k:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     rbx, rsi
+    movss   [rsp], xmm0
+    mov     rsi, rdi
+    call    wb_str
+    xor     r12d, r12d
+1:  test    r12d, r12d
+    jz      2f
+    mov     edi, ' '
+    call    wb_char
+2:  movss   xmm0, [rbx+r12*4]
+    mulss   xmm0, [rsp]
+    call    wb_float
+    inc     r12d
+    cmp     r12d, 3
+    jb      1b
+    lea     rsi, [rip+s_nl]
+    call    wb_str
+    add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
+# mtl_val(rdi=key with space, xmm0=value)
+mtl_val:
+    sub     rsp, 24
+    movss   [rsp], xmm0
+    mov     rsi, rdi
+    call    wb_str
+    movss   xmm0, [rsp]
+    call    wb_float
+    lea     rsi, [rip+s_nl]
+    call    wb_str
+    add     rsp, 24
     ret
 
 # line_end(rsi=pos, rdx=end) -> rax = start of the next line
