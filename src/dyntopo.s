@@ -73,6 +73,7 @@ s_dyn_on:       .asciz "  dyntopo on, detail "
 s_dyn_off:      .asciz "  dyntopo off"
 s_dyn_px:       .asciz " px"
 s_dyn_mem:      .asciz "  dyntopo: out of memory"
+s_dyn_mr:       .asciz "  dyntopo: not on a multires level (level 0 sculpts the base)"
 
 .section .bss
 .align 8
@@ -133,7 +134,14 @@ do_dyntopo:                             # on / off: the leaves built again
     je      9f
     cmp     dword ptr [rip+sc_stroking], 0
     jne     9f
-    xor     dword ptr [rip+sc_dyn], 1
+    mov     rdi, [rip+sc_mesh]          # (not on a multires level)
+    call    mr_owns
+    test    eax, eax
+    jz      4f
+    lea     rdi, [rip+s_dyn_mr]
+    call    log_line
+    jmp     9f
+4:  xor     dword ptr [rip+sc_dyn], 1
     mov     edi, [rip+sc_nv]            # (the mask stays)
     xor     esi, esi
     call    carry_mask

@@ -142,7 +142,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `socket(material, socket, node)` | Drives `base`, `metallic`, `roughness`, `emission` or `normal` (a bump node) by a node; `nil` unplugs |
 | `imgpixel(image, x, y, channel)` | A pixel's red, green, blue or alpha (0..3): 0..255 for 8-bit images, linear values for HDR |
 | `render(path [, width, height, samples, denoise])` | Path-traces the scene with Hive into a PNG (the camera object, or the viewport's view), denoised when `denoise` is 1; returns the milliseconds. Defaults 640 x 360, 64 samples, no denoising |
-| `modifier(name, type)` | Adds `mirror`, `array`, `solidify`, `subsurf`, `bevel`, `decimate`, `remesh` or `boolean`; returns its index. A boolean takes the other selected mesh as its object |
+| `modifier(name, type)` | Adds `mirror`, `array`, `solidify`, `subsurf`, `bevel`, `decimate`, `remesh`, `boolean` or `multires`; returns its index. A boolean takes the other selected mesh as its object |
 | `modset(name, i, param, value)` | Sets a value, e.g. `modset(c, 0, "levels", 3)`; an object value is a name: `modset(c, 0, "object", "Cutter")` |
 | `modapply(name, i)` / `modremove(name, i)` | Applies a modifier to the mesh / removes it |
 | `modcount(name)` | Number of modifiers in the stack |
@@ -161,6 +161,7 @@ The modifier values are:
 | decimate | `ratio` |
 | remesh | `voxel` |
 | boolean | `object` (a name), `operation` (0 union, 1 difference, 2 intersect) |
+| multires | `levels` (1-6), `level` (the one shown and sculpted; 0 the base) |
 
 ```
 add("cube", "Plate", 0, 0, 0)

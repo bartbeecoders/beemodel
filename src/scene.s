@@ -608,6 +608,11 @@ op_duplicate_sel:
     push    rax
     call    sk_ref
     pop     rax
+    mov     rdi, [r12+OB_MRES]          # ... and multires displacements
+    mov     [rax+OB_MRES], rdi
+    push    rax
+    call    mesh_ref
+    pop     rax
     movss   xmm0, [rax+OB_LOC]
     addss   xmm0, [rip+sf_dup]
     movss   [rax+OB_LOC], xmm0

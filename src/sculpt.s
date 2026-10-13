@@ -50,6 +50,7 @@
 .globl sc_mask_b, sc_masked, sc_stamp, sc_stamp_b, sc_rec, sc_rec_b, sc_acc
 .globl sc_acc_b, sc_maxedge, sc_hits, sc_nh, sc_lchg, sc_stroking
 .globl sc_brush_now, dab_p, salloc, sfree, smap, reach, node_box
+.globl sc_d_n, sc_d_cap, sc_d_idx, sc_d_old
 
 .include "sculpt.inc"
 
@@ -96,6 +97,7 @@ s_hud_prad:     .asciz " radius"
 s_hud_poff:     .asciz " -"
 s_hud_gap:      .asciz "   "
 s_hud_dyn:      .asciz "dyntopo "
+s_hud_mr:       .asciz "multires level "
 .align 8
 curve_names:    .quad s_soft, s_linear, s_hard
 s_soft:         .asciz " (soft)"
@@ -415,6 +417,7 @@ shared_mesh:
 sculpt_exit:
     sub     rsp, 8
     call    sculpt_free
+    call    mr_drop
     mov     dword ptr [rip+sc_obj], 0
     mov     qword ptr [rip+sc_mesh], 0
     mov     dword ptr [rip+sc_stroking], 0
@@ -480,7 +483,9 @@ sculpt_valid:
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     7f
     mov     rbx, rax
-    mov     rcx, [rax+OB_MESH]
+    mov     rdi, rax                    # what it sculpts (multires: its
+    call    mr_target                   #  level, while that stays)
+    mov     rcx, rax
     cmp     rcx, [rip+sc_mesh]
     je      1f
     test    rcx, rcx
@@ -517,7 +522,9 @@ sculpt_build:
     sub     rsp, 88
     mov     rbx, rdi
     call    sculpt_free
-    mov     r12, [rbx+OB_MESH]
+    mov     rdi, rbx                    # (multires: a copy of its level)
+    call    mr_target
+    mov     r12, rax
     mov     [rip+sc_mesh], r12
     mov     eax, [r12+ME_NVERTS]
     mov     [rip+sc_nv], eax
@@ -3770,6 +3777,13 @@ stroke_end:
     jz      8f
     cmp     dword ptr [rip+sc_dyn], 0   # dyntopo: the mesh is replaced (the
     jne     8f                          #  undo step keeps the old one)
+    mov     rdi, [rip+sc_mesh]          # multires: the moves go to the
+    call    mr_owns                     #  displacements (a new block)
+    test    eax, eax
+    jz      71f
+    call    mr_stroke_end
+    jmp     8f
+71:
     mov     edi, ebx                    # block: header 32, idx, old, new
     imul    rdi, rdi, 28
     add     rdi, 32
@@ -4609,7 +4623,22 @@ sculpt_overlay:
     call    draw_text
     call    fmt_reset                   # "stabilizer 25   pen: strength (soft)"
     xor     ebx, ebx
+    mov     rdi, [rip+sc_mesh]          # multires: the level
+    call    mr_owns
+    test    eax, eax
+    jz      9f
+    lea     rdi, [rip+s_hud_mr]
+    call    fmt_str
+    mov     edi, [rip+mr_klev]
+    call    fmt_int
+    inc     ebx
+9:  test    ebx, ebx
+    jz      91f
     cmp     dword ptr [rip+sc_lazy], 0
+    je      91f
+    lea     rdi, [rip+s_hud_gap]
+    call    fmt_str
+91: cmp     dword ptr [rip+sc_lazy], 0
     je      10f
     lea     rdi, [rip+s_hud_lazy]
     call    fmt_str

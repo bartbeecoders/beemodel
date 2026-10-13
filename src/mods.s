@@ -45,6 +45,7 @@
 .globl active_mesh_obj
 .globl mod_param_set_obj
 .globl fmt_val3
+.globl ev_owner
 
 .equ MB_N,      2048            # blocks in the pool
 .equ MB_REFS,   0
@@ -70,7 +71,8 @@
 .equ MT_DECIMATE, 6
 .equ MT_REMESH,   7
 .equ MT_BOOLEAN,  8
-.equ MT_COUNT,    9
+.equ MT_MULTIRES, 9
+.equ MT_COUNT,    10
 .equ PF_OBJECT,   2             # parameter flag: an object handle (raw bits)
 
 .section .bss
@@ -113,10 +115,11 @@ mn_bevel:       .asciz "Bevel"
 mn_decimate:    .asciz "Decimate"
 mn_remesh:      .asciz "Remesh"
 mn_boolean:     .asciz "Boolean"
+mn_multires:    .asciz "Multires"
 .align 8
-mod_names:      .quad mn_none, mn_mirror, mn_array, mn_solidify, mn_subsurf, mn_bevel, mn_decimate, mn_remesh, mn_boolean
-mod_keys:       .quad 0, mk_mirror, mk_array, mk_solidify, mk_subsurf, mk_bevel, mk_decimate, mk_remesh, mk_boolean
-mod_params:     .quad 0, mp_mirror, mp_array, mp_solidify, mp_subsurf, mp_bevel, mp_decimate, mp_remesh, mp_boolean
+mod_names:      .quad mn_none, mn_mirror, mn_array, mn_solidify, mn_subsurf, mn_bevel, mn_decimate, mn_remesh, mn_boolean, mn_multires
+mod_keys:       .quad 0, mk_mirror, mk_array, mk_solidify, mk_subsurf, mk_bevel, mk_decimate, mk_remesh, mk_boolean, mk_multires
+mod_params:     .quad 0, mp_mirror, mp_array, mp_solidify, mp_subsurf, mp_bevel, mp_decimate, mp_remesh, mp_boolean, mp_multires
 mk_mirror:      .asciz "mirror"
 mk_array:       .asciz "array"
 mk_solidify:    .asciz "solidify"
@@ -125,6 +128,7 @@ mk_bevel:       .asciz "bevel"
 mk_decimate:    .asciz "decimate"
 mk_remesh:      .asciz "remesh"
 mk_boolean:     .asciz "boolean"
+mk_multires:    .asciz "multires"
 pn_object:      .asciz "object"
 pn_operation:   .asciz "operation"
 pn_axis:        .asciz "axis"
@@ -135,6 +139,7 @@ pn_y:           .asciz "y"
 pn_z:           .asciz "z"
 pn_thick:       .asciz "thickness"
 pn_levels:      .asciz "levels"
+pn_level:       .asciz "level"
 pn_width:       .asciz "width"
 pn_segments:    .asciz "segments"
 pn_angle:       .asciz "angle"
@@ -195,6 +200,13 @@ mp_boolean:     .long 2, 0                  # operation: 0 union, 1 difference,
                 .quad pn_operation
                 .long 1
                 .float 1, 0, 2, 1, 0
+mp_multires:    .long 2, 0                  # levels, the level shown and
+                .quad pn_levels             #  sculpted (0: the base)
+                .long 1
+                .float 1, 1, 6, 2, 0
+                .quad pn_level
+                .long 1
+                .float 1, 0, 6, 6, 0
 s_none:         .asciz "-"
 s_op_names:     .asciz "union"
                 .asciz "difference"
@@ -217,8 +229,9 @@ s_axes:         .ascii "XYZ"
 .align 8
 items_modadd:   .quad op_mod_mirror, op_mod_array, op_mod_solidify, op_mod_subsurf
                 .quad op_mod_bevel, op_mod_decimate, op_mod_remesh, op_mod_boolean
+                .quad op_mod_multires
 
-OPERATOR op_mod_add, "object.modifier_add", "Add Modifier", do_mod_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a modifier to the active mesh: object.modifier_add mirror|array|solidify|subsurf|bevel|decimate|remesh|boolean"
+OPERATOR op_mod_add, "object.modifier_add", "Add Modifier", do_mod_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a modifier to the active mesh: object.modifier_add mirror|array|solidify|subsurf|bevel|decimate|remesh|boolean|multires"
 OPERATOR op_mod_mirror, "object.modifier_add_mirror", "Mirror", do_mod_add_n, arg=MT_MIRROR, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Mirror modifier"
 OPERATOR op_mod_array, "object.modifier_add_array", "Array", do_mod_add_n, arg=MT_ARRAY, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add an Array modifier"
 OPERATOR op_mod_solidify, "object.modifier_add_solidify", "Solidify", do_mod_add_n, arg=MT_SOLIDIFY, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Solidify modifier"
@@ -227,6 +240,7 @@ OPERATOR op_mod_bevel, "object.modifier_add_bevel", "Bevel", do_mod_add_n, arg=M
 OPERATOR op_mod_decimate, "object.modifier_add_decimate", "Decimate", do_mod_add_n, arg=MT_DECIMATE, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Decimate modifier"
 OPERATOR op_mod_remesh, "object.modifier_add_remesh", "Remesh", do_mod_add_n, arg=MT_REMESH, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Remesh modifier"
 OPERATOR op_mod_boolean, "object.modifier_add_boolean", "Boolean", do_mod_add_n, arg=MT_BOOLEAN, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Boolean modifier (the other selected mesh is its object)"
+OPERATOR op_mod_multires, "object.modifier_add_multires", "Multiresolution", do_mod_add_n, arg=MT_MULTIRES, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Multires modifier: subdivision levels that keep sculpted detail (sculpt at any level)"
 OPERATOR op_mod_remove, "object.modifier_remove", "Remove Modifier", do_mod_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a modifier: object.modifier_remove [index]"
 OPERATOR op_mod_apply, "object.modifier_apply", "Apply Modifier", do_mod_apply, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make a modifier (and those above it) part of the mesh: object.modifier_apply [index]"
 OPERATOR op_mod_set, "object.modifier_set", "Set Modifier Value", do_mod_set, flags=OPF_AI_SAFE|OPF_UNDO|OPF_QUIET, doc="Change a value: object.modifier_set \"index parameter value\" (e.g. 0 levels 3)"
@@ -297,6 +311,8 @@ obj_data_ref:
     call    mods_ref
     mov     rdi, [rbx+OB_SKETCH]
     call    sk_ref
+    mov     rdi, [rbx+OB_MRES]
+    call    mesh_ref
     pop     rbx
     ret
 obj_data_unref:
@@ -308,6 +324,8 @@ obj_data_unref:
     call    mods_unref
     mov     rdi, [rbx+OB_SKETCH]
     call    sk_unref
+    mov     rdi, [rbx+OB_MRES]
+    call    mesh_unref
     pop     rbx
     ret
 
@@ -678,6 +696,8 @@ mod_eval:
     je      mod_remesh
     cmp     eax, MT_BOOLEAN
     je      mod_boolean
+    cmp     eax, MT_MULTIRES
+    je      mod_multires
     xor     eax, eax
     ret
 
@@ -729,7 +749,13 @@ mods_deps:
     jae     9f
     imul    eax, r14d, MOD_SZ
     lea     rsi, [r12+MB_HDR+rax]
-    cmp     dword ptr [rsi+MD_TYPE], MT_BOOLEAN
+    cmp     dword ptr [rsi+MD_TYPE], MT_MULTIRES
+    jne     21f
+    mov     rax, 0x9E3779B97F4A7C15     # multires: its displacements
+    xor     r13, [rbx+OB_MRES]
+    imul    r13, rax
+    jmp     3f
+21: cmp     dword ptr [rsi+MD_TYPE], MT_BOOLEAN
     jne     3f
     mov     edi, [rsi+MD_P]
     mov     rax, 0x9E3779B97F4A7C15
@@ -1865,6 +1891,7 @@ mod_apply:
     call    stack_index
     test    rax, rax
     jz      8f
+    mov     [rip+ev_owner], rbx         # (modifiers that read the object)
     mov     r13, [rbx+OB_MESH]          # evaluate 0..index
     mov     rdi, r13
     call    mesh_ref
@@ -1897,7 +1924,9 @@ mod_apply:
     call    mod_remove
     dec     r12d
     jmp     3b
-4:  mov     dword ptr [rip+dirty], 1
+4:  mov     rdi, rbx                    # multires detail that no longer fits
+    call    mr_prune
+    mov     dword ptr [rip+dirty], 1
     mov     eax, 1
     jmp     9f
 8:  xor     eax, eax
