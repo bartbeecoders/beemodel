@@ -125,6 +125,19 @@ Faces on faces come out the way you would want: a flush cut goes through, touchi
 and A − A is empty. A stress corpus in CI checks the volume identities and closed results on
 every change.
 
+**Analysis and repair.** View › Show Normals / Non-manifold / Boundary Edges / Degenerate Faces /
+Overhangs mark problems on the active mesh, with a count of each in the viewport.
+
+Edit › Repair Mesh (`mesh.repair [distance]`) works in object and edit mode, as one undo step:
+
+1. merges vertices closer than the distance;
+2. removes faces without area and duplicate faces;
+3. fills holes;
+4. makes the normals consistent and points them outwards;
+5. drops loose vertices.
+
+It reports what it did. Scripts and agents read the counts with `analyze(name, what)`.
+
 Modifiers are saved in `.bee` files. Scripts use `modifier`, `modset`, `modapply` and `modremove`;
 agents see an object's modifiers in `scene_summary`.
 

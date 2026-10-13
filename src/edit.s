@@ -49,6 +49,10 @@
 .globl build_adj
 .globl adj_off
 .globl adj_nb
+.globl project_all
+.globl proj_local
+.globl dline
+.globl dot
 
 .equ KEY_TAB,   15
 .equ KEY_1,     2
@@ -723,6 +727,59 @@ project_all:
     pop     r14
     pop     r13
     pop     r12
+    ret
+
+# proj_local(xmm0..2 = an object-space point) -> xmm0, xmm1 = screen x, y,
+#   xmm2 = 1/z (0 behind the camera); after project_all for that object
+proj_local:
+    lea     r8, [rip+cmat]
+    movss   xmm3, xmm0
+    movss   xmm4, xmm1
+    movss   xmm5, xmm2
+    movss   xmm0, [r8+32]               # z
+    mulss   xmm0, xmm3
+    movss   xmm1, [r8+36]
+    mulss   xmm1, xmm4
+    addss   xmm0, xmm1
+    movss   xmm1, [r8+40]
+    mulss   xmm1, xmm5
+    addss   xmm0, xmm1
+    addss   xmm0, [r8+44]
+    comiss  xmm0, [rip+f_near]
+    jae     1f
+    xorps   xmm0, xmm0
+    xorps   xmm1, xmm1
+    xorps   xmm2, xmm2
+    ret
+1:  movss   xmm6, [rip+ef_one]
+    divss   xmm6, xmm0                  # 1/z
+    movss   xmm7, xmm6
+    mulss   xmm7, [rip+vp_focal]
+    movss   xmm0, [r8]                  # x
+    mulss   xmm0, xmm3
+    movss   xmm1, [r8+4]
+    mulss   xmm1, xmm4
+    addss   xmm0, xmm1
+    movss   xmm1, [r8+8]
+    mulss   xmm1, xmm5
+    addss   xmm0, xmm1
+    addss   xmm0, [r8+12]
+    mulss   xmm0, xmm7
+    addss   xmm0, [rip+vp_cx]
+    movss   xmm1, [r8+16]               # y
+    mulss   xmm1, xmm3
+    movss   xmm2, [r8+20]
+    mulss   xmm2, xmm4
+    addss   xmm1, xmm2
+    movss   xmm2, [r8+24]
+    mulss   xmm2, xmm5
+    addss   xmm1, xmm2
+    addss   xmm1, [r8+28]
+    mulss   xmm1, xmm7
+    movss   xmm2, [rip+vp_cy]
+    subss   xmm2, xmm1
+    movss   xmm1, xmm2
+    movss   xmm2, xmm6
     ret
 
 # visible(xmm0=x, xmm1=y, xmm2=1/z) -> eax = 1 if not hidden by a surface

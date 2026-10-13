@@ -83,12 +83,26 @@ project uses [Semantic Versioning](https://semver.org/).
   X, A, F and Shift+D mean the mesh versions in edit mode. Home resets the
   camera in either mode.
 
+- Mesh analysis and repair.
+  - **Overlays** for the active mesh (View › Show …), with counts in the
+    viewport:
+    - face normals;
+    - non-manifold edges (more than two faces, or two facing the same way);
+    - boundary edges;
+    - degenerate faces;
+    - overhangs (faces facing down steeper than 45°, or a given angle).
+  - **Edit › Repair Mesh** (`mesh.repair [distance]`), in object or edit
+    mode, as one undo step. It merges by distance, removes degenerate and
+    duplicate faces, fills holes, makes the normals consistent and
+    outward, and drops loose vertices, then reports what it changed.
+  - BeeScript `analyze(name, what)` for scripts and agents.
+
 ### Changed
 - Meshes store a vertex selection and a triangle-to-polygon map.
 
 ### Fixed
-- Cylinder and cone caps and the whole torus were wound inwards; all
-  primitives are now closed solids facing out.
+- Cylinder and cone caps and the whole torus were wound inwards, and the
+  plane and grid faced down. All primitives now face out (up).
 
 ## [0.4.0] - 2026-10-13
 
