@@ -13,7 +13,6 @@
 .globl tex_init
 .globl tex_sample
 .globl box_uv
-.globl mat_texel
 .globl srgb_to_lin
 .globl tex_texel
 
@@ -21,8 +20,6 @@
 .equ IM_H,     4
 .equ IM_FMT,   8
 .equ IM_DATA,  64
-.equ MA_TEX,   92                       # base colour image + 1 (0 = none)
-.equ MA_TSIZE, 96                       # object units per repeat (0: 1)
 
 .section .rodata
 .align 4
@@ -306,44 +303,6 @@ corner_uv:
 31: movss   xmm1, [r10+4]
 8:  movss   [rcx], xmm0
     movss   [rcx+4], xmm1
-    ret
-
-# mat_texel(rdi=material record, xmm0=u, xmm1=v, rsi=out[3]) -> eax = 1 when
-#   the material has an image (out = its colour there)
-mat_texel:
-    push    rbx
-    push    r12
-    sub     rsp, 24
-    mov     rbx, rdi
-    mov     r12, rsi
-    xor     eax, eax
-    test    rbx, rbx
-    jz      9f
-    mov     edi, [rbx+MA_TEX]
-    test    edi, edi
-    jz      9f
-    dec     edi
-    movss   [rsp], xmm0
-    movss   [rsp+4], xmm1
-    call    image_ptr
-    test    rax, rax
-    jz      9f
-    mov     rdi, rax
-    movss   xmm2, [rbx+MA_TSIZE]        # object units per repeat
-    xorps   xmm3, xmm3
-    comiss  xmm2, xmm3
-    ja      1f
-    movss   xmm2, [rip+tx_one]
-1:  movss   xmm0, [rsp]
-    divss   xmm0, xmm2
-    movss   xmm1, [rsp+4]
-    divss   xmm1, xmm2
-    mov     rsi, r12
-    call    tex_sample
-    mov     eax, 1
-9:  add     rsp, 24
-    pop     r12
-    pop     rbx
     ret
 
 .section .rodata

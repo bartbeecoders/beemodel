@@ -462,6 +462,7 @@ def main():
     hive_render()
     render_window()
     textures_world()
+    shader_graph()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -1590,6 +1591,93 @@ def textures_world():
     check(ok, 'scene_summary shows agents the images, textures and the world')
     text, err = m.tool('script_eval', {'code': f'image("{chk}")'})
     check(err and 'permission' in text, 'agents need file access to load images')
+    f.proc.kill()
+
+
+GRAPH_SCENE = (
+    'delete("Cube")\nm = material("G")\nadd("sphere", "S", 0, 1, 0)\nscale("S", 2)\nassign("S", m)\n')
+
+
+def shader_graph():
+    """Shader graphs: nodes drive base, roughness, emission and the normal in
+    Hive and the preview; files, scripts, undo and agents."""
+    print('  -- shader graphs --')
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-graph-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+        return r.stdout.strip() + r.stderr.strip()
+    def shot(name, code, spp=16, size=(160, 90)):
+        p = os.path.join(home, name + '.png')
+        run(GRAPH_SCENE + code + f'\nrender("{p}", {size[0]}, {size[1]}, {spp}, 1)')
+        return Image.open(p).convert('RGB') if os.path.exists(p) else None
+    lum = lambda p: sum(p) / 3
+    # a gradient along y (object space): bright on top, dark below
+    g = shot('grad', 'n = node(m, "gradient", 1, 2)\nsocket(m, "base", n)')
+    top, bottom = lum(g.getpixel((80, 22))), lum(g.getpixel((80, 70)))
+    check(top > bottom + 60, f'a gradient node drives the base colour by height ({top:.0f} top, {bottom:.0f} below)')
+    # math: a hard threshold of the same gradient
+    t = shot('math', 'n = node(m, "gradient", 1, 2)\nk = node(m, "math", 7)\nlink(m, n, k, 1)\nnodeset(m, k, 2, 0.5)\nsocket(m, "base", k)')
+    col = [lum(t.getpixel((80, y))) for y in range(15, 80, 3)]
+    jumps = sum(1 for a, b in zip(col, col[1:]) if abs(a - b) > 40)
+    check(jumps >= 1 and max(col) - min(col) > 100, f'a math node thresholds it (one edge: {jumps} jumps)')
+    t.save(os.path.join(OUT, '55_graph_math.png'))
+    # noise -> ramp -> base, checker -> roughness, bump -> normal
+    rich = ('n = node(m, "noise", 3, 5, 0.55)\nr = node(m, "ramp")\nlink(m, n, r, 1)\nnodeset(m, r, 2, 0.6, 0.15, 0.05)\n'
+            'nodeset(m, r, 3, 0.95, 0.8, 0.5)\nsocket(m, "base", r)\nc = node(m, "checker", 2)\nnodeset(m, c, 1, 0.1)\n'
+            'nodeset(m, c, 2, 0.8)\nsocket(m, "roughness", c)\n')
+    a = shot('rich', rich, 32, (240, 135))
+    b = shot('bump', rich + 'b = node(m, "bump", 2, 0.2)\nlink(m, n, b, 1)\nsocket(m, "normal", b)', 32, (240, 135))
+    pxs = [a.getpixel((x, y)) for y in range(30, 105, 4) for x in range(80, 160, 4)]
+    warm = sum(1 for p in pxs if p[0] > p[2] + 40)
+    spread = max(lum(p) for p in pxs) - min(lum(p) for p in pxs)
+    check(warm > len(pxs) // 2 and spread > 40, f'noise -> ramp colours the sphere ({warm} of {len(pxs)} warm, spread {spread:.0f})')
+    diff = sum(abs(lum(a.getpixel((x, y))) - lum(b.getpixel((x, y)))) for y in range(30, 105, 2) for x in range(80, 160, 2)) / (38 * 40)
+    check(diff > 4, f'a bump node tilts the normals (mean change {diff:.1f} levels)')
+    b.save(os.path.join(OUT, '56_graph_bump.png'))
+    # emission: a checker of light
+    e = shot('emit', 'c = node(m, "checker", 3)\nnodeset(m, c, 1, 4, 4, 4)\nnodeset(m, c, 2, 0)\nsocket(m, "emission", c)\n'
+                     'matset(m, "base", 0, 0, 0)\nmatset(m, "strength", 1)')
+    vals = [lum(e.getpixel((x, y))) for y in range(25, 70, 3) for x in range(55, 105, 3)]
+    check(max(vals) > 230 and min(vals) < 60, f'an emission socket makes a pattern of light ({min(vals):.0f}..{max(vals):.0f})')
+    # links only go forward; bad types are refused
+    out = run(GRAPH_SCENE + 'a = node(m, "noise")\nb = node(m, "ramp")\nlink(m, b, a, 1)')
+    check('no such node' in out, 'a link to an earlier node is refused (no loops)')
+    out = run(GRAPH_SCENE + 'node(m, "teapot")')
+    check('unknown node type' in out, 'an unknown node type is refused')
+    # files: the graph comes back
+    bee = os.path.join(home, 'g.bee')
+    c1, c2 = os.path.join(home, 'c1.png'), os.path.join(home, 'c2.png')
+    run(GRAPH_SCENE + rich + f'op("file.save", "{bee}")\nrender("{c1}", 96, 54, 8)')
+    run(f'op("file.open", "{bee}")\nrender("{c2}", 96, 54, 8)')
+    same = os.path.exists(c2) and open(c1, 'rb').read() == open(c2, 'rb').read()
+    check(same, 'shader graphs are saved in .bee (an identical render after opening)')
+    # the preview, undo and agents
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('m = material("G")\nassign("Cube", m)\nn = node(m, "gradient", 1, 2)\nr = node(m, "ramp")\nlink(m, n, r, 1)\n'
+      'nodeset(m, r, 2, 0.05, 0.1, 0.6)\nnodeset(m, r, 3, 0.9, 0.5, 0.1)\nsocket(m, "base", r)')
+    f.mods(1); f.key(44); f.mods(0)             # Shift+Z: material preview
+    f.pump(0.5)
+    hi, lo = px(f, *project((0.2, 1.9, 1.0))), px(f, *project((0.2, 0.15, 1.0)))
+    check((hi >> 16) > (hi & 0xff) + 30 and (lo & 0xff) > (lo >> 16) + 20,
+          f'the material preview evaluates the graph (orange above {hi:06x}, blue below {lo:06x})')
+    f.shot('57_graph_preview.png')
+    t = m.tool('scene_summary')[0]
+    try:
+        g = [mm for mm in json.loads(t.split('\n')[0])['materials'] if mm['name'] == 'G'][0]
+        ok = ([n['type'] for n in g['nodes']] == ['gradient', 'ramp'] and g['nodes'][1]['inputs'][0] == {'link': 1}
+              and g['sockets'] == {'base': 2})
+    except Exception as e:
+        ok, g = False, e
+    check(ok, f'scene_summary shows agents the graph ({str(g)[:60] if not ok else "nodes, links, sockets"})')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the whole script run
+    check(q('print(matof("Cube"))') == 'nil', 'one undo removes the material and its graph (one script run)')
     f.proc.kill()
 
 

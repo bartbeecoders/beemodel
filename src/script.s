@@ -401,6 +401,14 @@ builtins:
     .long 2, 2
     .quad bn_imgpixel, b_imgpixel
     .long 4, 4
+    .quad bn_node, b_node
+    .long 2, 6
+    .quad bn_link, b_link
+    .long 4, 4
+    .quad bn_nodeset, b_nodeset
+    .long 4, 6
+    .quad bn_socket, b_socket
+    .long 3, 3
 builtins_end:
 .equ B_SZ, 24
 
@@ -473,6 +481,13 @@ bn_render:      .asciz "render"
 bn_image:       .asciz "image"
 bn_imgsize:     .asciz "imgsize"
 bn_imgpixel:    .asciz "imgpixel"
+bn_node:        .asciz "node"
+bn_link:        .asciz "link"
+bn_nodeset:     .asciz "nodeset"
+bn_socket:      .asciz "socket"
+e_node_type:    .asciz "unknown node type (image noise checker gradient mix ramp math bump): "
+e_node_full:    .asciz "a material holds 12 nodes"
+e_node_bad:     .asciz "no such node, input or socket (links go from an earlier node)"
 e_image:        .asciz "image: could not load "
 e_no_image:     .asciz "no image called "
 e_render:       .asciz "render: could not render or write "
@@ -4446,6 +4461,227 @@ b_imgpixel:
     pop     r12
     pop     rbx
     jmp     ret_num
+
+# node(material, type [, values...]) -> the node's number (1..12); an image
+#   node takes an image name first, then its size
+b_node:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r15d, esi
+    call    a_mat
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     r14, rax
+    mov     rdi, rax
+    call    graph_type_index
+    test    eax, eax
+    js      7f
+    mov     r13d, eax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     edi, r12d
+    mov     esi, r13d
+    call    graph_add
+    test    eax, eax
+    js      8f
+    mov     r14d, eax                   # the node
+    mov     dword ptr [rsp+8], 4        # slot of the next value
+    mov     ecx, 2                      # argument
+    cmp     r13d, 1                     # image: the name
+    jne     2f
+    cmp     r15d, 3
+    jb      2f
+    lea     rdi, [rbx+32]
+    call    a_image
+    inc     eax
+    cvtsi2ss xmm0, eax
+    movss   [rsp], xmm0
+    mov     edi, r12d
+    mov     esi, r14d
+    mov     edx, 4
+    lea     rcx, [rsp]
+    mov     r8d, 1
+    call    graph_set
+    mov     dword ptr [rsp+8], 5
+    mov     ecx, 3
+2:  cmp     ecx, r15d
+    jae     5f
+    mov     [rsp+12], ecx
+    shl     ecx, 4
+    lea     rdi, [rbx+rcx]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp], xmm0
+    mov     edi, r12d
+    mov     esi, r14d
+    mov     edx, [rsp+8]
+    lea     rcx, [rsp]
+    mov     r8d, 1
+    call    graph_set
+    inc     dword ptr [rsp+8]
+    mov     ecx, [rsp+12]
+    inc     ecx
+    jmp     2b
+5:  cvtsi2sd xmm0, r14d
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+7:  lea     rdi, [rip+e_node_type]
+    mov     rsi, r14
+    jmp     sc_rt
+8:  lea     rdi, [rip+e_node_full]
+    xor     esi, esi
+    jmp     sc_rt
+
+# a_int(rdi=value) -> eax
+a_int:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si eax, xmm0
+    add     rsp, 8
+    ret
+
+# link(material, from, to, input 1..3)
+b_link:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    call    a_mat
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     r14d, eax
+    lea     rdi, [rbx+48]
+    call    a_int
+    mov     r15d, eax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, r15d
+    call    graph_link
+    test    eax, eax
+    jz      8f
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+8:  lea     rdi, [rip+e_node_bad]
+    xor     esi, esi
+    jmp     sc_rt
+
+# nodeset(material, node, slot 1..7, x [, y, z])
+b_nodeset:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r15d, esi
+    call    a_mat
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     r14d, eax
+    xor     ecx, ecx                    # values
+1:  lea     eax, [rcx+3]
+    cmp     eax, r15d
+    jae     2f
+    push    rcx
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+rcx*4], xmm0
+    inc     ecx
+    jmp     1b
+2:  mov     [rsp+12], ecx
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    lea     rcx, [rsp]
+    mov     r8d, [rsp+12]
+    call    graph_set
+    test    eax, eax
+    jz      8f
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+8:  lea     rdi, [rip+e_node_bad]
+    xor     esi, esi
+    jmp     sc_rt
+
+# socket(material, base|metallic|roughness|emission|normal, node or nil)
+b_socket:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_mat
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     rdi, rax
+    call    graph_socket_index
+    test    eax, eax
+    js      8f
+    mov     r13d, eax
+    xor     r14d, r14d                  # nil: unplug
+    cmp     dword ptr [rbx+32], T_NIL
+    je      1f
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     r14d, eax
+1:  lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    call    graph_socket
+    test    eax, eax
+    jz      8f
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+8:  lea     rdi, [rip+e_node_bad]
+    xor     esi, esi
+    jmp     sc_rt
 
 # matof(object) -> its material's name, or nil
 b_matof:

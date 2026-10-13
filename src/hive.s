@@ -20,7 +20,7 @@
 .globl hv_tv
 .globl hv_tn
 .globl hv_tm
-.globl hv_tuv
+.globl hv_to
 .globl hv_mats
 .globl hv_nmats
 .globl hv_cam
@@ -34,7 +34,7 @@
 .equ N2_SZ,     32              # BVH2 node: min[3] max[3] a b
 .equ N4_SZ,     128             # BVH4 node: minx maxx miny maxy minz maxz [4] child[4]
 .equ NBUF,      32
-.equ MA_SZ,     128
+.equ MA_SZ,     1024
 .equ MAX_POINTS, 64
 
 .section .bss
@@ -47,7 +47,7 @@ hv_npoints:     .skip 4
 hv_tv:          .skip 8             # f32[n][9]  v0 e1 e2
 hv_tn:          .skip 8             # f32[n][9]  corner normals
 hv_tm:          .skip 8             # u32[n]     material (0 = default)
-hv_tuv:         .skip 8             # f32[n][6]  box-projected texture coordinates
+hv_to:          .skip 8             # f32[n][9]  object-space v0, e1, e2 (shader graphs)
 hv_mats:        .skip 8             # material snapshots (128 bytes, 0 = default)
 hv_nodes:       .skip 8             # BVH4
 hv_root:        .skip 4             # root reference
@@ -180,12 +180,12 @@ hive_build:
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_tm], rax
-    imul    edi, r12d, 24
+    imul    edi, r12d, 36
     add     edi, 64
     call    hv_map
     test    rax, rax
     jz      .Lhb_fail
-    mov     [rip+hv_tuv], rax
+    mov     [rip+hv_to], rax
     imul    edi, r12d, 12
     add     edi, 64
     call    hv_map
@@ -207,7 +207,7 @@ hive_build:
     call    mat_count
     mov     [rip+hv_nmats], eax
     lea     edi, [rax+1]
-    shl     edi, 7
+    shl     edi, 10
     call    hv_map
     test    rax, rax
     jz      .Lhb_fail
@@ -220,7 +220,7 @@ hive_build:
     mov     rsi, rax
     mov     rdi, [rip+hv_mats]
     lea     ecx, [rbx+1]
-    shl     ecx, 7
+    shl     ecx, 10
     add     rdi, rcx
     mov     ecx, MA_SZ
     rep     movsb
@@ -339,20 +339,25 @@ put_tri:
     lea     rdx, [rdx+rdx*2]
     lea     r8, [r8+r8*2]
     lea     r9, [r9+r9*2]
-    push    rdx                         # texture coordinates (object space)
-    push    r8
-    push    r9
-    mov     rax, [r15+ME_POS]
-    lea     rdi, [rax+rdx*4]
-    lea     rsi, [rax+r8*4]
-    lea     rdx, [rax+r9*4]
-    lea     rcx, [rbx+rbx*2]
-    shl     rcx, 3
-    add     rcx, [rip+hv_tuv]
-    call    box_uv
-    pop     r9
-    pop     r8
-    pop     rdx
+    mov     rax, [r15+ME_POS]           # object space: v0, e1, e2
+    lea     r10, [rbx+rbx*8]
+    shl     r10, 2
+    add     r10, [rip+hv_to]
+    xor     ecx, ecx
+2:  lea     r11, [rax+rdx*4]
+    movss   xmm0, [r11+rcx*4]
+    movss   [r10+rcx*4], xmm0
+    lea     r11, [rax+r8*4]
+    movss   xmm1, [r11+rcx*4]
+    subss   xmm1, xmm0
+    movss   [r10+12+rcx*4], xmm1
+    lea     r11, [rax+r9*4]
+    movss   xmm1, [r11+rcx*4]
+    subss   xmm1, xmm0
+    movss   [r10+24+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
     lea     rdx, [rbp+rdx*4]            # p0
     lea     r8, [rbp+r8*4]              # p1
     lea     r9, [rbp+r9*4]              # p2
@@ -1313,6 +1318,27 @@ reorder_tris:
     inc     ebx
     jmp     3b
 4:  mov     [rip+hv_tn], r13
+    imul    edi, r12d, 36               # object space (shader graphs)
+    add     edi, 64
+    call    hv_map
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    xor     ebx, ebx
+41: cmp     ebx, r12d
+    jae     42f
+    mov     rax, [rip+b_prim]
+    mov     eax, [rax+rbx*4]
+    lea     rsi, [rax+rax*8]
+    shl     rsi, 2
+    add     rsi, [rip+hv_to]
+    lea     rdi, [rbx+rbx*8]
+    lea     rdi, [r13+rdi*4]
+    mov     ecx, 36
+    rep     movsb
+    inc     ebx
+    jmp     41b
+42: mov     [rip+hv_to], r13
     lea     edi, [r12*4+64]             # materials
     call    hv_map
     test    rax, rax
