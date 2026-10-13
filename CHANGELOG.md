@@ -6,6 +6,96 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-13
+
+Phase 7 of the masterplan, "Sculpting, texturing & UV". BeeModel sculpts
+dense meshes and paints them:
+
+- **Sculpting:** a sculpt mode for meshes of tens of millions of vertices,
+  with eleven brushes, pen pressure, a stabilizer, dynamic topology and
+  multiresolution levels.
+- **UVs:** seams, LSCM unwrapping, smart projection, packing and a UV
+  editor with a distortion heat map.
+- **Painting:** texture painting through the UVs (in the viewport and the UV
+  editor) on layers, and vertex colours.
+- **Baking:** normal, ambient occlusion and curvature maps from a high-poly
+  mesh to a low-poly one with the path tracer's BVH, and a `normalmap`
+  shader node that uses them.
+
+The exit checks:
+- **`tests/sculpt20m.py`** sculpts a 25.2M-vertex mesh in the window with
+  four strokes.
+- **`tests/sculpt_paint.bees`** sculpts a creature head and bakes it into a
+  light head's maps. It then paints the light head on two layers, gives a
+  pedestal vertex colours, saves everything to one `.bee` file and renders
+  it. `tests/sculpt_paint.py` checks every step and the reopened file.
+
+Benchmark on a 32-thread desktop (Ryzen 9 7950X):
+- **Strokes at 60 fps on 25.2M vertices:** frames that place brush dabs
+  (brush work plus drawing) take 11.2 ms at the median and 15.8–16.4 ms at
+  the 95th percentile, under the 16.7 ms of 60 fps. Frames in between take
+  2.3 ms to draw. During a stroke only the BVH leaves the brush changed are
+  projected again, and only the screen tiles they cover (where they were
+  and where they are) are drawn again.
+- **Memory:** the mesh as BeeModel keeps it takes 2.76 GB, and the whole
+  process while sculpting takes 2.82 GB (1.02×). The peak, while entering
+  sculpt mode, is 3.6 GB (1.3×). Measured against the bare data (positions
+  plus quad indices, 672 MB) the process takes 4.2×: the general mesh
+  format's per-loop data is most of it, and slimming it is future work.
+- **Sculpt and paint walkthrough:** 5.5 s end to end. That covers ten
+  strokes on 127k vertices, 1024² normal, AO and curvature maps in 0.75 s
+  together, 288 paint dabs, the save and a 960×540 render.
+
+### Added
+- Sculpt mode (Ctrl+Tab):
+  - **Structure:** BVH leaves of about a thousand triangles, per-vertex
+    normals, and undo steps that store only the moved vertices.
+  - **Brushes:** draw, clay strips, crease, inflate, grab, snake hook,
+    smooth, flatten, pinch, layer and mask; X symmetry.
+  - **Drawing:** cached splat records per leaf, drawn in parallel screen
+    tiles. During a stroke each leaf keeps its splat density, and only the
+    tiles of the changed leaves are drawn again; the rest comes from a copy
+    of the last frame.
+  - **Input:** tablet pressure (strength / radius, three curves), the
+    eraser end and a stroke stabilizer.
+  - **Dynamic topology** (Ctrl+D): longest-edge splits and safe collapses
+    to a detail size in pixels.
+  - **Multiresolution:** per-level displacements, sculpting at any level,
+    propagation to coarser levels, saved in `.bee` files.
+  - **BeeScript:** `sculpt`, `frames`, `frametime` (`frametime(k, 1)`: a
+    frame's brush work).
+- UV maps:
+  - **Seams:** marked or from sharp edges.
+  - **Unwrapping:** least squares conformal maps (own sparse CG solver) and
+    smart projection, with islands packed into the unit square.
+  - **UV editor:** island selection, move / scale / rotate, and an
+    area / angle distortion heat map.
+  - **Files:** OBJ `vt` and glTF `TEXCOORD_0`.
+- Textures through UVs in the material preview and the path tracer;
+  `image.new`; images saved inside `.bee` files as PNG.
+- Texture painting (Shift+Tab):
+  - **Strokes:** projected viewport strokes that paint only what is
+    visible, plus strokes in the UV editor, with an undo history.
+  - **Layers:** opacity, normal / multiply / add blending and visibility,
+    with the stack saved in `.bee` files.
+- Vertex colours (Shift+V):
+  - **Shading:** per triangle in solid view, smooth in the preview and the
+    path tracer.
+  - **Files:** OBJ `v x y z r g b`, glTF `COLOR_0` and `.bee`.
+- Baking (`object.bake`, `bake(...)`):
+  - **Maps:** tangent-space normal maps, ambient occlusion (48 rays) and
+    curvature.
+  - **Method:** a cage distance and dilated island borders. A bake is one
+    texture-paint undo step.
+- A `normalmap` shader node: a tangent-space normal map (as baking writes
+  it) tilts the shading normal in the preview and the path tracer.
+- `tests/sculpt20m.py` and `tests/sculpt_paint.py` in CI.
+
+### Fixed
+- Drawing a mesh of more than ~45M triangles in object mode overflowed
+  the rasterizer's triangle buffer (a 32-bit size) and crashed. Huge
+  meshes now draw the triangles that fit in half the frame arena.
+
 ## [0.7.0] - 2026-10-13
 
 Phase 6 of the masterplan, "CAD & digital fabrication". BeeModel designs
@@ -657,7 +747,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/bartbeecoders/beemodel/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/bartbeecoders/beemodel/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/bartbeecoders/beemodel/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/bartbeecoders/beemodel/compare/v0.4.0...v0.5.0

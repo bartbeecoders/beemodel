@@ -13,6 +13,7 @@
 
 .globl tex_init
 .globl tex_sample
+.globl tx_unlin
 .globl box_uv
 .globl srgb_to_lin
 .globl tex_texel
@@ -106,6 +107,38 @@ floor_wrap:
     jns     2f
     add     eax, ecx
 2:  ret
+
+# tx_unlin(xmm0 = a linear value from an 8-bit image) -> xmm0 = the stored
+#   0..1 value again (normal maps are data, not colour): the decoding table
+#   searched, interpolated between entries (keeps rdi rsi; xmm0..2, eax ecx
+#   edx r8 change)
+tx_unlin:
+    lea     r8, [rip+tx_lut]
+    xor     eax, eax                    # the last entry <= x: lo = 0, hi = 255
+    mov     ecx, 255
+1:  mov     edx, ecx
+    sub     edx, eax
+    cmp     edx, 1
+    jbe     2f
+    lea     edx, [rax+rcx]
+    shr     edx, 1
+    comiss  xmm0, [r8+rdx*4]
+    jb      11f
+    mov     eax, edx
+    jmp     1b
+11: mov     ecx, edx
+    jmp     1b
+2:  movss   xmm1, [r8+rcx*4]            # i + (x - lut[i]) / (lut[i+1] - lut[i])
+    subss   xmm1, [r8+rax*4]
+    subss   xmm0, [r8+rax*4]
+    xorps   xmm2, xmm2
+    maxss   xmm0, xmm2
+    divss   xmm0, xmm1
+    minss   xmm0, [rip+tx_one]
+    cvtsi2ss xmm1, eax
+    addss   xmm0, xmm1
+    mulss   xmm0, [rip+tx_inv255]
+    ret
 
 # texel(rdi=image, ecx=x, edx=y, rsi=out[3]) - linear colour
 tex_texel:

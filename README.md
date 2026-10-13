@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.7.0/beemodel-0.7.0-linux-x86_64.bin
-chmod +x beemodel-0.7.0-linux-x86_64.bin && ./beemodel-0.7.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.8.0/beemodel-0.8.0-linux-x86_64.bin
+chmod +x beemodel-0.8.0-linux-x86_64.bin && ./beemodel-0.8.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -325,8 +325,12 @@ To make things:
 
 ### Sculpting
 
-Ctrl+Tab puts the active mesh in **sculpt mode** (millions of vertices: a
-subdivided 22M-vertex ball strokes at about 7 ms a frame). Brushes: X draw,
+Ctrl+Tab puts the active mesh in **sculpt mode**. It handles tens of
+millions of vertices: on a 25M-vertex mesh, stroke frames take 11 ms at the
+median and stay under 16.7 ms (60 fps) at the 95th percentile on a 32-thread
+desktop ([tests/sculpt20m.py](tests/sculpt20m.py)). While you stroke, only
+the parts of the mesh the brush changed are projected and drawn again.
+Brushes: X draw,
 C clay strips, Shift+C crease, I inflate, G grab, K snake hook, S smooth
 (Shift with any brush), Shift+T flatten, P pinch, L layer, M mask (Alt+M
 clears, Ctrl+I inverts). `[` `]` size the brush, Shift+`[` `]` its strength,
@@ -407,7 +411,15 @@ a tangent-space normal map, ambient occlusion (48 rays per texel), or
 curvature (light convex, dark concave). Rays start a cage distance outside
 the low surface (5% of its size unless given); island borders are dilated
 so seams do not show. A bake is one texture-paint undo step. 1024 x 1024
-from a 127k-triangle mesh: about 0.2 s for normals, 0.7 s for AO.
+from a 127k-triangle mesh: about 0.2 s for normals, 0.7 s for AO. A
+`normalmap` shader node (an image node into it, it into the `normal`
+socket) shades the low mesh with the baked detail.
+
+[tests/sculpt_paint.bees](tests/sculpt_paint.bees) is the whole workflow:
+it sculpts a creature head, bakes its normal, AO and curvature maps into a
+light head, and paints that head with a base coat and a multiplied moss
+layer (AO in the material, the normal map on top). It then gives a pedestal
+vertex colours, saves the scene and renders it.
 
 ### BeeScript
 

@@ -2397,6 +2397,19 @@ def sculpting():
     f.pump(0.3)
     v3 = q('print(volume("Ball"))')
     check(v2 == v0 and v3 == v1, f'Ctrl+Z puts every vertex back, Ctrl+Shift+Z sculpts it again ({v2}, {v3})')
+    # mid-stroke frames redraw only the tiles of the leaves the stroke
+    # changed (the rest from the last frame): the same picture as a full one
+    f.move(570, 310); f.button(True)
+    for i in range(30):
+        f.move(570 + i * 3, 310 + i)
+    f.pump(0.3)
+    a = f.image()
+    f.button(False); f.pump(0.5)
+    b = f.image()
+    d = sum(1 for p, r in zip(a.getdata(), b.getdata()) if max(abs(p[i] - r[i]) for i in range(3)) > 24)
+    check(d < 50, f'a stroke frame drawn from the tile cache matches a full redraw ({d} pixels differ)')
+    f.mods(4); f.key(44); f.mods(0)             # (that stroke undone)
+    f.pump(0.3)
     f.key(31)                                   # S: the smooth brush
     f.pump(0.1)
     f.drag(600, 300, 640, 320, steps=8)

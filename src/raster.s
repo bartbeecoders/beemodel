@@ -212,6 +212,9 @@ raster_scene:
     test    rax, rax
     jz      .Lrs_out
     lea     eax, [r13*2+1]              # clipping can split a triangle in two
+    mov     ecx, FRAME_ARENA_BYTES/2/TRI_SZ  # (at most half the frame arena:
+    cmp     eax, ecx                    #  past that a huge mesh draws the
+    cmova   eax, ecx                    #  triangles that fit)
     mov     [rip+rs_cap_tris], eax
     lea     rdi, [rip+frame_arena]
     imul    esi, eax, TRI_SZ

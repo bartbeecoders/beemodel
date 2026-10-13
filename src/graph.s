@@ -5,7 +5,8 @@
 #  node has a type, three inputs (a constant colour, or a link to an
 #  earlier node) and four parameters; every node yields a colour and a
 #  value. Five sockets take node results in place of the material's own
-#  base colour, metallic, roughness, emission and normal (bump).
+#  base colour, metallic, roughness, emission and normal (bump or
+#  normal map).
 #
 #    1 image     p0 image + 1, p1 size (object units per repeat)
 #    2 noise     p0 scale, p1 detail (octaves), p2 roughness; in0 = offset
@@ -17,6 +18,9 @@
 #    7 math      p0 op (0 add 1 subtract 2 multiply 3 divide 4 power 5 min
 #                6 max 7 greater 8 sine 9 absolute); in0, in1 = values
 #    8 bump      in0 = height; p0 strength, p1 distance
+#    9 normalmap in0 = a tangent-space normal map's colour (an image node);
+#                p0 strength. The tangent frame comes from the mesh's UVs
+#                (OpenGL: green = +v), as baking writes it
 #
 #  Coordinates are object space (noise, checker, gradient) or the box
 #  projection (image). Nodes evaluate in order, so a link always points to
@@ -60,7 +64,8 @@
 .equ T_RAMP,    6
 .equ T_MATH,    7
 .equ T_BUMP,    8
-.equ NTYPES,    8
+.equ T_NMAP,    9
+.equ NTYPES,    9
 # the shading context (callers fill the first part)
 .equ SC_P0O,    0                       # object-space corner, edges
 .equ SC_E1O,    12
@@ -87,7 +92,7 @@
 .section .rodata
 .align 8
 graph_type_names:
-                .quad s_t_image, s_t_noise, s_t_checker, s_t_grad, s_t_mix, s_t_ramp, s_t_math, s_t_bump, 0
+                .quad s_t_image, s_t_noise, s_t_checker, s_t_grad, s_t_mix, s_t_ramp, s_t_math, s_t_bump, s_t_nmap, 0
 graph_socket_names:
                 .quad s_s_base, s_s_metal, s_s_rough, s_s_emit, s_s_bump, 0
 s_t_image:      .asciz "image"
@@ -98,6 +103,7 @@ s_t_mix:        .asciz "mix"
 s_t_ramp:       .asciz "ramp"
 s_t_math:       .asciz "math"
 s_t_bump:       .asciz "bump"
+s_t_nmap:       .asciz "normalmap"
 s_s_base:       .asciz "base"
 s_s_metal:      .asciz "metallic"
 s_s_rough:      .asciz "roughness"
@@ -114,6 +120,7 @@ node_defaults:
     .float 0, 1, 0, 0,     0.5, 0.5, 0.5,  0, 0, 0,  1, 1, 1            # ramp
     .float 0, 0, 0, 0,     0, 0, 0,  0, 0, 0,  0, 0, 0                  # math
     .float 1, 0.05, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0                  # bump
+    .float 1, 0, 0, 0,     0.5, 0.5, 1,  0, 0, 0,  0, 0, 0              # normalmap
 gf_one:         .float 1.0
 gf_half:        .float 0.5
 gf_zero:        .float 0.0
@@ -472,6 +479,8 @@ graph_eval:
     je      .Lge_math
     cmp     eax, T_BUMP
     je      .Lge_bump
+    cmp     eax, T_NMAP
+    je      .Lge_nmap
     xorps   xmm0, xmm0
     call    put_val
     jmp     .Lge_next
@@ -768,6 +777,12 @@ graph_eval:
 99: call    put_val
     jmp     .Lge_next
 
+.Lge_nmap:
+    xor     ecx, ecx                    # its colour: the map's
+    call    node_in
+    call    put_col
+    jmp     .Lge_next
+
 .Lge_bump:
     xor     ecx, ecx                    # value = height x distance
     call    node_in
@@ -954,6 +969,8 @@ graph_shade:
     dec     eax
     mov     r14d, eax                   # the bump node
     imul    eax, eax, NODE_SZ
+    cmp     dword ptr [rbx+GR_NODES+rax+ND_TYPE], T_NMAP
+    je      .Lgs_nmap
     cmp     dword ptr [rbx+GR_NODES+rax+ND_TYPE], T_BUMP
     jne     .Lgs_done
     movss   xmm0, [rbx+GR_NODES+rax+ND_P]   # strength
@@ -1069,6 +1086,132 @@ graph_shade:
     pop     r12
     pop     rbx
     ret
+.Lgs_nmap:                              # (r14d: the node; colour evaluated)
+    mov     rsi, [r12+SC_UVP]
+    test    rsi, rsi
+    jz      .Lgs_done
+    movss   xmm4, [rbx+GR_NODES+rax+ND_P]   # strength
+    mov     eax, r14d                   # t = 2 c - 1 (x, y x strength)
+    shl     eax, 4
+    lea     rdx, [r13+EV_VAL+rax]
+    xor     ecx, ecx
+1:  movss   xmm0, [rdx+rcx*4]
+    push    rcx                         # (the map's bytes, not colours;
+    push    rdx                         #  xmm4 is kept)
+    call    tx_unlin
+    pop     rdx
+    pop     rcx
+    addss   xmm0, xmm0
+    subss   xmm0, [rip+gf_one]
+    cmp     ecx, 2
+    je      2f
+    mulss   xmm0, xmm4
+2:  movss   [r15+48+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    movss   xmm0, [rsi+8]               # du1 dv1 du2 dv2, det
+    subss   xmm0, [rsi]
+    movss   xmm1, [rsi+12]
+    subss   xmm1, [rsi+4]
+    movss   xmm2, [rsi+16]
+    subss   xmm2, [rsi]
+    movss   xmm3, [rsi+20]
+    subss   xmm3, [rsi+4]
+    movss   xmm4, xmm0
+    mulss   xmm4, xmm3
+    movss   xmm5, xmm2
+    mulss   xmm5, xmm1
+    subss   xmm4, xmm5
+    movss   xmm5, xmm4
+    andps   xmm5, [rip+gf_abs]
+    comiss  xmm5, [rip+gf_tiny]
+    jbe     .Lgs_done
+    movss   xmm5, [rip+gf_one]
+    divss   xmm5, xmm4
+    xor     ecx, ecx                    # T = (Pu dv2 - Pv dv1) / det,
+3:  movss   xmm6, [r12+SC_PU+rcx*4]     # B = (Pv du1 - Pu du2) / det
+    mulss   xmm6, xmm3
+    movss   xmm7, [r12+SC_PV+rcx*4]
+    mulss   xmm7, xmm1
+    subss   xmm6, xmm7
+    mulss   xmm6, xmm5
+    movss   [r15+24+rcx*4], xmm6
+    movss   xmm6, [r12+SC_PV+rcx*4]
+    mulss   xmm6, xmm0
+    movss   xmm7, [r12+SC_PU+rcx*4]
+    mulss   xmm7, xmm2
+    subss   xmm6, xmm7
+    mulss   xmm6, xmm5
+    movss   [r15+36+rcx*4], xmm6
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    lea     rdi, [r15+24]               # both without their N part, unit
+    call    nm_ortho
+    lea     rdi, [r15+36]
+    call    nm_ortho
+    xor     ecx, ecx                    # n' = tx T + ty B + tz N
+4:  movss   xmm0, [r15+24+rcx*4]
+    mulss   xmm0, [r15+48]
+    movss   xmm1, [r15+36+rcx*4]
+    mulss   xmm1, [r15+52]
+    addss   xmm0, xmm1
+    movss   xmm1, [r12+SC_N+rcx*4]
+    mulss   xmm1, [r15+56]
+    addss   xmm0, xmm1
+    movss   [r15+60+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      4b
+    lea     rdi, [r15+60]
+    call    len3
+    comiss  xmm0, [rip+gf_tiny]
+    jbe     .Lgs_done
+    movss   xmm1, [rip+gf_one]
+    divss   xmm1, xmm0
+    xor     ecx, ecx
+5:  movss   xmm0, [r15+60+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [r12+SC_N+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      5b
+    or      dword ptr [r12+SC_FLAGS], 16
+    jmp     .Lgs_done
+
+# nm_ortho(rdi=vector; r12 = SC) - without its SC_N part, unit (0 stays 0)
+nm_ortho:
+    movss   xmm0, [rdi]
+    mulss   xmm0, [r12+SC_N]
+    movss   xmm1, [rdi+4]
+    mulss   xmm1, [r12+SC_N+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rdi+8]
+    mulss   xmm1, [r12+SC_N+8]
+    addss   xmm0, xmm1
+    xor     ecx, ecx
+1:  movss   xmm1, [r12+SC_N+rcx*4]
+    mulss   xmm1, xmm0
+    movss   xmm2, [rdi+rcx*4]
+    subss   xmm2, xmm1
+    movss   [rdi+rcx*4], xmm2
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    call    len3
+    comiss  xmm0, [rip+gf_tiny]
+    jbe     3f
+    movss   xmm1, [rip+gf_one]
+    divss   xmm1, xmm0
+    xor     ecx, ecx
+2:  movss   xmm0, [rdi+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [rdi+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+3:  ret
 
 # =============================================================================
 #  Editing (callers have made the material block their own: mat_cow)

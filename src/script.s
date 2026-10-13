@@ -538,7 +538,7 @@ builtins:
     .quad bn_bake, b_bake
     .long 4, 5
     .quad bn_frametime, b_frametime
-    .long 1, 1
+    .long 1, 2
 builtins_end:
 .equ B_SZ, 24
 
@@ -6481,20 +6481,38 @@ b_uvstat:
     jmp     ret_num
 
 # frames() -> how many frames have been drawn; frametime(k) -> how long the
-#   k-th last one (0: the latest, up to 255 back) took to draw, milliseconds
+#   k-th last one (0: the latest, up to 255 back) took to draw, milliseconds;
+#   frametime(k, 1): the input work before it (sculpt strokes)
 b_frames:
     mov     eax, [rip+fr_count]
     cvtsi2sd xmm0, rax
     jmp     ret_num
 b_frametime:
+    push    rbx
+    push    r12
     sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
     call    a_int
-    add     rsp, 8
     mov     ecx, [rip+fr_count]
     sub     ecx, eax
     dec     ecx
     and     ecx, 255
     lea     rdx, [rip+fr_ns]
+    cmp     r12d, 2                     # (k, 1: its input work instead)
+    jb      1f
+    push    rcx
+    push    rdx
+    lea     rdi, [rbx+16]
+    call    a_int
+    pop     rdx
+    pop     rcx
+    test    eax, eax
+    jz      1f
+    lea     rdx, [rip+fr_wk]
+1:  add     rsp, 8
+    pop     r12
+    pop     rbx
     cvtsi2sd xmm0, qword ptr [rdx+rcx*8]
     divsd   xmm0, [rip+fr_million]
     jmp     ret_num
