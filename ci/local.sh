@@ -10,6 +10,7 @@ BEEMODEL_THREADS=3 ./build/beemodel --selftest
 ./build.sh debug >/dev/null && ./build.sh >/dev/null
 timeout 300 python3 tests/bool_stress.py build/beemodel --cases 300
 timeout 300 python3 tests/image_io.py build/beemodel
+timeout 600 python3 tests/enclosure.py build/beemodel
 timeout 300 python3 tools/fakewl.py build/shots
 BEEMODEL_FONT=none BEEMODEL_MONO_FONT=none BEEMODEL_GOLDEN=check \
     timeout 300 python3 tools/fakewl.py build/shots-bitmap

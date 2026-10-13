@@ -909,6 +909,12 @@ combine:
     call    mesh_unref
     test    r13, r13
     jz      8f
+    mov     rdi, r13                    # points at one place welded, then
+    call    mesh_clean                  #  no flat triangles: the next boolean
+    call    keep_closed                 #  cannot orient them
+    mov     rdi, r13
+    call    mesh_drop_flats
+    call    keep_closed
     mov     rdi, r14
     call    mesh_unref
     lea     rax, [rip+bd_mesh]
@@ -922,6 +928,27 @@ combine:
     pop     r12
     pop     rbx
     ret
+
+# keep_closed(rax=a cleaned copy of r13, or 0) - r13 becomes it when it is
+#   closed (the old one goes), else it goes
+keep_closed:
+    test    rax, rax
+    jz      9f
+    push    rbx
+    mov     rbx, rax
+    mov     rdi, rax
+    call    mesh_manifold
+    test    eax, eax
+    jz      1f
+    mov     rdi, r13
+    call    mesh_unref
+    mov     r13, rbx
+    pop     rbx
+    ret
+1:  mov     rdi, rbx
+    call    mesh_unref
+    pop     rbx
+9:  ret
 
 # through(esi=body slot) -> xmm0 = a depth that goes through the body
 through:

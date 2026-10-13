@@ -26,6 +26,7 @@
 .globl bv_angle
 .globl bv_cos
 .globl bv_pred
+.globl eh_get
 
 .equ KEY_R,     19
 .equ KEY_B,     48

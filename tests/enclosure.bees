@@ -1,0 +1,83 @@
+# The v0.7 walkthrough: a printable electronics enclosure designed from
+# dimensioned sketches and parameters. The case is padded from a sketch
+# whose dimensions are parameters, rounded, shelled, given a cable hole;
+# the lid has a lip that fits inside with a clearance and a row of vents.
+# Change one parameter and everything rebuilds; both parts go to a 3MF
+# that slicers open (tests/enclosure.py checks it with lib3mf and, where
+# installed, PrusaSlicer).
+op("scene.units", "mm")
+delete("Cube")
+param("w", "80mm")              # outside width, depth, height
+param("d", "50mm")
+param("h", "30mm")
+param("wall", "2mm")
+param("r", "4mm")               # corner radius
+param("gap", "0.3mm")           # lid lip clearance
+
+# ---- the case --------------------------------------------------------------
+s = sketch("CaseBase", "XZ")
+b = rect(s, 0, 0, 80, 50)
+con(s, "fixed", pt(s, b, 0))
+con(s, "length", b, "w")
+con(s, "length", b + 1, "d")
+pad("Case", s, "h")
+fillet("Case", "r", "vertical")
+shell("Case", 0, "wall")
+f = sketch("CableSide", "XY")   # the front wall (z = 0): a cable hole
+o = point(f, 0, 0)
+con(f, "fixed", o)
+p = point(f, 40, 15)
+con(f, "hdistance", o, p, "w / 2")
+con(f, "vdistance", o, p, "h / 2")
+hole("Case", f, "8mm", "wall * 2")
+
+# ---- the lid, laid out to print: beside the case, plate down, lip up ----------
+param("lid", "2mm")
+t = sketch("LidPlate", "XZ")
+to = point(t, 0, 0)
+con(t, "fixed", to)
+lb = rect(t, 90, 0, 80, 50)
+con(t, "hdistance", to, pt(t, lb, 0), "w + 10mm")
+con(t, "vdistance", to, pt(t, lb, 0), "0mm")
+con(t, "length", lb, "w")
+con(t, "length", lb + 1, "d")
+pad("Lid", t, "lid")
+fillet("Lid", "r", "vertical")
+u = sketch("LidLip", "XZ", "lid")
+lo = point(u, 0, 0)
+con(u, "fixed", lo)
+li = rect(u, 93, 3, 74, 44)
+con(u, "hdistance", lo, pt(u, li, 0), "w + 10mm + wall + gap")
+con(u, "vdistance", lo, pt(u, li, 0), "wall + gap")
+con(u, "length", li, "w - 2 * (wall + gap)")
+con(u, "length", li + 1, "d - 2 * (wall + gap)")
+lp = pad("Lid", u, "4mm")
+shell("Lid", lp, "wall")              # the lip is a ring, open at the top
+v = sketch("Vents", "XZ")
+vo = point(v, 0, 0)
+con(v, "fixed", vo)
+c = circle(v, 110, 25, 2)
+con(v, "radius", c, "2mm")
+con(v, "hdistance", vo, pt(v, c, 0), "w + 10mm + w / 2 - 20mm")
+con(v, "vdistance", vo, pt(v, c, 0), "d / 2")
+k = pocket("Lid", v, 0, "through")
+pattern("Lid", k, 5, "10mm", "x")
+
+print("case", round(volume("Case")), manifold("Case"), "lid", round(volume("Lid")), manifold("Lid"))
+s = ""
+for i in 0..features() {
+    s = s + str(fstatus(i))
+}
+print("status", s)
+op("file.export_3mf", "~/BeeModel/enclosure.3mf")
+op("file.export_pdf", "~/BeeModel/enclosure.pdf")
+
+# ---- one parameter: wider, everything follows -------------------------------
+param("w", "100mm")
+print("wider", round(volume("Case")), manifold("Case"), round(volume("Lid")), manifold("Lid"))
+s = ""
+for i in 0..features() {
+    s = s + str(fstatus(i))
+}
+print("status", s)
+op("file.export_3mf", "~/BeeModel/enclosure-wide.3mf")

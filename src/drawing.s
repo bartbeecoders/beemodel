@@ -33,6 +33,7 @@ df_one:         .float 1.0
 df_pt:          .float 2.8346457             # points per mm
 df_tol:         .float 2.5                   # depth tolerance, in pixels
 df_tiny:        .float 1.0e-12
+df_sliver:      .float 1.0e-6
 df_gap:         .float 50.0                  # between views (pt)
 df_x0:          .float 50.0                  # the views' corner (pt)
 df_y0:          .float 120.0
@@ -924,7 +925,27 @@ view_edges:
     mov     r8d, [rcx+rax*4]
     lea     rdx, [rdx+rdx*2]
     lea     r8, [r8+r8*2]
-    movss   xmm0, [r14+rdx*4]           # n1 . n2 < cos 20: sharp
+    movss   xmm0, [r14+rdx*4]           # a sliver (no area, no normal)
+    mulss   xmm0, xmm0                  #  beside it: not an edge to draw
+    movss   xmm1, [r14+rdx*4+4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [r14+rdx*4+8]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    comiss  xmm0, [rip+df_half]
+    jb      .Lve_enext
+    movss   xmm0, [r14+r8*4]
+    mulss   xmm0, xmm0
+    movss   xmm1, [r14+r8*4+4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [r14+r8*4+8]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    comiss  xmm0, [rip+df_half]
+    jb      .Lve_enext
+    movss   xmm0, [r14+rdx*4]           # n1 . n2 < cos 30: sharp
     mulss   xmm0, [r14+r8*4]
     movss   xmm1, [r14+rdx*4+4]
     mulss   xmm1, [r14+r8*4+4]
@@ -1000,6 +1021,7 @@ wnormal:
     xorps   xmm0, xmm0
     xorps   xmm1, xmm1
     xorps   xmm2, xmm2
+    xorps   xmm5, xmm5
     mov     rbp, [r12+ME_LOOPS]
     mov     r8d, ecx
 1:  cmp     r8d, edx
@@ -1032,9 +1054,25 @@ wnormal:
     addss   xmm4, [r10+4]
     mulss   xmm3, xmm4
     addss   xmm2, xmm3
+    movss   xmm3, [r9]                  # perimeter (for slivers)
+    subss   xmm3, [r10]
+    mulss   xmm3, xmm3
+    movss   xmm4, [r9+4]
+    subss   xmm4, [r10+4]
+    mulss   xmm4, xmm4
+    addss   xmm3, xmm4
+    movss   xmm4, [r9+8]
+    subss   xmm4, [r10+8]
+    mulss   xmm4, xmm4
+    addss   xmm3, xmm4
+    sqrtss  xmm3, xmm3
+    addss   xmm5, xmm3
     inc     r8d
     jmp     1b
-2:  movss   xmm3, xmm0
+2:  movss   xmm6, xmm5                  # 2 area < 1e-3 perimeter^2: a sliver,
+    mulss   xmm6, xmm5                  #  no normal
+    mulss   xmm6, [rip+df_sliver]
+    movss   xmm3, xmm0
     mulss   xmm3, xmm0
     movss   xmm4, xmm1
     mulss   xmm4, xmm1
@@ -1043,7 +1081,13 @@ wnormal:
     mulss   xmm4, xmm2
     addss   xmm3, xmm4
     sqrtss  xmm3, xmm3
-    maxss   xmm3, [rip+df_tiny]
+    comiss  xmm3, xmm6
+    ja      3f
+    xorps   xmm0, xmm0
+    xorps   xmm1, xmm1
+    xorps   xmm2, xmm2
+    movss   xmm3, [rip+df_one]
+3:  maxss   xmm3, [rip+df_tiny]
     divss   xmm0, xmm3
     divss   xmm1, xmm3
     divss   xmm2, xmm3

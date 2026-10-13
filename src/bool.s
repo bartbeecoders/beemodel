@@ -1293,8 +1293,8 @@ find_intersections:
     test    eax, eax
     jz      .Lfi_fail
     mov     edi, [rip+nt]               # points / segments: grow-free caps
-    shl     edi, 2
-    add     edi, 1024
+    shl     edi, 3                      #  (long thin triangles - fans over a
+    add     edi, 262144                 #  face - cross many others)
     mov     [rip+cap_p], edi
     mov     [rip+cap_s], edi
     call    eh_new
