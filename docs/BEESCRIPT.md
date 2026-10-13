@@ -113,6 +113,8 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `image(path)` | Loads a PNG, JPEG or Radiance HDR image into the scene; returns its name |
 | `imgsize(image, axis)` | Width (axis 0) or height (1) |
 | (textures, world) | `op("material.texture", "Wood " + img + " 0.5")`, `op("world.hdri", sky)`, `op("world.strength", 2)` |
+| `param(name [, expression])` | Sets a parameter (an expression with units, e.g. `"10*wall + 2mm"`, or a number) and returns its value in scene units; with one argument, reads it |
+| `expr(text)` | Evaluates an expression with units and parameters (lengths in scene units, angles in radians) |
 | `node(material, type [, values...])` | Adds a shader node and returns its number (1..12). Types: `image` (image name, size), `noise` (scale, detail, roughness), `checker` (scale), `gradient` (axis 0/1/2, scale, offset), `mix` (mode 0 mix 1 add 2 multiply 3 subtract 4 screen), `ramp` (position 0, position 1), `math` (op 0 add 1 subtract 2 multiply 3 divide 4 power 5 min 6 max 7 greater 8 sine 9 abs), `bump` (strength, distance) |
 | `link(material, from, to, input)` | Feeds node `from` into input 1..3 of a later node `to` |
 | `nodeset(material, node, slot, x [, y, z])` | Sets an input's constant (slots 1-3; one value fills all three) or a value (slots 4-7 = the type's values above) |

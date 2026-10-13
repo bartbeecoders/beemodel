@@ -188,6 +188,11 @@ j_images:       .asciz "],\"images\":["
 j_world:        .asciz "],\"world\":{\"hdri\":"
 j_null:         .asciz "null"
 k_texture:      .asciz "texture"
+j_units:        .asciz ",\"units\":"
+j_custom:       .asciz "custom"
+j_params:       .asciz ",\"parameters\":["
+k_expression:   .asciz "expression"
+k_value:        .asciz "value"
 j_nodes:        .asciz ",\"nodes\":["
 j_ntype:        .asciz "{\"type\":"
 j_nvals:        .asciz ",\"values\":["
@@ -1920,6 +1925,53 @@ mats_json:
     mulss   xmm0, [rip+f_rad2deg_]
     call    jb_num
     mov     edi, '}'                    # (the caller closes the summary)
+    call    wb_char
+    lea     rsi, [rip+j_units]          # ,"units":"mm","parameters":[..]
+    call    wb_str
+    call    cad_unit_name
+    test    rax, rax
+    jnz     95f
+    lea     rax, [rip+j_custom]
+95: mov     rsi, rax
+    call    jb_q
+    lea     rsi, [rip+j_params]
+    call    wb_str
+    xor     ebx, ebx
+96: call    param_count
+    cmp     ebx, eax
+    jae     97f
+    test    ebx, ebx
+    jz      961f
+    mov     edi, ','
+    call    wb_char
+961:mov     edi, '{'
+    call    wb_char
+    lea     rsi, [rip+k_name_m]
+    call    jb_key
+    mov     edi, ebx
+    call    param_rec
+    mov     r12, rax
+    mov     rsi, rax
+    call    jb_q
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_expression]
+    call    jb_key
+    lea     rsi, [r12+24]
+    call    jb_q
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_value]
+    call    jb_key
+    mov     edi, ebx
+    call    param_value
+    cvtsd2ss xmm0, xmm0
+    call    jb_num
+    mov     edi, '}'
+    call    wb_char
+    inc     ebx
+    jmp     96b
+97: mov     edi, ']'
     call    wb_char
     pop     r13
     pop     r12

@@ -1077,6 +1077,7 @@ fmt_vec3:
     ret
 
 # prop_row(edi=y, rsi=label) - label at left, current fmt_buf as value
+.globl prop_row
 prop_row:
     push    rbx
     push    r12
@@ -1171,7 +1172,10 @@ ed_props_draw:
     call    mats_props_draw
     mov     r12d, eax
     add     r12d, 18
-12: mov     edi, [rip+vp_area]          # ---- camera of the last used viewport
+12: mov     edi, r12d                   # ---- parameters
+    call    cad_props_draw
+    mov     r12d, eax
+    mov     edi, [rip+vp_area]          # ---- camera of the last used viewport
     call    cam_load
     mov     edi, [rip+ed_x]
     add     edi, 14

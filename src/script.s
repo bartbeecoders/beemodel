@@ -409,6 +409,10 @@ builtins:
     .long 4, 6
     .quad bn_socket, b_socket
     .long 3, 3
+    .quad bn_param, b_param
+    .long 1, 2
+    .quad bn_expr, b_expr
+    .long 1, 1
 builtins_end:
 .equ B_SZ, 24
 
@@ -485,6 +489,10 @@ bn_node:        .asciz "node"
 bn_link:        .asciz "link"
 bn_nodeset:     .asciz "nodeset"
 bn_socket:      .asciz "socket"
+bn_param:       .asciz "param"
+bn_expr:        .asciz "expr"
+e_param:        .asciz "parameter: "
+e_noparam:      .asciz "no parameter named "
 e_node_type:    .asciz "unknown node type (image noise checker gradient mix ramp math bump): "
 e_node_full:    .asciz "a material holds 12 nodes"
 e_node_bad:     .asciz "no such node, input or socket (links go from an earlier node)"
@@ -4681,6 +4689,70 @@ b_socket:
     jmp     ret_nil
 8:  lea     rdi, [rip+e_node_bad]
     xor     esi, esi
+    jmp     sc_rt
+
+# param(name [, expression]) -> its value in scene units (set it first)
+b_param:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r13d, esi
+    call    a_str
+    mov     r12, rax
+    cmp     r13d, 2
+    jb      1f
+    lea     rdi, [rbx+16]               # the expression: text or a number
+    cmp     dword ptr [rdi], T_NUM
+    jne     2f
+    movsd   xmm0, [rdi+8]               # (a number: as text)
+    sub     rsp, 8
+    call    fmt_reset
+    cvtsd2ss xmm0, xmm0
+    call    fmt_val3
+    add     rsp, 8
+    lea     rax, [rip+fmt_buf]
+    jmp     3f
+2:  call    a_str
+3:  push    rax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    pop     rsi
+    mov     rdi, r12
+    call    param_set
+    test    eax, eax
+    jz      8f
+1:  mov     rdi, r12
+    call    param_find
+    test    eax, eax
+    js      7f
+    mov     edi, eax
+    call    param_value
+    test    eax, eax
+    jz      8f
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+7:  lea     rdi, [rip+e_noparam]
+    mov     rsi, r12
+    jmp     sc_rt
+8:  lea     rdi, [rip+e_param]
+    mov     rsi, [rip+expr_err]
+    jmp     sc_rt
+
+# expr(text) -> its value (units: scene units / radians)
+b_expr:
+    sub     rsp, 8
+    call    a_str
+    mov     rdi, rax
+    call    expr_eval
+    test    eax, eax
+    jz      8f
+    add     rsp, 8
+    jmp     ret_num
+8:  lea     rdi, [rip+e_param]
+    mov     rsi, [rip+expr_err]
     jmp     sc_rt
 
 # matof(object) -> its material's name, or nil

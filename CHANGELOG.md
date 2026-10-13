@@ -6,6 +6,23 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Parameters, expressions and scene units, the base of the CAD phase:
+  - **Units:** `scene.units mm|cm|m|in` sets what one scene unit is
+    (metres by default).
+  - **Expressions:** `+ - * / ^`, parentheses, units (`mm cm m in ft`
+    for lengths in scene units, `deg rad` for angles), `pi`, `e`, and
+    sin cos tan asin acos atan sqrt abs floor ceil round min max.
+  - **Parameters:** `param.set <name> <expression>` (for example
+    `width = 10*wall + 2mm`), `param.remove`, `param.list`. Values are
+    evaluated on demand and cached. A cycle, a syntax error or an
+    unknown name is refused, and the scene keeps its last good state.
+  - **Where they live:** parameters belong to a copy-on-write CAD
+    document that undo shares, like the materials, and that is saved in
+    `.bee` (CADD chunk). Properties lists them with their values.
+  - **Scripts and agents:** BeeScript `param(name [, expression])` and
+    `expr(text)`; `scene_summary` shows the units and the parameters.
+
 ## [0.6.0] - 2026-10-13
 
 Phase 5 of the masterplan, "Materials & rendering". BeeModel renders:
