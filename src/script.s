@@ -394,7 +394,7 @@ builtins:
     .quad bn_matof, b_matof
     .long 1, 1
     .quad bn_render, b_render
-    .long 1, 4
+    .long 1, 5
 builtins_end:
 .equ B_SZ, 24
 
@@ -4265,7 +4265,7 @@ b_assign:
     pop     rbx
     jmp     ret_nil
 
-# render(path [, width, height, samples]) -> milliseconds: the path tracer
+# render(path [, width, height, samples, denoise]) -> milliseconds: the path tracer
 #   into a PNG (the camera object, or the viewport)
 b_render:
     push    rbx
@@ -4294,7 +4294,14 @@ b_render:
     lea     rdi, [rbx+48]
     call    a_num
     cvttsd2si r15d, xmm0
-3:  mov     rdi, rbx
+3:  mov     dword ptr [rsp+8], 0
+    cmp     r12d, 5
+    jb      4f
+    lea     rdi, [rbx+64]
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp+8], eax
+4:  mov     rdi, rbx
     call    a_str
     mov     [rsp], rax
     cmp     dword ptr [rip+sc_agent], 0 # agents need file access
@@ -4307,6 +4314,7 @@ b_render:
     mov     esi, r13d
     mov     edx, r14d
     mov     ecx, r15d
+    mov     r8d, [rsp+8]
     call    hive_render_file
     test    eax, eax
     js      8f

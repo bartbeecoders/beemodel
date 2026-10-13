@@ -1324,6 +1324,8 @@ HIVE_SCENE = (
     'c = material("Glass"); matset(c, "transmission", 1); matset(c, "roughness", 0.02)\n'
     'add("sphere", "G", -0.5, 0.8, 2.6); scale("G", 0.8); assign("G", c)\n')
 HIVE_BUDGET_MS = 8000.0            # 480 x 270 x 64 samples on a 4-core CI runner
+DENOISE_GAIN = 0.65                # denoised error / noisy error, 16 samples
+DENOISE_BUDGET_MS = 600.0          # denoising 1080p on a 4-core CI runner
 
 
 def hive_render():
@@ -1367,6 +1369,25 @@ def hive_render():
         mean = sum(g) / len(g)
         sds.append((sum((v - mean) ** 2 for v in g) / len(g)) ** 0.5)
     check(sds[1] < sds[0] / 2.5, f'noise falls with samples (sd {sds[0]:.1f} at 4, {sds[1]:.1f} at 64)')
+    # the denoiser: 16 samples + denoise against a 512-sample reference
+    def rmse(a, b):
+        a, b = Image.open(a).convert('RGB'), Image.open(b).convert('RGB')
+        d = [(p[i] - q[i]) ** 2 for p, q in zip(a.getdata(), b.getdata()) for i in range(3)]
+        return (sum(d) / len(d)) ** 0.5
+    shots = {}
+    for name, spp, dn in (('ref', 512, 0), ('n16', 16, 0), ('d16', 16, 1)):
+        shots[name] = os.path.join(home, f'{name}.png')
+        ms = run(HIVE_SCENE + f'print(render("{shots[name]}", 160, 90, {spp}, {dn}))')
+    en, ed = rmse(shots['n16'], shots['ref']), rmse(shots['d16'], shots['ref'])
+    check(ed < en * DENOISE_GAIN, f'denoising 16 samples cuts the error (rmse {en:.1f} -> {ed:.1f}, at most x{DENOISE_GAIN})')
+    for name in ('n16', 'd16'):
+        Image.open(shots[name]).save(os.path.join(OUT, f'49_hive_{name}.png'))
+    ms = [run(f'print(render("{os.path.join(home, "big.png")}", 1920, 1080, 1, {dn}))') for dn in (0, 1)]
+    try:
+        t = float(ms[1]) - float(ms[0])
+    except ValueError:
+        t = 1e9
+    check(t < DENOISE_BUDGET_MS, f'denoising 1920 x 1080 takes {t:.0f} ms (budget {DENOISE_BUDGET_MS:.0f} ms)')
     # agents: rendering writes a file, so it needs file access
     f = Fake()
     f.pump(1.0, until_frame=True)
@@ -1418,6 +1439,21 @@ def render_window():
     n0 = f.frames
     f.pump(0.6)
     check(f.frames - n0 <= 1, f'Esc stops the render ({f.frames - n0} frames after)')
+    def face_sd():                              # the cube's left face
+        g = [v[1] for v in f.image().crop((756, 300, 796, 360)).getdata()]
+        mean = sum(g) / len(g)
+        return (sum((v - mean) ** 2 for v in g) / len(g)) ** 0.5
+    q('op("render.settings", "320 180 8")')
+    f.key(88)                                   # a short render: still noisy
+    f.pump(1.0)
+    den = face_sd()
+    cmd('render.denoise')                       # off: the raw samples
+    f.pump(0.3)
+    raw = face_sd()
+    cmd('render.denoise')
+    f.pump(0.3)
+    check(den < raw * 0.7 and face_sd() == den,
+          f'a finished render is denoised (cube face noise sd {raw:.1f} -> {den:.1f}); render.denoise toggles it')
     beauty = px(f, 815, 362)
     cmd('render.pass normal')
     f.pump(0.3)

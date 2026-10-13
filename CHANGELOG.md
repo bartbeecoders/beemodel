@@ -7,6 +7,18 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- A denoiser for Hive renders: an edge-avoiding à-trous wavelet filter
+  (after Dammertz et al. and SVGF):
+  - **Guides:** the albedo, normal and depth passes. It filters the
+    lighting only (radiance ÷ albedo), so colours and edges stay sharp.
+  - **Strength:** set by the noise. A per-pixel variance comes from the
+    luminance moments of the samples, so converged renders pass through
+    almost unchanged.
+  - **Results:** 16 samples + denoise get about as close to the reference
+    as 256 samples. 1080p denoises in about 50 ms.
+  - **Where:** Render › Denoise (`render.denoise`, on by default, saved
+    in `.bee`) denoises a render when it finishes or is stopped;
+    `render.image <path> w h spp 1` and `render(path, w, h, spp, 1)` too.
 - The Render window:
   - **F12** (Render › Render) starts a progressive render in a Render area
     beside the viewport, opening the area if needed. The main loop spends
