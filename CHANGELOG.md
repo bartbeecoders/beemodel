@@ -7,6 +7,25 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Image textures and an HDRI world:
+  - **Textures:** `material.texture <material> <image|none> [size]` gives
+    a material a base-colour image. Until UVs arrive it is box-projected in
+    object space (per face, by its normal) and sampled bilinearly and
+    repeating, with 8-bit images decoded from sRGB. Hive and the material
+    preview both show it.
+  - **HDRI world:** `world.hdri <image|none>`, `world.strength`,
+    `world.rotation` light the scene with an equirectangular image instead
+    of the studio sky and sun.
+    - Hive importance-samples the HDRI through a 2D CDF (luminance ×
+      sin θ) with MIS. In a flat HDRI a white diffuse sphere vanishes (the
+      white-furnace test).
+    - The material preview takes irradiance from 9 spherical-harmonic
+      coefficients and reflections from a blurred copy, and turns off its
+      softboxes.
+  - **Files:** `.bee` keeps the image paths (IMGS, reloaded in order;
+    missing files keep their place) and the world (WRLD).
+  - **Agents:** `scene_summary` lists the images, each material's texture
+    and the world.
 - Image files, all with our own code:
   - **inflate:** stored, fixed and dynamic Huffman blocks, with a 10-bit
     lookup table.

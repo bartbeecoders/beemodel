@@ -103,6 +103,8 @@ preview_shade:
     push    r12
     push    r13
     sub     rsp, 16
+    call    tex_init
+    call    env_prep
     mov     edi, [rip+obj_count]        # object id (scene index + 1) -> record
     lea     esi, [rdi*4+8]
     lea     rdi, [rip+frame_arena]
@@ -543,7 +545,15 @@ job_shade:
     mov     rax, [rip+pv_mat]           # material values
     mov     rsi, [rax+rbp*8]
     call    load_material
-    lea     rdi, [rsp]
+    mov     rax, [rip+pv_mat]           # a textured base
+    mov     rdi, [rax+rbp*8]
+    test    rdi, rdi
+    jz      1f
+    cmp     dword ptr [rdi+92], 0
+    je      1f
+    lea     rsi, [rsp]
+    call    pv_texture
+1:  lea     rdi, [rsp]
     call    shade
     mov     eax, r12d                   # write the pixel
     add     eax, [rip+rs_y0]
@@ -566,6 +576,57 @@ job_shade:
     pop     r13
     pop     r12
     pop     rbp
+    pop     rbx
+    ret
+
+# pv_texture(rdi=material record, rsi=job_shade's frame; r14 = object
+#   record, r15d = local triangle) - SH_BASE from the box-projected image
+pv_texture:
+    push    rbx
+    push    r12
+    sub     rsp, 40
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     r8, [r14+RO_MESH]
+    mov     rax, [r8+ME_TRIS]
+    lea     rcx, [r15+r15*2]
+    mov     edx, [rax+rcx*4]
+    mov     esi, [rax+rcx*4+4]
+    mov     edi, [rax+rcx*4+8]
+    mov     r9, [r8+ME_POS]
+    lea     rdx, [rdx+rdx*2]
+    lea     rsi, [rsi+rsi*2]
+    lea     rdi, [rdi+rdi*2]
+    lea     rdi, [r9+rdi*4]             # p2 -> rdx below
+    lea     rsi, [r9+rsi*4]
+    lea     rax, [r9+rdx*4]
+    mov     rdx, rdi
+    mov     rdi, rax
+    lea     rcx, [rsp]
+    call    box_uv
+    movss   xmm2, [rip+pf_one]          # uv = w0 uv0 + u uv1 + v uv2
+    subss   xmm2, [r12+SH_SZ+20]
+    subss   xmm2, [r12+SH_SZ+24]
+    xor     ecx, ecx
+1:  movss   xmm0, [rsp+rcx*4]
+    mulss   xmm0, xmm2
+    movss   xmm1, [rsp+8+rcx*4]
+    mulss   xmm1, [r12+SH_SZ+20]
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+16+rcx*4]
+    mulss   xmm1, [r12+SH_SZ+24]
+    addss   xmm0, xmm1
+    movss   [rsp+24+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 2
+    jb      1b
+    mov     rdi, rbx
+    movss   xmm0, [rsp+24]
+    movss   xmm1, [rsp+28]
+    lea     rsi, [r12+SH_BASE]
+    call    mat_texel
+    add     rsp, 40
+    pop     r12
     pop     rbx
     ret
 
@@ -907,8 +968,10 @@ shade:
     inc     ecx
     cmp     ecx, 3
     jb      41b
-4:  # ---- softbox lights ------------------------------------------------------
+4:  # ---- softbox lights (the studio only) ---------------------------------------
     xor     r12d, r12d
+    cmp     dword ptr [rip+env_on], 0
+    jne     6f
 5:  cmp     r12d, 3
     jae     6f
     imul    eax, r12d, 24
@@ -947,6 +1010,8 @@ shade:
     inc     ecx
     cmp     ecx, 3
     jb      62b
+    cmp     dword ptr [rip+env_on], 0
+    jne     7f
     xor     r12d, r12d                  # coat highlights of the key light
     lea     rsi, [rip+lights]
     mov     rdi, rbx
@@ -1115,6 +1180,8 @@ dot3:
 
 # env_irr(rdi=direction, rsi=out[3]) - ground .. sky irradiance by n.y
 env_irr:
+    cmp     dword ptr [rip+env_on], 0   # an HDRI world: its SH irradiance
+    jne     env_irr_pv
     movss   xmm0, [rdi+4]
     mulss   xmm0, [rip+pf_half]
     addss   xmm0, [rip+pf_half]         # t = 0.5 + 0.5 y
@@ -1134,10 +1201,28 @@ env_irr:
 
 # env_sky(rdi=direction, rsi=out[3]) - horizon .. zenith above, ground below
 env_sky:
+    cmp     dword ptr [rip+env_on], 0   # an HDRI world: its blurred copy
+    jne     env_spec_pv
     movss   xmm0, [rdi+4]
     jmp     es_body
 env_sky_neg:                            # (the direction negated)
+    cmp     dword ptr [rip+env_on], 0
+    je      1f
+    sub     rsp, 24
+    movss   xmm0, [rdi]
+    xorps   xmm0, [rip+pf_sign]
+    movss   [rsp], xmm0
     movss   xmm0, [rdi+4]
+    xorps   xmm0, [rip+pf_sign]
+    movss   [rsp+4], xmm0
+    movss   xmm0, [rdi+8]
+    xorps   xmm0, [rip+pf_sign]
+    movss   [rsp+8], xmm0
+    lea     rdi, [rsp]
+    call    env_spec_pv
+    add     rsp, 24
+    ret
+1:  movss   xmm0, [rdi+4]
     xorps   xmm0, [rip+pf_sign]
 es_body:
     comiss  xmm0, [rip+pf_zero]

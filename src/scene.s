@@ -318,6 +318,7 @@ scene_clear:
     jmp     1b
 2:  call    eval_flush
     call    mats_reset
+    call    image_clear                 # (and the world)
     lea     rdi, [rip+scene_pool]
     call    pool_clear
     mov     dword ptr [rip+obj_count], 0

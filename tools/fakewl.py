@@ -461,6 +461,7 @@ def main():
     modeling_budgets()
     hive_render()
     render_window()
+    textures_world()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -1481,6 +1482,114 @@ def render_window():
     cmd(f'render.save {out}')
     ok = os.path.exists(out) and Image.open(out).size == (640, 360)
     check(ok, 'render settings are saved in .bee files (640 x 360 after opening)')
+    f.proc.kill()
+
+
+def write_rgbe_hdr(path, w, h, fn):
+    """A Radiance .hdr (flat pixels) from fn(theta, phi) -> rgb."""
+    out = bytearray(f'#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y {h} +X {w}\n'.encode())
+    for y in range(h):
+        for x in range(w):
+            r, g, b = fn((y + 0.5) / h * math.pi, (x + 0.5) / w * 2 * math.pi)
+            m = max(r, g, b)
+            if m < 1e-30:
+                out += bytes(4); continue
+            f, e = math.frexp(m); k = f * 256.0 / m
+            out += bytes([int(r * k), int(g * k), int(b * k), e + 128])
+    open(path, 'wb').write(out)
+
+
+def textures_world():
+    """Box-projected image textures and an HDRI world: Hive, the material
+    preview, files and agents."""
+    print('  -- textures and the HDRI world --')
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-tex-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        return subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120).stdout.strip()
+    chk = os.path.join(home, 'check.png')
+    im = Image.new('RGB', (64, 64))
+    im.putdata([((230, 30, 30) if ((x // 16) + (y // 16)) % 2 else (240, 240, 240)) for y in range(64) for x in range(64)])
+    im.save(chk)
+    sky = os.path.join(home, 'sky.hdr')
+    sun_t, sun_p = math.radians(35), math.radians(200)
+    def fn(t, p):
+        if math.hypot(t - sun_t, (p - sun_p) * math.sin(t)) < 0.05: return (120, 110, 100)
+        return (0.06, 0.08, 0.14) if t < math.pi / 2 else (0.04, 0.035, 0.03)
+    write_rgbe_hdr(sky, 128, 64, fn)
+    tex = (f'i = image("{chk}"); m = material("Tex"); assign("Cube", m); op("material.texture", "Tex " + i + " 2")\n')
+    a = os.path.join(home, 'tex.png')
+    run(tex + f'render("{a}", 320, 180, 16, 1)')
+    r = Image.open(a).convert('RGB')
+    face = [r.getpixel((x, y)) for y in range(60, 100, 2) for x in range(120, 150, 2)]
+    reds = sum(1 for p in face if p[0] > p[1] + 60)
+    whites = sum(1 for p in face if abs(p[0] - p[1]) < 30 and p[1] > 120)
+    check(reds > 10 and whites > 10, f'Hive renders the box-projected texture ({reds} red and {whites} white samples on a face)')
+    r.save(os.path.join(OUT, '52_texture.png'))
+    # the HDRI: shadows from its sun, and a white furnace with a flat one
+    b = os.path.join(home, 'hdri.png')
+    run(f'e = image("{sky}"); op("world.hdri", e); add("plane", "F"); scale("F", 6)\n'
+        f'add("sphere", "S", 2.5, 1, 0.5); render("{b}", 320, 180, 32, 1)')
+    r = Image.open(b).convert('RGB')
+    r.save(os.path.join(OUT, '53_hdri.png'))
+    lum = lambda p: sum(p) / 3
+    floor = sorted(lum(r.getpixel((x, y))) for y in range(120, 178, 3) for x in range(10, 310, 5))
+    check(floor[len(floor) // 10] < floor[-len(floor) // 10] * 0.75,
+          f'the HDRI sun casts shadows (floor 10% {floor[len(floor) // 10]:.0f} vs 90% {floor[-len(floor) // 10]:.0f})')
+    flat = os.path.join(home, 'flat.hdr')
+    write_rgbe_hdr(flat, 32, 16, lambda t, p: (0.5, 0.5, 0.5))
+    f2 = os.path.join(home, 'furn.png')
+    run(f'e = image("{flat}"); op("world.hdri", e); delete("Cube"); delete("Light"); m = material("M"); '
+        f'matset(m, "roughness", 1); matset(m, "specular", 0); add("sphere", "S", 0, 0, 0); scale("S", 2); assign("S", m); '
+        f'render("{f2}", 160, 90, 128)')
+    im2 = Image.open(f2).convert('RGB')
+    c, bg = im2.getpixel((80, 45)), im2.getpixel((2, 2))
+    # (base 0.8 by default: the sphere reflects 80%)
+    check(abs(c[0] - bg[0]) > 3 and bg[0] == 200, f'a flat HDRI lights like the furnace (background {bg[0]}, sphere {c[0]})')
+    run(f'e = image("{flat}"); op("world.hdri", e); delete("Cube"); delete("Light"); m = material("M"); '
+        f'matset(m, "roughness", 1); matset(m, "specular", 0); matset(m, "base", 1, 1, 1); add("sphere", "S", 0, 0, 0); '
+        f'scale("S", 2); assign("S", m); render("{f2}", 160, 90, 128)')
+    im2 = Image.open(f2).convert('RGB')
+    c, bg = im2.getpixel((80, 45)), im2.getpixel((2, 2))
+    check(abs(c[0] - bg[0]) <= 2, f'white furnace in a flat HDRI: the sphere vanishes ({c[0]} vs {bg[0]})')
+    # files: the image paths, the texture and the world come back
+    bee = os.path.join(home, 'tex.bee')
+    c1, c2 = os.path.join(home, 'c1.png'), os.path.join(home, 'c2.png')
+    run(tex + f'e = image("{sky}"); op("world.hdri", e); op("world.strength", 0.7); op("world.rotation", 90)\n'
+        f'op("file.save", "{bee}"); render("{c1}", 96, 54, 8)')
+    run(f'op("file.open", "{bee}"); render("{c2}", 96, 54, 8)')
+    same = os.path.exists(c2) and open(c1, 'rb').read() == open(c2, 'rb').read()
+    check(same, 'images, textures and the world are saved in .bee (an identical render after opening)')
+    # the material preview and agents (GUI)
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.2)
+    cmd(f'op("file.open", "{bee}")')
+    f.key(1)                                    # leave the command line
+    f.pump(0.3)
+    f.mods(1); f.key(44); f.mods(0)             # Shift+Z: material preview
+    f.pump(0.5)
+    shot = f.image()
+    f.shot('54_preview_texture_hdri.png')
+    region = [shot.getpixel(project((x / 4, 2.01, z / 4))) for x in range(-3, 4) for z in range(-3, 4)]
+    reds = sum(1 for p in region if p[0] > p[1] + 50)
+    check(reds >= 3 and len(set(region)) > 5, f'the material preview shows the texture ({reds} red of {len(region)} samples)')
+    m = Mcp(f)
+    t = m.tool('scene_summary')[0]
+    try:
+        js = json.loads(t.split('\n')[0])
+        ok = (js['world']['hdri'] == 'sky' and abs(js['world']['strength'] - 0.7) < 1e-3 and abs(js['world']['rotation'] - 90) < 0.01
+              and {'check', 'sky'} <= set(js['images'])
+              and any(mm.get('texture') == 'check' for mm in js['materials']))
+    except Exception as e:
+        ok, js = False, e
+    check(ok, 'scene_summary shows agents the images, textures and the world')
+    text, err = m.tool('script_eval', {'code': f'image("{chk}")'})
+    check(err and 'permission' in text, 'agents need file access to load images')
     f.proc.kill()
 
 

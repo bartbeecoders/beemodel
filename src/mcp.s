@@ -184,6 +184,12 @@ s_ok:           .asciz "ok"
 j_objs_a:       .asciz "{\"units\":\"meters, Y up, rotation_deg = Euler XYZ\",\"objects\":["
 j_objs_b:       .asciz "]}"
 j_objs_b2:      .asciz "]}"
+j_images:       .asciz "],\"images\":["
+j_world:        .asciz "],\"world\":{\"hdri\":"
+j_null:         .asciz "null"
+k_texture:      .asciz "texture"
+k_strength:     .asciz "strength"
+k_rotation_w:   .asciz "rotation"
 j_material:     .asciz ",\"material\":"
 j_mats:         .asciz "],\"materials\":["
 j_type_names:   .asciz "mesh"
@@ -1788,9 +1794,9 @@ scene_json:
     call    wb_char
     inc     ebx
     jmp     1b
-9:  call    mats_json                   # ],"materials":[...]}
-    lea     rsi, [rip+j_objs_b2]
-    call    wb_str
+9:  call    mats_json                   # ],"materials":[...],"images":[...],"world":{..}
+    mov     edi, '}'
+    call    wb_char
     pop     r12
     pop     rbx
     ret
@@ -1857,11 +1863,70 @@ mats_json:
     call    jb_num
 51: inc     r12d
     jmp     3b
-6:  mov     edi, '}'
+6:  mov     edi, ebx                    # a texture: "texture":"image"
+    call    mat_get
+    mov     edi, [rax+92]
+    test    edi, edi
+    jz      61f
+    dec     edi
+    cmp     edi, [rip+img_count]
+    jae     61f
+    imul    r13d, edi, 256
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_texture]
+    call    jb_key
+    lea     rsi, [rip+img_tab]
+    add     rsi, r13
+    call    jb_q
+61: mov     edi, '}'
     call    wb_char
     inc     ebx
     jmp     1b
-9:  pop     r13
+9:  lea     rsi, [rip+j_images]         # ],"images":["a","b"
+    call    wb_str
+    xor     ebx, ebx
+91: cmp     ebx, [rip+img_count]
+    jae     92f
+    test    ebx, ebx
+    jz      911f
+    mov     edi, ','
+    call    wb_char
+911:imul    eax, ebx, 256
+    lea     rsi, [rip+img_tab]
+    add     rsi, rax
+    call    jb_q
+    inc     ebx
+    jmp     91b
+92: lea     rsi, [rip+j_world]          # ],"world":{"hdri":..,"strength":..,"rotation":..}
+    call    wb_str
+    mov     eax, [rip+env_idx]
+    dec     eax
+    cmp     eax, [rip+img_count]
+    jb      93f
+    lea     rsi, [rip+j_null]
+    call    wb_str
+    jmp     94f
+93: imul    eax, eax, 256
+    lea     rsi, [rip+img_tab]
+    add     rsi, rax
+    call    jb_q
+94: mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_strength]
+    call    jb_key
+    movss   xmm0, [rip+env_str]
+    call    jb_num
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_rotation_w]
+    call    jb_key
+    movss   xmm0, [rip+env_rot]
+    mulss   xmm0, [rip+f_rad2deg_]
+    call    jb_num
+    mov     edi, '}'                    # (the caller closes the summary)
+    call    wb_char
+    pop     r13
     pop     r12
     pop     rbx
     ret

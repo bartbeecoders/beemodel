@@ -166,7 +166,10 @@ switches passes (beauty, albedo, normal, depth) and saves them
 
 **Images.** `image.load <path>` reads PNG (every colour type, depth and interlacing), baseline
 JPEG and Radiance HDR files, all with BeeModel's own decoders; `image.save <name> <path>`
-writes PNG or OpenEXR.
+writes PNG or OpenEXR. `material.texture <material> <image> [size]` puts an image on a material
+(box-projected until meshes get UVs), and `world.hdri <image>` lights the scene with an
+equirectangular HDRI (`world.strength`, `world.rotation`). Hive importance-samples it, and the
+material preview uses it too. Image paths and the world are saved with the scene.
 
 **Analysis and repair.** View › Show Normals / Non-manifold / Boundary Edges / Degenerate Faces /
 Overhangs mark problems on the active mesh, with a count of each in the viewport.
