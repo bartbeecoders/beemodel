@@ -17,6 +17,10 @@
 #  the same colour and depth buffers as the other objects. Splats are
 #  projected and shaded once into records that stay while the view does:
 #  during a stroke only the leaves it changed are projected again.
+#
+#  A pen's pressure (wayland.s: in_pressure) scales the strength and / or
+#  the radius of each dab through a curve; its eraser end inverts. The
+#  stabilizer drags the stroke point behind the pointer on a string.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -104,6 +108,19 @@ s_hud:          .asciz "Sculpt: "
 s_hud_r:        .asciz "  radius "
 s_hud_s:        .asciz "  strength "
 s_hud_sym:      .asciz "  X symmetry"
+s_hud_lazy:     .asciz "stabilizer "
+s_hud_pen:      .asciz "pen:"
+s_hud_pstr:     .asciz " strength"
+s_hud_prad:     .asciz " radius"
+s_hud_poff:     .asciz " -"
+s_hud_gap:      .asciz "   "
+.align 8
+curve_names:    .quad s_soft, s_linear, s_hard
+s_soft:         .asciz " (soft)"
+s_linear:       .asciz " (linear)"
+s_hard:         .asciz " (hard)"
+s_lazy_log:     .asciz "  sculpt stabilizer: "
+s_px:           .asciz " px"
 s_hud_keys:     .asciz "  ([ ] radius, Shift+[ ] strength, Ctrl inverts, Shift smooths)"
 .align 8
 brush_names:    .quad bn_draw, bn_clay, bn_crease, bn_inflate, bn_grab, bn_snake
@@ -129,6 +146,10 @@ sc_radius:      .float 50.0             # pixels
 sc_strength:    .float 0.5
 sc_brush:       .long 0
 sc_sym:         .long 0                 # bit 0: X
+sc_pmap:        .long 1                 # pen pressure drives: 1 strength,
+                                        #  2 radius
+sc_pcurve:      .long 1                 # 0 soft (sqrt), 1 linear, 2 hard (^2)
+sc_lazy:        .long 0                 # stabilizer: string length (pixels)
 
 .section .bss
 .align 8
@@ -215,6 +236,10 @@ sc_rbuf:        .skip 8                 # splat records: x y 1/z colour, kept
 sc_rbuf_b:      .skip 8                 #  while the view stays
 sc_full:        .skip 4                 # 1: project every leaf again
 sc_rused:       .skip 4                 # records laid out
+sc_base_s:      .skip 4                 # the stroke's strength (signed)
+sc_penon:       .skip 4                 # 1: a stroke by hand (pressure counts)
+lz_x:           .skip 4                 # the stabilized pointer
+lz_y:           .skip 4
 sd_key:         .skip 80                # the view the records were made in
 sd_knew:        .skip 80
 sd_nodes_b:     .skip 8
@@ -3635,6 +3660,18 @@ job_n_unit:
 do_dab:
     sub     rsp, 24
     movss   [rsp], xmm0
+    call    pen_factor                  # pressure: strength and / or radius
+    movss   xmm1, [rip+sc_base_s]
+    test    dword ptr [rip+sc_pmap], 1
+    jz      1f
+    mulss   xmm1, xmm0
+1:  movss   [rip+dab_s], xmm1
+    test    dword ptr [rip+sc_pmap], 2
+    jz      2f
+    maxss   xmm0, [rip+sf_tenth]
+    mulss   xmm0, [rsp]
+    movss   [rsp], xmm0
+2:  movss   xmm0, [rsp]
     call    dab
     test    dword ptr [rip+sc_sym], 1
     jz      9f
@@ -3663,6 +3700,25 @@ do_dab:
 9:  add     rsp, 24
     ret
 
+# pen_factor -> xmm0 = the pen's pressure through the curve (1 for the mouse
+#   and for scripts)
+pen_factor:
+    movss   xmm0, [rip+sf_one]
+    cmp     dword ptr [rip+sc_penon], 0
+    je      9f
+    movss   xmm0, [rip+in_pressure]
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    minss   xmm0, [rip+sf_one]
+    mov     eax, [rip+sc_pcurve]
+    cmp     eax, 1
+    je      9f
+    jb      1f
+    mulss   xmm0, xmm0                  # hard
+    ret
+1:  sqrtss  xmm0, xmm0                  # soft
+9:  ret
+
 # stroke_begin(edi=modifiers) - the brush (Shift: smooth), its sign (Ctrl:
 #   inverted), an undo step, empty deltas
 stroke_begin:
@@ -3676,7 +3732,9 @@ stroke_begin:
     xor     eax, eax
     test    ebx, MOD_CTRL
     setnz   al
+    or      eax, [rip+in_eraser]        # (a pen's eraser end inverts too)
     mov     [rip+sc_invert], eax
+    mov     dword ptr [rip+sc_penon], 0
     movss   xmm0, [rip+sc_strength]
     test    eax, eax
     jz      2f
@@ -3684,6 +3742,7 @@ stroke_begin:
     subss   xmm1, xmm0
     movss   xmm0, xmm1
 2:  movss   [rip+dab_s], xmm0
+    movss   [rip+sc_base_s], xmm0
     xorps   xmm0, xmm0
     movss   [rip+dab_move], xmm0
     movss   [rip+dab_move+4], xmm0
@@ -3816,6 +3875,11 @@ sculpt_press:
     jz      8f
     mov     edi, [rip+key_mods]
     call    stroke_begin
+    mov     dword ptr [rip+sc_penon], 1
+    cvtsi2ss xmm0, ebx
+    movss   [rip+lz_x], xmm0
+    cvtsi2ss xmm0, r12d
+    movss   [rip+lz_y], xmm0
     mov     rax, [rip+pk_p]
     mov     [rip+dab_p], rax
     mov     eax, [rip+pk_p+8]
@@ -3913,7 +3977,34 @@ sculpt_drag:
     mov     eax, [rip+sc_brush_now]
     cmp     eax, B_GRAB
     je      .Lsg_grab
-    cmp     eax, B_SNAKE
+    mov     eax, [rip+sc_lazy]          # stabilizer: the stroke follows on a
+    test    eax, eax                    #  string of that length
+    jz      5f
+    cvtsi2ss xmm2, eax
+    cvtsi2ss xmm0, ebx
+    subss   xmm0, [rip+lz_x]
+    cvtsi2ss xmm1, r12d
+    subss   xmm1, [rip+lz_y]
+    movss   xmm3, xmm0
+    mulss   xmm3, xmm0
+    movss   xmm4, xmm1
+    mulss   xmm4, xmm1
+    addss   xmm3, xmm4
+    sqrtss  xmm3, xmm3
+    comiss  xmm3, xmm2
+    jbe     9f                          # (within the string: nothing yet)
+    movss   xmm4, xmm3
+    subss   xmm4, xmm2
+    divss   xmm4, xmm3
+    mulss   xmm0, xmm4
+    mulss   xmm1, xmm4
+    addss   xmm0, [rip+lz_x]
+    movss   [rip+lz_x], xmm0
+    addss   xmm1, [rip+lz_y]
+    movss   [rip+lz_y], xmm1
+    cvtss2si ebx, xmm0
+    cvtss2si r12d, xmm1
+5:  cmp     dword ptr [rip+sc_brush_now], B_SNAKE
     je      .Lsg_snake
     # spacing: a dab every 10% of the radius (in pixels) along the path
     mov     eax, ebx
@@ -4510,6 +4601,63 @@ sculpt_overlay:
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_ACTIVE
     call    draw_text
+    call    fmt_reset                   # "stabilizer 25   pen: strength (soft)"
+    xor     ebx, ebx
+    cmp     dword ptr [rip+sc_lazy], 0
+    je      11f
+    lea     rdi, [rip+s_hud_lazy]
+    call    fmt_str
+    mov     edi, [rip+sc_lazy]
+    call    fmt_int
+    inc     ebx
+11: cmp     dword ptr [rip+in_pen], 0   # (once a pen has been seen)
+    je      14f
+    test    ebx, ebx
+    jz      111f
+    lea     rdi, [rip+s_hud_gap]
+    call    fmt_str
+111:inc     ebx
+    lea     rdi, [rip+s_hud_pen]
+    call    fmt_str
+    test    dword ptr [rip+sc_pmap], 3
+    jnz     12f
+    lea     rdi, [rip+s_hud_poff]
+    call    fmt_str
+    jmp     14f
+12: test    dword ptr [rip+sc_pmap], 1
+    jz      13f
+    lea     rdi, [rip+s_hud_pstr]
+    call    fmt_str
+13: test    dword ptr [rip+sc_pmap], 2
+    jz      131f
+    lea     rdi, [rip+s_hud_prad]
+    call    fmt_str
+131:mov     eax, [rip+sc_pcurve]
+    lea     rcx, [rip+curve_names]
+    mov     rdi, [rcx+rax*8]
+    call    fmt_str
+14: test    ebx, ebx
+    jz      15f
+    mov     edi, [rip+cvs_x0]
+    add     edi, 10
+    mov     esi, [rip+cvs_y0]
+    add     esi, 80
+    lea     rdx, [rip+fmt_buf]
+    mov     ecx, COL_ACTIVE
+    call    draw_text
+15: cmp     dword ptr [rip+sc_lazy], 0  # stroking with the stabilizer: its
+    je      16f                         #  string, pointer to stroke
+    cmp     dword ptr [rip+sc_stroking], 0
+    je      16f
+    cmp     dword ptr [rip+sd_hover], 0
+    je      16f
+    cvttss2si edi, [rip+lz_x]
+    cvttss2si esi, [rip+lz_y]
+    mov     edx, [rip+sd_hx]
+    mov     ecx, [rip+sd_hy]
+    mov     r8d, 0xf0f0f0
+    call    draw_line
+16:
     cmp     dword ptr [rip+sd_hover], 0 # the brush circle
     je      .Lso_out
     xor     ebx, ebx                    # 32 segments (logical pixels)
@@ -4571,6 +4719,10 @@ OPERATOR op_s_str_dn,   "sculpt.strength_down", "Weaker",        do_strength, ar
 OPERATOR op_s_str_up,   "sculpt.strength_up",   "Stronger",      do_strength, arg=1,    key=KEY_RIGHTBRACE|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: strength + 0.1"
 OPERATOR op_s_sym,      "sculpt.symmetry_x",    "X Symmetry",    do_sym, check=sym_check, key=KEY_X|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: mirror strokes across the object's X"
 OPERATOR op_s_mclear,   "sculpt.mask_clear",    "Clear Mask",    do_mask, arg=0,        key=KEY_M|KM_ALT,      flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: remove the mask"
+OPERATOR op_s_lazy,     "sculpt.stabilizer",    "Stabilizer",    do_lazy, check=lazy_check, key=KEY_S|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: the stroke trails the pointer on a string (off, 10, 25, 50 px) for steady lines"
+OPERATOR op_s_pstr,     "sculpt.pressure_strength", "Pressure: Strength", do_pmap, arg=1, check=pstr_check, flags=OPF_AI_SAFE|OPF_QUIET, doc="Sculpt: pen pressure scales the brush strength"
+OPERATOR op_s_prad,     "sculpt.pressure_radius", "Pressure: Radius", do_pmap, arg=2, check=prad_check, flags=OPF_AI_SAFE|OPF_QUIET, doc="Sculpt: pen pressure scales the brush radius"
+OPERATOR op_s_pcurve,   "sculpt.pressure_curve", "Pressure Curve", do_pcurve, flags=OPF_AI_SAFE|OPF_QUIET, doc="Sculpt: the pressure curve - soft, linear, hard"
 OPERATOR op_s_minv,     "sculpt.mask_invert",   "Invert Mask",   do_mask, arg=1,        key=KEY_I|KM_CTRL,     flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: invert the mask"
 
 do_brush:
@@ -4611,6 +4763,59 @@ sym_check:
     ret
 do_mask:
     jmp     sculpt_mask_op
+do_lazy:                                # off, 10, 25, 50 pixels
+    mov     eax, [rip+sc_lazy]
+    mov     ecx, 10
+    test    eax, eax
+    jz      1f
+    mov     ecx, 25
+    cmp     eax, 10
+    je      1f
+    mov     ecx, 50
+    cmp     eax, 25
+    je      1f
+    xor     ecx, ecx
+1:  mov     [rip+sc_lazy], ecx
+    sub     rsp, 8
+    call    fmt_reset
+    lea     rdi, [rip+s_lazy_log]
+    call    fmt_str
+    mov     edi, [rip+sc_lazy]
+    call    fmt_int
+    lea     rdi, [rip+s_px]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+    add     rsp, 8
+    mov     dword ptr [rip+dirty], 1
+    ret
+lazy_check:
+    xor     eax, eax
+    cmp     dword ptr [rip+sc_lazy], 0
+    setne   al
+    ret
+do_pmap:                                # edi = 1 strength, 2 radius
+    xor     [rip+sc_pmap], edi
+    mov     dword ptr [rip+dirty], 1
+    ret
+pstr_check:
+    mov     eax, [rip+sc_pmap]
+    and     eax, 1
+    ret
+prad_check:
+    mov     eax, [rip+sc_pmap]
+    shr     eax, 1
+    and     eax, 1
+    ret
+do_pcurve:
+    mov     eax, [rip+sc_pcurve]
+    inc     eax
+    cmp     eax, 3
+    jb      1f
+    xor     eax, eax
+1:  mov     [rip+sc_pcurve], eax
+    mov     dword ptr [rip+dirty], 1
+    ret
 
 .section .bss
 .align 8

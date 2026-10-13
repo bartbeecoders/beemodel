@@ -10,6 +10,9 @@
 
 # exports
 .globl write_err
+.globl in_pressure
+.globl in_eraser
+.globl in_pen
 .globl fr_ns
 .globl fr_count
 .globl getenv
@@ -48,6 +51,7 @@
 .section .data
 .align 4
 next_id:        .long 2                 # 1 is always wl_display
+in_pressure:    .float 1.0              # the pen's pressure 0..1 (mouse: 1)
 
 .section .bss
 .align 64
@@ -91,6 +95,17 @@ id_pool:        .skip 4
 id_buf:         .skip 8                 # two wl_buffers (double buffering)
 id_frame_cb:    .skip 4
 id_sync_cb:     .skip 4
+id_tab_mgr:     .skip 4                 # zwp_tablet_manager_v2
+id_tab_seat:    .skip 4
+tab_tool:       .skip TAB_TOOLS*4       # the tools the seat has (ids)
+tab_type:       .skip TAB_TOOLS*4       # their types (0x140 pen, 0x141 eraser)
+tab_cdev:       .skip TAB_TOOLS*4       # their cursor-shape devices
+tab_x:          .skip 4                 # the frame being collected
+tab_y:          .skip 4
+tab_ev:         .skip 4                 # 1 moved, 2 down, 4 up
+tab_serial:     .skip 4
+in_eraser:      .skip 4                 # 1: the pen's eraser end
+in_pen:         .skip 4                 # 1: a tablet tool was seen
 sync_done:      .skip 4
 
 # window state
@@ -121,6 +136,17 @@ buf_busy:       .skip 8
 pool_ptr:       .skip 8
 
 .section .rodata
+.align 4
+tool_ops:                               # zwp_tablet_tool_v2 events
+    .long .Ltl_type - tool_ops, ev_done - tool_ops, ev_done - tool_ops
+    .long ev_done - tool_ops, ev_done - tool_ops, .Ltl_removed - tool_ops
+    .long .Ltl_in - tool_ops, .Ltl_out - tool_ops, .Ltl_down - tool_ops
+    .long .Ltl_up - tool_ops, .Ltl_motion - tool_ops, .Ltl_pressure - tool_ops
+    .long ev_done - tool_ops, ev_done - tool_ops, ev_done - tool_ops
+    .long ev_done - tool_ops, ev_done - tool_ops, .Ltl_button - tool_ops
+    .long .Ltl_frame - tool_ops
+tab_pmax:       .float 65535.0
+sf_one_w:       .float 1.0
 s_env_wd:       .asciz "WAYLAND_DISPLAY="
 s_env_xdg:      .asciz "XDG_RUNTIME_DIR="
 s_wayland0:     .asciz "wayland-0"
@@ -131,6 +157,7 @@ s_seat:         .asciz "wl_seat"
 s_cursor_mgr:   .asciz "wp_cursor_shape_manager_v1"
 s_fscale_mgr:   .asciz "wp_fractional_scale_manager_v1"
 s_viewporter:   .asciz "wp_viewporter"
+s_tab_mgr:      .asciz "zwp_tablet_manager_v2"
 s_memfd_name:   .asciz "beemodel-fb"
 e_connect:      .asciz "beemodel: cannot connect to the Wayland display\n"
 e_lost:         .asciz "beemodel: Wayland connection lost\n"
@@ -660,6 +687,17 @@ wl_dispatch:
     je      ev_sync_done
     cmp     edi, [rip+id_fscale]
     je      ev_fscale
+    cmp     edi, [rip+id_tab_seat]
+    je      ev_tab_seat
+    cmp     edi, 0xff000000             # objects the compositor made: tools
+    jb      ev_done
+    lea     r15, [rip+tab_tool]
+    xor     ebx, ebx
+1:  cmp     edi, [r15+rbx*4]
+    je      ev_tool
+    inc     ebx
+    cmp     ebx, TAB_TOOLS
+    jb      1b
 ev_done:
     pop     r15
     pop     r14
@@ -739,6 +777,7 @@ ev_registry:
     mov     edi, r14d
     call    wl_bind
     mov     [rip+id_seat], eax
+    call    tab_seat
     jmp     ev_done
 4:  mov     rdi, rbx
     lea     rsi, [rip+s_fscale_mgr]
@@ -763,6 +802,18 @@ ev_registry:
     mov     [rip+id_viewporter], eax
     jmp     ev_done
 42: mov     rdi, rbx
+    lea     rsi, [rip+s_tab_mgr]
+    call    str_eq
+    test    eax, eax
+    jz      43f
+    mov     edx, 1
+    lea     rsi, [rip+s_tab_mgr]
+    mov     edi, r14d
+    call    wl_bind
+    mov     [rip+id_tab_mgr], eax
+    call    tab_seat
+    jmp     ev_done
+43: mov     rdi, rbx
     lea     rsi, [rip+s_cursor_mgr]
     call    str_eq
     test    eax, eax
@@ -931,13 +982,15 @@ ev_pointer:
     jmp     ev_done
 11: call    ui_leave
     jmp     ev_done
-12: mov     edi, [r12+4]                # motion(time, x, y)
+12: call    mouse_input
+    mov     edi, [r12+4]                # motion(time, x, y)
     sar     edi, 8
     mov     esi, [r12+8]
     sar     esi, 8
     call    ui_motion
     jmp     ev_done
-13: mov     edi, [r12+8]                # button(serial, time, button, state)
+13: call    mouse_input
+    mov     edi, [r12+8]                # button(serial, time, button, state)
     mov     esi, [r12+12]
     mov     edx, [r12]
     mov     ecx, [r12+4]
@@ -947,6 +1000,153 @@ ev_pointer:
     mov     esi, [r12+8]
     call    ui_axis
     jmp     ev_done
+
+# tablets (zwp_tablet_v2): tools come and go on the tablet seat; a tool's
+#   events are collected until its frame, then given to the UI as pointer
+#   motion and the left button (stylus buttons: middle and right), with
+#   in_pressure and in_eraser set for the brushes
+ev_tab_seat:
+    cmp     r13d, 1                     # tool_added(id)
+    jne     ev_done
+    lea     r15, [rip+tab_tool]         # (tab_type, tab_cdev follow)
+    xor     ebx, ebx
+1:  cmp     dword ptr [r15+rbx*4], 0
+    je      2f
+    inc     ebx
+    cmp     ebx, TAB_TOOLS
+    jb      1b
+    jmp     ev_done                     # (no room: ignored)
+2:  mov     eax, [r12]
+    mov     [r15+rbx*4], eax
+    mov     dword ptr [r15+rbx*4+TAB_TOOLS*4], TOOL_PEN
+    mov     dword ptr [r15+rbx*4+TAB_TOOLS*8], 0
+    cmp     dword ptr [rip+id_cursor_mgr], 0
+    je      ev_done
+    call    alloc_id
+    mov     [r15+rbx*4+TAB_TOOLS*8], eax
+    mov     edx, eax
+    mov     ecx, [r15+rbx*4]
+    mov     edi, [rip+id_cursor_mgr]
+    mov     esi, CURSOR_MGR_GET_TABLET_TOOL
+    call    msg2
+    jmp     ev_done
+
+ev_tool:                                # ebx = the tool's slot
+    cmp     r13d, 18
+    ja      ev_done
+    lea     rax, [rip+tool_ops]
+    movsxd  rcx, dword ptr [rax+r13*4]
+    add     rax, rcx
+    jmp     rax
+.Ltl_type:
+    mov     eax, [r12]
+    mov     [r15+rbx*4+TAB_TOOLS*4], eax
+    jmp     ev_done
+.Ltl_removed:
+    mov     dword ptr [r15+rbx*4], 0
+    jmp     ev_done
+.Ltl_in:                                # proximity_in(serial, tablet, surface)
+    mov     dword ptr [rip+in_pen], 1
+    xor     eax, eax
+    cmp     dword ptr [r15+rbx*4+TAB_TOOLS*4], TOOL_ERASER
+    sete    al
+    mov     [rip+in_eraser], eax
+    mov     edi, [r15+rbx*4+TAB_TOOLS*8]   # the same cursor as the mouse's
+    test    edi, edi
+    jz      ev_done
+    mov     edx, [r12]
+    mov     ecx, [rip+cur_shape]
+    test    ecx, ecx
+    jnz     1f
+    mov     ecx, 1
+1:  mov     esi, CURSOR_DEV_SET_SHAPE
+    call    msg2
+    jmp     ev_done
+.Ltl_out:
+    mov     dword ptr [rip+in_eraser], 0
+    jmp     ev_done
+.Ltl_down:
+    mov     eax, [r12]
+    mov     [rip+tab_serial], eax
+    or      dword ptr [rip+tab_ev], 2
+    jmp     ev_done
+.Ltl_up:
+    or      dword ptr [rip+tab_ev], 4
+    jmp     ev_done
+.Ltl_motion:                            # motion(x, y) (fixed 24.8)
+    mov     eax, [r12]
+    sar     eax, 8
+    mov     [rip+tab_x], eax
+    mov     eax, [r12+4]
+    sar     eax, 8
+    mov     [rip+tab_y], eax
+    or      dword ptr [rip+tab_ev], 1
+    jmp     ev_done
+.Ltl_pressure:                          # pressure(0..65535)
+    cvtsi2ss xmm0, dword ptr [r12]
+    divss   xmm0, [rip+tab_pmax]
+    movss   [rip+in_pressure], xmm0
+    jmp     ev_done
+.Ltl_button:                            # button(serial, button, state)
+    mov     edi, BTN_MIDDLE
+    cmp     dword ptr [r12+4], BTN_STYLUS
+    je      1f
+    mov     edi, BTN_RIGHT
+    cmp     dword ptr [r12+4], BTN_STYLUS2
+    jne     ev_done
+1:  mov     esi, [r12+8]
+    mov     edx, [r12]
+    xor     ecx, ecx
+    call    ui_button
+    jmp     ev_done
+.Ltl_frame:                             # frame(time): what was collected
+    mov     r14d, [r12]
+    mov     ebx, [rip+tab_ev]
+    mov     dword ptr [rip+tab_ev], 0
+    test    ebx, 1
+    jz      1f
+    mov     edi, [rip+tab_x]
+    mov     esi, [rip+tab_y]
+    call    ui_motion
+1:  test    ebx, 2
+    jz      2f
+    mov     edi, BTN_LEFT
+    mov     esi, 1
+    mov     edx, [rip+tab_serial]
+    mov     ecx, r14d
+    call    ui_button
+2:  test    ebx, 4
+    jz      ev_done
+    mov     edi, BTN_LEFT
+    xor     esi, esi
+    mov     edx, [rip+tab_serial]
+    mov     ecx, r14d
+    call    ui_button
+    jmp     ev_done
+
+# tab_seat - once there are a seat and a tablet manager: the tablet seat
+tab_seat:
+    cmp     dword ptr [rip+id_tab_seat], 0
+    jne     1f
+    cmp     dword ptr [rip+id_tab_mgr], 0
+    je      1f
+    cmp     dword ptr [rip+id_seat], 0
+    je      1f
+    call    alloc_id
+    mov     [rip+id_tab_seat], eax
+    mov     edx, eax
+    mov     ecx, [rip+id_seat]
+    mov     edi, [rip+id_tab_mgr]
+    mov     esi, TAB_MGR_GET_SEAT
+    call    msg2
+1:  ret
+
+# mouse_input - a pointer event: full pressure, no eraser
+mouse_input:
+    mov     eax, [rip+sf_one_w]
+    mov     [rip+in_pressure], eax
+    mov     dword ptr [rip+in_eraser], 0
+    ret
 
 ev_keyboard:
     cmp     r13d, 3

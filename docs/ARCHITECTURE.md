@@ -13,7 +13,7 @@ stays private to the module.
 | Module | Responsibility |
 |--------|----------------|
 | `main.s` | `_start`, command-line flags, the event loop |
-| `wayland.s` | Socket, message encoding/decoding, `SCM_RIGHTS`, shm buffers, event dispatch, frame pacing |
+| `wayland.s` | Socket, message encoding/decoding, `SCM_RIGHTS`, shm buffers, event dispatch, frame pacing, drawing times (`frametime`), tablets (`zwp_tablet_v2` tools: pen motion and buttons as pointer input, pressure, eraser end) |
 | `draw.s` | Framebuffer primitives: rects, gradients, text, lines, clip rectangle |
 | `ui.s` | Layout, hit testing, pointer/keyboard handling, title bar, menus, panes, status bar |
 | `ops.s` | The operator spine: application operators, `run_op`, key dispatch, shortcut text, `--list-ops` |
