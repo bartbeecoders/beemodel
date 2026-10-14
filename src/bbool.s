@@ -115,6 +115,15 @@ spl_next:       .skip 4*MAXSPL
 spl_n:          .skip 4
 nv_v:           .skip 4*MAXNV
 nv_n:           .skip 4
+# edges of one solid lying in a face of the other (from sections along
+#   them): put into that face
+ins_e:          .skip 4*4096
+ins_f:          .skip 4*4096
+ins_n:          .skip 4
+# the solids' own vertices (welding, snapping)
+ov_v:           .skip 4*65536
+ov_n:           .skip 4
+ov_mark:        .skip 8
 # section pieces: edge, local face a, local face b
 spc_e:          .skip 4*MAXSPC
 spc_a:          .skip 4*MAXSPC
@@ -199,6 +208,8 @@ bk_bool:
     mov     [rip+spl_n], eax
     mov     [rip+nv_n], eax
     mov     [rip+spc_n], eax
+    mov     [rip+ins_n], eax
+    mov     [rip+ov_n], eax
     mov     [rip+ep_n], eax
     mov     [rip+bs_n], eax
     call    bo_faces
@@ -309,6 +320,10 @@ bk_bool:
     jne     .Lbk_f9
     jmp     8f
 7:  mov     edi, r15d
+    mov     esi, [rsp+8]
+    mov     edx, 9999
+    call    bk_note
+    mov     edi, r15d
     call    bk_dump
 8:
     mov     eax, r15d
@@ -435,12 +450,63 @@ bo_faces:
     mov     dword ptr [rip+bo_fail], 1
 .Lbx_out:
     call    edges_reset
+    call    own_vertices
     add     rsp, 8
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
     ret
+
+# own_vertices - ov_v: every vertex of both solids, once
+own_vertices:
+    push    rbx
+    sub     rsp, 16
+    mov     rdi, [rip+bk_vx+AR_USED]    # a byte per vertex: seen
+    shr     rdi, 5
+    add     rdi, 16
+    mov     [rsp], rdi
+    call    bk_data
+    mov     [rip+ov_mark], rax
+    mov     rdi, rax
+    mov     rcx, [rsp]
+    xor     eax, eax
+    rep     stosb
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+lf_n]
+    jae     9f
+    lea     rcx, [rip+lf_face]
+    mov     edi, [rcx+rbx*4]
+    lea     rsi, [rip+ov_take]
+    call    each_coedge
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 16
+    pop     rbx
+    ret
+ov_take:
+    sub     rsp, 8
+    mov     edi, [rax+CE_EDGE]
+    call    p_ed
+    mov     edi, [rax+ED_V0]
+    call    ov_one
+    mov     edi, [rax+ED_V1]
+    call    ov_one
+    add     rsp, 8
+    ret
+# ov_one(edi=vertex; rax kept)
+ov_one:
+    mov     rcx, [rip+ov_mark]
+    cmp     byte ptr [rcx+rdi], 0
+    jne     9f
+    mov     byte ptr [rcx+rdi], 1
+    mov     ecx, [rip+ov_n]
+    cmp     ecx, 65536
+    jae     9f
+    lea     rdx, [rip+ov_v]
+    mov     [rdx+rcx*4], edi
+    inc     dword ptr [rip+ov_n]
+9:  ret
 
 # edges_reset - every edge of both solids: no splits, no pieces yet
 edges_reset:
@@ -795,7 +861,7 @@ uv_inside:
 9:  ret
 
 # bdist(edi=local face, xmm0=u, xmm1=v) -> xmm0 = the distance (in the
-#   face's metric) to its boundary
+#   face's metric) to its boundary, eax = the edge of the nearest piece
 bdist:
     lea     rax, [rip+lf_su]
     movsd   xmm6, [rax+rdi*8]
@@ -809,6 +875,7 @@ bdist:
     mov     edx, [rax+rdi*4]
     add     edx, ecx
     movsd   xmm8, [rip+bo_big]          # best squared
+    mov     eax, -1                     # (its edge)
     lea     r8, [rip+bs_rec]
 1:  cmp     ecx, edx
     jae     9f
@@ -852,8 +919,11 @@ bdist:
     mulsd   xmm9, xmm9
     mulsd   xmm10, xmm10
     addsd   xmm9, xmm10
-    minsd   xmm8, xmm9
-    inc     ecx
+    comisd  xmm9, xmm8
+    jae     3f
+    movsd   xmm8, xmm9
+    mov     eax, [r9+BS_E]
+3:  inc     ecx
     jmp     1b
 9:  sqrtsd  xmm0, xmm8
     ret
@@ -1012,31 +1082,61 @@ bo_section:
     mulsd   xmm0, [rip+bo_half]
     lea     rdi, [rsp+SE_M]
     call    se_point_at
-    mov     edi, [rsp+SE_LA]            # inside both faces, off their
-    movsd   xmm0, [rsp+SE_M+24]         #  boundaries
-    movsd   xmm1, [rsp+SE_M+32]
-    call    uv_inside
-    test    eax, eax
-    jz      .Lse_pcn
-    mov     edi, [rsp+SE_LB]
-    movsd   xmm0, [rsp+SE_M+40]
-    movsd   xmm1, [rsp+SE_M+48]
-    call    uv_inside
-    test    eax, eax
-    jz      .Lse_pcn
+    # on a face's boundary: that face's edge goes into the other face (when
+    # inside it); off both: a section piece when inside both
     mov     edi, [rsp+SE_LA]
     movsd   xmm0, [rsp+SE_M+24]
     movsd   xmm1, [rsp+SE_M+32]
     call    bdist
-    comisd  xmm0, [rip+bo_on]
-    jbe     .Lse_pcn
+    mov     [rsp+SE_I], eax             # a's nearest edge, distance
+    movsd   [rsp+SE_C], xmm0
     mov     edi, [rsp+SE_LB]
     movsd   xmm0, [rsp+SE_M+40]
     movsd   xmm1, [rsp+SE_M+48]
     call    bdist
-    comisd  xmm0, [rip+bo_on]
-    jbe     .Lse_pcn
-    lea     rcx, [rip+cr_v]
+    mov     [rsp+SE_C+12], eax          # b's
+    movsd   [rsp+SE_TMP+16], xmm0
+    movsd   xmm1, [rip+bo_on]
+    comisd  xmm1, [rsp+SE_C]
+    jae     .Lse_onA
+    comisd  xmm1, [rsp+SE_TMP+16]
+    jae     .Lse_onB
+    mov     edi, [rsp+SE_LA]            # off both: inside both?
+    movsd   xmm0, [rsp+SE_M+24]
+    movsd   xmm1, [rsp+SE_M+32]
+    call    uv_inside
+    test    eax, eax
+    jz      .Lse_pcn
+    mov     edi, [rsp+SE_LB]
+    movsd   xmm0, [rsp+SE_M+40]
+    movsd   xmm1, [rsp+SE_M+48]
+    call    uv_inside
+    test    eax, eax
+    jz      .Lse_pcn
+    jmp     6f
+.Lse_onB:                               # on b's boundary, off a's: b's
+    mov     edi, [rsp+SE_LA]            #  edges along it into a, when it
+    movsd   xmm0, [rsp+SE_M+24]         #  is inside a
+    movsd   xmm1, [rsp+SE_M+32]
+    call    uv_inside
+    test    eax, eax
+    jz      .Lse_pcn
+    mov     edi, 1
+    call    ins_along
+    jmp     .Lse_pcn
+.Lse_onA:
+    comisd  xmm1, [rsp+SE_TMP+16]       # (on both: nothing)
+    jae     .Lse_pcn
+    mov     edi, [rsp+SE_LB]
+    movsd   xmm0, [rsp+SE_M+40]
+    movsd   xmm1, [rsp+SE_M+48]
+    call    uv_inside
+    test    eax, eax
+    jz      .Lse_pcn
+    xor     edi, edi
+    call    ins_along
+    jmp     .Lse_pcn
+6:  lea     rcx, [rip+cr_v]
     mov     edi, [rcx+r12*4]
     mov     esi, [rcx+r13*4]
     movsd   xmm0, [rsp+SE_TMP]
@@ -1082,6 +1182,102 @@ sp_at:
     add     rax, [r9+SE_PTS]
     ret
 
+# ins_along(edi=0: a's edges into b / 1: b's into a; bo_section's frame:
+#   the piece from SE_TMP to SE_TMP+8) - every boundary edge the piece runs
+#   along (nearest to 17 points of it) into the other face
+ins_along:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 64
+    lea     r13, [rsp+64+24+8]          # bo_section's frame
+    mov     r12d, edi
+    xor     ebx, ebx
+1:  cmp     ebx, 16
+    ja      9f
+    cvtsi2sd xmm0, ebx                  # position: p0 + (p1 - p0) k / 16
+    mov     eax, 16
+    cvtsi2sd xmm1, eax
+    divsd   xmm0, xmm1
+    movsd   xmm1, [r13+SE_TMP+8]
+    subsd   xmm1, [r13+SE_TMP]
+    mulsd   xmm0, xmm1
+    addsd   xmm0, [r13+SE_TMP]
+    lea     rdi, [rsp]
+    call    se_point_at_f               # (bo_section's frame as given)
+    mov     edi, [r13+SE_LA]            # the nearest edge of that side
+    movsd   xmm0, [rsp+24]
+    movsd   xmm1, [rsp+32]
+    test    r12d, r12d
+    jz      2f
+    mov     edi, [r13+SE_LB]
+    movsd   xmm0, [rsp+40]
+    movsd   xmm1, [rsp+48]
+2:  call    bdist
+    comisd  xmm0, [rip+bo_on]
+    ja      3f
+    mov     edi, eax
+    mov     esi, [r13+SE_LB]
+    test    r12d, r12d
+    jz      21f
+    mov     esi, [r13+SE_LA]
+21: call    ins_add
+3:  inc     ebx
+    jmp     1b
+9:  add     rsp, 64
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+# se_point_at_f(rdi=out, xmm0=position; r13=bo_section's frame) - as
+#   se_point_at, from a deeper frame
+se_point_at_f:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, r13
+    jmp     se_point_body
+
+# ins_add(edi=edge (-1: none), esi=local face) - the edge into that face
+#   (once)
+ins_add:
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    bk_keep
+    test    eax, eax
+    jz      0f
+    mov     edi, [rsp+16]
+    mov     esi, [rsp+8]
+    mov     edx, 7777
+    call    bk_note
+0:  add     rsp, 8
+    pop     rsi
+    pop     rdi
+    test    edi, edi
+    js      9f
+    xor     eax, eax
+1:  cmp     eax, [rip+ins_n]
+    jae     2f
+    lea     rcx, [rip+ins_e]
+    cmp     [rcx+rax*4], edi
+    jne     11f
+    lea     rcx, [rip+ins_f]
+    cmp     [rcx+rax*4], esi
+    je      9f
+11: inc     eax
+    jmp     1b
+2:  cmp     eax, 4096
+    jae     9f
+    lea     rcx, [rip+ins_e]
+    mov     [rcx+rax*4], edi
+    lea     rcx, [rip+ins_f]
+    mov     [rcx+rax*4], esi
+    inc     dword ptr [rip+ins_n]
+    lea     rcx, [rip+lf_touch]
+    mov     dword ptr [rcx+rsi*4], 1
+9:  ret
+
 # se_point_at(rdi=out record, xmm0=position k + f; bo_section's frame) - the
 #   section interpolated there
 se_point_at:
@@ -1089,6 +1285,7 @@ se_point_at:
     push    r12
     sub     rsp, 8
     lea     r12, [rsp+32]               # bo_section's frame
+se_point_body:
     mov     rbx, rdi
     mov     r9, r12
     cvttsd2si ecx, xmm0
@@ -1509,9 +1706,13 @@ edge_root:
     inc     ebx
     jmp     .Ler_it
 .Ler_nobracket:
-    # no sign change: the curve may touch the surface (a double root): the
-    # smallest |distance| in the bracket (golden section); not touching
-    # (farther than the tolerance): no crossing
+    # no sign change: at most a touch (a double root, found only to the
+    # square root of the noise): no crossing here - the transversal side
+    # makes that vertex exactly, and it splits this edge (snap_vertices)
+    mov     dword ptr [rip+er_miss], 1
+    movsd   xmm0, [rsp+ER_A]
+    movsd   [rsp+ER_T], xmm0
+    jmp     .Ler_done
     mov     dword ptr [rip+er_miss], 0
     xor     ebx, ebx
 5:  cmp     ebx, 80
@@ -1594,7 +1795,23 @@ new_vertex:
     push    r12
     push    r13
     mov     r12, rdi
-    xor     ebx, ebx
+    xor     ebx, ebx                    # the solids' own vertices first
+55: cmp     ebx, [rip+ov_n]
+    jae     57f
+    lea     rax, [rip+ov_v]
+    mov     edi, [rax+rbx*4]
+    call    p_vx
+    mov     rdi, rax
+    mov     rsi, r12
+    call    v3dist
+    comisd  xmm0, [rip+bo_weld]
+    ja      56f
+    lea     rax, [rip+ov_v]
+    mov     eax, [rax+rbx*4]
+    jmp     9f
+56: inc     ebx
+    jmp     55b
+57: xor     ebx, ebx
 1:  cmp     ebx, [rip+nv_n]
     jae     2f
     lea     rax, [rip+nv_v]
@@ -1917,11 +2134,18 @@ snap_vertices:
     push    rbx
     push    r12
     sub     rsp, 8
-    xor     ebx, ebx
-1:  cmp     ebx, [rip+nv_n]
+    xor     ebx, ebx                    # new vertices, then the solids' own
+1:  mov     eax, [rip+nv_n]
+    add     eax, [rip+ov_n]
+    cmp     ebx, eax
     jae     9f
-    lea     rax, [rip+nv_v]
-    mov     edi, [rax+rbx*4]
+    mov     eax, ebx
+    lea     rcx, [rip+nv_v]
+    cmp     ebx, [rip+nv_n]
+    jb      11f
+    sub     eax, [rip+nv_n]
+    lea     rcx, [rip+ov_v]
+11: mov     edi, [rcx+rax*4]
     mov     [rip+sn_vx], edi
     call    p_vx
     movupd  xmm0, [rax]
@@ -2303,7 +2527,18 @@ he_add:
     sub     rsp, 48
     mov     [rsp+HA_E], edi
     mov     [rsp+HA_REV], esi
-    mov     eax, [rip+he_n]
+    xor     ecx, ecx                    # (already there: once is enough)
+0:  cmp     ecx, [rip+he_n]
+    jae     71f
+    imul    rax, rcx, HE_SZ
+    lea     rdx, [rip+he_rec]
+    cmp     [rdx+rax+HE_E], edi
+    jne     72f
+    cmp     [rdx+rax+HE_REV], esi
+    je      .Lha_out
+72: inc     ecx
+    jmp     0b
+71: mov     eax, [rip+he_n]
     cmp     eax, MAXHE
     jae     .Lha_full
     imul    rbx, rax, HE_SZ
@@ -2559,11 +2794,27 @@ bo_face:
     lea     rcx, [rip+lf_coin]
     mov     eax, [rcx+rax*4]
     test    eax, eax
-    js      .Lbf_walk
+    js      .Lbf_ins0
     lea     rcx, [rip+lf_face]
     mov     edi, [rcx+rax*4]
     lea     rsi, [rip+he_inserted]
     call    each_coedge
+.Lbf_ins0:
+    xor     r12d, r12d                  # edges of the other solid along it
+.Lbf_ins:
+    cmp     r12d, [rip+ins_n]
+    jae     .Lbf_walk
+    mov     eax, [rsp+BF_LF]
+    lea     rcx, [rip+ins_f]
+    cmp     [rcx+r12*4], eax
+    jne     1f
+    lea     rcx, [rip+ins_e]
+    mov     eax, [rcx+r12*4]
+    mov     [rsp+BF_I], eax
+    lea     rax, [rsp+BF_I]             # (as a coedge record: CE_EDGE = 0)
+    call    he_inserted
+1:  inc     r12d
+    jmp     .Lbf_ins
 .Lbf_walk:
     cmp     dword ptr [rip+bo_fail], 0
     jne     .Lbf_out

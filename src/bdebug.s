@@ -9,6 +9,7 @@
 .globl bk_keep
 .globl bk_dump
 .globl bk_dump_he
+.globl bk_note
 
 .section .rodata
 s_keep:         .asciz "BEEMODEL_BREP_KEEP="
@@ -25,6 +26,7 @@ s_av:           .asciz " area/vol*1000 "
 s_pc:           .asciz " pc"
 s_bar:          .asciz " |"
 s_lf:           .asciz "arrangement of local face "
+s_note:         .asciz "note "
 
 .align 8
 d_k:            .double 1000.0
@@ -152,10 +154,14 @@ bk_dump_he:
     call    d_str
     mov     edi, [rbx+8]
     call    d_int
+    mov     edi, [rbx+8]
+    call    d_vpos
     lea     rdi, [rip+s_arrow]
     call    d_str
     mov     edi, [rbx+12]
     call    d_int
+    mov     edi, [rbx+12]
+    call    d_vpos
     lea     rdi, [rip+s_ce]
     call    d_str
     movsd   xmm0, [rbx+32]
@@ -173,6 +179,32 @@ bk_dump_he:
     inc     r13d
     jmp     1b
 9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bk_note(edi, esi, edx) - three numbers on a line ("note a b c")
+bk_note:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12d, esi
+    mov     r13d, edx
+    lea     rdi, [rip+s_note]
+    call    d_str
+    mov     edi, ebx
+    call    d_int
+    lea     rdi, [rip+s_ce]
+    call    d_str
+    mov     edi, r12d
+    call    d_int
+    lea     rdi, [rip+s_ce]
+    call    d_str
+    mov     edi, r13d
+    call    d_int
+    call    d_nl
+    pop     r13
     pop     r12
     pop     rbx
     ret
