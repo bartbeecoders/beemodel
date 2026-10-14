@@ -74,6 +74,9 @@ jobs:
       - name: Sculpting at scale (25M vertices, frame times, memory)
         run: timeout 900 python tests/sculpt20m.py build/beemodel --frame-ms 250
 
+      - name: A billion triangles (virtual geometry: cuts, culling, streaming, memory)
+        run: timeout 900 python tests/billion.py build/beemodel build/shots --tiles 4 --frame-ms 150
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 600 python tools/fakewl.py build/shots
 

@@ -413,6 +413,10 @@ builtins:
     .long 1, 1
     .quad bn_vgeo, b_vgeo
     .long 2, 2
+    .quad bn_vgstat, b_vgstat
+    .long 1, 1
+    .quad bn_view, b_view
+    .long 6, 6
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -680,6 +684,8 @@ bn_colls:       .asciz "collisions"
 bn_clinfo:      .asciz "clothinfo"
 bn_cainfo:      .asciz "cacheinfo"
 bn_vgeo:        .asciz "vgeo"
+bn_vgstat:      .asciz "vgstat"
+bn_view:        .asciz "view"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -4491,9 +4497,19 @@ mod_index_call:
     mov     rbx, rax
     lea     rdi, [rip+s_script]
     call    undo_push
+    call    fa_mark                     # its scratch memory goes back after
+    push    rax                         #  (a script applying many)
+    sub     rsp, 8
     mov     rdi, rbx
     mov     esi, r12d
     call    r13
+    add     rsp, 8
+    pop     rdi
+    push    rax
+    sub     rsp, 8
+    call    fa_release
+    add     rsp, 8
+    pop     rax
     test    eax, eax
     jz      8f
     pop     r13
@@ -4828,6 +4844,46 @@ b_vgeo:
     pop     r12
     pop     rbx
     jmp     ret_num
+
+# vgstat(k) -> the last frame's drawing through cluster DAGs (vgdraw.s:
+#   vgd_stat)
+b_vgstat:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    vgd_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# view(yaw, pitch, distance, x, y, z) - the viewport camera: degrees round
+#   and above its target, metres from it
+b_view:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    xor     r12d, r12d
+1:  mov     rdi, r12
+    shl     rdi, 4
+    add     rdi, rbx
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    cmp     r12d, 2
+    jae     2f
+    divss   xmm0, [rip+f_rad2deg]
+2:  lea     rax, [rip+cam_yaw]
+    movss   [rax+r12*4], xmm0
+    inc     r12d
+    cmp     r12d, 6
+    jb      1b
+    mov     edi, [rip+vp_area]
+    call    cam_store
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
 
 # collisions() -> how many pairs of a mechanism's parts collide now
 b_colls:

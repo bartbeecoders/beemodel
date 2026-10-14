@@ -29,8 +29,46 @@ project uses [Semantic Versioning](https://semver.org/).
   - **Operators and scripts:** `vgeo.extract <level | error>` adds a cut as
     a mesh with its clusters coloured, `vgeo.clear` drops the DAG, and
     BeeScript's `vgeo(name, k)` reports on it.
+- **Drawing cluster DAGs** (virtualized geometry, part 2, #144). A mesh with
+  a DAG is drawn through a new cut every frame (`src/vgdraw.s`).
+  - **Cuts:** from the roots down, a group is refined while its error,
+    projected from the camera, is over one pixel (`vgeo.error`). Each object
+    is cut on its own thread; the chosen clusters are decoded into a mesh in
+    the frame arena (64 clusters a job) and rasterized like any other.
+  - **Culling:** a group whose LOD sphere is outside the frustum is skipped
+    whole, and so is each cluster outside it. A cluster hidden behind last
+    frame's depth pyramid (seen from last frame's camera) waits. After the
+    first batch is drawn, the pyramid is built from this frame's depth, and
+    the waiting clusters that are visible after all are drawn in a second
+    batch.
+  - **Streaming:** a DAG read from a `.bee` file stays mapped from it.
+    Cluster data comes in 64 KiB pages, read ahead (madvise) when a group
+    needs them and counted in once they are in memory. Past the budget
+    (`vgeo.budget`, default 2 GB), the least recently used pages are given
+    back; the roots' pages always stay. A group whose members are not in yet
+    is drawn as the clusters it made, which keeps the cut crack-free.
+  - **Proxies:** `vgeo.proxy` replaces the mesh, everywhere it is used, by
+    its DAG's roots (welded), and the DAG goes with it. Files and memory
+    then hold the DAG only.
+  - **The exit check:** [tests/billion.py](tests/billion.py) builds 64
+    unique million-triangle terrain tiles and 8 boulders, places 960 linked
+    copies (1.05 billion source triangles, a 2.1 GB file), reopens it and
+    flies over it. Frames take 5.8 ms at the median (8.2 ms at the 95th
+    percentile) on 32 threads. The process peaks at 851 MB, with 64 MB of
+    pages under a small budget.
+  - **Tools:** `vgeo.view clusters | shaded | off | check` (check: the
+    drawn cut against level 0, for cracks), BeeScript `vgstat(k)` (the last
+    frame's cut, culling and streaming) and `view(yaw, pitch, distance, x,
+    y, z)` (the viewport camera). The zoom now goes out to 20 km.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
+
+### Fixed
+- `modapply` in a script gave its scratch memory back only at the end of the
+  script: a script applying many large geometry node modifiers ran out of
+  frame memory (a flat result, then a crash).
+- Leaving sculpt mode now marks the mesh as changed, so caches keyed by its
+  version see the strokes.
 
 ## [0.10.0] - 2026-10-14
 

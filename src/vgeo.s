@@ -28,6 +28,7 @@
 
 .globl vg_build_mesh
 .globl vg_get
+.globl vg_live
 .globl vg_ref
 .globl vg_unref
 .globl vg_attach
@@ -39,57 +40,11 @@
 .globl vg_state
 .globl vg_async
 .globl vgeo_read
+.globl vg_unmap_file
 .globl vg_zero
 .globl vg_selftest
 
-# the block
-.equ VG_MAGIC,  0x4F454756              # "VGEO"
-.equ VG_VERSION, 1
-.equ VH_MAGIC,  0
-.equ VH_VER,    4
-.equ VH_REFS,   8
-.equ VH_NCL,    12
-.equ VH_NGR,    16
-.equ VH_NLV,    20
-.equ VH_STRI,   24                      # source triangles (welded, no degenerate)
-.equ VH_SVERT,  28                      # welded vertices
-.equ VH_BMIN,   32                      # f32 x 3: the grid's origin
-.equ VH_STEP,   44                      # f32: its spacing
-.equ VH_HASH,   48                      # the mesh it was built from
-.equ VH_MS,     56                      # build time
-.equ VH_TTRI,   60                      # triangles in all clusters
-.equ VH_NMEM,   64
-.equ VH_ROOTS,  68
-.equ VH_OCL,    72                      # u64 offsets in the block
-.equ VH_OGR,    80
-.equ VH_OMEM,   88
-.equ VH_ODATA,  96
-.equ VH_DBYTES, 104
-.equ VH_BYTES,  112
-.equ VH_RERR,   120                     # f32: the largest error
-.equ VH_LV,     128                     # per level: first cluster, clusters,
-.equ VH_SZ,     512                     #   triangles, largest error
-.equ VG_MAXLV,  24
-
-.equ CR_C,      0                       # bounds: centre, radius
-.equ CR_LOD,    16                      # LOD sphere (of the group that made it)
-.equ CR_PLOD,   32                      # parent LOD sphere (the group it is in)
-.equ CR_ERR,    48
-.equ CR_PERR,   52                      # FLT_MAX for roots
-.equ CR_DATA,   56                      # data offset / 16
-.equ CR_NV,     60                      # u8
-.equ CR_NT,     61                      # u8
-.equ CR_LEVEL,  62                      # u8
-.equ CR_SZ,     64
-
-.equ GR_MEM,    0                       # first member (index into members)
-.equ GR_NMEM,   4
-.equ GR_PAR,    8                       # first cluster it made
-.equ GR_NPAR,   12
-.equ GR_ERR,    16
-.equ GR_LOD,    20                      # sphere
-.equ GR_LEVEL,  36
-.equ GR_SZ,     48
+.include "vgeo.inc"
 
 # build-time cluster info
 .equ CB_TOFF,   0                       # first triangle in bt
@@ -103,14 +58,18 @@
 .equ BLK,       4096                    # level 0 is partitioned in blocks
 .equ NCAND,     1024
 .equ VM_MAX,    256
+.equ VK_MAX,    4096
 .equ MAP_NORES, 0x4022
 .equ MAP_ANON_PRIV, 0x22
 .equ SYS_CLOCK_GETTIME, 228
+.equ SYS_MPROTECT, 10
 
 .section .bss
 .align 16
 vm_list:        .skip 16*VM_MAX         # the builder's mappings (pointer, bytes)
 vm_n:           .skip 4
+vk_list:        .skip 16*VK_MAX         # DAG blocks kept in a file's mapping
+vk_n:           .skip 4
 vg_state:       .skip 4                 # 0 idle, 1 building, 2 built (to attach)
 vg_async:       .skip 4                 # the window: build in the background
 vg_fail:        .skip 4
@@ -4069,6 +4028,9 @@ vg_unref:
     jz      1f
     lock dec dword ptr [rdi+VH_REFS]
     jnz     1f
+    push    rdi
+    call    vd_forget                   # (its drawing state)
+    pop     rdi
     mov     rsi, [rdi+VH_BYTES]
     mov     eax, SYS_MUNMAP
     syscall
@@ -4077,6 +4039,7 @@ vg_unref:
 # vg_attach(rdi=mesh, rsi=dag) - the mesh's DAG (its reference taken over;
 #   the old one let go)
 vg_attach:
+    mov     dword ptr [rdi+ME_VGOK], 0  # (checked again)
     mov     rax, [rdi+ME_VGEO]
     mov     [rdi+ME_VGEO], rsi
     cmp     rax, rsi
@@ -4098,9 +4061,42 @@ vg_get:
     mov     rax, 0xcbf29ce484222325
     call    sc_meshhash
     cmp     rax, [rbx+VH_HASH]
-    mov     rax, rbx
+    je      1f
+    cmp     rax, [rbx+VH_PHASH]         # (or its proxy)
+1:  mov     rax, rbx
     pop     rbx
     je      9f
+8:  xor     eax, eax
+9:  ret
+
+# vg_live(rdi=mesh) -> rax = vg_get, its answer kept with the mesh's version
+#   (ME_VGOK): drawing asks every frame
+vg_live:
+    test    rdi, rdi
+    jz      8f
+    mov     rax, [rdi+ME_VGEO]
+    test    rax, rax
+    jz      9f
+    mov     eax, [rdi+ME_VER]
+    inc     eax
+    cmp     [rdi+ME_VGOK], eax
+    je      7f
+    neg     eax
+    cmp     [rdi+ME_VGOK], eax
+    je      8f
+    push    rbx
+    mov     rbx, rdi
+    call    vg_get
+    mov     ecx, [rbx+ME_VER]
+    inc     ecx
+    test    rax, rax
+    jnz     1f
+    neg     ecx
+1:  mov     [rbx+ME_VGOK], ecx
+    pop     rbx
+    ret
+7:  mov     rax, [rdi+ME_VGEO]
+    ret
 8:  xor     eax, eax
 9:  ret
 
@@ -4658,8 +4654,10 @@ vg_info:
     pop     rbx
     ret
 
-# vgeo_read(rdi=chunk data, esi=bytes) -> rax = a DAG (its own pages) and
-#   edx = the mesh (index in the file), or rax = 0
+# vgeo_read(rdi=chunk data, esi=bytes) -> rax = a DAG and edx = the mesh
+#   (index in the file), or rax = 0. A block on a page of the mapped file
+#   stays where it is (vg_unmap_file leaves it mapped): its cluster data is
+#   read from the file only where vgdraw.s streams it in.
 vgeo_read:
     push    rbx
     push    r12
@@ -4681,7 +4679,32 @@ vgeo_read:
     mov     r12, [rbx+VH_BYTES]
     cmp     r12, rsi
     ja      8f
-    xor     edi, edi
+    test    r12d, 4095
+    jnz     8f
+    test    ebx, 4095                   # on a page of the file: kept where
+    jnz     5f                          #  it is, mapped from the file (its
+    cmp     dword ptr [rip+vk_n], VK_MAX #  pages streamed in by vgdraw.s);
+    jae     5f                          #  bee_load unmaps the rest
+    mov     rdi, rbx                    # the header page: written (references,
+    mov     esi, 4096                   #  runtime state)
+    mov     edx, PROT_RW
+    mov     eax, SYS_MPROTECT
+    syscall
+    test    rax, rax
+    jnz     5f
+    mov     eax, [rip+vk_n]
+    inc     dword ptr [rip+vk_n]
+    shl     rax, 4
+    lea     rcx, [rip+vk_list]
+    mov     [rcx+rax], rbx
+    mov     [rcx+rax+8], r12
+    lea     rdi, [rbx+VR_CREATOR]
+    mov     ecx, (VH_SZ-VR_CREATOR)/8
+    xor     eax, eax
+    rep     stosq
+    mov     dword ptr [rbx+VR_STREAM], 1
+    jmp     6f
+5:  xor     edi, edi
     mov     rsi, r12
     mov     edx, PROT_RW
     mov     r10d, MAP_ANON_PRIV
@@ -4696,7 +4719,11 @@ vgeo_read:
     mov     rcx, r12
     mov     rbx, rax
     rep     movsb
-    mov     dword ptr [rbx+VH_REFS], 1
+    lea     rdi, [rbx+VR_CREATOR]
+    mov     ecx, (VH_SZ-VR_CREATOR)/8
+    xor     eax, eax
+    rep     stosq
+6:  mov     dword ptr [rbx+VH_REFS], 1
     mov     rax, rbx
     mov     edx, r13d
     jmp     9f
@@ -4706,11 +4733,63 @@ vgeo_read:
     pop     rbx
     ret
 
+# vg_unmap_file(rdi=mapping, rsi=bytes) - a .bee file's mapping given back
+#   but the DAG blocks kept in it (in file order)
+vg_unmap_file:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rdi
+    lea     r13, [rdi+rsi]
+    add     r13, 4095
+    and     r13, -4096
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+vk_n]
+    jae     3f
+    mov     eax, ebx
+    shl     rax, 4
+    lea     rcx, [rip+vk_list]
+    mov     rdx, [rcx+rax]              # a kept block
+    cmp     rdx, r12
+    jb      2f
+    cmp     rdx, r13
+    jae     2f
+    mov     rdi, r12                    # what lies before it
+    mov     rsi, rdx
+    sub     rsi, r12
+    jz      11f
+    push    rdx
+    push    rcx
+    mov     eax, SYS_MUNMAP
+    syscall
+    pop     rcx
+    pop     rdx
+11: mov     eax, ebx
+    shl     rax, 4
+    lea     rcx, [rip+vk_list]
+    add     rdx, [rcx+rax+8]
+    mov     r12, rdx
+2:  inc     ebx
+    jmp     1b
+3:  cmp     r12, r13                    # the rest
+    jae     4f
+    mov     rdi, r12
+    mov     rsi, r13
+    sub     rsi, r12
+    mov     eax, SYS_MUNMAP
+    syscall
+4:  mov     dword ptr [rip+vk_n], 0
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # =============================================================================
 #  Operators
 # =============================================================================
 OPERATOR op_vg_build, "vgeo.build", "Virtualize Geometry", do_vg_build, flags=OPF_AI_SAFE, doc="Build the active mesh's cluster LOD DAG: meshlets of up to 128 triangles, grouped and simplified level by level (in the background; kept with the mesh, saved in the .bee file)"
 OPERATOR op_vg_clear, "vgeo.clear", "Clear Virtual Geometry", do_vg_clear, flags=OPF_AI_SAFE, doc="Forget the active mesh's cluster LOD DAG"
+OPERATOR op_vg_proxy, "vgeo.proxy", "Proxy Mesh", do_vg_proxy, flags=OPF_AI_SAFE|OPF_UNDO, doc="Let the active mesh go for its cluster DAG's roots (welded) wherever it is used: the DAG keeps every detail, drawn and saved with the proxy"
 OPERATOR op_vg_extract, "vgeo.extract", "Extract LOD", do_vg_extract, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add the active mesh's DAG cut as a new object, its clusters coloured: vgeo.extract <level> or vgeo.extract <error, e.g. 0.01>"
 
 # vg_active -> rax = the active object if it is a mesh, rdx = its mesh
@@ -5099,6 +5178,270 @@ do_vg_extract:
     pop     rbx
     ret
 
+# do_vg_proxy - the active mesh (and every object showing it) replaced by a
+#   mesh of its DAG's roots, vertices welded by grid position; the DAG goes
+#   with it (VH_PHASH: the proxy's hash also matches)
+.equ VY_OBJ,    0
+.equ VY_DAG,    8
+.equ VY_OLD,    16
+.equ VY_NEW,    24
+.equ VY_TAB,    32                      # x y z, new index + 1 (16 bytes)
+.equ VY_TBYTES, 40
+.equ VY_MASK,   48
+.equ VY_NV,     52
+.equ VY_NT,     56
+.equ VY_IDX,    64                      # 3 x u32
+.equ VY_MAP,    80                      # local -> new: u32 x 128
+.equ VY_SZ,     80+512+8
+do_vg_proxy:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, VY_SZ
+    call    vg_active
+    test    rax, rax
+    jz      .Lvy_none
+    mov     [rsp+VY_OBJ], rax
+    mov     [rsp+VY_OLD], rdx
+    mov     rdi, rdx
+    call    vg_get
+    test    rax, rax
+    jz      .Lvy_none
+    mov     [rsp+VY_DAG], rax
+    lea     r12, [rax+VH_SZ]            # the roots' sizes
+    mov     ecx, [rax+VH_NCL]
+    xor     r13d, r13d
+    xor     r14d, r14d
+1:  test    ecx, ecx
+    jz      2f
+    cmp     dword ptr [r12+CR_PERR], 0x7f7fffff
+    jne     11f
+    movzx   eax, byte ptr [r12+CR_NV]
+    add     r13d, eax
+    movzx   eax, byte ptr [r12+CR_NT]
+    add     r14d, eax
+11: add     r12, CR_SZ
+    dec     ecx
+    jmp     1b
+2:  mov     [rsp+VY_NV], r13d
+    mov     [rsp+VY_NT], r14d
+    test    r14d, r14d
+    jz      .Lvy_none
+    lea     eax, [r13+r13]              # the weld table: a power of two
+    mov     ecx, 64
+3:  cmp     ecx, eax
+    jae     4f
+    add     ecx, ecx
+    jmp     3b
+4:  lea     eax, [rcx-1]
+    mov     [rsp+VY_MASK], eax
+    mov     esi, ecx
+    shl     rsi, 4
+    add     rsi, 4095
+    and     rsi, -4096
+    mov     [rsp+VY_TBYTES], rsi
+    xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jae     .Lvy_none
+    mov     [rsp+VY_TAB], rax
+    mov     edi, r13d
+    lea     esi, [r14+r14*2]
+    mov     edx, r14d
+    call    mesh_new
+    test    rax, rax
+    jz      .Lvy_free
+    mov     [rsp+VY_NEW], rax
+    xor     ebx, ebx                    # cluster
+.Lvy_cl:
+    mov     rdi, [rsp+VY_DAG]
+    cmp     ebx, [rdi+VH_NCL]
+    jae     .Lvy_made
+    mov     rax, rbx
+    shl     rax, 6
+    lea     r12, [rdi+rax+VH_SZ]
+    cmp     dword ptr [r12+CR_PERR], 0x7f7fffff
+    jne     .Lvy_skip
+    mov     eax, [r12+CR_DATA]
+    shl     rax, 4
+    add     rax, [rdi+VH_ODATA]
+    lea     r13, [rdi+rax]              # its vertices
+    xor     r15d, r15d
+5:  movzx   eax, byte ptr [r12+CR_NV]
+    cmp     r15d, eax
+    jae     7f
+    mov     rax, r15
+    shl     rax, 4
+    lea     rbp, [r13+rax]              # x y z (grid)
+    mov     eax, [rbp]
+    imul    eax, eax, 0x9e3779b1
+    xor     eax, [rbp+4]
+    imul    eax, eax, 0x85ebca6b
+    xor     eax, [rbp+8]
+    imul    eax, eax, 0xc2b2ae35
+    mov     ecx, eax
+    shr     ecx, 15
+    xor     eax, ecx
+    and     eax, [rsp+VY_MASK]
+    mov     rsi, [rsp+VY_TAB]
+51: mov     rcx, rax
+    shl     rcx, 4
+    add     rcx, rsi
+    mov     edx, [rcx+12]
+    test    edx, edx
+    jz      52f
+    mov     edx, [rcx]
+    cmp     edx, [rbp]
+    jne     53f
+    mov     edx, [rcx+4]
+    cmp     edx, [rbp+4]
+    jne     53f
+    mov     edx, [rcx+8]
+    cmp     edx, [rbp+8]
+    jne     53f
+    mov     eax, [rcx+12]               # welded
+    dec     eax
+    jmp     6f
+53: inc     eax
+    and     eax, [rsp+VY_MASK]
+    jmp     51b
+52: mov     rax, [rbp]                  # new
+    mov     [rcx], rax
+    mov     eax, [rbp+8]
+    mov     [rcx+8], eax
+    push    rcx
+    sub     rsp, 8
+    mov     rdi, [rsp+16+VY_DAG]
+    cvtsi2ss xmm0, dword ptr [rbp]
+    cvtsi2ss xmm1, dword ptr [rbp+4]
+    cvtsi2ss xmm2, dword ptr [rbp+8]
+    movss   xmm3, [rdi+VH_STEP]
+    mulss   xmm0, xmm3
+    mulss   xmm1, xmm3
+    mulss   xmm2, xmm3
+    addss   xmm0, [rdi+VH_BMIN]
+    addss   xmm1, [rdi+VH_BMIN+4]
+    addss   xmm2, [rdi+VH_BMIN+8]
+    mov     rdi, [rsp+16+VY_NEW]
+    call    mesh_add_vert
+    add     rsp, 8
+    pop     rcx
+    lea     edx, [rax+1]
+    mov     [rcx+12], edx
+6:  mov     [rsp+VY_MAP+r15*4], eax
+    inc     r15d
+    jmp     5b
+7:  movzx   eax, byte ptr [r12+CR_NV]   # its triangles
+    shl     eax, 4
+    lea     r13, [r13+rax]
+    movzx   r15d, byte ptr [r12+CR_NT]
+8:  test    r15d, r15d
+    jz      .Lvy_skip
+    movzx   eax, byte ptr [r13]
+    mov     eax, [rsp+VY_MAP+rax*4]
+    mov     [rsp+VY_IDX], eax
+    movzx   ecx, byte ptr [r13+1]
+    mov     ecx, [rsp+VY_MAP+rcx*4]
+    mov     [rsp+VY_IDX+4], ecx
+    movzx   edx, byte ptr [r13+2]
+    mov     edx, [rsp+VY_MAP+rdx*4]
+    mov     [rsp+VY_IDX+8], edx
+    cmp     eax, ecx                    # (welded together: dropped)
+    je      81f
+    cmp     eax, edx
+    je      81f
+    cmp     ecx, edx
+    je      81f
+    mov     rdi, [rsp+VY_NEW]
+    lea     rsi, [rsp+VY_IDX]
+    mov     edx, 3
+    call    mesh_add_poly
+81: add     r13, 3
+    dec     r15d
+    jmp     8b
+.Lvy_skip:
+    inc     ebx
+    jmp     .Lvy_cl
+.Lvy_made:
+    mov     rdi, [rsp+VY_NEW]
+    call    mesh_finish
+    mov     rbx, [rsp+VY_DAG]           # the DAG goes with it
+    mov     rdi, rbx
+    call    vg_ref
+    mov     rdi, [rsp+VY_NEW]
+    mov     rsi, rbx
+    call    vg_attach
+    mov     rdi, [rsp+VY_NEW]
+    mov     rax, 0xcbf29ce484222325
+    call    sc_meshhash
+    mov     [rbx+VH_PHASH], rax
+    xor     r12d, r12d                  # every object showing the old mesh
+    xor     r13d, r13d                  #  shows the new one
+.Lvy_obj:
+    cmp     r12d, [rip+obj_count]
+    jae     .Lvy_done
+    mov     edi, r12d
+    call    obj_at
+    inc     r12d
+    mov     rcx, [rsp+VY_OLD]
+    cmp     [rax+OB_MESH], rcx
+    jne     .Lvy_obj
+    mov     rdi, [rsp+VY_NEW]
+    mov     [rax+OB_MESH], rdi
+    test    r13d, r13d                  # (the first takes mesh_new's
+    jz      91f                         #  reference)
+    call    mesh_ref
+91: inc     r13d
+    mov     rdi, [rsp+VY_OLD]
+    call    mesh_unref
+    jmp     .Lvy_obj
+.Lvy_done:
+    test    r13d, r13d
+    jnz     92f
+    mov     rdi, [rsp+VY_NEW]
+    call    mesh_unref
+92: mov     dword ptr [rip+dirty], 1
+    call    fmt_reset
+    lea     rdi, [rip+s_vg_proxy]
+    call    fmt_str
+    mov     rax, [rsp+VY_NEW]
+    mov     edi, [rax+ME_NTRIS]
+    call    fmt_int
+    lea     rdi, [rip+s_vg_proxy2]
+    call    fmt_str
+    mov     edi, [rbx+VH_STRI]
+    call    fmt_int
+    lea     rdi, [rip+s_vg_tris]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+.Lvy_free:
+    mov     rdi, [rsp+VY_TAB]
+    mov     rsi, [rsp+VY_TBYTES]
+    mov     eax, SYS_MUNMAP
+    syscall
+    jmp     .Lvy_out
+.Lvy_none:
+    lea     rdi, [rip+s_vg_nodag]
+    call    log_line
+.Lvy_out:
+    add     rsp, VY_SZ
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # =============================================================================
 #  Self-test (beemodel --selftest)
 # =============================================================================
@@ -5397,6 +5740,8 @@ s_vg_ms:        .asciz " ms"
 s_vg_failed:    .asciz "Virtualize failed (out of memory?)"
 s_vg_cleared:   .asciz "Cluster DAG cleared"
 s_vg_lod:       .asciz "LOD"
+s_vg_proxy:     .asciz "Proxy: "
+s_vg_proxy2:    .asciz " triangles stand in for "
 s_vg_lodmsg:    .asciz "LOD: "
 
 .section .note.GNU-stack,"",@progbits

@@ -40,7 +40,13 @@
 .equ RO_COL,        28
 .equ RO_OBJ,        32
 .equ RO_PSEL,       40              # edit mode: selected-polygon flags
-.equ RO_SZ,         48
+.equ RO_TFIRST,     48              # its first triangle / vertex in the mesh
+.equ RO_VFIRST,     52              #   (a DAG cut's second batch)
+.equ RO_SZ,         56
+.equ VI_MESH,       16              # (vgdraw.s: an object drawn through its DAG)
+.equ VI_REC,        24
+.equ VI_V2,         176
+.equ VI_T2,         180
 .equ CHUNKS,    128
 .equ BUF_ROUND,     0x100000
 .equ MAP_ANON_PRIV, 0x22
@@ -77,6 +83,8 @@ rs_objs:        .skip 8
 rs_cursor:      .skip 8
 rs_counts:      .skip 8
 rs_chunk:       .skip 4
+rs_tbase:       .skip 4             # the batch's first output slot
+rs_noclear:     .skip 4             # 1: a second batch over the first
 rs_ccount:      .skip 4*CHUNKS
 
 .section .rodata
@@ -181,6 +189,7 @@ raster_scene:
     imul    ecx, edx
     mov     edi, ecx
     call    rs_ensure
+    call    vgd_begin                   # objects drawn through cluster DAGs
 
     # ---- pass A: one record per mesh object, triangle numbering --------------
     xor     r12d, r12d                  # mesh objects
@@ -199,19 +208,25 @@ raster_scene:
     inc     r12d
     mov     rdi, rax
     call    obj_eval
+    mov     rdi, rax                    # (or the cut of its DAG)
+    mov     esi, ebx
+    call    vgd_swap
     add     r13d, [rax+ME_NTRIS]
 11: inc     ebx
     jmp     1b
 2:  mov     [rip+rs_nobjs], r12d
     mov     [rip+rs_total], r13d
+    call    vgd_n                       # (records for a second batch too)
     lea     rdi, [rip+frame_arena]
-    imul    esi, r12d, RO_SZ
-    add     esi, RO_SZ
+    lea     esi, [r12+rax+1]
+    imul    esi, esi, RO_SZ
     call    arena_alloc
     mov     [rip+rs_objs], rax
     test    rax, rax
     jz      .Lrs_out
-    lea     eax, [r13*2+1]              # clipping can split a triangle in two
+    call    vgd_extra                   # (and its triangles)
+    add     eax, r13d
+    lea     eax, [rax*2+1]              # clipping can split a triangle in two
     mov     ecx, FRAME_ARENA_BYTES/2/TRI_SZ  # (at most half the frame arena:
     cmp     eax, ecx                    #  past that a huge mesh draws the
     cmova   eax, ecx                    #  triangles that fit)
@@ -246,9 +261,17 @@ raster_scene:
 32: mov     [r14+RO_PSEL], rcx
     mov     rdi, rax
     call    obj_eval
+    mov     rdi, rax
+    mov     esi, ebx
+    call    vgd_swap
     mov     r15, rax
-    mov     [r14+RO_MESH], r15
+    mov     [rsp], rdx                  # (drawn through its DAG: the record)
+    test    rdx, rdx
+    jz      33f
+    mov     [rdx+VI_REC], r14
+33: mov     [r14+RO_MESH], r15
     mov     [r14+RO_BASE], r13d
+    mov     qword ptr [r14+RO_TFIRST], 0
     mov     ecx, [r15+ME_NTRIS]
     mov     [r14+RO_NTRIS], ecx
     add     r13d, ecx
@@ -259,14 +282,110 @@ raster_scene:
     mov     [r14+RO_COL], eax
     lea     rdi, [rip+frame_arena]      # camera-space vertices
     imul    esi, [r15+ME_NVERTS], 12
-    call    arena_alloc
+    cmp     qword ptr [rsp], 0
+    je      34f
+    imul    esi, [r15+ME_CAPV], 12      # (room for the second batch's)
+34: call    arena_alloc
     mov     [r14+RO_CV], rax
     test    rax, rax
     jz      .Lrs_out
     add     r14, RO_SZ
 31: inc     ebx
     jmp     3b
-4:  # ---- pass B: vertices -> camera space (parallel over objects) ------------
+4:  mov     dword ptr [rip+rs_tbase], 0
+    mov     dword ptr [rip+rs_noclear], 0
+    call    rs_batch
+    test    eax, eax
+    jz      .Lrs_out
+    # ---- objects drawn through DAGs: what the first batch uncovered ----------
+    call    vgd_pass2
+    test    eax, eax
+    jz      .Lrs_post
+    mov     r12d, [rip+rs_nobjs]        # their records after the first ones
+    imul    r14d, r12d, RO_SZ
+    add     r14, [rip+rs_objs]
+    mov     r15, r14
+    xor     r13d, r13d                  # its triangles
+    xor     ebp, ebp                    # its records
+    xor     ebx, ebx
+5:  call    vgd_n
+    cmp     ebx, eax
+    jae     6f
+    mov     edi, ebx
+    call    vgd_inst
+    inc     ebx
+    mov     rsi, [rax+VI_REC]
+    test    rsi, rsi
+    jz      5b
+    mov     rcx, [rax+VI_MESH]
+    mov     edx, [rcx+ME_NTRIS]
+    sub     edx, [rax+VI_T2]
+    jbe     5b
+    mov     rdi, r14
+    mov     ecx, RO_SZ/8
+    rep     movsq
+    mov     [r14+RO_BASE], r13d
+    mov     [r14+RO_NTRIS], edx
+    add     r13d, edx
+    mov     ecx, [rax+VI_T2]
+    mov     [r14+RO_TFIRST], ecx
+    mov     ecx, [rax+VI_V2]
+    mov     [r14+RO_VFIRST], ecx
+    add     r14, RO_SZ
+    inc     ebp
+    jmp     5b
+6:  test    ebp, ebp
+    jz      .Lrs_post
+    mov     eax, [rip+rs_total]         # after the first batch's slots
+    add     eax, eax
+    mov     [rip+rs_tbase], eax
+    mov     [rip+rs_objs], r15
+    mov     [rip+rs_nobjs], ebp
+    mov     [rip+rs_total], r13d
+    mov     dword ptr [rip+rs_noclear], 1
+    call    rs_batch
+    imul    eax, r12d, RO_SZ            # all the records again
+    sub     [rip+rs_objs], rax
+    add     [rip+rs_nobjs], r12d
+    mov     dword ptr [rip+rs_noclear], 0
+    mov     dword ptr [rip+rs_tbase], 0
+.Lrs_post:
+    cmp     dword ptr [rip+rs_mode], 0
+    jne     .Lrs_out
+    cmp     dword ptr [rip+vp_shading], 2   # material preview: shade
+    jne     1f
+    call    preview_shade
+1:
+    call    build_sel_table
+    test    rax, rax
+    jz      .Lrs_out
+    lea     rdi, [rip+outline_rows]
+    xor     esi, esi
+    mov     edx, [rip+rs_h]
+    mov     ecx, 32
+    call    parallel_for
+.Lrs_out:
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# rs_batch -> eax = 1: the records [rs_objs, + rs_nobjs) with rs_total
+#   triangles set up, binned and rasterized (from slot rs_tbase; over what
+#   is there when rs_noclear); 0: out of frame memory
+rs_batch:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    # ---- pass B: vertices -> camera space (parallel over objects) ------------
     lea     rdi, [rip+job_verts]
     xor     esi, esi
     mov     edx, [rip+rs_nobjs]
@@ -301,13 +420,13 @@ raster_scene:
     lea     esi, [rax*8+8]              # offsets + cursors
     call    arena_alloc
     test    rax, rax
-    jz      .Lrs_out
+    jz      .Lrb_fail
     mov     [rip+rs_toff], rax
     lea     rdi, [rip+frame_arena]      # counts[chunk][tile]
     imul    esi, r12d, CHUNKS*4
     call    arena_alloc
     test    rax, rax
-    jz      .Lrs_out
+    jz      .Lrb_fail
     mov     [rip+rs_counts], rax
     mov     rdi, rax
     imul    ecx, r12d, CHUNKS
@@ -344,7 +463,7 @@ raster_scene:
     lea     esi, [rax*4+4]
     call    arena_alloc
     test    rax, rax
-    jz      .Lrs_out
+    jz      .Lrb_fail
     mov     [rip+rs_entries], rax
     lea     rdi, [rip+job_fill]
     xor     esi, esi
@@ -357,22 +476,11 @@ raster_scene:
     mov     edx, r12d
     mov     ecx, 1
     call    parallel_for
-    cmp     dword ptr [rip+rs_mode], 0
-    jne     .Lrs_out
-    cmp     dword ptr [rip+vp_shading], 2   # material preview: shade
-    jne     1f
-    call    preview_shade
-1:
-    call    build_sel_table
-    test    rax, rax
-    jz      .Lrs_out
-    lea     rdi, [rip+outline_rows]
-    xor     esi, esi
-    mov     edx, [rip+rs_h]
-    mov     ecx, 32
-    call    parallel_for
-.Lrs_out:
-    add     rsp, 8
+    mov     eax, 1
+    jmp     9f
+.Lrb_fail:
+    xor     eax, eax
+9:  add     rsp, 8
     pop     r15
     pop     r14
     pop     r13
@@ -498,9 +606,14 @@ job_verts:
     cmp     ecx, 3
     jb      1b
     mov     r15, [r13+RO_MESH]
+    mov     eax, [r13+RO_VFIRST]        # (a second batch: its vertices)
+    imul    rax, rax, 12
     mov     rsi, [r15+ME_POS]
+    add     rsi, rax
     mov     rdi, [r13+RO_CV]
+    add     rdi, rax
     mov     ecx, [r15+ME_NVERTS]
+    sub     ecx, [r13+RO_VFIRST]
 3:  test    ecx, ecx
     jz      .Ljv_next
     movss   xmm3, [rsi]
@@ -562,6 +675,7 @@ job_tris:
     cmp     r12d, [rip+rs_total]
     cmova   r12d, [rip+rs_total]
     lea     ebp, [rbx+rbx]              # output cursor
+    add     ebp, [rip+rs_tbase]
     mov     [rsp+8], ebp
     xor     ecx, ecx                    # binary search: last object with base <= t
     mov     edx, [rip+rs_nobjs]
@@ -593,7 +707,8 @@ job_tris:
     jb      3f
     inc     r13d                        # past this object's triangles
     jmp     .Ljt_loop
-3:  mov     r15, [r14+RO_MESH]
+3:  add     eax, [r14+RO_TFIRST]        # (in its mesh)
+    mov     r15, [r14+RO_MESH]
     mov     [rsp+20], eax               # the local triangle
     mov     ecx, [r14+RO_COL]
     mov     [rsp+16], ecx
@@ -695,6 +810,7 @@ bin_chunks:
     mov     ebx, r14d                   # kept triangles of this chunk
     imul    ebx, [rip+rs_chunk]
     add     ebx, ebx
+    add     ebx, [rip+rs_tbase]
     lea     rax, [rip+rs_ccount]
     mov     r12d, [rax+r14*4]
     add     r12d, ebx
@@ -1018,8 +1134,10 @@ raster_tile:
     cmp     r15d, [rip+rs_h]
     cmovg   r15d, [rip+rs_h]            # py1
     mov     [rsp], edi
-    # clear depth and id for the tile
+    # clear depth and id for the tile (not under a second batch)
     mov     ebx, r13d
+    cmp     dword ptr [rip+rs_noclear], 0
+    jne     2f
 1:  cmp     ebx, r15d
     jae     2f
     mov     eax, ebx

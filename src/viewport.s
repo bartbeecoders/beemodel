@@ -59,7 +59,7 @@ f_pitch_min:.float -1.55
 f_zoom_in:  .float 0.9090909
 f_zoom_out: .float 1.1
 f_dist_min: .float 1.5
-f_dist_max: .float 400.0
+f_dist_max: .float 20000.0
 f_gizmo:    .float 34.0
 f_axis_y:   .float 3.0
 f_rad2deg:  .float 57.29578

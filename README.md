@@ -510,8 +510,21 @@ its bounds and an error that only grows towards the root. Picking clusters by "e
 parent error" (projected from the camera or not) gives a crack-free mesh at any detail. The DAG
 builds in the background (about 120 ms per million triangles on 32 threads) and is saved with
 the file. `vgeo.extract 3` (a level) or `vgeo.extract 0.01` (an error) adds a cut as a mesh
-with its clusters coloured. Drawing and streaming the clusters per frame comes with phase 10's
-next step.
+with its clusters coloured.
+
+**Drawing a billion triangles.** A mesh with a DAG is drawn through a fresh cut every frame,
+at one pixel of error from the camera (`vgeo.error 0.5` for finer cuts). Clusters outside the
+view are dropped, and so are clusters hidden behind last frame's depth; the ones that came into
+view are drawn in a second pass, so moving the camera never opens holes. `vgeo.proxy` lets the
+full mesh go: a few thousand triangles (the DAG's roots) stand in for it in the file, the
+exporters and the path tracer, while the viewport keeps drawing every detail. A DAG read from a
+`.bee` file stays mapped from it: cluster pages are read in as the view needs them and the
+least recently used ones are given back past the budget (`vgeo.budget 2048`, in MB). Until a
+page arrives, coarser clusters stand in, still without cracks. `vgeo.view clusters` colours the
+clusters. A landscape of 64 unique million-triangle tiles strewn with 960 linked copies of
+million-triangle boulders (1.05 billion source triangles) flies at about 6 ms a frame on 32
+threads, and the process never holds more than 900 MB
+([tests/billion.py](tests/billion.py)).
 
 ### Sculpting
 
@@ -745,6 +758,7 @@ src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, island
 src/physui.s    the Physics section of the Properties area
 src/simcache.s  the simulation cache: frames kept, played back, baked, saved
 src/vgeo.s      virtualized geometry: the cluster LOD DAG (meshlets, groups, simplification)
+src/vgdraw.s    virtualized geometry: per-frame cuts, frustum and occlusion culling, streaming
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

@@ -1,0 +1,114 @@
+# A billion triangles - the v0.11 walkthrough's virtual geometry.
+#
+# A landscape of n x n terrain tiles (100 m, a million triangles each, all
+# different: one geometry node tree whose noise is read at world positions,
+# so neighbouring tiles meet exactly) strewn with boulders: 8 sculpted rocks
+# of a million triangles each, placed again and again as linked copies until
+# the scene holds a billion source triangles. Every mesh is virtualized
+# (a cluster LOD DAG) and stands in as its DAG's roots (vgeo.proxy); the .bee
+# file keeps the DAGs, which the viewport streams from it.
+#
+#   beemodel --eval "$(cat tests/billion.bees)"     (writes ~/BeeModel/billion.bee)
+
+n = 8                                           # tiles a side
+delete("Cube")
+T = 100
+c0 = clock()
+
+# ---- 8 rocks: subdivided spheres pushed along their normals by noise ----------------
+r = gtree("Rock")
+ro = gnode(r, "output")
+ri = gnode(r, "input")
+rp = gnode(r, "position")
+rn = gnode(r, "noise", 1.1, 3, 0.5)
+glink(r, rp, rn, 1)
+rs = gnode(r, "math", 1)                        # noise - 0.5
+glink(r, rn, rs, 1)
+gset(r, rs, 2, 0.5)
+rnm = gnode(r, "normal")
+rv = gnode(r, "vector_math", 3)                 # normal x it
+glink(r, rnm, rv, 1)
+glink(r, rs, rv, 2)
+rsp = gnode(r, "set_position")
+glink(r, ri, rsp, 1)
+glink(r, rv, rsp, 3)
+glink(r, rsp, ro, 1)
+for k in 0..8 {
+ nm = "Rock" + str(k)
+ add("sphere", nm, 0, -500, 0)
+ modifier(nm, "subsurf")
+ modset(nm, 0, "levels", 5)
+ modapply(nm, 0)
+ gset(r, rn, 4, 0.7 + 0.25 * k)                 # a different noise each
+ m = modifier(nm, "geometry")
+ modset(nm, m, "tree", r)
+ modapply(nm, 0)
+ scale(nm, 1, 0.6 + 0.05 * k, 1)
+ select(nm)
+ op("vgeo.build")
+ op("vgeo.proxy")
+}
+material("Stone")
+matset("Stone", "base", 0.62, 0.6, 0.56)
+for k in 0..8 { assign("Rock" + str(k), "Stone") }
+rock = vgeo("Rock0", 4)
+print("rocks", rock, round(clock() - c0))
+
+# ---- the tiles, and the boulders on each --------------------------------------------
+t = gtree("Tile")
+o = gnode(t, "output")
+g = gnode(t, "grid", T, 723)
+tf = gnode(t, "transform", 0, 0, 0)
+glink(t, g, tf, 1)
+p = gnode(t, "position")
+nz = gnode(t, "noise", 0.012, 6, 0.5)
+glink(t, p, nz, 1)
+mu = gnode(t, "math", 2)
+glink(t, nz, mu, 1)
+gset(t, mu, 2, 60)
+cx = gnode(t, "combine_xyz")
+glink(t, mu, cx, 2)
+sp = gnode(t, "set_position")
+glink(t, tf, sp, 1)
+glink(t, cx, sp, 3)
+glink(t, sp, o, 1)
+unique = 0
+copies = 0
+per = floor((1000000000 - n * n * 1045458 - 8 * rock) / rock / (n * n)) + 1
+for i in 0..n {
+ for j in 0..n {
+  nm = "Tile" + str(i * n + j)
+  add("plane", nm, 0, 0, 0)
+  gset(t, tf, 2, (i - n / 2 + 0.5) * T, 0, (j - n / 2 + 0.5) * T)
+  m = modifier(nm, "geometry")
+  modset(nm, m, "tree", t)
+  modapply(nm, 0)
+  nv = verts(nm)
+  for k in 0..per {                             # boulders on the ground
+   select("Rock" + str(floor(rand() * 8)))
+   op("object.duplicate")
+   a = active()
+   v = floor(rand() * nv)
+   s = 1.5 + 4 * rand() * rand()
+   move(a, vpos(nm, v, 0), vpos(nm, v, 1) + 0.2 * s, vpos(nm, v, 2))
+   rotate(a, rand() * 6.28, rand() * 6.28, rand() * 6.28)
+   scale(a, s, s * (0.6 + 0.4 * rand()), s)
+   copies += 1
+  }
+  select(nm)
+  op("vgeo.build")
+  unique += vgeo(nm, 4)
+  op("vgeo.proxy")
+ }
+}
+select()
+total = unique + 8 * rock + copies * rock
+print("scene", n * n, unique, copies, total, round(clock() - c0))
+
+# ---- the ground's material, saved -----------------------------------------
+material("Ground")
+matset("Ground", "base", 0.42, 0.5, 0.3)
+for k in 0..n * n { assign("Tile" + str(k), "Ground") }
+c1 = clock()
+op("file.save", "~/BeeModel/billion.bee")
+print("saved", round(clock() - c1))
