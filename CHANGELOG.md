@@ -115,6 +115,31 @@ project uses [Semantic Versioning](https://semver.org/).
     [tests/library.py](tests/library.py) checks the blob names against the
     hash, packs into a fresh library, background thumbnails, dropping into
     the viewport, and MCP.
+- **Play mode** (#147). F5 (`play.start [walk|fly] [x y z]`) snapshots the
+  scene and plays it from the view (`src/play.s`).
+  - **Walking:** a capsule (0.3 m radius, eyes at 1.6 m) under the rigid
+    body world's gravity, in fixed 1/120 s steps against every mesh
+    (a per-mesh grid of triangles, built on first use). It stands on
+    slopes up to about 50 degrees and slides off steeper ones, is stopped
+    by walls, climbs steps up to 0.4 m and keeps to the ground going down
+    a slope. WASD moves, Shift runs, Space jumps; F switches to a fly
+    camera (Space / C up and down).
+  - **Captured mouse:** the pointer is locked
+    (`zwp_pointer_constraints_v1`) and its relative motion
+    (`zwp_relative_pointer_v1`) turns the view; the cursor is hidden.
+  - **Live scene:** the frame runs on in real time, so rigid bodies, cloth,
+    keyed animation and rigs play while you walk.
+  - **Leaving:** Esc frees the mouse and asks: K keeps what happened as one
+    undo step, D (or Esc) discards it, the scene, the frame and the view
+    as they were. `play.stop [keep|discard]` does the same from scripts.
+  - **Scripted:** every operation is an MCP tool (`op_play_start`,
+    `op_play_stop`, `op_play_mode`); BeeScript gets `playstep(seconds,
+    forward, right, up, run)`, `playlook(yaw, pitch)` and `playinfo(k)`.
+    [tests/play.py](tests/play.py) walks a small level (walls, stairs, a
+    ramp, a slope too steep, falling boxes, a keyed spinner) and plays it
+    in a window with keys, mouse motion and MCP.
+  - `run_op` gives every operator an aligned stack, whoever calls it (keys,
+    MCP, scripts).
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

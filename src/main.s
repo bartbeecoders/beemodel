@@ -87,7 +87,10 @@ _start:
 3:  cmp     dword ptr [rip+wp_pending], 0  # world cells waiting: look soon
     je      30f
     mov     edx, 16
-30: cmp     dword ptr [rip+lb_busy], 0  # a thumbnail being made: look
+30: cmp     dword ptr [rip+pl_on], 1    # playing: every frame
+    jne     302f
+    mov     edx, 8
+302:cmp     dword ptr [rip+lb_busy], 0  # a thumbnail being made: look
     je      301f
     mov     edx, 50
 301:call    vd_streaming                # cluster pages on their way: look
@@ -117,6 +120,7 @@ _start:
     xor     edi, edi                    # world cells in and out for the camera
     call    wp_tick
     call    lb_tick                     # library thumbnails, one at a time
+    call    play_tick                   # play mode: the player, the scene on
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render

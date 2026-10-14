@@ -23,6 +23,8 @@
 .globl group_depth
 .globl undo_drop_last
 .globl undo_clear
+.globl undo_snap
+.globl undo_back
 .globl undo_bytes
 .globl undo_depth
 .globl undo_attach_delta
@@ -345,6 +347,34 @@ clear_redo:
     jmp     1b
 9:  pop     rbx
     ret
+
+# undo_snap(rdi=label) -> rax = the scene now, kept aside (not a step yet)
+undo_snap:
+    jmp     snapshot
+
+# undo_back(rdi=snapshot, esi=1 keep / 0 discard) - discard: the scene as
+#   the snapshot has it, the snapshot let go; keep: it becomes the newest
+#   undo step (undo goes back to before the changes)
+undo_back:
+    test    rdi, rdi
+    jz      9f
+    push    rbx
+    mov     rbx, rdi
+    test    esi, esi
+    jz      1f
+    call    clear_redo
+    lea     rdi, [rip+undo_stack]
+    lea     rsi, [rip+undo_depth]
+    mov     rdx, rbx
+    call    push_on
+    call    trim_bytes
+    jmp     8f
+1:  mov     rdi, rbx
+    call    restore_step
+    mov     rdi, rbx
+    call    release
+8:  pop     rbx
+9:  ret
 
 # undo_clear - the history starts again (a world's cells came or went: steps
 #   from before would bring back what is now on disk, or drop what came in)

@@ -421,6 +421,12 @@ builtins:
     .long 1, 1
     .quad bn_lib, b_lib
     .long 1, 1
+    .quad bn_playstep, b_playstep
+    .long 1, 5
+    .quad bn_playlook, b_playlook
+    .long 2, 2
+    .quad bn_playinfo, b_playinfo
+    .long 1, 1
     .quad bn_libfind, b_libfind
     .long 2, 2
     .quad bn_libinfo, b_libinfo
@@ -696,6 +702,9 @@ bn_vgstat:      .asciz "vgstat"
 bn_view:        .asciz "view"
 bn_world:       .asciz "world"
 bn_lib:         .asciz "lib"
+bn_playstep:    .asciz "playstep"
+bn_playlook:    .asciz "playlook"
+bn_playinfo:    .asciz "playinfo"
 bn_libfind:     .asciz "libfind"
 bn_libinfo:     .asciz "libinfo"
 bn_wpaint:      .asciz "wpaint"
@@ -4864,6 +4873,74 @@ b_vgstat:
     call    a_num
     cvttsd2si edi, xmm0
     call    vgd_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# playstep(seconds [, forward, right, up, run]) - play mode goes on for that
+#   time (in fixed steps) with those keys held: forward / right / up -1..1
+#   (up: jump, or fly up / down), run 1
+b_playstep:
+    push    rbx
+    push    r12
+    sub     rsp, 40
+    mov     rbx, rdi
+    mov     r12d, esi
+    xor     eax, eax
+    mov     [rsp], rax
+    mov     [rsp+8], rax
+    mov     [rsp+16], rax
+    mov     ecx, 1
+1:  cmp     ecx, r12d
+    jae     2f
+    mov     [rsp+32], ecx
+    mov     rdi, rcx
+    shl     rdi, 4
+    add     rdi, rbx
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    mov     ecx, [rsp+32]
+    movss   [rsp+rcx*4-4], xmm0
+    inc     ecx
+    jmp     1b
+2:  mov     rdi, rbx
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   xmm1, [rsp]
+    movss   xmm2, [rsp+4]
+    movss   xmm3, [rsp+8]
+    xor     edi, edi
+    cvttss2si eax, [rsp+12]
+    mov     edi, eax
+    call    pl_script_step
+    add     rsp, 40
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# playlook(yaw, pitch) - where the player looks (degrees)
+b_playlook:
+    push    rbx
+    sub     rsp, 16
+    mov     rbx, rdi
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp], xmm0
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvtsd2ss xmm1, xmm0
+    movss   xmm0, [rsp]
+    call    pl_script_look
+    add     rsp, 16
+    pop     rbx
+    jmp     ret_nil
+
+# playinfo(k) -> play mode (play.s: pl_stat)
+b_playinfo:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    pl_stat
     add     rsp, 8
     cvtss2sd xmm0, xmm0
     jmp     ret_num

@@ -112,6 +112,9 @@ run_op:
     mov     rdi, [rbx+OP_LABEL]         # record the scene before the change
     call    undo_push
 2:  call    fa_mark                     # its scratch memory goes back after
+    push    rbp                         # (the operator gets an aligned stack,
+    mov     rbp, rsp                    #  whoever calls: keys, MCP, scripts)
+    and     rsp, -16
     push    rax
     sub     rsp, 8
     mov     rdi, [rbx+OP_ARG]
@@ -119,6 +122,8 @@ run_op:
     call    [rbx+OP_EXEC]
     add     rsp, 8
     pop     rdi
+    mov     rsp, rbp
+    pop     rbp
     call    fa_release
     call    rig_eval                    # (drivers and constraints follow)
     mov     dword ptr [rip+dirty], 1
@@ -212,7 +217,9 @@ dispatch_key:
     jmp     6f
 5:  test    dword ptr [rdi+OP_FLAGS], OPF_EDIT
     jnz     4b
-6:  call    run_op
+6:  sub     rsp, 8                      # (the operator gets an aligned stack)
+    call    run_op
+    add     rsp, 8
     mov     eax, 1
     ret
 

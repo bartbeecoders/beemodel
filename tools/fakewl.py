@@ -31,7 +31,8 @@ os.makedirs(OUT, exist_ok=True)
 GLOBALS = [(1, 'wl_compositor', 4), (2, 'wl_shm', 1), (3, 'xdg_wm_base', 2),
            (4, 'wl_seat', 5), (5, 'wp_cursor_shape_manager_v1', 1),
            (6, 'wp_fractional_scale_manager_v1', 1), (7, 'wp_viewporter', 1),
-           (8, 'zwp_tablet_manager_v2', 1)]
+           (8, 'zwp_tablet_manager_v2', 1), (9, 'zwp_pointer_constraints_v1', 1),
+           (10, 'zwp_relative_pointer_manager_v1', 1)]
 
 
 def wstr(s):
@@ -145,6 +146,19 @@ class Fake:
             self.dest = (u(0), u(1))
         elif iface == 'wp_cursor_shape_device_v1' and op == 1:
             self.cursor = u(1)
+        elif iface == 'zwp_pointer_constraints_v1' and op == 1:  # lock_pointer
+            self.objs[u(0)] = 'zwp_locked_pointer_v1'
+            self.locked = u(0)
+            self.send(u(0), 0)                            # locked
+        elif iface == 'zwp_locked_pointer_v1' and op == 0:       # destroy
+            self.locked = None
+        elif iface == 'zwp_relative_pointer_manager_v1' and op == 1:
+            self.objs[u(0)] = 'zwp_relative_pointer_v1'
+            self.relptr = u(0)
+        elif iface == 'zwp_relative_pointer_v1' and op == 0:
+            self.relptr = None
+        elif iface == 'wl_pointer' and op == 0:          # set_cursor
+            self.cursor_hidden = (u(1) == 0)
         elif iface == 'wl_shm' and op == 0:               # create_pool(id, fd, size)
             fd = self.fds.pop(0)
             self.pools[u(0)] = [fd, mmap.mmap(fd, u(1)), u(1)]
@@ -220,6 +234,14 @@ class Fake:
     def wheel(self, v):
         self.send(self.ptr(), 4, struct.pack('<IIi', 0, 0, v * 256))
         self.pump(until_frame=True)
+
+    def rel(self, dx, dy):
+        """relative pointer motion (a locked pointer: play mode)"""
+        rp = getattr(self, 'relptr', None)
+        if rp:
+            fx, fy = int(dx * 256), int(dy * 256)
+            self.send(rp, 0, struct.pack('<IIiiii', 0, int(time.time() * 1e6) & 0xffffffff, fx, fy, fx, fy))
+            self.pump(0.02)
 
     def key(self, code):
         kb = self.find('wl_keyboard')[0]

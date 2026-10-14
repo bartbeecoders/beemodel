@@ -22,6 +22,8 @@
 .globl alloc_id
 .globl create_window
 .globl dirty
+.globl wl_lock_pointer
+.globl wl_unlock_pointer
 .globl e_globals
 .globl envp
 .globl fatal
@@ -90,6 +92,10 @@ id_shm:         .skip 4
 id_wm_base:     .skip 4
 id_seat:        .skip 4
 id_cursor_mgr:  .skip 4
+id_constraints: .skip 4                 # zwp_pointer_constraints_v1
+id_relmgr:      .skip 4                 # zwp_relative_pointer_manager_v1
+id_locked:      .skip 4                 # (play mode: the locked pointer,
+id_relptr:      .skip 4                 #  its relative motion)
 id_surface:     .skip 4
 id_xdg_surface: .skip 4
 id_toplevel:    .skip 4
@@ -160,6 +166,10 @@ s_shm:          .asciz "wl_shm"
 s_wm_base:      .asciz "xdg_wm_base"
 s_seat:         .asciz "wl_seat"
 s_cursor_mgr:   .asciz "wp_cursor_shape_manager_v1"
+s_constraints:  .asciz "zwp_pointer_constraints_v1"
+.align 4
+sf_fix:         .float 0.00390625       # (24.8 fixed point)
+s_relmgr:       .asciz "zwp_relative_pointer_manager_v1"
 s_fscale_mgr:   .asciz "wp_fractional_scale_manager_v1"
 s_viewporter:   .asciz "wp_viewporter"
 s_tab_mgr:      .asciz "zwp_tablet_manager_v2"
@@ -694,6 +704,11 @@ wl_dispatch:
     je      ev_fscale
     cmp     edi, [rip+id_tab_seat]
     je      ev_tab_seat
+    cmp     dword ptr [rip+id_relptr], 0
+    je      0f
+    cmp     edi, [rip+id_relptr]
+    je      ev_relptr
+0:
     cmp     edi, 0xff000000             # objects the compositor made: tools
     jb      ev_done
     lea     r15, [rip+tab_tool]
@@ -819,6 +834,28 @@ ev_registry:
     call    tab_seat
     jmp     ev_done
 43: mov     rdi, rbx
+    lea     rsi, [rip+s_constraints]
+    call    str_eq
+    test    eax, eax
+    jz      44f
+    mov     edx, 1
+    lea     rsi, [rip+s_constraints]
+    mov     edi, r14d
+    call    wl_bind
+    mov     [rip+id_constraints], eax
+    jmp     ev_done
+44: mov     rdi, rbx
+    lea     rsi, [rip+s_relmgr]
+    call    str_eq
+    test    eax, eax
+    jz      45f
+    mov     edx, 1
+    lea     rsi, [rip+s_relmgr]
+    mov     edi, r14d
+    call    wl_bind
+    mov     [rip+id_relmgr], eax
+    jmp     ev_done
+45: mov     rdi, rbx
     lea     rsi, [rip+s_cursor_mgr]
     call    str_eq
     test    eax, eax
@@ -1128,6 +1165,86 @@ ev_tool:                                # ebx = the tool's slot
     mov     ecx, r14d
     call    ui_button
     jmp     ev_done
+
+# ev_relptr - relative_motion(utime hi, lo, dx, dy, dx unaccelerated, dy
+#   unaccelerated): play mode turns the view (unaccelerated, 24.8 fixed)
+ev_relptr:
+    test    r13d, r13d
+    jnz     ev_done
+    cvtsi2ss xmm0, dword ptr [r12+16]
+    cvtsi2ss xmm1, dword ptr [r12+20]
+    mulss   xmm0, [rip+sf_fix]
+    mulss   xmm1, [rip+sf_fix]
+    call    play_look
+    jmp     ev_done
+
+# wl_lock_pointer -> eax = 1 when the pointer is locked in the window, its
+#   cursor hidden and its relative motion coming (the compositor has both)
+wl_lock_pointer:
+    xor     eax, eax
+    cmp     dword ptr [rip+id_constraints], 0
+    je      9f
+    cmp     dword ptr [rip+id_relmgr], 0
+    je      9f
+    cmp     dword ptr [rip+id_pointer], 0
+    je      9f
+    cmp     dword ptr [rip+id_locked], 0
+    jne     8f
+    push    rbx
+    call    alloc_id                    # lock_pointer(id, surface, pointer,
+    mov     [rip+id_locked], eax        #  region none, persistent)
+    mov     edi, [rip+id_constraints]
+    mov     esi, 1
+    call    msg_begin
+    mov     edi, [rip+id_locked]
+    call    put_u32
+    mov     edi, [rip+id_surface]
+    call    put_u32
+    mov     edi, [rip+id_pointer]
+    call    put_u32
+    xor     edi, edi
+    call    put_u32
+    mov     edi, 2
+    call    put_u32
+    call    msg_end
+    call    alloc_id                    # get_relative_pointer(id, pointer)
+    mov     [rip+id_relptr], eax
+    mov     edx, eax
+    mov     ecx, [rip+id_pointer]
+    mov     edi, [rip+id_relmgr]
+    mov     esi, 1
+    call    msg2
+    mov     edi, [rip+id_pointer]       # no cursor: set_cursor(serial, none)
+    xor     esi, esi
+    call    msg_begin
+    mov     edi, [rip+enter_serial]
+    call    put_u32
+    xor     edi, edi
+    call    put_u32
+    xor     edi, edi
+    call    put_u32
+    xor     edi, edi
+    call    put_u32
+    call    msg_end
+    mov     dword ptr [rip+cur_shape], -1
+    pop     rbx
+8:  mov     eax, 1
+9:  ret
+
+# wl_unlock_pointer - the pointer free again (its cursor back on the next move)
+wl_unlock_pointer:
+    cmp     dword ptr [rip+id_locked], 0
+    je      9f
+    mov     edi, [rip+id_locked]
+    xor     esi, esi
+    call    msg0
+    mov     edi, [rip+id_relptr]
+    xor     esi, esi
+    call    msg0
+    mov     dword ptr [rip+id_locked], 0
+    mov     dword ptr [rip+id_relptr], 0
+    mov     dword ptr [rip+cur_shape], -1
+9:  ret
 
 # tab_seat - once there are a seat and a tablet manager: the tablet seat
 tab_seat:

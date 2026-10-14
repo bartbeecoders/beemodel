@@ -83,6 +83,9 @@ jobs:
       - name: The content library (assets by hash, thumbnails, packs, drag and drop, MCP)
         run: timeout 300 python tests/library.py build/beemodel build/shots
 
+      - name: Play mode (walk, fly, captured mouse, keep or discard, MCP)
+        run: timeout 300 python tests/play.py build/beemodel build/shots
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 600 python tools/fakewl.py build/shots
 

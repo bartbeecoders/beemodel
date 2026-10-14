@@ -419,6 +419,18 @@ ui_motion:
     add     rsp, 8
     pop     rsi
     pop     rdi
+0:  cmp     dword ptr [rip+pl_on], 0    # play mode: the mouse looks
+    je      0f
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    play_motion
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+    mov     [rip+ptr_x], edi
+    mov     [rip+ptr_y], esi
+    ret
 0:  cmp     dword ptr [rip+lb_drag], 0  # a library tile carried
     je      0f
     mov     [rip+ptr_x], edi
@@ -670,7 +682,10 @@ toggle_maximize:
 
 # ui_button(edi=button, esi=state, edx=serial, ecx=time)
 ui_button:
-    push    rbx
+    cmp     dword ptr [rip+pl_on], 0    # (play mode: buttons do nothing)
+    je      0f
+    ret
+0:  push    rbx
     push    r12
     push    r13
     push    r14
@@ -1268,7 +1283,17 @@ vp_setup_drag:
 # ui_key(edi=evdev key, esi=state) - Esc closes menus, everything else is
 # looked up in the operator keymap (ops.s: dispatch_key)
 ui_key:
-    cmp     esi, 1
+    push    rdi                         # play mode takes the keys
+    push    rsi
+    sub     rsp, 8
+    call    play_key
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+    test    eax, eax
+    jz      0f
+    ret
+0:  cmp     esi, 1
     je      1f
     test    esi, esi                    # release: stop repeating that key
     jnz     9f
