@@ -6,6 +6,49 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-14
+
+Phase 9 of the masterplan, "Animation & simulation". Scenes move:
+
+- **Keyframes:** Bezier, linear and constant F-curves on anything a script
+  can set, with a timeline, a dope sheet, a graph editor and action layers.
+- **Rigging:** armatures with automatic (bone heat) weights, linear blend
+  and dual quaternion skinning, pose and weight paint modes, constraints,
+  IK (FABRIK / CCD, poles), drivers, shape keys, motion paths and onion
+  skins.
+- **Mechanisms:** CAD parts on revolute and slider joints, gears and racks,
+  limits and collision checks, driven by keyed parameters.
+- **Rigid bodies:** boxes, spheres, capsules, hulls and convex compounds
+  with GJK / EPA contacts, persistent manifolds, islands solved in parallel,
+  sleeping and joints, set up from a Physics panel.
+- **Cloth and soft bodies (XPBD):** pins, colliders, self collision, wind
+  and volume, with coloured constraint batches solved in parallel.
+- **Simulation cache:** frames kept and played back, bakes saved in the
+  file, invalidated by edits.
+
+The exit checks:
+- **`tools/fakewl.py`:** 1000 boxes tumbling into a heap simulate 10 s in
+  less than 10 s.
+- **`tests/animation.bees`:** builds a character (a 178,656-vertex SDF body
+  skinned to a 12-bone armature, IK legs on keyed feet: a walk cycle), a
+  gear pair turned by a keyed parameter, 1000 rigid boxes and a draping
+  tablecloth. It bakes 10 s, saves and renders three frames.
+  `tests/animation.py` checks the numbers and the reopened bake, then plays
+  the saved scene in a window: each frame stepped in under 16.7 ms (60 fps).
+
+Benchmark on a 32-thread desktop (Ryzen 9 7950X):
+- **The rigged character:** a played frame of the whole walkthrough scene
+  (keys, IK, skinning 178k vertices, the mechanism, the baked bodies and
+  cloth) evaluates in 7.0 ms; in the window, stepped and drawn, 10.1 ms at
+  the median.
+- **1000 rigid boxes:** 10 s simulated in 5.9 s (4 threads: 6.7 s; 1
+  thread: 8.2 s). Baked with the cloth and the rig over 239 frames in 9.0 s,
+  then scrubbed back at 3.1 ms a frame.
+- **Cloth:** a 6561-particle sheet colliding with a ball, the floor and
+  itself simulates 4 s in 3.0 s.
+- **Animation walkthrough:** 16.7 s end to end, three 480x270 frames
+  rendered in 0.9 s.
+
 ### Added
 - The simulation cache:
   - **Cached frames:** rigid bodies and cloth keep each whole frame as the simulation reaches it. Scrubbing back plays the cached frames instead of simulating again, and the scene's start keeps them. Cloth vertices are stored as 16 bits a coordinate within each cloth's bounds (half the memory; within 0.2 mm on a 2 m flag).
@@ -936,7 +979,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/bartbeecoders/beemodel/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/bartbeecoders/beemodel/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/bartbeecoders/beemodel/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/bartbeecoders/beemodel/compare/v0.6.0...v0.7.0

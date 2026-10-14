@@ -187,7 +187,7 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 <!-- ============================================================ -->
 <section id="baseline">
   <h2>Where we are</h2>
-  <p class="sub">Status on 13 October 2026: phases 0–8 are shipped (v0.1.0 – v0.9.0) and phase 9 is in progress (v0.10.0). Every phase has its own GitHub milestone with one PR per issue and a tagged release.</p>
+  <p class="sub">Status on 14 October 2026: phases 0–9 are shipped (v0.1.0 – v0.10.0); phase 10 (v0.11.0) is next. Every phase has its own GitHub milestone with one PR per issue and a tagged release.</p>
   <div class="table-wrap"><table>
     <tr><th>Phase</th><th>Release</th><th>Status</th><th>Exit check</th></tr>
     <tr><td>0 · Shell</td><td>v0.1.0</td><td><span class="tag g">done</span></td><td>Wayland client, app-drawn UI and the fake-compositor harness.</td></tr>
@@ -199,10 +199,10 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
     <tr><td>6 · CAD</td><td>v0.7.0</td><td><span class="tag g">done</span></td><td>Parametric enclosure: rebuilds on a parameter change and its 3MF slices in PrusaSlicer, in 0.65 s.</td></tr>
     <tr><td>7 · Sculpt, UV &amp; paint</td><td>v0.8.0</td><td><span class="tag g">done</span></td><td>Strokes on a 25.2M-vertex sculpt at 11.2 ms median per frame (60 fps).</td></tr>
     <tr><td>8 · Nodes &amp; procedural</td><td>v0.9.0</td><td><span class="tag g">done</span></td><td>A million instances placed in 13–16 ms (budget 200 ms) and orbited at 11.4 ms per frame.</td></tr>
-    <tr><td>9 · Animation &amp; simulation</td><td>v0.10.0</td><td><span class="tag a">in progress</span></td><td>Done: keyframes and the timeline (#123), the dope sheet, graph editor and action layers (#124), armatures, skinning (LBS / DQS), automatic weights and weight paint (#125). Next: IK, constraints, shape keys and drivers (#126), CAD mechanisms (#127), rigid bodies (#128), XPBD cloth (#129), the simulation cache (#130), then the release (#131).</td></tr>
+    <tr><td>9 · Animation &amp; simulation</td><td>v0.10.0</td><td><span class="tag g">done</span></td><td>A 178k-vertex character walking on IK legs plays at 10.1 ms per frame (60 fps) with its scene; 1000 rigid boxes simulate 10 s in 5.9 s.</td></tr>
     <tr><td>10 · Engine-grade &amp; collaboration</td><td>v0.11.0</td><td><span class="tag">planned</span></td><td>—</td></tr>
   </table></div>
-  <p class="muted">Footprint: the static binary is about 590 KB (the CI budget is 1 MiB) and still links nothing. CI runs <code>ci/local.sh</code> on every PR: the build, the headless fake-compositor suite with golden images, MCP conformance, the rasterizer stress test and every phase's walkthrough scene.</p>
+  <p class="muted">Footprint: the static binary is about 660 KB (the CI budget is 1 MiB) and still links nothing. CI runs <code>ci/local.sh</code> on every PR: the build, the headless fake-compositor suite with golden images, MCP conformance, the rasterizer stress test and every phase's walkthrough scene.</p>
 </section>
 
 <!-- ============================================================ -->
@@ -776,16 +776,15 @@ check.printable(min_wall: 1.2mm)</code></pre>
     <div class="exit"><b>Exit:</b> 1M scattered instances placed in &lt; 200 ms and rendered at interactive rates.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>9</b>now</div><div class="card"><h3>Animation &amp; simulation <span class="tag g">motion</span> <span class="tag a">in progress · v0.10.0</span></h3>
+  <div class="phase"><div class="pn"><b>9</b>done</div><div class="card"><h3>Animation &amp; simulation <span class="tag g">motion</span> <span class="tag g">shipped v0.10.0</span></h3>
     <ul>
       <li>Keyframes, dope sheet, graph editor, armatures, skinning, IK, shape keys, drivers.</li>
       <li>Rigid bodies, XPBD cloth, cache system; mechanism animation for CAD assemblies.</li>
     </ul>
-    <p class="muted">Done: keyframes and the timeline; the dope sheet, graph editor and action layers; armatures with LBS / DQS skinning, automatic weights and weight paint. In progress: IK, constraints, shape keys, drivers, motion paths and onion skinning. Still to come: CAD mechanisms, rigid bodies, XPBD cloth and the simulation cache.</p>
     <div class="exit"><b>Exit:</b> rigged character plays back at 60 fps · 1000 rigid bodies simulate in real time.</div>
   </div></div>
 
-  <div class="phase"><div class="pn"><b>10</b>XL</div><div class="card"><h3>Engine-grade &amp; collaboration <span class="tag b">scale</span><span class="tag g">team</span></h3>
+  <div class="phase"><div class="pn"><b>10</b>next</div><div class="card"><h3>Engine-grade &amp; collaboration <span class="tag b">scale</span><span class="tag g">team</span></h3>
     <ul>
       <li>Meshlet DAG virtualized geometry, world partition streaming, content browser.</li>
       <li>Play mode with logic graphs; live link.</li>
