@@ -84,6 +84,37 @@ project uses [Semantic Versioning](https://semver.org/).
     while partitioned (1024 cell files), flies over it under an 8 MB budget
     at ~3 ms a frame, edits on the way, and checks the edits after flying
     away, flying back, saving and opening again.
+- **Content library** (#146). The Asset Browser grows into a content browser
+  over libraries of assets kept by their content (`src/library.s`).
+  - **Assets:** `lib.save object|rig|scene [name] [#tag ...]` and
+    `lib.save material|tree|action <name>`. Objects keep their meshes as
+    evaluated, UVs, colours and cluster DAGs, with their materials saved as
+    assets they depend on; rigs keep the armature, the skinned meshes and
+    their weights; actions keep their curves; scenes are whole `.bee` files.
+  - **Content-addressed:** each blob is `blobs/<hash>.bee`, named by a
+    64-bit hash of its bytes, so identical content is stored once. An
+    asset's id hashes its kind, name, blob and dependencies. `index.txt`
+    lists the assets; `lib.add <folder>` adds more libraries.
+  - **Placing:** `lib.place <asset> [x y z]` (default: the 3D cursor) brings
+    in dependencies first, places objects selected, rebinds rig meshes, and
+    plays an action on the active object. Dragging a tile into a viewport
+    places the asset on the surface under the pointer; a double click places
+    it at the cursor.
+  - **Thumbnails:** path-traced by a child process
+    (`beemodel --eval 'op("lib.thumbnail", id)'`), one at a time, while the
+    window goes on; `lib.thumbnails` makes them all now.
+  - **Finding things:** tags (`lib.tag Pillar #heavy -old`), search
+    (`lib.search`: every word in the name, kind or tags), dependencies
+    (`lib.deps`, and the browser's uses / used by).
+  - **Packs:** `lib.pack <file.bee> [search]` writes the matching assets and
+    what they use: a manifest, each blob once, the thumbnails. `lib.import`
+    checks each blob against its hash and adds only what is new.
+  - **Everywhere:** every operation is an MCP tool (`op_lib_*`; packs and
+    library folders need the agent's file permission). BeeScript gets
+    `lib(k)`, `libfind(words, i)` and `libinfo(asset, what)`.
+    [tests/library.py](tests/library.py) checks the blob names against the
+    hash, packs into a fresh library, background thumbnails, dropping into
+    the viewport, and MCP.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

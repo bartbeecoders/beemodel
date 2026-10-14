@@ -419,6 +419,12 @@ builtins:
     .long 6, 6
     .quad bn_world, b_world
     .long 1, 1
+    .quad bn_lib, b_lib
+    .long 1, 1
+    .quad bn_libfind, b_libfind
+    .long 2, 2
+    .quad bn_libinfo, b_libinfo
+    .long 2, 2
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -689,6 +695,9 @@ bn_vgeo:        .asciz "vgeo"
 bn_vgstat:      .asciz "vgstat"
 bn_view:        .asciz "view"
 bn_world:       .asciz "world"
+bn_lib:         .asciz "lib"
+bn_libfind:     .asciz "libfind"
+bn_libinfo:     .asciz "libinfo"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -4858,6 +4867,71 @@ b_vgstat:
     add     rsp, 8
     cvtss2sd xmm0, xmm0
     jmp     ret_num
+
+# lib(k) -> the content library (library.s: lb_stat)
+b_lib:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    lb_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# libfind(words, i) -> the i-th asset (from 0) whose name, kind or tags hold
+#   every word, or nil
+b_libfind:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si r12d, xmm0
+    mov     rdi, rbx
+    call    a_str
+    mov     rdi, rax
+    mov     esi, r12d
+    call    lb_find_nth
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    test    rax, rax
+    jz      ret_nil
+    mov     rsi, rax
+    jmp     ret_text
+
+# libinfo(asset, what) -> "kind", "id", "blob", "tags", "uses", "users",
+#   "thumb" (1 made) of an asset, or nil
+b_libinfo:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     r12, rax
+    mov     rdi, rbx
+    call    a_str
+    mov     rdi, rax
+    mov     rsi, r12
+    call    lb_info
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    test    rax, rax
+    jz      ret_nil
+    mov     rsi, rax
+    jmp     ret_text
+
+# ret_text(rsi=text) - a copy of it
+ret_text:
+    sub     rsp, 8
+    call    sh_dup
+    mov     rdx, rax
+    mov     eax, T_STR
+    add     rsp, 8
+    ret
 
 # world(k) -> the world partition (world.s: wp_stat)
 b_world:

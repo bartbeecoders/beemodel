@@ -24,6 +24,12 @@
 .intel_syntax noprefix
 .globl mesh_tab
 .globl mesh_chunks
+.globl armt_write
+.globl armt_read
+.globl mwgt_write
+.globl mwgt_read
+.globl bee_save
+.globl bee_load
 .globl muvs_write
 .globl muvs_read
 .globl vgeo_chunks

@@ -19,6 +19,7 @@
 #  equation with the nearest bone as the source), the four largest kept.
 # =============================================================================
 .intel_syntax noprefix
+.globl arm_mod_index
 .include "const.inc"
 .include "macros.inc"
 

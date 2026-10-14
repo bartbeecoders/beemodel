@@ -62,6 +62,9 @@
 .globl tl_motion
 .globl tl_release
 .globl tl_drag
+.globl an_action_blob
+.globl an_action_add
+.globl an_action_find
 
 .equ AN_REFS,   0
 .equ AN_NCUR,   4
@@ -3328,6 +3331,179 @@ an_obj_curve:
     setnz   cl
 9:  mov     eax, ecx
     add     rsp, 8
+    ret
+
+# an_action_blob(rdi=name) -> rax = wb_ptr, rdx = bytes (0: no such
+#   action): its name and frames, then per curve its channel (kind, a, b,
+#   c), key count and keys (library assets, library.s)
+an_action_blob:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    call    an_action_find
+    test    eax, eax
+    jz      8f
+    mov     r12d, eax                   # its number
+    mov     rbx, [rip+an_cur]
+    call    wb_reset
+    lea     eax, [r12-1]
+    imul    r14, rax, AC_SZ
+    lea     r14, [rbx+AN_ACT+r14]
+    mov     rsi, r14                    # name (32), start, end
+    mov     edx, 40
+    call    wb_bytes
+    xor     r13d, r13d                  # how many curves
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+AN_NCUR]
+    jae     2f
+    imul    rax, rcx, CU_SZ
+    cmp     [rbx+AN_CUR+rax+CU_ACT], r12d
+    jne     11f
+    inc     r13d
+11: inc     ecx
+    jmp     1b
+2:  mov     edi, r13d
+    call    wb_u32
+    xor     r13d, r13d
+3:  cmp     r13d, [rbx+AN_NCUR]
+    jae     5f
+    imul    r14, r13, CU_SZ
+    lea     r14, [rbx+AN_CUR+r14]
+    cmp     [r14+CU_ACT], r12d
+    jne     4f
+    mov     rsi, r14                    # kind, a, b, c
+    mov     edx, 16
+    call    wb_bytes
+    mov     edi, [r14+CU_N]
+    call    wb_u32
+    mov     eax, [r14+CU_FIRST]
+    imul    rsi, rax, KY_SZ
+    lea     rsi, [rbx+AN_KEYS+rsi]
+    imul    edx, [r14+CU_N], KY_SZ
+    call    wb_bytes
+4:  inc     r13d
+    jmp     3b
+5:  mov     rax, [rip+wb_ptr]
+    mov     rdx, [rip+wb_len]
+    jmp     9f
+8:  xor     eax, eax
+    xor     edx, edx
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# an_action_add(rdi=data, rsi=bytes, edx=uid of the object it moves, or 0)
+#   -> eax = the new action's number (0: not one, or no room): an action
+#   blob back as an action, its object channels on that object
+an_action_add:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 24
+    mov     r12, rdi
+    mov     r13, rsi
+    mov     [rsp], edx
+    cmp     r13, 44
+    jb      8f
+    mov     ecx, [r12+40]               # curves: every key fits?
+    lea     r14, [r12+44]
+    lea     r15, [r12+r13]
+    xor     ebp, ebp                    # keys
+1:  test    ecx, ecx
+    jz      2f
+    lea     rax, [r14+20]
+    cmp     rax, r15
+    ja      8f
+    mov     eax, [r14+16]
+    add     ebp, eax
+    imul    rax, rax, KY_SZ
+    lea     r14, [r14+20+rax]
+    cmp     r14, r15
+    ja      8f
+    dec     ecx
+    jmp     1b
+2:  mov     edi, ebp
+    call    an_own
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    mov     eax, [rbx+AN_NACT]
+    cmp     eax, AN_MAXA
+    jae     8f
+    mov     eax, [rbx+AN_NCUR]
+    add     eax, [r12+40]
+    cmp     eax, AN_MAXC
+    ja      8f
+    mov     eax, [rbx+AN_NACT]          # the action: name, frames
+    imul    rdi, rax, AC_SZ
+    lea     rdi, [rbx+AN_ACT+rdi]
+    mov     rsi, r12
+    mov     ecx, 40
+    rep     movsb
+    mov     byte ptr [rdi-9], 0         # (its name terminated)
+    inc     dword ptr [rbx+AN_NACT]
+    mov     eax, [rbx+AN_NACT]
+    mov     [rsp+8], eax
+    mov     ecx, [r12+40]               # the curves
+    lea     r14, [r12+44]
+3:  test    ecx, ecx
+    jz      7f
+    mov     [rsp+4], ecx
+    mov     eax, [rbx+AN_NCUR]
+    imul    rdi, rax, CU_SZ
+    lea     rdi, [rbx+AN_CUR+rdi]
+    mov     rax, [r14]
+    mov     [rdi], rax
+    mov     rax, [r14+8]
+    mov     [rdi+8], rax
+    mov     eax, [rsp]                  # on the object it moves now
+    test    eax, eax
+    jz      4f
+    mov     ecx, [rdi+CU_KIND]
+    cmp     ecx, K_MAT
+    je      4f
+    cmp     ecx, K_NODE
+    je      4f
+    mov     [rdi+CU_A], eax
+4:  mov     eax, [rbx+AN_NKEY]
+    mov     [rdi+CU_FIRST], eax
+    mov     ecx, [r14+16]
+    mov     [rdi+CU_N], ecx
+    mov     eax, [rsp+8]
+    mov     [rdi+CU_ACT], eax
+    mov     dword ptr [rdi+28], 0
+    inc     dword ptr [rbx+AN_NCUR]
+    mov     eax, [rbx+AN_NKEY]
+    imul    rdi, rax, KY_SZ
+    lea     rdi, [rbx+AN_KEYS+rdi]
+    add     [rbx+AN_NKEY], ecx
+    lea     rsi, [r14+20]
+    imul    ecx, ecx, KY_SZ
+    mov     rax, rcx
+    rep     movsb
+    lea     r14, [r14+20+rax]
+    mov     ecx, [rsp+4]
+    dec     ecx
+    jmp     3b
+7:  mov     eax, [rsp+8]
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # an_action_find(rdi=name) -> eax = its number (1..), or 0

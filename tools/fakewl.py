@@ -3216,7 +3216,7 @@ def node_groups():
               'add("cube", "M", 0, 0, 0)\nmm = modifier("M", "geometry")\nmodset("M", mm, "tree", t)\nmodapply("M", 0)\n'
               'print(verts("M"), vpos("M", 0, 0), vpos("M", 0, 1), vpos("M", 8, 0), vpos("M", 8, 1))\n'
               'material("Gold")\nmatset("Gold", "metallic", 1)\nn = node("Gold", "noise", 3)\nsocket("Gold", "base", n)\n'
-              'op("tree.save_asset", "Main")\nop("material.save_asset", "Gold")')
+              'op("tree.save_asset", "Main")\nop("material.save_asset", "Gold")\nop("lib.save", "material Gold #metal")')
     check(out == ['9', '-1', '-1', '1', '1'], f'a group node runs its tree; a field from outside lifts each point by its x ({out})')
     out = run('op("asset.load", "Main")\nop("asset.load", "Gold")\n'
               'print(ginfo(1, 0, "count"), ginfo(2, 0, "count"), ginfo(1, 3, "value", 1), matget("Gold", "metallic"), nodeinfo("Gold", 0, "count"))')
@@ -3226,6 +3226,7 @@ def node_groups():
     f.keymap('tests/keymaps/us.xkb')
     f.enter(600, 300)
     shutil.copytree(os.path.join(home, 'BeeModel', 'assets'), os.path.join(f.home, 'BeeModel', 'assets'))
+    shutil.copytree(os.path.join(home, 'BeeModel', 'library'), os.path.join(f.home, 'BeeModel', 'library'))
     m = Mcp(f)
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
     q('t = gtree("Terrain")\no = gnode(t, "output")\ng = gnode(t, "grid", 6, 30)\nsp = gnode(t, "set_position")\n'
@@ -3259,10 +3260,11 @@ def node_groups():
     q('op("area.type_asset_browser")')
     f.pump(0.5)
     f.shot('90_asset_browser.png')
-    f.click(200, 112)                           # the first asset (Gold: by name)
+    f.click(60, 120)                            # the library's first asset (Gold):
+    f.click(60, 120)                            #  a double click places it
     f.pump(0.3)
     n = q('print(matget("Gold", "metallic"))')
-    check(n == '1', f'the asset browser lists the assets; a click adds one ({n})')
+    check(n == '1', f'the asset browser lists the library; a double click places an asset ({n})')
     f.proc.kill()
 
 

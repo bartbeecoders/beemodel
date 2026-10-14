@@ -32,6 +32,9 @@ act_btn_w:      .skip 4
 act_btn_h:      .skip 4
 
 .section .rodata
+s_lib_pack:     .asciz "lib.pack"
+s_lib_import:   .asciz "lib.import"
+s_lib_add:      .asciz "lib.add"
 s_env_perm:     .asciz "BEEMODEL_AGENT_PERMISSION="
 s_read:         .asciz "read"
 s_edit:         .asciz "edit"
@@ -135,6 +138,21 @@ op_tier:
     jnz     1f
     mov     rdi, rbx
     lea     rsi, [rip+s_render_save]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     rdi, rbx                    # library packs, folders: files
+    lea     rsi, [rip+s_lib_pack]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     rdi, rbx
+    lea     rsi, [rip+s_lib_import]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     rdi, rbx
+    lea     rsi, [rip+s_lib_add]
     call    str_eq
     test    eax, eax
     jnz     1f

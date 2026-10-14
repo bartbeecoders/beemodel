@@ -419,6 +419,11 @@ ui_motion:
     add     rsp, 8
     pop     rsi
     pop     rdi
+0:  cmp     dword ptr [rip+lb_drag], 0  # a library tile carried
+    je      0f
+    mov     [rip+ptr_x], edi
+    mov     [rip+ptr_y], esi
+    jmp     lb_motion
 0:  push    rbx
     push    r12
     push    r13
@@ -1008,6 +1013,13 @@ ui_button:
 
     # ---------------- release ----------------
 .Lbt_release:
+    cmp     dword ptr [rip+lb_drag], 0  # a library tile dropped
+    je      7700f
+    mov     edi, ebx
+    mov     esi, r12d
+    call    lb_release
+    jmp     .Lbt_done
+7700:
     call    uved_release                # (a UV pan ends)
     call    nodeed_release              # (a node editor drag too)
     call    tl_release                  # (and a timeline scrub)
