@@ -181,6 +181,59 @@ Each face is triangulated in its (u, v), scaled by the surface's metric:
 Triangles turn so their normals point outwards. The result is watertight:
 every triangle edge is used exactly twice, once each way.
 
+## STEP (`step.s`, `stepread.s`)
+
+`file.export_step <path>` writes every object with a solid (built by the
+kernel or imported) as ISO 10303-21, AP214 (`AUTOMOTIVE_DESIGN`):
+
+- **Geometry:** lines, circles, ellipses and B-spline curves; planes,
+  cylinders, cones, spheres, tori and B-spline surfaces, rational ones as
+  the complex instances STEP needs. Our parametrisations are STEP's, so
+  each is written as it is.
+- **Topology:** an advanced B-rep (`MANIFOLD_SOLID_BREP`) per solid. Pole
+  edges are left out, as STEP expects.
+- **Products:** each solid is a product named after its object, with its
+  colour as a styled item.
+- **Placement:** one solid is written in place, its object's transform
+  applied. Several make an assembly: each object a component placed by its
+  transform (`NEXT_ASSEMBLY_USAGE_OCCURRENCE` and
+  `ITEM_DEFINED_TRANSFORMATION`).
+- **Units:** the scene's (millimetres, centimetres, metres, or inches as a
+  conversion-based unit); angles in radians.
+- **Precision:** reals carry 17 significant digits, so they come back to
+  the last bit.
+
+`file.import_step <path>` (an undo step) reads Part 21 with its own parser:
+simple and complex instances, typed values, comments. Every solid becomes a
+kernel body:
+
+- Faces get their pcurves from their surfaces.
+- Seamed faces get pcurves that continue round the seam.
+- Poles get the degenerate edges STEP leaves out.
+- A face bounded only by meridians takes the side of the turn its loop's
+  direction gives.
+- Lengths are converted from the file's unit, the one its context assigns,
+  to the scene's.
+
+Each placed instance of a solid becomes a mesh object, its tessellation,
+named after its product. It gets its assembly placement (through every
+level of the assembly) as the object's transform, and the solid's colour.
+`brep()` and `file.export_step` see the solid, so a part goes back out
+exact. The parsed file is kept for the session, so the solids are built
+again after each kernel reset. A saved `.bee` keeps the meshes; import again
+for the exact solids.
+
+[tests/step.py](../tests/step.py) round-trips an assembly of every analytic
+surface, placed, turned and coloured, and the enclosure's case:
+
+- **Our own round trip:** volumes and areas to 1e-9 (about 1e-15 seen), the same faces,
+  placements and colours.
+- **Units:** the case read into a centimetre scene, and an inch scene
+  exported.
+- **Through FreeCAD (or OpenCASCADE):** reading both files (volumes to 1e-6,
+  each solid where we put it), writing them again for us to read (to 1e-6),
+  and its every-face-NURBS version of the case (to 1e-6).
+
 ## BeeScript
 
 | Call | Result |
@@ -188,6 +241,8 @@ every triangle edge is used exactly twice, once each way.
 | `op("cad.kernel", "on")` / `"off"` | The switch (an undo step, saved with the file) |
 | `brep(name, what)` | Reports on the object's solid. `what` is one of: `"volume"`, `"area"`, `"faces"`, `"edges"`, `"vertices"`, `"loops"`, `"valid"`, `"watertight"`, `"triangles"`, `"tessvolume"` (the triangles' volume), `"kernel"` (1 when it has a solid), `"error"` (why the last boolean failed), or how many faces are `"planes"`, `"cylinders"`, `"cones"`, `"spheres"`, `"tori"`, `"nurbs"`. Without a solid it returns nil. |
 | `nurbscheck(k)` | The largest error of NURBS check `k` (`nbcheck.s`) |
+| `op("file.export_step", path)` / `op("file.import_step", path)` | STEP out and in |
+| `get(name, "color")` / `set(name, "color", rgb)` | The object's colour, `0xRRGGBB` as a number (what STEP writes and reads) |
 
 Setting `BEEMODEL_BREP_KEEP=1` keeps boolean results even when they are
 not valid, and dumps their topology and each face's arrangement to stderr

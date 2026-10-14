@@ -25,6 +25,9 @@
 .include "brep.inc"
 
 .globl br_reset
+.globl br_init
+.globl nb_new_ext
+.globl pc_hint_ok
 .globl bk_vx
 .globl bk_ed
 .globl bk_ce
@@ -104,6 +107,7 @@ br_lin:         .double 1.0e-10             # (relative) a pcurve is straight
 br_pctol:       .double 1.0e-8              # (relative) polyline pcurves
 br_pole:        .double 1.0e-11             # (relative) on a surface's pole
 br_nwt:         .double 1.0e-15
+br_on9:         .double 1.0e-9
 br_eps:         .double 1.0e-6              # fc_orient's step off the face
 br_in:          .double 1.0e-4              #  and into it
 br_big:         .double 1.0e300
@@ -140,6 +144,8 @@ bs_bad:         .skip 4
 pc_t:           .skip 8*MAXPC
 pc_uv:          .skip 16*MAXPC
 pc_n:           .skip 4
+pc_hint_ok:     .skip 4                 # pc_make: start near pc_hint
+pc_hint:        .skip 16
 pc_pole:        .skip MAXPC
 # fc_sample: every loop of a face as (u, v) points
 .align 8
@@ -154,6 +160,13 @@ fs_np:          .skip 4
 # =============================================================================
 #  Storage
 # =============================================================================
+# br_init - the arenas exist (nothing reset)
+br_init:
+    cmp     dword ptr [rip+br_ready], 0
+    jne     9f
+    jmp     br_reset
+9:  ret
+
 # br_reset - the kernel starts empty (nurbs.s's arenas too)
 br_reset:
     push    rbx
@@ -702,7 +715,32 @@ sf_invert:
     mov     eax, 1
     jmp     .Lsi_out
 .Lsi_nurbs:
-    call    nurbs_seed                  # the nearest of a grid, then Newton
+    mov     rdi, rbx                    # Newton from the hint first; on the
+    mov     rsi, r12                    #  point: done
+    call    sf_project
+    movsd   [rsp+72], xmm0
+    movsd   [rsp+80], xmm1
+    mov     rdi, rbx
+    lea     rsi, [rsp]
+    call    srf_eval
+    lea     rdi, [rsp]
+    mov     rsi, r12
+    call    v3dist
+    lea     rdi, [r12]                  # (tolerance: 1e-9 of |P| + 1e-15)
+    call    v3len
+    mulsd   xmm0, [rip+br_on9]
+    addsd   xmm0, [rip+br_nwt]
+    movsd   xmm2, xmm0
+    lea     rdi, [rsp]
+    mov     rsi, r12
+    call    v3dist
+    comisd  xmm0, xmm2
+    ja      1f
+    movsd   xmm0, [rsp+72]
+    movsd   xmm1, [rsp+80]
+    xor     eax, eax
+    jmp     .Lsi_out
+1:  call    nurbs_seed                  # else the nearest of a grid, Newton
     mov     rdi, rbx
     mov     rsi, r12
     call    sf_project
@@ -1014,7 +1052,13 @@ pc_make:
     mov     edi, [rax+FC_SURF]
     call    p_sf
     mov     [rsp+PM_S], rax
-    mov     edi, r12d
+    cmp     dword ptr [rip+pc_hint_ok], 0   # continuing from the coedge
+    je      1f                              #  before (round a seam)
+    movsd   xmm0, [rip+pc_hint]
+    movsd   [rsp+PM_UH], xmm0
+    movsd   xmm0, [rip+pc_hint+8]
+    movsd   [rsp+PM_VH], xmm0
+1:  mov     edi, r12d
     call    ce_edge_dir
     movsd   [rsp+PM_TS], xmm0
     movsd   [rsp+PM_TE], xmm1
@@ -1664,15 +1708,33 @@ fc_pcurves:
     mov     r14d, [rax+LP_FIRST]
     mov     ebp, [rax+LP_N]
     add     ebp, r14d
+    mov     [rsp+80], r14d              # (the loop's first)
 1:  cmp     r14d, ebp
     jae     2f
     mov     edi, r14d
     call    p_ce
     cmp     dword ptr [rax+CE_PC], -1   # (kept when it has one)
     jne     11f
-    mov     edi, r14d
+    mov     dword ptr [rip+pc_hint_ok], 0
+    cmp     r14d, [rsp+80]              # after the first: from where the one
+    je      12f                         #  before ends
+    lea     edi, [r14-1]
+    call    p_ce
+    cmp     dword ptr [rax+CE_PC], -1
+    je      12f
+    lea     edi, [r14-1]
+    movsd   xmm0, [rip+br_one]
+    lea     rsi, [rsp]
+    call    ce_uv
+    movsd   xmm0, [rsp]
+    movsd   [rip+pc_hint], xmm0
+    movsd   xmm0, [rsp+8]
+    movsd   [rip+pc_hint+8], xmm0
+    mov     dword ptr [rip+pc_hint_ok], 1
+12: mov     edi, r14d
     mov     esi, r15d
     call    pc_make
+    mov     dword ptr [rip+pc_hint_ok], 0
 11: inc     r14d
     jmp     1b
 2:  inc     r12d

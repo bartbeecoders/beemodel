@@ -212,6 +212,7 @@ bk_note:
 
 # lp_shoelace(edi=loop) -> xmm0 = the signed area of its pcurves' points
 #   (polylines: their own points; others: 64 each)
+.globl lp_shoelace
 lp_shoelace:
     push    rbx
     push    r12

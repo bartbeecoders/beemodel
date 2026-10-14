@@ -274,6 +274,8 @@ props:          .ascii "x\0\0\0\0\0\0\0"
                 .quad OB_SCALE+4
                 .ascii "sz\0\0\0\0\0\0"
                 .quad OB_SCALE+8
+                .ascii "color\0\0\0"          # 0xRRGGBB, an integer
+                .quad OB_COLOR
 props_end:
 
 # builtins: name, handler, min args, max args
@@ -4086,8 +4088,14 @@ b_get:
     call    a_obj
     mov     edi, eax
     call    obj_get
-    cvtss2sd xmm0, [rax+r12]
-    add     rsp, 8
+    cmp     r12d, OB_COLOR
+    jne     1f
+    mov     eax, [rax+r12]
+    and     eax, 0xffffff
+    cvtsi2sd xmm0, eax
+    jmp     2f
+1:  cvtss2sd xmm0, [rax+r12]
+2:  add     rsp, 8
     pop     r12
     pop     rbx
     jmp     ret_num
@@ -4103,9 +4111,15 @@ b_set:
     mov     r12d, eax
     lea     rdi, [rbx+32]
     call    a_num
-    cvtsd2ss xmm0, xmm0
+    cmp     r12d, OB_COLOR
+    jne     1f
+    cvttsd2si eax, xmm0
+    and     eax, 0xffffff
+    mov     [rsp], eax
+    jmp     2f
+1:  cvtsd2ss xmm0, xmm0
     movss   [rsp], xmm0
-    mov     rdi, rbx
+2:  mov     rdi, rbx
     call    a_obj
     mov     r13d, eax
     lea     rdi, [rip+s_script]
