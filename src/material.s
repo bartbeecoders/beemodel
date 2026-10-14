@@ -23,6 +23,7 @@
 .globl mat_new
 .globl mat_set
 .globl mat_cow
+.globl mat_put
 .globl mat_param_index
 .globl mat_param_get
 .globl mat_assign
@@ -312,6 +313,44 @@ mat_find:
 2:  mov     eax, ebx
     jmp     9f
 8:  mov     eax, -1
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# mat_put(edi=index, rsi=name[32], rdx=values (60 bytes: base .. alpha, as
+#   from MA_BASE)) -> eax = 1: the record copied over (the live link)
+mat_put:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12, rsi
+    mov     r13, rdx
+    call    mat_count
+    cmp     ebx, eax
+    jae     8f
+    xor     edi, edi
+    call    mat_cow
+    test    rax, rax
+    jz      8f
+    mov     edi, ebx
+    call    mat_get
+    test    rax, rax
+    jz      8f
+    mov     rdi, rax
+    mov     rsi, r12
+    mov     ecx, 31
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    lea     rdi, [rax+MA_BASE]
+    mov     rsi, r13
+    mov     ecx, 60
+    rep     movsb
+    mov     dword ptr [rip+dirty], 1
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
 9:  pop     r13
     pop     r12
     pop     rbx

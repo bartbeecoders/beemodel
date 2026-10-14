@@ -206,6 +206,20 @@ project uses [Semantic Versioning](https://semver.org/).
     reflections), undo, saving, PNG and EXR, the export through the
     Khronos glTF validator (no errors, no warnings), the preview lit by
     the probes.
+- **Live link** (#150): the scene streamed over a socket (`src/link.s`).
+  - `link.serve [port] | lan [port] | unix:<path>` serves a versioned
+    binary stream: HELLO, a snapshot (materials, meshes, objects), then the
+    changes - OBJECT, DELETE, TRANSFORM, PROPERTY (name, material, hidden,
+    colour), MESH, MESH_DELTA (only the runs of vertices that moved),
+    MATERIAL - each turn of the event loop after a TICK with the editor's
+    clock. Changes are found by comparing the scene with what was sent.
+  - `beemodel --link host:port` (or `link.connect`) mirrors a session;
+    `docs/LIVELINK.md` documents the protocol for engine plugins and
+    `tools/livelink.py` is a reference reader.
+  - Under a millisecond on localhost; a reader that falls behind gets its
+    transforms coalesced (one, the latest, per object once it catches up).
+  - [tests/livelink.py](tests/livelink.py): snapshot, latency, deltas,
+    topology changes, a mirror, backpressure, a late reader, a UNIX socket.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

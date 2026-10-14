@@ -23,6 +23,7 @@
 .globl scene_pool
 .globl obj_find
 .globl obj_copy
+.globl obj_remove_at
 .globl obj_rename
 .globl select_none
 .globl scene_clear
@@ -510,22 +511,16 @@ op_create:
     pop     rbx
     ret
 
-# op_delete_sel - remove selected objects (keeps list order)
-op_delete_sel:
-    cmp     dword ptr [rip+edit_obj], 0
-    jne     edit_unsupported
+# obj_remove_at(edi=list index) - the object goes (its data let go, the
+#   list closed up)
+obj_remove_at:
     push    rbx
     push    r12
-    push    r13
-    xor     r13d, r13d                  # deleted count
-    mov     ebx, [rip+obj_count]
-1:  test    ebx, ebx
-    jz      5f
-    dec     ebx
-    mov     edi, ebx
+    sub     rsp, 8
+    mov     ebx, edi
     call    obj_at
-    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
-    jz      1b
+    test    rax, rax
+    jz      9f
     mov     rdi, rax
     call    obj_data_unref
     lea     rax, [rip+obj_list]
@@ -546,6 +541,30 @@ op_delete_sel:
     inc     ecx
     jmp     3b
 4:  dec     dword ptr [rip+obj_count]
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# op_delete_sel - remove selected objects (keeps list order)
+op_delete_sel:
+    cmp     dword ptr [rip+edit_obj], 0
+    jne     edit_unsupported
+    push    rbx
+    push    r12
+    push    r13
+    xor     r13d, r13d                  # deleted count
+    mov     ebx, [rip+obj_count]
+1:  test    ebx, ebx
+    jz      5f
+    dec     ebx
+    mov     edi, ebx
+    call    obj_at
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      1b
+    mov     edi, ebx
+    call    obj_remove_at
     inc     r13d
     jmp     1b
 5:  test    r13d, r13d
