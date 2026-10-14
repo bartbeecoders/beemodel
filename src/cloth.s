@@ -96,6 +96,12 @@
 .align 16
 cq_xyz:         .long -1, -1, -1, 0
 cq_w:           .long 0, 0, 0, -1
+cq_big4:        .float 1e30, 1e30, 1e30, 0
+cq_nbig4:       .float -1e30, -1e30, -1e30, 0
+cq_tiny4:       .float 1e-12, 1e-12, 1e-12, 1e-12
+cq_q16:         .float 65535, 65535, 65535, 0
+cq_inv16:       .float 1.5259022e-5, 1.5259022e-5, 1.5259022e-5, 0
+cq_q16i:        .long 65535, 65535, 65535, 0
 cq_grav:        .float 0, -9.81, 0, 0
 cq_one:         .float 1.0
 cq_tiny:        .float 1.0e-9
@@ -2066,27 +2072,57 @@ cl_sethash:
     pop     rbx
     ret
 
-# cl_frame(xmm0=frame) - the simulation at that frame (none at or before
-#   the start; begun again when going back or the settings changed)
+# cl_frame(xmm0=frame) - the simulation at that frame: none at or before
+#   the start; a cached frame played back; else stepped on (begun again
+#   when going back or the key changed), each whole frame reached kept
 cl_frame:
     push    rbx
     push    r12
-    sub     rsp, 40
+    sub     rsp, 56
     cmp     dword ptr [rip+cx_busy], 0
     jne     .Lcf_ret
     mov     dword ptr [rip+cx_busy], 1
     movss   [rsp], xmm0
     mov     rbx, [rip+an_cur]
     test    rbx, rbx
-    jz      .Lcf_none
+    jz      .Lcf_gone
     cmp     dword ptr [rbx+AN_CW_+CW_N], 0
-    je      .Lcf_none
+    je      .Lcf_gone
     cvtsi2ss xmm1, dword ptr [rbx+AN_START]
     movss   [rsp+4], xmm1
-    comiss  xmm0, xmm1
-    jbe     .Lcf_none
-    call    cl_sethash
+    call    cl_key
     mov     r12, rax
+    mov     edi, 1
+    mov     rsi, r12
+    mov     edx, [rbx+AN_START]
+    call    sc_check
+    mov     [rsp+32], eax               # baked
+    movss   xmm0, [rsp]
+    comiss  xmm0, [rsp+4]
+    jbe     .Lcf_none
+    cvttss2si esi, xmm0                 # a cached frame?
+    cvtsi2ss xmm1, esi
+    cmp     dword ptr [rsp+32], 0
+    je      11f
+    mov     edi, 1
+    mov     [rsp+36], esi
+    call    sc_last
+    mov     esi, [rsp+36]
+    cmp     esi, eax
+    cmovg   esi, eax
+    jmp     12f
+11: ucomiss xmm0, xmm1
+    jne     13f
+12: mov     edi, 1
+    call    sc_get
+    test    rax, rax
+    jz      13f
+    mov     rdi, rax
+    mov     rsi, r12
+    call    cl_play
+    jmp     .Lcf_out
+13: cmp     dword ptr [rsp+32], 0
+    jne     .Lcf_out
     cmp     dword ptr [rip+cx_on], 0
     je      2f
     cmp     r12, [rip+cx_hash]
@@ -2102,16 +2138,35 @@ cl_frame:
     mov     dword ptr [rip+cx_time], 0
 3:  call    now_ms
     mov     [rsp+8], rax
-    movss   xmm0, [rsp]
-    subss   xmm0, [rsp+4]
     movss   xmm1, [rbx+AN_FPS]
     xorps   xmm2, xmm2
     comiss  xmm1, xmm2
     ja      31f
     movss   xmm1, [rip+cq_24]
-31: divss   xmm0, xmm1
+31: movss   [rsp+20], xmm1
+    movss   xmm0, [rsp]
+    subss   xmm0, [rsp+4]
+    divss   xmm0, xmm1
     movss   [rsp+16], xmm0
-4:  movss   xmm0, [rip+cx_dt]
+4:  mov     edi, 1                      # a whole frame reached: kept
+    call    sc_last
+    inc     eax
+    cvtsi2ss xmm0, eax
+    comiss  xmm0, [rsp]
+    ja      41f
+    mov     [rsp+24], eax
+    subss   xmm0, [rsp+4]
+    divss   xmm0, [rsp+20]
+    movss   xmm1, [rip+cx_dt]
+    mulss   xmm1, [rip+cq_half]
+    addss   xmm1, [rip+cx_time]
+    comiss  xmm1, xmm0
+    jb      41f
+    mov     esi, [rsp+24]
+    call    cl_record
+    test    rax, rax
+    jnz     4b
+41: movss   xmm0, [rip+cx_dt]
     mulss   xmm0, [rip+cq_half]
     addss   xmm0, [rip+cx_time]
     comiss  xmm0, [rsp+16]
@@ -2130,14 +2185,278 @@ cl_frame:
     call    cl_output
     mov     dword ptr [rip+dirty], 1
     jmp     .Lcf_out
+.Lcf_gone:
+    mov     edi, 1
+    call    sc_clear
 .Lcf_none:
     call    cl_free
 .Lcf_out:
     mov     dword ptr [rip+cx_busy], 0
 .Lcf_ret:
-    add     rsp, 40
+    add     rsp, 56
     pop     r12
     pop     rbx
+    ret
+
+# cl_key -> rax: the settings and pins, the animation, the rigid bodies'
+#   key, the meshes, where the objects nothing moves are (what the cache
+#   belongs to)
+cl_key:
+    push    rbx
+    push    r12
+    push    r13
+    call    cl_sethash
+    call    an_hash
+    mov     r12, rax
+    mov     rbx, [rip+an_cur]
+    cmp     dword ptr [rbx+AN_NRB_], 0
+    je      1f
+    xor     edi, edi
+    call    sc_key
+    mov     r8, 0x9E3779B97F4A7C15
+    xor     r12, rax
+    imul    r12, r8
+1:  mov     rax, r12
+    xor     r12d, r12d
+2:  cmp     r12d, [rbx+AN_CW_+CW_N]
+    jae     9f
+    push    rax
+    imul    r13, r12, CL_SZ_
+    lea     rdi, [rbx+AN_CL_+r13]
+    call    cl_entry_obj
+    mov     rdi, rax
+    pop     rax
+    test    rdi, rdi
+    jz      3f
+    push    rdi
+    push    rax
+    mov     edi, [rdi+OB_UID]           # nothing moves it: where it is
+    call    an_moves
+    mov     ecx, eax
+    pop     rax
+    pop     rdi
+    test    ecx, ecx
+    jnz     21f
+    push    rdi
+    add     rdi, OB_LOC
+    mov     esi, 36
+    call    sc_mix
+    pop     rdi
+21: mov     rdi, [rdi+OB_MESH]
+    call    sc_meshhash
+3:  inc     r12d
+    jmp     2b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# rec_size(r12=cloth) -> eax = its part of a cached frame
+.macro REC_SIZE d, r
+    imul    \d, [\r+CR_NP], 6
+    add     \d, 32+3
+    and     \d, -4
+.endm
+
+# cl_record(esi=frame) -> rax = 0 when not kept: each cloth's shown
+#   vertices into the cache: count, then uid, vertices, the low corner, the
+#   step, three u16 a vertex
+cl_record:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 64
+    mov     [rsp+48], esi
+    call    cl_output
+    mov     edx, 4
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+cx_nc]
+    jae     2f
+    imul    r12, rbx, CR_SZ
+    lea     rax, [rip+cx_rec]
+    add     r12, rax
+    REC_SIZE eax, r12
+    add     edx, eax
+    inc     ebx
+    jmp     1b
+2:  mov     edi, 1
+    mov     esi, [rsp+48]
+    call    sc_add
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    mov     eax, [rip+cx_nc]
+    mov     [r13], eax
+    add     r13, 4
+    xor     ebx, ebx
+3:  cmp     ebx, [rip+cx_nc]
+    jae     8f
+    imul    r12, rbx, CR_SZ
+    lea     rax, [rip+cx_rec]
+    add     r12, rax
+    mov     rax, [r12+CR_OBJ]
+    mov     eax, [rax+OB_UID]
+    mov     [r13], eax
+    mov     r15d, [r12+CR_NP]
+    mov     [r13+4], r15d
+    mov     r14, [r12+CR_OUT]
+    mov     r14, [r14+ME_POS]
+    movaps  xmm6, [rip+cq_big4]         # its bounds
+    movaps  xmm7, [rip+cq_nbig4]
+    xor     ecx, ecx
+    mov     rdx, r14
+4:  cmp     ecx, r15d
+    jae     5f
+    LD3     xmm0, rdx, xmm1
+    minps   xmm6, xmm0
+    maxps   xmm7, xmm0
+    add     rdx, 12
+    inc     ecx
+    jmp     4b
+5:  andps   xmm6, [rip+cq_xyz]
+    andps   xmm7, [rip+cq_xyz]
+    subps   xmm7, xmm6                  # extent
+    movaps  [rsp], xmm6
+    movaps  xmm0, xmm7
+    mulps   xmm0, [rip+cq_inv16]        # the step
+    movaps  [rsp+16], xmm0
+    movaps  xmm5, [rip+cq_q16]          # 1 / the step (0: flat)
+    movaps  xmm4, [rip+cq_tiny4]
+    cmpltps xmm4, xmm7
+    maxps   xmm7, [rip+cq_tiny4]
+    divps   xmm5, xmm7
+    andps   xmm5, xmm4
+    mov     rax, [rsp]
+    mov     [r13+8], rax
+    mov     eax, [rsp+8]
+    mov     [r13+16], eax
+    mov     rax, [rsp+16]
+    mov     [r13+20], rax
+    mov     eax, [rsp+24]
+    mov     [r13+28], eax
+    lea     rdi, [r13+32]
+    movaps  xmm3, [rip+cq_q16i]
+    pxor    xmm2, xmm2
+    xor     ecx, ecx
+6:  cmp     ecx, r15d
+    jae     7f
+    LD3     xmm0, r14, xmm1
+    subps   xmm0, xmm6
+    mulps   xmm0, xmm5
+    cvtps2dq xmm0, xmm0
+    pminsd  xmm0, xmm3
+    pmaxsd  xmm0, xmm2
+    packusdw xmm0, xmm0
+    movd    [rdi], xmm0
+    pextrw  eax, xmm0, 2
+    mov     [rdi+4], ax
+    add     rdi, 6
+    add     r14, 12
+    inc     ecx
+    jmp     6b
+7:  REC_SIZE eax, r12
+    add     r13, rax
+    inc     ebx
+    jmp     3b
+8:  mov     eax, 1
+9:  lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# cl_play(rdi=record, rsi=key) - a cached frame into the cloths' shown
+#   meshes (the simulation made, at its start, when there is none)
+cl_play:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 48
+    mov     rbx, rdi
+    cmp     dword ptr [rip+cx_on], 0
+    jne     1f
+    mov     [rsp+32], rsi
+    call    cl_build
+    cmp     dword ptr [rip+cx_on], 0
+    je      9f
+    mov     rax, [rsp+32]
+    mov     [rip+cx_hash], rax
+    mov     dword ptr [rip+cx_time], 0
+    mov     rax, [rip+an_cur]
+    cvtsi2ss xmm0, dword ptr [rax+AN_START]
+    movss   [rip+cx_fnow], xmm0
+1:  mov     r15d, [rbx]
+    add     rbx, 4
+2:  test    r15d, r15d
+    jz      9f
+    mov     edi, [rbx]
+    call    obj_by_uid
+    test    rax, rax
+    jz      7f
+    lea     r12, [rip+cx_rec]           # its cloth
+    xor     ecx, ecx
+3:  cmp     ecx, [rip+cx_nc]
+    jae     7f
+    cmp     [r12+CR_OBJ], rax
+    je      4f
+    add     r12, CR_SZ
+    inc     ecx
+    jmp     3b
+4:  mov     eax, [rbx+4]
+    cmp     eax, [r12+CR_NP]
+    jne     7f
+    mov     r13, [r12+CR_OUT]
+    cmp     eax, [r13+ME_NVERTS]
+    jne     7f
+    LD3     xmm6, rbx+8, xmm1
+    LD3     xmm5, rbx+20, xmm1
+    lea     rsi, [rbx+32]
+    mov     rdi, [r13+ME_POS]
+    mov     r14d, eax
+5:  test    r14d, r14d
+    jz      6f
+    movd    xmm0, [rsi]
+    pinsrw  xmm0, word ptr [rsi+4], 2
+    pmovzxwd xmm0, xmm0
+    cvtdq2ps xmm0, xmm0
+    mulps   xmm0, xmm5
+    addps   xmm0, xmm6
+    movlps  [rdi], xmm0
+    extractps [rdi+8], xmm0, 2
+    add     rsi, 6
+    add     rdi, 12
+    dec     r14d
+    jmp     5b
+6:  mov     rdi, r13
+    call    mesh_bbox
+    inc     dword ptr [r13+ME_VER]
+7:  imul    eax, [rbx+4], 6
+    add     eax, 32+3
+    and     eax, -4
+    add     rbx, rax
+    dec     r15d
+    jmp     2b
+9:  mov     dword ptr [rip+dirty], 1
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
     ret
 
 # cl_output - each cloth's particles into its shown mesh (object space)

@@ -329,6 +329,7 @@ scene_clear:
     call    rig_reset                   #  (motion paths, onion skins)
     call    rb_reset                    #  (the simulation)
     call    cl_reset                    #  (cloth)
+    call    sc_reset                    #  (the simulation cache)
     call    image_clear                 # (and the world)
     call    cad_reset                   # (units, parameters)
     lea     rdi, [rip+scene_pool]

@@ -43,6 +43,8 @@
 .globl an_reset
 .globl an_tick
 .globl an_apply
+.globl an_hash
+.globl an_moves
 .globl an_write
 .globl an_read
 .globl an_path_key
@@ -2030,6 +2032,8 @@ an_pathbuf:     .skip 256
 .equ COL_TL_NOW,   0xf2b134
 .equ COL_TL_KEY,   0xe8c547
 .equ COL_TL_KEYDIM, 0x8a7a40
+.equ COL_TL_CACHE, 0x9a6a3a              # simulation frames cached,
+.equ COL_TL_BAKED, 0xe0902c              #  baked
 
 .section .rodata
 s_tl_frame:     .asciz "Frame "
@@ -2041,6 +2045,131 @@ s_tl_playing:   .asciz "    playing (Space pauses)"
 .align 4
 tl_steps:       .long 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 0
 .text
+
+# an_hash(rax=hash) -> rax: the frame range, fps, curves, actions, layers,
+#   keys, drivers, constraints, mechanism joints mixed in (what moves the
+#   objects a simulation starts from)
+an_hash:
+    push    rbx
+    mov     rbx, [rip+an_cur]
+    test    rbx, rbx
+    jz      9f
+    lea     rdi, [rbx+AN_START]
+    mov     esi, 12
+    call    sc_mix
+    lea     rdi, [rbx+AN_CUR]
+    mov     esi, [rbx+AN_NCUR]
+    shl     esi, 5                      # (CU_SZ)
+    call    sc_mix
+    lea     rdi, [rbx+AN_ACT]
+    imul    esi, [rbx+AN_NACT], AC_SZ
+    call    sc_mix
+    lea     rdi, [rbx+AN_LAY]
+    imul    esi, [rbx+AN_NLAY], LY_SZ
+    call    sc_mix
+    lea     rdi, [rbx+AN_KEYS]
+    mov     esi, [rbx+AN_NKEY]
+    shl     esi, 5                      # (KY_SZ)
+    call    sc_mix
+    lea     rdi, [rbx+AN_DRV_]          # drivers
+    imul    esi, [rbx+AN_NDRV_], DR_SZ_
+    call    sc_mix
+    push    r12
+    push    r13
+    xor     r12d, r12d                  # constraints (not what they keep: CN_BASE on)
+1:  cmp     r12d, [rbx+AN_NCON_]
+    jae     2f
+    imul    r13, r12, CN_SZ_
+    lea     rdi, [rbx+AN_CON_+r13]
+    mov     esi, 72
+    call    sc_mix
+    inc     r12d
+    jmp     1b
+2:  xor     r12d, r12d                  # mechanism joints (not MJ_VAL, MJ_LIM)
+3:  cmp     r12d, [rbx+AN_NMJ_]
+    jae     4f
+    imul    r13, r12, MJ_SZ_
+    lea     rdi, [rbx+AN_MJ_+r13]
+    mov     esi, 56
+    call    sc_mix
+    lea     rdi, [rbx+AN_MJ_+r13+64]
+    mov     esi, MJ_SZ_-64
+    call    sc_mix
+    inc     r12d
+    jmp     3b
+4:  pop     r13
+    pop     r12
+9:  pop     rbx
+    ret
+
+# an_moves(edi=object uid) -> eax = 1 when something moves it over time:
+#   keys, a layer, a constraint, a driver, a rigid body, a mechanism joint
+an_moves:
+    mov     r8, [rip+an_cur]
+    test    r8, r8
+    jz      8f
+    xor     ecx, ecx
+    lea     rdx, [r8+AN_CUR]
+1:  cmp     ecx, [r8+AN_NCUR]
+    jae     2f
+    cmp     dword ptr [rdx+CU_KIND], K_OBJ
+    jne     11f
+    cmp     [rdx+CU_A], edi
+    je      7f
+11: add     rdx, CU_SZ
+    inc     ecx
+    jmp     1b
+2:  xor     ecx, ecx
+    lea     rdx, [r8+AN_LAY]
+21: cmp     ecx, [r8+AN_NLAY]
+    jae     3f
+    cmp     [rdx+LY_TARGET], edi
+    je      7f
+    add     rdx, LY_SZ
+    inc     ecx
+    jmp     21b
+3:  xor     ecx, ecx
+    lea     rdx, [r8+AN_CON_]
+31: cmp     ecx, [r8+AN_NCON_]
+    jae     4f
+    cmp     [rdx], edi                  # (its owner)
+    je      7f
+    add     rdx, CN_SZ_
+    inc     ecx
+    jmp     31b
+4:  xor     ecx, ecx
+    lea     rdx, [r8+AN_DRV_]
+41: cmp     ecx, [r8+AN_NDRV_]
+    jae     5f
+    cmp     dword ptr [rdx], K_OBJ      # (the channel it sets)
+    jne     42f
+    cmp     [rdx+4], edi
+    je      7f
+42: add     rdx, DR_SZ_
+    inc     ecx
+    jmp     41b
+5:  xor     ecx, ecx
+    lea     rdx, [r8+AN_RB_]
+51: cmp     ecx, [r8+AN_NRB_]
+    jae     6f
+    cmp     [rdx], edi                  # (its uid)
+    je      7f
+    add     rdx, RB_SZ_
+    inc     ecx
+    jmp     51b
+6:  xor     ecx, ecx
+    lea     rdx, [r8+AN_MJ_]
+61: cmp     ecx, [r8+AN_NMJ_]
+    jae     8f
+    cmp     [rdx+8], edi                # (the part)
+    je      7f
+    add     rdx, MJ_SZ_
+    inc     ecx
+    jmp     61b
+7:  mov     eax, 1
+    ret
+8:  xor     eax, eax
+    ret
 
 # tl_x(edi=frame) -> eax = its x (logical); needs tl_x0 / tl_w and the range
 tl_x:
@@ -2147,6 +2276,35 @@ ed_timeline_draw:
     mov     ecx, TL_RH
     mov     r8d, COL_TL_RULER
     call    fill_rect
+    xor     r13d, r13d                  # cached frames: a line under the ruler
+71: mov     edi, r13d                   #  (rigid, then cloth above it)
+    call    sc_range
+    cmp     edx, eax
+    jle     72f
+    mov     r14d, ecx
+    mov     [rsp+8], edx
+    mov     edi, eax
+    call    tl_x
+    mov     r15d, eax
+    mov     edi, [rsp+8]
+    call    tl_x
+    sub     eax, r15d
+    jle     72f
+    mov     edx, eax
+    mov     edi, r15d
+    mov     esi, [rip+ed_y]
+    add     esi, TL_RULER+TL_RH-2
+    lea     ecx, [r13+r13]
+    sub     esi, ecx
+    mov     ecx, 2
+    mov     r8d, COL_TL_CACHE
+    test    r14d, r14d
+    jz      73f
+    mov     r8d, COL_TL_BAKED
+73: call    fill_rect
+72: inc     r13d
+    cmp     r13d, 2
+    jb      71b
     mov     eax, r12d                   # ticks: a step that leaves 40 px each
     sub     eax, ebx
     inc     eax

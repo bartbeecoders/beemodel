@@ -409,6 +409,8 @@ builtins:
     .long 0, 0
     .quad bn_clinfo, b_clinfo
     .long 1, 1
+    .quad bn_cainfo, b_cainfo
+    .long 1, 1
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -674,6 +676,7 @@ bn_rigid:       .asciz "rigid"
 bn_joint:       .asciz "joint"
 bn_colls:       .asciz "collisions"
 bn_clinfo:      .asciz "clothinfo"
+bn_cainfo:      .asciz "cacheinfo"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -4780,6 +4783,17 @@ b_clinfo:
     call    a_num
     cvttsd2si edi, xmm0
     call    cl_info
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# cacheinfo(k) -> the simulation cache: 0 rigid frames, 1 cloth frames,
+#   2 MB in use, 3 rigid baked, 4 cloth baked, 5 full, 6 the budget (MB)
+b_cainfo:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    sc_info
     add     rsp, 8
     cvtss2sd xmm0, xmm0
     jmp     ret_num

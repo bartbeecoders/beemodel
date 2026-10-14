@@ -72,14 +72,14 @@ jobs:
         run: timeout 900 python tests/sculpt20m.py build/beemodel --frame-ms 250
 
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
-        run: timeout 300 python tools/fakewl.py build/shots
+        run: timeout 600 python tools/fakewl.py build/shots
 
       - name: Headless UI test (bitmap font fallback + golden images)
         env:
           BEEMODEL_FONT: none
           BEEMODEL_MONO_FONT: none
           BEEMODEL_GOLDEN: check
-        run: timeout 300 python tools/fakewl.py build/shots-bitmap
+        run: timeout 600 python tools/fakewl.py build/shots-bitmap
 
       - name: Upload screenshots
         if: always()

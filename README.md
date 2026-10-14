@@ -473,6 +473,11 @@ sets all of it up without typing: **+ Rigid Body**, Active / Passive, the shape,
 friction, bounce, damping, gravity. 1000 boxes tumbling into a heap simulate faster than real
 time.
 
+**Simulation cache.** Rigid bodies and cloth keep every frame they reach, so scrubbing back
+plays them instead of simulating again; an edit to the setup starts it over. `sim.bake` keeps
+the whole frame range (saved with the file) until `sim.free`, and the timeline shows what is
+cached.
+
 **Rigging.** Constraints copy, track, limit or parent an object to another
 (`constraint.add Cam track_to Target`). An IK constraint on a bone makes its chain reach for a
 target and bend towards a pole (`constraint.add Rig:Hand ik Goal chain 2 pole Knee`); drag the
@@ -720,6 +725,7 @@ src/mech.s      mechanisms: revolute / slider joints, gears, limits, collisions
 src/cloth.s     cloth and soft bodies: XPBD, pins, colliders, self collision, wind
 src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, islands, joints
 src/physui.s    the Physics section of the Properties area
+src/simcache.s  the simulation cache: frames kept, played back, baked, saved
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

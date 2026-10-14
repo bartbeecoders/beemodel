@@ -7,6 +7,14 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The simulation cache:
+  - **Cached frames:** rigid bodies and cloth keep each whole frame as the simulation reaches it. Scrubbing back plays the cached frames instead of simulating again, and the scene's start keeps them. Cloth vertices are stored as 16 bits a coordinate within each cloth's bounds (half the memory; within 0.2 mm on a 2 m flag).
+  - **Invalidation:** the cache belongs to a key made from the settings, pins, the objects' start places and meshes, and the animation (keys, layers, drivers, constraints, mechanism joints). An edit that changes the key drops it, and the simulation starts again.
+  - **Bake:** `sim.bake [rigid|cloth]` simulates the frame range and keeps it whatever changes until `sim.free [rigid|cloth]`. A baked cache is saved in the `.bee` file (SIMC), and past its end it holds the last frame.
+  - **Memory:** all channels share a budget (`sim.cache budget MB`, 1024 MB by default); a channel that would go over it stops recording. `sim.cache` reports what is held.
+  - **Timeline:** a line under the ruler shows the cached frames, brighter when baked.
+  - **Speed:** 1000 boxes scrub back at under 2 ms a frame from a 6.4 MB cache of 239 frames.
+  - **BeeScript:** `cacheinfo(k)`.
 - Keyframes and the timeline:
   - **Keys:** anything a script can set can be keyed: object transforms, material values, modifier parameters, node inputs and values.
   - **F-curves:** Bezier with auto-clamped handles (flat at extremes, never overshooting), linear or constant interpolation.
