@@ -878,6 +878,7 @@ tools_call:
     push    rbx
     push    r12
     push    r13
+    mov     dword ptr [rip+co_mcp_touch], 1 # (co-editing: the agent's, maybe)
     lea     rdi, [rip+out_state]        # park the response, open the text
     call    buf_swap
     lea     rdi, [rip+txt_state]

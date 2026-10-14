@@ -449,6 +449,14 @@ builtins:
     .long 1, 1
     .quad bn_vctext, b_vctext
     .long 1, 2
+    .quad bn_costat, b_costat
+    .long 1, 1
+    .quad bn_cohash, b_cohash
+    .long 0, 0
+    .quad bn_viewinfo, b_viewinfo
+    .long 1, 1
+    .quad bn_objtype, b_objtype
+    .long 1, 1
     .quad bn_libfind, b_libfind
     .long 2, 2
     .quad bn_libinfo, b_libinfo
@@ -738,6 +746,10 @@ bn_lmsample:    .asciz "lmsample"
 bn_livelink:    .asciz "livelink"
 bn_vcinfo:      .asciz "vcinfo"
 bn_vctext:      .asciz "vctext"
+bn_costat:      .asciz "costat"
+bn_cohash:      .asciz "cohash"
+bn_viewinfo:    .asciz "viewinfo"
+bn_objtype:     .asciz "objtype"
 bn_libfind:     .asciz "libfind"
 bn_libinfo:     .asciz "libinfo"
 bn_wpaint:      .asciz "wpaint"
@@ -5224,6 +5236,68 @@ b_vctext:
     jz      ret_nil
     mov     rsi, rax
     jmp     ret_text
+
+# costat(k) -> co-editing (cosync.s: co_stat)
+b_costat:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    co_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# cohash() -> the co-editing document's hash (16 hex digits): every peer's
+#   is the same once they converged
+b_cohash:
+    sub     rsp, 40
+    call    co_hash_doc
+    lea     rdi, [rsp]
+    mov     ecx, 16
+1:  rol     rax, 4
+    mov     edx, eax
+    and     edx, 15
+    add     edx, '0'
+    cmp     edx, '9'
+    jbe     2f
+    add     edx, 'a'-'9'-1
+2:  mov     [rdi], dl
+    inc     rdi
+    dec     ecx
+    jnz     1b
+    mov     byte ptr [rdi], 0
+    lea     rsi, [rsp]
+    call    ret_text
+    add     rsp, 40
+    ret
+
+# viewinfo(k) -> the viewport camera: 0 yaw, 1 pitch (degrees), 2 distance,
+#   3-5 its target
+b_viewinfo:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si eax, xmm0
+    xorps   xmm0, xmm0
+    cmp     eax, 6
+    jae     9f
+    lea     rcx, [rip+cam_yaw]
+    movss   xmm0, [rcx+rax*4]
+    cmp     eax, 2
+    jae     9f
+    mulss   xmm0, [rip+f_rad2deg]
+9:  add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# objtype(object) -> 0 mesh, 1 light, 2 camera, 3 sketch, 4 armature
+b_objtype:
+    sub     rsp, 8
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    cvtsi2sd xmm0, dword ptr [rax+OB_TYPE]
+    add     rsp, 8
+    jmp     ret_num
 
 # livelink(k) -> the live link (link.s: link_stat)
 b_livelink:
