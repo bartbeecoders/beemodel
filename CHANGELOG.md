@@ -312,6 +312,28 @@ project uses [Semantic Versioning](https://semver.org/).
     - the enclosure walkthrough on the kernel, before and after a parameter
       change: valid and watertight;
     - the switch in saved files.
+- **STEP import and export** (#154), our own Part 21 reader and writer
+  (docs/BREP.md):
+  - `file.export_step` writes B-rep solids as AP214:
+    - geometry: planes, cylinders, cones, spheres, tori, B-spline surfaces
+      and curves, rational or not;
+    - one part in place, or several as an assembly with their placements;
+    - each solid's name and colour, and the scene's units (millimetres,
+      centimetres, metres, inches).
+  - `file.import_step` reads parts and assemblies:
+    - analytic or NURBS faces, seams and poles;
+    - placements through every level, names, colours, and the file's
+      units converted to the scene's.
+    - Imported solids are kernel bodies, so `brep()` and the export see
+      them.
+  - BeeScript's `get` and `set` take `"color"`.
+  - [tests/step.py](tests/step.py) checks:
+    - our own round trip: volumes and areas to 1e-9 (about 1e-15 seen), placements, colours
+      and units;
+    - FreeCAD (or OpenCASCADE) reading our part and assembly (volumes to
+      1e-6, each solid in place);
+    - its re-export, and its every-face-NURBS version, read back to 1e-6.
+  - CI installs FreeCAD from its PPA for the round trips.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

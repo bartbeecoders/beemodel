@@ -46,6 +46,7 @@ bt_big:         .double 1.0e300
 bt_rel:         .double 2.0e-4                  # chord height (of the size)
 bt_keep:        .double 0.45                    # inner points this far in
 bt_eps:         .double 1.0e-9
+bt_200:         .double 0.005
 bt_dirs:        .double 0.5773, 0.5774, 0.5776
                 .double -0.6247, 0.4342, 0.6489
                 .double 0.2117, -0.8731, 0.4392
@@ -1557,7 +1558,15 @@ inner_points:
     movsd   xmm2, [rip+ft_sv]           #  surface
     andpd   xmm2, [rip+bt_absm]
     divsd   xmm1, xmm2
-1:  maxsd   xmm0, [rip+bt_tiny]
+1:  movsd   xmm2, [rbx+FC_U1]           # at most 200 steps each way
+    subsd   xmm2, [rbx+FC_U0]
+    mulsd   xmm2, [rip+bt_200]
+    maxsd   xmm0, xmm2
+    movsd   xmm2, [rbx+FC_V1]
+    subsd   xmm2, [rbx+FC_V0]
+    mulsd   xmm2, [rip+bt_200]
+    maxsd   xmm1, xmm2
+    maxsd   xmm0, [rip+bt_tiny]
     maxsd   xmm1, [rip+bt_tiny]
     movsd   [rsp], xmm0                 # du, dv
     movsd   [rsp+8], xmm1
@@ -1580,6 +1589,7 @@ inner_points:
     movsd   xmm0, [rsp+24]
     comisd  xmm0, [rbx+FC_U1]
     jae     .Lip_out
+    jp      .Lip_out                    # (NaN: nothing)
     movsd   xmm0, [rbx+FC_V0]
     addsd   xmm0, [rsp+8]
     movsd   [rsp+32], xmm0              # v
@@ -1587,6 +1597,7 @@ inner_points:
     movsd   xmm0, [rsp+32]
     comisd  xmm0, [rbx+FC_V1]
     jae     .Lip_unext
+    jp      .Lip_out
     movsd   xmm0, [rsp+24]              # scaled
     mulsd   xmm0, [rip+ft_su]
     movsd   [rsp+40], xmm0

@@ -128,8 +128,7 @@ bf_body:
     lea     rcx, [rip+bf_bds]
     mov     eax, [rcx+rax*4]
     ret
-8:  mov     eax, -1
-    ret
+8:  jmp     st_body                     # (an imported STEP solid?)
 
 # bf_rebuild - the feature tree replayed in the kernel (when it is on)
 bf_rebuild:
@@ -176,6 +175,7 @@ bf_rebuild:
     inc     ebx
     jmp     .Lbr_feat
 .Lbr_bodies:
+    call    st_rebuild                  # imported solids after the reset
     xor     ebx, ebx                    # each solid body: its tessellation
 .Lbr_b:
     cmp     ebx, [rip+bf_count]

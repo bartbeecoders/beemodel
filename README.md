@@ -337,6 +337,12 @@ Volumes and areas are integrated exactly over the trimmed faces;
 `brep(name, "volume")` returns them. The enclosure above builds on it. See
 [docs/BREP.md](docs/BREP.md).
 
+**STEP.** `file.export_step` writes the solids as STEP (ISO 10303-21, AP214):
+one part in place, or several as an assembly with their placements, colours
+and units. `file.import_step` reads STEP parts and assemblies, analytic or
+NURBS, from other CAD systems back into the kernel. Volumes survive a round
+trip through FreeCAD to 1e-6.
+
 To make things:
 - **3MF** for printers: File › Export 3MF writes millimetres, Z up.
 - **DXF / SVG** of a sketch.
@@ -825,6 +831,8 @@ src/btess.s     watertight tessellation, inside / outside by ray parity
 src/bfeat.s     the feature tree replayed in the kernel (cad.kernel on)
 src/nbcheck.s   NURBS self-checks (nurbscheck)
 src/bdebug.s    kernel debugging dumps (BEEMODEL_BREP_KEEP)
+src/step.s      STEP export: AP214 B-rep solids, assemblies, colours, units
+src/stepread.s  STEP import: the Part 21 parser, solids, assemblies
 src/measure.s   mass properties, the measure tool
 src/sdf.s       signed-distance shapes, marching tetrahedra
 src/fab.s       3MF export, DXF / SVG of sketches
