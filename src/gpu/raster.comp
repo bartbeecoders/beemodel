@@ -1,0 +1,84 @@
+// BeeModel - the viewport rasterizer's tile stage on the GPU (beemodel-gpu).
+//
+// raster.s sets the triangles up and bins them into 16 x 16 tiles on the
+// CPU; this replaces raster_tiles: one workgroup per tile, one invocation
+// per pixel, walking the tile's triangles in submission order with
+// raster_tri's arithmetic (the same edge functions, evaluated the same way:
+// row start plus whole 4-pixel steps, 1/z interpolated from the scaled
+// vertex weights, a strictly nearer test). Every pixel belongs to one
+// invocation, so the buffers come out as the CPU's.
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(std430, binding = 0) readonly buffer Params {
+    uint w, h, ntx, mode;           // mode 0: colour + id, 1: id only
+    uint noclear, pad0, pad1, pad2;
+} P;
+layout(std430, binding = 1) readonly buffer Tris { float tris[]; };  // 12 words each
+layout(std430, binding = 2) readonly buffer Toff { uint toff[]; };   // tiles + 1
+layout(std430, binding = 3) readonly buffer Ents { uint ents[]; };
+layout(std430, binding = 4) buffer Depth { float depth[]; };         // w h
+layout(std430, binding = 5) buffer Ids { uint ids[]; };
+layout(std430, binding = 6) buffer Vis { uint vis[]; };              // record + 1
+layout(std430, binding = 7) buffer Col { uint col[]; };              // XRGB, w h
+
+void main() {
+    uint tile = gl_WorkGroupID.y * P.ntx + gl_WorkGroupID.x;
+    int tx0 = int(gl_WorkGroupID.x) * 16, ty0 = int(gl_WorkGroupID.y) * 16;
+    int tx1 = min(tx0 + 16, int(P.w)), ty1 = min(ty0 + 16, int(P.h));
+    int px = tx0 + int(gl_LocalInvocationID.x), py = ty0 + int(gl_LocalInvocationID.y);
+    if (px >= tx1 || py >= ty1) return;
+    uint pix = uint(py) * P.w + uint(px);
+    float dz = 0.0;
+    uint id = 0u, vi = 0u, c = col[pix];
+    if (P.noclear != 0u) { dz = depth[pix]; id = ids[pix]; vi = vis[pix]; }
+    uint e0 = toff[tile], e1 = toff[tile + 1u];
+    for (uint e = e0; e < e1; e++) {
+        uint r = ents[e];
+        uint o = r * 12u;
+        float x0 = tris[o], y0 = tris[o + 1u], x1 = tris[o + 2u], y1 = tris[o + 3u];
+        float x2 = tris[o + 4u], y2 = tris[o + 5u];
+        float w0 = tris[o + 6u], w1 = tris[o + 7u], w2 = tris[o + 8u];
+        precise float area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+        if (area > 0.0) {
+        } else if (area < 0.0 || isnan(area)) {
+            float t = x1; x1 = x2; x2 = t;
+            t = y1; y1 = y2; y2 = t;
+            t = w1; w1 = w2; w2 = t;
+            area = 0.0 - area;
+        } else continue;
+        float inv = 1.0 / area;
+        // the pixel range, inside the tile
+        int bx0 = int(min(min(x0, x1), x2)), bx1 = int(max(max(x0, x1), x2)) + 1;
+        int by0 = int(min(min(y0, y1), y2)), by1 = int(max(max(y0, y1), y2)) + 1;
+        bx0 = max(bx0, tx0); by0 = max(by0, ty0);
+        bx1 = min(bx1, tx1); by1 = min(by1, ty1);
+        if (bx0 >= bx1 || by0 >= by1) continue;
+        if (px < bx0 || px >= bx1 || py < by0 || py >= by1) continue;
+        precise float A0 = y1 - y2, B0 = x2 - x1, C0 = x1 * y2 - x2 * y1;
+        precise float A1 = y2 - y0, B1 = x0 - x2, C1 = x2 * y0 - x0 * y2;
+        precise float A2 = y0 - y1, B2 = x1 - x0, C2 = x0 * y1 - x1 * y0;
+        precise float sw0 = w0 * inv, sw1 = w1 * inv, sw2 = w2 * inv;
+        // E at the row's first 4-pixel group, then whole steps of 4
+        int k = (px - bx0) >> 2, lane = (px - bx0) & 3;
+        precise float fy = float(py) + 0.5;
+        precise float fx = float(bx0) + (float(lane) + 0.5);
+        precise float E0 = (B0 * fy + C0) + A0 * fx;
+        precise float E1 = (B1 * fy + C1) + A1 * fx;
+        precise float E2 = (B2 * fy + C2) + A2 * fx;
+        precise float S0 = A0 * 4.0, S1 = A1 * 4.0, S2 = A2 * 4.0;
+        for (int s = 0; s < k; s++) { E0 = E0 + S0; E1 = E1 + S1; E2 = E2 + S2; }
+        if (E0 < 0.0 || E1 < 0.0 || E2 < 0.0) continue;
+        precise float wz = (E0 * sw0 + E1 * sw1) + E2 * sw2;
+        if (!(wz > dz)) continue;
+        dz = wz;
+        id = floatBitsToUint(tris[o + 10u]);
+        vi = r + 1u;
+        if (P.mode == 0u) c = floatBitsToUint(tris[o + 9u]);
+    }
+    depth[pix] = dz;
+    ids[pix] = id;
+    vis[pix] = vi;
+    col[pix] = c;
+}

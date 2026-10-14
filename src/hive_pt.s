@@ -41,6 +41,14 @@
 .globl hv_den
 .globl hv_den_on
 .globl now_ms
+.globl hv_seed
+.globl hv_lcdf
+.globl hv_ltri
+.globl hv_lsel
+.globl hv_nl
+.globl hv_nslots
+.globl hv_debug
+.globl hv_env
 
 .equ MAP_ANON_PRIV, 0x22
 .equ RAY_O,     0
@@ -1777,10 +1785,12 @@ trace_ray:
 hive_prep:
     sub     rsp, 8
     mov     dword ptr [rip+hv_active], 0
+    mov     dword ptr [rip+gt_cpu], 1
     mov     edi, 4
     mov     esi, 4
     mov     edx, 1
     call    hive_start
+    mov     dword ptr [rip+gt_cpu], 0
     add     rsp, 8
     ret
 
@@ -2349,6 +2359,7 @@ hive_start:
     mov     r12d, edi
     mov     r13d, esi
     mov     [rip+hv_target], edx
+    mov     dword ptr [rip+hv_gpu], 0   # (nothing of the last render's)
     call    pt_unmap_all
     call    tex_init
     call    env_prep
@@ -2411,6 +2422,11 @@ hive_start:
 1:  mov     dword ptr [rip+hv_spp], 0
     mov     dword ptr [rip+hv_ms], 0
     inc     dword ptr [rip+hv_seed]
+    mov     dword ptr [rip+gt_batch], 1
+    cmp     dword ptr [rip+gt_cpu], 0   # (hive_prep: trace_ray, the CPU's)
+    jne     11f
+    call    gpu_pt_begin                # its passes on the GPU (gpu.s)?
+11:
     mov     eax, 1
     jmp     9f
 8:  xor     eax, eax
@@ -2422,7 +2438,15 @@ hive_start:
 # hive_pass - one more sample per pixel (rows in parallel)
 hive_pass:
     sub     rsp, 8
-    mov     dword ptr [rip+hv_next], 0
+    cmp     dword ptr [rip+hv_gpu], 0   # on the GPU (if that fails: here)
+    je      1f
+    mov     edi, 1
+    call    gpu_pt_pass
+    test    eax, eax
+    jz      1f
+    add     rsp, 8
+    ret
+1:  mov     dword ptr [rip+hv_next], 0
     lea     rdi, [rip+job_rows]
     xor     esi, esi
     mov     edx, [rip+hv_h]
@@ -2736,6 +2760,13 @@ hive_tick:
     mov     r12d, edi
     call    now_ms
     mov     rbx, rax
+    cmp     dword ptr [rip+hv_gpu], 0
+    je      1f
+    cmp     dword ptr [rip+hv_next], 0  # (rows a CPU pass left half done)
+    jne     1f
+    call    gpu_tick
+    test    eax, eax
+    jns     9f                          # (-1: the GPU failed, go on here)
 1:  mov     eax, [rip+hv_spp]
     cmp     eax, [rip+hv_target]
     jae     8f
@@ -2771,6 +2802,66 @@ hive_tick:
 9:  pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# gpu_tick(r12d=budget ms, rbx=start ms) -> eax = 1 while samples remain, 0
+#   done, -1 the GPU failed: batches of samples on the GPU, each sized from
+#   the last one's time so a batch stays within the budget
+gpu_tick:
+    push    r13
+    push    r14
+    sub     rsp, 8
+1:  mov     r13d, [rip+hv_target]
+    sub     r13d, [rip+hv_spp]
+    jbe     8f
+    mov     eax, [rip+gt_batch]
+    test    eax, eax
+    jnz     2f
+    mov     eax, 1
+2:  cmp     r13d, eax
+    cmova   r13d, eax
+    call    now_ms
+    mov     r14, rax
+    mov     edi, r13d
+    call    gpu_pt_pass
+    test    eax, eax
+    jz      7f
+    call    now_ms
+    sub     rax, r14                    # the next batch: twice as many while
+    mov     ecx, r12d                   #  one takes under a quarter of the
+    shr     ecx, 2                      #  budget, half when over it
+    mov     edx, [rip+gt_batch]
+    test    edx, edx
+    jnz     3f
+    mov     edx, 1
+3:  cmp     eax, ecx
+    jae     4f
+    cmp     edx, 256
+    jae     5f
+    add     edx, edx
+    jmp     5f
+4:  cmp     eax, r12d
+    jbe     5f
+    shr     edx, 1
+    jnz     5f
+    mov     edx, 1
+5:  mov     [rip+gt_batch], edx
+    call    now_ms
+    sub     rax, rbx
+    cmp     eax, r12d
+    jb      1b
+    add     [rip+hv_ms], eax
+    mov     eax, 1
+    jmp     9f
+7:  mov     eax, -1
+    jmp     9f
+8:  call    now_ms
+    sub     rax, rbx
+    add     [rip+hv_ms], eax
+    xor     eax, eax
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
     ret
 
 # now_ms -> rax (monotonic)
@@ -2825,7 +2916,28 @@ hive_render_file:
 1:  mov     eax, [rip+hv_spp]
     cmp     eax, [rip+hv_target]
     jae     2f
-    call    hive_pass
+    cmp     dword ptr [rip+hv_gpu], 0   # on the GPU: batches of about 16M
+    je      11f                         #  samples (one dispatch stays short)
+    mov     eax, [rip+hv_w]
+    imul    eax, [rip+hv_h]
+    mov     ecx, eax
+    mov     eax, 16*1024*1024
+    xor     edx, edx
+    div     ecx
+    cmp     eax, 16
+    jbe     12f
+    mov     eax, 16
+12: test    eax, eax
+    jnz     13f
+    mov     eax, 1
+13: mov     edi, [rip+hv_target]
+    sub     edi, [rip+hv_spp]
+    cmp     edi, eax
+    cmova   edi, eax
+    call    gpu_pt_pass
+    test    eax, eax
+    jnz     1b
+11: call    hive_pass
     jmp     1b
 2:  test    r14d, r14d
     jz      21f
@@ -2969,6 +3081,8 @@ pt_mdepth:      .float -0.1202          # -1 / (12 ln 2): exp(-d / 12) via 2^x
 pt_maps:        .skip 16*16             # 16 mappings: pointer, bytes
 pt_nmaps:       .skip 4
 hv_debug:       .skip 4
+gt_batch:       .skip 4                 # gpu_tick's samples per batch
+gt_cpu:         .skip 4                 # hive_start without the GPU
 hv_den_on:      .skip 4                 # beauty shows hv_den (denoised)
 hv_env:         .skip 4                 # the world is an HDRI (no studio sky, sun)
 rv_stride:      .skip 4

@@ -453,6 +453,8 @@ builtins:
     .long 2, 2
     .quad bn_nurbscheck, b_nurbscheck
     .long 1, 1
+    .quad bn_gpu, b_gpu
+    .long 1, 1
     .quad bn_vctext, b_vctext
     .long 1, 2
     .quad bn_costat, b_costat
@@ -753,6 +755,7 @@ bn_livelink:    .asciz "livelink"
 bn_vcinfo:      .asciz "vcinfo"
 bn_brep:        .asciz "brep"
 bn_nurbscheck:  .asciz "nurbscheck"
+bn_gpu:         .asciz "gpu"
 bn_vctext:      .asciz "vctext"
 bn_costat:      .asciz "costat"
 bn_cohash:      .asciz "cohash"
@@ -8384,6 +8387,18 @@ b_nurbscheck:
     call    a_int
     mov     edi, eax
     call    nb_check
+    add     rsp, 8
+    jmp     ret_num
+
+# gpu(k) - the GPU helper (gpu.s): 0 running (starts it), 1 device type,
+#   2 path tracer runs, 3 raster batches, 4 samples traced, 5 GPU-side ms,
+#   6 the current render on the GPU
+b_gpu:
+    sub     rsp, 8
+    call    a_int
+    mov     edi, eax
+    call    gpu_query
+    cvtsi2sd xmm0, eax
     add     rsp, 8
     jmp     ret_num
 

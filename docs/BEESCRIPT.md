@@ -84,6 +84,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `move(name, x, y, z)` | Sets the location |
 | `rotate(name, x, y, z)` | Sets the Euler XYZ rotation, in radians (`rotate(c, 0, 45deg, 0)`) |
 | `scale(name, x, y, z)` | Sets the scale; `scale(name, s)` scales uniformly |
+| `gpu(k)` | The GPU helper (docs/GPU.md): 0 running (starts it), 1 the device type (1 integrated, 2 discrete, 3 virtual, 4 CPU), 2 path tracer runs, 3 raster batches, 4 samples traced on the GPU, 5 GPU-side milliseconds, 6 the current render on the GPU |
 | `get(name, prop)` | Reads `x` `y` `z` (location), `rx` `ry` `rz` (rotation), `sx` `sy` `sz` (scale) or `color` (the object's colour, `0xRRGGBB` as a number) |
 | `set(name, prop, value)` | Writes one of those properties |
 | `select(names...)` | Selects exactly these objects; the last one is active. `select()` deselects all |

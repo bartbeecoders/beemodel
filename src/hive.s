@@ -32,6 +32,9 @@
 .globl hv_points
 .globl hv_npoints
 .globl hv_ready
+.globl hv_nodes
+.globl hv_root
+.globl hv_nn4
 
 .equ HV_IBUDGET, 4000000          # instance triangles the path tracer takes
 .equ MAP_ANON_PRIV, 0x22

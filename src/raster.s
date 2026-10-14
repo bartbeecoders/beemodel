@@ -28,6 +28,14 @@
 .globl rs_tris
 .globl rs_objs
 .globl rs_nobjs
+.globl rs_id
+.globl rs_toff
+.globl rs_entries
+.globl rs_ntiles
+.globl rs_ntx
+.globl rs_nty
+.globl rs_mode
+.globl rs_noclear
 
 .equ TILE_SHIFT,    4
 .equ TILE,          1 << TILE_SHIFT
@@ -475,12 +483,17 @@ rs_batch:
     mov     ecx, 1
     call    parallel_for
 
+    call    vgd_n                       # the tiles on the GPU (frames with
+    mov     edi, eax                    #  DAG-drawn objects), else here
+    call    gpu_rs_tiles
+    test    eax, eax
+    jnz     74f
     lea     rdi, [rip+raster_tiles]
     xor     esi, esi
     mov     edx, r12d
     mov     ecx, 1
     call    parallel_for
-    mov     eax, 1
+74: mov     eax, 1
     jmp     9f
 .Lrb_fail:
     xor     eax, eax

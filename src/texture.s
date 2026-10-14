@@ -17,6 +17,7 @@
 .globl box_uv
 .globl srgb_to_lin
 .globl tex_texel
+.globl tx_lut
 
 .equ IM_W,     0
 .equ IM_H,     4
