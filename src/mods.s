@@ -2617,7 +2617,11 @@ mods_props_hit:
 # mods_drag_begin(edi=hit code) - buttons act at once; fields start a drag
 #   (one undo step for the whole drag)
 mods_drag_begin:
-    xor     eax, eax                    # the material section's?
+    test    edi, 0x80000                # the physics section's?
+    jz      0f
+    mov     dword ptr [rip+md_mat], 2
+    jmp     rb_drag_begin
+0:  xor     eax, eax                    # the material section's?
     test    edi, 0x40000
     setnz   al
     mov     [rip+md_mat], eax
@@ -2685,6 +2689,8 @@ mods_drag_begin:
 
 # mods_drag_move(edi=x logical)
 mods_drag_move:
+    cmp     dword ptr [rip+md_mat], 2
+    je      rb_drag_move
     cmp     dword ptr [rip+md_mat], 0
     jne     mats_drag_move
     push    rbx

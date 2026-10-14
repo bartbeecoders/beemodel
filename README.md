@@ -457,8 +457,10 @@ skinning, and **Ctrl+W** paints weights over a heat map.
 **Physics.** `rigid.add` makes the selected objects rigid bodies: boxes, spheres, capsules,
 convex hulls, or compounds of convex parts cut from the mesh. They fall, collide, rest and sleep
 when you play past the scene's start, and come back when you return to it. Joints (fixed,
-hinge, point) tie them together or to the world. 1000 boxes tumbling into a heap simulate
-faster than real time.
+hinge, point) tie them together or to the world. The Properties area's **Physics** section
+sets all of it up without typing: **+ Rigid Body**, Active / Passive, the shape, mass,
+friction, bounce, damping, gravity. 1000 boxes tumbling into a heap simulate faster than real
+time.
 
 **Rigging.** Constraints copy, track, limit or parent an object to another
 (`constraint.add Cam track_to Target`). An IK constraint on a bone makes its chain reach for a
@@ -704,6 +706,7 @@ src/rig.s       constraints, IK (FABRIK / CCD), drivers, motion paths, onion ski
 src/shape.s     shape keys
 src/collide.s   convex collision: support functions, GJK, EPA
 src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, islands, joints
+src/physui.s    the Physics section of the Properties area
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours
