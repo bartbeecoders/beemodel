@@ -81,6 +81,7 @@ bo_tiny:        .double 1.0e-14
 bo_big:         .double 1.0e300
 bo_grow:        .double 1.0e-6         # bracket growth (of the edge's range)
 bo_left:        .double 1.0e-3
+bo_gold:        .double 0.6180339887498949
 
 .section .bss
 .align 8
@@ -267,6 +268,7 @@ bk_bool:
     jmp     1b
 2:  cmp     dword ptr [rip+bo_fail], 0
     jne     .Lbk_f5
+    call    snap_vertices               # new vertices on existing edges
     call    bo_pieces
     cmp     dword ptr [rip+bo_fail], 0
     jne     .Lbk_f6
@@ -299,14 +301,16 @@ bk_bool:
     jmp     5b
 6:  mov     edi, r15d
     call    bd_check
-    test    eax, eax
-    jz      7f
+    mov     [rsp+8], eax
     call    bk_keep                     # (debugging: kept, shown)
     test    eax, eax
-    jz      .Lbk_f9
-    mov     edi, r15d
+    jnz     7f
+    cmp     dword ptr [rsp+8], 0
+    jne     .Lbk_f9
+    jmp     8f
+7:  mov     edi, r15d
     call    bk_dump
-7:
+8:
     mov     eax, r15d
     jmp     .Lbk_out
 .Lbk_f1:
@@ -1169,6 +1173,9 @@ se_vertex_at:
 .equ SC_SO,   64                        # the other surface
 .equ SC_T,    72
 .equ SC_SF,   80                        # this side's surface
+.equ SC_PT,   88                        # the crossing's point
+.equ SC_OL,   96                        # the other local face
+.equ SC_UV,   104                       # the point on it
 se_crossings:
     push    rbx
     push    r12
@@ -1176,8 +1183,8 @@ se_crossings:
     push    r14
     push    r15
     push    rbp
-    sub     rsp, 104
-    lea     rbp, [rsp+104+48+8]         # bo_section's frame
+    sub     rsp, 120
+    lea     rbp, [rsp+120+48+8]         # bo_section's frame
     mov     r9, rbp
     mov     ecx, [rbp+SE_K]
     call    sp_at
@@ -1289,8 +1296,38 @@ se_crossings:
     mov     rsi, [rsp+SC_SO]
     movsd   xmm2, [rsp+SC_MU]
     call    edge_root                   # -> xmm0 = t, rax = the point
+    cmp     dword ptr [rip+er_miss], 0
+    jne     .Lsx_next
+    movsd   [rsp+SC_T], xmm0
+    mov     [rsp+SC_PT], rax
+    mov     rdi, [rsp+SC_SO]            # in (or on) the other face? else no
+    mov     rsi, rax                    #  piece can end here: no split
+    mov     edi, [rbp+SE_LB]
+    cmp     dword ptr [rbp+SE_SIDE], 0
+    je      0f
+    mov     edi, [rbp+SE_LA]
+0:  mov     [rsp+SC_OL], edi
+    call    box_mid
+    mov     rdi, [rsp+SC_SO]
+    mov     rsi, [rsp+SC_PT]
+    call    to_uv
+    movsd   [rsp+SC_UV], xmm0
+    movsd   [rsp+SC_UV+8], xmm1
+    mov     edi, [rsp+SC_OL]
+    call    uv_inside
+    test    eax, eax
+    jnz     79f
+    mov     edi, [rsp+SC_OL]
+    movsd   xmm0, [rsp+SC_UV]
+    movsd   xmm1, [rsp+SC_UV+8]
+    call    bdist
+    movsd   xmm1, [rip+bo_on]
+    addsd   xmm1, xmm1
+    comisd  xmm0, xmm1
+    ja      .Lsx_next
+79: movsd   xmm0, [rsp+SC_T]
     mov     edi, [rbx+BS_E]
-    mov     rsi, rax
+    mov     rsi, [rsp+SC_PT]
     call    split_vertex
     mov     ecx, [rip+cr_n]
     cmp     ecx, MAXCR
@@ -1306,7 +1343,7 @@ se_crossings:
     inc     dword ptr [rsp+SC_I]
     jmp     .Lsx_seg
 .Lsx_out:
-    add     rsp, 104
+    add     rsp, 120
     pop     rbp
     pop     r15
     pop     r14
@@ -1395,6 +1432,7 @@ edge_root:
     mov     edi, [rax+ED_CURVE]
     call    p_cv
     mov     r12, rax
+    mov     dword ptr [rip+er_miss], 0
     xorpd   xmm0, xmm0                  # hints
     movsd   [rsp+ER_HU], xmm0
     movsd   [rsp+ER_HV], xmm0
@@ -1471,16 +1509,47 @@ edge_root:
     inc     ebx
     jmp     .Ler_it
 .Ler_nobracket:
-    # no sign change: the end nearer zero, polished by secant steps
-    movsd   xmm0, [rsp+ER_FA]
-    andpd   xmm0, [rip+bo_absm]
-    movsd   xmm1, [rsp+ER_FB]
-    andpd   xmm1, [rip+bo_absm]
+    # no sign change: the curve may touch the surface (a double root): the
+    # smallest |distance| in the bracket (golden section); not touching
+    # (farther than the tolerance): no crossing
+    mov     dword ptr [rip+er_miss], 0
+    xor     ebx, ebx
+5:  cmp     ebx, 80
+    jae     6f
+    movsd   xmm0, [rsp+ER_B]            # c = b - g (b - a), d = a + g (b - a)
+    subsd   xmm0, [rsp+ER_A]
+    mulsd   xmm0, [rip+bo_gold]
+    movsd   xmm1, [rsp+ER_B]
+    subsd   xmm1, xmm0
+    movsd   [rsp+ER_T], xmm1
     movsd   xmm2, [rsp+ER_A]
-    comisd  xmm0, xmm1
-    jbe     5f
-    movsd   xmm2, [rsp+ER_B]
-5:  movsd   [rsp+ER_T], xmm2
+    addsd   xmm2, xmm0
+    movsd   [rsp+ER_F], xmm2
+    movsd   xmm0, [rsp+ER_T]
+    call    er_f
+    andpd   xmm0, [rip+bo_absm]
+    movsd   [rsp+ER_FA+0], xmm0         # (|f(c)| kept in ER_FA)
+    movsd   xmm0, [rsp+ER_F]
+    call    er_f
+    andpd   xmm0, [rip+bo_absm]
+    comisd  xmm0, [rsp+ER_FA]
+    jb      51f
+    movsd   xmm0, [rsp+ER_F]            # f(c) smaller: b = d
+    movsd   [rsp+ER_B], xmm0
+    jmp     52f
+51: movsd   xmm0, [rsp+ER_T]            # f(d) smaller: a = c
+    movsd   [rsp+ER_A], xmm0
+52: inc     ebx
+    jmp     5b
+6:  movsd   xmm0, [rsp+ER_A]
+    addsd   xmm0, [rsp+ER_B]
+    mulsd   xmm0, [rip+bo_half]
+    movsd   [rsp+ER_T], xmm0
+    call    er_f
+    andpd   xmm0, [rip+bo_absm]
+    comisd  xmm0, [rip+bo_on]
+    jbe     .Ler_done
+    mov     dword ptr [rip+er_miss], 1
 .Ler_done:
     movsd   xmm0, [rsp+ER_T]            # the point at t
     mov     rdi, r12
@@ -1515,6 +1584,7 @@ er_f:
 .section .bss
 .align 8
 er_p:           .skip 72
+er_miss:        .skip 4                 # edge_root found no crossing
 .text
 
 # new_vertex(rdi=point) -> eax = a vertex there: one made by this boolean
@@ -1837,6 +1907,216 @@ nb_new_poly:
 9:  pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# snap_vertices - every vertex this boolean made that lies on an edge of
+#   either solid (inside it, not at its ends) splits that edge (sections
+#   meeting an edge tangentially, or along a face that lies on a plane of the
+#   other solid, find no crossing of their own there)
+snap_vertices:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+nv_n]
+    jae     9f
+    lea     rax, [rip+nv_v]
+    mov     edi, [rax+rbx*4]
+    mov     [rip+sn_vx], edi
+    call    p_vx
+    movupd  xmm0, [rax]
+    movupd  [rip+sn_p], xmm0
+    mov     rcx, [rax+16]
+    mov     [rip+sn_p+16], rcx
+    xor     r12d, r12d
+2:  cmp     r12d, [rip+lf_n]
+    jae     3f
+    lea     rcx, [rip+lf_face]
+    mov     edi, [rcx+r12*4]
+    lea     rsi, [rip+snap_one]
+    call    each_coedge
+    inc     r12d
+    jmp     2b
+3:  inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+.section .bss
+.align 8
+sn_p:           .skip 24
+sn_vx:          .skip 4
+.text
+
+# snap_one(rax=coedge) - split its edge at sn_p if the point lies on it
+snap_one:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, [rax+CE_EDGE]
+    mov     edi, ebx
+    call    p_ed
+    mov     r12, rax
+    test    dword ptr [r12+ED_FLAGS], EF_DEGEN
+    jnz     9f
+    mov     eax, [rip+sn_vx]            # (its own end)
+    cmp     eax, [r12+ED_V0]
+    je      9f
+    cmp     eax, [r12+ED_V1]
+    je      9f
+    cmp     qword ptr [r12+ED_POLY], 0
+    je      9f
+    mov     edi, ebx
+    call    ed_nearest_t                # -> xmm0 = t, xmm1 = distance
+    comisd  xmm1, [rip+bo_on]
+    ja      9f
+    movsd   xmm1, [r12+ED_T0]           # strictly inside (t0, t1)
+    movsd   xmm2, [r12+ED_T1]
+    movsd   xmm3, xmm1
+    minsd   xmm3, xmm2
+    maxsd   xmm1, xmm2
+    comisd  xmm0, xmm3
+    jbe     9f
+    comisd  xmm0, xmm1
+    jae     9f
+    mov     edi, ebx
+    lea     rsi, [rip+sn_p]
+    call    split_vertex
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ed_nearest_t(edi=edge; sn_p) -> xmm0 = the parameter of its curve nearest
+#   sn_p, xmm1 = the distance (the polyline's nearest piece, then Newton on
+#   the curve)
+.equ NT_BEST, 0
+.equ NT_T,    8
+.equ NT_EV,   16                        # crv_eval out (72 bytes)
+.equ NT_I,    88
+.equ NT_W,    96                        # C - P
+.equ NT_G,    120
+ed_nearest_t:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 128
+    call    p_ed
+    mov     rbx, rax
+    mov     edi, [rbx+ED_CURVE]
+    call    p_cv
+    mov     r13, rax
+    movsd   xmm0, [rip+bo_big]
+    movsd   [rsp+NT_BEST], xmm0
+    movsd   xmm0, [rbx+ED_T0]
+    movsd   [rsp+NT_T], xmm0
+    mov     r12, [rbx+ED_POLY]
+    xor     ecx, ecx
+1:  lea     eax, [rcx+1]
+    cmp     eax, [rbx+ED_NPOLY]
+    jae     3f
+    mov     [rsp+NT_I], ecx
+    shl     ecx, 5
+    lea     rdi, [r12+rcx]              # piece a -> b: the nearest point on it
+    lea     rsi, [r12+rcx+32]
+    call    seg_near                    # -> xmm0 = fraction, xmm1 = distance
+    comisd  xmm1, [rsp+NT_BEST]
+    jae     2f
+    movsd   [rsp+NT_BEST], xmm1
+    mov     ecx, [rsp+NT_I]
+    shl     ecx, 5
+    movsd   xmm2, [r12+rcx+56]          # t = ta + f (tb - ta)
+    subsd   xmm2, [r12+rcx+24]
+    mulsd   xmm2, xmm0
+    addsd   xmm2, [r12+rcx+24]
+    movsd   [rsp+NT_T], xmm2
+2:  mov     ecx, [rsp+NT_I]
+    inc     ecx
+    jmp     1b
+3:  xor     r12d, r12d                  # Newton: (C(t) - P) . C'(t) = 0
+4:  cmp     r12d, 8
+    jae     5f
+    mov     rdi, r13
+    movsd   xmm0, [rsp+NT_T]
+    lea     rsi, [rsp+NT_EV]
+    call    crv_eval
+    lea     rdi, [rsp+NT_W]
+    lea     rsi, [rsp+NT_EV]
+    lea     rdx, [rip+sn_p]
+    call    v3sub
+    lea     rdi, [rsp+NT_W]
+    lea     rsi, [rsp+NT_EV+24]
+    call    v3dot
+    movsd   [rsp+NT_G], xmm0
+    lea     rdi, [rsp+NT_EV+24]
+    lea     rsi, [rsp+NT_EV+24]
+    call    v3dot
+    comisd  xmm0, [rip+bo_tiny]
+    jbe     5f
+    movsd   xmm1, [rsp+NT_G]
+    divsd   xmm1, xmm0
+    movsd   xmm2, [rsp+NT_T]
+    subsd   xmm2, xmm1
+    movsd   [rsp+NT_T], xmm2
+    inc     r12d
+    jmp     4b
+5:  mov     rdi, r13
+    movsd   xmm0, [rsp+NT_T]
+    lea     rsi, [rsp+NT_EV]
+    call    crv_eval
+    lea     rdi, [rsp+NT_EV]
+    lea     rsi, [rip+sn_p]
+    call    v3dist
+    movsd   xmm1, xmm0
+    movsd   xmm0, [rsp+NT_T]
+    add     rsp, 128
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# seg_near(rdi=a, rsi=b; sn_p) -> xmm0 = the fraction along a -> b of the
+#   point nearest sn_p, xmm1 = the distance to it
+seg_near:
+    xorpd   xmm4, xmm4                  # d.d, w.d
+    xorpd   xmm5, xmm5
+    xor     ecx, ecx
+1:  movsd   xmm0, [rsi+rcx*8]
+    subsd   xmm0, [rdi+rcx*8]
+    lea     rax, [rip+sn_p]
+    movsd   xmm1, [rax+rcx*8]
+    subsd   xmm1, [rdi+rcx*8]
+    mulsd   xmm1, xmm0
+    addsd   xmm5, xmm1
+    mulsd   xmm0, xmm0
+    addsd   xmm4, xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    xorpd   xmm0, xmm0
+    comisd  xmm4, [rip+bo_tiny]
+    jbe     2f
+    movsd   xmm0, xmm5
+    divsd   xmm0, xmm4
+    xorpd   xmm1, xmm1
+    maxsd   xmm0, xmm1
+    minsd   xmm0, [rip+bo_one]
+2:  xorpd   xmm6, xmm6                  # |a + f d - p|
+    xor     ecx, ecx
+3:  movsd   xmm1, [rsi+rcx*8]
+    subsd   xmm1, [rdi+rcx*8]
+    mulsd   xmm1, xmm0
+    addsd   xmm1, [rdi+rcx*8]
+    lea     rax, [rip+sn_p]
+    subsd   xmm1, [rax+rcx*8]
+    mulsd   xmm1, xmm1
+    addsd   xmm6, xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    sqrtsd  xmm1, xmm6
     ret
 
 # =============================================================================
@@ -2236,7 +2516,7 @@ bo_face:
     mov     edi, [rsp+BF_F]
     mov     esi, 24
     call    fc_sample
-    call    fs_inner_point
+    call    fs_deep_point
     test    eax, eax
     jz      .Lbf_out
     call    classify
@@ -2287,7 +2567,14 @@ bo_face:
 .Lbf_walk:
     cmp     dword ptr [rip+bo_fail], 0
     jne     .Lbf_out
-    call    walk_cycles
+    call    bk_keep                     # (debugging: the arrangement)
+    test    eax, eax
+    jz      1f
+    lea     rdi, [rip+he_rec]
+    mov     esi, [rip+he_n]
+    mov     edx, [rip+af_lf]
+    call    bk_dump_he
+1:  call    walk_cycles
     call    nest_cycles
     xor     r12d, r12d                  # each outer cycle: a region
 .Lbf_reg:
@@ -2299,7 +2586,7 @@ bo_face:
     jbe     .Lbf_regn
     mov     edi, r12d
     call    region_points
-    call    fs_inner_point
+    call    fs_deep_point
     test    eax, eax
     jz      .Lbf_regn
     divsd   xmm0, [rip+af_su]           # back to the face's (u, v)

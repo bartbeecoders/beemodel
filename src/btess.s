@@ -1209,14 +1209,10 @@ fc_tess:
     call    p_sf
     mov     [rip+ft_surf], rax
     mov     r12, rax
-    mov     eax, [r12+SF_TYPE]          # doubly curved: points inside
+    mov     eax, [r12+SF_TYPE]          # curved: points inside
     xor     ecx, ecx
-    cmp     eax, ST_SPHERE
-    je      1f
-    cmp     eax, ST_TORUS
-    je      1f
-    cmp     eax, ST_NURBS
-    jne     2f
+    cmp     eax, ST_PLANE
+    je      2f
 1:  mov     ecx, 1
 2:  mov     [rip+ft_curved], ecx
     # metric scales at the box's middle: |Su|, |Sv| (v negated for sense 1)
@@ -1541,6 +1537,10 @@ inner_points:
     movsd   xmm0, [rip+bt_fine]
     movsd   xmm1, xmm0
     mov     rax, [rip+ft_surf]
+    cmp     dword ptr [rax+SF_TYPE], ST_CYL
+    je      11f
+    cmp     dword ptr [rax+SF_TYPE], ST_CONE
+    je      11f
     cmp     dword ptr [rax+SF_TYPE], ST_NURBS
     jne     1f
     movsd   xmm0, [rbx+FC_U1]
@@ -1550,6 +1550,12 @@ inner_points:
     divsd   xmm0, xmm2
     movsd   xmm1, [rbx+FC_V1]
     subsd   xmm1, [rbx+FC_V0]
+    divsd   xmm1, xmm2
+    jmp     1f
+11: movsd   xmm1, xmm0                  # cylinders, cones: v (a length) at
+    mulsd   xmm1, [rip+ft_su]           #  the step the angle makes on the
+    movsd   xmm2, [rip+ft_sv]           #  surface
+    andpd   xmm2, [rip+bt_absm]
     divsd   xmm1, xmm2
 1:  maxsd   xmm0, [rip+bt_tiny]
     maxsd   xmm1, [rip+bt_tiny]

@@ -8,6 +8,7 @@
 
 .globl bk_keep
 .globl bk_dump
+.globl bk_dump_he
 
 .section .rodata
 s_keep:         .asciz "BEEMODEL_BREP_KEEP="
@@ -20,9 +21,18 @@ s_rev:          .asciz "r"
 s_arrow:        .asciz ">"
 s_colon:        .asciz ":"
 s_mark:         .asciz " m"
+s_av:           .asciz " area/vol*1000 "
+s_pc:           .asciz " pc"
+s_bar:          .asciz " |"
+s_lf:           .asciz "arrangement of local face "
 
+.align 8
+d_k:            .double 1000.0
+d_half:         .double 0.5
 .section .bss
 db_buf:         .skip 32
+.align 8
+db_uv:          .skip 32
 
 .text
 # bk_keep -> eax = 1 when the debug switch is set
@@ -81,6 +91,92 @@ d_nl:
     add     rsp, 8
     ret
 
+# d_vpos(edi=vertex) - (x y z) in thousandths
+d_vpos:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    p_vx
+    mov     rbx, rax
+    mov     byte ptr [rip+db_buf], '('
+    mov     byte ptr [rip+db_buf+1], 0
+    lea     rdi, [rip+db_buf]
+    call    d_str
+    xor     r12d, r12d
+1:  movsd   xmm0, [rbx+r12*8]
+    mulsd   xmm0, [rip+d_k]
+    cvtsd2si edi, xmm0
+    call    d_int
+    mov     byte ptr [rip+db_buf], ' '
+    mov     byte ptr [rip+db_buf+1], 0
+    lea     rdi, [rip+db_buf]
+    call    d_str
+    inc     r12d
+    cmp     r12d, 3
+    jb      1b
+    mov     byte ptr [rip+db_buf], ')'
+    mov     byte ptr [rip+db_buf+1], 0
+    lea     rdi, [rip+db_buf]
+    call    d_str
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# bk_dump_he(rdi=half-edge records, esi=count, edx=local face) - a face's
+#   arrangement: each half-edge's edge, ends, angles (thousandths)
+bk_dump_he:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13d, edx
+    lea     rdi, [rip+s_lf]
+    call    d_str
+    mov     edi, r13d
+    call    d_int
+    call    d_nl
+    xor     r13d, r13d
+1:  cmp     r13d, r12d
+    jae     9f
+    lea     rdi, [rip+s_ce]
+    call    d_str
+    mov     edi, [rbx]
+    call    d_int
+    lea     rdi, [rip+s_rev]
+    call    d_str
+    mov     edi, [rbx+4]
+    call    d_int
+    lea     rdi, [rip+s_colon]
+    call    d_str
+    mov     edi, [rbx+8]
+    call    d_int
+    lea     rdi, [rip+s_arrow]
+    call    d_str
+    mov     edi, [rbx+12]
+    call    d_int
+    lea     rdi, [rip+s_ce]
+    call    d_str
+    movsd   xmm0, [rbx+32]
+    mulsd   xmm0, [rip+d_k]
+    cvtsd2si edi, xmm0
+    call    d_int
+    lea     rdi, [rip+s_ce]
+    call    d_str
+    movsd   xmm0, [rbx+40]
+    mulsd   xmm0, [rip+d_k]
+    cvtsd2si edi, xmm0
+    call    d_int
+    call    d_nl
+    add     rbx, 64
+    inc     r13d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # bk_dump(edi=body) - every face, loop and coedge (edge, direction, ends,
 #   use marks) to stderr
 bk_dump:
@@ -113,6 +209,20 @@ bk_dump:
     lea     rdi, [rip+s_sense]
     call    d_str
     mov     edi, [r15+FC_SENSE]
+    call    d_int
+    lea     rdi, [rip+s_av]
+    call    d_str
+    mov     edi, ebx
+    call    fc_area
+    mulsd   xmm0, [rip+d_k]
+    cvtsd2si edi, xmm0
+    call    d_int
+    lea     rdi, [rip+s_ce]
+    call    d_str
+    mov     edi, ebx
+    call    fc_volume
+    mulsd   xmm0, [rip+d_k]
+    cvtsd2si edi, xmm0
     call    d_int
     call    d_nl
     mov     r13d, [r15+FC_LOOP]
@@ -148,6 +258,8 @@ bk_dump:
     mov     r15, rax
     mov     edi, [r15+ED_V0]
     call    d_int
+    mov     edi, [r15+ED_V0]
+    call    d_vpos
     lea     rdi, [rip+s_arrow]
     call    d_str
     mov     edi, [r15+ED_V1]
@@ -156,6 +268,41 @@ bk_dump:
     call    d_str
     mov     edi, [r15+ED_MARK]
     call    d_int
+    mov     edi, ebp                    # its pcurve: type, (u, v) at 0, .5, 1
+    call    p_ce
+    mov     edi, [rax+CE_PC]
+    cmp     edi, -1
+    je      34f
+    call    p_cv
+    mov     r15d, [rax+CV_TYPE]
+    lea     rdi, [rip+s_pc]
+    call    d_str
+    mov     edi, r15d
+    call    d_int
+    xor     r15d, r15d
+33: cmp     r15d, 2
+    ja      34f
+    cvtsi2sd xmm0, r15d
+    mulsd   xmm0, [rip+d_half]
+    mov     edi, ebp
+    lea     rsi, [rip+db_uv]
+    call    ce_uv
+    lea     rdi, [rip+s_ce]
+    call    d_str
+    movsd   xmm0, [rip+db_uv]
+    mulsd   xmm0, [rip+d_k]
+    cvtsd2si edi, xmm0
+    call    d_int
+    lea     rdi, [rip+s_colon]
+    call    d_str
+    movsd   xmm0, [rip+db_uv+8]
+    mulsd   xmm0, [rip+d_k]
+    cvtsd2si edi, xmm0
+    call    d_int
+    inc     r15d
+    jmp     33b
+34: lea     rdi, [rip+s_bar]
+    call    d_str
     inc     ebp
     jmp     3b
 4:  call    d_nl

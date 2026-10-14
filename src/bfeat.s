@@ -55,6 +55,7 @@ bf_negm:        .quad 0x8000000000000000, 0x8000000000000000
 bf_one:         .double 1.0
 bf_half:        .double 0.5
 bf_three:       .double 3.0
+bf_six:         .double 6.0
 bf_ov:          .double 0.02
 bf_2pi:         .double 6.28318530717958647692
 bf_2pim:        .double 6.2831
@@ -70,6 +71,7 @@ k_kernel:       .asciz "kernel"
 k_error:        .asciz "error"
 k_tris:         .asciz "triangles"
 k_tight:        .asciz "watertight"
+k_tvol:         .asciz "tessvolume"
 k_planes:       .asciz "planes"
 k_cyls:         .asciz "cylinders"
 k_cones:        .asciz "cones"
@@ -685,7 +687,15 @@ bf_query:
     jz      .Lq_int
     mov     ecx, [rax+4]
     jmp     .Lq_int
-5:  lea     rdi, [rip+k_tight]
+5:  lea     rdi, [rip+k_tvol]           # the triangles' volume
+    mov     rsi, r12
+    call    kw
+    test    eax, eax
+    jz      51f
+    mov     edi, ebx
+    call    tess_volume
+    jmp     .Lq_out
+51: lea     rdi, [rip+k_tight]
     mov     rsi, r12
     call    kw
     test    eax, eax
@@ -759,6 +769,62 @@ bf_query:
 .Lq_out:
     add     rsp, 16
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tess_volume(edi=body) -> xmm0 = the volume its triangles enclose
+tess_volume:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    p_bd
+    mov     rbx, [rax+BD_TRI]
+    xorpd   xmm7, xmm7
+    test    rbx, rbx
+    jz      9f
+    xor     r12d, r12d
+1:  cmp     r12d, [rbx+4]
+    jae     9f
+    imul    rax, r12, 12
+    add     rax, [rbx+16]
+    mov     rcx, [rbx+8]
+    mov     edx, [rax]
+    imul    rdx, rdx, 24
+    lea     r8, [rcx+rdx]
+    mov     edx, [rax+4]
+    imul    rdx, rdx, 24
+    lea     r9, [rcx+rdx]
+    mov     edx, [rax+8]
+    imul    rdx, rdx, 24
+    lea     r10, [rcx+rdx]
+    # a . (b x c) / 6
+    movsd   xmm0, [r9+8]
+    mulsd   xmm0, [r10+16]
+    movsd   xmm1, [r9+16]
+    mulsd   xmm1, [r10+8]
+    subsd   xmm0, xmm1
+    mulsd   xmm0, [r8]
+    movsd   xmm1, [r9+16]
+    mulsd   xmm1, [r10]
+    movsd   xmm2, [r9]
+    mulsd   xmm2, [r10+16]
+    subsd   xmm1, xmm2
+    mulsd   xmm1, [r8+8]
+    addsd   xmm0, xmm1
+    movsd   xmm1, [r9]
+    mulsd   xmm1, [r10+8]
+    movsd   xmm2, [r9+8]
+    mulsd   xmm2, [r10]
+    subsd   xmm1, xmm2
+    mulsd   xmm1, [r8+16]
+    addsd   xmm0, xmm1
+    addsd   xmm7, xmm0
+    inc     r12d
+    jmp     1b
+9:  movsd   xmm0, xmm7
+    divsd   xmm0, [rip+bf_six]
+    add     rsp, 8
     pop     r12
     pop     rbx
     ret

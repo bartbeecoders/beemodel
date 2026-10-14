@@ -63,6 +63,8 @@
 .globl fc_sample
 .globl bd_volume
 .globl bd_area
+.globl fc_volume
+.globl fc_area
 .globl bd_check
 .globl bd_flip
 .globl bd_stats
@@ -78,6 +80,7 @@
 .globl fs_nl
 .globl fs_np
 .globl fs_inner_point
+.globl fs_deep_point
 .globl lp_flip
 .globl ed_mid
 .globl ce_edge_dir
@@ -2080,6 +2083,159 @@ fs_inner_point:
     pop     r12
     pop     rbx
     ret
+# fs_deep_point -> xmm0, xmm1 = a point well inside the sampled loops (the
+#   farthest from them of a 24 x 24 grid over their box), eax = 1; falls back
+#   to fs_inner_point for regions too thin for the grid
+.equ FD_BOX,  0                         # u0 u1 v0 v1
+.equ FD_BEST, 32
+.equ FD_P,    40
+.equ FD_I,    56
+.equ FD_J,    60
+.equ FD_Q,    64                        # the best point
+fs_deep_point:
+    push    rbx
+    push    r12
+    sub     rsp, 88
+    mov     eax, [rip+fs_np]
+    test    eax, eax
+    jz      .Lfd_fall
+    lea     rsi, [rip+fs_pts]
+    movsd   xmm0, [rsi]
+    movsd   xmm1, xmm0
+    movsd   xmm2, [rsi+8]
+    movsd   xmm3, xmm2
+    xor     ecx, ecx
+1:  cmp     ecx, eax
+    jae     2f
+    mov     edx, ecx
+    shl     edx, 4
+    minsd   xmm0, [rsi+rdx]
+    maxsd   xmm1, [rsi+rdx]
+    minsd   xmm2, [rsi+rdx+8]
+    maxsd   xmm3, [rsi+rdx+8]
+    inc     ecx
+    jmp     1b
+2:  movsd   [rsp+FD_BOX], xmm0
+    movsd   [rsp+FD_BOX+8], xmm1
+    movsd   [rsp+FD_BOX+16], xmm2
+    movsd   [rsp+FD_BOX+24], xmm3
+    xorpd   xmm0, xmm0
+    movsd   [rsp+FD_BEST], xmm0
+    xor     ebx, ebx                    # (found)
+    mov     dword ptr [rsp+FD_I], 0
+.Lfd_i:
+    cmp     dword ptr [rsp+FD_I], 24
+    jae     .Lfd_done
+    mov     dword ptr [rsp+FD_J], 0
+.Lfd_j:
+    cmp     dword ptr [rsp+FD_J], 24
+    jae     .Lfd_in
+    cvtsi2sd xmm0, dword ptr [rsp+FD_I] # cell centres
+    addsd   xmm0, [rip+br_half]
+    mov     eax, 24
+    cvtsi2sd xmm2, eax
+    divsd   xmm0, xmm2
+    movsd   xmm1, [rsp+FD_BOX+8]
+    subsd   xmm1, [rsp+FD_BOX]
+    mulsd   xmm0, xmm1
+    addsd   xmm0, [rsp+FD_BOX]
+    cvtsi2sd xmm1, dword ptr [rsp+FD_J]
+    addsd   xmm1, [rip+br_half]
+    divsd   xmm1, xmm2
+    movsd   xmm3, [rsp+FD_BOX+24]
+    subsd   xmm3, [rsp+FD_BOX+16]
+    mulsd   xmm1, xmm3
+    addsd   xmm1, [rsp+FD_BOX+16]
+    movsd   [rsp+FD_P], xmm0
+    movsd   [rsp+FD_P+8], xmm1
+    call    fc_inside
+    test    eax, eax
+    jz      .Lfd_jn
+    movsd   xmm0, [rsp+FD_P]
+    movsd   xmm1, [rsp+FD_P+8]
+    call    fs_seg_dist
+    comisd  xmm0, [rsp+FD_BEST]
+    jbe     .Lfd_jn
+    movsd   [rsp+FD_BEST], xmm0
+    movsd   xmm0, [rsp+FD_P]
+    movsd   [rsp+FD_Q], xmm0
+    movsd   xmm0, [rsp+FD_P+8]
+    movsd   [rsp+FD_Q+8], xmm0
+    mov     ebx, 1
+.Lfd_jn:
+    inc     dword ptr [rsp+FD_J]
+    jmp     .Lfd_j
+.Lfd_in:
+    inc     dword ptr [rsp+FD_I]
+    jmp     .Lfd_i
+.Lfd_done:
+    test    ebx, ebx
+    jz      .Lfd_fall
+    movsd   xmm0, [rsp+FD_Q]
+    movsd   xmm1, [rsp+FD_Q+8]
+    mov     eax, 1
+    jmp     9f
+.Lfd_fall:
+    call    fs_inner_point
+9:  add     rsp, 88
+    pop     r12
+    pop     rbx
+    ret
+
+# fs_seg_dist(xmm0, xmm1 = point) -> xmm0 = its distance to the sampled loops
+fs_seg_dist:
+    movsd   xmm8, [rip+br_big]          # best squared
+    lea     rsi, [rip+fs_pts]
+    xor     eax, eax
+1:  cmp     eax, [rip+fs_np]
+    jae     9f
+    push    rax
+    call    fs_next
+    mov     edx, eax
+    pop     rax
+    mov     ecx, eax
+    shl     ecx, 4
+    shl     edx, 4
+    movsd   xmm2, [rsi+rcx]             # a, d = b - a
+    movsd   xmm3, [rsi+rcx+8]
+    movsd   xmm4, [rsi+rdx]
+    subsd   xmm4, xmm2
+    movsd   xmm5, [rsi+rdx+8]
+    subsd   xmm5, xmm3
+    movsd   xmm9, xmm0                  # w = p - a
+    subsd   xmm9, xmm2
+    movsd   xmm10, xmm1
+    subsd   xmm10, xmm3
+    movsd   xmm11, xmm9                 # t = clamp(w.d / d.d)
+    mulsd   xmm11, xmm4
+    movsd   xmm12, xmm10
+    mulsd   xmm12, xmm5
+    addsd   xmm11, xmm12
+    movsd   xmm12, xmm4
+    mulsd   xmm12, xmm4
+    movsd   xmm13, xmm5
+    mulsd   xmm13, xmm5
+    addsd   xmm12, xmm13
+    xorpd   xmm13, xmm13
+    comisd  xmm12, [rip+br_nwt]
+    jbe     2f
+    divsd   xmm11, xmm12
+    maxsd   xmm11, xmm13
+    minsd   xmm11, [rip+br_one]
+    movsd   xmm13, xmm11
+2:  mulsd   xmm4, xmm13
+    mulsd   xmm5, xmm13
+    subsd   xmm9, xmm4
+    subsd   xmm10, xmm5
+    mulsd   xmm9, xmm9
+    mulsd   xmm10, xmm10
+    addsd   xmm9, xmm10
+    minsd   xmm8, xmm9
+    inc     eax
+    jmp     1b
+9:  sqrtsd  xmm0, xmm8
+    ret
+
 # fs_next(eax=point) -> eax = the point after it in its loop
 fs_next:
     push    rcx
@@ -2272,7 +2428,14 @@ bd_integrate:
     mov     [rsp+BI_KIND], esi
     xorpd   xmm0, xmm0
     movsd   [rsp+BI_SUM], xmm0
-    call    p_bd
+    cmp     esi, 2                      # (2, 3: one face's volume, area)
+    jb      1f
+    sub     dword ptr [rsp+BI_KIND], 2
+    mov     [rsp+BI_F], edi
+    lea     edx, [rdi+1]
+    mov     [rsp+BI_FN], edx
+    jmp     .Lbi_face
+1:  call    p_bd
     mov     ecx, [rax+BD_FIRST]
     mov     [rsp+BI_F], ecx
     mov     edx, [rax+BD_NF]
@@ -2487,7 +2650,12 @@ bi_bounds:
     divsd   xmm0, xmm2
     subsd   xmm1, [r12+CE_P0]
     divsd   xmm1, xmm2
-    movsd   [r9+BI_A], xmm0
+    comisd  xmm0, xmm1                  # (walked backwards: a > b)
+    jbe     4f
+    movsd   xmm2, xmm0
+    movsd   xmm0, xmm1
+    movsd   xmm1, xmm2
+4:  movsd   [r9+BI_A], xmm0
     movsd   [r9+BI_B], xmm1
     ret
 1:  cvtsi2sd xmm0, eax
@@ -2511,6 +2679,13 @@ bd_volume:
     jmp     bd_integrate
 bd_area:
     mov     esi, 1
+    jmp     bd_integrate
+# fc_volume(edi=face) -> xmm0 = its share of the volume; fc_area -> its area
+fc_volume:
+    mov     esi, 2
+    jmp     bd_integrate
+fc_area:
+    mov     esi, 3
     jmp     bd_integrate
 
 # bd_stats(edi=body) - bs_v, bs_e (edges used), bs_f, bs_l

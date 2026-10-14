@@ -35,6 +35,8 @@
 .globl bm_v
 .globl bm_w
 .globl bd_finish
+.globl bm_set
+.globl bp_custom
 
 .equ SK_PLANE,   8
 .equ SK_NPT,     12
@@ -246,7 +248,28 @@ bp_place:
     inc     r13d
     cmp     r13d, 4
     jb      3b
-2:  # the inverse: rows V x W, W x U, U x V over det
+2:  call    bm_invert
+    add     rsp, 128
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bm_set(rdi=O U V W: 12 doubles) - a plane map given directly
+bm_set:
+    sub     rsp, 8
+    mov     rsi, rdi
+    lea     rdi, [rip+bm_o]
+    mov     ecx, 12
+    rep     movsq
+    call    bm_invert
+    add     rsp, 8
+    ret
+
+# bm_invert - bm_inv: rows of [U V W]^-1
+bm_invert:
+    sub     rsp, 8
+    # the inverse: rows V x W, W x U, U x V over det
     lea     rdi, [rip+bm_inv]
     lea     rsi, [rip+bm_v]
     lea     rdx, [rip+bm_w]
@@ -271,10 +294,7 @@ bp_place:
     movsd   [rax], xmm0
     add     rax, 8
     loop    4b
-    add     rsp, 128
-    pop     r13
-    pop     r12
-    pop     rbx
+    add     rsp, 8
     ret
 
 # bm_local(rdi=world point, rsi=out (u, v, w))
@@ -1293,6 +1313,30 @@ bp_offset:
     pop     r15
     pop     r14
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bp_custom(rdi=elements (EL_SZ each: type, a, b; arcs also c, r, t0, sweep),
+#   esi=count, xmm0=scale) - the profile is that one closed loop (turned
+#   counter-clockwise)
+bp_custom:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    movsd   [rip+bp_scale], xmm0
+    mov     rsi, rdi
+    lea     rdi, [rip+bp_el]
+    imul    ecx, r12d, EL_SZ/8
+    rep     movsq
+    mov     [rip+bp_nel], r12d
+    mov     dword ptr [rip+bp_nl], 1
+    mov     dword ptr [rip+bp_lf], 0
+    mov     [rip+bp_ln], r12d
+    call    nest
+    add     rsp, 8
     pop     r12
     pop     rbx
     ret
