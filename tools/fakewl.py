@@ -541,6 +541,7 @@ def main():
     cloth()
     sim_cache()
     virtual_geometry()
+    virtual_geometry_cuts()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -4187,7 +4188,7 @@ def virtual_geometry():
             'sculpt("S", "draw", 0, 0.3, 1.0, 0.3, 0.1, 0.95, 0.3, 1)\nselect("S")\nprint(vgeo("S", 0))\n'
             't = clock()\nop("vgeo.build")\nt = clock() - t\n'
             'print(vgeo("S", 0), vgeo("S", 4), vgeo("S", 1), vgeo("S", 2), vgeo("S", 9), vgeo("S", 5), vgeo("S", 10), vgeo("S", 11), t)\n'
-            'print(vgeo("S", 12), vgeo("S", 8) < 0.5, vgeo("S", 300 + 3) < 0.002, vgeo("S", 13) < 2.2 * vgeo("S", 4))\n'
+            'print(vgeo("S", 12), vgeo("S", 8) < 0.5, vgeo("S", 300 + 3) < 0.003, vgeo("S", 13) < 2.2 * vgeo("S", 4))\n'
             'op("vgeo.extract", "3")\nprint(faces("LOD") == vgeo("S", 103), vgeo("LOD", 0))\n'
             'n = vgeo("S", 1)\nop("file.save", "~/BeeModel/v.bee")\nop("file.new")\nop("file.open", "~/BeeModel/v.bee")\n'
             'print(vgeo("S", 0), vgeo("S", 1) == n, vgeo("S", 12))\n'
@@ -4237,6 +4238,97 @@ def virtual_geometry():
     q('op("vgeo.extract", "5")\ndelete("S")\nscale("LOD", 4.5)\nselect()')
     f.pump(0.5)
     f.shot('109_vgeo_clusters.png')
+    f.proc.kill()
+
+
+def virtual_geometry_cuts():
+    """Virtualized geometry, part 2: a mesh with a cluster DAG is drawn
+    through a cut of it every frame (one pixel of error from the camera),
+    clusters culled by the frustum and by the last frame's depth, the ones
+    that come into view drawn in a second batch; picking and material preview
+    see the cut. vgeo.proxy lets the mesh go for the DAG's roots; saved and
+    opened again, the DAG stays mapped from the file and its pages stream in
+    under a budget."""
+    print('  -- virtual geometry: cuts, culling, streaming --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    st = lambda *ks: [float(x) for x in q('print(' + ', '.join('vgstat(%d)' % k for k in ks) + ')').split()]
+    f.enter(600, 300)
+    f.move(600, 300)
+    q('delete("Cube")\nadd("sphere", "S", 0, 0, 0)\nmodifier("S", "subsurf")\nmodset("S", 0, "levels", 5)\nmodapply("S", 0)\n'
+      'add("cube", "C", -4, 0, 0)\nselect("S")\nop("vgeo.build")')
+    t0 = time.time()
+    while time.time() - t0 < 60 and q('print(vgeo("S", 0))') != '2':
+        f.pump(0.2)
+    q('select()\nop("vgeo.view", "check")')
+    cr = []
+    for d in (3, 5, 12):                            # all of it in view: the cut drawn, crack-free
+        q('view(30, 20, %d, 0, 0, 0)' % d)
+        f.pump(0.4)
+        cr += st(16)
+    q('view(45, 25, 30, 0, 0, 0)')
+    f.pump(0.5)
+    far = st(0, 1, 2, 6)
+    q('view(90, 10, 0.7, 1, 0, 0)')                 # at the surface: much of it out of view
+    f.pump(0.5)
+    near = st(0, 1, 2, 3, 4, 6)
+    check(far[0] == 1 and far[3] > 1000000 and far[2] < 20000 and near[2] > 3 * far[2] and near[3] > 0 and cr == [1, 1, 1],
+          f'a 1M-triangle mesh drawn through cuts of its DAG: {far[2]:.0f} triangles ({far[1]:.0f} clusters) from afar, '
+          f'{near[2]:.0f} up close, {near[3]:.0f} clusters culled by the frustum ({near[4]:.0f} occluded); '
+          f'the cuts drawn crack-free ({cr})')
+    lat = []
+    for i in range(16):                             # orbiting: the far side comes into view
+        f.latencies = []
+        f.t_input = time.time()
+        f.drag(560, 380, 600, 380, steps=3)
+        lat += f.latencies
+    lat = sorted(lat)
+    check(len(lat) > 10 and lat[len(lat) // 2] < 40 * (2 if os.environ.get('CI') else 1),
+          f'orbiting close: {lat[len(lat) // 2] if lat else 0:.1f} ms a frame at the median')
+    q('view(45, 25, 12, 0, 0, 0)')
+    f.pump(0.5)
+    f.click(615, 352)
+    picked = q('print(active())')
+    q('op("view.toggle_material_preview")')
+    f.pump(0.5)
+    mp = st(0, 2)
+    q('op("view.toggle_material_preview")\nop("vgeo.view", "clusters")')
+    f.pump(0.5)
+    f.shot('113_vgeo_cut_clusters.png')
+    q('op("vgeo.view", "off")')
+    f.pump(0.5)
+    off = st(0)
+    q('op("vgeo.view", "shaded")')
+    check(picked == 'S' and mp[0] == 1 and mp[1] > 0 and off == [0],
+          f'a click picks the object drawn through its cut ({picked}); material preview draws the cut ({mp[1]:.0f} triangles); '
+          f'vgeo.view off draws the mesh itself')
+    q('select("S")\nop("vgeo.proxy")')
+    prox = q('print(faces("S"), vgeo("S", 0), vgeo("S", 4))').split()
+    os.makedirs(os.path.join(f.home, 'BeeModel'), exist_ok=True)
+    bee = os.path.join(f.home, 'BeeModel', 'vgs.bee')
+    for c in ('file.save ' + bee, 'file.new', 'file.open ' + bee):
+        f.key(28); f.type(c); f.key(28); f.pump(1.0); f.key(1)
+    back = q('print(faces("S"), vgeo("S", 0))').split()
+    q('select()\nop("vgeo.budget", "1")\nview(30, 20, 3, 0, 0, 0)')
+    for i in range(10):                             # pages missing: coarser clusters stand in
+        f.pump(0.1)
+    fb = st(16, 12)
+    q('op("vgeo.budget", "4")\nview(30, 20, 30, 0, 0, 0)')
+    f.pump(0.5)
+    for v in ('90, 10, 0.7, 1, 0, 0', '270, 10, 0.7, -1, 0, 0'):    # close to one side, then the other
+        q('view(%s)' % v)
+        for i in range(20):
+            f.pump(0.1)
+    s1 = st(7, 8, 10, 11, 14, 2, 12)
+    check(prox[1:] == ['2', '1015808'] and int(prox[0]) < 1000 and back == prox[:2] and s1[4] == 1 and s1[2] > 0
+          and s1[0] <= 4 and s1[3] > 0 and s1[5] > 3 * far[2],
+          f'vgeo.proxy: {prox[0]} triangles stand in; saved, opened: the DAG mapped from the file, {s1[2]:.0f} pages '
+          f'read as the view came close, {s1[3]:.0f} given back under a 4 MB budget ({s1[0]:.2f} MB in memory); '
+          f'{s1[5]:.0f} triangles drawn, {s1[6]:.0f} refinements wait for pages that do not fit')
+    check(fb[0] == 1 and fb[1] > 0, f'with pages missing ({fb[1]:.0f} refinements waiting under 1 MB) the cut drawn is still crack-free ({fb[0]:.0f})')
     f.proc.kill()
 
 

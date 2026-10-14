@@ -22,7 +22,7 @@
 .equ RO_NTRIS,  20
 .equ RO_ID,     24
 .equ RO_OBJ,    32
-.equ RO_SZ,     48
+.equ RO_SZ,     56
 .equ TRI_SZ,    48
 # shading scratch (per call, on the stack): see sh_* offsets
 .equ SH_N,      0               # world normal

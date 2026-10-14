@@ -434,7 +434,11 @@ shared_mesh:
 # sculpt_exit - the arrays go; the mesh stays as sculpted
 sculpt_exit:
     sub     rsp, 8
-    call    sculpt_free
+    mov     rax, [rip+sc_mesh]          # edited in place: a new version (caches
+    test    rax, rax                    #  keyed by it, the cluster DAG check)
+    jz      1f
+    inc     dword ptr [rax+ME_VER]
+1:  call    sculpt_free
     call    sdc_free
     call    mr_drop
     mov     dword ptr [rip+sc_obj], 0

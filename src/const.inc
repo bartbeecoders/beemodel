@@ -341,7 +341,8 @@
 .equ ME_SHAPE,      192     # shape keys (shape.s: its own mapping), or 0
 .equ ME_PIN,        200     # u8 per vertex (own mapping): pinned for cloth, or 0
 .equ ME_VGEO,       208     # cluster LOD DAG (vgeo.s: shared, reference counted), or 0
-.equ ME_HDR,        216
+.equ ME_VGOK,       216     # u32: ME_VER + 1 when ME_VGEO was checked to be its DAG (negative: not)
+.equ ME_HDR,        224
 
 # ---- rigging data in the animation block (anim.s, rig.s) -----------------------------
 .equ AN_NCON_,      44      # constraints, drivers in use

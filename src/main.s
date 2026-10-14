@@ -84,7 +84,11 @@ _start:
     cmp     dword ptr [rip+vg_state], 1 # virtualizing: look now and then
     jne     3f
     mov     edx, 50
-3:  cmp     dword ptr [rip+hv_active], 0  # rendering: just look, never wait
+3:  call    vd_streaming                # cluster pages on their way: look
+    test    eax, eax                    #  every frame
+    jz      31f
+    mov     edx, 16
+31: cmp     dword ptr [rip+hv_active], 0  # rendering: just look, never wait
     je      0f
     xor     edx, edx
 0:  mov     eax, SYS_POLL
@@ -103,6 +107,7 @@ _start:
     jne     .Lquit
     call    render_tick                 # a slice of the progressive render
     call    vg_tick                     # a cluster DAG built in the background
+    call    vd_poll                     # cluster pages that came in: drawn
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render

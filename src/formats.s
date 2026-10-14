@@ -25,6 +25,7 @@
 .globl mesh_tab
 .globl n_mesh_tab
 .include "const.inc"
+.include "vgeo.inc"
 .include "macros.inc"
 
 # exports
@@ -412,10 +413,19 @@ bee_save:
     lea     rsi, [rip+vg_zero]
     mov     edx, ebx
     call    wb_bytes
-    mov     rsi, r13
-    mov     rdx, [r13+112]              # (VH_BYTES)
+    mov     rsi, r13                    # (the runtime part of the header
+    mov     edx, VR_CREATOR             #  as zeros)
+    call    wb_bytes
+    lea     rsi, [rip+vg_zero]
+    mov     edx, VH_SZ-VR_CREATOR
+    call    wb_bytes
+    lea     rsi, [r13+VH_SZ]
+    mov     rdx, [r13+VH_BYTES]
+    sub     rdx, VH_SZ
     call    wb_bytes
     call    chunk_end
+    mov     rdi, r13                    # (read all through: given back)
+    call    vd_drop
 42: inc     r12d
     jmp     41b
 43:
@@ -1470,16 +1480,16 @@ bee_load:
     mov     edi, [rip+vp_area]
     call    cam_store
 8:  call    drop_table_refs
-    mov     rdi, [rip+fbase]
+    mov     rdi, [rip+fbase]            # (but its cluster DAGs)
     mov     rsi, [rip+fsize]
-    call    file_unmap
+    call    vg_unmap_file
     xor     eax, eax
     jmp     .Lbl_out
 .Lbl_bad:
     call    drop_table_refs
     mov     rdi, [rip+fbase]
     mov     rsi, [rip+fsize]
-    call    file_unmap
+    call    vg_unmap_file
     mov     eax, 2
 .Lbl_out:
     add     rsp, 8
