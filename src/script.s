@@ -445,6 +445,10 @@ builtins:
     .long 5, 5
     .quad bn_livelink, b_livelink
     .long 1, 1
+    .quad bn_vcinfo, b_vcinfo
+    .long 1, 1
+    .quad bn_vctext, b_vctext
+    .long 1, 2
     .quad bn_libfind, b_libfind
     .long 2, 2
     .quad bn_libinfo, b_libinfo
@@ -732,6 +736,8 @@ bn_probesample: .asciz "probesample"
 bn_lightmap:    .asciz "lightmap"
 bn_lmsample:    .asciz "lmsample"
 bn_livelink:    .asciz "livelink"
+bn_vcinfo:      .asciz "vcinfo"
+bn_vctext:      .asciz "vctext"
 bn_libfind:     .asciz "libfind"
 bn_libinfo:     .asciz "libinfo"
 bn_wpaint:      .asciz "wpaint"
@@ -5181,6 +5187,43 @@ b_lmsample:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# vcinfo(k) -> versions (vc.s: vc_stat)
+b_vcinfo:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    vc_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# vctext(what [, row]) -> versions as text (vc.s: vc_text): 0 the branch,
+#   1 a diff row, 2 a merge conflict, 3 the last commit's message; nil
+b_vctext:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp], eax
+    xor     esi, esi
+    cmp     r12d, 2
+    jb      1f
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si esi, xmm0
+1:  mov     edi, [rsp]
+    call    vc_text
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    test    rax, rax
+    jz      ret_nil
+    mov     rsi, rax
+    jmp     ret_text
 
 # livelink(k) -> the live link (link.s: link_stat)
 b_livelink:

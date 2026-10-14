@@ -220,6 +220,30 @@ project uses [Semantic Versioning](https://semver.org/).
     transforms coalesced (one, the latest, per object once it catches up).
   - [tests/livelink.py](tests/livelink.py): snapshot, latency, deltas,
     topology changes, a mirror, backpressure, a late reader, a UNIX socket.
+- **Versioned scenes** (#151): commit, branch, diff and merge `.bee` files
+  (`src/vc.s`).
+  - **History:** beside the saved file, `<file>.vc/` keeps content-addressed
+    blobs (whole scenes, each object's mesh, manifests: an entry per object
+    and a hash per mergeable chunk), commits (text: scene, manifest,
+    parents, time, message; named by their hash) and the branches.
+    `vc.commit [message]`, `vc.branch`, `vc.switch` (refused with changes
+    unless `force`), `vc.log`.
+  - **Visual diff:** `vc.diff [branch | commit] [overlay | side]` lists
+    objects added, removed and changed (which properties; meshes with their
+    vertex counts) in a panel and on the console, and draws the other
+    version as ghosts - over the scene or beside it.
+  - **Three-way merge:** `vc.merge <branch>` from the common ancestor, per
+    object and property (transform, name, material, hidden, colour, mesh)
+    and per chunk (materials, node trees, animation, light probes): one
+    side's change is taken, different changes to the same thing are
+    conflicts for the merge panel (ours / theirs buttons, `vc.resolve`);
+    `vc.commit` makes the merge commit (two parents), `vc.abort` gives up.
+  - Every operation is an MCP tool: an agent can branch, work and propose
+    its branch for the user to diff and merge. BeeScript: `vcinfo(k)`,
+    `vctext(what, row)`.
+  - [tests/versions.py](tests/versions.py): commits, branches, the diff,
+    merges with and without conflicts, the store, the panel's buttons,
+    ghosts over and beside the scene, an agent's branch over MCP.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

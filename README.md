@@ -554,6 +554,14 @@ mirrors the first; a game engine plugin reads the same stream ([docs/LIVELINK.md
 reference reader [tools/livelink.py](tools/livelink.py)). Readers that fall behind get their
 transforms coalesced. See [tests/livelink.py](tests/livelink.py).
 
+**Versions.** A saved scene keeps its history beside it (`<file>.vc/`, content-addressed:
+unchanged meshes cost nothing). `vc.commit "a message"`, `vc.branch idea`, `vc.switch idea`,
+`vc.log`; `vc.diff main` lists what differs - objects added, removed, changed and which
+properties - and draws the other version as ghosts over the scene (`side`: beside it).
+`vc.merge idea` merges three-way per object and property; the same property changed on both
+sides shows in the merge panel (ours / theirs), then `vc.commit`. Agents use the same operators
+over MCP to work on a branch of their own and propose it. See [tests/versions.py](tests/versions.py).
+
 ### Virtualized geometry
 
 **Cluster LOD DAG.** `vgeo.build` prepares the active mesh for virtualized rendering, as Nanite
@@ -808,6 +816,7 @@ src/logic.s     logic graphs: event / action / data nodes, the play-mode VM
 src/probe.s     light probes: SH irradiance volumes, reflection cube maps, baked by Hive
 src/lightmap.s  the lightmap baker: second UVs, the atlas, traced texels, EXR / PNG
 src/link.s      the live link: the scene streamed to peers, mirroring a session
+src/vc.s        versioned scenes: commits, branches, the visual diff, three-way merge
 src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
 src/procgen.s   terrain, erosion, L-systems, wave function collapse

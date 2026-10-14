@@ -49,6 +49,7 @@
 .globl link_connect_arg
 .globl link_stat
 .globl link_target
+.globl build_mesh
 
 .equ SYS_BIND,      49
 .equ SYS_LISTEN,    50
