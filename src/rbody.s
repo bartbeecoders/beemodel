@@ -29,6 +29,7 @@
 .include "macros.inc"
 
 .globl rb_frame
+.globl rb_gravity
 .globl rb_info
 .globl rb_reset
 
@@ -874,6 +875,14 @@ rb_lay:
     add     rsi, 63
     and     rsi, -64
     add     r12, rsi
+    ret
+
+# rb_gravity -> rax = the world's gravity (4 floats, w 0)
+rb_gravity:
+    sub     rsp, 8
+    call    rb_settings
+    lea     rax, [rip+rb_g]
+    add     rsp, 8
     ret
 
 # rb_settings - gravity, step, iterations from the world settings

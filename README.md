@@ -514,6 +514,15 @@ and `lib.import` merges one; `lib.add <folder>` lists another library too. Every
 MCP tool (`op_lib_save`, `op_lib_place`, ...), and BeeScript has `lib(k)`, `libfind(words, i)`
 and `libinfo(asset, what)`. See [tests/library.py](tests/library.py).
 
+**Play mode.** F5 plays the scene from the view: a first-person walk (a capsule that falls
+under the rigid body world's gravity, climbs steps and walkable slopes, and is stopped by
+walls) or, with F, a fly camera. The mouse is captured (a locked pointer with relative
+motion); WASD moves, Shift runs, Space jumps. Simulations and animations run live. Esc stops
+and asks: K keeps the changes as one undo step, D discards them (as in Unreal's Play In
+Editor). `play.start [walk|fly] [x y z]` / `play.stop [keep|discard]` / `play.mode` are MCP
+tools too, and BeeScript plays from scripts with `playstep`, `playlook` and `playinfo`. See
+[tests/play.py](tests/play.py).
+
 ### Virtualized geometry
 
 **Cluster LOD DAG.** `vgeo.build` prepares the active mesh for virtualized rendering, as Nanite
@@ -763,6 +772,7 @@ src/fieldvm.s   the field VM: per-point programs in SSE blocks
 src/fvjit.s     the field JIT: templates to x86-64 (AVX / SSE), differential self-test
 src/asset.s     assets: trees and materials saved, loaded (.beea files, library blobs)
 src/library.s   the content library: blobs by hash, kinds, thumbnails, packs, the Asset Browser
+src/play.s      play mode: the capsule walker, fly camera, captured mouse, keep / discard
 src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
 src/procgen.s   terrain, erosion, L-systems, wave function collapse
