@@ -685,7 +685,27 @@ ui_button:
     cmp     dword ptr [rip+pl_on], 0    # (play mode: buttons do nothing)
     je      0f
     ret
-0:  push    rbx
+0:  test    esi, esi                    # the merge panel's buttons first
+    jz      70f
+    cmp     edi, BTN_LEFT
+    jne     70f
+    push    rdi
+    push    rsi
+    push    rdx
+    push    rcx
+    sub     rsp, 8
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    vc_press
+    add     rsp, 8
+    pop     rcx
+    pop     rdx
+    pop     rsi
+    pop     rdi
+    test    eax, eax
+    jz      70f
+    ret
+70: push    rbx
     push    r12
     push    r13
     push    r14

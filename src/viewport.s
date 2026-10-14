@@ -518,6 +518,7 @@ viewport_draw:
     call    wp_draw                     # world cells not loaded, the minimap
     call    lb_ghost                    # a library asset being dragged in
     call    pb_draw                     # light probes: their boxes
+    call    vc_draw                     # versions: the diff, the merge panel
     call    play_hud                    # play mode: the keys, or the question
     call    edit_draw                   # edit mode: edges, vertices, faces
     call    analysis_draw               # View > Show ... overlays
