@@ -613,6 +613,10 @@ obj_eval:
     mov     rbx, rdi
     cmp     dword ptr [rbx+OB_TYPE], OT_MESH
     jne     .Loe_base
+    call    cl_mesh                     # (simulated cloth: its mesh)
+    test    rax, rax
+    jnz     .Loe_out
+    mov     rdi, rbx
     call    mods_on
     test    eax, eax
     jnz     96f

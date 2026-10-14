@@ -23,6 +23,15 @@ project uses [Semantic Versioning](https://semver.org/).
   - **Automatic weights:** by bone heat: each bone's heat equation is solved on the mesh, and the four strongest bones are kept. `arm.parent <mesh> <armature>` sets up both.
   - **Weight paint (Ctrl+W):** paints the active bone's weights, shown as a heat map. `paint.weight` sets the value; BeeScript has `wpaint`.
   - **BeeScript:** `armature`, `bones`, `weight`, `evpos`. Bones are saved in ARMT and weights in MWGT.
+- Cloth and soft bodies (XPBD):
+  - **Objects:** `cloth.add [cloth|soft|collider] [stretch c] [bend c] [volume c] [mass m] [damping d] [thickness t] [friction f] [self]` on the selected meshes. Compliances are in m/N; 0 is stiff.
+  - **Constraints:** stretch on every triangle edge; bend between the far corners of triangles sharing an edge; a soft body's closed mesh also keeps its volume. Constraints are coloured into batches with no shared particle, and big batches are solved in parallel.
+  - **Pins:** `cloth.pin selected | all | none | above <axis> <value> | below <axis> <value>` sets a mesh's pin group (saved in MPIN). Pinned vertices hold to the object as it moves.
+  - **Collisions:** cloth keeps its thickness from collider objects' triangles (a spatial hash; very large triangles are checked by every particle) with friction. With `self` it also keeps off itself and other self-colliding cloth (a particle hash; rest neighbours are left out), resolved in parallel.
+  - **Forces:** gravity (the physics world's) and wind as drag on each triangle (`cloth.world wind x y z`). Each step (60 a second) is cut into 10 substeps (`cloth.world substeps n rate n`).
+  - **Timeline:** like rigid bodies it runs from the scene's start; while it runs an object shows its simulated mesh.
+  - **Speed:** a 6561-particle sheet colliding with a ball, the floor and itself simulates 4 s in 3.0 s.
+  - **BeeScript:** `clothinfo(k)`.
 - Mechanisms for CAD assemblies:
   - **Joints:** `mech.joint <revolute|slider> <part> <parent|world> [pivot x y z] [axis x y z]` moves a part about or along an axis, relative to its parent part. The part as it is when joined is its place at 0. Parts can be chained: an arm on a gear turns with it.
   - **Values:** a joint is driven by an expression of CAD parameters, units and `frame` (`value angle`, `value crank * 2`, `value frame * 3deg`), or by another joint times a ratio (`gear 1 -2` for a gear pair; a slider from a revolute joint is a rack). `min` / `max` limits hold it, and it says when it is held. Also `mech.set`, `mech.remove`, `mech.list`.

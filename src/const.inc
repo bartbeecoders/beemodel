@@ -339,6 +339,7 @@
 .equ ME_WGT,        184     # skin weights: 4 bones (u8) + 4 weights (f32) a
                             #  vertex (own mapping), or 0
 .equ ME_SHAPE,      192     # shape keys (shape.s: its own mapping), or 0
+.equ ME_PIN,        200     # u8 per vertex (own mapping): pinned for cloth, or 0
 .equ ME_HDR,        208
 
 # ---- rigging data in the animation block (anim.s, rig.s) -----------------------------
@@ -365,7 +366,12 @@
 .equ AN_MJ_,        AN_JT_ + JT_MAX_*JT_SZ_   # mechanism joints
 .equ MJ_MAX_,       64
 .equ MJ_SZ_,        208
-.equ AN_KEYSOFF_,   AN_MJ_ + MJ_MAX_*MJ_SZ_   # then the keys
+.equ AN_CW_,        AN_MJ_ + MJ_MAX_*MJ_SZ_   # cloth: the world (cloth.s),
+.equ CW_SZ_,        32
+.equ AN_CL_,        AN_CW_ + CW_SZ_           #  the objects
+.equ CL_MAX_,       32
+.equ CL_SZ_,        64
+.equ AN_KEYSOFF_,   AN_CL_ + CL_MAX_*CL_SZ_   # then the keys
 .equ K_PARAM_,      7       # a CAD parameter's value (an animation channel kind)
 .equ K_SHAPE_,      6       # a shape key's value (an animation channel kind)
 

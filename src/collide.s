@@ -21,6 +21,7 @@
 .globl part_support
 .globl proxy_support
 .globl px_place
+.globl tri_closest
 
 # a part
 .equ PT_TYPE,   0                       # 0 a box core, 1 a hull

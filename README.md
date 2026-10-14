@@ -454,6 +454,11 @@ bones and **I** keys them. `arm.parent <mesh> <armature>` skins a mesh with auto
 (bone heat diffusion); the Armature modifier deforms it by linear blend or dual quaternion
 skinning, and **Ctrl+W** paints weights over a heat map.
 
+**Cloth.** `cloth.add` makes a mesh cloth (or a soft body that keeps its volume), `cloth.pin
+above x 0.95` holds an edge, and other objects become colliders. Play past the start and it
+hangs, drapes over what is below it, folds onto itself without passing through and blows in
+the wind (`cloth.world wind 0 0 8`).
+
 **Mechanisms.** CAD parts can be joined to move: `mech.joint revolute Gear world value angle`
 turns a gear by a parameter, `gear 1 -2` makes a second follow, a slider from it is a rack, and
 limits hold a joint. Key a parameter (`key("param:angle", 1, 0)`) and the whole assembly moves
@@ -712,6 +717,7 @@ src/rig.s       constraints, IK (FABRIK / CCD), drivers, motion paths, onion ski
 src/shape.s     shape keys
 src/collide.s   convex collision: support functions, GJK, EPA
 src/mech.s      mechanisms: revolute / slider joints, gears, limits, collisions
+src/cloth.s     cloth and soft bodies: XPBD, pins, colliders, self collision, wind
 src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, islands, joints
 src/physui.s    the Physics section of the Properties area
 src/agent.s     agent permissions, activity log, revert
