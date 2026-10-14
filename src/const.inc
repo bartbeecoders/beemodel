@@ -361,7 +361,12 @@
 .equ AN_JT_,        AN_RB_ + RB_MAX_*RB_SZ_   # joints
 .equ JT_MAX_,       128
 .equ JT_SZ_,        64
-.equ AN_KEYSOFF_,   AN_JT_ + JT_MAX_*JT_SZ_   # then the keys
+.equ AN_NMJ_,       60      # mechanism joints in use (mech.s)
+.equ AN_MJ_,        AN_JT_ + JT_MAX_*JT_SZ_   # mechanism joints
+.equ MJ_MAX_,       64
+.equ MJ_SZ_,        208
+.equ AN_KEYSOFF_,   AN_MJ_ + MJ_MAX_*MJ_SZ_   # then the keys
+.equ K_PARAM_,      7       # a CAD parameter's value (an animation channel kind)
 .equ K_SHAPE_,      6       # a shape key's value (an animation channel kind)
 
 # ---- objects (scene.s) -------------------------------------------------------------

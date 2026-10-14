@@ -454,6 +454,12 @@ bones and **I** keys them. `arm.parent <mesh> <armature>` skins a mesh with auto
 (bone heat diffusion); the Armature modifier deforms it by linear blend or dual quaternion
 skinning, and **Ctrl+W** paints weights over a heat map.
 
+**Mechanisms.** CAD parts can be joined to move: `mech.joint revolute Gear world value angle`
+turns a gear by a parameter, `gear 1 -2` makes a second follow, a slider from it is a rack, and
+limits hold a joint. Key a parameter (`key("param:angle", 1, 0)`) and the whole assembly moves
+over the timeline. Its features rebuild with it, and parts that run into each other are
+reported.
+
 **Physics.** `rigid.add` makes the selected objects rigid bodies: boxes, spheres, capsules,
 convex hulls, or compounds of convex parts cut from the mesh. They fall, collide, rest and sleep
 when you play past the scene's start, and come back when you return to it. Joints (fixed,
@@ -705,6 +711,7 @@ src/arm.s       armatures: bones, poses, skinning (LBS / DQS), automatic weights
 src/rig.s       constraints, IK (FABRIK / CCD), drivers, motion paths, onion skins
 src/shape.s     shape keys
 src/collide.s   convex collision: support functions, GJK, EPA
+src/mech.s      mechanisms: revolute / slider joints, gears, limits, collisions
 src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, islands, joints
 src/physui.s    the Physics section of the Properties area
 src/agent.s     agent permissions, activity log, revert

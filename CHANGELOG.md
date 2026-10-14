@@ -23,6 +23,12 @@ project uses [Semantic Versioning](https://semver.org/).
   - **Automatic weights:** by bone heat: each bone's heat equation is solved on the mesh, and the four strongest bones are kept. `arm.parent <mesh> <armature>` sets up both.
   - **Weight paint (Ctrl+W):** paints the active bone's weights, shown as a heat map. `paint.weight` sets the value; BeeScript has `wpaint`.
   - **BeeScript:** `armature`, `bones`, `weight`, `evpos`. Bones are saved in ARMT and weights in MWGT.
+- Mechanisms for CAD assemblies:
+  - **Joints:** `mech.joint <revolute|slider> <part> <parent|world> [pivot x y z] [axis x y z]` moves a part about or along an axis, relative to its parent part. The part as it is when joined is its place at 0. Parts can be chained: an arm on a gear turns with it.
+  - **Values:** a joint is driven by an expression of CAD parameters, units and `frame` (`value angle`, `value crank * 2`, `value frame * 3deg`), or by another joint times a ratio (`gear 1 -2` for a gear pair; a slider from a revolute joint is a rack). `min` / `max` limits hold it, and it says when it is held. Also `mech.set`, `mech.remove`, `mech.list`.
+  - **Parameters animate:** CAD parameters are animation channels (`param:angle`), so a keyed parameter moves the whole mechanism over the timeline and rebuilds the sketches and features that use it.
+  - **Collisions:** after the parts move, each moving part is checked against every other mesh. A triangle edge passing strictly through the other part counts; touching faces do not. A pair that starts colliding is reported in the console. `mech.check` lists them now.
+  - **BeeScript:** `joint(n [, 1])` reads a joint's value, or whether it is held at a limit; `collisions()` counts the colliding pairs.
 - Rigid body physics:
   - **Bodies:** `rigid.add [active|passive] [box|sphere|capsule|hull|compound] [mass m] [friction f] [bounce b] [damping d]` on the selected objects. Active bodies fall and collide; passive ones are collided with. A thin passive box (a ground plane) gets depth below its top.
   - **Shapes:** a box, sphere or capsule; the mesh's convex hull; or a compound, where the mesh is cut into up to 16 convex parts until each is close to its hull (a ball drops through a torus's hole).

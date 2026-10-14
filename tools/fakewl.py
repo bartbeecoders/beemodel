@@ -537,6 +537,7 @@ def main():
     rigging()
     rigid_bodies()
     physics_panel()
+    mechanisms()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -3970,6 +3971,58 @@ def physics_panel():
     check(d == '1 1' and e == 'nil 3' and joint > 5 and status > 10,
           f'the physics panel: a joint listed, the simulation shown while playing, x removes the body ({d}, {e}, {joint}, {status})')
     f.proc.kill()
+def mechanisms():
+    """Mechanisms: a crank parameter keyed over the timeline turns a gear;
+    a second gear follows at -2x, a rack slides (held at its limit), an arm
+    on the first gear turns with it and is reported hitting a block; a
+    keyed parameter also rebuilds a pad and turns its joint; saved and
+    reopened. In the window: Space plays it."""
+    print('  -- mechanisms --')
+    home = tempfile.mkdtemp(prefix='bee-mj-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('delete("Cube")\nparam("angle", "0deg")\nadd("cylinder", "G1", 0, 0, 0)\nscale("G1", 1, 0.2, 1)\n'
+            'add("cylinder", "G2", 2.5, 0, 0)\nscale("G2", 0.5, 0.2, 0.5)\nadd("cube", "Rack", 0, 0, 1.3)\nscale("Rack", 2, 0.2, 0.2)\n'
+            'add("cube", "Arm", 0, 1, 0)\nscale("Arm", 3, 0.1, 0.1)\nadd("cube", "Block", 0, 1, -3)\nscale("Block", 0.4, 0.4, 0.4)\n'
+            'op("mech.joint", "revolute G1 world axis 0 1 0 value angle")\nop("mech.joint", "revolute G2 world axis 0 1 0 gear 1 -2")\n'
+            'op("mech.joint", "slider Rack world axis 1 0 0 gear 1 1 min -1 max 1")\nop("mech.joint", "revolute Arm G1 pivot 0 1 0 axis 0 1 0")\n'
+            'param("angle", "30deg")\n'
+            'print(round(joint(1) * 1000), round(joint(2) * 1000), round(get("G2", "ry") * 1000), round(get("Rack", "x") * 1000), round(get("Arm", "ry") * 1000), joint(3, 1))\n'
+            'key("param:angle", 1, 0, "linear")\nkey("param:angle", 41, 6.2832, "linear")\n'
+            'hit = 0\nfor f in 1..42 {\n frame(f)\n if collisions() > 0 and hit == 0 { hit = f }\n}\n'
+            'frame(21)\nprint(round(prop("param:angle") * 1000), round(get("Rack", "x") * 1000), joint(3, 1), hit)\n'
+            'param("len", "1")\ns = sketch("S", "XZ")\nrect(s, 4, 4, 1, 1)\npad("Box", s, "len")\nop("mech.joint", "slider Box world axis 0 1 0 value len - 1")\n'
+            'key("param:len", 1, 1, "linear")\nkey("param:len", 11, 3, "linear")\nframe(6)\n'
+            'print(round(volume("Box") * 100), round(get("Box", "y") * 100))\n'
+            'op("file.save", "~/BeeModel/m.bee")\nop("file.new")\nop("file.open", "~/BeeModel/m.bee")\nframe(21)\n'
+            'print(round(joint(2) * 1000), round(get("G2", "ry") * 1000), round(get("Rack", "x") * 1000))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=120)
+    out = [l.strip() for l in r.stdout.split('\n')] + [''] * 6
+    check(out[0] == '524 -1047 -1047 524 524 0', f'a parameter turns a gear; a second at -2x, a rack, an arm on the first follow ({out[0]})')
+    w = out[1].split()
+    check(len(w) == 4 and w[0] == '3142' and w[1] == '1000' and w[2] == '1' and 10 <= int(w[3]) <= 12,
+          f'keyed over the timeline: the rack held at its limit, the arm reported hitting the block ({out[1]})')
+    check(out[2] == '200 100', f'a keyed parameter rebuilds a pad and moves its joint ({out[2]})')
+    check(out[3] == '-6283 0 1000', f'the mechanism saved and reopened ({out[3]})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip().split('\n')[0]
+    f.enter(600, 300)
+    q('delete("Cube")\nparam("crank", "0deg")\nadd("cylinder", "Wheel", 0, 0, 0)\nscale("Wheel", 2, 0.2, 2)\n'
+      'add("cube", "Pin", 1.5, 0.4, 0)\nscale("Pin", 0.2, 0.2, 0.2)\nadd("cube", "Wall", 0, 0.4, -2.5)\nscale("Wall", 1, 0.3, 0.1)\n'
+      'op("mech.joint", "revolute Wheel world axis 0 1 0 value crank")\nop("mech.joint", "revolute Pin Wheel pivot 0 0 0 axis 0 1 0")\n'
+      'op("anim.range", "1 48 24")\nkey("param:crank", 1, 0, "linear")\nkey("param:crank", 48, 6.2832, "linear")\nselect()')
+    f.move(600, 300)
+    f.key(57)                                   # Space: it turns
+    f.pump(1.0)
+    f.shot('106_mechanism.png')
+    f.key(57)
+    a = q('print(abs(prop("param:crank")) > 0.1, abs(get("Pin", "x") - 1.5) > 0.01)')
+    check(a == '1 1', f'Space plays the mechanism: the crank turns the wheel and the pin on it ({a})')
+    f.proc.kill()
+
 
 class Bridge:
     """An MCP client over `beemodel --mcp-bridge` (stdio), like Claude Code."""
