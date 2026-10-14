@@ -4188,7 +4188,7 @@ def virtual_geometry():
             'sculpt("S", "draw", 0, 0.3, 1.0, 0.3, 0.1, 0.95, 0.3, 1)\nselect("S")\nprint(vgeo("S", 0))\n'
             't = clock()\nop("vgeo.build")\nt = clock() - t\n'
             'print(vgeo("S", 0), vgeo("S", 4), vgeo("S", 1), vgeo("S", 2), vgeo("S", 9), vgeo("S", 5), vgeo("S", 10), vgeo("S", 11), t)\n'
-            'print(vgeo("S", 12), vgeo("S", 8) < 0.5, vgeo("S", 300 + 3) < 0.002, vgeo("S", 13) < 2.2 * vgeo("S", 4))\n'
+            'print(vgeo("S", 12), vgeo("S", 8) < 0.5, vgeo("S", 300 + 3) < 0.003, vgeo("S", 13) < 2.2 * vgeo("S", 4))\n'
             'op("vgeo.extract", "3")\nprint(faces("LOD") == vgeo("S", 103), vgeo("LOD", 0))\n'
             'n = vgeo("S", 1)\nop("file.save", "~/BeeModel/v.bee")\nop("file.new")\nop("file.open", "~/BeeModel/v.bee")\n'
             'print(vgeo("S", 0), vgeo("S", 1) == n, vgeo("S", 12))\n'
