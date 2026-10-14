@@ -68,6 +68,9 @@ jobs:
       - name: Procedural walkthrough (terrain, scattering, a million instances)
         run: timeout 300 python tests/procedural.py build/beemodel build/shots
 
+      - name: Animation walkthrough (a rigged walk, a mechanism, 1000 bodies, cloth, a bake)
+        run: timeout 300 python tests/animation.py build/beemodel build/shots
+
       - name: Sculpting at scale (25M vertices, frame times, memory)
         run: timeout 900 python tests/sculpt20m.py build/beemodel --frame-ms 250
 

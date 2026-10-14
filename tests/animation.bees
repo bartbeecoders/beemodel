@@ -1,0 +1,202 @@
+# The v0.10 walkthrough: animation and simulation in one scene.
+#   - a character: an SDF body skinned to a 12-bone armature (automatic
+#     weights), IK legs following keyed feet, swinging arms: a walk cycle
+#   - a mechanism: a keyed crank parameter turns a gear pair
+#   - 1000 rigid boxes falling into a heap, a tablecloth draping over a table
+#   - everything simulated and baked over 10 s, saved, three frames rendered
+# Run it: beemodel --eval "$(cat tests/animation.bees)" (writes ~/BeeModel/animation.*)
+
+delete("Cube")
+op("anim.range", "1 240 24")
+
+# ---- 1000 boxes (first: they are all the scene when selected) ----------------------------
+for k in 0..10 {
+ for i in 0..10 {
+  for j in 0..10 {
+   n = "B" + str(k * 100 + i * 10 + j)
+   add("cube", n, 5 + i * 0.4 + 0.2 * (k % 2), 1 + k * 0.4, j * 0.4 - 2 + 0.2 * (k % 2))
+   rotate(n, 0.1 * k, 0.37 * k + 0.1 * i, 0.05 * j)
+   scale(n, 0.15)
+  }
+ }
+}
+select()
+op("object.select_all")                         # (toggles: nothing selected first)
+op("rigid.add", "active box")
+select()
+add("plane", "Ground", 0, 0, 0)
+scale("Ground", 20)
+select("Ground")
+op("rigid.add", "passive box")
+
+# ---- the character -----------------------------------------------------------------------
+c0 = clock()
+leg = scyl(0.16, 0.95)
+body = sunion(smove(scyl(0.3, 0.7), 0, 1.3, 0), smove(ssphere(0.36), 0, 1.85, 0), 0.08)
+body = sunion(body, smove(leg, -0.18, 0.5, 0), 0.06)
+body = sunion(body, smove(leg, 0.18, 0.5, 0), 0.06)
+arm = srot(scyl(0.09, 0.85), 0, 0, 1.5708)
+body = sunion(body, smove(arm, -0.62, 1.55, 0), 0.06)
+body = sunion(body, smove(arm, 0.62, 1.55, 0), 0.06)
+smesh("Body", body, 200)
+sclear()
+a = armature("Rig")
+op("arm.bone", "Hips Bone 0 1 0 0 1.05 0")
+op("arm.bone", "Spine Bone 0 1 0 0 1.6 0")
+op("arm.bone", "Head Spine 0 1.6 0 0 2.2 0")
+op("arm.bone", "ThighL Bone -0.18 1 0 -0.18 0.52 0.02")
+op("arm.bone", "ShinL ThighL -0.18 0.52 0.02 -0.18 0.04 0")
+op("arm.bone", "ThighR Bone 0.18 1 0 0.18 0.52 0.02")
+op("arm.bone", "ShinR ThighR 0.18 0.52 0.02 0.18 0.04 0")
+op("arm.bone", "ArmL Spine -0.3 1.55 0 -0.65 1.55 0")
+op("arm.bone", "ForeL ArmL -0.65 1.55 0 -1.05 1.55 0")
+op("arm.bone", "ArmR Spine 0.3 1.55 0 0.65 1.55 0")
+op("arm.bone", "ForeR ArmR 0.65 1.55 0 1.05 1.55 0")
+op("arm.parent", "Body Rig")
+add("cube", "FootL", -0.18, 0.04, 0)
+scale("FootL", 0.05)
+add("cube", "FootR", 0.18, 0.04, 0)
+scale("FootR", 0.05)
+add("sphere", "KneeL", -0.18, 0.5, 2)
+scale("KneeL", 0.001)
+add("sphere", "KneeR", 0.18, 0.5, 2)
+scale("KneeR", 0.001)
+op("constraint.add", "Rig:ShinL ik FootL chain 2 pole KneeL")
+op("constraint.add", "Rig:ShinR ik FootR chain 2 pole KneeR")
+for k in 0..10 {                                # a stride every 24 frames
+ f = 1 + k * 24
+ key("FootL:z", f, 0.3)
+ key("FootL:z", f + 12, -0.3)
+ key("FootL:y", f, 0.04)
+ key("FootL:y", f + 6, 0.04)
+ key("FootL:y", f + 18, 0.2)
+ key("FootR:z", f, -0.3)
+ key("FootR:z", f + 12, 0.3)
+ key("FootR:y", f, 0.2)
+ key("FootR:y", f + 6, 0.04)
+ key("FootR:y", f + 18, 0.04)
+ key("bone:Rig:ArmL:rx", f, 0.4)
+ key("bone:Rig:ArmL:rx", f + 12, -0.4)
+ key("bone:Rig:ArmR:rx", f, -0.4)
+ key("bone:Rig:ArmR:rx", f + 12, 0.4)
+}
+toe = 0                                         # the left leg's lowest vertex
+lo = 9
+for i in 0..verts("Body") {
+ if vpos("Body", i, "x") < -0.1 and vpos("Body", i, "y") < lo {
+  lo = vpos("Body", i, "y")
+  toe = i
+ }
+}
+print("character", verts("Body"), bones("Rig"), round(clock() - c0))
+
+frame(1)
+z1 = evpos("Body", toe, "z")
+frame(13)
+print("walk", round(z1 * 100), round(evpos("Body", toe, "z") * 100), round(bonepos("Rig", "ShinL", "z") * 100))
+
+# ---- a mechanism: a crank turns a gear pair ---------------------------------------------
+param("angle", "0deg")
+add("cylinder", "Gear", -4, 0.15, -3)
+scale("Gear", 0.8, 0.15, 0.8)
+add("cylinder", "Pinion", -2.8, 0.15, -3)
+scale("Pinion", 0.4, 0.15, 0.4)
+add("cube", "Crank", -4, 0.45, -2.6)
+scale("Crank", 0.08, 0.08, 0.5)
+op("mech.joint", "revolute Gear world pivot -4 0 -3 axis 0 1 0 value angle")
+op("mech.joint", "revolute Pinion world pivot -2.8 0 -3 axis 0 1 0 gear 1 -2")
+op("mech.joint", "revolute Crank Gear pivot -4 0 -3 axis 0 1 0")
+key("param:angle", 1, 0, "linear")
+key("param:angle", 241, 12.566, "linear")
+frame(61)
+print("mechanism", round(joint(1) * 100), round(joint(2) * 100), round(get("Crank", "x") * 100))
+
+# ---- a tablecloth over a table --------------------------------------------------------------
+frame(1)
+add("cube", "Table", 0, 0.5, 4)
+scale("Table", 0.8, 0.5, 0.5)
+add("grid", "Cloth", 0, 1.4, 4)
+modifier("Cloth", "subsurf")
+modset("Cloth", 0, "levels", 2)
+modapply("Cloth", 0)
+scale("Cloth", 1.4)
+select("Cloth")
+op("cloth.add", "cloth thickness 0.015")
+select("Table", "Ground")
+op("cloth.add", "collider")
+select()
+
+nb = 0
+for k in 0..1000 { nb += rigid("B" + str(k), "type") == 1 }
+c0 = clock()                                    # 10 s simulated, kept
+op("sim.bake")
+bake = clock() - c0
+frame(240)
+lo = 9
+for k in 0..1000 {
+ y = get("B" + str(k), "y")
+ if y < lo { lo = y }
+}
+cl = 9
+for i in 0..verts("Cloth") {
+ y = evpos("Cloth", i, "y") * 1.4 + 1.4
+ if y < cl { cl = y }
+}
+print("simulated", nb, clothinfo(1), cacheinfo(0), cacheinfo(1), cacheinfo(3) + cacheinfo(4), round(bake), lo > 0.05, cl < 0.6, cl > 0)
+y = get("B555", "y")
+c0 = clock()
+for f in 2..241 { frame(242 - f) }
+print("scrub", (clock() - c0) / 239)
+frame(240)
+print("same", get("B555", "y") == y)
+
+# a played frame: the keys, IK, the skin, the mechanism, the cached bodies and cloth
+worst = 0
+sum = 0
+for f in 1..73 {
+ c0 = clock()
+ frame(f)
+ e = everts("Body") + everts("Cloth")
+ t = clock() - c0
+ sum += t
+ if t > worst { worst = t }
+}
+print("played", sum / 72, worst)
+
+# ---- save, three frames rendered --------------------------------------------------------
+material("Skin")
+matset("Skin", "base", 0.8, 0.42, 0.25)
+matset("Skin", "roughness", 0.6)
+assign("Body", "Skin")
+material("Honey")
+matset("Honey", "base", 0.9, 0.55, 0.08)
+for k in 0..1000 { assign("B" + str(k), "Honey") }
+material("Linen")
+matset("Linen", "base", 0.15, 0.3, 0.75)
+assign("Cloth", "Linen")
+material("Wood")
+matset("Wood", "base", 0.35, 0.2, 0.1)
+assign("Table", "Wood")
+material("Steel")
+matset("Steel", "base", 0.7, 0.7, 0.75)
+matset("Steel", "metallic", 1)
+matset("Steel", "roughness", 0.3)
+assign("Gear", "Steel")
+assign("Pinion", "Steel")
+assign("Crank", "Steel")
+material("Floor")
+matset("Floor", "base", 0.3, 0.3, 0.32)
+assign("Ground", "Floor")
+add("cube", "Aim", 2.6, 0.4, 0.8)
+scale("Aim", 0.001)
+move("Camera", 2.6, 9, 16)
+op("constraint.add", "Camera track_to Aim")
+move("Light", 4, 12, 8)
+op("file.save", "~/BeeModel/animation.bee")
+c0 = clock()
+for r in 0..3 {
+ f = 1 + r * 119 + (r == 2)
+ frame(f)
+ render("~/BeeModel/animation_" + str(f) + ".png", 480, 270, 16)
+}
+print("rendered", round(clock() - c0))

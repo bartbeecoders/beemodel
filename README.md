@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.9.0/beemodel-0.9.0-linux-x86_64.bin
-chmod +x beemodel-0.9.0-linux-x86_64.bin && ./beemodel-0.9.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.10.0/beemodel-0.10.0-linux-x86_64.bin
+chmod +x beemodel-0.10.0-linux-x86_64.bin && ./beemodel-0.10.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -477,6 +477,11 @@ time.
 plays them instead of simulating again; an edit to the setup starts it over. `sim.bake` keeps
 the whole frame range (saved with the file) until `sim.free`, and the timeline shows what is
 cached.
+
+[tests/animation.bees](tests/animation.bees) puts it together: a character modelled from SDF
+shapes is skinned to a 12-bone armature and walks on IK legs, a keyed parameter turns a gear pair,
+1000 boxes fall into a heap and a tablecloth drapes over a table. 10 s are baked, the scene is
+saved and three frames are rendered; reopened, it plays at ~10 ms a frame.
 
 **Rigging.** Constraints copy, track, limit or parent an object to another
 (`constraint.add Cam track_to Target`). An IK constraint on a bone makes its chain reach for a
