@@ -1505,10 +1505,20 @@ RENDER_LATENCY_MS = 60.0           # input -> frame while a render runs (median)
 
 def render_window():
     """The Render window: F12 renders progressively in its own area while the
-    UI stays live; Esc stops; passes, saving, settings in .bee, agents."""
+    UI stays live; Esc stops; passes, saving, settings in .bee, agents. (The
+    CPU's render: a GPU helper would finish it before it could be watched;
+    tests/gpu.py covers that one.)"""
     print('  -- Render window --')
     from PIL import Image
-    f = Fake()
+    gpu = os.environ.get('BEEMODEL_GPU')
+    os.environ['BEEMODEL_GPU'] = 'off'
+    try:
+        f = Fake()
+    finally:
+        if gpu is None:
+            os.environ.pop('BEEMODEL_GPU', None)
+        else:
+            os.environ['BEEMODEL_GPU'] = gpu
     f.pump(1.0, until_frame=True)
     f.keymap('tests/keymaps/us.xkb')
     f.enter(400, 300)

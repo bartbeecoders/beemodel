@@ -334,6 +334,26 @@ project uses [Semantic Versioning](https://semver.org/).
       1e-6, each solid in place);
     - its re-export, and its every-face-NURBS version, read back to 1e-6.
   - CI installs FreeCAD from its PPA for the round trips.
+- **The GPU helper** (#155): `beemodel-gpu`, an optional second program and
+  release asset, links the Vulkan loader. BeeModel still links nothing and
+  talks to it over a socket and shared memory (docs/GPU.md).
+  - **Path tracing:** Hive's samples run on the GPU. The shader is a
+    line-for-line port with the same random streams, so the images agree
+    with the CPU's: the default scene is pixel-identical, and a scene of
+    glass, metal, clearcoat and lights differs by 0.01 levels on average.
+    128 samples at 1080p take 0.9 s on an RTX 4080 SUPER, against 9.8 s on
+    32 CPU threads.
+  - **Rasterization:** for frames drawn through cluster DAGs, the viewport
+    rasterizer's tile stage runs on the GPU, pixel-identical to the CPU.
+  - **Fallback:** without the helper, without a usable device, for scenes
+    the GPU kernels do not cover (an HDRI world, shader graphs), or if the
+    helper fails mid-render, the CPU paths go on from where they were.
+  - **Choice of device:** a discrete GPU first, then an integrated or virtual
+    one; llvmpipe only with `BEEMODEL_GPU=any`. `BEEMODEL_GPU=off` turns it
+    off, and BeeScript's `gpu(k)` reports on it.
+  - [tests/gpu.py](tests/gpu.py) checks the fallbacks, the path tracer
+    against the CPU (also denoised), the helper dying mid-render, and the
+    rasterized frame; CI runs it on llvmpipe.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

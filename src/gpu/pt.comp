@@ -1,0 +1,652 @@
+// BeeModel - the Hive path tracer on the GPU (beemodel-gpu).
+//
+// A line-for-line port of hive_pt.s / hive.s: the same camera rays, the
+// same xorshift64* streams (hash of pixel, sample and seed), the same BVH4
+// (the CPU's nodes, uploaded as they are), BSDF, lights and MIS. A path
+// therefore takes the same decisions as on the CPU until float rounding
+// differs somewhere, so the images agree within noise. Scenes this does not
+// cover (shader graphs, an HDRI world) stay on the CPU (src/gpu.s decides).
+//
+// One invocation per pixel adds `count` samples into the accumulators.
+#version 450
+#extension GL_ARB_gpu_shader_int64 : require
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(std430, binding = 0) readonly buffer Params {
+    uint w, h, spp, count;          // the first sample's number, how many
+    uint seed, nslots, npoints, nl;
+    uint ntri, root, debug, pad0;
+    float cam[16];                  // origin, right, up, forward, tan_h
+    float points[64 * 8];           // position, colour * power, pad
+    float lut[256];                 // sRGB byte -> linear (srgb_to_lin)
+} P;
+layout(std430, binding = 1) readonly buffer TV { float tv[]; };      // v0 e1 e2
+layout(std430, binding = 2) readonly buffer TN { float tn[]; };      // corner normals
+layout(std430, binding = 3) readonly buffer TM { uint tm[]; };       // material
+layout(std430, binding = 4) readonly buffer TC { uint tvc[]; };      // vertex colours
+layout(std430, binding = 5) readonly buffer MA { float mats[]; };    // 256 floats each
+layout(std430, binding = 6) readonly buffer ND { float nodes[]; };   // 32 words each
+layout(std430, binding = 7) readonly buffer LC { float lcdf[]; };
+layout(std430, binding = 8) readonly buffer LT { uint ltri[]; };
+layout(std430, binding = 9) readonly buffer LS { float lsel[]; };
+layout(std430, binding = 10) buffer AC { float accum[]; };           // w h 3
+layout(std430, binding = 11) buffer AX { float aux[]; };             // w h 7
+layout(std430, binding = 12) buffer M2 { float m2[]; };              // w h
+
+const float PI = 3.14159265;
+const float INV_PI = 0.31830989;
+const float TWO_PI = 6.28318531;
+const float EPS = 1.0e-4;
+const float TINY = 1.0e-8;
+const float AMIN = 0.0004;
+const float BIG = 1.0e30;
+const int MAX_DEPTH = 12;
+const vec3 SKY_ZENITH = vec3(0.34, 0.46, 0.74);
+const vec3 SKY_HORIZON = vec3(0.72, 0.74, 0.78);
+const vec3 SKY_GROUND = vec3(0.20, 0.19, 0.17);
+const vec3 SUN_DIR = vec3(0.5246, 0.7343, 0.4302);
+const float SUN_COS = 0.99996192;
+const vec3 SUN_RAD = vec3(4100.0, 3950.0, 3700.0);
+const float SUN_PDF = 4181.5;
+const vec3 LUMW = vec3(0.2126, 0.7152, 0.0722);
+
+uint64_t rng;
+
+float rnd() {
+    uint64_t x = rng;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    rng = x;
+    x *= 0x2545F4914F6CDD1DUL;
+    float r = float(uint(x >> 40)) * 5.9604645e-8;
+    return min(r, 0.99999994);
+}
+
+float lum(vec3 c) { return c.x * 0.2126 + c.y * 0.7152 + c.z * 0.0722; }
+
+vec3 unit3(vec3 v, out float len) {
+    len = sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+    if (len > 0.0) v *= 1.0 / len;
+    return v;
+}
+vec3 unit3(vec3 v) { float l; return unit3(v, l); }
+
+void onb(vec3 n, out vec3 t, out vec3 b) {
+    float s = n.z >= 0.0 ? 1.0 : -1.0;
+    float a = -(1.0 / (s + n.z));
+    float bb = n.x * n.y * a;
+    t = vec3(n.x * n.x * a * s + 1.0, bb * s, -(n.x * s));
+    b = vec3(bb, n.y * n.y * a + s, -n.y);
+}
+
+vec3 local_to_world(vec3 l, vec3 t, vec3 b, vec3 n) { return t * l.x + b * l.y + n * l.z; }
+
+vec2 sincos_2pi(float u) { float a = u * TWO_PI; return vec2(sin(a), cos(a)); }
+
+// ---- the scene -------------------------------------------------------------
+vec3 tv3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tv[o], tv[o + 1u], tv[o + 2u]); }
+vec3 tn3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tn[o], tn[o + 1u], tn[o + 2u]); }
+
+struct Ray { vec3 o; vec3 d; float tmax; float t; int tri; float u; float v; };
+
+bool tri_hit(uint t, inout Ray r, out float tt, out float uu, out float vv) {
+    vec3 v0 = tv3(t, 0u), e1 = tv3(t, 1u), e2 = tv3(t, 2u);
+    precise vec3 p = vec3(r.d.y * e2.z - r.d.z * e2.y, r.d.z * e2.x - r.d.x * e2.z, r.d.x * e2.y - r.d.y * e2.x);
+    precise float det = e1.x * p.x + e1.y * p.y + e1.z * p.z;
+    if (!(abs(det) > 1.0e-12)) return false;
+    float inv = 1.0 / det;
+    precise vec3 s = r.o - v0;
+    precise float u = (p.x * s.x + p.y * s.y + p.z * s.z) * inv;
+    if (u < 0.0 || u > 1.0) return false;
+    precise vec3 q = vec3(s.y * e1.z - s.z * e1.y, s.z * e1.x - s.x * e1.z, s.x * e1.y - s.y * e1.x);
+    precise float v = (r.d.x * q.x + r.d.y * q.y + r.d.z * q.z) * inv;
+    if (v < 0.0 || u + v > 1.0) return false;
+    precise float d = (q.x * e2.x + q.y * e2.y + q.z * e2.z) * inv;
+    if (!(d > 1.0e-4)) return false;
+    tt = d; uu = u; vv = v;
+    return true;
+}
+
+// one axis of the 4-wide box test (lanes: the node's four children)
+void slab(uint base, float o, float iv, inout vec4 tn4, inout vec4 tf4) {
+    vec4 lo = vec4(nodes[base], nodes[base + 1u], nodes[base + 2u], nodes[base + 3u]);
+    vec4 hi = vec4(nodes[base + 4u], nodes[base + 5u], nodes[base + 6u], nodes[base + 7u]);
+    bool neg = iv < 0.0;
+    precise vec4 tnear = ((neg ? hi : lo) - vec4(o)) * iv;
+    precise vec4 tfar = ((neg ? lo : hi) - vec4(o)) * iv;
+    tn4 = max(tn4, tnear);
+    tf4 = min(tf4, tfar);
+}
+
+// the nearest hit (any: the first closer than tmax)
+bool trace(inout Ray r, bool anyhit) {
+    r.tri = -1;
+    if (P.ntri == 0u) return false;
+    float ix = abs(r.d.x) > 1.0e-12 ? 1.0 / r.d.x : 1.0e30;
+    float iy = abs(r.d.y) > 1.0e-12 ? 1.0 / r.d.y : 1.0e30;
+    float iz = abs(r.d.z) > 1.0e-12 ? 1.0 / r.d.z : 1.0e30;
+    uint stk[64];
+    float stt[64];
+    int sp = 1;
+    stk[0] = P.root;
+    float best = r.tmax;
+    bool hit = false;
+    while (sp > 0) {
+        sp--;
+        uint ref = stk[sp];
+        if ((ref & 0x80000000u) == 0u) {
+            vec4 tn4 = vec4(0.0), tf4 = vec4(best);
+            uint nb = ref * 32u;
+            slab(nb, r.o.x, ix, tn4, tf4);
+            slab(nb + 8u, r.o.y, iy, tn4, tf4);
+            slab(nb + 16u, r.o.z, iz, tn4, tf4);
+            bvec4 in4 = lessThanEqual(tn4, tf4);
+            if (!any(in4)) continue;
+            int start = sp;
+            for (int c = 0; c < 4; c++) {
+                if (!in4[c]) continue;
+                uint child = floatBitsToUint(nodes[nb + 24u + uint(c)]);
+                float tc = tn4[c];
+                int i = sp;
+                while (i > start && !(stt[i - 1] >= tc)) {
+                    stk[i] = stk[i - 1];
+                    stt[i] = stt[i - 1];
+                    i--;
+                }
+                stk[i] = child;
+                stt[i] = tc;
+                sp++;
+            }
+            if (sp >= 60) sp = 60;
+        } else {
+            if (ref == 0xffffffffu) continue;
+            uint first = ref & 0x07ffffffu;
+            uint end = first + ((ref >> 27) & 0xfu);
+            for (uint t = first; t < end; t++) {
+                float tt, uu, vv;
+                if (!tri_hit(t, r, tt, uu, vv)) continue;
+                if (!(tt < best)) continue;
+                best = tt;
+                r.tri = int(t); r.t = tt; r.u = uu; r.v = vv;
+                hit = true;
+                if (anyhit) return true;
+            }
+        }
+    }
+    return hit;
+}
+
+// ---- the world: studio sky and sun -------------------------------------------
+vec3 sky_rad(vec3 d) {
+    if (P.debug == 3u) return vec3(0.5);
+    if (d.y > 0.0) {
+        float s = sqrt(d.y);
+        return (SKY_ZENITH - SKY_HORIZON) * s + SKY_HORIZON;
+    }
+    return SKY_GROUND;
+}
+
+bool in_sun(vec3 d) {
+    if (P.debug >= 2u) return false;
+    return dot(d, SUN_DIR) > SUN_COS;
+}
+
+// ---- materials --------------------------------------------------------------
+// the values from +32 (floats 8..): base 8-10, metal 11, rough 12, specular 13,
+// ior 14, transmission 15, emission 16-18, strength 19, coat 20, coat rough 21
+struct Mat { vec3 base; float metal, rough, spec, ior, trans; vec3 emit; float strength, coat, crough; };
+
+Mat mat_of(uint t) {
+    Mat m;
+    uint i = tm[t];
+    if (i == 0u) {
+        m.base = vec3(0.8); m.metal = 0.0; m.rough = 0.5; m.spec = 0.5; m.ior = 1.45; m.trans = 0.0;
+        m.emit = vec3(0.0); m.strength = 0.0; m.coat = 0.0; m.crough = 0.03;
+        return m;
+    }
+    uint o = i * 256u;
+    m.base = vec3(mats[o + 8u], mats[o + 9u], mats[o + 10u]);
+    m.metal = mats[o + 11u]; m.rough = mats[o + 12u]; m.spec = mats[o + 13u];
+    m.ior = mats[o + 14u]; m.trans = mats[o + 15u];
+    m.emit = vec3(mats[o + 16u], mats[o + 17u], mats[o + 18u]);
+    m.strength = mats[o + 19u]; m.coat = mats[o + 20u]; m.crough = mats[o + 21u];
+    return m;
+}
+
+vec3 vcol_lin3(uint t, float u, float v) {
+    float wt[3] = float[3](1.0 - u - v, u, v);
+    vec3 out_c;
+    for (int ch = 0; ch < 3; ch++) {
+        float acc = 0.0;
+        for (int k = 0; k < 3; k++) {
+            uint c = tvc[t * 3u + uint(k)];
+            uint byte = (c >> uint(16 - ch * 8)) & 0xffu;
+            acc = P.lut[byte] * wt[k] + acc;
+        }
+        out_c[ch] = acc;
+    }
+    return out_c;
+}
+
+// ---- the BSDF ----------------------------------------------------------------
+struct Ctx {
+    vec3 n, no, wo, t, b, base, f0;
+    float alpha, metal, te, eta, coat, calpha, abase, pd, ps, pt, pc, coso;
+    vec3 tn, bn;
+};
+
+float schlick_w(float c) { float x = max(1.0 - c, 0.0); return x * x * x * x * x; }
+
+float ggx_d(float nh, float a) {
+    float a2 = a * a;
+    float d = nh * nh * (a2 - 1.0) + 1.0;
+    d = max(d * d * PI, TINY);
+    return a2 / d;
+}
+
+float ggx_g1(float c, float a) {
+    float a2 = a * a;
+    float s = max(sqrt((1.0 - a2) * (c * c) + a2) + c, TINY);
+    return (c + c) / s;
+}
+
+float fresnel_d(float ci, float eta) {
+    if (ci < 0.0) { ci = -ci; eta = 1.0 / eta; }
+    ci = min(ci, 1.0);
+    float s2 = (1.0 - ci * ci) / (eta * eta);
+    if (s2 >= 1.0) return 1.0;
+    float ct = sqrt(1.0 - s2);
+    float rpa = (eta * ci - ct) / (eta * ci + ct);
+    float rpe = (ci - eta * ct) / (ci + eta * ct);
+    return (rpa * rpa + rpe * rpe) * 0.5;
+}
+
+Ctx bsdf_init(Mat m, vec3 ns, vec3 wo, bool outside) {
+    Ctx c;
+    c.no = ns;
+    c.wo = wo;
+    c.n = outside ? ns : -ns;
+    c.coso = max(dot(c.n, wo), TINY);
+    onb(c.n, c.t, c.b);
+    onb(c.no, c.tn, c.bn);
+    c.base = m.base;
+    c.metal = m.metal;
+    c.alpha = max(m.rough * m.rough, AMIN);
+    c.eta = m.ior;
+    c.te = (1.0 - m.metal) * m.trans;
+    c.coat = m.coat;
+    c.calpha = max(m.crough * m.crough, AMIN);
+    float r = (m.ior - 1.0) / (m.ior + 1.0);
+    r = r * r * m.spec;
+    r = r + r;
+    c.f0 = (c.base - vec3(r)) * m.metal + vec3(r);
+    float wcoat = ((1.0 - 0.04) * schlick_w(c.coso) + 0.04) * c.coat;
+    c.abase = 1.0 - wcoat;
+    float a1 = (1.0 - c.te) * c.abase;
+    float wd = lum(c.base) * (1.0 - c.metal) * a1;
+    float sw = schlick_w(c.coso);
+    float lf = lum(c.f0);
+    float ws = ((1.0 - lf) * sw + lf) * a1;
+    float wt = c.te * c.abase;
+    float sum = wd + ws + wt + wcoat;
+    if (!(sum > 0.0)) { sum = 1.0; wd = 1.0; }
+    float inv = 1.0 / sum;
+    c.pd = wd * inv;
+    c.ps = ws * inv;
+    c.pt = wt * inv;
+    c.pc = wcoat * inv;
+    return c;
+}
+
+float glass_eval(Ctx c, vec3 wi, out vec3 f) {
+    f = vec3(0.0);
+    float co = dot(c.no, c.wo), ci = dot(c.no, wi);
+    float same = co * ci;
+    float etap = c.eta;
+    if (!(0.0 < co)) etap = 1.0 / c.eta;
+    vec3 wm = same > 0.0 ? wi + c.wo : wi * etap + c.wo;
+    float len;
+    wm = unit3(wm, len);
+    if (!(len > 0.0)) return 0.0;
+    if (dot(wm, c.no) < 0.0) wm = -wm;
+    float wmo = dot(wm, c.wo), wmi = dot(wm, wi);
+    if (wmi * ci < 0.0) return 0.0;
+    if (wmo * co < 0.0) return 0.0;
+    float nwm = dot(wm, c.no);
+    float D = ggx_d(nwm, c.alpha);
+    float G = ggx_g1(abs(ci), c.alpha) * ggx_g1(abs(co), c.alpha);
+    float R = fresnel_d(wmo, c.eta);
+    if (same > 0.0) {
+        float fr = D * G * R / max(abs(co * ci) * 2.0 * 2.0, TINY);
+        f = vec3(fr);
+        return D * abs(nwm) * R / max(abs(wmo) * 2.0 * 2.0, TINY);
+    }
+    float denom = max((wmo / etap + wmi) * (wmo / etap + wmi), TINY);
+    float T = 1.0 - R;
+    float ft = abs(wmi * wmo / max(abs(co * ci * denom), TINY)) * D * G * T / (etap * etap);
+    f = vec3(ft);
+    return D * abs(nwm) * abs(wmi) / denom * T;
+}
+
+float bsdf_eval(Ctx c, vec3 wi, out vec3 f) {
+    f = vec3(0.0);
+    float pdf = 0.0;
+    float ci = dot(c.n, wi);
+    if (ci > 0.0) {
+        vec3 hh = unit3(wi + c.wo);
+        float nh = max(dot(hh, c.n), 0.0);
+        float oh = max(dot(hh, c.wo), TINY);
+        if (c.pd > 0.0) {
+            pdf = ci * INV_PI * c.pd + pdf;
+            float k = (1.0 - c.metal) * (1.0 - c.te) * c.abase * INV_PI;
+            f = c.base * k + f;
+        }
+        float D = ggx_d(nh, c.alpha);
+        float dp = nh * D / oh * 0.5 * 0.5;
+        pdf = dp * c.ps + pdf;
+        float G = ggx_g1(c.coso, c.alpha) * ggx_g1(ci, c.alpha);
+        float sp = G * D / (c.coso * ci * 2.0 * 2.0) * ((1.0 - c.te) * c.abase);
+        float sw = schlick_w(oh);
+        f = ((vec3(1.0) - c.f0) * sw + c.f0) * sp + f;
+        if (c.coat > 0.0) {
+            float Dc = ggx_d(nh, c.calpha);
+            pdf = nh * Dc / oh * 0.5 * 0.5 * c.pc + pdf;
+            float Gc = ggx_g1(c.coso, c.calpha) * ggx_g1(ci, c.calpha);
+            float cp = Gc * Dc / (c.coso * ci * 2.0 * 2.0) * c.coat;
+            float fc = ((1.0 - 0.04) * schlick_w(oh) + 0.04) * cp;
+            f = f + vec3(fc);
+        }
+    }
+    if (c.pt > 0.0) {
+        vec3 fg;
+        float gp = glass_eval(c, wi, fg);
+        pdf = gp * c.pt + pdf;
+        f = fg * (c.te * c.abase) * c.base + f;
+    }
+    return pdf;
+}
+
+vec3 sample_h(float u1, float u2, float a, vec3 t, vec3 b, vec3 n) {
+    float tan2 = u1 * a * a / max(1.0 - u1, TINY);
+    float cs = 1.0 / sqrt(tan2 + 1.0);
+    float sn = sqrt(max(1.0 - cs * cs, 0.0));
+    vec2 sc = sincos_2pi(u2);
+    return local_to_world(vec3(sc.y * sn, sc.x * sn, cs), t, b, n);
+}
+
+float bsdf_sample(Ctx c, out vec3 wi) {
+    float u0 = rnd(), u1 = rnd(), u2 = rnd();
+    wi = vec3(0.0);
+    vec3 dummy;
+    if (u0 < c.pd) {
+        vec2 sc = sincos_2pi(u2);
+        float r = sqrt(u1);
+        float z = sqrt(max(1.0 - u1, 0.0));
+        wi = local_to_world(vec3(sc.y * r, sc.x * r, z), c.t, c.b, c.n);
+    } else if (u0 < c.pd + c.ps || !(u0 < c.pd + c.ps + c.pt)) {
+        float a = u0 < c.pd + c.ps ? c.alpha : c.calpha;
+        vec3 hh = sample_h(u1, u2, a, c.t, c.b, c.n);
+        float d = dot(hh, c.wo);
+        if (!(d > 0.0)) return 0.0;
+        wi = hh * (d + d) - c.wo;
+    } else {
+        vec3 hh = sample_h(u1, u2, c.alpha, c.tn, c.bn, c.no);
+        float oh = dot(hh, c.wo);
+        float R = fresnel_d(oh, c.eta);
+        bool refl = rnd() < R;
+        if (!refl) {
+            float etap = dot(c.no, c.wo) > 0.0 ? c.eta : 1.0 / c.eta;
+            float cii = oh, sg = 1.0;
+            if (cii < 0.0) { cii = -cii; sg = -1.0; }
+            float s2 = max(1.0 - cii * cii, 0.0) / (etap * etap);
+            if (s2 >= 1.0) refl = true;
+            else {
+                float ct = sqrt(1.0 - s2);
+                float k = cii / etap - ct;
+                wi = unit3(-(c.wo / etap) + hh * sg * k);
+            }
+        }
+        if (refl) wi = hh * (oh + oh) - c.wo;
+    }
+    return bsdf_eval(c, wi, dummy);
+}
+
+// ---- lights ------------------------------------------------------------------
+float tri_area(uint t) {
+    vec3 e1 = tv3(t, 1u), e2 = tv3(t, 2u);
+    float x = e1.y * e2.z - e1.z * e2.y, y = e1.z * e2.x - e1.x * e2.z, z = e1.x * e2.y - e1.y * e2.x;
+    return sqrt(x * x + y * y + z * z) * 0.5;
+}
+
+vec3 tri_geo_normal(uint t) {
+    vec3 e1 = tv3(t, 1u), e2 = tv3(t, 2u);
+    return unit3(vec3(e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x));
+}
+
+struct LSample { vec3 wi; vec3 li; float dist; float pdf; bool delta; };
+
+bool light_sample(vec3 p, vec3 n, out LSample ls) {
+    ls.delta = false;
+    ls.wi = vec3(0.0); ls.li = vec3(0.0); ls.dist = 0.0; ls.pdf = 0.0;
+    float ns = float(P.nslots);
+    int slot = int(rnd() * ns);
+    if (slot >= int(P.nslots)) slot = int(P.nslots) - 1;
+    float pc = 1.0 / ns;
+    if (slot == 0) {                                    // the sky: cosine about n
+        float u1 = rnd();
+        vec2 sc = sincos_2pi(rnd());
+        float r = sqrt(u1);
+        float cs = sqrt(max(1.0 - u1, 0.0));
+        vec3 t, b;
+        onb(n, t, b);
+        ls.wi = local_to_world(vec3(sc.y * r, sc.x * r, cs), t, b, n);
+        ls.dist = BIG;
+        ls.li = sky_rad(ls.wi);
+        float pdf = cs * INV_PI * pc;
+        if (!(pdf > TINY)) return false;
+        ls.pdf = pdf;
+        return true;
+    }
+    if (slot == 1) {                                    // the sun's cone
+        float u1 = rnd(), u2 = rnd();
+        float cs = 1.0 - (1.0 - SUN_COS) * u1;
+        float sn = sqrt(max(1.0 - cs * cs, 0.0));
+        vec2 sc = sincos_2pi(u2);
+        vec3 t, b;
+        onb(SUN_DIR, t, b);
+        ls.wi = local_to_world(vec3(sc.y * sn, sc.x * sn, cs), t, b, SUN_DIR);
+        ls.dist = BIG;
+        ls.li = SUN_RAD;
+        ls.pdf = SUN_PDF * pc;
+        return true;
+    }
+    int pi = slot - 2;
+    if (pi < int(P.npoints)) {                          // a point light
+        uint o = uint(pi) * 8u;
+        vec3 q = vec3(P.points[o], P.points[o + 1u], P.points[o + 2u]);
+        float d;
+        ls.wi = unit3(q - p, d);
+        ls.dist = d;
+        float d2 = d * d;
+        ls.li = vec3(P.points[o + 3u], P.points[o + 4u], P.points[o + 5u]) / d2;
+        ls.pdf = pc;
+        ls.delta = true;
+        return true;
+    }
+    float u = rnd();                                    // an emissive triangle
+    uint lo = 0u, hi = P.nl;
+    while (lo < hi) {
+        uint mid = (lo + hi) >> 1;
+        if (u < lcdf[mid]) hi = mid; else lo = mid + 1u;
+    }
+    if (lo >= P.nl) lo = P.nl - 1u;
+    uint t = ltri[lo];
+    float su = sqrt(rnd());
+    float bb = rnd() * su;
+    float aa = 1.0 - su;
+    vec3 q = tv3(t, 1u) * aa + tv3(t, 2u) * bb + tv3(t, 0u) - p;
+    float d;
+    ls.wi = unit3(q, d);
+    ls.dist = d;
+    float cl = abs(dot(tri_geo_normal(t), ls.wi));
+    if (!(cl > TINY)) return false;
+    ls.pdf = d * d / (tri_area(t) * cl) * lsel[t] * pc;
+    Mat m = mat_of(t);
+    ls.li = m.emit * m.strength;
+    return true;
+}
+
+float light_pdf_tri(uint t, float dist, vec3 dir) {
+    float sel = lsel[t];
+    if (!(sel > 0.0)) return 0.0;
+    float cl = abs(dot(tri_geo_normal(t), dir));
+    if (!(cl > TINY)) return 0.0;
+    return dist * dist / (tri_area(t) * cl) * sel / float(P.nslots);
+}
+
+float mis(float a, float b) { a *= a; b *= b; return a / max(b + a, TINY); }
+
+// ---- one path ------------------------------------------------------------------
+vec3 L, beta;
+uint depth;
+
+void add_beta_l(vec3 rad) {
+    vec3 x = rad * beta;
+    if (depth != 0u) x = min(x, vec3(40.0));
+    L += x;
+}
+
+Ray spawn_ray(vec3 p, vec3 ng, vec3 dir) {
+    Ray r;
+    float e = dot(ng, dir) >= 0.0 ? EPS : -EPS;
+    r.o = ng * e + p;
+    r.d = dir;
+    r.tmax = BIG;
+    return r;
+}
+
+void trace_path(float sx, float sy, out vec3 lout, out float auxo[7]) {
+    for (int k = 0; k < 7; k++) auxo[k] = 0.0;
+    vec3 org = vec3(P.cam[0], P.cam[1], P.cam[2]);
+    vec3 right = vec3(P.cam[3], P.cam[4], P.cam[5]);
+    vec3 up = vec3(P.cam[6], P.cam[7], P.cam[8]);
+    vec3 fwd = vec3(P.cam[9], P.cam[10], P.cam[11]);
+    float th = P.cam[12];
+    Ray ray;
+    ray.o = org;
+    ray.d = unit3(fwd + right * sx * th + up * sy * th);
+    beta = vec3(1.0);
+    L = vec3(0.0);
+    float prev = 0.0;
+    bool spec = true;
+    depth = 0u;
+    vec3 nsPrev = vec3(0.0);
+    for (;;) {
+        ray.tmax = BIG;
+        if (!trace(ray, false)) {
+            vec3 sky = sky_rad(ray.d);
+            float wgt = 1.0;
+            if (!spec) {
+                float pb = max(dot(nsPrev, ray.d), 0.0) * INV_PI / float(P.nslots);
+                wgt = mis(prev, pb);
+            }
+            sky *= wgt;
+            if (in_sun(ray.d)) {
+                float ws = 1.0;
+                if (!spec) ws = mis(prev, SUN_PDF / float(P.nslots));
+                sky = SUN_RAD * ws + sky;
+            }
+            add_beta_l(sky);
+            break;
+        }
+        uint t = uint(ray.tri);
+        vec3 p = ray.d * ray.t + ray.o;
+        vec3 wo = -ray.d;
+        // normals
+        vec3 e1 = tv3(t, 1u), e2 = tv3(t, 2u);
+        vec3 ng = unit3(vec3(e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x));
+        float wv = 1.0 - ray.u - ray.v;
+        float nl;
+        vec3 ns = unit3(tn3(t, 0u) * wv + tn3(t, 1u) * ray.u + tn3(t, 2u) * ray.v, nl);
+        if (!(nl > 0.0)) ns = ng;
+        if (dot(ns, ng) < 0.0) ns = ng;
+        bool outside = dot(ng, wo) > 0.0;
+        if (P.debug == 1u) { L = ns * 0.5 + vec3(0.5); break; }
+        Mat m = mat_of(t);
+        if (tvc[t * 3u] != 0u) m.base *= vcol_lin3(t, ray.u, ray.v);
+        if (m.strength > 0.0) {                         // emission
+            float wgt = 1.0;
+            if (!spec) wgt = mis(prev, light_pdf_tri(t, ray.t, ray.d));
+            add_beta_l(m.emit * (wgt * m.strength));
+        }
+        Ctx c = bsdf_init(m, ns, wo, outside);
+        if (depth == 0u) {
+            auxo[0] = c.base.x; auxo[1] = c.base.y; auxo[2] = c.base.z;
+            auxo[3] = ns.x; auxo[4] = ns.y; auxo[5] = ns.z;
+            auxo[6] = ray.t;
+        }
+        // next-event estimation
+        LSample ls;
+        if (light_sample(p, c.n, ls)) {
+            vec3 f;
+            float pb = bsdf_eval(c, ls.wi, f);
+            if (lum(f) > TINY) {
+                Ray sr = spawn_ray(p, ng, ls.wi);
+                sr.tmax = ls.dist * 0.99999994 - EPS;
+                if (!trace(sr, true)) {
+                    float wgt = ls.delta ? 1.0 : mis(ls.pdf, pb);
+                    float k = abs(dot(c.n, ls.wi)) * wgt / ls.pdf;
+                    add_beta_l(f * ls.li * k);
+                }
+            }
+        }
+        // a BSDF sample onwards
+        vec3 wi;
+        float pdf = bsdf_sample(c, wi);
+        if (!(pdf > TINY)) break;
+        prev = pdf;
+        vec3 f;
+        bsdf_eval(c, wi, f);
+        float k = abs(dot(c.n, wi)) / prev;
+        beta = f * k * beta;
+        if (!(lum(beta) > TINY)) break;
+        spec = false;
+        ray = spawn_ray(p, ng, wi);
+        nsPrev = c.n;
+        depth++;
+        if (depth >= uint(MAX_DEPTH)) break;
+        if (depth >= 3u) {
+            float q = clamp(max(max(beta.x, beta.y), beta.z), 0.05, 0.95);
+            if (rnd() >= q) break;
+            beta *= 1.0 / q;
+        }
+    }
+    lout = L;
+}
+
+void main() {
+    uint x = gl_GlobalInvocationID.x, y = gl_GlobalInvocationID.y;
+    if (x >= P.w || y >= P.h) return;
+    uint px = y * P.w + x;
+    float fw = float(P.w), fh = float(P.h);
+    for (uint s = 0u; s < P.count; s++) {
+        uint64_t hsh = uint64_t(px) * 0x9E3779B97F4A7C15UL;
+        hsh ^= (uint64_t(P.spp + s) << 32) | uint64_t(P.seed);
+        hsh *= 0xBF58476D1CE4E5B9UL;
+        hsh ^= hsh >> 31;
+        rng = hsh | 1UL;
+        float sx = (rnd() + float(x)) * 2.0 / fw - 1.0;
+        float sy = (1.0 - (rnd() + float(y)) * 2.0 / fh) * fh / fw;
+        vec3 lo;
+        float ax[7];
+        trace_path(sx, sy, lo, ax);
+        for (int k = 0; k < 7; k++)
+            if (!isnan(ax[k])) aux[px * 7u + uint(k)] += ax[k];
+        float l = lum(lo);
+        if (!isnan(l)) m2[px] += l * l;
+        for (int k = 0; k < 3; k++)
+            if (!isnan(lo[k])) accum[px * 3u + uint(k)] += lo[k];
+    }
+}

@@ -23,8 +23,13 @@ jobs:
       - name: Toolchain versions
         run: as --version | head -1 && ld --version | head -1
 
+      - name: Vulkan loader and llvmpipe (for the GPU helper)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
+
       - name: Build (release)
-        run: ./build.sh release
+        run: ./build.sh release && test -x build/beemodel-gpu
 
       - name: Binary policy checks
         run: ci/check-binary.sh build/beemodel
@@ -113,6 +118,11 @@ jobs:
 
       - name: STEP (assemblies, units, colours; round trips through FreeCAD)
         run: timeout 900 python tests/step.py build/beemodel
+
+      - name: GPU helper (Vulkan on llvmpipe, CPU fallback, the same images)
+        env:
+          BEEMODEL_GPU: any
+        run: timeout 900 python tests/gpu.py build/beemodel build/shots --require
 
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 600 python tools/fakewl.py build/shots

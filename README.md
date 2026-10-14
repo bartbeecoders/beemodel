@@ -158,6 +158,14 @@ sees (or the viewport, without one) with the same principled materials:
 `render.image <path> [width height samples]`, or `render(path, w, h, samples)` from a script,
 writes a PNG. A 480 × 270 image with 64 samples takes about a third of a second on 32 threads.
 
+**The GPU helper.** `beemodel-gpu`, an optional second program, lets a Vulkan GPU take the path
+tracer's samples and the virtualized-geometry rasterizer's tiles. BeeModel itself still links
+nothing: it talks to the helper over a socket and shared memory. The GPU computes the same
+samples as the CPU, so the images agree, and the default scene comes out pixel-identical.
+Without the helper, without a usable GPU, or if the helper fails mid-render, everything runs on
+the CPU as before. Unpack the release's `beemodel-gpu` archive next to `beemodel` to use it;
+[docs/GPU.md](docs/GPU.md) describes it.
+
 **F12** renders into a Render area beside the viewport, refining while you keep working; **Esc**
 stops. A finished or stopped render is denoised (guided by the albedo, normal and depth
 passes; Render › Denoise turns it off), so 16 samples look close to 256. The Render menu
@@ -803,6 +811,8 @@ src/texture.s   image lookups, box projection
 src/env.s       the world: HDRI lookups, importance sampling, SH irradiance
 src/hive.s      Hive path tracer: triangle soup, SAH BVH4, SSE traversal
 src/hive_pt.s   Hive light transport: NEE + MIS, principled BSDF, passes
+src/gpu.s       the optional GPU helper from this side: start, shared memory, fallback
+src/gpu/        beemodel-gpu: helper.s (Vulkan), pt.comp / raster.comp, spv.s (SPIR-V)
 src/denoise.s   edge-avoiding a-trous denoiser (albedo / normal / depth)
 src/render.s    the Render window and render.* operators
 src/image.s     the scene's images, image.* operators
@@ -905,6 +915,8 @@ operator spine and how to add an action.
 
 * `tools/genfont.py` regenerates `src/font.inc` from a PSF console font.
 * `tools/genkeysyms.py` regenerates `src/keysyms.inc` (keysym names → Unicode).
+* `tools/genspv.py` compiles the GPU helper's shaders (`src/gpu/*.comp`, with
+  `glslc`) into `src/gpu/spv.s`.
 * `tests/keymaps/*.xkb` are real US, Belgian and German keymaps, used by the
   headless tests.
 * Golden images (`tests/golden/*.png`) are compared pixel by pixel when the

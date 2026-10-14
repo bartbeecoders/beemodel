@@ -20,8 +20,13 @@ jobs:
           [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != VERSION v$v"; exit 1; }
           echo "VERSION=$v" >> "$GITHUB_ENV"
 
+      - name: Vulkan loader (the GPU helper links it)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1
+
       - name: Build
-        run: ./build.sh release
+        run: ./build.sh release && test -x build/beemodel-gpu
 
       - name: Binary policy checks
         run: ci/check-binary.sh build/beemodel

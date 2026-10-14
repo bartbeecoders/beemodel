@@ -27,3 +27,20 @@ else
        -o build/beemodel "${OBJS[@]}"
 fi
 echo "built build/beemodel v$VERSION ($(stat -c %s build/beemodel) bytes, mode: $MODE)"
+
+# The optional GPU helper (src/gpu/): a separate program that links the
+# Vulkan loader. Built when a C toolchain's linker driver and libvulkan.so.1
+# are present; BeeModel works without it.
+VKLIB="$(ldconfig -p 2>/dev/null | awk '/libvulkan\.so\.1 .*x86-64/ && !v {v = $NF} END {print v}' || true)"
+if command -v cc >/dev/null && [[ -n "$VKLIB" ]]; then
+    mkdir -p build/gpu
+    as "${ASFLAGS[@]}" -o build/gpu/helper.o src/gpu/helper.s
+    as "${ASFLAGS[@]}" -o build/gpu/spv.o src/gpu/spv.s
+    LDX=(-no-pie -Wl,-z,noexecstack)
+    [[ "$MODE" == "debug" ]] || LDX+=(-s)
+    cc "${LDX[@]}" -o build/beemodel-gpu build/gpu/helper.o build/gpu/spv.o "$VKLIB"
+    echo "built build/beemodel-gpu ($(stat -c %s build/beemodel-gpu) bytes)"
+else
+    rm -f build/beemodel-gpu
+    echo "skipped build/beemodel-gpu (needs cc and libvulkan.so.1)"
+fi
