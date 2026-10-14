@@ -163,6 +163,12 @@ def ext(tool, *job):
     if os.path.exists(out):
         os.remove(out)
     env = dict(os.environ, HOME=HOME, STEP_EXT_JOB='\t'.join(job), STEP_EXT_OUT=out)
+    if tool[1] == 'FreeCAD':
+        # FreeCAD embeds the system's Python: not another one's paths (CI's
+        # setup-python sets them)
+        for k in ('PYTHONHOME', 'PYTHONPATH', 'LD_LIBRARY_PATH', 'pythonLocation', 'Python_ROOT_DIR',
+                  'Python2_ROOT_DIR', 'Python3_ROOT_DIR', 'PKG_CONFIG_PATH'):
+            env.pop(k, None)
     r = subprocess.run(tool[0] + [os.path.join(HERE, 'step_ext.py')], env=env, capture_output=True, text=True,
                        timeout=600)
     res = {'solids': [], 'valid': None, 'ok': False, 'text': ''}
