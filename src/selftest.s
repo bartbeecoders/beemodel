@@ -376,6 +376,8 @@ selftest:
     lea     rdi, [rip+fmt_buf]
     call    write_out
 
+    lea     rdi, [rip+check]            # cluster LOD DAGs: crack-free cuts
+    call    vg_selftest
     xor     eax, eax
     cmp     dword ptr [rip+t_fails], 0
     sete    al

@@ -500,6 +500,19 @@ from scripts and agents).
 <material>` a material with its graph, to `~/BeeModel/assets`; `asset.load <name>` adds one to
 any scene. The **Asset Browser** area lists the folder: a click adds the asset.
 
+### Virtualized geometry
+
+**Cluster LOD DAG.** `vgeo.build` prepares the active mesh for virtualized rendering, as Nanite
+does. It splits the mesh into clusters of up to 128 triangles, then repeatedly groups
+neighbouring clusters, simplifies each group to half its triangles with the group's border
+held, and splits the result into new clusters, until one cluster is left. Every cluster keeps
+its bounds and an error that only grows towards the root. Picking clusters by "error <= t <
+parent error" (projected from the camera or not) gives a crack-free mesh at any detail. The DAG
+builds in the background (about 120 ms per million triangles on 32 threads) and is saved with
+the file. `vgeo.extract 3` (a level) or `vgeo.extract 0.01` (an error) adds a cut as a mesh
+with its clusters coloured. Drawing and streaming the clusters per frame comes with phase 10's
+next step.
+
 ### Sculpting
 
 Ctrl+Tab puts the active mesh in **sculpt mode**. It handles tens of
@@ -731,6 +744,7 @@ src/cloth.s     cloth and soft bodies: XPBD, pins, colliders, self collision, wi
 src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, islands, joints
 src/physui.s    the Physics section of the Properties area
 src/simcache.s  the simulation cache: frames kept, played back, baked, saved
+src/vgeo.s      virtualized geometry: the cluster LOD DAG (meshlets, groups, simplification)
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours
