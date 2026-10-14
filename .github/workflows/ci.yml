@@ -92,6 +92,9 @@ jobs:
       - name: Lighting tools (light probes, lightmaps, glTF through the Khronos validator)
         run: timeout 600 python tests/lighting.py build/beemodel build/shots
 
+      - name: Live link (the scene over a socket, a mirror, backpressure)
+        run: timeout 300 python tests/livelink.py build/beemodel build/shots
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 600 python tools/fakewl.py build/shots
 

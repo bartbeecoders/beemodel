@@ -59,7 +59,11 @@ _start:
     call    create_window
     call    kb_timer_init
     call    mcp_init
-    lea     rdi, [rip+s_log_hello]
+    mov     rdi, [rip+link_target]      # --link host:port: mirror that session
+    test    rdi, rdi
+    jz      1f
+    call    link_connect_arg
+1:  lea     rdi, [rip+s_log_hello]
     call    log_line
     lea     rdi, [rip+s_log_hello2]
     call    log_line
@@ -78,6 +82,11 @@ _start:
     mov     dword ptr [rdi+12], POLLIN
     lea     rdi, [rip+pollfds+16]       # + MCP listener and clients
     call    mcp_pollfds
+    mov     [rip+n_mcpfds], eax
+    lea     rdi, [rip+pollfds+16]       # + the live link's
+    lea     rdi, [rdi+rax*8]
+    call    link_pollfds
+    add     eax, [rip+n_mcpfds]
     lea     esi, [rax+2]
     lea     rdi, [rip+pollfds]
     mov     edx, -1
@@ -112,6 +121,7 @@ _start:
     call    kb_on_timer
 2:  lea     rdi, [rip+pollfds+16]
     call    mcp_handle
+    call    link_tick                   # the live link: peers, changes out
     cmp     dword ptr [rip+quit_flag], 0
     jne     .Lquit
     call    render_tick                 # a slice of the progressive render
@@ -174,6 +184,11 @@ handle_cli_args:
     test    eax, eax
     jnz     .Lcli_list_ops
     mov     rdi, rbx
+    lea     rsi, [rip+s_arg_link]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lcli_link
+    mov     rdi, rbx
     lea     rsi, [rip+s_arg_help]
     call    str_eq
     test    eax, eax
@@ -189,6 +204,11 @@ handle_cli_args:
     call    write_err
     lea     rdi, [rip+s_newline]
     call    fatal
+.Lcli_link:                             # --link host:port: the window, mirroring
+    test    r12, r12
+    jz      .Lcli_need
+    mov     [rip+link_target], r12
+    ret
 .Lcli_version:
     lea     rdi, [rip+s_ver_prefix]
     call    write_out
@@ -274,7 +294,8 @@ write_out:
 
 .section .bss
 .align 8
-pollfds:        .skip 8*16              # struct pollfd: Wayland, repeat timer, MCP
+pollfds:        .skip 8*32              # struct pollfd: Wayland, repeat timer, MCP, link
+n_mcpfds:       .skip 4
 
 .section .rodata
 s_arg_version:  .asciz "--version"
@@ -286,11 +307,13 @@ s_arg_help:     .asciz "--help"
 s_arg_h:        .asciz "-h"
 s_arg_eval:     .asciz "--eval"
 s_arg_run:      .asciz "--run"
-e_need_arg:     .asciz "beemodel: --eval needs BeeScript code, --run a file\n"
+s_arg_link:     .asciz "--link"
+e_need_arg:     .asciz "beemodel: --eval needs BeeScript code, --run a file, --link an address\n"
 s_ver_prefix:   .asciz "beemodel "
 e_bad_arg:      .asciz "beemodel: unknown argument: "
 s_help:         .ascii "Usage: beemodel [--version | --list-ops | --selftest | --mcp-bridge | --help]\n"
                 .ascii "       beemodel --eval 'BeeScript' | --run file.bees   (no window)\n"
+                .ascii "       beemodel --link host:port | unix:<path>   (mirror a session's live link)\n"
                 .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
                 .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
 .include "version.inc"

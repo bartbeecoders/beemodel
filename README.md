@@ -546,6 +546,14 @@ point lights as `KHR_lights_punctual`, the lightmap embedded and mapped with `TE
 `KHR_materials_emissive_strength`; it passes the Khronos glTF validator. See
 [tests/lighting.py](tests/lighting.py).
 
+**Live link.** `link.serve` streams the scene over a socket (TCP on localhost, `lan` for the
+network, or `unix:<path>`): a snapshot when a peer connects, then every change as a small
+binary message - transforms, vertex deltas, meshes, materials, renames, deletions - well under
+a millisecond on localhost. `beemodel --link 127.0.0.1:7461` opens a second BeeModel that
+mirrors the first; a game engine plugin reads the same stream ([docs/LIVELINK.md](docs/LIVELINK.md),
+reference reader [tools/livelink.py](tools/livelink.py)). Readers that fall behind get their
+transforms coalesced. See [tests/livelink.py](tests/livelink.py).
+
 ### Virtualized geometry
 
 **Cluster LOD DAG.** `vgeo.build` prepares the active mesh for virtualized rendering, as Nanite
@@ -799,6 +807,7 @@ src/play.s      play mode: the capsule walker, fly camera, captured mouse, keep 
 src/logic.s     logic graphs: event / action / data nodes, the play-mode VM
 src/probe.s     light probes: SH irradiance volumes, reflection cube maps, baked by Hive
 src/lightmap.s  the lightmap baker: second UVs, the atlas, traced texels, EXR / PNG
+src/link.s      the live link: the scene streamed to peers, mirroring a session
 src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
 src/procgen.s   terrain, erosion, L-systems, wave function collapse

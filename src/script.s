@@ -443,6 +443,8 @@ builtins:
     .long 1, 1
     .quad bn_lmsample, b_lmsample
     .long 5, 5
+    .quad bn_livelink, b_livelink
+    .long 1, 1
     .quad bn_libfind, b_libfind
     .long 2, 2
     .quad bn_libinfo, b_libinfo
@@ -729,6 +731,7 @@ bn_probeinfo:   .asciz "probeinfo"
 bn_probesample: .asciz "probesample"
 bn_lightmap:    .asciz "lightmap"
 bn_lmsample:    .asciz "lmsample"
+bn_livelink:    .asciz "livelink"
 bn_libfind:     .asciz "libfind"
 bn_libinfo:     .asciz "libinfo"
 bn_wpaint:      .asciz "wpaint"
@@ -5178,6 +5181,16 @@ b_lmsample:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# livelink(k) -> the live link (link.s: link_stat)
+b_livelink:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    link_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
 
 # lib(k) -> the content library (library.s: lb_stat)
 b_lib:

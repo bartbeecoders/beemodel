@@ -41,7 +41,7 @@ def wstr(s):
 
 
 class Fake:
-    def __init__(self):
+    def __init__(self, args=()):
         self.dir = tempfile.mkdtemp()
         self.path = os.path.join(self.dir, 'wl')
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -53,7 +53,7 @@ class Fake:
                    XDG_RUNTIME_DIR=self.home)       # MCP socket lands here
         self.env = env
         self.t0 = time.time()
-        self.proc = subprocess.Popen([BIN], env=env)
+        self.proc = subprocess.Popen([BIN, *args], env=env)
         self.first_frame_ms = None
         self.t_input = None                 # input sent, waiting for its frame
         self.latencies = []
