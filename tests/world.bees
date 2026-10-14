@@ -1,0 +1,68 @@
+# A world in cells - the v0.11 walkthrough's world partition.
+#
+# A 32 x 32 map of 50 m cells (1.6 km a side): each cell has its own
+# piece of ground (a 48 x 48 grid raised by noise read at world positions,
+# so the pieces meet) and three props. That is 4096 objects - as many as a
+# scene can hold at once - so the map is partitioned before it is made and
+# written row by row as the camera moves along: each new row comes in
+# around the camera, the rows behind go out to their cell files.
+#
+#   beemodel --eval "$(cat tests/world.bees)"     (writes ~/BeeModel/world.bee)
+
+n = 32                                          # cells a side
+C = 50                                          # metres a cell
+delete("Cube")
+op("file.save", "~/BeeModel/world.bee")
+op("world.partition", "50 120")
+c0 = clock()
+
+t = gtree("Ground")
+o = gnode(t, "output")
+g = gnode(t, "grid", C, 48)
+p = gnode(t, "position")
+off = gnode(t, "combine_xyz")                   # the cell's place in the world
+w = gnode(t, "vector_math", 0)
+glink(t, p, w, 1)
+glink(t, off, w, 2)
+nz = gnode(t, "noise", 0.01, 5, 0.5)
+glink(t, w, nz, 1)
+mu = gnode(t, "math", 2)
+glink(t, nz, mu, 1)
+gset(t, mu, 2, 40)
+up = gnode(t, "combine_xyz")
+glink(t, mu, up, 2)
+sp = gnode(t, "set_position")
+glink(t, g, sp, 1)
+glink(t, up, sp, 3)
+glink(t, sp, o, 1)
+material("Ground")
+matset("Ground", "base", 0.4, 0.5, 0.3)
+material("Prop")
+matset("Prop", "base", 0.75, 0.55, 0.35)
+
+for i in 0..n {
+ for j in 0..n {
+  x = (i - n / 2 + 0.5) * C
+  z = (j - n / 2 + 0.5) * C
+  nm = add("plane", "Ground_" + str(i) + "_" + str(j), 0, 0, 0)
+  gset(t, off, 1, x)
+  gset(t, off, 3, z)
+  m = modifier(nm, "geometry")
+  modset(nm, m, "tree", t)
+  modapply(nm, 0)
+  move(nm, x, 0, z)
+  assign(nm, "Ground")
+  for k in 0..3 {
+   kind = "cube"
+   if k == 1 { kind = "cylinder" }
+   if k == 2 { kind = "sphere" }
+   pr = add(kind, "Prop_" + str(i) + "_" + str(j) + "_" + str(k), x - 15 + 15 * k, 30, z + 10 - 10 * k)
+   scale(pr, 2 + k)
+   assign(pr, "Prop")
+  }
+ }
+ view(0, 30, 10, (i - n / 2 + 0.5) * C, 0, 0)  # along with the rows made
+ op("world.update")
+}
+op("file.save", "~/BeeModel/world.bee")
+print("world", n * n, world(1), world(5), world(9), round(clock() - c0))

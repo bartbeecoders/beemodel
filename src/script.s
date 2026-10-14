@@ -417,6 +417,8 @@ builtins:
     .long 1, 1
     .quad bn_view, b_view
     .long 6, 6
+    .quad bn_world, b_world
+    .long 1, 1
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -686,6 +688,7 @@ bn_cainfo:      .asciz "cacheinfo"
 bn_vgeo:        .asciz "vgeo"
 bn_vgstat:      .asciz "vgstat"
 bn_view:        .asciz "view"
+bn_world:       .asciz "world"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -4852,6 +4855,16 @@ b_vgstat:
     call    a_num
     cvttsd2si edi, xmm0
     call    vgd_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# world(k) -> the world partition (world.s: wp_stat)
+b_world:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    wp_stat
     add     rsp, 8
     cvtss2sd xmm0, xmm0
     jmp     ret_num

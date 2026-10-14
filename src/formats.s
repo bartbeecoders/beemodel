@@ -23,6 +23,15 @@
 # =============================================================================
 .intel_syntax noprefix
 .globl mesh_tab
+.globl mesh_chunks
+.globl muvs_write
+.globl muvs_read
+.globl vgeo_chunks
+.globl mesh_from
+.globl mesh_index
+.globl chunk_begin
+.globl chunk_end
+.globl drop_table_refs
 .globl n_mesh_tab
 .include "const.inc"
 .include "vgeo.inc"
@@ -62,6 +71,7 @@
 .equ TAG_MPIN,      0x4E49504D          # "MPIN"
 .equ TAG_SIMC,      0x434D4953          # "SIMC"
 .equ TAG_VGEO,      0x4F454756          # "VGEO"
+.equ TAG_WRLP,      0x504C5257          # "WRLP"
 .equ AR_SZ_,        64 + 128*128
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
@@ -71,6 +81,8 @@
 cur_path:       .skip 512               # current .bee file ("" = untitled)
 mesh_tab:       .skip 8*MAX_FILE_MESHES
 fbase:          .skip 8                 # mapped input file
+wrlp_chunk:     .skip 8
+wrlp_size:      .skip 4
 fsize:          .skip 8
 chunk_at:       .skip 8
 mods_chunk:     .skip 8
@@ -243,47 +255,12 @@ chunk_end:
     mov     [rdx+rcx+4], eax
     ret
 
-# mesh_index(rdi=mesh) -> eax = index in mesh_tab (added when new)
-mesh_index:
-    xor     eax, eax
-1:  cmp     eax, [rip+n_mesh_tab]
-    jae     2f
-    lea     rcx, [rip+mesh_tab]
-    cmp     [rcx+rax*8], rdi
-    je      9f
-    inc     eax
-    jmp     1b
-2:  cmp     eax, MAX_FILE_MESHES
-    jae     9f
-    lea     rcx, [rip+mesh_tab]
-    mov     [rcx+rax*8], rdi
-    inc     dword ptr [rip+n_mesh_tab]
-9:  ret
-
-# bee_save(rdi=path) -> eax = 0 on success
-bee_save:
-    push    rbx
+# mesh_chunks - a MESH chunk for each mesh in mesh_tab (bee_save, cells)
+mesh_chunks:
     push    r12
     push    r13
-    push    r14
     sub     rsp, 8
-    mov     r14, rdi
-    call    wb_reset
-    mov     edi, BEE_MAGIC
-    call    wb_u32
-    mov     edi, BEE_VERSION
-    call    wb_u32
-    mov     dword ptr [rip+n_mesh_tab], 0
-    xor     ebx, ebx                    # collect the distinct meshes
-1:  cmp     ebx, [rip+obj_count]
-    jae     2f
-    mov     edi, ebx
-    call    obj_at
-    mov     rdi, [rax+OB_MESH]
-    call    mesh_index
-    inc     ebx
-    jmp     1b
-2:  xor     r12d, r12d                  # MESH chunks
+    xor     r12d, r12d
 3:  cmp     r12d, [rip+n_mesh_tab]
     jae     4f
     lea     rax, [rip+mesh_tab]
@@ -310,7 +287,105 @@ bee_save:
     call    chunk_end
     inc     r12d
     jmp     3b
-4:  mov     edi, TAG_MUVS               # MUVS (UVs and seams of the meshes)
+4:  add     rsp, 8
+    pop     r13
+    pop     r12
+    ret
+
+# vgeo_chunks - a VGEO chunk for each mesh in mesh_tab with a live cluster
+#   DAG (bee_save, cells): the mesh's index, padding to a page of the
+#   file, the block
+vgeo_chunks:
+    push    rbx
+    push    r12
+    push    r13
+    xor     r12d, r12d                  # VGEO (cluster DAGs, one a mesh;
+41: cmp     r12d, [rip+n_mesh_tab]      #   the block on a page of the file)
+    jae     43f
+    lea     rax, [rip+mesh_tab]
+    mov     rdi, [rax+r12*8]
+    call    vg_get
+    test    rax, rax
+    jz      42f
+    mov     r13, rax
+    mov     edi, TAG_VGEO
+    call    chunk_begin
+    mov     edi, r12d
+    call    wb_u32
+    mov     eax, [rip+wb_len]
+    add     eax, 4
+    neg     eax
+    and     eax, 4095
+    mov     ebx, eax
+    mov     edi, eax
+    call    wb_u32
+    lea     rsi, [rip+vg_zero]
+    mov     edx, ebx
+    call    wb_bytes
+    mov     rsi, r13                    # (the runtime part of the header
+    mov     edx, VR_CREATOR             #  as zeros)
+    call    wb_bytes
+    lea     rsi, [rip+vg_zero]
+    mov     edx, VH_SZ-VR_CREATOR
+    call    wb_bytes
+    lea     rsi, [r13+VH_SZ]
+    mov     rdx, [r13+VH_BYTES]
+    sub     rdx, VH_SZ
+    call    wb_bytes
+    call    chunk_end
+    mov     rdi, r13                    # (read all through: given back)
+    call    vd_drop
+42: inc     r12d
+    jmp     41b
+43: pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+
+# mesh_index(rdi=mesh) -> eax = index in mesh_tab (added when new)
+mesh_index:
+    xor     eax, eax
+1:  cmp     eax, [rip+n_mesh_tab]
+    jae     2f
+    lea     rcx, [rip+mesh_tab]
+    cmp     [rcx+rax*8], rdi
+    je      9f
+    inc     eax
+    jmp     1b
+2:  cmp     eax, MAX_FILE_MESHES
+    jae     9f
+    lea     rcx, [rip+mesh_tab]
+    mov     [rcx+rax*8], rdi
+    inc     dword ptr [rip+n_mesh_tab]
+9:  ret
+
+# bee_save(rdi=path) -> eax = 0 on success
+bee_save:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r14, rdi
+    call    wp_save_begin               # (a partitioned world: its cells first,
+    call    wb_reset                    #  their objects out of this file)
+    mov     edi, BEE_MAGIC
+    call    wb_u32
+    mov     edi, BEE_VERSION
+    call    wb_u32
+    mov     dword ptr [rip+n_mesh_tab], 0
+    xor     ebx, ebx                    # collect the distinct meshes
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    mov     rdi, [rax+OB_MESH]
+    call    mesh_index
+    inc     ebx
+    jmp     1b
+2:  call    mesh_chunks                 # MESH chunks
+    mov     edi, TAG_MUVS               # MUVS (UVs and seams of the meshes)
     call    chunk_begin
     call    muvs_write
     call    chunk_end
@@ -390,45 +465,16 @@ bee_save:
     call    chunk_begin
     call    simc_write
     call    chunk_end
-    xor     r12d, r12d                  # VGEO (cluster DAGs, one a mesh;
-41: cmp     r12d, [rip+n_mesh_tab]      #   the block on a page of the file)
-    jae     43f
-    lea     rax, [rip+mesh_tab]
-    mov     rdi, [rax+r12*8]
-    call    vg_get
-    test    rax, rax
-    jz      42f
-    mov     r13, rax
-    mov     edi, TAG_VGEO
+    call    vgeo_chunks                 # VGEO (cluster DAGs)
+    cmp     dword ptr [rip+wp_on], 0    # WRLP (the world's partition)
+    je      44f
+    cmp     dword ptr [rip+wp_plain], 0
+    jne     44f
+    mov     edi, TAG_WRLP
     call    chunk_begin
-    mov     edi, r12d
-    call    wb_u32
-    mov     eax, [rip+wb_len]
-    add     eax, 4
-    neg     eax
-    and     eax, 4095
-    mov     ebx, eax
-    mov     edi, eax
-    call    wb_u32
-    lea     rsi, [rip+vg_zero]
-    mov     edx, ebx
-    call    wb_bytes
-    mov     rsi, r13                    # (the runtime part of the header
-    mov     edx, VR_CREATOR             #  as zeros)
-    call    wb_bytes
-    lea     rsi, [rip+vg_zero]
-    mov     edx, VH_SZ-VR_CREATOR
-    call    wb_bytes
-    lea     rsi, [r13+VH_SZ]
-    mov     rdx, [r13+VH_BYTES]
-    sub     rdx, VH_SZ
-    call    wb_bytes
+    call    wp_chunk_write
     call    chunk_end
-    mov     rdi, r13                    # (read all through: given back)
-    call    vd_drop
-42: inc     r12d
-    jmp     41b
-43:
+44:
     mov     edi, TAG_CADD
     call    chunk_begin
     call    cad_write
@@ -508,6 +554,11 @@ bee_save:
     mov     rsi, [rip+wb_ptr]
     mov     rdx, [rip+wb_len]
     call    file_write_atomic
+    push    rax
+    sub     rsp, 8
+    call    wp_save_end                 # (the world's objects back in)
+    add     rsp, 8
+    pop     rax
     add     rsp, 8
     pop     r14
     pop     r13
@@ -1052,6 +1103,8 @@ bee_load:
     push    r14
     push    r15
     sub     rsp, 8
+    call    wp_note_path            # (a partitioned world's cells: beside it)
+    mov     qword ptr [rip+wrlp_chunk], 0
     call    file_read
     test    rax, rax
     jnz     1f
@@ -1172,7 +1225,13 @@ bee_load:
     mov     [rip+mpin_chunk], rax
     mov     [rip+mpin_size], ebp
     jmp     23f
-288:cmp     eax, TAG_VGEO
+288:cmp     eax, TAG_WRLP
+    jne     2881f
+    lea     rax, [rbx+8]
+    mov     [rip+wrlp_chunk], rax
+    mov     [rip+wrlp_size], ebp
+    jmp     23f
+2881:cmp     eax, TAG_VGEO
     jne     287f
     lea     rdi, [rbx+8]                # (after the meshes)
     mov     esi, ebp
@@ -1302,7 +1361,8 @@ bee_load:
     jae     .Lbl_bad
     inc     ecx
     jmp     4b
-5:  call    scene_clear                 # replace the scene
+5:  call    wp_reset                    # (no world partition)
+    call    scene_clear                 # replace the scene
     xor     ebx, ebx
 6:  cmp     ebx, r12d
     jae     7f
@@ -1479,7 +1539,12 @@ bee_load:
     rep     movsb
     mov     edi, [rip+vp_area]
     call    cam_store
-8:  call    drop_table_refs
+8:  mov     rdi, [rip+wrlp_chunk]       # a partitioned world: its cells
+    test    rdi, rdi                    #  stream in around the camera
+    jz      81f
+    mov     esi, [rip+wrlp_size]
+    call    wp_chunk_read
+81: call    drop_table_refs
     mov     rdi, [rip+fbase]            # (but its cluster DAGs)
     mov     rsi, [rip+fsize]
     call    vg_unmap_file
@@ -2642,6 +2707,7 @@ set_cur_path:                           # cur_path = path_buf
     ret
 
 op_new:
+    call    wp_reset
     call    scene_clear
     call    scene_defaults
     mov     byte ptr [rip+cur_path], 0
@@ -2839,8 +2905,10 @@ autosave_path:
 
 autosave:
     call    autosave_path
+    mov     dword ptr [rip+wp_plain], 1 # (what is loaded, as a plain scene)
     lea     rdi, [rip+path_buf]
     call    bee_save
+    mov     dword ptr [rip+wp_plain], 0
     test    eax, eax
     jnz     1f
     lea     rdi, [rip+s_autosaved]
