@@ -633,6 +633,11 @@ in_group:
     jmp     log_line
 
 op_undo:
+    sub     rsp, 8                      # co-editing: your own last edit
+    call    co_undo_hook
+    add     rsp, 8
+    test    eax, eax
+    jnz     9f
     cmp     dword ptr [rip+group_depth], 0
     jne     in_group
     lea     rdi, [rip+undo_stack]
@@ -648,6 +653,11 @@ op_undo:
 9:  ret
 
 op_redo:
+    sub     rsp, 8
+    call    co_redo_hook
+    add     rsp, 8
+    test    eax, eax
+    jnz     9f
     cmp     dword ptr [rip+group_depth], 0
     jne     in_group
     lea     rdi, [rip+redo_stack]

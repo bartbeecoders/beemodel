@@ -85,3 +85,36 @@ in order. A reader 64 MiB behind is dropped.
    vertex buffer (just the ranges), MESH replaces the mesh, DELETE removes.
 4. Read on every frame without blocking; the stream is never ahead of the
    editor by more than its last change.
+
+## Co-editing (types 40-52)
+
+Peers of a co-editing session (`co.host`, `co.join`; `src/cosync.s`,
+`src/cotree.s`) speak the same framing in both directions. After the type
+every message has `u16 origin` (the peer that made it; bit 15 set: that
+peer's agent) and `u32 number` (its count of messages); a peer keeps each
+(origin, number) once and relays it to its other connections, so any
+connected graph of peers works without a server. On connecting both sides
+send HELLO (40: `"BEEL"`, `u16 version` 1, `u16 role` 2) and then their whole
+document as operations; afterwards each change as it is made.
+
+Times are `u64` Lamport clocks with the peer below: `clock << 16 | peer`.
+
+| Type | Name | Payload |
+|---|---|---|
+| 41 | ADD | `u64 id`, `u64 time`, `u64 after` (the element it follows in the object list; 0: the start), `u32 type` |
+| 42 | DEL | `u64 id`, `u64 time` - alive while the add time is the later |
+| 43 | REG | `u64 id`, `u64 time`, `u32 key` (1 name, 2 material name, 3 transform, 4 flags, 5 colour), 36 bytes of value |
+| 44 | GEN | `u64 id`, `u64 time`, `u64 generation`, `u32 vertices, polygons, loops, has UVs`, positions, polygon starts, loops, UVs - a new topology |
+| 45 | VERTS | `u64 id`, `u64 generation`, `u64 time`, `u32 ranges`; per range `u32 first, count`, the positions - vertices of that generation moved |
+| 46 | MAT | `name[32]`, `u64 time`, 15 `f32` (as MATERIAL) |
+| 47 | PRESENCE | `u32 peer`, `name[16]`, the camera (`f32` yaw pitch distance, target xyz), the 3D cursor (3 `f32`), `u32 n`, `n` selected element ids |
+| 48 | TREE | `name[32]`, `u64 add time`, `u32 kind` - a node tree |
+| 49 | TAIL | `name[32]`, `u64 time`, `u32 kind`, the 480-byte names table (logic graphs) |
+| 50 | NADD | `tree[32]`, `u64 id`, `u64 time`, `u64 after` - a node in the tree's sequence |
+| 51 | NDEL | `tree[32]`, `u64 id`, `u64 time` |
+| 52 | NSET | `tree[32]`, `u64 id`, `u64 time`, the node's 72 bytes (links cleared), 3 `u64` link ids, 3 `u8` outputs |
+
+Every register keeps the value with the latest time, every element is alive
+by its latest add / delete, and the object list and each tree's nodes are
+ordered as an RGA (under each element, the newer insertions first): all
+peers that saw the same operations show the same document.

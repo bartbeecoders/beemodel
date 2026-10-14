@@ -86,6 +86,11 @@ _start:
     lea     rdi, [rip+pollfds+16]       # + the live link's
     lea     rdi, [rdi+rax*8]
     call    link_pollfds
+    add     [rip+n_mcpfds], eax
+    lea     rdi, [rip+pollfds+16]       # + co-editing's
+    mov     eax, [rip+n_mcpfds]
+    lea     rdi, [rdi+rax*8]
+    call    co_pollfds
     add     eax, [rip+n_mcpfds]
     lea     esi, [rax+2]
     lea     rdi, [rip+pollfds]
@@ -122,6 +127,7 @@ _start:
 2:  lea     rdi, [rip+pollfds+16]
     call    mcp_handle
     call    link_tick                   # the live link: peers, changes out
+    call    co_tick                     # co-editing: operations in and out
     cmp     dword ptr [rip+quit_flag], 0
     jne     .Lquit
     call    render_tick                 # a slice of the progressive render

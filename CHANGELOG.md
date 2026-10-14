@@ -244,6 +244,36 @@ project uses [Semantic Versioning](https://semver.org/).
   - [tests/versions.py](tests/versions.py): commits, branches, the diff,
     merges with and without conflicts, the store, the panel's buttons,
     ghosts over and beside the scene, an agent's branch over MCP.
+- **Live co-editing** (#152): two users and an AI agent on one scene
+  (`src/cosync.s`, `src/cotree.s`).
+  - `co.host [port]` starts a session, `co.join host:port` joins any of its
+    peers (`co.host` on a peer in a session lets others join there too);
+    operations are relayed peer to peer, each kept once - no server.
+  - **The CRDT:** objects are elements with unique ids (alive by their
+    latest add / delete, in an RGA sequence for the object list); name,
+    material, transform, hidden and colour are last-writer-wins registers
+    (Lamport clock, the peer below); a mesh is a topology generation plus a
+    position register per vertex (moves of different vertices merge);
+    materials are registers by name; node trees are a set by name with
+    their nodes in an RGA sequence (content and links by node id one
+    register each).
+  - Edits of any kind become operations by comparing the scene with the
+    document every turn of the event loop; remote operations update the
+    document, then the scene.
+  - **Undo per author:** Ctrl+Z in a session undoes your own last edit (as
+    new operations: others' later edits stay); redo likewise.
+  - **The agent:** `co.agent on` makes what MCP tools change a peer of its
+    own, with its own undo and presence (the objects it last touched).
+  - **Presence:** every peer's camera, 3D cursor and selection are drawn in
+    its colour; `co.follow <peer>` keeps your view on theirs.
+  - The co-editing messages are in docs/LIVELINK.md. BeeScript:
+    `costat(k)`, `cohash()` (the document's hash), plus `viewinfo(k)` and
+    `objtype(object)`.
+  - [tests/coedit.py](tests/coedit.py): three peers in a chain (one the
+    agent): joining, concurrent edits of one property, vertex merges, node
+    graphs edited at once, per-author undo and redo, presence and follow,
+    and a fuzz of hundreds of random concurrent edits converging to
+    identical documents (by hash) and scenes.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

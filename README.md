@@ -562,6 +562,14 @@ properties - and draws the other version as ghosts over the scene (`side`: besid
 sides shows in the merge panel (ours / theirs), then `vc.commit`. Agents use the same operators
 over MCP to work on a branch of their own and propose it. See [tests/versions.py](tests/versions.py).
 
+**Co-editing.** `co.host` starts a live session, `co.join host:port` joins it from another
+BeeModel - peer to peer, no server. Everyone edits at once: objects, transforms, materials,
+meshes (moves of different vertices merge), node graphs; a CRDT settles every conflict the same
+way everywhere. Ctrl+Z undoes only your own edits. You see the others' cameras, cursors and
+selections in their colours, and `co.follow` keeps your view on someone's. An AI agent joins
+as a peer of its own (`co.agent on`: what MCP tools change is the agent's, with its own undo).
+See [tests/coedit.py](tests/coedit.py).
+
 ### Virtualized geometry
 
 **Cluster LOD DAG.** `vgeo.build` prepares the active mesh for virtualized rendering, as Nanite
@@ -817,6 +825,8 @@ src/probe.s     light probes: SH irradiance volumes, reflection cube maps, baked
 src/lightmap.s  the lightmap baker: second UVs, the atlas, traced texels, EXR / PNG
 src/link.s      the live link: the scene streamed to peers, mirroring a session
 src/vc.s        versioned scenes: commits, branches, the visual diff, three-way merge
+src/cosync.s    live co-editing: the CRDT, peers, per-author undo, presence
+src/cotree.s    co-editing node graphs: trees as sets, nodes as sequences
 src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
 src/procgen.s   terrain, erosion, L-systems, wave function collapse

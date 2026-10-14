@@ -98,6 +98,9 @@ jobs:
       - name: Versioned scenes (commits, branches, the visual diff, three-way merge)
         run: timeout 300 python tests/versions.py build/beemodel build/shots
 
+      - name: Co-editing (two users and an agent converge under fuzzed concurrent edits)
+        run: timeout 900 python tests/coedit.py build/beemodel build/shots
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 600 python tools/fakewl.py build/shots
 
