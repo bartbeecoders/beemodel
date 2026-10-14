@@ -29,6 +29,9 @@
 .include "macros.inc"
 
 .globl pl_on
+.globl pl_pos
+.globl pl_radius
+.globl pl_height
 .globl play_tick
 .globl play_key
 .globl play_look
@@ -103,6 +106,11 @@ pl_frame_was:   .skip 4
 pl_time:        .skip 4                 # seconds played
 pl_acc:         .skip 4                 # time not yet stepped
 pl_best_d:      .skip 4                 # its depth
+pl_best_obj:    .skip 4                 # its object (handle)
+pl_cur_obj:     .skip 4                 # (the object being tested)
+pl_gobj:        .skip 4                 # the object stood on, where it was
+pl_gground:     .skip 4                 # (the last ground contact's object)
+pl_gloc:        .skip 12
 pl_t_last:      .skip 8
 pl_ts:          .skip 16
 pl_lastx:       .skip 4
@@ -130,6 +138,7 @@ f_fall:         .float -1000.0
 f_pmax:         .float 1.5
 f_pmin:         .float -1.5
 f_tmax:         .float 0.1              # the longest tick
+f_frame:        .float 0.016666668      # a scripted step's frame
 f_snap:         .float 0.25             # down a slope: kept on it
 f_cam_d:        .float 0.05
 f_rad2deg:      .float 57.29578
@@ -224,6 +233,10 @@ do_play_start:
     mov     dword ptr [rip+pl_time], 0
     mov     dword ptr [rip+pl_acc], 0
     mov     dword ptr [rip+pl_steps], 0
+    mov     dword ptr [rip+pl_gobj], 0
+    mov     edi, 1                      # simulations live, the logic graphs
+    call    rb_live
+    call    lg_begin
     call    ms_now
     mov     [rip+pl_t_last], rax
     mov     dword ptr [rip+pl_on], 1
@@ -297,6 +310,9 @@ play_end:
     call    wl_unlock_pointer
     mov     dword ptr [rip+pl_locked], 0
     call    pl_free_grids
+    call    lg_end
+    xor     edi, edi
+    call    rb_live
     mov     rdi, [rip+pl_snap]
     mov     qword ptr [rip+pl_snap], 0
     mov     esi, ebx
@@ -344,6 +360,16 @@ do_play_mode:
 play_key:
     cmp     dword ptr [rip+pl_on], 0
     je      .Lpk_no
+    cmp     dword ptr [rip+pl_on], 1    # (playing: the logic graphs see it)
+    jne     0f
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    lg_key
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+0:
     cmp     dword ptr [rip+pl_on], 2    # asking: K keeps, D / Esc discard
     jne     1f
     test    esi, esi
@@ -502,6 +528,8 @@ pl_advance:
     movss   [rip+pl_time], xmm0
     call    pl_step
     inc     dword ptr [rip+pl_steps]
+    movss   xmm0, [rip+pl_dt]           # the logic graphs, the same step
+    call    lg_step
     jmp     1b
 2:  call    an_range                    # the scene's frame: by the clock
     mulss   xmm0, [rip+pl_time]
@@ -666,7 +694,10 @@ pl_step:
     addps   xmm0, [rip+pl_pos]
     movaps  [rip+pl_pos], xmm0
     jmp     9f
-1:  movaps  xmm1, [rip+pl_vel]          # walk: horizontal as asked, the
+1:  movaps  [rsp], xmm0
+    call    pl_ride                     # (on something that moved: along)
+    movaps  xmm0, [rsp]
+    movaps  xmm1, [rip+pl_vel]          # walk: horizontal as asked, the
     insertps xmm0, xmm1, 0x50           #  vertical by gravity
     movaps  [rip+pl_vel], xmm0
     cmp     dword ptr [rip+pl_ground], 0
@@ -704,7 +735,8 @@ pl_step:
     comiss  xmm0, [rip+f_zero]
     ja      6f
     call    pl_snap_down
-6:  movss   xmm0, [rip+pl_pos+4]        # fell out of the world: back
+6:  call    pl_ride_mark                # what it stands on now, and where
+    movss   xmm0, [rip+pl_pos+4]        # fell out of the world: back
     comiss  xmm0, [rip+f_fall]
     jae     9f
     movaps  xmm0, [rip+pl_start]
@@ -713,6 +745,48 @@ pl_step:
     movaps  [rip+pl_vel], xmm0
 9:  add     rsp, 48
     pop     rbx
+    ret
+
+# pl_ride - standing on an object that moved since the last step (a moving
+#   platform): the player moves with it
+pl_ride:
+    sub     rsp, 8
+    cmp     dword ptr [rip+pl_ground], 0
+    je      9f
+    mov     edi, [rip+pl_gobj]
+    test    edi, edi
+    jz      9f
+    call    obj_get
+    test    rax, rax
+    jz      9f
+    movups  xmm0, [rax+OB_LOC]
+    movsd   xmm1, [rip+pl_gloc]
+    insertps xmm1, [rip+pl_gloc+8], 0x20
+    subps   xmm0, xmm1
+    andps   xmm0, [rip+f_xyz]
+    addps   xmm0, [rip+pl_pos]
+    movaps  [rip+pl_pos], xmm0
+9:  add     rsp, 8
+    ret
+
+# pl_ride_mark - after the step: the object stood on and its place
+pl_ride_mark:
+    sub     rsp, 8
+    mov     dword ptr [rip+pl_gobj], 0
+    cmp     dword ptr [rip+pl_ground], 0
+    je      9f
+    mov     edi, [rip+pl_gground]
+    mov     [rip+pl_gobj], edi
+    call    obj_get
+    test    rax, rax
+    jz      8f
+    mov     rcx, [rax+OB_LOC]
+    mov     [rip+pl_gloc], rcx
+    mov     ecx, [rax+OB_LOC+8]
+    mov     [rip+pl_gloc+8], ecx
+    jmp     9f
+8:  mov     dword ptr [rip+pl_gobj], 0
+9:  add     rsp, 8
     ret
 
 # pl_resolve - up to five times: the deepest contact left; pl_ground,
@@ -732,6 +806,9 @@ pl_resolve:
     movss   xmm0, [rip+pl_best_d]
     comiss  xmm0, [rip+f_zero]
     jbe     9f
+    mov     edi, [rip+pl_best_obj]      # (logic: the player touched it)
+    call    lg_touch
+    movss   xmm0, [rip+pl_best_d]
     addss   xmm0, [rip+f_skin]
     movaps  xmm1, [rip+pl_best_n]
     movaps  xmm2, xmm1
@@ -744,6 +821,8 @@ pl_resolve:
     addps   xmm3, [rip+pl_pos]
     movaps  [rip+pl_pos], xmm3
     mov     dword ptr [rip+pl_ground], 1
+    mov     eax, [rip+pl_best_obj]      # (what it stands on)
+    mov     [rip+pl_gground], eax
     movss   xmm3, [rip+pl_vel+4]
     comiss  xmm3, [rip+f_zero]
     jae     8f
@@ -906,8 +985,13 @@ pl_contact:
     mov     edi, ebx
     call    obj_at
     mov     r12, rax
+    lea     rax, [rip+obj_list]
+    mov     eax, [rax+rbx*4]
+    mov     [rip+pl_cur_obj], eax
     cmp     dword ptr [r12+OB_TYPE], OT_MESH
     jne     .Lco_next
+    test    dword ptr [r12+OB_FLAGS], OBF_HIDDEN
+    jnz     .Lco_next
     mov     rdi, r12
     call    obj_eval
     test    rax, rax
@@ -1350,6 +1434,8 @@ cap_tri:
     jbe     .Lct_out
     movss   [rip+pl_best_d], xmm1
     movaps  [rip+pl_best_n], xmm0
+    mov     eax, [rip+pl_cur_obj]       # (and whose)
+    mov     [rip+pl_best_obj], eax
 .Lct_out:
     add     rsp, 104
     ret
@@ -1966,7 +2052,19 @@ pl_script_step:
     jz      7f
     or      eax, IN_RUN
 7:  mov     [rip+pl_keys], eax
+    sub     rsp, 16                     # in frames of 1/60 s, as the window
+    movss   [rsp], xmm0                 #  plays it (animations, logic)
+71: movss   xmm0, [rsp]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     72f
+    minss   xmm0, [rip+f_frame]
+    movss   xmm1, [rsp]
+    subss   xmm1, xmm0
+    movss   [rsp], xmm1
     call    pl_advance
+    jmp     71b
+72: add     rsp, 16
     mov     dword ptr [rip+pl_keys], 0
     mov     rsp, rbp
     pop     rbp

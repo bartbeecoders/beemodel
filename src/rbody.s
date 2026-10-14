@@ -32,6 +32,8 @@
 .globl rb_gravity
 .globl rb_info
 .globl rb_reset
+.globl rb_impulse
+.globl rb_live
 
 # the settings (anim block)
 .equ RW_GRAV,   0                       # gravity (3 floats; all 0: -9.81 Y)
@@ -267,6 +269,10 @@ rx_0577:        .float 0.57735
 .section .bss
 .align 16
 rb_on:          .skip 4                 # a simulation exists
+rb_islive:      .skip 4                 # play mode: no cache (logic changes it)
+rb_npend:       .skip 4                 # impulses before the bodies are made
+.align 16
+rb_pend:        .skip 16*32             # (object, then the impulse)
 rb_nb:          .skip 4                 # bodies (the world last)
 rb_npt:         .skip 4
 rb_nvx:         .skip 4
@@ -3553,7 +3559,9 @@ rb_frame:
     cmp     esi, eax
     cmovg   esi, eax
     jmp     12f
-11: ucomiss xmm0, xmm1
+11: cmp     dword ptr [rip+rb_islive], 0  # (play mode: always simulated)
+    jne     13f
+    ucomiss xmm0, xmm1
     jne     13f
 12: xor     edi, edi
     call    sc_get
@@ -3580,6 +3588,7 @@ rb_frame:
     je      .Lrf_out
     mov     [rip+rb_hash], r12
     mov     dword ptr [rip+rb_time], 0
+    call    rb_pend_apply
 3:  call    now_ms                      # steps up to the frame's time
     mov     [rsp+8], rax
     movss   xmm1, [rbx+AN_FPS]
@@ -3592,7 +3601,9 @@ rb_frame:
     subss   xmm0, [rsp+4]
     divss   xmm0, xmm1
     movss   [rsp+16], xmm0              # the time to reach
-4:  xor     edi, edi                    # a whole frame reached: kept
+4:  cmp     dword ptr [rip+rb_islive], 0  # (play mode: nothing kept)
+    jne     41f
+    xor     edi, edi                    # a whole frame reached: kept
     call    sc_last
     inc     eax
     cvtsi2ss xmm0, eax
@@ -3642,6 +3653,82 @@ rb_frame:
     pop     r12
     pop     rbx
     ret
+
+# rb_live(edi=1 on / 0 off) - play mode: the simulation runs live (no
+#   cached frames played or kept: logic graphs push bodies); either way it
+#   is made again from the start at the next frame
+rb_live:
+    mov     [rip+rb_islive], edi
+    mov     qword ptr [rip+rb_hash], 0
+    mov     dword ptr [rip+rb_npend], 0
+    ret
+
+# rb_pend_apply - the impulses waiting for the bodies
+rb_pend_apply:
+    push    rbx
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+rb_npend]
+    jae     9f
+    mov     eax, ebx
+    shl     eax, 5
+    lea     rcx, [rip+rb_pend]
+    mov     rdi, [rcx+rax]
+    movaps  xmm0, [rcx+rax+16]
+    call    rb_impulse_now
+    inc     ebx
+    jmp     1b
+9:  mov     dword ptr [rip+rb_npend], 0
+    pop     rbx
+    ret
+
+# rb_impulse(rdi=object, xmm0=impulse x y z) -> eax = 1 when it is a moving
+#   body: its velocity changes by impulse / mass, and it wakes (before the
+#   bodies are made: when they are)
+rb_impulse:
+    cmp     dword ptr [rip+rb_on], 0    # no bodies yet: when they are made
+    jne     rb_impulse_now
+    mov     eax, [rip+rb_npend]
+    cmp     eax, 16
+    jae     1f
+    inc     dword ptr [rip+rb_npend]
+    shl     eax, 5
+    lea     rcx, [rip+rb_pend]
+    mov     [rcx+rax], rdi
+    movaps  [rcx+rax+16], xmm0
+    mov     eax, 1
+    ret
+1:  xor     eax, eax
+    ret
+rb_impulse_now:
+    xor     eax, eax
+    cmp     dword ptr [rip+rb_on], 0
+    je      9f
+    xor     ecx, ecx
+1:  cmp     ecx, [rip+rb_nb]
+    jae     9f
+    BODY    rdx, rcx
+    cmp     [rdx+BD_OBJ], rdi
+    jne     2f
+    cmp     dword ptr [rdx+BD_TYPE], 1
+    jne     9f
+    movss   xmm1, [rdx+BD_IM]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, xmm0
+    andps   xmm1, [rip+rb_xyzmask]
+    addps   xmm1, [rdx+BD_V]
+    movaps  [rdx+BD_V], xmm1
+    mov     dword ptr [rdx+BD_ASLEEP], 0
+    mov     dword ptr [rdx+BD_SLEEP], 0
+    mov     eax, 1
+    ret
+2:  inc     ecx
+    jmp     1b
+9:  ret
+
+.section .rodata
+.align 16
+rb_xyzmask:     .long -1, -1, -1, 0
+.text
 
 # body_pose(rdi=body, rsi=out: loc, rot) - its object's place: loc = P - R com,
 #   the rotation as Euler angles

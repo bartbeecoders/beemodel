@@ -74,7 +74,8 @@
 .equ MT_MULTIRES, 9
 .equ MT_GEONODES, 10
 .equ MT_ARMATURE, 11
-.equ MT_COUNT,    12
+.equ MT_LOGIC,    12             # a logic graph (logic.s): no geometry
+.equ MT_COUNT,    13
 .equ PF_OBJECT,   2             # parameter flag: an object handle (raw bits)
 
 .section .bss
@@ -122,10 +123,11 @@ mn_boolean:     .asciz "Boolean"
 mn_multires:    .asciz "Multires"
 mn_geonodes:    .asciz "Geo Nodes"
 mn_armature:    .asciz "Armature"
+mn_logic:       .asciz "Logic"
 .align 8
-mod_names:      .quad mn_none, mn_mirror, mn_array, mn_solidify, mn_subsurf, mn_bevel, mn_decimate, mn_remesh, mn_boolean, mn_multires, mn_geonodes, mn_armature
-mod_keys:       .quad 0, mk_mirror, mk_array, mk_solidify, mk_subsurf, mk_bevel, mk_decimate, mk_remesh, mk_boolean, mk_multires, mk_geonodes, mk_armature
-mod_params:     .quad 0, mp_mirror, mp_array, mp_solidify, mp_subsurf, mp_bevel, mp_decimate, mp_remesh, mp_boolean, mp_multires, mp_geonodes, mp_armature
+mod_names:      .quad mn_none, mn_mirror, mn_array, mn_solidify, mn_subsurf, mn_bevel, mn_decimate, mn_remesh, mn_boolean, mn_multires, mn_geonodes, mn_armature, mn_logic
+mod_keys:       .quad 0, mk_mirror, mk_array, mk_solidify, mk_subsurf, mk_bevel, mk_decimate, mk_remesh, mk_boolean, mk_multires, mk_geonodes, mk_armature, mk_logic
+mod_params:     .quad 0, mp_mirror, mp_array, mp_solidify, mp_subsurf, mp_bevel, mp_decimate, mp_remesh, mp_boolean, mp_multires, mp_geonodes, mp_armature, mp_logic
 mk_mirror:      .asciz "mirror"
 mk_array:       .asciz "array"
 mk_solidify:    .asciz "solidify"
@@ -137,6 +139,7 @@ mk_boolean:     .asciz "boolean"
 mk_multires:    .asciz "multires"
 mk_geonodes:    .asciz "geometry"
 mk_armature:    .asciz "armature"
+mk_logic:       .asciz "logic"
 pn_mode:        .asciz "mode"
 pn_tree:        .asciz "tree"
 pn_object:      .asciz "object"
@@ -214,6 +217,10 @@ mp_geonodes:    .long 1, 0                  # the tree: its place + 1 (0: none)
                 .quad pn_tree
                 .long 1
                 .float 1, 0, 64, 0, 0
+mp_logic:       .long 1, 0                  # the graph: its place + 1 (0: none)
+                .quad pn_tree
+                .long 1
+                .float 1, 0, 64, 0, 0
 mp_armature:    .long 2, 0                  # mode: 0 linear blend, 1 dual
                 .quad pn_object             #  quaternion
                 .long PF_OBJECT
@@ -241,7 +248,7 @@ s_down:         .asciz "v"
 s_on:           .asciz "on"
 s_off:          .asciz "off"
 s_no_mesh:      .asciz "  modifiers need an active mesh object"
-s_bad_type:     .asciz "  modifier types: mirror array solidify subsurf bevel decimate remesh boolean multires geometry armature"
+s_bad_type:     .asciz "  modifier types: mirror array solidify subsurf bevel decimate remesh boolean multires geometry armature logic"
 s_bad_index:    .asciz "  no modifier with that index"
 s_full:         .asciz "  the stack holds 8 modifiers"
 s_applied:      .asciz "  modifier applied: "
@@ -250,7 +257,7 @@ s_axes:         .ascii "XYZ"
 .align 8
 items_modadd:   .quad op_mod_mirror, op_mod_array, op_mod_solidify, op_mod_subsurf
                 .quad op_mod_bevel, op_mod_decimate, op_mod_remesh, op_mod_boolean
-                .quad op_mod_multires, op_mod_geonodes, op_mod_armature
+                .quad op_mod_multires, op_mod_geonodes, op_mod_logic, op_mod_armature
 
 OPERATOR op_mod_add, "object.modifier_add", "Add Modifier", do_mod_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a modifier to the active mesh: object.modifier_add mirror|array|solidify|subsurf|bevel|decimate|remesh|boolean|multires"
 OPERATOR op_mod_mirror, "object.modifier_add_mirror", "Mirror", do_mod_add_n, arg=MT_MIRROR, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Mirror modifier"
@@ -262,6 +269,7 @@ OPERATOR op_mod_decimate, "object.modifier_add_decimate", "Decimate", do_mod_add
 OPERATOR op_mod_remesh, "object.modifier_add_remesh", "Remesh", do_mod_add_n, arg=MT_REMESH, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Remesh modifier"
 OPERATOR op_mod_boolean, "object.modifier_add_boolean", "Boolean", do_mod_add_n, arg=MT_BOOLEAN, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Boolean modifier (the other selected mesh is its object)"
 OPERATOR op_mod_multires, "object.modifier_add_multires", "Multiresolution", do_mod_add_n, arg=MT_MULTIRES, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Multires modifier: subdivision levels that keep sculpted detail (sculpt at any level)"
+OPERATOR op_mod_logic, "object.modifier_add_logic", "Logic", do_mod_add_n, arg=MT_LOGIC, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Logic modifier (its logic graph runs in play mode: modifier_set index tree <tree number>; logic.attach does both)"
 OPERATOR op_mod_armature, "object.modifier_add_armature", "Armature", do_mod_add_n, arg=MT_ARMATURE, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add an Armature modifier (skins the mesh by its weights; object: the armature, mode 0 linear, 1 dual quaternion)"
 OPERATOR op_mod_geonodes, "object.modifier_add_geometry", "Geometry Nodes", do_mod_add_n, arg=MT_GEONODES, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Geometry Nodes modifier (its tree: modifier_set index tree <tree number>)"
 OPERATOR op_mod_remove, "object.modifier_remove", "Remove Modifier", do_mod_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a modifier: object.modifier_remove [index]"
@@ -364,6 +372,8 @@ mods_on:
     imul    edx, ecx, MOD_SZ
     test    dword ptr [rdi+MB_HDR+rdx+MD_FLAGS], 1
     jz      2f
+    cmp     dword ptr [rdi+MB_HDR+rdx+MD_TYPE], MT_LOGIC  # (no geometry)
+    je      2f
     inc     eax
 2:  inc     ecx
     jmp     1b
@@ -763,7 +773,19 @@ mod_armature:
 # mod_geonodes(rdi=mesh, rsi=modifier) -> rax = its tree's result or 0
 mod_geonodes:
     cvttss2si esi, [rsi+MD_P]
+    push    rdi
+    push    rsi
+    lea     edi, [rsi-1]
+    sub     rsp, 8
+    call    lg_is_logic                 # (a logic graph: no geometry)
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+    test    eax, eax
+    jnz     1f
     jmp     gn_eval
+1:  xor     eax, eax
+    ret
 
 # mod_boolean(rdi=mesh, rsi=modifier) -> rax = the mesh combined with the
 #   object's base mesh (in place), or 0 (no object, or it failed)

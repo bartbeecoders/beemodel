@@ -140,6 +140,40 @@ project uses [Semantic Versioning](https://semver.org/).
     in a window with keys, mouse motion and MCP.
   - `run_op` gives every operator an aligned stack, whoever calls it (keys,
     MCP, scripts).
+- **Logic graphs** (#148). Event nodes that run in play mode
+  (`src/logic.s`), edited in the node editor like the other graphs.
+  - **Nodes:** events (Begin Play, On Tick, On Key, On Overlap, On Hit, On
+    Timer, On Message), actions (Move, Rotate, Set Property, Spawn,
+    Destroy, Play Action, Apply Impulse, Set Visibility, Send Message, Set
+    Variable, Branch) and data (Variable, Math with 18 operations, Info:
+    time, location, the player, distance, random..., Get Property). Run
+    inputs chain actions after the event or action before them; names
+    (messages, objects, properties, actions) are kept in the graph.
+  - **Attached:** `logic.new`, `logic.node`, `logic.name`, `logic.attach`
+    (a Logic modifier on the object); links and values with `tree.link` /
+    `tree.node_set`. Graphs are node trees, so they are saved in the
+    `.bee` file and undone like the rest.
+  - **The VM:** every fixed play step (1/120 s) runs each object's graph
+    in a fixed order, then delivers the messages sent. It is
+    deterministic (random is a hash of the step, node and object) and
+    sandboxed: 4096 nodes a step (the rest of the step is skipped), 256
+    messages a step, 256 spawns, objects only by name.
+  - **Play mode around it:** the player rides what it stands on (moving
+    platforms), contacts report hits, the rigid body world runs live (no
+    cached frames) and takes impulses, scripted `playstep` advances in
+    1/60 s frames as the window does, and `playkey(code, down)` presses
+    keys. An action layer that has played out now holds its last pose.
+  - **Hidden objects:** `object.hide` (H) and `object.reveal` (Alt+H); hidden
+    objects are not drawn, rendered, picked or collided with. Destroy and
+    Set Visibility use the same flag.
+  - The node editor shows an object's logic graph (before its geometry
+    tree; Tab: the material): red events, green actions, blue data, white
+    run sockets; Shift+A lists the logic nodes; pressing a name value
+    puts `logic.name ...` in the console to finish.
+  - [tests/logic.py](tests/logic.py): a door that opens, a pickup that is
+    counted, a spawn on E, a pushed ball, a moving platform; saved and
+    opened again, run twice to the same result, a message storm cut off at
+    the budget; the node editor, F5 and MCP in a window.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

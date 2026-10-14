@@ -86,6 +86,9 @@ jobs:
       - name: Play mode (walk, fly, captured mouse, keep or discard, MCP)
         run: timeout 300 python tests/play.py build/beemodel build/shots
 
+      - name: Logic graphs (events, actions, data nodes in play mode; door, pickup, platform)
+        run: timeout 300 python tests/logic.py build/beemodel build/shots
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 600 python tools/fakewl.py build/shots
 

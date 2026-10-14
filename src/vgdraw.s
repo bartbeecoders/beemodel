@@ -211,6 +211,8 @@ vgd_begin:
     mov     r12, rax
     cmp     dword ptr [r12+OB_TYPE], OT_MESH
     jne     .Lvb_next
+    test    dword ptr [r12+OB_FLAGS], OBF_HIDDEN
+    jnz     .Lvb_next
     lea     rcx, [rip+obj_list]         # (the sculpt and edit objects: as
     mov     ecx, [rcx+rbx*4]            #  they are)
     cmp     ecx, [rip+sc_obj]

@@ -523,6 +523,17 @@ Editor). `play.start [walk|fly] [x y z]` / `play.stop [keep|discard]` / `play.mo
 tools too, and BeeScript plays from scripts with `playstep`, `playlook` and `playinfo`. See
 [tests/play.py](tests/play.py).
 
+**Logic graphs.** Objects get behaviour from node graphs that run in play mode: events (Begin
+Play, On Tick, On Key, On Overlap, On Hit, On Timer, On Message) start chains of actions
+(Move, Rotate, Set Property, Spawn, Destroy, Play Action, Apply Impulse, Set Visibility, Send
+Message, Set Variable, Branch), fed by data nodes (Variable, Math, Info, Get Property).
+`logic.new Door` makes a graph, `logic.node Door overlap` adds nodes, `tree.link` wires them,
+`logic.attach Door Door` runs it on an object (a Logic modifier); the node editor shows it,
+and the graph is saved in the `.bee` file. The graphs run every fixed step, deterministic and
+sandboxed (a node budget a step, objects only by name), and the player rides moving platforms.
+BeeScript reads them with `logic(k)` and `logicvar(object, k)`; `playkey` presses keys.
+`object.hide` (H) / `object.reveal` (Alt+H) hide objects. See [tests/logic.py](tests/logic.py).
+
 ### Virtualized geometry
 
 **Cluster LOD DAG.** `vgeo.build` prepares the active mesh for virtualized rendering, as Nanite
@@ -773,6 +784,7 @@ src/fvjit.s     the field JIT: templates to x86-64 (AVX / SSE), differential sel
 src/asset.s     assets: trees and materials saved, loaded (.beea files, library blobs)
 src/library.s   the content library: blobs by hash, kinds, thumbnails, packs, the Asset Browser
 src/play.s      play mode: the capsule walker, fly camera, captured mouse, keep / discard
+src/logic.s     logic graphs: event / action / data nodes, the play-mode VM
 src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
 src/procgen.s   terrain, erosion, L-systems, wave function collapse
