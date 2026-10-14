@@ -167,7 +167,7 @@ OPERATOR op_area_type_console,"area.type_console",    "Console",     op_area_typ
 OPERATOR op_area_type_activity,"area.type_activity", "AI Activity", op_area_type, op_check_area_type, ED_ACTIVITY, doc="Show what AI agents did in the active area"
 OPERATOR op_area_type_render,"area.type_render",   "Render",      op_area_type, op_check_area_type, ED_RENDER,   doc="Show the render in the active area"
 OPERATOR op_area_type_uved,"area.type_uv_editor",  "UV Editor",   op_area_type, op_check_area_type, ED_UVED,     doc="Show the UV editor in the active area"
-OPERATOR op_area_type_assets,"area.type_asset_browser", "Asset Browser", op_area_type, op_check_area_type, ED_ASSETS, doc="Show the saved node trees and materials (~/BeeModel/assets) in the active area"
+OPERATOR op_area_type_assets,"area.type_asset_browser", "Asset Browser", op_area_type, op_check_area_type, ED_ASSETS, doc="Show the content library (~/BeeModel/library) in the active area: search, tags, dependencies; drag an asset into a viewport"
 OPERATOR op_area_type_timeline,"area.type_timeline", "Timeline", op_area_type, op_check_area_type, ED_TIMELINE, doc="Show the timeline (frames, keys, playback) in the active area"
 OPERATOR op_area_type_dopesheet,"area.type_dope_sheet", "Dope Sheet", op_area_type, op_check_area_type, ED_DOPESHEET, doc="Show every curve's keys in rows in the active area"
 OPERATOR op_area_type_graph,"area.type_graph_editor", "Graph Editor", op_area_type, op_check_area_type, ED_GRAPH, doc="Show the animation curves with their handles in the active area"

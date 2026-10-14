@@ -87,7 +87,10 @@ _start:
 3:  cmp     dword ptr [rip+wp_pending], 0  # world cells waiting: look soon
     je      30f
     mov     edx, 16
-30: call    vd_streaming                # cluster pages on their way: look
+30: cmp     dword ptr [rip+lb_busy], 0  # a thumbnail being made: look
+    je      301f
+    mov     edx, 50
+301:call    vd_streaming                # cluster pages on their way: look
     test    eax, eax                    #  every frame
     jz      31f
     mov     edx, 16
@@ -113,6 +116,7 @@ _start:
     call    vd_poll                     # cluster pages that came in: drawn
     xor     edi, edi                    # world cells in and out for the camera
     call    wp_tick
+    call    lb_tick                     # library thumbnails, one at a time
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render

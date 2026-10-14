@@ -16,9 +16,10 @@
 .include "const.inc"
 .include "macros.inc"
 
-.globl ed_assets_draw
-.globl assets_press
 .globl op_asset_load
+.globl as_tree_blob
+.globl as_mat_blob
+.globl as_blob_load
 
 .equ AS_MAGIC,  0x41454542              # "BEEA"
 .equ TR_SZ,     4096
@@ -184,22 +185,15 @@ as_add_tree:
 8:  mov     eax, -1
     ret
 
-# tree.save_asset <tree>
-do_save_tree:
+# as_tree_blob(edi=tree) -> rax = as_buf, rdx = its bytes: the tree and
+#   every group it runs (nested), group numbers made places in the file + 1
+as_tree_blob:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
-    call    as_word
-    test    rax, rax
-    jz      .Lst_need
-    mov     rdi, rax
-    call    nt_find
-    test    eax, eax
-    js      .Lst_none
     mov     dword ptr [rip+as_n], 0
-    mov     edi, eax
     call    as_add_tree
     xor     r12d, r12d                  # each tree: its groups added
 1:  cmp     r12d, [rip+as_n]
@@ -262,16 +256,38 @@ do_save_tree:
     jmp     5b
 51: inc     r12d
     jmp     4b
-6:  lea     rax, [rip+as_list]          # named after the tree
+6:  lea     rax, [rip+as_buf]
+    mov     edx, [rip+as_n]
+    shl     edx, 12
+    add     edx, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tree.save_asset <tree>
+do_save_tree:
+    push    rbx
+    call    as_word
+    test    rax, rax
+    jz      .Lst_need
+    mov     rdi, rax
+    call    nt_find
+    test    eax, eax
+    js      .Lst_none
+    mov     edi, eax
+    call    as_tree_blob
+    mov     rbx, rdx
+    lea     rax, [rip+as_list]          # named after the tree
     mov     edi, [rax]
     call    nt_get
     mov     rdi, rax
     call    as_file
     mov     rdi, rax
     lea     rsi, [rip+as_buf]
-    mov     edx, [rip+as_n]
-    shl     edx, 12
-    add     edx, 16
+    mov     rdx, rbx
     call    file_write_atomic
     test    eax, eax
     jnz     .Lst_fail
@@ -292,10 +308,37 @@ do_save_tree:
 .Lst_need:
     lea     rdi, [rip+s_as_need_t]
     call    log_line
-9:  pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
+9:  pop     rbx
+    ret
+
+# as_mat_blob(edi=material) -> rax = as_buf, rdx = its bytes: the record
+#   (its shader graph too; image nodes left empty: images stay with scenes)
+as_mat_blob:
+    push    rbx
+    call    mat_get
+    mov     rsi, rax
+    lea     rdi, [rip+as_buf]
+    mov     dword ptr [rdi], AS_MAGIC
+    mov     dword ptr [rdi+4], 1
+    mov     dword ptr [rdi+8], 2
+    mov     dword ptr [rdi+12], 1
+    lea     rdi, [rip+as_buf+16]
+    mov     ecx, MA_SZ
+    rep     movsb
+    lea     rbx, [rip+as_buf+16]
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+GR_N]
+    jae     2f
+    cmp     ecx, 12
+    jae     2f
+    imul    eax, ecx, NODE_SZ
+    cmp     dword ptr [rbx+GR_NODES+rax+ND_TYPE], T_IMAGE
+    jne     11f
+    mov     dword ptr [rbx+GR_NODES+rax+ND_P], 0
+11: inc     ecx
+    jmp     1b
+2:  lea     rax, [rip+as_buf]
+    mov     edx, 16+MA_SZ
     pop     rbx
     ret
 
@@ -312,29 +355,8 @@ do_save_mat:
     test    eax, eax
     js      .Lsm_none
     mov     edi, eax
-    call    mat_get
-    mov     rsi, rax
-    lea     rdi, [rip+as_buf]
-    mov     dword ptr [rdi], AS_MAGIC
-    mov     dword ptr [rdi+4], 1
-    mov     dword ptr [rdi+8], 2
-    mov     dword ptr [rdi+12], 1
+    call    as_mat_blob
     lea     rdi, [rip+as_buf+16]
-    mov     ecx, MA_SZ
-    rep     movsb
-    lea     rbx, [rip+as_buf+16]        # image nodes: no image (images stay)
-    xor     ecx, ecx
-1:  cmp     ecx, [rbx+GR_N]
-    jae     2f
-    cmp     ecx, 12
-    jae     2f
-    imul    eax, ecx, NODE_SZ
-    cmp     dword ptr [rbx+GR_NODES+rax+ND_TYPE], T_IMAGE
-    jne     11f
-    mov     dword ptr [rbx+GR_NODES+rax+ND_P], 0
-11: inc     ecx
-    jmp     1b
-2:  mov     rdi, rbx
     call    as_file
     mov     rdi, rax
     lea     rsi, [rip+as_buf]
@@ -364,8 +386,9 @@ do_save_mat:
     pop     rbx
     ret
 
-# asset.load <name>
-do_load:
+# as_blob_load(rdi=data, rsi=bytes) -> eax = what came in (1 node trees,
+#   2 a material, 0 none: not one), edx = the tree (the first) / material
+as_blob_load:
     push    rbx
     push    r12
     push    r13
@@ -373,37 +396,29 @@ do_load:
     push    r15
     push    rbp
     sub     rsp, 24
-    call    as_word
-    test    rax, rax
-    jz      .Lld_need
-    mov     rdi, rax
-    call    as_file
-    mov     rdi, rax
-    call    file_read
-    test    rax, rax
-    jz      .Lld_bad
-    mov     rbx, rax                    # the mapping, its size
-    mov     [rsp], rdx
-    cmp     rdx, 16
-    jb      .Lld_badmap
+    mov     rbx, rdi
+    mov     [rsp], rsi
+    mov     dword ptr [rsp+8], 0
+    cmp     qword ptr [rsp], 16
+    jb      .Lbl_no
     cmp     dword ptr [rbx], AS_MAGIC
-    jne     .Lld_badmap
+    jne     .Lbl_no
     cmp     dword ptr [rbx+4], 1
-    jne     .Lld_badmap
+    jne     .Lbl_no
     mov     r12d, [rbx+12]              # count
     cmp     dword ptr [rbx+8], 2
-    je      .Lld_mat
+    je      .Lbl_mat
     cmp     dword ptr [rbx+8], 1
-    jne     .Lld_badmap
+    jne     .Lbl_no
     test    r12d, r12d                  # trees: whole
-    jz      .Lld_badmap
+    jz      .Lbl_no
     cmp     r12d, AS_MAXT
-    ja      .Lld_badmap
+    ja      .Lbl_no
     mov     eax, r12d
     shl     eax, 12
     add     eax, 16
     cmp     rax, [rsp]
-    ja      .Lld_badmap
+    ja      .Lbl_no
     xor     r13d, r13d                  # each: a new tree, its nodes copied
 1:  cmp     r13d, r12d
     jae     3f
@@ -413,7 +428,7 @@ do_load:
     mov     rdi, r14
     call    nt_new
     test    eax, eax
-    js      .Lld_unmap
+    js      .Lbl_no
     lea     rcx, [rip+as_map]
     mov     [rcx+r13*4], eax
     mov     edi, eax
@@ -457,24 +472,21 @@ do_load:
     jmp     5b
 51: inc     r13d
     jmp     4b
-6:  mov     edi, [rip+as_map]           # (said: the first)
-    call    nt_get
-    mov     rsi, rax
-    lea     rdi, [rip+s_as_loaded]
-    call    log_pair
-    jmp     .Lld_unmap
-.Lld_mat:
+6:  mov     eax, 1
+    mov     edx, [rip+as_map]
+    jmp     .Lbl_out
+.Lbl_mat:
     cmp     qword ptr [rsp], 16+MA_SZ
-    jb      .Lld_badmap
+    jb      .Lbl_no
     lea     rdi, [rbx+16]
     call    mat_new
     test    eax, eax
-    js      .Lld_unmap
+    js      .Lbl_no
     mov     r13d, eax
     mov     edi, eax
     call    graph_own
     test    rax, rax
-    jz      .Lld_unmap
+    jz      .Lbl_no
     lea     rdi, [rax+32]               # (its new name kept)
     lea     rsi, [rbx+16+32]
     mov     ecx, MA_SZ-32
@@ -482,22 +494,64 @@ do_load:
     cmp     dword ptr [rax+GR_N], 12
     jbe     7f
     mov     dword ptr [rax+GR_N], 0
-7:  mov     edi, r13d
-    call    mat_get
-    mov     rsi, rax
-    lea     rdi, [rip+s_as_loaded]
-    call    log_pair
-.Lld_unmap:
-    mov     rdi, rbx
-    mov     rsi, [rsp]
-    call    file_unmap
+7:  mov     eax, 2
+    mov     edx, r13d
+    jmp     .Lbl_out
+.Lbl_no:
+    xor     eax, eax
+    xor     edx, edx
+.Lbl_out:
+    mov     [rsp+8], eax
+    mov     [rsp+12], edx
     call    eval_flush
     mov     dword ptr [rip+dirty], 1
-    jmp     9f
-.Lld_badmap:
+    mov     eax, [rsp+8]
+    mov     edx, [rsp+12]
+    add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# asset.load <name>
+do_load:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    call    as_word
+    test    rax, rax
+    jz      .Lld_need
+    mov     rdi, rax
+    call    as_file
+    mov     rdi, rax
+    call    file_read
+    test    rax, rax
+    jz      .Lld_bad
+    mov     rbx, rax
+    mov     [rsp], rdx
+    mov     rdi, rax
+    mov     rsi, rdx
+    call    as_blob_load
+    mov     r12d, eax
+    mov     [rsp+8], edx
     mov     rdi, rbx
     mov     rsi, [rsp]
     call    file_unmap
+    test    r12d, r12d
+    jz      .Lld_bad
+    mov     edi, [rsp+8]
+    cmp     r12d, 2
+    je      1f
+    call    nt_get
+    jmp     2f
+1:  call    mat_get
+2:  mov     rsi, rax
+    lea     rdi, [rip+s_as_loaded]
+    call    log_pair
+    jmp     9f
 .Lld_bad:
     lea     rdi, [rip+s_as_bad]
     lea     rsi, [rip+im_word]
@@ -509,10 +563,6 @@ do_load:
     call    log_line
     call    undo_drop_last
 9:  add     rsp, 24
-    pop     rbp
-    pop     r15
-    pop     r14
-    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -700,140 +750,6 @@ do_list:
     jmp     1b
 9:  add     rsp, 8
     pop     r12
-    pop     rbx
-    ret
-
-# ed_assets_draw - the area body: the folder's assets, a row each
-ed_assets_draw:
-    push    rbx
-    push    r12
-    push    r13
-    sub     rsp, 16
-    inc     dword ptr [rip+ab_scan]     # (the folder again now and then)
-    cmp     dword ptr [rip+ab_scan], 60
-    jb      1f
-    call    ab_rescan
-1:  mov     edi, [rip+ed_x]
-    add     edi, 8
-    mov     esi, [rip+ed_y]
-    add     esi, 4
-    lea     rdx, [rip+s_as_title]
-    mov     ecx, COL_TEXT_DIM
-    call    draw_text
-    mov     eax, [rip+ed_x]
-    mov     [rip+ab_x0], eax
-    mov     eax, [rip+ed_w]
-    mov     [rip+ab_w], eax
-    mov     eax, [rip+ed_y]
-    add     eax, AB_HDR
-    mov     [rip+ab_y0], eax
-    cmp     dword ptr [rip+ab_n], 0
-    jne     2f
-    mov     edi, [rip+ed_x]
-    add     edi, 8
-    mov     esi, [rip+ab_y0]
-    add     esi, 4
-    lea     rdx, [rip+s_as_empty]
-    mov     ecx, COL_TEXT_DIM
-    call    draw_text
-    jmp     9f
-2:  call    ab_row_at                   # (hover)
-    mov     r13d, eax
-    xor     ebx, ebx
-3:  cmp     ebx, [rip+ab_n]
-    jae     9f
-    imul    r12d, ebx, AB_ROW
-    add     r12d, [rip+ab_y0]
-    mov     eax, r12d
-    sub     eax, [rip+ed_y]
-    add     eax, AB_ROW
-    cmp     eax, [rip+ed_h]
-    jg      9f
-    cmp     ebx, r13d
-    jne     4f
-    mov     edi, [rip+ed_x]
-    mov     esi, r12d
-    mov     edx, [rip+ed_w]
-    mov     ecx, AB_ROW
-    mov     r8d, COL_HOVER
-    call    fill_rect
-4:  lea     rdx, [rip+s_as_kind_t]      # kind, name
-    lea     rax, [rip+ab_kinds]
-    cmp     dword ptr [rax+rbx*4], 2
-    jne     5f
-    lea     rdx, [rip+s_as_kind_m]
-5:  mov     edi, [rip+ed_x]
-    add     edi, 12
-    lea     esi, [r12+3]
-    mov     ecx, COL_TEXT_DIM
-    call    draw_text
-    mov     eax, ebx
-    shl     eax, 6
-    lea     rdx, [rip+ab_names]
-    add     rdx, rax
-    mov     edi, [rip+ed_x]
-    add     edi, 100
-    lea     esi, [r12+3]
-    mov     ecx, COL_TEXT
-    call    draw_text
-    inc     ebx
-    jmp     3b
-9:  add     rsp, 16
-    pop     r13
-    pop     r12
-    pop     rbx
-    ret
-
-# ab_row_at -> eax = the row under the pointer (-1: none)
-ab_row_at:
-    mov     eax, [rip+ptr_x]
-    sub     eax, [rip+ab_x0]
-    js      8f
-    cmp     eax, [rip+ab_w]
-    jae     8f
-    mov     eax, [rip+ptr_y]
-    sub     eax, [rip+ab_y0]
-    js      8f
-    xor     edx, edx
-    mov     ecx, AB_ROW
-    div     ecx
-    cmp     eax, [rip+ab_n]
-    jae     8f
-    ret
-8:  mov     eax, -1
-    ret
-
-# assets_press(edi=button, esi, edx = pointer) -> eax = 1 when taken: a row
-#   added to the scene (asset.load)
-assets_press:
-    push    rbx
-    sub     rsp, 16
-    mov     dword ptr [rip+dirty], 1
-    cmp     edi, BTN_LEFT
-    jne     8f
-    call    ab_row_at
-    test    eax, eax
-    js      8f
-    shl     eax, 6
-    lea     rsi, [rip+ab_names]
-    add     rsi, rax
-    lea     rdi, [rip+ab_argbuf]
-    mov     ecx, 64
-    rep     movsb
-    lea     rdi, [rip+s_op_load]
-    call    find_op_by_name
-    test    rax, rax
-    jz      8f
-    mov     rbx, rax
-    lea     rax, [rip+ab_argbuf]
-    mov     [rip+op_arg], rax
-    mov     rdi, rbx
-    call    run_op
-    mov     qword ptr [rip+op_arg], 0
-    mov     eax, 1
-    jmp     9f
-8:  xor     eax, eax
-9:  add     rsp, 16
     pop     rbx
     ret
 

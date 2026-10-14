@@ -498,7 +498,21 @@ from scripts and agents).
 
 **Assets.** `tree.save_asset <tree>` saves a tree with every group it runs, `material.save_asset
 <material>` a material with its graph, to `~/BeeModel/assets`; `asset.load <name>` adds one to
-any scene. The **Asset Browser** area lists the folder: a click adds the asset.
+any scene.
+
+**Content library.** `lib.save` keeps any kind of asset in `~/BeeModel/library`: `object`
+(the selected objects, modifiers applied, with their materials as assets they depend on),
+`material`, `tree`, `rig` (an armature with its skinned meshes), `action` and `scene`, with
+`#tags`. Assets are stored by content: each blob is named by the hash of its bytes, so the
+same content is stored once, whoever saves it. Thumbnails are path-traced in a background
+process. The **Asset Browser** area shows the library as tiles; click the header to search
+(`lib.search stone`; names, kinds and tags), and the selected asset shows what it uses and what
+uses it (`lib.deps`). Drag a tile into a viewport and the asset lands on the surface under the
+pointer; a double click places it at the 3D cursor (`lib.place Gate 10 0 0`). `lib.pack
+metal.bee metal` writes a pack (a `.bee` file with a manifest, each blob once, thumbnails),
+and `lib.import` merges one; `lib.add <folder>` lists another library too. Every operation is an
+MCP tool (`op_lib_save`, `op_lib_place`, ...), and BeeScript has `lib(k)`, `libfind(words, i)`
+and `libinfo(asset, what)`. See [tests/library.py](tests/library.py).
 
 ### Virtualized geometry
 
@@ -747,7 +761,8 @@ src/ntree.s     node trees: the block, nodes, links, files
 src/geonodes.s  geometry nodes: evaluation, field compiler, tree.* operators
 src/fieldvm.s   the field VM: per-point programs in SSE blocks
 src/fvjit.s     the field JIT: templates to x86-64 (AVX / SSE), differential self-test
-src/asset.s     assets: trees and materials saved, loaded, the Asset Browser
+src/asset.s     assets: trees and materials saved, loaded (.beea files, library blobs)
+src/library.s   the content library: blobs by hash, kinds, thumbnails, packs, the Asset Browser
 src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
 src/procgen.s   terrain, erosion, L-systems, wave function collapse
