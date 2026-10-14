@@ -1785,10 +1785,12 @@ trace_ray:
 hive_prep:
     sub     rsp, 8
     mov     dword ptr [rip+hv_active], 0
+    mov     dword ptr [rip+gt_cpu], 1
     mov     edi, 4
     mov     esi, 4
     mov     edx, 1
     call    hive_start
+    mov     dword ptr [rip+gt_cpu], 0
     add     rsp, 8
     ret
 
@@ -2357,6 +2359,7 @@ hive_start:
     mov     r12d, edi
     mov     r13d, esi
     mov     [rip+hv_target], edx
+    mov     dword ptr [rip+hv_gpu], 0   # (nothing of the last render's)
     call    pt_unmap_all
     call    tex_init
     call    env_prep
@@ -2420,7 +2423,10 @@ hive_start:
     mov     dword ptr [rip+hv_ms], 0
     inc     dword ptr [rip+hv_seed]
     mov     dword ptr [rip+gt_batch], 1
+    cmp     dword ptr [rip+gt_cpu], 0   # (hive_prep: trace_ray, the CPU's)
+    jne     11f
     call    gpu_pt_begin                # its passes on the GPU (gpu.s)?
+11:
     mov     eax, 1
     jmp     9f
 8:  xor     eax, eax
@@ -3076,6 +3082,7 @@ pt_maps:        .skip 16*16             # 16 mappings: pointer, bytes
 pt_nmaps:       .skip 4
 hv_debug:       .skip 4
 gt_batch:       .skip 4                 # gpu_tick's samples per batch
+gt_cpu:         .skip 4                 # hive_start without the GPU
 hv_den_on:      .skip 4                 # beauty shows hv_den (denoised)
 hv_env:         .skip 4                 # the world is an HDRI (no studio sky, sun)
 rv_stride:      .skip 4
