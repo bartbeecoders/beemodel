@@ -539,6 +539,7 @@ def main():
     physics_panel()
     mechanisms()
     cloth()
+    sim_cache()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -4093,6 +4094,82 @@ def cloth():
     f.shot('107_cloth.png')
     a = q('print(evpos("Sheet", 0, "y") < -0.3, frame() > 10)')
     check(a == '1 1', f'Space plays the cloth falling over the ball ({a})')
+    f.proc.kill()
+
+
+def sim_cache():
+    """The simulation cache: frames kept as the simulation reaches them and
+    played back when scrubbing (the same places, cloth to 16 bits); the
+    start keeps them; an edit drops them; a bake stays through edits, is
+    saved and holds its last frame; sim.free; 1000 boxes scrubbed back
+    faster than 60 fps. In the window: the timeline shows the cached and
+    the baked frames."""
+    print('  -- simulation cache --')
+    home = tempfile.mkdtemp(prefix='bee-sc-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 20)\nselect("Ground")\nop("rigid.add", "passive box")\n'
+            'add("cube", "Box", 0, 3, 0)\nscale("Box", 0.5)\nrotate("Box", 0.3, 0.2, 0.1)\nselect("Box")\nop("rigid.add", "active box")\n'
+            'y30 = 0\nfor f in 2..61 {\n frame(f)\n if f == 30 { y30 = get("Box", "y") }\n}\nprint(cacheinfo(0), rbinfo(6))\n'
+            'frame(30)\nprint(cacheinfo(0), rbinfo(6), get("Box", "y") == y30)\n'
+            'frame(1)\nprint(get("Box", "y"), cacheinfo(0))\nframe(30)\nprint(get("Box", "y") == y30, cacheinfo(0))\n'
+            'frame(1)\nmove("Box", 0, 4, 0)\nframe(30)\nprint(cacheinfo(0), get("Box", "y") == y30)\n'
+            'op("sim.bake")\nprint(cacheinfo(0), cacheinfo(3))\nframe(100)\nb = get("Box", "y")\n'
+            'op("rigid.world", "gravity 0 5 0")\nframe(1)\nframe(100)\nprint(get("Box", "y") == b, cacheinfo(0))\n'
+            'op("file.save", "~/BeeModel/r.bee")\nop("file.new")\nop("file.open", "~/BeeModel/r.bee")\n'
+            'frame(100)\nprint(cacheinfo(0), cacheinfo(3), get("Box", "y") == b)\nframe(250)\ne = get("Box", "y")\nframe(300)\nprint(get("Box", "y") == e)\n'
+            'op("sim.free")\nprint(cacheinfo(0), cacheinfo(3), get("Box", "y") > 3)\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+    out = [l.strip() for l in r.stdout.split('\n')] + [''] * 12
+    check(out[0] == '59 295' and out[1] == '59 295 1' and out[2] == '3 59' and out[3] == '1 59',
+          f'rigid bodies: each frame kept; scrubbing back plays it (no steps), the start keeps it ({out[:4]})')
+    check(out[4] == '29 0', f'moving a body at the start drops the cache; simulated again from there ({out[4]})')
+    check(out[5] == '249 1' and out[6] == '1 249' and out[7] == '249 1 1' and out[8] == '1' and out[9] == '299 0 1',
+          f'a bake: the frame range kept through a change of gravity, saved and reopened, its last frame held; sim.free simulates again ({out[5:10]})')
+    code = ('delete("Cube")\nadd("grid", "Flag", 0, 2, 0)\nselect("Flag")\nop("cloth.add", "cloth")\nop("cloth.pin", "above x 0.95")\n'
+            'y = 0\nfor f in 2..61 {\n frame(f)\n if f == 30 { y = evpos("Flag", 5, "y") }\n}\nprint(cacheinfo(1))\n'
+            'frame(30)\nprint(cacheinfo(1), abs(evpos("Flag", 5, "y") - y) < 0.0002)\n'
+            'frame(1)\nprint(evpos("Flag", 5, "y"), cacheinfo(1))\nframe(30)\nprint(cacheinfo(1), abs(evpos("Flag", 5, "y") - y) < 0.0002)\n'
+            'frame(60)\nmove("Flag", 0, 1, 0)\nframe(30)\nprint(cacheinfo(1))\n'
+            'op("sim.bake", "cloth")\nprint(cacheinfo(1), cacheinfo(4), cacheinfo(2) < 0.5)\nframe(80)\nb = evpos("Flag", 5, "y")\n'
+            'op("file.save", "~/BeeModel/c.bee")\nop("file.new")\nop("file.open", "~/BeeModel/c.bee")\n'
+            'frame(80)\nprint(cacheinfo(1), cacheinfo(4), evpos("Flag", 5, "y") == b)\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+    out = [l.strip() for l in r.stdout.split('\n')] + [''] * 8
+    check(out[0] == '59' and out[1] == '59 1' and out[2] == '0 59' and out[3] == '59 1' and out[4] == '29',
+          f'cloth: each frame kept (16 bits a coordinate, within 0.2 mm), played back, dropped when the flag moves ({out[:5]})')
+    check(out[5] == '249 1 1' and out[6] == '249 1 1', f'cloth baked (121 vertices x 249 frames < 0.5 MB), saved and reopened ({out[5:7]})')
+    code = ('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 40)\n'
+            'for k in 0..10 {\n for i in 0..10 {\n  for j in 0..10 {\n   n = "B" + str(k * 100 + i * 10 + j)\n'
+            '   add("cube", n, i * 1.2 - 6 + 0.6 * (k % 2), 1 + k * 1.2, j * 1.2 - 6 + 0.6 * (k % 2))\n'
+            '   rotate(n, 0.1 * k, 0.37 * k + 0.1 * i, 0.05 * j)\n   scale(n, 0.5)\n  }\n }\n}\n'
+            'select()\nop("object.select_all")\nop("rigid.add", "active box")\nselect("Ground")\nop("rigid.add", "passive box")\n'
+            'for f in 2..241 { frame(f) }\ny = get("B555", "y")\nframe(120)\nc0 = clock()\nfor f in 2..241 { frame(242 - f) }\n'
+            't = clock() - c0\nframe(240)\nprint(cacheinfo(0), t / 239, get("B555", "y") == y, cacheinfo(2))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=600)
+    w = (r.stdout.strip().split('\n') or [''])[-1].split()
+    ok = len(w) == 4 and w[0] == '239' and w[2] == '1'
+    check(ok and float(w[1]) < 16.7 * (2 if os.environ.get('CI') else 1),
+          f'1000 boxes: 239 frames cached ({w[3] if ok else "?"} MB), scrubbed back at {w[1] if ok else "?"} ms a frame (60 fps: 16.7)')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.enter(600, 300)
+    q('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 20)\nselect("Ground")\nop("rigid.add", "passive box")\n'
+      'add("cube", "Box", 0, 3, 0)\nselect("Box")\nop("rigid.add", "active box")\nselect()')
+    f.move(600, 700)
+    q('op("area.type_timeline")')
+    q('for f in 2..126 { frame(f) }')
+    f.pump(0.3)
+    cached = sum(1 for x in range(0, 1280) for y in range(600, 800) if px(f, x, y) == 0x9a6a3a)
+    q('op("sim.bake")')
+    f.pump(0.3)
+    f.shot('108_sim_cache.png')
+    baked = sum(1 for x in range(0, 1280) for y in range(600, 800) if px(f, x, y) == 0xe0902c)
+    check(cached > 400 and baked > 2 * cached * 0.9,
+          f'the timeline shows the cached frames, then the whole baked range ({cached} -> {baked} px)')
     f.proc.kill()
 
 

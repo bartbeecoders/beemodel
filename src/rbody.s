@@ -3476,7 +3476,11 @@ rb_sethash:
     imul    rsi, rdx, RB_SZ_
     lea     rsi, [rbx+AN_RB_+rsi]
     mov     ecx, 4
-3:  xor     rax, [rsi]
+3:  mov     r9, [rsi]
+    cmp     ecx, 1                      # (not RB_FLAGS bit 0: the start kept)
+    jne     31f
+    btr     r9, 32
+31: xor     rax, r9
     imul    rax, r8
     add     rsi, 8
     dec     ecx
@@ -3501,27 +3505,58 @@ rb_reset:
     jmp     rb_free
 
 # rb_frame(xmm0=frame) - the simulation at that frame: none at or before the
-#   start (objects back where they began); else stepped on (or begun again
-#   when going back or when the settings changed), bodies into objects
+#   start (objects back where they began); a cached frame played back; else
+#   stepped on (or begun again when going back or when the key changed),
+#   each whole frame reached kept in the cache, bodies into objects
 rb_frame:
     push    rbx
     push    r12
-    sub     rsp, 40
+    sub     rsp, 56
     cmp     dword ptr [rip+rb_busy], 0
     jne     .Lrf_ret
     mov     dword ptr [rip+rb_busy], 1
     movss   [rsp], xmm0
     mov     rbx, [rip+an_cur]
     test    rbx, rbx
-    jz      .Lrf_none
+    jz      .Lrf_gone
     cmp     dword ptr [rbx+AN_NRB_], 0
-    je      .Lrf_none
+    je      .Lrf_gone
     cvtsi2ss xmm1, dword ptr [rbx+AN_START]
     movss   [rsp+4], xmm1
-    comiss  xmm0, xmm1
-    jbe     .Lrf_none
-    call    rb_sethash
+    call    rb_key
     mov     r12, rax
+    xor     edi, edi
+    mov     rsi, r12
+    mov     edx, [rbx+AN_START]
+    call    sc_check
+    mov     [rsp+32], eax               # baked
+    movss   xmm0, [rsp]
+    comiss  xmm0, [rsp+4]
+    jbe     .Lrf_none
+    cvttss2si esi, xmm0                 # a cached frame?
+    cvtsi2ss xmm1, esi
+    cmp     dword ptr [rsp+32], 0
+    je      11f
+    xor     edi, edi                    # baked: the frame (or the last)
+    mov     [rsp+36], esi
+    call    sc_last
+    mov     esi, [rsp+36]
+    cmp     esi, eax
+    cmovg   esi, eax
+    jmp     12f
+11: ucomiss xmm0, xmm1
+    jne     13f
+12: xor     edi, edi
+    call    sc_get
+    test    rax, rax
+    jz      13f
+    mov     [rsp+40], rax
+    call    rb_capture
+    mov     rdi, [rsp+40]
+    call    rb_play
+    jmp     .Lrf_out
+13: cmp     dword ptr [rsp+32], 0       # (baked, nothing there: as it is)
+    jne     .Lrf_out
     cmp     dword ptr [rip+rb_on], 0
     je      2f
     cmp     r12, [rip+rb_hash]
@@ -3538,16 +3573,35 @@ rb_frame:
     mov     dword ptr [rip+rb_time], 0
 3:  call    now_ms                      # steps up to the frame's time
     mov     [rsp+8], rax
-    movss   xmm0, [rsp]
-    subss   xmm0, [rsp+4]
     movss   xmm1, [rbx+AN_FPS]
     xorps   xmm2, xmm2
     comiss  xmm1, xmm2
     ja      31f
     movss   xmm1, [rip+rx_24]
-31: divss   xmm0, xmm1
+31: movss   [rsp+20], xmm1              # fps
+    movss   xmm0, [rsp]
+    subss   xmm0, [rsp+4]
+    divss   xmm0, xmm1
     movss   [rsp+16], xmm0              # the time to reach
-4:  movss   xmm0, [rip+rb_dt]
+4:  xor     edi, edi                    # a whole frame reached: kept
+    call    sc_last
+    inc     eax
+    cvtsi2ss xmm0, eax
+    comiss  xmm0, [rsp]
+    ja      41f
+    mov     [rsp+24], eax
+    subss   xmm0, [rsp+4]
+    divss   xmm0, [rsp+20]
+    movss   xmm1, [rip+rb_dt]
+    mulss   xmm1, [rip+rx_half]
+    addss   xmm1, [rip+rb_time]
+    comiss  xmm1, xmm0
+    jb      41f
+    mov     esi, [rsp+24]
+    call    rb_record
+    test    rax, rax
+    jnz     4b
+41: movss   xmm0, [rip+rb_dt]
     mulss   xmm0, [rip+rx_half]
     addss   xmm0, [rip+rb_time]
     comiss  xmm0, [rsp+16]
@@ -3566,27 +3620,67 @@ rb_frame:
     call    writeback
     mov     dword ptr [rip+dirty], 1
     jmp     .Lrf_out
+.Lrf_gone:                              # no bodies: nothing cached
+    xor     edi, edi
+    call    sc_clear
 .Lrf_none:                              # no simulation: objects as they began
     call    rb_free
     call    rb_restore
 .Lrf_out:
     mov     dword ptr [rip+rb_busy], 0
 .Lrf_ret:
-    add     rsp, 40
+    add     rsp, 56
     pop     r12
     pop     rbx
     ret
 
-# writeback - each moving body's place into its object: loc = P - R com,
-#   rotation as Euler angles
-writeback:
+# body_pose(rdi=body, rsi=out: loc, rot) - its object's place: loc = P - R com,
+#   the rotation as Euler angles
+body_pose:
     push    rbp
     mov     rbp, rsp
     push    rbx
     push    r12
-    push    r13
     and     rsp, -16
-    sub     rsp, 112
+    sub     rsp, 128
+    mov     rbx, rdi
+    mov     r12, rsi
+    movaps  xmm0, [rbx+BD_COM]
+    MV3     xmm1, rbx+BD_R, xmm0, xmm2, xmm3
+    movaps  xmm0, [rbx+BD_POS]
+    subps   xmm0, xmm1                  # loc
+    movaps  [rsp+64], xmm0
+    xor     ecx, ecx                    # [R | loc]
+1:  mov     eax, ecx
+    shl     eax, 4
+    movaps  xmm1, [rbx+BD_R+rax]
+    movaps  [rsp+rax], xmm1
+    movss   xmm1, [rsp+64+rcx*4]
+    movss   [rsp+rax+12], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    lea     rdi, [rsp+80-60]            # (pose_from_mat writes at +60)
+    lea     rsi, [rsp]
+    call    pose_from_mat
+    mov     rax, [rsp+80]               # loc, rot (not the scale)
+    mov     [r12], rax
+    mov     rax, [rsp+88]
+    mov     [r12+8], rax
+    mov     rax, [rsp+96]
+    mov     [r12+16], rax
+    lea     rsp, [rbp-16]
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# writeback - each moving body's place into its object
+writeback:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 32
     xor     r12d, r12d
 1:  mov     eax, [rip+rb_nb]
     dec     eax
@@ -3598,39 +3692,183 @@ writeback:
     mov     r13, [rbx+BD_OBJ]
     test    r13, r13
     jz      2f
-    movaps  xmm0, [rbx+BD_COM]
-    MV3     xmm1, rbx+BD_R, xmm0, xmm2, xmm3
-    movaps  xmm0, [rbx+BD_POS]
-    subps   xmm0, xmm1                  # loc
-    movaps  [rsp+64], xmm0
-    xor     ecx, ecx                    # [R | loc]
-21: mov     eax, ecx
-    shl     eax, 4
-    movaps  xmm1, [rbx+BD_R+rax]
-    movaps  [rsp+rax], xmm1
-    movss   xmm1, [rsp+64+rcx*4]
-    movss   [rsp+rax+12], xmm1
-    inc     ecx
-    cmp     ecx, 3
-    jb      21b
-    lea     rdi, [rsp+80-60]            # (pose_from_mat writes at +60)
+    mov     rdi, rbx
     lea     rsi, [rsp]
-    call    pose_from_mat
-    mov     rax, [rsp+80]               # loc, rot (not the scale)
+    call    body_pose
+    mov     rax, [rsp]
     mov     [r13+OB_LOC], rax
-    mov     eax, [rsp+88]
+    mov     eax, [rsp+8]
     mov     [r13+OB_LOC+8], eax
-    mov     rax, [rsp+92]
+    mov     rax, [rsp+12]
     mov     [r13+OB_ROT], rax
-    mov     eax, [rsp+100]
+    mov     eax, [rsp+20]
     mov     [r13+OB_ROT+8], eax
 2:  inc     r12d
     jmp     1b
-9:  lea     rsp, [rbp-24]
+9:  add     rsp, 32
     pop     r13
     pop     r12
     pop     rbx
-    pop     rbp
+    ret
+
+# rb_record(esi=frame) -> rax = 0 when not kept: the moving bodies' places
+#   into the cache (count, then uid, loc, rot each)
+rb_record:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r14d, esi
+    xor     r12d, r12d                  # how many
+    xor     ecx, ecx
+1:  mov     eax, [rip+rb_nb]
+    dec     eax
+    cmp     ecx, eax
+    jae     2f
+    BODY    rdx, rcx
+    cmp     dword ptr [rdx+BD_TYPE], 1
+    jne     11f
+    cmp     qword ptr [rdx+BD_OBJ], 0
+    je      11f
+    inc     r12d
+11: inc     ecx
+    jmp     1b
+2:  imul    edx, r12d, 28
+    add     edx, 4
+    xor     edi, edi
+    mov     esi, r14d
+    call    sc_add
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    mov     [r13], r12d
+    add     r13, 4
+    xor     r12d, r12d
+3:  mov     eax, [rip+rb_nb]
+    dec     eax
+    cmp     r12d, eax
+    jae     8f
+    BODY    rbx, r12
+    cmp     dword ptr [rbx+BD_TYPE], 1
+    jne     4f
+    mov     rax, [rbx+BD_OBJ]
+    test    rax, rax
+    jz      4f
+    mov     eax, [rax+OB_UID]
+    mov     [r13], eax
+    mov     rdi, rbx
+    lea     rsi, [r13+4]
+    call    body_pose
+    add     r13, 28
+4:  inc     r12d
+    jmp     3b
+8:  mov     eax, 1
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# rb_play(rdi=record) - a cached frame's places into the objects
+rb_play:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, [rbx]
+    add     rbx, 4
+1:  test    r12d, r12d
+    jz      9f
+    mov     edi, [rbx]
+    call    obj_by_uid
+    test    rax, rax
+    jz      2f
+    mov     rcx, [rbx+4]
+    mov     [rax+OB_LOC], rcx
+    mov     ecx, [rbx+12]
+    mov     [rax+OB_LOC+8], ecx
+    mov     rcx, [rbx+16]
+    mov     [rax+OB_ROT], rcx
+    mov     ecx, [rbx+24]
+    mov     [rax+OB_ROT+8], ecx
+2:  add     rbx, 28
+    dec     r12d
+    jmp     1b
+9:  mov     dword ptr [rip+dirty], 1
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# rb_capture - each body's start kept (RB_INIT) before its object moves
+rb_capture:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, [rip+an_cur]
+    xor     r12d, r12d
+1:  cmp     r12d, [rbx+AN_NRB_]
+    jae     9f
+    imul    r13, r12, RB_SZ_
+    lea     r13, [rbx+AN_RB_+r13]
+    test    dword ptr [r13+RB_FLAGS], 1
+    jnz     2f
+    mov     rdi, r13
+    call    rb_entry_obj
+    test    rax, rax
+    jz      2f
+    lea     rsi, [rax+OB_LOC]
+    lea     rdi, [r13+RB_INIT]
+    mov     ecx, 36
+    rep     movsb
+    or      dword ptr [r13+RB_FLAGS], 1
+2:  inc     r12d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# rb_key -> rax: the settings, the frame range, each body's start and mesh
+#   (what the cache belongs to)
+rb_key:
+    push    rbx
+    push    r12
+    push    r13
+    call    rb_sethash
+    mov     rbx, [rip+an_cur]
+    lea     rdi, [rbx+AN_START]
+    mov     esi, 12
+    call    sc_mix
+    xor     r12d, r12d
+1:  cmp     r12d, [rbx+AN_NRB_]
+    jae     9f
+    push    rax
+    imul    r13, r12, RB_SZ_
+    lea     r13, [rbx+AN_RB_+r13]
+    mov     rdi, r13
+    call    rb_entry_obj
+    mov     rdx, rax
+    pop     rax
+    test    rdx, rdx
+    jz      2f
+    push    rdx
+    lea     rdi, [r13+RB_INIT]          # where it starts
+    test    dword ptr [r13+RB_FLAGS], 1
+    jnz     11f
+    lea     rdi, [rdx+OB_LOC]
+11: mov     esi, 36
+    call    sc_mix
+    pop     rdx
+    mov     rdi, [rdx+OB_MESH]
+    call    sc_meshhash
+2:  inc     r12d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # rb_info(edi=what) -> xmm0: 0 bodies, 1 contact points, 2 awake, 3 islands,
