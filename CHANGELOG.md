@@ -6,6 +6,32 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Cluster LOD DAG** (virtualized geometry, part 1, #143). `vgeo.build`
+  turns the active mesh into meshlets: clusters of up to 128 triangles and
+  128 vertices, grown over their neighbours and seeded in Morton order.
+  - **Levels:** each level groups neighbouring clusters, by shared edges and
+    up to 1024 triangles, preferring edges across the old group borders so
+    those get simplified too. Each group is simplified to half its triangles
+    (area-weighted quadrics, half-edge collapses), with the group's border
+    locked and no collapse that folds a pillow. It is then split into new
+    clusters. This repeats until one cluster is left (a 1M-triangle sculpt:
+    14 levels, one root of ~120 triangles).
+  - **Errors:** every cluster keeps its bounds and the error and LOD sphere
+    of the group that made it and of its parents' group. Errors only grow up
+    the DAG and the spheres nest, so any cut is crack-free. The self-test
+    checks every level, 16 error thresholds and 24 cameras on a torus, a
+    rippled 1M-triangle grid and 216 separate cubes.
+  - **Storage:** one block, shared by the mesh's copies, saved in a VGEO
+    chunk that starts on a page of the `.bee` file. In the window it is built
+    on a background thread while the UI keeps drawing: about 120 ms per
+    million triangles on 32 threads. Editing the mesh makes it out of date.
+  - **Operators and scripts:** `vgeo.extract <level | error>` adds a cut as
+    a mesh with its clusters coloured, `vgeo.clear` drops the DAG, and
+    BeeScript's `vgeo(name, k)` reports on it.
+- **Job system:** `parallel_for` is shared by the UI thread and one
+  background thread (`job_spawn`), which take turns.
+
 ## [0.10.0] - 2026-10-14
 
 Phase 9 of the masterplan, "Animation & simulation". Scenes move:

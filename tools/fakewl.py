@@ -540,6 +540,7 @@ def main():
     mechanisms()
     cloth()
     sim_cache()
+    virtual_geometry()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -4170,6 +4171,72 @@ def sim_cache():
     baked = sum(1 for x in range(0, 1280) for y in range(600, 800) if px(f, x, y) == 0xe0902c)
     check(cached > 400 and baked > 2 * cached * 0.9,
           f'the timeline shows the cached frames, then the whole baked range ({cached} -> {baked} px)')
+    f.proc.kill()
+
+def virtual_geometry():
+    """Virtualized geometry, part 1: a mesh's cluster LOD DAG (vgeo.build) -
+    clusters of <= 128 triangles simplified level by level to one root,
+    every cut crack-free; a level extracted as a mesh; saved in the .bee file
+    (page aligned) and read back; out of date after an edit. In the window
+    the DAG is built in the background while the UI keeps drawing."""
+    print('  -- virtual geometry --')
+    home = tempfile.mkdtemp(prefix='bee-vg-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('delete("Cube")\nadd("sphere", "S", 0, 0, 0)\nmodifier("S", "subsurf")\nmodset("S", 0, "levels", 5)\nmodapply("S", 0)\n'
+            'sculpt("S", "draw", 0, 0.3, 1.0, 0.3, 0.1, 0.95, 0.3, 1)\nselect("S")\nprint(vgeo("S", 0))\n'
+            't = clock()\nop("vgeo.build")\nt = clock() - t\n'
+            'print(vgeo("S", 0), vgeo("S", 4), vgeo("S", 1), vgeo("S", 2), vgeo("S", 9), vgeo("S", 5), vgeo("S", 10), vgeo("S", 11), t)\n'
+            'print(vgeo("S", 12), vgeo("S", 8) < 0.5, vgeo("S", 300 + 3) < 0.002, vgeo("S", 13) < 2.2 * vgeo("S", 4))\n'
+            'op("vgeo.extract", "3")\nprint(faces("LOD") == vgeo("S", 103), vgeo("LOD", 0))\n'
+            'n = vgeo("S", 1)\nop("file.save", "~/BeeModel/v.bee")\nop("file.new")\nop("file.open", "~/BeeModel/v.bee")\n'
+            'print(vgeo("S", 0), vgeo("S", 1) == n, vgeo("S", 12))\n'
+            'sculpt("S", "draw", 0, 0.3, 1.0, 0.3, 0.1, 0.95, 0.3, 1)\nprint(vgeo("S", 0))\nselect("S")\nop("vgeo.clear")\nprint(vgeo("S", 0))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+    out = [l.strip() for l in r.stdout.split('\n')] + [''] * 8
+    w = out[1].split()
+    ok = len(w) == 9 and w[0] == '2' and w[4] == '1' and int(w[1]) > 1000000
+    check(out[0] == '0' and ok and int(w[6]) <= 128 and int(w[7]) <= 128 and float(w[8]) < 2000 * (2 if os.environ.get('CI') else 1),
+          f'a 1M-triangle sculpt: {w[2] if ok else "?"} clusters (<= 128 triangles and vertices) in {w[3] if ok else "?"} levels '
+          f'to one root of {w[5] if ok else "?"} triangles, built in {w[8] if ok else "?"} ms')
+    check(out[2] == '1 1 1 1', f'every cut crack-free (each level, 16 errors, 24 cameras); errors small, ~2x the triangles in all ({out[2]})')
+    check(out[3] == '1 0', f'vgeo.extract: a level as a mesh, its clusters coloured ({out[3]})')
+    check(out[4] == '2 1 1', f'saved in the .bee file and read back ({out[4]})')
+    check(out[5] == '3' and out[6] == '0', f'out of date after a sculpt stroke; vgeo.clear ({out[5:7]})')
+    data = open(os.path.join(home, 'BeeModel', 'v.bee'), 'rb').read()
+    at = data.find(b'VGEO', 8)
+    blk = data.find(b'VGEO', at + 4)
+    check(at > 0 and blk > 0 and blk % 4096 == 0, f'the DAG block starts on a page of the file (offset {blk})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.enter(600, 300)
+    f.move(600, 300)
+    q('delete("Cube")\nadd("sphere", "S", 0, 1, 0)\nmodifier("S", "subsurf")\nmodset("S", 0, "levels", 6)\nmodapply("S", 0)\nselect("S")')
+    q('op("vgeo.build")')
+    st = q('print(vgeo("S", 0))')
+    lat, polls = [], 0
+    t0 = time.time()
+    while time.time() - t0 < 60:
+        f.latencies = []
+        f.t_input = time.time()
+        f.key(106)                                  # Right: a frame on
+        lat += f.latencies
+        polls += 1
+        if q('print(vgeo("S", 0))') != '1':
+            break
+    secs = time.time() - t0
+    fin = q('print(vgeo("S", 0), vgeo("S", 4), vgeo("S", 9))').split()
+    lat = sorted(lat)
+    med = lat[len(lat) // 2] if lat else 1e9
+    check(st == '1' and fin[:1] == ['2'] and fin[2:] == ['1'] and len(lat) >= 3 and med < 50 * (2 if os.environ.get('CI') else 1),
+          f'in the window: {fin[1:2]} triangles virtualized in the background ({secs:.1f} s), the UI drew {len(lat)} frames '
+          f'meanwhile, {med:.1f} ms after a key at the median')
+    q('op("vgeo.extract", "5")\ndelete("S")\nscale("LOD", 4.5)\nselect()')
+    f.pump(0.5)
+    f.shot('109_vgeo_clusters.png')
     f.proc.kill()
 
 

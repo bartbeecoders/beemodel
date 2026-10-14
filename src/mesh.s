@@ -294,7 +294,9 @@ mesh_uv_free:
     mov     qword ptr [rbx+ME_PIN], 0
     mov     esi, [rbx+ME_CAPV]
     call    uv_unmap
-51:
+51: mov     rdi, [rbx+ME_VGEO]          # (its cluster DAG)
+    mov     qword ptr [rbx+ME_VGEO], 0
+    call    vg_unref
     pop     rbx
     ret
 uv_unmap:
@@ -407,7 +409,11 @@ mesh_copy:
     mov     rsi, [rbx+ME_PIN]
     mov     ecx, [rbx+ME_NVERTS]
     rep     movsb
-7:  pop     rax
+7:  mov     rdi, [rbx+ME_VGEO]          # (the cluster DAG: shared)
+    mov     rax, [rsp]
+    mov     [rax+ME_VGEO], rdi
+    call    vg_ref
+    pop     rax
 9:  pop     rbx
     ret
 

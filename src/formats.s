@@ -60,6 +60,7 @@
 .equ TAG_MSHK,      0x4B48534D          # "MSHK"
 .equ TAG_MPIN,      0x4E49504D          # "MPIN"
 .equ TAG_SIMC,      0x434D4953          # "SIMC"
+.equ TAG_VGEO,      0x4F454756          # "VGEO"
 .equ AR_SZ_,        64 + 128*128
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
@@ -388,6 +389,36 @@ bee_save:
     call    chunk_begin
     call    simc_write
     call    chunk_end
+    xor     r12d, r12d                  # VGEO (cluster DAGs, one a mesh;
+41: cmp     r12d, [rip+n_mesh_tab]      #   the block on a page of the file)
+    jae     43f
+    lea     rax, [rip+mesh_tab]
+    mov     rdi, [rax+r12*8]
+    call    vg_get
+    test    rax, rax
+    jz      42f
+    mov     r13, rax
+    mov     edi, TAG_VGEO
+    call    chunk_begin
+    mov     edi, r12d
+    call    wb_u32
+    mov     eax, [rip+wb_len]
+    add     eax, 4
+    neg     eax
+    and     eax, 4095
+    mov     ebx, eax
+    mov     edi, eax
+    call    wb_u32
+    lea     rsi, [rip+vg_zero]
+    mov     edx, ebx
+    call    wb_bytes
+    mov     rsi, r13
+    mov     rdx, [r13+112]              # (VH_BYTES)
+    call    wb_bytes
+    call    chunk_end
+42: inc     r12d
+    jmp     41b
+43:
     mov     edi, TAG_CADD
     call    chunk_begin
     call    cad_write
@@ -1126,10 +1157,27 @@ bee_load:
     mov     [rip+mshk_size], ebp
     jmp     23f
 286:cmp     eax, TAG_MPIN
-    jne     287f
+    jne     288f
     lea     rax, [rbx+8]
     mov     [rip+mpin_chunk], rax
     mov     [rip+mpin_size], ebp
+    jmp     23f
+288:cmp     eax, TAG_VGEO
+    jne     287f
+    lea     rdi, [rbx+8]                # (after the meshes)
+    mov     esi, ebp
+    call    vgeo_read
+    test    rax, rax
+    jz      23f
+    cmp     edx, [rip+n_mesh_tab]
+    jae     289f
+    lea     rcx, [rip+mesh_tab]
+    mov     rdi, [rcx+rdx*8]
+    mov     rsi, rax
+    call    vg_attach
+    jmp     23f
+289:mov     rdi, rax
+    call    vg_unref
     jmp     23f
 287:cmp     eax, TAG_SIMC
     jne     284f

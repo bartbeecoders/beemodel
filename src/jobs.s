@@ -19,10 +19,16 @@
 .globl jobs_cancel
 .globl n_workers
 .globl thread_arena
+.globl job_spawn
+.globl bg_tid
 
 .equ SYS_CLONE,         56
 .equ SYS_EXIT,          60
 .equ SYS_FUTEX,         202
+.equ SYS_GETTID,        186
+.equ FUTEX_WAIT,        0
+.equ CLONE_TID_FLAGS,   0x01200000      # CHILD_SETTID | CHILD_CLEARTID
+.equ BG_STACK_BYTES,    0x100000        # 1 MiB for the background thread
 .equ SYS_GETAFFINITY,   204
 .equ FUTEX_WAIT_PRIV,   128
 .equ FUTEX_WAKE_PRIV,   129
@@ -44,6 +50,11 @@ pf_count:       .skip 4
 pf_grain:       .skip 4
 pf_cancel:      .skip 4
 pf_busy:        .skip 4
+pf_lock:        .skip 4                 # futex mutex: 0 free, 1 held, 2 waited on
+pf_owner:       .skip 4                 # thread id of the parallel_for running
+main_tid:       .skip 4
+bg_tid:         .skip 4                 # the background thread (0: none)
+bg_stack:       .skip 8
 n_workers:      .skip 4
 cpumask:        .skip 128
 thread_arena:   .skip ARENA_SZ*MAX_THREADS
@@ -70,6 +81,9 @@ jobs_init:
     push    rbx
     push    r12
     push    r13
+    mov     eax, SYS_GETTID
+    syscall
+    mov     [rip+main_tid], eax
     lea     rdi, [rip+s_env_threads]
     call    getenv
     test    rax, rax
@@ -247,13 +261,32 @@ parallel_for:
     push    r12
     push    r13
     push    r14
-    mov     rbx, rdi                    # fn
+    push    r15
+    sub     rsp, 8                      # (jobs start with rsp as workers'
+    mov     rbx, rdi                    #   do: the same parity as before) fn
     mov     r12, rsi                    # ctx
     mov     r13d, edx                   # count
     mov     r14d, ecx                   # grain
-    cmp     dword ptr [rip+pf_busy], 0
+    xor     r15d, r15d                  # who asks: the UI or the background
+    mov     eax, [rip+main_tid]         #   thread take turns; a worker (or
+    cmp     dword ptr [rip+bg_tid], 0   #   the owner, nested) runs it inline
+    je      5f                          #   (no background thread: the UI's,
+    mov     eax, SYS_GETTID             #   or a worker's while busy - no
+    syscall                             #   need to ask the kernel)
+5:
+    cmp     eax, [rip+pf_owner]
+    jne     6f
+    cmp     dword ptr [rip+pf_busy], 0  # (the owner inside a job it ran on
+    jne     .Lpf_nested                 #   its own: in parallel, the lock
+    jmp     7f                          #   still held)
+6:  cmp     eax, [rip+main_tid]
+    je      0f
+    cmp     eax, [rip+bg_tid]
     jne     .Lpf_nested
-    cmp     dword ptr [rip+n_workers], 0
+0:  mov     r15d, eax
+    call    pf_acquire
+    mov     [rip+pf_owner], r15d
+7:  cmp     dword ptr [rip+n_workers], 0
     je      .Lpf_serial
     cmp     r13d, r14d
     jbe     .Lpf_serial                 # a single chunk: nobody to wake
@@ -301,11 +334,97 @@ parallel_for:
     mov     edx, r13d
     call    rbx
 .Lpf_out:
+    test    r15d, r15d
+    jz      5f
+    mov     dword ptr [rip+pf_owner], 0
+    call    pf_release
+5:  add     rsp, 8
+    pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
 .Lpf_ret:
+    ret
+
+# pf_acquire / pf_release - the parallel_for mutex (futex, 3 states)
+pf_acquire:
+    xor     eax, eax
+    mov     ecx, 1
+    lock cmpxchg [rip+pf_lock], ecx
+    jz      9f
+1:  mov     eax, 2
+    xchg    eax, [rip+pf_lock]
+    test    eax, eax
+    jz      9f
+    lea     rdi, [rip+pf_lock]
+    mov     esi, FUTEX_WAIT_PRIV
+    mov     edx, 2
+    call    futex
+    jmp     1b
+9:  ret
+pf_release:
+    lock dec dword ptr [rip+pf_lock]
+    jz      9f
+    mov     dword ptr [rip+pf_lock], 0
+    lea     rdi, [rip+pf_lock]
+    mov     esi, FUTEX_WAKE_PRIV
+    mov     edx, 1
+    call    futex
+9:  ret
+
+# job_spawn(rdi=fn, rsi=arg) -> eax = thread id (< 0: failed). fn(rdi=arg)
+#   runs on the background thread; there is one at a time (bg_tid is set by
+#   the kernel when it starts and cleared when it exits). Its parallel_for
+#   calls take turns with the UI thread's.
+job_spawn:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12, rsi
+1:  mov     edx, [rip+bg_tid]           # (the last one still leaving)
+    test    edx, edx
+    jz      2f
+    lea     rdi, [rip+bg_tid]
+    mov     esi, FUTEX_WAIT
+    call    futex
+    jmp     1b
+2:  cmp     qword ptr [rip+bg_stack], 0
+    jne     3f
+    xor     edi, edi
+    mov     esi, BG_STACK_BYTES
+    mov     edx, PROT_RW
+    mov     r10d, MAP_STACK_FLAGS
+    mov     r8d, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    ja      9f
+    mov     [rip+bg_stack], rax
+3:  mov     rsi, [rip+bg_stack]
+    add     rsi, BG_STACK_BYTES-16
+    mov     [rsi], rbx
+    mov     [rsi+8], r12
+    mov     edi, CLONE_THREAD_FLAGS|CLONE_TID_FLAGS
+    xor     edx, edx
+    lea     r10, [rip+bg_tid]
+    xor     r8d, r8d
+    mov     eax, SYS_CLONE
+    syscall
+    test    eax, eax
+    jnz     9f
+    pop     rax                         # child: fn
+    pop     rdi                         #        arg
+    and     rsp, -16
+    call    rax
+    xor     edi, edi
+    mov     eax, SYS_EXIT
+    syscall
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
     ret
 
 # jobs_cancel - ask the running parallel_for to stop claiming chunks

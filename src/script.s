@@ -411,6 +411,8 @@ builtins:
     .long 1, 1
     .quad bn_cainfo, b_cainfo
     .long 1, 1
+    .quad bn_vgeo, b_vgeo
+    .long 2, 2
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -677,6 +679,7 @@ bn_joint:       .asciz "joint"
 bn_colls:       .asciz "collisions"
 bn_clinfo:      .asciz "clothinfo"
 bn_cainfo:      .asciz "cacheinfo"
+bn_vgeo:        .asciz "vgeo"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -4796,6 +4799,34 @@ b_cainfo:
     call    sc_info
     add     rsp, 8
     cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# vgeo(name, k) -> an object's cluster LOD DAG (vg_info): 0 state (0 none,
+#   1 building, 2 ready, 3 out of date), 1 clusters, 2 levels, 3 groups,
+#   4 source triangles, 5 top level triangles, 6 build ms, 7 KB, 8 largest
+#   error, 9 roots, 10 / 11 most triangles / vertices in a cluster, 12 every
+#   cut crack-free (1), 13 triangles in all clusters, 14 level 0 clusters
+b_vgeo:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     r12, [rax+OB_MESH]
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    je      1f
+    xor     r12d, r12d
+1:  lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si esi, xmm0
+    mov     rdi, r12
+    call    vg_info
+    cvtss2sd xmm0, xmm0
+    add     rsp, 8
+    pop     r12
+    pop     rbx
     jmp     ret_num
 
 # collisions() -> how many pairs of a mechanism's parts collide now

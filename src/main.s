@@ -64,6 +64,7 @@ _start:
     lea     rdi, [rip+s_log_hello2]
     call    log_line
 
+    mov     dword ptr [rip+vg_async], 1 # (the window: DAGs build in the background)
 .Lloop:
     mov     edi, -1
     call    wl_flush
@@ -80,7 +81,10 @@ _start:
     lea     esi, [rax+2]
     lea     rdi, [rip+pollfds]
     mov     edx, -1
-    cmp     dword ptr [rip+hv_active], 0  # rendering: just look, never wait
+    cmp     dword ptr [rip+vg_state], 1 # virtualizing: look now and then
+    jne     3f
+    mov     edx, 50
+3:  cmp     dword ptr [rip+hv_active], 0  # rendering: just look, never wait
     je      0f
     xor     edx, edx
 0:  mov     eax, SYS_POLL
@@ -98,6 +102,7 @@ _start:
     cmp     dword ptr [rip+quit_flag], 0
     jne     .Lquit
     call    render_tick                 # a slice of the progressive render
+    call    vg_tick                     # a cluster DAG built in the background
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render
@@ -180,6 +185,10 @@ handle_cli_args:
     mov     eax, SYS_EXIT_GROUP
     syscall
 .Lcli_selftest:
+    sub     rsp, 8                      # (16-byte aligned calls)
+    lea     rdi, [rip+frame_arena]      # (meshes made by the tests)
+    mov     esi, FRAME_ARENA_BYTES
+    call    arena_init
     call    jobs_init
     call    selftest
     mov     edi, eax
