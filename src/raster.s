@@ -201,6 +201,8 @@ raster_scene:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     11f
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jnz     11f
     lea     rcx, [rip+obj_list]         # (the sculpt object draws itself)
     mov     ecx, [rcx+rbx*4]
     cmp     ecx, [rip+sc_obj]
@@ -247,6 +249,8 @@ raster_scene:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     31f
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jnz     31f
     lea     rcx, [rip+obj_list]
     mov     ecx, [rcx+rbx*4]
     cmp     ecx, [rip+sc_obj]

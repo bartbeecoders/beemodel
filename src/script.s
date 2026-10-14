@@ -427,6 +427,12 @@ builtins:
     .long 2, 2
     .quad bn_playinfo, b_playinfo
     .long 1, 1
+    .quad bn_playkey, b_playkey
+    .long 2, 2
+    .quad bn_logic, b_logic
+    .long 1, 1
+    .quad bn_logicvar, b_logicvar
+    .long 2, 3
     .quad bn_libfind, b_libfind
     .long 2, 2
     .quad bn_libinfo, b_libinfo
@@ -705,6 +711,9 @@ bn_lib:         .asciz "lib"
 bn_playstep:    .asciz "playstep"
 bn_playlook:    .asciz "playlook"
 bn_playinfo:    .asciz "playinfo"
+bn_playkey:     .asciz "playkey"
+bn_logic:       .asciz "logic"
+bn_logicvar:    .asciz "logicvar"
 bn_libfind:     .asciz "libfind"
 bn_libinfo:     .asciz "libinfo"
 bn_wpaint:      .asciz "wpaint"
@@ -4942,6 +4951,69 @@ b_playinfo:
     cvttsd2si edi, xmm0
     call    pl_stat
     add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# playkey(code, down) - a key (evdev code) goes down (1) or up (0) in play
+#   mode, as from the keyboard
+b_playkey:
+    push    rbx
+    sub     rsp, 16
+    mov     rbx, rdi
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp], eax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si esi, xmm0
+    mov     edi, [rsp]
+    call    play_key
+    add     rsp, 16
+    pop     rbx
+    jmp     ret_nil
+
+# logic(k) -> the logic graphs in play mode (logic.s: lg_stat)
+b_logic:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    lg_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# logicvar(object, k [, component]) -> variable k (0..7) of the object's
+#   logic graph (x, or component 0..2); nil when none runs on it
+b_logicvar:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r12d, esi
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp], eax
+    mov     dword ptr [rsp+4], 0
+    cmp     r12d, 3
+    jb      1f
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp+4], eax
+1:  mov     rdi, rbx
+    call    a_obj
+    mov     edi, eax
+    mov     esi, [rsp]
+    mov     edx, [rsp+4]
+    call    lg_var
+    add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    test    eax, eax
+    jz      ret_nil
     cvtss2sd xmm0, xmm0
     jmp     ret_num
 

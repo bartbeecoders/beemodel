@@ -22,6 +22,7 @@
 .globl outl_scroll
 .globl scene_pool
 .globl obj_find
+.globl obj_copy
 .globl obj_rename
 .globl select_none
 .globl scene_clear
@@ -86,6 +87,8 @@ OPERATOR op_add_grid,     "create.grid",     "Grid",     op_create, arg=8, flags
 OPERATOR op_select_all,   "object.select_all", "Select All / None", op_select_all_t, key=KEY_A, flags=OPF_AI_SAFE|OPF_OBJECT, doc="Select every object, or none if some are selected"
 OPERATOR op_delete,       "object.delete",   "Delete",   op_delete_sel, key=KEY_X, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Delete the selected objects"
 OPERATOR op_delete_key,   "object.delete_key", "Delete", op_delete_sel, key=KEY_DELETE, flags=OPF_HIDDEN|OPF_UNDO|OPF_OBJECT, doc="Delete the selected objects (Delete key)"
+OPERATOR op_hide,         "object.hide",     "Hide",     op_hide_sel, key=KEY_H, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Hide the selected objects (not drawn, rendered or collided with; Alt+H shows them again)"
+OPERATOR op_reveal,       "object.reveal",   "Reveal Hidden", op_reveal_all, key=KEY_H|KM_ALT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Show every hidden object again (selected)"
 OPERATOR op_duplicate,    "object.duplicate", "Duplicate", op_duplicate_sel, key=KEY_D|KM_SHIFT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Duplicate the selected objects"
 
 .text
@@ -586,39 +589,14 @@ op_duplicate_sel:
     jz      4f
     mov     r12, rax
     and     dword ptr [r12+OB_FLAGS], ~OBF_SELECTED
-    mov     r14, [r12+OB_MESH]          # meshes are immutable: share it
-    mov     rdi, r14
-    call    mesh_ref
-    mov     rdi, r12
-    call    base_name
-    mov     edi, [r12+OB_TYPE]
-    lea     rsi, [rip+name_buf]
-    mov     rdx, r14
-    call    obj_new
+    lea     rax, [rip+obj_list]
+    mov     edi, [rax+rbx*4]
+    call    obj_copy
     test    eax, eax
     jz      4f
     mov     r14d, eax
     mov     edi, eax
     call    obj_get
-    lea     rsi, [r12+32]               # transform, colour, flags, type
-    lea     rdi, [rax+32]
-    mov     ecx, 40
-    rep     movsb
-    mov     rdi, [r12+OB_MODS]          # the modifier stack is shared too
-    mov     [rax+OB_MODS], rdi
-    push    rax
-    call    mods_ref
-    pop     rax
-    mov     rdi, [r12+OB_SKETCH]        # ... and a sketch
-    mov     [rax+OB_SKETCH], rdi
-    push    rax
-    call    sk_ref
-    pop     rax
-    mov     rdi, [r12+OB_MRES]          # ... and multires displacements
-    mov     [rax+OB_MRES], rdi
-    push    rax
-    call    mesh_ref
-    pop     rax
     movss   xmm0, [rax+OB_LOC]
     addss   xmm0, [rip+sf_dup]
     movss   [rax+OB_LOC], xmm0
@@ -665,6 +643,123 @@ obj_by_uid:
     jmp     1b
 8:  xor     eax, eax
 9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# object.hide - the selected objects hidden (and deselected)
+op_hide_sel:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     r12d, r12d
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      11f
+    and     dword ptr [rax+OB_FLAGS], ~OBF_SELECTED
+    or      dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    inc     r12d
+11: inc     ebx
+    jmp     1b
+2:  test    r12d, r12d
+    jnz     3f
+    call    undo_drop_last
+    jmp     9f
+3:  mov     dword ptr [rip+active_obj], 0
+    call    fmt_reset
+    lea     rdi, [rip+s_log_hidden]
+    call    fmt_str
+    mov     edi, r12d
+    call    fmt_int
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# object.reveal - every hidden object shown again, selected
+op_reveal_all:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     r12d, r12d
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jz      11f
+    and     dword ptr [rax+OB_FLAGS], ~OBF_HIDDEN
+    or      dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    inc     r12d
+11: inc     ebx
+    jmp     1b
+2:  test    r12d, r12d
+    jnz     9f
+    call    undo_drop_last
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+.section .rodata
+s_log_hidden:   .asciz "  hidden: "
+.text
+
+# obj_copy(edi=handle) -> eax = a new object like it (0: none, or full): its
+#   name made unique, the same transform, colour, flags, type, and the same
+#   (shared) mesh, modifier stack, sketch and multires displacements
+obj_copy:
+    push    rbx
+    push    r12
+    push    r14
+    call    obj_get
+    test    rax, rax
+    jz      8f
+    mov     r12, rax
+    mov     r14, [r12+OB_MESH]          # meshes are immutable: share it
+    mov     rdi, r14
+    call    mesh_ref
+    mov     rdi, r12
+    call    base_name
+    mov     edi, [r12+OB_TYPE]
+    lea     rsi, [rip+name_buf]
+    mov     rdx, r14
+    call    obj_new
+    test    eax, eax                    # (full: it dropped the mesh)
+    jz      8f
+    mov     ebx, eax
+    mov     edi, eax
+    call    obj_get
+    lea     rsi, [r12+32]               # transform, colour, flags, type
+    lea     rdi, [rax+32]
+    mov     ecx, 40
+    rep     movsb
+    mov     rdi, [r12+OB_MODS]          # the modifier stack is shared too
+    mov     [rax+OB_MODS], rdi
+    push    rax
+    call    mods_ref
+    pop     rax
+    mov     rdi, [r12+OB_SKETCH]        # ... and a sketch
+    mov     [rax+OB_SKETCH], rdi
+    push    rax
+    call    sk_ref
+    pop     rax
+    mov     rdi, [r12+OB_MRES]          # ... and multires displacements
+    mov     [rax+OB_MRES], rdi
+    call    mesh_ref
+    mov     eax, ebx
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r14
     pop     r12
     pop     rbx
     ret

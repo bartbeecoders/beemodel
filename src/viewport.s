@@ -624,6 +624,8 @@ draw_objects:
     jae     6f
     mov     edi, ebx
     call    obj_at
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jnz     5f
     cmp     dword ptr [rip+vp_shading], 1   # shaded modes draw meshes raster
     je      3f
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
@@ -805,6 +807,8 @@ vp_pick_bounds:
     jae     .Lpk_done
     mov     edi, ebx
     call    obj_at
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jnz     .Lpk_next
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     1f
     push    rax                         # meshes: the ID buffer, unless lines

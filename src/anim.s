@@ -65,6 +65,7 @@
 .globl an_action_blob
 .globl an_action_add
 .globl an_action_find
+.globl an_layer_play
 
 .equ AN_REFS,   0
 .equ AN_NCUR,   4
@@ -1018,19 +1019,21 @@ an_apply:
     xorps   xmm1, xmm1
     comiss  xmm0, xmm1
     jb      8f                          # (not started)
-    movss   xmm1, [r15+AC_END]          # length; past its repeats: done
-    subss   xmm1, [r15+AC_START]
+    movss   xmm1, [r15+AC_END]          # length; past its repeats: its
+    subss   xmm1, [r15+AC_START]        #  last pose held
     maxss   xmm1, [rip+af_one]
     movss   xmm2, xmm1
     mulss   xmm2, [r14+LY_REPEAT]
     comiss  xmm0, xmm2
-    ja      8f
-    divss   xmm0, xmm1                  # within one play: fmod
+    jbe     31f
+    movss   xmm0, [r15+AC_END]
+    jmp     32f
+31: divss   xmm0, xmm1                  # within one play: fmod
     roundss xmm3, xmm0, 1
     subss   xmm0, xmm3
     mulss   xmm0, xmm1
     addss   xmm0, [r15+AC_START]
-    movss   [rsp], xmm0
+32: movss   [rsp], xmm0
     xor     r12d, r12d
 4:  cmp     r12d, [rbx+AN_NCUR]
     jae     8f
@@ -3531,6 +3534,62 @@ an_action_find:
     jmp     9f
 8:  xor     eax, eax
 9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# an_layer_play(edi=action (1..), esi=object uid, xmm0=start frame,
+#   xmm1=times (< 1: once)) -> eax = 1: the action plays on that object from
+#   that frame (logic graphs; no undo step). Its layer there already: it
+#   starts again.
+an_layer_play:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     r12d, edi
+    mov     r13d, esi
+    movss   [rsp], xmm0
+    maxss   xmm1, [rip+af_one]
+    movss   [rsp+4], xmm1
+    xor     edi, edi
+    call    an_own
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    xor     ecx, ecx                    # its layer there already?
+1:  cmp     ecx, [rbx+AN_NLAY]
+    jae     2f
+    imul    rdx, rcx, LY_SZ
+    lea     rdx, [rbx+AN_LAY+rdx]
+    cmp     [rdx+LY_ACT], r12d
+    jne     11f
+    cmp     [rdx+LY_TARGET], r13d
+    je      3f
+11: inc     ecx
+    jmp     1b
+2:  cmp     ecx, AN_MAXL
+    jae     8f
+    inc     dword ptr [rbx+AN_NLAY]
+    imul    rdx, rcx, LY_SZ
+    lea     rdx, [rbx+AN_LAY+rdx]
+    mov     [rdx+LY_ACT], r12d
+    mov     [rdx+LY_TARGET], r13d
+    mov     eax, [rip+af_one]
+    mov     [rdx+LY_INFL], eax
+    mov     dword ptr [rdx+LY_MODE], 0
+3:  movss   xmm0, [rsp]
+    movss   [rdx+LY_START], xmm0
+    movss   xmm0, [rsp+4]
+    movss   [rdx+LY_REPEAT], xmm0
+    mov     dword ptr [rdx+LY_MUTE], 0
+    movss   xmm0, [rip+an_frame]
+    call    an_apply
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 16
+    pop     r13
     pop     r12
     pop     rbx
     ret
