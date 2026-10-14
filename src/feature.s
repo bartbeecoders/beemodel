@@ -25,6 +25,11 @@
 .globl feat_status_name
 .globl ft_tmp
 .globl fr_busy
+.globl slot_val
+.globl pad_range
+.globl fr_w
+.globl m_move
+.globl m_turn
 
 .equ FT_SZ,      128
 .equ FT_TYPE,    0
@@ -343,7 +348,8 @@ feat_rebuild:
     call    mesh_unref
 2:  inc     ebx
     jmp     1b
-3:  mov     rdi, [rsp]
+3:  call    bf_rebuild                  # the B-rep kernel (when on)
+    mov     rdi, [rsp]
     call    fa_release
     mov     dword ptr [rip+dirty], 1
     mov     dword ptr [rip+fr_busy], 0

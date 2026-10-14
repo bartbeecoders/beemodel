@@ -27,6 +27,13 @@
 .globl pf_ls
 .globl pf_ln
 .globl pf_pt
+.globl pf_par
+.globl pf_dep
+.globl pf_scale
+.globl pf_merge
+.globl pf_earclip
+.globl pf_tri
+.globl pf_ntri
 
 .equ SK_NPT,     12
 .equ SK_NENT,    16
@@ -88,7 +95,9 @@ clus:           .skip 4*256             # sketch point -> cluster
 # triangulation
 tr_v:           .skip 4*(MAXP+2*MAXL)   # the merged polygon (point indices)
 tr_n:           .skip 4
+pf_tri:
 tr_out:         .skip 12*MAXTRI         # triangles (point indices)
+pf_ntri:
 tr_cnt:         .skip 4
 # the mesh being built
 pm_mesh:        .skip 8
@@ -916,6 +925,8 @@ cross3:
     ret
 
 # merge(edi=material loop) -> tr_v / tr_n: the loop with its holes bridged in
+#   (pf_merge: the same, for btess.s)
+pf_merge:
 merge:
     push    rbx
     push    r12
@@ -1140,7 +1151,8 @@ splice:
     ret
 
 # earclip -> tr_out / tr_cnt from tr_v (counter-clockwise, may touch itself
-#   at the bridges)
+#   at the bridges); pf_earclip: the same, for btess.s
+pf_earclip:
 earclip:
     push    rbx
     push    r12

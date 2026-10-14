@@ -274,6 +274,44 @@ project uses [Semantic Versioning](https://semver.org/).
     graphs edited at once, per-author undo and redo, presence and follow,
     and a fuzz of hundreds of random concurrent edits converging to
     identical documents (by hash) and scenes.
+- **The B-rep kernel** (#153): `cad.kernel on` makes CAD features build
+  exact solids instead of meshes (docs/BREP.md). The switch is saved with
+  the scene.
+  - **Geometry:**
+    - Curves are lines, circles, ellipses or NURBS; surfaces are planes,
+      cylinders, cones, spheres, tori or rational NURBS, all in the STEP
+      parametrisations.
+    - NURBS evaluation with derivatives, knot insertion, and degree
+      elevation of curves and surfaces.
+  - **Topology:**
+    - Bodies, faces trimmed by loops, coedges with pcurves, edges and
+      vertices.
+    - Volume and area are integrated exactly over the trimmed faces (Green's
+      theorem in (u, v)).
+  - **Solids from sketches:** pads, pockets, holes, shells and revolves are
+    built from the sketches' exact lines and arcs, with patches of at most
+    half a turn and poles on the axis.
+  - **Booleans:**
+    - The surface-surface intersection is in closed form for the
+      plane / quadric cases and traced (marching squares, Newton onto both
+      surfaces) otherwise.
+    - Each face is divided in (u, v) and its regions classified;
+      coplanar, tangent and along-edge contacts are handled.
+  - **Fillets and chamfers:** straight edges between two planes.
+  - **Tessellation:** adaptive, watertight and Delaunay in the surfaces'
+    metric; it is what the viewport shows.
+  - A body the kernel cannot build (e.g. infill, or fillets meeting at a
+    corner) keeps the mesh replay's result.
+  - **BeeScript:** `brep(name, what)` and `nurbscheck(k)`.
+  - [tests/brep.py](tests/brep.py) checks:
+    - the NURBS self-checks;
+    - closed-form volumes and areas of pads and revolves, to about 1e-15;
+    - booleans: a hole drilled across a rod against an independent
+      integral (3e-8);
+    - fillets and chamfers;
+    - the enclosure walkthrough on the kernel, before and after a parameter
+      change: valid and watertight;
+    - the switch in saved files.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

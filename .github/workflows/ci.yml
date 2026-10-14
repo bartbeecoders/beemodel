@@ -101,6 +101,9 @@ jobs:
       - name: Co-editing (two users and an agent converge under fuzzed concurrent edits)
         run: timeout 900 python tests/coedit.py build/beemodel build/shots
 
+      - name: B-rep kernel (NURBS, exact solids, booleans, fillets, the enclosure on the kernel)
+        run: timeout 600 python tests/brep.py build/beemodel
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 600 python tools/fakewl.py build/shots
 
