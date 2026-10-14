@@ -449,6 +449,8 @@ builtins:
     .long 1, 1
     .quad bn_brep, b_brep
     .long 2, 2
+    .quad bn_nurbscheck, b_nurbscheck
+    .long 1, 1
     .quad bn_vctext, b_vctext
     .long 1, 2
     .quad bn_costat, b_costat
@@ -748,6 +750,7 @@ bn_lmsample:    .asciz "lmsample"
 bn_livelink:    .asciz "livelink"
 bn_vcinfo:      .asciz "vcinfo"
 bn_brep:        .asciz "brep"
+bn_nurbscheck:  .asciz "nurbscheck"
 bn_vctext:      .asciz "vctext"
 bn_costat:      .asciz "costat"
 bn_cohash:      .asciz "cohash"
@@ -8356,6 +8359,18 @@ b_brep:
     pop     rbx
     ucomisd xmm0, xmm0
     jp      ret_nil
+    jmp     ret_num
+
+# nurbscheck(k) - the kernel's NURBS checks (nbcheck.s): the largest error
+#   of check k (0 arcs on circles, 1 knot insertion, 2 degree elevation,
+#   3 curve derivatives, 4 a NURBS cylinder with knots and degrees added,
+#   5 surface derivatives, 6 a NURBS torus)
+b_nurbscheck:
+    sub     rsp, 8
+    call    a_int
+    mov     edi, eax
+    call    nb_check
+    add     rsp, 8
     jmp     ret_num
 
 # features() -> how many; fstatus(index) -> 0 ok, 1 sketch missing, 2 no

@@ -85,7 +85,7 @@
 .globl ed_mid
 .globl ce_edge_dir
 
-.equ MAXPC,     2048                    # points of a polyline pcurve
+.equ MAXPC,     8192                    # points of a polyline pcurve
 .equ FS_MAX,    16384                   # fc_sample: points of a face's loops
 .equ FS_MAXL,   256
 
@@ -101,7 +101,7 @@ br_pi:          .double 3.14159265358979323846
 br_2pi:         .double 6.28318530717958647692
 br_hpi:         .double 1.57079632679489661923
 br_lin:         .double 1.0e-10             # (relative) a pcurve is straight
-br_pctol:       .double 2.0e-9              # (relative) polyline pcurves
+br_pctol:       .double 1.0e-8              # (relative) polyline pcurves
 br_pole:        .double 1.0e-11             # (relative) on a surface's pole
 br_nwt:         .double 1.0e-15
 br_eps:         .double 1.0e-6              # fc_orient's step off the face
@@ -1021,8 +1021,22 @@ pc_make:
     mov     rax, [rsp+PM_S]
     cmp     dword ptr [rax+SF_TYPE], ST_PLANE
     je      .Lpm_plane
-    # nine samples: a straight line in (u, v)?
+    # a polyline edge: its own points (its pcurve follows it point for point)
     mov     dword ptr [rip+pc_n], 0
+    mov     rax, [rsp+PM_E]
+    mov     edi, [rax+ED_CURVE]
+    call    p_cv
+    cmp     dword ptr [rax+CV_TYPE], CT_NURBS
+    jne     0f
+    cmp     dword ptr [rax+CV_DEG], 1
+    jne     0f
+    call    pc_knots
+    call    pc_fixpoles
+    call    pc_straight
+    test    eax, eax
+    jz      .Lpm_polyonly
+    jmp     .Lpm_line
+0:  # nine samples: a straight line in (u, v)?
     xor     ebx, ebx
 1:  cmp     ebx, 8
     ja      2f
@@ -1041,6 +1055,7 @@ pc_make:
     call    pc_straight
     test    eax, eax
     jz      .Lpm_poly
+.Lpm_line:
     # a line from the first (u, v) to the last
     call    kc_new
     mov     rbx, rax
@@ -1069,6 +1084,7 @@ pc_make:
     jmp     .Lpm_set
 .Lpm_poly:
     call    pc_refine
+.Lpm_polyonly:
     call    pc_polyline
     test    rax, rax
     jz      .Lpm_out
@@ -1198,6 +1214,7 @@ pc_push:
     push    rbx
     sub     rsp, 16
     lea     rbx, [rsp+32]               # pc_make's frame
+pc_push_body:
     mov     eax, [rip+pc_n]
     cmp     eax, MAXPC
     jae     9f
@@ -1236,6 +1253,62 @@ pc_push:
 9:  add     rsp, 16
     pop     rbx
     ret
+
+# pc_knots(pc_make's frame) - samples at a polyline edge's own points
+#   between its t at the start and the end, in walking order
+pc_knots:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    lea     r13, [rsp+48]               # pc_make's frame
+    mov     rax, [r13+PM_E]
+    mov     edi, [rax+ED_CURVE]
+    call    p_cv
+    mov     r12, rax
+    movsd   xmm0, [r13+PM_TS]           # the start
+    call    pc_push_at
+    mov     ebx, 1                      # knots 1 .. N (forwards or back)
+    mov     ecx, 1
+    movsd   xmm0, [r13+PM_TE]
+    comisd  xmm0, [r13+PM_TS]
+    jae     1f
+    mov     ebx, [r12+CV_N]
+    mov     ecx, -1
+1:  mov     [rsp], ecx
+2:  cmp     ebx, 1
+    jl      4f
+    cmp     ebx, [r12+CV_N]
+    jg      4f
+    mov     rax, [r12+CV_KN]
+    movsd   xmm0, [rax+rbx*8]
+    movsd   xmm1, [r13+PM_TS]           # strictly between ts and te
+    movsd   xmm2, [r13+PM_TE]
+    movsd   xmm3, xmm1
+    minsd   xmm3, xmm2
+    maxsd   xmm1, xmm2
+    comisd  xmm0, xmm3
+    jbe     3f
+    comisd  xmm0, xmm1
+    jae     3f
+    cmp     dword ptr [rip+pc_n], MAXPC-1
+    jae     4f
+    call    pc_push_at
+3:  add     ebx, [rsp]
+    jmp     2b
+4:  movsd   xmm0, [r13+PM_TE]           # the end
+    call    pc_push_at
+    add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+# pc_push_at(xmm0=t; r13=pc_make's frame) - pc_push from a deeper frame
+pc_push_at:
+    push    rbx
+    sub     rsp, 16
+    mov     rbx, r13
+    jmp     pc_push_body
 
 # pc_fixpoles - samples at a pole take u from their neighbour
 pc_fixpoles:
@@ -1340,12 +1413,15 @@ pc_refine:
     mulsd   xmm1, [rip+br_pctol]
     addsd   xmm1, [rip+br_nwt]
     movsd   [rsp+40], xmm1
+    mov     dword ptr [rsp+32], 0       # passes; insertions this pass
+.Lpr_pass:
+    mov     dword ptr [rsp+36], 0
     xor     ebx, ebx                    # piece i: samples i, i + 1
 .Lpr_piece:
     mov     eax, [rip+pc_n]
     dec     eax
     cmp     ebx, eax
-    jae     .Lpr_out
+    jae     .Lpr_passend
     cmp     dword ptr [rip+pc_n], MAXPC-1
     jae     .Lpr_out
     lea     rcx, [rip+pc_t]             # the middle's parameter
@@ -1414,10 +1490,18 @@ pc_refine:
     movsd   [r9+rdx+8], xmm3
     mov     [r10+rcx], r11b
     inc     dword ptr [rip+pc_n]
-    jmp     .Lpr_piece                  # (the same piece, now shorter)
+    inc     dword ptr [rsp+36]
+    add     ebx, 2                      # (both halves wait for the next pass)
+    jmp     .Lpr_piece
 .Lpr_next:
     inc     ebx
     jmp     .Lpr_piece
+.Lpr_passend:
+    cmp     dword ptr [rsp+36], 0
+    je      .Lpr_out
+    inc     dword ptr [rsp+32]
+    cmp     dword ptr [rsp+32], 16
+    jb      .Lpr_pass
 .Lpr_out:
     call    pc_fixpoles
     add     rsp, 48

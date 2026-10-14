@@ -1673,9 +1673,11 @@ densify:
     mov     rbx, rdi
     xor     r12d, r12d                  # piece k: points k, k + 1
 .Ldn_piece:
-    mov     eax, [rbx+SS_N]
+    mov     eax, [rbx+SS_N]             # pieces: n - 1 (closed: n, the last
+    cmp     dword ptr [rbx+SS_CLOSED], 0    #  back to the first)
+    jne     0f
     dec     eax
-    cmp     r12d, eax
+0:  cmp     r12d, eax
     jae     .Ldn_out
     cmp     dword ptr [rbx+SS_N], 65536
     jae     .Ldn_out
@@ -1683,13 +1685,22 @@ densify:
     add     eax, r12d
     call    sp_ptr
     mov     r13, rax
+    lea     rax, [r13+SP_SZ]            # the next point (wraps)
+    mov     ecx, r12d
+    inc     ecx
+    cmp     ecx, [rbx+SS_N]
+    jb      79f
+    mov     eax, [rbx+SS_FIRST]
+    call    sp_ptr
+79: mov     [rsp+64], rax
     call    sp_new
     test    rax, rax
     jz      .Ldn_out
     mov     r14, rax
+    mov     rdx, [rsp+64]
     xor     ecx, ecx
 1:  movsd   xmm0, [r13+rcx*8]
-    addsd   xmm0, [r13+SP_SZ+rcx*8]
+    addsd   xmm0, [rdx+rcx*8]
     mulsd   xmm0, [rip+ss_half]
     movsd   [r14+rcx*8], xmm0
     inc     ecx
@@ -1707,8 +1718,9 @@ densify:
     jz      .Ldn_next
     xor     ecx, ecx                    # off the chord?
     xorpd   xmm2, xmm2
+    mov     rdx, [rsp+64]
 3:  movsd   xmm0, [r13+rcx*8]
-    addsd   xmm0, [r13+SP_SZ+rcx*8]
+    addsd   xmm0, [rdx+rcx*8]
     mulsd   xmm0, [rip+ss_half]
     subsd   xmm0, [r14+rcx*8]
     mulsd   xmm0, xmm0

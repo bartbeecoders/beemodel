@@ -27,9 +27,10 @@ s_pc:           .asciz " pc"
 s_bar:          .asciz " |"
 s_lf:           .asciz "arrangement of local face "
 s_note:         .asciz "note "
+s_shoe:         .asciz " shoelace "
 
 .align 8
-d_k:            .double 1000.0
+d_k:            .double 1000000.0
 d_half:         .double 0.5
 .section .bss
 db_buf:         .skip 32
@@ -209,6 +210,74 @@ bk_note:
     pop     rbx
     ret
 
+# lp_shoelace(edi=loop) -> xmm0 = the signed area of its pcurves' points
+#   (polylines: their own points; others: 64 each)
+lp_shoelace:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 56
+    call    p_lp
+    mov     ebx, [rax+LP_FIRST]
+    mov     r12d, [rax+LP_N]
+    add     r12d, ebx
+    xorpd   xmm0, xmm0
+    movsd   [rsp+40], xmm0
+1:  cmp     ebx, r12d
+    jae     9f
+    mov     edi, ebx
+    call    p_ce
+    mov     edi, [rax+CE_PC]
+    cmp     edi, -1
+    je      8f
+    call    p_cv
+    mov     r14d, 64
+    cmp     dword ptr [rax+CV_TYPE], CT_NURBS
+    jne     2f
+    mov     r14d, [rax+CV_N]
+    shl     r14d, 1
+2:  xor     r13d, r13d
+3:  cmp     r13d, r14d
+    jae     8f
+    cvtsi2sd xmm0, r13d                 # segment s0 -> s1
+    cvtsi2sd xmm1, r14d
+    divsd   xmm0, xmm1
+    mov     edi, ebx
+    lea     rsi, [rsp]
+    call    ce_uv
+    lea     eax, [r13+1]
+    cvtsi2sd xmm0, eax
+    cvtsi2sd xmm1, r14d
+    divsd   xmm0, xmm1
+    mov     edi, ebx
+    lea     rsi, [rsp+16]
+    sub     rsp, 32
+    lea     rsi, [rsp]
+    call    ce_uv
+    movsd   xmm0, [rsp]
+    movsd   xmm1, [rsp+8]
+    add     rsp, 32
+    movsd   xmm2, [rsp]                 # x0 y1 - x1 y0
+    mulsd   xmm2, xmm1
+    movsd   xmm3, [rsp+8]
+    mulsd   xmm3, xmm0
+    subsd   xmm2, xmm3
+    mulsd   xmm2, [rip+d_half]
+    addsd   xmm2, [rsp+40]
+    movsd   [rsp+40], xmm2
+    inc     r13d
+    jmp     3b
+8:  inc     ebx
+    jmp     1b
+9:  movsd   xmm0, [rsp+40]
+    add     rsp, 56
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # bk_dump(edi=body) - every face, loop and coedge (edge, direction, ends,
 #   use marks) to stderr
 bk_dump:
@@ -307,10 +376,17 @@ bk_dump:
     je      34f
     call    p_cv
     mov     r15d, [rax+CV_TYPE]
+    push    qword ptr [rax+CV_N]
+    sub     rsp, 8
     lea     rdi, [rip+s_pc]
     call    d_str
     mov     edi, r15d
     call    d_int
+    lea     rdi, [rip+s_colon]
+    call    d_str
+    mov     edi, [rsp+8]
+    call    d_int
+    add     rsp, 16
     xor     r15d, r15d
 33: cmp     r15d, 2
     ja      34f
@@ -337,7 +413,14 @@ bk_dump:
     call    d_str
     inc     ebp
     jmp     3b
-4:  call    d_nl
+4:  lea     rdi, [rip+s_shoe]
+    call    d_str
+    mov     edi, r13d
+    call    lp_shoelace
+    mulsd   xmm0, [rip+d_k]
+    cvtsd2si edi, xmm0
+    call    d_int
+    call    d_nl
     inc     r13d
     jmp     2b
 5:  inc     ebx

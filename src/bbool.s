@@ -74,7 +74,7 @@ bo_2pi:         .double 6.28318530717958647692
 bo_pi:          .double 3.14159265358979323846
 bo_rweld:       .double 1.0e-8
 bo_ron:         .double 1.0e-7
-bo_rsec:        .double 1.0e-6
+bo_rsec:        .double 1.0e-7
 bo_rtess:       .double 2.0e-4
 bo_angeps:      .double 1.0e-10
 bo_tiny:        .double 1.0e-14
