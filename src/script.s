@@ -403,6 +403,10 @@ builtins:
     .long 1, 1
     .quad bn_rigid, b_rigid
     .long 2, 2
+    .quad bn_joint, b_joint
+    .long 1, 2
+    .quad bn_colls, b_colls
+    .long 0, 0
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -665,6 +669,8 @@ bn_shapes:      .asciz "shapes"
 bn_bonepos:     .asciz "bonepos"
 bn_rbinfo:      .asciz "rbinfo"
 bn_rigid:       .asciz "rigid"
+bn_joint:       .asciz "joint"
+bn_colls:       .asciz "collisions"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -4733,6 +4739,39 @@ b_rbinfo:
     call    rb_info
     add     rsp, 8
     cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# joint(n [, 1]) -> mechanism joint n's value (1..; radians or units); with
+#   1: whether it is held at a limit; nil: no such joint
+b_joint:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_num
+    cvttsd2si edi, xmm0
+    dec     edi
+    call    mech_value
+    test    eax, eax
+    jz      8f
+    cmp     r12d, 2
+    jb      1f
+    dec     eax
+    cvtsi2ss xmm0, eax
+1:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+8:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# collisions() -> how many pairs of a mechanism's parts collide now
+b_colls:
+    cvtsi2sd xmm0, dword ptr [rip+mech_hits]
     jmp     ret_num
 
 # rigid(name, prop) -> an object's rigid body setting: "type" (1 active,

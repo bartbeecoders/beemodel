@@ -426,9 +426,11 @@ rig_eval:
     jz      5f
     mov     eax, [rbx+AN_NCON_]
     or      eax, [rbx+AN_NDRV_]
+    or      eax, [rbx+AN_NMJ_]
     jz      5f
     mov     dword ptr [rip+rg_busy], 1
     call    rig_drivers
+    call    mech_eval                   # mechanisms (mech.s)
     call    rig_constraints
     call    rig_ikcheck
     mov     dword ptr [rip+rg_busy], 0

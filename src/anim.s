@@ -23,6 +23,7 @@
 #                                                  inputs, 4-7 values)
 #    bone         bone:Rig:Upper:rz               (a pose, in its axes)
 #    shape key    shape:Cube:Smile                (its value)
+#    parameter    param:angle                     (a CAD parameter, mech.s)
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -803,6 +804,8 @@ an_chan:
     je      .Lch_node
     cmp     ebx, K_BONE
     je      .Lch_bone
+    cmp     ebx, K_PARAM_
+    je      .Lch_param
     cmp     ebx, K_SHAPE
     jne     .Lch_fail
     mov     edi, r12d                   # a shape key's value (shape.s)
@@ -810,6 +813,14 @@ an_chan:
     mov     edx, r15d
     movss   xmm0, [rsp]
     call    sk_chan
+    test    eax, eax
+    jz      .Lch_fail
+    jmp     .Lch_ok
+.Lch_param:                             # a CAD parameter (mech.s)
+    mov     edi, r12d
+    mov     esi, r15d
+    movss   xmm0, [rsp]
+    call    param_chan
     test    eax, eax
     jz      .Lch_fail
     jmp     .Lch_ok
@@ -1220,6 +1231,11 @@ an_path:
     call    str_eq
     test    eax, eax
     jnz     .Lap_shape
+    lea     rdi, [rip+ap_word]
+    lea     rsi, [rip+k_param]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lap_param
     lea     rdi, [rip+ap_word]          # an object: its property
     call    obj_find
     test    eax, eax
@@ -1359,6 +1375,21 @@ an_path:
     jmp     5b
 6:  mov     [rip+ap_c], ecx
     mov     dword ptr [rip+ap_kind], K_BONE
+    jmp     .Lap_ok
+.Lap_param:                             # param:angle
+    mov     rsi, r12
+    call    ap_field
+    test    eax, eax
+    jle     .Lap_bad
+    lea     rdi, [rip+ap_word]
+    call    param_find
+    test    eax, eax
+    js      .Lap_bad
+    mov     [rip+ap_a], eax
+    xor     eax, eax
+    mov     [rip+ap_b], eax
+    mov     [rip+ap_c], eax
+    mov     dword ptr [rip+ap_kind], K_PARAM_
     jmp     .Lap_ok
 .Lap_shape:                             # shape:Cube:Smile
     mov     rsi, r12
@@ -1520,6 +1551,7 @@ k_modifier:     .asciz "modifier"
 k_node:         .asciz "node"
 k_bone:         .asciz "bone"
 k_shape:        .asciz "shape"
+k_param:        .asciz "param"
 .align 8
 obj_props:      .quad p_x, p_y, p_z, p_rx, p_ry, p_rz, p_sx, p_sy, p_sz
 p_x:            .asciz "x"
@@ -1554,7 +1586,7 @@ OPERATOR op_an_range,  "anim.range",      "Frame Range",      do_an_range, flags
 OPERATOR op_an_interp, "anim.interpolation", "Interpolation", do_an_interp, flags=OPF_AI_SAFE|OPF_UNDO, doc="How the selected objects' keys blend into the next: anim.interpolation <constant|linear|bezier>"
 
 .section .rodata
-s_an_bad:       .asciz "  no such property to key (paths: Cube:x, material:M:roughness, modifier:Cube:0:levels, node:Tree:3:5, bone:Rig:Bone:rz, shape:Cube:Smile): "
+s_an_bad:       .asciz "  no such property to key (paths: Cube:x, material:M:roughness, modifier:Cube:0:levels, node:Tree:3:5, bone:Rig:Bone:rz, shape:Cube:Smile, param:angle): "
 s_an_none:      .asciz "  nothing selected to key"
 s_an_range_bad: .asciz "  anim.range <start> <end> [fps]"
 s_an_keyed:     .asciz "  keyed at frame "
