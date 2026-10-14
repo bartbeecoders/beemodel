@@ -67,6 +67,7 @@ k_verts:        .asciz "vertices"
 k_loops:        .asciz "loops"
 k_valid:        .asciz "valid"
 k_kernel:       .asciz "kernel"
+k_error:        .asciz "error"
 k_tris:         .asciz "triangles"
 k_tight:        .asciz "watertight"
 k_planes:       .asciz "planes"
@@ -596,7 +597,14 @@ bf_query:
     mov     r12, rsi
     call    bf_body
     mov     ebx, eax
-    lea     rdi, [rip+k_kernel]
+    lea     rdi, [rip+k_error]          # why the last boolean failed
+    mov     rsi, r12
+    call    kw
+    test    eax, eax
+    jz      0f
+    cvtsi2sd xmm0, dword ptr [rip+bk_err]
+    jmp     .Lq_out
+0:  lea     rdi, [rip+k_kernel]
     mov     rsi, r12
     call    kw
     test    eax, eax

@@ -569,8 +569,11 @@ sc_point:
     addsd   xmm0, [rax+24]
     mulsd   xmm0, [rip+ss_half]
     movsd   [rbx+48], xmm0
-    cmp     dword ptr [rip+sp_cont], 0  # continuing a curve: the last's
-    je      1f
+    cmp     dword ptr [rip+sp_cont], 0  # continuing a curve on a NURBS
+    je      1f                          #  surface: the last point's (an
+    mov     rax, [rip+sb_s]             #  analytic one wraps its angles
+    cmp     dword ptr [rax+SF_TYPE], ST_NURBS   #  round its box's middle)
+    jne     1f
     mov     eax, [rip+ss_np]
     sub     eax, 2
     js      1f

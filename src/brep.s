@@ -76,6 +76,9 @@
 .globl fs_ls
 .globl fs_ln
 .globl fs_nl
+.globl fs_np
+.globl fs_inner_point
+.globl lp_flip
 .globl ed_mid
 .globl ce_edge_dir
 
