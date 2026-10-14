@@ -433,6 +433,16 @@ builtins:
     .long 1, 1
     .quad bn_logicvar, b_logicvar
     .long 2, 3
+    .quad bn_probe, b_probe
+    .long 1, 1
+    .quad bn_probeinfo, b_probeinfo
+    .long 2, 2
+    .quad bn_probesample, b_probesample
+    .long 8, 9
+    .quad bn_lightmap, b_lightmap
+    .long 1, 1
+    .quad bn_lmsample, b_lmsample
+    .long 5, 5
     .quad bn_libfind, b_libfind
     .long 2, 2
     .quad bn_libinfo, b_libinfo
@@ -714,6 +724,11 @@ bn_playinfo:    .asciz "playinfo"
 bn_playkey:     .asciz "playkey"
 bn_logic:       .asciz "logic"
 bn_logicvar:    .asciz "logicvar"
+bn_probe:       .asciz "probe"
+bn_probeinfo:   .asciz "probeinfo"
+bn_probesample: .asciz "probesample"
+bn_lightmap:    .asciz "lightmap"
+bn_lmsample:    .asciz "lmsample"
 bn_libfind:     .asciz "libfind"
 bn_libinfo:     .asciz "libinfo"
 bn_wpaint:      .asciz "wpaint"
@@ -5016,6 +5031,153 @@ b_logicvar:
     jz      ret_nil
     cvtss2sd xmm0, xmm0
     jmp     ret_num
+
+# probe(k) -> the light probes (probe.s: pb_stat)
+b_probe:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    pb_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# probeinfo(n, what) -> probe n (from 1): 0 kind (1 irradiance, 2
+#   reflection), 1 samples baked, 2-4 centre, 5-7 half size, 8-10 grid
+#   points; nil when there is no such probe
+b_probeinfo:
+    push    rbx
+    sub     rsp, 16
+    mov     rbx, rdi
+    call    a_num
+    cvttsd2si eax, xmm0
+    dec     eax
+    mov     [rsp], eax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si esi, xmm0
+    mov     edi, [rsp]
+    test    edi, edi
+    js      8f
+    call    pb_info
+    test    eax, eax
+    jz      8f
+    add     rsp, 16
+    pop     rbx
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+8:  add     rsp, 16
+    pop     rbx
+    jmp     ret_nil
+
+# probesample(what, x, y, z, dx, dy, dz, c [, rays]) -> colour channel c:
+#   what 0 the probes' irradiance / pi for that normal, 1 a reflection
+#   probe's radiance along that direction, 2 the irradiance / pi traced now
+#   (the reference; rays default 1024); nil when no probe covers the point
+b_probesample:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 48
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp+40], eax
+    xor     r13d, r13d
+1:  cmp     r13d, 6
+    jae     2f
+    lea     eax, [r13+1]
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+r13*4], xmm0
+    inc     r13d
+    jmp     1b
+2:  lea     rdi, [rbx+112]
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp+44], eax
+    mov     edx, 1024
+    cmp     r12d, 9
+    jb      3f
+    lea     rdi, [rbx+128]
+    call    a_num
+    cvttsd2si edx, xmm0
+3:  mov     edi, [rsp+40]
+    lea     rsi, [rsp]
+    lea     rcx, [rsp+24]
+    call    pb_sample
+    test    eax, eax
+    jz      8f
+    mov     eax, [rsp+44]
+    cmp     eax, 3
+    jae     8f
+    cvtss2sd xmm0, [rsp+24+rax*4]
+    add     rsp, 48
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  add     rsp, 48
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# lightmap(k) -> the lightmap (lightmap.s: lm_stat)
+b_lightmap:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    lm_stat
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# lmsample(object, x, y, z, c) -> the lightmap's channel c where the
+#   object's surface is nearest the point (within 5 cm); nil if none
+b_lmsample:
+    push    rbx
+    push    r12
+    sub     rsp, 40
+    mov     rbx, rdi
+    xor     r12d, r12d
+1:  cmp     r12d, 3
+    jae     2f
+    lea     eax, [r12+1]
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+r12*4], xmm0
+    inc     r12d
+    jmp     1b
+2:  lea     rdi, [rbx+64]
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp+32], eax
+    mov     rdi, rbx
+    call    a_obj
+    mov     edi, eax
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+16]
+    call    lm_sample
+    test    eax, eax
+    jz      8f
+    mov     eax, [rsp+32]
+    cmp     eax, 3
+    jae     8f
+    cvtss2sd xmm0, [rsp+16+rax*4]
+    add     rsp, 40
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  add     rsp, 40
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
 
 # lib(k) -> the content library (library.s: lb_stat)
 b_lib:

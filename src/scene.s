@@ -328,6 +328,8 @@ scene_clear:
     mov     dword ptr [rip+uid_next], 1
     call    mats_reset
     call    nt_reset
+    call    pb_reset                    # (light probes)
+    call    lm_reset                    # (the lightmap)
     call    an_reset                    # (and the animation)
     call    rig_reset                   #  (motion paths, onion skins)
     call    rb_reset                    #  (the simulation)

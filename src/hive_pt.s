@@ -17,6 +17,9 @@
 
 # exports
 .globl hive_start
+.globl hive_prep
+.globl trace_ray
+.globl hv_rnd
 .globl hive_pass
 .globl hive_resolve
 .globl hive_resolve_new
@@ -1740,6 +1743,51 @@ mis:
 .equ PF_SC,     592             # the graph's shading context (152)
 .equ PF_SZ,     752
 
+# trace_ray(rdi=origin[3], rsi=direction[3], rdx=L out[3], rcx=aux out[7];
+#   r15 = rng) - the radiance arriving along -direction at the origin, a path
+#   traced as from the camera (probes, lightmaps)
+trace_ray:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    rbp
+    sub     rsp, PF_SZ+16
+    mov     r14, rdx
+    lea     rbx, [rsp]
+    mov     [rsp+PF_SZ], rcx
+    xor     eax, eax
+    mov     r8d, 7
+1:  mov     [rcx+r8*4-4], eax
+    dec     r8d
+    jnz     1b
+    xor     ecx, ecx
+2:  mov     eax, [rdi+rcx*4]
+    mov     [rbx+PF_RAY+RAY_O+rcx*4], eax
+    mov     eax, [rsi+rcx*4]
+    mov     [rbx+PF_RAY+RAY_D+rcx*4], eax
+    mov     dword ptr [rbx+PF_BETA+rcx*4], 0x3f800000
+    mov     dword ptr [rbx+PF_L+rcx*4], 0
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    jmp     .Ltp_dir
+
+# hive_prep - the scene ready for trace_ray (any render stops): -> eax = 1
+hive_prep:
+    sub     rsp, 8
+    mov     dword ptr [rip+hv_active], 0
+    mov     edi, 4
+    mov     esi, 4
+    mov     edx, 1
+    call    hive_start
+    add     rsp, 8
+    ret
+
+# hv_rnd(r15 = rng) -> xmm0 in [0, 1)
+hv_rnd:
+    jmp     rnd
+
 # trace_path(xmm0=sx, xmm1=sy (screen -1..1), rdi=L out[3], rsi=aux out[7]
 #   (albedo, normal, depth of the first hit); r15 = rng)
 trace_path:
@@ -1776,6 +1824,7 @@ trace_path:
     inc     ecx
     cmp     ecx, 3
     jb      1b
+.Ltp_dir:
     lea     rdi, [rbx+PF_RAY+RAY_D]
     call    unit3
     mov     dword ptr [rbx+PF_PREV], 0

@@ -7,6 +7,12 @@
 #  positions (with min / max), and every material as metallic-roughness
 #  PBR, emission (KHR_materials_emissive_strength above 1), transmission,
 #  IOR and clearcoat extensions. Normals are left to the viewer (flat).
+#  For engines: light objects become KHR_lights_punctual point lights (a
+#  node each), and a baked lightmap (lightmap.s) goes along: the atlas as an
+#  embedded PNG, each lightmapped object's second UVs as TEXCOORD_1 (a
+#  vertex per loop) and a material of its own whose MOZ_lightmap texture
+#  (texCoord 1) carries a KHR_texture_transform: the object's region in
+#  the atlas (offset, scale).
 #
 #  Import: the default scene's node tree (TRS or matrix) is walked and each
 #  triangle primitive becomes an object with its world transform baked in;
@@ -31,11 +37,17 @@
 .equ MA_COATR,  84
 .equ MA_ALPHA,  88
 .equ MAX_EXP,   4096                    # mesh objects per file
+.equ LE_NLOOPS_, 4                      # lightmap.s entries
+.equ LE_NTRIS_, 8
+.equ LE_UV_,    16
+.equ LE_RECT_,  24
 .equ MAX_BUF,   8
 .equ MAX_MATS,  256
 .equ MAX_DEPTH, 32
 
 .section .rodata
+.align 4
+gf_lpower:      .float 80.0
 g_head:         .asciz "{\"asset\":{\"version\":\"2.0\",\"generator\":\"BeeModel\"},\"scene\":0,\"scenes\":[{\"nodes\":["
 g_nodes:        .asciz "]}],\"nodes\":["
 g_name:         .asciz "{\"name\":"
@@ -70,6 +82,23 @@ g_acc_max:      .asciz "],\"max\":["
 g_acc_ind2:     .asciz ",\"componentType\":5125,\"type\":\"SCALAR\",\"count\":"
 g_acc_uv2:      .asciz ",\"componentType\":5126,\"type\":\"VEC2\",\"count\":"
 g_tex0:         .asciz ",\"TEXCOORD_0\":"
+g_tex1:         .asciz ",\"TEXCOORD_1\":"
+g_usedm:        .asciz "\"KHR_materials_ior\",\"KHR_materials_emissive_strength\",\"KHR_materials_transmission\",\"KHR_materials_clearcoat\""
+g_usedl:        .asciz "\"KHR_lights_punctual\""
+g_usedt:        .asciz "\"KHR_texture_transform\",\"MOZ_lightmap\""
+g_used0:        .asciz "],\"extensionsUsed\":["
+g_lmext:        .asciz "},\"MOZ_lightmap\":{\"index\":0,\"texCoord\":1,\"intensity\":1,\"extensions\":{\"KHR_texture_transform\":{\"texCoord\":1,\"offset\":["
+g_lmscale:      .asciz "],\"scale\":["
+g_lmend:        .asciz "]}}}}}"
+g_texs:         .asciz "],\"textures\":[{\"sampler\":0,\"source\":0}],\"samplers\":[{\"magFilter\":9729,\"minFilter\":9729,\"wrapS\":33071,\"wrapT\":33071}],\"images\":[{\"name\":\"lightmap\",\"mimeType\":\"image/png\",\"bufferView\":"
+g_lnode:        .asciz ",\"extensions\":{\"KHR_lights_punctual\":{\"light\":"
+g_lnend:        .asciz "}}}"
+g_lights:       .asciz ",\"extensions\":{\"KHR_lights_punctual\":{\"lights\":["
+g_light:        .asciz "{\"type\":\"point\",\"color\":[1,1,1],\"intensity\":"
+g_lname:        .asciz ",\"name\":"
+g_lend:         .asciz "]}}"
+g_bend:         .asciz "}]"
+g_pngview:      .asciz "{\"buffer\":0,\"byteOffset\":"
 g_col0:         .asciz ",\"COLOR_0\":"
 g_acc_col2:     .asciz ",\"componentType\":5126,\"type\":\"VEC3\",\"count\":"
 g_views:        .asciz "],\"bufferViews\":["
@@ -153,6 +182,16 @@ gx_nuv:         .skip 4                 # meshes with UVs
 gx_vc:          .skip 4*MAX_EXP         # with vertex colours: its colour
 gx_nvc:         .skip 4                 #  accessor (else -1); how many
 gx_path:        .skip 512
+gx_lm:          .skip 8*MAX_EXP         # with a lightmap: its entry (else 0)
+gx_lmk:         .skip 4*MAX_EXP         #  its number among them
+gx_pl:          .skip 4*MAX_EXP         # a vertex per loop (UVs or a lightmap)
+gx_nlm:         .skip 4
+gx_nl:          .skip 4                 # light objects: list indices
+gx_lt:          .skip 4*64
+gx_png:         .skip 8                 # the lightmap as PNG bytes
+gx_pngsz:       .skip 8
+gx_pngoff:      .skip 8                 #  where in the buffer
+gx_dmat:        .skip 128               # the default material (no material)
 # import
 gi_json:        .skip 8                 # text start / end
 gi_jend:        .skip 8
@@ -286,10 +325,13 @@ gltf_export:
     lea     rsi, [rip+s_glb]
     call    str_eq
     mov     [rip+gx_glb], eax
-3:  # the mesh objects and the buffer size
+3:  call    gx_png_make                 # (a lightmap: its PNG)
+    call    gx_light_list
+    # the mesh objects and the buffer size
     mov     dword ptr [rip+gx_n], 0
     mov     dword ptr [rip+gx_nuv], 0
     mov     dword ptr [rip+gx_nvc], 0
+    mov     dword ptr [rip+gx_nlm], 0
     xor     r15, r15                    # bytes
     xor     ebx, ebx
 4:  cmp     ebx, [rip+obj_count]
@@ -301,12 +343,42 @@ gltf_export:
     mov     ecx, [rip+gx_n]
     cmp     ecx, MAX_EXP
     jae     5f
+    mov     r14, rax                    # (the object)
     mov     rdi, rax
     call    obj_eval
+    mov     r13, rax                    # (its mesh)
+    mov     ecx, [rip+gx_n]
+    lea     rdx, [rip+gx_lm]            # a lightmap for this mesh?
+    mov     qword ptr [rdx+rcx*8], 0
+    mov     edi, [r14+OB_UID]
+    call    lm_find
+    test    rax, rax
+    jz      39f
+    mov     edx, [r13+ME_NLOOPS]
+    cmp     edx, [rax+LE_NLOOPS_]
+    jne     39f
+    mov     edx, [r13+ME_NTRIS]
+    cmp     edx, [rax+LE_NTRIS_]
+    jne     39f
+    mov     ecx, [rip+gx_n]
+    lea     rdx, [rip+gx_lm]
+    mov     [rdx+rcx*8], rax
+    lea     rdx, [rip+gx_lmk]
+    mov     eax, [rip+gx_nlm]
+    mov     [rdx+rcx*4], eax
+    inc     dword ptr [rip+gx_nlm]
+39: mov     rax, r13
     mov     ecx, [rip+gx_n]
     lea     rdx, [rip+gx_obj]
     mov     [rdx+rcx*4], ebx
-    mov     edx, [rax+ME_NVERTS]
+    lea     r8, [rip+gx_pl]
+    mov     dword ptr [r8+rcx*4], 0
+    lea     r8, [rip+gx_lm]
+    cmp     qword ptr [r8+rcx*8], 0
+    je      391f
+    lea     r8, [rip+gx_pl]
+    mov     dword ptr [r8+rcx*4], 1
+391:mov     edx, [rax+ME_NVERTS]
     lea     r8, [rip+gx_uv]             # UVs: a vertex per loop, + UVs
     mov     dword ptr [r8+rcx*4], -1
     cmp     qword ptr [rax+ME_UV], 0
@@ -314,8 +386,14 @@ gltf_export:
     mov     edx, [rip+gx_nuv]
     mov     [r8+rcx*4], edx
     inc     dword ptr [rip+gx_nuv]
+    lea     r8, [rip+gx_pl]
+    mov     dword ptr [r8+rcx*4], 1
+40: lea     r8, [rip+gx_pl]             # (a vertex a loop)
+    mov     edx, [rax+ME_NVERTS]
+    cmp     dword ptr [r8+rcx*4], 0
+    je      401f
     mov     edx, [rax+ME_NLOOPS]
-40: lea     r8, [rip+gx_nv]
+401:lea     r8, [rip+gx_nv]
     mov     [r8+rcx*4], edx
     mov     r9d, [rax+ME_NTRIS]
     lea     r8, [rip+gx_ntri]
@@ -344,11 +422,22 @@ gltf_export:
     mov     edx, [r8+rcx*4]
     imul    rdx, rdx, 12
     add     r15, rdx
-43: inc     dword ptr [rip+gx_n]
+43: lea     r8, [rip+gx_lm]             # (then the lightmap UVs)
+    cmp     qword ptr [r8+rcx*8], 0
+    je      44f
+    lea     r8, [rip+gx_nv]
+    mov     edx, [r8+rcx*4]
+    shl     rdx, 3
+    add     r15, rdx
+44: inc     dword ptr [rip+gx_n]
 41: inc     ebx
     jmp     4b
 5:  cmp     dword ptr [rip+gx_n], 0
     je      .Lgx_none
+    add     r15, 3                      # the PNG after it all (aligned)
+    and     r15, -4
+    mov     [rip+gx_pngoff], r15
+    add     r15, [rip+gx_pngsz]
     mov     [rip+gx_binsz], r15
     lea     rdi, [r15+16]
     call    vmap
@@ -368,10 +457,10 @@ gltf_export:
     lea     rax, [rip+gx_off]
     mov     rdi, [rax+r12*8]
     add     rdi, [rip+gx_bin]
-    lea     rax, [rip+gx_uv]
-    cmp     dword ptr [rax+r12*4], -1
+    lea     rax, [rip+gx_pl]
+    cmp     dword ptr [rax+r12*4], 0
     je      61f
-    mov     rsi, r13                    # (with UVs)
+    mov     rsi, r13                    # (a vertex a loop)
     call    gx_fill_uv
     jmp     62f
 61: mov     rsi, [r13+ME_POS]
@@ -389,12 +478,29 @@ gltf_export:
     call    gx_col_off
     mov     rdi, rax
     mov     rsi, r13
-    lea     rax, [rip+gx_uv]
+    lea     rax, [rip+gx_pl]
     mov     edx, [rax+r12*4]
+    dec     edx                         # (-1: a vertex a vertex)
     call    gx_fill_col
-63: inc     r12d
+63: lea     rax, [rip+gx_lm]            # lightmap UVs after
+    cmp     qword ptr [rax+r12*8], 0
+    je      64f
+    mov     edi, r12d
+    call    gx_lm_off
+    mov     rdi, rax
+    lea     rax, [rip+gx_lm]
+    mov     rsi, [rax+r12*8]
+    call    gx_fill_lm
+64: inc     r12d
     jmp     6b
-7:  # the JSON
+7:  mov     rsi, [rip+gx_png]           # the PNG
+    test    rsi, rsi
+    jz      71f
+    mov     rdi, [rip+gx_bin]
+    add     rdi, [rip+gx_pngoff]
+    mov     rcx, [rip+gx_pngsz]
+    rep     movsb
+71: # the JSON
     call    wb_reset
     lea     rsi, [rip+g_head]
     call    wb_str
@@ -409,7 +515,17 @@ gltf_export:
     call    int_out
     inc     r12d
     jmp     8b
-81: lea     rsi, [rip+g_nodes]
+81: xor     r12d, r12d                  # (and the lights' nodes)
+811:cmp     r12d, [rip+gx_nl]
+    jae     812f
+    mov     edi, ','
+    call    wb_char
+    mov     edi, [rip+gx_n]
+    add     edi, r12d
+    call    int_out
+    inc     r12d
+    jmp     811b
+812:lea     rsi, [rip+g_nodes]
     call    wb_str
     xor     r12d, r12d                  # nodes
 .Lgx_node:
@@ -454,6 +570,7 @@ gltf_export:
     inc     r12d
     jmp     .Lgx_node
 .Lgx_meshes:
+    call    gx_light_nodes
     lea     rsi, [rip+g_meshes]
     call    wb_str
     xor     r12d, r12d
@@ -502,11 +619,40 @@ gltf_export:
     lea     edi, [rdi+rax*2]
     add     edi, [rip+gx_nuv]
     call    int_out
-22: lea     rsi, [rip+g_ind]
+22: lea     rax, [rip+gx_lm]            # (lightmap UVs: after the colours)
+    cmp     qword ptr [rax+r12*8], 0
+    je      23f
+    lea     rax, [rip+gx_uv]            # (no UVs of its own: TEXCOORD_0 is
+    cmp     dword ptr [rax+r12*4], -1   #  them too - sets start at 0)
+    jne     221f
+    lea     rsi, [rip+g_tex0]
+    call    wb_str
+    mov     edi, r12d
+    call    gx_lm_acc
+    mov     edi, eax
+    call    int_out
+221:lea     rsi, [rip+g_tex1]
+    call    wb_str
+    mov     edi, r12d
+    call    gx_lm_acc
+    mov     edi, eax
+    call    int_out
+23: lea     rsi, [rip+g_ind]
     call    wb_str
     lea     edi, [r12+r12+1]
     call    int_out
-    mov     eax, [r13+OB_MAT]
+    lea     rax, [rip+gx_lm]            # a lightmap: its own material
+    cmp     qword ptr [rax+r12*8], 0
+    je      24f
+    lea     rsi, [rip+g_mat]
+    call    wb_str
+    call    mat_count
+    lea     rcx, [rip+gx_lmk]
+    mov     edi, [rcx+r12*4]
+    add     edi, eax
+    call    int_out
+    jmp     3f
+24: mov     eax, [r13+OB_MAT]
     test    eax, eax
     jz      3f
     lea     rsi, [rip+g_mat]
@@ -520,97 +666,102 @@ gltf_export:
     jmp     1b
 .Lgx_mats:
     call    mat_count
+    add     eax, [rip+gx_nlm]
     test    eax, eax
-    jz      .Lgx_acc
+    jz      .Lgx_used
     lea     rsi, [rip+g_mats]
     call    wb_str
     xor     r12d, r12d
 1:  call    mat_count
     cmp     r12d, eax
-    jae     .Lgx_used
+    jae     5f
     test    r12d, r12d
     jz      2f
     mov     edi, ','
     call    wb_char
 2:  mov     edi, r12d
     call    mat_get
-    mov     r13, rax
-    lea     rsi, [rip+g_name]
-    call    wb_str
-    mov     rsi, r13
-    call    jb_q
-    lea     rsi, [rip+g_pbr]
-    call    wb_str
-    lea     rdi, [r13+MA_BASE]
-    mov     ecx, 3
-    call    nums
-    mov     edi, ','
-    call    wb_char
-    movss   xmm0, [r13+MA_ALPHA]
-    call    jb_num
-    lea     rsi, [rip+g_metal]
-    call    wb_str
-    movss   xmm0, [r13+MA_METAL]
-    call    jb_num
-    lea     rsi, [rip+g_rough]
-    call    wb_str
-    movss   xmm0, [r13+MA_ROUGH]
-    call    jb_num
-    lea     rsi, [rip+g_emit]           # emission: colour x min(strength, 1)
-    call    wb_str
-    movss   xmm4, [r13+MA_ESTR]
-    minss   xmm4, [rip+gf_one]
-    xor     ecx, ecx
-3:  push    rcx
-    test    ecx, ecx
-    jz      31f
-    mov     edi, ','
-    call    wb_char
-31: mov     rcx, [rsp]
-    movss   xmm0, [r13+MA_EMIT+rcx*4]
-    movss   xmm4, [r13+MA_ESTR]
-    minss   xmm4, [rip+gf_one]
-    mulss   xmm0, xmm4
-    call    jb_num
-    pop     rcx
-    inc     ecx
-    cmp     ecx, 3
-    jb      3b
-    mov     edi, ']'
-    call    wb_char
-    movss   xmm0, [r13+MA_ALPHA]
-    comiss  xmm0, [rip+gf_one]
-    jae     4f
-    lea     rsi, [rip+g_blend]
-    call    wb_str
-4:  lea     rsi, [rip+g_ext]
-    call    wb_str
-    movss   xmm0, [r13+MA_IOR]
-    call    jb_num
-    lea     rsi, [rip+g_estr]           # the strength beyond 1
-    call    wb_str
-    movss   xmm0, [r13+MA_ESTR]
-    maxss   xmm0, [rip+gf_one]
-    call    jb_num
-    lea     rsi, [rip+g_trans]
-    call    wb_str
-    movss   xmm0, [r13+MA_TRANS]
-    call    jb_num
-    lea     rsi, [rip+g_coat]
-    call    wb_str
-    movss   xmm0, [r13+MA_COAT]
-    call    jb_num
-    lea     rsi, [rip+g_coatr]
-    call    wb_str
-    movss   xmm0, [r13+MA_COATR]
-    call    jb_num
-    lea     rsi, [rip+g_mend]
-    call    wb_str
+    mov     rdi, rax
+    xor     esi, esi
+    call    gx_mat
     inc     r12d
     jmp     1b
-.Lgx_used:
-    lea     rsi, [rip+g_used]
+5:  xor     r12d, r12d                  # the lightmapped objects' own
+6:  cmp     r12d, [rip+gx_n]
+    jae     .Lgx_used
+    lea     rax, [rip+gx_lm]
+    cmp     qword ptr [rax+r12*8], 0
+    je      7f
+    call    mat_count                   # (a comma unless it is the first)
+    lea     rcx, [rip+gx_lmk]
+    add     eax, [rcx+r12*4]
+    test    eax, eax
+    jz      61f
+    mov     edi, ','
+    call    wb_char
+61: lea     rax, [rip+gx_obj]
+    mov     edi, [rax+r12*4]
+    call    obj_at
+    mov     rbx, rax
+    lea     rdi, [rip+gx_dmat]          # its material, or the default
+    call    gx_default_mat
+    mov     eax, [rbx+OB_MAT]
+    test    eax, eax
+    jz      62f
+    lea     edi, [rax-1]
+    call    mat_get
+    mov     rdi, rax
+62: lea     rax, [rip+gx_lm]
+    mov     rsi, [rax+r12*8]
+    call    gx_mat
+7:  inc     r12d
+    jmp     6b
+.Lgx_used:                              # the extensions used
+    call    mat_count
+    mov     ebx, eax
+    add     eax, [rip+gx_nlm]
+    add     eax, [rip+gx_nl]
+    test    eax, eax
+    jz      .Lgx_tex
+    lea     rsi, [rip+g_used0]
     call    wb_str
+    xor     r12d, r12d                  # (commas)
+    mov     eax, ebx
+    add     eax, [rip+gx_nlm]
+    test    eax, eax
+    jz      1f
+    lea     rsi, [rip+g_usedm]
+    call    wb_str
+    inc     r12d
+1:  cmp     dword ptr [rip+gx_nl], 0
+    je      2f
+    test    r12d, r12d
+    jz      11f
+    mov     edi, ','
+    call    wb_char
+11: lea     rsi, [rip+g_usedl]
+    call    wb_str
+    inc     r12d
+2:  cmp     dword ptr [rip+gx_nlm], 0
+    je      .Lgx_tex
+    test    r12d, r12d
+    jz      21f
+    mov     edi, ','
+    call    wb_char
+21: lea     rsi, [rip+g_usedt]
+    call    wb_str
+.Lgx_tex:                               # the lightmap: texture, image
+    cmp     dword ptr [rip+gx_nlm], 0
+    je      .Lgx_acc
+    cmp     qword ptr [rip+gx_png], 0
+    je      .Lgx_acc
+    lea     rsi, [rip+g_texs]
+    call    wb_str
+    call    gx_png_view
+    mov     edi, eax
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
 .Lgx_acc:
     lea     rsi, [rip+g_acc]
     call    wb_str
@@ -744,7 +895,30 @@ gltf_export:
     call    wb_char
 51: inc     r12d
     jmp     5b
-6:
+6:  xor     r12d, r12d                  # lightmap UV accessors (views likewise)
+65: cmp     r12d, [rip+gx_n]
+    jae     66f
+    lea     rax, [rip+gx_lm]
+    cmp     qword ptr [rax+r12*8], 0
+    je      651f
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+g_acc_pos]
+    call    wb_str
+    mov     edi, r12d
+    call    gx_lm_acc
+    mov     edi, eax
+    call    int_out
+    lea     rsi, [rip+g_acc_uv2]
+    call    wb_str
+    lea     rax, [rip+gx_nv]
+    mov     edi, [rax+r12*4]
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
+651:inc     r12d
+    jmp     65b
+66:
     lea     rsi, [rip+g_views]
     call    wb_str
     xor     r12d, r12d
@@ -858,7 +1032,52 @@ gltf_export:
     call    wb_char
 51: inc     r12d
     jmp     5b
-6:
+6:  xor     r12d, r12d                  # lightmap UV views
+65: cmp     r12d, [rip+gx_n]
+    jae     66f
+    lea     rax, [rip+gx_lm]
+    cmp     qword ptr [rax+r12*8], 0
+    je      651f
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+g_view]
+    call    wb_str
+    mov     edi, r12d
+    call    gx_lm_off
+    sub     rax, [rip+gx_bin]
+    mov     rdi, rax
+    call    wb_int
+    lea     rsi, [rip+g_vlen]
+    call    wb_str
+    lea     rax, [rip+gx_nv]
+    mov     edi, [rax+r12*4]
+    shl     edi, 3
+    call    int_out
+    lea     rsi, [rip+g_vtarget]
+    call    wb_str
+    mov     edi, 34962
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
+651:inc     r12d
+    jmp     65b
+66: cmp     dword ptr [rip+gx_nlm], 0   # the PNG's view
+    je      67f
+    cmp     qword ptr [rip+gx_png], 0
+    je      67f
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+g_pngview]
+    call    wb_str
+    mov     rdi, [rip+gx_pngoff]
+    call    wb_int
+    lea     rsi, [rip+g_vlen]
+    call    wb_str
+    mov     rdi, [rip+gx_pngsz]
+    call    wb_int
+    mov     edi, '}'
+    call    wb_char
+67:
     lea     rsi, [rip+g_bufs]
     call    wb_str
     mov     rdi, [rip+gx_binsz]
@@ -872,8 +1091,11 @@ gltf_export:
     call    base64_out
     mov     edi, '"'
     call    wb_char
-1:  lea     rsi, [rip+g_end]
+1:  lea     rsi, [rip+g_bend]           # the buffers closed, then the lights
     call    wb_str
+    call    gx_light_list_json
+    mov     edi, '}'
+    call    wb_char
     cmp     dword ptr [rip+gx_glb], 0
     je      .Lgx_write
     call    glb_wrap
@@ -887,6 +1109,11 @@ gltf_export:
     mov     ebx, eax
     jmp     .Lgx_free
 .Lgx_none:
+    mov     rdi, [rip+gx_png]
+    mov     rsi, [rip+gx_pngsz]
+    call    vunmap
+    mov     qword ptr [rip+gx_png], 0
+    mov     qword ptr [rip+gx_pngsz], 0
     mov     eax, 2
     jmp     .Lgx_out
 .Lgx_mem:
@@ -897,6 +1124,11 @@ gltf_export:
     add     rsi, 16
     call    vunmap
     mov     qword ptr [rip+gx_bin], 0
+    mov     rdi, [rip+gx_png]
+    mov     rsi, [rip+gx_pngsz]
+    call    vunmap
+    mov     qword ptr [rip+gx_png], 0
+    mov     qword ptr [rip+gx_pngsz], 0
     mov     eax, ebx
 .Lgx_out:
     add     rsp, 104
@@ -907,6 +1139,321 @@ gltf_export:
     pop     rbp
     pop     rbx
     ret
+
+# gx_mat(rdi=material record, rsi=lightmap entry or 0) - one material:
+#   metallic-roughness, emission, the extensions; with a lightmap its
+#   MOZ_lightmap texture (texCoord 1), the region as KHR_texture_transform
+gx_mat:
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r13, rdi
+    mov     r14, rsi
+    lea     rsi, [rip+g_name]
+    call    wb_str
+    mov     rsi, r13
+    call    jb_q
+    lea     rsi, [rip+g_pbr]
+    call    wb_str
+    lea     rdi, [r13+MA_BASE]
+    mov     ecx, 3
+    call    nums
+    mov     edi, ','
+    call    wb_char
+    movss   xmm0, [r13+MA_ALPHA]
+    call    jb_num
+    lea     rsi, [rip+g_metal]
+    call    wb_str
+    movss   xmm0, [r13+MA_METAL]
+    call    jb_num
+    lea     rsi, [rip+g_rough]
+    call    wb_str
+    movss   xmm0, [r13+MA_ROUGH]
+    call    jb_num
+    lea     rsi, [rip+g_emit]           # emission: colour x min(strength, 1)
+    call    wb_str
+    xor     ecx, ecx
+3:  push    rcx
+    push    rcx
+    test    ecx, ecx
+    jz      31f
+    mov     edi, ','
+    call    wb_char
+31: mov     rcx, [rsp]
+    movss   xmm0, [r13+MA_EMIT+rcx*4]
+    movss   xmm4, [r13+MA_ESTR]
+    minss   xmm4, [rip+gf_one]
+    mulss   xmm0, xmm4
+    call    jb_num
+    pop     rcx
+    pop     rcx
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    mov     edi, ']'
+    call    wb_char
+    movss   xmm0, [r13+MA_ALPHA]
+    comiss  xmm0, [rip+gf_one]
+    jae     4f
+    lea     rsi, [rip+g_blend]
+    call    wb_str
+4:  lea     rsi, [rip+g_ext]
+    call    wb_str
+    movss   xmm0, [r13+MA_IOR]
+    call    jb_num
+    lea     rsi, [rip+g_estr]           # the strength beyond 1
+    call    wb_str
+    movss   xmm0, [r13+MA_ESTR]
+    maxss   xmm0, [rip+gf_one]
+    call    jb_num
+    lea     rsi, [rip+g_trans]
+    call    wb_str
+    movss   xmm0, [r13+MA_TRANS]
+    call    jb_num
+    lea     rsi, [rip+g_coat]
+    call    wb_str
+    movss   xmm0, [r13+MA_COAT]
+    call    jb_num
+    lea     rsi, [rip+g_coatr]
+    call    wb_str
+    movss   xmm0, [r13+MA_COATR]
+    call    jb_num
+    test    r14, r14
+    jnz     5f
+    lea     rsi, [rip+g_mend]
+    call    wb_str
+    jmp     9f
+5:  lea     rsi, [rip+g_lmext]          # the lightmap, its region
+    call    wb_str
+    lea     rdi, [r14+LE_RECT_]
+    mov     ecx, 2
+    call    nums
+    lea     rsi, [rip+g_lmscale]
+    call    wb_str
+    lea     rdi, [r14+LE_RECT_+8]
+    mov     ecx, 2
+    call    nums
+    lea     rsi, [rip+g_lmend]
+    call    wb_str
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    ret
+
+# gx_default_mat(rdi=record) -> rdi: the values a mesh without a material
+#   shows (the preview's default), named "default"
+gx_default_mat:
+    push    rdi
+    xor     eax, eax
+    mov     ecx, 128
+    rep     stosb
+    pop     rdi
+    mov     rax, 0x746c7561666564       # "default"
+    mov     [rdi], rax
+    mov     eax, 0x3f4ccccd             # 0.8
+    mov     [rdi+MA_BASE], eax
+    mov     [rdi+MA_BASE+4], eax
+    mov     [rdi+MA_BASE+8], eax
+    mov     dword ptr [rdi+MA_ROUGH], 0x3f000000
+    mov     dword ptr [rdi+MA_IOR], 0x3fb9999a
+    mov     dword ptr [rdi+MA_ESTR], 0x3f800000
+    mov     dword ptr [rdi+MA_ALPHA], 0x3f800000
+    ret
+
+# gx_png_make - a lightmap: its atlas as PNG bytes in gx_png (wb borrowed)
+gx_png_make:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     qword ptr [rip+gx_png], 0
+    mov     qword ptr [rip+gx_pngsz], 0
+    cmp     qword ptr [rip+lm_rgb], 0
+    je      9f
+    call    lm_png
+    test    rax, rax
+    jz      9f
+    mov     rbx, rax
+    call    wb_reset
+    mov     rsi, rbx
+    mov     edx, [rip+lm_w]
+    mov     ecx, [rip+lm_h]
+    mov     r8d, edx
+    call    png_encode
+    test    eax, eax
+    jz      8f
+    mov     rdi, [rip+wb_len]
+    call    vmap
+    test    rax, rax
+    jz      8f
+    mov     [rip+gx_png], rax
+    mov     rcx, [rip+wb_len]
+    mov     [rip+gx_pngsz], rcx
+    mov     rdi, rax
+    mov     rsi, [rip+wb_ptr]
+    rep     movsb
+8:  mov     rdi, rbx
+    mov     esi, [rip+lm_w]
+    imul    esi, [rip+lm_h]
+    shl     esi, 2
+    call    vunmap
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_light_list - gx_lt: the light objects (64 at most)
+gx_light_list:
+    push    rbx
+    mov     dword ptr [rip+gx_nl], 0
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     9f
+    cmp     dword ptr [rip+gx_nl], 64
+    jae     9f
+    mov     edi, ebx
+    call    obj_at
+    cmp     dword ptr [rax+OB_TYPE], OT_LIGHT
+    jne     2f
+    mov     ecx, [rip+gx_nl]
+    lea     rdx, [rip+gx_lt]
+    mov     [rdx+rcx*4], ebx
+    inc     dword ptr [rip+gx_nl]
+2:  inc     ebx
+    jmp     1b
+9:  pop     rbx
+    ret
+
+# gx_light_nodes - after the mesh nodes: a node per light (its place, the
+#   light it is)
+gx_light_nodes:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+gx_nl]
+    jae     9f
+    mov     edi, ','
+    call    wb_char
+    lea     rax, [rip+gx_lt]
+    mov     edi, [rax+rbx*4]
+    call    obj_at
+    mov     r12, rax
+    lea     rsi, [rip+g_name]
+    call    wb_str
+    mov     rsi, r12
+    call    jb_q
+    lea     rsi, [rip+g_tr]
+    call    wb_str
+    lea     rdi, [r12+OB_LOC]
+    mov     ecx, 3
+    call    nums
+    mov     edi, ']'
+    call    wb_char
+    lea     rsi, [rip+g_lnode]
+    call    wb_str
+    mov     edi, ebx
+    call    int_out
+    lea     rsi, [rip+g_lnend]
+    call    wb_str
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_light_list_json - the root's KHR_lights_punctual: a point light each
+#   (white; the path tracer's strength as candela)
+gx_light_list_json:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    cmp     dword ptr [rip+gx_nl], 0
+    je      9f
+    lea     rsi, [rip+g_lights]
+    call    wb_str
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+gx_nl]
+    jae     8f
+    test    ebx, ebx
+    jz      2f
+    mov     edi, ','
+    call    wb_char
+2:  lea     rsi, [rip+g_light]
+    call    wb_str
+    movss   xmm0, [rip+gf_lpower]
+    call    jb_num
+    lea     rsi, [rip+g_lname]
+    call    wb_str
+    lea     rax, [rip+gx_lt]
+    mov     edi, [rax+rbx*4]
+    call    obj_at
+    mov     rsi, rax
+    call    jb_q
+    mov     edi, '}'
+    call    wb_char
+    inc     ebx
+    jmp     1b
+8:  lea     rsi, [rip+g_lend]
+    call    wb_str
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_lm_off(edi=export) -> rax = where its lightmap UVs go: after its
+#   colours (or where they would be)
+gx_lm_off:
+    push    rbx
+    mov     ebx, edi
+    call    gx_col_off
+    lea     rcx, [rip+gx_vc]
+    cmp     dword ptr [rcx+rbx*4], -1
+    je      1f
+    lea     rcx, [rip+gx_nv]
+    mov     ecx, [rcx+rbx*4]
+    lea     rcx, [rcx+rcx*2]
+    lea     rax, [rax+rcx*4]
+1:  pop     rbx
+    ret
+
+# gx_lm_acc(edi=export) -> eax = its lightmap UV accessor: 2n + UVs +
+#   colours + its number
+gx_lm_acc:
+    lea     rax, [rip+gx_lmk]
+    mov     eax, [rax+rdi*4]
+    mov     ecx, [rip+gx_n]
+    lea     eax, [rax+rcx*2]
+    add     eax, [rip+gx_nuv]
+    add     eax, [rip+gx_nvc]
+    ret
+
+# gx_png_view -> eax = the PNG's bufferView: after every accessor's
+gx_png_view:
+    mov     eax, [rip+gx_n]
+    add     eax, eax
+    add     eax, [rip+gx_nuv]
+    add     eax, [rip+gx_nvc]
+    add     eax, [rip+gx_nlm]
+    ret
+
+# gx_fill_lm(rdi=out, rsi=lightmap entry) - its second UVs, (u, 1 - v)
+gx_fill_lm:
+    mov     ecx, [rsi+LE_NLOOPS_]
+    mov     rsi, [rsi+LE_UV_]
+    movss   xmm1, [rip+gf_one]
+1:  test    ecx, ecx
+    jz      9f
+    mov     eax, [rsi]
+    mov     [rdi], eax
+    movss   xmm0, xmm1
+    subss   xmm0, [rsi+4]
+    movss   [rdi+4], xmm0
+    add     rsi, 8
+    add     rdi, 8
+    dec     ecx
+    jmp     1b
+9:  ret
 
 # gx_col_off(edi=export) -> rax = where its colours go in the buffer:
 #   after positions, indices and UVs
@@ -1033,7 +1580,9 @@ gx_fill_uv:
     jb      4b
     inc     r13d
     jmp     3b
-6:  xor     ecx, ecx                    # UVs: (u, 1 - v)
+6:  cmp     qword ptr [rbx+ME_UV], 0    # UVs: (u, 1 - v)
+    je      9f
+    xor     ecx, ecx
 7:  cmp     ecx, [rbx+ME_NLOOPS]
     jae     9f
     mov     rax, [rbx+ME_UV]

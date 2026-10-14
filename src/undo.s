@@ -42,7 +42,8 @@
 .equ ST_DELTA,      104     # sculpt: vertex positions changed in place, or 0
 .equ ST_TREES,      112     # the node trees it saw (a reference)
 .equ ST_ANIM,       120     # the animation it saw (a reference)
-.equ ST_HDR,        128
+.equ ST_PROBES,     128     # the light probes it saw (a reference)
+.equ ST_HDR,        136
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -130,6 +131,9 @@ snapshot:
     mov     rdi, [rip+an_cur]           # the animation, shared
     mov     [rbx+ST_ANIM], rdi
     call    an_ref
+    mov     rdi, [rip+pb_cur]           # the light probes, shared
+    mov     [rbx+ST_PROBES], rdi
+    call    pb_ref
     xor     r12d, r12d
 2:  cmp     r12d, [rip+obj_count]
     jae     8f
@@ -181,6 +185,8 @@ release:
     call    nt_unref
     mov     rdi, [rbx+ST_ANIM]
     call    an_unref
+    mov     rdi, [rbx+ST_PROBES]
+    call    pb_unref
     mov     rdi, [rbx+ST_DELTA]         # its delta goes too
     test    rdi, rdi
     jz      3f
@@ -243,6 +249,12 @@ restore_step:
     mov     rax, [rbx+ST_ANIM]
     mov     [rip+an_cur], rax
     call    an_unref
+    mov     rdi, [rbx+ST_PROBES]        # the light probes it saw
+    call    pb_ref
+    mov     rdi, [rip+pb_cur]
+    mov     rax, [rbx+ST_PROBES]
+    mov     [rip+pb_cur], rax
+    call    pb_unref
     call    cad_sync
     lea     rdi, [rip+scene_pool]
     call    pool_clear
