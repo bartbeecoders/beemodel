@@ -174,6 +174,38 @@ project uses [Semantic Versioning](https://semver.org/).
     counted, a spawn on E, a pushed ball, a moving platform; saved and
     opened again, run twice to the same result, a message storm cut off at
     the budget; the node editor, F5 and MCP in a window.
+- **Lighting tools** (#149): light probes, a lightmap baker, glTF for
+  engines.
+  - **Light probes** (`src/probe.s`): `probe.add irradiance|reflection
+    [x y z] [half size] [grid points]`, `probe.bake [rays]`. Irradiance
+    volumes keep a grid of L2 spherical harmonics (convolved with the
+    cosine lobe), reflection probes a 6 x 32 x 32 cube map; both are baked
+    by the path tracer (a new `trace_ray`: a path from any point along any
+    direction) in parallel. The material preview takes its diffuse light
+    from the smallest volume around a point (trilinear) and its
+    reflections from a reflection probe's box (box-projected); where a
+    volume lights it, the studio softboxes are left out. The probes are
+    drawn as boxes in the viewport, kept in undo and saved (PRBE).
+  - **Lightmaps** (`src/lightmap.s`): `lightmap.bake [size] [rays]` gives
+    every visible mesh a second UV set (a smart projection of a copy,
+    packed), places the objects in one atlas by their area, traces the
+    irradiance at every covered texel (cosine-weighted, from just above
+    the surface), denoises (a-trous, normal, distance and luminance
+    weights) and dilates; `lightmap.save` writes OpenEXR or PNG. Saved in
+    the `.bee` file (LMAP), not in undo.
+  - **glTF for engines:** light objects as `KHR_lights_punctual`; a baked
+    lightmap as an embedded PNG, the second UVs as `TEXCOORD_1` and a
+    material per lightmapped object with `MOZ_lightmap` whose
+    `KHR_texture_transform` is the object's atlas region;
+    `KHR_materials_emissive_strength` as before.
+  - BeeScript: `probe(k)`, `probeinfo(n, what)`, `probesample(...)` (the
+    probes, or irradiance traced directly as the reference),
+    `lightmap(k)`, `lmsample(object, x, y, z, c)`.
+  - [tests/lighting.py](tests/lighting.py): probes and the lightmap
+    checked against traced irradiance (shade, colour bleeding,
+    reflections), undo, saving, PNG and EXR, the export through the
+    Khronos glTF validator (no errors, no warnings), the preview lit by
+    the probes.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

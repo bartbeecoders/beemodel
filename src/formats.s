@@ -69,6 +69,8 @@
 .equ TAG_ILAY,      0x59414C49          # "ILAY"
 .equ TAG_MVCL,      0x4C43564D          # "MVCL"
 .equ TAG_NTRE,      0x4552544E          # "NTRE"
+.equ TAG_PRBE,      0x45425250          # "PRBE"
+.equ TAG_LMAP,      0x50414D4C          # "LMAP"
 .equ TAG_CURV,      0x56525543          # "CURV"
 .equ TAG_ANIM,      0x4D494E41          # "ANIM"
 .equ TAG_ARMT,      0x544D5241          # "ARMT"
@@ -124,6 +126,10 @@ ilay_size:      .skip 4
 mvcl_chunk:     .skip 8
 ntre_chunk:     .skip 8
 ntre_size:      .skip 4
+prbe_chunk:     .skip 8
+prbe_size:      .skip 4
+lmap_chunk:     .skip 8
+lmap_size:      .skip 4
 curv_chunk:     .skip 8
 anim_chunk:     .skip 8
 anim_size:      .skip 4
@@ -442,6 +448,14 @@ bee_save:
     mov     edi, TAG_NTRE               # NTRE (geometry node trees)
     call    chunk_begin
     call    nt_write
+    call    chunk_end
+    mov     edi, TAG_PRBE               # PRBE (light probes)
+    call    chunk_begin
+    call    pb_write
+    call    chunk_end
+    mov     edi, TAG_LMAP               # LMAP (the lightmap)
+    call    chunk_begin
+    call    lm_write
     call    chunk_end
     mov     edi, TAG_CURV               # CURV (the curves meshes come from)
     call    chunk_begin
@@ -1142,6 +1156,8 @@ bee_load:
     mov     qword ptr [rip+ilay_chunk], 0
     mov     qword ptr [rip+mvcl_chunk], 0
     mov     qword ptr [rip+ntre_chunk], 0
+    mov     qword ptr [rip+prbe_chunk], 0
+    mov     qword ptr [rip+lmap_chunk], 0
     mov     qword ptr [rip+curv_chunk], 0
     mov     qword ptr [rip+anim_chunk], 0
     mov     qword ptr [rip+armt_chunk], 0
@@ -1273,10 +1289,22 @@ bee_load:
     mov     [rip+curv_size], ebp
     jmp     23f
 281:cmp     eax, TAG_NTRE
-    jne     272f
+    jne     2811f
     lea     rax, [rbx+8]
     mov     [rip+ntre_chunk], rax
     mov     [rip+ntre_size], ebp
+    jmp     23f
+2811:cmp    eax, TAG_PRBE
+    jne     2812f
+    lea     rax, [rbx+8]
+    mov     [rip+prbe_chunk], rax
+    mov     [rip+prbe_size], ebp
+    jmp     23f
+2812:cmp    eax, TAG_LMAP
+    jne     272f
+    lea     rax, [rbx+8]
+    mov     [rip+lmap_chunk], rax
+    mov     [rip+lmap_size], ebp
     jmp     23f
 272:cmp     eax, TAG_MVCL
     jne     273f
@@ -1458,9 +1486,19 @@ bee_load:
     call    simc_read
 7742:mov     rdi, [rip+ntre_chunk]       # geometry node trees
     test    rdi, rdi
-    jz      775f
+    jz      7743f
     mov     esi, [rip+ntre_size]
     call    nt_read
+7743:mov     rdi, [rip+prbe_chunk]       # light probes
+    test    rdi, rdi
+    jz      7744f
+    mov     esi, [rip+prbe_size]
+    call    pb_read
+7744:mov     rdi, [rip+lmap_chunk]       # the lightmap
+    test    rdi, rdi
+    jz      775f
+    mov     esi, [rip+lmap_size]
+    call    lm_read
 775:mov     rdi, [rip+mres_chunk]       # multires displacements
     test    rdi, rdi
     jz      772f

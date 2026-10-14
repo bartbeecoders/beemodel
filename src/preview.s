@@ -42,7 +42,9 @@
 .equ SH_NV,     112
 .equ SH_R,      116             # reflection direction
 .equ SH_TMP,    128             # 32 bytes
-.equ SH_SZ,     176
+.equ SH_P,      176             # the world point (light probes)
+.equ SH_PROBED, 188             # 1: an irradiance volume lit it
+.equ SH_SZ,     192
 
 .section .bss
 .align 8
@@ -542,6 +544,26 @@ job_shade:
     test    eax, eax
     jz      .Ljs_pnext
     call    pixel_normal                # world N, V into the scratch
+    movss   xmm0, [rsp+SH_SZ+28]        # the world point: eye + world(d t)
+    xor     ecx, ecx
+21: movss   xmm1, [rsp+SH_SZ+8+rcx*4]
+    mulss   xmm1, xmm0
+    movss   [rsp+SH_TMP+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      21b
+    lea     rsi, [rsp+SH_TMP]
+    lea     rdi, [rsp+SH_P]
+    call    cam_to_world
+    xor     ecx, ecx
+22: lea     rax, [rip+eye]
+    movss   xmm0, [rax+rcx*4]
+    addss   xmm0, [rsp+SH_P+rcx*4]
+    movss   [rsp+SH_P+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      22b
+    mov     dword ptr [rsp+SH_PROBED], 0
     mov     rax, [rip+pv_mat]           # material values
     mov     rsi, [rax+rbp*8]
     call    load_material
@@ -991,13 +1013,13 @@ shade:
     # ---- environment: diffuse irradiance(n) + specular radiance(R) ----------
     lea     rdi, [rbx+SH_N]
     lea     rsi, [rsp]                  # irr(n)
-    call    env_irr
+    call    pv_irr
     lea     rdi, [rbx+SH_R]
     lea     rsi, [rsp+16]               # sky(R)
-    call    env_sky
+    call    pv_sky
     lea     rdi, [rbx+SH_R]
     lea     rsi, [rsp+32]               # irr(R)
-    call    env_irr
+    call    pv_irr
     movss   xmm0, [rbx+SH_ROUGH]        # blur: mix(sky, irr, rough^2 ... )
     mulss   xmm0, xmm0
     call    split_sum                   # xmm0 = A, xmm1 = B for (rough, n.v)
@@ -1045,9 +1067,11 @@ shade:
     inc     ecx
     cmp     ecx, 3
     jb      41b
-4:  # ---- softbox lights (the studio only) ---------------------------------------
+4:  # ---- softbox lights (the studio only; not where probes light it) ---------
     xor     r12d, r12d
     cmp     dword ptr [rip+env_on], 0
+    jne     6f
+    cmp     dword ptr [rbx+SH_PROBED], 0
     jne     6f
 5:  cmp     r12d, 3
     jae     6f
@@ -1088,6 +1112,8 @@ shade:
     cmp     ecx, 3
     jb      62b
     cmp     dword ptr [rip+env_on], 0
+    jne     7f
+    cmp     dword ptr [rbx+SH_PROBED], 0
     jne     7f
     xor     r12d, r12d                  # coat highlights of the key light
     lea     rsi, [rip+lights]
@@ -1254,6 +1280,66 @@ dot3:
     mulss   xmm1, [rsi+8]
     addss   xmm0, xmm1
     ret
+
+# pv_irr(rdi=direction, rsi=out[3]; rbx = the scratch) - the irradiance / pi
+#   from the light probes at the point (probe.s), else the environment's
+pv_irr:
+    push    r12
+    push    r13
+    sub     rsp, 24
+    mov     r12, rdi
+    mov     r13, rsi
+    mov     rdx, rsi
+    mov     rsi, rdi
+    lea     rdi, [rbx+SH_P]
+    call    pb_irr
+    test    eax, eax
+    jz      1f
+    mov     dword ptr [rbx+SH_PROBED], 1
+    jmp     9f
+1:  mov     rdi, r12
+    mov     rsi, r13
+    call    env_irr
+9:  add     rsp, 24
+    pop     r13
+    pop     r12
+    ret
+
+# pv_sky(rdi=direction, rsi=out[3]; rbx = the scratch) - the radiance along
+#   it from a reflection probe at the point, else the environment's (the
+#   direction need not be unit: made so for the probe)
+pv_sky:
+    push    r12
+    push    r13
+    sub     rsp, 40
+    mov     r12, rdi
+    mov     r13, rsi
+    movsd   xmm0, [rdi]
+    insertps xmm0, [rdi+8], 0x28
+    movaps  xmm1, xmm0
+    dpps    xmm1, xmm1, 0x7f
+    sqrtps  xmm1, xmm1
+    maxps   xmm1, [rip+pf_tiny4]
+    divps   xmm0, xmm1
+    movups  [rsp], xmm0
+    lea     rdi, [rbx+SH_P]
+    lea     rsi, [rsp]
+    mov     rdx, r13
+    call    pb_spec
+    test    eax, eax
+    jnz     9f
+    mov     rdi, r12
+    mov     rsi, r13
+    call    env_sky
+9:  add     rsp, 40
+    pop     r13
+    pop     r12
+    ret
+
+.section .rodata
+.align 16
+pf_tiny4:       .float 1.0e-8, 1.0e-8, 1.0e-8, 1.0e-8
+.text
 
 # env_irr(rdi=direction, rsi=out[3]) - ground .. sky irradiance by n.y
 env_irr:

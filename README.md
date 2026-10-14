@@ -534,6 +534,18 @@ sandboxed (a node budget a step, objects only by name), and the player rides mov
 BeeScript reads them with `logic(k)` and `logicvar(object, k)`; `playkey` presses keys.
 `object.hide` (H) / `object.reveal` (Alt+H) hide objects. See [tests/logic.py](tests/logic.py).
 
+**Light probes and lightmaps.** `probe.add irradiance 0 1 0 9 1 9 7 3 7` places an irradiance
+volume (a grid of spherical-harmonic probes over a box), `probe.add reflection 5 1.5 0 2.5 1.5
+3` a reflection probe (a cube map, box-projected); `probe.bake` traces them with the path
+tracer, and the material preview then takes its light from them: shade under a roof, colour
+bleeding from a red wall, the room in a mirror. `lightmap.bake 512 64` gives every mesh a
+second UV set, packs them into one atlas and traces the light falling on every texel
+(denoised, dilated); `lightmap.save lightmap.exr` (or `.png`). The glTF export is engine-ready:
+point lights as `KHR_lights_punctual`, the lightmap embedded and mapped with `TEXCOORD_1`,
+`MOZ_lightmap` and `KHR_texture_transform`, emission beyond 1 with
+`KHR_materials_emissive_strength`; it passes the Khronos glTF validator. See
+[tests/lighting.py](tests/lighting.py).
+
 ### Virtualized geometry
 
 **Cluster LOD DAG.** `vgeo.build` prepares the active mesh for virtualized rendering, as Nanite
@@ -785,6 +797,8 @@ src/asset.s     assets: trees and materials saved, loaded (.beea files, library 
 src/library.s   the content library: blobs by hash, kinds, thumbnails, packs, the Asset Browser
 src/play.s      play mode: the capsule walker, fly camera, captured mouse, keep / discard
 src/logic.s     logic graphs: event / action / data nodes, the play-mode VM
+src/probe.s     light probes: SH irradiance volumes, reflection cube maps, baked by Hive
+src/lightmap.s  the lightmap baker: second UVs, the atlas, traced texels, EXR / PNG
 src/inst.s      instances: the block, realizing, the viewport's instance pass
 src/curve.s     curves: splines, sweeps, curve edit mode, the curve nodes
 src/procgen.s   terrain, erosion, L-systems, wave function collapse
