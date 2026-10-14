@@ -60,6 +60,30 @@ project uses [Semantic Versioning](https://semver.org/).
     drawn cut against level 0, for cracks), BeeScript `vgstat(k)` (the last
     frame's cut, culling and streaming) and `view(yaw, pitch, distance, x,
     y, z)` (the viewport camera). The zoom now goes out to 20 km.
+- **World partition** (#145). `world.partition <cell size> [radius]`
+  splits a saved scene into grid cells on the ground (`src/world.s`).
+  - **Cells:** plain mesh objects belong to the cell under them. Each cell
+    is its own file beside the scene (`<name>.cells/<x>_<z>.cell`: meshes,
+    UVs, colours, cluster DAGs and objects). The scene file keeps
+    everything else and an index of the cells; on opening, the cells
+    directory is read too.
+  - **Streaming:** each pass of the main loop (and `world.update` in
+    scripts) unloads cells past 1.25 x the radius, loads the cells in reach
+    nearest first (two a pass) while the budget (`world.budget`) allows, and
+    unloads the farthest while the budget is passed.
+  - **Edits:** a fingerprint of each cell's objects tells a changed cell,
+    which is written before it unloads. An object moved into a cell that is
+    not loaded pulls that cell in, so objects cross borders. Saving writes
+    the changed cells and keeps their objects out of the scene file; saving
+    elsewhere copies the cells along. Streaming starts the undo history
+    afresh (`undo_clear`).
+  - **Showing it:** unloaded cells are drawn as boxes in the viewport, and a
+    minimap (`world.minimap`) shows every cell (loaded, changed, on disk),
+    the camera and its radius. BeeScript `world(k)` reports.
+  - [tests/world.py](tests/world.py) makes a 32 x 32 map of 4096 objects
+    while partitioned (1024 cell files), flies over it under an 8 MB budget
+    at ~3 ms a frame, edits on the way, and checks the edits after flying
+    away, flying back, saving and opening again.
 - **Job system:** `parallel_for` is shared by the UI thread and one
   background thread (`job_spawn`), which take turns.
 

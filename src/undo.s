@@ -22,6 +22,7 @@
 .globl undo_suppress
 .globl group_depth
 .globl undo_drop_last
+.globl undo_clear
 .globl undo_bytes
 .globl undo_depth
 .globl undo_attach_delta
@@ -343,6 +344,25 @@ clear_redo:
     call    release
     jmp     1b
 9:  pop     rbx
+    ret
+
+# undo_clear - the history starts again (a world's cells came or went: steps
+#   from before would bring back what is now on disk, or drop what came in)
+undo_clear:
+    push    rbx
+    call    clear_redo
+1:  mov     ebx, [rip+undo_depth]
+    test    ebx, ebx
+    jz      9f
+    dec     ebx
+    mov     [rip+undo_depth], ebx
+    lea     rax, [rip+undo_stack]
+    mov     rdi, [rax+rbx*8]
+    call    release
+    jmp     1b
+9:  mov     qword ptr [rip+lo_op], 0    # (the redo panel too)
+    mov     dword ptr [rip+group_pushed], 0  # (a group records again)
+    pop     rbx
     ret
 
 # -----------------------------------------------------------------------------

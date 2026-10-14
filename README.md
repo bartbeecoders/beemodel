@@ -526,6 +526,19 @@ million-triangle boulders (1.05 billion source triangles) flies at about 6 ms a 
 threads, and the process never holds more than 900 MB
 ([tests/billion.py](tests/billion.py)).
 
+### World partition
+
+`world.partition 50` splits a saved scene into 50 m cells on the ground; each cell's plain mesh
+objects (no modifiers, rig, curve or shape keys) go to their own file beside the scene
+(`world.cells/<x>_<z>.cell`, cluster DAGs included). Cells within the loading radius of the camera
+(`world.radius`) stream in, nearest first; cells far behind go out, and when the loaded cells' meshes
+pass the budget (`world.budget`, in MB) the farthest go too. A cell that changed is written before
+it goes, and an object moved into a cell that is not loaded pulls that cell in, so objects cross
+borders freely. Unloaded cells show as boxes, and a minimap in the viewport's corner shows every
+cell (loaded, changed, on disk), the camera and its radius (`world.minimap`). Streaming starts the
+undo history afresh. A 32 x 32 map of 4096 objects is made, edited and flown over under an 8 MB
+budget in [tests/world.py](tests/world.py).
+
 ### Sculpting
 
 Ctrl+Tab puts the active mesh in **sculpt mode**. It handles tens of
@@ -759,6 +772,7 @@ src/physui.s    the Physics section of the Properties area
 src/simcache.s  the simulation cache: frames kept, played back, baked, saved
 src/vgeo.s      virtualized geometry: the cluster LOD DAG (meshlets, groups, simplification)
 src/vgdraw.s    virtualized geometry: per-frame cuts, frustum and occlusion culling, streaming
+src/world.s     world partition: grid cells saved apart, streamed by camera distance, the minimap
 src/agent.s     agent permissions, activity log, revert
 src/script.s    BeeScript: lexer, one-pass compiler, stack VM, builtins, macros
 src/const.inc   syscalls, opcodes, layout metrics, theme colours

@@ -77,6 +77,9 @@ jobs:
       - name: A billion triangles (virtual geometry - cuts, culling, streaming, memory)
         run: timeout 900 python tests/billion.py build/beemodel build/shots --tiles 4 --frame-ms 150
 
+      - name: A world in cells (world partition - streaming, edits, budget)
+        run: timeout 300 python tests/world.py build/beemodel build/shots --frame-ms 50
+
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 600 python tools/fakewl.py build/shots
 

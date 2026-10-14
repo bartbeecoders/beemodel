@@ -84,7 +84,10 @@ _start:
     cmp     dword ptr [rip+vg_state], 1 # virtualizing: look now and then
     jne     3f
     mov     edx, 50
-3:  call    vd_streaming                # cluster pages on their way: look
+3:  cmp     dword ptr [rip+wp_pending], 0  # world cells waiting: look soon
+    je      30f
+    mov     edx, 16
+30: call    vd_streaming                # cluster pages on their way: look
     test    eax, eax                    #  every frame
     jz      31f
     mov     edx, 16
@@ -108,6 +111,8 @@ _start:
     call    render_tick                 # a slice of the progressive render
     call    vg_tick                     # a cluster DAG built in the background
     call    vd_poll                     # cluster pages that came in: drawn
+    xor     edi, edi                    # world cells in and out for the camera
+    call    wp_tick
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render

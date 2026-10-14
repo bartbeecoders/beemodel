@@ -515,6 +515,7 @@ viewport_draw:
     call    sculpt_draw                 # the sculpt mesh: its own path
     call    inst_draw                   # instances: splats and triangles
 1:  call    draw_objects                # wires (all objects, or non-meshes)
+    call    wp_draw                     # world cells not loaded, the minimap
     call    edit_draw                   # edit mode: edges, vertices, faces
     call    analysis_draw               # View > Show ... overlays
     call    etool_draw                  # loop cut / knife previews
