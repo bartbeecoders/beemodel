@@ -407,6 +407,8 @@ builtins:
     .long 1, 2
     .quad bn_colls, b_colls
     .long 0, 0
+    .quad bn_clinfo, b_clinfo
+    .long 1, 1
     .quad bn_wpaint, b_wpaint
     .long 7, 7
     .quad bn_weight, b_weight
@@ -671,6 +673,7 @@ bn_rbinfo:      .asciz "rbinfo"
 bn_rigid:       .asciz "rigid"
 bn_joint:       .asciz "joint"
 bn_colls:       .asciz "collisions"
+bn_clinfo:      .asciz "clothinfo"
 bn_wpaint:      .asciz "wpaint"
 bn_weight:      .asciz "weight"
 bn_key:         .asciz "key"
@@ -4768,6 +4771,18 @@ b_joint:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# clothinfo(k) -> the cloth simulation: 0 cloths, 1 particles, 2
+#   constraints, 3 colours in use, 4 the last frame's time (ms), 5
+#   collisions in the last step, 6 collider triangles
+b_clinfo:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    cl_info
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
 
 # collisions() -> how many pairs of a mechanism's parts collide now
 b_colls:

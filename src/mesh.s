@@ -288,6 +288,13 @@ mesh_uv_free:
 5:  mov     rdi, [rbx+ME_SHAPE]         # (shape keys)
     mov     qword ptr [rbx+ME_SHAPE], 0
     call    sk_free
+    mov     rdi, [rbx+ME_PIN]           # (cloth pins)
+    test    rdi, rdi
+    jz      51f
+    mov     qword ptr [rbx+ME_PIN], 0
+    mov     esi, [rbx+ME_CAPV]
+    call    uv_unmap
+51:
     pop     rbx
     ret
 uv_unmap:
@@ -390,7 +397,45 @@ mesh_copy:
     call    sk_dup
     mov     rcx, [rsp]
     mov     [rcx+ME_SHAPE], rax
-    pop     rax
+    cmp     qword ptr [rbx+ME_PIN], 0   # (cloth pins)
+    je      7f
+    mov     rdi, [rsp]
+    call    mesh_pin_alloc
+    test    rax, rax
+    jz      7f
+    mov     rdi, rax
+    mov     rsi, [rbx+ME_PIN]
+    mov     ecx, [rbx+ME_NVERTS]
+    rep     movsb
+7:  pop     rax
+9:  pop     rbx
+    ret
+
+# mesh_pin_alloc(rdi=mesh) -> rax = its cloth pins (made: none pinned), or 0
+.globl mesh_pin_alloc
+mesh_pin_alloc:
+    push    rbx
+    mov     rbx, rdi
+    mov     rax, [rbx+ME_PIN]
+    test    rax, rax
+    jnz     9f
+    mov     esi, [rbx+ME_CAPV]
+    add     rsi, 4095
+    and     rsi, -4096
+    jnz     1f
+    mov     esi, 4096
+1:  xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jb      2f
+    xor     eax, eax
+    jmp     9f
+2:  mov     [rbx+ME_PIN], rax
 9:  pop     rbx
     ret
 

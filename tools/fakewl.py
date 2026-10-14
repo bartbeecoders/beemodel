@@ -538,6 +538,7 @@ def main():
     rigid_bodies()
     physics_panel()
     mechanisms()
+    cloth()
     mcp_conformance()
     raster_stress()
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nall checks passed')
@@ -4021,6 +4022,77 @@ def mechanisms():
     f.key(57)
     a = q('print(abs(prop("param:crank")) > 0.1, abs(get("Pin", "x") - 1.5) > 0.01)')
     check(a == '1 1', f'Space plays the mechanism: the crank turns the wheel and the pin on it ({a})')
+    f.proc.kill()
+
+def cloth():
+    """Cloth and soft bodies (XPBD): a flag pinned along one edge hangs at
+    its length and bows in the wind; a sheet drapes over a ball (kept its
+    thickness off it); two sheets that collide with themselves stay apart;
+    a soft ball lands and keeps its volume; pins saved; a 6561-particle
+    sheet in real time. In the window: Space plays the drape."""
+    print('  -- cloth, soft bodies --')
+    home = tempfile.mkdtemp(prefix='bee-cl-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    low = ('lo = 99\nfor i in 0..verts(N) {\n y = evpos(N, i, "y")\n if y < lo { lo = y }\n}\n')
+    code = ('delete("Cube")\nadd("grid", "Flag", 0, 2, 0)\nselect("Flag")\nop("cloth.add", "cloth")\nop("cloth.pin", "above x 0.95")\n'
+            'frame(2)\nprint(clothinfo(1), clothinfo(2), clothinfo(3) > 4)\nfor f in 3..121 { frame(f) }\n'
+            'mx = 0\nfor i in 0..120 {\n if i % 11 != 10 {\n'
+            '  d = sqrt(pow(evpos("Flag", i, "x") - evpos("Flag", i + 1, "x"), 2) + pow(evpos("Flag", i, "y") - evpos("Flag", i + 1, "y"), 2) + pow(evpos("Flag", i, "z") - evpos("Flag", i + 1, "z"), 2))\n'
+            '  if d > mx { mx = d }\n }\n}\n' + low.replace('N', '"Flag"') +
+            'print(round(lo * 100), round(mx * 100), round(evpos("Flag", 10, "y") * 100))\n'
+            'rotate("Flag", 1.5708, 0, 0)\nop("cloth.world", "wind 0 0 8")\nfor f in 2..97 { frame(f) }\n'
+            'z = 0\nfor i in 0..verts("Flag") { z += evpos("Flag", i, "y") }\nprint(z / verts("Flag") > 0.5)\n'
+            'op("cloth.world", "wind 0 0 0")\nop("file.save", "~/BeeModel/c.bee")\nop("file.new")\nop("file.open", "~/BeeModel/c.bee")\n'
+            'frame(1)\nframe(96)\nz = 0\nfor i in 0..verts("Flag") { z += evpos("Flag", i, "y") }\nprint(z / verts("Flag") < 0, round(evpos("Flag", 10, "y") * 100))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+    out = [l.strip() for l in r.stdout.split('\n')] + [''] * 6
+    w = out[1].split()
+    check(out[0] == '121 600 1' and len(w) == 3 and -201 <= int(w[0]) <= -100 and int(w[1]) <= 21 and w[2] == '0',
+          f'a flag pinned along one edge swings down, never past its length (edges stay 0.2), the pins hold ({out[:2]})')
+    check(out[2] == '1' and out[3] == '1 0', f'wind bows it; the pins and settings saved and simulated again ({out[2:4]})')
+    code = ('delete("Cube")\nadd("grid", "Sheet", 0, 3, 0)\nscale("Sheet", 1.5)\nadd("sphere", "Ball", 0, 1, 0)\n'
+            'add("plane", "Floor", 0, 0, 0)\nscale("Floor", 5)\nselect("Sheet")\nop("cloth.add", "cloth")\nselect("Ball", "Floor")\nop("cloth.add", "collider")\n'
+            'for f in 2..97 { frame(f) }\nmind = 99\nfor i in 0..verts("Sheet") {\n x = evpos("Sheet", i, "x") * 1.5\n y = evpos("Sheet", i, "y") * 1.5 + 3\n'
+            ' z = evpos("Sheet", i, "z") * 1.5\n d = sqrt(x * x + (y - 1) * (y - 1) + z * z)\n if d < mind { mind = d }\n}\n'
+            'print(round(mind * 1000), clothinfo(5) > 0)\n'
+            'add("grid", "A", 8, 2, 0)\nadd("grid", "B", 8.05, 2.1, 0.03)\nselect("A", "B")\nop("cloth.add", "cloth self thickness 0.03")\n'
+            'frame(1)\nfor f in 2..61 { frame(f) }\nmn = 99\nfor i in 0..verts("A") {\n for j in 0..verts("B") {\n'
+            '  dx = evpos("A", i, "x") - (evpos("B", j, "x") + 0.05)\n  dy = evpos("A", i, "y") + 2 - (evpos("B", j, "y") + 2.1)\n'
+            '  dz = evpos("A", i, "z") - (evpos("B", j, "z") + 0.03)\n  d = dx * dx + dy * dy + dz * dz\n  if d < mn { mn = d }\n }\n}\n'
+            'print(sqrt(mn) > 0.055)\n'
+            'add("sphere", "Blob", -3.5, 2, 3)\nscale("Blob", 0.5)\nselect("Blob")\nop("cloth.add", "soft stretch 0.001 bend 0.1")\n'
+            'frame(1)\nfor f in 2..73 { frame(f) }\nlo = 99\nhi = -99\nfor i in 0..verts("Blob") {\n y = evpos("Blob", i, "y") * 0.5 + 2\n'
+            ' if y < lo { lo = y }\n if y > hi { hi = y }\n}\nprint(round(lo * 100), hi - lo > 0.8, hi - lo < 1.02)\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+    out = [l.strip() for l in r.stdout.split('\n')] + [''] * 6
+    w = out[0].split()
+    check(len(w) == 2 and 1000 <= int(w[0]) <= 1025 and w[1] == '1' and out[1] == '1' and out[2] == '2 1 1',
+          f'a sheet drapes over a ball (its thickness off it); self-colliding sheets stay apart; a soft ball lands and keeps its shape ({out[:3]})')
+    code = ('delete("Cube")\nadd("grid", "Sheet", 0, 3, 0)\nmodifier("Sheet", "subsurf")\nmodset("Sheet", 0, "levels", 3)\nmodapply("Sheet", 0)\n'
+            'scale("Sheet", 1.5)\nadd("sphere", "Ball", 0, 1, 0)\nadd("plane", "Floor", 0, 0, 0)\nscale("Floor", 5)\n'
+            'select("Sheet")\nop("cloth.add", "cloth self")\nselect("Ball", "Floor")\nop("cloth.add", "collider")\n'
+            'sim = 0\nfor f in 2..97 {\n frame(f)\n sim += clothinfo(4)\n}\nprint(clothinfo(1), sim)\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=600)
+    w = (r.stdout.strip().split('\n') or [''])[-1].split()
+    sim = float(w[1]) if len(w) == 2 else 1e9
+    check(len(w) == 2 and w[0] == '6561' and sim < 4000 * (3 if os.environ.get('CI') else 1),
+          f'a 6561-particle sheet colliding with a ball, the floor and itself: 4 s simulated in {sim / 1000:.1f} s')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip().split('\n')[0]
+    f.enter(600, 300)
+    q('delete("Cube")\nadd("grid", "Sheet", 0, 3, 0)\nmodifier("Sheet", "subsurf")\nmodset("Sheet", 0, "levels", 1)\nmodapply("Sheet", 0)\n'
+      'scale("Sheet", 2)\nadd("sphere", "Ball", 0, 1, 0)\nselect("Sheet")\nop("cloth.add", "cloth")\nselect("Ball")\nop("cloth.add", "collider")\nselect()')
+    f.move(600, 300)
+    f.key(57)                                   # Space: it falls on the ball
+    f.pump(1.2)
+    f.key(57)
+    f.shot('107_cloth.png')
+    a = q('print(evpos("Sheet", 0, "y") < -0.3, frame() > 10)')
+    check(a == '1 1', f'Space plays the cloth falling over the ball ({a})')
     f.proc.kill()
 
 

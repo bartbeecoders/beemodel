@@ -58,6 +58,7 @@
 .equ TAG_ARMT,      0x544D5241          # "ARMT"
 .equ TAG_MWGT,      0x5447574D          # "MWGT"
 .equ TAG_MSHK,      0x4B48534D          # "MSHK"
+.equ TAG_MPIN,      0x4E49504D          # "MPIN"
 .equ AR_SZ_,        64 + 128*128
 .equ OBJ_REC,       84
 .equ MAX_FILE_MESHES, MAX_OBJECTS
@@ -111,6 +112,8 @@ mwgt_chunk:     .skip 8
 mwgt_size:      .skip 4
 mshk_chunk:     .skip 8
 mshk_size:      .skip 4
+mpin_chunk:     .skip 8
+mpin_size:      .skip 4
 oi_line:        .skip 4                 # OBJ import: an "l" line
 curv_size:      .skip 4
 mvcl_size:      .skip 4
@@ -373,6 +376,10 @@ bee_save:
     mov     edi, TAG_MSHK               # MSHK (shape keys)
     call    chunk_begin
     call    mshk_write
+    call    chunk_end
+    mov     edi, TAG_MPIN               # MPIN (cloth pins)
+    call    chunk_begin
+    call    mpin_write
     call    chunk_end
     mov     edi, TAG_CADD
     call    chunk_begin
@@ -1033,6 +1040,7 @@ bee_load:
     mov     qword ptr [rip+armt_chunk], 0
     mov     qword ptr [rip+mwgt_chunk], 0
     mov     qword ptr [rip+mshk_chunk], 0
+    mov     qword ptr [rip+mpin_chunk], 0
     lea     rbx, [rax+8]                # pass 1: meshes, remember OBJS / VIEW
 2:  mov     rsi, rbx
     mov     edx, 8
@@ -1104,10 +1112,16 @@ bee_load:
     mov     [rip+mwgt_size], ebp
     jmp     23f
 285:cmp     eax, TAG_MSHK
-    jne     284f
+    jne     286f
     lea     rax, [rbx+8]
     mov     [rip+mshk_chunk], rax
     mov     [rip+mshk_size], ebp
+    jmp     23f
+286:cmp     eax, TAG_MPIN
+    jne     284f
+    lea     rax, [rbx+8]
+    mov     [rip+mpin_chunk], rax
+    mov     [rip+mpin_size], ebp
     jmp     23f
 284:cmp     eax, TAG_ANIM
     jne     282f
@@ -1289,7 +1303,12 @@ bee_load:
     jz      7745f
     mov     esi, [rip+mshk_size]
     call    mshk_read
-7745:mov     rdi, [rip+anim_chunk]       # animation
+7745:mov     rdi, [rip+mpin_chunk]       # cloth pins
+    test    rdi, rdi
+    jz      7746f
+    mov     esi, [rip+mpin_size]
+    call    mpin_read
+7746:mov     rdi, [rip+anim_chunk]       # animation
     test    rdi, rdi
     jz      7742f
     mov     esi, [rip+anim_size]

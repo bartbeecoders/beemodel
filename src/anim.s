@@ -1082,6 +1082,8 @@ an_apply:
     jmp     3b
 9:  movss   xmm0, [rip+an_frame]        # rigid bodies (rbody.s)
     call    rb_frame
+    movss   xmm0, [rip+an_frame]        # cloth (cloth.s)
+    call    cl_frame
     call    rig_eval                    # drivers, constraints (rig.s)
     call    arm_refresh                 # armatures show their new pose
     add     rsp, 32
