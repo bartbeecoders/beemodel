@@ -36,11 +36,14 @@
 .globl op_scene_units
 .globl feat_count
 .globl feat_rec
+.globl cad_kernel
+.globl op_cad_kernel
 
 .equ CD_REFS,    0
 .equ CD_BYTES,   4
 .equ CD_NPARAM,  8
 .equ CD_UNIT,    16                     # double: mm per scene unit
+.equ CD_KERNEL,  24                     # 1: CAD features make B-rep solids
 .equ CD_PARAMS,  64
 .equ MAX_PARAMS, 64
 .equ PR_SZ,      128
@@ -93,6 +96,11 @@ s_p_gone:       .asciz "  parameter removed: "
 s_p_none:       .asciz "  no parameter named "
 s_p_empty:      .asciz "  no parameters"
 s_u_need:       .asciz "  scene.units mm|cm|m|in"
+s_k_need:       .asciz "  cad.kernel on|off"
+s_k_on:         .asciz "  B-rep kernel: on"
+s_k_off:        .asciz "  B-rep kernel: off"
+s_k_onw:        .asciz "on"
+s_k_offw:       .asciz "off"
 s_u_set:        .asciz "  scene units: "
 s_u_list:       .asciz "  units: "
 reserved:       .quad r_pi, r_e, r_sin, r_cos, r_tan, r_sqrt, r_abs, r_min, r_max, 0
@@ -109,6 +117,7 @@ r_max:          .asciz "max"
 OPERATOR op_param_set, "param.set", "Set Parameter", do_param_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Define or change a parameter: param.set <name> <expression with units>, e.g. param.set width 10*wall + 2mm"
 OPERATOR op_param_remove, "param.remove", "Remove Parameter", do_param_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a parameter: param.remove <name>"
 OPERATOR op_param_list, "param.list", "List Parameters", do_param_list, flags=OPF_AI_SAFE|OPF_QUIET, doc="List the parameters with their values"
+OPERATOR op_cad_kernel, "cad.kernel", "B-rep Kernel", do_cad_kernel, flags=OPF_AI_SAFE|OPF_UNDO, doc="CAD features make exact B-rep solids (NURBS surfaces, STEP export) instead of meshes: cad.kernel on|off"
 OPERATOR op_scene_units, "scene.units", "Scene Units", do_scene_units, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set what one scene unit is: scene.units mm|cm|m|in (lengths typed with units convert)"
 
 .text
@@ -565,8 +574,21 @@ cad_write:
     call    wb_bytes
     inc     ebx
     jmp     2b
-3:  add     rsp, 16
+3:  call    cad_kernel                  # then the kernel switch
+    mov     edi, eax
+    call    wb_u32
+    add     rsp, 16
     pop     rbx
+    ret
+
+# cad_kernel -> eax = 1 when features make B-rep solids
+cad_kernel:
+    mov     rax, [rip+cad_cur]
+    test    rax, rax
+    jz      1f
+    mov     eax, [rax+CD_KERNEL]
+    ret
+1:  xor     eax, eax
     ret
 
 # cad_read(rdi=chunk data, esi=bytes) - after cad_reset (scene_clear)
@@ -620,8 +642,17 @@ cad_read:
     mov     [rax+CD_NFEAT], edx
     lea     rsi, [rbx+rcx+16]
     lea     rdi, [rax+CD_FEATS]
+    push    rcx
     mov     ecx, r8d
     rep     movsb
+    pop     rcx
+    lea     edx, [rcx+r8+20]            # the kernel switch (newer files)
+    cmp     edx, r12d
+    ja      4f
+    lea     edx, [rcx+r8+16]
+    mov     edx, [rbx+rdx]
+    and     edx, 1
+    mov     [rax+CD_KERNEL], edx
 4:  call    cad_sync
 9:  pop     r13
     pop     r12
@@ -908,6 +939,42 @@ do_scene_units:
     pop     rbx
     ret
 8:  lea     rdi, [rip+s_u_need]
+    call    log_line
+    call    undo_drop_last
+    pop     rbx
+    ret
+
+do_cad_kernel:
+    push    rbx
+    call    split_arg
+    test    eax, eax
+    jz      8f
+    lea     rdi, [rip+cw_name]
+    lea     rsi, [rip+s_k_onw]
+    call    str_eq
+    mov     ebx, 1
+    test    eax, eax
+    jnz     1f
+    lea     rdi, [rip+cw_name]
+    lea     rsi, [rip+s_k_offw]
+    call    str_eq
+    xor     ebx, ebx
+    test    eax, eax
+    jz      8f
+1:  call    cad_cow
+    test    rax, rax
+    jz      8f
+    mov     [rax+CD_KERNEL], ebx
+    call    cad_sync
+    call    cad_rebuild
+    lea     rdi, [rip+s_k_on]
+    test    ebx, ebx
+    jnz     2f
+    lea     rdi, [rip+s_k_off]
+2:  call    log_line
+    pop     rbx
+    ret
+8:  lea     rdi, [rip+s_k_need]
     call    log_line
     call    undo_drop_last
     pop     rbx

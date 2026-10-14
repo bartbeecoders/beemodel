@@ -447,6 +447,8 @@ builtins:
     .long 1, 1
     .quad bn_vcinfo, b_vcinfo
     .long 1, 1
+    .quad bn_brep, b_brep
+    .long 2, 2
     .quad bn_vctext, b_vctext
     .long 1, 2
     .quad bn_costat, b_costat
@@ -745,6 +747,7 @@ bn_lightmap:    .asciz "lightmap"
 bn_lmsample:    .asciz "lmsample"
 bn_livelink:    .asciz "livelink"
 bn_vcinfo:      .asciz "vcinfo"
+bn_brep:        .asciz "brep"
 bn_vctext:      .asciz "vctext"
 bn_costat:      .asciz "costat"
 bn_cohash:      .asciz "cohash"
@@ -8329,6 +8332,31 @@ b_feature:
 8:  lea     rdi, [rip+e_ft_ref]
     xor     esi, esi
     jmp     sc_rt
+
+# brep(name, what) - the object's B-rep solid (cad.kernel on): "volume",
+#   "area", "faces", "edges", "vertices", "loops", "valid", "kernel" (1 when
+#   it has one), "triangles", "watertight", or how many faces are "planes",
+#   "cylinders", "cones", "spheres", "tori", "nurbs"; nil when it has none
+b_brep:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     r12d, [rax+OB_UID]
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     rsi, rax
+    mov     edi, r12d
+    call    bf_query
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ucomisd xmm0, xmm0
+    jp      ret_nil
+    jmp     ret_num
 
 # features() -> how many; fstatus(index) -> 0 ok, 1 sketch missing, 2 no
 #   closed profile, 3 geometry failed, 4 bad value, 5 nothing to work on,
