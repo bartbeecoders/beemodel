@@ -24,6 +24,7 @@ timeout 600 python3 tests/lighting.py build/beemodel build/shots
 timeout 300 python3 tests/livelink.py build/beemodel build/shots
 timeout 300 python3 tests/versions.py build/beemodel build/shots
 timeout 900 python3 tests/coedit.py build/beemodel build/shots
+timeout 600 python3 tests/brep.py build/beemodel
 timeout 600 python3 tools/fakewl.py build/shots
 BEEMODEL_FONT=none BEEMODEL_MONO_FONT=none BEEMODEL_GOLDEN=check \
     timeout 600 python3 tools/fakewl.py build/shots-bitmap

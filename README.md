@@ -324,6 +324,19 @@ param("w", "100mm")             # the case widens; rounds and walls follow
 [tests/enclosure.bees](tests/enclosure.bees) is a complete printable enclosure
 (case, lid with lip and vents) built this way.
 
+**The B-rep kernel.** `op("cad.kernel", "on")` makes the features build exact
+solids instead of meshes:
+
+- **Geometry:** NURBS and analytic surfaces (planes, cylinders, cones,
+  spheres, tori), trimmed by loops of edges.
+- **Operations:** booleans through surface-surface intersection, fillets
+  and chamfers on straight edges.
+- **Display:** an adaptive, watertight tessellation.
+
+Volumes and areas are integrated exactly over the trimmed faces;
+`brep(name, "volume")` returns them. The enclosure above builds on it. See
+[docs/BREP.md](docs/BREP.md).
+
 To make things:
 - **3MF** for printers: File › Export 3MF writes millimetres, Z up.
 - **DXF / SVG** of a sketch.
@@ -802,6 +815,16 @@ src/sketchobj.s sketch objects, display, rebuild
 src/sketchui.s  sketch mode
 src/prof.s      profiles from sketches: loops, caps, prisms, revolutions
 src/feature.s   the feature tree and its rebuild
+src/nurbs.s     B-rep kernel: NURBS / analytic curves and surfaces, knots, degrees
+src/brep.s      B-rep topology, pcurves, orientation, exact volume and area
+src/bbuild.s    B-rep solids from sketches: exact profiles, prisms, revolutions
+src/bssi.s      surface-surface intersection (closed forms, traced curves)
+src/bbool.s     B-rep booleans: sections, face division, classification
+src/bfillet.s   B-rep fillets and chamfers on straight edges between planes
+src/btess.s     watertight tessellation, inside / outside by ray parity
+src/bfeat.s     the feature tree replayed in the kernel (cad.kernel on)
+src/nbcheck.s   NURBS self-checks (nurbscheck)
+src/bdebug.s    kernel debugging dumps (BEEMODEL_BREP_KEEP)
 src/measure.s   mass properties, the measure tool
 src/sdf.s       signed-distance shapes, marching tetrahedra
 src/fab.s       3MF export, DXF / SVG of sketches

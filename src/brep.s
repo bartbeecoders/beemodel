@@ -2573,9 +2573,16 @@ bd_integrate:
     call    p_cv
     mov     [rsp+BI_PC], rax
     # intervals over s in 0 .. 1: a polyline per piece, a conic 8, a line 1
+    # (4 on a curved surface)
     mov     ecx, 1
     cmp     dword ptr [rax+CV_TYPE], CT_LINE
+    jne     0f
+    mov     rdx, [rsp+BI_SURF]
+    cmp     dword ptr [rdx+SF_TYPE], ST_PLANE
     je      1f
+    mov     ecx, 4
+    jmp     1f
+0:
     mov     ecx, 8
     cmp     dword ptr [rax+CV_TYPE], CT_NURBS
     jne     1f
