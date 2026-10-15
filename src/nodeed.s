@@ -76,6 +76,13 @@
 .equ COL_NE_KNIFE,  0xe06c75
 .equ COL_NE_PAL,    0x2a2d34            # the palette
 .equ PAL_W,     190
+.equ PV_SZ,     180                     # the preview pane (logical px)
+.equ PV_N,      128                     # its image (pixels a side)
+.equ TH_N,      32                      # a node's thumbnail (pixels a side),
+.equ TH_G,      54                      #  the room it takes (graph units)
+.equ TH_S,      48                      #  and its size there
+.equ COL_NE_STAT,   0x9aa1ad
+.equ COL_NE_WARN,   0xe5a54b
 .equ PAL_TOP,   34                      # (its search field above the list)
 .equ COL_NE_MMBG,   0x1a1c21            # the minimap
 .equ MM_W,      168
@@ -173,6 +180,10 @@ o_ior:          .asciz "IOR"
 o_mask:         .asciz "Opacity Mask"
 .section .data
 .align 4
+ne_prev:        .long 1                 # the preview pane, the thumbnails (on)
+ne_thumbs:      .long 1
+ne_pyaw:        .float 0.6              # the pane's shape and its turn
+ne_ppitch:      .float 0.35
 .equ NZSTEPS,   12
 ne_zsteps:      .long 25, 33, 50, 67, 75, 90, 100, 110, 125, 150, 175, 200
 # the zoom (percent) and the sizes on screen it gives (zoom_apply); at 100 %
@@ -229,6 +240,15 @@ ne_drag:        .skip 4                 # 0 none, 1 move, 2 wire from an output,
 ne_dn:          .skip 4                 # the node dragged (or from)
 ne_dk:          .skip 4                 # its socket / value
 ne_cur:         .skip 8                 # the record ne_rec found last
+ne_pshape:      .skip 4                 # (0 sphere, 1 cube, 2 plane)
+ne_prec:        .skip 8                 # what the pane's image shows: the
+ne_pver:        .skip 4                 #  record, its version, shape, turn
+ne_pkey:        .skip 12
+ne_pbuf:        .skip 4*PV_N*PV_N
+ne_threc:       .skip 8                 # the thumbnails: for which record
+ne_thver:       .skip 4                 #  and version
+ne_thbuf:       .skip 4*TH_N*TH_N*48
+ne_pa0:         .skip 8                 # (turning the pane: its turn before)
 ne_pal:         .skip 4                 # the palette shown, its search, the
 ne_pfilt:       .skip 32                #  rows scrolled away, the entry being
 ne_pscroll:     .skip 4                 #  dragged from it, its column
@@ -331,6 +351,8 @@ OPERATOR op_ne_qnormalize, "node.quick_normalize", "Quick Normalize", do_ne_arm,
 OPERATOR op_ne_qtexcoord, "node.quick_texcoord", "Quick Texture Coordinate", do_ne_arm, 0, 10, KEY_U, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: U, then a click on the canvas adds a Texture Coordinate node there"
 OPERATOR op_ne_qbump, "node.quick_bump", "Quick Bump", do_ne_arm, 0, 8, KEY_B_, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: B, then a click on the canvas adds a Bump node there"
 OPERATOR op_ne_zoom,   "node.zoom", "Zoom Nodes", do_ne_zoom, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the zoom in percent, about the middle of the view: node.zoom <25-200>"
+OPERATOR op_ne_prevop, "node.preview", "Material Preview", do_ne_prev, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the material's preview pane: node.preview 0|1 [sphere|cube|plane]"
+OPERATOR op_ne_thop,   "node.thumbnails", "Node Thumbnails", do_ne_thumbs, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: each material node's output over a square, below it: node.thumbnails 0|1"
 OPERATOR op_ne_fsel,   "node.view_selected", "Frame Selected", do_ne_frame_sel, key=KEY_F, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes in view"
 
 # ne_rec -> rax = the record shown (0: none): the active object's geometry
@@ -804,8 +826,14 @@ ne_layout:
 40: cmp     dword ptr [rip+ne_kind], 0  # (a knot: its square)
     jne     41f
     cmp     dword ptr [r14+ND_TYPE], T_REROUTE
-    jne     41f
+    jne     401f
     mov     eax, RR_SZ
+    jmp     41f
+401:test    byte ptr [rbx+NE_NFLAGS+r13], 1 # (materials: its thumbnail below)
+    jnz     41f
+    cmp     dword ptr [rip+ne_thumbs], 0
+    je      41f
+    add     eax, TH_G
 41: lea     r8, [rip+ne_gh]
     mov     [r8+r13*4+4], eax
     movsx   ecx, word ptr [r14+ND_POS]
@@ -866,9 +894,19 @@ ne_layout:
     call    ne_is_rr
     test    eax, eax
     pop     rax
-    jz      74f
+    jz      731f
     mov     eax, RR_SZ
     call    zs
+    jmp     74f
+731:call    ne_has_thumb
+    test    ecx, ecx
+    jz      74f
+    push    rax
+    mov     eax, TH_G
+    call    zs
+    mov     ecx, eax
+    pop     rax
+    add     eax, ecx
 74: lea     r8, [rip+ne_lh]
     mov     [r8+r13*4], eax
     inc     r13d
@@ -1787,6 +1825,427 @@ do_ne_zoom:
 9:  add     rsp, 8
     ret
 
+# ---- previews -------------------------------------------------------------
+# ne_has_thumb(edi=node; rax kept) -> ecx = 1 when it shows a thumbnail
+ne_has_thumb:
+    xor     ecx, ecx
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     9f
+    cmp     dword ptr [rip+ne_thumbs], 0
+    je      9f
+    test    edi, edi
+    jle     9f
+    mov     rdx, [rip+ne_cur]
+    test    rdx, rdx
+    jz      9f
+    test    byte ptr [rdx+NE_NFLAGS+rdi-1], 1   # (collapsed)
+    jnz     9f
+    lea     r8d, [rdi-1]
+    imul    r8d, r8d, NODE_SZ
+    cmp     dword ptr [rdx+GR_NODES+r8+ND_TYPE], T_REROUTE
+    je      9f
+    inc     ecx
+9:  ret
+
+# ne_make_thumbs (rbx = record) - the thumbnails again when the graph
+#   changed since
+ne_make_thumbs:
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     9f
+    cmp     dword ptr [rip+ne_thumbs], 0
+    je      9f
+    cmp     dword ptr [rbx+GR_N], 0
+    je      9f
+    cmp     rbx, [rip+ne_threc]
+    jne     1f
+    mov     eax, [rip+graph_ver]
+    cmp     eax, [rip+ne_thver]
+    je      9f
+1:  mov     [rip+ne_threc], rbx
+    mov     eax, [rip+graph_ver]
+    mov     [rip+ne_thver], eax
+    sub     rsp, 8
+    mov     rdi, rbx
+    lea     rsi, [rip+ne_thbuf]
+    mov     edx, TH_N
+    call    graph_thumbs
+    add     rsp, 8
+9:  ret
+
+# ne_blit(rsi=image u32[n x n], edx=n, edi, ecx = top left, r8d=size (all
+#   logical)) - scaled to the screen (nearest), clipped
+ne_blit:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 24
+    mov     rbx, rsi
+    mov     r12d, edx
+    mov     [rsp], ecx
+    mov     [rsp+4], r8d
+    call    to_px                       # physical: x0, y0, size
+    mov     r13d, eax
+    mov     edi, [rsp]
+    call    to_px
+    mov     r14d, eax
+    mov     edi, [rsp+4]
+    call    to_px
+    mov     r15d, eax
+    test    r15d, r15d
+    jle     9f
+    xor     ebp, ebp                    # its rows
+1:  cmp     ebp, r15d
+    jge     9f
+    lea     eax, [r14+rbp]
+    cmp     eax, [rip+clip_y0]
+    jl      4f
+    cmp     eax, [rip+clip_y1]
+    jge     9f
+    imul    eax, [rip+fb_w]
+    mov     [rsp+8], eax                # the row's start in the buffer
+    mov     eax, ebp                    # the image's row
+    imul    eax, r12d
+    cdq
+    idiv    r15d
+    imul    eax, r12d
+    mov     [rsp+12], eax
+    xor     ecx, ecx
+2:  cmp     ecx, r15d
+    jge     4f
+    lea     eax, [r13+rcx]
+    cmp     eax, [rip+clip_x0]
+    jl      3f
+    cmp     eax, [rip+clip_x1]
+    jge     4f
+    mov     r8d, eax
+    mov     eax, ecx                    # the image's column
+    imul    eax, r12d
+    cdq
+    idiv    r15d
+    add     eax, [rsp+12]
+    mov     edx, [rbx+rax*4]
+    mov     eax, r8d
+    add     eax, [rsp+8]
+    mov     r9, [rip+fb_ptr]
+    mov     [r9+rax*4], edx
+3:  inc     ecx
+    jmp     2b
+4:  inc     ebp
+    jmp     1b
+9:  add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ne_draw_thumb(edi=node; rbx = record) - its thumbnail at its box's bottom
+ne_draw_thumb:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    mov     r12d, edi
+    call    ne_has_thumb
+    test    ecx, ecx
+    jz      9f
+    cmp     rbx, [rip+ne_threc]         # (made for this graph)
+    jne     9f
+    mov     eax, TH_S
+    call    zs
+    mov     r13d, eax                   # its size
+    mov     edi, r12d
+    call    ne_wof
+    sub     eax, r13d
+    sar     eax, 1
+    lea     r8, [rip+ne_lx]
+    add     eax, [r8+r12*4]
+    mov     [rsp], eax                  # x
+    lea     r8, [rip+ne_ly]
+    mov     ecx, [r8+r12*4]
+    lea     r8, [rip+ne_lh]
+    add     ecx, [r8+r12*4]
+    sub     ecx, r13d
+    push    rcx
+    mov     eax, 4
+    call    zs
+    pop     rcx
+    sub     ecx, eax
+    mov     edi, [rsp]
+    lea     eax, [r12-1]
+    imul    eax, eax, 4*TH_N*TH_N
+    lea     rsi, [rip+ne_thbuf]
+    add     rsi, rax
+    mov     edx, TH_N
+    mov     r8d, r13d
+    call    ne_blit
+9:  add     rsp, 8
+    pop     r13
+    pop     r12
+    ret
+
+# ne_pane_box -> eax, edx = the preview pane's top left (logical), or eax
+#   = -1: none (not a material, off, too narrow)
+ne_pane_box:
+    mov     eax, -1
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     9f
+    cmp     dword ptr [rip+ne_prev], 0
+    je      9f
+    cmp     dword ptr [rip+ne_bw], PV_SZ+260
+    jl      9f
+    cmp     dword ptr [rip+ne_bh], PV_SZ+40
+    jl      9f
+    mov     eax, [rip+ne_bx]
+    add     eax, [rip+ne_bw]
+    sub     eax, PV_SZ+8
+    mov     edx, [rip+ne_by]
+    add     edx, 8
+9:  ret
+
+# ne_in_pane(r12d, r13d = pointer) -> eax = 1 over the preview pane
+ne_in_pane:
+    call    ne_pane_box
+    cmp     eax, -1
+    je      8f
+    mov     ecx, r12d
+    sub     ecx, eax
+    js      8f
+    cmp     ecx, PV_SZ
+    jge     8f
+    mov     ecx, r13d
+    sub     ecx, edx
+    js      8f
+    cmp     ecx, PV_SZ
+    jge     8f
+    mov     eax, 1
+    ret
+8:  xor     eax, eax
+    ret
+
+# ne_pane_turn (r12d, r13d = pointer) - dragging the pane turns the shape
+ne_pane_turn:
+    mov     eax, r12d
+    sub     eax, [rip+ne_x0]
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+nf_turn]
+    addss   xmm0, [rip+ne_pa0]
+    movss   [rip+ne_pyaw], xmm0
+    mov     eax, r13d
+    sub     eax, [rip+ne_y0]
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+nf_turn]
+    addss   xmm0, [rip+ne_pa0+4]
+    maxss   xmm0, [rip+nf_mpitch]
+    minss   xmm0, [rip+nf_pitch]
+    movss   [rip+ne_ppitch], xmm0
+    mov     dword ptr [rip+dirty], 1
+    ret
+
+# ne_draw_pane (rbx = record) - the material in the corner (made again when
+#   the graph, the shape or the turn changed)
+ne_draw_pane:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    call    ne_pane_box
+    cmp     eax, -1
+    je      9f
+    mov     r12d, eax
+    mov     r13d, edx
+    mov     ecx, [rip+ne_mat]           # (the material's record)
+    cmp     rbx, [rip+ne_prec]
+    jne     1f
+    mov     eax, [rip+graph_ver]
+    cmp     eax, [rip+ne_pver]
+    jne     1f
+    mov     eax, [rip+ne_pshape]
+    cmp     eax, [rip+ne_pkey]
+    jne     1f
+    mov     rax, [rip+ne_pyaw]
+    cmp     rax, [rip+ne_pkey+4]
+    je      2f
+1:  mov     [rip+ne_prec], rbx
+    mov     eax, [rip+graph_ver]
+    mov     [rip+ne_pver], eax
+    mov     eax, [rip+ne_pshape]
+    mov     [rip+ne_pkey], eax
+    mov     rax, [rip+ne_pyaw]
+    mov     [rip+ne_pkey+4], rax
+    mov     rdi, rbx
+    lea     rsi, [rip+ne_pbuf]
+    mov     edx, PV_N
+    mov     ecx, [rip+ne_pshape]
+    movss   xmm0, [rip+ne_pyaw]
+    movss   xmm1, [rip+ne_ppitch]
+    call    preview_material
+2:  lea     edi, [r12-1]                # a frame, the image
+    lea     esi, [r13-1]
+    mov     edx, PV_SZ+2
+    mov     ecx, PV_SZ+2
+    mov     r8d, COL_NE_EDGE
+    call    fill_rect
+    lea     rsi, [rip+ne_pbuf]
+    mov     edx, PV_N
+    mov     edi, r12d
+    mov     ecx, r13d
+    mov     r8d, PV_SZ
+    call    ne_blit
+9:  add     rsp, 8
+    pop     r13
+    pop     r12
+    ret
+
+# ne_draw_stats (rbx = record) - a line at the bottom left: the nodes, how
+#   many lead to the output, the texture samples; warnings (in amber):
+#   nodes that lead nowhere, a texture sample without an image
+ne_draw_stats:
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     9f
+    mov     r12d, [rbx+GR_N]
+    test    r12d, r12d
+    jz      9f
+    xor     eax, eax                    # the nodes that reach a pin
+    xor     ecx, ecx
+1:  cmp     ecx, NPINS
+    jae     2f
+    movzx   edx, word ptr [rbx+GR_PINS+rcx*4]
+    dec     edx
+    js      11f
+    bts     rax, rdx
+11: inc     ecx
+    jmp     1b
+2:  call    gr_live
+    popcnt  r13, rax                    # live
+    xor     r14d, r14d                  # texture samples (live), images missing
+    xor     r15d, r15d
+    xor     ecx, ecx
+3:  cmp     ecx, r12d
+    jae     4f
+    imul    edx, ecx, NODE_SZ
+    mov     r8d, [rbx+GR_NODES+rdx+ND_TYPE]
+    cmp     r8d, 1                      # (image, triplanar)
+    je      31f
+    cmp     r8d, 35
+    jne     33f
+31: bt      rax, rcx
+    jnc     32f
+    inc     r14d
+32: cmp     dword ptr [rbx+GR_NODES+rdx+ND_P], 0
+    jne     33f
+    inc     r15d
+33: inc     ecx
+    jmp     3b
+4:  call    fmt_reset
+    mov     edi, r12d
+    call    fmt_int
+    lea     rdi, [rip+s_st_nodes]
+    call    fmt_str
+    mov     edi, r13d
+    call    fmt_int
+    lea     rdi, [rip+s_st_live]
+    call    fmt_str
+    mov     edi, r14d
+    call    fmt_int
+    lea     rdi, [rip+s_st_tex]
+    call    fmt_str
+    mov     edi, [rip+ne_bx]
+    add     edi, 8
+    mov     esi, [rip+ne_by]
+    add     esi, [rip+ne_bh]
+    sub     esi, 20
+    lea     rdx, [rip+fmt_buf]
+    mov     ecx, COL_NE_STAT
+    call    draw_small
+    mov     [rsp], eax                  # (the pen)
+    mov     eax, r12d                   # warnings
+    sub     eax, r13d
+    jz      5f
+    push    rax
+    call    fmt_reset
+    lea     rdi, [rip+s_st_sep]
+    call    fmt_str
+    pop     rdi
+    call    fmt_int
+    lea     rdi, [rip+s_st_unused]
+    call    fmt_str
+    mov     edi, [rsp]
+    mov     esi, [rip+ne_by]
+    add     esi, [rip+ne_bh]
+    sub     esi, 20
+    lea     rdx, [rip+fmt_buf]
+    mov     ecx, COL_NE_WARN
+    call    draw_small
+    mov     [rsp], eax
+5:  test    r15d, r15d
+    jz      9f
+    mov     edi, [rsp]
+    mov     esi, [rip+ne_by]
+    add     esi, [rip+ne_bh]
+    sub     esi, 20
+    lea     rdx, [rip+s_st_noimg]
+    mov     ecx, COL_NE_WARN
+    call    draw_small
+9:  add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    ret
+
+# node.preview 0|1 [sphere|cube|plane]
+do_ne_prev:
+    push    rbx
+    lea     rbx, [rip+ne_prev]
+    jmp     ne_onoff
+# node.thumbnails 0|1
+do_ne_thumbs:
+    push    rbx
+    lea     rbx, [rip+ne_thumbs]
+ne_onoff:
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      9f
+    lea     rdx, [rsi+64]
+    call    parse_float
+    test    eax, eax
+    jz      9f
+    cvttss2si eax, xmm0
+    test    eax, eax
+    setnz   al
+    movzx   eax, al
+    mov     [rbx], eax
+    lea     rax, [rip+ne_prev]          # (the pane: a shape after it)
+    cmp     rbx, rax
+    jne     8f
+1:  cmp     byte ptr [rsi], ' '
+    jne     2f
+    inc     rsi
+    jmp     1b
+2:  movzx   eax, byte ptr [rsi]
+    xor     ecx, ecx
+    cmp     al, 'c'
+    jne     3f
+    mov     ecx, 1
+3:  cmp     al, 'p'
+    jne     4f
+    mov     ecx, 2
+4:  test    al, al
+    jz      8f
+    mov     [rip+ne_pshape], ecx
+8:  mov     dword ptr [rip+dirty], 1
+9:  pop     rbx
+    ret
+
 # pal_on -> eax = 1 when the palette is shown (wide enough)
 pal_on:
     xor     eax, eax
@@ -2302,7 +2761,8 @@ ed_nodes_draw:
     call    ne_frame
     call    ne_rec
     mov     rbx, rax
-34: mov     rdi, rbx
+34: call    ne_make_thumbs
+    mov     rdi, rbx
     call    ne_layout
     mov     edi, FONT_NODE              # the canvas: text at the zoom's size
     call    text_use
@@ -2400,6 +2860,8 @@ ed_nodes_draw:
     jne     591f
     call    ne_draw_output
 591:call    ne_draw_minimap
+    call    ne_draw_pane
+    call    ne_draw_stats
     # a wire being dragged
     mov     eax, [rip+ne_drag]
     cmp     eax, 2
@@ -2847,6 +3309,8 @@ ne_draw_node:
 49: inc     r15d
     jmp     4b
 .Ldn_out:
+    mov     edi, r12d                   # its thumbnail (materials)
+    call    ne_draw_thumb
     add     rsp, 32
     pop     rbp
     pop     r15
@@ -2899,6 +3363,15 @@ ne_rgb:
 .align 4
 nf_255:         .float 255.0
 n36:            .long 36
+nf_turn:        .float 0.01
+nf_pitch:       .float 1.5
+nf_mpitch:      .float -1.5
+s_st_nodes:     .asciz " nodes, "
+s_st_live:      .asciz " lead to the output, texture samples: "
+s_st_sep:       .asciz "  - "
+s_st_unused:    .asciz " lead nowhere"
+s_st_tex:       .asciz ""
+s_st_noimg:     .asciz "  - a texture sample has no image"
 .text
 
 # ne_draw_output (rbx = record) - the Material Output node
@@ -3455,7 +3928,18 @@ nodeed_press:
     mov     [rip+ne_x0], r12d
     mov     [rip+ne_y0], r13d
     jmp     .Lnp_taken
-101:cmp     ebx, BTN_LEFT               # the minimap: the view goes there
+101:cmp     ebx, BTN_LEFT               # the preview pane: turned, or (a
+    jne     102f                        #  click) another shape
+    call    ne_in_pane
+    test    eax, eax
+    jz      102f
+    mov     dword ptr [rip+ne_drag], 14
+    mov     [rip+ne_x0], r12d
+    mov     [rip+ne_y0], r13d
+    mov     rax, [rip+ne_pyaw]
+    mov     [rip+ne_pa0], rax
+    jmp     .Lnp_taken
+102:cmp     ebx, BTN_LEFT               # the minimap: the view goes there
     jne     11f
     call    ne_in_minimap
     test    eax, eax
@@ -3904,7 +4388,11 @@ nodeed_motion:
     add     eax, [rip+ne_b0]
     mov     [rip+ne_pany], eax
     jmp     .Lnm_yes
-2:  cmp     eax, 12
+2:  cmp     eax, 14
+    jne     18f
+    call    ne_pane_turn
+    jmp     .Lnm_yes
+18: cmp     eax, 12
     jne     19f
     call    ne_minimap_go
     jmp     .Lnm_yes
@@ -4179,6 +4667,25 @@ nodeed_release:
     je      .Lnr_knife
     cmp     eax, 13
     je      .Lnr_pal
+    cmp     eax, 14                     # the pane clicked: the next shape
+    jne     0f
+    mov     eax, r12d
+    sub     eax, [rip+ne_x0]
+    imul    eax, eax
+    mov     ecx, r13d
+    sub     ecx, [rip+ne_y0]
+    imul    ecx, ecx
+    add     eax, ecx
+    cmp     eax, 9
+    ja      9f
+    mov     eax, [rip+ne_pshape]
+    inc     eax
+    cmp     eax, 3
+    jb      81f
+    xor     eax, eax
+81: mov     [rip+ne_pshape], eax
+    jmp     9f
+0:
     cmp     eax, 5                      # a value clicked twice, unchanged:
     je      .Lnr_val                    #  typed in the console
     cmp     eax, 6
@@ -4771,6 +5278,8 @@ WIDGET wd_ne_tree, WK_ENUM, "node.tree", flags=WGF_DYN, cb=ne_tree_cb, aux=ne_tr
 WIDGET wd_ne_new,  WK_BUTTON, "node.new_tree", "New Tree", tip="A new geometry node tree, run by the active object"
 WIDGET wd_ne_pal,  WK_TOGGLE, "node.palette", "Palette", tip="The palette: every node by category and a search field (click one to add it, or drag it onto the canvas)"
 WIDGET wd_ne_pfilt, WK_TEXT, "node.palette_filter", "Search", cb=ne_pfilt_cb, tip="Show the nodes whose names have this in them (Enter)"
+WIDGET wd_ne_prev, WK_TOGGLE, "node.preview", "Preview", tip="A material: shown on a sphere, cube or plane in the corner (drag it to turn it, click it for another shape)"
+WIDGET wd_ne_thumbs, WK_TOGGLE, "node.thumbnails", "Thumbnails", tip="A material's nodes: what each one gives, over a square, below it"
 WIDGET wd_ne_add,  WK_BUTTON, "node.add", "Add", tip="Add a node (Shift+A in the editor, then type to search the list)"
 .section .rodata
 s_ne_mat:       .asciz "Material"
@@ -4899,6 +5408,26 @@ ne_header_tools:
     mov     edx, r12d
     mov     ecx, 90
     lea     r8, [rip+ne_pal]
+    xor     r9d, r9d
+    call    wg
+    lea     eax, [rbx+56+96+90]         # the preview pane's, the thumbnails'
+    cmp     eax, r13d
+    jg      1f
+    lea     rdi, [rip+wd_ne_prev]
+    lea     esi, [rbx+56+96]
+    mov     edx, r12d
+    mov     ecx, 90
+    lea     r8, [rip+ne_prev]
+    xor     r9d, r9d
+    call    wg
+    lea     eax, [rbx+56+96+96+110]
+    cmp     eax, r13d
+    jg      1f
+    lea     rdi, [rip+wd_ne_thumbs]
+    lea     esi, [rbx+56+96+96]
+    mov     edx, r12d
+    mov     ecx, 110
+    lea     r8, [rip+ne_thumbs]
     xor     r9d, r9d
     call    wg
 1:  mov     eax, [rip+ne_addp]

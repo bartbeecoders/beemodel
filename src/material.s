@@ -560,6 +560,7 @@ mat_set:
     movss   xmm0, [rsp]
     movss   [rax+rcx], xmm0
     mov     dword ptr [rip+dirty], 1
+    inc     dword ptr [rip+graph_ver]   # (previews: made again)
     mov     eax, 1
     jmp     9f
 8:  xor     eax, eax
