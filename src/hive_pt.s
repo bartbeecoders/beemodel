@@ -2586,6 +2586,15 @@ hive_start:
     push    rbx
     push    r12
     push    r13
+    push    rdi
+    push    rsi
+    push    rdx
+    sub     rsp, 8
+    call    mat_sync_check              # (material instances up to date)
+    add     rsp, 8
+    pop     rdx
+    pop     rsi
+    pop     rdi
     mov     r12d, edi
     mov     r13d, esi
     mov     [rip+hv_target], edx

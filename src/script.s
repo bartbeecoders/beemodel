@@ -523,6 +523,10 @@ builtins:
     .long 3, 4
     .quad bn_nodeval, b_nodeval
     .long 6, 8
+    .quad bn_instance, b_instance
+    .long 1, 2
+    .quad bn_matparam, b_matparam
+    .long 2, 6
     .quad bn_gtree, b_gtree
     .long 1, 1
     .quad bn_gnode, b_gnode
@@ -792,6 +796,8 @@ bn_nodeset:     .asciz "nodeset"
 bn_socket:      .asciz "socket"
 bn_nodeinfo:    .asciz "nodeinfo"
 bn_nodeval:     .asciz "nodeval"
+bn_instance:    .asciz "instance"
+bn_matparam:    .asciz "matparam"
 bn_gtree:       .asciz "gtree"
 bn_gnode:       .asciz "gnode"
 bn_glink:       .asciz "glink"
@@ -6016,6 +6022,11 @@ b_matget:
     push    r12
     push    r13
     mov     rbx, rdi
+    push    rsi
+    push    rsi
+    call    mat_sync_check              # (instances up to date)
+    pop     rsi
+    pop     rsi
     xor     r13d, r13d
     cmp     esi, 3
     jb      1f
@@ -6666,9 +6677,35 @@ b_node:
     mov     r14d, eax                   # the node
     mov     dword ptr [rsp+8], 4        # slot of the next value
     mov     ecx, 2                      # argument
-    cmp     r13d, 1                     # image: the name
-    jne     2f
+    mov     edi, r13d                   # a parameter: its name (a string)
+    call    is_param_type
+    mov     ecx, 2
+    test    eax, eax
+    jz      1f
     cmp     r15d, 3
+    jb      1f
+    cmp     dword ptr [rbx+32], T_STR
+    jne     1f
+    lea     rdi, [rbx+32]
+    call    a_str
+    push    rax
+    mov     edi, r12d
+    call    graph_own
+    pop     rsi
+    test    rax, rax
+    jz      71f
+    lea     ecx, [r14-1]
+    imul    ecx, ecx, 72
+    lea     rdi, [rax+160+rcx]
+    call    pn_set
+71: mov     ecx, 2
+    add     rbx, 16                     # (the rest as if one argument less)
+    dec     r15d
+1:  cmp     r13d, 1                     # image (or a texture parameter): the name
+    je      11f
+    cmp     r13d, 39
+    jne     2f
+11: cmp     r15d, 3
     jb      2f
     lea     rdi, [rbx+32]
     call    a_image
@@ -7144,6 +7181,116 @@ b_nodeval:
     xor     esi, esi
     jmp     sc_rt
 
+# instance(parent [, name]) -> the new material instance's name
+b_instance:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_mat
+    mov     [rsp], eax
+    xor     esi, esi
+    cmp     r12d, 2
+    jb      1f
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     rsi, rax
+1:  push    rsi
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    pop     rsi
+    mov     edi, [rsp]
+    call    mat_instance_new
+    test    eax, eax
+    js      8f
+    mov     edi, eax
+    call    mat_get
+    mov     rsi, rax
+    call    sh_dup
+    mov     rdx, rax
+    mov     eax, T_STR
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+8:  lea     rdi, [rip+e_mat_full]
+    xor     esi, esi
+    jmp     sc_rt
+
+# matparam(material, name [, x, y, z, w]) - a parameter's value (x), or set
+#   (an instance: overridden)
+b_matparam:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 40
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    mat_sync_check
+    mov     rdi, rbx
+    call    a_mat
+    mov     r13d, eax
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     edi, r13d
+    mov     rsi, rax
+    call    mat_param_node
+    test    eax, eax
+    jz      8f
+    mov     r14d, eax
+    cmp     r12d, 3                     # get: its first value
+    jae     2f
+    mov     edi, r13d
+    call    mat_get
+    lea     ecx, [r14-1]
+    imul    ecx, ecx, 72
+    cvtss2sd xmm0, dword ptr [rax+160+rcx+52]
+    add     rsp, 40
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+2:  lea     rdi, [rip+s_script]         # set
+    call    undo_push
+    mov     edi, r13d
+    call    graph_own
+    test    rax, rax
+    jz      8f
+    mov     [rsp+32], rax
+    lea     ecx, [r14-1]
+    imul    ecx, ecx, 72
+    lea     rcx, [rax+160+rcx+52]
+    mov     [rsp+24], rcx
+    mov     ecx, 2
+3:  cmp     ecx, r12d
+    jae     4f
+    mov     [rsp+16], ecx
+    shl     ecx, 4
+    lea     rdi, [rbx+rcx]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    mov     ecx, [rsp+16]
+    mov     rax, [rsp+24]
+    movss   [rax+rcx*4-8], xmm0
+    inc     ecx
+    jmp     3b
+4:  mov     rax, [rsp+32]               # (an instance: overridden)
+    cmp     dword ptr [rax+108], 0
+    je      5f
+    or      byte ptr [rax+3968+r14-1], 2
+5:  add     rsp, 40
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+8:  lea     rdi, [rip+e_node_bad]
+    xor     esi, esi
+    jmp     sc_rt
+
 b_nodeinfo:
     push    rbx
     push    r12
@@ -7152,6 +7299,8 @@ b_nodeinfo:
     sub     rsp, 8
     mov     rbx, rdi
     mov     r14d, esi
+    call    mat_sync_check              # (instances up to date)
+    mov     rdi, rbx
     call    a_mat
     mov     r12d, eax
     lea     rdi, [rbx+16]

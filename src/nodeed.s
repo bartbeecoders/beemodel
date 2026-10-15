@@ -1508,6 +1508,8 @@ ne_draw_minimap:
     mov     dword ptr [rip+ne_mmw], 0
     cmp     dword ptr [rip+ne_bw], 480
     jl      9f
+    cmp     dword ptr [rip+ne_bh], 320
+    jl      9f
     cmp     dword ptr [rip+ne_n], 0
     je      9f
     mov     r12d, 0x7fffffff            # the graph's box, the view's too
@@ -3117,6 +3119,20 @@ ne_draw_node:
     mov     edi, ecx
     call    ne_title
     mov     rdx, rax
+    cmp     dword ptr [rip+ne_kind], 0  # (a parameter: its name)
+    jne     12f
+    mov     edi, [r13+ND_TYPE]
+    push    rdx
+    call    is_param_type
+    pop     rdx
+    test    eax, eax
+    jz      12f
+    mov     rdi, r13
+    call    pn_get
+    cmp     byte ptr [rax], 0
+    je      12f
+    mov     rdx, rax
+12:
     mov     edi, r12d
     mov     esi, [rsp+24]
     call    ne_box
@@ -3478,7 +3494,7 @@ ne_draw_menu:
     cmp     dword ptr [rip+ne_ecat_on], 0   # the categories' names
     je      81f
     xor     ebx, ebx
-82: cmp     ebx, 6
+82: cmp     ebx, 7
     jae     81f
     imul    edi, ebx, MENU_W
     add     edi, [rip+ne_mx]
@@ -3551,7 +3567,7 @@ ne_menu_size:
     inc     ecx
     jmp     1b
 11: add     eax, 2
-    mov     edx, 6
+    mov     edx, 7
     add     rsp, 8
     ret
 2:  call    ne_vcount
@@ -5631,7 +5647,7 @@ ne_entries:
     jmp     1b
 .Lent_mat:
     xor     r14d, r14d                  # by category
-2:  cmp     r14d, 6
+2:  cmp     r14d, 7
     jae     .Lent_done
     xor     r8d, r8d                    # (its rank)
     mov     ebx, 1

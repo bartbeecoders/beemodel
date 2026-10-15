@@ -16,6 +16,7 @@
 .globl curve_props
 
 .equ MA_BASE,   32                      # (material.s)
+.equ GR_N_,     128
 .equ NPARAMS,   12
 .equ PR_SZ,     32
 .equ MAXL,      48                      # names in a picker
@@ -39,6 +40,12 @@ im_lbl:         .skip 8*MAXL
 mt_sel:         .skip 4                 # material + 1 (0: none)
 mt_tex:         .skip 4                 # its texture image + 1
 mt_mat:         .skip 4                 # the material shown
+ip_v:           .skip 16*16             # an instance's parameters: values,
+ip_e:           .skip 4*16              #  as whole numbers (images), whether
+ip_o:           .skip 4*16              #  overridden, which node
+ip_n:           .skip 4*16
+ip_hd:          .skip 96
+nd_nm:          .skip 32                # the selected parameter's name
 nd_v:           .skip 16                # the selected node: its values,
 nd_e:           .skip 16                #  as whole numbers (choices, images),
 nd_in:          .skip 48                #  its inputs' constants
@@ -72,6 +79,9 @@ s_no_images:    .asciz "Textures, HDRI skies, paint canvases."
 s_texture:      .asciz "Texture"
 s_blend:        .asciz "Blend mode"
 s_nd_head:      .asciz "Node: "
+s_ip_of:        .asciz "Instance of "
+s_ip_head:      .asciz "Parameters"
+s_nd_namec:     .asciz "Name"
 s_nd_linked:    .asciz "(linked)"
 .align 8
 nd_none_l:      .quad s_none
@@ -108,6 +118,12 @@ WIDGET wd_mt_dens, WK_FLOAT, "material.density", "Density (g/cm3)", 0.0, 25.0, 0
 WIDGET wd_mt_blend, WK_ENUM, "material.blend", flags=WGF_DYN, cb=blend_cb, aux=blend_names, tip="Opaque, Masked (holes where the opacity mask is below the clip value) or Translucent (light through by its opacity)"
 WIDGET wd_mt_sided, WK_TOGGLE, "material.one_sided", "One-sided", cb=sided_cb, tip="Back faces let rays through (leaves, decals, open shells)"
 WIDGET wd_mt_clip, WK_SLIDER, "material.clip", "Mask clip", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="Masked: the opacity below which the surface is a hole (0 means 1/3)"
+WIDGET wd_ip_ovr, WK_TOGGLE, "instance.override", "", cb=ip_ovr_cb, undo="Material Parameter", tip="Override: this instance keeps its own value (off: the parent's)"
+WIDGET wd_ip_num, WK_FLOAT, "instance.value", "", -1000000.0, 1000000.0, 0.01, 3, cb=ip_num_cb, undo="Material Parameter", tip="The parameter's value in this instance (overrides the parent's)"
+WIDGET wd_ip_col, WK_COLOR, "instance.color", "", cb=ip_col_cb, undo="Material Parameter", tip="The parameter's colour in this instance (overrides the parent's)"
+WIDGET wd_ip_img, WK_ENUM, "instance.image", flags=WGF_DYN, cb=ip_img_cb, undo="Material Parameter", aux=image_names, tip="The parameter's image in this instance (overrides the parent's)"
+WIDGET wd_mt_inst, WK_BUTTON, "material.new_instance", "New Instance", aux=op_mat_instance_ui, tip="A material instance of this one: the same graph, its parameters yours to override"
+WIDGET wd_nd_name, WK_TEXT, "node.name", "", cb=nd_name_cb, undo="Node Name", tip="The parameter's name: instances and scripts find it by this (Enter)"
 WIDGET wd_nd_num, WK_FLOAT, "node.value", "", -1000000.0, 1000000.0, 0.01, 3, cb=nd_num_cb, undo="Node Value", tip="The node's value (drag, or type a number or an expression)"
 WIDGET wd_nd_col, WK_COLOR, "node.color", "", cb=nd_col_cb, undo="Node Value", tip="The input's colour while nothing is linked to it"
 WIDGET wd_nd_img, WK_ENUM, "node.image", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=image_names, tip="The image it samples"
@@ -192,7 +208,11 @@ mats_props_draw:
     jne     31f
     call    layers_props
     add     r12d, 8
-31: mov     eax, r12d                   # the node selected in the node editor
+31: mov     edi, ebx                    # an instance: its parameters (its
+    call    inst_props                  #  values are the parent's); else
+    test    eax, eax                    #  New Instance
+    jnz     .Lmp_out
+    mov     eax, r12d                   # the node selected in the node editor
     push    rax                         #  first (then a gap)
     push    rax
     mov     edi, ebx
@@ -322,6 +342,233 @@ tex_of:
     pop     rbx
     ret
 
+# ---- instances -------------------------------------------------------------------------
+# inst_props(edi=material; r12d = y) - an instance: "Instance of <parent>"
+#   and its parameters (an override toggle, the value); else New Instance
+inst_props:
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    mov     ebx, edi
+    call    mat_get
+    test    rax, rax
+    jz      90f
+    mov     r13, rax
+    mov     ecx, [r13+MA_PARENT]
+    test    ecx, ecx
+    jnz     1f
+    lea     rdi, [rip+wd_mt_inst]       # not one: New Instance
+    xor     r8d, r8d
+    call    pnl_right
+    add     r12d, WG_H+6
+    xor     eax, eax
+    jmp     91f
+1:  lea     rdi, [rip+ip_hd]            # "Instance of <parent>"
+    lea     rsi, [rip+s_ip_of]
+    call    cpy
+    push    rdi
+    mov     edi, [r13+MA_PARENT]
+    dec     edi
+    call    mat_get
+    pop     rdi
+    test    rax, rax
+    jz      11f
+    mov     rsi, rax
+    call    cpy
+11: lea     rdx, [rip+ip_hd]
+    call    pnl_hint
+    xor     r14d, r14d                  # its parameters
+    xor     r15d, r15d                  # (shown)
+2:  cmp     r14d, [r13+GR_N_]
+    jae     9f
+    cmp     r15d, 16
+    jae     9f
+    imul    eax, r14d, 72
+    lea     rbp, [r13+160+rax]
+    mov     edi, [rbp]
+    call    is_param_type
+    test    eax, eax
+    jz      8f
+    mov     rdi, rbp                    # its name
+    call    pn_get
+    mov     rdx, rax
+    call    pnl_caption
+    lea     rax, [rip+ip_n]
+    lea     ecx, [r14+1]
+    mov     [rax+r15*4], ecx
+    movzx   eax, byte ptr [r13+NE_NFLAGS+r14]   # overridden?
+    shr     eax, 1
+    and     eax, 1
+    lea     rcx, [rip+ip_o]
+    mov     [rcx+r15*4], eax
+    mov     rax, [rbp+52]               # its values
+    mov     rcx, r15
+    shl     rcx, 4
+    lea     rdx, [rip+ip_v]
+    mov     [rdx+rcx], rax
+    mov     rax, [rbp+60]
+    mov     [rdx+rcx+8], rax
+    movss   xmm0, [rbp+52]
+    cvtss2si eax, xmm0
+    lea     rcx, [rip+ip_e]
+    mov     [rcx+r15*4], eax
+    mov     ecx, [rip+pnl_w]            # the toggle: the right half's start
+    shr     ecx, 1
+    mov     esi, [rip+pnl_x]
+    add     esi, ecx
+    add     esi, 3
+    mov     edx, r12d
+    mov     ecx, 22
+    lea     rdi, [rip+wd_ip_ovr]
+    lea     r8, [rip+ip_o]
+    lea     r8, [r8+r15*4]
+    mov     r9d, r15d
+    call    wg
+    mov     ecx, [rip+pnl_w]            # the value: the rest
+    shr     ecx, 1
+    mov     esi, [rip+pnl_x]
+    add     esi, ecx
+    add     esi, 29
+    sub     ecx, 29
+    mov     edx, r12d
+    lea     rdi, [rip+wd_ip_num]
+    mov     r8, r15
+    shl     r8, 4
+    lea     rax, [rip+ip_v]
+    add     r8, rax
+    cmp     dword ptr [rbp], 38         # (vector: a colour; texture: an image)
+    jne     3f
+    lea     rdi, [rip+wd_ip_col]
+3:  cmp     dword ptr [rbp], 39
+    jne     4f
+    lea     rdi, [rip+wd_ip_img]
+    lea     r8, [rip+ip_e]
+    lea     r8, [r8+r15*4]
+4:  mov     r9d, r15d
+    call    wg
+    add     r12d, WG_H+4
+    inc     r15d
+8:  inc     r14d
+    jmp     2b
+9:  mov     eax, 1
+    jmp     91f
+90: xor     eax, eax
+91: pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# ip_set(esi=row, rcx=float[4], r8d=how many; -1: reset) - the shown
+#   instance's parameter: these values, overridden (or the parent's again)
+ip_set:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    lea     rax, [rip+ip_n]
+    mov     ebx, [rax+rsi*4]            # its node
+    mov     r12, rcx
+    mov     r13d, r8d
+    mov     edi, [rip+mt_mat]
+    call    graph_own
+    test    rax, rax
+    jz      9f
+    test    ebx, ebx
+    jz      9f
+    test    r13d, r13d                  # a reset: no longer overridden
+    jns     1f
+    and     byte ptr [rax+NE_NFLAGS+rbx-1], 0xfd
+    jmp     8f
+1:  or      byte ptr [rax+NE_NFLAGS+rbx-1], 2
+    lea     ecx, [rbx-1]
+    imul    ecx, ecx, 72
+    lea     rdi, [rax+160+rcx+52]
+    xor     ecx, ecx
+2:  cmp     ecx, r13d
+    jae     8f
+    mov     edx, [r12+rcx*4]
+    mov     [rdi+rcx*4], edx
+    inc     ecx
+    jmp     2b
+8:  mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+ip_ovr_cb:                              # rdi = &on, esi = row
+    cmp     dword ptr [rdi], 0
+    jne     1f
+    mov     r8d, -1                     # off: the parent's value
+    jmp     ip_set
+1:  mov     rcx, rsi                    # on: its value as it is, its own
+    shl     rcx, 4
+    lea     rax, [rip+ip_v]
+    add     rcx, rax
+    mov     r8d, 4
+    jmp     ip_set
+ip_num_cb:                              # rdi = &value, esi = row
+    mov     rcx, rdi
+    mov     r8d, 1
+    jmp     ip_set
+ip_col_cb:                              # rdi = &rgb, esi = row
+    mov     rcx, rdi
+    mov     r8d, 3
+    jmp     ip_set
+ip_img_cb:                              # rdi = &image + 1, esi = row
+    sub     rsp, 24
+    cvtsi2ss xmm0, dword ptr [rdi]
+    movss   [rsp], xmm0
+    lea     rcx, [rsp]
+    mov     r8d, 1
+    call    ip_set
+    add     rsp, 24
+    ret
+
+# the Material tab's New Instance: material.instance <the material>
+op_mat_instance_ui:
+    push    rbx
+    sub     rsp, 16
+    mov     edi, [rip+mt_mat]
+    call    mat_get
+    test    rax, rax
+    jz      9f
+    lea     rdi, [rip+mt_arg]
+    mov     rsi, rax
+    call    cpy
+    lea     rdi, [rip+op_mat_instance]
+    lea     rsi, [rip+mt_arg]
+    call    run_arg2
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# nd_name_cb(rdi = the new name) - the selected parameter node's name
+nd_name_cb:
+    push    rbx
+    mov     rbx, rdi
+    mov     edi, [rip+ne_mat]
+    call    graph_own
+    test    rax, rax
+    jz      9f
+    mov     ecx, [rip+ne_sel]
+    dec     ecx
+    js      9f
+    imul    ecx, ecx, 72
+    lea     rdi, [rax+160+rcx]
+    mov     rsi, rbx
+    call    pn_set
+    mov     dword ptr [rip+dirty], 1
+9:  pop     rbx
+    ret
+
 # ---- the selected node (the node editor's) ----------------------------------------------
 # node_details(edi=material shown; r12d = y) - its values and its inputs'
 #   constants as fields: numbers, choices, images, colours; a linked input
@@ -364,7 +611,22 @@ node_details:
     add     r12d, 6
     lea     rdx, [rip+nd_hd]
     call    pnl_heading
-    xor     r15d, r15d                  # its values
+    mov     edi, [r13]                  # a parameter: its name
+    call    is_param_type
+    test    eax, eax
+    jz      81f
+    lea     rdx, [rip+s_nd_namec]
+    call    pnl_caption
+    mov     rdi, r13
+    call    pn_get
+    mov     rsi, rax
+    lea     rdi, [rip+nd_nm]
+    call    cpy
+    lea     rdi, [rip+wd_nd_name]
+    lea     r8, [rip+nd_nm]
+    xor     r9d, r9d
+    call    nd_field
+81: xor     r15d, r15d                  # its values
 1:  cmp     r15d, 4
     jae     3f
     mov     rax, [r14+16]
