@@ -583,6 +583,7 @@ def main():
     cad_ui()
     materials_more()
     paint_ui()
+    anim_ui()
     transforms()
     undo_redo()
     files()
@@ -968,7 +969,7 @@ def add_modifier(f, m, label):
 
 def props_tab(m, f, name):
     """Open a Properties tab (U10) by name: object, modifiers, material, ..."""
-    tabs = ['object', 'modifiers', 'material', 'physics', 'cad', 'scene', 'render', 'viewport']
+    tabs = ['object', 'modifiers', 'material', 'physics', 'cad', 'scene', 'render', 'viewport', 'animation', 'rig']
     x, y = widget_xy(m, 'props.tab.' + name, tabs.index(name))
     if x:
         f.click(x, y); f.pump(0.2)
@@ -5359,7 +5360,7 @@ def props_ui():
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
     val = lambda n: (widget(m, n) or {}).get('value')
     tabs = [w['label'] for w in ui_tree(m) if w['name'].startswith('props.tab.')]
-    check(tabs == ['Object', 'Modifiers', 'Material', 'Physics', 'CAD', 'Scene', 'Render', 'Viewport'],
+    check(tabs == ['Object', 'Modifiers', 'Material', 'Physics', 'CAD', 'Scene', 'Render', 'Viewport', 'Animation', 'Rig'],
           f'Properties has a tab per page ({len(tabs)})')
     def set_field(name, text):
         x, y = widget_xy(m, name); f.click(x, y)
@@ -5879,6 +5880,91 @@ def paint_ui():
           'the UV editor header: Unwrap, Pack, Select All, heat map, Fit')
     pick_enum(f, m, 'uv.header.heat', 0, 1)
     check(widget(m, 'uv.header.heat')['value'] == 1, 'the heat map from the header')
+    f.proc.kill()
+
+
+def anim_ui():
+    """UI plan U19: the timeline's transport and range, auto-key, I over a
+    field, the key editors' key menu, the Animation tab (shape keys,
+    actions and layers, drivers, onion skins) and the Rig tab (bones,
+    pose, constraints, parenting)."""
+    print('  -- animation and rigging --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
+    q('op("area.type_timeline")')
+    f.pump(0.3)
+    check({'timeline.first', 'timeline.prev', 'timeline.play', 'timeline.next', 'timeline.last', 'timeline.frame',
+           'timeline.start', 'timeline.end', 'timeline.fps', 'timeline.auto_key'} <= names(), 'the timeline header: transport, frame, range, auto-key')
+    type_into('timeline.frame', '12')
+    check(q('print(frame())') == '12', f'typing a frame goes there ({q("print(frame())")})')
+    type_into('timeline.end', '120')
+    check(widget(m, 'timeline.end')['value'] == 120, 'the end frame from the header')
+    click('timeline.last')
+    check(q('print(frame())') == '120', 'the last-frame button')
+    click('timeline.first')
+    click('timeline.auto_key')
+    q('op("area.type_viewport")\nselect("Cube")')
+    f.move(600, 300); f.key(34); f.type('2'); f.key(28); f.pump(0.3)   # G 2 Enter
+    check(q('print(keyed("Cube:x", 1))') in ('1', '2', '3'), 'auto-key: a move keys the object')
+    q('op("anim.auto_key")')
+    props_tab(m, f, 'object')
+    x, y = widget_xy(m, 'object.location', 1)
+    q('frame(10)')
+    f.move(x, y); f.pump(0.1); f.key(23); f.pump(0.2)                # I over Y
+    check(q('print(keyed("Cube:y", 10))') == '1', 'I over a field keys that value')
+    q('op("area.type_dope_sheet")')
+    f.pump(0.3)
+    check({'keys.constant', 'keys.linear', 'keys.bezier', 'keys.duplicate', 'keys.delete'} <= names(), 'the key editors\' header: interpolation, handles, duplicate, delete')
+    props_tab(m, f, 'animation')
+    check({'shape.add', 'anim.new_action', 'anim.add_layer', 'onion.on', 'anim.motion_paths'} <= names(), 'the Animation tab')
+    click('shape.add')
+    f.key(28); f.pump(0.3)
+    q('op("shape.add", "Big")')
+    w = wait_widget(f, m, 'shape.value', 1)
+    check(w is not None, 'shape keys get a slider each')
+    if w:
+        f.drag(w['x'] + 2, w['y'] + 11, w['x'] + w['w'] // 2, w['y'] + 11, steps=3)
+        f.pump(0.2)
+        v = widget(m, 'shape.value', 1)['value']
+        check(v is not None and 0.4 < v < 0.6, f'dragging it mixes the shape in ({v})')
+    click('onion.on')
+    check(q('print(1)') == '1' and widget(m, 'onion.on')['value'] == 1, 'onion skins from the tab')
+    click('anim.new_action')
+    check('form.action.name' in names(), 'New Action asks for a name')
+    f.key(28); f.pump(0.3)
+    click('anim.add_layer')
+    f.key(28); f.pump(0.3)
+    w = wait_widget(f, m, 'layer.influence', 0)
+    check(w is not None, 'a layer row with its influence')
+    q('delete("Cube")\na = armature("Rig")\nop("arm.bone", "Upper Bone 0 1 0 0 2 0")\nadd("cylinder", "Arm", 0, 1, 0)\nselect("Arm")')
+    props_tab(m, f, 'rig')
+    check('rig.parent' in names(), 'a mesh: Parent to Armature')
+    click('rig.parent')
+    check({'form.parent.mesh', 'form.parent.armature'} <= names(), 'it asks for the armature')
+    type_into('form.parent.armature', 'Rig')
+    f.key(28); f.pump(0.5)
+    check(q('print(modcount("Arm"))') == '1', 'OK skins it (an Armature modifier)')
+    click('constraint.add')
+    check({'form.constraint.owner', 'form.constraint.type', 'form.constraint.target'} <= names(), 'Add Constraint asks for the type and target')
+    type_into('form.constraint.target', 'Rig')
+    f.key(28); f.pump(0.3)
+    w = wait_widget(f, m, 'constraint.influence', 0)
+    check(w is not None, 'the constraint gets a row')
+    q('select("Rig")')
+    f.pump(0.3)
+    rows = [w.get('label') for w in ui_tree(m) if w['name'] == 'rig.bone']
+    check(rows == ['Bone', 'Upper'], f'the bone list ({rows})')
+    click('rig.bone', 0)
+    check('rig.pose.rotation' in names(), 'a bone row makes it active and shows its pose')
     f.proc.kill()
 
 

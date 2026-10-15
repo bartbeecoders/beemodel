@@ -339,7 +339,7 @@ sk_chan:
 # =============================================================================
 #  Operators
 # =============================================================================
-OPERATOR op_sk_add,   "shape.add",    "Add Shape Key",    do_sk_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Store the mesh as it is as a shape key (made, or replaced; then the Basis comes back): shape.add <name> [object]. The first also stores the Basis"
+OPERATOR op_sk_add,   "shape.add",    "Add Shape Key",    do_sk_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Store the mesh as it is as a shape key (made, or replaced; then the Basis comes back): shape.add <name> [object]. The first also stores the Basis", form=form_shape
 OPERATOR op_sk_edit,  "shape.edit",   "Edit Shape Key",   do_sk_edit, flags=OPF_AI_SAFE|OPF_UNDO, doc="Show a shape key's shape in the mesh to change it (shape.add <name> stores it again): shape.edit <name> [object]"
 OPERATOR op_sk_set,   "shape.set",    "Set Shape Key",    do_sk_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="A shape key's value (0..1, or beyond): shape.set <name> <value> [object]"
 OPERATOR op_sk_rem,   "shape.remove", "Remove Shape Key", do_sk_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a shape key: shape.remove <name> [object]"

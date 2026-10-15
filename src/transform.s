@@ -1057,6 +1057,7 @@ tm_confirm:
     jmp     2f
 1:  mov     edi, [rip+tm_mode]
     call    macro_transform
+    call    autokey_confirm             # (auto-key: the objects get keys)
 2:  mov     dword ptr [rip+tm_noundo], 0
     mov     dword ptr [rip+tm_mode], 0
     mov     dword ptr [rip+tm_drag], 0

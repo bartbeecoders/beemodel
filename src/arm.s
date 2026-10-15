@@ -1405,6 +1405,7 @@ am_quarter:     .float 0.25
 # -----------------------------------------------------------------------------
 .globl arm_paint_bone
 .globl arm_mod_target
+.globl do_arm_pose
 .globl arm_auto_weights
 .equ MT_ARMATURE_, 11
 .equ MB_COUNT_, 4
@@ -1864,7 +1865,7 @@ OPERATOR op_add_armature, "create.armature", "Armature", do_arm_add, flags=OPF_A
 OPERATOR op_arm_bone,  "arm.bone",    "Add Bone",       do_arm_bone, flags=OPF_AI_SAFE|OPF_UNDO, doc="A bone in the active armature: arm.bone <name> <parent|-> <head x y z> <tail x y z> (armature space; a head on the parent's tail joins them)"
 OPERATOR op_arm_pose,  "arm.pose",    "Pose Bone",      do_arm_pose, flags=OPF_AI_SAFE|OPF_UNDO, doc="Pose a bone of the active armature: arm.pose <bone> <loc|rot|scale> <x> <y> <z> (rot in degrees, in the bone's own axes; Y along it)"
 OPERATOR op_arm_sel,   "arm.select_bone", "Select Bone", do_arm_sel, flags=OPF_AI_SAFE|OPF_QUIET, doc="Make a bone of the active armature the active one: arm.select_bone <bone> [extend]"
-OPERATOR op_arm_parent,"arm.parent",  "Parent to Armature", do_arm_parent, flags=OPF_AI_SAFE|OPF_UNDO, doc="Skin a mesh to an armature with automatic weights: arm.parent <mesh> <armature> [dual]"
+OPERATOR op_arm_parent,"arm.parent",  "Parent to Armature", do_arm_parent, flags=OPF_AI_SAFE|OPF_UNDO, doc="Skin a mesh to an armature with automatic weights: arm.parent <mesh> <armature> [dual]", form=form_parent
 OPERATOR op_arm_autow, "arm.auto_weights", "Automatic Weights", do_arm_autow, flags=OPF_AI_SAFE|OPF_UNDO, doc="A mesh's skin weights by bone heat again: arm.auto_weights <mesh>"
 OPERATOR op_arm_clear, "arm.clear_pose", "Clear Pose", do_arm_clear, flags=OPF_AI_SAFE|OPF_UNDO, doc="Back to the rest pose: the selected bones of the active armature (all when none is)"
 
