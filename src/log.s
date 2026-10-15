@@ -160,7 +160,9 @@ log_line:
     mov     byte ptr [rdx+rcx], 0
 2:  inc     dword ptr [rip+log_head]
     mov     dword ptr [rip+dirty], 1
-    ret
+    mov     edi, [rip+log_head]         # a toast for it (status.s)
+    dec     edi
+    jmp     toast_note
 
 # log_pair(rdi=prefix, rsi=text)
 log_pair:

@@ -71,7 +71,6 @@ f_def_dist: .float 18.0
 .equ GRID_N, 10
 
 s_vp_label: .asciz "Perspective  |  Grid 1 m"
-s_vp_hint:  .asciz "Click select   LMB drag orbit   MMB pan   Wheel zoom   G/R/S transform   Z wireframe   F reset"
 s_ax_x:     .asciz "X"
 s_ax_y:     .asciz "Y"
 s_ax_z:     .asciz "Z"
@@ -592,13 +591,6 @@ viewport_draw:
     lea     rdx, [rip+s_vp_label]
     mov     ecx, COL_TEXT
     call    draw_text
-    mov     edi, [rip+cvs_x0]
-    add     edi, 10
-    mov     esi, [rip+cvs_y0]
-    add     esi, 26
-    lea     rdx, [rip+s_vp_hint]
-    mov     ecx, COL_TEXT_DIM
-    call    draw_small
     call    redo_draw                   # adjust the last operation (on top)
     call    reset_clip
     pop     r15
