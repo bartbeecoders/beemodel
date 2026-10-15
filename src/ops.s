@@ -229,12 +229,16 @@ op_poll:
 # ---- polls ---------------------------------------------------------------------
 poll_undo:
     xor     eax, eax
+    cmp     dword ptr [rip+co_on], 0    # (co-editing keeps its own history)
+    jne     1f
     cmp     dword ptr [rip+undo_depth], 0
     jne     1f
     lea     rax, [rip+s_no_undo]
 1:  ret
 poll_redo:
     xor     eax, eax
+    cmp     dword ptr [rip+co_on], 0
+    jne     1f
     cmp     dword ptr [rip+redo_depth], 0
     jne     1f
     lea     rax, [rip+s_no_redo]
