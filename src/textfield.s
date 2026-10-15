@@ -206,6 +206,66 @@ tf_delete_sel:
 1:  xor     eax, eax
     ret
 
+# tf_copy - the selection (all of it when none) to the clipboard
+tf_copy:
+    mov     edi, [rip+tf_anchor]
+    mov     esi, [rip+tf_caret]
+    cmp     edi, esi
+    jb      1f
+    xchg    edi, esi
+    jne     1f
+    xor     edi, edi                    # no selection: everything
+    mov     esi, [rip+tf_len]
+1:  sub     esi, edi
+    lea     rax, [rip+tf_buf]
+    add     rdi, rax
+    jmp     clip_copy
+
+# tf_paste - the clipboard's text in place of the selection (one line:
+#   line breaks and tabs become spaces)
+tf_paste:
+    push    rbx
+    push    r12
+    sub     rsp, 264
+    lea     rdi, [rsp]
+    mov     esi, 256
+    call    clip_paste
+    mov     r12d, eax
+    test    eax, eax
+    jz      9f
+    call    tf_delete_sel
+    xor     ebx, ebx
+1:  cmp     ebx, r12d
+    jae     9f
+    movzx   eax, byte ptr [rsp+rbx]
+    cmp     eax, 0x20
+    jae     2f
+    mov     eax, ' '
+2:  mov     edx, [rip+tf_len]           # insert the byte at the caret
+    cmp     edx, TF_CAP
+    jae     9f
+    lea     r8, [rip+tf_buf]
+    mov     r9d, edx
+3:  cmp     r9d, [rip+tf_caret]
+    jbe     4f
+    mov     cl, [r8+r9-1]
+    mov     [r8+r9], cl
+    dec     r9d
+    jmp     3b
+4:  mov     [r8+r9], al
+    inc     dword ptr [rip+tf_len]
+    mov     edx, [rip+tf_len]
+    mov     byte ptr [r8+rdx], 0
+    inc     dword ptr [rip+tf_caret]
+    mov     ecx, [rip+tf_caret]
+    mov     [rip+tf_anchor], ecx
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 264
+    pop     r12
+    pop     rbx
+    ret
+
 # tf_insert(edi=code point)
 tf_insert:
     push    rbx
@@ -417,6 +477,12 @@ tf_key:
     jz      .Ltf_no                     # fall through to the keymap
     mov     edi, ebx
     call    kb_layout_code
+    cmp     eax, 46                     # Ctrl+C / X / V: the clipboard
+    je      .Ltf_copy
+    cmp     eax, 45
+    je      .Ltf_cut
+    cmp     eax, 47
+    je      .Ltf_paste
     cmp     eax, KEY_A
     jne     .Ltf_no
     mov     dword ptr [rip+tf_anchor], 0
@@ -529,6 +595,16 @@ tf_key:
     call    tf_load
     jmp     .Ltf_yes
 
+.Ltf_copy:
+    call    tf_copy
+    jmp     .Ltf_yes
+.Ltf_cut:
+    call    tf_copy
+    call    tf_delete_sel
+    jmp     .Ltf_yes
+.Ltf_paste:
+    call    tf_paste
+    jmp     .Ltf_yes
 .Ltf_submit:
     cmp     dword ptr [rip+tf_len], 0
     je      .Ltf_yes

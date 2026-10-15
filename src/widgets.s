@@ -46,6 +46,7 @@
 .globl wg_desc_of
 .globl wg_n
 .globl wg_set_label
+.globl wg_clip_key
 
 .equ WG_MAX,    768
 .equ WG_SZ,     64
@@ -1390,6 +1391,80 @@ edit_begin:
     call    tf_load
     mov     dword ptr [rip+tf_anchor], 0
     mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# wg_clip_key(edi=evdev) -> eax = 1 if used: Ctrl+C over a field copies
+#   its value, Ctrl+V pastes into it (as if typed: units, expressions, undo)
+wg_clip_key:
+    push    rbx
+    push    r12
+    sub     rsp, 264
+    mov     ebx, edi
+    xor     r12d, r12d
+    cmp     dword ptr [rip+hover_id], HIT_WIDGET
+    jne     9f
+    mov     eax, [rip+key_mods]
+    and     eax, MOD_CTRL|MOD_ALT|MOD_SHIFT
+    cmp     eax, MOD_CTRL
+    jne     9f
+    mov     edi, [rip+hover_idx]
+    call    wg_find
+    test    rax, rax
+    jz      9f
+    mov     ecx, [rax+E_KIND]           # (values only)
+    cmp     ecx, WK_FLOAT
+    je      1f
+    cmp     ecx, WK_INT
+    je      1f
+    cmp     ecx, WK_SLIDER
+    je      1f
+    cmp     ecx, WK_TEXT
+    jne     9f
+1:  mov     [rsp], rax
+    mov     edi, ebx
+    call    kb_layout_code
+    cmp     eax, 46                     # C
+    je      2f
+    cmp     eax, 47                     # V
+    jne     9f
+    lea     rdi, [rsp+8]                # paste: type it in and confirm
+    mov     esi, 250
+    call    clip_paste
+    test    eax, eax
+    jz      8f
+    mov     rdi, [rsp]
+    call    edit_begin
+    lea     rsi, [rsp+8]
+    call    tf_load
+    call    wg_commit
+    jmp     8f
+2:  mov     rax, [rsp]                  # copy: the value as shown when typing
+    mov     rdi, [rax+E_DESC]
+    mov     rsi, [rax+E_PTR]
+    lea     rdx, [rip+wg_txt]
+    cmp     dword ptr [rdi+WD_KIND], WK_TEXT
+    je      3f
+    cmp     dword ptr [rdi+WD_KIND], WK_INT
+    je      3f
+    movss   xmm0, [rsi]
+    test    dword ptr [rdi+WD_FLAGS], WGF_DEG
+    jz      4f
+    mulss   xmm0, [rip+f_r2d]
+4:  mov     edi, 6
+    mov     rsi, rdx
+    call    wg_ftoa
+    jmp     5f
+3:  call    value_text
+5:  lea     rdi, [rip+wg_txt]
+    call    str_len
+    mov     esi, eax
+    lea     rdi, [rip+wg_txt]
+    call    clip_copy
+8:  mov     r12d, 1
+9:  mov     eax, r12d
+    add     rsp, 264
+    pop     r12
     pop     rbx
     ret
 

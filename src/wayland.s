@@ -165,6 +165,7 @@ s_compositor:   .asciz "wl_compositor"
 s_shm:          .asciz "wl_shm"
 s_wm_base:      .asciz "xdg_wm_base"
 s_seat:         .asciz "wl_seat"
+s_ddm:          .asciz "wl_data_device_manager"
 s_cursor_mgr:   .asciz "wp_cursor_shape_manager_v1"
 s_constraints:  .asciz "zwp_pointer_constraints_v1"
 .align 4
@@ -708,7 +709,13 @@ wl_dispatch:
     je      0f
     cmp     edi, [rip+id_relptr]
     je      ev_relptr
-0:
+0:  push    rdi                         # the clipboard's objects
+    mov     esi, r13d
+    mov     rdx, r12
+    call    clip_event
+    pop     rdi
+    test    eax, eax
+    jnz     ev_done
     cmp     edi, 0xff000000             # objects the compositor made: tools
     jb      ev_done
     lea     r15, [rip+tab_tool]
@@ -799,7 +806,20 @@ ev_registry:
     mov     [rip+id_seat], eax
     call    tab_seat
     jmp     ev_done
-4:  mov     rdi, rbx
+4:  mov     rdi, rbx                    # the clipboard (clipboard.s)
+    lea     rsi, [rip+s_ddm]
+    call    str_eq
+    test    eax, eax
+    jz      41f
+    mov     edx, 3
+    cmp     r15d, edx
+    cmovb   edx, r15d
+    lea     rsi, [rip+s_ddm]
+    mov     edi, r14d
+    call    wl_bind
+    mov     [rip+id_ddm], eax
+    jmp     ev_done
+41: mov     rdi, rbx
     lea     rsi, [rip+s_fscale_mgr]
     call    str_eq
     test    eax, eax
@@ -1298,7 +1318,9 @@ ev_keyboard:
     mov     eax, [r12+4]
     mov     [rip+rep_delay], eax
     jmp     ev_done
-1:  mov     edi, [r12+8]                # key(serial, time, key, state)
+1:  mov     eax, [r12]                  # (the serial: for the clipboard)
+    mov     [rip+clip_serial], eax
+    mov     edi, [r12+8]                # key(serial, time, key, state)
     mov     esi, [r12+12]
     call    ui_key
     jmp     ev_done
@@ -1608,6 +1630,10 @@ render:
 
 # mono_ns -> rax = monotonic clock, nanoseconds
 .globl mono_ns
+.globl msg_begin
+.globl msg_end
+.globl put_str
+.globl fdq_pop
 mono_ns:
     sub     rsp, 24
     mov     edi, 1                      # CLOCK_MONOTONIC

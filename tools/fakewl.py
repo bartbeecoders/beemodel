@@ -32,7 +32,7 @@ GLOBALS = [(1, 'wl_compositor', 4), (2, 'wl_shm', 1), (3, 'xdg_wm_base', 2),
            (4, 'wl_seat', 5), (5, 'wp_cursor_shape_manager_v1', 1),
            (6, 'wp_fractional_scale_manager_v1', 1), (7, 'wp_viewporter', 1),
            (8, 'zwp_tablet_manager_v2', 1), (9, 'zwp_pointer_constraints_v1', 1),
-           (10, 'zwp_relative_pointer_manager_v1', 1)]
+           (10, 'zwp_relative_pointer_manager_v1', 1), (11, 'wl_data_device_manager', 3)]
 
 
 def wstr(s):
@@ -157,6 +157,25 @@ class Fake:
             self.relptr = u(0)
         elif iface == 'zwp_relative_pointer_v1' and op == 0:
             self.relptr = None
+        elif iface == 'wl_data_device_manager' and op == 0:   # create_data_source
+            self.objs[u(0)] = 'wl_data_source'
+            self.sources = getattr(self, 'sources', {}); self.sources[u(0)] = []
+        elif iface == 'wl_data_device_manager' and op == 1:   # get_data_device
+            self.objs[u(0)] = 'wl_data_device'
+            self.ddev = u(0)
+        elif iface == 'wl_data_source' and op == 0:           # offer(mime)
+            n = u(0)
+            self.sources[obj].append(p[4:4 + n - 1].decode())
+        elif iface == 'wl_data_source' and op == 1:           # destroy
+            self.sources.pop(obj, None)
+            if getattr(self, 'selection', None) == obj:
+                self.selection = None
+        elif iface == 'wl_data_device' and op == 1:           # set_selection(source, serial)
+            self.selection = u(0) or None
+        elif iface == 'wl_data_offer' and op == 1:            # receive(mime, fd)
+            fd = self.fds.pop(0)
+            os.write(fd, self.offer_text.encode())
+            os.close(fd)
         elif iface == 'wl_pointer' and op == 0:          # set_cursor
             self.cursor_hidden = (u(1) == 0)
         elif iface == 'wl_shm' and op == 0:               # create_pool(id, fd, size)
@@ -291,6 +310,45 @@ class Fake:
         kb = self.find('wl_keyboard')[0]
         self.serial += 1
         self.send(kb, 4, struct.pack('<IIIII', self.serial, depressed, 0, 0, 0))
+
+    def clipboard(self):
+        """Paste as another program would: the app's selection, through a pipe."""
+        src = getattr(self, 'selection', None)
+        if not src:
+            return None
+        r, w = os.pipe()
+        mime = wstr('text/plain;charset=utf-8')
+        msg = struct.pack('<II', src, ((8 + len(mime)) << 16) | 1) + mime
+        socket.send_fds(self.c, [msg], [w])
+        os.close(w)
+        os.set_blocking(r, False)
+        out, end = b'', time.time() + 2
+        while time.time() < end:
+            self.pump(0.05)
+            try:
+                chunk = os.read(r, 65536)
+            except BlockingIOError:
+                continue
+            if not chunk:
+                break
+            out += chunk
+        os.close(r)
+        return out.decode(errors='replace')
+
+    def set_clipboard(self, text):
+        """Another program copies text: an offer becomes the selection."""
+        self.offer_text = text
+        self.n_offers = getattr(self, 'n_offers', 0) + 1
+        oid = 0xff100000 + self.n_offers
+        self.objs[oid] = 'wl_data_offer'
+        old = getattr(self, 'selection', None)
+        if old:                                    # the app's source: cancelled
+            self.send(old, 2)
+            self.selection = None
+        self.send(self.ddev, 0, struct.pack('<I', oid))            # data_offer
+        self.send(oid, 0, wstr('text/plain;charset=utf-8'))        # offer
+        self.send(self.ddev, 5, struct.pack('<I', oid))            # selection
+        self.pump(0.1)
 
     def keymap(self, path):
         data = open(path, 'rb').read() + b'\0'
@@ -515,6 +573,7 @@ def main():
     menus_ui()
     dialogs()
     files_ui()
+    clipboard()
     transforms()
     undo_redo()
     files()
@@ -5174,6 +5233,49 @@ def files_ui():
     n = q('print(count())')
     check(len(saved) == 1 and n == '3',
           f'Save before New: the browser saves ({saved}), then the new scene starts ({n} objects)')
+    f.proc.kill()
+
+
+def clipboard():
+    """UI plan U9: the Wayland clipboard - copy from the console and from a
+    field, paste into fields from another program, cut."""
+    print('  -- clipboard --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    check(getattr(f, 'ddev', None) is not None, 'BeeModel gets a data device for the clipboard')
+    f.key(28); f.type('hello world')           # the console: Ctrl+A, Ctrl+C
+    f.mods(4); f.key(30); f.key(46); f.mods(0)
+    f.key(1)
+    t = f.clipboard()
+    check(t == 'hello world', f'Ctrl+C in the console copies for other programs ({t!r})')
+    x, y = widget_xy(m, 'object.location', 1)
+    f.move(x, y)
+    f.mods(4); f.key(46); f.mods(0)            # Ctrl+C over a field: its value
+    t = f.clipboard()
+    check(t == '1', f'Ctrl+C over a field copies its value ({t!r})')
+    f.set_clipboard('2.75')                    # another program copies a number
+    x, y = widget_xy(m, 'object.location', 0)
+    f.move(x, y)
+    f.mods(4); f.key(47); f.mods(0)            # Ctrl+V over a field
+    r = q('print(get("Cube", "x"))')
+    check(r == '2.75', f'Ctrl+V over a field pastes another program\'s text ({r})')
+    f.mods(4); f.key(44); f.mods(0)
+    check(q('print(get("Cube", "x"))') == '0', 'one undo takes the paste back')
+    f.set_clipboard('Pasted\nname')
+    x, y = widget_xy(m, 'object.name')
+    f.click(x, y)                              # typing in the name: select all, paste
+    f.mods(4); f.key(30); f.key(47); f.mods(0)
+    f.key(28)
+    check(q('print(exists("Pasted name"))') == '1', 'pasting into a text field (a line break becomes a space)')
+    f.click(x, y)
+    f.mods(4); f.key(30); f.key(45); f.mods(0) # Ctrl+X: cut
+    f.key(1)
+    t = f.clipboard()
+    check(t == 'Pasted name', f'Ctrl+X cuts the text ({t!r})')
     f.proc.kill()
 
 
