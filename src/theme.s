@@ -17,6 +17,7 @@
 .globl th_init
 .globl th_id
 .globl th_name
+.globl th_set
 
 .section .data
 .align 4
@@ -72,6 +73,8 @@ th_light:
     .long COL_UV_EDGE,      0x464c57
     .long COL_INPUT_BG,     0xffffff
     .long COL_SELECTION,    0xf3d58a
+    .long COL_FIELD_HOVER,  0xf0f2f5
+    .long COL_FOCUS,        0x2a78c8
     .long 0xffffffff, 0
 
 th_contrast:
@@ -107,6 +110,8 @@ th_contrast:
     .long COL_CANVAS_BOT,   0x000000
     .long COL_INPUT_BG,     0x1a1a1a
     .long COL_SELECTION,    0x6b5a00
+    .long COL_FIELD_HOVER,  0x3a3a3a
+    .long COL_FOCUS,        0x60c8ff
     .long 0xffffffff, 0
 
 .text
