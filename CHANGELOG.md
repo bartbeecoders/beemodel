@@ -55,6 +55,15 @@ project uses [Semantic Versioning](https://semver.org/).
   reach every instance, instances of instances work, parameters can be
   keyed (`material:Blue:Wear`), and everything is saved. 100 instances of
   one material render in one image, each with its own colour.
+- **Texture sets and presets (M9, #236):** `material.import_textures`
+  (Material tab: Texture Set...) builds a PBR material from any one image
+  of a texture set: its siblings are found by name (base colour, normal,
+  roughness or gloss, metallic, AO, height, emission, opacity, packed
+  ORM / ARM; `_2k`, `_dx` and the like understood) and wired through
+  Texture Sample, Normal Map and Bump nodes. The Normal Map node reads
+  DirectX (-Y) maps too. `material.preset` (Material tab: Preset...) gives
+  a material one of 20 looks, from gold and glass to procedural wood,
+  marble, concrete, fabric and leather.
 
 ## [0.12.0] - 2026-10-15
 

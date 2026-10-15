@@ -620,6 +620,7 @@ def main():
     material_editor()
     material_previews()
     material_instances()
+    material_library()
     gltf_mtl()
     product_shot()
     params_units()
@@ -2643,6 +2644,88 @@ def material_instances():
     q('assign("Cube", "Paint")')
     f.pump(0.3)
     check('material.new_instance' in {w['name'] for w in ui_tree(m)}, 'a material offers New Instance')
+    f.proc.kill()
+
+
+def material_library():
+    """Texture sets and presets (M9): material.import_textures finds a PBR
+    set's maps by name (DirectX normals, resolution suffixes, packed ORM,
+    gloss, height, opacity) and wires them; material.preset gives looks."""
+    print('  -- texture sets and presets --')
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-mlib-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+        return r.stdout.strip() + r.stderr.strip()
+    d = os.path.join(home, 'set')
+    os.makedirs(d)
+    for n, c in [('Rock_Albedo_2k.png', (200, 100, 50)), ('Rock_Normal_DX_2k.png', (128, 64, 255)),
+                 ('Rock_Roughness_2k.png', (180, 180, 180)), ('Rock_AO_2k.png', (220, 220, 220)),
+                 ('Rock_Gloss_2k.jpg', (10, 10, 10)), ('Other_basecolor.png', (0, 0, 0)),
+                 ('brick-color.png', (150, 60, 40)), ('brick-ORM.png', (255, 128, 0)),
+                 ('brick-height.png', (128, 128, 128)), ('brick-opacity.png', (255, 255, 255)),
+                 ('leaf gloss.png', (51, 51, 51))]:
+        Image.new('RGB', (8, 8), c).save(os.path.join(d, n))
+    info = ('m = matof("Cube")\nn = nodeinfo(m, 0, "count")\nprint(m, n)\n'
+            'for p in 0..13 { s = nodeinfo(m, 0, "socket", p)\nif s > 0 { print(p, nodeinfo(m, s, "type"), nodeinfo(m, 0, "socketout", p)) } }\n')
+    def pins(out):
+        lines = out.splitlines()
+        return lines[0].split(), {int(l.split()[0]): (int(l.split()[1]), int(l.split()[2])) for l in lines[1:] if len(l.split()) == 3}
+    out = run(f'op("material.import_textures", "{d}/Rock_Normal_DX_2k.png")\n' + info +
+              'print(nodeinfo(m, nodeinfo(m, 0, "socket", 6), "value", 2), nodeval(m, nodeinfo(m, 0, "socket", 0), 0, 0, 0, 0, 0.5, 0.5))')
+    try:
+        head, pn = pins(out)
+        last = out.splitlines()[-1].split()
+        ok = (head == ['Rock', '6'] and pn == {0: (1, 0), 3: (1, 1), 6: (9, 0), 7: (1, 1)}
+              and last[0] == '1' and abs(float(last[1]) - (200 / 255) ** 2.2) < 0.03)
+    except (IndexError, ValueError):
+        ok, pn = False, out[-200:]
+    check(ok, f'a texture set from any one of its images: base (sRGB), roughness, AO, a DirectX normal map; gloss beside roughness and other sets left out ({pn})')
+    out = run(f'op("material.import_textures", "{d}/brick-ORM.png Wall")\n' + info + 'print(matget(m, "blend"))')
+    try:
+        head, pn = pins(out)
+        ok = (head == ['Wall', '6'] and pn == {0: (1, 0), 1: (1, 3), 3: (1, 2), 6: (8, 0), 7: (1, 1), 12: (1, 1)}
+              and out.splitlines()[-1] == '1')
+    except (IndexError, ValueError):
+        ok, pn = False, out[-200:]
+    check(ok, f'packed ORM (occlusion, roughness, metallic: R G B), height as a bump, opacity making it masked ({pn})')
+    out = run(f'op("material.import_textures", "{d}/leaf gloss.png")\n' + info +
+              'print(nodeval(m, nodeinfo(m, 0, "socket", 3), 3, 0, 0, 0, 0.5, 0.5))')
+    try:
+        head, pn = pins(out)
+        ok = head == ['leaf', '3'] and pn == {3: (7, 0)} and abs(float(out.splitlines()[-1]) - 0.8) < 0.02
+    except (IndexError, ValueError):
+        ok, pn = False, out[-200:]
+    check(ok, f'gloss alone becomes roughness through a One Minus ({pn})')
+    out = run(f'op("material.import_textures", "{d}/nothing_here.png")\nprint(matof("Cube"))')
+    check(out.splitlines()[-1] != 'nothing_here' if out else True, 'a texture set with no maps makes no material')
+    out = run('op("material.preset", "gold")\nm = matof("Cube")\nprint(m, matget(m, "metallic"), matget(m, "base", 1), matget(m, "roughness"))\n'
+              'op("material.preset", "glass " + m)\nprint(matof("Cube"), matget(m, "transmission"), matget(m, "metallic"))\n'
+              'op("material.preset", "water")\nprint(matget(matof("Cube"), "ior"))\n'
+              'op("material.preset", "marble")\nw = matof("Cube")\nprint(w, nodeinfo(w, 0, "count"), nodeinfo(w, nodeinfo(w, 0, "socket", 0), "type"))\n'
+              'op("material.preset", "concrete " + w)\nprint(nodeinfo(w, 0, "count"), nodeinfo(w, nodeinfo(w, 0, "socket", 6), "type"))\n'
+              'op("material.preset", "emissive " + w)\nprint(nodeinfo(w, 0, "count"), matget(w, "strength"))')
+    check(out.split() == ['gold', '1', '0.766', '0.22', 'gold', '1', '0', '1.333', 'marble', '2', '6', '3', '8', '0', '8'],
+          f'presets: values, an existing material restyled, procedural ones with small graphs ({out.split()})')
+    vals = []
+    for pr in ('gold', 'plastic', 'wood', 'fabric'):
+        p = os.path.join(home, f'{pr}.png')
+        run(f'op("material.preset", "{pr}")\nadd("sphere", "S", 0, 0, 0)\ndelete("Cube")\nassign("S", matof("S") or "{pr}")\nrender("{p}", 64, 64, 2)')
+        if os.path.exists(p):
+            im = Image.open(p).convert('RGB')
+            vals.append(im.getpixel((32, 32)))
+    check(len(set(vals)) == 4, f'presets render differently ({vals})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('select("Cube")')
+    props_tab(m, f, 'material')
+    f.pump(0.3)
+    names = {w['name'] for w in ui_tree(m)}
+    check({'material.preset', 'material.import_textures'} <= names, 'the Material tab has a preset menu and Texture Set...')
+    f.shot('68_presets.png')
     f.proc.kill()
 
 

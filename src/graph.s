@@ -1574,6 +1574,15 @@ graph_shade:
     inc     ecx
     cmp     ecx, 3
     jb      1b
+    mov     eax, r14d                   # (DirectX maps: green points down)
+    imul    eax, eax, NODE_SZ
+    movss   xmm0, [rbx+GR_NODES+rax+ND_P+4]
+    comiss  xmm0, [rip+gf_half]
+    jb      21f
+    movss   xmm0, [r15+52]
+    xorps   xmm0, [rip+gf_sign]
+    movss   [r15+52], xmm0
+21:
     movss   xmm0, [rsi+8]               # du1 dv1 du2 dv2, det
     subss   xmm0, [rsi]
     movss   xmm1, [rsi+12]
