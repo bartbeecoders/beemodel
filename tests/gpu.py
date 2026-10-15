@@ -11,6 +11,9 @@ to the CPU paths and the same images.
     vertex colours; the denoised render (the aux passes) too.
   * The helper dying mid-render (BEEMODEL_GPU_FAIL=2): the render finishes
     on the CPU, and the image is still the CPU's.
+  * Shader graphs (v0.13): a textured, bumped, normal-mapped and masked
+    scene on the GPU (the ptg kernel) against the CPU; a graph with a node
+    pt.comp does not evaluate stays on the CPU.
   * The rasterizer: a window (the fake compositor) showing a mesh drawn
     through its cluster DAG, with the tile stage on the GPU, against the
     same frame on the CPU.
@@ -60,6 +63,64 @@ assign(p, e)
 add("light", "Bulb", 2, 2, 2)
 v = add("sphere", "Painted", 0, 0, 1.5)
 vpaint(v, 0, 0, 2.5, 1.2, 1, 0, 0)
+'''
+
+
+def graph_scene():
+    """A textured, bumped, normal-mapped and masked scene (shader graphs):
+    the floor samples an image through its UVs, a noise bumps it and a
+    checker sets its roughness; a ball wears a normal map; a one-sided
+    panel is cut out by a checker mask."""
+    from PIL import Image
+    alb = os.path.join(HOME, 'albedo.png')
+    im = Image.new('RGB', (64, 64))
+    im.putdata([((x * 4) % 256, (y * 4) % 256, ((x ^ y) * 8) % 256) for y in range(64) for x in range(64)])
+    im.save(alb)
+    nrm = os.path.join(HOME, 'normal.png')
+    im = Image.new('RGB', (32, 32))
+    im.putdata([(128 + int(60 * ((x % 8) - 3.5) / 3.5), 128 + int(60 * ((y % 8) - 3.5) / 3.5), 230) for y in range(32) for x in range(32)])
+    im.save(nrm)
+    return f'''delete("Cube")
+f = add("plane", "Floor", 0, -1, 0)
+scale(f, 6, 1, 6)
+unwrap(f)
+m = material("Tex")
+t = node(m, "texcoord", 3, 3)
+i = image("{alb}")
+s = node(m, "image", i)
+link(m, t, s, 1)
+socket(m, "base", s)
+n = node(m, "noise", 6, 3, 0.5)
+b = node(m, "bump", 0.6, 0.05)
+link(m, n, b, 1)
+socket(m, "normal", b)
+c = node(m, "checker", 4)
+nodeset(m, c, 1, 0.2)
+nodeset(m, c, 2, 0.7)
+socket(m, "roughness", c)
+assign(f, m)
+g = add("sphere", "Ball", -1, 0, 0)
+unwrap(g, "smart")
+nm = material("Bumpy")
+matset(nm, "base", 0.7, 0.5, 0.3)
+j = image("{nrm}")
+ns = node(nm, "image", j, 1, 1)
+mp = node(nm, "normalmap", 1)
+link(nm, ns, mp, 1)
+socket(nm, "normal", mp)
+assign(g, nm)
+p = add("plane", "Leaf", 1, 0.2, 0)
+rotate(p, rad(90), 0, 0)
+lm = material("Leaf")
+matset(lm, "base", 0.2, 0.6, 0.2)
+matset(lm, "blend", 1)
+matset(lm, "one_sided", 1)
+k = node(lm, "checker", 3)
+nodeset(lm, k, 1, 0)
+nodeset(lm, k, 2, 1)
+socket(lm, "mask", k)
+assign(p, lm)
+add("light", "Bulb", 2, 2, 2)
 '''
 
 
@@ -142,6 +203,18 @@ def main():
         check(gp[0] == 1 and gp[2] == 64 and gp[1] >= 1 and mad < 0.25 and same > 0.97,
               f'path tracing, {name} scene: all 64 samples on the GPU ({gp[1]} runs), the CPU\'s image '
               f'(mean difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical)')
+    gs = graph_scene()                                  # shader graphs (M10)
+    c, gc = render('graphs_cpu', gs, 64, BEEMODEL_GPU='off')
+    p, gp = render('graphs_gpu', gs, 64, BEEMODEL_GPU='any')
+    mad, same = compare(c, p)
+    check(gp[0] == 1 and gp[2] == 64 and mad < 0.5 and same > 0.9,
+          f'path tracing a textured, bumped, normal-mapped and masked scene (shader graphs) on the GPU: the CPU\'s '
+          f'image (mean difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical, {gp[2]} GPU samples)')
+    vs = 'm = material("V")\nv = node(m, "voronoi", 5)\nsocket(m, "base", v)\nassign("Cube", m)\n'
+    c, _ = render('vor_cpu', vs, 16, BEEMODEL_GPU='off')
+    p, gp = render('vor_gpu', vs, 16, BEEMODEL_GPU='any')
+    check(gp[2] == 0 and compare(c, p)[0] == 0,
+          f'a graph with a node the GPU does not evaluate (Voronoi): the CPU renders it, the same image ({gp})')
     c, _ = render('den_cpu', SCENE, 32, 1, BEEMODEL_GPU='off')
     p, gp = render('den_gpu', SCENE, 32, 1, BEEMODEL_GPU='any')
     mad, same = compare(c, p)
