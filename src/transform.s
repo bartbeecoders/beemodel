@@ -111,6 +111,10 @@ OPERATOR op_grab,   "transform.grab",   "Grab / Move", op_tm_start, arg=1, key=K
 OPERATOR op_rotate, "transform.rotate", "Rotate",      op_tm_start, arg=2, key=KEY_R, flags=OPF_QUIET, doc="Rotate the selection with the mouse"
 OPERATOR op_scale,  "transform.scale",  "Scale",       op_tm_start, arg=3, key=KEY_S, flags=OPF_QUIET, doc="Scale the selection with the mouse"
 
+.section .data
+.align 4
+.globl snap_on
+snap_on:        .long 0                 # snapping on without Ctrl (viewport header)
 .text
 
 # tm_comp -> eax = nonzero in a component mode (mesh or curve edit mode):
@@ -194,6 +198,14 @@ pointer_px:
     call    to_px
     cvtsi2ss xmm0, eax
     movss   [rip+tm_my], xmm0
+    ret
+
+# tm_snapping -> eax = 1 while snapping: the Snap toggle, inverted by Ctrl
+tm_snapping:
+    xor     eax, eax
+    test    dword ptr [rip+key_mods], MOD_CTRL
+    setnz   al
+    xor     eax, [rip+snap_on]
     ret
 
 # -----------------------------------------------------------------------------
@@ -517,7 +529,8 @@ tm_update:
     andps   xmm0, [rip+tf_absm]
     mulss   xmm0, [rip+tm_depth]
     divss   xmm0, [rip+vp_focal]
-    test    dword ptr [rip+key_mods], MOD_CTRL
+    call    tm_snapping                 # (Ctrl inverts the Snap toggle)
+    test    eax, eax
     jz      3f
     movss   xmm1, [rip+tf_one]
     divss   xmm1, [rip+tf_ten]
@@ -572,7 +585,8 @@ tm_update:
     divss   xmm2, xmm0
     movss   xmm0, xmm2
     cmp     dword ptr [rip+key_mods], 0
-    test    dword ptr [rip+key_mods], MOD_CTRL
+    call    tm_snapping                 # (Ctrl inverts the Snap toggle)
+    test    eax, eax
     jz      2f
     movss   xmm1, [rip+tf_one]
     call    round_to
@@ -612,7 +626,8 @@ tm_update:
     movss   xmm1, [rax+rcx*4]
     mulss   xmm1, xmm6
     subss   xmm0, xmm1
-    test    dword ptr [rip+key_mods], MOD_CTRL
+    call    tm_snapping                 # (Ctrl inverts the Snap toggle)
+    test    eax, eax
     jz      31f
     push    rcx
     movss   xmm1, [rip+tf_one]
@@ -706,7 +721,8 @@ tm_update:
     xorps   xmm1, xmm1
     subss   xmm1, xmm0
     movss   xmm0, xmm1
-23: test    dword ptr [rip+key_mods], MOD_CTRL
+23: call    tm_snapping                 # (Ctrl inverts the Snap toggle)
+    test    eax, eax
     jz      .Ltr_have
     movss   xmm1, [rip+tf_step]
     call    round_to
@@ -795,7 +811,8 @@ tm_update:
     sqrtss  xmm2, xmm2
     maxss   xmm2, [rip+tf_one]
     divss   xmm0, xmm2
-    test    dword ptr [rip+key_mods], MOD_CTRL
+    call    tm_snapping                 # (Ctrl inverts the Snap toggle)
+    test    eax, eax
     jz      .Lsc_have
     movss   xmm1, [rip+tf_one]
     divss   xmm1, [rip+tf_ten]

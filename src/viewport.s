@@ -581,6 +581,8 @@ viewport_draw:
     cmp     ebx, 3
     jb      .Lvp_giz
 
+    call    nav_gizmo_draw              # the navigation gizmo (vpnav.s)
+
     # ---- overlay text ---------------------------------------------------------
     mov     edi, [rip+cvs_x0]
     add     edi, 10

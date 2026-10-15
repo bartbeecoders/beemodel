@@ -22,6 +22,8 @@
 .equ WGF_PRIMARY,   2           # button: the accent colour
 .equ WGF_CLAMP,     4           # keep FLOAT / INT inside [min, max]
 .equ WGF_COMPACT,   8           # 18 px tall (property rows), not WG_H
+.equ WGF_ICON,      16          # button: the icon WD_N instead of a caption, lit while its operator is checked
+.equ WGF_NODRAW,    32          # button: only the hit area (the caller draws it)
 
 # descriptor (static, .rodata)
 .equ WD_KIND,       0

@@ -575,6 +575,7 @@ def main():
     files_ui()
     clipboard()
     props_ui()
+    viewport_ui()
     transforms()
     undo_redo()
     files()
@@ -3655,7 +3656,7 @@ def copilot():
           'a proposal builds a tree through the operators; describe_graph shows its links and values')
     m.tool('propose_end')
     f.pump(0.3)
-    banner = px(f, 733, 134), px(f, 990, 134)
+    banner = px(f, 733, 134), px(f, 875, 134)   # (Accept, Revert: clear of the nav gizmo)
     f.shot('94_copilot_proposal.png')
     f.key(1)                                    # Esc: revert
     f.pump(0.3)
@@ -4932,12 +4933,14 @@ def widgets_ui():
     f.key(1)
     check(opened and val('viewport.shading') == 0 and not any(w['kind'] == 'list' for w in ui_tree(m)),
           'Esc closes an open list unchanged')
-    x, y = widget_xy(m, 'viewport.grid')
+    grid = lambda: [w for w in ui_tree(m) if w['name'] == 'viewport.grid' and w['kind'] == 'toggle'][0]
+    w = grid()                                 # (the Properties toggle, not the header's icon)
+    x, y = w['x'] + w['w'] // 2, w['y'] + w['h'] // 2
     f.click(x, y)
-    check(val('viewport.grid') == 0, 'a toggle switches the ground grid off')
+    check(grid()['value'] == 0, 'a toggle switches the ground grid off')
     f.mods(4); f.key(44); f.mods(0)            # (not an undo step: a view setting)
     f.click(x, y)
-    check(val('viewport.grid') == 1, 'and on again')
+    check(grid()['value'] == 1, 'and on again')
     x, y = widget_xy(m, 'viewport.pitch')
     f.click(x, y); f.type('120'); f.key(28)
     p = val('viewport.pitch')
@@ -5334,6 +5337,54 @@ def props_ui():
     check(widget(m, 'render.start') is not None and widget(m, 'render.save') is not None,
           'the Render page has Render and Save Render buttons')
     f.shot('props_render.png')
+    f.proc.kill()
+
+
+def viewport_ui():
+    """UI plan U11: the 3D viewport's header (mode, select mode, shading,
+    grid, snap) and the navigation gizmo / Numpad views."""
+    print('  -- viewport header --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name):
+        x, y = widget_xy(m, name); f.click(x, y); f.pump(0.2)
+    need = {'viewport.mode', 'viewport.shading_wireframe', 'viewport.shading_solid', 'viewport.shading_material',
+            'viewport.grid', 'viewport.snap', 'viewport.nav_top', 'viewport.nav_front', 'viewport.nav_right'}
+    check(need <= names(), f'the viewport header and gizmo are widgets ({len(need & names())} of {len(need)})')
+    check('viewport.select_face' not in names(), 'object mode: no select-mode buttons')
+    x, y = widget_xy(m, 'viewport.mode')       # the mode list: Edit Mode
+    f.click(x, y)
+    lst = [w for w in ui_tree(m) if w['kind'] == 'list']
+    f.click(x, lst[0]['y'] + 4 + 22 + 11 if lst else y)
+    check((widget(m, 'viewport.mode') or {}).get('value') == 1 and 'viewport.select_face' in names(),
+          'the mode list enters edit mode; the select-mode buttons appear')
+    click('viewport.select_face')
+    click('viewport.mode'); lst = [w for w in ui_tree(m) if w['kind'] == 'list']
+    x, y = widget_xy(m, 'viewport.mode'); f.click(x, lst[0]['y'] + 4 + 11 if lst else y)
+    check((widget(m, 'viewport.mode') or {}).get('value') == 0, 'and back to object mode')
+    props_tab(m, f, 'viewport')
+    val = lambda n: (widget(m, n) or {}).get('value')
+    click('viewport.shading_wireframe')
+    check(val('viewport.shading') == 1, 'the wireframe button')
+    click('viewport.shading_solid')
+    check(val('viewport.shading') == 0, 'the solid button')
+    click('viewport.nav_top')
+    p = val('viewport.pitch')
+    check(p is not None and p > 1.5, f'clicking the gizmo\'s Y looks from the top (pitch {p})')
+    f.move(600, 300); f.key(79)                # Numpad 1: front
+    p, yw = val('viewport.pitch'), val('viewport.yaw')
+    check(p is not None and yw is not None and abs(p) < 1e-6 and abs(yw) < 1e-6, f'Numpad 1: the front view ({yw}, {p})')
+    f.shot('viewport_header.png')
+    click('viewport.snap')                     # snap on: a move lands on whole units
+    f.move(600, 300); f.key(34)
+    f.move(637, 300); f.move(643, 302); f.button(True); f.button(False)
+    x = float(q('print(get("Cube", "x"))') or 'nan')
+    check(x == round(x) and x != 0, f'Snap on: G moves in whole steps ({x})')
     f.proc.kill()
 
 
