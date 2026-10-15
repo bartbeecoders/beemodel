@@ -6,6 +6,27 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-15
+
+Phase 10 of the masterplan, "Engine-grade & collaboration". BeeModel scales
+up and opens up to teams:
+
+- **Scale:** cluster LOD DAGs (virtualized geometry) drawn through a new cut
+  every frame, world partition streaming and a content library.
+- **Play:** play mode with walk and fly, logic graphs, light probes and
+  lightmaps, and a live link that streams the scene over a socket.
+- **Teams:** versioned scenes (commit, branch, visual diff, three-way
+  merge) and live CRDT co-editing for two users and an AI agent.
+- **CAD:** an exact B-rep / NURBS kernel and STEP import and export.
+- **GPU:** the optional `beemodel-gpu` helper path-traces and rasterizes on
+  Vulkan, a second release asset; BeeModel itself still links nothing.
+
+The exit checks: 1.05 billion source triangles fly at 5.8 ms a frame
+(median) in an 851 MB process (`tests/billion.py`, budget 8 GB); two users
+and an agent edit one scene and converge to identical documents
+(`tests/coedit.py`); STEP parts and assemblies round-trip through FreeCAD to
+1e-6 (`tests/step.py`).
+
 ### Added
 - **Cluster LOD DAG** (virtualized geometry, part 1, #143). `vgeo.build`
   turns the active mesh into meshlets: clusters of up to 128 triangles and
@@ -1337,7 +1358,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/bartbeecoders/beemodel/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/bartbeecoders/beemodel/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/bartbeecoders/beemodel/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/bartbeecoders/beemodel/compare/v0.7.0...v0.8.0
