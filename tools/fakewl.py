@@ -510,6 +510,7 @@ def main():
     ui_basics()
     themes()
     widgets_ui()
+    tooltips()
     transforms()
     undo_redo()
     files()
@@ -4847,6 +4848,66 @@ def widgets_ui():
     f.click(x, y)
     check(widget(m, 'viewport.yaw') is not None, 'and opens it again')
     f.proc.kill()
+
+
+def tooltips():
+    """UI plan U4: tooltips on menu items, tools, header buttons and fields;
+    items that cannot run now are greyed and say why."""
+    print('  -- tooltips --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    def tip():
+        f.pump(0.7)                            # rest longer than 500 ms
+        for w in ui_tree(m):
+            if w['kind'] == 'tooltip':
+                return w
+        return None
+    f.move(60, 102)                            # the Select tool
+    t = tip()
+    check(bool(t) and t['label'] == 'Select' and t['key'] == 'Shift+Q' and t['value'],
+          f'resting on a tool shows its name, shortcut and doc ({t and t["label"]}, {t and t["key"]})')
+    f.shot('tooltip_tool.png')
+    f.move(62, 104)
+    check(tip() is not None, 'moving within the same target keeps the tooltip')
+    f.button(True); f.button(False)
+    check(tip() is None, 'a press hides it')
+    f.click(80, 43)                            # Edit menu: Undo (nothing done yet)
+    f.move(120, 71)
+    t = tip()
+    check(bool(t) and t['label'] == 'Undo' and t['why'] == 'there is nothing to undo',
+          f'a menu item that cannot run says why ({t and t["why"]})')
+    f.shot('tooltip_menu.png')
+    grey, normal = px_text(f, 82, 64, 30), px_text(f, 82, 64 + 2 * 24 + 9, 30)
+    check(grey < normal - 40, f'and is drawn greyed ({grey:.0f} < {normal:.0f}, Edit Mode)')
+    f.click(120, 71)                           # clicking it does nothing
+    f.key(1)
+    f.click(253, 43)                           # Mesh menu in object mode
+    f.move(300, 71)
+    t = tip()
+    check(bool(t) and 'edit mode' in (t['why'] or ''), f'Mesh > Extrude needs edit mode ({t and t["why"]})')
+    f.key(1)
+    f.move(600, 300); f.key(15)                # Tab: edit mode
+    f.click(253, 43); f.move(300, 71)
+    t = tip()
+    check(bool(t) and t['why'] is None, 'in edit mode it can run (no reason shown)')
+    f.key(1); f.move(600, 300); f.key(15)
+    x, y = widget_xy(m, 'object.location', 0)
+    f.move(x, y)
+    t = tip()
+    check(bool(t) and 'expression' in (t['value'] or ''), 'a field has its own tooltip')
+    f.move(1210, 16)                           # the maximize button
+    t = tip()
+    check(bool(t) and t['label'] == 'Maximize', 'window buttons have tooltips')
+    f.proc.kill()
+
+
+def px_text(f, x, y, w):
+    """Brightest text pixel along a row segment (to compare greyed text)."""
+    return max(sum(((px(f, x + i, y + j) >> s) & 255) for s in (16, 8, 0)) / 3
+               for i in range(w) for j in range(0, 12))
 
 
 if __name__ == '__main__':

@@ -28,6 +28,7 @@
 .globl undo_back
 .globl undo_bytes
 .globl undo_depth
+.globl redo_depth
 .globl undo_attach_delta
 
 .equ MAX_STEPS,     256
@@ -74,8 +75,8 @@ s_bullet:       .asciz "    "
 s_unnamed:      .asciz "change"
 s_in_group:     .asciz "  undo / redo wait until the running script or agent request is done"
 
-OPERATOR op_edit_undo,  "edit.undo",  "Undo", op_undo, key=KEY_Z|KM_CTRL, flags=OPF_QUIET|OPF_AI_SAFE, doc="Undo the last change"
-OPERATOR op_edit_redo,  "edit.redo",  "Redo", op_redo, key=KEY_Z|KM_CTRL|KM_SHIFT, flags=OPF_QUIET|OPF_AI_SAFE, doc="Redo the last undone change"
+OPERATOR op_edit_undo,  "edit.undo",  "Undo", op_undo, key=KEY_Z|KM_CTRL, flags=OPF_QUIET|OPF_AI_SAFE, doc="Undo the last change", poll=poll_undo
+OPERATOR op_edit_redo,  "edit.redo",  "Redo", op_redo, key=KEY_Z|KM_CTRL|KM_SHIFT, flags=OPF_QUIET|OPF_AI_SAFE, doc="Redo the last undone change", poll=poll_redo
 OPERATOR op_edit_hist,  "edit.undo_history", "Undo History", op_history, flags=OPF_QUIET|OPF_AI_SAFE, doc="List the undo steps in the console"
 
 .text

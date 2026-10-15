@@ -124,9 +124,22 @@ _start:
     jz      31f
     mov     edx, 16
 31: cmp     dword ptr [rip+hv_active], 0  # rendering: just look, never wait
-    je      0f
+    je      32f
     xor     edx, edx
-0:  mov     eax, SYS_POLL
+32: push    rdx                         # a tooltip due: wake up for it
+    push    rsi
+    call    tip_wait
+    pop     rsi
+    pop     rdx
+    test    eax, eax
+    js      0f
+    cmp     edx, -1
+    je      33f
+    cmp     eax, edx
+    jge     0f
+33: mov     edx, eax
+0:  lea     rdi, [rip+pollfds]
+    mov     eax, SYS_POLL
     syscall
     cmp     rax, -4                     # EINTR
     je      .Lloop
@@ -149,6 +162,7 @@ _start:
     call    wp_tick
     call    lb_tick                     # library thumbnails, one at a time
     call    play_tick                   # play mode: the player, the scene on
+    call    tip_tick                    # a tooltip whose time has come
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render

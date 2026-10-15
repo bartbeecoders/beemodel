@@ -65,7 +65,7 @@ palette_run:
     push    rax
     call    palette_close
     pop     rdi
-    jmp     run_op
+    jmp     run_op_ui                   # (or why it cannot run now)
 
 # ---- case-insensitive matching ----------------------------------------------------
 # lower(al) -> al
@@ -406,11 +406,16 @@ palette_draw:
     mov     ecx, PAL_ROW_H
     mov     r8d, COL_ACCENT
     call    fill_rect
-3:  mov     edi, [rip+pal_x]
+3:  mov     rdi, r13                    # greyed when it cannot run now
+    call    op_poll
+    mov     ecx, COL_TEXT
+    test    rax, rax
+    jz      31f
+    mov     ecx, COL_TEXT_OFF
+31: mov     edi, [rip+pal_x]
     add     edi, 20
     lea     esi, [r12+5]
     mov     rdx, [r13+OP_LABEL]
-    mov     ecx, COL_TEXT
     call    draw_text
     lea     edi, [rax+14]               # id, dimmed
     lea     esi, [r12+5]

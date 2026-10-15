@@ -17,6 +17,7 @@ stays private to the module.
 | `draw.s` | Framebuffer primitives: rects, gradients, text, lines, clip rectangle; every colour passes through the theme (`th_map`) |
 | `shapes.s` | Anti-aliased UI shapes: rounded and translucent rectangles, circles, soft shadows, Wu lines, `popup_frame` for menus and the palette |
 | `widgets.s` | The widget toolkit: buttons, toggles, number / slider / text fields, dropdowns, sections, tabs, scrolled regions; one frame's widget list for hit testing; typing (a `textfield.s` instance); `ui_tree` JSON |
+| `tooltip.s` | Tooltips: half a second's rest on a menu item, tool, header button or widget shows its name, shortcut, doc and why it cannot run now (`op_poll`); the main loop's poll timeout wakes it |
 | `theme.s` | UI themes (Dark, Light, High contrast): a table per theme maps each dark-theme `COL_*` value to the theme's colour; `view.theme`, the View menu, `BEEMODEL_THEME` |
 | `ui.s` | Layout, hit testing, pointer/keyboard handling, title bar, menus, panes, status bar |
 | `ops.s` | The operator spine: application operators, `run_op` (which realigns the stack for the operator, whoever calls), key dispatch, shortcut text, `--list-ops` |
@@ -193,6 +194,16 @@ so the table needs no central registration list. From that one table:
 
 Coming next on top of the same table: the F3 command palette (#6), BeeScript
 bindings and MCP tools (phase 3).
+
+### Can it run now?
+
+`op_poll(op)` returns 0, or a short reason the operator cannot run now. An
+`OPF_EDIT` operator needs edit mode and an `OPF_OBJECT` one object mode. After
+that, the operator's own `poll=` function decides (`OP_POLL`): nothing to
+undo, no selection, no render yet. Menus and the palette grey those entries
+out, and tooltips show the reason. Clicking one (`run_op_ui`) writes
+"Label: reason" to the status line instead of running it. `run_op` itself
+never asks, so scripts and agents still get the operator's own messages.
 
 ### Adding an action
 

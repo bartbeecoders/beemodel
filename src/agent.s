@@ -64,7 +64,7 @@ s_empty2:       .asciz "Connect one with: beemodel --mcp-bridge"
 OPERATOR op_agent_read,  "agent.permission_read",  "Agents: Read Only",  set_tier, chk_tier, 0, flags=OPF_QUIET, doc="AI agents may only look at the scene"
 OPERATOR op_agent_edit,  "agent.permission_edit",  "Agents: Edit Scene", set_tier, chk_tier, 1, flags=OPF_QUIET, doc="AI agents may look at and edit the scene (default)"
 OPERATOR op_agent_files, "agent.permission_files", "Agents: Edit + Files", set_tier, chk_tier, 2, flags=OPF_QUIET, doc="AI agents may also open, save, import, export and screenshot"
-OPERATOR op_agent_revert, "agent.revert", "Revert Agent Change", do_revert, flags=OPF_QUIET, doc="Undo the last change if an AI agent made it"
+OPERATOR op_agent_revert, "agent.revert", "Revert Agent Change", do_revert, flags=OPF_QUIET, doc="Undo the last change if an AI agent made it", poll=poll_revert
 
 .text
 
@@ -203,6 +203,8 @@ do_revert:
     add     rsp, 8
     ret
 
+
+.globl revertable
 # revertable -> eax = 1 if the newest undo step is an agent's
 revertable:
     sub     rsp, 8
