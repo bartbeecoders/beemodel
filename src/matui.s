@@ -98,6 +98,7 @@ s_x:            .asciz " x "
 s_sp:           .asciz " "
 s_q:            .asciz "\""
 k_none:         .asciz "none"
+s_bake_arg:     .asciz " 1024 apply"
 k_blend:        .asciz " blend "
 k_sided:        .asciz " one_sided "
 
@@ -136,6 +137,7 @@ WIDGET wd_nd_ch2, WK_ENUM, "node.choice2", flags=WGF_DYN, cb=nd_enum_cb, undo="N
 WIDGET wd_nd_ch3, WK_ENUM, "node.choice3", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=nd_ch3
 WIDGET wd_mt_tex,  WK_ENUM, "material.texture", flags=WGF_DYN, cb=tex_cb, aux=image_names, tip="An image as the base colour, projected from the sides of a box"
 WIDGET wd_mt_load, WK_BUTTON, "material.load_image", "Load Image...", aux=op_image_load
+WIDGET wd_mt_bake, WK_BUTTON, "material.bake", "Bake to Maps", aux=op_mat_bake_ui, tip="Bake this material's node graph through the object's UVs into base colour, ORM, normal and emissive maps (1024 x 1024) that the material then samples"
 WIDGET wd_wl_sky,  WK_ENUM, "world.sky", flags=WGF_DYN, cb=sky_cb, aux=sky_names, tip="What lights the scene from around it: the studio sky or an HDRI image"
 WIDGET wd_cv_res,  WK_INT, "curve.resolution", "Resolution", 1.0, 64.0, 0.1, 0, WGF_CLAMP, cb=cv_cb, undo="Curve", tip="Points per span: more is smoother"
 WIDGET wd_cv_bevel, WK_FLOAT, "curve.bevel", "Tube radius", 0.0, 100.0, 0.005, 3, WGF_CLAMP, cb=cv_cb, undo="Curve", tip="Make it a tube this thick (0: a line)"
@@ -322,6 +324,10 @@ mats_props_draw:
     call    pnl_right
     add     r12d, WG_H+4
     lea     rdi, [rip+wd_mt_load]
+    xor     r8d, r8d
+    call    pnl_right
+    add     r12d, WG_H+4
+    lea     rdi, [rip+wd_mt_bake]
     xor     r8d, r8d
     call    pnl_right
     add     r12d, WG_H+4
@@ -569,6 +575,28 @@ op_mat_instance_ui:
     mov     rsi, rax
     call    cpy
     lea     rdi, [rip+op_mat_instance]
+    lea     rsi, [rip+mt_arg]
+    call    run_arg2
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# the Material tab's Bake to Maps: material.bake <the object> 1024 apply
+op_mat_bake_ui:
+    push    rbx
+    sub     rsp, 16
+    mov     edi, [rip+active_obj]
+    test    edi, edi
+    jz      9f
+    call    obj_get
+    test    rax, rax
+    jz      9f
+    lea     rdi, [rip+mt_arg]
+    lea     rsi, [rax+OB_NAME]
+    call    cpy
+    lea     rsi, [rip+s_bake_arg]
+    call    cpy
+    lea     rdi, [rip+op_mat_bake]
     lea     rsi, [rip+mt_arg]
     call    run_arg2
 9:  add     rsp, 16

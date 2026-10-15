@@ -64,6 +64,18 @@ project uses [Semantic Versioning](https://semver.org/).
   DirectX (-Y) maps too. `material.preset` (Material tab: Preset...) gives
   a material one of 20 looks, from gold and glass to procedural wood,
   marble, concrete, fabric and leather.
+- **Material baking, glTF and OBJ texture maps (M11, #238):**
+  `material.bake <object> [size] [apply]` (Material tab: Bake to Maps)
+  bakes a material's node graph through the object's UVs into base
+  colour, ORM, tangent-space normal and emissive maps; with `apply` the
+  material samples them. glTF import reads `TEXCOORD_0` and the five
+  texture slots (base colour, metallic-roughness, normal, occlusion,
+  emissive) with `KHR_texture_transform`, from GLB buffer views, data:
+  URIs or files; export embeds the maps as PNGs, image graphs as they are
+  and procedural ones baked. MTL gains `map_Pr`, `map_Pm`, `map_Ke`,
+  `norm` / `map_Bump` and `map_d` both ways (`-imfchan` for packed maps).
+  A helmet-style fixture round-trips with its textures, and Blender reads
+  our maps.
 
 ## [0.12.0] - 2026-10-15
 

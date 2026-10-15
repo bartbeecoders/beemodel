@@ -29,6 +29,7 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl lin_to_srgb
 .globl lm_reset
 .globl lm_write
 .globl lm_read
