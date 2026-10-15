@@ -514,6 +514,7 @@ def main():
     icons()
     menus_ui()
     dialogs()
+    files_ui()
     transforms()
     undo_redo()
     files()
@@ -5096,6 +5097,84 @@ def dialogs():
     except subprocess.TimeoutExpired:
         f.proc.kill(); rc = None
     check(rc == 0, f"Don't Save quits (rc={rc})")
+
+
+def files_ui():
+    """UI plan U8: the file browser - Save As / Open / Import through it,
+    folders first, the filter, double-click, the path field, Backspace,
+    "Replace?", Ctrl+S once there is a file, Save before New."""
+    print('  -- file browser --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    home = f.home
+    bee = os.path.join(home, 'BeeModel')
+    os.makedirs(os.path.join(bee, 'parts'), exist_ok=True)
+    open(os.path.join(bee, 'notes.txt'), 'w').write('not a scene')
+    open(os.path.join(home, 'tri.obj'), 'w').write('v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n')
+    rows = lambda: [w['label'] for w in ui_tree(m) if w['kind'] == 'row' and w['name'] == 'files.row']
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def new_scene():                           # (scripts may not run file.*)
+        f.mods(4); f.key(49); f.mods(0)
+        if 'dialog.dont_save' in names():
+            click('dialog.dont_save')
+    def type_into(name, text):
+        click(name); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.2)
+    q('add("cube", "Box", 3, 1, 0)')
+    f.mods(5); f.key(31); f.mods(0)            # Ctrl+Shift+S: Save As
+    check({'files.path', 'files.name', 'files.ok'} <= names(), 'Save As opens the file browser')
+    check(rows() == ['parts'], f'it lists folders and only .bee files ({rows()})')
+    f.shot('files_save.png')
+    type_into('files.name', 'box')
+    click('files.ok')
+    check(os.path.exists(os.path.join(bee, 'box.bee')), 'Save adds the .bee extension and writes ~/BeeModel/box.bee')
+    q('add("cube", "Box2", -3, 1, 0)')
+    f.mods(4); f.key(31); f.mods(0)            # Ctrl+S: the file it has, no browser
+    check('files.ok' not in names(), 'Ctrl+S saves to the scene\'s file without asking')
+    f.mods(5); f.key(31); f.mods(0)
+    type_into('files.name', 'box')
+    click('files.ok')
+    check('files.replace' in names(), 'saving over a file asks "Replace it?"')
+    click('files.replace')
+    check('files.ok' not in names(), 'Replace saves')
+    new_scene()
+    f.mods(4); f.key(24); f.mods(0)            # Ctrl+O
+    r = rows()
+    check(r == ['parts', 'box.bee'], f'Open: folders first, then scenes ({r})')
+    x, y = [(w['x'] + 30, w['y'] + 11) for w in ui_tree(m) if w.get('label') == 'parts'][0]
+    f.click(x, y); f.click(x, y); f.pump(0.2)  # double-click a folder: into it
+    p = (widget(m, 'files.path') or {}).get('value', '')
+    check(p.endswith('/BeeModel/parts'), f'double-clicking a folder opens it ({p})')
+    f.key(14); f.pump(0.2)                     # Backspace: up
+    check(rows() == ['parts', 'box.bee'], 'Backspace goes to the folder above')
+    x, y = [(w['x'] + 30, w['y'] + 11) for w in ui_tree(m) if w.get('label') == 'box.bee'][0]
+    f.click(x, y); f.click(x, y); f.pump(0.3)  # double-click a scene: open it
+    check(q('print(exists("Box"), exists("Box2"))') == '1 1' and 'files.ok' not in names(),
+          'double-clicking a scene opens it')
+    menu_pick(f, m, 'File', 'Import', 'Import OBJ...')
+    check(rows() == ['parts'], 'Import OBJ filters for .obj files')
+    type_into('files.path', os.path.join(home, 'tri.obj'))   # a typed file: its folder, name
+    click('files.ok')
+    check(q('print(count())') == '6', 'Import OBJ through the browser adds the mesh')
+    f.mods(5); f.key(31); f.mods(0)
+    f.key(1)
+    check('files.ok' not in names(), 'Esc closes the browser')
+    new_scene()
+    q('add("cube", "Fresh", 0, 4, 0)')         # untitled, changed: New asks,
+    f.mods(4); f.key(49); f.mods(0)            #  Save opens the browser,
+    click('dialog.save')                       #  then the new scene follows
+    type_into('files.name', 'fresh')
+    click('files.ok')
+    saved = [r for r, d, fs in os.walk(home) if 'fresh.bee' in fs]
+    n = q('print(count())')
+    check(len(saved) == 1 and n == '3',
+          f'Save before New: the browser saves ({saved}), then the new scene starts ({n} objects)')
+    f.proc.kill()
 
 
 if __name__ == '__main__':

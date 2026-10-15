@@ -125,9 +125,9 @@ fd_pi:          .double 3.14159265358979323846
 fd_2pi:         .double 6.28318530717958647692
 fd_margin:      .double 5.0
 
-OPERATOR op_export_3mf, "file.export_3mf", "Export 3MF...", do_e3mf, doc="Export the mesh objects for 3D printing as 3MF (millimetres, Z up): file.export_3mf <path>"
-OPERATOR op_export_dxf, "file.export_dxf", "Export DXF...", do_edxf, doc="Export the active sketch (or the first) as DXF in millimetres: file.export_dxf <path>"
-OPERATOR op_export_svg, "file.export_svg", "Export SVG...", do_esvg, doc="Export the active sketch (or the first) as SVG in millimetres: file.export_svg <path>"
+OPERATOR op_export_3mf, "file.export_3mf", "Export 3MF...", do_e3mf, doc="Export the mesh objects for 3D printing as 3MF (millimetres, Z up): file.export_3mf <path>", form=form_e3mf
+OPERATOR op_export_dxf, "file.export_dxf", "Export DXF...", do_edxf, doc="Export the active sketch (or the first) as DXF in millimetres: file.export_dxf <path>", form=form_edxf
+OPERATOR op_export_svg, "file.export_svg", "Export SVG...", do_esvg, doc="Export the active sketch (or the first) as SVG in millimetres: file.export_svg <path>", form=form_esvg
 
 .section .bss
 .align 8

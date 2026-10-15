@@ -1605,6 +1605,11 @@ run_op_ui:
     jne     3f
 2:  cmp     qword ptr [rbx+OP_FORM], 0  #  a form asks for it
     je      3f
+    test    dword ptr [rbx+OP_FLAGS], OPF_FORMNEW  # (Save: only for a new
+    jz      21f                                    #  scene)
+    cmp     byte ptr [rip+cur_path], 0
+    jne     3f
+21:
     mov     rdi, rbx
     pop     rbx
     jmp     dlg_open_form

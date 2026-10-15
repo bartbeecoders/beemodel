@@ -84,7 +84,7 @@ s_exported:     .asciz "  exported "
 s_err_write:    .asciz "  could not write "
 s_none:         .asciz "  nothing to draw: no meshes"
 
-OPERATOR op_export_pdf, "file.export_pdf", "Export Drawing (PDF)...", do_epdf, doc="A drawing of the selected meshes (or all): front, top and right views with hidden lines dashed, overall dimensions and a title block, on A4 as PDF: file.export_pdf <path>"
+OPERATOR op_export_pdf, "file.export_pdf", "Export Drawing (PDF)...", do_epdf, doc="A drawing of the selected meshes (or all): front, top and right views with hidden lines dashed, overall dimensions and a title block, on A4 as PDF: file.export_pdf <path>", form=form_epdf
 
 .section .bss
 .align 8

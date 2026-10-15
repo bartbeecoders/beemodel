@@ -36,6 +36,7 @@
 .equ OPF_ANIMED,  4096  # its key only works over a dope sheet / graph editor (and wins there)
 .equ OPF_ARM,     8192  # its key only works in armature edit / pose mode (and wins there)
 .equ OPF_CONFIRM, 16384 # from the UI: asks "Save changes?" first when the scene has some
+.equ OPF_FORMNEW, 32768 # its form only while the scene has no file yet (file.save)
 
 # key binding modifiers (pre-shifted into the high half of OP_KEY)
 .equ KM_SHIFT,  MOD_SHIFT << 16

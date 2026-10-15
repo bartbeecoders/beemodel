@@ -45,6 +45,7 @@
 .globl wg_ftoa
 .globl wg_desc_of
 .globl wg_n
+.globl wg_set_label
 
 .equ WG_MAX,    768
 .equ WG_SZ,     64
@@ -130,9 +131,11 @@ kn_section:     .asciz "section"
 kn_tabs:        .asciz "tabs"
 kn_scroll:      .asciz "scroll"
 kn_thumb:       .asciz "scrollbar"
+kn_row:         .asciz "row"
+kn_path:        .asciz "path"
 .align 8
 kind_names:     .quad 0, kn_button, kn_toggle, kn_float, kn_int, kn_slider, kn_text
-                .quad kn_enum, kn_section, kn_tabs, kn_scroll, kn_thumb
+                .quad kn_enum, kn_section, kn_tabs, kn_scroll, kn_thumb, kn_row, kn_path
 
 .text
 
@@ -173,6 +176,18 @@ wg_find:
     jmp     1b
 2:  xor     eax, eax
 9:  ret
+
+# wg_set_label(rdi=text) - the widget just drawn shows this label in ui_tree
+#   (rows whose text is not in their descriptor: file names)
+wg_set_label:
+    mov     eax, [rip+wg_n]
+    test    eax, eax
+    jz      1f
+    dec     eax
+    imul    eax, eax, WG_SZ
+    lea     rcx, [rip+wg_list]
+    mov     [rcx+rax+E_AUX], rdi
+1:  ret
 
 # wg_desc_of(edi=id) -> rax = that widget's descriptor, 0 if not on screen
 wg_desc_of:
@@ -280,7 +295,27 @@ wg:
     je      .Lwg_enum
     cmp     eax, WK_TABS
     je      .Lwg_tabs
+    cmp     eax, WK_ROW
+    je      .Lwg_row
     jmp     .Lwg_field
+
+# ---- a list row: lit when selected (or hot); the caller draws its content -----
+.Lwg_row:
+    mov     r8d, COL_ACCENT_DARK
+    mov     eax, [rsp]
+    cmp     eax, [r15]
+    je      1f
+    mov     r8d, COL_HOVER
+    test    dword ptr [rsp+8], 1
+    jz      2f
+1:  mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, [rsp+4]
+    mov     r9d, FIELD_R
+    call    fill_rrect
+2:  xor     eax, eax
+    jmp     .Lwg_ret
 
 # ---- button ------------------------------------------------------------------
 .Lwg_button:
@@ -590,9 +625,11 @@ wg:
     mov     r8d, COL_ACCENT_DARK
     mov     r9d, FIELD_R
     call    fill_rrect
-3:  mov     rdx, [rbx+WD_LABEL]         # label on the left
-    test    rdx, rdx
+3:  mov     rdx, [rbx+WD_LABEL]         # label on the left (a text field's
+    test    rdx, rdx                    #  is a caption beside it instead)
     jz      4f
+    cmp     dword ptr [rbx+WD_KIND], WK_TEXT
+    je      4f
     lea     edi, [r12+7]
     mov     esi, r13d
     add     esi, [rsp+28]
@@ -1141,6 +1178,8 @@ wg_release:
     je      .Lwr_enum
     cmp     eax, WK_TABS
     je      .Lwr_tabs
+    cmp     eax, WK_ROW
+    je      .Lwr_row
     cmp     eax, WK_THUMB
     je      9f
     lea     rdi, [rip+wg_act_e]         # a field: type into it
@@ -1182,6 +1221,12 @@ wg_release:
 2:  mov     [rip+wg_pop_w], eax
     mov     dword ptr [rip+wg_pop_hot], -1
     mov     dword ptr [rip+wg_pop_open], 1
+    jmp     9f
+.Lwr_row:                               # a row: select it, its callback
+    mov     rdx, [rip+wg_act_e+E_PTR]
+    mov     eax, [rip+wg_act_e+E_SUB]
+    mov     [rdx], eax
+    call    act_changed
     jmp     9f
 .Lwr_tabs:
     mov     eax, [rip+ptr_x]            # which tab
@@ -1901,7 +1946,10 @@ wg_tree_json:
     movsxd  rdi, dword ptr [rbx+E_H]
     call    wb_int
     mov     rsi, [r13+WD_LABEL]
-    test    rsi, rsi
+    cmp     dword ptr [rbx+E_KIND], WK_ROW  # (a row: its own text)
+    jne     31f
+    mov     rsi, [rbx+E_AUX]
+31: test    rsi, rsi
     jz      4f
     push    rsi
     lea     rsi, [rip+k_label]
