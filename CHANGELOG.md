@@ -64,6 +64,16 @@ project uses [Semantic Versioning](https://semver.org/).
   DirectX (-Y) maps too. `material.preset` (Material tab: Preset...) gives
   a material one of 20 looks, from gold and glass to procedural wood,
   marble, concrete, fabric and leather.
+- **Faster material graphs (M3, #230):** each graph is compiled per edit:
+  nodes that do not depend on the shading point (math, mixes, colours,
+  parameters fed only by such nodes) are evaluated once and their results
+  copied in; the Noise node runs its three channels four-wide (SSE, the
+  same numbers as before); node dispatch is a table. A 40-node game-style
+  material previews at about 2.2x a principled one while orbiting (was
+  3x); a heavy procedural one (noise, voronoi, wave, bump) at about 7.6x
+  (was 10x). The path tracer renders the product shot 26% faster than
+  v0.12. `--selftest` checks the four-wide noise and the folding on random
+  graphs.
 - **Material functions (M8, #235):** a material function is a graph from
   Function Input nodes (In 1..3) to a Function Output (Out 1..3); a
   Material Function node runs it inline with its inputs, so one function

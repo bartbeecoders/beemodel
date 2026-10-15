@@ -378,6 +378,8 @@ selftest:
 
     lea     rdi, [rip+check]            # cluster LOD DAGs: crack-free cuts
     call    vg_selftest
+    lea     rdi, [rip+check]            # material programs: SIMD noise,
+    call    mp_selftest                 #  folded constants
     xor     eax, eax
     cmp     dword ptr [rip+t_fails], 0
     sete    al
