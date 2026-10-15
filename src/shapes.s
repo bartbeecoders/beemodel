@@ -6,6 +6,8 @@
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
+.equ ICON_DATA, 1
+.include "icons.inc"
 
 # exports
 .globl fill_rrect
@@ -15,6 +17,7 @@
 .globl draw_shadow
 .globl draw_line_aa
 .globl popup_frame
+.globl draw_icon
 
 .section .rodata
 .align 4
@@ -265,6 +268,103 @@ draw_shadow:
     pop     r12
     pop     rbp
     pop     rbx
+    ret
+
+# draw_icon(edi=x, esi=y, edx=icon (ICON_*), r8d=colour) - a 16 x 16 icon
+#   (logical), its 4-bit mask tinted with the theme's colour; scaled output
+#   samples the nearest mask pixel
+draw_icon:
+    cmp     edx, ICON_COUNT
+    jae     .Ldi_ret
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 24
+    shl     edx, 7                      # 128 bytes an icon
+    lea     rbx, [rip+icon_masks]
+    add     rbx, rdx
+    call    th_map
+    mov     [rip+rr_col], r8d
+    push    rsi
+    call    to_px                       # physical x0
+    mov     r12d, eax
+    pop     rdi
+    call    to_px                       # physical y0
+    mov     r13d, eax
+    mov     edi, 16
+    call    to_px
+    mov     [rsp], eax                  # physical size
+    xor     r14d, r14d                  # row
+.Ldi_row:
+    cmp     r14d, [rsp]
+    jge     .Ldi_done
+    lea     eax, [r13+r14]
+    cmp     eax, [rip+clip_y0]
+    jl      .Ldi_nrow
+    cmp     eax, [rip+clip_y1]
+    jge     .Ldi_nrow
+    imul    eax, [rip+fb_w]
+    mov     rbp, [rip+fb_ptr]
+    lea     rbp, [rbp+rax*4]
+    mov     eax, r14d                   # mask row = row x 16 / size
+    shl     eax, 4
+    xor     edx, edx
+    div     dword ptr [rsp]
+    shl     eax, 3
+    mov     [rsp+4], eax                # its byte offset
+    xor     r15d, r15d                  # column
+.Ldi_px:
+    cmp     r15d, [rsp]
+    jge     .Ldi_nrow
+    lea     eax, [r12+r15]
+    cmp     eax, [rip+clip_x0]
+    jl      .Ldi_npx
+    cmp     eax, [rip+clip_x1]
+    jge     .Ldi_npx
+    mov     [rsp+8], eax
+    mov     eax, r15d                   # mask column
+    shl     eax, 4
+    xor     edx, edx
+    div     dword ptr [rsp]
+    mov     ecx, eax
+    shr     eax, 1
+    add     eax, [rsp+4]
+    movzx   edx, byte ptr [rbx+rax]
+    test    ecx, 1
+    jz      1f
+    shr     edx, 4
+1:  and     edx, 15
+    jz      .Ldi_npx
+    imul    edx, edx, 17                # 0..255
+    inc     edx                         # (16 -> 256: opaque)
+    cmp     edx, 256
+    jb      2f
+    mov     edx, 256
+2:  mov     ecx, [rsp+8]
+    mov     r8d, [rip+rr_col]
+    mov     eax, [rbp+rcx*4]
+    push    rcx
+    BLEND_PX
+    pop     rcx
+    mov     [rbp+rcx*4], eax
+.Ldi_npx:
+    inc     r15d
+    jmp     .Ldi_px
+.Ldi_nrow:
+    inc     r14d
+    jmp     .Ldi_row
+.Ldi_done:
+    add     rsp, 24
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+.Ldi_ret:
     ret
 
 # popup_frame(edi=x, esi=y, edx=w, ecx=h, r8d=border colour) - menus,

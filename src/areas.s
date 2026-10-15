@@ -8,6 +8,7 @@
 .intel_syntax noprefix
 .include "const.inc"
 .include "widgets.inc"
+.include "icons.inc"
 .include "macros.inc"
 
 # exports
@@ -854,52 +855,19 @@ draw_leaf:
     jnz     41f
     mov     r8d, COL_CLOSE_HOT
 41: call    fill_rect
-5:  lea     edi, [r14+5]                # 12x10 icon box
-    lea     esi, [r15-5]
-    cmp     r13d, 0
-    jne     6f
-    lea     edx, [r14+15]               # close: X
-    lea     ecx, [r15+5]
+5:  mov     edi, HDR_BTN_W-16           # its icon, centred
+    shr     edi, 1
+    add     edi, r14d
+    lea     esi, [r15-8]
+    lea     rax, [rip+hdr_icons]
+    mov     edx, [rax+r13*4]
     mov     r8d, COL_TEXT
-    call    draw_line
-    lea     edi, [r14+5]
-    lea     esi, [r15+5]
-    lea     edx, [r14+15]
-    lea     ecx, [r15-5]
-    mov     r8d, COL_TEXT
-    call    draw_line
-    jmp     8f
-6:  mov     edx, 12
-    mov     ecx, 10
-    mov     r8d, COL_TEXT
-    call    rect_outline
-    cmp     r13d, 1
-    jne     61f
-    lea     edi, [r14+5]                # stacked: horizontal divider
-    mov     esi, r15d
-    mov     edx, 12
-    mov     ecx, 1
-    mov     r8d, COL_TEXT
-    call    fill_rect
-    jmp     8f
-61: cmp     r13d, 2
-    jne     62f
-    lea     edi, [r14+11]               # side by side: vertical divider
-    lea     esi, [r15-5]
-    mov     edx, 1
-    mov     ecx, 10
-    mov     r8d, COL_TEXT
-    call    fill_rect
-    jmp     8f
-62: lea     edi, [r14+5]                # maximize: thick top edge
-    lea     esi, [r15-5]
-    mov     edx, 12
-    mov     ecx, 3
-    mov     r8d, COL_TEXT
+    cmp     r13d, 3                     # maximize: accent while maximized
+    jne     7f
     cmp     ebx, [rip+area_maxed]
-    jne     63f
+    jne     7f
     mov     r8d, COL_ACCENT
-63: call    fill_rect
+7:  call    draw_icon
 8:  inc     r13d
     cmp     r13d, 4
     jb      4b
@@ -1037,18 +1005,17 @@ ed_tools_draw:
     sub     edx, 16
     mov     ecx, TOOL_BTN_H
     mov     r8d, r13d
-    call    fill_rect
-    mov     edi, [rip+ed_x]             # glyph: filled for tools, hollow for create
-    add     edi, 16
-    lea     esi, [r12+9]
-    mov     edx, 8
-    mov     ecx, 8
+    mov     r9d, FIELD_R
+    call    fill_rrect
+    mov     edi, [rip+ed_x]             # its icon
+    add     edi, 13
+    mov     esi, TOOL_BTN_H-16
+    shr     esi, 1
+    add     esi, r12d
+    lea     rax, [rip+tool_icons]
+    mov     edx, [rax+rbx*4]
     mov     r8d, r14d
-    cmp     ebx, 4
-    jae     4f
-    call    fill_rect
-    jmp     5f
-4:  call    rect_outline
+    call    draw_icon
 5:  mov     edi, [rip+ed_x]
     add     edi, 34
     lea     esi, [r12+5]
@@ -1929,6 +1896,10 @@ op_toggle_console:
     jmp     split_with
 
 .section .rodata
+.align 4
+hdr_icons:      .long ICON_CLOSE, ICON_SPLIT_V, ICON_SPLIT_H, ICON_MAXIMIZE
+tool_icons:     .long ICON_SELECT, ICON_MOVE, ICON_ROTATE, ICON_SCALE, ICON_CUBE
+                .long ICON_SPHERE, ICON_CYLINDER, ICON_PLANE, ICON_LIGHT, ICON_CAMERA
 .align 8
 vp_shade_lbl:   .quad s_sh_solid, s_sh_wire, s_sh_mat
 vp_theme_lbl:   .quad s_th_d, s_th_l, s_th_c
