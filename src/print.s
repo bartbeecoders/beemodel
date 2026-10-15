@@ -50,7 +50,7 @@ s_pc_x:         .asciz " x "
 s_pc_none:      .asciz "  print check: select a mesh"
 s_pc_nowall:    .asciz " -"
 
-OPERATOR op_print_check, "mesh.print_check", "Print Check", do_print_check, flags=OPF_AI_SAFE|OPF_QUIET, doc="For 3D printing, per selected mesh: closed or not, the thinnest wall and faces under the minimum, overhang area, size (Z up, mm): mesh.print_check [minimum wall mm, default 1]"
+OPERATOR op_print_check, "mesh.print_check", "Print Check", do_print_check, flags=OPF_AI_SAFE|OPF_QUIET, doc="For 3D printing, per selected mesh: closed or not, the thinnest wall and faces under the minimum, overhang area, size (Z up, mm): mesh.print_check [minimum wall mm, default 1]", form=form_pcheck
 OPERATOR op_show_thin, "view.show_thickness", "Show Thin Walls", do_show_thin, check=an_check, arg=AN_THIN, flags=OPF_AI_SAFE|OPF_QUIET, doc="Colour the active mesh's faces by wall thickness: red under the minimum, yellow under twice it: view.show_thickness [minimum mm, default 1]"
 
 .section .bss

@@ -244,8 +244,9 @@ export_3mf:
     jae     .L3_build
     mov     edi, ebx
     call    obj_at
-    cmp     dword ptr [rax+OB_TYPE], OT_MESH
-    jne     .L3_next
+    call    exp_wants                   # (export options: export.s)
+    test    ecx, ecx
+    jz      .L3_next
     mov     rbp, rax
     mov     rdi, rax
     call    obj_eval

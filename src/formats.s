@@ -1656,8 +1656,9 @@ obj_export:
     jae     8f
     mov     edi, ebx
     call    obj_at
-    cmp     dword ptr [rax+OB_TYPE], OT_MESH
-    jne     7f
+    call    exp_wants                   # (export options: export.s)
+    test    ecx, ecx
+    jz      7f
     mov     r12, rax
     lea     rsi, [rip+s_o]
     call    wb_str
@@ -1679,7 +1680,7 @@ obj_export:
     lea     rsi, [rip+s_nl]
     call    wb_str
 0:  mov     rdi, r12                    # world-space vertices
-    call    world_verts
+    call    exp_verts                   # (scaled / Z up when asked)
     mov     r13, rax
     mov     rdi, r12
     call    obj_eval
@@ -2390,14 +2391,15 @@ stl_export:
     jae     8f
     mov     edi, ebx
     call    obj_at
-    cmp     dword ptr [rax+OB_TYPE], OT_MESH
-    jne     7f
+    call    exp_wants                   # (export options: export.s)
+    test    ecx, ecx
+    jz      7f
     mov     rdi, rax
     push    rax
     call    obj_eval
     mov     r12, rax
     pop     rdi
-    call    world_verts
+    call    exp_verts
     mov     r13, rax
     xor     r14d, r14d
 2:  cmp     r14d, [r12+ME_NTRIS]
@@ -2749,7 +2751,8 @@ set_cur_path:                           # cur_path = path_buf (opened or saved)
     lea     rdi, [rip+cur_path]
     mov     ecx, 512
     rep     movsb
-    ret
+    lea     rdi, [rip+cur_path]         # (File > Open Recent)
+    jmp     recent_add
 
 op_new:
     call    wp_reset

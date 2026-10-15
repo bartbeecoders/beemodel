@@ -24,6 +24,8 @@
 .equ WGF_COMPACT,   8           # 18 px tall (property rows), not WG_H
 .equ WGF_ICON,      16          # button: the icon WD_N instead of a caption, lit while its operator is checked
 .equ WGF_NODRAW,    32          # button: only the hit area (the caller draws it)
+.equ WGF_EXPORT,    64          # path: an export (the browser offers Selected only)
+.equ WGF_EXPAXIS,   128         # path: ... and Up axis / Scale (OBJ, STL)
 
 # descriptor (static, .rodata)
 .equ WD_KIND,       0

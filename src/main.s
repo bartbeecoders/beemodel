@@ -34,6 +34,7 @@ _start:
 
     call    text_init
     call    th_init
+    call    recent_load                 # File > Open Recent
     call    area_init
     lea     rdi, [rip+frame_arena]
     mov     esi, FRAME_ARENA_BYTES

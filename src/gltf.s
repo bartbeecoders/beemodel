@@ -338,8 +338,9 @@ gltf_export:
     jae     5f
     mov     edi, ebx
     call    obj_at
-    cmp     dword ptr [rax+OB_TYPE], OT_MESH
-    jne     41f
+    call    exp_wants                   # (export options: export.s)
+    test    ecx, ecx
+    jz      41f
     mov     ecx, [rip+gx_n]
     cmp     ecx, MAX_EXP
     jae     5f

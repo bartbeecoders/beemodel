@@ -41,13 +41,13 @@ def wstr(s):
 
 
 class Fake:
-    def __init__(self, args=()):
+    def __init__(self, args=(), home=None):
         self.dir = tempfile.mkdtemp()
         self.path = os.path.join(self.dir, 'wl')
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         srv.bind(self.path)
         srv.listen(1)
-        self.home = tempfile.mkdtemp()      # never touch the real ~/BeeModel or cache
+        self.home = home or tempfile.mkdtemp()  # never touch the real ~/BeeModel or cache
         env = dict(os.environ, WAYLAND_DISPLAY=self.path, HOME=self.home,
                    XDG_CACHE_HOME=os.path.join(self.home, 'cache'),
                    XDG_RUNTIME_DIR=self.home)       # MCP socket lands here
@@ -579,6 +579,7 @@ def main():
     tools_ui()
     outliner_ui()
     status_ui()
+    files_more()
     transforms()
     undo_redo()
     files()
@@ -5064,7 +5065,7 @@ def menus_ui():
     items = lambda lvl=None: [w for w in ui_tree(m) if w['kind'] == 'menuitem' and (lvl is None or w['level'] == lvl)]
     f.key(68)                                  # F10: the first menu, keyboard on it
     check(len(items(0)) > 5 and items(0)[0]['label'] == 'New Scene', 'F10 opens the File menu')
-    f.key(108); f.key(108); f.key(108); f.key(108)   # Down x4: Import (a submenu)
+    for _ in range(5): f.key(108)              # Down x5: Import (a submenu, after Open Recent)
     f.key(106)                                 # Right: into it
     sub = [w['label'] for w in items(1)]
     check(sub[:2] == ['Import OBJ...', 'Import STL...'], f'Right opens the Import submenu ({len(sub)})')
@@ -5506,6 +5507,72 @@ def status_ui():
     after = bright(10, 600)
     check(after != left, 'edit mode: other hints')
     f.proc.kill()
+
+
+def files_more():
+    """UI plan U15: export options (selected only, Z up, scale), File > Open
+    Recent (kept across a restart), the Print Check form."""
+    print('  -- files, export, print --')
+    import struct as _st
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    home = f.home
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name):
+        x, y = widget_xy(m, name); f.click(x, y); f.pump(0.2)
+    def type_into(name, text):
+        click(name); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.2)
+    q('add("cube", "Other", 5, 1, 0); select("Cube")')
+    menu_pick(f, m, 'File', 'Export', 'Export STL...')
+    check({'files.selected_only', 'files.up_axis', 'files.scale'} <= names(), 'Export STL offers selected only, up axis and scale')
+    click('files.selected_only')
+    x, y = widget_xy(m, 'files.up_axis'); f.click(x, y)
+    lst = [w for w in ui_tree(m) if w['kind'] == 'list']
+    f.click(x, lst[0]['y'] + 4 + 22 + 11 if lst else y)    # Z up
+    type_into('files.scale', '1000')
+    type_into('files.name', 'part')
+    click('files.ok')
+    path = os.path.join(home, 'BeeModel', 'part.stl')
+    data = open(path, 'rb').read() if os.path.exists(path) else b''
+    ntri = _st.unpack_from('<I', data, 80)[0] if len(data) > 84 else 0
+    zs = [_st.unpack_from('<f', data, 84 + i * 50 + 12 + v * 12 + 8)[0] for i in range(ntri) for v in range(3)]
+    check(ntri == 12 and zs and abs(min(zs)) < 1e-3 and abs(max(zs) - 2000) < 1e-2,
+          f'the STL has only the cube, Z up and in millimetres ({ntri} triangles, z {min(zs) if zs else "?"}..{max(zs) if zs else "?"})')
+    f.mods(5); f.key(31); f.mods(0)            # Save As: no export options
+    check('files.selected_only' not in names(), 'Save As has no export options')
+    type_into('files.name', 'recent1')
+    click('files.ok')
+    t = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == 'File'][0]
+    f.click(t['x'] + 10, t['y'] + 10)
+    w = [w for w in ui_tree(m) if w.get('label') == 'Open Recent'][0]
+    f.move(w['x'] + 40, w['y'] + 12); f.pump(0.2)
+    rec = [w['label'] for w in ui_tree(m) if w['kind'] == 'menuitem' and w['level'] == 1]
+    check(rec == ['recent1.bee'], f'File > Open Recent lists it ({rec})')
+    f.key(1); f.key(1)
+    menu_pick(f, m, 'Object', 'Print Check')
+    check('form.print.wall' in names(), 'Object > Print Check asks for the thinnest wall')
+    f.key(28)
+    f.proc.kill()
+    g = Fake(home=home)                        # after a restart
+    g.pump(1.0, until_frame=True)
+    g.keymap('tests/keymaps/us.xkb')
+    g.enter(600, 300)
+    n = Mcp(g)
+    t = [w for w in ui_tree(n) if w['kind'] == 'menu' and w['label'] == 'File'][0]
+    g.click(t['x'] + 10, t['y'] + 10)
+    w = [w for w in ui_tree(n) if w.get('label') == 'Open Recent'][0]
+    g.move(w['x'] + 40, w['y'] + 12); g.pump(0.2)
+    item = [w for w in ui_tree(n) if w['kind'] == 'menuitem' and w['level'] == 1 and w['label'] == 'recent1.bee']
+    check(bool(item), 'Open Recent survives a restart')
+    if item:
+        g.click(item[0]['x'] + 40, item[0]['y'] + 12); g.pump(0.3)
+    r = (n.tool('script_eval', {'code': 'print(exists("Other"))'})[0] or '').strip()
+    check(r == '1', 'and opens the scene')
+    g.proc.kill()
 
 
 if __name__ == '__main__':
