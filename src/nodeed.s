@@ -26,6 +26,9 @@
 .globl nodeed_key
 .globl ne_drag
 .globl ne_menu
+.globl ne_sel
+.globl ne_mat
+.globl ne_kind
 .globl op_ne_dup
 .globl op_ne_copy
 .globl op_ne_paste
@@ -54,6 +57,9 @@
 
 .equ MT_GEONODES_, 10                     # (mods.s)
 .equ MT_LOGIC_,  12
+.equ KEY_1_,    2                       # (quick keys)
+.equ KEY_3_,    4
+.equ KEY_B_,    48
 .equ T_REROUTE, 36                      # (matnodes.s: drawn as a knot)
 .equ RR_SZ,     16                      # its square (graph units)
 .equ NE_BAR,    20                      # the header line (logical px)
@@ -68,6 +74,9 @@
 .equ COL_NE_BG,     0x23262c
 .equ COL_NE_GRID,   0x2b2f36
 .equ COL_NE_KNIFE,  0xe06c75
+.equ COL_NE_PAL,    0x2a2d34            # the palette
+.equ PAL_W,     190
+.equ PAL_TOP,   34                      # (its search field above the list)
 .equ COL_NE_MMBG,   0x1a1c21            # the minimap
 .equ MM_W,      168
 .equ MM_H,      104
@@ -220,7 +229,26 @@ ne_drag:        .skip 4                 # 0 none, 1 move, 2 wire from an output,
 ne_dn:          .skip 4                 # the node dragged (or from)
 ne_dk:          .skip 4                 # its socket / value
 ne_cur:         .skip 8                 # the record ne_rec found last
+ne_pal:         .skip 4                 # the palette shown, its search, the
+ne_pfilt:       .skip 32                #  rows scrolled away, the entry being
+ne_pscroll:     .skip 4                 #  dragged from it, its column
+ne_pdent:       .skip 4
+ne_addp:        .skip 4
+ne_vclkt:       .skip 8                 # the last click on a value: when,
+ne_vclkn:       .skip 4                 #  which node, which value (a second
+ne_vclkk:       .skip 4                 #  one: the console types it)
+ne_px:          .skip 4
 ne_fitpend:     .skip 4                 # a frame asked before a drawing: mode + 1
+ne_arm:         .skip 4                 # a quick key pressed: the entry the
+ne_armq:        .skip 4
+ne_armt:        .skip 8                 #  next click on the canvas adds, when
+ne_ne:          .skip 4                 # the add menu's entries: type |
+ne_ecat_on:     .skip 4                 #  (preset value + 1) << 8, title,
+.align 8                                #  category, rank in it; by category
+ne_etit:        .skip 8*160             #  (materials, nothing typed: one
+ne_ent:         .skip 4*160             #  column each)
+ne_ecat:        .skip 160
+ne_erank:       .skip 160
 ne_mmx:         .skip 4                 # the minimap on screen (w 0: none),
 ne_mmy:         .skip 4                 #  the graph's corner it shows from,
 ne_mmw:         .skip 4                 #  its scale (screen px per 1000 graph
@@ -289,6 +317,20 @@ OPERATOR op_ne_alil,   "node.align_left", "Align Left", do_ne_align_l, flags=OPF
 OPERATOR op_ne_alit,   "node.align_top", "Align Top", do_ne_align_t, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes' tops lined up (on the highest)"
 OPERATOR op_ne_disx,   "node.distribute_x", "Distribute Horizontally", do_ne_dist_x, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes evenly spaced from left to right"
 OPERATOR op_ne_disy,   "node.distribute_y", "Distribute Vertically", do_ne_dist_y, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes evenly spaced from top to bottom"
+OPERATOR op_ne_qconstant, "node.quick_constant", "Quick Constant", do_ne_arm, 0, 16, KEY_1_, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: 1, then a click on the canvas adds a Constant node there"
+OPERATOR op_ne_qcolor, "node.quick_color", "Quick Color", do_ne_arm, 0, 17, KEY_3_, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: 3, then a click on the canvas adds a Color node there"
+OPERATOR op_ne_qtexture, "node.quick_texture", "Quick Texture Sample", do_ne_arm, 0, 1, KEY_T, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: T, then a click on the canvas adds a Texture Sample node there"
+OPERATOR op_ne_qlerp, "node.quick_lerp", "Quick Lerp", do_ne_arm, 0, 5639, KEY_L, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: L, then a click on the canvas adds a Lerp node there"
+OPERATOR op_ne_qmultiply, "node.quick_multiply", "Quick Multiply", do_ne_arm, 0, 775, KEY_M, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: M, then a click on the canvas adds a Multiply node there"
+OPERATOR op_ne_qadd, "node.quick_add", "Quick Add", do_ne_arm, 0, 263, KEY_A, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: A, then a click on the canvas adds a Add node there"
+OPERATOR op_ne_qdivide, "node.quick_divide", "Quick Divide", do_ne_arm, 0, 1031, KEY_D, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: D, then a click on the canvas adds a Divide node there"
+OPERATOR op_ne_qpower, "node.quick_power", "Quick Power", do_ne_arm, 0, 1287, KEY_E, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: E, then a click on the canvas adds a Power node there"
+OPERATOR op_ne_qone_minus, "node.quick_one_minus", "Quick One Minus", do_ne_arm, 0, 4871, KEY_O, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: O, then a click on the canvas adds a One Minus node there"
+OPERATOR op_ne_qpanner, "node.quick_panner", "Quick Panner", do_ne_arm, 0, 23, KEY_P, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: P, then a click on the canvas adds a Panner node there"
+OPERATOR op_ne_qnormalize, "node.quick_normalize", "Quick Normalize", do_ne_arm, 0, 3347, KEY_N, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: N, then a click on the canvas adds a Normalize node there"
+OPERATOR op_ne_qtexcoord, "node.quick_texcoord", "Quick Texture Coordinate", do_ne_arm, 0, 10, KEY_U, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: U, then a click on the canvas adds a Texture Coordinate node there"
+OPERATOR op_ne_qbump, "node.quick_bump", "Quick Bump", do_ne_arm, 0, 8, KEY_B_, OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, "Node editor: B, then a click on the canvas adds a Bump node there"
+OPERATOR op_ne_zoom,   "node.zoom", "Zoom Nodes", do_ne_zoom, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the zoom in percent, about the middle of the view: node.zoom <25-200>"
 OPERATOR op_ne_fsel,   "node.view_selected", "Frame Selected", do_ne_frame_sel, key=KEY_F, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes in view"
 
 # ne_rec -> rax = the record shown (0: none): the active object's geometry
@@ -1682,6 +1724,260 @@ ne_minimap_go:
     mov     dword ptr [rip+dirty], 1
     ret
 
+# ne_type_value(edi=slot 1..7 of ne_dn) - the console asks for it:
+#   "material.node_set <material> <node> <slot> " (trees: tree.node_set)
+ne_type_value:
+    push    rbx
+    mov     ebx, edi
+    call    fmt_reset
+    lea     rdi, [rip+s_op_set]
+    cmp     dword ptr [rip+ne_kind], 0
+    je      1f
+    lea     rdi, [rip+s_tp_set]
+1:  call    fmt_str
+    mov     edi, ' '
+    call    fmt_char
+    call    ne_rec
+    mov     rdi, rax
+    call    fmt_str
+    mov     edi, ' '
+    call    fmt_char
+    mov     edi, [rip+ne_dn]
+    call    fmt_int
+    mov     edi, ' '
+    call    fmt_char
+    mov     edi, ebx
+    call    fmt_int
+    mov     edi, ' '
+    call    fmt_char
+    lea     rdi, [rip+tfi_console]
+    call    tf_select
+    lea     rsi, [rip+fmt_buf]
+    call    tf_load
+    mov     edi, 1
+    call    tf_set_focus
+    mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# node.zoom <percent> - about the middle of the view
+do_ne_zoom:
+    sub     rsp, 8
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      9f
+    lea     rdx, [rsi+64]
+    call    parse_float
+    test    eax, eax
+    jz      9f
+    cvttss2si esi, xmm0
+    cmp     esi, 25
+    jge     1f
+    mov     esi, 25
+1:  cmp     esi, 200
+    jle     2f
+    mov     esi, 200
+2:  mov     edi, [rip+ne_bw]
+    shr     edi, 1
+    add     edi, [rip+ne_bx]
+    mov     edx, [rip+ne_bh]
+    shr     edx, 1
+    add     edx, [rip+ne_by]
+    call    ne_zoom_at
+9:  add     rsp, 8
+    ret
+
+# pal_on -> eax = 1 when the palette is shown (wide enough)
+pal_on:
+    xor     eax, eax
+    cmp     dword ptr [rip+ne_pal], 0
+    je      9f
+    cmp     dword ptr [rip+ed_w], PAL_W+200
+    jl      9f
+    mov     eax, [rip+ne_bx]
+    cmp     eax, [rip+ne_px]
+    setne   al
+    movzx   eax, al
+9:  ret
+
+# pal_row(edi=k: a row of the list, 0..) -> eax: 0 none, 1 a category's
+#   name edx, 2 an entry edx (the palette's search applied)
+pal_row:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, edi
+    mov     r13d, -1                    # (the category shown last)
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+ne_ne]
+    jae     8f
+    mov     edi, ebx
+    call    pal_vis
+    test    eax, eax
+    jz      4f
+    cmp     dword ptr [rip+ne_kind], 0  # (materials: a heading a category)
+    jne     3f
+    lea     rcx, [rip+ne_ecat]
+    movzx   edx, byte ptr [rcx+rbx]
+    cmp     edx, r13d
+    je      3f
+    mov     r13d, edx
+    test    r12d, r12d
+    jz      2f
+    dec     r12d
+    jmp     3f
+2:  mov     eax, 1
+    jmp     9f
+3:  test    r12d, r12d
+    jz      5f
+    dec     r12d
+4:  inc     ebx
+    jmp     1b
+5:  mov     eax, 2
+    mov     edx, ebx
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pal_hit(r12d, r13d = pointer) -> eax = the entry under it + 1 (0: none)
+pal_hit:
+    mov     eax, r13d
+    sub     eax, [rip+ne_by]
+    sub     eax, PAL_TOP
+    js      8f
+    xor     edx, edx
+    mov     ecx, NROW
+    div     ecx
+    add     eax, [rip+ne_pscroll]
+    push    rax
+    push    rax
+    call    ne_entries
+    mov     edi, [rsp]
+    call    pal_row
+    add     rsp, 16
+    cmp     eax, 2
+    jne     8f
+    lea     eax, [rdx+1]
+    ret
+8:  xor     eax, eax
+    ret
+
+# ne_draw_palette - the column: the search field, every node by category
+#   (the wheel scrolls it), the one being dragged at the pointer
+ne_draw_palette:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    call    pal_on
+    test    eax, eax
+    jz      9f
+    mov     edi, [rip+ne_px]
+    mov     esi, [rip+ne_by]
+    mov     edx, PAL_W
+    mov     ecx, [rip+ne_bh]
+    mov     r8d, COL_NE_PAL
+    call    fill_rect
+    lea     rdi, [rip+wd_ne_pfilt]
+    mov     esi, [rip+ne_px]
+    add     esi, 6
+    mov     edx, [rip+ne_by]
+    add     edx, 6
+    mov     ecx, PAL_W-12
+    lea     r8, [rip+ne_pfilt]
+    xor     r9d, r9d
+    call    wg
+    call    ne_entries
+    mov     r14d, [rip+ne_by]           # the rows that fit
+    add     r14d, PAL_TOP
+    xor     r15d, r15d
+1:  lea     eax, [r14+NROW]
+    mov     ecx, [rip+ne_by]
+    add     ecx, [rip+ne_bh]
+    cmp     eax, ecx
+    jg      5f
+    mov     edi, r15d
+    add     edi, [rip+ne_pscroll]
+    call    pal_row
+    test    eax, eax
+    jz      5f
+    mov     r12d, eax
+    mov     r13d, edx
+    cmp     r12d, 1
+    jne     2f
+    mov     edi, [rip+ne_px]            # a category: its name, coloured
+    add     edi, 10
+    lea     esi, [r14+2]
+    lea     rax, [rip+mn_cat_names]
+    mov     rdx, [rax+r13*8]
+    mov     ecx, COL_ACCENT
+    call    draw_text
+    jmp     4f
+2:  mov     eax, [rip+ptr_x]            # an entry (under the pointer: lit)
+    sub     eax, [rip+ne_px]
+    js      3f
+    cmp     eax, PAL_W
+    jge     3f
+    mov     eax, [rip+ptr_y]
+    sub     eax, r14d
+    js      3f
+    cmp     eax, NROW
+    jge     3f
+    mov     edi, [rip+ne_px]
+    mov     esi, r14d
+    mov     edx, PAL_W
+    mov     ecx, NROW
+    mov     r8d, COL_HOVER
+    call    fill_rect
+3:  mov     edi, [rip+ne_px]
+    add     edi, 20
+    lea     esi, [r14+2]
+    lea     rax, [rip+ne_etit]
+    mov     rdx, [rax+r13*8]
+    mov     ecx, COL_TEXT
+    call    draw_text
+4:  add     r14d, NROW
+    inc     r15d
+    jmp     1b
+5:  cmp     dword ptr [rip+ne_drag], 13 # dragging one: its name at the pointer
+    jne     9f
+    mov     edi, [rip+ptr_x]
+    add     edi, 12
+    mov     esi, [rip+ptr_y]
+    add     esi, 4
+    mov     eax, [rip+ne_pdent]
+    lea     rcx, [rip+ne_etit]
+    mov     rdx, [rcx+rax*8]
+    mov     ecx, COL_ACCENT
+    call    draw_text
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# the palette's search (Enter): the text, the list back at its top
+ne_pfilt_cb:
+    mov     rsi, rdi
+    lea     rdi, [rip+ne_pfilt]
+    mov     dword ptr [rip+ne_pscroll], 0
+    xor     ecx, ecx
+1:  mov     al, [rsi+rcx]
+    mov     [rdi+rcx], al
+    test    al, al
+    jz      2f
+    inc     ecx
+    cmp     ecx, 31
+    jb      1b
+    mov     byte ptr [rdi+rcx], 0
+2:  mov     dword ptr [rip+dirty], 1
+    ret
+
 # ne_draw_box - the selection box being dragged (an outline)
 ne_draw_box:
     push    rbx
@@ -1949,6 +2245,15 @@ ed_nodes_draw:
     mov     eax, [rip+ed_h]
     sub     eax, NE_BAR
     mov     [rip+ne_bh], eax
+    mov     eax, [rip+ed_x]             # (the palette: a column at the left)
+    mov     [rip+ne_px], eax
+    cmp     dword ptr [rip+ne_pal], 0
+    je      0f
+    cmp     dword ptr [rip+ed_w], PAL_W+200
+    jl      0f
+    add     dword ptr [rip+ne_bx], PAL_W
+    sub     dword ptr [rip+ne_bw], PAL_W
+0:
     mov     edi, [rip+ed_x]             # background, a dot grid
     mov     esi, [rip+ed_y]
     mov     edx, [rip+ed_w]
@@ -2124,7 +2429,10 @@ ed_nodes_draw:
     mov     esi, [rip+ptr_y]
     mov     r8d, COL_ACCENT
     call    ne_wire
-69: cmp     dword ptr [rip+ne_drag], 9  # the knife
+69: mov     edi, FONT_UI                # (the palette: the UI's text)
+    call    text_use
+    call    ne_draw_palette
+    cmp     dword ptr [rip+ne_drag], 9  # the knife
     jne     67f
     mov     edi, [rip+ne_x0]
     mov     esi, [rip+ne_y0]
@@ -2633,7 +2941,19 @@ ne_draw_output:
     sub     esi, [rip+ne_r2]
     add     esi, [rip+ne_ty]
     mov     ecx, COL_TEXT
-    call    draw_text
+    movss   xmm0, [rbx+MA_BLEND]        # (unused by the blend mode: dimmed -
+    cvtss2si eax, xmm0                  #  opacity when not translucent, the
+    cmp     r12d, PIN_ALPHA             #  mask when not masked)
+    jne     24f
+    cmp     eax, 2
+    je      25f
+    mov     ecx, COL_TEXT_DIM
+24: cmp     r12d, PIN_MASK
+    jne     25f
+    cmp     eax, 1
+    je      25f
+    mov     ecx, COL_TEXT_DIM
+25: call    draw_text
 23:
     inc     r12d
     jmp     1b
@@ -2682,20 +3002,34 @@ ne_draw_menu:
     lea     rdx, [rip+ne_filt]
 0:  mov     ecx, COL_TEXT_DIM
     call    draw_text
-    call    ne_menu_item                # (the one under the pointer)
+    cmp     dword ptr [rip+ne_ecat_on], 0   # the categories' names
+    je      81f
+    xor     ebx, ebx
+82: cmp     ebx, 6
+    jae     81f
+    imul    edi, ebx, MENU_W
+    add     edi, [rip+ne_mx]
+    add     edi, 8
+    mov     esi, [rip+ne_my]
+    add     esi, NROW+4
+    lea     rax, [rip+mn_cat_names]
+    mov     rdx, [rax+rbx*8]
+    mov     ecx, COL_ACCENT
+    call    draw_text
+    inc     ebx
+    jmp     82b
+81: call    ne_menu_item                # (the one under the pointer)
     mov     r13d, eax
     call    ne_vcount
     mov     r14d, eax
     mov     ebx, 1
 1:  cmp     ebx, r14d
     ja      9f
-    lea     eax, [rbx-1]                # column, row
-    xor     edx, edx
-    mov     ecx, MROWS
-    div     ecx
+    mov     edi, ebx                    # its slot
+    call    ne_mslot
     imul    r15d, eax, MENU_W
     add     r15d, [rip+ne_mx]
-    lea     r12d, [rdx+1]
+    mov     r12d, edx
     imul    r12d, r12d, NROW
     add     r12d, [rip+ne_my]
     add     r12d, 2
@@ -2710,9 +3044,9 @@ ne_draw_menu:
     mov     ecx, NROW
     mov     r8d, COL_HOVER
     call    fill_rect
-2:  mov     edi, [rip+ne_dt]
-    call    ne_title
-    mov     rdx, rax
+2:  mov     eax, [rip+ne_dt]
+    lea     rcx, [rip+ne_etit]
+    mov     rdx, [rcx+rax*8-8]
     lea     edi, [r15+12]
     lea     esi, [r12+2]
     mov     ecx, COL_TEXT
@@ -2726,10 +3060,28 @@ ne_draw_menu:
     pop     rbx
     ret
 
-# ne_menu_size -> eax = the add menu's rows, edx = its columns
+# ne_menu_size -> eax = the add menu's rows (below its title), edx = its
+#   columns
 ne_menu_size:
     sub     rsp, 8
-    call    ne_vcount
+    call    ne_catmode
+    test    eax, eax
+    jz      2f
+    xor     eax, eax                    # by category: the longest + heading
+    xor     ecx, ecx
+1:  cmp     ecx, [rip+ne_ne]
+    jae     11f
+    lea     rdx, [rip+ne_erank]
+    movzx   edx, byte ptr [rdx+rcx]
+    cmp     edx, eax
+    cmovg   eax, edx
+    inc     ecx
+    jmp     1b
+11: add     eax, 2
+    mov     edx, 6
+    add     rsp, 8
+    ret
+2:  call    ne_vcount
     add     rsp, 8
     lea     ecx, [rax+MROWS-1]
     push    rax
@@ -2740,13 +3092,36 @@ ne_menu_size:
     mov     edx, eax
     pop     rax
     cmp     eax, MROWS
-    jbe     1f
+    jbe     3f
     mov     eax, MROWS
-1:  ret
+3:  ret
 
-# ne_menu_item -> eax = the type under the pointer in the menu (0: none)
+# ne_mslot(edi=k, the k-th entry shown) -> eax = its column, edx = its row
+#   (1: the first below the title)
+ne_mslot:
+    cmp     dword ptr [rip+ne_ecat_on], 0
+    je      1f
+    lea     eax, [rdi-1]                # (every entry shown: k - 1 is it)
+    lea     rcx, [rip+ne_ecat]
+    movzx   ecx, byte ptr [rcx+rax]
+    lea     rdx, [rip+ne_erank]
+    movzx   edx, byte ptr [rdx+rax]
+    add     edx, 2                      # (a heading above)
+    mov     eax, ecx
+    ret
+1:  lea     eax, [rdi-1]
+    xor     edx, edx
+    mov     ecx, MROWS
+    div     ecx
+    inc     edx
+    ret
+
+# ne_menu_item -> eax = the entry under the pointer + 1 (0: none)
 ne_menu_item:
     push    rbx
+    push    r12
+    sub     rsp, 8
+    call    ne_catmode
     mov     eax, [rip+ptr_x]
     sub     eax, [rip+ne_mx]
     js      8f
@@ -2761,20 +3136,31 @@ ne_menu_item:
     xor     edx, edx
     mov     ecx, NROW
     div     ecx
+    mov     r12d, eax                   # row
     test    eax, eax
     jz      8f
-    cmp     eax, MROWS
-    ja      8f
-    imul    ebx, ebx, MROWS
-    add     ebx, eax
-    call    ne_vcount                   # (past the last: none)
-    cmp     ebx, eax
-    ja      8f
-    mov     edi, ebx
+    call    ne_vcount                   # the one in that slot
+    mov     ecx, eax
+1:  test    ecx, ecx
+    jz      8f
+    push    rcx
+    push    rcx
+    mov     edi, ecx
+    call    ne_mslot
+    pop     rcx
+    pop     rcx
+    cmp     eax, ebx
+    jne     2f
+    cmp     edx, r12d
+    je      3f
+2:  dec     ecx
+    jmp     1b
+3:  mov     edi, ecx
     call    ne_nth
-    pop     rbx
-    ret
+    jmp     9f
 8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
     pop     rbx
     ret
 
@@ -3053,7 +3439,23 @@ nodeed_press:
     mov     [rip+ne_selm], rcx
     mov     [rip+ne_sel], edx
     jmp     .Lnp_no
-10: cmp     ebx, BTN_LEFT               # the minimap: the view goes there
+10: call    pal_on                      # the palette: an entry to drag
+    test    eax, eax
+    jz      101f
+    cmp     r12d, [rip+ne_bx]
+    jge     101f
+    cmp     ebx, BTN_LEFT
+    jne     .Lnp_taken
+    call    pal_hit
+    test    eax, eax
+    jz      .Lnp_taken
+    dec     eax
+    mov     [rip+ne_pdent], eax
+    mov     dword ptr [rip+ne_drag], 13
+    mov     [rip+ne_x0], r12d
+    mov     [rip+ne_y0], r13d
+    jmp     .Lnp_taken
+101:cmp     ebx, BTN_LEFT               # the minimap: the view goes there
     jne     11f
     call    ne_in_minimap
     test    eax, eax
@@ -3190,7 +3592,25 @@ nodeed_press:
     mov     eax, [r8+rcx*4]
     mov     [rip+ne_b0], eax
     jmp     .Lnp_taken
-.Lnp_box:                               # empty space: Alt - a knife through
+.Lnp_box:                               # empty space: a quick key armed - its
+    mov     eax, [rip+ne_arm]           #  node here
+    test    eax, eax
+    jz      72f
+    mov     dword ptr [rip+ne_arm], 0
+    call    now_ms
+    sub     rax, [rip+ne_armt]
+    cmp     rax, 3000
+    ja      72f
+    mov     [rip+ne_ax], r12d
+    mov     [rip+ne_ay], r13d
+    call    ne_entries
+    lea     rcx, [rip+ne_ent]
+    mov     eax, [rip+ne_armq]
+    mov     [rcx+159*4], eax
+    mov     edi, 160
+    call    ne_add_node
+    jmp     .Lnp_taken
+72:                                     # Alt - a knife through
     test    dword ptr [rip+key_mods], MOD_ALT   #  wires (a click: the wire
     jz      73f                         #  under it)
     mov     dword ptr [rip+ne_drag], 9
@@ -3757,6 +4177,12 @@ nodeed_release:
     je      .Lnr_box
     cmp     eax, 9
     je      .Lnr_knife
+    cmp     eax, 13
+    je      .Lnr_pal
+    cmp     eax, 5                      # a value clicked twice, unchanged:
+    je      .Lnr_val                    #  typed in the console
+    cmp     eax, 6
+    je      .Lnr_val
     cmp     eax, 10                     # a frame's title clicked again: rename
     jne     9f
     cmp     dword ptr [rip+ne_undone], 0
@@ -3764,6 +4190,51 @@ nodeed_release:
     cmp     dword ptr [rip+ne_fwas], 0
     je      9f
     call    ne_frame_rename
+    jmp     9f
+.Lnr_val:
+    cmp     dword ptr [rip+ne_undone], 0
+    jne     9f
+    mov     ebx, eax                    # (5 a value, 6 an input)
+    call    now_ms
+    mov     rcx, rax
+    sub     rcx, [rip+ne_vclkt]
+    mov     [rip+ne_vclkt], rax
+    mov     edx, [rip+ne_dn]
+    mov     r8d, [rip+ne_dk]
+    cmp     ebx, 5                      # (values: slots 4..7, inputs 1..3)
+    jne     1f
+    add     r8d, 3
+1:  inc     r8d
+    cmp     rcx, 400
+    ja      2f
+    cmp     edx, [rip+ne_vclkn]
+    jne     2f
+    cmp     r8d, [rip+ne_vclkk]
+    jne     2f
+    mov     qword ptr [rip+ne_vclkt], 0
+    mov     edi, r8d
+    call    ne_type_value
+    jmp     9f
+2:  mov     [rip+ne_vclkn], edx
+    mov     [rip+ne_vclkk], r8d
+    jmp     9f
+.Lnr_pal:                               # a palette entry dropped: its node at
+    mov     [rip+ne_ax], r12d           #  the drop (in the palette: in the
+    mov     [rip+ne_ay], r13d           #  middle of the view)
+    cmp     r12d, [rip+ne_bx]
+    jge     1f
+    mov     eax, [rip+ne_bw]
+    shr     eax, 1
+    add     eax, [rip+ne_bx]
+    mov     [rip+ne_ax], eax
+    mov     eax, [rip+ne_bh]
+    shr     eax, 1
+    add     eax, [rip+ne_by]
+    mov     [rip+ne_ay], eax
+1:  call    ne_entries
+    mov     edi, [rip+ne_pdent]
+    inc     edi
+    call    ne_add_node
     jmp     9f
 .Lnr_knife:                             # wires cut: crossed, or (a click) the
     mov     eax, r12d                   #  one under the pointer
@@ -3951,7 +4422,10 @@ ne_add_node:
     push    rbx
     push    r12
     sub     rsp, 8
-    mov     ebx, edi
+    lea     rax, [rip+ne_ent]           # (edi: an entry + 1) its type, preset
+    mov     eax, [rax+rdi*4-4]
+    mov     [rsp], eax
+    movzx   ebx, al
     call    ne_rec
     test    rax, rax
     jz      9f
@@ -3984,7 +4458,16 @@ ne_add_node:
     call    image_rec
     lea     rdi, [rax+IR_NAME]
     call    fmt_str
-2:  call    ne_arg_done
+2:  mov     edi, [rsp]                  # a shortcut: its first value
+    shr     edi, 8
+    jz      3f
+    dec     edi
+    push    rdi
+    mov     edi, ' '
+    call    fmt_char
+    pop     rdi
+    call    fmt_int
+3:  call    ne_arg_done
     lea     rdi, [rip+s_op_node]
     lea     rsi, [rip+s_tp_node]
     cmp     dword ptr [rip+ne_kind], 2
@@ -4146,6 +4629,22 @@ do_ne_tab:
 # nodeed_wheel(edi = steps) - scroll
 nodeed_wheel:
     mov     dword ptr [rip+dirty], 1
+    push    rdi
+    call    pal_on
+    pop     rdi
+    test    eax, eax
+    jz      0f
+    mov     eax, [rip+ptr_x]
+    cmp     eax, [rip+ne_bx]
+    jge     0f
+    imul    edi, edi, 3                 # (the palette: 3 rows a notch)
+    mov     eax, [rip+ne_pscroll]
+    sub     eax, edi
+    jns     81f
+    xor     eax, eax
+81: mov     [rip+ne_pscroll], eax
+    ret
+0:
     test    dword ptr [rip+key_mods], MOD_CTRL
     jz      1f
     imul    edi, edi, 40                # Ctrl: scroll
@@ -4270,9 +4769,75 @@ nodeed_key:
 .globl ne_header_tools
 WIDGET wd_ne_tree, WK_ENUM, "node.tree", flags=WGF_DYN, cb=ne_tree_cb, aux=ne_tree_names, tip="Edit the material's nodes, or a node tree: picking one gives the active object a Geometry Nodes (or Logic) modifier running it"
 WIDGET wd_ne_new,  WK_BUTTON, "node.new_tree", "New Tree", tip="A new geometry node tree, run by the active object"
+WIDGET wd_ne_pal,  WK_TOGGLE, "node.palette", "Palette", tip="The palette: every node by category and a search field (click one to add it, or drag it onto the canvas)"
+WIDGET wd_ne_pfilt, WK_TEXT, "node.palette_filter", "Search", cb=ne_pfilt_cb, tip="Show the nodes whose names have this in them (Enter)"
 WIDGET wd_ne_add,  WK_BUTTON, "node.add", "Add", tip="Add a node (Shift+A in the editor, then type to search the list)"
 .section .rodata
 s_ne_mat:       .asciz "Material"
+# shortcuts in the add menu: a type with its first value set (math and
+#   vector math operations), their category, their title
+.align 8
+ne_alias:       .byte 7, 0, 2, 0, 0, 0, 0, 0
+                .quad ma_add
+                .byte 7, 1, 2, 0, 0, 0, 0, 0
+                .quad ma_sub
+                .byte 7, 2, 2, 0, 0, 0, 0, 0
+                .quad ma_mul
+                .byte 7, 3, 2, 0, 0, 0, 0, 0
+                .quad ma_div
+                .byte 7, 4, 2, 0, 0, 0, 0, 0
+                .quad ma_pow
+                .byte 7, 21, 2, 0, 0, 0, 0, 0
+                .quad ma_lerp
+                .byte 7, 20, 2, 0, 0, 0, 0, 0
+                .quad ma_clamp
+                .byte 7, 19, 2, 0, 0, 0, 0, 0
+                .quad ma_sat
+                .byte 7, 18, 2, 0, 0, 0, 0, 0
+                .quad ma_omin
+                .byte 7, 5, 2, 0, 0, 0, 0, 0
+                .quad ma_min
+                .byte 7, 6, 2, 0, 0, 0, 0, 0
+                .quad ma_max
+                .byte 7, 9, 2, 0, 0, 0, 0, 0
+                .quad ma_abs
+                .byte 7, 8, 2, 0, 0, 0, 0, 0
+                .quad ma_sin
+                .byte 7, 15, 2, 0, 0, 0, 0, 0
+                .quad ma_frac
+                .byte 7, 22, 2, 0, 0, 0, 0, 0
+                .quad ma_step
+                .byte 7, 23, 2, 0, 0, 0, 0, 0
+                .quad ma_sstep
+                .byte 19, 10, 3, 0, 0, 0, 0, 0
+                .quad ma_dot
+                .byte 19, 11, 3, 0, 0, 0, 0, 0
+                .quad ma_cross
+                .byte 19, 12, 3, 0, 0, 0, 0, 0
+                .quad ma_norm
+                .byte 19, 13, 3, 0, 0, 0, 0, 0
+                .quad ma_len
+.equ NE_NALIAS, (. - ne_alias) / 16
+ma_add:         .asciz "Add"
+ma_sub:         .asciz "Subtract"
+ma_mul:         .asciz "Multiply"
+ma_div:         .asciz "Divide"
+ma_pow:         .asciz "Power"
+ma_lerp:        .asciz "Lerp"
+ma_clamp:       .asciz "Clamp"
+ma_sat:         .asciz "Saturate"
+ma_omin:        .asciz "One Minus"
+ma_min:         .asciz "Min"
+ma_max:         .asciz "Max"
+ma_abs:         .asciz "Abs"
+ma_sin:         .asciz "Sine"
+ma_frac:        .asciz "Fraction"
+ma_step:        .asciz "Step"
+ma_sstep:       .asciz "Smoothstep"
+ma_dot:         .asciz "Dot Product"
+ma_cross:       .asciz "Cross Product"
+ma_norm:        .asciz "Normalize"
+ma_len:         .asciz "Length"
 s_ne_nt_undo:   .asciz "Node Tree"
 .text
 # ne_header_tools(edi=x, esi=header y, edx=right limit)
@@ -4325,6 +4890,18 @@ ne_header_tools:
     xor     r8d, r8d
     xor     r9d, r9d
     call    wg
+    mov     [rip+ne_addp], eax          # (pressed?)
+    lea     eax, [rbx+56+90]            # the palette's toggle
+    cmp     eax, r13d
+    jg      1f
+    lea     rdi, [rip+wd_ne_pal]
+    lea     esi, [rbx+56]
+    mov     edx, r12d
+    mov     ecx, 90
+    lea     r8, [rip+ne_pal]
+    xor     r9d, r9d
+    call    wg
+1:  mov     eax, [rip+ne_addp]
     test    eax, eax
     jz      9f
     push    qword ptr [rip+ptr_x]       # the add menu, under the button
@@ -4412,10 +4989,21 @@ ne_vis:
     mov     eax, 1
     cmp     dword ptr [rip+ne_fn], 0
     je      9f
-    sub     rsp, 8
-    call    ne_title
-    add     rsp, 8
-1:  lea     rsi, [rip+ne_filt]          # at each start in the name
+    lea     rsi, [rip+ne_filt]
+    jmp     vis_match
+# pal_vis(edi=entry) -> eax = 1 if the palette shows it (its search)
+pal_vis:
+    mov     eax, 1
+    cmp     byte ptr [rip+ne_pfilt], 0
+    je      9f
+    lea     rsi, [rip+ne_pfilt]
+# vis_match(edi=entry, rsi=text) -> eax = 1 if the text starts somewhere
+#   in its title (any case)
+vis_match:
+    lea     rax, [rip+ne_etit]          # (edi: the entry)
+    mov     rax, [rax+rdi*8]
+1:  push    rsi                         # at each start in the name
+    xor     ecx, ecx
     xor     ecx, ecx
 2:  movzx   edx, byte ptr [rsi+rcx]
     test    edx, edx
@@ -4429,54 +5017,55 @@ ne_vis:
     jne     3f
     inc     ecx
     jmp     2b
-3:  inc     rax
+3:  pop     rsi
+    inc     rax
     cmp     byte ptr [rax], 0
     jne     1b
-7:  xor     eax, eax
+    xor     eax, eax
     ret
-8:  mov     eax, 1
+7:  pop     rsi
+    xor     eax, eax
+    ret
+8:  pop     rsi
+    mov     eax, 1
 9:  ret
 
-# ne_vcount -> eax = the types shown in the menu
+# ne_vcount -> eax = the entries shown in the menu
 ne_vcount:
     push    rbx
     push    r12
     sub     rsp, 8
-    call    ne_ntypes
-    mov     r12d, eax
     xor     ebx, ebx
-    xor     eax, eax
-    mov     [rsp], eax
-1:  inc     ebx
-    cmp     ebx, r12d
-    ja      9f
+    xor     r12d, r12d
+1:  cmp     ebx, [rip+ne_ne]
+    jae     9f
     mov     edi, ebx
     call    ne_vis
-    add     [rsp], eax
+    add     r12d, eax
+    inc     ebx
     jmp     1b
-9:  mov     eax, [rsp]
+9:  mov     eax, r12d
     add     rsp, 8
     pop     r12
     pop     rbx
     ret
 
-# ne_nth(edi=k, 1..) -> eax = the k-th type shown (0: none)
+# ne_nth(edi=k, 1..) -> eax = the k-th entry shown + 1 (0: none)
 ne_nth:
     push    rbx
     push    r12
     push    r13
     mov     r13d, edi
-    call    ne_ntypes
-    mov     r12d, eax
     xor     ebx, ebx
-1:  inc     ebx
-    cmp     ebx, r12d
-    ja      8f
+1:  cmp     ebx, [rip+ne_ne]
+    jae     8f
     mov     edi, ebx
     call    ne_vis
     sub     r13d, eax
-    jnz     1b
-    mov     eax, ebx
+    jz      2f
+    inc     ebx
+    jmp     1b
+2:  lea     eax, [rbx+1]
     jmp     9f
 8:  xor     eax, eax
 9:  pop     r13
@@ -4484,11 +5073,120 @@ ne_nth:
     pop     rbx
     ret
 
+# ne_entries - the add menu's entries for what is shown: a material's types
+#   and shortcuts, by category; a tree's types in order
+ne_entries:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    xor     r12d, r12d                  # entries so far
+    call    ne_ntypes
+    mov     r13d, eax
+    cmp     dword ptr [rip+ne_kind], 0
+    je      .Lent_mat
+    mov     ebx, 1                      # a tree: its types
+1:  cmp     ebx, r13d
+    ja      .Lent_done
+    mov     edi, ebx
+    call    ne_title
+    lea     rcx, [rip+ne_etit]
+    mov     [rcx+r12*8], rax
+    lea     rcx, [rip+ne_ent]
+    mov     [rcx+r12*4], ebx
+    lea     rcx, [rip+ne_ecat]
+    mov     byte ptr [rcx+r12], 0
+    inc     r12d
+    inc     ebx
+    jmp     1b
+.Lent_mat:
+    xor     r14d, r14d                  # by category
+2:  cmp     r14d, 6
+    jae     .Lent_done
+    xor     r8d, r8d                    # (its rank)
+    mov     ebx, 1
+3:  cmp     ebx, r13d
+    ja      4f
+    lea     rcx, [rip+mn_cat]
+    movzx   eax, byte ptr [rcx+rbx]
+    cmp     eax, r14d
+    jne     31f
+    push    r8
+    push    r8
+    mov     edi, ebx
+    call    ne_title
+    pop     r8
+    pop     r8
+    lea     rcx, [rip+ne_etit]
+    mov     [rcx+r12*8], rax
+    lea     rcx, [rip+ne_ent]
+    mov     [rcx+r12*4], ebx
+    lea     rcx, [rip+ne_ecat]
+    mov     [rcx+r12], r14b
+    lea     rcx, [rip+ne_erank]
+    mov     [rcx+r12], r8b
+    inc     r8d
+    inc     r12d
+31: inc     ebx
+    jmp     3b
+4:  xor     ebx, ebx                    # then its shortcuts
+5:  cmp     ebx, NE_NALIAS
+    jae     6f
+    mov     eax, ebx
+    shl     eax, 4
+    lea     rcx, [rip+ne_alias]
+    add     rcx, rax
+    movzx   eax, byte ptr [rcx+2]
+    cmp     eax, r14d
+    jne     51f
+    movzx   eax, byte ptr [rcx+1]       # type | (value + 1) << 8
+    inc     eax
+    shl     eax, 8
+    movzx   edx, byte ptr [rcx]
+    or      eax, edx
+    lea     rdx, [rip+ne_ent]
+    mov     [rdx+r12*4], eax
+    mov     rax, [rcx+8]
+    lea     rdx, [rip+ne_etit]
+    mov     [rdx+r12*8], rax
+    lea     rdx, [rip+ne_ecat]
+    mov     [rdx+r12], r14b
+    lea     rdx, [rip+ne_erank]
+    mov     [rdx+r12], r8b
+    inc     r8d
+    inc     r12d
+51: inc     ebx
+    jmp     5b
+6:  inc     r14d
+    jmp     2b
+.Lent_done:
+    mov     [rip+ne_ne], r12d
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ne_catmode -> eax = 1: the menu shows a column a category (a material,
+#   nothing typed)
+ne_catmode:
+    xor     eax, eax
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     9f
+    cmp     dword ptr [rip+ne_fn], 0
+    jne     9f
+    inc     eax
+9:  mov     [rip+ne_ecat_on], eax
+    ret
+
 do_ne_add_menu:
     sub     rsp, 8
     call    ne_rec
     test    rax, rax
     jz      9f
+    call    ne_entries
     mov     dword ptr [rip+ne_fn], 0    # (no search yet)
     mov     byte ptr [rip+ne_filt], 0
     mov     dword ptr [rip+ne_menu], 1
@@ -5424,6 +6122,26 @@ ne_align:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# node.quick_* (1 3 T L M A D E O P N U B, as in Unreal) - the next click on
+#   the canvas (within 3 s) adds that node there (edi: type | value + 1 << 8)
+do_ne_arm:
+    push    rbx
+    mov     ebx, edi
+    movzx   eax, bl                     # (as an entry: the value + 1)
+    shr     ebx, 8
+    test    ebx, ebx
+    jz      1f
+    shl     ebx, 8
+    or      eax, ebx
+1:  cmp     dword ptr [rip+ne_kind], 0  # (materials only)
+    jne     9f
+    mov     [rip+ne_armq], eax
+    mov     dword ptr [rip+ne_arm], 1
+    call    now_ms
+    mov     [rip+ne_armt], rax
+9:  pop     rbx
     ret
 
 # node.copy (Ctrl+C)

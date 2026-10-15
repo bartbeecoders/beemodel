@@ -35,6 +35,13 @@ project uses [Semantic Versioning](https://semver.org/).
   an Alt+drag knife), dropping a wire in empty space to add the node it
   feeds, wire colours by what they carry, align and distribute, a
   minimap and a right-click node menu. One undo step each.
+- **Material editor (M5, #232):** the add menu in a column per category
+  with shortcuts that preset an operation (Add, Multiply, Lerp, Dot
+  Product ...), a palette beside the canvas (search, click or drag to
+  add), Unreal's quick keys (1, 3, T, U, A, M, D, E, L, O, N, P, B, then a
+  click), the selected node's values as fields in the Material tab, a
+  value clicked twice typed in the console, `node.zoom`, and Material
+  Output pins the blend mode doesn't use dimmed.
 
 ## [0.12.0] - 2026-10-15
 
