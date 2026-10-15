@@ -6704,12 +6704,19 @@ b_node:
 1:  cmp     r13d, 1                     # image (or a texture parameter): the name
     je      11f
     cmp     r13d, 39
+    je      11f
+    cmp     r13d, 42                    # a Material Function: its function
     jne     2f
+    cmp     r15d, 3
+    jb      2f
+    lea     rdi, [rbx+32]
+    call    a_mat
+    jmp     12f
 11: cmp     r15d, 3
     jb      2f
     lea     rdi, [rbx+32]
     call    a_image
-    inc     eax
+12: inc     eax
     cvtsi2ss xmm0, eax
     movss   [rsp], xmm0
     mov     edi, r12d
