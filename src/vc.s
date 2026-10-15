@@ -31,6 +31,11 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl vc_brn
+.globl vc_nbr
+.globl vc_head
+.globl vc_view
+.globl vc_log_rows
 .globl vc_draw
 .globl vc_press
 .globl vc_stat
@@ -161,6 +166,11 @@ vc_cm:          .skip 64                # a commit read: scene, manifest,
 vc_vd:          .skip VD_MAX*VD_SZ
 vc_nvd:         .skip 4
 vc_view:        .skip 4                 # 0 off, 1 overlay, 2 side
+.align 8
+vc_lhead:       .skip 8                 # the log rows' head (vc_log_rows)
+vc_nlrow:       .skip 4
+.globl vc_lrow
+vc_lrow:        .skip 64*32
 vc_label:       .skip 40                # what the scene is compared with
 vc_cf:          .skip CF_MAX*CF_SZ
 vc_ncf:         .skip 4
@@ -178,10 +188,10 @@ vc_dx:          .skip 4                 # side by side: the offset
 .text
 OPERATOR op_vc_commit, "vc.commit", "Commit Version", do_vc_commit, flags=OPF_AI_SAFE, doc="Keep the scene as a version in its history (beside the saved file): vc.commit [message]; after a merge: the merge commit"
 OPERATOR op_vc_log, "vc.log", "Version Log", do_vc_log, flags=OPF_AI_SAFE|OPF_QUIET, doc="List the branch's commits, newest first"
-OPERATOR op_vc_branch, "vc.branch", "New Branch", do_vc_branch, flags=OPF_AI_SAFE, doc="Start a branch at the current commit: vc.branch <name>"
+OPERATOR op_vc_branch, "vc.branch", "New Branch", do_vc_branch, flags=OPF_AI_SAFE, doc="Start a branch at the current commit: vc.branch <name>", form=form_vcbranch
 OPERATOR op_vc_switch, "vc.switch", "Switch Branch", do_vc_switch, flags=OPF_AI_SAFE, doc="Check out a branch (its last commit): vc.switch <name> [force: drop the scene's changes]"
 OPERATOR op_vc_diff, "vc.diff", "Compare Versions", do_vc_diff, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show what changed against a branch or commit: vc.diff [branch | commit] [overlay | side] (default: the last commit, overlay); vc.diff off"
-OPERATOR op_vc_merge, "vc.merge", "Merge Branch", do_vc_merge, flags=OPF_AI_SAFE, doc="Merge a branch into the scene, three-way per object and property: vc.merge <branch>; conflicts go to the merge panel (vc.resolve), then vc.commit (vc.abort: back to before)"
+OPERATOR op_vc_merge, "vc.merge", "Merge Branch", do_vc_merge, flags=OPF_AI_SAFE, doc="Merge a branch into the scene, three-way per object and property: vc.merge <branch>; conflicts go to the merge panel (vc.resolve), then vc.commit (vc.abort: back to before)", form=form_vcmerge
 OPERATOR op_vc_resolve, "vc.resolve", "Resolve Conflict", do_vc_resolve, flags=OPF_AI_SAFE, doc="Settle merge conflicts (either side, as often as you like until the commit): vc.resolve <number from 1 | all> <ours | theirs>"
 OPERATOR op_vc_abort, "vc.abort", "Abort Merge", do_vc_abort, flags=OPF_AI_SAFE, doc="Give up a merge: the scene as its branch's last commit"
 
@@ -1499,6 +1509,64 @@ do_vc_log:
     inc     r12d
     jmp     1b
 9:  add     rsp, 40
+    pop     r12
+    pop     rbx
+    ret
+
+# vc_log_rows -> eax = commits listed in vc_lrow (64 bytes each: "id message"),
+#   newest first, at most 32; read again only when the branch's head moves
+vc_log_rows:
+    push    rbx
+    push    r12
+    push    r13
+    call    vc_open
+    test    eax, eax
+    jz      8f
+    call    head_id
+    cmp     rax, [rip+vc_lhead]
+    je      7f
+    mov     [rip+vc_lhead], rax
+    mov     rbx, rax
+    xor     r12d, r12d
+1:  test    rbx, rbx
+    jz      6f
+    cmp     r12d, 32
+    jae     6f
+    mov     rax, rbx
+    call    commit_read
+    test    eax, eax
+    jz      6f
+    mov     eax, r12d
+    shl     eax, 6
+    lea     r13, [rip+vc_lrow]
+    add     r13, rax
+    mov     rax, rbx                    # "1a2b3c4d  message"
+    mov     rdi, r13
+    call    hexq
+    mov     word ptr [r13+8], 0x2020
+    lea     rsi, [rip+vc_txt]
+    lea     rdi, [r13+10]
+    mov     ecx, 53
+2:  mov     al, [rsi]
+    test    al, al
+    jz      3f
+    cmp     al, 10                      # (the first line)
+    je      3f
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    dec     ecx
+    jnz     2b
+3:  mov     byte ptr [rdi], 0
+    mov     rbx, [rip+vc_cm+16]
+    inc     r12d
+    jmp     1b
+6:  mov     [rip+vc_nlrow], r12d
+7:  mov     eax, [rip+vc_nlrow]
+    jmp     9f
+8:  xor     eax, eax
+    mov     qword ptr [rip+vc_lhead], -1
+9:  pop     r13
     pop     r12
     pop     rbx
     ret

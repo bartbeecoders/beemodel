@@ -829,9 +829,14 @@ ctx_open_for:
     mov     ecx, ctx_edit_n
     jmp     5f
 1:  cmp     edi, HIT_OUTLINER
-    jne     2f
+    jne     11f
     lea     rbx, [rip+ctx_outliner]
     mov     ecx, ctx_outliner_n
+    jmp     5f
+11: cmp     edi, HIT_ASSETS             # an asset tile (teamui.s)
+    jne     2f
+    lea     rbx, [rip+ctx_assets]
+    mov     ecx, [rip+ctx_assets_n]
     jmp     5f
 2:  cmp     edi, HIT_AREA_HDR
     je      3f

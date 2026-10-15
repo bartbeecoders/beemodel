@@ -9,6 +9,7 @@
 .include "const.inc"
 
 # exports
+.globl redraw_again
 .globl write_err
 .globl in_pressure
 .globl in_eraser
@@ -58,6 +59,7 @@ next_id:        .long 2                 # 1 is always wl_display
 in_pressure:    .float 1.0              # the pen's pressure 0..1 (mouse: 1)
 
 .section .bss
+redraw_again:   .skip 4                 # drawing wants another frame (set while drawing)
 .align 64
 .equ FR_RING, 256
 fr_ns:          .skip FR_RING*8         # the last frames' drawing times
@@ -1624,6 +1626,8 @@ render:
     mov     dword ptr [rip+frame_pending], 1
     mov     dword ptr [rip+dirty], 0
     mov     eax, [rip+an_play]          # playing: the next frame too
+    or      eax, [rip+redraw_again]     # (or drawing asked for one)
+    mov     dword ptr [rip+redraw_again], 0
     or      [rip+dirty], eax
 8:  pop     rbx
 9:  ret

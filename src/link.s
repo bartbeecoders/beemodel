@@ -44,6 +44,8 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl lk_serving
+.globl lk_mstate
 .globl link_tick
 .globl link_pollfds
 .globl link_connect_arg
@@ -167,7 +169,7 @@ lk_inited:      .skip 4
 .text
 OPERATOR op_link_serve, "link.serve", "Serve Live Link", do_link_serve, flags=OPF_AI_SAFE, doc="Stream the scene to peers (other BeeModels, game engines): link.serve [port] (localhost, default 7461) | lan [port] (every interface) | unix:<path>"
 OPERATOR op_link_stop, "link.stop", "Stop Live Link", do_link_stop, flags=OPF_AI_SAFE, doc="Stop serving the live link (peers are let go)"
-OPERATOR op_link_connect, "link.connect", "Mirror a Session", do_link_connect, flags=OPF_AI_SAFE, doc="Mirror another BeeModel's scene over its live link: link.connect host:port | unix:<path> (IPv4 numbers or localhost)"
+OPERATOR op_link_connect, "link.connect", "Mirror a Session", do_link_connect, flags=OPF_AI_SAFE, doc="Mirror another BeeModel's scene over its live link: link.connect host:port | unix:<path> (IPv4 numbers or localhost)", form=form_lkconn
 OPERATOR op_link_disconnect, "link.disconnect", "Stop Mirroring", do_link_disconnect, flags=OPF_AI_SAFE, doc="Stop mirroring (the scene stays as it is)"
 
 # =============================================================================

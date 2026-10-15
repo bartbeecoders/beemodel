@@ -39,6 +39,9 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl co_npr
+.globl co_pr
+.globl co_follow
 .globl co_tick
 .globl co_pollfds
 .globl co_on
@@ -225,7 +228,7 @@ co_kids:        .skip 4*CE_MAX
 
 .text
 OPERATOR op_co_host, "co.host", "Host Co-Editing", do_co_host, flags=OPF_AI_SAFE, doc="Start a co-editing session with this scene: co.host [port] (localhost, default 7462) | lan [port]; in a session: others can join here too"
-OPERATOR op_co_join, "co.join", "Join Co-Editing", do_co_join, flags=OPF_AI_SAFE, doc="Join a co-editing session (its scene replaces this one): co.join host:port"
+OPERATOR op_co_join, "co.join", "Join Co-Editing", do_co_join, flags=OPF_AI_SAFE, doc="Join a co-editing session (its scene replaces this one): co.join host:port", form=form_cojoin
 OPERATOR op_co_leave, "co.leave", "Leave Co-Editing", do_co_leave, flags=OPF_AI_SAFE, doc="Leave the co-editing session (the scene stays as it is)"
 OPERATOR op_co_follow, "co.follow", "Follow Peer", do_co_follow, flags=OPF_AI_SAFE, doc="Keep the view on another peer's camera: co.follow <peer name | number> | off"
 OPERATOR op_co_agent, "co.agent", "Agent Peer", do_co_agent, flags=OPF_AI_SAFE, doc="co.agent on: what MCP tools change here is a peer of its own (the agent), with its own undo"

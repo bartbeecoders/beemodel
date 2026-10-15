@@ -985,7 +985,13 @@ ui_button:
     xor     esi, esi
     call    obj_click_select
     jmp     16f
-17: cmp     ebx, HIT_AREA_HDR           # an area header: that area
+17: cmp     ebx, HIT_ASSETS             # an asset tile: select it, its menu
+    jne     171f
+    call    assets_rclick
+    test    eax, eax
+    jz      .Lbt_done
+    jmp     16f
+171: cmp    ebx, HIT_AREA_HDR           # an area header: that area
     je      18f
     cmp     ebx, HIT_AREA_TYPE
     jne     .Lbt_done

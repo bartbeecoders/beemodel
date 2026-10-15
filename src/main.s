@@ -192,6 +192,7 @@ _start:
     call    tip_tick                    # a tooltip whose time has come
     call    pie_tick                    # a pie key held long enough
     call    toast_tick                  # a toast whose time is up
+    call    team_pending                # a button's operator, between frames
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render
