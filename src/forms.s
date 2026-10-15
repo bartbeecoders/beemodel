@@ -617,6 +617,7 @@ PATHFORM form_epdf, "file.export_pdf", 1, x_pdf, n_drawing_pdf
 PATHFORM form_script, "script.run", 0, x_bees
 PATHFORM form_rsave, "render.save", 1, x_img, n_render_png
 PATHFORM form_iload, "image.load", 0, x_imgin
+PATHFORM form_itex, "material.import_textures", 0, x_imgin
 PATHFORM form_rimage, "render.image", 1, x_pngonly, n_render_png
 PATHFORM form_lmsave, "lightmap.save", 1, x_img, n_lightmap
 

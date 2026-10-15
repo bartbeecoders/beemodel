@@ -50,6 +50,7 @@ nd_v:           .skip 16                # the selected node: its values,
 nd_e:           .skip 16                #  as whole numbers (choices, images),
 nd_in:          .skip 48                #  its inputs' constants
 nd_hd:          .skip 64                # "Node: <title>"
+mt_pre:         .skip 4                 # the preset menu (0: its label)
 mt_blend:       .skip 4                 # its blend mode, one-sided, clip
 mt_sided:       .skip 4
 mt_clip:        .skip 4
@@ -103,6 +104,8 @@ k_sided:        .asciz " one_sided "
 .text
 WIDGET wd_mt_slot, WK_ENUM, "material.slot", flags=WGF_DYN, cb=slot_cb, aux=mat_names, tip="The object's material (the same material can go on many objects)"
 WIDGET wd_mt_new,  WK_BUTTON, "material.new", "New", aux=op_mat_new
+WIDGET wd_mt_pre,  WK_ENUM, "material.preset", flags=WGF_DYN, cb=pre_cb, undo="Material Preset", aux=pre_names, tip="A preset look: metals, glass, plastics, wood, marble and more (a new material when there is none)"
+WIDGET wd_mt_itex, WK_BUTTON, "material.import_textures", "Texture Set...", aux=op_mat_import_tex, tip="A PBR material from a texture set: pick any one of its images, the others are found by name"
 WIDGET wd_mt_base, WK_COLOR, "material.base", "Base colour", cb=val_cb, undo="Material", tip="The surface colour (a click opens the colour picker)"
 WIDGET wd_mt_metal, WK_SLIDER, "material.metallic", "Metallic", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="0: plastic, wood, paint ... 1: bare metal"
 WIDGET wd_mt_rough, WK_SLIDER, "material.roughness", "Roughness", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="0: a mirror finish, 1: matte"
@@ -193,6 +196,28 @@ mats_props_draw:
     sub     esi, 60
     mov     ecx, 60
     mov     edx, r12d
+    xor     r9d, r9d
+    call    wg
+    add     r12d, WG_H+6
+    mov     dword ptr [rip+mt_pre], 0   # Preset... | Texture Set...
+    lea     rdi, [rip+wd_mt_pre]
+    mov     esi, [rip+pnl_x]
+    mov     ecx, [rip+pnl_w]
+    shr     ecx, 1
+    sub     ecx, 3
+    mov     edx, r12d
+    lea     r8, [rip+mt_pre]
+    xor     r9d, r9d
+    call    wg
+    lea     rdi, [rip+wd_mt_itex]
+    mov     ecx, [rip+pnl_w]
+    shr     ecx, 1
+    sub     ecx, 3
+    mov     esi, [rip+pnl_x]
+    add     esi, [rip+pnl_w]
+    sub     esi, ecx
+    mov     edx, r12d
+    xor     r8d, r8d
     xor     r9d, r9d
     call    wg
     add     r12d, WG_H+6
@@ -821,6 +846,37 @@ nd_enum_cb:                             # rdi = &index, esi = slot
     ret
 
 # ---- the pickers' labels ------------------------------------------------------------
+pre_names:                              # "Preset...", then the presets
+    lea     rax, [rip+preset_labels]
+    mov     edx, [rip+npresets]
+    inc     edx
+    ret
+
+pre_cb:                                 # rdi = &mt_pre -> material.preset
+    push    rbx                         #  <preset> [the material]
+    mov     ebx, [rdi]
+    dec     ebx
+    js      9f
+    lea     rax, [rip+preset_names]
+    mov     rsi, [rax+rbx*8]
+    lea     rdi, [rip+mt_arg]
+    call    cpy
+    mov     rbx, rdi                    # (its end)
+    mov     edi, [rip+mt_mat]
+    call    mat_get
+    test    rax, rax
+    jz      1f
+    mov     byte ptr [rbx], ' '
+    lea     rdi, [rbx+1]
+    mov     rsi, rax
+    call    cpy
+1:  lea     rdi, [rip+op_mat_preset]
+    lea     rsi, [rip+mt_arg]
+    pop     rbx
+    jmp     run_arg2
+9:  pop     rbx
+    ret
+
 blend_names:                            # -> rax = labels, edx = count
     lea     rax, [rip+bl_labels]
     mov     edx, 3
