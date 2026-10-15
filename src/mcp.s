@@ -1339,6 +1339,7 @@ dispatch_tool:
     mov     rdi, rbx
     call    run_op
     mov     qword ptr [rip+op_arg], 0
+    call    wb_reset                    # (file writers use the text buffer too)
     lea     rsi, [rip+s_ok]
     call    wb_str
     jmp     .Ldt_out
@@ -1489,6 +1490,7 @@ dispatch_tool:
     mov     rdi, rbx
     call    run_op
     mov     qword ptr [rip+op_arg], 0
+    call    wb_reset                    # (file writers use the text buffer too)
     lea     rsi, [rip+s_ok]
     call    wb_str
     jmp     .Ldt_out
@@ -1508,6 +1510,7 @@ dispatch_tool:
     mov     esi, 1                      # agent: only agent-safe operators
     call    script_eval
     mov     ebx, eax
+    call    wb_reset                    # (file writers use the text buffer too)
     lea     rsi, [rip+script_out]       # its output, not the console copy
     mov     edx, [rip+script_out_len]
     call    wb_bytes
