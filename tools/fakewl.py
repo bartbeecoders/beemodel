@@ -988,6 +988,9 @@ def mcp():
     cmd('agent.permission_files')
     text, err = m.tool('run_operator', {'id': 'file.save', 'arg': path})
     check(os.path.exists(path) and not err, 'after the user allows files, run_operator file.save writes the scene')
+    check(text.startswith('ok\n'), f'its answer is "ok", not the file it wrote ({text[:12]!r})')
+    text, err = m.tool('script_eval', {'code': f'op("file.save", "{path}")\nprint("saved", round(render("{f.home}/r.png", 32, 18, 1) >= 0))'})
+    check(not err and text.strip() == 'saved 1', f'a script that saves and renders answers with what it printed ({text[:16]!r})')
     cmd('agent.permission_read')
     text, err = m.tool('create_primitive', {'type': 'cone', 'name': 'Nope'})
     names = [o['name'] for o in json.loads(m.tool('scene_summary')[0].split('\n')[0])['objects']]
