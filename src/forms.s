@@ -391,6 +391,74 @@ FFIELD fw_bkk, kw=kw_bake
 FFIELD fw_bki, kw=d_bakeimg
 FFIELD fw_bkd, flags=FF_CHANGED
 
+# ---- animation and rigging (animui.s) -------------------------------------------------
+.section .rodata
+d_key:          .asciz "Key"
+d_action:       .asciz "Action"
+s_replace:      .asciz "Replace"
+s_addm:         .asciz "Add"
+k_replace:      .asciz "replace"
+k_addm:         .asciz "add"
+p_chain:        .asciz "chain"
+p_dual:         .asciz "dual"
+s_ct1:          .asciz "Copy Location"
+s_ct2:          .asciz "Copy Rotation"
+s_ct3:          .asciz "Copy Scale"
+s_ct4:          .asciz "Track To"
+s_ct5:          .asciz "Limit Location"
+s_ct6:          .asciz "Limit Rotation"
+s_ct7:          .asciz "Limit Scale"
+s_ct8:          .asciz "Child Of"
+s_ct9:          .asciz "IK (bones: armature:bone)"
+k_ct1:          .asciz "copy_location"
+k_ct2:          .asciz "copy_rotation"
+k_ct3:          .asciz "copy_scale"
+k_ct4:          .asciz "track_to"
+k_ct5:          .asciz "limit_location"
+k_ct6:          .asciz "limit_rotation"
+k_ct7:          .asciz "limit_scale"
+k_ct8:          .asciz "child_of"
+k_ct9:          .asciz "ik"
+.align 8
+l_lmode:        .quad s_replace, s_addm
+kw_lmode:       .quad k_replace, k_addm
+l_ctype:        .quad s_ct1, s_ct2, s_ct3, s_ct4, s_ct5, s_ct6, s_ct7, s_ct8, s_ct9
+kw_ctype:       .quad k_ct1, k_ct2, k_ct3, k_ct4, k_ct5, k_ct6, k_ct7, k_ct8, k_ct9
+.text
+WIDGET fw_skn2, WK_TEXT, "form.shape.name", "Name", tip="The mesh as it is now is stored under this name"
+FORM form_shape, 1
+FFIELD fw_skn2, kw=d_key
+WIDGET fw_acn,  WK_TEXT, "form.action.name", "Name", tip="The selected objects' keys are kept as this action"
+FORM form_action, 1
+FFIELD fw_acn, kw=d_action
+WIDGET fw_lya,  WK_TEXT, "form.layer.action", "Action"
+WIDGET fw_lyo,  WK_TEXT, "form.layer.object", "Object", tip="The object it moves (- : the objects it was keyed on)"
+WIDGET fw_lys,  WK_FLOAT, "form.layer.start", "Start frame", -100000.0, 100000.0, 0.2, 0, WGF_CLAMP
+WIDGET fw_lyi,  WK_FLOAT, "form.layer.influence", "Influence", 0.0, 1.0, 0.005, 2, WGF_CLAMP
+WIDGET fw_lym,  WK_ENUM, "form.layer.mode", "Mode", aux=l_lmode, n=2
+FORM form_layer, 5
+FFIELD fw_lya, kw=d_action
+FFIELD fw_lyo, kw=FK_ACTIVE
+FFIELD fw_lys, def=1.0
+FFIELD fw_lyi, def=1.0
+FFIELD fw_lym, kw=kw_lmode
+WIDGET fw_cno,  WK_TEXT, "form.constraint.owner", "Object", tip="The object constrained (IK: armature:bone)"
+WIDGET fw_cnt,  WK_ENUM, "form.constraint.type", "Type", aux=l_ctype, n=9
+WIDGET fw_cng,  WK_TEXT, "form.constraint.target", "Target", tip="The object it follows or aims at"
+WIDGET fw_cnc,  WK_INT, "form.constraint.chain", "IK chain (bones, 0: to the root)", 0.0, 64.0, 0.05, 0, WGF_CLAMP
+FORM form_cn, 4
+FFIELD fw_cno, kw=FK_ACTIVE
+FFIELD fw_cnt, kw=kw_ctype
+FFIELD fw_cng
+FFIELD fw_cnc, p_chain, flags=FF_CHANGED
+WIDGET fw_pam,  WK_TEXT, "form.parent.mesh", "Mesh"
+WIDGET fw_paa,  WK_TEXT, "form.parent.armature", "Armature"
+WIDGET fw_pad,  WK_TOGGLE, "form.parent.dual", "Dual quaternion (keeps volume)"
+FORM form_parent, 3
+FFIELD fw_pam, kw=FK_ACTIVE
+FFIELD fw_paa
+FFIELD fw_pad, p_dual
+
 # ---- param.set <name> <expression> ----------------------------------------------------
 WIDGET fw_pmn,  WK_TEXT, "form.param.name", "Name"
 WIDGET fw_pme,  WK_TEXT, "form.param.expression", "Value", tip="A number with units or an expression of other parameters (10mm, 2*wall + 1mm)"

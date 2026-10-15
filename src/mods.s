@@ -46,6 +46,7 @@
 .globl md_y
 .globl active_mesh_obj
 .globl mod_param_set_obj
+.globl mod_params
 .globl mod_use_tree
 .globl fmt_val3
 .globl ev_owner

@@ -10,7 +10,7 @@
 .include "widgets.inc"
 .include "icons.inc"
 .equ PTAB_W, 32                          # the Properties tab strip
-.equ PTAB_N, 8
+.equ PTAB_N, 10
 .equ OUTL_MAXROWS, 256
 .include "macros.inc"
 
@@ -812,7 +812,29 @@ draw_leaf:
     sub     edx, 4*HDR_BTN_W+10
     call    vp_header_tools
     jmp     5f
-51: cmp     eax, ED_UVED                # the UV editor: its tools
+51: cmp     eax, ED_TIMELINE            # the timeline: transport, range
+    jne     53f
+    mov     edi, [r12+N_X]
+    add     edi, TYPE_BTN_W+6
+    mov     esi, [r12+N_Y]
+    mov     edx, [r12+N_X]
+    add     edx, [r12+N_W]
+    sub     edx, 4*HDR_BTN_W+10
+    call    tl_header_tools
+    jmp     5f
+53: cmp     eax, ED_DOPESHEET           # the key editors: the key menu
+    je      54f
+    cmp     eax, ED_GRAPH
+    jne     55f
+54: mov     edi, [r12+N_X]
+    add     edi, TYPE_BTN_W+6
+    mov     esi, [r12+N_Y]
+    mov     edx, [r12+N_X]
+    add     edx, [r12+N_W]
+    sub     edx, 4*HDR_BTN_W+10
+    call    ae_header_tools
+    jmp     5f
+55: cmp     eax, ED_UVED                # the UV editor: its tools
     jne     52f
     mov     edi, [r12+N_X]
     add     edi, TYPE_BTN_W+6
@@ -1698,6 +1720,16 @@ ed_props_draw:
 .Lpp_render:
     call    props_render
     jmp     .Lpp_done
+.Lpp_anim:
+    mov     edi, r12d
+    call    animui_props
+    mov     r12d, eax
+    jmp     .Lpp_done
+.Lpp_rig:
+    mov     edi, r12d
+    call    rigui_props
+    mov     r12d, eax
+    jmp     .Lpp_done
 .Lpp_view:
     lea     rdi, [rip+wd_vp_sec]
     mov     esi, [rip+ed_x]
@@ -2544,12 +2576,13 @@ k_u_in:         .asciz "in"
 .align 4
 unit_mm_tab:    .float 1.0, 10.0, 1000.0, 25.4
 ptab_icons:     .long ICON_OBJECT, ICON_MODIFIER, ICON_MATERIAL, ICON_PHYSICS, ICON_SKETCH
-                .long ICON_WORLD, ICON_RENDERED, ICON_WIRE
+                .long ICON_WORLD, ICON_RENDERED, ICON_WIRE, ICON_KEY, ICON_ARMATURE
 .align 8
 unit_lbl:       .quad s_u_mm, s_u_cm, s_u_m, s_u_in
 unit_kw:        .quad k_u_mm, k_u_cm, k_u_m, k_u_in
-ptab_descs:     .quad wd_pt0, wd_pt1, wd_pt2, wd_pt3, wd_pt4, wd_pt5, wd_pt6, wd_pt7
+ptab_descs:     .quad wd_pt0, wd_pt1, wd_pt2, wd_pt3, wd_pt4, wd_pt5, wd_pt6, wd_pt7, wd_pt8, wd_pt9
 props_pages:    .quad .Lpp_object, .Lpp_mods, .Lpp_mat, .Lpp_phys, .Lpp_cad, .Lpp_scene, .Lpp_render, .Lpp_view
+                .quad .Lpp_anim, .Lpp_rig
 .text
 WIDGET wd_pt0, WK_ROW, "props.tab.object", "Object", tip="Name, place, rotation, size, visibility and colour of the active object"
 WIDGET wd_pt1, WK_ROW, "props.tab.modifiers", "Modifiers", tip="The modifier stack: mirror, array, subdivision, booleans, geometry nodes ..."
@@ -2559,6 +2592,8 @@ WIDGET wd_pt4, WK_ROW, "props.tab.cad", "CAD", tip="Parameters and the features 
 WIDGET wd_pt5, WK_ROW, "props.tab.scene", "Scene", tip="Units, the world's light and the frame range"
 WIDGET wd_pt6, WK_ROW, "props.tab.render", "Render", tip="Render size, samples and denoising, Render and Save"
 WIDGET wd_pt7, WK_ROW, "props.tab.viewport", "Viewport", tip="Shading, grid, theme and the viewport camera"
+WIDGET wd_pt8, WK_ROW, "props.tab.animation", "Animation", tip="Shape keys, actions and layers, drivers, onion skins, motion paths"
+WIDGET wd_pt9, WK_ROW, "props.tab.rig", "Rig", tip="Bones and their pose, constraints, parenting to an armature"
 WIDGET wd_props_scroll, WK_SCROLL, "props.page"
 WIDGET wd_obj_vis,   WK_TOGGLE, "object.visible", "Visible", cb=props_vis_cb, undo="Hide", tip="Show or hide the object (H hides the selection, Alt+H shows all)"
 WIDGET wd_obj_color, WK_TEXT, "object.color", "Colour", cb=props_hex_cb, undo="Colour", tip="The object's colour in the viewport, as #rrggbb"

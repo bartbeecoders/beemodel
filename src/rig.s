@@ -39,6 +39,11 @@
 .globl rig_reset
 .globl bone_tail
 .globl expr_name_hook
+.globl on_before
+.globl on_after
+.globl on_step
+.globl on_on
+.globl mp_n
 
 # a constraint
 .equ CN_OWNER,  0                       # object uid
@@ -1620,11 +1625,12 @@ ik_pose:
 # =============================================================================
 #  Operators
 # =============================================================================
-OPERATOR op_cn_add,  "constraint.add",    "Add Constraint",    do_cn_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Constrain an object (or, for ik, a bone): constraint.add <object|armature:bone> <copy_location|copy_rotation|copy_scale|track_to|limit_location|limit_rotation|limit_scale|child_of|ik> [target] [axes xyz] [offset] [influence f] [min x y z] [max x y z] [track x|y|z|-x|-y|-z] [up x|y|z] [chain n] [pole object] [solver fabrik|ccd] [iterations n] (limit_rotation in degrees)"
+OPERATOR op_cn_add,  "constraint.add",    "Add Constraint",    do_cn_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Constrain an object (or, for ik, a bone): constraint.add <object|armature:bone> <copy_location|copy_rotation|copy_scale|track_to|limit_location|limit_rotation|limit_scale|child_of|ik> [target] [axes xyz] [offset] [influence f] [min x y z] [max x y z] [track x|y|z|-x|-y|-z] [up x|y|z] [chain n] [pole object] [solver fabrik|ccd] [iterations n] (limit_rotation in degrees)", form=form_cn
 OPERATOR op_cn_rem,  "constraint.remove", "Remove Constraint", do_cn_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a constraint by number (1.., as constraint.list shows) or all of an object's: constraint.remove <n|object>"
 OPERATOR op_cn_set,  "constraint.set",    "Set Constraint",    do_cn_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Change a constraint (1..): constraint.set <n> <influence|mute> <value>"
 OPERATOR op_cn_list, "constraint.list",   "List Constraints",  do_cn_list, flags=OPF_AI_SAFE|OPF_QUIET, doc="The constraints and drivers, in the console"
 OPERATOR op_dr_add,  "anim.driver",       "Add Driver",        do_dr_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Drive a property by an expression of others: anim.driver <path> [name=path ...] <expression> (names: up to 8 letters; frame is the frame), e.g. anim.driver Door:ry a=Handle:rz a*2"
+OPERATOR op_dr_set,  "anim.driver_set",  "Set Driver",       do_dr_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Change a driver by number (1.., as constraint.list shows): anim.driver_set <n> expression <text> | mute <0|1> | remove"
 OPERATOR op_dr_rem,  "anim.driver_remove", "Remove Driver",    do_dr_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a property's driver: anim.driver_remove <path>"
 OPERATOR op_mpath,   "anim.motion_paths", "Motion Paths",      do_mpath, flags=OPF_AI_SAFE, doc="Show the selected objects' (pose mode: bones') paths over the frame range: anim.motion_paths [start end] | clear"
 OPERATOR op_onion,   "anim.onion",        "Onion Skins",       do_onion, flags=OPF_AI_SAFE, doc="Ghosts of the active object some frames before (red) and after (green): anim.onion [before after step] | off"
@@ -1677,6 +1683,9 @@ s_dr_bad:       .asciz "  anim.driver <path> [name=path ...] <expression> - not 
 s_dr_expr:      .asciz "  the driver's expression: "
 s_dr:           .asciz "  driver "
 s_dr_none:      .asciz "  no driver on "
+s_ds_bad:       .asciz "  anim.driver_set <n> expression <text> | mute <0|1> | remove"
+kk_expr:        .asciz "expression"
+kk_remove:      .asciz "remove"
 s_mp_none:      .asciz "  select objects (or, in pose mode, bones) to show their paths"
 s_mp:           .asciz "  motion paths: "
 s_mp_frames:    .asciz " over frames "
@@ -2540,6 +2549,91 @@ do_dr_rem:
     call    undo_drop_last
 9:  pop     rbx
     ret
+
+# anim.driver_set <n> expression <text> | mute <0|1> | remove
+do_dr_set:
+    push    rbx
+    push    r12
+    push    r13
+    xor     edi, edi
+    call    an_own_g
+    test    rax, rax
+    jz      .Lds_bad
+    mov     rbx, rax
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      .Lds_bad
+    call    rg_num
+    test    eax, eax
+    jz      .Lds_bad
+    cvttss2si eax, xmm0
+    dec     eax
+    cmp     eax, [rbx+AN_NDRV_]
+    jae     .Lds_bad
+    mov     r13d, eax
+    call    im_next_word
+    mov     r12, rsi
+    imul    rax, r13, DR_SZ_
+    lea     r13, [rbx+AN_DRV_+rax]      # the driver
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+kk_expr]
+    call    str_eq
+    test    eax, eax
+    jz      2f
+    mov     rsi, r12                    # the rest of the line
+1:  cmp     byte ptr [rsi], ' '
+    jne     11f
+    inc     rsi
+    jmp     1b
+11: cmp     byte ptr [rsi], 0
+    je      .Lds_bad
+    lea     rdi, [r13+DR_EXPR]
+    xor     ecx, ecx
+12: mov     al, [rsi+rcx]
+    mov     [rdi+rcx], al
+    test    al, al
+    jz      9f
+    inc     ecx
+    cmp     ecx, DR_EXPRSZ-1
+    jb      12b
+    mov     byte ptr [rdi+rcx], 0
+    jmp     9f
+2:  lea     rdi, [rip+im_word]
+    lea     rsi, [rip+kk_mute]
+    call    str_eq
+    test    eax, eax
+    jz      3f
+    mov     rsi, r12
+    call    rg_num
+    test    eax, eax
+    jz      .Lds_bad
+    cvttss2si eax, xmm0
+    mov     [r13+DR_MUTE], eax
+    jmp     9f
+3:  lea     rdi, [rip+im_word]
+    lea     rsi, [rip+kk_remove]
+    call    str_eq
+    test    eax, eax
+    jz      .Lds_bad
+    mov     rdi, r13                    # remove: the later ones move up
+    lea     rsi, [r13+DR_SZ_]
+    lea     rcx, [rbx+AN_DRV_]
+    mov     eax, [rbx+AN_NDRV_]
+    imul    rax, rax, DR_SZ_
+    add     rcx, rax
+    sub     rcx, rsi
+    rep     movsb
+    dec     dword ptr [rbx+AN_NDRV_]
+9:  mov     dword ptr [rip+dirty], 1
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+.Lds_bad:
+    lea     rdi, [rip+s_ds_bad]
+    call    log_line
+    call    undo_drop_last
+    jmp     9b
 
 # =============================================================================
 #  Motion paths, onion skins

@@ -151,6 +151,7 @@ items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
 .equ items_add_n, (. - items_add) / 8
 items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, 0
                 .quad sub_feature, sub_boolean, sub_mech, op_repair, op_print_check, op_obj_measure
+                .quad 0, op_an_key, op_arm_parent
 .equ items_object_n, (. - items_object) / 8
 items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
                 .quad op_m_loopcut, op_m_knife, op_m_bisect, op_m_subdivide, 0
@@ -1564,6 +1565,16 @@ ui_key_press:
 .Lkp_nopie:
     mov     edi, ebx                    # an open menu: arrows, Enter, Esc
     call    mn_key
+    test    eax, eax
+    jnz     9f
+    cmp     ebx, KEY_I                  # I over a field: key that value
+    jne     1f
+    cmp     dword ptr [rip+key_mods], 0
+    jne     1f
+    cmp     dword ptr [rip+hover_id], HIT_WIDGET
+    jne     1f
+    mov     edi, [rip+hover_idx]
+    call    field_key
     test    eax, eax
     jnz     9f
 1:  cmp     dword ptr [rip+etool], 0    # edit tools: Enter / Esc / ...

@@ -36,6 +36,8 @@
 .globl an_range
 .globl an_sel_all
 .globl an_own_g
+.globl an_act_at
+.globl an_lay_at
 .globl an_frame
 .globl an_play
 .globl an_ref
@@ -281,6 +283,16 @@ an_own:
 # an_own_g - an_own for the editors
 an_own_g:
     jmp     an_own
+
+# an_act_at / an_lay_at(rdi=block, esi=index) -> rax = that action / layer
+an_act_at:
+    imul    eax, esi, AC_SZ
+    lea     rax, [rdi+AN_ACT+rax]
+    ret
+an_lay_at:
+    imul    eax, esi, LY_SZ
+    lea     rax, [rdi+AN_LAY+rax]
+    ret
 
 # an_find(edi=kind, esi=a, edx=b, ecx=c) -> eax = its curve, or -1
 an_find:
@@ -2593,8 +2605,8 @@ OPERATOR op_an_delk,   "anim.delete_keys", "Delete Keys",     do_an_delk, flags=
 OPERATOR op_an_dup,    "anim.duplicate_keys", "Duplicate Keys", do_an_dup, flags=OPF_AI_SAFE|OPF_UNDO, doc="Copy the selected keys some frames on (the copies are selected): anim.duplicate_keys <frames>"
 OPERATOR op_an_ht,     "anim.handle_type", "Key Handle Type", do_an_ht, flags=OPF_AI_SAFE|OPF_UNDO, doc="Handles of the selected keys: anim.handle_type <auto|free>"
 OPERATOR op_an_handle, "anim.handle",      "Set Key Handle",  do_an_handle, flags=OPF_AI_SAFE|OPF_UNDO, doc="One key's handle (it becomes free): anim.handle <path> <frame> <left|right> <frames> <value> (relative to the key)"
-OPERATOR op_an_action, "anim.action",      "New Action",      do_an_action, flags=OPF_AI_SAFE|OPF_UNDO, doc="Keep the selected objects' keys as a named action (a clip layers can play): anim.action <name>"
-OPERATOR op_an_layer,  "anim.layer",       "Add Action Layer", do_an_layer, flags=OPF_AI_SAFE|OPF_UNDO, doc="Play an action on top of the scene: anim.layer <action> [object|-] [start frame] [influence] [replace|add] [repeat]"
+OPERATOR op_an_action, "anim.action",      "New Action",      do_an_action, flags=OPF_AI_SAFE|OPF_UNDO, doc="Keep the selected objects' keys as a named action (a clip layers can play): anim.action <name>", form=form_action
+OPERATOR op_an_layer,  "anim.layer",       "Add Action Layer", do_an_layer, flags=OPF_AI_SAFE|OPF_UNDO, doc="Play an action on top of the scene: anim.layer <action> [object|-] [start frame] [influence] [replace|add] [repeat]", form=form_layer
 OPERATOR op_an_lset,   "anim.layer_set",   "Set Layer",       do_an_lset, flags=OPF_AI_SAFE|OPF_UNDO, doc="Change a layer (1..): anim.layer_set <layer> <influence|start|repeat|mode|mute> <value> (mode: 0 replace, 1 add)"
 OPERATOR op_an_lrem,   "anim.layer_remove", "Remove Layer",   do_an_lrem, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a layer: anim.layer_remove <layer>"
 

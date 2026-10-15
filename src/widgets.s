@@ -44,6 +44,7 @@
 .globl wg_tree_json
 .globl wg_ftoa
 .globl wg_desc_of
+.globl wg_find
 .globl wg_n
 .globl wg_set_label
 .globl wg_set_op
