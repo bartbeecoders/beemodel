@@ -401,7 +401,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <li>A vertical tab strip with icons: Tool, Object, Modifiers, Data (mesh / light / camera / curve / sketch / armature), Material, Physics, Constraints, CAD, Scene &amp; World, Render.</li>
     <li>Scrolling and collapsible panels.</li>
     <li>Editable name, transform, visibility, colour and parent.</li>
-    <li>Light settings (type, power, colour, radius) and camera settings (focal length, clip, set active).</li></ul></div></div>
+    <li>Light settings (type, power, colour, radius) and camera settings (focal length, clip, set active): moved to U21, because lights and cameras have no per-object settings yet (one global light power, a fixed lens) and need new scene data first.</li></ul></div></div>
   <div class="phase"><div class="pn"><b>U11</b><a href="https://github.com/bartbeecoders/beemodel/issues/180">#180</a></div><div class="card blue"><h3>Viewport header and navigation</h3><ul>
     <li>A header with a mode dropdown, View / Select / Object menus, select-mode buttons (vertex / edge / face), snapping, pivot, orientation, shading buttons and an overlays popover.</li>
     <li>A clickable navigation gizmo (click an axis to align the view, drag to orbit) and zoom / pan handles.</li>
@@ -467,7 +467,8 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <li>A Render area header (start, stop, save, denoise, pass counter), and Render to File.</li>
     <li>Panels for virtualized geometry and world partition, plus a minimap toggle.</li>
     <li>Probe and lightmap bake panels with progress.</li>
-    <li>A play mode button and its settings.</li></ul></div></div>
+    <li>A play mode button and its settings.</li>
+    <li>Per-object light and camera settings (new scene data, saved in .bee): power, colour, radius, lens, the active camera.</li></ul></div></div>
   <div class="phase"><div class="pn"><b>U22</b><a href="https://github.com/bartbeecoders/beemodel/issues/191">#191</a></div><div class="card green"><h3>Library, versions, collaboration and AI</h3><ul>
     <li>Asset browser header (search, kind and tag filters, tile size), tile menu, and a "Save to Library" dialog.</li>
     <li>A new <b>Versions</b> editor: branches, log, commit box, diff toggle, a merge conflict list.</li>

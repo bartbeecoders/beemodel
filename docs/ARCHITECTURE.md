@@ -276,6 +276,18 @@ bitmap font a heading is drawn twice, a pixel apart. `draw_heading` and
 `draw_small` draw in those slots, and `fonts_resize` resets every size when
 the scale changes.
 
+## Properties
+
+`ed_props_draw` (areas.s) draws a tab strip (`props_tabs`: Object, Modifiers,
+Material, Physics, CAD, Scene, Render, Viewport) and the open page in a
+scrolled region (`wg_scroll_begin` / `wg_scroll_end`). While a page draws,
+`ed_x` / `ed_w` describe the area right of the strip. The modifier, material,
+physics, CAD and feature sections are drawn by their own modules
+(`mods_props_draw` and the others), which still do their own hit testing. The
+Object, Scene, Render and Viewport pages use widgets. Settings that live in
+copy-on-write blocks (the frame range, the units) are bound to scratch values
+whose callbacks run the operator (`anim.range`, `scene.units`).
+
 ## Widgets
 
 Panels draw their controls with `wg(desc, x, y, w, ptr, sub)` from

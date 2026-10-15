@@ -574,6 +574,7 @@ def main():
     dialogs()
     files_ui()
     clipboard()
+    props_ui()
     transforms()
     undo_redo()
     files()
@@ -918,6 +919,14 @@ def menu_pick(f, m, *path):
     return True
 
 
+def props_tab(m, f, name):
+    """Open a Properties tab (U10) by name: object, modifiers, material, ..."""
+    tabs = ['object', 'modifiers', 'material', 'physics', 'cad', 'scene', 'render', 'viewport']
+    x, y = widget_xy(m, 'props.tab.' + name, tabs.index(name))
+    if x:
+        f.click(x, y); f.pump(0.2)
+
+
 def mcp():
     """MCP server: protocol, tools, resources, errors and the stdio bridge."""
     print('  -- MCP --')
@@ -1221,17 +1230,18 @@ def modifiers_ui():
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
     f.mods(4); f.key(3); f.mods(0)              # Ctrl+2: subdivision surface
     check(q('print(modcount("Cube"), efaces("Cube"))') == '1 96', 'Ctrl+2 adds a Subsurf modifier (level 2)')
-    f.drag(1150, 355, 1162, 355, steps=3)       # levels +1
+    props_tab(m, f, 'modifiers')
+    f.drag(1150, 267, 1162, 267, steps=3)       # levels +1
     check(q('efaces("Cube")') == '= 384', 'dragging the levels field re-evaluates (level 3)')
     f.mods(4); f.key(44); f.mods(0)
     check(q('efaces("Cube")') == '= 96', 'one undo reverts the whole drag')
-    f.click(1238, 311); f.pump(0.2)             # + Add -> Mirror
-    f.click(1098, 339); f.pump(0.2)
+    f.click(1238, 223); f.pump(0.2)             # + Add -> Mirror
+    f.click(1098, 251); f.pump(0.2)
     check(q('modcount("Cube")') == '= 2', 'the Add menu adds a Mirror modifier')
     f.shot('43_modifiers.png')
-    f.click(1249, 334); f.pump(0.2)             # x on the first (Subsurf)
+    f.click(1249, 246); f.pump(0.2)             # x on the first (Subsurf)
     check(q('print(modcount("Cube"), efaces("Cube"))') == '1 12', 'the x button removes Subsurf (Mirror stays)')
-    f.click(1214, 334); f.pump(0.2)             # Apply the Mirror
+    f.click(1214, 246); f.pump(0.2)             # Apply the Mirror
     check(q('print(modcount("Cube"), verts("Cube"), faces("Cube"))') == '0 16 12', 'Apply makes the mirror part of the mesh')
     f.proc.kill()
 
@@ -1324,8 +1334,9 @@ def hardsurface_walkthrough():
     menu_pick(f, m, 'Object', 'Boolean', 'Boolean Difference')
     r = q('print(exists("Cylinder"), manifold("Cube"), round(volume("Cube") * 1000))').split()
     check(r[:2] == ['0', '1'] and r[2] == '6599', f'Edit > Boolean Difference drills the hole: closed, volume {r[2] if len(r) > 2 else "?"} / 6599')
-    f.click(1238, 311); f.pump(0.2)            # Properties: + Add > Bevel
-    f.click(1095, 435); f.pump(0.3)
+    props_tab(m, f, 'modifiers')
+    f.click(1238, 223); f.pump(0.2)            # Properties: + Add > Bevel
+    f.click(1095, 347); f.pump(0.3)
     r = q('print(modcount("Cube"), efaces("Cube") > faces("Cube"))')
     check(r == '1 1', 'the Bevel modifier rounds the edges (more faces after it)')
     f.move(*project((0, 1, 0)))
@@ -1333,7 +1344,7 @@ def hardsurface_walkthrough():
         f.wheel(-1)                             # zoom in on the part
     f.pump(0.2)
     f.shot('46_walkthrough.png')
-    f.click(1214, 334); f.pump(0.3)            # Apply
+    f.click(1214, 246); f.pump(0.3)            # Apply
     r = q('print(modcount("Cube"), manifold("Cube"), analyze("Cube", "nonmanifold"), analyze("Cube", "degenerate"))')
     check(r == '0 1 0 0', f'applied: closed, no non-manifold edges, no degenerate faces ({r})')
     path = os.path.join(f.home, 'part.bee')
@@ -1364,10 +1375,11 @@ def materials_ui():
     m = Mcp(f)
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
     grey = px(f, *project((0.3, 2, 0.3)))
-    f.click(1238, 341); f.pump(0.3)             # Material: + New
+    props_tab(m, f, 'material')
+    f.click(1238, 223); f.pump(0.3)             # Material: + New
     check(q('print(matof("Cube"), matget("Material", "roughness"))') == 'Material 0.5',
           'Properties > Material > + New makes a material and gives it to the cube')
-    f.drag(1140, 425, 1180, 425, steps=4)       # roughness +40 px
+    f.drag(1140, 307, 1180, 307, steps=4)       # roughness +40 px
     r = q('matget("Material", "roughness")')
     check(r == '= 0.7', f'dragging roughness changes it ({r})')
     f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
@@ -4076,14 +4088,15 @@ def physics_panel():
     f.enter(600, 300)
     q('select("Cube")')
     f.pump(0.2)
-    f.click(1215, 393)                          # + Rigid Body
+    props_tab(m, f, 'physics')
+    f.click(1215, 223)                          # + Rigid Body
     f.pump(0.2)
     a = rb()
-    f.click(1160, 417)                          # Active -> Passive
-    f.click(1230, 417)                          # Box -> Sphere
+    f.click(1187, 247)                          # Active -> Passive
+    f.click(1250, 247)                          # Box -> Sphere
     f.pump(0.2)
     b = rb()
-    f.drag(1150, 439, 1250, 439, steps=5)       # Mass: +100 px x 0.02
+    f.drag(1170, 269, 1270, 269, steps=5)       # Mass: +100 px x 0.02
     f.pump(0.2)
     c = rb()
     f.shot('104_physics_panel.png')
@@ -4097,7 +4110,7 @@ def physics_panel():
       'op("rigid.add", "active box")\nop("rigid.joint", "point Probe world pivot 4 3 0")')
     f.pump(0.2)
     img = f.image()
-    joint = sum(1 for x in range(1130, 1240, 2) if max(img.getpixel((x, 519))[:3]) > 150)
+    joint = sum(1 for x in range(1130, 1240, 2) if max(img.getpixel((x, 349))[:3]) > 150)
     f.move(600, 300)
     f.key(57)                                   # Space: the status line
     f.pump(0.8)
@@ -4105,11 +4118,11 @@ def physics_panel():
     f.pump(0.2)
     f.shot('105_physics_running.png')
     img = f.image()
-    status = sum(1 for y in range(616, 630) for x in range(1130, 1260, 2) if max(img.getpixel((x, y))[:3]) > 90)
+    status = sum(1 for y in range(446, 460) for x in range(1130, 1260, 2) if max(img.getpixel((x, y))[:3]) > 90)
     d = q('print(get("Cube", "y") < 2.5, frame() > 5)')
     f.mods(1); f.key(105); f.mods(0)            # back to the start
     f.pump(0.2)
-    f.click(1253, 393)                          # x: Probe no longer a body
+    f.click(1253, 223)                          # x: Probe no longer a body
     f.pump(0.2)
     e = q('print(rigid("Probe", "type"), get("Cube", "y"))')
     check(d == '1 1' and e == 'nil 3' and joint > 5 and status > 10,
@@ -4906,6 +4919,7 @@ def widgets_ui():
     check(q('print(exists("Box"), exists("Cube"))') == '1 0', 'the name field renames the object')
     f.shot('widgets_props.png')
     val = lambda n: (widget(m, n) or {}).get('value')
+    props_tab(m, f, 'viewport')
     x, y = widget_xy(m, 'viewport.shading')    # an option list
     f.click(x, y)
     f.click(x, y + 11 + 2 + 4 + 22 + 11)       # its second row: Wireframe
@@ -5078,6 +5092,7 @@ def menus_ui():
     labels = [w['label'] for w in items()]
     check('Split Area Side by Side' in labels, 'right-click on an area header: the area menu')
     f.key(1)
+    props_tab(m, f, 'viewport')                # (the shading shows there)
     f.move(600, 300)
     shade = lambda: (widget(m, 'viewport.shading') or {}).get('value')
     f.key(44)                                  # Z tapped: wireframe, as always
@@ -5276,6 +5291,49 @@ def clipboard():
     f.key(1)
     t = f.clipboard()
     check(t == 'Pasted name', f'Ctrl+X cuts the text ({t!r})')
+    f.proc.kill()
+
+
+def props_ui():
+    """UI plan U10: the Properties editor - tabs, editable visibility and
+    colour, scene settings (units, world, frame range) and render settings."""
+    print('  -- properties --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    val = lambda n: (widget(m, n) or {}).get('value')
+    tabs = [w['label'] for w in ui_tree(m) if w['name'].startswith('props.tab.')]
+    check(tabs == ['Object', 'Modifiers', 'Material', 'Physics', 'CAD', 'Scene', 'Render', 'Viewport'],
+          f'Properties has a tab per page ({len(tabs)})')
+    def set_field(name, text):
+        x, y = widget_xy(m, name); f.click(x, y)
+        f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.2)
+    x, y = widget_xy(m, 'object.visible')
+    f.click(x, y)
+    check(val('object.visible') == 0 and q('print(count())') == '3', 'Visible off hides the cube')
+    f.mods(4); f.key(44); f.mods(0)
+    check(val('object.visible') == 1, 'one undo shows it again')
+    set_field('object.color', 'ff8000')
+    check(q('print(get("Cube", "color"))') == str(0xff8000), 'the colour field takes #rrggbb')
+    props_tab(m, f, 'scene')
+    x, y = widget_xy(m, 'scene.units')
+    f.click(x, y)
+    lst = [w for w in ui_tree(m) if w['kind'] == 'list']
+    f.click(x, lst[0]['y'] + 4 + 11 if lst else y)    # Millimetres
+    check(q('print(expr("1m"))') == '1000', 'Scene > Units: millimetres')
+    set_field('world.strength', '2.5')
+    check(val('world.strength') == 2.5, 'Scene > World strength')
+    set_field('scene.frame_end', '120')
+    check(val('scene.frame_end') == 120 and val('scene.frame_start') == 1, 'Scene > End frame (anim.range)')
+    props_tab(m, f, 'render')
+    set_field('render.width', '640')
+    check(val('render.width') == 640, 'Render > Width')
+    check(widget(m, 'render.start') is not None and widget(m, 'render.save') is not None,
+          'the Render page has Render and Save Render buttons')
+    f.shot('props_render.png')
     f.proc.kill()
 
 

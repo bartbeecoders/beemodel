@@ -9,6 +9,8 @@
 .include "const.inc"
 .include "widgets.inc"
 .include "icons.inc"
+.equ PTAB_W, 32                          # the Properties tab strip
+.equ PTAB_N, 8
 .include "macros.inc"
 
 # exports
@@ -1216,8 +1218,28 @@ props_xform:
 ed_props_draw:
     push    rbx
     push    r12
-    mov     r12d, [rip+ed_y]
-    add     r12d, 8
+    push    r13
+    push    r14
+    sub     rsp, 8
+    call    props_tabs                  # the tab strip on the left
+    add     dword ptr [rip+ed_x], PTAB_W  # the page beside it, scrolled
+    sub     dword ptr [rip+ed_w], PTAB_W
+    lea     rdi, [rip+wd_props_scroll]
+    mov     esi, [rip+ed_x]
+    mov     edx, [rip+ed_y]
+    mov     ecx, [rip+ed_w]
+    mov     r8d, [rip+ed_h]
+    lea     r9, [rip+props_scroll]
+    call    wg_scroll_begin
+    lea     r12d, [rax+8]
+    mov     eax, [rip+props_tab]
+    cmp     eax, PTAB_N
+    jb      1f
+    xor     eax, eax
+1:  lea     rcx, [rip+props_pages]
+    jmp     [rcx+rax*8]
+
+.Lpp_object:
     mov     edi, [rip+active_obj]       # ---- active object
     call    obj_get
     test    rax, rax
@@ -1229,7 +1251,7 @@ ed_props_draw:
     mov     ecx, COL_TEXT_DIM
     call    draw_text
     add     r12d, 30
-    jmp     12f
+    jmp     .Lpp_done
 11: mov     rbx, rax
     lea     rdi, [rip+wd_obj_name]      # name, location, rotation, scale:
     mov     esi, [rip+ed_x]             #  fields (widgets.s) - drag, type, Tab
@@ -1259,6 +1281,42 @@ ed_props_draw:
     lea     rcx, [rip+wd_obj_scale]
     call    xyz_row
     add     r12d, 18
+    add     r12d, 6
+    mov     eax, [rbx+OB_FLAGS]         # visible (not hidden)
+    not     eax
+    shr     eax, 9
+    and     eax, 1
+    mov     [rip+props_vis], eax
+    lea     rdi, [rip+wd_obj_vis]
+    lea     r8, [rip+props_vis]
+    call    vp_row
+    mov     edi, [rbx+OB_COLOR]         # its colour as #rrggbb
+    call    hex_color
+    lea     rdi, [rip+wd_obj_color]
+    lea     r8, [rip+props_hex]
+    mov     esi, [rip+ed_x]
+    add     esi, 80
+    mov     edx, r12d
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 94
+    xor     r9d, r9d
+    call    wg
+    mov     edi, [rip+ed_x]             # its caption and a swatch
+    add     edi, 14
+    lea     esi, [r12+3]
+    lea     rdx, [rip+s_p_color]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+    mov     edi, [rip+ed_x]
+    add     edi, [rip+ed_w]
+    sub     edi, 36
+    lea     esi, [r12+4]
+    mov     edx, 14
+    mov     ecx, 14
+    mov     r8d, [rbx+OB_COLOR]
+    mov     r9d, 3
+    call    fill_rrect
+    add     r12d, WG_H+8
     mov     rax, [rbx+OB_SKETCH]        # a sketch: its plane, sizes, DOF
     test    rax, rax
     jz      113f
@@ -1303,8 +1361,7 @@ ed_props_draw:
     call    prop_row
     add     rsp, 16
     add     r12d, 12
-    mov     edi, r12d
-    jmp     114f
+    jmp     .Lpp_done
 113:call    fmt_reset                   # mesh statistics
     mov     rbx, [rbx+OB_MESH]
     mov     edi, [rbx+ME_NVERTS]
@@ -1323,20 +1380,46 @@ ed_props_draw:
     lea     rsi, [rip+s_p_mesh]
     call    prop_row
     add     r12d, 12
-    mov     edi, r12d                   # ---- the modifier stack
-114:call    mods_props_draw
-    mov     edi, eax                    # ---- the material
+    jmp     .Lpp_done
+
+.Lpp_mods:
+    mov     edi, r12d
+    call    mods_props_draw
+    mov     r12d, eax
+    jmp     .Lpp_done
+.Lpp_mat:
+    mov     edi, r12d
     call    mats_props_draw
-    mov     edi, eax                    # ---- physics (physui.s)
+    mov     r12d, eax
+    jmp     .Lpp_done
+.Lpp_phys:
+    mov     edi, r12d
     call    rb_props_draw
     mov     r12d, eax
-    add     r12d, 18
-12: mov     edi, r12d                   # ---- parameters
+    jmp     .Lpp_done
+.Lpp_cad:
+    mov     edi, r12d
     call    cad_props_draw
-    mov     edi, eax                    # ---- features
+    mov     edi, eax
     call    feat_props_draw
-    mov     r12d, eax
-    add     r12d, 6                     # ---- the viewport: a section
+    cmp     eax, r12d                   # nothing yet: how to start
+    jne     1f
+    mov     edi, [rip+ed_x]
+    add     edi, 14
+    mov     esi, r12d
+    lea     rdx, [rip+s_cad_empty]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_small
+    lea     eax, [r12+20]
+1:  mov     r12d, eax
+    jmp     .Lpp_done
+.Lpp_scene:
+    call    props_scene
+    jmp     .Lpp_done
+.Lpp_render:
+    call    props_render
+    jmp     .Lpp_done
+.Lpp_view:
     lea     rdi, [rip+wd_vp_sec]
     mov     esi, [rip+ed_x]
     add     esi, 8
@@ -1348,7 +1431,7 @@ ed_props_draw:
     call    wg
     add     r12d, 28
     test    eax, eax
-    jz      9f                          # (closed)
+    jz      .Lpp_done                   # (closed)
     lea     rdi, [rip+wd_vp_shading]
     lea     r8, [rip+vp_shading]
     call    vp_row
@@ -1360,7 +1443,7 @@ ed_props_draw:
     call    vp_row
     mov     edi, [rip+vp_area]          # the last used viewport's camera
     test    edi, edi
-    js      9f
+    js      .Lpp_done
     call    cam_ptr
     mov     rbx, rax
     lea     rdi, [rip+wd_vp_yaw]
@@ -1372,8 +1455,251 @@ ed_props_draw:
     lea     rdi, [rip+wd_vp_dist]
     lea     r8, [rbx+8]
     call    vp_row
-9:  pop     r12
+.Lpp_done:
+    lea     edi, [r12+12]
+    call    wg_scroll_end
+    sub     dword ptr [rip+ed_x], PTAB_W
+    add     dword ptr [rip+ed_w], PTAB_W
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
+    ret
+
+# props_tabs - the tab strip: an icon per page, the open one lit
+props_tabs:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     edi, [rip+ed_x]             # its background
+    mov     esi, [rip+ed_y]
+    mov     edx, PTAB_W-2
+    mov     ecx, [rip+ed_h]
+    mov     r8d, COL_MENU_BG
+    call    fill_rect
+    xor     ebx, ebx
+1:  cmp     ebx, PTAB_N
+    jae     9f
+    lea     rax, [rip+ptab_descs]
+    mov     rdi, [rax+rbx*8]
+    mov     esi, [rip+ed_x]
+    add     esi, 3
+    mov     edx, ebx
+    imul    edx, edx, 28
+    add     edx, [rip+ed_y]
+    add     edx, 6
+    mov     r12d, edx
+    mov     ecx, PTAB_W-8
+    lea     r8, [rip+props_tab]
+    mov     r9d, ebx
+    call    wg
+    mov     edi, [rip+ed_x]
+    add     edi, (PTAB_W-2-16)/2
+    lea     esi, [r12+3]
+    lea     rax, [rip+ptab_icons]
+    mov     edx, [rax+rbx*4]
+    mov     r8d, COL_TEXT_DIM
+    cmp     ebx, [rip+props_tab]
+    jne     2f
+    mov     r8d, COL_ACCENT
+2:  call    draw_icon
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# props_scene - units, the world's light, the frame range (r12d = y, on)
+props_scene:
+    push    rbx
+    sub     rsp, 16
+    lea     rdx, [rip+s_pg_scene]
+    call    page_heading
+    call    cad_unit_mm                 # the units as a choice
+    cvtsd2ss xmm0, xmm0
+    xor     ecx, ecx
+    lea     rax, [rip+unit_mm_tab]
+1:  cmp     ecx, 3
+    jae     2f
+    ucomiss xmm0, [rax+rcx*4]
+    je      2f
+    inc     ecx
+    jmp     1b
+2:  mov     [rip+props_units], ecx
+    lea     rdi, [rip+wd_sc_units]
+    lea     r8, [rip+props_units]
+    call    vp_row
+    add     r12d, 4
+    lea     rdi, [rip+wd_sc_wstr]
+    lea     r8, [rip+env_str]
+    call    vp_row
+    lea     rdi, [rip+wd_sc_wrot]
+    lea     r8, [rip+env_rot]
+    call    vp_row
+    add     r12d, 4
+    call    an_range                    # the frame range
+    mov     [rip+props_fstart], eax
+    mov     [rip+props_fend], edx
+    cvtss2si eax, xmm0
+    mov     [rip+props_fps], eax
+    lea     rdi, [rip+wd_sc_fstart]
+    lea     r8, [rip+props_fstart]
+    call    vp_row
+    lea     rdi, [rip+wd_sc_fend]
+    lea     r8, [rip+props_fend]
+    call    vp_row
+    lea     rdi, [rip+wd_sc_fps]
+    lea     r8, [rip+props_fps]
+    call    vp_row
+    add     rsp, 16
+    pop     rbx
+    ret
+
+# props_render - the render's size, samples, denoising; Render, Save
+props_render:
+    sub     rsp, 8
+    lea     rdx, [rip+s_pg_render]
+    call    page_heading
+    lea     rdi, [rip+wd_rn_w]
+    lea     r8, [rip+rn_w]
+    call    vp_row
+    lea     rdi, [rip+wd_rn_h]
+    lea     r8, [rip+rn_h]
+    call    vp_row
+    lea     rdi, [rip+wd_rn_spp]
+    lea     r8, [rip+rn_spp]
+    call    vp_row
+    lea     rdi, [rip+wd_rn_dn]
+    lea     r8, [rip+rn_denoise]
+    call    vp_row
+    add     r12d, 6
+    lea     rdi, [rip+wd_rn_go]
+    lea     r8, [rip+props_dummy]
+    call    vp_row
+    lea     rdi, [rip+wd_rn_save]
+    lea     r8, [rip+props_dummy]
+    call    vp_row
+    add     rsp, 8
+    ret
+
+# page_heading(rdx=title; r12d = y, on)
+page_heading:
+    mov     edi, [rip+ed_x]
+    add     edi, 14
+    mov     esi, r12d
+    mov     ecx, COL_ACCENT
+    sub     rsp, 8
+    call    draw_heading
+    add     rsp, 8
+    add     r12d, 28
+    ret
+
+# ---- callbacks -------------------------------------------------------------------
+props_vis_cb:                           # rdi = &props_vis
+    mov     ecx, [rdi]
+    mov     edi, [rip+active_obj]
+    push    rcx
+    call    obj_get
+    pop     rcx
+    test    rax, rax
+    jz      9f
+    and     dword ptr [rax+OB_FLAGS], ~OBF_HIDDEN
+    test    ecx, ecx
+    jnz     9f
+    or      dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+9:  ret
+
+props_hex_cb:                           # rdi = typed text: #rrggbb or rrggbb
+    push    rbx
+    mov     rbx, rdi
+    cmp     byte ptr [rbx], '#'
+    jne     1f
+    inc     rbx
+1:  xor     edx, edx
+    xor     ecx, ecx
+2:  movzx   eax, byte ptr [rbx+rcx]
+    test    eax, eax
+    jz      4f
+    sub     eax, '0'
+    cmp     eax, 9
+    jbe     3f
+    movzx   eax, byte ptr [rbx+rcx]
+    or      eax, 0x20
+    sub     eax, 'a'
+    cmp     eax, 5
+    ja      8f                          # not hex: ignored
+    add     eax, 10
+3:  shl     edx, 4
+    or      edx, eax
+    inc     ecx
+    cmp     ecx, 6
+    jb      2b
+4:  cmp     ecx, 6
+    jne     8f
+    push    rdx
+    mov     edi, [rip+active_obj]
+    call    obj_get
+    pop     rdx
+    test    rax, rax
+    jz      8f
+    mov     [rax+OB_COLOR], edx
+8:  pop     rbx
+    ret
+
+props_units_cb:                         # rdi = &props_units -> scene.units
+    mov     eax, [rdi]
+    lea     rcx, [rip+unit_kw]
+    mov     rax, [rcx+rax*8]
+    lea     rdi, [rip+op_scene_units]
+    jmp     run_with_arg
+
+props_range_cb:                         # the frame fields -> anim.range
+    sub     rsp, 8
+    call    fmt_reset
+    mov     edi, [rip+props_fstart]
+    call    fmt_int
+    mov     edi, ' '
+    call    fmt_char
+    mov     edi, [rip+props_fend]
+    call    fmt_int
+    mov     edi, ' '
+    call    fmt_char
+    mov     edi, [rip+props_fps]
+    call    fmt_int
+    add     rsp, 8
+    lea     rsi, [rip+fmt_buf]          # (a copy: run_op's echo uses fmt_buf)
+    lea     rdi, [rip+props_arg]
+    mov     ecx, 63
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    lea     rax, [rip+props_arg]
+    lea     rdi, [rip+op_an_range]
+    jmp     run_with_arg
+
+# run_with_arg(rdi=operator, rax=argument text)
+run_with_arg:
+    push    qword ptr [rip+op_arg]
+    mov     [rip+op_arg], rax
+    call    run_op
+    pop     qword ptr [rip+op_arg]
+    ret
+
+# hex_color(edi=0xrrggbb) -> props_hex = "#rrggbb"
+hex_color:
+    lea     rsi, [rip+props_hex]
+    mov     byte ptr [rsi], '#'
+    mov     ecx, 6
+1:  mov     eax, edi
+    and     eax, 15
+    lea     rdx, [rip+hex_digits_p]
+    mov     al, [rdx+rax]
+    mov     [rsi+rcx], al
+    shr     edi, 4
+    dec     ecx
+    jnz     1b
+    mov     byte ptr [rsi+7], 0
     ret
 
 # vp_row(rdi=widget, r8=value; r12d = y, advanced) - one full-width row
@@ -1910,6 +2236,65 @@ s_th_d:         .asciz "Dark theme"
 s_th_l:         .asciz "Light theme"
 s_th_c:         .asciz "High contrast"
 .text
+.section .bss
+.align 4
+props_tab:      .skip 4                 # the page shown (PTAB_*)
+props_scroll:   .skip 4
+props_vis:      .skip 4
+props_units:    .skip 4
+props_fstart:   .skip 4
+props_fend:     .skip 4
+props_fps:      .skip 4
+props_dummy:    .skip 4
+props_hex:      .skip 32
+props_arg:      .skip 64
+.section .rodata
+s_p_color:      .asciz "Colour"
+s_pg_scene:     .asciz "Scene"
+s_pg_render:    .asciz "Render"
+s_cad_empty:    .asciz "No parameters or features yet"
+hex_digits_p:   .ascii "0123456789abcdef"
+s_u_mm:         .asciz "Millimetres"
+s_u_cm:         .asciz "Centimetres"
+s_u_m:          .asciz "Metres"
+s_u_in:         .asciz "Inches"
+k_u_mm:         .asciz "mm"
+k_u_cm:         .asciz "cm"
+k_u_m:          .asciz "m"
+k_u_in:         .asciz "in"
+.align 4
+unit_mm_tab:    .float 1.0, 10.0, 1000.0, 25.4
+ptab_icons:     .long ICON_OBJECT, ICON_MODIFIER, ICON_MATERIAL, ICON_PHYSICS, ICON_SKETCH
+                .long ICON_WORLD, ICON_RENDERED, ICON_WIRE
+.align 8
+unit_lbl:       .quad s_u_mm, s_u_cm, s_u_m, s_u_in
+unit_kw:        .quad k_u_mm, k_u_cm, k_u_m, k_u_in
+ptab_descs:     .quad wd_pt0, wd_pt1, wd_pt2, wd_pt3, wd_pt4, wd_pt5, wd_pt6, wd_pt7
+props_pages:    .quad .Lpp_object, .Lpp_mods, .Lpp_mat, .Lpp_phys, .Lpp_cad, .Lpp_scene, .Lpp_render, .Lpp_view
+.text
+WIDGET wd_pt0, WK_ROW, "props.tab.object", "Object", tip="Name, place, rotation, size, visibility and colour of the active object"
+WIDGET wd_pt1, WK_ROW, "props.tab.modifiers", "Modifiers", tip="The modifier stack: mirror, array, subdivision, booleans, geometry nodes ..."
+WIDGET wd_pt2, WK_ROW, "props.tab.material", "Material", tip="The object's material: colour, roughness, metal, emission, textures"
+WIDGET wd_pt3, WK_ROW, "props.tab.physics", "Physics", tip="Rigid body, joints and the physics world"
+WIDGET wd_pt4, WK_ROW, "props.tab.cad", "CAD", tip="Parameters and the features of parts"
+WIDGET wd_pt5, WK_ROW, "props.tab.scene", "Scene", tip="Units, the world's light and the frame range"
+WIDGET wd_pt6, WK_ROW, "props.tab.render", "Render", tip="Render size, samples and denoising, Render and Save"
+WIDGET wd_pt7, WK_ROW, "props.tab.viewport", "Viewport", tip="Shading, grid, theme and the viewport camera"
+WIDGET wd_props_scroll, WK_SCROLL, "props.page"
+WIDGET wd_obj_vis,   WK_TOGGLE, "object.visible", "Visible", cb=props_vis_cb, undo="Hide", tip="Show or hide the object (H hides the selection, Alt+H shows all)"
+WIDGET wd_obj_color, WK_TEXT, "object.color", "Colour", cb=props_hex_cb, undo="Colour", tip="The object's colour in the viewport, as #rrggbb"
+WIDGET wd_sc_units, WK_ENUM, "scene.units", "Units", cb=props_units_cb, aux=unit_lbl, n=4, tip="What one scene unit is (typed lengths with units convert)"
+WIDGET wd_sc_wstr, WK_FLOAT, "world.strength", "World strength", 0.0, 1000.0, 0.01, 3, WGF_CLAMP, undo="World", tip="How bright the world (sky or HDRI) lights the scene"
+WIDGET wd_sc_wrot, WK_FLOAT, "world.rotation", "World rotation", step=0.00872665, dec=1, flags=WGF_DEG, undo="World", tip="Turns the world image about the vertical axis"
+WIDGET wd_sc_fstart, WK_INT, "scene.frame_start", "Start frame", -100000.0, 100000.0, 0.2, 0, cb=props_range_cb, tip="The first frame of the animation"
+WIDGET wd_sc_fend, WK_INT, "scene.frame_end", "End frame", -100000.0, 100000.0, 0.2, 0, cb=props_range_cb, tip="The last frame of the animation"
+WIDGET wd_sc_fps, WK_INT, "scene.fps", "Frames per second", 1.0, 1000.0, 0.1, 0, WGF_CLAMP, cb=props_range_cb, tip="Playback speed"
+WIDGET wd_rn_w, WK_INT, "render.width", "Width", 1.0, 8192.0, 1.0, 0, WGF_CLAMP, tip="The render's width in pixels"
+WIDGET wd_rn_h, WK_INT, "render.height", "Height", 1.0, 8192.0, 1.0, 0, WGF_CLAMP, tip="The render's height in pixels"
+WIDGET wd_rn_spp, WK_INT, "render.samples", "Samples", 1.0, 65536.0, 1.0, 0, WGF_CLAMP, tip="Samples per pixel: more is cleaner and slower"
+WIDGET wd_rn_dn, WK_TOGGLE, "render.denoise", "Denoise", tip="Clean up the noise of the finished render"
+WIDGET wd_rn_go, WK_BUTTON, "render.start", "Render (F12)", flags=WGF_PRIMARY, aux=op_render_start
+WIDGET wd_rn_save, WK_BUTTON, "render.save", "Save Render...", aux=op_render_save
 WIDGET wd_vp_sec,     WK_SECTION, "props.viewport", "Viewport"
 WIDGET wd_vp_shading, WK_ENUM,   "viewport.shading", aux=vp_shade_lbl, n=3
 WIDGET wd_vp_grid,    WK_TOGGLE, "viewport.grid", "Ground grid"
