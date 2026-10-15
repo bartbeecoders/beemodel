@@ -87,7 +87,12 @@ jobs_init:
     lea     rdi, [rip+s_env_threads]
     call    getenv
     test    rax, rax
+    jnz     0f
+    mov     ebx, [rip+pr_threads]       # no override: the preference, if any
+    test    ebx, ebx
     jz      1f
+    jmp     3f
+0:
     movzx   ecx, byte ptr [rax]         # empty / non-numeric: automatic
     sub     ecx, '0'
     cmp     ecx, 9

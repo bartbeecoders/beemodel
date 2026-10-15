@@ -123,6 +123,8 @@ sync_done:      .skip 4
 
 # window state
 win_w:          .skip 4
+comp_w:         .skip 4                 # the size the compositor gave (logical)
+comp_h:         .skip 4
 phys_w:         .skip 4
 phys_h:         .skip 4
 id_fscale_mgr:  .skip 4
@@ -926,22 +928,23 @@ ev_xdg_surface:                         # configure(serial)
     mov     esi, XDG_SURFACE_ACK_CONFIGURE
     mov     edx, [r12]
     call    msg1
-    mov     eax, [rip+pend_w]
+    mov     eax, [rip+pend_w]           # the compositor's size,
     test    eax, eax
     jnz     1f
-    mov     eax, [rip+win_w]
+    mov     eax, [rip+comp_w]
     test    eax, eax
     jnz     1f
     mov     eax, DEF_W
-1:  mov     [rip+win_w], eax
+1:  mov     [rip+comp_w], eax
     mov     eax, [rip+pend_h]
     test    eax, eax
     jnz     2f
-    mov     eax, [rip+win_h]
+    mov     eax, [rip+comp_h]
     test    eax, eax
     jnz     2f
     mov     eax, DEF_H
-2:  mov     [rip+win_h], eax
+2:  mov     [rip+comp_h], eax
+    call    win_from_comp               #  ours: less when the UI is bigger
     mov     eax, [rip+pend_flags]
     mov     [rip+win_flags], eax
     mov     dword ptr [rip+configured], 1
@@ -1037,6 +1040,7 @@ ev_pointer:
     sar     edi, 8
     mov     esi, [r12+12]
     sar     esi, 8
+    call    pr_ptr
     call    ui_motion
     jmp     ev_done
 11: call    ui_leave
@@ -1046,6 +1050,7 @@ ev_pointer:
     sar     edi, 8
     mov     esi, [r12+8]
     sar     esi, 8
+    call    pr_ptr
     call    ui_motion
     jmp     ev_done
 13: call    mouse_input
@@ -1166,6 +1171,7 @@ ev_tool:                                # ebx = the tool's slot
     jz      1f
     mov     edi, [rip+tab_x]
     mov     esi, [rip+tab_y]
+    call    pr_ptr
     call    ui_motion
 1:  test    ebx, 2
     jz      2f
@@ -1599,8 +1605,8 @@ render:
     test    edi, edi
     jz      1f
     mov     esi, WP_VIEWPORT_SET_DESTINATION
-    mov     edx, [rip+win_w]
-    mov     ecx, [rip+win_h]
+    mov     edx, [rip+comp_w]           # (the compositor's logical size)
+    mov     ecx, [rip+comp_h]
     call    msg2
 1:  mov     edi, [rip+id_surface]
     mov     esi, WL_SURFACE_DAMAGE
@@ -1609,9 +1615,9 @@ render:
     call    put_u32
     xor     edi, edi
     call    put_u32
-    mov     edi, [rip+win_w]
+    mov     edi, [rip+comp_w]
     call    put_u32
-    mov     edi, [rip+win_h]
+    mov     edi, [rip+comp_h]
     call    put_u32
     call    msg_end
     call    alloc_id
@@ -1633,6 +1639,37 @@ render:
 9:  ret
 
 # mono_ns -> rax = monotonic clock, nanoseconds
+# win_from_comp - win_w / win_h from the compositor's size and the UI scale
+.globl win_from_comp
+win_from_comp:
+    mov     eax, [rip+comp_w]
+    imul    eax, eax, 100
+    xor     edx, edx
+    div     dword ptr [rip+pr_scale]
+    mov     [rip+win_w], eax
+    mov     eax, [rip+comp_h]
+    imul    eax, eax, 100
+    xor     edx, edx
+    div     dword ptr [rip+pr_scale]
+    mov     [rip+win_h], eax
+    ret
+
+# pr_ptr(edi=x, esi=y) -> edi, esi in our units (the UI scale)
+pr_ptr:
+    cmp     dword ptr [rip+pr_scale], 100
+    je      9f
+    mov     eax, edi
+    imul    eax, eax, 100
+    cdq
+    idiv    dword ptr [rip+pr_scale]
+    mov     edi, eax
+    mov     eax, esi
+    imul    eax, eax, 100
+    cdq
+    idiv    dword ptr [rip+pr_scale]
+    mov     esi, eax
+9:  ret
+
 .globl mono_ns
 .globl msg_begin
 .globl msg_end

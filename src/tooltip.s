@@ -96,7 +96,7 @@ tip_wait:
     xor     edx, edx
     mov     ecx, 1000000
     div     rcx
-    mov     ecx, TIP_MS
+    mov     ecx, [rip+tip_ms]           # (prefs)
     sub     ecx, eax
     xor     eax, eax
     test    ecx, ecx
@@ -225,7 +225,9 @@ tip_content:
     mov     [rip+tip_title], rax
     mov     rax, [rbx+OP_DOC]
     mov     [rip+tip_doc], rax
-    mov     edi, [rbx+OP_KEY]
+    mov     rdi, rbx                    # (the key in use: prefs.s)
+    call    key_eff
+    mov     edi, eax
     call    fmt_key
     test    rax, rax
     jz      2f

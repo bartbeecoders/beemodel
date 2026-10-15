@@ -72,7 +72,11 @@ OPERATOR op_agent_revert, "agent.revert", "Revert Agent Change", do_revert, flag
 agent_init:
     push    rbx
     mov     dword ptr [rip+agent_tier], 1
-    lea     rdi, [rip+s_env_perm]
+    mov     eax, [rip+pr_tier]          # the preference (env still wins)
+    cmp     eax, 2
+    ja      71f
+    mov     [rip+agent_tier], eax
+71: lea     rdi, [rip+s_env_perm]
     call    getenv
     test    rax, rax
     jz      9f

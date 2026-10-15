@@ -453,8 +453,11 @@ undo_push:
     mov     eax, [rip+scene_modified]
     mov     [rip+mod_prev], eax
     mov     dword ptr [rip+scene_modified], 1
-    inc     dword ptr [rip+changes]     # autosave every AUTOSAVE_EVERY changes
-    cmp     dword ptr [rip+changes], AUTOSAVE_EVERY
+    inc     dword ptr [rip+changes]     # autosave every pr_autosave changes
+    mov     eax, [rip+pr_autosave]      #  (prefs; 0: never)
+    test    eax, eax
+    jz      9f
+    cmp     [rip+changes], eax
     jb      9f
     mov     dword ptr [rip+changes], 0
     call    autosave

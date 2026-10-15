@@ -587,6 +587,7 @@ def main():
     physics_ui()
     render_ui()
     team_ui()
+    prefs_ui()
     transforms()
     undo_redo()
     files()
@@ -6143,6 +6144,72 @@ def team_ui():
     pick_enum(f, m, 'ai.permission', 0, 1)
     check(wait_value(f, m, 'ai.permission', 0, 1) == 1, 'agents may edit (from the list)')
     f.proc.kill()
+
+
+def prefs_ui():
+    """UI plan U23: Edit > Preferences (interface, input, keymap, system,
+    files, AI), kept in ~/.config/beemodel/prefs across a restart; the UI
+    scale; a key rebound by pressing it."""
+    print('  -- preferences --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    home = f.home
+    prefs = lambda: open(os.path.join(home, '.config', 'beemodel', 'prefs')).read() if os.path.exists(os.path.join(home, '.config', 'beemodel', 'prefs')) else ''
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
+    def tab(i):
+        w = widget(m, 'prefs.tabs')
+        f.click(w['x'] + w['w'] * (2 * i + 1) // 12, w['y'] + w['h'] // 2); f.pump(0.2)
+    menu_pick(f, m, 'Edit', 'Preferences...')
+    f.pump(0.3)
+    check({'prefs.tabs', 'prefs.theme', 'prefs.ui_scale', 'prefs.tooltip_ms'} <= names(), 'Edit > Preferences: the Interface section')
+    pick_enum(f, m, 'prefs.theme', 0, 1)
+    check('theme 1' in prefs(), f'the theme goes into the prefs file ({prefs()[:60]!r})')
+    w0 = widget(m, 'prefs.tabs')['w']
+    pick_enum(f, m, 'prefs.ui_scale', 0, 3)                     # 150 %
+    f.pump(0.3)
+    w1 = (widget(m, 'prefs.tabs') or {}).get('w', 0)
+    check('scale 150' in prefs() and 0 < w1 < w0, f'UI scale 150 %: everything bigger (the tab row {w0} -> {w1} units wide)')
+    q('op("view.ui_scale", "100")')                             # (back: clicks are in screen units)
+    f.pump(0.3)
+    check('scale 100' in prefs() and widget(m, 'prefs.tabs')['w'] == w0, 'view.ui_scale sets it too (back to 100 %)')
+    tab(1)
+    check({'prefs.emulate_middle', 'prefs.orbit_speed'} <= names(), 'Input: Alt as the middle button, orbit speed')
+    tab(2)
+    check({'prefs.key_search', 'prefs.key_set', 'prefs.keys_reset'} <= names(), 'Keymap: search, Set, Reset')
+    type_into('prefs.key_search', 'object.duplicate')
+    click('prefs.key_set', 0)
+    f.key(65); f.pump(0.3)                                      # F7 (free)
+    check('key object.duplicate' in prefs(), f'Set, then a key: kept ({prefs()[-60:]!r})')
+    n0 = q('print(count())')
+    q('select("Cube")')
+    f.move(300, 200); f.key(65); f.pump(0.3)                     # (over the 3D viewport)
+    n1 = q('print(count())')
+    check(int(n1 or 0) == int(n0 or 0) + 1, f'the new key runs it ({n0} -> {n1} objects)')
+    tab(3)
+    check({'prefs.threads', 'prefs.gpu', 'prefs.jit'} <= names(), 'System: threads, GPU, JIT')
+    tab(4)
+    check({'prefs.autosave', 'prefs.library_add'} <= names(), 'Files: autosave, library folders')
+    tab(5)
+    check({'prefs.agent_permission', 'prefs.mcp'} <= names(), 'AI: the agents\' permission, MCP')
+    f.proc.kill()
+    g = Fake(home=home)                                         # a restart
+    g.pump(1.0, until_frame=True)
+    g.keymap('tests/keymaps/us.xkb')
+    g.enter(600, 300)
+    n = Mcp(g)
+    menu_pick(g, n, 'Edit', 'Preferences...')
+    g.pump(0.3)
+    w = widget(n, 'prefs.theme')
+    check(w and w['value'] == 1, 'the preferences are there after a restart')
+    g.proc.kill()
 
 
 if __name__ == '__main__':

@@ -614,6 +614,12 @@ ui_motion:
     mov     esi, r12d
     cmp     eax, DRAG_ORBIT
     jne     4f
+    cvtsi2ss xmm0, edi                  # (the orbit speed: prefs)
+    mulss   xmm0, [rip+pr_orbit]
+    cvtss2si edi, xmm0
+    cvtsi2ss xmm0, esi
+    mulss   xmm0, [rip+pr_orbit]
+    cvtss2si esi, xmm0
     call    vp_orbit
     mov     edi, [rip+drag_node]
     call    cam_store
@@ -743,7 +749,14 @@ toggle_maximize:
 
 # ui_button(edi=button, esi=state, edx=serial, ecx=time)
 ui_button:
-    test    esi, esi                    # a press hides the tooltip
+    cmp     dword ptr [rip+pr_emu3], 0  # Alt + left: the middle button (prefs)
+    je      0f
+    cmp     edi, BTN_LEFT
+    jne     0f
+    test    dword ptr [rip+key_mods], MOD_ALT
+    jz      0f
+    mov     edi, BTN_MIDDLE
+0:  test    esi, esi                    # a press hides the tooltip
     jz      0f
     call    tip_block
 0:  cmp     dword ptr [rip+pl_on], 0    # (play mode: buttons do nothing)
@@ -1519,6 +1532,8 @@ ui_key_repeat:
     jz      kb_repeat_stop
 # ui_key_press(edi=evdev) - one key stroke: menus, text field, then keymap
 ui_key_press:
+    cmp     qword ptr [rip+pr_capture], 0  # Preferences > Keymap waits for a key
+    jne     prefs_key
     cmp     dword ptr [rip+tm_mode], 0  # a running transform takes every key
     jne     tm_key
     cmp     dword ptr [rip+uved_tm], 0  # (a UV one too)

@@ -422,7 +422,9 @@ palette_draw:
     mov     rdx, [r13+OP_NAME]
     mov     ecx, COL_TEXT_DIM
     call    draw_text
-    mov     edi, [r13+OP_KEY]           # shortcut, right aligned
+    mov     rdi, r13                    # (the key in use: prefs.s)
+    call    key_eff
+    mov     edi, eax           # shortcut, right aligned
     call    fmt_key
     test    rax, rax
     jz      4f

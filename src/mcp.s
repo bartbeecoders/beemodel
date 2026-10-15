@@ -282,6 +282,8 @@ sockaddr:
 mcp_init:
     push    rbx
     call    agent_init
+    cmp     dword ptr [rip+pr_mcp], 0   # turned off in the preferences
+    je      9f
     lea     rdi, [rip+s_env_off]
     call    getenv
     test    rax, rax

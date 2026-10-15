@@ -493,6 +493,10 @@ fvj_detect:
 1:  mov     [rip+fvj_avx], r8d
     lea     eax, [r8+1]
     mov     [rip+fvj_mode], eax
+    cmp     dword ptr [rip+pr_jit], 0   # turned off in the preferences
+    jne     8f
+    mov     dword ptr [rip+fvj_mode], 0
+8:
     lea     rdi, [rip+s_env_jit]
     call    getenv
     test    rax, rax

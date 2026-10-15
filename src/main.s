@@ -33,6 +33,7 @@ _start:
 1:  and     rsp, -16
 
     call    text_init
+    call    prefs_load                  # ~/.config/beemodel/prefs (env wins)
     call    th_init
     call    recent_load                 # File > Open Recent
     call    area_init
