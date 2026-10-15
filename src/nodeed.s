@@ -122,12 +122,21 @@ t_ramp:         .asciz "Color Ramp"
 t_math:         .asciz "Math"
 t_bump:         .asciz "Bump"
 t_nmap:         .asciz "Normal Map"
-ne_out_names:   .quad o_base, o_metal, o_rough, o_emit, o_normal
+ne_out_names:   .quad o_base, o_metal, o_spec, o_rough, o_emit, o_alpha, o_normal
+                .quad o_ao, o_coat, o_coatr, o_trans, o_ior, o_mask
 o_base:         .asciz "Base Color"
 o_metal:        .asciz "Metallic"
+o_spec:         .asciz "Specular"
 o_rough:        .asciz "Roughness"
 o_emit:         .asciz "Emission"
+o_alpha:        .asciz "Opacity"
 o_normal:       .asciz "Normal"
+o_ao:           .asciz "Ambient Occlusion"
+o_coat:         .asciz "Clear Coat"
+o_coatr:        .asciz "Coat Roughness"
+o_trans:        .asciz "Transmission"
+o_ior:          .asciz "IOR"
+o_mask:         .asciz "Opacity Mask"
 # per type (as geonodes.s's gn_meta): input names (3), input kinds (0
 #   geometry, 1 value, 2 vector, 3 colour), value names (4), value kinds (0
 #   number, 1 choice, 2 image, 3 whole number), the choices, output names
@@ -282,7 +291,7 @@ ne_rec:
     push    rbx
     mov     dword ptr [rip+ne_mat], -1
     mov     dword ptr [rip+ne_kind], 0
-    mov     dword ptr [rip+ne_maxn], 12
+    mov     dword ptr [rip+ne_maxn], 48
     mov     ecx, [rip+ne_pathn]         # inside a group: that tree
     test    ecx, ecx
     jz      0f
@@ -581,7 +590,7 @@ ne_layout:
     mov     [r8+r13*4+4], esi
     inc     r13d
     jmp     4b
-6:  mov     dword ptr [rip+ne_lh], NHDR+5*NROW+6   # the material output
+6:  mov     dword ptr [rip+ne_lh], NHDR+NPINS*NROW+6   # the material output
     cmp     dword ptr [rip+ne_kind], 0
     je      61f
     mov     dword ptr [rip+ne_lh], 0    # (trees: none)
@@ -1078,15 +1087,17 @@ ed_nodes_draw:
 45: xor     r14d, r14d
     cmp     dword ptr [rip+ne_kind], 0  # (trees: no material sockets)
     jne     5f
-46: cmp     r14d, 5
+46: cmp     r14d, NPINS
     jae     5f
-    mov     r15d, [rbx+GR_SOCK+r14*4]
-    test    r15d, r15d
+    mov     r15d, [rbx+GR_PINS+r14*4]
+    movzx   eax, r15w
+    test    eax, eax
     jz      47f
-    cmp     r15d, [rip+ne_n]
+    cmp     eax, [rip+ne_n]
     ja      47f
-    mov     edi, r15d
-    xor     esi, esi
+    mov     edi, eax
+    mov     esi, r15d
+    shr     esi, 16
     call    ne_out_xy
     mov     [rsp], eax
     mov     [rsp+4], edx
@@ -1500,7 +1511,7 @@ ne_draw_output:
     lea     rdx, [rip+s_ne_out]
     call    ne_box
     xor     r12d, r12d
-1:  cmp     r12d, 5
+1:  cmp     r12d, NPINS
     jae     9f
     xor     edi, edi
     mov     esi, r12d
@@ -1509,15 +1520,15 @@ ne_draw_output:
     mov     r14d, edx
     mov     edi, eax
     mov     esi, edx
-    mov     edx, COL_NE_SOCK_C
-    cmp     r12d, 4
-    jne     2f
+    mov     edx, COL_NE_SOCK_C          # colours: base, emission
+    cmp     r12d, PIN_BASE
+    je      22f
+    cmp     r12d, PIN_EMIT
+    je      22f
     mov     edx, COL_NE_SOCK_N
-2:  cmp     r12d, 1
-    je      21f
-    cmp     r12d, 2
-    jne     22f
-21: mov     edx, COL_NE_SOCK_V
+    cmp     r12d, PIN_NORMAL
+    je      22f
+    mov     edx, COL_NE_SOCK_V          # the rest: values
 22: call    ne_sock
     lea     rax, [rip+ne_out_names]
     mov     rdx, [rax+r12*8]
@@ -1735,7 +1746,7 @@ ne_hit:
 3:  xor     r15d, r15d                  # the material sockets
     cmp     dword ptr [rip+ne_kind], 0
     jne     4f
-31: cmp     r15d, 5
+31: cmp     r15d, NPINS
     jae     4f
     xor     edi, edi
     mov     esi, r15d
@@ -1970,8 +1981,8 @@ nodeed_press:
     jne     4f
     call    ne_rec                      # a material socket: picked up too
     mov     ecx, [rip+ne_dk]
-    mov     r14d, [rax+GR_SOCK+rcx*4]
-    test    r14d, r14d
+    mov     r14d, [rax+GR_PINS+rcx*4]
+    test    r14w, r14w
     jz      31f
     call    ne_arg_start
     lea     rdi, [rip+ne_out_sock]
@@ -2054,7 +2065,16 @@ nodeed_press:
 
 .section .rodata
 .align 8
-ne_out_sock:    .quad sk_base, sk_metal, sk_rough, sk_emit, sk_normal
+ne_out_sock:    .quad sk_base, sk_metal, sk_spec, sk_rough, sk_emit, sk_alpha, sk_normal
+                .quad sk_ao, sk_coat, sk_coatr, sk_trans, sk_ior, sk_mask
+sk_spec:        .asciz "specular"
+sk_alpha:       .asciz "opacity"
+sk_ao:          .asciz "ao"
+sk_coat:        .asciz "clearcoat"
+sk_coatr:       .asciz "coat_roughness"
+sk_trans:       .asciz "transmission"
+sk_ior:         .asciz "ior"
+sk_mask:        .asciz "mask"
 sk_base:        .asciz "base"
 sk_metal:       .asciz "metallic"
 sk_rough:       .asciz "roughness"
@@ -2428,6 +2448,7 @@ nodeed_release:
     jne     9f
     mov     edi, [rip+ne_dn]            # material.socket
     mov     esi, ecx
+    mov     edx, [rip+ne_dk]
     call    ne_socket
     jmp     9f
 1:  mov     edi, [rip+ne_dn]            # link from to input
@@ -2455,6 +2476,7 @@ nodeed_release:
     jne     9f
     mov     edi, edx
     mov     esi, [rip+ne_dk]
+    mov     edx, ecx
     call    ne_socket
 9:  add     rsp, 8
     pop     r14
@@ -2492,7 +2514,13 @@ ne_link:
     call    ne_arg_int
     lea     edi, [r13+1]
     call    ne_arg_int
-    call    ne_arg_done
+    cmp     dword ptr [rip+ne_kind], 0  # (materials: an output after it)
+    jne     2f
+    test    r14d, r14d
+    jz      2f
+    mov     edi, r14d
+    call    ne_arg_int
+2:  call    ne_arg_done
     lea     rdi, [rip+s_op_link]
     lea     rsi, [rip+s_tp_link]
     call    ne_run2
@@ -2507,9 +2535,10 @@ ne_link:
 ne_socket:
     push    rbx
     push    r12
-    sub     rsp, 8
+    push    r13
     mov     ebx, edi
     mov     r12d, esi
+    mov     r13d, edx
     call    ne_arg_start
     lea     rax, [rip+ne_out_sock]
     mov     rdi, [rax+r12*8]
@@ -2517,11 +2546,15 @@ ne_socket:
     mov     edi, ' '
     call    fmt_char
     mov     edi, ebx
-    call    fmt_int
-    call    ne_arg_done
+    call    ne_arg_int
+    test    r13d, r13d                  # (an output after the first)
+    jz      1f
+    mov     edi, r13d
+    call    ne_arg_int
+1:  call    ne_arg_done
     lea     rdi, [rip+s_op_socket]
     call    ne_run
-    add     rsp, 8
+    pop     r13
     pop     r12
     pop     rbx
     ret

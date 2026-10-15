@@ -677,10 +677,22 @@ gpu_pt_begin:
     mov     rdi, [r14+32]
     mov     rcx, [rbx+32]
     call    put_bytes
-    mov     rsi, [rip+hv_mats]
+    xor     ecx, ecx                    # the materials' first KiB each
+    mov     rsi, [rip+hv_mats]          #  (pt.comp: 256 floats a material)
     mov     rdi, [r14+40]
-    mov     rcx, [rbx+40]
-    call    put_bytes
+    add     rdi, r13
+21: cmp     ecx, [rip+hv_nmats]
+    ja      22f
+    push    rcx
+    push    rsi
+    mov     ecx, 1024
+    rep     movsb
+    pop     rsi
+    pop     rcx
+    add     rsi, MA_SZ
+    inc     ecx
+    jmp     21b
+22:
     mov     rsi, [rip+hv_nodes]
     mov     rdi, [r14+48]
     mov     rcx, [rbx+48]
@@ -784,18 +796,20 @@ put_bytes:
     ret
 
 # hv_gpu_ok -> eax = 1 if pt.comp covers this scene: no HDRI world, no
-#   material with a shader graph
+#   material with a shader graph, nothing masked, translucent or one-sided
 hv_gpu_ok:
     xor     eax, eax
     cmp     dword ptr [rip+hv_env], 0
+    jne     9f
+    cmp     dword ptr [rip+hv_cut], 0
     jne     9f
     mov     ecx, 1
 1:  cmp     ecx, [rip+hv_nmats]
     ja      8f
     mov     rdx, rcx
-    shl     rdx, 10
+    shl     rdx, MA_SHIFT
     add     rdx, [rip+hv_mats]
-    cmp     qword ptr [rdx+128], 0
+    cmp     dword ptr [rdx+128], 0
     jne     9f
     inc     ecx
     jmp     1b

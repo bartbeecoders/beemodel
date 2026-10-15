@@ -516,7 +516,7 @@ builtins:
     .quad bn_node, b_node
     .long 2, 6
     .quad bn_link, b_link
-    .long 4, 4
+    .long 4, 5
     .quad bn_nodeset, b_nodeset
     .long 4, 6
     .quad bn_nodeinfo, b_nodeinfo
@@ -532,7 +532,7 @@ builtins:
     .quad bn_ginfo, b_ginfo
     .long 3, 4
     .quad bn_socket, b_socket
-    .long 3, 3
+    .long 3, 4
     .quad bn_param, b_param
     .long 1, 2
     .quad bn_sketch, b_sketch
@@ -800,7 +800,9 @@ e_gtype:        .asciz "unknown geometry node type: "
 gi_whats:       .quad ni_count, ni_type, ni_link, gi_output, ni_x, ni_y, ni_value, 0
 gi_output:      .asciz "output"
 .align 8
-ni_whats:       .quad ni_count, ni_type, ni_link, ni_sock, ni_x, ni_y, ni_value, 0
+ni_whats:       .quad ni_count, ni_type, ni_link, ni_sock, ni_x, ni_y, ni_value, ni_lout, ni_sout, 0
+ni_lout:        .asciz "linkout"
+ni_sout:        .asciz "socketout"
 ni_count:       .asciz "count"
 ni_type:        .asciz "type"
 ni_link:        .asciz "link"
@@ -993,9 +995,9 @@ fw_circular:    .asciz "circular"
 fw_linear:      .asciz "linear"
 e_param:        .asciz "parameter: "
 e_noparam:      .asciz "no parameter named "
-e_node_type:    .asciz "unknown node type (image noise checker gradient mix ramp math bump): "
+e_node_type:    .asciz "unknown node type (image noise checker gradient mix ramp math bump normalmap): "
 e_node_full:    .asciz "a material holds 12 nodes"
-e_node_bad:     .asciz "no such node, input or socket (links go from an earlier node)"
+e_node_bad:     .asciz "no such node, input, output or socket (or the link would loop)"
 e_image:        .asciz "image: could not load "
 e_no_image:     .asciz "no image called "
 e_render:       .asciz "render: could not render or write "
@@ -6719,14 +6721,25 @@ a_int:
     add     rsp, 8
     ret
 
-# link(material, from, to, input 1..3)
+# link(material, from, to, input 1..3 [, from's output 0..])
 b_link:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
+    push    rbp
+    sub     rsp, 8
     mov     rbx, rdi
+    xor     ebp, ebp                    # output 0 unless given
+    cmp     esi, 5
+    jb      1f
+    lea     rdi, [rbx+64]
+    call    a_int
+    mov     ebp, eax
+    test    ebp, ebp
+    js      8f
+1:  mov     rdi, rbx
     call    a_mat
     mov     r12d, eax
     lea     rdi, [rbx+16]
@@ -6744,11 +6757,14 @@ b_link:
     mov     esi, r13d
     mov     edx, r14d
     mov     ecx, r15d
+    mov     r8d, ebp
     call    graph_link_any
     test    eax, eax
     jz      8f
     cvtsi2sd xmm0, eax                  # (to's number: linking backwards
-    pop     r15                         #  renumbers)
+    add     rsp, 8                      #  renumbers)
+    pop     rbp
+    pop     r15
     pop     r14
     pop     r13
     pop     r12
@@ -7106,8 +7122,13 @@ b_nodeinfo:
     cvtss2sd xmm0, xmm0
     jmp     3f
 2:  mov     edx, [rsp]
+    cmp     edx, 7                      # linkout, socketout: what 6, 7
+    jb      21f
+    dec     edx
     call    graph_info
-    cvtsi2sd xmm0, eax
+    jmp     22f
+21: call    graph_info
+22: cvtsi2sd xmm0, eax
 3:
     add     rsp, 8
     pop     r14
@@ -7123,6 +7144,15 @@ b_socket:
     push    r14
     sub     rsp, 8
     mov     rbx, rdi
+    mov     dword ptr [rsp], 0          # [the node's output 0..]
+    cmp     esi, 4
+    jb      71f
+    lea     rdi, [rbx+48]
+    call    a_int
+    test    eax, eax
+    js      8f
+    mov     [rsp], eax
+71: mov     rdi, rbx
     call    a_mat
     mov     r12d, eax
     lea     rdi, [rbx+16]
@@ -7143,6 +7173,7 @@ b_socket:
     mov     edi, r12d
     mov     esi, r13d
     mov     edx, r14d
+    mov     ecx, [rsp]
     call    graph_socket
     test    eax, eax
     jz      8f

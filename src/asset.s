@@ -23,7 +23,6 @@
 
 .equ AS_MAGIC,  0x41454542              # "BEEA"
 .equ TR_SZ,     4096
-.equ MA_SZ,     1024
 .equ GR_N,      128
 .equ GR_NODES,  160
 .equ NODE_SZ,   72
@@ -319,7 +318,7 @@ as_mat_blob:
     mov     rsi, rax
     lea     rdi, [rip+as_buf]
     mov     dword ptr [rdi], AS_MAGIC
-    mov     dword ptr [rdi+4], 1
+    mov     dword ptr [rdi+4], 2        # (version 2: 4 KiB material records)
     mov     dword ptr [rdi+8], 2
     mov     dword ptr [rdi+12], 1
     lea     rdi, [rip+as_buf+16]
@@ -329,7 +328,7 @@ as_mat_blob:
     xor     ecx, ecx
 1:  cmp     ecx, [rbx+GR_N]
     jae     2f
-    cmp     ecx, 12
+    cmp     ecx, 48
     jae     2f
     imul    eax, ecx, NODE_SZ
     cmp     dword ptr [rbx+GR_NODES+rax+ND_TYPE], T_IMAGE
@@ -403,11 +402,11 @@ as_blob_load:
     jb      .Lbl_no
     cmp     dword ptr [rbx], AS_MAGIC
     jne     .Lbl_no
-    cmp     dword ptr [rbx+4], 1
-    jne     .Lbl_no
     mov     r12d, [rbx+12]              # count
     cmp     dword ptr [rbx+8], 2
     je      .Lbl_mat
+    cmp     dword ptr [rbx+4], 1
+    jne     .Lbl_no
     cmp     dword ptr [rbx+8], 1
     jne     .Lbl_no
     test    r12d, r12d                  # trees: whole
@@ -476,7 +475,14 @@ as_blob_load:
     mov     edx, [rip+as_map]
     jmp     .Lbl_out
 .Lbl_mat:
-    cmp     qword ptr [rsp], 16+MA_SZ
+    mov     r14d, MA_V1SZ-32            # version 1: v0.12's 1 KiB records
+    cmp     dword ptr [rbx+4], 1
+    je      1f
+    cmp     dword ptr [rbx+4], 2
+    jne     .Lbl_no
+    mov     r14d, MA_SZ-32
+1:  lea     eax, [r14+16+32]
+    cmp     [rsp], rax
     jb      .Lbl_no
     lea     rdi, [rbx+16]
     call    mat_new
@@ -489,12 +495,14 @@ as_blob_load:
     jz      .Lbl_no
     lea     rdi, [rax+32]               # (its new name kept)
     lea     rsi, [rbx+16+32]
-    mov     ecx, MA_SZ-32
+    mov     ecx, r14d
     rep     movsb
-    cmp     dword ptr [rax+GR_N], 12
-    jbe     7f
-    mov     dword ptr [rax+GR_N], 0
-7:  mov     eax, 2
+    mov     rdi, rax
+    cmp     r14d, MA_V1SZ-32
+    jne     7f
+    call    graph_upgrade
+7:  call    graph_check
+    mov     eax, 2
     mov     edx, r13d
     jmp     .Lbl_out
 .Lbl_no:

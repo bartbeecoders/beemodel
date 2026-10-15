@@ -52,6 +52,8 @@
 .globl hv_env
 
 .equ MAP_ANON_PRIV, 0x22
+.equ MA_ALPHA,  88              # (material.s)
+.equ GR_N,      128
 .equ RAY_O,     0
 .equ RAY_D,     12
 .equ RAY_TMAX,  24
@@ -127,6 +129,8 @@ pt_big:         .float 1.0e30
 pt_amin:        .float 0.0004
 pt_2m24:        .float 5.9604645e-8         # 2^-24
 pt_one_m:       .float 0.99999994
+pt_third:       .float 0.33333334
+pt_walk_rel:    .float 1.0e-5
 pt_rr_lo:       .float 0.05
 pt_rr_hi:       .float 0.95
 pt_clamp:       .float 40.0                 # firefly clamp (indirect)
@@ -1229,7 +1233,7 @@ light_prep:
     call    tri_material
     test    rax, rax
     jz      11f
-    cmp     dword ptr [rax+144], 0      # (a graph drives the emission: no
+    cmp     dword ptr [rax+GR_PINS+PIN_EMIT*4], 0   # (a graph drives the emission: no
     jne     11f                         #  light sampling, found by bounces)
     lea     rdi, [rax+64]               # emission * strength
     call    lum
@@ -1290,7 +1294,7 @@ tri_material:
     mov     eax, [rax+rdi*4]
     test    eax, eax
     jz      1f
-    shl     rax, 10
+    shl     rax, MA_SHIFT
     add     rax, [rip+hv_mats]
     ret
 1:  xor     eax, eax
@@ -1844,7 +1848,7 @@ trace_path:
 .Ltp_bounce:
     mov     dword ptr [rbx+PF_RAY+RAY_TMAX], 0x7149f2ca
     lea     rdi, [rbx+PF_RAY]
-    call    hv_trace
+    call    pt_trace
     test    eax, eax
     jnz     .Ltp_hit
     # missed: the sky (+ sun), MIS against the light choices
@@ -2050,7 +2054,7 @@ trace_path:
     subss   xmm0, [rip+pt_eps]
     movss   [rbx+PF_SRAY+RAY_TMAX], xmm0
     lea     rdi, [rbx+PF_SRAY]
-    call    hv_occluded
+    call    pt_occluded
     test    eax, eax
     jnz     .Ltp_bsdf
     movss   xmm0, [rip+pt_one]          # weight
@@ -2152,6 +2156,214 @@ trace_path:
     pop     rbx
     ret
 
+# pt_trace(rdi=ray; r15 = rng) -> eax = 1 if it hit (t, tri, u, v filled):
+#   hv_trace, but rays go on through the parts of masked, translucent and
+#   one-sided materials that let them (by chance, as much as they do); t
+#   stays measured from the ray's origin
+# pt_occluded(rdi=ray; r15 = rng) -> eax = 1 if something stops it before tmax
+pt_occluded:
+    cmp     dword ptr [rip+hv_cut], 0
+    je      hv_occluded
+    jmp     pt_walk
+pt_trace:
+    cmp     dword ptr [rip+hv_cut], 0
+    je      hv_trace
+pt_walk:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 32
+    mov     rbx, rdi
+    mov     r12d, 32                    # (layers at most)
+    mov     rax, [rbx+RAY_O]            # the origin, as given
+    mov     [rsp], rax
+    mov     eax, [rbx+RAY_O+8]
+    mov     [rsp+8], eax
+    mov     dword ptr [rsp+12], 0       # gone so far
+    mov     eax, [rbx+RAY_TMAX]
+    mov     [rsp+16], eax
+1:  mov     rdi, rbx
+    call    hv_trace
+    test    eax, eax
+    jz      7f
+    dec     r12d
+    jz      6f
+    mov     edi, [rbx+RAY_TRI]
+    movss   xmm0, [rbx+RAY_U]
+    movss   xmm1, [rbx+RAY_V]
+    lea     rsi, [rbx+RAY_D]
+    call    cover
+    comiss  xmm0, [rip+pt_one_m]
+    jae     6f
+    movss   [rsp+20], xmm0
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     2f
+    call    rnd
+    comiss  xmm0, [rsp+20]
+    jb      6f
+2:  movss   xmm0, [rbx+RAY_T]           # on, from a little past it
+    movss   xmm1, xmm0
+    mulss   xmm1, [rip+pt_walk_rel]
+    addss   xmm0, xmm1
+    addss   xmm0, [rip+pt_eps]
+    xor     ecx, ecx
+3:  movss   xmm1, [rbx+RAY_D+rcx*4]
+    mulss   xmm1, xmm0
+    addss   xmm1, [rbx+RAY_O+rcx*4]
+    movss   [rbx+RAY_O+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    movss   xmm1, [rsp+12]
+    addss   xmm1, xmm0
+    movss   [rsp+12], xmm1
+    movss   xmm1, [rbx+RAY_TMAX]
+    subss   xmm1, xmm0
+    movss   [rbx+RAY_TMAX], xmm1
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    ja      1b
+    xor     eax, eax
+    jmp     7f
+6:  movss   xmm0, [rbx+RAY_T]           # this one: t from the origin
+    addss   xmm0, [rsp+12]
+    movss   [rbx+RAY_T], xmm0
+    mov     eax, 1
+7:  mov     rcx, [rsp]                  # the ray as it was
+    mov     [rbx+RAY_O], rcx
+    mov     ecx, [rsp+8]
+    mov     [rbx+RAY_O+8], ecx
+    mov     ecx, [rsp+16]
+    mov     [rbx+RAY_TMAX], ecx
+    add     rsp, 32
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# cover(edi=triangle, xmm0=u, xmm1=v, rsi=ray direction) -> xmm0 = how much
+#   of the surface there stops a ray: 1 opaque, 0 a hole (a one-sided
+#   material from behind, a masked one below its clip value), else a
+#   translucent material's opacity
+cover:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 304
+    mov     r12d, edi
+    movss   [rsp+296], xmm0
+    movss   [rsp+300], xmm1
+    mov     r13, rsi
+    call    tri_material
+    test    rax, rax
+    jz      .Lcv_one
+    mov     rbx, rax
+    movss   xmm0, [rbx+MA_SIDED]        # one-sided: open from behind
+    comiss  xmm0, [rip+pt_half]
+    jb      2f
+    mov     rax, [rip+hv_tv]            # (e1 x e2) . d > 0: the back
+    lea     rcx, [r12+r12*8]
+    lea     rax, [rax+rcx*4]
+    movss   xmm0, [rax+16]
+    mulss   xmm0, [rax+32]
+    movss   xmm1, [rax+20]
+    mulss   xmm1, [rax+28]
+    subss   xmm0, xmm1
+    mulss   xmm0, [r13]
+    movss   xmm2, [rax+20]
+    mulss   xmm2, [rax+24]
+    movss   xmm1, [rax+12]
+    mulss   xmm1, [rax+32]
+    subss   xmm2, xmm1
+    mulss   xmm2, [r13+4]
+    addss   xmm0, xmm2
+    movss   xmm2, [rax+12]
+    mulss   xmm2, [rax+28]
+    movss   xmm1, [rax+16]
+    mulss   xmm1, [rax+24]
+    subss   xmm2, xmm1
+    mulss   xmm2, [r13+8]
+    addss   xmm0, xmm2
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    ja      .Lcv_zero
+2:  movss   xmm0, [rbx+MA_BLEND]
+    cvtss2si eax, xmm0
+    test    eax, eax
+    jle     .Lcv_one
+    mov     [rsp+292], eax
+    mov     eax, [rbx+MA_ALPHA]         # the value: alpha, unless the graph
+    mov     [rsp+288], eax              #  says otherwise
+    cmp     dword ptr [rbx+GR_N], 0
+    je      5f
+    mov     rax, [rip+hv_to]            # the shading context (as hit_graph)
+    lea     rcx, [r12+r12*8]
+    lea     rsi, [rax+rcx*4]
+    lea     rdi, [rsp]
+    mov     ecx, 9
+    rep     movsd
+    mov     eax, [rsp+296]
+    mov     [rsp+36], eax
+    mov     eax, [rsp+300]
+    mov     [rsp+40], eax
+    mov     rax, [rip+hv_tv]
+    lea     rcx, [r12+r12*8]
+    lea     rsi, [rax+rcx*4+12]
+    lea     rdi, [rsp+44]
+    mov     ecx, 6
+    rep     movsd
+    mov     dword ptr [rsp+68], 0
+    mov     dword ptr [rsp+72], 0
+    mov     dword ptr [rsp+76], 0x3f800000
+    mov     rax, [rip+hv_tuv]
+    lea     rcx, [r12+r12*2]
+    lea     rax, [rax+rcx*8]
+    cmp     dword ptr [rax], 0x7fc00000
+    jne     3f
+    xor     eax, eax
+3:  mov     [rsp+120], rax
+    mov     rsi, rbx
+    lea     rdi, [rsp+160]
+    mov     ecx, 32
+    rep     movsd
+    mov     rdi, rbx
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+160]
+    mov     ecx, 1
+    call    graph_shade
+    mov     eax, [rsp+160+MA_ALPHA]
+    cmp     dword ptr [rsp+292], 1
+    jne     4f
+    test    dword ptr [rsp+112], 1 << PIN_MASK
+    jz      4f
+    mov     eax, [rsp+160+MA_RT_MASK]
+4:  mov     [rsp+288], eax
+5:  movss   xmm0, [rsp+288]
+    cmp     dword ptr [rsp+292], 1
+    jne     6f
+    movss   xmm1, [rbx+MA_CLIP]         # masked: against the clip value
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    ja      51f
+    movss   xmm1, [rip+pt_third]
+51: comiss  xmm0, xmm1
+    jae     .Lcv_one
+    jmp     .Lcv_zero
+6:  maxss   xmm0, [rip+pt_zero]
+    minss   xmm0, [rip+pt_one]
+    jmp     9f
+.Lcv_zero:
+    xorps   xmm0, xmm0
+    jmp     9f
+.Lcv_one:
+    movss   xmm0, [rip+pt_one]
+9:  add     rsp, 304
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # hit_graph(rbx=path frame, r12d=triangle, r13=material) - evaluate the
 #   material's graph here: r13 -> PF_MAT with the results, PF_NS bumped
 hit_graph:
@@ -2183,40 +2395,18 @@ hit_graph:
     jne     1f
     xor     eax, eax
 1:  mov     [rbx+PF_SC+120], rax
-    mov     rsi, r13                    # the material's own values
-    lea     rdi, [rbx+PF_MAT]
+    mov     rsi, r13                    # the material's own values, the
+    lea     rdi, [rbx+PF_MAT]           #  graph's pins over them
     mov     ecx, 32
     rep     movsd
     mov     rdi, r13
     lea     rsi, [rbx+PF_SC]
+    lea     rdx, [rbx+PF_MAT]
+    xor     ecx, ecx
     call    graph_shade
     lea     r13, [rbx+PF_MAT]
     mov     r14d, [rbx+PF_SC+112]       # what it drives
-    test    r14d, 1
-    jz      1f
-    lea     rsi, [rbx+PF_SC+80]
-    lea     rdi, [r13+32]
-    mov     ecx, 3
-    rep     movsd
-1:  test    r14d, 2
-    jz      2f
-    mov     eax, [rbx+PF_SC+92]
-    mov     [r13+44], eax
-2:  test    r14d, 4
-    jz      3f
-    mov     eax, [rbx+PF_SC+96]
-    mov     [r13+48], eax
-3:  test    r14d, 8
-    jz      4f
-    lea     rsi, [rbx+PF_SC+100]
-    lea     rdi, [r13+64]
-    mov     ecx, 3
-    rep     movsd
-    xorps   xmm0, xmm0                  # (no strength yet: 1)
-    comiss  xmm0, [r13+76]
-    jb      4f
-    mov     dword ptr [r13+76], 0x3f800000
-4:  test    r14d, 16
+    test    r14d, 1 << PIN_NORMAL
     jz      5f
     lea     rsi, [rbx+PF_SC+68]
     lea     rdi, [rbx+PF_NS]

@@ -6,6 +6,18 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (PBR materials and material editor, phase 12)
+- **Material records v2 (M1, #228):** materials grow to 4 KiB: graphs of
+  48 nodes, links that take a node's output 0..3, and a Material Output
+  with 13 pins (base, metallic, specular, roughness, emission, opacity,
+  normal, ambient occlusion, clear coat, coat roughness, transmission, IOR,
+  opacity mask). Blend modes (opaque, masked, translucent), one-sided
+  materials and the mask clip value, in the Material tab, `matset` and
+  glTF (`alphaMode`, `alphaCutoff`, `doubleSided`). The path tracer lets
+  rays and shadows through holes and translucent surfaces; the preview
+  takes specular, IOR (F0) and AO from nodes. v0.12 files and `.beea`
+  material assets open unchanged.
+
 ## [0.12.0] - 2026-10-15
 
 Phase 11, "UI & usability" (`Vibecoding/BeeModel-UI-Plan.html`): every

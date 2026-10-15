@@ -44,7 +44,8 @@
 .equ SH_TMP,    128             # 32 bytes
 .equ SH_P,      176             # the world point (light probes)
 .equ SH_PROBED, 188             # 1: an irradiance volume lit it
-.equ SH_SZ,     192
+.equ SH_AO,     192             # ambient occlusion (a graph's; else 1)
+.equ SH_SZ,     208
 
 .section .bss
 .align 8
@@ -624,7 +625,7 @@ job_shade:
 pv_graph:
     push    rbx
     push    r12
-    sub     rsp, 200
+    sub     rsp, 328
     mov     rbx, rdi
     mov     r12, rsi
     mov     r8, [r14+RO_MESH]           # the triangle's corners
@@ -686,45 +687,30 @@ pv_graph:
     jz      11f
     lea     rax, [rsp+176]
     mov     [rsp+120], rax
-11: mov     rdi, rbx
+11: mov     rsi, rbx                    # its values, the pins over them
+    lea     rdi, [rsp+200]
+    mov     ecx, 32
+    rep     movsd
+    mov     rdi, rbx
     lea     rsi, [rsp]
+    lea     rdx, [rsp+200]
+    xor     ecx, ecx
     call    graph_shade
+    lea     rsi, [rsp+200]
+    mov     r9, r12
+    call    load_values
     mov     eax, [rsp+112]              # what it drives
-    test    eax, 1
-    jz      2f
-    mov     rcx, [rsp+80]
-    mov     [r12+SH_BASE], rcx
-    mov     ecx, [rsp+88]
-    mov     [r12+SH_BASE+8], ecx
-2:  test    eax, 2
-    jz      3f
-    mov     ecx, [rsp+92]
-    mov     [r12+SH_METAL], ecx
-3:  test    eax, 4
-    jz      4f
-    mov     ecx, [rsp+96]
-    mov     [r12+SH_ROUGH], ecx
-4:  test    eax, 8
+    test    eax, 1 << PIN_AO
     jz      5f
-    movss   xmm1, [rbx+76]              # emission x strength (none yet: 1)
-    xorps   xmm2, xmm2
-    comiss  xmm1, xmm2
-    ja      41f
-    movss   xmm1, [rip+pf_one]
-41: xor     ecx, ecx
-42: movss   xmm0, [rsp+100+rcx*4]
-    mulss   xmm0, xmm1
-    movss   [r12+SH_EMIT+rcx*4], xmm0
-    inc     ecx
-    cmp     ecx, 3
-    jb      42b
-5:  test    eax, 16
+    mov     ecx, [rsp+200+MA_RT_AO]
+    mov     [r12+SH_AO], ecx
+5:  test    eax, 1 << PIN_NORMAL
     jz      6f
     mov     rcx, [rsp+68]
     mov     [r12+SH_N], rcx
     mov     ecx, [rsp+76]
     mov     [r12+SH_N+8], ecx
-6:  add     rsp, 200
+6:  add     rsp, 328
     pop     r12
     pop     rbx
     ret
@@ -939,11 +925,14 @@ cam_to_world:
 # load_material(rsi=record or 0) - job_shade's scratch (one level up)
 load_material:
     lea     r9, [rsp+8]
+    mov     dword ptr [r9+SH_AO], 0x3f800000
     test    rsi, rsi
-    jnz     1f
+    jnz     load_values
     lea     rsi, [rip+mat_default]
     sub     rsi, 32                     # (laid out like a record from +32)
-1:  xor     ecx, ecx                    # base metallic roughness specular
+# load_values(rsi=record, r9=scratch) - its principled values
+load_values:
+    xor     ecx, ecx                    # base metallic roughness specular
 2:  mov     eax, [rsi+32+rcx*4]         #  ior transmission
     mov     [r9+SH_BASE+rcx*4], eax
     inc     ecx
@@ -984,8 +973,14 @@ shade:
     movss   xmm5, [rip+pf_one]
     subss   xmm5, [rbx+SH_TRANS]
     mulss   xmm5, xmm6
-    movss   xmm4, [rbx+SH_SPEC]
-    mulss   xmm4, [rip+pf_008]
+    movss   xmm4, [rbx+SH_IOR]          # 2 spec ((ior - 1) / (ior + 1))^2
+    movss   xmm3, xmm4
+    subss   xmm4, [rip+pf_one]
+    addss   xmm3, [rip+pf_one]
+    divss   xmm4, xmm3
+    mulss   xmm4, xmm4
+    mulss   xmm4, [rbx+SH_SPEC]
+    addss   xmm4, xmm4
     xor     ecx, ecx
 1:  movss   xmm0, [rbx+SH_BASE+rcx*4]
     movss   xmm1, xmm0
@@ -1039,6 +1034,7 @@ shade:
     movss   xmm3, [rbx+SH_DIFF+rcx*4]   # + diffuse irr
     mulss   xmm3, [rsp+rcx*4]
     addss   xmm2, xmm3
+    mulss   xmm2, [rbx+SH_AO]           # (occluded ambient)
     movss   [rbx+SH_OUT+rcx*4], xmm2
     inc     ecx
     cmp     ecx, 3

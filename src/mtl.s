@@ -471,6 +471,7 @@ map_kd:
     mov     edi, ebx
     xor     esi, esi
     mov     edx, [rsp+16]
+    xor     ecx, ecx
     call    graph_socket
 9:  add     rsp, 24
     pop     r12

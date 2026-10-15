@@ -28,6 +28,7 @@
 .globl corner_normals
 .globl hv_mats
 .globl hv_nmats
+.globl hv_cut
 .globl hv_cam
 .globl hv_points
 .globl hv_npoints
@@ -43,7 +44,6 @@
 .equ N2_SZ,     32              # BVH2 node: min[3] max[3] a b
 .equ N4_SZ,     128             # BVH4 node: minx maxx miny maxy minz maxz [4] child[4]
 .equ NBUF,      32
-.equ MA_SZ,     1024
 .equ MAX_POINTS, 64
 
 .section .bss
@@ -62,7 +62,9 @@ hv_tuv:         .skip 8             # f32[n][6]  UVs (u0 NaN: none, box)
 hv_tvc:         .skip 8             # u32[n][3]  vertex colours (0: none)
 hv_only:        .skip 8             # set: only this object (baking)
 hv_ibud:        .skip 4             # instance triangles still allowed
-hv_mats:        .skip 8             # material snapshots (128 bytes, 0 = default)
+hv_mats:        .skip 8             # material snapshots (MA_SZ bytes, 0 = default)
+hv_cut:         .skip 4             # some material is masked, translucent or
+                                    #  one-sided: rays test what they hit
 hv_nodes:       .skip 8             # BVH4
 hv_root:        .skip 4             # root reference
 hv_nn4:         .skip 4
@@ -241,10 +243,11 @@ hive_build:
     jz      .Lhb_fail
     mov     [rip+b_prim], rax
     # materials: the scene's, as of now (index + 1; 0 = the default)
+    mov     dword ptr [rip+hv_cut], 0
     call    mat_count
     mov     [rip+hv_nmats], eax
     lea     edi, [rax+1]
-    shl     edi, 10
+    shl     edi, MA_SHIFT
     call    hv_map
     test    rax, rax
     jz      .Lhb_fail
@@ -257,11 +260,17 @@ hive_build:
     mov     rsi, rax
     mov     rdi, [rip+hv_mats]
     lea     ecx, [rbx+1]
-    shl     ecx, 10
+    shl     ecx, MA_SHIFT
     add     rdi, rcx
     mov     ecx, MA_SZ
     rep     movsb
-    inc     ebx
+    movss   xmm0, [rdi-MA_SZ+MA_BLEND]  # (not simply opaque)
+    addss   xmm0, [rdi-MA_SZ+MA_SIDED]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     31f
+    mov     dword ptr [rip+hv_cut], 1
+31: inc     ebx
     jmp     3b
 4:  # triangles, object by object
     xor     r13d, r13d                  # global triangle
