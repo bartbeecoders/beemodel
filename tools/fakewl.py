@@ -588,6 +588,7 @@ def main():
     render_ui()
     team_ui()
     prefs_ui()
+    workspaces_ui()
     transforms()
     undo_redo()
     files()
@@ -6209,6 +6210,68 @@ def prefs_ui():
     g.pump(0.3)
     w = widget(n, 'prefs.theme')
     check(w and w['value'] == 1, 'the preferences are there after a restart')
+    g.proc.kill()
+
+
+def workspaces_ui():
+    """UI plan U24: workspace tabs (built-in and custom), Ctrl+PageUp /
+    PageDown, swapping areas by their headers, joining them by a corner,
+    layouts kept in .bee files and across a restart."""
+    print('  -- workspaces --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    home = f.home
+    tabs = lambda: [w.get('label') for w in ui_tree(m) if w['name'] == 'workspace.tab']
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.3)
+    check(tabs() == ['Modeling', 'Sculpt', 'CAD', 'Shading', 'Animation', 'World'], f'workspace tabs in the menu bar ({tabs()})')
+    click('workspace.tab', 3)
+    check('node.tree' in names() and 'outliner.filter' not in names(), 'Shading: a node editor, no outliner')
+    f.mods(4); f.key(109); f.mods(0); f.pump(0.3)              # Ctrl+PageDown
+    check('timeline.play' in names(), 'Ctrl+PageDown: Animation (a timeline)')
+    f.mods(4); f.key(104); f.key(104); f.key(104); f.key(104); f.mods(0); f.pump(0.3)  # Ctrl+PageUp x4
+    check('outliner.filter' in names() and 'timeline.play' not in names(), 'Ctrl+PageUp back to Modeling, as it was')
+    click('workspace.add')
+    check(len(tabs()) == 7 and tabs()[-1] == 'Custom 1', f'+ adds a workspace from this layout ({tabs()[-1:]})')
+    vm = widget(m, 'viewport.mode')                            # swap: the viewport's header onto the outliner
+    of = widget(m, 'outliner.filter')
+    hy = vm['y'] + 11                                          # (the header row; empty right of its tools)
+    f.drag(of['x'] - 140, hy, of['x'] + 60, of['y'] - 40, steps=4); f.pump(0.3)
+    w = wait_widget(f, m, 'outliner.filter')
+    check(w is not None and w['x'] < of['x'] - 200, f'a header dragged onto another area swaps them (the outliner now at x {w and w["x"]})')
+    q('op("workspace.set", "1")')                               # (Modeling, as it was)
+    f.pump(0.3)
+    for _ in range(10):                                        # (until Modeling is drawn again)
+        of = widget(m, 'outliner.filter')
+        if of and of['x'] > 600:
+            break
+        f.pump(0.1)
+    vm = wait_widget(f, m, 'viewport.mode')
+    if vm and of:                                              # join: the outliner's corner into the Properties below
+        cx, cy = of['x'] - 4, vm['y'] + 1
+        f.drag(cx, cy, cx + 60, cy + 300, steps=4); f.pump(0.3)
+    for _ in range(5):
+        if 'props.tab.object' not in names():
+            break
+        f.pump(0.1)
+    check('props.tab.object' not in names() and 'outliner.filter' in names(), 'a corner dragged into the neighbour joins them')
+    f.key(28); f.type('agent.permission_files'); f.key(28); f.pump(0.2); f.key(1)
+    path = os.path.join(home, 'ws.bee')
+    q(f'op("file.save_as", "{path}")\nop("workspace.set", "1")\nop("file.new")\nop("file.open", "{path}")')
+    f.pump(0.3)
+    check(tabs()[-1:] == ['Custom 1'], 'the workspaces come back from the .bee file')
+    f.proc.kill()
+    g = Fake(home=home)
+    g.pump(1.0, until_frame=True)
+    g.enter(600, 300)
+    n = Mcp(g)
+    t2 = [w.get('label') for w in ui_tree(n) if w['name'] == 'workspace.tab']
+    check(t2[-1:] == ['Custom 1'], f'and after a restart ({t2[-1:]})')
     g.proc.kill()
 
 

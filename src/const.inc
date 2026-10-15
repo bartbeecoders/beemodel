@@ -208,6 +208,7 @@
 .equ HIT_WIDGET,        30        # widgets.s (index = the widget's id)
 .equ HIT_WGPOP,         31        # an enum's open option list (index = row)
 .equ DRAG_WIDGET,       13
+.equ DRAG_AREA,         14      # an area's header / corner dragged (workspace.s)
 .equ POPUP_R,           6         # corner radius of menus, palette, dialogs
 .equ FIELD_R,           4         # ... of fields and buttons
 .equ TH_DARK,           0         # UI themes (theme.s)
@@ -331,6 +332,7 @@
 .equ HIT_PIE,           33            # a pie menu (index = the choice)
 .equ HIT_DIALOG,        34            # under a dialog: nothing
 .equ HIT_CPICK,         35            # the colour picker (index 1 inside it, 0 outside)
+.equ HIT_AREA_CORNER,   36            # an area's top-left corner (drag: join)
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
 
