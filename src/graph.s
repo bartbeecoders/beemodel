@@ -87,6 +87,7 @@
 .equ MA_COATR_, 84
 .equ MA_ALPHA_, 88
 .equ T_IMAGE,   1
+.equ T_TEXPARAM, 39
 .equ T_NOISE,   2
 .equ T_CHECKER, 3
 .equ T_GRAD,    4
@@ -532,6 +533,8 @@ graph_eval:
     lea     r12, [rbx+GR_NODES+r12]
     mov     eax, [r12+ND_TYPE]
     cmp     eax, T_IMAGE
+    je      .Lge_image
+    cmp     eax, T_TEXPARAM             # (a texture parameter: the same)
     je      .Lge_image
     cmp     eax, T_NOISE
     je      .Lge_noise
@@ -1046,6 +1049,7 @@ graph_probe:
     mov     rbp, rcx
     push    rdi
     call    tex_init
+    call    mat_sync_check              # (material instances up to date)
     pop     rdi
     call    mat_count
     cmp     edi, eax
@@ -1778,6 +1782,9 @@ graph_add:
     cmp     ecx, 3
     jb      1b
     inc     dword ptr [rbx+GR_N]
+    mov     rdi, rbx                    # (a parameter: "Param n")
+    mov     esi, [rbx+GR_N]
+    call    param_default
     mov     eax, [rbx+GR_N]
     jmp     9f
 8:  mov     eax, -1
@@ -2409,9 +2416,29 @@ do_mat_node:
     test    eax, eax
     js      .Lmn_full
     mov     ebx, eax
-    cmp     r14d, T_IMAGE               # image: a name first
-    jne     2f
+    mov     edi, r14d                   # a parameter: its name first
+    call    is_param_type
+    test    eax, eax
+    jz      11f
     mov     rsi, r13
+    call    next_word
+    mov     r13, rsi
+    test    eax, eax
+    jz      11f
+    mov     edi, r12d
+    call    graph_own
+    test    rax, rax
+    jz      11f
+    lea     ecx, [rbx-1]
+    imul    ecx, ecx, NODE_SZ
+    lea     rdi, [rax+GR_NODES+rcx]
+    lea     rsi, [rip+gw_word]
+    call    pn_set
+11: cmp     r14d, T_IMAGE               # image: a name first
+    je      12f
+    cmp     r14d, T_TEXPARAM
+    jne     2f
+12: mov     rsi, r13
     call    next_word
     mov     r13, rsi
     test    eax, eax

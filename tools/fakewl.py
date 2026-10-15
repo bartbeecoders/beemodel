@@ -619,6 +619,7 @@ def main():
     node_canvas()
     material_editor()
     material_previews()
+    material_instances()
     gltf_mtl()
     product_shot()
     params_units()
@@ -2566,6 +2567,82 @@ def material_previews():
     f.pump(0.5)
     ft = [float(x) for x in q('for k in 0..6 {\n print(frametime(k))\n}').split()]
     check(max(ft) < 120, f'24 nodes: thumbnails and pane made again in {max(ft):.1f} ms at most (budget 120 ms in CI)')
+    f.proc.kill()
+
+
+
+def material_instances():
+    """Parameters and material instances (M7): named parameter nodes,
+    instances that share the parent's graph and override parameters,
+    changes to the parent reaching every instance, keyed parameters,
+    files, the Material tab."""
+    print('  -- material instances --')
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-inst-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+        return r.stdout.strip() + r.stderr.strip()
+    base = ('m = material("Paint")\nc = node(m, "vectorparam", "Tint", 0.8, 0.1, 0.1)\nw = node(m, "scalarparam", "Wear", 0.3)\n'
+            'socket(m, "base", c)\nsocket(m, "roughness", w)\n')
+    out = run(base + 'a = instance(m, "Blue")\nb = instance(m)\nprint(a, b)\nmatparam(a, "Tint", 0.1, 0.2, 0.9)\n'
+              'matparam(m, "Wear", 0.7)\nmatparam(m, "Tint", 0.5, 0.5, 0.5)\n'
+              'print(matparam(a, "Wear"), matparam(a, "Tint"), matparam(b, "Tint"))\n'
+              'op("material.param_reset", "Blue Tint")\nprint(matparam(a, "Tint"))\nc2 = instance(a, "Blue2")\n'
+              'matparam(m, "Wear", 0.2)\nprint(matparam(c2, "Wear"))')
+    check(out.split() == ['Blue', 'Paint_Inst', '0.7', '0.1', '0.5', '0.5', '0.2'],
+          f'instances: the parent\'s values unless overridden, a reset, instances of instances ({out.split()})')
+    out = run(base + 'a = instance(m, "Blue")\nprint(key("material:Blue:Wear", 1, 0), key("material:Blue:Wear", 11, 1))\n'
+              'frame(6)\nprint(matparam("Blue", "Wear"), matparam("Paint", "Wear"))')
+    check(out.split()[-2:] == ['0.5', '0.3'], f'a parameter can be keyed on an instance ({out.split()[-2:]})')
+    bee = os.path.join(home, 'i.bee')
+    out = run(base + f'a = instance(m, "Blue")\nmatparam(a, "Tint", 0.1, 0.2, 0.9)\nop("file.save", "{bee}")')
+    out = run(f'op("file.open", "{bee}")\nmatparam("Paint", "Tint", 0.3, 0.3, 0.3)\nmatparam("Paint", "Wear", 0.9)\n'
+              'print(matparam("Blue", "Tint"), matparam("Blue", "Wear"))')
+    check(out.split()[-2:] == ['0.1', '0.9'], f'instances and their overrides are saved ({out.split()[-2:]})')
+    # 100 instances of one parent, each its own colour, in one render
+    grid = base + 'socket(m, "roughness", nil)\nmatset(m, "roughness", 0.6)\ndelete("Cube")\n'
+    for i in range(100):
+        r, g, b = (i % 10) / 9, (i // 10) / 9, 1 - (i % 10) / 9
+        grid += (f'add("cube", "C{i}", {(i % 10) * 2.2 - 10}, 0, {(i // 10) * 2.2 - 10})\n'
+                 f'n{i} = instance(m, "I{i}")\nmatparam(n{i}, "Tint", {r:.3f}, {g:.3f}, {b:.3f})\nassign("C{i}", n{i})\n')
+    p = os.path.join(home, 'grid.png')
+    out = run(grid + f'delete("Camera")\nadd("camera", "Top", 0, 34, 0.1)\nrotate("Top", rad(-90), 0, 0)\nrender("{p}", 160, 160, 4)\n'
+              'print(matparam("I37", "Tint"))')
+    cols = set()
+    if os.path.exists(p):
+        im = Image.open(p).convert('RGB')
+        cols = {tuple(c // 40 for c in im.getpixel((x, y))) for y in range(0, 160, 3) for x in range(0, 160, 3)}
+    check(len(cols) >= 25, f'100 instances of one material render in one image, each its own colour ({len(cols)} colours)')
+    # deleting the parent: its instances become materials of their own
+    out = run(base + 'a = instance(m, "Blue")\nop("material.remove", "Paint")\nmatparam(a, "Wear", 0.4)\nprint(matparam(a, "Wear"), nodeinfo(a, 0, "count"))')
+    check(out.split()[-2:] == ['0.4', '2'], f'removing the parent leaves its instances as materials ({out.split()[-2:]})')
+    # the Material tab: an instance's parameters with override toggles
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q(base + 'a = instance(m, "Blue")\nassign("Cube", a)\nselect("Cube")')
+    f.pump(0.3)
+    props_tab(m, f, 'material')
+    f.pump(0.3)
+    names = {w['name'] for w in ui_tree(m)}
+    check({'instance.override', 'instance.value', 'instance.color'} <= names and 'material.base' not in names,
+          'an instance shows its parameters with override toggles, not the parent\'s values')
+    w = widget(m, 'instance.value', 1)
+    if w:
+        f.click(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2); f.pump(0.2)
+        f.mods(4); f.key(30); f.mods(0); f.type('0.85'); f.key(28); f.pump(0.3)
+    got = (q('print(matparam("Blue", "Wear"))'), widget(m, 'instance.override', 1)['value'] if widget(m, 'instance.override', 1) else None)
+    check(got == ('0.85', 1), f'typing a value overrides that parameter ({got})')
+    x, y = widget_xy(m, 'instance.override', 1)
+    f.click(x, y); f.pump(0.3)
+    check(q('print(matparam("Blue", "Wear"))') == '0.3', 'clearing the override gives the parent\'s value back')
+    f.shot('67_instance.png')
+    q('assign("Cube", "Paint")')
+    f.pump(0.3)
+    check('material.new_instance' in {w['name'] for w in ui_tree(m)}, 'a material offers New Instance')
     f.proc.kill()
 
 
