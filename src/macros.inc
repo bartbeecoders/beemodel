@@ -57,3 +57,17 @@
     .quad \poll
     .popsection
 .endm
+
+# A submenu entry of a menu list (menus.s): tag 1, label, entries, count
+.equ SUBTAG,    1
+.equ SUB_LABEL, 8
+.equ SUB_ITEMS, 16
+.equ SUB_COUNT, 24
+.macro SUBMENU sym, label, items, count
+    .pushsection .rodata
+.Lsl\@: .asciz "\label"
+    .balign 8
+    .globl \sym
+\sym:   .quad SUBTAG, .Lsl\@, \items, \count
+    .popsection
+.endm

@@ -23,8 +23,6 @@
 .globl cursor_pos
 .globl cursor_place
 .globl cursor_draw
-.globl items_mesh2
-.globl items_mesh2_n
 .globl build_bevel
 .globl bv_angle
 .globl bv_cos
@@ -100,14 +98,6 @@ s_lbl_bevel:    .asciz "Bevel"
 s_lbl_loop:     .asciz "Loop Cut"
 s_lbl_knife:    .asciz "Knife"
 .align 8
-items_mesh2:    .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
-                .quad op_m_loopcut, op_m_knife, op_m_bisect, op_m_subdivide, 0
-                .quad op_m_bridge, op_m_spin, op_m_fill, op_m_dissolve, 0
-                .quad op_m_merge_c, op_m_merge_col, op_m_merge_d, 0
-                .quad op_m_del_v, op_m_del_e, op_m_del_f, 0
-                .quad op_m_dup, op_m_flip, op_m_recalc, 0, op_cursor_reset
-items_mesh2_end:
-.set items_mesh2_n, (items_mesh2_end - items_mesh2) / 8
 
 OPERATOR op_m_loopcut, "mesh.loopcut", "Loop Cut", do_loopcut, key=KEY_R|KM_CTRL, flags=OPF_AI_SAFE|OPF_EDIT, doc="Cut a ring of quads: Ctrl+R then click; scripts: mesh.loopcut \"a b [cuts]\"", params=p_loopcut
 OPERATOR op_m_knife, "mesh.knife", "Knife", do_knife, key=KEY_K, flags=OPF_EDIT|OPF_QUIET, doc="Draw a cut across the visible faces: click points, Enter cuts"

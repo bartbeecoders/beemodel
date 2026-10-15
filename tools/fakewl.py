@@ -512,6 +512,7 @@ def main():
     widgets_ui()
     tooltips()
     icons()
+    menus_ui()
     transforms()
     undo_redo()
     files()
@@ -832,6 +833,28 @@ def widget_xy(m, name, sub=0):
     """Centre of a widget, found by name (no hard-coded coordinates)."""
     w = widget(m, name, sub)
     return (w['x'] + w['w'] // 2, w['y'] + w['h'] // 2) if w else (0, 0)
+
+
+def menu_pick(f, m, *path):
+    """Click through the menus by label (ui_tree): menu_pick(f, m, 'View',
+    'Analysis', 'Show Boundary Edges'). Submenus open by hovering."""
+    t = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == path[0]]
+    if not t:
+        return False
+    f.click(t[0]['x'] + t[0]['w'] // 2, t[0]['y'] + t[0]['h'] // 2)
+    f.pump(0.1)
+    for i, label in enumerate(path[1:], 1):
+        items = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == label]
+        if not items:
+            f.key(1); f.key(1)
+            return False
+        w = items[-1]
+        x, y = w['x'] + 40, w['y'] + w['h'] // 2
+        if i < len(path) - 1:
+            f.move(x, y); f.pump(0.1)
+        else:
+            f.click(x, y); f.pump(0.2)
+    return True
 
 
 def mcp():
@@ -1162,8 +1185,7 @@ def booleans():
     m = Mcp(f)
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
     q('add("cube", "Cutter", 1, 1.5, 1); scale("Cutter", 0.6); select("Cutter", "Cube")')
-    f.click(70, 44); f.pump(0.2)                # Edit > Boolean Difference
-    f.click(140, 258); f.pump(0.3)
+    menu_pick(f, m, 'Object', 'Boolean', 'Boolean Difference')
     r = q('print(exists("Cutter"), manifold("Cube"), round(volume("Cube") * 1000))').split()
     check(r == ['0', '1', '7604'], f'Edit > Boolean Difference cuts the corner (closed, volume {r[-1] if r else "?"} / 7604)')
     f.shot('44_boolean.png')
@@ -1192,14 +1214,12 @@ def analysis_repair():
     q('edit("Cube"); op("mesh.select_mode_face"); vselect("Cube", 4, 5, 6, 7); op("mesh.delete"); edit(); select("Cube")')
     check(q('print(analyze("Cube", "boundary"), analyze("Cube", "overhang"), manifold("Cube"))') == '4 1 0',
           'analyze(): the deleted top face leaves 4 boundary edges, the bottom overhangs')
-    f.click(130, 44); f.pump(0.2)              # View > Show Boundary Edges
-    f.click(200, 516); f.pump(0.3)             # (below the theme entries)
+    menu_pick(f, m, 'View', 'Analysis', 'Show Boundary Edges')
     img = f.image().crop((214, 80, 1014, 620))
     cyan = sum(1 for c in img.getdata() if c == (0x40, 0xe0, 0xe0))
     check(cyan > 100, f'View > Show Boundary Edges marks the hole ({cyan} px)')
     f.shot('45_analysis.png')
-    f.click(70, 44); f.pump(0.2)               # Edit > Repair Mesh
-    f.click(140, 306); f.pump(0.3)
+    menu_pick(f, m, 'Object', 'Repair Mesh')
     check(q('print(analyze("Cube", "boundary"), manifold("Cube"), faces("Cube"))') == '0 1 6',
           'Edit > Repair Mesh fills the hole: closed, 6 faces')
     img = f.image().crop((214, 80, 1014, 620))
@@ -1234,15 +1254,13 @@ def hardsurface_walkthrough():
     f.key(15)                                   # object mode
     check(q('print(faces("Cube"), round(volume("Cube") * 100))') == '14 702',
           'inset + extrude down: a 1.4 x 1.4 x 0.5 pocket in the top')
-    f.click(181, 44); f.pump(0.2)              # Create > Cylinder (at the 3D cursor)
-    f.click(200, 120); f.pump(0.3)
+    menu_pick(f, m, 'Add', 'Cylinder')         # (at the 3D cursor)
     f.key(31); f.type('0.3'); f.key(28)         # S 0.3
     f.key(31); f.key(21); f.type('4'); f.key(28)  # S Y 4: 2.4 tall
     f.key(34); f.key(21); f.type('1'); f.key(28)  # G Y 1: through the part
     f.mods(1); f.click(*project((0.9, 0.5, 1))); f.mods(0)   # Shift+click the cube
     check(q('print(active())') == 'Cube', 'Shift+click makes the cube active, the cylinder stays selected')
-    f.click(70, 44); f.pump(0.2)               # Edit > Boolean Difference
-    f.click(140, 258); f.pump(0.3)
+    menu_pick(f, m, 'Object', 'Boolean', 'Boolean Difference')
     r = q('print(exists("Cylinder"), manifold("Cube"), round(volume("Cube") * 1000))').split()
     check(r[:2] == ['0', '1'] and r[2] == '6599', f'Edit > Boolean Difference drills the hole: closed, volume {r[2] if len(r) > 2 else "?"} / 6599')
     f.click(1238, 311); f.pump(0.2)            # Properties: + Add > Bevel
@@ -4672,11 +4690,15 @@ def ui_basics():
     f.move(600, 300)
     check(f.cursor == 8, 'crosshair again over the canvas')
     check(not dot(), 'a fresh scene has no unsaved-changes dot')
-    f.click(193, 43)                           # Create menu
+    labels = []
+    t = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == 'Add'][0]
+    f.click(t['x'] + 10, t['y'] + 10)
+    labels = [w['label'] for w in ui_tree(m) if w['kind'] == 'menuitem']
     f.shot('ui_create_menu.png')
-    f.click(230, 71 + 12 * 24 + 2 * 9)         # its 13th entry, below two separators
-    f.pump(0.3)
-    check(q('print(exists("Armature"))') == '1', 'Create menu shows Path, Light, Camera and Armature')
+    f.key(1)
+    check({'Light', 'Camera', 'Armature', 'Curve'} <= set(labels), f'the Add menu lists every entry ({len(labels)})')
+    menu_pick(f, m, 'Add', 'Armature')
+    check(q('print(exists("Armature"))') == '1', 'Add > Armature adds one')
     check(dot(), 'a change shows the unsaved-changes dot in the title')
     f.click(270, 67)                           # viewport header: editor type menu
     f.shot('ui_area_menu.png')
@@ -4748,10 +4770,11 @@ def themes():
         t = tabs[th]
         check(px(f, 640, 5) == t['COL_TITLE_BG'] and px(f, 4, 300) == t['COL_PANE_BG'],
               f'view.theme {th}: title bar and panels take its colours')
-    f.click(133, 43)                           # View menu: Light Theme
-    f.click(160, 411)
-    check(px(f, 640, 5) == tabs['light']['COL_TITLE_BG'], 'View > Light Theme switches the theme')
-    f.click(133, 43)
+    m = Mcp(f)
+    menu_pick(f, m, 'View', 'Theme', 'Light Theme')
+    check(px(f, 640, 5) == tabs['light']['COL_TITLE_BG'], 'View > Theme > Light Theme switches the theme')
+    t = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == 'View'][0]
+    f.click(t['x'] + 10, t['y'] + 10)
     f.shot('themes_light_menu.png')
     f.key(1)
     f.proc.kill()
@@ -4885,13 +4908,14 @@ def tooltips():
     check(grey < normal - 40, f'and is drawn greyed ({grey:.0f} < {normal:.0f}, Edit Mode)')
     f.click(120, 71)                           # clicking it does nothing
     f.key(1)
-    f.click(253, 43)                           # Mesh menu in object mode
-    f.move(300, 71)
+    mx = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == 'Mesh'][0]['x'] + 10
+    f.click(mx, 43)                            # Mesh menu in object mode
+    f.move(mx + 40, 71)
     t = tip()
     check(bool(t) and 'edit mode' in (t['why'] or ''), f'Mesh > Extrude needs edit mode ({t and t["why"]})')
     f.key(1)
     f.move(600, 300); f.key(15)                # Tab: edit mode
-    f.click(253, 43); f.move(300, 71)
+    f.click(mx, 43); f.move(mx + 40, 71)
     t = tip()
     check(bool(t) and t['why'] is None, 'in edit mode it can run (no reason shown)')
     f.key(1); f.move(600, 300); f.key(15)
@@ -4931,6 +4955,76 @@ def icons():
     drawn = [sum(sh) for sh in shapes]
     check(all(n >= 12 for n in drawn) and len(set(shapes)) == 10,
           f'each tool button shows its own icon ({drawn})')
+    f.proc.kill()
+
+
+def menus_ui():
+    """UI plan U6: the reorganised menu bar, submenus, keyboard navigation,
+    right-click context menus and the Z pie (hold) - Z tapped still toggles."""
+    print('  -- menus --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    tree = ui_tree(m)
+    bar = [w['label'] for w in tree if w['kind'] == 'menu']
+    check(bar == ['File', 'Edit', 'View', 'Select', 'Add', 'Object', 'Mesh', 'Render', 'AI', 'Help'],
+          f'menu bar: {" ".join(bar)}')
+    items = lambda lvl=None: [w for w in ui_tree(m) if w['kind'] == 'menuitem' and (lvl is None or w['level'] == lvl)]
+    f.key(68)                                  # F10: the first menu, keyboard on it
+    check(len(items(0)) > 5 and items(0)[0]['label'] == 'New Scene', 'F10 opens the File menu')
+    f.key(108); f.key(108); f.key(108); f.key(108)   # Down x4: Import (a submenu)
+    f.key(106)                                 # Right: into it
+    sub = [w['label'] for w in items(1)]
+    check(sub[:2] == ['Import OBJ...', 'Import STL...'], f'Right opens the Import submenu ({len(sub)})')
+    f.key(105)                                 # Left: back
+    check(not items(1), 'Left closes the submenu')
+    f.key(106); f.key(106)                     # Right on Import opens it again, ... ; Esc x2
+    f.key(1); f.key(1)
+    check(not items(), 'Esc closes one level at a time')
+    f.key(68); f.key(106)                      # F10, Right: the next menu (Edit)
+    check(items(0) and items(0)[0]['label'] == 'Undo', 'Right on a plain entry moves to the next menu')
+    f.key(1)
+    f.mods(8); f.key(47); f.mods(0)            # Alt+V: View (no operator has Alt+V)
+    check(items(0) and items(0)[0]['label'] == 'Tools Pane', 'Alt+V opens the View menu')
+    f.key(1)
+    f.mods(8); f.key(35); f.mods(0)            # Alt+H: Reveal Hidden stays a shortcut
+    check(not items(), 'Alt+H keeps its operator (no menu opens)')
+    menu_pick(f, m, 'Add', 'Curve', 'Bezier Curve')
+    check(q('print(count())') == '4', 'Add > Curve > Bezier Curve (a submenu by the mouse)')
+    f.click(600, 420, 0x111)                   # RMB on the viewport: a context menu
+    labels = [w['label'] for w in items()]
+    check(labels[:2] == ['Duplicate', 'Delete'] and 'Boolean' in labels,
+          f'right-click in the viewport: the object menu ({len(labels)})')
+    w = [w for w in items() if w['label'] == 'Duplicate'][0]
+    f.click(w['x'] + 40, w['y'] + 12)
+    check(q('print(count())') == '5', 'its Duplicate duplicates')
+    f.key(1)                                   # (the duplicate grab)
+    q('select("Cube")')
+    f.move(600, 300); f.key(15)                # edit mode: the edit menu
+    f.click(600, 420, 0x111)
+    labels = [w['label'] for w in items()]
+    check('Extrude' in labels and 'Merge' in labels, f'in edit mode it is the mesh menu ({labels[:3]})')
+    f.key(1); f.key(15)
+    f.click(1060, 67, 0x111)                   # RMB on the outliner header
+    labels = [w['label'] for w in items()]
+    check('Split Area Side by Side' in labels, 'right-click on an area header: the area menu')
+    f.key(1)
+    f.move(600, 300)
+    shade = lambda: (widget(m, 'viewport.shading') or {}).get('value')
+    f.key(44)                                  # Z tapped: wireframe, as always
+    check(shade() == 1, 'Z tapped still toggles wireframe')
+    f.key(44)
+    f.keyev(44, 1); f.pump(0.5)                # Z held: the pie
+    pie = [w['label'] for w in ui_tree(m) if w['kind'] == 'pieitem']
+    check(pie == ['Solid', 'Wireframe', 'Material Preview'], f'Z held opens the shading pie ({pie})')
+    f.move(600, 420); f.pump(0.1)              # down: Material Preview
+    f.shot('menus_pie.png')
+    f.keyev(44, 0); f.pump(0.3)
+    check(shade() == 2 and not any(w['kind'] == 'pieitem' for w in ui_tree(m)),
+          'releasing over a choice picks it and closes the pie')
     f.proc.kill()
 
 

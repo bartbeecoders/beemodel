@@ -147,7 +147,7 @@
 .equ DRAG_ORBIT,        4
 .equ DRAG_PAN,          5
 
-.equ NUM_MENUS,         8
+.equ NUM_MENUS,         10        # File Edit View Select Add Object Mesh Render AI Help
 .equ NUM_TOOLS,         10
 .equ NUM_OUTLINER,      4
 
@@ -322,8 +322,11 @@
 .equ ED_TIMELINE,       10
 .equ ED_DOPESHEET,      11
 .equ ED_GRAPH,          12
-.equ MENU_AREA,         8
-.equ MENU_MODADD,       9
+.equ MENU_AREA,         NUM_MENUS     # pop-up lists after the bar's menus
+.equ MENU_MODADD,       NUM_MENUS+1   # (from here on: at md_x, md_y)
+.equ MENU_CTX,          NUM_MENUS+2   # a right-click context menu (menus.s)
+.equ HIT_SUBITEM,       32            # an entry of an open submenu
+.equ HIT_PIE,           33            # a pie menu (index = the choice)
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
 

@@ -132,12 +132,24 @@ _start:
     pop     rsi
     pop     rdx
     test    eax, eax
-    js      0f
+    js      34f
     cmp     edx, -1
     je      33f
     cmp     eax, edx
-    jge     0f
+    jge     34f
 33: mov     edx, eax
+34: push    rdx                         # (and a held pie key)
+    push    rsi
+    call    pie_wait
+    pop     rsi
+    pop     rdx
+    test    eax, eax
+    js      0f
+    cmp     edx, -1
+    je      35f
+    cmp     eax, edx
+    jge     0f
+35: mov     edx, eax
 0:  lea     rdi, [rip+pollfds]
     mov     eax, SYS_POLL
     syscall
@@ -163,6 +175,7 @@ _start:
     call    lb_tick                     # library thumbnails, one at a time
     call    play_tick                   # play mode: the player, the scene on
     call    tip_tick                    # a tooltip whose time has come
+    call    pie_tick                    # a pie key held long enough
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render

@@ -1948,7 +1948,10 @@ wg_tree_json:
     add     rbx, WG_SZ
     inc     r12d
     jmp     1b
-8:  mov     edi, r12d                   # a tooltip on screen: one more
+8:  mov     edi, r12d                   # the menus (bar, open lists, a pie)
+    call    mn_json
+    add     r12d, eax
+    mov     edi, r12d                   # a tooltip on screen: one more
     call    tip_json
     cmp     dword ptr [rip+tip_shown], 0
     je      80f

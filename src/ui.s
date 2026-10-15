@@ -20,6 +20,14 @@
 .globl tool_ops
 .globl menu_items
 .globl run_op_ui
+.globl ui_layout
+.globl menu_counts
+.globl menu_titles
+.globl menu_x
+.globl drop_x
+.globl drop_y
+.globl drop_w
+.globl drop_h
 .globl ui_key_repeat
 .globl active_tool
 .globl cur_shape
@@ -85,11 +93,13 @@ s_untitled:     .asciz "untitled scene"
 s_m_file:       .asciz "File"
 s_m_edit:       .asciz "Edit"
 s_m_view:       .asciz "View"
-s_m_create:     .asciz "Create"
-s_m_help:       .asciz "Help"
-s_m_ai:         .asciz "AI"
+s_m_select:     .asciz "Select"
+s_m_add:        .asciz "Add"
+s_m_object:     .asciz "Object"
 s_m_mesh:       .asciz "Mesh"
 s_m_render:     .asciz "Render"
+s_m_ai:         .asciz "AI"
+s_m_help:       .asciz "Help"
 s_ai_pfx:       .asciz "AI: "
 s_ai_conn:      .asciz " ("
 s_ai_conn2:     .asciz " connected)"
@@ -106,43 +116,75 @@ s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero 
 s_log_hello2:   .asciz "Tip: F3 searches every command; Enter opens the console"
 
 .align 8
-menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_render, s_m_ai, s_m_help
-menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_render, items_ai, items_help, items_area, items_modadd
-# Item counts are computed from the lists, so a new entry always shows up.
-menu_counts:    .long (items_edit - items_file) / 8, (items_view - items_edit) / 8
-                .long (items_create - items_view) / 8, (items_render - items_create) / 8
-                .long items_mesh2_n, (items_help - items_render) / 8, (tool_ops - items_ai) / 8
-                .long (items_ai - items_help) / 8, items_area_n, items_modadd_n
+menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_select, s_m_add, s_m_object, s_m_mesh
+                .quad s_m_render, s_m_ai, s_m_help
 
-# Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
+# Menus are lists of entries (menus.s): an operator, 0 (a separator) or a
+# SUBMENU. The tables are writable: MENU_CTX's slot is set when a context
+# menu opens. Counts come from the lists, so a new entry always shows up.
+.section .data
+.align 8
+menu_items:     .quad items_file, items_edit, items_view, items_select, items_add, items_object
+                .quad items_mesh, items_render, items_ai, items_help, items_area, items_modadd, 0
+menu_counts:    .long items_file_n, items_edit_n, items_view_n, items_select_n, items_add_n
+                .long items_object_n, items_mesh_n, items_render_n, items_ai_n, items_help_n
+                .long items_area_n, items_modadd_n, 0
+
+.section .rodata
 .align 8
 items_file:     .quad op_file_new, op_file_open, op_file_save, op_file_saveas, 0
-                .quad op_import_obj, op_import_stl, op_import_gltf, op_import_step, 0
-                .quad op_export_obj, op_export_stl, op_export_gltf, op_export_step
-                .quad op_export_3mf, op_export_dxf, op_export_svg, op_export_pdf, 0
-                .quad op_screenshot, op_recover, 0, op_file_exit
-items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_edit_toggle, op_select_all, op_duplicate, op_delete, 0
-                .quad op_bool_union, op_bool_diff, op_bool_isect, op_repair, op_print_check, 0
-                .quad op_palette_open, 0, op_script_record, op_script_run, 0, op_edit_prefs
+                .quad sub_import, sub_export, 0, op_screenshot, op_recover, 0, op_file_exit
+.equ items_file_n, (. - items_file) / 8
+items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_palette_open, 0
+                .quad op_script_record, op_script_run, 0, op_edit_prefs
+.equ items_edit_n, (. - items_edit) / 8
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
                 .quad op_view_wire, op_view_matprev, op_view_grid, op_view_reset_cam, op_console_clear, 0
-                .quad op_theme_dark, op_theme_light, op_theme_contrast, 0
-                .quad op_an_normals, op_an_nonman, op_an_bound, op_an_degen, op_an_over, op_show_thin
-                .quad op_view_measure
-items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
-                .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_bezier, op_add_ccircle
-                .quad op_add_path, 0, op_add_light, op_add_camera, op_add_armature
+                .quad sub_analysis, op_view_measure, 0, sub_theme
+.equ items_view_n, (. - items_view) / 8
+items_select:   .quad op_select_all, 0, op_mesh_all, op_mesh_inv, op_mesh_linked, op_mesh_box, 0
+                .quad op_selmode_v, op_selmode_e, op_selmode_f
+.equ items_select_n, (. - items_select) / 8
+items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
+                .quad op_add_torus, op_add_plane, op_add_grid, 0, sub_curve
+                .quad 0, op_add_light, op_add_camera, op_add_armature
+.equ items_add_n, (. - items_add) / 8
+items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, 0
+                .quad sub_boolean, op_repair, op_print_check, op_obj_measure
+.equ items_object_n, (. - items_object) / 8
+items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
+                .quad op_m_loopcut, op_m_knife, op_m_bisect, op_m_subdivide, 0
+                .quad op_m_bridge, op_m_spin, op_m_fill, op_m_dissolve, op_m_dup, 0
+                .quad sub_merge, sub_mdelete, sub_normals, 0, op_cursor_reset
+.equ items_mesh_n, (. - items_mesh) / 8
 items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_render_save, 0
                 .quad op_render_denoise, op_render_settings
+.equ items_render_n, (. - items_render) / 8
 items_help:     .quad op_help_keys, op_console_ops, op_help_about
+.equ items_help_n, (. - items_help) / 8
 items_ai:       .quad op_view_activity, op_agent_revert, 0
                 .quad op_agent_read, op_agent_edit, op_agent_files
+.equ items_ai_n, (. - items_ai) / 8
+sub_import_l:   .quad op_import_obj, op_import_stl, op_import_gltf, op_import_step
+sub_export_l:   .quad op_export_obj, op_export_stl, op_export_gltf, op_export_step, 0
+                .quad op_export_3mf, op_export_dxf, op_export_svg, op_export_pdf
+sub_analysis_l: .quad op_an_normals, op_an_nonman, op_an_bound, op_an_degen, op_an_over, op_show_thin
+sub_theme_l:    .quad op_theme_dark, op_theme_light, op_theme_contrast
+sub_curve_l:    .quad op_add_bezier, op_add_ccircle, op_add_path
+sub_normals_l:  .quad op_m_flip, op_m_recalc
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
 
+
 .text
+SUBMENU sub_import, "Import", sub_import_l, 4
+SUBMENU sub_export, "Export", sub_export_l, 9
+SUBMENU sub_analysis, "Analysis", sub_analysis_l, 6
+SUBMENU sub_theme, "Theme", sub_theme_l, 3
+SUBMENU sub_curve, "Curve", sub_curve_l, 3
+SUBMENU sub_normals, "Normals", sub_normals_l, 2
 
 # -----------------------------------------------------------------------------
 # small helpers
@@ -154,13 +196,6 @@ clamp:
     cmovg   eax, edx
     cmp     eax, esi
     cmovl   eax, esi
-    ret
-
-# item_op(edi=menu, esi=index) -> rax = operator (0 = separator)
-item_op:
-    lea     rax, [rip+menu_items]
-    mov     rax, [rax+rdi*8]
-    mov     rax, [rax+rsi*8]
     ret
 
 # -----------------------------------------------------------------------------
@@ -191,53 +226,7 @@ ui_layout:
     jb      11b
     mov     [r13+r12*4], ebx
 
-    # dropdown rectangle
-    mov     edi, [rip+menu_open]
-    test    edi, edi
-    js      14f
-    cmp     edi, MENU_MODADD            # modifier types: at the Add button
-    jne     17f
-    mov     eax, [rip+md_y]
-    mov     [rip+drop_y], eax
-    mov     eax, [rip+md_x]
-    jmp     16f
-17: cmp     edi, MENU_AREA              # editor-type menu hangs off an area header
-    jne     15f
-    push    rdi
-    mov     edi, [rip+active_area]
-    call    area_node_rect
-    pop     rdi
-    mov     ecx, [rax+12]
-    mov     [rip+drop_x], ecx
-    mov     ecx, [rax+16]
-    add     ecx, PANE_HDR_H
-    mov     [rip+drop_y], ecx
-    mov     eax, [rip+drop_x]
-    jmp     16f
-15: mov     eax, [r13+rdi*4]
-    mov     dword ptr [rip+drop_y], TITLE_H+MENU_H
-16: mov     ecx, [rip+win_w]
-    sub     ecx, MENU_DROP_W
-    cmp     eax, ecx
-    cmovg   eax, ecx
-    mov     [rip+drop_x], eax
-    mov     dword ptr [rip+drop_w], MENU_DROP_W
-    lea     rax, [rip+menu_counts]
-    mov     ecx, [rax+rdi*4]
-    lea     rax, [rip+menu_items]
-    mov     rax, [rax+rdi*8]
-    mov     edx, 8                      # 4px padding top + bottom
-12: test    ecx, ecx
-    jz      13f
-    cmp     qword ptr [rax], 0
-    mov     esi, MENU_ITEM_H
-    mov     edi, MENU_SEP_H
-    cmove   esi, edi
-    add     edx, esi
-    add     rax, 8
-    dec     ecx
-    jmp     12b
-13: mov     [rip+drop_h], edx
+    call    mn_layout                   # the open menu and its submenu
 14: pop     r13
     pop     r12
     pop     rbx
@@ -273,49 +262,19 @@ hit_test:
     mov     eax, HIT_WGPOP
     jmp     .Lht_ret
 .Lht_nopop:
-    # open dropdown sits on top of everything
-    mov     edi, [rip+menu_open]
-    test    edi, edi
-    js      .Lht_edges
-    mov     eax, [rip+drop_x]
-    cmp     ebx, eax
-    jl      .Lht_edges
-    add     eax, [rip+drop_w]
-    cmp     ebx, eax
-    jge     .Lht_edges
-    mov     eax, [rip+drop_y]
-    cmp     r12d, eax
-    jl      .Lht_edges
-    add     eax, [rip+drop_h]
-    cmp     r12d, eax
-    jge     .Lht_edges
-    lea     rax, [rip+menu_counts]
-    mov     r13d, [rax+rdi*4]
-    lea     rax, [rip+menu_items]
-    mov     r14, [rax+rdi*8]
-    mov     ecx, [rip+drop_y]
-    add     ecx, 4
-    xor     edx, edx
-1:  cmp     edx, r13d
-    jae     3f
-    mov     esi, MENU_ITEM_H
-    cmp     qword ptr [r14], 0
-    jne     2f
-    mov     esi, MENU_SEP_H
-2:  add     ecx, esi
-    cmp     r12d, ecx
-    jl      4f
-    add     r14, 8
-    inc     edx
-    jmp     1b
-4:  mov     eax, HIT_MENU_ITEM
-    cmp     qword ptr [r14], 0
-    jne     .Lht_ret
-    mov     edx, -1
+    cmp     dword ptr [rip+pie_on], 0   # a pie menu takes the pointer
+    je      1f
+    mov     edi, ebx
+    mov     esi, r12d
+    call    pie_hit
+    mov     edx, eax
+    mov     eax, HIT_PIE
     jmp     .Lht_ret
-3:  mov     eax, HIT_DROPDOWN
-    mov     edx, -1
-    jmp     .Lht_ret
+1:  mov     edi, ebx                    # an open menu (and its submenu)
+    mov     esi, r12d
+    call    mn_hit
+    test    eax, eax
+    jnz     .Lht_ret
 
 .Lht_edges:
     test    dword ptr [rip+win_flags], 3
@@ -693,7 +652,19 @@ ui_motion:
     je      12f
     mov     [rip+pal_sel], edx
     mov     dword ptr [rip+dirty], 1
-12: cmp     r13d, [rip+hover_id]
+12: push    rdx                         # menus: highlight, submenus; a pie
+    sub     rsp, 8
+    mov     edi, r13d
+    mov     esi, edx
+    call    mn_hover
+    cmp     dword ptr [rip+pie_on], 0
+    je      121f
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    pie_hover
+121: add     rsp, 8
+    pop     rdx
+    cmp     r13d, [rip+hover_id]
     jne     2f
     cmp     edx, [rip+hover_idx]
     je      3f
@@ -808,6 +779,12 @@ ui_button:
     jz      .Lbt_release
 
     # ---------------- press ----------------
+    cmp     dword ptr [rip+pie_on], 0   # a pie: a click picks or closes it
+    je      .Lbt_nopie
+    mov     edi, r14d
+    call    pie_press
+    jmp     .Lbt_done
+.Lbt_nopie:
     cmp     dword ptr [rip+wg_pop_open], 0  # an open option list: a row picks,
     je      .Lbt_nopop                  #  anywhere else closes it
     mov     edi, -2
@@ -911,6 +888,8 @@ ui_button:
     js      .Lbt_nomenu
     cmp     ebx, HIT_MENU_ITEM          # items fire on release
     je      .Lbt_done
+    cmp     ebx, HIT_SUBITEM
+    je      .Lbt_done
     cmp     ebx, HIT_DROPDOWN
     je      .Lbt_done
     cmp     ebx, HIT_MENU_TITLE
@@ -932,16 +911,16 @@ ui_button:
     mov     edi, CUR_MOVE
     call    set_cursor
     jmp     .Lbt_done
-1:  cmp     r14d, BTN_RIGHT             # right button in a viewport
+1:  cmp     r14d, BTN_RIGHT             # right button: a context menu
     jne     13f
     cmp     ebx, HIT_CANVAS
-    jne     .Lbt_done
-    cmp     dword ptr [rip+etool], 0    # cancels an edit tool,
+    jne     14f
+    cmp     dword ptr [rip+etool], 0    # (an edit tool: cancels it,
     je      12f
     call    etool_cancel
     jmp     .Lbt_done
-12: test    dword ptr [rip+key_mods], MOD_SHIFT  # Shift: places the 3D cursor
-    jz      .Lbt_done
+12: test    dword ptr [rip+key_mods], MOD_SHIFT  #  Shift: places the 3D cursor)
+    jz      15f
     mov     [rip+vp_area], r12d
     mov     [rip+drag_node], r12d
     call    vp_setup_drag
@@ -949,6 +928,26 @@ ui_button:
     mov     esi, [rip+ptr_y]
     call    cursor_place
     call    reset_clip
+    jmp     .Lbt_done
+15: mov     [rip+vp_area], r12d
+    jmp     16f
+14: cmp     ebx, HIT_OUTLINER           # an outliner row: select it first
+    jne     17f
+    call    edit_exit
+    lea     rax, [rip+obj_list]
+    mov     edi, [rax+r12*4]
+    xor     esi, esi
+    call    obj_click_select
+    jmp     16f
+17: cmp     ebx, HIT_AREA_HDR           # an area header: that area
+    je      18f
+    cmp     ebx, HIT_AREA_TYPE
+    jne     .Lbt_done
+18: mov     eax, [rip+hit_area]
+    mov     [rip+active_area], eax
+16: mov     edi, ebx
+    mov     esi, r12d
+    call    ctx_open_for
     jmp     .Lbt_done
 13: cmp     r14d, BTN_LEFT
     jne     .Lbt_done
@@ -1192,20 +1191,11 @@ ui_button:
     mov     esi, XDG_TOPLEVEL_SET_MINIMIZED
     call    msg0
     jmp     .Lbt_done
-2:  cmp     dword ptr [rip+menu_open], 0
+2:  cmp     dword ptr [rip+menu_open], 0  # a menu entry: run it (or open it)
     jl      .Lbt_done
-    cmp     ebx, HIT_MENU_ITEM
-    jne     .Lbt_done
-    test    r12d, r12d
-    js      .Lbt_done
-    mov     edi, [rip+menu_open]
+    mov     edi, ebx
     mov     esi, r12d
-    call    item_op
-    mov     dword ptr [rip+menu_open], -1
-    test    rax, rax
-    jz      .Lbt_done
-    mov     rdi, rax
-    call    run_op_ui
+    call    mn_release
 .Lbt_done:
     pop     r15
     pop     r14
@@ -1419,6 +1409,11 @@ ui_key:
     je      1f
     test    esi, esi                    # release: stop repeating that key
     jnz     9f
+    push    rdi                         # (and a pie key: tap or pick)
+    sub     rsp, 8
+    call    pie_release_key
+    add     rsp, 8
+    pop     rdi
     cmp     edi, [rip+rep_code]
     jne     9f
     jmp     kb_repeat_stop
@@ -1488,13 +1483,17 @@ ui_key_press:
     call    wg_key
     jmp     9f
 .Lkp_notyping:
+    cmp     dword ptr [rip+pie_on], 0   # Esc closes a pie
+    je      .Lkp_nopie
     cmp     ebx, KEY_ESC
-    jne     1f
-    cmp     dword ptr [rip+menu_open], 0
-    jl      1f
-    mov     dword ptr [rip+menu_open], -1
-    mov     dword ptr [rip+dirty], 1
+    jne     .Lkp_nopie
+    call    pie_close
     jmp     9f
+.Lkp_nopie:
+    mov     edi, ebx                    # an open menu: arrows, Enter, Esc
+    call    mn_key
+    test    eax, eax
+    jnz     9f
 1:  cmp     dword ptr [rip+etool], 0    # edit tools: Enter / Esc / ...
     je      11f
     mov     edi, ebx
@@ -1533,7 +1532,15 @@ ui_key_press:
     lea     rdi, [rip+op_render_stop]
     call    run_op
     jmp     9f
-21: mov     edi, ebx
+21: mov     edi, ebx                    # F10 / Alt+letter: the menu bar
+    call    mn_bar_key
+    test    eax, eax
+    jnz     9f
+    mov     edi, ebx                    # a pie key: wait for hold or tap
+    call    pie_try
+    test    eax, eax
+    jnz     9f
+    mov     edi, ebx
     call    dispatch_key
 9:  pop     rbx
     ret
@@ -1558,9 +1565,10 @@ ui_draw:
     call    draw_statusbar
     cmp     dword ptr [rip+menu_open], 0
     jl      4f
-    call    draw_dropdown
+    call    mn_draw
 4:  call    wg_pop_draw
     call    palette_draw
+    call    pie_draw
     jmp     tip_draw                    # tooltips on top of everything
 
 # run_op_ui(rdi=op) - a menu item or a button: runs it, or when it cannot run
@@ -1880,119 +1888,6 @@ draw_statusbar:
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_TEXT_DIM
     call    draw_small
-    pop     rbx
-    ret
-
-# ---- dropdown menu --------------------------------------------------------------
-draw_dropdown:
-    push    rbx
-    push    r12
-    push    r13
-    push    r14
-    push    r15
-    mov     edi, [rip+drop_x]           # shadow, border, body
-    mov     esi, [rip+drop_y]
-    mov     edx, [rip+drop_w]
-    mov     ecx, [rip+drop_h]
-    mov     r8d, COL_DROP_BORDER
-    call    popup_frame
-
-    mov     eax, [rip+menu_open]
-    lea     rcx, [rip+menu_counts]
-    mov     r13d, [rcx+rax*4]
-    lea     rcx, [rip+menu_items]
-    mov     r14, [rcx+rax*8]            # item pointer
-    mov     r12d, [rip+drop_y]
-    add     r12d, 4                     # y
-    mov     r15d, [rip+drop_x]
-    xor     ebx, ebx
-1:  cmp     qword ptr [r14], 0
-    jne     2f
-    lea     edi, [r15+8]
-    lea     esi, [r12+4]
-    mov     edx, [rip+drop_w]
-    sub     edx, 16
-    mov     ecx, 1
-    mov     r8d, COL_SEPARATOR
-    call    fill_rect
-    add     r12d, MENU_SEP_H
-    jmp     6f
-2:  mov     edi, HIT_MENU_ITEM
-    mov     esi, ebx
-    call    is_hot
-    test    eax, eax
-    jz      3f
-    lea     edi, [r15+2]
-    mov     esi, r12d
-    mov     edx, [rip+drop_w]
-    sub     edx, 4
-    mov     ecx, MENU_ITEM_H
-    mov     r8d, COL_HOVER
-    call    fill_rect
-    lea     edi, [r15+2]
-    mov     esi, r12d
-    mov     edx, 3
-    mov     ecx, MENU_ITEM_H
-    mov     r8d, COL_ACCENT
-    call    fill_rect
-3:  mov     rdi, [r14]                  # check mark for toggles
-    call    op_checked
-    cmp     eax, 1
-    jne     4f
-    lea     edi, [r15+9]
-    lea     esi, [r12+12]
-    lea     edx, [r15+12]
-    lea     ecx, [r12+15]
-    mov     r8d, COL_ACCENT
-    call    draw_line
-    lea     edi, [r15+12]
-    lea     esi, [r12+15]
-    lea     edx, [r15+18]
-    lea     ecx, [r12+8]
-    mov     r8d, COL_ACCENT
-    call    draw_line
-4:  mov     rdi, [r14]                  # greyed when it cannot run now
-    call    op_poll
-    mov     ecx, COL_TEXT
-    test    rax, rax
-    jz      41f
-    mov     ecx, COL_TEXT_OFF
-41: push    rcx
-    sub     rsp, 8
-    lea     edi, [r15+26]
-    lea     esi, [r12+4]
-    mov     rax, [r14]
-    mov     rdx, [rax+OP_LABEL]
-    call    draw_text
-    mov     rax, [r14]                  # shortcut derived from the binding
-    mov     edi, [rax+OP_KEY]
-    call    fmt_key
-    test    rax, rax
-    jz      42f
-    push    rax
-    mov     rdi, rax
-    call    text_width
-    mov     edi, r15d
-    add     edi, [rip+drop_w]
-    sub     edi, 12
-    sub     edi, eax
-    lea     esi, [r12+4]
-    pop     rdx
-    mov     ecx, COL_TEXT_DIM
-    cmp     dword ptr [rsp+8], COL_TEXT_OFF
-    jne     43f
-    mov     ecx, COL_TEXT_OFF
-43: call    draw_text
-42: add     rsp, 16
-5:  add     r12d, MENU_ITEM_H
-6:  add     r14, 8
-    inc     ebx
-    cmp     ebx, r13d
-    jb      1b
-    pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
     pop     rbx
     ret
 
