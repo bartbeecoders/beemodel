@@ -38,6 +38,8 @@
 .globl graph_eval
 .globl fbm
 .globl perlin
+.globl perlin4
+.globl fbm4
 .globl graph_add
 .globl graph_link
 .globl graph_set
@@ -173,6 +175,19 @@ gf_noff2:       .float 31.59, 3.23, 23.41
 .align 16
 gf_abs:         .long 0x7fffffff, 0, 0, 0
 gf_sign:        .long 0x80000000, 0, 0, 0
+.align 16
+p4_255:         .long 255, 255, 255, 255
+p4_six:         .float 6.0, 6.0, 6.0, 6.0
+p4_15:          .float 15.0, 15.0, 15.0, 15.0
+p4_10:          .float 10.0, 10.0, 10.0, 10.0
+p4_one:         .float 1.0, 1.0, 1.0, 1.0
+p4_two:         .float 2.0, 2.0, 2.0, 2.0
+p4_half:        .float 0.5, 0.5, 0.5, 0.5
+# perlin's gradients by hash & 15 (grad: u = h < 8 ? x : y, v = h < 4 ? y :
+#   h == 12 or 14 ? x : z, their signs from bits 0 and 1)
+p4_gx:          .float 1, -1, 1, -1, 1, -1, 1, -1, 0, 0, 0, 0, 1, 0, -1, 0
+p4_gy:          .float 1, 1, -1, -1, 0, 0, 0, 0, 1, -1, 1, -1, 1, -1, 1, -1
+p4_gz:          .float 0, 0, 0, 0, 1, 1, -1, -1, 1, 1, -1, -1, 0, 1, 0, -1
 # Ken Perlin's permutation
 perm:   .byte 151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,103,30,69,142
         .byte 8,99,37,240,21,10,23,190,6,148,247,120,234,75,0,26,197,62,94,252,219,203,117
@@ -384,6 +399,236 @@ perlin:
     pop     rbx
     ret
 
+# perlin4(xmm0, xmm1, xmm2 = x, y, z of four points) -> xmm0 = perlin at
+#   each: the same numbers as perlin (the gradients from a table: g . (x y
+#   z), added in perlin's order), four lanes at a time
+perlin4:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    mov     rbp, rsp                    # (aligned whatever the caller's)
+    and     rsp, -16
+    sub     rsp, 544                    # cells +0 (3 x 4 i32), fractions +48,
+    lea     r11, [rip+perm]             #  fades +96, g x y z per corner +144
+    xor     ecx, ecx
+1:  movaps  xmm3, xmm0                  # each axis: floor, fraction, fade
+    cvttps2dq xmm4, xmm3
+    cvtdq2ps xmm5, xmm4
+    movaps  xmm6, xmm3
+    cmpltps xmm6, xmm5                  # (x below its truncation: one less)
+    paddd   xmm4, xmm6
+    cvtdq2ps xmm5, xmm4
+    subps   xmm3, xmm5
+    pand    xmm4, [rip+p4_255]
+    imul    edx, ecx, 16
+    movaps  [rsp+rdx], xmm4
+    movaps  [rsp+48+rdx], xmm3
+    movaps  xmm5, xmm3                  # fade: ((t 6 - 15) t + 10) t t t
+    mulps   xmm5, [rip+p4_six]
+    subps   xmm5, [rip+p4_15]
+    mulps   xmm5, xmm3
+    addps   xmm5, [rip+p4_10]
+    mulps   xmm5, xmm3
+    mulps   xmm5, xmm3
+    mulps   xmm5, xmm3
+    movaps  [rsp+96+rdx], xmm5
+    movaps  xmm0, xmm1                  # (the next axis)
+    movaps  xmm1, xmm2
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    xor     ecx, ecx                    # each lane: the corners' gradients
+2:  mov     eax, [rsp+rcx*4]            # A = p[X] + Y, AA, AB, B, BA, BB
+    and     eax, 255
+    movzx   eax, byte ptr [r11+rax]
+    add     eax, [rsp+16+rcx*4]
+    mov     ebx, eax
+    and     eax, 255
+    movzx   eax, byte ptr [r11+rax]
+    add     eax, [rsp+32+rcx*4]
+    mov     r12d, eax                   # AA
+    lea     eax, [rbx+1]
+    and     eax, 255
+    movzx   eax, byte ptr [r11+rax]
+    add     eax, [rsp+32+rcx*4]
+    mov     r13d, eax                   # AB
+    mov     eax, [rsp+rcx*4]
+    inc     eax
+    and     eax, 255
+    movzx   eax, byte ptr [r11+rax]
+    add     eax, [rsp+16+rcx*4]
+    mov     ebx, eax                    # B
+    and     eax, 255
+    movzx   eax, byte ptr [r11+rax]
+    add     eax, [rsp+32+rcx*4]
+    mov     r14d, eax                   # BA
+    lea     eax, [rbx+1]
+    and     eax, 255
+    movzx   eax, byte ptr [r11+rax]
+    add     eax, [rsp+32+rcx*4]
+    mov     r15d, eax                   # BB
+    xor     r9d, r9d                    # corners (x bit 0, y bit 1, z bit 2)
+3:  mov     eax, r12d
+    test    r9d, 1
+    jz      31f
+    mov     eax, r14d
+31: test    r9d, 2
+    jz      33f
+    mov     eax, r13d
+    test    r9d, 1
+    jz      33f
+    mov     eax, r15d
+33: test    r9d, 4
+    jz      34f
+    inc     eax
+34: and     eax, 255
+    movzx   eax, byte ptr [r11+rax]
+    and     eax, 15
+    lea     edx, [rcx+r9*4]             # (corner c: +144 + 16 c + 4 lane)
+    lea     r8, [rip+p4_gx]
+    mov     r10d, [r8+rax*4]
+    mov     [rsp+144+rdx*4], r10d
+    lea     r8, [rip+p4_gy]
+    mov     r10d, [r8+rax*4]
+    mov     [rsp+272+rdx*4], r10d
+    lea     r8, [rip+p4_gz]
+    mov     r10d, [r8+rax*4]
+    mov     [rsp+400+rdx*4], r10d
+    inc     r9d
+    cmp     r9d, 8
+    jb      3b
+    inc     ecx
+    cmp     ecx, 4
+    jb      2b
+    xor     ecx, ecx                    # each corner: g . (x - i, y - j, z - k)
+4:  movaps  xmm0, [rsp+48]
+    movaps  xmm1, [rsp+64]
+    movaps  xmm2, [rsp+80]
+    test    ecx, 1
+    jz      41f
+    subps   xmm0, [rip+p4_one]
+41: test    ecx, 2
+    jz      42f
+    subps   xmm1, [rip+p4_one]
+42: test    ecx, 4
+    jz      43f
+    subps   xmm2, [rip+p4_one]
+43: mov     edx, ecx
+    shl     edx, 4
+    mulps   xmm0, [rsp+144+rdx]
+    mulps   xmm1, [rsp+272+rdx]
+    mulps   xmm2, [rsp+400+rdx]
+    addps   xmm0, xmm1
+    addps   xmm0, xmm2
+    movaps  [rsp+144+rdx], xmm0
+    inc     ecx
+    cmp     ecx, 8
+    jb      4b
+    movaps  xmm5, [rsp+96]              # along x: (0 1) (2 3) (4 5) (6 7)
+    xor     ecx, ecx
+5:  mov     edx, ecx
+    shl     edx, 5
+    movaps  xmm0, [rsp+144+rdx]
+    movaps  xmm1, [rsp+144+16+rdx]
+    subps   xmm1, xmm0
+    mulps   xmm1, xmm5
+    addps   xmm0, xmm1
+    shr     edx, 1
+    movaps  [rsp+144+rdx], xmm0
+    inc     ecx
+    cmp     ecx, 4
+    jb      5b
+    movaps  xmm5, [rsp+112]             # along y
+    xor     ecx, ecx
+6:  mov     edx, ecx
+    shl     edx, 5
+    movaps  xmm0, [rsp+144+rdx]
+    movaps  xmm1, [rsp+144+16+rdx]
+    subps   xmm1, xmm0
+    mulps   xmm1, xmm5
+    addps   xmm0, xmm1
+    shr     edx, 1
+    movaps  [rsp+144+rdx], xmm0
+    inc     ecx
+    cmp     ecx, 2
+    jb      6b
+    movaps  xmm0, [rsp+144]             # along z
+    movaps  xmm1, [rsp+144+16]
+    subps   xmm1, xmm0
+    mulps   xmm1, [rsp+128]
+    addps   xmm0, xmm1
+    mov     rsp, rbp
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# fbm4(xmm0, xmm1, xmm2 = x, y, z of four points, xmm3 = scale, ecx =
+#   octaves, xmm4 = roughness) -> xmm0 = fbm at each (as fbm, in 0..1)
+fbm4:
+    push    rbx
+    push    rbp
+    mov     rbp, rsp                    # (aligned whatever the caller's)
+    and     rsp, -16
+    sub     rsp, 144
+    movaps  [rsp], xmm0
+    movaps  [rsp+16], xmm1
+    movaps  [rsp+32], xmm2
+    shufps  xmm3, xmm3, 0
+    movaps  [rsp+48], xmm3              # frequency
+    shufps  xmm4, xmm4, 0
+    movaps  [rsp+64], xmm4              # gain
+    movaps  xmm0, [rip+p4_one]
+    movaps  [rsp+80], xmm0              # amplitude
+    xorps   xmm0, xmm0
+    movaps  [rsp+96], xmm0              # sum
+    movaps  [rsp+112], xmm0             # sum of amplitudes
+    mov     ebx, ecx
+    test    ebx, ebx
+    jg      1f
+    mov     ebx, 1
+1:  cmp     ebx, 8
+    jle     2f
+    mov     ebx, 8
+2:  movaps  xmm0, [rsp]
+    mulps   xmm0, [rsp+48]
+    movaps  xmm1, [rsp+16]
+    mulps   xmm1, [rsp+48]
+    movaps  xmm2, [rsp+32]
+    mulps   xmm2, [rsp+48]
+    call    perlin4
+    mulps   xmm0, [rsp+80]
+    addps   xmm0, [rsp+96]
+    movaps  [rsp+96], xmm0
+    movaps  xmm0, [rsp+80]
+    addps   xmm0, [rsp+112]
+    movaps  [rsp+112], xmm0
+    movaps  xmm0, [rsp+80]
+    mulps   xmm0, [rsp+64]
+    movaps  [rsp+80], xmm0
+    movaps  xmm0, [rsp+48]
+    mulps   xmm0, [rip+p4_two]
+    movaps  [rsp+48], xmm0
+    dec     ebx
+    jnz     2b
+    movaps  xmm0, [rsp+96]              # 0.5 + 0.5 sum / amplitudes
+    divps   xmm0, [rsp+112]
+    mulps   xmm0, [rip+p4_half]
+    addps   xmm0, [rip+p4_half]
+    xorps   xmm1, xmm1
+    maxps   xmm0, xmm1
+    minps   xmm0, [rip+p4_one]
+    mov     rsp, rbp
+    pop     rbp
+    pop     rbx
+    ret
+
 # fbm(rdi=p[3], xmm0=scale, ecx=octaves, xmm1=roughness) -> xmm0 in 0..1
 fbm:
     push    rbx
@@ -447,8 +692,15 @@ node_in:
     mov     eax, [rdx]
     test    ax, ax
     jz      1f
-    call    out_slot                    # a link: that output's result
-    lea     rdx, [r13+rax]
+    mov     edx, eax                    # a link: that output's result
+    movzx   eax, ax                     #  (out_slot, inline)
+    dec     eax
+    shl     eax, 7
+    shr     edx, 16
+    and     edx, NOUTS-1
+    shl     edx, 4
+    add     eax, edx
+    lea     rdx, [r13+rax+EV_VAL]
     movss   xmm0, [rdx]
     movss   xmm1, [rdx+4]
     movss   xmm2, [rdx+8]
@@ -522,42 +774,41 @@ graph_eval:
     push    r13
     push    r14
     push    r15
-    sub     rsp, 64
+    sub     rsp, 80
     mov     rbx, rdi
     mov     r13, rsi
-    xor     r14d, r14d
+    mov     rax, [r13+EV_LIVE]          # the nodes left (those leading to a
+    mov     [rsp+64], rax               #  pin), lowest first
 .Lge_node:
+    mov     rax, [rsp+64]
+    bsf     r14, rax
+    jz      .Lge_out
+    btr     rax, r14
+    mov     [rsp+64], rax
     cmp     r14d, [rbx+GR_N]
     jae     .Lge_out
-    cmp     r14d, MAX_NODES
-    jae     .Lge_out
-    bt      qword ptr [r13+EV_LIVE], r14
-    jnc     .Lge_next                   # (it leads to no pin)
     imul    r12d, r14d, NODE_SZ
     lea     r12, [rbx+GR_NODES+r12]
-    mov     eax, [r12+ND_TYPE]
-    cmp     eax, T_IMAGE
-    je      .Lge_image
-    cmp     eax, T_TEXPARAM             # (a texture parameter: the same)
-    je      .Lge_image
-    cmp     eax, T_NOISE
-    je      .Lge_noise
-    cmp     eax, T_CHECKER
-    je      .Lge_checker
-    cmp     eax, T_GRAD
-    je      .Lge_grad
-    cmp     eax, T_MIX
-    je      .Lge_mix
-    cmp     eax, T_RAMP
-    je      .Lge_ramp
-    cmp     eax, T_MATH
-    je      .Lge_math
-    cmp     eax, T_BUMP
-    je      .Lge_bump
-    cmp     eax, T_NMAP
-    je      .Lge_nmap
-    call    mn_eval                     # the rest: matnodes.s
+    mov     eax, [r12+ND_TYPE]          # by its type (a table)
+    cmp     eax, 40
+    jae     1f
+    lea     rcx, [rip+ge_jump]
+    movsxd  rdx, dword ptr [rcx+rax*4]
+    add     rdx, rcx
+    jmp     rdx
+1:  call    mn_eval                     # the rest: matnodes.s
     jmp     .Lge_next
+.Lge_mn:
+    call    mn_eval
+    jmp     .Lge_next
+ge_jump:
+    .long .Lge_mn-ge_jump, .Lge_image-ge_jump, .Lge_noise-ge_jump, .Lge_checker-ge_jump
+    .long .Lge_grad-ge_jump, .Lge_mix-ge_jump, .Lge_ramp-ge_jump, .Lge_math-ge_jump
+    .long .Lge_bump-ge_jump, .Lge_nmap-ge_jump
+    .rept 29
+    .long .Lge_mn-ge_jump
+    .endr
+    .long .Lge_image-ge_jump            # 39: a texture parameter: as an image
 
 .Lge_image:
     cvttss2si edi, dword ptr [r12+ND_P]
@@ -640,55 +891,46 @@ uv_wrap_1:
     minss   xmm0, [rip+gf_one_m]
 9:  ret
 
-.Lge_noise:
-    xor     ecx, ecx                    # p + offset (in0)
+.Lge_noise:                             # three channels at once (fbm4):
+    xor     ecx, ecx                    #  p + offset, then shifted samples
     call    node_in
     addss   xmm0, [r13+EV_P]
     addss   xmm1, [r13+EV_P+4]
     addss   xmm2, [r13+EV_P+8]
-    movss   [rsp], xmm0
-    movss   [rsp+4], xmm1
-    movss   [rsp+8], xmm2
-    lea     rdi, [rsp]
-    movss   xmm0, [r12+ND_P]
-    cvttss2si ecx, dword ptr [r12+ND_P+4]
-    movss   xmm1, [r12+ND_P+8]
-    call    fbm
-    movss   [rsp+16], xmm0              # r = the value; g, b shifted
-    xor     ecx, ecx
-3:  movss   xmm0, [rsp+rcx*4]
+    movss   [rsp], xmm0                 # lanes: p, p + noff, p + noff2, p
+    movss   [rsp+12], xmm0
+    movss   [rsp+16], xmm1
+    movss   [rsp+28], xmm1
+    movss   [rsp+32], xmm2
+    movss   [rsp+44], xmm2
     lea     rax, [rip+gf_noff]
-    addss   xmm0, [rax+rcx*4]
-    movss   [rsp+32+rcx*4], xmm0
-    inc     ecx
-    cmp     ecx, 3
-    jb      3b
-    lea     rdi, [rsp+32]
-    movss   xmm0, [r12+ND_P]
-    cvttss2si ecx, dword ptr [r12+ND_P+4]
-    movss   xmm1, [r12+ND_P+8]
-    call    fbm
-    movss   [rsp+20], xmm0
+    lea     rdx, [rip+gf_noff2]
     xor     ecx, ecx
-4:  movss   xmm0, [rsp+rcx*4]
-    lea     rax, [rip+gf_noff2]
-    addss   xmm0, [rax+rcx*4]
-    movss   [rsp+32+rcx*4], xmm0
+1:  imul    r8d, ecx, 16
+    movss   xmm3, [rsp+r8]
+    movss   xmm4, xmm3
+    addss   xmm3, [rax+rcx*4]
+    movss   [rsp+r8+4], xmm3
+    addss   xmm4, [rdx+rcx*4]
+    movss   [rsp+r8+8], xmm4
     inc     ecx
     cmp     ecx, 3
-    jb      4b
-    lea     rdi, [rsp+32]
-    movss   xmm0, [r12+ND_P]
+    jb      1b
+    movups  xmm0, [rsp]
+    movups  xmm1, [rsp+16]
+    movups  xmm2, [rsp+32]
+    movss   xmm3, [r12+ND_P]
     cvttss2si ecx, dword ptr [r12+ND_P+4]
-    movss   xmm1, [r12+ND_P+8]
-    call    fbm
-    movss   xmm2, xmm0
-    movss   xmm0, [rsp+16]
-    movss   xmm1, [rsp+20]
+    movss   xmm4, [r12+ND_P+8]
+    call    fbm4
+    movups  [rsp], xmm0
+    movss   xmm0, [rsp]
+    movss   xmm1, [rsp+4]
+    movss   xmm2, [rsp+8]
     call    put_col
     mov     eax, r14d                   # value = the first channel
     shl     eax, 7
-    movss   xmm0, [rsp+16]
+    movss   xmm0, [rsp]
     movss   [r13+EV_VAL+rax+12], xmm0
     jmp     .Lge_next
 
@@ -788,6 +1030,8 @@ uv_wrap_1:
     xor     ecx, ecx
 7:  movss   xmm0, [rsp+rcx*4]           # a
     movss   xmm1, [rsp+16+rcx*4]        # b -> op(a, b)
+    test    r15d, r15d                  # (mix: b itself)
+    jz      75f
     cmp     r15d, 1
     jne     71f
     addss   xmm1, xmm0
@@ -951,10 +1195,9 @@ mix_more:
     call    put_val
 
 .Lge_next:
-    inc     r14d
     jmp     .Lge_node
 .Lge_out:
-    add     rsp, 64
+    add     rsp, 80
     pop     r15
     pop     r14
     pop     r13
@@ -1319,7 +1562,7 @@ graph_shade:
     push    r14
     push    r15
     push    rbp
-    sub     rsp, EV_SZ+152
+    sub     rsp, EV_SZ+168
     mov     rbx, rdi
     mov     r12, rsi
     mov     [rsp+EV_SZ+136], rdx        # the copy
@@ -1356,6 +1599,8 @@ graph_shade:
     js      791f
     bts     rax, rcx
 791:call    graph_live
+    call    gc_fold                     # (what does not vary: copied in)
+    mov     [rsp+EV_SZ+152], rdx
     mov     [r13+EV_LIVE], rax
     xor     ecx, ecx                    # the box coordinates of the corners
 1:  movss   xmm0, [r12+SC_P0O+rcx*4]
@@ -1478,6 +1723,9 @@ graph_shade:
     xor     eax, eax                    # from here on only its height
     bts     rax, r14
     call    graph_live
+    mov     rdx, [rsp+EV_SZ+152]        # (its constants: in the frame)
+    not     rdx
+    and     rax, rdx
     mov     [r13+EV_LIVE], rax
     lea     rdi, [r12+SC_E1O]           # du = eps / |e1o|, dv = eps / |e2o|
     call    len3
@@ -1578,7 +1826,7 @@ graph_shade:
 .Lgs_done:
     mov     eax, 1
 .Lgs_out:
-    add     rsp, EV_SZ+152
+    add     rsp, EV_SZ+168
     pop     rbp
     pop     r15
     pop     r14

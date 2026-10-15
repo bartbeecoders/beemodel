@@ -623,6 +623,7 @@ def main():
     material_library()
     material_exchange()
     material_functions()
+    material_bench()
     gltf_mtl()
     product_shot()
     params_units()
@@ -2989,6 +2990,55 @@ def material_functions():
     outside = not ys(noise)
     check(inside and outside, f'Tab on a Material Function node edits the function, Tab again goes back (in: {inside}, out: {outside})')
     f.proc.kill()
+
+
+def material_bench():
+    """Material programs (M3): the viewport preview of a 40-node game-style
+    material (a texture, parameters, math and lerps: constants folded)
+    within 2.5x of a principled one while orbiting; a 40-node procedural
+    one (noise, voronoi, wave, bump) reported."""
+    print('  -- material preview benchmark --')
+    import statistics
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-mb-')
+    game = ('m = material("G")\nassign("Cube", m)\nt = node(m, "texcoord", 4, 4)\ns = node(m, "checker", 8)\n'
+            'g = node(m, "vmath", 2)\nlink(m, t, g, 1)\nlink(m, s, g, 2)\n'
+            'p0 = node(m, "scalarparam", "Wear", 0.3)\np1 = node(m, "vectorparam", "Tint", 0.9, 0.7, 0.6)\n'
+            + ''.join(f'c{k} = node(m, "math", {k % 3})\nlink(m, {"p0" if k == 0 else "c" + str(k - 1)}, c{k}, 1)\nnodeset(m, c{k}, 2, 1.05)\n'
+                      for k in range(10))
+            + ''.join(f'k{k} = node(m, "{"mix" if k % 3 == 2 else "math"}", {0 if k % 3 == 2 else k % 2 * 2})\n'
+                      f'link(m, {"g" if k == 0 else "k" + str(k - 1)}, k{k}, {2 if k % 3 == 2 else 1})\n'
+                      f'link(m, {"p1" if k % 3 == 2 else "c9"}, k{k}, {3 if k % 3 == 2 else 2})\n' for k in range(24))
+            + 'socket(m, "base", k23)\nr = node(m, "math", 2)\nlink(m, s, r, 1, 1)\nlink(m, c5, r, 2)\nsocket(m, "roughness", r)\n')
+    proc = ''.join([
+        'm = material("G")\nassign("Cube", m)\n',
+        't = node(m, "texcoord", 4, 4)\nv = node(m, "voronoi", 6)\nlink(m, t, v, 1)\nn = node(m, "noise", 5, 4, 0.5)\n',
+        ''.join(f'k{i} = node(m, "math", {i % 7})\nlink(m, {"n" if i == 0 else "k" + str(i - 1)}, k{i}, 1)\nlink(m, v, k{i}, 2)\n' for i in range(30)),
+        'w = node(m, "wave", 3)\nh = node(m, "hsv", 0.2)\nlink(m, w, h, 1, 1)\nx = node(m, "mix", 2)\nlink(m, k29, x, 1)\nlink(m, h, x, 2)\nlink(m, v, x, 3, 1)\n',
+        'socket(m, "base", x)\nr = node(m, "math", 19)\nlink(m, k20, r, 1)\nsocket(m, "roughness", r)\nb = node(m, "bump", 0.5, 0.05)\nlink(m, n, b, 1)\nsocket(m, "normal", b)\n',
+        'f = node(m, "fresnel")\nsocket(m, "specular", f)\n'])
+    def orbit(code):
+        f = Fake()
+        f.pump(1.0, until_frame=True)
+        f.keymap('tests/keymaps/us.xkb')
+        m = Mcp(f)
+        q = lambda c: (m.tool('script_eval', {'code': c})[0] or '').strip()
+        q(code + 'view(40, 25, 4, 0, 1, 0)')
+        n = q('print(nodeinfo("G", 0, "count"))')
+        f.move(600, 300); f.mods(1); f.key(44); f.mods(0); f.pump(0.5)     # Shift+Z: rendered
+        n0 = int(q('print(frames())'))
+        for i in range(12):
+            f.drag(600, 300, 610, 305, steps=2)
+        k = int(q('print(frames())')) - n0
+        ft = [float(x) for x in q(f'for k in 1..{min(k, 200)} {{\n print(frametime(k))\n}}').split()]
+        f.proc.kill()
+        return (statistics.median(ft) if ft else 0), n
+    base, _ = orbit('m = material("G")\nassign("Cube", m)\nmatset(m, "base", 0.8, 0.3, 0.2)\n')
+    g, gn = orbit(game)
+    pr, pn = orbit(proc)
+    check(gn == '40' and base > 0 and g <= 2.5 * base,
+          f'a {gn}-node game-style material previews within 2.5x of a principled one while orbiting ({g:.2f} ms vs {base:.2f} ms: x{g / max(base, 1e-6):.2f})')
+    print(f'       a {pn}-node procedural material (noise, voronoi, wave, bump): {pr:.2f} ms (x{pr / max(base, 1e-6):.2f})')
 
 
 def gltf_fixture(path, external=False):
