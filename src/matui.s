@@ -130,6 +130,7 @@ WIDGET wd_mt_inst, WK_BUTTON, "material.new_instance", "New Instance", aux=op_ma
 WIDGET wd_nd_name, WK_TEXT, "node.name", "", cb=nd_name_cb, undo="Node Name", tip="The parameter's name: instances and scripts find it by this (Enter)"
 WIDGET wd_nd_num, WK_FLOAT, "node.value", "", -1000000.0, 1000000.0, 0.01, 3, cb=nd_num_cb, undo="Node Value", tip="The node's value (drag, or type a number or an expression)"
 WIDGET wd_nd_col, WK_COLOR, "node.color", "", cb=nd_col_cb, undo="Node Value", tip="The input's colour while nothing is linked to it"
+WIDGET wd_nd_fn,  WK_ENUM, "node.function", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=fn_names, tip="The material function it runs (Tab in the node editor: edit it)"
 WIDGET wd_nd_img, WK_ENUM, "node.image", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=image_names, tip="The image it samples"
 WIDGET wd_nd_ch0, WK_ENUM, "node.choice", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=nd_ch0
 WIDGET wd_nd_ch1, WK_ENUM, "node.choice1", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=nd_ch1
@@ -699,8 +700,13 @@ node_details:
     lea     rdi, [rip+wd_nd_num]
     lea     r8, [rip+nd_v]
     cmp     eax, 2
-    jne     11f
+    jne     10f
     lea     rdi, [rip+wd_nd_img]
+    lea     r8, [rip+nd_e]
+    jmp     12f
+10: cmp     eax, 4
+    jne     11f
+    lea     rdi, [rip+wd_nd_fn]
     lea     r8, [rip+nd_e]
     jmp     12f
 11: cmp     eax, 1

@@ -35,6 +35,7 @@
 .include "macros.inc"
 
 .globl graph_shade
+.globl graph_eval
 .globl fbm
 .globl perlin
 .globl graph_add
@@ -122,7 +123,9 @@
 .equ EV_P,      0                       # object position
 .equ EV_UV,     12
 .equ EV_LIVE,   24                      # u64: the nodes to evaluate
+.equ EV_DEPTH,  20                      # u32 function calls deep (matfunc.s)
 .equ EV_SC,     32                      # the shading context
+.equ EV_ARGS,   40                      # a function's arguments (or 0)
 .equ EV_VAL,    48                      # 48 x 8 outputs x (rgb, value)
 .equ EV_SZ,     48 + 16*NOUTS*MAX_NODES
 
@@ -199,6 +202,7 @@ s_g_moveneed:   .asciz "  material.node_move <material> <node (0: the output)> <
 s_g_setneed:    .asciz "  material.node_set <material> <node> <slot: 1-3 inputs, 4-7 values> <x> [y z]"
 s_g_sockneed:   .asciz "  material.socket <material> base|metallic|specular|roughness|emission|opacity|normal|ao|clearcoat|coat_roughness|transmission|ior|mask <node|none> [output 0-3]"
 s_g_ok:         .asciz "  graph: "
+s_g_nofunc:     .asciz "  no material function named "
 s_g_noimage:    .asciz "  no image named "
 s_g_unknown:    .asciz "  no material named "
 s_g_none:       .asciz "none"
@@ -1099,6 +1103,8 @@ graph_probe:
     mov     rax, [rbp+12]
     mov     [r13+EV_UV], rax
     mov     qword ptr [r13+EV_LIVE], -1
+    mov     dword ptr [r13+EV_DEPTH], 0  # (not in a function call)
+    mov     qword ptr [r13+EV_ARGS], 0
     mov     [r13+EV_SC], r12
     mov     rdi, rbx
     mov     rsi, r13
@@ -1158,6 +1164,8 @@ graph_thumbs:
     mov     [r12+SC_UVP], rax
     lea     r13, [rsp]
     mov     qword ptr [r13+EV_LIVE], -1
+    mov     dword ptr [r13+EV_DEPTH], 0  # (not in a function call)
+    mov     qword ptr [r13+EV_ARGS], 0
     mov     [r13+EV_SC], r12
     xor     r14d, r14d                  # the pixel
 .Lgt_px:
@@ -1285,6 +1293,20 @@ graph_live:
     jmp     1b
 9:  ret
 
+# gs_fnout(rbx=record) -> ecx = its Function Output node (0-based), -1 if
+#   none (keeps rax)
+gs_fnout:
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+GR_N]
+    jae     8f
+    imul    edx, ecx, NODE_SZ
+    cmp     dword ptr [rbx+GR_NODES+rdx+ND_TYPE], 41
+    je      9f
+    inc     ecx
+    jmp     1b
+8:  mov     ecx, -1
+9:  ret
+
 # graph_shade(rdi=material record, rsi=SC (+ 24 bytes after it for the
 #   box coordinates), rdx=a copy of its principled values (128 bytes, to
 #   change), ecx=1: coverage only (no normal)) -> eax = 1 if the material
@@ -1310,6 +1332,8 @@ graph_shade:
     je      .Lgs_out
     lea     r13, [rsp]                  # the frame
     mov     [r13+EV_SC], r12
+    mov     dword ptr [r13+EV_DEPTH], 0  # (not in a function call)
+    mov     qword ptr [r13+EV_ARGS], 0
     lea     r15, [rsp+EV_SZ]            # corners p1 p2 (24), sums (scratch)
     xor     eax, eax                    # the nodes that lead to a pin
     xor     ecx, ecx
@@ -1325,7 +1349,13 @@ graph_shade:
     bts     rax, rdx
 78:inc     ecx
     jmp     76b
-79: call    graph_live
+79: cmp     dword ptr [rbx+MA_FUNC], 1  # (a material function, shown on its
+    jne     791f                        #  own: Out 1 as the base colour)
+    call    gs_fnout
+    test    ecx, ecx
+    js      791f
+    bts     rax, rcx
+791:call    graph_live
     mov     [r13+EV_LIVE], rax
     xor     ecx, ecx                    # the box coordinates of the corners
 1:  movss   xmm0, [r12+SC_P0O+rcx*4]
@@ -1353,6 +1383,25 @@ graph_shade:
     movss   xmm0, [r12+SC_U]            # the point itself
     movss   xmm1, [r12+SC_V]
     call    at
+    cmp     dword ptr [rbx+MA_FUNC], 1  # (a function: Out 1)
+    jne     13f
+    call    gs_fnout
+    test    ecx, ecx
+    js      13f
+    imul    ecx, ecx, NODE_SZ
+    push    r12
+    push    r12
+    lea     r12, [rbx+GR_NODES+rcx]
+    xor     ecx, ecx
+    call    node_in
+    pop     r12
+    pop     r12
+    mov     rax, [rsp+EV_SZ+136]
+    movss   [rax+32], xmm0
+    movss   [rax+36], xmm1
+    movss   [rax+40], xmm2
+    bts     dword ptr [r12+SC_FLAGS], PIN_BASE
+13:
     # the pins into the copy
     mov     r14, [rsp+EV_SZ+136]
     xor     ebp, ebp
@@ -2446,7 +2495,19 @@ do_mat_node:
 11: cmp     r14d, T_IMAGE               # image: a name first
     je      12f
     cmp     r14d, T_TEXPARAM
+    je      12f
+    cmp     r14d, 42                    # a Material Function: its function
     jne     2f
+    mov     rsi, r13
+    call    next_word
+    mov     r13, rsi
+    test    eax, eax
+    jz      2f
+    lea     rdi, [rip+gw_word]
+    call    mat_find
+    test    eax, eax
+    js      .Lmn_nofunc
+    jmp     13f
 12: mov     rsi, r13
     call    next_word
     mov     r13, rsi
@@ -2456,7 +2517,7 @@ do_mat_node:
     call    image_find
     test    eax, eax
     js      .Lmn_noimage
-    inc     eax
+13: inc     eax
     cvtsi2ss xmm0, eax
     movss   [rsp], xmm0
     mov     edi, r12d
@@ -2486,6 +2547,11 @@ do_mat_node:
 4:  mov     edi, ebx
     call    say_node
     jmp     9f
+.Lmn_nofunc:
+    lea     rdi, [rip+s_g_nofunc]
+    lea     rsi, [rip+gw_word]
+    call    log_pair
+    jmp     .Lmn_drop
 .Lmn_noimage:
     lea     rdi, [rip+s_g_noimage]
     lea     rsi, [rip+gw_word]

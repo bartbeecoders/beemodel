@@ -622,6 +622,7 @@ def main():
     material_instances()
     material_library()
     material_exchange()
+    material_functions()
     gltf_mtl()
     product_shot()
     params_units()
@@ -2909,6 +2910,85 @@ def material_exchange():
     got = [tuple(int(x) for x in l.split()) for l in out.splitlines() if len(l.split()) == 3]
     check(got == [(0, 1, 0), (1, 1, 3), (3, 1, 2), (4, 1, 0), (6, 9, 0)] and out.splitlines()[-1] == '3',
           f'MTL import: the maps back as a graph (-imfchan g / b: one packed map) ({got})')
+
+
+def material_functions():
+    """Material functions (M8): one function used by three materials, an
+    edit to it reaching all three; make_function (Ctrl+G) keeps what the
+    material shows; saved and opened; calls nest without looping forever;
+    in the node editor Ctrl+G makes one and Tab goes in and out."""
+    print('  -- material functions --')
+    home = tempfile.mkdtemp(prefix='bee-fn-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+        return r.stdout.strip() + r.stderr.strip()
+    tint = ('op("material.function_new", "Tint")\nf = "Tint"\nm = node(f, "vmath", 2)\nlink(f, 1, m, 1)\nnodeset(f, m, 2, 0.5)\n'
+            'link(f, m, 2, 1)\n'
+            'for i in 1..4 {\n a = material("M" + i)\n c = node(a, "color")\n nodeset(a, c, 1, 0.2 * i, 0.4, 0.8)\n'
+            ' k = node(a, "fncall", "Tint")\n link(a, c, k, 1)\n socket(a, "base", k)\n}\n')
+    out = run(tint + 'for i in 1..4 { a = "M" + i\nprint(nodeval(a, nodeinfo(a, 0, "socket", 0), 0, 0, 0, 0)) }\n'
+              'op("material.node_set", "Tint 2 2 0.25")\n'
+              'for i in 1..4 { a = "M" + i\nprint(nodeval(a, nodeinfo(a, 0, "socket", 0), 0, 0, 0, 0)) }')
+    check(out.split() == ['0.1', '0.2', '0.3', '0.05', '0.1', '0.15'],
+          f'one function used by three materials; editing it changes all three ({out.split()})')
+    rust = ('a = material("Rust")\nassign("Cube", a)\nc = node(a, "color")\nnodeset(a, c, 1, 0.6, 0.3, 0.1)\nn = node(a, "noise", 8)\n'
+            'v = node(a, "vmath", 2)\nlink(a, c, v, 1)\nlink(a, n, v, 2)\nh = node(a, "hsv", 0.1)\nlink(a, v, h, 1)\n'
+            'r = node(a, "math", 18)\nlink(a, n, r, 1)\nsocket(a, "base", h)\nsocket(a, "roughness", r)\n')
+    look = ('b = nodeinfo(a, 0, "socket", 0)\nbo = nodeinfo(a, 0, "socketout", 0)\nq = nodeinfo(a, 0, "socket", 3)\nqo = nodeinfo(a, 0, "socketout", 3)\n'
+            'print(nodeinfo(a, 0, "count"), nodeval(a, b, 4 * bo, 0.3, 0.2, 0.1), nodeval(a, b, 4 * bo + 2, 0.3, 0.2, 0.1), '
+            'nodeval(a, q, 4 * qo + 3, 0.3, 0.2, 0.1))\n')
+    bee = os.path.join(home, 'fn.bee')
+    out = run(rust + look + 'op("material.make_function", "Rust 2 3 4")\n' + look +
+              'print(nodeinfo("Rust_fn", 0, "count"), nodeinfo(a, 2, "type"))\n' + f'op("file.save", "{bee}")').splitlines()
+    try:
+        before, after, fn = out[0].split(), out[1].split(), out[2].split()
+        ok = before[0] == '5' and after[0] == '3' and before[1:] == after[1:] and fn == ['5', '42']
+    except IndexError:
+        ok, before, after = False, out, []
+    check(ok, f'make_function moves nodes into a function, one Material Function node in their place, the same result ({before} -> {after})')
+    out = run(f'op("file.open", "{bee}")\na = "Rust"\n' + look).split()
+    check(out[-4:] == after[:4] if len(after) >= 4 else False, f'functions and their calls are saved and opened ({out[-4:]})')
+    out = run('op("material.function_new", "Loop")\nk = node("Loop", "fncall", "Loop")\nlink("Loop", 1, k, 1)\nlink("Loop", k, 2, 1)\n'
+              'a = material("L")\nc = node(a, "fncall", "Loop")\nsocket(a, "base", c)\nprint(nodeval(a, c, 0, 0, 0, 0), "done")')
+    check(out.split()[-1:] == ['done'], f'a function calling itself stops 8 calls deep ({out.split()[-2:]})')
+    # the node editor: Ctrl+G, Tab in and out
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q(rust + 'select("Cube")\nop("material.node_move", "Rust 1 20 420")\nop("material.node_move", "Rust 2 20 20")\n'
+      'op("material.node_move", "Rust 3 260 20")\nop("material.node_move", "Rust 4 500 20")\nop("material.node_move", "Rust 5 260 420")\n'
+      'op("material.node_move", "Rust 0 740 420")\nop("area.type_node_editor")\nop("area.maximize")\nop("node.thumbnails", "0")\n'
+      'op("node.view_fit")')
+    f.pump(0.4)
+    def ys(col):
+        img = f.image()
+        return [y for y in range(60, 790, 2) for x in range(0, 1280, 6) if img.getpixel((x, y))[:3] == col]
+    noise, colr = (0x6b, 0x4f, 0x96), (0x9a, 0x4a, 0x3c)
+    ny, cy = ys(noise), ys(colr)
+    if ny and cy:
+        f.drag(150, min(ny) - 14, 1000, min(cy) - 20, steps=8)
+        f.pump(0.2)
+        f.mods(4); f.key(34); f.mods(0)                     # Ctrl+G
+        f.pump(0.4)
+    got = (q('print(nodeinfo("Rust", 0, "count"))'), q('print(nodeinfo("Rust_fn", 0, "count"))'))
+    check(got == ('3', '5'), f'Ctrl+G makes a material function of the selected nodes ({got})')
+    f.shot('69_function_made.png')
+    teal = (0x2f, 0x6e, 0x6e)
+    img = f.image()
+    pts = [(x, y) for y in range(60, 790, 2) for x in range(0, 1280, 2) if img.getpixel((x, y))[:3] == teal]
+    if pts:
+        x, y = min(pts, key=lambda p: (p[1], p[0]))
+        f.click(x + 20, y + 4); f.pump(0.2)
+    f.key(15); f.pump(0.4)                                  # Tab: into it
+    inside = bool(ys(noise))
+    f.shot('70_function_inside.png')
+    f.key(15); f.pump(0.4)                                  # Tab: back out
+    outside = not ys(noise)
+    check(inside and outside, f'Tab on a Material Function node edits the function, Tab again goes back (in: {inside}, out: {outside})')
+    f.proc.kill()
 
 
 def gltf_fixture(path, external=False):

@@ -383,6 +383,7 @@
 .equ MA_SIDED,      100     # f32 1: one-sided (back faces not drawn or hit)
 .equ MA_CLIP,       104     # f32 the opacity mask clip value (0: 1/3)
 .equ MA_PARENT,     108     # u32 an instance: its parent material + 1 (0: none)
+.equ MA_FUNC,       112     # u32 1: a material function (matfunc.s)
 .equ MA_RT_AO,      116     # f32 shading copies only (after a graph): its AO,
 .equ MA_RT_MASK,    120     #  its opacity mask (valid when SC_FLAGS says so)
 .equ GR_PINS,       3616    # u32[16] Material Output pins: node + 1 | output << 16
