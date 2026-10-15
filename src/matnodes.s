@@ -48,7 +48,7 @@
 .equ EV_P,      0
 .equ EV_UV,     12
 .equ EV_SC,     32
-.equ MN_NTYPES, 35                      # (the node list below)
+.equ MN_NTYPES, 36                      # (the node list below)
 
 .section .rodata
 .align 16
@@ -376,7 +376,7 @@ mn_jump:
     .long .Lmn_mapping-mn_jump, .Lmn_panner-mn_jump, .Lmn_rotator-mn_jump, .Lmn_voronoi-mn_jump
     .long .Lmn_hsv-mn_jump, .Lmn_invert-mn_jump, .Lmn_brightcon-mn_jump, .Lmn_desat-mn_jump
     .long .Lmn_gamma-mn_jump, .Lmn_blackbody-mn_jump, .Lmn_brick-mn_jump, .Lmn_wave-mn_jump
-    .long .Lmn_whitenoise-mn_jump, .Lmn_triplanar-mn_jump
+    .long .Lmn_whitenoise-mn_jump, .Lmn_triplanar-mn_jump, .Lmn_reroute-mn_jump
 .Lmn_zero:
     xorps   xmm0, xmm0
     call    gr_putv
@@ -1184,6 +1184,14 @@ node_t:
     call    gr_put
     jmp     .Lmn_out
 
+# ---- utility ---------------------------------------------------------------
+.Lmn_reroute:                           # its input, as it is (the value too)
+    xor     ecx, ecx
+    call    gr_in
+    xor     ecx, ecx
+    call    gr_out
+    jmp     .Lmn_out
+
 # ---- colour ----------------------------------------------------------------
 .Lmn_hsv:                               # shift hue, scale saturation, value
     xor     ecx, ecx
@@ -1494,15 +1502,15 @@ graph_type_names:
                 .quad mns_12, mns_13, mns_14, mns_15, mns_16, mns_17
                 .quad mns_18, mns_19, mns_20, mns_21, mns_22, mns_23
                 .quad mns_24, mns_25, mns_26, mns_27, mns_28, mns_29
-                .quad mns_30, mns_31, mns_32, mns_33, mns_34
+                .quad mns_30, mns_31, mns_32, mns_33, mns_34, mns_35
                 .quad 0
 mn_titles:      .quad 0
-                .quad mns_35, mns_36, mns_37, mns_38, mns_39, mns_40
-                .quad mns_41, mns_42, mns_43, mns_44, mns_45, mns_46
-                .quad mns_47, mns_48, mns_49, mns_50, mns_51, mns_52
-                .quad mns_53, mns_54, mns_55, mns_56, mns_57, mns_58
-                .quad mns_59, mns_60, mns_61, mns_62, mns_63, mns_64
-                .quad mns_65, mns_66, mns_67, mns_68, mns_69
+                .quad mns_36, mns_37, mns_38, mns_39, mns_40, mns_41
+                .quad mns_42, mns_43, mns_44, mns_45, mns_46, mns_47
+                .quad mns_48, mns_49, mns_50, mns_51, mns_52, mns_53
+                .quad mns_54, mns_55, mns_56, mns_57, mns_58, mns_59
+                .quad mns_60, mns_61, mns_62, mns_63, mns_64, mns_65
+                .quad mns_66, mns_67, mns_68, mns_69, mns_70, mns_71
 # per type (as geonodes.s's gn_meta): input names (3), input kinds, value
 #   names (4), value kinds (0 number, 1 choice, 6 the second choice list,
 #   2 image, 3 whole number), the choices (lists one after the other: a
@@ -1543,120 +1551,124 @@ mn_meta:        .quad 0, 0, 0, 0, 0, 0, 0
                 .quad mi_wave, mik_wave, mv_wave, mvk_wave, mc_wave, mo_wave, mok_wave
                 .quad mi_whitenoise, mik_whitenoise, mv_whitenoise, mvk_whitenoise, 0, mo_whitenoise, mok_whitenoise
                 .quad mi_triplanar, mik_triplanar, mv_triplanar, mvk_triplanar, mc_triplanar, mo_triplanar, mok_triplanar
-mi_image:      .quad mns_70, 0, 0
-mv_image:      .quad mns_71, mns_72, mns_73, mns_74
-mo_image:      .quad mns_51, mns_75, mns_76, mns_77, mns_78, 0, 0, 0
-mc_image:      .quad 3, mns_79, mns_80, mns_46, 3, mns_81, mns_82, mns_83
-mi_noise:      .quad mns_84, 0, 0
-mv_noise:      .quad mns_85, mns_86, mns_87, 0
-mo_noise:      .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mi_checker:    .quad mns_88, mns_89, 0
-mv_checker:    .quad mns_85, 0, 0, 0
-mo_checker:    .quad mns_51, 0, 0, 0, 0, 0, 0, 0
+                .quad mi_reroute, mik_reroute, mv_reroute, mvk_reroute, 0, mo_reroute, mok_reroute
+mi_image:      .quad mns_72, 0, 0
+mv_image:      .quad mns_73, mns_74, mns_75, mns_76
+mo_image:      .quad mns_52, mns_77, mns_78, mns_79, mns_80, 0, 0, 0
+mc_image:      .quad 3, mns_81, mns_82, mns_47, 3, mns_83, mns_84, mns_85
+mi_noise:      .quad mns_86, 0, 0
+mv_noise:      .quad mns_87, mns_88, mns_89, 0
+mo_noise:      .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mi_checker:    .quad mns_90, mns_91, 0
+mv_checker:    .quad mns_87, 0, 0, 0
+mo_checker:    .quad mns_52, 0, 0, 0, 0, 0, 0, 0
 mi_gradient:   .quad 0, 0, 0
-mv_gradient:   .quad mns_90, mns_85, mns_84, 0
-mo_gradient:   .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mc_gradient:   .quad 5, mns_91, mns_92, mns_93, mns_94, mns_95
-mi_mix:        .quad mns_96, mns_88, mns_89
-mv_mix:        .quad mns_97, 0, 0, 0
-mo_mix:        .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mc_mix:        .quad 11, mns_39, mns_98, mns_99, mns_100, mns_101, mns_102, mns_103, mns_104, mns_105, mns_106, mns_107
-mi_ramp:       .quad mns_96, mns_108, mns_88
-mv_ramp:       .quad mns_109, mns_110, 0, 0
-mo_ramp:       .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mi_math:       .quad mns_111, mns_77, mns_112
-mv_math:       .quad mns_113, 0, 0, 0
-mo_math:       .quad mns_114, 0, 0, 0, 0, 0, 0, 0
-mc_math:       .quad 31, mns_98, mns_100, mns_99, mns_107, mns_115, mns_116, mns_117, mns_118, mns_119, mns_120, mns_121, mns_122, mns_123, mns_124, mns_125, mns_126, mns_127, mns_128, mns_129, mns_130, mns_82, mns_131, mns_132, mns_133, mns_134, mns_135, mns_136, mns_137, mns_138, mns_139, mns_140
-mi_bump:       .quad mns_141, 0, 0
-mv_bump:       .quad mns_142, mns_143, 0, 0
-mo_bump:       .quad mns_46, 0, 0, 0, 0, 0, 0, 0
-mi_normalmap:  .quad mns_51, 0, 0
-mv_normalmap:  .quad mns_142, 0, 0, 0
-mo_normalmap:  .quad mns_46, 0, 0, 0, 0, 0, 0, 0
+mv_gradient:   .quad mns_92, mns_87, mns_86, 0
+mo_gradient:   .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mc_gradient:   .quad 5, mns_93, mns_94, mns_95, mns_96, mns_97
+mi_mix:        .quad mns_98, mns_90, mns_91
+mv_mix:        .quad mns_99, 0, 0, 0
+mo_mix:        .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mc_mix:        .quad 11, mns_40, mns_100, mns_101, mns_102, mns_103, mns_104, mns_105, mns_106, mns_107, mns_108, mns_109
+mi_ramp:       .quad mns_98, mns_110, mns_90
+mv_ramp:       .quad mns_111, mns_112, 0, 0
+mo_ramp:       .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mi_math:       .quad mns_113, mns_79, mns_114
+mv_math:       .quad mns_115, 0, 0, 0
+mo_math:       .quad mns_116, 0, 0, 0, 0, 0, 0, 0
+mc_math:       .quad 31, mns_100, mns_102, mns_101, mns_109, mns_117, mns_118, mns_119, mns_120, mns_121, mns_122, mns_123, mns_124, mns_125, mns_126, mns_127, mns_128, mns_129, mns_130, mns_131, mns_132, mns_84, mns_133, mns_134, mns_135, mns_136, mns_137, mns_138, mns_139, mns_140, mns_141, mns_142
+mi_bump:       .quad mns_143, 0, 0
+mv_bump:       .quad mns_144, mns_145, 0, 0
+mo_bump:       .quad mns_47, 0, 0, 0, 0, 0, 0, 0
+mi_normalmap:  .quad mns_52, 0, 0
+mv_normalmap:  .quad mns_144, 0, 0, 0
+mo_normalmap:  .quad mns_47, 0, 0, 0, 0, 0, 0, 0
 mi_texcoord:   .quad 0, 0, 0
-mv_texcoord:   .quad mns_144, mns_145, mns_146, mns_147
-mo_texcoord:   .quad mns_70, mns_148, mns_149, 0, 0, 0, 0, 0
+mv_texcoord:   .quad mns_146, mns_147, mns_148, mns_149
+mo_texcoord:   .quad mns_72, mns_150, mns_151, 0, 0, 0, 0, 0
 mi_position:   .quad 0, 0, 0
-mv_position:   .quad mns_150, 0, 0, 0
-mo_position:   .quad mns_45, mns_91, mns_92, mns_93, 0, 0, 0, 0
-mc_position:   .quad 2, mns_151, mns_152
+mv_position:   .quad mns_152, 0, 0, 0
+mo_position:   .quad mns_46, mns_93, mns_94, mns_95, 0, 0, 0, 0
+mc_position:   .quad 2, mns_153, mns_154
 mi_normal:     .quad 0, 0, 0
 mv_normal:     .quad 0, 0, 0, 0
-mo_normal:     .quad mns_46, mns_91, mns_92, mns_93, 0, 0, 0, 0
+mo_normal:     .quad mns_47, mns_93, mns_94, mns_95, 0, 0, 0, 0
 mi_camera:     .quad 0, 0, 0
 mv_camera:     .quad 0, 0, 0, 0
-mo_camera:     .quad mns_153, 0, 0, 0, 0, 0, 0, 0
+mo_camera:     .quad mns_155, 0, 0, 0, 0, 0, 0, 0
 mi_vcolor:     .quad 0, 0, 0
 mv_vcolor:     .quad 0, 0, 0, 0
-mo_vcolor:     .quad mns_51, 0, 0, 0, 0, 0, 0, 0
+mo_vcolor:     .quad mns_52, 0, 0, 0, 0, 0, 0, 0
 mi_time:       .quad 0, 0, 0
-mv_time:       .quad mns_154, 0, 0, 0
-mo_time:       .quad mns_49, 0, 0, 0, 0, 0, 0, 0
+mv_time:       .quad mns_156, 0, 0, 0
+mo_time:       .quad mns_50, 0, 0, 0, 0, 0, 0, 0
 mi_constant:   .quad 0, 0, 0
-mv_constant:   .quad mns_114, 0, 0, 0
-mo_constant:   .quad mns_114, 0, 0, 0, 0, 0, 0, 0
-mi_color:      .quad mns_51, 0, 0
+mv_constant:   .quad mns_116, 0, 0, 0
+mo_constant:   .quad mns_116, 0, 0, 0, 0, 0, 0, 0
+mi_color:      .quad mns_52, 0, 0
 mv_color:      .quad 0, 0, 0, 0
-mo_color:      .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mi_fresnel:    .quad mns_46, 0, 0
-mv_fresnel:    .quad mns_135, mns_155, 0, 0
-mo_fresnel:    .quad mns_156, 0, 0, 0, 0, 0, 0, 0
-mi_vmath:      .quad mns_111, mns_77, mns_112
-mv_vmath:      .quad mns_113, 0, 0, 0
-mo_vmath:      .quad mns_153, mns_91, mns_92, mns_93, 0, 0, 0, 0
-mc_vmath:      .quad 20, mns_98, mns_100, mns_99, mns_107, mns_116, mns_117, mns_120, mns_124, mns_126, mns_85, mns_157, mns_158, mns_159, mns_160, mns_143, mns_161, mns_131, mns_129, mns_130, mns_115
-mi_separate:   .quad mns_153, 0, 0
+mo_color:      .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mi_fresnel:    .quad mns_47, 0, 0
+mv_fresnel:    .quad mns_137, mns_157, 0, 0
+mo_fresnel:    .quad mns_158, 0, 0, 0, 0, 0, 0, 0
+mi_vmath:      .quad mns_113, mns_79, mns_114
+mv_vmath:      .quad mns_115, 0, 0, 0
+mo_vmath:      .quad mns_155, mns_93, mns_94, mns_95, 0, 0, 0, 0
+mc_vmath:      .quad 20, mns_100, mns_102, mns_101, mns_109, mns_118, mns_119, mns_122, mns_126, mns_128, mns_87, mns_159, mns_160, mns_161, mns_162, mns_145, mns_163, mns_133, mns_131, mns_132, mns_117
+mi_separate:   .quad mns_155, 0, 0
 mv_separate:   .quad 0, 0, 0, 0
-mo_separate:   .quad mns_91, mns_92, mns_93, 0, 0, 0, 0, 0
-mi_combine:    .quad mns_91, mns_92, mns_93
+mo_separate:   .quad mns_93, mns_94, mns_95, 0, 0, 0, 0, 0
+mi_combine:    .quad mns_93, mns_94, mns_95
 mv_combine:    .quad 0, 0, 0, 0
-mo_combine:    .quad mns_153, 0, 0, 0, 0, 0, 0, 0
-mi_mapping:    .quad mns_153, mns_84, mns_85
-mv_mapping:    .quad mns_162, 0, 0, 0
-mo_mapping:    .quad mns_153, 0, 0, 0, 0, 0, 0, 0
-mi_panner:     .quad mns_70, mns_49, 0
-mv_panner:     .quad mns_163, mns_164, 0, 0
-mo_panner:     .quad mns_70, 0, 0, 0, 0, 0, 0, 0
-mi_rotator:    .quad mns_70, mns_49, 0
-mv_rotator:    .quad mns_165, mns_166, mns_154, 0
-mo_rotator:    .quad mns_70, 0, 0, 0, 0, 0, 0, 0
-mi_voronoi:    .quad mns_153, 0, 0
-mv_voronoi:    .quad mns_85, mns_167, mns_168, 0
-mo_voronoi:    .quad mns_143, mns_51, 0, 0, 0, 0, 0, 0
-mc_voronoi:    .quad 3, mns_169, mns_170, mns_171
-mi_hsv:        .quad mns_51, 0, 0
-mv_hsv:        .quad mns_172, mns_173, mns_114, mns_96
-mo_hsv:        .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mi_invert:     .quad mns_51, 0, 0
-mv_invert:     .quad mns_96, 0, 0, 0
-mo_invert:     .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mi_brightcon:  .quad mns_51, 0, 0
-mv_brightcon:  .quad mns_174, mns_175, 0, 0
-mo_brightcon:  .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mi_desaturate: .quad mns_51, 0, 0
-mv_desaturate: .quad mns_126, 0, 0, 0
-mo_desaturate: .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mi_gamma:      .quad mns_51, 0, 0
-mv_gamma:      .quad mns_64, 0, 0, 0
-mo_gamma:      .quad mns_51, 0, 0, 0, 0, 0, 0, 0
+mo_combine:    .quad mns_155, 0, 0, 0, 0, 0, 0, 0
+mi_mapping:    .quad mns_155, mns_86, mns_87
+mv_mapping:    .quad mns_164, 0, 0, 0
+mo_mapping:    .quad mns_155, 0, 0, 0, 0, 0, 0, 0
+mi_panner:     .quad mns_72, mns_50, 0
+mv_panner:     .quad mns_165, mns_166, 0, 0
+mo_panner:     .quad mns_72, 0, 0, 0, 0, 0, 0, 0
+mi_rotator:    .quad mns_72, mns_50, 0
+mv_rotator:    .quad mns_167, mns_168, mns_156, 0
+mo_rotator:    .quad mns_72, 0, 0, 0, 0, 0, 0, 0
+mi_voronoi:    .quad mns_155, 0, 0
+mv_voronoi:    .quad mns_87, mns_169, mns_170, 0
+mo_voronoi:    .quad mns_145, mns_52, 0, 0, 0, 0, 0, 0
+mc_voronoi:    .quad 3, mns_171, mns_172, mns_173
+mi_hsv:        .quad mns_52, 0, 0
+mv_hsv:        .quad mns_174, mns_175, mns_116, mns_98
+mo_hsv:        .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mi_invert:     .quad mns_52, 0, 0
+mv_invert:     .quad mns_98, 0, 0, 0
+mo_invert:     .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mi_brightcon:  .quad mns_52, 0, 0
+mv_brightcon:  .quad mns_176, mns_177, 0, 0
+mo_brightcon:  .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mi_desaturate: .quad mns_52, 0, 0
+mv_desaturate: .quad mns_128, 0, 0, 0
+mo_desaturate: .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mi_gamma:      .quad mns_52, 0, 0
+mv_gamma:      .quad mns_65, 0, 0, 0
+mo_gamma:      .quad mns_52, 0, 0, 0, 0, 0, 0, 0
 mi_blackbody:  .quad 0, 0, 0
-mv_blackbody:  .quad mns_176, 0, 0, 0
-mo_blackbody:  .quad mns_51, 0, 0, 0, 0, 0, 0, 0
-mi_brick:      .quad mns_153, mns_177, mns_178
-mv_brick:      .quad mns_85, mns_178, mns_84, 0
-mo_brick:      .quad mns_51, mns_156, 0, 0, 0, 0, 0, 0
-mi_wave:       .quad mns_153, 0, 0
-mv_wave:       .quad mns_85, mns_179, mns_180, mns_90
-mo_wave:       .quad mns_156, mns_51, 0, 0, 0, 0, 0, 0
-mc_wave:       .quad 2, mns_181, mns_182, 3, mns_91, mns_92, mns_93
-mi_whitenoise: .quad mns_153, 0, 0
+mv_blackbody:  .quad mns_178, 0, 0, 0
+mo_blackbody:  .quad mns_52, 0, 0, 0, 0, 0, 0, 0
+mi_brick:      .quad mns_155, mns_179, mns_180
+mv_brick:      .quad mns_87, mns_180, mns_86, 0
+mo_brick:      .quad mns_52, mns_158, 0, 0, 0, 0, 0, 0
+mi_wave:       .quad mns_155, 0, 0
+mv_wave:       .quad mns_87, mns_181, mns_182, mns_92
+mo_wave:       .quad mns_158, mns_52, 0, 0, 0, 0, 0, 0
+mc_wave:       .quad 2, mns_183, mns_184, 3, mns_93, mns_94, mns_95
+mi_whitenoise: .quad mns_155, 0, 0
 mv_whitenoise: .quad 0, 0, 0, 0
-mo_whitenoise: .quad mns_114, mns_51, 0, 0, 0, 0, 0, 0
+mo_whitenoise: .quad mns_116, mns_52, 0, 0, 0, 0, 0, 0
 mi_triplanar:  .quad 0, 0, 0
-mv_triplanar:  .quad mns_71, mns_72, mns_183, mns_73
-mo_triplanar:  .quad mns_51, mns_78, 0, 0, 0, 0, 0, 0
-mc_triplanar:  .quad 2, mns_79, mns_80
+mv_triplanar:  .quad mns_73, mns_74, mns_185, mns_75
+mo_triplanar:  .quad mns_52, mns_80, 0, 0, 0, 0, 0, 0
+mc_triplanar:  .quad 2, mns_81, mns_82
+mi_reroute:    .quad mns_186, 0, 0
+mv_reroute:    .quad 0, 0, 0, 0
+mo_reroute:    .quad mns_187, 0, 0, 0, 0, 0, 0, 0
 mik_image:     .byte 2, 0, 0
 mvk_image:     .byte 2, 0, 1, 6
 mok_image:     .byte 3, 1, 1, 1, 1, 0, 0, 0
@@ -1762,6 +1774,9 @@ mok_whitenoise: .byte 1, 3, 0, 0, 0, 0, 0, 0
 mik_triplanar: .byte 0, 0, 0
 mvk_triplanar: .byte 2, 0, 0, 1
 mok_triplanar: .byte 3, 1, 0, 0, 0, 0, 0, 0
+mik_reroute:   .byte 3, 0, 0
+mvk_reroute:   .byte 0, 0, 0, 0
+mok_reroute:   .byte 3, 0, 0, 0, 0, 0, 0, 0
 # header colours, categories (0 input, 1 texture, 2 math, 3 vector, 4 colour, 5 utility)
 .align 4
 mn_color:       .long 0
@@ -1800,9 +1815,10 @@ mn_color:       .long 0
                 .long 0x6b4f96               # wave
                 .long 0x6b4f96               # whitenoise
                 .long 0x6b4f96               # triplanar
-mn_cat:         .byte 0, 1, 1, 1, 1, 4, 4, 2, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 1, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1
+                .long 0x4a5560               # reroute
+mn_cat:         .byte 0, 1, 1, 1, 1, 4, 4, 2, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 3, 3, 3, 3, 3, 1, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 5
 .align 8
-mn_cat_names:   .quad mns_184, mns_185, mns_41, mns_153, mns_79, mns_186, 0
+mn_cat_names:   .quad mns_188, mns_189, mns_42, mns_155, mns_81, mns_190, 0
 # defaults per type: p0..p3, the inputs' values (3 each)
 .align 4
 mn_defaults:
@@ -1841,6 +1857,7 @@ mn_defaults:
     .float 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0    # wave
     .float 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0    # whitenoise
     .float 0.0, 1.0, 4.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0    # triplanar
+    .float 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0    # reroute
 # the strings
 mns_0:          .asciz "image"
 mns_1:          .asciz "noise"
@@ -1877,157 +1894,161 @@ mns_31:         .asciz "brick"
 mns_32:         .asciz "wave"
 mns_33:         .asciz "whitenoise"
 mns_34:         .asciz "triplanar"
-mns_35:         .asciz "Texture Sample"
-mns_36:         .asciz "Noise Texture"
-mns_37:         .asciz "Checker Texture"
-mns_38:         .asciz "Gradient Texture"
-mns_39:         .asciz "Mix"
-mns_40:         .asciz "Color Ramp"
-mns_41:         .asciz "Math"
-mns_42:         .asciz "Bump"
-mns_43:         .asciz "Normal Map"
-mns_44:         .asciz "Texture Coordinate"
-mns_45:         .asciz "Position"
-mns_46:         .asciz "Normal"
-mns_47:         .asciz "Camera Vector"
-mns_48:         .asciz "Vertex Color"
-mns_49:         .asciz "Time"
-mns_50:         .asciz "Constant"
-mns_51:         .asciz "Color"
-mns_52:         .asciz "Fresnel"
-mns_53:         .asciz "Vector Math"
-mns_54:         .asciz "Separate"
-mns_55:         .asciz "Combine"
-mns_56:         .asciz "Mapping"
-mns_57:         .asciz "Panner"
-mns_58:         .asciz "Rotator"
-mns_59:         .asciz "Voronoi Texture"
-mns_60:         .asciz "Hue/Saturation"
-mns_61:         .asciz "Invert"
-mns_62:         .asciz "Bright/Contrast"
-mns_63:         .asciz "Desaturation"
-mns_64:         .asciz "Gamma"
-mns_65:         .asciz "Blackbody"
-mns_66:         .asciz "Brick Texture"
-mns_67:         .asciz "Wave Texture"
-mns_68:         .asciz "White Noise"
-mns_69:         .asciz "Triplanar Sample"
-mns_70:         .asciz "UV"
-mns_71:         .asciz "Image"
-mns_72:         .asciz "Size"
-mns_73:         .asciz "Sampler"
-mns_74:         .asciz "Wrap"
-mns_75:         .asciz "R"
-mns_76:         .asciz "G"
-mns_77:         .asciz "B"
-mns_78:         .asciz "Alpha"
-mns_79:         .asciz "Colour"
-mns_80:         .asciz "Data"
-mns_81:         .asciz "Repeat"
-mns_82:         .asciz "Clamp"
-mns_83:         .asciz "Mirror"
-mns_84:         .asciz "Offset"
-mns_85:         .asciz "Scale"
-mns_86:         .asciz "Detail"
-mns_87:         .asciz "Roughness"
-mns_88:         .asciz "Color 1"
-mns_89:         .asciz "Color 2"
-mns_90:         .asciz "Axis"
-mns_91:         .asciz "X"
-mns_92:         .asciz "Y"
-mns_93:         .asciz "Z"
-mns_94:         .asciz "Radial"
-mns_95:         .asciz "Spherical"
-mns_96:         .asciz "Factor"
-mns_97:         .asciz "Mode"
-mns_98:         .asciz "Add"
-mns_99:         .asciz "Multiply"
-mns_100:        .asciz "Subtract"
-mns_101:        .asciz "Screen"
-mns_102:        .asciz "Overlay"
-mns_103:        .asciz "Darken"
-mns_104:        .asciz "Lighten"
-mns_105:        .asciz "Difference"
-mns_106:        .asciz "Soft Light"
-mns_107:        .asciz "Divide"
-mns_108:        .asciz "Color 0"
-mns_109:        .asciz "Position 0"
-mns_110:        .asciz "Position 1"
-mns_111:        .asciz "A"
-mns_112:        .asciz "C"
-mns_113:        .asciz "Operation"
-mns_114:        .asciz "Value"
-mns_115:        .asciz "Power"
-mns_116:        .asciz "Minimum"
-mns_117:        .asciz "Maximum"
-mns_118:        .asciz "Greater Than"
-mns_119:        .asciz "Sine"
-mns_120:        .asciz "Absolute"
-mns_121:        .asciz "Cosine"
-mns_122:        .asciz "Tangent"
-mns_123:        .asciz "Square Root"
-mns_124:        .asciz "Floor"
-mns_125:        .asciz "Ceil"
-mns_126:        .asciz "Fraction"
-mns_127:        .asciz "Round"
-mns_128:        .asciz "Sign"
-mns_129:        .asciz "One Minus"
-mns_130:        .asciz "Saturate"
-mns_131:        .asciz "Lerp"
-mns_132:        .asciz "Step"
-mns_133:        .asciz "Smoothstep"
-mns_134:        .asciz "Modulo"
-mns_135:        .asciz "Exponent"
-mns_136:        .asciz "Logarithm"
-mns_137:        .asciz "Arctan2"
-mns_138:        .asciz "Less Than"
-mns_139:        .asciz "Negate"
-mns_140:        .asciz "Multiply Add"
-mns_141:        .asciz "Height"
-mns_142:        .asciz "Strength"
-mns_143:        .asciz "Distance"
-mns_144:        .asciz "Tiling U"
-mns_145:        .asciz "Tiling V"
-mns_146:        .asciz "Offset U"
-mns_147:        .asciz "Offset V"
-mns_148:        .asciz "U"
-mns_149:        .asciz "V"
-mns_150:        .asciz "Space"
-mns_151:        .asciz "Object"
-mns_152:        .asciz "World"
-mns_153:        .asciz "Vector"
-mns_154:        .asciz "Speed"
-mns_155:        .asciz "Base"
-mns_156:        .asciz "Fac"
-mns_157:        .asciz "Dot Product"
-mns_158:        .asciz "Cross Product"
-mns_159:        .asciz "Normalize"
-mns_160:        .asciz "Length"
-mns_161:        .asciz "Reflect"
-mns_162:        .asciz "Rotation"
-mns_163:        .asciz "Speed U"
-mns_164:        .asciz "Speed V"
-mns_165:        .asciz "Centre U"
-mns_166:        .asciz "Centre V"
-mns_167:        .asciz "Randomness"
-mns_168:        .asciz "Feature"
-mns_169:        .asciz "F1"
-mns_170:        .asciz "F2"
-mns_171:        .asciz "Edge"
-mns_172:        .asciz "Hue"
-mns_173:        .asciz "Saturation"
-mns_174:        .asciz "Bright"
-mns_175:        .asciz "Contrast"
-mns_176:        .asciz "Kelvin"
-mns_177:        .asciz "Brick"
-mns_178:        .asciz "Mortar"
-mns_179:        .asciz "Distortion"
-mns_180:        .asciz "Kind"
-mns_181:        .asciz "Bands"
-mns_182:        .asciz "Rings"
-mns_183:        .asciz "Sharpness"
-mns_184:        .asciz "Input"
-mns_185:        .asciz "Texture"
-mns_186:        .asciz "Utility"
+mns_35:         .asciz "reroute"
+mns_36:         .asciz "Texture Sample"
+mns_37:         .asciz "Noise Texture"
+mns_38:         .asciz "Checker Texture"
+mns_39:         .asciz "Gradient Texture"
+mns_40:         .asciz "Mix"
+mns_41:         .asciz "Color Ramp"
+mns_42:         .asciz "Math"
+mns_43:         .asciz "Bump"
+mns_44:         .asciz "Normal Map"
+mns_45:         .asciz "Texture Coordinate"
+mns_46:         .asciz "Position"
+mns_47:         .asciz "Normal"
+mns_48:         .asciz "Camera Vector"
+mns_49:         .asciz "Vertex Color"
+mns_50:         .asciz "Time"
+mns_51:         .asciz "Constant"
+mns_52:         .asciz "Color"
+mns_53:         .asciz "Fresnel"
+mns_54:         .asciz "Vector Math"
+mns_55:         .asciz "Separate"
+mns_56:         .asciz "Combine"
+mns_57:         .asciz "Mapping"
+mns_58:         .asciz "Panner"
+mns_59:         .asciz "Rotator"
+mns_60:         .asciz "Voronoi Texture"
+mns_61:         .asciz "Hue/Saturation"
+mns_62:         .asciz "Invert"
+mns_63:         .asciz "Bright/Contrast"
+mns_64:         .asciz "Desaturation"
+mns_65:         .asciz "Gamma"
+mns_66:         .asciz "Blackbody"
+mns_67:         .asciz "Brick Texture"
+mns_68:         .asciz "Wave Texture"
+mns_69:         .asciz "White Noise"
+mns_70:         .asciz "Triplanar Sample"
+mns_71:         .asciz "Reroute"
+mns_72:         .asciz "UV"
+mns_73:         .asciz "Image"
+mns_74:         .asciz "Size"
+mns_75:         .asciz "Sampler"
+mns_76:         .asciz "Wrap"
+mns_77:         .asciz "R"
+mns_78:         .asciz "G"
+mns_79:         .asciz "B"
+mns_80:         .asciz "Alpha"
+mns_81:         .asciz "Colour"
+mns_82:         .asciz "Data"
+mns_83:         .asciz "Repeat"
+mns_84:         .asciz "Clamp"
+mns_85:         .asciz "Mirror"
+mns_86:         .asciz "Offset"
+mns_87:         .asciz "Scale"
+mns_88:         .asciz "Detail"
+mns_89:         .asciz "Roughness"
+mns_90:         .asciz "Color 1"
+mns_91:         .asciz "Color 2"
+mns_92:         .asciz "Axis"
+mns_93:         .asciz "X"
+mns_94:         .asciz "Y"
+mns_95:         .asciz "Z"
+mns_96:         .asciz "Radial"
+mns_97:         .asciz "Spherical"
+mns_98:         .asciz "Factor"
+mns_99:         .asciz "Mode"
+mns_100:        .asciz "Add"
+mns_101:        .asciz "Multiply"
+mns_102:        .asciz "Subtract"
+mns_103:        .asciz "Screen"
+mns_104:        .asciz "Overlay"
+mns_105:        .asciz "Darken"
+mns_106:        .asciz "Lighten"
+mns_107:        .asciz "Difference"
+mns_108:        .asciz "Soft Light"
+mns_109:        .asciz "Divide"
+mns_110:        .asciz "Color 0"
+mns_111:        .asciz "Position 0"
+mns_112:        .asciz "Position 1"
+mns_113:        .asciz "A"
+mns_114:        .asciz "C"
+mns_115:        .asciz "Operation"
+mns_116:        .asciz "Value"
+mns_117:        .asciz "Power"
+mns_118:        .asciz "Minimum"
+mns_119:        .asciz "Maximum"
+mns_120:        .asciz "Greater Than"
+mns_121:        .asciz "Sine"
+mns_122:        .asciz "Absolute"
+mns_123:        .asciz "Cosine"
+mns_124:        .asciz "Tangent"
+mns_125:        .asciz "Square Root"
+mns_126:        .asciz "Floor"
+mns_127:        .asciz "Ceil"
+mns_128:        .asciz "Fraction"
+mns_129:        .asciz "Round"
+mns_130:        .asciz "Sign"
+mns_131:        .asciz "One Minus"
+mns_132:        .asciz "Saturate"
+mns_133:        .asciz "Lerp"
+mns_134:        .asciz "Step"
+mns_135:        .asciz "Smoothstep"
+mns_136:        .asciz "Modulo"
+mns_137:        .asciz "Exponent"
+mns_138:        .asciz "Logarithm"
+mns_139:        .asciz "Arctan2"
+mns_140:        .asciz "Less Than"
+mns_141:        .asciz "Negate"
+mns_142:        .asciz "Multiply Add"
+mns_143:        .asciz "Height"
+mns_144:        .asciz "Strength"
+mns_145:        .asciz "Distance"
+mns_146:        .asciz "Tiling U"
+mns_147:        .asciz "Tiling V"
+mns_148:        .asciz "Offset U"
+mns_149:        .asciz "Offset V"
+mns_150:        .asciz "U"
+mns_151:        .asciz "V"
+mns_152:        .asciz "Space"
+mns_153:        .asciz "Object"
+mns_154:        .asciz "World"
+mns_155:        .asciz "Vector"
+mns_156:        .asciz "Speed"
+mns_157:        .asciz "Base"
+mns_158:        .asciz "Fac"
+mns_159:        .asciz "Dot Product"
+mns_160:        .asciz "Cross Product"
+mns_161:        .asciz "Normalize"
+mns_162:        .asciz "Length"
+mns_163:        .asciz "Reflect"
+mns_164:        .asciz "Rotation"
+mns_165:        .asciz "Speed U"
+mns_166:        .asciz "Speed V"
+mns_167:        .asciz "Centre U"
+mns_168:        .asciz "Centre V"
+mns_169:        .asciz "Randomness"
+mns_170:        .asciz "Feature"
+mns_171:        .asciz "F1"
+mns_172:        .asciz "F2"
+mns_173:        .asciz "Edge"
+mns_174:        .asciz "Hue"
+mns_175:        .asciz "Saturation"
+mns_176:        .asciz "Bright"
+mns_177:        .asciz "Contrast"
+mns_178:        .asciz "Kelvin"
+mns_179:        .asciz "Brick"
+mns_180:        .asciz "Mortar"
+mns_181:        .asciz "Distortion"
+mns_182:        .asciz "Kind"
+mns_183:        .asciz "Bands"
+mns_184:        .asciz "Rings"
+mns_185:        .asciz "Sharpness"
+mns_186:        .asciz "In"
+mns_187:        .asciz "Out"
+mns_188:        .asciz "Input"
+mns_189:        .asciz "Texture"
+mns_190:        .asciz "Utility"
 
 .section .note.GNU-stack,"",@progbits

@@ -1022,7 +1022,9 @@ ui_button:
     xor     esi, esi
     call    obj_click_select
     jmp     16f
-17: cmp     ebx, HIT_ASSETS             # an asset tile: select it, its menu
+17: cmp     ebx, HIT_NODES              # the node editor: its menu
+    je      16f
+    cmp     ebx, HIT_ASSETS             # an asset tile: select it, its menu
     jne     171f
     call    assets_rclick
     test    eax, eax

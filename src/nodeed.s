@@ -26,6 +26,20 @@
 .globl nodeed_key
 .globl ne_drag
 .globl ne_menu
+.globl op_ne_dup
+.globl op_ne_copy
+.globl op_ne_paste
+.globl op_ne_del
+.globl op_ne_coll
+.globl op_ne_comment
+.globl op_ne_fsel
+.globl op_ne_fit
+.globl op_ne_alil
+.globl op_ne_alit
+.globl op_ne_disx
+.globl op_ne_disy
+.globl op_ne_cut
+.globl op_ne_add
 
 .equ GR_N,      128
 .equ GR_SOCK,   132
@@ -40,6 +54,8 @@
 
 .equ MT_GEONODES_, 10                     # (mods.s)
 .equ MT_LOGIC_,  12
+.equ T_REROUTE, 36                      # (matnodes.s: drawn as a knot)
+.equ RR_SZ,     16                      # its square (graph units)
 .equ NE_BAR,    20                      # the header line (logical px)
 .equ NW,        170                     # node width
 .equ NHDR,      20                      # node header
@@ -51,6 +67,10 @@
 
 .equ COL_NE_BG,     0x23262c
 .equ COL_NE_GRID,   0x2b2f36
+.equ COL_NE_KNIFE,  0xe06c75
+.equ COL_NE_MMBG,   0x1a1c21            # the minimap
+.equ MM_W,      168
+.equ MM_H,      104
 .equ COL_NE_FRBODY, 0x2b3038            # comment frames: body, title bar
 .equ COL_NE_FRBAR,  0x3a4352
 .equ COL_NE_BODY,   0x343841
@@ -114,6 +134,9 @@ s_undo_paste:   .asciz "Paste Nodes"
 s_undo_del:     .asciz "Delete Nodes"
 s_undo_coll:    .asciz "Collapse Nodes"
 s_undo_frame:   .asciz "Comment Frame"
+s_undo_cut:     .asciz "Cut Links"
+s_undo_rr:      .asciz "Add Reroute"
+s_undo_align:   .asciz "Align Nodes"
 s_fr_title:     .asciz "Comment"
 s_op_frtitle:   .asciz "node.frame_title "
 s_ne_frfull:    .asciz "  a graph holds 6 comment frames"
@@ -196,6 +219,23 @@ ne_drag:        .skip 4                 # 0 none, 1 move, 2 wire from an output,
                                         #  input's value, 7 pan
 ne_dn:          .skip 4                 # the node dragged (or from)
 ne_dk:          .skip 4                 # its socket / value
+ne_cur:         .skip 8                 # the record ne_rec found last
+ne_mmx:         .skip 4                 # the minimap on screen (w 0: none),
+ne_mmy:         .skip 4                 #  the graph's corner it shows from,
+ne_mmw:         .skip 4                 #  its scale (screen px per 1000 graph
+ne_mmh:         .skip 4                 #  units)
+ne_mmg0:        .skip 4
+ne_mmg1:        .skip 4
+ne_mms:         .skip 4
+ne_clkt:        .skip 8                 # the last press in empty space: when,
+ne_clkx:        .skip 4                 #  where (a double-click on a wire: a
+ne_clky:        .skip 4                 #  reroute)
+ne_wto:         .skip 4                 # the wire found: its input's node (0:
+ne_wk:          .skip 4                 #  a pin), input or pin, its output's
+ne_wfrom:       .skip 4                 #  node and output
+ne_wout:        .skip 4
+ne_ncut:        .skip 4                 # wires the knife crossed: node, input
+ne_cutl:        .skip 8*160
 ne_fsel:        .skip 4                 # the selected comment frame + 1
 ne_fmask:       .skip 8                 # nodes inside the frame being moved
 ne_fx0:         .skip 4                 # its place / size when the drag began
@@ -244,6 +284,10 @@ OPERATOR op_ne_cut,    "node.cut", "Cut Nodes", do_ne_cut, key=KEY_X|KM_CTRL, fl
 OPERATOR op_ne_coll,   "node.collapse", "Collapse Nodes", do_ne_collapse, key=KEY_H, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes shown as their headers alone (again: whole)"
 OPERATOR op_ne_comment, "node.comment", "Comment Frame", do_ne_comment, key=KEY_C, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: a comment frame around the selected nodes (moving its title moves them)"
 OPERATOR op_ne_frtitle, "node.frame_title", "Rename Comment", do_ne_frtitle, flags=OPF_AI_SAFE|OPF_UNDO|OPF_NODE, doc="Node editor: a comment frame's title: node.frame_title <frame 1-6> <title>"
+OPERATOR op_ne_alil,   "node.align_left", "Align Left", do_ne_align_l, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes' left edges lined up (on the leftmost)"
+OPERATOR op_ne_alit,   "node.align_top", "Align Top", do_ne_align_t, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes' tops lined up (on the highest)"
+OPERATOR op_ne_disx,   "node.distribute_x", "Distribute Horizontally", do_ne_dist_x, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes evenly spaced from left to right"
+OPERATOR op_ne_disy,   "node.distribute_y", "Distribute Vertically", do_ne_dist_y, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes evenly spaced from top to bottom"
 OPERATOR op_ne_fsel,   "node.view_selected", "Frame Selected", do_ne_frame_sel, key=KEY_F, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes in view"
 
 # ne_rec -> rax = the record shown (0: none): the active object's geometry
@@ -341,7 +385,8 @@ ne_rec:
     call    mat_get
     jmp     9f
 8:  xor     eax, eax
-9:  pop     rbx
+9:  mov     [rip+ne_cur], rax
+    pop     rbx
     ret
 
 # ne_ntypes -> eax = the node types of the kind shown
@@ -484,6 +529,83 @@ ne_height_s:
     add     rsp, 8
     pop     r12
     pop     rbx
+    ret
+
+# ne_is_rr(edi=node) -> eax = 1 if it is a reroute (a material's knot)
+ne_is_rr:
+    xor     eax, eax
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     9f
+    test    edi, edi
+    jle     9f
+    mov     rcx, [rip+ne_cur]
+    test    rcx, rcx
+    jz      9f
+    lea     edx, [rdi-1]
+    imul    edx, edx, NODE_SZ
+    cmp     dword ptr [rcx+GR_NODES+rdx+ND_TYPE], T_REROUTE
+    jne     9f
+    inc     eax
+9:  ret
+
+# ne_wof(edi=node) -> eax = its width on screen (a reroute: its square)
+ne_wof:
+    push    rdi
+    call    ne_is_rr
+    pop     rdi
+    test    eax, eax
+    jnz     1f
+    mov     eax, [rip+ne_nw]
+    ret
+1:  mov     eax, RR_SZ
+    jmp     zs
+
+# ne_gwof(edi=node) -> eax = its width in the graph
+ne_gwof:
+    push    rdi
+    call    ne_is_rr
+    pop     rdi
+    test    eax, eax
+    mov     eax, NW
+    jz      1f
+    mov     eax, RR_SZ
+1:  ret
+
+# ne_compact(edi=node) -> eax = 0, or half its height on screen when it
+#   is a knot or collapsed (its sockets: at that height, on its sides)
+ne_compact:
+    push    rdi
+    call    ne_is_rr
+    pop     rdi
+    test    eax, eax
+    jz      1f
+    mov     eax, RR_SZ
+    call    zs
+    shr     eax, 1
+    ret
+1:  test    edi, edi
+    jle     2f
+    mov     rcx, [rip+ne_cur]
+    test    rcx, rcx
+    jz      2f
+    test    byte ptr [rcx+NE_NFLAGS+rdi-1], 1
+    jz      2f
+    mov     eax, [rip+ne_hdr]
+    shr     eax, 1
+    ret
+2:  xor     eax, eax
+    ret
+
+# ne_addgw(eax, edi=node) -> eax + its width in the graph (the rest kept)
+ne_addgw:
+    push    rcx
+    push    rdx
+    push    rax
+    call    ne_gwof
+    pop     rcx
+    add     eax, ecx
+    pop     rdx
+    pop     rcx
     ret
 
 # zs(eax) -> eax = eax x the zoom (rounded)
@@ -634,8 +756,13 @@ ne_layout:
     pop     rdx
     pop     rdx
     test    byte ptr [rbx+NE_NFLAGS+r13], 1 # (collapsed: the header)
-    jz      41f
+    jz      40f
     mov     eax, NHDR
+40: cmp     dword ptr [rip+ne_kind], 0  # (a knot: its square)
+    jne     41f
+    cmp     dword ptr [r14+ND_TYPE], T_REROUTE
+    jne     41f
+    mov     eax, RR_SZ
 41: lea     r8, [rip+ne_gh]
     mov     [r8+r13*4+4], eax
     movsx   ecx, word ptr [r14+ND_POS]
@@ -691,7 +818,15 @@ ne_layout:
     test    byte ptr [rbx+NE_NFLAGS+r13-1], 1
     jz      73f
     mov     eax, [rip+ne_hdr]
-73: lea     r8, [rip+ne_lh]
+73: mov     edi, r13d
+    push    rax
+    call    ne_is_rr
+    test    eax, eax
+    pop     rax
+    jz      74f
+    mov     eax, RR_SZ
+    call    zs
+74: lea     r8, [rip+ne_lh]
     mov     [r8+r13*4], eax
     inc     r13d
     jmp     71b
@@ -725,20 +860,28 @@ ne_layout:
 
 # ne_out_xy(edi=node, esi=output k) -> eax, edx = that output socket
 ne_out_xy:
+    push    rsi
+    push    rdi
+    call    ne_compact                  # (a knot or collapsed: the side)
+    pop     rdi
+    push    rdi
+    push    rax
+    call    ne_wof
+    mov     ecx, eax
+    pop     rax
+    pop     rdi
+    pop     rsi
     lea     r8, [rip+ne_lx]
-    mov     eax, [r8+rdi*4]
-    add     eax, [rip+ne_nw]
+    add     ecx, [r8+rdi*4]
     lea     r8, [rip+ne_ly]
     mov     edx, [r8+rdi*4]
-    test    edi, edi
+    test    eax, eax
     jz      1f
-    test    byte ptr [rbx+NE_NFLAGS+rdi-1], 1   # (collapsed: the header's side)
-    jz      1f
-    mov     ecx, [rip+ne_hdr]
-    shr     ecx, 1
-    add     edx, ecx
+    add     edx, eax
+    mov     eax, ecx
     ret
-1:  add     edx, [rip+ne_hr2]
+1:  mov     eax, ecx
+    add     edx, [rip+ne_hr2]
     imul    esi, [rip+ne_row]
     add     edx, esi
     ret
@@ -746,16 +889,18 @@ ne_out_xy:
 # ne_in_xy(rbx=record, edi=node (0: the output), esi=input k / socket) ->
 #   eax, edx = that input socket on screen
 ne_in_xy:
+    push    rsi
+    push    rdi
+    call    ne_compact                  # (a knot or collapsed: the side)
+    pop     rdi
+    pop     rsi
+    mov     ecx, eax
     lea     r8, [rip+ne_lx]
     mov     eax, [r8+rdi*4]
     lea     r8, [rip+ne_ly]
     mov     edx, [r8+rdi*4]
-    test    edi, edi
+    test    ecx, ecx
     jz      0f
-    test    byte ptr [rbx+NE_NFLAGS+rdi-1], 1   # (collapsed: the header's side)
-    jz      0f
-    mov     ecx, [rip+ne_hdr]
-    shr     ecx, 1
     add     edx, ecx
     ret
 0:  add     edx, [rip+ne_hr2]
@@ -884,6 +1029,656 @@ ne_wire:
     add     rsp, 152
     pop     r12
     pop     rbx
+    ret
+
+# ne_wire_scan(edi=0: the wire within 6 px of the pointer, 1: every wire
+#   the knife (ne_x0, ne_y0 -> the pointer) crosses; r12d, r13d = the
+#   pointer) -> eax: 0 / 1 found (ne_wto, ne_wk, ne_wfrom, ne_wout), or the
+#   count (ne_cutl: node, input pairs; node 0: a material pin)
+ne_wire_scan:
+    push    rbx
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 216
+    mov     ebp, edi
+    mov     dword ptr [rip+ne_ncut], 0
+    call    ne_rec
+    test    rax, rax
+    jz      .Lws_none
+    mov     rbx, rax
+    mov     r14d, 1                     # the inputs of every node, then pins
+.Lws_node:
+    cmp     r14d, [rip+ne_n]
+    ja      .Lws_pins
+    lea     eax, [r14-1]
+    imul    eax, eax, NODE_SZ
+    mov     edi, [rbx+GR_NODES+rax+ND_TYPE]
+    call    ne_counts
+    mov     [rsp+200], eax
+    xor     r15d, r15d
+.Lws_in:
+    cmp     r15d, [rsp+200]
+    jae     .Lws_nextnode
+    lea     eax, [r14-1]
+    imul    eax, eax, NODE_SZ
+    imul    ecx, r15d, 16
+    add     eax, ecx
+    mov     eax, [rbx+GR_NODES+rax+ND_IN]
+    call    ne_link_node
+    test    eax, eax
+    jz      .Lws_nextin
+    cmp     eax, [rip+ne_n]
+    ja      .Lws_nextin
+    mov     [rsp+192], eax              # from, its output
+    mov     [rsp+196], ecx
+    mov     edi, r14d
+    mov     esi, r15d
+    mov     edx, eax
+    call    ne_ws_one
+    test    eax, eax
+    jnz     .Lws_found
+.Lws_nextin:
+    inc     r15d
+    jmp     .Lws_in
+.Lws_nextnode:
+    inc     r14d
+    jmp     .Lws_node
+.Lws_pins:
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     .Lws_end
+    xor     r15d, r15d
+1:  cmp     r15d, NPINS
+    jae     .Lws_end
+    mov     eax, [rbx+GR_PINS+r15*4]
+    call    ne_link_node
+    test    eax, eax
+    jz      2f
+    cmp     eax, [rip+ne_n]
+    ja      2f
+    mov     [rsp+192], eax
+    mov     [rsp+196], ecx
+    xor     edi, edi
+    mov     esi, r15d
+    call    ne_ws_one
+    test    eax, eax
+    jnz     .Lws_found
+2:  inc     r15d
+    jmp     1b
+.Lws_found:                             # (the pointer's wire)
+    mov     dword ptr [rip+ne_wto], r14d
+    cmp     r14d, [rip+ne_n]
+    jbe     3f
+    mov     dword ptr [rip+ne_wto], 0
+3:  mov     [rip+ne_wk], r15d
+    mov     eax, [rsp+192]
+    mov     [rip+ne_wfrom], eax
+    mov     eax, [rsp+196]
+    mov     [rip+ne_wout], eax
+    mov     eax, 1
+    jmp     .Lws_out
+.Lws_end:
+    mov     eax, [rip+ne_ncut]
+    jmp     .Lws_out
+.Lws_none:
+    xor     eax, eax
+.Lws_out:
+    add     rsp, 216
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     rbx
+    ret
+
+# ne_ws_one(edi=to node (0: the output), esi=its input / pin; [rsp+192+8] =
+#   from, output; ebp the mode) -> eax = 1 when the pointer is on it (mode
+#   0); mode 1 adds it to ne_cutl when the knife crosses it, eax 0
+ne_ws_one:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    mov     [rsp], edi
+    mov     [rsp+4], esi
+    call    ne_in_xy                    # the ends, the curve
+    mov     r12d, eax
+    mov     r13d, edx
+    mov     edi, [rsp+32+192]
+    mov     esi, [rsp+32+196]
+    call    ne_out_xy
+    mov     edi, eax
+    mov     esi, edx
+    mov     edx, r12d
+    mov     ecx, r13d
+    lea     r9, [rsp+32]
+    call    ne_bez
+    mov     r12d, [rip+ptr_x]
+    mov     r13d, [rip+ptr_y]
+    xor     ecx, ecx                    # each of its 16 segments
+1:  cmp     ecx, 16
+    jae     8f
+    lea     r8, [rsp+32+rcx*8]
+    test    ebp, ebp
+    jnz     2f
+    call    seg_near                    # (the pointer within 6 px)
+    test    eax, eax
+    jnz     7f
+    jmp     3f
+2:  call    seg_cross                   # (the knife across it)
+    test    eax, eax
+    jz      3f
+    mov     eax, [rip+ne_ncut]
+    cmp     eax, 160
+    jae     8f
+    mov     edx, [rsp]
+    lea     r8, [rip+ne_cutl]
+    mov     [r8+rax*8], edx
+    mov     edx, [rsp+4]
+    mov     [r8+rax*8+4], edx
+    inc     dword ptr [rip+ne_ncut]
+    jmp     8f
+3:  inc     ecx
+    jmp     1b
+7:  mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r13
+    pop     r12
+    ret
+
+# seg_near(r8 = p, p + 8 = q (i32 x y); r12d, r13d = the point) -> eax = 1
+#   within 6 px of the segment (ecx kept)
+seg_near:
+    cvtsi2ss xmm0, dword ptr [r8]       # d = q - p, w = pt - p
+    cvtsi2ss xmm1, dword ptr [r8+4]
+    cvtsi2ss xmm2, dword ptr [r8+8]
+    cvtsi2ss xmm3, dword ptr [r8+12]
+    subss   xmm2, xmm0
+    subss   xmm3, xmm1
+    cvtsi2ss xmm4, r12d
+    cvtsi2ss xmm5, r13d
+    subss   xmm4, xmm0
+    subss   xmm5, xmm1
+    movss   xmm6, xmm2                  # t = clamp(w.d / d.d)
+    mulss   xmm6, xmm4
+    movss   xmm7, xmm3
+    mulss   xmm7, xmm5
+    addss   xmm6, xmm7
+    movss   xmm7, xmm2
+    mulss   xmm7, xmm2
+    movss   xmm0, xmm3
+    mulss   xmm0, xmm3
+    addss   xmm7, xmm0
+    xorps   xmm0, xmm0
+    comiss  xmm7, xmm0
+    jbe     1f
+    divss   xmm6, xmm7
+    maxss   xmm6, xmm0
+    minss   xmm6, [rip+nf_one]
+    jmp     2f
+1:  xorps   xmm6, xmm6
+2:  mulss   xmm2, xmm6                  # |w - t d|^2 <= 36
+    mulss   xmm3, xmm6
+    subss   xmm4, xmm2
+    subss   xmm5, xmm3
+    mulss   xmm4, xmm4
+    mulss   xmm5, xmm5
+    addss   xmm4, xmm5
+    cvtsi2ss xmm0, dword ptr [rip+n36]
+    xor     eax, eax
+    comiss  xmm4, xmm0
+    ja      9f
+    inc     eax
+9:  ret
+
+# seg_cross(r8 = p, q) -> eax = 1 if the knife (ne_x0, ne_y0 -> ptr) and
+#   the segment cross (ecx kept)
+seg_cross:
+    push    rbx
+    push    rcx
+    mov     r9d, [rip+ne_x0]            # a = the knife's start, b its end
+    mov     r10d, [rip+ne_y0]
+    mov     r11d, [rip+ptr_x]
+    mov     ebx, [rip+ptr_y]
+    mov     edi, [r8]                   # orient(a, b, p) and (a, b, q)
+    mov     esi, [r8+4]
+    call    orient
+    mov     edx, eax
+    mov     edi, [r8+8]
+    mov     esi, [r8+12]
+    call    orient
+    imul    eax, edx
+    xor     ecx, ecx
+    test    eax, eax
+    jg      9f
+    push    r9                          # orient(p, q, a) and (p, q, b)
+    push    r10
+    push    r11
+    push    rbx
+    mov     r9d, [r8]
+    mov     r10d, [r8+4]
+    mov     r11d, [r8+8]
+    mov     ebx, [r8+12]
+    mov     edi, [rip+ne_x0]
+    mov     esi, [rip+ne_y0]
+    call    orient
+    mov     edx, eax
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    orient
+    pop     rbx
+    pop     r11
+    pop     r10
+    pop     r9
+    imul    eax, edx
+    test    eax, eax
+    jg      9f
+    inc     ecx
+9:  mov     eax, ecx
+    pop     rcx
+    pop     rbx
+    ret
+
+# orient(r9d, r10d = a, r11d, ebx = b, edi, esi = c) -> eax = the sign of
+#   (b - a) x (c - a): -1, 0, 1
+orient:
+    push    r12
+    movsxd  rax, r11d                   # (bx - ax)(cy - ay)
+    movsxd  rcx, r9d
+    sub     rax, rcx
+    movsxd  rcx, esi
+    movsxd  r12, r10d
+    sub     rcx, r12
+    imul    rax, rcx
+    movsxd  rcx, ebx                    # - (by - ay)(cx - ax)
+    sub     rcx, r12
+    movsxd  r12, edi
+    movsxd  r11, r11d                   # (keep b: r11 is an input)
+    push    r11
+    movsxd  r11, r9d
+    sub     r12, r11
+    pop     r11
+    imul    rcx, r12
+    sub     rax, rcx
+    test    rax, rax                    # the sign (mov keeps the flags)
+    mov     eax, 0
+    jz      1f
+    mov     eax, 1
+    jg      1f
+    mov     eax, -1
+1:  pop     r12
+    ret
+
+# ne_cut - the links in ne_cutl gone (their inputs back to their constants;
+#   pins unplugged): one undo step
+ne_cut:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    cmp     dword ptr [rip+ne_ncut], 0
+    je      9f
+    lea     rdi, [rip+s_undo_cut]
+    call    undo_push
+    call    ne_own
+    test    rax, rax
+    jz      9f
+    mov     rbx, rax
+    xor     r12d, r12d
+1:  cmp     r12d, [rip+ne_ncut]
+    jae     8f
+    lea     r8, [rip+ne_cutl]
+    mov     eax, [r8+r12*8]
+    mov     ecx, [r8+r12*8+4]
+    test    eax, eax
+    jnz     2f
+    mov     dword ptr [rbx+GR_PINS+rcx*4], 0
+    jmp     3f
+2:  dec     eax
+    imul    eax, eax, NODE_SZ
+    shl     ecx, 4
+    add     eax, ecx
+    mov     dword ptr [rbx+GR_NODES+rax+ND_IN], 0
+3:  inc     r12d
+    jmp     1b
+8:  mov     dword ptr [rip+dirty], 1
+    call    eval_flush
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ne_reroute - a knot on the wire found (materials): its output -> the
+#   knot -> the input or pin, one undo step
+ne_reroute:
+    push    rbx
+    push    r12
+    push    r13
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     9f
+    call    ne_rec
+    test    rax, rax
+    jz      9f
+    mov     eax, [rax+GR_N]
+    cmp     eax, [rip+ne_maxn]
+    jae     9f
+    lea     rdi, [rip+s_undo_rr]
+    call    undo_push
+    mov     ebx, [rip+ne_mat]
+    mov     edi, ebx
+    mov     esi, T_REROUTE
+    call    graph_add
+    test    eax, eax
+    jle     9f
+    mov     r12d, eax                   # the knot: at the pointer
+    mov     eax, [rip+ptr_x]
+    sub     eax, [rip+ne_bx]
+    sub     eax, [rip+ne_panx]
+    call    ne_unzoom
+    sub     eax, RR_SZ/2
+    mov     r13d, eax
+    mov     eax, [rip+ptr_y]
+    sub     eax, [rip+ne_by]
+    sub     eax, [rip+ne_pany]
+    call    ne_unzoom
+    sub     eax, RR_SZ/2
+    mov     ecx, eax
+    mov     edx, r13d
+    mov     edi, ebx
+    mov     esi, r12d
+    call    graph_place
+    mov     edi, ebx                    # the wire's output into it
+    mov     esi, [rip+ne_wfrom]
+    mov     edx, r12d
+    mov     ecx, 1
+    mov     r8d, [rip+ne_wout]
+    call    graph_link_any
+    cmp     dword ptr [rip+ne_wto], 0   # and it into the input or pin
+    jne     1f
+    mov     edi, ebx
+    mov     esi, [rip+ne_wk]
+    mov     edx, r12d
+    xor     ecx, ecx
+    call    graph_socket
+    jmp     2f
+1:  mov     edi, ebx
+    mov     esi, r12d
+    mov     edx, [rip+ne_wto]
+    mov     ecx, [rip+ne_wk]
+    inc     ecx
+    xor     r8d, r8d
+    call    graph_link_any
+2:  mov     dword ptr [rip+dirty], 1
+    mov     qword ptr [rip+ne_selm], 0
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ne_draw_minimap (rbx = record) - the whole graph small in the bottom
+#   right corner, the view's rectangle on it (bodies narrower than 480 px:
+#   none)
+ne_draw_minimap:
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 16
+    mov     dword ptr [rip+ne_mmw], 0
+    cmp     dword ptr [rip+ne_bw], 480
+    jl      9f
+    cmp     dword ptr [rip+ne_n], 0
+    je      9f
+    mov     r12d, 0x7fffffff            # the graph's box, the view's too
+    mov     r13d, 0x7fffffff
+    mov     r14d, 0x80000000
+    mov     r15d, 0x80000000
+    xor     ecx, ecx
+    cmp     dword ptr [rip+ne_kind], 0
+    je      1f
+    inc     ecx
+1:  cmp     ecx, [rip+ne_n]
+    ja      2f
+    lea     r8, [rip+ne_gx]
+    mov     eax, [r8+rcx*4]
+    cmp     eax, r12d
+    cmovl   r12d, eax
+    mov     edi, ecx
+    call    ne_addgw
+    cmp     eax, r14d
+    cmovg   r14d, eax
+    lea     r8, [rip+ne_gy]
+    mov     eax, [r8+rcx*4]
+    cmp     eax, r13d
+    cmovl   r13d, eax
+    lea     r8, [rip+ne_gh]
+    add     eax, [r8+rcx*4]
+    cmp     eax, r15d
+    cmovg   r15d, eax
+    inc     ecx
+    jmp     1b
+2:  xor     eax, eax                    # the view: (-pan) / z .. (body - pan) / z
+    sub     eax, [rip+ne_panx]
+    call    ne_unzoom
+    cmp     eax, r12d
+    cmovl   r12d, eax
+    mov     [rsp], eax
+    mov     eax, [rip+ne_bw]
+    sub     eax, [rip+ne_panx]
+    call    ne_unzoom
+    cmp     eax, r14d
+    cmovg   r14d, eax
+    mov     [rsp+8], eax
+    xor     eax, eax
+    sub     eax, [rip+ne_pany]
+    call    ne_unzoom
+    cmp     eax, r13d
+    cmovl   r13d, eax
+    mov     [rsp+4], eax
+    mov     eax, [rip+ne_bh]
+    sub     eax, [rip+ne_pany]
+    call    ne_unzoom
+    cmp     eax, r15d
+    cmovg   r15d, eax
+    mov     [rsp+12], eax
+    mov     [rip+ne_mmg0], r12d
+    mov     [rip+ne_mmg1], r13d
+    mov     eax, (MM_W-8)*1000          # the scale: the tighter of the two
+    mov     ecx, r14d
+    sub     ecx, r12d
+    inc     ecx
+    cdq
+    idiv    ecx
+    mov     ebp, eax
+    mov     eax, (MM_H-8)*1000
+    mov     ecx, r15d
+    sub     ecx, r13d
+    inc     ecx
+    cdq
+    idiv    ecx
+    cmp     eax, ebp
+    cmovl   ebp, eax
+    test    ebp, ebp
+    jle     9f
+    mov     [rip+ne_mms], ebp
+    mov     eax, [rip+ne_bx]            # its place: the corner
+    add     eax, [rip+ne_bw]
+    sub     eax, MM_W+8
+    mov     [rip+ne_mmx], eax
+    mov     eax, [rip+ne_by]
+    add     eax, [rip+ne_bh]
+    sub     eax, MM_H+8
+    mov     [rip+ne_mmy], eax
+    mov     dword ptr [rip+ne_mmw], MM_W
+    mov     dword ptr [rip+ne_mmh], MM_H
+    mov     edi, [rip+ne_mmx]
+    mov     esi, [rip+ne_mmy]
+    mov     edx, MM_W
+    mov     ecx, MM_H
+    mov     r8d, COL_NE_MMBG
+    call    fill_rect
+    xor     r12d, r12d                  # the nodes: their header colours
+    cmp     dword ptr [rip+ne_kind], 0
+    je      3f
+    inc     r12d
+3:  cmp     r12d, [rip+ne_n]
+    ja      4f
+    lea     r8, [rip+ne_gx]
+    mov     eax, [r8+r12*4]
+    call    mm_x
+    mov     r13d, eax
+    lea     r8, [rip+ne_gy]
+    mov     eax, [r8+r12*4]
+    call    mm_y
+    mov     r14d, eax
+    mov     edi, r12d
+    call    ne_gwof
+    imul    eax, ebp
+    cdq
+    mov     ecx, 1000
+    idiv    ecx
+    inc     eax
+    mov     r15d, eax
+    lea     r8, [rip+ne_gh]
+    mov     eax, [r8+r12*4]
+    imul    eax, ebp
+    cdq
+    mov     ecx, 1000
+    idiv    ecx
+    inc     eax
+    mov     ecx, eax
+    mov     r8d, COL_NE_OUT
+    test    r12d, r12d
+    jz      31f
+    lea     eax, [r12-1]
+    imul    eax, eax, NODE_SZ
+    mov     eax, [rbx+GR_NODES+rax+ND_TYPE]
+    mov     r8d, COL_NE_GEO
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     31f
+    lea     rdx, [rip+mn_color]
+    mov     r8d, [rdx+rax*4]
+31: mov     edi, r13d
+    mov     esi, r14d
+    mov     edx, r15d
+    call    fill_rect
+    inc     r12d
+    jmp     3b
+4:  mov     eax, [rsp]                  # the view's rectangle
+    call    mm_x
+    mov     r12d, eax
+    mov     eax, [rsp+4]
+    call    mm_y
+    mov     r13d, eax
+    mov     eax, [rsp+8]
+    call    mm_x
+    mov     r14d, eax
+    mov     eax, [rsp+12]
+    call    mm_y
+    mov     r15d, eax
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    sub     edx, r12d
+    mov     ecx, 1
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+    mov     edi, r12d
+    mov     esi, r15d
+    mov     edx, r14d
+    sub     edx, r12d
+    mov     ecx, 1
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, 1
+    mov     ecx, r15d
+    sub     ecx, r13d
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+    mov     edi, r14d
+    mov     esi, r13d
+    mov     edx, 1
+    mov     ecx, r15d
+    sub     ecx, r13d
+    inc     ecx
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+9:  add     rsp, 16
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    ret
+
+# mm_x / mm_y(eax = graph x / y) -> eax on the minimap
+mm_x:
+    sub     eax, [rip+ne_mmg0]
+    imul    eax, [rip+ne_mms]
+    cdq
+    mov     ecx, 1000
+    idiv    ecx
+    add     eax, [rip+ne_mmx]
+    add     eax, 4
+    ret
+mm_y:
+    sub     eax, [rip+ne_mmg1]
+    imul    eax, [rip+ne_mms]
+    cdq
+    mov     ecx, 1000
+    idiv    ecx
+    add     eax, [rip+ne_mmy]
+    add     eax, 4
+    ret
+
+# ne_in_minimap(r12d, r13d = pointer) -> eax = 1 on the minimap
+ne_in_minimap:
+    xor     eax, eax
+    cmp     dword ptr [rip+ne_mmw], 0
+    je      9f
+    mov     ecx, r12d
+    sub     ecx, [rip+ne_mmx]
+    js      9f
+    cmp     ecx, [rip+ne_mmw]
+    jge     9f
+    mov     ecx, r13d
+    sub     ecx, [rip+ne_mmy]
+    js      9f
+    cmp     ecx, [rip+ne_mmh]
+    jge     9f
+    inc     eax
+9:  ret
+
+# ne_minimap_go(r12d, r13d = pointer on the minimap) - the view centred on
+#   the graph point under it
+ne_minimap_go:
+    mov     eax, r12d                   # graph = g0 + (p - mm - 4) 1000 / s
+    sub     eax, [rip+ne_mmx]
+    sub     eax, 4
+    imul    eax, eax, 1000
+    cdq
+    idiv    dword ptr [rip+ne_mms]
+    add     eax, [rip+ne_mmg0]
+    call    zs                          # pan = body / 2 - graph z
+    mov     ecx, [rip+ne_bw]
+    sar     ecx, 1
+    sub     ecx, eax
+    mov     [rip+ne_panx], ecx
+    mov     eax, r13d
+    sub     eax, [rip+ne_mmy]
+    sub     eax, 4
+    imul    eax, eax, 1000
+    cdq
+    idiv    dword ptr [rip+ne_mms]
+    add     eax, [rip+ne_mmg1]
+    call    zs
+    mov     ecx, [rip+ne_bh]
+    sar     ecx, 1
+    sub     ecx, eax
+    mov     [rip+ne_pany], ecx
+    mov     dword ptr [rip+dirty], 1
     ret
 
 # ne_draw_box - the selection box being dragged (an outline)
@@ -1290,7 +2085,7 @@ ed_nodes_draw:
 59: cmp     dword ptr [rip+ne_kind], 0
     jne     591f
     call    ne_draw_output
-591:
+591:call    ne_draw_minimap
     # a wire being dragged
     mov     eax, [rip+ne_drag]
     cmp     eax, 2
@@ -1320,7 +2115,15 @@ ed_nodes_draw:
     mov     esi, [rip+ptr_y]
     mov     r8d, COL_ACCENT
     call    ne_wire
-69: cmp     dword ptr [rip+ne_drag], 8  # the selection box
+69: cmp     dword ptr [rip+ne_drag], 9  # the knife
+    jne     67f
+    mov     edi, [rip+ne_x0]
+    mov     esi, [rip+ne_y0]
+    mov     edx, [rip+ptr_x]
+    mov     ecx, [rip+ptr_y]
+    mov     r8d, COL_NE_KNIFE
+    call    draw_line
+67: cmp     dword ptr [rip+ne_drag], 8  # the selection box
     jne     68f
     call    ne_draw_box
 68: mov     edi, FONT_UI
@@ -1410,18 +2213,19 @@ ne_box:
     push    r12
     push    r13
     push    r14
-    sub     rsp, 8
+    push    r15
     mov     ebx, edi
     mov     r12d, esi
     mov     r13, rdx
-    lea     r8, [rip+ne_lx]
+    call    ne_wof
+    mov     r15d, eax                   # its width
+    lea     r8, [rip+ne_lx]             # the edge (selected: the accent)
     mov     edi, [r8+rbx*4]
     sub     edi, 1
     lea     r8, [rip+ne_ly]
     mov     esi, [r8+rbx*4]
     sub     esi, 1
-    mov     edx, [rip+ne_nw]
-    add     edx, 2
+    lea     edx, [r15+2]
     lea     r8, [rip+ne_lh]
     mov     ecx, [r8+rbx*4]
     add     ecx, 2
@@ -1433,11 +2237,25 @@ ne_box:
     jnc     1f
     mov     r8d, COL_ACCENT
 1:  call    fill_rect
+    mov     edi, ebx                    # (a knot: the body alone, wire grey)
+    call    ne_is_rr
+    test    eax, eax
+    jz      2f
     lea     r8, [rip+ne_lx]
     mov     edi, [r8+rbx*4]
     lea     r8, [rip+ne_ly]
     mov     esi, [r8+rbx*4]
-    mov     edx, [rip+ne_nw]
+    mov     edx, r15d
+    lea     r8, [rip+ne_lh]
+    mov     ecx, [r8+rbx*4]
+    mov     r8d, COL_NE_WIRE
+    call    fill_rect
+    jmp     9f
+2:  lea     r8, [rip+ne_lx]
+    mov     edi, [r8+rbx*4]
+    lea     r8, [rip+ne_ly]
+    mov     esi, [r8+rbx*4]
+    mov     edx, r15d
     lea     r8, [rip+ne_lh]
     mov     ecx, [r8+rbx*4]
     mov     r8d, COL_NE_BODY
@@ -1446,7 +2264,7 @@ ne_box:
     mov     edi, [r8+rbx*4]
     lea     r8, [rip+ne_ly]
     mov     esi, [r8+rbx*4]
-    mov     edx, [rip+ne_nw]
+    mov     edx, r15d
     mov     ecx, [rip+ne_hdr]
     mov     r8d, r12d
     call    fill_rect
@@ -1459,7 +2277,7 @@ ne_box:
     mov     rdx, r13
     mov     ecx, COL_TEXT
     call    draw_text
-    add     rsp, 8
+9:  pop     r15
     pop     r14
     pop     r13
     pop     r12
@@ -1523,7 +2341,9 @@ ne_draw_node:
     mov     edi, r12d
     mov     esi, [rsp+24]
     call    ne_box
-    test    byte ptr [rbx+NE_NFLAGS+r12-1], 1   # collapsed: a socket a side
+    mov     edi, r12d                   # a knot, or collapsed: a socket a side
+    call    ne_compact
+    test    eax, eax
     jz      0f
     cmp     dword ptr [rsp+20], 0
     je      77f
@@ -1761,6 +2581,7 @@ ne_rgb:
 .section .rodata
 .align 4
 nf_255:         .float 255.0
+n36:            .long 36
 .text
 
 # ne_draw_output (rbx = record) - the Material Output node
@@ -2117,7 +2938,12 @@ ne_in_box:
     mov     eax, r12d
     sub     eax, [r8+r14*4]
     js      8f
-    cmp     eax, [rip+ne_nw]
+    push    rax
+    mov     edi, r14d
+    call    ne_wof
+    mov     ecx, eax
+    pop     rax
+    cmp     eax, ecx
     jge     8f
     lea     r8, [rip+ne_ly]
     mov     eax, r13d
@@ -2203,7 +3029,30 @@ nodeed_press:
     mov     edi, eax
     call    ne_add_node
     jmp     .Lnp_taken
-1:  mov     [rip+ne_x0], r12d
+1:  cmp     ebx, BTN_RIGHT              # the right button: the node under it
+    jne     10f                         #  selected, then its menu (ui.s)
+    mov     edi, r12d
+    mov     esi, r13d
+    call    ne_hit
+    test    eax, eax
+    jz      .Lnp_no
+    mov     rcx, [rip+ne_selm]
+    bt      rcx, rdx
+    jc      .Lnp_no
+    xor     ecx, ecx
+    bts     rcx, rdx
+    mov     [rip+ne_selm], rcx
+    mov     [rip+ne_sel], edx
+    jmp     .Lnp_no
+10: cmp     ebx, BTN_LEFT               # the minimap: the view goes there
+    jne     11f
+    call    ne_in_minimap
+    test    eax, eax
+    jz      11f
+    mov     dword ptr [rip+ne_drag], 12
+    call    ne_minimap_go
+    jmp     .Lnp_taken
+11: mov     [rip+ne_x0], r12d
     mov     [rip+ne_y0], r13d
     mov     dword ptr [rip+ne_undone], 0
     mov     dword ptr [rip+ne_pick], 0
@@ -2332,7 +3181,35 @@ nodeed_press:
     mov     eax, [r8+rcx*4]
     mov     [rip+ne_b0], eax
     jmp     .Lnp_taken
-.Lnp_box:                               # empty space: a frame's title or
+.Lnp_box:                               # empty space: Alt - a knife through
+    test    dword ptr [rip+key_mods], MOD_ALT   #  wires (a click: the wire
+    jz      73f                         #  under it)
+    mov     dword ptr [rip+ne_drag], 9
+    jmp     .Lnp_taken
+73: call    now_ms                      # a double-click on a wire: a reroute
+    mov     rcx, rax
+    sub     rcx, [rip+ne_clkt]
+    mov     [rip+ne_clkt], rax
+    cmp     rcx, 400
+    ja      74f
+    mov     eax, r12d
+    sub     eax, [rip+ne_clkx]
+    imul    eax, eax
+    mov     edx, r13d
+    sub     edx, [rip+ne_clky]
+    imul    edx, edx
+    add     eax, edx
+    cmp     eax, 36
+    ja      74f
+    xor     edi, edi
+    call    ne_wire_scan
+    test    eax, eax
+    jz      74f
+    mov     qword ptr [rip+ne_clkt], 0
+    call    ne_reroute
+    jmp     .Lnp_taken
+74: mov     [rip+ne_clkx], r12d
+    mov     [rip+ne_clky], r13d
     call    ne_frame_hit                #  corner, else a box to select with
     test    eax, eax
     jz      71f
@@ -2598,7 +3475,11 @@ nodeed_motion:
     add     eax, [rip+ne_b0]
     mov     [rip+ne_pany], eax
     jmp     .Lnm_yes
-2:  cmp     eax, 10
+2:  cmp     eax, 12
+    jne     19f
+    call    ne_minimap_go
+    jmp     .Lnm_yes
+19: cmp     eax, 10
     jb      20f
     call    ne_frame_drag
     jmp     .Lnm_yes
@@ -2708,7 +3589,18 @@ ne_box_select:
     mov     eax, [r10+rbx*4]
     cmp     eax, r15d
     jg      7f
-    add     eax, [rip+ne_nw]
+    push    rdx
+    push    r8
+    push    r9
+    push    rax
+    mov     edi, ebx
+    call    ne_wof
+    mov     ecx, eax
+    pop     rax
+    pop     r9
+    pop     r8
+    pop     rdx
+    add     eax, ecx
     cmp     eax, r14d
     jl      7f
     lea     r10, [rip+ne_ly]
@@ -2854,6 +3746,8 @@ nodeed_release:
     je      .Lnr_from_sock
     cmp     eax, 8
     je      .Lnr_box
+    cmp     eax, 9
+    je      .Lnr_knife
     cmp     eax, 10                     # a frame's title clicked again: rename
     jne     9f
     cmp     dword ptr [rip+ne_undone], 0
@@ -2861,6 +3755,31 @@ nodeed_release:
     cmp     dword ptr [rip+ne_fwas], 0
     je      9f
     call    ne_frame_rename
+    jmp     9f
+.Lnr_knife:                             # wires cut: crossed, or (a click) the
+    mov     eax, r12d                   #  one under the pointer
+    sub     eax, [rip+ne_x0]
+    imul    eax, eax
+    mov     ecx, r13d
+    sub     ecx, [rip+ne_y0]
+    imul    ecx, ecx
+    add     eax, ecx
+    cmp     eax, 36
+    ja      1f
+    xor     edi, edi
+    call    ne_wire_scan
+    test    eax, eax
+    jz      9f
+    mov     eax, [rip+ne_wto]
+    mov     [rip+ne_cutl], eax
+    mov     eax, [rip+ne_wk]
+    mov     [rip+ne_cutl+4], eax
+    mov     dword ptr [rip+ne_ncut], 1
+    call    ne_cut
+    jmp     9f
+1:  mov     edi, 1
+    call    ne_wire_scan
+    call    ne_cut
     jmp     9f
 .Lnr_box:                               # nodes in the box (a click: none)
     call    ne_box_select
@@ -4100,7 +5019,8 @@ ne_frame_grab:
     movsx   edx, word ptr [r13]
     cmp     eax, edx
     jl      3f
-    add     eax, NW
+    mov     edi, ecx
+    call    ne_addgw
     movsx   r10d, word ptr [r13+4]
     add     edx, r10d
     cmp     eax, edx
@@ -4271,7 +5191,8 @@ do_ne_comment:
     mov     eax, [r8+rcx*4]
     cmp     eax, r13d
     cmovl   r13d, eax
-    add     eax, NW
+    mov     edi, ecx
+    call    ne_addgw
     cmp     eax, r15d
     cmovg   r15d, eax
     lea     r8, [rip+ne_gy]
@@ -4379,6 +5300,119 @@ do_ne_frtitle:
     call    log_line
     call    undo_drop_last
 9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ---- align, distribute ------------------------------------------------------
+do_ne_align_l:
+    xor     edi, edi
+    jmp     ne_align
+do_ne_align_t:
+    mov     edi, 1
+    jmp     ne_align
+do_ne_dist_x:
+    mov     edi, 2
+    jmp     ne_align
+do_ne_dist_y:
+    mov     edi, 3
+# ne_align(edi=0 left edges, 1 tops, 2 spread along x, 3 along y) - the
+#   selected nodes (2 or more; spreading: 3 or more), one undo step
+ne_align:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 8+4*49
+    mov     ebp, edi
+    call    ne_rec
+    test    rax, rax
+    jz      9f
+    mov     rdi, rax
+    call    ne_layout
+    mov     r12, [rip+ne_selm]
+    cmp     dword ptr [rip+ne_kind], 0
+    je      0f
+    btr     r12, 0
+0:  popcnt  rax, r12
+    cmp     eax, 2
+    jb      9f
+    cmp     ebp, 2
+    jb      1f
+    cmp     eax, 3
+    jb      9f
+1:  lea     r13, [rip+ne_gx]            # the axis: x (0, 2) or y (1, 3)
+    test    ebp, 1
+    jz      11f
+    lea     r13, [rip+ne_gy]
+11: xor     r14d, r14d                  # the selected ones, by place
+    xor     ecx, ecx
+2:  cmp     ecx, [rip+ne_n]
+    ja      3f
+    bt      r12, rcx
+    jnc     22f
+    mov     edx, r14d                   # (insertion sort)
+21: test    edx, edx
+    jz      23f
+    mov     eax, [rsp+8+rdx*4-4]
+    mov     eax, [r13+rax*4]
+    cmp     eax, [r13+rcx*4]
+    jle     23f
+    mov     eax, [rsp+8+rdx*4-4]
+    mov     [rsp+8+rdx*4], eax
+    dec     edx
+    jmp     21b
+23: mov     [rsp+8+rdx*4], ecx
+    inc     r14d
+22: inc     ecx
+    jmp     2b
+3:  lea     rdi, [rip+s_undo_align]
+    call    undo_push
+    mov     eax, [rsp+8]                # the first, the last
+    mov     ebx, [r13+rax*4]
+    lea     ecx, [r14-1]
+    mov     eax, [rsp+8+rcx*4]
+    mov     r15d, [r13+rax*4]
+    xor     ecx, ecx                    # each: its new place on the axis
+4:  cmp     ecx, r14d
+    jae     8f
+    push    rcx
+    push    rcx
+    mov     eax, ebx                    # (aligning: the first's)
+    cmp     ebp, 2
+    jb      41f
+    mov     eax, r15d                   # (spreading: first + (last - first) i / (n - 1))
+    sub     eax, ebx
+    imul    eax, ecx
+    lea     r8d, [r14-1]
+    cdq
+    idiv    r8d
+    add     eax, ebx
+41: mov     ecx, [rsp]
+    mov     esi, [rsp+16+8+rcx*4]       # the node
+    lea     r8, [rip+ne_gx]
+    mov     edx, [r8+rsi*4]
+    lea     r8, [rip+ne_gy]
+    mov     ecx, [r8+rsi*4]
+    test    ebp, 1
+    jnz     42f
+    mov     edx, eax
+    jmp     43f
+42: mov     ecx, eax
+43: mov     edi, [rip+ne_mat]
+    call    ne_place
+    pop     rcx
+    pop     rcx
+    inc     ecx
+    jmp     4b
+8:  mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8+4*49
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -4543,7 +5577,8 @@ ne_frame:
     mov     eax, [r8+rbx*4]
     cmp     eax, r12d
     cmovl   r12d, eax
-    add     eax, NW
+    mov     edi, ebx
+    call    ne_addgw
     cmp     eax, r14d
     cmovg   r14d, eax
     lea     r8, [rip+ne_gy]

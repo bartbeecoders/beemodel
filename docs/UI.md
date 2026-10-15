@@ -108,6 +108,10 @@ The tabs down the left side of Properties are:
 - **Timeline.** Play, step and the frame range, plus auto-key, which keys every confirmed move.
 - **Dope Sheet / Graph Editor.** Interpolation, handles, duplicate and delete for the selected keys.
 - **Node Editor.** The header chooses the graph (a material or a node tree). The Add menu filters as you type.
+  - **View.** The wheel zooms about the pointer (25–200 %); Ctrl+wheel scrolls, Shift+wheel scrolls sideways, the middle button pans. Home frames every node, F the selection. The minimap in the corner shows the whole graph; click or drag in it to go there.
+  - **Select and move.** Drag in empty space for a box (Shift adds, Ctrl takes away); dragging any selected node moves them all. The right button opens the node menu.
+  - **Edit.** Shift+D (or Ctrl+D) duplicates, Ctrl+C / Ctrl+V / Ctrl+X copy, paste and cut. Pasting into another material keeps the links between the pasted nodes. H collapses nodes to their headers, C puts a comment frame round the selection. Dragging a frame's title moves the nodes inside it, its corner resizes it, a click on a selected frame's title renames it, X removes it. Align Left / Top and Distribute are in the node menu.
+  - **Wires.** Drop a wire in empty space to pick the node it should feed. Double-click a wire for a reroute knot. Alt+click a wire to cut it, or Alt+drag a knife across several. Wires take the colour of what they carry.
 - **UV Editor.** Unwrap, Pack, Select All, the stretch heat map. More is in Mesh › UV.
 - **Render.** Render, Stop, Save, Denoise, the pass shown, the samples done.
 - **Asset Browser.** Search, a kind filter, Save to Library. Right-click a tile to place it, tag it, show its dependencies or remove it.

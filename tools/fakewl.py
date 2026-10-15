@@ -2342,6 +2342,71 @@ def node_canvas():
     img2 = f.image()
     b2 = sum(1 for y in range(80, 780, 2) for x in range(0, 1280, 2) if img2.getpixel((x, y))[:3] == (0x34, 0x38, 0x41))
     check(abs(b2 - b0) < 50, f'H again opens them ({b2})')
+    # wires: Alt+click cuts one, a double-click puts a reroute on it, an
+    # Alt+drag knife cuts every wire it crosses
+    q('op("node.view_fit")')
+    f.pump(0.3)
+    f.click(60, 740)                                        # nothing selected
+    f.pump(0.2)
+    def wire_px(col_left, col_right, wire):
+        img = f.image()
+        left = [x for y in range(80, 640, 2) for x in range(0, 1280) if img.getpixel((x, y))[:3] == col_left]
+        right = [x for y in range(80, 640, 2) for x in range(0, 1280) if img.getpixel((x, y))[:3] == col_right]
+        if not left or not right:
+            return None
+        x0, x1 = max(left) + 10, min(right) - 10
+        pts = [(x, y) for y in range(80, 640) for x in range(x0, x1) if img.getpixel((x, y))[:3] == wire]
+        return pts[len(pts) // 2] if pts else None
+    p = wire_px((0x9a, 0x4a, 0x3c), (0x6b, 0x4f, 0x96), (0x63, 0x63, 0xc7))    # texcoord UV -> wave
+    check(p is not None, f'the UV wire is drawn in the vector colour ({p})')
+    if p:
+        f.mods(8); f.click(*p); f.mods(0)
+        f.pump(0.2)
+        cut = info('C', 2, 'link', 1)
+        f.mods(4); f.key(44); f.mods(0)
+        f.pump(0.2)
+        back = info('C', 2, 'link', 1)
+        check((cut, back) == ('0', '1'), f'Alt+click cuts the wire under the pointer, undo restores it ({cut} {back})')
+        f.click(*p); f.pump(0.05); f.click(*p)
+        f.pump(0.3)
+        got = (info('C', 0, 'count'), info('C', 2, 'type'), info('C', 2, 'link', 1), info('C', 3, 'link', 1))
+        check(got == ('4', '36', '1', '2'), f'a double-click on a wire puts a reroute knot on it ({got})')
+        f.shot('62_reroute.png')
+    p = wire_px((0x8a, 0x6d, 0x1f), (0x9a, 0x4a, 0x3c), (0xe3, 0xc8, 0x4a))    # hsv -> output: base colour
+    if p:
+        f.mods(8); f.drag(p[0], p[1] - 40, p[0], p[1] + 40, steps=6); f.mods(0)
+        f.pump(0.2)
+        check(info('C', 0, 'socket', 0) == '0', f'an Alt+drag knife cuts the wires it crosses ({info("C", 0, "socket", 0)})')
+    # align and distribute (the right-click menu has them)
+    q('op("material.node_move", "C 1 20 50")\nop("material.node_move", "C 2 300 10")\nop("material.node_move", "C 3 450 90")\n'
+      'op("material.node_move", "C 4 900 30")')
+    f.pump(0.2)
+    f.drag(5, 110, 1270, 770, steps=6)
+    f.pump(0.2)
+    q('op("node.align_top")')
+    tops = {info('C', n, 'y') for n in (1, 2, 3, 4)}
+    q('op("node.distribute_x")')
+    xs = sorted(int(info('C', n, 'x')) for n in (0, 1, 2, 3, 4))    # (the output too: it was boxed)
+    check(len(tops) == 1 and len({b - a for a, b in zip(xs, xs[1:])}) == 1,
+          f'align top lines the selection up, distribute spaces it evenly ({tops} {xs})')
+    # the minimap: a click there moves the view
+    img = f.image()
+    mm = [(x, y) for y in range(400, 790, 2) for x in range(900, 1280, 2) if img.getpixel((x, y))[:3] == (0x1a, 0x1c, 0x21)]
+    check(len(mm) > 2000, f'a minimap of the graph sits in the corner ({len(mm)} px)')
+    if mm:
+        before = [(x, y) for y in range(80, 400, 2) for x in range(0, 900, 2) if img.getpixel((x, y))[:3] == (0x6b, 0x4f, 0x96)]
+        f.click(min(mm)[0] + 6, max(mm, key=lambda p: p[1])[1] - 6)
+        f.pump(0.2)
+        img = f.image()
+        after = [(x, y) for y in range(80, 790, 2) for x in range(0, 1280, 2) if img.getpixel((x, y))[:3] == (0x6b, 0x4f, 0x96)]
+        check(before and (not after or min(after) != min(before)), 'a click on the minimap moves the view there')
+    x, y = widget_xy(m, 'node.add')
+    f.click(600, 300, btn=0x111)                            # right button
+    f.pump(0.3)
+    labels = {w.get('label') for w in ui_tree(m)}
+    check({'Duplicate Nodes', 'Copy Nodes', 'Paste Nodes', 'Align Left', 'Comment Frame'} <= labels,
+          'the right button opens the node menu: duplicate, copy, paste, align, comment ...')
+    f.key(1)
     f.shot('61_node_canvas.png')
     f.proc.kill()
 
