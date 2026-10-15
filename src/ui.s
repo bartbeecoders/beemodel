@@ -58,6 +58,9 @@ active_tool:    .long 0
 
 .section .bss
 .align 4
+outl_click_t:   .skip 4
+outl_click_row: .skip 4
+.align 4
 ptr_x:          .skip 4
 ptr_y:          .skip 4
 hover_id:       .skip 4
@@ -1126,6 +1129,19 @@ ui_button:
 7:  cmp     ebx, HIT_OUTLINER           # click an object row to select it
     jne     .Lbt_done
     call    edit_exit                   # (leaves edit mode)
+    mov     eax, r13d                   # a double-click: rename it
+    sub     eax, [rip+outl_click_t]
+    cmp     r12d, [rip+outl_click_row]
+    jne     71f
+    cmp     eax, 400
+    ja      71f
+    mov     dword ptr [rip+outl_click_row], -1
+    lea     rax, [rip+obj_list]
+    mov     edi, [rax+r12*4]
+    call    outl_rename
+    jmp     .Lbt_done
+71: mov     [rip+outl_click_t], r13d
+    mov     [rip+outl_click_row], r12d
     lea     rax, [rip+obj_list]
     mov     edi, [rax+r12*4]
     mov     esi, [rip+key_mods]

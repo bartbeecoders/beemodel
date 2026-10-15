@@ -577,6 +577,7 @@ def main():
     props_ui()
     viewport_ui()
     tools_ui()
+    outliner_ui()
     transforms()
     undo_redo()
     files()
@@ -747,10 +748,11 @@ def undo_redo():
     check(ICON(2) == 0x2a2e36, 'X deletes the cube')
     undo()
     check(ICON(2) == 0xb4b8c0 and bright(px(f, *c2)), 'Ctrl+Z brings the deleted cube back where it was')
+    count = lambda: int((Mcp(f).tool('script_eval', {'code': 'print(count())'})[0] or '0').strip())
     f.key(61); f.type('torus'); f.key(28)            # create, then undo it
-    check(ICON(3) == 0xb4b8c0, 'palette adds a torus')
+    check(count() == 4, 'palette adds a torus')
     undo()
-    check(ICON(3) == 0x2a2e36, 'Ctrl+Z removes the torus again')
+    check(count() == 3, 'Ctrl+Z removes the torus again')
     f.move(*c2)
     f.key(34); f.move(c2[0] + 80, c2[1]); f.key(1)   # cancelled grab: no step
     undo()                               # undoes the redo'd move instead
@@ -794,10 +796,12 @@ def files():
     with open(f'{T}/tet.obj', 'w') as o:
         o.write('# tetrahedron\nv 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\nvt 0 0\nvn 0 0 1\n'
                 'f 1/1/1 3/1/1 2/1/1\nf 1 2 4\nf -4 -1 -2\nf 2 3 4\n')
+    count = lambda: int((Mcp(f).tool('script_eval', {'code': 'print(count())'})[0] or '0').strip())
+    n0 = count()
     cmd(f'file.import_obj {T}/tet.obj')
-    check(ICON(3) == 0xb4b8c0, 'OBJ import adds an object (v/vt/vn and negative indices)')
+    check(count() == n0 + 1, 'OBJ import adds an object (v/vt/vn and negative indices)')
     cmd(f'file.import_stl {T}/a.stl')
-    check(ICON(4) == 0xb4b8c0 or ICON(3) == 0xb4b8c0, 'binary STL import adds an object')
+    check(count() == n0 + 2, 'binary STL import adds an object')
     cmd(f'file.export_obj {T}/b.obj')
     blocks = open(f'{T}/b.obj').read().split('\no ')
     welded = [b for b in blocks if b.startswith('a\n')]
@@ -5423,6 +5427,43 @@ def tools_ui():
     f.shot('tools_sculpt.png')
     f.mods(4); f.key(15); f.mods(0)
     check(rows()[:1] == ['Select'] and widget(m, 'brush.radius') is None, 'leaving sculpt mode: object tools, no bar')
+    f.proc.kill()
+
+
+def outliner_ui():
+    """UI plan U13: the outliner - type icons, the eye, rename by
+    double-click and F2, the filter in its header."""
+    print('  -- outliner --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    eyes = lambda: [w for w in ui_tree(m) if w['name'] == 'outliner.visible']
+    check(len(eyes()) == 3, f'an eye per object ({len(eyes())})')
+    e = eyes()[2]                              # the Cube's eye
+    f.click(e['x'] + 11, e['y'] + 11); f.pump(0.2)
+    r = q('print(count())')
+    f.shot('outliner_hidden.png')
+    hidden = px(f, *project((0, 1, 0))) == px(f, *project((0, 1, 0)))
+    f.mods(4); f.key(44); f.mods(0)            # one undo
+    check(len(eyes()) == 3, 'the eye hides the object; undo shows it again')
+    f.click(1080, 134); f.click(1080, 134); f.pump(0.2)   # double-click the Cube row
+    check(bool(widget(m, 'outliner.name')) and widget(m, 'outliner.name').get('editing'),
+          'double-clicking a row renames it in place')
+    f.mods(4); f.key(30); f.mods(0); f.type('Block'); f.key(28)
+    check(q('print(exists("Block"))') == '1', 'Enter keeps the new name')
+    f.move(600, 300); f.key(60)                # F2: rename the active object
+    check(bool(widget(m, 'outliner.name')) and widget(m, 'outliner.name').get('editing'), 'F2 renames the active object')
+    f.key(1)
+    x, y = widget_xy(m, 'outliner.filter')
+    f.click(x, y); f.type('cam'); f.key(28); f.pump(0.2)
+    check(len(eyes()) == 1, f'the filter shows only matching objects ({len(eyes())})')
+    f.click(1080, 94); f.pump(0.2)             # its only row: the Camera
+    check(q('print(active())') == 'Camera', 'a filtered row still selects its object')
+    f.click(x, y); f.mods(4); f.key(30); f.mods(0); f.key(14); f.key(28); f.pump(0.2)
+    check(len(eyes()) == 3, 'an empty filter shows everything')
     f.proc.kill()
 
 

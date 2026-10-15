@@ -47,6 +47,8 @@
 .globl wg_n
 .globl wg_set_label
 .globl wg_set_op
+.globl wg_edit_last
+.globl wg_edit_named
 .globl wg_op_of
 .globl wg_clip_key
 
@@ -203,6 +205,47 @@ wg_set_op:
     lea     rcx, [rip+wg_list]
     mov     [rcx+rax+E_OP], rdi
 1:  ret
+
+# wg_edit_last - start typing into the widget just drawn (inline rename)
+wg_edit_last:
+    mov     eax, [rip+wg_n]
+    test    eax, eax
+    jz      1f
+    dec     eax
+    imul    eax, eax, WG_SZ
+    lea     rdi, [rip+wg_list]
+    add     rdi, rax
+    jmp     edit_begin
+1:  ret
+
+# wg_edit_named(rdi=descriptor name) - start typing into that widget, if
+#   it is on screen
+wg_edit_named:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, rdi
+    lea     rbx, [rip+wg_list]
+    mov     ecx, [rip+wg_n]
+1:  test    ecx, ecx
+    jz      9f
+    push    rcx
+    mov     rax, [rbx+E_DESC]
+    mov     rdi, [rax+WD_NAME]
+    mov     rsi, r12
+    call    str_eq
+    pop     rcx
+    test    eax, eax
+    jnz     2f
+    add     rbx, WG_SZ
+    dec     ecx
+    jmp     1b
+2:  mov     rdi, rbx
+    call    edit_begin
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
 
 # wg_op_of(edi=id) -> rax = the operator that widget stands for, or 0
 wg_op_of:
