@@ -13,11 +13,20 @@
 #  vertex per loop) and a material of its own whose MOZ_lightmap texture
 #  (texCoord 1) carries a KHR_texture_transform: the object's region in
 #  the atlas (offset, scale).
+#  Materials' maps go along as embedded PNG textures: a pin driven straight
+#  by a Texture Sample (base colour; metallic B + roughness G of one image;
+#  occlusion R; emission; a Normal Map node's image) exports that image; a
+#  graph doing more is baked (bake.s, 512 x 512) through the UVs of an
+#  object using it into base colour, ORM, normal and emissive maps.
 #
 #  Import: the default scene's node tree (TRS or matrix) is walked and each
 #  triangle primitive becomes an object with its world transform baked in;
-#  equal positions are welded so meshes stay connected. Materials map back
-#  to principled values (factors only; textures wait for UVs).
+#  equal positions are welded so meshes stay connected; TEXCOORD_0 becomes
+#  the mesh's UVs. Materials map back to principled values, and their
+#  texture slots (base colour, metallic-roughness, normal, occlusion,
+#  emissive; KHR_texture_transform's offset and scale) to a node graph of
+#  Texture Samples (matlib.s ml_gltf); images come from data: URIs, files
+#  beside the .gltf or the GLB's buffer views.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -25,6 +34,14 @@
 
 .globl gltf_export
 .globl gltf_import
+.globl gx_tex_plan
+.globl gx_tex_free
+.globl gx_ms
+.globl gx_nx
+.globl gx_xname
+.globl gx_xpng
+.globl gx_xpsz
+.globl gx_xidx
 
 .equ MA_BASE,   32
 .equ MA_METAL,  44
@@ -44,6 +61,17 @@
 .equ MAX_BUF,   8
 .equ MAX_MATS,  256
 .equ MAX_DEPTH, 32
+.equ MAX_GIMG,  64
+.equ IM_DIRTY,  24
+.equ GT_SZ,     80                      # (matlib.s ml_gltf's GT)
+.equ MAX_XIMG,  64                      # export: texture images
+.equ XM_SZ,     24                      # per material: base, mr, normal,
+                                        #  occlusion, emission (k + 1), scale
+.equ IM_W,      0
+.equ IM_H,      4
+.equ IM_FMT,    8
+.equ IM_DATA,   64
+.equ XBAKE,     512
 
 .section .rodata
 .align 4
@@ -104,6 +132,20 @@ g_light:        .asciz "{\"type\":\"point\",\"color\":[1,1,1],\"intensity\":"
 g_lname:        .asciz ",\"name\":"
 g_lend:         .asciz "]}}"
 g_bend:         .asciz "}]"
+g_xtexs:        .asciz "],\"textures\":["
+g_xtlm:         .asciz "{\"sampler\":0,\"source\":0}"
+g_xtex:         .asciz "{\"sampler\":1,\"source\":"
+g_xsamp:        .asciz "],\"samplers\":[{\"magFilter\":9729,\"minFilter\":9729,\"wrapS\":33071,\"wrapT\":33071},{\"magFilter\":9729,\"minFilter\":9987,\"wrapS\":10497,\"wrapT\":10497}],\"images\":["
+g_ximlm:        .asciz "{\"name\":\"lightmap\",\"mimeType\":\"image/png\",\"bufferView\":"
+g_ximg:         .asciz "{\"name\":"
+g_ximg2:        .asciz ",\"mimeType\":\"image/png\",\"bufferView\":"
+g_xbase:        .asciz ",\"baseColorTexture\":{\"index\":"
+g_xmr:          .asciz ",\"metallicRoughnessTexture\":{\"index\":"
+g_xnrm:         .asciz ",\"normalTexture\":{\"index\":"
+g_xnscale:      .asciz ",\"scale\":"
+g_xocc:         .asciz ",\"occlusionTexture\":{\"index\":"
+g_xemi:         .asciz ",\"emissiveTexture\":{\"index\":"
+g_one3:         .asciz "1,1,1"
 g_pngview:      .asciz "{\"buffer\":0,\"byteOffset\":"
 g_col0:         .asciz ",\"COLOR_0\":"
 g_acc_col2:     .asciz ",\"componentType\":5126,\"type\":\"VEC3\",\"count\":"
@@ -163,6 +205,26 @@ k_ior:          .asciz "ior"
 k_x_coat:       .asciz "KHR_materials_clearcoat"
 k_coatf:        .asciz "clearcoatFactor"
 k_coatrf:       .asciz "clearcoatRoughnessFactor"
+k_images:       .asciz "images"
+k_textures:     .asciz "textures"
+k_source:       .asciz "source"
+k_index:        .asciz "index"
+k_bctex:        .asciz "baseColorTexture"
+k_mrtex:        .asciz "metallicRoughnessTexture"
+k_ntex:         .asciz "normalTexture"
+k_otex:         .asciz "occlusionTexture"
+k_etex:         .asciz "emissiveTexture"
+k_x_tt:         .asciz "KHR_texture_transform"
+k_offset:       .asciz "offset"
+k_texcoord0:    .asciz "TEXCOORD_0"
+s_gimg:         .asciz "glTF image"
+.align 4
+gt_defaults:    .long 0, 0, 0, 0, 0
+                .float 1.0, 1.0, 1.0, 0.0, 0.0  # normal scale, tile, offset
+                .float 1.0, 1.0, 1.0, 1.0       # base factor
+                .float 1.0, 1.0                 # metallic, roughness
+                .float 1.0, 1.0, 1.0            # emissive
+                .long 0
 s_gmat:         .asciz "glTF material"
 s_gobj:         .asciz "glTF"
 .align 4
@@ -198,6 +260,17 @@ gx_png:         .skip 8                 # the lightmap as PNG bytes
 gx_pngsz:       .skip 8
 gx_pngoff:      .skip 8                 #  where in the buffer
 gx_dmat:        .skip 128               # the default material (no material)
+gx_ms:          .skip XM_SZ*MAX_MATS    # materials' texture slots
+gx_nx:          .skip 4                 # texture images
+gx_lmimg:       .skip 4                 # 1: the lightmap is image 0
+gx_curm:        .skip 4                 # gx_mat's material (-1: none)
+gx_ximg:        .skip 8*MAX_XIMG        # the image
+gx_xown:        .skip 4*MAX_XIMG        #  made here (baked: freed after)
+gx_xidx:        .skip 4*MAX_XIMG        #  the scene's image (-1: made here)
+gx_xpng:        .skip 8*MAX_XIMG        #  as PNG
+gx_xpsz:        .skip 8*MAX_XIMG
+gx_xoff:        .skip 8*MAX_XIMG        #  where in the buffer
+gx_xname:       .skip 32*MAX_XIMG
 # import
 gi_json:        .skip 8                 # text start / end
 gi_jend:        .skip 8
@@ -207,6 +280,9 @@ gi_bufmap:      .skip 8*MAX_BUF         # owned mappings to free (or 0)
 gi_bufmapsz:    .skip 8*MAX_BUF
 gi_nbuf:        .skip 4
 gi_mats:        .skip 4*MAX_MATS        # glTF material -> ours (+ 1)
+gi_imgs:        .skip 4*MAX_GIMG        # glTF image -> ours + 1 (-1: failed)
+gi_gt:          .skip GT_SZ             # a material's maps (ml_gltf)
+gi_tt:          .skip 4                 # a texture transform was read
 gi_nobj:        .skip 4
 gi_dir:         .skip 512               # the file's folder (external buffers)
 gi_name:        .skip 64
@@ -445,6 +521,10 @@ gltf_export:
     and     r15, -4
     mov     [rip+gx_pngoff], r15
     add     r15, [rip+gx_pngsz]
+    call    gx_tex_plan                 # (materials' maps: their PNGs after)
+    mov     rdi, r15
+    call    gx_tex_place
+    mov     r15, rax
     mov     [rip+gx_binsz], r15
     lea     rdi, [r15+16]
     call    vmap
@@ -507,7 +587,8 @@ gltf_export:
     add     rdi, [rip+gx_pngoff]
     mov     rcx, [rip+gx_pngsz]
     rep     movsb
-71: # the JSON
+71: call    gx_tex_copy                 # the materials' PNGs
+    # the JSON
     call    wb_reset
     lea     rsi, [rip+g_head]
     call    wb_str
@@ -686,7 +767,8 @@ gltf_export:
     jz      2f
     mov     edi, ','
     call    wb_char
-2:  mov     edi, r12d
+2:  mov     [rip+gx_curm], r12d
+    mov     edi, r12d
     call    mat_get
     mov     rdi, rax
     xor     esi, esi
@@ -712,10 +794,12 @@ gltf_export:
     mov     rbx, rax
     lea     rdi, [rip+gx_dmat]          # its material, or the default
     call    gx_default_mat
+    mov     dword ptr [rip+gx_curm], -1
     mov     eax, [rbx+OB_MAT]
     test    eax, eax
     jz      62f
     lea     edi, [rax-1]
+    mov     [rip+gx_curm], edi
     call    mat_get
     mov     rdi, rax
 62: lea     rax, [rip+gx_lm]
@@ -757,18 +841,8 @@ gltf_export:
     call    wb_char
 21: lea     rsi, [rip+g_usedt]
     call    wb_str
-.Lgx_tex:                               # the lightmap: texture, image
-    cmp     dword ptr [rip+gx_nlm], 0
-    je      .Lgx_acc
-    cmp     qword ptr [rip+gx_png], 0
-    je      .Lgx_acc
-    lea     rsi, [rip+g_texs]
-    call    wb_str
-    call    gx_png_view
-    mov     edi, eax
-    call    int_out
-    mov     edi, '}'
-    call    wb_char
+.Lgx_tex:                               # the lightmap, the maps: textures,
+    call    gx_tex_json                 #  samplers, images
 .Lgx_acc:
     lea     rsi, [rip+g_acc]
     call    wb_str
@@ -1084,7 +1158,7 @@ gltf_export:
     call    wb_int
     mov     edi, '}'
     call    wb_char
-67:
+67: call    gx_tex_views                # the maps' views
     lea     rsi, [rip+g_bufs]
     call    wb_str
     mov     rdi, [rip+gx_binsz]
@@ -1116,6 +1190,7 @@ gltf_export:
     mov     ebx, eax
     jmp     .Lgx_free
 .Lgx_none:
+    call    gx_tex_free
     mov     rdi, [rip+gx_png]
     mov     rsi, [rip+gx_pngsz]
     call    vunmap
@@ -1126,6 +1201,7 @@ gltf_export:
 .Lgx_mem:
     mov     ebx, -12
 .Lgx_free:
+    call    gx_tex_free
     mov     rdi, [rip+gx_bin]
     mov     rsi, [rip+gx_binsz]
     add     rsi, 16
@@ -1162,21 +1238,44 @@ gx_mat:
     call    jb_q
     lea     rsi, [rip+g_pbr]
     call    wb_str
-    lea     rdi, [r13+MA_BASE]
+    lea     rsi, [rip+g_one3]           # (a map: factor 1)
+    xor     ecx, ecx
+    call    gx_slot
+    test    eax, eax
+    jz      11f
+    call    wb_str
+    jmp     12f
+11: lea     rdi, [r13+MA_BASE]
     mov     ecx, 3
     call    nums
-    mov     edi, ','
+12: mov     edi, ','
     call    wb_char
     movss   xmm0, [r13+MA_ALPHA]
     call    jb_num
     lea     rsi, [rip+g_metal]
     call    wb_str
+    mov     ecx, 1
+    call    gx_slot
+    movss   xmm0, [rip+gf_one]
+    test    eax, eax
+    jnz     13f
     movss   xmm0, [r13+MA_METAL]
-    call    jb_num
+13: call    jb_num
     lea     rsi, [rip+g_rough]
     call    wb_str
+    mov     ecx, 1
+    call    gx_slot
+    movss   xmm0, [rip+gf_one]
+    test    eax, eax
+    jnz     14f
     movss   xmm0, [r13+MA_ROUGH]
-    call    jb_num
+14: call    jb_num
+    lea     rsi, [rip+g_xbase]          # the maps
+    xor     ecx, ecx
+    call    gx_tref
+    lea     rsi, [rip+g_xmr]
+    mov     ecx, 1
+    call    gx_tref
     lea     rsi, [rip+g_emit]           # emission: colour x min(strength, 1)
     call    wb_str
     xor     ecx, ecx
@@ -1186,9 +1285,14 @@ gx_mat:
     jz      31f
     mov     edi, ','
     call    wb_char
-31: mov     rcx, [rsp]
+31: mov     ecx, 4                      # (a map: its colour, x the strength)
+    call    gx_slot
+    mov     rcx, [rsp]
+    movss   xmm0, [rip+gf_one]
+    test    eax, eax
+    jnz     32f
     movss   xmm0, [r13+MA_EMIT+rcx*4]
-    movss   xmm4, [r13+MA_ESTR]
+32: movss   xmm4, [r13+MA_ESTR]
     minss   xmm4, [rip+gf_one]
     mulss   xmm0, xmm4
     call    jb_num
@@ -1199,6 +1303,15 @@ gx_mat:
     jb      3b
     mov     edi, ']'
     call    wb_char
+    lea     rsi, [rip+g_xnrm]           # normal (its scale), occlusion,
+    mov     ecx, 2                      #  emission maps
+    call    gx_tref
+    lea     rsi, [rip+g_xocc]
+    mov     ecx, 3
+    call    gx_tref
+    lea     rsi, [rip+g_xemi]
+    mov     ecx, 4
+    call    gx_tref
     movss   xmm0, [r13+MA_BLEND]        # alphaMode: masked, translucent (or
     cvtss2si eax, xmm0                  #  opaque with alpha below 1: v0.12)
     cmp     eax, 1
@@ -1266,6 +1379,740 @@ gx_mat:
 9:  add     rsp, 8
     pop     r14
     pop     r13
+    ret
+
+# ---- materials' maps ------------------------------------------------------------
+# gx_slot(ecx=slot 0 base 1 mr 2 normal 3 occlusion 4 emission) -> eax =
+#   gx_mat's material's texture there + 1 (0: none) (keeps rsi)
+gx_slot:
+    xor     eax, eax
+    mov     edx, [rip+gx_curm]
+    test    edx, edx
+    js      9f
+    cmp     edx, MAX_MATS
+    jae     9f
+    imul    edx, edx, XM_SZ
+    lea     r8, [rip+gx_ms]
+    add     r8, rdx
+    mov     eax, [r8+rcx*4]
+    test    eax, eax
+    jz      9f
+    add     eax, [rip+gx_lmimg]
+9:  ret
+
+# gx_tref(rsi=key text, ecx=slot) - ,"<key>":{"index":t[,"scale":s]} when
+#   there is a map in the slot
+gx_tref:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12d, ecx
+    call    gx_slot
+    test    eax, eax
+    jz      9f
+    lea     ebx, [rax-1]
+    call    wb_str
+    mov     edi, ebx
+    call    int_out
+    cmp     r12d, 2
+    jne     1f
+    lea     rsi, [rip+g_xnscale]
+    call    wb_str
+    mov     eax, [rip+gx_curm]
+    imul    eax, eax, XM_SZ
+    lea     rcx, [rip+gx_ms]
+    movss   xmm0, [rcx+rax+20]
+    call    jb_num
+1:  mov     edi, '}'
+    call    wb_char
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_tex_plan - each material's slots (gx_ms), the images (gx_ximg) and
+#   their PNGs
+gx_tex_plan:
+    push    rbx
+    sub     rsp, 16
+    lea     rdi, [rip+gx_ms]
+    xor     eax, eax
+    mov     ecx, XM_SZ*MAX_MATS/4
+    rep     stosd
+    mov     dword ptr [rip+gx_nx], 0
+    xor     ebx, ebx
+1:  call    mat_count
+    cmp     ebx, eax
+    jae     2f
+    cmp     ebx, MAX_MATS
+    jae     2f
+    mov     edi, ebx
+    call    gx_mplan
+    inc     ebx
+    jmp     1b
+2:  xor     ebx, ebx                    # PNGs (wb borrowed)
+3:  cmp     ebx, [rip+gx_nx]
+    jae     9f
+    call    wb_reset
+    lea     rax, [rip+gx_ximg]
+    mov     rax, [rax+rbx*8]
+    lea     rsi, [rax+IM_DATA]
+    mov     edx, [rax+IM_W]
+    mov     ecx, [rax+IM_H]
+    mov     r8d, edx
+    call    png_encode_rgba
+    test    eax, eax
+    jz      4f
+    mov     rdi, [rip+wb_len]
+    lea     rax, [rip+gx_xpsz]
+    mov     [rax+rbx*8], rdi
+    call    vmap
+    test    rax, rax
+    jz      4f
+    lea     rcx, [rip+gx_xpng]
+    mov     [rcx+rbx*8], rax
+    mov     rdi, rax
+    mov     rsi, [rip+wb_ptr]
+    lea     rax, [rip+gx_xpsz]
+    mov     rcx, [rax+rbx*8]
+    rep     movsb
+    jmp     5f
+4:  lea     rax, [rip+gx_xpsz]          # (no PNG: an empty one, sadly)
+    mov     qword ptr [rax+rbx*8], 0
+5:  inc     ebx
+    jmp     3b
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# gx_mplan(edi=material) - its slots: maps used directly, else baked
+gx_mplan:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 24
+    mov     ebx, edi
+    imul    eax, ebx, XM_SZ
+    lea     r12, [rip+gx_ms]
+    add     r12, rax
+    mov     dword ptr [r12+20], 0x3f800000
+    mov     edi, ebx                    # a graph at all?
+    xor     esi, esi
+    xor     edx, edx
+    xor     ecx, ecx
+    call    graph_info
+    test    eax, eax
+    jle     .Lxp_out
+    xor     ebp, ebp                    # bake?
+    mov     esi, PIN_BASE               # base colour: an image's colour
+    call    gx_pin
+    test    eax, eax
+    jle     1f
+    test    edx, edx
+    jnz     11f
+    mov     edi, eax
+    call    gx_direct
+    test    rax, rax
+    jz      11f
+    mov     rdi, rax
+    xor     esi, esi
+    call    gx_addimg
+    mov     [r12], eax
+    jmp     1f
+11: mov     ebp, 1
+1:  mov     esi, PIN_METAL              # metallic B, roughness G: one image
+    call    gx_pin
+    mov     r13d, eax
+    mov     r14d, edx
+    mov     esi, PIN_ROUGH
+    call    gx_pin
+    mov     r15d, eax
+    mov     ecx, r13d
+    or      ecx, r15d
+    jle     2f
+    test    r13d, r13d
+    jle     21f
+    test    r15d, r15d
+    jle     21f
+    cmp     r14d, 3
+    jne     21f
+    cmp     edx, 2
+    jne     21f
+    mov     edi, r13d
+    call    gx_direct
+    test    rax, rax
+    jz      21f
+    mov     [rsp], rax
+    mov     edi, r15d
+    call    gx_direct
+    cmp     rax, [rsp]
+    jne     21f
+    mov     rdi, rax
+    xor     esi, esi
+    call    gx_addimg
+    mov     [r12+4], eax
+    jmp     2f
+21: mov     ebp, 1
+2:  mov     esi, PIN_AO                 # occlusion: an image's red
+    call    gx_pin
+    test    eax, eax
+    jle     3f
+    cmp     edx, 1
+    jne     31f
+    mov     edi, eax
+    call    gx_direct
+    test    rax, rax
+    jz      31f
+    mov     rdi, rax
+    xor     esi, esi
+    call    gx_addimg
+    mov     [r12+12], eax
+    jmp     3f
+31: mov     ebp, 1
+3:  mov     esi, PIN_NORMAL             # a Normal Map node (OpenGL) on an
+    call    gx_pin                      #  image's colour
+    test    eax, eax
+    jle     4f
+    mov     r13d, eax
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 1
+    xor     ecx, ecx
+    call    graph_info
+    cmp     eax, 9
+    jne     41f
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 2
+    call    graph_value
+    comiss  xmm0, [rip+gf_half]
+    jae     41f
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 6
+    mov     ecx, 1
+    call    graph_info
+    test    eax, eax
+    jnz     41f
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 2
+    mov     ecx, 1
+    call    graph_info
+    test    eax, eax
+    jle     41f
+    mov     edi, eax
+    call    gx_direct
+    test    rax, rax
+    jz      41f
+    mov     rdi, rax
+    xor     esi, esi
+    call    gx_addimg
+    mov     [r12+8], eax
+    mov     edi, ebx                    # (its strength: the scale)
+    mov     esi, r13d
+    mov     edx, 1
+    call    graph_value
+    movss   [r12+20], xmm0
+    jmp     4f
+41: mov     ebp, 1
+4:  mov     esi, PIN_EMIT               # emission: an image's colour
+    call    gx_pin
+    test    eax, eax
+    jle     5f
+    test    edx, edx
+    jnz     51f
+    mov     edi, eax
+    call    gx_direct
+    test    rax, rax
+    jz      51f
+    mov     rdi, rax
+    xor     esi, esi
+    call    gx_addimg
+    mov     [r12+16], eax
+    jmp     5f
+51: mov     ebp, 1
+5:  test    ebp, ebp
+    jz      .Lxp_out
+    mov     edi, ebx
+    call    gx_mbake
+.Lxp_out:
+    add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_pin(esi=pin; ebx = material) -> eax = the node driving it (0: none),
+#   edx = which of its outputs
+gx_pin:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    mov     r12d, esi
+    mov     edi, ebx
+    xor     esi, esi
+    mov     edx, 3
+    mov     ecx, r12d
+    call    graph_info
+    mov     r13d, eax
+    test    eax, eax
+    jle     8f
+    mov     edi, ebx
+    xor     esi, esi
+    mov     edx, 7
+    mov     ecx, r12d
+    call    graph_info
+    mov     edx, eax
+    mov     eax, r13d
+    jmp     9f
+8:  xor     eax, eax
+    xor     edx, edx
+9:  add     rsp, 8
+    pop     r13
+    pop     r12
+    ret
+
+# gx_direct(edi=node; ebx = material) -> rax = the 8-bit image a Texture
+#   Sample (or Texture Parameter) node reads as glTF would: its UVs plain
+#   (unlinked, or a Texture Coordinate node at 1 1 0 0), size 1; else 0.
+#   edx = the image's index
+gx_direct:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    mov     r12d, edi
+    mov     edi, ebx
+    mov     esi, r12d
+    mov     edx, 1
+    xor     ecx, ecx
+    call    graph_info
+    cmp     eax, 1
+    je      1f
+    cmp     eax, 39
+    jne     8f
+1:  mov     edi, ebx                    # its UVs
+    mov     esi, r12d
+    mov     edx, 2
+    mov     ecx, 1
+    call    graph_info
+    test    eax, eax
+    jle     3f
+    mov     r13d, eax
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 1
+    xor     ecx, ecx
+    call    graph_info
+    cmp     eax, 10
+    jne     8f
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 1
+    call    graph_value
+    ucomiss xmm0, [rip+gf_one]
+    jne     8f
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 2
+    call    graph_value
+    ucomiss xmm0, [rip+gf_one]
+    jne     8f
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 3
+    call    graph_value
+    xorps   xmm1, xmm1
+    ucomiss xmm0, xmm1
+    jne     8f
+    mov     edi, ebx
+    mov     esi, r13d
+    mov     edx, 4
+    call    graph_value
+    xorps   xmm1, xmm1
+    ucomiss xmm0, xmm1
+    jne     8f
+3:  mov     edi, ebx                    # size 1 (0: 1)
+    mov     esi, r12d
+    mov     edx, 2
+    call    graph_value
+    xorps   xmm1, xmm1
+    ucomiss xmm0, xmm1
+    je      4f
+    ucomiss xmm0, [rip+gf_one]
+    jne     8f
+4:  mov     edi, ebx                    # the image
+    mov     esi, r12d
+    mov     edx, 1
+    call    graph_value
+    cvttss2si r13d, xmm0
+    dec     r13d
+    js      8f
+    mov     edi, r13d
+    call    image_ptr
+    test    rax, rax
+    jz      8f
+    cmp     dword ptr [rax+IM_FMT], 0
+    jne     8f
+    mov     edx, r13d
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r13
+    pop     r12
+    ret
+
+# gx_addimg(rdi=image, esi=1: made here (rdx = its name), else edx = the
+#   scene image's index) -> eax = its number + 1 (0: no room; a made one
+#   is freed)
+gx_addimg:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13, rdx
+    xor     ecx, ecx                    # (once)
+1:  cmp     ecx, [rip+gx_nx]
+    jae     2f
+    lea     rax, [rip+gx_ximg]
+    cmp     [rax+rcx*8], rbx
+    je      7f
+    inc     ecx
+    jmp     1b
+2:  cmp     ecx, MAX_XIMG
+    jae     8f
+    lea     rax, [rip+gx_ximg]
+    mov     [rax+rcx*8], rbx
+    lea     rax, [rip+gx_xown]
+    mov     [rax+rcx*4], r12d
+    lea     rax, [rip+gx_xidx]
+    mov     dword ptr [rax+rcx*4], -1
+    test    r12d, r12d
+    jnz     21f
+    mov     [rax+rcx*4], r13d
+21: lea     rax, [rip+gx_xpng]
+    mov     qword ptr [rax+rcx*8], 0
+    inc     dword ptr [rip+gx_nx]
+    mov     rsi, r13                    # its name
+    test    r12d, r12d
+    jnz     3f
+    push    rcx
+    push    rcx
+    mov     edi, r13d
+    call    image_rec
+    mov     rsi, rax
+    pop     rcx
+    pop     rcx
+3:  mov     eax, ecx
+    shl     eax, 5
+    lea     rdi, [rip+gx_xname]
+    add     rdi, rax
+    xor     edx, edx
+4:  mov     al, [rsi+rdx]
+    mov     [rdi+rdx], al
+    test    al, al
+    jz      7f
+    inc     edx
+    cmp     edx, 31
+    jb      4b
+    mov     byte ptr [rdi+rdx], 0
+7:  lea     eax, [rcx+1]
+    jmp     9f
+8:  test    r12d, r12d
+    jz      81f
+    mov     rdi, rbx
+    call    img_free
+81: xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_mbake(edi=material) - its graph baked through the UVs of an object
+#   using it: base colour, ORM (occlusion and both PBR maps), a
+#   normal map (when it drives the normal), emission (when it drives it)
+gx_mbake:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 64
+    mov     ebx, edi
+    xor     r12d, r12d                  # an object with it, UVs
+1:  cmp     r12d, [rip+obj_count]
+    jae     .Lxb_out
+    mov     edi, r12d
+    call    obj_at
+    mov     r13, rax
+    mov     eax, [r13+OB_MAT]
+    dec     eax
+    cmp     eax, ebx
+    jne     2f
+    mov     rdi, r13
+    call    obj_eval
+    test    rax, rax
+    jz      2f
+    cmp     qword ptr [rax+ME_UV], 0
+    jne     3f
+2:  inc     r12d
+    jmp     1b
+3:  imul    eax, ebx, XM_SZ             # (nothing kept from the direct look)
+    lea     r14, [rip+gx_ms]
+    add     r14, rax
+    xor     eax, eax
+    mov     [r14], eax
+    mov     [r14+4], eax
+    mov     [r14+8], eax
+    mov     [r14+12], eax
+    mov     [r14+16], eax
+    mov     dword ptr [r14+20], 0x3f800000
+    xor     r15d, r15d                  # each kind
+4:  cmp     r15d, 4
+    jae     .Lxb_out
+    cmp     r15d, 2                     # (normal, emission: only if driven)
+    jb      41f
+    mov     esi, PIN_NORMAL
+    cmp     r15d, 2
+    je      40f
+    mov     esi, PIN_EMIT
+40: call    gx_pin
+    test    eax, eax
+    jle     7f
+41: mov     edi, XBAKE
+    mov     esi, XBAKE
+    xor     edx, edx
+    call    img_alloc
+    test    rax, rax
+    jz      .Lxb_out
+    mov     r12, rax
+    mov     dword ptr [rip+bk_quiet], 1
+    mov     rdi, r13
+    mov     esi, r15d
+    mov     rdx, r12
+    call    bake_material
+    mov     dword ptr [rip+bk_quiet], 0
+    test    eax, eax
+    jns     5f
+    mov     rdi, r12
+    call    img_free
+    jmp     7f
+5:  mov     edi, ebx                    # its name: <material>_<kind>
+    call    mat_get
+    lea     rdi, [rsp]
+    mov     rsi, rax
+    call    gcpy
+    lea     rax, [rip+ml_bake_kinds]
+    mov     rsi, [rax+r15*8]
+    call    gcpy
+    mov     byte ptr [rsp+31], 0
+    mov     rdi, r12
+    mov     esi, 1
+    lea     rdx, [rsp]
+    call    gx_addimg
+    test    eax, eax
+    jz      7f
+    cmp     r15d, 1
+    jne     51f
+    mov     [r14+4], eax                # (ORM: both slots)
+    mov     [r14+12], eax
+    jmp     7f
+51: mov     ecx, r15d                   # base 0, normal 2, emission 4
+    cmp     r15d, 3
+    jne     52f
+    mov     ecx, 4
+52: mov     [r14+rcx*4], eax
+7:  inc     r15d
+    jmp     4b
+.Lxb_out:
+    add     rsp, 64
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_tex_place(rdi=buffer bytes so far) -> rax = with the maps' PNGs after
+#   (each aligned); gx_lmimg
+gx_tex_place:
+    xor     eax, eax
+    cmp     dword ptr [rip+gx_nlm], 0
+    je      1f
+    cmp     qword ptr [rip+gx_png], 0
+    je      1f
+    mov     eax, 1
+1:  mov     [rip+gx_lmimg], eax
+    mov     rax, rdi
+    xor     ecx, ecx
+2:  cmp     ecx, [rip+gx_nx]
+    jae     9f
+    add     rax, 3
+    and     rax, -4
+    lea     rdx, [rip+gx_xoff]
+    mov     [rdx+rcx*8], rax
+    lea     rdx, [rip+gx_xpsz]
+    add     rax, [rdx+rcx*8]
+    inc     ecx
+    jmp     2b
+9:  ret
+
+# gx_tex_copy - the maps' PNGs into the buffer
+gx_tex_copy:
+    xor     edx, edx
+1:  cmp     edx, [rip+gx_nx]
+    jae     9f
+    lea     rax, [rip+gx_xpng]
+    mov     rsi, [rax+rdx*8]
+    test    rsi, rsi
+    jz      2f
+    lea     rax, [rip+gx_xoff]
+    mov     rdi, [rax+rdx*8]
+    add     rdi, [rip+gx_bin]
+    lea     rax, [rip+gx_xpsz]
+    mov     rcx, [rax+rdx*8]
+    rep     movsb
+2:  inc     edx
+    jmp     1b
+9:  ret
+
+# gx_tex_json - "textures", "samplers", "images" (the lightmap first)
+gx_tex_json:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     eax, [rip+gx_lmimg]
+    or      eax, [rip+gx_nx]
+    jz      9f
+    lea     rsi, [rip+g_xtexs]
+    call    wb_str
+    xor     r12d, r12d                  # (entries written)
+    cmp     dword ptr [rip+gx_lmimg], 0
+    je      1f
+    lea     rsi, [rip+g_xtlm]
+    call    wb_str
+    inc     r12d
+1:  xor     ebx, ebx
+2:  cmp     ebx, [rip+gx_nx]
+    jae     3f
+    call    gx_comma
+    lea     rsi, [rip+g_xtex]
+    call    wb_str
+    mov     edi, ebx
+    add     edi, [rip+gx_lmimg]
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
+    inc     ebx
+    jmp     2b
+3:  lea     rsi, [rip+g_xsamp]
+    call    wb_str
+    xor     r12d, r12d
+    call    gx_png_view                 # (views: the lightmap's, then ours)
+    mov     [rsp], eax
+    cmp     dword ptr [rip+gx_lmimg], 0
+    je      4f
+    lea     rsi, [rip+g_ximlm]
+    call    wb_str
+    mov     edi, [rsp]
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
+    inc     dword ptr [rsp]
+    inc     r12d
+4:  xor     ebx, ebx
+5:  cmp     ebx, [rip+gx_nx]
+    jae     9f
+    call    gx_comma
+    lea     rsi, [rip+g_ximg]
+    call    wb_str
+    mov     eax, ebx
+    shl     eax, 5
+    lea     rsi, [rip+gx_xname]
+    add     rsi, rax
+    call    jb_q
+    lea     rsi, [rip+g_ximg2]
+    call    wb_str
+    mov     edi, [rsp]
+    add     edi, ebx
+    call    int_out
+    mov     edi, '}'
+    call    wb_char
+    inc     ebx
+    jmp     5b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_comma(r12d = entries so far, then one more) - a comma between
+gx_comma:
+    test    r12d, r12d
+    jz      1f
+    push    r12
+    mov     edi, ','
+    call    wb_char
+    pop     r12
+1:  inc     r12d
+    ret
+
+# gx_tex_views - the maps' buffer views
+gx_tex_views:
+    push    rbx
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+gx_nx]
+    jae     9f
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+g_pngview]
+    call    wb_str
+    lea     rax, [rip+gx_xoff]
+    mov     rdi, [rax+rbx*8]
+    call    wb_int
+    lea     rsi, [rip+g_vlen]
+    call    wb_str
+    lea     rax, [rip+gx_xpsz]
+    mov     rdi, [rax+rbx*8]
+    call    wb_int
+    mov     edi, '}'
+    call    wb_char
+    inc     ebx
+    jmp     1b
+9:  pop     rbx
+    ret
+
+# gx_tex_free - the PNGs and the baked images
+gx_tex_free:
+    push    rbx
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+gx_nx]
+    jae     9f
+    lea     rax, [rip+gx_xpng]
+    mov     rdi, [rax+rbx*8]
+    test    rdi, rdi
+    jz      2f
+    mov     qword ptr [rax+rbx*8], 0
+    lea     rax, [rip+gx_xpsz]
+    mov     rsi, [rax+rbx*8]
+    call    vunmap
+2:  lea     rax, [rip+gx_xown]
+    cmp     dword ptr [rax+rbx*4], 0
+    je      3f
+    mov     dword ptr [rax+rbx*4], 0
+    lea     rax, [rip+gx_ximg]
+    mov     rdi, [rax+rbx*8]
+    call    img_free
+3:  inc     ebx
+    jmp     1b
+9:  mov     dword ptr [rip+gx_nx], 0
+    pop     rbx
     ret
 
 # gx_default_mat(rdi=record) -> rdi: the values a mesh without a material
@@ -2199,10 +3046,12 @@ primitive:
     push    r13
     push    r14
     push    r15
-    sub     rsp, 168
-    mov     r12, rsi
-    mov     [rsp+152], rsi
-    mov     [rsp+128], rdi
+    sub     rsp, 232                    # (+168 UVs' accessor, +200 the
+    mov     r12, rsi                    #  corners' glTF vertices, +208 its
+    mov     [rsp+152], rsi              #  size, +216 one triangle's, +228
+    mov     [rsp+128], rdi              #  triangles kept)
+    mov     qword ptr [rsp+200], 0
+    mov     dword ptr [rsp+168+AC_COUNT], 0
     lea     rdi, [rip+k_mode]           # triangles only
     mov     rsi, r12
     call    j_find
@@ -2272,7 +3121,8 @@ primitive:
     imul    rax, rcx
     cmp     rax, [rsp+64+AC_AVAIL]
     ja      .Lpr_out
-2:  mov     r13d, [rsp+64+AC_COUNT]     # corners
+2:  call    prim_uvs                    # TEXCOORD_0 (+168), if usable
+    mov     r13d, [rsp+64+AC_COUNT]     # corners
     cmp     r13d, -1
     jne     21f
     mov     r13d, [rsp+AC_COUNT]
@@ -2310,6 +3160,14 @@ primitive:
     test    rax, rax
     jz      .Lpr_free1
     mov     [rsp+112], rax              # slots: mesh vertex + 1
+    cmp     dword ptr [rsp+168+AC_COUNT], 0
+    je      22f
+    lea     rdi, [r14+r14*2]            # (UVs: each kept corner's vertex)
+    lea     rdi, [rdi*4+64]
+    mov     [rsp+208], rdi
+    call    vmap
+    mov     [rsp+200], rax
+22: mov     dword ptr [rsp+228], 0
     dec     ebp                         # mask
     xor     ebx, ebx
 3:  cmp     ebx, [rsp+AC_COUNT]
@@ -2374,6 +3232,7 @@ primitive:
     mov     ecx, eax
 52: cmp     ecx, [rsp+AC_COUNT]
     jae     54f
+    mov     [rsp+216+r12*4], ecx
     mov     rax, [rsp+144]
     mov     eax, [rax+rcx*4]
     mov     [rsp+96+r12*4], eax
@@ -2392,6 +3251,16 @@ primitive:
     lea     rsi, [rsp+96]
     mov     edx, 3
     call    mesh_add_poly
+    mov     rax, [rsp+200]
+    test    rax, rax
+    jz      54f
+    mov     ecx, [rsp+228]
+    lea     ecx, [rcx+rcx*2]
+    mov     rdx, [rsp+216]
+    mov     [rax+rcx*4], rdx
+    mov     edx, [rsp+224]
+    mov     [rax+rcx*4+8], edx
+    inc     dword ptr [rsp+228]
 54: inc     ebx
     jmp     5b
 6:  mov     rdi, r15
@@ -2402,8 +3271,22 @@ primitive:
     mov     rdi, r15
     call    mesh_unref
     jmp     .Lpr_free2
-61:
-    lea     rsi, [rip+gi_name]
+61: cmp     qword ptr [rsp+200], 0      # its UVs: (u, 1 - v) per loop
+    je      62f
+    mov     eax, [rsp+228]
+    lea     eax, [rax+rax*2]
+    cmp     eax, [r15+ME_NLOOPS]
+    jne     62f
+    mov     rdi, r15
+    call    mesh_uv_alloc
+    test    rax, rax
+    jz      62f
+    mov     rdi, rax
+    lea     rsi, [rsp+168]
+    mov     rdx, [rsp+200]
+    mov     ecx, [r15+ME_NLOOPS]
+    call    fill_uvs
+62: lea     rsi, [rip+gi_name]
     mov     rdx, r15
     mov     edi, OT_MESH
     call    obj_new
@@ -2436,7 +3319,12 @@ primitive:
     call    mesh_unref
     jmp     .Lpr_out
 .Lpr_free2:
-    mov     rdi, [rsp+112]
+    mov     rdi, [rsp+200]
+    test    rdi, rdi
+    jz      63f
+    mov     rsi, [rsp+208]
+    call    vunmap
+63: mov     rdi, [rsp+112]
     mov     rsi, [rsp+120]
     call    vunmap
 .Lpr_free1:
@@ -2444,12 +3332,572 @@ primitive:
     mov     rsi, [rsp+136]
     call    vunmap
 .Lpr_out:
-    add     rsp, 168
+    add     rsp, 232
     pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbp
+    pop     rbx
+    ret
+
+# prim_uvs - the primitive's TEXCOORD_0 into the accessor at +168 of
+#   primitive's frame (count 0: none or not usable: floats, or normalized
+#   u8 / u16, at least as many as positions)
+prim_uvs:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    lea     rbx, [rsp+32]               # primitive's frame
+    mov     dword ptr [rbx+168+AC_COUNT], 0
+    lea     rdi, [rip+k_attributes]
+    mov     rsi, [rbx+152]
+    call    j_find
+    test    rax, rax
+    jz      9f
+    lea     rdi, [rip+k_texcoord0]
+    mov     rsi, rax
+    call    j_find
+    test    rax, rax
+    jz      9f
+    mov     rsi, rax
+    call    jint
+    test    eax, eax
+    js      9f
+    mov     ecx, eax
+    lea     rdi, [rbx+168]
+    call    accessor
+    test    eax, eax
+    jz      8f
+    mov     eax, [rbx+168+AC_TYPE]      # element size
+    mov     ecx, 8
+    cmp     eax, 5126
+    je      1f
+    mov     ecx, 4
+    cmp     eax, 5123
+    je      1f
+    mov     ecx, 2
+    cmp     eax, 5121
+    jne     8f
+1:  cmp     dword ptr [rbx+168+AC_STRIDE], 0
+    jne     2f
+    mov     [rbx+168+AC_STRIDE], ecx
+2:  mov     eax, [rbx+168+AC_COUNT]
+    cmp     eax, [rbx+AC_COUNT]
+    jb      8f
+    dec     eax
+    mov     edx, [rbx+168+AC_STRIDE]
+    imul    rax, rdx
+    add     rax, rcx
+    cmp     rax, [rbx+168+AC_AVAIL]
+    jbe     9f
+8:  mov     dword ptr [rbx+168+AC_COUNT], 0
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# fill_uvs(rdi=UVs out, rsi=accessor, rdx=u32 glTF vertex per loop, ecx=
+#   loops) - (u, 1 - v)
+fill_uvs:
+    push    rbx
+    xor     r8d, r8d
+1:  cmp     r8d, ecx
+    jae     9f
+    mov     eax, [rdx+r8*4]
+    imul    eax, [rsi+AC_STRIDE]
+    mov     r9, [rsi+AC_PTR]
+    add     r9, rax
+    mov     ebx, [rsi+AC_TYPE]
+    cmp     ebx, 5126
+    jne     2f
+    movss   xmm0, [r9]
+    movss   xmm1, [r9+4]
+    jmp     4f
+2:  cmp     ebx, 5123
+    jne     3f
+    movzx   eax, word ptr [r9]
+    cvtsi2ss xmm0, eax
+    movzx   eax, word ptr [r9+2]
+    cvtsi2ss xmm1, eax
+    mov     eax, 65535
+    jmp     31f
+3:  movzx   eax, byte ptr [r9]
+    cvtsi2ss xmm0, eax
+    movzx   eax, byte ptr [r9+1]
+    cvtsi2ss xmm1, eax
+    mov     eax, 255
+31: cvtsi2ss xmm2, eax
+    divss   xmm0, xmm2
+    divss   xmm1, xmm2
+4:  movss   [rdi+r8*8], xmm0
+    movss   xmm2, [rip+gf_one]
+    subss   xmm2, xmm1
+    movss   [rdi+r8*8+4], xmm2
+    inc     r8d
+    jmp     1b
+9:  pop     rbx
+    ret
+
+# ---- textures ---------------------------------------------------------------
+# gmat_tex(r12 = the glTF material, r13d = ours) - its texture maps as a
+#   graph
+gmat_tex:
+    push    rbx
+    push    rbp
+    push    r14
+    push    r15
+    sub     rsp, 24
+    lea     rsi, [rip+gt_defaults]
+    lea     rdi, [rip+gi_gt]
+    mov     ecx, GT_SZ/4
+    rep     movsd
+    mov     dword ptr [rip+gi_tt], 0
+    lea     rdi, [rip+k_pbr]
+    mov     rsi, r12
+    call    j_find
+    mov     rbp, rax
+    test    rax, rax
+    jz      2f
+    lea     rdi, [rip+k_bctex]
+    mov     rsi, rbp
+    call    j_find
+    mov     rsi, rax
+    call    gtex
+    mov     [rip+gi_gt+0], eax
+    lea     rdi, [rip+k_basecol]
+    mov     rsi, rbp
+    call    j_find
+    test    rax, rax
+    jz      1f
+    mov     rsi, rax
+    lea     rdi, [rip+gi_gt+40]
+    mov     ecx, 4
+    call    jfloats
+1:  lea     rdi, [rip+k_metalf]
+    lea     rbx, [rip+gi_gt+56]
+    call    gt_num
+    lea     rdi, [rip+k_roughf]
+    lea     rbx, [rip+gi_gt+60]
+    call    gt_num
+    lea     rdi, [rip+k_mrtex]
+    mov     rsi, rbp
+    call    j_find
+    mov     rsi, rax
+    call    gtex
+    mov     [rip+gi_gt+4], eax
+2:  lea     rdi, [rip+k_ntex]           # normal (its scale)
+    mov     rsi, r12
+    call    j_find
+    mov     r14, rax
+    mov     rsi, rax
+    call    gtex
+    mov     [rip+gi_gt+8], eax
+    test    eax, eax
+    jz      3f
+    mov     rbp, r14
+    lea     rdi, [rip+k_scale]
+    lea     rbx, [rip+gi_gt+20]
+    call    gt_num
+3:  lea     rdi, [rip+k_otex]
+    mov     rsi, r12
+    call    j_find
+    mov     rsi, rax
+    call    gtex
+    mov     [rip+gi_gt+12], eax
+    lea     rdi, [rip+k_etex]
+    mov     rsi, r12
+    call    j_find
+    mov     rsi, rax
+    call    gtex
+    mov     [rip+gi_gt+16], eax
+    lea     rdi, [rip+k_emisf]
+    mov     rsi, r12
+    call    j_find
+    test    rax, rax
+    jz      4f
+    mov     rsi, rax
+    lea     rdi, [rip+gi_gt+64]
+    mov     ecx, 3
+    call    jfloats
+4:  mov     edi, r13d                   # masked / translucent: as set
+    call    mat_get
+    cvttss2si eax, dword ptr [rax+96]
+    mov     [rip+gi_gt+76], eax
+    lea     rax, [rip+gi_gt]
+    mov     ecx, [rax]
+    or      ecx, [rax+4]
+    or      ecx, [rax+8]
+    or      ecx, [rax+12]
+    or      ecx, [rax+16]
+    jz      9f
+    mov     edi, r13d
+    lea     rsi, [rip+gi_gt]
+    call    ml_gltf
+9:  add     rsp, 24
+    pop     r15
+    pop     r14
+    pop     rbp
+    pop     rbx
+    ret
+
+# gt_num(rdi=key, rbp=object, rbx=out float) - a number, when there is one
+gt_num:
+    sub     rsp, 8
+    mov     rsi, rbp
+    call    j_find
+    test    rax, rax
+    jz      9f
+    mov     rsi, rax
+    call    j_num
+    test    eax, eax
+    jz      9f
+    movss   [rbx], xmm0
+9:  add     rsp, 8
+    ret
+
+# gtex(rsi=textureInfo or 0) -> eax = our image + 1 (0: none); the first
+#   KHR_texture_transform met sets the tiling and offset (glTF's v runs
+#   down: offset v = 1 - oy - sy)
+gtex:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    xor     eax, eax
+    test    rsi, rsi
+    jz      9f
+    mov     rbx, rsi
+    lea     rdi, [rip+k_index]
+    call    j_find
+    test    rax, rax
+    jz      8f
+    mov     rsi, rax
+    call    jint
+    test    eax, eax
+    js      8f
+    mov     r12d, eax
+    lea     rdi, [rip+k_textures]
+    call    top
+    test    rax, rax
+    jz      8f
+    mov     rsi, rax
+    mov     ecx, r12d
+    call    jidx
+    test    rax, rax
+    jz      8f
+    lea     rdi, [rip+k_source]
+    mov     rsi, rax
+    call    j_find
+    test    rax, rax
+    jz      8f
+    mov     rsi, rax
+    call    jint
+    test    eax, eax
+    js      8f
+    mov     ecx, eax
+    call    gimage
+    test    eax, eax
+    js      8f
+    inc     eax
+    mov     r12d, eax
+    cmp     dword ptr [rip+gi_tt], 0    # its transform
+    jne     7f
+    lea     rdi, [rip+k_ext]
+    mov     rsi, rbx
+    call    j_find
+    test    rax, rax
+    jz      7f
+    lea     rdi, [rip+k_x_tt]
+    mov     rsi, rax
+    call    j_find
+    test    rax, rax
+    jz      7f
+    mov     rbx, rax
+    mov     dword ptr [rip+gi_tt], 1
+    lea     rdi, [rip+k_scale]
+    mov     rsi, rbx
+    call    j_find
+    test    rax, rax
+    jz      5f
+    mov     rsi, rax
+    lea     rdi, [rip+gi_gt+24]
+    mov     ecx, 2
+    call    jfloats
+5:  lea     rdi, [rip+k_offset]
+    mov     rsi, rbx
+    call    j_find
+    test    rax, rax
+    jz      6f
+    mov     rsi, rax
+    lea     rdi, [rsp]
+    mov     ecx, 2
+    call    jfloats
+    cmp     eax, 2
+    jb      6f
+    mov     eax, [rsp]
+    mov     [rip+gi_gt+32], eax
+    movss   xmm0, [rip+gf_one]
+    subss   xmm0, [rsp+4]
+    subss   xmm0, [rip+gi_gt+28]
+    movss   [rip+gi_gt+36], xmm0
+    jmp     7f
+6:  movss   xmm0, [rip+gf_one]          # (no offset: still 1 - sy)
+    subss   xmm0, [rip+gi_gt+28]
+    movss   [rip+gi_gt+36], xmm0
+7:  mov     eax, r12d
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
+# gimage(ecx=glTF image) -> eax = ours or -1 (loaded once): a data: URI, a
+#   file beside the .gltf, or a buffer view
+gimage:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     r12d, ecx
+    cmp     r12d, MAX_GIMG
+    jae     8f
+    lea     rax, [rip+gi_imgs]
+    mov     eax, [rax+r12*4]
+    test    eax, eax
+    jz      1f
+    dec     eax                         # (0 - 1 - 1: failed before)
+    jmp     9f
+1:  lea     rdi, [rip+k_images]
+    call    top
+    test    rax, rax
+    jz      7f
+    mov     rsi, rax
+    mov     ecx, r12d
+    call    jidx
+    test    rax, rax
+    jz      7f
+    mov     rbx, rax
+    lea     rdi, [rip+gi_name]          # its name (else "glTF image")
+    lea     rsi, [rip+s_gimg]
+    call    gcpy
+    lea     rdi, [rip+k_name]
+    mov     rsi, rbx
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     rsi, rax
+    lea     rdi, [rip+gi_name]
+    mov     edx, 27
+    call    j_str
+    test    eax, eax
+    jg      2f
+    lea     rdi, [rip+gi_name]
+    lea     rsi, [rip+s_gimg]
+    call    gcpy
+2:  lea     rdi, [rip+k_uri]
+    mov     rsi, rbx
+    call    j_find
+    test    rax, rax
+    jz      5f
+    mov     r13, rax
+    lea     rdi, [rax+1]                # data: ... ;base64,
+    lea     rsi, [rip+s_data]
+    call    prefix
+    test    eax, eax
+    jz      4f
+    mov     rsi, r13
+3:  cmp     rsi, [rip+j_end]
+    jae     7f
+    mov     rax, [rsi]
+    cmp     rax, [rip+s_b64]
+    je      31f
+    inc     rsi
+    jmp     3b
+31: add     rsi, 8
+    mov     r14, rsi
+    mov     rdi, [rip+j_end]            # (no longer than the text left)
+    sub     rdi, rsi
+    add     rdi, 64
+    mov     [rsp], rdi
+    call    vmap
+    test    rax, rax
+    jz      7f
+    mov     r15, rax
+    mov     rsi, r14
+    mov     rdi, r15
+    call    b64_in
+    mov     rdi, r15
+    mov     rsi, rax
+    call    img_decode
+    mov     r14, rax
+    mov     rdi, r15
+    mov     rsi, [rsp]
+    call    vunmap
+    jmp     6f
+4:  mov     rsi, r13                    # a file beside the .gltf
+    lea     rdi, [rip+gi_tmp+256]
+    mov     edx, 250
+    call    j_str
+    test    eax, eax
+    jle     7f
+    lea     rdi, [rip+gi_tmp]
+    lea     rsi, [rip+gi_dir]
+    call    gcpy
+    lea     rsi, [rip+gi_tmp+256]       # (%20 and the like decoded)
+41: mov     al, [rsi]
+    cmp     al, '%'
+    jne     43f
+    movzx   eax, byte ptr [rsi+1]
+    call    hexval
+    mov     ecx, eax
+    movzx   eax, byte ptr [rsi+2]
+    call    hexval
+    test    ecx, ecx
+    js      42f
+    test    eax, eax
+    js      42f
+    shl     ecx, 4
+    or      eax, ecx
+    add     rsi, 2
+    jmp     43f
+42: mov     al, '%'
+43: mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    test    al, al
+    jnz     41b
+    lea     rdi, [rip+gi_tmp]
+    call    image_load
+    jmp     71f
+5:  lea     rdi, [rip+k_bufferView]     # a buffer view
+    mov     rsi, rbx
+    call    j_find
+    test    rax, rax
+    jz      7f
+    mov     rsi, rax
+    call    jint
+    test    eax, eax
+    js      7f
+    mov     ecx, eax
+    call    bufview
+    test    rax, rax
+    jz      7f
+    mov     rdi, rax
+    mov     rsi, rdx
+    call    img_decode
+    mov     r14, rax
+6:  test    r14, r14
+    jz      7f
+    mov     rdi, r14
+    lea     rsi, [rip+gi_name]
+    call    image_adopt
+    jmp     71f
+7:  mov     eax, -1
+71: lea     ecx, [rax+1]                # (remembered: index + 1, or -1)
+    test    eax, eax
+    jns     72f
+    mov     ecx, -1
+72: lea     rdx, [rip+gi_imgs]
+    mov     [rdx+r12*4], ecx
+    jmp     9f
+8:  mov     eax, -1
+9:  add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gcpy(rdi=dest, rsi=text) -> rdi at its 0
+gcpy:
+1:  mov     al, [rsi]
+    mov     [rdi], al
+    test    al, al
+    jz      2f
+    inc     rsi
+    inc     rdi
+    jmp     1b
+2:  ret
+
+# hexval(eax=character) -> eax = 0..15 or -1
+hexval:
+    cmp     eax, '0'
+    jb      8f
+    cmp     eax, '9'
+    jbe     1f
+    or      eax, 0x20
+    cmp     eax, 'a'
+    jb      8f
+    cmp     eax, 'f'
+    ja      8f
+    sub     eax, 'a'-10
+    ret
+1:  sub     eax, '0'
+    ret
+8:  mov     eax, -1
+    ret
+
+# bufview(ecx=index) -> rax = its bytes, rdx = how many (rax 0: none)
+bufview:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, ecx
+    lea     rdi, [rip+k_bufferViews]
+    call    top
+    test    rax, rax
+    jz      8f
+    mov     rsi, rax
+    mov     ecx, r12d
+    call    jidx
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    lea     rdi, [rip+k_buffer]
+    mov     rsi, rbx
+    call    j_find
+    mov     rsi, rax
+    call    jint
+    test    eax, eax
+    js      8f
+    cmp     eax, [rip+gi_nbuf]
+    jae     8f
+    mov     r12d, eax
+    xor     r13d, r13d
+    lea     rdi, [rip+k_byteOffset]
+    mov     rsi, rbx
+    call    j_find
+    test    rax, rax
+    jz      1f
+    mov     rsi, rax
+    call    jint
+    test    eax, eax
+    js      8f
+    mov     r13d, eax
+1:  lea     rdi, [rip+k_byteLength]
+    mov     rsi, rbx
+    call    j_find
+    mov     rsi, rax
+    call    jint
+    test    eax, eax
+    jle     8f
+    mov     edx, eax
+    lea     rax, [rdx+r13]              # in the buffer?
+    lea     rcx, [rip+gi_bufsz]
+    cmp     rax, [rcx+r12*8]
+    ja      8f
+    lea     rcx, [rip+gi_bufs]
+    mov     rax, [rcx+r12*8]
+    add     rax, r13
+    jmp     9f
+8:  xor     eax, eax
+    xor     edx, edx
+9:  pop     r13
+    pop     r12
     pop     rbx
     ret
 
@@ -2632,6 +4080,9 @@ materials:
     xor     eax, eax
     mov     ecx, MAX_MATS
     rep     stosd
+    lea     rdi, [rip+gi_imgs]
+    mov     ecx, MAX_GIMG
+    rep     stosd
     lea     rdi, [rip+k_materials]
     call    top
     test    rax, rax
@@ -2807,7 +4258,8 @@ materials:
     lea     rsi, [rip+k_coatrf]
     mov     edx, 9
     call    ext_factor
-8:  mov     rsi, r12
+8:  call    gmat_tex                    # its texture maps
+    mov     rsi, r12
     call    j_next
     inc     ebx
     jmp     1b

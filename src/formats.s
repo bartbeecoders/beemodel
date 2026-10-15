@@ -101,6 +101,7 @@ mods_size:      .skip 4
 mats_chunk:     .skip 8
 mtl_base:       .skip 8
 mtl_buf:        .skip 512
+mtl_png_path:   .skip 640
 omat_chunk:     .skip 8
 oi_mtllib:      .skip 256
 oi_usemtl:      .skip 256
@@ -183,6 +184,12 @@ s_pc:           .asciz "Pc "
 s_pcr:          .asciz "Pcr "
 s_tf:           .asciz "Tf "
 s_illum:        .asciz "illum 2\n"
+s_mapkd:        .asciz "map_Kd "
+s_mappr:        .asciz "map_Pr -imfchan g "
+s_mappm:        .asciz "map_Pm -imfchan b "
+s_norm:         .asciz "norm "
+s_mapke:        .asciz "map_Ke "
+s_dotpng:       .asciz ".png"
 .align 4
 mt_one:         .float 1.0
 s_v:            .asciz "v "
@@ -1918,11 +1925,15 @@ mtl_path:
     jmp     5b
 9:  ret
 
-# mtl_write - every material as OBJ's MTL (with the PBR extension)
+# mtl_write - every material as OBJ's MTL (with the PBR extension); their
+#   maps (gltf.s gx_tex_plan: images used directly, else baked) as map_Kd,
+#   map_Pr / map_Pm (the G and B of an ORM image), norm and map_Ke: the
+#   image's file, or a PNG written beside the MTL
 mtl_write:
     push    rbx
     push    r12
     sub     rsp, 8
+    call    gx_tex_plan
     call    wb_reset
     lea     rsi, [rip+s_mtl_head]
     call    wb_str
@@ -1971,6 +1982,8 @@ mtl_write:
     lea     rsi, [rsp]
     call    mtl_vec
     add     rsp, 16
+    mov     edi, ebx
+    call    mtl_maps
     lea     rsi, [rip+s_illum]
     call    wb_str
     inc     ebx
@@ -1979,9 +1992,126 @@ mtl_write:
     mov     rsi, [rip+wb_ptr]
     mov     rdx, [rip+wb_len]
     call    file_write_atomic
+    call    gx_tex_free
     add     rsp, 8
     pop     r12
     pop     rbx
+    ret
+
+# mtl_maps(edi=material) - its map lines
+mtl_maps:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    cmp     edi, 256
+    jae     9f
+    imul    eax, edi, 24
+    lea     rbx, [rip+gx_ms]
+    add     rbx, rax
+    mov     edi, [rbx]
+    lea     rsi, [rip+s_mapkd]
+    call    mtl_map
+    mov     edi, [rbx+4]
+    lea     rsi, [rip+s_mappr]
+    call    mtl_map
+    mov     edi, [rbx+4]
+    lea     rsi, [rip+s_mappm]
+    call    mtl_map
+    mov     edi, [rbx+8]
+    lea     rsi, [rip+s_norm]
+    call    mtl_map
+    mov     edi, [rbx+16]
+    lea     rsi, [rip+s_mapke]
+    call    mtl_map
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# mtl_map(edi=texture image + 1 (0: none), rsi=key) - "<key><file>\n"
+mtl_map:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    test    edi, edi
+    jz      9f
+    lea     ebx, [rdi-1]
+    call    wb_str
+    lea     rax, [rip+gx_xidx]          # a scene image from a file: its path
+    mov     edi, [rax+rbx*4]
+    test    edi, edi
+    js      1f
+    call    image_rec
+    cmp     byte ptr [rax+40], 0
+    je      1f
+    lea     rsi, [rax+40]
+    call    wb_str
+    jmp     8f
+1:  call    mtl_png                     # else a PNG beside the MTL
+    mov     rsi, rax
+    call    wb_str
+8:  lea     rsi, [rip+s_nl]
+    call    wb_str
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# mtl_png(ebx=texture image) -> rax = the file's name: mtl_buf's folder +
+#   its name + .png, written
+mtl_png:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    lea     rdi, [rip+mtl_png_path]
+    lea     rsi, [rip+mtl_buf]
+    xor     ecx, ecx
+    xor     edx, edx                    # (after the last /)
+1:  mov     al, [rsi+rcx]
+    test    al, al
+    jz      2f
+    mov     [rdi+rcx], al
+    inc     ecx
+    cmp     al, '/'
+    jne     1b
+    mov     edx, ecx
+    jmp     1b
+2:  lea     r12, [rdi+rdx]
+    mov     r13, r12
+    mov     eax, ebx                    # its name (spaces as _)
+    shl     eax, 5
+    lea     rsi, [rip+gx_xname]
+    add     rsi, rax
+3:  mov     al, [rsi]
+    test    al, al
+    jz      4f
+    cmp     al, ' '
+    jne     31f
+    mov     al, '_'
+31: mov     [r12], al
+    inc     rsi
+    inc     r12
+    jmp     3b
+4:  lea     rsi, [rip+s_dotpng]
+5:  mov     al, [rsi]
+    mov     [r12], al
+    inc     rsi
+    inc     r12
+    test    al, al
+    jnz     5b
+    mov     [rsp], r13
+    lea     rax, [rip+gx_xpng]
+    mov     rsi, [rax+rbx*8]
+    test    rsi, rsi
+    jz      6f
+    lea     rax, [rip+gx_xpsz]
+    mov     rdx, [rax+rbx*8]
+    lea     rdi, [rip+mtl_png_path]
+    call    file_write_atomic
+6:  mov     rax, [rsp]
+    add     rsp, 8
+    pop     r13
+    pop     r12
     ret
 
 # mtl_vec(rdi=key with space, rsi=float[3]) / mtl_vec_k(.., xmm0 = factor)

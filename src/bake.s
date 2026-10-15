@@ -22,6 +22,8 @@
 .include "macros.inc"
 
 .globl bake
+.globl bake_material
+.globl bk_quiet
 
 .section .rodata
 s_bk_need:      .asciz "  object.bake <low> <high> <normal|ao|curvature> <image> [distance]"
@@ -50,6 +52,29 @@ OPERATOR op_object_bake, "object.bake", "Bake Maps", do_bake, doc="Bake a high m
 .equ RAY_V,     40
 .equ RAY_SZ,    64
 .equ AO_N,      48
+.equ BK_BASE,   3                       # material kinds: base colour (sRGB,
+.equ BK_ORM,    4                       #  alpha), occlusion roughness
+.equ BK_NORMAL, 5                       #  metallic, tangent-space normal,
+.equ BK_EMIT,   6                       #  emission (sRGB)
+.equ MA_BASE,   32
+.equ MA_METAL,  44
+.equ MA_ROUGH,  48
+.equ MA_EMIT,   64
+.equ MA_ESTR,   76
+.equ MA_ALPHA,  88
+.equ SC_P0O,    0                       # (graph.s's shading context)
+.equ SC_E1O,    12
+.equ SC_E2O,    24
+.equ SC_U,      36
+.equ SC_V,      40
+.equ SC_PU,     44
+.equ SC_PV,     56
+.equ SC_N,      68
+.equ SC_FLAGS,  112
+.equ SC_UVP,    120
+.equ SC_WP,     152
+.equ SC_WV,     164
+.equ SC_VC,     176
 .equ CV_N,      8
 
 .section .rodata
@@ -85,6 +110,9 @@ bk_kind:        .skip 4
 bk_dist:        .skip 4
 bk_diag:        .skip 4
 bk_count:       .skip 4
+bk_mrec:        .skip 8                 # material kinds: the material record
+bk_quiet:       .skip 4                 # 1: straight into the image (no
+                                        #  layers, no undo: export's bakes)
 
 .text
 # bake(rdi=low object, rsi=high object, edx=kind 0 normal 1 ao 2 curvature,
@@ -134,14 +162,20 @@ bake:
     ja      1f
     mulss   xmm0, [rip+bk_cage]
     movss   [rip+bk_dist], xmm0
-1:  mov     [rip+hv_only], r12          # the high mesh alone
+1:  cmp     dword ptr [rip+bk_kind], BK_BASE
+    jae     11f                         # (a material: no high mesh)
+    mov     [rip+hv_only], r12          # the high mesh alone
     call    hive_build
     mov     qword ptr [rip+hv_only], 0
     cmp     dword ptr [rip+hv_n], 0
     je      .Lbk_free
-    mov     rdi, [rip+bk_img]           # where: the image (its layer)
+11: mov     rax, [rip+bk_img]           # where: the image (its layer)
+    add     rax, IM_DATA
+    cmp     dword ptr [rip+bk_quiet], 0
+    jne     12f
+    mov     rdi, [rip+bk_img]
     call    lay_target
-    mov     [rip+bk_pix], rax
+12: mov     [rip+bk_pix], rax
     mov     rax, [rip+bk_img]
     mov     esi, [rax+IM_W]
     imul    esi, [rax+IM_H]
@@ -158,26 +192,34 @@ bake:
     imul    ecx, [rdx+IM_H]
     xor     eax, eax
     rep     stosb
+    cmp     dword ptr [rip+bk_quiet], 0
+    jne     13f
     mov     rdi, [rip+bk_img]           # (one texture paint undo step)
     call    pt_record
-    lea     rdi, [rip+bk_job]           # the low triangles, in parallel
+13: lea     rdi, [rip+bk_job]           # the low triangles, in parallel
     xor     esi, esi
     mov     edx, [r13+ME_NTRIS]
     shl     edx, 4
     mov     ecx, 4
     call    parallel_for
     call    bk_dilate
+    mov     rdi, [rip+bk_img]
+    mov     dword ptr [rdi+IM_DIRTY], 1
+    cmp     dword ptr [rip+bk_quiet], 0
+    jne     .Lbk_free
     call    pt_record_end
     mov     rdi, [rip+bk_img]           # done: composite, redraw
-    mov     dword ptr [rdi+IM_DIRTY], 1
     xor     esi, esi
     xor     edx, edx
     mov     ecx, -1
     xor     r8d, r8d
     call    lay_rect
 .Lbk_free:
+    cmp     dword ptr [rip+bk_kind], BK_BASE
+    jae     14f
     mov     dword ptr [rip+hv_ready], 0 # (the scene's BVH again next time)
     call    hv_free_all
+14:
     mov     rdi, [rsp+48]
     call    fa_release
     call    eval_flush
@@ -705,7 +747,13 @@ bk_texel:
     jb      1b
     lea     rdi, [rsp+12]
     call    bk_unit
-    lea     r14, [rsp+64]               # the ray: from P + N d, along -N
+    cmp     dword ptr [rip+bk_kind], BK_BASE
+    jb      21f
+    mov     rdi, rbx                    # a material: its graph there
+    lea     rsi, [rsp]
+    call    bk_mat
+    jmp     .Lbt_write
+21: lea     r14, [rsp+64]               # the ray: from P + N d, along -N
     xor     ecx, ecx
 3:  movss   xmm0, [rsp+12+rcx*4]
     mulss   xmm0, [rip+bk_dist]
@@ -949,6 +997,239 @@ bk_texel:
     add     rsp, 296
     pop     r14
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bk_mat(rdi=bk_job's frame, rsi=bk_texel's: P +0, N +12) -> eax = the
+#   material's texel (0xAARRGGBB) for bk_kind
+bk_mat:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 400                    # SC +0 (216), copy +224 (128), +352
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     rax, [rip+bk_mesh]          # object space: p0, e1, e2
+    mov     ecx, [rbx+200]
+    lea     ecx, [rcx+rcx*2]
+    mov     rdx, [rax+ME_TRIS]
+    lea     r13, [rdx+rcx*4]
+    mov     r8, [rax+ME_POS]
+    xor     ecx, ecx
+1:  mov     eax, [r13]
+    lea     rax, [rax+rax*2]
+    lea     rax, [r8+rax*4]
+    movss   xmm0, [rax+rcx*4]
+    movss   [rsp+SC_P0O+rcx*4], xmm0
+    mov     edx, [r13+4]
+    lea     rdx, [rdx+rdx*2]
+    lea     rdx, [r8+rdx*4]
+    movss   xmm1, [rdx+rcx*4]
+    subss   xmm1, xmm0
+    movss   [rsp+SC_E1O+rcx*4], xmm1
+    mov     edx, [r13+8]
+    lea     rdx, [rdx+rdx*2]
+    lea     rdx, [r8+rdx*4]
+    movss   xmm1, [rdx+rcx*4]
+    subss   xmm1, xmm0
+    movss   [rsp+SC_E2O+rcx*4], xmm1
+    movss   xmm0, [rbx+rcx*4]           # world edges
+    movss   xmm1, [rbx+12+rcx*4]
+    subss   xmm1, xmm0
+    movss   [rsp+SC_PU+rcx*4], xmm1
+    movss   xmm1, [rbx+24+rcx*4]
+    subss   xmm1, xmm0
+    movss   [rsp+SC_PV+rcx*4], xmm1
+    movss   xmm0, [r12+12+rcx*4]        # the normal, the point, the eye
+    movss   [rsp+SC_N+rcx*4], xmm0
+    movss   [rsp+SC_WV+rcx*4], xmm0
+    movss   xmm0, [r12+rcx*4]
+    movss   [rsp+SC_WP+rcx*4], xmm0
+    mov     dword ptr [rsp+SC_VC+rcx*4], 0x3f800000
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     eax, [rbx+156]              # barycentrics of corners 1, 2
+    mov     [rsp+SC_U], eax
+    mov     eax, [rbx+160]
+    mov     [rsp+SC_V], eax
+    lea     rax, [rbx+96]               # the triangle's UVs
+    mov     [rsp+SC_UVP], rax
+    mov     dword ptr [rsp+SC_FLAGS], 0
+    mov     rsi, [rip+bk_mrec]          # its values, the graph over them
+    lea     rdi, [rsp+224]
+    mov     ecx, 32
+    rep     movsd
+    mov     rdi, [rip+bk_mrec]
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+224]
+    xor     ecx, ecx
+    call    graph_shade
+    mov     r13d, [rsp+SC_FLAGS]
+    mov     eax, [rip+bk_kind]
+    cmp     eax, BK_ORM
+    je      .Lbm_orm
+    cmp     eax, BK_NORMAL
+    je      .Lbm_nrm
+    cmp     eax, BK_EMIT
+    je      .Lbm_emit
+    movss   xmm0, [rsp+224+MA_ALPHA]    # base: alpha (or the mask), sRGB
+    test    r13d, 1 << PIN_MASK
+    jz      2f
+    movss   xmm0, [rsp+224+MA_RT_MASK]
+2:  call    bk_byte
+    mov     [rsp+352], edx
+    lea     rax, [rsp+224+MA_BASE]
+    jmp     .Lbm_srgb
+.Lbm_emit:
+    xor     ecx, ecx                    # emission x strength
+3:  movss   xmm0, [rsp+224+MA_EMIT+rcx*4]
+    mulss   xmm0, [rsp+224+MA_ESTR]
+    movss   [rsp+360+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    mov     dword ptr [rsp+352], 255
+    lea     rax, [rsp+360]
+.Lbm_srgb:
+    mov     [rsp+376], rax
+    xor     ecx, ecx
+4:  mov     [rsp+384], ecx
+    mov     rax, [rsp+376]
+    movss   xmm0, [rax+rcx*4]
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    minss   xmm0, [rip+bk_one]
+    call    lin_to_srgb
+    call    bk_byte
+    mov     eax, [rsp+352]
+    shl     eax, 8
+    or      eax, edx
+    mov     [rsp+352], eax
+    mov     ecx, [rsp+384]
+    inc     ecx
+    cmp     ecx, 3
+    jb      4b
+    mov     eax, [rsp+352]
+    jmp     9f
+.Lbm_orm:
+    movss   xmm0, [rip+bk_one]          # occlusion, roughness, metallic
+    test    r13d, 1 << PIN_AO
+    jz      5f
+    movss   xmm0, [rsp+224+MA_RT_AO]
+5:  call    bk_byte
+    mov     eax, 0xff
+    shl     eax, 8
+    or      eax, edx
+    movss   xmm0, [rsp+224+MA_ROUGH]
+    call    bk_byte
+    shl     eax, 8
+    or      eax, edx
+    movss   xmm0, [rsp+224+MA_METAL]
+    call    bk_byte
+    shl     eax, 8
+    or      eax, edx
+    jmp     9f
+.Lbm_nrm:
+    mov     eax, 0xff8080ff             # (no normal of its own: flat)
+    test    r13d, 1 << PIN_NORMAL
+    jz      9f
+    lea     rdi, [rsp+SC_N]
+    call    bk_unit
+    lea     rdi, [rbx+72]               # T, B orthonormal to N: +352, +364
+    lea     rsi, [rsp+352]
+    lea     rdx, [r12+12]
+    call    bk_orth
+    lea     rdi, [rbx+84]
+    lea     rsi, [rsp+364]
+    lea     rdx, [r12+12]
+    call    bk_orth
+    xor     ecx, ecx                    # (n.T, n.B, n.N) -> 0.5 + c / 2
+    mov     eax, 0xff
+6:  lea     rdx, [rsp+352]
+    cmp     ecx, 1
+    jne     61f
+    lea     rdx, [rsp+364]
+61: cmp     ecx, 2
+    jne     62f
+    lea     rdx, [r12+12]
+62: movss   xmm0, [rsp+SC_N]
+    mulss   xmm0, [rdx]
+    movss   xmm1, [rsp+SC_N+4]
+    mulss   xmm1, [rdx+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+SC_N+8]
+    mulss   xmm1, [rdx+8]
+    addss   xmm0, xmm1
+    mulss   xmm0, [rip+bk_half]
+    addss   xmm0, [rip+bk_half]
+    call    bk_byte
+    shl     eax, 8
+    or      eax, edx
+    inc     ecx
+    cmp     ecx, 3
+    jb      6b
+9:  add     rsp, 400
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bk_orth(rdi=vector, rsi=out, rdx=unit n) - the vector made orthogonal to
+#   n, unit (keeps rcx)
+bk_orth:
+    movss   xmm0, [rdi]                 # v . n
+    mulss   xmm0, [rdx]
+    movss   xmm1, [rdi+4]
+    mulss   xmm1, [rdx+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rdi+8]
+    mulss   xmm1, [rdx+8]
+    addss   xmm0, xmm1
+    xor     eax, eax
+1:  movss   xmm1, [rdx+rax*4]
+    mulss   xmm1, xmm0
+    movss   xmm2, [rdi+rax*4]
+    subss   xmm2, xmm1
+    movss   [rsi+rax*4], xmm2
+    inc     eax
+    cmp     eax, 3
+    jb      1b
+    mov     rdi, rsi
+    jmp     bk_unit
+
+# bake_material(rdi=object, esi=kind 0 base 1 orm 2 normal 3 emissive,
+#   rdx=image) -> eax = texels baked (-1: no UVs, no material, not 8-bit)
+bake_material:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13, rdx
+    call    mat_of
+    test    eax, eax
+    js      8f
+    mov     edi, eax
+    push    rax
+    push    rax
+    call    mat_sync_check              # (an instance: up to date)
+    pop     rdi
+    pop     rax
+    call    mat_get
+    test    rax, rax
+    jz      8f
+    mov     [rip+bk_mrec], rax
+    mov     rdi, rbx
+    mov     rsi, rbx
+    lea     edx, [r12+BK_BASE]
+    mov     rcx, r13
+    xorps   xmm0, xmm0
+    call    bake
+    jmp     9f
+8:  mov     eax, -1
+9:  pop     r13
     pop     r12
     pop     rbx
     ret

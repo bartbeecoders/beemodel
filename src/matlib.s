@@ -23,6 +23,10 @@
 
 .globl op_mat_import_tex
 .globl op_mat_preset
+.globl op_mat_bake
+.globl ml_bake_kinds
+.globl ml_gltf
+.globl ml_set_build
 .globl preset_names
 .globl preset_labels
 .globl npresets
@@ -46,6 +50,9 @@
 .equ K_ALPHA,   8
 .equ K_ORM,     9
 .equ NKINDS,    10
+.equ IM_W,      0
+.equ IM_H,      4
+.equ IM_FMT,    8
 
 .section .bss
 .align 8
@@ -59,6 +66,7 @@ ml_dx:          .skip 4                 # the normal map is DirectX
 ml_lower:       .skip 128
 ml_mat:         .skip 4
 ml_nmaps:       .skip 4
+ml_noao:        .skip 4                 # ORM: no occlusion from it
 
 .section .rodata
 s_ml_need:      .asciz "  material.import_textures <one image of the set> [name]"
@@ -142,8 +150,20 @@ n_emit:         .asciz "emission"
 n_alpha:        .asciz "opacity"
 n_orm:          .asciz "orm"
 s_comma:        .asciz ", "
+s_mb_need:      .asciz "  material.bake <object> [size] [apply]"
+s_mb_fail:      .asciz "  material.bake: the object needs a material and UVs: "
+s_mb_done:      .asciz "  baked: "
+s_apply:        .asciz "apply"
+.align 8
+ml_bake_kinds:  .quad bs_base, bs_orm, bs_normal, bs_emit
+ml_bake_kk:     .long K_BASE, K_ORM, K_NORMAL, K_EMIT
+bs_base:        .asciz "_base"
+bs_orm:         .asciz "_orm"
+bs_normal:      .asciz "_normal"
+bs_emit:        .asciz "_emissive"
 
 OPERATOR op_mat_import_tex, "material.import_textures", "Import Texture Set...", do_import_tex, flags=OPF_AI_SAFE|OPF_UNDO, doc="A PBR material from a texture set: pick any one of its images (base colour, normal, roughness, metallic, AO, height, emission, opacity, ORM are found by name): material.import_textures <image> [name]", form=form_itex
+OPERATOR op_mat_bake, "material.bake", "Bake Material", do_mat_bake, flags=OPF_AI_SAFE|OPF_UNDO, doc="Bake an object's material (its node graph) through its UVs into images <material>_base, _orm (occlusion, roughness, metallic), _normal and _emissive; apply: the material then samples them: material.bake <object> [size] [apply]"
 OPERATOR op_mat_preset, "material.preset", "Material Preset", do_preset, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give a material a preset look (none named: a new one for the active mesh): material.preset <gold|silver|copper|chrome|aluminium|plastic|rubber|glass|frosted_glass|water|ceramic|car_paint|wood|marble|concrete|fabric|leather|skin|clay|emissive> [material]"
 
 .text
@@ -454,6 +474,459 @@ do_import_tex:
 .Lit_out:
     add     rsp, 24
     pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ml_set_build(edi=material, rsi=u32[10] image + 1 per map kind, as
+#   import_textures finds them, edx=1: the packed map's red is not
+#   occlusion) - its graph: those maps (MTL import)
+ml_set_build:
+    push    rbx
+    mov     [rip+ml_noao], edx
+    mov     [rip+ml_mat], edi
+    lea     rdi, [rip+ml_found]
+    mov     ecx, NKINDS
+    rep     movsd
+    mov     dword ptr [rip+ml_dx], 0
+    mov     edi, [rip+ml_mat]
+    call    graph_clear
+    call    ml_build
+    mov     dword ptr [rip+ml_noao], 0
+    pop     rbx
+    ret
+
+# ---- glTF's texture slots ------------------------------------------------------
+# ml_gltf(edi=material, rsi=GT) - its graph from glTF's maps (image + 1, 0:
+#   none): base colour (x its factor; alpha to the mask or opacity),
+#   metallic-roughness (B, G; x their factors), occlusion (R; the same
+#   sample when it is the same image), normal (a Normal Map node, its
+#   scale), emission (x its factor), all through one Texture Coordinate
+#   node carrying KHR_texture_transform's scale and offset
+.equ GT_BASE,   0
+.equ GT_MR,     4
+.equ GT_NRM,    8
+.equ GT_OCC,    12
+.equ GT_EMI,    16
+.equ GT_NSCALE, 20
+.equ GT_TILE,   24                      # u, v
+.equ GT_OFF,    32                      # u, v
+.equ GT_BASEF,  40                      # r g b a
+.equ GT_METALF, 56
+.equ GT_ROUGHF, 60
+.equ GT_EMIF,   64                      # r g b
+.equ GT_ALPHA,  76                      # 0 opaque, 1 mask, 2 blend
+ml_gltf:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 24
+    mov     [rip+ml_mat], edi
+    mov     r12, rsi
+    mov     edi, 10                     # the texture coordinate
+    mov     esi, 20
+    mov     edx, 40
+    call    ml_node
+    mov     ebx, eax
+    test    eax, eax
+    jle     .Lmg_out
+    xor     ecx, ecx
+1:  mov     [rsp], ecx
+    movss   xmm0, [r12+GT_TILE+rcx*4]
+    mov     edi, ebx
+    lea     esi, [rcx+4]
+    call    ml_val
+    mov     ecx, [rsp]
+    inc     ecx
+    cmp     ecx, 4
+    jb      1b
+    xor     r15d, r15d                  # the metallic-roughness sample
+    mov     ebp, 20                     # y
+    mov     eax, [r12+GT_BASE]          # base colour
+    test    eax, eax
+    jz      2f
+    mov     edi, eax
+    xor     esi, esi
+    call    mg_sample
+    mov     r13d, eax
+    lea     rsi, [r12+GT_BASEF]
+    mov     edi, r13d
+    xor     edx, edx
+    call    mg_tint
+    mov     edi, eax
+    xor     esi, esi
+    mov     edx, PIN_BASE
+    call    ml_pin
+    mov     edx, PIN_MASK               # its alpha: the mask or opacity
+    cmp     dword ptr [r12+GT_ALPHA], 1
+    je      11f
+    mov     edx, PIN_ALPHA
+    cmp     dword ptr [r12+GT_ALPHA], 2
+    jne     2f
+11: mov     edi, r13d
+    mov     esi, 4
+    call    ml_pin
+2:  mov     eax, [r12+GT_MR]            # metallic (B), roughness (G)
+    test    eax, eax
+    jz      3f
+    mov     edi, eax
+    mov     esi, 1
+    call    mg_sample
+    mov     r15d, eax
+    mov     edi, r15d
+    mov     esi, 3
+    movss   xmm0, [r12+GT_METALF]
+    call    mg_scale
+    mov     edx, PIN_METAL
+    mov     edi, eax
+    mov     esi, ecx
+    call    ml_pin
+    mov     edi, r15d
+    mov     esi, 2
+    movss   xmm0, [r12+GT_ROUGHF]
+    call    mg_scale
+    mov     edx, PIN_ROUGH
+    mov     edi, eax
+    mov     esi, ecx
+    call    ml_pin
+3:  mov     eax, [r12+GT_OCC]           # occlusion (R)
+    test    eax, eax
+    jz      4f
+    mov     r13d, r15d
+    cmp     eax, [r12+GT_MR]
+    je      31f
+    mov     edi, eax
+    mov     esi, 1
+    call    mg_sample
+    mov     r13d, eax
+31: mov     edi, r13d
+    mov     esi, 1
+    mov     edx, PIN_AO
+    call    ml_pin
+4:  mov     eax, [r12+GT_NRM]           # normal
+    test    eax, eax
+    jz      5f
+    mov     edi, eax
+    mov     esi, 2
+    call    mg_sample
+    mov     r13d, eax
+    mov     edi, 9
+    mov     esi, 430
+    mov     edx, ebp
+    sub     edx, 150
+    call    ml_node
+    mov     r14d, eax
+    movss   xmm0, [r12+GT_NSCALE]
+    mov     edi, r14d
+    mov     esi, 4
+    call    ml_val
+    mov     edi, r13d
+    xor     esi, esi
+    mov     edx, r14d
+    mov     ecx, 1
+    call    ml_link
+    mov     edi, r14d
+    xor     esi, esi
+    mov     edx, PIN_NORMAL
+    call    ml_pin
+5:  mov     eax, [r12+GT_EMI]           # emission
+    test    eax, eax
+    jz      .Lmg_out
+    mov     edi, eax
+    xor     esi, esi
+    call    mg_sample
+    lea     rsi, [r12+GT_EMIF]
+    mov     edi, eax
+    mov     edx, 1
+    call    mg_tint
+    mov     edi, eax
+    xor     esi, esi
+    mov     edx, PIN_EMIT
+    call    ml_pin
+    mov     edi, [rip+ml_mat]           # (a strength: 1 unless it has one)
+    call    mat_get
+    xorps   xmm0, xmm0
+    comiss  xmm0, [rax+76]
+    jb      .Lmg_out
+    mov     edi, [rip+ml_mat]
+    mov     esi, 7
+    xor     edx, edx
+    movss   xmm0, [rip+ml_one]
+    call    mat_set
+.Lmg_out:
+    mov     edi, [rip+ml_mat]           # the output at the right
+    xor     esi, esi
+    mov     edx, 820
+    mov     ecx, 40
+    call    graph_place
+    add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# mg_sample(edi=image + 1, esi=sampler; ebx = the texture coordinate, ebp =
+#   y, moved on) -> eax = a Texture Sample node
+mg_sample:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     edi, 1
+    mov     esi, 240
+    mov     edx, ebp
+    add     ebp, 150
+    call    ml_node
+    mov     [rsp], eax
+    cvtsi2ss xmm0, r12d
+    mov     edi, eax
+    mov     esi, 4
+    call    ml_val
+    cvtsi2ss xmm0, r13d
+    mov     edi, [rsp]
+    mov     esi, 6
+    call    ml_val
+    mov     edi, ebx
+    xor     esi, esi
+    mov     edx, [rsp]
+    mov     ecx, 1
+    call    ml_link
+    mov     eax, [rsp]
+    add     rsp, 8
+    pop     r13
+    pop     r12
+    ret
+
+# mg_tint(edi=node, rsi=factor rgb, edx=1: emission (any factor but 1 1 1:
+#   multiplied)) -> eax = the node giving the colour (a Mix, multiply, when
+#   the factor is not white)
+mg_tint:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12, rsi
+    movss   xmm0, [rip+ml_one]
+    xor     ecx, ecx
+1:  ucomiss xmm0, [r12+rcx*4]
+    jne     2f
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     eax, ebx
+    jmp     9f
+2:  mov     edi, 5                      # a Mix: multiply, factor 1
+    mov     esi, 430
+    mov     edx, ebp
+    sub     edx, 150
+    call    ml_node
+    mov     r13d, eax
+    mov     edi, r13d
+    mov     esi, 4
+    movss   xmm0, [rip+ml_two]
+    call    ml_val
+    mov     edi, r13d
+    mov     esi, 1
+    movss   xmm0, [rip+ml_one]
+    call    ml_val
+    mov     edi, [rip+ml_mat]           # colour 2: the factor
+    mov     esi, r13d
+    mov     edx, 3
+    mov     rcx, r12
+    mov     r8d, 3
+    call    graph_set
+    mov     edi, ebx
+    xor     esi, esi
+    mov     edx, r13d
+    mov     ecx, 2
+    call    ml_link
+    mov     eax, r13d
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# mg_scale(edi=node, esi=its output, xmm0=factor) -> eax = node, ecx = its
+#   output: the same, or a Math multiply when the factor is not 1
+mg_scale:
+    ucomiss xmm0, [rip+ml_one]
+    jne     1f
+    mov     eax, edi
+    mov     ecx, esi
+    ret
+1:  push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    movss   [rsp], xmm0
+    mov     ebx, edi
+    mov     r12d, esi
+    mov     edi, 7
+    mov     esi, 430
+    mov     edx, ebp
+    sub     edx, 150
+    add     edx, r12d
+    call    ml_node
+    mov     r13d, eax
+    mov     edi, r13d                   # multiply (op 2), B: the factor
+    mov     esi, 4
+    movss   xmm0, [rip+ml_two]
+    call    ml_val
+    mov     edi, r13d
+    mov     esi, 2
+    movss   xmm0, [rsp]
+    call    ml_val
+    mov     edi, ebx
+    mov     esi, r12d
+    mov     edx, r13d
+    mov     ecx, 1
+    call    ml_link
+    mov     eax, r13d
+    xor     ecx, ecx
+    add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ---- bake --------------------------------------------------------------------
+# material.bake <object> [size] [apply]
+do_mat_bake:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      .Lmb_need
+    lea     rdi, [rip+ml_name]          # the object
+    call    ml_word
+    mov     [rsp], rsi
+    cmp     byte ptr [rip+ml_name], 0
+    je      .Lmb_need
+    lea     rdi, [rip+ml_name]
+    call    obj_find
+    test    eax, eax
+    jz      .Lmb_fail
+    mov     edi, eax
+    call    obj_get
+    mov     rbx, rax
+    mov     r13d, 1024                  # [size] [apply]
+    mov     dword ptr [rsp+8], 0
+1:  lea     rdi, [rip+ml_lower]
+    mov     rsi, [rsp]
+    call    ml_word
+    mov     [rsp], rsi
+    cmp     byte ptr [rip+ml_lower], 0
+    je      2f
+    lea     rdi, [rip+ml_lower]
+    lea     rsi, [rip+s_apply]
+    call    str_eq
+    test    eax, eax
+    jz      11f
+    mov     dword ptr [rsp+8], 1
+    jmp     1b
+11: lea     rdi, [rip+ml_lower]
+    call    im_int
+    lea     ecx, [rax-1]
+    cmp     ecx, 8192
+    jae     1b
+    mov     r13d, eax
+    jmp     1b
+2:  mov     rdi, rbx
+    call    mat_of
+    test    eax, eax
+    js      .Lmb_fail
+    mov     [rip+ml_mat], eax
+    lea     rdi, [rip+ml_found]
+    xor     eax, eax
+    mov     ecx, NKINDS
+    rep     stosd
+    xor     r12d, r12d                  # each map: <material>_<kind>
+3:  cmp     r12d, 4
+    jae     6f
+    mov     edi, [rip+ml_mat]
+    call    mat_get
+    lea     rdi, [rip+ml_path]
+    mov     rsi, rax
+    call    ml_cpy
+    lea     rax, [rip+ml_bake_kinds]
+    mov     rsi, [rax+r12*8]
+    call    ml_cpy
+    lea     rdi, [rip+ml_path]          # (one of that name and size: again)
+    call    image_find
+    test    eax, eax
+    js      4f
+    mov     r14d, eax
+    mov     edi, eax
+    call    image_ptr
+    test    rax, rax
+    jz      4f
+    cmp     [rax+IM_W], r13d
+    jne     4f
+    cmp     [rax+IM_H], r13d
+    jne     4f
+    cmp     dword ptr [rax+IM_FMT], 0
+    je      5f
+4:  lea     rdi, [rip+ml_path]
+    mov     esi, r13d
+    mov     edx, r13d
+    mov     ecx, 0xff808080
+    call    image_new
+    test    eax, eax
+    js      .Lmb_fail
+    mov     r14d, eax
+5:  mov     edi, r14d
+    call    image_ptr
+    mov     rdx, rax
+    mov     rdi, rbx
+    mov     esi, r12d
+    call    bake_material
+    test    eax, eax
+    js      .Lmb_fail
+    lea     rax, [rip+ml_bake_kk]
+    mov     ecx, [rax+r12*4]
+    lea     eax, [r14+1]
+    lea     rdx, [rip+ml_found]
+    mov     [rdx+rcx*4], eax
+    inc     r12d
+    jmp     3b
+6:  cmp     dword ptr [rsp+8], 0        # apply: the material samples them
+    je      7f
+    mov     dword ptr [rip+ml_dx], 0
+    mov     edi, [rip+ml_mat]
+    call    graph_clear
+    call    ml_build
+7:  mov     dword ptr [rip+dirty], 1
+    mov     edi, [rip+ml_mat]
+    call    mat_get
+    lea     rdi, [rip+s_mb_done]
+    mov     rsi, rax
+    call    log_pair
+    jmp     9f
+.Lmb_need:
+    lea     rdi, [rip+s_mb_need]
+    call    log_line
+    jmp     .Lmb_drop
+.Lmb_fail:
+    lea     rdi, [rip+s_mb_fail]
+    lea     rsi, [rip+ml_name]
+    call    log_pair
+.Lmb_drop:
+    call    undo_drop_last
+9:  add     rsp, 16
     pop     r15
     pop     r14
     pop     r13
@@ -878,6 +1351,8 @@ ml_build:
     lea     rax, [rip+ml_found]         # occlusion, roughness, metallic: R G B
     cmp     dword ptr [rax+K_AO*4], 0   #  (unless there are maps of their own)
     jne     161f
+    cmp     dword ptr [rip+ml_noao], 0
+    jne     161f
     mov     edi, r13d
     mov     esi, 1
     mov     edx, PIN_AO
@@ -1042,6 +1517,7 @@ p_clay:         .asciz "clay"
 p_emissive:     .asciz "emissive"
 .align 4
 ml_one:         .float 1.0
+ml_two:         .float 2.0
 ml_omin:        .float 18.0
 ml_bumpd:       .float 0.02
 # the procedural presets' numbers
