@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.10.0/beemodel-0.10.0-linux-x86_64.bin
-chmod +x beemodel-0.10.0-linux-x86_64.bin && ./beemodel-0.10.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.12.0/beemodel-0.12.0-linux-x86_64.bin
+chmod +x beemodel-0.12.0-linux-x86_64.bin && ./beemodel-0.12.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -30,13 +30,16 @@ chmod +x beemodel-0.10.0-linux-x86_64.bin && ./beemodel-0.10.0-linux-x86_64.bin
 | Area | Details |
 |------|---------|
 | Title bar | Client-side decoration: logo, title, minimize / maximize-restore / close. Drag to move; double-click to maximize. Edges resize floating windows. |
-| Menu bar | File, Edit, View, Create, Mesh, AI, Help dropdowns. Hover switches between open menus, check marks show toggles, shortcuts are listed, Esc closes. |
-| Panes | Tools (left), Outliner + Properties (right), Console (bottom). Drag the splitters to resize; View menu shows/hides each pane. |
-| Canvas | Software 3D viewport (solid shading or wireframe): perspective orbit camera, ground grid, XYZ axes, orientation gizmo. LMB orbit, MMB or Shift+LMB pan, wheel zoom, F reset, G grid. |
-| Status bar | Last command, framebuffer size, window size. |
+| Menu bar | File, Edit, View, Select, Add, Object, Mesh, Render, AI, Help, with submenus, then the workspace tabs (Modeling, Sculpt, CAD, Shading, Animation, World, your own). F10 / Alt+letter open them from the keyboard. |
+| Areas | Any area can be any editor: 3D Viewport, Tools, Outliner, Properties, Console, Timeline, Dope Sheet, Graph, Node, UV, Render, Asset Browser, AI Activity, Versions, Preferences, Help. Split, join (drag a corner), swap (drag a header), maximize. |
+| 3D Viewport | Software renderer with a header (mode, select mode, shading, grid, snap), a navigation gizmo, quick actions in an empty scene, right-click menus, a Z pie. |
+| Properties | Object, Modifiers, Material, Physics, CAD, Scene, Render, Viewport, Animation and Rig tabs: every feature as fields, buttons and pickers. |
+| Status bar | What the mouse and keys do now; scene size, AI permission, render progress, peers; toasts for messages. |
 
-Keys: Q/W/E/R tools, T tools pane, N outliner pane, G grid, F reset camera,
-F1 list all shortcuts, Ctrl+L clear console, Esc close menu, Ctrl+Q quit.
+Every command is in a menu, a panel or a dialog with a form; tooltips say what
+anything does and why it is greyed. Keys: F3 search every command, F1 every
+shortcut, F6 next area, Tab through a panel's or dialog's fields, Ctrl+Z / Ctrl+Shift+Z.
+The full tour: [docs/UI.md](docs/UI.md).
 Shortcuts follow your keyboard layout (Ctrl+Z is the key labelled Z on AZERTY too).
 
 The window is divided into **areas** like Blender's. Drag the splitters

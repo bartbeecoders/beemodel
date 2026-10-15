@@ -592,6 +592,8 @@ def main():
     workspaces_ui()
     help_ui()
     a11y_ui()
+    walkthrough_ui()
+    ui_bench()
     transforms()
     undo_redo()
     files()
@@ -6398,6 +6400,131 @@ def a11y_ui():
         f.click(click_w['x'] + 10, click_w['y'] + 11); f.pump(0.3)
     after = near(f.image(), 0xe06c75), near(f.image(), 0xe69f00)
     check(after[1] > before[1] + 20 and after[0] < before[0], f'colour-blind-safe axes: X turns orange (red, orange pixels {before} -> {after})')
+    f.proc.kill()
+
+
+def walkthrough_ui():
+    """UI plan U27: a console-free walkthrough - model, a CAD feature, a
+    material, a render, save and reopen - with only clicks and keys on
+    widgets found through ui_tree (scripts only check the results)."""
+    print('  -- console-free walkthrough --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        w = wait_widget(f, m, name, sub)
+        if w:
+            f.click(w['x'] + min(w['w'] // 2, 40), w['y'] + w['h'] // 2); f.pump(0.2)
+        return w is not None
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
+    bee = os.path.join(f.home, 'BeeModel')
+    # model: Add > Cylinder, moved by typing into the Properties
+    menu_pick(f, m, 'Add', 'Cylinder')
+    check(q('print(count(), active())') == '4 Cylinder', f'Add > Cylinder ({q("print(count(), active())")})')
+    props_tab(m, f, 'object')
+    type_into('object.location', '4', 0)
+    check(q('print(round(get("Cylinder", "x")))') == '4', 'typing X = 4 in the Properties moves it')
+    # a CAD feature: a sketch, a rectangle from the tool shelf, Pad
+    menu_pick(f, m, 'Add', 'Sketch...')
+    f.key(28); f.pump(0.3)                                     # OK (the XY plane)
+    check(q('print(active())') == 'Sketch', 'Add > Sketch, OK: sketch mode')
+    rect = [w for w in ui_tree(m) if w['name'] == 'tools.row' and w.get('label') == 'Rectangle']
+    check(bool(rect), 'sketch mode puts the sketch tools on the shelf')
+    if rect:
+        f.click(rect[0]['x'] + 30, rect[0]['y'] + rect[0]['h'] // 2); f.pump(0.2)
+    f.click(*project((-5, 0.5, 0))); f.pump(0.1)
+    f.click(*project((-3, 2.5, 0))); f.pump(0.2)
+    f.key(1); f.pump(0.1)
+    ent = q('print(skinfo("Sketch", "entities"))')
+    check(ent == '4', f'two clicks draw a rectangle ({ent} lines)')
+    pts = [float(v) for v in q('s = "Sketch"\nfor i in 0..skinfo(s, "points") {\n print(sx(s, i), sy(s, i))\n}').split()]
+    xs, ys = pts[0::2] or [0], pts[1::2] or [0]
+    area = (max(xs) - min(xs)) * (max(ys) - min(ys))
+    f.key(1); f.key(1); f.pump(0.2)
+    menu_pick(f, m, 'Object', 'Part Feature', 'Pad...')
+    check('form.pad.distance' in names(), 'Object > Part Feature > Pad asks for the distance')
+    type_into('form.pad.distance', '1')
+    f.key(28); f.pump(0.5)
+    vol = float(q('print(volume("Body"))') or 0)
+    check(q('print(features())') == '1' and area > 1 and abs(vol - area) < 1e-3, f'OK pads the sketch 1 m into a part (volume {vol:.2f}, rectangle {area:.2f})')
+    # a material: a new one, red through the colour picker's hex code
+    props_tab(m, f, 'material')
+    click('material.new')
+    click('material.base')
+    type_into('color.hex', '#ff0000')
+    f.key(1); f.pump(0.2)
+    red = q('print(round(matget("Material", "base", 0) * 100), round(matget("Material", "base", 1) * 100))')
+    check(red == '100 0', f'Material > New, the base colour from the picker ({red})')
+    # a render: small, from the Render tab, saved through the file browser
+    props_tab(m, f, 'render')
+    type_into('render.width', '160')
+    type_into('render.height', '90')
+    type_into('render.samples', '4')
+    click('render.start')
+    f.pump(3.0)
+    click('render.save')
+    check('files.name' in names(), 'Save Render asks where (the file browser)')
+    type_into('files.name', 'walk')
+    click('files.ok')
+    from PIL import Image
+    png = os.path.join(bee, 'walk.png')
+    ok = os.path.exists(png) and Image.open(png).size == (160, 90)
+    check(ok, f'the render is saved as ~/BeeModel/walk.png, 160 x 90')
+    # save, a new scene, reopen
+    f.move(600, 300)
+    f.mods(4); f.key(31); f.mods(0); f.pump(0.3)              # Ctrl+S: no file yet, the browser
+    type_into('files.name', 'walk')
+    click('files.ok')
+    check(os.path.exists(os.path.join(bee, 'walk.bee')), 'Ctrl+S saves ~/BeeModel/walk.bee')
+    f.mods(4); f.key(49); f.mods(0); f.pump(0.3)              # Ctrl+N
+    if 'dialog.dont_save' in names():
+        click('dialog.dont_save')
+    check(q('print(exists("Cylinder"))') == '0', 'Ctrl+N: a new scene')
+    t = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == 'File'][0]
+    f.click(t['x'] + 10, t['y'] + 10); f.pump(0.2)
+    w = [w for w in ui_tree(m) if w.get('label') == 'Open Recent'][0]
+    f.move(w['x'] + 40, w['y'] + 12); f.pump(0.2)
+    rec = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['level'] == 1 and w['label'] == 'walk.bee']
+    if rec:
+        f.click(rec[0]['x'] + 40, rec[0]['y'] + rec[0]['h'] // 2); f.pump(0.5)
+    back = q('print(exists("Cylinder"), round(get("Cylinder", "x")), features(), round(matget("Material", "base", 0) * 100))')
+    check(back == '1 4 1 100', f'File > Open Recent brings it all back: the cylinder, the part, the material ({back})')
+    f.shot('walkthrough.png')
+    f.proc.kill()
+
+
+UI_FRAME_BUDGET_MS = 16                 # (a 60 Hz frame; ~3 ms here)
+
+
+def ui_bench():
+    """UI plan U27: frame times while the busiest panels are on screen and
+    the pointer moves over them (each move redraws the window)."""
+    print('  -- UI frame times --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    res = {}
+    for tab in ('object', 'modifiers', 'material', 'render'):
+        props_tab(m, f, tab)
+        n0 = int(q('print(frames())'))
+        for i in range(40):                                    # over the Properties and the outliner
+            f.move(1060 + (i * 37) % 200, 100 + (i * 53) % 600); f.pump(0.03)
+        n = int(q('print(frames())')) - n0
+        ft = sorted(float(x) for x in q(f'for k in 1..{min(n, 200)} {{\n print(frametime(k))\n}}').split()) if n > 1 else [0.0]
+        res[tab] = (n, ft[len(ft) // 2], ft[-1])
+    for tab, (n, med, worst) in res.items():
+        print(f'    {tab:10s} {n:3d} frames, median {med:.1f} ms, worst {worst:.1f} ms')
+    meds = [r[1] for r in res.values()]
+    check(all(r[0] >= 10 for r in res.values()), f'moving the pointer redraws ({[r[0] for r in res.values()]} frames)')
+    check(max(meds) < UI_FRAME_BUDGET_MS, f'UI frames: median under {UI_FRAME_BUDGET_MS} ms on every tab ({", ".join(f"{x:.1f}" for x in meds)})')
     f.proc.kill()
 
 
