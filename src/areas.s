@@ -11,6 +11,7 @@
 .include "icons.inc"
 .equ PTAB_W, 32                          # the Properties tab strip
 .equ PTAB_N, 8
+.equ OUTL_MAXROWS, 256
 .include "macros.inc"
 
 # exports
@@ -28,6 +29,7 @@
 .globl active_area
 .globl vp_area
 .globl cam_ptr
+.globl outl_rename
 .globl hit_area
 .globl drag_node
 .globl ed_x
@@ -548,10 +550,10 @@ area_hit:
     xor     edx, edx
     mov     ecx, ROW_H
     div     ecx
-    add     eax, [rip+outl_scroll]
-    cmp     eax, [rip+obj_count]
+    cmp     eax, [rip+outl_rows]
     jae     .Lah_pane2
-    mov     edx, eax
+    lea     rcx, [rip+outl_map]
+    mov     edx, [rcx+rax*4]
     mov     eax, HIT_OUTLINER
     jmp     .Lah_ret
 .Lah_props:                             # material, modifier buttons and fields
@@ -1136,62 +1138,260 @@ ed_outliner_draw:
     push    r12
     push    r13
     push    r14
+    push    r15
+    sub     rsp, 16
     xor     ebx, ebx                    # visible row
-1:  mov     r13d, ebx
-    add     r13d, [rip+outl_scroll]     # object index
-    cmp     r13d, [rip+obj_count]
-    jae     9f
-    mov     edi, ebx
+    mov     r15d, [rip+outl_scroll]     # objects to skip (scrolled past)
+    xor     r13d, r13d                  # object index
+    mov     dword ptr [rip+outl_rows], 0
+    mov     dword ptr [rip+outl_eye_sel], -1
+1:  cmp     r13d, [rip+obj_count]
+    jae     .Lod_done
+    mov     edi, r13d
+    call    obj_at
+    mov     r14, rax
+    mov     rdi, r14                    # the filter: names containing it
+    call    outl_match
+    test    eax, eax
+    jz      .Lod_next
+    test    r15d, r15d
+    jz      2f
+    dec     r15d
+    jmp     .Lod_next
+2:  mov     edi, ebx
     call    row_y
     mov     r12d, eax
     mov     ecx, [rip+ed_y]
     add     ecx, [rip+ed_h]
     cmp     r12d, ecx
-    jge     9f
-    mov     edi, r13d
-    call    obj_at
-    mov     r14, rax
+    jge     .Lod_done
+    cmp     ebx, OUTL_MAXROWS
+    jae     .Lod_done
+    lea     rax, [rip+outl_map]         # this row is that object
+    mov     [rax+rbx*4], r13d
+    inc     dword ptr [rip+outl_rows]
     mov     r8d, COL_ACCENT_DARK
     test    dword ptr [r14+OB_FLAGS], OBF_SELECTED
-    jnz     2f
+    jnz     3f
     mov     edi, HIT_OUTLINER
     mov     esi, r13d
     call    is_hot
     test    eax, eax
-    jz      3f
+    jz      4f
     mov     r8d, COL_HOVER
-2:  mov     edi, [rip+ed_x]
+3:  mov     edi, [rip+ed_x]
     add     edi, 4
     mov     esi, r12d
     mov     edx, [rip+ed_w]
     sub     edx, 8
     mov     ecx, ROW_H
     call    fill_rect
-3:  mov     edi, [rip+ed_x]             # type icon
+4:  mov     edi, [rip+ed_x]             # its colour, its type
     add     edi, 14
     lea     esi, [r12+6]
     mov     edx, 8
     mov     ecx, 8
     mov     r8d, [r14+OB_COLOR]
     call    fill_rect
-    mov     ecx, COL_TEXT               # name; the active object in gold
-    lea     rax, [rip+obj_list]
+    mov     eax, [r14+OB_TYPE]
+    cmp     eax, 4
+    jbe     5f
+    xor     eax, eax
+5:  lea     rcx, [rip+type_icons]
+    mov     edx, [rcx+rax*4]
+    mov     edi, [rip+ed_x]
+    add     edi, 27
+    lea     esi, [r12+2]
+    mov     r8d, COL_TEXT_DIM
+    call    draw_icon
+    lea     rax, [rip+obj_list]         # being renamed: a text field
     mov     eax, [rax+r13*4]
+    mov     [rsp], eax
+    cmp     eax, [rip+outl_ren]
+    jne     6f
+    test    eax, eax
+    jz      6f
+    lea     rdi, [rip+wd_outl_name]
+    mov     esi, [rip+ed_x]
+    add     esi, 46
+    lea     edx, [r12-1]
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 80
+    mov     r8, r14
+    xor     r9d, r9d
+    call    wg
+    cmp     dword ptr [rip+outl_ren_go], 0
+    je      7f
+    mov     dword ptr [rip+outl_ren_go], 0
+    call    wg_edit_last
+    jmp     7f
+6:  mov     ecx, COL_TEXT               # its name: the active one in gold,
+    mov     eax, [rsp]                  #  a hidden one dimmed
     cmp     eax, [rip+active_obj]
-    jne     4f
+    jne     61f
     mov     ecx, COL_ACTIVE
-4:  mov     edi, [rip+ed_x]
-    add     edi, 30
+61: test    dword ptr [r14+OB_FLAGS], OBF_HIDDEN
+    jz      62f
+    mov     ecx, COL_TEXT_OFF
+62: mov     edi, [rip+ed_x]
+    add     edi, 48
     lea     esi, [r12+2]
     mov     rdx, r14
     call    draw_text
+7:  lea     rdi, [rip+wd_outl_eye]      # the eye: shown / hidden
+    mov     esi, [rip+ed_x]
+    add     esi, [rip+ed_w]
+    sub     esi, 30
+    lea     edx, [r12-1]
+    mov     ecx, 22
+    lea     r8, [rip+outl_eye_sel]
+    mov     r9d, r13d
+    call    wg
+    mov     edi, [rip+ed_x]
+    add     edi, [rip+ed_w]
+    sub     edi, 27
+    lea     esi, [r12+2]
+    mov     edx, ICON_EYE
+    mov     r8d, COL_TEXT_DIM
+    test    dword ptr [r14+OB_FLAGS], OBF_HIDDEN
+    jz      8f
+    mov     edx, ICON_EYE_OFF
+    mov     r8d, COL_TEXT_OFF
+8:  call    draw_icon
     inc     ebx
+.Lod_next:
+    inc     r13d
     jmp     1b
-9:  pop     r14
+.Lod_done:
+    lea     rdi, [rip+wd_outl_filter]   # the filter, at the bottom
+    mov     esi, [rip+ed_x]
+    add     esi, 6
+    mov     edx, [rip+ed_y]
+    add     edx, [rip+ed_h]
+    sub     edx, WG_H+4
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 12
+    lea     r8, [rip+outl_filter]
+    xor     r9d, r9d
+    call    wg
+    cmp     byte ptr [rip+outl_filter], 0
+    jne     .Lod_ren
+    call    wg_editing                  # (a hint while it is empty)
+    test    eax, eax
+    jnz     .Lod_ren
+    mov     edi, [rip+ed_x]
+    add     edi, 14
+    mov     esi, [rip+ed_y]
+    add     esi, [rip+ed_h]
+    sub     esi, WG_H+1
+    lea     rdx, [rip+s_filter_hint]
+    mov     ecx, COL_TEXT_OFF
+    call    draw_small
+.Lod_ren:
+    cmp     dword ptr [rip+outl_ren], 0 # a rename that ended: done
+    je      9f
+    cmp     dword ptr [rip+outl_ren_go], 0
+    jne     9f
+    call    wg_editing
+    test    eax, eax
+    jnz     9f
+    mov     dword ptr [rip+outl_ren], 0
+9:  add     rsp, 16
+    pop     r15
+    pop     r14
     pop     r13
     pop     r12
     pop     rbx
     ret
+
+# outl_match(rdi=object) -> eax = 1 if its name contains the filter text
+#   (any case; an empty filter takes all)
+outl_match:
+    lea     rsi, [rip+outl_filter]
+    cmp     byte ptr [rsi], 0
+    je      8f
+1:  xor     ecx, ecx                    # does the filter start here?
+2:  movzx   eax, byte ptr [rsi+rcx]
+    test    eax, eax
+    jz      8f
+    movzx   edx, byte ptr [rdi+rcx]
+    test    edx, edx
+    jz      9f
+    or      eax, 0x20
+    or      edx, 0x20
+    cmp     eax, edx
+    jne     3f
+    inc     ecx
+    jmp     2b
+3:  inc     rdi
+    cmp     byte ptr [rdi], 0
+    jne     1b
+9:  xor     eax, eax
+    ret
+8:  mov     eax, 1
+    ret
+
+# outl_eye_cb(rdi=ptr, esi=object index) - show / hide it (one undo step)
+outl_eye_cb:
+    push    rbx
+    mov     ebx, esi
+    lea     rdi, [rip+s_u_hide]
+    call    undo_push
+    mov     edi, ebx
+    call    obj_at
+    xor     dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jz      9f
+    and     dword ptr [rax+OB_FLAGS], ~OBF_SELECTED   # (hidden: not selected)
+9:  pop     rbx
+    ret
+
+outl_name_cb:                           # rdi = the new name
+    mov     rsi, rdi
+    mov     edi, [rip+outl_ren]
+    jmp     obj_rename
+
+# outl_rename(edi=object handle) - its outliner row becomes a text field
+#   (no outliner on screen: the Properties name field)
+outl_rename:
+    push    rbx
+    mov     ebx, edi
+    test    ebx, ebx
+    jz      9f
+    mov     edi, ED_OUTLINER
+    call    op_has_editor
+    test    eax, eax
+    jz      1f
+    mov     [rip+outl_ren], ebx
+    mov     dword ptr [rip+outl_ren_go], 1
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+1:  mov     edi, ebx                    # (Properties: it must be the active one)
+    mov     [rip+active_obj], edi
+    lea     rdi, [rip+s_obj_name_w]
+    call    wg_edit_named
+9:  pop     rbx
+    ret
+
+do_rename:                              # F2: the active object
+    mov     edi, [rip+active_obj]
+    jmp     outl_rename
+
+# outl_filter_cb(rdi=typed text)
+outl_filter_cb:
+    mov     rsi, rdi
+    lea     rdi, [rip+outl_filter]
+    mov     dword ptr [rip+outl_scroll], 0
+    xor     ecx, ecx
+1:  mov     al, [rsi+rcx]
+    mov     [rdi+rcx], al
+    test    al, al
+    jz      2f
+    inc     ecx
+    cmp     ecx, 31
+    jb      1b
+    mov     byte ptr [rdi+rcx], 0
+2:  ret
 
 # fmt_vec3(rdi=float[3], esi=1 to show degrees) - "x, y, z" into fmt_buf
 fmt_vec3:
@@ -2445,6 +2645,25 @@ tool_icon_tab:  .quad op_tool_select, ICON_SELECT, op_tool_move, ICON_MOVE, op_t
                 .quad op_arm_delete, ICON_CLOSE, op_arm_key, ICON_KEY, op_arm_autow, ICON_WEIGHT
                 .quad 0, 0
 .text
+.section .bss
+.align 4
+outl_rows:      .skip 4                 # rows drawn, and their objects
+outl_map:       .skip OUTL_MAXROWS*4
+outl_eye_sel:   .skip 4
+outl_ren:       .skip 4                 # the object being renamed (handle)
+outl_ren_go:    .skip 4                 #  (start typing when drawn)
+outl_filter:    .skip 32
+.section .rodata
+s_u_hide:       .asciz "Hide"
+s_obj_name_w:   .asciz "object.name"
+s_filter_hint:  .asciz "Filter by name"
+.align 4
+type_icons:     .long ICON_MESH, ICON_LIGHT, ICON_CAMERA, ICON_SKETCH, ICON_ARMATURE
+.text
+OPERATOR op_rename, "object.rename", "Rename", do_rename, key=KEY_F1+1, flags=OPF_QUIET, doc="Rename the active object: its outliner row (or the Properties name) becomes a text field (F2, or double-click a row)"
+WIDGET wd_outl_name, WK_TEXT, "outliner.name", "Name", flags=WGF_COMPACT, cb=outl_name_cb, undo="Rename"
+WIDGET wd_outl_eye,  WK_ROW, "outliner.visible", "Show / Hide", cb=outl_eye_cb, tip="Show or hide this object in the viewport"
+WIDGET wd_outl_filter, WK_TEXT, "outliner.filter", "Filter", cb=outl_filter_cb, tip="Show only the objects whose name contains this (Enter)"
 WIDGET wd_tool_row, WK_ROW, "tools.row", cb=tools_cb
 WIDGET wd_vp_sec,     WK_SECTION, "props.viewport", "Viewport"
 WIDGET wd_vp_shading, WK_ENUM,   "viewport.shading", aux=vp_shade_lbl, n=3

@@ -277,6 +277,18 @@ bitmap font a heading is drawn twice, a pixel apart. `draw_heading` and
 `draw_small` draw in those slots, and `fonts_resize` resets every size when
 the scale changes.
 
+## Outliner
+
+`ed_outliner_draw` (areas.s) draws a row per object that passes the filter
+(the text field at the bottom; a name contains it, in any case). Each row
+has a colour chip, a type icon, the name (gold when active, dimmed when
+hidden) and an eye (`WK_ROW`, toggling `OBF_HIDDEN` as one undo step). The
+row's object is recorded in `outl_map`, which `area_hit` uses, so a
+filtered list still selects the right object. Double-clicking a row, or F2
+(`object.rename`), draws a `WK_TEXT` in the row and starts typing into it
+(`wg_edit_last`). With no outliner on screen, F2 types into the Properties
+name field instead (`wg_edit_named`).
+
 ## Properties
 
 `ed_props_draw` (areas.s) draws a tab strip (`props_tabs`: Object, Modifiers,
