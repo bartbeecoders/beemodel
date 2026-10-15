@@ -155,6 +155,7 @@ gf_zero:        .float 0.0
 gf_two:         .float 2.0
 gf_six:         .float 6.0
 gf_three:       .float 3.0
+gf_255:         .float 255.0
 gf_inv2pi:      .float 0.15915494
 gf_one_m:       .float 0.9999
 gf_15:          .float 15.0
@@ -184,6 +185,8 @@ perm:   .byte 151,160,137,91,90,15,131,13,201,95,96,53,194,233,7,225,140,36,103,
 
 .section .bss
 gw_word:        .skip 64
+.align 4
+graph_ver:      .skip 4                 # bumped by every change to a graph
 
 .section .rodata
 s_g_need:       .asciz "  material.node <material> image|noise|checker|gradient|mix|ramp|math|bump [values]"
@@ -1027,6 +1030,9 @@ len3:
 #   node). The normal is +y, the eye along +z, no vertex colours: every
 #   node is evaluated (scripts and tests read single nodes this way)
 .globl graph_probe
+.globl graph_thumbs
+.globl gr_live
+.globl graph_ver
 graph_probe:
     push    rbx
     push    r12
@@ -1112,8 +1118,149 @@ graph_probe:
     pop     rbx
     ret
 
+# graph_thumbs(rdi=record, rsi=out u32[48][n x n], edx=n) - every node's
+#   first output over a square (u, v 0..1; the object point (2u - 1, 2v - 1,
+#   0), the normal and the eye along +z): colours as sRGB-ish bytes, values
+#   grey, vectors as 0.5 + v / 2
+graph_thumbs:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, EV_SZ+SC_SZ2+56
+    mov     rbx, rdi
+    mov     [rsp+EV_SZ+SC_SZ2+24], rsi
+    mov     [rsp+EV_SZ+SC_SZ2+32], edx
+    call    tex_init
+    lea     r12, [rsp+EV_SZ]            # the shading context
+    mov     rdi, r12
+    xor     eax, eax
+    mov     ecx, SC_SZ2/4
+    rep     stosd
+    mov     eax, 0x3a83126f             # (edges of 0.001)
+    mov     [r12+SC_E1O], eax
+    mov     [r12+SC_E2O+4], eax
+    mov     [r12+SC_PU], eax
+    mov     [r12+SC_PV+4], eax
+    mov     eax, 0x3f800000
+    mov     [r12+SC_N+8], eax
+    mov     [r12+SC_WV+8], eax
+    mov     [r12+SC_VC], eax
+    mov     [r12+SC_VC+4], eax
+    mov     [r12+SC_VC+8], eax
+    lea     rax, [rsp+EV_SZ+SC_SZ2]
+    mov     [r12+SC_UVP], rax
+    lea     r13, [rsp]
+    mov     qword ptr [r13+EV_LIVE], -1
+    mov     [r13+EV_SC], r12
+    xor     r14d, r14d                  # the pixel
+.Lgt_px:
+    mov     eax, [rsp+EV_SZ+SC_SZ2+32]
+    imul    eax, eax
+    cmp     r14d, eax
+    jae     .Lgt_out
+    mov     eax, r14d                   # u = (x + 1/2) / n, v = 1 - (y + 1/2) / n
+    xor     edx, edx
+    div     dword ptr [rsp+EV_SZ+SC_SZ2+32]
+    cvtsi2ss xmm0, edx
+    addss   xmm0, [rip+gf_half]
+    cvtsi2ss xmm2, dword ptr [rsp+EV_SZ+SC_SZ2+32]
+    divss   xmm0, xmm2
+    cvtsi2ss xmm1, eax
+    addss   xmm1, [rip+gf_half]
+    divss   xmm1, xmm2
+    movss   xmm3, [rip+gf_one]
+    subss   xmm3, xmm1
+    movss   xmm1, xmm3
+    movss   [r13+EV_UV], xmm0
+    movss   [r13+EV_UV+4], xmm1
+    lea     rdi, [rsp+EV_SZ+SC_SZ2]     # (the UVs, the same at every corner)
+    movss   [rdi], xmm0
+    movss   [rdi+4], xmm1
+    movss   [rdi+8], xmm0
+    movss   [rdi+12], xmm1
+    movss   [rdi+16], xmm0
+    movss   [rdi+20], xmm1
+    addss   xmm0, xmm0                  # the point
+    subss   xmm0, [rip+gf_one]
+    addss   xmm1, xmm1
+    subss   xmm1, [rip+gf_one]
+    movss   [r13+EV_P], xmm0
+    movss   [r13+EV_P+4], xmm1
+    mov     dword ptr [r13+EV_P+8], 0
+    movss   [r12+SC_P0O], xmm0
+    movss   [r12+SC_P0O+4], xmm1
+    movss   [r12+SC_WP], xmm0
+    movss   [r12+SC_WP+4], xmm1
+    mov     rdi, rbx
+    mov     rsi, r13
+    call    graph_eval
+    xor     r15d, r15d                  # each node's first output
+.Lgt_node:
+    cmp     r15d, [rbx+GR_N]
+    jae     .Lgt_next
+    cmp     r15d, MAX_NODES
+    jae     .Lgt_next
+    imul    eax, r15d, NODE_SZ          # (its first output's kind)
+    mov     eax, [rbx+GR_NODES+rax+ND_TYPE]
+    imul    eax, eax, 56
+    lea     rcx, [rip+mn_meta]
+    mov     rcx, [rcx+rax+48]
+    xor     ebp, ebp
+    test    rcx, rcx
+    jz      1f
+    movzx   ebp, byte ptr [rcx]
+1:  mov     eax, r15d
+    shl     eax, 7
+    lea     rsi, [r13+EV_VAL+rax]
+    xor     edx, edx                    # the pixel: 0xRRGGBB
+    xor     ecx, ecx
+2:  movss   xmm0, [rsi+rcx*4]
+    cmp     ebp, 1                      # (a value: grey)
+    jne     21f
+    movss   xmm0, [rsi+12]
+21: cmp     ebp, 2                      # (a vector: 0.5 + v / 2, as it is)
+    jne     22f
+    mulss   xmm0, [rip+gf_half]
+    addss   xmm0, [rip+gf_half]
+    jmp     23f
+22: maxss   xmm0, [rip+gf_zero]         # (else: a colour; sqrt ~ sRGB)
+    sqrtss  xmm0, xmm0
+23: maxss   xmm0, [rip+gf_zero]
+    minss   xmm0, [rip+gf_one]
+    mulss   xmm0, [rip+gf_255]
+    cvtss2si eax, xmm0
+    shl     edx, 8
+    or      edx, eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    mov     eax, [rsp+EV_SZ+SC_SZ2+32]  # out[node][pixel]
+    imul    eax, eax
+    imul    eax, r15d
+    add     eax, r14d
+    mov     rcx, [rsp+EV_SZ+SC_SZ2+24]
+    mov     [rcx+rax*4], edx
+    inc     r15d
+    jmp     .Lgt_node
+.Lgt_next:
+    inc     r14d
+    jmp     .Lgt_px
+.Lgt_out:
+    add     rsp, EV_SZ+SC_SZ2+56
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # graph_live(rbx=record, rax=the nodes wanted) -> rax = them and every
 #   node feeding them (links point to earlier nodes: one pass down)
+gr_live:
 graph_live:
     mov     ecx, [rbx+GR_N]
 1:  dec     ecx
@@ -1581,6 +1728,7 @@ own:
     mov     edi, ebx
     call    mat_get
     mov     dword ptr [rip+dirty], 1
+    inc     dword ptr [rip+graph_ver]   # (previews: made again)
     pop     rbx
     ret
 8:  xor     eax, eax
