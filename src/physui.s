@@ -316,7 +316,7 @@ rb_props_draw:
     mov     esi, r12d
     lea     rdx, [rip+s_physics]
     mov     ecx, COL_ACCENT
-    call    draw_text
+    call    draw_heading
     mov     r14, [rip+an_cur]           # the block (0: none yet)
     mov     rdi, r14
     mov     esi, [rbx+OB_UID]

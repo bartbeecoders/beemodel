@@ -1221,7 +1221,7 @@ ed_props_draw:
     mov     esi, r12d
     mov     rdx, rbx
     mov     ecx, COL_ACTIVE
-    call    draw_text
+    call    draw_heading
     add     r12d, 20
     call    fmt_reset
     lea     rdi, [rbx+OB_LOC]
@@ -1331,7 +1331,7 @@ ed_props_draw:
     mov     esi, r12d
     lea     rdx, [rip+s_p_camera]
     mov     ecx, COL_ACCENT
-    call    draw_text
+    call    draw_heading
     add     r12d, 20
     call    fmt_reset
     movss   xmm0, [rip+cam_yaw]

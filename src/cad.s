@@ -674,7 +674,7 @@ cad_props_draw:
     mov     esi, r12d
     lea     rdx, [rip+s_p_head]
     mov     ecx, COL_ACCENT
-    call    draw_text
+    call    draw_heading
     add     r12d, 20
     xor     ebx, ebx
 1:  call    param_count

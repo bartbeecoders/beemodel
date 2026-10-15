@@ -2366,7 +2366,7 @@ mods_props_draw:
     mov     esi, r12d
     lea     rdx, [rip+s_mods]
     mov     ecx, COL_ACCENT
-    call    draw_text
+    call    draw_heading
     mov     edi, BTN_ADD
     mov     esi, [rip+ed_x]
     add     esi, [rip+ed_w]

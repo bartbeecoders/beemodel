@@ -872,12 +872,7 @@ ev_fscale:                              # preferred_scale(scale / 120)
     call    set_ui_scale
     test    eax, eax
     jz      ev_done
-    mov     edi, FONT_UI                # re-rasterize fonts for the new scale
-    mov     esi, UI_FONT_PX
-    call    font_set_size
-    mov     edi, FONT_MONO
-    mov     esi, MONO_FONT_PX
-    call    font_set_size
+    call    fonts_resize                # re-rasterize fonts for the new scale
     mov     dword ptr [rip+dirty], 1
     jmp     ev_done
 

@@ -35,7 +35,7 @@
 
 .section .bss
 .align 64
-fonts:          .skip FNT_SZ*2          # 0 = UI (sans), 1 = mono
+fonts:          .skip FNT_SZ*FONT_SLOTS # UI (sans), mono, small, heading
 gcache:         .skip CACHE_N*32
 acc:            .skip MAXDIM*MAXDIM*4   # float coverage accumulator
 ptx:            .skip MAXPTS*4
@@ -676,6 +676,26 @@ glyph_render:
     inc     rdi
     dec     ecx
     jnz     3b
+    cmp     dword ptr [rbp+FNT_BOLD], 0
+    je      .Lgr_done
+    mov     edi, [rbx+4]                # bold: each pixel takes the darker
+    add     rdi, [rip+arena]            #  of itself and its left neighbour
+    mov     r9d, [rip+r_h]
+4:  mov     ecx, [rip+r_w]
+    dec     ecx
+    jle     .Lgr_done
+5:  movzx   eax, byte ptr [rdi+rcx]
+    movzx   edx, byte ptr [rdi+rcx-1]
+    cmp     eax, edx
+    jae     6f
+    mov     [rdi+rcx], dl
+6:  dec     ecx
+    jnz     5b
+    mov     eax, [rip+r_w]
+    add     rdi, rax
+    dec     r9d
+    jnz     4b
+    add     dword ptr [rbx+16], 65536   # one pixel wider
 .Lgr_done:
     add     rsp, 8
     pop     r15
