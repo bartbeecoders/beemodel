@@ -27,6 +27,7 @@
 .globl parse_float
 .globl skip_space
 .globl ensure_dir
+.globl home_join
 .globl default_dir
 .globl cache_dir
 .globl basename

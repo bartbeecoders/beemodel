@@ -697,6 +697,19 @@ fb_ok:
     mov     dword ptr [rip+dirty], 1
     jmp     9f
 7:  call    remember_dir                # run it with the path
+    call    fb_has_opts                 # (an export: its options, this once)
+    test    eax, eax
+    jz      71f
+    mov     eax, [rip+fb_opt_sel]
+    mov     [rip+exp_sel_only], eax
+    mov     rax, [rip+fb_desc]
+    test    dword ptr [rax+WD_FLAGS], WGF_EXPAXIS
+    jz      71f
+    mov     eax, [rip+fb_opt_zup]
+    mov     [rip+exp_zup], eax
+    movss   xmm0, [rip+fb_opt_scale]
+    movss   [rip+exp_scale], xmm0
+71:
     mov     rbx, [rip+fb_op]
     mov     r12, [rip+fb_after]
     mov     qword ptr [rip+fb_after], 0
@@ -707,16 +720,27 @@ fb_ok:
     mov     rdi, rbx
     call    run_op
     pop     qword ptr [rip+op_arg]
+    call    exp_defaults                # (scripts and agents: the defaults)
     test    r12, r12                    # saved for a New / Open / Exit:
     jz      9f                          #  now that one
     cmp     dword ptr [rip+scene_modified], 0
     jne     9f
     mov     rdi, r12
-    call    run_op
+    call    dlg_run_pending
 9:  add     rsp, 8
     pop     r12
     pop     rbx
     ret
+
+# fb_has_opts -> eax = 1 when the browser is for an export with options
+fb_has_opts:
+    xor     eax, eax
+    mov     rcx, [rip+fb_desc]
+    test    rcx, rcx
+    jz      1f
+    test    dword ptr [rcx+WD_FLAGS], WGF_EXPORT
+    setnz   al
+1:  ret
 
 # remember_dir - fb_dir to the front of the recent folders
 remember_dir:
@@ -920,8 +944,12 @@ fb_draw:
     mov     esi, r14d
     lea     edx, [rbp+78]
     mov     ecx, r15d
-    mov     r8d, FB_H-176
-    lea     r9, [rip+fb_scroll]
+    mov     r8d, FB_H-176               # (shorter with export options)
+    call    fb_has_opts
+    test    eax, eax
+    jz      61f
+    sub     r8d, 34
+61: lea     r9, [rip+fb_scroll]
     call    wg_scroll_begin
     mov     r12d, eax                   # the first row's y
     mov     [rsp], eax
@@ -983,7 +1011,35 @@ fb_draw:
     imul    edi, ROW_H
     add     edi, [rsp]
     call    wg_scroll_end
-    # the name, the buttons
+    call    fb_has_opts                 # export options
+    test    eax, eax
+    jz      62f
+    lea     r12d, [rbp+FB_H-120]
+    lea     rdi, [rip+wd_fb_osel]
+    lea     esi, [rbx+18]
+    mov     edx, r12d
+    mov     ecx, 230
+    lea     r8, [rip+fb_opt_sel]
+    xor     r9d, r9d
+    call    wg
+    mov     rax, [rip+fb_desc]
+    test    dword ptr [rax+WD_FLAGS], WGF_EXPAXIS
+    jz      62f
+    lea     rdi, [rip+wd_fb_oup]
+    lea     esi, [rbx+260]
+    mov     edx, r12d
+    mov     ecx, 130
+    lea     r8, [rip+fb_opt_zup]
+    xor     r9d, r9d
+    call    wg
+    lea     rdi, [rip+wd_fb_oscale]
+    lea     esi, [rbx+400]
+    mov     edx, r12d
+    mov     ecx, 150
+    lea     r8, [rip+fb_opt_scale]
+    xor     r9d, r9d
+    call    wg
+62: # the name, the buttons
     lea     r12d, [rbp+FB_H-86]
     lea     edi, [rbx+18]
     lea     esi, [r12+3]
@@ -1050,6 +1106,20 @@ wg_ok_label:
     lea     rdi, [rip+wd_fb_save]
     jmp     wg
 
+.section .data
+.align 4
+fb_opt_sel:     .long 0
+fb_opt_zup:     .long 0
+fb_opt_scale:   .float 1.0
+.section .rodata
+s_up_y:         .asciz "Y up"
+s_up_z:         .asciz "Z up"
+.align 8
+up_lbl:         .quad s_up_y, s_up_z
+.text
+WIDGET wd_fb_osel,   WK_TOGGLE, "files.selected_only", "Selected objects only", tip="Export only the selected objects"
+WIDGET wd_fb_oup,    WK_ENUM, "files.up_axis", "Up axis", aux=up_lbl, n=2, tip="Z up for programs and printers that expect it"
+WIDGET wd_fb_oscale, WK_FLOAT, "files.scale", "Scale", 0.0001, 10000.0, 0.01, 3, WGF_CLAMP, tip="Multiply every size (1000: metres to millimetres)"
 WIDGET wd_fb_save, WK_BUTTON, "files.ok", "Save", flags=WGF_PRIMARY, aux=op_fb_ok
 
 .section .rodata

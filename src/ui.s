@@ -130,7 +130,7 @@ menu_counts:    .long items_file_n, items_edit_n, items_view_n, items_select_n, 
 
 .section .rodata
 .align 8
-items_file:     .quad op_file_new, op_file_open, op_file_save, op_file_saveas, 0
+items_file:     .quad op_file_new, op_file_open, sub_recent, op_file_save, op_file_saveas, 0
                 .quad sub_import, sub_export, 0, op_screenshot, op_recover, 0, op_file_exit
 .equ items_file_n, (. - items_file) / 8
 items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_palette_open, 0

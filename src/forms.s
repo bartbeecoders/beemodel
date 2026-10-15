@@ -214,8 +214,8 @@ x_pdf:          .quad e_pdf, 0
 x_bees:         .quad e_bees, 0
 x_img:          .quad e_png, e_exr, 0
 .text
-.macro PATHFORM form, name, mode, ext, defname=0
-WIDGET \form\()_w, WK_PATH, \name, aux=\ext, n=\mode
+.macro PATHFORM form, name, mode, ext, defname=0, flags=0
+WIDGET \form\()_w, WK_PATH, \name, flags=\flags, aux=\ext, n=\mode
 FORM \form, 1
 FFIELD \form\()_w, kw=\defname
 .endm
@@ -225,15 +225,20 @@ PATHFORM form_iobj, "file.import_obj", 0, x_obj
 PATHFORM form_istl, "file.import_stl", 0, x_stl
 PATHFORM form_igltf, "file.import_gltf", 0, x_gltf
 PATHFORM form_istep, "file.import_step", 0, x_step
-PATHFORM form_eobj, "file.export_obj", 1, x_obj, n_scene_obj
-PATHFORM form_estl, "file.export_stl", 1, x_stl, n_scene_stl
-PATHFORM form_egltf, "file.export_gltf", 1, x_gltf, n_scene_glb
+PATHFORM form_eobj, "file.export_obj", 1, x_obj, n_scene_obj, WGF_EXPORT|WGF_EXPAXIS
+PATHFORM form_estl, "file.export_stl", 1, x_stl, n_scene_stl, WGF_EXPORT|WGF_EXPAXIS
+PATHFORM form_egltf, "file.export_gltf", 1, x_gltf, n_scene_glb, WGF_EXPORT
 PATHFORM form_estep, "file.export_step", 1, x_step, n_part_step
-PATHFORM form_e3mf, "file.export_3mf", 1, x_3mf, n_part_3mf
+PATHFORM form_e3mf, "file.export_3mf", 1, x_3mf, n_part_3mf, WGF_EXPORT
 PATHFORM form_edxf, "file.export_dxf", 1, x_dxf, n_sketch_dxf
 PATHFORM form_esvg, "file.export_svg", 1, x_svg, n_sketch_svg
 PATHFORM form_epdf, "file.export_pdf", 1, x_pdf, n_drawing_pdf
 PATHFORM form_script, "script.run", 0, x_bees
 PATHFORM form_rsave, "render.save", 1, x_img, n_render_png
+
+# ---- mesh.print_check [minimum wall mm] ------------------------------------------
+WIDGET fw_pcw,  WK_FLOAT, "form.print.wall", "Thinnest wall allowed (mm)", 0.05, 100.0, 0.01, 2, WGF_CLAMP
+FORM form_pcheck, 1
+FFIELD fw_pcw, def=1.0
 
 .section .note.GNU-stack,"",@progbits

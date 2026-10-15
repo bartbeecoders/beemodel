@@ -23,6 +23,8 @@
 .globl dlg_key
 .globl dlg_floor
 .globl dlg_close
+.globl dlg_parg
+.globl dlg_run_pending
 
 .equ DLG_FORM,      1
 .equ DLG_CONFIRM,   2
@@ -51,6 +53,7 @@ dlg_op:         .skip 8                 # the operator (form) / to do (confirm)
 dlg_form:       .skip 8
 dlg_arg:        .skip 512
 dlg_title:      .skip 160
+dlg_parg:       .skip 512               # the argument the asking operator had
 
 .section .rodata
 s_ok:           .asciz "OK"
@@ -133,6 +136,22 @@ dlg_open_form:
 # dlg_open_confirm(rdi=operator to run after) - "Save changes to x?"
 dlg_open_confirm:
     mov     [rip+dlg_op], rdi
+    lea     rdi, [rip+dlg_parg]         # (keep its argument: Open Recent)
+    mov     byte ptr [rdi], 0
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      1f
+    mov     ecx, 511
+2:  mov     al, [rsi]
+    mov     [rdi], al
+    test    al, al
+    jz      1f
+    inc     rsi
+    inc     rdi
+    dec     ecx
+    jnz     2b
+    mov     byte ptr [rdi], 0
+1:
     mov     dword ptr [rip+dlg_kind], DLG_CONFIRM
     mov     dword ptr [rip+dlg_open], 1
     mov     dword ptr [rip+dirty], 1
@@ -178,7 +197,7 @@ dlg_ok:
     cmp     dword ptr [rip+scene_modified], 0
     jne     9f                          # (not saved: a path is still asked for)
     mov     rdi, rbx
-    call    run_op
+    call    dlg_run_pending
 9:  pop     rbx
     ret
 
@@ -187,8 +206,18 @@ dlg_dont:                               # go on without saving
     mov     rbx, [rip+dlg_op]
     call    dlg_close
     mov     rdi, rbx
-    call    run_op
+    call    dlg_run_pending
     pop     rbx
+    ret
+
+# dlg_run_pending(rdi=operator) - run it with the argument it had when it
+#   asked "Save changes?"
+dlg_run_pending:
+    push    qword ptr [rip+op_arg]
+    lea     rax, [rip+dlg_parg]
+    mov     [rip+op_arg], rax
+    call    run_op
+    pop     qword ptr [rip+op_arg]
     ret
 
 # dlg_key(edi=evdev) -> eax = 1 (a dialog takes every key): Enter is OK (or
