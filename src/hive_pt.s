@@ -1753,8 +1753,8 @@ mis:
 .equ PF_TMP,    256             # 48
 .equ PF_CTX,    304             # BSDF context (160)
 .equ PF_MAT,    464             # the material here, after its graph (128)
-.equ PF_SC,     592             # the graph's shading context (152)
-.equ PF_SZ,     752
+.equ PF_SC,     592             # the graph's shading context (192)
+.equ PF_SZ,     784
 
 # trace_ray(rdi=origin[3], rsi=direction[3], rdx=L out[3], rcx=aux out[7];
 #   r15 = rng) - the radiance arriving along -direction at the origin, a path
@@ -1936,6 +1936,7 @@ trace_path:
     jmp     .Ltp_done
 69:
     # the material (a graph overrides values and the normal here)
+    mov     dword ptr [rbx+PF_SC+112], 0
     mov     edi, r12d
     call    tri_material
     mov     r13, rax
@@ -1958,7 +1959,9 @@ trace_path:
 63: cmp     dword ptr [r13+128], 0
     je      64f
     call    hit_graph
-64: mov     rax, [rip+hv_tvc]           # vertex colours tint the base
+64: test    dword ptr [rbx+PF_SC+112], 0x80000000   # (a graph that reads them:
+    jnz     65f                         #  no tint)
+    mov     rax, [rip+hv_tvc]           # vertex colours tint the base
     lea     rcx, [r12+r12*2]
     lea     rsi, [rax+rcx*4]
     cmp     dword ptr [rsi], 0
@@ -2250,10 +2253,10 @@ cover:
     push    rbx
     push    r12
     push    r13
-    sub     rsp, 304
+    sub     rsp, 336
     mov     r12d, edi
-    movss   [rsp+296], xmm0
-    movss   [rsp+300], xmm1
+    movss   [rsp+328], xmm0
+    movss   [rsp+332], xmm1
     mov     r13, rsi
     call    tri_material
     test    rax, rax
@@ -2292,9 +2295,9 @@ cover:
     cvtss2si eax, xmm0
     test    eax, eax
     jle     .Lcv_one
-    mov     [rsp+292], eax
+    mov     [rsp+324], eax
     mov     eax, [rbx+MA_ALPHA]         # the value: alpha, unless the graph
-    mov     [rsp+288], eax              #  says otherwise
+    mov     [rsp+320], eax              #  says otherwise
     cmp     dword ptr [rbx+GR_N], 0
     je      5f
     mov     rax, [rip+hv_to]            # the shading context (as hit_graph)
@@ -2303,9 +2306,9 @@ cover:
     lea     rdi, [rsp]
     mov     ecx, 9
     rep     movsd
-    mov     eax, [rsp+296]
+    mov     eax, [rsp+328]
     mov     [rsp+36], eax
-    mov     eax, [rsp+300]
+    mov     eax, [rsp+332]
     mov     [rsp+40], eax
     mov     rax, [rip+hv_tv]
     lea     rcx, [r12+r12*8]
@@ -2323,24 +2326,42 @@ cover:
     jne     3f
     xor     eax, eax
 3:  mov     [rsp+120], rax
+    mov     rax, [rip+hv_tv]            # the world point: v0 + u e1 + v e2
+    lea     rcx, [r12+r12*8]
+    lea     rax, [rax+rcx*4]
+    xor     ecx, ecx
+31: movss   xmm0, [rax+12+rcx*4]
+    mulss   xmm0, [rsp+328]
+    movss   xmm1, [rax+24+rcx*4]
+    mulss   xmm1, [rsp+332]
+    addss   xmm0, xmm1
+    addss   xmm0, [rax+rcx*4]
+    movss   [rsp+152+rcx*4], xmm0
+    movss   xmm0, [r13+rcx*4]           # towards the eye: -d
+    xorps   xmm0, [rip+pt_sign]
+    movss   [rsp+164+rcx*4], xmm0
+    mov     dword ptr [rsp+176+rcx*4], 0x3f800000
+    inc     ecx
+    cmp     ecx, 3
+    jb      31b
     mov     rsi, rbx
-    lea     rdi, [rsp+160]
+    lea     rdi, [rsp+192]
     mov     ecx, 32
     rep     movsd
     mov     rdi, rbx
     lea     rsi, [rsp]
-    lea     rdx, [rsp+160]
+    lea     rdx, [rsp+192]
     mov     ecx, 1
     call    graph_shade
-    mov     eax, [rsp+160+MA_ALPHA]
-    cmp     dword ptr [rsp+292], 1
+    mov     eax, [rsp+192+MA_ALPHA]
+    cmp     dword ptr [rsp+324], 1
     jne     4f
     test    dword ptr [rsp+112], 1 << PIN_MASK
     jz      4f
-    mov     eax, [rsp+160+MA_RT_MASK]
-4:  mov     [rsp+288], eax
-5:  movss   xmm0, [rsp+288]
-    cmp     dword ptr [rsp+292], 1
+    mov     eax, [rsp+192+MA_RT_MASK]
+4:  mov     [rsp+320], eax
+5:  movss   xmm0, [rsp+320]
+    cmp     dword ptr [rsp+324], 1
     jne     6f
     movss   xmm1, [rbx+MA_CLIP]         # masked: against the clip value
     xorps   xmm2, xmm2
@@ -2358,7 +2379,7 @@ cover:
     jmp     9f
 .Lcv_one:
     movss   xmm0, [rip+pt_one]
-9:  add     rsp, 304
+9:  add     rsp, 336
     pop     r13
     pop     r12
     pop     rbx
@@ -2395,7 +2416,24 @@ hit_graph:
     jne     1f
     xor     eax, eax
 1:  mov     [rbx+PF_SC+120], rax
-    mov     rsi, r13                    # the material's own values, the
+    lea     rsi, [rbx+PF_P]             # the world point, towards the eye
+    lea     rdi, [rbx+PF_SC+152]
+    mov     ecx, 6
+    rep     movsd
+    mov     eax, 0x3f800000             # the vertex colour (none: white)
+    mov     [rbx+PF_SC+176], eax
+    mov     [rbx+PF_SC+180], eax
+    mov     [rbx+PF_SC+184], eax
+    mov     rax, [rip+hv_tvc]
+    lea     rcx, [r12+r12*2]
+    lea     rsi, [rax+rcx*4]
+    cmp     dword ptr [rsi], 0
+    je      2f
+    movss   xmm0, [rbx+PF_RAY+RAY_U]
+    movss   xmm1, [rbx+PF_RAY+RAY_V]
+    lea     rdx, [rbx+PF_SC+176]
+    call    vcol_lin3
+2:  mov     rsi, r13                    # the material's own values, the
     lea     rdi, [rbx+PF_MAT]           #  graph's pins over them
     mov     ecx, 32
     rep     movsd
