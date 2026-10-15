@@ -513,6 +513,7 @@ def main():
     tooltips()
     icons()
     menus_ui()
+    dialogs()
     transforms()
     undo_redo()
     files()
@@ -4659,6 +4660,11 @@ def areas_and_palette():
     f.key(61)
     f.type('exit')                       # fuzzy search, Enter runs the best hit
     f.key(28)
+    f.pump(0.3)
+    m = Mcp(f)                           # (changes: "Save changes?" - Don't Save)
+    x, y = widget_xy(m, 'dialog.dont_save')
+    if x:
+        f.click(x, y)
     f.pump(0.5)
     try:
         rc = f.proc.wait(timeout=2)
@@ -5026,6 +5032,70 @@ def menus_ui():
     check(shade() == 2 and not any(w['kind'] == 'pieitem' for w in ui_tree(m)),
           'releasing over a choice picks it and closes the pie')
     f.proc.kill()
+
+
+def dialogs():
+    """UI plan U7: operator forms and the "Save changes?" dialog - modal,
+    keyboard (Enter / Esc), remembered values; scripts never see them."""
+    print('  -- dialogs --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def palette(text):
+        f.key(61); f.type(text); f.key(28); f.pump(0.2)
+    palette('scene units')
+    check({'form.units', 'dialog.ok', 'dialog.cancel'} <= names(), 'the palette opens Scene Units as a form')
+    f.shot('dialog_units.png')
+    before = q('print(active())')
+    f.click(300, 560)                          # behind the dialog: nothing happens
+    check(q('print(active())') == before and 'dialog.ok' in names(), 'the dialog is modal')
+    x, y = widget_xy(m, 'form.units')
+    f.click(x, y)                              # its options: Millimetres first
+    lst = [w for w in ui_tree(m) if w['kind'] == 'list']
+    f.click(x, lst[0]['y'] + 4 + 11 if lst else y)
+    x, y = widget_xy(m, 'dialog.ok')
+    f.click(x, y)
+    check(q('print(expr("1m"))') == '1000' and 'dialog.ok' not in names(), 'OK runs scene.units mm (1 m = 1000 units)')
+    palette('scene units')
+    check((widget(m, 'form.units') or {}).get('value') == 0, 'the form remembers the last values')
+    f.key(1)
+    check('dialog.ok' not in names(), 'Esc closes a form')
+    q('select("Cube")')
+    palette('add rigid body')
+    x, y = widget_xy(m, 'form.rigid.mass')
+    f.click(x, y); f.type('2.5'); f.key(28)    # (Enter confirms the field,
+    f.key(28)                                  #  a second Enter the dialog)
+    r = q('print(rigid("Cube", "type"), rigid("Cube", "mass"))')
+    check(r == '1 2.5', f'Enter confirms the rigid body form: active, mass 2.5 ({r})')
+    q('op("scene.units", "m")')                # (scripts: no dialog)
+    check('dialog.ok' not in names(), 'a script running a form operator gets no dialog')
+    f.mods(4); f.key(49); f.mods(0)            # Ctrl+N with changes: "Save changes?"
+    check({'dialog.save', 'dialog.dont_save', 'dialog.cancel'} <= names(), 'Ctrl+N asks to save changes first')
+    f.shot('dialog_save.png')
+    x, y = widget_xy(m, 'dialog.cancel')
+    f.click(x, y)
+    check(q('print(rigid("Cube", "type"))') == '1', 'Cancel keeps the scene')
+    f.mods(4); f.key(49); f.mods(0)
+    x, y = widget_xy(m, 'dialog.dont_save')
+    f.click(x, y)
+    check(q('print(count(), rigid("Cube", "type"))') == '3 nil', "Don't Save starts the new scene")
+    f.mods(4); f.key(49); f.mods(0)            # nothing changed: no question
+    check('dialog.save' not in names(), 'an unchanged scene is not asked about')
+    q('add("cube", "Extra", 3, 0, 0)')
+    f.click(1257, 16)                          # the window's close button
+    check('dialog.dont_save' in names(), 'closing the window with changes asks first')
+    x, y = widget_xy(m, 'dialog.dont_save')
+    f.click(x, y)
+    f.pump(0.5)
+    try:
+        rc = f.proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        f.proc.kill(); rc = None
+    check(rc == 0, f"Don't Save quits (rc={rc})")
 
 
 if __name__ == '__main__':

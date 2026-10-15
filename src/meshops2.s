@@ -101,10 +101,10 @@ s_lbl_knife:    .asciz "Knife"
 
 OPERATOR op_m_loopcut, "mesh.loopcut", "Loop Cut", do_loopcut, key=KEY_R|KM_CTRL, flags=OPF_AI_SAFE|OPF_EDIT, doc="Cut a ring of quads: Ctrl+R then click; scripts: mesh.loopcut \"a b [cuts]\"", params=p_loopcut
 OPERATOR op_m_knife, "mesh.knife", "Knife", do_knife, key=KEY_K, flags=OPF_EDIT|OPF_QUIET, doc="Draw a cut across the visible faces: click points, Enter cuts"
-OPERATOR op_m_bisect, "mesh.bisect", "Bisect", do_bisect, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Cut the mesh with a plane: mesh.bisect \"px py pz nx ny nz\" (world; default: horizontal through the 3D cursor)"
+OPERATOR op_m_bisect, "mesh.bisect", "Bisect", do_bisect, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Cut the mesh with a plane: mesh.bisect \"px py pz nx ny nz\" (world; default: horizontal through the 3D cursor)", form=form_bisect
 OPERATOR op_m_bevel, "mesh.bevel", "Bevel", do_bevel, key=KEY_B|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Bevel the selected edges: drag the width, wheel = segments; scripts: mesh.bevel \"width [segments]\"", params=p_bevel
 OPERATOR op_m_bridge, "mesh.bridge", "Bridge Edge Loops", do_bridge, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Join two selected boundary loops with a band of quads"
-OPERATOR op_m_spin, "mesh.spin", "Spin", do_spin, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Sweep the selected edges around the 3D cursor: mesh.spin \"[steps] [degrees] [x|y|z]\" (12 360 y)", params=p_spin
+OPERATOR op_m_spin, "mesh.spin", "Spin", do_spin, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Sweep the selected edges around the 3D cursor: mesh.spin \"[steps] [degrees] [x|y|z]\" (12 360 y)", params=p_spin, form=form_spin
 OPERATOR op_cursor_reset, "view.cursor_reset", "Reset 3D Cursor", do_cursor_reset, flags=OPF_AI_SAFE, doc="Put the 3D cursor back at the origin (Shift+right click places it)"
 
 .text

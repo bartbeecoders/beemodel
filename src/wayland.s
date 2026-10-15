@@ -958,7 +958,7 @@ ev_toplevel:
 3:  mov     [rip+pend_flags], edx
     jmp     ev_done
 ev_close:
-    mov     dword ptr [rip+quit_flag], 1
+    call    request_quit                # (unsaved changes: asks first)
     jmp     ev_done
 
 ev_seat:

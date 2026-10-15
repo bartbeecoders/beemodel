@@ -92,7 +92,7 @@ OPERATOR op_render_start, "render.start", "Render", do_render_start, key=KEY_F12
 OPERATOR op_render_stop, "render.stop", "Stop Render", do_render_stop, flags=OPF_AI_SAFE|OPF_QUIET, doc="Stop the running render (keeps the samples so far)", poll=poll_rendering
 OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, doc="Save the render as PNG, or .exr (linear half floats): render.save <path> [beauty|albedo|normal|depth]", poll=poll_render
 OPERATOR op_render_pass, "render.pass", "Next Render Pass", do_render_pass, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)", poll=poll_render
-OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>"
+OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>", form=form_render
 OPERATOR op_render_denoise, "render.denoise", "Denoise", do_render_denoise, check_denoise, flags=OPF_AI_SAFE|OPF_QUIET, doc="Toggle denoising the beauty pass when a render ends (guided by albedo, normal, depth)", poll=poll_render
 
 .globl rn_have

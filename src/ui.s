@@ -21,6 +21,7 @@
 .globl menu_items
 .globl run_op_ui
 .globl ui_layout
+.globl request_quit
 .globl menu_counts
 .globl menu_titles
 .globl menu_x
@@ -262,7 +263,19 @@ hit_test:
     mov     eax, HIT_WGPOP
     jmp     .Lht_ret
 .Lht_nopop:
-    cmp     dword ptr [rip+pie_on], 0   # a pie menu takes the pointer
+    cmp     dword ptr [rip+dlg_open], 0 # a dialog: its widgets, or nothing
+    je      2f
+    mov     edi, ebx
+    mov     esi, r12d
+    call    wg_hit
+    mov     edx, eax
+    test    eax, eax
+    mov     eax, HIT_WIDGET
+    jnz     .Lht_ret
+    mov     eax, HIT_DIALOG
+    xor     edx, edx
+    jmp     .Lht_ret
+2:  cmp     dword ptr [rip+pie_on], 0   # a pie menu takes the pointer
     je      1f
     mov     edi, ebx
     mov     esi, r12d
@@ -1181,7 +1194,8 @@ ui_button:
     jne     .Lbt_done
     cmp     eax, HIT_BTN_CLOSE
     jne     11f
-    mov     dword ptr [rip+quit_flag], 1
+    lea     rdi, [rip+op_file_exit]     # (unsaved changes: asks first)
+    call    run_op_ui
     jmp     .Lbt_done
 11: cmp     eax, HIT_BTN_MAX
     jne     12f
@@ -1483,6 +1497,10 @@ ui_key_press:
     call    wg_key
     jmp     9f
 .Lkp_notyping:
+    mov     edi, ebx                    # a dialog takes the keys
+    call    dlg_key
+    test    eax, eax
+    jnz     9f
     cmp     dword ptr [rip+pie_on], 0   # Esc closes a pie
     je      .Lkp_nopie
     cmp     ebx, KEY_ESC
@@ -1569,6 +1587,7 @@ ui_draw:
 4:  call    wg_pop_draw
     call    palette_draw
     call    pie_draw
+    call    dlg_draw                    # a dialog over everything
     jmp     tip_draw                    # tooltips on top of everything
 
 # run_op_ui(rdi=op) - a menu item or a button: runs it, or when it cannot run
@@ -1579,7 +1598,24 @@ run_op_ui:
     call    op_poll
     test    rax, rax
     jnz     1f
+    mov     rax, [rip+op_arg]           # no argument given:
+    test    rax, rax
+    jz      2f
+    cmp     byte ptr [rax], 0
+    jne     3f
+2:  cmp     qword ptr [rbx+OP_FORM], 0  #  a form asks for it
+    je      3f
     mov     rdi, rbx
+    pop     rbx
+    jmp     dlg_open_form
+3:  test    dword ptr [rbx+OP_FLAGS], OPF_CONFIRM
+    jz      4f
+    cmp     dword ptr [rip+scene_modified], 0
+    je      4f
+    mov     rdi, rbx                    # unsaved changes: "Save changes?"
+    pop     rbx
+    jmp     dlg_open_confirm
+4:  mov     rdi, rbx
     pop     rbx
     jmp     run_op
 1:  push    rax                         # "Undo: there is nothing to undo"
@@ -1596,6 +1632,11 @@ run_op_ui:
     add     rsp, 16
     pop     rbx
     ret
+
+# request_quit - the compositor's close: "Save changes?" first if needed
+request_quit:
+    lea     rdi, [rip+op_file_exit]
+    jmp     run_op_ui
 
 # is_hot(edi=hit id, esi=index) -> eax = 1 if hovered
 is_hot:

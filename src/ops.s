@@ -30,7 +30,7 @@
 .globl key_chars
 
 # ---- File ---------------------------------------------------------------------
-OPERATOR op_file_exit,  "file.exit",  "Exit",      op_exit, key=KEY_Q|KM_CTRL, flags=0, doc="Quit BeeModel"
+OPERATOR op_file_exit,  "file.exit",  "Exit",      op_exit, key=KEY_Q|KM_CTRL, flags=OPF_CONFIRM, doc="Quit BeeModel"
 # ---- Edit ---------------------------------------------------------------------
 OPERATOR op_edit_prefs, "edit.preferences", "Preferences...", op_todo, doc="Open the preferences editor"
 # ---- Tools --------------------------------------------------------------------
@@ -229,12 +229,16 @@ op_poll:
 # ---- polls ---------------------------------------------------------------------
 poll_undo:
     xor     eax, eax
+    cmp     dword ptr [rip+co_on], 0    # (co-editing keeps its own history)
+    jne     1f
     cmp     dword ptr [rip+undo_depth], 0
     jne     1f
     lea     rax, [rip+s_no_undo]
 1:  ret
 poll_redo:
     xor     eax, eax
+    cmp     dword ptr [rip+co_on], 0
+    jne     1f
     cmp     dword ptr [rip+redo_depth], 0
     jne     1f
     lea     rax, [rip+s_no_redo]
@@ -385,8 +389,8 @@ dispatch_key:
     jmp     6f
 5:  test    dword ptr [rdi+OP_FLAGS], OPF_EDIT
     jnz     4b
-6:  sub     rsp, 8                      # (the operator gets an aligned stack)
-    call    run_op
+6:  sub     rsp, 8                      # (the operator gets an aligned stack;
+    call    run_op_ui                   #  a key is the UI: poll, form, "Save?")
     add     rsp, 8
     mov     eax, 1
     ret

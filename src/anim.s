@@ -1592,7 +1592,7 @@ OPERATOR op_an_next,   "anim.next_frame", "Next Frame",       do_an_step, arg=1,
 OPERATOR op_an_prev,   "anim.prev_frame", "Previous Frame",   do_an_step, arg=-1, key=KEY_LEFT_, flags=OPF_AI_SAFE|OPF_QUIET, doc="One frame back"
 OPERATOR op_an_first,  "anim.first_frame","First Frame",      do_an_jump, arg=0, key=KEY_LEFT_|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET, doc="To the start of the frame range"
 OPERATOR op_an_last,   "anim.last_frame", "Last Frame",       do_an_jump, arg=1, key=KEY_RIGHT_|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET, doc="To the end of the frame range"
-OPERATOR op_an_range,  "anim.range",      "Frame Range",      do_an_range, flags=OPF_AI_SAFE|OPF_UNDO, doc="The scene's frames and speed: anim.range <start> <end> [fps]"
+OPERATOR op_an_range,  "anim.range",      "Frame Range",      do_an_range, flags=OPF_AI_SAFE|OPF_UNDO, doc="The scene's frames and speed: anim.range <start> <end> [fps]", form=form_range
 OPERATOR op_an_interp, "anim.interpolation", "Interpolation", do_an_interp, flags=OPF_AI_SAFE|OPF_UNDO, doc="How the selected objects' keys blend into the next: anim.interpolation <constant|linear|bezier>"
 
 .section .rodata

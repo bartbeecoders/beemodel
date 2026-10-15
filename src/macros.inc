@@ -18,7 +18,8 @@
 .equ OP_FLAGS,  52      # u32  OPF_*
 .equ OP_PARAMS, 56      # ptr  parameter list for the redo panel (redo.s), or 0
 .equ OP_POLL,   64      # ptr  fn(rdi=arg) -> rax = 0 can run now, else why not (asciz), or 0
-.equ OP_SIZE,   72
+.equ OP_FORM,   72      # ptr  FORM record (forms.s): a dialog asks for the argument, or 0
+.equ OP_SIZE,   80
 
 .equ OPF_QUIET,   1     # don't echo to the console when run
 .equ OPF_AI_SAFE, 2     # may be exposed to automation without confirmation
@@ -34,6 +35,7 @@
 .equ OPF_CURVE,   2048  # its key only works in curve edit mode (and wins there)
 .equ OPF_ANIMED,  4096  # its key only works over a dope sheet / graph editor (and wins there)
 .equ OPF_ARM,     8192  # its key only works in armature edit / pose mode (and wins there)
+.equ OPF_CONFIRM, 16384 # from the UI: asks "Save changes?" first when the scene has some
 
 # key binding modifiers (pre-shifted into the high half of OP_KEY)
 .equ KM_SHIFT,  MOD_SHIFT << 16
@@ -41,7 +43,7 @@
 .equ KM_ALT,    MOD_ALT << 16
 
 #  OPERATOR sym, "id", "Label", exec [, check, arg, key, flags, "doc"]
-.macro OPERATOR sym, name, label, exec, check=0, arg=0, key=0, flags=OPF_AI_SAFE, doc, params=0, poll=0
+.macro OPERATOR sym, name, label, exec, check=0, arg=0, key=0, flags=OPF_AI_SAFE, doc, params=0, poll=0, form=0
     .pushsection .rodata
 .Lop_name\@:  .asciz "\name"
 .Lop_label\@: .asciz "\label"
@@ -55,6 +57,7 @@
     .long \key, \flags
     .quad \params
     .quad \poll
+    .quad \form
     .popsection
 .endm
 
@@ -69,5 +72,29 @@
     .balign 8
     .globl \sym
 \sym:   .quad SUBTAG, .Lsl\@, \items, \count
+    .popsection
+.endm
+
+# Operator forms (dialog.s, forms.s): FORM sym, n then n FFIELDs - a field
+# is a widget descriptor, the text before its value ("mass "), keywords for
+# an enum, its default and flags (FF_CHANGED: only sent when not the default)
+.equ FF_CHANGED, 1
+.macro FORM sym, n
+    .pushsection .rodata.forms, "a"
+    .balign 8
+    .globl \sym
+\sym:   .quad 0, \sym\()_v
+    .long \n, 0
+    .popsection
+    .pushsection .bss
+    .balign 8
+\sym\()_v: .skip 16*64+8
+    .popsection
+.endm
+.macro FFIELD desc, prefix=0, kw=0, def=0.0, flags=0
+    .pushsection .rodata.forms, "a"
+    .quad \desc, \prefix, \kw
+    .float \def
+    .long \flags
     .popsection
 .endm
