@@ -65,6 +65,7 @@ s_untitled_q:   .asciz "this scene"
 s_q:            .asciz "?"
 s_lost:         .asciz "Your changes are lost if you don't save them."
 s_space:        .asciz " "
+s_world_kw:     .asciz "world"
 
 .text
 
@@ -118,7 +119,7 @@ dlg_open_form:
     cmp     esi, WK_TEXT                # text: the default text (FF_KW)
     jne     5f
     mov     rsi, [rcx+FF_KW]
-    cmp     rsi, FK_ACTIVE
+    cmp     rsi, FK_OTHER
     jbe     4f
     call    copy63
     jmp     4f
@@ -138,8 +139,11 @@ dlg_open_form:
     mov     eax, r13d
     imul    eax, FF_SZ
     lea     rcx, [rbx+FM_FIELDS+rax]
-    cmp     qword ptr [rcx+FF_KW], FK_ACTIVE
-    jne     7f
+    mov     rsi, [rcx+FF_KW]
+    cmp     rsi, FK_OTHER
+    ja      7f
+    test    rsi, rsi
+    jz      7f
     mov     rdx, [rcx+FF_DESC]
     cmp     dword ptr [rdx+WD_KIND], WK_TEXT
     jne     7f
@@ -148,12 +152,22 @@ dlg_open_form:
     lea     rdi, [r12+rax]
     mov     byte ptr [rdi], 0
     push    rdi
+    push    rsi
     mov     edi, [rip+active_obj]
     call    obj_get
+    pop     rsi
     pop     rdi
+    cmp     rsi, FK_OTHER
+    je      71f
     test    rax, rax
     jz      7f
     mov     rsi, rax                    # (OB_NAME)
+    call    copy63
+    jmp     7f
+71: push    rdi                         # another selected object, or world
+    call    other_selected
+    pop     rdi
+    mov     rsi, rax
     call    copy63
 7:  inc     r13d
     jmp     6b
@@ -424,6 +438,30 @@ doc_plain:
 5:  mov     byte ptr [rdi+rcx], 0
     ret
 6:  mov     rdi, rsi                    # (all syntax: as it is)
+    ret
+
+# other_selected(rax=the active object or 0) -> rax = the name of the first
+#   other selected object, or "world"
+other_selected:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, rax
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     8f
+    mov     edi, ebx
+    call    obj_at
+    inc     ebx
+    cmp     rax, r12
+    je      1b
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      1b
+    jmp     9f
+8:  lea     rax, [rip+s_world_kw]
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
     ret
 
 copy63:                                 # rdi = dest, rsi = text (63 max)

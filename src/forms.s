@@ -459,6 +459,28 @@ FFIELD fw_pam, kw=FK_ACTIVE
 FFIELD fw_paa
 FFIELD fw_pad, p_dual
 
+# ---- rigid.joint <fixed|hinge|point> <object> <object|world> [axis x y z] ---------
+.section .rodata
+s_jt_fixed:     .asciz "Fixed (welded)"
+s_jt_hinge:     .asciz "Hinge (turns about an axis)"
+s_jt_point:     .asciz "Point (a ball joint)"
+k_jt_fixed:     .asciz "fixed"
+k_jt_hinge:     .asciz "hinge"
+k_jt_point:     .asciz "point"
+.align 8
+l_jtype:        .quad s_jt_fixed, s_jt_hinge, s_jt_point
+kw_jtype:       .quad k_jt_fixed, k_jt_hinge, k_jt_point
+.text
+WIDGET fw_rjt,  WK_ENUM, "form.rjoint.type", "Type", aux=l_jtype, n=3
+WIDGET fw_rja,  WK_TEXT, "form.rjoint.a", "Object", tip="The first body (the joint sits at its place)"
+WIDGET fw_rjb,  WK_TEXT, "form.rjoint.b", "Tied to", tip="The second body, or world"
+WIDGET fw_rjx,  WK_ENUM, "form.rjoint.axis", "Hinge axis", aux=l_axis, n=3
+FORM form_rjoint, 4
+FFIELD fw_rjt, kw=kw_jtype, def=1.0
+FFIELD fw_rja, kw=FK_ACTIVE
+FFIELD fw_rjb, kw=FK_OTHER
+FFIELD fw_rjx, kw=kw_jaxis, def=1.0
+
 # ---- param.set <name> <expression> ----------------------------------------------------
 WIDGET fw_pmn,  WK_TEXT, "form.param.name", "Name"
 WIDGET fw_pme,  WK_TEXT, "form.param.expression", "Value", tip="A number with units or an expression of other parameters (10mm, 2*wall + 1mm)"
