@@ -12,6 +12,8 @@
 .intel_syntax noprefix
 .include "const.inc"
 .include "macros.inc"
+.include "widgets.inc"
+.include "icons.inc"
 
 # exports
 .globl mods_ref
@@ -25,7 +27,6 @@
 .globl mesh_forget
 .globl mod_names
 .globl mods_props_draw
-.globl mods_props_hit
 .globl mods_drag_begin
 .globl mods_drag_move
 .globl mods_drag_end
@@ -45,6 +46,7 @@
 .globl md_y
 .globl active_mesh_obj
 .globl mod_param_set_obj
+.globl mod_use_tree
 .globl fmt_val3
 .globl ev_owner
 
@@ -1730,6 +1732,45 @@ active_mesh_obj:
     add     rsp, 8
     ret
 
+# mod_use_tree(rdi=object, esi=MT_GEONODES / MT_LOGIC, edx=tree + 1) -> eax =
+#   1: its first modifier of that type (added when it has none) runs the tree
+mod_use_tree:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     rax, [rbx+OB_MODS]
+    xor     ecx, ecx
+    test    rax, rax
+    jz      2f
+1:  cmp     ecx, [rax+MB_COUNT]
+    jae     2f
+    imul    edx, ecx, MOD_SZ
+    cmp     [rax+MB_HDR+rdx+MD_TYPE], r12d
+    je      3f
+    inc     ecx
+    jmp     1b
+2:  mov     rdi, rbx
+    mov     esi, r12d
+    call    mod_add
+    mov     ecx, eax
+    test    eax, eax
+    js      8f
+3:  cvtsi2ss xmm0, r13d
+    mov     rdi, rbx
+    mov     esi, ecx
+    xor     edx, edx
+    call    mod_param_set
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # mod_add(rdi=object, esi=type) -> eax = index or -1
 mod_add:
     push    rbx
@@ -2287,61 +2328,56 @@ do_mod_set:
     pop     r13
     pop     r12
     pop     rbx
-    ret
-
 # =============================================================================
-#  Properties editor: the stack of the active object
+#  Properties editor: the active object's stack, as widgets. Values are
+#  copied out each frame (md_vals); a change goes through mod_param_set
+#  (one undo step). Objects (boolean, armature) and trees (geometry nodes,
+#  logic) are picked from lists; Multires has Subdivide and Propagate Down.
 # =============================================================================
-.equ BTN_ADD,    1
-.equ BTN_DEL,    2
-.equ BTN_UP,     3
-.equ BTN_DOWN,   4
-.equ BTN_APPLY,  5
-.equ BTN_TOGGLE, 6
+.equ MAXR,      64                      # value rows in a frame
 
-# add_button(edi=code (| index << 8), esi=x, edx=y, ecx=w, r8=label, r9d=colour)
-add_button:
-    push    rbx
-    push    r12
-    push    r13
-    push    r14
-    push    r15
-    mov     ebx, edi
-    mov     r12d, esi
-    mov     r13d, edx
-    mov     r14d, ecx
-    mov     r15, r8
-    mov     eax, [rip+pr_nbtn]
-    cmp     eax, 30
-    jae     1f
-    lea     rcx, [rip+pr_btn]
-    imul    edx, eax, 16
-    mov     [rcx+rdx], ebx
-    mov     [rcx+rdx+4], r12d
-    mov     [rcx+rdx+8], r13d
-    mov     [rcx+rdx+12], r14d
-    inc     dword ptr [rip+pr_nbtn]
-1:  mov     edi, r12d
-    mov     esi, r13d
-    mov     edx, r14d
-    mov     ecx, 18
-    mov     r8d, COL_FIELD
-    call    fill_rect
-    mov     edi, r12d
-    add     edi, 5
-    mov     esi, r13d
-    add     esi, 1
-    mov     rdx, r15
-    mov     ecx, COL_TEXT
-    call    draw_text
-    pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
-    pop     rbx
-    ret
+WIDGET wd_md_add,  WK_BUTTON, "modifier.add", "Add Modifier", tip="Add a modifier to the stack (Ctrl+1..3: Subdivision Surface)"
+WIDGET wd_md_on,   WK_TOGGLE, "modifier.on", flags=WGF_COMPACT, cb=md_on_cb, tip="On or off (an off modifier is skipped)"
+WIDGET wd_md_up,   WK_BUTTON, "modifier.up", "^", flags=WGF_COMPACT, tip="Move it up the stack (it runs earlier)"
+WIDGET wd_md_down, WK_BUTTON, "modifier.down", "v", flags=WGF_COMPACT, tip="Move it down the stack (it runs later)"
+WIDGET wd_md_apply, WK_BUTTON, "modifier.apply", "Apply", flags=WGF_COMPACT, tip="Make it (and the ones above it) part of the mesh"
+WIDGET wd_md_del,  WK_BUTTON, "modifier.remove", flags=WGF_ICON|WGF_COMPACT, n=ICON_CLOSE, tip="Remove the modifier"
+WIDGET wd_md_f,    WK_FLOAT, "modifier.value", cb=md_f_cb, undo="Modifier"
+WIDGET wd_md_i,    WK_INT, "modifier.value", cb=md_i_cb, undo="Modifier"
+WIDGET wd_md_obj,  WK_ENUM, "modifier.object", flags=WGF_DYN, cb=md_obj_cb, undo="Modifier", aux=md_obj_names, tip="The other object it uses"
+WIDGET wd_md_tree, WK_ENUM, "modifier.tree", flags=WGF_DYN, cb=md_i_cb, undo="Modifier", aux=md_tree_names, tip="The node tree it runs (Node Editor: Tab switches to it)"
+WIDGET wd_md_bop,  WK_ENUM, "modifier.operation", cb=md_i_cb, undo="Modifier", aux=l_boolop, n=3
+WIDGET wd_md_amode, WK_ENUM, "modifier.mode", cb=md_i_cb, undo="Modifier", aux=l_armmode, n=2, tip="How bones bend the skin: linear blend, or dual quaternion (keeps volume at joints)"
+WIDGET wd_md_subd, WK_BUTTON, "modifier.subdivide", "Subdivide", tip="One more level of detail to sculpt on"
+WIDGET wd_md_prop, WK_BUTTON, "modifier.propagate", "Propagate", aux=op_mr_down, tip="Pass the sculpted detail of this level down to the coarser levels"
 
-# mods_props_draw(edi=y) -> eax = y below the section (ed_x / ed_w set)
+.section .rodata
+s_union_l:      .asciz "Union"
+s_diff_l:       .asciz "Difference"
+s_isect_l:      .asciz "Intersect"
+s_lbs:          .asciz "Linear blend"
+s_dqs:          .asciz "Dual quaternion"
+s_dash:         .asciz "None"
+s_no_mods:      .asciz "Modifiers change the mesh without touching it: mirror, array, bevel ..."
+.align 8
+l_boolop:       .quad s_union_l, s_diff_l, s_isect_l
+l_armmode:      .quad s_lbs, s_dqs
+.section .bss
+.align 8
+md_desc:        .skip WD_SZ*MAXR        # per value row (its range and step)
+md_vals:        .skip 4*MAXR
+md_on:          .skip 4*MOD_MAX
+md_lbl:         .skip 8*80
+md_objh:        .skip 4*80              # the object list's handles
+md_ob:          .skip 8                 # the object shown
+md_cur_h:       .skip 4
+md_name:        .skip 32
+.section .rodata
+.align 4
+mz_tenth:       .float 0.1
+.text
+
+# mods_props_draw(edi=y) -> eax = y below the section
 mods_props_draw:
     push    rbx
     push    r12
@@ -2349,10 +2385,9 @@ mods_props_draw:
     push    r14
     push    r15
     push    rbp
-    sub     rsp, 40
+    sub     rsp, 24
     mov     r12d, edi
-    mov     dword ptr [rip+pr_rows], 0
-    mov     dword ptr [rip+pr_nbtn], 0
+    call    pnl_begin
     mov     edi, [rip+active_obj]
     call    obj_get
     test    rax, rax
@@ -2360,174 +2395,195 @@ mods_props_draw:
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     .Lpd_out
     mov     rbx, rax
+    mov     [rip+md_ob], rax
     add     r12d, 8
-    mov     edi, [rip+ed_x]             # "Modifiers" + Add
-    add     edi, 14
-    mov     esi, r12d
     lea     rdx, [rip+s_mods]
-    mov     ecx, COL_ACCENT
-    call    draw_heading
-    mov     edi, BTN_ADD
-    mov     esi, [rip+ed_x]
-    add     esi, [rip+ed_w]
-    sub     esi, 70
-    mov     edx, r12d
-    mov     ecx, 56
-    lea     r8, [rip+s_add_mod]
-    call    add_button
-    add     r12d, 24
-    mov     rbp, [rbx+OB_MODS]
-    test    rbp, rbp
-    jz      .Lpd_out
+    call    pnl_heading
+    lea     rdi, [rip+wd_md_add]        # Add Modifier: the list of types
+    xor     r8d, r8d
+    call    pnl_full
+    test    eax, eax
+    jz      1f
+    mov     eax, [rip+pnl_x]
+    mov     [rip+md_x], eax
+    lea     eax, [r12-4]
+    mov     [rip+md_y], eax
+    mov     dword ptr [rip+menu_open], MENU_MODADD
+    call    mn_layout                   # (its place now: ui_tree, clicks)
+    mov     dword ptr [rip+dirty], 1    # (drawn next frame)
+1:  mov     rbp, [rbx+OB_MODS]
     xor     r13d, r13d                  # modifier
+    xor     r15d, r15d                  # value row
+    test    rbp, rbp
+    jz      .Lpd_none
+    cmp     dword ptr [rbp+MB_COUNT], 0
+    jne     .Lpd_mod
+.Lpd_none:
+    lea     rdx, [rip+s_no_mods]
+    call    pnl_hint
+    jmp     .Lpd_out
 .Lpd_mod:
     cmp     r13d, [rbp+MB_COUNT]
     jae     .Lpd_out
+    add     r12d, 6
     imul    eax, r13d, MOD_SZ
     lea     r14, [rbp+MB_HDR+rax]
-    mov     eax, [r14+MD_TYPE]          # name (dim when off)
+    mov     eax, [r14+MD_FLAGS]         # on / off, the name
+    and     eax, 1
+    lea     rcx, [rip+md_on]
+    mov     [rcx+r13*4], eax
+    lea     r8, [rcx+r13*4]
+    lea     rdi, [rip+wd_md_on]
+    mov     esi, [rip+pnl_x]
+    mov     edx, r12d
+    mov     ecx, 18
+    mov     r9d, r13d
+    call    wg
+    mov     eax, [r14+MD_TYPE]
     lea     rcx, [rip+mod_names]
     mov     rdx, [rcx+rax*8]
     mov     ecx, COL_TEXT
     test    dword ptr [r14+MD_FLAGS], 1
-    jnz     1f
+    jnz     2f
     mov     ecx, COL_TEXT_DIM
-1:  mov     edi, [rip+ed_x]
-    add     edi, 14
+2:  mov     edi, [rip+pnl_x]
+    add     edi, 24
     mov     esi, r12d
     call    draw_text
-    mov     r15d, [rip+ed_x]            # buttons: on/off ^ v Apply x
-    add     r15d, [rip+ed_w]
-    sub     r15d, 14
-    sub     r15d, 26
-    mov     edi, r13d
-    shl     edi, 8
-    or      edi, BTN_DEL
-    mov     esi, r15d
-    mov     edx, r12d
-    mov     ecx, 22
-    lea     r8, [rip+s_x]
-    call    add_button
-    sub     r15d, 50
-    mov     edi, r13d
-    shl     edi, 8
-    or      edi, BTN_APPLY
-    mov     esi, r15d
-    mov     edx, r12d
+    mov     eax, [rip+pnl_x]            # ^ v Apply x, from the right
+    add     eax, [rip+pnl_w]
+    mov     [rsp], eax
+    lea     rdi, [rip+wd_md_del]
+    mov     ecx, 18
+    call    md_btn
+    test    eax, eax
+    jz      3f
+    lea     rdi, [rip+op_mod_remove]
+    jmp     .Lpd_run
+3:  lea     rdi, [rip+wd_md_apply]
     mov     ecx, 46
-    lea     r8, [rip+s_apply]
-    call    add_button
-    sub     r15d, 22
-    mov     edi, r13d
-    shl     edi, 8
-    or      edi, BTN_DOWN
-    mov     esi, r15d
-    mov     edx, r12d
+    call    md_btn
+    test    eax, eax
+    jz      4f
+    lea     rdi, [rip+op_mod_apply]
+    jmp     .Lpd_run
+4:  lea     rdi, [rip+wd_md_down]
     mov     ecx, 18
-    lea     r8, [rip+s_down]
-    call    add_button
-    sub     r15d, 22
-    mov     edi, r13d
-    shl     edi, 8
-    or      edi, BTN_UP
-    mov     esi, r15d
-    mov     edx, r12d
+    call    md_btn
+    test    eax, eax
+    jz      5f
+    lea     rdi, [rip+op_mod_down]
+    jmp     .Lpd_run
+5:  lea     rdi, [rip+wd_md_up]
     mov     ecx, 18
-    lea     r8, [rip+s_up]
-    call    add_button
-    sub     r15d, 32
-    mov     edi, r13d
-    shl     edi, 8
-    or      edi, BTN_TOGGLE
-    mov     esi, r15d
-    mov     edx, r12d
-    mov     ecx, 28
-    lea     r8, [rip+s_on]
-    test    dword ptr [r14+MD_FLAGS], 1
-    jnz     2f
-    lea     r8, [rip+s_off]
-2:  call    add_button
-    add     r12d, 22
-    mov     eax, [r14+MD_TYPE]          # parameter rows
+    call    md_btn
+    test    eax, eax
+    jz      6f
+    lea     rdi, [rip+op_mod_up]
+    jmp     .Lpd_run
+6:  add     r12d, 24
+    mov     eax, [r14+MD_TYPE]          # the values
     lea     rcx, [rip+mod_params]
     mov     rax, [rcx+rax*8]
-    mov     [rsp+32], rax
-    xor     r15d, r15d
-3:  mov     rax, [rsp+32]
-    cmp     r15d, [rax]
-    jae     5f
-    imul    ecx, r15d, 32
-    lea     rax, [rax+8+rcx]
-    mov     [rsp+24], rax
-    mov     edi, [rip+ed_x]
-    add     edi, 28
-    mov     esi, r12d
-    mov     rdx, [rax]
-    mov     ecx, COL_TEXT_DIM
-    call    draw_text
-    mov     edi, [rip+ed_x]             # value field
-    add     edi, 110
-    mov     esi, r12d
-    sub     esi, 2
-    mov     edx, [rip+ed_w]
-    sub     edx, 124
-    mov     ecx, 18
-    mov     r8d, COL_FIELD
-    call    fill_rect
-    mov     eax, [rip+pr_rows]          # remember the field
-    cmp     eax, 63
-    jae     31f
-    mov     ecx, r13d
-    shl     ecx, 8
-    or      ecx, r15d
-    lea     rdx, [rip+pr_field]
-    mov     [rdx+rax*4], ecx
-    lea     rdx, [rip+pr_fy]
-    mov     ecx, r12d
-    sub     ecx, 2
-    mov     [rdx+rax*4], ecx
-    inc     dword ptr [rip+pr_rows]
-31: call    fmt_reset                   # the value
-    mov     rax, [rsp+24]
-    cmp     dword ptr [rax+8], PF_OBJECT
-    jne     34f
-    mov     edi, [r14+MD_P+r15*4]       # an object: its name
-    lea     rdx, [rip+s_none]
-    test    edi, edi
-    jz      35f
-    call    obj_get
-    lea     rdx, [rip+s_none]
+    mov     [rsp+8], rax
+    xor     ebx, ebx                    # parameter
+.Lpd_par:
+    mov     rax, [rsp+8]
     test    rax, rax
-    jz      35f
-    lea     rdx, [rax+OB_NAME]
-35: mov     edi, [rip+ed_x]
-    add     edi, 116
-    mov     esi, r12d
-    mov     ecx, COL_TEXT
-    call    draw_text
-    jmp     36f
-34: movss   xmm0, [r14+MD_P+r15*4]
-    cmp     dword ptr [rax+8], 0
-    je      32f
-    cvtss2si edi, xmm0
-    call    fmt_int
-    jmp     33f
-32: call    fmt_val3
-33: mov     edi, [rip+ed_x]
-    add     edi, 116
-    mov     esi, r12d
-    lea     rdx, [rip+fmt_buf]
-    mov     ecx, COL_TEXT
-    call    draw_text
-36: add     r12d, 20
+    jz      .Lpd_parend
+    cmp     ebx, [rax]
+    jae     .Lpd_parend
+    cmp     r15d, MAXR
+    jae     .Lpd_parend
+    imul    ecx, ebx, 32
+    lea     rax, [rax+8+rcx]
+    mov     [rsp+16], rax               # the parameter's record
+    mov     rsi, [rax]                  # its name, capitalised
+    lea     rdi, [rip+md_name]
+    mov     ecx, 30
+1:  mov     al, [rsi]
+    mov     [rdi], al
+    test    al, al
+    jz      2f
+    inc     rsi
+    inc     rdi
+    dec     ecx
+    jnz     1b
+    mov     byte ptr [rdi], 0
+2:  lea     rdx, [rip+md_name]
+    mov     al, [rdx]
+    cmp     al, 'a'
+    jb      3f
+    cmp     al, 'z'
+    ja      3f
+    sub     byte ptr [rdx], 32
+3:  mov     edi, [rip+pnl_x]
+    add     edi, 24
+    lea     esi, [r12+3]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_small
+    mov     rax, [rsp+16]
+    call    md_field_desc               # -> rdi = desc, md_vals[r15] set
+    mov     esi, [rip+pnl_x]
+    add     esi, 96
+    mov     ecx, [rip+pnl_w]
+    sub     ecx, 96
+    mov     edx, r12d
+    lea     r8, [rip+md_vals]
+    lea     r8, [r8+r15*4]
+    mov     r9d, r13d
+    shl     r9d, 4
+    or      r9d, ebx
+    call    wg
+    add     r12d, WG_H+4
     inc     r15d
-    jmp     3b
-5:  add     r12d, 6
-    inc     r13d
+    inc     ebx
+    jmp     .Lpd_par
+.Lpd_parend:
+    cmp     dword ptr [r14+MD_TYPE], MT_MULTIRES
+    jne     8f
+    lea     rdi, [rip+wd_md_subd]       # Multires: Subdivide, Propagate Down
+    mov     esi, [rip+pnl_x]
+    add     esi, 24
+    mov     ecx, [rip+pnl_w]
+    sub     ecx, 24
+    shr     ecx, 1
+    sub     ecx, 3
+    mov     edx, r12d
+    xor     r8d, r8d
+    mov     r9d, r13d
+    call    wg
+    test    eax, eax
+    jz      7f
+    mov     edi, r13d
+    call    md_subdivide
+7:  lea     rdi, [rip+wd_md_prop]
+    mov     ecx, [rip+pnl_w]
+    sub     ecx, 24
+    shr     ecx, 1
+    mov     esi, [rip+pnl_x]
+    add     esi, 24
+    add     esi, ecx
+    add     esi, 3
+    sub     ecx, 3
+    mov     edx, r12d
+    xor     r8d, r8d
+    mov     r9d, r13d
+    call    wg
+    add     r12d, WG_H+4
+8:  inc     r13d
     jmp     .Lpd_mod
+.Lpd_run:                               # a button: its operator on modifier r13
+    mov     eax, r13d
+    lea     rsi, [rip+arg_buf]
+    add     al, '0'
+    mov     [rsi], al
+    mov     byte ptr [rsi+1], 0
+    call    run_arg_m
+    jmp     .Lpd_out                    # (the stack changed: next frame)
 .Lpd_out:
     mov     eax, r12d
-    add     rsp, 40
+    add     rsp, 24
     pop     rbp
     pop     r15
     pop     r14
@@ -2535,6 +2591,229 @@ mods_props_draw:
     pop     r12
     pop     rbx
     ret
+
+# md_btn(rdi=desc, ecx=w) - a header button left of [rsp+8] (the caller's
+#   [rsp]); moves it left -> eax = 1 clicked
+md_btn:
+    mov     esi, [rsp+8]
+    sub     esi, ecx
+    lea     eax, [rsi-4]
+    mov     [rsp+8], eax
+    mov     edx, r12d
+    xor     r8d, r8d
+    mov     r9d, r13d
+    sub     rsp, 8
+    call    wg
+    add     rsp, 8
+    ret
+
+# md_field_desc(rax=parameter record; r14 = modifier, ebx = parameter,
+#   r15d = row) -> rdi = the widget for it, its value in md_vals[r15]
+md_field_desc:
+    push    r12
+    mov     r12, rax
+    lea     rcx, [rip+md_vals]
+    lea     rcx, [rcx+r15*4]
+    movss   xmm0, [r14+MD_P+rbx*4]
+    mov     eax, [r12+8]                # kind
+    cmp     eax, PF_OBJECT
+    je      .Lfd_obj
+    mov     rdx, [r12]
+    lea     rsi, [rip+pn_tree]
+    cmp     rdx, rsi
+    je      .Lfd_int_as
+    lea     rsi, [rip+pn_operation]
+    cmp     rdx, rsi
+    je      .Lfd_int_as
+    lea     rsi, [rip+pn_mode]
+    cmp     rdx, rsi
+    je      .Lfd_int_as
+    test    eax, eax
+    jnz     .Lfd_int
+    movss   [rcx], xmm0                 # a float: its range and step
+    lea     rsi, [rip+wd_md_f]
+    mov     edx, 3
+    jmp     .Lfd_copy
+.Lfd_int:
+    cvtss2si eax, xmm0
+    mov     [rcx], eax
+    lea     rsi, [rip+wd_md_i]
+    xor     edx, edx
+.Lfd_copy:
+    imul    eax, r15d, WD_SZ
+    lea     rdi, [rip+md_desc]
+    add     rdi, rax
+    push    rdi
+    mov     ecx, WD_SZ
+    rep     movsb
+    pop     rdi
+    mov     [rdi+WD_DEC], edx
+    mov     eax, [r12+12]               # step (ints: one per 10 px)
+    mov     [rdi+WD_STEP], eax
+    test    edx, edx
+    jnz     1f
+    movss   xmm0, [r12+12]
+    mulss   xmm0, [rip+mz_tenth]
+    movss   [rdi+WD_STEP], xmm0
+1:  mov     eax, [r12+16]
+    mov     [rdi+WD_MIN], eax
+    mov     eax, [r12+20]
+    mov     [rdi+WD_MAX], eax
+    or      dword ptr [rdi+WD_FLAGS], WGF_CLAMP
+    pop     r12
+    ret
+.Lfd_int_as:                            # trees, operation, mode: lists
+    cvtss2si eax, xmm0
+    mov     [rcx], eax
+    lea     rdi, [rip+wd_md_tree]
+    lea     rsi, [rip+pn_tree]
+    cmp     rdx, rsi
+    je      9f
+    lea     rdi, [rip+wd_md_bop]
+    lea     rsi, [rip+pn_operation]
+    cmp     rdx, rsi
+    je      9f
+    lea     rdi, [rip+wd_md_amode]
+9:  pop     r12
+    ret
+.Lfd_obj:                               # an object: its place in the list + 1
+    movd    eax, xmm0
+    mov     [rip+md_cur_h], eax
+    call    md_obj_names                # (fills md_objh)
+    xor     ecx, ecx
+    mov     esi, [rip+md_cur_h]
+    xor     eax, eax
+    test    esi, esi
+    jz      3f
+2:  cmp     ecx, edx
+    jae     3f
+    lea     r8, [rip+md_objh]
+    cmp     [r8+rcx*4], esi
+    je      21f
+    inc     ecx
+    jmp     2b
+21: lea     eax, [rcx+1]
+3:  lea     rcx, [rip+md_vals]
+    mov     [rcx+r15*4], eax
+    lea     rdi, [rip+wd_md_obj]
+    pop     r12
+    ret
+
+# md_obj_names -> rax = labels ("None", the scene's objects), edx = count
+md_obj_names:
+    push    rbx
+    lea     rax, [rip+s_dash]
+    mov     [rip+md_lbl], rax
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    cmp     ebx, 78
+    jae     2f
+    lea     rax, [rip+obj_list]
+    mov     eax, [rax+rbx*4]
+    lea     rcx, [rip+md_objh]
+    mov     [rcx+rbx*4], eax
+    mov     edi, ebx
+    call    obj_at                      # (OB_NAME)
+    lea     rcx, [rip+md_lbl]
+    mov     [rcx+rbx*8+8], rax
+    inc     ebx
+    jmp     1b
+2:  lea     edx, [rbx+1]
+    lea     rax, [rip+md_lbl]
+    pop     rbx
+    ret
+
+md_tree_names:
+    sub     rsp, 8
+    call    nt_count
+    lea     rdi, [rip+md_lbl]
+    lea     rsi, [rip+s_dash]
+    mov     edx, eax
+    lea     rcx, [rip+nt_get]           # (the name at 0)
+    mov     r8d, 80
+    call    pnl_list
+    mov     edx, eax
+    lea     rax, [rip+md_lbl]
+    add     rsp, 8
+    ret
+
+# ---- callbacks: rdi = the value, esi = modifier << 4 | parameter ----------------------
+md_f_cb:
+    movss   xmm0, [rdi]
+    jmp     md_set
+md_i_cb:
+    cvtsi2ss xmm0, dword ptr [rdi]
+md_set:
+    mov     edx, esi
+    and     edx, 15
+    shr     esi, 4
+    mov     rdi, [rip+md_ob]
+    jmp     mod_param_set
+md_obj_cb:
+    push    rbx
+    mov     ebx, esi
+    mov     ecx, [rdi]                  # list place -> handle
+    xor     eax, eax
+    dec     ecx
+    js      1f
+    lea     rax, [rip+md_objh]
+    mov     eax, [rax+rcx*4]
+1:  mov     ecx, eax
+    mov     edx, ebx
+    and     edx, 15
+    mov     esi, ebx
+    shr     esi, 4
+    mov     rdi, [rip+md_ob]
+    call    mod_param_set_obj
+    pop     rbx
+    ret
+md_on_cb:                               # esi = modifier -> object.modifier_toggle
+    lea     eax, [rsi+'0']
+    lea     rsi, [rip+arg_buf]
+    mov     [rsi], al
+    mov     byte ptr [rsi+1], 0
+    lea     rdi, [rip+op_mod_toggle]
+    jmp     run_arg_m
+
+# md_subdivide(edi=modifier) - Multires: one level more, shown
+md_subdivide:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    lea     rdi, [rip+s_mods]
+    call    undo_push
+    mov     rdi, [rip+md_ob]
+    mov     esi, ebx
+    call    stack_index
+    test    rax, rax
+    jz      9f
+    movss   xmm0, [rax+MD_P]            # levels + 1, and the level shown
+    addss   xmm0, [rip+mz_one]
+    movss   [rsp], xmm0
+    mov     rdi, [rip+md_ob]
+    mov     esi, ebx
+    xor     edx, edx
+    call    mod_param_set
+    movss   xmm0, [rsp]
+    mov     rdi, [rip+md_ob]
+    mov     esi, ebx
+    mov     edx, 1
+    call    mod_param_set
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+run_arg_m:                              # rdi = op, rsi = argument
+    push    qword ptr [rip+op_arg]
+    mov     [rip+op_arg], rsi
+    call    run_op
+    pop     qword ptr [rip+op_arg]
+    ret
+
+
 
 # fmt_val3(xmm0) - three decimals, trailing zeros dropped
 fmt_val3:
@@ -2597,209 +2876,16 @@ fmt_val3:
     pop     rbx
     ret
 
-# mods_props_hit(edi=x, esi=y logical) -> eax = 1xxxx button (code | index
-#   << 8 in the low bits) / 2xxxx field (index << 8 | param), or -1
-mods_props_hit:
-    xor     ecx, ecx                    # buttons
-1:  cmp     ecx, [rip+pr_nbtn]
-    jae     3f
-    lea     rdx, [rip+pr_btn]
-    imul    eax, ecx, 16
-    add     rdx, rax
-    mov     eax, edi
-    sub     eax, [rdx+4]
-    js      2f
-    cmp     eax, [rdx+12]
-    jge     2f
-    mov     eax, esi
-    sub     eax, [rdx+8]
-    js      2f
-    cmp     eax, 18
-    jge     2f
-    mov     eax, [rdx]
-    or      eax, 0x10000
-    ret
-2:  inc     ecx
-    jmp     1b
-3:  mov     eax, [rip+ed_x]             # fields
-    add     eax, 110
-    cmp     edi, eax
-    jl      8f
-    xor     ecx, ecx
-4:  cmp     ecx, [rip+pr_rows]
-    jae     8f
-    lea     rdx, [rip+pr_fy]
-    mov     eax, esi
-    sub     eax, [rdx+rcx*4]
-    js      5f
-    cmp     eax, 18
-    jge     5f
-    lea     rdx, [rip+pr_field]
-    mov     eax, [rdx+rcx*4]
-    or      eax, 0x20000
-    ret
-5:  inc     ecx
-    jmp     4b
-8:  mov     eax, -1
-    ret
-
-# mods_drag_begin(edi=hit code) - buttons act at once; fields start a drag
-#   (one undo step for the whole drag)
+# mods_drag_begin / mods_drag_move - the physics section's fields (rbody.s)
 mods_drag_begin:
-    test    edi, 0x80000                # the physics section's?
-    jz      0f
+    test    edi, 0x80000
+    jz      1f
     mov     dword ptr [rip+md_mat], 2
     jmp     rb_drag_begin
-0:  xor     eax, eax                    # the material section's?
-    test    edi, 0x40000
-    setnz   al
-    mov     [rip+md_mat], eax
-    jnz     mats_drag_begin
-    push    rbx
-    push    r12
-    sub     rsp, 8
-    mov     ebx, edi
-    test    ebx, 0x10000
-    jz      5f
-    mov     eax, ebx                    # button
-    and     eax, 0xff
-    mov     r12d, ebx
-    shr     r12d, 8
-    and     r12d, 0xff
-    cmp     eax, BTN_ADD
-    jne     1f
-    mov     eax, [rip+ptr_x]            # the type menu opens at the pointer
-    mov     [rip+md_x], eax
-    mov     eax, [rip+ptr_y]
-    add     eax, 12
-    mov     [rip+md_y], eax
-    mov     dword ptr [rip+menu_open], MENU_MODADD
-    jmp     9f
-1:  lea     rcx, [rip+btn_ops]          # run its operator with the index
-    mov     rdi, [rcx+rax*8]
-    test    rdi, rdi
-    jz      9f
-    push    rdi
-    mov     eax, r12d
-    lea     rdi, [rip+arg_buf]
-    add     al, '0'
-    mov     [rdi], al
-    mov     byte ptr [rdi+1], 0
-    mov     [rip+op_arg], rdi
-    pop     rdi
-    call    run_op
-    mov     qword ptr [rip+op_arg], 0
-    jmp     9f
-5:  mov     [rip+dr_code], ebx          # field: remember where we started
-    mov     eax, [rip+ptr_x]
-    mov     [rip+dr_x0], eax
-    mov     edi, [rip+active_obj]
-    call    obj_get
-    test    rax, rax
-    jz      9f
-    mov     r12, rax
-    mov     esi, ebx
-    shr     esi, 8
-    and     esi, 0xff
-    mov     rdi, r12
-    call    stack_index
-    test    rax, rax
-    jz      9f
-    mov     ecx, ebx
-    and     ecx, 0xff
-    mov     edx, [rax+MD_P+rcx*4]
-    mov     [rip+dr_v0], edx
-    lea     rdi, [rip+s_mods]           # one undo step for the drag
-    call    undo_push
-9:  add     rsp, 8
-    pop     r12
-    pop     rbx
-    ret
-
-# mods_drag_move(edi=x logical)
+1:  ret
 mods_drag_move:
     cmp     dword ptr [rip+md_mat], 2
     je      rb_drag_move
-    cmp     dword ptr [rip+md_mat], 0
-    jne     mats_drag_move
-    push    rbx
-    push    r12
-    push    r13
-    sub     rsp, 16
-    mov     ebx, edi
-    sub     ebx, [rip+dr_x0]
-    mov     edi, [rip+active_obj]
-    call    obj_get
-    test    rax, rax
-    jz      9f
-    mov     r12, rax
-    mov     r13d, [rip+dr_code]
-    mov     esi, r13d
-    shr     esi, 8
-    and     esi, 0xff
-    mov     rdi, r12
-    call    stack_index
-    test    rax, rax
-    jz      9f
-    mov     ecx, [rax+MD_TYPE]          # step from the parameter record
-    lea     rdx, [rip+mod_params]
-    mov     rdx, [rdx+rcx*8]
-    mov     ecx, r13d
-    and     ecx, 0xff
-    imul    ecx, ecx, 32
-    lea     rdx, [rdx+8+rcx]
-    cmp     dword ptr [rdx+8], PF_OBJECT
-    jne     2f
-    mov     eax, ebx                    # an object: one per 20 px through
-    cdq                                 #  the scene's list
-    mov     ecx, 20
-    idiv    ecx
-    mov     r8d, eax
-    xor     eax, eax                    # where the start value sits
-    mov     ecx, [rip+dr_v0]
-    lea     r9, [rip+obj_list]
-21: cmp     eax, [rip+obj_count]
-    jae     22f
-    cmp     [r9+rax*4], ecx
-    je      22f
-    inc     eax
-    jmp     21b
-22: add     eax, r8d
-    jns     23f
-    xor     eax, eax
-23: mov     ecx, [rip+obj_count]
-    dec     ecx
-    js      9f
-    cmp     eax, ecx
-    jle     24f
-    mov     eax, ecx
-24: mov     ecx, [r9+rax*4]
-    mov     rdi, r12
-    mov     esi, r13d
-    shr     esi, 8
-    and     esi, 0xff
-    mov     edx, r13d
-    and     edx, 0xff
-    call    mod_param_set_obj
-    jmp     9f
-2:  cvtsi2ss xmm0, ebx
-    cmp     dword ptr [rdx+8], 0
-    je      1f
-    divss   xmm0, [rip+mz_ten]          # integers: one per 10 px
-    roundss xmm0, xmm0, 1
-1:  mulss   xmm0, [rdx+12]
-    addss   xmm0, [rip+dr_v0]
-    mov     rdi, r12
-    mov     esi, r13d
-    shr     esi, 8
-    and     esi, 0xff
-    mov     edx, r13d
-    and     edx, 0xff
-    call    mod_param_set
-9:  add     rsp, 16
-    pop     r13
-    pop     r12
-    pop     rbx
     ret
 
 mods_drag_end:

@@ -48,8 +48,6 @@ cu_units:       .skip 4
 cu_kernel:      .skip 4
 cu_mass:        .skip 128               # the last mass properties
 cu_mass_uid:    .skip 4
-cu_x:           .skip 4
-cu_w:           .skip 4
 
 .section .rodata
 s_empty:        .asciz ""
@@ -359,21 +357,16 @@ cadui_props:
     push    r14
     push    r15
     mov     r12d, edi
-    mov     eax, [rip+ed_x]
-    add     eax, 14
-    mov     [rip+cu_x], eax
-    mov     eax, [rip+ed_w]
-    sub     eax, 28
-    mov     [rip+cu_w], eax
+    call    pnl_begin
 
     # ---- parameters ----
     lea     rdx, [rip+s_h_params]
-    call    heading
+    call    pnl_heading
     call    param_count
     test    eax, eax
     jnz     1f
     lea     rdx, [rip+s_no_params]
-    call    hint
+    call    pnl_hint
 1:  xor     ebx, ebx
 .Lcu_prow:
     call    param_count
@@ -384,21 +377,21 @@ cadui_props:
     mov     edi, ebx
     call    param_rec
     mov     r13, rax
-    mov     edi, [rip+cu_x]             # name
+    mov     edi, [rip+pnl_x]             # name
     lea     esi, [r12+3]
     lea     rdx, [r13+PR_NAME]
     mov     ecx, COL_TEXT
     call    draw_small
-    mov     eax, [rip+cu_w]             # the expression: 28% .. 62%
+    mov     eax, [rip+pnl_w]             # the expression: 28% .. 62%
     imul    eax, eax, 28
     cdq
     mov     ecx, 100
     idiv    ecx
     mov     r14d, eax                   # (its x offset)
     lea     rdi, [rip+wd_cp_expr]
-    mov     esi, [rip+cu_x]
+    mov     esi, [rip+pnl_x]
     add     esi, r14d
-    mov     ecx, [rip+cu_w]
+    mov     ecx, [rip+pnl_w]
     imul    ecx, ecx, 34
     mov     eax, ecx
     cdq
@@ -416,16 +409,16 @@ cadui_props:
     call    param_value
     cvtsd2ss xmm0, xmm0
     call    fmt_val3
-    mov     edi, [rip+cu_x]             # (right-aligned before the x)
-    add     edi, [rip+cu_w]
+    mov     edi, [rip+pnl_x]             # (right-aligned before the x)
+    add     edi, [rip+pnl_w]
     sub     edi, 22
     lea     esi, [r12+3]
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_TEXT_DIM
-    call    draw_right
+    call    pnl_draw_right
     lea     rdi, [rip+wd_cp_del]        # remove
-    mov     esi, [rip+cu_x]
-    add     esi, [rip+cu_w]
+    mov     esi, [rip+pnl_x]
+    add     esi, [rip+pnl_w]
     sub     esi, 18
     mov     edx, r12d
     mov     ecx, 18
@@ -445,8 +438,8 @@ cadui_props:
     add     r12d, 4
     lea     rdi, [rip+wd_cp_add]
     xor     r8d, r8d
-    call    full_row
-    mov     edi, [rip+cu_x]
+    call    pnl_full
+    mov     edi, [rip+pnl_x]
     lea     esi, [r12+4]
     lea     rdx, [rip+s_units]
     mov     ecx, COL_TEXT_DIM
@@ -464,23 +457,23 @@ cadui_props:
 4:  mov     [rip+cu_units], ecx
     lea     rdi, [rip+wd_cp_units]
     lea     r8, [rip+cu_units]
-    call    half_right
+    call    pnl_right
     add     r12d, WG_H+4
     call    cad_kernel
     mov     [rip+cu_kernel], eax
     lea     rdi, [rip+wd_cp_kernel]
     lea     r8, [rip+cu_kernel]
-    call    full_row
+    call    pnl_full
 
     # ---- features ----
     add     r12d, 8
     lea     rdx, [rip+s_h_feats]
-    call    heading
+    call    pnl_heading
     call    feat_count
     test    eax, eax
     jnz     1f
     lea     rdx, [rip+s_no_feats]
-    call    hint
+    call    pnl_hint
 1:  xor     ebx, ebx
 .Lcu_frow:
     call    feat_count
@@ -501,7 +494,7 @@ cadui_props:
     cmp     eax, 7                      # (S_OFF: suppressed)
     je      2f
     mov     r8d, COL_REC
-2:  mov     edi, [rip+cu_x]
+2:  mov     edi, [rip+pnl_x]
     add     edi, 4
     lea     esi, [r12+9]
     mov     edx, 4
@@ -523,7 +516,7 @@ cadui_props:
     jz      3f
     mov     rdi, rax
     call    fmt_str
-3:  mov     edi, [rip+cu_x]
+3:  mov     edi, [rip+pnl_x]
     add     edi, 14
     lea     esi, [r12+3]
     lea     rdx, [rip+fmt_buf]
@@ -546,10 +539,10 @@ cadui_props:
     call    wg_ftoa
     mov     byte ptr [rax], 0
 4:  lea     rdi, [rip+wd_cf_val]
-    mov     esi, [rip+cu_w]             # 50% .. 80%
+    mov     esi, [rip+pnl_w]             # 50% .. 80%
     shr     esi, 1
-    add     esi, [rip+cu_x]
-    mov     ecx, [rip+cu_w]
+    add     esi, [rip+pnl_x]
+    mov     ecx, [rip+pnl_w]
     imul    ecx, ecx, 3
     mov     eax, ecx
     cdq
@@ -567,15 +560,15 @@ cadui_props:
     mov     [rax+rbx*4], ecx
     lea     r8, [rax+rbx*4]
     lea     rdi, [rip+wd_cf_on]
-    mov     eax, [rip+cu_w]
+    mov     eax, [rip+pnl_w]
     imul    eax, eax, 4
     cdq
     mov     ecx, 5
     idiv    ecx
     lea     esi, [rax+6]
-    add     esi, [rip+cu_x]
+    add     esi, [rip+pnl_x]
     mov     edx, r12d
-    mov     ecx, [rip+cu_w]
+    mov     ecx, [rip+pnl_w]
     sub     ecx, eax
     sub     ecx, 6
     mov     r9d, ebx
@@ -588,7 +581,7 @@ cadui_props:
     mov     edi, r15d
     call    feat_status_name
     mov     rdx, rax
-    mov     edi, [rip+cu_x]
+    mov     edi, [rip+pnl_x]
     add     edi, 14
     mov     esi, r12d
     mov     ecx, COL_REC
@@ -600,13 +593,13 @@ cadui_props:
     add     r12d, 4
     lea     rdi, [rip+wd_cf_sketch]
     xor     r8d, r8d
-    call    full_row
+    call    pnl_full
     lea     r15, [rip+add_btns]         # the features, three to a row
     xor     ebx, ebx
 6:  mov     rdi, [r15+rbx*8]
     test    rdi, rdi
     jz      8f
-    mov     eax, [rip+cu_w]
+    mov     eax, [rip+pnl_w]
     add     eax, 4
     xor     edx, edx
     mov     ecx, 3
@@ -617,7 +610,7 @@ cadui_props:
     mov     ecx, 3
     div     ecx
     imul    edx, r13d
-    mov     esi, [rip+cu_x]
+    mov     esi, [rip+pnl_x]
     add     esi, edx
     mov     ecx, r13d
     sub     ecx, 4
@@ -649,12 +642,12 @@ cadui_props:
     # ---- mechanism ----
 9:  add     r12d, 8
     lea     rdx, [rip+s_h_mech]
-    call    heading
+    call    pnl_heading
     call    joint_count
     test    eax, eax
     jnz     1f
     lea     rdx, [rip+s_no_joints]
-    call    hint
+    call    pnl_hint
 1:  xor     ebx, ebx
 .Lcu_jrow:
     call    joint_count
@@ -679,7 +672,7 @@ cadui_props:
     jz      3f
     mov     rdi, rax
     call    fmt_str
-3:  mov     edi, [rip+cu_x]
+3:  mov     edi, [rip+pnl_x]
     lea     esi, [r12+3]
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_TEXT
@@ -695,17 +688,17 @@ cadui_props:
     call    fmt_str
     jmp     5f
 4:  call    fmt_val3
-5:  mov     edi, [rip+cu_x]
-    add     edi, [rip+cu_w]
+5:  mov     edi, [rip+pnl_x]
+    add     edi, [rip+pnl_w]
     lea     esi, [r12+3]
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_TEXT_DIM
-    call    draw_right
+    call    pnl_draw_right
     add     r12d, 20                    # the expression under it
     lea     rdi, [rip+wd_cj_expr]
-    mov     esi, [rip+cu_x]
+    mov     esi, [rip+pnl_x]
     add     esi, 14
-    mov     ecx, [rip+cu_w]
+    mov     ecx, [rip+pnl_w]
     sub     ecx, 14
     mov     edx, r12d
     lea     r8, [r13+MJ_EXPR]
@@ -719,18 +712,18 @@ cadui_props:
     add     r12d, 4
     lea     rdi, [rip+wd_cj_add]
     xor     r8d, r8d
-    call    full_row
+    call    pnl_full
 
     # ---- measure ----
     add     r12d, 8
     lea     rdx, [rip+s_h_measure]
-    call    heading
+    call    pnl_heading
     lea     rdi, [rip+wd_cm_tool]
     xor     r8d, r8d
-    call    full_row
+    call    pnl_full
     lea     rdi, [rip+wd_cm_mass]
     xor     r8d, r8d
-    call    full_row
+    call    pnl_full
     test    eax, eax
     jz      1f
     call    mass_now
@@ -762,7 +755,7 @@ cadui_props:
     lea     rdi, [rip+s_deg]
     call    fmt_str
 21: lea     rdx, [rip+fmt_buf]
-    call    hint_text
+    call    pnl_text
 3:  mov     edi, [rip+active_obj]       # the active part's mass properties
     test    edi, edi
     jz      4f
@@ -785,89 +778,15 @@ cadui_props:
     mov     byte ptr [rbx-1], 0
     push    rbx
     push    rbx
-    call    hint_text
+    call    pnl_text
     pop     rbx
     pop     rbx
     mov     byte ptr [rbx-1], ','
     inc     rbx
     jmp     41b
-43: call    hint_text
+43: call    pnl_text
 4:  mov     eax, r12d
     pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
-    pop     rbx
-    ret
-
-# heading(rdx=text) / hint(rdx=text) / hint_text(rdx=text) at r12d
-heading:
-    mov     edi, [rip+cu_x]
-    mov     esi, r12d
-    mov     ecx, COL_ACCENT
-    sub     rsp, 8
-    call    draw_heading
-    add     rsp, 8
-    add     r12d, 24
-    ret
-hint:
-    mov     ecx, COL_TEXT_DIM
-    jmp     1f
-hint_text:
-    mov     ecx, COL_TEXT
-1:  mov     edi, [rip+cu_x]
-    mov     esi, r12d
-    sub     rsp, 8
-    call    draw_small
-    add     rsp, 8
-    add     r12d, 18
-    ret
-
-# full_row / half_right(rdi=desc, r8=ptr) -> eax (wg's) at r12d
-full_row:
-    mov     esi, [rip+cu_x]
-    mov     ecx, [rip+cu_w]
-    mov     edx, r12d
-    xor     r9d, r9d
-    sub     rsp, 8
-    call    wg
-    add     rsp, 8
-    add     r12d, WG_H+4
-    ret
-half_right:
-    mov     ecx, [rip+cu_w]
-    shr     ecx, 1
-    mov     esi, [rip+cu_x]
-    add     esi, ecx
-    add     esi, 3
-    sub     ecx, 3
-    mov     edx, r12d
-    xor     r9d, r9d
-    sub     rsp, 8
-    call    wg
-    add     rsp, 8
-    ret
-
-# draw_right(rdx=text, edi=right edge, esi=y, ecx=colour) - small text
-draw_right:
-    push    rbx
-    push    r12
-    push    r13
-    push    r14
-    sub     rsp, 8
-    mov     rbx, rdx
-    mov     r12d, edi
-    mov     r13d, esi
-    mov     r14d, ecx
-    mov     rdi, rdx
-    call    text_width_small
-    mov     edi, r12d
-    sub     edi, eax
-    mov     esi, r13d
-    mov     rdx, rbx
-    mov     ecx, r14d
-    call    draw_small
-    add     rsp, 8
     pop     r14
     pop     r13
     pop     r12

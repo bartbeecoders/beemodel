@@ -16,6 +16,8 @@
 .equ WK_THUMB,      11          # its scrollbar thumb
 .equ WK_ROW,        12          # a list row: lit when *ptr == sub; a click sets it, cb
 .equ WK_PATH,       13          # a form's file: the file browser (WD_N 0 open, 1 save; WD_AUX extensions)
+.equ WK_COLOR,      14          # float[3] linear RGB: a swatch; a click opens the colour picker (colorpick.s)
+.equ WK_PAD,        15          # float[2] 0..1 where it is pressed / dragged (WD_N: its height); the caller draws it
 
 # descriptor flags
 .equ WGF_DEG,       1           # a radian value shown and typed in degrees
@@ -26,6 +28,7 @@
 .equ WGF_NODRAW,    32          # button: only the hit area (the caller draws it)
 .equ WGF_EXPORT,    64          # path: an export (the browser offers Selected only)
 .equ WGF_EXPAXIS,   128         # path: ... and Up axis / Scale (OBJ, STL)
+.equ WGF_DYN,       256         # enum: WD_AUX is a function -> rax = labels, edx = how many (objects, trees ...)
 
 # descriptor (static, .rodata)
 .equ WD_KIND,       0

@@ -15,6 +15,7 @@
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
+.include "widgets.inc"
 .include "macros.inc"
 
 .globl ed_nodes_draw
@@ -38,6 +39,8 @@
 .equ NTYPES,    9
 .equ IR_NAME,   0
 
+.equ MT_GEONODES_, 10                     # (mods.s)
+.equ MT_LOGIC_,  12
 .equ NE_BAR,    20                      # the header line (logical px)
 .equ NW,        170                     # node width
 .equ NHDR,      20                      # node header
@@ -248,6 +251,12 @@ ne_y0:          .skip 4
 ne_a0:          .skip 4                 # what was there: x / y / pan / value
 ne_b0:          .skip 4
 ne_undone:      .skip 4                 # the drag has its undo step
+ne_filt:        .skip 32                # the add menu's search text
+ne_fn:          .skip 4                 #  (its length)
+ne_dt:          .skip 4
+ne_tsel:        .skip 4                 # the header's tree picker
+.align 8
+ne_tlbl:        .skip 8*80
 ne_menu:        .skip 4                 # the add menu: open, where
 ne_mx:          .skip 4
 ne_my:          .skip 4
@@ -1558,11 +1567,14 @@ ne_draw_menu:
     mov     esi, [rip+ne_my]
     add     esi, 3
     lea     rdx, [rip+s_ne_add]
-    mov     ecx, COL_TEXT_DIM
+    cmp     dword ptr [rip+ne_fn], 0    # "Add" or what is typed
+    je      0f
+    lea     rdx, [rip+ne_filt]
+0:  mov     ecx, COL_TEXT_DIM
     call    draw_text
     call    ne_menu_item                # (the one under the pointer)
     mov     r13d, eax
-    call    ne_ntypes
+    call    ne_vcount
     mov     r14d, eax
     mov     ebx, 1
 1:  cmp     ebx, r14d
@@ -1577,7 +1589,10 @@ ne_draw_menu:
     imul    r12d, r12d, NROW
     add     r12d, [rip+ne_my]
     add     r12d, 2
-    cmp     ebx, r13d
+    mov     edi, ebx                    # (the k-th of those shown)
+    call    ne_nth
+    mov     [rip+ne_dt], eax
+    cmp     eax, r13d
     jne     2f
     mov     edi, r15d
     mov     esi, r12d
@@ -1585,7 +1600,7 @@ ne_draw_menu:
     mov     ecx, NROW
     mov     r8d, COL_HOVER
     call    fill_rect
-2:  mov     edi, ebx
+2:  mov     edi, [rip+ne_dt]
     call    ne_title
     mov     rdx, rax
     lea     edi, [r15+12]
@@ -1604,7 +1619,7 @@ ne_draw_menu:
 # ne_menu_size -> eax = the add menu's rows, edx = its columns
 ne_menu_size:
     sub     rsp, 8
-    call    ne_ntypes
+    call    ne_vcount
     add     rsp, 8
     lea     ecx, [rax+MROWS-1]
     push    rax
@@ -1642,10 +1657,11 @@ ne_menu_item:
     ja      8f
     imul    ebx, ebx, MROWS
     add     ebx, eax
-    call    ne_ntypes                   # (past the last: none)
+    call    ne_vcount                   # (past the last: none)
     cmp     ebx, eax
     ja      8f
-    mov     eax, ebx
+    mov     edi, ebx
+    call    ne_nth
     pop     rbx
     ret
 8:  xor     eax, eax
@@ -2637,11 +2653,268 @@ nodeed_wheel:
 # nodeed_key(edi = evdev) -> eax = 1 (the open menu takes every key: Esc
 #   closes it)
 nodeed_key:
-    cmp     edi, KEY_ESC
+    push    rbx
+    mov     ebx, edi
+    mov     dword ptr [rip+dirty], 1
+    cmp     ebx, KEY_ESC
     jne     1f
     mov     dword ptr [rip+ne_menu], 0
-1:  mov     dword ptr [rip+dirty], 1
+    jmp     9f
+1:  cmp     ebx, 14                     # Backspace: a letter less
+    jne     2f
+    cmp     dword ptr [rip+ne_fn], 0
+    je      9f
+    dec     dword ptr [rip+ne_fn]
+    mov     eax, [rip+ne_fn]
+    lea     rcx, [rip+ne_filt]
+    mov     byte ptr [rcx+rax], 0
+    jmp     9f
+2:  cmp     ebx, KEY_ENTER              # Enter: the first one shown
+    jne     3f
+    mov     edi, 1
+    call    ne_nth
+    mov     dword ptr [rip+ne_menu], 0
+    test    eax, eax
+    jz      9f
+    mov     edi, eax
+    call    ne_add_node
+    jmp     9f
+3:  mov     edi, ebx                    # a letter: search
+    call    kb_sym
+    cmp     eax, ' '
+    jb      9f
+    cmp     eax, 127
+    jae     9f
+    mov     ecx, [rip+ne_fn]
+    cmp     ecx, 30
+    jae     9f
+    lea     rdx, [rip+ne_filt]
+    mov     [rdx+rcx], al
+    mov     byte ptr [rdx+rcx+1], 0
+    inc     dword ptr [rip+ne_fn]
+9:  mov     eax, 1
+    pop     rbx
+    ret
+
+# =============================================================================
+#  The header: which graph (the material, or a node tree the active object
+#  runs), New Tree, Add
+# =============================================================================
+.globl ne_header_tools
+WIDGET wd_ne_tree, WK_ENUM, "node.tree", flags=WGF_DYN, cb=ne_tree_cb, aux=ne_tree_names, tip="Edit the material's nodes, or a node tree: picking one gives the active object a Geometry Nodes (or Logic) modifier running it"
+WIDGET wd_ne_new,  WK_BUTTON, "node.new_tree", "New Tree", tip="A new geometry node tree, run by the active object"
+WIDGET wd_ne_add,  WK_BUTTON, "node.add", "Add", tip="Add a node (Shift+A in the editor, then type to search the list)"
+.section .rodata
+s_ne_mat:       .asciz "Material"
+s_ne_nt_undo:   .asciz "Node Tree"
+.text
+# ne_header_tools(edi=x, esi=header y, edx=right limit)
+ne_header_tools:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    lea     r12d, [rsi+1]
+    mov     r13d, edx
+    call    ne_rec                      # what is shown
+    xor     eax, eax
+    cmp     dword ptr [rip+ne_kind], 0
+    je      1f
+    mov     eax, [rip+ne_mat]
+    inc     eax
+1:  mov     [rip+ne_tsel], eax
+    lea     eax, [rbx+150]
+    cmp     eax, r13d
+    jg      9f
+    lea     rdi, [rip+wd_ne_tree]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 150
+    lea     r8, [rip+ne_tsel]
+    xor     r9d, r9d
+    call    wg
+    add     ebx, 156
+    lea     eax, [rbx+80]
+    cmp     eax, r13d
+    jg      9f
+    lea     rdi, [rip+wd_ne_new]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 80
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    test    eax, eax
+    jz      2f
+    call    ne_new_tree
+2:  add     ebx, 86
+    lea     eax, [rbx+50]
+    cmp     eax, r13d
+    jg      9f
+    lea     rdi, [rip+wd_ne_add]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 50
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    test    eax, eax
+    jz      9f
+    push    qword ptr [rip+ptr_x]       # the add menu, under the button
+    mov     [rip+ptr_x], ebx
+    lea     eax, [r12+24]
+    mov     [rip+ptr_y], eax
+    sub     rsp, 8
+    call    do_ne_add_menu
+    add     rsp, 8
+    pop     rax                         # (the pointer stays where it is)
+    mov     [rip+ptr_x], eax
+    shr     rax, 32
+    mov     [rip+ptr_y], eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+ne_tree_names:                          # -> rax = labels, edx = count
+    sub     rsp, 8
+    call    nt_count
+    lea     rdi, [rip+ne_tlbl]
+    lea     rsi, [rip+s_ne_mat]
+    mov     edx, eax
+    lea     rcx, [rip+nt_get]
+    mov     r8d, 80
+    call    pnl_list
+    mov     edx, eax
+    lea     rax, [rip+ne_tlbl]
+    add     rsp, 8
+    ret
+
+# ne_tree_cb(rdi=&ne_tsel) - the material, or that tree on the active mesh
+ne_tree_cb:
+    mov     dword ptr [rip+ne_pathn], 0
+    mov     eax, [rdi]
+    test    eax, eax
+    jnz     ne_use_tree
+    mov     dword ptr [rip+ne_pref], 1
+    mov     dword ptr [rip+dirty], 1
+    ret
+# ne_use_tree(eax=tree + 1)
+ne_use_tree:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, eax
+    mov     dword ptr [rip+ne_pref], 0
+    call    active_mesh_obj
+    test    rax, rax
+    jz      9f
+    mov     r12, rax
+    lea     rdi, [rip+s_ne_nt_undo]
+    call    undo_push
+    lea     edi, [rbx-1]
+    call    lg_is_logic
+    mov     esi, MT_GEONODES_
+    test    eax, eax
+    jz      1f
+    mov     esi, MT_LOGIC_
+1:  mov     rdi, r12
+    mov     edx, ebx
+    call    mod_use_tree
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ne_new_tree - tree.new, then the active mesh runs it
+ne_new_tree:
+    sub     rsp, 8
+    push    qword ptr [rip+op_arg]
+    mov     qword ptr [rip+op_arg], 0
+    lea     rdi, [rip+op_tree_new]
+    call    run_op
+    pop     qword ptr [rip+op_arg]
+    call    nt_count
+    mov     dword ptr [rip+ne_pathn], 0
+    add     rsp, 8
+    jmp     ne_use_tree                 # (eax = the new one + 1)
+
+# ne_vis(edi=type) -> eax = 1 when its name holds the search text (any case)
+ne_vis:
     mov     eax, 1
+    cmp     dword ptr [rip+ne_fn], 0
+    je      9f
+    sub     rsp, 8
+    call    ne_title
+    add     rsp, 8
+1:  lea     rsi, [rip+ne_filt]          # at each start in the name
+    xor     ecx, ecx
+2:  movzx   edx, byte ptr [rsi+rcx]
+    test    edx, edx
+    jz      8f                          # (all of it matched)
+    movzx   r8d, byte ptr [rax+rcx]
+    test    r8d, r8d
+    jz      7f
+    or      edx, 0x20
+    or      r8d, 0x20
+    cmp     edx, r8d
+    jne     3f
+    inc     ecx
+    jmp     2b
+3:  inc     rax
+    cmp     byte ptr [rax], 0
+    jne     1b
+7:  xor     eax, eax
+    ret
+8:  mov     eax, 1
+9:  ret
+
+# ne_vcount -> eax = the types shown in the menu
+ne_vcount:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    ne_ntypes
+    mov     r12d, eax
+    xor     ebx, ebx
+    xor     eax, eax
+    mov     [rsp], eax
+1:  inc     ebx
+    cmp     ebx, r12d
+    ja      9f
+    mov     edi, ebx
+    call    ne_vis
+    add     [rsp], eax
+    jmp     1b
+9:  mov     eax, [rsp]
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ne_nth(edi=k, 1..) -> eax = the k-th type shown (0: none)
+ne_nth:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r13d, edi
+    call    ne_ntypes
+    mov     r12d, eax
+    xor     ebx, ebx
+1:  inc     ebx
+    cmp     ebx, r12d
+    ja      8f
+    mov     edi, ebx
+    call    ne_vis
+    sub     r13d, eax
+    jnz     1b
+    mov     eax, ebx
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 do_ne_add_menu:
@@ -2649,6 +2922,8 @@ do_ne_add_menu:
     call    ne_rec
     test    rax, rax
     jz      9f
+    mov     dword ptr [rip+ne_fn], 0    # (no search yet)
+    mov     byte ptr [rip+ne_filt], 0
     mov     dword ptr [rip+ne_menu], 1
     mov     eax, [rip+ptr_x]
     mov     [rip+ne_mx], eax

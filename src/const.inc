@@ -328,6 +328,7 @@
 .equ HIT_SUBITEM,       32            # an entry of an open submenu
 .equ HIT_PIE,           33            # a pie menu (index = the choice)
 .equ HIT_DIALOG,        34            # under a dialog: nothing
+.equ HIT_CPICK,         35            # the colour picker (index 1 inside it, 0 outside)
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
 
