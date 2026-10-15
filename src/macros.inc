@@ -81,6 +81,7 @@
 # an enum, its default and flags (FF_CHANGED: only sent when not the default)
 .equ FF_CHANGED, 1
 .equ FK_ACTIVE,  1                     # a text field's kw: the active object's name
+.equ FK_OTHER,   2                     #  ... another selected object's (else world)
 .macro FORM sym, n
     .pushsection .rodata.forms, "a"
     .balign 8

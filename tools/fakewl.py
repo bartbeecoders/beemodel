@@ -584,6 +584,7 @@ def main():
     materials_more()
     paint_ui()
     anim_ui()
+    physics_ui()
     transforms()
     undo_redo()
     files()
@@ -5965,6 +5966,49 @@ def anim_ui():
     check(rows == ['Bone', 'Upper'], f'the bone list ({rows})')
     click('rig.bone', 0)
     check('rig.pose.rotation' in names(), 'a bone row makes it active and shows its pose')
+    f.proc.kill()
+
+
+def physics_ui():
+    """UI plan U20: cloth / soft body settings and pins, the cloth world,
+    a joint between two selected objects, the simulation cache."""
+    print('  -- physics and simulation --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
+    q('add("plane", "Sheet", 0, 2, 0)\nselect("Sheet")')
+    props_tab(m, f, 'physics')
+    check({'cloth.make_cloth', 'cloth.make_soft', 'cloth.make_collider'} <= names(), 'not cloth yet: Cloth, Soft Body, Collider')
+    click('cloth.make_cloth')
+    w = wait_widget(f, m, 'cloth.stretch')
+    check(w is not None and {'cloth.type', 'cloth.mass', 'cloth.self', 'cloth.pin_selected', 'cloth.remove'} <= names(),
+          'cloth: its type, compliances, mass, self collision, pins')
+    type_into('cloth.mass', '2.5')
+    check(wait_value(f, m, 'cloth.mass', 0, 2.5) == 2.5, 'a value changes the cloth (cloth.add on the selection)')
+    click('cloth.self')
+    check(wait_value(f, m, 'cloth.self', 0, 1) == 1 and wait_value(f, m, 'cloth.mass', 0, 2.5) == 2.5, 'self collision on, the rest kept')
+    pick_enum(f, m, 'cloth.type', 0, 1)
+    check(wait_value(f, m, 'cloth.type', 0, 1) == 1, 'cloth becomes a soft body')
+    type_into('cloth.wind_x', '3')
+    check(wait_value(f, m, 'cloth.wind_x', 0, 3) == 3, 'the wind')
+    click('cloth.remove')
+    check(wait_widget(f, m, 'cloth.make_cloth') is not None, 'Remove: no longer cloth')
+    q('add("sphere", "Ball", 3, 0, 0)\nselect("Ball", "Cube")')
+    click('rigid.add_joint')
+    a, b = widget(m, 'form.rjoint.a'), widget(m, 'form.rjoint.b')
+    check(a and b and a['value'] == 'Cube' and b['value'] == 'Ball', f'Add Joint: the two selected objects ({a and a["value"]}, {b and b["value"]})')
+    f.key(1); f.pump(0.2)
+    check({'sim.bake', 'sim.free', 'sim.budget'} <= names(), 'the cache: Bake, Free, its budget')
+    type_into('sim.budget', '512')
+    check(wait_value(f, m, 'sim.budget', 0, 512) == 512, 'the budget from the field')
     f.proc.kill()
 
 

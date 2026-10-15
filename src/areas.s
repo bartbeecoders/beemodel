@@ -1707,6 +1707,8 @@ ed_props_draw:
 .Lpp_phys:
     mov     edi, r12d
     call    rb_props_draw
+    mov     edi, eax                    # cloth, wind, joints, the cache
+    call    sim_props
     mov     r12d, eax
     jmp     .Lpp_done
 .Lpp_cad:

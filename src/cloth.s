@@ -23,6 +23,8 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl do_cl_add
+.globl do_cl_world
 .globl cl_frame
 .globl cl_mesh
 .globl cl_reset
