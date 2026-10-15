@@ -37,6 +37,9 @@ Start BeeModel first. The bridge connects to the newest running instance. The st
 | `undo` / `redo` | Undoes or redoes a step (agent change sets included) |
 | `node_types` | The geometry node catalogue as JSON: every type with its inputs (slots 1-3: name, kind, default), values (slots 4-7: name, kind, default, choices) and outputs (index, name, kind), and how the `tree.*` operators use them |
 | `describe_graph` | A node tree `{tree?}` as JSON: its nodes with type, the link into each input (`from: {node, output}`) or its constant, the values and the place; without a name, every tree. Includes the proposal's state |
+| `material_node_types` | The material node catalogue as JSON, in `node_types`'s form, and how `material_graph_set` and BeeScript use it |
+| `material_graph` | A material `{name}` as JSON: its node graph (each node's type, values, inputs as constants or `{link, output}`, place, parameter name) and the Material Output's sockets |
+| `material_graph_set` | Replaces a material's graph `{name, graph}` (made when missing) from that same JSON; nodes are numbered from 1 in order, links may point either way; a loop or an unknown type is refused and nothing changes. One undo step |
 | `propose_begin` / `propose_end` | Open a proposal `{title}` (see below), and show it to the user |
 | `proposal_status` | `none`, `building`, `waiting for the user`, `accepted` or `reverted` |
 

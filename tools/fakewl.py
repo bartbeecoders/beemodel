@@ -624,6 +624,7 @@ def main():
     material_exchange()
     material_functions()
     material_bench()
+    material_mcp()
     gltf_mtl()
     product_shot()
     params_units()
@@ -3039,6 +3040,49 @@ def material_bench():
     check(gn == '40' and base > 0 and g <= 2.5 * base,
           f'a {gn}-node game-style material previews within 2.5x of a principled one while orbiting ({g:.2f} ms vs {base:.2f} ms: x{g / max(base, 1e-6):.2f})')
     print(f'       a {pn}-node procedural material (noise, voronoi, wave, bump): {pr:.2f} ms (x{pr / max(base, 1e-6):.2f})')
+
+
+def material_mcp():
+    """Material tools for agents (M12): material_node_types (the catalogue),
+    material_graph_set builds a graph from JSON (links forwards and back,
+    sockets, a parameter's name, places), material_graph reads it back the
+    same way, a loop is refused and nothing changes; one undo step."""
+    print('  -- material tools for agents --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    t, err = m.tool('material_node_types', {})[:2]
+    try:
+        cat = json.loads(t.split('\n')[0])['material_nodes']
+        ok = len(cat) >= 42 and cat[0]['type'] == 'image' and any(n['type'] == 'fncall' for n in cat)
+    except (ValueError, KeyError, IndexError, AttributeError):
+        ok, cat = False, []
+    check(ok and not err, f'material_node_types lists the {len(cat)} material node types with their inputs, values and outputs')
+    g = {'nodes': [{'type': 'math', 'values': [2], 'inputs': [{'link': 3, 'output': 0}, {'link': 2}]},
+                   {'type': 'scalarparam', 'values': [0.5], 'name': 'Wear', 'pos': [100, 300]},
+                   {'type': 'checker', 'values': [3], 'inputs': [[1, 0.5, 0], [0, 0, 1]]}],
+         'sockets': {'base': 3, 'roughness': {'node': 1, 'output': 0}}}
+    t, err = m.tool('material_graph_set', {'name': 'Tiles', 'graph': g})[:2]
+    back = m.tool('material_graph', {'name': 'Tiles'})[0]
+    try:
+        j = json.loads(back.split('\n')[0])
+        types = [n['type'] for n in j['nodes']]
+        ok = (not err and types == ['scalarparam', 'checker', 'math'] and j['nodes'][0].get('name') == 'Wear'
+              and j['nodes'][0]['pos'] == [100, 300] and j['sockets'] == {'base': 2, 'roughness': 3}
+              and j['nodes'][2]['inputs'][0] == {'link': 2} and j['nodes'][1]['inputs'][0] == [1, 0.5, 0])
+    except (ValueError, KeyError, IndexError):
+        ok, types = False, back[:200]
+    check(ok, f'material_graph_set builds the graph (sorted: {types}), material_graph reads it back')
+    check(q('print(matparam("Tiles", "Wear"))') == '0.5', 'its parameter answers to its name')
+    t, err = m.tool('material_graph_set', {'name': 'Tiles', 'graph': {'nodes': [{'type': 'math', 'inputs': [{'link': 2}]},
+                                                                               {'type': 'math', 'inputs': [{'link': 1}]}]}})[:2]
+    check(err and 'loop' in t, f'a graph with a loop is refused ({t[:60]})')
+    t, err = m.tool('material_graph_set', {'name': 'Tiles', 'graph': {'nodes': [{'type': 'teapot'}]}})[:2]
+    check(err and 'teapot' in t, 'an unknown node type is named in the error')
+    still = [n['type'] for n in json.loads(m.tool('material_graph', {'name': 'Tiles'})[0].split('\n')[0])['nodes']]
+    check(still == ['scalarparam', 'checker', 'math'], f'after those the graph is as it was ({still})')
+    f.proc.kill()
 
 
 def gltf_fixture(path, external=False):

@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.12.0/beemodel-0.12.0-linux-x86_64.bin
-chmod +x beemodel-0.12.0-linux-x86_64.bin && ./beemodel-0.12.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.13.0/beemodel-0.13.0-linux-x86_64.bin
+chmod +x beemodel-0.13.0-linux-x86_64.bin && ./beemodel-0.13.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -200,8 +200,9 @@ A damped Newton solver keeps every constraint. Lines are blue while free and lig
 constrained, conflicts are red, and the status line counts the remaining degrees of freedom. Change a
 parameter and the sketch follows.
 
-**Shader graphs.** A material can hold a small node graph that drives its base colour,
-roughness, metallic, emission and normal:
+**Shader graphs.** A material can hold a node graph, Unreal-style, that drives any of its 13
+Material Output pins (base colour, metallic, specular, roughness, emission, opacity, normal, ambient
+occlusion, clear coat, transmission, IOR, opacity mask ...):
 
 ```
 m = material("Stone")
@@ -215,11 +216,16 @@ link(m, n, b, 1)
 socket(m, "normal", b)
 ```
 
-The node types are image, noise, checker, gradient, mix, ramp, math, bump and normalmap. Agents see
-the graph in `scene_summary` and edit it with the `material.node*` commands.
+There are 42 node types (textures, patterns, inputs, 31 math operations, vector math, colour
+adjustments, bump and normal maps, parameters, functions), parameters with material instances,
+material functions shared by many materials, PBR texture-set import, 20 presets, baking to texture
+maps, glTF and OBJ texture maps both ways, and graphs on the GPU path tracer: see
+[docs/MATERIALS.md](docs/MATERIALS.md). Agents see the graphs in `scene_summary`, read and write
+them as JSON with `material_graph` / `material_graph_set`, and use the `material.*` operators.
 
 The **Node Editor** (any area's type menu) shows the active object's material graph as boxes and
-wires, laid out by depth until you move them. **Shift+A** adds a node at the pointer, dragging a
+wires, laid out by depth until you move them, with a live preview and per-node thumbnails.
+**Shift+A** adds a node at the pointer (type to search), dragging a
 header moves it, dragging from an output to an input or a Material Output socket links them (from a
 linked input it picks the link up; dropped on empty space it is gone), dragging a value sideways
 changes it, **X** deletes the selected node, middle or empty-space drags pan, Home fits. Links may go
@@ -920,6 +926,8 @@ operator spine and how to add an action.
 * `tools/genkeysyms.py` regenerates `src/keysyms.inc` (keysym names → Unicode).
 * `tools/genspv.py` compiles the GPU helper's shaders (`src/gpu/*.comp`, with
   `glslc`) into `src/gpu/spv.s`.
+* `tools/genmatnodes.py` regenerates the material node catalogue in
+  `src/matnodes.s` (names, kinds, choices, defaults) from its node list.
 * `tests/keymaps/*.xkb` are real US, Belgian and German keymaps, used by the
   headless tests.
 * Golden images (`tests/golden/*.png`) are compared pixel by pixel when the

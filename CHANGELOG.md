@@ -6,7 +6,17 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added (PBR materials and material editor, phase 12)
+## [0.13.0] - 2026-10-15
+
+Phase 12, "PBR materials and a material editor"
+(`Vibecoding/BeeModel-Materials-Plan.html`): materials are physically based
+and driven by node graphs edited the way Unreal Engine's material editor
+works: a 42-node catalogue, a zoomable canvas with live previews,
+parameters and material instances, shared material functions, texture-set
+import, presets, baking to texture maps, glTF and OBJ texture exchange, and
+graphs on the GPU path tracer. The guide is [docs/MATERIALS.md](docs/MATERIALS.md).
+
+### Added (PBR materials and material editor)
 - **Material records v2 (M1, #228):** materials grow to 4 KiB: graphs of
   48 nodes, links that take a node's output 0..3, and a Material Output
   with 13 pins (base, metallic, specular, roughness, emission, opacity,
@@ -64,6 +74,13 @@ project uses [Semantic Versioning](https://semver.org/).
   DirectX (-Y) maps too. `material.preset` (Material tab: Preset...) gives
   a material one of 20 looks, from gold and glass to procedural wood,
   marble, concrete, fabric and leather.
+- **Materials for scripts, agents and docs (M12, #239):** MCP tools
+  `material_node_types` (the catalogue), `material_graph` and
+  `material_graph_set` (a graph as JSON, read and written; a loop or an
+  unknown type is refused and nothing changes); `scene_summary` gives each
+  node's place and parameter name. docs/MATERIALS.md describes the whole
+  system; tests/materials.py walks through it (texture set, preset,
+  baking, instances, a shared function, a masked leaf, the file and glTF).
 - **Shader graphs on the GPU (M10, #237):** the GPU path tracer
   evaluates material graphs (textures, patterns, math, mixes, bump and
   normal maps; a second kernel built only when a scene has graphs) and

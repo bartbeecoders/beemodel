@@ -22,6 +22,8 @@
 .globl mcp_handle
 .globl mcp_bridge
 .globl mcp_clients
+.globl graph_json
+.globl mcp_arg_val
 
 .equ MAX_CLIENTS,   4
 .equ CIN_CAP,       0x40000             # 256 KiB per client request buffer
@@ -211,6 +213,8 @@ j_nlink:        .asciz "{\"link\":"
 j_nout:         .asciz ",\"output\":"
 j_pnode:        .asciz "{\"node\":"
 j_nend:         .asciz "]}"
+j_npos:         .asciz ",\"pos\":["
+j_npname:       .asciz ",\"name\":"
 j_socks:        .asciz "],\"sockets\":{"
 k_strength:     .asciz "strength"
 k_rotation_w:   .asciz "rotation"
@@ -838,6 +842,8 @@ tools_list:
     call    wb_str
     lea     rsi, [rip+cp_tools_json]
     call    wb_str
+    lea     rsi, [rip+mm_tools_json]    # (the material tools: mcpmat.s)
+    call    wb_str
     lea     rbx, [rip+__start_bee_ops]
 1:  lea     rax, [rip+__stop_bee_ops]
     cmp     rbx, rax
@@ -1008,6 +1014,10 @@ tool_tier:
     call    cp_tier
     test    eax, eax
     jns     9f
+    lea     rdi, [rip+tool]             # the material tools (mcpmat.s)
+    call    mm_tier
+    test    eax, eax
+    jns     9f
     lea     rdi, [rip+tool]
     lea     rsi, [rip+c_scene]
     call    str_eq
@@ -1148,6 +1158,15 @@ fail:
     test    rsi, rsi
     jz      1f
     call    wb_str
+1:  ret
+
+# mcp_arg_val(rdi=key) -> rax = the argument's JSON value, or 0
+mcp_arg_val:
+    mov     rsi, [rip+targs]
+    xor     eax, eax
+    test    rsi, rsi
+    jz      1f
+    jmp     j_find
 1:  ret
 
 # arg_str(rdi=key, rsi=dest, edx=cap) -> eax = length (-1 if missing)
@@ -1315,6 +1334,10 @@ dispatch_tool:
     jnz     .Ldt_uitree
     lea     rdi, [rip+tool]             # the co-pilot's tools
     call    cp_dispatch
+    test    eax, eax
+    jnz     .Ldt_out
+    lea     rdi, [rip+tool]             # the material tools
+    call    mm_dispatch
     test    eax, eax
     jnz     .Ldt_out
     # op_<id>: compare against every agent-safe operator's tool name
@@ -2260,10 +2283,20 @@ graph_json:
     inc     ecx
     cmp     ecx, 4
     jb      34b
-    lea     rsi, [rip+j_nins]           # ],"inputs":[
+    lea     rsi, [rip+j_nins]           # ],"inputs":[ (those its type has)
     call    wb_str
     xor     ecx, ecx
-35: push    rcx
+35: mov     eax, [r14]
+    cmp     eax, [rip+graph_ntypes]
+    ja      354f
+    imul    eax, eax, 56
+    lea     rdx, [rip+mn_meta]
+    mov     rdx, [rdx+rax]
+    test    rdx, rdx
+    jz      354f
+    cmp     qword ptr [rdx+rcx*8], 0
+    je      354f
+    push    rcx
     test    ecx, ecx
     jz      351f
     mov     edi, ','
@@ -2312,8 +2345,31 @@ graph_json:
     inc     ecx
     cmp     ecx, 3
     jb      35b
-    lea     rsi, [rip+j_nend]           # ]}
+354:
+    mov     edi, ']'
+    call    wb_char
+    lea     rsi, [rip+j_npos]           # ,"pos":[x,y]
     call    wb_str
+    movsx   edi, word ptr [r14+68]
+    call    wb_int
+    mov     edi, ','
+    call    wb_char
+    movsx   edi, word ptr [r14+70]
+    call    wb_int
+    mov     edi, ']'
+    call    wb_char
+    mov     edi, [r14]                  # a parameter: its name
+    call    is_param_type
+    test    eax, eax
+    jz      36f
+    lea     rsi, [rip+j_npname]
+    call    wb_str
+    mov     rdi, r14
+    call    pn_get
+    mov     rsi, rax
+    call    jb_q
+36: mov     edi, '}'
+    call    wb_char
     inc     r13d
     jmp     3b
 .Lgj_socks:
