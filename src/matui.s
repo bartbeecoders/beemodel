@@ -39,6 +39,10 @@ im_lbl:         .skip 8*MAXL
 mt_sel:         .skip 4                 # material + 1 (0: none)
 mt_tex:         .skip 4                 # its texture image + 1
 mt_mat:         .skip 4                 # the material shown
+nd_v:           .skip 16                # the selected node: its values,
+nd_e:           .skip 16                #  as whole numbers (choices, images),
+nd_in:          .skip 48                #  its inputs' constants
+nd_hd:          .skip 64                # "Node: <title>"
 mt_blend:       .skip 4                 # its blend mode, one-sided, clip
 mt_sided:       .skip 4
 mt_clip:        .skip 4
@@ -67,6 +71,12 @@ s_no_mat:       .asciz "No material: the object's colour is used. New makes one.
 s_no_images:    .asciz "Textures, HDRI skies, paint canvases."
 s_texture:      .asciz "Texture"
 s_blend:        .asciz "Blend mode"
+s_nd_head:      .asciz "Node: "
+s_nd_linked:    .asciz "(linked)"
+.align 8
+nd_none_l:      .quad s_none
+.align 8
+nd_chdesc:      .quad wd_nd_ch0, wd_nd_ch1, wd_nd_ch2, wd_nd_ch3
 s_bl_opaque:    .asciz "Opaque"
 s_bl_masked:    .asciz "Masked"
 s_bl_trans:     .asciz "Translucent"
@@ -98,6 +108,13 @@ WIDGET wd_mt_dens, WK_FLOAT, "material.density", "Density (g/cm3)", 0.0, 25.0, 0
 WIDGET wd_mt_blend, WK_ENUM, "material.blend", flags=WGF_DYN, cb=blend_cb, aux=blend_names, tip="Opaque, Masked (holes where the opacity mask is below the clip value) or Translucent (light through by its opacity)"
 WIDGET wd_mt_sided, WK_TOGGLE, "material.one_sided", "One-sided", cb=sided_cb, tip="Back faces let rays through (leaves, decals, open shells)"
 WIDGET wd_mt_clip, WK_SLIDER, "material.clip", "Mask clip", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="Masked: the opacity below which the surface is a hole (0 means 1/3)"
+WIDGET wd_nd_num, WK_FLOAT, "node.value", "", -1000000.0, 1000000.0, 0.01, 3, cb=nd_num_cb, undo="Node Value", tip="The node's value (drag, or type a number or an expression)"
+WIDGET wd_nd_col, WK_COLOR, "node.color", "", cb=nd_col_cb, undo="Node Value", tip="The input's colour while nothing is linked to it"
+WIDGET wd_nd_img, WK_ENUM, "node.image", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=image_names, tip="The image it samples"
+WIDGET wd_nd_ch0, WK_ENUM, "node.choice", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=nd_ch0
+WIDGET wd_nd_ch1, WK_ENUM, "node.choice1", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=nd_ch1
+WIDGET wd_nd_ch2, WK_ENUM, "node.choice2", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=nd_ch2
+WIDGET wd_nd_ch3, WK_ENUM, "node.choice3", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=nd_ch3
 WIDGET wd_mt_tex,  WK_ENUM, "material.texture", flags=WGF_DYN, cb=tex_cb, aux=image_names, tip="An image as the base colour, projected from the sides of a box"
 WIDGET wd_mt_load, WK_BUTTON, "material.load_image", "Load Image...", aux=op_image_load
 WIDGET wd_wl_sky,  WK_ENUM, "world.sky", flags=WGF_DYN, cb=sky_cb, aux=sky_names, tip="What lights the scene from around it: the studio sky or an HDRI image"
@@ -175,7 +192,17 @@ mats_props_draw:
     jne     31f
     call    layers_props
     add     r12d, 8
-31: mov     edi, ebx                    # its values, a copy
+31: mov     eax, r12d                   # the node selected in the node editor
+    push    rax                         #  first (then a gap)
+    push    rax
+    mov     edi, ebx
+    call    node_details
+    pop     rax
+    pop     rax
+    cmp     r12d, eax
+    je      32f
+    add     r12d, 10
+32: mov     edi, ebx                    # its values, a copy
     call    mat_get
     lea     rsi, [rax+MA_BASE]
     lea     rdi, [rip+mt_v]
@@ -293,6 +320,242 @@ tex_of:
 9:  add     rsp, 8
     pop     r12
     pop     rbx
+    ret
+
+# ---- the selected node (the node editor's) ----------------------------------------------
+# node_details(edi=material shown; r12d = y) - its values and its inputs'
+#   constants as fields: numbers, choices, images, colours; a linked input
+#   says so
+node_details:
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    mov     ebx, edi
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     .Lnd_out
+    mov     eax, [rip+ne_sel]
+    test    eax, eax
+    jle     .Lnd_out
+    cmp     ebx, [rip+ne_mat]
+    jne     .Lnd_out
+    mov     edi, ebx
+    call    mat_get
+    test    rax, rax
+    jz      .Lnd_out
+    mov     ecx, [rip+ne_sel]
+    cmp     ecx, [rax+128]              # (GR_N)
+    ja      .Lnd_out
+    dec     ecx
+    imul    ecx, ecx, 72
+    lea     r13, [rax+160+rcx]          # the node
+    mov     eax, [r13]                  # its meta row
+    imul    eax, eax, 56
+    lea     r14, [rip+mn_meta]
+    add     r14, rax
+    lea     rdi, [rip+nd_hd]            # "Node: <title>"
+    lea     rsi, [rip+s_nd_head]
+    call    cpy
+    mov     eax, [r13]
+    lea     rcx, [rip+mn_titles]
+    mov     rsi, [rcx+rax*8]
+    call    cpy
+    add     r12d, 6
+    lea     rdx, [rip+nd_hd]
+    call    pnl_heading
+    xor     r15d, r15d                  # its values
+1:  cmp     r15d, 4
+    jae     3f
+    mov     rax, [r14+16]
+    mov     rdx, [rax+r15*8]
+    test    rdx, rdx
+    jz      3f
+    call    pnl_caption
+    mov     eax, [r13+52+r15*4]
+    lea     rcx, [rip+nd_v]
+    mov     [rcx+r15*4], eax
+    movd    xmm0, eax
+    cvtss2si eax, xmm0
+    lea     rcx, [rip+nd_e]
+    mov     [rcx+r15*4], eax
+    mov     rax, [r14+24]               # by its kind
+    movzx   eax, byte ptr [rax+r15]
+    lea     rdi, [rip+wd_nd_num]
+    lea     r8, [rip+nd_v]
+    cmp     eax, 2
+    jne     11f
+    lea     rdi, [rip+wd_nd_img]
+    lea     r8, [rip+nd_e]
+    jmp     12f
+11: cmp     eax, 1
+    je      111f
+    cmp     eax, 6
+    jne     12f
+111:lea     rax, [rip+nd_chdesc]
+    mov     rdi, [rax+r15*8]
+    lea     r8, [rip+nd_e]
+12: lea     r8, [r8+r15*4]
+    lea     r9d, [r15+4]                # (slot 4..7)
+    call    nd_field
+    inc     r15d
+    jmp     1b
+3:  xor     r15d, r15d                  # its inputs
+4:  cmp     r15d, 3
+    jae     .Lnd_out
+    mov     rax, [r14]
+    mov     rdx, [rax+r15*8]
+    test    rdx, rdx
+    jz      .Lnd_out
+    call    pnl_caption
+    imul    eax, r15d, 16
+    cmp     word ptr [r13+4+rax], 0     # linked: says so
+    je      41f
+    lea     rdx, [rip+s_nd_linked]
+    mov     edi, [rip+pnl_x]
+    add     edi, [rip+pnl_w]
+    lea     esi, [r12+4]
+    mov     ecx, COL_TEXT_DIM
+    call    pnl_draw_right
+    add     r12d, WG_H+4
+    jmp     49f
+41: lea     rsi, [r13+8+rax]            # its constant
+    imul    ecx, r15d, 12
+    lea     rdi, [rip+nd_in]
+    add     rdi, rcx
+    mov     rax, [rsi]
+    mov     [rdi], rax
+    mov     eax, [rsi+8]
+    mov     [rdi+8], eax
+    mov     r8, rdi
+    mov     rax, [r14+8]                # a colour: a swatch; else a number
+    movzx   eax, byte ptr [rax+r15]     #  (a vector: its x; the rest typed
+    lea     rdi, [rip+wd_nd_num]        #  in the node editor)
+    cmp     eax, 3
+    jne     42f
+    lea     rdi, [rip+wd_nd_col]
+42: lea     r9d, [r15+1]                # (slot 1..3)
+    call    nd_field
+49: inc     r15d
+    jmp     4b
+.Lnd_out:
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# nd_field(rdi=desc, r8=ptr, r9d=slot) - in the right half of the row at
+#   r12d, then the next row
+nd_field:
+    mov     ecx, [rip+pnl_w]
+    shr     ecx, 1
+    mov     esi, [rip+pnl_x]
+    add     esi, ecx
+    add     esi, 3
+    sub     ecx, 3
+    mov     edx, r12d
+    sub     rsp, 8
+    call    wg
+    add     rsp, 8
+    add     r12d, WG_H+4
+    ret
+
+# the choices of the selected node's value k (as the node editor's meta: a
+#   count, the names; kind 6: the second list)
+nd_ch0:
+    xor     ecx, ecx
+    jmp     nd_choices
+nd_ch1:
+    mov     ecx, 1
+    jmp     nd_choices
+nd_ch2:
+    mov     ecx, 2
+    jmp     nd_choices
+nd_ch3:
+    mov     ecx, 3
+nd_choices:
+    push    rcx
+    mov     edi, [rip+ne_mat]
+    call    mat_get
+    pop     rcx
+    test    rax, rax
+    jz      8f
+    mov     edx, [rip+ne_sel]
+    test    edx, edx
+    jle     8f
+    dec     edx
+    imul    edx, edx, 72
+    mov     eax, [rax+160+rdx]
+    imul    eax, eax, 56
+    lea     rdx, [rip+mn_meta]
+    add     rdx, rax
+    mov     rax, [rdx+32]               # the list
+    test    rax, rax
+    jz      8f
+    mov     rsi, [rdx+24]
+    cmp     byte ptr [rsi+rcx], 6
+    jne     1f
+    mov     rdx, [rax]                  # (the second list)
+    lea     rax, [rax+rdx*8+8]
+1:  mov     edx, [rax]
+    add     rax, 8
+    ret
+8:  lea     rax, [rip+nd_none_l]
+    mov     edx, 1
+    ret
+
+# callbacks: the value into the node (graph_set; the widget made the undo
+#   step)
+nd_num_cb:                              # rdi = &value, esi = slot
+    push    rbx
+    sub     rsp, 16
+    mov     ebx, esi
+    mov     eax, [rdi]
+    mov     [rsp], eax
+    mov     r8d, 1
+    cmp     ebx, 4                      # (an input: its other components kept)
+    jae     1f
+    lea     rax, [rip+nd_in]
+    imul    ecx, ebx, 12
+    mov     edx, [rax+rcx-12+4]
+    mov     [rsp+4], edx
+    mov     edx, [rax+rcx-12+8]
+    mov     [rsp+8], edx
+    mov     r8d, 3
+1:  mov     edi, [rip+ne_mat]
+    mov     esi, [rip+ne_sel]
+    mov     edx, ebx
+    lea     rcx, [rsp]
+    call    graph_set
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 16
+    pop     rbx
+    ret
+nd_col_cb:                              # rdi = &rgb, esi = slot
+    sub     rsp, 8
+    mov     rcx, rdi
+    mov     edx, esi
+    mov     edi, [rip+ne_mat]
+    mov     esi, [rip+ne_sel]
+    mov     r8d, 3
+    call    graph_set
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    ret
+nd_enum_cb:                             # rdi = &index, esi = slot
+    sub     rsp, 24
+    cvtsi2ss xmm0, dword ptr [rdi]
+    movss   [rsp], xmm0
+    mov     edx, esi
+    mov     edi, [rip+ne_mat]
+    mov     esi, [rip+ne_sel]
+    lea     rcx, [rsp]
+    mov     r8d, 1
+    call    graph_set
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 24
     ret
 
 # ---- the pickers' labels ------------------------------------------------------------

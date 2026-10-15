@@ -617,6 +617,7 @@ def main():
     materials_v2()
     material_nodes()
     node_canvas()
+    material_editor()
     gltf_mtl()
     product_shot()
     params_units()
@@ -2408,6 +2409,101 @@ def node_canvas():
           'the right button opens the node menu: duplicate, copy, paste, align, comment ...')
     f.key(1)
     f.shot('61_node_canvas.png')
+    f.proc.kill()
+
+
+
+def material_editor():
+    """The material editor (M5): the add menu by category with shortcuts
+    (Multiply, Lerp ...), the quick keys (L, then a click), the selected
+    node's values as fields in the Material tab."""
+    print('  -- material editor --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    info = lambda *a: q('print(nodeinfo("E", %s))' % ', '.join('"%s"' % x if isinstance(x, str) else str(x) for x in a))
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    q('m = material("E")\nassign("Cube", m)\nselect("Cube")\nn = node(m, "noise", 3)\nop("area.type_node_editor")\nop("area.maximize")')
+    f.pump(0.4)
+    # Shift+A: a column a category; typing "lerp" finds the shortcut
+    f.move(700, 500)
+    f.mods(1); f.key(30); f.mods(0)
+    f.pump(0.3)
+    labels = {w.get('label') for w in ui_tree(m)}
+    img = f.image()
+    heads = sum(1 for x in range(0, 1280) for y in range(80, 780, 2)
+                if (lambda p: p[0] > 190 and 140 < p[1] < 200 and p[2] < 90)(img.getpixel((x, y))[:3]))
+    check(heads > 100, f'Shift+A shows the nodes by category with headings ({heads} px of headings)')
+    f.shot('63_add_menu.png')
+    f.type('lerp'); f.pump(0.2); f.key(28); f.pump(0.3)
+    got = (info(0, 'count'), info(2, 'type'), info(2, 'value', 1))
+    check(got == ('2', '7', '21'), f'typing "lerp" + Enter adds a Math node set to Lerp ({got})')
+    # quick keys: M, then a click on the canvas - a Multiply there
+    f.move(400, 650)
+    f.key(50)                                   # M
+    f.pump(0.1)
+    f.click(400, 650)
+    f.pump(0.3)
+    got = (info(0, 'count'), info(3, 'type'), info(3, 'value', 1))
+    check(got == ('3', '7', '2'), f'M then a click adds a Multiply where it was clicked ({got})')
+    f.key(20)                                   # T, then a click: a texture sample
+    f.click(150, 700)
+    f.pump(0.3)
+    check(info(4, 'type') == '1', f'T then a click adds a Texture Sample ({info(4, "type")})')
+    # the selected node in the Material tab: its values as fields
+    q('op("area.maximize")')
+    f.pump(0.3)
+    props_tab(m, f, 'material')
+    f.pump(0.3)
+    q('op("node.view_fit")')
+    f.pump(0.3)
+    img = f.image()
+    pos = [(x, y) for y in range(0, 800, 2) for x in range(0, 1280, 2) if img.getpixel((x, y))[:3] == (0x6b, 0x4f, 0x96)]
+    if pos:                                     # the Noise header: select it
+        f.click(min(pos)[0] + 30, min(pos)[1] + 4)
+        f.pump(0.3)
+    check({'node.value'} <= names(), f'a selected node shows its values in the Material tab ({sorted(n for n in names() if n.startswith("node."))})')
+    w = widget(m, 'node.value', 4)
+    if w:
+        f.click(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2); f.pump(0.2)
+        f.mods(4); f.key(30); f.mods(0); f.type('2*4'); f.key(28); f.pump(0.3)
+    check(info(1, 'value', 1) == '8', f'typing an expression into the field sets the node\'s value (Scale = {info(1, "value", 1)})')
+    f.mods(4); f.key(44); f.mods(0)
+    f.pump(0.2)
+    check(info(1, 'value', 1) == '3', f'one undo takes it back ({info(1, "value", 1)})')
+    f.shot('64_node_details.png')
+    # a value clicked twice: the console types it (a material with one node)
+    q('op("area.maximize")\nv = material("V")\nassign("Cube", v)\nnode(v, "noise", 3)\nop("node.view_fit")')
+    f.pump(0.4)
+    img = f.image()
+    pos = [(x, y) for y in range(80, 640, 2) for x in range(0, 1080, 2) if img.getpixel((x, y))[:3] == (0x6b, 0x4f, 0x96)]
+    if pos:
+        hx, hy = min(pos)                       # Noise: its header, then Color, Scale
+        vx, vy = hx + 80, hy + 20 + 18 + 9
+        f.click(vx, vy); f.pump(0.05); f.click(vx, vy); f.pump(0.3)
+        f.type('6'); f.key(28); f.pump(0.3)
+    got = q('print(nodeinfo("V", 1, "value", 1))')
+    check(got == '6', f'a value clicked twice opens the console to type it (Scale = {got})')
+    q('assign("Cube", "E")')
+    f.pump(0.3)
+    # the palette: a toggle in the header; drag an entry onto the canvas
+    x, y = widget_xy(m, 'node.palette')
+    f.click(x, y); f.pump(0.3)
+    img = f.image()
+    pal = sum(1 for yy in range(110, 700, 4) for xx in range(0, 190, 4) if img.getpixel((xx, yy))[:3] == (0x2a, 0x2d, 0x34))
+    check(pal > 1000, f'the palette shows every node in a column ({pal} px)')
+    n0 = int(info(0, 'count'))
+    f.drag(60, 162, 700, 620, steps=8)                      # the first entry: Texture Coordinate
+    f.pump(0.3)
+    got = (info(0, 'count'), info(n0 + 1, 'type'))
+    check(got == (str(n0 + 1), '10'), f'dragging an entry from the palette adds that node where it is dropped ({got})')
+    x, y = widget_xy(m, 'node.palette_filter')
+    f.click(x, y); f.type('fres'); f.key(28); f.pump(0.3)
+    f.click(60, 162); f.pump(0.3)                           # (below the Input heading)
+    check(info(n0 + 2, 'type') == '18', f'the palette\'s search finds Fresnel; a click adds it ({info(n0 + 2, "type")})')
+    f.shot('65_palette.png')
     f.proc.kill()
 
 
