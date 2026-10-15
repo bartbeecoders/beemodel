@@ -1,0 +1,1 @@
+Can you use the mcp server to create a stunning demo scene in this application

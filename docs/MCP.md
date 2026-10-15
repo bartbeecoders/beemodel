@@ -11,7 +11,7 @@ BeeModel is a [Model Context Protocol](https://modelcontextprotocol.io) server.
 **Claude Code**
 
 ```sh
-claude mcp add beemodel -- /path/to/beemodel --mcp-bridge
+claude mcp add beemodel --  ~/.local/bin/beemodel --mcp-bridge
 ```
 
 **Claude Desktop** (or any stdio MCP client): add this to the client's configuration.
