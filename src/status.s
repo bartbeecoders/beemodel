@@ -503,6 +503,7 @@ chip:
     ret
 
 # text_width_small(rdi=text) -> eax
+.globl text_width_small
 text_width_small:
     push    rbx
     push    rdi

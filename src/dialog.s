@@ -115,7 +115,14 @@ dlg_open_form:
     lea     rdi, [r12+rax]
     movss   xmm0, [rcx+FF_DEF]
     mov     esi, [rdx+WD_KIND]
-    cmp     esi, WK_FLOAT
+    cmp     esi, WK_TEXT                # text: the default text (FF_KW)
+    jne     5f
+    mov     rsi, [rcx+FF_KW]
+    cmp     rsi, FK_ACTIVE
+    jbe     4f
+    call    copy63
+    jmp     4f
+5:  cmp     esi, WK_FLOAT
     je      3f
     cmp     esi, WK_SLIDER
     je      3f
@@ -125,7 +132,32 @@ dlg_open_form:
 3:  movss   [rdi], xmm0
 4:  inc     r13d
     jmp     1b
-2:  mov     dword ptr [rip+dlg_kind], DLG_FORM
+2:  xor     r13d, r13d                  # FK_ACTIVE text: the active object's
+6:  cmp     r13d, [rbx+FM_N]            #  name, each time
+    jae     8f
+    mov     eax, r13d
+    imul    eax, FF_SZ
+    lea     rcx, [rbx+FM_FIELDS+rax]
+    cmp     qword ptr [rcx+FF_KW], FK_ACTIVE
+    jne     7f
+    mov     rdx, [rcx+FF_DESC]
+    cmp     dword ptr [rdx+WD_KIND], WK_TEXT
+    jne     7f
+    mov     eax, r13d
+    imul    eax, VAL_SZ
+    lea     rdi, [r12+rax]
+    mov     byte ptr [rdi], 0
+    push    rdi
+    mov     edi, [rip+active_obj]
+    call    obj_get
+    pop     rdi
+    test    rax, rax
+    jz      7f
+    mov     rsi, rax                    # (OB_NAME)
+    call    copy63
+7:  inc     r13d
+    jmp     6b
+8:  mov     dword ptr [rip+dlg_kind], DLG_FORM
     mov     dword ptr [rip+dlg_open], 1
     mov     dword ptr [rip+dirty], 1
     pop     r13
@@ -307,10 +339,33 @@ form_arg:
     mov     rsi, [rdx+rax*8]
     call    put_str
     jmp     .Lfa_next
-2:  cmp     eax, WK_TEXT
+2:  cmp     eax, WK_TEXT            # text: quoted when it has spaces
     jne     3f
     mov     rsi, rcx
+    xor     edx, edx
+    cmp     byte ptr [rsi], 0           # (empty: "" keeps its place)
+    sete    dl
+21: mov     al, [rsi]
+    test    al, al
+    jz      22f
+    inc     rsi
+    cmp     al, ' '
+    jne     21b
+    inc     edx
+22: test    edx, edx
+    jz      23f
+    mov     byte ptr [r14], '"'
+    inc     r14
+23: push    rdx
+    push    rdx
+    mov     rsi, rcx
     call    put_str
+    pop     rdx
+    pop     rdx
+    test    edx, edx
+    jz      .Lfa_next
+    mov     word ptr [r14], '"'
+    inc     r14
     jmp     .Lfa_next
 3:  cmp     eax, WK_INT
     jne     4f
@@ -331,6 +386,57 @@ form_arg:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# doc_plain -> rdi = the operator's doc up to its syntax ("Hollow a part: cad.shell
+#   <pad> ..." -> "Hollow a part"), in dlg_title
+doc_plain:
+    mov     rax, [rip+dlg_op]
+    mov     rsi, [rax+OP_DOC]
+    mov     r8, [rax+OP_NAME]
+    lea     rdi, [rip+dlg_title]
+    xor     ecx, ecx
+1:  mov     al, [rsi+rcx]               # does "<name>" start here?
+    test    al, al
+    jz      5f
+    xor     edx, edx
+    lea     r10, [rsi+rcx]
+2:  mov     r9b, [r8+rdx]
+    test    r9b, r9b
+    jz      4f
+    cmp     r9b, [r10+rdx]
+    jne     3f
+    inc     edx
+    jmp     2b
+3:  cmp     ecx, 158
+    jae     5f
+    mov     [rdi+rcx], al
+    inc     ecx
+    jmp     1b
+4:  test    ecx, ecx                    # yes: drop it and the ": " before
+    jz      6f
+    cmp     byte ptr [rdi+rcx-1], ' '
+    je      41f
+    cmp     byte ptr [rdi+rcx-1], ':'
+    jne     5f
+41: dec     ecx
+    jmp     4b
+5:  mov     byte ptr [rdi+rcx], 0
+    ret
+6:  mov     rdi, rsi                    # (all syntax: as it is)
+    ret
+
+copy63:                                 # rdi = dest, rsi = text (63 max)
+    mov     ecx, 63
+1:  mov     al, [rsi]
+    test    al, al
+    jz      2f
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    dec     ecx
+    jnz     1b
+2:  mov     byte ptr [rdi], 0
     ret
 
 put_space:                              # (not at the start)
@@ -429,8 +535,7 @@ dlg_draw:
     mov     edi, FONT_SMALL             # its doc, one line (the tooltip has it all)
     call    text_use
     mov     [rsp], eax
-    mov     rax, [rip+dlg_op]
-    mov     rdi, [rax+OP_DOC]
+    call    doc_plain
     mov     esi, DLG_W-36
     lea     edx, [rbx+18]
     mov     ecx, r12d

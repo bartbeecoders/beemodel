@@ -80,6 +80,7 @@
 # is a widget descriptor, the text before its value ("mass "), keywords for
 # an enum, its default and flags (FF_CHANGED: only sent when not the default)
 .equ FF_CHANGED, 1
+.equ FK_ACTIVE,  1                     # a text field's kw: the active object's name
 .macro FORM sym, n
     .pushsection .rodata.forms, "a"
     .balign 8

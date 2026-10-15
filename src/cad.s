@@ -114,7 +114,7 @@ r_abs:          .asciz "abs"
 r_min:          .asciz "min"
 r_max:          .asciz "max"
 
-OPERATOR op_param_set, "param.set", "Set Parameter", do_param_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Define or change a parameter: param.set <name> <expression with units>, e.g. param.set width 10*wall + 2mm"
+OPERATOR op_param_set, "param.set", "Set Parameter", do_param_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Define or change a parameter: param.set <name> <expression with units>, e.g. param.set width 10*wall + 2mm", form=form_param
 OPERATOR op_param_remove, "param.remove", "Remove Parameter", do_param_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a parameter: param.remove <name>"
 OPERATOR op_param_list, "param.list", "List Parameters", do_param_list, flags=OPF_AI_SAFE|OPF_QUIET, doc="List the parameters with their values"
 OPERATOR op_cad_kernel, "cad.kernel", "B-rep Kernel", do_cad_kernel, flags=OPF_AI_SAFE|OPF_UNDO, doc="CAD features make exact B-rep solids (NURBS surfaces, STEP export) instead of meshes: cad.kernel on|off"
@@ -749,7 +749,21 @@ split_arg:
     test    al, al
     jnz     7b
 71: mov     byte ptr [rdi+rcx], 0
-    mov     eax, 1
+    cmp     byte ptr [rdi], '"'         # "10*wall + 2mm" (a form): unquoted
+    jne     74f
+    xor     ecx, ecx
+72: mov     al, [rdi+rcx+1]
+    mov     [rdi+rcx], al
+    test    al, al
+    jz      73f
+    inc     ecx
+    jmp     72b
+73: test    ecx, ecx
+    jz      74f
+    cmp     byte ptr [rdi+rcx-1], '"'
+    jne     74f
+    mov     byte ptr [rdi+rcx-1], 0
+74: mov     eax, 1
     ret
 8:  xor     eax, eax
     ret

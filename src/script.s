@@ -939,6 +939,8 @@ s_body:         .asciz "Body"
 .align 8
 fw_modes:       .quad fw_sym
                 .long 1, 0
+                .quad fw_normal
+                .long 0, 0
                 .quad fw_rev
                 .long 2, 0
                 .quad fw_thru
@@ -974,6 +976,7 @@ fw_circ:        .quad fw_circular
                 .long 0, 0
                 .quad 0
 fw_sym:         .asciz "symmetric"
+fw_normal:      .asciz "normal"
 fw_rev:         .asciz "reverse"
 fw_thru:        .asciz "through"
 fw_bottom:      .asciz "bottom"

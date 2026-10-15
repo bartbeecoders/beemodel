@@ -175,6 +175,217 @@ FFIELD fw_bo, kw=kw_bool, def=1.0
 FFIELD fw_bk, p_keep
 
 
+# ---- modeling and CAD (cadui.s): sketches, features, generators ---------------------
+.section .rodata
+d_sketch:       .asciz "Sketch"
+d_body:         .asciz "Body"
+d_10:           .asciz "10"
+d_5:            .asciz "5"
+d_2:            .asciz "2"
+d_1:            .asciz "1"
+d_08:           .asciz "0.8"
+d_0:            .asciz "0"
+d_360:          .asciz "360deg"
+d_plant:        .asciz "Plant"
+d_axiom:        .asciz "X"
+d_rules:        .asciz "X=F+[[X]-X]-F[-FX]+X; F=FF"
+d_tiles:        .asciz "Tiles"
+d_width:        .asciz "width"
+d_10mm:         .asciz "10mm"
+d_world:        .asciz "world"
+p_value:        .asciz "value"
+s_xy:           .asciz "XY (front)"
+s_xz:           .asciz "XZ (ground)"
+s_yz:           .asciz "YZ (side)"
+k_xy:           .asciz "XY"
+k_xz:           .asciz "XZ"
+k_yz:           .asciz "YZ"
+s_normal:       .asciz "Along the normal"
+s_symm:         .asciz "Symmetric"
+s_rev:          .asciz "Reversed"
+s_thru:         .asciz "Through all"
+k_normal:       .asciz "normal"
+k_symm:         .asciz "symmetric"
+k_rev:          .asciz "reverse"
+k_thru:         .asciz "through"
+s_u:            .asciz "U (the sketch's horizontal)"
+s_v:            .asciz "V (the sketch's vertical)"
+k_u:            .asciz "u"
+k_v:            .asciz "v"
+s_top:          .asciz "Open at the top"
+s_bottom:       .asciz "Open at the bottom"
+k_bottom:       .asciz "bottom"
+s_all:          .asciz "All sharp edges"
+s_vert:         .asciz "Vertical edges"
+s_horiz:        .asciz "Horizontal edges"
+s_tope:         .asciz "Top edges"
+s_bote:         .asciz "Bottom edges"
+k_all:          .asciz "all"
+k_vert:         .asciz "vertical"
+k_horiz:        .asciz "horizontal"
+k_top:          .asciz "top"
+s_linear:       .asciz "In a row"
+s_circular:     .asciz "Around the axis"
+k_linear:       .asciz "linear"
+k_circular:     .asciz "circular"
+s_gyroid:       .asciz "Gyroid"
+s_grid:         .asciz "Grid"
+k_gyroid:       .asciz "gyroid"
+k_grid:         .asciz "grid"
+s_revolute:     .asciz "Revolute (turns)"
+s_slider:       .asciz "Slider (slides)"
+k_revolute:     .asciz "revolute"
+k_slider:       .asciz "slider"
+k_ax_x:         .asciz "axis 1 0 0"
+k_ax_y:         .asciz "axis 0 1 0"
+k_ax_z:         .asciz "axis 0 0 1"
+.align 8
+l_plane:        .quad s_xy, s_xz, s_yz
+kw_plane:       .quad k_xy, k_xz, k_yz
+l_padm:         .quad s_normal, s_symm, s_rev
+kw_padm:        .quad k_normal, k_symm, k_rev
+l_pockm:        .quad s_normal, s_thru, s_symm, s_rev
+kw_pockm:       .quad k_normal, k_thru, k_symm, k_rev
+l_uv:           .quad s_u, s_v
+kw_uv:          .quad k_u, k_v
+l_open:         .quad s_top, s_bottom
+kw_open:        .quad k_normal, k_bottom
+l_edges:        .quad s_all, s_vert, s_horiz, s_tope, s_bote
+kw_edges:       .quad k_all, k_vert, k_horiz, k_top, k_bottom
+l_pkind:        .quad s_linear, s_circular
+kw_pkind:       .quad k_linear, k_circular
+l_lattice:      .quad s_gyroid, s_grid
+kw_lattice:     .quad k_gyroid, k_grid
+l_joint:        .quad s_revolute, s_slider
+kw_joint:       .quad k_revolute, k_slider
+kw_jaxis:       .quad k_ax_x, k_ax_y, k_ax_z
+
+.text
+# ---- cad.sketch <name> <plane> <offset> ---------------------------------------------
+WIDGET fw_skn,  WK_TEXT, "form.sketch.name", "Name"
+WIDGET fw_skp,  WK_ENUM, "form.sketch.plane", "Plane", aux=l_plane, n=3
+WIDGET fw_sko,  WK_FLOAT, "form.sketch.offset", "Offset", step=0.01
+FORM form_sketch, 3
+FFIELD fw_skn, kw=d_sketch
+FFIELD fw_skp, kw=kw_plane, def=1.0
+FFIELD fw_sko
+
+# ---- cad.pad / pocket / revolve / hole: <body> <size> <option> (the active sketch) ----
+WIDGET fw_body, WK_TEXT, "form.feature.body", "Part", tip="The part (a mesh object) the feature builds on, made when missing"
+WIDGET fw_pdd,  WK_TEXT, "form.pad.distance", "Distance", tip="How far: a number or an expression of parameters with units (10, 2*h, 5mm)"
+WIDGET fw_pdm,  WK_ENUM, "form.pad.direction", "Direction", aux=l_padm, n=3
+FORM form_pad, 3
+FFIELD fw_body, kw=d_body
+FFIELD fw_pdd, kw=d_10
+FFIELD fw_pdm, kw=kw_padm
+WIDGET fw_pkd,  WK_TEXT, "form.pocket.depth", "Depth", tip="How deep: a number or an expression (Through all ignores it)"
+WIDGET fw_pkm,  WK_ENUM, "form.pocket.extent", "Extent", aux=l_pockm, n=4
+FORM form_pocket, 3
+FFIELD fw_body, kw=d_body
+FFIELD fw_pkd, kw=d_5
+FFIELD fw_pkm, kw=kw_pockm
+WIDGET fw_rva,  WK_TEXT, "form.revolve.angle", "Angle", tip="How far round: 360deg is a full turn (radians without a unit)"
+WIDGET fw_rvx,  WK_ENUM, "form.revolve.axis", "About the axis", aux=l_uv, n=2
+FORM form_revolve, 3
+FFIELD fw_body, kw=d_body
+FFIELD fw_rva, kw=d_360
+FFIELD fw_rvx, kw=kw_uv
+WIDGET fw_hd,   WK_TEXT, "form.hole.diameter", "Diameter", tip="The hole's diameter: a number or an expression"
+WIDGET fw_hdp,  WK_TEXT, "form.hole.depth", "Depth", tip="How deep (0 goes right through)"
+FORM form_hole, 3
+FFIELD fw_body, kw=d_body
+FFIELD fw_hd, kw=d_5
+FFIELD fw_hdp, kw=d_0
+
+# ---- cad.shell / fillet / chamfer / pattern / infill (the active part) ---------------
+WIDGET fw_shf,  WK_INT, "form.shell.feature", "Pad feature (number in the CAD tab, from 0)", 0.0, 63.0, 0.05, 0, WGF_CLAMP
+WIDGET fw_shw,  WK_TEXT, "form.shell.wall", "Wall", tip="The wall thickness left standing"
+WIDGET fw_sho,  WK_ENUM, "form.shell.open", "Opening", aux=l_open, n=2
+FORM form_shell, 3
+FFIELD fw_shf
+FFIELD fw_shw, kw=d_2
+FFIELD fw_sho, kw=kw_open
+WIDGET fw_flr,  WK_TEXT, "form.fillet.radius", "Radius", tip="The rounding radius: a number or an expression"
+WIDGET fw_fle,  WK_ENUM, "form.fillet.edges", "Edges", aux=l_edges, n=5
+FORM form_fillet, 2
+FFIELD fw_flr, kw=d_1
+FFIELD fw_fle, kw=kw_edges
+WIDGET fw_chs,  WK_TEXT, "form.chamfer.size", "Size", tip="How much each edge is cut back"
+WIDGET fw_che,  WK_ENUM, "form.chamfer.edges", "Edges", aux=l_edges, n=5
+FORM form_chamfer, 2
+FFIELD fw_chs, kw=d_1
+FFIELD fw_che, kw=kw_edges
+WIDGET fw_ptf,  WK_INT, "form.pattern.feature", "Feature to repeat (from 0)", 0.0, 63.0, 0.05, 0, WGF_CLAMP
+WIDGET fw_ptn,  WK_INT, "form.pattern.count", "Count", 2.0, 1000.0, 0.1, 0, WGF_CLAMP
+WIDGET fw_pts,  WK_TEXT, "form.pattern.step", "Spacing", tip="In a row: the distance between copies. Around the axis: the total angle (0: a full turn)"
+WIDGET fw_pta,  WK_ENUM, "form.pattern.axis", "Axis", aux=l_axis, n=3
+WIDGET fw_ptk,  WK_ENUM, "form.pattern.kind", "Arrangement", aux=l_pkind, n=2
+FORM form_pattern, 5
+FFIELD fw_ptf
+FFIELD fw_ptn, def=3.0
+FFIELD fw_pts, kw=d_10
+FFIELD fw_pta, kw=kw_axis
+FFIELD fw_ptk, kw=kw_pkind
+WIDGET fw_inf,  WK_INT, "form.infill.feature", "Shell feature (from 0)", 0.0, 63.0, 0.05, 0, WGF_CLAMP
+WIDGET fw_ink,  WK_ENUM, "form.infill.lattice", "Lattice", aux=l_lattice, n=2
+WIDGET fw_inc,  WK_TEXT, "form.infill.cell", "Cell size", tip="The lattice's cell size"
+WIDGET fw_inw,  WK_TEXT, "form.infill.wall", "Wall", tip="The lattice's strut / wall thickness"
+FORM form_infill, 4
+FFIELD fw_inf, def=1.0
+FFIELD fw_ink, kw=kw_lattice
+FFIELD fw_inc, kw=d_5
+FFIELD fw_inw, kw=d_08
+
+# ---- add.lsystem / add.wfc ------------------------------------------------------------
+WIDGET fw_lsn,  WK_TEXT, "form.lsystem.name", "Name"
+WIDGET fw_lsa,  WK_TEXT, "form.lsystem.axiom", "Axiom"
+WIDGET fw_lsr,  WK_TEXT, "form.lsystem.rules", "Rules", tip="Rewriting rules like X=F+[[X]-X]-F[-FX]+X, a semicolon between them"
+WIDGET fw_lsi,  WK_INT, "form.lsystem.iterations", "Iterations", 0.0, 12.0, 0.05, 0, WGF_CLAMP
+WIDGET fw_lsg,  WK_FLOAT, "form.lsystem.angle", "Turn angle (degrees)", 0.0, 360.0, 0.2, 1, WGF_CLAMP
+WIDGET fw_lss,  WK_FLOAT, "form.lsystem.step", "Step length", 0.001, 100.0, 0.005, 3, WGF_CLAMP
+WIDGET fw_lsd,  WK_FLOAT, "form.lsystem.radius", "Tube radius (0: lines)", 0.0, 10.0, 0.001, 3, WGF_CLAMP
+FORM form_lsystem, 7
+FFIELD fw_lsn, kw=d_plant
+FFIELD fw_lsa, kw=d_axiom
+FFIELD fw_lsr, kw=d_rules
+FFIELD fw_lsi, def=5.0
+FFIELD fw_lsg, def=25.0
+FFIELD fw_lss, def=0.1
+FFIELD fw_lsd
+WIDGET fw_wfn,  WK_TEXT, "form.wfc.name", "Name"
+WIDGET fw_wfx,  WK_INT, "form.wfc.nx", "Cells across (X)", 1.0, 256.0, 0.1, 0, WGF_CLAMP
+WIDGET fw_wfz,  WK_INT, "form.wfc.nz", "Cells deep (Z)", 1.0, 256.0, 0.1, 0, WGF_CLAMP
+WIDGET fw_wfl,  WK_INT, "form.wfc.layers", "Layers", 1.0, 64.0, 0.05, 0, WGF_CLAMP
+WIDGET fw_wfs,  WK_INT, "form.wfc.seed", "Seed", 0.0, 1000000.0, 0.2, 0, WGF_CLAMP
+WIDGET fw_wft,  WK_TEXT, "form.wfc.tiles", "Tiles", tip="The tile objects' names, separated by spaces (up to 16)"
+FORM form_wfc, 6
+FFIELD fw_wfn, kw=d_tiles
+FFIELD fw_wfx, def=8.0
+FFIELD fw_wfz, def=8.0
+FFIELD fw_wfl, def=1.0
+FFIELD fw_wfs, def=1.0
+FFIELD fw_wft
+
+# ---- param.set <name> <expression> ----------------------------------------------------
+WIDGET fw_pmn,  WK_TEXT, "form.param.name", "Name"
+WIDGET fw_pme,  WK_TEXT, "form.param.expression", "Value", tip="A number with units or an expression of other parameters (10mm, 2*wall + 1mm)"
+FORM form_param, 2
+FFIELD fw_pmn, kw=d_width
+FFIELD fw_pme, kw=d_10mm
+
+# ---- mech.joint <type> <part> <parent> axis x y z value <e> -----------------------------
+WIDGET fw_mjt,  WK_ENUM, "form.joint.type", "Type", aux=l_joint, n=2
+WIDGET fw_mjp,  WK_TEXT, "form.joint.part", "Part"
+WIDGET fw_mjq,  WK_TEXT, "form.joint.parent", "Joined to", tip="The part it moves with: another object, or world"
+WIDGET fw_mja,  WK_ENUM, "form.joint.axis", "Axis", aux=l_axis, n=3
+WIDGET fw_mjv,  WK_TEXT, "form.joint.value", "Value", tip="An expression: 30deg, a parameter, frame*2deg ..."
+FORM form_joint, 5
+FFIELD fw_mjt, kw=kw_joint
+FFIELD fw_mjp, kw=FK_ACTIVE
+FFIELD fw_mjq, kw=d_world
+FFIELD fw_mja, kw=kw_jaxis, def=1.0
+FFIELD fw_mjv, p_value, kw=d_0
+
 # ---- files: a WK_PATH field opens the file browser (filebrowser.s) --------------
 .section .rodata
 e_bee:          .asciz "bee"

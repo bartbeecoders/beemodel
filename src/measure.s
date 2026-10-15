@@ -26,6 +26,7 @@
 .globl measure_reset
 .globl measure_value
 .globl fmt_len
+.globl fmt_props
 .globl fmt_unit
 .globl op_obj_measure
 .globl op_view_measure

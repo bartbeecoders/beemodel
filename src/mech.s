@@ -1092,7 +1092,7 @@ fmt_num6:
 # =============================================================================
 #  Operators
 # =============================================================================
-OPERATOR op_mj_add,  "mech.joint",  "Add Mechanism Joint", do_mj_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Join a part to its parent so it moves: mech.joint <revolute|slider> <part> <parent|world> [pivot x y z] [axis x y z] [min e] [max e] [gear <joint> <ratio>] [value <expression>] (the part as it is now is its place at 0; values: parameters, units, frame)"
+OPERATOR op_mj_add,  "mech.joint",  "Add Mechanism Joint", do_mj_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Join a part to its parent so it moves: mech.joint <revolute|slider> <part> <parent|world> [pivot x y z] [axis x y z] [min e] [max e] [gear <joint> <ratio>] [value <expression>] (the part as it is now is its place at 0; values: parameters, units, frame)", form=form_joint
 OPERATOR op_mj_set,  "mech.set",    "Set Mechanism Joint", do_mj_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Change a joint (1..): mech.set <n> value <expression> | min <e> | max <e> | nolimits | gear <joint> <ratio>"
 OPERATOR op_mj_rem,  "mech.remove", "Remove Mechanism Joint", do_mj_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a mechanism joint: mech.remove <n>"
 OPERATOR op_mj_list, "mech.list",   "List Mechanism Joints", do_mj_list, flags=OPF_AI_SAFE|OPF_QUIET, doc="The mechanism's joints and their values, in the console"
