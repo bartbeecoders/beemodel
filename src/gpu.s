@@ -48,7 +48,7 @@
 .equ SOCK_SEQPACKET_CLOEXEC, 0x80005
 .equ HELLO_MS,      15000               # a slow driver start is fine
 .equ RUN_MS,        120000
-.equ PT_NBIND,      13
+.equ PT_NBIND,      16
 .equ RS_NBIND,      8
 
 .section .rodata
@@ -86,11 +86,18 @@ g_argv:         .skip 16
 g_msg:          .skip GM_SZ
 g_ctl:          .skip 32
 g_name:         .skip 48
+gp_kern:        .skip 4                 # its kernel + 1 (3: with graphs; 0)
 gp_off:         .skip 8*PT_NBIND        # the path tracer's layout
 gp_bytes:       .skip 8*PT_NBIND
 gr_off:         .skip 8*RS_NBIND
 gr_bytes:       .skip 8*RS_NBIND
 
+.section .rodata
+.align 8
+# the node types pt.comp evaluates: textures, noise, checker, gradient, mix,
+#   ramp, math, bump, normal map, texture coordinate, constant, color, vector
+#   math, separate, combine, invert, reroute, parameters
+gp_types:       .quad (1<<1)|(1<<2)|(1<<3)|(1<<4)|(1<<5)|(1<<6)|(1<<7)|(1<<8)|(1<<9)|(1<<10)|(1<<16)|(1<<17)|(1<<19)|(1<<20)|(1<<21)|(1<<27)|(1<<36)|(1<<37)|(1<<38)|(1<<39)
 .text
 
 # =============================================================================
@@ -504,6 +511,11 @@ gpu_run:
     mov     [rip+g_msg+GM_NBIND], r12d
     mov     [rip+g_msg+GM_GX], r13d
     mov     [rip+g_msg+GM_GY], r14d
+    test    ebx, ebx                    # (the path tracer: with graphs?)
+    jnz     1f
+    mov     eax, [rip+gp_kern]
+    mov     [rip+g_msg+GM_KERN], eax
+1:
     mov     edi, -1
     call    g_send
     test    eax, eax
@@ -612,6 +624,9 @@ gpu_pt_begin:
     call    hv_gpu_ok
     test    eax, eax
     jz      9f
+    call    gp_has_graphs               # (graphs: the kernel that has them)
+    imul    eax, eax, 3
+    mov     [rip+gp_kern], eax
     call    gpu_ready
     test    eax, eax
     jz      9f
@@ -631,8 +646,8 @@ gpu_pt_begin:
     mov     [rbx+32], rax               # tvc
     mov     eax, [rip+hv_nmats]
     inc     eax
-    shl     rax, 10
-    mov     [rbx+40], rax               # mats
+    shl     rax, MA_SHIFT
+    mov     [rbx+40], rax               # mats (whole records: their graphs)
     mov     eax, [rip+hv_nn4]
     shl     rax, 7
     mov     [rbx+48], rax               # nodes
@@ -649,6 +664,14 @@ gpu_pt_begin:
     mov     [rbx+88], rax               # aux
     lea     rax, [r12*4]
     mov     [rbx+96], rax               # m2
+    mov     eax, [rip+hv_n]
+    imul    rax, rax, 36
+    mov     [rbx+104], rax              # to (object-space corners)
+    mov     eax, [rip+hv_n]
+    imul    rax, rax, 24
+    mov     [rbx+112], rax              # tuv
+    call    gp_img_bytes
+    mov     [rbx+120], rax              # images
     mov     rdi, rbx
     lea     rsi, [rip+gp_off]
     mov     edx, PT_NBIND
@@ -677,15 +700,15 @@ gpu_pt_begin:
     mov     rdi, [r14+32]
     mov     rcx, [rbx+32]
     call    put_bytes
-    xor     ecx, ecx                    # the materials' first KiB each
-    mov     rsi, [rip+hv_mats]          #  (pt.comp: 256 floats a material)
+    xor     ecx, ecx                    # the materials, whole (pt.comp:
+    mov     rsi, [rip+hv_mats]          #  1024 words a record)
     mov     rdi, [r14+40]
     add     rdi, r13
 21: cmp     ecx, [rip+hv_nmats]
     ja      22f
     push    rcx
     push    rsi
-    mov     ecx, 1024
+    mov     ecx, MA_SZ
     rep     movsb
     pop     rsi
     pop     rcx
@@ -709,6 +732,17 @@ gpu_pt_begin:
     mov     rdi, [r14+72]
     mov     rcx, [rbx+72]
     call    put_bytes
+    mov     rsi, [rip+hv_to]            # graphs: object corners, UVs, images
+    mov     rdi, [r14+104]
+    mov     rcx, [rbx+104]
+    call    put_bytes
+    mov     rsi, [rip+hv_tuv]
+    mov     rdi, [r14+112]
+    mov     rcx, [rbx+112]
+    call    put_bytes
+    mov     rdi, [r14+120]
+    add     rdi, r13
+    call    gp_img_put
     mov     rdi, [r14+80]               # the accumulators: zero, and the
     add     rdi, r13                    #  CPU's from now on
     mov     [rip+hv_accum], rdi
@@ -751,6 +785,8 @@ gpu_pt_begin:
     mov     [rdi+36], eax
     mov     eax, [rip+hv_debug]
     mov     [rdi+40], eax
+    mov     eax, [rip+hv_cut]
+    mov     [rdi+44], eax
     lea     rsi, [rip+hv_cam]
     lea     rdi, [rdi+48]
     mov     ecx, 13*4
@@ -795,14 +831,30 @@ put_bytes:
     rep     stosb
     ret
 
-# hv_gpu_ok -> eax = 1 if pt.comp covers this scene: no HDRI world, no
-#   material with a shader graph, nothing masked, translucent or one-sided
+# hv_gpu_ok -> eax = 1 if pt.comp covers this scene: no HDRI world, and
+#   the materials' graphs of node types it evaluates
 hv_gpu_ok:
+    push    rbx
     xor     eax, eax
     cmp     dword ptr [rip+hv_env], 0
     jne     9f
-    cmp     dword ptr [rip+hv_cut], 0
-    jne     9f
+    mov     ebx, 1
+1:  cmp     ebx, [rip+hv_nmats]
+    ja      8f
+    mov     rdi, rbx
+    shl     rdi, MA_SHIFT
+    add     rdi, [rip+hv_mats]
+    call    gp_graph_ok
+    test    eax, eax
+    jz      9f
+    inc     ebx
+    jmp     1b
+8:  mov     eax, 1
+9:  pop     rbx
+    ret
+
+# gp_has_graphs -> eax = 1 when a material of the scene has a graph
+gp_has_graphs:
     mov     ecx, 1
 1:  cmp     ecx, [rip+hv_nmats]
     ja      8f
@@ -813,8 +865,131 @@ hv_gpu_ok:
     jne     9f
     inc     ecx
     jmp     1b
+8:  xor     eax, eax
+    ret
+9:  mov     eax, 1
+    ret
+
+# gp_graph_ok(rdi=material record) -> eax = 1 when pt.comp evaluates its
+#   graph (none, or only the node types it knows, 8-bit images)
+gp_graph_ok:
+    mov     ecx, [rdi+128]              # (GR_N)
+    test    ecx, ecx
+    jz      8f
+    cmp     ecx, 48
+    ja      9f
+    xor     edx, edx
+1:  cmp     edx, ecx
+    jae     8f
+    imul    eax, edx, 72
+    lea     rsi, [rdi+160+rax]          # (the node)
+    mov     eax, [rsi]
+    cmp     eax, 63
+    ja      9f
+    mov     r8, [rip+gp_types]
+    bt      r8, rax
+    jnc     9f
+    cmp     eax, 1                      # an image: 8 bits (or none)
+    je      2f
+    cmp     eax, 39
+    jne     3f
+2:  cvttss2si eax, dword ptr [rsi+52]
+    dec     eax
+    js      3f
+    push    rcx
+    push    rdx
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    mov     edi, eax
+    call    image_ptr
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+    pop     rdx
+    pop     rcx
+    test    rax, rax
+    jz      3f
+    cmp     dword ptr [rax+8], 0        # (IM_FMT)
+    jne     9f
+3:  inc     edx
+    jmp     1b
 8:  mov     eax, 1
-9:  ret
+    ret
+9:  xor     eax, eax
+    ret
+
+# gp_img_bytes -> rax = the images' buffer: 64 x (offset, w, h, format) and
+#   the 8-bit images' texels
+gp_img_bytes:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12d, 1024
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+img_count]
+    jae     9f
+    cmp     ebx, 64
+    jae     9f
+    mov     edi, ebx
+    call    image_ptr
+    test    rax, rax
+    jz      2f
+    cmp     dword ptr [rax+8], 0
+    jne     2f
+    mov     ecx, [rax]
+    imul    ecx, [rax+4]
+    lea     r12, [r12+rcx*4]
+2:  inc     ebx
+    jmp     1b
+9:  mov     rax, r12
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# gp_img_put(rdi=where) - that buffer
+gp_img_put:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r13, rdi
+    mov     rcx, 128                    # (the table: zeros first)
+    xor     eax, eax
+    rep     stosq
+    mov     r12d, 256                   # texels after the table (words)
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+img_count]
+    jae     9f
+    cmp     ebx, 64
+    jae     9f
+    mov     edi, ebx
+    call    image_ptr
+    test    rax, rax
+    jz      2f
+    cmp     dword ptr [rax+8], 0
+    jne     2f
+    mov     edx, ebx
+    shl     edx, 4
+    mov     ecx, r12d
+    sub     ecx, 256
+    mov     [r13+rdx], ecx
+    mov     ecx, [rax]
+    mov     [r13+rdx+4], ecx
+    mov     ecx, [rax+4]
+    mov     [r13+rdx+8], ecx
+    mov     ecx, [rax]
+    imul    ecx, [rax+4]
+    lea     rsi, [rax+64]               # (IM_DATA)
+    lea     rdi, [r13+r12*4]
+    add     r12d, ecx
+    rep     movsd
+2:  inc     ebx
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
 
 # gpu_pt_pass(edi=samples) -> eax = 1: that many more samples per pixel
 #   (hv_spp and every row's count go up); 0: the helper failed (stopped,

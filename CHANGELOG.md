@@ -64,6 +64,12 @@ project uses [Semantic Versioning](https://semver.org/).
   DirectX (-Y) maps too. `material.preset` (Material tab: Preset...) gives
   a material one of 20 looks, from gold and glass to procedural wood,
   marble, concrete, fabric and leather.
+- **Shader graphs on the GPU (M10, #237):** the GPU path tracer
+  evaluates material graphs (textures, patterns, math, mixes, bump and
+  normal maps; a second kernel built only when a scene has graphs) and
+  lets rays through masked, translucent and one-sided materials. A
+  textured, bumped, normal-mapped and masked scene renders the CPU's image
+  (99.8% of pixels identical); graphs with other nodes stay on the CPU.
 - **Faster material graphs (M3, #230):** each graph is compiled per edit:
   nodes that do not depend on the shading point (math, mixes, colours,
   parameters fed only by such nodes) are evaluated once and their results

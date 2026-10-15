@@ -10,7 +10,7 @@ import os, struct, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GPU = os.path.join(HERE, '..', 'src', 'gpu')
-SHADERS = ['pt', 'raster']
+SHADERS = ['pt', 'raster', 'ptg']   # ptg: pt.comp with shader graphs (-DGRAPHS)
 
 
 def main():
@@ -19,8 +19,9 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         for name in SHADERS:
             spv = os.path.join(tmp, name + '.spv')
-            subprocess.run(['glslc', '-O', '--target-env=vulkan1.1', '-o', spv,
-                            os.path.join(GPU, name + '.comp')], check=True)
+            src, defs = (name, []) if name != 'ptg' else ('pt', ['-DGRAPHS'])
+            subprocess.run(['glslc', '-O', '--target-env=vulkan1.1'] + defs + ['-o', spv,
+                            os.path.join(GPU, src + '.comp')], check=True)
             data = open(spv, 'rb').read()
             words = struct.unpack('<%dI' % (len(data) // 4), data)
             out.append('.globl spv_%s\n.globl spv_%s_end' % (name, name))
