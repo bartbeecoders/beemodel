@@ -95,22 +95,27 @@ s_ai_gap:       .asciz "     "
 
 
 
-s_x:            .asciz " x "
-s_kib:          .asciz " KiB framebuffer   "
+s_objs:         .asciz " objects"
+s_obj1:         .asciz " object"
 s_ready:        .asciz "Ready"
 
 s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero libraries"
-s_log_hello2:   .asciz "Hint: drag the yellow-highlighted splitters to resize panes"
+s_log_hello2:   .asciz "Tip: F3 searches every command; Enter opens the console"
 
 .align 8
 menu_titles:    .quad s_m_file, s_m_edit, s_m_view, s_m_create, s_m_mesh, s_m_render, s_m_ai, s_m_help
 menu_items:     .quad items_file, items_edit, items_view, items_create, items_mesh2, items_render, items_ai, items_help, items_area, items_modadd
-menu_counts:    .long 20, 20, 22, 10, 27, 8, 6, 3, 10, 11
+# Item counts are computed from the lists, so a new entry always shows up.
+menu_counts:    .long (items_edit - items_file) / 8, (items_view - items_edit) / 8
+                .long (items_create - items_view) / 8, (items_render - items_create) / 8
+                .long items_mesh2_n, (items_help - items_render) / 8, (tool_ops - items_ai) / 8
+                .long (items_ai - items_help) / 8, items_area_n, items_modadd_n
 
 # Menus and tool buttons are lists of operators (see ops.s); 0 = separator.
 .align 8
 items_file:     .quad op_file_new, op_file_open, op_file_save, op_file_saveas, 0
-                .quad op_import_obj, op_import_stl, op_import_gltf, op_export_obj, op_export_stl, op_export_gltf
+                .quad op_import_obj, op_import_stl, op_import_gltf, op_import_step, 0
+                .quad op_export_obj, op_export_stl, op_export_gltf, op_export_step
                 .quad op_export_3mf, op_export_dxf, op_export_svg, op_export_pdf, 0
                 .quad op_screenshot, op_recover, 0, op_file_exit
 items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_edit_toggle, op_select_all, op_duplicate, op_delete, 0
@@ -123,7 +128,7 @@ items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_view_measure
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_bezier, op_add_ccircle
-                .quad op_add_path, 0, op_add_light, op_add_camera
+                .quad op_add_path, 0, op_add_light, op_add_camera, op_add_armature
 items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_render_save, 0
                 .quad op_render_denoise, op_render_settings
 items_help:     .quad op_help_keys, op_console_ops, op_help_about
@@ -375,6 +380,9 @@ hit_test:
     pop     rbx
     ret
 
+# hit ids that show the pointing hand
+.equ PTR_HITS, (1<<HIT_BTN_MIN)|(1<<HIT_BTN_MAX)|(1<<HIT_BTN_CLOSE)|(1<<HIT_MENU_TITLE)|(1<<HIT_MENU_ITEM)|(1<<HIT_TOOL)|(1<<HIT_OUTLINER)|(1<<HIT_AREA_TYPE)|(1<<HIT_AREA_BTN)|(1<<HIT_ACT_REVERT)|(1<<HIT_MODS)
+
 # cursor_for(edi=hit id, esi=index) -> eax = cursor shape
 cursor_for:
     cmp     edi, HIT_SPLITTER
@@ -388,7 +396,13 @@ cursor_for:
     mov     eax, CUR_TEXT
     cmp     edi, HIT_CONSOLE_INPUT
     je      9f
-    mov     eax, CUR_DEFAULT
+    mov     eax, CUR_POINTER            # a hand over things you can click
+    mov     ecx, PTR_HITS
+    cmp     edi, 31
+    ja      2f
+    bt      ecx, edi
+    jc      9f
+2:  mov     eax, CUR_DEFAULT
     cmp     edi, HIT_EDGE
     jne     9f
     lea     rax, [rip+edge_cursors]
@@ -1494,7 +1508,22 @@ draw_titlebar:
     mov     esi, 8
     mov     ecx, COL_TEXT_DIM
     call    draw_text
-
+    cmp     dword ptr [rip+scene_modified], 0
+    je      5f
+    lea     ebx, [rax+8]                # unsaved changes: a round dot
+    mov     edi, ebx
+    mov     esi, TITLE_H/2-2
+    mov     edx, 7
+    mov     ecx, 5
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+    lea     edi, [rbx+1]
+    mov     esi, TITLE_H/2-3
+    mov     edx, 5
+    mov     ecx, 7
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+5:
     # caption buttons: minimize, maximize, close
     mov     ebx, [rip+win_w]
     sub     ebx, 3*CAPTION_BTN_W        # x of first button
@@ -1678,8 +1707,17 @@ draw_statusbar:
     add     esi, 3
     mov     ecx, COL_TEXT_DIM
     call    draw_text
-    # right: "AI: edit (1 connected)     <fb KiB> KiB framebuffer   W x H"
+    # right: "3 objects     AI: edit (1 connected)"
     call    fmt_reset
+    mov     edi, [rip+obj_count]
+    call    fmt_int
+    lea     rdi, [rip+s_objs]
+    cmp     dword ptr [rip+obj_count], 1
+    jne     5f
+    lea     rdi, [rip+s_obj1]
+5:  call    fmt_str
+    lea     rdi, [rip+s_ai_gap]
+    call    fmt_str
     lea     rdi, [rip+s_ai_pfx]
     call    fmt_str
     mov     edi, [rip+agent_tier]
@@ -1696,19 +1734,7 @@ draw_statusbar:
     call    fmt_int
     lea     rdi, [rip+s_ai_conn2]
     call    fmt_str
-3:  lea     rdi, [rip+s_ai_gap]
-    call    fmt_str
-    mov     edi, [rip+pool_size]
-    shr     edi, 10
-    call    fmt_int
-    lea     rdi, [rip+s_kib]
-    call    fmt_str
-    mov     edi, [rip+win_w]
-    call    fmt_int
-    lea     rdi, [rip+s_x]
-    call    fmt_str
-    mov     edi, [rip+win_h]
-    call    fmt_int
+3:
     lea     rdi, [rip+fmt_buf]
     call    text_width
     mov     edi, [rip+win_w]

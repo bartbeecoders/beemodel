@@ -36,6 +36,7 @@
 .globl mod_remove
 .globl mods_on
 .globl items_modadd
+.globl items_modadd_n
 .globl mods_alloc
 .globl mod_keys
 .globl type_by_name
@@ -258,6 +259,8 @@ s_axes:         .ascii "XYZ"
 items_modadd:   .quad op_mod_mirror, op_mod_array, op_mod_solidify, op_mod_subsurf
                 .quad op_mod_bevel, op_mod_decimate, op_mod_remesh, op_mod_boolean
                 .quad op_mod_multires, op_mod_geonodes, op_mod_logic, op_mod_armature
+items_modadd_end:
+.set items_modadd_n, (items_modadd_end - items_modadd) / 8
 
 OPERATOR op_mod_add, "object.modifier_add", "Add Modifier", do_mod_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a modifier to the active mesh: object.modifier_add mirror|array|solidify|subsurf|bevel|decimate|remesh|boolean|multires"
 OPERATOR op_mod_mirror, "object.modifier_add_mirror", "Mirror", do_mod_add_n, arg=MT_MIRROR, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="Add a Mirror modifier"
