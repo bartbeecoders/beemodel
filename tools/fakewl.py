@@ -621,6 +621,7 @@ def main():
     material_previews()
     material_instances()
     material_library()
+    material_exchange()
     gltf_mtl()
     product_shot()
     params_units()
@@ -2727,6 +2728,187 @@ def material_library():
     check({'material.preset', 'material.import_textures'} <= names, 'the Material tab has a preset menu and Texture Set...')
     f.shot('68_presets.png')
     f.proc.kill()
+
+
+def helmet_fixture(path, mode, transform=False):
+    """A DamagedHelmet-style glTF: a UV sphere, five PNG maps (base colour
+    with a red / green / blue / white quadrant code, metallic-roughness,
+    normal, occlusion, emissive) as GLB buffer views ('glb'), data: URIs
+    ('gltf') or files beside it with spaces in their names ('ext')."""
+    import base64, io
+    from PIL import Image
+    def png(im):
+        b = io.BytesIO(); im.save(b, 'PNG'); return b.getvalue()
+    base = Image.new('RGB', (16, 16))
+    base.putdata([((255, 0, 0) if y < 8 and x < 8 else (0, 255, 0) if y < 8 else (0, 0, 255) if x < 8 else (255, 255, 255))
+                  for y in range(16) for x in range(16)])
+    maps = [('Helmet_albedo', base), ('Helmet_metalRoughness', Image.new('RGB', (16, 16), (0, 128, 255))),
+            ('Helmet_normal', Image.new('RGB', (16, 16), (128, 128, 255))), ('Helmet_AO', Image.new('RGB', (16, 16), (200, 200, 200))),
+            ('Helmet_emissive', Image.new('RGB', (16, 16), (255, 128, 0)))]
+    pos, uv, idx = [], [], []
+    R, C = 8, 16
+    for i in range(R + 1):
+        for j in range(C + 1):
+            th, ph = math.pi * i / R, 2 * math.pi * j / C
+            pos.append((math.sin(th) * math.cos(ph), math.cos(th), math.sin(th) * math.sin(ph)))
+            uv.append((j / C, i / R))
+    for i in range(R):
+        for j in range(C):
+            a, b = i * (C + 1) + j, (i + 1) * (C + 1) + j
+            idx += [a, b, a + 1, a + 1, b, b + 1]
+    geo = b''.join(struct.pack('<3f', *p) for p in pos) + b''.join(struct.pack('<2f', *t) for t in uv)
+    ib = struct.pack(f'<{len(idx)}H', *idx)
+    views = [{'buffer': 0, 'byteOffset': 0, 'byteLength': 12 * len(pos)},
+             {'buffer': 0, 'byteOffset': 12 * len(pos), 'byteLength': 8 * len(uv)},
+             {'buffer': 0, 'byteOffset': len(geo), 'byteLength': len(ib)}]
+    binb = bytearray(geo + ib)
+    images = []
+    for n, im in maps:
+        data = png(im)
+        if mode == 'glb':
+            while len(binb) % 4: binb.append(0)
+            views.append({'buffer': 0, 'byteOffset': len(binb), 'byteLength': len(data)}); binb += data
+            images.append({'name': n, 'mimeType': 'image/png', 'bufferView': len(views) - 1})
+        elif mode == 'gltf':
+            images.append({'name': n, 'uri': 'data:image/png;base64,' + base64.b64encode(data).decode()})
+        else:
+            fn = n.replace('_', ' ') + '.png'
+            open(os.path.join(os.path.dirname(path), fn), 'wb').write(data)
+            images.append({'uri': fn.replace(' ', '%20')})
+    tt = {'extensions': {'KHR_texture_transform': {'offset': [0.25, 0], 'scale': [2, 3]}}} if transform else {}
+    mat = {'name': 'Helmet', 'pbrMetallicRoughness': {'baseColorTexture': dict({'index': 0}, **tt), 'metallicRoughnessTexture': {'index': 1}},
+           'normalTexture': {'index': 2, 'scale': 0.7}, 'occlusionTexture': {'index': 3}, 'emissiveTexture': {'index': 4},
+           'emissiveFactor': [1, 1, 1]}
+    g = {'asset': {'version': '2.0'}, 'scene': 0, 'scenes': [{'nodes': [0]}], 'nodes': [{'name': 'Helmet', 'mesh': 0}],
+         'meshes': [{'primitives': [{'attributes': {'POSITION': 0, 'TEXCOORD_0': 1}, 'indices': 2, 'material': 0}]}],
+         'materials': [mat], 'textures': [{'source': i} for i in range(5)], 'images': images,
+         'accessors': [{'bufferView': 0, 'componentType': 5126, 'type': 'VEC3', 'count': len(pos), 'min': [-1, -1, -1], 'max': [1, 1, 1]},
+                       {'bufferView': 1, 'componentType': 5126, 'type': 'VEC2', 'count': len(uv)},
+                       {'bufferView': 2, 'componentType': 5123, 'type': 'SCALAR', 'count': len(idx)}],
+         'bufferViews': views, 'buffers': [{'byteLength': len(binb)}]}
+    if mode == 'glb':
+        js = json.dumps(g).encode(); js += b' ' * ((4 - len(js) % 4) % 4)
+        while len(binb) % 4: binb.append(0)
+        body = struct.pack('<II', len(js), 0x4E4F534A) + js + struct.pack('<II', len(binb), 0x004E4942) + bytes(binb)
+        open(path, 'wb').write(struct.pack('<III', 0x46546C67, 2, 12 + len(body)) + body)
+    else:
+        g['buffers'][0]['uri'] = 'data:application/octet-stream;base64,' + base64.b64encode(bytes(binb)).decode()
+        open(path, 'w').write(json.dumps(g))
+
+
+def material_exchange():
+    """Material baking and texture maps in glTF and OBJ / MTL (M11): a
+    helmet-style glTF with five maps imports as a graph (UVs, the maps'
+    pins, KHR_texture_transform), round-trips, Blender reads our maps;
+    procedural graphs are baked on export; material.bake; MTL map_*."""
+    print('  -- material baking, glTF and MTL maps --')
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-mx-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+        return r.stdout.strip() + r.stderr.strip()
+    pins = ('m = matof("Helmet")\nprint(m, nodeinfo(m, 0, "count"), uvstat("Helmet", "inside"))\n'
+            'for p in 0..13 { s = nodeinfo(m, 0, "socket", p)\nif s > 0 { print(p, nodeinfo(m, s, "type"), nodeinfo(m, 0, "socketout", p)) } }\n'
+            'b = nodeinfo(m, 0, "socket", 0)\n'
+            'print(nodeval(m, b, 0, 0, 0, 0, 0.2, 0.8), nodeval(m, b, 1, 0, 0, 0, 0.8, 0.8), nodeval(m, b, 2, 0, 0, 0, 0.2, 0.2), '
+            'nodeinfo(m, nodeinfo(m, 0, "socket", 6), "value", 1))\n')
+    want = {0: (1, 0), 1: (1, 3), 3: (1, 2), 4: (1, 0), 6: (9, 0), 7: (1, 1)}
+    def parse(out):
+        lines = out.splitlines()
+        try:
+            head = lines[0].split()
+            pn = {int(l.split()[0]): (int(l.split()[1]), int(l.split()[2])) for l in lines[1:-1] if len(l.split()) == 3}
+            return head, pn, [float(x) for x in lines[-1].split()]
+        except (IndexError, ValueError):
+            return None, out[-160:], None
+    for mode in ('glb', 'gltf', 'ext'):
+        d = os.path.join(home, mode)
+        os.makedirs(d)
+        p = os.path.join(d, 'helmet.glb' if mode == 'glb' else 'helmet.gltf')
+        helmet_fixture(p, mode)
+        head, pn, v = parse(run(f'op("file.import_gltf", "{p}")\n' + pins))
+        ok = head == ['Helmet', '7', '1'] and pn == want and v and [round(x, 2) for x in v] == [1, 1, 1, 0.7]
+        check(ok, f'a helmet-style glTF ({mode}): UVs, a graph of its five maps, glTF\'s top-left texel where it belongs ({head} {pn} {v})')
+    p = os.path.join(home, 'tt.glb')
+    helmet_fixture(p, 'glb', transform=True)
+    out = run(f'op("file.import_gltf", "{p}")\nm = matof("Helmet")\n'
+              'print(nodeinfo(m, 1, "type"), nodeinfo(m, 1, "value", 1), nodeinfo(m, 1, "value", 2), nodeinfo(m, 1, "value", 3), nodeinfo(m, 1, "value", 4))')
+    check(out.split() == ['10', '2', '3', '0.25', '-2'], f'KHR_texture_transform: the texture coordinate\'s tiling and offset ({out.split()})')
+    # round trip: export, import again
+    src = os.path.join(home, 'glb', 'helmet.glb')
+    rt = os.path.join(home, 'rt.glb')
+    run(f'op("file.import_gltf", "{src}")\ndelete("Cube")\nop("file.export_gltf", "{rt}")')
+    head, pn, v = parse(run(f'op("file.import_gltf", "{rt}")\n' + pins))
+    check(head == ['Helmet', '7', '1'] and pn == want and v and [round(x, 2) for x in v] == [1, 1, 1, 0.7],
+          f'its maps round-trip through our export ({head} {pn} {v})')
+    try:
+        dd = open(rt, 'rb').read(); n = struct.unpack('<I', dd[12:16])[0]; j = json.loads(dd[20:20 + n])
+        names = sorted(i['name'] for i in j.get('images', []))
+    except (OSError, ValueError, struct.error):
+        names = []
+    check(names == sorted(['Helmet_albedo', 'Helmet_metalRoughness', 'Helmet_normal', 'Helmet_AO', 'Helmet_emissive']),
+          f'the exported file embeds the five maps as PNGs ({names})')
+    if shutil.which('blender'):
+        script = os.path.join(home, 'bl.py')
+        open(script, 'w').write(
+            'import bpy, sys\nbpy.ops.wm.read_factory_settings(use_empty=True)\n'
+            'bpy.ops.import_scene.gltf(filepath=sys.argv[-1])\n'
+            'm = bpy.data.materials["Helmet"]\nbs = [n for n in m.node_tree.nodes if n.type == "BSDF_PRINCIPLED"][0]\n'
+            'print("BLM", len(bpy.data.images), bs.inputs["Base Color"].is_linked, bs.inputs["Roughness"].is_linked, '
+            'bs.inputs["Normal"].is_linked)\n')
+        r = subprocess.run(['blender', '-b', '--factory-startup', '--python', script, '--', rt], capture_output=True, text=True, timeout=300)
+        line = [l for l in r.stdout.splitlines() if l.startswith('BLM ')]
+        check(line and line[0].split()[1:] == ['5', 'True', 'True', 'True'], f'Blender reads the maps ({line or r.stderr[-120:]})')
+    # procedural: baked on export
+    pb = os.path.join(home, 'proc.glb')
+    run(f'add("sphere", "S", 3, 0, 0)\nunwrap("S", "smart")\nselect("S")\nop("material.preset", "marble")\ndelete("Cube")\n'
+        f'op("file.export_gltf", "{pb}")')
+    try:
+        import io
+        dd = open(pb, 'rb').read(); n = struct.unpack('<I', dd[12:16])[0]; j = json.loads(dd[20:20 + n]); binb = dd[20 + n + 8:]
+        ims = {}
+        for im in j['images']:
+            v = j['bufferViews'][im['bufferView']]
+            ims[im['name']] = Image.open(io.BytesIO(binb[v.get('byteOffset', 0):v.get('byteOffset', 0) + v['byteLength']])).convert('RGB')
+        mm = j['materials'][0]['pbrMetallicRoughness']
+        base = ims.get('marble_base')
+        spread = len({base.getpixel((x, y)) for x in range(0, 512, 16) for y in range(0, 512, 16)}) if base else 0
+        ok = (sorted(ims) == ['marble_base', 'marble_orm'] and base.size == (512, 512) and spread > 20
+              and 'baseColorTexture' in mm and 'metallicRoughnessTexture' in mm)
+    except (OSError, ValueError, KeyError, struct.error, IndexError):
+        ok, spread = False, 0
+    check(ok, f'a procedural graph is baked through the UVs on export: base colour and ORM maps ({spread} colours)')
+    # material.bake: the baked material renders like the graph
+    shots = [os.path.join(home, f'b{k}.png') for k in (0, 1)]
+    scene = 'delete("Cube")\nadd("sphere", "S")\nunwrap("S", "smart")\nselect("S")\nop("material.preset", "wood")\n'
+    out = run(scene + f'render("{shots[0]}", 96, 96, 8)\nop("material.bake", "S 256 apply")\nm = matof("S")\n'
+              f'print(m, nodeinfo(m, 0, "count"), imgsize("wood_base", 0), imgsize("wood_orm", 0), imgsize("wood_normal", 0))\n'
+              f'render("{shots[1]}", 96, 96, 8)')
+    diff = 999
+    if all(os.path.exists(x) for x in shots):
+        a, b = (Image.open(x).convert('RGB') for x in shots)
+        px = [(p, q) for p, q in zip(a.getdata(), b.getdata()) if max(p) > 30]
+        diff = sum(abs(p[c] - q[c]) for p, q in px for c in range(3)) / max(1, 3 * len(px))
+    got = next((l.split() for l in out.splitlines() if l.startswith('wood ')), [])
+    check(got == ['wood', '6', '256', '256', '256'] and diff < 12,
+          f'material.bake: maps through the UVs, the material samples them and renders alike ({got}, mean difference {diff:.1f})')
+    # OBJ / MTL
+    od = os.path.join(home, 'obj')
+    os.makedirs(od)
+    run(f'op("file.import_gltf", "{src}")\nadd("sphere", "S", 3, 0, 0)\nunwrap("S", "smart")\nselect("S")\n'
+        f'op("material.preset", "marble")\ndelete("Cube")\nop("file.export_obj", "{od}/scene.obj")')
+    mtl = open(os.path.join(od, 'scene.mtl')).read() if os.path.exists(os.path.join(od, 'scene.mtl')) else ''
+    files = sorted(f for f in os.listdir(od) if f.endswith('.png'))
+    check('map_Kd Helmet_albedo.png' in mtl and 'map_Pr -imfchan g marble_orm.png' in mtl and 'norm Helmet_normal.png' in mtl
+          and files == ['Helmet_albedo.png', 'Helmet_emissive.png', 'Helmet_metalRoughness.png', 'Helmet_normal.png',
+                        'marble_base.png', 'marble_orm.png'], f'MTL export: map_Kd, map_Pr / map_Pm, norm, map_Ke and their PNGs ({files})')
+    out = run(f'op("file.import_obj", "{od}/scene.obj")\nm = "Helmet"\n'
+              'for p in 0..13 { s = nodeinfo(m, 0, "socket", p)\nif s > 0 { print(p, nodeinfo(m, s, "type"), nodeinfo(m, 0, "socketout", p)) } }\n'
+              'print(nodeinfo("marble", 0, "count"))')
+    got = [tuple(int(x) for x in l.split()) for l in out.splitlines() if len(l.split()) == 3]
+    check(got == [(0, 1, 0), (1, 1, 3), (3, 1, 2), (4, 1, 0), (6, 9, 0)] and out.splitlines()[-1] == '3',
+          f'MTL import: the maps back as a graph (-imfchan g / b: one packed map) ({got})')
 
 
 def gltf_fixture(path, external=False):

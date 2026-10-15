@@ -25,6 +25,8 @@
 .globl imgd_write
 .globl imgd_read
 .globl image_rec
+.globl image_adopt
+.globl im_int
 
 .equ MAX_IMAGES, 64
 .equ IR_NAME,  0
@@ -291,6 +293,39 @@ image_load:
 9:  add     rsp, 8
     pop     r14
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# image_adopt(rdi=decoded image, rsi=name) -> eax = its index (-1: full; the
+#   image is freed then): an image from memory (a glTF's), saved inside .bee
+#   files
+image_adopt:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    cmp     dword ptr [rip+img_count], MAX_IMAGES
+    jae     8f
+    mov     dword ptr [rbx+IM_DIRTY], 1
+    mov     rdi, rsi
+    call    base_name
+    call    unique
+    mov     edi, [rip+img_count]
+    call    rec
+    mov     [rax+IR_IMG], rbx
+    mov     byte ptr [rax+IR_PATH], 0
+    mov     rdi, rax
+    lea     rsi, [rip+im_name]
+    mov     ecx, 32
+    rep     movsb
+    mov     eax, [rip+img_count]
+    inc     dword ptr [rip+img_count]
+    jmp     9f
+8:  mov     rdi, rbx
+    call    img_free
+    mov     eax, -1
+9:  add     rsp, 8
     pop     r12
     pop     rbx
     ret

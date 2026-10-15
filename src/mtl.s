@@ -3,9 +3,12 @@
 #
 #  newmtl, Kd (base), Ke (emission, strength 1), Ni (IOR), d / Tr (alpha),
 #  Ns (roughness = sqrt(2 / (Ns + 2)) unless Pr says), Tf (transmission, as
-#  our export writes it) and the PBR extension Pr Pm Pc Pcr; map_Kd loads
-#  the image and makes it the base colour (box-projected). A material that
-#  already exists by name is updated.
+#  our export writes it) and the PBR extension Pr Pm Pc Pcr; map_Kd alone
+#  loads the image and makes it the base colour (box-projected without
+#  UVs). With more maps - map_Pr, map_Pm, map_Ke, norm / map_Bump / bump,
+#  map_d - the material gets a texture set's graph (matlib.s); map_Pr and
+#  map_Pm reading the G and B of one file (-imfchan) make a packed ORM map.
+#  A material that already exists by name is updated.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -26,6 +29,18 @@ mk_pm:          .asciz "Pm"
 mk_pc:          .asciz "Pc"
 mk_pcr:         .asciz "Pcr"
 mk_mapkd:       .asciz "map_Kd"
+mk_mappr:       .asciz "map_Pr"
+mk_mappm:       .asciz "map_Pm"
+mk_mapke:       .asciz "map_Ke"
+mk_norm:        .asciz "norm"
+mk_mapbump:     .asciz "map_Bump"
+mk_mapbump2:    .asciz "map_bump"
+mk_bump:        .asciz "bump"
+mk_mapd:        .asciz "map_d"
+mk_imfchan:     .asciz "-imfchan "
+.align 8
+mk_maps:        .quad mk_mapkd, 0, mk_mappr, 2, mk_mappm, 4, mk_mapke, 7, mk_norm, 1
+                .quad mk_mapbump, 1, mk_mapbump2, 1, mk_bump, 1, mk_mapd, 8, 0, 0
 .align 4
 mf_one:         .float 1.0
 mf_two:         .float 2.0
@@ -38,6 +53,8 @@ mt_dir:         .skip 512
 mt_path:        .skip 640
 mt_cur:         .skip 4
 mt_haspr:       .skip 4
+mt_found:       .skip 4*10              # the material's maps: image + 1
+mt_chan:        .skip 4*10              #  their -imfchan letter
 mt_end:         .skip 8
 
 .text
@@ -237,7 +254,12 @@ mtl_import:
     jns     11f
     lea     rdi, [rip+mt_name]
     call    mat_new
-11: mov     [rip+mt_cur], eax
+11: push    rax
+    push    rax
+    call    mt_flush                    # (the one before: its maps)
+    pop     rax
+    pop     rax
+    mov     [rip+mt_cur], eax
     mov     dword ptr [rip+mt_haspr], 0
     jmp     .Lmt_next
 1:  lea     rdi, [rip+mk_kd]
@@ -353,14 +375,20 @@ mtl_import:
     mov     esi, 2
     call    set1
     jmp     .Lmt_next
-7:  lea     rdi, [rip+mk_mapkd]         # map_Kd: the image as the base
+7:  lea     r15, [rip+mk_maps]          # the maps
+71: mov     rdi, [r15]
+    test    rdi, rdi
+    jz      .Lmt_next
     call    is_key
-    jnz     .Lmt_next
-    mov     rsi, rbx
+    jz      72f
+    add     r15, 16
+    jmp     71b
+72: mov     rsi, rbx
     lea     rdi, [rsp]                  # (only the last word: options first)
     call    map_file
     mov     rbx, rsi
-    call    map_kd
+    mov     edi, [r15+8]
+    call    map_load
     jmp     .Lmt_next
 .Lmt_num:
     mov     rsi, rbx
@@ -382,6 +410,7 @@ mtl_import:
 2:  inc     rsi
     jmp     .Lmt_line
 .Lmt_done:
+    call    mt_flush
     mov     rdi, r13
     mov     rsi, r14
     call    file_unmap
@@ -423,14 +452,63 @@ map_file:
 4:  mov     byte ptr [rdx+r8], 0
     ret
 
-# map_kd - load mt_dir + mt_name, give it to the current material's base
-map_kd:
+# map_load(edi=kind) - load mt_dir + mt_name as that map of the current
+#   material (the first of each kind; a file already loaded for another:
+#   the same image), its -imfchan letter (mt_path: the line)
+map_load:
     push    rbx
     push    r12
-    sub     rsp, 24
-    mov     ebx, [rip+mt_cur]
-    test    ebx, ebx
+    push    r13
+    mov     ebx, edi
+    cmp     dword ptr [rip+mt_cur], 0
+    jl      9f
+    lea     rax, [rip+mt_found]
+    cmp     dword ptr [rax+rbx*4], 0
+    jne     9f
+    lea     rdi, [rip+mt_path]          # -imfchan x
+    lea     rsi, [rip+mk_imfchan]
+    call    mt_strstr
+    xor     ecx, ecx
+    test    rax, rax
+    jz      1f
+    movzx   ecx, byte ptr [rax+9]
+1:  lea     rax, [rip+mt_chan]
+    mov     [rax+rbx*4], ecx
+    call    map_image
+    test    eax, eax
     js      9f
+    inc     eax
+    lea     rcx, [rip+mt_found]
+    mov     [rcx+rbx*4], eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# mt_strstr(rdi=text, rsi=word) -> rax = where it starts, or 0
+mt_strstr:
+1:  xor     ecx, ecx
+2:  mov     al, [rsi+rcx]
+    test    al, al
+    jz      8f
+    cmp     al, [rdi+rcx]
+    jne     3f
+    inc     ecx
+    jmp     2b
+3:  cmp     byte ptr [rdi], 0
+    je      7f
+    inc     rdi
+    jmp     1b
+7:  xor     eax, eax
+    ret
+8:  mov     rax, rdi
+    ret
+
+# map_image -> eax = the image mt_dir + mt_name (loaded, or the one loaded
+#   from that file already), -1 if unreadable
+map_image:
+    push    rbx
+    sub     rsp, 16
     lea     rdi, [rip+mt_path]          # the folder + the file
     lea     rsi, [rip+mt_dir]
 1:  mov     al, [rsi]
@@ -447,12 +525,91 @@ map_kd:
     inc     rdi
     test    al, al
     jnz     3b
-    lea     rdi, [rip+mt_path]
-    call    image_load
+    xor     ebx, ebx                    # (one of this scene's from it?)
+4:  cmp     ebx, [rip+img_count]
+    jae     5f
+    mov     edi, ebx
+    call    image_rec
+    lea     rdi, [rax+40]
+    lea     rsi, [rip+mt_path]
+    call    str_eq
     test    eax, eax
+    jnz     6f
+    inc     ebx
+    jmp     4b
+5:  lea     rdi, [rip+mt_path]
+    call    image_load
+    jmp     9f
+6:  mov     eax, ebx
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# mt_flush - the current material's maps: map_Kd alone, the base colour;
+#   more, a texture set's graph; then none
+mt_flush:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     dword ptr [rsp], 0
+    mov     ebx, [rip+mt_cur]
+    test    ebx, ebx
+    js      8f
+    lea     r12, [rip+mt_found]
+    mov     eax, [r12+8]                # roughness G + metallic B of one
+    test    eax, eax                    #  image: packed ORM
+    jz      1f
+    cmp     eax, [r12+16]
+    jne     1f
+    lea     rcx, [rip+mt_chan]
+    cmp     dword ptr [rcx+8], 'g'
+    jne     1f
+    cmp     dword ptr [rcx+16], 'b'
+    jne     1f
+    mov     [r12+36], eax
+    mov     dword ptr [r12+8], 0
+    mov     dword ptr [r12+16], 0
+    mov     dword ptr [rsp], 1          # (its red: not known to be AO)
+1:  xor     ecx, ecx                    # how many
+    xor     edx, edx
+2:  cmp     dword ptr [r12+rcx*4], 0
+    je      21f
+    inc     edx
+21: inc     ecx
+    cmp     ecx, 10
+    jb      2b
+    test    edx, edx
+    jz      8f
+    cmp     edx, 1
+    jne     3f
+    mov     eax, [r12]
+    test    eax, eax
+    jz      3f
+    lea     r12d, [rax]                 # map_Kd alone
+    call    map_kd
+    jmp     8f
+3:  mov     edi, ebx
+    mov     rsi, r12
+    mov     edx, [rsp]
+    call    ml_set_build
+8:  lea     rdi, [rip+mt_found]
+    xor     eax, eax
+    mov     ecx, 20
+    rep     stosd
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# map_kd(r12d = image + 1) - the current material's base: that image
+map_kd:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     ebx, [rip+mt_cur]
+    test    ebx, ebx
     js      9f
-    lea     r12d, [rax+1]               # image + 1
-    mov     edi, ebx                    # a one-node graph: image -> base
+41: mov     edi, ebx                    # a one-node graph: image -> base
     call    graph_clear
     mov     edi, ebx
     mov     esi, 1
