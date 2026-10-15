@@ -365,7 +365,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <li>Move colours from <code>COL_*</code> constants into a theme table in memory, with Dark, Light and High contrast themes.</li>
     <li>New primitives: alpha fill, rounded rect, anti-aliased lines and circles, drop shadow, icon blit with tint.</li>
     <li>Font roles Body / Small / Heading / Mono, with a heading weight made by synthetic emboldening when there is no bold face.</li>
-    <li>A UI scale multiplier on top of the compositor scale.</li></ul></div></div>
+    <li>A UI scale multiplier on top of the compositor scale: moved to U23 (Preferences), since it means separating the surface size from the layout size in <code>wayland.s</code>.</li></ul></div></div>
   <div class="phase"><div class="pn"><b>U3</b><a href="https://github.com/bartbeecoders/beemodel/issues/172">#172</a></div><div class="card accent"><h3>Widget toolkit</h3><ul>
     <li><code>src/widgets.s</code>: an immediate-mode toolkit with stable widget ids and hot, active and focus state.</li>
     <li>Widgets: button, icon button, toggle, checkbox, number field (scrub, type, expressions, units, reset), slider, dropdown, text field, colour swatch, collapsible section, tabs, scroll view with scrollbar, list rows.</li>
@@ -485,6 +485,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
         <li>Files: autosave, library folders.</li>
         <li>AI: default tier, MCP on/off.</li>
       </ul></li>
+    <li>UI scale (75–200%) on top of the compositor's scale.</li>
     <li>Saved to <code>~/.config/beemodel/prefs</code>. Environment variables still override it.</li></ul></div></div>
   <div class="phase"><div class="pn"><b>U24</b><a href="https://github.com/bartbeecoders/beemodel/issues/193">#193</a></div><div class="card violet"><h3>Workspaces and layout persistence</h3><ul>
     <li>Layouts are saved in <code>.bee</code> files and in the preferences.</li>

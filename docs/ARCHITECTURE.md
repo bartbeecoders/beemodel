@@ -14,7 +14,9 @@ stays private to the module.
 |--------|----------------|
 | `main.s` | `_start`, command-line flags, the event loop |
 | `wayland.s` | Socket, message encoding/decoding, `SCM_RIGHTS`, shm buffers, event dispatch, frame pacing, drawing times and the input work before each frame (`frametime`), tablets (`zwp_tablet_v2` tools: pen motion and buttons as pointer input, pressure, eraser end), the locked pointer for play mode (`zwp_pointer_constraints_v1` + `zwp_relative_pointer_v1`: `wl_lock_pointer` / `wl_unlock_pointer`, unaccelerated relative motion to `play_look`, the cursor hidden) |
-| `draw.s` | Framebuffer primitives: rects, gradients, text, lines, clip rectangle |
+| `draw.s` | Framebuffer primitives: rects, gradients, text, lines, clip rectangle; every colour passes through the theme (`th_map`) |
+| `shapes.s` | Anti-aliased UI shapes: rounded and translucent rectangles, circles, soft shadows, Wu lines, `popup_frame` for menus and the palette |
+| `theme.s` | UI themes (Dark, Light, High contrast): a table per theme maps each dark-theme `COL_*` value to the theme's colour; `view.theme`, the View menu, `BEEMODEL_THEME` |
 | `ui.s` | Layout, hit testing, pointer/keyboard handling, title bar, menus, panes, status bar |
 | `ops.s` | The operator spine: application operators, `run_op` (which realigns the stack for the operator, whoever calls), key dispatch, shortcut text, `--list-ops` |
 | `viewport.s` | Camera, projection, clipping, grid/axes/gizmo, plus the viewport's own operators |
@@ -233,6 +235,34 @@ hash table backed by a 4 MiB arena, and are alpha-blended into the framebuffer.
 
 Text is proportional, so layout code measures with `text_width` /
 `text_width_n` instead of assuming 8-pixel cells.
+
+There are four font slots. `FONT_UI` (15 px) is for labels, menus and fields.
+`FONT_MONO` (14 px) is for the console. `FONT_SMALL` (13 px) is for hints and
+the status bar. `FONT_HEAD` (16 px) is for section and dialog titles. Small
+and heading reuse the UI face: the slot is a copy of `FONT_UI`'s record at
+another size. The heading slot sets `FNT_BOLD`, which widens each glyph by a
+pixel (each pixel takes the darker of itself and its left neighbour). In the
+bitmap font a heading is drawn twice, a pixel apart. `draw_heading` and
+`draw_small` draw in those slots, and `fonts_resize` resets every size when
+the scale changes.
+
+## Themes
+
+UI code names its colours with the `COL_*` constants in `const.inc`, which are
+the dark theme's values. The logical-coordinate primitives (`fill_rect`,
+`fill_vgradient`, `draw_line`, `draw_text`, the shapes in `shapes.s` and the
+viewport's `line3d`) pass every colour through `th_map`. For the dark theme it
+returns the colour unchanged. For another theme it looks the colour up in that
+theme's table (`theme.s`) and returns the replacement. Colours that are not in
+the table, such as object and image colours, pass through, so a new
+`COL_*` constant only needs a row per theme. Two constants with the same value
+map to the same colour, so give roles that must differ distinct values
+(`COL_TEXT_DARK` is `0x1b1d23`, not the title bar's `0x1b1d22`).
+`fill_rect_px` and `draw_line_px` stay unmapped for pixels that are content,
+not chrome.
+
+The `themes` fakewl test computes the WCAG contrast of every text and
+background pair in every theme from these tables (at least 4.5:1).
 
 ## HiDPI / fractional scaling
 
