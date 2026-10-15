@@ -37,6 +37,7 @@ _start:
     call    th_init
     call    recent_load                 # File > Open Recent
     call    area_init
+    call    wsp_init                    # workspaces: the last session's, or the built-in ones
     lea     rdi, [rip+frame_arena]
     mov     esi, FRAME_ARENA_BYTES
     call    arena_init
@@ -200,6 +201,7 @@ _start:
     jmp     .Lloop
 
 .Lquit:
+    call    wsp_persist                 # (the layout, for next time)
     call    mcp_shutdown
     xor     edi, edi
     mov     eax, SYS_EXIT_GROUP

@@ -15,6 +15,11 @@
 .include "macros.inc"
 
 # exports
+.globl nodes
+.globl area_cams
+.globl props_tab
+.globl close_leaf
+.globl node_ptr
 .globl ed_node
 .globl area_layout
 .globl area_hit
@@ -456,6 +461,18 @@ area_hit:
     call    set_body
     mov     edi, r13d
     call    node_ptr
+    mov     ecx, ebx                    # the top-left corner (8 px): join
+    sub     ecx, [rax+N_X]
+    cmp     ecx, 8
+    jae     1f
+    mov     ecx, r12d
+    sub     ecx, [rax+N_Y]
+    cmp     ecx, 8
+    jae     1f
+    mov     eax, HIT_AREA_CORNER
+    mov     edx, r13d
+    jmp     .Lah_ret
+1:
     mov     ecx, [rax+N_Y]
     add     ecx, PANE_HDR_H
     cmp     r12d, ecx

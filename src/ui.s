@@ -139,7 +139,7 @@ items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_palette_open, 0
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
                 .quad op_view_wire, op_view_matprev, op_view_grid, op_view_reset_cam, op_console_clear, 0
-                .quad sub_analysis, op_view_measure, 0, sub_theme
+                .quad sub_analysis, op_view_measure, 0, sub_theme, sub_workspace
 .equ items_view_n, (. - items_view) / 8
 items_select:   .quad op_select_all, 0, op_mesh_all, op_mesh_inv, op_mesh_linked, op_mesh_box, 0
                 .quad op_selmode_v, op_selmode_e, op_selmode_f
@@ -176,6 +176,7 @@ sub_normals_l:  .quad op_m_flip, op_m_recalc
 sub_feature_l:  .quad op_cad_pad, op_cad_pocket, op_cad_revolve, op_cad_hole, 0
                 .quad op_cad_shell, op_cad_fillet, op_cad_chamfer, op_cad_pattern, op_cad_infill
 sub_generate_l: .quad op_gen_lsystem, op_gen_wfc
+sub_ws_l:       .quad op_ws_next, op_ws_prev, 0, op_ws_new, op_ws_rename, op_ws_delete
 sub_uv_l:       .quad op_uv_unwrap, op_uv_smart, op_uv_pack, 0, op_uv_mark, op_uv_clear, op_uv_sharp
 sub_mech_l:     .quad op_mj_add, op_mj_list, op_mj_check
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
@@ -194,6 +195,7 @@ SUBMENU sub_feature, "Part Feature", sub_feature_l, 10
 SUBMENU sub_generate, "Generate", sub_generate_l, 2
 SUBMENU sub_mech, "Mechanism", sub_mech_l, 3
 SUBMENU sub_uv, "UV", sub_uv_l, 7
+SUBMENU sub_workspace, "Workspace", sub_ws_l, 6
 
 # -----------------------------------------------------------------------------
 # small helpers
@@ -370,7 +372,14 @@ hit_test:
     jl      .Lht_ret
     inc     edx
     jmp     1b
-2:  mov     eax, HIT_MENUBAR
+2:  mov     edi, ebx                    # (the workspace tabs)
+    mov     esi, r12d
+    call    wg_hit
+    mov     edx, eax
+    test    eax, eax
+    mov     eax, HIT_WIDGET
+    jnz     .Lht_ret
+    mov     eax, HIT_MENUBAR
     xor     edx, edx
     jmp     .Lht_ret
 
@@ -1067,7 +1076,17 @@ ui_button:
     mov     rdi, [rax+r12*8]
     call    run_op
     jmp     .Lbt_done
-42: cmp     ebx, HIT_AREA_TYPE          # editor type menu
+42: cmp     ebx, HIT_AREA_HDR           # a header dragged: swap areas
+    je      43f
+    cmp     ebx, HIT_AREA_CORNER        # a corner dragged: join areas
+    jne     44f
+    mov     dword ptr [rip+wsp_drag_kind], 1
+    jmp     45f
+43: mov     dword ptr [rip+wsp_drag_kind], 0
+45: mov     [rip+wsp_drag_src], r12d
+    mov     dword ptr [rip+drag_mode], DRAG_AREA
+    jmp     .Lbt_done
+44: cmp     ebx, HIT_AREA_TYPE          # editor type menu
     jne     5f
     mov     [rip+active_area], r12d
     mov     dword ptr [rip+menu_open], MENU_AREA
@@ -1201,7 +1220,14 @@ ui_button:
 
     # ---------------- release ----------------
 .Lbt_release:
-    cmp     dword ptr [rip+drag_mode], DRAG_WIDGET
+    cmp     dword ptr [rip+drag_mode], DRAG_AREA  # an area dropped on another
+    jne     7698f
+    mov     dword ptr [rip+drag_mode], 0
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    wsp_area_drop
+    jmp     .Lbt_done
+7698: cmp   dword ptr [rip+drag_mode], DRAG_WIDGET
     jne     7699f
     mov     dword ptr [rip+drag_mode], 0
     call    wg_release
@@ -1943,6 +1969,7 @@ draw_menubar:
     inc     ebx
     cmp     ebx, NUM_MENUS
     jb      1b
+    call    wsp_tabs_draw               # the workspaces' tabs after the menus
     xor     edi, edi
     mov     esi, TITLE_H+MENU_H-1
     mov     edx, [rip+win_w]

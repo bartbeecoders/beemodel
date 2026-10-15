@@ -521,6 +521,14 @@ FFIELD fw_lbk, kw=kw_lbkind
 FFIELD fw_lbn, kw=FK_ACTIVE
 FFIELD fw_lbg
 
+# ---- workspace.rename <name> -------------------------------------------------------
+.section .rodata
+d_wsname:       .asciz "My Layout"
+.text
+WIDGET fw_wsn,  WK_TEXT, "form.workspace.name", "Name"
+FORM form_wsname, 1
+FFIELD fw_wsn, kw=d_wsname
+
 # ---- param.set <name> <expression> ----------------------------------------------------
 WIDGET fw_pmn,  WK_TEXT, "form.param.name", "Name"
 WIDGET fw_pme,  WK_TEXT, "form.param.expression", "Value", tip="A number with units or an expression of other parameters (10mm, 2*wall + 1mm)"
