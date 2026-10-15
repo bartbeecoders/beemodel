@@ -174,7 +174,13 @@ tip_content:
     mov     rdi, [rcx+rbx*8]
     jmp     .Ltc_op
 .Ltc_widget:
-    mov     edi, ebx
+    mov     edi, ebx                    # a row standing for an operator
+    call    wg_op_of
+    test    rax, rax
+    jz      0f
+    mov     rdi, rax
+    jmp     .Ltc_op
+0:  mov     edi, ebx
     call    wg_desc_of
     test    rax, rax
     jz      .Ltc_none

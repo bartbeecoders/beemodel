@@ -27,6 +27,8 @@
 .include "macros.inc"
 
 .globl sc_obj
+.globl sc_radius
+.globl sc_strength
 .globl sculpt_enter
 .globl sculpt_exit
 .globl sculpt_valid

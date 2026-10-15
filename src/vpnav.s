@@ -17,6 +17,7 @@
 # exports
 .globl vp_header_tools
 .globl nav_gizmo_draw
+.globl tool_settings_draw
 
 .equ NAV_R,     34                      # the gizmo's radius
 .equ NAV_BALL,  9
@@ -63,6 +64,16 @@ OPERATOR op_align_top,    "view.align_top",    "Top View",    view_align, arg=4,
 OPERATOR op_align_bottom, "view.align_bottom", "Bottom View", view_align, arg=5, key=71|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET, doc="Look up at the scene from below"
 OPERATOR op_toggle_snap,  "view.toggle_snap",  "Snap",        op_toggle_flag, op_check_flag, snap_on, flags=OPF_AI_SAFE|OPF_QUIET, doc="Snap moves, turns and scales to whole steps (Ctrl does the opposite while you drag)"
 
+WIDGET wd_ts_srad,  WK_FLOAT, "brush.radius", "Radius", 2.0, 1000.0, 0.5, 0, WGF_CLAMP, tip="The brush's radius in pixels ([ and ] change it)"
+WIDGET wd_ts_sstr,  WK_SLIDER, "brush.strength", "Strength", 0.0, 1.0, 0.005, 2, tip="How strongly the brush acts (Shift+[ and Shift+])"
+WIDGET wd_ts_prad,  WK_FLOAT, "paint.radius", "Radius", 1.0, 1000.0, 0.5, 0, WGF_CLAMP, tip="The brush's radius in pixels ([ and ] change it)"
+WIDGET wd_ts_pstr,  WK_SLIDER, "paint.strength", "Strength", 0.0, 1.0, 0.005, 2, tip="How strongly the brush paints (Shift+[ and Shift+])"
+WIDGET wd_ts_sym,   WK_BUTTON, "brush.symmetry_x", "X Symmetry (Shift+X)", flags=WGF_ICON, aux=op_s_sym, n=ICON_SPLIT_H
+WIDGET wd_ts_dyn,   WK_BUTTON, "brush.dyntopo", "Dynamic Topology (Ctrl+D)", flags=WGF_ICON, aux=op_s_dyn, n=ICON_GRID
+WIDGET wd_ts_lazy,  WK_BUTTON, "brush.stabilizer", "Stabilizer (Shift+S)", flags=WGF_ICON, aux=op_s_lazy, n=ICON_CURVE
+WIDGET wd_ts_pstrp, WK_BUTTON, "brush.pressure_strength", "Pen pressure drives the strength", flags=WGF_ICON, aux=op_s_pstr, n=ICON_BRUSH
+WIDGET wd_ts_pradp, WK_BUTTON, "brush.pressure_radius", "Pen pressure drives the radius", flags=WGF_ICON, aux=op_s_prad, n=ICON_DOT
+WIDGET wd_ts_col,   WK_BUTTON, "paint.color", "Brush Colour", flags=WGF_ICON, aux=op_pt_color, n=ICON_PAINT
 WIDGET wd_vp_mode,  WK_ENUM, "viewport.mode", "Mode", cb=vp_mode_cb, aux=mode_lbl, n=6, tip="The mode of the active object: edit, sculpt or paint it"
 WIDGET wd_sm_v,     WK_BUTTON, "viewport.select_vertex", "Vertex select (1)", flags=WGF_ICON, aux=op_selmode_v, n=ICON_DOT
 WIDGET wd_sm_e,     WK_BUTTON, "viewport.select_edge", "Edge select (2)", flags=WGF_ICON, aux=op_selmode_e, n=ICON_MINUS
@@ -276,6 +287,89 @@ nav_gizmo_draw:
     pop     r13
     pop     r12
     pop     rbp
+    pop     rbx
+    ret
+
+# ---- the brush settings (sculpt, texture paint) ----------------------------------
+# tool_settings_draw - a bar at the bottom of the canvas while a brush mode is
+#   on: radius, strength and the brush's toggles
+tool_settings_draw:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    xor     eax, eax
+    cmp     dword ptr [rip+sc_obj], 0
+    jne     1f
+    cmp     dword ptr [rip+pt_obj], 0
+    je      9f
+    mov     eax, 1
+1:  mov     [rsp], eax                  # 0 sculpt, 1 paint
+    mov     ebx, [rip+cvs_x1]           # centred, 540 wide
+    add     ebx, [rip+cvs_x0]
+    sar     ebx, 1
+    sub     ebx, 270
+    mov     eax, [rip+cvs_x0]
+    add     eax, 250                    # (not over the redo panel)
+    cmp     ebx, eax
+    cmovl   ebx, eax
+    mov     r12d, [rip+cvs_y1]
+    sub     r12d, 38
+    mov     edi, ebx                    # its backing
+    sub     edi, 6
+    lea     esi, [r12-5]
+    mov     edx, 552
+    mov     ecx, WG_H+10
+    mov     r8d, COL_PANE_BG
+    mov     r9d, 8
+    push    210
+    push    210
+    call    fill_rrect_a
+    add     rsp, 16
+    mov     r13d, ebx
+    add     r13d, 540                   # the limit for tool_btn
+    lea     rdi, [rip+wd_ts_srad]       # radius, strength
+    lea     r8, [rip+sc_radius]
+    cmp     dword ptr [rsp], 0
+    je      2f
+    lea     rdi, [rip+wd_ts_prad]
+    lea     r8, [rip+pt_radius]
+2:  mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 150
+    xor     r9d, r9d
+    call    wg
+    add     ebx, 158
+    lea     rdi, [rip+wd_ts_sstr]
+    lea     r8, [rip+sc_strength]
+    cmp     dword ptr [rsp], 0
+    je      3f
+    lea     rdi, [rip+wd_ts_pstr]
+    lea     r8, [rip+pt_strength]
+3:  mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 180
+    xor     r9d, r9d
+    call    wg
+    add     ebx, 192
+    cmp     dword ptr [rsp], 0
+    jne     4f
+    lea     rdi, [rip+wd_ts_sym]        # sculpt: its toggles
+    call    tool_btn
+    lea     rdi, [rip+wd_ts_dyn]
+    call    tool_btn
+    lea     rdi, [rip+wd_ts_lazy]
+    call    tool_btn
+    lea     rdi, [rip+wd_ts_pstrp]
+    call    tool_btn
+    lea     rdi, [rip+wd_ts_pradp]
+    call    tool_btn
+    jmp     9f
+4:  lea     rdi, [rip+wd_ts_col]        # paint: the colour
+    call    tool_btn
+9:  add     rsp, 16
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 

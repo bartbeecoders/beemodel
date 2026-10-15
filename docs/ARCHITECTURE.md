@@ -23,7 +23,7 @@ stays private to the module.
 | `clipboard.s` | The Wayland clipboard (`wl_data_device_manager`): copy makes a `wl_data_source` and sets the selection, `send` events get the text written to their fd; paste reads the selection's offer through a pipe (our own selection directly) |
 | `filebrowser.s` | The file browser every path operator opens from the UI (a form whose field is `WK_PATH`): `getdents64` listing, folders first, extension filter, places (home, ~/BeeModel, /, recent folders), double-click, path field, Backspace, "Replace it?" |
 | `forms.s` | The operator forms, as data: per form its fields (a widget, the word before the value, enum keywords, the default; `FF_CHANGED` fields are only sent when changed) |
-| `vpnav.s` | The 3D viewport's header tools (mode, select mode, shading, grid, snap) and its navigation gizmo (six axis balls, top right: click one to look along it); `view.align_*` (Numpad 1 / 3 / 7, Ctrl for the opposite side) |
+| `vpnav.s` | The brush settings bar (sculpt / texture paint: radius, strength, toggles), the 3D viewport's header tools (mode, select mode, shading, grid, snap) and its navigation gizmo (six axis balls, top right: click one to look along it); `view.align_*` (Numpad 1 / 3 / 7, Ctrl for the opposite side) |
 | `tooltip.s` | Tooltips: half a second's rest on a menu item, tool, header button or widget shows its name, shortcut, doc and why it cannot run now (`op_poll`); the main loop's poll timeout wakes it |
 | `theme.s` | UI themes (Dark, Light, High contrast): a table per theme maps each dark-theme `COL_*` value to the theme's colour; `view.theme`, the View menu, `BEEMODEL_THEME` |
 | `ui.s` | Layout, hit testing, pointer/keyboard handling, title bar, menus, panes, status bar |
