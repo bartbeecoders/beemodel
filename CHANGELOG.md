@@ -47,6 +47,14 @@ project uses [Semantic Versioning](https://semver.org/).
   thumbnail of every node's output, and a stats line with warnings
   (nodes that lead nowhere, texture samples without an image). Each edit
   re-renders them within a frame: 9 ms for 24 nodes (budget 16 ms).
+- **Parameters and material instances (M7, #234):** Scalar, Vector and
+  Texture Parameter nodes with names; `material.instance` (Material tab:
+  New Instance) makes an instance that shares its parent's graph and
+  values and overrides parameters (override boxes in the Material tab,
+  `matparam`, `material.param`, `material.param_reset`); parent edits
+  reach every instance, instances of instances work, parameters can be
+  keyed (`material:Blue:Wear`), and everything is saved. 100 instances of
+  one material render in one image, each with its own colour.
 
 ## [0.12.0] - 2026-10-15
 

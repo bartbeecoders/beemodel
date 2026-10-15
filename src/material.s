@@ -1333,7 +1333,24 @@ mat_delete:
     lea     rsi, [rdi+MA_SZ]
     rep     movsb
     dec     dword ptr [rbx+MB_COUNT]
-    xor     ecx, ecx                    # objects: none / one lower
+    xor     ecx, ecx                    # instances: of it - none; later ones
+70: cmp     ecx, [rbx+MB_COUNT]         #  one lower
+    jae     71f
+    mov     eax, ecx
+    shl     eax, MA_SHIFT
+    lea     rdx, [rbx+MB_HDR+rax]
+    mov     eax, [rdx+MA_PARENT]
+    dec     eax
+    js      72f
+    cmp     eax, r12d
+    jb      72f
+    jne     73f
+    mov     dword ptr [rdx+MA_PARENT], 0
+    jmp     72f
+73: dec     dword ptr [rdx+MA_PARENT]
+72: inc     ecx
+    jmp     70b
+71: xor     ecx, ecx                    # objects: none / one lower
 1:  cmp     ecx, [rip+obj_count]
     jae     8f
     push    rcx

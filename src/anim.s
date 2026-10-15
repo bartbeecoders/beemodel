@@ -867,6 +867,8 @@ an_chan:
 1:  movss   xmm0, [rax]
     jmp     .Lch_ok
 .Lch_mat:
+    cmp     r13d, 0x10000               # (a parameter node)
+    jae     .Lch_pparam
     test    r15d, r15d
     jz      2f
     mov     edi, r12d
@@ -878,6 +880,21 @@ an_chan:
     mov     esi, r13d
     mov     edx, r14d
     call    mat_param_get
+    test    eax, eax
+    jz      .Lch_fail
+    jmp     .Lch_ok
+.Lch_pparam:
+    test    r15d, r15d
+    jz      3f
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    movss   xmm0, [rsp]
+    call    mat_pparam_set
+3:  mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    call    mat_pparam_get
     test    eax, eax
     jz      .Lch_fail
     jmp     .Lch_ok
@@ -1304,8 +1321,13 @@ an_path:
     lea     rdi, [rip+ap_word]
     call    mat_param_index
     test    eax, eax
+    jns     1f
+    mov     edi, [rip+ap_a]             # (a parameter node, by name)
+    lea     rsi, [rip+ap_word]
+    call    mat_pparam_code
+    test    eax, eax
     js      .Lap_bad
-    mov     [rip+ap_b], eax
+1:  mov     [rip+ap_b], eax
     mov     dword ptr [rip+ap_kind], K_MAT
     mov     rsi, r12
     call    ap_comp

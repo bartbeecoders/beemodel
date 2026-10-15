@@ -443,6 +443,7 @@ bee_save:
     call    chunk_end
     mov     edi, TAG_MATS               # MATS, OMAT (materials)
     call    chunk_begin
+    call    mat_sync_check              # (instances as they are)
     call    mats_write
     call    chunk_end
     mov     edi, TAG_OMAT

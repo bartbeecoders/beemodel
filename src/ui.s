@@ -1718,6 +1718,7 @@ modifier_keys: .byte 29, 42, 56, 54, 97, 100, 125, 126, 58, 69, 0
 #  Drawing
 # =============================================================================
 ui_draw:
+    call    mat_sync_check              # (material instances up to date)
     call    wg_frame                    # a new list of widgets
     call    an_tick                     # playback: the frame the clock says
     call    rig_tick                    # drivers, constraints, onion skins
