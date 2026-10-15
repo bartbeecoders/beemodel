@@ -88,6 +88,7 @@
 .equ MAXDEV,                16
 
 .equ NSLOT,         2
+.equ NKERN,         3
 .equ SL_BASE,       0                   # a slot: its shared memory, the device
 .equ SL_SIZE,       8                   #   and staging buffers (capacity)
 .equ SL_DBUF,       16
@@ -154,8 +155,9 @@ vk_names2:      .asciz "vkGetDeviceQueue"
                 .asciz "vkUnmapMemory"
                 .byte 0
 .align 8
-k_nbind:        .long 13, 8             # bindings per kernel
-k_code:         .quad spv_pt, spv_pt_end, spv_raster, spv_raster_end
+k_nbind:        .long 16, 8, 16         # bindings per kernel (2: the path tracer
+                                        #  with shader graphs, made when asked)
+k_code:         .quad spv_pt, spv_pt_end, spv_raster, spv_raster_end, spv_ptg, spv_ptg_end
 
 .section .bss
 .align 8
@@ -218,7 +220,7 @@ feats_on:       .skip PF_SZ
 pdlist:         .skip 8*MAXDEV
 qprops:         .skip 24*32
 slots:          .skip SL_SZ*NSLOT
-kernels:        .skip KR_SZ*2
+kernels:        .skip KR_SZ*3
 msg:            .skip GM_SZ
 reply:          .skip GM_SZ
 ctl:            .skip 64
@@ -635,9 +637,9 @@ vk_setup:
     lea     rdi, [rip+ci]               # a pool for both sets
     call    zero256
     mov     dword ptr [rip+ci2], DESC_STORAGE
-    mov     dword ptr [rip+ci2+4], 32
+    mov     dword ptr [rip+ci2+4], 48
     mov     dword ptr [rip+ci], ST_DPOOL
-    mov     dword ptr [rip+ci+20], 2
+    mov     dword ptr [rip+ci+20], 3
     mov     dword ptr [rip+ci+24], 1
     lea     rax, [rip+ci2]
     mov     [rip+ci+32], rax
@@ -1033,11 +1035,26 @@ do_run:
     mov     eax, [rip+msg+GM_SLOT]
     cmp     eax, NSLOT
     jae     .Lr_fail
-    mov     r15d, eax                   # the slot is the kernel
-    imul    ebx, eax, SL_SZ
+    mov     r15d, eax                   # the slot is the kernel, unless one
+    imul    ebx, eax, SL_SZ             #  is named (made the first time)
     lea     rax, [rip+slots]
     add     rbx, rax
+    mov     eax, [rip+msg+GM_KERN]
+    test    eax, eax
+    jz      1f
+    dec     eax
+    cmp     eax, NKERN
+    jae     .Lr_fail
+    mov     r15d, eax
     imul    r12d, r15d, KR_SZ
+    lea     rax, [rip+kernels]
+    cmp     qword ptr [rax+r12+KR_PIPE], 0
+    jne     1f
+    mov     edi, r15d
+    call    make_kernel
+    test    eax, eax
+    jz      .Lr_fail
+1:  imul    r12d, r15d, KR_SZ
     lea     rax, [rip+kernels]
     add     r12, rax
     cmp     qword ptr [rbx+SL_BASE], 0

@@ -15,6 +15,7 @@
 .equ GM_NBIND,      8                   # MSG_RUN: bindings in the table
 .equ GM_GX,         12                  #   workgroups
 .equ GM_GY,         16
+.equ GM_KERN,       20                  #   the kernel + 1 (0: the slot's)
 .equ GM_STATUS,     4                   # replies: 0 ok
 .equ GM_MS,         8                   #   MSG_RUN: milliseconds on the GPU side
 .equ GM_MAGIC,      8                   # MSG_HELLO: 'BGPU', the device type,
