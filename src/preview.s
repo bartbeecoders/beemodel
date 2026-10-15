@@ -46,6 +46,7 @@
 .equ SH_PROBED, 188             # 1: an irradiance volume lit it
 .equ SH_AO,     192             # ambient occlusion (a graph's; else 1)
 .equ SH_SZ,     208
+.equ MA_ALPHA_,  88                      # (material.s)
 
 .section .bss
 .align 8
@@ -1476,5 +1477,621 @@ exp2f_:
     movss   xmm0, [rsp]
     add     rsp, 8
     ret
+
+
+# =============================================================================
+# preview_material(rdi=material record or 0, rsi=out u32[size x size], edx=
+#   size, ecx=shape 0 sphere 1 cube 2 plane, xmm0=yaw, xmm1=pitch) - the
+#   material on a shape alone, under the studio environment, as the viewport
+#   preview shades it (its graph, masks and opacity too); rows in parallel.
+#   The node editor's preview pane draws it.
+# =============================================================================
+.equ PM_SC,     208                     # (a row job's frame: the scratch, the
+.equ PM_CP,     400                     #  shading context, the material's
+.equ PM_UV,     528                     #  copy, the UVs, the hit)
+.equ PM_PO,     552
+.equ PM_NO,     564
+.equ PM_TU,     576
+.equ PM_TV,     588
+.equ PM_D,      600
+.equ PM_OO,     612
+.equ PM_DO,     624
+.equ PM_ROW,    640
+.equ PM_END,    644
+.equ PM_X,      648
+.equ PM_U,      652
+.equ PM_VV,     656
+.equ PM_T,      660
+.equ PM_FR,     712
+.equ SCN_N,     68                      # (graph.s's shading context)
+.equ SCN_FLAGS, 112
+.equ SCN_UVP,   120
+.equ SCN_WP,    152
+.equ SCN_WV,    164
+.equ SCN_VC,    176
+.equ SCN_SZ2,   192
+
+.section .bss
+.align 8
+pm_rec:         .skip 8
+pm_out:         .skip 8
+pm_size:        .skip 4
+pm_shape:       .skip 4
+pm_cy:          .skip 4                 # the shape's turn: cos, sin of yaw,
+pm_sy:          .skip 4                 #  of pitch
+pm_cp:          .skip 4
+pm_sp:          .skip 4
+
+.section .rodata
+.align 4
+pm_eye:         .float 0.0, 0.0, 3.4    # the camera, looking down -z
+pm_focal:       .float 2.6
+pm_cube:        .float 0.75
+pm_plane:       .float 1.1
+pm_h:           .float 0.002            # bump's steps (a fraction of a repeat)
+pm_far:         .float 1.0e8
+pm_inv2pi:      .float 0.15915494
+pm_2pi:         .float 6.2831853
+pm_pi:          .float 3.14159265
+pm_third:       .float 0.33333334
+pm_bg0:         .long 0x2a2c31
+pm_bg1:         .long 0x33363c
+
+.text
+.globl preview_material
+preview_material:
+    push    rbx
+    sub     rsp, 16
+    mov     [rip+pm_rec], rdi
+    mov     [rip+pm_out], rsi
+    mov     [rip+pm_size], edx
+    mov     [rip+pm_shape], ecx
+    movss   [rsp], xmm0
+    movss   [rsp+4], xmm1
+    fld     dword ptr [rsp]
+    fsincos
+    fstp    dword ptr [rip+pm_cy]
+    fstp    dword ptr [rip+pm_sy]
+    fld     dword ptr [rsp+4]
+    fsincos
+    fstp    dword ptr [rip+pm_cp]
+    fstp    dword ptr [rip+pm_sp]
+    call    tex_init
+    call    env_prep
+    lea     rdi, [rip+job_pmat]
+    xor     esi, esi
+    mov     edx, [rip+pm_size]
+    mov     ecx, 4
+    call    parallel_for
+    add     rsp, 16
+    pop     rbx
+    ret
+
+# pm_toobj(rdi=v (camera), rsi=out (object)) - Ry(-yaw) Rx(-pitch) v
+pm_toobj:
+    movss   xmm0, [rdi]                 # x' = x
+    movss   xmm1, [rdi+4]               # y' = cp y + sp z
+    mulss   xmm1, [rip+pm_cp]
+    movss   xmm2, [rdi+8]
+    mulss   xmm2, [rip+pm_sp]
+    addss   xmm1, xmm2
+    movss   xmm2, [rdi+8]               # z' = -sp y + cp z
+    mulss   xmm2, [rip+pm_cp]
+    movss   xmm3, [rdi+4]
+    mulss   xmm3, [rip+pm_sp]
+    subss   xmm2, xmm3
+    movss   xmm3, xmm0                  # then about y: x'' = cy x' - sy z'
+    mulss   xmm3, [rip+pm_cy]
+    movss   xmm4, xmm2
+    mulss   xmm4, [rip+pm_sy]
+    subss   xmm3, xmm4
+    mulss   xmm0, [rip+pm_sy]           # z'' = sy x' + cy z'
+    mulss   xmm2, [rip+pm_cy]
+    addss   xmm2, xmm0
+    movss   [rsi], xmm3
+    movss   [rsi+4], xmm1
+    movss   [rsi+8], xmm2
+    ret
+
+# pm_tocam(rdi=v (object), rsi=out (camera)) - Rx(pitch) Ry(yaw) v
+pm_tocam:
+    movss   xmm0, [rdi]                 # about y: x' = cy x + sy z
+    mulss   xmm0, [rip+pm_cy]
+    movss   xmm1, [rdi+8]
+    mulss   xmm1, [rip+pm_sy]
+    addss   xmm0, xmm1
+    movss   xmm2, [rdi+8]               # z' = -sy x + cy z
+    mulss   xmm2, [rip+pm_cy]
+    movss   xmm1, [rdi]
+    mulss   xmm1, [rip+pm_sy]
+    subss   xmm2, xmm1
+    movss   xmm1, [rdi+4]               # about x: y'' = cp y - sp z'
+    mulss   xmm1, [rip+pm_cp]
+    movss   xmm3, xmm2
+    mulss   xmm3, [rip+pm_sp]
+    subss   xmm1, xmm3
+    movss   xmm3, [rdi+4]               # z'' = sp y + cp z'
+    mulss   xmm3, [rip+pm_sp]
+    mulss   xmm2, [rip+pm_cp]
+    addss   xmm2, xmm3
+    movss   [rsi], xmm0
+    movss   [rsi+4], xmm1
+    movss   [rsi+8], xmm2
+    ret
+
+# job_pmat(ctx, esi=first row, edx=end) - preview_material's rows
+job_pmat:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, PM_FR
+    mov     [rsp+PM_ROW], esi
+    mov     [rsp+PM_END], edx
+    lea     rax, [rip+pm_eye]           # the eye in the object's frame
+    mov     rdi, rax
+    lea     rsi, [rsp+PM_OO]
+    call    pm_toobj
+.Lpm_row:
+    mov     eax, [rsp+PM_ROW]
+    cmp     eax, [rsp+PM_END]
+    jae     .Lpm_out
+    mov     dword ptr [rsp+PM_X], 0
+.Lpm_px:
+    mov     eax, [rsp+PM_X]
+    cmp     eax, [rip+pm_size]
+    jae     .Lpm_rnext
+    # the ray: d = (x', y', -focal), x' y' in -1..1
+    cvtsi2ss xmm0, eax
+    addss   xmm0, [rip+pf_half]
+    cvtsi2ss xmm2, dword ptr [rip+pm_size]
+    divss   xmm0, xmm2
+    addss   xmm0, xmm0
+    subss   xmm0, [rip+pf_one]
+    cvtsi2ss xmm1, dword ptr [rsp+PM_ROW]
+    addss   xmm1, [rip+pf_half]
+    divss   xmm1, xmm2
+    addss   xmm1, xmm1
+    movss   xmm3, [rip+pf_one]
+    subss   xmm3, xmm1
+    movss   [rsp+PM_D], xmm0
+    movss   [rsp+PM_D+4], xmm3
+    movss   xmm0, [rip+pm_focal]
+    xorps   xmm0, [rip+pf_sign]
+    movss   [rsp+PM_D+8], xmm0
+    lea     rdi, [rsp+PM_D]
+    call    pm_unit
+    lea     rdi, [rsp+PM_D]
+    lea     rsi, [rsp+PM_DO]
+    call    pm_toobj
+    mov     eax, [rip+pm_shape]
+    cmp     eax, 1
+    je      .Lpm_cube
+    cmp     eax, 2
+    je      .Lpm_plane
+    # sphere: |o + t d| = 1
+    lea     rdi, [rsp+PM_OO]
+    lea     rsi, [rsp+PM_DO]
+    call    pm_dot
+    movss   xmm4, xmm0                  # b
+    lea     rdi, [rsp+PM_OO]
+    mov     rsi, rdi
+    call    pm_dot
+    subss   xmm0, [rip+pf_one]          # c
+    movss   xmm1, xmm4
+    mulss   xmm1, xmm1
+    subss   xmm1, xmm0
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jb      .Lpm_bg
+    sqrtss  xmm1, xmm1
+    xorps   xmm4, [rip+pf_sign]
+    subss   xmm4, xmm1                  # t = -b - sqrt
+    call    pm_hitpoint                 # P_obj
+    mov     rax, [rsp+PM_PO+8]          # (rsp moved: the call)
+    lea     rsi, [rsp+PM_PO]            # N = P; u = atan2(x, z) / 2pi + 1/2,
+    lea     rdi, [rsp+PM_NO]            #  v = acos(-y) / pi
+    mov     rcx, [rsi]
+    mov     [rdi], rcx
+    mov     ecx, [rsi+8]
+    mov     [rdi+8], ecx
+    movss   xmm0, [rsp+PM_PO]
+    movss   [rsp+PM_T], xmm0
+    movss   xmm0, [rsp+PM_PO+8]
+    movss   [rsp+PM_T+4], xmm0
+    fld     dword ptr [rsp+PM_T]
+    fld     dword ptr [rsp+PM_T+4]
+    fpatan
+    fstp    dword ptr [rsp+PM_T]
+    movss   xmm0, [rsp+PM_T]
+    mulss   xmm0, [rip+pm_inv2pi]
+    addss   xmm0, [rip+pf_half]
+    movss   [rsp+PM_U], xmm0
+    movss   xmm0, [rsp+PM_PO+4]         # v = 1/2 - asin(y)... ~ (y + 1) / 2
+    addss   xmm0, [rip+pf_one]
+    mulss   xmm0, [rip+pf_half]
+    movss   [rsp+PM_VV], xmm0
+    movss   xmm0, [rsp+PM_PO+8]         # dP/du = 2 pi (z, 0, -x), dP/dv = (0, 2, 0)
+    mulss   xmm0, [rip+pm_2pi]
+    movss   [rsp+PM_TU], xmm0
+    mov     dword ptr [rsp+PM_TU+4], 0
+    movss   xmm0, [rsp+PM_PO]
+    mulss   xmm0, [rip+pm_2pi]
+    xorps   xmm0, [rip+pf_sign]
+    movss   [rsp+PM_TU+8], xmm0
+    mov     dword ptr [rsp+PM_TV], 0
+    mov     dword ptr [rsp+PM_TV+4], 0x40000000
+    mov     dword ptr [rsp+PM_TV+8], 0
+    jmp     .Lpm_shade
+.Lpm_cube:                              # slabs: [-c, c]^3
+    xorps   xmm4, xmm4                  # t near
+    movss   xmm5, [rip+pm_far]          # t far
+    mov     dword ptr [rsp+PM_T], -1    # (the axis it entered by)
+    xor     ecx, ecx
+1:  movss   xmm0, [rsp+PM_DO+rcx*4]
+    movaps  xmm6, xmm0
+    andps   xmm6, [rip+pf_absm]
+    comiss  xmm6, [rip+pf_eps]
+    jb      3f
+    movss   xmm1, [rip+pm_cube]         # t1 = (-c - o) / d, t2 = (c - o) / d
+    movss   xmm2, xmm1
+    xorps   xmm1, [rip+pf_sign]
+    subss   xmm1, [rsp+PM_OO+rcx*4]
+    subss   xmm2, [rsp+PM_OO+rcx*4]
+    divss   xmm1, xmm0
+    divss   xmm2, xmm0
+    movss   xmm3, xmm1
+    minss   xmm1, xmm2
+    maxss   xmm2, xmm3
+    comiss  xmm1, xmm4
+    jbe     2f
+    movss   xmm4, xmm1
+    mov     [rsp+PM_T], ecx
+2:  minss   xmm5, xmm2
+    jmp     4f
+3:  movss   xmm1, [rsp+PM_OO+rcx*4]     # (parallel: inside the slab?)
+    andps   xmm1, [rip+pf_absm]
+    comiss  xmm1, [rip+pm_cube]
+    ja      .Lpm_bg
+4:  inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    comiss  xmm4, xmm5
+    ja      .Lpm_bg
+    mov     eax, [rsp+PM_T]
+    test    eax, eax
+    js      .Lpm_bg
+    call    pm_hitpoint
+    mov     eax, [rsp+PM_T]             # N: that axis, its side; UV and
+    xorps   xmm0, xmm0                  #  tangents by the other two axes
+    movss   [rsp+PM_NO], xmm0
+    movss   [rsp+PM_NO+4], xmm0
+    movss   [rsp+PM_NO+8], xmm0
+    movss   xmm0, [rip+pf_one]
+    movss   xmm1, [rsp+PM_PO+rax*4]
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jae     5f
+    xorps   xmm0, [rip+pf_sign]
+5:  movss   [rsp+PM_NO+rax*4], xmm0
+    lea     rcx, [rip+pm_faxes]         # (u, v) axes for that face
+    movzx   edx, byte ptr [rcx+rax*2]
+    movzx   r8d, byte ptr [rcx+rax*2+1]
+    movss   xmm0, [rsp+PM_PO+rdx*4]     # u = p / 2c + 1/2
+    divss   xmm0, [rip+pm_cube]
+    mulss   xmm0, [rip+pf_half]
+    addss   xmm0, [rip+pf_half]
+    movss   [rsp+PM_U], xmm0
+    movss   xmm0, [rsp+PM_PO+r8*4]
+    divss   xmm0, [rip+pm_cube]
+    mulss   xmm0, [rip+pf_half]
+    addss   xmm0, [rip+pf_half]
+    movss   [rsp+PM_VV], xmm0
+    xorps   xmm0, xmm0
+    movss   [rsp+PM_TU], xmm0
+    movss   [rsp+PM_TU+4], xmm0
+    movss   [rsp+PM_TU+8], xmm0
+    movss   [rsp+PM_TV], xmm0
+    movss   [rsp+PM_TV+4], xmm0
+    movss   [rsp+PM_TV+8], xmm0
+    movss   xmm0, [rip+pm_cube]
+    addss   xmm0, xmm0
+    movss   [rsp+PM_TU+rdx*4], xmm0
+    movss   [rsp+PM_TV+r8*4], xmm0
+    jmp     .Lpm_shade
+.Lpm_plane:                             # y = 0, |x| |z| <= p
+    movss   xmm0, [rsp+PM_DO+4]
+    movaps  xmm1, xmm0
+    andps   xmm1, [rip+pf_absm]
+    comiss  xmm1, [rip+pf_eps]
+    jb      .Lpm_bg
+    movss   xmm4, [rsp+PM_OO+4]
+    xorps   xmm4, [rip+pf_sign]
+    divss   xmm4, xmm0
+    xorps   xmm1, xmm1
+    comiss  xmm4, xmm1
+    jbe     .Lpm_bg
+    call    pm_hitpoint
+    movss   xmm0, [rsp+PM_PO]
+    andps   xmm0, [rip+pf_absm]
+    comiss  xmm0, [rip+pm_plane]
+    ja      .Lpm_bg
+    movss   xmm0, [rsp+PM_PO+8]
+    andps   xmm0, [rip+pf_absm]
+    comiss  xmm0, [rip+pm_plane]
+    ja      .Lpm_bg
+    xorps   xmm0, xmm0                  # N: up, facing the eye
+    movss   [rsp+PM_NO], xmm0
+    movss   [rsp+PM_NO+8], xmm0
+    movss   xmm1, [rip+pf_one]
+    comiss  xmm0, [rsp+PM_DO+4]         # (d.y > 0: from below)
+    ja      6f
+    xorps   xmm1, [rip+pf_sign]
+6:  movss   [rsp+PM_NO+4], xmm1
+    movss   xmm0, [rsp+PM_PO]
+    divss   xmm0, [rip+pm_plane]
+    mulss   xmm0, [rip+pf_half]
+    addss   xmm0, [rip+pf_half]
+    movss   [rsp+PM_U], xmm0
+    movss   xmm0, [rsp+PM_PO+8]
+    divss   xmm0, [rip+pm_plane]
+    mulss   xmm0, [rip+pf_half]
+    movss   xmm1, [rip+pf_half]
+    subss   xmm1, xmm0
+    movss   [rsp+PM_VV], xmm1
+    movss   xmm0, [rip+pm_plane]
+    addss   xmm0, xmm0
+    xorps   xmm1, xmm1
+    movss   [rsp+PM_TU], xmm0
+    movss   [rsp+PM_TU+4], xmm1
+    movss   [rsp+PM_TU+8], xmm1
+    movss   [rsp+PM_TV], xmm1
+    movss   [rsp+PM_TV+4], xmm1
+    xorps   xmm0, [rip+pf_sign]
+    movss   [rsp+PM_TV+8], xmm0
+.Lpm_shade:
+    # the scratch: its values, the normal and the view (camera space)
+    lea     r9, [rsp]
+    mov     dword ptr [r9+SH_AO], 0x3f800000
+    mov     dword ptr [r9+SH_PROBED], 0
+    movss   xmm0, [rip+pm_far]          # (no light probe out there)
+    movss   [r9+SH_P], xmm0
+    movss   [r9+SH_P+4], xmm0
+    movss   [r9+SH_P+8], xmm0
+    mov     rsi, [rip+pm_rec]
+    test    rsi, rsi
+    jnz     7f
+    lea     rsi, [rip+mat_default]
+    sub     rsi, 32
+7:  call    load_values
+    lea     rdi, [rsp+PM_NO]
+    lea     rsi, [rsp+SH_N]
+    call    pm_tocam
+    xor     ecx, ecx
+71: movss   xmm0, [rsp+PM_D+rcx*4]
+    xorps   xmm0, [rip+pf_sign]
+    movss   [rsp+SH_V+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      71b
+    mov     rbx, [rip+pm_rec]           # a graph: the shading context
+    test    rbx, rbx
+    jz      .Lpm_go
+    cmp     dword ptr [rbx+128], 0
+    je      .Lpm_go
+    lea     r12, [rsp+PM_SC]
+    mov     rdi, r12
+    xor     eax, eax
+    mov     ecx, SCN_SZ2/4
+    rep     stosd
+    xor     ecx, ecx                    # P0, e1 = Tu h, e2 = Tv h (object)
+72: mov     eax, [rsp+PM_PO+rcx*4]
+    mov     [r12+rcx*4], eax
+    movss   xmm0, [rsp+PM_TU+rcx*4]
+    mulss   xmm0, [rip+pm_h]
+    movss   [r12+12+rcx*4], xmm0
+    movss   xmm0, [rsp+PM_TV+rcx*4]
+    mulss   xmm0, [rip+pm_h]
+    movss   [r12+24+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      72b
+    lea     rdi, [r12+12]               # the edges, the normal: camera space
+    lea     rsi, [r12+44]
+    call    pm_tocam
+    lea     rdi, [r12+24]
+    lea     rsi, [r12+56]
+    call    pm_tocam
+    mov     rax, [rsp+SH_N]
+    mov     [r12+SCN_N], rax
+    mov     eax, [rsp+SH_N+8]
+    mov     [r12+SCN_N+8], eax
+    lea     rdi, [rsp+PM_PO]            # the point, the view, no tint
+    lea     rsi, [r12+SCN_WP]
+    call    pm_tocam
+    mov     rax, [rsp+SH_V]
+    mov     [r12+SCN_WV], rax
+    mov     eax, [rsp+SH_V+8]
+    mov     [r12+SCN_WV+8], eax
+    mov     eax, 0x3f800000
+    mov     [r12+SCN_VC], eax
+    mov     [r12+SCN_VC+4], eax
+    mov     [r12+SCN_VC+8], eax
+    movss   xmm0, [rsp+PM_U]            # UVs: (u, v), (u + h, v), (u, v + h)
+    movss   xmm1, [rsp+PM_VV]
+    movss   [rsp+PM_UV], xmm0
+    movss   [rsp+PM_UV+4], xmm1
+    movss   [rsp+PM_UV+12], xmm1
+    movss   [rsp+PM_UV+16], xmm0
+    addss   xmm0, [rip+pm_h]
+    addss   xmm1, [rip+pm_h]
+    movss   [rsp+PM_UV+8], xmm0
+    movss   [rsp+PM_UV+20], xmm1
+    lea     rax, [rsp+PM_UV]
+    mov     [r12+SCN_UVP], rax
+    mov     rsi, rbx                    # its values, the pins over them
+    lea     rdi, [rsp+PM_CP]
+    mov     ecx, 32
+    rep     movsd
+    mov     rdi, rbx
+    mov     rsi, r12
+    lea     rdx, [rsp+PM_CP]
+    xor     ecx, ecx
+    call    graph_shade
+    lea     rsi, [rsp+PM_CP]
+    lea     r9, [rsp]
+    call    load_values
+    mov     eax, [r12+SCN_FLAGS]
+    test    eax, 1 << PIN_AO
+    jz      73f
+    mov     ecx, [rsp+PM_CP+MA_RT_AO]
+    mov     [rsp+SH_AO], ecx
+73: test    eax, 1 << PIN_NORMAL
+    jz      .Lpm_mask
+    mov     rcx, [r12+SCN_N]
+    mov     [rsp+SH_N], rcx
+    mov     ecx, [r12+SCN_N+8]
+    mov     [rsp+SH_N+8], ecx
+.Lpm_mask:                              # masked: below the clip, the
+    movss   xmm0, [rbx+MA_BLEND]        #  background; translucent: its
+    cvtss2si eax, xmm0                  #  opacity over it
+    cmp     eax, 1
+    jne     .Lpm_go
+    movss   xmm0, [rsp+PM_CP+MA_ALPHA_]
+    test    dword ptr [r12+SCN_FLAGS], 1 << PIN_MASK
+    jz      74f
+    movss   xmm0, [rsp+PM_CP+MA_RT_MASK]
+74: movss   xmm1, [rbx+MA_CLIP]
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    ja      75f
+    movss   xmm1, [rip+pm_third]
+75: comiss  xmm0, xmm1
+    jb      .Lpm_bg
+.Lpm_go:
+    lea     rdi, [rsp]
+    call    shade
+    mov     eax, [rsp+SH_OUT+12]
+    mov     rbx, [rip+pm_rec]           # translucent: blended with the
+    test    rbx, rbx                    #  background by its opacity
+    jz      .Lpm_put
+    movss   xmm0, [rbx+MA_BLEND]
+    cvtss2si ecx, xmm0
+    cmp     ecx, 2
+    jne     .Lpm_put
+    movss   xmm0, [rbx+MA_ALPHA_]
+    cmp     dword ptr [rbx+128], 0      # (a graph: its copy's)
+    je      76f
+    movss   xmm0, [rsp+PM_CP+MA_ALPHA_]
+76: mov     edx, eax
+    call    pm_bgpix
+    call    pm_blend
+    jmp     .Lpm_put
+.Lpm_bg:
+    call    pm_bgpix
+.Lpm_put:
+    mov     ecx, [rsp+PM_ROW]
+    imul    ecx, [rip+pm_size]
+    add     ecx, [rsp+PM_X]
+    mov     rdx, [rip+pm_out]
+    mov     [rdx+rcx*4], eax
+    inc     dword ptr [rsp+PM_X]
+    jmp     .Lpm_px
+.Lpm_rnext:
+    inc     dword ptr [rsp+PM_ROW]
+    jmp     .Lpm_row
+.Lpm_out:
+    add     rsp, PM_FR
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# pm_hitpoint(xmm4=t; the job's frame one up) - P_obj = o + t d
+pm_hitpoint:
+    xor     ecx, ecx
+1:  movss   xmm0, [rsp+8+PM_DO+rcx*4]
+    mulss   xmm0, xmm4
+    addss   xmm0, [rsp+8+PM_OO+rcx*4]
+    movss   [rsp+8+PM_PO+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    ret
+
+# pm_bgpix(the job's frame one up) -> eax = the background: a dark checker
+pm_bgpix:
+    mov     eax, [rsp+8+PM_X]
+    shr     eax, 3
+    mov     ecx, [rsp+8+PM_ROW]
+    shr     ecx, 3
+    xor     eax, ecx
+    test    eax, 1
+    mov     eax, [rip+pm_bg0]
+    jz      1f
+    mov     eax, [rip+pm_bg1]
+1:  ret
+
+# pm_blend(edx=over, eax=under, xmm0=opacity) -> eax
+pm_blend:
+    maxss   xmm0, [rip+pf_zero]
+    minss   xmm0, [rip+pf_one]
+    mulss   xmm0, [rip+pf_255]
+    cvtss2si r8d, xmm0                  # a, 255 - a
+    mov     r9d, 255
+    sub     r9d, r8d
+    xor     r10d, r10d
+    mov     ecx, 16
+1:  mov     r11d, edx
+    shr     r11d, cl
+    and     r11d, 255
+    imul    r11d, r8d
+    mov     esi, eax
+    shr     esi, cl
+    and     esi, 255
+    imul    esi, r9d
+    add     r11d, esi
+    shr     r11d, 8
+    shl     r11d, cl
+    or      r10d, r11d
+    sub     ecx, 8
+    jns     1b
+    mov     eax, r10d
+    ret
+
+pm_dot:
+    movss   xmm0, [rdi]
+    mulss   xmm0, [rsi]
+    movss   xmm1, [rdi+4]
+    mulss   xmm1, [rsi+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rdi+8]
+    mulss   xmm1, [rsi+8]
+    addss   xmm0, xmm1
+    ret
+
+pm_unit:
+    mov     rsi, rdi
+    call    pm_dot
+    sqrtss  xmm0, xmm0
+    movss   xmm1, [rip+pf_one]
+    divss   xmm1, xmm0
+    xor     ecx, ecx
+1:  movss   xmm0, [rdi+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [rdi+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    ret
+
+.section .rodata
+pm_faxes:       .byte 2, 1, 0, 2, 0, 1      # cube faces: (u, v) axes
+.text
 
 .section .note.GNU-stack,"",@progbits

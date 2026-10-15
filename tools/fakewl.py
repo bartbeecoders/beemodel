@@ -618,6 +618,7 @@ def main():
     material_nodes()
     node_canvas()
     material_editor()
+    material_previews()
     gltf_mtl()
     product_shot()
     params_units()
@@ -2507,6 +2508,67 @@ def material_editor():
     f.proc.kill()
 
 
+
+def material_previews():
+    """Live previews (M6): the material in a pane (drag turns it, a click
+    changes the shape), a thumbnail under every node, the stats line and
+    its warnings, all made again after an edit within a frame."""
+    print('  -- material previews --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('m = material("P")\nassign("Cube", m)\nselect("Cube")\nv = node(m, "voronoi", 4)\nr = node(m, "ramp")\nlink(m, v, r, 1)\n'
+      'nodeset(m, r, 2, 0.6, 0.2, 0.1)\nnodeset(m, r, 3, 1, 0.8, 0.4)\nsocket(m, "base", r)\nk = node(m, "checker", 3)\n'
+      'op("area.type_node_editor")\nop("area.maximize")')
+    f.pump(0.5)
+    pane = lambda: [f.image().getpixel((x, y))[:3] for y in range(120, 280, 4) for x in range(1100, 1260, 4)]
+    def warm(px):
+        return sum(1 for p in px if p[0] > p[2] + 50)
+    a = pane()
+    check(warm(a) > 300, f'the preview pane shows the material on a sphere ({warm(a)} warm px)')
+    f.shot('66_previews.png')
+    q('nodeset("P", 2, 2, 0.1, 0.3, 0.9)\nnodeset("P", 2, 3, 0.2, 0.6, 1)')   # blue now
+    f.pump(0.3)
+    b = pane()
+    blue = sum(1 for p in b if p[2] > p[0] + 50)
+    check(blue > 300 and warm(b) < 50, f'an edit shows in the pane in the next frame ({blue} blue px)')
+    f.click(1180, 200); f.pump(0.3)                         # a click: the cube
+    c = pane()
+    diff = sum(1 for p, q2 in zip(b, c) if p != q2)
+    check(diff > 300, f'a click on the pane shows the material on the next shape ({diff} px changed)')
+    f.drag(1150, 200, 1230, 230, steps=5); f.pump(0.3)      # turned
+    d = pane()
+    check(sum(1 for p, q2 in zip(c, d) if p != q2) > 200, 'dragging the pane turns the shape')
+    # thumbnails: the checker's has both of its colours
+    img = f.image()
+    hdr = [(x, y) for y in range(80, 700, 2) for x in range(0, 1000, 2) if img.getpixel((x, y))[:3] == (0x6b, 0x4f, 0x96)]
+    ok = False
+    if hdr:
+        low = max(p[1] for p in hdr)                        # (the checker: the lowest texture node)
+        left = min(p[0] for p in hdr if p[1] >= low - 12)
+        px = [img.getpixel((x, y))[:3] for y in range(low, min(low + 170, 790)) for x in range(left, left + 170)]
+        grey = lambda p, lo, hi: p[0] == p[1] == p[2] and lo <= p[0] <= hi
+        ok = any(grey(p, 200, 255) for p in px) and any(grey(p, 95, 135) for p in px)
+    check(ok, 'every node shows a thumbnail of its output (the checker: light and dark squares)')
+    # the stats line: the unused checker is a warning (amber), linked it is not
+    amber = lambda: sum(1 for y in range(740, 780) for x in range(0, 700) if (lambda p: p[0] > 200 and 140 < p[1] < 190 and p[2] < 110)(f.image().getpixel((x, y))[:3]))
+    a0 = amber()
+    q('socket("P", "roughness", 3)')
+    f.pump(0.3)
+    a1 = amber()
+    check(a0 > 20 and a1 == 0, f'the stats line warns about nodes that lead nowhere ({a0} -> {a1} px)')
+    # 24 nodes: an edit re-made within a frame
+    q(''.join(f'n{i} = node("P", "noise", {i % 5 + 2})\n' for i in range(20)))
+    f.pump(0.5)
+    q('nodeset("P", 1, 4, 7)')
+    f.pump(0.5)
+    ft = [float(x) for x in q('for k in 0..6 {\n print(frametime(k))\n}').split()]
+    check(max(ft) < 120, f'24 nodes: thumbnails and pane made again in {max(ft):.1f} ms at most (budget 120 ms in CI)')
+    f.proc.kill()
+
+
 def gltf_fixture(path, external=False):
     """A small glTF by hand: a parent (TRS) with a child (matrix) holding a
     tetrahedron (u16 indices) and a material with extensions. Returns the
@@ -3805,7 +3867,7 @@ def node_editor():
       'link("M", n, r, 1)\nsocket("M", "base", r)\nb = node("M", "bump", 1, 0.1)\nlink("M", n, b, 1)\nsocket("M", "normal", b)')
     f.move(600, 700)                            # the console area becomes it
     f.pump(0.2)
-    q('op("area.type_node_editor")\nop("area.maximize")')
+    q('op("area.type_node_editor")\nop("area.maximize")\nop("node.thumbnails", "0")')   # (fixed places: no thumbnails)
     f.pump(0.5)
     img = f.image()
     boxes = sum(1 for x in range(0, 640, 4) if img.getpixel((x, 125)) in ((0x6b, 0x4f, 0x96), (0x2f, 0x65, 0x89), (0x8a, 0x3b, 0x3b)))

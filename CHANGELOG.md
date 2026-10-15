@@ -42,6 +42,11 @@ project uses [Semantic Versioning](https://semver.org/).
   click), the selected node's values as fields in the Material tab, a
   value clicked twice typed in the console, `node.zoom`, and Material
   Output pins the blend mode doesn't use dimmed.
+- **Live previews (M6, #233):** a preview pane with the material on a
+  sphere, cube or plane (drag to turn, click for the next shape), a
+  thumbnail of every node's output, and a stats line with warnings
+  (nodes that lead nowhere, texture samples without an image). Each edit
+  re-renders them within a frame: 9 ms for 24 nodes (budget 16 ms).
 
 ## [0.12.0] - 2026-10-15
 
