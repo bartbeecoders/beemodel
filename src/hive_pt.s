@@ -16,6 +16,7 @@
 .include "macros.inc"
 
 # exports
+.globl hv_bounces
 .globl hive_start
 .globl hive_prep
 .globl trace_ray
@@ -155,7 +156,7 @@ s_rendered_ms:  .asciz " samples, ms: "
 s_render_need:  .asciz "  render.image <path.png> [width height samples [denoise 0|1]]"
 s_render_fail:  .asciz "  render: out of memory"
 
-OPERATOR op_render_image, "render.image", "Render Image", do_render_image, flags=OPF_AI_SAFE, doc="Path-trace the scene (camera object, or the viewport) into a PNG: render.image <path> [width height samples [denoise]]"
+OPERATOR op_render_image, "render.image", "Render Image", do_render_image, flags=OPF_AI_SAFE, doc="Path-trace the scene (camera object, or the viewport) into a PNG: render.image <path> [width height samples [denoise]]", form=form_rimage
 
 .text
 
@@ -2114,7 +2115,8 @@ trace_path:
     mov     eax, [rbx+PF_CTX+C_N+8]
     mov     [rbx+PF_NS+8], eax
     inc     dword ptr [rbx+PF_DEPTH]
-    cmp     dword ptr [rbx+PF_DEPTH], MAX_DEPTH
+    mov     eax, [rbx+PF_DEPTH]         # (the bounces allowed: hv_bounces)
+    cmp     eax, [rip+hv_bounces]
     jae     .Ltp_done
     cmp     dword ptr [rbx+PF_DEPTH], 3 # Russian roulette
     jb      .Ltp_bounce
@@ -3092,5 +3094,9 @@ rv_out:         .skip 8
 rv_done:        .skip 8                 # u32[h]: samples of each row when resolved
 .align 8
 hv_den:         .skip 8                 # f32[w*h][4] denoised radiance
+
+.section .data
+.align 4
+hv_bounces:     .long MAX_DEPTH          # light bounces (render settings)
 
 .section .note.GNU-stack,"",@progbits

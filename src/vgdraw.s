@@ -34,6 +34,8 @@
 .include "macros.inc"
 .include "vgeo.inc"
 
+.globl vd_budget
+.globl vd_px
 .globl vgd_begin
 .globl vgd_swap
 .globl vgd_pass2

@@ -70,6 +70,7 @@
 .equ TAG_MVCL,      0x4C43564D          # "MVCL"
 .equ TAG_NTRE,      0x4552544E          # "NTRE"
 .equ TAG_PRBE,      0x45425250          # "PRBE"
+.equ TAG_LCAM,      0x4d41434c          # "LCAM"
 .equ TAG_LMAP,      0x50414D4C          # "LMAP"
 .equ TAG_CURV,      0x56525543          # "CURV"
 .equ TAG_ANIM,      0x4D494E41          # "ANIM"
@@ -128,6 +129,9 @@ ntre_chunk:     .skip 8
 ntre_size:      .skip 4
 prbe_chunk:     .skip 8
 prbe_size:      .skip 4
+.align 8
+lcam_chunk:     .skip 8
+lcam_size:      .skip 4
 lmap_chunk:     .skip 8
 lmap_size:      .skip 4
 curv_chunk:     .skip 8
@@ -452,6 +456,10 @@ bee_save:
     mov     edi, TAG_PRBE               # PRBE (light probes)
     call    chunk_begin
     call    pb_write
+    call    chunk_end
+    mov     edi, TAG_LCAM               # LCAM (lights' and cameras' settings)
+    call    chunk_begin
+    call    lc_write
     call    chunk_end
     mov     edi, TAG_LMAP               # LMAP (the lightmap)
     call    chunk_begin
@@ -1157,6 +1165,7 @@ bee_load:
     mov     qword ptr [rip+mvcl_chunk], 0
     mov     qword ptr [rip+ntre_chunk], 0
     mov     qword ptr [rip+prbe_chunk], 0
+    mov     qword ptr [rip+lcam_chunk], 0
     mov     qword ptr [rip+lmap_chunk], 0
     mov     qword ptr [rip+curv_chunk], 0
     mov     qword ptr [rip+anim_chunk], 0
@@ -1294,7 +1303,13 @@ bee_load:
     mov     [rip+ntre_chunk], rax
     mov     [rip+ntre_size], ebp
     jmp     23f
-2811:cmp    eax, TAG_PRBE
+2811:cmp    eax, TAG_LCAM
+    jne     2819f
+    lea     rax, [rbx+8]
+    mov     [rip+lcam_chunk], rax
+    mov     [rip+lcam_size], ebp
+    jmp     23f
+2819:cmp    eax, TAG_PRBE
     jne     2812f
     lea     rax, [rbx+8]
     mov     [rip+prbe_chunk], rax
@@ -1489,6 +1504,11 @@ bee_load:
     jz      7743f
     mov     esi, [rip+ntre_size]
     call    nt_read
+    mov     rdi, [rip+lcam_chunk]       # light / camera settings
+    test    rdi, rdi
+    jz      7743f
+    mov     esi, [rip+lcam_size]
+    call    lc_read
 7743:mov     rdi, [rip+prbe_chunk]       # light probes
     test    rdi, rdi
     jz      7744f

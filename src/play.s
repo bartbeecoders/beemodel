@@ -28,6 +28,11 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl pl_walk
+.globl pl_run
+.globl pl_fly
+.globl pl_jump
+.globl pl_mode
 .globl pl_on
 .globl pl_pos
 .globl pl_radius

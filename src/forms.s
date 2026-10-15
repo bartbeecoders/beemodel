@@ -531,6 +531,7 @@ n_sketch_dxf:   .asciz "sketch.dxf"
 n_sketch_svg:   .asciz "sketch.svg"
 n_drawing_pdf:  .asciz "drawing.pdf"
 n_render_png:   .asciz "render.png"
+n_lightmap:     .asciz "lightmap.exr"
 .align 8
 x_bee:          .quad e_bee, 0
 x_obj:          .quad e_obj, 0
@@ -544,6 +545,7 @@ x_pdf:          .quad e_pdf, 0
 x_bees:         .quad e_bees, 0
 x_img:          .quad e_png, e_exr, 0
 x_imgin:        .quad e_png, e_jpg, e_jpeg, e_hdr, 0
+x_pngonly:      .quad e_png, 0
 .text
 .macro PATHFORM form, name, mode, ext, defname=0, flags=0
 WIDGET \form\()_w, WK_PATH, \name, flags=\flags, aux=\ext, n=\mode
@@ -567,6 +569,8 @@ PATHFORM form_epdf, "file.export_pdf", 1, x_pdf, n_drawing_pdf
 PATHFORM form_script, "script.run", 0, x_bees
 PATHFORM form_rsave, "render.save", 1, x_img, n_render_png
 PATHFORM form_iload, "image.load", 0, x_imgin
+PATHFORM form_rimage, "render.image", 1, x_pngonly, n_render_png
+PATHFORM form_lmsave, "lightmap.save", 1, x_img, n_lightmap
 
 # ---- image.new <name> [width height] ----------------------------------------------
 WIDGET fw_imn,  WK_TEXT, "form.image.name", "Name"

@@ -937,7 +937,7 @@ operator spine and how to add an action.
   `ci/…`) and is merged through a pull request once CI is green.
 * CI (`.github/workflows/ci.yml`) runs on every PR and push to `main`. It builds
   release and debug binaries, runs `ci/check-binary.sh` (static, no shared
-  libraries, no RWX segments, size budget of 1 MiB) and runs the headless UI test.
+  libraries, no RWX segments, size budget of 1.5 MiB) and runs the headless UI test.
   Screenshots are uploaded as a workflow artifact.
 * **Releasing:** bump `VERSION`, move the `[Unreleased]` notes in `CHANGELOG.md`
   into a new version section, and merge via a PR. Then tag:

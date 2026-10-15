@@ -585,6 +585,7 @@ def main():
     paint_ui()
     anim_ui()
     physics_ui()
+    render_ui()
     transforms()
     undo_redo()
     files()
@@ -6009,6 +6010,76 @@ def physics_ui():
     check({'sim.bake', 'sim.free', 'sim.budget'} <= names(), 'the cache: Bake, Free, its budget')
     type_into('sim.budget', '512')
     check(wait_value(f, m, 'sim.budget', 0, 512) == 512, 'the budget from the field')
+    f.proc.kill()
+
+
+def render_ui():
+    """UI plan U21: bounces, the GPU, Render to File, the engine panels
+    (virtualized geometry, world partition, probes, lightmap, play), the
+    Render area's header, a light's power and colour, a camera's lens and
+    which camera renders (saved, undone)."""
+    print('  -- render and engine --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
+    f.key(28); f.type('agent.permission_files'); f.key(28); f.pump(0.2); f.key(1)   # (scripts may save)
+    props_tab(m, f, 'render')
+    check({'render.bounces', 'render.gpu', 'render.to_file', 'vgeo.build', 'world.partition', 'probe.add_irradiance',
+           'probe.bake', 'lightmap.bake', 'play.start', 'play.mode'} <= names(),
+          'the Render tab: bounces, GPU, Render to File, virtualized geometry, world partition, probes, lightmap, play')
+    type_into('render.bounces', '4')
+    check(wait_value(f, m, 'render.bounces', 0, 4) == 4, 'bounces from the field')
+    click('render.to_file')
+    check('files.name' in names(), 'Render to File asks where (the file browser)')
+    f.key(1); f.pump(0.2)
+    q(f'op("file.save_as", "{os.path.join(f.home, "w.bee")}")')   # (cells go beside the file)
+    click('world.partition')
+    for _ in range(5):
+        if q('print(world(0))') == '1':
+            break
+        f.pump(0.1)
+    check(q('print(world(0))') == '1', 'Partition the world turns it on')
+    click('world.partition')
+    check(q('print(world(0))') == '0', '... and off')
+    lname = q('op("create.light")\nprint(active())')
+    props_tab(m, f, 'object')
+    check({'light.power', 'light.color'} <= names(), 'a light: its power and colour')
+    type_into('light.power', '3')
+    check(wait_value(f, m, 'light.power', 0, 3) == 3, 'the light\'s power')
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.3)
+    check(wait_value(f, m, 'light.power', 0, 1) == 1, 'undo takes it back')
+    q('op("light.set", "power 2.5")')
+    q('op("create.camera")\nop("create.camera")')
+    check({'camera.lens', 'camera.make_active'} <= names() or wait_widget(f, m, 'camera.lens') is not None, 'a camera: its lens and Render from This Camera')
+    type_into('camera.lens', '35')
+    f.pump(0.2)
+    v = widget(m, 'camera.lens')['value']
+    check(abs(v - 35) < 0.01, f'the lens ({v})')
+    click('camera.make_active')
+    for _ in range(10):
+        if widget(m, 'camera.make_active') is None:
+            break
+        f.pump(0.1)
+    check(widget(m, 'camera.make_active') is None, 'this camera renders now')
+    path = os.path.join(f.home, 'lc.bee')
+    q(f'op("file.save_as", "{path}")\nop("file.new")\nop("file.open", "{path}")')
+    f.pump(0.3)
+    q(f'select("{lname}")')
+    props_tab(m, f, 'object')
+    v = wait_value(f, m, 'light.power', 0, 2.5)
+    check(v == 2.5, f'the settings are saved in the .bee file ({v})')
+    q('op("area.type_render")')
+    f.pump(0.3)
+    check({'render.header.start', 'render.header.stop', 'render.header.save', 'render.header.denoise', 'render.header.pass'} <= names(),
+          'the Render area header: Render, Stop, Save, Denoise, the pass')
     f.proc.kill()
 
 

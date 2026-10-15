@@ -25,6 +25,8 @@
 .include "const.inc"
 .include "gpuipc.inc"
 
+.globl gpu_status
+.globl gpu_off
 .globl gpu_ready
 .globl gpu_stop
 .globl gpu_query
@@ -62,6 +64,7 @@ s_g_off:        .asciz "  GPU helper: not used (CPU paths)"
 .section .data
 .align 4
 g_state:        .long 0                 # 0 not tried, 1 running, -1 none
+gpu_off:        .long 0                 # 1: renders stay on the CPU
 g_fd:           .long -1
 g_pid:          .long 0
 
@@ -93,8 +96,20 @@ gr_bytes:       .skip 8*RS_NBIND
 # =============================================================================
 #  The helper process
 # =============================================================================
+# gpu_status -> eax = 0 not tried yet, 1 running, -1 none; edx = the device
+#   type (1 integrated, 2 discrete, 3 virtual, 4 CPU)
+gpu_status:
+    mov     eax, [rip+g_state]
+    mov     edx, [rip+g_type]
+    ret
+
 # gpu_ready -> eax = 1 if the helper runs (it is started on the first call)
 gpu_ready:
+    xor     eax, eax                    # (turned off in the render settings)
+    cmp     dword ptr [rip+gpu_off], 0
+    je      0f
+    ret
+0:
     mov     eax, [rip+g_state]
     test    eax, eax
     jz      1f
