@@ -25,6 +25,8 @@
 .include "macros.inc"
 
 .globl cv_new
+.globl cv_of
+.globl do_cv_set
 .globl ch_sweep
 .globl ch_to_lines
 .globl prof_circle

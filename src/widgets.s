@@ -139,9 +139,12 @@ kn_scroll:      .asciz "scroll"
 kn_thumb:       .asciz "scrollbar"
 kn_row:         .asciz "row"
 kn_path:        .asciz "path"
+kn_color:       .asciz "color"
+kn_pad:         .asciz "pad"
 .align 8
 kind_names:     .quad 0, kn_button, kn_toggle, kn_float, kn_int, kn_slider, kn_text
                 .quad kn_enum, kn_section, kn_tabs, kn_scroll, kn_thumb, kn_row, kn_path
+                .quad kn_color, kn_pad
 
 .text
 
@@ -322,8 +325,11 @@ wg:
     jz      0f
     mov     edx, 18
 0:  cmp     dword ptr [rbx+WD_KIND], WK_SECTION
-    jne     1f
+    jne     11f
     mov     edx, 24
+11: cmp     dword ptr [rbx+WD_KIND], WK_PAD  # (a pad: its own height)
+    jne     1f
+    mov     edx, [rbx+WD_N]
 1:  mov     [rsp+4], edx                # h
     lea     eax, [rdx-CHAR_H]
     shr     eax, 1
@@ -364,7 +370,52 @@ wg:
     je      .Lwg_tabs
     cmp     eax, WK_ROW
     je      .Lwg_row
+    cmp     eax, WK_COLOR
+    je      .Lwg_color
+    cmp     eax, WK_PAD
+    je      .Lwg_pad
     jmp     .Lwg_field
+
+# ---- a pad: only its hit area (the caller draws it) ---------------------------
+.Lwg_pad:
+    xor     eax, eax
+    jmp     .Lwg_ret
+
+# ---- a colour: the label, then a swatch of it ----------------------------------
+.Lwg_color:
+    mov     r8d, COL_FIELD
+    test    dword ptr [rsp+8], 1
+    jz      1f
+    mov     r8d, COL_FIELD_HOVER
+1:  mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, [rsp+4]
+    mov     r9d, FIELD_R
+    call    fill_rrect
+    mov     rdx, [rbx+WD_LABEL]
+    test    rdx, rdx
+    jz      2f
+    lea     edi, [r12+8]
+    mov     esi, r13d
+    add     esi, [rsp+28]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+2:  mov     rdi, r15                    # the swatch: the right half
+    call    cpk_rgb_of
+    mov     r8d, eax
+    mov     eax, r14d
+    shr     eax, 1
+    lea     edi, [r12+rax]
+    lea     esi, [r13+3]
+    mov     edx, eax
+    sub     edx, 3
+    mov     ecx, [rsp+4]
+    sub     ecx, 6
+    mov     r9d, FIELD_R-1
+    call    fill_rrect
+    xor     eax, eax
+    jmp     .Lwg_ret
 
 # ---- a list row: lit when selected (or hot); the caller draws its content -----
 .Lwg_row:
@@ -593,11 +644,12 @@ wg:
     mov     ecx, WG_H
     mov     r9d, FIELD_R
     call    fill_rrect
-    mov     eax, [r15]
-    cmp     eax, [rbx+WD_N]
+    mov     rdi, rbx
+    call    enum_list
+    mov     ecx, [r15]
+    cmp     ecx, edx
     jae     2f
-    mov     rcx, [rbx+WD_AUX]
-    mov     rdx, [rcx+rax*8]
+    mov     rdx, [rax+rcx*8]
     lea     edi, [r12+8]
     lea     esi, [r13+3]
     mov     ecx, COL_TEXT
@@ -1002,10 +1054,14 @@ closed_toggle:                          # edi = id
 #   the wheel, so they are not hits.
 wg_hit:
     lea     rax, [rip+wg_list]
+    xor     ecx, ecx
     cmp     dword ptr [rip+dlg_open], 0 # a dialog: only its own widgets
-    je      0f
+    je      71f
     mov     ecx, [rip+dlg_floor]
-    imul    ecx, ecx, WG_SZ
+71: cmp     dword ptr [rip+cpk_on], 0    # the colour picker: only its own
+    je      72f
+    mov     ecx, [rip+cpk_floor]
+72: imul    ecx, ecx, WG_SZ
     add     rax, rcx
 0:  mov     ecx, [rip+wg_n]
     imul    ecx, ecx, WG_SZ
@@ -1133,9 +1189,39 @@ wg_press:
     mov     rax, [rip+wg_act_e+E_PTR]   # thumb: remember the scroll offset
     mov     eax, [rax]
     mov     [rip+wg_v0], eax
-2:  mov     dword ptr [rip+dirty], 1
+2:  cmp     dword ptr [rip+wg_act_e+E_KIND], WK_PAD
+    jne     3f
+    mov     dword ptr [rip+wg_scrubbed], 1  # a pad: its value at once
+    call    act_undo
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    pad_set
+3:  mov     dword ptr [rip+dirty], 1
 9:  pop     rbx
     ret
+
+# pad_set(edi=x, esi=y) - the pressed pad's value from the pointer
+pad_set:
+    mov     rdx, [rip+wg_act_e+E_PTR]
+    test    rdx, rdx
+    jz      9f
+    sub     edi, [rip+wg_act_e+E_X]
+    cvtsi2ss xmm0, edi
+    cvtsi2ss xmm1, dword ptr [rip+wg_act_e+E_W]
+    divss   xmm0, xmm1
+    sub     esi, [rip+wg_act_e+E_Y]
+    cvtsi2ss xmm2, esi
+    cvtsi2ss xmm1, dword ptr [rip+wg_act_e+E_H]
+    divss   xmm2, xmm1
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    maxss   xmm2, xmm1
+    minss   xmm0, [rip+f_1]
+    minss   xmm2, [rip+f_1]
+    movss   [rdx], xmm0
+    movss   [rdx+4], xmm2
+    jmp     act_changed
+9:  ret
 
 # wg_drag(edi=x, esi=y) - pointer motion while a widget is pressed
 wg_drag:
@@ -1147,7 +1233,11 @@ wg_drag:
     mov     eax, [rip+wg_act_e+E_KIND]
     cmp     eax, WK_THUMB
     je      .Lwd_thumb
-    cmp     eax, WK_FLOAT
+    cmp     eax, WK_PAD
+    jne     0f
+    call    pad_set
+    jmp     9f
+0:  cmp     eax, WK_FLOAT
     je      1f
     cmp     eax, WK_INT
     je      1f
@@ -1292,7 +1382,14 @@ wg_release:
     je      .Lwr_row
     cmp     eax, WK_THUMB
     je      9f
-    lea     rdi, [rip+wg_act_e]         # a field: type into it
+    cmp     eax, WK_PAD
+    je      9f
+    cmp     eax, WK_COLOR
+    jne     1f
+    lea     rdi, [rip+wg_act_e]         # a colour: the picker
+    call    cpk_open
+    jmp     9f
+1:  lea     rdi, [rip+wg_act_e]         # a field: type into it
     call    edit_begin
     jmp     9f
 .Lwr_button:
@@ -1329,7 +1426,18 @@ wg_release:
     jge     2f
     mov     eax, 120
 2:  mov     [rip+wg_pop_w], eax
-    mov     dword ptr [rip+wg_pop_hot], -1
+    call    pop_h                       # (above the field when it would not fit)
+    mov     ecx, [rip+wg_pop_y]
+    add     ecx, eax
+    cmp     ecx, [rip+win_h]
+    jle     3f
+    mov     ecx, [rip+wg_pop_e+E_Y]
+    sub     ecx, eax
+    sub     ecx, 2
+    jns     21f
+    xor     ecx, ecx
+21: mov     [rip+wg_pop_y], ecx
+3:  mov     dword ptr [rip+wg_pop_hot], -1
     mov     dword ptr [rip+wg_pop_open], 1
     jmp     9f
 .Lwr_row:                               # a row: select it, its callback
@@ -1744,10 +1852,25 @@ has_letter:
 # The option list of an enum (drawn on top of everything, like a menu)
 # -----------------------------------------------------------------------------
 pop_h:                                  # -> eax = height of the open list
-    mov     rax, [rip+wg_pop_e+E_DESC]
-    mov     eax, [rax+WD_N]
-    imul    eax, eax, POP_ROW
+    mov     rdi, [rip+wg_pop_e+E_DESC]
+    sub     rsp, 8
+    call    enum_list
+    add     rsp, 8
+    imul    eax, edx, POP_ROW
     add     eax, 8
+    ret
+
+# enum_list(rdi=desc) -> rax = its labels, edx = how many (rdi kept)
+.globl enum_list
+enum_list:
+    test    dword ptr [rdi+WD_FLAGS], WGF_DYN
+    jnz     1f
+    mov     rax, [rdi+WD_AUX]
+    mov     edx, [rdi+WD_N]
+    ret
+1:  push    rdi
+    call    [rdi+WD_AUX]
+    pop     rdi
     ret
 
 wg_pop_draw:
@@ -1766,8 +1889,9 @@ wg_pop_draw:
     xor     ebx, ebx
     mov     r12d, [rip+wg_pop_y]
     add     r12d, 4
-1:  mov     rax, [rip+wg_pop_e+E_DESC]
-    cmp     ebx, [rax+WD_N]
+1:  mov     rdi, [rip+wg_pop_e+E_DESC]
+    call    enum_list
+    cmp     ebx, edx
     jae     8f
     cmp     ebx, [rip+wg_pop_hot]
     jne     2f
@@ -1793,9 +1917,12 @@ wg_pop_draw:
 3:  mov     edi, [rip+wg_pop_x]
     add     edi, 14
     lea     esi, [r12+3]
-    mov     rax, [rip+wg_pop_e+E_DESC]
-    mov     rax, [rax+WD_AUX]
+    mov     rdi, [rip+wg_pop_e+E_DESC]
+    call    enum_list
     mov     rdx, [rax+rbx*8]
+    mov     edi, [rip+wg_pop_x]
+    add     edi, 14
+    lea     esi, [r12+3]
     mov     ecx, COL_TEXT
     call    draw_text
     add     r12d, POP_ROW
@@ -1828,8 +1955,11 @@ wg_pop_hit:
     xor     edx, edx
     mov     ecx, POP_ROW
     div     ecx
-    mov     rcx, [rip+wg_pop_e+E_DESC]
-    cmp     eax, [rcx+WD_N]
+    push    rax
+    mov     rdi, [rip+wg_pop_e+E_DESC]
+    call    enum_list
+    pop     rax
+    cmp     eax, edx
     jae     7f
     mov     [rip+wg_pop_hot], eax
     ret
@@ -2164,6 +2294,8 @@ wg_tree_json:
     je      .Ltj_int
     cmp     ecx, WK_SCROLL
     je      .Ltj_int
+    cmp     ecx, WK_COLOR
+    je      .Ltj_color
 .Ltj_null:
     lea     rsi, [rip+j_null]
     call    wb_str
@@ -2175,6 +2307,13 @@ wg_tree_json:
 .Ltj_int:
     movsxd  rdi, dword ptr [rax]
     call    wb_int
+    jmp     5f
+.Ltj_color:                             # "#rrggbb"
+    mov     rdi, rax
+    lea     rsi, [rip+wg_txt]
+    call    cpk_hex_of
+    lea     rsi, [rip+wg_txt]
+    call    jb_q
     jmp     5f
 .Ltj_text:
     mov     rsi, rax

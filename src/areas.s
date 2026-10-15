@@ -559,16 +559,6 @@ area_hit:
 .Lah_props:                             # material, modifier buttons and fields
     mov     edi, ebx
     mov     esi, r12d
-    call    mats_props_hit
-    test    eax, eax
-    jns     1f
-    mov     edi, ebx
-    mov     esi, r12d
-    call    mods_props_hit
-    test    eax, eax
-    jns     1f
-    mov     edi, ebx
-    mov     esi, r12d
     call    rb_props_hit
 1:
     test    eax, eax
@@ -813,7 +803,7 @@ draw_leaf:
     jb      3b
     movzx   eax, byte ptr [r12+N_ED]    # a 3D viewport: its tools in the header
     cmp     eax, ED_VIEWPORT
-    jne     5f
+    jne     51f
     mov     edi, [r12+N_X]
     add     edi, TYPE_BTN_W+6
     mov     esi, [r12+N_Y]
@@ -821,6 +811,16 @@ draw_leaf:
     add     edx, [r12+N_W]
     sub     edx, 4*HDR_BTN_W+10
     call    vp_header_tools
+    jmp     5f
+51: cmp     eax, ED_NODES               # the node editor: its tree, New, Add
+    jne     5f
+    mov     edi, [r12+N_X]
+    add     edi, TYPE_BTN_W+6
+    mov     esi, [r12+N_Y]
+    mov     edx, [r12+N_X]
+    add     edx, [r12+N_W]
+    sub     edx, 4*HDR_BTN_W+10
+    call    ne_header_tools
 5:
     # header buttons: 0 close, 1 split stacked, 2 split side by side, 3 maximize
     xor     r13d, r13d
@@ -1640,7 +1640,9 @@ ed_props_draw:
     add     rsp, 16
     add     r12d, 12
     jmp     .Lpp_done
-113:call    fmt_reset                   # mesh statistics
+113:mov     rdi, rbx                    # a curve: its values
+    call    curve_props
+    call    fmt_reset                   # mesh statistics
     mov     rbx, [rbx+OB_MESH]
     mov     edi, [rbx+ME_NVERTS]
     call    fmt_int
@@ -1798,7 +1800,7 @@ props_scene:
     lea     rdi, [rip+wd_sc_units]
     lea     r8, [rip+props_units]
     call    vp_row
-    add     r12d, 4
+    call    world_sky_row               # the world: sky or HDRI, strength, turn
     lea     rdi, [rip+wd_sc_wstr]
     lea     r8, [rip+env_str]
     call    vp_row
@@ -1820,6 +1822,7 @@ props_scene:
     lea     rdi, [rip+wd_sc_fps]
     lea     r8, [rip+props_fps]
     call    vp_row
+    call    images_props
     add     rsp, 16
     pop     rbx
     ret

@@ -581,6 +581,7 @@ def main():
     status_ui()
     files_more()
     cad_ui()
+    materials_more()
     transforms()
     undo_redo()
     files()
@@ -928,6 +929,30 @@ def menu_pick(f, m, *path):
     return True
 
 
+def wait_widget(f, m, name, sub=0):
+    """The widget once a frame has drawn it (None after a second)."""
+    for _ in range(10):
+        w = widget(m, name, sub)
+        if w:
+            return w
+        f.pump(0.1)
+    return None
+
+
+def add_modifier(f, m, label):
+    """Properties > Modifiers > Add Modifier > label (U17)."""
+    x, y = widget_xy(m, 'modifier.add')
+    f.click(x, y)
+    items = []
+    for _ in range(10):                        # (the list is laid out when drawn)
+        f.pump(0.1)
+        items = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == label and w['x'] > 0]
+        if items:
+            break
+    if items:
+        f.click(items[-1]['x'] + 40, items[-1]['y'] + items[-1]['h'] // 2); f.pump(0.2)
+
+
 def props_tab(m, f, name):
     """Open a Properties tab (U10) by name: object, modifiers, material, ..."""
     tabs = ['object', 'modifiers', 'material', 'physics', 'cad', 'scene', 'render', 'viewport']
@@ -1240,17 +1265,17 @@ def modifiers_ui():
     f.mods(4); f.key(3); f.mods(0)              # Ctrl+2: subdivision surface
     check(q('print(modcount("Cube"), efaces("Cube"))') == '1 96', 'Ctrl+2 adds a Subsurf modifier (level 2)')
     props_tab(m, f, 'modifiers')
-    f.drag(1150, 267, 1162, 267, steps=3)       # levels +1
+    x, y = widget_xy(m, 'modifier.value', 0)
+    f.drag(x, y, x + 12, y, steps=3)            # levels +1
     check(q('efaces("Cube")') == '= 384', 'dragging the levels field re-evaluates (level 3)')
     f.mods(4); f.key(44); f.mods(0)
     check(q('efaces("Cube")') == '= 96', 'one undo reverts the whole drag')
-    f.click(1238, 223); f.pump(0.2)             # + Add -> Mirror
-    f.click(1098, 251); f.pump(0.2)
+    add_modifier(f, m, 'Mirror')
     check(q('modcount("Cube")') == '= 2', 'the Add menu adds a Mirror modifier')
     f.shot('43_modifiers.png')
-    f.click(1249, 246); f.pump(0.2)             # x on the first (Subsurf)
+    x, y = widget_xy(m, 'modifier.remove', 0); f.click(x, y); f.pump(0.2)  # x on the first (Subsurf)
     check(q('print(modcount("Cube"), efaces("Cube"))') == '1 12', 'the x button removes Subsurf (Mirror stays)')
-    f.click(1214, 246); f.pump(0.2)             # Apply the Mirror
+    x, y = widget_xy(m, 'modifier.apply', 0); f.click(x, y); f.pump(0.2)   # Apply the Mirror
     check(q('print(modcount("Cube"), verts("Cube"), faces("Cube"))') == '0 16 12', 'Apply makes the mirror part of the mesh')
     f.proc.kill()
 
@@ -1344,8 +1369,8 @@ def hardsurface_walkthrough():
     r = q('print(exists("Cylinder"), manifold("Cube"), round(volume("Cube") * 1000))').split()
     check(r[:2] == ['0', '1'] and r[2] == '6599', f'Edit > Boolean Difference drills the hole: closed, volume {r[2] if len(r) > 2 else "?"} / 6599')
     props_tab(m, f, 'modifiers')
-    f.click(1238, 223); f.pump(0.2)            # Properties: + Add > Bevel
-    f.click(1095, 347); f.pump(0.3)
+    add_modifier(f, m, 'Bevel')                # Properties: Add Modifier > Bevel
+    f.pump(0.3)
     r = q('print(modcount("Cube"), efaces("Cube") > faces("Cube"))')
     check(r == '1 1', 'the Bevel modifier rounds the edges (more faces after it)')
     f.move(*project((0, 1, 0)))
@@ -1353,7 +1378,7 @@ def hardsurface_walkthrough():
         f.wheel(-1)                             # zoom in on the part
     f.pump(0.2)
     f.shot('46_walkthrough.png')
-    f.click(1214, 246); f.pump(0.3)            # Apply
+    x, y = widget_xy(m, 'modifier.apply', 0); f.click(x, y); f.pump(0.3)  # Apply
     r = q('print(modcount("Cube"), manifold("Cube"), analyze("Cube", "nonmanifold"), analyze("Cube", "degenerate"))')
     check(r == '0 1 0 0', f'applied: closed, no non-manifold edges, no degenerate faces ({r})')
     path = os.path.join(f.home, 'part.bee')
@@ -1385,12 +1410,13 @@ def materials_ui():
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
     grey = px(f, *project((0.3, 2, 0.3)))
     props_tab(m, f, 'material')
-    f.click(1238, 223); f.pump(0.3)             # Material: + New
+    x, y = widget_xy(m, 'material.new'); f.click(x, y); f.pump(0.3)  # Material: New
     check(q('print(matof("Cube"), matget("Material", "roughness"))') == 'Material 0.5',
           'Properties > Material > + New makes a material and gives it to the cube')
-    f.drag(1140, 307, 1180, 307, steps=4)       # roughness +40 px
-    r = q('matget("Material", "roughness")')
-    check(r == '= 0.7', f'dragging roughness changes it ({r})')
+    w = wait_widget(f, m, 'material.roughness', 2)  # the slider follows the pointer: 70 %
+    f.drag(w['x'] + w['w'] // 2, w['y'] + 11, w['x'] + round(w['w'] * 0.7), w['y'] + 11, steps=4)
+    r = q('print(round(matget("Material", "roughness") * 100))')
+    check(r == '70', f'dragging roughness changes it ({r} %)')
     f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
     check(q('matget("Material", "roughness")') == '= 0.5', 'one undo reverts the whole drag')
     q('matset("Material", "base", 1, 0.766, 0.336)')
@@ -5657,6 +5683,103 @@ def cad_ui():
     check(jp is not None and jp.get('value') == 'Plant', f'the part is the active object ({jp and jp.get("value")})')
     f.key(28); f.pump(0.3)
     check(q('print(joint(1))') == '0', f'OK adds the joint ({q("print(joint(1))")})')
+    f.proc.kill()
+
+
+def pick_enum(f, m, name, sub, row):
+    """Open an enum's list and pick its row-th option (U3 lists)."""
+    x, y = widget_xy(m, name, sub)
+    f.click(x, y); f.pump(0.2)
+    lst = [w for w in ui_tree(m) if w['kind'] == 'list']
+    if lst:
+        f.click(lst[0]['x'] + 30, lst[0]['y'] + 4 + row * 22 + 11); f.pump(0.3)
+
+
+def materials_more():
+    """UI plan U17: the colour picker (square, hue, hex, Pick), the Material
+    tab's fields and pickers, world sky and images, a curve's data, the
+    modifier stack as widgets (object and tree pickers, Multires), the node
+    editor's header (tree, New Tree, Add with search)."""
+    print('  -- materials, world, images, procedural --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
+    base = lambda: q('print(round(matget("Material", "base", 0) * 100), round(matget("Material", "base", 1) * 100), round(matget("Material", "base", 2) * 100))')
+    props_tab(m, f, 'material')
+    click('material.new')
+    wait_widget(f, m, 'material.base')
+    click('material.base')
+    check({'color.sv', 'color.hue', 'color.hex', 'color.pick'} <= names(), 'a colour field opens the picker: square, hue strip, hex code, Pick')
+    type_into('color.hex', '#ff0000')
+    check(base() == '100 0 0', f'typing #ff0000 makes the base colour red ({base()})')
+    w = widget(m, 'color.sv')
+    f.click(w['x'] + 2, w['y'] + w['h'] - 2); f.pump(0.2)     # the bottom left: black
+    check(base() == '0 0 0', f'the square\'s bottom is black ({base()})')
+    w = widget(m, 'color.hue')
+    f.drag(w['x'] + 8, w['y'] + 2, w['x'] + 8, w['y'] + w['h'] // 3, steps=3)
+    w = widget(m, 'color.sv')
+    f.click(w['x'] + w['w'] - 2, w['y'] + 2); f.pump(0.2)     # full colour of that hue
+    r = base().split()
+    check(len(r) == 3 and int(r[1]) > 90 and int(r[0]) < 10, f'the hue strip turns it green ({r})')
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.2)
+    check(base() == '0 0 0', 'one undo per change (the last pick taken back)')
+    click('color.pick')
+    f.click(320, 140); f.pump(0.3)                          # Pick, then a click on the sky
+    check(base() != '0 0 0', f'Pick takes the colour on screen ({base()})')
+    f.key(1); f.pump(0.2)
+    check('color.sv' not in names(), 'Esc closes the picker')
+    q('op("image.new", "Tex 16 16")')
+    pick_enum(f, m, 'material.texture', 0, 1)
+    check(widget(m, 'material.texture')['value'] == 1, 'the texture list offers the scene\'s images')
+    props_tab(m, f, 'scene')
+    check({'world.sky', 'images.load', 'images.new'} <= names(), 'the Scene tab: the world\'s sky and the images')
+    pick_enum(f, m, 'world.sky', 0, 1)
+    check(widget(m, 'world.sky')['value'] == 1, 'the sky can be an image (HDRI)')
+    click('images.new')
+    check('form.image.name' in names(), 'New Image asks for a name and a size')
+    f.key(1); f.pump(0.2)
+    q('add("cylinder", "Cutter", 3, 0, 0)\nselect("Cube")\nmodifier("Cube", "boolean")\nmodifier("Cube", "multires")')
+    props_tab(m, f, 'modifiers')
+    check({'modifier.object', 'modifier.operation', 'modifier.subdivide', 'modifier.propagate'} <= names(),
+          'modifier fields: an object list, an operation list, Multires buttons')
+    pick_enum(f, m, 'modifier.object', 0, 4)                   # None Camera Light Cube Cutter
+    check(widget(m, 'modifier.object')['value'] == 4, f'the boolean\'s object is picked from a list ({widget(m, "modifier.object")["value"]})')
+    lv = widget(m, 'modifier.value', 16)
+    click('modifier.subdivide', 1)
+    for _ in range(5):
+        lv2 = widget(m, 'modifier.value', 16)
+        if lv2 and lv and lv2['value'] != lv['value']:
+            break
+        f.pump(0.1)
+    check(lv and lv2 and lv2['value'] == lv['value'] + 1, f'Subdivide adds a Multires level ({lv and lv["value"]} -> {lv2 and lv2["value"]})')
+    q('op("create.bezier")')
+    props_tab(m, f, 'object')
+    check({'curve.resolution', 'curve.bevel', 'curve.sides', 'curve.fill', 'curve.cyclic', 'curve.profile'} <= names(), 'a curve shows its data: resolution, tube, caps, closed, profile')
+    f0 = int(q('print(faces("BezierCurve"))') or 0)
+    type_into('curve.bevel', '0.1', 1)
+    f1 = int(q('print(faces("BezierCurve"))') or 0)
+    check(f1 > f0, f'a tube radius makes it a tube ({f0} -> {f1} faces)')
+    q('select("Cube")\nop("area.type_node_editor")\nop("area.maximize")')
+    f.pump(0.3)
+    check({'node.tree', 'node.new_tree', 'node.add'} <= names(), 'the node editor header: tree, New Tree, Add')
+    n0 = q('print(modcount("Cube"))')
+    click('node.new_tree')
+    check(q('print(modcount("Cube"))') == str(int(n0) + 1) and widget(m, 'node.tree')['value'] == 1,
+          'New Tree makes a tree the cube runs (a Geometry Nodes modifier)')
+    c0 = q('print(ginfo(1, 0, "count"))')
+    click('node.add')
+    f.type('cube'); f.pump(0.2); f.key(28); f.pump(0.3)
+    check(q('print(ginfo(1, 0, "count"))') == str(int(c0 or 0) + 1), f'Add, typing to search, Enter adds the node ({c0} -> {q("print(ginfo(1, 0, \"count\"))")})')
+    pick_enum(f, m, 'node.tree', 0, 0)
+    check(widget(m, 'node.tree')['value'] == 0, 'the tree list goes back to the material')
     f.proc.kill()
 
 

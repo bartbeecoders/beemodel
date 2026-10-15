@@ -64,8 +64,8 @@ s_im_savefail:  .asciz "  image: could not write the file"
 s_exr:          .asciz ".exr"
 s_image:        .asciz "image"
 
-OPERATOR op_image_load, "image.load", "Load Image...", do_image_load, doc="Load a PNG, JPEG or Radiance HDR image into the scene: image.load <path>"
-OPERATOR op_image_new, "image.new", "New Image...", do_image_new, flags=OPF_AI_SAFE, doc="A new image to paint on: image.new <name> [width height] (1024 x 1024 grey)"
+OPERATOR op_image_load, "image.load", "Load Image...", do_image_load, doc="Load a PNG, JPEG or Radiance HDR image into the scene: image.load <path>", form=form_iload
+OPERATOR op_image_new, "image.new", "New Image...", do_image_new, flags=OPF_AI_SAFE, doc="A new image to paint on: image.new <name> [width height] (1024 x 1024 grey)", form=form_imnew
 OPERATOR op_image_save, "image.save", "Save Image...", do_image_save, doc="Save a scene image: image.save <name> <path.png|path.exr>"
 
 .text

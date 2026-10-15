@@ -402,6 +402,10 @@ e_pdf:          .asciz "pdf"
 e_bees:         .asciz "bees"
 e_png:          .asciz "png"
 e_exr:          .asciz "exr"
+e_jpg:          .asciz "jpg"
+e_jpeg:         .asciz "jpeg"
+e_hdr:          .asciz "hdr"
+d_image:        .asciz "Image"
 n_untitled:     .asciz "untitled.bee"
 n_scene_obj:    .asciz "scene.obj"
 n_scene_stl:    .asciz "scene.stl"
@@ -424,6 +428,7 @@ x_svg:          .quad e_svg, 0
 x_pdf:          .quad e_pdf, 0
 x_bees:         .quad e_bees, 0
 x_img:          .quad e_png, e_exr, 0
+x_imgin:        .quad e_png, e_jpg, e_jpeg, e_hdr, 0
 .text
 .macro PATHFORM form, name, mode, ext, defname=0, flags=0
 WIDGET \form\()_w, WK_PATH, \name, flags=\flags, aux=\ext, n=\mode
@@ -446,6 +451,16 @@ PATHFORM form_esvg, "file.export_svg", 1, x_svg, n_sketch_svg
 PATHFORM form_epdf, "file.export_pdf", 1, x_pdf, n_drawing_pdf
 PATHFORM form_script, "script.run", 0, x_bees
 PATHFORM form_rsave, "render.save", 1, x_img, n_render_png
+PATHFORM form_iload, "image.load", 0, x_imgin
+
+# ---- image.new <name> [width height] ----------------------------------------------
+WIDGET fw_imn,  WK_TEXT, "form.image.name", "Name"
+WIDGET fw_imw,  WK_INT, "form.image.width", "Width", 1.0, 16384.0, 1.0, 0, WGF_CLAMP
+WIDGET fw_imh,  WK_INT, "form.image.height", "Height", 1.0, 16384.0, 1.0, 0, WGF_CLAMP
+FORM form_imnew, 3
+FFIELD fw_imn, kw=d_image
+FFIELD fw_imw, def=1024.0
+FFIELD fw_imh, def=1024.0
 
 # ---- mesh.print_check [minimum wall mm] ------------------------------------------
 WIDGET fw_pcw,  WK_FLOAT, "form.print.wall", "Thinnest wall allowed (mm)", 0.05, 100.0, 0.01, 2, WGF_CLAMP

@@ -268,6 +268,22 @@ hit_test:
     mov     eax, HIT_WGPOP
     jmp     .Lht_ret
 .Lht_nopop:
+    cmp     dword ptr [rip+cpk_on], 0    # the colour picker: its widgets, or
+    je      .Lht_nocp                   #  itself (outside: a click closes it)
+    mov     edi, ebx
+    mov     esi, r12d
+    call    wg_hit
+    mov     edx, eax
+    test    eax, eax
+    mov     eax, HIT_WIDGET
+    jnz     .Lht_ret
+    mov     edi, ebx
+    mov     esi, r12d
+    call    cpk_inside
+    mov     edx, eax
+    mov     eax, HIT_CPICK
+    jmp     .Lht_ret
+.Lht_nocp:
     cmp     dword ptr [rip+dlg_open], 0 # a dialog: its widgets, or nothing
     je      2f
     mov     edi, ebx
@@ -811,6 +827,16 @@ ui_button:
 1:  call    wg_pop_press
     jmp     .Lbt_done
 .Lbt_nopop:
+    cmp     ebx, HIT_CPICK              # the colour picker: outside it, Pick
+    jne     .Lbt_nocp                   #  takes a colour or it closes
+    test    r12d, r12d
+    jnz     .Lbt_done
+    call    wg_commit
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    cpk_outside
+    jmp     .Lbt_done
+.Lbt_nocp:
     cmp     ebx, HIT_WIDGET             # a widget: press, then drag or click
     jne     .Lbt_nowg
     cmp     r14d, BTN_LEFT
@@ -1499,7 +1525,16 @@ ui_key_press:
     mov     edi, ebx
     call    palette_key
     jmp     9f
-0:  cmp     dword ptr [rip+wg_pop_open], 0  # Esc closes an option list
+0:  cmp     dword ptr [rip+cpk_on], 0    # Esc closes the colour picker
+    je      61f                         #  (unless its hex is being typed)
+    cmp     ebx, KEY_ESC
+    jne     61f
+    call    wg_editing
+    test    eax, eax
+    jnz     61f
+    call    cpk_close
+    jmp     9f
+61: cmp     dword ptr [rip+wg_pop_open], 0  # Esc closes an option list
     je      .Lkp_noesc
     cmp     ebx, KEY_ESC
     jne     .Lkp_noesc
@@ -1609,6 +1644,7 @@ ui_draw:
     call    palette_draw
     call    pie_draw
     call    dlg_draw                    # a dialog over everything
+    call    cpk_draw                     # the colour picker (over a dialog too)
     jmp     tip_draw                    # tooltips on top of everything
 
 # run_op_ui(rdi=op) - a menu item or a button: runs it, or when it cannot run
