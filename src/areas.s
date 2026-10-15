@@ -27,6 +27,7 @@
 .globl area_maxed
 .globl active_area
 .globl vp_area
+.globl cam_ptr
 .globl hit_area
 .globl drag_node
 .globl ed_x
@@ -830,6 +831,17 @@ draw_leaf:
     inc     r13d
     cmp     r13d, 4
     jb      3b
+    movzx   eax, byte ptr [r12+N_ED]    # a 3D viewport: its tools in the header
+    cmp     eax, ED_VIEWPORT
+    jne     5f
+    mov     edi, [r12+N_X]
+    add     edi, TYPE_BTN_W+6
+    mov     esi, [r12+N_Y]
+    mov     edx, [r12+N_X]
+    add     edx, [r12+N_W]
+    sub     edx, 4*HDR_BTN_W+10
+    call    vp_header_tools
+5:
     # header buttons: 0 close, 1 split stacked, 2 split side by side, 3 maximize
     xor     r13d, r13d
 4:  mov     r14d, [r12+N_X]

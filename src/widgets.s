@@ -320,6 +320,10 @@ wg:
 
 # ---- button ------------------------------------------------------------------
 .Lwg_button:
+    test    dword ptr [rbx+WD_FLAGS], WGF_NODRAW
+    jnz     5f
+    test    dword ptr [rbx+WD_FLAGS], WGF_ICON
+    jnz     .Lwg_iconbtn
     mov     r8d, COL_BTN
     test    dword ptr [rbx+WD_FLAGS], WGF_PRIMARY
     jz      1f
@@ -358,6 +362,45 @@ wg:
     mov     dword ptr [rip+wg_clicked], 0
     mov     eax, 1
     jmp     .Lwg_ret
+
+# ---- an icon button: lit while its operator is on, greyed when it cannot run --
+.Lwg_iconbtn:
+    mov     dword ptr [rsp+16], COL_TEXT
+    mov     rdi, [rbx+WD_AUX]
+    test    rdi, rdi
+    jz      3f
+    call    op_checked
+    cmp     eax, 1
+    jne     1f
+    mov     dword ptr [rsp+16], COL_ACCENT
+    mov     r8d, COL_ACCENT_DARK
+    jmp     2f
+1:  mov     rdi, [rbx+WD_AUX]
+    call    op_poll
+    test    rax, rax
+    jz      3f
+    mov     dword ptr [rsp+16], COL_TEXT_OFF
+3:  test    dword ptr [rsp+8], 1        # hover
+    jz      4f
+    mov     r8d, COL_BTN_HOVER
+2:  mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, [rsp+4]
+    mov     r9d, FIELD_R
+    call    fill_rrect
+4:  mov     edi, r14d                   # the icon, centred
+    sub     edi, 16
+    sar     edi, 1
+    add     edi, r12d
+    mov     esi, [rsp+4]
+    sub     esi, 16
+    sar     esi, 1
+    add     esi, r13d
+    mov     edx, [rbx+WD_N]
+    mov     r8d, [rsp+16]
+    call    draw_icon
+    jmp     5b
 
 # ---- toggle ------------------------------------------------------------------
 .Lwg_toggle:
