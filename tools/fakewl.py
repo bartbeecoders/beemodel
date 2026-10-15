@@ -511,6 +511,7 @@ def main():
     themes()
     widgets_ui()
     tooltips()
+    icons()
     transforms()
     undo_redo()
     files()
@@ -4908,6 +4909,29 @@ def px_text(f, x, y, w):
     """Brightest text pixel along a row segment (to compare greyed text)."""
     return max(sum(((px(f, x + i, y + j) >> s) & 255) for s in (16, 8, 0)) / 3
                for i in range(w) for j in range(0, 12))
+
+
+def icons():
+    """UI plan U5: src/icons.inc matches tools/genicons.py, and the Tools
+    pane draws a different icon on each button (tinted by the theme)."""
+    print('  -- icons --')
+    root = os.path.join(os.path.dirname(__file__), '..')
+    tmp = os.path.join(tempfile.mkdtemp(), 'icons.inc')
+    subprocess.run([sys.executable, os.path.join(root, 'tools', 'genicons.py'), '--out', tmp],
+                   cwd=root, capture_output=True)
+    same = os.path.exists(tmp) and open(tmp).read() == open(os.path.join(root, 'src', 'icons.inc')).read()
+    check(same, 'src/icons.inc is what tools/genicons.py makes (regenerate it after editing an icon)')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    shapes = []
+    for i in range(10):                        # tool_y: ed_y + 10 + i * 30 (+28 after 4)
+        y0 = 80 + 10 + i * 30 + (28 if i >= 4 else 0) + 5
+        bg = px(f, 10, y0 + 8)
+        shapes.append(tuple(px(f, 13 + x, y0 + y) != bg for y in range(16) for x in range(16)))
+    drawn = [sum(sh) for sh in shapes]
+    check(all(n >= 12 for n in drawn) and len(set(shapes)) == 10,
+          f'each tool button shows its own icon ({drawn})')
+    f.proc.kill()
 
 
 if __name__ == '__main__':
