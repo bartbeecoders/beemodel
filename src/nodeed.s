@@ -127,6 +127,8 @@ o_ior:          .asciz "IOR"
 o_mask:         .asciz "Opacity Mask"
 .section .bss
 .align 8
+ne_ax:          .skip 4                 # the pointer when the add menu opened
+ne_ay:          .skip 4
 ne_panx:        .skip 4                 # the view: where graph (0, 0) is
 ne_pany:        .skip 4                 #  (from the body's top left)
 ne_mat:         .skip 4                 # the material shown (-1: none)
@@ -2520,13 +2522,16 @@ ne_add_node:
     cmp     [rax+GR_N], r12d
     jbe     9f
     inc     r12d
-    mov     [rip+ne_sel], r12d
-    mov     edi, [rip+ne_mat]
+    mov     [rip+ne_sel], r12d          # (selected, alone)
+    xor     eax, eax
+    bts     rax, r12
+    mov     [rip+ne_selm], rax
+    mov     edi, [rip+ne_mat]           # at the pointer where the menu opened
     mov     esi, r12d
-    mov     edx, [rip+ne_mx]
+    mov     edx, [rip+ne_ax]
     sub     edx, [rip+ne_bx]
     sub     edx, [rip+ne_panx]
-    mov     ecx, [rip+ne_my]
+    mov     ecx, [rip+ne_ay]
     sub     ecx, [rip+ne_by]
     sub     ecx, [rip+ne_pany]
     call    ne_place
@@ -2869,6 +2874,9 @@ do_ne_add_menu:
     mov     dword ptr [rip+ne_menu], 1
     mov     eax, [rip+ptr_x]
     mov     [rip+ne_mx], eax
+    mov     [rip+ne_ax], eax
+    mov     ecx, [rip+ptr_y]
+    mov     [rip+ne_ay], ecx
     call    ne_menu_size                # (all of it inside the body)
     inc     eax
     imul    eax, eax, NROW

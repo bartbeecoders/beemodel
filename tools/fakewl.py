@@ -3548,7 +3548,7 @@ def node_editor():
     f.move(800, 500)
     f.mods(1); f.key(30); f.mods(0)             # Shift+A
     f.pump(0.2)
-    f.click(830, 565)                           # Checker Texture
+    f.type('checker'); f.pump(0.2); f.key(28)   # Checker Texture (typed)
     f.pump(0.2)
     g = (info(0, 'count'), info(4, 'type'), info(4, 'x'), info(4, 'y'))
     f.click(830, 515)                           # selected, X
