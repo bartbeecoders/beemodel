@@ -20,6 +20,8 @@
 .include "macros.inc"
 
 .globl pt_obj
+.globl pt_radius
+.globl pt_strength
 .globl pt_record
 .globl pt_record_end
 .globl paint_press

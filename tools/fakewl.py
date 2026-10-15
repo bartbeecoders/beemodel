@@ -576,6 +576,7 @@ def main():
     clipboard()
     props_ui()
     viewport_ui()
+    tools_ui()
     transforms()
     undo_redo()
     files()
@@ -5385,6 +5386,43 @@ def viewport_ui():
     f.move(637, 300); f.move(643, 302); f.button(True); f.button(False)
     x = float(q('print(get("Cube", "x"))') or 'nan')
     check(x == round(x) and x != 0, f'Snap on: G moves in whole steps ({x})')
+    f.proc.kill()
+
+
+def tools_ui():
+    """UI plan U12: the Tools pane follows the mode; the brush settings bar
+    in sculpt and texture paint mode."""
+    print('  -- tools pane --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    rows = lambda: [w['label'] for w in ui_tree(m) if w['name'] == 'tools.row']
+    r = rows()
+    check(r[:4] == ['Select', 'Move', 'Rotate', 'Scale'] and 'Cube' in r, f'object mode: transform tools and Add ({len(r)})')
+    f.move(600, 300); f.key(15)                # edit mode
+    r = rows()
+    check('Extrude' in r and 'Loop Cut' in r and 'Box Select' in r and 'Cube' not in r,
+          f'edit mode: the modelling tools ({len(r)})')
+    f.key(30)                                  # A: select all first
+    w = [w for w in ui_tree(m) if w['name'] == 'tools.row' and w['label'] == 'Subdivide'][0]
+    f.click(w['x'] + 40, w['y'] + 12); f.pump(0.2)
+    f.move(600, 300); f.key(15)
+    n = q('print(faces("Cube"))')
+    check(n == '24', f'clicking Subdivide subdivides the selection ({n} faces)')
+    f.mods(4); f.key(15); f.mods(0)            # sculpt mode
+    r = rows()
+    check(r[:3] == ['Draw', 'Clay Strips', 'Crease'], f'sculpt mode: the brushes ({r[:3]})')
+    check({'brush.radius', 'brush.strength', 'brush.symmetry_x'} <= {w['name'] for w in ui_tree(m)},
+          'sculpt mode: the brush bar (radius, strength, symmetry ...)')
+    x, y = widget_xy(m, 'brush.radius')
+    f.click(x, y); f.mods(4); f.key(30); f.mods(0); f.type('80'); f.key(28)
+    check((widget(m, 'brush.radius') or {}).get('value') == 80, 'the brush radius field')
+    f.shot('tools_sculpt.png')
+    f.mods(4); f.key(15); f.mods(0)
+    check(rows()[:1] == ['Select'] and widget(m, 'brush.radius') is None, 'leaving sculpt mode: object tools, no bar')
     f.proc.kill()
 
 

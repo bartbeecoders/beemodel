@@ -538,29 +538,7 @@ area_hit:
     mov     eax, HIT_PANE
     mov     edx, r13d
     jmp     .Lah_ret
-.Lah_tools:
-    mov     eax, [rip+ed_x]
-    add     eax, 8
-    cmp     ebx, eax
-    jl      .Lah_pane
-    add     eax, [rip+ed_w]
-    sub     eax, 16
-    cmp     ebx, eax
-    jge     .Lah_pane
-    xor     r13d, r13d
-4:  mov     edi, r13d
-    call    tool_y
-    cmp     r12d, eax
-    jl      5f
-    add     eax, TOOL_BTN_H
-    cmp     r12d, eax
-    jge     5f
-    mov     eax, HIT_TOOL
-    mov     edx, r13d
-    jmp     .Lah_ret
-5:  inc     r13d
-    cmp     r13d, NUM_TOOLS
-    jb      4b
+.Lah_tools:                             # (its rows are widgets)
     jmp     .Lah_pane2
 .Lah_outliner:
     mov     eax, r12d                   # row under the pointer -> object
@@ -981,89 +959,177 @@ ed_tools_draw:
     push    r13
     push    r14
     push    r15
-    mov     edi, 4
-    call    tool_y
-    lea     esi, [rax-22]
+    sub     rsp, 32
+    call    tools_list                  # the mode's tools
+    mov     r14, rax                    # entries
+    mov     r15d, edx                   # count
+    mov     dword ptr [rip+tools_sel], -1
+    mov     r12d, [rip+ed_y]            # y
+    add     r12d, 10
+    xor     ebx, ebx
+.Ltd_entry:
+    cmp     ebx, r15d
+    jae     .Ltd_done
+    mov     r13, [r14+rbx*8]
+    test    r13, r13                    # a gap
+    jnz     1f
+    add     r12d, 8
+    jmp     .Ltd_next
+1:  cmp     qword ptr [r13], 2          # a caption
+    jne     2f
     mov     edi, [rip+ed_x]
     add     edi, 12
-    lea     rdx, [rip+s_h_create]
+    lea     esi, [r12+5]
+    mov     rdx, [r13+8]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
-    xor     ebx, ebx
-1:  lea     rax, [rip+tool_ops]
-    mov     r15, [rax+rbx*8]            # operator
-    mov     edi, ebx
-    call    tool_y
-    mov     r12d, eax                   # y
-    mov     r13d, COL_BTN               # background
-    mov     r14d, COL_TEXT              # foreground
-    mov     edi, HIT_TOOL
-    mov     esi, ebx
-    call    is_hot
-    test    eax, eax
-    jz      2f
-    mov     eax, [rip+ed_node]
-    cmp     eax, [rip+hit_area]
-    jne     2f
-    mov     r13d, COL_BTN_HOVER
-2:  mov     rdi, r15
+    call    draw_small
+    add     r12d, 28
+    jmp     .Ltd_next
+2:  lea     rdi, [rip+wd_tool_row]      # an operator: a row
+    mov     esi, [rip+ed_x]
+    add     esi, 8
+    mov     edx, r12d
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 16
+    lea     r8, [rip+tools_sel]
+    mov     r9d, ebx
+    call    wg
+    mov     rdi, r13
+    call    wg_set_op
+    mov     rdi, [r13+OP_LABEL]
+    call    wg_set_label
+    mov     dword ptr [rsp], COL_TEXT   # lit while it is the current one
+    mov     dword ptr [rsp+4], COL_TEXT_DIM
+    mov     rdi, r13
     call    op_checked
     cmp     eax, 1
     jne     3f
-    mov     r13d, COL_ACCENT
-    mov     r14d, COL_TEXT_DARK
-3:  mov     edi, [rip+ed_x]
+    mov     edi, [rip+ed_x]
     add     edi, 8
     mov     esi, r12d
     mov     edx, [rip+ed_w]
     sub     edx, 16
     mov     ecx, TOOL_BTN_H
-    mov     r8d, r13d
+    mov     r8d, COL_ACCENT
     mov     r9d, FIELD_R
     call    fill_rrect
-    mov     edi, [rip+ed_x]             # its icon
+    mov     dword ptr [rsp], COL_TEXT_DARK
+    mov     dword ptr [rsp+4], COL_TEXT_DARK
+    jmp     4f
+3:  mov     rdi, r13                    # greyed when it cannot run now
+    call    op_poll
+    test    rax, rax
+    jz      4f
+    mov     dword ptr [rsp], COL_TEXT_OFF
+    mov     dword ptr [rsp+4], COL_TEXT_OFF
+4:  mov     rdi, r13                    # icon, label, shortcut
+    call    tool_icon
+    mov     edx, eax
+    mov     edi, [rip+ed_x]
     add     edi, 13
-    mov     esi, TOOL_BTN_H-16
-    shr     esi, 1
-    add     esi, r12d
-    lea     rax, [rip+tool_icons]
-    mov     edx, [rax+rbx*4]
-    mov     r8d, r14d
+    lea     esi, [r12+5]
+    mov     r8d, [rsp]
     call    draw_icon
-5:  mov     edi, [rip+ed_x]
+    mov     edi, [rip+ed_x]
     add     edi, 34
     lea     esi, [r12+5]
-    mov     rdx, [r15+OP_LABEL]
-    mov     ecx, r14d
+    mov     rdx, [r13+OP_LABEL]
+    mov     ecx, [rsp]
     call    draw_text
-    mov     edi, [r15+OP_KEY]
+    mov     [rsp+16], eax               # where the label ends
+    mov     edi, [r13+OP_KEY]
     call    fmt_key
     test    rax, rax
-    jz      6f
-    mov     rdx, rax                    # shortcut, right aligned
-    push    rdx
+    jz      5f
+    mov     [rsp+8], rax
     mov     rdi, rax
     call    text_width
-    pop     rdx
     mov     edi, [rip+ed_x]
     add     edi, [rip+ed_w]
     sub     edi, 16
     sub     edi, eax
+    mov     eax, [rsp+16]               # (no room: the tooltip has it)
+    add     eax, 8
+    cmp     edi, eax
+    jl      5f
     lea     esi, [r12+5]
-    mov     ecx, COL_TEXT_DIM
-    cmp     r14d, COL_TEXT_DARK
-    jne     51f
-    mov     ecx, COL_TEXT_DARK
-51: call    draw_text
-6:  inc     ebx
-    cmp     ebx, NUM_TOOLS
-    jb      1b
+    mov     rdx, [rsp+8]
+    mov     ecx, [rsp+4]
+    call    draw_text
+5:  add     r12d, TOOL_BTN_H+TOOL_BTN_GAP
+.Ltd_next:
+    inc     ebx
+    jmp     .Ltd_entry
+.Ltd_done:
+    add     rsp, 32
     pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
     ret
+
+# tools_list -> rax = the Tools pane's entries for the mode, edx = count
+tools_list:
+    sub     rsp, 8
+    lea     rax, [rip+tl_sketch]
+    mov     edx, [rip+tl_sketch_c]
+    cmp     dword ptr [rip+skm_obj], 0
+    jne     9f
+    lea     rax, [rip+tl_curve]
+    mov     edx, [rip+tl_curve_c]
+    cmp     dword ptr [rip+cve_obj], 0
+    jne     9f
+    lea     rax, [rip+tl_arm]
+    mov     edx, [rip+tl_arm_c]
+    cmp     dword ptr [rip+arm_mode], 0
+    jne     9f
+    lea     rax, [rip+tl_sculpt]
+    mov     edx, [rip+tl_sculpt_c]
+    cmp     dword ptr [rip+sc_obj], 0
+    jne     9f
+    lea     rax, [rip+tl_paint]
+    mov     edx, [rip+tl_paint_c]
+    cmp     dword ptr [rip+pt_obj], 0
+    jne     9f
+    lea     rdi, [rip+op_wpaint_mode]
+    call    op_checked
+    lea     rcx, [rip+tl_wpaint]
+    mov     edx, [rip+tl_wpaint_c]
+    cmp     eax, 1
+    mov     rax, rcx
+    je      9f
+    lea     rax, [rip+tl_edit]
+    mov     edx, [rip+tl_edit_c]
+    cmp     dword ptr [rip+edit_obj], 0
+    jne     9f
+    lea     rax, [rip+tl_object]
+    mov     edx, [rip+tl_object_c]
+9:  add     rsp, 8
+    ret
+
+# tool_icon(rdi=operator) -> eax = its icon (a dot when it has none)
+tool_icon:
+    lea     rcx, [rip+tool_icon_tab]
+1:  mov     rdx, [rcx]
+    test    rdx, rdx
+    jz      2f
+    cmp     rdx, rdi
+    je      3f
+    add     rcx, 16
+    jmp     1b
+2:  mov     eax, ICON_DOT
+    ret
+3:  mov     eax, [rcx+8]
+    ret
+
+# tools_cb(rdi=&tools_sel, esi=row) - run the row's operator
+tools_cb:
+    push    rsi
+    call    tools_list
+    pop     rsi
+    mov     rdi, [rax+rsi*8]
+    jmp     run_op_ui
 
 ed_outliner_draw:
     push    rbx
@@ -2307,6 +2373,79 @@ WIDGET wd_rn_spp, WK_INT, "render.samples", "Samples", 1.0, 65536.0, 1.0, 0, WGF
 WIDGET wd_rn_dn, WK_TOGGLE, "render.denoise", "Denoise", tip="Clean up the noise of the finished render"
 WIDGET wd_rn_go, WK_BUTTON, "render.start", "Render (F12)", flags=WGF_PRIMARY, aux=op_render_start
 WIDGET wd_rn_save, WK_BUTTON, "render.save", "Save Render...", aux=op_render_save
+.section .bss
+.align 4
+tools_sel:      .skip 4
+.section .rodata
+s_t_add:        .asciz "ADD"
+s_t_select:     .asciz "SELECT"
+s_t_brushes:    .asciz "BRUSHES"
+s_t_tools:      .asciz "TOOLS"
+s_t_constr:     .asciz "CONSTRAIN"
+s_t_layers:     .asciz "LAYERS"
+.align 8
+cap_add:        .quad 2, s_t_add
+cap_select:     .quad 2, s_t_select
+cap_brushes:    .quad 2, s_t_brushes
+cap_tools:      .quad 2, s_t_tools
+cap_constr:     .quad 2, s_t_constr
+cap_layers:     .quad 2, s_t_layers
+tl_object:      .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale, cap_add
+                .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane, op_add_light, op_add_camera
+                .quad 0, op_view_measure, op_cursor_reset
+.equ tl_object_n, (. - tl_object) / 8
+tl_edit:        .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, op_m_loopcut, op_m_knife
+                .quad op_m_bisect, op_m_spin, op_m_subdivide, op_m_bridge, op_m_fill, op_m_dissolve, cap_select
+                .quad op_mesh_all, op_mesh_box, op_mesh_linked, op_mesh_inv
+.equ tl_edit_n, (. - tl_edit) / 8
+tl_sculpt:      .quad op_sb_draw, op_sb_clay, op_sb_crease, op_sb_inflate, op_sb_grab, op_sb_snake
+                .quad op_sb_smooth, op_sb_flatten, op_sb_pinch, op_sb_layer, op_sb_mask, 0
+                .quad op_s_mclear, op_s_minv, op_s_dyn
+.equ tl_sculpt_n, (. - tl_sculpt) / 8
+tl_paint:       .quad op_pt_color, op_pt_rad_up, op_pt_rad_dn, op_pt_str_up, op_pt_str_dn, cap_layers
+                .quad op_pt_ladd, op_pt_lup, op_pt_ldn, op_pt_lmerge
+.equ tl_paint_n, (. - tl_paint) / 8
+tl_wpaint:      .quad op_pt_weight
+.equ tl_wpaint_n, (. - tl_wpaint) / 8
+tl_sketch:      .quad op_sk_line, op_sk_circle, op_sk_rect, op_sk_dimkey, op_sk_del, cap_constr
+                .quad op_sk_coin, op_sk_hor, op_sk_ver, op_sk_eq, op_sk_par
+                .quad op_sk_perp, op_sk_tan, op_sk_fix, op_sk_mid
+.equ tl_sketch_n, (. - tl_sketch) / 8
+tl_curve:       .quad op_cv_extrude, op_cv_subdiv, op_cv_delete, op_cv_cyclic, op_cv_handle, op_cv_selall
+                .quad 0, op_cv_tomesh
+.equ tl_curve_n, (. - tl_curve) / 8
+tl_arm:         .quad op_arm_extrude, op_arm_delete, op_arm_selall, 0, op_arm_key, op_arm_clearr, op_arm_autow
+.equ tl_arm_n, (. - tl_arm) / 8
+.align 4
+tl_object_c:    .long tl_object_n
+tl_edit_c:      .long tl_edit_n
+tl_sculpt_c:    .long tl_sculpt_n
+tl_paint_c:     .long tl_paint_n
+tl_wpaint_c:    .long tl_wpaint_n
+tl_sketch_c:    .long tl_sketch_n
+tl_curve_c:     .long tl_curve_n
+tl_arm_c:       .long tl_arm_n
+.align 8
+tool_icon_tab:  .quad op_tool_select, ICON_SELECT, op_tool_move, ICON_MOVE, op_tool_rotate, ICON_ROTATE
+                .quad op_tool_scale, ICON_SCALE, op_add_cube, ICON_CUBE, op_add_sphere, ICON_SPHERE
+                .quad op_add_cylinder, ICON_CYLINDER, op_add_plane, ICON_PLANE, op_add_light, ICON_LIGHT
+                .quad op_add_camera, ICON_CAMERA, op_view_measure, ICON_MEASURE, op_cursor_reset, ICON_CURSOR
+                .quad op_m_extrude, ICON_EXTRUDE, op_m_extrude_ind, ICON_EXTRUDE, op_m_inset, ICON_INSET
+                .quad op_m_bevel, ICON_BEVEL, op_m_loopcut, ICON_LOOPCUT, op_m_knife, ICON_KNIFE
+                .quad op_m_bisect, ICON_KNIFE, op_m_spin, ICON_ROTATE, op_m_subdivide, ICON_GRID
+                .quad op_mesh_all, ICON_SELECT, op_mesh_box, ICON_SELECT
+                .quad op_sb_draw, ICON_BRUSH, op_sb_clay, ICON_BRUSH, op_sb_crease, ICON_BRUSH
+                .quad op_sb_inflate, ICON_SPHERE, op_sb_grab, ICON_MOVE, op_sb_snake, ICON_CURVE
+                .quad op_sb_smooth, ICON_BRUSH, op_sb_flatten, ICON_PLANE, op_sb_pinch, ICON_BRUSH
+                .quad op_sb_layer, ICON_BRUSH, op_sb_mask, ICON_SCULPT
+                .quad op_pt_color, ICON_PAINT, op_pt_ladd, ICON_PLUS, op_pt_weight, ICON_WEIGHT
+                .quad op_sk_line, ICON_SKETCH, op_sk_circle, ICON_TORUS, op_sk_rect, ICON_PLANE
+                .quad op_sk_dimkey, ICON_MEASURE, op_sk_del, ICON_CLOSE, op_cv_extrude, ICON_EXTRUDE
+                .quad op_cv_delete, ICON_CLOSE, op_cv_tomesh, ICON_MESH, op_arm_extrude, ICON_EXTRUDE
+                .quad op_arm_delete, ICON_CLOSE, op_arm_key, ICON_KEY, op_arm_autow, ICON_WEIGHT
+                .quad 0, 0
+.text
+WIDGET wd_tool_row, WK_ROW, "tools.row", cb=tools_cb
 WIDGET wd_vp_sec,     WK_SECTION, "props.viewport", "Viewport"
 WIDGET wd_vp_shading, WK_ENUM,   "viewport.shading", aux=vp_shade_lbl, n=3
 WIDGET wd_vp_grid,    WK_TOGGLE, "viewport.grid", "Ground grid"

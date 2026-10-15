@@ -582,6 +582,7 @@ viewport_draw:
     jb      .Lvp_giz
 
     call    nav_gizmo_draw              # the navigation gizmo (vpnav.s)
+    call    tool_settings_draw          # a brush mode: its settings (vpnav.s)
 
     # ---- overlay text ---------------------------------------------------------
     mov     edi, [rip+cvs_x0]

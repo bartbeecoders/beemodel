@@ -46,6 +46,8 @@
 .globl wg_desc_of
 .globl wg_n
 .globl wg_set_label
+.globl wg_set_op
+.globl wg_op_of
 .globl wg_clip_key
 
 .equ WG_MAX,    768
@@ -60,7 +62,8 @@
 .equ E_DESC,    32
 .equ E_SUB,     40
 .equ E_DRAWX,   44              # (scroll: content top; thumb: track y)
-.equ E_AUX,     48              # (scroll: content height)
+.equ E_AUX,     48              # (scroll: content height; a row: its text)
+.equ E_OP,      56              # a row's operator (tooltips), 0 none
 .equ CLOSED_N,  64
 .equ POP_ROW,   22
 .equ SCROLL_N,  4               # nested scrolled regions
@@ -190,6 +193,25 @@ wg_set_label:
     mov     [rcx+rax+E_AUX], rdi
 1:  ret
 
+# wg_set_op(rdi=operator) - the widget just drawn stands for it (tooltips)
+wg_set_op:
+    mov     eax, [rip+wg_n]
+    test    eax, eax
+    jz      1f
+    dec     eax
+    imul    eax, eax, WG_SZ
+    lea     rcx, [rip+wg_list]
+    mov     [rcx+rax+E_OP], rdi
+1:  ret
+
+# wg_op_of(edi=id) -> rax = the operator that widget stands for, or 0
+wg_op_of:
+    call    wg_find
+    test    rax, rax
+    jz      1f
+    mov     rax, [rax+E_OP]
+1:  ret
+
 # wg_desc_of(edi=id) -> rax = that widget's descriptor, 0 if not on screen
 wg_desc_of:
     call    wg_find
@@ -223,6 +245,7 @@ wg_add:
     mov     [rbx+E_SUB], r10d
     mov     [rbx+E_DRAWX], esi
     mov     qword ptr [rbx+E_AUX], 0
+    mov     qword ptr [rbx+E_OP], 0
     mov     rax, rbx
     pop     rbx
     ret
