@@ -155,10 +155,10 @@ items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit
 items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
                 .quad op_m_loopcut, op_m_knife, op_m_bisect, op_m_subdivide, 0
                 .quad op_m_bridge, op_m_spin, op_m_fill, op_m_dissolve, op_m_dup, 0
-                .quad sub_merge, sub_mdelete, sub_normals, 0, op_cursor_reset
+                .quad sub_merge, sub_mdelete, sub_normals, sub_uv, 0, op_cursor_reset
 .equ items_mesh_n, (. - items_mesh) / 8
 items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_render_save, 0
-                .quad op_render_denoise, op_render_settings
+                .quad op_render_denoise, op_render_settings, 0, op_object_bake
 .equ items_render_n, (. - items_render) / 8
 items_help:     .quad op_help_keys, op_console_ops, op_help_about
 .equ items_help_n, (. - items_help) / 8
@@ -175,6 +175,7 @@ sub_normals_l:  .quad op_m_flip, op_m_recalc
 sub_feature_l:  .quad op_cad_pad, op_cad_pocket, op_cad_revolve, op_cad_hole, 0
                 .quad op_cad_shell, op_cad_fillet, op_cad_chamfer, op_cad_pattern, op_cad_infill
 sub_generate_l: .quad op_gen_lsystem, op_gen_wfc
+sub_uv_l:       .quad op_uv_unwrap, op_uv_smart, op_uv_pack, 0, op_uv_mark, op_uv_clear, op_uv_sharp
 sub_mech_l:     .quad op_mj_add, op_mj_list, op_mj_check
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
@@ -191,6 +192,7 @@ SUBMENU sub_normals, "Normals", sub_normals_l, 2
 SUBMENU sub_feature, "Part Feature", sub_feature_l, 10
 SUBMENU sub_generate, "Generate", sub_generate_l, 2
 SUBMENU sub_mech, "Mechanism", sub_mech_l, 3
+SUBMENU sub_uv, "UV", sub_uv_l, 7
 
 # -----------------------------------------------------------------------------
 # small helpers

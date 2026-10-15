@@ -36,6 +36,7 @@
 .globl paint_dab_world
 .globl pt_radius
 .globl pt_col
+.globl pt_valid
 .globl pt_hist_clear
 .globl pt_mat
 .globl pt_cam

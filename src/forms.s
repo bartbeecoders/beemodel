@@ -366,6 +366,31 @@ FFIELD fw_wfl, def=1.0
 FFIELD fw_wfs, def=1.0
 FFIELD fw_wft
 
+# ---- object.bake <low> <high> <normal|ao|curvature> <image> [distance] ------------
+.section .rodata
+d_bakeimg:      .asciz "Bake"
+s_bk_normal:    .asciz "Normal map"
+s_bk_ao:        .asciz "Ambient occlusion"
+s_bk_curv:      .asciz "Curvature"
+k_bk_normal:    .asciz "normal"
+k_bk_ao:        .asciz "ao"
+k_bk_curv:      .asciz "curvature"
+.align 8
+l_bake:         .quad s_bk_normal, s_bk_ao, s_bk_curv
+kw_bake:        .quad k_bk_normal, k_bk_ao, k_bk_curv
+.text
+WIDGET fw_bkl,  WK_TEXT, "form.bake.low", "Low mesh", tip="The mesh (with UVs) whose image gets the map: the active object"
+WIDGET fw_bkh,  WK_TEXT, "form.bake.high", "High mesh", tip="The detailed mesh the map is taken from"
+WIDGET fw_bkk,  WK_ENUM, "form.bake.map", "Map", aux=l_bake, n=3
+WIDGET fw_bki,  WK_TEXT, "form.bake.image", "Image", tip="The image to bake into (Scene tab: New Image... makes one)"
+WIDGET fw_bkd,  WK_FLOAT, "form.bake.distance", "Search distance (0: automatic)", 0.0, 1000.0, 0.005, 3, WGF_CLAMP
+FORM form_bake, 5
+FFIELD fw_bkl, kw=FK_ACTIVE
+FFIELD fw_bkh
+FFIELD fw_bkk, kw=kw_bake
+FFIELD fw_bki, kw=d_bakeimg
+FFIELD fw_bkd, flags=FF_CHANGED
+
 # ---- param.set <name> <expression> ----------------------------------------------------
 WIDGET fw_pmn,  WK_TEXT, "form.param.name", "Name"
 WIDGET fw_pme,  WK_TEXT, "form.param.expression", "Value", tip="A number with units or an expression of other parameters (10mm, 2*wall + 1mm)"

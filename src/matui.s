@@ -155,7 +155,13 @@ mats_props_draw:
     lea     rdx, [rip+s_no_mat]
     call    pnl_hint
     jmp     .Lmp_out
-3:  mov     edi, ebx                    # its values, a copy
+3:  cmp     dword ptr [rip+pt_obj], 0   # texture painting: the layer stack
+    je      31f                         #  first
+    cmp     dword ptr [rip+vp_on], 0
+    jne     31f
+    call    layers_props
+    add     r12d, 8
+31: mov     edi, ebx                    # its values, a copy
     call    mat_get
     lea     rsi, [rax+MA_BASE]
     lea     rdi, [rip+mt_v]
@@ -613,6 +619,251 @@ cv_cb:
     add     rsp, 8
     pop     r12
     pop     rbx
+    ret
+
+# =============================================================================
+#  The paint layers of the image being painted (layers.s): the top first, an
+#  eye, the name (a click paints on it), opacity and blend; Add, Merge,
+#  Remove
+# =============================================================================
+.equ IM_LAYERS, 32
+.equ LB_COUNT,  0
+.equ LB_ACTIVE, 4
+.equ LB_L,      16
+.equ LE_OPAC,   8
+.equ LE_BLEND,  12
+.equ LE_VIS,    16
+.equ LE_SZ,     32
+WIDGET wd_ly_vis,  WK_TOGGLE, "layer.visible", flags=WGF_COMPACT, cb=ly_vis_cb, tip="Show or hide the layer"
+WIDGET wd_ly_row,  WK_ROW, "layer.row", cb=ly_act_cb, tip="Paint on this layer"
+WIDGET wd_ly_op,   WK_SLIDER, "layer.opacity", , 0.0, 1.0, 0.005, 2, cb=ly_op_cb, tip="The layer's opacity"
+WIDGET wd_ly_bl,   WK_ENUM, "layer.blend", cb=ly_bl_cb, aux=l_blend, n=3, tip="How the layer mixes with the ones below"
+WIDGET wd_ly_add,  WK_BUTTON, "layer.add", "Add", aux=op_pt_ladd
+WIDGET wd_ly_merge, WK_BUTTON, "layer.merge", "Merge", aux=op_pt_lmerge
+WIDGET wd_ly_del,  WK_BUTTON, "layer.remove", "Remove", tip="Remove the active layer (not the base)"
+.section .rodata
+s_h_layers:     .asciz "Paint Layers"
+s_base:         .asciz "Base"
+s_layer:        .asciz "Layer "
+s_normal:       .asciz "Normal"
+s_mult:         .asciz "Multiply"
+s_add:          .asciz "Add"
+s_one_layer:    .asciz "One layer: Add makes one to paint on."
+.align 8
+l_blend:        .quad s_normal, s_mult, s_add
+.section .bss
+.align 8
+ly_img:         .skip 8
+ly_vis:         .skip 4*16
+ly_op:          .skip 4*16
+ly_bl:          .skip 4*16
+ly_act:         .skip 4
+ly_names:       .skip 16*12
+.text
+layers_props:
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    call    pt_valid
+    test    rax, rax
+    jz      .Lly_out
+    mov     [rip+ly_img], rax
+    lea     rdx, [rip+s_h_layers]
+    call    pnl_heading
+    mov     rax, [rip+ly_img]
+    mov     r14, [rax+IM_LAYERS]
+    test    r14, r14
+    jnz     1f
+    lea     rdx, [rip+s_one_layer]
+    call    pnl_hint
+    jmp     .Lly_btns
+1:  mov     eax, [r14+LB_ACTIVE]
+    mov     [rip+ly_act], eax
+    mov     ebx, [r14+LB_COUNT]
+2:  dec     ebx                         # the top first
+    js      .Lly_btns
+    imul    eax, ebx, LE_SZ
+    lea     r15, [r14+LB_L+rax]
+    lea     rcx, [rip+ly_vis]
+    mov     eax, [r15+LE_VIS]
+    mov     [rcx+rbx*4], eax
+    lea     rcx, [rip+ly_op]
+    mov     eax, [r15+LE_OPAC]
+    mov     [rcx+rbx*4], eax
+    lea     rcx, [rip+ly_bl]
+    mov     eax, [r15+LE_BLEND]
+    mov     [rcx+rbx*4], eax
+    lea     rdi, [rip+wd_ly_vis]        # the eye
+    mov     esi, [rip+pnl_x]
+    lea     edx, [r12+2]
+    mov     ecx, 18
+    lea     r8, [rip+ly_vis]
+    lea     r8, [r8+rbx*4]
+    mov     r9d, ebx
+    call    wg
+    lea     rdi, [rip+wd_ly_row]        # its name: a row
+    mov     esi, [rip+pnl_x]
+    add     esi, 24
+    mov     edx, r12d
+    mov     ecx, [rip+pnl_w]
+    imul    ecx, ecx, 35
+    mov     eax, ecx
+    xor     edx, edx
+    mov     ecx, 100
+    div     ecx
+    mov     ecx, eax
+    mov     edx, r12d
+    lea     r8, [rip+ly_act]
+    mov     r9d, ebx
+    call    wg
+    lea     rdi, [rip+ly_names]         # "Base" / "Layer n"
+    imul    eax, ebx, 12
+    add     rdi, rax
+    mov     r13, rdi
+    lea     rsi, [rip+s_base]
+    test    ebx, ebx
+    jz      3f
+    lea     rsi, [rip+s_layer]
+    call    cpy
+    lea     eax, [rbx+'0']
+    cmp     ebx, 10
+    jb      21f
+    mov     byte ptr [rdi], '1'
+    inc     rdi
+    lea     eax, [rbx+'0'-10]
+21: mov     [rdi], al
+    mov     byte ptr [rdi+1], 0
+    jmp     4f
+3:  call    cpy
+4:  mov     rdi, r13
+    call    wg_set_label
+    mov     edi, [rip+pnl_x]
+    add     edi, 30
+    lea     esi, [r12+3]
+    mov     rdx, r13
+    mov     ecx, COL_TEXT
+    call    draw_text
+    test    ebx, ebx                    # (the base: no opacity, no blend)
+    jz      6f
+    mov     eax, [rip+pnl_w]            # opacity: 38 .. 70 %
+    imul    eax, eax, 38
+    xor     edx, edx
+    mov     ecx, 100
+    div     ecx
+    mov     esi, eax
+    add     esi, [rip+pnl_x]
+    add     esi, 24
+    mov     ecx, [rip+pnl_w]
+    imul    ecx, ecx, 31
+    mov     eax, ecx
+    xor     edx, edx
+    mov     ecx, 100
+    div     ecx
+    mov     ecx, eax
+    lea     rdi, [rip+wd_ly_op]
+    mov     edx, r12d
+    lea     r8, [rip+ly_op]
+    lea     r8, [r8+rbx*4]
+    mov     r9d, ebx
+    call    wg
+    mov     eax, [rip+pnl_w]            # blend: from 72 % to the end
+    imul    eax, eax, 72
+    xor     edx, edx
+    mov     ecx, 100
+    div     ecx
+    lea     esi, [rax+4]
+    add     esi, [rip+pnl_x]
+    mov     ecx, [rip+pnl_w]
+    sub     ecx, eax
+    sub     ecx, 4
+    lea     rdi, [rip+wd_ly_bl]
+    mov     edx, r12d
+    lea     r8, [rip+ly_bl]
+    lea     r8, [r8+rbx*4]
+    mov     r9d, ebx
+    call    wg
+6:  add     r12d, WG_H+4
+    jmp     2b
+.Lly_btns:
+    lea     rdi, [rip+wd_ly_add]        # Add | Merge | Remove
+    mov     esi, [rip+pnl_x]
+    mov     ecx, [rip+pnl_w]
+    mov     eax, ecx
+    xor     edx, edx
+    mov     ecx, 3
+    div     ecx
+    mov     r13d, eax
+    lea     ecx, [rax-4]
+    mov     edx, r12d
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    lea     rdi, [rip+wd_ly_merge]
+    mov     esi, [rip+pnl_x]
+    add     esi, r13d
+    lea     ecx, [r13-4]
+    mov     edx, r12d
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    lea     rdi, [rip+wd_ly_del]
+    mov     esi, [rip+pnl_x]
+    add     esi, r13d
+    add     esi, r13d
+    lea     ecx, [r13-4]
+    mov     edx, r12d
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    test    eax, eax
+    jz      5f
+    mov     rdi, [rip+ly_img]           # remove the active one
+    mov     esi, 8
+    xor     edx, edx
+    call    lay_op
+    test    eax, eax
+    jle     5f
+    mov     edx, eax
+    mov     rdi, [rip+ly_img]
+    mov     esi, 6
+    xorps   xmm0, xmm0
+    call    lay_op
+    mov     dword ptr [rip+dirty], 1
+5:  add     r12d, WG_H+4
+.Lly_out:
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# the rows' callbacks: rdi = value, esi = layer
+ly_vis_cb:
+    cvtsi2ss xmm0, dword ptr [rdi]
+    mov     eax, 5
+    jmp     ly_set
+ly_op_cb:
+    movss   xmm0, [rdi]
+    mov     eax, 3
+    jmp     ly_set
+ly_bl_cb:
+    cvtsi2ss xmm0, dword ptr [rdi]
+    mov     eax, 4
+    jmp     ly_set
+ly_act_cb:
+    xorps   xmm0, xmm0
+    mov     eax, 2
+ly_set:                                 # eax = lay_op's op
+    mov     edx, esi
+    mov     esi, eax
+    mov     rdi, [rip+ly_img]
+    sub     rsp, 8
+    call    lay_op
+    add     rsp, 8
+    mov     dword ptr [rip+dirty], 1
     ret
 
 .section .note.GNU-stack,"",@progbits

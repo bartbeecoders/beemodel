@@ -49,7 +49,7 @@
 .equ WG_H,          22          # row height of fields and buttons
 
 # WIDGET sym, kind, "name" [, "label", min, max, step, dec, flags, cb, "undo", aux, n, "tip"]
-.macro WIDGET sym, kind, name, label, min=0.0, max=0.0, step=0.01, dec=3, flags=0, cb=0, undo, aux=0, n=0, tip
+.macro WIDGET sym, kind, name, label, min=0.0, max=0.0, step=0.01, dec=3, flags=0, cb=0, undo, aux=0, n=0, tip, sect=.rodata
     .pushsection .rodata
 .Lwn\@: .asciz "\name"
 .ifnb \label
@@ -61,6 +61,8 @@
 .ifnb \tip
 .Lwt\@: .asciz "\tip"
 .endif
+    .popsection
+    .pushsection \sect
     .balign 8
 \sym:
     .long \kind, \flags

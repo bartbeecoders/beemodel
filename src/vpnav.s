@@ -349,7 +349,11 @@ tool_settings_draw:
 3:  mov     esi, ebx
     mov     edx, r12d
     mov     ecx, 180
-    xor     r9d, r9d
+    cmp     dword ptr [rsp], 0          # (paint: narrower, for its colour)
+    je      31f
+    mov     ecx, 150
+    sub     ebx, 30
+31: xor     r9d, r9d
     call    wg
     add     ebx, 192
     cmp     dword ptr [rsp], 0
@@ -365,8 +369,61 @@ tool_settings_draw:
     lea     rdi, [rip+wd_ts_pradp]
     call    tool_btn
     jmp     9f
-4:  lea     rdi, [rip+wd_ts_col]        # paint: the colour
-    call    tool_btn
+4:  cmp     dword ptr [rip+vp_on], 2    # weight paint: the weight, the bone
+    je      6f
+    lea     rdi, [rip+pt_col]           # paint: the colour (a picker) and
+    call    ts_unpack                   #  swatches
+    lea     rdi, [rip+wd_ts_colf]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 56
+    lea     r8, [rip+ts_colf]
+    xor     r9d, r9d
+    call    wg
+    add     ebx, 62
+    xor     r13d, r13d
+5:  lea     rax, [rip+ts_swatch]
+    mov     r8d, [rax+r13*4]
+    lea     edi, [rbx+1]
+    lea     esi, [r12+2]
+    mov     edx, 20
+    mov     ecx, WG_H-4
+    mov     r9d, 4
+    call    fill_rrect
+    lea     rdi, [rip+wd_ts_sw]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 22
+    xor     r8d, r8d
+    mov     r9d, r13d
+    call    wg
+    test    eax, eax
+    jz      51f
+    lea     rax, [rip+ts_swatch]
+    mov     eax, [rax+r13*4]
+    or      eax, 0xff000000
+    mov     [rip+pt_col], eax
+51: add     ebx, 24
+    inc     r13d
+    cmp     r13d, 6
+    jb      5b
+    jmp     9f
+6:  lea     rdi, [rip+wd_ts_wt]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 96
+    lea     r8, [rip+wp_value]
+    xor     r9d, r9d
+    call    wg
+    add     ebx, 102
+    call    ts_bones                    # (the armature's bones, its active one)
+    lea     rdi, [rip+wd_ts_bone]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 120
+    lea     r8, [rip+ts_bone]
+    xor     r9d, r9d
+    call    wg
 9:  add     rsp, 16
     pop     r13
     pop     r12
@@ -451,6 +508,103 @@ tool_btn:
     call    wg
     add     rsp, 8
     add     ebx, 26
+9:  ret
+
+# ---- paint colour, swatches, weight paint's bone ------------------------------------
+WIDGET wd_ts_colf, WK_COLOR, "paint.colour", cb=ts_col_cb, tip="The paint colour (a click opens the colour picker)"
+WIDGET wd_ts_sw,   WK_BUTTON, "paint.swatch", flags=WGF_NODRAW, tip="Paint with this colour"
+WIDGET wd_ts_wt,   WK_SLIDER, "paint.weight", "Weight", 0.0, 1.0, 0.005, 2, tip="The weight painted towards (1: the bone moves it fully)"
+WIDGET wd_ts_bone, WK_ENUM, "paint.bone", flags=WGF_DYN, cb=ts_bone_cb, aux=ts_bone_names, tip="The bone whose weights are painted"
+.section .rodata
+.align 4
+ts_swatch:      .long 0xffffff, 0x101010, 0xd04020, 0xe0b030, 0x40a050, 0x3070d0
+f_255v:         .float 255.0
+s_nobone:       .asciz "No bone"
+.section .bss
+.align 16
+ts_colf:        .skip 16
+ts_bone:        .skip 4
+.align 8
+ts_arm:         .skip 8
+ts_blbl:        .skip 8*130
+.text
+# ts_unpack(rdi=&0xAARRGGBB) -> ts_colf (linear: the display value squared)
+ts_unpack:
+    mov     eax, [rdi]
+    mov     ecx, 2
+1:  mov     edx, eax
+    and     edx, 255
+    cvtsi2ss xmm0, edx
+    divss   xmm0, [rip+f_255v]
+    mulss   xmm0, xmm0
+    lea     r8, [rip+ts_colf]
+    movss   [r8+rcx*4], xmm0
+    shr     eax, 8
+    dec     ecx
+    jns     1b
+    ret
+ts_col_cb:                              # rdi = ts_colf -> pt_col
+    sub     rsp, 8
+    call    cpk_rgb_of
+    or      eax, 0xff000000
+    mov     [rip+pt_col], eax
+    add     rsp, 8
+    ret
+
+# ts_bones - ts_arm = the bones of the painted mesh's armature, ts_bone its
+#   active one + 1
+ts_bones:
+    sub     rsp, 8
+    mov     qword ptr [rip+ts_arm], 0
+    mov     dword ptr [rip+ts_bone], 0
+    mov     edi, [rip+active_obj]
+    call    obj_get
+    test    rax, rax
+    jz      9f
+    mov     rdi, rax
+    call    arm_mod_target
+    test    rax, rax
+    jz      9f
+    mov     rdi, rax
+    call    arm_of
+    test    rax, rax
+    jz      9f
+    mov     [rip+ts_arm], rax
+    mov     eax, [rax+8]                # (AR_ACT)
+    inc     eax
+    mov     [rip+ts_bone], eax
+9:  add     rsp, 8
+    ret
+ts_bone_names:                          # -> rax = labels, edx = count
+    sub     rsp, 8
+    xor     edx, edx
+    mov     rax, [rip+ts_arm]
+    test    rax, rax
+    jz      1f
+    mov     edx, [rax+4]                # (AR_N)
+1:  lea     rdi, [rip+ts_blbl]
+    lea     rsi, [rip+s_nobone]
+    lea     rcx, [rip+ts_bone_name]
+    mov     r8d, 129
+    call    pnl_list
+    mov     edx, eax
+    lea     rax, [rip+ts_blbl]
+    add     rsp, 8
+    ret
+ts_bone_name:                           # edi = bone -> rax (its name)
+    imul    eax, edi, 128
+    mov     rcx, [rip+ts_arm]
+    lea     rax, [rcx+64+rax]
+    ret
+ts_bone_cb:                             # rdi = &ts_bone: the active bone
+    mov     eax, [rdi]
+    dec     eax
+    js      9f
+    mov     rcx, [rip+ts_arm]
+    test    rcx, rcx
+    jz      9f
+    mov     [rcx+8], eax                # (AR_ACT: no geometry changes)
+    mov     dword ptr [rip+dirty], 1
 9:  ret
 
 # vp_mode_cb - the header's mode choice: leave the mode, enter the new one

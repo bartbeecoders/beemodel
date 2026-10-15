@@ -14,6 +14,7 @@
 .intel_syntax noprefix
 .include "const.inc"
 .include "macros.inc"
+.include "widgets.inc"
 
 .globl ed_uved_draw
 .globl uved_press
@@ -103,6 +104,55 @@ OPERATOR op_ue_scale,"uv.scale",  "Scale Islands",  do_ue_tm, arg=2, key=KEY_S, 
 OPERATOR op_ue_rot,  "uv.rotate", "Rotate Islands", do_ue_tm, arg=3, key=KEY_R, flags=OPF_AI_SAFE|OPF_UNDO|OPF_UV, doc="UV editor: rotate the selected islands about their centre"
 OPERATOR op_ue_heat, "uv.heat_map", "Distortion Heat Map", do_ue_heat, key=KEY_D, flags=OPF_AI_SAFE|OPF_QUIET|OPF_UV, doc="UV editor: no heat map, area distortion, angle distortion"
 OPERATOR op_ue_fit,  "uv.view_fit", "Fit UV View", do_ue_fit, key=KEY_HOME, flags=OPF_AI_SAFE|OPF_QUIET|OPF_UV, doc="UV editor: the unit square fills the view"
+
+# ---- the header: Unwrap, Pack, Select All, the heat map, Fit ----------------------
+.globl uv_header_tools
+WIDGET wd_uh_unwrap, WK_BUTTON, "uv.header.unwrap", "Unwrap", aux=op_uv_unwrap
+WIDGET wd_uh_pack, WK_BUTTON, "uv.header.pack", "Pack", aux=op_uv_pack
+WIDGET wd_uh_all,  WK_BUTTON, "uv.header.select_all", "Select All", aux=op_ue_all
+WIDGET wd_uh_heat, WK_ENUM, "uv.header.heat", aux=heat_lbl, n=3, tip="Colour the islands by how much they are stretched (D cycles)"
+WIDGET wd_uh_fit,  WK_BUTTON, "uv.header.fit", "Fit", aux=op_ue_fit
+.section .rodata
+s_hl_off:       .asciz "No heat map"
+s_hl_area:      .asciz "Area distortion"
+s_hl_angle:     .asciz "Angle distortion"
+.align 8
+heat_lbl:       .quad s_hl_off, s_hl_area, s_hl_angle
+uh_items:       .quad wd_uh_unwrap, 70, wd_uh_pack, 54, wd_uh_all, 84, wd_uh_heat, 140, wd_uh_fit, 40, 0
+.text
+# uv_header_tools(edi=x, esi=header y, edx=right limit)
+uv_header_tools:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     ebx, edi
+    lea     r12d, [rsi+1]
+    mov     r13d, edx
+    lea     r14, [rip+uh_items]
+1:  mov     rdi, [r14]
+    test    rdi, rdi
+    jz      9f
+    mov     ecx, [r14+8]
+    lea     eax, [rbx+rcx]
+    cmp     eax, r13d
+    jg      9f
+    mov     esi, ebx
+    mov     edx, r12d
+    lea     r8, [rip+ue_heat]
+    xor     r9d, r9d
+    call    wg
+    mov     eax, [r14+8]
+    lea     ebx, [rbx+rax+6]
+    add     r14, 16
+    jmp     1b
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
 
 # ue_target -> rax = the mesh shown (edit object, else the active mesh;
 #   0: none or no UVs), rdx = its object
