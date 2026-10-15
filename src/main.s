@@ -84,6 +84,7 @@ _start:
     pop     qword ptr [rip+op_arg]
 2:
 
+    call    help_start                  # the welcome screen (no file opened)
     mov     dword ptr [rip+toast_on], 1 # (from now on messages are toasts)
     mov     dword ptr [rip+vg_async], 1 # (the window: DAGs build in the background)
 .Lloop:

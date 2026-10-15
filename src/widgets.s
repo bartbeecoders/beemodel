@@ -1062,7 +1062,10 @@ wg_hit:
 71: cmp     dword ptr [rip+cpk_on], 0    # the colour picker: only its own
     je      72f
     mov     ecx, [rip+cpk_floor]
-72: imul    ecx, ecx, WG_SZ
+72: cmp     dword ptr [rip+ov_on], 0    # a help overlay: only its own
+    je      73f
+    mov     ecx, [rip+ov_floor]
+73: imul    ecx, ecx, WG_SZ
     add     rax, rcx
 0:  mov     ecx, [rip+wg_n]
     imul    ecx, ecx, WG_SZ

@@ -11,6 +11,7 @@
 .include "macros.inc"
 .include "widgets.inc"
 
+.globl run_t
 .globl lb_header_tools
 .globl assets_rclick
 .globl ctx_assets

@@ -42,7 +42,6 @@ OPERATOR op_console_focus, "console.focus", "Command Line", do_console_focus, ke
 OPERATOR op_console_clear, "console.clear", "Clear Console", do_console_clear, key=KEY_L|KM_CTRL, flags=OPF_QUIET|OPF_AI_SAFE, doc="Clear the console log"
 OPERATOR op_console_ops,   "console.list_ops", "List Operators", do_console_list_ops, doc="List every operator id in the console"
 # ---- Help ---------------------------------------------------------------------
-OPERATOR op_help_keys,  "help.shortcuts", "Keyboard Shortcuts", op_shortcuts, key=KEY_F1, doc="List all key bindings in the console"
 OPERATOR op_help_about, "help.about",     "About BeeModel",     op_about, doc="Show version information"
 
 .section .rodata

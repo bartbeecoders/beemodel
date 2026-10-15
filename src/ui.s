@@ -161,7 +161,7 @@ items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
 items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_render_save, 0
                 .quad op_render_denoise, op_render_settings, 0, op_object_bake
 .equ items_render_n, (. - items_render) / 8
-items_help:     .quad op_help_keys, op_console_ops, op_help_about
+items_help:     .quad op_help_keys, op_welcome, op_area_type_help, 0, op_console_ops, op_help_about
 .equ items_help_n, (. - items_help) / 8
 items_ai:       .quad op_view_activity, op_agent_revert, 0
                 .quad op_agent_read, op_agent_edit, op_agent_files
@@ -273,6 +273,18 @@ hit_test:
     mov     eax, HIT_WGPOP
     jmp     .Lht_ret
 .Lht_nopop:
+    cmp     dword ptr [rip+ov_on], 0    # a help overlay: its widgets, nothing else
+    je      .Lht_noov
+    mov     edi, ebx
+    mov     esi, r12d
+    call    wg_hit
+    mov     edx, eax
+    test    eax, eax
+    mov     eax, HIT_WIDGET
+    jnz     .Lht_ret
+    mov     eax, HIT_DIALOG
+    jmp     .Lht_ret
+.Lht_noov:
     cmp     dword ptr [rip+cpk_on], 0    # the colour picker: its widgets, or
     je      .Lht_nocp                   #  itself (outside: a click closes it)
     mov     edi, ebx
@@ -1575,7 +1587,16 @@ ui_key_press:
     mov     edi, ebx
     call    palette_key
     jmp     9f
-0:  cmp     dword ptr [rip+cpk_on], 0    # Esc closes the colour picker
+0:  cmp     dword ptr [rip+ov_on], 0    # Esc closes a help overlay
+    je      62f                         #  (unless a field is typed in)
+    cmp     ebx, KEY_ESC
+    jne     62f
+    call    wg_editing
+    test    eax, eax
+    jnz     62f
+    call    ov_close
+    jmp     9f
+62: cmp     dword ptr [rip+cpk_on], 0    # Esc closes the colour picker
     je      61f                         #  (unless its hex is being typed)
     cmp     ebx, KEY_ESC
     jne     61f
@@ -1705,6 +1726,7 @@ ui_draw:
     call    pie_draw
     call    dlg_draw                    # a dialog over everything
     call    cpk_draw                     # the colour picker (over a dialog too)
+    call    ov_draw                     # the welcome screen, the shortcuts
     jmp     tip_draw                    # tooltips on top of everything
 
 # run_op_ui(rdi=op) - a menu item or a button: runs it, or when it cannot run

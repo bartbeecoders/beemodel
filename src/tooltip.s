@@ -10,7 +10,12 @@
 .include "widgets.inc"
 
 # exports
+.globl tip_title
+.globl tip_key
+.globl tip_doc
+.globl tip_why
 .globl tip_hover
+.globl wrap_text
 .globl tip_block
 .globl tip_wait
 .globl tip_tick
@@ -249,6 +254,7 @@ tip_content:
     call    op_poll
     mov     [rip+tip_why], rax
 .Ltc_yes:
+    call    help_note                   # (the Help area keeps it)
     mov     eax, 1
     pop     rbx
     ret

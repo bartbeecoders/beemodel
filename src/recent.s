@@ -8,6 +8,9 @@
 .include "macros.inc"
 
 # exports
+.globl rec_lbl
+.globl rec_n
+.globl rec_ops
 .globl recent_load
 .globl recent_add
 .globl sub_recent

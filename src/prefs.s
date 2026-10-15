@@ -107,6 +107,7 @@ w_gpu:          .asciz "gpu"
 w_mcp:          .asciz "mcp"
 w_tier:         .asciz "agent_permission"
 w_key:          .asciz "key"
+w_welcome:      .asciz "welcome"
 .align 8
 l_tabs:         .quad s_h_interface, s_h_input, s_h_keymap, s_h_system, s_h_files, s_h_ai
 l_theme:        .quad s_dark, s_light, s_contrast
@@ -117,7 +118,8 @@ l_tier:         .quad s_tenv, s_tr, s_te, s_tf
 pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_orbit, pr_orbit, 1, w_autosave, pr_autosave, 0
                 .quad w_threads, pr_threads, 0, w_jit, pr_jit, 0, w_mcp, pr_mcp, 0
-                .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0, 0
+                .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0
+                .quad w_welcome, pr_welcome, 0, 0
 
 .section .data
 .align 4

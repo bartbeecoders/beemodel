@@ -41,7 +41,7 @@ def wstr(s):
 
 
 class Fake:
-    def __init__(self, args=(), home=None):
+    def __init__(self, args=(), home=None, welcome=False):
         self.dir = tempfile.mkdtemp()
         self.path = os.path.join(self.dir, 'wl')
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -50,7 +50,8 @@ class Fake:
         self.home = home or tempfile.mkdtemp()  # never touch the real ~/BeeModel or cache
         env = dict(os.environ, WAYLAND_DISPLAY=self.path, HOME=self.home,
                    XDG_CACHE_HOME=os.path.join(self.home, 'cache'),
-                   XDG_RUNTIME_DIR=self.home)       # MCP socket lands here
+                   XDG_RUNTIME_DIR=self.home,       # MCP socket lands here
+                   BEEMODEL_WELCOME='1' if welcome else '0')
         self.env = env
         self.t0 = time.time()
         self.proc = subprocess.Popen([BIN, *args], env=env)
@@ -589,6 +590,7 @@ def main():
     team_ui()
     prefs_ui()
     workspaces_ui()
+    help_ui()
     transforms()
     undo_redo()
     files()
@@ -6273,6 +6275,61 @@ def workspaces_ui():
     t2 = [w.get('label') for w in ui_tree(n) if w['name'] == 'workspace.tab']
     check(t2[-1:] == ['Custom 1'], f'and after a restart ({t2[-1:]})')
     g.proc.kill()
+
+
+def help_ui():
+    """UI plan U25: the welcome screen (templates, recent, samples, keymap),
+    quick actions in an empty viewport, the searchable F1 shortcuts, the
+    Help area."""
+    print('  -- onboarding and help --')
+    f = Fake(welcome=True)
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.4)
+    check({'welcome.default', 'welcome.empty', 'welcome.product', 'welcome.character', 'welcome.terrain', 'welcome.open',
+           'welcome.sample_tree', 'welcome.keymap', 'welcome.show'} <= names(),
+          'the welcome screen: templates, open, samples, keymap, show at start')
+    click('welcome.product')
+    for _ in range(10):
+        if 'welcome.product' not in names():
+            break
+        f.pump(0.1)
+    r = q('print(exists("Part"), features())')
+    check(r == '1 2' and 'welcome.product' not in names(), f'a template makes its scene, the screen goes ({r})')
+    menu_pick(f, m, 'Help', 'Welcome Screen')
+    f.pump(0.3)
+    check('welcome.empty' in names(), 'Help > Welcome Screen opens it again')
+    f.key(1); f.pump(0.2)
+    check('welcome.empty' not in names(), 'Esc closes it')
+    menu_pick(f, m, 'Help', 'Welcome Screen')
+    f.pump(0.3)
+    click('welcome.empty')
+    f.pump(0.3)
+    check(q('print(count())') == '0' and wait_widget(f, m, 'quick.add_cube') is not None, 'an empty scene shows quick actions in the viewport')
+    click('quick.add_cube')
+    check(q('print(count())') == '1', 'Add a Cube from there')
+    f.move(600, 300); f.key(59); f.pump(0.3)                   # F1
+    check('shortcuts.search' in names(), 'F1: the shortcuts, with a search field')
+    f.key(1); f.pump(0.2)
+    check('shortcuts.search' not in names(), 'Esc closes them')
+    q('op("area.type_help")')                                   # (the active area becomes the Help area)
+    f.pump(0.3)
+    img0 = f.image()
+    t = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == 'File'][0]
+    f.click(t['x'] + 10, t['y'] + 10); f.pump(0.2)
+    it = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == 'Save As...']
+    if it:
+        f.move(it[0]['x'] + 40, it[0]['y'] + 12); f.pump(0.3)
+    f.key(1); f.key(1); f.pump(0.3)
+    img1 = f.image()
+    d = sum(1 for a, b in zip(img0.getdata(), img1.getdata()) if a != b)
+    check(d > 500, f'the Help area shows what the pointer rested on ({d} pixels changed)')
+    f.proc.kill()
 
 
 if __name__ == '__main__':
