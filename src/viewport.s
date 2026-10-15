@@ -300,6 +300,9 @@ line3d:
     push    r12
     sub     rsp, 8
     mov     ebx, edx
+    mov     r8d, ebx                    # the active theme's colour
+    call    th_map
+    mov     ebx, r8d
     lea     rdi, [rip+lp0]
     lea     rsi, [rip+la]
     call    to_cam
@@ -592,7 +595,7 @@ viewport_draw:
     add     esi, 26
     lea     rdx, [rip+s_vp_hint]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    call    draw_small
     call    redo_draw                   # adjust the last operation (on top)
     call    reset_clip
     pop     r15

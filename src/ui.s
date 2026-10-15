@@ -124,6 +124,7 @@ items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_edit_toggle, op_select_a
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
                 .quad op_view_wire, op_view_matprev, op_view_grid, op_view_reset_cam, op_console_clear, 0
+                .quad op_theme_dark, op_theme_light, op_theme_contrast, 0
                 .quad op_an_normals, op_an_nonman, op_an_bound, op_an_degen, op_an_over, op_show_thin
                 .quad op_view_measure
 items_create:   .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
@@ -1510,19 +1511,11 @@ draw_titlebar:
     call    draw_text
     cmp     dword ptr [rip+scene_modified], 0
     je      5f
-    lea     ebx, [rax+8]                # unsaved changes: a round dot
-    mov     edi, ebx
-    mov     esi, TITLE_H/2-2
-    mov     edx, 7
-    mov     ecx, 5
+    lea     edi, [rax+11]               # unsaved changes: a round dot
+    mov     esi, TITLE_H/2
+    mov     edx, 4
     mov     r8d, COL_ACCENT
-    call    fill_rect
-    lea     edi, [rbx+1]
-    mov     esi, TITLE_H/2-3
-    mov     edx, 5
-    mov     ecx, 7
-    mov     r8d, COL_ACCENT
-    call    fill_rect
+    call    fill_circle
 5:
     # caption buttons: minimize, maximize, close
     mov     ebx, [rip+win_w]
@@ -1706,7 +1699,7 @@ draw_statusbar:
     mov     esi, [rip+cont_y1]
     add     esi, 3
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    call    draw_small
     # right: "3 objects     AI: edit (1 connected)"
     call    fmt_reset
     mov     edi, [rip+obj_count]
@@ -1744,7 +1737,7 @@ draw_statusbar:
     add     esi, 3
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    call    draw_small
     pop     rbx
     ret
 
@@ -1755,26 +1748,12 @@ draw_dropdown:
     push    r13
     push    r14
     push    r15
-    mov     edi, [rip+drop_x]           # drop shadow
-    add     edi, 4
-    mov     esi, [rip+drop_y]
-    add     esi, 4
-    mov     edx, [rip+drop_w]
-    mov     ecx, [rip+drop_h]
-    mov     r8d, 0x0c0d10
-    call    fill_rect
-    mov     edi, [rip+drop_x]
-    mov     esi, [rip+drop_y]
-    mov     edx, [rip+drop_w]
-    mov     ecx, [rip+drop_h]
-    mov     r8d, COL_DROP_BG
-    call    fill_rect
-    mov     edi, [rip+drop_x]
+    mov     edi, [rip+drop_x]           # shadow, border, body
     mov     esi, [rip+drop_y]
     mov     edx, [rip+drop_w]
     mov     ecx, [rip+drop_h]
     mov     r8d, COL_DROP_BORDER
-    call    rect_outline
+    call    popup_frame
 
     mov     eax, [rip+menu_open]
     lea     rcx, [rip+menu_counts]

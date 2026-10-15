@@ -508,6 +508,7 @@ def main():
     check(f.frames >= 50, f'frames rendered ({f.frames})')
     areas_and_palette()
     ui_basics()
+    themes()
     transforms()
     undo_redo()
     files()
@@ -1167,7 +1168,7 @@ def analysis_repair():
     check(q('print(analyze("Cube", "boundary"), analyze("Cube", "overhang"), manifold("Cube"))') == '4 1 0',
           'analyze(): the deleted top face leaves 4 boundary edges, the bottom overhangs')
     f.click(130, 44); f.pump(0.2)              # View > Show Boundary Edges
-    f.click(200, 435); f.pump(0.3)
+    f.click(200, 516); f.pump(0.3)             # (below the theme entries)
     img = f.image().crop((214, 80, 1014, 620))
     cyan = sum(1 for c in img.getdata() if c == (0x40, 0xe0, 0xe0))
     check(cyan > 100, f'View > Show Boundary Edges marks the hole ({cyan} px)')
@@ -4671,6 +4672,72 @@ def ui_basics():
     check(r == '1', f'beemodel scene.bee opens the scene ({r})')
     check(not any(px(g, x, 16) == 0xf2b134 for x in range(160, 640)), 'an opened scene has no dot')
     g.proc.kill()
+
+
+def theme_tables():
+    """{theme: {COL_NAME: rgb}} from src/const.inc and src/theme.s"""
+    import re
+    root = os.path.join(os.path.dirname(__file__), '..', 'src')
+    base = {m[0]: int(m[1], 16) for m in
+            re.findall(r'^\.equ (COL_\w+),\s+0x([0-9a-fA-F]+)', open(os.path.join(root, 'const.inc')).read(), re.M)}
+    src = open(os.path.join(root, 'theme.s')).read()
+    out = {'dark': dict(base)}
+    for name, label in (('light', 'th_light'), ('contrast', 'th_contrast')):
+        body = re.split(r'^' + label + ':', src, flags=re.M)[1].split('0xffffffff')[0]
+        t = dict(base)
+        for k, v in re.findall(r'\.long (COL_\w+),\s+0x([0-9a-fA-F]+)', body):
+            t[k] = int(v, 16)
+        out[name] = t
+    return out
+
+
+def contrast(a, b):
+    def lum(c):
+        ch = [((c >> sh) & 255) / 255 for sh in (16, 8, 0)]
+        ch = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in ch]
+        return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2]
+    la, lb = lum(a), lum(b)
+    return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def themes():
+    """UI plan U2: Dark / Light / High contrast themes, text contrast in each,
+    the theme switch from the View menu, the console and BEEMODEL_THEME."""
+    print('  -- themes --')
+    tabs = theme_tables()
+    pairs = [('COL_TEXT', 'COL_PANE_BG'), ('COL_TEXT', 'COL_DROP_BG'), ('COL_TEXT', 'COL_FIELD'),
+             ('COL_TEXT', 'COL_INPUT_BG'), ('COL_TEXT_DIM', 'COL_PANE_BG'), ('COL_TEXT_DIM', 'COL_DROP_BG'),
+             ('COL_TEXT_DIM', 'COL_STATUS_BG'), ('COL_TITLE_TEXT', 'COL_TITLE_BG'),
+             ('COL_ACCENT', 'COL_PANE_BG'), ('COL_TEXT', 'COL_MENU_BG')]
+    for th, t in tabs.items():
+        low = [(fg, bg, round(contrast(t[fg], t[bg]), 2)) for fg, bg in pairs if contrast(t[fg], t[bg]) < 4.5]
+        check(not low, f'{th} theme: every text colour >= 4.5:1 on its background {low or ""}')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.2); f.key(1)
+    for th in ('light', 'contrast', 'dark'):
+        cmd(f'view.theme {th}')
+        t = tabs[th]
+        check(px(f, 640, 5) == t['COL_TITLE_BG'] and px(f, 4, 300) == t['COL_PANE_BG'],
+              f'view.theme {th}: title bar and panels take its colours')
+    f.click(133, 43)                           # View menu: Light Theme
+    f.click(160, 411)
+    check(px(f, 640, 5) == tabs['light']['COL_TITLE_BG'], 'View > Light Theme switches the theme')
+    f.click(133, 43)
+    f.shot('themes_light_menu.png')
+    f.key(1)
+    f.proc.kill()
+    os.environ['BEEMODEL_THEME'] = 'contrast'
+    try:
+        g = Fake()
+        g.pump(1.0, until_frame=True)
+        check(px(g, 640, 5) == 0, 'BEEMODEL_THEME=contrast starts in the high-contrast theme')
+        g.proc.kill()
+    finally:
+        del os.environ['BEEMODEL_THEME']
 
 
 if __name__ == '__main__':

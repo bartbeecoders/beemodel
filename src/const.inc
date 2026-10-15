@@ -193,12 +193,20 @@
 .equ COL_BTN,           0x363b45
 .equ COL_BTN_HOVER,     0x454b57
 .equ COL_TEXT,          0xc8ccd4
-.equ COL_TEXT_DIM,      0x7f8794
-.equ COL_TEXT_DARK,     0x1b1d22
+.equ COL_TEXT_DIM,      0x9aa1ad  # >= 4.5:1 on panels and menus
+.equ COL_TEXT_DARK,     0x1b1d23  # (not the title bar's value: themes map them apart)
 .equ COL_CLOSE_HOT,     0xe81123
 .equ COL_STATUS_BG,     0x1f2126
 .equ COL_DROP_BG,       0x2d313a
 .equ COL_DROP_BORDER,   0x101114
+.equ COL_SHADOW,        0x0c0d10
+.equ COL_INPUT_BG,      0x1f2228  # text fields (console, palette)
+.equ COL_SELECTION,     0x5a4a1e  # selected text
+.equ POPUP_R,           6         # corner radius of menus, palette, dialogs
+.equ FIELD_R,           4         # ... of fields and buttons
+.equ TH_DARK,           0         # UI themes (theme.s)
+.equ TH_LIGHT,          1
+.equ TH_CONTRAST,       2
 .equ COL_SEPARATOR,     0x434956
 .equ COL_GRID,          0x454b55
 .equ COL_GRID_MAJOR,    0x5a616d
@@ -254,9 +262,15 @@
 .equ FNT_BASELINE,  88      # baseline offset inside a CHAR_H text row
 .equ FNT_ASCU,      92
 .equ FNT_DESCU,     96
+.equ FNT_BOLD,      100     # synthetic bold: glyphs widened by a pixel
 .equ FNT_SZ,        128
 .equ FONT_UI,       0
 .equ FONT_MONO,     1
+.equ FONT_SMALL,    2         # hints, units, the status bar (the UI face)
+.equ FONT_HEAD,     3         # panel and dialog titles (the UI face, bold)
+.equ FONT_SLOTS,    4
+.equ SMALL_FONT_PX, 13
+.equ HEAD_FONT_PX,  16
 .equ UI_FONT_PX,    15
 .equ MONO_FONT_PX,  14
 

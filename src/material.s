@@ -1272,7 +1272,7 @@ mats_props_draw:
     mov     esi, r12d
     lea     rdx, [rip+s_p_material]
     mov     ecx, COL_ACCENT
-    call    draw_text
+    call    draw_heading
     mov     edi, 1                      # + New
     mov     esi, [rip+ed_x]
     add     esi, [rip+ed_w]

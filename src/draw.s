@@ -11,6 +11,7 @@
 .globl to_px
 .globl to_lg
 .globl set_ui_scale
+.globl scale4
 .globl fill_rect_px
 .globl draw_line_px
 .globl ui_s120
@@ -22,6 +23,7 @@
 .globl clip_y1
 .globl draw_line
 .globl draw_text_bitmap
+.globl draw_text_bm_raw
 .globl fb_h
 .globl fb_ptr
 .globl fb_w
@@ -195,6 +197,7 @@ set_clip_px:
 # fill_rect_px - same in physical pixels
 # -----------------------------------------------------------------------------
 fill_rect:
+    call    th_map                      # the active theme's colour
     cmp     dword ptr [rip+ui_s120], 120
     je      fill_rect_px
     push    r8
@@ -285,6 +288,10 @@ rect_outline:
 fill_vgradient:
     test    ecx, ecx
     jle     9f
+    call    th_map
+    xchg    r8d, r9d
+    call    th_map
+    xchg    r8d, r9d
     push    rbx
     mov     [rip+gr_top], r8d
     mov     [rip+gr_bot], r9d
@@ -358,6 +365,10 @@ gr_bot: .skip 4
 #   8x16 bitmap font (fallback when no TrueType font is available), glyphs fully outside the clip are skipped.
 # -----------------------------------------------------------------------------
 draw_text_bitmap:
+    mov     r8d, ecx
+    call    th_map
+    mov     ecx, r8d
+draw_text_bm_raw:                       # (colour already themed: draw_text)
     cmp     dword ptr [rip+ui_s120], 120
     jne     draw_text_bitmap_scaled
     push    rbx
@@ -525,6 +536,7 @@ str_len:
 # draw_line_px - Bresenham in physical pixels, clipped
 # -----------------------------------------------------------------------------
 draw_line:
+    call    th_map
     cmp     dword ptr [rip+ui_s120], 120
     je      draw_line_px
     push    rbx

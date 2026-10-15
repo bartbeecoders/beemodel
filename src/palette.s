@@ -359,26 +359,12 @@ palette_draw:
     push    r14
     push    r15
     call    pal_layout
-    mov     edi, [rip+pal_x]            # shadow, body, border
-    add     edi, 5
-    mov     esi, [rip+pal_y]
-    add     esi, 6
-    mov     edx, [rip+pal_w]
-    mov     ecx, [rip+pal_h]
-    mov     r8d, 0x0c0d10
-    call    fill_rect
-    mov     edi, [rip+pal_x]
-    mov     esi, [rip+pal_y]
-    mov     edx, [rip+pal_w]
-    mov     ecx, [rip+pal_h]
-    mov     r8d, COL_DROP_BG
-    call    fill_rect
-    mov     edi, [rip+pal_x]
+    mov     edi, [rip+pal_x]            # shadow, border, body
     mov     esi, [rip+pal_y]
     mov     edx, [rip+pal_w]
     mov     ecx, [rip+pal_h]
     mov     r8d, COL_ACCENT_DARK
-    call    rect_outline
+    call    popup_frame
     lea     rdi, [rip+tfi_palette]      # query field
     call    tf_select
     mov     edi, [rip+pal_x]

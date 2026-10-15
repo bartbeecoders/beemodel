@@ -12,6 +12,9 @@
 
 # exports
 .globl text_init
+.globl fonts_resize
+.globl draw_heading
+.globl draw_small
 .globl draw_text
 .globl text_width
 .globl text_width_n
@@ -113,12 +116,68 @@ text_init:
     lea     rsi, [rip+s_env_mono]
     lea     rdx, [rip+mono_paths]
     call    load_slot
+    lea     rsi, [rip+fonts]            # small and heading: the UI face
+    cmp     dword ptr [rsi+FNT_LOADED], 0
+    je      fonts_resize
+    lea     rdi, [rsi+FONT_SMALL*FNT_SZ]
+    mov     ecx, FNT_SZ
+    rep     movsb
+    lea     rsi, [rip+fonts]
+    lea     rdi, [rsi+FONT_HEAD*FNT_SZ]
+    mov     ecx, FNT_SZ
+    rep     movsb
+    lea     rsi, [rip+fonts]
+    mov     dword ptr [rsi+FONT_HEAD*FNT_SZ+FNT_BOLD], 1
+    jmp     fonts_resize
+
+# fonts_resize - (re)set every slot's size for the current UI scale
+fonts_resize:
+    sub     rsp, 8
     mov     edi, FONT_UI
     mov     esi, UI_FONT_PX
     call    font_set_size
     mov     edi, FONT_MONO
     mov     esi, MONO_FONT_PX
-    jmp     font_set_size
+    call    font_set_size
+    mov     edi, FONT_SMALL
+    mov     esi, SMALL_FONT_PX
+    call    font_set_size
+    mov     edi, FONT_HEAD
+    mov     esi, HEAD_FONT_PX
+    call    font_set_size
+    add     rsp, 8
+    ret
+
+# draw_heading / draw_small(edi=x, esi=y, rdx=text, ecx=colour) -> eax = x
+#   after: draw_text in the heading (bold) or small font
+draw_heading:
+    lea     rax, [rip+fonts]            # bitmap font: bold by drawing twice
+    cmp     dword ptr [rax+FONT_HEAD*FNT_SZ+FNT_LOADED], 0
+    jne     2f
+    push    rdi
+    push    rsi
+    push    rdx
+    push    rcx
+    sub     rsp, 8
+    call    draw_text
+    add     rsp, 8
+    pop     rcx
+    pop     rdx
+    pop     rsi
+    pop     rdi
+    inc     edi
+    jmp     draw_text
+2:  push    rbx
+    mov     ebx, FONT_HEAD
+    jmp     1f
+draw_small:
+    push    rbx
+    mov     ebx, FONT_SMALL
+1:  xchg    ebx, [rip+cur_font]
+    call    draw_text
+    mov     [rip+cur_font], ebx
+    pop     rbx
+    ret
 
 # text_use(edi=slot) -> eax = previous slot
 text_use:
@@ -145,6 +204,9 @@ active_slot:
 #   y is the top of a CHAR_H (16px) text row, as with the bitmap font.
 # -----------------------------------------------------------------------------
 draw_text:
+    mov     r8d, ecx                    # the active theme's colour
+    call    th_map
+    mov     ecx, r8d
     push    rdi
     push    rsi
     push    rdx
@@ -155,7 +217,7 @@ draw_text:
     pop     rsi
     pop     rdi
     test    eax, eax
-    js      draw_text_bitmap
+    js      draw_text_bm_raw
     push    rbx
     push    rbp
     push    r12

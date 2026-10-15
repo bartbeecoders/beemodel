@@ -35,8 +35,6 @@
 .equ KEY_END,       107
 .equ KEY_DOWN,      108
 .equ KEY_DELETE,    111
-.equ COL_INPUT_BG,  0x1f2228
-.equ COL_SELECTION, 0x5a4a1e
 
 .section .data
 .align 8
