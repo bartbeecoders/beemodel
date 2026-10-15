@@ -220,6 +220,7 @@ ne_drag:        .skip 4                 # 0 none, 1 move, 2 wire from an output,
 ne_dn:          .skip 4                 # the node dragged (or from)
 ne_dk:          .skip 4                 # its socket / value
 ne_cur:         .skip 8                 # the record ne_rec found last
+ne_fitpend:     .skip 4                 # a frame asked before a drawing: mode + 1
 ne_mmx:         .skip 4                 # the minimap on screen (w 0: none),
 ne_mmy:         .skip 4                 #  the graph's corner it shows from,
 ne_mmw:         .skip 4                 #  its scale (screen px per 1000 graph
@@ -1988,7 +1989,15 @@ ed_nodes_draw:
     test    rax, rax
     jz      .Lnd_none
     mov     rbx, rax
-    mov     rdi, rbx
+    mov     edi, [rip+ne_fitpend]       # (a frame asked for before: now)
+    test    edi, edi
+    jz      34f
+    mov     dword ptr [rip+ne_fitpend], 0
+    dec     edi
+    call    ne_frame
+    call    ne_rec
+    mov     rbx, rax
+34: mov     rdi, rbx
     call    ne_layout
     mov     edi, FONT_NODE              # the canvas: text at the zoom's size
     call    text_use
@@ -5542,7 +5551,13 @@ do_ne_frame_sel:
 # ne_frame(edi=1: only the selected) - zoom (25 .. 100 %) and pan so the
 #   nodes fill the body, centred
 ne_frame:
-    push    rbx
+    cmp     dword ptr [rip+ne_bw], 120  # (not drawn yet: at the next drawing)
+    jge     0f
+    inc     edi
+    mov     [rip+ne_fitpend], edi
+    mov     dword ptr [rip+dirty], 1
+    ret
+0:  push    rbx
     push    r12
     push    r13
     push    r14
