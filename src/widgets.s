@@ -1299,7 +1299,7 @@ wg_release:
     mov     rdi, [rcx+WD_AUX]
     test    rdi, rdi
     jz      1f
-    call    run_op
+    call    run_op_ui                   # (greyed, a form or a question first)
     jmp     9f
 1:  mov     [rip+wg_clicked], ebx
     jmp     9f
@@ -1704,14 +1704,14 @@ wg_commit:
     call    rax
     mov     dword ptr [rip+dirty], 1
     jmp     9f
-1:  xor     ecx, ecx                    # or it is copied (31 bytes at most)
+1:  xor     ecx, ecx                    # or it is copied (63 bytes at most)
     lea     rsi, [rip+tf_buf]
 5:  mov     al, [rsi+rcx]
     mov     [r12+rcx], al
     test    al, al
     jz      9f
     inc     ecx
-    cmp     ecx, 31
+    cmp     ecx, 63
     jb      5b
     mov     byte ptr [r12+rcx], 0
     jmp     9f

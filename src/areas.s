@@ -1677,19 +1677,8 @@ ed_props_draw:
     jmp     .Lpp_done
 .Lpp_cad:
     mov     edi, r12d
-    call    cad_props_draw
-    mov     edi, eax
-    call    feat_props_draw
-    cmp     eax, r12d                   # nothing yet: how to start
-    jne     1f
-    mov     edi, [rip+ed_x]
-    add     edi, 14
-    mov     esi, r12d
-    lea     rdx, [rip+s_cad_empty]
-    mov     ecx, COL_TEXT_DIM
-    call    draw_small
-    lea     eax, [r12+20]
-1:  mov     r12d, eax
+    call    cadui_props
+    mov     r12d, eax
     jmp     .Lpp_done
 .Lpp_scene:
     call    props_scene
@@ -2530,7 +2519,6 @@ props_arg:      .skip 64
 s_p_color:      .asciz "Colour"
 s_pg_scene:     .asciz "Scene"
 s_pg_render:    .asciz "Render"
-s_cad_empty:    .asciz "No parameters or features yet"
 hex_digits_p:   .ascii "0123456789abcdef"
 s_u_mm:         .asciz "Millimetres"
 s_u_cm:         .asciz "Centimetres"

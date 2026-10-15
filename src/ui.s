@@ -146,10 +146,11 @@ items_select:   .quad op_select_all, 0, op_mesh_all, op_mesh_inv, op_mesh_linked
 .equ items_select_n, (. - items_select) / 8
 items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_add_torus, op_add_plane, op_add_grid, 0, sub_curve
+                .quad op_cad_sketch, sub_generate
                 .quad 0, op_add_light, op_add_camera, op_add_armature
 .equ items_add_n, (. - items_add) / 8
 items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, 0
-                .quad sub_boolean, op_repair, op_print_check, op_obj_measure
+                .quad sub_feature, sub_boolean, sub_mech, op_repair, op_print_check, op_obj_measure
 .equ items_object_n, (. - items_object) / 8
 items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
                 .quad op_m_loopcut, op_m_knife, op_m_bisect, op_m_subdivide, 0
@@ -171,6 +172,10 @@ sub_analysis_l: .quad op_an_normals, op_an_nonman, op_an_bound, op_an_degen, op_
 sub_theme_l:    .quad op_theme_dark, op_theme_light, op_theme_contrast
 sub_curve_l:    .quad op_add_bezier, op_add_ccircle, op_add_path
 sub_normals_l:  .quad op_m_flip, op_m_recalc
+sub_feature_l:  .quad op_cad_pad, op_cad_pocket, op_cad_revolve, op_cad_hole, 0
+                .quad op_cad_shell, op_cad_fillet, op_cad_chamfer, op_cad_pattern, op_cad_infill
+sub_generate_l: .quad op_gen_lsystem, op_gen_wfc
+sub_mech_l:     .quad op_mj_add, op_mj_list, op_mj_check
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -183,6 +188,9 @@ SUBMENU sub_analysis, "Analysis", sub_analysis_l, 6
 SUBMENU sub_theme, "Theme", sub_theme_l, 3
 SUBMENU sub_curve, "Curve", sub_curve_l, 3
 SUBMENU sub_normals, "Normals", sub_normals_l, 2
+SUBMENU sub_feature, "Part Feature", sub_feature_l, 10
+SUBMENU sub_generate, "Generate", sub_generate_l, 2
+SUBMENU sub_mech, "Mechanism", sub_mech_l, 3
 
 # -----------------------------------------------------------------------------
 # small helpers
