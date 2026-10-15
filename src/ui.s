@@ -104,15 +104,9 @@ s_m_mesh:       .asciz "Mesh"
 s_m_render:     .asciz "Render"
 s_m_ai:         .asciz "AI"
 s_m_help:       .asciz "Help"
-s_ai_pfx:       .asciz "AI: "
-s_ai_conn:      .asciz " ("
-s_ai_conn2:     .asciz " connected)"
-s_ai_gap:       .asciz "     "
 
 
 
-s_objs:         .asciz " objects"
-s_obj1:         .asciz " object"
 s_ready:        .asciz "Ready"
 s_colon_sp:     .asciz ": "
 
@@ -354,20 +348,19 @@ hit_test:
     jmp     .Lht_ret
 
 .Lht_status:
-    mov     eax, HIT_PANE
-    mov     edx, 3
-    cmp     r12d, [rip+cont_y1]
-    jge     .Lht_ret
-
-    mov     edi, ebx                    # widgets (widgets.s) lie on the areas
-    mov     esi, r12d
+    mov     edi, ebx                    # widgets (widgets.s): on the areas and
+    mov     esi, r12d                   #  the status bar
     call    wg_hit
     test    eax, eax
     jz      1f
     mov     edx, eax
     mov     eax, HIT_WIDGET
     jmp     .Lht_ret
-1:  mov     edi, ebx
+1:  mov     eax, HIT_PANE
+    mov     edx, 3
+    cmp     r12d, [rip+cont_y1]
+    jge     .Lht_ret
+    mov     edi, ebx
     mov     esi, r12d
     call    area_hit
 .Lht_ret:
@@ -1652,6 +1645,7 @@ run_op_ui:
     call    fmt_str
     mov     rdi, [rsp+8]
     call    fmt_str
+    mov     dword ptr [rip+toast_warn], 1   # (a warning toast)
     lea     rdi, [rip+fmt_buf]
     call    log_line
     add     rsp, 16
@@ -1879,81 +1873,6 @@ draw_menubar:
     call    fill_rect
     pop     r13
     pop     r12
-    pop     rbx
-    ret
-
-# ---- status bar ----------------------------------------------------------------
-draw_statusbar:
-    push    rbx
-    xor     edi, edi
-    mov     esi, [rip+cont_y1]
-    mov     edx, [rip+win_w]
-    mov     ecx, STATUS_H
-    mov     r8d, COL_STATUS_BG
-    call    fill_rect
-    mov     edi, 10
-    mov     esi, [rip+cont_y1]
-    add     esi, 8
-    mov     edx, 6
-    mov     ecx, 6
-    mov     r8d, COL_ACCENT
-    cmp     dword ptr [rip+macro_on], 0     # red while recording a macro
-    je      2f
-    mov     r8d, COL_REC
-2:  call    fill_rect
-    # left: last console line (or "Ready")
-    lea     rdx, [rip+s_ready]
-    mov     eax, [rip+log_head]
-    test    eax, eax
-    jz      1f
-    dec     eax
-    and     eax, LOG_LINES-1
-    imul    eax, LOG_LINE_LEN
-    lea     rdx, [rip+log_buf]
-    add     rdx, rax
-1:  mov     edi, 24
-    mov     esi, [rip+cont_y1]
-    add     esi, 3
-    mov     ecx, COL_TEXT_DIM
-    call    draw_small
-    # right: "3 objects     AI: edit (1 connected)"
-    call    fmt_reset
-    mov     edi, [rip+obj_count]
-    call    fmt_int
-    lea     rdi, [rip+s_objs]
-    cmp     dword ptr [rip+obj_count], 1
-    jne     5f
-    lea     rdi, [rip+s_obj1]
-5:  call    fmt_str
-    lea     rdi, [rip+s_ai_gap]
-    call    fmt_str
-    lea     rdi, [rip+s_ai_pfx]
-    call    fmt_str
-    mov     edi, [rip+agent_tier]
-    call    agent_tier_name
-    mov     rdi, rax
-    call    fmt_str
-    call    mcp_clients
-    test    eax, eax
-    jz      3f
-    push    rax
-    lea     rdi, [rip+s_ai_conn]
-    call    fmt_str
-    pop     rdi
-    call    fmt_int
-    lea     rdi, [rip+s_ai_conn2]
-    call    fmt_str
-3:
-    lea     rdi, [rip+fmt_buf]
-    call    text_width
-    mov     edi, [rip+win_w]
-    sub     edi, eax
-    sub     edi, 12
-    mov     esi, [rip+cont_y1]
-    add     esi, 3
-    lea     rdx, [rip+fmt_buf]
-    mov     ecx, COL_TEXT_DIM
-    call    draw_small
     pop     rbx
     ret
 

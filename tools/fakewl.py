@@ -578,6 +578,7 @@ def main():
     viewport_ui()
     tools_ui()
     outliner_ui()
+    status_ui()
     transforms()
     undo_redo()
     files()
@@ -5464,6 +5465,46 @@ def outliner_ui():
     check(q('print(active())') == 'Camera', 'a filtered row still selects its object')
     f.click(x, y); f.mods(4); f.key(30); f.mods(0); f.key(14); f.key(28); f.pump(0.2)
     check(len(eyes()) == 3, 'an empty filter shows everything')
+    f.proc.kill()
+
+
+def status_ui():
+    """UI plan U14: the status bar's hints follow the mode, chips on the
+    right, toasts for messages (warnings amber), a click opens the console."""
+    print('  -- status bar --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    y = 800 - 11
+    bright = lambda x0, x1: sum(1 for x in range(x0, x1) for yy in range(y - 6, y + 6) if max(((px(f, x, yy) >> s) & 255) for s in (16, 8, 0)) > 150)
+    left = bright(10, 600)
+    check(left > 40, f'the status bar shows key hints ({left} bright px)')
+    names = {w['name'] for w in ui_tree(m)}
+    check('status.ai' in names and 'status.toast' not in names, 'an AI chip; no toast at startup')
+    f.mods(4); f.key(44); f.mods(0)            # Ctrl+Z with nothing to undo
+    names = {w['name'] for w in ui_tree(m)}
+    t = widget(m, 'status.toast')
+    amber = t and any(px(f, t['x'] + 2, t['y'] + yy) == 0xe0a030 for yy in range(6, 30))
+    check(bool(t) and amber, 'a toast says why, in amber')
+    f.shot('status_toast.png')
+    x, y2 = widget_xy(m, 'status.toast')
+    f.click(x, y2); f.pump(0.2)
+    f.type('add("cube", "Typed", 3, 0, 0)'); f.key(28); f.pump(0.2)   # the console has the keys
+    f.key(1)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    check(q('print(exists("Typed"))') == '1', 'clicking the toast opens the console')
+    f.pump(4.3)
+    check('status.toast' not in {w['name'] for w in ui_tree(m)}, 'the toast goes after four seconds')
+    x, y2 = widget_xy(m, 'status.ai')
+    f.click(x, y2)
+    labels = [w['label'] for w in ui_tree(m) if w['kind'] == 'menuitem']
+    check('Read Only' in ' '.join(labels) or len(labels) >= 4, f'the AI chip opens the AI menu ({labels[:2]})')
+    f.key(1)
+    f.move(600, 300); f.key(15)
+    after = bright(10, 600)
+    check(after != left, 'edit mode: other hints')
     f.proc.kill()
 
 

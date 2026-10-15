@@ -81,6 +81,7 @@ _start:
     pop     qword ptr [rip+op_arg]
 2:
 
+    mov     dword ptr [rip+toast_on], 1 # (from now on messages are toasts)
     mov     dword ptr [rip+vg_async], 1 # (the window: DAGs build in the background)
 .Lloop:
     mov     edi, -1
@@ -139,7 +140,19 @@ _start:
     cmp     eax, edx
     jge     34f
 33: mov     edx, eax
-34: push    rdx                         # (and a held pie key)
+34: push    rdx                         # (and a toast to take down)
+    push    rsi
+    call    toast_wait
+    pop     rsi
+    pop     rdx
+    test    eax, eax
+    js      36f
+    cmp     edx, -1
+    je      37f
+    cmp     eax, edx
+    jge     36f
+37: mov     edx, eax
+36: push    rdx                         # (and a held pie key)
     push    rsi
     call    pie_wait
     pop     rsi
@@ -177,6 +190,7 @@ _start:
     call    play_tick                   # play mode: the player, the scene on
     call    tip_tick                    # a tooltip whose time has come
     call    pie_tick                    # a pie key held long enough
+    call    toast_tick                  # a toast whose time is up
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop
     call    render
