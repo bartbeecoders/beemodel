@@ -812,7 +812,17 @@ draw_leaf:
     sub     edx, 4*HDR_BTN_W+10
     call    vp_header_tools
     jmp     5f
-51: cmp     eax, ED_NODES               # the node editor: its tree, New, Add
+51: cmp     eax, ED_UVED                # the UV editor: its tools
+    jne     52f
+    mov     edi, [r12+N_X]
+    add     edi, TYPE_BTN_W+6
+    mov     esi, [r12+N_Y]
+    mov     edx, [r12+N_X]
+    add     edx, [r12+N_W]
+    sub     edx, 4*HDR_BTN_W+10
+    call    uv_header_tools
+    jmp     5f
+52: cmp     eax, ED_NODES               # the node editor: its tree, New, Add
     jne     5f
     mov     edi, [r12+N_X]
     add     edi, TYPE_BTN_W+6

@@ -58,9 +58,9 @@ s_pick_hint:    .asciz "  Pick: click anywhere to take the colour there (Esc: ne
 hexd:           .ascii "0123456789abcdef"
 
 .text
-WIDGET wd_cp_sv,  WK_PAD, "color.sv", undo="Colour", cb=sv_cb, n=SQ_H, tip="Saturation (across) and brightness (up)"
-WIDGET wd_cp_hue, WK_PAD, "color.hue", undo="Colour", cb=hue_cb, n=SQ_H, tip="Hue"
-WIDGET wd_cp_hex, WK_TEXT, "color.hex", cb=hex_cb, undo="Colour", tip="The colour as #rrggbb (Enter)"
+WIDGET wd_cp_sv,  WK_PAD, "color.sv", undo="Colour", cb=sv_cb, n=SQ_H, tip="Saturation (across) and brightness (up)", sect=.data
+WIDGET wd_cp_hue, WK_PAD, "color.hue", undo="Colour", cb=hue_cb, n=SQ_H, tip="Hue", sect=.data
+WIDGET wd_cp_hex, WK_TEXT, "color.hex", cb=hex_cb, undo="Colour", tip="The colour as #rrggbb (Enter)", sect=.data
 WIDGET wd_cp_pick, WK_BUTTON, "color.pick", "Pick", aux=op_cpk_pick, tip="Take a colour from anywhere on the screen: click Pick, then click there"
 
 OPERATOR op_cpk_pick, "color.pick", "Pick a Colour", do_pick, flags=OPF_QUIET|OPF_HIDDEN, doc="The open colour picker's eyedropper: the next click anywhere takes the colour on screen there"
@@ -80,6 +80,10 @@ cpk_open:
     mov     [rip+cpk_ptr], rax
     mov     rax, [rbx+32]
     mov     [rip+cpk_desc], rax
+    mov     rax, [rax+WD_UNDO]          # undo steps when its field has them
+    mov     [rip+wd_cp_sv+WD_UNDO], rax
+    mov     [rip+wd_cp_hue+WD_UNDO], rax
+    mov     [rip+wd_cp_hex+WD_UNDO], rax
     mov     eax, [rbx+40]
     mov     [rip+cpk_sub], eax
     mov     eax, [rbx+8]                # under the field, right-aligned
@@ -144,8 +148,12 @@ cpk_outside:
     mov     ebx, edi
     mov     r12d, esi
     mov     dword ptr [rip+cpk_drop], 0
-    lea     rdi, [rip+s_colour]
+    mov     rax, [rip+cpk_desc]
+    mov     rdi, [rax+WD_UNDO]
+    test    rdi, rdi
+    jz      1f
     call    undo_push
+1:
     mov     edi, ebx                    # the framebuffer pixel there
     call    to_px
     mov     ebx, eax

@@ -582,6 +582,7 @@ def main():
     files_more()
     cad_ui()
     materials_more()
+    paint_ui()
     transforms()
     undo_redo()
     files()
@@ -937,6 +938,18 @@ def wait_widget(f, m, name, sub=0):
             return w
         f.pump(0.1)
     return None
+
+
+def wait_value(f, m, name, sub, want):
+    """A widget's value once it is want (or the last one seen, after a second)."""
+    v = None
+    for _ in range(10):
+        w = widget(m, name, sub)
+        v = w and w.get('value')
+        if v == want:
+            break
+        f.pump(0.1)
+    return v
 
 
 def add_modifier(f, m, label):
@@ -5783,6 +5796,89 @@ def materials_more():
     check(q('print(ginfo(1, 0, "count"))') == str(int(c0 or 0) + 1), f'Add, typing to search, Enter adds the node ({c0} -> {q("print(ginfo(1, 0, \"count\"))")})')
     pick_enum(f, m, 'node.tree', 0, 0)
     check(widget(m, 'node.tree')['value'] == 0, 'the tree list goes back to the material')
+    f.proc.kill()
+
+
+def paint_ui():
+    """UI plan U18: the paint colour (picker, swatches), the layer stack,
+    weight paint's weight and bone, Mesh > UV, the UV editor's header, the
+    Bake dialog."""
+    print('  -- sculpt, paint, UV and bake --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    q('op("image.new", "tex 64 64")\nmaterial("M")\nn = node("M", "image", "tex", 1)\nsocket("M", "base", n)\n'
+      'assign("Cube", "M")\nseams("Cube", "sharp")\nunwrap("Cube")\nselect("Cube")')
+    f.mods(1); f.key(15); f.mods(0); f.pump(0.3)   # Shift+Tab: texture paint
+    check({'paint.colour', 'paint.swatch'} <= names(), 'texture paint: the colour and swatches in the brush bar')
+    click('paint.swatch', 3)
+    v = wait_value(f, m, 'paint.colour', 0, '#e0b030')
+    check(v == '#e0b030', f'a swatch sets the paint colour ({v})')
+    click('paint.colour')
+    check('color.sv' in names(), 'the colour opens the picker')
+    f.key(1); f.pump(0.2)
+    props_tab(m, f, 'material')
+    check({'layer.add', 'layer.merge', 'layer.remove'} <= names(), 'the Material tab shows the paint layers while painting')
+    click('layer.add')
+    rows = lambda: [w for w in ui_tree(m) if w['name'] == 'layer.row']
+    for _ in range(5):
+        if len(rows()) == 2:
+            break
+        f.pump(0.1)
+    check([w.get('label') for w in rows()] == ['Layer 1', 'Base'], f'Add: a layer above the base, the top first ({[w.get("label") for w in rows()]})')
+    check(q('print(layer("tex", "count"), layer("tex", "active"))') == '2 1', 'it is painted on')
+    pick_enum(f, m, 'layer.blend', 1, 1)
+    check(wait_value(f, m, 'layer.blend', 1, 1) == 1, 'its blend mode from the list (Multiply)')
+    click('layer.visible', 1)
+    check(wait_value(f, m, 'layer.visible', 1, 0) == 0, 'the eye hides it')
+    click('layer.row', 0)
+    check(q('print(layer("tex", "active"))') == '0', 'a click on a row paints on that layer')
+    click('layer.row', 1)
+    click('layer.remove')
+    for _ in range(5):
+        if q('print(layer("tex", "count"))') == '1':
+            break
+        f.pump(0.1)
+    check(q('print(layer("tex", "count"))') == '1', 'Remove takes the active layer away')
+    q('op("object.texture_paint")')            # (out of texture paint)
+    q('delete("Cube")\na = armature("Rig")\nop("arm.bone", "Upper Bone 0 1 0 0 2 0")\nadd("cylinder", "Arm", 0, 1, 0)\n'
+      'scale("Arm", 0.3)\nop("arm.parent", "Arm Rig")\nselect("Arm")')
+    f.mods(4); f.key(17); f.mods(0); f.pump(0.3)   # Ctrl+W: weight paint
+    check({'paint.weight', 'paint.bone'} <= names(), 'weight paint: the weight and the bone in the brush bar')
+    pick_enum(f, m, 'paint.bone', 0, 2)
+    check(widget(m, 'paint.bone')['value'] == 2, 'the bone is picked from the armature\'s bones')
+    w = widget(m, 'paint.weight')
+    f.drag(w['x'] + w['w'] // 2, w['y'] + 11, w['x'] + w['w'] // 4, w['y'] + 11, steps=3)
+    v = widget(m, 'paint.weight')['value']
+    check(abs(v - 0.25) < 0.05, f'the weight slider ({v})')
+    f.mods(4); f.key(17); f.mods(0); f.pump(0.2)
+    q('select("Arm")')
+    t = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == 'Mesh'][0]
+    f.click(t['x'] + 10, t['y'] + 10); f.pump(0.2)
+    u = [w for w in ui_tree(m) if w.get('label') == 'UV']
+    if u:
+        f.move(u[0]['x'] + 40, u[0]['y'] + 12); f.pump(0.2)
+    sub = [w['label'] for w in ui_tree(m) if w['kind'] == 'menuitem' and w['level'] == 1]
+    check(sub[:3] == ['Unwrap', 'Smart UV Project', 'Pack Islands'], f'Mesh > UV: unwrapping and seams ({sub[:3]})')
+    f.key(1); f.key(1)
+    menu_pick(f, m, 'Render', 'Bake Maps')
+    check({'form.bake.low', 'form.bake.high', 'form.bake.map', 'form.bake.image', 'form.bake.distance'} <= names(),
+          'Render > Bake Maps asks for the low and high mesh, the map, the image and the distance')
+    w = widget(m, 'form.bake.low')
+    check(w and w['value'] == 'Arm', f'the low mesh is the active object ({w and w["value"]})')
+    f.key(1); f.pump(0.2)
+    q('op("area.type_uv_editor")')
+    f.pump(0.3)
+    check({'uv.header.unwrap', 'uv.header.pack', 'uv.header.select_all', 'uv.header.heat', 'uv.header.fit'} <= names(),
+          'the UV editor header: Unwrap, Pack, Select All, heat map, Fit')
+    pick_enum(f, m, 'uv.header.heat', 0, 1)
+    check(widget(m, 'uv.header.heat')['value'] == 1, 'the heat map from the header')
     f.proc.kill()
 
 

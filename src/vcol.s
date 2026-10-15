@@ -20,6 +20,7 @@
 .globl vcol_lin
 .globl vcol_lin3
 .globl vp_on
+.globl wp_value
 .globl vp_stroke_start
 .globl vp_dab
 .globl vp_dab_world
