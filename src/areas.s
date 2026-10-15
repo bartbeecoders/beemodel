@@ -125,6 +125,7 @@ s_ed_dopesheet: .asciz "Dope Sheet"
 s_ed_graph:     .asciz "Graph Editor"
 s_ed_versions:  .asciz "Versions"
 s_ed_prefs:     .asciz "Preferences"
+s_ed_help:      .asciz "Help"
 s_h_create:     .asciz "CREATE"
 s_p_loc:        .asciz "Location"
 s_p_rot:        .asciz "Rotation"
@@ -149,13 +150,13 @@ s_comma:        .asciz ", "
 s_last_area:    .asciz "  the last area cannot be closed"
 s_no_room:      .asciz "  no room for more areas"
 .align 8
-editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity, s_ed_render, s_ed_uved, s_ed_nodes, s_ed_assets, s_ed_timeline, s_ed_dopesheet, s_ed_graph, s_ed_versions, s_ed_prefs
-editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw, ed_render_draw, ed_uved_draw, ed_nodes_draw, ed_assets_draw, ed_timeline_draw, ed_dopesheet_draw, ed_graph_draw, ed_versions_draw, ed_prefs_draw
+editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity, s_ed_render, s_ed_uved, s_ed_nodes, s_ed_assets, s_ed_timeline, s_ed_dopesheet, s_ed_graph, s_ed_versions, s_ed_prefs, s_ed_help
+editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw, ed_render_draw, ed_uved_draw, ed_nodes_draw, ed_assets_draw, ed_timeline_draw, ed_dopesheet_draw, ed_graph_draw, ed_versions_draw, ed_prefs_draw, ed_help_draw
 area_btn_ops:   .quad op_area_close, op_area_split_stack, op_area_split_side, op_area_maximize
 items_area:     .quad op_area_type_vp, op_area_type_tools, op_area_type_outl
                 .quad op_area_type_props, op_area_type_console, op_area_type_activity, op_area_type_render
                 .quad op_area_type_uved, op_area_type_nodes, op_area_type_assets, op_area_type_timeline
-                .quad op_area_type_dopesheet, op_area_type_graph, op_area_type_versions, op_area_type_prefs
+                .quad op_area_type_dopesheet, op_area_type_graph, op_area_type_versions, op_area_type_prefs, op_area_type_help
 items_area_end:
 .set items_area_n, (items_area_end - items_area) / 8
 
@@ -178,6 +179,7 @@ OPERATOR op_area_type_dopesheet,"area.type_dope_sheet", "Dope Sheet", op_area_ty
 OPERATOR op_area_type_graph,"area.type_graph_editor", "Graph Editor", op_area_type, op_check_area_type, ED_GRAPH, doc="Show the animation curves with their handles in the active area"
 OPERATOR op_area_type_versions,"area.type_versions", "Versions", op_area_type, op_check_area_type, ED_VERSIONS, doc="Show the scene's versions (branches, commits, merges) and collaboration in the active area"
 OPERATOR op_area_type_prefs,"area.type_preferences", "Preferences", op_area_type, op_check_area_type, ED_PREFS, doc="Show the preferences in the active area"
+OPERATOR op_area_type_help,"area.type_help", "Help", op_area_type, op_check_area_type, ED_HELP, doc="Show what the pointer rests on - what it does, its shortcut - in the active area"
 OPERATOR op_area_type_nodes,"area.type_node_editor", "Node Editor", op_area_type, op_check_area_type, ED_NODES,   doc="Show the node editor (the active material's shader graph) in the active area"
 OPERATOR op_view_activity, "view.toggle_activity", "AI Activity Pane", op_toggle_activity, op_has_editor, ED_ACTIVITY, 0, doc="Show or hide the AI Activity area (next to the console)"
 OPERATOR op_view_tools,    "view.toggle_tools",    "Tools Pane",    op_toggle_tools,    op_has_editor, ED_TOOLS,    KEY_T, doc="Show or hide the tools area"

@@ -582,6 +582,11 @@ viewport_draw:
 
     call    nav_gizmo_draw              # the navigation gizmo (vpnav.s)
     call    tool_settings_draw          # a brush mode: its settings (vpnav.s)
+    mov     edi, [rip+cvs_x0]           # an empty scene: what to do first (help.s)
+    mov     esi, [rip+cvs_y0]
+    mov     edx, [rip+cvs_x1]
+    mov     ecx, [rip+cvs_y1]
+    call    vp_quick_draw
 
     # ---- overlay text ---------------------------------------------------------
     mov     edi, [rip+cvs_x0]
