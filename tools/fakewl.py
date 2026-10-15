@@ -591,6 +591,7 @@ def main():
     prefs_ui()
     workspaces_ui()
     help_ui()
+    a11y_ui()
     transforms()
     undo_redo()
     files()
@@ -6329,6 +6330,74 @@ def help_ui():
     img1 = f.image()
     d = sum(1 for a, b in zip(img0.getdata(), img1.getdata()) if a != b)
     check(d > 500, f'the Help area shows what the pointer rested on ({d} pixels changed)')
+    f.proc.kill()
+
+
+def a11y_ui():
+    """UI plan U26: Tab / Shift+Tab through a panel's and a dialog's widgets
+    with a focus ring, Enter / Space and the arrows on the focused one, Esc;
+    F6 to the next area; colour-blind-safe axes."""
+    print('  -- keyboard navigation and accessibility --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    focused = lambda: [(w['name'], w['sub']) for w in ui_tree(m) if w.get('focused')]
+    q('select("Cube")')
+    x, y = widget_xy(m, 'object.visible')
+    f.move(x, y + 40); f.pump(0.2)                             # over the Properties
+    f.key(15); f.pump(0.2)                                     # Tab
+    a = focused()
+    check(len(a) == 1, f'Tab over a panel: a widget has the focus ({a})')
+    f.key(15); f.pump(0.2)
+    b = focused()
+    f.mods(1); f.key(15); f.mods(0); f.pump(0.2)               # Shift+Tab
+    check(b != a and focused() == a, 'Tab moves on, Shift+Tab back')
+    for _ in range(40):                                        # to Location X
+        if focused() == [('object.location', 0)]:
+            break
+        f.key(15); f.pump(0.05)
+    check(focused() == [('object.location', 0)], 'Tab reaches the fields in order')
+    x0 = float(q('print(get("Cube", "x"))') or 0)
+    f.key(106); f.pump(0.2)                                    # Right
+    x1 = float(q('print(get("Cube", "x"))') or 0)
+    check(abs(x1 - x0 - 0.1) < 1e-4, f'the arrows step the focused number ({x0} -> {x1})')
+    for _ in range(40):
+        if focused() == [('object.visible', 0)]:
+            break
+        f.key(15); f.pump(0.05)
+    f.key(57); f.pump(0.2)                                     # Space
+    check(widget(m, 'object.visible')['value'] == 0, 'Space works the focused toggle (the cube hidden)')
+    f.key(28); f.pump(0.2)                                     # Enter: again
+    check(widget(m, 'object.visible')['value'] == 1, 'Enter too')
+    f.key(1); f.pump(0.2)
+    check(focused() == [], 'Esc lets go')
+    f.move(600, 300); f.key(15); f.pump(0.2)                    # Tab over the viewport: edit mode
+    mode = (widget(m, 'viewport.mode') or {}).get('value')
+    check(focused() == [] and mode == 1, f'over a 3D viewport Tab is still edit mode ({mode})')
+    f.key(15); f.pump(0.2)
+    menu_pick(f, m, 'Render', 'Bake Maps')
+    f.pump(0.3)
+    f.key(15); f.pump(0.2)
+    c = focused() + [(w['name'], w['sub']) for w in ui_tree(m) if w.get('editing')]
+    check(c and c[0][0].startswith('form.'), f'in a dialog Tab goes through its fields ({c})')
+    f.key(1); f.pump(0.2); f.key(1); f.pump(0.2)                # Esc: the focus, then the dialog
+    f.key(64); f.pump(0.2)                                     # F6
+    img = f.image()
+    ring = sum(1 for p in img.getdata() if p[:3] == (0x61, 0xaf, 0xef))
+    check(ring > 200, f'F6: the next area, with a ring round it ({ring} ring pixels)')
+    f.click(600, 300); f.pump(0.2)
+    near = lambda img, c: sum(1 for p in img.getdata() if abs(p[0] - (c >> 16)) < 12 and abs(p[1] - ((c >> 8) & 255)) < 12 and abs(p[2] - (c & 255)) < 12)
+    before = near(f.image(), 0xe06c75), near(f.image(), 0xe69f00)
+    q('op("edit.preferences")')
+    f.pump(0.3)
+    click_w = widget(m, 'prefs.colorblind_axes')
+    if click_w:
+        f.click(click_w['x'] + 10, click_w['y'] + 11); f.pump(0.3)
+    after = near(f.image(), 0xe06c75), near(f.image(), 0xe69f00)
+    check(after[1] > before[1] + 20 and after[0] < before[0], f'colour-blind-safe axes: X turns orange (red, orange pixels {before} -> {after})')
     f.proc.kill()
 
 

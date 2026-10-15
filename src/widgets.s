@@ -77,6 +77,7 @@ wg_list:        .skip WG_MAX*WG_SZ
 wg_n:           .skip 4
 wg_active:      .skip 4             # id pressed (0 = none)
 wg_scrubbed:    .skip 4
+wg_kfocus:      .skip 4             # the widget with the keyboard focus (0: none)
 wg_x0:          .skip 4
 wg_y0:          .skip 4
 wg_v0:          .skip 4             # value when the press began
@@ -125,6 +126,7 @@ k_h:            .asciz ",\"h\":"
 k_value:        .asciz ",\"value\":"
 k_label:        .asciz ",\"label\":"
 k_edit:         .asciz ",\"editing\":true"
+k_focus:        .asciz ",\"focused\":true"
 k_list:         .asciz ",\"sub\":-1,\"kind\":\"list\",\"x\":"
 j_null:         .asciz "null"
 kn_button:      .asciz "button"
@@ -358,7 +360,23 @@ wg:
     jne     4f
     or      eax, 4
 4:  mov     [rsp+8], eax
-    mov     eax, [rbx+WD_KIND]
+    cmp     ebp, [rip+wg_kfocus]        # keyboard focus: a ring around it
+    jne     5f
+    lea     edi, [r12-2]
+    lea     esi, [r13-2]
+    lea     edx, [r14+4]
+    mov     ecx, [rsp+4]
+    add     ecx, 4
+    mov     r8d, COL_FOCUS
+    call    rect_outline
+    lea     edi, [r12-1]
+    lea     esi, [r13-1]
+    lea     edx, [r14+2]
+    mov     ecx, [rsp+4]
+    add     ecx, 2
+    mov     r8d, COL_FOCUS
+    call    rect_outline
+5:  mov     eax, [rbx+WD_KIND]
     cmp     eax, WK_BUTTON
     je      .Lwg_button
     cmp     eax, WK_TOGGLE
@@ -1354,6 +1372,213 @@ act_changed:
     jmp     rax
 1:  ret
 
+# ---- keyboard focus (a11y.s moves it) ------------------------------------------------
+# wg_activate - Enter / Space on the focused widget: as a click on it
+.globl wg_activate
+.globl wg_kfocus
+wg_activate:
+    push    rbx
+    sub     rsp, 16
+    mov     ebx, [rip+wg_kfocus]
+    test    ebx, ebx
+    jz      9f
+    mov     edi, ebx
+    call    wg_find
+    test    rax, rax
+    jz      9f
+    mov     rsi, rax
+    lea     rdi, [rip+wg_act_e]
+    mov     ecx, WG_SZ
+    rep     movsb
+    mov     dword ptr [rip+wg_active], 0
+    mov     dword ptr [rip+dirty], 1
+    jmp     .Lwr_dispatch
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# wg_nudge(edi=+1 / -1) - arrows on the focused widget: a number a step
+#   (x 10; a whole number: one), an option the next / previous one
+.globl wg_nudge
+wg_nudge:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12d, edi
+    mov     edi, [rip+wg_kfocus]
+    test    edi, edi
+    jz      9f
+    call    wg_find
+    test    rax, rax
+    jz      9f
+    mov     rsi, rax
+    lea     rdi, [rip+wg_act_e]
+    mov     ecx, WG_SZ
+    rep     movsb
+    mov     rbx, [rip+wg_act_e+E_DESC]
+    mov     rdx, [rip+wg_act_e+E_PTR]
+    test    rdx, rdx
+    jz      9f
+    mov     eax, [rbx+WD_KIND]
+    cmp     eax, WK_ENUM
+    je      .Lwn_enum
+    cmp     eax, WK_INT
+    je      .Lwn_int
+    cmp     eax, WK_FLOAT
+    je      .Lwn_float
+    cmp     eax, WK_SLIDER
+    jne     9f
+.Lwn_float:
+    call    act_undo
+    mov     rdx, [rip+wg_act_e+E_PTR]
+    cvtsi2ss xmm0, r12d
+    mulss   xmm0, [rbx+WD_STEP]
+    mulss   xmm0, [rip+f_ten]
+    addss   xmm0, [rdx]
+    mov     rcx, rbx
+    call    clamp_desc
+    cmp     dword ptr [rbx+WD_KIND], WK_SLIDER
+    jne     1f
+    maxss   xmm0, [rbx+WD_MIN]
+    minss   xmm0, [rbx+WD_MAX]
+1:  mov     rdx, [rip+wg_act_e+E_PTR]
+    movss   [rdx], xmm0
+    call    act_changed
+    jmp     9f
+.Lwn_int:
+    call    act_undo
+    mov     rdx, [rip+wg_act_e+E_PTR]
+    mov     eax, [rdx]
+    add     eax, r12d
+    cvtsi2ss xmm0, eax
+    mov     rcx, rbx
+    call    clamp_desc
+    cvtss2si eax, xmm0
+    mov     rdx, [rip+wg_act_e+E_PTR]
+    mov     [rdx], eax
+    call    act_changed
+    jmp     9f
+.Lwn_enum:
+    mov     rdi, rbx
+    call    enum_list
+    mov     ecx, edx                    # (how many)
+    mov     rdx, [rip+wg_act_e+E_PTR]
+    mov     eax, [rdx]
+    add     eax, r12d
+    js      9f
+    cmp     eax, ecx
+    jae     9f
+    push    rax
+    push    rax
+    call    act_undo
+    pop     rax
+    pop     rax
+    mov     rdx, [rip+wg_act_e+E_PTR]
+    mov     [rdx], eax
+    call    act_changed
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# wg_focus_step(edi=+1 / -1, rsi=area rect (x y w h) or 0: any) -> eax = 1
+#   when a widget took the focus: the next one that can (of a dialog or an
+#   overlay when one is open, else inside that rect)
+.globl wg_focus_step
+wg_focus_step:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, edi
+    mov     r13, rsi
+    xor     r14d, r14d                  # the first entry in scope (a floor)
+    cmp     dword ptr [rip+dlg_open], 0
+    je      1f
+    mov     r14d, [rip+dlg_floor]
+1:  cmp     dword ptr [rip+cpk_on], 0
+    je      2f
+    mov     r14d, [rip+cpk_floor]
+2:  cmp     dword ptr [rip+ov_on], 0
+    je      3f
+    mov     r14d, [rip+ov_floor]
+3:  test    r14d, r14d                  # (a floor: no rect)
+    jz      4f
+    xor     r13d, r13d
+4:  mov     r15d, [rip+wg_n]            # where the focus is now (-1: none)
+    mov     ebx, -1
+    mov     ecx, r14d
+5:  cmp     ecx, r15d
+    jae     6f
+    imul    eax, ecx, WG_SZ
+    lea     rdx, [rip+wg_list]
+    mov     eax, [rdx+rax+E_ID]
+    cmp     eax, [rip+wg_kfocus]
+    jne     51f
+    mov     ebx, ecx
+    jmp     6f
+51: inc     ecx
+    jmp     5b
+6:  mov     ecx, r15d                   # at most a lap
+    sub     ecx, r14d
+    jle     8f
+    mov     [rsp-8], ecx
+7:  test    ebx, ebx                    # the next one
+    jns     71f
+    mov     ebx, r14d                   # (none yet: the first / the last)
+    test    r12d, r12d
+    jns     72f
+    lea     ebx, [r15-1]
+    jmp     72f
+71: add     ebx, r12d
+    cmp     ebx, r14d
+    jge     711f
+    lea     ebx, [r15-1]
+711:cmp     ebx, r15d
+    jl      72f
+    mov     ebx, r14d
+72: imul    eax, ebx, WG_SZ
+    lea     rdx, [rip+wg_list]
+    add     rdx, rax
+    mov     eax, [rdx+E_KIND]           # can it take the focus?
+    cmp     eax, WK_SCROLL
+    je      79f
+    cmp     eax, WK_THUMB
+    je      79f
+    cmp     eax, WK_PAD
+    je      79f
+    test    r13, r13                    # inside the rect?
+    jz      78f
+    mov     eax, [rdx+E_X]
+    cmp     eax, [r13]
+    jl      79f
+    mov     ecx, [r13]
+    add     ecx, [r13+8]
+    cmp     eax, ecx
+    jge     79f
+    mov     eax, [rdx+E_Y]
+    cmp     eax, [r13+4]
+    jl      79f
+    mov     ecx, [r13+4]
+    add     ecx, [r13+12]
+    cmp     eax, ecx
+    jge     79f
+78: mov     eax, [rdx+E_ID]
+    mov     [rip+wg_kfocus], eax
+    mov     dword ptr [rip+dirty], 1
+    mov     eax, 1
+    jmp     9f
+79: dec     dword ptr [rsp-8]
+    jnz     7b
+8:  xor     eax, eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # wg_release - LMB up: a press without a scrub is a click
 wg_release:
     push    rbx
@@ -1370,6 +1595,7 @@ wg_release:
     call    wg_hit
     cmp     eax, ebx
     jne     9f
+.Lwr_dispatch:                          # (wg_activate comes in here too)
     mov     rcx, [rip+wg_act_e+E_DESC]
     mov     eax, [rip+wg_act_e+E_KIND]
     cmp     eax, WK_BUTTON
@@ -2323,7 +2549,12 @@ wg_tree_json:
     mov     rsi, rax
     call    jb_q
 5:  mov     eax, [rbx+E_ID]
-    cmp     eax, [rip+wg_edit]
+    cmp     eax, [rip+wg_kfocus]        # (the keyboard's focus)
+    jne     51f
+    lea     rsi, [rip+k_focus]
+    call    wb_str
+    mov     eax, [rbx+E_ID]
+51: cmp     eax, [rip+wg_edit]
     jne     6f
     lea     rsi, [rip+k_edit]
     call    wb_str

@@ -108,6 +108,7 @@ w_mcp:          .asciz "mcp"
 w_tier:         .asciz "agent_permission"
 w_key:          .asciz "key"
 w_welcome:      .asciz "welcome"
+w_cbaxes:       .asciz "colorblind_axes"
 .align 8
 l_tabs:         .quad s_h_interface, s_h_input, s_h_keymap, s_h_system, s_h_files, s_h_ai
 l_theme:        .quad s_dark, s_light, s_contrast
@@ -119,7 +120,7 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_orbit, pr_orbit, 1, w_autosave, pr_autosave, 0
                 .quad w_threads, pr_threads, 0, w_jit, pr_jit, 0, w_mcp, pr_mcp, 0
                 .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0
-                .quad w_welcome, pr_welcome, 0, 0
+                .quad w_welcome, pr_welcome, 0, w_cbaxes, pr_cbaxes, 0, 0
 
 .section .data
 .align 4
@@ -553,6 +554,7 @@ WIDGET wd_pf_tabs, WK_TABS, "prefs.tabs", aux=l_tabs, n=6
 WIDGET wd_pf_scroll, WK_SCROLL, "prefs.page"
 WIDGET wd_pf_theme, WK_ENUM, "prefs.theme", cb=theme_cb, aux=l_theme, n=3
 WIDGET wd_pf_scale, WK_ENUM, "prefs.ui_scale", cb=scale_cb, aux=l_scale, n=6, tip="Everything bigger or smaller, on top of the screen's own scale"
+WIDGET wd_pf_cb,   WK_TOGGLE, "prefs.colorblind_axes", "Colour-blind-safe axis colours", cb=save_cb, tip="X, Y, Z in orange, sky blue and purple instead of red, green and blue"
 WIDGET wd_pf_tip,  WK_INT, "prefs.tooltip_ms", "Tooltip delay (ms)", 0.0, 5000.0, 2.0, 0, WGF_CLAMP, cb=save_cb
 WIDGET wd_pf_emu3, WK_TOGGLE, "prefs.emulate_middle", "Alt + left button is the middle button", cb=save_cb, tip="Orbit with Alt + drag on a touchpad or a two-button mouse"
 WIDGET wd_pf_orbit, WK_FLOAT, "prefs.orbit_speed", "Orbit speed", 0.1, 5.0, 0.005, 2, WGF_CLAMP, cb=save_cb
@@ -626,6 +628,9 @@ ed_prefs_draw:
     call    pnl_full
     lea     rdi, [rip+wd_pf_tip]
     lea     r8, [rip+tip_ms]
+    call    pnl_full
+    lea     rdi, [rip+wd_pf_cb]
+    lea     r8, [rip+pr_cbaxes]
     call    pnl_full
     jmp     .Lpf_end
 
