@@ -1114,7 +1114,7 @@ e_op_agent:     .asciz "operator not allowed for agents: "
 e_op_perm:      .asciz "permission denied (the user has not given agents file access): "
 
 OPERATOR op_script_record, "script.record", "Record Macro", do_record, check=chk_record, flags=OPF_QUIET, doc="Start / stop recording your actions as a BeeScript macro"
-OPERATOR op_script_run, "script.run", "Run Script...", do_run, flags=0, doc="Run a BeeScript file: script.run [path] (default: the last macro)"
+OPERATOR op_script_run, "script.run", "Run Script...", do_run, flags=0, doc="Run a BeeScript file: script.run [path] (default: the last macro)", form=form_script
 OPERATOR op_script_reset, "script.reset", "Reset Script State", do_reset, flags=OPF_AI_SAFE|OPF_QUIET, doc="Forget BeeScript variables and functions"
 
 .text

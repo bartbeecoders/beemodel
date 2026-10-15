@@ -14,6 +14,8 @@
 .equ WK_TABS,       9           # u32 index into aux (n labels): a tab row
 .equ WK_SCROLL,     10          # a scrolled region (wg_scroll_begin / _end)
 .equ WK_THUMB,      11          # its scrollbar thumb
+.equ WK_ROW,        12          # a list row: lit when *ptr == sub; a click sets it, cb
+.equ WK_PATH,       13          # a form's file: the file browser (WD_N 0 open, 1 save; WD_AUX extensions)
 
 # descriptor flags
 .equ WGF_DEG,       1           # a radian value shown and typed in degrees

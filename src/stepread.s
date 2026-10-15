@@ -233,7 +233,7 @@ sr_negm:        .quad 0x8000000000000000, 0x8000000000000000
 sr_z:           .double 0, 0, 1
 sr_x:           .double 1, 0, 0
 
-OPERATOR op_import_step, "file.import_step", "Import STEP...", do_istep, flags=OPF_UNDO, doc="Import a STEP file's solids (AP203 / AP214 / AP242) as B-rep objects, placed as its assembly says: file.import_step <path>"
+OPERATOR op_import_step, "file.import_step", "Import STEP...", do_istep, flags=OPF_UNDO, doc="Import a STEP file's solids (AP203 / AP214 / AP242) as B-rep objects, placed as its assembly says: file.import_step <path>", form=form_istep
 
 .section .bss
 .align 8

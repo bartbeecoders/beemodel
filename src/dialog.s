@@ -22,9 +22,11 @@
 .globl dlg_draw
 .globl dlg_key
 .globl dlg_floor
+.globl dlg_close
 
 .equ DLG_FORM,      1
 .equ DLG_CONFIRM,   2
+.equ DLG_FILE,      3                   # the file browser (filebrowser.s)
 .equ DLG_W,         460
 .equ VAL_SZ,        64                  # each field's value slot
 .equ MAXF,          16
@@ -80,6 +82,19 @@ dlg_open_form:
     push    r13
     mov     [rip+dlg_op], rdi
     mov     rbx, [rdi+OP_FORM]
+    mov     rsi, [rbx+FM_FIELDS+FF_DESC]    # a file: the browser instead
+    cmp     dword ptr [rsi+WD_KIND], WK_PATH
+    jne     0f
+    mov     rdx, [rbx+FM_FIELDS+FF_KW]      # (its default file name)
+    call    fb_open
+    mov     dword ptr [rip+dlg_kind], DLG_FILE
+    mov     dword ptr [rip+dlg_open], 1
+    mov     dword ptr [rip+dirty], 1
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+0:
     mov     [rip+dlg_form], rbx
     mov     r12, [rbx+FM_VALS]
     cmp     dword ptr [r12+MAXF*VAL_SZ], 0  # first time: the defaults
@@ -151,7 +166,14 @@ dlg_ok:
     ret
 .Lok_save:                              # save, then what was asked
     call    dlg_close
-    lea     rdi, [rip+op_file_save]
+    cmp     byte ptr [rip+cur_path], 0  # (no file yet: the browser asks
+    jne     1f                          #  where, then goes on)
+    lea     rdi, [rip+op_file_saveas]
+    call    dlg_open_form
+    mov     [rip+fb_after], rbx
+    pop     rbx
+    ret
+1:  lea     rdi, [rip+op_file_save]
     call    run_op
     cmp     dword ptr [rip+scene_modified], 0
     jne     9f                          # (not saved: a path is still asked for)
@@ -174,6 +196,8 @@ dlg_dont:                               # go on without saving
 dlg_key:
     cmp     dword ptr [rip+dlg_open], 0
     je      8f
+    cmp     dword ptr [rip+dlg_kind], DLG_FILE
+    je      fb_key
     sub     rsp, 8
     cmp     edi, KEY_ESC
     jne     1f
@@ -308,7 +332,22 @@ put_str:                                # rsi = text or 0 -> at r14
 dlg_draw:
     cmp     dword ptr [rip+dlg_open], 0
     je      .Ldd_ret
-    push    rbx
+    cmp     dword ptr [rip+dlg_kind], DLG_FILE
+    jne     0f
+    sub     rsp, 8
+    call    reset_clip                  # (the browser: dimmed window too)
+    xor     edi, edi
+    xor     esi, esi
+    mov     edx, [rip+win_w]
+    mov     ecx, [rip+win_h]
+    mov     r8d, COL_SHADOW
+    mov     r9d, 110
+    call    fill_rect_a
+    mov     eax, [rip+wg_n]
+    mov     [rip+dlg_floor], eax
+    add     rsp, 8
+    jmp     fb_draw
+0:  push    rbx
     push    rbp
     push    r12
     push    r13

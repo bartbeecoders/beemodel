@@ -208,15 +208,15 @@ s_shot_name:    .asciz "/screenshot.png"
 s_untitled_obj: .asciz "Imported"
 
 OPERATOR op_file_new,   "file.new",   "New Scene",   op_new,   key=KEY_N|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_CONFIRM, doc="Start again from the default scene"
-OPERATOR op_file_open,  "file.open",  "Open...",     op_open,  key=KEY_O|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_CONFIRM, doc="Open a .bee scene: file.open <path>"
-OPERATOR op_file_save,  "file.save",  "Save",        op_save,  key=KEY_S|KM_CTRL, doc="Save the scene: file.save [path]"
-OPERATOR op_file_saveas,"file.save_as", "Save As...", op_save_as, key=KEY_S|KM_CTRL|KM_SHIFT, doc="Save the scene under a new name"
-OPERATOR op_import_obj, "file.import_obj", "Import OBJ...", op_iobj, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import a Wavefront OBJ: file.import_obj <path>"
-OPERATOR op_import_stl, "file.import_stl", "Import STL...", op_istl, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import an STL (binary or ASCII): file.import_stl <path>"
-OPERATOR op_export_obj, "file.export_obj", "Export OBJ...", op_eobj, doc="Export mesh objects as OBJ: file.export_obj <path>"
-OPERATOR op_import_gltf, "file.import_gltf", "Import glTF...", op_igltf, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import a glTF 2.0 scene (.gltf or .glb): file.import_gltf <path>"
-OPERATOR op_export_gltf, "file.export_gltf", "Export glTF...", op_egltf, doc="Export mesh objects and materials as glTF 2.0 (.glb binary, .gltf text): file.export_gltf <path>"
-OPERATOR op_export_stl, "file.export_stl", "Export STL...", op_estl, doc="Export mesh objects as binary STL: file.export_stl <path>"
+OPERATOR op_file_open,  "file.open",  "Open...",     op_open,  key=KEY_O|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_CONFIRM, doc="Open a .bee scene: file.open <path>", form=form_open
+OPERATOR op_file_save,  "file.save",  "Save",        op_save,  key=KEY_S|KM_CTRL, doc="Save the scene: file.save [path]", flags=OPF_AI_SAFE|OPF_FORMNEW, form=form_saveas
+OPERATOR op_file_saveas,"file.save_as", "Save As...", op_save_as, key=KEY_S|KM_CTRL|KM_SHIFT, doc="Save the scene under a new name", form=form_saveas
+OPERATOR op_import_obj, "file.import_obj", "Import OBJ...", op_iobj, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import a Wavefront OBJ: file.import_obj <path>", form=form_iobj
+OPERATOR op_import_stl, "file.import_stl", "Import STL...", op_istl, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import an STL (binary or ASCII): file.import_stl <path>", form=form_istl
+OPERATOR op_export_obj, "file.export_obj", "Export OBJ...", op_eobj, doc="Export mesh objects as OBJ: file.export_obj <path>", form=form_eobj
+OPERATOR op_import_gltf, "file.import_gltf", "Import glTF...", op_igltf, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import a glTF 2.0 scene (.gltf or .glb): file.import_gltf <path>", form=form_igltf
+OPERATOR op_export_gltf, "file.export_gltf", "Export glTF...", op_egltf, doc="Export mesh objects and materials as glTF 2.0 (.glb binary, .gltf text): file.export_gltf <path>", form=form_egltf
+OPERATOR op_export_stl, "file.export_stl", "Export STL...", op_estl, doc="Export mesh objects as binary STL: file.export_stl <path>", form=form_estl
 OPERATOR op_screenshot, "view.screenshot", "Screenshot",   op_shot, key=KEY_F12|KM_SHIFT, doc="Save the window as PNG: view.screenshot [path]"
 OPERATOR op_recover,    "file.recover",  "Recover Autosave", op_recover_x, flags=OPF_AI_SAFE|OPF_UNDO, doc="Open the last autosave"
 
@@ -2800,6 +2800,8 @@ op_save:
     jmp     result
 
 op_save_as:
+    call    has_arg                     # a path given: save there
+    jnz     op_save
     lea     rdi, [rip+s_pf_save]
     jmp     console_prefill
 
