@@ -327,7 +327,7 @@ OPERATOR op_ne_add,    "node.add_menu", "Add Node...", do_ne_add_menu, key=KEY_A
 OPERATOR op_ne_del,    "node.delete", "Delete Node", do_ne_delete, key=KEY_X, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: remove the selected node"
 OPERATOR op_ne_del2,   "node.delete_key", "Delete Node", do_ne_delete, key=KEY_DELETE, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE|OPF_HIDDEN, doc="Node editor: remove the selected node"
 OPERATOR op_ne_tab,    "node.toggle_tree", "Material / Geometry Nodes", do_ne_tab, key=KEY_TAB, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the active object's material graph or its geometry node tree"
-OPERATOR op_ne_group,  "node.group", "Make Node Group", do_ne_group, key=KEY_G|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected geometry nodes into a group (a new tree run by one node)"
+OPERATOR op_ne_group,  "node.group", "Make Node Group", do_ne_group, key=KEY_G|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes into a group (geometry nodes: a new tree run by one node; a material: a material function run by a Material Function node)"
 OPERATOR op_ne_fit,    "node.view_fit", "Frame All", do_ne_fit, key=KEY_HOME, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: every node in view (zoomed to fit, at most 100 %)"
 OPERATOR op_ne_copy,   "node.copy", "Copy Nodes", do_ne_copy, key=KEY_C|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the selected nodes to the node clipboard (with the links between them)"
 OPERATOR op_ne_paste,  "node.paste", "Paste Nodes", do_ne_paste, key=KEY_V|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET|OPF_NODE, doc="Node editor: the clipboard's nodes at the pointer (another material or tree of the same kind too)"

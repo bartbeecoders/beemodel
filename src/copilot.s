@@ -22,6 +22,7 @@
 .globl cp_tier
 .globl cp_tools_json
 .globl cp_types_json
+.globl mn_types_json
 .globl cp_graphs_json
 .globl cp_state
 .globl cp_draw
@@ -55,6 +56,14 @@ cp_state:       .long 0                 # 0 none, 1 building, 2 waiting for
 .section .bss
 .align 8
 cp_title:       .skip 96
+ty_n:           .skip 8                 # the catalogue being written:
+ty_names:       .skip 8                 #  count, names, titles, meta,
+ty_titles:      .skip 8                 #  defaults, head and tail texts
+ty_meta:        .skip 8
+ty_defs:        .skip 8
+ty_a:           .skip 8
+ty_b:           .skip 8
+ty_pk:          .skip 8
 cp_buf:         .skip 128
 cp_bx:          .skip 4                 # the banner's buttons (logical)
 cp_by:          .skip 4
@@ -71,6 +80,8 @@ k_title:        .asciz "title"
 k_goal:         .asciz "goal"
 in_kinds:       .quad s_geometry, s_value, s_vector, s_colour
 par_kinds:      .quad s_number, s_choice, s_image, s_whole, s_treek
+mpar_kinds:     .quad s_number, s_choice, s_image, s_whole, s_funck
+s_funck:        .asciz "function"
 s_geometry:     .asciz "geometry"
 s_value:        .asciz "value"
 s_vector:       .asciz "vector"
@@ -82,6 +93,8 @@ s_whole:        .asciz "whole number"
 s_treek:        .asciz "tree number"
 j_types_a:      .asciz "{\"geometry_nodes\":["
 j_types_b:      .asciz "],\"how\":\"tree.new <name> makes a tree (its number is its place + 1 in describe_graph); tree.node <tree> <type> [values] adds a node (numbers never change); tree.link <tree> <from[:output]> <to> <input slot 1-3>; tree.node_set <tree> <node> <slot> <x> [y z] sets an input's constant (slots 1-3) or a value (slots 4-7); tree.group <tree> <node...>; tree.node_delete; a Geometry Nodes modifier runs a tree: script_eval m = modifier(obj, \\\"geometry\\\")  modset(obj, m, \\\"tree\\\", number). Every tree needs an output node fed into input 1.\"}"
+j_mtypes_a:     .asciz "{\"material_nodes\":["
+j_mtypes_b:     .asciz "],\"how\":\"material_graph_set {name, graph} replaces a material's graph: graph.nodes is a list of {type, values: [p0..p3], inputs: three of [x,y,z] constants or {link: node, output: k}, pos: [x,y], name (parameters)}; nodes are numbered from 1 in that order, links may point anywhere (the graph sorts itself); graph.sockets maps a Material Output pin (base, metallic, specular, roughness, emission, opacity, normal, ao, clearcoat, coat_roughness, transmission, ior, mask) to a node number or {node, output}. material_graph {name} reads it back the same way. In BeeScript: node(m, type, values...), link(m, from, to, input, output), nodeset, socket. Value kinds: number, choice (an index into the choices), image (the image number + 1), whole number, function (the material + 1).\"}"
 j_type:         .asciz "{\"type\":"
 j_title:        .asciz ",\"title\":"
 j_inputs:       .asciz ",\"inputs\":["
@@ -285,16 +298,53 @@ cp_float:
 
 # cp_types_json - the catalogue (appended to wb)
 cp_types_json:
+    lea     rax, [rip+gn_ntypes]        # (the geometry nodes' tables)
+    mov     [rip+ty_n], rax
+    lea     rax, [rip+gn_type_names]
+    mov     [rip+ty_names], rax
+    lea     rax, [rip+gn_titles]
+    mov     [rip+ty_titles], rax
+    lea     rax, [rip+gn_meta]
+    mov     [rip+ty_meta], rax
+    lea     rax, [rip+gn_defaults]
+    mov     [rip+ty_defs], rax
+    lea     rax, [rip+j_types_a]
+    mov     [rip+ty_a], rax
+    lea     rax, [rip+j_types_b]
+    mov     [rip+ty_b], rax
+    lea     rax, [rip+par_kinds]
+    mov     [rip+ty_pk], rax
+    jmp     ty_json
+# mn_types_json - the material nodes' catalogue, the same way
+mn_types_json:
+    lea     rax, [rip+graph_ntypes]
+    mov     [rip+ty_n], rax
+    lea     rax, [rip+graph_type_names]
+    mov     [rip+ty_names], rax
+    lea     rax, [rip+mn_titles]
+    mov     [rip+ty_titles], rax
+    lea     rax, [rip+mn_meta]
+    mov     [rip+ty_meta], rax
+    lea     rax, [rip+mn_defaults]
+    mov     [rip+ty_defs], rax
+    lea     rax, [rip+j_mtypes_a]
+    mov     [rip+ty_a], rax
+    lea     rax, [rip+j_mtypes_b]
+    mov     [rip+ty_b], rax
+    lea     rax, [rip+mpar_kinds]
+    mov     [rip+ty_pk], rax
+ty_json:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
-    lea     rsi, [rip+j_types_a]
+    mov     rsi, [rip+ty_a]
     call    wb_str
     mov     ebx, 1
 .Lty_type:
-    cmp     ebx, [rip+gn_ntypes]
+    mov     rax, [rip+ty_n]
+    cmp     ebx, [rax]
     ja      .Lty_done
     cmp     ebx, 1
     je      1f
@@ -302,21 +352,19 @@ cp_types_json:
     call    wb_char
 1:  lea     rsi, [rip+j_type]
     call    wb_str
-    lea     rax, [rip+gn_type_names]
+    mov     rax, [rip+ty_names]
     mov     rsi, [rax+rbx*8-8]
     call    jb_q
     lea     rsi, [rip+j_title]
     call    wb_str
-    lea     rax, [rip+gn_titles]
+    mov     rax, [rip+ty_titles]
     mov     rsi, [rax+rbx*8]
     call    jb_q
     imul    r12, rbx, 56                # its meta row
-    lea     rax, [rip+gn_meta]
-    add     r12, rax
+    add     r12, [rip+ty_meta]
     lea     r15d, [rbx-1]               # its defaults
     imul    r15, r15, 52
-    lea     rax, [rip+gn_defaults]
-    add     r15, rax
+    add     r15, [rip+ty_defs]
     lea     rsi, [rip+j_inputs]         # inputs: slot, name, kind, default
     call    wb_str
     xor     r13d, r13d
@@ -406,7 +454,7 @@ cp_types_json:
     xor     eax, eax
 43: push    rax
     push    rax
-    lea     rcx, [rip+par_kinds]
+    mov     rcx, [rip+ty_pk]
     mov     rsi, [rcx+rax*8]
     call    jb_q
     lea     rsi, [rip+j_default]
@@ -493,7 +541,7 @@ cp_types_json:
     inc     ebx
     jmp     .Lty_type
 .Lty_done:
-    lea     rsi, [rip+j_types_b]
+    mov     rsi, [rip+ty_b]
     call    wb_str
     pop     r15
     pop     r14
