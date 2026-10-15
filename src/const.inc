@@ -202,6 +202,11 @@
 .equ COL_SHADOW,        0x0c0d10
 .equ COL_INPUT_BG,      0x1f2228  # text fields (console, palette)
 .equ COL_SELECTION,     0x5a4a1e  # selected text
+.equ COL_FIELD_HOVER,   0x262a31  # a field under the pointer
+.equ COL_FOCUS,         0x61afef  # keyboard focus ring and caret (never selection)
+.equ HIT_WIDGET,        30        # widgets.s (index = the widget's id)
+.equ HIT_WGPOP,         31        # an enum's open option list (index = row)
+.equ DRAG_WIDGET,       13
 .equ POPUP_R,           6         # corner radius of menus, palette, dialogs
 .equ FIELD_R,           4         # ... of fields and buttons
 .equ TH_DARK,           0         # UI themes (theme.s)

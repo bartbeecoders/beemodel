@@ -20,6 +20,10 @@
 .globl tf_len
 .globl tfi_console
 .globl tfi_palette
+.globl tfi_widget
+.globl tf_caret
+.globl tf_anchor
+.globl tf_px
 
 .equ TF_CAP,        240                 # max bytes of text
 .equ HIST_N,        8
@@ -59,6 +63,7 @@ tf_plen:        .skip 4
 .align 8
 tfi_console:    .skip TF_STATE_SZ
 tfi_palette:    .skip TF_STATE_SZ
+tfi_widget:     .skip TF_STATE_SZ       # a field being typed into (widgets.s)
 # ---- console-only ----
 hist:           .skip HIST_N*HIST_LEN
 cmd_arg:        .skip 256
@@ -319,7 +324,27 @@ tf_clear:
 # tf_key(edi=evdev code, esi=symbol from kb_sym) -> eax = 1 if consumed
 # -----------------------------------------------------------------------------
 tf_key:
-    push    rbx
+    lea     rax, [rip+tfi_widget]       # a widget's field: Enter / Esc / Tab
+    cmp     [rip+tf_cur], rax           #  go back to widgets.s
+    jne     0f
+    mov     eax, 2
+    cmp     edi, KEY_ENTER
+    je      9f
+    cmp     edi, KEY_KPENTER
+    je      9f
+    mov     eax, 3
+    cmp     edi, KEY_ESC
+    je      9f
+    mov     eax, 4
+    cmp     edi, KEY_TAB
+    je      9f
+    mov     eax, 1
+    cmp     edi, KEY_UP
+    je      9f
+    cmp     edi, KEY_DOWN
+    jne     0f
+9:  ret
+0:  push    rbx
     push    r12
     push    r13
     mov     ebx, edi
@@ -647,6 +672,9 @@ looks_like_op:
 # tf_is_focused -> eax: the palette field always is; the console when focused
 tf_is_focused:
     lea     rax, [rip+tfi_palette]
+    cmp     [rip+tf_cur], rax
+    je      1f
+    lea     rax, [rip+tfi_widget]
     cmp     [rip+tf_cur], rax
     je      1f
     mov     eax, [rip+tf_focus]

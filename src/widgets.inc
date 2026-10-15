@@ -1,0 +1,71 @@
+# =============================================================================
+#  Widget toolkit (widgets.s): kinds, flags, descriptor layout, WIDGET macro
+# =============================================================================
+
+# kinds
+.equ WK_BUTTON,     1           # runs aux (an operator) or reports a click
+.equ WK_TOGGLE,     2           # u32 0 / 1
+.equ WK_FLOAT,      3           # float: scrub, type, Ctrl+wheel
+.equ WK_INT,        4           # i32
+.equ WK_SLIDER,     5           # float in [min, max], drawn as a bar
+.equ WK_TEXT,       6           # text: cb(rdi = new text) or copied to ptr
+.equ WK_ENUM,       7           # u32 index into aux (n labels): a popup list
+.equ WK_SECTION,    8           # collapsible header: returns 1 while open
+.equ WK_TABS,       9           # u32 index into aux (n labels): a tab row
+.equ WK_SCROLL,     10          # a scrolled region (wg_scroll_begin / _end)
+.equ WK_THUMB,      11          # its scrollbar thumb
+
+# descriptor flags
+.equ WGF_DEG,       1           # a radian value shown and typed in degrees
+.equ WGF_PRIMARY,   2           # button: the accent colour
+.equ WGF_CLAMP,     4           # keep FLOAT / INT inside [min, max]
+.equ WGF_COMPACT,   8           # 18 px tall (property rows), not WG_H
+
+# descriptor (static, .rodata)
+.equ WD_KIND,       0
+.equ WD_FLAGS,      4
+.equ WD_NAME,       8           # stable path for ui_tree / tests, "object.loc"
+.equ WD_MIN,        16          # float
+.equ WD_MAX,        20
+.equ WD_STEP,       24          # per pixel of scrub; Ctrl+wheel = 10 steps
+.equ WD_DEC,        28          # decimals shown
+.equ WD_CB,         32          # after a change: cb(rdi = ptr, esi = sub)
+.equ WD_LABEL,      40          # text inside / beside the widget, or 0
+.equ WD_UNDO,       48          # undo step label, 0 = not undoable
+.equ WD_AUX,        56          # operator (button), label list (enum, tabs)
+.equ WD_N,          64          # number of labels
+.equ WD_SZ,         72
+
+.equ WG_H,          22          # row height of fields and buttons
+
+# WIDGET sym, kind, "name" [, "label", min, max, step, dec, flags, cb, "undo", aux, n]
+.macro WIDGET sym, kind, name, label, min=0.0, max=0.0, step=0.01, dec=3, flags=0, cb=0, undo, aux=0, n=0
+    .pushsection .rodata
+.Lwn\@: .asciz "\name"
+.ifnb \label
+.Lwl\@: .asciz "\label"
+.endif
+.ifnb \undo
+.Lwu\@: .asciz "\undo"
+.endif
+    .balign 8
+\sym:
+    .long \kind, \flags
+    .quad .Lwn\@
+    .float \min, \max, \step
+    .long \dec
+    .quad \cb
+.ifnb \label
+    .quad .Lwl\@
+.else
+    .quad 0
+.endif
+.ifnb \undo
+    .quad .Lwu\@
+.else
+    .quad 0
+.endif
+    .quad \aux
+    .long \n, 0
+    .popsection
+.endm
