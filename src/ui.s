@@ -259,7 +259,17 @@ hit_test:
     mov     edx, eax
     mov     eax, HIT_PALETTE
     jmp     .Lht_ret
-0:
+0:  cmp     dword ptr [rip+wg_pop_open], 0  # an enum's open option list
+    je      .Lht_nopop
+    mov     edi, ebx
+    mov     esi, r12d
+    call    wg_pop_hit
+    cmp     eax, -2
+    je      .Lht_nopop
+    mov     edx, eax
+    mov     eax, HIT_WGPOP
+    jmp     .Lht_ret
+.Lht_nopop:
     # open dropdown sits on top of everything
     mov     edi, [rip+menu_open]
     test    edi, edi
@@ -371,7 +381,15 @@ hit_test:
     cmp     r12d, [rip+cont_y1]
     jge     .Lht_ret
 
-    mov     edi, ebx
+    mov     edi, ebx                    # widgets (widgets.s) lie on the areas
+    mov     esi, r12d
+    call    wg_hit
+    test    eax, eax
+    jz      1f
+    mov     edx, eax
+    mov     eax, HIT_WIDGET
+    jmp     .Lht_ret
+1:  mov     edi, ebx
     mov     esi, r12d
     call    area_hit
 .Lht_ret:
@@ -382,11 +400,15 @@ hit_test:
     ret
 
 # hit ids that show the pointing hand
-.equ PTR_HITS, (1<<HIT_BTN_MIN)|(1<<HIT_BTN_MAX)|(1<<HIT_BTN_CLOSE)|(1<<HIT_MENU_TITLE)|(1<<HIT_MENU_ITEM)|(1<<HIT_TOOL)|(1<<HIT_OUTLINER)|(1<<HIT_AREA_TYPE)|(1<<HIT_AREA_BTN)|(1<<HIT_ACT_REVERT)|(1<<HIT_MODS)
+.equ PTR_HITS, (1<<HIT_BTN_MIN)|(1<<HIT_BTN_MAX)|(1<<HIT_BTN_CLOSE)|(1<<HIT_MENU_TITLE)|(1<<HIT_MENU_ITEM)|(1<<HIT_TOOL)|(1<<HIT_OUTLINER)|(1<<HIT_AREA_TYPE)|(1<<HIT_AREA_BTN)|(1<<HIT_ACT_REVERT)|(1<<HIT_MODS)|(1<<HIT_WGPOP)
 
 # cursor_for(edi=hit id, esi=index) -> eax = cursor shape
 cursor_for:
-    cmp     edi, HIT_SPLITTER
+    cmp     edi, HIT_WIDGET
+    jne     0f
+    mov     edi, esi
+    jmp     wg_cursor
+0:  cmp     edi, HIT_SPLITTER
     jne     1f
     mov     edi, esi
     jmp     splitter_cursor
@@ -489,6 +511,13 @@ ui_motion:
     mov     eax, [rip+drag_mode]
     test    eax, eax
     jz      .Lmo_hover
+    cmp     eax, DRAG_WIDGET            # scrubbing a widget
+    jne     7640f
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    wg_drag
+    jmp     .Lmo_out
+7640:
     cmp     eax, DRAG_BOX
     jne     76f
     call    box_move                    # edi / esi = the pointer
@@ -766,6 +795,25 @@ ui_button:
     jz      .Lbt_release
 
     # ---------------- press ----------------
+    cmp     dword ptr [rip+wg_pop_open], 0  # an open option list: a row picks,
+    je      .Lbt_nopop                  #  anywhere else closes it
+    mov     edi, -2
+    cmp     ebx, HIT_WGPOP
+    jne     1f
+    mov     edi, r12d
+1:  call    wg_pop_press
+    jmp     .Lbt_done
+.Lbt_nopop:
+    cmp     ebx, HIT_WIDGET             # a widget: press, then drag or click
+    jne     .Lbt_nowg
+    cmp     r14d, BTN_LEFT
+    jne     .Lbt_nowg
+    mov     edi, r12d
+    call    wg_press
+    mov     dword ptr [rip+drag_mode], DRAG_WIDGET
+    jmp     .Lbt_done
+.Lbt_nowg:
+    call    wg_commit                   # a press elsewhere confirms typing
     cmp     dword ptr [rip+ne_menu], 0  # node editor (its menu takes a click)
     jne     763f
     cmp     ebx, HIT_NODES
@@ -1063,7 +1111,12 @@ ui_button:
 
     # ---------------- release ----------------
 .Lbt_release:
-    cmp     dword ptr [rip+lb_drag], 0  # a library tile dropped
+    cmp     dword ptr [rip+drag_mode], DRAG_WIDGET
+    jne     7699f
+    mov     dword ptr [rip+drag_mode], 0
+    call    wg_release
+    jmp     .Lbt_done
+7699: cmp     dword ptr [rip+lb_drag], 0  # a library tile dropped
     je      7700f
     mov     edi, ebx
     mov     esi, r12d
@@ -1167,7 +1220,28 @@ ui_axis:
     mov     esi, [rip+ptr_y]
     call    hit_test
     pop     rdi
-    cmp     eax, HIT_NODES              # the node editor scrolls
+    push    rax                         # widgets: Ctrl+wheel steps a value,
+    push    rdx                         #  the wheel scrolls a region
+    push    rdi
+    xor     edi, edi
+    cmp     eax, HIT_WIDGET
+    jne     1f
+    mov     edi, edx
+1:  mov     esi, [rip+ptr_x]
+    mov     edx, [rip+ptr_y]
+    mov     ecx, [rsp]
+    sar     ecx, 31
+    or      ecx, 1
+    neg     ecx                         # notches up > 0
+    call    wg_wheel
+    mov     r8d, eax
+    pop     rdi
+    pop     rdx
+    pop     rax
+    test    r8d, r8d
+    jz      2f
+    ret
+2:  cmp     eax, HIT_NODES              # the node editor scrolls
     jne     760f
     neg     edi
     jmp     nodeed_wheel
@@ -1338,8 +1412,9 @@ ui_key:
 1:  push    rbx
     mov     ebx, edi
     call    ui_key_press
-    cmp     dword ptr [rip+tf_focus], 0 # repeat only while typing
-    je      2f
+    call    typing                      # repeat only while typing
+    test    eax, eax
+    jz      2f
     lea     rax, [rip+modifier_keys]
 3:  movzx   ecx, byte ptr [rax]
     test    ecx, ecx
@@ -1353,10 +1428,21 @@ ui_key:
 2:  pop     rbx
 9:  ret
 
+# typing -> eax = 1 while the console or a widget field takes text
+typing:
+    mov     eax, [rip+tf_focus]
+    test    eax, eax
+    jnz     1f
+    jmp     wg_editing
+1:  ret
+
 # ui_key_repeat(edi=evdev) - timer tick for a held key
 ui_key_repeat:
-    cmp     dword ptr [rip+tf_focus], 0
-    je      kb_repeat_stop
+    push    rdi
+    call    typing
+    pop     rdi
+    test    eax, eax
+    jz      kb_repeat_stop
 # ui_key_press(edi=evdev) - one key stroke: menus, text field, then keymap
 ui_key_press:
     cmp     dword ptr [rip+tm_mode], 0  # a running transform takes every key
@@ -1374,7 +1460,21 @@ ui_key_press:
     mov     edi, ebx
     call    palette_key
     jmp     9f
-0:
+0:  cmp     dword ptr [rip+wg_pop_open], 0  # Esc closes an option list
+    je      .Lkp_noesc
+    cmp     ebx, KEY_ESC
+    jne     .Lkp_noesc
+    mov     dword ptr [rip+wg_pop_open], 0
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+.Lkp_noesc:
+    call    wg_editing                  # typing into a field takes the keys
+    test    eax, eax
+    jz      .Lkp_notyping
+    mov     edi, ebx
+    call    wg_key
+    jmp     9f
+.Lkp_notyping:
     cmp     ebx, KEY_ESC
     jne     1f
     cmp     dword ptr [rip+menu_open], 0
@@ -1434,6 +1534,7 @@ modifier_keys: .byte 29, 42, 56, 54, 97, 100, 125, 126, 58, 69, 0
 #  Drawing
 # =============================================================================
 ui_draw:
+    call    wg_frame                    # a new list of widgets
     call    an_tick                     # playback: the frame the clock says
     call    rig_tick                    # drivers, constraints, onion skins
     call    ui_layout
@@ -1445,7 +1546,8 @@ ui_draw:
     cmp     dword ptr [rip+menu_open], 0
     jl      4f
     call    draw_dropdown
-4:  jmp     palette_draw
+4:  call    wg_pop_draw
+    jmp     palette_draw
 
 # is_hot(edi=hit id, esi=index) -> eax = 1 if hovered
 is_hot:

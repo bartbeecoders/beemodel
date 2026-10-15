@@ -509,6 +509,7 @@ def main():
     areas_and_palette()
     ui_basics()
     themes()
+    widgets_ui()
     transforms()
     undo_redo()
     files()
@@ -807,6 +808,28 @@ class Mcp:
         r = self.call('tools/call', {'name': name, 'arguments': args or {}})
         res = (r or {}).get('result', {})
         return res.get('content', [{}])[0].get('text', ''), res.get('isError')
+
+
+def ui_tree(m):
+    """The widgets of the last frame (MCP ui_tree)."""
+    text, _ = m.tool('ui_tree')
+    try:
+        return json.loads(text).get('widgets', [])
+    except ValueError:
+        return []
+
+
+def widget(m, name, sub=0):
+    for w in ui_tree(m):
+        if w['name'] == name and w['sub'] == sub:
+            return w
+    return None
+
+
+def widget_xy(m, name, sub=0):
+    """Centre of a widget, found by name (no hard-coded coordinates)."""
+    w = widget(m, name, sub)
+    return (w['x'] + w['w'] // 2, w['y'] + w['h'] // 2) if w else (0, 0)
 
 
 def mcp():
@@ -4738,6 +4761,92 @@ def themes():
         g.proc.kill()
     finally:
         del os.environ['BEEMODEL_THEME']
+
+
+def widgets_ui():
+    """UI plan U3: the widget toolkit on the Properties transform rows -
+    scrub, type values and expressions, Tab, Esc, Ctrl+wheel, undo, rename,
+    and ui_tree for finding widgets by name."""
+    print('  -- widgets --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    num = lambda p: float(q(f'print(get("Cube", "{p}"))') or 'nan')
+    names = {(w['name'], w['sub']) for w in ui_tree(m)}
+    check({('object.name', 0), ('object.location', 0), ('object.rotation', 2), ('object.scale', 1)} <= names,
+          f'ui_tree lists the Properties fields ({len(names)} widgets)')
+    x, y = widget_xy(m, 'object.location', 0)
+    f.move(x, y)
+    check(f.cursor == 26, f'a number field shows the sideways cursor (shape {f.cursor})')
+    f.drag(x, y, x + 50, y, steps=5)
+    check(abs(num('x') - 0.5) < 1e-4, f'dragging Location X 50 px moves the cube 0.5 m ({num("x")})')
+    f.mods(4); f.key(44); f.mods(0)            # Ctrl+Z
+    check(abs(num('x')) < 1e-6, 'one undo reverts the whole drag')
+    x, y = widget_xy(m, 'object.location', 1)
+    f.click(x, y)
+    w = widget(m, 'object.location', 1)
+    check(bool(w and w.get('editing')), 'clicking a field (no drag) starts typing in it')
+    f.type('2.5'); f.key(28)
+    check(abs(num('y') - 2.5) < 1e-6, f'typing 2.5 + Enter sets Location Y ({num("y")})')
+    x, y = widget_xy(m, 'object.rotation', 2)
+    f.click(x, y); f.type('90'); f.key(28)
+    check(abs(num('rz') - math.pi / 2) < 1e-4, f'a rotation field takes degrees: 90 -> {num("rz"):.4f} rad')
+    x, y = widget_xy(m, 'object.scale', 0)
+    f.click(x, y); f.type('1+0.5*2'); f.key(28)
+    check(abs(num('sx') - 2) < 1e-6, f'fields take expressions: 1+0.5*2 -> {num("sx")}')
+    x, y = widget_xy(m, 'object.location', 0)
+    f.click(x, y); f.type('1'); f.key(15)      # Tab: confirm, next field
+    w = widget(m, 'object.location', 1)
+    check(abs(num('x') - 1) < 1e-6 and bool(w and w.get('editing')), 'Tab confirms and moves to the next field')
+    f.type('7'); f.key(1)                      # Esc cancels
+    check(abs(num('y') - 2.5) < 1e-6 and not any(w.get('editing') for w in ui_tree(m)),
+          'Esc cancels typing and keeps the value')
+    x, y = widget_xy(m, 'object.scale', 2)
+    f.move(x, y)
+    f.mods(4); f.wheel(-1); f.mods(0)          # Ctrl+wheel up: 10 steps
+    check(abs(num('sz') - 1.05) < 1e-4, f'Ctrl+wheel steps a field ({num("sz")})')
+    x, y = widget_xy(m, 'object.name')
+    f.click(x, y)
+    f.mods(4); f.key(30); f.mods(0)            # (all selected already) type over
+    f.type('Box'); f.key(28)
+    check(q('print(exists("Box"), exists("Cube"))') == '1 0', 'the name field renames the object')
+    f.shot('widgets_props.png')
+    val = lambda n: (widget(m, n) or {}).get('value')
+    x, y = widget_xy(m, 'viewport.shading')    # an option list
+    f.click(x, y)
+    f.click(x, y + 11 + 2 + 4 + 22 + 11)       # its second row: Wireframe
+    check(val('viewport.shading') == 1, 'a dropdown list picks Wireframe shading')
+    f.move(x, y)
+    f.mods(4); f.wheel(-1); f.mods(0)          # Ctrl+wheel up: the option before
+    check(val('viewport.shading') == 0, 'Ctrl+wheel steps a dropdown')
+    f.click(x, y)
+    opened = any(w['kind'] == 'list' for w in ui_tree(m))
+    f.key(1)
+    check(opened and val('viewport.shading') == 0 and not any(w['kind'] == 'list' for w in ui_tree(m)),
+          'Esc closes an open list unchanged')
+    x, y = widget_xy(m, 'viewport.grid')
+    f.click(x, y)
+    check(val('viewport.grid') == 0, 'a toggle switches the ground grid off')
+    f.mods(4); f.key(44); f.mods(0)            # (not an undo step: a view setting)
+    f.click(x, y)
+    check(val('viewport.grid') == 1, 'and on again')
+    x, y = widget_xy(m, 'viewport.pitch')
+    f.click(x, y); f.type('120'); f.key(28)
+    p = val('viewport.pitch')
+    check(p is not None and abs(p - 1.55) < 1e-4, f'a clamped field keeps pitch at its limit ({p})')
+    x, y = widget_xy(m, 'ui.theme')
+    f.click(x, y); f.click(x, y + 11 + 2 + 4 + 22 + 11)
+    check(px(f, 640, 5) == 0xdfe1e6, 'the theme dropdown switches to the light theme')
+    f.click(x, y); f.click(x, y + 11 + 2 + 4 + 11)
+    x, y = widget_xy(m, 'props.viewport')
+    f.click(x, y)
+    check(widget(m, 'viewport.yaw') is None, 'clicking a section header collapses it')
+    f.click(x, y)
+    check(widget(m, 'viewport.yaw') is not None, 'and opens it again')
+    f.proc.kill()
 
 
 if __name__ == '__main__':

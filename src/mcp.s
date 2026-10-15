@@ -147,6 +147,7 @@ curated_tools:
     .ascii "{\"name\":\"run_operator\",\"description\":\"Run any BeeModel operator by id (see console.list_ops), with an optional text argument such as a file path.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"id\":{\"type\":\"string\"},\"arg\":{\"type\":\"string\"}},\"required\":[\"id\"]}},"
     .ascii "{\"name\":\"viewport_capture\",\"description\":\"Look at the scene: a PNG image of the 3D viewport as it is now (area: viewport or window).\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"area\":{\"type\":\"string\",\"enum\":[\"viewport\",\"window\"]}}}},"
     .ascii "{\"name\":\"script_eval\",\"description\":\"Run BeeScript, BeeModel's scripting language, as one undo step; returns what it prints plus the last value. Best for bulk or procedural edits. Syntax: x = 2m; for i in 0..10 { add(\\\"cube\\\", \\\"C\\\" + i, i * 2, 0, 0) }; if a > 1 and b { } else { }; while c { }; fn f(a) { return a * 2 }. Units: m cm mm km deg rad (angles are radians, 45deg works). Scene: add(type, [name], [x, y, z]) -> name; move / rotate / scale(name, x, y, z); scale(name, s); get(name, prop) and set(name, prop, v) with prop x y z rx ry rz sx sy sz; select(names...); delete(names...); rename(old, new); exists(name); count(); name(i); active(); op(id, [arg]). Also print(...), str, num, len, sin, cos, tan, sqrt, abs, floor, round, min, max, pow, atan2, deg, rad, rand, seed, pi.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"code\":{\"type\":\"string\",\"description\":\"BeeScript source\"}},\"required\":[\"code\"]}},"
+    .ascii "{\"name\":\"ui_tree\",\"description\":\"List the widgets on screen this frame (buttons, fields, toggles, lists, sections) with their name, sub index, kind, rectangle in window pixels, label and value. Use it to find what the user sees and where to click.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
     .ascii "{\"name\":\"undo\",\"description\":\"Undo the last change.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
     .asciz "{\"name\":\"redo\",\"description\":\"Redo the last undone change.\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
 c_scene:        .asciz "scene_summary"
@@ -158,6 +159,7 @@ c_run:          .asciz "run_operator"
 c_undo:         .asciz "undo"
 c_capture:      .asciz "viewport_capture"
 c_script:       .asciz "script_eval"
+c_uitree:       .asciz "ui_tree"
 s_agent_pfx:    .asciz "Agent: "
 e_perm_a:       .asciz "permission denied: "
 e_perm_b:       .asciz " needs the '"
@@ -1013,6 +1015,11 @@ tool_tier:
     test    eax, eax
     jnz     .Ltt_read
     lea     rdi, [rip+tool]
+    lea     rsi, [rip+c_uitree]
+    call    str_eq
+    test    eax, eax
+    jnz     .Ltt_read
+    lea     rdi, [rip+tool]
     lea     rsi, [rip+c_run]
     call    str_eq
     test    eax, eax
@@ -1297,6 +1304,11 @@ dispatch_tool:
     call    str_eq
     test    eax, eax
     jnz     .Ldt_redo
+    lea     rdi, [rip+tool]
+    lea     rsi, [rip+c_uitree]
+    call    str_eq
+    test    eax, eax
+    jnz     .Ldt_uitree
     lea     rdi, [rip+tool]             # the co-pilot's tools
     call    cp_dispatch
     test    eax, eax
@@ -1338,6 +1350,10 @@ dispatch_tool:
 
 .Ldt_scene:
     call    scene_json
+    jmp     .Ldt_out
+
+.Ldt_uitree:                            # the widgets of the last frame
+    call    wg_tree_json
     jmp     .Ldt_out
 
 .Ldt_create:

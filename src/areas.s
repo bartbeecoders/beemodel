@@ -7,6 +7,7 @@
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
+.include "widgets.inc"
 .include "macros.inc"
 
 # exports
@@ -112,11 +113,6 @@ s_ed_timeline:  .asciz "Timeline"
 s_ed_dopesheet: .asciz "Dope Sheet"
 s_ed_graph:     .asciz "Graph Editor"
 s_h_create:     .asciz "CREATE"
-s_p_camera:     .asciz "Viewport camera"
-s_p_yaw:        .asciz "Yaw"
-s_p_pitch:      .asciz "Pitch"
-s_p_dist:       .asciz "Distance"
-s_p_target:     .asciz "Target"
 s_p_loc:        .asciz "Location"
 s_p_rot:        .asciz "Rotation"
 s_p_scale:      .asciz "Scale"
@@ -136,7 +132,6 @@ s_no_active:    .asciz "No active object"
 s_v:            .asciz " v, "
 s_e:            .asciz " e, "
 s_f:            .asciz " f"
-s_deg:          .asciz " deg"
 s_comma:        .asciz ", "
 s_last_area:    .asciz "  the last area cannot be closed"
 s_no_room:      .asciz "  no room for more areas"
@@ -1198,6 +1193,59 @@ prop_row:
     pop     rbx
     ret
 
+# xyz_row(edi=y, rsi=label, rdx=float[3], rcx=widget) - a label and three
+#   compact number fields (X Y Z) across the rest of the row
+xyz_row:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     ebx, edi
+    mov     r12, rdx
+    mov     r13, rcx
+    mov     rdx, rsi
+    mov     edi, [rip+ed_x]
+    add     edi, 14
+    mov     esi, ebx
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+    mov     eax, [rip+ed_w]             # field width: (w - 94 - 2 gaps) / 3
+    sub     eax, 94+6
+    xor     edx, edx
+    mov     ecx, 3
+    div     ecx
+    mov     r15d, eax
+    xor     r14d, r14d
+1:  mov     rdi, r13
+    mov     esi, r15d
+    add     esi, 3
+    imul    esi, r14d
+    add     esi, [rip+ed_x]
+    add     esi, 80
+    lea     edx, [rbx-1]
+    mov     ecx, r15d
+    lea     r8, [r12+r14*4]
+    mov     r9d, r14d
+    call    wg
+    inc     r14d
+    cmp     r14d, 3
+    jb      1b
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# widget callbacks: a renamed object, a moved one (drivers follow)
+props_rename:                           # rdi = the new name
+    mov     rsi, rdi
+    mov     edi, [rip+active_obj]
+    jmp     obj_rename
+props_xform:
+    jmp     rig_eval
+
 ed_props_draw:
     push    rbx
     push    r12
@@ -1216,36 +1264,33 @@ ed_props_draw:
     add     r12d, 30
     jmp     12f
 11: mov     rbx, rax
-    mov     edi, [rip+ed_x]
-    add     edi, 14
-    mov     esi, r12d
-    mov     rdx, rbx
-    mov     ecx, COL_ACTIVE
-    call    draw_heading
+    lea     rdi, [rip+wd_obj_name]      # name, location, rotation, scale:
+    mov     esi, [rip+ed_x]             #  fields (widgets.s) - drag, type, Tab
+    add     esi, 10
+    lea     edx, [r12-1]
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 24
+    mov     r8, rbx
+    xor     r9d, r9d
+    call    wg
     add     r12d, 20
-    call    fmt_reset
-    lea     rdi, [rbx+OB_LOC]
-    xor     esi, esi
-    call    fmt_vec3
     mov     edi, r12d
     lea     rsi, [rip+s_p_loc]
-    call    prop_row
+    lea     rdx, [rbx+OB_LOC]
+    lea     rcx, [rip+wd_obj_loc]
+    call    xyz_row
     add     r12d, 18
-    call    fmt_reset
-    lea     rdi, [rbx+OB_ROT]
-    mov     esi, 1
-    call    fmt_vec3
     mov     edi, r12d
     lea     rsi, [rip+s_p_rot]
-    call    prop_row
+    lea     rdx, [rbx+OB_ROT]
+    lea     rcx, [rip+wd_obj_rot]
+    call    xyz_row
     add     r12d, 18
-    call    fmt_reset
-    lea     rdi, [rbx+OB_SCALE]
-    xor     esi, esi
-    call    fmt_vec3
     mov     edi, r12d
     lea     rsi, [rip+s_p_scale]
-    call    prop_row
+    lea     rdx, [rbx+OB_SCALE]
+    lea     rcx, [rip+wd_obj_scale]
+    call    xyz_row
     add     r12d, 18
     mov     rax, [rbx+OB_SKETCH]        # a sketch: its plane, sizes, DOF
     test    rax, rax
@@ -1324,57 +1369,63 @@ ed_props_draw:
     mov     edi, eax                    # ---- features
     call    feat_props_draw
     mov     r12d, eax
-    mov     edi, [rip+vp_area]          # ---- camera of the last used viewport
-    call    cam_load
-    mov     edi, [rip+ed_x]
-    add     edi, 14
-    mov     esi, r12d
-    lea     rdx, [rip+s_p_camera]
-    mov     ecx, COL_ACCENT
-    call    draw_heading
-    add     r12d, 20
-    call    fmt_reset
-    movss   xmm0, [rip+cam_yaw]
-    call    fmt_deg
-    lea     rdi, [rip+s_deg]
-    call    fmt_str
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_yaw]
-    call    prop_row
-    add     r12d, 18
-    call    fmt_reset
-    movss   xmm0, [rip+cam_pitch]
-    call    fmt_deg
-    lea     rdi, [rip+s_deg]
-    call    fmt_str
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_pitch]
-    call    prop_row
-    add     r12d, 18
-    call    fmt_reset
-    movss   xmm0, [rip+cam_dist]
-    call    fmt_fix1
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_dist]
-    call    prop_row
-    add     r12d, 18
-    call    fmt_reset
-    movss   xmm0, [rip+cam_tx]
-    call    fmt_fix1
-    lea     rdi, [rip+s_comma]
-    call    fmt_str
-    movss   xmm0, [rip+cam_ty]
-    call    fmt_fix1
-    lea     rdi, [rip+s_comma]
-    call    fmt_str
-    movss   xmm0, [rip+cam_tz]
-    call    fmt_fix1
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_target]
-    call    prop_row
-    pop     r12
+    add     r12d, 6                     # ---- the viewport: a section
+    lea     rdi, [rip+wd_vp_sec]
+    mov     esi, [rip+ed_x]
+    add     esi, 8
+    mov     edx, r12d
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 20
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    add     r12d, 28
+    test    eax, eax
+    jz      9f                          # (closed)
+    lea     rdi, [rip+wd_vp_shading]
+    lea     r8, [rip+vp_shading]
+    call    vp_row
+    lea     rdi, [rip+wd_vp_grid]
+    lea     r8, [rip+show_grid]
+    call    vp_row
+    lea     rdi, [rip+wd_vp_theme]
+    lea     r8, [rip+th_id]
+    call    vp_row
+    mov     edi, [rip+vp_area]          # the last used viewport's camera
+    test    edi, edi
+    js      9f
+    call    cam_ptr
+    mov     rbx, rax
+    lea     rdi, [rip+wd_vp_yaw]
+    lea     r8, [rbx+0]
+    call    vp_row
+    lea     rdi, [rip+wd_vp_pitch]
+    lea     r8, [rbx+4]
+    call    vp_row
+    lea     rdi, [rip+wd_vp_dist]
+    lea     r8, [rbx+8]
+    call    vp_row
+9:  pop     r12
     pop     rbx
     ret
+
+# vp_row(rdi=widget, r8=value; r12d = y, advanced) - one full-width row
+vp_row:
+    mov     esi, [rip+ed_x]
+    add     esi, 14
+    mov     edx, r12d
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 28
+    xor     r9d, r9d
+    sub     rsp, 8
+    call    wg
+    add     rsp, 8
+    add     r12d, WG_H+4
+    ret
+
+vp_theme_cb:                            # rdi = th_id
+    mov     edi, [rdi]
+    jmp     th_set
 
 ed_console_draw:
     push    rbx
@@ -1876,5 +1927,28 @@ op_toggle_console:
     mov     ecx, ED_CONSOLE
     xor     r8d, r8d
     jmp     split_with
+
+.section .rodata
+.align 8
+vp_shade_lbl:   .quad s_sh_solid, s_sh_wire, s_sh_mat
+vp_theme_lbl:   .quad s_th_d, s_th_l, s_th_c
+s_sh_solid:     .asciz "Solid"
+s_sh_wire:      .asciz "Wireframe"
+s_sh_mat:       .asciz "Material Preview"
+s_th_d:         .asciz "Dark theme"
+s_th_l:         .asciz "Light theme"
+s_th_c:         .asciz "High contrast"
+.text
+WIDGET wd_vp_sec,     WK_SECTION, "props.viewport", "Viewport"
+WIDGET wd_vp_shading, WK_ENUM,   "viewport.shading", aux=vp_shade_lbl, n=3
+WIDGET wd_vp_grid,    WK_TOGGLE, "viewport.grid", "Ground grid"
+WIDGET wd_vp_theme,   WK_ENUM,   "ui.theme", cb=vp_theme_cb, aux=vp_theme_lbl, n=3
+WIDGET wd_vp_yaw,     WK_FLOAT,  "viewport.yaw", "Yaw", step=0.00872665, dec=1, flags=WGF_DEG
+WIDGET wd_vp_pitch,   WK_FLOAT,  "viewport.pitch", "Pitch", -1.55, 1.55, 0.00872665, 1, WGF_DEG|WGF_CLAMP
+WIDGET wd_vp_dist,    WK_FLOAT,  "viewport.distance", "Distance", 1.5, 20000.0, 0.05, 2, WGF_CLAMP
+WIDGET wd_obj_name,  WK_TEXT,  "object.name", , flags=WGF_COMPACT, cb=props_rename, undo="Rename"
+WIDGET wd_obj_loc,   WK_FLOAT, "object.location", , step=0.01, dec=3, flags=WGF_COMPACT, cb=props_xform, undo="Move"
+WIDGET wd_obj_rot,   WK_FLOAT, "object.rotation", , step=0.00872665, dec=1, flags=WGF_COMPACT|WGF_DEG, cb=props_xform, undo="Rotate"
+WIDGET wd_obj_scale, WK_FLOAT, "object.scale", , step=0.005, dec=3, flags=WGF_COMPACT, cb=props_xform, undo="Scale"
 
 .section .note.GNU-stack,"",@progbits
