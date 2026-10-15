@@ -586,6 +586,7 @@ def main():
     anim_ui()
     physics_ui()
     render_ui()
+    team_ui()
     transforms()
     undo_redo()
     files()
@@ -6080,6 +6081,67 @@ def render_ui():
     f.pump(0.3)
     check({'render.header.start', 'render.header.stop', 'render.header.save', 'render.header.denoise', 'render.header.pass'} <= names(),
           'the Render area header: Render, Stop, Save, Denoise, the pass')
+    f.proc.kill()
+
+
+def team_ui():
+    """UI plan U22: the Asset Browser's header and tile menu, the Versions
+    editor (commit, branches, history), collaboration and the live link,
+    the AI Activity header (permission)."""
+    print('  -- library, versions, collaboration, AI --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
+    f.key(28); f.type('agent.permission_files'); f.key(28); f.pump(0.2); f.key(1)
+    q('select("Cube")\nop("area.type_asset_browser")\nop("area.maximize")')
+    f.pump(0.3)
+    check({'library.search', 'library.kind', 'library.save'} <= names(), 'the Asset Browser header: search, kind, Save to Library')
+    click('library.save')
+    check({'form.lib.kind', 'form.lib.name', 'form.lib.tags'} <= names(), 'Save to Library asks what, its name and tags')
+    type_into('form.lib.tags', '#box')
+    f.key(28); f.pump(0.5)
+    check(q('print(lib(0))') == '1', f'OK keeps the cube in the library ({q("print(lib(0))")})')
+    pick_enum(f, m, 'library.kind', 0, 2)                      # Materials
+    check(q('print(lib(4))') == '0', 'the kind list filters (no materials)')
+    pick_enum(f, m, 'library.kind', 0, 1)                      # Objects
+    check(q('print(lib(4))') == '1', '... objects: the cube')
+    s = widget(m, 'library.search')
+    tx, ty = s['x'] - (130 + 6) + 8 + 48, s['y'] + 24 + 24 + 48
+    f.click(tx, ty, 0x111); f.pump(0.2)
+    labels = [w['label'] for w in ui_tree(m) if w['kind'] == 'menuitem' and w.get('level') == 0]
+    check('Place in the Scene' in labels and 'Remove from Library' in labels, f'right-click on a tile: its menu ({labels[:5]})')
+    f.key(1); f.pump(0.2)
+    q('op("area.maximize")\nop("area.type_viewport")')
+    q(f'op("file.save_as", "{os.path.join(f.home, "v.bee")}")\nop("area.type_versions")\nop("area.maximize")')
+    f.pump(0.3)
+    check({'versions.message', 'versions.commit', 'versions.new_branch', 'versions.merge', 'versions.diff', 'collab.host', 'link.serve'} <= names(),
+          'the Versions editor: commit, branches, merge, changes, collaboration, live link')
+    type_into('versions.message', 'first')
+    click('versions.commit')
+    check(q('print(vcinfo(1), vctext(3))') == '1 first', f'Commit keeps a version ({q("print(vcinfo(1), vctext(3))")})')
+    click('versions.new_branch')
+    f.key(28); f.pump(0.4)
+    check(q('print(vcinfo(2))') == '2', 'New Branch makes one')
+    rows = [w.get('label') for w in ui_tree(m) if w['name'] == 'versions.branch']
+    check(sorted(rows) == ['feature', 'main'], f'the branches are listed ({rows})')
+    click('collab.host')
+    check(q('print(costat(0))') == '1', 'Host starts a session')
+    check('collab.leave' in names(), 'in a session: Leave')
+    click('collab.leave')
+    check(q('print(costat(0))') == '0', 'Leave ends it')
+    q('op("area.maximize")\nop("area.type_activity")')
+    f.pump(0.3)
+    check('ai.permission' in names(), 'the AI Activity header: the agents\' permission')
+    pick_enum(f, m, 'ai.permission', 0, 1)
+    check(wait_value(f, m, 'ai.permission', 0, 1) == 1, 'agents may edit (from the list)')
     f.proc.kill()
 
 

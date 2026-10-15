@@ -32,6 +32,14 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl lb_search
+.globl lb_sel
+.globl lb_kind
+.globl lb_match
+.globl lb_rec
+.globl tile_at
+.globl lb_shown_idx
+.globl lb_n
 .globl ed_assets_draw
 .globl assets_press
 .globl lb_tick
@@ -131,6 +139,7 @@ lb_afr:         .skip 8                 # the action placed: its frames
 lb_last_t:      .skip 8                 # the last tile press (double clicks)
 lb_tags2:       .skip 96
 lb_search:      .skip 128               # the browser's search
+lb_kind:        .skip 4                 #  and kind (0 all, K_*)
 lb_name:        .skip 64
 lb_tags:        .skip 96
 lb_path:        .skip 640
@@ -1049,7 +1058,12 @@ lb_match:
     test    eax, eax
     jnz     2b
     jmp     8f
-7:  mov     dword ptr [r12+LR_HIT], 1
+7:  mov     eax, [rip+lb_kind]         # the browser's kind filter (0: all)
+    test    eax, eax
+    jz      71f
+    cmp     eax, [r12+LR_KIND]
+    jne     8f
+71: mov     dword ptr [r12+LR_HIT], 1
     inc     dword ptr [rip+lb_hits]
 8:  inc     ebx
     jmp     1b
@@ -1120,7 +1134,7 @@ lb_find:
 # =============================================================================
 #  Saving assets
 # =============================================================================
-OPERATOR op_lb_save,   "lib.save",   "Save to Library", do_lb_save, flags=OPF_AI_SAFE, doc="Save to the content library: lib.save object|rig|scene [name] [#tag ...] (the selected objects, an armature with its skinned meshes, the scene) or lib.save material|tree|action <name> [#tag ...]"
+OPERATOR op_lb_save,   "lib.save",   "Save to Library", do_lb_save, flags=OPF_AI_SAFE, doc="Save to the content library: lib.save object|rig|scene [name] [#tag ...] (the selected objects, an armature with its skinned meshes, the scene) or lib.save material|tree|action <name> [#tag ...]", form=form_lbsave
 OPERATOR op_lb_place,  "lib.place",  "Place Asset",     do_lb_place, flags=OPF_AI_SAFE|OPF_UNDO, doc="Put a library asset into the scene: lib.place <name or id> [x y z] (default: the 3D cursor; a scene opens instead)"
 OPERATOR op_lb_tag,    "lib.tag",    "Tag Asset",       do_lb_tag, flags=OPF_AI_SAFE, doc="Tag an asset: lib.tag <asset> <tag> [-tag ...] (-tag takes one away)"
 OPERATOR op_lb_remove, "lib.remove", "Remove Asset",    do_lb_remove, flags=OPF_AI_SAFE, doc="Take an asset out of its library (its blob goes when nothing else uses it): lib.remove <asset>"

@@ -481,6 +481,46 @@ FFIELD fw_rja, kw=FK_ACTIVE
 FFIELD fw_rjb, kw=FK_OTHER
 FFIELD fw_rjx, kw=kw_jaxis, def=1.0
 
+# ---- lib.tag_selected <tags> -----------------------------------------------------------
+WIDGET fw_lbt,  WK_TEXT, "form.asset.tags", "Tags", tip="Words separated by spaces (-word removes a tag)"
+FORM form_lbtag, 1
+FFIELD fw_lbt
+.section .rodata
+d_vcbranch:     .asciz "feature"
+.text
+WIDGET fw_vcb,  WK_TEXT, "form.branch.name", "Name", tip="The new branch starts at the current commit"
+FORM form_vcbranch, 1
+FFIELD fw_vcb, kw=d_vcbranch
+WIDGET fw_vcm,  WK_TEXT, "form.merge.branch", "Branch", tip="The branch whose changes come into this one"
+FORM form_vcmerge, 1
+FFIELD fw_vcm
+WIDGET fw_coj,  WK_TEXT, "form.join.address", "Address", tip="host:port, e.g. 192.168.1.20:7462"
+FORM form_cojoin, 1
+FFIELD fw_coj
+WIDGET fw_lkc,  WK_TEXT, "form.link.address", "Address", tip="host:port (7461), or unix:/path"
+FORM form_lkconn, 1
+FFIELD fw_lkc
+.section .rodata
+s_lbk_obj:      .asciz "The active object"
+s_lbk_rig:      .asciz "Its rig"
+s_lbk_scene:    .asciz "The whole scene"
+s_lbk_mat:      .asciz "Its material"
+k_lbk_obj:      .asciz "object"
+k_lbk_rig:      .asciz "rig"
+k_lbk_scene:    .asciz "scene"
+k_lbk_mat:      .asciz "material"
+.align 8
+l_lbkind:       .quad s_lbk_obj, s_lbk_rig, s_lbk_scene, s_lbk_mat
+kw_lbkind:      .quad k_lbk_obj, k_lbk_rig, k_lbk_scene, k_lbk_mat
+.text
+WIDGET fw_lbk,  WK_ENUM, "form.lib.kind", "Save", aux=l_lbkind, n=4
+WIDGET fw_lbn,  WK_TEXT, "form.lib.name", "Name", tip="Its name in the library (a material: the material's name)"
+WIDGET fw_lbg,  WK_TEXT, "form.lib.tags", "Tags", tip="Words with # to find it by, e.g. #chair #wood"
+FORM form_lbsave, 3
+FFIELD fw_lbk, kw=kw_lbkind
+FFIELD fw_lbn, kw=FK_ACTIVE
+FFIELD fw_lbg
+
 # ---- param.set <name> <expression> ----------------------------------------------------
 WIDGET fw_pmn,  WK_TEXT, "form.param.name", "Name"
 WIDGET fw_pme,  WK_TEXT, "form.param.expression", "Value", tip="A number with units or an expression of other parameters (10mm, 2*wall + 1mm)"

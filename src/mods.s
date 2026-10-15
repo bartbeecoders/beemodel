@@ -2411,7 +2411,7 @@ mods_props_draw:
     mov     [rip+md_y], eax
     mov     dword ptr [rip+menu_open], MENU_MODADD
     call    mn_layout                   # (its place now: ui_tree, clicks)
-    mov     dword ptr [rip+dirty], 1    # (drawn next frame)
+    mov     dword ptr [rip+redraw_again], 1  # (drawn next frame)
 1:  mov     rbp, [rbx+OB_MODS]
     xor     r13d, r13d                  # modifier
     xor     r15d, r15d                  # value row

@@ -15,6 +15,9 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl cp_accept
+.globl cp_revert
+.globl cp_title
 .globl cp_dispatch
 .globl cp_tier
 .globl cp_tools_json
