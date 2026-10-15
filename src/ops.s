@@ -12,6 +12,14 @@
 
 .globl run_op
 .globl op_checked
+.globl op_poll
+.globl poll_undo
+.globl poll_redo
+.globl poll_sel
+.globl poll_two
+.globl poll_render
+.globl poll_rendering
+.globl poll_revert
 .globl dispatch_key
 .globl fmt_key
 .globl list_ops
@@ -57,6 +65,15 @@ s_k_enter:      .asciz "Enter"
 s_k_space:      .asciz "Space"
 s_k_home:       .asciz "Home"
 s_k_del:        .asciz "Del"
+s_need_edit:    .asciz "works in edit mode - select a mesh and press Tab"
+s_need_object:  .asciz "works in object mode - press Tab to leave edit mode"
+s_no_undo:      .asciz "there is nothing to undo"
+s_no_redo:      .asciz "there is nothing to redo"
+s_no_sel:       .asciz "select an object first"
+s_need_two:     .asciz "select two or more meshes (the active one keeps the result)"
+s_no_render:    .asciz "render first (F12)"
+s_not_rendering: .asciz "no render is running"
+s_no_revert_p:  .asciz "the last change was not an agent's"
 s_k_up:       .asciz "Up"
 s_k_pgup:     .asciz "PgUp"
 s_k_left:     .asciz "Left"
@@ -177,6 +194,109 @@ run_op:
     mov     dword ptr [rip+dirty], 1
     mov     rdi, rbx                    # macro recording
     call    macro_op
+    pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# op_poll(rdi=op) -> rax = 0 if it can run now, else why not (asciz). Menus,
+#   tool buttons and the palette grey out what cannot run and say why. An
+#   OPF_EDIT operator needs edit mode, an OPF_OBJECT one object mode; then
+#   the operator's own OP_POLL, if it has one. (run_op itself does not ask:
+#   scripts and agents get the operator's own message.)
+# -----------------------------------------------------------------------------
+op_poll:
+    mov     eax, [rdi+OP_FLAGS]
+    test    eax, OPF_EDIT
+    jz      1f
+    cmp     dword ptr [rip+edit_obj], 0
+    jne     1f
+    lea     rax, [rip+s_need_edit]
+    ret
+1:  test    eax, OPF_OBJECT
+    jz      2f
+    cmp     dword ptr [rip+edit_obj], 0
+    je      2f
+    lea     rax, [rip+s_need_object]
+    ret
+2:  mov     rax, [rdi+OP_POLL]
+    test    rax, rax
+    jz      3f
+    mov     rdi, [rdi+OP_ARG]
+    jmp     rax
+3:  xor     eax, eax
+    ret
+
+# ---- polls ---------------------------------------------------------------------
+poll_undo:
+    xor     eax, eax
+    cmp     dword ptr [rip+undo_depth], 0
+    jne     1f
+    lea     rax, [rip+s_no_undo]
+1:  ret
+poll_redo:
+    xor     eax, eax
+    cmp     dword ptr [rip+redo_depth], 0
+    jne     1f
+    lea     rax, [rip+s_no_redo]
+1:  ret
+poll_sel:                               # an object selected
+    call    sel_objects
+    test    eax, eax
+    jz      1f
+    xor     eax, eax
+    ret
+1:  lea     rax, [rip+s_no_sel]
+    ret
+poll_two:                               # two or more
+    call    sel_objects
+    cmp     eax, 2
+    jb      1f
+    xor     eax, eax
+    ret
+1:  lea     rax, [rip+s_need_two]
+    ret
+poll_render:
+    xor     eax, eax
+    cmp     dword ptr [rip+rn_have], 0
+    jne     1f
+    lea     rax, [rip+s_no_render]
+1:  ret
+poll_rendering:
+    xor     eax, eax
+    cmp     dword ptr [rip+hv_active], 0
+    jne     1f
+    lea     rax, [rip+s_not_rendering]
+1:  ret
+poll_revert:
+    sub     rsp, 8
+    call    revertable
+    add     rsp, 8
+    test    eax, eax
+    jz      1f
+    xor     eax, eax
+    ret
+1:  lea     rax, [rip+s_no_revert_p]
+    ret
+
+# sel_objects -> eax = selected objects
+sel_objects:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+    xor     r12d, r12d
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      3f
+    inc     r12d
+3:  inc     ebx
+    jmp     1b
+2:  mov     eax, r12d
+    add     rsp, 8
+    pop     r12
     pop     rbx
     ret
 

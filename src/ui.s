@@ -18,6 +18,8 @@
 .globl cont_y0
 .globl is_hot
 .globl tool_ops
+.globl menu_items
+.globl run_op_ui
 .globl ui_key_repeat
 .globl active_tool
 .globl cur_shape
@@ -98,6 +100,7 @@ s_ai_gap:       .asciz "     "
 s_objs:         .asciz " objects"
 s_obj1:         .asciz " object"
 s_ready:        .asciz "Ready"
+s_colon_sp:     .asciz ": "
 
 s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero libraries"
 s_log_hello2:   .asciz "Tip: F3 searches every command; Enter opens the console"
@@ -697,7 +700,14 @@ ui_motion:
 2:  mov     [rip+hover_id], r13d
     mov     [rip+hover_idx], edx
     mov     dword ptr [rip+dirty], 1
-3:  mov     edi, r13d
+3:  push    rdx                         # resting on something: a tooltip
+    sub     rsp, 8
+    mov     edi, r13d
+    mov     esi, edx
+    call    tip_hover
+    add     rsp, 8
+    pop     rdx
+    mov     edi, r13d
     mov     esi, edx
     call    cursor_for
     mov     edi, eax
@@ -726,7 +736,10 @@ toggle_maximize:
 
 # ui_button(edi=button, esi=state, edx=serial, ecx=time)
 ui_button:
-    cmp     dword ptr [rip+pl_on], 0    # (play mode: buttons do nothing)
+    test    esi, esi                    # a press hides the tooltip
+    jz      0f
+    call    tip_block
+0:  cmp     dword ptr [rip+pl_on], 0    # (play mode: buttons do nothing)
     je      0f
     ret
 0:  test    esi, esi                    # the merge panel's buttons first
@@ -1096,7 +1109,7 @@ ui_button:
     jne     7f
     lea     rax, [rip+tool_ops]
     mov     rdi, [rax+r12*8]
-    call    run_op
+    call    run_op_ui
     jmp     .Lbt_done
 7:  cmp     ebx, HIT_OUTLINER           # click an object row to select it
     jne     .Lbt_done
@@ -1192,7 +1205,7 @@ ui_button:
     test    rax, rax
     jz      .Lbt_done
     mov     rdi, rax
-    call    run_op
+    call    run_op_ui
 .Lbt_done:
     pop     r15
     pop     r14
@@ -1547,7 +1560,34 @@ ui_draw:
     jl      4f
     call    draw_dropdown
 4:  call    wg_pop_draw
-    jmp     palette_draw
+    call    palette_draw
+    jmp     tip_draw                    # tooltips on top of everything
+
+# run_op_ui(rdi=op) - a menu item or a button: runs it, or when it cannot run
+#   now says why on the status line
+run_op_ui:
+    push    rbx
+    mov     rbx, rdi
+    call    op_poll
+    test    rax, rax
+    jnz     1f
+    mov     rdi, rbx
+    pop     rbx
+    jmp     run_op
+1:  push    rax                         # "Undo: there is nothing to undo"
+    sub     rsp, 8
+    call    fmt_reset
+    mov     rdi, [rbx+OP_LABEL]
+    call    fmt_str
+    lea     rdi, [rip+s_colon_sp]
+    call    fmt_str
+    mov     rdi, [rsp+8]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+    add     rsp, 16
+    pop     rbx
+    ret
 
 # is_hot(edi=hit id, esi=index) -> eax = 1 if hovered
 is_hot:
@@ -1911,17 +1951,24 @@ draw_dropdown:
     lea     ecx, [r12+8]
     mov     r8d, COL_ACCENT
     call    draw_line
-4:  lea     edi, [r15+26]
+4:  mov     rdi, [r14]                  # greyed when it cannot run now
+    call    op_poll
+    mov     ecx, COL_TEXT
+    test    rax, rax
+    jz      41f
+    mov     ecx, COL_TEXT_OFF
+41: push    rcx
+    sub     rsp, 8
+    lea     edi, [r15+26]
     lea     esi, [r12+4]
     mov     rax, [r14]
     mov     rdx, [rax+OP_LABEL]
-    mov     ecx, COL_TEXT
     call    draw_text
     mov     rax, [r14]                  # shortcut derived from the binding
     mov     edi, [rax+OP_KEY]
     call    fmt_key
     test    rax, rax
-    jz      5f
+    jz      42f
     push    rax
     mov     rdi, rax
     call    text_width
@@ -1932,7 +1979,11 @@ draw_dropdown:
     lea     esi, [r12+4]
     pop     rdx
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    cmp     dword ptr [rsp+8], COL_TEXT_OFF
+    jne     43f
+    mov     ecx, COL_TEXT_OFF
+43: call    draw_text
+42: add     rsp, 16
 5:  add     r12d, MENU_ITEM_H
 6:  add     r14, 8
     inc     ebx

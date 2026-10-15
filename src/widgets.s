@@ -43,6 +43,7 @@
 .globl wg_scroll_end
 .globl wg_tree_json
 .globl wg_ftoa
+.globl wg_desc_of
 
 .equ WG_MAX,    768
 .equ WG_SZ,     64
@@ -171,6 +172,14 @@ wg_find:
     jmp     1b
 2:  xor     eax, eax
 9:  ret
+
+# wg_desc_of(edi=id) -> rax = that widget's descriptor, 0 if not on screen
+wg_desc_of:
+    call    wg_find
+    test    rax, rax
+    jz      1f
+    mov     rax, [rax+E_DESC]
+1:  ret
 
 # wg_add(rdi=desc, esi=x, edx=y, ecx=w, r8d=h, r9=ptr, [r10d]=sub, eax=id)
 #   -> rax = entry (0 when the list is full)
@@ -1939,7 +1948,12 @@ wg_tree_json:
     add     rbx, WG_SZ
     inc     r12d
     jmp     1b
-8:  cmp     dword ptr [rip+wg_pop_open], 0  # an open option list: one more,
+8:  mov     edi, r12d                   # a tooltip on screen: one more
+    call    tip_json
+    cmp     dword ptr [rip+tip_shown], 0
+    je      80f
+    inc     r12d
+80: cmp     dword ptr [rip+wg_pop_open], 0  # an open option list: one more,
     je      81f                         #  sub -1, kind "list"
     test    r12d, r12d
     jz      82f

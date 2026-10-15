@@ -5257,9 +5257,9 @@ polya:          .skip 4
 #  object.boolean, closed-manifold check
 # =============================================================================
 OPERATOR op_boolean, "object.boolean", "Boolean", do_boolean, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Combine the active mesh with another selected one: object.boolean union|difference|intersect [keep]"
-OPERATOR op_bool_union, "object.boolean_union", "Boolean Union", do_boolean_n, arg=BOOL_UNION, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Boolean union of the active and the selected mesh"
-OPERATOR op_bool_diff, "object.boolean_difference", "Boolean Difference", do_boolean_n, arg=BOOL_DIFF, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Subtract the selected mesh from the active one"
-OPERATOR op_bool_isect, "object.boolean_intersect", "Boolean Intersect", do_boolean_n, arg=BOOL_ISECT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Keep what the active and the selected mesh share"
+OPERATOR op_bool_union, "object.boolean_union", "Boolean Union", do_boolean_n, arg=BOOL_UNION, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Boolean union of the active and the selected mesh", poll=poll_two
+OPERATOR op_bool_diff, "object.boolean_difference", "Boolean Difference", do_boolean_n, arg=BOOL_DIFF, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Subtract the selected mesh from the active one", poll=poll_two
+OPERATOR op_bool_isect, "object.boolean_intersect", "Boolean Intersect", do_boolean_n, arg=BOOL_ISECT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Keep what the active and the selected mesh share", poll=poll_two
 
 .section .rodata
 s_bo_need:      .asciz "boolean: select two meshes (the active one is kept)"

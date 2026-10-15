@@ -54,6 +54,7 @@ th_light:
     .long COL_BTN_HOVER,    0xcdd2da
     .long COL_TEXT,         0x1f2329
     .long COL_TEXT_DIM,     0x5b6270
+    .long COL_TEXT_OFF,     0xa3a9b3
     .long COL_STATUS_BG,    0xe3e6eb
     .long COL_DROP_BG,      0xffffff
     .long COL_DROP_BORDER,  0xb5bac3
@@ -94,6 +95,7 @@ th_contrast:
     .long COL_BTN_HOVER,    0x555555
     .long COL_TEXT,         0xffffff
     .long COL_TEXT_DIM,     0xd2d2d2
+    .long COL_TEXT_OFF,     0x8c8c8c
     .long COL_STATUS_BG,    0x000000
     .long COL_DROP_BG,      0x000000
     .long COL_DROP_BORDER,  0xffffff

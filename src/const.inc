@@ -194,6 +194,7 @@
 .equ COL_BTN_HOVER,     0x454b57
 .equ COL_TEXT,          0xc8ccd4
 .equ COL_TEXT_DIM,      0x9aa1ad  # >= 4.5:1 on panels and menus
+.equ COL_TEXT_OFF,      0x5f6672  # disabled text
 .equ COL_TEXT_DARK,     0x1b1d23  # (not the title bar's value: themes map them apart)
 .equ COL_CLOSE_HOT,     0xe81123
 .equ COL_STATUS_BG,     0x1f2126

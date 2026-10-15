@@ -34,12 +34,13 @@
 .equ WD_UNDO,       48          # undo step label, 0 = not undoable
 .equ WD_AUX,        56          # operator (button), label list (enum, tabs)
 .equ WD_N,          64          # number of labels
-.equ WD_SZ,         72
+.equ WD_TIP,        72          # tooltip text (buttons: their operator's)
+.equ WD_SZ,         80
 
 .equ WG_H,          22          # row height of fields and buttons
 
-# WIDGET sym, kind, "name" [, "label", min, max, step, dec, flags, cb, "undo", aux, n]
-.macro WIDGET sym, kind, name, label, min=0.0, max=0.0, step=0.01, dec=3, flags=0, cb=0, undo, aux=0, n=0
+# WIDGET sym, kind, "name" [, "label", min, max, step, dec, flags, cb, "undo", aux, n, "tip"]
+.macro WIDGET sym, kind, name, label, min=0.0, max=0.0, step=0.01, dec=3, flags=0, cb=0, undo, aux=0, n=0, tip
     .pushsection .rodata
 .Lwn\@: .asciz "\name"
 .ifnb \label
@@ -47,6 +48,9 @@
 .endif
 .ifnb \undo
 .Lwu\@: .asciz "\undo"
+.endif
+.ifnb \tip
+.Lwt\@: .asciz "\tip"
 .endif
     .balign 8
 \sym:
@@ -67,5 +71,10 @@
 .endif
     .quad \aux
     .long \n, 0
+.ifnb \tip
+    .quad .Lwt\@
+.else
+    .quad 0
+.endif
     .popsection
 .endm
