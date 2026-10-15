@@ -2021,8 +2021,10 @@ wg_tree_json:
     movsxd  rdi, dword ptr [rbx+E_H]
     call    wb_int
     mov     rsi, [r13+WD_LABEL]
-    cmp     dword ptr [rbx+E_KIND], WK_ROW  # (a row: its own text)
+    cmp     dword ptr [rbx+E_KIND], WK_ROW  # (a row: its own text, if set)
     jne     31f
+    cmp     qword ptr [rbx+E_AUX], 0
+    je      31f
     mov     rsi, [rbx+E_AUX]
 31: test    rsi, rsi
     jz      4f
