@@ -129,7 +129,7 @@ OPERATOR op_pt_rad_dn, "paint.radius_down", "Smaller Brush", do_pt_radius, arg=0
 OPERATOR op_pt_rad_up, "paint.radius_up", "Bigger Brush", do_pt_radius, arg=1, key=KEY_RIGHTBRACE, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: brush radius + 15%"
 OPERATOR op_pt_str_dn, "paint.strength_down", "Weaker", do_pt_strength, arg=0, key=KEY_LEFTBRACE|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: strength - 0.1"
 OPERATOR op_pt_str_up, "paint.strength_up", "Stronger", do_pt_strength, arg=1, key=KEY_RIGHTBRACE|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: strength + 0.1"
-OPERATOR op_pt_color, "paint.color", "Brush Colour", do_pt_color, flags=OPF_AI_SAFE|OPF_QUIET, doc="Texture paint: the brush colour: paint.color <r> <g> <b> (0-255)"
+OPERATOR op_pt_color, "paint.color", "Brush Colour", do_pt_color, flags=OPF_AI_SAFE|OPF_QUIET, doc="Texture paint: the brush colour: paint.color <r> <g> <b> (0-255)", form=form_pcolor
 OPERATOR op_pt_ladd, "paint.layer_add", "New Paint Layer", do_pt_layer, arg=0, key=KEY_N|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: a new transparent layer above, painted from now on"
 OPERATOR op_pt_lup, "paint.layer_up", "Layer Above", do_pt_layer, arg=1, key=KEY_PAGEUP, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: paint the layer above"
 OPERATOR op_pt_ldn, "paint.layer_down", "Layer Below", do_pt_layer, arg=2, key=KEY_PAGEDOWN, flags=OPF_AI_SAFE|OPF_QUIET|OPF_PAINT, doc="Texture paint: paint the layer below"

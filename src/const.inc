@@ -327,6 +327,7 @@
 .equ MENU_CTX,          NUM_MENUS+2   # a right-click context menu (menus.s)
 .equ HIT_SUBITEM,       32            # an entry of an open submenu
 .equ HIT_PIE,           33            # a pie menu (index = the choice)
+.equ HIT_DIALOG,        34            # under a dialog: nothing
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
 

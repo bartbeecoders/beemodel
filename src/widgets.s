@@ -44,6 +44,7 @@
 .globl wg_tree_json
 .globl wg_ftoa
 .globl wg_desc_of
+.globl wg_n
 
 .equ WG_MAX,    768
 .equ WG_SZ,     64
@@ -854,9 +855,15 @@ closed_toggle:                          # edi = id
 #   the wheel, so they are not hits.
 wg_hit:
     lea     rax, [rip+wg_list]
-    mov     ecx, [rip+wg_n]
+    cmp     dword ptr [rip+dlg_open], 0 # a dialog: only its own widgets
+    je      0f
+    mov     ecx, [rip+dlg_floor]
     imul    ecx, ecx, WG_SZ
-    add     rcx, rax                    # one past the end
+    add     rax, rcx
+0:  mov     ecx, [rip+wg_n]
+    imul    ecx, ecx, WG_SZ
+    lea     rdx, [rip+wg_list]
+    add     rcx, rdx                    # one past the end
 1:  cmp     rcx, rax
     jbe     8f
     sub     rcx, WG_SZ

@@ -2550,7 +2550,7 @@ cl_info:
 # =============================================================================
 #  Operators
 # =============================================================================
-OPERATOR op_cl_add,   "cloth.add",    "Add Cloth",      do_cl_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects cloth, soft bodies or colliders (or change them): cloth.add [cloth|soft|collider] [stretch c] [bend c] [volume c] [mass m] [damping d] [thickness t] [friction f] [self] (c: compliance, m/N; 0 stiff)"
+OPERATOR op_cl_add,   "cloth.add",    "Add Cloth",      do_cl_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects cloth, soft bodies or colliders (or change them): cloth.add [cloth|soft|collider] [stretch c] [bend c] [volume c] [mass m] [damping d] [thickness t] [friction f] [self] (c: compliance, m/N; 0 stiff)", form=form_cloth
 OPERATOR op_cl_rem,   "cloth.remove", "Remove Cloth",   do_cl_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="The selected objects are no longer cloth / soft bodies / colliders"
 OPERATOR op_cl_pin,   "cloth.pin",    "Pin Cloth",      do_cl_pin, flags=OPF_AI_SAFE|OPF_UNDO, doc="The pin group of the selected meshes (pinned vertices hold to the object): cloth.pin selected | all | none | above <x|y|z> <value> | below <x|y|z> <value> (object space)"
 OPERATOR op_cl_world, "cloth.world",  "Cloth World",    do_cl_world, flags=OPF_AI_SAFE|OPF_UNDO, doc="Cloth settings: cloth.world [wind x y z] [substeps n] [rate steps-a-second]"

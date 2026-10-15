@@ -118,7 +118,7 @@ OPERATOR op_param_set, "param.set", "Set Parameter", do_param_set, flags=OPF_AI_
 OPERATOR op_param_remove, "param.remove", "Remove Parameter", do_param_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a parameter: param.remove <name>"
 OPERATOR op_param_list, "param.list", "List Parameters", do_param_list, flags=OPF_AI_SAFE|OPF_QUIET, doc="List the parameters with their values"
 OPERATOR op_cad_kernel, "cad.kernel", "B-rep Kernel", do_cad_kernel, flags=OPF_AI_SAFE|OPF_UNDO, doc="CAD features make exact B-rep solids (NURBS surfaces, STEP export) instead of meshes: cad.kernel on|off"
-OPERATOR op_scene_units, "scene.units", "Scene Units", do_scene_units, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set what one scene unit is: scene.units mm|cm|m|in (lengths typed with units convert)"
+OPERATOR op_scene_units, "scene.units", "Scene Units", do_scene_units, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set what one scene unit is: scene.units mm|cm|m|in (lengths typed with units convert)", form=form_units
 
 .text
 

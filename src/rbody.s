@@ -4023,7 +4023,7 @@ rb_info:
 # =============================================================================
 #  Operators
 # =============================================================================
-OPERATOR op_rb_add,   "rigid.add",    "Add Rigid Body",    do_rb_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects rigid bodies (or change them): rigid.add [active|passive] [box|sphere|capsule|hull|compound] [mass m] [friction f] [bounce b] [damping d]. Active ones fall when the frame goes past the start"
+OPERATOR op_rb_add,   "rigid.add",    "Add Rigid Body",    do_rb_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects rigid bodies (or change them): rigid.add [active|passive] [box|sphere|capsule|hull|compound] [mass m] [friction f] [bounce b] [damping d]. Active ones fall when the frame goes past the start", form=form_rigid
 OPERATOR op_rb_rem,   "rigid.remove", "Remove Rigid Body", do_rb_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="The selected objects are no longer rigid bodies"
 OPERATOR op_rb_joint, "rigid.joint",  "Add Joint",         do_rb_joint, flags=OPF_AI_SAFE|OPF_UNDO, doc="Tie two bodies (or one to the world): rigid.joint <fixed|hinge|point> <object> <object|world> [pivot x y z] [axis x y z] (pivot: the first object's place; axis: Y)"
 OPERATOR op_rb_world, "rigid.world",  "Physics World",     do_rb_world, flags=OPF_AI_SAFE|OPF_UNDO, doc="Physics settings: rigid.world [gravity x y z] [rate steps-a-second] [iterations n]"

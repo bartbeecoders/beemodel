@@ -87,8 +87,8 @@ s_w_str:        .asciz "  world strength: "
 s_w_rot:        .asciz "  world rotation: "
 
 OPERATOR op_world_hdri, "world.hdri", "World HDRI", do_world_hdri, flags=OPF_AI_SAFE, doc="Light the scene with an equirectangular image: world.hdri <image|none>"
-OPERATOR op_world_strength, "world.strength", "World Strength", do_world_strength, flags=OPF_AI_SAFE, doc="Scale the world's light: world.strength <factor>"
-OPERATOR op_world_rotation, "world.rotation", "World Rotation", do_world_rotation, flags=OPF_AI_SAFE, doc="Turn the world image about the vertical: world.rotation <degrees>"
+OPERATOR op_world_strength, "world.strength", "World Strength", do_world_strength, flags=OPF_AI_SAFE, doc="Scale the world's light: world.strength <factor>", form=form_wstrength
+OPERATOR op_world_rotation, "world.rotation", "World Rotation", do_world_rotation, flags=OPF_AI_SAFE, doc="Turn the world image about the vertical: world.rotation <degrees>", form=form_wrotation
 
 .text
 
