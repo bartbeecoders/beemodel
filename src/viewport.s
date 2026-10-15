@@ -974,6 +974,13 @@ OPERATOR op_view_matprev,   "view.toggle_material_preview", "Material Preview", 
 .text
 # op_shading_set(edi=mode) - that mode, or solid when it is already on;
 #   op_shading_is(edi=mode) -> eax = 1 when on
+OPERATOR op_shade_solid, "view.shading_solid", "Solid", op_shading_exact, op_shading_is, 0, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Solid shading in the viewport"
+OPERATOR op_shade_wire,  "view.shading_wireframe", "Wireframe", op_shading_exact, op_shading_is, 1, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Wireframe shading in the viewport"
+OPERATOR op_shade_mat,   "view.shading_material", "Material Preview", op_shading_exact, op_shading_is, 2, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Shade the viewport with each object's material"
+op_shading_exact:                       # (pie menu: exactly this one)
+    mov     [rip+vp_shading], edi
+    mov     dword ptr [rip+dirty], 1
+    ret
 op_shading_set:
     xor     eax, eax
     cmp     [rip+vp_shading], edi

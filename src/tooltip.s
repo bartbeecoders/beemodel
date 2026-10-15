@@ -132,6 +132,8 @@ tip_content:
     mov     ecx, [rip+tip_id]
     cmp     ecx, HIT_MENU_ITEM
     je      .Ltc_menu
+    cmp     ecx, HIT_SUBITEM
+    je      .Ltc_sub
     cmp     ecx, HIT_TOOL
     je      .Ltc_tool
     cmp     ecx, HIT_AREA_BTN
@@ -155,6 +157,12 @@ tip_content:
     js      .Ltc_none
     lea     rcx, [rip+menu_items]
     mov     rcx, [rcx+rax*8]
+    mov     rdi, [rcx+rbx*8]
+    jmp     .Ltc_op
+.Ltc_sub:
+    test    ebx, ebx
+    js      .Ltc_none
+    mov     rcx, [rip+l1_items]
     mov     rdi, [rcx+rbx*8]
     jmp     .Ltc_op
 .Ltc_tool:
@@ -204,6 +212,8 @@ tip_content:
 .Ltc_op:                                # rdi = operator (0: a separator)
     test    rdi, rdi
     jz      .Ltc_none
+    cmp     qword ptr [rdi], SUBTAG     # (a submenu: nothing to add)
+    je      .Ltc_none
     mov     rbx, rdi
     mov     rax, [rbx+OP_LABEL]
     mov     [rip+tip_title], rax
