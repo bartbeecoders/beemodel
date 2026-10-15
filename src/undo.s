@@ -15,6 +15,7 @@
 
 # exports
 .globl undo_push
+.globl scene_modified
 .globl undo_group_begin
 .globl undo_group_end
 .globl undo_top_label
@@ -59,6 +60,8 @@ undo_bytes:     .skip 8
 undo_depth:     .skip 4
 redo_depth:     .skip 4
 changes:        .skip 4
+scene_modified: .skip 4                 # unsaved changes (the title shows a dot)
+mod_prev:       .skip 4                 # (its value before the last step)
 
 .section .rodata
 s_undo:         .asciz "  undo: "
@@ -434,6 +437,9 @@ undo_push:
     call    push_on
     mov     qword ptr [rip+lo_op], 0    # a new step: the redo panel moves on
     call    trim_bytes
+    mov     eax, [rip+scene_modified]
+    mov     [rip+mod_prev], eax
+    mov     dword ptr [rip+scene_modified], 1
     inc     dword ptr [rip+changes]     # autosave every AUTOSAVE_EVERY changes
     cmp     dword ptr [rip+changes], AUTOSAVE_EVERY
     jb      9f
@@ -495,6 +501,8 @@ undo_drop_last:
     jne     9f
     cmp     dword ptr [rip+group_depth], 0  # inside a group the step stays
     jne     9f
+    mov     eax, [rip+mod_prev]         # nothing changed after all
+    mov     [rip+scene_modified], eax
     mov     eax, [rip+undo_depth]
     test    eax, eax
     jz      9f
@@ -647,9 +655,10 @@ op_undo:
     lea     r8, [rip+s_undo]
     call    swap_states
     test    eax, eax
-    jnz     9f
+    jnz     8f
     lea     rdi, [rip+s_nothing_u]
     jmp     log_line
+8:  mov     dword ptr [rip+scene_modified], 1
 9:  ret
 
 op_redo:
@@ -667,9 +676,10 @@ op_redo:
     lea     r8, [rip+s_redo]
     call    swap_states
     test    eax, eax
-    jnz     9f
+    jnz     8f
     lea     rdi, [rip+s_nothing_r]
     jmp     log_line
+8:  mov     dword ptr [rip+scene_modified], 1
 9:  ret
 
 op_history:

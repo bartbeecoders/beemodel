@@ -30,6 +30,7 @@
 .globl ed_w
 .globl ed_h
 .globl items_area
+.globl items_area_n
 .globl split_with
 .globl find_editor
 .globl splitter_cursor
@@ -116,9 +117,6 @@ s_p_yaw:        .asciz "Yaw"
 s_p_pitch:      .asciz "Pitch"
 s_p_dist:       .asciz "Distance"
 s_p_target:     .asciz "Target"
-s_p_canvas:     .asciz "Canvas"
-s_p_grid:       .asciz "Grid"
-s_p_areas:      .asciz "Areas"
 s_p_loc:        .asciz "Location"
 s_p_rot:        .asciz "Rotation"
 s_p_scale:      .asciz "Scale"
@@ -138,11 +136,8 @@ s_no_active:    .asciz "No active object"
 s_v:            .asciz " v, "
 s_e:            .asciz " e, "
 s_f:            .asciz " f"
-s_on:           .asciz "on"
-s_off:          .asciz "off"
 s_deg:          .asciz " deg"
 s_comma:        .asciz ", "
-s_xx:           .asciz " x "
 s_last_area:    .asciz "  the last area cannot be closed"
 s_no_room:      .asciz "  no room for more areas"
 .align 8
@@ -153,6 +148,8 @@ items_area:     .quad op_area_type_vp, op_area_type_tools, op_area_type_outl
                 .quad op_area_type_props, op_area_type_console, op_area_type_activity, op_area_type_render
                 .quad op_area_type_uved, op_area_type_nodes, op_area_type_assets, op_area_type_timeline
                 .quad op_area_type_dopesheet, op_area_type_graph
+items_area_end:
+.set items_area_n, (items_area_end - items_area) / 8
 
 # ---- operators ------------------------------------------------------------------
 OPERATOR op_area_split_side,  "area.split_side",  "Split Area Side by Side", op_area_split, arg=K_HSPLIT, doc="Split the active area into two side by side"
@@ -1374,50 +1371,6 @@ ed_props_draw:
     call    fmt_fix1
     mov     edi, r12d
     lea     rsi, [rip+s_p_target]
-    call    prop_row
-    add     r12d, 26
-    call    fmt_reset                   # size of that viewport's canvas
-    mov     edi, [rip+vp_area]
-    test    edi, edi
-    js      1f
-    call    node_ptr
-    mov     rbx, rax
-    mov     edi, [rbx+N_W]
-    call    fmt_int
-    lea     rdi, [rip+s_xx]
-    call    fmt_str
-    mov     edi, [rbx+N_H]
-    sub     edi, PANE_HDR_H
-    call    fmt_int
-1:  mov     edi, r12d
-    lea     rsi, [rip+s_p_canvas]
-    call    prop_row
-    add     r12d, 18
-    call    fmt_reset
-    lea     rdi, [rip+s_on]
-    cmp     dword ptr [rip+show_grid], 0
-    jne     2f
-    lea     rdi, [rip+s_off]
-2:  call    fmt_str
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_grid]
-    call    prop_row
-    add     r12d, 18
-    call    fmt_reset                   # number of areas
-    xor     ebx, ebx
-    lea     rcx, [rip+nodes]
-    xor     eax, eax
-3:  cmp     byte ptr [rcx], K_LEAF
-    jne     4f
-    inc     ebx
-4:  add     rcx, N_SZ
-    inc     eax
-    cmp     eax, MAX_NODES
-    jb      3b
-    mov     edi, ebx
-    call    fmt_int
-    mov     edi, r12d
-    lea     rsi, [rip+s_p_areas]
     call    prop_row
     pop     r12
     pop     rbx

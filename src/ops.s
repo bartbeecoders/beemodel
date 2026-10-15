@@ -57,6 +57,30 @@ s_k_enter:      .asciz "Enter"
 s_k_space:      .asciz "Space"
 s_k_home:       .asciz "Home"
 s_k_del:        .asciz "Del"
+s_k_up:       .asciz "Up"
+s_k_pgup:     .asciz "PgUp"
+s_k_left:     .asciz "Left"
+s_k_right:    .asciz "Right"
+s_k_end:      .asciz "End"
+s_k_down:     .asciz "Down"
+s_k_pgdn:     .asciz "PgDn"
+s_k_ins:      .asciz "Ins"
+s_k_kpmul:    .asciz "Num*"
+s_k_kpminus:  .asciz "Num-"
+s_k_kpplus:   .asciz "Num+"
+s_k_kpdot:    .asciz "Num."
+s_k_kpenter:  .asciz "NumEnter"
+s_k_kpslash:  .asciz "Num/"
+s_k_kp0:      .asciz "Num0"
+s_k_kp1:      .asciz "Num1"
+s_k_kp2:      .asciz "Num2"
+s_k_kp3:      .asciz "Num3"
+s_k_kp4:      .asciz "Num4"
+s_k_kp5:      .asciz "Num5"
+s_k_kp6:      .asciz "Num6"
+s_k_kp7:      .asciz "Num7"
+s_k_kp8:      .asciz "Num8"
+s_k_kp9:      .asciz "Num9"
 s_k_f11:        .asciz "F11"
 s_k_f12:        .asciz "F12"
 s_k_unknown:    .asciz "Key?"
@@ -83,7 +107,31 @@ key_special:                            # code:u64, name:ptr
     .quad 87, s_k_f11
     .quad 88, s_k_f12
     .quad 102, s_k_home
+    .quad 103, s_k_up
+    .quad 104, s_k_pgup
+    .quad 105, s_k_left
+    .quad 106, s_k_right
+    .quad 107, s_k_end
+    .quad 108, s_k_down
+    .quad 109, s_k_pgdn
+    .quad 110, s_k_ins
     .quad 111, s_k_del
+    .quad 55, s_k_kpmul
+    .quad 74, s_k_kpminus
+    .quad 78, s_k_kpplus
+    .quad 79, s_k_kp1
+    .quad 80, s_k_kp2
+    .quad 81, s_k_kp3
+    .quad 75, s_k_kp4
+    .quad 76, s_k_kp5
+    .quad 77, s_k_kp6
+    .quad 71, s_k_kp7
+    .quad 72, s_k_kp8
+    .quad 73, s_k_kp9
+    .quad 82, s_k_kp0
+    .quad 83, s_k_kpdot
+    .quad 96, s_k_kpenter
+    .quad 98, s_k_kpslash
     .quad 0, 0
 
 .section .bss

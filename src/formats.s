@@ -2743,7 +2743,8 @@ result:
 3:  lea     rsi, [rip+path_buf]
     jmp     log_pair
 
-set_cur_path:                           # cur_path = path_buf
+set_cur_path:                           # cur_path = path_buf (opened or saved)
+    mov     dword ptr [rip+scene_modified], 0
     lea     rsi, [rip+path_buf]
     lea     rdi, [rip+cur_path]
     mov     ecx, 512
@@ -2755,6 +2756,7 @@ op_new:
     call    scene_clear
     call    scene_defaults
     mov     byte ptr [rip+cur_path], 0
+    mov     dword ptr [rip+scene_modified], 0
     ret
 
 op_open:

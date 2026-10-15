@@ -67,6 +67,17 @@ _start:
     call    log_line
     lea     rdi, [rip+s_log_hello2]
     call    log_line
+    mov     rax, [rip+open_target]      # beemodel scene.bee
+    test    rax, rax
+    jz      2f
+    push    qword ptr [rip+op_arg]
+    push    rax
+    mov     [rip+op_arg], rax
+    lea     rdi, [rip+op_file_open]
+    call    run_op
+    pop     rax
+    pop     qword ptr [rip+op_arg]
+2:
 
     mov     dword ptr [rip+vg_async], 1 # (the window: DAGs build in the background)
 .Lloop:
@@ -204,7 +215,11 @@ handle_cli_args:
     call    str_eq
     test    eax, eax
     jnz     .Lcli_help
-    lea     rdi, [rip+e_bad_arg]
+    cmp     byte ptr [rbx], '-'         # beemodel scene.bee: open it in the window
+    je      1f
+    mov     [rip+open_target], rbx
+    ret
+1:  lea     rdi, [rip+e_bad_arg]
     call    write_err
     mov     rdi, rbx
     call    write_err
@@ -300,6 +315,8 @@ write_out:
 
 .section .bss
 .align 8
+open_target:    .skip 8                 # (beemodel scene.bee: the file to open)
+.align 8
 pollfds:        .skip 8*32              # struct pollfd: Wayland, repeat timer, MCP, link
 n_mcpfds:       .skip 4
 
@@ -317,7 +334,8 @@ s_arg_link:     .asciz "--link"
 e_need_arg:     .asciz "beemodel: --eval needs BeeScript code, --run a file, --link an address\n"
 s_ver_prefix:   .asciz "beemodel "
 e_bad_arg:      .asciz "beemodel: unknown argument: "
-s_help:         .ascii "Usage: beemodel [--version | --list-ops | --selftest | --mcp-bridge | --help]\n"
+s_help:         .ascii "Usage: beemodel [scene.bee]   (open a scene in the window)\n"
+                .ascii "       beemodel --version | --list-ops | --selftest | --mcp-bridge | --help\n"
                 .ascii "       beemodel --eval 'BeeScript' | --run file.bees   (no window)\n"
                 .ascii "       beemodel --link host:port | unix:<path>   (mirror a session's live link)\n"
                 .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"

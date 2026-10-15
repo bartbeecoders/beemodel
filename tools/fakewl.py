@@ -507,6 +507,7 @@ def main():
     check(rc == 0, f'typed file.exit quits cleanly (rc={rc})')
     check(f.frames >= 50, f'frames rendered ({f.frames})')
     areas_and_palette()
+    ui_basics()
     transforms()
     undo_redo()
     files()
@@ -4620,6 +4621,56 @@ def areas_and_palette():
     except subprocess.TimeoutExpired:
         f.proc.kill(); rc = None
     check(rc == 0, f'F3 "exit" + Enter quits through the palette (rc={rc})')
+
+
+def ui_basics():
+    """UI plan U1: every menu entry shows, key names, the hand cursor, the
+    unsaved-changes dot and opening a scene from the command line."""
+    print('  -- ui basics --')
+    ops = subprocess.run([BIN, '--list-ops'], capture_output=True, text=True).stdout
+    check('Key?' not in ops and 'Right ' in ops and 'PgUp' in ops,
+          '--list-ops names every bound key (arrows, PageUp/PageDown)')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    T = f.home
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.2); f.key(1)
+    def dot():                                 # the accent dot right of the title
+        return any(px(f, x, 16) == 0xf2b134 for x in range(160, 640))
+    f.move(30, 43)
+    check(f.cursor == 4, f'hand cursor over a menu title (shape {f.cursor})')
+    f.move(600, 300)
+    check(f.cursor == 8, 'crosshair again over the canvas')
+    check(not dot(), 'a fresh scene has no unsaved-changes dot')
+    f.click(193, 43)                           # Create menu
+    f.shot('ui_create_menu.png')
+    f.click(230, 71 + 12 * 24 + 2 * 9)         # its 13th entry, below two separators
+    f.pump(0.3)
+    check(q('print(exists("Armature"))') == '1', 'Create menu shows Path, Light, Camera and Armature')
+    check(dot(), 'a change shows the unsaved-changes dot in the title')
+    f.click(270, 67)                           # viewport header: editor type menu
+    f.shot('ui_area_menu.png')
+    before = px(f, 600, 400)
+    f.click(300, 95 + 12 * 24)                 # 13th entry: Graph Editor
+    check(px(f, 600, 400) != before, 'editor type menu reaches Timeline, Dope Sheet and Graph Editor')
+    cmd(f'file.save {T}/u1.bee')
+    check(os.path.exists(f'{T}/u1.bee') and not dot(), 'saving clears the dot')
+    f.mods(4); f.key(44); f.mods(0)            # Ctrl+Z: changed again
+    check(dot(), 'undo after saving marks the scene changed')
+    f.shot('ui_status.png')
+    f.proc.kill()
+    g = Fake([f'{T}/u1.bee'])
+    g.pump(1.0, until_frame=True)
+    g.enter(600, 300)
+    n = Mcp(g)
+    r = (n.tool('script_eval', {'code': 'print(exists("Armature"))'})[0] or '').strip()
+    check(r == '1', f'beemodel scene.bee opens the scene ({r})')
+    check(not any(px(g, x, 16) == 0xf2b134 for x in range(160, 640)), 'an opened scene has no dot')
+    g.proc.kill()
 
 
 if __name__ == '__main__':
