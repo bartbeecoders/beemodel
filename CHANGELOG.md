@@ -6,6 +6,81 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-15
+
+Phase 11, "UI & usability" (`Vibecoding/BeeModel-UI-Plan.html`): every
+feature is one click away. You never need the console: each command has a
+menu entry, a panel or a dialog, and the window works with the mouse or the
+keyboard alone. The tour is in [docs/UI.md](docs/UI.md).
+
+### Added (UI and usability)
+- **Look:** Dark, Light and High contrast themes, all text at 4.5:1 or
+  more; anti-aliased rounded shapes and shadows; font roles; 94 vector icons
+  (U1-U2, U5).
+- **Widget toolkit:** fields that scrub, take typed values and expressions,
+  copy and paste, and key with I; toggles, sliders, option lists, colour
+  fields with a picker (hue, square, hex, Pick from the screen), sections,
+  tabs, scrolled regions; one undo step per change. The MCP tool `ui_tree`
+  lists every widget for agents and tests (U3, U9, U17).
+- **Help in place:** tooltips with the shortcut, what it does and why it is
+  greyed; a status bar with the keys that work now and toasts; F1 for every
+  shortcut; a Help area; a welcome screen with templates, samples and
+  recent files; quick actions in an empty viewport (U4, U14, U25).
+- **Menus and dialogs:** two-level menus (File ... Help), right-click menus,
+  a Z pie; forms for every command that takes values; "Save changes?"; a
+  file browser with export options; Open Recent (U6-U8, U15).
+- **Editors:** a Properties editor with Object, Modifiers, Material,
+  Physics, CAD, Scene, Render, Viewport, Animation and Rig tabs; a viewport
+  header and navigation gizmo; a tool shelf that follows the mode; brush
+  bars; an outliner with icons, eyes, rename and a filter; headers for the
+  node, UV, timeline, dope sheet, graph, render and asset editors; new
+  Versions, Preferences and Help editors (U10-U13, U16-U22).
+- **Feature panels:** CAD features, parameters and joints; materials, the
+  world, images and modifiers; paint colour and layers, weight and bones,
+  UVs and baking; keys, shape keys, actions, drivers, constraints and
+  bones; cloth, joints and the simulation cache; render, GPU, virtualized
+  geometry, world partition, probes, lightmaps and play mode; a light's
+  power and colour and a camera's lens (saved as LCAM); the asset library,
+  versions, co-editing, the live link and the agents (U16-U22).
+- **Preferences** saved in `~/.config/beemodel/prefs`: theme, UI scale
+  (75-200 %), tooltip delay, keymap overrides, input, threads, GPU, JIT,
+  autosave, library folders, the agents and MCP (U23).
+- **Workspaces:** Modeling, Sculpt, CAD, Shading, Animation and World plus
+  your own, as tabs in the menu bar; swap and join areas by dragging (U24).
+- **Keyboard and accessibility:** F6 between areas, Tab / Shift+Tab through
+  any panel's or dialog's widgets, Enter / Space / arrows on the focused
+  one; colour-blind-safe axis colours (U26).
+- **Tests:** a fakewl scenario per step, driven through `ui_tree` names,
+  and `walkthrough_ui`: model, a CAD feature, a material, a render, save and
+  reopen with clicks and keys only (U27).
+
+### Performance (UI)
+- **UI frames:** with the Object, Modifiers, Material or Render tab on
+  screen and the pointer moving over it, a frame takes 1.4-3.5 ms (median,
+  1280 x 800, software rendering); the budget is 16 ms (`ui_bench`).
+- **Size:** the binary is about 1.08 MB; the budget went to 1.5 MiB.
+
+## [0.11.0] - 2026-10-15
+
+Phase 10 of the masterplan, "Engine-grade & collaboration". BeeModel scales
+up and opens up to teams:
+
+- **Scale:** cluster LOD DAGs (virtualized geometry) drawn through a new cut
+  every frame, world partition streaming and a content library.
+- **Play:** play mode with walk and fly, logic graphs, light probes and
+  lightmaps, and a live link that streams the scene over a socket.
+- **Teams:** versioned scenes (commit, branch, visual diff, three-way
+  merge) and live CRDT co-editing for two users and an AI agent.
+- **CAD:** an exact B-rep / NURBS kernel and STEP import and export.
+- **GPU:** the optional `beemodel-gpu` helper path-traces and rasterizes on
+  Vulkan, a second release asset; BeeModel itself still links nothing.
+
+The exit checks: 1.05 billion source triangles fly at 5.8 ms a frame
+(median) in an 851 MB process (`tests/billion.py`, budget 8 GB); two users
+and an agent edit one scene and converge to identical documents
+(`tests/coedit.py`); STEP parts and assemblies round-trip through FreeCAD to
+1e-6 (`tests/step.py`).
+
 ### Added
 - **Cluster LOD DAG** (virtualized geometry, part 1, #143). `vgeo.build`
   turns the active mesh into meshlets: clusters of up to 128 triangles and
@@ -1337,7 +1412,9 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/bartbeecoders/beemodel/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/bartbeecoders/beemodel/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/bartbeecoders/beemodel/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/bartbeecoders/beemodel/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/bartbeecoders/beemodel/compare/v0.7.0...v0.8.0
