@@ -126,6 +126,7 @@ OPERATOR op_theme_contrast, "view.theme_contrast", "High Contrast", do_theme_n, 
 # th_map(r8d = colour) -> r8d = the active theme's colour
 #   clobbers rax only, so the primitives can call it on their arguments
 th_map:
+    call    cb_axis_map                 # (colour-blind-safe axes: a11y.s)
     mov     rax, [rip+th_tab]
     test    rax, rax
     jz      9f                          # dark: the colours as written

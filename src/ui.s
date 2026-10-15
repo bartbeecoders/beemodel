@@ -770,7 +770,10 @@ toggle_maximize:
 
 # ui_button(edi=button, esi=state, edx=serial, ecx=time)
 ui_button:
-    cmp     dword ptr [rip+pr_emu3], 0  # Alt + left: the middle button (prefs)
+    test    esi, esi                    # a press: the keyboard lets go
+    jz      71f
+    call    kbnav_mouse
+71: cmp     dword ptr [rip+pr_emu3], 0  # Alt + left: the middle button (prefs)
     je      0f
     cmp     edi, BTN_LEFT
     jne     0f
@@ -1620,6 +1623,10 @@ ui_key_press:
     call    wg_key
     jmp     9f
 .Lkp_notyping:
+    mov     edi, ebx                    # keyboard navigation: F6, Tab, the
+    call    kbnav_key                   #  focused widget (a11y.s)
+    test    eax, eax
+    jnz     9f
     mov     edi, ebx                    # a dialog takes the keys
     call    dlg_key
     test    eax, eax
@@ -1717,6 +1724,7 @@ ui_draw:
     call    draw_titlebar
     call    draw_menubar
     call    area_draw_all
+    call    kbnav_ring                  # (the keyboard's active area)
     call    draw_statusbar
     cmp     dword ptr [rip+menu_open], 0
     jl      4f
