@@ -626,7 +626,14 @@ mn_bar_key:
     lea     rdx, [rip+__stop_bee_ops]
 4:  cmp     rcx, rdx
     jae     5f
-    cmp     [rcx+OP_KEY], eax
+    push    rdi                         # (the key in use: prefs.s)
+    push    rax
+    mov     rdi, rcx
+    call    key_eff
+    mov     edi, eax
+    pop     rax
+    cmp     edi, eax
+    pop     rdi
     je      7f
     add     rcx, OP_SIZE
     jmp     4b

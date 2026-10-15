@@ -39,6 +39,7 @@
 ui_s16q:    .quad 65536                 # UI scale, 16.16 (logical -> physical)
 ui_inv16q:  .quad 65536                 # 1 / scale, 16.16
 ui_s120:    .long 120                   # UI scale in 1/120 (wp_fractional_scale)
+comp_s120:  .long 120                   # (the compositor's part of it)
 
 .section .bss
 .align 8
@@ -72,8 +73,22 @@ to_lg:
     sar     rax, 16
     ret
 
-# set_ui_scale(edi = scale in 1/120) -> eax = 1 if it changed
+# set_ui_scale(edi = the compositor's scale in 1/120) -> eax = 1 if it
+#   changed; the scale used is that times the UI scale preference (prefs.s)
 set_ui_scale:
+    xor     eax, eax
+    test    edi, edi
+    jz      9f
+    mov     [rip+comp_s120], edi
+# ui_scale_apply -> eax = 1 if the scale used changed
+.globl ui_scale_apply
+ui_scale_apply:
+    mov     eax, [rip+comp_s120]
+    imul    eax, [rip+pr_scale]
+    xor     edx, edx
+    mov     ecx, 100
+    div     ecx
+    mov     edi, eax
     xor     eax, eax
     test    edi, edi
     jz      9f

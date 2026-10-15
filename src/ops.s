@@ -32,7 +32,6 @@
 # ---- File ---------------------------------------------------------------------
 OPERATOR op_file_exit,  "file.exit",  "Exit",      op_exit, key=KEY_Q|KM_CTRL, flags=OPF_CONFIRM, doc="Quit BeeModel"
 # ---- Edit ---------------------------------------------------------------------
-OPERATOR op_edit_prefs, "edit.preferences", "Preferences...", op_todo, doc="Open the preferences editor"
 # ---- Tools --------------------------------------------------------------------
 OPERATOR op_tool_select, "tool.select", "Select", op_set_tool, op_check_tool, 0, KEY_Q|KM_SHIFT, doc="Selection tool"
 OPERATOR op_tool_move,   "tool.move",   "Move",   op_set_tool, op_check_tool, 1, KEY_W|KM_SHIFT, doc="Move tool"
@@ -364,7 +363,11 @@ dispatch_key:
     lea     rdx, [rip+__stop_bee_ops]
 101: cmp     rdi, rdx
     jae     0f
-    cmp     [rdi+OP_KEY], eax
+    push    rax                         # (the key in use: prefs.s)
+    call    key_eff
+    mov     r8d, eax
+    pop     rax
+    cmp     r8d, eax
     jne     102f
     test    [rdi+OP_FLAGS], ecx
     jnz     6f
@@ -374,7 +377,11 @@ dispatch_key:
     lea     rdx, [rip+__stop_bee_ops]
 1:  cmp     rdi, rdx
     jae     2f
-    cmp     [rdi+OP_KEY], eax
+    push    rax
+    call    key_eff
+    mov     r8d, eax
+    pop     rax
+    cmp     r8d, eax
     je      3f
 4:  add     rdi, OP_SIZE
     jmp     1b
@@ -515,7 +522,9 @@ list_ops:
     call    fmt_str
     mov     edi, 24
     call    fmt_pad
-    mov     edi, [rbx+OP_KEY]
+    mov     rdi, rbx                    # (the key in use: prefs.s)
+    call    key_eff
+    mov     edi, eax
     call    fmt_key
     test    rax, rax
     jz      2f
@@ -619,13 +628,17 @@ op_shortcuts:
 1:  lea     rax, [rip+__stop_bee_ops]
     cmp     rbx, rax
     jae     9f
-    mov     edi, [rbx+OP_KEY]
+    mov     rdi, rbx                    # (the key in use: prefs.s)
+    call    key_eff
+    mov     edi, eax
     test    edi, edi
     jz      2f
     call    fmt_reset
     lea     rdi, [rip+s_two_sp]
     call    fmt_str
-    mov     edi, [rbx+OP_KEY]
+    mov     rdi, rbx                    # (the key in use: prefs.s)
+    call    key_eff
+    mov     edi, eax
     call    fmt_key
     mov     rdi, rax
     call    fmt_str
