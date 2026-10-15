@@ -64,6 +64,14 @@ project uses [Semantic Versioning](https://semver.org/).
   DirectX (-Y) maps too. `material.preset` (Material tab: Preset...) gives
   a material one of 20 looks, from gold and glass to procedural wood,
   marble, concrete, fabric and leather.
+- **Material functions (M8, #235):** a material function is a graph from
+  Function Input nodes (In 1..3) to a Function Output (Out 1..3); a
+  Material Function node runs it inline with its inputs, so one function
+  can serve many materials and an edit to it reaches all of them. In the
+  node editor, Ctrl+G turns the selected nodes into a function (links from
+  outside become its inputs, what was used outside its outputs) and Tab
+  on a Material Function node edits the function (Tab again: back).
+  `material.function_new`, `material.make_function`; calls nest 8 deep.
 - **Material baking, glTF and OBJ texture maps (M11, #238):**
   `material.bake <object> [size] [apply]` (Material tab: Bake to Maps)
   bakes a material's node graph through the object's UVs into base

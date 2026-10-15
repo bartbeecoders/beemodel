@@ -113,6 +113,7 @@ nf_one:         .float 1.0
 nf_seg:         .float 0.0625           # 1/16
 nf_three:       .float 3.0
 s_ne_head:      .asciz "Material: "
+s_ne_fhead:     .asciz "Function: "
 s_ne_keys:      .asciz "     Shift+A add  X delete  Home fit"
 s_ne_none:      .asciz "Node editor: the active object's material graph (an object with a material: Properties > Material > New)"
 s_ne_out:       .asciz "Material Output"
@@ -134,6 +135,7 @@ s_ne_ghead:     .asciz "Geometry: "
 s_ne_grhead:    .asciz "Group: "
 s_ne_grkeys:    .asciz "     Shift+A add  X delete  Ctrl+G group  Tab back"
 s_tp_group:     .asciz "tree.group"
+s_tp_mfn:       .asciz "material.make_function"
 s_ne_gkeys:     .asciz "     Shift+A add  X delete  Ctrl+G group  Tab material / into a group"
 s_ne_tabgeo:    .asciz "  Tab geometry"
 s_ne_lhead:     .asciz "Logic: "
@@ -232,6 +234,8 @@ ne_maxn:        .skip 4
 ne_selm:        .skip 8                 # selected nodes (bit n: node n)
 ne_path:        .skip 4*8               # groups entered: their tree numbers
 ne_pathn:       .skip 4
+ne_fpath:       .skip 4*8               # material functions entered (Tab)
+ne_fpathn:      .skip 4
 ne_sel:         .skip 4                 # the selected node (0: none)
 ne_drag:        .skip 4                 # 0 none, 1 move, 2 wire from an output,
                                         #  3 wire from an input, 4 from a
@@ -441,7 +445,23 @@ ne_rec:
     jmp     9f
 2:  inc     ecx
     jmp     1b
-3:  mov     rdi, rbx                    # the material
+3:  mov     ecx, [rip+ne_fpathn]        # inside a material function: it
+    test    ecx, ecx
+    jz      31f
+    lea     rax, [rip+ne_fpath]
+    mov     edi, [rax+rcx*4-4]
+    push    rdi
+    push    rdi
+    call    mf_is_func
+    pop     rdi
+    pop     rdi
+    test    eax, eax
+    jz      30f
+    mov     [rip+ne_mat], edi
+    call    mat_get
+    jmp     9f
+30: mov     dword ptr [rip+ne_fpathn], 0  # (gone: back out)
+31: mov     rdi, rbx                    # the material
     call    mat_of
     mov     [rip+ne_mat], eax
     test    eax, eax
@@ -860,8 +880,10 @@ ne_layout:
     mov     [rip+ne_lh], eax
     mov     dword ptr [rip+ne_gh], NHDR+NPINS*NROW+6
     cmp     dword ptr [rip+ne_kind], 0
-    je      61f
-    mov     dword ptr [rip+ne_lh], 0    # (trees: none)
+    jne     60f
+    cmp     dword ptr [rbx+MA_FUNC], 1  # (a material function: none either)
+    jne     61f
+60: mov     dword ptr [rip+ne_lh], 0    # (trees: none)
     mov     dword ptr [rip+ne_gh], 0
     mov     dword ptr [rip+ne_gx], -30000
     mov     dword ptr [rip+ne_gy], -30000
@@ -2118,6 +2140,8 @@ ne_draw_stats:
     jz      9f
     xor     eax, eax                    # the nodes that reach a pin
     xor     ecx, ecx
+    cmp     dword ptr [rbx+MA_FUNC], 1  # (a function: its Function Output)
+    je      12f
 1:  cmp     ecx, NPINS
     jae     2f
     movzx   edx, word ptr [rbx+GR_PINS+rcx*4]
@@ -2126,6 +2150,14 @@ ne_draw_stats:
     bts     rax, rdx
 11: inc     ecx
     jmp     1b
+12: cmp     ecx, r12d
+    jae     2f
+    imul    edx, ecx, NODE_SZ
+    cmp     dword ptr [rbx+GR_NODES+rdx+ND_TYPE], 41
+    jne     13f
+    bts     rax, rcx
+13: inc     ecx
+    jmp     12b
 2:  call    gr_live
     popcnt  r13, rax                    # live
     xor     r14d, r14d                  # texture samples (live), images missing
@@ -2669,9 +2701,21 @@ ne_value_text:
     jmp     9f
 21: lea     rax, [rip+s_ne_noimg]
     jmp     9f
-4:  cvtss2si edi, xmm0                  # a tree (number)
-    dec     edi
+4:  cvtss2si edi, xmm0                  # a tree (number); for a material,
+    dec     edi                         #  a function
     js      21b
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     41f
+    mov     r13d, edi
+    call    mat_count
+    cmp     r13d, eax
+    jae     21b
+    mov     edi, r13d
+    call    mat_get
+    test    rax, rax
+    jz      21b
+    jmp     9f
+41:
     call    nt_get
     test    rax, rax
     jz      21b
@@ -2860,6 +2904,8 @@ ed_nodes_draw:
     jmp     51b
 59: cmp     dword ptr [rip+ne_kind], 0
     jne     591f
+    cmp     dword ptr [rbx+MA_FUNC], 1  # (a function: its own output node)
+    je      591f
     call    ne_draw_output
 591:call    ne_draw_minimap
     call    ne_draw_pane
@@ -2922,7 +2968,15 @@ ed_nodes_draw:
     add     esi, 3
     lea     rdx, [rip+s_ne_head]
     cmp     dword ptr [rip+ne_kind], 0
-    je      31f
+    jne     30f
+    mov     rax, [rip+ne_cur]
+    test    rax, rax
+    jz      31f
+    cmp     dword ptr [rax+MA_FUNC], 1
+    jne     31f
+    lea     rdx, [rip+s_ne_fhead]
+    jmp     31f
+30:
     lea     rdx, [rip+s_ne_lhead]
     cmp     dword ptr [rip+ne_kind], 2
     je      31f
@@ -5113,7 +5167,37 @@ do_ne_tab:
     call    ne_rec                      # a group selected: into it
     test    rax, rax
     jz      2f
-    cmp     dword ptr [rip+ne_kind], 1
+    cmp     dword ptr [rip+ne_kind], 0  # a Material Function: into it
+    jne     10f
+    mov     ecx, [rip+ne_sel]
+    test    ecx, ecx
+    jz      15f
+    cmp     ecx, [rax+GR_N]
+    ja      15f
+    dec     ecx
+    imul    ecx, ecx, NODE_SZ
+    cmp     dword ptr [rax+GR_NODES+rcx+ND_TYPE], 42
+    jne     15f
+    cvttss2si ebx, [rax+GR_NODES+rcx+ND_P]
+    lea     edi, [rbx-1]
+    test    edi, edi
+    js      15f
+    call    mf_is_func
+    test    eax, eax
+    jz      15f
+    mov     ecx, [rip+ne_fpathn]
+    cmp     ecx, 8
+    jae     15f
+    lea     rax, [rip+ne_fpath]
+    lea     edx, [rbx-1]
+    mov     [rax+rcx*4], edx
+    inc     dword ptr [rip+ne_fpathn]
+    jmp     8f
+15: cmp     dword ptr [rip+ne_fpathn], 0 # inside one: back out
+    je      3f
+    dec     dword ptr [rip+ne_fpathn]
+    jmp     8f
+10: cmp     dword ptr [rip+ne_kind], 1
     jne     2f
     mov     ecx, [rip+ne_sel]
     test    ecx, ecx
@@ -6782,8 +6866,8 @@ do_ne_group:
     call    ne_rec
     test    rax, rax
     jz      9f
-    cmp     dword ptr [rip+ne_kind], 1
-    jne     9f
+    cmp     dword ptr [rip+ne_kind], 2  # (materials: a function)
+    jae     9f
     mov     rbx, [rip+ne_selm]
     test    rbx, rbx
     jz      9f
@@ -6796,7 +6880,10 @@ do_ne_group:
     jmp     1b
 2:  call    ne_arg_done
     lea     rdi, [rip+s_tp_group]
-    call    ne_run
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     3f
+    lea     rdi, [rip+s_tp_mfn]
+3:  call    ne_run
     mov     dword ptr [rip+ne_sel], 0
     mov     qword ptr [rip+ne_selm], 0
 9:  add     rsp, 8
