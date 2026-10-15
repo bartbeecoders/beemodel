@@ -16,6 +16,7 @@ stays private to the module.
 | `wayland.s` | Socket, message encoding/decoding, `SCM_RIGHTS`, shm buffers, event dispatch, frame pacing, drawing times and the input work before each frame (`frametime`), tablets (`zwp_tablet_v2` tools: pen motion and buttons as pointer input, pressure, eraser end), the locked pointer for play mode (`zwp_pointer_constraints_v1` + `zwp_relative_pointer_v1`: `wl_lock_pointer` / `wl_unlock_pointer`, unaccelerated relative motion to `play_look`, the cursor hidden) |
 | `draw.s` | Framebuffer primitives: rects, gradients, text, lines, clip rectangle; every colour passes through the theme (`th_map`) |
 | `shapes.s` | Anti-aliased UI shapes: rounded and translucent rectangles, circles, soft shadows, Wu lines, `popup_frame` for menus and the palette |
+| `widgets.s` | The widget toolkit: buttons, toggles, number / slider / text fields, dropdowns, sections, tabs, scrolled regions; one frame's widget list for hit testing; typing (a `textfield.s` instance); `ui_tree` JSON |
 | `theme.s` | UI themes (Dark, Light, High contrast): a table per theme maps each dark-theme `COL_*` value to the theme's colour; `view.theme`, the View menu, `BEEMODEL_THEME` |
 | `ui.s` | Layout, hit testing, pointer/keyboard handling, title bar, menus, panes, status bar |
 | `ops.s` | The operator spine: application operators, `run_op` (which realigns the stack for the operator, whoever calls), key dispatch, shortcut text, `--list-ops` |
@@ -245,6 +246,38 @@ pixel (each pixel takes the darker of itself and its left neighbour). In the
 bitmap font a heading is drawn twice, a pixel apart. `draw_heading` and
 `draw_small` draw in those slots, and `fonts_resize` resets every size when
 the scale changes.
+
+## Widgets
+
+Panels draw their controls with `wg(desc, x, y, w, ptr, sub)` from
+`widgets.s`. A descriptor (the `WIDGET` macro in `widgets.inc`) holds the
+widget's kind, a stable name such as `object.location`, its range, scrub step,
+decimals, flags, an optional callback, an undo label, and the operator or the
+option labels it uses. The call draws the widget for the value at `ptr` and
+appends its rectangle to the frame's list (`wg_frame` empties the list when
+`ui_draw` starts). It returns 1 the frame after a button is clicked, and 1
+while a section is open.
+
+Between frames, `hit_test` asks `wg_hit` before `area_hit`. The hit is
+`HIT_WIDGET` and its index is the widget's id: a hash of the descriptor's
+name and `sub`, the same every frame. Then `ui_button`, `ui_motion`,
+`ui_axis` and `ui_key_press` hand presses, drags (`DRAG_WIDGET`), the wheel and
+keys to `wg_press`, `wg_drag`, `wg_release`, `wg_wheel` and `wg_key`.
+Values are written in place, then the callback runs and the frame redraws. A
+scrub, a typed value or a toggle pushes the descriptor's undo step first.
+
+Typing uses a third `textfield.s` instance, `tfi_widget`. On that instance
+`tf_key` returns 2 for Enter, 3 for Esc and 4 for Tab to the toolkit. Numbers
+are parsed with `expr_eval`, so they take units and expressions. A plain number
+in a `WGF_DEG` field is in degrees. Dropdowns open an option list
+(`wg_pop_*`), which is drawn and hit-tested above everything except the
+palette. A scrolled region (`wg_scroll_begin` / `wg_scroll_end`) clips its
+content, takes the wheel, draws a draggable thumb, and hides the hits of
+widgets scrolled out of view.
+
+The MCP tool `ui_tree` returns the widget list as JSON (`wg_tree_json`).
+fakewl's `widget_xy(m, name, sub)` uses it to click a widget by name instead
+of by coordinates.
 
 ## Themes
 
