@@ -1550,7 +1550,11 @@ ui_key_press:
     lea     rdi, [rip+op_render_stop]
     call    run_op
     jmp     9f
-21: mov     edi, ebx                    # F10 / Alt+letter: the menu bar
+21: mov     edi, ebx                    # Ctrl+C / V over a field
+    call    wg_clip_key
+    test    eax, eax
+    jnz     9f
+    mov     edi, ebx                    # F10 / Alt+letter: the menu bar
     call    mn_bar_key
     test    eax, eax
     jnz     9f

@@ -58,6 +58,7 @@ _start:
     je      .Lmissing
 
     call    create_window
+    call    clip_init                   # (the clipboard's data device)
     call    kb_timer_init
     call    mcp_init
     mov     rdi, [rip+link_target]      # --link host:port: mirror that session
