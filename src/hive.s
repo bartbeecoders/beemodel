@@ -47,6 +47,7 @@
 .equ MAX_POINTS, 64
 
 .section .bss
+hv_camuid:      .skip 4
 .align 8
 hv_ready:       .skip 4
 hv_n:           .skip 4             # triangles
@@ -340,10 +341,23 @@ hive_build:
     mov     [rdx], rcx
     mov     ecx, [rax+OB_LOC+8]
     mov     [rdx+8], ecx
-    movss   xmm0, [rip+hf_pt_power]     # white, a fixed strength for now
-    movss   [rdx+12], xmm0
-    movss   [rdx+16], xmm0
-    movss   [rdx+20], xmm0
+    push    rdx                         # its colour x power (lcam.s), times
+    push    rdx                         #  the default strength
+    mov     edi, [rax+OB_UID]
+    lea     rsi, [rdx+12]
+    call    lc_light
+    pop     rdx
+    pop     rdx
+    movss   xmm0, [rip+hf_pt_power]
+    movss   xmm1, [rdx+12]
+    mulss   xmm1, xmm0
+    movss   [rdx+12], xmm1
+    movss   xmm1, [rdx+16]
+    mulss   xmm1, xmm0
+    movss   [rdx+16], xmm1
+    movss   xmm1, [rdx+20]
+    mulss   xmm1, xmm0
+    movss   [rdx+20], xmm1
     inc     dword ptr [rip+hv_npoints]
 71: inc     ebx
     jmp     7b
@@ -845,15 +859,12 @@ corner_normals:
 hv_camera:
     push    rbx
     sub     rsp, 64
-    xor     ebx, ebx
-1:  cmp     ebx, [rip+obj_count]
-    jae     5f
-    mov     edi, ebx
-    call    obj_at
-    cmp     dword ptr [rax+OB_TYPE], OT_CAMERA
-    je      2f
-    inc     ebx
-    jmp     1b
+    mov     dword ptr [rip+hv_camuid], 0
+    call    lc_camera                   # the camera that renders (lcam.s)
+    test    rax, rax
+    jz      5f
+    mov     ecx, [rax+OB_UID]
+    mov     [rip+hv_camuid], ecx
 2:  mov     rdi, rax                    # its matrix: columns are the axes
     lea     rsi, [rsp]
     call    obj_matrix
@@ -901,7 +912,12 @@ hv_camera:
     call    hv_unit
     mov     eax, [rip+hf_tanh]
     mov     [rip+hv_cam+48], eax
-    add     rsp, 64
+    mov     edi, [rip+hv_camuid]        # a camera: its lens
+    test    edi, edi
+    jz      7f
+    call    lc_lens_tan
+    movss   [rip+hv_cam+48], xmm0
+7:  add     rsp, 64
     pop     rbx
     ret
 

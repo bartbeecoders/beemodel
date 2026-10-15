@@ -102,7 +102,7 @@ lm_ord:         .skip 4*LM_MAX
 
 .text
 OPERATOR op_lm_bake, "lightmap.bake", "Bake Lightmap", do_lm_bake, flags=OPF_AI_SAFE, doc="Bake the light on every visible mesh into one lightmap atlas with the path tracer (a second UV set per object, packed; denoised, dilated): lightmap.bake [size 64-4096, default 512] [rays a texel, default 64]"
-OPERATOR op_lm_save, "lightmap.save", "Save Lightmap", do_lm_save, flags=OPF_AI_SAFE, doc="Write the lightmap atlas: lightmap.save <file.exr | file.png> (EXR linear half floats, PNG sRGB clamped)"
+OPERATOR op_lm_save, "lightmap.save", "Save Lightmap", do_lm_save, flags=OPF_AI_SAFE, doc="Write the lightmap atlas: lightmap.save <file.exr | file.png> (EXR linear half floats, PNG sRGB clamped)", form=form_lmsave
 OPERATOR op_lm_clear, "lightmap.clear", "Clear Lightmap", do_lm_clear, flags=OPF_AI_SAFE, doc="Forget the baked lightmap"
 
 # =============================================================================

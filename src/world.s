@@ -28,6 +28,10 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl wp_size
+.globl wp_radius
+.globl wp_budget
+.globl wp_minimap
 .globl wp_on
 .globl wp_plain
 .globl wp_pending

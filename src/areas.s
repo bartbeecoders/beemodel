@@ -834,7 +834,17 @@ draw_leaf:
     sub     edx, 4*HDR_BTN_W+10
     call    ae_header_tools
     jmp     5f
-55: cmp     eax, ED_UVED                # the UV editor: its tools
+55: cmp     eax, ED_RENDER              # the Render area: Render, Stop, ...
+    jne     56f
+    mov     edi, [r12+N_X]
+    add     edi, TYPE_BTN_W+6
+    mov     esi, [r12+N_Y]
+    mov     edx, [r12+N_X]
+    add     edx, [r12+N_W]
+    sub     edx, 4*HDR_BTN_W+10
+    call    rn_header_tools
+    jmp     5f
+56: cmp     eax, ED_UVED                # the UV editor: its tools
     jne     52f
     mov     edi, [r12+N_X]
     add     edi, TYPE_BTN_W+6
@@ -1674,6 +1684,8 @@ ed_props_draw:
     jmp     .Lpp_done
 113:mov     rdi, rbx                    # a curve: its values
     call    curve_props
+    mov     rdi, rbx                    # a light / camera: its settings
+    call    lcam_props
     call    fmt_reset                   # mesh statistics
     mov     rbx, [rbx+OB_MESH]
     mov     edi, [rbx+ME_NVERTS]
@@ -1895,6 +1907,7 @@ props_render:
     lea     rdi, [rip+wd_rn_save]
     lea     r8, [rip+props_dummy]
     call    vp_row
+    call    render_more                 # bounces, the GPU, the engine panels
     add     rsp, 8
     ret
 
