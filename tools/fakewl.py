@@ -615,6 +615,7 @@ def main():
     textures_world()
     shader_graph()
     materials_v2()
+    material_nodes()
     gltf_mtl()
     product_shot()
     params_units()
@@ -2084,6 +2085,140 @@ def materials_v2():
     f.proc.kill()
 
 
+
+def material_nodes():
+    """The node catalogue (M2): every new node type against reference values
+    (nodeval), the texture sampler's colour spaces and wraps, the editor's
+    add menu, renders with the new nodes."""
+    print('  -- material nodes: the catalogue --')
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-mnodes-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=180)
+        return r.stdout.strip() + r.stderr.strip()
+    def vals(code):
+        out = run('m = material("M")\n' + code)
+        try:
+            return [float(v) for v in out.split()]
+        except ValueError:
+            return out
+    close = lambda got, want, eps=2e-3: (isinstance(got, list) and len(got) == len(want)
+                                         and all(abs(a - b) <= eps for a, b in zip(got, want)))
+    def case(label, code, want, eps=2e-3):
+        got = vals(code)
+        check(close(got, want, eps), f'{label} ({got if not close(got, want, eps) else want})')
+    # math: 31 operations on a = 0.5, b = 2, c = 3
+    want = [2.5, -1.5, 1, 0.25, 0.25, 0.5, 2, 0, 0.479426, 0.5, 0.877583, 0.546302, 0.707107, 0, 1, 0.5,
+            0, 1, 0.5, 0.5, 2, 5, 1, 1, 0.5, 1.648721, -0.693147, 0.244979, 1, -0.5, 4]
+    code = ''.join(f'k = node(m, "math", {i})\nnodeset(m, k, 1, 0.5)\nnodeset(m, k, 2, 2)\nnodeset(m, k, 3, 3)\n'
+                   'print(nodeval(m, k, 3, 0, 0, 0))\n' for i in range(31))
+    case('math: 31 operations, from add to multiply-add', code, want)
+    # vector math, separate / combine, mapping
+    case('vector math: dot, cross, normalize, length, reflect',
+         'a = node(m, "vmath", 10)\nnodeset(m, a, 1, 1, 2, 3)\nnodeset(m, a, 2, 4, 5, 6)\nprint(nodeval(m, a, 3, 0, 0, 0))\n'
+         'c = node(m, "vmath", 11)\nnodeset(m, c, 1, 1, 0, 0)\nnodeset(m, c, 2, 0, 1, 0)\n'
+         'print(nodeval(m, c, 0, 0, 0, 0), nodeval(m, c, 1, 0, 0, 0), nodeval(m, c, 2, 0, 0, 0))\n'
+         'n = node(m, "vmath", 12)\nnodeset(m, n, 1, 3, 0, 4)\nprint(nodeval(m, n, 0, 0, 0, 0), nodeval(m, n, 2, 0, 0, 0))\n'
+         'l = node(m, "vmath", 13)\nnodeset(m, l, 1, 3, 0, 4)\nprint(nodeval(m, l, 3, 0, 0, 0))\n'
+         'r = node(m, "vmath", 15)\nnodeset(m, r, 1, 1, -1, 0)\nnodeset(m, r, 2, 0, 1, 0)\n'
+         'print(nodeval(m, r, 0, 0, 0, 0), nodeval(m, r, 1, 0, 0, 0))',
+         [32, 0, 0, 1, 0.6, 0.8, 5, 1, 1])
+    case('separate and combine; mapping turns, scales and offsets',
+         's = node(m, "separate")\nnodeset(m, s, 1, 0.1, 0.2, 0.3)\nprint(nodeval(m, s, 7, 0, 0, 0), nodeval(m, s, 11, 0, 0, 0))\n'
+         'c = node(m, "combine")\nnodeset(m, c, 1, 0.4)\nnodeset(m, c, 2, 0.5)\nnodeset(m, c, 3, 0.6)\n'
+         'print(nodeval(m, c, 1, 0, 0, 0))\n'
+         'p = node(m, "mapping", 90)\nnodeset(m, p, 2, 1, 0, 0)\nnodeset(m, p, 3, 2, 2, 2)\n'
+         'print(nodeval(m, p, 0, 0, 0, 0, 0.5, 0), nodeval(m, p, 1, 0, 0, 0, 0.5, 0))',
+         [0.2, 0.3, 0.5, 1, 1])
+    case('texture coordinate tiles and offsets; panner and rotator move it',
+         't = node(m, "texcoord", 2, 3, 0.5, 0)\nprint(nodeval(m, t, 0, 0, 0, 0, 0.25, 0.5), nodeval(m, t, 1, 0, 0, 0, 0.25, 0.5))\n'
+         'k = node(m, "constant", 2)\np = node(m, "panner", 0.5, 0.25)\np = link(m, k, p, 2)\n'
+         'print(nodeval(m, p, 0, 0, 0, 0, 0.1, 0.2), nodeval(m, p, 1, 0, 0, 0, 0.1, 0.2))\n'
+         'r = node(m, "rotator", 0.5, 0.5, 1.5707963)\nr = link(m, k, r, 2)\n'
+         'print(nodeval(m, r, 0, 0, 0, 0, 1, 0.5), nodeval(m, r, 1, 0, 0, 0, 1, 0.5))',
+         [1, 1.5, 1.1, 0.7, 0, 0.5], 3e-3)
+    case('position, normal, camera vector, Fresnel, constant, colour',
+         'p = node(m, "position")\nprint(nodeval(m, p, 0, 1, 2, 3), nodeval(m, p, 11, 1, 2, 3))\n'
+         'n = node(m, "normal")\nprint(nodeval(m, n, 1, 0, 0, 0))\nc = node(m, "camera")\nprint(nodeval(m, c, 2, 0, 0, 0))\n'
+         'z = node(m, "combine")\nnodeset(m, z, 3, 1)\nf = node(m, "fresnel", 5, 0.04)\nlink(m, z, f, 1)\nprint(nodeval(m, f, 3, 0, 0, 0))\n'
+         'g = node(m, "fresnel", 5, 0.04)\nprint(nodeval(m, g, 3, 0, 0, 0))\n'
+         'k = node(m, "constant", 0.7)\nprint(nodeval(m, k, 3, 0, 0, 0))\nq = node(m, "color")\nnodeset(m, q, 1, 0.1, 0.2, 0.3)\n'
+         'print(nodeval(m, q, 2, 0, 0, 0))',
+         [1, 2, 1, 1, 0.04, 1, 0.7, 0.3])
+    case('colour: hue, invert, brightness / contrast, desaturation, gamma',
+         'h = node(m, "hsv", 0.5)\nnodeset(m, h, 1, 1, 0, 0)\nprint(nodeval(m, h, 0, 0, 0, 0), nodeval(m, h, 1, 0, 0, 0))\n'
+         'i = node(m, "invert", 1)\nnodeset(m, i, 1, 0.25, 0.5, 1)\nprint(nodeval(m, i, 0, 0, 0, 0), nodeval(m, i, 2, 0, 0, 0))\n'
+         'b = node(m, "brightcon", 0.1, 1)\nnodeset(m, b, 1, 0.5, 0.5, 0.5)\nprint(nodeval(m, b, 0, 0, 0, 0))\n'
+         'd = node(m, "desaturate", 1)\nnodeset(m, d, 1, 1, 0, 0)\nprint(nodeval(m, d, 1, 0, 0, 0))\n'
+         'g = node(m, "gamma", 2)\nnodeset(m, g, 1, 0.5, 0.5, 0.5)\nprint(nodeval(m, g, 0, 0, 0, 0))',
+         [0, 1, 0.75, 0, 0.6, 0.2126, 0.25])
+    out = vals('b = node(m, "blackbody", 2000)\nprint(nodeval(m, b, 0, 0, 0, 0), nodeval(m, b, 2, 0, 0, 0))\n'
+               'c = node(m, "blackbody", 12000)\nprint(nodeval(m, c, 0, 0, 0, 0), nodeval(m, c, 2, 0, 0, 0))')
+    check(isinstance(out, list) and len(out) == 4 and out[0] > 3 * out[1] and out[3] > out[2],
+          f'blackbody: 2000 K is orange-red, 12000 K blue ({out})')
+    out = vals('v = node(m, "voronoi", 3, 1, 0)\nw = node(m, "voronoi", 3, 1, 1)\ne = node(m, "voronoi", 3, 1, 2)\n'
+               + ''.join(f'print(nodeval(m, v, 3, {x}, {y}, 0.3), nodeval(m, w, 3, {x}, {y}, 0.3), nodeval(m, e, 3, {x}, {y}, 0.3))\n'
+                         for x, y in ((0.1, 0.2), (0.7, 0.4), (1.3, -0.6))))
+    ok = isinstance(out, list) and len(out) == 9 and all(
+        0 <= out[i] <= out[i + 1] and abs(out[i + 2] - (out[i + 1] - out[i])) < 1e-3 for i in (0, 3, 6))
+    check(ok and len(set(round(v, 4) for v in out[0::3])) == 3, f'Voronoi: F1 <= F2, edge = F2 - F1, varying ({out})')
+    out = vals('b = node(m, "brick", 4, 0.05, 0.5)\nprint(nodeval(m, b, 7, 0, 0, 0, 0.001, 0.001), nodeval(m, b, 7, 0, 0, 0, 0.12, 0.06))\n'
+               'w = node(m, "wave", 2)\nprint(nodeval(m, w, 3, 0, 0, 0), nodeval(m, w, 3, 0.125, 0, 0))\n'
+               'n = node(m, "whitenoise")\nprint(nodeval(m, n, 3, 0.1, 0.2, 0.3), nodeval(m, n, 3, 0.1, 0.2, 0.3), nodeval(m, n, 3, 0.2, 0.2, 0.3))\n'
+               'g = node(m, "gradient", 3)\nprint(nodeval(m, g, 3, 1, 0, 0), nodeval(m, g, 3, -1, 0, 0.0001))\n'
+               's = node(m, "gradient", 4, 0.5)\nprint(nodeval(m, s, 3, 0, 1, 0))')
+    check(isinstance(out, list) and len(out) == 10 and out[0] == 1 and out[1] == 0 and abs(out[2] - 0.5) < 1e-3
+          and abs(out[3] - 1) < 1e-3 and out[4] == out[5] != out[6] and abs(out[7] - 0.5) < 1e-3
+          and out[8] > 0.95 and abs(out[9] - 0.5) < 1e-3,
+          f'brick mortar, wave, white noise, radial and spherical gradients ({out})')
+    case('mix: overlay, darken, difference, soft light, divide',
+         ''.join(f'x = node(m, "mix", {mode})\nnodeset(m, x, 1, 1)\nnodeset(m, x, 2, 0.25)\nnodeset(m, x, 3, 0.5)\n'
+                 'print(nodeval(m, x, 0, 0, 0, 0))\n' for mode in (5, 6, 8, 9, 10)),
+         [0.25, 0.25, 0.25, 0.25, 0.5])
+    # the sampler: colour (sRGB) or data; wraps; alpha
+    out = vals('op("image.new", "t 2 2")\nfor y in 0..2 { for x in 0..2 { imgset("t", x, y, 128, 128, 128, 64) } }\n'
+               'imgset("t", 0, 0, 255, 255, 255, 64)\n'
+               'c = node(m, "image", "t", 1, 0, 0)\nd = node(m, "image", "t", 1, 1, 0)\n'
+               'print(nodeval(m, c, 0, 0, 0, 0, 0.75, 0.25), nodeval(m, d, 0, 0, 0, 0, 0.75, 0.25), nodeval(m, d, 19, 0, 0, 0, 0.75, 0.25))\n'
+               'k = node(m, "image", "t", 1, 1, 1)\nr = node(m, "image", "t", 1, 1, 2)\n'
+               'print(nodeval(m, d, 0, 0, 0, 0, 2.25, 0.75), nodeval(m, k, 0, 0, 0, 0, 2.25, 0.75), nodeval(m, r, 0, 0, 0, 0, 1.75, 0.75))')
+    check(isinstance(out, list) and len(out) == 6 and abs(out[0] - 0.2158) < 0.01 and abs(out[1] - 0.502) < 0.01
+          and abs(out[2] - 0.251) < 0.01 and out[3] > 0.9 and abs(out[4] - 0.502) < 0.01 and out[5] > 0.9,
+          f'texture sample: colour or data, alpha, repeat / clamp / mirror ({out})')
+    # unknown names, the editor's add menu
+    out = run('m = material("M")\nnode(m, "teapot")')
+    check('normalmap' in out and 'unknown node type' in out, 'an unknown type is refused, the error lists the types')
+    # renders: a Voronoi of cell colours; vertex colours through the node
+    def shot(name, code, spp=16, size=(160, 90)):
+        p = os.path.join(home, name + '.png')
+        run(GRAPH_SCENE + code + f'\nrender("{p}", {size[0]}, {size[1]}, {spp}, 1)')
+        return Image.open(p).convert('RGB') if os.path.exists(p) else Image.new('RGB', size)
+    v = shot('voronoi', 'v = node(m, "voronoi", 4)\nsocket(m, "base", v, 1)')
+    cols = {tuple(c // 32 for c in v.getpixel((x, y))) for y in range(25, 70, 3) for x in range(55, 105, 3)}
+    check(len(cols) >= 6, f'a Voronoi texture colours the sphere by cells ({len(cols)} colours)')
+    v.save(os.path.join(OUT, '59_voronoi.png'))
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('m = material("N")\nassign("Cube", m)\nselect("Cube")\nop("area.type_node_editor")\nop("area.maximize")')
+    f.pump(0.3)
+    x, y = widget_xy(m, 'node.add')
+    f.click(x, y); f.pump(0.2)
+    f.type('voron'); f.pump(0.2); f.key(28); f.pump(0.3)
+    got = q('print(nodeinfo("N", 0, "count"), nodeinfo("N", 1, "type"))')
+    check(got == '1 25', f'the add menu finds the new nodes: typing "voron" + Enter adds a Voronoi Texture ({got})')
+    q('t = node("N", "texcoord", 4, 4)\nw = node("N", "wave", 3)\nlink("N", t, w, 1)\nh = node("N", "hsv", 0.3)\n'
+      'link("N", w, h, 1, 1)\nsocket("N", "base", h)\nf = node("N", "fresnel")\nsocket("N", "specular", f)')
+    f.pump(0.5)
+    f.shot('60_material_nodes.png')
+    seen = {px(f, xx, yy) for xx in range(0, 1280, 4) for yy in range(60, 760, 4)}
+    check({0x9a4a3c, 0x6b4f96, 0x8a6d1f} <= seen, 'node headers are coloured by category: input, texture, colour')
+    f.proc.kill()
+
+
 def gltf_fixture(path, external=False):
     """A small glTF by hand: a parent (TRS) with a child (matrix) holding a
     tetrahedron (u16 indices) and a material with extensions. Returns the
@@ -3413,7 +3548,7 @@ def node_editor():
     f.move(800, 500)
     f.mods(1); f.key(30); f.mods(0)             # Shift+A
     f.pump(0.2)
-    f.click(830, 565)                           # Checker Texture
+    f.type('checker'); f.pump(0.2); f.key(28)   # Checker Texture (typed)
     f.pump(0.2)
     g = (info(0, 'count'), info(4, 'type'), info(4, 'x'), info(4, 'y'))
     f.click(830, 515)                           # selected, X

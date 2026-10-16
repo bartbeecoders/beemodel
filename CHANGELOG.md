@@ -17,6 +17,16 @@ project uses [Semantic Versioning](https://semver.org/).
   rays and shadows through holes and translucent surfaces; the preview
   takes specular, IOR (F0) and AO from nodes. v0.12 files and `.beea`
   material assets open unchanged.
+- **Node catalogue (M2, #229):** 35 node types (from 9) with several
+  outputs each: texture coordinate, position, normal, camera vector,
+  vertex colour, time, constant, colour, Fresnel; vector math, separate,
+  combine, mapping, panner, rotator; Voronoi, brick, wave, white noise,
+  triplanar; hue / saturation, invert, brightness / contrast,
+  desaturation, gamma, blackbody; 31 math operations; 11 mix modes;
+  radial and spherical gradients. Texture Sample gives colour, R, G, B and
+  alpha, reads images as colour (sRGB) or data, and repeats, clamps or
+  mirrors. Node headers are coloured by category. `nodeval()` evaluates
+  any node at a point.
 
 ## [0.12.0] - 2026-10-15
 

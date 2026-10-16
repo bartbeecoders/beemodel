@@ -521,6 +521,8 @@ builtins:
     .long 4, 6
     .quad bn_nodeinfo, b_nodeinfo
     .long 3, 4
+    .quad bn_nodeval, b_nodeval
+    .long 6, 8
     .quad bn_gtree, b_gtree
     .long 1, 1
     .quad bn_gnode, b_gnode
@@ -789,6 +791,7 @@ bn_link:        .asciz "link"
 bn_nodeset:     .asciz "nodeset"
 bn_socket:      .asciz "socket"
 bn_nodeinfo:    .asciz "nodeinfo"
+bn_nodeval:     .asciz "nodeval"
 bn_gtree:       .asciz "gtree"
 bn_gnode:       .asciz "gnode"
 bn_glink:       .asciz "glink"
@@ -7090,6 +7093,57 @@ b_ginfo:
 #   the node feeding its input k, the node driving socket k (0 base .. 4
 #   normal), its place in the node editor (node 0: the output), its value k
 #   (1..4); -1: none
+# nodeval(material, node, k, x, y, z [, u, v]) - node's output k / 4,
+#   channel k % 4 (0..2 the colour, 3 the value), evaluated at the point
+b_nodeval:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 40
+    mov     rbx, rdi
+    mov     r14d, esi
+    mov     qword ptr [rsp+12], 0       # (u, v: 0 unless given)
+    call    a_mat
+    mov     r12d, eax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     [rsp+32], eax
+    xor     ecx, ecx                    # x y z (u v)
+1:  lea     eax, [rcx+3]
+    cmp     eax, r14d
+    jae     2f
+    push    rcx
+    shl     eax, 4
+    lea     rdi, [rbx+rax]
+    call    a_num
+    pop     rcx
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 5
+    jb      1b
+2:  mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, [rsp+32]
+    lea     rcx, [rsp]
+    call    graph_probe
+    test    eax, eax
+    jz      8f
+    cvtss2sd xmm0, xmm0
+    add     rsp, 40
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  lea     rdi, [rip+e_node_bad]
+    xor     esi, esi
+    jmp     sc_rt
+
 b_nodeinfo:
     push    rbx
     push    r12

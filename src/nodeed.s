@@ -36,7 +36,6 @@
 .equ ND_IN,     4
 .equ ND_P,      52
 .equ ND_POS,    68
-.equ NTYPES,    9
 .equ IR_NAME,   0
 
 .equ MT_GEONODES_, 10                     # (mods.s)
@@ -110,18 +109,7 @@ s_op_set:       .asciz "material.node_set"
 s_undo_move:    .asciz "Move Node"
 s_undo_value:   .asciz "Change Node Value"
 s_none_w:       .asciz "none"
-# display names by type (1..9) and the output's sockets
-.align 8
-ne_titles:      .quad 0, t_image, t_noise, t_checker, t_grad, t_mix, t_ramp, t_math, t_bump, t_nmap
-t_image:        .asciz "Image Texture"
-t_noise:        .asciz "Noise Texture"
-t_checker:      .asciz "Checker Texture"
-t_grad:         .asciz "Gradient Texture"
-t_mix:          .asciz "Mix"
-t_ramp:         .asciz "Color Ramp"
-t_math:         .asciz "Math"
-t_bump:         .asciz "Bump"
-t_nmap:         .asciz "Normal Map"
+# the Material Output's pins
 ne_out_names:   .quad o_base, o_metal, o_spec, o_rough, o_emit, o_alpha, o_normal
                 .quad o_ao, o_coat, o_coatr, o_trans, o_ior, o_mask
 o_base:         .asciz "Base Color"
@@ -137,99 +125,10 @@ o_coatr:        .asciz "Coat Roughness"
 o_trans:        .asciz "Transmission"
 o_ior:          .asciz "IOR"
 o_mask:         .asciz "Opacity Mask"
-# per type (as geonodes.s's gn_meta): input names (3), input kinds (0
-#   geometry, 1 value, 2 vector, 3 colour), value names (4), value kinds (0
-#   number, 1 choice, 2 image, 3 whole number), the choices, output names
-#   (3), output kinds
-ne_meta:        .quad 0, 0, 0, 0, 0, 0, 0
-                .quad in_image, ik_vec1, pn_image, pk_image, 0, so_color, sk_col
-                .quad in_noise, ik_vec1, pn_noise, pk_noise, 0, so_color, sk_col
-                .quad in_checker, ik_col2, pn_scale, pk_num1, 0, so_color, sk_col
-                .quad in_none, ik_vec1, pn_grad, pk_grad, ch_axis, so_color, sk_col
-                .quad in_mix, ik_mix, pn_mode, pk_choice, ch_mix, so_color, sk_col
-                .quad in_ramp, ik_mix, pn_ramp, pk_num2, 0, so_color, sk_col
-                .quad in_math, ik_val2, pn_op, pk_choice, ch_math, so_value, sk_val
-                .quad in_bump, ik_val2, pn_bump, pk_num2, 0, so_normal, sk_vec
-                .quad in_nmap, ik_col2, pn_strength, pk_num1, 0, so_normal, sk_vec
-so_color:       .quad s_ne_color, 0, 0
-so_value:       .quad s_ne_value, 0, 0
-so_normal:      .quad s_ne_normal, 0, 0
-sk_col:         .byte 3, 0, 0, 0
-sk_val:         .byte 1, 0, 0, 0
-sk_vec:         .byte 2, 0, 0, 0
-in_none:        .quad 0, 0, 0
-in_image:       .quad i_vector, 0, 0
-in_noise:       .quad i_offset, 0, 0
-in_checker:     .quad i_color1, i_color2, 0
-in_mix:         .quad i_factor, i_color1, i_color2
-in_ramp:        .quad i_factor, i_color0, i_color1
-in_math:        .quad i_value1, i_value2, 0
-in_bump:        .quad i_height, 0, 0
-in_nmap:        .quad i_color, 0, 0
-ik_vec1:        .byte 2, 2, 2
-ik_col2:        .byte 3, 3, 3
-ik_mix:         .byte 1, 3, 3
-ik_val2:        .byte 1, 1, 1
-pn_image:       .quad p_image, p_size, 0, 0
-pn_noise:       .quad p_scale, p_detail, p_rough, 0
-pn_scale:       .quad p_scale, 0, 0, 0
-pn_grad:        .quad p_axis, p_scale, p_offset, 0
-pn_mode:        .quad p_mode, 0, 0, 0
-pn_ramp:        .quad p_pos0, p_pos1, 0, 0
-pn_op:          .quad p_op, 0, 0, 0
-pn_bump:        .quad p_strength, p_distance, 0, 0
-pn_strength:    .quad p_strength, 0, 0, 0
-pk_image:       .byte 2, 0, 0, 0
-pk_noise:       .byte 0, 3, 0, 0
-pk_num1:        .byte 0, 0, 0, 0
-pk_num2:        .byte 0, 0, 0, 0
-pk_grad:        .byte 1, 0, 0, 0
-pk_choice:      .byte 1, 0, 0, 0
-.align 8
-ch_axis:        .quad 3, c_x, c_y, c_z
-ch_mix:         .quad 5, c_mix, c_add, c_mul, c_sub, c_screen
-ch_math:        .quad 10, c_add, c_sub, c_mul, c_div, c_pow, c_min, c_max, c_gt, c_sin, c_abs
-i_vector:       .asciz "Vector"
-i_offset:       .asciz "Offset"
-i_color:        .asciz "Color"
-i_color0:       .asciz "Color 0"
-i_color1:       .asciz "Color 1"
-i_color2:       .asciz "Color 2"
-i_factor:       .asciz "Factor"
-i_value1:       .asciz "Value 1"
-i_value2:       .asciz "Value 2"
-i_height:       .asciz "Height"
-p_image:        .asciz "Image"
-p_size:         .asciz "Size"
-p_scale:        .asciz "Scale"
-p_detail:       .asciz "Detail"
-p_rough:        .asciz "Roughness"
-p_axis:         .asciz "Axis"
-p_offset:       .asciz "Offset"
-p_mode:         .asciz "Mode"
-p_pos0:         .asciz "Position 0"
-p_pos1:         .asciz "Position 1"
-p_op:           .asciz "Operation"
-p_strength:     .asciz "Strength"
-p_distance:     .asciz "Distance"
-c_x:            .asciz "X"
-c_y:            .asciz "Y"
-c_z:            .asciz "Z"
-c_mix:          .asciz "Mix"
-c_add:          .asciz "Add"
-c_mul:          .asciz "Multiply"
-c_sub:          .asciz "Subtract"
-c_screen:       .asciz "Screen"
-c_div:          .asciz "Divide"
-c_pow:          .asciz "Power"
-c_min:          .asciz "Minimum"
-c_max:          .asciz "Maximum"
-c_gt:           .asciz "Greater Than"
-c_sin:          .asciz "Sine"
-c_abs:          .asciz "Absolute"
-
 .section .bss
 .align 8
+ne_ax:          .skip 4                 # the pointer when the add menu opened
+ne_ay:          .skip 4
 ne_panx:        .skip 4                 # the view: where graph (0, 0) is
 ne_pany:        .skip 4                 #  (from the body's top left)
 ne_mat:         .skip 4                 # the material shown (-1: none)
@@ -383,7 +282,7 @@ ne_rec:
 
 # ne_ntypes -> eax = the node types of the kind shown
 ne_ntypes:
-    mov     eax, NTYPES
+    mov     eax, [rip+graph_ntypes]
     cmp     dword ptr [rip+ne_kind], 0
     je      1f
     mov     eax, [rip+gn_ntypes]
@@ -394,7 +293,7 @@ ne_ntypes:
 
 # ne_title(edi=type) -> rax = its name
 ne_title:
-    lea     rax, [rip+ne_titles]
+    lea     rax, [rip+mn_titles]
     cmp     dword ptr [rip+ne_kind], 0
     je      1f
     lea     rax, [rip+gn_titles]
@@ -416,7 +315,7 @@ ne_meta_of:
     cmp     edi, ecx
     ja      9f
     imul    eax, edi, 56
-    lea     rcx, [rip+ne_meta]
+    lea     rcx, [rip+mn_meta]
     cmp     dword ptr [rip+ne_kind], 0
     je      1f
     lea     rcx, [rip+gn_meta]
@@ -432,8 +331,12 @@ ne_nouts:
     test    rax, rax
     jz      8f
     mov     rcx, [rax+40]
-    xor     eax, eax
-1:  cmp     eax, 3
+    mov     edx, 3                      # (materials: up to 8)
+    cmp     dword ptr [rip+ne_kind], 0
+    jne     0f
+    mov     edx, 8
+0:  xor     eax, eax
+1:  cmp     eax, edx
     jae     9f
     cmp     qword ptr [rcx+rax*8], 0
     je      9f
@@ -879,6 +782,8 @@ ne_value_text:
     movss   xmm0, [r12+ND_P+r13*4]
     cmp     ecx, 1
     je      1f
+    cmp     ecx, 6
+    je      6f
     cmp     ecx, 2
     je      2f
     cmp     ecx, 4
@@ -897,8 +802,12 @@ ne_value_text:
 3:  call    ne_fmt_num
     lea     rax, [rip+fmt_buf]
     jmp     9f
-1:  cvtss2si eax, xmm0              # a choice
-    mov     rcx, [r14+32]
+6:  mov     rcx, [r14+32]               # the second choice list
+    mov     rax, [rcx]
+    lea     rcx, [rcx+rax*8+8]
+    jmp     10f
+1:  mov     rcx, [r14+32]               # a choice
+10: cvtss2si eax, xmm0
     test    eax, eax
     jns     11f
     xor     eax, eax
@@ -1286,13 +1195,8 @@ ne_draw_node:
     jbe     1f
     mov     esi, COL_NE_CONV
     jmp     1f
-11: mov     esi, COL_NE_TEX
-    cmp     ecx, 5
-    jb      1f
-    mov     esi, COL_NE_CONV
-    cmp     ecx, 8
-    jb      1f
-    mov     esi, COL_NE_VEC
+11: lea     rax, [rip+mn_color]         # (materials: by category)
+    mov     esi, [rax+rcx*4]
 1:  mov     [rsp+24], esi
     mov     edi, ecx
     call    ne_title
@@ -2374,7 +2278,14 @@ ne_new_value:
     idiv    ecx
     cvtss2si ecx, xmm0
     add     eax, ecx
-    cmp     r13d, 1
+    cmp     r13d, 6
+    jne     11f
+    mov     rcx, [r12+32]               # the second choice list
+    mov     rdx, [rcx]
+    mov     rcx, [rcx+rdx*8+8]
+    dec     ecx
+    jmp     4f
+11: cmp     r13d, 1
     jne     2f
     mov     rcx, [r12+32]               # a choice: within its list
     mov     rcx, [rcx]
@@ -2611,13 +2522,16 @@ ne_add_node:
     cmp     [rax+GR_N], r12d
     jbe     9f
     inc     r12d
-    mov     [rip+ne_sel], r12d
-    mov     edi, [rip+ne_mat]
+    mov     [rip+ne_sel], r12d          # (selected, alone)
+    xor     eax, eax
+    bts     rax, r12
+    mov     [rip+ne_selm], rax
+    mov     edi, [rip+ne_mat]           # at the pointer where the menu opened
     mov     esi, r12d
-    mov     edx, [rip+ne_mx]
+    mov     edx, [rip+ne_ax]
     sub     edx, [rip+ne_bx]
     sub     edx, [rip+ne_panx]
-    mov     ecx, [rip+ne_my]
+    mov     ecx, [rip+ne_ay]
     sub     ecx, [rip+ne_by]
     sub     ecx, [rip+ne_pany]
     call    ne_place
@@ -2960,6 +2874,9 @@ do_ne_add_menu:
     mov     dword ptr [rip+ne_menu], 1
     mov     eax, [rip+ptr_x]
     mov     [rip+ne_mx], eax
+    mov     [rip+ne_ax], eax
+    mov     ecx, [rip+ptr_y]
+    mov     [rip+ne_ay], ecx
     call    ne_menu_size                # (all of it inside the body)
     inc     eax
     imul    eax, eax, NROW

@@ -52,8 +52,11 @@
 .globl op_mat_node_move
 .globl graph_type_index
 .globl graph_socket_index
-.globl graph_type_names
-.globl graph_ntypes
+.globl gr_in
+.globl gr_put
+.globl gr_putv
+.globl gr_out
+.globl gr_slot
 .globl graph_socket_names
 .globl op_mat_node
 .globl op_mat_link
@@ -71,7 +74,7 @@
 .equ ND_POS,    68                      # i16 x, y in the node editor (0, 0: not placed)
 .equ GR_OUTPOS,  152                     # i16 x, y: the material output node
 .equ MAX_NODES, 48
-.equ NOUTS,     4                       # outputs a node can have
+.equ NOUTS,     8                       # outputs a node can have
 .equ MA_BASE_,  32                      # (material.s: the principled values)
 .equ MA_METAL_, 44
 .equ MA_ROUGH_, 48
@@ -92,7 +95,6 @@
 .equ T_MATH,    7
 .equ T_BUMP,    8
 .equ T_NMAP,    9
-.equ NTYPES,    9
 # the shading context (callers fill the first part)
 .equ SC_P0O,    0                       # object-space corner, edges
 .equ SC_E1O,    12
@@ -110,35 +112,29 @@
 .equ SC_UVP,    120                     # the triangle's UVs (6 floats) or 0:
                                         #  box projection
 .equ SC_SZ,     128
+# the shading context, v2 (M2): callers fill these too
+.equ SC_WP,     152                     # the world point
+.equ SC_WV,     164                     # towards the eye, unit (world)
+.equ SC_VC,     176                     # the vertex colour (linear; 1 1 1 if none)
+.equ SC_SZ2,    192
 # evaluation frame
 .equ EV_P,      0                       # object position
 .equ EV_UV,     12
 .equ EV_LIVE,   24                      # u64: the nodes to evaluate
-.equ EV_VAL,    32                      # 48 x 4 outputs x (rgb, value)
-.equ EV_SZ,     32 + 16*NOUTS*MAX_NODES
+.equ EV_SC,     32                      # the shading context
+.equ EV_VAL,    48                      # 48 x 8 outputs x (rgb, value)
+.equ EV_SZ,     48 + 16*NOUTS*MAX_NODES
 
 .section .rodata
 .align 8
-graph_type_names:
-                .quad s_t_image, s_t_noise, s_t_checker, s_t_grad, s_t_mix, s_t_ramp, s_t_math, s_t_bump, s_t_nmap, 0
 graph_socket_names:                     # the pins, in PIN_* order
                 .quad s_s_base, s_s_metal, s_s_spec, s_s_rough, s_s_emit, s_s_alpha
                 .quad s_s_bump, s_s_ao, s_s_coat, s_s_coatr, s_s_trans, s_s_ior, s_s_mask, 0
-graph_ntypes:   .long NTYPES
 # per pin: the copy's offset, and how its value goes there (0 the colour, 1
 #   the value clamped to 0..1, 2 to 1..3, 3 the emission colour)
 pin_off:        .short MA_BASE_, MA_METAL_, MA_SPEC_, MA_ROUGH_, MA_EMIT_, MA_ALPHA_
                 .short 0, MA_RT_AO, MA_COAT_, MA_COATR_, MA_TRANS_, MA_IOR_, MA_RT_MASK
 pin_kind:       .byte 0, 1, 1, 1, 3, 1, 9, 1, 1, 1, 1, 2, 1
-s_t_image:      .asciz "image"
-s_t_noise:      .asciz "noise"
-s_t_checker:    .asciz "checker"
-s_t_grad:       .asciz "gradient"
-s_t_mix:        .asciz "mix"
-s_t_ramp:       .asciz "ramp"
-s_t_math:       .asciz "math"
-s_t_bump:       .asciz "bump"
-s_t_nmap:       .asciz "normalmap"
 s_s_base:       .asciz "base"
 s_s_metal:      .asciz "metallic"
 s_s_rough:      .asciz "roughness"
@@ -152,24 +148,15 @@ s_s_coatr:      .asciz "coat_roughness"
 s_s_trans:      .asciz "transmission"
 s_s_ior:        .asciz "ior"
 s_s_mask:       .asciz "mask"
-# defaults per type: p0..p3, in0..in2 values (3 each)
 .align 4
-node_defaults:
-    .float 0, 1, 0, 0,     0, 0, 0,  0, 0, 0,  0, 0, 0                  # image
-    .float 4, 3, 0.5, 0,   0, 0, 0,  0, 0, 0,  0, 0, 0                  # noise
-    .float 2, 0, 0, 0,     0.8, 0.8, 0.8,  0.2, 0.2, 0.2,  0, 0, 0      # checker
-    .float 1, 1, 0, 0,     0, 0, 0,  0, 0, 0,  0, 0, 0                  # gradient
-    .float 0, 0, 0, 0,     0.5, 0.5, 0.5,  0.8, 0.8, 0.8,  0.2, 0.2, 0.2   # mix
-    .float 0, 1, 0, 0,     0.5, 0.5, 0.5,  0, 0, 0,  1, 1, 1            # ramp
-    .float 0, 0, 0, 0,     0, 0, 0,  0, 0, 0,  0, 0, 0                  # math
-    .float 1, 0.05, 0, 0,  0, 0, 0,  0, 0, 0,  0, 0, 0                  # bump
-    .float 1, 0, 0, 0,     0.5, 0.5, 1,  0, 0, 0,  0, 0, 0              # normalmap
 gf_one:         .float 1.0
 gf_half:        .float 0.5
 gf_zero:        .float 0.0
 gf_two:         .float 2.0
 gf_six:         .float 6.0
 gf_three:       .float 3.0
+gf_inv2pi:      .float 0.15915494
+gf_one_m:       .float 0.9999
 gf_15:          .float 15.0
 gf_10:          .float 10.0
 gf_eps:         .float 0.001                # bump: the step in object units
@@ -445,6 +432,7 @@ fbm:
 #  Evaluation
 # =============================================================================
 # node_in(rbx=record, r12=node, ecx=input, r13=frame) -> xmm0..2 colour, xmm3 value
+gr_in:
 node_in:
     imul    eax, ecx, 16
     lea     rdx, [r12+ND_IN+rax]
@@ -464,22 +452,37 @@ node_in:
     movss   xmm3, xmm0
     ret
 
-# out_slot(eax=link) -> eax = the frame offset of that output's result
+# gr_slot(eax=link) -> eax = the frame offset of that output's result
+gr_slot:
 out_slot:
     mov     edx, eax
     movzx   eax, ax
     dec     eax
-    shl     eax, 6                      # (16 NOUTS bytes a node)
+    shl     eax, 7                      # (16 NOUTS bytes a node)
     shr     edx, 16
     and     edx, NOUTS-1
     shl     edx, 4
     lea     eax, [rax+rdx+EV_VAL]
     ret
 
+# gr_out(ecx=output k, xmm0..2 colour, xmm3 value) - output k (r13, r14d)
+gr_out:
+    mov     eax, r14d
+    shl     eax, 7
+    shl     ecx, 4
+    add     eax, ecx
+    lea     rdx, [r13+EV_VAL+rax]
+    movss   [rdx], xmm0
+    movss   [rdx+4], xmm1
+    movss   [rdx+8], xmm2
+    movss   [rdx+12], xmm3
+    ret
+
 # put(xmm0..2) - the node's colour, value = luminance (r13 frame, r14d node)
+gr_put:
 put_col:
     mov     eax, r14d
-    shl     eax, 6
+    shl     eax, 7
     lea     rdx, [r13+EV_VAL+rax]
     movss   [rdx], xmm0
     movss   [rdx+4], xmm1
@@ -493,9 +496,10 @@ put_col:
     ret
 
 # put_val(xmm0) - grey colour and value
+gr_putv:
 put_val:
     mov     eax, r14d
-    shl     eax, 6
+    shl     eax, 7
     lea     rdx, [r13+EV_VAL+rax]
     movss   [rdx], xmm0
     movss   [rdx+4], xmm0
@@ -542,8 +546,7 @@ graph_eval:
     je      .Lge_bump
     cmp     eax, T_NMAP
     je      .Lge_nmap
-    xorps   xmm0, xmm0
-    call    put_val
+    call    mn_eval                     # the rest: matnodes.s
     jmp     .Lge_next
 
 .Lge_image:
@@ -568,10 +571,35 @@ graph_eval:
     call    node_in
 2:  divss   xmm0, [rsp+56]
     divss   xmm1, [rsp+56]
-    mov     rdi, [rsp+48]
+    cvttss2si eax, dword ptr [r12+ND_P+12]  # wrap: repeat, clamp, mirror
+    xor     edx, edx
+    cmp     eax, 1
+    jne     21f
+    mov     edx, 2                      # (clamping: the sampler's)
+21: call    uv_wrap
+    movss   xmm2, xmm0
+    movss   xmm0, xmm1
+    call    uv_wrap_1
+    movss   xmm1, xmm0
+    movss   xmm0, xmm2
+    movss   xmm2, [r12+ND_P+8]          # data (not colours) unless a colour
+    comiss  xmm2, [rip+gf_half]
+    jb      3f
+    or      edx, 1
+3:  mov     rdi, [rsp+48]
     lea     rsi, [rsp]
-    call    tex_sample
-    movss   xmm0, [rsp]
+    call    tex_sample4
+    xor     r15d, r15d                  # R G B A: values (outputs 1..4)
+4:  movss   xmm0, [rsp+r15*4]
+    movss   xmm1, xmm0
+    movss   xmm2, xmm0
+    movss   xmm3, xmm0
+    lea     ecx, [r15+1]
+    call    gr_out
+    inc     r15d
+    cmp     r15d, 4
+    jb      4b
+    movss   xmm0, [rsp]                 # the colour (output 0)
     movss   xmm1, [rsp+4]
     movss   xmm2, [rsp+8]
     call    put_col
@@ -580,6 +608,27 @@ graph_eval:
     xorps   xmm0, xmm0
     call    put_val
     jmp     .Lge_next
+
+# uv_wrap(xmm0=u, eax=0 repeat, 1 clamp, 2 mirror) -> xmm0 (rsp-safe; eax kept)
+#   uv_wrap_1 the same with eax as last given
+uv_wrap:
+uv_wrap_1:
+    test    eax, eax
+    jle     9f
+    cmp     eax, 1
+    jne     2f
+    ret                                 # (clamp: the sampler does it)
+2:  movss   xmm3, xmm0                  # mirror: 1 - |frac(u / 2) 2 - 1|
+    mulss   xmm3, [rip+gf_half]
+    roundss xmm4, xmm3, 1
+    subss   xmm3, xmm4
+    addss   xmm3, xmm3
+    subss   xmm3, [rip+gf_one]
+    andps   xmm3, [rip+gf_abs]
+    movss   xmm0, [rip+gf_one]
+    subss   xmm0, xmm3
+    minss   xmm0, [rip+gf_one_m]
+9:  ret
 
 .Lge_noise:
     xor     ecx, ecx                    # p + offset (in0)
@@ -628,7 +677,7 @@ graph_eval:
     movss   xmm1, [rsp+20]
     call    put_col
     mov     eax, r14d                   # value = the first channel
-    shl     eax, 6
+    shl     eax, 7
     movss   xmm0, [rsp+16]
     movss   [r13+EV_VAL+rax+12], xmm0
     jmp     .Lge_next
@@ -652,13 +701,17 @@ graph_eval:
     call    node_in
     call    put_col
     mov     eax, r14d
-    shl     eax, 6
+    shl     eax, 7
     cvtsi2ss xmm0, r15d
     movss   [r13+EV_VAL+rax+12], xmm0
     jmp     .Lge_next
 
 .Lge_grad:
     cvttss2si eax, dword ptr [r12+ND_P]
+    cmp     eax, 3
+    je      .Lge_grad_radial
+    cmp     eax, 4
+    je      .Lge_grad_sphere
     cmp     eax, 2
     jbe     6f
     mov     eax, 1
@@ -667,6 +720,39 @@ graph_eval:
     mulss   xmm0, [rip+gf_half]
     addss   xmm0, [rip+gf_half]
     addss   xmm0, [r12+ND_P+8]
+    maxss   xmm0, [rip+gf_zero]
+    minss   xmm0, [rip+gf_one]
+    call    put_val
+    jmp     .Lge_next
+
+.Lge_grad_radial:                       # around y: the angle, 0..1
+    movss   xmm0, [r13+EV_P+8]
+    movss   [rsp], xmm0
+    movss   xmm0, [r13+EV_P]
+    movss   [rsp+4], xmm0
+    fld     dword ptr [rsp]             # atan2(z, x)
+    fld     dword ptr [rsp+4]
+    fpatan
+    fstp    dword ptr [rsp]
+    movss   xmm0, [rsp]
+    mulss   xmm0, [rip+gf_inv2pi]
+    addss   xmm0, [rip+gf_half]
+    jmp     7f
+.Lge_grad_sphere:                       # 1 - |p| scale
+    movss   xmm0, [r13+EV_P]
+    mulss   xmm0, xmm0
+    movss   xmm1, [r13+EV_P+4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [r13+EV_P+8]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    sqrtss  xmm0, xmm0
+    mulss   xmm0, [r12+ND_P+4]
+    movss   xmm1, [rip+gf_one]
+    subss   xmm1, xmm0
+    movss   xmm0, xmm1
+7:  addss   xmm0, [r12+ND_P+8]
     maxss   xmm0, [rip+gf_zero]
     minss   xmm0, [rip+gf_one]
     call    put_val
@@ -707,7 +793,7 @@ graph_eval:
     movss   xmm1, xmm2
     jmp     75f
 73: cmp     r15d, 4                     # screen: 1 - (1 - a)(1 - b)
-    jne     75f
+    jne     74f
     movss   xmm2, [rip+gf_one]
     subss   xmm2, xmm0
     movss   xmm4, [rip+gf_one]
@@ -715,6 +801,8 @@ graph_eval:
     mulss   xmm2, xmm4
     movss   xmm1, [rip+gf_one]
     subss   xmm1, xmm2
+    jmp     75f
+74: call    mix_more                    # overlay .. divide
 75: subss   xmm1, xmm0                  # a + (op - a) factor
     mulss   xmm1, [rsp+48]
     addss   xmm0, xmm1
@@ -727,6 +815,66 @@ graph_eval:
     movss   xmm2, [rsp+40]
     call    put_col
     jmp     .Lge_next
+
+# mix_more(xmm0=a, xmm1=b, r15d=mode 5..10) -> xmm1 = op(a, b); xmm0 kept
+#   5 overlay, 6 darken, 7 lighten, 8 difference, 9 soft light, 10 divide
+mix_more:
+    cmp     r15d, 5
+    jne     1f
+    movss   xmm2, xmm0                  # a < 1/2: 2 a b, else 1 - 2 (1-a)(1-b)
+    comiss  xmm2, [rip+gf_half]
+    jae     11f
+    mulss   xmm1, xmm0
+    addss   xmm1, xmm1
+    ret
+11: movss   xmm2, [rip+gf_one]
+    subss   xmm2, xmm0
+    movss   xmm4, [rip+gf_one]
+    subss   xmm4, xmm1
+    mulss   xmm2, xmm4
+    addss   xmm2, xmm2
+    movss   xmm1, [rip+gf_one]
+    subss   xmm1, xmm2
+    ret
+1:  cmp     r15d, 6
+    jne     2f
+    minss   xmm1, xmm0
+    ret
+2:  cmp     r15d, 7
+    jne     3f
+    maxss   xmm1, xmm0
+    ret
+3:  cmp     r15d, 8
+    jne     4f
+    subss   xmm1, xmm0
+    andps   xmm1, [rip+gf_abs]
+    ret
+4:  cmp     r15d, 9
+    jne     5f
+    movss   xmm2, xmm1                  # (1 - 2b) a^2 + 2 b a
+    addss   xmm2, xmm2
+    movss   xmm4, [rip+gf_one]
+    subss   xmm4, xmm2
+    mulss   xmm4, xmm0
+    mulss   xmm4, xmm0
+    mulss   xmm2, xmm0
+    addss   xmm4, xmm2
+    movss   xmm1, xmm4
+    ret
+5:  cmp     r15d, 10
+    jne     6f
+    movss   xmm2, xmm1                  # a / b (b ~ 0: 0)
+    andps   xmm2, [rip+gf_abs]
+    comiss  xmm2, [rip+gf_tiny]
+    jbe     51f
+    movss   xmm2, xmm0
+    divss   xmm2, xmm1
+    movss   xmm1, xmm2
+    ret
+51: xorps   xmm1, xmm1
+    ret
+6:  movss   xmm1, xmm0                  # (unknown: a)
+    ret
 
 .Lge_ramp:
     xor     ecx, ecx
@@ -763,79 +911,20 @@ graph_eval:
     jmp     .Lge_next
 
 .Lge_math:
-    xor     ecx, ecx
+    xor     ecx, ecx                    # a, b, c: their values
     call    node_in
     movss   [rsp], xmm3
     mov     ecx, 1
     call    node_in
-    movss   xmm1, xmm3                  # b
-    movss   xmm0, [rsp]                 # a
+    movss   [rsp+4], xmm3
+    mov     ecx, 2
+    call    node_in
+    movss   xmm2, xmm3
+    movss   xmm0, [rsp]
+    movss   xmm1, [rsp+4]
     cvttss2si eax, dword ptr [r12+ND_P]
-    cmp     eax, 1
-    jb      90f
-    je      91f
-    cmp     eax, 3
-    jb      92f
-    je      93f
-    cmp     eax, 5
-    jb      94f
-    je      95f
-    cmp     eax, 7
-    jb      96f
-    je      97f
-    cmp     eax, 8
-    je      98f
-    andps   xmm0, [rip+gf_abs]          # 9: |a|
-    jmp     99f
-90: addss   xmm0, xmm1
-    jmp     99f
-91: subss   xmm0, xmm1
-    jmp     99f
-92: mulss   xmm0, xmm1
-    jmp     99f
-93: movaps  xmm2, xmm1
-    andps   xmm2, [rip+gf_abs]
-    comiss  xmm2, [rip+gf_tiny]
-    jbe     931f
-    divss   xmm0, xmm1
-    jmp     99f
-931:xorps   xmm0, xmm0
-    jmp     99f
-94: xorps   xmm2, xmm2                  # a^b (a > 0), x87
-    comiss  xmm0, xmm2
-    jbe     931b
-    movss   [rsp], xmm0
-    movss   [rsp+4], xmm1
-    fld     dword ptr [rsp+4]
-    fld     dword ptr [rsp]
-    fyl2x
-    fld     st(0)
-    frndint
-    fsub    st(1), st(0)
-    fxch    st(1)
-    f2xm1
-    fld1
-    faddp   st(1), st(0)
-    fscale
-    fstp    st(1)
-    fstp    dword ptr [rsp]
-    movss   xmm0, [rsp]
-    jmp     99f
-95: minss   xmm0, xmm1
-    jmp     99f
-96: maxss   xmm0, xmm1
-    jmp     99f
-97: comiss  xmm0, xmm1                  # a > b: 1 / 0
-    movss   xmm0, [rip+gf_one]
-    ja      99f
-    xorps   xmm0, xmm0
-    jmp     99f
-98: movss   [rsp], xmm0                 # sin a
-    fld     dword ptr [rsp]
-    fsin
-    fstp    dword ptr [rsp]
-    movss   xmm0, [rsp]
-99: call    put_val
+    call    math_op
+    call    put_val
     jmp     .Lge_next
 
 .Lge_nmap:
@@ -932,6 +1021,97 @@ len3:
     sqrtss  xmm0, xmm0
     ret
 
+# graph_probe(edi=material, esi=node, edx=k: output * 4 + channel (0..2
+#   the colour, 3 the value), rsi.. see below, rcx=float[5]: x y z (the
+#   object position, also the world one), u v) -> xmm0 (eax = 0: no such
+#   node). The normal is +y, the eye along +z, no vertex colours: every
+#   node is evaluated (scripts and tests read single nodes this way)
+.globl graph_probe
+graph_probe:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, EV_SZ+SC_SZ2+40
+    mov     r14d, esi
+    mov     r15d, edx
+    mov     rbp, rcx
+    push    rdi
+    call    tex_init
+    pop     rdi
+    call    mat_count
+    cmp     edi, eax
+    jae     8f
+    call    mat_get
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    test    r14d, r14d
+    jle     8f
+    cmp     r14d, [rbx+GR_N]
+    ja      8f
+    lea     r12, [rsp+EV_SZ]            # the shading context
+    mov     rdi, r12
+    xor     eax, eax
+    mov     ecx, SC_SZ2/4
+    rep     stosd
+    xor     ecx, ecx
+1:  mov     eax, [rbp+rcx*4]
+    mov     [r12+SC_P0O+rcx*4], eax
+    mov     [r12+SC_WP+rcx*4], eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     eax, 0x3a83126f             # (edges of 0.001: bump's steps)
+    mov     [r12+SC_E1O], eax
+    mov     [r12+SC_E2O+8], eax
+    mov     [r12+SC_PU], eax
+    mov     [r12+SC_PV+8], eax
+    mov     eax, 0x3f800000
+    mov     [r12+SC_N+4], eax
+    mov     [r12+SC_WV+8], eax
+    mov     [r12+SC_VC], eax
+    mov     [r12+SC_VC+4], eax
+    mov     [r12+SC_VC+8], eax
+    lea     rdi, [rsp+EV_SZ+SC_SZ2]     # the UVs: (u, v) at every corner
+    mov     rax, [rbp+12]
+    mov     [rdi], rax
+    mov     [rdi+8], rax
+    mov     [rdi+16], rax
+    mov     [r12+SC_UVP], rdi
+    lea     r13, [rsp]                  # every node, at the point
+    mov     rax, [rbp]
+    mov     [r13+EV_P], rax
+    mov     eax, [rbp+8]
+    mov     [r13+EV_P+8], eax
+    mov     rax, [rbp+12]
+    mov     [r13+EV_UV], rax
+    mov     qword ptr [r13+EV_LIVE], -1
+    mov     [r13+EV_SC], r12
+    mov     rdi, rbx
+    mov     rsi, r13
+    call    graph_eval
+    lea     eax, [r14-1]                # the output's channel
+    shl     eax, 7
+    mov     ecx, r15d
+    and     ecx, 4*NOUTS-1
+    lea     eax, [rax+rcx*4]
+    movss   xmm0, [r13+EV_VAL+rax]
+    mov     eax, 1
+    jmp     9f
+8:  xorps   xmm0, xmm0
+    xor     eax, eax
+9:  add     rsp, EV_SZ+SC_SZ2+40
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # graph_live(rbx=record, rax=the nodes wanted) -> rax = them and every
 #   node feeding them (links point to earlier nodes: one pass down)
 graph_live:
@@ -978,6 +1158,7 @@ graph_shade:
     cmp     dword ptr [rbx+GR_N], 0
     je      .Lgs_out
     lea     r13, [rsp]                  # the frame
+    mov     [r13+EV_SC], r12
     lea     r15, [rsp+EV_SZ]            # corners p1 p2 (24), sums (scratch)
     xor     eax, eax                    # the nodes that lead to a pin
     xor     ecx, ecx
@@ -1091,7 +1272,7 @@ graph_shade:
     movss   xmm0, [rbx+GR_NODES+rax+ND_P]   # strength
     movss   [r15+24], xmm0
     mov     eax, r14d
-    shl     eax, 6
+    shl     eax, 7
     movss   xmm0, [r13+EV_VAL+rax+12]   # h
     movss   [r15+28], xmm0
     xor     eax, eax                    # from here on only its height
@@ -1117,7 +1298,7 @@ graph_shade:
     movss   xmm1, [r12+SC_V]
     call    at
     mov     eax, r14d
-    shl     eax, 6
+    shl     eax, 7
     movss   xmm0, [r13+EV_VAL+rax+12]
     subss   xmm0, [r15+28]
     divss   xmm0, [r15+32]
@@ -1127,7 +1308,7 @@ graph_shade:
     addss   xmm1, [r15+36]
     call    at
     mov     eax, r14d
-    shl     eax, 6
+    shl     eax, 7
     movss   xmm0, [r13+EV_VAL+rax+12]
     subss   xmm0, [r15+28]
     divss   xmm0, [r15+36]
@@ -1209,18 +1390,31 @@ graph_shade:
     mov     rsi, [r12+SC_UVP]
     test    rsi, rsi
     jz      .Lgs_done
-    movss   xmm4, [rbx+GR_NODES+rax+ND_P]   # strength
+    xor     ebp, ebp                    # fed by an image read as data:
+    movzx   edi, word ptr [rbx+GR_NODES+rax+ND_IN]  # its values as they are
+    dec     edi
+    js      70f
+    imul    edi, edi, NODE_SZ
+    cmp     dword ptr [rbx+GR_NODES+rdi+ND_TYPE], T_IMAGE
+    jne     70f
+    movss   xmm0, [rbx+GR_NODES+rdi+ND_P+8]
+    comiss  xmm0, [rip+gf_half]
+    jb      70f
+    mov     ebp, 1
+70: movss   xmm4, [rbx+GR_NODES+rax+ND_P]   # strength
     mov     eax, r14d                   # t = 2 c - 1 (x, y x strength)
-    shl     eax, 6
+    shl     eax, 7
     lea     rdx, [r13+EV_VAL+rax]
     xor     ecx, ecx
 1:  movss   xmm0, [rdx+rcx*4]
+    test    ebp, ebp
+    jnz     11f
     push    rcx                         # (the map's bytes, not colours;
     push    rdx                         #  xmm4 is kept)
     call    tx_unlin
     pop     rdx
     pop     rcx
-    addss   xmm0, xmm0
+11: addss   xmm0, xmm0
     subss   xmm0, [rip+gf_one]
     cmp     ecx, 2
     je      2f
@@ -1400,7 +1594,7 @@ graph_add:
     sub     rsp, 8
     mov     r12d, esi
     lea     eax, [rsi-1]
-    cmp     eax, NTYPES
+    cmp     eax, [rip+graph_ntypes]
     jae     8f
     call    own
     test    rax, rax
@@ -1419,7 +1613,7 @@ graph_add:
     mov     [rdi+ND_TYPE], r12d
     lea     eax, [r12-1]                # defaults: p0..p3, the inputs' values
     imul    eax, eax, 52
-    lea     rsi, [rip+node_defaults]
+    lea     rsi, [rip+mn_defaults]
     add     rsi, rax
     mov     rax, [rsi]
     mov     [rdi+ND_P], rax

@@ -570,13 +570,16 @@ job_shade:
     call    load_material
     mov     rax, [rip+pv_mat]           # a shader graph
     mov     rdi, [rax+rbp*8]
+    xor     eax, eax
     test    rdi, rdi
     jz      1f
     cmp     dword ptr [rdi+128], 0
     je      1f
     lea     rsi, [rsp]
     call    pv_graph
-1:  mov     rdi, [r14+RO_MESH]          # vertex colours tint the base
+1:  test    eax, 0x80000000             # (not when the graph reads them)
+    jnz     12f
+    mov     rdi, [r14+RO_MESH]          # vertex colours tint the base
     cmp     qword ptr [rdi+ME_VCOL], 0
     je      12f
     movss   xmm0, [rsp+SH_SZ+20]
@@ -625,7 +628,7 @@ job_shade:
 pv_graph:
     push    rbx
     push    r12
-    sub     rsp, 328
+    sub     rsp, 376
     mov     rbx, rdi
     mov     r12, rsi
     mov     r8, [r14+RO_MESH]           # the triangle's corners
@@ -656,11 +659,11 @@ pv_graph:
     lea     rax, [r10+rsi*4]
     movss   xmm1, [rax+rcx*4]
     subss   xmm1, xmm0
-    movss   [rsp+152+rcx*4], xmm1       # (camera e1, e2 for now)
+    movss   [rsp+320+rcx*4], xmm1       # (camera e1, e2 for now)
     lea     rax, [r10+rdi*4]
     movss   xmm1, [rax+rcx*4]
     subss   xmm1, xmm0
-    movss   [rsp+164+rcx*4], xmm1
+    movss   [rsp+332+rcx*4], xmm1
     inc     ecx
     cmp     ecx, 3
     jb      1b
@@ -668,10 +671,10 @@ pv_graph:
     mov     [rsp+36], eax
     mov     eax, [r12+SH_SZ+24]
     mov     [rsp+40], eax
-    lea     rsi, [rsp+152]              # the edges in world space
+    lea     rsi, [rsp+320]              # the edges in world space
     lea     rdi, [rsp+44]
     call    cam_to_world
-    lea     rsi, [rsp+164]
+    lea     rsi, [rsp+332]
     lea     rdi, [rsp+56]
     call    cam_to_world
     mov     rax, [r12+SH_N]             # the normal
@@ -681,28 +684,48 @@ pv_graph:
     mov     qword ptr [rsp+120], 0      # the mesh's UVs, if it has them
     mov     rdi, [r14+RO_MESH]
     mov     esi, r15d
-    lea     rdx, [rsp+176]
+    lea     rdx, [rsp+344]
     call    tri_uvs
     test    eax, eax
     jz      11f
-    lea     rax, [rsp+176]
+    lea     rax, [rsp+344]
     mov     [rsp+120], rax
-11: mov     rsi, rbx                    # its values, the pins over them
-    lea     rdi, [rsp+200]
+11: mov     rax, [r12+SH_P]             # the world point, towards the eye
+    mov     [rsp+152], rax
+    mov     eax, [r12+SH_P+8]
+    mov     [rsp+160], eax
+    mov     rax, [r12+SH_V]
+    mov     [rsp+164], rax
+    mov     eax, [r12+SH_V+8]
+    mov     [rsp+172], eax
+    mov     eax, 0x3f800000             # the vertex colour (none: white)
+    mov     [rsp+176], eax
+    mov     [rsp+180], eax
+    mov     [rsp+184], eax
+    mov     rdi, [r14+RO_MESH]
+    cmp     qword ptr [rdi+ME_VCOL], 0
+    je      12f
+    movss   xmm0, [r12+SH_SZ+20]
+    movss   xmm1, [r12+SH_SZ+24]
+    mov     esi, r15d
+    lea     rdx, [rsp+176]
+    call    vcol_lin
+12: mov     rsi, rbx                    # its values, the pins over them
+    lea     rdi, [rsp+192]
     mov     ecx, 32
     rep     movsd
     mov     rdi, rbx
     lea     rsi, [rsp]
-    lea     rdx, [rsp+200]
+    lea     rdx, [rsp+192]
     xor     ecx, ecx
     call    graph_shade
-    lea     rsi, [rsp+200]
+    lea     rsi, [rsp+192]
     mov     r9, r12
     call    load_values
     mov     eax, [rsp+112]              # what it drives
     test    eax, 1 << PIN_AO
     jz      5f
-    mov     ecx, [rsp+200+MA_RT_AO]
+    mov     ecx, [rsp+192+MA_RT_AO]
     mov     [r12+SH_AO], ecx
 5:  test    eax, 1 << PIN_NORMAL
     jz      6f
@@ -710,7 +733,8 @@ pv_graph:
     mov     [r12+SH_N], rcx
     mov     ecx, [rsp+76]
     mov     [r12+SH_N+8], ecx
-6:  add     rsp, 328
+6:  mov     eax, [rsp+112]              # (what the graph did)
+    add     rsp, 376
     pop     r12
     pop     rbx
     ret

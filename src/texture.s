@@ -13,6 +13,7 @@
 
 .globl tex_init
 .globl tex_sample
+.globl tex_sample4
 .globl tx_unlin
 .globl box_uv
 .globl srgb_to_lin
@@ -142,13 +143,36 @@ tx_unlin:
     ret
 
 # texel(rdi=image, ecx=x, edx=y, rsi=out[3]) - linear colour
+# tex_texel(rdi=image, ecx=x, edx=y, rsi=out[3]) - one texel, linear
 tex_texel:
+    push    rsi
+    sub     rsp, 16
+    xor     r9d, r9d
+    lea     rsi, [rsp]
+    call    texel
+    mov     rsi, [rsp+16]
+    mov     rax, [rsp]
+    mov     [rsi], rax
+    mov     eax, [rsp+8]
+    mov     [rsi+8], eax
+    add     rsp, 16
+    pop     rsi
+    ret
+
+# texel(rdi=image, ecx=x, edx=y, rsi=out[4], r9d=1: data) - rgba
 texel:
     imul    edx, [rdi+IM_W]
     add     edx, ecx
     cmp     dword ptr [rdi+IM_FMT], 0
     jne     1f
     mov     eax, [rdi+IM_DATA+rdx*4]    # 0xAARRGGBB
+    mov     ecx, eax                    # alpha: a fraction
+    shr     ecx, 24
+    cvtsi2ss xmm0, ecx
+    mulss   xmm0, [rip+tx_inv255]
+    movss   [rsi+12], xmm0
+    test    r9d, 1                      # data (not colours): a fraction too
+    jnz     2f
     lea     r8, [rip+tx_lut]
     mov     ecx, eax
     shr     ecx, 16
@@ -162,22 +186,49 @@ texel:
     movss   xmm0, [r8+rcx*4]
     movss   [rsi+8], xmm0
     ret
+2:  mov     ecx, eax
+    shr     ecx, 16
+    movzx   ecx, cl
+    cvtsi2ss xmm0, ecx
+    mulss   xmm0, [rip+tx_inv255]
+    movss   [rsi], xmm0
+    movzx   ecx, ah
+    cvtsi2ss xmm0, ecx
+    mulss   xmm0, [rip+tx_inv255]
+    movss   [rsi+4], xmm0
+    movzx   ecx, al
+    cvtsi2ss xmm0, ecx
+    mulss   xmm0, [rip+tx_inv255]
+    movss   [rsi+8], xmm0
+    ret
 1:  lea     rdx, [rdx+rdx*2]
     mov     rax, [rdi+IM_DATA+rdx*4]
     mov     [rsi], rax
     mov     eax, [rdi+IM_DATA+rdx*4+8]
     mov     [rsi+8], eax
+    mov     dword ptr [rsi+12], 0x3f800000
     ret
 
 # tex_sample(rdi=image, xmm0=u, xmm1=v, rsi=out[3]) - bilinear, repeating;
 #   v runs up the image
+# tex_sample4(rdi=image, xmm0=u, xmm1=v, rsi=out[4], edx: 1 data, not
+#   colours (8-bit texels as fractions, no sRGB curve), 2 clamped to the
+#   edge (not repeating)) - and the alpha
 tex_sample:
+    xor     edx, edx
+    mov     ecx, 3
+    jmp     ts_body
+tex_sample4:
+    mov     ecx, 4
+ts_body:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
-    sub     rsp, 80
+    sub     rsp, 96
+    mov     [rsp+80], edx               # the mode, the channels
+    mov     [rsp+84], ecx
     mov     rbx, rdi
     mov     r12, rsi
     cvtsi2ss xmm2, dword ptr [rbx+IM_W] # x = u w - 0.5
@@ -188,7 +239,18 @@ tex_sample:
     cvtsi2ss xmm2, dword ptr [rbx+IM_H]
     mulss   xmm3, xmm2
     subss   xmm3, [rip+tx_half]
-    movss   [rsp+64], xmm3
+    test    edx, 2                      # clamped: within the edge texels
+    jz      1f
+    xorps   xmm4, xmm4
+    maxss   xmm0, xmm4
+    maxss   xmm3, xmm4
+    cvtsi2ss xmm4, dword ptr [rbx+IM_W]
+    subss   xmm4, [rip+tx_one]
+    minss   xmm0, xmm4
+    cvtsi2ss xmm4, dword ptr [rbx+IM_H]
+    subss   xmm4, [rip+tx_one]
+    minss   xmm3, xmm4
+1:  movss   [rsp+64], xmm3
     mov     ecx, [rbx+IM_W]
     call    floor_wrap
     mov     r13d, eax                   # x0
@@ -207,6 +269,7 @@ tex_sample:
     jb      2f
     xor     eax, eax
 2:  mov     [rsp+76], eax
+    mov     r9d, [rsp+80]
     mov     rdi, rbx                    # the four texels
     mov     ecx, r13d
     mov     edx, r14d
@@ -245,9 +308,9 @@ tex_sample:
     addss   xmm0, xmm2
     movss   [r12+rcx*4], xmm0
     inc     ecx
-    cmp     ecx, 3
+    cmp     ecx, [rsp+84]
     jb      3b
-    add     rsp, 80
+    add     rsp, 96
     pop     r15
     pop     r14
     pop     r13
