@@ -50,6 +50,8 @@ ai_tools_st:    .skip 24                #  the tools as functions
 ai_req_st:      .skip 24                #  a tool call for mcp_local
 ai_end:         .skip 8                 # the reply's end (j_end, kept)
 ai_line_len:    .skip 8
+ai_indent:      .skip 8                 # ai_add's later lines' indent
+ai_line_skip:   .skip 4                 # in a line too long to read
 ai_reply_len:   .skip 8
 ai_tx_len:      .skip 4
 ai_busy:        .skip 4                 # 1 while a request runs
@@ -196,7 +198,11 @@ s_hint:         .asciz "Describe a world, a model or a change, and press Enter. 
 s_prompt_hint:  .asciz "Describe what to build..."
 s_working:      .asciz "Working with "
 s_dots:         .asciz "...  (Stop ends it)"
+s_indent:       .asciz "               "    # (15)
+s_too_long:     .asciz "  (a message too long to show, such as an image, was left out)"
 s_nothing_rev:  .asciz "  nothing of the AI's to revert"
+s_copied:       .asciz "  the AI conversation is on the clipboard"
+s_nothing_copy: .asciz "  the AI conversation is empty"
 n_claude:       .asciz "Claude Code"
 n_grok:         .asciz "Grok"
 n_or:           .asciz "OpenRouter"
@@ -222,7 +228,7 @@ s_world:
     .ascii "Work like this:\n"
     .ascii "1. Look first: scene_summary (and viewport_capture when it matters).\n"
     .ascii "2. Plan briefly: the parts, their sizes and places.\n"
-    .ascii "3. Build in batches with script_eval (BeeScript), many objects a call: add(type, name, x, y, z) with cube, sphere, cylinder, cone, torus, plane, grid, light or camera; scale(n, x, y, z); rotate(n, rx, ry, rz); move(n, x, y, z); for i in 0..10 { ... } loops. Materials: m = material(\"Stone\"); matset(m, \"base\", 0.5, 0.5, 0.48); matset(m, \"roughness\", 0.8); assign(object, m); a preset look: m = material(\"Planks\"); op(\"material.preset\", \"wood Planks\") (gold silver copper chrome aluminium plastic rubber glass frosted_glass water ceramic car_paint skin clay emissive wood marble concrete fabric leather). add returns the name it gave (Cube.001 when Cube is taken): keep it.\n"
+    .ascii "3. Build in batches with script_eval (BeeScript), many objects a call: add(type, name, x, y, z) with cube, sphere, cylinder, cone, torus, plane, grid, light or camera; scale(n, x, y, z); rotate(n, rx, ry, rz); move(n, x, y, z); for i in 0..10 { ... } loops; fn name(a, b) { ... } helpers. There are no lists or arrays ([...]): write each call, or loop over numbers. Materials: m = material(\"Stone\"); matset(m, \"base\", 0.5, 0.5, 0.48); matset(m, \"roughness\", 0.8); assign(object, m); a preset look: m = material(\"Planks\"); op(\"material.preset\", \"wood Planks\") (gold silver copper chrome aluminium plastic rubber glass frosted_glass water ceramic car_paint skin clay emissive wood marble concrete fabric leather). add returns the name it gave (Cube.001 when Cube is taken): keep it.\n"
     .ascii "4. Terrain and many copies with geometry nodes: t = gtree(\"Land\"); n = gnode(t, \"terrain\", 60, 128, 6, 1) (size, resolution, height, seed); o = gnode(t, \"output\"); glink(t, n, o, 1); add(\"plane\", \"Ground\"); k = modifier(\"Ground\", \"geometry\"); modset(\"Ground\", k, \"tree\", t). The distribute and instance nodes scatter objects; lsystem nodes grow plants (node_types lists them all).\n"
     .ascii "5. Light and camera: add(\"light\", \"Sun\", 4, 8, 3) then op(\"light.set\", \"power 3\"); c = add(\"camera\", \"Shot\", 0, 2, 12), aim it with rotate(c, -10deg, 0, 0), then op(\"camera.set\", \"active\") (the new object is the active one). With an HDRI image loaded (image(path)), op(\"world.hdri\", name) and op(\"world.strength\", 1.5) light the world.\n"
     .ascii "6. Check: viewport_capture, then fix what is wrong. Keep to a few thousand objects; use instances and node trees for many copies.\n"
@@ -236,6 +242,7 @@ s_wp_goal:      .asciz "\n\nWhat to build: "
 WIDGET wd_ai_prov, WK_ENUM, "ai.connection", cb=ai_prov_cb, aux=l_ai_prov, n=3, tip="The connection this conversation uses (set them up in Preferences > AI)"
 WIDGET wd_ai_new, WK_BUTTON, "ai.new", "New", flags=WGF_COMPACT, tip="Start a new conversation (the scene stays as it is)"
 WIDGET wd_ai_revert, WK_BUTTON, "ai.revert", "Revert", flags=WGF_COMPACT, tip="Undo the AI's last request (one step)"
+WIDGET wd_ai_copy, WK_BUTTON, "ai.copy", "Copy", flags=WGF_COMPACT, tip="Copy the whole conversation to the clipboard"
 WIDGET wd_ai_scroll, WK_SCROLL, "ai.transcript"
 WIDGET wd_ai_prompt, WK_TEXT, "ai.prompt", "Prompt", cb=ai_prompt_cb, tip="What to build or change. Enter sends it"
 WIDGET wd_ai_send, WK_BUTTON, "ai.send", "Send", flags=WGF_PRIMARY, tip="Send the prompt (Enter)"
@@ -248,6 +255,7 @@ l_ai_prov:      .quad n_claude, n_grok, n_or
 OPERATOR op_ai_send, "ai.send", "Send to the AI", do_ai_send, flags=OPF_QUIET, doc="Send a prompt to the AI Assistant: ai.send <what to build>"
 OPERATOR op_ai_stop, "ai.stop", "Stop the AI", do_ai_stop, flags=OPF_QUIET, doc="Stop the AI Assistant's request"
 OPERATOR op_ai_new, "ai.new", "New AI Conversation", do_ai_new, flags=OPF_QUIET, doc="Start a new conversation with the AI Assistant"
+OPERATOR op_ai_copy, "ai.copy", "Copy AI Conversation", do_ai_copy, flags=OPF_QUIET, doc="Copy the AI Assistant's conversation, as shown, to the clipboard"
 OPERATOR op_ai_revert, "ai.revert", "Revert AI Request", do_ai_revert, flags=OPF_QUIET, doc="Undo the AI Assistant's last request (one step)"
 OPERATOR op_ai_mode, "ai.mode", "AI Assistant", do_ai_mode, key=KEY_SPACE|KM_CTRL|KM_SHIFT, flags=OPF_QUIET, doc="Go to the AI Assistant's prompt (the AI workspace when none is shown; Ctrl+Shift+Space)"
 OPERATOR op_ai_transcript, "ai.transcript", "AI Transcript", do_ai_transcript, flags=OPF_QUIET|OPF_AI_SAFE, doc="Print the AI Assistant's conversation (its last 24 lines) to the console: Y you, A the AI, T a tool call, R its result, E an error, N a note"
@@ -258,7 +266,8 @@ OPERATOR op_ai_test, "ai.test", "Test AI Connection", do_ai_test, flags=OPF_QUIE
 # The transcript
 # =============================================================================
 # ai_add(edi=kind, rsi=prefix or 0, rdx=text, ecx=bytes at most (-1: all))
-#   - one entry a line (empty lines skipped); the first line gets the prefix
+#   - one entry a line (empty lines skipped); the first line gets the prefix,
+#   the others as many spaces
 ai_add:
     push    rbx
     push    r12
@@ -269,6 +278,17 @@ ai_add:
     mov     r13, rsi
     mov     rbx, rdx
     mov     r14d, ecx
+    mov     qword ptr [rip+ai_indent], 0
+    test    rsi, rsi
+    jz      .Lad_line
+    mov     rdi, rsi
+    call    str_len
+    cmp     eax, 15
+    jbe     1f
+    mov     eax, 15
+1:  lea     rcx, [rip+s_indent+15]
+    sub     rcx, rax
+    mov     [rip+ai_indent], rcx
     test    rbx, rbx
     jz      .Lad_done
 .Lad_line:
@@ -298,10 +318,13 @@ ai_add:
     add     rdi, rcx
     mov     [rdi], r12b
     inc     rdi
-    test    r13, r13
-    jz      4f
     mov     rsi, r13
-    call    ai_cpy
+    test    r13, r13
+    jnz     31f
+    mov     rsi, [rip+ai_indent]        # (a later line)
+    test    rsi, rsi
+    jz      4f
+31: call    ai_cpy
 4:  xor     ecx, ecx
 5:  cmp     ecx, r15d
     jae     6f
@@ -744,6 +767,7 @@ ai_cli_start:
     call    .Larg
 5:  mov     qword ptr [r13+r14*8], 0
     mov     qword ptr [rip+ai_line_len], 0
+    mov     dword ptr [rip+ai_line_skip], 0
     lea     rax, [rip+ai_cli_data]
     mov     [rip+ai_on_data], rax
     lea     rax, [rip+ai_cli_exit]
@@ -830,22 +854,31 @@ ai_cfg_write:
     ret
 
 # ai_cli_data(rdi=bytes, esi=count) - the child's output: each whole line
+#   (a line longer than the buffer, such as an image's data, is skipped
+#   whole, with a note)
 ai_cli_data:
     push    rbx
     push    r12
     push    r13
-    mov     ecx, esi
-    mov     rsi, rdi
-    mov     rax, [rip+ai_line_len]      # appended (what does not fit: lost)
+    push    r14
+    push    r15
+    mov     r14, rdi                    # what is left of the bytes
+    mov     r15d, esi
+.Lcd_fill:
+    mov     ecx, r15d                   # as much as fits
+    mov     rax, [rip+ai_line_len]
     mov     edx, LINE_CAP-1
     sub     rdx, rax
     cmp     rcx, rdx
     jbe     1f
     mov     rcx, rdx
-1:  lea     rdi, [rip+ai_line]
+1:  sub     r15d, ecx
+    lea     rdi, [rip+ai_line]
     add     rdi, rax
     add     [rip+ai_line_len], rcx
+    mov     rsi, r14
     rep     movsb
+    mov     r14, rsi
 2:  lea     rbx, [rip+ai_line]          # whole lines
     mov     r12, [rip+ai_line_len]
     xor     r13d, r13d
@@ -856,10 +889,14 @@ ai_cli_data:
     inc     r13
     jmp     3b
 4:  mov     byte ptr [rbx+r13], 0
-    mov     rdi, rbx
+    cmp     dword ptr [rip+ai_line_skip], 0
+    je      41f
+    mov     dword ptr [rip+ai_line_skip], 0     # (the end of a skipped one)
+    jmp     5f
+41: mov     rdi, rbx
     mov     rsi, r13
     call    ai_cli_line
-    lea     rsi, [rbx+r13+1]            # the rest moves up
+5:  lea     rsi, [rbx+r13+1]            # the rest moves up
     mov     rcx, r12
     sub     rcx, r13
     dec     rcx
@@ -868,9 +905,22 @@ ai_cli_data:
     rep     movsb
     jmp     2b
 6:  cmp     r12, LINE_CAP-1             # a line too long for the buffer
-    jb      9f
+    jb      7f
     mov     qword ptr [rip+ai_line_len], 0
-9:  pop     r13
+    cmp     dword ptr [rip+ai_line_skip], 0
+    jne     7f
+    mov     dword ptr [rip+ai_line_skip], 1
+    mov     edi, K_NOTE
+    lea     rsi, [rip+s_too_long]
+    mov     rdx, rsi
+    xor     esi, esi
+    mov     ecx, -1
+    call    ai_add
+7:  test    r15d, r15d
+    jnz     .Lcd_fill
+    pop     r15
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -882,10 +932,13 @@ ai_cli_exit:
     mov     rsi, [rip+ai_line_len]      # a last line without its newline
     test    rsi, rsi
     jz      1f
+    cmp     dword ptr [rip+ai_line_skip], 0     # (not the end of a skipped one)
+    jne     11f
     lea     rdi, [rip+ai_line]
     mov     byte ptr [rdi+rsi], 0
     call    ai_cli_line
-    mov     qword ptr [rip+ai_line_len], 0
+11: mov     qword ptr [rip+ai_line_len], 0
+    mov     dword ptr [rip+ai_line_skip], 0
 1:  cmp     dword ptr [rip+ai_run], 3
     je      .Lce_test
     cmp     dword ptr [rip+ai_stopped], 0
@@ -2036,6 +2089,53 @@ do_ai_new:
     mov     dword ptr [rip+dirty], 1
 9:  ret
 
+# ai.copy - the transcript as shown (a line an entry, a blank line before
+#   each prompt but the first) becomes the clipboard
+do_ai_copy:
+    push    rbx
+    push    r12
+    push    r13
+    cmp     dword ptr [rip+ai_tx_len], 0
+    jne     1f
+    lea     rdi, [rip+s_nothing_copy]
+    call    log_line
+    jmp     9f
+1:  lea     r12, [rip+ai_copy_buf]
+    xor     r13d, r13d                  # bytes out
+    xor     ebx, ebx                    # the entry's offset
+2:  cmp     ebx, [rip+ai_tx_len]
+    jae     5f
+    lea     rsi, [rip+ai_tx]
+    add     rsi, rbx
+    cmp     byte ptr [rsi], K_YOU
+    jne     3f
+    test    ebx, ebx
+    jz      3f
+    mov     byte ptr [r12+r13], 10
+    inc     r13d
+3:  inc     rsi                         # (an entry is no longer than its
+    inc     ebx                         #  kind and 0: the buffer holds it)
+31: mov     al, [rsi]
+    inc     rsi
+    inc     ebx
+    test    al, al
+    jz      4f
+    mov     [r12+r13], al
+    inc     r13d
+    jmp     31b
+4:  mov     byte ptr [r12+r13], 10
+    inc     r13d
+    jmp     2b
+5:  mov     rdi, r12
+    mov     esi, r13d
+    call    clip_copy
+    lea     rdi, [rip+s_copied]
+    call    log_line
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 do_ai_revert:
     sub     rsp, 8
     cmp     dword ptr [rip+ai_busy], 0
@@ -2249,9 +2349,11 @@ ed_ai_draw:
     call    pnl_left
     mov     eax, [rip+pnl_w]
     shr     eax, 1
-    sub     eax, 9
-    shr     eax, 1
-    mov     r13d, eax                   # a button's width
+    sub     eax, 15
+    xor     edx, edx
+    mov     ecx, 3
+    div     ecx
+    mov     r13d, eax                   # a button's width (New Copy Revert)
     mov     esi, [rip+pnl_x]
     mov     eax, [rip+pnl_w]
     shr     eax, 1
@@ -2267,13 +2369,26 @@ ed_ai_draw:
     test    eax, eax
     jz      1f
     call    do_ai_new
-1:  cmp     dword ptr [rip+ai_busy], 0
+1:  cmp     dword ptr [rip+ai_tx_len], 0
+    je      15f
+    lea     rdi, [rip+wd_ai_copy]
+    lea     esi, [r14+r13+6]
+    mov     edx, r12d
+    mov     ecx, r13d
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    test    eax, eax
+    jz      15f
+    call    do_ai_copy
+15: cmp     dword ptr [rip+ai_busy], 0
     jne     2f
     call    revertable
     test    eax, eax
     jz      2f
     lea     rdi, [rip+wd_ai_revert]
-    lea     esi, [r14+r13+6]
+    lea     esi, [r13*2+12]
+    add     esi, r14d
     mov     edx, r12d
     mov     ecx, r13d
     xor     r8d, r8d
@@ -2437,6 +2552,7 @@ ed_ai_draw:
 .align 8
 ap_argv_ai:     .skip 8*48
 ai_trline:      .skip 96
+ai_copy_buf:    .skip TX_CAP+8
 .section .rodata
 s_empty_arr:    .asciz "[]"
 

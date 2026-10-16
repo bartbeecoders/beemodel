@@ -78,6 +78,18 @@ def main():
     if 'fail' in prompt:
         print('the stand-in failed on purpose', file=sys.stderr, flush=True)
         return 3
+    if 'image' in prompt:                       # a viewport capture: one line far
+        say({'type': 'user', 'message': {'role': 'user', 'content': [  # longer than the buffer
+            {'type': 'tool_result', 'tool_use_id': 't1', 'content': [
+                {'type': 'image', 'source': {'type': 'base64', 'media_type': 'image/png',
+                                             'data': 'QkVF' * 150000}}]}]}})
+        say({'type': 'user', 'message': {'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': 't2', 'content': 'House1 r 0 0 0\nRoof1 r 0 0 45'}]}})
+        say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [
+            {'type': 'text', 'text': 'Seen the image.'}]}})
+        say({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Seen the image.',
+             'session_id': sid})
+        return 0
     m = Mcp()
     pre = 'mcp__beemodel__'
     say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [
