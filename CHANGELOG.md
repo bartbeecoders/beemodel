@@ -6,6 +6,59 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-16
+
+Phase 14, "Blender files" (`Vibecoding/BeeModel-Blend-Plan.html`).
+BeeModel opens `.blend` files natively and saves them through Blender. The
+guide is [docs/BLEND.md](docs/BLEND.md).
+
+### Added (Blender files)
+- **The .blend reader (B1, #258):**
+  - both headers: the 12-byte one, and Blender 5's 17-byte one with 64-bit
+    block lengths;
+  - zstd files through the `zstd` program, gzip ones through BeeModel's
+    inflate;
+  - every field looked up by name in the file's DNA, with Blender's old
+    names as alternatives;
+  - pointers matched within the ID being read (Blender 5 numbers each ID's
+    data on its own).
+- **Meshes (B2, #259):** all three layouts (`MVert` / `MPoly` / `MLoop`;
+  `CustomData` layers in 3.4–4.x; `AttributeStorage` in 5.x). Positions,
+  n-gons, the active UV map and material indices, checked against the
+  file's block sizes.
+- **Objects, cameras and lights (B3, #260):**
+  - the current scene's view layer, with excluded collections skipped;
+  - world matrices from location, any rotation mode, scale, their deltas
+    and the parent chain with its inverse, turned from Z up to Y up and
+    taken apart into place, rotation and scale (baked into the mesh when
+    it shears);
+  - an object per material used;
+  - camera lens and the scene's camera;
+  - light colour and power.
+- **Materials and images (B4, #261):** Principled BSDF values. Image
+  Texture nodes on base colour and emission, and a Normal Map node's image,
+  become texture maps. Images come from the file (packed) or from beside it.
+- **Import everywhere (B5, #262):**
+  - `file.import_blend`;
+  - File › Import › Import Blender...;
+  - the file browser's `.blend` filter;
+  - **files dropped on the window** (`text/uri-list` over the Wayland data
+    device): `.blend`, glTF, OBJ, STL and STEP are imported, and `.bee`
+    opens when nothing is unsaved.
+- **Export through Blender (B6, #263):** `file.export_blend` and File ›
+  Export › Export Blender...:
+  - glTF goes to a private folder, and Blender runs in the background
+    (merge vertices, join triangles into quads, save);
+  - a message says when it is saved, or shows Blender's error;
+  - the Blender program is set in Preferences › Files;
+  - the glTF export now writes cameras.
+- BeeScript `get` / `set` of a camera's `lens` and a light's `power` and
+  colour (`lr`, `lg`, `lb`).
+- **Tests (B7, #264):** `tests/blend.py`, with fixtures and expected values
+  from Blender 5.2 and 4.2 (zstd, plain and gzip). It covers the window's
+  menu and drop, and runs an export round trip and a million-triangle
+  import when Blender is installed.
+
 ## [0.14.0] - 2026-10-16
 
 Phase 13, "AI first" (`Vibecoding/BeeModel-AI-Plan.html`): the AI comes
@@ -1582,7 +1635,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/bartbeecoders/beemodel/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/bartbeecoders/beemodel/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/bartbeecoders/beemodel/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/bartbeecoders/beemodel/compare/v0.11.0...v0.12.0

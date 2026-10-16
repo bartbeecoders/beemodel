@@ -68,6 +68,12 @@ The menu bar holds every command, in File, Edit, View, Select, Add, Object, Mesh
 
 Exports add their own options: selected objects only, the up axis and the scale.
 
+Files dragged from a file manager onto the window open by their kind:
+
+- `.blend`, `.glb` / `.gltf`, `.obj`, `.stl` and `.step` are imported, each
+  as one undo step;
+- a `.bee` file opens when the scene has no unsaved changes.
+
 **File › Open Recent** lists the last eight scenes. New, Open and Exit ask "Save changes?" when the scene has changes.
 
 ## The 3D viewport
