@@ -11,6 +11,10 @@
 #    Files      autosave, library folders
 #    AI         the agents' permission at start, MCP on / off (next start)
 #
+#  The Preferences dialog (Edit > Preferences, Ctrl+Comma) and the
+#  Preferences area show the same thing: a search, the categories, and the
+#  category's settings with Reset to Defaults.
+#
 #  Keys set here are overrides of the operators' own (bee_ops is read-only):
 #  key_eff gives the key in use.
 # =============================================================================
@@ -34,6 +38,7 @@
 .globl pr_capture
 .globl prefs_key
 .globl ed_prefs_draw
+.globl prefs_dlg_draw
 
 .equ MAXK,      128
 .equ PK_SZ,     16                      # an override: the operator, its key
@@ -62,6 +67,9 @@ pr_theme:       .skip 4
 pr_gpu:         .skip 4
 pr_tierv:       .skip 4
 pr_search:      .skip 64
+pr_find:        .skip 64                # the Preferences' search
+pf_shown:       .skip 4
+                 # settings drawn (a search: none?)
 pr_path:        .skip 512
 pr_buf:         .skip 16384
 pr_line:        .skip 64
@@ -125,9 +133,10 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
 .section .data
 .align 4
 pr_gpu_on:      .long 1                 # (gpu_off is its opposite)
+pf_pick:        .long -1                # a category picked while searching
 
 .text
-OPERATOR op_edit_prefs, "edit.preferences", "Preferences...", do_prefs_open, doc="Open the Preferences editor (beside the active area)"
+OPERATOR op_edit_prefs, "edit.preferences", "Preferences...", do_prefs_open, key=51|KM_CTRL, doc="Open the Preferences (Ctrl+Comma): interface, input, keymap, system, files and the AI connections"
 
 OPERATOR op_ui_scale, "view.ui_scale", "UI Scale", do_ui_scale, flags=OPF_AI_SAFE|OPF_QUIET, doc="Make everything bigger or smaller, on top of the screen's own scale: view.ui_scale <75..200> (percent; kept in the preferences)"
 
@@ -164,16 +173,9 @@ scale_now:
     mov     dword ptr [rip+dirty], 1
     ret
 
-# do_prefs_open - a Preferences area beside the active one (or that one)
+# do_prefs_open - the Preferences dialog (dialog.s)
 do_prefs_open:
-    push    qword ptr [rip+op_arg]
-    mov     qword ptr [rip+op_arg], 0
-    lea     rdi, [rip+op_area_split_side]
-    call    run_op
-    lea     rdi, [rip+op_area_type_prefs]
-    call    run_op
-    pop     qword ptr [rip+op_arg]
-    ret
+    jmp     dlg_open_prefs
 
 # ---- key overrides ----------------------------------------------------------------
 # key_eff(rdi=op) -> eax = its key in use (an override, or its own); keeps
@@ -550,9 +552,17 @@ pcpy:                                   # rdi = dest, rsi = text -> rdi at its 0
 # =============================================================================
 #  The Preferences editor
 # =============================================================================
-WIDGET wd_pf_tabs, WK_TABS, "prefs.tabs", aux=l_tabs, n=6
+WIDGET wd_pf_find, WK_TEXT, "prefs.search", "Search", tip="Find a setting in every category (its name or what it does)"
+WIDGET wd_pf_c0, WK_ROW, "prefs.category.interface", "Interface"
+WIDGET wd_pf_c1, WK_ROW, "prefs.category.input", "Input"
+WIDGET wd_pf_c2, WK_ROW, "prefs.category.keymap", "Keymap"
+WIDGET wd_pf_c3, WK_ROW, "prefs.category.system", "System"
+WIDGET wd_pf_c4, WK_ROW, "prefs.category.files", "Files"
+WIDGET wd_pf_c5, WK_ROW, "prefs.category.ai", "AI"
+WIDGET wd_pf_reset, WK_BUTTON, "prefs.reset", "Reset to Defaults", tip="Every setting of this category back to how BeeModel comes"
+WIDGET wd_pf_close, WK_BUTTON, "prefs.close", "Close", flags=WGF_PRIMARY, aux=op_dlg_cancel, tip="Close the preferences (Esc): every change is already kept"
 WIDGET wd_pf_scroll, WK_SCROLL, "prefs.page"
-WIDGET wd_pf_theme, WK_ENUM, "prefs.theme", cb=theme_cb, aux=l_theme, n=3
+WIDGET wd_pf_theme, WK_ENUM, "prefs.theme", cb=theme_cb, aux=l_theme, n=3, tip="The colours of the whole window"
 WIDGET wd_pf_scale, WK_ENUM, "prefs.ui_scale", cb=scale_cb, aux=l_scale, n=6, tip="Everything bigger or smaller, on top of the screen's own scale"
 WIDGET wd_pf_cb,   WK_TOGGLE, "prefs.colorblind_axes", "Colour-blind-safe axis colours", cb=save_cb, tip="X, Y, Z in orange, sky blue and purple instead of red, green and blue"
 WIDGET wd_pf_tip,  WK_INT, "prefs.tooltip_ms", "Tooltip delay (ms)", 0.0, 5000.0, 2.0, 0, WGF_CLAMP, cb=save_cb
@@ -570,24 +580,250 @@ WIDGET wd_pf_libadd, WK_BUTTON, "prefs.library_add", "Add Library Folder...", au
 WIDGET wd_pf_tier, WK_ENUM, "prefs.agent_permission", cb=tier_cb, aux=l_tier, n=4, tip="What AI agents may do when BeeModel starts"
 WIDGET wd_pf_mcp,  WK_TOGGLE, "prefs.mcp", "Listen for MCP clients (AI agents)", cb=save_cb
 
-ed_prefs_draw:
+.section .rodata
+.align 8
+pf_cats:        .quad wd_pf_c0, wd_pf_c1, wd_pf_c2, wd_pf_c3, wd_pf_c4, wd_pf_c5
+pf_pages:       .quad .Lpf_interface, .Lpf_input, .Lpf_keymap, .Lpf_system, .Lpf_files, .Lpf_ai
+# the defaults, by category: category, variable, value (Reset to Defaults)
+pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxes, 0
+                .quad 1, pr_emu3, 0, 1, pr_orbit, 0x3f800000
+                .quad 2, pr_nkey, 0
+                .quad 3, pr_threads, 0, 3, pr_jit, 1, 3, pr_gpu_on, 1
+                .quad 4, pr_autosave, 25
+                .quad 5, pr_tier, -1, 5, pr_mcp, 1
+                .quad -1
+s_pf_title:     .asciz "Preferences"
+s_pf_found:     .asciz "Settings found"
+s_pf_nothing:   .asciz "No setting matches."
+s_pf_hint:      .asciz "Search settings"
+c_theme:        .asciz "Theme"
+c_scale:        .asciz "UI scale"
+c_tier:         .asciz "AI agents may"
+.text
+
+# pf_body(edi=x, esi=y, edx=w, ecx=h) - the category list (with the search
+#   above it) and the page beside it, in that rectangle (the Preferences
+#   area, or the dialog)
+.equ PF_SIDE,   176
+pf_body:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
-    mov     r12d, [rip+ed_y]
-    add     r12d, 6
-    lea     rdi, [rip+wd_pf_tabs]       # the sections
-    mov     esi, [rip+ed_x]
-    add     esi, 8
+    push    rbp
+    sub     rsp, 24
+    mov     eax, [rip+ed_x]             # (the area's rectangle, kept)
+    mov     [rsp], eax
+    mov     eax, [rip+ed_y]
+    mov     [rsp+4], eax
+    mov     eax, [rip+ed_w]
+    mov     [rsp+8], eax
+    mov     eax, [rip+ed_h]
+    mov     [rsp+12], eax
+    mov     ebx, edi
+    mov     ebp, esi
+    mov     r14d, edx
+    mov     r15d, ecx
+    lea     r12d, [rbp+8]
+    lea     rdi, [rip+wd_pf_find]       # search
+    lea     esi, [rbx+8]
     mov     edx, r12d
-    mov     ecx, [rip+ed_w]
-    sub     ecx, 16
-    lea     r8, [rip+pr_tab]
+    mov     ecx, PF_SIDE-16
+    lea     r8, [rip+pr_find]
     xor     r9d, r9d
     call    wg
-    add     r12d, WG_H+8
+    cmp     byte ptr [rip+pr_find], 0   # (a hint while it is empty)
+    jne     61f
+    call    wg_editing
+    test    eax, eax
+    jnz     61f
+    lea     edi, [rbx+16]
+    lea     esi, [r12+3]
+    lea     rdx, [rip+s_pf_hint]
+    mov     ecx, COL_TEXT_OFF
+    call    draw_small
+61: add     r12d, WG_H+12
+    mov     eax, [rip+pf_pick]          # a category picked while searching
+    mov     dword ptr [rip+pf_pick], -1
+    test    eax, eax
+    js      0f
+    cmp     byte ptr [rip+pr_find], 0
+    je      0f
+    mov     [rip+pr_tab], eax
+    mov     byte ptr [rip+pr_find], 0
+    mov     dword ptr [rip+pr_scroll], 0
+0:  xor     r13d, r13d                  # the categories
+1:  cmp     r13d, 6
+    jae     2f
+    lea     rax, [rip+pf_cats]
+    mov     rdi, [rax+r13*8]
+    lea     esi, [rbx+8]
+    mov     edx, r12d
+    mov     ecx, PF_SIDE-16
+    lea     r8, [rip+pr_tab]
+    cmp     byte ptr [rip+pr_find], 0   # (searching: none lit; a pick ends
+    je      10f                         #  the search)
+    lea     r8, [rip+pf_pick]
+10: mov     r9d, r13d
+    call    wg
+11: lea     rax, [rip+pf_cats]
+    mov     rax, [rax+r13*8]
+    mov     rdx, [rax+WD_LABEL]
+    lea     edi, [rbx+18]
+    lea     esi, [r12+5]
+    mov     ecx, COL_TEXT
+    cmp     r13d, [rip+pr_tab]
+    jne     12f
+    cmp     byte ptr [rip+pr_find], 0
+    jne     12f
+    mov     ecx, COL_ACCENT
+12: call    draw_small
+    add     r12d, WG_H+4
+    inc     r13d
+    jmp     1b
+2:  lea     edi, [rbx+PF_SIDE]          # a line between
+    mov     esi, ebp
+    mov     edx, 1
+    mov     ecx, r15d
+    mov     r8d, COL_SEPARATOR
+    call    fill_rect
+    lea     eax, [rbx+PF_SIDE+4]        # the page: the rest
+    mov     [rip+ed_x], eax
+    mov     [rip+ed_y], ebp
+    mov     eax, r14d
+    sub     eax, PF_SIDE+4
+    mov     [rip+ed_w], eax
+    mov     [rip+ed_h], r15d
+    call    pf_page
+    mov     eax, [rsp]
+    mov     [rip+ed_x], eax
+    mov     eax, [rsp+4]
+    mov     [rip+ed_y], eax
+    mov     eax, [rsp+8]
+    mov     [rip+ed_w], eax
+    mov     eax, [rsp+12]
+    mov     [rip+ed_h], eax
+    add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ed_prefs_draw - the Preferences area: the same as the dialog
+ed_prefs_draw:
+    sub     rsp, 8
+    mov     edi, [rip+ed_x]
+    mov     esi, [rip+ed_y]
+    mov     edx, [rip+ed_w]
+    mov     ecx, [rip+ed_h]
+    call    pf_body
+    add     rsp, 8
+    ret
+
+# prefs_dlg_draw - the Preferences dialog's box (dialog.s has dimmed the
+#   window): a title, Close, the categories and the page
+prefs_dlg_draw:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r14d, [rip+win_w]           # as big as fits, at most 900 x 640
+    sub     r14d, 60
+    cmp     r14d, 900
+    jle     1f
+    mov     r14d, 900
+1:  mov     r15d, [rip+win_h]
+    sub     r15d, 60
+    cmp     r15d, 640
+    jle     2f
+    mov     r15d, 640
+2:  mov     ebx, [rip+win_w]            # centred
+    sub     ebx, r14d
+    sar     ebx, 1
+    mov     r12d, [rip+win_h]
+    sub     r12d, r15d
+    sar     r12d, 1
+    mov     edi, ebx
+    mov     esi, r12d
+    mov     edx, r14d
+    mov     ecx, r15d
+    mov     r8d, COL_DROP_BORDER
+    call    popup_frame
+    lea     edi, [rbx+18]               # the title, Close
+    lea     esi, [r12+14]
+    lea     rdx, [rip+s_pf_title]
+    mov     ecx, COL_TEXT
+    call    draw_heading
+    lea     rdi, [rip+wd_pf_close]
+    lea     esi, [rbx+r14-100]
+    lea     edx, [r12+10]
+    mov     ecx, 88
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    lea     edi, [rbx+2]                # the body
+    lea     esi, [r12+44]
+    lea     edx, [r14-4]
+    lea     ecx, [r15-48]
+    call    pf_body
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pf_page - the category's settings (the search: every category's that
+#   match) in ed_x .. ed_h, with Reset to Defaults
+pf_page:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 8
+    mov     dword ptr [rip+pf_shown], 0
+    mov     r12d, [rip+ed_y]
+    add     r12d, 8
+    cmp     byte ptr [rip+pr_find], 0   # its title (or the search's)
+    jne     1f
+    mov     eax, [rip+pr_tab]
+    cmp     eax, 5
+    jbe     71f
+    xor     eax, eax
+    mov     [rip+pr_tab], eax
+71: lea     rcx, [rip+pf_cats]
+    mov     rax, [rcx+rax*8]
+    mov     rdx, [rax+WD_LABEL]
+    jmp     2f
+1:  lea     rdx, [rip+s_pf_found]
+2:  mov     edi, [rip+ed_x]
+    add     edi, 14
+    lea     esi, [r12+4]
+    mov     ecx, COL_ACCENT
+    call    draw_heading
+    cmp     byte ptr [rip+pr_find], 0   # Reset to Defaults (a category)
+    jne     3f
+    lea     rdi, [rip+wd_pf_reset]
+    mov     esi, [rip+ed_x]
+    add     esi, [rip+ed_w]
+    sub     esi, 170
+    mov     edx, r12d
+    mov     ecx, 156
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    test    eax, eax
+    jz      3f
+    mov     edi, [rip+pr_tab]
+    call    pf_reset
+3:  add     r12d, WG_H+10
     lea     rdi, [rip+wd_pf_scroll]
     mov     esi, [rip+ed_x]
     mov     edx, r12d
@@ -599,20 +835,133 @@ ed_prefs_draw:
     call    wg_scroll_begin
     mov     r12d, eax
     call    pnl_begin
+    cmp     byte ptr [rip+pr_find], 0
+    jne     .Lpf_all
     mov     eax, [rip+pr_tab]
-    cmp     eax, 5
-    ja      .Lpf_end
     lea     rcx, [rip+pf_pages]
-    jmp     [rcx+rax*8]
+    lea     rax, [rcx+rax*8]
+    call    [rax]
+    jmp     .Lpf_done
+.Lpf_all:                               # searching: every category's matches
+    xor     ebx, ebx
+4:  cmp     ebx, 6
+    jae     5f
+    lea     rcx, [rip+pf_pages]
+    call    [rcx+rbx*8]
+    inc     ebx
+    jmp     4b
+5:  cmp     dword ptr [rip+pf_shown], 0
+    jne     .Lpf_done
+    lea     rdx, [rip+s_pf_nothing]
+    call    pnl_hint
+.Lpf_done:
+    mov     edi, r12d
+    call    wg_scroll_end
+    add     rsp, 8
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
 
+# pf_item(rdi=desc, r8=ptr, rdx=caption or 0) -> eax (wg's) - one setting
+#   (searching: only if it matches), its caption at the left when given
+pf_item:
+    push    rbx
+    push    r13
+    push    r14
+    mov     rbx, rdi
+    mov     r13, r8
+    mov     r14, rdx
+    cmp     byte ptr [rip+pr_find], 0
+    je      2f
+    mov     rdi, r14
+    call    pf_match
+    test    eax, eax
+    jnz     2f
+    mov     rdi, [rbx+WD_LABEL]
+    call    pf_match
+    test    eax, eax
+    jnz     2f
+    mov     rdi, [rbx+WD_TIP]
+    call    pf_match
+    test    eax, eax
+    jnz     2f
+    mov     rdi, [rbx+WD_NAME]
+    call    pf_match
+    test    eax, eax
+    jnz     2f
+    xor     eax, eax
+    jmp     9f
+2:  inc     dword ptr [rip+pf_shown]
+    test    r14, r14
+    jz      3f
+    mov     rdx, r14
+    call    pnl_caption
+    mov     rdi, rbx
+    mov     r8, r13
+    call    pnl_right
+    add     r12d, WG_H+4
+    jmp     9f
+3:  mov     rdi, rbx
+    mov     r8, r13
+    call    pnl_full
+9:  pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# pf_match(rdi=text or 0) -> eax = 1 when the search is in it
+pf_match:
+    xor     eax, eax
+    test    rdi, rdi
+    jz      1f
+    lea     rsi, [rip+pr_find]
+    jmp     has_word
+1:  ret
+
+# pf_head(rdx=heading) - a page's sub-heading (not while searching)
+pf_head:
+    cmp     byte ptr [rip+pr_find], 0
+    jne     1f
+    jmp     pnl_heading
+1:  ret
+
+# pf_reset(edi=category) - its settings back to the defaults
+pf_reset:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12d, edi
+    lea     rbx, [rip+pf_defs]
+1:  mov     rax, [rbx]
+    cmp     rax, -1
+    je      2f
+    cmp     eax, r12d
+    jne     11f
+    mov     rcx, [rbx+8]
+    mov     rax, [rbx+16]
+    mov     [rcx], eax
+11: add     rbx, 24
+    jmp     1b
+2:  call    pr_apply                    # (the theme, the GPU)
+    call    scale_now                   # (the fonts; saved)
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ---- the pages (r12d: the row; pnl_ set) --------------------------------------------
 .Lpf_interface:
-    lea     rdx, [rip+s_h_interface]
-    call    pnl_heading
+    push    rbx
     mov     eax, [rip+th_id]
     mov     [rip+pr_theme], eax
     lea     rdi, [rip+wd_pf_theme]
     lea     r8, [rip+pr_theme]
-    call    pnl_full
+    lea     rdx, [rip+c_theme]
+    call    pf_item
     xor     ecx, ecx                    # the scale: its place in the list
     lea     rax, [rip+scales]
 1:  cmp     ecx, 5
@@ -625,30 +974,43 @@ ed_prefs_draw:
 2:  mov     [rip+pr_sel_scale], ecx
     lea     rdi, [rip+wd_pf_scale]
     lea     r8, [rip+pr_sel_scale]
-    call    pnl_full
+    lea     rdx, [rip+c_scale]
+    call    pf_item
     lea     rdi, [rip+wd_pf_tip]
     lea     r8, [rip+tip_ms]
-    call    pnl_full
+    xor     edx, edx
+    call    pf_item
     lea     rdi, [rip+wd_pf_cb]
     lea     r8, [rip+pr_cbaxes]
-    call    pnl_full
-    jmp     .Lpf_end
+    xor     edx, edx
+    call    pf_item
+    pop     rbx
+    ret
 
 .Lpf_input:
-    lea     rdx, [rip+s_h_input]
-    call    pnl_heading
+    push    rbx
     lea     rdi, [rip+wd_pf_emu3]
     lea     r8, [rip+pr_emu3]
-    call    pnl_full
+    xor     edx, edx
+    call    pf_item
     lea     rdi, [rip+wd_pf_orbit]
     lea     r8, [rip+pr_orbit]
-    call    pnl_full
-    jmp     .Lpf_end
+    xor     edx, edx
+    call    pf_item
+    pop     rbx
+    ret
 
 .Lpf_keymap:
-    lea     rdx, [rip+s_h_keymap]
-    call    pnl_heading
-    lea     rdi, [rip+wd_pf_search]
+    push    rbx
+    push    r14
+    push    r15
+    sub     rsp, 16
+    lea     r15, [rip+pr_search]        # (searching: the search narrows it)
+    cmp     byte ptr [rip+pr_find], 0
+    je      0f
+    lea     r15, [rip+pr_find]
+    jmp     1f
+0:  lea     rdi, [rip+wd_pf_search]
     lea     r8, [rip+pr_search]
     call    pnl_full
     lea     rdi, [rip+wd_pf_kreset]
@@ -667,19 +1029,20 @@ ed_prefs_draw:
     jae     7f
     test    dword ptr [rbx+OP_FLAGS], OPF_HIDDEN
     jnz     6f
-    cmp     byte ptr [rip+pr_search], 0 # the search: in its name or label
+    cmp     byte ptr [r15], 0           # the search: in its name or label
     je      3f
     mov     rdi, [rbx+OP_NAME]
-    lea     rsi, [rip+pr_search]
+    mov     rsi, r15
     call    has_word
     test    eax, eax
     jnz     3f
     mov     rdi, [rbx+OP_LABEL]
-    lea     rsi, [rip+pr_search]
+    mov     rsi, r15
     call    has_word
     test    eax, eax
     jz      6f
-3:  mov     edi, [rip+pnl_x]
+3:  inc     dword ptr [rip+pf_shown]
+    mov     edi, [rip+pnl_x]
     lea     esi, [r12+3]
     mov     rdx, [rbx+OP_LABEL]
     mov     ecx, COL_TEXT
@@ -698,13 +1061,13 @@ ed_prefs_draw:
     test    rdx, rdx
     jnz     4f
     lea     rdx, [rip+s_none]
-4:  mov     r15, rdx
+4:  mov     [rsp], rdx
     mov     eax, [rip+pnl_w]
     imul    eax, eax, 45
     xor     edx, edx
     mov     ecx, 100
     div     ecx
-    mov     rdx, r15
+    mov     rdx, [rsp]
     mov     edi, eax
     add     edi, [rip+pnl_x]
     lea     esi, [r12+3]
@@ -741,69 +1104,72 @@ ed_prefs_draw:
     inc     r14d
 6:  add     rbx, OP_SIZE
     jmp     2b
-7:  lea     rdx, [rip+s_more]
+7:  cmp     byte ptr [rip+pr_find], 0
+    jne     8f
+    lea     rdx, [rip+s_more]
     call    pnl_hint
-8:  jmp     .Lpf_end
+8:  add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     rbx
+    ret
 
 .Lpf_system:
-    lea     rdx, [rip+s_h_system]
-    call    pnl_heading
+    push    rbx
     lea     rdi, [rip+wd_pf_threads]
     lea     r8, [rip+pr_threads]
-    call    pnl_full
+    xor     edx, edx
+    call    pf_item
     mov     eax, [rip+gpu_off]
     xor     eax, 1
     mov     [rip+pr_gpu], eax
     lea     rdi, [rip+wd_pf_gpu]
     lea     r8, [rip+pr_gpu]
-    call    pnl_full
+    xor     edx, edx
+    call    pf_item
     lea     rdi, [rip+wd_pf_jit]
     lea     r8, [rip+pr_jit]
-    call    pnl_full
+    xor     edx, edx
+    call    pf_item
+    cmp     byte ptr [rip+pr_find], 0
+    jne     1f
     lea     rdx, [rip+s_restart]
     call    pnl_hint
-    jmp     .Lpf_end
+1:  pop     rbx
+    ret
 
 .Lpf_files:
-    lea     rdx, [rip+s_h_files]
-    call    pnl_heading
+    push    rbx
     lea     rdi, [rip+wd_pf_autosave]
     lea     r8, [rip+pr_autosave]
-    call    pnl_full
+    xor     edx, edx
+    call    pf_item
     lea     rdi, [rip+wd_pf_libadd]
     xor     r8d, r8d
-    call    pnl_full
-    jmp     .Lpf_end
+    xor     edx, edx
+    call    pf_item
+    pop     rbx
+    ret
 
 .Lpf_ai:
-    lea     rdx, [rip+s_h_ai]
-    call    pnl_heading
+    push    rbx
     mov     eax, [rip+pr_tier]
     inc     eax
     mov     [rip+pr_tierv], eax
     lea     rdi, [rip+wd_pf_tier]
     lea     r8, [rip+pr_tierv]
-    call    pnl_full
+    lea     rdx, [rip+c_tier]
+    call    pf_item
     lea     rdi, [rip+wd_pf_mcp]
     lea     r8, [rip+pr_mcp]
-    call    pnl_full
+    xor     edx, edx
+    call    pf_item
+    cmp     byte ptr [rip+pr_find], 0
+    jne     1f
     lea     rdx, [rip+s_restart]
     call    pnl_hint
-
-.Lpf_end:
-    mov     edi, r12d
-    call    wg_scroll_end
-    pop     r15
-    pop     r14
-    pop     r13
-    pop     r12
-    pop     rbx
+1:  pop     rbx
     ret
-
-.section .rodata
-.align 8
-pf_pages:       .quad .Lpf_interface, .Lpf_input, .Lpf_keymap, .Lpf_system, .Lpf_files, .Lpf_ai
-.text
 
 draw_small_keyed:                       # (the key's text)
     jmp     draw_small

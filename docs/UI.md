@@ -139,9 +139,9 @@ Click a toast to open the console.
 
 ## Preferences
 
-**Edit › Preferences** opens a Preferences area. Everything in it is saved to `~/.config/beemodel/prefs` as soon as it changes.
+**Edit › Preferences** (**Ctrl+Comma**) opens the Preferences dialog: a search field and the categories on the left, the category's settings on the right. The search looks through every category at once (a setting's name, label and tooltip; Enter); picking a category ends it. **Reset to Defaults** puts the category back as BeeModel comes. **Close** or Esc closes it. Everything is saved to `~/.config/beemodel/prefs` as soon as it changes. A Preferences area (an area's type menu) shows the same thing.
 
-| Section | Settings |
+| Category | Settings |
 |---|---|
 | **Interface** | Theme (Dark, Light, High contrast), UI scale 75–200 %, tooltip delay, colour-blind-safe axis colours, the welcome screen |
 | **Input** | Alt + left button as the middle button, orbit speed |
