@@ -14,6 +14,7 @@
 .globl file_read
 .globl file_unmap
 .globl file_write_atomic
+.globl file_write_private
 .globl wb_reset
 .globl wb_reserve
 .globl wb_bytes
@@ -69,6 +70,9 @@ d_million:      .double 1000000.0
 d_ten:          .double 10.0
 d_one:          .double 1.0
 
+.section .data
+.align 4
+fw_mode:        .long 0644              # file_write_atomic's mode
 .text
 
 # -----------------------------------------------------------------------------
@@ -298,6 +302,14 @@ file_unmap:
 
 # file_write_atomic(rdi=path, rsi=data, rdx=bytes) -> eax = 0 ok, else -errno
 #   writes "<path>.tmp" then renames it over the target
+# file_write_private: the same, readable by its owner only (0600: secrets)
+file_write_private:
+    mov     dword ptr [rip+fw_mode], 0600
+    push    rdi
+    call    file_write_atomic
+    pop     rdi
+    mov     dword ptr [rip+fw_mode], 0644
+    ret
 file_write_atomic:
     push    rbx
     push    r12
@@ -326,7 +338,7 @@ file_write_atomic:
     mov     edi, AT_FDCWD
     lea     rsi, [rip+tmp_path]
     mov     edx, O_WRITE_NEW
-    mov     r10d, 0644
+    mov     r10d, [rip+fw_mode]
     mov     eax, SYS_OPENAT
     syscall
     test    eax, eax

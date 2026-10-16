@@ -99,6 +99,8 @@ wg_sc_stack:    .skip SCROLL_N*32   # clip (4 x i32), entry index, top y
 wg_txt:         .skip 64
 
 .section .rodata
+s_secret_set:   .asciz "(set)"
+s_secret_none:  .asciz ""
 .align 4
 f_1:            .float 1.0
 f_0:            .float 0.0
@@ -948,7 +950,16 @@ value_text:
     call    wg_ftoa
     jmp     9f
 .Lvt_text:
-    xor     ecx, ecx
+    test    dword ptr [rbx+WD_FLAGS], WGF_SECRET    # (a secret: stars)
+    jz      0f
+    mov     byte ptr [r13], 0
+    cmp     byte ptr [r12], 0
+    je      9f
+    mov     rax, 0x2a2a2a2a2a2a2a2a
+    mov     [r13], rax
+    mov     byte ptr [r13+8], 0
+    jmp     9f
+0:  xor     ecx, ecx
 1:  mov     al, [r12+rcx]
     mov     [r13+rcx], al
     test    al, al
@@ -1834,6 +1845,10 @@ edit_begin:
     call    wg_ftoa
     jmp     3f
 1:  call    value_text
+    mov     rdi, [rbx+E_DESC]           # (a secret: typed afresh)
+    test    dword ptr [rdi+WD_FLAGS], WGF_SECRET
+    jz      3f
+    mov     byte ptr [rip+wg_txt], 0
 3:  lea     rsi, [rip+wg_txt]
     call    tf_load
     mov     dword ptr [rip+tf_anchor], 0
@@ -2547,7 +2562,14 @@ wg_tree_json:
     jmp     5f
 .Ltj_text:
     mov     rsi, rax
-    call    jb_q
+    mov     rcx, [rbx+E_DESC]           # (a secret: only whether there is one)
+    test    dword ptr [rcx+WD_FLAGS], WGF_SECRET
+    jz      0f
+    lea     rsi, [rip+s_secret_set]
+    cmp     byte ptr [rax], 0
+    jne     0f
+    lea     rsi, [rip+s_secret_none]
+0:  call    jb_q
 5:  mov     eax, [rbx+E_ID]
     cmp     eax, [rip+wg_kfocus]        # (the keyboard's focus)
     jne     51f
