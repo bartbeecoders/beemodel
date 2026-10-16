@@ -168,7 +168,7 @@ items_ai:       .quad op_ai_mode, op_ai_stop, op_ai_new, 0
                 .quad op_agent_read, op_agent_edit, op_agent_files
 .equ items_ai_n, (. - items_ai) / 8
 sub_import_l:   .quad op_import_obj, op_import_stl, op_import_gltf, op_import_step, op_import_blend
-sub_export_l:   .quad op_export_obj, op_export_stl, op_export_gltf, op_export_step, 0
+sub_export_l:   .quad op_export_obj, op_export_stl, op_export_gltf, op_export_step, op_export_blend, 0
                 .quad op_export_3mf, op_export_dxf, op_export_svg, op_export_pdf
 sub_analysis_l: .quad op_an_normals, op_an_nonman, op_an_bound, op_an_degen, op_an_over, op_show_thin
 sub_theme_l:    .quad op_theme_dark, op_theme_light, op_theme_contrast
@@ -187,7 +187,7 @@ tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scal
 
 .text
 SUBMENU sub_import, "Import", sub_import_l, 5
-SUBMENU sub_export, "Export", sub_export_l, 9
+SUBMENU sub_export, "Export", sub_export_l, 10
 SUBMENU sub_analysis, "Analysis", sub_analysis_l, 6
 SUBMENU sub_theme, "Theme", sub_theme_l, 3
 SUBMENU sub_curve, "Curve", sub_curve_l, 3
