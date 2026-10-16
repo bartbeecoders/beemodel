@@ -275,7 +275,8 @@
 .equ FONT_MONO,     1
 .equ FONT_SMALL,    2         # hints, units, the status bar (the UI face)
 .equ FONT_HEAD,     3         # panel and dialog titles (the UI face, bold)
-.equ FONT_SLOTS,    4
+.equ FONT_NODE,     4         # the node editor's text (the UI face, sized by its zoom)
+.equ FONT_SLOTS,    5
 .equ SMALL_FONT_PX, 13
 .equ HEAD_FONT_PX,  16
 .equ UI_FONT_PX,    15
@@ -384,6 +385,10 @@
 .equ MA_RT_AO,      116     # f32 shading copies only (after a graph): its AO,
 .equ MA_RT_MASK,    120     #  its opacity mask (valid when SC_FLAGS says so)
 .equ GR_PINS,       3616    # u32[16] Material Output pins: node + 1 | output << 16
+.equ NE_FRAMES,     3680    # (material and tree records) comment frames: 6 x
+.equ NE_NFR,        6       #  (i16 x y w h, u32 colour, 36-byte title); the
+.equ FR_SZ,         48      #  node editor's per node flags (bit 0: collapsed)
+.equ NE_NFLAGS,     3968
 .equ NPINS,         13      # base metallic specular roughness emission opacity
                             #  normal ao coat coat_roughness transmission ior mask
 .equ PIN_BASE,      0

@@ -616,6 +616,7 @@ def main():
     shader_graph()
     materials_v2()
     material_nodes()
+    node_canvas()
     gltf_mtl()
     product_shot()
     params_units()
@@ -2216,6 +2217,197 @@ def material_nodes():
     f.shot('60_material_nodes.png')
     seen = {px(f, xx, yy) for xx in range(0, 1280, 4) for yy in range(60, 760, 4)}
     check({0x9a4a3c, 0x6b4f96, 0x8a6d1f} <= seen, 'node headers are coloured by category: input, texture, colour')
+    f.proc.kill()
+
+
+
+def node_canvas():
+    """The node canvas (M4): zoom about the pointer, frame all / selected,
+    box select, moving a selection, copy / paste (across materials),
+    duplicate, cut - each one undo step."""
+    print('  -- node canvas --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('m = material("C")\nassign("Cube", m)\nselect("Cube")\nt = node(m, "texcoord", 4, 4)\nw = node(m, "wave", 3)\n'
+      'link(m, t, w, 1)\nh = node(m, "hsv", 0.3)\nlink(m, w, h, 1, 1)\nsocket(m, "base", h)\nmaterial("D")\n'
+      'op("material.node_move", "C 1 20 20")\nop("material.node_move", "C 2 220 20")\nop("material.node_move", "C 3 420 20")\n'
+      'op("material.node_move", "C 0 620 20")\nop("area.type_node_editor")\nop("area.maximize")')
+    f.pump(0.3)
+    info = lambda mat, *a: q('print(nodeinfo("%s", %s))' % (mat, ', '.join('"%s"' % x if isinstance(x, str) else str(x) for x in a)))
+    def header_w(col):
+        img = f.image()
+        runs = []
+        for y in range(70, 760, 2):
+            row = [img.getpixel((x, y))[:3] == col for x in range(1280)]
+            n = best = 0
+            for v in row:
+                n = n + 1 if v else 0
+                best = max(best, n)
+            runs.append(best)
+        return max(runs)
+    wave = (0x6b, 0x4f, 0x96)
+    w100 = header_w(wave)
+    f.move(400, 300)
+    f.wheel(10); f.pump(0.1); f.wheel(10); f.pump(0.2)     # two steps out: 75 %
+    w75 = header_w(wave)
+    check(w100 == 170 and abs(w75 - 128) <= 2, f'the wheel zooms the canvas (Wave header {w100} -> {w75} px)')
+    f.key(102); f.pump(0.2)                                 # Home: frame all
+    fit = header_w(wave)
+    check(fit >= 128, f'Home frames every node ({fit} px wide headers)')
+    # box select: everything, then a drag moves the selection together
+    q('op("node.view_fit")')
+    f.pump(0.2)
+    x0, y0 = int(info('C', 1, 'x')), int(info('C', 1, 'y'))
+    f.drag(5, 110, 1270, 770, steps=6)
+    f.pump(0.2)
+    img = f.image()
+    acc = sum(1 for x in range(0, 1280, 2) for y in range(100, 780, 2) if img.getpixel((x, y))[:3] == (0xf2, 0xb1, 0x34))
+    check(acc > 200, f'a box drag selects the nodes it touches (outlined: {acc} px)')
+    hx = [x for x in range(1280) if img.getpixel((x, 0))]  # (unused)
+    # where is the Wave header now? drag it by 50, 30: all three move
+    pos = [(x, y) for y in range(80, 780, 2) for x in range(0, 1280, 2) if img.getpixel((x, y))[:3] == wave]
+    wx, wy = min(pos)
+    before = [(int(info('C', n, 'x')), int(info('C', n, 'y'))) for n in (1, 2, 3)]
+    f.drag(wx + 30, wy + 4, wx + 80, wy + 34, steps=6)
+    f.pump(0.2)
+    after = [(int(info('C', n, 'x')), int(info('C', n, 'y'))) for n in (1, 2, 3)]
+    d = {(a[0] - b[0], a[1] - b[1]) for a, b in zip(after, before)}
+    check(len(d) == 1 and list(d)[0] != (0, 0), f'dragging one selected node moves the whole selection ({d})')
+    f.mods(4); f.key(44); f.mods(0)                         # Ctrl+Z: one step
+    f.pump(0.2)
+    back = [(int(info('C', n, 'x')), int(info('C', n, 'y'))) for n in (1, 2, 3)]
+    check(back == before, 'one undo puts the whole move back')
+    # copy, then paste into another material: links among them kept
+    f.mods(4); f.key(46); f.mods(0)                         # Ctrl+C
+    q('assign("Cube", "D")')
+    f.pump(0.3)
+    f.move(300, 300)
+    f.mods(4); f.key(47); f.mods(0)                         # Ctrl+V
+    f.pump(0.3)
+    got = (info('D', 0, 'count'), info('D', 2, 'link', 1), info('D', 3, 'link', 1), info('D', 3, 'linkout', 1))
+    check(got == ('3', '1', '2', '1'), f'copy and paste into another material keeps the links among the nodes ({got})')
+    # duplicate (Shift+D): three more, 40 down and right; cut (Ctrl+X)
+    f.mods(1); f.key(32); f.mods(0)
+    f.pump(0.3)
+    got = (info('D', 0, 'count'), int(info('D', 4, 'x')) - int(info('D', 1, 'x')), int(info('D', 4, 'y')) - int(info('D', 1, 'y')),
+           info('D', 5, 'link', 1))
+    check(got == ('6', 40, 40, '4'), f'Shift+D duplicates the selection, links and all ({got})')
+    f.mods(4); f.key(45); f.mods(0)                         # Ctrl+X: the copies
+    f.pump(0.3)
+    check(info('D', 0, 'count') == '3', f'Ctrl+X cuts the selection ({info("D", 0, "count")})')
+    f.mods(4); f.key(44); f.mods(0)
+    f.pump(0.2)
+    check(info('D', 0, 'count') == '6', f'undo brings the cut nodes back ({info("D", 0, "count")})')
+    # a comment frame round the selection; its title drags the nodes along
+    q('assign("Cube", "C")')
+    f.pump(0.3)
+    q('op("node.view_fit")')
+    f.pump(0.2)
+    f.drag(5, 110, 1270, 770, steps=6)                      # all selected
+    f.pump(0.2)
+    f.key(46)                                               # C
+    f.pump(0.3)
+    img = f.image()
+    bar = [(x, y) for y in range(80, 780, 2) for x in range(0, 1280, 2) if img.getpixel((x, y))[:3] == (0x3a, 0x43, 0x52)]
+    check(len(bar) > 100, f'C frames the selection with a titled comment ({len(bar)} px of title bar)')
+    if bar:
+        bx, by = min(bar)
+        before = [(int(info('C', n, 'x')), int(info('C', n, 'y'))) for n in (1, 2, 3)]
+        f.drag(bx + 60, by + 6, bx + 60, by + 66, steps=6)
+        f.pump(0.2)
+        after = [(int(info('C', n, 'x')), int(info('C', n, 'y'))) for n in (1, 2, 3)]
+        d = {(a[0] - b[0], a[1] - b[1]) for a, b in zip(after, before)}
+        check(len(d) == 1 and list(d)[0][1] > 0, f'dragging the frame\'s title moves the nodes inside it ({d})')
+        f.key(45)                                           # X: the frame alone
+        f.pump(0.2)
+        img = f.image()
+        bar2 = sum(1 for y in range(80, 780, 2) for x in range(0, 1280, 2) if img.getpixel((x, y))[:3] == (0x3a, 0x43, 0x52))
+        check(bar2 == 0 and info('C', 0, 'count') == '3', f'X with a frame selected removes the frame, not its nodes ({bar2})')
+    # H: collapsed to their headers
+    body = lambda: sum(1 for y in range(80, 780, 2) for x in range(0, 1280, 2) if f.image().getpixel((x, y))[:3] == (0x34, 0x38, 0x41))
+    img0 = f.image()
+    b0 = sum(1 for y in range(80, 780, 2) for x in range(0, 1280, 2) if img0.getpixel((x, y))[:3] == (0x34, 0x38, 0x41))
+    f.drag(5, 110, 1270, 770, steps=6)
+    f.pump(0.2)
+    f.key(35)                                               # H
+    f.pump(0.3)
+    img1 = f.image()
+    b1 = sum(1 for y in range(80, 780, 2) for x in range(0, 1280, 2) if img1.getpixel((x, y))[:3] == (0x34, 0x38, 0x41))
+    check(b1 < b0 * 0.7, f'H collapses the selected nodes to their headers ({b0} -> {b1} px of bodies)')
+    f.key(35)
+    f.pump(0.3)
+    img2 = f.image()
+    b2 = sum(1 for y in range(80, 780, 2) for x in range(0, 1280, 2) if img2.getpixel((x, y))[:3] == (0x34, 0x38, 0x41))
+    check(abs(b2 - b0) < 50, f'H again opens them ({b2})')
+    # wires: Alt+click cuts one, a double-click puts a reroute on it, an
+    # Alt+drag knife cuts every wire it crosses
+    q('op("node.view_fit")')
+    f.pump(0.3)
+    f.click(60, 740)                                        # nothing selected
+    f.pump(0.2)
+    def wire_px(col_left, col_right, wire):
+        img = f.image()
+        left = [x for y in range(80, 640, 2) for x in range(0, 1280) if img.getpixel((x, y))[:3] == col_left]
+        right = [x for y in range(80, 640, 2) for x in range(0, 1280) if img.getpixel((x, y))[:3] == col_right]
+        if not left or not right:
+            return None
+        x0, x1 = max(left) + 10, min(right) - 10
+        pts = [(x, y) for y in range(80, 640) for x in range(x0, x1) if img.getpixel((x, y))[:3] == wire]
+        return pts[len(pts) // 2] if pts else None
+    p = wire_px((0x9a, 0x4a, 0x3c), (0x6b, 0x4f, 0x96), (0x63, 0x63, 0xc7))    # texcoord UV -> wave
+    check(p is not None, f'the UV wire is drawn in the vector colour ({p})')
+    if p:
+        f.mods(8); f.click(*p); f.mods(0)
+        f.pump(0.2)
+        cut = info('C', 2, 'link', 1)
+        f.mods(4); f.key(44); f.mods(0)
+        f.pump(0.2)
+        back = info('C', 2, 'link', 1)
+        check((cut, back) == ('0', '1'), f'Alt+click cuts the wire under the pointer, undo restores it ({cut} {back})')
+        f.click(*p); f.pump(0.05); f.click(*p)
+        f.pump(0.3)
+        got = (info('C', 0, 'count'), info('C', 2, 'type'), info('C', 2, 'link', 1), info('C', 3, 'link', 1))
+        check(got == ('4', '36', '1', '2'), f'a double-click on a wire puts a reroute knot on it ({got})')
+        f.shot('62_reroute.png')
+    p = wire_px((0x8a, 0x6d, 0x1f), (0x9a, 0x4a, 0x3c), (0xe3, 0xc8, 0x4a))    # hsv -> output: base colour
+    if p:
+        f.mods(8); f.drag(p[0], p[1] - 40, p[0], p[1] + 40, steps=6); f.mods(0)
+        f.pump(0.2)
+        check(info('C', 0, 'socket', 0) == '0', f'an Alt+drag knife cuts the wires it crosses ({info("C", 0, "socket", 0)})')
+    # align and distribute (the right-click menu has them)
+    q('op("material.node_move", "C 1 20 50")\nop("material.node_move", "C 2 300 10")\nop("material.node_move", "C 3 450 90")\n'
+      'op("material.node_move", "C 4 900 30")')
+    f.pump(0.2)
+    f.drag(5, 110, 1270, 770, steps=6)
+    f.pump(0.2)
+    q('op("node.align_top")')
+    tops = {info('C', n, 'y') for n in (1, 2, 3, 4)}
+    q('op("node.distribute_x")')
+    xs = sorted(int(info('C', n, 'x')) for n in (0, 1, 2, 3, 4))    # (the output too: it was boxed)
+    check(len(tops) == 1 and len({b - a for a, b in zip(xs, xs[1:])}) == 1,
+          f'align top lines the selection up, distribute spaces it evenly ({tops} {xs})')
+    # the minimap: a click there moves the view
+    img = f.image()
+    mm = [(x, y) for y in range(400, 790, 2) for x in range(900, 1280, 2) if img.getpixel((x, y))[:3] == (0x1a, 0x1c, 0x21)]
+    check(len(mm) > 2000, f'a minimap of the graph sits in the corner ({len(mm)} px)')
+    if mm:
+        before = [(x, y) for y in range(80, 400, 2) for x in range(0, 900, 2) if img.getpixel((x, y))[:3] == (0x6b, 0x4f, 0x96)]
+        f.click(min(mm)[0] + 6, max(mm, key=lambda p: p[1])[1] - 6)
+        f.pump(0.2)
+        img = f.image()
+        after = [(x, y) for y in range(80, 790, 2) for x in range(0, 1280, 2) if img.getpixel((x, y))[:3] == (0x6b, 0x4f, 0x96)]
+        check(before and (not after or min(after) != min(before)), 'a click on the minimap moves the view there')
+    x, y = widget_xy(m, 'node.add')
+    f.click(600, 300, btn=0x111)                            # right button
+    f.pump(0.3)
+    labels = {w.get('label') for w in ui_tree(m)}
+    check({'Duplicate Nodes', 'Copy Nodes', 'Paste Nodes', 'Align Left', 'Comment Frame'} <= labels,
+          'the right button opens the node menu: duplicate, copy, paste, align, comment ...')
+    f.key(1)
+    f.shot('61_node_canvas.png')
     f.proc.kill()
 
 

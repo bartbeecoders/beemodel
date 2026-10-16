@@ -20,10 +20,12 @@
 .globl text_width_n
 .globl text_use
 .globl cur_font
+.globl node_font_px
 
 .section .data
 .align 4
 cur_font:       .long FONT_UI
+node_font_px:   .long UI_FONT_PX            # FONT_NODE's size (the node editor's zoom)
 
 .section .rodata
 s_env_font:     .asciz "BEEMODEL_FONT="
@@ -128,6 +130,9 @@ text_init:
     rep     movsb
     lea     rsi, [rip+fonts]
     mov     dword ptr [rsi+FONT_HEAD*FNT_SZ+FNT_BOLD], 1
+    lea     rdi, [rsi+FONT_NODE*FNT_SZ]
+    mov     ecx, FNT_SZ
+    rep     movsb
     jmp     fonts_resize
 
 # fonts_resize - (re)set every slot's size for the current UI scale
@@ -144,6 +149,9 @@ fonts_resize:
     call    font_set_size
     mov     edi, FONT_HEAD
     mov     esi, HEAD_FONT_PX
+    call    font_set_size
+    mov     edi, FONT_NODE
+    mov     esi, [rip+node_font_px]
     call    font_set_size
     add     rsp, 8
     ret

@@ -1886,7 +1886,7 @@ graph_sort:
     push    r13
     push    r14
     push    r15
-    sub     rsp, NODE_SZ*MAX_NODES+128
+    sub     rsp, NODE_SZ*MAX_NODES+192
     mov     rbx, rdi
     mov     r12d, [rbx+GR_N]
     lea     rdi, [rsp]                  # placed: [rsp + 0..47], new index
@@ -1931,6 +1931,19 @@ graph_sort:
     lea     rdi, [rsp+128]
     imul    ecx, r12d, NODE_SZ
     rep     movsb
+    lea     rsi, [rbx+NE_NFLAGS]        # (their flags in the node editor too)
+    lea     rdi, [rsp+128+NODE_SZ*MAX_NODES]
+    mov     ecx, MAX_NODES
+    rep     movsb
+    xor     r14d, r14d
+31: cmp     r14d, r12d
+    jae     32f
+    movzx   eax, byte ptr [rsp+64+r14]
+    mov     cl, [rsp+128+NODE_SZ*MAX_NODES+r14]
+    mov     [rbx+NE_NFLAGS+rax], cl
+    inc     r14d
+    jmp     31b
+32:
     xor     r14d, r14d
 4:  cmp     r14d, r12d
     jae     6f
@@ -1975,7 +1988,7 @@ graph_sort:
     jb      81b
     mov     eax, 1
 .Lgsrt_out:
-    add     rsp, NODE_SZ*MAX_NODES+128
+    add     rsp, NODE_SZ*MAX_NODES+192
     pop     r15
     pop     r14
     pop     r13
@@ -2088,6 +2101,13 @@ graph_delete:
     sub     ecx, r12d
     imul    ecx, ecx, NODE_SZ
     rep     movsb
+    lea     rdi, [rbx+NE_NFLAGS+r12-1] # (their flags in the node editor)
+    lea     rsi, [rdi+1]
+    mov     ecx, [rbx+GR_N]
+    sub     ecx, r12d
+    rep     movsb
+    mov     ecx, [rbx+GR_N]
+    mov     byte ptr [rbx+NE_NFLAGS+rcx-1], 0
     dec     dword ptr [rbx+GR_N]
     mov     edi, [rbx+GR_N]             # (the last record cleared)
     imul    edi, edi, NODE_SZ

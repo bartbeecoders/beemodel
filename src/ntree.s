@@ -580,6 +580,13 @@ nt_delete:
     sub     ecx, r12d
     imul    ecx, ecx, NODE_SZ
     rep     movsb
+    lea     rdi, [rbx+NE_NFLAGS+r12-1]  # (their flags in the node editor)
+    lea     rsi, [rdi+1]
+    mov     ecx, [rbx+GR_N]
+    sub     ecx, r12d
+    rep     movsb
+    mov     ecx, [rbx+GR_N]
+    mov     byte ptr [rbx+NE_NFLAGS+rcx-1], 0
     dec     dword ptr [rbx+GR_N]
     mov     edi, [rbx+GR_N]
     imul    edi, edi, NODE_SZ

@@ -27,6 +27,14 @@ project uses [Semantic Versioning](https://semver.org/).
   alpha, reads images as colour (sRGB) or data, and repeats, clamps or
   mirrors. Node headers are coloured by category. `nodeval()` evaluates
   any node at a point.
+- **Node canvas (M4, #231):** zoom about the pointer with the text sized
+  to match, Home / F to frame everything or the selection, box select,
+  moving a whole selection, copy / paste (into other materials too),
+  duplicate, cut, collapse (H), comment frames (C) that carry their
+  nodes, reroute knots (double-click a wire), cutting wires (Alt+click,
+  an Alt+drag knife), dropping a wire in empty space to add the node it
+  feeds, wire colours by what they carry, align and distribute, a
+  minimap and a right-click node menu. One undo step each.
 
 ## [0.12.0] - 2026-10-15
 
