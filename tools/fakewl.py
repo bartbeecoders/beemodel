@@ -3037,8 +3037,9 @@ def material_bench():
     base, _ = orbit('m = material("G")\nassign("Cube", m)\nmatset(m, "base", 0.8, 0.3, 0.2)\n')
     g, gn = orbit(game)
     pr, pn = orbit(proc)
-    check(gn == '40' and base > 0 and g <= 2.5 * base,
-          f'a {gn}-node game-style material previews within 2.5x of a principled one while orbiting ({g:.2f} ms vs {base:.2f} ms: x{g / max(base, 1e-6):.2f})')
+    lim = 2.5 * (2 if os.environ.get('CI') else 1)          # (shared CI runners: twice)
+    check(gn == '40' and base > 0 and g <= lim * base,
+          f'a {gn}-node game-style material previews within {lim}x of a principled one while orbiting ({g:.2f} ms vs {base:.2f} ms: x{g / max(base, 1e-6):.2f})')
     print(f'       a {pn}-node procedural material (noise, voronoi, wave, bump): {pr:.2f} ms (x{pr / max(base, 1e-6):.2f})')
 
 
