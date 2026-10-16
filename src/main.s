@@ -109,6 +109,11 @@ _start:
     mov     eax, [rip+n_mcpfds]
     lea     rdi, [rdi+rax*8]
     call    co_pollfds
+    add     [rip+n_mcpfds], eax
+    lea     rdi, [rip+pollfds+16]       # + the AI connection's child
+    mov     eax, [rip+n_mcpfds]
+    lea     rdi, [rdi+rax*8]
+    call    ai_pollfds
     add     eax, [rip+n_mcpfds]
     lea     esi, [rax+2]
     lea     rdi, [rip+pollfds]
@@ -129,7 +134,19 @@ _start:
     test    eax, eax                    #  every frame
     jz      31f
     mov     edx, 16
-31: cmp     dword ptr [rip+hv_active], 0  # rendering: just look, never wait
+31: push    rdx                         # an AI child running: look often
+    push    rsi
+    call    ai_proc_running
+    pop     rsi
+    pop     rdx
+    test    eax, eax
+    jz      38f
+    cmp     edx, -1
+    je      39f
+    cmp     edx, 50
+    jle     38f
+39: mov     edx, 50
+38: cmp     dword ptr [rip+hv_active], 0  # rendering: just look, never wait
     je      32f
     xor     edx, edx
 32: push    rdx                         # a tooltip due: wake up for it
@@ -183,6 +200,7 @@ _start:
     call    mcp_handle
     call    link_tick                   # the live link: peers, changes out
     call    co_tick                     # co-editing: operations in and out
+    call    ai_tick                     # the AI connection's child: its output
     cmp     dword ptr [rip+quit_flag], 0
     jne     .Lquit
     call    render_tick                 # a slice of the progressive render
@@ -203,6 +221,7 @@ _start:
 
 .Lquit:
     call    wsp_persist                 # (the layout, for next time)
+    call    ai_proc_kill                # (an AI connection's child goes too)
     call    mcp_shutdown
     xor     edi, edi
     mov     eax, SYS_EXIT_GROUP
