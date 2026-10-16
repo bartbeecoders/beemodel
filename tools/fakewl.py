@@ -614,6 +614,7 @@ def main():
     render_window()
     textures_world()
     shader_graph()
+    materials_v2()
     gltf_mtl()
     product_shot()
     params_units()
@@ -1971,6 +1972,115 @@ def shader_graph():
     check(ok, f'scene_summary shows agents the graph ({str(g)[:60] if not ok else "nodes, links, sockets"})')
     f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the whole script run
     check(q('print(matof("Cube"))') == 'nil', 'one undo removes the material and its graph (one script run)')
+    f.proc.kill()
+
+
+LEAF_SCENE = ('delete("Cube")\nadd("plane", "Floor", 0, 0, 0)\nscale("Floor", 8)\nf = material("F")\nassign("Floor", f)\n'
+              'add("plane", "Leaf", 0, 2, 0)\nscale("Leaf", 2.5)\nm = material("L")\nassign("Leaf", m)\n'
+              'matset(m, "base", 0.2, 0.7, 0.2)\n')
+V012_GRAPH = ('n = node(m, "noise", 3, 5, 0.55)\nr = node(m, "ramp")\nlink(m, n, r, 1)\nnodeset(m, r, 2, 0.6, 0.15, 0.05)\n'
+              'nodeset(m, r, 3, 0.95, 0.8, 0.5)\nsocket(m, "base", r)\nc = node(m, "checker", 2)\nnodeset(m, c, 1, 0.1)\n'
+              'nodeset(m, c, 2, 0.8)\nsocket(m, "roughness", c)\nb = node(m, "bump", 2, 0.2)\nlink(m, n, b, 1)\n'
+              'socket(m, "normal", b)\nk = node(m, "gradient", 1, 2)\nsocket(m, "metallic", k)\ne = node(m, "checker", 5)\n'
+              'nodeset(m, e, 1, 0.3, 0.1, 0)\nnodeset(m, e, 2, 0)\nsocket(m, "emission", e)\n')
+
+
+def materials_v2():
+    """Material records v2 (M1): v0.12 files upgrade, 48-node graphs, every
+    PBR pin, masked / translucent / one-sided materials in Hive, glTF."""
+    print('  -- materials v2: pins, opacity, 48 nodes --')
+    from PIL import Image
+    home = tempfile.mkdtemp(prefix='bee-mat2-')
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    def run(code):
+        r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=180)
+        return r.stdout.strip() + r.stderr.strip()
+    def shot(name, code, spp=24, size=(160, 90)):
+        p = os.path.join(home, name + '.png')
+        run(code + f'\nrender("{p}", {size[0]}, {size[1]}, {spp})')
+        return Image.open(p).convert('RGB') if os.path.exists(p) else Image.new('RGB', size)
+    lum = lambda p: sum(p) / 3
+    green = lambda im: sum(1 for p in im.getdata() if p[1] > p[0] + 40 and p[1] > p[2] + 40)
+    plum = lambda c: (((c >> 16) & 255) + ((c >> 8) & 255) + (c & 255)) / 3
+    # a v0.12 file: its 5 sockets become pins, and it renders as it did
+    fx = os.path.abspath('tests/fixtures/graph_v012.bee')
+    a, b = os.path.join(home, 'old.png'), os.path.join(home, 'new.png')
+    out = run(f'op("file.open", "{fx}")\nm = "G"\nprint(nodeinfo(m, 0, "count"), nodeinfo(m, 0, "socket", 0), '
+              'nodeinfo(m, 0, "socket", 1), nodeinfo(m, 0, "socket", 3), nodeinfo(m, 0, "socket", 4), '
+              f'nodeinfo(m, 0, "socket", 6))\nrender("{a}", 160, 90, 16, 1)')
+    check(out.split()[:6] == ['6', '2', '5', '3', '6', '4'],
+          f'a v0.12 graph opens: base, metallic, roughness, emission, normal on their pins ({out.split()[:6]})')
+    run(GRAPH_SCENE + V012_GRAPH + f'render("{b}", 160, 90, 16, 1)')
+    same = os.path.exists(a) and os.path.exists(b) and open(a, 'rb').read() == open(b, 'rb').read()
+    check(same, 'the v0.12 file renders exactly like the same graph made today')
+    # 48 nodes: the 49th is refused; they save and come back
+    bee = os.path.join(home, 'big.bee')
+    chain = ''.join(f'n{i} = node(m, "math", 0)\n' + (f'link(m, n{i-1}, n{i}, 1)\n' if i else '') for i in range(48))
+    out = run(GRAPH_SCENE + chain + 'nodeset(m, n0, 1, 0.05)\nnodeset(m, n0, 2, 0.01)\n' + ''.join(
+        f'nodeset(m, n{i}, 2, 0.01)\n' for i in range(1, 48)) + 'socket(m, "base", n47)\n'
+        f'print(nodeinfo(m, 0, "count"))\nop("file.save", "{bee}")\nop("material.node", "G math")\nprint(nodeinfo(m, 0, "count"))')
+    out2 = run(f'op("file.open", "{bee}")\nprint(nodeinfo("G", 0, "count"), nodeinfo("G", 0, "socket", 0), nodeinfo("G", 48, "link", 1))')
+    check(out.split()[:1] == ['48'] and out.split()[-1] == '48',
+          f'a material holds 48 nodes, the 49th is refused ({out.split()[:1]} {out.split()[-1:]})')
+    check(out2.split()[:3] == ['48', '48', '47'], f'a 48-node graph saves and opens ({out2.split()[:3]})')
+    # specular from a node: a black, glossy sphere shines only where it says
+    gl = 'matset(m, "base", 0, 0, 0)\nmatset(m, "roughness", 0.2)\n'
+    p0 = shot('spec0', GRAPH_SCENE + gl + 'matset(m, "specular", 0)', 32)
+    p1 = shot('spec1', GRAPH_SCENE + gl + 'matset(m, "specular", 0)\nk = node(m, "checker", 1.5)\nnodeset(m, k, 1, 1)\n'
+              'nodeset(m, k, 2, 0)\nsocket(m, "specular", k)', 32)
+    d = sum(abs(lum(p0.getpixel((x, y))) - lum(p1.getpixel((x, y)))) for y in range(20, 70, 2) for x in range(55, 105, 2)) / 625
+    check(d > 3, f'a specular pin makes the sphere reflect (mean change {d:.1f} levels)')
+    # masked: holes where the mask is below the clip value, shadows too
+    opq = shot('opaque', LEAF_SCENE, 32, (320, 180))
+    msk = shot('masked', LEAF_SCENE + 'matset(m, "blend", 1)\nc = node(m, "checker", 2)\nnodeset(m, c, 1, 1)\n'
+               'nodeset(m, c, 2, 0)\nsocket(m, "mask", c)', 32, (320, 180))
+    g0, g1 = green(opq), green(msk)
+    s0, s1 = sum(lum(p) for p in opq.getdata()), sum(lum(p) for p in msk.getdata())
+    check(0.25 * g0 < g1 < 0.75 * g0 and s1 > s0 * 1.03,
+          f'a masked leaf has holes and casts a cut-out shadow ({g1} of {g0} green pixels, light x{s1 / max(s0, 1):.2f})')
+    msk.save(os.path.join(OUT, '58_masked_leaf.png'))
+    # translucent: you see the floor through it
+    tr = shot('trans', LEAF_SCENE + 'matset(m, "blend", 2)\nmatset(m, "alpha", 0.3)', 32, (320, 180))
+    check(green(tr) < 0.5 * g0, f'a translucent leaf (opacity 0.3) lets the floor show ({green(tr)} of {g0} green)')
+    # one-sided: seen from behind (and lit from behind) it is not there
+    os_ = shot('sided', LEAF_SCENE + 'rotate("Leaf", rad(180), 0, 0)\nmatset(m, "one_sided", 1)', 32, (320, 180))
+    two = shot('twosided', LEAF_SCENE + 'rotate("Leaf", rad(180), 0, 0)', 32, (320, 180))
+    s2, s3 = sum(lum(p) for p in os_.getdata()), sum(lum(p) for p in two.getdata())
+    check(green(os_) < 0.05 * max(green(two), 1) and s2 > s3,
+          f'a one-sided leaf is not seen or hit from behind ({green(os_)} vs {green(two)} green)')
+    # glTF: masked and translucent go out as alphaMode and come back
+    gf = os.path.join(home, 'm.gltf')
+    run(LEAF_SCENE + f'matset(m, "blend", 1)\nmatset(m, "clip", 0.4)\nmatset(f, "blend", 2)\nop("file.export_gltf", "{gf}")')
+    txt = open(gf).read() if os.path.exists(gf) else ''
+    out = run(f'delete("Cube")\nop("file.import_gltf", "{gf}")\nprint(matget("L", "blend"), matget("L", "clip"), matget("F", "blend"))')
+    check('"alphaMode":"MASK","alphaCutoff":0.4' in txt and out.split()[:3] == ['1', '0.4', '2'],
+          f'glTF: masked and translucent materials round-trip as alphaMode ({out.split()[:3]})')
+    # the preview: an AO pin darkens it; agents see pins and settings
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('m = material("A")\nassign("Cube", m)\nmatset(m, "base", 0.8, 0.8, 0.8)')
+    f.mods(1); f.key(44); f.mods(0)             # Shift+Z: material preview
+    f.pump(0.5)
+    pt = project((0.0, 2.0, 0.0))
+    before = plum(px(f, *pt))
+    q('c = node("A", "checker", 1)\nnodeset("A", c, 1, 0.2)\nnodeset("A", c, 2, 0.2)\nsocket("A", "ao", c)')
+    f.pump(0.5)
+    after = plum(px(f, *pt))
+    check(after < before - 15, f'an AO pin darkens the ambient light in the preview ({before:.0f} -> {after:.0f})')
+    q('matset("A", "blend", 1)\nsocket("A", "mask", c, 0)')
+    t = m.tool('scene_summary')[0]
+    try:
+        g = [mm for mm in json.loads(t.split('\n')[0])['materials'] if mm['name'] == 'A'][0]
+        ok = g['blend'] == 1 and g['sockets'] == {'ao': 1, 'mask': 1}
+    except Exception as e:
+        ok, g = False, e
+    check(ok, f'scene_summary shows the blend mode and every pin ({str(g)[:80] if not ok else "blend, ao, mask"})')
+    f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z
+    check(q('print(nodeinfo("A", 0, "socket", 12))') == '0', 'undo takes the mask pin back')
     f.proc.kill()
 
 

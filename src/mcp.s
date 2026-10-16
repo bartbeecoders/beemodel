@@ -208,6 +208,8 @@ j_ntype:        .asciz "{\"type\":"
 j_nvals:        .asciz ",\"values\":["
 j_nins:         .asciz "],\"inputs\":["
 j_nlink:        .asciz "{\"link\":"
+j_nout:         .asciz ",\"output\":"
+j_pnode:        .asciz "{\"node\":"
 j_nend:         .asciz "]}"
 j_socks:        .asciz "],\"sockets\":{"
 k_strength:     .asciz "strength"
@@ -1996,7 +1998,7 @@ mats_json:
     mov     rsi, rax
     call    jb_q
     xor     r12d, r12d                  # every parameter
-3:  cmp     r12d, 12
+3:  cmp     r12d, 15                    # (mat_params)
     jae     6f
     mov     edi, ','
     call    wb_char
@@ -2195,10 +2197,10 @@ graph_json:
     mov     r12d, [rbx+128]             # nodes
     test    r12d, r12d
     jz      .Lgj_out
-    cmp     r12d, 12
+    cmp     r12d, 48
     jbe     1f
-    mov     r12d, 12
-1:  mov     eax, [rbx+132]              # "texture": the image behind base
+    mov     r12d, 48
+1:  movzx   eax, word ptr [rbx+GR_PINS] # "texture": the image behind base
     test    eax, eax
     jz      2f
     cmp     eax, r12d
@@ -2235,7 +2237,7 @@ graph_json:
     call    wb_str
     mov     eax, [r14]
     dec     eax
-    cmp     eax, 8
+    cmp     eax, [rip+graph_ntypes]
     jae     32f
     lea     rcx, [rip+graph_type_names]
     mov     rsi, [rcx+rax*8]
@@ -2272,12 +2274,17 @@ graph_json:
     mov     edx, [rax]
     test    edx, edx
     jz      352f
-    lea     rsi, [rip+j_nlink]          # {"link":n}
+    lea     rsi, [rip+j_nlink]          # {"link":n[,"output":k]}
     call    wb_str
     mov     rcx, [rsp]
     shl     ecx, 4
-    cvtsi2ss xmm0, dword ptr [r14+4+rcx]
+    movzx   eax, word ptr [r14+4+rcx]
+    cvtsi2ss xmm0, eax
     call    jb_num
+    mov     rcx, [rsp]
+    shl     ecx, 4
+    movzx   eax, byte ptr [r14+4+rcx+2]
+    call    gj_output
     mov     edi, '}'
     call    wb_char
     jmp     353f
@@ -2314,10 +2321,10 @@ graph_json:
     call    wb_str
     xor     r13d, r13d
     xor     r14d, r14d                  # written
-4:  cmp     r13d, 5
+4:  cmp     r13d, NPINS
     jae     5f
-    mov     eax, [rbx+132+r13*4]
-    test    eax, eax
+    mov     eax, [rbx+GR_PINS+r13*4]
+    test    ax, ax
     jz      41f
     test    r14d, r14d
     jz      42f
@@ -2326,9 +2333,21 @@ graph_json:
 42: lea     rcx, [rip+graph_socket_names]
     mov     rsi, [rcx+r13*8]
     call    jb_key
-    cvtsi2ss xmm0, dword ptr [rbx+132+r13*4]
+    movzx   eax, byte ptr [rbx+GR_PINS+r13*4+2]
+    test    eax, eax                    # n, or {"node":n,"output":k}
+    jz      43f
+    lea     rsi, [rip+j_pnode]
+    call    wb_str
+43: movzx   eax, word ptr [rbx+GR_PINS+r13*4]
+    cvtsi2ss xmm0, eax
     call    jb_num
-    inc     r14d
+    movzx   eax, byte ptr [rbx+GR_PINS+r13*4+2]
+    test    eax, eax
+    jz      44f
+    call    gj_output
+    mov     edi, '}'
+    call    wb_char
+44: inc     r14d
 41: inc     r13d
     jmp     4b
 5:  mov     edi, '}'
@@ -2340,6 +2359,18 @@ graph_json:
     pop     r12
     pop     rbx
     ret
+
+# gj_output(eax=output 0..) - ,"output":k unless the first
+gj_output:
+    test    eax, eax
+    jz      1f
+    push    rax
+    lea     rsi, [rip+j_nout]
+    call    wb_str
+    pop     rax
+    cvtsi2ss xmm0, eax
+    jmp     jb_num
+1:  ret
 
 # vec_json(rsi=key, rdi=float[3], edx=1 for radians -> degrees)
 vec_json:

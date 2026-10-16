@@ -1,12 +1,15 @@
 # =============================================================================
 #  BeeModel - shader graphs: small node graphs inside a material
 #
-#  A material record holds up to 12 nodes after its principled values. Each
-#  node has a type, three inputs (a constant colour, or a link to an
-#  earlier node) and four parameters; every node yields a colour and a
-#  value. Five sockets take node results in place of the material's own
-#  base colour, metallic, roughness, emission and normal (bump or
-#  normal map).
+#  A material record holds up to 48 nodes after its principled values. Each
+#  node has a type, three inputs (a constant colour, or a link to one of an
+#  earlier node's outputs: node + 1, the output in bits 16..23) and four
+#  parameters; every output is a colour and a value. Thirteen Material
+#  Output pins (GR_PINS, linked the same way) take node results in place of
+#  the material's own base colour, metallic, specular, roughness, emission,
+#  opacity, ambient occlusion, clear coat and its roughness, transmission,
+#  IOR and opacity mask, and the normal (a bump or normal map node). Only
+#  the nodes that lead to a pin are evaluated.
 #
 #    1 image     p0 image + 1, p1 size (object units per repeat)
 #    2 noise     p0 scale, p1 detail (octaves), p2 roughness; in0 = offset
@@ -50,6 +53,7 @@
 .globl graph_type_index
 .globl graph_socket_index
 .globl graph_type_names
+.globl graph_ntypes
 .globl graph_socket_names
 .globl op_mat_node
 .globl op_mat_link
@@ -58,7 +62,7 @@
 .globl op_mat_nodes_clear
 
 .equ GR_N,      128                     # u32 node count
-.equ GR_SOCK,   132                     # u32[5]: node + 1 per socket
+.equ GR_SOCK,   132                     # u32[5]: v0.12's sockets (now GR_PINS)
 .equ GR_NODES,  160
 .equ NODE_SZ,   72
 .equ ND_TYPE,   0
@@ -66,8 +70,19 @@
 .equ ND_P,      52                      # f32[4]
 .equ ND_POS,    68                      # i16 x, y in the node editor (0, 0: not placed)
 .equ GR_OUTPOS,  152                     # i16 x, y: the material output node
-.equ MAX_NODES, 12
-.equ NSOCK,     5
+.equ MAX_NODES, 48
+.equ NOUTS,     4                       # outputs a node can have
+.equ MA_BASE_,  32                      # (material.s: the principled values)
+.equ MA_METAL_, 44
+.equ MA_ROUGH_, 48
+.equ MA_SPEC_,  52
+.equ MA_IOR_,   56
+.equ MA_TRANS_, 60
+.equ MA_EMIT_,  64
+.equ MA_ESTR_,  76
+.equ MA_COAT_,  80
+.equ MA_COATR_, 84
+.equ MA_ALPHA_, 88
 .equ T_IMAGE,   1
 .equ T_NOISE,   2
 .equ T_CHECKER, 3
@@ -91,22 +106,30 @@
 .equ SC_METAL,  92
 .equ SC_ROUGH,  96
 .equ SC_EMIT,   100
-.equ SC_FLAGS,  112                     # 1 base 2 metallic 4 roughness 8 emission 16 normal
+.equ SC_FLAGS,  112                     # bit p: pin p drove the copy (PIN_NORMAL: SC_N)
 .equ SC_UVP,    120                     # the triangle's UVs (6 floats) or 0:
                                         #  box projection
 .equ SC_SZ,     128
 # evaluation frame
 .equ EV_P,      0                       # object position
 .equ EV_UV,     12
-.equ EV_VAL,    32                      # 12 x (rgb, value)
-.equ EV_SZ,     32 + 16*MAX_NODES
+.equ EV_LIVE,   24                      # u64: the nodes to evaluate
+.equ EV_VAL,    32                      # 48 x 4 outputs x (rgb, value)
+.equ EV_SZ,     32 + 16*NOUTS*MAX_NODES
 
 .section .rodata
 .align 8
 graph_type_names:
                 .quad s_t_image, s_t_noise, s_t_checker, s_t_grad, s_t_mix, s_t_ramp, s_t_math, s_t_bump, s_t_nmap, 0
-graph_socket_names:
-                .quad s_s_base, s_s_metal, s_s_rough, s_s_emit, s_s_bump, 0
+graph_socket_names:                     # the pins, in PIN_* order
+                .quad s_s_base, s_s_metal, s_s_spec, s_s_rough, s_s_emit, s_s_alpha
+                .quad s_s_bump, s_s_ao, s_s_coat, s_s_coatr, s_s_trans, s_s_ior, s_s_mask, 0
+graph_ntypes:   .long NTYPES
+# per pin: the copy's offset, and how its value goes there (0 the colour, 1
+#   the value clamped to 0..1, 2 to 1..3, 3 the emission colour)
+pin_off:        .short MA_BASE_, MA_METAL_, MA_SPEC_, MA_ROUGH_, MA_EMIT_, MA_ALPHA_
+                .short 0, MA_RT_AO, MA_COAT_, MA_COATR_, MA_TRANS_, MA_IOR_, MA_RT_MASK
+pin_kind:       .byte 0, 1, 1, 1, 3, 1, 9, 1, 1, 1, 1, 2, 1
 s_t_image:      .asciz "image"
 s_t_noise:      .asciz "noise"
 s_t_checker:    .asciz "checker"
@@ -121,6 +144,14 @@ s_s_metal:      .asciz "metallic"
 s_s_rough:      .asciz "roughness"
 s_s_emit:       .asciz "emission"
 s_s_bump:       .asciz "normal"
+s_s_spec:       .asciz "specular"
+s_s_alpha:      .asciz "opacity"
+s_s_ao:         .asciz "ao"
+s_s_coat:       .asciz "clearcoat"
+s_s_coatr:      .asciz "coat_roughness"
+s_s_trans:      .asciz "transmission"
+s_s_ior:        .asciz "ior"
+s_s_mask:       .asciz "mask"
 # defaults per type: p0..p3, in0..in2 values (3 each)
 .align 4
 node_defaults:
@@ -138,6 +169,7 @@ gf_half:        .float 0.5
 gf_zero:        .float 0.0
 gf_two:         .float 2.0
 gf_six:         .float 6.0
+gf_three:       .float 3.0
 gf_15:          .float 15.0
 gf_10:          .float 10.0
 gf_eps:         .float 0.001                # bump: the step in object units
@@ -168,22 +200,22 @@ gw_word:        .skip 64
 
 .section .rodata
 s_g_need:       .asciz "  material.node <material> image|noise|checker|gradient|mix|ramp|math|bump [values]"
-s_g_full:       .asciz "  a material holds 12 nodes"
+s_g_full:       .asciz "  a material holds 48 nodes"
 s_g_node:       .asciz "  node "
-s_g_linkneed:   .asciz "  material.link <material> <from node> <to node> <input 1-3> (no loops)"
+s_g_linkneed:   .asciz "  material.link <material> <from node> <to node> <input 1-3> [output 0-3] (no loops)"
 s_g_delneed:    .asciz "  material.node_delete <material> <node>"
 s_g_moveneed:   .asciz "  material.node_move <material> <node (0: the output)> <x> <y>"
 s_g_setneed:    .asciz "  material.node_set <material> <node> <slot: 1-3 inputs, 4-7 values> <x> [y z]"
-s_g_sockneed:   .asciz "  material.socket <material> base|metallic|roughness|emission|normal <node|none>"
+s_g_sockneed:   .asciz "  material.socket <material> base|metallic|specular|roughness|emission|opacity|normal|ao|clearcoat|coat_roughness|transmission|ior|mask <node|none> [output 0-3]"
 s_g_ok:         .asciz "  graph: "
 s_g_noimage:    .asciz "  no image named "
 s_g_unknown:    .asciz "  no material named "
 s_g_none:       .asciz "none"
 
 OPERATOR op_mat_node, "material.node", "Add Shader Node", do_mat_node, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a node to a material's graph: material.node <material> <type> [values] (image: <image> [size])"
-OPERATOR op_mat_link, "material.link", "Link Shader Nodes", do_mat_link, flags=OPF_AI_SAFE|OPF_UNDO, doc="Feed a node into a later node's input: material.link <material> <from> <to> <input 1-3> (any order; the graph is kept in evaluation order)"
+OPERATOR op_mat_link, "material.link", "Link Shader Nodes", do_mat_link, flags=OPF_AI_SAFE|OPF_UNDO, doc="Feed a node into another node's input: material.link <material> <from> <to> <input 1-3> [output 0-3] (any order; the graph is kept in evaluation order)"
 OPERATOR op_mat_node_set, "material.node_set", "Set Shader Node Value", do_mat_node_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set a node input (1-3) or value (4-7): material.node_set <material> <node> <slot> <x> [y z]"
-OPERATOR op_mat_socket, "material.socket", "Connect Material Socket", do_mat_socket, flags=OPF_AI_SAFE|OPF_UNDO, doc="Drive base, metallic, roughness, emission or normal by a node: material.socket <material> <socket> <node|none>"
+OPERATOR op_mat_socket, "material.socket", "Connect Material Socket", do_mat_socket, flags=OPF_AI_SAFE|OPF_UNDO, doc="Drive a Material Output pin by a node: material.socket <material> base|metallic|specular|roughness|emission|opacity|normal|ao|clearcoat|coat_roughness|transmission|ior|mask <node|none> [output 0-3]"
 OPERATOR op_mat_node_delete, "material.node_delete", "Delete Shader Node", do_mat_node_delete, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a node from a material's graph (its links go): material.node_delete <material> <node>"
 OPERATOR op_mat_node_move, "material.node_move", "Move Shader Node", do_mat_node_move, flags=OPF_AI_SAFE|OPF_UNDO|OPF_QUIET, doc="Place a node in the node editor: material.node_move <material> <node (0: the output)> <x> <y>"
 OPERATOR op_mat_nodes_clear, "material.nodes_clear", "Clear Shader Nodes", do_mat_nodes_clear, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a material's graph: material.nodes_clear <material>"
@@ -417,11 +449,10 @@ node_in:
     imul    eax, ecx, 16
     lea     rdx, [r12+ND_IN+rax]
     mov     eax, [rdx]
-    test    eax, eax
+    test    ax, ax
     jz      1f
-    dec     eax                         # a link: that node's result
-    shl     eax, 4
-    lea     rdx, [r13+EV_VAL+rax]
+    call    out_slot                    # a link: that output's result
+    lea     rdx, [r13+rax]
     movss   xmm0, [rdx]
     movss   xmm1, [rdx+4]
     movss   xmm2, [rdx+8]
@@ -433,10 +464,22 @@ node_in:
     movss   xmm3, xmm0
     ret
 
+# out_slot(eax=link) -> eax = the frame offset of that output's result
+out_slot:
+    mov     edx, eax
+    movzx   eax, ax
+    dec     eax
+    shl     eax, 6                      # (16 NOUTS bytes a node)
+    shr     edx, 16
+    and     edx, NOUTS-1
+    shl     edx, 4
+    lea     eax, [rax+rdx+EV_VAL]
+    ret
+
 # put(xmm0..2) - the node's colour, value = luminance (r13 frame, r14d node)
 put_col:
     mov     eax, r14d
-    shl     eax, 4
+    shl     eax, 6
     lea     rdx, [r13+EV_VAL+rax]
     movss   [rdx], xmm0
     movss   [rdx+4], xmm1
@@ -452,7 +495,7 @@ put_col:
 # put_val(xmm0) - grey colour and value
 put_val:
     mov     eax, r14d
-    shl     eax, 4
+    shl     eax, 6
     lea     rdx, [r13+EV_VAL+rax]
     movss   [rdx], xmm0
     movss   [rdx+4], xmm0
@@ -476,6 +519,8 @@ graph_eval:
     jae     .Lge_out
     cmp     r14d, MAX_NODES
     jae     .Lge_out
+    bt      qword ptr [r13+EV_LIVE], r14
+    jnc     .Lge_next                   # (it leads to no pin)
     imul    r12d, r14d, NODE_SZ
     lea     r12, [rbx+GR_NODES+r12]
     mov     eax, [r12+ND_TYPE]
@@ -583,7 +628,7 @@ graph_eval:
     movss   xmm1, [rsp+20]
     call    put_col
     mov     eax, r14d                   # value = the first channel
-    shl     eax, 4
+    shl     eax, 6
     movss   xmm0, [rsp+16]
     movss   [r13+EV_VAL+rax+12], xmm0
     jmp     .Lge_next
@@ -607,7 +652,7 @@ graph_eval:
     call    node_in
     call    put_col
     mov     eax, r14d
-    shl     eax, 4
+    shl     eax, 6
     cvtsi2ss xmm0, r15d
     movss   [r13+EV_VAL+rax+12], xmm0
     jmp     .Lge_next
@@ -887,8 +932,33 @@ len3:
     sqrtss  xmm0, xmm0
     ret
 
+# graph_live(rbx=record, rax=the nodes wanted) -> rax = them and every
+#   node feeding them (links point to earlier nodes: one pass down)
+graph_live:
+    mov     ecx, [rbx+GR_N]
+1:  dec     ecx
+    js      9f
+    bt      rax, rcx
+    jnc     1b
+    imul    edx, ecx, NODE_SZ
+    lea     rdx, [rbx+GR_NODES+rdx+ND_IN]
+    xor     r8d, r8d
+2:  movzx   r9d, word ptr [rdx]
+    dec     r9d
+    js      3f
+    bts     rax, r9
+3:  add     rdx, 16
+    inc     r8d
+    cmp     r8d, 3
+    jb      2b
+    jmp     1b
+9:  ret
+
 # graph_shade(rdi=material record, rsi=SC (+ 24 bytes after it for the
-#   box coordinates)) -> eax = 1 if the material has a graph; SC results
+#   box coordinates), rdx=a copy of its principled values (128 bytes, to
+#   change), ecx=1: coverage only (no normal)) -> eax = 1 if the material
+#   has a graph; the pins' results in the copy (emission without a strength
+#   gets 1), the normal in SC_N, SC_FLAGS which ones
 graph_shade:
     push    rbx
     push    r12
@@ -896,9 +966,11 @@ graph_shade:
     push    r14
     push    r15
     push    rbp
-    sub     rsp, EV_SZ+136
+    sub     rsp, EV_SZ+152
     mov     rbx, rdi
     mov     r12, rsi
+    mov     [rsp+EV_SZ+136], rdx        # the copy
+    mov     [rsp+EV_SZ+144], ecx        # the mode
     mov     dword ptr [r12+SC_FLAGS], 0
     xor     eax, eax
     test    rbx, rbx
@@ -907,6 +979,22 @@ graph_shade:
     je      .Lgs_out
     lea     r13, [rsp]                  # the frame
     lea     r15, [rsp+EV_SZ]            # corners p1 p2 (24), sums (scratch)
+    xor     eax, eax                    # the nodes that lead to a pin
+    xor     ecx, ecx
+76: cmp     ecx, NPINS
+    jae     79f
+    cmp     ecx, PIN_NORMAL
+    jne     77f
+    test    dword ptr [rsp+EV_SZ+144], 1
+    jnz     78f
+77: movzx   edx, word ptr [rbx+GR_PINS+rcx*4]
+    dec     edx
+    js      78f
+    bts     rax, rdx
+78:inc     ecx
+    jmp     76b
+79: call    graph_live
+    mov     [r13+EV_LIVE], rax
     xor     ecx, ecx                    # the box coordinates of the corners
 1:  movss   xmm0, [r12+SC_P0O+rcx*4]
     movss   xmm1, xmm0
@@ -933,51 +1021,62 @@ graph_shade:
     movss   xmm0, [r12+SC_U]            # the point itself
     movss   xmm1, [r12+SC_V]
     call    at
-    # sockets
+    # the pins into the copy
+    mov     r14, [rsp+EV_SZ+136]
     xor     ebp, ebp
-2:  cmp     ebp, NSOCK-1                # (normal: below)
+2:  cmp     ebp, NPINS
     jae     3f
-    mov     eax, [rbx+GR_SOCK+rbp*4]
-    test    eax, eax
+    mov     eax, [rbx+GR_PINS+rbp*4]
+    test    ax, ax
     jz      29f
-    cmp     eax, [rbx+GR_N]
+    cmp     ax, [rbx+GR_N]
     ja      29f
-    dec     eax
-    shl     eax, 4
-    lea     rsi, [r13+EV_VAL+rax]
-    cmp     ebp, 0
-    jne     21f
-    mov     rax, [rsi]                  # base
-    mov     [r12+SC_BASE], rax
+    lea     rcx, [rip+pin_kind]
+    movzx   ecx, byte ptr [rcx+rbp]
+    cmp     ecx, 9                      # (the normal: below)
+    je      29f
+    call    out_slot
+    lea     rsi, [r13+rax]
+    lea     rdi, [rip+pin_off]
+    movzx   edi, word ptr [rdi+rbp*2]
+    add     rdi, r14
+    test    ecx, 1                      # (kinds 1 and 3 here)
+    jz      21f
+    cmp     ecx, 1
+    je      22f
+    mov     rax, [rsi]                  # 3: emission (no strength yet: 1)
+    mov     [rdi], rax
     mov     eax, [rsi+8]
-    mov     [r12+SC_BASE+8], eax
-    or      dword ptr [r12+SC_FLAGS], 1
-    jmp     29f
-21: cmp     ebp, 1
-    jne     22f
-    movss   xmm0, [rsi+12]              # metallic (clamped)
+    mov     [rdi+8], eax
+    xorps   xmm0, xmm0
+    comiss  xmm0, [r14+MA_ESTR_]
+    jb      28f
+    mov     dword ptr [r14+MA_ESTR_], 0x3f800000
+    jmp     28f
+21: cmp     ecx, 2
+    je      23f
+    mov     rax, [rsi]                  # 0: the colour
+    mov     [rdi], rax
+    mov     eax, [rsi+8]
+    mov     [rdi+8], eax
+    jmp     28f
+22: movss   xmm0, [rsi+12]              # 1: the value, 0..1
     maxss   xmm0, [rip+gf_zero]
     minss   xmm0, [rip+gf_one]
-    movss   [r12+SC_METAL], xmm0
-    or      dword ptr [r12+SC_FLAGS], 2
-    jmp     29f
-22: cmp     ebp, 2
-    jne     23f
-    movss   xmm0, [rsi+12]              # roughness
-    maxss   xmm0, [rip+gf_zero]
-    minss   xmm0, [rip+gf_one]
-    movss   [r12+SC_ROUGH], xmm0
-    or      dword ptr [r12+SC_FLAGS], 4
-    jmp     29f
-23: mov     rax, [rsi]                  # emission
-    mov     [r12+SC_EMIT], rax
-    mov     eax, [rsi+8]
-    mov     [r12+SC_EMIT+8], eax
-    or      dword ptr [r12+SC_FLAGS], 8
+    movss   [rdi], xmm0
+    jmp     28f
+23: movss   xmm0, [rsi+12]              # 2: 1..3 (IOR)
+    maxss   xmm0, [rip+gf_one]
+    minss   xmm0, [rip+gf_three]
+    movss   [rdi], xmm0
+28: bts     dword ptr [r12+SC_FLAGS], ebp
 29: inc     ebp
     jmp     2b
 3:  # the normal: a bump node's height, a little along both edges
-    mov     eax, [rbx+GR_SOCK+16]
+    test    dword ptr [rsp+EV_SZ+144], 1
+    jnz     .Lgs_done
+    mov     eax, [rbx+GR_PINS+PIN_NORMAL*4]
+    movzx   eax, ax
     test    eax, eax
     jz      .Lgs_done
     cmp     eax, [rbx+GR_N]
@@ -992,9 +1091,13 @@ graph_shade:
     movss   xmm0, [rbx+GR_NODES+rax+ND_P]   # strength
     movss   [r15+24], xmm0
     mov     eax, r14d
-    shl     eax, 4
+    shl     eax, 6
     movss   xmm0, [r13+EV_VAL+rax+12]   # h
     movss   [r15+28], xmm0
+    xor     eax, eax                    # from here on only its height
+    bts     rax, r14
+    call    graph_live
+    mov     [r13+EV_LIVE], rax
     lea     rdi, [r12+SC_E1O]           # du = eps / |e1o|, dv = eps / |e2o|
     call    len3
     movss   xmm1, [rip+gf_eps]
@@ -1014,7 +1117,7 @@ graph_shade:
     movss   xmm1, [r12+SC_V]
     call    at
     mov     eax, r14d
-    shl     eax, 4
+    shl     eax, 6
     movss   xmm0, [r13+EV_VAL+rax+12]
     subss   xmm0, [r15+28]
     divss   xmm0, [r15+32]
@@ -1024,7 +1127,7 @@ graph_shade:
     addss   xmm1, [r15+36]
     call    at
     mov     eax, r14d
-    shl     eax, 4
+    shl     eax, 6
     movss   xmm0, [r13+EV_VAL+rax+12]
     subss   xmm0, [r15+28]
     divss   xmm0, [r15+36]
@@ -1090,11 +1193,11 @@ graph_shade:
     inc     ecx
     cmp     ecx, 3
     jb      6b
-    or      dword ptr [r12+SC_FLAGS], 16
+    or      dword ptr [r12+SC_FLAGS], 1 << PIN_NORMAL
 .Lgs_done:
     mov     eax, 1
 .Lgs_out:
-    add     rsp, EV_SZ+136
+    add     rsp, EV_SZ+152
     pop     rbp
     pop     r15
     pop     r14
@@ -1108,7 +1211,7 @@ graph_shade:
     jz      .Lgs_done
     movss   xmm4, [rbx+GR_NODES+rax+ND_P]   # strength
     mov     eax, r14d                   # t = 2 c - 1 (x, y x strength)
-    shl     eax, 4
+    shl     eax, 6
     lea     rdx, [r13+EV_VAL+rax]
     xor     ecx, ecx
 1:  movss   xmm0, [rdx+rcx*4]
@@ -1193,7 +1296,7 @@ graph_shade:
     inc     ecx
     cmp     ecx, 3
     jb      5b
-    or      dword ptr [r12+SC_FLAGS], 16
+    or      dword ptr [r12+SC_FLAGS], 1 << PIN_NORMAL
     jmp     .Lgs_done
 
 # nm_ortho(rdi=vector; r12 = SC) - without its SC_N part, unit (0 stays 0)
@@ -1435,23 +1538,30 @@ graph_set:
     pop     rbx
     ret
 
-# graph_socket(edi=material, esi=socket 0..4, edx=node (0 = none)) -> eax = 1
+# graph_socket(edi=material, esi=pin (PIN_*), edx=node (0 = none), ecx=its
+#   output 0..3) -> eax = 1
 graph_socket:
     push    rbx
     push    r12
     push    r13
     mov     r12d, esi
     mov     r13d, edx
+    mov     ebx, ecx
     call    own
     test    rax, rax
     jz      8f
-    cmp     r12d, NSOCK
+    cmp     r12d, NPINS
     jae     8f
     cmp     r13d, [rax+GR_N]
     ja      8f
     test    r13d, r13d
     js      8f
-    mov     [rax+GR_SOCK+r12*4], r13d
+    jz      1f
+    cmp     ebx, NOUTS
+    jae     8f
+    shl     ebx, 16
+    or      r13d, ebx
+1:  mov     [rax+GR_PINS+r12*4], r13d
     mov     eax, 1
     jmp     9f
 8:  xor     eax, eax
@@ -1462,8 +1572,9 @@ graph_socket:
 
 # graph_info(edi=material, esi=node, edx=what, ecx=k) -> eax: what 0 the
 #   node count, 1 the node's type, 2 the node feeding its input k (1..3;
-#   0: none), 3 the node driving socket k (0..4), 4 its x, 5 its y (node 0:
-#   the output) - -1 when there is no such thing
+#   0: none), 3 the node driving pin k (PIN_*), 4 its x, 5 its y (node 0:
+#   the output), 6 the output (0..) feeding input k, 7 the output driving
+#   pin k - -1 when there is no such thing
 graph_info:
     push    rbx
     push    r12
@@ -1485,10 +1596,17 @@ graph_info:
     test    r13d, r13d
     jz      9f
     cmp     r13d, 3
+    je      86f
+    cmp     r13d, 7
     jne     1f
-    cmp     r14d, NSOCK
+86: cmp     r14d, NPINS
     jae     8f
-    mov     eax, [rbx+GR_SOCK+r14*4]
+    mov     eax, [rbx+GR_PINS+r14*4]
+    cmp     r13d, 7
+    je      87f
+    movzx   eax, ax
+    jmp     9f
+87: shr     eax, 16
     jmp     9f
 1:  lea     rdx, [rbx+GR_OUTPOS]        # the node (0: the output)
     test    r12d, r12d
@@ -1504,12 +1622,19 @@ graph_info:
     mov     eax, [rdx+ND_TYPE]
     jmp     9f
 11: cmp     r13d, 2
+    je      111f
+    cmp     r13d, 6
     jne     12f
-    lea     eax, [r14-1]
+111:lea     eax, [r14-1]
     cmp     eax, 3
     jae     8f
     shl     eax, 4
     mov     eax, [rdx+ND_IN+rax]
+    cmp     r13d, 6
+    je      112f
+    movzx   eax, ax
+    jmp     9f
+112:shr     eax, 16
     jmp     9f
 12: add     rdx, ND_POS
 2:  cmp     r13d, 4
@@ -1567,11 +1692,11 @@ graph_sort:
     push    r13
     push    r14
     push    r15
-    sub     rsp, NODE_SZ*MAX_NODES+64
+    sub     rsp, NODE_SZ*MAX_NODES+128
     mov     rbx, rdi
     mov     r12d, [rbx+GR_N]
-    lea     rdi, [rsp]                  # placed: [rsp + 0..11], new index
-    mov     ecx, 16                     #  of each old one: [rsp + 16..]
+    lea     rdi, [rsp]                  # placed: [rsp + 0..47], new index
+    mov     ecx, 64                     #  of each old one: [rsp + 64..]
     xor     eax, eax
     rep     stosb
     xor     r13d, r13d                  # placed so far
@@ -1586,7 +1711,7 @@ graph_sort:
     imul    eax, r14d, NODE_SZ
     lea     rdx, [rbx+GR_NODES+rax+ND_IN]
     xor     ecx, ecx
-2:  mov     eax, [rdx]
+2:  movzx   eax, word ptr [rdx]
     test    eax, eax
     jz      21f
     dec     eax
@@ -1599,7 +1724,7 @@ graph_sort:
     cmp     ecx, 3
     jb      2b
     mov     byte ptr [rsp+r14], 1       # ready: next in order
-    mov     [rsp+16+r14], r13b
+    mov     [rsp+64+r14], r13b
     inc     r13d
     jmp     .Lgsrt_round
 3:  inc     r14d
@@ -1609,17 +1734,17 @@ graph_sort:
     jmp     .Lgsrt_out
 .Lgsrt_permute:
     lea     rsi, [rbx+GR_NODES]         # a copy, then each to its place
-    lea     rdi, [rsp+64]
+    lea     rdi, [rsp+128]
     imul    ecx, r12d, NODE_SZ
     rep     movsb
     xor     r14d, r14d
 4:  cmp     r14d, r12d
     jae     6f
-    movzx   eax, byte ptr [rsp+16+r14]
+    movzx   eax, byte ptr [rsp+64+r14]
     imul    eax, eax, NODE_SZ
     lea     rdi, [rbx+GR_NODES+rax]
     imul    eax, r14d, NODE_SZ
-    lea     rsi, [rsp+64+rax]
+    lea     rsi, [rsp+128+rax]
     mov     ecx, NODE_SZ
     rep     movsb
     inc     r14d
@@ -1630,33 +1755,33 @@ graph_sort:
     imul    eax, r14d, NODE_SZ
     lea     rdx, [rbx+GR_NODES+rax+ND_IN]
     xor     ecx, ecx
-71: mov     eax, [rdx]
+71: movzx   eax, word ptr [rdx]
     test    eax, eax
     jz      72f
     dec     eax
-    movzx   eax, byte ptr [rsp+16+rax]
+    movzx   eax, byte ptr [rsp+64+rax]
     inc     eax
-    mov     [rdx], eax
+    mov     [rdx], ax
 72: add     rdx, 16
     inc     ecx
     cmp     ecx, 3
     jb      71b
     inc     r14d
     jmp     7b
-8:  xor     ecx, ecx                    # and the sockets
-81: mov     eax, [rbx+GR_SOCK+rcx*4]
+8:  xor     ecx, ecx                    # and the pins
+81: movzx   eax, word ptr [rbx+GR_PINS+rcx*4]
     test    eax, eax
     jz      82f
     dec     eax
-    movzx   eax, byte ptr [rsp+16+rax]
+    movzx   eax, byte ptr [rsp+64+rax]
     inc     eax
-    mov     [rbx+GR_SOCK+rcx*4], eax
+    mov     [rbx+GR_PINS+rcx*4], ax
 82: inc     ecx
-    cmp     ecx, NSOCK
+    cmp     ecx, NPINS
     jb      81b
     mov     eax, 1
 .Lgsrt_out:
-    add     rsp, NODE_SZ*MAX_NODES+64
+    add     rsp, NODE_SZ*MAX_NODES+128
     pop     r15
     pop     r14
     pop     r13
@@ -1664,15 +1789,18 @@ graph_sort:
     pop     rbx
     ret
 
-# graph_link_any(edi=material, esi=from, edx=to, ecx=input 1..3) -> eax =
-#   the node fed, renumbered (0: no such nodes, or the link would make a
-#   loop - nothing changed)
+# graph_link_any(edi=material, esi=from, edx=to, ecx=input 1..3, r8d=from's
+#   output 0..3) -> eax = the node fed, renumbered (0: no such nodes, or the
+#   link would make a loop - nothing changed)
 graph_link_any:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
+    push    rbp
+    sub     rsp, 8
+    mov     ebp, r8d
     mov     r12d, esi
     mov     r13d, edx
     mov     r14d, ecx
@@ -1698,10 +1826,15 @@ graph_link_any:
     shl     eax, 4
     add     ecx, eax
     lea     r15, [rbx+GR_NODES+rcx+ND_IN]
+    cmp     ebp, NOUTS
+    jae     8f
     mov     eax, [r15]                  # (kept to put back)
     push    rax
     push    rax
-    mov     [r15], r12d
+    mov     eax, ebp
+    shl     eax, 16
+    or      eax, r12d
+    mov     [r15], eax
     lea     ecx, [r13-1]                # the fed node marked to find it after
     imul    ecx, ecx, NODE_SZ
     or      dword ptr [rbx+GR_NODES+rcx+ND_TYPE], 0x80000000
@@ -1730,7 +1863,9 @@ graph_link_any:
     lea     eax, [rcx+1]
     jmp     9f
 8:  xor     eax, eax
-9:  pop     r15
+9:  add     rsp, 8
+    pop     rbp
+    pop     r15
     pop     r14
     pop     r13
     pop     r12
@@ -1772,13 +1907,13 @@ graph_delete:
     imul    eax, ecx, NODE_SZ
     lea     rdx, [rbx+GR_NODES+rax+ND_IN]
     xor     r8d, r8d
-2:  mov     eax, [rdx]
+2:  movzx   eax, word ptr [rdx]
     cmp     eax, r12d
     jb      3f
     jne     21f
     mov     dword ptr [rdx], 0          # fed by it: its constant again
     jmp     3f
-21: dec     dword ptr [rdx]
+21: dec     word ptr [rdx]
 3:  add     rdx, 16
     inc     r8d
     cmp     r8d, 3
@@ -1786,15 +1921,15 @@ graph_delete:
     inc     ecx
     jmp     1b
 4:  xor     ecx, ecx
-5:  mov     eax, [rbx+GR_SOCK+rcx*4]
+5:  movzx   eax, word ptr [rbx+GR_PINS+rcx*4]
     cmp     eax, r12d
     jb      7f
     jne     6f
-    mov     dword ptr [rbx+GR_SOCK+rcx*4], 0
+    mov     dword ptr [rbx+GR_PINS+rcx*4], 0
     jmp     7f
-6:  dec     dword ptr [rbx+GR_SOCK+rcx*4]
+6:  dec     word ptr [rbx+GR_PINS+rcx*4]
 7:  inc     ecx
-    cmp     ecx, NSOCK
+    cmp     ecx, NPINS
     jb      5b
     mov     eax, 1
     jmp     9f
@@ -1812,7 +1947,7 @@ graph_clear:
     jz      8f
     lea     rdi, [rax+GR_N]
     xor     eax, eax
-    mov     ecx, (1024-GR_N)/4
+    mov     ecx, (MA_SZ-GR_N)/4
     rep     stosd
     mov     eax, 1
     add     rsp, 8
@@ -1995,10 +2130,20 @@ do_mat_link:
     inc     ebx
     cmp     ebx, 3
     jb      1b
-    mov     edi, r12d
+    xor     eax, eax                    # [output 0..]: 0 based
+    mov     [rsp+12], eax
+    call    arg_num
+    test    eax, eax
+    jz      2f
+    cvttss2si eax, xmm0
+    test    eax, eax
+    js      .Lml_need
+    mov     [rsp+12], eax
+2:  mov     edi, r12d
     mov     esi, [rsp]
     mov     edx, [rsp+4]
     mov     ecx, [rsp+8]
+    mov     r8d, [rsp+12]
     call    graph_link_any
     test    eax, eax
     jz      .Lml_need
@@ -2088,6 +2233,7 @@ do_mat_socket:
     js      .Lmk_need
     mov     ebx, eax
     call    next_word
+    mov     [rsp], rsi                  # (the text after it)
     xor     edx, edx                    # none: 0
     lea     rdi, [rip+gw_word]
     push    rsi
@@ -2101,7 +2247,17 @@ do_mat_socket:
     test    eax, eax
     jz      .Lmk_need
     cvttss2si edx, xmm0
-1:  mov     edi, r12d
+1:  mov     rsi, [rsp]                  # [output 0..]
+    push    rdx
+    call    arg_num
+    pop     rdx
+    xor     ecx, ecx
+    test    eax, eax
+    jz      11f
+    cvttss2si ecx, xmm0
+    test    ecx, ecx
+    js      .Lmk_need
+11: mov     edi, r12d
     mov     esi, ebx
     call    graph_socket
     test    eax, eax

@@ -374,6 +374,32 @@
 .equ ME_VGOK,       216     # u32: ME_VER + 1 when ME_VGEO was checked to be its DAG (negative: not)
 .equ ME_HDR,        224
 
+# ---- materials (material.s, graph.s) -------------------------------------------------
+.equ MA_SZ,         4096    # a material record: principled values, then its graph
+.equ MA_SHIFT,      12
+.equ MA_V1SZ,       1024    # v0.12 records (12-node graphs: files, assets)
+.equ MA_BLEND,      96      # f32 0 opaque, 1 masked (opacity mask clipped), 2 translucent
+.equ MA_SIDED,      100     # f32 1: one-sided (back faces not drawn or hit)
+.equ MA_CLIP,       104     # f32 the opacity mask clip value (0: 1/3)
+.equ MA_RT_AO,      116     # f32 shading copies only (after a graph): its AO,
+.equ MA_RT_MASK,    120     #  its opacity mask (valid when SC_FLAGS says so)
+.equ GR_PINS,       3616    # u32[16] Material Output pins: node + 1 | output << 16
+.equ NPINS,         13      # base metallic specular roughness emission opacity
+                            #  normal ao coat coat_roughness transmission ior mask
+.equ PIN_BASE,      0
+.equ PIN_METAL,     1
+.equ PIN_SPEC,      2
+.equ PIN_ROUGH,     3
+.equ PIN_EMIT,      4
+.equ PIN_ALPHA,     5
+.equ PIN_NORMAL,    6
+.equ PIN_AO,        7
+.equ PIN_COAT,      8
+.equ PIN_COATR,     9
+.equ PIN_TRANS,     10
+.equ PIN_IOR,       11
+.equ PIN_MASK,      12
+
 # ---- rigging data in the animation block (anim.s, rig.s) -----------------------------
 .equ AN_NCON_,      44      # constraints, drivers in use
 .equ AN_NDRV_,      48

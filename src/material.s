@@ -44,9 +44,13 @@
 .equ MB_CAP,    8
 .equ MB_BYTES,  12
 .equ MB_HDR,    16
-.equ MA_SZ,     1024                    # 128 principled + the node graph
-.equ MA_SHIFT,  10
 .equ MA_FILE,   128                     # the principled part (MATS records)
+.equ GR_N,      128                     # (graph.s)
+.equ GR_SOCK,   132
+.equ GR_NODES,  160
+.equ GR_MAXN,   48
+.equ NODE_SZ,   72
+.equ ND_IN,     4
 .equ MA_NAME,   0
 .equ MA_BASE,   32
 .equ MA_METAL,  44
@@ -61,7 +65,9 @@
 .equ MA_ALPHA,  88
 .equ MA_DENS,   92                      # g/cm^3 (0 in older files: 1)
 .equ MA_MAX,    1024
-.equ NPARAMS,   12
+.equ NPARAMS,   15
+.equ NPARAMS_V1, 12                     # (before blend, one_sided, clip)
+.equ GR_MAGIC,  0x3252474d              # "MGR2": the graph chunk's v2 marker
 .equ PR_SZ,     32              # name ptr, offset, comps, step, min, max
 
 .section .bss
@@ -103,6 +109,9 @@ pn_coat:        .asciz "clearcoat"
 pn_coatr:       .asciz "coat_roughness"
 pn_alpha:       .asciz "alpha"
 pn_dens:        .asciz "density"
+pn_blend:       .asciz "blend"
+pn_sided:       .asciz "one_sided"
+pn_clip:        .asciz "clip"
 .align 8
 mat_params:     .quad pn_base
                 .long MA_BASE, 3
@@ -140,12 +149,22 @@ mat_params:     .quad pn_base
                 .quad pn_dens
                 .long MA_DENS, 1
                 .float 0.01, 0, 25, 0
+                .quad pn_blend              # 0 opaque, 1 masked, 2 translucent
+                .long MA_BLEND, 1
+                .float 1, 0, 2, 0
+                .quad pn_sided
+                .long MA_SIDED, 1
+                .float 1, 0, 1, 0
+                .quad pn_clip
+                .long MA_CLIP, 1
+                .float 0.005, 0, 1, 0
 s_p_material:   .asciz "Material"
 lb_ior:         .asciz "IOR"
 lb_coatr:       .asciz "coat rough."
 .align 8
 mat_labels:     .quad pn_base, pn_metal, pn_rough, pn_spec, lb_ior, pn_trans
                 .quad pn_emit, pn_estr, pn_coat, lb_coatr, pn_alpha, pn_dens
+                .quad pn_blend, pn_sided, pn_clip
 s_none:         .asciz "-"
 s_new:          .asciz "+ New"
 s_x:            .asciz "x"
@@ -153,7 +172,7 @@ s_m_new:        .asciz "  material created: "
 s_m_assigned:   .asciz "  material assigned: "
 s_m_none_obj:   .asciz "  materials go on an active mesh object"
 s_m_unknown:    .asciz "  no material named "
-s_m_bad:        .asciz "  material.set <name> <parameter> <values...>"
+s_m_bad:        .asciz "  material.set <name> <parameter> <values...> (blend: 0 opaque, 1 masked, 2 translucent)"
 s_m_full:       .asciz "  the scene holds 1024 materials"
 s_m_removed:    .asciz "  material removed: "
 s_m_texbad:     .asciz "  material.texture <material> <image|none> [size in object units]"
@@ -162,10 +181,11 @@ s_m_tex:        .asciz "  material texture: "
 s_m_none:       .asciz "none"
 s_drag:         .asciz "Material"
 s_dot:          .asciz "."
+gu_pin:         .byte PIN_BASE, PIN_METAL, PIN_ROUGH, PIN_EMIT, PIN_NORMAL   # v0.12 sockets
 
 OPERATOR op_mat_new, "material.new", "New Material", do_mat_new, flags=OPF_AI_SAFE|OPF_UNDO, doc="Create a material and give it to the active mesh: material.new [name]"
 OPERATOR op_mat_assign, "material.assign", "Assign Material", do_mat_assign, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give the active mesh a material: material.assign <name> (none = no material)"
-OPERATOR op_mat_set, "material.set", "Set Material Value", do_mat_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set a material value: material.set <name> base|metallic|roughness|specular|ior|transmission|emission|strength|clearcoat|coat_roughness|alpha <values>"
+OPERATOR op_mat_set, "material.set", "Set Material Value", do_mat_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set a material value: material.set <name> base|metallic|roughness|specular|ior|transmission|emission|strength|clearcoat|coat_roughness|alpha|density|blend|one_sided|clip <values> (blend 0 opaque, 1 masked, 2 translucent)"
 OPERATOR op_mat_texture, "material.texture", "Material Texture", do_mat_texture, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give a material a base colour image, box-projected (a one-node graph): material.texture <name> <image|none> [size]"
 OPERATOR op_mat_remove, "material.remove", "Remove Material", do_mat_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Delete a material (objects using it get none): material.remove <name>"
 
@@ -706,10 +726,17 @@ mats_read:
     pop     rbx
     ret
 
-# graphs_write - MGRF chunk body: count, then each material's graph part
+# graphs_write - MGRF chunk body: 0 (v0.12 readers see no graphs), "MGR2",
+#   the count, then per material its node count n, the graph header (32
+#   bytes), n nodes and the pins onwards (MA_SZ - GR_PINS bytes)
 graphs_write:
     push    rbx
-    sub     rsp, 16
+    push    r12
+    sub     rsp, 8
+    xor     edi, edi
+    call    wb_u32
+    mov     edi, GR_MAGIC
+    call    wb_u32
     call    mat_count
     mov     [rsp], eax
     mov     edi, eax
@@ -719,25 +746,85 @@ graphs_write:
     jae     9f
     mov     edi, ebx
     call    mat_get
-    lea     rsi, [rax+MA_FILE]
-    mov     edx, MA_SZ-MA_FILE
+    mov     r12, rax
+    mov     edi, [r12+GR_N]
+    call    wb_u32
+    lea     rsi, [r12+GR_N]
+    mov     edx, GR_NODES-GR_N
+    call    wb_bytes
+    lea     rsi, [r12+GR_NODES]
+    imul    edx, [r12+GR_N], NODE_SZ
+    call    wb_bytes
+    lea     rsi, [r12+GR_PINS]
+    mov     edx, MA_SZ-GR_PINS
     call    wb_bytes
     inc     ebx
     jmp     1b
-9:  add     rsp, 16
+9:  add     rsp, 8
+    pop     r12
     pop     rbx
     ret
 
-# graphs_read(rdi=chunk data, esi=size) - after mats_read; bad graphs
-#   (counts, links, sockets) are cleared
+# graphs_read(rdi=chunk data, esi=size) - after mats_read; v0.12's layout
+#   (count, 896 bytes each: 12 nodes, 5 sockets) is upgraded; bad graphs
+#   (counts, types, links, pins) are cleared
 graphs_read:
     push    rbx
     push    r12
     push    r13
     push    r14
-    sub     rsp, 8
+    push    r15
     mov     rbx, rdi
     mov     r12d, esi
+    cmp     r12d, 12
+    jb      .Lgr_v1
+    cmp     dword ptr [rbx], 0
+    jne     .Lgr_v1
+    cmp     dword ptr [rbx+4], GR_MAGIC
+    jne     .Lgr_v1
+    mov     r13d, [rbx+8]               # v2
+    call    mat_count
+    cmp     r13d, eax
+    cmova   r13d, eax
+    lea     r15, [rbx+12]               # the next record
+    add     r12, rbx                    # the end
+    xor     r14d, r14d
+1:  cmp     r14d, r13d
+    jae     9f
+    lea     rax, [r15+4]
+    cmp     rax, r12
+    ja      9f
+    mov     ecx, [r15]                  # n
+    cmp     ecx, GR_MAXN
+    ja      9f
+    imul    ecx, ecx, NODE_SZ
+    lea     rax, [r15+4+GR_NODES-GR_N+MA_SZ-GR_PINS]
+    add     rax, rcx
+    cmp     rax, r12
+    ja      9f
+    mov     edi, r14d
+    call    mat_get
+    mov     rdx, rax
+    lea     rdi, [rdx+GR_N]             # all of it clear, then the parts
+    xor     eax, eax
+    mov     ecx, (MA_SZ-GR_N)/4
+    rep     stosd
+    lea     rsi, [r15+4]
+    lea     rdi, [rdx+GR_N]
+    mov     ecx, GR_NODES-GR_N
+    rep     movsb
+    imul    ecx, [r15], NODE_SZ
+    lea     rdi, [rdx+GR_NODES]
+    rep     movsb
+    lea     rdi, [rdx+GR_PINS]
+    mov     ecx, MA_SZ-GR_PINS
+    rep     movsb
+    mov     r15, rsi
+    mov     rdi, rdx
+    call    graph_check
+    inc     r14d
+    jmp     1b
+.Lgr_v1:
     cmp     r12d, 4
     jb      9f
     mov     r13d, [rbx]
@@ -745,55 +832,83 @@ graphs_read:
     cmp     r13d, eax
     cmova   r13d, eax
     mov     eax, r13d
-    imul    eax, eax, MA_SZ-MA_FILE
+    imul    eax, eax, MA_V1SZ-MA_FILE
     add     eax, 4
     cmp     eax, r12d
     ja      9f
     lea     rsi, [rbx+4]
     xor     r14d, r14d
-1:  cmp     r14d, r13d
+2:  cmp     r14d, r13d
     jae     9f
     mov     edi, r14d
     call    mat_get
     lea     rdi, [rax+MA_FILE]
-    mov     ecx, MA_SZ-MA_FILE
+    mov     ecx, MA_V1SZ-MA_FILE
     rep     movsb
-    mov     rdi, rax                    # sanity: node count, links, sockets
+    mov     rdi, rax
     push    rsi
+    sub     rsp, 8
+    call    graph_upgrade
     call    graph_check
+    add     rsp, 8
     pop     rsi
     inc     r14d
-    jmp     1b
-9:  add     rsp, 8
+    jmp     2b
+9:  pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
     ret
 
-# graph_check(rdi=record) - zero the graph if it does not make sense
-graph_check:
-    mov     eax, [rdi+128]
-    cmp     eax, 12
-    ja      8f
-    xor     ecx, ecx                    # sockets <= n
-1:  cmp     [rdi+132+rcx*4], eax
-    ja      8f
+# graph_upgrade(rdi=record) - a v0.12 graph (5 sockets at GR_SOCK) to pins;
+#   rdi kept
+.globl graph_upgrade
+graph_upgrade:
+    xor     ecx, ecx
+    lea     rsi, [rip+gu_pin]
+1:  mov     eax, [rdi+GR_SOCK+rcx*4]
+    movzx   edx, byte ptr [rsi+rcx]
+    mov     [rdi+GR_PINS+rdx*4], eax
+    mov     dword ptr [rdi+GR_SOCK+rcx*4], 0
     inc     ecx
     cmp     ecx, 5
     jb      1b
-    xor     ecx, ecx                    # node k's links < k + 1
+    ret
+
+# graph_check(rdi=record) - zero the graph if it does not make sense; rdi kept
+.globl graph_check
+graph_check:
+    mov     eax, [rdi+GR_N]
+    cmp     eax, GR_MAXN
+    ja      8f
+    xor     ecx, ecx                    # pins: a node there, outputs < 8
+1:  mov     edx, [rdi+GR_PINS+rcx*4]
+    test    edx, 0xff000000
+    jnz     8f
+    test    edx, 0xf80000
+    jnz     8f
+    movzx   edx, dx
+    cmp     edx, eax
+    ja      8f
+    inc     ecx
+    cmp     ecx, 16
+    jb      1b
+    xor     ecx, ecx                    # node k's type, links < k + 1
 2:  cmp     ecx, eax
     jae     9f
-    imul    edx, ecx, 72
-    mov     r8d, [rdi+160+rdx]
+    imul    edx, ecx, NODE_SZ
+    mov     r8d, [rdi+GR_NODES+rdx]
     dec     r8d
-    cmp     r8d, 8
+    cmp     r8d, [rip+graph_ntypes]
     jae     8f
     xor     r9d, r9d
 3:  imul    r10d, r9d, 16
     add     r10d, edx
-    mov     r8d, [rdi+164+r10]
+    mov     r8d, [rdi+GR_NODES+ND_IN+r10]
+    test    r8d, 0xfff80000
+    jnz     8f
+    movzx   r8d, r8w
     cmp     r8d, ecx
     ja      8f
     inc     r9d
@@ -802,9 +917,9 @@ graph_check:
     inc     ecx
     jmp     2b
 8:  push    rdi
-    lea     rdi, [rdi+128]
+    lea     rdi, [rdi+GR_N]
     xor     eax, eax
-    mov     ecx, (MA_SZ-128)/4
+    mov     ecx, (MA_SZ-GR_N)/4
     rep     stosd
     pop     rdi
 9:  ret
@@ -1160,6 +1275,7 @@ do_mat_texture:
     mov     edi, ebx
     xor     esi, esi
     mov     edx, r13d
+    xor     ecx, ecx
     call    graph_socket
 21: call    fmt_reset
     lea     rdi, [rip+s_m_tex]

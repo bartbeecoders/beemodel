@@ -67,6 +67,12 @@ g_metal:        .asciz "],\"metallicFactor\":"
 g_rough:        .asciz ",\"roughnessFactor\":"
 g_emit:         .asciz "},\"emissiveFactor\":["
 g_blend:        .asciz ",\"alphaMode\":\"BLEND\""
+g_mask:         .asciz ",\"alphaMode\":\"MASK\",\"alphaCutoff\":"
+g_dsided:       .asciz ",\"doubleSided\":true"
+k_amode:        .asciz "alphaMode"
+k_cutoff:       .asciz "alphaCutoff"
+k_mmask:        .asciz "MASK"
+k_mblend:       .asciz "BLEND"
 g_ext:          .asciz ",\"extensions\":{\"KHR_materials_ior\":{\"ior\":"
 g_estr:         .asciz "},\"KHR_materials_emissive_strength\":{\"emissiveStrength\":"
 g_trans:        .asciz "},\"KHR_materials_transmission\":{\"transmissionFactor\":"
@@ -1193,12 +1199,33 @@ gx_mat:
     jb      3b
     mov     edi, ']'
     call    wb_char
+    movss   xmm0, [r13+MA_BLEND]        # alphaMode: masked, translucent (or
+    cvtss2si eax, xmm0                  #  opaque with alpha below 1: v0.12)
+    cmp     eax, 1
+    jne     41f
+    lea     rsi, [rip+g_mask]
+    call    wb_str
+    movss   xmm0, [r13+MA_CLIP]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    ja      40f
+    mov     eax, 0x3eaaaaab             # (0: a third)
+    movd    xmm0, eax
+40: call    jb_num
+    jmp     4f
+41: cmp     eax, 2
+    je      42f
     movss   xmm0, [r13+MA_ALPHA]
     comiss  xmm0, [rip+gf_one]
     jae     4f
-    lea     rsi, [rip+g_blend]
+42: lea     rsi, [rip+g_blend]
     call    wb_str
-4:  lea     rsi, [rip+g_ext]
+4:  movss   xmm0, [r13+MA_SIDED]        # two-sided unless one-sided
+    comiss  xmm0, [rip+gf_half]
+    jae     43f
+    lea     rsi, [rip+g_dsided]
+    call    wb_str
+43: lea     rsi, [rip+g_ext]
     call    wb_str
     movss   xmm0, [r13+MA_IOR]
     call    jb_num
@@ -2677,7 +2704,51 @@ materials:
     mov     edi, 2
     lea     rsi, [rip+k_roughf]
     call    factor
-5:  lea     rdi, [rip+k_emisf]          # emission
+5:  lea     rdi, [rip+k_amode]          # alphaMode: MASK (its cutoff), BLEND
+    mov     rsi, r12
+    call    j_find
+    test    rax, rax
+    jz      59f
+    mov     rsi, rax
+    lea     rdi, [rip+gi_name]
+    mov     edx, 27
+    call    j_str
+    lea     rdi, [rip+gi_name]
+    lea     rsi, [rip+k_mmask]
+    call    str_eq
+    test    eax, eax
+    jz      55f
+    mov     edi, r13d
+    mov     esi, 12
+    xor     edx, edx
+    movss   xmm0, [rip+gf_one]
+    call    mat_set
+    mov     dword ptr [rsp], 0x3f000000 # (glTF's default cutoff: 0.5)
+    lea     rdi, [rip+k_cutoff]
+    mov     rsi, r12
+    call    j_find
+    test    rax, rax
+    jz      54f
+    mov     rsi, rax
+    call    j_num
+    movss   [rsp], xmm0
+54: mov     edi, r13d
+    mov     esi, 14
+    xor     edx, edx
+    movss   xmm0, [rsp]
+    call    mat_set
+    jmp     59f
+55: lea     rdi, [rip+gi_name]
+    lea     rsi, [rip+k_mblend]
+    call    str_eq
+    test    eax, eax
+    jz      59f
+    mov     edi, r13d
+    mov     esi, 12
+    xor     edx, edx
+    movss   xmm0, [rip+gf_two]
+    call    mat_set
+59: lea     rdi, [rip+k_emisf]          # emission
     mov     rsi, r12
     call    j_find
     test    rax, rax

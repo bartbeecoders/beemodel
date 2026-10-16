@@ -39,6 +39,9 @@ im_lbl:         .skip 8*MAXL
 mt_sel:         .skip 4                 # material + 1 (0: none)
 mt_tex:         .skip 4                 # its texture image + 1
 mt_mat:         .skip 4                 # the material shown
+mt_blend:       .skip 4                 # its blend mode, one-sided, clip
+mt_sided:       .skip 4
+mt_clip:        .skip 4
 wl_sky:         .skip 4
 mt_arg:         .skip 96
 cv_vals:        .skip 32                # resolution, bevel, sides, fill, cyclic, profile
@@ -63,11 +66,19 @@ s_no_mesh:      .asciz "Materials go on meshes: select a mesh object."
 s_no_mat:       .asciz "No material: the object's colour is used. New makes one."
 s_no_images:    .asciz "Textures, HDRI skies, paint canvases."
 s_texture:      .asciz "Texture"
+s_blend:        .asciz "Blend mode"
+s_bl_opaque:    .asciz "Opaque"
+s_bl_masked:    .asciz "Masked"
+s_bl_trans:     .asciz "Translucent"
+.align 8
+bl_labels:      .quad s_bl_opaque, s_bl_masked, s_bl_trans
 s_profile:      .asciz "Profile"
 s_x:            .asciz " x "
 s_sp:           .asciz " "
 s_q:            .asciz "\""
 k_none:         .asciz "none"
+k_blend:        .asciz " blend "
+k_sided:        .asciz " one_sided "
 
 .text
 WIDGET wd_mt_slot, WK_ENUM, "material.slot", flags=WGF_DYN, cb=slot_cb, aux=mat_names, tip="The object's material (the same material can go on many objects)"
@@ -84,6 +95,9 @@ WIDGET wd_mt_coat, WK_SLIDER, "material.clearcoat", "Clear coat", 0.0, 1.0, 0.00
 WIDGET wd_mt_coatr, WK_SLIDER, "material.coat_roughness", "Coat roughness", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material"
 WIDGET wd_mt_alpha, WK_SLIDER, "material.alpha", "Alpha", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="Opacity: 0 invisible, 1 solid"
 WIDGET wd_mt_dens, WK_FLOAT, "material.density", "Density (g/cm3)", 0.0, 25.0, 0.01, 3, WGF_CLAMP, cb=val_cb, undo="Material", tip="For mass properties: water 1, aluminium 2.7, steel 7.85"
+WIDGET wd_mt_blend, WK_ENUM, "material.blend", flags=WGF_DYN, cb=blend_cb, aux=blend_names, tip="Opaque, Masked (holes where the opacity mask is below the clip value) or Translucent (light through by its opacity)"
+WIDGET wd_mt_sided, WK_TOGGLE, "material.one_sided", "One-sided", cb=sided_cb, tip="Back faces let rays through (leaves, decals, open shells)"
+WIDGET wd_mt_clip, WK_SLIDER, "material.clip", "Mask clip", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="Masked: the opacity below which the surface is a hole (0 means 1/3)"
 WIDGET wd_mt_tex,  WK_ENUM, "material.texture", flags=WGF_DYN, cb=tex_cb, aux=image_names, tip="An image as the base colour, projected from the sides of a box"
 WIDGET wd_mt_load, WK_BUTTON, "material.load_image", "Load Image...", aux=op_image_load
 WIDGET wd_wl_sky,  WK_ENUM, "world.sky", flags=WGF_DYN, cb=sky_cb, aux=sky_names, tip="What lights the scene from around it: the studio sky or an HDRI image"
@@ -189,7 +203,42 @@ mats_props_draw:
 6:  inc     r13d
     cmp     r13d, NPARAMS
     jb      4b
-    add     r12d, 6                     # the texture
+    add     r12d, 6                     # blend mode, one-sided, clip
+    mov     edi, ebx
+    call    mat_get
+    movss   xmm0, [rax+MA_BLEND]
+    cvtss2si ecx, xmm0
+    mov     [rip+mt_blend], ecx
+    movss   xmm0, [rax+MA_SIDED]
+    cvtss2si ecx, xmm0
+    mov     [rip+mt_sided], ecx
+    mov     ecx, [rax+MA_CLIP]
+    mov     [rip+mt_clip], ecx
+    lea     rdx, [rip+s_blend]
+    call    pnl_caption
+    lea     rdi, [rip+wd_mt_blend]
+    lea     r8, [rip+mt_blend]
+    call    pnl_right
+    add     r12d, WG_H+4
+    lea     rdi, [rip+wd_mt_sided]
+    mov     esi, [rip+pnl_x]
+    mov     ecx, [rip+pnl_w]
+    mov     edx, r12d
+    lea     r8, [rip+mt_sided]
+    mov     r9d, 13
+    call    wg
+    add     r12d, WG_H+4
+    cmp     dword ptr [rip+mt_blend], 1 # (masked: its clip value)
+    jne     32f
+    lea     rdi, [rip+wd_mt_clip]
+    mov     esi, [rip+pnl_x]
+    mov     ecx, [rip+pnl_w]
+    mov     edx, r12d
+    lea     r8, [rip+mt_clip]
+    mov     r9d, 14
+    call    wg
+    add     r12d, WG_H+4
+32: add     r12d, 6                     # the texture
     mov     edi, ebx
     call    tex_of
     inc     eax
@@ -247,6 +296,42 @@ tex_of:
     ret
 
 # ---- the pickers' labels ------------------------------------------------------------
+blend_names:                            # -> rax = labels, edx = count
+    lea     rax, [rip+bl_labels]
+    mov     edx, 3
+    ret
+
+blend_cb:                               # rdi = &mt_blend -> material.set .. blend
+    lea     rsi, [rip+k_blend]
+    jmp     1f
+sided_cb:                               # rdi = &mt_sided -> .. one_sided
+    lea     rsi, [rip+k_sided]
+1:  push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, [rdi]
+    mov     r12, rsi
+    mov     edi, [rip+mt_mat]
+    call    mat_get
+    lea     rdi, [rip+mt_arg]           # "material blend|one_sided n"
+    mov     rsi, rax
+    call    cpy
+    mov     rsi, r12
+    call    cpy
+    push    rdi
+    call    fmt_reset
+    mov     edi, ebx
+    call    fmt_int
+    pop     rdi
+    lea     rsi, [rip+fmt_buf]
+    call    cpy
+    lea     rdi, [rip+op_mat_set]
+    lea     rsi, [rip+mt_arg]
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     run_arg2
+
 mat_names:                              # -> rax = labels, edx = count
     sub     rsp, 8
     call    mat_count
