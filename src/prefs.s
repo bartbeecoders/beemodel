@@ -45,6 +45,7 @@
 .globl ai_gk_path
 .globl ai_cl_model
 .globl ai_cl_path
+.globl pr_blender
 .globl ai_or_model
 .globl ai_or_url
 .globl ai_or_steps
@@ -95,6 +96,7 @@ pr_theme:       .skip 4
 pr_gpu:         .skip 4
 pr_tierv:       .skip 4
 pr_search:      .skip 64
+pr_blender:     .skip 256               # the Blender program (empty: on PATH)
 ai_cl_path:     .skip 256               # AI: paths (empty: on PATH), models
 ai_cl_model:    .skip 256               #  (empty: the CLI's own), the key
 ai_gk_path:     .skip 256
@@ -172,6 +174,7 @@ w_rspp:         .asciz "render_samples"
 w_rdn:          .asciz "render_denoise"
 w_aiprov:       .asciz "ai_connection"
 w_clpath:       .asciz "claude_path"
+w_blender:      .asciz "blender_path"
 w_clmodel:      .asciz "claude_model"
 w_clturns:      .asciz "claude_turns"
 w_gkpath:       .asciz "grok_path"
@@ -199,6 +202,7 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_rspp, pr_rspp, 0, w_rdn, pr_rdn, 0
                 .quad w_aiprov, ai_prov, 0, w_clturns, ai_cl_turns, 0, w_gkturns, ai_gk_turns, 0
                 .quad w_orsteps, ai_or_steps, 0
+                .quad w_blender, pr_blender, 2
                 .quad w_clpath, ai_cl_path, 2, w_clmodel, ai_cl_model, 2
                 .quad w_gkpath, ai_gk_path, 2, w_gkmodel, ai_gk_model, 2
                 .quad w_orurl, ai_or_url, 2, w_ormodel, ai_or_model, 2, w_aiextra, ai_extra, 2, 0
@@ -835,6 +839,7 @@ WIDGET wd_pf_libadd, WK_BUTTON, "prefs.library_add", "Add Library Folder...", au
 WIDGET wd_pf_tier, WK_ENUM, "prefs.agent_permission", cb=tier_cb, aux=l_tier, n=4, tip="What AI agents may do when BeeModel starts"
 WIDGET wd_pf_mcp,  WK_TOGGLE, "prefs.mcp", "Listen for MCP clients (AI agents)", cb=save_cb
 WIDGET wd_pf_aiprov, WK_ENUM, "prefs.ai_connection", cb=save_cb, aux=l_prov, n=3, tip="Which connection the AI Assistant uses"
+WIDGET wd_pf_blender, WK_TEXT, "prefs.blender_path", "Blender program", cb=cb_blender, tip="Blender, for saving .blend files (File > Export > Blender). Empty: the one on PATH"
 WIDGET wd_pf_clpath, WK_TEXT, "prefs.claude_path", "Program", cb=cb_clpath, tip="The claude program (empty: the one on PATH)"
 WIDGET wd_pf_clmodel, WK_TEXT, "prefs.claude_model", "Model", cb=cb_clmodel, tip="A model name or alias such as sonnet or opus (empty: Claude Code's default)"
 WIDGET wd_pf_clturns, WK_INT, "prefs.claude_turns", "Turns at most", 1.0, 500.0, 0.2, 0, WGF_CLAMP, cb=save_cb, tip="How many rounds of tool calls one request may take"
@@ -1478,6 +1483,10 @@ pf_reset:
     xor     r8d, r8d
     xor     edx, edx
     call    pf_item
+    lea     rdi, [rip+wd_pf_blender]
+    lea     r8, [rip+pr_blender]
+    xor     edx, edx
+    call    pf_item
     pop     rbx
     ret
 
@@ -1617,6 +1626,7 @@ has_word:
     lea     rsi, [rip+\buf]
     jmp     text_cb
 .endm
+TEXTCB cb_blender, pr_blender
 TEXTCB cb_clpath, ai_cl_path
 TEXTCB cb_clmodel, ai_cl_model
 TEXTCB cb_gkpath, ai_gk_path

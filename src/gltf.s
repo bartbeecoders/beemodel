@@ -125,6 +125,12 @@ g_lmext:        .asciz "},\"MOZ_lightmap\":{\"index\":0,\"texCoord\":1,\"intensi
 g_lmscale:      .asciz "],\"scale\":["
 g_lmend:        .asciz "]}}}}}"
 g_texs:         .asciz "],\"textures\":[{\"sampler\":0,\"source\":0}],\"samplers\":[{\"magFilter\":9729,\"minFilter\":9729,\"wrapS\":33071,\"wrapT\":33071}],\"images\":[{\"name\":\"lightmap\",\"mimeType\":\"image/png\",\"bufferView\":"
+g_cnode:        .asciz ",\"camera\":"
+g_cnend:        .asciz "]}"
+g_cams:         .asciz ",\"cameras\":["
+g_cam:          .asciz "{\"type\":\"perspective\",\"perspective\":{\"znear\":0.05,\"yfov\":"
+g_camar:        .asciz ",\"aspectRatio\":"
+g_camend:       .asciz "}}"
 g_lnode:        .asciz ",\"extensions\":{\"KHR_lights_punctual\":{\"light\":"
 g_lnend:        .asciz "}}}"
 g_lights:       .asciz ",\"extensions\":{\"KHR_lights_punctual\":{\"lights\":["
@@ -256,6 +262,8 @@ gx_pl:          .skip 4*MAX_EXP         # a vertex per loop (UVs or a lightmap)
 gx_nlm:         .skip 4
 gx_nl:          .skip 4                 # light objects: list indices
 gx_lt:          .skip 4*64
+gx_nc:          .skip 4                 # camera objects: list indices
+gx_ct:          .skip 4*16
 gx_png:         .skip 8                 # the lightmap as PNG bytes
 gx_pngsz:       .skip 8
 gx_pngoff:      .skip 8                 #  where in the buffer
@@ -409,6 +417,7 @@ gltf_export:
     mov     [rip+gx_glb], eax
 3:  call    gx_png_make                 # (a lightmap: its PNG)
     call    gx_light_list
+    call    gx_cam_list
     # the mesh objects and the buffer size
     mov     dword ptr [rip+gx_n], 0
     mov     dword ptr [rip+gx_nuv], 0
@@ -613,7 +622,18 @@ gltf_export:
     call    int_out
     inc     r12d
     jmp     811b
-812:lea     rsi, [rip+g_nodes]
+812:xor     r12d, r12d                  # (and the cameras' nodes)
+813:cmp     r12d, [rip+gx_nc]
+    jae     814f
+    mov     edi, ','
+    call    wb_char
+    mov     edi, [rip+gx_n]
+    add     edi, [rip+gx_nl]
+    add     edi, r12d
+    call    int_out
+    inc     r12d
+    jmp     813b
+814:lea     rsi, [rip+g_nodes]
     call    wb_str
     xor     r12d, r12d                  # nodes
 .Lgx_node:
@@ -659,6 +679,7 @@ gltf_export:
     jmp     .Lgx_node
 .Lgx_meshes:
     call    gx_light_nodes
+    call    gx_cam_nodes
     lea     rsi, [rip+g_meshes]
     call    wb_str
     xor     r12d, r12d
@@ -1172,8 +1193,9 @@ gltf_export:
     call    base64_out
     mov     edi, '"'
     call    wb_char
-1:  lea     rsi, [rip+g_bend]           # the buffers closed, then the lights
-    call    wb_str
+1:  lea     rsi, [rip+g_bend]           # the buffers closed, then the
+    call    wb_str                      #  cameras and the lights
+    call    gx_cam_json
     call    gx_light_list_json
     mov     edi, '}'
     call    wb_char
@@ -2232,6 +2254,121 @@ gx_light_nodes:
     call    wb_str
     inc     ebx
     jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_cam_list - gx_ct: the camera objects (16 at most)
+gx_cam_list:
+    push    rbx
+    mov     dword ptr [rip+gx_nc], 0
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     9f
+    cmp     dword ptr [rip+gx_nc], 16
+    jae     9f
+    mov     edi, ebx
+    call    obj_at
+    cmp     dword ptr [rax+OB_TYPE], OT_CAMERA
+    jne     2f
+    mov     ecx, [rip+gx_nc]
+    lea     rdx, [rip+gx_ct]
+    mov     [rdx+rcx*4], ebx
+    inc     dword ptr [rip+gx_nc]
+2:  inc     ebx
+    jmp     1b
+9:  pop     rbx
+    ret
+
+# gx_cam_nodes - after the lights' nodes: a node per camera (its place and
+#   turn: our cameras look down -Z with Y up, as glTF's)
+gx_cam_nodes:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+gx_nc]
+    jae     9f
+    mov     edi, ','
+    call    wb_char
+    lea     rax, [rip+gx_ct]
+    mov     edi, [rax+rbx*4]
+    call    obj_at
+    mov     r12, rax
+    lea     rsi, [rip+g_name]
+    call    wb_str
+    mov     rsi, r12
+    call    jb_q
+    lea     rsi, [rip+g_cnode]
+    call    wb_str
+    mov     edi, ebx
+    call    int_out
+    lea     rsi, [rip+g_tr]
+    call    wb_str
+    lea     rdi, [r12+OB_LOC]
+    mov     ecx, 3
+    call    nums
+    lea     rsi, [rip+g_rot]
+    call    wb_str
+    lea     rdi, [r12+OB_ROT]
+    lea     rsi, [rsp]
+    call    euler_quat
+    lea     rdi, [rsp]
+    mov     ecx, 4
+    call    nums
+    lea     rsi, [rip+g_cnend]
+    call    wb_str
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
+# gx_cam_json - the root's cameras: perspective, the vertical angle from
+#   the lens and the render's aspect
+gx_cam_json:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    cmp     dword ptr [rip+gx_nc], 0
+    je      9f
+    lea     rsi, [rip+g_cams]
+    call    wb_str
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+gx_nc]
+    jae     8f
+    test    ebx, ebx
+    jz      2f
+    mov     edi, ','
+    call    wb_char
+2:  lea     rsi, [rip+g_cam]
+    call    wb_str
+    lea     rax, [rip+gx_ct]
+    mov     edi, [rax+rbx*4]
+    call    obj_at
+    mov     edi, [rax+OB_UID]
+    call    lc_lens_tan                 # tan(half the horizontal angle)
+    cvtss2sd xmm0, xmm0
+    cvtsi2sd xmm1, dword ptr [rip+rn_w] # / aspect: the vertical one's
+    cvtsi2sd xmm2, dword ptr [rip+rn_h]
+    divsd   xmm1, xmm2
+    movsd   [rsp], xmm1
+    call    datan2
+    addsd   xmm0, xmm0
+    cvtsd2ss xmm0, xmm0
+    call    jb_num
+    lea     rsi, [rip+g_camar]
+    call    wb_str
+    cvtsd2ss xmm0, [rsp]
+    call    jb_num
+    lea     rsi, [rip+g_camend]
+    call    wb_str
+    inc     ebx
+    jmp     1b
+8:  mov     edi, ']'
+    call    wb_char
 9:  add     rsp, 8
     pop     r12
     pop     rbx

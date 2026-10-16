@@ -610,6 +610,7 @@ PATHFORM form_istl, "file.import_stl", 0, x_stl
 PATHFORM form_igltf, "file.import_gltf", 0, x_gltf
 PATHFORM form_istep, "file.import_step", 0, x_step
 PATHFORM form_iblend, "file.import_blend", 0, x_blend
+PATHFORM form_eblend, "file.export_blend", 1, x_blend, n_scene_blend
 PATHFORM form_eobj, "file.export_obj", 1, x_obj, n_scene_obj, WGF_EXPORT|WGF_EXPAXIS
 PATHFORM form_estl, "file.export_stl", 1, x_stl, n_scene_stl, WGF_EXPORT|WGF_EXPAXIS
 PATHFORM form_egltf, "file.export_gltf", 1, x_gltf, n_scene_glb, WGF_EXPORT
