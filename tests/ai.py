@@ -214,6 +214,15 @@ def main():
           'its MCP configuration: this program as the bridge, for this instance\'s socket')
     if OUT:
         f.shot('140_ai_assistant.png')
+    w = fakewl.wait_widget(f, m, 'ai.copy')
+    clip = ''
+    if w:
+        f.click(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2)
+        f.pump(0.3)
+        clip = f.clipboard() or ''
+    check(clip.startswith('> build a tower\n') and 'Looking at the scene first.\n' in clip
+          and '  scene_summary {}\n' in clip and 'Ask for a roof next.\n' in clip,
+          'Copy puts the whole conversation on the clipboard, a line an entry')
     w = fakewl.wait_widget(f, m, 'ai.revert')
     check(w is not None, 'Revert shows once the AI changed the scene')
     if w:
@@ -254,6 +263,15 @@ def main():
     tx = '\n'.join(t)
     check('N the stand-in failed on purpose' in tx and 'E Claude Code ended with exit code 3' in tx,
           'a CLI that fails: what it printed and its exit code')
+
+    send('show an image')
+    t = wait_idle()
+    tx = '\n'.join(t)
+    check('QkVFQkVF' not in tx and 'N   (a message too long to show, such as an image, was left out)' in tx
+          and 'A Seen the image.' in tx,
+          'a line longer than the buffer (an image) is left out whole, with a note; the stream goes on')
+    check('R   = House1 r 0 0 0' in tx and 'R     Roof1 r 0 0 45' in tx,
+          'a result\'s later lines are indented under its first')
 
     # -- Grok
     print('  -- Grok --')

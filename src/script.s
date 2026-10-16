@@ -133,6 +133,7 @@
 .equ OP_CLRR, 31
 
 .section .bss
+e_char_d:       .skip 8                 # " 'c'" for unexpected character
 .align 16
 sd_p:           .skip 32
 sd_obj:         .skip OB_SZ
@@ -1089,6 +1090,7 @@ m_close:        .asciz ")\n"
 m_deg:          .asciz "deg"
 
 e_char:         .asciz "unexpected character"
+e_char_list:    .asciz " [ or ] (there are no lists: write each item, or loop with for i in 0..n)"
 e_string:       .asciz "unterminated text (missing quote)"
 e_unit:         .asciz "unknown unit (m cm mm km deg rad)"
 e_toolong:      .asciz "script too long"
@@ -1559,9 +1561,24 @@ lex:
     pop     r12
     pop     rbx
     ret
-.Llx_bad:
+.Llx_bad:                               # "unexpected character 'c'"
     lea     rdi, [rip+e_char]
-    jmp     .Llx_err
+    movzx   eax, byte ptr [r12]
+    lea     rsi, [rip+e_char_list]      # [ ]: the usual mistake
+    cmp     al, '['
+    je      1f
+    cmp     al, ']'
+    je      1f
+    xor     esi, esi
+    lea     ecx, [rax-0x21]             # (printable: shown)
+    cmp     ecx, 0x7e-0x21
+    ja      1f
+    lea     rsi, [rip+e_char_d]
+    mov     dword ptr [rsi], 0x27002720 # " '", the character, "'"
+    mov     [rsi+2], al
+    mov     byte ptr [rsi+4], 0
+1:  mov     edx, r13d
+    jmp     sc_err
 .Llx_unterm:
     lea     rdi, [rip+e_string]
     jmp     .Llx_err

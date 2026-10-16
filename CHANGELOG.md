@@ -6,6 +6,17 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **The AI Assistant's Copy** button (`ai.copy`): the whole conversation on
+  the clipboard.
+
+### Fixed
+- The AI Assistant: a stream line longer than its buffer (an image from
+  `viewport_capture`) is left out with a note instead of spilling base64
+  into the conversation; a result's later lines are indented.
+- BeeScript's "unexpected character" names the character, and explains that
+  there are no lists for `[` and `]`; the AI's instructions say so too.
+
 ## [0.15.0] - 2026-10-16
 
 Phase 14, "Blender files" (`Vibecoding/BeeModel-Blend-Plan.html`).

@@ -37,6 +37,9 @@ tools (the same ones outside agents get, see [MCP.md](MCP.md)):
    - OpenRouter is sent the whole conversation again.
 
    **New** starts a new conversation. It leaves the scene as it is.
+6. **Copy** (or **AI › Copy AI Conversation**, operator `ai.copy`) puts the
+   whole conversation on the clipboard as it is shown, one line per entry,
+   to paste into a bug report or another program.
 
 The connection picker at the top of the area chooses Claude Code, Grok or
 OpenRouter for the next request.
