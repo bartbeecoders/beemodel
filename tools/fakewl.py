@@ -7265,9 +7265,11 @@ def team_ui():
 
 
 def prefs_ui():
-    """UI plan U23: Edit > Preferences (interface, input, keymap, system,
-    files, AI), kept in ~/.config/beemodel/prefs across a restart; the UI
-    scale; a key rebound by pressing it."""
+    """UI plan U23 and AI plan A1: Edit > Preferences (Ctrl+Comma) is a
+    dialog with categories (interface, input, keymap, system, files, AI), a
+    search across them and Reset to Defaults; the settings are kept in
+    ~/.config/beemodel/prefs across a restart; the UI scale; a key rebound
+    by pressing it."""
     print('  -- preferences --')
     f = Fake()
     f.pump(1.0, until_frame=True)
@@ -7282,41 +7284,53 @@ def prefs_ui():
         x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
     def type_into(name, text, sub=0):
         click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
-    def tab(i):
-        w = widget(m, 'prefs.tabs')
-        f.click(w['x'] + w['w'] * (2 * i + 1) // 12, w['y'] + w['h'] // 2); f.pump(0.2)
+    cats = ['interface', 'input', 'keymap', 'system', 'files', 'ai']
+    def cat(i):
+        click('prefs.category.' + cats[i], i)
     menu_pick(f, m, 'Edit', 'Preferences...')
     f.pump(0.3)
-    check({'prefs.tabs', 'prefs.theme', 'prefs.ui_scale', 'prefs.tooltip_ms'} <= names(), 'Edit > Preferences: the Interface section')
+    check({'prefs.category.interface', 'prefs.search', 'prefs.reset', 'prefs.theme', 'prefs.ui_scale', 'prefs.tooltip_ms'} <= names(),
+          'Edit > Preferences: a dialog with categories, a search and the Interface settings')
+    f.shot('71_preferences.png')
     pick_enum(f, m, 'prefs.theme', 0, 1)
     check('theme 1' in prefs(), f'the theme goes into the prefs file ({prefs()[:60]!r})')
-    w0 = widget(m, 'prefs.tabs')['w']
+    w0 = widget(m, 'prefs.tooltip_ms')['w']
     pick_enum(f, m, 'prefs.ui_scale', 0, 3)                     # 150 %
     f.pump(0.3)
-    w1 = (widget(m, 'prefs.tabs') or {}).get('w', 0)
-    check('scale 150' in prefs() and 0 < w1 < w0, f'UI scale 150 %: everything bigger (the tab row {w0} -> {w1} units wide)')
+    w1 = (widget(m, 'prefs.tooltip_ms') or {}).get('w', 0)
+    check('scale 150' in prefs() and 0 < w1 < w0, f'UI scale 150 %: everything bigger (a setting {w0} -> {w1} units wide)')
     q('op("view.ui_scale", "100")')                             # (back: clicks are in screen units)
     f.pump(0.3)
-    check('scale 100' in prefs() and widget(m, 'prefs.tabs')['w'] == w0, 'view.ui_scale sets it too (back to 100 %)')
-    tab(1)
-    check({'prefs.emulate_middle', 'prefs.orbit_speed'} <= names(), 'Input: Alt as the middle button, orbit speed')
-    tab(2)
+    check('scale 100' in prefs() and widget(m, 'prefs.tooltip_ms')['w'] == w0, 'view.ui_scale sets it too (back to 100 %)')
+    click('prefs.reset')                                        # Reset to Defaults: dark again
+    check('theme 0' in prefs() and widget(m, 'prefs.theme')['value'] == 0, 'Reset to Defaults: the category as BeeModel comes')
+    type_into('prefs.search', 'orbit')                          # the search: across categories
+    found = names()
+    check('prefs.orbit_speed' in found and 'prefs.theme' not in found, 'the search finds a setting in another category (and only what matches)')
+    cat(1)
+    check({'prefs.emulate_middle', 'prefs.orbit_speed'} <= names() and 'prefs.theme' not in names(),
+          'a category ends the search: Input (Alt as the middle button, orbit speed)')
+    cat(2)
     check({'prefs.key_search', 'prefs.key_set', 'prefs.keys_reset'} <= names(), 'Keymap: search, Set, Reset')
     type_into('prefs.key_search', 'object.duplicate')
     click('prefs.key_set', 0)
     f.key(65); f.pump(0.3)                                      # F7 (free)
     check('key object.duplicate' in prefs(), f'Set, then a key: kept ({prefs()[-60:]!r})')
+    cat(3)
+    check({'prefs.threads', 'prefs.gpu', 'prefs.jit'} <= names(), 'System: threads, GPU, JIT')
+    cat(4)
+    check({'prefs.autosave', 'prefs.library_add'} <= names(), 'Files: autosave, library folders')
+    cat(5)
+    check({'prefs.agent_permission', 'prefs.mcp'} <= names(), 'AI: the agents\' permission, MCP')
+    f.key(1); f.pump(0.3)                                       # Esc: closed
+    check('prefs.search' not in names(), 'Esc closes the dialog')
     n0 = q('print(count())')
     q('select("Cube")')
     f.move(300, 200); f.key(65); f.pump(0.3)                     # (over the 3D viewport)
     n1 = q('print(count())')
     check(int(n1 or 0) == int(n0 or 0) + 1, f'the new key runs it ({n0} -> {n1} objects)')
-    tab(3)
-    check({'prefs.threads', 'prefs.gpu', 'prefs.jit'} <= names(), 'System: threads, GPU, JIT')
-    tab(4)
-    check({'prefs.autosave', 'prefs.library_add'} <= names(), 'Files: autosave, library folders')
-    tab(5)
-    check({'prefs.agent_permission', 'prefs.mcp'} <= names(), 'AI: the agents\' permission, MCP')
+    f.mods(4); f.key(51); f.mods(0); f.pump(0.3)                 # Ctrl+Comma
+    check('prefs.search' in names(), 'Ctrl+Comma opens the preferences')
     f.proc.kill()
     g = Fake(home=home)                                         # a restart
     g.pump(1.0, until_frame=True)
@@ -7325,8 +7339,9 @@ def prefs_ui():
     n = Mcp(g)
     menu_pick(g, n, 'Edit', 'Preferences...')
     g.pump(0.3)
-    w = widget(n, 'prefs.theme')
-    check(w and w['value'] == 1, 'the preferences are there after a restart')
+    x, y = widget_xy(n, 'prefs.category.input', 1); g.click(x, y); g.pump(0.2)
+    w = widget(n, 'prefs.orbit_speed')
+    check(w is not None and 'key object.duplicate' in prefs(), 'the preferences are there after a restart')
     g.proc.kill()
 
 
@@ -7510,6 +7525,7 @@ def a11y_ui():
     click_w = widget(m, 'prefs.colorblind_axes')
     if click_w:
         f.click(click_w['x'] + 10, click_w['y'] + 11); f.pump(0.3)
+    f.key(1); f.pump(0.3)                                       # (the dialog closed)
     after = near(f.image(), 0xe06c75), near(f.image(), 0xe69f00)
     check(after[1] > before[1] + 20 and after[0] < before[0], f'colour-blind-safe axes: X turns orange (red, orange pixels {before} -> {after})')
     f.proc.kill()

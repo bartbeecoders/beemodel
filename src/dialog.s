@@ -25,10 +25,12 @@
 .globl dlg_close
 .globl dlg_parg
 .globl dlg_run_pending
+.globl dlg_open_prefs
 
 .equ DLG_FORM,      1
 .equ DLG_CONFIRM,   2
 .equ DLG_FILE,      3                   # the file browser (filebrowser.s)
+.equ DLG_PREFS,     4                   # the Preferences (prefs.s)
 .equ DLG_W,         460
 .equ VAL_SZ,        64                  # each field's value slot
 .equ MAXF,          16
@@ -179,6 +181,13 @@ dlg_open_form:
     pop     rbx
     ret
 
+# dlg_open_prefs - the Preferences dialog
+dlg_open_prefs:
+    mov     dword ptr [rip+dlg_kind], DLG_PREFS
+    mov     dword ptr [rip+dlg_open], 1
+    mov     dword ptr [rip+dirty], 1
+    ret
+
 # dlg_open_confirm(rdi=operator to run after) - "Save changes to x?"
 dlg_open_confirm:
     mov     [rip+dlg_op], rdi
@@ -274,7 +283,13 @@ dlg_key:
     cmp     dword ptr [rip+dlg_kind], DLG_FILE
     je      fb_key
     sub     rsp, 8
+    cmp     dword ptr [rip+dlg_kind], DLG_PREFS # (the Preferences: Esc only)
+    jne     0f
     cmp     edi, KEY_ESC
+    jne     9f
+    call    dlg_close
+    jmp     9f
+0:  cmp     edi, KEY_ESC
     jne     1f
     call    dlg_close
     jmp     9f
@@ -506,8 +521,10 @@ dlg_draw:
     cmp     dword ptr [rip+dlg_open], 0
     je      .Ldd_ret
     cmp     dword ptr [rip+dlg_kind], DLG_FILE
+    je      71f
+    cmp     dword ptr [rip+dlg_kind], DLG_PREFS
     jne     0f
-    sub     rsp, 8
+71: sub     rsp, 8
     call    reset_clip                  # (the browser: dimmed window too)
     xor     edi, edi
     xor     esi, esi
@@ -519,6 +536,8 @@ dlg_draw:
     mov     eax, [rip+wg_n]
     mov     [rip+dlg_floor], eax
     add     rsp, 8
+    cmp     dword ptr [rip+dlg_kind], DLG_PREFS
+    je      prefs_dlg_draw
     jmp     fb_draw
 0:  push    rbx
     push    rbp
