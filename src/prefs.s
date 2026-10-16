@@ -39,6 +39,18 @@
 .globl prefs_key
 .globl ed_prefs_draw
 .globl pr_scene_defaults
+.globl ai_extra
+.globl ai_or_key
+.globl ai_gk_model
+.globl ai_gk_path
+.globl ai_cl_model
+.globl ai_cl_path
+.globl ai_or_model
+.globl ai_or_url
+.globl ai_or_steps
+.globl ai_gk_turns
+.globl ai_cl_turns
+.globl ai_prov
 .globl prefs_dlg_draw
 
 .equ MAXK,      128
@@ -62,6 +74,14 @@ pr_rw:          .long 960               # Rendering: new scenes' size, samples,
 pr_rh:          .long 540               #  denoise
 pr_rspp:        .long 128
 pr_rdn:         .long 1
+ai_prov:        .long 0                 # AI: the connection (0 Claude Code, 1
+ai_cl_turns:    .long 40                #  Grok CLI, 2 OpenRouter), turn limits
+ai_gk_turns:    .long 40
+ai_or_steps:    .long 30
+ai_or_url:      .asciz "https://openrouter.ai/api/v1"
+                .skip 256-29
+ai_or_model:    .asciz "anthropic/claude-sonnet-4.5"
+                .skip 256-28
 
 .section .bss
 .align 8
@@ -75,6 +95,12 @@ pr_theme:       .skip 4
 pr_gpu:         .skip 4
 pr_tierv:       .skip 4
 pr_search:      .skip 64
+ai_cl_path:     .skip 256               # AI: paths (empty: on PATH), models
+ai_cl_model:    .skip 256               #  (empty: the CLI's own), the key
+ai_gk_path:     .skip 256
+ai_gk_model:    .skip 256
+ai_or_key:      .skip 256
+ai_extra:       .skip 256               # added to the system prompt
 pr_find:        .skip 64                # the Preferences' search
 pf_shown:       .skip 4
                  # settings drawn (a search: none?)
@@ -86,6 +112,8 @@ pr_words:       .skip 64
 .section .rodata
 s_cfgdir:       .asciz "/.config/beemodel"
 s_prefs:        .asciz "/prefs"
+s_secrets:      .asciz "/secrets"
+w_orkey:        .asciz "openrouter_key"
 s_h_interface:  .asciz "Interface"
 s_h_input:      .asciz "Input"
 s_h_keymap:     .asciz "Keymap"
@@ -109,6 +137,14 @@ s_200:          .asciz "200 %"
 s_tr:           .asciz "Read only"
 s_te:           .asciz "May edit"
 s_tf:           .asciz "Edit and files"
+s_p_claude:     .asciz "Claude Code"
+s_p_grok:       .asciz "Grok CLI"
+s_p_or:         .asciz "OpenRouter"
+s_h_cl:         .asciz "Claude Code"
+s_h_gk:         .asciz "Grok CLI"
+s_h_or:         .asciz "OpenRouter"
+s_h_agents:     .asciz "Agents"
+c_prov:         .asciz "The AI Assistant uses"
 s_tenv:         .asciz "As started (BEEMODEL_AGENT_PERMISSION)"
 s_more:         .asciz "type to narrow the list"
 # the file's words
@@ -134,12 +170,24 @@ w_rw:           .asciz "render_width"
 w_rh:           .asciz "render_height"
 w_rspp:         .asciz "render_samples"
 w_rdn:          .asciz "render_denoise"
+w_aiprov:       .asciz "ai_connection"
+w_clpath:       .asciz "claude_path"
+w_clmodel:      .asciz "claude_model"
+w_clturns:      .asciz "claude_turns"
+w_gkpath:       .asciz "grok_path"
+w_gkmodel:      .asciz "grok_model"
+w_gkturns:      .asciz "grok_turns"
+w_orurl:        .asciz "openrouter_url"
+w_ormodel:      .asciz "openrouter_model"
+w_orsteps:      .asciz "openrouter_steps"
+w_aiextra:      .asciz "ai_prompt"
 .align 8
 l_tabs:         .quad s_h_interface, s_h_input, s_h_keymap, s_h_system, s_h_files, s_h_ai
 l_theme:        .quad s_dark, s_light, s_contrast
 l_scale:        .quad s_75, s_100, s_125, s_150, s_175, s_200
 scales:         .long 75, 100, 125, 150, 175, 200
 l_tier:         .quad s_tenv, s_tr, s_te, s_tf
+l_prov:         .quad s_p_claude, s_p_grok, s_p_or
 # word, variable, kind (0 int, 1 float)
 pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_orbit, pr_orbit, 1, w_autosave, pr_autosave, 0
@@ -148,7 +196,12 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_welcome, pr_welcome, 0, w_cbaxes, pr_cbaxes, 0
                 .quad w_grid, show_grid, 0, w_gridsz, pr_grid, 1, w_fov, pr_fov, 0
                 .quad w_near, pr_near, 1, w_rw, pr_rw, 0, w_rh, pr_rh, 0
-                .quad w_rspp, pr_rspp, 0, w_rdn, pr_rdn, 0, 0
+                .quad w_rspp, pr_rspp, 0, w_rdn, pr_rdn, 0
+                .quad w_aiprov, ai_prov, 0, w_clturns, ai_cl_turns, 0, w_gkturns, ai_gk_turns, 0
+                .quad w_orsteps, ai_or_steps, 0
+                .quad w_clpath, ai_cl_path, 2, w_clmodel, ai_cl_model, 2
+                .quad w_gkpath, ai_gk_path, 2, w_gkmodel, ai_gk_model, 2
+                .quad w_orurl, ai_or_url, 2, w_ormodel, ai_or_model, 2, w_aiextra, ai_extra, 2, 0
 
 .section .data
 .align 4
@@ -392,7 +445,12 @@ prefs_load:
     jnz     4f
     add     r13, 24
     jmp     3b
-4:  mov     rsi, rbx
+4:  cmp     qword ptr [r13+16], 2   # text: the rest of the line
+    jne     41f
+    mov     rdi, [r13+8]
+    call    pr_rest
+    jmp     .Lpl_next
+41: mov     rsi, rbx
     mov     rdx, r12
     call    parse_float
     mov     rbx, rsi
@@ -455,6 +513,7 @@ prefs_load:
     mov     rdi, r14
     mov     rsi, r15
     call    file_unmap
+    call    sec_load                    # (the secrets: their own file)
     call    pr_apply
 9:  pop     r15
     pop     r14
@@ -547,7 +606,16 @@ prefs_save:
     mov     rbx, rdi
     call    fmt_reset
     mov     rax, [r12+8]
-    cmp     qword ptr [r12+16], 1
+    cmp     qword ptr [r12+16], 2       # (text: as it is)
+    jne     11f
+    mov     rdi, rbx
+    mov     rsi, rax
+    call    pcpy
+    mov     byte ptr [rdi], 10
+    lea     rbx, [rdi+1]
+    add     r12, 24
+    jmp     1b
+11: cmp     qword ptr [r12+16], 1
     je      2f
     mov     edi, [rax]
     call    fmt_int
@@ -597,6 +665,122 @@ prefs_save:
     call    file_write_atomic
     pop     r13
     pop     r12
+    pop     rbx
+    ret
+
+# pr_rest(rdi=out[256]; rbx = the line after its word, r12 = the end) - the
+#   rest of the line, without the space before it (rbx moved on)
+pr_rest:
+    cmp     rbx, r12
+    jae     3f
+    cmp     byte ptr [rbx], ' '
+    jne     1f
+    inc     rbx
+1:  xor     ecx, ecx
+2:  cmp     rbx, r12
+    jae     3f
+    mov     al, [rbx]
+    cmp     al, 10
+    je      3f
+    cmp     al, 13
+    je      21f
+    cmp     ecx, 255
+    jae     21f
+    mov     [rdi+rcx], al
+    inc     ecx
+21: inc     rbx
+    jmp     2b
+3:  mov     byte ptr [rdi+rcx], 0
+    ret
+
+# ---- the secrets: ~/.config/beemodel/secrets, 0600, never in prefs --------------
+# sec_path -> pr_path = the secrets file
+sec_path:
+    sub     rsp, 8
+    lea     rdi, [rip+s_cfgdir]
+    call    home_join
+    lea     rdi, [rip+pr_path]
+    mov     rsi, rax
+    call    pcpy
+    lea     rsi, [rip+s_secrets]
+    call    pcpy
+    add     rsp, 8
+    ret
+
+# sec_load - "openrouter_key <key>"
+sec_load:
+    push    rbx
+    push    r12
+    push    r13
+    call    sec_path
+    lea     rdi, [rip+pr_path]
+    call    file_read
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    mov     rbx, rax
+    lea     r12, [rax+rdx]
+    push    rdx
+    push    rdx
+1:  cmp     rbx, r12                    # each line: its word, then the key
+    jae     8f
+    lea     rdi, [rip+pr_line]
+    xor     ecx, ecx
+2:  cmp     rbx, r12
+    jae     3f
+    mov     al, [rbx]
+    cmp     al, ' '
+    je      3f
+    cmp     al, 10
+    je      3f
+    cmp     ecx, 62
+    jae     21f
+    mov     [rdi+rcx], al
+    inc     ecx
+21: inc     rbx
+    jmp     2b
+3:  mov     byte ptr [rdi+rcx], 0
+    lea     rdi, [rip+pr_line]
+    lea     rsi, [rip+w_orkey]
+    call    str_eq
+    test    eax, eax
+    jz      4f
+    lea     rdi, [rip+ai_or_key]
+    call    pr_rest
+4:  cmp     rbx, r12                    # (on past the line)
+    jae     8f
+    mov     al, [rbx]
+    inc     rbx
+    cmp     al, 10
+    jne     4b
+    jmp     1b
+8:  pop     rsi
+    pop     rsi
+    mov     rdi, r13
+    call    file_unmap
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# sec_save - the secrets file (owner only)
+sec_save:
+    push    rbx
+    lea     rdi, [rip+pr_buf]
+    lea     rsi, [rip+w_orkey]
+    call    pcpy
+    mov     byte ptr [rdi], ' '
+    inc     rdi
+    lea     rsi, [rip+ai_or_key]
+    call    pcpy
+    mov     byte ptr [rdi], 10
+    lea     rbx, [rdi+1]
+    call    sec_path
+    lea     rdi, [rip+pr_path]
+    lea     rsi, [rip+pr_buf]
+    mov     rdx, rbx
+    sub     rdx, rsi
+    call    file_write_private
     pop     rbx
     ret
 
@@ -650,6 +834,18 @@ WIDGET wd_pf_autosave, WK_INT, "prefs.autosave", "Autosave every N changes (0: n
 WIDGET wd_pf_libadd, WK_BUTTON, "prefs.library_add", "Add Library Folder...", aux=op_lb_add
 WIDGET wd_pf_tier, WK_ENUM, "prefs.agent_permission", cb=tier_cb, aux=l_tier, n=4, tip="What AI agents may do when BeeModel starts"
 WIDGET wd_pf_mcp,  WK_TOGGLE, "prefs.mcp", "Listen for MCP clients (AI agents)", cb=save_cb
+WIDGET wd_pf_aiprov, WK_ENUM, "prefs.ai_connection", cb=save_cb, aux=l_prov, n=3, tip="Which connection the AI Assistant uses"
+WIDGET wd_pf_clpath, WK_TEXT, "prefs.claude_path", "Program", cb=cb_clpath, tip="The claude program (empty: the one on PATH)"
+WIDGET wd_pf_clmodel, WK_TEXT, "prefs.claude_model", "Model", cb=cb_clmodel, tip="A model name or alias such as sonnet or opus (empty: Claude Code's default)"
+WIDGET wd_pf_clturns, WK_INT, "prefs.claude_turns", "Turns at most", 1.0, 500.0, 0.2, 0, WGF_CLAMP, cb=save_cb, tip="How many rounds of tool calls one request may take"
+WIDGET wd_pf_gkpath, WK_TEXT, "prefs.grok_path", "Program", cb=cb_gkpath, tip="The grok program (empty: the one on PATH)"
+WIDGET wd_pf_gkmodel, WK_TEXT, "prefs.grok_model", "Model", cb=cb_gkmodel, tip="A Grok model name (empty: the CLI's default)"
+WIDGET wd_pf_gkturns, WK_INT, "prefs.grok_turns", "Turns at most", 1.0, 500.0, 0.2, 0, WGF_CLAMP, cb=save_cb, tip="How many rounds of tool calls one request may take"
+WIDGET wd_pf_orkey, WK_TEXT, "prefs.openrouter_key", "API key", flags=WGF_SECRET, cb=cb_orkey, tip="Your OpenRouter key: kept in ~/.config/beemodel/secrets (yours alone to read), never shown or logged (empty: OPENROUTER_API_KEY)"
+WIDGET wd_pf_ormodel, WK_TEXT, "prefs.openrouter_model", "Model", cb=cb_ormodel, tip="Any OpenRouter model id with tool calling, such as anthropic/claude-sonnet-4.5 or openai/gpt-4.1"
+WIDGET wd_pf_orurl, WK_TEXT, "prefs.openrouter_url", "Address", cb=cb_orurl, tip="The API's address (another OpenAI-compatible server works too)"
+WIDGET wd_pf_orsteps, WK_INT, "prefs.openrouter_steps", "Steps at most", 1.0, 500.0, 0.2, 0, WGF_CLAMP, cb=save_cb, tip="How many rounds of tool calls one request may take"
+WIDGET wd_pf_aiextra, WK_TEXT, "prefs.ai_prompt", "Also tell the AI", cb=cb_aiextra, tip="Text added to every request's instructions (a style, units, what to avoid)"
 
 .section .rodata
 .align 8
@@ -663,7 +859,8 @@ pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxe
                 .quad 4, pr_rw, 960, 4, pr_rh, 540, 4, pr_rspp, 128, 4, pr_rdn, 1
                 .quad 5, pr_threads, 0, 5, pr_jit, 1, 5, pr_gpu_on, 1
                 .quad 6, pr_autosave, 25
-                .quad 7, pr_tier, -1, 7, pr_mcp, 1
+                .quad 7, pr_tier, -1, 7, pr_mcp, 1, 7, ai_prov, 0, 7, ai_cl_turns, 40
+                .quad 7, ai_gk_turns, 40, 7, ai_or_steps, 30
                 .quad -1
 s_pf_title:     .asciz "Preferences"
 s_pf_found:     .asciz "Settings found"
@@ -953,6 +1150,12 @@ pf_item:
     mov     rbx, rdi
     mov     r13, r8
     mov     r14, rdx
+    test    r14, r14                    # (a text field: its label as the
+    jnz     1f                          #  caption)
+    cmp     dword ptr [rbx+WD_KIND], WK_TEXT
+    jne     1f
+    mov     r14, [rbx+WD_LABEL]
+1:
     cmp     byte ptr [rip+pr_find], 0
     je      2f
     mov     rdi, r14
@@ -1277,6 +1480,62 @@ pf_reset:
 
 .Lpf_ai:
     push    rbx
+    lea     rdi, [rip+wd_pf_aiprov]
+    lea     r8, [rip+ai_prov]
+    lea     rdx, [rip+c_prov]
+    call    pf_item
+    lea     rdi, [rip+wd_pf_aiextra]
+    lea     r8, [rip+ai_extra]
+    xor     edx, edx
+    call    pf_item
+    lea     rdx, [rip+s_h_cl]
+    call    pf_head
+    lea     rdi, [rip+wd_pf_clpath]
+    lea     r8, [rip+ai_cl_path]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_clmodel]
+    lea     r8, [rip+ai_cl_model]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_clturns]
+    lea     r8, [rip+ai_cl_turns]
+    xor     edx, edx
+    call    pf_item
+    lea     rdx, [rip+s_h_gk]
+    call    pf_head
+    lea     rdi, [rip+wd_pf_gkpath]
+    lea     r8, [rip+ai_gk_path]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_gkmodel]
+    lea     r8, [rip+ai_gk_model]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_gkturns]
+    lea     r8, [rip+ai_gk_turns]
+    xor     edx, edx
+    call    pf_item
+    lea     rdx, [rip+s_h_or]
+    call    pf_head
+    lea     rdi, [rip+wd_pf_orkey]
+    lea     r8, [rip+ai_or_key]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_ormodel]
+    lea     r8, [rip+ai_or_model]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_orurl]
+    lea     r8, [rip+ai_or_url]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_orsteps]
+    lea     r8, [rip+ai_or_steps]
+    xor     edx, edx
+    call    pf_item
+    lea     rdx, [rip+s_h_agents]
+    call    pf_head
     mov     eax, [rip+pr_tier]
     inc     eax
     mov     [rip+pr_tierv], eax
@@ -1322,6 +1581,45 @@ has_word:
     ret
 
 # ---- callbacks: a change is saved at once ------------------------------------------
+# the texts (longer than a field keeps by itself): copied, then saved
+.macro TEXTCB name, buf
+\name:
+    lea     rsi, [rip+\buf]
+    jmp     text_cb
+.endm
+TEXTCB cb_clpath, ai_cl_path
+TEXTCB cb_clmodel, ai_cl_model
+TEXTCB cb_gkpath, ai_gk_path
+TEXTCB cb_gkmodel, ai_gk_model
+TEXTCB cb_ormodel, ai_or_model
+TEXTCB cb_orurl, ai_or_url
+TEXTCB cb_aiextra, ai_extra
+text_cb:                                # rdi = the text, rsi = where (256)
+    xor     ecx, ecx
+1:  mov     al, [rdi+rcx]
+    mov     [rsi+rcx], al
+    test    al, al
+    jz      2f
+    inc     ecx
+    cmp     ecx, 255
+    jb      1b
+    mov     byte ptr [rsi+rcx], 0
+2:  jmp     save_cb
+cb_orkey:                               # the key: the secrets file only
+    lea     rsi, [rip+ai_or_key]
+    xor     ecx, ecx
+1:  mov     al, [rdi+rcx]
+    mov     [rsi+rcx], al
+    test    al, al
+    jz      2f
+    inc     ecx
+    cmp     ecx, 255
+    jb      1b
+    mov     byte ptr [rsi+rcx], 0
+2:  sub     rsp, 8
+    call    sec_save
+    add     rsp, 8
+    ret
 apply_cb:                               # (what it means now: the viewport)
     sub     rsp, 8
     call    pr_apply

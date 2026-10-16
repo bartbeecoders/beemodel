@@ -29,6 +29,7 @@
 .equ WGF_EXPORT,    64          # path: an export (the browser offers Selected only)
 .equ WGF_EXPAXIS,   128         # path: ... and Up axis / Scale (OBJ, STL)
 .equ WGF_DYN,       256         # enum: WD_AUX is a function -> rax = labels, edx = how many (objects, trees ...)
+.equ WGF_SECRET,    512         # text: shown as stars, never in ui_tree, typed afresh (API keys)
 
 # descriptor (static, .rodata)
 .equ WD_KIND,       0
