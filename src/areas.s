@@ -33,6 +33,7 @@
 .globl area_maxed
 .globl active_area
 .globl vp_area
+.globl area_is_viewport
 .globl cam_ptr
 .globl outl_rename
 .globl hit_area
@@ -391,6 +392,22 @@ area_editor:
     call    node_ptr
     movzx   eax, byte ptr [rax+N_ED]
     ret
+
+# area_is_viewport(edi=node) -> eax = 1 when it is a leaf showing a 3D
+#   viewport (live.s: does the live view's owner still exist)
+area_is_viewport:
+    xor     eax, eax
+    cmp     edi, MAX_NODES
+    jae     9f
+    call    node_ptr
+    cmp     byte ptr [rax+N_KIND], K_LEAF
+    jne     8f
+    cmp     byte ptr [rax+N_ED], ED_VIEWPORT
+    jne     8f
+    mov     eax, 1
+    ret
+8:  xor     eax, eax
+9:  ret
 
 # splitter_cursor(edi=split node) -> eax = cursor shape
 splitter_cursor:
@@ -2601,11 +2618,12 @@ hdr_icons:      .long ICON_CLOSE, ICON_SPLIT_V, ICON_SPLIT_H, ICON_MAXIMIZE
 tool_icons:     .long ICON_SELECT, ICON_MOVE, ICON_ROTATE, ICON_SCALE, ICON_CUBE
                 .long ICON_SPHERE, ICON_CYLINDER, ICON_PLANE, ICON_LIGHT, ICON_CAMERA
 .align 8
-vp_shade_lbl:   .quad s_sh_solid, s_sh_wire, s_sh_mat
+vp_shade_lbl:   .quad s_sh_solid, s_sh_wire, s_sh_mat, s_sh_rend
 vp_theme_lbl:   .quad s_th_d, s_th_l, s_th_c
 s_sh_solid:     .asciz "Solid"
 s_sh_wire:      .asciz "Wireframe"
 s_sh_mat:       .asciz "Material Preview"
+s_sh_rend:      .asciz "Rendered"
 s_th_d:         .asciz "Dark theme"
 s_th_l:         .asciz "Light theme"
 s_th_c:         .asciz "High contrast"
@@ -2764,7 +2782,7 @@ WIDGET wd_outl_eye,  WK_ROW, "outliner.visible", "Show / Hide", cb=outl_eye_cb, 
 WIDGET wd_outl_filter, WK_TEXT, "outliner.filter", "Filter", cb=outl_filter_cb, tip="Show only the objects whose name contains this (Enter)"
 WIDGET wd_tool_row, WK_ROW, "tools.row", cb=tools_cb
 WIDGET wd_vp_sec,     WK_SECTION, "props.viewport", "Viewport"
-WIDGET wd_vp_shading, WK_ENUM,   "viewport.shading", aux=vp_shade_lbl, n=3
+WIDGET wd_vp_shading, WK_ENUM,   "viewport.shading", aux=vp_shade_lbl, n=4
 WIDGET wd_vp_grid,    WK_TOGGLE, "viewport.grid", "Ground grid"
 WIDGET wd_vp_theme,   WK_ENUM,   "ui.theme", cb=vp_theme_cb, aux=vp_theme_lbl, n=3
 WIDGET wd_vp_yaw,     WK_FLOAT,  "viewport.yaw", "Yaw", step=0.00872665, dec=1, flags=WGF_DEG

@@ -1623,8 +1623,8 @@ bee_load:
 71: mov     eax, [r15+4]
     and     eax, 1
     mov     [rip+show_grid], eax
-    mov     eax, [r15+8]                # 0 solid, 1 wireframe, 2 material
-    cmp     eax, 2
+    mov     eax, [r15+8]                # 0 solid, 1 wireframe, 2 material,
+    cmp     eax, 3                      #  3 rendered
     jbe     1f
     xor     eax, eax
 1:  mov     [rip+vp_shading], eax

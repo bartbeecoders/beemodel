@@ -28,6 +28,8 @@
 .globl pr_orbit
 .globl pr_autosave
 .globl pr_threads
+.globl pr_lvspp
+.globl pr_lvdn
 .globl pr_jit
 .globl pr_mcp
 .globl pr_tier
@@ -70,7 +72,9 @@ pr_tier:        .long -1                # the agents' permission at start (-1: e
 tip_ms:         .long 500               # the rest before a tooltip
 pr_grid:        .float 1.0              # Viewport: grid spacing (m), field of
 pr_fov:         .long 50                #  view (degrees, vertical), clip start
-pr_near:        .float 0.05             #  (m)
+pr_near:        .float 0.05             #  (m), Rendered shading's samples
+pr_lvspp:       .long 64
+pr_lvdn:        .long 1                 #  and its denoise
 pr_rw:          .long 960               # Rendering: new scenes' size, samples,
 pr_rh:          .long 540               #  denoise
 pr_rspp:        .long 128
@@ -168,6 +172,8 @@ w_grid:         .asciz "grid"
 w_gridsz:       .asciz "grid_size"
 w_fov:          .asciz "fov"
 w_near:         .asciz "clip_start"
+w_lvspp:        .asciz "rendered_samples"
+w_lvdn:         .asciz "rendered_denoise"
 w_rw:           .asciz "render_width"
 w_rh:           .asciz "render_height"
 w_rspp:         .asciz "render_samples"
@@ -198,7 +204,7 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0
                 .quad w_welcome, pr_welcome, 0, w_cbaxes, pr_cbaxes, 0
                 .quad w_grid, show_grid, 0, w_gridsz, pr_grid, 1, w_fov, pr_fov, 0
-                .quad w_near, pr_near, 1, w_rw, pr_rw, 0, w_rh, pr_rh, 0
+                .quad w_near, pr_near, 1, w_lvspp, pr_lvspp, 0, w_lvdn, pr_lvdn, 0, w_rw, pr_rw, 0, w_rh, pr_rh, 0
                 .quad w_rspp, pr_rspp, 0, w_rdn, pr_rdn, 0
                 .quad w_aiprov, ai_prov, 0, w_clturns, ai_cl_turns, 0, w_gkturns, ai_gk_turns, 0
                 .quad w_orsteps, ai_or_steps, 0
@@ -814,6 +820,8 @@ WIDGET wd_pf_grid, WK_TOGGLE, "prefs.grid", "Ground grid and axes", cb=save_cb, 
 WIDGET wd_pf_gridsz, WK_FLOAT, "prefs.grid_size", "Grid spacing (m)", 0.01, 1000.0, 0.01, 2, WGF_CLAMP, cb=apply_cb, tip="The distance between the grid's lines (every fifth is brighter)"
 WIDGET wd_pf_fov, WK_INT, "prefs.fov", "Field of view (degrees)", 10.0, 120.0, 0.2, 0, WGF_CLAMP, cb=apply_cb, tip="How wide the 3D viewport sees, top to bottom (50: a normal lens)"
 WIDGET wd_pf_near, WK_FLOAT, "prefs.clip_start", "Clip start (m)", 0.001, 10.0, 0.001, 3, WGF_CLAMP, cb=apply_cb, tip="Nothing closer to the viewport's eye than this is drawn"
+WIDGET wd_pf_lvdn, WK_TOGGLE, "prefs.rendered_denoise", "Rendered denoise", cb=save_cb, tip="Rendered shading: denoise the path-traced samples on the GPU, every frame (guided by albedo, normal and depth)"
+WIDGET wd_pf_lvspp, WK_INT, "prefs.rendered_samples", "Rendered samples", 0.0, 4096.0, 1.0, 0, WGF_CLAMP, cb=save_cb, tip="Rendered shading: path-traced samples a pixel once the view is still, on the GPU (0: the raycast alone)"
 WIDGET wd_pf_rw, WK_INT, "prefs.render_width", "Width (px)", 16.0, 8192.0, 1.0, 0, WGF_CLAMP, cb=save_cb, tip="New scenes render this wide (each scene keeps its own)"
 WIDGET wd_pf_rh, WK_INT, "prefs.render_height", "Height (px)", 16.0, 8192.0, 1.0, 0, WGF_CLAMP, cb=save_cb, tip="New scenes render this high"
 WIDGET wd_pf_rspp, WK_INT, "prefs.render_samples", "Samples", 1.0, 65536.0, 1.0, 0, WGF_CLAMP, cb=save_cb, tip="New scenes' samples per pixel"
@@ -862,6 +870,7 @@ pf_pages:       .quad .Lpf_interface, .Lpf_viewport, .Lpf_input, .Lpf_keymap, .L
 # the defaults, by category: category, variable, value (Reset to Defaults)
 pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxes, 0
                 .quad 1, show_grid, 1, 1, pr_grid, 0x3f800000, 1, pr_fov, 50, 1, pr_near, 0x3d4ccccd
+                .quad 1, pr_lvspp, 64, 1, pr_lvdn, 1
                 .quad 2, pr_emu3, 0, 2, pr_orbit, 0x3f800000
                 .quad 3, pr_nkey, 0
                 .quad 4, pr_rw, 960, 4, pr_rh, 540, 4, pr_rspp, 128, 4, pr_rdn, 1
@@ -1292,6 +1301,14 @@ pf_reset:
     call    pf_item
     lea     rdi, [rip+wd_pf_near]
     lea     r8, [rip+pr_near]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_lvspp]
+    lea     r8, [rip+pr_lvspp]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_lvdn]
+    lea     r8, [rip+pr_lvdn]
     xor     edx, edx
     call    pf_item
     pop     rbx

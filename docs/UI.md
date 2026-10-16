@@ -82,7 +82,7 @@ The header has:
 
 - the **mode** (Object, Edit, Sculpt, Texture / Vertex / Weight Paint);
 - vertex / edge / face select in edit mode;
-- **shading** (Wireframe, Solid, Material Preview);
+- **shading** (Wireframe, Solid, Material Preview, Rendered);
 - the ground grid and snapping.
 
 The **navigation gizmo** in the top-right corner turns the view: click a ball to look along that axis. Numpad 1, 3 and 7 do the same, with Ctrl for the opposite side. An empty scene offers quick actions in the middle of the viewport: Add a Cube, Start a Sketch, Open, Import and the templates.
@@ -162,7 +162,7 @@ Connections are set up and tested in Preferences › AI. The guide is [AI.md](AI
 | Category | Settings |
 |---|---|
 | **Interface** | Theme (Dark, Light, High contrast), UI scale 75–200 %, tooltip delay, colour-blind-safe axis colours, the welcome screen |
-| **Viewport** | The ground grid and its spacing, the field of view, the clip start |
+| **Viewport** | The ground grid and its spacing, the field of view, the clip start, Rendered shading's samples and denoise |
 | **Input** | Alt + left button as the middle button, orbit speed |
 | **Keymap** | Search, Set (then press the key), Clear, Reset All Keys. It warns you when a key is already taken |
 | **Rendering** | New scenes' render width, height, samples and denoise (each scene keeps its own) |

@@ -33,7 +33,7 @@ process with a `SOCK_SEQPACKET` socket on its fd 3, using the protocol in
 
 1. The helper answers `MSG_HELLO` with its device, or with why it has none.
 2. Bulk data goes through shared memory, one memfd per *slot*: slot 0 is the
-   path tracer, slot 1 the rasterizer. The memfd is passed with `MSG_MAP`
+   path tracer, slot 1 the rasterizer, slot 2 the live viewport. The memfd is passed with `MSG_MAP`
    (`SCM_RIGHTS`).
 3. A slot's memory starts with a table of bindings: where each storage
    buffer of the kernel lies, and whether to copy it to the GPU before the
@@ -100,6 +100,95 @@ the CPU leaves them, so the frame is pixel-identical. By default this runs
 for frames that draw objects through cluster DAGs (virtualized geometry),
 including both batches of the occlusion pass.
 
+### Rendered shading (the live viewport)
+
+**Rendered** is the fourth viewport shading, next to Wireframe, Solid and
+Material Preview: in the viewport header, the Z pie, **View › Rendered**
+and Properties › Viewport (`view.shading_rendered`). It draws the view on
+the GPU, from the scene Hive snapshots (`src/live.s`):
+
+- **While the view or the scene changes**, one raycast a frame:
+  - the sun and each point light, with hard shadows, through the same
+    BSDF as the path tracer;
+  - the studio sky through six occlusion rays, which look 2 m away; a
+    surface they hit adds a rough first bounce (its colour, lit by half the
+    sky and the unshadowed sun);
+  - mirrors (metal under roughness 0.3) and glass followed, four deep;
+    other surfaces reflect the sky.
+- **Once the view is still**, Hive's path-traced samples accumulate on the
+  GPU, a 12 ms slice a frame, up to **Preferences › Viewport › Rendered
+  samples** (64; `view.rendered_samples <n>`). The raycast stays shown for
+  the first 4. With 0 samples the raycast is all there is, and no frames
+  are drawn while nothing changes.
+- **Denoised** on the GPU every frame, unless **Preferences › Viewport ›
+  Rendered denoise** is off (`view.rendered_denoise [0|1]`). It is the F12
+  render's filter (`denoise.s`), ported to `pt.comp`'s `dn_` stages:
+  - the samples also sum the first hit's albedo, normal and depth, and the
+    luminance moments;
+  - the radiance is divided by the albedo;
+  - the variance is blurred 3 × 3;
+  - five edge-avoiding à-trous passes (steps 1 to 16) weigh each tap by
+    normals, depth and luminance;
+  - the albedo is multiplied back in.
+
+  That is six more dispatches after the frame's samples; only the last one
+  reads pixels back. In the test scene, 4 denoised samples are 1.3 levels
+  from a 512-sample image on average; 4 plain ones are 6.6. It takes 2 to
+  7 ms on an RTX 4080 SUPER at 800 x 540. Turning it on or off starts the
+  samples again (its sums ride along with them).
+
+The selection outline, the gizmos, edit-mode edges and the other overlays
+are drawn over the image, and clicks still pick through the rasterizer.
+
+**How it runs.** The raycast is a mode of `pt.comp` (its `cam[14]` flags):
+it walks `trace_path`'s own loop, and its shadow and occlusion rays go
+through the path's one shadow-ray call. So the shader keeps one inlined
+copy of the BVH walk and of the graph evaluator (`pt` grew from 97 to
+112 KB of SPIR-V, `ptg` from 292 to 306 KB). The scene goes to slot 2 once:
+after that, each frame sends only the constants (the camera) and reads
+back the pixels as XRGB, 4 bytes each. The accumulators stay on the GPU,
+and the shader applies ACES and the sRGB curve as the CPU's resolve does.
+
+**When the scene goes up again.** A fingerprint is taken every frame:
+
+- each object's place, flags (not its selection), material and modifiers;
+- its evaluated mesh, with the mesh's version and size;
+- each light's colour and power;
+- the material records;
+- the undo and redo depths;
+- the edited mesh's positions (a drag in edit mode).
+
+A camera move changes none of these. When the fingerprint changes:
+
+- a scene that builds in under 30 ms is built again for every change (at
+  most half the time);
+- a slower one waits until the change is over (the fingerprint is the same
+  two frames running); meanwhile the camera stays live on the last
+  snapshot.
+
+**Beside an F12 render.** The render owns Hive's scene, so the live view
+keeps its snapshot. When F12 opens the Render area and narrows the viewport,
+the live view sends the render's own snapshot at the new size. It builds
+anew once the render is done. The Render area's image, passes and denoising
+are untouched (they live in slot 0).
+
+**More than one viewport.** One viewport has the live view: the one last
+used. The others show Material Preview, and their status line says "live
+in another viewport".
+
+**Falling back.** Without the helper, or when it fails, Rendered shows
+Material Preview, and the console says why once. The status line under
+the viewport's label always says what is shown: `raycast`,
+`n / N samples`, or the fallback. Materials whose graphs `pt.comp` does
+not evaluate are drawn with their plain values. An HDRI world is drawn
+with the studio sky.
+
+On an RTX 4080 SUPER, at an 800 x 540 viewport, a raycast takes 2 to 3 ms,
+including the readback. That holds for the 1,600-triangle test scene and
+for one million triangles. 1024 samples of the small scene take 1.5 s
+(3.3 s with the million triangles). Building the million-triangle scene
+takes 0.55 s; the small one, 4 ms.
+
 ### Falling back
 
 - **Missing or unusable:** no helper, no device, a scene `pt.comp` does not
@@ -123,12 +212,24 @@ including both batches of the occlusion pass.
 | 4 | samples traced on the GPU |
 | 5 | GPU-side milliseconds |
 | 6 | 1 if the current render runs on the GPU |
+| 7 | Rendered shading: raycasts drawn |
+| 8 | Rendered shading: samples in the image (0: the raycast) |
+| 9 | Rendered shading: scene uploads |
+| 10 | Rendered shading's last frame: 1 the GPU's, 2 another viewport has it, 0 Material Preview |
+| 11 | The last raycast's milliseconds, with its readback |
+| 12 | The last scene build's milliseconds |
+| 13 | 1 when the image shown is denoised |
+| 14 | The last denoise's milliseconds |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 
 - the fallbacks;
 - the path tracer against the CPU, including the denoised render;
 - the helper dying at its second run (`BEEMODEL_GPU_FAIL=2`, a test hook);
-- the rasterizer's frame in the fake compositor.
+- the rasterizer's frame in the fake compositor;
+- Rendered shading: the raycast, then the samples; a camera move against a
+  scene change; the selection outline; 0 samples; the denoiser against
+  plain samples; an F12 render beside it;
+  Material Preview without the helper, or when it dies.
 
 CI runs it on llvmpipe.

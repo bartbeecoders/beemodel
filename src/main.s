@@ -147,8 +147,10 @@ _start:
     jle     38f
 39: mov     edx, 50
 38: cmp     dword ptr [rip+hv_active], 0  # rendering: just look, never wait
+    jne     31f
+    cmp     dword ptr [rip+lv_busy], 0  # (the live viewport's samples too)
     je      32f
-    xor     edx, edx
+31: xor     edx, edx
 32: push    rdx                         # a tooltip due: wake up for it
     push    rsi
     call    tip_wait
@@ -204,6 +206,7 @@ _start:
     cmp     dword ptr [rip+quit_flag], 0
     jne     .Lquit
     call    render_tick                 # a slice of the progressive render
+    call    live_tick                   # the live viewport: more samples
     call    vg_tick                     # a cluster DAG built in the background
     call    vd_poll                     # cluster pages that came in: drawn
     xor     edi, edi                    # world cells in and out for the camera

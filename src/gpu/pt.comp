@@ -9,6 +9,17 @@
 // cover (shader graphs, an HDRI world) stay on the CPU (src/gpu.s decides).
 //
 // One invocation per pixel adds `count` samples into the accumulators.
+//
+// The live viewport (Rendered shading, src/live.s) uses the same kernel from
+// its own slot, with flags in cam[14]: 1 live (the accumulators stay on the
+// GPU, the first pass overwrites them, and each pass leaves the pixel's mean
+// in m2 as XRGB); 2 raycast (one ray a pixel: the lights' direct light with
+// hard shadows, the sky with short-range occlusion, mirrors and glass
+// followed; drawn while the view moves); 4 denoise (the samples also sum
+// the first hit's albedo, normal and depth and the luminance moments, and
+// leave the filter's input instead of XRGB); bits 8-11 a denoise stage
+// (count 0): 1 the variance blurred, 2-6 the a-trous passes, the last one
+// leaving XRGB (denoise.s's filter, the same steps).
 #version 450
 #extension GL_ARB_gpu_shader_int64 : require
 
@@ -18,7 +29,7 @@ layout(std430, binding = 0) readonly buffer Params {
     uint w, h, spp, count;          // the first sample's number, how many
     uint seed, nslots, npoints, nl;
     uint ntri, root, debug, cut;    // cut: masked / translucent / one-sided in it
-    float cam[16];                  // origin, right, up, forward, tan_h
+    float cam[16];                  // origin, right, up, forward, tan_h; [14]: live flags
     float points[64 * 8];           // position, colour * power, pad
     float lut[256];                 // sRGB byte -> linear (srgb_to_lin)
 } P;
@@ -33,7 +44,7 @@ layout(std430, binding = 8) readonly buffer LT { uint ltri[]; };
 layout(std430, binding = 9) readonly buffer LS { float lsel[]; };
 layout(std430, binding = 10) buffer AC { float accum[]; };           // w h 3
 layout(std430, binding = 11) buffer AX { float aux[]; };             // w h 7
-layout(std430, binding = 12) buffer M2 { float m2[]; };              // w h
+layout(std430, binding = 12) buffer M2 { uint m2[]; };               // w h: f32 bits (live: XRGB)
 layout(std430, binding = 13) readonly buffer TO { float to_[]; };    // object-space v0 e1 e2
 layout(std430, binding = 14) readonly buffer TU { float tuv[]; };    // UVs (u0 NaN: none)
 layout(std430, binding = 15) readonly buffer IM { uint img[]; };     // 64 x (texel offset, w, h, fmt), texels
@@ -1036,22 +1047,53 @@ Ray spawn_ray(vec3 p, vec3 ng, vec3 dir) {
     return r;
 }
 
-void trace_path(float sx, float sy, out vec3 lout, out float auxo[7]) {
-    for (int k = 0; k < 7; k++) auxo[k] = 0.0;
-    vec3 org = vec3(P.cam[0], P.cam[1], P.cam[2]);
+Ray cam_ray(float sx, float sy) {
     vec3 right = vec3(P.cam[3], P.cam[4], P.cam[5]);
     vec3 up = vec3(P.cam[6], P.cam[7], P.cam[8]);
     vec3 fwd = vec3(P.cam[9], P.cam[10], P.cam[11]);
     float th = P.cam[12];
     Ray ray;
-    ray.o = org;
+    ray.o = vec3(P.cam[0], P.cam[1], P.cam[2]);
     ray.d = unit3(fwd + right * sx * th + up * sy * th);
+    return ray;
+}
+
+// ---- the live viewport's raycast (in trace_path: its ray queries are the
+// path's own, so the shader keeps one copy of each) ---------------------------
+const int RC_AO = 6;                    // ambient occlusion rays
+const float RC_AO_DIST = 2.0;           //  and how far they look (m)
+const uint RC_DEPTH = 4u;               // mirrors and glass followed
+
+// ACES and the sRGB curve, as the CPU's resolve (aces_srgb in hive_pt.s)
+uint aces_byte(float x) {
+    x = max(x, 0.0);
+    float a = (x * 2.51 + 0.03) * x;
+    float b = (x * 2.43 + 0.59) * x + 0.14;
+    float y = sqrt(clamp(a / b, 0.0, 1.0));
+    return uint(y * 255.0 + 0.5);
+}
+
+uint xrgb(vec3 c) {
+    if (any(isnan(c))) c = vec3(0.0);
+    return (aces_byte(c.x) << 16) | (aces_byte(c.y) << 8) | aces_byte(c.z);
+}
+
+// rc: the live viewport's raycast instead of a path (spec stays set: no MIS):
+//   each light's direct light (hard shadows) and the sky through RC_AO
+//   occlusion rays (a pattern turned per pixel), then on through mirrors and
+//   glass, else the sky's glossy reflection and the end
+void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float auxo[7]) {
+    for (int k = 0; k < 7; k++) auxo[k] = 0.0;
+    Ray ray = cam_ray(sx, sy);
     beta = vec3(1.0);
     L = vec3(0.0);
     float prev = 0.0;
     bool spec = true;
     depth = 0u;
     vec3 nsPrev = vec3(0.0);
+    uint hs = px * 0x9E3779B9u;         // (rc: the occlusion pattern's turn)
+    hs ^= hs >> 16; hs *= 0x85EBCA6Bu; hs ^= hs >> 13;
+    float r1 = float(hs & 0xffffu) / 65536.0, r2 = float(hs >> 16) / 65536.0;
     for (;;) {
         ray.tmax = BIG;
         if (!trace_cut(ray, false)) {
@@ -1102,20 +1144,84 @@ void trace_path(float sx, float sy, out vec3 lout, out float auxo[7]) {
             auxo[3] = ns.x; auxo[4] = ns.y; auxo[5] = ns.z;
             auxo[6] = ray.t;
         }
-        // next-event estimation
-        LSample ls;
-        if (light_sample(p, c.n, ls)) {
-            vec3 f;
-            float pb = bsdf_eval(c, ls.wi, f);
-            if (lum(f) > TINY) {
-                Ray sr = spawn_ray(p, ng, ls.wi);
-                sr.tmax = ls.dist * 0.99999994 - EPS;
-                if (!trace_cut(sr, true)) {
-                    float wgt = ls.delta ? 1.0 : mis(ls.pdf, pb);
-                    float k = abs(dot(c.n, ls.wi)) * wgt / ls.pdf;
-                    add_beta_l(f * ls.li * k);
-                }
+        // next-event estimation: a light sample (rc: the sun, each point
+        //   light, the occlusion rays)
+        int nq = rc ? 1 + int(P.npoints) + RC_AO : 1;
+        vec3 skyl = vec3(0.0);
+        float open = 0.0;
+        for (int qi = 0; qi < nq; qi++) {
+            LSample ls;
+            bool ao = qi > int(P.npoints);
+            if (!rc) {
+                if (!light_sample(p, c.n, ls)) continue;
+            } else if (qi == 0) {
+                ls.wi = SUN_DIR; ls.dist = BIG; ls.li = SUN_RAD; ls.pdf = SUN_PDF; ls.delta = true;
+            } else if (!ao) {
+                uint o = uint(qi - 1) * 8u;
+                float d;
+                ls.wi = unit3(vec3(P.points[o], P.points[o + 1u], P.points[o + 2u]) - p, d);
+                ls.dist = d;
+                ls.li = vec3(P.points[o + 3u], P.points[o + 4u], P.points[o + 5u]) / (d * d);
+                ls.pdf = 1.0; ls.delta = true;
+            } else {
+                float kk = float(qi - 1 - int(P.npoints));
+                float u1 = (kk + r1) / float(RC_AO);
+                vec2 sc = sincos_2pi(fract(r2 + kk * 0.618034));
+                float r = sqrt(u1), cz = sqrt(max(1.0 - u1, 0.0));
+                ls.wi = local_to_world(vec3(sc.y * r, sc.x * r, cz), c.t, c.b, c.n);
+                ls.dist = RC_AO_DIST; ls.li = vec3(0.0); ls.pdf = 1.0; ls.delta = true;
             }
+            vec3 f = vec3(0.0);
+            float pb = 0.0;
+            if (!ao) {
+                pb = bsdf_eval(c, ls.wi, f);
+                if (!(lum(f) > TINY)) continue;
+            }
+            Ray sr = spawn_ray(p, ng, ls.wi);
+            sr.tmax = ao ? RC_AO_DIST : ls.dist * 0.99999994 - EPS;
+            if (trace_cut(sr, !ao)) {
+                if (ao) {               // occluded nearby: roughly what that
+                    uint th = uint(sr.tri);     //  surface sends back (lit by
+                    vec3 nh = tri_geo_normal(th);   //  half the sky and the
+                    if (dot(nh, ls.wi) > 0.0) nh = -nh;  //  sun, unshadowed)
+                    Mat mh = mat_of(th);
+                    float sh = max(dot(nh, SUN_DIR), 0.0) * (0.5 * INV_PI / SUN_PDF);
+                    skyl += mh.base * (sky_rad(nh) * 0.5 + SUN_RAD * sh) + mh.emit * mh.strength;
+                }
+                continue;
+            }
+            if (ao) { skyl += sky_rad(ls.wi); open += 1.0; continue; }
+            float wgt = ls.delta ? 1.0 : mis(ls.pdf, pb);
+            float k = abs(dot(c.n, ls.wi)) * wgt / ls.pdf;
+            add_beta_l(f * ls.li * k);
+        }
+        if (rc) {                       // the raycast: the sky, then onwards
+            skyl *= 1.0 / float(RC_AO);
+            open *= 1.0 / float(RC_AO);
+            add_beta_l(c.base * ((1.0 - c.metal) * (1.0 - c.te) * c.abase) * skyl);
+            vec3 fs = c.f0 + (vec3(1.0) - c.f0) * schlick_w(c.coso);
+            vec3 rdir = reflect(ray.d, c.n);
+            bool mirror = c.alpha < 0.1;   // (roughness under ~0.3)
+            if (mirror && c.te > 0.5) {         // glass: on through it, the sky reflected
+                float fr = fresnel_d(dot(wo, c.n), outside ? c.eta : 1.0 / c.eta);
+                vec3 tdir = refract(ray.d, c.n, outside ? 1.0 / c.eta : c.eta);
+                if (dot(tdir, tdir) > 0.0) {
+                    add_beta_l(sky_rad(rdir) * (fr * c.te * open));
+                    beta *= c.base * ((1.0 - fr) * c.te);
+                    ray = spawn_ray(p, ng, tdir);
+                } else {
+                    ray = spawn_ray(p, ng, rdir);
+                }
+            } else if (mirror && c.metal > 0.5) {   // a metal mirror: what it shows
+                beta *= fs;
+                ray = spawn_ray(p, ng, rdir);
+            } else {                                // glossy: the sky, and the end
+                add_beta_l(fs * sky_rad(rdir) * (c.abase * (1.0 - c.te) * open));
+                break;
+            }
+            depth++;
+            if (depth >= RC_DEPTH) break;
+            continue;
         }
         // a BSDF sample onwards
         vec3 wi;
@@ -1141,27 +1247,165 @@ void trace_path(float sx, float sy, out vec3 lout, out float auxo[7]) {
     lout = L;
 }
 
+// ---- the live viewport's denoiser (denoise.s on the GPU) ----------------------
+// The live slot's aux binding: N = w h pixels, in floats from 0: the sums of
+// the first hit (albedo, normal, depth; 7 N), the sums of the luminance
+// squared (N), then A, B (illumination rgb + variance) and G (normal,
+// depth; 0: the sky), 4 N each.
+uint dn_n() { return P.w * P.h; }
+vec4 dn_get(uint buf, uint q) { uint o = buf + q * 4u; return vec4(aux[o], aux[o + 1u], aux[o + 2u], aux[o + 3u]); }
+void dn_put(uint buf, uint q, vec4 v) { uint o = buf + q * 4u; aux[o] = v.x; aux[o + 1u] = v.y; aux[o + 2u] = v.z; aux[o + 3u] = v.w; }
+uint dn_a() { return 8u * dn_n(); }
+uint dn_b() { return 12u * dn_n(); }
+uint dn_g() { return 16u * dn_n(); }
+vec3 dn_albedo(uint px, float inv) {
+    return max(vec3(aux[px * 7u], aux[px * 7u + 1u], aux[px * 7u + 2u]) * inv, vec3(0.1));
+}
+
+// 1. demodulate: A = (radiance / albedo, its variance), G = (normal, depth)
+void dn_prep(uint px, vec3 c, float inv) {
+    vec3 ns = vec3(aux[px * 7u + 3u], aux[px * 7u + 4u], aux[px * 7u + 5u]);
+    float z = aux[px * 7u + 6u] * inv;
+    float nl = dot(ns, ns);
+    vec3 alb = vec3(1.0);
+    vec4 g = vec4(0.0);
+    if (nl > 1.0e-12 && z > 0.0) {
+        g = vec4(ns / sqrt(nl), z);
+        alb = dn_albedo(px, inv);
+    }
+    float ml = lum(c);
+    float var = max(aux[7u * dn_n() + px] * inv - ml * ml, 0.0) * inv;
+    float la = lum(alb);
+    dn_put(dn_a(), px, vec4(c / alb, var / (la * la)));
+    dn_put(dn_g(), px, g);
+}
+
+const float DN_H[5] = float[5](0.0625, 0.25, 0.375, 0.25, 0.0625);
+const float DN_H3[3] = float[3](0.25, 0.5, 0.25);
+
+// 2.-4. a stage: the variance blurred 3 x 3 (A -> B), or a-trous pass k
+//   (B -> A, A -> B, ...; the last remodulated and packed into m2)
+void dn_stage(uint stage, uint x, uint y, uint px) {
+    if (stage == 1u) {
+        vec4 a = dn_get(dn_a(), px);
+        float sw = 0.0, sv = 0.0;
+        for (int dy = -1; dy <= 1; dy++) {
+            uint qy = uint(int(y) + dy);
+            if (qy >= P.h) continue;
+            for (int dx = -1; dx <= 1; dx++) {
+                uint qx = uint(int(x) + dx);
+                if (qx >= P.w) continue;
+                uint q = qy * P.w + qx;
+                if (!(dn_get(dn_g(), q).w > 0.0)) continue;   // (sky taps don't count)
+                float w = DN_H3[dy + 1] * DN_H3[dx + 1];
+                sv += w * dn_get(dn_a(), q).w;
+                sw += w;
+            }
+        }
+        if (sw > 0.0) a.w = sv / sw;
+        dn_put(dn_b(), px, a);
+        return;
+    }
+    uint k = stage - 2u;
+    uint src = (k & 1u) == 0u ? dn_b() : dn_a();
+    uint dst = (k & 1u) == 0u ? dn_a() : dn_b();
+    int step = 1 << int(k);
+    vec4 g = dn_get(dn_g(), px);
+    vec4 a = dn_get(src, px);
+    vec4 o = a;
+    if (g.w > 0.0) {                    // (the sky: as it is)
+        float lp = lum(a.xyz);
+        float isig = 1.0 / (4.0 * sqrt(max(a.w, 0.0)) + 1.0e-4);
+        vec3 srgb = vec3(0.0);
+        float sw = 0.0, sv = 0.0;
+        for (int j = -2; j <= 2; j++) {
+            uint qy = uint(int(y) + j * step);
+            if (qy >= P.h) continue;
+            for (int i = -2; i <= 2; i++) {
+                uint qx = uint(int(x) + i * step);
+                if (qx >= P.w) continue;
+                uint q = qy * P.w + qx;
+                vec4 gq = dn_get(dn_g(), q);
+                if (!(gq.w > 0.0)) continue;
+                float d = dot(gq.xyz, g.xyz);           // normals: d^64
+                if (!(d > 0.0)) continue;
+                d *= d; d *= d; d *= d; d *= d; d *= d; d *= d;
+                float w = d * DN_H[j + 2] * DN_H[i + 2];
+                float dist = float(max(abs(i), abs(j)) * step);
+                float zt = abs(g.w - gq.w) / (dist * g.w * 0.02 + 1.0e-4);
+                vec4 sq = dn_get(src, q);
+                float lt = abs(lum(sq.xyz) - lp) * isig;
+                w *= exp(-(lt + zt));
+                sw += w;
+                sv += w * w * sq.w;
+                srgb += sq.xyz * w;
+            }
+        }
+        float iw = 1.0 / sw;
+        o = vec4(srgb * iw, sv * iw * iw);
+    }
+    if (k < 4u) {
+        dn_put(dst, px, o);
+        return;
+    }
+    vec3 c = o.xyz;                     // the last: remodulated, packed
+    if (g.w > 0.0) c *= dn_albedo(px, 1.0 / float(max(P.spp, 1u)));
+    m2[px] = xrgb(c);
+}
+
 void main() {
     uint x = gl_GlobalInvocationID.x, y = gl_GlobalInvocationID.y;
     if (x >= P.w || y >= P.h) return;
     uint px = y * P.w + x;
     float fw = float(P.w), fh = float(P.h);
-    for (uint s = 0u; s < P.count; s++) {
+    uint live = floatBitsToUint(P.cam[14]);
+    uint stage = (live >> 8) & 15u;
+    if (stage != 0u) { dn_stage(stage, x, y, px); return; }
+    bool rc = (live & 2u) != 0u;                        // the raycast: once,
+    uint n = rc ? 1u : P.count;                         //  the pixel's centre
+    for (uint s = 0u; s < n; s++) {
         uint64_t hsh = uint64_t(px) * 0x9E3779B97F4A7C15UL;
         hsh ^= (uint64_t(P.spp + s) << 32) | uint64_t(P.seed);
         hsh *= 0xBF58476D1CE4E5B9UL;
         hsh ^= hsh >> 31;
         rng = hsh | 1UL;
-        float sx = (rnd() + float(x)) * 2.0 / fw - 1.0;
-        float sy = (1.0 - (rnd() + float(y)) * 2.0 / fh) * fh / fw;
+        float jx = rc ? 0.5 : rnd();
+        float jy = rc ? 0.5 : rnd();
+        float sx = (jx + float(x)) * 2.0 / fw - 1.0;
+        float sy = (1.0 - (jy + float(y)) * 2.0 / fh) * fh / fw;
         vec3 lo;
         float ax[7];
-        trace_path(sx, sy, lo, ax);
+        trace_path(sx, sy, rc, px, lo, ax);
+        if (rc) { m2[px] = xrgb(lo); return; }
+        if ((live & 1u) != 0u) {                        // live: the mean only
+            bool first = P.spp + s == 0u;
+            for (int k = 0; k < 3; k++) {
+                float v = isnan(lo[k]) ? 0.0 : lo[k];
+                accum[px * 3u + uint(k)] = first ? v : accum[px * 3u + uint(k)] + v;
+            }
+            if ((live & 4u) != 0u) {                    // (the denoiser's)
+                for (int k = 0; k < 7; k++) {
+                    float v = isnan(ax[k]) ? 0.0 : ax[k];
+                    aux[px * 7u + uint(k)] = first ? v : aux[px * 7u + uint(k)] + v;
+                }
+                float l = lum(lo);
+                l = isnan(l) ? 0.0 : l * l;
+                uint mo = 7u * dn_n() + px;
+                aux[mo] = first ? l : aux[mo] + l;
+            }
+            continue;
+        }
         for (int k = 0; k < 7; k++)
             if (!isnan(ax[k])) aux[px * 7u + uint(k)] += ax[k];
         float l = lum(lo);
-        if (!isnan(l)) m2[px] += l * l;
+        if (!isnan(l)) m2[px] = floatBitsToUint(uintBitsToFloat(m2[px]) + l * l);
         for (int k = 0; k < 3; k++)
             if (!isnan(lo[k])) accum[px * 3u + uint(k)] += lo[k];
+    }
+    if ((live & 1u) != 0u && P.count != 0u) {
+        float inv = 1.0 / float(P.spp + P.count);
+        vec3 c = vec3(accum[px * 3u], accum[px * 3u + 1u], accum[px * 3u + 2u]) * inv;
+        if ((live & 4u) != 0u) dn_prep(px, c, inv);
+        else m2[px] = xrgb(c);
     }
 }

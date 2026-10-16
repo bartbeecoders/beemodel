@@ -50,6 +50,8 @@
 .globl hv_nslots
 .globl hv_debug
 .globl hv_env
+.globl light_prep
+.globl pt_nmaps
 
 .equ MAP_ANON_PRIV, 0x22
 .equ MA_ALPHA,  88              # (material.s)

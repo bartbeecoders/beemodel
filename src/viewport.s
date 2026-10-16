@@ -531,7 +531,13 @@ viewport_draw:
     je      1f
     xor     edi, edi                    # solid: rasterize meshes (+ outline)
     call    raster_scene
-    call    sculpt_draw                 # the sculpt mesh: its own path
+    cmp     dword ptr [rip+vp_shading], 3   # (rendered on the GPU: both are
+    jne     2f                              #  in its image)
+    mov     edi, 10
+    call    lv_query
+    cmp     eax, 1
+    je      1f
+2:  call    sculpt_draw                 # the sculpt mesh: its own path
     call    inst_draw                   # instances: splats and triangles
 1:  call    draw_objects                # wires (all objects, or non-meshes)
     call    wp_draw                     # world cells not loaded, the minimap
@@ -606,13 +612,30 @@ viewport_draw:
     call    vp_quick_draw
 
     # ---- overlay text ---------------------------------------------------------
+    cmp     dword ptr [rip+vp_shading], 3   # (over a render: a shadow under it)
+    jne     2f
     mov     edi, [rip+cvs_x0]
+    add     edi, 11
+    mov     esi, [rip+cvs_y0]
+    add     esi, 9
+    lea     rdx, [rip+s_vp_label]
+    xor     ecx, ecx
+    call    draw_text
+2:  mov     edi, [rip+cvs_x0]
     add     edi, 10
     mov     esi, [rip+cvs_y0]
     add     esi, 8
     lea     rdx, [rip+s_vp_label]
     mov     ecx, COL_TEXT
     call    draw_text
+    cmp     dword ptr [rip+vp_shading], 3   # rendered: what it shows
+    jne     1f
+    mov     edi, [rip+cvs_x0]
+    add     edi, 10
+    mov     esi, [rip+cvs_y0]
+    add     esi, 26
+    call    lv_hud
+1:
     call    redo_draw                   # adjust the last operation (on top)
     call    reset_clip
     pop     r15
@@ -986,6 +1009,7 @@ vp_zoom:
 
 # ---- viewport operators (registered into the operator spine) --------------
 OPERATOR op_view_wire,      "view.toggle_wireframe", "Wireframe", op_shading_set, op_shading_is, 1, KEY_Z, doc="Switch the viewport between solid shading and wireframe"
+OPERATOR op_view_rendered,  "view.toggle_rendered", "Rendered", op_shading_set, op_shading_is, 3, doc="Rendered shading on the GPU: a raycast while the view moves, path-traced samples when it is still"
 OPERATOR op_view_matprev,   "view.toggle_material_preview", "Material Preview", op_shading_set, op_shading_is, 2, KEY_Z|KM_SHIFT, doc="Shade the viewport with each object's material under a studio light (Shift+Z)"
 
 .text
@@ -994,6 +1018,7 @@ OPERATOR op_view_matprev,   "view.toggle_material_preview", "Material Preview", 
 OPERATOR op_shade_solid, "view.shading_solid", "Solid", op_shading_exact, op_shading_is, 0, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Solid shading in the viewport"
 OPERATOR op_shade_wire,  "view.shading_wireframe", "Wireframe", op_shading_exact, op_shading_is, 1, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Wireframe shading in the viewport"
 OPERATOR op_shade_mat,   "view.shading_material", "Material Preview", op_shading_exact, op_shading_is, 2, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Shade the viewport with each object's material"
+OPERATOR op_shade_rend,  "view.shading_rendered", "Rendered", op_shading_exact, op_shading_is, 3, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Rendered shading in the viewport: a GPU raycast while the view moves, path-traced samples when it is still"
 op_shading_exact:                       # (pie menu: exactly this one)
     mov     [rip+vp_shading], edi
     mov     dword ptr [rip+dirty], 1
