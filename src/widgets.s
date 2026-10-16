@@ -34,6 +34,7 @@
 .globl wg_wheel
 .globl wg_key
 .globl wg_editing
+.globl wg_by_enter
 .globl wg_commit
 .globl wg_pop_draw
 .globl wg_pop_hit
@@ -83,6 +84,7 @@ wg_y0:          .skip 4
 wg_v0:          .skip 4             # value when the press began
 wg_clicked:     .skip 4             # a button's id, reported by its next wg
 wg_edit:        .skip 4             # id being typed into
+wg_by_enter:    .skip 4             # the commit is Enter's
 wg_pop_open:    .skip 4
 wg_pop_hot:     .skip 4
 wg_pop_x:       .skip 4
@@ -1960,8 +1962,10 @@ wg_key:
     mov     dword ptr [rip+wg_edit], 0
     mov     dword ptr [rip+dirty], 1
     jmp     9f
-.Lwk_enter:
+.Lwk_enter:                             # (callbacks can tell Enter apart)
+    mov     dword ptr [rip+wg_by_enter], 1
     call    wg_commit
+    mov     dword ptr [rip+wg_by_enter], 0
     jmp     9f
 .Lwk_tab:                               # confirm, then the next field
     mov     ebx, [rip+wg_edit]

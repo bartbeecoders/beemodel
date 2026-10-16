@@ -327,6 +327,7 @@
 .equ ED_VERSIONS,       13            # versions and collaboration (teamui.s)
 .equ ED_PREFS,          14            # the preferences (prefs.s)
 .equ ED_HELP,           15            # what the pointer rests on (help.s)
+.equ ED_AI,             16            # the AI Assistant (ai.s)
 .equ MENU_AREA,         NUM_MENUS     # pop-up lists after the bar's menus
 .equ MENU_MODADD,       NUM_MENUS+1   # (from here on: at md_x, md_y)
 .equ MENU_CTX,          NUM_MENUS+2   # a right-click context menu (menus.s)
