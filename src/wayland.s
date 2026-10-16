@@ -1672,6 +1672,7 @@ pr_ptr:
 
 .globl mono_ns
 .globl msg_begin
+.globl put_u32
 .globl msg_end
 .globl put_str
 .globl fdq_pop

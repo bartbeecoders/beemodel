@@ -11,6 +11,8 @@
 .include "macros.inc"
 
 .globl lc_cur
+.globl lc_rec_own
+.globl lc_own
 .globl lc_ref
 .globl lc_unref
 .globl lc_reset

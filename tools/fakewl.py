@@ -173,6 +173,11 @@ class Fake:
                 self.selection = None
         elif iface == 'wl_data_device' and op == 1:           # set_selection(source, serial)
             self.selection = u(0) or None
+        elif iface == 'wl_data_offer' and op == 0:            # accept(serial, mime)
+            n = u(1)
+            self.dnd_accepted = p[8:8 + n - 1].decode() if n else None
+        elif iface == 'wl_data_offer' and op == 3:            # finish (a drop taken)
+            self.dnd_finished = True
         elif iface == 'wl_data_offer' and op == 1:            # receive(mime, fd)
             fd = self.fds.pop(0)
             os.write(fd, self.offer_text.encode())
@@ -350,6 +355,26 @@ class Fake:
         self.send(oid, 0, wstr('text/plain;charset=utf-8'))        # offer
         self.send(self.ddev, 5, struct.pack('<I', oid))            # selection
         self.pump(0.1)
+
+    def drop_files(self, paths, x=600, y=300):
+        """Files dragged from a file manager and dropped on the window
+        (text/uri-list, as file:// URIs with %XX escapes)."""
+        from urllib.parse import quote
+        self.offer_text = ''.join('file://' + quote(os.path.abspath(p)) + '\r\n' for p in paths)
+        self.n_offers = getattr(self, 'n_offers', 0) + 1
+        oid = 0xff100000 + self.n_offers
+        self.objs[oid] = 'wl_data_offer'
+        self.dnd_accepted, self.dnd_finished = None, False
+        self.send(self.ddev, 0, struct.pack('<I', oid))            # data_offer
+        self.send(oid, 0, wstr('text/uri-list'))                   # offer
+        self.send(oid, 0, wstr('text/plain;charset=utf-8'))
+        self.serial += 1
+        self.send(self.ddev, 1, struct.pack('<IIiiI', self.serial, self.surf(),
+                                            int(x * 256), int(y * 256), oid))  # enter
+        self.send(self.ddev, 3, struct.pack('<Iii', 0, int(x * 256), int(y * 256)))  # motion
+        self.pump(0.1)
+        self.send(self.ddev, 4)                                    # drop
+        self.pump(0.5)
 
     def keymap(self, path):
         data = open(path, 'rb').read() + b'\0'

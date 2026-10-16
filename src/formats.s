@@ -23,6 +23,8 @@
 # =============================================================================
 .intel_syntax noprefix
 .globl mesh_tab
+.globl result
+.globl has_arg
 .globl mesh_chunks
 .globl armt_write
 .globl armt_read
