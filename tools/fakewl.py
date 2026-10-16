@@ -7284,7 +7284,7 @@ def prefs_ui():
         x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
     def type_into(name, text, sub=0):
         click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
-    cats = ['interface', 'input', 'keymap', 'system', 'files', 'ai']
+    cats = ['interface', 'viewport', 'input', 'keymap', 'rendering', 'system', 'files', 'ai']
     def cat(i):
         click('prefs.category.' + cats[i], i)
     menu_pick(f, m, 'Edit', 'Preferences...')
@@ -7307,20 +7307,41 @@ def prefs_ui():
     type_into('prefs.search', 'orbit')                          # the search: across categories
     found = names()
     check('prefs.orbit_speed' in found and 'prefs.theme' not in found, 'the search finds a setting in another category (and only what matches)')
-    cat(1)
+    cat(2)
     check({'prefs.emulate_middle', 'prefs.orbit_speed'} <= names() and 'prefs.theme' not in names(),
           'a category ends the search: Input (Alt as the middle button, orbit speed)')
-    cat(2)
+    cat(1)                                                      # Viewport
+    check({'prefs.grid', 'prefs.grid_size', 'prefs.fov', 'prefs.clip_start'} <= names(), 'Viewport: grid, its spacing, field of view, clip start')
+    f.key(1); f.pump(0.3)
+    box = (230, 90, 1010, 620)
+    before = f.image().crop(box)
+    f.mods(4); f.key(51); f.mods(0); f.pump(0.3)
+    type_into('prefs.fov', '30')
+    type_into('prefs.grid_size', '2')
+    f.key(1); f.pump(0.3)
+    after = f.image().crop(box)
+    moved = sum(1 for a, b in zip(before.getdata(), after.getdata()) if a != b)
+    check('fov 30' in prefs() and 'grid_size 2' in prefs() and moved > 5000,
+          f'a narrower field of view and a wider grid change the viewport at once ({moved} pixels)')
+    f.mods(4); f.key(51); f.mods(0); f.pump(0.3)
+    click('prefs.reset')
+    check('fov 50' in prefs() and 'grid_size 1' in prefs(), 'Reset to Defaults: the viewport as it was')
+    cat(4)                                                      # Rendering
+    check({'prefs.render_width', 'prefs.render_height', 'prefs.render_samples', 'prefs.render_denoise'} <= names(),
+          'Rendering: new scenes\' size, samples, denoise')
+    type_into('prefs.render_width', '640')
+    type_into('prefs.render_samples', '32')
+    cat(3)
     check({'prefs.key_search', 'prefs.key_set', 'prefs.keys_reset'} <= names(), 'Keymap: search, Set, Reset')
     type_into('prefs.key_search', 'object.duplicate')
     click('prefs.key_set', 0)
     f.key(65); f.pump(0.3)                                      # F7 (free)
     check('key object.duplicate' in prefs(), f'Set, then a key: kept ({prefs()[-60:]!r})')
-    cat(3)
-    check({'prefs.threads', 'prefs.gpu', 'prefs.jit'} <= names(), 'System: threads, GPU, JIT')
-    cat(4)
-    check({'prefs.autosave', 'prefs.library_add'} <= names(), 'Files: autosave, library folders')
     cat(5)
+    check({'prefs.threads', 'prefs.gpu', 'prefs.jit'} <= names(), 'System: threads, GPU, JIT')
+    cat(6)
+    check({'prefs.autosave', 'prefs.library_add'} <= names(), 'Files: autosave, library folders')
+    cat(7)
     check({'prefs.agent_permission', 'prefs.mcp'} <= names(), 'AI: the agents\' permission, MCP')
     f.key(1); f.pump(0.3)                                       # Esc: closed
     check('prefs.search' not in names(), 'Esc closes the dialog')
@@ -7339,9 +7360,11 @@ def prefs_ui():
     n = Mcp(g)
     menu_pick(g, n, 'Edit', 'Preferences...')
     g.pump(0.3)
-    x, y = widget_xy(n, 'prefs.category.input', 1); g.click(x, y); g.pump(0.2)
+    x, y = widget_xy(n, 'prefs.category.input', 2); g.click(x, y); g.pump(0.2)
     w = widget(n, 'prefs.orbit_speed')
     check(w is not None and 'key object.duplicate' in prefs(), 'the preferences are there after a restart')
+    rs = n.tool('run_operator', {'id': 'render.settings'})[0]
+    check('640' in rs and '32' in rs, f'a new scene renders at the preferred size and samples ({rs.strip()[-60:]!r})')
     g.proc.kill()
 
 

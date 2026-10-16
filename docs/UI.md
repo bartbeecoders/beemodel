@@ -144,8 +144,10 @@ Click a toast to open the console.
 | Category | Settings |
 |---|---|
 | **Interface** | Theme (Dark, Light, High contrast), UI scale 75–200 %, tooltip delay, colour-blind-safe axis colours, the welcome screen |
+| **Viewport** | The ground grid and its spacing, the field of view, the clip start |
 | **Input** | Alt + left button as the middle button, orbit speed |
 | **Keymap** | Search, Set (then press the key), Clear, Reset All Keys. It warns you when a key is already taken |
+| **Rendering** | New scenes' render width, height, samples and denoise (each scene keeps its own) |
 | **System** | Worker threads, the GPU, the JIT |
 | **Files** | Autosave interval, library folders |
 | **AI** | The agents' permission at start-up, the MCP server |

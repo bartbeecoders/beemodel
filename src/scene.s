@@ -350,6 +350,7 @@ scene_clear:
 
 # scene_defaults - add Camera, Light and Cube
 scene_defaults:
+    call    pr_scene_defaults           # (render settings: the preferences')
     push    rbx
     call    prim_camera
     mov     rdx, rax

@@ -38,6 +38,9 @@
 .globl vp_reset
 .globl vp_zoom
 
+.globl vp_near
+.globl vp_focal_k
+.globl vp_grid
 .section .data
 .align 4
 cam_yaw:    .float 0.7853982
@@ -46,13 +49,15 @@ cam_dist:   .float 18.0
 cam_tx:     .float 0.0
 cam_ty:     .float 0.0
 cam_tz:     .float 0.0
+vp_near:                                # clip start (preferences: everything
+f_near:     .float 0.05                 #  that projects follows it)
+vp_focal_k: .float 1.07                 # 0.5 / tan(fov / 2): 50deg vertical (preferences)
+vp_grid:    .float 1.0                  # the ground grid's spacing (preferences)
 
 .section .rodata
 .align 4
-f_near:     .float 0.05
 f_zero:     .float 0.0
 f_one:      .float 1.0
-f_focal_k:  .float 1.07                 # 0.5 / tan(25deg) -> 50deg vertical fov
 f_orbit_k:  .float 0.008
 f_pitch_max:.float 1.55
 f_pitch_min:.float -1.55
@@ -180,7 +185,7 @@ cam_setup:
     mov     r13d, eax
     sub     eax, r12d                   # physical height
     cvtsi2ss xmm0, eax
-    mulss   xmm0, [rip+f_focal_k]
+    mulss   xmm0, [rip+vp_focal_k]
     movss   [rip+vp_focal], xmm0        # focal length in pixels
     movss   xmm1, [rip+cam_dist]        # world units per logical pixel
     divss   xmm1, xmm0
@@ -236,7 +241,7 @@ to_cam:
 
 # clip_near(rdi=point behind the near plane, rsi=point in front) - moves rdi
 clip_near:
-    movss   xmm0, [rip+f_near]
+    movss   xmm0, [rip+vp_near]
     subss   xmm0, [rdi+8]
     movss   xmm1, [rsi+8]
     subss   xmm1, [rdi+8]
@@ -251,7 +256,7 @@ clip_near:
     mulss   xmm1, xmm0
     addss   xmm1, [rdi+4]
     movss   [rdi+4], xmm1
-    movss   xmm1, [rip+f_near]
+    movss   xmm1, [rip+vp_near]
     movss   [rdi+8], xmm1
     ret
 
@@ -308,7 +313,7 @@ line3d:
     lea     rdi, [rip+lp1]
     lea     rsi, [rip+lb]
     call    to_cam
-    movss   xmm7, [rip+f_near]
+    movss   xmm7, [rip+vp_near]
     movss   xmm0, [rip+la+8]
     movss   xmm1, [rip+lb+8]
     comiss  xmm0, xmm7
@@ -456,6 +461,12 @@ viewport_draw:
     xorps   xmm4, xmm4
     mov     eax, GRID_N
     cvtsi2ss xmm5, eax
+    mulss   xmm0, [rip+vp_grid]
+    mulss   xmm1, [rip+vp_grid]
+    mulss   xmm2, [rip+vp_grid]
+    mulss   xmm3, [rip+vp_grid]
+    mulss   xmm4, [rip+vp_grid]
+    mulss   xmm5, [rip+vp_grid]
     call    set_lp
     mov     edx, r12d
     call    line3d
@@ -467,6 +478,12 @@ viewport_draw:
     cvtsi2ss xmm3, eax
     xorps   xmm4, xmm4
     movss   xmm5, xmm2
+    mulss   xmm0, [rip+vp_grid]
+    mulss   xmm1, [rip+vp_grid]
+    mulss   xmm2, [rip+vp_grid]
+    mulss   xmm3, [rip+vp_grid]
+    mulss   xmm4, [rip+vp_grid]
+    mulss   xmm5, [rip+vp_grid]
     call    set_lp
     mov     edx, r12d
     call    line3d
@@ -845,7 +862,7 @@ vp_pick_bounds:
     lea     rsi, [rip+la]
     call    to_cam
     movss   xmm0, [rip+la+8]
-    comiss  xmm0, [rip+f_near]
+    comiss  xmm0, [rip+vp_near]
     jb      2f
     lea     rdi, [rip+la]
     lea     rsi, [rsp+16]
