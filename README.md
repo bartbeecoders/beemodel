@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.13.0/beemodel-0.13.0-linux-x86_64.bin
-chmod +x beemodel-0.13.0-linux-x86_64.bin && ./beemodel-0.13.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.14.0/beemodel-0.14.0-linux-x86_64.bin
+chmod +x beemodel-0.14.0-linux-x86_64.bin && ./beemodel-0.14.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -270,6 +270,17 @@ Without a path, the command line opens pre-filled. **Shift+F12** saves a PNG
 screenshot. The scene autosaves every 25 changes (`file.recover` restores
 it).
 
+### The AI Assistant
+
+Describe a world, a model or a change, and BeeModel builds it while you watch.
+
+- **Ctrl+Shift+Space** opens the AI workspace. Type a prompt and press Enter.
+- The assistant uses Claude Code, the Grok CLI or OpenRouter (any model). Each one acts through BeeModel's own tools.
+- Each request is one undo step, with a **Revert** button.
+- Connections, models and keys are set and tested in **Edit › Preferences › AI**. The OpenRouter key is kept in a 0600 secrets file.
+
+The guide is [docs/AI.md](docs/AI.md).
+
 ### AI agents (MCP)
 
 BeeModel is an MCP server. While it runs, an agent such as Claude Code can
@@ -299,7 +310,8 @@ Full details: [docs/MCP.md](docs/MCP.md). `--mcp-bridge` relays stdio to the run
 * the procedural co-pilot: `node_types` (the node catalogue), `describe_graph`, and
   `propose_begin` / `propose_end` / `proposal_status`. An agent builds a node setup, the
   viewport shows it with an **Accept** / **Revert** banner (Enter / Esc), and either way it is
-  one undo step. The MCP prompt `procedural` hands an agent this flow for a goal.
+  one undo step. The MCP prompt `procedural` hands an agent this flow for a goal, and
+  `build_world` hands it the AI Assistant's world-building instructions.
 
 The scene is also available as the resource `bee://scene`, and the node trees as `bee://graphs`.
 
@@ -888,6 +900,8 @@ src/json.s      lazy JSON reader + writer
 src/fileio.s    paths, files, the write buffer
 src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
 src/copilot.s   the procedural co-pilot: node catalogue, graphs as JSON, proposals
+src/ai.s        the AI Assistant: Claude Code / Grok / OpenRouter connections, transcript, area
+src/aiproc.s    a child process for the AI connections (pipes, stop), HTTPS through curl
 src/anim.s      animation: keyframes, F-curves, playback, actions and layers, the Timeline
 src/animed.s    the Dope Sheet and the Graph Editor
 src/arm.s       armatures: bones, poses, skinning (LBS / DQS), automatic weights, modes

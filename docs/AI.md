@@ -1,0 +1,121 @@
+# The AI Assistant
+
+Describe a world, a model or a change in plain words, and BeeModel builds it
+in the open scene while you watch. The assistant runs inside the app. It
+uses one of three connections, all of which act through BeeModel's own MCP
+tools (the same ones outside agents get, see [MCP.md](MCP.md)):
+
+| Connection | How it runs | What you need |
+|---|---|---|
+| **Claude Code** | `claude -p` as a child process, with an MCP configuration naming `beemodel --mcp-bridge` for this instance | [Claude Code](https://claude.com/claude-code) installed and logged in |
+| **Grok CLI** | `grok -p` as a child process, in its own agent directory with a `.grok/config.toml` naming the bridge | The Grok CLI installed and logged in |
+| **OpenRouter** | HTTPS chat completions through `curl`. BeeModel runs the tool loop itself, in-process | An OpenRouter API key (any OpenAI-compatible server works too) and `curl` |
+
+## Using it
+
+1. Press **Ctrl+Shift+Space** or pick **AI › AI Assistant**. The first time,
+   this makes the **AI** workspace: a viewport, the AI Assistant and the
+   outliner. The caret is placed in the prompt. Any area can also be
+   turned into an AI Assistant from its editor-type menu.
+2. Type what you want, for example *"a misty pine forest around a stone
+   cabin at dusk"* or *"make the cabin bigger and add a chimney"*, and press
+   **Enter** (or click **Send**).
+3. The transcript shows:
+   - your prompt;
+   - the model's text;
+   - each tool call with its arguments, and the start of its result;
+   - errors.
+
+   While the AI works, the status line says so, and **Stop** replaces Send.
+   Stop ends the child process or the request at once. The window keeps
+   drawing the whole time.
+4. Each request is **one undo step**, named `Agent: <your prompt>`. **Revert**
+   at the top of the area (or Ctrl+Z) takes the whole request back. It also
+   shows in **AI Activity**, like any agent's work.
+5. Follow-ups continue the same conversation:
+   - Claude Code and Grok resume their session;
+   - OpenRouter is sent the whole conversation again.
+
+   **New** starts a new conversation. It leaves the scene as it is.
+
+The connection picker at the top of the area chooses Claude Code, Grok or
+OpenRouter for the next request.
+
+## Settings: Preferences › AI
+
+Open **Edit › Preferences** (Ctrl+,) and pick the **AI** category:
+
+| Setting | |
+|---|---|
+| The AI Assistant uses | The connection used by default (the area's picker changes the same setting) |
+| Also tell the AI | Text added to every request's instructions, such as a style, units, or what to avoid |
+| Claude Code: Program, Model, Turns at most | The `claude` program (empty: the one on `PATH`), a model name or alias (empty: Claude Code's default), and how many rounds of tool calls one request may take (40) |
+| Grok CLI: Program, Model, Turns at most | The same for `grok` |
+| OpenRouter: API key, Model, Address, Steps at most | The key (masked), a model id with tool calling (`anthropic/claude-sonnet-4.5`), the API address (`https://openrouter.ai/api/v1`) and the step limit (30) |
+| Test Claude Code / Test Grok / Test OpenRouter | Runs `--version`, or asks OpenRouter whether the key works (this costs nothing). The answer shows as a message and in the transcript |
+| Agents | What AI agents may do (read, edit, files), and whether the MCP server listens |
+
+## Safety
+
+- **The key** is kept in `~/.config/beemodel/secrets` (mode 0600). It is
+  never stored in the prefs file or a `.bee` file, never shown, and never
+  logged. `curl` reads it from a header file in `~/.cache/beemodel/ai`
+  (a 0700 directory, the file 0600), so it never appears on a command line.
+  When no key is set, `OPENROUTER_API_KEY` is used.
+- **Permissions.** The assistant works under the same permission as every
+  agent (**AI** menu, or Preferences › AI). The default is *Edit Scene*.
+  File access is opt-in.
+- **Only BeeModel's tools.**
+  - Claude Code runs with `--strict-mcp-config --allowedTools mcp__beemodel`.
+  - Grok runs in its own directory (`~/.cache/beemodel/ai`), without its
+    shell, file, sub-agent and web tools. It runs with `--trust` so it loads
+    that configuration. MCP servers in your own `~/.grok/config.toml` stay
+    visible to it.
+  - OpenRouter models get the curated tools (`scene_summary`,
+    `script_eval`, `viewport_capture`, `run_operator`, the material and
+    node tools, ...). They do not get the 600 single-operator tools.
+- **Undo.** Each request is one undo step. Changes you make while a request
+  runs join that step.
+
+## How the AI is told to work
+
+Every request carries the world-building instructions:
+
+- **Conventions:** meters, Y up, the ground on the XZ plane.
+- **A way of working:**
+  - look first (`scene_summary`, `viewport_capture`);
+  - plan briefly;
+  - build in batches with `script_eval` (BeeScript): primitives, materials
+    and presets, terrain and scattering with geometry nodes, lights, a
+    camera, the world HDRI;
+  - look again and fix what is wrong.
+
+Outside agents get the same instructions as the MCP prompt `build_world`
+(argument `goal`).
+
+## Watching it from outside
+
+`ai.transcript` prints the conversation's last 24 lines to the console, as
+`$ <kind> <text>`. The kinds are:
+
+| Kind | Meaning |
+|---|---|
+| `Y` | You |
+| `A` | The AI |
+| `T` | A tool call |
+| `R` | Its result |
+| `E` | An error |
+| `N` | A note |
+
+Over MCP this operator is the tool `op_ai_transcript`. The test suite reads
+the conversation this way.
+
+## Testing without accounts
+
+`tests/ai.py` runs the whole flow without any network or account:
+
+- Stand-ins for `claude` and `grok` (`tests/ai_standin.py`, placed on
+  `PATH`) read their arguments, talk to BeeModel through the bridge and
+  print the real stream formats.
+- A localhost server plays OpenRouter. It answers with scripted tool calls
+  and checks what it is sent.

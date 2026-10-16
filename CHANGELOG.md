@@ -6,6 +6,64 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-16
+
+Phase 13, "AI first" (`Vibecoding/BeeModel-AI-Plan.html`): the AI comes
+inside the app. Describe a world, a model or a change, and an AI Assistant
+builds it in the scene through BeeModel's own tools, over Claude Code, the
+Grok CLI or OpenRouter. A real Preferences dialog holds every setting,
+connections included. The guide is [docs/AI.md](docs/AI.md).
+
+### Added (AI first)
+- **The Preferences dialog (A1, #246):** Edit › Preferences and Ctrl+,
+  open a modal dialog. It has a search across every category, eight
+  categories (Interface, Viewport, Input, Keymap, Rendering, System, Files,
+  AI) and Reset to Defaults per category. The Preferences area shows the
+  same view.
+- **More settings (A2, #247):** the viewport's grid size, field of view
+  and clip start; the default render resolution, samples and denoise. Each
+  one is saved and applied.
+- **AI connections (A3, #248):**
+  - the default connection;
+  - Claude Code and Grok: program, model and turn limit;
+  - OpenRouter: key, model, address and step limit;
+  - text added to every request.
+
+  The OpenRouter key is masked and kept only in `~/.config/beemodel/secrets`
+  (mode 0600), with `OPENROUTER_API_KEY` as the fallback.
+- **Child processes and HTTPS (A4, #249):** one child at a time. Its output
+  is read from the main loop without waiting, and Stop ends it (TERM, then
+  KILL). HTTPS goes through `curl`: the body and the key's header are in
+  private files, never on a command line.
+- **Claude Code (A5, #250):** `claude -p` with `stream-json`, an MCP
+  configuration naming `beemodel --mcp-bridge` for this instance,
+  `--strict-mcp-config --allowedTools mcp__beemodel`, the turn limit and the
+  instructions. Follow-ups use `--resume`.
+- **Grok CLI (A6, #251):** `grok -p` with `streaming-messages-json`. It
+  runs in its own agent directory with a `.grok/config.toml`, which it
+  loads because it runs with `--trust`. Its shell, file, sub-agent and web
+  tools are turned off. Follow-ups use `-r`.
+- **OpenRouter (A7, #252):** chat completions with the curated MCP tools as
+  functions (not the 600 single-operator tools). BeeModel runs each tool
+  call in-process (`mcp_local`, under the same permission, undo and AI
+  Activity as other agents) until the model answers or the step limit is
+  reached.
+- **The AI Assistant area and the AI workspace (A8, #253):**
+  - the connection picker, New, Revert, the transcript (text, tool calls,
+    results, errors), the prompt (Enter sends), Send and Stop;
+  - Ctrl+Shift+Space and AI › AI Assistant open it; the first time, they
+    make the AI workspace (a viewport, the assistant, the outliner);
+  - each request is one undo step, `Agent: <prompt>`;
+  - `ai.transcript` prints the conversation.
+
+  Preferences › AI has Test buttons for the three connections.
+- **Prompt to world (A9, #254):** the world-building instructions (the
+  conventions, the look-plan-build-check loop, and BeeScript recipes for
+  primitives, materials, terrain, scattering, lights and a camera) go with
+  every request. They are also the MCP prompt `build_world`.
+- **Tests (A10, #255):** `tests/ai.py` runs Claude Code and Grok
+  stand-ins and a localhost OpenRouter, with no network and no account.
+
 ## [0.13.0] - 2026-10-15
 
 Phase 12, "PBR materials and a material editor"
@@ -1524,7 +1582,9 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/bartbeecoders/beemodel/compare/v0.13.0...v0.14.0
+[0.13.0]: https://github.com/bartbeecoders/beemodel/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/bartbeecoders/beemodel/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/bartbeecoders/beemodel/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/bartbeecoders/beemodel/compare/v0.9.0...v0.10.0
