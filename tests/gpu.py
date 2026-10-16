@@ -17,6 +17,12 @@ to the CPU paths and the same images.
   * The rasterizer: a window (the fake compositor) showing a mesh drawn
     through its cluster DAG, with the tile stage on the GPU, against the
     same frame on the CPU.
+  * Rendered shading (the live viewport, src/live.s): a raycast a frame while
+    the view moves, path-traced samples when it is still, the scene going up
+    again when it changes (not when only the camera does), the selection
+    outline over it, raycast alone with 0 samples, the denoiser, an F12
+    render beside it,
+    and Material Preview without the helper or when it dies.
 
 With no usable Vulkan device the GPU checks are skipped (--require fails
 instead: CI runs it on llvmpipe with BEEMODEL_GPU=any).
@@ -245,7 +251,147 @@ def main():
               f'frame ({diff} pixels differ)')
     else:
         check(False, 'the window frames')
+    live_view()
     return finish()
+
+
+BOX = (214, 80, 1014, 620)                              # the viewport
+
+
+def fake(**env):
+    """The fake compositor with BeeModel in it (these GPU variables)."""
+    sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
+    argv = sys.argv
+    sys.argv = [argv[0], OUT or tempfile.mkdtemp(prefix='bee-gpu-shots-')]
+    import fakewl
+    sys.argv = argv
+    keys = ('BEEMODEL_GPU', 'BEEMODEL_GPU_HELPER', 'BEEMODEL_GPU_FAIL')
+    saved = {k: os.environ.get(k) for k in keys}
+    for k in keys:
+        os.environ.pop(k, None)
+    os.environ.update(env)
+    try:
+        f = fakewl.Fake()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    f.pump(1.0, until_frame=True)
+    m = fakewl.Mcp(f)
+    return f, m, (lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip())
+
+
+def live_view():
+    print('  -- Rendered shading (the live viewport) --')
+    f, m, q = fake(BEEMODEL_GPU='any')
+    try:
+        g = lambda *ks: [int(float(x)) for x in q('print(%s)' % ', '.join('gpu(%d)' % k for k in ks)).split()]
+        def settle(want, secs=60):                      # samples in the image
+            t = time.time()
+            while time.time() - t < secs and g(8)[0] < want:
+                f.pump(0.2)
+            f.pump(0.3)
+        q(SCENE + 'view(30, 20, 9, 0, 0, 0)\nop("view.shading_material")')
+        f.pump(0.5)
+        prev = f.image().crop(BOX)
+        q('op("view.rendered_samples", "32")\nop("view.shading_rendered")')
+        settle(32, 180)
+        st = g(7, 8, 9, 10)
+        still = f.image().crop(BOX)
+        if OUT:
+            f.shot('gpu_live_still.png')
+        mad = compare_img(prev, still)
+        check(st == [1, 32, 1, 1] and mad > 5,
+              f'Rendered: the scene up once, a raycast, then 32 path-traced samples on the GPU ({st}), '
+              f'not Material Preview (mean difference {mad:.1f} levels)')
+        outl = ((0xe0, 0x86, 0x2a), (0xff, 0xc2, 0x4a))   # selected, active (const.inc)
+        sel = sum(1 for p in pixels(still) if any(max(abs(a - b) for a, b in zip(p, c)) < 6 for c in outl))
+        check(sel > 50, f'the selection outline is drawn over the render ({sel} pixels)')
+        q('view(60, 25, 9, 0, 0, 0)')                   # the camera moves: a raycast
+        st = g(7, 9)
+        ray = None
+        q('op("view.rendered_samples", "0")\nview(61, 25, 9, 0, 0, 0)')
+        f.pump(0.5)
+        st2 = g(7, 8, 9)
+        ray = f.image().crop(BOX)
+        if OUT:
+            f.shot('gpu_live_raycast.png')
+        n0 = f.frames
+        f.pump(1.0)
+        check(st[0] >= 2 and st[1] == 1 and st2[1] == 0 and st2[2] == 1 and f.frames - n0 <= 1,
+              f'the camera moves: raycasts ({st[0]}, then {st2[0]}), the scene not sent again ({st2[2]} '
+              f'upload); 0 samples: the raycast alone, and no frames while nothing changes '
+              f'({f.frames - n0})')
+        q('op("view.rendered_samples", "64")')
+        settle(64, 180)
+        conv = f.image().crop(BOX)
+        mad = compare_img(ray, conv)
+        check(g(8)[0] == 64 and mad < 20,
+              f'the raycast looks like the path-traced image at 64 samples (mean difference {mad:.1f} levels)')
+        few = {}                                        # denoised, every frame
+        for dn in (0, 1):
+            q('op("view.rendered_denoise", "%d")\nop("view.rendered_samples", "4")\n'
+              'view(62, 25, 9, 0, 0, 0)' % dn)
+            q('view(61, 25, 9, 0, 0, 0)')
+            settle(4)
+            few[dn] = (f.image().crop(BOX), g(13, 14))
+        noisy, den = compare_img(few[0][0], conv), compare_img(few[1][0], conv)
+        check(few[0][1][0] == 0 and few[1][1][0] == 1 and den < noisy * 0.5,
+              f'Rendered denoise: 4 samples denoised on the GPU ({few[1][1][1]} ms) are nearer the 64-sample '
+              f'image than 4 noisy ones (mean difference {den:.1f} against {noisy:.1f} levels)')
+        q('move("Box", 2, 0, -1.5)')                    # the scene changes: up again
+        f.pump(0.5)
+        st = g(9)
+        moved = f.image().crop(BOX)
+        check(st[0] == 2 and compare_img(conv, moved) > 0.5,
+              f'an object moves: the scene goes up again ({st[0]} uploads) and the image follows')
+        q('op("render.settings", "160 90 512")')
+        f.key(88)                                       # F12 meanwhile (its area
+        f.pump(0.2)                                     #  narrows the viewport)
+        q('view(80, 25, 9, 0, 0, 0)')
+        during = g(10, 6, 7)
+        f.pump(0.2)
+        t = time.time()
+        while time.time() - t < 180 and q('print(gpu(4) >= 512)') != '1':
+            f.pump(0.2)
+        f.pump(0.5)
+        after = g(10, 4)
+        if OUT:
+            f.shot('gpu_live_f12.png')
+        check(during[0] == 1 and after[0] == 1 and after[1] >= 512,
+              f'an F12 render beside it: the live view goes on at the narrower size while it renders '
+              f'(gpu(10), gpu(6): {during[:2]}), the render finishes ({after[1]} GPU samples)')
+    finally:
+        f.proc.kill()
+    for env, what in (({'BEEMODEL_GPU': 'off'}, 'without the helper'),
+                      ({'BEEMODEL_GPU': 'any', 'BEEMODEL_GPU_FAIL': '3'}, 'when the helper dies')):
+        f, m, q = fake(**env)
+        try:
+            q(SCENE + 'view(30, 20, 9, 0, 0, 0)\nop("view.shading_material")')
+            f.pump(0.5)
+            prev = f.image().crop(BOX)
+            q('op("view.shading_rendered")')
+            for i in range(4):
+                q('view(%d, 20, 9, 0, 0, 0)' % (31 + i))
+                f.pump(0.3)
+            q('view(30, 20, 9, 0, 0, 0)')
+            f.pump(0.5)
+            st = q('print(gpu(10))')
+            mad = compare_img(prev, f.image().crop(BOX))
+            if OUT:
+                f.shot('gpu_live_%s.png' % ('off' if 'off' in what else 'died'))
+            check(st == '0' and mad < 3,
+                  f'{what}: Rendered shows Material Preview (gpu(10) {st}, mean difference {mad:.2f} levels '
+                  f'but for the line saying so)')
+        finally:
+            f.proc.kill()
+
+
+def compare_img(a, b):
+    pa, pb = pixels(a), pixels(b)
+    return sum(abs(x - y) for p, q in zip(pa, pb) for x, y in zip(p, q)) / (3 * len(pa))
 
 
 def window(mode):

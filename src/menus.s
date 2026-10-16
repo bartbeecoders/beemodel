@@ -113,7 +113,7 @@ j_end:          .asciz "}"
 pie_dir:        .byte -1,0, 1,0, 0,1, 0,-1, -1,-1, 1,-1, -1,1, 1,1
 pie_diag:       .byte 10, 10, 10, 10, 7, 7, 7, 7
 .align 8
-pie_shading:    .quad op_shade_solid, op_shade_wire, op_shade_mat
+pie_shading:    .quad op_shade_solid, op_shade_wire, op_shade_mat, op_shade_rend
 .equ pie_shading_n, (. - pie_shading) / 8
 
 ctx_object:     .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0

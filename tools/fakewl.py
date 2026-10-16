@@ -6301,7 +6301,7 @@ def menus_ui():
     f.key(44)
     f.keyev(44, 1); f.pump(0.5)                # Z held: the pie
     pie = [w['label'] for w in ui_tree(m) if w['kind'] == 'pieitem']
-    check(pie == ['Solid', 'Wireframe', 'Material Preview'], f'Z held opens the shading pie ({pie})')
+    check(pie == ['Solid', 'Wireframe', 'Material Preview', 'Rendered'], f'Z held opens the shading pie ({pie})')
     f.move(600, 420); f.pump(0.1)              # down: Material Preview
     f.shot('menus_pie.png')
     f.keyev(44, 0); f.pump(0.3)

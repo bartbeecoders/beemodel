@@ -81,6 +81,7 @@ WIDGET wd_sm_f,     WK_BUTTON, "viewport.select_face", "Face select (3)", flags=
 WIDGET wd_sh_wire,  WK_BUTTON, "viewport.shading_wireframe", "Wireframe", flags=WGF_ICON, aux=op_shade_wire, n=ICON_WIRE
 WIDGET wd_sh_solid, WK_BUTTON, "viewport.shading_solid", "Solid", flags=WGF_ICON, aux=op_shade_solid, n=ICON_SOLID
 WIDGET wd_sh_mat,   WK_BUTTON, "viewport.shading_material", "Material Preview", flags=WGF_ICON, aux=op_shade_mat, n=ICON_MATERIAL
+WIDGET wd_sh_rend,  WK_BUTTON, "viewport.shading_rendered", "Rendered (GPU)", flags=WGF_ICON, aux=op_shade_rend, n=ICON_RENDERED
 WIDGET wd_vh_grid,  WK_BUTTON, "viewport.grid", "Ground Grid", flags=WGF_ICON, aux=op_view_grid, n=ICON_GRID
 WIDGET wd_vh_snap,  WK_BUTTON, "viewport.snap", "Snap", flags=WGF_ICON, aux=op_toggle_snap, n=ICON_SNAP
 WIDGET wd_nav_px,   WK_BUTTON, "viewport.nav_right", "Right View (Numpad 3)", flags=WGF_NODRAW, aux=op_align_right
@@ -482,6 +483,8 @@ vp_header_tools:
     lea     rdi, [rip+wd_sh_solid]
     call    tool_btn
     lea     rdi, [rip+wd_sh_mat]
+    call    tool_btn
+    lea     rdi, [rip+wd_sh_rend]
     call    tool_btn
     add     ebx, 10
     lea     rdi, [rip+wd_vh_grid]

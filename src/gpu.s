@@ -13,13 +13,16 @@
 #  BEEMODEL_GPU=off never starts it; BEEMODEL_GPU=any lets it use a CPU
 #  Vulkan implementation (llvmpipe: the tests).
 #
-#  Two kernels use it:
+#  Three users:
 #    the path tracer  hive_start hands the scene to slot 0 (gpu_pt_begin)
 #                     and its passes run there (gpu_pt_pass): the same
 #                     samples as hive_pt.s (pt.comp is its port);
 #    the rasterizer   raster.s's tile stage for frames with objects drawn
 #                     through cluster DAGs (virtualized geometry), or every
-#                     frame with BEEMODEL_GPU_RASTER=all (gpu_rs_tiles).
+#                     frame with BEEMODEL_GPU_RASTER=all (gpu_rs_tiles);
+#    the live viewport Rendered shading (live.s): pt.comp from slot 2, the
+#                     scene kept on the GPU, a raycast or path-traced
+#                     samples a pass, back as XRGB (gpu_lv_put, gpu_lv_run).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -33,6 +36,8 @@
 .globl gpu_pt_begin
 .globl gpu_pt_pass
 .globl gpu_rs_tiles
+.globl gpu_lv_put
+.globl gpu_lv_run
 .globl hv_gpu
 
 .equ SYS_ACCESS,    21
@@ -49,6 +54,7 @@
 .equ HELLO_MS,      15000               # a slow driver start is fine
 .equ RUN_MS,        120000
 .equ PT_NBIND,      16
+.equ LV_NOREAD,     0x10000             # gpu_lv_run: no pixels back
 .equ RS_NBIND,      8
 
 .section .rodata
@@ -79,8 +85,8 @@ g_rsmode:       .skip 4                 # 0 auto (DAG frames), 1 all, -1 off
 hv_gpu:         .skip 4                 # this render's passes run on the GPU
 gp_first:       .skip 4                 # the next pass uploads the scene
 .align 8
-g_base:         .skip 8*2               # each slot's shared memory, bytes
-g_size:         .skip 8*2
+g_base:         .skip 8*3               # each slot's shared memory, bytes
+g_size:         .skip 8*3
 g_path:         .skip 512
 g_argv:         .skip 16
 g_msg:          .skip GM_SZ
@@ -90,6 +96,10 @@ gp_kern:        .skip 4                 # its kernel + 1 (3: with graphs; 0)
 gp_off:         .skip 8*PT_NBIND        # the path tracer's layout
 gp_bytes:       .skip 8*PT_NBIND
 gr_off:         .skip 8*RS_NBIND
+lv_kern:        .skip 4                 # the live viewport's kernel + 1
+lv_first:       .skip 4                 # its next run uploads the scene
+lv_off:         .skip 8*PT_NBIND        # its layout (slot 2, as pt.comp)
+lv_bytes:       .skip 8*PT_NBIND
 gr_bytes:       .skip 8*RS_NBIND
 
 .section .rodata
@@ -515,7 +525,11 @@ gpu_run:
     jnz     1f
     mov     eax, [rip+gp_kern]
     mov     [rip+g_msg+GM_KERN], eax
-1:
+1:  cmp     ebx, 2                      # (the live viewport: pt or ptg)
+    jne     2f
+    mov     eax, [rip+lv_kern]
+    mov     [rip+g_msg+GM_KERN], eax
+2:
     mov     edi, -1
     call    g_send
     test    eax, eax
@@ -581,7 +595,7 @@ put_table:
 
 # gpu_query(edi=k) -> eax: 0 running (starts it), 1 device type, 2 path
 #   tracer runs, 3 raster batches, 4 samples traced, 5 GPU-side ms,
-#   6 this render on the GPU
+#   6 this render on the GPU; 7.. the live viewport (lv_query)
 gpu_query:
     cmp     edi, 0
     jne     1f
@@ -604,7 +618,10 @@ gpu_query:
     mov     eax, [rip+hv_gpu]
     cmp     edi, 6
     je      9f
-    xor     eax, eax
+    cmp     edi, 7                      # 7.. the live viewport's (live.s)
+    jb      8f
+    jmp     lv_query
+8:  xor     eax, eax
 9:  ret
 
 # =============================================================================
@@ -630,8 +647,62 @@ gpu_pt_begin:
     call    gpu_ready
     test    eax, eax
     jz      9f
-    # sizes
+    xor     edi, edi
+    mov     esi, [rip+hv_w]
+    mov     edx, [rip+hv_h]
+    lea     rcx, [rip+gp_bytes]
+    lea     r8, [rip+gp_off]
+    call    gp_put
+    test    rax, rax
+    jz      9f
+    mov     r13, rax                    # base
     lea     rbx, [rip+gp_bytes]
+    lea     r14, [rip+gp_off]
+    mov     rdi, [r14+80]               # the accumulators: zero, and the
+    add     rdi, r13                    #  CPU's from now on
+    mov     [rip+hv_accum], rdi
+    mov     rcx, [rbx+80]
+    xor     eax, eax
+    rep     stosb
+    mov     rdi, [r14+88]
+    add     rdi, r13
+    mov     [rip+hv_aux], rdi
+    mov     rcx, [rbx+88]
+    rep     stosb
+    mov     rdi, [r14+96]
+    add     rdi, r13
+    mov     [rip+hv_m2], rdi
+    mov     rcx, [rbx+96]
+    rep     stosb
+    mov     dword ptr [rip+gp_first], 1
+    mov     dword ptr [rip+hv_gpu], 1
+9:  add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gp_put(edi=slot, esi=width, edx=height, rcx=its sizes, r8=its offsets) ->
+#   rax = the slot's memory: the scene as Hive has it (hive_build,
+#   light_prep), laid out as pt.comp's bindings, the constants (the camera
+#   hv_cam's) and the table, every binding uploading first (0: the helper
+#   failed). The accumulators are the caller's.
+gp_put:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 24
+    mov     [rsp], edi                  # slot
+    mov     [rsp+4], esi                # width
+    mov     [rsp+8], edx                # height
+    mov     rbx, rcx
+    mov     r14, r8
+    # sizes
     mov     qword ptr [rbx], 48+64+2048+1024
     mov     eax, [rip+hv_n]
     imul    rax, rax, 36
@@ -655,13 +726,16 @@ gpu_pt_begin:
     shl     rax, 2
     mov     [rbx+56], rax               # lcdf
     mov     [rbx+64], rax               # ltri
-    mov     eax, [rip+hv_w]
-    imul    eax, [rip+hv_h]
+    mov     eax, [rsp+4]
+    imul    eax, [rsp+8]
     mov     r12, rax                    # pixels
     imul    rax, r12, 12
     mov     [rbx+80], rax               # accum
     imul    rax, r12, 28
-    mov     [rbx+88], rax               # aux
+    cmp     dword ptr [rsp], 2          # (the live slot: the denoiser's
+    jne     11f                         #  buffers after it, pt.comp's dn_*)
+    imul    rax, r12, 80
+11: mov     [rbx+88], rax               # aux
     lea     rax, [r12*4]
     mov     [rbx+96], rax               # m2
     mov     eax, [rip+hv_n]
@@ -673,16 +747,15 @@ gpu_pt_begin:
     call    gp_img_bytes
     mov     [rbx+120], rax              # images
     mov     rdi, rbx
-    lea     rsi, [rip+gp_off]
+    mov     rsi, r14
     mov     edx, PT_NBIND
     call    layout
     mov     rsi, rax
-    xor     edi, edi
+    mov     edi, [rsp]
     call    gpu_slot
     test    rax, rax
     jz      9f
     mov     r13, rax                    # base
-    lea     r14, [rip+gp_off]
     # the arrays, as the CPU has them
     mov     rsi, [rip+hv_tv]
     mov     rdi, [r14+8]
@@ -743,22 +816,6 @@ gpu_pt_begin:
     mov     rdi, [r14+120]
     add     rdi, r13
     call    gp_img_put
-    mov     rdi, [r14+80]               # the accumulators: zero, and the
-    add     rdi, r13                    #  CPU's from now on
-    mov     [rip+hv_accum], rdi
-    mov     rcx, [rbx+80]
-    xor     eax, eax
-    rep     stosb
-    mov     rdi, [r14+88]
-    add     rdi, r13
-    mov     [rip+hv_aux], rdi
-    mov     rcx, [rbx+88]
-    rep     stosb
-    mov     rdi, [r14+96]
-    add     rdi, r13
-    mov     [rip+hv_m2], rdi
-    mov     rcx, [rbx+96]
-    rep     stosb
     # the constants (pt.comp's Params): sizes, the camera, lights, the table
     mov     rdi, [r14]
     add     rdi, r13
@@ -767,9 +824,9 @@ gpu_pt_begin:
     rep     stosb
     mov     rdi, [r14]
     add     rdi, r13
-    mov     eax, [rip+hv_w]
+    mov     eax, [rsp+4]
     mov     [rdi], eax
-    mov     eax, [rip+hv_h]
+    mov     eax, [rsp+8]
     mov     [rdi+4], eax
     mov     eax, [rip+hv_seed]
     mov     [rdi+16], eax
@@ -805,14 +862,14 @@ gpu_pt_begin:
     mov     ecx, 1024
     rep     movsb
     mov     rdi, r13                    # every binding uploads first
-    lea     rsi, [rip+gp_off]
-    lea     rdx, [rip+gp_bytes]
+    mov     rsi, r14
+    mov     rdx, rbx
     mov     ecx, PT_NBIND
     mov     r8d, GBF_IN
     call    put_table
-    mov     dword ptr [rip+gp_first], 1
-    mov     dword ptr [rip+hv_gpu], 1
-9:  add     rsp, 16
+    mov     rax, r13
+9:  add     rsp, 24
+    pop     rbp
     pop     r15
     pop     r14
     pop     r13
@@ -1051,6 +1108,134 @@ gpu_pt_pass:
     jmp     4b
 5:  mov     eax, 1
 9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# =============================================================================
+#  The live viewport (slot 2; pt.comp's bindings, its live flags)
+# =============================================================================
+# gpu_lv_put(edi=width, esi=height) -> eax = 1: the scene as Hive has it
+#   now (hive_build, light_prep) goes to slot 2 at the next run; materials
+#   whose graphs pt.comp does not evaluate are drawn with their values
+gpu_lv_put:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12d, esi
+    call    gpu_ready
+    test    eax, eax
+    jz      9f
+    call    gp_has_graphs
+    imul    eax, eax, 2                 # 1 pt, 3 ptg (kernel + 1)
+    inc     eax
+    mov     [rip+lv_kern], eax
+    mov     edi, 2
+    mov     esi, ebx
+    mov     edx, r12d
+    lea     rcx, [rip+lv_bytes]
+    lea     r8, [rip+lv_off]
+    call    gp_put
+    test    rax, rax
+    jz      8f
+    mov     r13, rax
+    mov     ebx, 1                      # graphs it cannot run: values only
+1:  cmp     ebx, [rip+hv_nmats]
+    ja      3f
+    mov     rdi, rbx
+    shl     rdi, MA_SHIFT
+    add     rdi, [rip+lv_off+40]
+    add     rdi, r13
+    push    rdi
+    push    rdi
+    call    gp_graph_ok
+    pop     rdi
+    pop     rdi
+    test    eax, eax
+    jnz     2f
+    mov     dword ptr [rdi+128], 0      # (GR_N)
+2:  inc     ebx
+    jmp     1b
+3:  mov     dword ptr [r13+10*GB_SZ+GB_FLAGS], 0    # accumulators: on the GPU
+    mov     dword ptr [r13+11*GB_SZ+GB_FLAGS], 0
+    mov     dword ptr [r13+12*GB_SZ+GB_FLAGS], GBF_OUT  # the pixels: back
+    mov     dword ptr [rip+lv_first], 1
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gpu_lv_run(edi=live flags (pt.comp's cam[14]: 1 samples, 3 the raycast,
+#   +4 for the denoiser, a denoise stage << 8; LV_NOREAD: no pixels back),
+#   esi=the first sample, edx=samples, rcx=camera: 13 floats) -> rax = the
+#   XRGB pixels (width x height, in the slot), 0: the helper failed (it is
+#   stopped)
+gpu_lv_run:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r12d, edi
+    mov     r14, rcx
+    lea     rax, [rip+g_base]
+    mov     r13, [rax+16]
+    xor     eax, eax
+    test    r13, r13
+    jz      9f
+    cmp     dword ptr [rip+g_state], 1
+    jne     9f
+    mov     rbx, [rip+lv_off]           # the constants
+    add     rbx, r13
+    mov     [rbx+8], esi
+    mov     [rbx+12], edx
+    mov     eax, r12d                   # cam[14]: the flags
+    and     eax, 0xffff
+    mov     [rbx+48+14*4], eax
+    mov     eax, GBF_OUT                # the pixels back, unless not wanted
+    test    r12d, LV_NOREAD
+    jz      4f
+    xor     eax, eax
+4:  mov     [r13+12*GB_SZ+GB_FLAGS], eax
+    mov     rsi, r14                    # cam[0..12]
+    lea     rdi, [rbx+48]
+    mov     ecx, 13
+    rep     movsd
+    mov     ecx, [rbx]                  # (its size: the workgroups)
+    add     ecx, 7
+    shr     ecx, 3
+    mov     edx, [rbx+4]
+    add     edx, 7
+    shr     edx, 3
+    xchg    ecx, edx
+    mov     edi, 2
+    mov     esi, PT_NBIND
+    call    gpu_run
+    test    eax, eax
+    jz      9f
+    cmp     dword ptr [rip+lv_first], 0 # the scene is up: only the constants
+    je      1f                          #  from now on
+    mov     dword ptr [rip+lv_first], 0
+    xor     ecx, ecx
+2:  inc     ecx
+    cmp     ecx, PT_NBIND
+    jae     1f
+    cmp     ecx, 10
+    jb      3f
+    cmp     ecx, 12
+    jbe     2b
+3:  imul    eax, ecx, GB_SZ
+    mov     dword ptr [r13+rax+GB_FLAGS], 0
+    jmp     2b
+1:  mov     rax, [rip+lv_off+96]
+    add     rax, r13
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret

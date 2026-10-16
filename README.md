@@ -144,7 +144,9 @@ The Material section of Properties shows the active mesh's material.
 - **x** removes it.
 
 The solid viewport shows the base colour; **View › Material Preview** (Shift+Z) shades every pixel
-with the full material under a studio environment. Materials are saved in `.bee` files and exported as MTL next to an OBJ. Scripts use
+with the full material under a studio environment. **View › Rendered** draws the viewport on the GPU
+(the optional helper): a raycast every frame while you orbit or edit, then path-traced samples once
+the view is still ([docs/GPU.md](docs/GPU.md#rendered-shading-the-live-viewport)). Materials are saved in `.bee` files and exported as MTL next to an OBJ. Scripts use
 `material`, `matset`, `matget`, `assign` and `matof`; agents see them in `scene_summary` and use
 the `material.*` operators.
 
@@ -836,6 +838,7 @@ src/env.s       the world: HDRI lookups, importance sampling, SH irradiance
 src/hive.s      Hive path tracer: triangle soup, SAH BVH4, SSE traversal
 src/hive_pt.s   Hive light transport: NEE + MIS, principled BSDF, passes
 src/gpu.s       the optional GPU helper from this side: start, shared memory, fallback
+src/live.s      Rendered shading: the live viewport on the GPU (raycast, then samples)
 src/gpu/        beemodel-gpu: helper.s (Vulkan), pt.comp / raster.comp, spv.s (SPIR-V)
 src/denoise.s   edge-avoiding a-trous denoiser (albedo / normal / depth)
 src/render.s    the Render window and render.* operators

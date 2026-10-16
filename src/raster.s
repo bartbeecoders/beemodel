@@ -61,7 +61,8 @@
 
 .section .data
 .align 4
-vp_shading:     .long 0             # 0 = solid, 1 = wireframe, 2 = material
+vp_shading:     .long 0             # 0 = solid, 1 = wireframe, 2 = material,
+                                    #  3 = rendered (live.s)
 
 .section .bss
 .align 8
@@ -364,7 +365,14 @@ raster_scene:
 .Lrs_post:
     cmp     dword ptr [rip+rs_mode], 0
     jne     .Lrs_out
-    cmp     dword ptr [rip+vp_shading], 2   # material preview: shade
+    cmp     dword ptr [rip+vp_shading], 3   # rendered: the GPU's image
+    jne     2f                              #  (live.s), else as material
+    call    lv_shade                        #  preview
+    test    eax, eax
+    jnz     1f
+    call    preview_shade
+    jmp     1f
+2:  cmp     dword ptr [rip+vp_shading], 2   # material preview: shade
     jne     1f
     call    preview_shade
 1:

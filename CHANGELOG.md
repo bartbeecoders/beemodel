@@ -7,6 +7,23 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Rendered shading:** a fourth viewport shading, drawn on the GPU (the
+  optional `beemodel-gpu` helper). While the view or the scene changes, one
+  raycast a frame: the sun and point lights with hard shadows through the
+  real BSDF, the sky with short-range occlusion and a rough first bounce,
+  mirrors and glass followed. Once the view is still, Hive's path-traced
+  samples accumulate on the GPU up to Preferences › Viewport › Rendered
+  samples (64; 0 keeps the raycast alone), denoised on the GPU every frame
+  (the F12 render's guided à-trous filter; Preferences › Viewport ›
+  Rendered denoise, `view.rendered_denoise`). The selection outline and the
+  overlays stay on top. The scene goes up again only when it changes (a
+  fingerprint of objects, mesh versions, lights, materials and undo steps);
+  a slow-to-build scene waits for the change to end. An F12 render runs
+  beside it. Without the helper Rendered shows Material Preview. In the
+  header, the Z pie, View › Rendered, Properties › Viewport;
+  `view.shading_rendered`, `view.rendered_samples <n>`,
+  `view.rendered_denoise [0|1]`; `gpu(7)`..`gpu(14)`.
+  See [docs/GPU.md](docs/GPU.md#rendered-shading-the-live-viewport).
 - **The AI Assistant's Copy** button (`ai.copy`): the whole conversation on
   the clipboard.
 

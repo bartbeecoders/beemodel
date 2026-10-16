@@ -87,7 +87,7 @@
 .equ PF_SZ,                 220
 .equ MAXDEV,                16
 
-.equ NSLOT,         2
+.equ NSLOT,         3                   # path tracer, rasterizer, live viewport
 .equ NKERN,         3
 .equ SL_BASE,       0                   # a slot: its shared memory, the device
 .equ SL_SIZE,       8                   #   and staging buffers (capacity)
