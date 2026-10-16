@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.14.0/beemodel-0.14.0-linux-x86_64.bin
-chmod +x beemodel-0.14.0-linux-x86_64.bin && ./beemodel-0.14.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.15.0/beemodel-0.15.0-linux-x86_64.bin
+chmod +x beemodel-0.15.0-linux-x86_64.bin && ./beemodel-0.15.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -261,8 +261,11 @@ Scripts and agents call the same operators with the value as the argument:
 `op("mesh.inset", 0.1)`.
 
 Files: **Ctrl+S** saves (`.bee`), **Ctrl+O** opens, and File › Import / Export
-handle **OBJ** (with MTL materials), **STL** and **glTF 2.0** (`.glb` / `.gltf`, with PBR
-materials). For making things there is **3MF** for 3D printers (millimetres,
+handle **OBJ** (with MTL materials), **STL**, **glTF 2.0** (`.glb` / `.gltf`, with PBR
+materials) and **Blender** (`.blend`). Blender files from 2.80 to 5.x open natively,
+compressed ones too: their meshes, UVs, cameras, lights, and materials with their images.
+They save through Blender, run in the background ([docs/BLEND.md](docs/BLEND.md)). Files
+dropped on the window are imported by their kind. For making things there is **3MF** for 3D printers (millimetres,
 Z up), **DXF** and **SVG** of a sketch, and **PDF** drawings (front / top /
 right views with hidden lines and dimensions). Commands take paths on the command line, for
 example `file.save ~/BeeModel/chair.bee` or `file.import_stl ~/part.stl`.
@@ -845,6 +848,8 @@ src/exr.s       OpenEXR writer (half floats, ZIP)
 src/formats.s   .bee files, OBJ / STL import + export, file operators
 src/mtl.s       MTL import (OBJ materials)
 src/gltf.s      glTF 2.0 import / export
+src/blend.s     Blender files: the .blend reader (SDNA, blocks, meshes, materials)
+src/blendx.s    saving .blend files through Blender
 src/expr.s      expressions with units
 src/cad.s       the CAD document: units, parameters, the feature records
 src/sketch.s    sketches and the constraint solver
