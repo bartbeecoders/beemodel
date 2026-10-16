@@ -19,6 +19,9 @@
 .globl mcp_init
 .globl mcp_shutdown
 .globl mcp_pollfds
+.globl mcp_local
+.globl mcp_listening
+.globl sock_path
 .globl mcp_handle
 .globl mcp_bridge
 .globl mcp_clients
@@ -129,6 +132,7 @@ r_false:        .asciz "false"
 r_res_list:     .asciz "{\"resources\":[{\"uri\":\"bee://scene\",\"name\":\"Scene\",\"description\":\"Objects, transforms and mesh sizes as JSON\",\"mimeType\":\"application/json\"},{\"uri\":\"bee://graphs\",\"name\":\"Node graphs\",\"description\":\"Every geometry node tree (nodes, links, constants, values) and the co-pilot proposal's state as JSON\",\"mimeType\":\"application/json\"}]}"
 r_res_ga:       .asciz "{\"contents\":[{\"uri\":\"bee://graphs\",\"mimeType\":\"application/json\",\"text\":"
 s_uri_graphs:   .asciz "bee://graphs"
+s_build_world:  .asciz "build_world"
 m_prompts_list: .asciz "prompts/list"
 m_prompts_get:  .asciz "prompts/get"
 k_goal:         .asciz "goal"
@@ -517,8 +521,31 @@ client_read:
     pop     rbx
     ret
 
-# send_out - write the response buffer to the current client
+# mcp_local(rdi=request text, rsi=length) -> rax = the response, rdx = its
+#   length (valid until the next message): the AI Assistant's tool calls,
+#   run as a client's would be (the same permission, undo, activity)
+mcp_local:
+    push    rbx
+    mov     ebx, [rip+cur_client]
+    mov     dword ptr [rip+cur_client], -1
+    call    handle_message
+    mov     [rip+cur_client], ebx
+    mov     rax, [rip+out_state]
+    mov     rdx, [rip+out_state+8]
+    pop     rbx
+    ret
+
+# mcp_listening -> eax = 1 while agents can connect (the socket is open)
+mcp_listening:
+    xor     eax, eax
+    cmp     dword ptr [rip+lsock], 0
+    setge   al
+    ret
+
+# send_out - write the response buffer to the current client (none: kept)
 send_out:
+    cmp     dword ptr [rip+cur_client], 0
+    jl      .Lso_none
     push    rbx
     push    r12
     mov     ecx, [rip+cur_client]
@@ -543,6 +570,7 @@ send_out:
     jmp     1b
 9:  pop     r12
     pop     rbx
+.Lso_none:
     ret
 
 # -----------------------------------------------------------------------------
@@ -720,9 +748,19 @@ handle_message:
     lea     rsi, [rip+r_result]
     call    wb_str
     mov     byte ptr [rip+sbuf1], 0
+    mov     byte ptr [rip+sbuf2], 0
     mov     rsi, [rip+params]
     test    rsi, rsi
     jz      1f
+    lea     rdi, [rip+k_name]           # (which prompt)
+    call    j_find
+    test    rax, rax
+    jz      12f
+    mov     rsi, rax
+    lea     rdi, [rip+sbuf2]
+    mov     edx, 64
+    call    j_str
+12: mov     rsi, [rip+params]
     lea     rdi, [rip+k_arguments]
     call    j_find
     test    rax, rax
@@ -736,8 +774,15 @@ handle_message:
     lea     rdi, [rip+sbuf1]
     mov     edx, 500
     call    j_str
-1:  lea     rsi, [rip+sbuf1]
-    call    cp_prompt_get
+1:  lea     rdi, [rip+sbuf2]
+    lea     rsi, [rip+s_build_world]
+    call    str_eq
+    lea     rsi, [rip+sbuf1]
+    test    eax, eax
+    jz      13f
+    call    ai_world_get
+    jmp     .Lhm_end
+13: call    cp_prompt_get
     jmp     .Lhm_end
 .Lhm_rread:
     lea     rsi, [rip+r_result]

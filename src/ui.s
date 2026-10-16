@@ -163,7 +163,8 @@ items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_ren
 .equ items_render_n, (. - items_render) / 8
 items_help:     .quad op_help_keys, op_welcome, op_area_type_help, 0, op_console_ops, op_help_about
 .equ items_help_n, (. - items_help) / 8
-items_ai:       .quad op_view_activity, op_agent_revert, 0
+items_ai:       .quad op_ai_mode, op_ai_stop, op_ai_new, 0
+                .quad op_view_activity, op_agent_revert, 0
                 .quad op_agent_read, op_agent_edit, op_agent_files
 .equ items_ai_n, (. - items_ai) / 8
 sub_import_l:   .quad op_import_obj, op_import_stl, op_import_gltf, op_import_step

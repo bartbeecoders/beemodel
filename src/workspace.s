@@ -18,6 +18,7 @@
 .globl wsp_init
 .globl wsp_tabs_draw
 .globl wsp_write
+.globl wsp_ai
 .globl wsp_read
 .globl wsp_persist
 .globl wsp_area_drop
@@ -78,6 +79,7 @@ n_shading:      .asciz "Shading"
 n_anim:         .asciz "Animation"
 n_world:        .asciz "World"
 n_custom:       .asciz "Custom"
+n_ai:           .asciz "AI"
 s_ws_full:      .asciz "  12 workspaces at most"
 s_ws_last:      .asciz "  the last workspace cannot go"
 s_ws_bad:       .asciz "  workspace.set <number from 1 | name>"
@@ -131,6 +133,14 @@ lay_world:
     NODE K_LEAF,   ED_PROPS,    0,       0,     0, 0
     NODE K_LEAF,   ED_VIEWPORT, 1,       0,     0, 0
     NODE K_LEAF,   ED_ASSETS,   1,       0,     0, 0
+    .long -1
+# AI (made by ai.mode): viewport | (AI Assistant / outliner)
+lay_ai:
+    NODE K_HSPLIT, 0,           NO_NODE, 40000, 1, 2
+    NODE K_LEAF,   ED_VIEWPORT, 0,       0,     0, 0
+    NODE K_VSPLIT, 0,           0,       47000, 3, 4
+    NODE K_LEAF,   ED_AI,       2,       0,     0, 0
+    NODE K_LEAF,   ED_OUTLINER, 2,       0,     0, 0
     .long -1
 
 .text
@@ -287,6 +297,72 @@ wsp_switch:
     call    wsp_give
     call    wsp_persist
 9:  pop     rbx
+    ret
+
+# wsp_ai - the AI workspace shown (made the first time: a viewport, the AI
+#   Assistant and the outliner)
+wsp_ai:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx                    # there already?
+1:  cmp     ebx, [rip+wsp_n]
+    jae     2f
+    mov     edi, ebx
+    call    wsp_rec
+    lea     rdi, [rax+WS_NAME]
+    lea     rsi, [rip+n_ai]
+    call    str_eq
+    test    eax, eax
+    jnz     8f
+    inc     ebx
+    jmp     1b
+2:  cmp     ebx, WS_MAX
+    jae     9f
+    mov     edi, [rip+wsp_cur]          # this one kept, copied (its cameras)
+    call    wsp_take
+    mov     edi, [rip+wsp_cur]
+    call    wsp_rec
+    mov     r12, rax
+    mov     edi, ebx
+    call    wsp_rec
+    mov     rdi, rax
+    mov     rsi, r12
+    mov     ecx, WS_SZ
+    rep     movsb
+    mov     edi, ebx
+    call    wsp_rec
+    mov     r12, rax
+    lea     rdi, [r12+WS_NAME]
+    lea     rsi, [rip+n_ai]
+    call    wcpy
+    lea     rdi, [r12+WS_NODES]         # its layout
+    xor     eax, eax
+    mov     ecx, MAX_NODES*N_SZ
+    rep     stosb
+    lea     rdi, [r12+WS_NODES]
+    lea     rsi, [rip+lay_ai]
+3:  cmp     dword ptr [rsi], -1
+    je      4f
+    mov     ecx, N_SZ
+    rep     movsb
+    jmp     3b
+4:  mov     dword ptr [r12+WS_ROOT], 0
+    mov     dword ptr [r12+WS_MAXED], -1
+    mov     dword ptr [r12+WS_ACT], 3   # (the AI Assistant)
+    mov     dword ptr [r12+WS_VP], 1
+    inc     dword ptr [rip+wsp_n]
+    mov     [rip+wsp_cur], ebx          # (this one was just kept)
+    mov     edi, ebx
+    call    wsp_give
+    call    wsp_persist
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+8:  mov     edi, ebx
+    call    wsp_switch
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
     ret
 
 # ---- operators ----------------------------------------------------------------------

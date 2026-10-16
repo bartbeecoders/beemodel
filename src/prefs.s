@@ -845,6 +845,9 @@ WIDGET wd_pf_orkey, WK_TEXT, "prefs.openrouter_key", "API key", flags=WGF_SECRET
 WIDGET wd_pf_ormodel, WK_TEXT, "prefs.openrouter_model", "Model", cb=cb_ormodel, tip="Any OpenRouter model id with tool calling, such as anthropic/claude-sonnet-4.5 or openai/gpt-4.1"
 WIDGET wd_pf_orurl, WK_TEXT, "prefs.openrouter_url", "Address", cb=cb_orurl, tip="The API's address (another OpenAI-compatible server works too)"
 WIDGET wd_pf_orsteps, WK_INT, "prefs.openrouter_steps", "Steps at most", 1.0, 500.0, 0.2, 0, WGF_CLAMP, cb=save_cb, tip="How many rounds of tool calls one request may take"
+WIDGET wd_pf_cltest, WK_BUTTON, "prefs.claude_test", "Test Claude Code", tip="Run claude --version: the answer shows as a message"
+WIDGET wd_pf_gktest, WK_BUTTON, "prefs.grok_test", "Test Grok", tip="Run grok --version: the answer shows as a message"
+WIDGET wd_pf_ortest, WK_BUTTON, "prefs.openrouter_test", "Test OpenRouter", tip="Ask OpenRouter whether the key works (it costs nothing)"
 WIDGET wd_pf_aiextra, WK_TEXT, "prefs.ai_prompt", "Also tell the AI", cb=cb_aiextra, tip="Text added to every request's instructions (a style, units, what to avoid)"
 
 .section .rodata
@@ -1502,6 +1505,15 @@ pf_reset:
     lea     r8, [rip+ai_cl_turns]
     xor     edx, edx
     call    pf_item
+    lea     rdi, [rip+wd_pf_cltest]
+    xor     r8d, r8d
+    xor     edx, edx
+    call    pf_item
+    test    eax, eax
+    jz      71f
+    mov     edi, 0
+    call    ai_test
+71:
     lea     rdx, [rip+s_h_gk]
     call    pf_head
     lea     rdi, [rip+wd_pf_gkpath]
@@ -1516,6 +1528,15 @@ pf_reset:
     lea     r8, [rip+ai_gk_turns]
     xor     edx, edx
     call    pf_item
+    lea     rdi, [rip+wd_pf_gktest]
+    xor     r8d, r8d
+    xor     edx, edx
+    call    pf_item
+    test    eax, eax
+    jz      72f
+    mov     edi, 1
+    call    ai_test
+72:
     lea     rdx, [rip+s_h_or]
     call    pf_head
     lea     rdi, [rip+wd_pf_orkey]
@@ -1534,6 +1555,15 @@ pf_reset:
     lea     r8, [rip+ai_or_steps]
     xor     edx, edx
     call    pf_item
+    lea     rdi, [rip+wd_pf_ortest]
+    xor     r8d, r8d
+    xor     edx, edx
+    call    pf_item
+    test    eax, eax
+    jz      73f
+    mov     edi, 2
+    call    ai_test
+73:
     lea     rdx, [rip+s_h_agents]
     call    pf_head
     mov     eax, [rip+pr_tier]
