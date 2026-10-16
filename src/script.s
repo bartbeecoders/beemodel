@@ -256,6 +256,11 @@ keywords:       .ascii "fn\0\0\0\0\0\0"
                 .quad TK_PI
 keywords_end:
 # object properties for get / set
+# (lcam.s records: 0 uid, 4 power, 8 colour, 20 lens; its defaults)
+.equ PR_LC,     0x10000
+.align 4
+lc_defaults:    .long 0
+                .float 1.0, 1.0, 1.0, 1.0, 50.0
 props:          .ascii "x\0\0\0\0\0\0\0"
                 .quad OB_LOC
                 .ascii "y\0\0\0\0\0\0\0"
@@ -276,6 +281,16 @@ props:          .ascii "x\0\0\0\0\0\0\0"
                 .quad OB_SCALE+8
                 .ascii "color\0\0\0"          # 0xRRGGBB, an integer
                 .quad OB_COLOR
+                .ascii "lens\0\0\0\0"           # cameras and lights (lcam.s):
+                .quad PR_LC+20              #  the lens (mm),
+                .ascii "power\0\0\0"          #  the power (x the default),
+                .quad PR_LC+4
+                .ascii "lr\0\0\0\0\0\0"           #  the colour (linear)
+                .quad PR_LC+8
+                .ascii "lg\0\0\0\0\0\0"
+                .quad PR_LC+12
+                .ascii "lb\0\0\0\0\0\0"
+                .quad PR_LC+16
 props_end:
 
 # builtins: name, handler, min args, max args
@@ -4105,7 +4120,17 @@ b_get:
     call    a_obj
     mov     edi, eax
     call    obj_get
-    cmp     r12d, OB_COLOR
+    cmp     r12d, PR_LC                 # a camera's or light's setting
+    jb      3f
+    mov     edi, [rax+OB_UID]
+    call    lc_get
+    sub     r12d, PR_LC
+    lea     rcx, [rip+lc_defaults]
+    test    rax, rax
+    cmovz   rax, rcx
+    cvtss2sd xmm0, [rax+r12]
+    jmp     2f
+3:  cmp     r12d, OB_COLOR
     jne     1f
     mov     eax, [rax+r12]
     and     eax, 0xffffff
@@ -4143,8 +4168,16 @@ b_set:
     call    undo_push
     mov     edi, r13d
     call    obj_get
-    movss   xmm0, [rsp]
+    cmp     r12d, PR_LC                 # a camera's or light's setting
+    jb      3f
+    mov     edi, [rax+OB_UID]
+    call    lc_rec_own
+    test    rax, rax
+    jz      4f
+    sub     r12d, PR_LC
+3:  movss   xmm0, [rsp]
     movss   [rax+r12], xmm0
+4:
     mov     dword ptr [rip+dirty], 1
     add     rsp, 16
     pop     r13

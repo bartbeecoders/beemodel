@@ -557,6 +557,7 @@ e_stl:          .asciz "stl"
 e_gltf:         .asciz "gltf"
 e_glb:          .asciz "glb"
 e_step:         .asciz "step"
+e_blend:        .asciz "blend"
 e_stp:          .asciz "stp"
 e_3mf:          .asciz "3mf"
 e_dxf:          .asciz "dxf"
@@ -574,6 +575,7 @@ n_scene_obj:    .asciz "scene.obj"
 n_scene_stl:    .asciz "scene.stl"
 n_scene_glb:    .asciz "scene.glb"
 n_part_step:    .asciz "part.step"
+n_scene_blend:  .asciz "scene.blend"
 n_part_3mf:     .asciz "part.3mf"
 n_sketch_dxf:   .asciz "sketch.dxf"
 n_sketch_svg:   .asciz "sketch.svg"
@@ -586,6 +588,7 @@ x_obj:          .quad e_obj, 0
 x_stl:          .quad e_stl, 0
 x_gltf:         .quad e_glb, e_gltf, 0
 x_step:         .quad e_step, e_stp, 0
+x_blend:        .quad e_blend, 0
 x_3mf:          .quad e_3mf, 0
 x_dxf:          .quad e_dxf, 0
 x_svg:          .quad e_svg, 0
@@ -606,6 +609,7 @@ PATHFORM form_iobj, "file.import_obj", 0, x_obj
 PATHFORM form_istl, "file.import_stl", 0, x_stl
 PATHFORM form_igltf, "file.import_gltf", 0, x_gltf
 PATHFORM form_istep, "file.import_step", 0, x_step
+PATHFORM form_iblend, "file.import_blend", 0, x_blend
 PATHFORM form_eobj, "file.export_obj", 1, x_obj, n_scene_obj, WGF_EXPORT|WGF_EXPAXIS
 PATHFORM form_estl, "file.export_stl", 1, x_stl, n_scene_stl, WGF_EXPORT|WGF_EXPAXIS
 PATHFORM form_egltf, "file.export_gltf", 1, x_gltf, n_scene_glb, WGF_EXPORT
