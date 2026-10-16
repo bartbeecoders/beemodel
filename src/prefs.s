@@ -38,6 +38,7 @@
 .globl pr_capture
 .globl prefs_key
 .globl ed_prefs_draw
+.globl pr_scene_defaults
 .globl prefs_dlg_draw
 
 .equ MAXK,      128
@@ -54,6 +55,13 @@ pr_jit:         .long 1
 pr_mcp:         .long 1
 pr_tier:        .long -1                # the agents' permission at start (-1: env)
 tip_ms:         .long 500               # the rest before a tooltip
+pr_grid:        .float 1.0              # Viewport: grid spacing (m), field of
+pr_fov:         .long 50                #  view (degrees, vertical), clip start
+pr_near:        .float 0.05             #  (m)
+pr_rw:          .long 960               # Rendering: new scenes' size, samples,
+pr_rh:          .long 540               #  denoise
+pr_rspp:        .long 128
+pr_rdn:         .long 1
 
 .section .bss
 .align 8
@@ -85,6 +93,7 @@ s_h_system:     .asciz "System"
 s_h_files:      .asciz "Files"
 s_h_ai:         .asciz "AI"
 s_restart:      .asciz "Takes effect when BeeModel starts again."
+s_rn_hint:      .asciz "For new scenes: a scene keeps its own (the Render area)."
 s_press:        .asciz "press a key (Esc: never mind)"
 s_none:         .asciz "-"
 s_taken:        .asciz "  that key is also: "
@@ -117,6 +126,14 @@ w_tier:         .asciz "agent_permission"
 w_key:          .asciz "key"
 w_welcome:      .asciz "welcome"
 w_cbaxes:       .asciz "colorblind_axes"
+w_grid:         .asciz "grid"
+w_gridsz:       .asciz "grid_size"
+w_fov:          .asciz "fov"
+w_near:         .asciz "clip_start"
+w_rw:           .asciz "render_width"
+w_rh:           .asciz "render_height"
+w_rspp:         .asciz "render_samples"
+w_rdn:          .asciz "render_denoise"
 .align 8
 l_tabs:         .quad s_h_interface, s_h_input, s_h_keymap, s_h_system, s_h_files, s_h_ai
 l_theme:        .quad s_dark, s_light, s_contrast
@@ -128,7 +145,10 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_orbit, pr_orbit, 1, w_autosave, pr_autosave, 0
                 .quad w_threads, pr_threads, 0, w_jit, pr_jit, 0, w_mcp, pr_mcp, 0
                 .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0
-                .quad w_welcome, pr_welcome, 0, w_cbaxes, pr_cbaxes, 0, 0
+                .quad w_welcome, pr_welcome, 0, w_cbaxes, pr_cbaxes, 0
+                .quad w_grid, show_grid, 0, w_gridsz, pr_grid, 1, w_fov, pr_fov, 0
+                .quad w_near, pr_near, 1, w_rw, pr_rw, 0, w_rh, pr_rh, 0
+                .quad w_rspp, pr_rspp, 0, w_rdn, pr_rdn, 0, 0
 
 .section .data
 .align 4
@@ -463,7 +483,48 @@ pr_apply:
     jbe     3f
     xor     edi, edi
 3:  call    th_set
+    movss   xmm0, [rip+pr_grid]         # the viewport: grid, clip, field of view
+    maxss   xmm0, [rip+pf_gmin]
+    movss   [rip+pr_grid], xmm0
+    movss   [rip+vp_grid], xmm0
+    movss   xmm0, [rip+pr_near]
+    maxss   xmm0, [rip+pf_nmin]
+    movss   [rip+pr_near], xmm0
+    movss   [rip+vp_near], xmm0
+    mov     eax, [rip+pr_fov]           # 10 .. 120 degrees: k = 0.5 / tan(fov / 2)
+    cmp     eax, 10
+    jge     4f
+    mov     eax, 10
+4:  cmp     eax, 120
+    jle     5f
+    mov     eax, 120
+5:  mov     [rip+pr_fov], eax
+    mov     dword ptr [rip+vp_focal_k], 0x3f88f5c3  # (50: the lens it always had)
+    cmp     eax, 50
+    je      6f
+    mov     [rsp], eax
+    fild    dword ptr [rsp]
+    fmul    dword ptr [rip+pf_deg2]
+    fptan
+    fstp    st(0)
+    fld     dword ptr [rip+pf_half]
+    fdivrp  st(1), st(0)
+    fstp    dword ptr [rip+vp_focal_k]
+6:  mov     dword ptr [rip+dirty], 1
     add     rsp, 8
+    ret
+
+# pr_scene_defaults - a new scene's render settings: the preferences' (a leaf:
+#   scene_defaults calls it unaligned)
+pr_scene_defaults:
+    mov     eax, [rip+pr_rw]
+    mov     [rip+rn_w], eax
+    mov     eax, [rip+pr_rh]
+    mov     [rip+rn_h], eax
+    mov     eax, [rip+pr_rspp]
+    mov     [rip+rn_spp], eax
+    mov     eax, [rip+pr_rdn]
+    mov     [rip+rn_denoise], eax
     ret
 
 # prefs_save - the file, from the values now
@@ -554,11 +615,21 @@ pcpy:                                   # rdi = dest, rsi = text -> rdi at its 0
 # =============================================================================
 WIDGET wd_pf_find, WK_TEXT, "prefs.search", "Search", tip="Find a setting in every category (its name or what it does)"
 WIDGET wd_pf_c0, WK_ROW, "prefs.category.interface", "Interface"
-WIDGET wd_pf_c1, WK_ROW, "prefs.category.input", "Input"
-WIDGET wd_pf_c2, WK_ROW, "prefs.category.keymap", "Keymap"
-WIDGET wd_pf_c3, WK_ROW, "prefs.category.system", "System"
-WIDGET wd_pf_c4, WK_ROW, "prefs.category.files", "Files"
-WIDGET wd_pf_c5, WK_ROW, "prefs.category.ai", "AI"
+WIDGET wd_pf_c1, WK_ROW, "prefs.category.viewport", "Viewport"
+WIDGET wd_pf_c2, WK_ROW, "prefs.category.input", "Input"
+WIDGET wd_pf_c3, WK_ROW, "prefs.category.keymap", "Keymap"
+WIDGET wd_pf_c4, WK_ROW, "prefs.category.rendering", "Rendering"
+WIDGET wd_pf_c5, WK_ROW, "prefs.category.system", "System"
+WIDGET wd_pf_c6, WK_ROW, "prefs.category.files", "Files"
+WIDGET wd_pf_c7, WK_ROW, "prefs.category.ai", "AI"
+WIDGET wd_pf_grid, WK_TOGGLE, "prefs.grid", "Ground grid and axes", cb=save_cb, tip="The floor grid and the X / Z axes in the 3D viewport (Shift+G)"
+WIDGET wd_pf_gridsz, WK_FLOAT, "prefs.grid_size", "Grid spacing (m)", 0.01, 1000.0, 0.01, 2, WGF_CLAMP, cb=apply_cb, tip="The distance between the grid's lines (every fifth is brighter)"
+WIDGET wd_pf_fov, WK_INT, "prefs.fov", "Field of view (degrees)", 10.0, 120.0, 0.2, 0, WGF_CLAMP, cb=apply_cb, tip="How wide the 3D viewport sees, top to bottom (50: a normal lens)"
+WIDGET wd_pf_near, WK_FLOAT, "prefs.clip_start", "Clip start (m)", 0.001, 10.0, 0.001, 3, WGF_CLAMP, cb=apply_cb, tip="Nothing closer to the viewport's eye than this is drawn"
+WIDGET wd_pf_rw, WK_INT, "prefs.render_width", "Width (px)", 16.0, 8192.0, 1.0, 0, WGF_CLAMP, cb=save_cb, tip="New scenes render this wide (each scene keeps its own)"
+WIDGET wd_pf_rh, WK_INT, "prefs.render_height", "Height (px)", 16.0, 8192.0, 1.0, 0, WGF_CLAMP, cb=save_cb, tip="New scenes render this high"
+WIDGET wd_pf_rspp, WK_INT, "prefs.render_samples", "Samples", 1.0, 65536.0, 1.0, 0, WGF_CLAMP, cb=save_cb, tip="New scenes' samples per pixel"
+WIDGET wd_pf_rdn, WK_TOGGLE, "prefs.render_denoise", "Denoise the finished render", cb=save_cb, tip="New scenes clean up the noise when a render ends"
 WIDGET wd_pf_reset, WK_BUTTON, "prefs.reset", "Reset to Defaults", tip="Every setting of this category back to how BeeModel comes"
 WIDGET wd_pf_close, WK_BUTTON, "prefs.close", "Close", flags=WGF_PRIMARY, aux=op_dlg_cancel, tip="Close the preferences (Esc): every change is already kept"
 WIDGET wd_pf_scroll, WK_SCROLL, "prefs.page"
@@ -582,15 +653,17 @@ WIDGET wd_pf_mcp,  WK_TOGGLE, "prefs.mcp", "Listen for MCP clients (AI agents)",
 
 .section .rodata
 .align 8
-pf_cats:        .quad wd_pf_c0, wd_pf_c1, wd_pf_c2, wd_pf_c3, wd_pf_c4, wd_pf_c5
-pf_pages:       .quad .Lpf_interface, .Lpf_input, .Lpf_keymap, .Lpf_system, .Lpf_files, .Lpf_ai
+pf_cats:        .quad wd_pf_c0, wd_pf_c1, wd_pf_c2, wd_pf_c3, wd_pf_c4, wd_pf_c5, wd_pf_c6, wd_pf_c7
+pf_pages:       .quad .Lpf_interface, .Lpf_viewport, .Lpf_input, .Lpf_keymap, .Lpf_render, .Lpf_system, .Lpf_files, .Lpf_ai
 # the defaults, by category: category, variable, value (Reset to Defaults)
 pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxes, 0
-                .quad 1, pr_emu3, 0, 1, pr_orbit, 0x3f800000
-                .quad 2, pr_nkey, 0
-                .quad 3, pr_threads, 0, 3, pr_jit, 1, 3, pr_gpu_on, 1
-                .quad 4, pr_autosave, 25
-                .quad 5, pr_tier, -1, 5, pr_mcp, 1
+                .quad 1, show_grid, 1, 1, pr_grid, 0x3f800000, 1, pr_fov, 50, 1, pr_near, 0x3d4ccccd
+                .quad 2, pr_emu3, 0, 2, pr_orbit, 0x3f800000
+                .quad 3, pr_nkey, 0
+                .quad 4, pr_rw, 960, 4, pr_rh, 540, 4, pr_rspp, 128, 4, pr_rdn, 1
+                .quad 5, pr_threads, 0, 5, pr_jit, 1, 5, pr_gpu_on, 1
+                .quad 6, pr_autosave, 25
+                .quad 7, pr_tier, -1, 7, pr_mcp, 1
                 .quad -1
 s_pf_title:     .asciz "Preferences"
 s_pf_found:     .asciz "Settings found"
@@ -599,6 +672,11 @@ s_pf_hint:      .asciz "Search settings"
 c_theme:        .asciz "Theme"
 c_scale:        .asciz "UI scale"
 c_tier:         .asciz "AI agents may"
+.align 4
+pf_gmin:        .float 0.01
+pf_nmin:        .float 0.001
+pf_deg2:        .float 0.008726646          # pi / 360: half the angle, radians
+pf_half:        .float 0.5
 .text
 
 # pf_body(edi=x, esi=y, edx=w, ecx=h) - the category list (with the search
@@ -654,7 +732,7 @@ pf_body:
     mov     byte ptr [rip+pr_find], 0
     mov     dword ptr [rip+pr_scroll], 0
 0:  xor     r13d, r13d                  # the categories
-1:  cmp     r13d, 6
+1:  cmp     r13d, 8
     jae     2f
     lea     rax, [rip+pf_cats]
     mov     rdi, [rax+r13*8]
@@ -794,7 +872,7 @@ pf_page:
     cmp     byte ptr [rip+pr_find], 0   # its title (or the search's)
     jne     1f
     mov     eax, [rip+pr_tab]
-    cmp     eax, 5
+    cmp     eax, 7
     jbe     71f
     xor     eax, eax
     mov     [rip+pr_tab], eax
@@ -844,7 +922,7 @@ pf_page:
     jmp     .Lpf_done
 .Lpf_all:                               # searching: every category's matches
     xor     ebx, ebx
-4:  cmp     ebx, 6
+4:  cmp     ebx, 8
     jae     5f
     lea     rcx, [rip+pf_pages]
     call    [rcx+rbx*8]
@@ -985,6 +1063,52 @@ pf_reset:
     xor     edx, edx
     call    pf_item
     pop     rbx
+    ret
+
+.Lpf_viewport:
+    push    rbx
+    lea     rdi, [rip+wd_pf_grid]
+    lea     r8, [rip+show_grid]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_gridsz]
+    lea     r8, [rip+pr_grid]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_fov]
+    lea     r8, [rip+pr_fov]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_near]
+    lea     r8, [rip+pr_near]
+    xor     edx, edx
+    call    pf_item
+    pop     rbx
+    ret
+
+.Lpf_render:
+    push    rbx
+    lea     rdi, [rip+wd_pf_rw]
+    lea     r8, [rip+pr_rw]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_rh]
+    lea     r8, [rip+pr_rh]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_rspp]
+    lea     r8, [rip+pr_rspp]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_rdn]
+    lea     r8, [rip+pr_rdn]
+    xor     edx, edx
+    call    pf_item
+    cmp     byte ptr [rip+pr_find], 0
+    jne     1f
+    lea     rdx, [rip+s_rn_hint]
+    call    pnl_hint
+1:  pop     rbx
     ret
 
 .Lpf_input:
@@ -1198,6 +1322,12 @@ has_word:
     ret
 
 # ---- callbacks: a change is saved at once ------------------------------------------
+apply_cb:                               # (what it means now: the viewport)
+    sub     rsp, 8
+    call    pr_apply
+    call    prefs_save
+    add     rsp, 8
+    ret
 save_cb:
     sub     rsp, 8
     call    prefs_save
