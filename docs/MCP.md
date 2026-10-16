@@ -83,6 +83,18 @@ An agent builds node setups as a **proposal** the user previews:
 
 Opening, closing and reading a proposal need only the read permission. Building it needs the edit permission, as usual.
 
+## Prompts
+
+- `procedural {goal}` gives an agent the co-pilot flow above for a goal.
+- `build_world {goal?}` gives an agent BeeModel's own AI Assistant instructions:
+  - the scene conventions;
+  - the look, plan, build, check loop;
+  - BeeScript recipes for primitives, materials, terrain and scattering, lights and a camera.
+
+  The AI Assistant inside the app sends the same text with every request (see [AI.md](AI.md)).
+
+The AI Assistant itself calls these tools in-process when it uses OpenRouter, under the same permission, undo and AI Activity as any client. `op_ai_transcript` reads its conversation.
+
 ## Protocol details
 
 * **Transport and format.**

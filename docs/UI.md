@@ -26,7 +26,7 @@ The window is split into **areas**. Each area has a header with its editor type 
 - **Join** two areas: drag an area's top-left corner into its neighbour.
 - **Workspaces** are saved layouts: Modeling, Sculpt, CAD, Shading, Animation and World, plus your own (**+** after the tabs). Switch with a click on a tab or with Ctrl+PageUp / PageDown. They are saved in `.bee` files and remembered for the next session.
 
-Editor types: 3D Viewport, Tools, Outliner, Properties, Console, Timeline, Dope Sheet, Graph Editor, Node Editor, UV Editor, Render, Asset Browser, AI Activity, Versions, Preferences and Help.
+Editor types: 3D Viewport, Tools, Outliner, Properties, Console, Timeline, Dope Sheet, Graph Editor, Node Editor, UV Editor, Render, Asset Browser, AI Activity, AI Assistant, Versions, Preferences and Help.
 
 ## Mouse and keyboard rules
 
@@ -136,6 +136,18 @@ Messages show as **toasts** above the status bar for four seconds:
 - **amber** for problems.
 
 Click a toast to open the console.
+
+## AI Assistant
+
+**Ctrl+Shift+Space** (or **AI › AI Assistant**) goes to the AI Assistant's prompt. The first time, it makes the **AI** workspace: a viewport, the AI Assistant and the outliner. The area holds:
+
+- the connection (Claude Code, Grok or OpenRouter);
+- **New**, which starts a new conversation;
+- **Revert**, which undoes the AI's last request: one step;
+- the transcript;
+- the prompt. **Enter** or **Send** sends it, and **Stop** ends a request that is running.
+
+Connections are set up and tested in Preferences › AI. The guide is [AI.md](AI.md).
 
 ## Preferences
 
