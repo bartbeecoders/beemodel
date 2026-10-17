@@ -48,6 +48,8 @@
 .equ RB_UID,    0
 .equ RB_TYPE,   4                       # 1 active, 2 passive
 .equ RB_SHAPE,  8                       # 0 box 1 sphere 2 capsule 3 hull 4 compound
+                                        #  5 mesh 6 plane (passive; moving ones:
+                                        #  compound, box)
 .equ RB_MASS,   12
 .equ RB_FRIC,   16
 .equ RB_REST,   20
@@ -84,6 +86,7 @@
 .equ BD_DAMP,   268
 .equ BD_JOINT,  272                     # in a joint (no contact with its partner)
 .equ BD_INST,   276                     # an instance: its index + 1 (0: an object)
+.equ BD_BVH,    280                     # a mesh: its triangles' tree (root + 1)
 .equ BD_SCL,    288                     # its scale (instances: their own)
 .equ BD_SZ,     304
 # a part (collide.s)
@@ -94,8 +97,14 @@
 .equ PT_BODY,   20
 .equ PT_HALF,   32
 .equ PT_OFF,    48
+.equ PT_FLG,    24                      # 1: a mesh's triangle; | its edges that
+                                        #  are active (bits 1-3: 0-1, 1-2, 2-0)
+.equ PT_TW,     28                      # a triangle: its corners' slot (world)
 .equ PT_SZ,     64
 .equ PT_MAXB,   16                      # parts a body
+.equ BV_SZ,     32                      # a tree node: min, left (| 1 << 31: a
+                                        #  leaf, its first); max, right (a
+                                        #  leaf: how many)
 .equ HULL_MAX,  64                      # points a hull part
 # a proxy (collide.s)
 .equ PX_C,      48
@@ -245,6 +254,7 @@ rx_xy:          .long -1, -1, 0, 0
 rx_yz:          .long 0, -1, -1, 0
 rx_tiny4:       .float 1e-9, 1e-9, 1e-9, 1
 rx_ident:       .float 1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0
+rx_1e4:         .float 10000, 10000, 10000, 0
 rx_marg4:       .float 0.04, 0.04, 0.04, 0
 rx_big4:        .float 1e30, 1e30, 1e30, 0
 rx_nbig4:       .float -1e30, -1e30, -1e30, 0
@@ -287,6 +297,7 @@ rx_quarter:     .float 0.25
 rx_two:         .float 2.0
 rx_tiny:        .float 1.0e-9
 rx_tiny2:       .float 1e-12
+rx_cos5:        .float 0.9962                # (5 degrees)
 rx_small:       .float 1.0e-6
 rx_margin:      .float 0.02                 # contacts begin this far apart
 rx_keep:        .float 0.04                 # points kept this far apart,
@@ -338,6 +349,9 @@ rb_gsh:         .skip 4                 # 64 - log2 buckets
 rb_gn:          .skip 4                 # entries this step
 rb_gnbig:       .skip 4
 rb_npair:       .skip 4
+rb_nbvh:        .skip 4                 # (nodes, triangles placed)
+rb_nbvi:        .skip 4
+rb_xparts:      .skip 4                 # meshes' triangles in all
 rb_cappair:     .skip 4
 rb_gcs:         .skip 4                 # the cell's size,
 rb_ginv:        .skip 4                 #  1 / it
@@ -363,6 +377,10 @@ rb_bsrt:        .skip 8                 #  by colour,
 rb_bcol:        .skip 8                 #  their colours,
 rb_bmask:       .skip 8                 #  the colours at each body (64 bits)
 rb_bcst:        .skip 8                 #  each colour's start (66)
+rb_bvh:         .skip 8                 # meshes' trees: nodes,
+rb_bvi:         .skip 8                 #  their triangles (parts), in order,
+rb_bvb:         .skip 8                 #  those triangles' bounds
+rb_tvw:         .skip 8                 #  their corners (world, 3 vec4)
 rb_stg:         .skip 8                 # a big island's step: its stages,
 rb_scnt:        .skip 8                 #  each one's claimed / done blocks
 rb_nstg:        .skip 4
@@ -663,7 +681,12 @@ body_bounds:
     add     r13, [rip+rb_pt]
 1:  test    r12d, r12d
     jz      2f
-    movaps  xmm0, [r13+PT_OFF]          # centre = P + R off
+    cmp     dword ptr [r13+PT_TYPE], 2  # a plane: without end
+    jne     11f
+    movaps  xmm6, [rip+rx_nbig4]
+    movaps  xmm7, [rip+rx_big4]
+    jmp     2f
+11: movaps  xmm0, [r13+PT_OFF]          # centre = P + R off
     MV3     xmm1, rbx+BD_R, xmm0, xmm2, xmm3
     addps   xmm1, [rbx+BD_POS]
     movss   xmm4, [r13+PT_RAD]          # extent = |R| (half + r)
@@ -804,6 +827,7 @@ rb_build:
     xor     r13d, r13d
     xor     r14d, r14d                  # (its vertices, triangles)
     mov     dword ptr [rsp], 0
+    mov     dword ptr [rip+rb_xparts], 0
 1:  cmp     r12d, [rbx+AN_NRB_]
     jae     2f
     imul    rdi, r12, RB_SZ_
@@ -838,7 +862,14 @@ rb_build:
 102:inc     ecx
     jmp     101b
 10: inc     r13d
-    mov     ecx, [rax+ME_NVERTS]
+    mov     rdi, [rsp+16]               # a mesh collider: its triangles
+    cmp     dword ptr [rdi+RB_SHAPE], 5
+    jne     103f
+    cmp     dword ptr [rdi+RB_TYPE], 2
+    jne     103f
+    mov     ecx, [rax+ME_NTRIS]
+    add     [rip+rb_xparts], ecx
+103:mov     ecx, [rax+ME_NVERTS]
     cmp     ecx, r14d
     cmova   r14d, ecx
     mov     ecx, [rax+ME_NTRIS]
@@ -858,9 +889,34 @@ rb_build:
     call    rb_lay
     lea     rdi, [rip+rb_pt]
     imul    rsi, r15, PT_SZ*PT_MAXB
+    mov     eax, [rip+rb_xparts]        # (and meshes' triangles)
+    imul    rax, rax, PT_SZ
+    add     rsi, rax
+    call    rb_lay
+    lea     rdi, [rip+rb_bvh]           # meshes' trees
+    mov     esi, [rip+rb_xparts]
+    lea     rsi, [rsi*2+64]
+    shl     rsi, 5
+    call    rb_lay
+    lea     rdi, [rip+rb_bvi]
+    mov     esi, [rip+rb_xparts]
+    lea     rsi, [rsi*4+64]
+    call    rb_lay
+    lea     rdi, [rip+rb_bvb]
+    mov     esi, [rip+rb_xparts]
+    add     esi, 16
+    shl     rsi, 5
+    call    rb_lay
+    lea     rdi, [rip+rb_tvw]
+    mov     esi, [rip+rb_xparts]
+    add     esi, 16
+    imul    rsi, rsi, 48
     call    rb_lay
     lea     rdi, [rip+rb_vx]            # hulls, then scratch for a mesh
     imul    rsi, r15, PT_MAXB*HULL_MAX*16
+    mov     eax, [rip+rb_xparts]        # (and meshes' triangles' corners)
+    imul    rax, rax, 48
+    add     rsi, rax
     mov     eax, [rsp+8]
     imul    rax, rax, 48
     add     rsi, rax
@@ -871,7 +927,11 @@ rb_build:
     call    rb_lay
     imul    eax, r15d, 64               # manifolds: 64 a body (packed small
     add     eax, 4096                   #  ones meet many; address space,
-                                        #  pages taken as used)
+    cmp     dword ptr [rip+rb_xparts], 0    #  pages taken as used), 128 more
+    je      21f                         #  with a mesh collider (a body on a
+    imul    ecx, r15d, 128              #  fine mesh meets its triangles)
+    add     eax, ecx
+21:
     mov     [rip+rb_capmf], eax
     lea     rdi, [rip+rb_mf]
     imul    rsi, rax, MF_SZ
@@ -1013,6 +1073,8 @@ rb_build:
     mov     [rip+rb_npt], eax
     mov     [rip+rb_nvx], eax
     mov     [rip+rb_nmf], eax
+    mov     [rip+rb_nbvh], eax
+    mov     [rip+rb_nbvi], eax
     mov     [rip+rb_njr], eax
     mov     [rip+rb_stepno], eax
     # the bodies
@@ -1280,15 +1342,30 @@ make_body_ex:
     mulps   xmm1, [rip+rx_half4]
     movaps  [rsp+112], xmm1
     mov     eax, [r12+RB_SHAPE]
+    cmp     eax, 5
+    jb      .Lmb_shape
+    cmp     dword ptr [r12+RB_TYPE], 2
+    jne     .Lmb_moving
+    cmp     eax, 5
+    je      .Lmb_mesh
+    jmp     .Lmb_plane
+.Lmb_moving:                            # (moving: a mesh as a compound, a
+    cmp     eax, 5                      #  plane as a box)
+    je      .Lmb_comp_pts
+    xor     eax, eax
+.Lmb_shape:
     cmp     eax, 3
     jae     .Lmb_hull
     # box / sphere / capsule: one part
     call    new_part
     mov     r15, rax
     movaps  xmm1, [rsp+112]
-    cmp     dword ptr [r12+RB_SHAPE], 0
+    mov     eax, [r12+RB_SHAPE]
+    cmp     eax, 6
+    je      0f
+    test    eax, eax
     jne     2f
-    cmp     dword ptr [r12+RB_TYPE], 2  # a thin passive box: deep below
+0:  cmp     dword ptr [r12+RB_TYPE], 2  # a thin passive box: deep below
     jne     1f
     xor     ecx, ecx
 11: movss   xmm0, [rsp+112+rcx*4]
@@ -1328,18 +1405,77 @@ make_body_ex:
     lea     rsi, [rsp+96]
     lea     rdx, [rsp+128]
     call    mesh_points                 # rax = them, ecx = how many
-    cmp     dword ptr [r12+RB_SHAPE], 4
-    je      .Lmb_comp
+    cmp     dword ptr [r12+RB_SHAPE], 3
+    jne     .Lmb_comp
     mov     rdi, rax
     mov     esi, ecx
     xorps   xmm0, xmm0
     call    hull_part
     jmp     .Lmb_mass
+.Lmb_comp_pts:
+    mov     rdi, r14
+    lea     rsi, [rsp+96]
+    lea     rdx, [rsp+128]
+    call    mesh_points
 .Lmb_comp:
     mov     [rip+dc_body], rbx
     mov     rdi, r14
     mov     rsi, rax
     call    decompose
+.Lmb_mesh:                              # a mesh collider: a part a triangle
+    mov     rdi, r14
+    lea     rsi, [rsp+96]
+    lea     rdx, [rsp+128]
+    mov     ecx, [r14+ME_NTRIS]         # (its points after where the
+    lea     ecx, [rcx+rcx*2+64]         #  triangles' corners go)
+    call    mesh_points_at
+    mov     r15, rax
+    mov     dword ptr [rsp+140], 0      # triangle
+1:  mov     eax, [rsp+140]
+    cmp     eax, [r14+ME_NTRIS]
+    jae     .Lmb_mass
+    mov     rcx, [r14+ME_TRIS]
+    imul    eax, eax, 12
+    xor     edx, edx                    # its corners into [rsp] (3 vec4)
+2:  mov     r8d, [rcx+rax]
+    shl     r8, 4
+    movaps  xmm0, [r15+r8]
+    mov     r9d, edx
+    shl     r9d, 4
+    movaps  [rsp+r9], xmm0
+    add     eax, 4
+    inc     edx
+    cmp     edx, 3
+    jb      2b
+    movaps  xmm1, [rsp+16]              # (no area: none)
+    subps   xmm1, [rsp]
+    movaps  xmm2, [rsp+32]
+    subps   xmm2, [rsp]
+    CROSS   xmm3, xmm1, xmm2, xmm4
+    DOT3    xmm3, xmm3
+    comiss  xmm3, [rip+rx_tiny2]
+    jbe     3f
+    lea     rdi, [rsp]
+    mov     esi, 3
+    xorps   xmm0, xmm0
+    call    hull_part
+    mov     eax, [rip+rb_npt]
+    dec     eax
+    imul    rax, rax, PT_SZ
+    add     rax, [rip+rb_pt]
+    mov     dword ptr [rax+PT_FLG], 1 | 14  # (every edge active, for now)
+3:  inc     dword ptr [rsp+140]
+    jmp     1b
+.Lmb_plane:                             # a plane: its object's XZ, up its Y,
+    call    new_part                    #  through its origin, without end
+    mov     dword ptr [rax+PT_TYPE], 2
+    mov     dword ptr [rax+PT_HALF], 0
+    mov     ecx, [rip+rx_one]
+    mov     dword ptr [rax+PT_HALF+4], ecx
+    mov     dword ptr [rax+PT_HALF+8], 0
+    movaps  xmm0, [rsp+96]              # (the point: the origin, from the
+    xorps   xmm0, [rip+rx_sign]         #  bounds' centre)
+    movaps  [rax+PT_OFF], xmm0
 .Lmb_mass:
     mov     eax, [rip+rb_npt]
     sub     eax, [rbx+BD_P0]
@@ -1394,6 +1530,129 @@ make_body_ex:
     movaps  [rbx+BD_IIL], xmm3
 8:  mov     rdi, rbx
     call    body_update
+    cmp     dword ptr [r12+RB_SHAPE], 5 # a mesh collider: its edges, its
+    jne     9f                          #  tree
+    cmp     dword ptr [r12+RB_TYPE], 2
+    jne     9f
+    mov     rdi, rbx
+    call    tri_edges
+    mov     rdi, rbx
+    call    bvh_build
+9:  lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# tri_edges(rdi=body) - which of its triangles' edges are active: an edge
+#   shared with a neighbour in the same plane (within 5 degrees) is not
+#   (contacts there take the face's normal: tri_fix). Edges are matched by
+#   their ends' places (to 0.1 mm), so meshes with split vertices work too
+.equ TE_SZ,     16                      # an entry: key (8), part, edge
+tri_edges:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 128
+    mov     rbx, rdi
+    mov     eax, [rbx+BD_NP]            # the table: a power of two >= 6 n
+    imul    eax, eax, 6
+    or      eax, 63
+    bsr     ecx, eax
+    inc     ecx
+    mov     eax, 1
+    shl     eax, cl
+    dec     eax
+    mov     [rsp+96], eax               # mask
+    inc     rax
+    shl     rax, 4
+    mov     [rsp+104], rax              # bytes
+    mov     rsi, rax
+    call    rb_reserve
+    test    rax, rax
+    jz      .Lte_out
+    mov     [rsp+112], rax
+    xor     r12d, r12d                  # part (of this body)
+1:  cmp     r12d, [rbx+BD_NP]
+    jae     .Lte_done
+    xor     r13d, r13d                  # edge
+2:  cmp     r13d, 3
+    jae     8f
+    mov     edi, r12d
+    mov     esi, r13d
+    call    te_key                      # rax the key
+    mov     r14, rax
+    mov     rcx, [rsp+112]
+    mov     rdx, rax                    # its slot
+    shr     rdx, 20
+    and     edx, [rsp+96]
+3:  mov     r8, rdx
+    shl     r8, 4
+    cmp     qword ptr [rcx+r8], 0
+    je      4f
+    cmp     [rcx+r8], r14
+    je      5f
+    inc     edx
+    and     edx, [rsp+96]
+    jmp     3b
+4:  mov     [rcx+r8], r14               # first seen: kept
+    mov     [rcx+r8+8], r12d
+    mov     [rcx+r8+12], r13d
+    jmp     7f
+5:  mov     edi, r12d                   # its neighbour: flat?
+    mov     esi, [rcx+r8+8]
+    call    te_normals                  # xmm0 = |n1 . n2|
+    comiss  xmm0, [rip+rx_cos5]
+    jb      7f
+    mov     rcx, [rsp+112]
+    mov     edx, r14d                   # (the slot again)
+    mov     rdx, r14
+    shr     rdx, 20
+    and     edx, [rsp+96]
+51: mov     r8, rdx
+    shl     r8, 4
+    cmp     [rcx+r8], r14
+    je      52f
+    inc     edx
+    and     edx, [rsp+96]
+    jmp     51b
+52: mov     eax, [rcx+r8+8]             # both edges inactive
+    mov     r9d, [rcx+r8+12]
+    add     eax, [rbx+BD_P0]
+    imul    rax, rax, PT_SZ
+    add     rax, [rip+rb_pt]
+    mov     r10d, 2
+    mov     ecx, r9d
+    shl     r10d, cl
+    not     r10d
+    and     [rax+PT_FLG], r10d
+    mov     eax, r12d
+    add     eax, [rbx+BD_P0]
+    imul    rax, rax, PT_SZ
+    add     rax, [rip+rb_pt]
+    mov     r10d, 2
+    mov     ecx, r13d
+    shl     r10d, cl
+    not     r10d
+    and     [rax+PT_FLG], r10d
+7:  inc     r13d
+    jmp     2b
+8:  inc     r12d
+    jmp     1b
+.Lte_done:
+    mov     rdi, [rsp+112]
+    mov     rsi, [rsp+104]
+    mov     eax, SYS_MUNMAP
+    syscall
+.Lte_out:
     lea     rsp, [rbp-40]
     pop     r15
     pop     r14
@@ -1402,6 +1661,311 @@ make_body_ex:
     pop     rbx
     pop     rbp
     ret
+
+# te_point(edi=part of rbx, esi=corner 0-2) -> xmm0 = it (body axes)
+te_point:
+    mov     eax, edi
+    add     eax, [rbx+BD_P0]
+    imul    rax, rax, PT_SZ
+    add     rax, [rip+rb_pt]
+    mov     rcx, [rax+PT_VERTS]
+    shl     esi, 4
+    movaps  xmm0, [rcx+rsi]
+    addps   xmm0, [rax+PT_OFF]
+    andps   xmm0, [rip+rx_xyz]
+    ret
+
+# te_key(edi=part of rbx, esi=edge) -> rax = its ends' places (to 0.1 mm,
+#   either way round) hashed; never 0
+te_key:
+    push    r12
+    push    r13
+    sub     rsp, 40
+    mov     r12d, edi
+    mov     r13d, esi
+    call    te_point                    # its first end
+    mulps   xmm0, [rip+rx_1e4]
+    cvtps2dq xmm0, xmm0
+    movdqa  [rsp], xmm0
+    mov     edi, r12d
+    lea     esi, [r13+1]
+    cmp     esi, 3
+    jb      1f
+    xor     esi, esi
+1:  call    te_point                    # its second
+    mulps   xmm0, [rip+rx_1e4]
+    cvtps2dq xmm0, xmm0
+    movdqa  [rsp+16], xmm0
+    mov     rax, [rsp]                  # the lesser first (x, then y, z)
+    mov     rcx, [rsp+16]
+    mov     edx, [rsp+8]
+    mov     r8d, [rsp+24]
+    mov     r9d, [rsp]
+    cmp     r9d, [rsp+16]
+    jl      3f
+    jg      2f
+    mov     r9d, [rsp+4]
+    cmp     r9d, [rsp+20]
+    jl      3f
+    jg      2f
+    mov     r9d, [rsp+8]
+    cmp     r9d, [rsp+24]
+    jle     3f
+2:  xchg    rax, rcx
+    xchg    edx, r8d
+3:  mov     r9, 0x9E3779B97F4A7C15      # (a, b) mixed
+    imul    rax, r9
+    xor     rax, rdx
+    imul    rax, r9
+    xor     rax, rcx
+    imul    rax, r9
+    xor     rax, r8
+    imul    rax, r9
+    or      rax, 1
+    add     rsp, 40
+    pop     r13
+    pop     r12
+    ret
+
+# te_normals(edi=part, esi=part, both of rbx) -> xmm0 = |n1 . n2|
+te_normals:
+    push    r12
+    push    r13
+    sub     rsp, 40
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     edi, r12d
+    call    te_normal
+    movaps  [rsp], xmm0
+    mov     edi, r13d
+    call    te_normal
+    DOT3    xmm0, [rsp]
+    andps   xmm0, [rip+rx_abs]
+    add     rsp, 40
+    pop     r13
+    pop     r12
+    ret
+# te_normal(edi=part of rbx) -> xmm0 = its face's normal (unit)
+te_normal:
+    mov     eax, edi
+    add     eax, [rbx+BD_P0]
+    imul    rax, rax, PT_SZ
+    add     rax, [rip+rb_pt]
+    mov     rcx, [rax+PT_VERTS]
+    movaps  xmm1, [rcx+16]
+    subps   xmm1, [rcx]
+    movaps  xmm2, [rcx+32]
+    subps   xmm2, [rcx]
+    andps   xmm1, [rip+rx_xyz]
+    andps   xmm2, [rip+rx_xyz]
+    CROSS   xmm0, xmm1, xmm2, xmm3
+    movaps  xmm1, xmm0
+    DOT3    xmm1, xmm1
+    maxss   xmm1, [rip+rx_tiny2]
+    sqrtss  xmm1, xmm1
+    shufps  xmm1, xmm1, 0
+    divps   xmm0, xmm1
+    ret
+
+# bvh_build(rdi=body) - a tree of its parts (a mesh's triangles): their
+#   bounds (world), split at the middle of their centres' largest extent
+#   (half and half when that fails), four or fewer to a leaf
+bvh_build:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 40
+    mov     rbx, rdi
+    mov     r12d, [rip+rb_nbvi]         # this body's triangles start here
+    xor     r13d, r13d
+1:  cmp     r13d, [rbx+BD_NP]
+    jae     2f
+    mov     esi, [rbx+BD_P0]
+    add     esi, r13d
+    lea     eax, [r12+r13]
+    mov     rcx, [rip+rb_bvi]
+    mov     [rcx+rax*4], esi
+    shl     rax, 5
+    mov     rdx, [rip+rb_bvb]
+    add     rdx, rax
+    mov     rdi, rbx
+    call    part_bounds
+    mov     esi, [rbx+BD_P0]            # its corners (world), kept
+    add     esi, r13d
+    lea     edx, [r12+r13]
+    call    tw_make
+    inc     r13d
+    jmp     1b
+2:  add     [rip+rb_nbvi], r13d
+    mov     edi, r12d
+    mov     esi, r13d
+    call    bvh_node
+    inc     eax
+    mov     [rbx+BD_BVH], eax
+    add     rsp, 40
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tw_make(esi=part of rbx, edx=its slot) - the triangle's corners in the
+#   world into rb_tvw (the body is static)
+tw_make:
+    imul    rax, rsi, PT_SZ
+    add     rax, [rip+rb_pt]
+    mov     [rax+PT_TW], edx
+    imul    r8, rdx, 48
+    add     r8, [rip+rb_tvw]
+    mov     r9, [rax+PT_VERTS]
+    xor     ecx, ecx
+1:  mov     edx, ecx
+    shl     edx, 4
+    movaps  xmm0, [r9+rdx]
+    addps   xmm0, [rax+PT_OFF]
+    andps   xmm0, [rip+rx_xyz]
+    MV3     xmm1, rbx+BD_R, xmm0, xmm2, xmm3
+    addps   xmm1, [rbx+BD_POS]
+    andps   xmm1, [rip+rx_xyz]
+    movaps  [r8+rdx], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    ret
+
+# bvh_node(edi=first, esi=count) -> eax = a node for those triangles
+bvh_node:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 64
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     ebx, [rip+rb_nbvh]          # the node
+    inc     dword ptr [rip+rb_nbvh]
+    movaps  xmm6, [rip+rx_big4]         # bounds, and the centres' bounds
+    movaps  xmm7, [rip+rx_nbig4]
+    movaps  xmm8, [rip+rx_big4]
+    movaps  xmm9, [rip+rx_nbig4]
+    xor     ecx, ecx
+1:  cmp     ecx, r13d
+    jae     2f
+    lea     eax, [r12+rcx]
+    shl     rax, 5
+    add     rax, [rip+rb_bvb]
+    minps   xmm6, [rax]
+    maxps   xmm7, [rax+16]
+    movaps  xmm0, [rax]
+    addps   xmm0, [rax+16]
+    minps   xmm8, xmm0
+    maxps   xmm9, xmm0
+    inc     ecx
+    jmp     1b
+2:  mov     rax, rbx
+    shl     rax, 5
+    add     rax, [rip+rb_bvh]
+    mov     r14, rax
+    movaps  [r14], xmm6
+    movaps  [r14+16], xmm7
+    cmp     r13d, 4
+    ja      3f
+    mov     eax, r12d                   # a leaf
+    or      eax, 0x80000000
+    mov     [r14+12], eax
+    mov     [r14+28], r13d
+    jmp     9f
+3:  movaps  xmm0, xmm9                  # the axis: the centres' largest
+    subps   xmm0, xmm8                  #  extent (x2: sums of min and max)
+    xor     r15d, r15d
+    movss   xmm1, xmm0
+    movaps  xmm2, xmm0
+    shufps  xmm2, xmm2, 0x55
+    comiss  xmm2, xmm1
+    jbe     31f
+    movss   xmm1, xmm2
+    mov     r15d, 1
+31: movaps  xmm2, xmm0
+    shufps  xmm2, xmm2, 0xAA
+    comiss  xmm2, xmm1
+    jbe     32f
+    mov     r15d, 2
+32: movaps  [rsp], xmm8             # its middle
+    movaps  [rsp+16], xmm9
+    movss   xmm3, [rsp+r15*4]
+    addss   xmm3, [rsp+16+r15*4]
+    mulss   xmm3, [rip+rx_half]
+    movss   [rsp+32], xmm3
+    mov     ecx, r12d                   # partition: centre below it first
+    lea     edx, [r12+r13]
+4:  cmp     ecx, edx
+    jae     5f
+    mov     eax, ecx
+    shl     rax, 5
+    add     rax, [rip+rb_bvb]
+    movss   xmm0, [rax+r15*4]
+    addss   xmm0, [rax+16+r15*4]
+    comiss  xmm0, [rsp+32]
+    jae     41f
+    inc     ecx
+    jmp     4b
+41: dec     edx                         # swap with the last
+    mov     r8d, edx
+    shl     r8, 5
+    add     r8, [rip+rb_bvb]
+    movaps  xmm0, [rax]
+    movaps  xmm1, [rax+16]
+    movaps  xmm2, [r8]
+    movaps  xmm3, [r8+16]
+    movaps  [rax], xmm2
+    movaps  [rax+16], xmm3
+    movaps  [r8], xmm0
+    movaps  [r8+16], xmm1
+    mov     r9, [rip+rb_bvi]
+    mov     r10d, [r9+rcx*4]
+    mov     r11d, [r9+rdx*4]
+    mov     [r9+rcx*4], r11d
+    mov     [r9+rdx*4], r10d
+    jmp     4b
+5:  sub     ecx, r12d                   # how many below
+    jz      51f
+    cmp     ecx, r13d
+    jb      52f
+51: mov     ecx, r13d                   # (all on one side: half and half)
+    shr     ecx, 1
+52: mov     [rsp+36], ecx
+    mov     edi, r12d
+    mov     esi, ecx
+    call    bvh_node
+    mov     [r14+12], eax
+    mov     edi, r12d
+    add     edi, [rsp+36]
+    mov     esi, r13d
+    sub     esi, [rsp+36]
+    call    bvh_node
+    mov     rcx, rbx                    # (the array may have moved? no:
+    shl     rcx, 5                      #  reserved; r14 still good)
+    add     rcx, [rip+rb_bvh]
+    mov     [rcx+28], eax
+9:  mov     eax, ebx
+    add     rsp, 64
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# mesh_points_at(rdi=mesh, rsi=centre, rdx=scale, ecx=where in the scratch
+#   (points after rb_nvx)) -> rax = its points (vec4, scaled, from the centre)
+mesh_points_at:
+    add     ecx, [rip+rb_nvx]
+    mov     eax, ecx
+    shl     rax, 4
+    add     rax, [rip+rb_vx]
+    jmp     mesh_points_in
 
 # new_part -> rax = a zeroed part of the body being made (rbx), counted
 new_part:
@@ -1428,6 +1992,7 @@ mesh_points:
     add     eax, PT_MAXB*HULL_MAX       #  leaving room for this body's)
     shl     rax, 4
     add     rax, [rip+rb_vx]
+mesh_points_in:
     mov     r8, [rdi+ME_POS]
     mov     ecx, [rdi+ME_NVERTS]
     movaps  xmm1, [rdx]
@@ -2179,7 +2744,11 @@ mf_get:
     cmp     edx, [rip+rb_capmf]
     jb      31f
 32:
-    inc     dword ptr [rip+rb_mffull]   # (none left: counted, rbinfo(14))
+    inc     dword ptr [rip+rb_mffull]   # (none left: counted, rbinfo(14);
+    cmp     dword ptr [rip+rb_mffull], 1    #  said once)
+    jne     9f
+    lea     rdi, [rip+s_rb_mffull]
+    call    log_line
     jmp     9f
 31:
     inc     dword ptr [rip+rb_nmf]
@@ -2476,6 +3045,10 @@ pair_job:
     BODY    r8, rax
     mov     eax, [rbx+4]
     BODY    r9, rax
+    cmp     dword ptr [r8+BD_BVH], 0    # a mesh: its triangles in reach
+    jne     5f                          #  looked up (new ones: after)
+    cmp     dword ptr [r9+BD_BVH], 0
+    jne     5f
     cmp     dword ptr [r8+BD_NP], 1
     jne     8f
     cmp     dword ptr [r9+BD_NP], 1
@@ -2505,6 +3078,15 @@ pair_job:
 8:  or      dword ptr [rbx+4], 0x80000000
 7:  inc     r12d
     jmp     1b
+5:  mov     rdi, r8
+    mov     rsi, r9
+    mov     edx, [rbx]
+    mov     ecx, [rbx+4]
+    mov     r8d, 1
+    call    pp_tree
+    test    eax, eax
+    jnz     8b
+    jmp     7b
 9:  pop     r13
     pop     r12
     pop     rbx
@@ -2857,6 +3439,10 @@ pair_parts:
     mov     r12, rsi
     mov     [rsp], r8d
     mov     [rsp+4], r9d
+    cmp     dword ptr [rbx+BD_BVH], 0   # a mesh: its tree
+    jne     .Lpp_tree
+    cmp     dword ptr [r12+BD_BVH], 0
+    jne     .Lpp_tree
     mov     r13d, [rbx+BD_P0]
 2:  mov     eax, [rbx+BD_P0]
     add     eax, [rbx+BD_NP]
@@ -2897,6 +3483,13 @@ pair_parts:
     jmp     3b
 5:  inc     r13d
     jmp     2b
+.Lpp_tree:
+    mov     rdi, rbx
+    mov     rsi, r12
+    mov     edx, [rsp]
+    mov     ecx, [rsp+4]
+    xor     r8d, r8d
+    call    pp_tree
 9:  lea     rsp, [rbp-40]
     pop     r15
     pop     r14
@@ -2906,10 +3499,238 @@ pair_parts:
     pop     rbp
     ret
 
+# pp_tree(rdi=body, rsi=body (the lower index first), edx, ecx = their
+#   indices, r8d=1: only look) -> eax = triangles in reach with no manifold
+#   (looking: those found are kept). One of them is a mesh: each part of
+#   the other against the triangles under its bounds, within its reach
+pp_tree:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 400                    # (+64: the tree walk's stack, 48;
+                                        #  +48, +52: a leaf's end, place;
+                                        #  +276 missing, +56 a part, +60 the
+                                        #  mode; +256 the part's centre, +272
+                                        #  its reach squared, +288 a
+                                        #  triangle, +336 tri_closest's out)
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     [rsp], edx
+    mov     [rsp+4], ecx
+    mov     [rsp+60], r8d
+    mov     dword ptr [rsp+276], 0
+    # the mesh M (r12 when it is the second) and the other O: each part of
+    #   O against the triangles under its bounds
+    mov     dword ptr [rsp+8], 0        # M is the second (0) / first (1)
+    mov     r15, r12
+    mov     r14, rbx
+    cmp     dword ptr [r12+BD_BVH], 0
+    jne     61f
+    mov     dword ptr [rsp+8], 1
+    mov     r15, rbx
+    mov     r14, r12
+61: mov     r13d, [r14+BD_P0]           # O's parts
+62: mov     eax, [r14+BD_P0]
+    add     eax, [r14+BD_NP]
+    cmp     r13d, eax
+    jae     .Lpt_out
+    mov     rdi, r14
+    mov     esi, r13d
+    lea     rdx, [rsp+16]
+    call    part_bounds
+    mov     eax, r13d                   # its centre and reach: the bounds'
+    imul    rax, rax, PT_SZ             #  half diagonal and its radius, the
+    add     rax, [rip+rb_pt]            #  margin, how far it goes in a step
+    movaps  xmm0, [rax+PT_OFF]
+    MV3     xmm1, r14+BD_R, xmm0, xmm2, xmm3
+    addps   xmm1, [r14+BD_POS]
+    andps   xmm1, [rip+rx_xyz]
+    movaps  [rsp+256], xmm1
+    movaps  xmm0, [rax+PT_HALF]
+    andps   xmm0, [rip+rx_xyz]
+    DOT3    xmm0, xmm0
+    sqrtss  xmm0, xmm0
+    addss   xmm0, [rax+PT_RAD]
+    movaps  xmm1, [r14+BD_V]
+    DOT3    xmm1, xmm1
+    sqrtss  xmm1, xmm1
+    mulss   xmm1, [rip+rb_dt]
+    addss   xmm0, xmm1
+    addss   xmm0, [rip+rx_keep]
+    mulss   xmm0, xmm0
+    movss   [rsp+272], xmm0
+    mov     eax, [r15+BD_BVH]           # the walk: a stack of nodes
+    dec     eax
+    mov     [rsp+64], eax
+    mov     dword ptr [rsp+12], 1       # (its depth, at +64 on)
+63: mov     ecx, [rsp+12]
+    test    ecx, ecx
+    jz      69f
+    dec     ecx
+    mov     [rsp+12], ecx
+    mov     eax, [rsp+64+rcx*4]
+    shl     rax, 5
+    add     rax, [rip+rb_bvh]
+    movaps  xmm0, [rax]                 # meets the bounds?
+    cmpleps xmm0, [rsp+32]
+    movaps  xmm1, [rsp+16]
+    cmpleps xmm1, [rax+16]
+    andps   xmm0, xmm1
+    movmskps edx, xmm0
+    and     edx, 7
+    cmp     edx, 7
+    jne     63b
+    mov     edx, [rax+12]
+    test    edx, edx
+    js      65f
+    mov     ecx, [rsp+12]               # inner: both children (the stack
+    cmp     ecx, 46                     #  holds 48: a tree of 2^40 leaves)
+    jae     63b
+    mov     [rsp+64+rcx*4], edx
+    mov     edx, [rax+28]
+    mov     [rsp+68+rcx*4], edx
+    add     dword ptr [rsp+12], 2
+    jmp     63b
+65: and     edx, 0x7fffffff             # a leaf: its triangles
+    mov     ecx, [rax+28]
+    add     ecx, edx
+    mov     [rsp+48], ecx
+    mov     [rsp+52], edx
+66: mov     edx, [rsp+52]
+    cmp     edx, [rsp+48]
+    jae     63b
+    mov     rax, rdx
+    shl     rax, 5
+    add     rax, [rip+rb_bvb]
+    movaps  xmm0, [rax]
+    cmpleps xmm0, [rsp+32]
+    movaps  xmm1, [rsp+16]
+    cmpleps xmm1, [rax+16]
+    andps   xmm0, xmm1
+    movmskps ecx, xmm0
+    and     ecx, 7
+    cmp     ecx, 7
+    jne     67f
+    mov     rax, [rip+rb_bvi]
+    mov     ecx, [rax+rdx*4]            # the triangle's part: within reach?
+    mov     [rsp+56], ecx               #  (its closest point to the centre)
+    call    pp_reach
+    mov     ecx, [rsp+56]
+    test    eax, eax
+    jz      67f
+    mov     edi, [rsp]
+    mov     esi, [rsp+4]
+    mov     edx, r13d                   # (parts in the bodies' order)
+    cmp     dword ptr [rsp+8], 0        # (M second: O's part first; M
+    je      68f                         #  first: its triangle first)
+    xchg    edx, ecx
+68: cmp     dword ptr [rsp+60], 0   # (only looking: there already?)
+    je      681f
+    mov     edi, edx
+    mov     esi, ecx
+    call    mf_find
+    test    rax, rax
+    jz      682f
+    mov     ecx, [rip+rb_stepno]
+    mov     [rax+MX_KEEP], ecx
+    jmp     67f
+682:inc     dword ptr [rsp+276]
+    jmp     67f
+681:call    mf_get
+67: inc     dword ptr [rsp+52]
+    jmp     66b
+69: inc     r13d
+    jmp     62b
+.Lpt_out:
+    mov     eax, [rsp+276]
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# mf_find(edi=part a, esi=part b) -> rax = its manifold's keys, or 0
+mf_find:
+    mov     r10d, edi
+    mov     r11d, esi
+    call    mf_hash
+    mov     rcx, [rip+rb_hs]
+1:  mov     edx, [rcx+rax*4]
+    test    edx, edx
+    jz      8f
+    dec     edx
+    shl     rdx, 5
+    add     rdx, [rip+rb_mx]
+    cmp     [rdx+MX_PA], r10d
+    jne     2f
+    cmp     [rdx+MX_PB], r11d
+    jne     2f
+    mov     rax, rdx
+    ret
+2:  inc     eax
+    and     eax, [rip+rb_hmask]
+    jmp     1b
+8:  xor     eax, eax
+    ret
+
+# pp_reach(ecx=a triangle's part of r15; the caller's frame: +256 the
+#   other part's centre, +272 its reach squared) -> eax = 1 when the
+#   triangle comes within that reach
+pp_reach:
+    push    rbx
+    push    r12
+    sub     rsp, 8                      # (the caller's frame at +32)
+    imul    rax, rcx, PT_SZ
+    add     rax, [rip+rb_pt]
+    mov     ebx, [rax+PT_TW]            # its corners (world, kept)
+    imul    rbx, rbx, 48
+    add     rbx, [rip+rb_tvw]
+    xor     r12d, r12d
+1:  mov     edx, r12d                   # each corner: from the centre
+    shl     edx, 4
+    movaps  xmm1, [rbx+rdx]
+    subps   xmm1, [rsp+32+256]
+    andps   xmm1, [rip+rx_xyz]
+    movaps  [rsp+32+288+rdx], xmm1
+    inc     r12d
+    cmp     r12d, 3
+    jb      1b
+    lea     rdi, [rsp+32+288]
+    lea     rsi, [rsp+32+304]
+    lea     rdx, [rsp+32+320]
+    lea     rcx, [rsp+32+336]
+    call    tri_closest
+    movaps  xmm0, [rsp+32+336]          # |closest|^2 <= reach^2
+    DOT3    xmm0, xmm0
+    xor     eax, eax
+    comiss  xmm0, [rsp+32+272]
+    ja      9f
+    mov     eax, 1
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
 # part_bounds(rdi=body, esi=part, rdx=out min, max)
 part_bounds:
     imul    rsi, rsi, PT_SZ
     add     rsi, [rip+rb_pt]
+    cmp     dword ptr [rsi+PT_TYPE], 2  # a plane: without end
+    jne     1f
+    movaps  xmm0, [rip+rx_nbig4]
+    movaps  [rdx], xmm0
+    movaps  xmm0, [rip+rx_big4]
+    movaps  [rdx+16], xmm0
+    ret
+1:
     movaps  xmm0, [rsi+PT_OFF]
     MV3     xmm1, rdi+BD_R, xmm0, xmm2, xmm3
     addps   xmm1, [rdi+BD_POS]
@@ -2929,6 +3750,13 @@ part_bounds:
     unpcklps xmm2, xmm3
     movlhps xmm2, xmm5
     addps   xmm2, [rip+rx_marg4]
+    movaps  xmm4, [rdi+BD_V]            # and how far it goes in a step (as
+    andps   xmm4, [rip+rx_abs]          #  body_bounds)
+    movss   xmm5, [rip+rb_dt]
+    shufps  xmm5, xmm5, 0
+    mulps   xmm4, xmm5
+    andps   xmm4, [rip+rx_xyz]
+    addps   xmm2, xmm4
     movaps  xmm3, xmm1
     subps   xmm3, xmm2
     movaps  [rdx], xmm3
@@ -3109,7 +3937,7 @@ mf_update:
     call    cp_remove
     jmp     1b
 3:  # a new point
-    lea     rdi, [rsp+MU_PXA]
+    lea     rdi, [rsp+MU_PXA]           # (the proxies first)
     lea     rsi, [r12+BD_R]
     lea     rdx, [r12+BD_POS]
     mov     ecx, [rbx+MF_PA]
@@ -3123,7 +3951,34 @@ mf_update:
     imul    rcx, rcx, PT_SZ
     add     rcx, [rip+rb_pt]
     call    px_place
+    mov     rax, [rsp+MU_PXA+PX_PART]   # a plane: its own contacts
+    mov     edx, 1
     lea     rdi, [rsp+MU_PXA]
+    lea     rsi, [rsp+MU_PXB]
+    cmp     dword ptr [rax+PT_TYPE], 2
+    je      31f
+    mov     rax, [rsp+MU_PXB+PX_PART]
+    xor     edx, edx
+    lea     rdi, [rsp+MU_PXB]
+    lea     rsi, [rsp+MU_PXA]
+    cmp     dword ptr [rax+PT_TYPE], 2
+    jne     32f
+31: movss   xmm0, [rsp+MU_MG]
+    lea     rcx, [rsp+MU_CL]
+    call    poly_plane
+    mov     edx, eax
+    mov     rdi, rbx
+    lea     rsi, [rsp+MU_CL]
+    lea     rcx, [rsp+MU_NEW]
+    test    edx, edx
+    jnz     33f
+    mov     dword ptr [rbx+MF_N], 0     # (apart)
+    jmp     .Lmu_out
+33: movaps  xmm0, [rsp+MU_CL+CR_N]
+    movaps  [rbx+MF_NRM], xmm0
+    call    mf_replace
+    jmp     .Lmu_tan
+32: lea     rdi, [rsp+MU_PXA]
     lea     rsi, [rsp+MU_PXB]
     lea     rdx, [rsp+MU_RES]
     call    collide
@@ -3132,7 +3987,24 @@ mf_update:
     jbe     4f
     mov     dword ptr [rbx+MF_N], 0     # apart
     jmp     .Lmu_out
-4:  movaps  xmm0, [rsp+MU_RES+CR_N]
+4:  mov     rax, [rsp+MU_PXA+PX_PART]   # a mesh's triangle: its inactive
+    lea     rdi, [rsp+MU_PXA]           #  edges (tri_fix)
+    mov     edx, 1
+    test    dword ptr [rax+PT_FLG], 1
+    jnz     40f
+    mov     rax, [rsp+MU_PXB+PX_PART]
+    lea     rdi, [rsp+MU_PXB]
+    xor     edx, edx
+    test    dword ptr [rax+PT_FLG], 1
+    jz      42f
+40: lea     rsi, [rsp+MU_RES]
+    call    tri_fix
+    movss   xmm0, [rsp+MU_RES+CR_SEP]   # (the gap along the face: maybe apart)
+    comiss  xmm0, [rsp+MU_MG]
+    jbe     42f
+    mov     dword ptr [rbx+MF_N], 0
+    jmp     .Lmu_out
+42: movaps  xmm0, [rsp+MU_RES+CR_N]
     movaps  [rbx+MF_NRM], xmm0
     # polytopes: their faces clipped - the whole contact at once
     lea     rdi, [rsp+MU_PXA]
@@ -6234,15 +7106,18 @@ OPERATOR op_rb_world, "rigid.world",  "Physics World",     do_rb_world, flags=OP
 
 .section .rodata
 k_active:       .asciz "active"
+s_rb_mffull:    .asciz "  rigid bodies: no room for more contacts - some bodies may pass through others"
 k_instances:    .asciz "instances"
 k_object:       .asciz "object"
 k_passive:      .asciz "passive"
-shape_names:    .quad k_box, k_sphere, k_capsule, k_hull, k_compound, 0
+shape_names:    .quad k_box, k_sphere, k_capsule, k_hull, k_compound, k_mesh, k_plane, 0
 k_box:          .asciz "box"
 k_sphere:       .asciz "sphere"
 k_capsule:      .asciz "capsule"
 k_hull:         .asciz "hull"
 k_compound:     .asciz "compound"
+k_mesh:         .asciz "mesh"
+k_plane:        .asciz "plane"
 rb_keys:        .quad k_mass, k_friction, k_bounce, k_damping, 0
 k_mass:         .asciz "mass"
 k_friction:     .asciz "friction"

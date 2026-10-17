@@ -19,11 +19,15 @@
 .include "const.inc"
 
 .globl poly_clip
+.globl poly_plane
+.globl tri_fix
 
 .equ PT_TYPE,   0                       # (collide.s)
 .equ PT_NV,     4
 .equ PT_VERTS,  8
 .equ PT_RAD,    16
+.equ PT_FLG,    24                      # (rbody.s: a mesh's triangle, its
+                                        #  active edges)
 .equ PT_HALF,   32
 .equ PX_R0,     0
 .equ PX_R1,     16
@@ -88,6 +92,7 @@
 .align 16
 cl_xyz:         .long -1, -1, -1, 0
 cl_sign:        .long 0x80000000, 0x80000000, 0x80000000, 0
+cl_one:         .float 1.0, 0, 0, 0
 cl_corner:      .float -1, -1, -1, 0,   1, -1, -1, 0,  -1, 1, -1, 0,   1, 1, -1, 0
                 .float -1, -1,  1, 0,   1, -1,  1, 0,  -1, 1,  1, 0,   1, 1,  1, 0
 cl_ex:          .float 1, 0, 0, 0
@@ -99,6 +104,8 @@ cl_tolmax:      .float 0.02                 #  (2 cm at most: a big ground's
 cl_big:         .float 1e30
 cl_eps:         .float 1e-9
 cl_half:        .float 0.577
+cl_edge:        .float 0.001                # (a point this near an edge is on it)
+cl_flat:        .float 0.9998               # (a normal this near the face's is it)
 .text
 
 # poly_clip(rdi=proxy A, rsi=proxy B, xmm0=normal from A to B (unit),
@@ -353,6 +360,293 @@ poly_clip:
     pop     r12
     pop     rbx
     pop     rbp
+    ret
+
+# poly_plane(rdi=the plane's proxy, rsi=the other's, edx=1 when the plane
+#   is A, xmm0=the margin, rcx=out: 4 results) -> eax = contact points: the
+#   other's points (a polytope's, or a rounded part's core corners less its
+#   radius) at most the margin above the plane, four kept
+poly_plane:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, CL_SZ
+    mov     rbx, rsp
+    movss   [rbx+CL_MG], xmm0
+    mov     [rbx+CL_OUT], rcx
+    mov     [rbx+CL_FLIP], edx
+    mov     [rbx+CL_PXA], rdi
+    mov     [rbx+CL_PXB], rsi
+    mov     r12, rdi                    # n = R normal, P0 = its centre
+    mov     rax, [r12+PX_PART]
+    movaps  xmm1, [rax+PT_HALF]
+    andps   xmm1, [rip+cl_xyz]
+    movaps  xmm2, [r12+PX_R0]
+    DOT3    xmm2, xmm1
+    movaps  xmm3, [r12+PX_R1]
+    DOT3    xmm3, xmm1
+    movaps  xmm4, [r12+PX_R2]
+    DOT3    xmm4, xmm1
+    unpcklps xmm2, xmm3
+    movlhps xmm2, xmm4
+    andps   xmm2, [rip+cl_xyz]
+    movaps  [rbx+CL_N], xmm2
+    movaps  xmm0, [r12+PX_C]
+    DOT3    xmm0, xmm2
+    movss   [rbx+CL_D], xmm0
+    mov     rdi, rsi                    # the other's points
+    lea     rsi, [rbx+CL_VA]
+    call    cl_gather
+    xorps   xmm5, xmm5                  # (its radius)
+    test    eax, eax
+    jnz     2f
+    mov     r12, [rbx+CL_PXB]           # rounded: its core's distinct corners
+    mov     rax, [r12+PX_PART]
+    cmp     dword ptr [rax+PT_TYPE], 0
+    jne     .Lpp_none
+    xor     r14d, r14d                  # corner
+    xor     r13d, r13d                  # kept
+1:  cmp     r14d, 8
+    jae     15f
+    mov     ecx, r14d
+    shl     ecx, 4
+    lea     rdx, [rip+cl_corner]
+    movaps  xmm0, [rdx+rcx]
+    mov     rax, [r12+PX_PART]
+    mulps   xmm0, [rax+PT_HALF]
+    call    cl_world
+    xor     ecx, ecx                    # not one already kept
+11: cmp     ecx, r13d
+    jae     12f
+    mov     edx, ecx
+    shl     edx, 4
+    movaps  xmm1, [rbx+CL_VA+rdx]
+    subps   xmm1, xmm0
+    DOT3    xmm1, xmm1
+    comiss  xmm1, [rip+cl_tolmin]
+    jb      13f
+    inc     ecx
+    jmp     11b
+12: mov     edx, r13d
+    shl     edx, 4
+    movaps  [rbx+CL_VA+rdx], xmm0
+    inc     r13d
+13: inc     r14d
+    jmp     1b
+15: mov     eax, r13d
+    mov     rcx, [r12+PX_PART]
+    movss   xmm5, [rcx+PT_RAD]
+2:  mov     [rbx+CL_NA], eax
+    movss   [rbx+CL_TA], xmm5           # the radius
+    xor     ecx, ecx                    # gaps: n . p - d - r; near enough kept
+    xor     r13d, r13d                  #  (the gap in lane 3)
+3:  cmp     ecx, [rbx+CL_NA]
+    jae     4f
+    mov     eax, ecx
+    shl     eax, 4
+    movaps  xmm0, [rbx+CL_VA+rax]
+    movaps  xmm1, xmm0
+    DOT3    xmm1, [rbx+CL_N]
+    subss   xmm1, [rbx+CL_D]
+    subss   xmm1, [rbx+CL_TA]
+    comiss  xmm1, [rbx+CL_MG]
+    ja      31f
+    andps   xmm0, [rip+cl_xyz]
+    shufps  xmm1, xmm1, 0
+    blendps xmm0, xmm1, 8
+    mov     edx, r13d
+    shl     edx, 4
+    movaps  [rbx+CL_P0+rdx], xmm0
+    inc     r13d
+31: inc     ecx
+    jmp     3b
+4:  test    r13d, r13d
+    jz      .Lpp_none
+    mov     [rbx+CL_NP], r13d
+    lea     rax, [rbx+CL_P0]
+    mov     [rbx+CL_PIN], rax
+    mov     r12, rax
+    call    cl_pick
+    mov     r13d, eax
+    mov     r14, [rbx+CL_OUT]
+    xor     r15d, r15d
+5:  cmp     r15d, r13d
+    jae     8f
+    mov     ecx, [rbx+CL_K+r15*4]
+    shl     ecx, 4
+    movaps  xmm0, [r12+rcx]             # the corner, its gap
+    movaps  xmm1, xmm0
+    shufps  xmm1, xmm1, 0xFF
+    movss   [r14+CR_SEP], xmm1
+    andps   xmm0, [rip+cl_xyz]
+    movss   xmm2, [rbx+CL_TA]           # on the other: p - r n
+    shufps  xmm2, xmm2, 0
+    mulps   xmm2, [rbx+CL_N]
+    subps   xmm0, xmm2
+    shufps  xmm1, xmm1, 0               # on the plane: that - gap n
+    mulps   xmm1, [rbx+CL_N]
+    movaps  xmm3, xmm0
+    subps   xmm3, xmm1
+    movaps  xmm4, [rbx+CL_N]
+    cmp     dword ptr [rbx+CL_FLIP], 0
+    je      51f
+    movaps  [r14+CR_PA], xmm3           # the plane is A: n from it
+    movaps  [r14+CR_PB], xmm0
+    jmp     52f
+51: movaps  [r14+CR_PA], xmm0           # the plane is B: n towards it
+    movaps  [r14+CR_PB], xmm3
+    xorps   xmm4, [rip+cl_sign]
+52: movaps  [r14+CR_N], xmm4
+    add     r14, CR_SZ
+    inc     r15d
+    jmp     5b
+8:  mov     eax, r15d
+    jmp     .Lpp_out
+.Lpp_none:
+    xor     eax, eax
+.Lpp_out:
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# tri_fix(rdi=the triangle's proxy, rsi=the result, edx=1 when the
+#   triangle is A) - a contact on edges of a mesh that are not active (a
+#   flat or concave neighbour there): the normal becomes the face's, the gap
+#   measured along it (no snagging on the edges inside a surface)
+tri_fix:
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 96
+    mov     r12, rdi
+    mov     r13, rsi
+    mov     r14d, edx
+    mov     rax, [r12+PX_PART]
+    xor     ecx, ecx                    # its corners (world) at [rsp]
+1:  mov     rdx, [rax+PT_VERTS]
+    mov     r8d, ecx
+    shl     r8d, 4
+    movaps  xmm0, [rdx+r8]
+    andps   xmm0, [rip+cl_xyz]
+    push    rcx
+    push    rax
+    call    cl_world
+    pop     rax
+    pop     rcx
+    mov     r8d, ecx
+    shl     r8d, 4
+    movaps  [rsp+r8], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    movaps  xmm1, [rsp+16]              # the face's normal
+    subps   xmm1, [rsp]
+    movaps  xmm2, [rsp+32]
+    subps   xmm2, [rsp]
+    CROSS   xmm3, xmm1, xmm2, xmm4
+    movaps  xmm4, xmm3
+    DOT3    xmm4, xmm4
+    comiss  xmm4, [rip+cl_eps]
+    jbe     9f
+    sqrtss  xmm4, xmm4
+    shufps  xmm4, xmm4, 0
+    divps   xmm3, xmm4                  # nf
+    movaps  xmm5, [r13+CR_N]            # n from the triangle to the other
+    test    r14d, r14d
+    jnz     2f
+    xorps   xmm5, [rip+cl_sign]
+2:  movaps  xmm6, xmm3                  # turned to the other's side
+    DOT3    xmm6, xmm5
+    xorps   xmm7, xmm7
+    comiss  xmm6, xmm7
+    jae     3f
+    xorps   xmm3, [rip+cl_sign]
+    xorps   xmm6, [rip+cl_sign]
+3:  comiss  xmm6, [rip+cl_flat]         # already the face's: nothing to do
+    jae     9f
+    movaps  [rsp+48], xmm3
+    lea     rax, [r13+CR_PA]            # the point on the triangle: its
+    test    r14d, r14d                  #  weights (barycentric)
+    jnz     4f
+    lea     rax, [r13+CR_PB]
+4:  movaps  xmm0, [rax]
+    subps   xmm0, [rsp]                 # p - a
+    movaps  xmm1, [rsp+16]
+    subps   xmm1, [rsp]                 # b - a
+    movaps  xmm2, [rsp+32]
+    subps   xmm2, [rsp]                 # c - a
+    movaps  xmm3, xmm1                  # d00 d01 d11 d20 d21
+    DOT3    xmm3, xmm1
+    movaps  xmm4, xmm1
+    DOT3    xmm4, xmm2
+    movaps  xmm5, xmm2
+    DOT3    xmm5, xmm2
+    movaps  xmm6, xmm0
+    DOT3    xmm6, xmm1
+    movaps  xmm7, xmm0
+    DOT3    xmm7, xmm2
+    movss   xmm8, xmm3                  # den = d00 d11 - d01^2
+    mulss   xmm8, xmm5
+    movss   xmm9, xmm4
+    mulss   xmm9, xmm4
+    subss   xmm8, xmm9
+    comiss  xmm8, [rip+cl_eps]
+    jbe     9f
+    movss   xmm9, xmm5                  # v = (d11 d20 - d01 d21) / den
+    mulss   xmm9, xmm6
+    movss   xmm10, xmm4
+    mulss   xmm10, xmm7
+    subss   xmm9, xmm10
+    divss   xmm9, xmm8
+    movss   xmm10, xmm3                 # w = (d00 d21 - d01 d20) / den
+    mulss   xmm10, xmm7
+    movss   xmm11, xmm4
+    mulss   xmm11, xmm6
+    subss   xmm10, xmm11
+    divss   xmm10, xmm8
+    movss   xmm11, [rip+cl_one]         # u = 1 - v - w
+    subss   xmm11, xmm9
+    subss   xmm11, xmm10
+    mov     rax, [r12+PX_PART]          # the edges it is on: all inactive?
+    mov     eax, [rax+PT_FLG]           #  (a: u, b: v, c: w; edge 0-1 is
+    xor     ecx, ecx                    #  where w is 0, 1-2 u, 2-0 v)
+    movss   xmm12, [rip+cl_edge]
+    comiss  xmm10, xmm12                # w ~ 0: edge 0-1
+    ja      51f
+    or      ecx, 2
+51: comiss  xmm11, xmm12                # u ~ 0: edge 1-2
+    ja      52f
+    or      ecx, 4
+52: comiss  xmm9, xmm12                 # v ~ 0: edge 2-0
+    ja      53f
+    or      ecx, 8
+53: test    ecx, ecx                    # (inside: a face contact - as is)
+    jz      9f
+    test    eax, ecx                    # one of its edges active: as is
+    jnz     9f
+    movaps  xmm3, [rsp+48]              # the face's normal; the gap along it
+    movaps  xmm0, [r13+CR_PB]
+    subps   xmm0, [r13+CR_PA]
+    test    r14d, r14d
+    jnz     6f
+    xorps   xmm3, [rip+cl_sign]         # (B: from the other to the triangle)
+6:  movaps  [r13+CR_N], xmm3
+    DOT3    xmm0, xmm3
+    movss   [r13+CR_SEP], xmm0
+9:  add     rsp, 96
+    pop     r14
+    pop     r13
+    pop     r12
     ret
 
 # cl_gather(rdi=proxy, rsi=out) -> eax = its points (world), xmm0 = how far

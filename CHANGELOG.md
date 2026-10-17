@@ -28,6 +28,14 @@ project uses [Semantic Versioning](https://semver.org/).
   balls poured into a box: 10 s simulated in about 26 s on 8 threads (4000
   took 23 s before); 5000 bricks settle at about 27 fps; 1000 tumbling
   boxes in 2.7 s (was 6.2). `instpos(object, i, k)`; `rbinfo(8..14)`.
+- **Mesh and plane colliders** (#288). A passive rigid body can be its
+  **mesh** - any shape, each triangle a collider, found through a tree - or
+  an endless **plane** (`rigid.add passive mesh`, `passive plane`;
+  Properties › Physics › shape). Edges inside a flat surface don't catch:
+  a contact there takes the face's normal, so a box slides over a ramp of
+  thousands of triangles without a bump. Balls and boxes in a bowl, boxes
+  on a staircase, 1000 balls on a terrain of 100 000 triangles at about
+  50 fps on 8 threads, a box landing on a plane 500 m out.
 - **The MIT License** (`LICENSE`, also in the release archive). The
   2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): the masterplan's open
   questions, then physics - the solver, ground and landscapes, shatter,

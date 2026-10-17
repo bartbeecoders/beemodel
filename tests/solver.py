@@ -12,6 +12,12 @@ on 8 threads; 5000 bricks settle at 24 frames a second or better; instance
 bodies baked into the cache and played back; the same heap on 1 and 8
 threads; files from v0.16 (room for 1024 bodies) still open.
 
+R3: static meshes and planes - balls and boxes dropped into a bowl (a
+sphere's mesh) stay in it and come to rest; boxes rest on a staircase's
+steps; a box slides down a ramp of many triangles without catching on
+their edges (inactive edges: the face's normal); 1000 balls on a terrain
+of 100 000 triangles run live; an endless plane catches a box 500 m out.
+
     python3 tests/solver.py build/beemodel
 """
 import os, subprocess, sys, tempfile
@@ -118,6 +124,55 @@ HEAP = ('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 40)\n'
         'frame(121)\nprint("heap", rbinfo(1), get("B555", "x"), get("B555", "y"), get("B555", "z"))\n')
 
 
+BOWL = ('delete("Cube")\ndelete("Light")\ndelete("Camera")\n'
+        'add("sphere", "Bowl", 0, 3, 0)\nscale("Bowl", 3)\nselect("Bowl")\nop("rigid.add", "passive mesh")\n'
+        'for i in 0..25 {\n n = "S" + str(i)\n add("sphere", n, (i % 5) * 0.5 - 1, 2 + (i / 5) * 0.45, ((i / 5) % 3) * 0.3 - 0.3)\n'
+        ' scale(n, 0.2)\n select(n)\n op("rigid.add", "active sphere")\n}\n'
+        'for i in 0..8 {\n n = "B" + str(i)\n add("cube", n, (i % 4) * 0.7 - 1, 4.4, (i / 4) * 0.7 - 0.35)\n'
+        ' scale(n, 0.25)\n select(n)\n op("rigid.add", "active box")\n}\n'
+        'fn dist(n) { return sqrt(pow(get(n, "x"), 2) + pow(get(n, "y") - 3, 2) + pow(get(n, "z"), 2)) }\n'
+        'frame(301)\nfar = 0\nfor i in 0..25 { far = max(far, dist("S" + str(i))) }\n'
+        'for i in 0..8 { far = max(far, dist("B" + str(i))) }\nprint("bowl", far, rbinfo(2), rbinfo(7))\n')
+
+STAIRS = ('delete("Cube")\ndelete("Light")\ndelete("Camera")\n'
+          't = gtree("Stairs")\no = gnode(t, "output")\nl = gnode(t, "line", 6, 0.6, 0.3, 0)\nc = gnode(t, "cube", 0.6)\n'
+          'ip = gnode(t, "instance", 0, 0, 0)\nglink(t, l, ip, 1)\nglink(t, c, ip, 2)\nr = gnode(t, "realize")\n'
+          'glink(t, ip, r, 1)\nglink(t, r, o, 1)\nadd("cube", "St", 0, 0.3, 0)\nm = modifier("St", "geometry")\n'
+          'modset("St", m, "tree", t)\nscale("St", 1, 1, 4)\nselect("St")\nop("rigid.add", "passive mesh")\n'
+          'add("plane", "Floor", 0, 0, 0)\nselect("Floor")\nop("rigid.add", "passive plane")\n'
+          'for i in 0..6 {\n n = "B" + str(i)\n add("cube", n, i * 0.6, 2.5 + i * 0.4, (i % 3) * 0.5 - 0.5)\n'
+          ' scale(n, 0.2)\n select(n)\n op("rigid.add", "active box")\n}\n'
+          'frame(241)\ns = ""\nfor i in 0..6 { s = s + " " + str(round(get("B" + str(i), "y") * 100)) }\n'
+          'print("stairs" + s)\nprint("asleep", rbinfo(2))\n')
+
+RAMP = ('delete("Cube")\ndelete("Light")\ndelete("Camera")\n'
+        't = gtree("RampT")\no = gnode(t, "output")\ng = gnode(t, "grid", 12, %d)\nglink(t, g, o, 1)\n'
+        'add("cube", "Ramp", 0, 0, 0)\nm = modifier("Ramp", "geometry")\nmodset("Ramp", m, "tree", t)\n'
+        'rotate("Ramp", rad(15), 0, 0)\nselect("Ramp")\nop("rigid.add", "passive mesh friction 0.05")\n'
+        's = sin(rad(15))\ncc = cos(rad(15))\nadd("cube", "B", 0.13, 0.26 * cc + 4 * s, -4 * cc + 0.26 * s)\n'
+        'scale("B", 0.25)\nrotate("B", rad(15), 0, 0)\nselect("B")\nop("rigid.add", "active box friction 0.05")\n'
+        'up = 0\ntw = 0\nfor f in 2..60 {\n frame(f)\n h = get("B", "y") * cc + get("B", "z") * s\n'
+        ' if f > 8 {\n  up = max(up, abs(h - 0.25))\n  tw = max(tw, abs(get("B", "rx") - rad(15)) + abs(get("B", "ry")) + abs(get("B", "rz")))\n }\n}\n'
+        'print("ramp", up, tw, get("B", "z"))\n')
+
+TERRAIN = ('delete("Cube")\ndelete("Light")\ndelete("Camera")\n'
+           't = gtree("Land")\no = gnode(t, "output")\ng = gnode(t, "terrain", 24, 224, 2, 7)\nglink(t, g, o, 1)\n'
+           'add("cube", "Land", 0, 0, 0)\nm = modifier("Land", "geometry")\nmodset("Land", m, "tree", t)\n'
+           'select("Land")\nop("rigid.add", "passive mesh")\n'
+           'b = gtree("Balls")\nbo = gnode(b, "output")\nbg = gnode(b, "grid", 16, 9)\nbs = gnode(b, "sphere", 0.2)\n'
+           'bi = gnode(b, "instance", 0, 0, 0)\nglink(b, bg, bi, 1)\nglink(b, bs, bi, 2)\nglink(b, bi, bo, 1)\n'
+           'for k in 0..10 {\n n = "Ba" + str(k)\n add("cube", n, 0.4 * (k % 2), 4 + k * 0.5, 0.3 * (k % 3))\n'
+           ' mm = modifier(n, "geometry")\n modset(n, mm, "tree", b)\n select(n)\n op("rigid.add", "active sphere instances")\n}\n'
+           'frame(2)\nprint("parts", rbinfo(7))\nworst = 0\nsum = 0\nfor f in 3..73 {\n frame(f)\n sum += rbinfo(4)\n worst = max(worst, rbinfo(4))\n}\n'
+           'lo = 99\nfor k in 0..10 { for i in 0..100 {\n n = "Ba" + str(k)\n'
+           ' if abs(instpos(n, i, 0)) < 11.5 and abs(instpos(n, i, 2)) < 11.5 { lo = min(lo, instpos(n, i, 1)) }\n} }\n'
+           'print("terrain", worst, sum / 70, lo)\n')
+
+PLANE = ('delete("Cube")\nadd("plane", "P", 0, 0, 0)\nselect("P")\nop("rigid.add", "passive plane")\n'
+         'add("cube", "F", 500, 2, -300)\nscale("F", 0.5)\nrotate("F", 0.3, 0.2, 0.1)\nselect("F")\nop("rigid.add", "active box")\n'
+         'frame(121)\nprint("plane", get("F", "y"), rbinfo(2))\n')
+
+
 def drift(rows):
     """(settling: the largest move start -> 1 s, standing: 1 s -> 10 s,
     the largest drop) in mm"""
@@ -173,6 +228,32 @@ def main():
     one = {x[0]: x[1:] for x in run(HEAP, threads=0) if x}.get('heap')
     many = {x[0]: x[1:] for x in run(HEAP, threads=eight) if x}.get('heap')
     check(one is not None and one == many, f'1000 boxes: the same heap on one thread and on eight ({one}, {many})')
+    print('  -- the solver: meshes and planes --')
+    r = {x[0]: x[1:] for x in run(BOWL) if x}
+    b = r.get('bowl', ['99', '1', '0'])
+    check(float(b[0]) < 2.82 and b[1] == '0' and int(b[2]) > 900,
+          f'25 balls and 8 boxes in a bowl (its mesh, {int(b[2]) - 33} triangles): they stay in it (the farthest '
+          f'{float(b[0]):.3f} m from the middle: 2.8 inside) and come to rest')
+    r = {x[0]: x[1:] for x in run(STAIRS) if x}
+    ys = [int(v) for v in r.get('stairs', [])]
+    want = [80, 110, 140, 170, 200, 230]
+    check(len(ys) == 6 and all(abs(a - b) <= 2 for a, b in zip(ys, want)) and r.get('asleep') == ['0'],
+          f'boxes dropped on a staircase (one mesh) rest on its steps ({ys} cm; {want})')
+    for n, label in ((1, 'two triangles'), (48, '4608 triangles')):
+        r = {x[0]: x[1:] for x in run(RAMP % n) if x}
+        up, tw, z = [float(v) for v in r.get('ramp', ['9', '9', '-9'])]
+        check(up < 0.005 and tw < 0.05 and z > 1.0,
+              f'a box slides down a ramp of {label} without catching on their edges (off the face by '
+              f'{up * 1000:.1f} mm at most, turned {tw:.3f} rad)')
+    r = {x[0]: x[1:] for x in run(TERRAIN, threads=eight) if x}
+    t = [float(v) for v in r.get('terrain', ['1e9', '1e9', '-99'])]
+    parts = int(r.get('parts', ['0'])[0])
+    check(parts > 100000 and t[0] < 41.7 * SLOW and t[2] > -2.5,
+          f'1000 balls on a terrain of {parts - 1000} triangles: live (the slowest frame {t[0]:.0f} ms, '
+          f'{t[1]:.1f} on average), none through it')
+    r = {x[0]: x[1:] for x in run(PLANE) if x}
+    p = r.get('plane', ['0', '1'])
+    check(abs(float(p[0]) - 0.5) < 0.01 and p[1] == '0', f'an endless plane catches a box 500 m out ({p})')
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nthe solver: all checks passed')
     sys.exit(1 if FAILS else 0)
 
