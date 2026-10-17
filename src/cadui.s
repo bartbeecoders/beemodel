@@ -27,6 +27,7 @@
 .equ FT_SZ,     128                     # (feature.s)
 .equ FT_TYPE,   0
 .equ FT_BODY,   4
+.equ FT_REF,    12
 .equ FT_FLAGS,  16
 .equ FT_X,      32
 .equ FF_OFF,    8
@@ -42,6 +43,7 @@ cs_args:        .skip 256               # the argument, split
 cs_tok:         .skip 8*MAXTOK
 cs_src:         .skip SRC_CAP
 cu_on:          .skip 4*MAXF            # the features' On toggles
+fm_arg:         .skip 32                # cad.feature_move's argument
 cu_fval:        .skip 32*MAXF           # a number value as text
 cu_arg:         .skip 160
 cu_units:       .skip 4
@@ -50,6 +52,11 @@ cu_mass:        .skip 128               # the last mass properties
 cu_mass_uid:    .skip 4
 
 .section .rodata
+s_fm_usage:     .asciz "  cad.feature_move <number> up|down"
+
+s_up:           .asciz "up"
+s_down:         .asciz "down"
+
 s_empty:        .asciz ""
 s_need_active:  .asciz "  select an object first"
 s_need_sketch:  .asciz "select a sketch first"
@@ -327,6 +334,9 @@ WIDGET wd_cp_add, WK_BUTTON, "cad.param.add", "Add Parameter...", aux=op_param_s
 WIDGET wd_cp_units, WK_ENUM, "cad.units", cb=units_cb, aux=unit_lbl, n=4, tip="What one scene unit is (typed lengths with units convert)"
 WIDGET wd_cp_kernel, WK_TOGGLE, "cad.kernel", "Exact B-rep solids", cb=kernel_cb, tip="Features make exact NURBS solids (STEP export) instead of meshes"
 WIDGET wd_cf_val, WK_TEXT, "cad.feature.value", flags=WGF_COMPACT, cb=feat_val_cb, tip="The feature's size: distance, depth, diameter, wall, radius or step - a number or an expression (Enter)"
+WIDGET wd_cf_up, WK_BUTTON, "cad.feature.up", flags=WGF_ICON|WGF_COMPACT, n=ICON_CHEVRON_UP, tip="Move the feature up: it runs earlier when the part rebuilds"
+WIDGET wd_cf_down, WK_BUTTON, "cad.feature.down", flags=WGF_ICON|WGF_COMPACT, n=ICON_CHEVRON_DOWN, tip="Move the feature down: it runs later when the part rebuilds"
+OPERATOR op_feat_move, "cad.feature_move", "Move Feature", do_feat_move, flags=OPF_AI_SAFE|OPF_UNDO, doc="Move a feature in the tree: cad.feature_move <number> up|down (the part rebuilds; a feature that needs a later one is marked)"
 WIDGET wd_cf_on, WK_TOGGLE, "cad.feature.on", "On", flags=WGF_COMPACT, cb=feat_on_cb, tip="Suppress the feature (it is skipped when the part rebuilds)"
 WIDGET wd_cf_pad, WK_BUTTON, "cad.add.pad", "Pad", aux=op_cad_pad
 WIDGET wd_cf_pocket, WK_BUTTON, "cad.add.pocket", "Pocket", aux=op_cad_pocket
@@ -538,7 +548,52 @@ cadui_props:
     mov     edi, 3
     call    wg_ftoa
     mov     byte ptr [rax], 0
-4:  lea     rdi, [rip+wd_cf_val]
+4:  lea     rdi, [rip+wd_cf_up]         # up / down, left of the value
+    mov     esi, [rip+pnl_w]
+    shr     esi, 1
+    add     esi, [rip+pnl_x]
+    sub     esi, 42
+    mov     edx, r12d
+    mov     ecx, 18
+    xor     r8d, r8d
+    mov     r9d, ebx
+    call    wg
+    test    eax, eax
+    jz      41f
+    lea     rdi, [rip+s_up]
+    jmp     43f
+41: lea     rdi, [rip+wd_cf_down]
+    mov     esi, [rip+pnl_w]
+    shr     esi, 1
+    add     esi, [rip+pnl_x]
+    sub     esi, 22
+    mov     edx, r12d
+    mov     ecx, 18
+    xor     r8d, r8d
+    mov     r9d, ebx
+    call    wg
+    test    eax, eax
+    jz      44f
+    lea     rdi, [rip+s_down]
+43: push    rdi                         # cad.feature_move <n> up|down
+    push    rdi
+    call    fmt_reset
+    mov     edi, ebx
+    call    fmt_int
+    mov     edi, ' '
+    call    fmt_char
+    pop     rdi
+    pop     rdi
+    call    fmt_str
+    lea     rdi, [rip+fm_arg]           # (its own copy: running logs via fmt)
+    lea     rsi, [rip+fmt_buf]
+    mov     ecx, 32
+    rep     movsb
+    lea     rsi, [rip+fm_arg]
+    lea     rdi, [rip+op_feat_move]
+    call    run_arg
+    jmp     .Lcu_fend                   # (the list changed)
+44: lea     rdi, [rip+wd_cf_val]
     mov     esi, [rip+pnl_w]             # 50% .. 80%
     shr     esi, 1
     add     esi, [rip+pnl_x]
@@ -986,5 +1041,108 @@ k_in:           .asciz "in"
 .align 8
 unit_lbl:       .quad s_mm, s_cm, s_m, s_in
 unit_kw:        .quad k_mm, k_cm, k_m, k_in
+
+.text
+# cad.feature_move <n> up|down - the feature and its neighbour trade places;
+#   features that refer to either (shell -> pad, patterns, infill -> shell)
+#   keep referring to the same one; the parts rebuild
+do_feat_move:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rsi, [rip+op_arg]
+    call    im_next_word
+    xor     ebx, ebx                    # the number
+    lea     rcx, [rip+im_word]
+    test    eax, eax
+    jz      .Lfm_bad
+1:  movzx   eax, byte ptr [rcx]
+    test    eax, eax
+    jz      2f
+    sub     eax, '0'
+    cmp     eax, 9
+    ja      .Lfm_bad
+    imul    ebx, ebx, 10
+    add     ebx, eax
+    inc     rcx
+    jmp     1b
+2:  push    rsi
+    call    im_next_word
+    pop     rsi
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+s_up]
+    call    str_eq
+    lea     r12d, [rbx-1]               # up: with the one before
+    test    eax, eax
+    jnz     3f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+s_down]
+    call    str_eq
+    test    eax, eax
+    jz      .Lfm_bad
+    lea     r12d, [rbx+1]               # down: with the one after
+3:  test    r12d, r12d
+    js      .Lfm_none
+    call    feat_count
+    cmp     ebx, eax
+    jae     .Lfm_none
+    cmp     r12d, eax
+    jae     .Lfm_none
+    mov     r15d, eax
+    call    cad_cow                     # (ours to change)
+    mov     edi, ebx
+    call    feat_rec
+    mov     r13, rax
+    mov     edi, r12d
+    call    feat_rec
+    mov     r14, rax
+    xor     ecx, ecx                    # swap the two records
+4:  mov     rax, [r13+rcx]
+    mov     rdx, [r14+rcx]
+    mov     [r13+rcx], rdx
+    mov     [r14+rcx], rax
+    add     ecx, 8
+    cmp     ecx, FT_SZ
+    jb      4b
+    xor     ecx, ecx                    # references follow
+5:  cmp     ecx, r15d
+    jae     7f
+    push    rcx
+    mov     edi, ecx
+    call    feat_rec
+    pop     rcx
+    mov     edx, [rax+FT_TYPE]
+    cmp     edx, 5                      # shell, patterns, infill: by number
+    je      51f
+    cmp     edx, 8
+    jb      6f
+51: mov     edx, [rax+FT_REF]
+    cmp     edx, ebx
+    jne     52f
+    mov     [rax+FT_REF], r12d
+    jmp     6f
+52: cmp     edx, r12d
+    jne     6f
+    mov     [rax+FT_REF], ebx
+6:  inc     ecx
+    jmp     5b
+7:  call    feat_rebuild
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+.Lfm_none:
+    call    undo_drop_last              # (nothing moved: no undo step)
+    jmp     9f
+.Lfm_bad:
+    lea     rdi, [rip+s_fm_usage]
+    call    log_line
+    call    undo_drop_last
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
 
 .section .note.GNU-stack,"",@progbits

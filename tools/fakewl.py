@@ -613,6 +613,7 @@ def main():
     files_more()
     files_complete()
     cad_ui()
+    feature_order_ui()
     materials_more()
     paint_ui()
     anim_ui()
@@ -7310,6 +7311,38 @@ def pick_enum(f, m, name, sub, row):
     lst = [w for w in ui_tree(m) if w['kind'] == 'list']
     if lst:
         f.click(lst[0]['x'] + 30, lst[0]['y'] + 4 + row * 22 + 11); f.pump(0.3)
+
+
+def feature_order_ui():
+    """F10 (#276): move a CAD feature up or down the tree (buttons,
+    cad.feature_move); the part rebuilds, a feature that needs a later one
+    is marked, undo puts the order back."""
+    print('  -- feature tree: reorder --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube")\ns = sketch("S", "XZ")\nrect(s, 0, 0, 2, 2)\npad("Body", s, 1)\nfillet("Body", 0.2, "vertical")\nselect("Body")')
+    st = lambda: q('print(features(), fstatus(0), fstatus(1))')
+    vol = lambda: round(float(q('print(volume("Body"))') or 0), 4)
+    check(st() == '2 0 0', f'a pad, then a fillet: both fine ({st()})')
+    v0 = vol()
+    props_tab(m, f, 'cad')
+    up = widget(m, 'cad.feature.up', 1)
+    check(up is not None and widget(m, 'cad.feature.down', 0) is not None, 'each feature row has up and down buttons')
+    if up:
+        f.click(up['x'] + up['w'] // 2, up['y'] + up['h'] // 2); f.pump(0.3)
+    s1 = st()
+    check(s1.split()[0] == '2' and s1.split()[1] != '0' and s1.split()[2] == '0',
+          f'the fillet moved before the pad: it has nothing to round yet, so it is marked ({s1})')
+    check(vol() == 4.0, f'the part rebuilt: the plain pad ({vol()})')
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.3)
+    check(st() == '2 0 0' and vol() == v0, f'one undo puts the order back ({st()}, {vol()})')
+    q('op("cad.feature_move", "0 down")')
+    check(st().split()[1] != '0', f'cad.feature_move 0 down does the same ({st()})')
+    f.proc.kill()
 
 
 def materials_more():
