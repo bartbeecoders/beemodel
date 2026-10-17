@@ -84,12 +84,14 @@ s_awake:        .asciz " awake, "
 s_ms:           .asciz " ms"
 s_undo:         .asciz "Physics"
 .align 8
-shape_lbl:      .quad sh_box, sh_sphere, sh_capsule, sh_hull, sh_compound
+shape_lbl:      .quad sh_box, sh_sphere, sh_capsule, sh_hull, sh_compound, sh_mesh, sh_plane
 sh_box:         .asciz "Box"
 sh_sphere:      .asciz "Sphere"
 sh_capsule:     .asciz "Capsule"
 sh_hull:        .asciz "Convex Hull"
 sh_compound:    .asciz "Compound"
+sh_mesh:        .asciz "Mesh"
+sh_plane:       .asciz "Plane"
 jt_lbl:         .quad sh_box, jt_fixed, jt_hinge, jt_point
 jt_fixed:       .asciz "Fixed"
 jt_hinge:       .asciz "Hinge"
@@ -375,7 +377,7 @@ rb_props_draw:
     mov     ecx, ebp
     call    rp_button
     mov     eax, [r13+RB_SHAPE]
-    cmp     eax, 4
+    cmp     eax, 6
     jbe     12f
     xor     eax, eax
 12: lea     rcx, [rip+shape_lbl]
@@ -685,7 +687,7 @@ rb_drag_begin:
     jne     32f
     mov     eax, [r13+RB_SHAPE]         # the next shape
     inc     eax
-    cmp     eax, 5
+    cmp     eax, 7
     jb      31f
     xor     eax, eax
 31: mov     [r13+RB_SHAPE], eax
