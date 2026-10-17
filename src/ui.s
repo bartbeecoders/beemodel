@@ -1259,10 +1259,21 @@ ui_button:
     jmp     .Lbt_done
 71: mov     [rip+outl_click_t], r13d
     mov     [rip+outl_click_row], r12d
-    lea     rax, [rip+obj_list]
+    test    dword ptr [rip+key_mods], MOD_SHIFT  # Shift: the rows from the
+    jz      72f                                  #  active one to this
+    mov     edi, r12d
+    call    outl_range
+    call    macro_select
+    jmp     .Lbt_done
+72: test    dword ptr [rip+key_mods], MOD_CTRL  # Ctrl: this one in or out
+    jz      73f
+    mov     edi, r12d
+    call    outl_toggle
+    call    macro_select
+    jmp     .Lbt_done
+73: lea     rax, [rip+obj_list]
     mov     edi, [rax+r12*4]
-    mov     esi, [rip+key_mods]
-    and     esi, MOD_SHIFT
+    xor     esi, esi
     call    obj_click_select
     call    macro_select
     jmp     .Lbt_done

@@ -469,8 +469,10 @@ op_select_all_t:
     jae     9f
     mov     edi, ebx
     call    obj_at
+    test    dword ptr [rax+OB_FLAGS], OBF_LOCKED  # (locked ones stay out)
+    jnz     41f
     or      dword ptr [rax+OB_FLAGS], OBF_SELECTED
-    inc     ebx
+41: inc     ebx
     jmp     4b
 9:  pop     rbx
     ret

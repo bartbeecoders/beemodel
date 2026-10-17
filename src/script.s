@@ -361,6 +361,8 @@ builtins:
     .long 1, 1
     .quad bn_active, b_active
     .long 0, 0
+    .quad bn_issel, b_issel
+    .long 1, 1
     .quad bn_op, b_op
     .long 1, 2
     .quad bn_edit, b_edit
@@ -722,6 +724,7 @@ bn_exists:      .asciz "exists"
 bn_count:       .asciz "count"
 bn_name:        .asciz "name"
 bn_active:      .asciz "active"
+bn_issel:       .asciz "issel"
 bn_op:          .asciz "op"
 bn_edit:        .asciz "edit"
 bn_verts:       .asciz "verts"
@@ -4290,6 +4293,24 @@ b_exists:
     xor     ecx, ecx
     test    eax, eax
     setnz   cl
+    cvtsi2sd xmm0, ecx
+    jmp     ret_num
+
+# issel(name) - 1 if that object is selected
+b_issel:
+    sub     rsp, 8
+    call    a_str
+    mov     rdi, rax
+    call    obj_find
+    xor     ecx, ecx
+    test    eax, eax
+    jz      1f
+    mov     edi, eax
+    call    obj_get
+    xor     ecx, ecx
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    setnz   cl
+1:  add     rsp, 8
     cvtsi2sd xmm0, ecx
     jmp     ret_num
 
