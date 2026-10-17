@@ -519,12 +519,17 @@ over the timeline. Its features rebuild with it, and parts that run into each ot
 reported.
 
 **Physics.** `rigid.add` makes the selected objects rigid bodies: boxes, spheres, capsules,
-convex hulls, or compounds of convex parts cut from the mesh. They fall, collide, rest and sleep
-when you play past the scene's start, and come back when you return to it. Joints (fixed,
-hinge, point) tie them together or to the world. The Properties area's **Physics** section
-sets all of it up without typing: **+ Rigid Body**, Active / Passive, the shape, mass,
-friction, bounce, damping, gravity. 1000 boxes tumbling into a heap simulate faster than real
-time.
+convex hulls, or compounds of convex parts cut from the mesh; static ones can also be any mesh
+(a landscape of 100 000 triangles) or an endless plane. They fall, collide, rest and sleep when
+you play past the scene's start, and come back when you return to it. Every instance of an
+object's geometry nodes can be a body: 10 800 balls poured into a box, 5000 bricks. Towers and
+pyramids stand, fast bodies stop at thin walls, collision groups and materials (rubber, ice,
+wood, metal, stone) set what meets what and how. Joints (fixed, hinge, point, slider) tie them
+together or to the world, with limits, motors and a strength past which they break. The result
+is the same bit for bit on any number of threads. The Properties area's **Physics** section
+sets all of it up without typing: **+ Rigid Body**, Active / Passive, the shape, material,
+mass, friction, bounce, damping, gravity, substeps. How the solver works:
+[docs/PHYSICS.md](docs/PHYSICS.md); `tools/physbench.py` times it.
 
 **Simulation cache.** Rigid bodies and cloth keep every frame they reach, so scrubbing back
 plays them instead of simulating again; an edit to the setup starts it over. `sim.bake` keeps

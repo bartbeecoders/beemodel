@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-17
+
+"The solver": stage R of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`),
+issues R1-R7 (#286-#292). How it works: `docs/PHYSICS.md`; the benchmark:
+`tools/physbench.py`.
+
 ### Added
 - **The rigid-body solver takes each step in substeps** (#286, "soft step"):
   4 by default (`rigid.world substeps n`, Properties › Physics › World ›
@@ -1806,7 +1812,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/bartbeecoders/beemodel/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/bartbeecoders/beemodel/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/bartbeecoders/beemodel/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/bartbeecoders/beemodel/compare/v0.13.0...v0.14.0
