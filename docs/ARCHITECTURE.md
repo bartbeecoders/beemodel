@@ -170,7 +170,7 @@ stays private to the module.
 
 Shared headers: `const.inc` (syscalls, protocol opcodes, layout metrics,
 colours) and `macros.inc` (the operator record and the `OPERATOR` macro).
-`build/version.inc` is generated from `VERSION` by `build.sh`.
+`build/version.inc` is generated from `VERSION` by `scripts/build.sh`.
 
 ## Calling convention
 

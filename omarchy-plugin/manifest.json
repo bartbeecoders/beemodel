@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "id": "bart.beemodel",
+  "name": "BeeModel",
+  "version": "0.15.0",
+  "author": "Bart Roelant",
+  "description": "Open BeeModel from the Omarchy bar. A click focuses the window, or starts one.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "BeeModel",
+    "description": "Focus BeeModel, or start it.",
+    "category": "Apps",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "binary": "",
+      "scene": ""
+    },
+    "schema": [
+      {
+        "key": "binary",
+        "type": "string",
+        "label": "BeeModel binary",
+        "defaultValue": "",
+        "description": "Empty uses ~/.local/bin/beemodel, which scripts/deploy-omarchy.sh installs."
+      },
+      {
+        "key": "scene",
+        "type": "path",
+        "label": "Scene to open",
+        "defaultValue": "",
+        "description": "Empty starts with the welcome screen. A .bee file opens that scene."
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=BeeModel
+Comment=3D modeling, CAD, sculpting and rendering, in assembly
+Exec=@BIN@ %f
+Icon=beemodel
+Terminal=false
+Categories=Graphics;3DGraphics;Engineering;
+Keywords=3d;modeler;cad;sculpt;render;bee;
+MimeType=application/x-beemodel;
+StartupNotify=true
+StartupWMClass=beemodel

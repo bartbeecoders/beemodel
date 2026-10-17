@@ -2,12 +2,12 @@
 # Run the same checks as CI (.github/workflows/ci.yml) on this machine.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-./build.sh
+scripts/build.sh
 ci/check-binary.sh build/beemodel
 ./build/beemodel --selftest
 BEEMODEL_THREADS=0 ./build/beemodel --selftest
 BEEMODEL_THREADS=3 ./build/beemodel --selftest
-./build.sh debug >/dev/null && ./build.sh >/dev/null
+scripts/build.sh debug >/dev/null && scripts/build.sh >/dev/null
 timeout 300 python3 tests/bool_stress.py build/beemodel --cases 300
 timeout 300 python3 tests/image_io.py build/beemodel
 timeout 600 python3 tests/enclosure.py build/beemodel

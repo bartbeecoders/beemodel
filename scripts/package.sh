@@ -2,10 +2,10 @@
 # Package a release build: dist/beemodel-<version>-linux-x86_64.tar.gz, the
 # optional GPU helper as dist/beemodel-gpu-<version>-linux-x86_64.tar.gz, SHA256SUMS
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 VERSION="$(tr -d '[:space:]' < VERSION)"
 NAME="beemodel-${VERSION}-linux-x86_64"
-./build.sh release
+scripts/build.sh release
 rm -rf dist && mkdir -p "dist/$NAME"
 cp build/beemodel README.md CHANGELOG.md "dist/$NAME/"
 tar -C dist --owner=0 --group=0 --sort=name --mtime='2026-01-01 00:00Z' \

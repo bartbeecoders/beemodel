@@ -26,7 +26,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends libvulkan1
 
       - name: Build
-        run: ./build.sh release && test -x build/beemodel-gpu
+        run: scripts/build.sh release && test -x build/beemodel-gpu
 
       - name: Binary policy checks
         run: ci/check-binary.sh build/beemodel
@@ -51,7 +51,7 @@ jobs:
             timeout 1200 python tools/fakewl.py build/shots-bitmap
 
       - name: Package
-        run: ./package.sh
+        run: scripts/package.sh
 
       - name: Release notes from CHANGELOG
         run: |
