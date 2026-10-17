@@ -104,7 +104,7 @@ The tabs down the left side of Properties are:
 | **Modifiers** | The stack (on / off, order, Apply, remove) with every value, including object and node-tree pickers |
 | **Material** | Material picker and New, base colour, metallic, roughness, transmission, emission and more. Images, and the paint layer stack while texture painting |
 | **Physics** | Rigid bodies, cloth and soft bodies, colliders, joints, wind, the simulation cache |
-| **CAD** | Parameters (expressions), the feature tree with sizes you can edit and a health dot, units, the B-rep kernel, mechanism joints, measuring |
+| **CAD** | Parameters (expressions), the feature tree with sizes you can edit, a health dot, and up / down buttons that reorder it (the part rebuilds; `cad.feature_move`), units, the B-rep kernel, mechanism joints, measuring |
 | **Scene** | Units, the world's sky (studio or an HDRI), its strength, the frame range |
 | **Render** | Size, samples, denoise, bounces, the GPU, Render and Save; virtualized geometry, world partition, light probes, lightmaps, play mode |
 | **Viewport** | Shading, grid, theme, camera |

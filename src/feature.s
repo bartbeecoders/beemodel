@@ -38,6 +38,7 @@
 .equ FT_REF,     12                     # feature (shell, patterns) / selector
 .equ FT_FLAGS,   16
 .equ FT_COUNT,   20
+.equ FT_STAT,    24                     # the last rebuild's status (S_*)
 .equ FT_AXIS,    28
 .equ FT_X,       32                     # three 32-byte value slots
 .equ MAX_FEATS,  64
@@ -166,8 +167,15 @@ feat_status:
     xor     eax, eax
     cmp     edi, MAX_FEATS
     jae     1f
-    lea     rax, [rip+ft_stat]
-    mov     eax, [rax+rdi*4]
+    push    rdi                         # the status kept in the feature's
+    call    feat_count                  #  record by its last rebuild (so an
+    pop     rdi                         #  undo brings back its own)
+    cmp     edi, eax
+    jae     2f
+    call    feat_rec
+    mov     eax, [rax+FT_STAT]
+    ret
+2:  xor     eax, eax
 1:  ret
 
 # feat_uses(edi=uid) -> eax = 1 if a feature takes that object
@@ -325,6 +333,7 @@ feat_rebuild:
 .Lfr_st:
     lea     rcx, [rip+ft_stat]
     mov     [rcx+rbx*4], eax
+    mov     [r12+FT_STAT], eax          # (in the document too: undo has it)
     inc     ebx
     jmp     .Lfr_loop
 .Lfr_commit:
