@@ -633,6 +633,10 @@ obj_eval:
     test    rax, rax
     jnz     .Loe_out
     mov     rdi, rbx
+    call    rb_inst_mesh                # (instances that are rigid bodies)
+    test    rax, rax
+    jnz     .Loe_out
+    mov     rdi, rbx
     call    mods_on
     test    eax, eax
     jnz     96f

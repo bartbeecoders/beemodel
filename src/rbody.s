@@ -37,6 +37,7 @@
 .globl rb_reset
 .globl rb_impulse
 .globl rb_live
+.globl rb_inst_mesh
 
 # the settings (anim block)
 .equ RW_GRAV,   0                       # gravity (3 floats; all 0: -9.81 Y)
@@ -51,7 +52,8 @@
 .equ RB_FRIC,   16
 .equ RB_REST,   20
 .equ RB_DAMP,   24
-.equ RB_FLAGS,  28                      # bit 0: RB_INIT holds the start
+.equ RB_FLAGS,  28                      # bit 0: RB_INIT holds the start; bit 1:
+                                        #  its instances are the bodies
 .equ RB_INIT,   32                      # loc rot scale at the start (9 floats)
 .equ JT_TYPE,   0                       # 1 fixed, 2 hinge, 3 point
 .equ JT_A,      4                       # object uids (B 0: the world)
@@ -81,7 +83,9 @@
 .equ BD_ISL,    264
 .equ BD_DAMP,   268
 .equ BD_JOINT,  272                     # in a joint (no contact with its partner)
-.equ BD_SZ,     288
+.equ BD_INST,   276                     # an instance: its index + 1 (0: an object)
+.equ BD_SCL,    288                     # its scale (instances: their own)
+.equ BD_SZ,     304
 # a part (collide.s)
 .equ PT_TYPE,   0
 .equ PT_NV,     4
@@ -131,8 +135,22 @@
 .equ CP_C0,     112                     # gap - n . (pB - pA) at the step's start
 .equ CP_VN0,    116                     # normal speed then (restitution)
 .equ CP_JMAX,   120                     # the largest normal impulse this step
-.equ CP_SZ,     128
+.equ CP_RN,     128                     # its rows (normal, the tangents), each
+.equ CP_RT1,    192                     #  rA x d, rB x d, IA (rA x d),
+.equ CP_RT2,    256                     #  IB (rB x d) for the step
+.equ RW_AX,     0
+.equ RW_BX,     16
+.equ RW_IA,     32
+.equ RW_IB,     48
+.equ CP_SZ,     320
 .equ MF_SZ,     MF_PTS + 4*CP_SZ
+.equ MX_A,      0                       # a manifold's keys, dense (what the
+.equ MX_B,      4                       #  steps scan): its bodies, parts,
+.equ MX_PA,     8                       #  the step it was last seen in, its
+.equ MX_PB,     12                      #  points
+.equ MX_KEEP,   16
+.equ MX_N,      20
+.equ MX_SZ,     32
 # a joint (runtime)
 .equ JR_A,      0
 .equ JR_B,      4
@@ -150,6 +168,24 @@
 .equ JR_C,      176                     # pB - pA (world)
 .equ JR_SZ,     192
 .equ MARGIN,    0                       # (as floats in rodata)
+.equ RBI_OBJ,   0                       # an object whose instances are bodies:
+.equ RBI_OUT,   8                       #  the mesh shown while they move (its
+.equ RBI_WINV,  16                      #  own instance block), the object's
+.equ RBI_SZ,    64                      #  inverse matrix
+.equ RBI_MAX,   64
+.equ RB_CVER,   0x52425632              # the cache's records ("RBV2")
+.equ IB_N_,     4                       # (inst.s: an instance block)
+.equ IB_NP_,    8
+.equ IB_PROTO_, 24
+.equ IB_DATA_,  128
+.equ ST_FMF,    0                       # a stage: the fn for manifolds (or
+.equ ST_FJR,    8                       #  bodies), for joints,
+.equ ST_BASE,   16                      #  its items (constraint ids / body
+.equ ST_N,      24                      #  indices), how many,
+.equ ST_GR,     28                      #  a block's size,
+.equ ST_KIND,   32                      #  0 constraints, 1 bodies
+.equ ST_SZ,     48
+.equ ST_MAX,    8192
 .equ MAP_NORES, 0x4022
 .equ AN_START,  24                      # (anim.s)
 .equ AN_FPS,    32
@@ -250,12 +286,14 @@ rx_half:        .float 0.5
 rx_quarter:     .float 0.25
 rx_two:         .float 2.0
 rx_tiny:        .float 1.0e-9
+rx_tiny2:       .float 1e-12
 rx_small:       .float 1.0e-6
 rx_margin:      .float 0.02                 # contacts begin this far apart
 rx_keep:        .float 0.04                 # points kept this far apart,
 rx_drift2:      .float 0.0004               #  sliding less than 2 cm
 rx_same2:       .float 0.0004               # a new point this near an old one
 rx_slop:        .float 0.002
+rx_gmin:        .float 0.05                 # the grid's smallest cell
 rx_pushmax:     .float 1.0
 rx_hzmax:       .float 60.0                 # soft contacts: at most this stiff,
 rx_zeta:        .float 10.0                 #  damped this much
@@ -272,6 +310,8 @@ rx_thin:        .float 0.05                 # a passive box thinner than this
 rx_thick:       .float 0.25                 #  is this deep below its top
 rx_third:       .float 0.33333334
 rx_fifth2:      .float 0.4
+.align 8
+rx_1e6d:        .double 1000000.0
 rx_1000:        .float 1000.0
 rx_24:          .float 24.0
 rx_conc:        .float 0.05                 # compound: a part's hollowness / size
@@ -293,6 +333,14 @@ rb_npr:         .skip 4
 rb_njr:         .skip 4
 rb_nisl:        .skip 4
 rb_hmask:       .skip 4
+rb_gmask:       .skip 4                 # buckets - 1
+rb_gsh:         .skip 4                 # 64 - log2 buckets
+rb_gn:          .skip 4                 # entries this step
+rb_gnbig:       .skip 4
+rb_npair:       .skip 4
+rb_cappair:     .skip 4
+rb_gcs:         .skip 4                 # the cell's size,
+rb_ginv:        .skip 4                 #  1 / it
 rb_stepno:      .skip 4
 rb_iter:        .skip 4
 rb_base:        .skip 8                 # the mapping, its size
@@ -301,9 +349,24 @@ rb_bd:          .skip 8
 rb_pt:          .skip 8
 rb_vx:          .skip 8
 rb_mf:          .skip 8
-rb_pr:          .skip 8
+rb_mx:          .skip 8                 # each manifold's keys, dense (MX_*)
 rb_hs:          .skip 8
 rb_ord:         .skip 8
+rb_gent:        .skip 8                 # the grid: entries (cell, body),
+rb_gsrt:        .skip 8                 #  sorted by bucket,
+rb_gtab:        .skip 8                 #  the buckets' starts,
+rb_gbig:        .skip 8                 #  the bodies too big for it
+rb_pairs:       .skip 8                 # pairs of bodies whose bounds meet
+rb_gcc:         .skip 8                 # pairs found in each chunk of buckets
+rb_bcon:        .skip 8                 # a big island: its constraints,
+rb_bsrt:        .skip 8                 #  by colour,
+rb_bcol:        .skip 8                 #  their colours,
+rb_bmask:       .skip 8                 #  the colours at each body (64 bits)
+rb_bcst:        .skip 8                 #  each colour's start (66)
+rb_stg:         .skip 8                 # a big island's step: its stages,
+rb_scnt:        .skip 8                 #  each one's claimed / done blocks
+rb_nstg:        .skip 4
+rb_islj:        .skip 4                 #  (it has joints)
 rb_par:         .skip 8
 rb_ib:          .skip 8                 # islands: bodies, manifolds, joints
 rb_imf:         .skip 8
@@ -328,6 +391,15 @@ rb_mscale_s:    .skip 4                 #  stiff (it carries the most)
 rb_iscale_s:    .skip 4
 rb_ms:          .skip 4                 # the last frame's simulation time
 rb_busy:        .skip 4
+rb_noinst:      .skip 4                 # (obj_eval: the source, not ours)
+rb_mffull:      .skip 4                 # pairs that found no room
+rbi_n:          .skip 4
+.align 16
+rbi_tab:        .skip RBI_SZ*RBI_MAX
+.align 8
+rb_tns:         .skip 8*6               # time in each part of the steps (ns):
+                                        #  broad phase, narrow, islands,
+                                        #  solve, the hash, compacting
 .align 16
 rb_g:           .skip 16                # gravity
 rb_tmp:         .skip 64
@@ -615,7 +687,15 @@ body_bounds:
     add     r13, PT_SZ
     dec     r12d
     jmp     1b
-2:  movaps  [rbx+BD_MIN], xmm6
+2:  movaps  xmm0, [rbx+BD_V]            # and how far it goes in a step
+    andps   xmm0, [rip+rx_abs]          #  (fast ones are found in time)
+    movss   xmm1, [rip+rb_dt]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm0, xmm1
+    andps   xmm0, [rip+rx_xyz]
+    subps   xmm6, xmm0
+    addps   xmm7, xmm0
+    movaps  [rbx+BD_MIN], xmm6
     movaps  [rbx+BD_MAX], xmm7
     pop     r13
     pop     r12
@@ -647,6 +727,7 @@ rb_reserve:
 
 # rb_free - no simulation
 rb_free:
+    call    rbi_drop
     cmp     dword ptr [rip+rb_on], 0
     je      9f
     mov     dword ptr [rip+rb_on], 0
@@ -717,22 +798,46 @@ rb_build:
     and     rsp, -16
     sub     rsp, 64
     call    rb_free
+    mov     dword ptr [rip+rb_noinst], 1    # (the meshes as made, not moved)
     mov     rbx, [rip+an_cur]
     xor     r12d, r12d                  # bodies, the largest mesh
     xor     r13d, r13d
     xor     r14d, r14d                  # (its vertices, triangles)
+    mov     dword ptr [rsp], 0
 1:  cmp     r12d, [rbx+AN_NRB_]
     jae     2f
     imul    rdi, r12, RB_SZ_
     lea     rdi, [rbx+AN_RB_+rdi]
+    mov     [rsp+16], rdi
     call    rb_entry_obj
     test    rax, rax
     jz      11f
-    inc     r13d
     mov     rdi, rax
     call    obj_eval
     test    rax, rax
     jz      11f
+    mov     rdi, [rsp+16]
+    test    dword ptr [rdi+RB_FLAGS], 2
+    jz      10f
+    mov     rdi, [rax+ME_INST]          # its instances: one body each; their
+    test    rdi, rdi                    #  prototypes' sizes
+    jz      11f
+    add     r13d, [rdi+IB_N_]
+    mov     [rsp+24], rdi
+    xor     ecx, ecx
+101:cmp     ecx, [rdi+IB_NP_]
+    jae     11f
+    mov     rax, [rdi+IB_PROTO_+rcx*8]
+    mov     edx, [rax+ME_NVERTS]
+    cmp     edx, r14d
+    cmova   r14d, edx
+    mov     edx, [rax+ME_NTRIS]
+    cmp     edx, [rsp]
+    jbe     102f
+    mov     [rsp], edx
+102:inc     ecx
+    jmp     101b
+10: inc     r13d
     mov     ecx, [rax+ME_NVERTS]
     cmp     ecx, r14d
     cmova   r14d, ecx
@@ -764,17 +869,20 @@ rb_build:
     add     rsi, rax
     add     rsi, 65536
     call    rb_lay
-    imul    eax, r15d, 16               # manifolds
-    add     eax, 4096
+    imul    eax, r15d, 64               # manifolds: 64 a body (packed small
+    add     eax, 4096                   #  ones meet many; address space,
+                                        #  pages taken as used)
     mov     [rip+rb_capmf], eax
     lea     rdi, [rip+rb_mf]
     imul    rsi, rax, MF_SZ
     call    rb_lay
-    lea     rdi, [rip+rb_pr]
+    lea     rdi, [rip+rb_mx]
     mov     esi, [rip+rb_capmf]
-    shl     rsi, 3
+    shl     rsi, 5
     call    rb_lay
-    mov     eax, [rip+rb_capmf]         # the hash: a power of two >= 4 x
+    mov     eax, [rip+rb_capmf]         # the hash (kept: entries added when
+                                        #  made, taken out when they go): a
+                                        #  power of two >= 4 x
     shl     eax, 2
     bsr     ecx, eax
     inc     ecx
@@ -788,6 +896,71 @@ rb_build:
     call    rb_lay
     lea     rdi, [rip+rb_ord]
     lea     rsi, [r15*4+16]
+    call    rb_lay
+    imul    rsi, r15, 27*16             # the grid: a body in at most 27 cells
+    add     rsi, 1024
+    lea     rdi, [rip+rb_gent]
+    push    rsi
+    push    rsi
+    call    rb_lay
+    pop     rsi
+    pop     rsi
+    lea     rdi, [rip+rb_gsrt]
+    call    rb_lay
+    imul    eax, r15d, 16               # buckets: a power of two >= 16 nb
+    or      eax, 1023
+    bsr     ecx, eax
+    inc     ecx
+    mov     eax, 1
+    shl     eax, cl
+    lea     edx, [rax-1]
+    mov     [rip+rb_gmask], edx
+    mov     edx, 64
+    sub     edx, ecx
+    mov     [rip+rb_gsh], edx
+    lea     rsi, [rax*4+16]
+    lea     rdi, [rip+rb_gtab]
+    call    rb_lay
+    lea     rdi, [rip+rb_gbig]
+    lea     rsi, [r15*4+16]
+    call    rb_lay
+    imul    eax, r15d, 64               # pairs: 64 a body (more: at once)
+    add     eax, 1024
+    mov     [rip+rb_cappair], eax
+    lea     rdi, [rip+rb_pairs]
+    lea     rsi, [rax*8]
+    call    rb_lay
+    mov     esi, [rip+rb_gmask]         # a count for each 256 buckets
+    shr     esi, 8
+    add     esi, 2
+    shl     esi, 2
+    lea     rdi, [rip+rb_gcc]
+    call    rb_lay
+    mov     esi, [rip+rb_capmf]         # big islands: constraints, sorted,
+    add     esi, JT_MAX_+16             #  colours
+    shl     esi, 2
+    push    rsi
+    push    rsi
+    lea     rdi, [rip+rb_bcon]
+    call    rb_lay
+    mov     rsi, [rsp]
+    lea     rdi, [rip+rb_bsrt]
+    call    rb_lay
+    pop     rsi
+    pop     rsi
+    lea     rdi, [rip+rb_bcol]
+    call    rb_lay
+    lea     rsi, [r15*8+16]
+    lea     rdi, [rip+rb_bmask]
+    call    rb_lay
+    lea     rdi, [rip+rb_bcst]
+    mov     esi, 70*4
+    call    rb_lay
+    lea     rdi, [rip+rb_stg]           # stages (at most ST_MAX a step)
+    mov     esi, ST_MAX*ST_SZ
+    call    rb_lay
+    lea     rdi, [rip+rb_scnt]
+    mov     esi, ST_MAX*128
     call    rb_lay
     lea     rdi, [rip+rb_par]
     lea     rsi, [r15*4+16]
@@ -831,6 +1004,12 @@ rb_build:
     jbe     3b
     mov     dword ptr [rip+rb_on], 1
     xor     eax, eax
+    mov     [rip+rb_mffull], eax
+    lea     rdi, [rip+rb_tns]
+    mov     [rdi], rax
+    mov     [rdi+8], rax
+    mov     [rdi+16], rax
+    mov     [rdi+24], rax
     mov     [rip+rb_npt], eax
     mov     [rip+rb_nvx], eax
     mov     [rip+rb_nmf], eax
@@ -860,7 +1039,15 @@ rb_build:
     mov     ecx, 36
     rep     movsb
     or      dword ptr [r14+RB_FLAGS], 1
-43: mov     edi, r13d
+43: test    dword ptr [r14+RB_FLAGS], 2
+    jz      44f
+    mov     edi, r13d                   # its instances
+    mov     rsi, r14
+    mov     rdx, r15
+    call    inst_bodies
+    add     r13d, eax
+    jmp     41f
+44: mov     edi, r13d
     mov     rsi, r14
     mov     rdx, r15
     call    make_body
@@ -886,6 +1073,7 @@ rb_build:
 .Lbd_fail:
     mov     dword ptr [rip+rb_on], 0
 .Lbd_out:
+    mov     dword ptr [rip+rb_noinst], 0
     lea     rsp, [rbp-40]
     pop     r15
     pop     r14
@@ -990,30 +1178,75 @@ make_body:
     push    r12
     push    r13
     push    r14
+    and     rsp, -16
+    sub     rsp, 128
+    mov     ebx, edi
+    mov     r12, rsi
+    mov     r13, rdx
+    xorps   xmm0, xmm0                  # rotation: from the Euler angles
+    movups  [rsp], xmm0                 #  (loc 0, scale 1)
+    movups  xmm0, [r13+OB_ROT]
+    movups  [rsp+12], xmm0
+    mov     eax, [rip+rx_one]
+    mov     [rsp+24], eax
+    mov     [rsp+28], eax
+    mov     [rsp+32], eax
+    lea     rdi, [rsp-OB_LOC]
+    lea     rsi, [rsp+48]               # rows (3 x vec4)
+    call    obj_matrix
+    xor     eax, eax
+    mov     [rsp+48+12], eax
+    mov     [rsp+48+28], eax
+    mov     [rsp+48+44], eax
+    movups  xmm0, [r13+OB_LOC]
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [rsp+96], xmm0              # loc
+    movups  xmm0, [r13+OB_SCALE]
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [rsp+112], xmm0             # scale
+    mov     rdi, r13
+    call    obj_eval
+    mov     rcx, rax                    # the mesh
+    mov     edi, ebx
+    mov     rsi, r12
+    mov     rdx, r13
+    lea     r8, [rsp+48]
+    call    make_body_ex
+    lea     rsp, [rbp-32]
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# make_body_ex(edi=index, rsi=entry, rdx=object, rcx=mesh, r8=its place:
+#   rotation rows (3 x vec4), loc (vec4), scale (vec4)) - a body of that
+#   mesh, so placed and scaled
+make_body_ex:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
     push    r15
     and     rsp, -16
     sub     rsp, 160
     BODY    rbx, rdi
     mov     r12, rsi
     mov     r13, rdx
+    mov     r14, rcx
     mov     [rbx+BD_OBJ], r13
     mov     ecx, [r12+RB_TYPE]
     mov     [rbx+BD_TYPE], ecx
     mov     eax, [rip+rb_npt]
     mov     [rbx+BD_P0], eax
-    # rotation: from the Euler angles (scale 1)
-    xorps   xmm0, xmm0
-    movups  [rsp], xmm0                 # loc 0
-    movups  xmm0, [r13+OB_ROT]
-    movups  [rsp+12], xmm0              # rot
-    mov     eax, [rip+rx_one]
-    mov     [rsp+24], eax
-    mov     [rsp+28], eax
-    mov     [rsp+32], eax
-    lea     rdi, [rsp-OB_LOC]
-    lea     rsi, [rsp+48]
-    call    obj_matrix
-    lea     rdi, [rsp+48]
+    movaps  xmm0, [r8+48]               # loc, scale kept
+    movaps  [rsp+144], xmm0
+    movaps  xmm0, [r8+64]
+    movaps  [rbx+BD_SCL], xmm0
+    mov     rdi, r8
     lea     rsi, [rbx+BD_Q]
     call    rows_q
     movaps  xmm0, [rbx+BD_Q]            # (unit)
@@ -1027,12 +1260,9 @@ make_body:
     lea     rsi, [rbx+BD_R]
     call    q_rows
     # the mesh's bounds, scaled: centre c (rsp+96), half h (rsp+112)
-    mov     rdi, r13
-    call    obj_eval
-    mov     r14, rax
     movups  xmm0, [r14+ME_BMIN]
     movups  xmm1, [r14+ME_BMAX]
-    movups  xmm2, [r13+OB_SCALE]
+    movaps  xmm2, [rbx+BD_SCL]
     andps   xmm0, [rip+rx_xyz]
     andps   xmm1, [rip+rx_xyz]
     andps   xmm2, [rip+rx_xyz]
@@ -1117,9 +1347,7 @@ make_body:
     movaps  xmm0, [rsp+96]              # the centre of mass: the bounds' centre
     movaps  [rbx+BD_COM], xmm0
     MV3     xmm1, rbx+BD_R, xmm0, xmm2, xmm3    # pos = loc + R com
-    movups  xmm2, [r13+OB_LOC]
-    andps   xmm2, [rip+rx_xyz]
-    addps   xmm1, xmm2
+    addps   xmm1, [rsp+144]
     movaps  [rbx+BD_POS], xmm1
     movss   xmm0, [r12+RB_FRIC]
     movss   [rbx+BD_FRIC], xmm0
@@ -1778,9 +2006,14 @@ rb_step:
     push    rbx
     sub     rsp, 16
     inc     dword ptr [rip+rb_stepno]
-    call    hash_all                    # the manifolds into the hash
+    call    now_ns
+    mov     rbx, rax
     call    broad                       # pairs of parts: manifolds kept / made
+    xor     edi, edi
+    call    rb_lap
     call    compact                     # the rest go
+    mov     edi, 5
+    call    rb_lap
     lea     rdi, [rip+narrow_job]       # contacts, in parallel
     xor     esi, esi
     mov     edx, [rip+rb_nmf]
@@ -1788,7 +2021,11 @@ rb_step:
     test    edx, edx
     jz      1f
     call    parallel_for
-1:  call    islands
+1:  mov     edi, 1
+    call    rb_lap
+    call    islands
+    mov     edi, 2
+    call    rb_lap
     lea     rdi, [rip+island_job]       # each island solved, in parallel
     xor     esi, esi
     mov     edx, [rip+rb_nisl]
@@ -1796,45 +2033,110 @@ rb_step:
     test    edx, edx
     jz      2f
     call    parallel_for
-2:  add     rsp, 16
+    mov     [rsp], rbx                  # (the lap's start)
+    xor     ebx, ebx                    # the big ones, one at a time, each
+21: cmp     ebx, [rip+rb_nisl]          #  across the workers
+    jae     22f
+    mov     rax, [rip+rb_iaw]
+    cmp     dword ptr [rax+rbx*4], 0
+    je      23f
+    mov     edi, ebx
+    call    isl_big
+    jz      23f
+    mov     edi, ebx
+    call    solve_big
+23: inc     ebx
+    jmp     21b
+22: mov     rbx, [rsp]
+2:  mov     edi, 3
+    call    rb_lap
+    add     rsp, 16
     pop     rbx
+    ret
+# rb_lap(edi=part; rbx = the time it began) - its time added; rbx = now
+rb_lap:
+    push    rdi
+    call    now_ns
+    pop     rdi
+    lea     rcx, [rip+rb_tns]
+    mov     rdx, rax
+    sub     rdx, rbx
+    add     [rcx+rdi*8], rdx
+    mov     rbx, rax
     ret
 
 # mf_hash(edi=part a, esi=part b) -> eax = the slot to start at
 mf_hash:
-    imul    eax, edi, 73856093
-    imul    ecx, esi, 19349663
-    xor     eax, ecx
+    mov     eax, edi                    # (a << 32 | b) x a large odd number,
+    shl     rax, 32                     #  its high bits folded down
+    mov     ecx, esi
+    or      rax, rcx
+    mov     rcx, 0x9E3779B97F4A7C15
+    imul    rax, rcx
+    mov     rcx, rax
+    shr     rcx, 29
+    xor     rax, rcx
     and     eax, [rip+rb_hmask]
     ret
 
-# hash_all - the hash cleared, then every manifold in it
-hash_all:
+# hf_slot(edi=manifold) -> rax = its slot in the hash (it is there)
+hf_slot:
     push    rbx
-    mov     rdi, [rip+rb_hs]
-    mov     ecx, [rip+rb_hmask]
-    inc     ecx
-    xor     eax, eax
-    rep     stosd
-    xor     ebx, ebx
-1:  cmp     ebx, [rip+rb_nmf]
-    jae     9f
-    imul    rdx, rbx, MF_SZ
-    add     rdx, [rip+rb_mf]
-    mov     edi, [rdx+MF_PA]
-    mov     esi, [rdx+MF_PB]
+    mov     ebx, edi
+    mov     rax, rbx
+    shl     rax, 5
+    add     rax, [rip+rb_mx]
+    mov     edi, [rax+MX_PA]
+    mov     esi, [rax+MX_PB]
     call    mf_hash
     mov     rcx, [rip+rb_hs]
-2:  cmp     dword ptr [rcx+rax*4], 0
-    je      3f
+    lea     edx, [rbx+1]
+1:  cmp     [rcx+rax*4], edx
+    je      9f
     inc     eax
     and     eax, [rip+rb_hmask]
-    jmp     2b
-3:  lea     edx, [rbx+1]
-    mov     [rcx+rax*4], edx
-    inc     ebx
     jmp     1b
 9:  pop     rbx
+    ret
+
+# hf_delete(eax=slot) - that slot emptied, the entries after it shifted back
+#   (linear probing: no gaps between an entry and its home)
+hf_delete:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, eax                   # i: the hole
+    mov     rbx, [rip+rb_hs]
+    mov     dword ptr [rbx+r12*4], 0
+    mov     r13d, r12d                  # j
+1:  inc     r13d
+    and     r13d, [rip+rb_hmask]
+    mov     edx, [rbx+r13*4]
+    test    edx, edx
+    jz      9f
+    dec     edx                         # its home k
+    shl     rdx, 5
+    add     rdx, [rip+rb_mx]
+    mov     edi, [rdx+MX_PA]
+    mov     esi, [rdx+MX_PB]
+    call    mf_hash
+    # it may move to i when k is not cyclically in (i, j]
+    mov     ecx, r13d
+    sub     ecx, eax
+    and     ecx, [rip+rb_hmask]         # (j - k) mod n
+    mov     edx, r13d
+    sub     edx, r12d
+    and     edx, [rip+rb_hmask]         # (j - i) mod n
+    cmp     ecx, edx
+    jb      1b                          # its home is after the hole: stays
+    mov     eax, [rbx+r13*4]
+    mov     [rbx+r12*4], eax
+    mov     dword ptr [rbx+r13*4], 0
+    mov     r12d, r13d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # mf_get(edi=body a, esi=body b, edx=part a, ecx=part b) - the manifold of
@@ -1857,21 +2159,29 @@ mf_get:
     test    edx, edx
     jz      3f
     dec     edx
-    imul    rbx, rdx, MF_SZ
-    add     rbx, [rip+rb_mf]
-    cmp     [rbx+MF_PA], r14d
+    shl     rdx, 5
+    add     rdx, [rip+rb_mx]
+    cmp     [rdx+MX_PA], r14d
     jne     2f
-    cmp     [rbx+MF_PB], r15d
+    cmp     [rdx+MX_PB], r15d
     jne     2f
-    mov     edx, [rip+rb_stepno]
-    mov     [rbx+MF_KEEP], edx
+    mov     ecx, [rip+rb_stepno]
+    mov     [rdx+MX_KEEP], ecx
     jmp     9f
 2:  inc     eax
     and     eax, [rip+rb_hmask]
     jmp     1b
-3:  mov     edx, [rip+rb_nmf]           # a new one
+3:  mov     edx, [rip+rb_nmf]           # a new one (room, and the hash
+    mov     r8d, [rip+rb_hmask]         #  at most half full)
+    shr     r8d, 1
+    cmp     edx, r8d
+    jae     32f
     cmp     edx, [rip+rb_capmf]
-    jae     9f
+    jb      31f
+32:
+    inc     dword ptr [rip+rb_mffull]   # (none left: counted, rbinfo(14))
+    jmp     9f
+31:
     inc     dword ptr [rip+rb_nmf]
     lea     r8d, [rdx+1]
     mov     [rcx+rax*4], r8d
@@ -1882,8 +2192,15 @@ mf_get:
     mov     [rbx+MF_PA], r14d
     mov     [rbx+MF_PB], r15d
     mov     dword ptr [rbx+MF_N], 0
-    mov     edx, [rip+rb_stepno]
-    mov     [rbx+MF_KEEP], edx
+    shl     rdx, 5
+    add     rdx, [rip+rb_mx]
+    mov     [rdx+MX_A], r12d
+    mov     [rdx+MX_B], r13d
+    mov     [rdx+MX_PA], r14d
+    mov     [rdx+MX_PB], r15d
+    mov     dword ptr [rdx+MX_N], 0
+    mov     ecx, [rip+rb_stepno]
+    mov     [rdx+MX_KEEP], ecx
     BODY    r8, r12                     # friction sqrt(fa fb), bounce max
     BODY    r9, r13
     movss   xmm0, [r8+BD_FRIC]
@@ -1900,85 +2217,578 @@ mf_get:
     pop     rbx
     ret
 
-# broad - sweep and prune along X: the order sorted (insertion: it barely
-#   changes), overlapping bounds paired, their parts' bounds tested
+# broad - pairs of bodies whose bounds meet, through a hash grid: the cell
+#   about the size of a moving body (their average); each body in the cells
+#   its bounds cover (bodies more than twice that size go in a list and are
+#   tested against every body); the entries counting-sorted by bucket; in a
+#   bucket, two entries of the same cell are a pair when that cell is where
+#   their bounds' overlap begins (each pair once). The order is the bodies'
+#   own (the same every run)
+.equ GE_KEY,    0                       # an entry: its cell (packed),
+.equ GE_BODY,   8                       #  the body,
+.equ GE_B,      12                      #  the bucket
 broad:
+    push    rbp
+    mov     rbp, rsp
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
-    sub     rsp, 16
-    mov     r12, [rip+rb_ord]
+    and     rsp, -16
+    sub     rsp, 64
     mov     r13, [rip+rb_bd]
-    mov     ecx, 1                      # insertion sort by min x
+    # the cell: the moving bodies' average size
+    xorps   xmm4, xmm4
+    xor     ecx, ecx
+    xor     edx, edx
 1:  cmp     ecx, [rip+rb_nb]
-    jae     3f
-    mov     eax, [r12+rcx*4]
-    imul    rdx, rax, BD_SZ
-    movss   xmm0, [r13+rdx+BD_MIN]
-    mov     edx, ecx
-2:  test    edx, edx
-    jz      21f
-    mov     r8d, [r12+rdx*4-4]
-    imul    r9, r8, BD_SZ
-    comiss  xmm0, [r13+r9+BD_MIN]
-    jae     21f
-    mov     [r12+rdx*4], r8d
-    dec     edx
-    jmp     2b
-21: mov     [r12+rdx*4], eax
-    inc     ecx
+    jae     2f
+    imul    rax, rcx, BD_SZ
+    cmp     dword ptr [r13+rax+BD_TYPE], 1
+    jne     11f
+    movaps  xmm0, [r13+rax+BD_MAX]
+    subps   xmm0, [r13+rax+BD_MIN]
+    call    gr_ext
+    addss   xmm4, xmm0
+    inc     edx
+11: inc     ecx
     jmp     1b
-3:  xor     r14d, r14d                  # i
-4:  cmp     r14d, [rip+rb_nb]
-    jae     9f
-    mov     eax, [r12+r14*4]
-    BODY    rbx, rax
-    lea     r15d, [r14+1]               # j: while min x(j) <= max x(i)
-5:  cmp     r15d, [rip+rb_nb]
-    jae     8f
-    mov     eax, [r12+r15*4]
-    BODY    rdi, rax
-    movss   xmm0, [rdi+BD_MIN]
-    comiss  xmm0, [rbx+BD_MAX]
-    ja      8f
-    movaps  xmm0, [rbx+BD_MIN]          # y z overlap
-    cmpleps xmm0, [rdi+BD_MAX]
-    movaps  xmm1, [rdi+BD_MIN]
-    cmpleps xmm1, [rbx+BD_MAX]
-    andps   xmm0, xmm1
-    movmskps eax, xmm0
-    and     eax, 6
-    cmp     eax, 6
-    jne     7f
-    cmp     dword ptr [rbx+BD_TYPE], 1  # at least one moves
-    je      51f
-    cmp     dword ptr [rdi+BD_TYPE], 1
-    jne     7f
-51: cmp     dword ptr [rbx+BD_JOINT], 0 # jointed together: no contact
-    je      52f
-    cmp     dword ptr [rdi+BD_JOINT], 0
-    je      52f
-    mov     rsi, rdi
+2:  test    edx, edx
+    jz      .Lbr_out                    # nothing moves: no pairs
+    cvtsi2ss xmm0, edx
+    divss   xmm4, xmm0
+    maxss   xmm4, [rip+rx_gmin]
+    movss   [rip+rb_gcs], xmm4
+    movss   xmm0, [rip+rx_one]
+    divss   xmm0, xmm4
+    movss   [rip+rb_ginv], xmm0
+    # entries; the buckets counted
+    mov     rdi, [rip+rb_gtab]
+    mov     ecx, [rip+rb_gmask]
+    add     ecx, 2
+    xor     eax, eax
+    rep     stosd
+    mov     dword ptr [rip+rb_gn], 0
+    mov     dword ptr [rip+rb_gnbig], 0
+    mov     dword ptr [rip+rb_npair], 0
+    xor     r12d, r12d
+3:  cmp     r12d, [rip+rb_nb]
+    jae     4f
+    imul    rbx, r12, BD_SZ
+    add     rbx, r13
+    movaps  xmm0, [rbx+BD_MAX]
+    subps   xmm0, [rbx+BD_MIN]
+    call    gr_ext
+    movss   xmm1, [rip+rb_gcs]
+    addss   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     31f
+    mov     eax, [rip+rb_gnbig]         # too big: the list
+    mov     rcx, [rip+rb_gbig]
+    mov     [rcx+rax*4], r12d
+    inc     dword ptr [rip+rb_gnbig]
+    jmp     39f
+31: movss   xmm2, [rip+rb_ginv]         # its cells
+    shufps  xmm2, xmm2, 0
+    movaps  xmm0, [rbx+BD_MIN]
+    mulps   xmm0, xmm2
+    roundps xmm0, xmm0, 1
+    cvttps2dq xmm0, xmm0
+    movdqa  [rsp], xmm0                 # i0 j0 k0
+    movaps  xmm0, [rbx+BD_MAX]
+    mulps   xmm0, xmm2
+    roundps xmm0, xmm0, 1
+    cvttps2dq xmm0, xmm0
+    movdqa  [rsp+16], xmm0              # i1 j1 k1
+    mov     r14d, [rsp]                 # i
+32: cmp     r14d, [rsp+16]
+    jg      39f
+    mov     r15d, [rsp+4]               # j
+33: cmp     r15d, [rsp+20]
+    jg      38f
+    mov     eax, [rsp+8]                # k
+    mov     [rsp+32], eax
+34: mov     eax, [rsp+32]
+    cmp     eax, [rsp+24]
+    jg      37f
+    mov     edi, r14d
+    mov     esi, r15d
+    mov     edx, eax
+    call    gr_key                      # rax key, edx bucket
+    mov     ecx, [rip+rb_gn]
+    shl     rcx, 4
+    add     rcx, [rip+rb_gent]
+    mov     [rcx+GE_KEY], rax
+    mov     [rcx+GE_BODY], r12d
+    mov     [rcx+GE_B], edx
+    mov     rcx, [rip+rb_gtab]
+    inc     dword ptr [rcx+rdx*4+4]
+    inc     dword ptr [rip+rb_gn]
+    inc     dword ptr [rsp+32]
+    jmp     34b
+37: inc     r15d
+    jmp     33b
+38: inc     r14d
+    jmp     32b
+39: inc     r12d
+    jmp     3b
+4:  mov     rcx, [rip+rb_gtab]          # starts; then a stable counting sort
+    mov     edx, [rip+rb_gmask]
+    inc     edx
+    xor     eax, eax
+    xor     r8d, r8d
+41: cmp     r8d, edx
+    ja      42f
+    add     eax, [rcx+r8*4]
+    mov     [rcx+r8*4], eax
+    inc     r8d
+    jmp     41b
+42: xor     r8d, r8d                    # (tab[b] the cursor; afterwards
+43: cmp     r8d, [rip+rb_gn]            #  tab[b] = b's end = b+1's start)
+    jae     44f
+    mov     rsi, r8
+    shl     rsi, 4
+    add     rsi, [rip+rb_gent]
+    mov     eax, [rsi+GE_B]
+    mov     r9d, [rcx+rax*4]
+    inc     dword ptr [rcx+rax*4]
+    shl     r9, 4
+    add     r9, [rip+rb_gsrt]
+    movaps  xmm0, [rsi]
+    movaps  [r9], xmm0
+    inc     r8d
+    jmp     43b
+44: # the buckets' pairs, in parallel: counted in chunks of 256 buckets,
+    #   then written where each chunk's count puts them (bucket order)
+    mov     eax, [rip+rb_gmask]
+    shr     eax, 8
+    inc     eax
+    mov     [rsp+40], eax               # chunks
+    lea     rdi, [rip+gr_count_job]
+    xor     esi, esi
+    mov     edx, eax
+    mov     ecx, 1
+    call    parallel_for
+    mov     rcx, [rip+rb_gcc]           # counts -> starts
+    xor     eax, eax
+    xor     edx, edx
+441:cmp     edx, [rsp+40]
+    jae     442f
+    mov     r8d, [rcx+rdx*4]
+    mov     [rcx+rdx*4], eax
+    add     eax, r8d
+    inc     edx
+    jmp     441b
+442:cmp     eax, [rip+rb_cappair]       # (no room: the list stays empty and
+    jbe     443f                        #  the pairs go one by one)
+    xor     eax, eax
+    mov     [rip+rb_npair], eax
+    lea     rdi, [rip+gr_slow_job]
+    xor     esi, esi
+    mov     edx, [rsp+40]
+    call    gr_slow_job
+    jmp     5f
+443:mov     [rip+rb_npair], eax
+    lea     rdi, [rip+gr_write_job]
+    xor     esi, esi
+    mov     edx, [rsp+40]
+    mov     ecx, 1
+    call    parallel_for
+5:  # the big ones: against every body (two big ones once)
+    xor     r12d, r12d
+51: cmp     r12d, [rip+rb_gnbig]
+    jae     .Lbr_pairs
+    mov     rax, [rip+rb_gbig]
+    mov     r14d, [rax+r12*4]
+    xor     r15d, r15d
+52: cmp     r15d, [rip+rb_nb]
+    jae     59f
+    cmp     r15d, r14d
+    je      58f
+    BODY    rbx, r14
+    BODY    rdi, r15
+    movaps  xmm0, [rdi+BD_MAX]          # (the other big too: only from the
+    subps   xmm0, [rdi+BD_MIN]          #  lower one)
+    call    gr_ext
+    movss   xmm1, [rip+rb_gcs]
+    addss   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     53f
+    cmp     r15d, r14d
+    jb      58f
+53: mov     rsi, rdi
     mov     rdi, rbx
-    call    jointed
-    mov     rdi, rsi
-    test    eax, eax
-    jnz     7f
-52: mov     rsi, rdi
-    mov     rdi, rbx
+    mov     edx, r14d
+    mov     ecx, r15d
+    call    gr_pair
+58: inc     r15d
+    jmp     52b
+59: inc     r12d
+    jmp     51b
+.Lbr_pairs:
+    # the pairs' manifolds looked up in parallel (kept); the new ones (and
+    #   bodies of several parts) made after, in the list's order
+    lea     rdi, [rip+pair_job]
+    xor     esi, esi
+    mov     edx, [rip+rb_npair]
+    mov     ecx, 256
+    test    edx, edx
+    jz      .Lbr_out
+    call    parallel_for
+    xor     r12d, r12d
+6:  cmp     r12d, [rip+rb_npair]
+    jae     .Lbr_out
+    mov     rax, [rip+rb_pairs]
+    mov     ecx, [rax+r12*8+4]
+    test    ecx, ecx
+    jns     61f
+    and     ecx, 0x7fffffff
+    mov     edx, [rax+r12*8]
+    BODY    rdi, rdx
+    BODY    rsi, rcx
     call    pair_parts
-7:  inc     r15d
-    jmp     5b
-8:  inc     r14d
-    jmp     4b
-9:  add     rsp, 16
+61: inc     r12d
+    jmp     6b
+.Lbr_out:
+    lea     rsp, [rbp-40]
     pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
+    pop     rbp
+    ret
+
+# pair_job(rdi=ctx, esi=begin, edx=end) - pairs of one part each whose
+#   manifold exists: seen this step; the rest marked (B | 1 << 31)
+pair_job:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, esi
+    mov     r13d, edx
+1:  cmp     r12d, r13d
+    jae     9f
+    mov     rbx, [rip+rb_pairs]
+    lea     rbx, [rbx+r12*8]
+    mov     eax, [rbx]
+    BODY    r8, rax
+    mov     eax, [rbx+4]
+    BODY    r9, rax
+    cmp     dword ptr [r8+BD_NP], 1
+    jne     8f
+    cmp     dword ptr [r9+BD_NP], 1
+    jne     8f
+    mov     edi, [r8+BD_P0]
+    mov     esi, [r9+BD_P0]
+    mov     r10d, edi
+    mov     r11d, esi
+    call    mf_hash
+    mov     rcx, [rip+rb_hs]
+2:  mov     edx, [rcx+rax*4]
+    test    edx, edx
+    jz      8f                          # none yet
+    dec     edx
+    shl     rdx, 5
+    add     rdx, [rip+rb_mx]
+    cmp     [rdx+MX_PA], r10d
+    jne     3f
+    cmp     [rdx+MX_PB], r11d
+    jne     3f
+    mov     ecx, [rip+rb_stepno]
+    mov     [rdx+MX_KEEP], ecx
+    jmp     7f
+3:  inc     eax
+    and     eax, [rip+rb_hmask]
+    jmp     2b
+8:  or      dword ptr [rbx+4], 0x80000000
+7:  inc     r12d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gr_count_job / gr_write_job(rdi=ctx, esi=first chunk, edx=end) - each
+#   chunk's pairs counted (rb_gcc) / written at its start (rb_gcc);
+#   gr_slow_job: paired at once (sequential)
+gr_count_job:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, esi
+    mov     r13d, edx
+1:  cmp     r12d, r13d
+    jae     9f
+    mov     edi, r12d
+    xor     esi, esi
+    call    gr_scan
+    mov     rcx, [rip+rb_gcc]
+    mov     [rcx+r12*4], eax
+    inc     r12d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+gr_write_job:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, esi
+    mov     r13d, edx
+1:  cmp     r12d, r13d
+    jae     9f
+    mov     rcx, [rip+rb_gcc]
+    mov     esi, [rcx+r12*4]
+    shl     rsi, 3
+    add     rsi, [rip+rb_pairs]
+    mov     edi, r12d
+    call    gr_scan
+    inc     r12d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+gr_slow_job:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, esi
+    mov     r13d, edx
+1:  cmp     r12d, r13d
+    jae     9f
+    mov     edi, r12d
+    mov     rsi, -1
+    call    gr_scan
+    inc     r12d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gr_scan(edi=chunk, rsi=out (0: count only; -1: pair_parts at once)) ->
+#   eax = the pairs in its 256 buckets: two entries of one cell where their
+#   bounds' overlap begins, passing gr_test
+gr_scan:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 80
+    mov     [rsp+64], rsi
+    mov     dword ptr [rsp+72], 0       # found
+    shl     edi, 8
+    mov     r12d, edi                   # bucket
+    lea     eax, [rdi+256]
+    mov     ecx, [rip+rb_gmask]
+    inc     ecx
+    cmp     eax, ecx
+    jbe     1f
+    mov     eax, ecx
+1:  mov     [rsp+76], eax               # end
+    xor     r14d, r14d                  # its start: the one before's end
+    test    r12d, r12d
+    jz      2f
+    mov     rcx, [rip+rb_gtab]
+    mov     r14d, [rcx+r12*4-4]
+2:  cmp     r12d, [rsp+76]
+    jae     9f
+    mov     rcx, [rip+rb_gtab]
+    mov     r15d, [rcx+r12*4]           # its end
+    mov     [rsp+40], r15d
+    lea     eax, [r14+1]
+    cmp     eax, r15d
+    jae     8f
+    mov     [rsp+44], r14d              # i
+3:  mov     eax, [rsp+44]
+    inc     eax
+    cmp     eax, [rsp+40]
+    jae     8f
+    mov     [rsp+48], eax               # j
+4:  mov     eax, [rsp+48]
+    cmp     eax, [rsp+40]
+    jae     7f
+    mov     rsi, [rip+rb_gsrt]
+    mov     ecx, [rsp+44]
+    shl     rcx, 4
+    mov     edx, eax
+    shl     rdx, 4
+    mov     rax, [rsi+rcx+GE_KEY]
+    cmp     rax, [rsi+rdx+GE_KEY]
+    jne     6f
+    mov     [rsp+56], rax
+    mov     edi, [rsi+rcx+GE_BODY]
+    mov     r8d, [rsi+rdx+GE_BODY]
+    mov     [rsp+32], edi
+    mov     [rsp+36], r8d
+    BODY    rbx, rdi
+    BODY    r13, r8
+    movaps  xmm0, [rbx+BD_MIN]          # where the overlap begins: this cell?
+    maxps   xmm0, [r13+BD_MIN]
+    movss   xmm2, [rip+rb_ginv]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm0, xmm2
+    roundps xmm0, xmm0, 1
+    cvttps2dq xmm0, xmm0
+    movdqa  [rsp], xmm0
+    mov     edi, [rsp]
+    mov     esi, [rsp+4]
+    mov     edx, [rsp+8]
+    call    gr_key
+    cmp     rax, [rsp+56]
+    jne     6f
+    mov     rdi, rbx
+    mov     rsi, r13
+    call    gr_test
+    test    eax, eax
+    jz      6f
+    mov     edx, [rsp+32]               # the lower first
+    mov     ecx, [rsp+36]
+    cmp     edx, ecx
+    jb      51f
+    xchg    edx, ecx
+51: mov     rax, [rsp+64]
+    test    rax, rax
+    jz      53f
+    cmp     rax, -1
+    jne     52f
+    BODY    rdi, rdx
+    BODY    rsi, rcx
+    call    pair_parts
+    jmp     53f
+52: mov     [rax], edx
+    mov     [rax+4], ecx
+    add     qword ptr [rsp+64], 8
+53: inc     dword ptr [rsp+72]
+6:  inc     dword ptr [rsp+48]
+    jmp     4b
+7:  inc     dword ptr [rsp+44]
+    jmp     3b
+8:  mov     r14d, r15d
+    inc     r12d
+    jmp     2b
+9:  mov     eax, [rsp+72]
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# gr_test(rdi=body, rsi=body) -> eax = 1 when their bounds meet, at least
+#   one moves and no joint ties them
+gr_test:
+    sub     rsp, 8
+    xor     eax, eax
+    movaps  xmm0, [rdi+BD_MIN]
+    cmpleps xmm0, [rsi+BD_MAX]
+    movaps  xmm1, [rsi+BD_MIN]
+    cmpleps xmm1, [rdi+BD_MAX]
+    andps   xmm0, xmm1
+    movmskps ecx, xmm0
+    and     ecx, 7
+    cmp     ecx, 7
+    jne     9f
+    cmp     dword ptr [rdi+BD_TYPE], 1
+    je      1f
+    cmp     dword ptr [rsi+BD_TYPE], 1
+    jne     9f
+1:  mov     eax, 1
+    cmp     dword ptr [rdi+BD_JOINT], 0
+    je      9f
+    cmp     dword ptr [rsi+BD_JOINT], 0
+    je      9f
+    call    jointed
+    xor     eax, 1
+9:  add     rsp, 8
+    ret
+
+# gr_ext(xmm0=size (vec4)) -> xmm0 = its largest of x y z
+gr_ext:
+    movaps  xmm1, xmm0
+    shufps  xmm1, xmm1, 0x55
+    maxss   xmm0, xmm1
+    movhlps xmm1, xmm0
+    maxss   xmm0, xmm1
+    ret
+
+# gr_key(edi=i, esi=j, edx=k) -> rax = the cell packed, edx = its bucket
+gr_key:
+    mov     eax, edi
+    add     eax, 0x100000
+    and     eax, 0x1FFFFF
+    mov     ecx, esi
+    add     ecx, 0x100000
+    and     ecx, 0x1FFFFF
+    shl     rcx, 21
+    or      rax, rcx
+    mov     ecx, edx
+    add     ecx, 0x100000
+    and     ecx, 0x1FFFFF
+    shl     rcx, 42
+    or      rax, rcx
+    mov     rdx, 0x9E3779B97F4A7C15
+    imul    rdx, rax
+    mov     ecx, [rip+rb_gsh]
+    shr     rdx, cl
+    ret
+
+# gr_pair(rdi=body, rsi=body, edx, ecx = their indices) - when their
+#   bounds meet, at least one moves and no joint ties them: on the list
+#   (the lower first)
+gr_pair:
+    sub     rsp, 8
+    movaps  xmm0, [rdi+BD_MIN]
+    cmpleps xmm0, [rsi+BD_MAX]
+    movaps  xmm1, [rsi+BD_MIN]
+    cmpleps xmm1, [rdi+BD_MAX]
+    andps   xmm0, xmm1
+    movmskps eax, xmm0
+    and     eax, 7
+    cmp     eax, 7
+    jne     9f
+    cmp     dword ptr [rdi+BD_TYPE], 1
+    je      1f
+    cmp     dword ptr [rsi+BD_TYPE], 1
+    jne     9f
+1:  cmp     dword ptr [rdi+BD_JOINT], 0
+    je      2f
+    cmp     dword ptr [rsi+BD_JOINT], 0
+    je      2f
+    push    rdi
+    push    rsi
+    push    rdx
+    push    rcx
+    call    jointed
+    pop     rcx
+    pop     rdx
+    pop     rsi
+    pop     rdi
+    test    eax, eax
+    jnz     9f
+2:  cmp     edx, ecx
+    jb      21f
+    xchg    edx, ecx
+21: mov     eax, [rip+rb_npair]
+    cmp     eax, [rip+rb_cappair]
+    jae     22f
+    mov     r8, [rip+rb_pairs]
+    mov     [r8+rax*8], edx
+    mov     [r8+rax*8+4], ecx
+    inc     dword ptr [rip+rb_npair]
+    jmp     9f
+22: call    pair_parts                  # (the list full: now)
+9:  add     rsp, 8
     ret
 
 # jointed(rdi=body, rsi=body) -> eax = 1 when a joint ties them
@@ -2128,31 +2938,60 @@ part_bounds:
 
 # compact - manifolds not seen this step go
 compact:
-    mov     rsi, [rip+rb_mf]
-    mov     rdi, rsi
+    push    rbx
+    push    r12
+    sub     rsp, 8
     mov     edx, [rip+rb_stepno]
-    xor     ecx, ecx
-    xor     r8d, r8d
-1:  cmp     ecx, [rip+rb_nmf]
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+rb_nmf]
     jae     9f
-    cmp     [rsi+MF_KEEP], edx
-    jne     3f
-    cmp     rsi, rdi
-    je      2f
-    push    rcx
-    push    rsi
-    push    rdi
+    mov     rax, rbx
+    shl     rax, 5
+    add     rax, [rip+rb_mx]
+    cmp     [rax+MX_KEEP], edx
+    je      3f
+    push    rdx                         # not seen: out of the hash,
+    push    rdx
+    mov     edi, ebx
+    call    hf_slot
+    call    hf_delete
+    pop     rdx
+    pop     rdx
+    mov     r12d, [rip+rb_nmf]          #  the last into its place
+    dec     r12d
+    mov     [rip+rb_nmf], r12d
+    cmp     ebx, r12d
+    je      1b
+    push    rdx
+    push    rdx
+    mov     edi, r12d                   # (its hash entry: the new index)
+    call    hf_slot
+    mov     rcx, [rip+rb_hs]
+    lea     edx, [rbx+1]
+    mov     [rcx+rax*4], edx
+    pop     rdx
+    pop     rdx
+    mov     rax, rbx
+    shl     rax, 5
+    add     rax, [rip+rb_mx]
+    mov     rsi, r12
+    shl     rsi, 5
+    add     rsi, [rip+rb_mx]
+    mov     rdi, rax
+    mov     ecx, MX_SZ/8
+    rep     movsq
+    imul    rsi, r12, MF_SZ
+    add     rsi, [rip+rb_mf]
+    imul    rdi, rbx, MF_SZ
+    add     rdi, [rip+rb_mf]
     mov     ecx, MF_SZ/8
     rep     movsq
-    pop     rdi
-    pop     rsi
-    pop     rcx
-2:  add     rdi, MF_SZ
-    inc     r8d
-3:  add     rsi, MF_SZ
-    inc     ecx
+    jmp     1b                          # (that one checked next)
+3:  inc     ebx
     jmp     1b
-9:  mov     [rip+rb_nmf], r8d
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
     ret
 
 # -----------------------------------------------------------------------------
@@ -2180,6 +3019,11 @@ narrow_job:
     jne     3f
 2:  mov     rdi, rbx
     call    mf_update
+    mov     eax, [rbx+MF_N]             # (its count in the keys)
+    mov     rcx, r12
+    shl     rcx, 5
+    add     rcx, [rip+rb_mx]
+    mov     [rcx+MX_N], eax
 3:  inc     r12d
     jmp     1b
 9:  pop     r13
@@ -2198,7 +3042,9 @@ narrow_job:
 .equ MU_WHO,    400
 .equ MU_CL,     416                     # poly_clip's points (4 results)
 .equ MU_NEW,    672                     # the new points (4)
-.equ MU_SZ,     MU_NEW + 4*CP_SZ
+.equ MU_MG,     MU_NEW + 4*CP_SZ        # contacts begin this far apart, and
+.equ MU_KEEP,   MU_MG + 4               #  points are kept this far
+.equ MU_SZ,     MU_MG + 16
 mf_update:
     push    rbp
     mov     rbp, rsp
@@ -2214,6 +3060,21 @@ mf_update:
     BODY    r12, rax
     mov     eax, [rbx+MF_B]
     BODY    r13, rax
+    # the margin: 2 cm, and as far as they can close in a step (no fast
+    #   body passes another between two narrow phases)
+    movaps  xmm0, [r12+BD_V]
+    DOT3    xmm0, xmm0
+    sqrtss  xmm0, xmm0
+    movaps  xmm1, [r13+BD_V]
+    DOT3    xmm1, xmm1
+    sqrtss  xmm1, xmm1
+    addss   xmm0, xmm1
+    mulss   xmm0, [rip+rb_dt]
+    addss   xmm0, [rip+rx_margin]
+    movss   [rsp+MU_MG], xmm0
+    addss   xmm0, [rip+rx_margin]
+    maxss   xmm0, [rip+rx_keep]
+    movss   [rsp+MU_KEEP], xmm0
     # refresh
     xor     r14d, r14d
 1:  cmp     r14d, [rbx+MF_N]
@@ -2233,7 +3094,7 @@ mf_update:
     movaps  xmm5, xmm4
     DOT3    xmm5, [rbx+MF_NRM]          # sep
     movss   [r15+CP_SEP], xmm5
-    comiss  xmm5, [rip+rx_keep]
+    comiss  xmm5, [rsp+MU_KEEP]
     ja      2f
     shufps  xmm5, xmm5, 0               # sliding: d - n sep
     mulps   xmm5, [rbx+MF_NRM]
@@ -2267,7 +3128,7 @@ mf_update:
     lea     rdx, [rsp+MU_RES]
     call    collide
     movss   xmm0, [rsp+MU_RES+CR_SEP]
-    comiss  xmm0, [rip+rx_margin]
+    comiss  xmm0, [rsp+MU_MG]
     jbe     4f
     mov     dword ptr [rbx+MF_N], 0     # apart
     jmp     .Lmu_out
@@ -2277,6 +3138,7 @@ mf_update:
     lea     rdi, [rsp+MU_PXA]
     lea     rsi, [rsp+MU_PXB]
     movaps  xmm0, [rsp+MU_RES+CR_N]
+    movss   xmm1, [rsp+MU_MG]
     lea     rdx, [rsp+MU_CL]
     call    poly_clip
     test    eax, eax
@@ -2357,7 +3219,7 @@ mf_update:
 54: lea     rdx, [rsp+MU_RES]
     call    collide
     movss   xmm0, [rsp+MU_RES+CR_SEP]
-    comiss  xmm0, [rip+rx_margin]
+    comiss  xmm0, [rsp+MU_MG]
     ja      58f
     # the tilted one's point: from the other's along n, turned back
     shufps  xmm0, xmm0, 0
@@ -2381,7 +3243,7 @@ mf_update:
     subps   xmm0, [rsp+MU_RES+CR_PA]
     DOT3    xmm0, [rbx+MF_NRM]
     movss   [rsp+MU_RES+CR_SEP], xmm0
-    comiss  xmm0, [rip+rx_margin]
+    comiss  xmm0, [rsp+MU_MG]
     ja      58f
     mov     rdi, rbx
     lea     rsi, [rsp+MU_RES]
@@ -2779,12 +3641,13 @@ islands:
 2:  xor     r12d, r12d                  # unions: contacts,
 3:  cmp     r12d, [rip+rb_nmf]
     jae     4f
-    imul    rbx, r12, MF_SZ
-    add     rbx, [rip+rb_mf]
-    cmp     dword ptr [rbx+MF_N], 0
+    mov     rbx, r12
+    shl     rbx, 5
+    add     rbx, [rip+rb_mx]
+    cmp     dword ptr [rbx+MX_N], 0
     je      31f
-    mov     edi, [rbx+MF_A]
-    mov     esi, [rbx+MF_B]
+    mov     edi, [rbx+MX_A]
+    mov     esi, [rbx+MX_B]
     call    uf_union
 31: inc     r12d
     jmp     3b
@@ -2861,8 +3724,9 @@ islands:
     xor     r12d, r12d
 65: cmp     r12d, [rip+rb_nmf]
     jae     66f
-    imul    rbx, r12, MF_SZ
-    add     rbx, [rip+rb_mf]
+    mov     rbx, r12
+    shl     rbx, 5
+    add     rbx, [rip+rb_mx]
     call    mf_island
     test    eax, eax
     js      651f
@@ -2875,8 +3739,9 @@ islands:
     xor     r12d, r12d
 67: cmp     r12d, [rip+rb_nmf]
     jae     68f
-    imul    rbx, r12, MF_SZ
-    add     rbx, [rip+rb_mf]
+    mov     rbx, r12
+    shl     rbx, 5
+    add     rbx, [rip+rb_mx]
     call    mf_island
     test    eax, eax
     js      671f
@@ -2963,13 +3828,13 @@ islands:
     pop     r12
     pop     rbx
     ret
-# mf_island(rbx=manifold) -> eax = its island (-1: no points / none)
+# mf_island(rbx=manifold's keys) -> eax = its island (-1: no points / none)
 mf_island:
     mov     eax, -1
-    cmp     dword ptr [rbx+MF_N], 0
+    cmp     dword ptr [rbx+MX_N], 0
     je      9f
-    mov     edi, [rbx+MF_A]
-    mov     esi, [rbx+MF_B]
+    mov     edi, [rbx+MX_A]
+    mov     esi, [rbx+MX_B]
     jmp     isl_of
 9:  ret
 # isl_zero(rdi=starts) - nisl + 2 zeros
@@ -3085,7 +3950,9 @@ ang_impulse:
     BODY    r13, rax
 .endm
 
-# mf_prestep(rbx=manifold) - masses, the gap's base, the speed it meets at
+# mf_prestep(rbx=manifold) - each point's rows for the step (normal,
+#   tangents: the cross products and the inverse inertias times them, the
+#   effective masses), the gap's base, the speed it meets at
 mf_prestep:
     push    r14
     push    r15
@@ -3096,20 +3963,17 @@ mf_prestep:
     jae     9f
     imul    r15, r14, CP_SZ
     lea     r15, [rbx+MF_PTS+r15]
+    lea     rdi, [r15+CP_RN]
     movaps  xmm0, [rbx+MF_NRM]
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    kmass
+    call    row_make
     movss   [r15+CP_MN], xmm0
+    lea     rdi, [r15+CP_RT1]
     movaps  xmm0, [rbx+MF_T1]
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    kmass
+    call    row_make
     movss   [r15+CP_MT1], xmm0
+    lea     rdi, [r15+CP_RT2]
     movaps  xmm0, [rbx+MF_T2]
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    kmass
+    call    row_make
     movss   [r15+CP_MT2], xmm0
     movaps  xmm0, [r13+BD_POS]          # c0 = sep - n . (pB - pA)
     addps   xmm0, [r15+CP_RB]
@@ -3119,10 +3983,9 @@ mf_prestep:
     movss   xmm1, [r15+CP_SEP]
     subss   xmm1, xmm0
     movss   [r15+CP_C0], xmm1
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    relvel
-    DOT3    xmm0, [rbx+MF_NRM]
+    movaps  xmm0, [rbx+MF_NRM]
+    lea     rdi, [r15+CP_RN]
+    call    row_vel
     movss   [r15+CP_VN0], xmm0
     mov     dword ptr [r15+CP_JMAX], 0
     inc     r14d
@@ -3131,6 +3994,80 @@ mf_prestep:
     pop     r15
     pop     r14
     ret
+
+# row_make(rdi=row, xmm0=its direction d; r15 the point, r12, r13 the
+#   bodies) -> xmm0 = 1 / (mA + mB + (rA x d) IA (rA x d) + (rB x d) ...)
+row_make:
+    movaps  xmm7, xmm0
+    movaps  xmm1, [r15+CP_RA]
+    CROSS   xmm2, xmm1, xmm7, xmm3      # rA x d
+    movaps  [rdi+RW_AX], xmm2
+    MV3     xmm3, r12+BD_IIW, xmm2, xmm4, xmm5
+    andps   xmm3, [rip+rx_xyz]
+    movaps  [rdi+RW_IA], xmm3
+    DOT3    xmm3, xmm2
+    movss   xmm6, xmm3
+    movaps  xmm1, [r15+CP_RB]
+    CROSS   xmm2, xmm1, xmm7, xmm3      # rB x d
+    movaps  [rdi+RW_BX], xmm2
+    MV3     xmm3, r13+BD_IIW, xmm2, xmm4, xmm5
+    andps   xmm3, [rip+rx_xyz]
+    movaps  [rdi+RW_IB], xmm3
+    DOT3    xmm3, xmm2
+    addss   xmm6, xmm3
+    addss   xmm6, [r12+BD_IM]
+    addss   xmm6, [r13+BD_IM]
+    maxss   xmm6, [rip+rx_tiny]
+    movss   xmm0, [rip+rx_one]
+    divss   xmm0, xmm6
+    ret
+
+# row_vel(rdi=row, xmm0=d; r12, r13) -> xmm0 = the speed along it:
+#   (vB - vA) . d + wB . (rB x d) - wA . (rA x d)
+row_vel:
+    movaps  xmm1, [r13+BD_V]
+    subps   xmm1, [r12+BD_V]
+    DOT3    xmm1, xmm0
+    movaps  xmm2, [r13+BD_W]
+    DOT3    xmm2, [rdi+RW_BX]
+    addss   xmm1, xmm2
+    movaps  xmm2, [r12+BD_W]
+    DOT3    xmm2, [rdi+RW_AX]
+    subss   xmm1, xmm2
+    movss   xmm0, xmm1
+    ret
+
+# row_push(rdi=row, xmm0=d, xmm1=the impulse; r12, r13) - -it on A, +it on
+#   B (the moving ones)
+row_push:
+    shufps  xmm1, xmm1, 0
+    cmp     dword ptr [r12+BD_TYPE], 1
+    jne     1f
+    movss   xmm2, [r12+BD_IM]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm2, xmm0
+    mulps   xmm2, xmm1
+    movaps  xmm3, [r12+BD_V]
+    subps   xmm3, xmm2
+    movaps  [r12+BD_V], xmm3
+    movaps  xmm2, [rdi+RW_IA]
+    mulps   xmm2, xmm1
+    movaps  xmm3, [r12+BD_W]
+    subps   xmm3, xmm2
+    movaps  [r12+BD_W], xmm3
+1:  cmp     dword ptr [r13+BD_TYPE], 1
+    jne     2f
+    movss   xmm2, [r13+BD_IM]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm2, xmm0
+    mulps   xmm2, xmm1
+    addps   xmm2, [r13+BD_V]
+    movaps  [r13+BD_V], xmm2
+    movaps  xmm2, [rdi+RW_IB]
+    mulps   xmm2, xmm1
+    addps   xmm2, [r13+BD_W]
+    movaps  [r13+BD_W], xmm2
+2:  ret
 
 # mf_warm(rbx=manifold) - last time's impulses again (each substep)
 mf_warm:
@@ -3143,20 +4080,18 @@ mf_warm:
     jae     9f
     imul    r15, r14, CP_SZ
     lea     r15, [rbx+MF_PTS+r15]
-    movss   xmm0, [r15+CP_JN]
-    shufps  xmm0, xmm0, 0
-    mulps   xmm0, [rbx+MF_NRM]
+    lea     rdi, [r15+CP_RN]
+    movaps  xmm0, [rbx+MF_NRM]
+    movss   xmm1, [r15+CP_JN]
+    call    row_push
+    lea     rdi, [r15+CP_RT1]
+    movaps  xmm0, [rbx+MF_T1]
     movss   xmm1, [r15+CP_JT1]
-    shufps  xmm1, xmm1, 0
-    mulps   xmm1, [rbx+MF_T1]
-    addps   xmm0, xmm1
+    call    row_push
+    lea     rdi, [r15+CP_RT2]
+    movaps  xmm0, [rbx+MF_T2]
     movss   xmm1, [r15+CP_JT2]
-    shufps  xmm1, xmm1, 0
-    mulps   xmm1, [rbx+MF_T2]
-    addps   xmm0, xmm1
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    impulse
+    call    row_push
     inc     r14d
     jmp     1b
 9:  add     rsp, 8
@@ -3171,9 +4106,9 @@ mf_warm:
 mf_relax:
     push    r14
     push    r15
-    sub     rsp, 40                     # [rsp] the friction's limit (fr_row
-    mov     dword ptr [rsp+4], 0        #  reads it), +4 push or not, +8 mass
-    jmp     mf_solve_in                 #  scale, +12 impulse scale, +16 bias
+    sub     rsp, 40                     # [rsp] the friction's limit, +4 push
+    mov     dword ptr [rsp+4], 0        #  or not, +8 mass scale, +12 impulse
+    jmp     mf_solve_in                 #  scale, +16 bias
 mf_solve:
     push    r14
     push    r15
@@ -3193,17 +4128,22 @@ mf_solve_in:
     dec     eax
 11: imul    r15, rax, CP_SZ
     lea     r15, [rbx+MF_PTS+r15]
+    cmp     dword ptr [rsp+4], 0        # (relax: the normal only)
+    je      12f
     movss   xmm0, [r15+CP_JN]           # the friction's limit
     mulss   xmm0, [rbx+MF_FRIC]
     movss   [rsp], xmm0
     mov     edx, MF_T1
     mov     ecx, CP_JT1
     mov     r8d, CP_MT1
+    mov     r9d, CP_RT1
     call    fr_row
     mov     edx, MF_T2
     mov     ecx, CP_JT2
     mov     r8d, CP_MT2
+    mov     r9d, CP_RT2
     call    fr_row
+12:
     movaps  xmm0, [r15+CP_LB]           # the gap now: c0 + n . (pB - pA)
     MV3     xmm1, r13+BD_R, xmm0, xmm2, xmm3
     addps   xmm1, [r13+BD_POS]
@@ -3240,11 +4180,10 @@ mf_solve_in:
 3:  movss   [rsp+8], xmm5
     movss   [rsp+12], xmm6
     movss   [rsp+16], xmm7
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    relvel
-    DOT3    xmm0, [rbx+MF_NRM]          # vn
-    addss   xmm0, [rsp+16]            # -m ms (vn + bias) - is acc
+    lea     rdi, [r15+CP_RN]
+    movaps  xmm0, [rbx+MF_NRM]
+    call    row_vel                     # vn
+    addss   xmm0, [rsp+16]              # -m ms (vn + bias) - is acc
     mulss   xmm0, [r15+CP_MN]
     mulss   xmm0, [rsp+8]
     xorps   xmm0, [rip+rx_sign]
@@ -3260,11 +4199,10 @@ mf_solve_in:
     maxss   xmm1, xmm0
     movss   [r15+CP_JMAX], xmm1
     subss   xmm0, xmm2
-    shufps  xmm0, xmm0, 0
-    mulps   xmm0, [rbx+MF_NRM]
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    impulse
+    movss   xmm1, xmm0
+    lea     rdi, [r15+CP_RN]
+    movaps  xmm0, [rbx+MF_NRM]
+    call    row_push
     inc     r14d
     jmp     1b
 9:  add     rsp, 40
@@ -3291,10 +4229,9 @@ mf_bounce:
     xorps   xmm0, xmm0
     comiss  xmm0, [r15+CP_JMAX]
     jae     2f
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    relvel
-    DOT3    xmm0, [rbx+MF_NRM]
+    lea     rdi, [r15+CP_RN]
+    movaps  xmm0, [rbx+MF_NRM]
+    call    row_vel
     movss   xmm1, [r15+CP_VN0]          # -m (vn + e vn0)
     mulss   xmm1, [rbx+MF_REST]
     addss   xmm0, xmm1
@@ -3306,30 +4243,30 @@ mf_bounce:
     maxss   xmm0, xmm3
     movss   [r15+CP_JN], xmm0
     subss   xmm0, xmm2
-    shufps  xmm0, xmm0, 0
-    mulps   xmm0, [rbx+MF_NRM]
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    impulse
+    movss   xmm1, xmm0
+    lea     rdi, [r15+CP_RN]
+    movaps  xmm0, [rbx+MF_NRM]
+    call    row_push
 2:  inc     r14d
     jmp     1b
 9:  add     rsp, 8
     pop     r15
     pop     r14
     ret
+
 # fr_row(edx=tangent's offset in the manifold, ecx=its impulse's, r8d=its
-#   mass's in the point; [rsp+8] = the limit) - one friction direction
+#   mass's, r9d=its row's in the point; [rsp+8] = the limit) - one friction
+#   direction
 fr_row:
     push    r9
     push    r10
     push    r11
-    mov     r9d, edx
     mov     r10d, ecx
     mov     r11d, r8d
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    relvel
-    DOT3    xmm0, [rbx+r9]
+    mov     eax, edx
+    movaps  xmm0, [rbx+rax]             # d (row_vel, row_push keep the GPRs)
+    lea     rdi, [r15+r9]
+    call    row_vel
     xorps   xmm0, [rip+rx_sign]         # -vt m
     mulss   xmm0, [r15+r11]
     movss   xmm2, [r15+r10]
@@ -3340,11 +4277,11 @@ fr_row:
     maxss   xmm0, xmm1
     movss   [r15+r10], xmm0
     subss   xmm0, xmm2
-    shufps  xmm0, xmm0, 0
-    mulps   xmm0, [rbx+r9]
-    lea     rdi, [r15+CP_RA]
-    lea     rsi, [r15+CP_RB]
-    call    impulse
+    movss   xmm1, xmm0
+    lea     rdi, [r15+r9]
+    mov     eax, edx
+    movaps  xmm0, [rbx+rax]
+    call    row_push
     pop     r11
     pop     r10
     pop     r9
@@ -3521,6 +4458,9 @@ island_job:
     cmp     dword ptr [rax+r12*4], 0
     je      2f
     mov     edi, r12d
+    call    isl_big
+    jnz     2f                          # (solved after, across the workers)
+    mov     edi, r12d
     call    solve_island
 2:  inc     r12d
     jmp     1b
@@ -3552,10 +4492,6 @@ solve_island:
     cmp     eax, [rip+rb_nsub]
     jae     .Lsi_end
     # forces: gravity, damping
-    movss   xmm6, [rip+rb_h]
-    movaps  xmm7, [rip+rb_g]
-    shufps  xmm6, xmm6, 0
-    mulps   xmm7, xmm6                  # g h
     mov     edi, [rsp]
     mov     rax, [rip+rb_isb]
     mov     r14d, [rax+rdi*4]
@@ -3564,24 +4500,8 @@ solve_island:
     jae     2f
     mov     rax, [rip+rb_ib]
     mov     eax, [rax+r14*4]
-    BODY    rbx, rax
-    movaps  xmm0, [rbx+BD_V]
-    addps   xmm0, xmm7
-    movss   xmm1, [rbx+BD_DAMP]         # v / (1 + h d)
-    mulss   xmm1, [rip+rb_h]
-    addss   xmm1, [rip+rx_one]
-    shufps  xmm1, xmm1, 0
-    divps   xmm0, xmm1
-    andps   xmm0, [rip+rx_xyz]
-    movaps  [rbx+BD_V], xmm0
-    movss   xmm1, [rip+rx_adamp]
-    mulss   xmm1, [rip+rb_h]
-    addss   xmm1, [rip+rx_one]
-    shufps  xmm1, xmm1, 0
-    movaps  xmm0, [rbx+BD_W]
-    divps   xmm0, xmm1
-    andps   xmm0, [rip+rx_xyz]
-    movaps  [rbx+BD_W], xmm0
+    BODY    rdi, rax
+    call    body_force
     inc     r14d
     jmp     1b
 2:  mov     edi, [rsp]
@@ -3629,7 +4549,30 @@ solve_island:
     mov     edi, [rsp]
     lea     rsi, [rip+mf_bounce]
     call    isl_each_mf
-    # rest
+    mov     edi, [rsp]
+    call    isl_rest
+9:  lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# isl_rest(edi=island) - each body's time at rest; all of them long enough
+#   at rest: the island sleeps
+isl_rest:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 16
+    mov     [rsp], edi
     movss   xmm0, [rip+rx_sleep]
     movss   [rsp+8], xmm0               # the least time at rest
     mov     edi, [rsp]
@@ -3681,6 +4624,490 @@ solve_island:
     pop     r12
     pop     rbx
     pop     rbp
+    ret
+
+# body_force(rdi=body) - a substep's gravity and damping
+body_force:
+    movss   xmm6, [rip+rb_h]
+    movaps  xmm7, [rip+rb_g]
+    shufps  xmm6, xmm6, 0
+    mulps   xmm7, xmm6                  # g h
+    movaps  xmm0, [rdi+BD_V]
+    addps   xmm0, xmm7
+    movss   xmm1, [rdi+BD_DAMP]         # v / (1 + h d)
+    mulss   xmm1, [rip+rb_h]
+    addss   xmm1, [rip+rx_one]
+    shufps  xmm1, xmm1, 0
+    divps   xmm0, xmm1
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [rdi+BD_V], xmm0
+    movss   xmm1, [rip+rx_adamp]
+    mulss   xmm1, [rip+rb_h]
+    addss   xmm1, [rip+rx_one]
+    shufps  xmm1, xmm1, 0
+    movaps  xmm0, [rdi+BD_W]
+    divps   xmm0, xmm1
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [rdi+BD_W], xmm0
+    ret
+
+# isl_big(edi=island) -> ZF clear when it has 128 constraints or more (its
+#   colours are solved across the workers)
+isl_big:
+    mov     rax, [rip+rb_ism]
+    mov     ecx, [rax+rdi*4+4]
+    sub     ecx, [rax+rdi*4]
+    mov     rax, [rip+rb_isj]
+    add     ecx, [rax+rdi*4+4]
+    sub     ecx, [rax+rdi*4]
+    xor     eax, eax
+    cmp     ecx, 128
+    setae   al
+    test    eax, eax
+    ret
+
+# solve_big(edi=island) - solve_island's steps for a big island: its
+#   manifolds and joints coloured (greedy: the first colour neither moving
+#   body has; 64 of them, the rest serial), each colour across the workers
+#   (no two of a colour share a moving body: the same result on any number
+#   of threads)
+solve_big:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 48
+    mov     [rsp], edi
+    # the constraints: manifolds, joints (| 1 << 31)
+    mov     r12, [rip+rb_bcon]
+    xor     r13d, r13d
+    mov     rax, [rip+rb_ism]
+    mov     r14d, [rax+rdi*4]
+    mov     r15d, [rax+rdi*4+4]
+1:  cmp     r14d, r15d
+    jae     2f
+    mov     rax, [rip+rb_imf]
+    mov     eax, [rax+r14*4]
+    mov     [r12+r13*4], eax
+    inc     r13d
+    inc     r14d
+    jmp     1b
+2:  mov     edi, [rsp]
+    mov     rax, [rip+rb_isj]
+    mov     r14d, [rax+rdi*4]
+    mov     r15d, [rax+rdi*4+4]
+3:  cmp     r14d, r15d
+    jae     4f
+    mov     rax, [rip+rb_ij]
+    mov     eax, [rax+r14*4]
+    or      eax, 0x80000000
+    mov     [r12+r13*4], eax
+    inc     r13d
+    inc     r14d
+    jmp     3b
+4:  mov     [rsp+16], r13d              # how many
+    # colours: the bodies' masks cleared, then greedy
+    mov     edi, [rsp]
+    mov     rax, [rip+rb_isb]
+    mov     r14d, [rax+rdi*4]
+    mov     r15d, [rax+rdi*4+4]
+    mov     rcx, [rip+rb_bmask]
+5:  cmp     r14d, r15d
+    jae     6f
+    mov     rax, [rip+rb_ib]
+    mov     eax, [rax+r14*4]
+    mov     qword ptr [rcx+rax*8], 0
+    inc     r14d
+    jmp     5b
+6:  mov     rdi, [rip+rb_bcst]          # colour counts (at +1)
+    mov     ecx, 68
+    xor     eax, eax
+    rep     stosd
+    xor     r14d, r14d
+7:  cmp     r14d, [rsp+16]
+    jae     8f
+    mov     edi, [r12+r14*4]
+    call    con_bodies                  # r8, r9: the moving ones' masks, or 0
+    xor     rax, rax
+    test    r8, r8
+    jz      71f
+    or      rax, [r8]
+71: test    r9, r9
+    jz      72f
+    or      rax, [r9]
+72: not     rax
+    mov     ecx, 64                     # (all taken: 64, the serial one)
+    tzcnt   rdx, rax
+    cmovc   edx, ecx
+    mov     rax, [rip+rb_bcol]
+    mov     [rax+r14*4], edx
+    mov     rax, [rip+rb_bcst]
+    inc     dword ptr [rax+rdx*4+4]
+    cmp     edx, 64
+    jae     74f
+    xor     eax, eax
+    bts     rax, rdx
+    test    r8, r8
+    jz      73f
+    or      [r8], rax
+73: test    r9, r9
+    jz      74f
+    or      [r9], rax
+74: inc     r14d
+    jmp     7b
+8:  mov     rcx, [rip+rb_bcst]          # starts; sorted (stable)
+    xor     eax, eax
+    xor     edx, edx
+81: cmp     edx, 65
+    ja      82f
+    add     eax, [rcx+rdx*4]
+    mov     [rcx+rdx*4], eax
+    inc     edx
+    jmp     81b
+82: sub     rsp, 272                    # (cursors)
+    mov     rsi, rcx
+    lea     rdi, [rsp]
+    mov     ecx, 66
+    rep     movsd
+    xor     r14d, r14d
+83: cmp     r14d, [rsp+272+16]
+    jae     84f
+    mov     rax, [rip+rb_bcol]
+    mov     eax, [rax+r14*4]
+    mov     edx, [rsp+rax*4]
+    inc     dword ptr [rsp+rax*4]
+    mov     ecx, [r12+r14*4]
+    mov     rax, [rip+rb_bsrt]
+    mov     [rax+rdx*4], ecx
+    inc     r14d
+    jmp     83b
+84: add     rsp, 272
+    # the step as stages: each colour of each pass, the bodies' passes;
+    #   then the workers run them all in one go (stage_job)
+    mov     dword ptr [rip+rb_nstg], 0
+    mov     edi, [rsp]
+    mov     rax, [rip+rb_isj]
+    mov     ecx, [rax+rdi*4+4]
+    sub     ecx, [rax+rdi*4]
+    mov     [rip+rb_islj], ecx
+    lea     rsi, [rip+mf_prestep]       # once a step: masses, gaps (all at
+    lea     rdx, [rip+jr_prestep]       #  once: no body written)
+    call    st_all
+    mov     dword ptr [rsp+12], 0
+.Lsb_sub:
+    mov     eax, [rsp+12]
+    cmp     eax, [rip+rb_nsub]
+    jae     .Lsb_end
+    mov     edi, [rsp]
+    lea     rsi, [rip+body_force]
+    call    st_bodies
+    lea     rsi, [rip+mf_warm]
+    xor     edx, edx
+    call    st_colours
+    cmp     dword ptr [rsp+12], 0       # (the first substep's joints: the
+    je      90f                         #  prestep did them)
+    cmp     dword ptr [rip+rb_islj], 0
+    je      90f
+    xor     esi, esi
+    lea     rdx, [rip+jr_prestep]
+    call    st_all
+90: mov     dword ptr [rsp+4], 0
+91: mov     eax, [rsp+4]
+    cmp     eax, [rip+rb_iter]
+    jae     92f
+    lea     rsi, [rip+mf_solve]
+    lea     rdx, [rip+jr_solve]
+    call    st_colours
+    inc     dword ptr [rsp+4]
+    jmp     91b
+92: mov     edi, [rsp]
+    lea     rsi, [rip+integrate]
+    call    st_bodies
+    cmp     dword ptr [rip+rb_islj], 0
+    je      93f
+    xor     esi, esi
+    lea     rdx, [rip+jr_prestep]
+    call    st_all
+93: lea     rsi, [rip+mf_relax]
+    lea     rdx, [rip+jr_relax]
+    call    st_colours
+    inc     dword ptr [rsp+12]
+    jmp     .Lsb_sub
+.Lsb_end:
+    lea     rsi, [rip+mf_bounce]
+    xor     edx, edx
+    call    st_colours
+    cmp     dword ptr [rip+rb_nstg], ST_MAX
+    jbe     94f
+    mov     edi, [rsp]                  # (too many stages: one thread)
+    call    solve_island
+    jmp     96f
+94: mov     rdi, [rip+rb_scnt]          # counters cleared; run
+    mov     ecx, [rip+rb_nstg]
+    shl     ecx, 7
+    xor     eax, eax
+    rep     stosb
+    mov     eax, [rip+n_workers]        # lanes: the threads, but no more
+    inc     eax                         #  than half of them past 8 (spinning
+    mov     edx, eax                    #  hyperthreads slow their siblings),
+    shr     edx, 1                      #  nor one for less than 256
+    cmp     edx, 8                      #  constraints
+    jae     941f
+    mov     edx, 8
+941:cmp     edx, eax
+    cmova   edx, eax
+    mov     eax, [rsp+16]
+    shr     eax, 8
+    cmp     eax, 1
+    adc     eax, 0
+    cmp     edx, eax
+    cmova   edx, eax
+    lea     rdi, [rip+stage_job]
+    xor     esi, esi
+    mov     ecx, 1
+    call    parallel_for
+    mov     edi, [rsp]
+    call    isl_rest
+96: lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# con_bodies(edi=constraint) -> r8, r9 = its bodies' colour masks when they
+#   move, else 0
+con_bodies:
+    test    edi, edi
+    js      1f
+    imul    rax, rdi, MF_SZ
+    add     rax, [rip+rb_mf]
+    mov     ecx, [rax+MF_A]
+    mov     edx, [rax+MF_B]
+    jmp     2f
+1:  and     edi, 0x7fffffff
+    imul    rax, rdi, JR_SZ
+    add     rax, [rip+rb_jr]
+    mov     ecx, [rax+JR_A]
+    mov     edx, [rax+JR_B]
+2:  xor     r8d, r8d
+    xor     r9d, r9d
+    BODY    rax, rcx
+    cmp     dword ptr [rax+BD_TYPE], 1
+    jne     3f
+    mov     r8, [rip+rb_bmask]
+    lea     r8, [r8+rcx*8]
+3:  BODY    rax, rdx
+    cmp     dword ptr [rax+BD_TYPE], 1
+    jne     4f
+    mov     r9, [rip+rb_bmask]
+    lea     r9, [r9+rdx*8]
+4:  ret
+
+# ---- stages ----------------------------------------------------------------
+
+# st_add(rdi=items, esi=count, edx=block size, ecx=kind, r8=fn, r9=fn) -
+#   a stage at the end (none when full: the step is not run that way)
+st_add:
+    test    esi, esi
+    jz      9f
+    mov     eax, [rip+rb_nstg]
+    inc     dword ptr [rip+rb_nstg]
+    cmp     eax, ST_MAX
+    jae     9f
+    imul    rax, rax, ST_SZ
+    add     rax, [rip+rb_stg]
+    mov     [rax+ST_BASE], rdi
+    mov     [rax+ST_N], esi
+    mov     [rax+ST_GR], edx
+    mov     [rax+ST_KIND], ecx
+    mov     [rax+ST_FMF], r8
+    mov     [rax+ST_FJR], r9
+9:  ret
+
+# st_colours(rsi=fn for manifolds, rdx=fn for joints) - a stage per colour
+#   (the last, the serial one, a single block)
+st_colours:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r14, rsi
+    mov     r15, rdx
+    xor     ebx, ebx
+1:  cmp     ebx, 64
+    ja      9f
+    mov     rax, [rip+rb_bcst]
+    mov     r12d, [rax+rbx*4]
+    mov     r13d, [rax+rbx*4+4]
+    sub     r13d, r12d
+    jz      8f
+    mov     rdi, [rip+rb_bsrt]
+    lea     rdi, [rdi+r12*4]
+    mov     esi, r13d
+    mov     edx, 16
+    cmp     ebx, 64
+    jne     2f
+    mov     edx, r13d
+2:  xor     ecx, ecx
+    mov     r8, r14
+    mov     r9, r15
+    call    st_add
+8:  inc     ebx
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# st_all(rsi, rdx) - one stage of every constraint (passes that write no
+#   body)
+st_all:
+    mov     r8, rsi
+    mov     r9, rdx
+    mov     rax, [rip+rb_bcst]
+    mov     esi, [rax+65*4]
+    mov     rdi, [rip+rb_bsrt]
+    mov     edx, 32
+    xor     ecx, ecx
+    jmp     st_add
+
+# st_bodies(edi=island, rsi=fn(rdi=body)) - a stage of its bodies
+st_bodies:
+    mov     r8, rsi
+    xor     r9d, r9d
+    mov     rax, [rip+rb_isb]
+    mov     ecx, [rax+rdi*4]
+    mov     esi, [rax+rdi*4+4]
+    sub     esi, ecx
+    mov     rdi, [rip+rb_ib]
+    lea     rdi, [rdi+rcx*4]
+    mov     edx, 64
+    mov     ecx, 1
+    jmp     st_add
+
+# stage_job(rdi=ctx, esi=begin, edx=end) - a lane: every stage in turn; in
+#   each it takes blocks while there are some, then waits until all of them
+#   are done (a lane that starts late holds no block: no one waits on it)
+stage_job:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, esi
+    mov     r13d, edx
+1:  cmp     r12d, r13d
+    jae     9f
+    xor     r14d, r14d                  # stage
+2:  cmp     r14d, [rip+rb_nstg]
+    jae     8f
+    imul    rbx, r14, ST_SZ
+    add     rbx, [rip+rb_stg]
+    mov     eax, [rbx+ST_N]             # blocks
+    add     eax, [rbx+ST_GR]
+    dec     eax
+    xor     edx, edx
+    div     dword ptr [rbx+ST_GR]
+    mov     r15d, eax
+3:  mov     rcx, r14                    # take a block
+    shl     rcx, 7
+    add     rcx, [rip+rb_scnt]
+    mov     eax, 1
+    lock xadd [rcx], eax
+    cmp     eax, r15d
+    jae     5f
+    push    rcx
+    push    rcx
+    mov     edi, eax
+    call    st_block
+    pop     rcx
+    pop     rcx
+    lock inc dword ptr [rcx+64]
+    jmp     3b
+5:  cmp     [rcx+64], r15d              # all of them done
+    jae     6f
+    pause
+    jmp     5b
+6:  inc     r14d
+    jmp     2b
+8:  inc     r12d
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# st_block(edi=block; rbx = its stage) - the stage's fn on that block
+st_block:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r15, rbx
+    mov     r14d, edi
+    imul    r14d, [r15+ST_GR]           # first,
+    mov     r13d, r14d                  #  end
+    add     r13d, [r15+ST_GR]
+    cmp     r13d, [r15+ST_N]
+    jbe     1f
+    mov     r13d, [r15+ST_N]
+1:  cmp     r14d, r13d
+    jae     9f
+    mov     rax, [r15+ST_BASE]
+    mov     eax, [rax+r14*4]
+    cmp     dword ptr [r15+ST_KIND], 1
+    je      4f
+    test    eax, eax
+    js      2f
+    mov     rcx, [r15+ST_FMF]
+    test    rcx, rcx
+    jz      8f
+    imul    rbx, rax, MF_SZ
+    add     rbx, [rip+rb_mf]
+    push    r13                         # (the fns take r12, r13 for the
+    push    r13                         #  bodies)
+    call    rcx
+    pop     r13
+    pop     r13
+    jmp     8f
+2:  mov     rcx, [r15+ST_FJR]
+    test    rcx, rcx
+    jz      8f
+    and     eax, 0x7fffffff
+    imul    rbx, rax, JR_SZ
+    add     rbx, [rip+rb_jr]
+    push    r13
+    push    r13
+    call    rcx
+    pop     r13
+    pop     r13
+    jmp     8f
+4:  BODY    rdi, rax                    # a body
+    push    r13
+    push    r13
+    call    [r15+ST_FMF]
+    pop     r13
+    pop     r13
+8:  inc     r14d
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # isl_each_mf(edi=island, rsi=fn(rbx=manifold)) / isl_each_jr (rbx=joint)
@@ -4095,7 +5522,12 @@ writeback:
     mov     r13, [rbx+BD_OBJ]
     test    r13, r13
     jz      2f
-    mov     rdi, rbx
+    cmp     dword ptr [rbx+BD_INST], 0
+    je      3f
+    mov     rdi, rbx                    # an instance: its matrix
+    call    inst_writeback
+    jmp     2f
+3:  mov     rdi, rbx
     lea     rsi, [rsp]
     call    body_pose
     mov     rax, [rsp]
@@ -4108,22 +5540,25 @@ writeback:
     mov     [r13+OB_ROT+8], eax
 2:  inc     r12d
     jmp     1b
-9:  add     rsp, 32
+9:  call    rbi_touch
+    add     rsp, 32
     pop     r13
     pop     r12
     pop     rbx
     ret
 
 # rb_record(esi=frame) -> rax = 0 when not kept: the moving bodies' places
-#   into the cache (count, then uid, loc, rot each)
+#   into the cache: the objects' count, the instances' count, then uid,
+#   loc, rot for each object; uid, index, matrix (12 floats) each instance
 rb_record:
     push    rbx
     push    r12
     push    r13
     push    r14
-    sub     rsp, 8
+    push    r15
     mov     r14d, esi
-    xor     r12d, r12d                  # how many
+    xor     r12d, r12d                  # how many objects,
+    xor     r15d, r15d                  #  instances
     xor     ecx, ecx
 1:  mov     eax, [rip+rb_nb]
     dec     eax
@@ -4134,11 +5569,17 @@ rb_record:
     jne     11f
     cmp     qword ptr [rdx+BD_OBJ], 0
     je      11f
-    inc     r12d
+    cmp     dword ptr [rdx+BD_INST], 0
+    je      12f
+    inc     r15d
+    jmp     11f
+12: inc     r12d
 11: inc     ecx
     jmp     1b
 2:  imul    edx, r12d, 28
-    add     edx, 4
+    imul    eax, r15d, 56
+    add     edx, eax
+    add     edx, 8
     xor     edi, edi
     mov     esi, r14d
     call    sc_add
@@ -4146,7 +5587,10 @@ rb_record:
     jz      9f
     mov     r13, rax
     mov     [r13], r12d
-    add     r13, 4
+    mov     [r13+4], r15d
+    imul    r15d, r12d, 28              # (where the instances go)
+    lea     r15, [r13+8+r15]
+    add     r13, 8
     xor     r12d, r12d
 3:  mov     eax, [rip+rb_nb]
     dec     eax
@@ -4159,31 +5603,46 @@ rb_record:
     test    rax, rax
     jz      4f
     mov     eax, [rax+OB_UID]
+    cmp     dword ptr [rbx+BD_INST], 0
+    jne     5f
     mov     [r13], eax
     mov     rdi, rbx
     lea     rsi, [r13+4]
     call    body_pose
     add     r13, 28
+    jmp     4f
+5:  mov     [r15], eax                  # an instance: uid, index, matrix
+    mov     eax, [rbx+BD_INST]
+    dec     eax
+    mov     [r15+4], eax
+    mov     rdi, rbx
+    lea     rsi, [r15+8]
+    call    inst_matrix
+    add     r15, 56
 4:  inc     r12d
     jmp     3b
 8:  mov     eax, 1
-9:  add     rsp, 8
+9:  pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
     ret
 
-# rb_play(rdi=record) - a cached frame's places into the objects
+# rb_play(rdi=record) - a cached frame's places into the objects (and
+#   instances)
 rb_play:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    push    r15
     mov     rbx, rdi
     mov     r12d, [rbx]
-    add     rbx, 4
+    mov     r14d, [rbx+4]
+    add     rbx, 8
 1:  test    r12d, r12d
-    jz      9f
+    jz      3f
     mov     edi, [rbx]
     call    obj_by_uid
     test    rax, rax
@@ -4199,8 +5658,382 @@ rb_play:
 2:  add     rbx, 28
     dec     r12d
     jmp     1b
-9:  mov     dword ptr [rip+dirty], 1
+3:  test    r14d, r14d                  # instances: into their object's mesh
+    jz      9f
+    mov     edi, [rbx]
+    call    obj_by_uid
+    test    rax, rax
+    jz      4f
+    mov     rdi, rax
+    call    rbi_make
+    test    rax, rax
+    jz      4f
+    mov     rax, [rax+RBI_OUT]
+    mov     rax, [rax+ME_INST]
+    mov     ecx, [rbx+4]
+    cmp     ecx, [rax+IB_N_]
+    jae     4f
+    imul    rcx, rcx, 48
+    lea     rdi, [rax+IB_DATA_+rcx]
+    lea     rsi, [rbx+8]
+    mov     ecx, 48
+    rep     movsb
+4:  add     rbx, 56
+    dec     r14d
+    jmp     3b
+9:  call    rbi_touch
+    mov     dword ptr [rip+dirty], 1
+    pop     r15
+    pop     r14
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ---- instances as bodies ------------------------------------------------------
+# rb_inst_mesh(rdi=object) -> rax = the mesh its moving instances are in, or
+#   0 (obj_eval asks first)
+rb_inst_mesh:
+    xor     eax, eax
+    cmp     dword ptr [rip+rb_noinst], 0
+    jne     9f
+    lea     rcx, [rip+rbi_tab]
+    xor     edx, edx
+1:  cmp     edx, [rip+rbi_n]
+    jae     9f
+    cmp     [rcx+RBI_OBJ], rdi
+    je      2f
+    add     rcx, RBI_SZ
+    inc     edx
+    jmp     1b
+2:  mov     rax, [rcx+RBI_OUT]
+9:  ret
+
+# rbi_find(rdi=object) -> rax = its entry, or 0
+rbi_find:
+    lea     rax, [rip+rbi_tab]
+    xor     edx, edx
+1:  cmp     edx, [rip+rbi_n]
+    jae     8f
+    cmp     [rax+RBI_OBJ], rdi
+    je      9f
+    add     rax, RBI_SZ
+    inc     edx
+    jmp     1b
+8:  xor     eax, eax
+9:  ret
+
+# rbi_make(rdi=object) -> rax = its entry (made when new: a copy of its
+#   evaluated mesh with an instance block of its own), or 0
+rbi_make:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    call    rbi_find
+    test    rax, rax
+    jnz     9f
+    cmp     dword ptr [rip+rbi_n], RBI_MAX
+    jae     8f
+    mov     eax, [rip+rb_noinst]
+    push    rax
+    push    rax
+    mov     dword ptr [rip+rb_noinst], 1
+    mov     rdi, rbx
+    call    obj_eval
+    pop     rcx
+    pop     rcx
+    mov     [rip+rb_noinst], ecx
+    test    rax, rax
+    jz      8f
+    cmp     qword ptr [rax+ME_INST], 0
+    je      8f
+    mov     r12, rax
+    mov     rdi, rax
+    call    mesh_copy
+    test    rax, rax
+    jz      8f
+    mov     r13, rax
+    mov     rdi, [r12+ME_INST]          # its own block (the same instances)
+    lea     rsi, [rip+rx_ident]
+    call    inst_xform
+    test    rax, rax
+    jz      7f
+    mov     rdi, [r13+ME_INST]
+    mov     [r13+ME_INST], rax
+    call    inst_unref
+    mov     eax, [rip+rbi_n]
+    inc     dword ptr [rip+rbi_n]
+    imul    rax, rax, RBI_SZ
+    lea     r12, [rip+rbi_tab]
+    add     r12, rax
+    mov     [r12+RBI_OBJ], rbx
+    mov     [r12+RBI_OUT], r13
+    mov     rdi, rbx                    # the object's inverse matrix
+    lea     rsi, [r12+RBI_WINV]
+    call    m34_inv_obj
+    mov     rax, r12
+    jmp     9f
+7:  mov     rdi, r13
+    call    mesh_unref
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# rbi_drop - no moving instances (their objects show their meshes again)
+rbi_drop:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+    lea     r12, [rip+rbi_tab]
+1:  cmp     ebx, [rip+rbi_n]
+    jae     2f
+    mov     rdi, [r12+RBI_OUT]
+    call    mesh_unref
+    add     r12, RBI_SZ
+    inc     ebx
+    jmp     1b
+2:  cmp     dword ptr [rip+rbi_n], 0
+    je      9f
+    mov     dword ptr [rip+rbi_n], 0
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# rbi_touch - the moving instances' meshes changed (their version)
+rbi_touch:
+    lea     rax, [rip+rbi_tab]
+    xor     edx, edx
+1:  cmp     edx, [rip+rbi_n]
+    jae     9f
+    mov     rcx, [rax+RBI_OUT]
+    inc     dword ptr [rcx+ME_VER]
+    add     rax, RBI_SZ
+    inc     edx
+    jmp     1b
+9:  ret
+
+# inst_bodies(edi=first index, rsi=entry, rdx=object) -> eax = bodies made:
+#   one per instance of the object's mesh, its prototype placed by the
+#   object's matrix times the instance's (rotation and scale split: the
+#   columns' lengths)
+inst_bodies:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 240
+    mov     [rsp], edi
+    mov     [rsp+8], rsi
+    mov     [rsp+16], rdx
+    xor     r15d, r15d                  # made
+    mov     rdi, rdx
+    call    rbi_make
+    test    rax, rax
+    jz      9f
+    mov     rbx, [rax+RBI_OUT]
+    mov     rbx, [rbx+ME_INST]          # the block
+    mov     rdi, [rsp+16]               # W
+    lea     rsi, [rsp+32]
+    call    obj_matrix
+    xor     r12d, r12d
+1:  cmp     r12d, [rbx+IB_N_]
+    jae     9f
+    imul    rdx, r12, 48                # C = W M
+    lea     rdx, [rbx+IB_DATA_+rdx]
+    lea     rsi, [rsp+32]
+    lea     rdi, [rsp+80]
+    call    inst_mul
+    xor     ecx, ecx                    # columns' lengths: the scale
+2:  movss   xmm0, [rsp+80+rcx*4]
+    mulss   xmm0, xmm0
+    movss   xmm1, [rsp+96+rcx*4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+112+rcx*4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    maxss   xmm0, [rip+rx_tiny2]
+    sqrtss  xmm0, xmm0
+    movss   [rsp+192+rcx*4], xmm0       # scale (vec4 at +192)
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    mov     dword ptr [rsp+204], 0
+    xor     ecx, ecx                    # rows (3 x vec4 at +128): C / scale,
+3:  mov     eax, ecx                    #  loc (vec4 at +176)
+    shl     eax, 4
+    xor     edx, edx
+31: imul    r8d, ecx, 16
+    lea     r9d, [r8+rdx*4]
+    movss   xmm0, [rsp+80+r9]
+    divss   xmm0, [rsp+192+rdx*4]
+    movss   [rsp+128+r9], xmm0
+    inc     edx
+    cmp     edx, 3
+    jb      31b
+    mov     dword ptr [rsp+128+rax+12], 0
+    movss   xmm0, [rsp+80+rax+12]
+    movss   [rsp+176+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    mov     dword ptr [rsp+188], 0
+    mov     rdi, rbx                    # its prototype
+    call    inst_pids
+    movzx   eax, byte ptr [rax+r12]
+    mov     rcx, [rbx+IB_PROTO_+rax*8]
+    mov     edi, [rsp]
+    add     edi, r15d
+    mov     [rsp+24], edi
+    mov     rsi, [rsp+8]
+    mov     rdx, [rsp+16]
+    lea     r8, [rsp+128]
+    call    make_body_ex
+    mov     eax, [rsp+24]
+    BODY    rcx, rax
+    lea     eax, [r12+1]
+    mov     [rcx+BD_INST], eax
+    inc     r15d
+    inc     r12d
+    jmp     1b
+9:  mov     eax, r15d
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# inst_matrix(rdi=body, rsi=out 12 floats) - its instance's matrix:
+#   W^-1 [R diag(s) | P - R com]
+inst_matrix:
+    push    rbx
+    push    r12
+    sub     rsp, 72
+    mov     rbx, rdi
+    mov     r12, rsi
+    movaps  xmm0, [rbx+BD_COM]
+    MV3     xmm1, rbx+BD_R, xmm0, xmm2, xmm3
+    movaps  xmm0, [rbx+BD_POS]
+    subps   xmm0, xmm1                  # loc
+    movaps  [rsp+48], xmm0
+    xor     ecx, ecx
+1:  mov     eax, ecx
+    shl     eax, 4
+    movaps  xmm1, [rbx+BD_R+rax]        # row i of R, times the scale
+    mulps   xmm1, [rbx+BD_SCL]
+    movaps  [rsp+rax], xmm1
+    movss   xmm1, [rsp+48+rcx*4]
+    movss   [rsp+rax+12], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     rdi, [rbx+BD_OBJ]
+    call    rbi_find
+    test    rax, rax
+    jz      9f
+    lea     rsi, [rax+RBI_WINV]
+    lea     rdx, [rsp]
+    mov     rdi, r12
+    call    inst_mul
+9:  add     rsp, 72
+    pop     r12
+    pop     rbx
+    ret
+
+# m34_inv_obj(rdi=object, rsi=out 3x4) - the inverse of its matrix: the
+#   adjugate over the determinant (its columns b x c, c x a, a x b of the
+#   rows a, b, c); t' = -inv t
+m34_inv_obj:
+    push    rbx
+    push    r12
+    sub     rsp, 104
+    mov     r12, rsi
+    lea     rsi, [rsp]                  # the matrix (rows at +0)
+    call    obj_matrix
+    movaps  xmm0, [rsp]
+    andps   xmm0, [rip+rx_xyz]
+    movaps  xmm1, [rsp+16]
+    andps   xmm1, [rip+rx_xyz]
+    movaps  xmm2, [rsp+32]
+    andps   xmm2, [rip+rx_xyz]
+    CROSS   xmm3, xmm1, xmm2, xmm6      # b x c
+    CROSS   xmm4, xmm2, xmm0, xmm6      # c x a
+    CROSS   xmm5, xmm0, xmm1, xmm6      # a x b
+    movaps  xmm6, xmm0                  # det = a . (b x c)
+    DOT3    xmm6, xmm3
+    movaps  xmm7, xmm6
+    andps   xmm7, [rip+rx_abs]
+    comiss  xmm7, [rip+rx_tiny]
+    ja      1f
+    movss   xmm6, [rip+rx_tiny]         # (singular)
+1:  movss   xmm7, [rip+rx_one]
+    divss   xmm7, xmm6
+    shufps  xmm7, xmm7, 0
+    mulps   xmm3, xmm7
+    mulps   xmm4, xmm7
+    mulps   xmm5, xmm7
+    movaps  [rsp+48], xmm3              # the inverse's columns (+48)
+    movaps  [rsp+64], xmm4
+    movaps  [rsp+80], xmm5
+    xor     ecx, ecx                    # out[i][j] = col_j[i]
+2:  mov     eax, ecx
+    shl     eax, 4                      # out row i
+    movss   xmm0, [rsp+48+rcx*4]
+    movss   [r12+rax], xmm0
+    movss   xmm0, [rsp+64+rcx*4]
+    movss   [r12+rax+4], xmm0
+    movss   xmm0, [rsp+80+rcx*4]
+    movss   [r12+rax+8], xmm0
+    movss   xmm0, [r12+rax]             # t'_i = -(inv_i . t)
+    mulss   xmm0, [rsp+12]
+    movss   xmm1, [r12+rax+4]
+    mulss   xmm1, [rsp+28]
+    addss   xmm0, xmm1
+    movss   xmm1, [r12+rax+8]
+    mulss   xmm1, [rsp+44]
+    addss   xmm0, xmm1
+    xorps   xmm0, [rip+rx_sign]
+    movss   [r12+rax+12], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    add     rsp, 104
+    pop     r12
+    pop     rbx
+    ret
+
+# inst_writeback(rdi=body) - its matrix into the moving mesh's block
+inst_writeback:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     rdi, [rbx+BD_OBJ]
+    call    rbi_find
+    test    rax, rax
+    jz      9f
+    mov     rax, [rax+RBI_OUT]
+    mov     rax, [rax+ME_INST]
+    mov     ecx, [rbx+BD_INST]
+    dec     ecx
+    imul    rcx, rcx, 48
+    lea     rsi, [rax+IB_DATA_+rcx]
+    mov     rdi, rbx
+    call    inst_matrix
+9:  add     rsp, 8
     pop     r12
     pop     rbx
     ret
@@ -4240,7 +6073,9 @@ rb_key:
     push    rbx
     push    r12
     push    r13
+    mov     dword ptr [rip+rb_noinst], 1
     call    rb_sethash
+    xor     rax, RB_CVER                # (the records' kind)
     mov     rbx, [rip+an_cur]
     lea     rdi, [rbx+AN_START]
     mov     esi, 12
@@ -4265,11 +6100,33 @@ rb_key:
 11: mov     esi, 36
     call    sc_mix
     pop     rdx
-    mov     rdi, [rdx+OB_MESH]
+    test    dword ptr [r13+RB_FLAGS], 2
+    jz      12f
+    push    rax                         # instances: what makes them (the
+    push    rdx                         #  evaluated mesh's instances)
+    mov     rdi, rdx
+    call    obj_eval
+    mov     rcx, rax
+    pop     rdx
+    pop     rax
+    test    rcx, rcx
+    jz      12f
+    mov     rcx, [rcx+ME_INST]
+    test    rcx, rcx
+    jz      12f
+    push    rdx
+    push    rcx
+    imul    esi, dword ptr [rcx+IB_N_], 48
+    lea     rdi, [rcx+IB_DATA_]
+    call    sc_mix
+    pop     rcx
+    pop     rdx
+12: mov     rdi, [rdx+OB_MESH]
     call    sc_meshhash
 2:  inc     r12d
     jmp     1b
-9:  pop     r13
+9:  mov     dword ptr [rip+rb_noinst], 0
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -4351,20 +6208,34 @@ rb_info:
     mov     eax, [rip+rb_npt]
     cmp     edi, 7
     je      8f
-    mov     eax, [rip+rb_stepno]
+    mov     eax, [rip+rb_mffull]
+    cmp     edi, 14                     # 14: pairs that found no manifold
+    je      8f
+    cmp     edi, 8                      # 8-13: ms in the broad phase, the
+    jb      7f                          #  narrow, islands, solving, the
+    cmp     edi, 13                     #  hash, compacting
+    ja      7f
+    lea     rax, [rip+rb_tns]
+    cvtsi2sd xmm0, qword ptr [rax+rdi*8-64]
+    divsd   xmm0, [rip+rx_1e6d]
+    cvtsd2ss xmm0, xmm0
+    ret
+7:  mov     eax, [rip+rb_stepno]
 8:  cvtsi2ss xmm0, eax
 9:  ret
 
 # =============================================================================
 #  Operators
 # =============================================================================
-OPERATOR op_rb_add,   "rigid.add",    "Add Rigid Body",    do_rb_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects rigid bodies (or change them): rigid.add [active|passive] [box|sphere|capsule|hull|compound] [mass m] [friction f] [bounce b] [damping d]. Active ones fall when the frame goes past the start", form=form_rigid
+OPERATOR op_rb_add,   "rigid.add",    "Add Rigid Body",    do_rb_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects rigid bodies (or change them): rigid.add [active|passive] [box|sphere|capsule|hull|compound] [instances|object] [mass m] [friction f] [bounce b] [damping d]. Active ones fall when the frame goes past the start; instances: each instance of the object's geometry (nodes) is a body of its own, shaped like its prototype", form=form_rigid
 OPERATOR op_rb_rem,   "rigid.remove", "Remove Rigid Body", do_rb_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="The selected objects are no longer rigid bodies"
 OPERATOR op_rb_joint, "rigid.joint",  "Add Joint",         do_rb_joint, flags=OPF_AI_SAFE|OPF_UNDO, doc="Tie two bodies (or one to the world): rigid.joint <fixed|hinge|point> <object> <object|world> [pivot x y z] [axis x y z] (pivot: the first object's place; axis: Y)", form=form_rjoint
 OPERATOR op_rb_world, "rigid.world",  "Physics World",     do_rb_world, flags=OPF_AI_SAFE|OPF_UNDO, doc="Physics settings: rigid.world [gravity x y z] [rate steps-a-second] [iterations n (a step, over its substeps)] [substeps n (1-64; 4)]"
 
 .section .rodata
 k_active:       .asciz "active"
+k_instances:    .asciz "instances"
+k_object:       .asciz "object"
 k_passive:      .asciz "passive"
 shape_names:    .quad k_box, k_sphere, k_capsule, k_hull, k_compound, 0
 k_box:          .asciz "box"
@@ -4493,6 +6364,22 @@ do_rb_add:
     or      dword ptr [rsp+24], 1
     jmp     1b
 3:  lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_instances]
+    call    str_eq
+    test    eax, eax
+    jz      31f
+    mov     dword ptr [rsp+28], 2       # its instances
+    or      dword ptr [rsp+24], 64
+    jmp     1b
+31: lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_object]
+    call    str_eq
+    test    eax, eax
+    jz      32f
+    mov     dword ptr [rsp+28], 0       # the object itself
+    or      dword ptr [rsp+24], 64
+    jmp     1b
+32: lea     rdi, [rip+im_word]
     lea     rsi, [rip+shape_names]
     call    rb_word_index
     test    eax, eax
@@ -4580,7 +6467,12 @@ do_rb_add:
 66: inc     ecx
     cmp     ecx, 4
     jb      65b
-    and     dword ptr [rdi+RB_FLAGS], ~1  # (its start: from where it is)
+    test    edx, 64
+    jz      67f
+    and     dword ptr [rdi+RB_FLAGS], ~2
+    mov     ecx, [rsp+28]
+    or      [rdi+RB_FLAGS], ecx
+67: and     dword ptr [rdi+RB_FLAGS], ~1  # (its start: from where it is)
     inc     r14d
 61: inc     r15d
     jmp     6b

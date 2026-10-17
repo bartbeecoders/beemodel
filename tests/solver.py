@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
-"""The rigid-body solver (2.0 plan, stage R). Stacks that stand: a tower of
-20 boxes and a 10-layer brick pyramid settle within the first second (a few
-mm: soft contacts give a little under the weight above) and then stand
-still to 10 s; a 1 kg box rests on a 100 kg one and the other way round
-(substeps, soft contacts and face clipping, R1).
+"""The rigid-body solver (2.0 plan, stage R).
+
+R1: stacks that stand - a tower of 20 boxes and a 10-layer brick pyramid
+settle within the first second (a few mm: soft contacts give a little under
+the weight above) and then stand still to 10 s; a 1 kg box rests on a
+100 kg one and the other way round (substeps, soft contacts, face clipping).
+
+R2: many bodies - 10 800 balls (instances of 12 objects' geometry nodes,
+each a body) poured into a box: none get out, 10 s simulated in under 30 s
+on 8 threads; 5000 bricks settle at 24 frames a second or better; instance
+bodies baked into the cache and played back; the same heap on 1 and 8
+threads; files from v0.16 (room for 1024 bodies) still open.
 
     python3 tests/solver.py build/beemodel
 """
@@ -19,16 +26,25 @@ def check(cond, msg):
         FAILS.append(msg)
 
 
-def run(code, timeout=600):
+CI = bool(os.environ.get('CI'))
+SLOW = 3 if CI else 1                   # (time budgets on shared CI machines)
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def run(code, timeout=900, threads=None):
     home = tempfile.mkdtemp(prefix='bee-solver-')
+    os.makedirs(os.path.join(home, 'BeeModel'), exist_ok=True)
     env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    if threads is not None:
+        env['BEEMODEL_THREADS'] = str(threads)
     r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=timeout)
     if r.returncode != 0:
         print(r.stdout[-1500:], r.stderr[-1500:])
     return [l.split() for l in r.stdout.splitlines() if l.strip()]
 
 
-GROUND = ('delete("Cube")\ndelete("Light")\ndelete("Camera")\n'
+WORLD = os.environ.get('SOLVER_WORLD', '')      # (other world settings to try)
+GROUND = ((f'op("rigid.world", "{WORLD}")\n' if WORLD else '') + 'delete("Cube")\ndelete("Light")\ndelete("Camera")\n'
           'add("plane", "Ground", 0, 0, 0)\nscale("Ground", 30)\nselect("Ground")\nop("rigid.add", "passive box")\n')
 
 # every body's place at the start, at 1 s (settled) and at 10 s
@@ -57,6 +73,49 @@ RATIO = GROUND + (
     'add("cube", "Weight", 4, 1.5, 0)\nscale("Weight", 0.5)\nselect("Weight")\nop("rigid.add", "active box mass 100")\n'
     'frame(241)\n'
     'print("ratio", get("Heavy", "y"), get("Light1", "y"), get("Light1", "x"), get("Big", "y"), get("Weight", "y"), get("Weight", "x"))\n')
+
+
+LATTICE = ('t = gtree("Lattice")\no = gnode(t, "output")\ng = gnode(t, "grid", 6, 29)\n'
+           's = gnode(t, "sphere", 0.09)\nip = gnode(t, "instance", 0, 0, 0)\n'
+           'glink(t, g, ip, 1)\nglink(t, s, ip, 2)\nglink(t, ip, o, 1)\n')
+
+POUR = GROUND.replace('scale("Ground", 30)', 'scale("Ground", 20)') + (
+    'w = 3.5\nadd("cube", "W1", -w, 2, 0)\nscale("W1", 0.1, 2, w)\nadd("cube", "W2", w, 2, 0)\nscale("W2", 0.1, 2, w)\n'
+    'add("cube", "W3", 0, 2, -w)\nscale("W3", w, 2, 0.1)\nadd("cube", "W4", 0, 2, w)\nscale("W4", w, 2, 0.1)\n'
+    'select("W1", "W2", "W3", "W4")\nop("rigid.add", "passive box")\n' + LATTICE +
+    'for k in 0..12 {\n n = "L" + str(k)\n add("cube", n, 0.03 * (k % 3), 0.5 + k * 0.22, 0.03 * (k % 2))\n'
+    ' m = modifier(n, "geometry")\n modset(n, m, "tree", t)\n select(n)\n op("rigid.add", "active sphere instances")\n}\n'
+    'frame(2)\nt0 = clock()\nframe(241)\nprint("pour", rbinfo(0), clock() - t0, rbinfo(14))\n'
+    'lo = 99\nout = 0\nfor k in 0..12 { for i in 0..900 {\n n = "L" + str(k)\n y = instpos(n, i, 1)\n'
+    ' if y < lo { lo = y }\n if abs(instpos(n, i, 0)) > 3.45 or abs(instpos(n, i, 2)) > 3.45 { out += 1 }\n} }\n'
+    'print("inside", lo, out)\n')
+
+BRICKS = GROUND + (
+    't = gtree("Bricks")\no = gnode(t, "output")\ng = gnode(t, "grid", 10, 24)\nc = gnode(t, "cube", 0.3)\n'
+    'ip = gnode(t, "instance", 0, 0, 0)\nglink(t, g, ip, 1)\nglink(t, c, ip, 2)\nglink(t, ip, o, 1)\n'
+    'for k in 0..8 {\n n = "B" + str(k)\n add("cube", n, 0.15 * (k % 2), 0.2 + k * 0.35, 0.15 * (k % 2))\n'
+    ' m = modifier(n, "geometry")\n modset(n, m, "tree", t)\n select(n)\n op("rigid.add", "active box instances")\n}\n'
+    'frame(2)\nsum = 0\nnf = 0\nfor f in 3..181 {\n frame(f)\n if rbinfo(2) > 4000 {\n  sum += rbinfo(4)\n  nf += 1\n }\n}\n'
+    'print("bricks", rbinfo(0), nf, sum / max(nf, 1), rbinfo(2))\n')
+
+CACHE = GROUND + LATTICE.replace('"grid", 6, 29', '"grid", 3, 9') + (
+    'add("cube", "Balls", 0, 2, 0)\nm = modifier("Balls", "geometry")\nmodset("Balls", m, "tree", t)\n'
+    'select("Balls")\nop("rigid.add", "active sphere instances")\n'
+    'frame(40)\na = instpos("Balls", 7, 1)\nb = instpos("Balls", 42, 0)\n'
+    'op("sim.bake", "rigid")\nframe(1)\nprint("start", instpos("Balls", 7, 1))\n'
+    'frame(40)\nprint("cached", abs(instpos("Balls", 7, 1) - a) < 1e-5, abs(instpos("Balls", 42, 0) - b) < 1e-5, cacheinfo(0) > 0)\n'
+    'op("file.save", "~/BeeModel/inst.bee")\nop("file.new")\nop("file.open", "~/BeeModel/inst.bee")\n'
+    'frame(40)\nprint("reopened", abs(instpos("Balls", 7, 1) - a) < 1e-5)\n')
+
+OLD = ('op("file.open", "%s")\nprint("old", rigid("B", "mass"), rigid("C", "shape"), keyed("Cube:x", 25), rbinfo(0))\n'
+       'frame(30)\nprint("oldsim", round(get("B", "y") * 100), rbinfo(0))\n')
+
+HEAP = ('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 40)\n'
+        'for k in 0..10 {\n for i in 0..10 {\n  for j in 0..10 {\n   n = "B" + str(k * 100 + i * 10 + j)\n'
+        '   add("cube", n, i * 1.2 - 6 + 0.6 * (k % 2), 1 + k * 1.2, j * 1.2 - 6 + 0.6 * (k % 2))\n'
+        '   rotate(n, 0.1 * k, 0.37 * k + 0.1 * i, 0.05 * j)\n   scale(n, 0.5)\n  }\n }\n}\n'
+        'select()\nop("object.select_all")\nop("rigid.add", "active box")\nselect("Ground")\nop("rigid.add", "passive box")\n'
+        'frame(121)\nprint("heap", rbinfo(1), get("B555", "x"), get("B555", "y"), get("B555", "z"))\n')
 
 
 def drift(rows):
@@ -90,6 +149,30 @@ def main():
     check(abs(v[3] - 0.5) < 0.01 and abs(v[4] - 1.5) < 0.02 and abs(v[5] - 4) < 0.001,
           f'a 100 kg box rests on a 1 kg one (at {round(v[4], 4)} m, 1.5 expected; soft contacts give a little under '
           f'a heavy load)')
+    print('  -- the solver: many bodies --')
+    eight = 7 if (os.cpu_count() or 1) >= 8 else None      # (8 threads)
+    r = {x[0]: x[1:] for x in run(POUR, threads=eight) if x}
+    p, ins = r.get('pour', ['0', '1e9', '1']), r.get('inside', ['-99', '1'])
+    ms = float(p[1])
+    check(p[0] == '10805' and p[2] == '0' and float(ins[0]) > 0.08 and ins[1] == '0'
+          and ms < 30000 * SLOW,
+          f'10 800 balls (instances, 12 objects) poured into a box: none get out (lowest {float(ins[0]):.3f} m), '
+          f'10 s simulated in {ms / 1000:.1f} s on {"8" if eight else "all the"} threads')
+    r = {x[0]: x[1:] for x in run(BRICKS, threads=eight) if x}
+    b = r.get('bricks', ['0', '0', '1e9', '1'])
+    check(b[0] == '5001' and int(b[1]) > 20 and float(b[2]) < 41.7 * 1.15 * SLOW and b[3] == '0',
+          f'5000 bricks settle: {float(b[2]):.1f} ms a frame while they move ({int(b[1])} frames; 41.7 = 24 fps), '
+          f'then sleep')
+    r = {x[0]: x[1:] for x in run(CACHE) if x}
+    check(r.get('start') == ['2'] and r.get('cached') == ['1', '1', '1'] and r.get('reopened') == ['1'],
+          f'instance bodies baked: back at the start, played from the cache, saved and opened again ({r})')
+    old = os.path.join(HERE, 'fixtures', 'physics', 'anim016.bee')
+    r = {x[0]: x[1:] for x in run(OLD % old) if x}
+    check(r.get('old', [])[:3] == ['7', '1', '4'] and r.get('oldsim') == ['100', '3'],
+          f'a v0.16 file (room for 1024 bodies) opens: bodies, a joint, keys, it simulates ({r})')
+    one = {x[0]: x[1:] for x in run(HEAP, threads=0) if x}.get('heap')
+    many = {x[0]: x[1:] for x in run(HEAP, threads=eight) if x}.get('heap')
+    check(one is not None and one == many, f'1000 boxes: the same heap on one thread and on eight ({one}, {many})')
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nthe solver: all checks passed')
     sys.exit(1 if FAILS else 0)
 

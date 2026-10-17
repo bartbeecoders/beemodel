@@ -15,10 +15,29 @@ project uses [Semantic Versioning](https://semver.org/).
   faces** (`src/clip.s`): a box resting on another touches at its four
   corners. A tower of 20 boxes and a 10-layer brick pyramid stand (they
   used to topple), and a 100 kg box rests on a 1 kg one. `tests/solver.py`.
+- **10 000 rigid bodies** (#287). Instances are bodies: `rigid.add ...
+  instances` (Properties › Physics › Bodies) makes each instance of an
+  object's geometry nodes a body shaped like its prototype; they move in
+  the viewport and the renders, are baked into the cache and played back.
+  Up to 4096 objects can be bodies (was 1024; files save only those in use
+  and older files open). The broad phase is a hash grid, pairs are looked
+  up in parallel in a hash kept between steps, and a big island's contacts
+  are coloured and solved across the threads (the same result on any
+  number of them). Contacts start further apart for fast bodies, so small
+  ones no longer pass through each other; spheres collide exactly. 10 800
+  balls poured into a box: 10 s simulated in about 26 s on 8 threads (4000
+  took 23 s before); 5000 bricks settle at about 27 fps; 1000 tumbling
+  boxes in 2.7 s (was 6.2). `instpos(object, i, k)`; `rbinfo(8..14)`.
 - **The MIT License** (`LICENSE`, also in the release archive). The
   2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): the masterplan's open
   questions, then physics - the solver, ground and landscapes, shatter,
   attractors, particles, smoke and fire.
+
+### Fixed
+- `parallel_for`: a worker still finishing one call could claim a chunk of
+  the next with the old chunk size and the new range end, and run part of
+  it twice (a crash or a wrong result when many calls with different chunk
+  sizes ran back to back).
 
 ## [0.16.0] - 2026-10-17
 

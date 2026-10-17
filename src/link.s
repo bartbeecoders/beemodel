@@ -353,6 +353,7 @@ send_tick:
     ret
 
 # now_ns -> rax = CLOCK_MONOTONIC in ns
+.globl now_ns
 now_ns:
     sub     rsp, 24
     mov     edi, 1

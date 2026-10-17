@@ -397,6 +397,8 @@ builtins:
     .long 1, 1
     .quad bn_instances, b_instances
     .long 1, 1
+    .quad bn_instpos, b_instpos
+    .long 3, 3
     .quad bn_curve, b_curve
     .long 1, 2
     .quad bn_cpoints, b_cpoints
@@ -745,6 +747,7 @@ bn_modremove:   .asciz "modremove"
 bn_modcount:    .asciz "modcount"
 bn_everts:      .asciz "everts"
 bn_instances:   .asciz "instances"
+bn_instpos:     .asciz "instpos"
 bn_curve:       .asciz "curve"
 bn_cpoints:     .asciz "cpoints"
 bn_clength:     .asciz "clength"
@@ -5958,6 +5961,65 @@ b_instances:
     add     rsp, 8
     cvtsi2sd xmm0, eax
     jmp     ret_num
+
+# instpos(name, i, k) -> instance i's place (world): k 0 x, 1 y, 2 z; nil
+#   when there is no such instance
+b_instpos:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 64
+    mov     rbx, rdi
+    call    a_meshobj
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_int
+    mov     r13d, eax
+    lea     rdi, [rbx+32]
+    call    a_int
+    mov     [rsp+48], eax
+    mov     rdi, r12
+    call    obj_eval
+    mov     rax, [rax+ME_INST]
+    test    rax, rax
+    jz      8f
+    cmp     r13d, [rax+4]               # (IB_N)
+    jae     8f
+    imul    rcx, r13, 48                # its translation (IB_DATA = 128)
+    lea     rcx, [rax+128+rcx]
+    movss   xmm0, [rcx+12]
+    movss   [rsp+52], xmm0
+    movss   xmm0, [rcx+28]
+    movss   [rsp+56], xmm0
+    movss   xmm0, [rcx+44]
+    movss   [rsp+60], xmm0
+    mov     rdi, r12                    # by the object's matrix
+    lea     rsi, [rsp]
+    call    obj_matrix
+    mov     eax, [rsp+48]
+    cmp     eax, 2
+    ja      8f
+    shl     eax, 4
+    movss   xmm0, [rsp+rax]
+    mulss   xmm0, [rsp+52]
+    movss   xmm1, [rsp+rax+4]
+    mulss   xmm1, [rsp+56]
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+rax+8]
+    mulss   xmm1, [rsp+60]
+    addss   xmm0, xmm1
+    addss   xmm0, [rsp+rax+12]
+    cvtss2sd xmm0, xmm0
+    add     rsp, 64
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  add     rsp, 64
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
 
 b_everts:
     mov     edx, ME_NVERTS
