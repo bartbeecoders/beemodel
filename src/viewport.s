@@ -1089,11 +1089,29 @@ OPERATOR op_view_grid,      "view.toggle_grid",  "Ground Grid",  op_toggle_flag,
 OPERATOR op_view_reset_cam, "view.reset_camera", "Reset Camera", op_reset_camera, key=KEY_F, flags=OPF_AI_SAFE|OPF_OBJECT, doc="Return the viewport camera to its default view (F in object mode, Home anywhere)"
 OPERATOR op_view_reset_home, "view.reset_camera_home", "Reset Camera", op_reset_camera, key=102, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="Return the viewport camera to its default view"
 op_reset_camera:
+    sub     rsp, 8
     mov     edi, [rip+vp_area]
+    test    edi, edi
+    js      9f
     call    cam_load
+    lea     rdi, [rip+rc_keep]          # (the default view, glided to)
+    lea     rsi, [rip+cam_yaw]
+    mov     ecx, 24
+    rep     movsb
     call    vp_reset
+    lea     rdi, [rip+rc_tgt]
+    lea     rsi, [rip+cam_yaw]
+    mov     ecx, 24
+    rep     movsb
+    lea     rdi, [rip+cam_yaw]
+    lea     rsi, [rip+rc_keep]
+    mov     ecx, 24
+    rep     movsb
     mov     edi, [rip+vp_area]
-    jmp     cam_store
+    lea     rsi, [rip+rc_tgt]
+    call    va_start
+9:  add     rsp, 8
+    ret
 vp_reset:
     movss   xmm0, [rip+f_def_yaw]
     movss   [rip+cam_yaw], xmm0
@@ -1106,5 +1124,10 @@ vp_reset:
     movss   [rip+cam_ty], xmm0
     movss   [rip+cam_tz], xmm0
     ret
+
+.section .bss
+.align 8
+rc_keep:        .skip 24
+rc_tgt:         .skip 24
 
 .section .note.GNU-stack,"",@progbits
