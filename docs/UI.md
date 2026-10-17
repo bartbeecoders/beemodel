@@ -70,7 +70,7 @@ The menu bar holds every command, in File, Edit, View, Select, Add, Object, Mesh
 - opening a scene shows a picture of it beside the list: BeeModel keeps a small picture of the 3D viewport in each `.bee` file it saves from the window;
 - saving over a file asks first.
 
-Exports add their own options: selected objects only, the up axis and the scale.
+Exports add their own options: selected objects only, the up axis and the scale. **Export Drawing (PDF)** adds the sheet (A4, A3, A2, Letter; landscape or portrait), the views (front, top, right and an isometric one), the scale (the largest that fits, or a fixed one) and the title block's title and author; the date is today's. Scripts set the same with `drawing.options`.
 
 Files dragged from a file manager onto the window open by their kind:
 

@@ -618,7 +618,7 @@ PATHFORM form_estep, "file.export_step", 1, x_step, n_part_step
 PATHFORM form_e3mf, "file.export_3mf", 1, x_3mf, n_part_3mf, WGF_EXPORT
 PATHFORM form_edxf, "file.export_dxf", 1, x_dxf, n_sketch_dxf
 PATHFORM form_esvg, "file.export_svg", 1, x_svg, n_sketch_svg
-PATHFORM form_epdf, "file.export_pdf", 1, x_pdf, n_drawing_pdf
+PATHFORM form_epdf, "file.export_pdf", 1, x_pdf, n_drawing_pdf, WGF_DRAWING
 PATHFORM form_script, "script.run", 0, x_bees
 PATHFORM form_rsave, "render.save", 1, x_img, n_render_png
 PATHFORM form_iload, "image.load", 0, x_imgin

@@ -1446,7 +1446,11 @@ fb_draw:
     test    eax, eax
     jz      61f
     sub     r8d, 34
-61: lea     r9, [rip+fb_scroll]
+61: mov     rax, [rip+fb_desc]          # (and a drawing's: three rows)
+    test    dword ptr [rax+WD_FLAGS], WGF_DRAWING
+    jz      611f
+    sub     r8d, 102
+611:lea     r9, [rip+fb_scroll]
     call    wg_scroll_begin
     mov     r12d, eax                   # the first row's y
     mov     [rsp], eax
@@ -1508,7 +1512,14 @@ fb_draw:
     imul    edi, ROW_H
     add     edi, [rsp]
     call    wg_scroll_end
-    call    fb_has_opts                 # export options
+    mov     rax, [rip+fb_desc]          # a drawing: its options (drawing.s)
+    test    dword ptr [rax+WD_FLAGS], WGF_DRAWING
+    jz      610f
+    lea     edi, [rbx+18]
+    lea     esi, [rbp+FB_H-188]
+    mov     edx, FB_W-36
+    call    drawing_opts_draw
+610:call    fb_has_opts                 # export options
     test    eax, eax
     jz      62f
     lea     r12d, [rbp+FB_H-120]

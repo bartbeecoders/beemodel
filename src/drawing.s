@@ -13,8 +13,10 @@
 .intel_syntax noprefix
 .include "const.inc"
 .include "macros.inc"
+.include "widgets.inc"
 
 .globl op_export_pdf
+.globl drawing_opts_draw
 .globl export_pdf
 
 .equ MAXO,      64
@@ -36,9 +38,7 @@ df_tiny:        .float 1.0e-12
 df_sliver:      .float 1.0e-6
 df_gap:         .float 50.0                  # between views (pt)
 df_x0:          .float 50.0                  # the views' corner (pt)
-df_y0:          .float 120.0
-df_w:           .float 740.0                 # room for them (pt)
-df_h:           .float 430.0
+df_y0:          .float 130.0                 # (above the title block)
 df_dim:         .float 14.0                  # dimension line offset (pt)
 df_ext:         .float 4.0
 df_arrow:       .float 3.0
@@ -47,7 +47,8 @@ scales:         .float 20, 10, 5, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01, 0.005, 
 s_pdf_head:     .asciz "%PDF-1.4\n%\xe2\xe3\xcf\xd3\n"
 s_o1:           .asciz "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
 s_o2:           .asciz "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
-s_o3:           .asciz "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 842 595] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
+s_o3:           .asciz "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 "
+s_o3b:          .asciz "] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj\n"
 s_o4:           .asciz "4 0 obj\n<< /Length "
 s_o4b:          .asciz " >>\nstream\n"
 s_o4e:          .asciz "\nendstream\nendobj\n"
@@ -78,6 +79,7 @@ s_units:        .asciz "Units: mm    Third-angle projection"
 s_front:        .asciz "FRONT"
 s_top:          .asciz "TOP"
 s_right:        .asciz "RIGHT"
+s_iso:          .asciz "ISOMETRIC"
 s_comma:        .asciz ", "
 s_pf_pdf:       .asciz "file.export_pdf ~/BeeModel/drawing.pdf"
 s_exported:     .asciz "  exported "
@@ -86,8 +88,37 @@ s_none:         .asciz "  nothing to draw: no meshes"
 
 OPERATOR op_export_pdf, "file.export_pdf", "Export Drawing (PDF)...", do_epdf, doc="A drawing of the selected meshes (or all): front, top and right views with hidden lines dashed, overall dimensions and a title block, on A4 as PDF: file.export_pdf <path>", form=form_epdf
 
+.section .data
+.align 4
+.globl dro_sheet
+.globl dro_port
+.globl dro_views
+.globl dro_scale
+.globl dro_title
+.globl dro_author
+dro_sheet:      .long 0                 # options (the file browser, drawing.options):
+dro_port:       .long 0                 #  A4 A3 A2 Letter; portrait;
+dro_views:      .long 7                 #  views: 1 front, 2 top, 4 right, 8 iso;
+dro_scale:      .long 0                 #  0 the largest that fits, else fixed
+dro_title:      .skip 64                #  the title block's title (empty: BeeModel)
+dro_author:     .skip 64                #  and author
+.section .rodata
+.align 4
+sheet_wh:       .float 842, 595, 1191, 842, 1684, 1191, 792, 612
+fixed_scales:   .float 0, 2, 1, 0.5, 0.2, 0.1, 0.05, 0.02, 0.01
+df_iso3:        .float 0.57735027
+df_iso2:        .float 0.70710678
+df_iso6:        .float 0.40824829
+df_ah:          .float 175.0
+df_aw:          .float 102.0
+df_tbw:         .float 262.0
 .section .bss
 .align 8
+dr_pw:          .skip 4                 # the page, points
+dr_ph:          .skip 4
+dr_vw:          .skip 16                # each view's width, height (model mm)
+dr_vh:          .skip 16
+dr_date:        .skip 16
 dr_mesh:        .skip 8*MAXO
 dr_wv:          .skip 8*MAXO
 dr_obj:         .skip 8*MAXO
@@ -115,6 +146,341 @@ dr_offs:        .skip 4*6
 dr_vis:         .skip 4                 # current run: visible?
 dr_tmp:         .skip 64
 
+.text
+
+# =============================================================================
+#  The drawing's options: in the file browser (Export Drawing) and for
+#  scripts (drawing.options); kept for the next drawing
+# =============================================================================
+.section .rodata
+s_sh_a4:        .asciz "A4"
+s_sh_a3:        .asciz "A3"
+s_sh_a2:        .asciz "A2"
+s_sh_letter:    .asciz "Letter"
+s_or_land:      .asciz "Landscape"
+s_or_port:      .asciz "Portrait"
+s_sc_auto:      .asciz "Scale: fit"
+s_sc_21:        .asciz "2:1"
+s_sc_11:        .asciz "1:1"
+s_sc_12:        .asciz "1:2"
+s_sc_15:        .asciz "1:5"
+s_sc_110:       .asciz "1:10"
+s_sc_120:       .asciz "1:20"
+s_sc_150:       .asciz "1:50"
+s_sc_1100:      .asciz "1:100"
+w_sh_a4:        .asciz "a4"
+w_sh_a3:        .asciz "a3"
+w_sh_a2:        .asciz "a2"
+w_sh_letter:    .asciz "letter"
+w_land:         .asciz "landscape"
+w_port:         .asciz "portrait"
+w_views:        .asciz "views"
+w_scale:        .asciz "scale"
+w_auto:         .asciz "auto"
+w_title:        .asciz "title"
+w_author:       .asciz "author"
+w_front:        .asciz "front"
+w_top:          .asciz "top"
+w_right:        .asciz "right"
+w_iso:          .asciz "iso"
+.align 8
+sheet_lbl:      .quad s_sh_a4, s_sh_a3, s_sh_a2, s_sh_letter
+orient_lbl:     .quad s_or_land, s_or_port
+scale_lbl:      .quad s_sc_auto, s_sc_21, s_sc_11, s_sc_12, s_sc_15, s_sc_110, s_sc_120, s_sc_150, s_sc_1100
+sheet_kw:       .quad w_sh_a4, w_sh_a3, w_sh_a2, w_sh_letter, 0
+view_kw:        .quad w_front, w_top, w_right, w_iso, 0
+scale_kw:       .quad w_auto, s_sc_21, s_sc_11, s_sc_12, s_sc_15, s_sc_110, s_sc_120, s_sc_150, s_sc_1100, 0
+.section .bss
+.align 4
+dro_vt:         .skip 16                # the views as four toggles
+dro_tok:        .skip 64
+.text
+WIDGET wd_dr_sheet, WK_ENUM, "drawing.sheet", aux=sheet_lbl, n=4, tip="The paper: A4, A3, A2 or US Letter"
+WIDGET wd_dr_orient, WK_ENUM, "drawing.orientation", aux=orient_lbl, n=2, tip="Landscape or portrait"
+WIDGET wd_dr_scale, WK_ENUM, "drawing.scale", aux=scale_lbl, n=9, tip="Fit: the largest standard scale that fits the sheet. Or a fixed one"
+WIDGET wd_dr_vf, WK_TOGGLE, "drawing.front", "Front", cb=dr_views_cb, tip="The front view (bottom left)"
+WIDGET wd_dr_vt, WK_TOGGLE, "drawing.top", "Top", cb=dr_views_cb, tip="The top view (above the front)"
+WIDGET wd_dr_vr, WK_TOGGLE, "drawing.right", "Right", cb=dr_views_cb, tip="The right view (right of the front)"
+WIDGET wd_dr_vi, WK_TOGGLE, "drawing.iso", "Isometric", cb=dr_views_cb, tip="An isometric view (top right, no dimensions)"
+WIDGET wd_dr_title, WK_TEXT, "drawing.title", "Title", flags=WGF_COMPACT, cb=dr_title_cb, tip="The title in the title block (empty: BeeModel)"
+WIDGET wd_dr_author, WK_TEXT, "drawing.author", "Author", flags=WGF_COMPACT, cb=dr_author_cb, tip="Who drew it (the title block)"
+OPERATOR op_dr_opts, "drawing.options", "Drawing Options", do_dr_opts, flags=OPF_AI_SAFE|OPF_QUIET, doc="How Export Drawing lays out the page: drawing.options [a4|a3|a2|letter] [landscape|portrait] [views front top right iso] [scale auto|2:1|1:1|1:2|1:5|1:10|1:20|1:50|1:100] [title \"...\"] [author \"...\"]"
+
+# drawing_opts_draw(edi=x, esi=y, edx=width) - three rows of options
+drawing_opts_draw:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     ebx, edi
+    mov     r12d, esi
+    mov     r13d, edx
+    xor     ecx, ecx                    # the toggles follow the views
+1:  bt      dword ptr [rip+dro_views], ecx
+    setc    al
+    movzx   eax, al
+    lea     rdx, [rip+dro_vt]
+    mov     [rdx+rcx*4], eax
+    inc     ecx
+    cmp     ecx, 4
+    jb      1b
+    mov     r14d, r13d                  # row 1: sheet, orientation, scale
+    sub     r14d, 12
+    mov     eax, r14d
+    xor     edx, edx
+    mov     ecx, 3
+    div     ecx
+    mov     r14d, eax                   # a third each
+    lea     rdi, [rip+wd_dr_sheet]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, r14d
+    lea     r8, [rip+dro_sheet]
+    xor     r9d, r9d
+    call    wg
+    lea     rdi, [rip+wd_dr_orient]
+    lea     esi, [rbx+r14+6]
+    mov     edx, r12d
+    mov     ecx, r14d
+    lea     r8, [rip+dro_port]
+    xor     r9d, r9d
+    call    wg
+    lea     rdi, [rip+wd_dr_scale]
+    lea     esi, [r14+r14+12]
+    add     esi, ebx
+    mov     edx, r12d
+    mov     ecx, r14d
+    lea     r8, [rip+dro_scale]
+    xor     r9d, r9d
+    call    wg
+    add     r12d, 34                    # row 2: the views
+    mov     r14d, r13d
+    shr     r14d, 2
+    xor     r15d, r15d
+2:  lea     rax, [rip+view_wd]
+    mov     rdi, [rax+r15*8]
+    mov     esi, r14d
+    imul    esi, r15d
+    add     esi, ebx
+    mov     edx, r12d
+    lea     ecx, [r14-6]
+    lea     r8, [rip+dro_vt]
+    lea     r8, [r8+r15*4]
+    xor     r9d, r9d
+    call    wg
+    inc     r15d
+    cmp     r15d, 4
+    jb      2b
+    add     r12d, 34                    # row 3: title, author
+    mov     r14d, r13d
+    shr     r14d, 1
+    lea     rdi, [rip+wd_dr_title]
+    mov     esi, ebx
+    mov     edx, r12d
+    lea     ecx, [r14-6]
+    lea     r8, [rip+dro_title]
+    xor     r9d, r9d
+    call    wg
+    lea     rdi, [rip+wd_dr_author]
+    lea     esi, [rbx+r14]
+    mov     edx, r12d
+    lea     ecx, [r14-6]
+    lea     r8, [rip+dro_author]
+    xor     r9d, r9d
+    call    wg
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+dr_views_cb:                            # the toggles -> dro_views (one at least)
+    xor     eax, eax
+    xor     ecx, ecx
+1:  lea     rdx, [rip+dro_vt]
+    cmp     dword ptr [rdx+rcx*4], 0
+    je      2f
+    bts     eax, ecx
+2:  inc     ecx
+    cmp     ecx, 4
+    jb      1b
+    test    eax, eax
+    jz      9f
+    mov     [rip+dro_views], eax
+9:  ret
+
+dr_title_cb:                            # rdi = the text
+    lea     rsi, [rip+dro_title]
+    jmp     dr_cpy63
+dr_author_cb:
+    lea     rsi, [rip+dro_author]
+dr_cpy63:                               # rdi = text, rsi = 64-byte field
+    xor     ecx, ecx
+1:  mov     al, [rdi+rcx]
+    mov     [rsi+rcx], al
+    test    al, al
+    jz      2f
+    inc     ecx
+    cmp     ecx, 63
+    jb      1b
+    mov     byte ptr [rsi+rcx], 0
+2:  ret
+
+# dr_token(rsi=text) -> dro_tok = the next word or "quoted words", rsi after
+#   it, eax = its length (0: none)
+dr_token:
+    lea     rdi, [rip+dro_tok]
+    xor     ecx, ecx
+1:  cmp     byte ptr [rsi], ' '
+    jne     2f
+    inc     rsi
+    jmp     1b
+2:  mov     dl, ' '                     # (a quote: to the next one)
+    cmp     byte ptr [rsi], '"'
+    jne     3f
+    mov     dl, '"'
+    inc     rsi
+3:  mov     al, [rsi]
+    test    al, al
+    jz      5f
+    cmp     al, dl
+    je      4f
+    cmp     ecx, 63
+    jae     31f
+    mov     [rdi+rcx], al
+    inc     ecx
+31: inc     rsi
+    jmp     3b
+4:  inc     rsi
+5:  mov     byte ptr [rdi+rcx], 0
+    mov     eax, ecx
+    cmp     dl, '"'                     # ("" counts as a token)
+    jne     6f
+    or      eax, 0x10000
+6:  ret
+
+# dr_kw(rdi=0-ended word list) -> eax = dro_tok's index there, -1
+dr_kw:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    xor     r12d, r12d
+1:  mov     rsi, [rbx+r12*8]
+    test    rsi, rsi
+    jz      8f
+    lea     rdi, [rip+dro_tok]
+    call    str_eq
+    test    eax, eax
+    jnz     9f
+    inc     r12d
+    jmp     1b
+8:  mov     r12d, -1
+9:  mov     eax, r12d
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# drawing.options - the words in any order (see the operator's doc)
+do_dr_opts:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, [rip+op_arg]
+    test    rbx, rbx
+    jz      9f
+.Ldo_next:
+    mov     rsi, rbx
+    call    dr_token
+    mov     rbx, rsi
+    test    eax, eax
+    jz      9f
+    lea     rdi, [rip+sheet_kw]         # a sheet
+    call    dr_kw
+    test    eax, eax
+    js      1f
+    mov     [rip+dro_sheet], eax
+    jmp     .Ldo_next
+1:  lea     rdi, [rip+dro_tok]
+    lea     rsi, [rip+w_land]
+    call    str_eq
+    test    eax, eax
+    jz      2f
+    mov     dword ptr [rip+dro_port], 0
+    jmp     .Ldo_next
+2:  lea     rdi, [rip+dro_tok]
+    lea     rsi, [rip+w_port]
+    call    str_eq
+    test    eax, eax
+    jz      3f
+    mov     dword ptr [rip+dro_port], 1
+    jmp     .Ldo_next
+3:  lea     rdi, [rip+dro_tok]          # views ...: the view words after it
+    lea     rsi, [rip+w_views]
+    call    str_eq
+    test    eax, eax
+    jz      5f
+    xor     r12d, r12d
+4:  mov     rsi, rbx
+    call    dr_token
+    mov     [rsp], rsi                  # (after it, if it is a view)
+    test    eax, eax
+    jz      41f
+    lea     rdi, [rip+view_kw]
+    call    dr_kw
+    test    eax, eax
+    js      41f
+    bts     r12d, eax
+    mov     rbx, [rsp]
+    jmp     4b
+41: test    r12d, r12d
+    jz      .Ldo_next
+    mov     [rip+dro_views], r12d
+    jmp     .Ldo_next
+5:  lea     rdi, [rip+dro_tok]          # scale <auto | a:b>
+    lea     rsi, [rip+w_scale]
+    call    str_eq
+    test    eax, eax
+    jz      6f
+    mov     rsi, rbx
+    call    dr_token
+    mov     rbx, rsi
+    lea     rdi, [rip+scale_kw]
+    call    dr_kw
+    test    eax, eax
+    js      .Ldo_next
+    mov     [rip+dro_scale], eax
+    jmp     .Ldo_next
+6:  lea     rdi, [rip+dro_tok]          # title "..." / author "..."
+    lea     rsi, [rip+w_title]
+    call    str_eq
+    lea     r12, [rip+dro_title]
+    test    eax, eax
+    jnz     7f
+    lea     rdi, [rip+dro_tok]
+    lea     rsi, [rip+w_author]
+    call    str_eq
+    lea     r12, [rip+dro_author]
+    test    eax, eax
+    jz      .Ldo_next
+7:  mov     rsi, rbx
+    call    dr_token
+    mov     rbx, rsi
+    lea     rdi, [rip+dro_tok]
+    mov     rsi, r12
+    call    dr_cpy63
+    jmp     .Ldo_next
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+.section .rodata
+.align 8
+view_wd:        .quad wd_dr_vf, wd_dr_vt, wd_dr_vr, wd_dr_vi
 .text
 
 # ---- small writers ------------------------------------------------------------
@@ -191,12 +557,27 @@ proj:
     xorps   xmm6, xmm6
     subss   xmm6, xmm5                  # -z
     mov     eax, [rip+dr_view]
+    cmp     eax, 3
+    je      3f
     cmp     eax, 1
     je      1f
     ja      2f
     movss   xmm0, xmm3
     movss   xmm1, xmm4
     movss   xmm2, xmm5
+    ret
+3:  movss   xmm0, xmm3                  # isometric, from front right above:
+    subss   xmm0, xmm5                  #  x' = (x - z) / sqrt 2
+    mulss   xmm0, [rip+df_iso2]
+    movss   xmm1, xmm4                  #  y' = (2y - x - z) / sqrt 6
+    addss   xmm1, xmm4
+    subss   xmm1, xmm3
+    subss   xmm1, xmm5
+    mulss   xmm1, [rip+df_iso6]
+    movss   xmm2, xmm3                  #  depth (x + y + z) / sqrt 3
+    addss   xmm2, xmm4
+    addss   xmm2, xmm5
+    mulss   xmm2, [rip+df_iso3]
     ret
 1:  movss   xmm0, xmm3
     movss   xmm1, xmm6
@@ -360,7 +741,21 @@ export_pdf:
     jmp     2b
 21: inc     ebx
     jmp     1b
-3:  # the scale: the largest standard one that fits
+3:  # the page and each view's size (model mm)
+    mov     eax, [rip+dro_sheet]
+    cmp     eax, 3
+    jbe     30f
+    xor     eax, eax
+30: lea     rcx, [rip+sheet_wh]
+    movss   xmm0, [rcx+rax*8]
+    movss   xmm1, [rcx+rax*8+4]
+    cmp     dword ptr [rip+dro_port], 0
+    je      31f
+    movss   xmm2, xmm0                  # portrait: turned
+    movss   xmm0, xmm1
+    movss   xmm1, xmm2
+31: movss   [rip+dr_pw], xmm0
+    movss   [rip+dr_ph], xmm1
     movss   xmm0, [rip+dr_bmax]         # dx, dy, dz
     subss   xmm0, [rip+dr_bmin]
     movss   [rsp], xmm0
@@ -370,23 +765,55 @@ export_pdf:
     movss   xmm0, [rip+dr_bmax+8]
     subss   xmm0, [rip+dr_bmin+8]
     movss   [rsp+8], xmm0
-    lea     rbx, [rip+scales]
+    movss   xmm0, [rsp]                 # front dx dy, top dx dz, right dz dy
+    movss   [rip+dr_vw], xmm0
+    movss   [rip+dr_vw+4], xmm0
+    movss   xmm0, [rsp+8]
+    movss   [rip+dr_vw+8], xmm0
+    movss   [rip+dr_vh+4], xmm0
+    movss   xmm0, [rsp+4]
+    movss   [rip+dr_vh], xmm0
+    movss   [rip+dr_vh+8], xmm0
+    mov     dword ptr [rip+dr_view], 3  # isometric: its projected box
+    mov     dword ptr [rip+dr_k], 0x3f800000
+    call    view_bounds
+    movss   xmm0, [rip+dr_vmax]
+    subss   xmm0, [rip+dr_vmin]
+    movss   [rip+dr_vw+12], xmm0
+    movss   xmm0, [rip+dr_vmax+4]
+    subss   xmm0, [rip+dr_vmin+4]
+    movss   [rip+dr_vh+12], xmm0
+    call    pd_grid                     # the grid's columns and rows: [rsp+24..36]
+    # the scale: fixed, or the largest standard one that fits
+    mov     eax, [rip+dro_scale]
+    test    eax, eax
+    jz      40f
+    cmp     eax, 8
+    ja      40f
+    lea     rbx, [rip+fixed_scales]
+    lea     rbx, [rbx+rax*4]
+    jmp     43f
+40: lea     rbx, [rip+scales]
 4:  movss   xmm0, [rbx]
     xorps   xmm1, xmm1
     comiss  xmm0, xmm1
     je      41f                         # (the smallest)
     mulss   xmm0, [rip+df_pt]           # k = points per model mm
-    movss   xmm1, [rsp]                 # (dx + dz) k + gap <= w
-    addss   xmm1, [rsp+8]
+    movss   xmm1, [rsp+24]              # (A + B) k + gap <= w
+    addss   xmm1, [rsp+28]
     mulss   xmm1, xmm0
-    addss   xmm1, [rip+df_gap]
-    comiss  xmm1, [rip+df_w]
+    addss   xmm1, [rsp+40]
+    movss   xmm2, [rip+dr_pw]
+    subss   xmm2, [rip+df_aw]
+    comiss  xmm1, xmm2
     ja      42f
-    movss   xmm1, [rsp+4]               # (dy + dz) k + gap <= h
-    addss   xmm1, [rsp+8]
+    movss   xmm1, [rsp+32]              # (row 1 + row 2) k + gap <= h
+    addss   xmm1, [rsp+36]
     mulss   xmm1, xmm0
-    addss   xmm1, [rip+df_gap]
-    comiss  xmm1, [rip+df_h]
+    addss   xmm1, [rsp+44]
+    movss   xmm2, [rip+dr_ph]
+    subss   xmm2, [rip+df_ah]
+    comiss  xmm1, xmm2
     jbe     43f
 42: add     rbx, 4
     jmp     4b
@@ -399,23 +826,25 @@ export_pdf:
     call    wb_reset
     xor     r15d, r15d                  # views
 .Lpd_view:
-    cmp     r15d, 3
+    cmp     r15d, 4
     jae     .Lpd_title
+    bt      dword ptr [rip+dro_views], r15d
+    jnc     .Lpd_vnext
     mov     [rip+dr_view], r15d
-    movss   xmm0, [rip+df_x0]           # page corner: front at x0 y0, top
-    movss   xmm1, [rip+df_y0]           #  above, right to the right
-    cmp     r15d, 1
-    jne     5f
-    movss   xmm2, [rsp+4]               # + dy k + gap
+    movss   xmm0, [rip+df_x0]           # page corner: column A or B,
+    movss   xmm1, [rip+df_y0]           #  row 1 or 2
+    test    r15d, 2                     # right, iso: column B
+    jz      5f
+    movss   xmm2, [rsp+24]
     mulss   xmm2, [rip+dr_k]
-    addss   xmm2, [rip+df_gap]
-    addss   xmm1, xmm2
-5:  cmp     r15d, 2
-    jne     6f
-    movss   xmm2, [rsp]                 # + dx k + gap
-    mulss   xmm2, [rip+dr_k]
-    addss   xmm2, [rip+df_gap]
+    addss   xmm2, [rsp+40]
     addss   xmm0, xmm2
+5:  test    r15d, 1                     # top, iso: row 2
+    jz      6f
+    movss   xmm2, [rsp+32]
+    mulss   xmm2, [rip+dr_k]
+    addss   xmm2, [rsp+44]
+    addss   xmm1, xmm2
 6:  movss   [rip+dr_ox], xmm0
     movss   [rip+dr_oy], xmm1
     call    view_bounds
@@ -429,6 +858,7 @@ export_pdf:
     mov     rsi, [rip+dr_zbytes]
     mov     eax, SYS_MUNMAP
     syscall
+.Lpd_vnext:
     inc     r15d
     jmp     .Lpd_view
 .Lpd_title:
@@ -461,7 +891,15 @@ export_pdf:
     call    wb_str
     mov     eax, [rip+wb_len]
     mov     [rbx+12], eax
-    lea     rsi, [rip+s_o3]
+    lea     rsi, [rip+s_o3]             # (the page's size)
+    call    wb_str
+    cvttss2si edi, [rip+dr_pw]
+    call    wb_int
+    lea     rsi, [rip+s_sp]
+    call    wb_str
+    cvttss2si edi, [rip+dr_ph]
+    call    wb_int
+    lea     rsi, [rip+s_o3b]
     call    wb_str
     mov     eax, [rip+wb_len]
     mov     [rbx+16], eax
@@ -524,6 +962,57 @@ export_pdf:
     pop     r12
     pop     rbx
     ret
+
+# pd_grid - (export_pdf's frame, rsp+8 here = its rsp) the grid of views:
+#   column A (front, top) and B (right, iso) widths, row 1 (front, right)
+#   and row 2 (top, iso) heights, and the gaps (only between used ones)
+pd_grid:
+    lea     r8, [rsp+8]                 # export_pdf's [rsp]
+    xorps   xmm0, xmm0
+    movss   [r8+24], xmm0
+    movss   [r8+28], xmm0
+    movss   [r8+32], xmm0
+    movss   [r8+36], xmm0
+    movss   [r8+40], xmm0
+    movss   [r8+44], xmm0
+    xor     ecx, ecx
+1:  bt      dword ptr [rip+dro_views], ecx
+    jnc     3f
+    lea     rax, [rip+dr_vw]
+    movss   xmm1, [rax+rcx*4]
+    lea     rax, [rip+dr_vh]
+    movss   xmm2, [rax+rcx*4]
+    mov     eax, ecx                    # the column: bit 1
+    shr     eax, 1
+    movss   xmm3, [r8+24+rax*4]
+    maxss   xmm3, xmm1
+    movss   [r8+24+rax*4], xmm3
+    mov     eax, ecx                    # the row: bit 0
+    and     eax, 1
+    movss   xmm3, [r8+32+rax*4]
+    maxss   xmm3, xmm2
+    movss   [r8+32+rax*4], xmm3
+3:  inc     ecx
+    cmp     ecx, 4
+    jb      1b
+    xorps   xmm0, xmm0                  # the gaps: both columns, both rows used
+    movss   xmm1, [r8+24]
+    comiss  xmm1, xmm0
+    jbe     4f
+    movss   xmm1, [r8+28]
+    comiss  xmm1, xmm0
+    jbe     4f
+    movss   xmm1, [rip+df_gap]
+    movss   [r8+40], xmm1
+4:  movss   xmm1, [r8+32]
+    comiss  xmm1, xmm0
+    jbe     5f
+    movss   xmm1, [r8+36]
+    comiss  xmm1, xmm0
+    jbe     5f
+    movss   xmm1, [rip+df_gap]
+    movss   [r8+44], xmm1
+5:  ret
 
 # wb_pad10(edi=value) - ten digits
 wb_pad10:
@@ -864,7 +1353,14 @@ view_edges:
     movss   [rip+dr_dir+8], xmm0
     movss   xmm1, [rip+df_one]
     lea     rcx, [rip+dr_dir]
-    mov     edx, 2                      # front: z
+    cmp     eax, 3                      # isometric: (1, 1, 1) / sqrt 3
+    jne     0f
+    movss   xmm1, [rip+df_iso3]
+    movss   [rcx], xmm1
+    movss   [rcx+4], xmm1
+    movss   [rcx+8], xmm1
+    jmp     3f
+0:  mov     edx, 2                      # front: z
     cmp     eax, 1
     jne     1f
     mov     edx, 1                      # top: y
@@ -872,6 +1368,7 @@ view_edges:
     jne     2f
     xor     edx, edx                    # right: x
 2:  movss   [rcx+rdx*4], xmm1
+3:
     xor     ebx, ebx
 .Lve_obj:
     cmp     ebx, [rip+dr_n]
@@ -1249,6 +1746,8 @@ view_dims:
     call    topage
     movss   [rsp+8], xmm0               # x1 y1
     movss   [rsp+12], xmm1
+    cmp     dword ptr [rip+dr_view], 3  # (isometric: no dimensions)
+    je      .Lvd_name
     # width: at y0 - d
     movss   xmm4, [rsp+4]
     subss   xmm4, [rip+df_dim]
@@ -1337,7 +1836,7 @@ view_dims:
     mov     edi, 8
     lea     rsi, [rip+fmt_buf]
     call    ptext
-    # the view's name above it
+.Lvd_name:                              # the view's name above it
     movss   xmm0, [rsp]
     movss   xmm1, [rsp+12]
     addss   xmm1, [rip+df_ext]
@@ -1350,7 +1849,10 @@ view_dims:
 1:  cmp     eax, 2
     jne     2f
     lea     rsi, [rip+s_right]
-2:  mov     edi, 7
+2:  cmp     eax, 3
+    jne     3f
+    lea     rsi, [rip+s_iso]
+3:  mov     edi, 7
     call    ptext
     add     rsp, 48
     pop     rbx
@@ -1439,32 +1941,71 @@ title_block:
     sub     rsp, 24
     lea     rsi, [rip+s_thin]
     call    wb_str
-    lea     rsi, [rip+tb_rect]          # outer box and its rows
+    movss   xmm0, [rip+dr_pw]           # the box: bottom right, 232 x 94
+    subss   xmm0, [rip+df_tbw]
+    movss   [rsp], xmm0
+    call    wf
+    movss   xmm0, [rip+tb_y]
+    call    wf
+    movss   xmm0, [rip+tb_w]
+    call    wf
+    movss   xmm0, [rip+tb_h]
+    call    wf
+    lea     rsi, [rip+s_re+1]
     call    wb_str
-    movss   xmm0, [rip+tb_x]            # "BeeModel"
-    movss   xmm1, [rip+tb_y3]
-    mov     edi, 12
+    xor     ebx, ebx                    # its rows
+1:  movss   xmm0, [rsp]
+    lea     rax, [rip+tb_lines]
+    movss   xmm1, [rax+rbx*4]
+    movss   xmm2, [rsp]
+    addss   xmm2, [rip+tb_w]
+    movss   xmm3, xmm1
+    call    pline
+    inc     ebx
+    cmp     ebx, 4
+    jb      1b
+    movss   xmm0, [rip+tb_m]            # the page's frame
+    call    wf
+    movss   xmm0, [rip+tb_m]
+    call    wf
+    movss   xmm0, [rip+dr_pw]
+    subss   xmm0, [rip+tb_m2]
+    call    wf
+    movss   xmm0, [rip+dr_ph]
+    subss   xmm0, [rip+tb_m2]
+    call    wf
+    lea     rsi, [rip+s_re+1]
+    call    wb_str
+    movss   xmm0, [rsp]                 # the text's left edge
+    addss   xmm0, [rip+tb_pad]
+    movss   [rsp+4], xmm0
+    lea     rsi, [rip+dro_title]        # the title (else "BeeModel")
+    cmp     byte ptr [rsi], 0
+    jne     11f
     lea     rsi, [rip+s_title]
+11: movss   xmm0, [rsp+4]
+    movss   xmm1, [rip+tb_y4]
+    mov     edi, 12
     call    ptext
     call    fmt_reset                   # "Part: A, B"
     lea     rdi, [rip+s_part]
     call    fmt_str
     xor     ebx, ebx
-1:  cmp     ebx, [rip+dr_n]
-    jae     2f
+2:  cmp     ebx, [rip+dr_n]
+    jae     3f
     cmp     ebx, 4
-    jae     2f
+    jae     3f
     test    ebx, ebx
-    jz      11f
+    jz      21f
     lea     rdi, [rip+s_comma]
     call    fmt_str
-11: lea     rax, [rip+dr_obj]
+21: lea     rax, [rip+dr_obj]
     mov     rdi, [rax+rbx*8]            # (OB_NAME)
     call    fmt_str
     inc     ebx
-    jmp     1b
-2:  movss   xmm0, [rip+tb_x]
-    movss   xmm1, [rip+tb_y2]
+    jmp     2b
+3:  movss   xmm0, [rsp+4]
+    movss   xmm1, [rip+tb_y3]
     mov     edi, 9
     lea     rsi, [rip+fmt_buf]
     call    ptext
@@ -1473,22 +2014,39 @@ title_block:
     call    fmt_str
     movss   xmm0, [rip+dr_scale]
     comiss  xmm0, [rip+df_one]
-    jae     3f
+    jae     4f
     lea     rdi, [rip+s_one_colon]
     call    fmt_str
     movss   xmm0, [rip+df_one]
     divss   xmm0, [rip+dr_scale]
     call    fmt_val3
-    jmp     4f
-3:  call    fmt_val3
+    jmp     5f
+4:  call    fmt_val3
     lea     rdi, [rip+s_colon_one]
     call    fmt_str
-4:  movss   xmm0, [rip+tb_x]
-    movss   xmm1, [rip+tb_y1]
+5:  movss   xmm0, [rsp+4]
+    movss   xmm1, [rip+tb_y2]
     mov     edi, 9
     lea     rsi, [rip+fmt_buf]
     call    ptext
-    movss   xmm0, [rip+tb_x]
+    call    fmt_reset                   # "By Ann   2026-10-17"
+    cmp     byte ptr [rip+dro_author], 0
+    je      6f
+    lea     rdi, [rip+s_by]
+    call    fmt_str
+    lea     rdi, [rip+dro_author]
+    call    fmt_str
+    lea     rdi, [rip+s_gap3]
+    call    fmt_str
+6:  call    today
+    lea     rdi, [rip+dr_date]
+    call    fmt_str
+    movss   xmm0, [rsp+4]
+    movss   xmm1, [rip+tb_y1]
+    mov     edi, 8
+    lea     rsi, [rip+fmt_buf]
+    call    ptext
+    movss   xmm0, [rsp+4]
     movss   xmm1, [rip+tb_y0]
     mov     edi, 8
     lea     rsi, [rip+s_units]
@@ -1498,14 +2056,132 @@ title_block:
     pop     rbx
     ret
 
+# today - dr_date = "YYYY-MM-DD" (UTC)
+today:
+    push    rbx
+    xor     edi, edi
+    mov     eax, 201                    # time
+    syscall
+    xor     edx, edx
+    mov     ecx, 86400
+    div     rcx
+    add     rax, 719468                 # days -> civil (Hinnant)
+    mov     rbx, rax
+    xor     edx, edx
+    mov     ecx, 146097
+    div     rcx                         # rax = era
+    mov     r8, rax
+    imul    rax, rax, 146097
+    mov     r9, rbx
+    sub     r9, rax                     # doe
+    mov     rax, r9                     # yoe = (doe - doe/1460 + doe/36524 - doe/146096) / 365
+    xor     edx, edx
+    mov     ecx, 1460
+    div     rcx
+    mov     r10, r9
+    sub     r10, rax
+    mov     rax, r9
+    xor     edx, edx
+    mov     ecx, 36524
+    div     rcx
+    add     r10, rax
+    mov     rax, r9
+    xor     edx, edx
+    mov     ecx, 146096
+    div     rcx
+    sub     r10, rax
+    mov     rax, r10
+    xor     edx, edx
+    mov     ecx, 365
+    div     rcx
+    mov     r10, rax                    # yoe
+    imul    r11, r8, 400
+    add     r11, r10                    # y
+    imul    rax, r10, 365               # doy = doe - (365 yoe + yoe/4 - yoe/100)
+    mov     rcx, r10
+    shr     rcx, 2
+    add     rax, rcx
+    mov     rcx, r10
+    push    rax
+    mov     rax, rcx
+    xor     edx, edx
+    mov     ecx, 100
+    div     rcx
+    mov     rcx, rax
+    pop     rax
+    sub     rax, rcx
+    mov     rcx, r9
+    sub     rcx, rax                    # doy
+    imul    rax, rcx, 5                 # mp = (5 doy + 2) / 153
+    add     rax, 2
+    xor     edx, edx
+    mov     r8d, 153
+    div     r8
+    mov     r8, rax                     # mp
+    imul    rax, r8, 153                # d = doy - (153 mp + 2) / 5 + 1
+    add     rax, 2
+    xor     edx, edx
+    mov     r9d, 5
+    div     r9
+    sub     rcx, rax
+    inc     rcx                         # d
+    lea     rax, [r8+3]                 # m = mp < 10 ? mp + 3 : mp - 9
+    cmp     r8, 10
+    jb      1f
+    lea     rax, [r8-9]
+1:  cmp     rax, 2                      # y += (m <= 2)
+    ja      2f
+    inc     r11
+2:  lea     rdi, [rip+dr_date]          # "YYYY-MM-DD"
+    mov     r8, rax
+    mov     rax, r11
+    mov     r9d, 4
+    call    dpad
+    mov     byte ptr [rdi], '-'
+    inc     rdi
+    mov     rax, r8
+    mov     r9d, 2
+    call    dpad
+    mov     byte ptr [rdi], '-'
+    inc     rdi
+    mov     rax, rcx
+    mov     r9d, 2
+    call    dpad
+    mov     byte ptr [rdi], 0
+    pop     rbx
+    ret
+
+# dpad(rax=value, r9d=digits, rdi=dest) - zero padded, rdi after (rcx kept)
+dpad:
+    push    rcx
+    lea     r10, [rdi+r9]
+    mov     r11d, 10
+1:  dec     r9d
+    js      2f
+    xor     edx, edx
+    div     r11
+    add     dl, '0'
+    mov     [rdi+r9], dl
+    jmp     1b
+2:  mov     rdi, r10
+    pop     rcx
+    ret
+
 .section .rodata
 .align 4
-tb_x:           .float 586.0
+tb_y:           .float 28.0
+tb_w:           .float 232.0
+tb_h:           .float 94.0
+tb_m:           .float 20.0
+tb_m2:          .float 40.0
+tb_pad:         .float 6.0
+tb_lines:       .float 98.0, 80.0, 62.0, 47.0
+tb_y4:          .float 104.0
 tb_y3:          .float 85.0
-tb_y2:          .float 66.0
+tb_y2:          .float 67.0
 tb_y1:          .float 51.0
-tb_y0:          .float 36.0
-tb_rect:        .ascii "580 28 232 76 re S\n580 80 m 812 80 l S\n580 62 m 812 62 l S\n"
-                .asciz "580 47 m 812 47 l S\n20 20 802 555 re S\n"
+tb_y0:          .float 34.0
+s_by:           .asciz "By "
+s_gap3:         .asciz "   "
 
 .section .note.GNU-stack,"",@progbits

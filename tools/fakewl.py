@@ -616,6 +616,7 @@ def main():
     files_more()
     files_complete()
     print_ui()
+    drawing_ui()
     cad_ui()
     feature_order_ui()
     materials_more()
@@ -7406,6 +7407,48 @@ def print_ui():
     f.key(15); f.pump(0.2)
     q('scale("Plate", 1, 1, 1)'); f.pump(0.2)
     check(widget(m, 'print.show_thin') is None, 'after a change the panel says to check again')
+    f.proc.kill()
+
+
+def drawing_ui():
+    """F17 (#283): Export Drawing's options - sheet, orientation, the views
+    (front, top, right, isometric), scale, title block - in the file
+    browser and as drawing.options."""
+    print('  -- drawing export options --')
+    import re as _re
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    def export(name):
+        path = os.path.join(f.home, name)
+        f.move(600, 300); f.key(28); f.type('file.export_pdf ' + path); f.key(28); f.key(1); f.pump(0.5)
+        return open(path, 'rb').read().decode('latin-1') if os.path.exists(path) else ''
+    pdf = export('d1.pdf')
+    check('/MediaBox [0 0 842 595]' in pdf and '(FRONT)' in pdf and '(TOP)' in pdf and '(ISOMETRIC)' not in pdf,
+          'the defaults: A4 landscape, front, top and right')
+    q('op("drawing.options", "a3 portrait views front iso scale 1:2 title \\"Bracket\\" author \\"Ann Lee\\"")')
+    pdf = export('d2.pdf')
+    check('/MediaBox [0 0 842 1191]' in pdf, f'drawing.options a3 portrait: the page ({_re.findall(r"MediaBox [^]]*]", pdf)})')
+    check('(ISOMETRIC)' in pdf and '(FRONT)' in pdf and '(TOP)' not in pdf and '(RIGHT)' not in pdf, 'only the front and an isometric view')
+    check('(Bracket)' in pdf and '(By Ann Lee' in pdf and '(Scale 1:2)' in pdf, 'the title block: title, author, the fixed scale')
+    check(bool(_re.search(r'\(By Ann Lee   \d{4}-\d\d-\d\d\)', pdf)), 'and the date')
+    menu_pick(f, m, 'File', 'Export', 'Export Drawing (PDF)...')
+    names = {w['name'] for w in ui_tree(m)}
+    need = {'drawing.sheet', 'drawing.orientation', 'drawing.scale', 'drawing.front', 'drawing.top', 'drawing.right', 'drawing.iso', 'drawing.title', 'drawing.author'}
+    check(need <= names, f'the file browser shows the drawing\'s options ({sorted(need - names)})')
+    check((widget(m, 'drawing.sheet') or {}).get('value') == 1 and (widget(m, 'drawing.iso') or {}).get('value') == 1,
+          'with the values set before (A3, isometric on)')
+    x, y = widget_xy(m, 'drawing.top'); f.click(x, y); f.pump(0.2)   # Top on
+    f.shot('drawing_dialog.png')
+    x, y = widget_xy(m, 'files.name'); f.click(x, y)
+    f.mods(4); f.key(30); f.mods(0); f.type('d3'); f.key(28)
+    x, y = widget_xy(m, 'files.ok'); f.click(x, y); f.pump(0.6)
+    out = [os.path.join(r, n) for r, d, fs in os.walk(f.home) for n in fs if n == 'd3.pdf']
+    pdf = open(out[0], 'rb').read().decode('latin-1') if out else ''
+    check('(TOP)' in pdf and '(ISOMETRIC)' in pdf, 'a view switched on in the dialog is in the drawing')
     f.proc.kill()
 
 
