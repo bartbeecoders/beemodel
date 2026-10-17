@@ -171,8 +171,10 @@ sc_serial:      .skip 4
 sc_hits:        .skip 8                 # leaves in reach: 3 lists of n
 sc_hits_b:      .skip 8
 sc_nh:          .skip 12                # their lengths
-.align 16
-sc_slots:       .skip 32*130            # per thread: w, centre, normal
+.align 64
+sc_slots:       .skip 64*130            # per thread: w, centre, normal (a
+                                        #  cache line each: no two threads
+                                        #  write one)
 sc_maxedge:     .skip 4
 # the matrix and its inverse
 sc_m:           .skip 48
@@ -3053,7 +3055,7 @@ dab:
     jz      .Ldb_out
     lea     rdi, [rip+sc_slots]         # the area: per-thread sums
     xor     eax, eax
-    mov     ecx, 32*130/4
+    mov     ecx, 64*130/4
     rep     stosd
     lea     rdi, [rip+job_area]
     mov     esi, [rip+sc_nh]
@@ -3077,7 +3079,7 @@ dab:
     inc     edx
     cmp     edx, 7
     jb      11b
-    add     rax, 32
+    add     rax, 64
     inc     ecx
     jmp     1b
 2:  movss   xmm0, [rsp]
@@ -3228,7 +3230,7 @@ job_area:
     mov     r13d, edx
     lea     eax, [rcx+1]                # this thread's slot
     and     eax, 127
-    shl     eax, 5
+    shl     eax, 6
     lea     rbp, [rip+sc_slots]
     add     rbp, rax
 1:  cmp     r12d, r13d
