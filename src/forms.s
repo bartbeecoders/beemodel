@@ -467,14 +467,16 @@ s_jt_point:     .asciz "Point (a ball joint)"
 k_jt_fixed:     .asciz "fixed"
 k_jt_hinge:     .asciz "hinge"
 k_jt_point:     .asciz "point"
+k_jt_slider:    .asciz "slider"
+s_jt_slider:    .asciz "Slider (along an axis)"
 .align 8
-l_jtype:        .quad s_jt_fixed, s_jt_hinge, s_jt_point
-kw_jtype:       .quad k_jt_fixed, k_jt_hinge, k_jt_point
+l_jtype:        .quad s_jt_fixed, s_jt_hinge, s_jt_point, s_jt_slider
+kw_jtype:       .quad k_jt_fixed, k_jt_hinge, k_jt_point, k_jt_slider
 .text
-WIDGET fw_rjt,  WK_ENUM, "form.rjoint.type", "Type", aux=l_jtype, n=3
+WIDGET fw_rjt,  WK_ENUM, "form.rjoint.type", "Type", aux=l_jtype, n=4
 WIDGET fw_rja,  WK_TEXT, "form.rjoint.a", "Object", tip="The first body (the joint sits at its place)"
 WIDGET fw_rjb,  WK_TEXT, "form.rjoint.b", "Tied to", tip="The second body, or world"
-WIDGET fw_rjx,  WK_ENUM, "form.rjoint.axis", "Hinge axis", aux=l_axis, n=3
+WIDGET fw_rjx,  WK_ENUM, "form.rjoint.axis", "Axis", aux=l_axis, n=3
 FORM form_rjoint, 4
 FFIELD fw_rjt, kw=kw_jtype, def=1.0
 FFIELD fw_rja, kw=FK_ACTIVE

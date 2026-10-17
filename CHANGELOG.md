@@ -44,12 +44,23 @@ project uses [Semantic Versioning](https://semver.org/).
   (16 groups; m the groups it meets). Physics materials: `material
   rubber|ice|wood|metal|stone` and Properties › Physics › Material. A
   starting velocity: `rigid.add ... velocity x y z`.
+- **Breakable joints, limits, motors and sliders** (#290). `rigid.joint
+  ... break f` breaks a joint whose load passes f newtons (it is gone for
+  the rest of the run; `rbinfo(15)` counts them); `limits lo hi` stops a
+  hinge (degrees) or a slider (metres) there; `motor speed force` turns a
+  hinge (degrees a second) or moves a slider (metres a second) with at
+  most that torque or force. A new `slider` joint keeps two bodies on a
+  line, turning together (Add Joint › Type › Slider).
 - **The MIT License** (`LICENSE`, also in the release archive). The
   2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): the masterplan's open
   questions, then physics - the solver, ground and landscapes, shatter,
   attractors, particles, smoke and fire.
 
 ### Fixed
+- Rigid bodies: a body given an impulse when play began (Logic › Apply
+  Impulse) did not move - the bodies were made again on the next frame.
+  Continuous collision skips a body touching what it is checked against
+  where its step began (it rests or slides on it).
 - Rigid bodies: a thin passive box (under 5 cm) was made 25 cm deep on
   every thin axis - meant for floors, it also thickened thin walls
   towards whatever came at them. Only a floor's own Y now; a passive body
