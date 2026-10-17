@@ -26,6 +26,7 @@
 .globl area_draw_all
 .globl area_drag
 .globl area_node_rect
+.globl draw_leaf
 .globl cam_load
 .globl cam_store
 .globl area_init

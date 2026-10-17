@@ -1968,7 +1968,16 @@ wg_key:
     mov     dword ptr [rip+wg_by_enter], 0
     jmp     9f
 .Lwk_tab:                               # confirm, then the next field
-    mov     ebx, [rip+wg_edit]
+    mov     edi, [rip+wg_edit]          # (the file browser's path: completes)
+    call    wg_find
+    test    rax, rax
+    jz      1f
+    lea     rcx, [rip+wd_fb_path]
+    cmp     [rax+E_DESC], rcx
+    jne     1f
+    call    fb_complete
+    jmp     9f
+1:  mov     ebx, [rip+wg_edit]
     call    wg_commit
     mov     edi, ebx
     call    wg_find

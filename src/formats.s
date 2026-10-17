@@ -18,6 +18,8 @@
 #          CADD  the CAD document: unit (mm, double), parameters
 #          SKCH  sketches: count, then (object index, sketch block) each
 #          UIDS  persistent object ids: count, one per object, the next id
+#          THMB  (first, when saved with a window) a picture of the 3D
+#                viewport for the file browser (thumb.s)
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
 #  STL   import (binary or ASCII, vertices welded) / export (binary)
 # =============================================================================
@@ -397,12 +399,14 @@ bee_save:
     push    r14
     sub     rsp, 8
     mov     r14, rdi
+    call    thumb_make                  # (a picture of the viewport, if shown)
     call    wp_save_begin               # (a partitioned world: its cells first,
     call    wb_reset                    #  their objects out of this file)
     mov     edi, BEE_MAGIC
     call    wb_u32
     mov     edi, BEE_VERSION
     call    wb_u32
+    call    thumb_write                 # THMB first: the file browser reads it
     mov     dword ptr [rip+n_mesh_tab], 0
     xor     ebx, ebx                    # collect the distinct meshes
 1:  cmp     ebx, [rip+obj_count]
