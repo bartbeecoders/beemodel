@@ -40,6 +40,7 @@ These work the same everywhere.
 | Click a number field | Type a value or an expression: `25mm`, `2*pi`, `width/2`; angles are in degrees |
 | Ctrl+wheel over a field | Step it |
 | Ctrl+C / Ctrl+V over a field | Copy its value / paste into it |
+| Ctrl+Left / Right while typing | Jump a word (Shift: select it); Ctrl+Backspace / Delete remove one |
 | I over a field | Insert a keyframe for that value |
 | Right-click | A context menu: in the viewport, on outliner rows, on area headers, on asset tiles |
 | Hold Z in the viewport | A pie menu for the shading |
