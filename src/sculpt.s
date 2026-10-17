@@ -128,6 +128,10 @@ OPERATOR op_sculpt_mode, "object.sculpt_mode", "Sculpt Mode", do_sculpt_mode, ch
 
 .section .data
 .align 4
+.globl sc_falloff
+sc_falloff:     .long 0                 # 0 smooth, 1 sphere, 2 root, 3 sharp, 4 linear, 5 constant
+
+.align 4
 sc_radius:      .float 50.0             # pixels
 sc_strength:    .float 0.5
 sc_brush:       .long 0
@@ -2774,7 +2778,8 @@ hits:
     ret
 
 # falloff(ecx=vertex) -> xmm0 = its weight in the dab (0 outside): smooth
-#   (1 - t^2)^2 with t = distance / radius, less where masked (the mask
+#   (1 - t^2)^2 with t = distance / radius, or the curve sc_falloff picks
+#   (sphere, root, sharp, linear, constant), less where masked (the mask
 #   brush itself ignores the mask)
 falloff:
     lea     rax, [rcx+rcx*2]
@@ -2796,10 +2801,14 @@ falloff:
     comiss  xmm0, xmm1
     jae     8f
     divss   xmm0, xmm1                  # t^2
-    movss   xmm1, [rip+sf_one]
+    mov     eax, [rip+sc_falloff]       # the brush's falloff curve
+    test    eax, eax
+    jnz     .Lfo_other
+    movss   xmm1, [rip+sf_one]          # smooth: (1 - t^2)^2
     subss   xmm1, xmm0
     mulss   xmm1, xmm1
     movss   xmm0, xmm1
+.Lfo_mask:
     cmp     dword ptr [rip+sc_brush_now], B_MASK
     je      9f
     cmp     dword ptr [rip+sc_masked], 0
@@ -2816,6 +2825,29 @@ falloff:
 9:  ret
 8:  xorps   xmm0, xmm0
     ret
+.Lfo_other:                             # xmm0 = t^2, eax = the curve
+    cmp     eax, 5                      # constant: 1
+    jne     1f
+    movss   xmm0, [rip+sf_one]
+    jmp     .Lfo_mask
+1:  cmp     eax, 1                      # sphere: sqrt(1 - t^2)
+    jne     2f
+    movss   xmm1, [rip+sf_one]
+    subss   xmm1, xmm0
+    sqrtss  xmm0, xmm1
+    jmp     .Lfo_mask
+2:  sqrtss  xmm0, xmm0                  # the rest are in t
+    movss   xmm1, [rip+sf_one]
+    subss   xmm1, xmm0                  # 1 - t
+    cmp     eax, 2                      # root: sqrt(1 - t)
+    jne     3f
+    sqrtss  xmm0, xmm1
+    jmp     .Lfo_mask
+3:  cmp     eax, 3                      # sharp: (1 - t)^2
+    jne     4f
+    mulss   xmm1, xmm1
+4:  movss   xmm0, xmm1                  # linear: 1 - t
+    jmp     .Lfo_mask
 
 # record(ecx=vertex) - its old position into the stroke's deltas, once
 #   (any thread: the room is made before a pass, a slot taken atomically)

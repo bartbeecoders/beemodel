@@ -7009,9 +7009,26 @@ def tools_ui():
     x, y = widget_xy(m, 'brush.radius')
     f.click(x, y); f.mods(4); f.key(30); f.mods(0); f.type('80'); f.key(28)
     check((widget(m, 'brush.radius') or {}).get('value') == 80, 'the brush radius field')
+    names = {w['name'] for w in ui_tree(m)}
+    check('brush.falloff' in names and 'brush.detail' not in names, 'F8: the bar has the falloff (the detail only with dynamic topology)')
+    q('op("sculpt.falloff", "constant")')
+    check((widget(m, 'brush.falloff') or {}).get('value') == 5, 'sculpt.falloff constant: the bar shows it')
+    f.move(600, 300); f.mods(4); f.key(32); f.mods(0); f.pump(0.2)   # Ctrl+D: dynamic topology
+    d = widget(m, 'brush.detail'); f.shot('tools_dyn.png')
+    check(d is not None and d.get('value') == 10, f'with dynamic topology: the detail size field ({d and d.get("value")})')
+    f.mods(4); f.key(32); f.mods(0)
+    q('op("sculpt.falloff", "smooth")')
     f.shot('tools_sculpt.png')
     f.mods(4); f.key(15); f.mods(0)
     check(rows()[:1] == ['Select'] and widget(m, 'brush.radius') is None, 'leaving sculpt mode: object tools, no bar')
+    vol = lambda n: float(q(f'print(volume("{n}"))') or 0)
+    q('add("sphere", "S1", -3, 1, 0); add("sphere", "S2", 3, 1, 0)')
+    a1, a2 = vol('S1'), vol('S2')
+    q('op("sculpt.falloff", "smooth"); sculpt("S1", "draw", -3, 2, 0, -3, 2, 0.01, 0.6, 0.5)')
+    q('op("sculpt.falloff", "constant"); sculpt("S2", "draw", 3, 2, 0, 3, 2, 0.01, 0.6, 0.5)')
+    q('op("sculpt.falloff", "smooth")')
+    d1, d2 = vol('S1') - a1, vol('S2') - a2
+    check(d1 > 0 and d2 > d1 * 1.3, f'the falloff shapes the stroke: constant raises more than smooth ({d1:.4f}, {d2:.4f})')
     f.proc.kill()
 
 

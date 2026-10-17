@@ -29,6 +29,7 @@
 .globl o_mul
 .globl o_mulv
 .globl xf_list
+.globl kw_index
 .globl xf_list_cnt
 
 .section .data
