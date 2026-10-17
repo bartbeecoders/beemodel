@@ -202,6 +202,31 @@ BOUNCE = ('delete("Cube")\nadd("plane", "G", 0, 0, 0)\nscale("G", 10)\nselect("G
           'print("bounce", hr, hw, rigid("R", "bounce"), rigid("W", "friction"))\n')
 
 
+# two hanging chains of 20 kg links: one whose top joint gives at 900 N (it
+# holds 980 N), one whose top holds 2000 N (the others: 1500 N, they hold
+# 784 N and less)
+JOINTS = GROUND + (
+    'fn chain(c, x, top) {\n for i in 0..5 {\n  n = c + str(i)\n  add("cube", n, x, 5 - i * 0.5, 0)\n  scale(n, 0.2)\n'
+    '  select(n)\n  op("rigid.add", "active box mass 20")\n }\n'
+    ' op("rigid.joint", "point " + c + "0 world pivot " + str(x) + " 5.25 0 break " + str(top))\n'
+    ' for i in 0..4 { op("rigid.joint", "point " + c + str(i) + " " + c + str(i + 1) + " pivot " + str(x) + " " + str(4.75 - i * 0.5) + " 0 break 1500") }\n}\n'
+    'chain("C", 0, 900)\nchain("H", 3, 2000)\n'
+    'add("cube", "Arm", 1, 5, 3)\nscale("Arm", 1, 0.1, 0.1)\nselect("Arm")\nop("rigid.add", "active box mass 10")\n'
+    'op("rigid.joint", "hinge Arm world pivot 0 5 3 axis 0 0 1 motor 90 1000")\n'
+    'add("cube", "Lim", 1, 5, -3)\nscale("Lim", 1, 0.1, 0.1)\nselect("Lim")\nop("rigid.add", "active box mass 10")\n'
+    'op("rigid.joint", "hinge Lim world pivot 0 5 -3 axis 0 0 1 limits -30 30")\n'
+    'add("cube", "Sl", 5, 5, 0)\nscale("Sl", 0.3)\nselect("Sl")\nop("rigid.add", "active box mass 5")\n'
+    'op("rigid.joint", "slider Sl world axis 0 1 0 limits -1 0.5")\n'
+    'add("cube", "Sm", -5, 5, 0)\nscale("Sm", 0.3)\nselect("Sm")\nop("rigid.add", "active box mass 5")\n'
+    'op("rigid.joint", "slider Sm world axis 1 0 0 motor 1 100")\n'
+    'lim = -9\nfor f in 1..50 {\n frame(f)\n lim = max(lim, abs(get("Lim", "rz")))\n'
+    ' if f == 12 { print("chain", rbinfo(15), get("C0", "y"), get("C3", "y") - get("C4", "y")) }\n'
+    ' if f == 25 { a0 = get("Arm", "rz")\n s0 = get("Sm", "x") }\n}\n'
+    'print("held", rbinfo(15), get("H0", "y"), get("H4", "y"))\n'
+    'print("motor", (get("Arm", "rz") - a0) * 57.29578, get("Sm", "x") - s0, get("Sm", "y"))\n'
+    'print("limits", lim * 57.29578, get("Lim", "rz") * 57.29578, get("Sl", "y"), get("Sl", "x"))\n')
+
+
 def drift(rows):
     """(settling: the largest move start -> 1 s, standing: 1 s -> 10 s,
     the largest drop) in mm"""
@@ -297,6 +322,21 @@ def main():
     b = [float(x) for x in r.get('bounce', ['0', '0', '0', '0'])]
     check(b[0] > 1.0 and b[1] < 0.5 and abs(b[2] - 0.8) < 1e-6 and abs(b[3] - 0.5) < 1e-6,
           f'materials: rubber bounces back to {b[0]:.2f} m, wood to {b[1]:.2f} m (from 3 m)')
+    print('  -- the solver: joints --')
+    r = {x[0]: [float(v) for v in x[1:]] for x in run(JOINTS) if x}
+    c, h = r.get('chain', [0] * 3), r.get('held', [0] * 3)
+    check(c[0] == 1 and c[1] < 4.9 and abs(c[2] - 0.5) < 0.01,
+          f'a chain pulled past its top joint\'s strength breaks there and falls whole ({c})')
+    check(abs(h[1] - 5) < 0.02 and abs(h[2] - 3) < 0.05,
+          f'a chain whose joints hold it hangs on (its end at {h[2]:.3f} m; the other\'s broke where it landed: '
+          f'{h[0]:.0f} broken)')
+    m = r.get('motor', [0] * 3)
+    check(abs(m[0] - 90) < 3 and abs(m[1] - 1) < 0.03 and abs(m[2] - 5) < 0.01,
+          f'motors: a loaded arm turns at {m[0]:.1f} degrees/s (90), a slider moves {m[1]:.3f} m in 1 s (1)')
+    lm = r.get('limits', [99, 0, 0, 0])
+    check(lm[0] < 31 and abs(lm[1] + 30) < 0.5 and abs(lm[2] - 4) < 0.01 and abs(lm[3] - 5) < 1e-4,
+          f'limits: a hinge swings to {lm[1]:.1f} degrees (no further than {lm[0]:.1f}; -30), a slider drops to '
+          f'{lm[2]:.3f} m (4)')
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nthe solver: all checks passed')
     sys.exit(1 if FAILS else 0)
 

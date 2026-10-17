@@ -60,11 +60,17 @@
 .equ RB_VEL,    68                      # its velocity at the start (3 floats)
 .equ RBF_GRP,   4                       # RB_FLAGS bits 4-7: its group (0-15);
 .equ RBF_IGN,   16                      #  16-31: the groups it does not meet
-.equ JT_TYPE,   0                       # 1 fixed, 2 hinge, 3 point
+.equ JT_TYPE,   0                       # 1 fixed, 2 hinge, 3 point, 4 slider
 .equ JT_A,      4                       # object uids (B 0: the world)
 .equ JT_B,      8
 .equ JT_PIV,    16                      # the pivot (world, at the start)
-.equ JT_AXIS,   28                      # hinge: its axis (world)
+.equ JT_AXIS,   28                      # hinge, slider: its axis (world)
+.equ JT_BRK,    40                      # the force that breaks it (0: none)
+.equ JT_LO,     44                      # limits (hinge: radians; slider: m)
+.equ JT_HI,     48
+.equ JT_MSPD,   52                      # a motor: its speed (rad/s, m/s),
+.equ JT_MFOR,   56                      #  its torque / force at most
+.equ JT_FLG,    60                      # 1 limited, 2 a motor
 # a body (runtime)
 .equ BD_POS,    0                       # centre of mass (world)
 .equ BD_Q,      16                      # orientation (x y z w)
@@ -182,7 +188,18 @@
 .equ JR_P,      144
 .equ JR_Q,      160
 .equ JR_C,      176                     # pB - pA (world)
-.equ JR_SZ,     192
+.equ JR_BRK,    192                     # (the settings above, as given)
+.equ JR_LO,     196
+.equ JR_HI,     200
+.equ JR_MS,     204
+.equ JR_MF,     208
+.equ JR_FL,     212                     # 1 limited, 2 a motor, 4 broken
+.equ JR_MACC,   220                     # the motor's this substep
+.equ JR_AW,     224                     # its axis (world), this substep
+.equ JR_POS,    240                     # where it is: the hinge's angle, the
+                                        #  slider's distance
+.equ JR_IMP,    244                     # the impulse it took this step (by row)
+.equ JR_SZ,     256
 .equ MARGIN,    0                       # (as floats in rodata)
 .equ RBI_OBJ,   0                       # an object whose instances are bodies:
 .equ RBI_OUT,   8                       #  the mesh shown while they move (its
@@ -421,6 +438,7 @@ rb_ms:          .skip 4                 # the last frame's simulation time
 rb_busy:        .skip 4
 rb_noinst:      .skip 4                 # (obj_eval: the source, not ours)
 rb_mffull:      .skip 4                 # pairs that found no room
+rb_nbroken:     .skip 4                 # joints broken this run
 rbi_n:          .skip 4
 .align 16
 rbi_tab:        .skip RBI_SZ*RBI_MAX
@@ -1075,6 +1093,7 @@ rb_build:
     mov     dword ptr [rip+rb_on], 1
     xor     eax, eax
     mov     [rip+rb_mffull], eax
+    mov     [rip+rb_nbroken], eax
     lea     rdi, [rip+rb_tns]
     mov     [rdi], rax
     mov     [rdi+8], rax
@@ -2503,6 +2522,22 @@ make_joints:
     mov     [rdi+JR_B], r15d
     mov     eax, [r13+JT_TYPE]
     mov     [rdi+JR_TYPE], eax
+    mov     eax, [r13+JT_BRK]           # break, limits, motor
+    mov     [rdi+JR_BRK], eax
+    mov     eax, [r13+JT_LO]
+    mov     [rdi+JR_LO], eax
+    mov     eax, [r13+JT_HI]
+    mov     [rdi+JR_HI], eax
+    mov     eax, [r13+JT_MSPD]
+    mov     [rdi+JR_MS], eax
+    mov     eax, [r13+JT_MFOR]
+    mov     [rdi+JR_MF], eax
+    mov     eax, [r13+JT_FLG]
+    and     eax, 3
+    mov     [rdi+JR_FL], eax
+    mov     dword ptr [rdi+JR_IMP], 0
+    mov     dword ptr [rdi+JR_IMP+4], 0
+    mov     dword ptr [rdi+JR_IMP+8], 0
     BODY    r8, r14
     BODY    r9, r15
     mov     dword ptr [r8+BD_JOINT], 1
@@ -2637,7 +2672,8 @@ rb_step:
 23: inc     ebx
     jmp     21b
 22: mov     rbx, [rsp]
-2:  call    ccd_pass                    # fast ones: stopped short of statics
+2:  call    jr_breaks                   # joints pulled too hard: broken
+    call    ccd_pass                    # fast ones: stopped short of statics
     mov     edi, 3
     call    rb_lap
     add     rsp, 16
@@ -2744,7 +2780,8 @@ ccd_pass:
     ret
 
 # cc_toi -> xmm0 = the first time (0..1 of the step) the moving part comes
-#   within 5 mm of the static one (>= 1: not this step)
+#   within 5 mm of the static one (>= 1: not this step, or touching it
+#   from the start)
 cc_toi:
     push    rbx
     push    r15
@@ -2774,7 +2811,11 @@ cc_toi:
     call    collide
     movss   xmm0, [rsp+32+CC_RES+CR_SEP]
     comiss  xmm0, [rip+rx_ccd_tol]
-    jbe     8f                          # touching: there
+    ja      2f
+    cmp     ebx, 24                     # touching where it began (resting,
+    je      7f                          #  sliding on it): its contact's, not
+    jmp     8f                          #  this; later: there
+2:
     movaps  xmm1, [r13+BD_POS]          # the most it closes over the step:
     subps   xmm1, [r13+BD_PP]           #  its move along n + its turn x reach
     DOT3    xmm1, [rsp+32+CC_RES+CR_N]
@@ -3683,6 +3724,8 @@ jointed:
     xor     ecx, ecx
 1:  cmp     ecx, [rip+rb_njr]
     jae     8f
+    test    dword ptr [rdx+JR_FL], 4    # (broken: no longer)
+    jnz     3f
     mov     eax, [rdx+JR_A]
     mov     r10d, [rdx+JR_B]
     cmp     eax, r8d
@@ -4821,10 +4864,12 @@ islands:
     jae     5f
     imul    rbx, r12, JR_SZ
     add     rbx, [rip+rb_jr]
+    test    dword ptr [rbx+JR_FL], 4    # (broken: no tie)
+    jnz     411f
     mov     edi, [rbx+JR_A]
     mov     esi, [rbx+JR_B]
     call    uf_union
-    inc     r12d
+411:inc     r12d
     jmp     41b
 5:  mov     r13, [rip+rb_isj]           # ids (rb_isj as root -> id, for now)
     xor     eax, eax
@@ -5458,6 +5503,9 @@ fr_row:
 # jr_prestep(rbx=joint) - anchors, errors, axes
 jr_prestep:
     sub     rsp, 8
+    test    dword ptr [rbx+JR_FL], 4    # (broken: nothing)
+    jnz     9f
+    mov     dword ptr [rbx+JR_MACC], 0
     mov     eax, [rbx+JR_A]
     BODY    r12, rax
     mov     eax, [rbx+JR_B]
@@ -5472,7 +5520,26 @@ jr_prestep:
     addps   xmm4, [r13+BD_POS]
     subps   xmm4, xmm1
     movaps  [rbx+JR_C], xmm4            # pB - pA
-    cmp     dword ptr [rbx+JR_TYPE], 2
+    movaps  xmm0, [rbx+JR_AXA]          # the axis (world, from A)
+    MV3     xmm6, r12+BD_R, xmm0, xmm2, xmm3
+    movaps  [rbx+JR_AW], xmm6
+    cmp     dword ptr [rbx+JR_TYPE], 4  # a slider: two rows square to it,
+    jne     11f                         #  the angle held like fixed; where
+    movaps  xmm0, xmm4                  #  it is: (pA - pB) . a (A's, from B)
+    DOT3    xmm0, xmm6
+    xorps   xmm0, [rip+rx_sign]
+    movss   [rbx+JR_POS], xmm0
+    sub     rsp, MF_SZ
+    movaps  [rsp+MF_NRM], xmm6
+    lea     rdi, [rsp]
+    call    mf_tangents
+    movaps  xmm0, [rsp+MF_T1]
+    movaps  [rbx+JR_P], xmm0
+    movaps  xmm0, [rsp+MF_T2]
+    movaps  [rbx+JR_Q], xmm0
+    add     rsp, MF_SZ
+    jmp     1f
+11: cmp     dword ptr [rbx+JR_TYPE], 2
     jne     1f
     movaps  xmm0, [rbx+JR_AXA]          # hinge: a, b; p, q square to a; a x b
     MV3     xmm6, r12+BD_R, xmm0, xmm2, xmm3
@@ -5489,10 +5556,12 @@ jr_prestep:
     movaps  xmm0, [rsp+MF_T2]
     movaps  [rbx+JR_Q], xmm0
     add     rsp, MF_SZ
-    jmp     9f
-1:  cmp     dword ptr [rbx+JR_TYPE], 1
-    jne     9f
-    movaps  xmm0, [r13+BD_Q]            # fixed: 2 vec(qB conj(qA) conj(q0))
+    cmp     dword ptr [rbx+JR_FL], 0    # (its angle: for limits, a motor)
+    je      9f
+1:  cmp     dword ptr [rbx+JR_TYPE], 3
+    je      9f
+    movaps  xmm0, [r13+BD_Q]            # 2 vec(qB conj(qA) conj(q0)) (fixed,
+                                        #  slider: the error; hinge: its angle)
     movaps  xmm1, [r12+BD_Q]
     xorps   xmm1, [rip+rx_sign]
     call    q_mul
@@ -5505,10 +5574,37 @@ jr_prestep:
     comiss  xmm1, xmm2
     jae     2f
     xorps   xmm0, [rip+rx_sign]
-2:  addps   xmm0, xmm0
+2:  cmp     dword ptr [rbx+JR_TYPE], 2  # a hinge: A's angle about its axis,
+    jne     3f                          #  from B: -2 atan2(v . a, |w|)
+    movaps  xmm1, xmm0
+    DOT3    xmm1, [rbx+JR_AW]
+    xorps   xmm1, [rip+rx_sign]
+    movaps  xmm2, xmm0
+    shufps  xmm2, xmm2, 0xFF
+    andps   xmm2, [rip+rx_abs]
+    movss   xmm0, xmm1
+    movss   xmm1, xmm2
+    call    rb_atan2
+    addss   xmm0, xmm0
+    movss   [rbx+JR_POS], xmm0
+    jmp     9f
+3:  addps   xmm0, xmm0
     andps   xmm0, [rip+rx_xyz]
     movaps  [rbx+JR_ERR], xmm0
 9:  add     rsp, 8
+    ret
+
+# rb_atan2(xmm0=y, xmm1=x) -> xmm0 (re-entrant: x87 on the stack)
+rb_atan2:
+    sub     rsp, 8
+    movss   [rsp], xmm0
+    movss   [rsp+4], xmm1
+    fld     dword ptr [rsp]
+    fld     dword ptr [rsp+4]
+    fpatan
+    fstp    dword ptr [rsp]
+    movss   xmm0, [rsp]
+    add     rsp, 8
     ret
 
 # jr_solve(rbx=joint) / jr_relax - the anchors together (three rows), then
@@ -5527,6 +5623,8 @@ jr_solve:
     mov     eax, [rip+rx_one]
     mov     [rsp+20], eax               # (how much of the error to pull back)
 jr_solve_in:
+    test    dword ptr [rbx+JR_FL], 4    # (broken: nothing)
+    jnz     9f
     mov     eax, [rbx+JR_A]
     BODY    r12, rax
     mov     eax, [rbx+JR_B]
@@ -5538,7 +5636,15 @@ jr_solve_in:
     shl     eax, 4
     lea     rcx, [rip+rx_ident]
     movaps  xmm0, [rcx+rax]
-    movaps  [rsp], xmm0
+    cmp     dword ptr [rbx+JR_TYPE], 4  # a slider: its two rows square to
+    jne     11f                         #  the axis only
+    cmp     r14d, 2
+    jae     2f
+    movaps  xmm0, [rbx+JR_P]
+    test    r14d, r14d
+    jz      11f
+    movaps  xmm0, [rbx+JR_Q]
+11: movaps  [rsp], xmm0
     lea     rdi, [rbx+JR_RA]
     lea     rsi, [rbx+JR_RB]
     call    kmass
@@ -5547,13 +5653,17 @@ jr_solve_in:
     lea     rsi, [rbx+JR_RB]
     call    relvel
     DOT3    xmm0, [rsp]                 # velocity along it
-    movss   xmm1, [rbx+JR_C+r14*4]      # target: -beta C / h
+    movaps  xmm1, [rbx+JR_C]            # target: -beta (C . d) / h
+    DOT3    xmm1, [rsp]
     mulss   xmm1, [rip+rx_beta]
     mulss   xmm1, [rsp+20]
     divss   xmm1, [rip+rb_h]
     xorps   xmm1, [rip+rx_sign]
     subss   xmm1, xmm0
     mulss   xmm1, [rsp+16]
+    movss   xmm2, xmm1                  # (the joint's load, by row)
+    addss   xmm2, [rbx+JR_IMP+r14*4]
+    movss   [rbx+JR_IMP+r14*4], xmm2
     shufps  xmm1, xmm1, 0
     mulps   xmm1, [rsp]
     movaps  xmm0, xmm1
@@ -5562,7 +5672,8 @@ jr_solve_in:
     call    impulse
     inc     r14d
     jmp     1b
-2:  cmp     dword ptr [rbx+JR_TYPE], 3
+2:  call    jr_extra                    # limits, a motor
+    cmp     dword ptr [rbx+JR_TYPE], 3
     je      9f
     xor     r14d, r14d                  # angular rows
 3:  cmp     dword ptr [rbx+JR_TYPE], 2
@@ -5612,6 +5723,162 @@ jr_solve_in:
     pop     r15
     pop     r14
     ret
+
+# jr_extra(rbx=joint, r12, r13 its bodies) - a hinge's or slider's limits
+#   (one way: only pushing it back in) and motor (its speed, within its
+#   torque / force over the substep)
+jr_extra:
+    push    r14
+    sub     rsp, 16
+    mov     eax, [rbx+JR_FL]
+    test    eax, 3
+    jz      9f
+    mov     ecx, [rbx+JR_TYPE]
+    cmp     ecx, 2
+    je      1f
+    cmp     ecx, 4
+    jne     9f
+1:  test    eax, 1                      # limits
+    jz      5f
+    movss   xmm0, [rbx+JR_LO]           # below: push up (the speed it needs
+    subss   xmm0, [rbx+JR_POS]          #  to be back, beta-damped)
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     2f
+    mulss   xmm0, [rip+rx_beta]
+    divss   xmm0, [rip+rb_h]
+    mov     r14d, 1                     # (pushing +)
+    jmp     3f
+2:  movss   xmm0, [rbx+JR_HI]           # above: push down
+    subss   xmm0, [rbx+JR_POS]
+    comiss  xmm0, xmm1
+    jae     5f
+    mulss   xmm0, [rip+rx_beta]
+    divss   xmm0, [rip+rb_h]
+    mov     r14d, -1
+3:  mulss   xmm0, [rsp+52]              # (none in the relax pass)
+    movss   [rsp], xmm0                 # target speed along the axis
+    call    jr_axis_speed               # xmm0 = now, xmm1 = 1 / k
+    movss   xmm2, [rsp]
+    subss   xmm2, xmm0                  # dv = target - now: only that way
+    xorps   xmm3, xmm3
+    test    r14d, r14d
+    js      31f
+    comiss  xmm2, xmm3
+    jbe     5f
+    jmp     32f
+31: comiss  xmm2, xmm3
+    jae     5f
+32: mulss   xmm2, xmm1
+    movss   xmm0, xmm2
+    call    jr_axis_push
+5:  test    dword ptr [rbx+JR_FL], 2    # a motor
+    jz      9f
+    call    jr_axis_speed
+    movss   xmm2, [rbx+JR_MS]
+    subss   xmm2, xmm0
+    mulss   xmm2, xmm1                  # the impulse it wants; the most over
+    movss   xmm3, [rbx+JR_MF]           #  this substep: force x h
+    mulss   xmm3, [rip+rb_h]
+    movss   xmm4, [rbx+JR_MACC]
+    addss   xmm2, xmm4
+    minss   xmm2, xmm3
+    xorps   xmm3, [rip+rx_sign]
+    maxss   xmm2, xmm3
+    movss   [rbx+JR_MACC], xmm2
+    subss   xmm2, xmm4
+    movss   xmm0, xmm2
+    call    jr_axis_push
+9:  add     rsp, 16
+    pop     r14
+    ret
+
+# jr_axis_speed(rbx, r12, r13) -> xmm0 = the joint's speed along its axis
+#   (A's, from B: hinge wA - wB; slider vA - vB at the anchors), xmm1 = its
+#   effective mass
+jr_axis_speed:
+    sub     rsp, 24
+    cmp     dword ptr [rbx+JR_TYPE], 2
+    jne     1f
+    movaps  xmm0, [rbx+JR_AW]           # k = a IA a + a IB a
+    MV3     xmm1, r12+BD_IIW, xmm0, xmm2, xmm3
+    DOT3    xmm1, xmm0
+    MV3     xmm4, r13+BD_IIW, xmm0, xmm2, xmm3
+    DOT3    xmm4, xmm0
+    addss   xmm1, xmm4
+    maxss   xmm1, [rip+rx_tiny]
+    movss   xmm5, [rip+rx_one]
+    divss   xmm5, xmm1
+    movaps  xmm2, [r12+BD_W]            # (A's, from B)
+    subps   xmm2, [r13+BD_W]
+    DOT3    xmm2, xmm0
+    movss   xmm0, xmm2
+    movss   xmm1, xmm5
+    add     rsp, 24
+    ret
+1:  movaps  xmm0, [rbx+JR_AW]           # a slider
+    lea     rdi, [rbx+JR_RA]
+    lea     rsi, [rbx+JR_RB]
+    call    kmass
+    movss   [rsp], xmm0
+    lea     rdi, [rbx+JR_RA]
+    lea     rsi, [rbx+JR_RB]
+    call    relvel
+    DOT3    xmm0, [rbx+JR_AW]
+    xorps   xmm0, [rip+rx_sign]         # (A's, from B)
+    movss   xmm1, [rsp]
+    add     rsp, 24
+    ret
+
+# jr_axis_push(xmm0=impulse along the axis; rbx, r12, r13) - +on A, -on B
+jr_axis_push:
+    sub     rsp, 8
+    xorps   xmm0, [rip+rx_sign]
+    shufps  xmm0, xmm0, 0
+    mulps   xmm0, [rbx+JR_AW]
+    cmp     dword ptr [rbx+JR_TYPE], 2
+    jne     1f
+    call    ang_impulse                 # a hinge: turning
+    jmp     9f
+1:  lea     rdi, [rbx+JR_RA]            # a slider: at the anchors
+    lea     rsi, [rbx+JR_RB]
+    call    impulse
+9:  add     rsp, 8
+    ret
+
+# jr_breaks - after a step: a joint whose load passed its breaking force
+#   (impulse over the step's time) is gone for the rest of the run; the
+#   loads start again
+jr_breaks:
+    xor     ecx, ecx
+1:  cmp     ecx, [rip+rb_njr]
+    jae     9f
+    imul    rax, rcx, JR_SZ
+    add     rax, [rip+rb_jr]
+    movss   xmm0, [rax+JR_BRK]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     2f
+    mulss   xmm0, [rip+rb_dt]           # (force x dt: an impulse)
+    movss   xmm1, [rax+JR_IMP]
+    mulss   xmm1, xmm1
+    movss   xmm2, [rax+JR_IMP+4]
+    mulss   xmm2, xmm2
+    addss   xmm1, xmm2
+    movss   xmm2, [rax+JR_IMP+8]
+    mulss   xmm2, xmm2
+    addss   xmm1, xmm2
+    sqrtss  xmm1, xmm1
+    comiss  xmm0, xmm1
+    jae     2f
+    or      dword ptr [rax+JR_FL], 4
+    inc     dword ptr [rip+rb_nbroken]
+2:  mov     dword ptr [rax+JR_IMP], 0
+    mov     dword ptr [rax+JR_IMP+4], 0
+    mov     dword ptr [rax+JR_IMP+8], 0
+    inc     ecx
+    jmp     1b
+9:  ret
 
 # island_job(rdi=ctx, esi=begin, edx=end)
 island_job:
@@ -6402,10 +6669,11 @@ rb_sethash:
     add     rsi, 8
     dec     ecx
     jnz     3b
-    sub     rsi, 32                     # its velocity too
-    xor     rax, [rsi+RB_VEL-4]
+    sub     rsi, 32                     # its velocity too (not the start
+    xor     rax, [rsi+RB_VEL]           #  before it: play keeps that)
     imul    rax, r8
-    xor     rax, [rsi+RB_VEL+4]
+    mov     r9d, [rsi+RB_VEL+8]
+    xor     rax, r9
     imul    rax, r8
     inc     edx
     jmp     2b
@@ -7384,6 +7652,9 @@ rb_info:
     mov     eax, [rip+rb_mffull]
     cmp     edi, 14                     # 14: pairs that found no manifold
     je      8f
+    mov     eax, [rip+rb_nbroken]
+    cmp     edi, 15                     # 15: joints broken
+    je      8f
     cmp     edi, 8                      # 8-13: ms in the broad phase, the
     jb      7f                          #  narrow, islands, solving, the
     cmp     edi, 13                     #  hash, compacting
@@ -7402,7 +7673,7 @@ rb_info:
 # =============================================================================
 OPERATOR op_rb_add,   "rigid.add",    "Add Rigid Body",    do_rb_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects rigid bodies (or change them): rigid.add [active|passive] [box|sphere|capsule|hull|compound] [instances|object] [mass m] [friction f] [bounce b] [damping d]. Active ones fall when the frame goes past the start; instances: each instance of the object's geometry (nodes) is a body of its own, shaped like its prototype", form=form_rigid
 OPERATOR op_rb_rem,   "rigid.remove", "Remove Rigid Body", do_rb_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="The selected objects are no longer rigid bodies"
-OPERATOR op_rb_joint, "rigid.joint",  "Add Joint",         do_rb_joint, flags=OPF_AI_SAFE|OPF_UNDO, doc="Tie two bodies (or one to the world): rigid.joint <fixed|hinge|point> <object> <object|world> [pivot x y z] [axis x y z] (pivot: the first object's place; axis: Y)", form=form_rjoint
+OPERATOR op_rb_joint, "rigid.joint",  "Add Joint",         do_rb_joint, flags=OPF_AI_SAFE|OPF_UNDO, doc="Tie two bodies (or one to the world): rigid.joint <fixed|hinge|point|slider> <object> <object|world> [pivot x y z] [axis x y z] [break force] [limits lo hi] [motor speed force] (pivot: the first object's place; axis: Y; hinge limits and motor speed in degrees)", form=form_rjoint
 OPERATOR op_rb_world, "rigid.world",  "Physics World",     do_rb_world, flags=OPF_AI_SAFE|OPF_UNDO, doc="Physics settings: rigid.world [gravity x y z] [rate steps-a-second] [iterations n (a step, over its substeps)] [substeps n (1-64; 4)]"
 
 .section .rodata
@@ -7437,7 +7708,13 @@ k_mass:         .asciz "mass"
 k_friction:     .asciz "friction"
 k_bounce:       .asciz "bounce"
 k_damping:      .asciz "damping"
-jt_names:       .quad k_dash, k_fixed, k_hinge, k_point, 0
+jt_names:       .quad k_dash, k_fixed, k_hinge, k_point, k_slider, 0
+k_slider:       .asciz "slider"
+k_break:        .asciz "break"
+k_limits:       .asciz "limits"
+k_motor:        .asciz "motor"
+.align 4
+rx_deg:         .float 0.017453292
 k_dash:         .asciz "-"
 k_fixed:        .asciz "fixed"
 k_hinge:        .asciz "hinge"
@@ -7453,7 +7730,7 @@ s_rb_bad:       .asciz "  rigid.add [active|passive] [box|sphere|capsule|hull|co
 s_rb_none:      .asciz "  select mesh objects to make rigid bodies"
 s_rb_full:      .asciz "  no room for more rigid bodies / joints"
 s_rb_added:     .asciz "  rigid bodies: "
-s_jt_bad:       .asciz "  rigid.joint <fixed|hinge|point> <object> <object|world> [pivot x y z] [axis x y z] - not understood: "
+s_jt_bad:       .asciz "  rigid.joint <fixed|hinge|point|slider> <object> <object|world> [pivot x y z] [axis x y z] [break force] [limits lo hi] [motor speed force] - not understood: "
 s_rw_bad:       .asciz "  rigid.world [gravity x y z] [rate n] [iterations n] [substeps n] - not understood: "
 .text
 
@@ -7938,8 +8215,57 @@ do_rb_joint:
     lea     rsi, [rip+k_axis]
     call    str_eq
     test    eax, eax
+    jnz     21f
+    lea     rdi, [rip+im_word]          # break <force>
+    lea     rsi, [rip+k_break]
+    call    str_eq
+    test    eax, eax
+    jz      22f
+    mov     rsi, r12
+    call    rb_num
+    mov     r12, rsi
+    test    eax, eax
     jz      .Lrj_bad
-    lea     rdi, [rsp+JT_AXIS]
+    movss   [rsp+JT_BRK], xmm0
+    jmp     1b
+22: lea     rdi, [rip+im_word]          # limits <lo> <hi> (hinge: degrees;
+    lea     rsi, [rip+k_limits]         #  slider: m)
+    call    str_eq
+    test    eax, eax
+    jz      23f
+    lea     r14, [rsp+JT_LO]
+    or      dword ptr [rsp+JT_FLG], 1
+    jmp     24f
+23: lea     rdi, [rip+im_word]          # motor <speed> <force> (hinge:
+    lea     rsi, [rip+k_motor]          #  degrees / s, torque; slider: m/s,
+    call    str_eq                      #  force)
+    test    eax, eax
+    jz      .Lrj_bad
+    lea     r14, [rsp+JT_MSPD]
+    or      dword ptr [rsp+JT_FLG], 2
+24: mov     rsi, r12
+    call    rb_num
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lrj_bad
+    cmp     dword ptr [rsp+JT_TYPE], 2  # (a hinge's in degrees)
+    jne     25f
+    mulss   xmm0, [rip+rx_deg]
+25: movss   [r14], xmm0
+    mov     rsi, r12
+    call    rb_num
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lrj_bad
+    lea     rax, [rsp+JT_LO]            # (a limit's second: an angle too; a
+    cmp     r14, rax                    #  motor's force: as it is)
+    jne     26f
+    cmp     dword ptr [rsp+JT_TYPE], 2
+    jne     26f
+    mulss   xmm0, [rip+rx_deg]
+26: movss   [r14+4], xmm0
+    jmp     1b
+21: lea     rdi, [rsp+JT_AXIS]
 2:  mov     rsi, r12
     call    rb_vec3
     mov     r12, rsi

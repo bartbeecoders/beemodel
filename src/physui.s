@@ -104,7 +104,8 @@ sh_hull:        .asciz "Convex Hull"
 sh_compound:    .asciz "Compound"
 sh_mesh:        .asciz "Mesh"
 sh_plane:       .asciz "Plane"
-jt_lbl:         .quad sh_box, jt_fixed, jt_hinge, jt_point
+jt_lbl:         .quad sh_box, jt_fixed, jt_hinge, jt_point, jt_slider
+jt_slider:      .asciz "Slider"
 jt_fixed:       .asciz "Fixed"
 jt_hinge:       .asciz "Hinge"
 jt_point:       .asciz "Point"
@@ -500,8 +501,11 @@ rb_props_draw:
     call    fmt_reset
     mov     rcx, [rsp]
     mov     eax, [rcx+JT_TYPE]
-    and     eax, 3
-    lea     rdx, [rip+jt_lbl]
+    and     eax, 7
+    cmp     eax, 4
+    jbe     42f
+    xor     eax, eax
+42: lea     rdx, [rip+jt_lbl]
     mov     rdi, [rdx+rax*8]
     call    fmt_str
     lea     rdi, [rip+s_to]
