@@ -43,7 +43,7 @@ These work the same everywhere.
 | Ctrl+Left / Right while typing | Jump a word (Shift: select it); Ctrl+Backspace / Delete remove one |
 | I over a field | Insert a keyframe for that value |
 | Right-click | A context menu: in the viewport, on outliner rows, on area headers, on asset tiles |
-| Hold Z in the viewport | A pie menu for the shading |
+| Hold Z / Ctrl+Tab / Shift+S in the viewport | A pie menu for the shading / the mode / the 3D cursor and snapping (a quick tap keeps the key's own action; Shift+S stays the stabilizer in sculpt mode) |
 | F3 | Search every command |
 | F1 | Every shortcut, searchable |
 | F10, or Alt+letter | Open the menus from the keyboard |

@@ -12,7 +12,8 @@
 #  back, Enter runs, Esc closes one level; F10 opens the bar, Alt+letter a
 #  menu by its first letter. Items that cannot run now are greyed (op_poll).
 #
-#  Pie menus: hold a pie key (Z: shading) and the choices appear around the
+#  Pie menus: hold a pie key (Z: shading, Ctrl+Tab: the mode, Shift+S:
+#  the 3D cursor and snapping, not in sculpt mode) and the choices appear around the
 #  pointer; release over one to pick it. A quick tap still does the key's
 #  plain action, so nothing changes for people who never hold it.
 # =============================================================================
@@ -80,6 +81,8 @@ pie_n:          .skip 4
 .align 8
 pie_items:      .skip 8
 pie_t0:         .skip 8
+pie_key:        .skip 4                 # the open (or armed) pie's key
+pie_mods:       .skip 4                 #  and the modifiers held with it
 pie_bx:         .skip 4*8               # each choice's box
 pie_by:         .skip 4*8
 pie_bw:         .skip 4*8
@@ -115,6 +118,25 @@ pie_diag:       .byte 10, 10, 10, 10, 7, 7, 7, 7
 .align 8
 pie_shading:    .quad op_shade_solid, op_shade_wire, op_shade_mat, op_shade_rend
 .equ pie_shading_n, (. - pie_shading) / 8
+# W E S N NW NE SW SE
+pie_modes:      .quad op_mode_object, op_mode_edit, op_mode_wgt, op_mode_sculpt, op_mode_vcol, op_mode_tex
+.equ pie_modes_n, (. - pie_modes) / 8
+pie_snap:       .quad op_cursor_sel, op_sel_cursor, op_sel_grid, op_toggle_snap, op_cursor_reset
+.equ pie_snap_n, (. - pie_snap) / 8
+# the pies: key, modifiers held, choices, count, when (1: not in sculpt
+#   mode, where the key has its own job)
+.align 8
+pie_defs:       .long KEY_Z, 0
+                .quad pie_shading
+                .long pie_shading_n, 0
+                .long KEY_TAB, MOD_CTRL
+                .quad pie_modes
+                .long pie_modes_n, 0
+                .long KEY_S, MOD_SHIFT
+                .quad pie_snap
+                .long pie_snap_n, 1
+.equ PIE_DEF_SZ, 24
+.equ pie_defs_n, (. - pie_defs) / PIE_DEF_SZ
 
 ctx_object:     .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0
                 .quad op_edit_toggle, 0, sub_boolean, op_repair, 0, op_obj_measure
@@ -1100,29 +1122,52 @@ pie_try:
     xor     eax, eax
     cmp     dword ptr [rip+pie_on], 0
     jne     9f
-    cmp     edi, KEY_Z                  # Z: shading
-    jne     9f
-    test    dword ptr [rip+key_mods], MOD_ALT|MOD_CTRL|MOD_SHIFT
-    jnz     9f
-    cmp     dword ptr [rip+hit_area], 0 # (over the 3D viewport)
-    jl      9f
-    push    rdi
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12d, edi
+    mov     eax, [rip+key_mods]         # (the modifiers that count)
+    and     eax, MOD_ALT|MOD_CTRL|MOD_SHIFT
+    mov     [rsp], eax
+    lea     rbx, [rip+pie_defs]         # which pie, if any
+    xor     ecx, ecx
+1:  cmp     ecx, pie_defs_n
+    jae     8f
+    cmp     [rbx], r12d
+    jne     2f
+    mov     eax, [rsp]
+    cmp     [rbx+4], eax
+    je      3f
+2:  add     rbx, PIE_DEF_SZ
+    inc     ecx
+    jmp     1b
+3:  cmp     dword ptr [rip+hit_area], 0 # (over the 3D viewport)
+    jl      8f
     mov     edi, [rip+hit_area]
     call    area_editor
-    pop     rdi
     cmp     eax, ED_VIEWPORT
     jne     8f
-    mov     [rip+pie_armed], edi
-    lea     rax, [rip+pie_shading]
+    cmp     dword ptr [rbx+20], 1       # not in sculpt mode
+    jne     4f
+    call    mode_now
+    cmp     eax, 2
+    je      8f
+4:  mov     [rip+pie_armed], r12d
+    mov     [rip+pie_key], r12d
+    mov     eax, [rsp]
+    mov     [rip+pie_mods], eax
+    mov     rax, [rbx+8]
     mov     [rip+pie_items], rax
-    mov     dword ptr [rip+pie_n], pie_shading_n
-    sub     rsp, 8
+    mov     eax, [rbx+16]
+    mov     [rip+pie_n], eax
     call    mono_ns
-    add     rsp, 8
     mov     [rip+pie_t0], rax
     mov     eax, 1
-    ret
+    jmp     7f
 8:  xor     eax, eax
+7:  add     rsp, 8
+    pop     r12
+    pop     rbx
 9:  ret
 
 # pie_wait -> eax = ms until an armed pie opens, -1 if none
@@ -1220,15 +1265,20 @@ pie_release_key:
     jne     1f
     test    edi, edi
     jz      1f
-    mov     dword ptr [rip+pie_armed], 0  # a tap: the plain key
-    sub     rsp, 8
+    mov     dword ptr [rip+pie_armed], 0  # a tap: the plain key, with the
+    push    qword ptr [rip+key_mods]    #  modifiers held when it went down
+    mov     eax, [rip+key_mods]
+    and     eax, ~(MOD_ALT|MOD_CTRL|MOD_SHIFT)
+    or      eax, [rip+pie_mods]
+    mov     [rip+key_mods], eax
     call    dispatch_key
-    add     rsp, 8
+    pop     rcx
+    mov     [rip+key_mods], ecx
     mov     eax, 1
     ret
 1:  cmp     dword ptr [rip+pie_on], 0
     je      8f
-    cmp     edi, KEY_Z
+    cmp     edi, [rip+pie_key]
     jne     8f
     mov     eax, [rip+pie_sel]          # released over a choice: pick it;
     test    eax, eax                    #  over the centre: it stays for a click

@@ -610,6 +610,174 @@ ts_bone_cb:                             # rdi = &ts_bone: the active bone
     mov     dword ptr [rip+dirty], 1
 9:  ret
 
+# ---- modes and snapping (the Ctrl+Tab and Shift+S pies, menus, scripts) ---------
+OPERATOR op_mode_object, "mode.object", "Object Mode", do_mode_set, check=chk_mode_set, arg=0, flags=OPF_AI_SAFE|OPF_QUIET|OPF_HIDDEN, doc="Leave edit, sculpt or paint mode"
+OPERATOR op_mode_edit, "mode.edit", "Edit Mode", do_mode_set, check=chk_mode_set, arg=1, flags=OPF_AI_SAFE|OPF_QUIET|OPF_HIDDEN, doc="Edit the active mesh's vertices, edges and faces"
+OPERATOR op_mode_sculpt, "mode.sculpt", "Sculpt Mode", do_mode_set, check=chk_mode_set, arg=2, flags=OPF_AI_SAFE|OPF_QUIET|OPF_HIDDEN, doc="Sculpt the active mesh with brushes"
+OPERATOR op_mode_tex, "mode.texture_paint", "Texture Paint", do_mode_set, check=chk_mode_set, arg=3, flags=OPF_AI_SAFE|OPF_QUIET|OPF_HIDDEN, doc="Paint the active mesh's image texture"
+OPERATOR op_mode_vcol, "mode.vertex_paint", "Vertex Paint", do_mode_set, check=chk_mode_set, arg=4, flags=OPF_AI_SAFE|OPF_QUIET|OPF_HIDDEN, doc="Paint the active mesh's vertex colours"
+OPERATOR op_mode_wgt, "mode.weight_paint", "Weight Paint", do_mode_set, check=chk_mode_set, arg=5, flags=OPF_AI_SAFE|OPF_QUIET|OPF_HIDDEN, doc="Paint the active mesh's skin weights"
+OPERATOR op_cursor_sel, "view.cursor_to_selected", "Cursor to Selected", do_cursor_sel, flags=OPF_AI_SAFE|OPF_OBJECT, poll=poll_sel, doc="Put the 3D cursor in the middle of the selected objects"
+OPERATOR op_sel_cursor, "object.to_cursor", "Selection to Cursor", do_sel_cursor, arg=0, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, poll=poll_sel, doc="Move the selected objects to the 3D cursor, keeping their spacing"
+OPERATOR op_sel_grid, "object.to_grid", "Selection to Grid", do_sel_cursor, arg=1, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, poll=poll_sel, doc="Move each selected object to the nearest point of the 1 m grid"
+
+# mode_now -> eax = the active object's mode: 0 object, 1 edit, 2 sculpt,
+#   3 texture / 4 vertex / 5 weight paint (the order of mode_ops)
+.globl mode_now
+mode_now:
+    push    rbx
+    mov     ebx, 1
+1:  cmp     ebx, 6
+    jae     2f
+    lea     rax, [rip+mode_ops]
+    mov     rdi, [rax+rbx*8]
+    call    op_checked
+    cmp     eax, 1
+    je      3f
+    inc     ebx
+    jmp     1b
+2:  xor     ebx, ebx
+3:  mov     eax, ebx
+    pop     rbx
+    ret
+
+# chk_mode_set(rdi=mode) -> eax = 1 while it is the mode
+chk_mode_set:
+    push    rbx
+    mov     ebx, edi
+    call    mode_now
+    cmp     eax, ebx
+    sete    al
+    movzx   eax, al
+    pop     rbx
+    ret
+
+# do_mode_set(rdi=mode) - leave the mode we are in, enter that one
+do_mode_set:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    call    mode_now
+    mov     r12d, eax
+    cmp     eax, ebx
+    je      9f
+    test    r12d, r12d
+    jz      1f
+    lea     rax, [rip+mode_ops]
+    mov     rdi, [rax+r12*8]
+    call    run_op
+1:  test    ebx, ebx
+    jz      9f
+    lea     rax, [rip+mode_ops]
+    mov     rdi, [rax+rbx*8]
+    call    run_op
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# sel_mid -> xmm0..xmm2 = the middle of the selected objects, eax = how many
+sel_mid:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    xorps   xmm0, xmm0
+    movups  [rsp], xmm0
+    xor     ebx, ebx
+    xor     r12d, r12d
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    inc     ebx
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      1b
+    movups  xmm0, [rsp]
+    movss   xmm1, [rax+OB_LOC]
+    movss   xmm2, [rax+OB_LOC+4]
+    movss   xmm3, [rax+OB_LOC+8]
+    unpcklps xmm1, xmm2
+    movlhps xmm1, xmm3
+    addps   xmm0, xmm1
+    movups  [rsp], xmm0
+    inc     r12d
+    jmp     1b
+2:  xorps   xmm0, xmm0
+    xorps   xmm1, xmm1
+    xorps   xmm2, xmm2
+    mov     eax, r12d
+    test    eax, eax
+    jz      9f
+    cvtsi2ss xmm3, eax
+    movss   xmm0, [rsp]
+    divss   xmm0, xmm3
+    movss   xmm1, [rsp+4]
+    divss   xmm1, xmm3
+    movss   xmm2, [rsp+8]
+    divss   xmm2, xmm3
+9:  add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
+# do_cursor_sel - view.cursor_to_selected
+do_cursor_sel:
+    sub     rsp, 8
+    call    sel_mid
+    add     rsp, 8
+    test    eax, eax
+    jz      9f
+    movss   [rip+cursor_pos], xmm0
+    movss   [rip+cursor_pos+4], xmm1
+    movss   [rip+cursor_pos+8], xmm2
+    mov     dword ptr [rip+dirty], 1
+9:  ret
+
+# do_sel_cursor(rdi=0: to the cursor, keeping the spacing; 1: each to the
+#   nearest whole metre)
+do_sel_cursor:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     r12d, edi
+    call    sel_mid
+    movss   xmm3, [rip+cursor_pos]      # the step for each: cursor - middle
+    subss   xmm3, xmm0
+    movss   [rsp], xmm3
+    movss   xmm3, [rip+cursor_pos+4]
+    subss   xmm3, xmm1
+    movss   [rsp+4], xmm3
+    movss   xmm3, [rip+cursor_pos+8]
+    subss   xmm3, xmm2
+    movss   [rsp+8], xmm3
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     9f
+    mov     edi, ebx
+    call    obj_at
+    inc     ebx
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      1b
+    xor     ecx, ecx
+2:  movss   xmm0, [rax+OB_LOC+rcx*4]
+    test    r12d, r12d
+    jnz     3f
+    addss   xmm0, [rsp+rcx*4]
+    jmp     4f
+3:  roundss xmm0, xmm0, 0               # (to nearest)
+4:  movss   [rax+OB_LOC+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    jmp     1b
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
 # vp_mode_cb - the header's mode choice: leave the mode, enter the new one
 vp_mode_cb:
     push    rbx
