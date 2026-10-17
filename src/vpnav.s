@@ -29,6 +29,21 @@
 .equ NAV_BALL,  9
 
 .section .rodata
+s_fo_smooth:    .asciz "Smooth"
+s_fo_sphere:    .asciz "Sphere"
+s_fo_root:      .asciz "Root"
+s_fo_sharp:     .asciz "Sharp"
+s_fo_linear:    .asciz "Linear"
+s_fo_const:     .asciz "Constant"
+s_fw_smooth:    .asciz "smooth"
+s_fw_sphere:    .asciz "sphere"
+s_fw_root:      .asciz "root"
+s_fw_sharp:     .asciz "sharp"
+s_fw_linear:    .asciz "linear"
+s_fw_const:     .asciz "constant"
+.align 8
+fall_lbl:       .quad s_fo_smooth, s_fo_sphere, s_fo_root, s_fo_sharp, s_fo_linear, s_fo_const
+fall_kw:        .quad s_fw_smooth, s_fw_sphere, s_fw_root, s_fw_sharp, s_fw_linear, s_fw_const, 0
 .align 4
 nz_k:           .float 0.01
 nz_one:         .float 1.0
@@ -94,6 +109,9 @@ OPERATOR op_vh_ov, "view.header_overlays", "Overlays", vh_overlays, flags=OPF_HI
 OPERATOR op_view_ortho, "view.toggle_ortho", "Orthographic", do_ortho, check=chk_ortho, key=76, flags=OPF_AI_SAFE|OPF_QUIET, doc="Switch the 3D viewport between perspective and orthographic (Numpad 5): no shrinking with distance, parallel lines stay parallel"
 OPERATOR op_toggle_snap,  "view.toggle_snap",  "Snap",        op_toggle_flag, op_check_flag, snap_on, flags=OPF_AI_SAFE|OPF_QUIET, doc="Snap moves, turns and scales to whole steps (Ctrl does the opposite while you drag)"
 
+WIDGET wd_ts_fall,  WK_ENUM, "brush.falloff", aux=fall_lbl, n=6, tip="How the brush fades towards its edge"
+WIDGET wd_ts_det,   WK_FLOAT, "brush.detail", "Detail", 1.0, 200.0, 0.2, 0, WGF_CLAMP, tip="Dynamic topology: the size of the new edges, in pixels on screen (smaller: more detail)"
+OPERATOR op_s_fall, "sculpt.falloff", "Brush Falloff", do_s_fall, flags=OPF_AI_SAFE|OPF_QUIET, doc="How sculpt brushes fade to their edge: sculpt.falloff smooth|sphere|root|sharp|linear|constant"
 WIDGET wd_ts_srad,  WK_FLOAT, "brush.radius", "Radius", 2.0, 1000.0, 0.5, 0, WGF_CLAMP, tip="The brush's radius in pixels ([ and ] change it)"
 WIDGET wd_ts_sstr,  WK_SLIDER, "brush.strength", "Strength", 0.0, 1.0, 0.005, 2, tip="How strongly the brush acts (Shift+[ and Shift+])"
 WIDGET wd_ts_prad,  WK_FLOAT, "paint.radius", "Radius", 1.0, 1000.0, 0.5, 0, WGF_CLAMP, tip="The brush's radius in pixels ([ and ] change it)"
@@ -478,6 +496,17 @@ chk_ortho:
 9:  add     rsp, 8
     ret
 
+do_s_fall:
+    sub     rsp, 8
+    lea     rdi, [rip+fall_kw]
+    call    kw_index
+    test    eax, eax
+    js      9f
+    mov     [rip+sc_falloff], eax
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    ret
+
 # ---- the brush settings (sculpt, texture paint) ----------------------------------
 # tool_settings_draw - a bar at the bottom of the canvas while a brush mode is
 #   on: radius, strength and the brush's toggles
@@ -508,6 +537,11 @@ tool_settings_draw:
     lea     esi, [r12-5]
     mov     edx, 552
     mov     ecx, WG_H+10
+    cmp     dword ptr [rsp], 0          # (sculpt: a second row above)
+    jne     12f
+    sub     esi, WG_H+6
+    add     ecx, WG_H+6
+12:
     mov     r8d, COL_PANE_BG
     mov     r9d, 8
     push    210
@@ -556,6 +590,25 @@ tool_settings_draw:
     call    tool_btn
     lea     rdi, [rip+wd_ts_pradp]
     call    tool_btn
+    lea     ebx, [r13-540]              # the row above: falloff, detail
+    sub     r12d, WG_H+6
+    lea     rdi, [rip+wd_ts_fall]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 150
+    lea     r8, [rip+sc_falloff]
+    xor     r9d, r9d
+    call    wg
+    add     ebx, 158
+    cmp     dword ptr [rip+sc_dyn], 0   # dynamic topology: its detail
+    je      9f
+    lea     rdi, [rip+wd_ts_det]
+    mov     esi, ebx
+    mov     edx, r12d
+    mov     ecx, 150
+    lea     r8, [rip+dyn_detail]
+    xor     r9d, r9d
+    call    wg
     jmp     9f
 4:  cmp     dword ptr [rip+vp_on], 2    # weight paint: the weight, the bone
     je      6f
