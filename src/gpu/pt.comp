@@ -30,7 +30,8 @@ layout(std430, binding = 0) readonly buffer Params {
     uint seed, nslots, npoints, nl;
     uint ntri, root, debug, cut;    // cut: masked / translucent / one-sided in it
     float cam[16];                  // origin, right, up, forward, tan_h; [14]: live flags
-    float points[64 * 8];           // position, colour * power, pad
+    float points[64 * 16];          // light objects: position, colour * power, type, size,
+                                    //  direction, cos (sun / spot outer), area axis, inner cos
     float lut[256];                 // sRGB byte -> linear (srgb_to_lin)
 } P;
 layout(std430, binding = 1) readonly buffer TV { float tv[]; };      // v0 e1 e2
@@ -947,6 +948,73 @@ vec3 tri_geo_normal(uint t) {
 
 struct LSample { vec3 wi; vec3 li; float dist; float pdf; bool delta; };
 
+// a direction in the cone of half-angle acos(cm) round the unit axis a
+vec3 cone_dir(vec3 a, float cm, float u1, float u2) {
+    float cs = 1.0 - (1.0 - cm) * u1;
+    float sn = sqrt(max(1.0 - cs * cs, 0.0));
+    vec2 sc = sincos_2pi(u2);
+    vec3 t, b;
+    onb(a, t, b);
+    return local_to_world(vec3(sc.y * sn, sc.x * sn, cs), t, b, a);
+}
+
+// a light object (16 floats from o; hive.s hv_light) seen from p: a sample
+//   towards it (pdf in solid angle, without the light's choice; never hit by
+//   BSDF rays, so no MIS). Point and spot: a sphere of the radius (a point
+//   when 0), a spot fading across its cone; sun: a cone round its direction;
+//   area: a square facing its direction. (hive_pt.s obj_light, the same.)
+// (det: the raycast's one fixed sample; else rnd() exactly where the CPU
+//  draws its random numbers, so both draw the same stream)
+bool obj_light(uint o, vec3 p, bool det, out LSample ls) {
+    vec3 q = vec3(P.points[o], P.points[o + 1u], P.points[o + 2u]);
+    vec3 I = vec3(P.points[o + 3u], P.points[o + 4u], P.points[o + 5u]);
+    uint ty = uint(P.points[o + 6u]);
+    float sz = P.points[o + 7u];
+    vec3 dir = vec3(P.points[o + 8u], P.points[o + 9u], P.points[o + 10u]);
+    float cm = P.points[o + 11u];
+    ls.delta = true;
+    if (ty == 1u) {
+        ls.dist = BIG;
+        if (cm >= 0.999999) { ls.wi = -dir; ls.li = I; ls.pdf = 1.0; return true; }
+        float u1 = det ? 0.5 : rnd();
+        float u2 = det ? 0.5 : rnd();
+        ls.wi = cone_dir(-dir, cm, u1, u2);
+        float so = TWO_PI * (1.0 - cm);
+        ls.li = I / so; ls.pdf = 1.0 / so;
+        return true;
+    }
+    if (ty == 3u) {
+        vec3 U = vec3(P.points[o + 12u], P.points[o + 13u], P.points[o + 14u]);
+        vec3 V = cross(dir, U);
+        float u1 = det ? 0.5 : rnd();
+        float u2 = det ? 0.5 : rnd();
+        float d;
+        ls.wi = unit3(q + U * (2.0 * u1 - 1.0) + V * (2.0 * u2 - 1.0) - p, d);
+        float cl = -dot(ls.wi, dir);
+        if (cl <= 1.0e-6) return false;
+        float A = max(4.0 * dot(U, U), 1.0e-8);
+        ls.dist = d; ls.li = I * (4.0 / A); ls.pdf = d * d / (cl * A);
+        return true;
+    }
+    float d;
+    vec3 wc = unit3(q - p, d);
+    float fall = 1.0;
+    if (ty == 2u) {
+        float t = clamp((-dot(wc, dir) - cm) / max(P.points[o + 15u] - cm, 1.0e-6), 0.0, 1.0);
+        fall = t * t * (3.0 - 2.0 * t);
+        if (fall <= 0.0) return false;
+    }
+    if (sz <= 0.0 || d <= sz) { ls.wi = wc; ls.dist = d; ls.li = I * (fall / (d * d)); ls.pdf = 1.0; return true; }
+    float cmax = sqrt(max(1.0 - sz * sz / (d * d), 0.0));
+    float u1 = det ? 0.5 : rnd();
+    float u2 = det ? 0.5 : rnd();
+    ls.wi = cone_dir(wc, cmax, u1, u2);
+    ls.dist = d - sz;
+    ls.li = I * (fall / (PI * sz * sz));
+    ls.pdf = 1.0 / max(TWO_PI * (1.0 - cmax), 1.0e-8);
+    return true;
+}
+
 bool light_sample(vec3 p, vec3 n, out LSample ls) {
     ls.delta = false;
     ls.wi = vec3(0.0); ls.li = vec3(0.0); ls.dist = 0.0; ls.pdf = 0.0;
@@ -983,16 +1051,9 @@ bool light_sample(vec3 p, vec3 n, out LSample ls) {
         return true;
     }
     int pi = slot - 2;
-    if (pi < int(P.npoints)) {                          // a point light
-        uint o = uint(pi) * 8u;
-        vec3 q = vec3(P.points[o], P.points[o + 1u], P.points[o + 2u]);
-        float d;
-        ls.wi = unit3(q - p, d);
-        ls.dist = d;
-        float d2 = d * d;
-        ls.li = vec3(P.points[o + 3u], P.points[o + 4u], P.points[o + 5u]) / d2;
-        ls.pdf = pc;
-        ls.delta = true;
+    if (pi < int(P.npoints)) {                          // a light object
+        if (!obj_light(uint(pi) * 16u, p, false, ls)) return false;
+        ls.pdf *= pc;
         return true;
     }
     float u = rnd();                                    // an emissive triangle
@@ -1157,12 +1218,7 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
             } else if (qi == 0) {
                 ls.wi = SUN_DIR; ls.dist = BIG; ls.li = SUN_RAD; ls.pdf = SUN_PDF; ls.delta = true;
             } else if (!ao) {
-                uint o = uint(qi - 1) * 8u;
-                float d;
-                ls.wi = unit3(vec3(P.points[o], P.points[o + 1u], P.points[o + 2u]) - p, d);
-                ls.dist = d;
-                ls.li = vec3(P.points[o + 3u], P.points[o + 4u], P.points[o + 5u]) / (d * d);
-                ls.pdf = 1.0; ls.delta = true;
+                if (!obj_light(uint(qi - 1) * 16u, p, true, ls)) continue;
             } else {
                 float kk = float(qi - 1 - int(P.npoints));
                 float u1 = (kk + r1) / float(RC_AO);

@@ -558,6 +558,7 @@ viewport_draw:
     call    wp_draw                     # world cells not loaded, the minimap
     call    lb_ghost                    # a library asset being dragged in
     call    pb_draw                     # light probes: their boxes
+    call    light_shapes_draw           # lights: radius, cone, square (lshape.s)
     call    vc_draw                     # versions: the diff, the merge panel
     call    co_draw                     # co-editing: the other peers
     call    play_hud                    # play mode: the keys, or the question
