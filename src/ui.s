@@ -149,7 +149,7 @@ items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_cad_sketch, sub_generate
                 .quad 0, op_add_light, op_add_camera, op_add_armature
 .equ items_add_n, (. - items_add) / 8
-items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, 0
+items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, sub_snap, 0
                 .quad sub_feature, sub_boolean, sub_mech, op_repair, op_print_check, op_obj_measure
                 .quad 0, op_an_key, op_arm_parent
 .equ items_object_n, (. - items_object) / 8
@@ -180,6 +180,7 @@ sub_generate_l: .quad op_gen_lsystem, op_gen_wfc
 sub_ws_l:       .quad op_ws_next, op_ws_prev, 0, op_ws_new, op_ws_rename, op_ws_delete
 sub_uv_l:       .quad op_uv_unwrap, op_uv_smart, op_uv_pack, 0, op_uv_mark, op_uv_clear, op_uv_sharp
 sub_mech_l:     .quad op_mj_add, op_mj_list, op_mj_check
+sub_snap_l:     .quad op_cursor_sel, op_cursor_reset, op_sel_cursor, op_sel_grid, op_toggle_snap
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -196,6 +197,7 @@ SUBMENU sub_feature, "Part Feature", sub_feature_l, 10
 SUBMENU sub_generate, "Generate", sub_generate_l, 2
 SUBMENU sub_mech, "Mechanism", sub_mech_l, 3
 SUBMENU sub_uv, "UV", sub_uv_l, 7
+SUBMENU sub_snap, "Snap", sub_snap_l, 5
 SUBMENU sub_workspace, "Workspace", sub_ws_l, 6
 
 # -----------------------------------------------------------------------------

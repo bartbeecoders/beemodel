@@ -597,6 +597,7 @@ def main():
     tooltips()
     icons()
     menus_ui()
+    pies_ui()
     dialogs()
     files_ui()
     clipboard()
@@ -6308,6 +6309,57 @@ def menus_ui():
     f.keyev(44, 0); f.pump(0.3)
     check(shade() == 2 and not any(w['kind'] == 'pieitem' for w in ui_tree(m)),
           'releasing over a choice picks it and closes the pie')
+    f.proc.kill()
+
+
+def pies_ui():
+    """F3 (#269): the mode pie (hold Ctrl+Tab) and the snap pie (hold
+    Shift+S); a tap keeps each key's own action."""
+    print('  -- mode and snap pies --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    mode = lambda: (widget(m, 'viewport.mode') or {}).get('value')
+    pie = lambda: [w['label'] for w in ui_tree(m) if w['kind'] == 'pieitem']
+    f.move(600, 300)
+    def hold(mods, key, to):
+        f.mods(mods); f.keyev(key, 1); f.pump(0.5)
+        got = pie()
+        f.move(*to); f.pump(0.1)
+        f.keyev(key, 0); f.mods(0); f.pump(0.3)
+        f.move(600, 300); f.pump(0.1)
+        return got
+    f.mods(4); f.key(15); f.mods(0); f.pump(0.2)
+    check(mode() == 2, f'Ctrl+Tab tapped: sculpt mode, as before ({mode()})')
+    f.mods(4); f.key(15); f.mods(0); f.pump(0.2)
+    check(mode() == 0, f'tapped again: object mode ({mode()})')
+    got = hold(4, 15, (720, 300))
+    check(got == ['Object Mode', 'Edit Mode', 'Weight Paint', 'Sculpt Mode', 'Vertex Paint', 'Texture Paint'],
+          f'Ctrl+Tab held: the mode pie ({got})')
+    check(mode() == 1, f'released to the right: edit mode ({mode()})')
+    hold(4, 15, (600, 180))
+    check(mode() == 2, f'from edit mode, up: sculpt mode (edit mode left first) ({mode()})')
+    got = hold(1, 31, (600, 420))
+    check(got == [], f'Shift+S in sculpt mode is the stabilizer, not a pie ({got})')
+    hold(4, 15, (480, 300))
+    check(mode() == 0, f'left: object mode ({mode()})')
+    q('set("Cube", "x", 2.3)')
+    got = hold(1, 31, (480, 300))               # W: Cursor to Selected
+    check(got == ['Cursor to Selected', 'Selection to Cursor', 'Selection to Grid', 'Snap', 'Reset 3D Cursor'],
+          f'Shift+S held: the snap pie ({got})')
+    q('set("Cube", "x", 5)')
+    hold(1, 31, (720, 300))                     # E: Selection to Cursor
+    x = q('print(get("Cube", "x"))')
+    check(abs(float(x or 0) - 2.3) < 1e-4, f'Cursor to Selected, then Selection to Cursor puts the cube back ({x})')
+    hold(1, 31, (600, 420))                     # S: Selection to Grid
+    x = q('print(get("Cube", "x"), get("Cube", "y"))')
+    check(x == '2 1', f'Selection to Grid: the nearest whole metre ({x})')
+    f.mods(4); f.key(44); f.mods(0)
+    x = q('print(get("Cube", "x"))')
+    check(abs(float(x or 0) - 2.3) < 1e-4, f'one undo takes it back ({x})')
     f.proc.kill()
 
 
