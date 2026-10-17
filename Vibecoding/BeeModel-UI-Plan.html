@@ -173,6 +173,13 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .issue { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent); }
 .stage { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 34px 0 6px; }
 kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; }
+.st { display: inline-block; font-size: 12px; font-weight: 700; padding: 1px 9px; border-radius: 999px; margin-right: 6px; border: 1px solid var(--line); }
+.st.done { color: var(--green); background: var(--panel-2); }
+.st.part { color: var(--accent); background: var(--accent-soft); }
+.st.open { color: var(--red); background: var(--panel-2); }
+ul.cell { margin: 0; padding-left: 18px; }
+.exit.status ul { margin: 6px 0 0; padding-left: 20px; }
+.exit.status li { margin: 2px 0; color: var(--ink-2); }
 </style>
 </head>
 <body>
@@ -180,6 +187,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
 <nav class="toc">
   <div class="brand"><span class="hex"></span>BeeModel UI Plan</div>
   <ol>
+    <li><a href="#status">Status</a></li>
     <li><a href="#goals">Goals</a></li>
     <li><a href="#today">The UI today</a></li>
     <li><a href="#target">Target layout</a></li>
@@ -200,8 +208,51 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <div class="kicker">Phase 11 · v0.12.0 · UI &amp; usability</div>
   <h1>Every feature one click away</h1>
   <p class="lede">BeeModel already has more than 400 operators, from polygon tools to a B-rep kernel, a path tracer and live co-editing. Many of them can only be reached by typing into the console. This plan gives every feature a mouse-and-keyboard UI. It adds a shared widget toolkit, clear text and colours, and conventions that make the app predictable. The console stays as a power tool, but you never need it.</p>
-  <div class="meta">BeeModel · Vibecoding/BeeModel-UI-Plan.html · Companion to the <a href="BeeModel-Masterplan.html#ux">Masterplan, section "UX &amp; workspaces"</a> · Written 2026-10-15 against v0.10.0 + phase 10</div>
+  <div class="meta">BeeModel · Vibecoding/BeeModel-UI-Plan.html · Companion to the <a href="BeeModel-Masterplan.html#ux">Masterplan, section "UX &amp; workspaces"</a> · Written 2026-10-15 against v0.10.0 + phase 10 · Status updated 2026-10-17 (v0.15.0)</div>
 </header>
+
+<!-- ============================================================ -->
+<section id="status">
+  <h2>Status</h2>
+  <p class="sub">Updated 2026-10-17, at v0.15.0.</p>
+  <div class="callout"><strong>Phase complete.</strong> All 27 issues (#170–#196) are closed and merged, and the phase shipped as <a href="https://github.com/bartbeecoders/beemodel/releases/tag/v0.12.0">v0.12.0</a>, with the console-free walkthrough test and <code>docs/UI.md</code>. Most issues were delivered in full. 14 of them left smaller parts undone, listed below and on each issue card. They are tracked as F1–F18 (#267–#284) in the <a href="https://github.com/bartbeecoders/beemodel/milestone/15">v0.16.0 – UI follow-ups</a> milestone.</div>
+  <div class="grid g3">
+    <div class="card green"><h4>Done</h4><p>The theme table, shapes and font roles; the widget toolkit with <code>ui_tree</code>; tooltips and greyed operators; the icon set; two-level menus, context menus and the shading pie; dialogs, operator forms and “Save changes?”; the file browser; the clipboard; the Properties tabs; the viewport header and gizmo; the mode-aware shelf; the outliner; the status bar and toasts; panels for every feature area; Preferences with UI scale and keymap; workspaces; the welcome screen and Help area; keyboard focus and colour-blind axes.</p></div>
+    <div class="card accent"><h4>Still open</h4><p>Mostly polish on finished editors: two more pie menus, a few context menus, the redo panel as a form, word jumps, file thumbnails, a richer viewport header, more status-bar job chips, feature reordering and a reduced-motion setting.</p></div>
+    <div class="card red"><h4>Blocked on engine work</h4><p>Outliner hierarchy, drag-to-reparent and the Parent field need object parenting. Light radius and types need area lights in the path tracer. Y/Z sculpt symmetry needs the sculpt engine. The drawing export dialog needs the PDF drawing writer to take sheet options.</p></div>
+  </div>
+  <div class="table-wrap"><table>
+    <tr><th>Issue</th><th>Title</th><th>Status</th><th>PR</th><th>Still open</th></tr>
+    <tr><td class="num"><span class="issue">U1</span></td><td>Fixes and quick wins</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/198">#198</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U2</span></td><td>Theme table and drawing primitives</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/199">#199</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U3</span></td><td>Widget toolkit</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/201">#201</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U4</span></td><td>Tooltips and operator state</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/202">#202</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U5</span></td><td>Icon set</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/203">#203</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U6</span></td><td>Menus, context menus and pies</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/204">#204</a></td><td><ul class="cell"><li>A mode pie (<kbd>Ctrl+Tab</kbd>) and a snap pie (<kbd>Shift+S</kbd>); only the shading pie (<kbd>Z</kbd>) exists.</li><li>Context menus on Properties fields, the timeline and dope sheet, and the file browser. The viewport, outliner, area headers, node editor and asset tiles have them.</li></ul></td></tr>
+    <tr><td class="num"><span class="issue">U7</span></td><td>Dialogs and operator forms</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/205">#205</a></td><td>The redo panel as the same generated form, live-editing the last operation. It still draws and hit-tests on its own.</td></tr>
+    <tr><td class="num"><span class="issue">U8</span></td><td>File browser</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/206">#206</a></td><td><ul class="cell"><li>A thumbnail preview of <code>.bee</code> files.</li><li>Tab completion in the path field.</li></ul></td></tr>
+    <tr><td class="num"><span class="issue">U9</span></td><td>Clipboard and text editing</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/207">#207</a></td><td>Word jumps (<kbd>Ctrl+←/→</kbd>) in text fields. Select-all, copy, cut and paste are done.</td></tr>
+    <tr><td class="num"><span class="issue">U10</span></td><td>Properties editor rebuilt</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/208">#208</a></td><td>A Parent field: objects have no parent in the scene data yet (see U13).</td></tr>
+    <tr><td class="num"><span class="issue">U11</span></td><td>Viewport header and navigation</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/209">#209</a></td><td><ul class="cell"><li>View / Select / Object menus, pivot, orientation and an overlays popover in the viewport header.</li><li>Dragging the navigation gizmo to orbit, and zoom / pan handles. Clicking an axis works.</li></ul></td></tr>
+    <tr><td class="num"><span class="issue">U12</span></td><td>Mode-aware tool shelf and tool settings bar</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/210">#210</a></td><td><ul class="cell"><li>Falloff and dyntopo detail size in the brush settings bar.</li><li>Y and Z sculpt symmetry: the sculpt engine only mirrors across X.</li></ul></td></tr>
+    <tr><td class="num"><span class="issue">U13</span></td><td>Outliner tree</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/211">#211</a></td><td><ul class="cell"><li>A hierarchy (parents, bones, modifiers as children) and drag to reparent: this needs object parenting in the scene data first.</li><li>Lock and camera toggles (only the eye exists), and Ctrl / Shift range select.</li></ul></td></tr>
+    <tr><td class="num"><span class="issue">U14</span></td><td>Status bar, toasts and progress</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/212">#212</a></td><td>Job chips for bake, import and simulation (render progress, co-editing and AI have chips), and a live-link chip.</td></tr>
+    <tr><td class="num"><span class="issue">U15</span></td><td>Files, export and print</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/213">#213</a></td><td><ul class="cell"><li>The drawing export dialog (sheet, views, title block): the PDF drawing writer has to take those options first.</li><li>A print-check results panel where clicking an issue zooms to it. Print Check is a form, and the results go to the console.</li></ul></td></tr>
+    <tr><td class="num"><span class="issue">U16</span></td><td>Modeling and CAD</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/214">#214</a></td><td>Reordering features in the feature tree. Edit, the On toggle (suppress) and health dots are done.</td></tr>
+    <tr><td class="num"><span class="issue">U17</span></td><td>Materials, world, images and procedural</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/216">#216</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U18</span></td><td>Sculpt, paint, UV and bake</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/217">#217</a></td><td>Y / Z symmetry buttons (same limit as U12).</td></tr>
+    <tr><td class="num"><span class="issue">U19</span></td><td>Animation and rigging</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/218">#218</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U20</span></td><td>Physics and simulation</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/219">#219</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U21</span></td><td>Render and engine features</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/220">#220</a></td><td>Light radius (soft shadows) and light types: the path tracer has no area lights yet. Power, colour, lens and the active camera are done.</td></tr>
+    <tr><td class="num"><span class="issue">U22</span></td><td>Library, versions, collaboration and AI</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/221">#221</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U23</span></td><td>Preferences</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/222">#222</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U24</span></td><td>Workspaces and layout persistence</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/223">#223</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U25</span></td><td>Onboarding and help</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/224">#224</a></td><td><span class="muted">—</span></td></tr>
+    <tr><td class="num"><span class="issue">U26</span></td><td>Keyboard navigation and accessibility</td><td><span class="st part">Gaps</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/226">#226</a></td><td>A reduced-motion preference.</td></tr>
+    <tr><td class="num"><span class="issue">U27</span></td><td>Release v0.12.0</td><td><span class="st done">Done</span></td><td class="num"><a href="https://github.com/bartbeecoders/beemodel/pull/227">#227</a></td><td><span class="muted">—</span></td></tr>
+  </table></div>
+  <p class="muted">Later phases added more UI on top of this one: the material editor (v0.13.0), the Preferences dialog and AI connections (v0.14.0) and Blender files (v0.15.0).</p>
+</section>
 
 <!-- ============================================================ -->
 <section id="goals">
@@ -350,7 +401,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
 <!-- ============================================================ -->
 <section id="improvements">
   <h2>Improvement list</h2>
-  <p class="sub">27 issues in four stages, tracked as issues #170–#196 in the <a href="https://github.com/bartbeecoders/beemodel/milestone/11">v0.12.0 milestone</a>. Each is delivered as its own PR.</p>
+  <p class="sub">27 issues in four stages, tracked as issues #170–#196 in the <a href="https://github.com/bartbeecoders/beemodel/milestone/11">v0.12.0 milestone</a>. Each is delivered as its own PR. All are merged; each card ends with its PR and anything still open.</p>
 
   <div class="stage">Stage A — Foundation</div>
   <div class="phase"><div class="pn"><b>U1</b><a href="https://github.com/bartbeecoders/beemodel/issues/170">#170</a></div><div class="card accent"><h3>Fixes and quick wins</h3><ul>
@@ -360,52 +411,52 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <li>Remove the stale splitter hint and the framebuffer size from the status bar. Remove the debug rows from Properties.</li>
     <li>Show a hand cursor over buttons, menu titles and tabs (<code>CUR_POINTER</code> exists but is unused).</li>
     <li>Make <code>beemodel scene.bee</code> open a file from the command line or a file manager.</li>
-    <li>Mark unsaved changes with a dot in the title.</li></ul></div></div>
+    <li>Mark unsaved changes with a dot in the title.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/198">PR #198</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U2</b><a href="https://github.com/bartbeecoders/beemodel/issues/171">#171</a></div><div class="card accent"><h3>Theme table and drawing primitives</h3><ul>
     <li>Move colours from <code>COL_*</code> constants into a theme table in memory, with Dark, Light and High contrast themes.</li>
     <li>New primitives: alpha fill, rounded rect, anti-aliased lines and circles, drop shadow, icon blit with tint.</li>
     <li>Font roles Body / Small / Heading / Mono, with a heading weight made by synthetic emboldening when there is no bold face.</li>
-    <li>A UI scale multiplier on top of the compositor scale: moved to U23 (Preferences), since it means separating the surface size from the layout size in <code>wayland.s</code>.</li></ul></div></div>
+    <li>A UI scale multiplier on top of the compositor scale: moved to U23 (Preferences), since it means separating the surface size from the layout size in <code>wayland.s</code>.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/199">PR #199</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U3</b><a href="https://github.com/bartbeecoders/beemodel/issues/172">#172</a></div><div class="card accent"><h3>Widget toolkit</h3><ul>
     <li><code>src/widgets.s</code>: an immediate-mode toolkit with stable widget ids and hot, active and focus state.</li>
     <li>Widgets: button, icon button, toggle, checkbox, number field (scrub, type, expressions, units, reset), slider, dropdown, text field, colour swatch, collapsible section, tabs, scroll view with scrollbar, list rows.</li>
     <li>Port the Properties sections (modifiers, material, physics, redo panel) from their hand-made hit codes to the toolkit.</li>
-    <li>Add a <code>ui_tree</code> MCP tool that lists each widget's id, rect, value and state, so tests click by name.</li></ul></div></div>
+    <li>Add a <code>ui_tree</code> MCP tool that lists each widget's id, rect, value and state, so tests click by name.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/201">PR #201</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U4</b><a href="https://github.com/bartbeecoders/beemodel/issues/173">#173</a></div><div class="card accent"><h3>Tooltips and operator state</h3><ul>
     <li>Tooltips on hover, showing the label, the shortcut and the operator <code>doc</code>.</li>
-    <li>An optional <code>poll</code> function per operator: menus, buttons and the palette grey out what can't run and say why ("needs a mesh in edit mode").</li></ul></div></div>
+    <li>An optional <code>poll</code> function per operator: menus, buttons and the palette grey out what can't run and say why ("needs a mesh in edit mode").</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/202">PR #202</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U5</b><a href="https://github.com/bartbeecoders/beemodel/issues/174">#174</a></div><div class="card accent"><h3>Icon set</h3><ul>
     <li><code>tools/genicons.py</code> turns small vector definitions into <code>src/icons.inc</code> alpha masks.</li>
     <li>About 100 icons: object types, modes, tools, brushes, shading, eye and lock, play controls, file types, status.</li>
-    <li>Use them in the Tools pane, the area headers and the Outliner.</li></ul></div></div>
+    <li>Use them in the Tools pane, the area headers and the Outliner.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/203">PR #203</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U6</b><a href="https://github.com/bartbeecoders/beemodel/issues/175">#175</a></div><div class="card accent"><h3>Menus, context menus and pies</h3><ul>
     <li>Menus get submenus (Import ▸, Export ▸, Recent ▸), disabled items, scrolling and keyboard navigation (arrows, Enter, mnemonics, F10).</li>
     <li>RMB context menus in the viewport (per mode), Outliner, Properties fields, asset tiles, node editor, timeline and dope sheet, and file browser.</li>
     <li>Pie menus for shading (<kbd>Z</kbd>), mode (<kbd>Ctrl+Tab</kbd>) and snap (<kbd>Shift+S</kbd>): hold and flick, or click.</li>
-    <li>A new Select menu, and the menu bar reshuffled into File / Edit / View / Select / Add / Object / Render / Window / Help.</li></ul></div></div>
+    <li>A new Select menu, and the menu bar reshuffled into File / Edit / View / Select / Add / Object / Render / Window / Help.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/204">PR #204</a>. Still open:<ul><li>A mode pie (<kbd>Ctrl+Tab</kbd>) and a snap pie (<kbd>Shift+S</kbd>); only the shading pie (<kbd>Z</kbd>) exists.</li><li>Context menus on Properties fields, the timeline and dope sheet, and the file browser. The viewport, outliner, area headers, node editor and asset tiles have them.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U7</b><a href="https://github.com/bartbeecoders/beemodel/issues/176">#176</a></div><div class="card accent"><h3>Dialogs and operator forms</h3><ul>
     <li>A modal dialog framework: dimmed backdrop, title, focus ring, Enter / Esc.</li>
     <li>"Save changes?" before New, Open, Exit and closing the window.</li>
     <li><b>Operator parameter descriptors</b> (<code>OPARAM</code>: name, type, default, range, unit). Any operator with arguments, run from a menu, button or F3, opens a generated form instead of a pre-filled console line. This turns most console-only features into UI at once.</li>
-    <li>The redo panel becomes the same form, live-editing the last operation.</li></ul></div></div>
+    <li>The redo panel becomes the same form, live-editing the last operation.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/205">PR #205</a>. Still open:<ul><li>The redo panel as the same generated form, live-editing the last operation. It still draws and hit-tests on its own.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U8</b><a href="https://github.com/bartbeecoders/beemodel/issues/177">#177</a></div><div class="card accent"><h3>File browser</h3><ul>
     <li>A file browser dialog built on <code>getdents64</code>: folders first, sorting, type filter, path bar with Tab completion, and bookmarks (Home, ~/BeeModel, recent folders).</li>
     <li>Keyboard and mouse navigation, a thumbnail preview of <code>.bee</code> files, and a confirmation before overwriting.</li>
-    <li>Used by every path parameter: open, save, import, export, images, HDRI, scripts, packs.</li></ul></div></div>
+    <li>Used by every path parameter: open, save, import, export, images, HDRI, scripts, packs.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/206">PR #206</a>. Still open:<ul><li>A thumbnail preview of <code>.bee</code> files.</li><li>Tab completion in the path field.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U9</b><a href="https://github.com/bartbeecoders/beemodel/issues/178">#178</a></div><div class="card accent"><h3>Clipboard and text editing</h3><ul>
     <li>Wayland <code>wl_data_device</code> copy and paste in all text fields.</li>
-    <li>Ctrl+C / Ctrl+V on fields; word jumps and select-all in text fields.</li></ul></div></div>
+    <li>Ctrl+C / Ctrl+V on fields; word jumps and select-all in text fields.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/207">PR #207</a>. Still open:<ul><li>Word jumps (<kbd>Ctrl+←/→</kbd>) in text fields. Select-all, copy, cut and paste are done.</li></ul></div></div></div>
 
   <div class="stage">Stage B — Core editors</div>
   <div class="phase"><div class="pn"><b>U10</b><a href="https://github.com/bartbeecoders/beemodel/issues/179">#179</a></div><div class="card blue"><h3>Properties editor rebuilt</h3><ul>
     <li>A vertical tab strip with icons: Tool, Object, Modifiers, Data (mesh / light / camera / curve / sketch / armature), Material, Physics, Constraints, CAD, Scene &amp; World, Render.</li>
     <li>Scrolling and collapsible panels.</li>
     <li>Editable name, transform, visibility, colour and parent.</li>
-    <li>Light settings (type, power, colour, radius) and camera settings (focal length, clip, set active): moved to U21, because lights and cameras have no per-object settings yet (one global light power, a fixed lens) and need new scene data first.</li></ul></div></div>
+    <li>Light settings (type, power, colour, radius) and camera settings (focal length, clip, set active): moved to U21, because lights and cameras have no per-object settings yet (one global light power, a fixed lens) and need new scene data first.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/208">PR #208</a>. Still open:<ul><li>A Parent field: objects have no parent in the scene data yet (see U13).</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U11</b><a href="https://github.com/bartbeecoders/beemodel/issues/180">#180</a></div><div class="card blue"><h3>Viewport header and navigation</h3><ul>
     <li>A header with a mode dropdown, View / Select / Object menus, select-mode buttons (vertex / edge / face), snapping, pivot, orientation, shading buttons and an overlays popover.</li>
     <li>A clickable navigation gizmo (click an axis to align the view, drag to orbit) and zoom / pan handles.</li>
-    <li>Move the permanent hint lines off the canvas into the status bar.</li></ul></div></div>
+    <li>Move the permanent hint lines off the canvas into the status bar.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/209">PR #209</a>. Still open:<ul><li>View / Select / Object menus, pivot, orientation and an overlays popover in the viewport header.</li><li>Dragging the navigation gizmo to orbit, and zoom / pan handles. Clicking an axis works.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U12</b><a href="https://github.com/bartbeecoders/beemodel/issues/181">#181</a></div><div class="card blue"><h3>Mode-aware tool shelf and tool settings bar</h3><ul>
     <li>The Tools pane follows the mode:
       <ul>
@@ -416,64 +467,64 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
         <li>Sketch: line, circle, rectangle, arc, point, dimension and the constraints.</li>
         <li>Curve and armature: their own tools.</li>
       </ul></li>
-    <li>A tool settings bar under the viewport header: radius, strength, symmetry XYZ, pressure, dyntopo and detail, falloff.</li></ul></div></div>
+    <li>A tool settings bar under the viewport header: radius, strength, symmetry XYZ, pressure, dyntopo and detail, falloff.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/210">PR #210</a>. Still open:<ul><li>Falloff and dyntopo detail size in the brush settings bar.</li><li>Y and Z sculpt symmetry: the sculpt engine only mirrors across X.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U13</b><a href="https://github.com/bartbeecoders/beemodel/issues/182">#182</a></div><div class="card blue"><h3>Outliner tree</h3><ul>
     <li>A hierarchy (parents, bones, modifiers) with type icons and eye / lock / camera toggles.</li>
     <li>Rename with F2 or a double-click, drag to reparent, a filter field and a scrollbar.</li>
-    <li>Ctrl and Shift range select, and an RMB menu.</li></ul></div></div>
+    <li>Ctrl and Shift range select, and an RMB menu.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/211">PR #211</a>. Still open:<ul><li>A hierarchy (parents, bones, modifiers as children) and drag to reparent: this needs object parenting in the scene data first.</li><li>Lock and camera toggles (only the eye exists), and Ctrl / Shift range select.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U14</b><a href="https://github.com/bartbeecoders/beemodel/issues/183">#183</a></div><div class="card blue"><h3>Status bar, toasts and progress</h3><ul>
     <li>Mouse and key hints for the current mode and tool.</li>
     <li>Coloured toasts for operator results and errors; click one to open the console.</li>
     <li>Scene statistics, and job chips with progress for render, bake, import and simulation.</li>
-    <li>Clickable chips for AI tier, co-editing and live link.</li></ul></div></div>
+    <li>Clickable chips for AI tier, co-editing and live link.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/212">PR #212</a>. Still open:<ul><li>Job chips for bake, import and simulation (render progress, co-editing and AI have chips), and a live-link chip.</li></ul></div></div></div>
 
   <div class="stage">Stage C — Feature panels: everything gets a UI</div>
   <div class="phase"><div class="pn"><b>U15</b><a href="https://github.com/bartbeecoders/beemodel/issues/184">#184</a></div><div class="card green"><h3>Files, export and print</h3><ul>
     <li>Import ▸ and Export ▸ submenus for every format (OBJ, STL, glTF, 3MF, STEP, DXF, SVG, PDF, images), and Recent ▸.</li>
     <li>Export options: selection only, up axis, scale, binary.</li>
     <li>A drawing export dialog: sheet, views, title block.</li>
-    <li>A print-check dialog and a results panel listing the issues; clicking one zooms to it.</li></ul></div></div>
+    <li>A print-check dialog and a results panel listing the issues; clicking one zooms to it.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/213">PR #213</a>. Still open:<ul><li>The drawing export dialog (sheet, views, title block): the PDF drawing writer has to take those options first.</li><li>A print-check results panel where clicking an issue zooms to it. Print Check is a form, and the results go to the console.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U16</b><a href="https://github.com/bartbeecoders/beemodel/issues/185">#185</a></div><div class="card green"><h3>Modeling and CAD</h3><ul>
     <li>Add › Sketch on a chosen plane, a sketch toolbar and constraint buttons.</li>
     <li>Feature dialogs: pad, pocket, revolve, hole, shell, fillet, chamfer, pattern, infill.</li>
     <li>An editable feature tree: edit, suppress, reorder, health icons.</li>
     <li>A parameter table with expressions, a units dropdown and the B-rep kernel toggle.</li>
     <li>A mechanism joints panel and a measure / mass properties panel.</li>
-    <li>Forms for SDF shapes, L-systems and WFC.</li></ul></div></div>
+    <li>Forms for SDF shapes, L-systems and WFC.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/214">PR #214</a>. Still open:<ul><li>Reordering features in the feature tree. Edit, the On toggle (suppress) and health dots are done.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U17</b><a href="https://github.com/bartbeecoders/beemodel/issues/186">#186</a></div><div class="card green"><h3>Materials, world, images and procedural</h3><ul>
     <li>A colour picker popup (HSV square, hue strip, hex, eyedropper from the viewport).</li>
     <li>A World panel (HDRI, strength, rotation) and an image list.</li>
     <li>Node editor header: tree selector, New, assign to object, a searchable Add menu.</li>
     <li>A curve Data panel.</li>
-    <li>Object and tree pickers for modifier fields (boolean target, armature, node tree, logic graph). Multires buttons.</li></ul></div></div>
+    <li>Object and tree pickers for modifier fields (boolean target, armature, node tree, logic graph). Multires buttons.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/216">PR #216</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U18</b><a href="https://github.com/bartbeecoders/beemodel/issues/187">#187</a></div><div class="card green"><h3>Sculpt, paint, UV and bake</h3><ul>
     <li>Brush sliders, a pressure toggle and symmetry buttons.</li>
     <li>Paint colour swatches and a layer stack panel (opacity, blend, eye, merge, reorder).</li>
     <li>A weight value slider and a bone picker.</li>
     <li>A UV menu and a UV editor header.</li>
-    <li>A bake dialog (low / high mesh, map type, image, distance).</li></ul></div></div>
+    <li>A bake dialog (low / high mesh, map type, image, distance).</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/217">PR #217</a>. Still open:<ul><li>Y / Z symmetry buttons (same limit as U12).</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U19</b><a href="https://github.com/bartbeecoders/beemodel/issues/188">#188</a></div><div class="card green"><h3>Animation and rigging</h3><ul>
     <li>Timeline transport: play / step / jump, frame field, range and fps, auto-key.</li>
     <li>A key menu (interpolation, handles), an actions and layers panel, a drivers panel, and a shape-key list with sliders.</li>
     <li>Keyframes from any field.</li>
     <li>A bone list and bone properties, a constraint stack with IK settings, and Parent › With Automatic Weights.</li>
-    <li>Motion path and onion skin settings.</li></ul></div></div>
+    <li>Motion path and onion skin settings.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/218">PR #218</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U20</b><a href="https://github.com/bartbeecoders/beemodel/issues/189">#189</a></div><div class="card green"><h3>Physics and simulation</h3><ul>
     <li>A cloth / soft body panel (type, compliances, pins from the selection, wind, self collision).</li>
     <li>Rigid joint creation from two selected objects.</li>
-    <li>A simulation cache panel (bake, free, budget), with the cached range drawn in the timeline.</li></ul></div></div>
+    <li>A simulation cache panel (bake, free, budget), with the cached range drawn in the timeline.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/219">PR #219</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U21</b><a href="https://github.com/bartbeecoders/beemodel/issues/190">#190</a></div><div class="card green"><h3>Render and engine features</h3><ul>
     <li>A render settings panel: size, samples, bounces, denoise, and GPU on/off with its status.</li>
     <li>A Render area header (start, stop, save, denoise, pass counter), and Render to File.</li>
     <li>Panels for virtualized geometry and world partition, plus a minimap toggle.</li>
     <li>Probe and lightmap bake panels with progress.</li>
     <li>A play mode button and its settings.</li>
-    <li>Per-object light and camera settings (new scene data, saved in .bee): power, colour, radius, lens, the active camera.</li></ul></div></div>
+    <li>Per-object light and camera settings (new scene data, saved in .bee): power, colour, radius, lens, the active camera.</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/220">PR #220</a>. Still open:<ul><li>Light radius (soft shadows) and light types: the path tracer has no area lights yet. Power, colour, lens and the active camera are done.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U22</b><a href="https://github.com/bartbeecoders/beemodel/issues/191">#191</a></div><div class="card green"><h3>Library, versions, collaboration and AI</h3><ul>
     <li>Asset browser header (search, kind and tag filters, tile size), tile menu, and a "Save to Library" dialog.</li>
     <li>A new <b>Versions</b> editor: branches, log, commit box, diff toggle, a merge conflict list.</li>
     <li>A <b>Collaboration</b> panel: host / join, peers with Follow, the agent peer, live link serve / connect.</li>
-    <li>An AI panel: tier dropdown, MCP socket and clients, and co-pilot proposals with Accept / Revert.</li></ul></div></div>
+    <li>An AI panel: tier dropdown, MCP socket and clients, and co-pilot proposals with Accept / Revert.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/221">PR #221</a>.</div></div></div>
 
   <div class="stage">Stage D — Personalisation and polish</div>
   <div class="phase"><div class="pn"><b>U23</b><a href="https://github.com/bartbeecoders/beemodel/issues/192">#192</a></div><div class="card violet"><h3>Preferences</h3><ul>
@@ -487,23 +538,23 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
         <li>AI: default tier, MCP on/off.</li>
       </ul></li>
     <li>UI scale (75–200%) on top of the compositor's scale.</li>
-    <li>Saved to <code>~/.config/beemodel/prefs</code>. Environment variables still override it.</li></ul></div></div>
+    <li>Saved to <code>~/.config/beemodel/prefs</code>. Environment variables still override it.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/222">PR #222</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U24</b><a href="https://github.com/bartbeecoders/beemodel/issues/193">#193</a></div><div class="card violet"><h3>Workspaces and layout persistence</h3><ul>
     <li>Layouts are saved in <code>.bee</code> files and in the preferences.</li>
     <li>Workspace tabs: Modeling, Sculpt, CAD, Shading, Animation, World, plus custom ones. Ctrl+PageUp/PageDown switches.</li>
-    <li>Join areas by dragging a corner; swap them by dragging a header.</li></ul></div></div>
+    <li>Join areas by dragging a corner; swap them by dragging a header.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/223">PR #223</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U25</b><a href="https://github.com/bartbeecoders/beemodel/issues/194">#194</a></div><div class="card violet"><h3>Onboarding and help</h3><ul>
     <li>A welcome screen: recent files, templates (empty, product, character, terrain), sample scenes, keymap choice.</li>
     <li>Quick actions in an empty viewport.</li>
     <li>A searchable F1 shortcut overlay, replacing the console dump.</li>
-    <li>A help area that shows the docs of whatever the mouse is over.</li></ul></div></div>
+    <li>A help area that shows the docs of whatever the mouse is over.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/224">PR #224</a>.</div></div></div>
   <div class="phase"><div class="pn"><b>U26</b><a href="https://github.com/bartbeecoders/beemodel/issues/195">#195</a></div><div class="card violet"><h3>Keyboard navigation and accessibility</h3><ul>
     <li>F6 area focus, a visible focus ring, Tab order in every panel and dialog.</li>
     <li>The high-contrast theme and colour-blind axes.</li>
-    <li>Reduced motion, and a contrast check in CI (text ≥ 4.5:1 in every theme).</li></ul></div></div>
+    <li>Reduced motion, and a contrast check in CI (text ≥ 4.5:1 in every theme).</li></ul><div class="exit status"><span class="st part">Done, with gaps</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/226">PR #226</a>. Still open:<ul><li>A reduced-motion preference.</li></ul></div></div></div>
   <div class="phase"><div class="pn"><b>U27</b><a href="https://github.com/bartbeecoders/beemodel/issues/196">#196</a></div><div class="card violet"><h3>Release v0.12.0</h3><ul>
     <li>A "console-free" walkthrough test: model, CAD feature, material, render, save and reopen, using only clicks and keys located through <code>ui_tree</code>.</li>
-    <li>Docs (<code>docs/UI.md</code>), regenerated goldens, a UI frame-time benchmark, CHANGELOG and the tag.</li></ul></div></div>
+    <li>Docs (<code>docs/UI.md</code>), regenerated goldens, a UI frame-time benchmark, CHANGELOG and the tag.</li></ul><div class="exit status"><span class="st done">Done</span> Merged in <a href="https://github.com/bartbeecoders/beemodel/pull/227">PR #227</a>.</div></div></div>
 </section>
 
 <!-- ============================================================ -->
