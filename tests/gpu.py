@@ -297,9 +297,9 @@ def live_view():
     f, m, q = fake(BEEMODEL_GPU='any')
     try:
         g = lambda *ks: [int(float(x)) for x in q('print(%s)' % ', '.join('gpu(%d)' % k for k in ks)).split()]
-        def settle(want, secs=60):                      # samples in the image
-            t = time.time()
-            while time.time() - t < secs and g(8)[0] < want:
+        def settle(want, secs=60):                      # samples in the image (no answer:
+            t = time.time()                             #  still busy, the scene going up
+            while time.time() - t < secs and (g(8) or [-1])[0] < want:  # to a slow device)
                 f.pump(0.2)
             f.pump(0.3)
         q(SCENE + 'view(30, 20, 9, 0, 0, 0)\nop("view.shading_material")')
@@ -337,7 +337,7 @@ def live_view():
         settle(64, 180)
         conv = f.image().crop(BOX)
         mad = compare_img(ray, conv)
-        check(g(8)[0] == 64 and mad < 20,
+        check((g(8) or [0])[0] == 64 and mad < 20,
               f'the raycast looks like the path-traced image at 64 samples (mean difference {mad:.1f} levels)')
         few = {}                                        # denoised, every frame
         for dn in (0, 1):
