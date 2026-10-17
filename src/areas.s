@@ -530,17 +530,7 @@ area_hit:
     mov     eax, HIT_CANVAS
     cmp     ecx, ED_VIEWPORT
     jne     1f
-    mov     edi, ebx                    # the redo panel sits on the canvas
-    mov     esi, r12d
-    call    redo_hit
-    mov     edx, r13d
-    test    eax, eax
-    js      0f
-    mov     edx, eax
-    mov     eax, HIT_REDO
-    jmp     .Lah_ret
-0:  mov     eax, HIT_CANVAS
-    jmp     .Lah_ret
+    jmp     .Lah_ret                    # (the redo panel: widgets)
 1:
     cmp     ecx, ED_TOOLS
     je      .Lah_tools
