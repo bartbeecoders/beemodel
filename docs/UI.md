@@ -64,7 +64,8 @@ The menu bar holds every command, in File, Edit, View, Select, Add, Object, Mesh
 - folders come first;
 - a click picks, and a double-click (or Enter) opens or takes;
 - Backspace goes up;
-- the path field takes a typed folder or file;
+- the path field takes a typed folder or file, and Tab completes a name in it (when several match, a second Tab shows them in the list);
+- opening a scene shows a picture of it beside the list: BeeModel keeps a small picture of the 3D viewport in each `.bee` file it saves from the window;
 - saving over a file asks first.
 
 Exports add their own options: selected objects only, the up axis and the scale.

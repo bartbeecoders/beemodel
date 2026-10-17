@@ -606,6 +606,7 @@ def main():
     outliner_ui()
     status_ui()
     files_more()
+    files_complete()
     cad_ui()
     materials_more()
     paint_ui()
@@ -6509,6 +6510,67 @@ def clipboard():
     check(n == 'alpha beta_2 delta', f'Ctrl+Shift+Left selects the word before (typing replaces it) ({n!r})')
     n = rename('one two.three', (4, 105), (4, 14))
     check(n == 'one three', f'Ctrl+Left then Ctrl+Backspace removes the word before ({n!r})')
+    f.proc.kill()
+
+
+def files_complete():
+    """F2 (#268): the file browser's path field completes with Tab, and Open
+    shows the picture saved in a .bee file."""
+    print('  -- file browser: Tab completion, scene pictures --')
+    import struct
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    bee = os.path.join(f.home, 'BeeModel')
+    os.makedirs(os.path.join(bee, 'parts'), exist_ok=True)
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    rows = lambda: [w['label'] for w in ui_tree(m) if w['kind'] == 'row' and w['name'] == 'files.row']
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def type_into(name, text):
+        click(name); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.2)
+    f.mods(5); f.key(31); f.mods(0)            # Save As: pattern.bee
+    type_into('files.name', 'pattern')
+    click('files.ok')
+    path = os.path.join(bee, 'pattern.bee')
+    data = open(path, 'rb').read() if os.path.exists(path) else b''
+    tag, size, w, h = struct.unpack('<4sIII', data[8:24]) if len(data) > 24 else (b'', 0, 0, 0)
+    check(tag == b'THMB' and (w, h) == (192, 120) and size == 8 + w * h * 4,
+          f'saving from the window puts a 192 x 120 picture first in the file ({tag}, {w} x {h})')
+    pix = set(struct.unpack_from('<%dI' % (w * h), data, 24)) if tag == b'THMB' else set()
+    check(len(pix) > 20, f'the picture is the viewport, not a blank ({len(pix)} colours)')
+    if tag == b'THMB':                         # the same scene without one
+        open(os.path.join(bee, 'plain.bee'), 'wb').write(data[:8] + data[16 + size:])
+    f.mods(4); f.key(24); f.mods(0)            # Ctrl+O
+    check(rows() == ['parts', 'pattern.bee', 'plain.bee'], f'Open lists them ({rows()})')
+    lab = lambda: (widget(m, 'files.preview') or {}).get('label')
+    check(lab() == 'Pick a scene to see it', f'nothing picked: no picture ({lab()})')
+    x, y = [(r['x'] + 30, r['y'] + 11) for r in ui_tree(m) if r.get('label') == 'pattern.bee'][0]
+    f.click(x, y); f.pump(0.3)
+    check(lab() == 'Preview', f'picking a scene shows its picture ({lab()})')
+    pw = widget(m, 'files.preview')
+    img = f.image()
+    cols = {img.getpixel((pw['x'] + 4 + i * 9, pw['y'] + 4 + j * 7)) for i in range(20) for j in range(16)}
+    check(len(cols) > 8, f'the picture is drawn in the browser ({len(cols)} colours)')
+    f.shot('files_preview.png')
+    x, y = [(r['x'] + 30, r['y'] + 11) for r in ui_tree(m) if r.get('label') == 'plain.bee'][0]
+    f.click(x, y); f.pump(0.3)
+    check(lab() == 'No preview', f'a file saved without a window has none ({lab()})')
+    click('files.path')                        # Tab completion
+    f.mods(4); f.key(30); f.mods(0)
+    f.type(bee + '/pa'); f.key(15); f.pump(0.2)
+    check(rows() == ['parts', 'pattern.bee', 'plain.bee'] and 'files.path' in names(),
+          'Tab with several matches (parts, pattern.bee) keeps typing and lists them')
+    f.type('r'); f.key(15); f.key(28); f.pump(0.3)
+    p = (widget(m, 'files.path') or {}).get('value', '')
+    check(p.endswith('/BeeModel/parts'), f'"par" + Tab completes to the folder parts/ ({p})')
+    click('files.path')
+    f.mods(4); f.key(30); f.mods(0)
+    f.type(bee + '/pl'); f.key(15); f.key(28); f.pump(0.3)
+    n = (widget(m, 'files.name') or {}).get('value', '')
+    check(n == 'plain.bee', f'"pl" + Tab completes a file name; Enter takes it ({n})')
     f.proc.kill()
 
 

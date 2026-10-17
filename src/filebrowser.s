@@ -9,7 +9,9 @@
 #  pick it, double-click (or Enter) to open a folder or take a file; the
 #  path field takes a typed folder or file (~ works); Backspace goes up; the
 #  places on the left are home, ~/BeeModel, / and the last folders used.
-#  Saving over a file asks first.
+#  Tab in the path field completes a folder or file name (a second Tab
+#  lists the ones that match). Opening a scene shows the picture saved in
+#  the selected .bee file (thumb.s). Saving over a file asks first.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -24,6 +26,8 @@
 .globl fb_ok
 .globl fb_after
 .globl fb_dir
+.globl fb_complete
+.globl wd_fb_path
 
 .equ FB_W,      760
 .equ FB_H,      500
@@ -31,6 +35,8 @@
 .equ MAXENT,    4096
 .equ NAMES_SZ,  262144
 .equ PLACES_W,  150
+.equ PREV_W,    192                     # a scene's picture (thumb.s TW x TH)
+.equ PREV_H,    120
 .equ NRECENT,   4
 .equ SYS_OPEN,      2
 .equ SYS_STAT,      4
@@ -57,6 +63,11 @@ fb_names:       .skip NAMES_SZ
 fb_dents:       .skip 32768
 fb_stat:        .skip 144
 fb_recent:      .skip NRECENT*512
+fb_cdir:        .skip 512               # Tab completion: the folder looked in
+fb_cmatch:      .skip 256               #  the first name that matched
+fb_cfull:       .skip 768
+fb_tpath:       .skip 768               # the scene whose picture is shown
+fb_tnext:       .skip 768
 .align 4
 fb_n:           .skip 4
 fb_sel:         .skip 4
@@ -68,6 +79,12 @@ fb_x:           .skip 4                 # the box
 fb_y:           .skip 4
 .align 8
 fb_last_t:      .skip 8
+.align 4
+fb_cn:          .skip 4                 # Tab completion: names that matched
+fb_clen:        .skip 4                 #  the part they all share
+fb_cdirn:       .skip 4                 #  the first match is a folder
+fb_bee:         .skip 4                 # the filter takes .bee files: preview
+fb_tok:         .skip 4                 # fb_tpath's picture is in th_view
 
 .section .rodata
 s_home:         .asciz "HOME="
@@ -87,6 +104,9 @@ s_empty_dir:    .asciz "(no files here)"
 s_files:        .asciz "Files: "
 s_slash:        .asciz "/"
 s_dotdot:       .asciz ".."
+s_ext_bee:      .asciz "bee"
+s_prev_no:      .asciz "No preview"
+s_prev_none:    .asciz "Pick a scene to see it"
 
 .text
 
@@ -108,6 +128,9 @@ WIDGET wd_fb_place,  WK_ROW,    "files.place", cb=fb_place_cb
 WIDGET wd_fb_ok,     WK_BUTTON, "files.ok", "Open", flags=WGF_PRIMARY, aux=op_fb_ok
 WIDGET wd_fb_cancel, WK_BUTTON, "files.cancel", "Cancel", aux=op_dlg_cancel
 WIDGET wd_fb_replace, WK_BUTTON, "files.replace", "Replace", flags=WGF_PRIMARY, aux=op_fb_ok
+WIDGET wd_fb_prev,   WK_BUTTON, "files.preview", "Preview", flags=WGF_NODRAW, tip="The scene as it was last saved"
+WIDGET wd_fb_prev_no, WK_BUTTON, "files.preview", "No preview", flags=WGF_NODRAW, tip="This scene was saved without a picture (by a script, or before pictures were kept)"
+WIDGET wd_fb_prev_none, WK_BUTTON, "files.preview", "Pick a scene to see it", flags=WGF_NODRAW
 
 # ---- opening ---------------------------------------------------------------------
 # fb_open(rdi=operator, rsi=its WK_PATH widget, rdx=default file name or 0)
@@ -118,6 +141,22 @@ fb_open:
     mov     [rip+fb_op], rdi
     mov     [rip+fb_desc], rsi
     mov     r13, rdx
+    mov     dword ptr [rip+fb_bee], 0   # .bee files in the filter: a preview
+    mov     byte ptr [rip+fb_tpath], 0
+    mov     rbx, [rsi+WD_AUX]
+    test    rbx, rbx
+    jz      38f
+36: mov     rsi, [rbx]
+    test    rsi, rsi
+    jz      38f
+    lea     rdi, [rip+s_ext_bee]
+    call    str_eq
+    test    eax, eax
+    jnz     37f
+    add     rbx, 8
+    jmp     36b
+37: mov     dword ptr [rip+fb_bee], 1
+38:
     mov     dword ptr [rip+fb_overwrite], 0
     mov     dword ptr [rip+fb_sel], -1
     mov     dword ptr [rip+fb_scroll], 0
@@ -439,6 +478,251 @@ ent_name:
     add     rax, rcx
     ret
 
+# ---- Tab completion ----------------------------------------------------------------
+# fb_complete - (Tab in the path field; tf_buf is the field's text) the
+#   last part of the path completed as far as the names that start with it
+#   agree; one folder gets its '/'. When Tab can add nothing, the list shows
+#   that folder with the first match selected.
+fb_complete:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    lea     rbx, [rip+tf_buf]
+    mov     ecx, [rip+tf_len]
+    mov     ebp, -1                     # ebp = the last '/'
+    xor     eax, eax
+1:  cmp     eax, ecx
+    jae     2f
+    cmp     byte ptr [rbx+rax], '/'
+    jne     11f
+    mov     ebp, eax
+11: inc     eax
+    jmp     1b
+2:  test    ebp, ebp                    # the folder: typed, else the one shown
+    jns     3f
+    lea     rdi, [rip+fb_cdir]
+    lea     rsi, [rip+fb_dir]
+    call    scpy
+    jmp     4f
+3:  movzx   r12d, byte ptr [rbx+rbp]    # (the text cut after the '/' a moment)
+    mov     edx, ebp
+    test    edx, edx
+    jnz     31f
+    inc     edx                         # "/x": the root
+31: movzx   r13d, byte ptr [rbx+rdx]
+    mov     [rsp], edx
+    mov     byte ptr [rbx+rdx], 0
+    mov     rdi, rbx
+    call    path_expand
+    mov     edx, [rsp]
+    mov     [rbx+rdx], r13b
+    lea     rdi, [rip+fb_cdir]
+    mov     rsi, rax
+    call    scpy
+4:  lea     r12d, [rbp+1]               # r12d = where the prefix starts
+    mov     r13d, [rip+tf_len]
+    sub     r13d, r12d                  # r13d = its length
+    mov     dword ptr [rip+fb_cn], 0
+    mov     dword ptr [rip+fb_clen], 0
+    lea     rdi, [rip+fb_cdir]
+    mov     esi, O_DIRECTORY
+    xor     edx, edx
+    mov     eax, SYS_OPEN
+    syscall
+    test    rax, rax
+    js      .Lfc_out
+    mov     r14d, eax                   # fd
+.Lfc_read:
+    mov     edi, r14d
+    lea     rsi, [rip+fb_dents]
+    mov     edx, 32768
+    mov     eax, SYS_GETDENTS64
+    syscall
+    test    rax, rax
+    jle     .Lfc_close
+    mov     r15, rax                    # bytes
+    xor     ebp, ebp                    # offset
+.Lfc_ent:
+    cmp     rbp, r15
+    jae     .Lfc_read
+    lea     rdi, [rip+fb_dents]
+    add     rdi, rbp
+    movzx   eax, word ptr [rdi+16]
+    add     rbp, rax
+    lea     rsi, [rdi+19]               # rsi = the name
+    cmp     byte ptr [rsi], '.'         # hidden: only when asked for
+    jne     5f
+    test    r13d, r13d
+    jz      .Lfc_ent
+    cmp     byte ptr [rbx+r12], '.'
+    jne     .Lfc_ent
+5:  xor     ecx, ecx                    # starts with the prefix?
+51: cmp     ecx, r13d
+    jae     52f
+    lea     eax, [r12+rcx]
+    movzx   eax, byte ptr [rbx+rax]
+    cmp     al, [rsi+rcx]
+    jne     .Lfc_ent
+    inc     ecx
+    jmp     51b
+52: movzx   eax, byte ptr [rdi+18]      # a folder, or a file the filter takes
+    mov     [rsp], rsi
+    cmp     eax, DT_DIR
+    je      54f
+    cmp     eax, DT_LNK
+    je      53f
+    cmp     eax, DT_UNKNOWN
+    jne     55f
+53: mov     rdi, rsi
+    call    cfull
+    lea     rdi, [rip+fb_cfull]
+    call    is_dir
+    test    eax, eax
+    jnz     54f
+55: mov     rdi, [rsp]
+    call    ext_ok
+    test    eax, eax
+    jz      .Lfc_ent
+    xor     eax, eax
+    jmp     56f
+54: mov     eax, 1
+56: mov     rsi, [rsp]
+    cmp     dword ptr [rip+fb_cn], 0
+    jne     57f
+    mov     [rip+fb_cdirn], eax         # the first match: kept whole
+    lea     rdi, [rip+fb_cmatch]
+    call    scpy255
+    lea     rdi, [rip+fb_cmatch]
+    call    str_len
+    mov     [rip+fb_clen], eax
+    jmp     58f
+57: xor     ecx, ecx                    # later ones: what they share
+    lea     rdi, [rip+fb_cmatch]
+571:cmp     ecx, [rip+fb_clen]
+    jae     572f
+    mov     al, [rdi+rcx]
+    cmp     al, [rsi+rcx]
+    jne     572f
+    inc     ecx
+    jmp     571b
+572:mov     [rip+fb_clen], ecx
+58: inc     dword ptr [rip+fb_cn]
+    jmp     .Lfc_ent
+.Lfc_close:
+    mov     edi, r14d
+    mov     eax, SYS_CLOSE
+    syscall
+    cmp     dword ptr [rip+fb_cn], 0
+    je      .Lfc_out
+    mov     ecx, [rip+fb_clen]          # something to add?
+    cmp     ecx, r13d
+    ja      .Lfc_add
+    cmp     dword ptr [rip+fb_cn], 1    # one folder, complete: its '/'
+    jne     .Lfc_show
+    cmp     dword ptr [rip+fb_cdirn], 0
+    je      .Lfc_out
+    mov     eax, [rip+tf_len]
+    jmp     .Lfc_slash
+.Lfc_add:
+    mov     eax, [rip+tf_len]           # append fb_cmatch[prefix .. shared)
+    mov     edx, r13d
+61: cmp     edx, ecx
+    jae     62f
+    cmp     eax, 238
+    jae     62f
+    lea     rsi, [rip+fb_cmatch]
+    mov     r8b, [rsi+rdx]
+    mov     [rbx+rax], r8b
+    inc     eax
+    inc     edx
+    jmp     61b
+62: cmp     dword ptr [rip+fb_cn], 1    # the only match, a folder: '/'
+    jne     .Lfc_len
+    cmp     dword ptr [rip+fb_cdirn], 0
+    je      .Lfc_len
+.Lfc_slash:
+    cmp     eax, 238
+    jae     .Lfc_len
+    mov     byte ptr [rbx+rax], '/'
+    inc     eax
+.Lfc_len:
+    mov     byte ptr [rbx+rax], 0
+    mov     [rip+tf_len], eax
+    mov     [rip+tf_caret], eax
+    mov     [rip+tf_anchor], eax
+    jmp     .Lfc_out
+.Lfc_show:                              # nothing to add: list them
+    lea     rdi, [rip+fb_dir]
+    lea     rsi, [rip+fb_cdir]
+    call    scpy
+    call    fb_load
+    xor     ebp, ebp                    # the first name with the prefix
+71: cmp     ebp, [rip+fb_n]
+    jae     .Lfc_out
+    mov     edi, ebp
+    call    ent_name
+    xor     ecx, ecx
+72: cmp     ecx, r13d
+    jae     73f
+    lea     edx, [r12+rcx]
+    movzx   edx, byte ptr [rbx+rdx]
+    cmp     dl, [rax+rcx]
+    jne     74f
+    inc     ecx
+    jmp     72b
+73: mov     [rip+fb_sel], ebp
+    imul    eax, ebp, ROW_H
+    mov     [rip+fb_scroll], eax
+    jmp     .Lfc_out
+74: inc     ebp
+    jmp     71b
+.Lfc_out:
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# cfull(rdi=name) -> fb_cfull = fb_cdir + "/" + name
+cfull:
+    push    rdi
+    lea     rdi, [rip+fb_cfull]
+    lea     rsi, [rip+fb_cdir]
+    call    scpy
+    lea     rdi, [rip+fb_cfull]
+    call    str_len
+    lea     rdi, [rip+fb_cfull]
+    test    eax, eax
+    jz      1f
+    cmp     byte ptr [rdi+rax-1], '/'
+    je      2f
+1:  mov     byte ptr [rdi+rax], '/'
+    inc     eax
+2:  add     rdi, rax
+    pop     rsi
+    jmp     scpy
+
+# scpy255(rdi=dest, rsi=text) - at most 255 bytes
+scpy255:
+    xor     ecx, ecx
+1:  mov     al, [rsi+rcx]
+    mov     [rdi+rcx], al
+    test    al, al
+    jz      2f
+    inc     ecx
+    cmp     ecx, 255
+    jb      1b
+    mov     byte ptr [rdi+rcx], 0
+2:  ret
+
 # ---- paths -----------------------------------------------------------------------
 scpy:                                   # rdi = dest, rsi = text (511 max)
     xor     ecx, ecx
@@ -498,7 +782,17 @@ go_dir:
     lea     rdi, [rip+fb_dir]
     mov     rsi, rbx
     call    scpy
-    call    fb_load
+    lea     rdi, [rip+fb_dir]           # (no '/' at the end but the root's)
+    call    str_len
+    lea     rdi, [rip+fb_dir]
+1:  cmp     eax, 1
+    jbe     2f
+    cmp     byte ptr [rdi+rax-1], '/'
+    jne     2f
+    dec     eax
+    mov     byte ptr [rdi+rax], 0
+    jmp     1b
+2:  call    fb_load
 9:  pop     rbx
     ret
 
@@ -939,7 +1233,12 @@ fb_draw:
     jmp     4b
 6:  # the list
     lea     r14d, [rbx+PLACES_W+14]     # x
-    mov     r15d, FB_W-PLACES_W-32      # w
+    mov     r15d, FB_W-PLACES_W-32      # w (less the preview's column)
+    cmp     dword ptr [rip+fb_bee], 0
+    je      51f
+    sub     r15d, PREV_W+14
+    call    fb_preview
+51:
     lea     rdi, [rip+wd_fb_list]
     mov     esi, r14d
     lea     edx, [rbp+78]
@@ -1093,6 +1392,96 @@ fb_draw:
     pop     r12
     pop     rbp
     pop     rbx
+    ret
+
+# fb_preview (ebx = box x, ebp = box y) - the selected scene's picture, in
+#   a column right of the list (read from the file once per scene)
+fb_preview:
+    push    r12
+    push    r13
+    push    r14
+    lea     r12d, [rbx+FB_W-PREV_W-18]  # x, y
+    lea     r13d, [rbp+78]
+    mov     byte ptr [rip+fb_tnext], 0  # the scene: the selected .bee file
+    mov     edi, [rip+fb_sel]
+    test    edi, edi
+    js      2f
+    cmp     edi, [rip+fb_n]
+    jae     2f
+    call    ent_name
+    test    edx, edx
+    jnz     2f
+    mov     r14, rax
+    mov     rdi, rax
+    lea     rsi, [rip+s_ext_bee]
+    call    has_ext
+    test    eax, eax
+    jz      2f
+    lea     rdi, [rip+fb_tnext]
+    lea     rsi, [rip+fb_dir]
+    call    scpy
+    lea     rdi, [rip+fb_tnext]
+    call    str_len
+    lea     rdi, [rip+fb_tnext]
+    cmp     byte ptr [rdi+rax-1], '/'
+    je      1f
+    mov     byte ptr [rdi+rax], '/'
+    inc     eax
+1:  add     rdi, rax
+    mov     rsi, r14
+    call    scpy255
+2:  lea     rdi, [rip+fb_tnext]         # another scene: read its picture
+    lea     rsi, [rip+fb_tpath]
+    call    str_eq
+    test    eax, eax
+    jnz     3f
+    lea     rdi, [rip+fb_tpath]
+    lea     rsi, [rip+fb_tnext]
+    call    scpy
+    mov     dword ptr [rip+fb_tok], 0
+    cmp     byte ptr [rip+fb_tpath], 0
+    je      3f
+    lea     rdi, [rip+fb_tpath]
+    call    thumb_read
+    mov     [rip+fb_tok], eax
+3:  mov     edi, r12d                   # the frame
+    lea     esi, [r13-1]
+    mov     edx, PREV_W+2
+    mov     ecx, PREV_H+2
+    mov     r8d, COL_FIELD
+    call    fill_rect
+    lea     rdi, [rip+wd_fb_prev]       # (for ui_tree: what it shows)
+    cmp     dword ptr [rip+fb_tok], 0
+    jne     31f
+    lea     rdi, [rip+wd_fb_prev_none]
+    cmp     byte ptr [rip+fb_tpath], 0
+    je      31f
+    lea     rdi, [rip+wd_fb_prev_no]
+31: lea     esi, [r12-1]
+    mov     edx, r13d
+    mov     ecx, PREV_W+2
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    cmp     dword ptr [rip+fb_tok], 0
+    je      4f
+    lea     edi, [r12+1]
+    mov     esi, r13d
+    lea     rdx, [rip+th_view]
+    call    thumb_blit
+    jmp     9f
+4:  lea     rdi, [rip+s_prev_none]      # nothing picked, or no picture
+    cmp     byte ptr [rip+fb_tpath], 0
+    je      5f
+    lea     rdi, [rip+s_prev_no]
+5:  mov     rdx, rdi
+    lea     edi, [r12+10]
+    lea     esi, [r13+PREV_H/2-8]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_small
+9:  pop     r14
+    pop     r13
+    pop     r12
     ret
 
 # wg_ok_label - wg for the OK button, captioned Save in save mode
