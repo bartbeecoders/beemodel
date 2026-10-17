@@ -51,6 +51,9 @@ project uses [Semantic Versioning](https://semver.org/).
   hinge (degrees a second) or moves a slider (metres a second) with at
   most that torque or force. A new `slider` joint keeps two bodies on a
   line, turning together (Add Joint › Type › Slider).
+- **The same result on any number of threads** (#291): 1000 tumbling
+  boxes, 5000 bricks and the joint tests end bit for bit the same on 1, 4,
+  8 and 32 threads; `rbinfo(16)` hashes every body's state to show it.
 - **The MIT License** (`LICENSE`, also in the release archive). The
   2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): the masterplan's open
   questions, then physics - the solver, ground and landscapes, shatter,

@@ -9,8 +9,8 @@ the weight above) and then stand still to 10 s; a 1 kg box rests on a
 R2: many bodies - 10 800 balls (instances of 12 objects' geometry nodes,
 each a body) poured into a box: none get out, 10 s simulated in under 30 s
 on 8 threads; 5000 bricks settle at 24 frames a second or better; instance
-bodies baked into the cache and played back; the same heap on 1 and 8
-threads; files from v0.16 (room for 1024 bodies) still open.
+bodies baked into the cache and played back; the same heap, bit for bit,
+on 1, 4, 8 and 32 threads; files from v0.16 (room for 1024 bodies) still open.
 
 R3: static meshes and planes - balls and boxes dropped into a bowl (a
 sphere's mesh) stay in it and come to rest; boxes rest on a staircase's
@@ -126,7 +126,7 @@ HEAP = ('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 40)\n'
         '   add("cube", n, i * 1.2 - 6 + 0.6 * (k % 2), 1 + k * 1.2, j * 1.2 - 6 + 0.6 * (k % 2))\n'
         '   rotate(n, 0.1 * k, 0.37 * k + 0.1 * i, 0.05 * j)\n   scale(n, 0.5)\n  }\n }\n}\n'
         'select()\nop("object.select_all")\nop("rigid.add", "active box")\nselect("Ground")\nop("rigid.add", "passive box")\n'
-        'frame(121)\nprint("heap", rbinfo(1), get("B555", "x"), get("B555", "y"), get("B555", "z"))\n')
+        'frame(121)\nprint("heap", rbinfo(1), get("B555", "x"), get("B555", "y"), get("B555", "z"), rbinfo(16))\n')
 
 
 BOWL = ('delete("Cube")\ndelete("Light")\ndelete("Camera")\n'
@@ -279,9 +279,10 @@ def main():
     r = {x[0]: x[1:] for x in run(OLD % old) if x}
     check(r.get('old', [])[:3] == ['7', '1', '4'] and r.get('oldsim') == ['100', '3'],
           f'a v0.16 file (room for 1024 bodies) opens: bodies, a joint, keys, it simulates ({r})')
-    one = {x[0]: x[1:] for x in run(HEAP, threads=0) if x}.get('heap')
-    many = {x[0]: x[1:] for x in run(HEAP, threads=eight) if x}.get('heap')
-    check(one is not None and one == many, f'1000 boxes: the same heap on one thread and on eight ({one}, {many})')
+    heaps = [{x[0]: x[1:] for x in run(HEAP, threads=t) if x}.get('heap') for t in (0, 3, 7, 31)]
+    check(heaps[0] is not None and all(h == heaps[0] for h in heaps),
+          f'1000 boxes: the same heap, bit for bit, on 1, 4, 8 and 32 threads (every body\'s state hashed: '
+          f'{[h and h[-1] for h in heaps]})')
     print('  -- the solver: meshes and planes --')
     r = {x[0]: x[1:] for x in run(BOWL) if x}
     b = r.get('bowl', ['99', '1', '0'])
