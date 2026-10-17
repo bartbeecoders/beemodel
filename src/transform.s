@@ -41,6 +41,9 @@
 .section .bss
 .align 8
 tm_snap:        .skip TM_MAX*TS_SZ
+tr_ra:          .skip 36                # turning about an axis: its matrix,
+tr_r0:          .skip 36                #  an object's, a location
+tr_v:           .skip 12
 tm_mode:        .skip 4             # 0 none, 1 grab, 2 rotate, 3 scale, 4 value
 tm_noundo:      .skip 4             # the caller already recorded the undo step
 tm_vint:        .skip 4             # value mode: an integer the wheel changes (0 = none)
@@ -306,6 +309,9 @@ tm_start:
     mov     edi, [rip+vp_area]
     mov     [rip+tm_area], edi
     call    vp_prepare
+    lea     rdi, [rip+tm_pivot]         # the pivot and the axes chosen (orient.s)
+    call    pivot_fix
+    call    orient_setup
     lea     rdi, [rip+tm_pivot]
     call    proj_world
     movss   [rip+tm_cx], xmm0
@@ -555,7 +561,7 @@ tm_update:
 1:  test    eax, eax
     jz      .Ltg_free
     # constrained: project the pointer motion onto the axis' screen direction
-    lea     rcx, [rip+axis_vec]
+    lea     rcx, [rip+tm_basis]         # (the orientation's axes)
     lea     rdx, [rax+rax*2-3]
     lea     rcx, [rcx+rdx*4]
     movss   xmm0, [rip+tm_pivot]        # pivot + axis
@@ -596,12 +602,14 @@ tm_update:
     movss   [rsp], xmm1
     movss   [rsp+4], xmm1
     movss   [rsp+8], xmm1
+    lea     rdx, [rip+tm_custom]
     cmp     eax, 4
     je      1f
-    movss   [rsp+rax*4-4], xmm0
-    jmp     .Ltg_apply
-1:  xor     ecx, ecx                    # custom direction (e.g. a normal)
-2:  lea     rdx, [rip+tm_custom]
+    lea     rdx, [rip+tm_basis]         # X / Y / Z of the orientation
+    lea     rax, [rax+rax*2-3]
+    lea     rdx, [rdx+rax*4]
+1:  xor     ecx, ecx                    # along that direction
+2:
     movss   xmm1, [rdx+rcx*4]
     mulss   xmm1, xmm0
     movss   [rsp+rcx*4], xmm1
@@ -704,7 +712,7 @@ tm_update:
 22: addss   xmm1, [rip+tm_accum]
     movss   [rip+tm_accum], xmm1
     movss   xmm0, xmm1
-    lea     rcx, [rip+axis_vec]         # facing away from the viewer: flip
+    lea     rcx, [rip+tm_basis]         # facing away from the viewer: flip
     lea     rdx, [r12+r12*2-3]
     lea     rcx, [rcx+rdx*4]
     movss   xmm1, [rcx]
@@ -752,7 +760,9 @@ tm_update:
     lea     rsi, [rip+tm_pivot]
     call    edit_tm_rotate
     jmp     .Ltu_text
-0:  xor     ebx, ebx
+0:  cmp     dword ptr [rip+tm_orient], 0  # another orientation: about
+    jne     .Ltr_axis                   #  that axis (orient.s)
+    xor     ebx, ebx
 4:  cmp     ebx, [rip+tm_n]
     jae     .Ltu_text
     imul    rcx, rbx, TS_SZ
@@ -764,6 +774,8 @@ tm_update:
     movss   xmm0, [rax+OB_ROT+r12*4-4]  # Euler component += angle
     addss   xmm0, [rsp+16]
     movss   [rax+OB_ROT+r12*4-4], xmm0
+    cmp     dword ptr [rip+tm_pvmode], 2  # (individual origins: they stay)
+    je      41f
     mov     ecx, [rsp+28]               # orbit the location around the pivot
     lea     rdx, [rip+tm_pivot]
     movss   xmm2, [rax+OB_LOC+r13*4]
@@ -784,6 +796,63 @@ tm_update:
     movss   [rax+OB_LOC+rcx*4], xmm2
 41: inc     ebx
     jmp     4b
+
+# rotate objects about the orientation's axis (r12d = 1..3, [rsp+16] = the
+#   angle): R = Ra * R0, the location orbits the pivot (not with Individual
+#   Origins). Uses [rsp+32 ..] of tm_update's frame for Ra.
+.Ltr_axis:
+    lea     rdi, [rip+tm_basis]
+    lea     eax, [r12+r12*2-3]
+    lea     rdi, [rdi+rax*4]
+    movss   xmm0, [rsp+16]
+    lea     rsi, [rip+tr_ra]
+    call    o_axis_mat
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+tm_n]
+    jae     .Ltu_text
+    imul    rcx, rbx, TS_SZ
+    lea     rax, [rip+tm_snap]
+    mov     edi, [rax+rcx+TS_H]
+    call    obj_get
+    test    rax, rax
+    jz      3f
+    mov     r13, rax
+    lea     rdi, [r13+OB_ROT]           # the turn
+    lea     rsi, [rip+tr_r0]
+    call    o_euler_mat
+    lea     rdi, [rip+tr_ra]
+    lea     rsi, [rip+tr_r0]
+    lea     rdx, [rip+tr_r0]
+    call    o_mul
+    lea     rdi, [rip+tr_r0]
+    lea     rsi, [r13+OB_ROT]
+    call    o_mat_euler
+    cmp     dword ptr [rip+tm_pvmode], 2
+    je      3f
+    xor     ecx, ecx                    # the orbit: pivot + Ra (loc - pivot)
+2:  lea     rdx, [rip+tm_pivot]
+    movss   xmm0, [r13+OB_LOC+rcx*4]
+    subss   xmm0, [rdx+rcx*4]
+    lea     rdx, [rip+tr_v]
+    movss   [rdx+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    lea     rdi, [rip+tr_ra]
+    lea     rsi, [rip+tr_v]
+    lea     rdx, [rip+tr_v]
+    call    o_mulv
+    xor     ecx, ecx
+21: lea     rdx, [rip+tr_v]
+    movss   xmm0, [rdx+rcx*4]
+    lea     rdx, [rip+tm_pivot]
+    addss   xmm0, [rdx+rcx*4]
+    movss   [r13+OB_LOC+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      21b
+3:  inc     ebx
+    jmp     1b
 
 # ---- scale relative to the pivot ------------------------------------------------------
 .Ltu_scale:
@@ -847,6 +916,8 @@ tm_update:
 4:  movss   xmm0, [rax+OB_SCALE+rcx*4]
     mulss   xmm0, [rsp+16]
     movss   [rax+OB_SCALE+rcx*4], xmm0
+    cmp     dword ptr [rip+tm_pvmode], 2  # (individual origins: they stay)
+    je      41f
     lea     rdx, [rip+tm_pivot]
     movss   xmm0, [rax+OB_LOC+rcx*4]
     subss   xmm0, [rdx+rcx*4]

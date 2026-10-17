@@ -532,6 +532,8 @@ cpy_s:                                  # rdi = dest, rsi = text (95 max)
 2:  ret
 
 # scene_stats - stat_buf = "3 objects  1,234 faces"
+.globl scene_stats
+.globl stat_buf
 scene_stats:
     push    rbx
     push    r12

@@ -18,6 +18,9 @@
 .globl vp_header_tools
 .globl nav_gizmo_draw
 .globl tool_settings_draw
+.globl vp_ov_text
+.globl vp_ov_stats
+.globl vp_ov_gizmo
 
 .equ NAV_R,     34                      # the gizmo's radius
 .equ NAV_BALL,  9
@@ -45,6 +48,16 @@ nav_desc:       .quad wd_nav_px, wd_nav_py, wd_nav_pz, wd_nav_nx, wd_nav_ny, wd_
 .align 4
 nav_col:        .long COL_AXIS_X, COL_AXIS_Y, COL_AXIS_Z
 
+.section .data
+.align 4
+vp_ov_text:     .long 1                 # Overlays: the view's name and grid size,
+vp_ov_stats:    .long 0                 #  the scene's size,
+vp_ov_gizmo:    .long 1                 #  the navigation gizmo
+.align 8
+ov_list:        .quad op_view_grid, op_ov_text, op_ov_stats, op_ov_gizmo, 0
+                .quad op_an_normals, op_an_bound, op_an_nonman, op_an_degen
+.equ ov_list_n, (. - ov_list) / 8
+
 .section .bss
 .align 4
 vp_mode_sel:    .skip 4                 # the header's mode choice
@@ -62,6 +75,14 @@ OPERATOR op_align_right,  "view.align_right",  "Right View",  view_align, arg=2,
 OPERATOR op_align_left,   "view.align_left",   "Left View",   view_align, arg=3, key=81|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET, doc="Look at the scene from the left"
 OPERATOR op_align_top,    "view.align_top",    "Top View",    view_align, arg=4, key=71, flags=OPF_AI_SAFE|OPF_QUIET, doc="Look down on the scene from above"
 OPERATOR op_align_bottom, "view.align_bottom", "Bottom View", view_align, arg=5, key=71|KM_CTRL, flags=OPF_AI_SAFE|OPF_QUIET, doc="Look up at the scene from below"
+OPERATOR op_ov_text,  "view.overlay_text", "Text Info", op_toggle_flag, op_check_flag, vp_ov_text, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show the view's name and grid size in the top left of 3D viewports"
+OPERATOR op_ov_stats, "view.overlay_stats", "Statistics", op_toggle_flag, op_check_flag, vp_ov_stats, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show the scene's size (objects, faces) in 3D viewports"
+OPERATOR op_ov_gizmo, "view.overlay_gizmo", "Navigation Gizmo", op_toggle_flag, op_check_flag, vp_ov_gizmo, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show the axis balls in the top right of 3D viewports"
+OPERATOR op_vh_mview, "view.header_menu_view", "View Menu", vh_menu, arg=2, flags=OPF_HIDDEN|OPF_QUIET, doc="The View menu, from the 3D viewport's header"
+OPERATOR op_vh_msel, "view.header_menu_select", "Select Menu", vh_menu, arg=3, flags=OPF_HIDDEN|OPF_QUIET, doc="The Select menu, from the 3D viewport's header"
+OPERATOR op_vh_mobj, "view.header_menu_object", "Object Menu", vh_menu, arg=5, flags=OPF_HIDDEN|OPF_QUIET, doc="The Object menu (Mesh in edit mode), from the 3D viewport's header"
+OPERATOR op_vh_xf, "view.header_transform", "Pivot Point and Orientation", vh_xf, flags=OPF_HIDDEN|OPF_QUIET, doc="What turning and scaling go around, and what X, Y and Z mean while moving or turning"
+OPERATOR op_vh_ov, "view.header_overlays", "Overlays", vh_overlays, flags=OPF_HIDDEN|OPF_QUIET, doc="What 3D viewports draw over the scene: grid, text, statistics, gizmo, normals and mesh checks"
 OPERATOR op_toggle_snap,  "view.toggle_snap",  "Snap",        op_toggle_flag, op_check_flag, snap_on, flags=OPF_AI_SAFE|OPF_QUIET, doc="Snap moves, turns and scales to whole steps (Ctrl does the opposite while you drag)"
 
 WIDGET wd_ts_srad,  WK_FLOAT, "brush.radius", "Radius", 2.0, 1000.0, 0.5, 0, WGF_CLAMP, tip="The brush's radius in pixels ([ and ] change it)"
@@ -82,6 +103,12 @@ WIDGET wd_sh_wire,  WK_BUTTON, "viewport.shading_wireframe", "Wireframe", flags=
 WIDGET wd_sh_solid, WK_BUTTON, "viewport.shading_solid", "Solid", flags=WGF_ICON, aux=op_shade_solid, n=ICON_SOLID
 WIDGET wd_sh_mat,   WK_BUTTON, "viewport.shading_material", "Material Preview", flags=WGF_ICON, aux=op_shade_mat, n=ICON_MATERIAL
 WIDGET wd_sh_rend,  WK_BUTTON, "viewport.shading_rendered", "Rendered (GPU)", flags=WGF_ICON, aux=op_shade_rend, n=ICON_RENDERED
+WIDGET wd_vh_mv,    WK_BUTTON, "viewport.menu_view", "View", aux=op_vh_mview
+WIDGET wd_vh_ms,    WK_BUTTON, "viewport.menu_select", "Select", aux=op_vh_msel
+WIDGET wd_vh_mo,    WK_BUTTON, "viewport.menu_object", "Object", aux=op_vh_mobj
+WIDGET wd_vh_mm,    WK_BUTTON, "viewport.menu_object", "Mesh", aux=op_vh_mobj
+WIDGET wd_vh_ov,    WK_BUTTON, "viewport.overlays", "Overlays", flags=WGF_ICON, aux=op_vh_ov, n=ICON_OVERLAYS
+WIDGET wd_vh_xf,    WK_BUTTON, "viewport.transform", "Pivot Point and Orientation", flags=WGF_ICON, aux=op_vh_xf, n=ICON_PIVOT
 WIDGET wd_vh_grid,  WK_BUTTON, "viewport.grid", "Ground Grid", flags=WGF_ICON, aux=op_view_grid, n=ICON_GRID
 WIDGET wd_vh_snap,  WK_BUTTON, "viewport.snap", "Snap", flags=WGF_ICON, aux=op_toggle_snap, n=ICON_SNAP
 WIDGET wd_nav_px,   WK_BUTTON, "viewport.nav_right", "Right View (Numpad 3)", flags=WGF_NODRAW, aux=op_align_right
@@ -468,7 +495,20 @@ vp_header_tools:
     lea     r8, [rip+vp_mode_sel]
     xor     r9d, r9d
     call    wg
-    add     ebx, 140
+    add     ebx, 136
+    lea     rdi, [rip+wd_vh_mv]         # View / Select / Object (Mesh) menus
+    mov     edx, 50
+    call    hdr_btn
+    lea     rdi, [rip+wd_vh_ms]
+    mov     edx, 56
+    call    hdr_btn
+    lea     rdi, [rip+wd_vh_mo]
+    cmp     dword ptr [rsp], 1
+    jne     21f
+    lea     rdi, [rip+wd_vh_mm]
+21: mov     edx, 60
+    call    hdr_btn
+    add     ebx, 6
     cmp     dword ptr [rsp], 1          # edit mode: vertex / edge / face
     jne     3f
     lea     rdi, [rip+wd_sm_v]
@@ -491,11 +531,64 @@ vp_header_tools:
     call    tool_btn
     lea     rdi, [rip+wd_vh_snap]
     call    tool_btn
+    lea     rdi, [rip+wd_vh_xf]         # pivot and orientation (orient.s),
+    call    tool_btn                    #  overlays
+    lea     rdi, [rip+wd_vh_ov]
+    call    tool_btn
 9:  add     rsp, 16
     pop     r13
     pop     r12
     pop     rbx
     ret
+
+# vh_menu(rdi=menu index: 2 View, 3 Select, 5 Object - Mesh in edit mode) -
+#   that menu bar menu, as a menu at the header's button
+vh_menu:
+    sub     rsp, 8
+    cmp     edi, 5
+    jne     1f
+    cmp     dword ptr [rip+edit_obj], 0
+    je      1f
+    mov     edi, 6
+1:  lea     rax, [rip+menu_counts]
+    mov     esi, [rax+rdi*4]
+    lea     rax, [rip+menu_items]
+    mov     rdi, [rax+rdi*8]
+    call    ctx_open_list
+    add     rsp, 8
+    ret
+
+vh_xf:
+    sub     rsp, 8
+    lea     rdi, [rip+xf_list]
+    mov     esi, [rip+xf_list_cnt]
+    call    ctx_open_list
+    add     rsp, 8
+    ret
+
+vh_overlays:
+    sub     rsp, 8
+    lea     rdi, [rip+ov_list]
+    mov     esi, ov_list_n
+    call    ctx_open_list
+    add     rsp, 8
+    ret
+
+# hdr_btn(rdi=widget, edx=width; ebx = x, advanced; r12d = y; r13d = limit)
+hdr_btn:
+    lea     eax, [rbx+rdx]
+    cmp     eax, r13d
+    jg      9f
+    push    rdx
+    mov     esi, ebx
+    mov     ecx, edx
+    mov     edx, r12d
+    lea     r8, [rip+nav_dummy]
+    xor     r9d, r9d
+    call    wg
+    pop     rdx
+    lea     ebx, [rbx+rdx+4]
+9:  ret
 
 # tool_btn(rdi=widget; ebx = x, advanced; r12d = y; r13d = the limit)
 tool_btn:

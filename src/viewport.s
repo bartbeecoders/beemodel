@@ -603,7 +603,10 @@ viewport_draw:
     cmp     ebx, 3
     jb      .Lvp_giz
 
+    cmp     dword ptr [rip+vp_ov_gizmo], 0  # (Overlays: Navigation Gizmo)
+    je      3f
     call    nav_gizmo_draw              # the navigation gizmo (vpnav.s)
+3:
     call    tool_settings_draw          # a brush mode: its settings (vpnav.s)
     mov     edi, [rip+cvs_x0]           # an empty scene: what to do first (help.s)
     mov     esi, [rip+cvs_y0]
@@ -612,6 +615,8 @@ viewport_draw:
     call    vp_quick_draw
 
     # ---- overlay text ---------------------------------------------------------
+    cmp     dword ptr [rip+vp_ov_text], 0   # (Overlays: Text Info)
+    je      1f
     cmp     dword ptr [rip+vp_shading], 3   # (over a render: a shadow under it)
     jne     2f
     mov     edi, [rip+cvs_x0]
@@ -635,7 +640,20 @@ viewport_draw:
     mov     esi, [rip+cvs_y0]
     add     esi, 26
     call    lv_hud
-1:
+1:  cmp     dword ptr [rip+vp_ov_stats], 0  # (Overlays: Statistics)
+    je      4f
+    call    scene_stats
+    mov     edi, [rip+cvs_x0]
+    add     edi, 10
+    mov     esi, [rip+cvs_y0]
+    add     esi, 26
+    cmp     dword ptr [rip+vp_shading], 3
+    jne     41f
+    add     esi, 18
+41: lea     rdx, [rip+stat_buf]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_small
+4:
     call    redo_draw                   # adjust the last operation (on top)
     call    reset_clip
     pop     r15
