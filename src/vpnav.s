@@ -19,6 +19,9 @@
 .globl nav_gizmo_draw
 .globl tool_settings_draw
 .globl vp_ov_text
+.globl nav_press
+.globl nav_release
+.globl nav_zoom_drag
 .globl vp_ov_stats
 .globl vp_ov_gizmo
 
@@ -27,6 +30,8 @@
 
 .section .rodata
 .align 4
+nz_k:           .float 0.01
+nz_one:         .float 1.0
 # yaw, pitch per view: front back right left top bottom
 align_tab:      .float 0.0, 0.0,  3.1415927, 0.0,  1.5707964, 0.0,  -1.5707964, 0.0
                 .float 0.0, 1.5697,  0.0, -1.5697
@@ -66,6 +71,9 @@ nav_dummy:      .skip 4
 nav_sx:         .skip 4*6               # each ball on screen, its depth
 nav_sy:         .skip 4*6
 nav_dep:        .skip 4*6
+nav_op:         .skip 8                 # a ball pressed: its view
+nav_y0:         .skip 4                 # the zoom handle: where it was pressed,
+nav_d0:         .skip 4                 #  the distance then
 
 .text
 
@@ -83,6 +91,7 @@ OPERATOR op_vh_msel, "view.header_menu_select", "Select Menu", vh_menu, arg=3, f
 OPERATOR op_vh_mobj, "view.header_menu_object", "Object Menu", vh_menu, arg=5, flags=OPF_HIDDEN|OPF_QUIET, doc="The Object menu (Mesh in edit mode), from the 3D viewport's header"
 OPERATOR op_vh_xf, "view.header_transform", "Pivot Point and Orientation", vh_xf, flags=OPF_HIDDEN|OPF_QUIET, doc="What turning and scaling go around, and what X, Y and Z mean while moving or turning"
 OPERATOR op_vh_ov, "view.header_overlays", "Overlays", vh_overlays, flags=OPF_HIDDEN|OPF_QUIET, doc="What 3D viewports draw over the scene: grid, text, statistics, gizmo, normals and mesh checks"
+OPERATOR op_view_ortho, "view.toggle_ortho", "Orthographic", do_ortho, check=chk_ortho, key=76, flags=OPF_AI_SAFE|OPF_QUIET, doc="Switch the 3D viewport between perspective and orthographic (Numpad 5): no shrinking with distance, parallel lines stay parallel"
 OPERATOR op_toggle_snap,  "view.toggle_snap",  "Snap",        op_toggle_flag, op_check_flag, snap_on, flags=OPF_AI_SAFE|OPF_QUIET, doc="Snap moves, turns and scales to whole steps (Ctrl does the opposite while you drag)"
 
 WIDGET wd_ts_srad,  WK_FLOAT, "brush.radius", "Radius", 2.0, 1000.0, 0.5, 0, WGF_CLAMP, tip="The brush's radius in pixels ([ and ] change it)"
@@ -111,6 +120,9 @@ WIDGET wd_vh_ov,    WK_BUTTON, "viewport.overlays", "Overlays", flags=WGF_ICON, 
 WIDGET wd_vh_xf,    WK_BUTTON, "viewport.transform", "Pivot Point and Orientation", flags=WGF_ICON, aux=op_vh_xf, n=ICON_PIVOT
 WIDGET wd_vh_grid,  WK_BUTTON, "viewport.grid", "Ground Grid", flags=WGF_ICON, aux=op_view_grid, n=ICON_GRID
 WIDGET wd_vh_snap,  WK_BUTTON, "viewport.snap", "Snap", flags=WGF_ICON, aux=op_toggle_snap, n=ICON_SNAP
+WIDGET wd_nav_zoom,  WK_BUTTON, "viewport.nav_zoom", "Zoom (drag up and down)", flags=WGF_ICON, n=ICON_SEARCH
+WIDGET wd_nav_pan,   WK_BUTTON, "viewport.nav_pan", "Pan (drag)", flags=WGF_ICON, n=ICON_MOVE
+WIDGET wd_nav_ortho, WK_BUTTON, "viewport.nav_ortho", "Perspective / Orthographic (Numpad 5)", flags=WGF_ICON, aux=op_view_ortho, n=ICON_GRID
 WIDGET wd_nav_px,   WK_BUTTON, "viewport.nav_right", "Right View (Numpad 3)", flags=WGF_NODRAW, aux=op_align_right
 WIDGET wd_nav_py,   WK_BUTTON, "viewport.nav_top", "Top View (Numpad 7)", flags=WGF_NODRAW, aux=op_align_top
 WIDGET wd_nav_pz,   WK_BUTTON, "viewport.nav_front", "Front View (Numpad 1)", flags=WGF_NODRAW, aux=op_align_front
@@ -309,6 +321,13 @@ nav_gizmo_draw:
     inc     ebp
     cmp     ebp, 2
     jb      .Lng_pass
+    lea     ebx, [r13+NAV_R+NAV_BALL+8] # under it: zoom, pan, perspective
+    lea     rdi, [rip+wd_nav_zoom]
+    call    nav_handle
+    lea     rdi, [rip+wd_nav_pan]
+    call    nav_handle
+    lea     rdi, [rip+wd_nav_ortho]
+    call    nav_handle
     add     rsp, 24
     pop     r15
     pop     r14
@@ -316,6 +335,147 @@ nav_gizmo_draw:
     pop     r12
     pop     rbp
     pop     rbx
+    ret
+
+# nav_handle(rdi=widget; ebx = y, advanced; r12d = the gizmo's centre x)
+nav_handle:
+    mov     esi, r12d
+    sub     esi, 12
+    mov     edx, ebx
+    mov     ecx, 24
+    lea     r8, [rip+nav_dummy]
+    xor     r9d, r9d
+    sub     rsp, 8
+    call    wg
+    add     rsp, 8
+    add     ebx, 26
+    ret
+
+# nav_area - the viewport under the pointer -> vp_area, eax = it (-1)
+nav_area:
+    sub     rsp, 8
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    area_hit
+    mov     eax, [rip+hit_area]
+    add     rsp, 8
+    test    eax, eax
+    js      9f
+    mov     [rip+vp_area], eax
+9:  ret
+
+# nav_press(edi=widget id) -> eax = 1 when it is the gizmo's: a ball (a click
+#   looks along it, a drag orbits), the zoom or pan handle (a drag)
+nav_press:
+    push    rbx
+    call    wg_find
+    test    rax, rax
+    jz      8f
+    mov     rbx, [rax+32]               # (E_DESC)
+    lea     rcx, [rip+nav_desc]         # a ball?
+    xor     edx, edx
+1:  cmp     rbx, [rcx+rdx*8]
+    je      2f
+    inc     edx
+    cmp     edx, 6
+    jb      1b
+    lea     rcx, [rip+wd_nav_zoom]
+    cmp     rbx, rcx
+    je      3f
+    lea     rcx, [rip+wd_nav_pan]
+    cmp     rbx, rcx
+    je      4f
+8:  xor     eax, eax
+    pop     rbx
+    ret
+2:  mov     rax, [rbx+WD_AUX]
+    mov     [rip+nav_op], rax
+    call    nav_area
+    mov     [rip+drag_node], eax
+    mov     dword ptr [rip+drag_mode], DRAG_NAV
+    mov     eax, [rip+ptr_x]
+    mov     [rip+press_x], eax
+    mov     eax, [rip+ptr_y]
+    mov     [rip+press_y], eax
+    mov     dword ptr [rip+press_mods], 0
+    jmp     9f
+3:  call    nav_area                    # zoom: from this distance
+    mov     [rip+drag_node], eax
+    mov     edi, eax
+    call    cam_load
+    mov     eax, [rip+cam_dist]
+    mov     [rip+nav_d0], eax
+    mov     eax, [rip+ptr_y]
+    mov     [rip+nav_y0], eax
+    mov     dword ptr [rip+drag_mode], DRAG_ZOOM
+    jmp     9f
+4:  call    nav_area                    # pan: as a Shift drag on the canvas
+    mov     [rip+drag_node], eax
+    mov     dword ptr [rip+drag_mode], DRAG_PAN
+9:  mov     eax, 1
+    pop     rbx
+    ret
+
+# nav_zoom_drag(esi=pointer y) - up zooms in, down out (1% a pixel)
+nav_zoom_drag:
+    push    rbx
+    mov     ebx, esi
+    mov     edi, [rip+drag_node]
+    call    cam_load
+    mov     eax, [rip+nav_d0]
+    mov     [rip+cam_dist], eax
+    sub     ebx, [rip+nav_y0]           # 1 + |dy| / 100, or its inverse
+    mov     eax, ebx
+    neg     eax
+    cmovs   eax, ebx
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+nz_k]
+    addss   xmm0, [rip+nz_one]
+    test    ebx, ebx
+    jns     1f
+    movss   xmm1, [rip+nz_one]
+    divss   xmm1, xmm0
+    movss   xmm0, xmm1
+1:  call    vp_zoom_by
+    mov     edi, [rip+drag_node]
+    call    cam_store
+    mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# nav_release - a ball pressed and let go without a drag: its view
+nav_release:
+    mov     dword ptr [rip+drag_mode], 0
+    mov     rdi, [rip+nav_op]
+    test    rdi, rdi
+    jz      9f
+    jmp     run_op_ui
+9:  ret
+
+# view.toggle_ortho - the viewport under the pointer (or the last one used)
+do_ortho:
+    sub     rsp, 8
+    call    nav_area
+    mov     edi, [rip+vp_area]
+    test    edi, edi
+    js      9f
+    call    cam_load
+    xor     dword ptr [rip+cam_ortho], 1
+    mov     edi, [rip+vp_area]
+    call    cam_store
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    ret
+
+chk_ortho:
+    sub     rsp, 8
+    mov     edi, [rip+vp_area]
+    xor     eax, eax
+    test    edi, edi
+    js      9f
+    call    cam_load
+    mov     eax, [rip+cam_ortho]
+9:  add     rsp, 8
     ret
 
 # ---- the brush settings (sculpt, texture paint) ----------------------------------

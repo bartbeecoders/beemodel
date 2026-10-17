@@ -605,6 +605,7 @@ def main():
     props_ui()
     viewport_ui()
     header_ui()
+    navigation_ui()
     tools_ui()
     outliner_ui()
     status_ui()
@@ -6903,6 +6904,77 @@ def header_ui():
     keys(34, 44, '1', 28)
     v = q('volume("Cube")')
     check(v == '= 12', f'orientation Normal: G Z 1 moves the top face along its normal ({v})')
+    f.proc.kill()
+
+
+def navigation_ui():
+    """F7 (#273): the navigation gizmo - drag a ball (or the disc) to orbit,
+    click one to align, the zoom and pan handles, perspective /
+    orthographic (Numpad 5)."""
+    print('  -- navigation gizmo: orbit, zoom, pan, orthographic --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    ball = lambda n: widget(m, 'viewport.nav_' + n)
+    need = {'viewport.nav_zoom', 'viewport.nav_pan', 'viewport.nav_ortho'}
+    check(need <= {w['name'] for w in ui_tree(m)}, 'under the gizmo: zoom, pan and perspective handles')
+    b0 = ball('top')
+    x, y = widget_xy(m, 'viewport.nav_top')
+    f.drag(x, y, x + 60, y + 20, steps=5); f.pump(0.2)
+    b1 = ball('top')
+    moved = b0 and b1 and (b0['x'], b0['y']) != (b1['x'], b1['y'])
+    rx = ball('right')
+    check(moved and rx and rx['x'] != b0['x'], f'dragging a ball orbits the view (top ball {b0 and (b0["x"], b0["y"])} -> {b1 and (b1["x"], b1["y"])})')
+    x, y = widget_xy(m, 'viewport.nav_front')
+    f.click(x, y); f.pump(0.2)
+    fr = ball('front'); c = widget(m, 'viewport.nav_zoom')
+    check(fr is not None and abs((fr['x'] + fr['w'] // 2) - (c['x'] + c['w'] // 2)) <= 3,
+          'clicking a ball still looks along it (front: its ball in the middle)')
+    q('set("Cube", "y", 5); set("Cube", "sz", 4); select("Cube")')
+    q('view(0, 0, 18, 0, 5, 0); op("view.shading_wireframe")'); f.pump(0.3)
+    def bright(img, cx, cy, h):                # line pixels in the ring 0.45 h .. 0.8 h
+        n = 0
+        for yy in range(int(cy - 0.8 * h), int(cy + 0.8 * h)):
+            for xx in range(int(cx - 0.8 * h), int(cx + 0.8 * h)):
+                if max(abs(xx - cx), abs(yy - cy)) < 0.45 * h:
+                    continue
+                p = img.getpixel((xx, yy))
+                if sum(p) > 420:
+                    n += 1
+        return n
+    vp = [w for w in ui_tree(m) if w['name'] == 'viewport.mode'][0]
+    cx, cy = 615, 355
+    h = 30
+    img = f.image(); per = bright(img, cx, cy, h)
+    f.shot('nav_persp.png')
+    x, y = widget_xy(m, 'viewport.nav_ortho'); f.click(x, y); f.pump(0.3)
+    img = f.image(); orth = bright(img, cx, cy, h)
+    f.shot('nav_ortho.png')
+    check(per > 40 and orth < per / 4, f'orthographic: the box\'s back face falls on its front ({per} -> {orth} line pixels inside)')
+    f.move(600, 300); f.key(76); f.pump(0.3)  # Numpad 5: back to perspective
+    img = f.image(); per2 = bright(img, cx, cy, h)
+    check(per2 > orth * 3, f'Numpad 5 switches back ({per2})')
+    def size():
+        img = f.image(); n = 0
+        for yy in range(150, 600, 2):
+            for xx in range(300, 950, 2):
+                if sum(img.getpixel((xx, yy))) > 420:
+                    n += 1
+        return n
+    s0 = size()
+    x, y = widget_xy(m, 'viewport.nav_zoom')
+    f.drag(x, y, x, y - 60, steps=5); f.pump(0.2)
+    s1 = size()
+    check(s1 > s0 * 1.2, f'dragging the zoom handle up zooms in ({s0} -> {s1} line pixels)')
+    x, y = widget_xy(m, 'viewport.nav_pan')
+    f.drag(x, y, x - 120, y, steps=5); f.pump(0.2)
+    img = f.image()
+    left = sum(1 for yy in range(150, 600, 3) for xx in range(220, 500, 3) if sum(img.getpixel((xx, yy))) > 420)
+    right = sum(1 for yy in range(150, 600, 3) for xx in range(730, 1010, 3) if sum(img.getpixel((xx, yy))) > 420)
+    check(left > right, f'dragging the pan handle left moves the scene left ({left} / {right})')
     f.proc.kill()
 
 

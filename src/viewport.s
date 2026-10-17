@@ -13,6 +13,8 @@
 .globl lp0
 .globl line3d
 .globl fwd
+.globl cam_ortho
+.globl vp_zoom_by
 .globl eye
 .globl world_verts
 .globl vp_focal
@@ -49,8 +51,10 @@ cam_dist:   .float 18.0
 cam_tx:     .float 0.0
 cam_ty:     .float 0.0
 cam_tz:     .float 0.0
+cam_ortho:  .long 0                     # orthographic (per viewport: areas.s)
 vp_near:                                # clip start (preferences: everything
 f_near:     .float 0.05                 #  that projects follows it)
+f_ortho_k:  .float 40.0                 # orthographic: 40 x the distance and lens
 vp_focal_k: .float 1.07                 # 0.5 / tan(fov / 2): 50deg vertical (preferences)
 vp_grid:    .float 1.0                  # the ground grid's spacing (preferences)
 
@@ -76,6 +80,7 @@ f_def_dist: .float 18.0
 .equ GRID_N, 10
 
 s_vp_label: .asciz "Perspective  |  Grid 1 m"
+s_vp_label_o: .asciz "Orthographic  |  Grid 1 m"
 s_ax_x:     .asciz "X"
 s_ax_y:     .asciz "Y"
 s_ax_z:     .asciz "Z"
@@ -151,6 +156,10 @@ cam_setup:
     movss   [rip+fwd+8], xmm1
 
     movss   xmm2, [rip+cam_dist]        # eye = target - fwd * dist
+    cmp     dword ptr [rip+cam_ortho], 0  # (orthographic: a long lens from far
+    je      0f                          #  away - parallel lines stay parallel)
+    mulss   xmm2, [rip+f_ortho_k]
+0:
     movss   xmm0, [rip+fwd]
     mulss   xmm0, xmm2
     movss   xmm1, [rip+cam_tx]
@@ -193,6 +202,12 @@ cam_setup:
     mulss   xmm1, xmm2
     divss   xmm1, [rip+f_120]
     movss   [rip+px_world], xmm1
+    cmp     dword ptr [rip+cam_ortho], 0  # orthographic: the focal length that
+    je      0f                          #  keeps the target's size
+    movss   xmm1, [rip+vp_focal]
+    mulss   xmm1, [rip+f_ortho_k]
+    movss   [rip+vp_focal], xmm1
+0:
     cvtsi2ss xmm0, ebx
     mulss   xmm0, [rip+f_half]
     movss   [rip+vp_cx], xmm0
@@ -623,14 +638,14 @@ viewport_draw:
     add     edi, 11
     mov     esi, [rip+cvs_y0]
     add     esi, 9
-    lea     rdx, [rip+s_vp_label]
+    call    vp_label
     xor     ecx, ecx
     call    draw_text
 2:  mov     edi, [rip+cvs_x0]
     add     edi, 10
     mov     esi, [rip+cvs_y0]
     add     esi, 8
-    lea     rdx, [rip+s_vp_label]
+    call    vp_label
     mov     ecx, COL_TEXT
     call    draw_text
     cmp     dword ptr [rip+vp_shading], 3   # rendered: what it shows
@@ -1010,6 +1025,22 @@ vp_pan:
     inc     eax
     cmp     eax, 3
     jb      1b
+    ret
+
+# vp_label -> rdx = the corner text (perspective or orthographic)
+vp_label:
+    lea     rdx, [rip+s_vp_label]
+    cmp     dword ptr [rip+cam_ortho], 0
+    je      1f
+    lea     rdx, [rip+s_vp_label_o]
+1:  ret
+
+# vp_zoom_by(xmm0=factor) - the distance times that (kept in range)
+vp_zoom_by:
+    mulss   xmm0, [rip+cam_dist]
+    maxss   xmm0, [rip+f_dist_min]
+    minss   xmm0, [rip+f_dist_max]
+    movss   [rip+cam_dist], xmm0
     ret
 
 # vp_zoom(edi = >0 zoom out, <0 zoom in)

@@ -14,6 +14,9 @@
 .globl hover_idx
 .globl hover_id
 .globl drag_mode
+.globl press_x
+.globl press_y
+.globl press_mods
 .globl cont_y1
 .globl cont_y0
 .globl is_hot
@@ -606,9 +609,15 @@ ui_motion:
     jne     77f
     call    mods_drag_move
     jmp     .Lmo_out
-77: cmp     eax, DRAG_PENDING
+77: cmp     eax, DRAG_ZOOM              # the gizmo's zoom handle
+    jne     771f
+    call    nav_zoom_drag               # (esi = pointer y)
+    jmp     .Lmo_out
+771:cmp     eax, DRAG_NAV               # a gizmo ball: like a canvas press
+    je      772f
+    cmp     eax, DRAG_PENDING
     jne     0f
-    mov     ecx, edi                    # moved far enough to be a drag?
+772:mov     ecx, edi                    # moved far enough to be a drag?
     sub     ecx, [rip+press_x]
     mov     edx, ecx
     neg     edx
@@ -889,6 +898,10 @@ ui_button:
     cmp     r14d, BTN_LEFT
     jne     .Lbt_nowg
     mov     dword ptr [rip+menu_open], -1   # (a menu open elsewhere closes)
+    mov     edi, r12d                   # the navigation gizmo's (vpnav.s)
+    call    nav_press
+    test    eax, eax
+    jnz     .Lbt_done
     mov     edi, r12d
     call    wg_press
     mov     dword ptr [rip+drag_mode], DRAG_WIDGET
@@ -1284,9 +1297,17 @@ ui_button:
     call    reset_clip
     jmp     .Lbt_done
 77: cmp     dword ptr [rip+drag_mode], DRAG_PENDING
-    jne     78f
+    jne     776f
     mov     dword ptr [rip+drag_mode], 0
     call    viewport_click
+    jmp     .Lbt_done
+776:cmp     dword ptr [rip+drag_mode], DRAG_NAV   # a gizmo ball clicked
+    jne     777f
+    call    nav_release
+    jmp     .Lbt_done
+777:cmp     dword ptr [rip+drag_mode], DRAG_ZOOM
+    jne     78f
+    mov     dword ptr [rip+drag_mode], 0
     jmp     .Lbt_done
 78: cmp     dword ptr [rip+drag_mode], DRAG_SCULPT
     jne     781f

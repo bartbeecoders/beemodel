@@ -103,6 +103,7 @@ vp_area:        .long 5                 # viewport whose camera Properties shows
 .section .bss
 .align 8
 area_cams:      .skip MAX_NODES*CAM_SZ
+area_ortho:     .skip MAX_NODES*4           # each viewport: orthographic (not saved)
 ed_x:           .skip 4
 ed_y:           .skip 4
 ed_w:           .skip 4
@@ -213,12 +214,18 @@ cam_ptr:
 cam_load:
     test    edi, edi
     js      9f
+    lea     rax, [rip+area_ortho]
+    mov     ecx, [rax+rdi*4]
+    mov     [rip+cam_ortho], ecx
     call    cam_ptr
     lea     rdx, [rip+cam_yaw]
     jmp     1f
 cam_store:
     test    edi, edi
     js      9f
+    lea     rax, [rip+area_ortho]
+    mov     ecx, [rip+cam_ortho]
+    mov     [rax+rdi*4], ecx
     call    cam_ptr
     mov     rdx, rax
     lea     rax, [rip+cam_yaw]
