@@ -51,6 +51,7 @@ hp_arg:         .skip 16
 .section .rodata
 s_env_welcome:  .asciz "BEEMODEL_WELCOME="
 s_welcome:      .asciz "Welcome to BeeModel"
+s_ver_v:        .asciz "v"
 s_sub:          .asciz "A 3D modeler, CAD and renderer in one small program."
 s_h_start:      .asciz "Start"
 s_h_recent:     .asciz "Recent"
@@ -224,6 +225,26 @@ ov_draw:
     mov     esi, [rip+ov_y]
     add     esi, 46
     lea     rdx, [rip+s_sub]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_small
+    lea     rdi, [rip+s_version]        # the version, top right: "v0.15.0"
+    call    text_width_small
+    mov     ebx, [rip+ov_x]
+    add     ebx, WL_W-24
+    sub     ebx, eax
+    mov     edi, ebx
+    mov     esi, [rip+ov_y]
+    add     esi, 22
+    lea     rdx, [rip+s_version]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_small
+    lea     rdi, [rip+s_ver_v]
+    call    text_width_small
+    sub     ebx, eax
+    mov     edi, ebx
+    mov     esi, [rip+ov_y]
+    add     esi, 22
+    lea     rdx, [rip+s_ver_v]
     mov     ecx, COL_TEXT_DIM
     call    draw_small
     # three columns: Start | Recent | Samples
