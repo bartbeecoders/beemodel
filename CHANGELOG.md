@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **The MIT License** (`LICENSE`, also in the release archive). The
+  2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): the masterplan's open
+  questions, then physics - the solver, ground and landscapes, shatter,
+  attractors, particles, smoke and fire.
+
 ## [0.16.0] - 2026-10-17
 
 "UI follow-ups": the parts of the UI plan (phase 11) left open at v0.12.0,

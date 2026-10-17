@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeeModel 2.0 Plan</title>
+<style>
+:root {
+  --bg: #f6f4ef; --panel: #ffffff; --panel-2: #f0ede6; --ink: #1d1f24; --ink-2: #4a4f5a;
+  --ink-3: #7a808c; --line: #e2ded5; --accent: #c98a0b; --accent-soft: #fbefd2;
+  --blue: #2f6fb3; --green: #3d8a4a; --red: #b8434f; --violet: #6b4fb3;
+  --code-bg: #f3f1ec; --shadow: 0 1px 2px rgba(0,0,0,.05), 0 4px 16px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15171b; --panel: #1d2026; --panel-2: #23272e; --ink: #e4e6ea; --ink-2: #b4b9c2;
+    --ink-3: #828895; --line: #2e333b; --accent: #f2b134; --accent-soft: #3a2f16;
+    --blue: #61afef; --green: #98c379; --red: #e06c75; --violet: #b49cf0;
+    --code-bg: #181a1f; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15171b; --panel: #1d2026; --panel-2: #23272e; --ink: #e4e6ea; --ink-2: #b4b9c2;
+  --ink-3: #828895; --line: #2e333b; --accent: #f2b134; --accent-soft: #3a2f16;
+  --blue: #61afef; --green: #98c379; --red: #e06c75; --violet: #b49cf0;
+  --code-bg: #181a1f; --shadow: none;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+code, pre, .mono { font-family: ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, monospace; font-size: .88em; }
+code { background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+pre { background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; line-height: 1.45; }
+pre code { background: none; padding: 0; }
+a { color: var(--blue); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); max-width: 1320px; margin: 0 auto; }
+nav.toc {
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+  padding: 28px 18px 28px 24px; border-right: 1px solid var(--line); font-size: 14px;
+}
+nav.toc .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; margin-bottom: 18px; }
+nav.toc ol { list-style: none; padding: 0; margin: 0; counter-reset: s; }
+nav.toc li { counter-increment: s; }
+nav.toc li a { display: block; padding: 4px 8px; border-radius: 6px; color: var(--ink-2); }
+nav.toc li a::before { content: counter(s) ". "; color: var(--ink-3); }
+nav.toc li a:hover { background: var(--panel-2); text-decoration: none; color: var(--ink); }
+main { padding: 40px 48px 120px; min-width: 0; }
+.hex { width: 22px; height: 24px; background: var(--accent); clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%); flex: none; }
+
+header.hero { margin-bottom: 40px; }
+header.hero .kicker { color: var(--accent); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 13px; }
+header.hero h1 { font-size: 42px; line-height: 1.1; margin: 8px 0 14px; letter-spacing: -.02em; }
+header.hero p.lede { font-size: 19px; color: var(--ink-2); max-width: 820px; margin: 0; }
+.meta { margin-top: 18px; color: var(--ink-3); font-size: 14px; }
+
+section { margin-top: 64px; }
+section > h2 { font-size: 28px; letter-spacing: -.01em; margin: 0 0 6px; padding-top: 8px; }
+section > .sub { color: var(--ink-3); margin: 0 0 22px; }
+h3 { font-size: 19px; margin: 30px 0 10px; }
+h4 { font-size: 15px; margin: 18px 0 6px; color: var(--ink-2); text-transform: uppercase; letter-spacing: .05em; }
+p, li { color: var(--ink); }
+.muted { color: var(--ink-3); }
+
+.grid { display: grid; gap: 16px; }
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 18px 20px; box-shadow: var(--shadow);
+}
+.card h3, .card h4 { margin-top: 0; }
+.card ul { padding-left: 20px; margin: 8px 0 0; }
+.card li { margin: 3px 0; }
+.card.accent { border-left: 4px solid var(--accent); }
+.card.blue { border-left: 4px solid var(--blue); }
+.card.green { border-left: 4px solid var(--green); }
+.card.red { border-left: 4px solid var(--red); }
+.card.violet { border-left: 4px solid var(--violet); }
+
+.callout { background: var(--accent-soft); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px; padding: 14px 18px; margin: 18px 0; }
+.callout strong:first-child { color: var(--accent); }
+
+.tag { display: inline-block; font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-2); margin: 0 4px 4px 0; white-space: nowrap; }
+.tag.b { color: var(--blue); } .tag.g { color: var(--green); } .tag.r { color: var(--red); } .tag.a { color: var(--accent); } .tag.v { color: var(--violet); }
+
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); margin: 14px 0; }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: var(--panel-2); font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.phase { display: grid; grid-template-columns: 74px minmax(0,1fr); gap: 18px; margin: 18px 0; }
+.phase .pn { font-size: 13px; font-weight: 700; color: var(--accent); text-align: right; padding-top: 20px; }
+.phase .pn b { display: block; font-size: 30px; color: var(--ink); line-height: 1; }
+.phase .card h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.exit { margin-top: 10px; font-size: 14px; color: var(--ink-2); border-top: 1px dashed var(--line); padding-top: 8px; }
+.exit b { color: var(--green); }
+
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; }
+.diagram svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.diagram text { font-family: ui-sans-serif, system-ui, sans-serif; }
+
+.pill-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.toggle-theme { margin-top: 18px; font-size: 13px; background: var(--panel-2); color: var(--ink-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+
+@media (max-width: 980px) {
+  .layout { grid-template-columns: minmax(0,1fr); }
+  nav.toc { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--line); padding: 16px; }
+  nav.toc ol { columns: 2; }
+  main { padding: 24px 16px 80px; }
+  .g2, .g3 { grid-template-columns: minmax(0,1fr); }
+  header.hero h1 { font-size: 32px; }
+  .phase { grid-template-columns: minmax(0,1fr); gap: 4px; }
+  .phase .pn { text-align: left; padding-top: 0; }
+  .phase .pn b { display: inline; font-size: 20px; margin-right: 6px; }
+}
+</style>
+<style>
+.issue { font-family: ui-monospace, monospace; font-weight: 700; color: var(--accent); }
+kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--panel-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; padding: 0 5px; }
+.stage { font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 34px 0 6px; }
+.dec { font-size: 13px; font-weight: 700; }
+.dec.ok { color: var(--green); } .dec.ask { color: var(--red); }
+.ne { background: #23262c; border-radius: 12px; border: 1px solid var(--line); overflow-x: auto; }
+.ne svg { display: block; width: 100%; min-width: 820px; height: auto; }
+.ne text { font-family: ui-sans-serif, system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav class="toc">
+  <div class="brand"><span class="hex"></span>BeeModel 2.0 Plan</div>
+  <ol>
+    <li><a href="#goals">Goals</a></li>
+    <li><a href="#today">Where physics is today</a></li>
+    <li><a href="#decisions">Open questions → v1.0</a></li>
+    <li><a href="#roadmap">Roadmap</a></li>
+    <li><a href="#solver">Stage R · The solver</a></li>
+    <li><a href="#ground">Stage G · Ground &amp; landscape</a></li>
+    <li><a href="#shatter">Stage S · Shatter</a></li>
+    <li><a href="#fields">Stage A · Attractors &amp; fields</a></li>
+    <li><a href="#particles">Stage P · Particles</a></li>
+    <li><a href="#gas">Stage V · Smoke, fire, volumes</a></li>
+    <li><a href="#release">Stage Z · v2.0.0</a></li>
+    <li><a href="#data">Data, files &amp; scripting</a></li>
+    <li><a href="#testing">Testing</a></li>
+    <li><a href="#risks">Budgets &amp; risks</a></li>
+  </ol>
+  <button class="toggle-theme" id="themeBtn" type="button">Toggle light / dark</button>
+</nav>
+
+<main>
+<header class="hero">
+  <div class="kicker">After v0.16.0 · v1.0 → v2.0 · Physics</div>
+  <h1>BeeModel 2.0: a world that moves</h1>
+  <p class="lede">The masterplan is done. This plan has two parts. First it settles the questions the masterplan left open, and that makes <b>v1.0</b>. Then it turns physics into a main feature, which makes <b>v2.0</b>. You can break any object into bricks, balls or shards that fall as rigid bodies. There are grounds and landscapes for them to land on, and gravity objects that pull things in or keep them in orbit. A particle system covers rain, sparks, water, smoke and fire. Everything stays pure assembly with no libraries, runs on every core, can be cached and scripted, and is reachable by AI agents over MCP.</p>
+  <div class="meta">BeeModel · Vibecoding/BeeModel-2.0-Plan.html · Follows the <a href="BeeModel-Masterplan.html">Masterplan</a> · Written 2026-10-17 against v0.16.0</div>
+</header>
+
+<section id="goals">
+  <h2>Goals</h2>
+  <div class="grid g2">
+    <div class="card accent"><h3>Break anything</h3><b>Object › Physics › Shatter…</b> breaks the selected object into a chosen number of pieces. The pattern can be <b>bricks</b> (a running bond, a mortar gap), <b>balls</b> (the volume packed with spheres), or <b>shards</b> (Voronoi cells, which can gather where it is hit). Every piece is a rigid body with its own mass. Pieces can be glued so the object breaks only when something hits it hard enough.</div>
+    <div class="card green"><h3>Ground to land on</h3>A <b>Ground</b> object is an endless floor that catches shadows. A <b>Landscape</b> object is a heightfield you can generate, erode, sculpt and paint. Both are exact, fast colliders for rigid bodies, cloth, particles and the play-mode player. Presets: hills, mountains, canyon, dunes, and an island with a water plane.</div>
+    <div class="card violet"><h3>Gravity you can place</h3>An <b>Attractor</b> object pulls rigid bodies, cloth and particles towards it, or pushes them away. Its force falls off with distance, or stops at a radius. Gravity zones, vortex, wind and turbulence fields work the same way. Bodies can also attract each other (N-body), and a planet can have its own "down" for the player.</div>
+    <div class="card blue"><h3>Particles, liquid, smoke, fire</h3>An emitter on any object, with forces, collisions and lifetimes. Particles are drawn as points, sprites or instances. Liquid uses position-based fluids and is meshed into a surface. Smoke and fire run on a sparse gas grid, with combustion and blackbody flames. Volumes render in both path tracers.</div>
+  </div>
+  <div class="callout"><strong>Principles kept.</strong> No libraries. CPU first, with the GPU helper optional. Results are deterministic, so a bake is the same on every machine and in every co-editing session. Everything is an operator, so it has a menu entry, an undo step, a BeeScript name and an MCP tool. Anything slower than a frame runs as a job with a progress chip. Results go into the simulation cache, which has a memory budget.</div>
+</section>
+
+<section id="today">
+  <h2>Where physics is today</h2>
+  <p class="sub">What v0.16.0 already has, and what is missing for the goals above.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Area</th><th>Today</th><th>Missing for 2.0</th></tr>
+    <tr><td>Rigid bodies <code>rbody.s</code>, <code>collide.s</code></td><td>Sequential impulses with warm starting, speculative contacts, friction and bounce. Shapes: box, sphere, capsule, hull (64 points), compound (16 convex parts). Narrow phase by GJK + EPA. Sweep-and-prune on X. Islands sleep, and solve in parallel. Joints: fixed, hinge, point. 1024 bodies and 128 joints. 120 Hz × 10 iterations, no substeps.</td><td>Mesh, heightfield and plane colliders; more than 1024 bodies; substeps for stacks and fast balls; breakable joints; collision groups; continuous collision detection; a guarantee of the same result on any number of threads.</td></tr>
+    <tr><td>Cloth and soft bodies <code>cloth.s</code></td><td>XPBD: stretch, bend and volume constraints; colliders made of triangles; self collision; wind. 60 Hz × 10 substeps. 32 objects.</td><td>Force fields, heightfield colliders, rigid bodies as colliders.</td></tr>
+    <tr><td>Cache <code>simcache.s</code></td><td>Channels 0 (rigid) and 1 (cloth), keyed on the inputs, with a 1 GB budget. <code>sim.bake</code> runs as a job and is saved in the SIMC chunk.</td><td>Channels for particles, liquid and gas grids, with quantized and sparse storage.</td></tr>
+    <tr><td>Terrain</td><td>Geonodes <code>terrain</code>, <code>terrace</code> and <code>erode</code> (<code>procgen.s</code>: fBm, ridged noise, droplet erosion). The welcome template is a grid to sculpt.</td><td>A landscape object type, a heightfield collider, and heightmap import and export.</td></tr>
+    <tr><td>Fracture</td><td>Booleans (mesh and B-rep), bisect, knife.</td><td>Voronoi, brick and ball patterns; cutting a mesh into closed cells; Separate by Loose Parts.</td></tr>
+    <tr><td>Particles, fluids, volumes</td><td>None. Building blocks: <code>inst.s</code> instancing (8 prototypes, per-instance matrices), geonodes <code>distribute</code>, the field JIT, blackbody and noise nodes.</td><td>All of it.</td></tr>
+    <tr><td>Play mode <code>play.s</code>, <code>logic.s</code></td><td>Live physics; a kinematic capsule player; logic nodes <code>hit</code>, <code>overlap</code> and <code>impulse</code>.</td><td>A "down" that follows the local gravity; logic nodes for shatter, emit and fields.</td></tr>
+  </table></div>
+</section>
+
+<section id="decisions">
+  <h2>Open questions → v1.0</h2>
+  <p class="sub">The masterplan's "Open questions to decide next". Several have already been settled by what was built. Each gets an issue that writes the decision into <code>docs/DECISIONS.md</code> and does the small amount of work that follows from it. When they are done, <b>v1.0.0</b> is tagged: the format and the APIs are stable from then on.</p>
+  <div class="table-wrap"><table>
+    <tr><th>#</th><th>Question</th><th>Where it stands</th><th>Proposal</th></tr>
+    <tr><td class="num"><span class="issue">D1</span></td><td>BeeScript syntax: Python-like or Lua-like?</td><td><span class="dec ok">Settled in practice.</span> BeeScript is its own small language: expressions like Python's, blocks in braces, <code>fn</code>, <code>for i in a..b</code>. The AI layer writes it reliably, and its errors explain themselves (v0.15).</td><td>Keep it. Write the grammar out in <code>docs/BEESCRIPT.md</code>, and add an AI test of 50 tasks that must run without an error. Freeze it for 1.x: new built-ins may be added, but nothing changes meaning.</td></tr>
+    <tr><td class="num"><span class="issue">D2</span></td><td>Default keymap: Blender-compatible, or our own with a Blender preset?</td><td><span class="dec ok">Mostly settled.</span> The default is close to Blender's (G R S, Tab, pies, Shift+A); there is a laptop preset and a rebinding editor.</td><td>Keep BeeModel's keymap as the default. Add a <b>Blender 4.x</b> preset that maps the differences, and list them in <code>docs/UI.md</code>.</td></tr>
+    <tr><td class="num"><span class="issue">D3</span></td><td>License, and is the MCP tool schema an open standard?</td><td><span class="dec ok">Decided 2026-10-17: MIT.</span> The LICENSE file is added with the solver work. The MCP tools are described only in <code>docs/MCP.md</code>.</td><td>MIT: add a license line to the README and the release archives. Publish the tool schema as <code>docs/mcp-tools.json</code> (JSON Schema, versioned with the app), and have CI check it against the running server.</td></tr>
+    <tr><td class="num"><span class="issue">D4</span></td><td>CAD scope for v1.0: parts only, or parts and assemblies?</td><td><span class="dec ok">Partly settled.</span> Parts (feature tree, B-rep kernel); STEP assemblies come in as placed objects; <code>mech.s</code> has kinematic joints.</td><td>v1.0 is parts plus light assemblies: components are objects, placed by mates (coincident, concentric, distance), with mech joints for motion. A full assembly constraint solver waits until after 2.0.</td></tr>
+    <tr><td class="num"><span class="issue">D5</span></td><td>Build the optional GPU helper, or commit fully to the CPU?</td><td><span class="dec ok">Settled.</span> The helper shipped in v0.11; it path-traces, rasterizes and drives Rendered shading, with the CPU as the reference.</td><td>Keep it optional. For 2.0 the physics is CPU first. The GPU helper may take the liquid and gas solvers later, checked against the CPU results the same way <code>tests/gpu.py</code> checks images.</td></tr>
+    <tr><td class="num"><span class="issue">D6</span></td><td>Collaboration: LAN first, or a relay server (which needs TLS)?</td><td><span class="dec ok">LAN first, built.</span> Co-editing and live link are peer to peer, on localhost or <code>lan</code>.</td><td>No relay in 1.x. Document working over the internet through an SSH tunnel or WireGuard. Add a shared session key (a pre-shared secret, with each message authenticated) so a LAN session can't be joined by just anyone.</td></tr>
+    <tr><td class="num"><span class="issue">D7</span></td><td>Release v1.0.0</td><td></td><td>Stability promises: <code>.bee</code> files from 1.0 open in every later version; BeeScript and the MCP tools change only by adding. <code>docs/DECISIONS.md</code>, the README, a 1.0 walkthrough, the tag.</td></tr>
+  </table></div>
+</section>
+
+<section id="roadmap">
+  <h2>Roadmap</h2>
+  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the decisions (v1.0.0).</p>
+  <div class="diagram">
+  <svg viewBox="0 0 980 250" role="img" aria-label="Stage order: D to v1.0, then R; R leads to G, S and A; G and A lead to P; P leads to V; all lead to Z, v2.0">
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
+    <g style="color: var(--ink-3)" stroke="currentColor" stroke-width="1.6" fill="none" marker-end="url(#ar)">
+      <path d="M128,125 L168,125"/>
+      <path d="M298,125 L338,60"/><path d="M298,125 L338,125"/><path d="M298,125 L338,190"/>
+      <path d="M468,60 L508,105"/><path d="M468,190 L508,145"/><path d="M468,125 L508,125"/>
+      <path d="M638,125 L678,125"/>
+      <path d="M808,125 L848,125"/>
+    </g>
+    <g font-size="13">
+      <rect x="10" y="95" width="118" height="60" rx="10" fill="var(--panel)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="69" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">D · decisions</text><text x="69" y="140" text-anchor="middle" fill="var(--ink-3)">v1.0.0</text>
+      <rect x="170" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="234" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">R · solver</text><text x="234" y="140" text-anchor="middle" fill="var(--ink-3)">v0.17.0 · first</text>
+      <rect x="340" y="30" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--green)" stroke-width="2"/>
+      <text x="404" y="55" text-anchor="middle" font-weight="700" fill="var(--ink)">G · ground</text><text x="404" y="75" text-anchor="middle" fill="var(--ink-3)">v1.1.0</text>
+      <rect x="340" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="404" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">S · shatter</text><text x="404" y="140" text-anchor="middle" fill="var(--ink-3)">v1.2.0</text>
+      <rect x="340" y="160" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--violet)" stroke-width="2"/>
+      <text x="404" y="185" text-anchor="middle" font-weight="700" fill="var(--ink)">A · attractors</text><text x="404" y="205" text-anchor="middle" fill="var(--ink-3)">v1.3.0</text>
+      <rect x="510" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>
+      <text x="574" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">P · particles</text><text x="574" y="140" text-anchor="middle" fill="var(--ink-3)">v1.4.0</text>
+      <rect x="680" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--red)" stroke-width="2"/>
+      <text x="744" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">V · gas, volumes</text><text x="744" y="140" text-anchor="middle" fill="var(--ink-3)">v1.5.0</text>
+      <rect x="850" y="95" width="120" height="60" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
+      <text x="910" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">Z · release</text><text x="910" y="140" text-anchor="middle" fill="var(--ink-3)">v2.0.0</text>
+    </g>
+  </svg>
+  </div>
+  <div class="table-wrap"><table>
+    <tr><th>Stage</th><th>Issues</th><th>Release</th><th>What you can do afterwards</th></tr>
+    <tr><td>R · the solver</td><td class="num">R1–R7</td><td class="num">v0.17.0</td><td>10 000 bodies; stacks that stand; bodies landing on any mesh; breakable joints.</td></tr>
+    <tr><td>D · decisions</td><td class="num">D1–D7</td><td class="num">v1.0.0</td><td>Rely on the file format and the APIs; the license is clear.</td></tr>
+    <tr><td>G · ground &amp; landscape</td><td class="num">G1–G6</td><td class="num">v1.1.0</td><td>Add a ground or a landscape, shape it, and drop things on it.</td></tr>
+    <tr><td>S · shatter</td><td class="num">S1–S6</td><td class="num">v1.2.0</td><td>Break objects into bricks, balls or shards, glued or loose.</td></tr>
+    <tr><td>A · attractors &amp; fields</td><td class="num">A1–A5</td><td class="num">v1.3.0</td><td>Attractors, orbits, gravity zones, wind, vortex; walk around a planet.</td></tr>
+    <tr><td>P · particles &amp; liquid</td><td class="num">P1–P6</td><td class="num">v1.4.0</td><td>Rain, snow, sparks, fountains; water that splashes and gets meshed.</td></tr>
+    <tr><td>V · smoke, fire, volumes</td><td class="num">V1–V5</td><td class="num">v1.5.0</td><td>Smoke plumes and campfires, rendered as volumes.</td></tr>
+    <tr><td>Z · release</td><td class="num">Z1–Z2</td><td class="num">v2.0.0</td><td>The demo scene, benchmarks, docs.</td></tr>
+  </table></div>
+</section>
+
+<section id="solver">
+  <h2>Stage R · The solver</h2>
+  <p class="sub">Everything else stands on this: shattered walls need thousands of bodies, landscapes need mesh colliders, and balls need not to tunnel.</p>
+  <div class="phase"><div class="pn"><b>R1</b>core</div><div class="card"><h3>Substeps and a stiffer solver <span class="tag b">core</span></h3>
+    <p>The step is split into substeps (default 4 per 1/120 s step), with "soft step" relaxation: a TGS-style solver with fewer iterations per substep. Mass ratios of 1:100 stack. Settings: <code>rigid.world substeps N</code>, and Properties › Physics › World.</p>
+    <div class="exit"><b>Exit:</b> a 20-box tower and a 10-layer brick pyramid stand still for 10 s (drift under 1 mm); a 1 kg box on a 100 kg box rests.</div></div></div>
+  <div class="phase"><div class="pn"><b>R2</b>scale</div><div class="card"><h3>10 000 bodies <span class="tag b">scale</span></h3>
+    <p>Body and contact storage grows from the memory pools, with no fixed 1024. The broadphase becomes a dynamic BVH (incremental refit, rebuilt in parallel), replacing sweep-and-prune on X. Islands are split across workers. Instanced shapes (one hull shared by many pieces) save memory.</p>
+    <div class="exit"><b>Exit:</b> 10 000 spheres poured into a box: 10 s simulated in under 30 s on 8 threads; 5000 settling bricks run live at 24 fps or better.</div></div></div>
+  <div class="phase"><div class="pn"><b>R3</b>static</div><div class="card"><h3>Mesh and plane colliders <span class="tag b">collide</span></h3>
+    <p>A passive rigid body can use its <b>Mesh</b> as a shape: triangles in a BVH, tested convex against triangle (GJK on each triangle, with its neighbours' normals so edges don't snag). An infinite <b>Plane</b> shape. Both static only. Cloth and the player already collide with meshes; they share the new BVH.</p>
+    <div class="exit"><b>Exit:</b> boxes and balls dropped into a bowl and onto a staircase mesh come to rest without falling through or jittering; 100k-triangle collider, 1000 bodies, live.</div></div></div>
+  <div class="phase"><div class="pn"><b>R4</b>ccd</div><div class="card"><h3>Fast bodies and collision groups <span class="tag b">collide</span></h3>
+    <p>Continuous collision detection for small, fast bodies: conservative advancement on the swept shape, used only where a body moves more than half its size in a step. 16 collision groups, each with a mask of the groups it collides with. Per-material friction and bounce (rubber, ice, wood, metal presets).</p>
+    <div class="exit"><b>Exit:</b> a 1 cm ball at 100 m/s does not pass through a 1 cm wall; two groups that ignore each other pass through one another.</div></div></div>
+  <div class="phase"><div class="pn"><b>R5</b>joints</div><div class="card"><h3>Breakable joints, limits and motors <span class="tag b">joints</span></h3>
+    <p>Every joint gets a breaking impulse; a broken joint is gone for the rest of the run, and the cache records when. Hinge limits and motors (target speed, maximum torque). A slider joint. The joint limit grows like the bodies (R2). Shatter (S4) uses these as its glue.</p>
+    <div class="exit"><b>Exit:</b> a chain breaks at the link that carries the most load; a motor turns a wheel at its set speed under load.</div></div></div>
+  <div class="phase"><div class="pn"><b>R6</b>same</div><div class="card"><h3>The same result everywhere <span class="tag r">quality</span></h3>
+    <p>Order the work so that the result does not depend on the thread count: contacts sorted by body pair, islands solved independently, sums in a fixed order. Bakes match between machines and in co-editing sessions. The cache records the solver version.</p>
+    <div class="exit"><b>Exit:</b> the 1000-box bake is identical bit for bit with 1, 4 and 32 threads.</div></div></div>
+  <div class="phase"><div class="pn"><b>R7</b>ship</div><div class="card"><h3>Tests, docs, release v0.17.0 <span class="tag r">release</span></h3>
+    <p><code>tests/solver.py</code> with the exits above, <code>docs/PHYSICS.md</code> (the solver part), the CHANGELOG, the README and a benchmark. The MIT LICENSE.</p>
+    <div class="exit"><b>Exit:</b> <code>ci/local.sh</code> and GitHub CI are green; v0.17.0 is published.</div></div></div>
+</section>
+
+<section id="ground">
+  <h2>Stage G · Ground &amp; landscape</h2>
+  <p class="sub">Something solid to land on: a simple floor, or terrain shaped like the real thing.</p>
+  <div class="phase"><div class="pn"><b>G1</b>ground</div><div class="card"><h3>The Ground object <span class="tag g">object</span></h3>
+    <p><b>Add › Ground</b>: an endless floor at a height, drawn with a fading grid. It catches shadows in renders (shadow-catcher mode, alpha elsewhere) and is a plane collider (R3) for rigid bodies, cloth, particles and the player. It has a physics material (friction, bounce). One per scene by default; <b>Add › Ground</b> on a scene that has one selects it.</p>
+    <div class="exit"><b>Exit:</b> a new scene, Add › Ground, a cube made a rigid body falls and rests on it; F12 shows the shadow over a transparent background.</div></div></div>
+  <div class="phase"><div class="pn"><b>G2</b>terrain</div><div class="card"><h3>The Landscape object <span class="tag g">object</span></h3>
+    <p>A new object type: a heightfield of N × N samples (65² to 4097²) over a chosen size, stored in tiles of 64², drawn with tile LOD (far tiles coarser, seams stitched). A non-destructive stack of layers: <b>Generate</b> (fBm, ridged, billow, Voronoi cells, with seed and scale), <b>Erode</b> (the droplet erosion from <code>procgen.s</code>, plus thermal erosion), <b>Terrace</b>, <b>Sculpted</b> (the strokes) and <b>Flatten area</b> (a mask). Each layer has a strength and can be hidden.</p>
+    <div class="exit"><b>Exit:</b> a 1025² landscape is generated and eroded in under 1 s, edited at interactive frame rates, saved and reopened the same.</div></div></div>
+  <div class="phase"><div class="pn"><b>G3</b>shape</div><div class="card"><h3>Sculpt and paint the landscape <span class="tag g">tools</span></h3>
+    <p>Landscape brushes in Sculpt mode: raise, lower, smooth, flatten, ramp (between two points), noise, erode (local). Paint mode paints up to 8 material layers (rock, grass, sand, snow…) into a splat map, and an <b>auto layer</b> rule picks them by height and slope. The splat drives the material in the viewport and in both path tracers.</p>
+    <div class="exit"><b>Exit:</b> fakewl paints a ramp and a grass layer with clicks; the render shows grass on the flat and rock on the slope.</div></div></div>
+  <div class="phase"><div class="pn"><b>G4</b>collide</div><div class="card"><h3>The heightfield collider <span class="tag b">collide</span></h3>
+    <p>An exact collider that reads the heightfield directly: the cells under a shape's bounding box become triangle pairs on the fly, with nothing stored. It is used by rigid bodies, cloth, particles (P3) and the play-mode player. A physics material per paint layer, so a ball rolls further on rock than on grass.</p>
+    <div class="exit"><b>Exit:</b> 1000 balls rolled down a 4097² mountain stay on its surface; the player walks over it with steps no taller than the step height.</div></div></div>
+  <div class="phase"><div class="pn"><b>G5</b>presets</div><div class="card"><h3>Presets and water <span class="tag g">ui</span></h3>
+    <p><b>Add › Landscape ›</b> Flat, Hills, Mountains, Canyon, Dunes, Island. Island adds a <b>Water plane</b> object: a flat level with a water material (transmission, IOR 1.33, ripple normals). The water plane is also a simple buoyancy zone (bodies below it float, by their submerged volume). The welcome screen's Terrain template uses Hills.</p>
+    <div class="exit"><b>Exit:</b> each preset is added from the menu; a wooden box dropped in the island's water floats.</div></div></div>
+  <div class="phase"><div class="pn"><b>G6</b>io</div><div class="card"><h3>Heightmaps in and out <span class="tag a">files</span></h3>
+    <p>Import a 16-bit PNG or EXR heightmap as a landscape; export the heights and the splat map; convert a landscape to a mesh (with the current LOD, or full). World partition streams landscape tiles like its other cells.</p>
+    <div class="exit"><b>Exit:</b> a heightmap round-trips exactly; converting to a mesh gives the same surface within 1e-5.</div></div></div>
+</section>
+
+<section id="shatter">
+  <h2>Stage S · Shatter</h2>
+  <p class="sub">Break any object into a number of pieces, and have every piece be physical.</p>
+  <div class="grid g3">
+    <div class="card accent"><h4>Bricks</h4>A running bond in the object's local axes: brick size or count per axis, row offset (½, ⅓, random), a mortar gap, a small random size jitter. The object is cut by the brick grid; a brick crossing the surface keeps the surface's shape.</div>
+    <div class="card blue"><h4>Balls</h4>The volume is packed with spheres: the given number of them, all one radius or a spread of radii. A dense packing is used, relaxed so balls don't overlap. The original is hidden, and each ball takes the colour of the surface nearest it. Thousands of balls share one sphere mesh (instancing).</div>
+    <div class="card violet"><h4>Shards</h4>Voronoi cells from N seed points: uniform, clustered around an <b>impact point</b> (the 3D cursor or a hit), or along the surface. Cells are clipped to the mesh, so concave objects work. An inner material for the new faces.</div>
+  </div>
+  <div class="phase"><div class="pn"><b>S1</b>cut</div><div class="card"><h3>Cutting a closed mesh into cells <span class="tag b">core</span></h3>
+    <p>The geometry core: clip a closed mesh by a convex cell (a set of planes) and close the cut with new faces, robust to coplanar and degenerate cases. Uses the exact predicates the boolean code already has. Cells are cut in parallel. A non-manifold input is repaired first (<code>repair.s</code>), or refused with a reason. <b>Mesh › Separate › By Loose Parts</b> comes with it.</p>
+    <div class="exit"><b>Exit:</b> a cube, a torus and Suzanne cut into 100 cells each: every piece is closed, the volumes add up to the original's within 1e-6, and there are no slivers under 1e-5.</div></div></div>
+  <div class="phase"><div class="pn"><b>S2</b>patterns</div><div class="card"><h3>The three patterns <span class="tag a">feature</span></h3>
+    <p>Bricks, balls and shards as above. Count, seed, size controls, gap, inner material. For balls, the packing works in the object's volume through its signed distance (the SDF tools), and a ball outside the surface is dropped.</p>
+    <div class="exit"><b>Exit:</b> a 2 × 1 × 0.2 m wall into 10 × 5 bricks; a sphere into 500 balls; a vase into 50 shards around a point: counts, volumes and materials as asked.</div></div></div>
+  <div class="phase"><div class="pn"><b>S3</b>bodies</div><div class="card"><h3>Every piece is a rigid body <span class="tag b">physics</span></h3>
+    <p>Each piece becomes an active rigid body: its shape is a hull (shards and bricks are convex, so the hull is exact) or a sphere; its mass is its volume times the material's density; it starts with the object's velocity. The pieces are parented to an empty named after the original, so the outliner folds them. The original is hidden, not deleted. One undo step. <code>object.shatter</code> with all the options; Object › Physics › Shatter… is its form.</p>
+    <div class="exit"><b>Exit:</b> shatter a cube into 200 shards, press play: they fall and settle on the ground; Ctrl+Z gives the cube back.</div></div></div>
+  <div class="phase"><div class="pn"><b>S4</b>glue</div><div class="card"><h3>Glue: break on impact <span class="tag b">physics</span></h3>
+    <p>Neighbouring pieces (those that share a face) get a glue joint (R5) with a strength. A glued object behaves as one body until a contact impulse breaks the joints near it; the pieces that come loose start moving. Strength can vary: weaker towards the impact point, or painted with weight paint.</p>
+    <div class="exit"><b>Exit:</b> a ball thrown at a glued brick wall knocks out a hole the size of the ball and the rest stands; a weaker throw leaves it standing.</div></div></div>
+  <div class="phase"><div class="pn"><b>S5</b>live</div><div class="card"><h3>Shatter while it runs <span class="tag v">play</span></h3>
+    <p>An object can be marked <b>Shatter on impact</b>: it stays whole and is cut only when hit above a threshold, around the point of the hit, during the simulation and in play mode. The cutting is precomputed when the run starts, so it costs no frame time. Logic node <code>shatter</code>.</p>
+    <div class="exit"><b>Exit:</b> in play mode, a ball shot at a vase breaks it where it hits, with no frame over 16 ms.</div></div></div>
+  <div class="phase"><div class="pn"><b>S6</b>ui</div><div class="card"><h3>The Shatter form and panel <span class="tag v">ui</span></h3>
+    <p>A form with a live preview of the cells (drawn as outlines before anything is cut), presets (Brick wall, Glass, Stone, Gravel balls), and a Shatter section in Properties › Physics for re-cutting with other settings. BeeScript <code>shatter(name, pattern, count [, options])</code>.</p>
+    <div class="exit"><b>Exit:</b> a fakewl test shatters a wall from the menu, changes the count in the panel and runs it, with clicks only.</div></div></div>
+</section>
+
+<section id="fields">
+  <h2>Stage A · Attractors &amp; force fields</h2>
+  <p class="sub">Gravity becomes something you place. One field system pushes rigid bodies, cloth and particles.</p>
+  <div class="phase"><div class="pn"><b>A1</b>fields</div><div class="card"><h3>Force field objects <span class="tag v">object</span></h3>
+    <p>A new object type, <b>Add › Force Field ›</b>:</p>
+    <ul>
+      <li><b>Attractor</b>: pulls towards its centre, by inverse square (softened near the centre) or linear; a negative strength repels.</li>
+      <li><b>Gravity zone</b>: a box or sphere inside which "down" is a different vector.</li>
+      <li><b>Wind</b>: a direction, with gusts.</li>
+      <li><b>Vortex</b>: turns things around its axis.</li>
+      <li><b>Turbulence</b>: curl noise.</li>
+      <li><b>Drag</b>.</li>
+    </ul>
+    <p>Every field has a falloff (none, radius, smooth) and a strength that can be keyframed. The viewport draws the icon and the radius. A Fields section in Properties › Physics.</p>
+    <div class="exit"><b>Exit:</b> each type moves a test body the way it should, within 1% of the analytic force.</div></div></div>
+  <div class="phase"><div class="pn"><b>A2</b>apply</div><div class="card"><h3>Fields on everything <span class="tag b">physics</span></h3>
+    <p>Rigid bodies (at their centre of mass), cloth and soft bodies (per particle) and particles (P1) take the sum of the fields. A field can apply to some collision groups only. The world's gravity can be switched off for space scenes. Integration is symplectic (velocity first), so orbits keep their energy.</p>
+    <div class="exit"><b>Exit:</b> a body in a circular orbit around an attractor keeps its radius within 1% over 10 orbits; a tablecloth blows in the wind.</div></div></div>
+  <div class="phase"><div class="pn"><b>A3</b>nbody</div><div class="card"><h3>Bodies that attract each other <span class="tag b">physics</span></h3>
+    <p>A rigid body can be marked <b>Attracts</b>: it pulls every other body by its mass, with a G you scale. Barnes–Hut (an octree of masses) keeps this fast for thousands of bodies. Shatter a moon and the pieces orbit and clump.</p>
+    <div class="exit"><b>Exit:</b> two bodies orbit their common centre; 5000 attracting bodies run at 10 steps per second or better on 8 threads.</div></div></div>
+  <div class="phase"><div class="pn"><b>A4</b>planet</div><div class="card"><h3>Walk on a planet <span class="tag v">play</span></h3>
+    <p>In play mode the player's "down" follows the strongest field where it stands, and the camera turns with it. A sphere with an attractor becomes a small planet to walk around. Logic nodes: <code>field</code> (sample the force at a point) and <code>set strength</code>.</p>
+    <div class="exit"><b>Exit:</b> the player walks once round a 20 m planet and comes back to its start.</div></div></div>
+  <div class="phase"><div class="pn"><b>A5</b>ui</div><div class="card"><h3>Seeing the fields <span class="tag v">ui</span></h3>
+    <p>A viewport overlay draws the field as arrows on a grid or as streamlines from the selected object. Presets: Planet, Black hole (strong and short), Tornado (vortex and lift), Breeze. BeeScript <code>field(type, name, …)</code>, and <code>force(x, y, z)</code> to sample the total.</p>
+    <div class="exit"><b>Exit:</b> fakewl adds a tornado from the menu; the overlay shows its swirl.</div></div></div>
+</section>
+
+<section id="particles">
+  <h2>Stage P · Particles &amp; liquid</h2>
+  <p class="sub">One particle core, used for simple effects and as the basis of the liquid solver.</p>
+  <div class="phase"><div class="pn"><b>P1</b>core</div><div class="card"><h3>The particle system <span class="tag b">core</span></h3>
+    <p>A particle system belongs to an emitter object. It emits from faces, the volume, vertices or a point; at a rate or all at once; with a lifetime, a start speed along the normal or a direction, and random spread. Particles are stored per field (structure of arrays: position, velocity, age, size, colour, id) in pooled blocks, up to 4 million. Forces come from gravity and the fields (A2), plus drag. Steps run in parallel chunks.</p>
+    <div class="exit"><b>Exit:</b> 1M particles step at under 10 ms on 8 threads; a fountain's arc matches the ballistic curve within 1e-3.</div></div></div>
+  <div class="phase"><div class="pn"><b>P2</b>draw</div><div class="card"><h3>Drawing and rendering particles <span class="tag a">render</span></h3>
+    <p>The viewport draws particles as points or camera-facing sprites, or as instances of up to 8 objects (debris, leaves, raindrops), through <code>inst.s</code>. Colour and size can change over the lifetime (a ramp). Hive and the GPU helper render them as spheres, or as the instanced meshes.</p>
+    <div class="exit"><b>Exit:</b> 1M points draw at 60 fps; a render of 100k instanced leaves matches between the CPU and the GPU.</div></div></div>
+  <div class="phase"><div class="pn"><b>P3</b>collide</div><div class="card"><h3>Collisions and events <span class="tag b">physics</span></h3>
+    <p>Particles hit meshes, the ground, landscapes and rigid bodies (a hash grid on the particle side, the BVHs on the other), with bounce, friction, or dying, sticking or splitting on a hit. Events (born, hit, died) can emit a second system: sparks that throw sparks, rain that splashes.</p>
+    <div class="exit"><b>Exit:</b> rain on a landscape: no particle passes through; every hit makes a splash.</div></div></div>
+  <div class="phase"><div class="pn"><b>P4</b>liquid</div><div class="card"><h3>Liquid <span class="tag b">solver</span></h3>
+    <p>Position-based fluids: density constraints solved over neighbours found in a spatial hash, with XSPH viscosity, vorticity confinement and surface tension. It runs on the particle core, uses the same colliders, and moves rigid bodies in both directions (things float and get pushed). Settings: particle size, viscosity (water, oil, honey), domain box.</p>
+    <div class="exit"><b>Exit:</b> a dam break of 200k particles bakes at under 1 s per frame on 8 threads; the water level at rest is flat within one particle radius; a box floats.</div></div></div>
+  <div class="phase"><div class="pn"><b>P5</b>surface</div><div class="card"><h3>The liquid's surface <span class="tag a">render</span></h3>
+    <p>Each frame the particles are turned into a mesh: a smoothed density field on a sparse grid, then marching cubes (the SDF code meshes this way already). It has a water material, with foam and spray as a secondary particle system where the surface breaks. The mesh can be exported per frame (OBJ sequence, or glTF with morph targets).</p>
+    <div class="exit"><b>Exit:</b> the dam break renders as a closed, smooth surface with no holes, in under 200 ms per frame for meshing.</div></div></div>
+  <div class="phase"><div class="pn"><b>P6</b>ui</div><div class="card"><h3>The Particles tab and presets <span class="tag v">ui</span></h3>
+    <p>A new Properties tab, Particles: the systems on the object, emission, motion, render, collisions, liquid. Presets: Rain, Snow, Sparks, Confetti, Fountain, Water tank. Cached in the simulation cache (channel 2 particles, 3 liquid), with positions quantized to 16 bits inside the domain. BeeScript <code>emit(object, preset)</code> and <code>particles(k)</code>.</p>
+    <div class="exit"><b>Exit:</b> fakewl adds a fountain with clicks; the bake fits the cache budget; save and reopen plays the same frames.</div></div></div>
+</section>
+
+<section id="gas">
+  <h2>Stage V · Smoke, fire &amp; volumes</h2>
+  <p class="sub">A gas solver on a sparse grid, and volumes in both path tracers.</p>
+  <div class="phase"><div class="pn"><b>V1</b>gas</div><div class="card"><h3>The smoke solver <span class="tag b">solver</span></h3>
+    <p>An Eulerian grid in 8³ bricks, with only the active bricks allocated, and a domain that follows the smoke. Steps:</p>
+    <ul>
+      <li>Semi-Lagrangian advection (MacCormack for detail).</li>
+      <li>Buoyancy from temperature.</li>
+      <li>Vorticity confinement.</li>
+      <li>A multigrid pressure solve, so the flow is divergence-free.</li>
+      <li>Colliders block the flow, and moving ones push it.</li>
+    </ul>
+    <p>Fields: density, temperature, velocity. Sources: a mesh, a particle system, or an emitter shape.</p>
+    <div class="exit"><b>Exit:</b> a smoke plume at 128³ effective bakes in under 0.5 s per frame on 8 threads; smoke flows around a sphere, not through it.</div></div></div>
+  <div class="phase"><div class="pn"><b>V2</b>fire</div><div class="card"><h3>Fire <span class="tag b">solver</span></h3>
+    <p>Combustion on the gas grid: fuel burns into heat and smoke at a rate. A flame field drives emission, coloured by temperature through the blackbody node the materials already have. Presets: Campfire, Candle, Torch, Explosion (a burst of fuel and an outward push). Logic node <code>ignite</code>.</p>
+    <div class="exit"><b>Exit:</b> a campfire burns steadily for 10 s; an explosion expands and fades; both look right in a render.</div></div></div>
+  <div class="phase"><div class="pn"><b>V3</b>render</div><div class="card"><h3>Volumes in Hive and on the GPU <span class="tag a">render</span></h3>
+    <p>Participating media in both path tracers:</p>
+    <ul>
+      <li>Delta tracking for sampling and ratio tracking for shadows, over the brick grid (a 3D DDA through the bricks).</li>
+      <li>Absorption, scattering (Henyey–Greenstein) and emission.</li>
+      <li>A <b>Volume</b> material output for any mesh (fog in a box, fog over the landscape), as well as gas grids.</li>
+    </ul>
+    <p>The CPU and the GPU must give the same image, as <code>tests/gpu.py</code> already checks for surfaces.</p>
+    <div class="exit"><b>Exit:</b> a smoke render matches between the CPU and the GPU (mean difference under 0.5 levels at 256 samples); a fog box over the ground shows god rays from the sun.</div></div></div>
+  <div class="phase"><div class="pn"><b>V4</b>view</div><div class="card"><h3>Volumes in the viewport <span class="tag a">viewport</span></h3>
+    <p>Solid and Material Preview raymarch the density (one light, low steps) so smoke and fire show while you work; Rendered uses V3. A slice view for debugging (density, temperature, velocity).</p>
+    <div class="exit"><b>Exit:</b> a 128³ plume draws in the viewport at 30 fps or better.</div></div></div>
+  <div class="phase"><div class="pn"><b>V5</b>io</div><div class="card"><h3>Caching and export <span class="tag a">files</span></h3>
+    <p>Gas grids are cached as sparse bricks, quantized to 8 or 16 bits per field (cache channel 4). Export as OpenVDB (our own writer of the format's grid layout, with no library) so Blender and others can render it.</p>
+    <div class="exit"><b>Exit:</b> a 10 s plume fits the default 1 GB budget; the exported .vdb opens in Blender with the same density.</div></div></div>
+</section>
+
+<section id="release">
+  <h2>Stage Z · v2.0.0</h2>
+  <div class="phase"><div class="pn"><b>Z1</b>demo</div><div class="card"><h3>The 2.0 walkthrough <span class="tag r">release</span></h3>
+    <p><code>tests/physics2.py</code> builds one scene with every new feature:</p>
+    <ul>
+      <li>An island landscape with water.</li>
+      <li>A glued brick tower on it, knocked down by a ball.</li>
+      <li>A moon shattered into balls that orbit an attractor.</li>
+      <li>A fountain and a campfire.</li>
+    </ul>
+    <p>It bakes everything, renders one frame on the CPU and on the GPU, saves and reopens the scene, and checks the results. A fakewl walkthrough does the same with clicks only.</p>
+    <div class="exit"><b>Exit:</b> the scene bakes and renders within the budgets below; the reopened file plays the same frames.</div></div></div>
+  <div class="phase"><div class="pn"><b>Z2</b>ship</div><div class="card"><h3>Docs and release v2.0.0 <span class="tag r">release</span></h3>
+    <p><code>docs/PHYSICS.md</code> (solver, shatter, fields, landscape), <code>docs/PARTICLES.md</code> (particles, liquid, gas, volumes), the README, the CHANGELOG, the benchmarks, the tag.</p>
+    <div class="exit"><b>Exit:</b> <code>ci/local.sh</code> and GitHub CI are green; the release is published.</div></div></div>
+</section>
+
+<section id="data">
+  <h2>Data, files &amp; scripting</h2>
+  <div class="table-wrap"><table>
+    <tr><th>Thing</th><th>Stored as</th><th>Operators (examples)</th><th>BeeScript</th></tr>
+    <tr><td>Solver settings, groups, physics materials</td><td>ANIM chunk (grows), PMAT</td><td><code>rigid.world substeps 4</code>, <code>rigid.group</code></td><td><code>rigid(name, prop)</code></td></tr>
+    <tr><td>Ground, landscape, water</td><td>GRND, TERR (tiles, layers, splat)</td><td><code>landscape.add hills</code>, <code>landscape.layer</code>, <code>landscape.import</code></td><td><code>landscape(name, k)</code>, <code>height(name, x, z)</code></td></tr>
+    <tr><td>Shatter settings, glue</td><td>FRAC (per original), joints in ANIM</td><td><code>object.shatter bricks 50</code>, <code>mesh.separate_loose</code></td><td><code>shatter(name, pattern, n)</code></td></tr>
+    <tr><td>Force fields</td><td>FLDS</td><td><code>field.add attractor</code>, <code>field.set strength 20</code></td><td><code>field(...)</code>, <code>force(x, y, z)</code></td></tr>
+    <tr><td>Particle systems</td><td>PSYS; cache channels 2 (particles), 3 (liquid)</td><td><code>particles.add rain</code>, <code>particles.bake</code></td><td><code>emit(obj, preset)</code>, <code>particles(k)</code></td></tr>
+    <tr><td>Gas domains</td><td>GASD; cache channel 4</td><td><code>gas.add smoke</code>, <code>gas.export_vdb</code></td><td><code>gas(k)</code></td></tr>
+  </table></div>
+  <p>Every operator has an MCP tool, through the operator table as always. The AI's instructions gain a short physics section, so an agent can say "shatter the wall into 40 bricks and throw a ball at it" and get there in one go.</p>
+</section>
+
+<section id="testing">
+  <h2>Testing</h2>
+  <ul>
+    <li><b>Physics checks with known answers:</b> ballistic arcs, orbits, resting stacks, a floating box (Archimedes), a dam's water level, mass and volume after shattering.</li>
+    <li><b>Same result everywhere:</b> bakes compared bit for bit across thread counts (R6), and across machines in CI.</li>
+    <li><b>Geometry:</b> cut pieces are closed and their volumes add up; fuzzed with random seeds and meshes, like <code>tests/bool_stress.py</code>.</li>
+    <li><b>CPU vs GPU</b> images for particles and volumes, in <code>tests/gpu.py</code>.</li>
+    <li><b>The UI</b> with clicks only in <code>tools/fakewl.py</code>, for each stage (shatter, landscape, fields, particles, smoke).</li>
+    <li><b>New files:</b> <code>tests/solver.py</code>, <code>tests/landscape.py</code>, <code>tests/shatter.py</code>, <code>tests/fields.py</code>, <code>tests/particles.py</code>, <code>tests/gas.py</code>, <code>tests/physics2.py</code>. Each is added to <code>ci/local.sh</code> and GitHub CI.</li>
+  </ul>
+</section>
+
+<section id="risks">
+  <h2>Budgets &amp; risks</h2>
+  <div class="grid g2">
+    <div class="card"><h4>Budgets (8 threads)</h4><ul>
+      <li>Rigid: 10 000 spheres, 10 s simulated in under 30 s; 5000 bricks live at 24 fps or better</li>
+      <li>Shatter: 500 cells from a 100k-triangle mesh in under 1 s</li>
+      <li>Landscape: 1025² generated and eroded in under 1 s; edits at 60 fps</li>
+      <li>Particles: 1M stepped in under 10 ms</li>
+      <li>Liquid: 200k particles, under 1 s per frame plus 200 ms meshing</li>
+      <li>Gas: 128³ effective, under 0.5 s per frame</li>
+      <li>Binary: under 2 MB at v2.0 (it is 1.27 MB today)</li>
+    </ul></div>
+    <div class="card"><h4>Risks</h4><ul>
+      <li><b>Speed of the solvers in pure assembly.</b> Write the hot loops in AVX2 from the start, measure each budget in CI, and keep the GPU helper as a way out for liquid and gas.</li>
+      <li><b>Robust cutting.</b> Degenerate cuts are where fracture tools fail. Reuse the boolean code's exact predicates, and fuzz it.</li>
+      <li><b>Stability with many contacts.</b> Substeps and soft steps (R1) come before shatter. Glue only between neighbours.</li>
+      <li><b>Cache size.</b> Liquid and gas are big. Quantize, keep only active bricks, and say clearly when the budget is reached.</li>
+      <li><b>Volume noise in renders.</b> Ratio tracking plus the existing denoiser. More samples just for volumes when needed.</li>
+      <li><b>Scope.</b> Each stage is useful on its own and released on its own; stage V can move after 2.0 if it runs long.</li>
+    </ul></div>
+  </div>
+</section>
+</main>
+</div>
+<script>
+(function () {
+  var btn = document.getElementById('themeBtn');
+  var root = document.documentElement;
+  try { var saved = localStorage.getItem('bee-theme'); if (saved) root.setAttribute('data-theme', saved); } catch (e) {}
+  btn.addEventListener('click', function () {
+    var cur = root.getAttribute('data-theme') ||
+      (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    var next = cur === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    try { localStorage.setItem('bee-theme', next); } catch (e) {}
+  });
+})();
+</script>
+</body>
+</html>
+

@@ -986,3 +986,7 @@ operator spine and how to add an action.
   The release workflow checks that the tag matches `VERSION`, builds, tests and
   packages the app (`scripts/package.sh`), and publishes a GitHub release with notes
   taken from the changelog.
+
+## License
+
+BeeModel is released under the [MIT License](LICENSE).
