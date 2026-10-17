@@ -19,10 +19,13 @@
 #  in parallel (GJK / EPA, collide.s; up to four points a manifold, kept by
 #  their anchors on each body, and on boxes and hulls more found by tilting
 #  one a little), then islands (bodies touching or jointed, through moving
-#  bodies only) solved in parallel: sequential impulses with warm starting,
-#  friction, restitution, speculative contacts and Baumgarte correction,
-#  then integration. An island at rest for half a second sleeps until
-#  something awake touches it.
+#  bodies only) solved in parallel. Each island takes the step in substeps
+#  (4 by default; "soft step"): forces, warm start, sequential impulses
+#  (friction, speculative contacts, soft contacts that push overlaps apart
+#  as a damped spring), the bodies moved, then a relax pass without the
+#  push (no bounce from it); restitution once at the end. A contact's gap
+#  follows its bodies through the substeps. An island at rest for half a
+#  second sleeps until something awake touches it.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -40,6 +43,7 @@
 .equ RW_RATE,   12                      # steps a second (0: 120)
 .equ RW_ITER,   16                      # solver iterations (0: 10)
 .equ RW_SET,    20                      # gravity was set
+.equ RW_SUB,    24                      # substeps a step (0: 4)
 .equ RB_UID,    0
 .equ RB_TYPE,   4                       # 1 active, 2 passive
 .equ RB_SHAPE,  8                       # 0 box 1 sphere 2 capsule 3 hull 4 compound
@@ -109,7 +113,8 @@
 .equ MF_NRM,    32                      # normal (A to B)
 .equ MF_T1,     48
 .equ MF_T2,     64
-.equ MF_PTS,    80
+.equ MF_DIR,    80                      # its points solved forward / back
+.equ MF_PTS,    96
 .equ CP_LA,     0                       # anchors (body axes, from its centre)
 .equ CP_LB,     16
 .equ CP_RA,     32                      # (world, from the centres)
@@ -123,7 +128,10 @@
 .equ CP_MT2,    88
 .equ CP_BIAS,   92
 .equ CP_WA,     96                      # where it is on A (world)
-.equ CP_SZ,     112
+.equ CP_C0,     112                     # gap - n . (pB - pA) at the step's start
+.equ CP_VN0,    116                     # normal speed then (restitution)
+.equ CP_JMAX,   120                     # the largest normal impulse this step
+.equ CP_SZ,     128
 .equ MF_SZ,     MF_PTS + 4*CP_SZ
 # a joint (runtime)
 .equ JR_A,      0
@@ -247,8 +255,11 @@ rx_margin:      .float 0.02                 # contacts begin this far apart
 rx_keep:        .float 0.04                 # points kept this far apart,
 rx_drift2:      .float 0.0004               #  sliding less than 2 cm
 rx_same2:       .float 0.0004               # a new point this near an old one
-rx_slop:        .float 0.005
+rx_slop:        .float 0.002
 rx_pushmax:     .float 1.0
+rx_hzmax:       .float 60.0                 # soft contacts: at most this stiff,
+rx_zeta:        .float 10.0                 #  damped this much
+rx_twopi:       .float 6.2831853
 rx_beta:        .float 0.2
 rx_bounce:      .float 1.0                  # restitution above 1 m/s
 rx_rest2:       .float 0.0025               # at rest under 5 cm/s
@@ -307,6 +318,14 @@ rb_frame0:      .skip 4                 # the start frame
 rb_fnow:        .skip 4                 # the frame it is at
 rb_time:        .skip 4                 # seconds simulated
 rb_dt:          .skip 4
+rb_h:           .skip 4                 # a substep
+rb_nsub:        .skip 4
+rb_brate:       .skip 4                 # soft contacts: bias rate,
+rb_mscale:      .skip 4                 #  mass scale,
+rb_iscale:      .skip 4                 #  impulse scale
+rb_brate_s:     .skip 4                 # against a static body: twice as
+rb_mscale_s:    .skip 4                 #  stiff (it carries the most)
+rb_iscale_s:    .skip 4
 rb_ms:          .skip 4                 # the last frame's simulation time
 rb_busy:        .skip 4
 .align 16
@@ -897,8 +916,13 @@ rb_settings:
     movaps  xmm0, [rip+rx_grav]
     mov     ecx, 120
     mov     edx, 10
+    mov     r8d, 4
     test    rax, rax
     jz      2f
+    cmp     dword ptr [rax+AN_RW_+RW_SUB], 0
+    je      10f
+    mov     r8d, [rax+AN_RW_+RW_SUB]
+10:
     cmp     dword ptr [rax+AN_RW_+RW_SET], 0
     je      1f
     movups  xmm0, [rax+AN_RW_+RW_GRAV]
@@ -910,11 +934,52 @@ rb_settings:
     je      2f
     mov     edx, [rax+AN_RW_+RW_ITER]
 2:  movaps  [rip+rb_g], xmm0
-    mov     [rip+rb_iter], edx
+    mov     [rip+rb_nsub], r8d
+    mov     eax, edx                    # iterations: spread over the substeps
+    xor     edx, edx
+    div     r8d
+    cmp     eax, 1
+    adc     eax, 0
+    mov     [rip+rb_iter], eax
     cvtsi2ss xmm0, ecx
     movss   xmm1, [rip+rx_one]
     divss   xmm1, xmm0
     movss   [rip+rb_dt], xmm1
+    cvtsi2ss xmm2, r8d
+    divss   xmm1, xmm2
+    movss   [rip+rb_h], xmm1            # h
+    # soft contacts: w = 2 pi min(30, rate x substeps / 4), z = 10;
+    #   a1 = 2z + hw, a2 = hw a1, a3 = 1 / (1 + a2): bias w / a1, mass a2 a3,
+    #   impulse a3
+    mulss   xmm0, xmm2
+    mulss   xmm0, [rip+rx_quarter]
+    minss   xmm0, [rip+rx_hzmax]
+    mulss   xmm0, [rip+rx_twopi]        # w
+    lea     rdi, [rip+rb_brate]
+    movss   xmm8, xmm0                  # (rb_soft keeps xmm1, xmm8)
+    call    rb_soft
+    movss   xmm0, xmm8
+    addss   xmm0, xmm0
+    lea     rdi, [rip+rb_brate_s]
+    jmp     rb_soft
+# rb_soft(xmm0=w, xmm1=h, rdi=out: bias rate, mass scale, impulse scale)
+rb_soft:
+    movss   xmm3, xmm1
+    mulss   xmm3, xmm0                  # hw
+    movss   xmm4, [rip+rx_zeta]
+    addss   xmm4, xmm4
+    addss   xmm4, xmm3                  # a1
+    movss   xmm5, xmm3
+    mulss   xmm5, xmm4                  # a2
+    movss   xmm6, [rip+rx_one]
+    addss   xmm6, xmm5
+    movss   xmm7, [rip+rx_one]
+    divss   xmm7, xmm6                  # a3
+    divss   xmm0, xmm4
+    movss   [rdi], xmm0
+    mulss   xmm5, xmm7
+    movss   [rdi+4], xmm5
+    movss   [rdi+8], xmm7
     ret
 
 # make_body(edi=index, rsi=entry, rdx=object)
@@ -2131,7 +2196,9 @@ narrow_job:
 .equ MU_PXT,    304
 .equ MU_PIV,    384
 .equ MU_WHO,    400
-.equ MU_SZ,     416
+.equ MU_CL,     416                     # poly_clip's points (4 results)
+.equ MU_NEW,    672                     # the new points (4)
+.equ MU_SZ,     MU_NEW + 4*CP_SZ
 mf_update:
     push    rbp
     mov     rbp, rsp
@@ -2206,10 +2273,24 @@ mf_update:
     jmp     .Lmu_out
 4:  movaps  xmm0, [rsp+MU_RES+CR_N]
     movaps  [rbx+MF_NRM], xmm0
+    # polytopes: their faces clipped - the whole contact at once
+    lea     rdi, [rsp+MU_PXA]
+    lea     rsi, [rsp+MU_PXB]
+    movaps  xmm0, [rsp+MU_RES+CR_N]
+    lea     rdx, [rsp+MU_CL]
+    call    poly_clip
+    test    eax, eax
+    jz      45f
+    mov     edx, eax
     mov     rdi, rbx
+    lea     rsi, [rsp+MU_CL]
+    lea     rcx, [rsp+MU_NEW]
+    call    mf_replace
+    jmp     .Lmu_tan
+45: mov     rdi, rbx
     lea     rsi, [rsp+MU_RES]
     call    cp_add
-    # polytopes with few points: tilt A a little four ways for more
+    # other polytopes (edges, vertices): tilt A a little four ways for more
     cmp     dword ptr [rbx+MF_N], 4
     jae     .Lmu_tan
     mov     rax, [rsp+MU_PXA+PX_PART]
@@ -2478,6 +2559,19 @@ cp_add:
     mov     [rbx+MF_PTS+rax+CP_JT2], ecx
 4:  imul    rax, r14, CP_SZ             # its geometry
     lea     rdi, [rbx+MF_PTS+rax]
+    mov     rsi, r15
+    call    cp_geom
+9:  add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     rbx
+    ret
+
+# cp_geom(rdi=point, rsi=result; r12, r13 the bodies) - its anchors, where
+#   it is, its gap
+cp_geom:
+    push    r15
+    mov     r15, rsi
     movaps  xmm0, [r15+CR_PA]
     movaps  [rdi+CP_WA], xmm0
     subps   xmm0, [r12+BD_POS]
@@ -2495,7 +2589,64 @@ cp_add:
     movaps  [rdi+CP_LB], xmm1
     movss   xmm0, [r15+CR_SEP]
     movss   [rdi+CP_SEP], xmm0
-9:  add     rsp, 16
+    pop     r15
+    ret
+
+# mf_replace(rdi=manifold, rsi=results, edx=count, rcx=scratch (4 points);
+#   r12, r13 its bodies) - these points instead; each takes the impulses of
+#   an old one where it was
+mf_replace:
+    push    rbx
+    push    r14
+    push    r15
+    push    rbp
+    push    r8
+    push    r9
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r15, rsi
+    mov     ebp, edx
+    mov     r9, rcx
+    xor     r14d, r14d
+1:  cmp     r14d, ebp
+    jae     5f
+    imul    rdi, r14, CP_SZ
+    add     rdi, r9
+    xor     eax, eax
+    mov     [rdi+CP_JN], eax
+    mov     [rdi+CP_JT1], eax
+    mov     [rdi+CP_JT2], eax
+    xor     ecx, ecx                    # an old one near it
+2:  cmp     ecx, [rbx+MF_N]
+    jae     4f
+    imul    rax, rcx, CP_SZ
+    movaps  xmm0, [rbx+MF_PTS+rax+CP_WA]
+    subps   xmm0, [r15+CR_PA]
+    DOT3    xmm0, xmm0
+    comiss  xmm0, [rip+rx_same2]
+    jbe     3f
+    inc     ecx
+    jmp     2b
+3:  mov     edx, [rbx+MF_PTS+rax+CP_JN]
+    mov     [rdi+CP_JN], edx
+    mov     edx, [rbx+MF_PTS+rax+CP_JT1]
+    mov     [rdi+CP_JT1], edx
+    mov     edx, [rbx+MF_PTS+rax+CP_JT2]
+    mov     [rdi+CP_JT2], edx
+4:  mov     rsi, r15
+    call    cp_geom
+    add     r15, 64
+    inc     r14d
+    jmp     1b
+5:  mov     [rbx+MF_N], ebp
+    lea     rdi, [rbx+MF_PTS]
+    mov     rsi, r9
+    imul    ecx, ebp, CP_SZ
+    rep     movsb
+    add     rsp, 8
+    pop     r9
+    pop     r8
+    pop     rbp
     pop     r15
     pop     r14
     pop     rbx
@@ -2934,7 +3085,7 @@ ang_impulse:
     BODY    r13, rax
 .endm
 
-# mf_prestep(rbx=manifold) - masses, bias (restitution), warm start
+# mf_prestep(rbx=manifold) - masses, the gap's base, the speed it meets at
 mf_prestep:
     push    r14
     push    r15
@@ -2960,36 +3111,39 @@ mf_prestep:
     lea     rsi, [r15+CP_RB]
     call    kmass
     movss   [r15+CP_MT2], xmm0
-    movss   xmm0, [r15+CP_SEP]          # bias: speculative, or push out
-    xorps   xmm1, xmm1
-    comiss  xmm0, xmm1
-    jbe     2f
+    movaps  xmm0, [r13+BD_POS]          # c0 = sep - n . (pB - pA)
+    addps   xmm0, [r15+CP_RB]
+    subps   xmm0, [r12+BD_POS]
+    subps   xmm0, [r15+CP_RA]
+    DOT3    xmm0, [rbx+MF_NRM]
+    movss   xmm1, [r15+CP_SEP]
     subss   xmm1, xmm0
-    divss   xmm1, [rip+rb_dt]
-    jmp     3f
-2:  subss   xmm1, xmm0
-    subss   xmm1, [rip+rx_slop]
-    xorps   xmm2, xmm2
-    maxss   xmm1, xmm2
-    mulss   xmm1, [rip+rx_beta]
-    divss   xmm1, [rip+rb_dt]
-    minss   xmm1, [rip+rx_pushmax]      # (overlaps part at most this fast)
-3:  movss   [rsp], xmm1
-    lea     rdi, [r15+CP_RA]            # restitution when they meet fast
+    movss   [r15+CP_C0], xmm1
+    lea     rdi, [r15+CP_RA]
     lea     rsi, [r15+CP_RB]
     call    relvel
     DOT3    xmm0, [rbx+MF_NRM]
-    movss   xmm1, [rip+rx_bounce]
-    xorps   xmm1, [rip+rx_sign]
-    comiss  xmm0, xmm1
-    jae     4f
-    mulss   xmm0, [rbx+MF_REST]
-    xorps   xmm0, [rip+rx_sign]
-    maxss   xmm0, [rsp]
-    movss   [rsp], xmm0
-4:  movss   xmm0, [rsp]
-    movss   [r15+CP_BIAS], xmm0
-    movss   xmm0, [r15+CP_JN]           # warm start
+    movss   [r15+CP_VN0], xmm0
+    mov     dword ptr [r15+CP_JMAX], 0
+    inc     r14d
+    jmp     1b
+9:  add     rsp, 8
+    pop     r15
+    pop     r14
+    ret
+
+# mf_warm(rbx=manifold) - last time's impulses again (each substep)
+mf_warm:
+    push    r14
+    push    r15
+    sub     rsp, 8
+    MFB
+    xor     r14d, r14d
+1:  cmp     r14d, [rbx+MF_N]
+    jae     9f
+    imul    r15, r14, CP_SZ
+    lea     r15, [rbx+MF_PTS+r15]
+    movss   xmm0, [r15+CP_JN]
     shufps  xmm0, xmm0, 0
     mulps   xmm0, [rbx+MF_NRM]
     movss   xmm1, [r15+CP_JT1]
@@ -3010,17 +3164,34 @@ mf_prestep:
     pop     r14
     ret
 
-# mf_solve(rbx=manifold) - friction (within mu x the normal impulse), then
-#   the normal (never pulling)
+# mf_solve(rbx=manifold) / mf_relax - friction (within mu x the normal
+#   impulse), then the normal (never pulling): the gap where the bodies are
+#   now; closing: a speculative contact; overlapping: pushed apart softly
+#   (mf_solve; mf_relax leaves the push out)
+mf_relax:
+    push    r14
+    push    r15
+    sub     rsp, 40                     # [rsp] the friction's limit (fr_row
+    mov     dword ptr [rsp+4], 0        #  reads it), +4 push or not, +8 mass
+    jmp     mf_solve_in                 #  scale, +12 impulse scale, +16 bias
 mf_solve:
     push    r14
     push    r15
-    sub     rsp, 8
+    sub     rsp, 40
+    mov     dword ptr [rsp+4], 1
+mf_solve_in:
     MFB
-    xor     r14d, r14d
+    xor     dword ptr [rbx+MF_DIR], 1   # each pass the other way round (no
+    xor     r14d, r14d                  #  point always first)
 1:  cmp     r14d, [rbx+MF_N]
     jae     9f
-    imul    r15, r14, CP_SZ
+    mov     eax, r14d
+    cmp     dword ptr [rbx+MF_DIR], 0
+    je      11f
+    mov     eax, [rbx+MF_N]
+    sub     eax, r14d
+    dec     eax
+11: imul    r15, rax, CP_SZ
     lea     r15, [rbx+MF_PTS+r15]
     movss   xmm0, [r15+CP_JN]           # the friction's limit
     mulss   xmm0, [rbx+MF_FRIC]
@@ -3033,26 +3204,114 @@ mf_solve:
     mov     ecx, CP_JT2
     mov     r8d, CP_MT2
     call    fr_row
-    lea     rdi, [r15+CP_RA]            # normal
+    movaps  xmm0, [r15+CP_LB]           # the gap now: c0 + n . (pB - pA)
+    MV3     xmm1, r13+BD_R, xmm0, xmm2, xmm3
+    addps   xmm1, [r13+BD_POS]
+    movaps  xmm0, [r15+CP_LA]
+    MV3     xmm4, r12+BD_R, xmm0, xmm2, xmm3
+    addps   xmm4, [r12+BD_POS]
+    subps   xmm1, xmm4
+    DOT3    xmm1, [rbx+MF_NRM]
+    addss   xmm1, [r15+CP_C0]           # s
+    movss   xmm5, [rip+rx_one]          # mass scale,
+    xorps   xmm6, xmm6                  #  impulse scale,
+    xorps   xmm7, xmm7                  #  bias
+    comiss  xmm1, xmm6
+    jbe     2f
+    movss   xmm7, xmm1                  # apart: close no faster than s / h
+    divss   xmm7, [rip+rb_h]
+    jmp     3f
+2:  cmp     dword ptr [rsp+4], 0
+    je      3f
+    lea     rax, [rip+rb_brate]         # overlapping: a soft push (stiffer
+    cmp     dword ptr [r12+BD_TYPE], 2  #  against a static body)
+    je      21f
+    cmp     dword ptr [r13+BD_TYPE], 2
+    jne     22f
+21: lea     rax, [rip+rb_brate_s]
+22: addss   xmm1, [rip+rx_slop]
+    minss   xmm1, xmm6
+    mulss   xmm1, [rax]
+    movss   xmm7, [rip+rx_pushmax]
+    xorps   xmm7, [rip+rx_sign]
+    maxss   xmm7, xmm1
+    movss   xmm5, [rax+4]
+    movss   xmm6, [rax+8]
+3:  movss   [rsp+8], xmm5
+    movss   [rsp+12], xmm6
+    movss   [rsp+16], xmm7
+    lea     rdi, [r15+CP_RA]
     lea     rsi, [r15+CP_RB]
     call    relvel
-    DOT3    xmm0, [rbx+MF_NRM]
-    movss   xmm1, [r15+CP_BIAS]
-    subss   xmm1, xmm0
-    mulss   xmm1, [r15+CP_MN]
+    DOT3    xmm0, [rbx+MF_NRM]          # vn
+    addss   xmm0, [rsp+16]            # -m ms (vn + bias) - is acc
+    mulss   xmm0, [r15+CP_MN]
+    mulss   xmm0, [rsp+8]
+    xorps   xmm0, [rip+rx_sign]
     movss   xmm2, [r15+CP_JN]
-    addss   xmm1, xmm2
+    movss   xmm1, xmm2
+    mulss   xmm1, [rsp+12]
+    subss   xmm0, xmm1
+    addss   xmm0, xmm2
     xorps   xmm3, xmm3
-    maxss   xmm1, xmm3
-    movss   [r15+CP_JN], xmm1
-    subss   xmm1, xmm2
-    shufps  xmm1, xmm1, 0
-    mulps   xmm1, [rbx+MF_NRM]
-    movaps  xmm0, xmm1
+    maxss   xmm0, xmm3
+    movss   [r15+CP_JN], xmm0
+    movss   xmm1, [r15+CP_JMAX]
+    maxss   xmm1, xmm0
+    movss   [r15+CP_JMAX], xmm1
+    subss   xmm0, xmm2
+    shufps  xmm0, xmm0, 0
+    mulps   xmm0, [rbx+MF_NRM]
     lea     rdi, [r15+CP_RA]
     lea     rsi, [r15+CP_RB]
     call    impulse
     inc     r14d
+    jmp     1b
+9:  add     rsp, 40
+    pop     r15
+    pop     r14
+    ret
+
+# mf_bounce(rbx=manifold) - after the substeps: points that met faster than
+#   1 m/s and pushed leave at their restitution x that speed
+mf_bounce:
+    push    r14
+    push    r15
+    sub     rsp, 8
+    MFB
+    xor     r14d, r14d
+1:  cmp     r14d, [rbx+MF_N]
+    jae     9f
+    imul    r15, r14, CP_SZ
+    lea     r15, [rbx+MF_PTS+r15]
+    movss   xmm0, [rip+rx_bounce]
+    xorps   xmm0, [rip+rx_sign]
+    comiss  xmm0, [r15+CP_VN0]
+    jbe     2f
+    xorps   xmm0, xmm0
+    comiss  xmm0, [r15+CP_JMAX]
+    jae     2f
+    lea     rdi, [r15+CP_RA]
+    lea     rsi, [r15+CP_RB]
+    call    relvel
+    DOT3    xmm0, [rbx+MF_NRM]
+    movss   xmm1, [r15+CP_VN0]          # -m (vn + e vn0)
+    mulss   xmm1, [rbx+MF_REST]
+    addss   xmm0, xmm1
+    mulss   xmm0, [r15+CP_MN]
+    xorps   xmm0, [rip+rx_sign]
+    movss   xmm2, [r15+CP_JN]
+    addss   xmm0, xmm2
+    xorps   xmm3, xmm3
+    maxss   xmm0, xmm3
+    movss   [r15+CP_JN], xmm0
+    subss   xmm0, xmm2
+    shufps  xmm0, xmm0, 0
+    mulps   xmm0, [rbx+MF_NRM]
+    lea     rdi, [r15+CP_RA]
+    lea     rsi, [r15+CP_RB]
+    call    impulse
+2:  inc     r14d
     jmp     1b
 9:  add     rsp, 8
     pop     r15
@@ -3147,12 +3406,22 @@ jr_prestep:
 9:  add     rsp, 8
     ret
 
-# jr_solve(rbx=joint) - the anchors together (three rows), then the
-#   rotation: hinge, two rows square to its axis; fixed, three
+# jr_solve(rbx=joint) / jr_relax - the anchors together (three rows), then
+#   the rotation: hinge, two rows square to its axis; fixed, three (jr_relax:
+#   velocities only, no pull back)
+jr_relax:
+    push    r14
+    push    r15
+    sub     rsp, 24
+    mov     dword ptr [rsp+20], 0
+    jmp     jr_solve_in
 jr_solve:
     push    r14
     push    r15
     sub     rsp, 24
+    mov     eax, [rip+rx_one]
+    mov     [rsp+20], eax               # (how much of the error to pull back)
+jr_solve_in:
     mov     eax, [rbx+JR_A]
     BODY    r12, rax
     mov     eax, [rbx+JR_B]
@@ -3173,9 +3442,10 @@ jr_solve:
     lea     rsi, [rbx+JR_RB]
     call    relvel
     DOT3    xmm0, [rsp]                 # velocity along it
-    movss   xmm1, [rbx+JR_C+r14*4]      # target: -beta C / dt
+    movss   xmm1, [rbx+JR_C+r14*4]      # target: -beta C / h
     mulss   xmm1, [rip+rx_beta]
-    divss   xmm1, [rip+rb_dt]
+    mulss   xmm1, [rsp+20]
+    divss   xmm1, [rip+rb_h]
     xorps   xmm1, [rip+rx_sign]
     subss   xmm1, xmm0
     mulss   xmm1, [rsp+16]
@@ -3209,9 +3479,10 @@ jr_solve:
     lea     rcx, [rip+rx_ident]
     movaps  xmm0, [rcx+rax]
     movss   xmm1, [rbx+JR_ERR+r14*4]
-33: movaps  [rsp], xmm0                 # d; target -beta err / dt
+33: movaps  [rsp], xmm0                 # d; target -beta err / h
     mulss   xmm1, [rip+rx_beta]
-    divss   xmm1, [rip+rb_dt]
+    mulss   xmm1, [rsp+20]
+    divss   xmm1, [rip+rb_h]
     xorps   xmm1, [rip+rx_sign]
     movss   [rsp+16], xmm1
     MV3     xmm1, r12+BD_IIW, xmm0, xmm2, xmm3   # k = d IA d + d IB d
@@ -3258,7 +3529,9 @@ island_job:
     pop     rbx
     ret
 
-# solve_island(edi=island)
+# solve_island(edi=island) - the step in substeps: forces, last time's
+#   impulses, the joints and contacts (iterations), the bodies moved, a
+#   relax pass; then restitution, and rest
 solve_island:
     push    rbp
     mov     rbp, rsp
@@ -3270,11 +3543,20 @@ solve_island:
     and     rsp, -16
     sub     rsp, 48
     mov     [rsp], edi
+    mov     edi, [rsp]                  # once a step: masses, gaps
+    lea     rsi, [rip+mf_prestep]
+    call    isl_each_mf
+    mov     dword ptr [rsp+12], 0       # substeps
+.Lsi_sub:
+    mov     eax, [rsp+12]
+    cmp     eax, [rip+rb_nsub]
+    jae     .Lsi_end
     # forces: gravity, damping
-    movss   xmm6, [rip+rb_dt]
+    movss   xmm6, [rip+rb_h]
     movaps  xmm7, [rip+rb_g]
     shufps  xmm6, xmm6, 0
-    mulps   xmm7, xmm6                  # g dt
+    mulps   xmm7, xmm6                  # g h
+    mov     edi, [rsp]
     mov     rax, [rip+rb_isb]
     mov     r14d, [rax+rdi*4]
     mov     r15d, [rax+rdi*4+4]
@@ -3285,15 +3567,15 @@ solve_island:
     BODY    rbx, rax
     movaps  xmm0, [rbx+BD_V]
     addps   xmm0, xmm7
-    movss   xmm1, [rbx+BD_DAMP]         # v / (1 + dt d)
-    mulss   xmm1, [rip+rb_dt]
+    movss   xmm1, [rbx+BD_DAMP]         # v / (1 + h d)
+    mulss   xmm1, [rip+rb_h]
     addss   xmm1, [rip+rx_one]
     shufps  xmm1, xmm1, 0
     divps   xmm0, xmm1
     andps   xmm0, [rip+rx_xyz]
     movaps  [rbx+BD_V], xmm0
     movss   xmm1, [rip+rx_adamp]
-    mulss   xmm1, [rip+rb_dt]
+    mulss   xmm1, [rip+rb_h]
     addss   xmm1, [rip+rx_one]
     shufps  xmm1, xmm1, 0
     movaps  xmm0, [rbx+BD_W]
@@ -3302,8 +3584,8 @@ solve_island:
     movaps  [rbx+BD_W], xmm0
     inc     r14d
     jmp     1b
-2:  mov     edi, [rsp]                  # prestep
-    lea     rsi, [rip+mf_prestep]
+2:  mov     edi, [rsp]
+    lea     rsi, [rip+mf_warm]
     call    isl_each_mf
     mov     edi, [rsp]
     lea     rsi, [rip+jr_prestep]
@@ -3320,7 +3602,34 @@ solve_island:
     call    isl_each_mf
     inc     dword ptr [rsp+4]
     jmp     3b
-4:  # integrate; rest
+4:  mov     edi, [rsp]                  # move
+    mov     rax, [rip+rb_isb]
+    mov     r14d, [rax+rdi*4]
+    mov     r15d, [rax+rdi*4+4]
+41: cmp     r14d, r15d
+    jae     42f
+    mov     rax, [rip+rb_ib]
+    mov     eax, [rax+r14*4]
+    BODY    rdi, rax
+    call    integrate
+    inc     r14d
+    jmp     41b
+42: mov     edi, [rsp]                  # relax
+    lea     rsi, [rip+jr_prestep]
+    call    isl_each_jr
+    mov     edi, [rsp]
+    lea     rsi, [rip+jr_relax]
+    call    isl_each_jr
+    mov     edi, [rsp]
+    lea     rsi, [rip+mf_relax]
+    call    isl_each_mf
+    inc     dword ptr [rsp+12]
+    jmp     .Lsi_sub
+.Lsi_end:
+    mov     edi, [rsp]
+    lea     rsi, [rip+mf_bounce]
+    call    isl_each_mf
+    # rest
     movss   xmm0, [rip+rx_sleep]
     movss   [rsp+8], xmm0               # the least time at rest
     mov     edi, [rsp]
@@ -3332,8 +3641,6 @@ solve_island:
     mov     rax, [rip+rb_ib]
     mov     eax, [rax+r14*4]
     BODY    rbx, rax
-    mov     rdi, rbx
-    call    integrate
     movaps  xmm0, [rbx+BD_V]
     DOT3    xmm0, xmm0
     movaps  xmm1, [rbx+BD_W]
@@ -3440,7 +3747,7 @@ isl_each_jr:
 integrate:
     push    rbx
     mov     rbx, rdi
-    movss   xmm6, [rip+rb_dt]
+    movss   xmm6, [rip+rb_h]
     shufps  xmm6, xmm6, 0
     movaps  xmm0, [rbx+BD_V]
     mulps   xmm0, xmm6
@@ -3451,7 +3758,7 @@ integrate:
     andps   xmm0, [rip+rx_xyz]
     movaps  xmm1, [rbx+BD_Q]
     call    q_mul
-    movss   xmm6, [rip+rb_dt]
+    movss   xmm6, [rip+rb_h]
     mulss   xmm6, [rip+rx_half]
     shufps  xmm6, xmm6, 0
     mulps   xmm0, xmm6
@@ -3973,6 +4280,34 @@ rb_info:
     xorps   xmm0, xmm0
     cmp     dword ptr [rip+rb_on], 0
     je      9f
+    cmp     edi, 1000                   # 1000 + 4 i + c: contact point i's
+    jb      .Lri_n                      #  place (c 0-2, on A), gap (3)
+    sub     edi, 1000
+    mov     r8d, edi
+    shr     r8d, 2                      # i
+    and     edi, 3
+    xor     ecx, ecx
+    mov     rdx, [rip+rb_mf]
+.Lri_d1:
+    cmp     ecx, [rip+rb_nmf]
+    jae     9f
+    cmp     r8d, [rdx+MF_N]
+    jb      .Lri_d2
+    sub     r8d, [rdx+MF_N]
+    add     rdx, MF_SZ
+    inc     ecx
+    jmp     .Lri_d1
+.Lri_d2:
+    imul    r8, r8, CP_SZ
+    lea     rdx, [rdx+MF_PTS+r8]
+    cmp     edi, 3
+    je      .Lri_d3
+    movss   xmm0, [rdx+CP_WA+rdi*4]
+    ret
+.Lri_d3:
+    movss   xmm0, [rdx+CP_SEP]
+    ret
+.Lri_n:
     cmp     edi, 0
     jne     1f
     mov     eax, [rip+rb_nb]
@@ -4026,7 +4361,7 @@ rb_info:
 OPERATOR op_rb_add,   "rigid.add",    "Add Rigid Body",    do_rb_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects rigid bodies (or change them): rigid.add [active|passive] [box|sphere|capsule|hull|compound] [mass m] [friction f] [bounce b] [damping d]. Active ones fall when the frame goes past the start", form=form_rigid
 OPERATOR op_rb_rem,   "rigid.remove", "Remove Rigid Body", do_rb_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="The selected objects are no longer rigid bodies"
 OPERATOR op_rb_joint, "rigid.joint",  "Add Joint",         do_rb_joint, flags=OPF_AI_SAFE|OPF_UNDO, doc="Tie two bodies (or one to the world): rigid.joint <fixed|hinge|point> <object> <object|world> [pivot x y z] [axis x y z] (pivot: the first object's place; axis: Y)", form=form_rjoint
-OPERATOR op_rb_world, "rigid.world",  "Physics World",     do_rb_world, flags=OPF_AI_SAFE|OPF_UNDO, doc="Physics settings: rigid.world [gravity x y z] [rate steps-a-second] [iterations n]"
+OPERATOR op_rb_world, "rigid.world",  "Physics World",     do_rb_world, flags=OPF_AI_SAFE|OPF_UNDO, doc="Physics settings: rigid.world [gravity x y z] [rate steps-a-second] [iterations n (a step, over its substeps)] [substeps n (1-64; 4)]"
 
 .section .rodata
 k_active:       .asciz "active"
@@ -4053,12 +4388,13 @@ k_axis:         .asciz "axis"
 k_gravity:      .asciz "gravity"
 k_rate:         .asciz "rate"
 k_iter:         .asciz "iterations"
+k_substeps:     .asciz "substeps"
 s_rb_bad:       .asciz "  rigid.add [active|passive] [box|sphere|capsule|hull|compound] [mass m] [friction f] [bounce b] [damping d] - not understood: "
 s_rb_none:      .asciz "  select mesh objects to make rigid bodies"
 s_rb_full:      .asciz "  no room for more rigid bodies / joints"
 s_rb_added:     .asciz "  rigid bodies: "
 s_jt_bad:       .asciz "  rigid.joint <fixed|hinge|point> <object> <object|world> [pivot x y z] [axis x y z] - not understood: "
-s_rw_bad:       .asciz "  rigid.world [gravity x y z] [rate n] [iterations n] - not understood: "
+s_rw_bad:       .asciz "  rigid.world [gravity x y z] [rate n] [iterations n] [substeps n] - not understood: "
 .text
 
 # rb_word_index(rdi=word, rsi=names) -> eax = its place or -1
@@ -4477,7 +4813,7 @@ do_rb_joint:
     pop     rbx
     ret
 
-# rigid.world [gravity x y z] [rate n] [iterations n]
+# rigid.world [gravity x y z] [rate n] [iterations n] [substeps n]
 do_rb_world:
     push    rbx
     push    r12
@@ -4517,6 +4853,12 @@ do_rb_world:
     call    str_eq
     mov     r8d, RW_ITER
     test    eax, eax
+    jnz     3f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_substeps]
+    call    str_eq
+    mov     r8d, RW_SUB
+    test    eax, eax
     jz      8f
 3:  push    r8
     push    r8
@@ -4531,9 +4873,13 @@ do_rb_world:
     cmp     eax, 1
     jge     4f
     mov     eax, 1
-4:  cmp     eax, 1000
+4:  mov     ecx, 1000
+    cmp     r8d, RW_SUB
+    jne     41f
+    mov     ecx, 64
+41: cmp     eax, ecx
     jle     5f
-    mov     eax, 1000
+    mov     eax, ecx
 5:  mov     [rbx+r8], eax
     jmp     1b
 8:  lea     rdi, [rip+s_rw_bad]

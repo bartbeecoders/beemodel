@@ -7,6 +7,14 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **The rigid-body solver takes each step in substeps** (#286, "soft step"):
+  4 by default (`rigid.world substeps n`, Properties › Physics › World ›
+  Substeps), with soft contacts that push overlaps apart as a damped spring
+  (twice as stiff against static bodies) and a relax pass, restitution once
+  at the end. Contacts between boxes and hulls are found by **clipping their
+  faces** (`src/clip.s`): a box resting on another touches at its four
+  corners. A tower of 20 boxes and a 10-layer brick pyramid stand (they
+  used to topple), and a 100 kg box rests on a 1 kg one. `tests/solver.py`.
 - **The MIT License** (`LICENSE`, also in the release archive). The
   2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): the masterplan's open
   questions, then physics - the solver, ground and landscapes, shatter,
