@@ -1,6 +1,8 @@
 # =============================================================================
 #  BeeModel - single-line text field (UTF-8), used as the console command
 #  line: caret, selection, history, Tab completion of operator ids, dead keys.
+#  Ctrl+Left / Right jump by word (Shift extends the selection), and
+#  Ctrl+Backspace / Delete remove one.
 #  Enter runs the typed operator id through the operator spine.
 # =============================================================================
 .intel_syntax noprefix
@@ -141,6 +143,64 @@ tf_next:
     cmp     edx, 0x80
     je      1b
 2:  ret
+
+# tf_wchar(edx=byte) -> ZF clear when it is part of a word: letters, digits,
+# '_' and every byte of a multi-byte UTF-8 character
+tf_wchar:
+    cmp     edx, 0x80
+    jae     1f
+    cmp     edx, '_'
+    je      1f
+    mov     r8d, edx
+    sub     r8d, '0'
+    cmp     r8d, 10
+    jb      1f
+    or      edx, 0x20
+    sub     edx, 'a'
+    cmp     edx, 26
+    jb      1f
+    xor     edx, edx                    # ZF set: not a word character
+    ret
+1:  or      edx, 1                      # ZF clear
+    ret
+
+# tf_wprev(eax=pos) -> eax = start of the word before pos (Ctrl+Left)
+tf_wprev:
+    lea     rcx, [rip+tf_buf]
+1:  test    eax, eax                    # skip what is not a word
+    jz      3f
+    movzx   edx, byte ptr [rcx+rax-1]
+    call    tf_wchar
+    jnz     2f
+    dec     eax
+    jmp     1b
+2:  test    eax, eax                    # then the word
+    jz      3f
+    movzx   edx, byte ptr [rcx+rax-1]
+    call    tf_wchar
+    jz      3f
+    dec     eax
+    jmp     2b
+3:  ret
+
+# tf_wnext(eax=pos) -> eax = end of the word at or after pos (Ctrl+Right)
+tf_wnext:
+    lea     rcx, [rip+tf_buf]
+1:  cmp     eax, [rip+tf_len]
+    jae     3f
+    movzx   edx, byte ptr [rcx+rax]
+    call    tf_wchar
+    jnz     2f
+    inc     eax
+    jmp     1b
+2:  cmp     eax, [rip+tf_len]
+    jae     3f
+    movzx   edx, byte ptr [rcx+rax]
+    call    tf_wchar
+    jz      3f
+    inc     eax
+    jmp     2b
+3:  ret
 
 # cp_count(edi=byte end) -> eax = code points in tf_buf[0..end)
 cp_count:
@@ -433,8 +493,12 @@ tf_key:
     mov     eax, [rip+tf_caret]
     test    eax, eax
     jz      .Ltf_yes
-    call    tf_prev
-    mov     edi, eax
+    test    r13d, MOD_CTRL              # Ctrl: the word before
+    jz      21f
+    call    tf_wprev
+    jmp     22f
+21: call    tf_prev
+22: mov     edi, eax
     mov     esi, [rip+tf_caret]
     call    tf_delete
     jmp     .Ltf_yes
@@ -444,20 +508,32 @@ tf_key:
     test    eax, eax
     jnz     .Ltf_yes
     mov     eax, [rip+tf_caret]
-    call    tf_next
-    mov     esi, eax
+    test    r13d, MOD_CTRL              # Ctrl: to the end of the word
+    jz      23f
+    call    tf_wnext
+    jmp     24f
+23: call    tf_next
+24: mov     esi, eax
     mov     edi, [rip+tf_caret]
     call    tf_delete
     jmp     .Ltf_yes
 3:  cmp     ebx, KEY_LEFT
     jne     4f
     mov     eax, [rip+tf_caret]
+    test    r13d, MOD_CTRL              # Ctrl: by word
+    jnz     31f
     call    tf_prev
+    jmp     .Ltf_move
+31: call    tf_wprev
     jmp     .Ltf_move
 4:  cmp     ebx, KEY_RIGHT
     jne     5f
     mov     eax, [rip+tf_caret]
+    test    r13d, MOD_CTRL
+    jnz     41f
     call    tf_next
+    jmp     .Ltf_move
+41: call    tf_wnext
     jmp     .Ltf_move
 5:  cmp     ebx, KEY_HOME
     jne     6f

@@ -6492,6 +6492,23 @@ def clipboard():
     f.key(1)
     t = f.clipboard()
     check(t == 'Pasted name', f'Ctrl+X cuts the text ({t!r})')
+    # F1: word jumps - Ctrl+Left / Right, Shift extends, Ctrl+Backspace / Delete
+    def rename(*steps):
+        f.click(x, y)
+        f.mods(4); f.key(30); f.mods(0)
+        for st in steps:
+            if isinstance(st, str):
+                f.type(st)
+            else:
+                f.mods(st[0]); f.key(st[1]); f.mods(0)
+        f.key(28); f.pump(0.2)
+        return (widget(m, 'object.name') or {}).get('value')
+    n = rename('alpha beta gamma', (0, 102), (4, 106), (4, 111))
+    check(n == 'alpha gamma', f'Ctrl+Right jumps a word, Ctrl+Delete removes the next one ({n!r})')
+    n = rename('alpha beta_2 gamma', (5, 105), 'delta')
+    check(n == 'alpha beta_2 delta', f'Ctrl+Shift+Left selects the word before (typing replaces it) ({n!r})')
+    n = rename('one two.three', (4, 105), (4, 14))
+    check(n == 'one three', f'Ctrl+Left then Ctrl+Backspace removes the word before ({n!r})')
     f.proc.kill()
 
 
