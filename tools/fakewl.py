@@ -598,6 +598,7 @@ def main():
     icons()
     menus_ui()
     pies_ui()
+    ctx_menus_ui()
     dialogs()
     files_ui()
     clipboard()
@@ -6360,6 +6361,97 @@ def pies_ui():
     f.mods(4); f.key(44); f.mods(0)
     x = q('print(get("Cube", "x"))')
     check(abs(float(x or 0) - 2.3) < 1e-4, f'one undo takes it back ({x})')
+    f.proc.kill()
+
+
+def ctx_menus_ui():
+    """F4 (#270): right-click menus on fields (Reset to Default, Copy /
+    Paste Value, Insert Keyframe, Copy Data Path), in the timeline and the
+    dope sheet, and on the file browser's rows."""
+    print('  -- context menus: fields, timeline, dope sheet, files --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    items = lambda: [w for w in ui_tree(m) if w['kind'] == 'menuitem']
+    labels = lambda: [w['label'] for w in items()]
+    def rclick(x, y):
+        f.click(x, y, 0x111); f.pump(0.2)
+    def rclick_w(name, sub=0, dy=0):
+        w = widget(m, name, sub)
+        rclick(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2 + dy) if w else None
+    def pick(label):
+        it = [w for w in items() if w['label'] == label]
+        if it:
+            f.click(it[-1]['x'] + 40, it[-1]['y'] + it[-1]['h'] // 2); f.pump(0.2)
+        return bool(it)
+    rclick_w('object.location', 0)
+    got = labels()
+    check(got == ['Reset to Default', 'Copy Value', 'Paste Value', 'Insert Keyframe', 'Copy Data Path'],
+          f'right-click on a number field: its menu ({got})')
+    pick('Copy Data Path')
+    check(f.clipboard() == 'Cube:x', f'Copy Data Path ({f.clipboard()!r})')
+    q('set("Cube", "y", 3.5)')
+    rclick_w('object.location', 1); pick('Reset to Default')
+    y = q('print(get("Cube", "y"))')
+    check(y == '0', f'Reset to Default: location y back to 0 ({y})')
+    f.mods(4); f.key(44); f.mods(0)
+    check(q('print(get("Cube", "y"))') == '3.5', 'one undo takes the reset back')
+    rclick_w('object.scale', 2); pick('Copy Value')
+    check(f.clipboard() == '1', f'Copy Value ({f.clipboard()!r})')
+    f.set_clipboard('4.5')
+    rclick_w('object.location', 2); pick('Paste Value')
+    check(q('print(get("Cube", "z"))') == '4.5', 'Paste Value types the clipboard into the field')
+    rclick_w('object.name')
+    why = {w['label']: w.get('why') for w in items()}
+    check(bool(why.get('Reset to Default')) and bool(why.get('Insert Keyframe')) and not why.get('Copy Value'),
+          f'a text field: no default and no keyframe, greyed with a reason ({why.get("Insert Keyframe")})')
+    f.key(1)
+    q('op("workspace.set", "Animation")'); f.pump(0.3)
+    q('op("anim.frame", "12")')
+    t = widget(m, 'timeline.first')
+    rclick(t['x'] + 200, t['y'] + 40) if t else None
+    got = labels()
+    check('Start at This Frame' in got and 'Play Animation' in got, f'right-click in the timeline: playback and range ({got})')
+    pick('End at This Frame')
+    e = (widget(m, 'timeline.end') or {}).get('value')
+    check(e == 12, f'End at This Frame (frame 12): the range ends there ({e})')
+    k = widget(m, 'keys.constant')
+    rclick(k['x'] + 200, k['y'] + 60) if k else None
+    got = labels()
+    check(got[:3] == ['Constant', 'Linear', 'Bezier'] and 'Delete Keys' in got, f'right-click in the dope sheet: the keys\' menu ({got})')
+    f.key(1)
+    q('op("workspace.set", "Modeling")'); f.pump(0.3)
+    bee = os.path.join(f.home, 'BeeModel')
+    os.makedirs(os.path.join(bee, 'parts'), exist_ok=True)
+    f.mods(4); f.key(24); f.mods(0)            # Ctrl+O
+    row = lambda name: [w for w in ui_tree(m) if w['name'] == 'files.row' and w.get('label') == name]
+    r = row('parts')
+    rclick(r[0]['x'] + 30, r[0]['y'] + 11) if r else None
+    got = labels()
+    check(got == ['Open', 'Rename...', 'Delete...', 'New Folder', 'Copy Path'], f'right-click on a file: its menu, over the browser ({got})')
+    pick('Copy Path')
+    check(f.clipboard().endswith('/BeeModel/parts'), f'Copy Path ({f.clipboard()!r})')
+    r = row('parts')
+    rclick(r[0]['x'] + 30, r[0]['y'] + 11) if r else None
+    pick('New Folder')
+    ok = (widget(m, 'files.ok') or {}).get('label')
+    check(os.path.isdir(os.path.join(bee, 'New Folder')) and ok == 'Rename', f'New Folder makes one, then asks for its name ({ok})')
+    x, y = widget_xy(m, 'files.name'); f.click(x, y)
+    f.mods(4); f.key(30); f.mods(0); f.type('made'); f.key(28); f.pump(0.2)
+    x, y = widget_xy(m, 'files.ok'); f.click(x, y); f.pump(0.3)
+    check(os.path.isdir(os.path.join(bee, 'made')) and not os.path.exists(os.path.join(bee, 'New Folder')),
+          'Rename: the folder gets the typed name')
+    r = row('made')
+    rclick(r[0]['x'] + 30, r[0]['y'] + 11) if r else None
+    pick('Delete...')
+    ok = (widget(m, 'files.ok') or {}).get('label')
+    check(ok == 'Delete' and os.path.isdir(os.path.join(bee, 'made')), f'Delete asks first ({ok})')
+    x, y = widget_xy(m, 'files.ok'); f.click(x, y); f.pump(0.3)
+    check(not os.path.exists(os.path.join(bee, 'made')) and 'files.ok' in {w['name'] for w in ui_tree(m)},
+          'Delete removes it and the browser stays open')
     f.proc.kill()
 
 

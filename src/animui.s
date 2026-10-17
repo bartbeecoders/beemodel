@@ -16,6 +16,8 @@
 .globl tl_header_tools
 .globl ae_header_tools
 .globl field_key
+.globl fk_copy
+.globl anim_ctx_open
 .globl animui_props
 .globl rigui_props
 
@@ -431,6 +433,8 @@ field_key:
     call    cpy3
     cmp     r12d, 1
     je      3f
+    cmp     dword ptr [rip+fk_copy], 0  # (a path: the colour as a whole)
+    jne     3f
     mov     byte ptr [rdi], ':'         # colours: each component
     mov     byte ptr [rdi+2], 0
     mov     rbx, rdi
@@ -453,9 +457,20 @@ field_key:
     pop     rbx
     ret
 
-# key_path - anim.key au_path (the current frame and value)
+# key_path - anim.key au_path (the current frame and value); with fk_copy
+#   the path goes to the clipboard instead (Copy Data Path)
 key_path:
-    lea     rdi, [rip+op_an_path]
+    cmp     dword ptr [rip+fk_copy], 0
+    je      1f
+    sub     rsp, 8
+    lea     rdi, [rip+au_path]
+    call    str_len
+    mov     esi, eax
+    lea     rdi, [rip+au_path]
+    call    clip_copy
+    add     rsp, 8
+    ret
+1:  lea     rdi, [rip+op_an_path]
     lea     rsi, [rip+au_path]
     jmp     run_arg3
 
@@ -1268,6 +1283,85 @@ cn_mute_cb:
 9:  add     rsp, 8
     pop     r12
     pop     rbx
+    ret
+
+# =============================================================================
+#  Right-click in the timeline (playback, the range) and in the dope sheet /
+#  graph editor (interpolation, handles, duplicate, delete)
+# =============================================================================
+.section .data
+.align 4
+fk_copy:        .long 0                 # field_key copies the path instead
+.section .rodata
+.align 8
+ctx_timeline:   .quad op_an_play, 0, op_an_first, op_an_last, 0, op_tl_start_here, op_tl_end_here, 0, op_an_key
+.equ ctx_timeline_n, (. - ctx_timeline) / 8
+ctx_keys:       .quad op_keys_const, op_keys_lin, op_keys_bez, 0, op_keys_auto, op_keys_free, 0, op_ae_dup, op_ae_del, op_ae_all
+.equ ctx_keys_n, (. - ctx_keys) / 8
+.text
+OPERATOR op_keys_const, "anim.keys_constant", "Constant", ae_menu_btn, arg=1, flags=OPF_HIDDEN|OPF_QUIET, doc="The selected keys hold until the next one"
+OPERATOR op_keys_lin, "anim.keys_linear", "Linear", ae_menu_btn, arg=2, flags=OPF_HIDDEN|OPF_QUIET, doc="Straight from key to key"
+OPERATOR op_keys_bez, "anim.keys_bezier", "Bezier", ae_menu_btn, arg=3, flags=OPF_HIDDEN|OPF_QUIET, doc="Smooth curves through the keys"
+OPERATOR op_keys_auto, "anim.keys_handles_auto", "Auto Handles", ae_menu_btn, arg=4, flags=OPF_HIDDEN|OPF_QUIET, doc="Handles that keep the curve smooth"
+OPERATOR op_keys_free, "anim.keys_handles_free", "Free Handles", ae_menu_btn, arg=5, flags=OPF_HIDDEN|OPF_QUIET, doc="Handles you move yourself (graph editor)"
+OPERATOR op_tl_start_here, "anim.start_here", "Start at This Frame", tl_set_here, arg=0, flags=OPF_HIDDEN|OPF_QUIET, doc="The scene's first frame becomes the current one"
+OPERATOR op_tl_end_here, "anim.end_here", "End at This Frame", tl_set_here, arg=1, flags=OPF_HIDDEN|OPF_QUIET, doc="The scene's last frame becomes the current one"
+
+ae_menu_btn:                            # rdi = 1..5 (as the header's buttons)
+    mov     ecx, edi
+    jmp     ae_button
+
+# tl_set_here(rdi=0 start, 1 end) - anim.range with the current frame
+tl_set_here:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r13d, edi
+    call    an_range
+    mov     ebx, eax                    # start, end, fps
+    mov     r12d, edx
+    cvttss2si r14d, xmm0
+    movss   xmm0, [rip+an_frame]
+    cvtss2si eax, xmm0
+    test    r13d, r13d
+    jnz     1f
+    mov     ebx, eax
+    jmp     2f
+1:  mov     r12d, eax
+2:  call    fmt_reset
+    mov     edi, ebx
+    call    fmt_int
+    mov     edi, ' '
+    call    fmt_char
+    mov     edi, r12d
+    call    fmt_int
+    mov     edi, ' '
+    call    fmt_char
+    mov     edi, r14d
+    call    fmt_int
+    lea     rdi, [rip+op_an_range]
+    call    run_fmt
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# anim_ctx_open(edi=hit id) - the timeline's menu, or the keys' menu
+anim_ctx_open:
+    sub     rsp, 8
+    lea     rax, [rip+ctx_keys]
+    mov     esi, ctx_keys_n
+    cmp     edi, HIT_TIMELINE
+    jne     1f
+    lea     rax, [rip+ctx_timeline]
+    mov     esi, ctx_timeline_n
+1:  mov     rdi, rax
+    call    ctx_open_list
+    add     rsp, 8
     ret
 
 .section .note.GNU-stack,"",@progbits

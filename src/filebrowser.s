@@ -28,6 +28,8 @@
 .globl fb_dir
 .globl fb_complete
 .globl wd_fb_path
+.globl wd_fb_row
+.globl fb_row_menu
 
 .equ FB_W,      760
 .equ FB_H,      500
@@ -48,6 +50,10 @@
 .equ KEY_UP,    103
 .equ KEY_DOWN,  108
 .equ KEY_BACKSPACE, 14
+.equ SYS_RENAME,    82
+.equ SYS_MKDIR,     83
+.equ SYS_RMDIR,     84
+.equ SYS_UNLINK,    87
 
 .section .bss
 .align 8
@@ -68,6 +74,7 @@ fb_cmatch:      .skip 256               #  the first name that matched
 fb_cfull:       .skip 768
 fb_tpath:       .skip 768               # the scene whose picture is shown
 fb_tnext:       .skip 768
+fb_tname:       .skip 256               # the file being renamed or deleted
 .align 4
 fb_n:           .skip 4
 fb_sel:         .skip 4
@@ -84,6 +91,8 @@ fb_cn:          .skip 4                 # Tab completion: names that matched
 fb_clen:        .skip 4                 #  the part they all share
 fb_cdirn:       .skip 4                 #  the first match is a folder
 fb_bee:         .skip 4                 # the filter takes .bee files: preview
+fb_mode:        .skip 4                 # 1: OK renames fb_tname, 2: deletes it
+fb_ctx:         .skip 4                 # the row a right-click was on
 fb_tok:         .skip 4                 # fb_tpath's picture is in th_view
 
 .section .rodata
@@ -105,6 +114,13 @@ s_files:        .asciz "Files: "
 s_slash:        .asciz "/"
 s_dotdot:       .asciz ".."
 s_ext_bee:      .asciz "bee"
+s_newdir:       .asciz "New Folder"
+s_del_q:        .asciz " will be deleted. Delete it?"
+s_ren_hint:     .asciz "Type the new name and press Rename"
+s_rm_fail:      .asciz "  could not delete it (a folder must be empty)"
+.align 8
+ctx_files:      .quad op_fb_open_row, 0, op_fb_rename, op_fb_delete, op_fb_mkdir, 0, op_fb_cpath
+.equ ctx_files_n, (. - ctx_files) / 8
 s_prev_no:      .asciz "No preview"
 s_prev_none:    .asciz "Pick a scene to see it"
 
@@ -112,6 +128,11 @@ s_prev_none:    .asciz "Pick a scene to see it"
 
 OPERATOR op_fb_ok, "files.ok", "Open / Save", fb_ok, flags=OPF_QUIET|OPF_HIDDEN, doc="Take the file named in the file browser"
 OPERATOR op_fb_up, "files.up", "Folder Up", fb_up, flags=OPF_QUIET|OPF_HIDDEN, doc="The file browser: the folder above"
+OPERATOR op_fb_open_row, "files.open_row", "Open", fb_open_row, flags=OPF_QUIET|OPF_HIDDEN, doc="Open the folder, or take the file"
+OPERATOR op_fb_rename, "files.rename", "Rename...", fb_rename, flags=OPF_QUIET|OPF_HIDDEN, doc="Give the file or folder a new name (type it in the Name field)"
+OPERATOR op_fb_delete, "files.delete", "Delete...", fb_delete, flags=OPF_QUIET|OPF_HIDDEN, doc="Delete the file, or an empty folder (asks first)"
+OPERATOR op_fb_mkdir, "files.new_folder", "New Folder", fb_mkdir, flags=OPF_QUIET|OPF_HIDDEN, doc="A new folder here, then type its name"
+OPERATOR op_fb_cpath, "files.copy_path", "Copy Path", fb_cpath, flags=OPF_QUIET|OPF_HIDDEN, doc="The file's full path to the clipboard"
 
 fb_up:
     sub     rsp, 8
@@ -128,6 +149,8 @@ WIDGET wd_fb_place,  WK_ROW,    "files.place", cb=fb_place_cb
 WIDGET wd_fb_ok,     WK_BUTTON, "files.ok", "Open", flags=WGF_PRIMARY, aux=op_fb_ok
 WIDGET wd_fb_cancel, WK_BUTTON, "files.cancel", "Cancel", aux=op_dlg_cancel
 WIDGET wd_fb_replace, WK_BUTTON, "files.replace", "Replace", flags=WGF_PRIMARY, aux=op_fb_ok
+WIDGET wd_fb_rename, WK_BUTTON, "files.ok", "Rename", flags=WGF_PRIMARY, aux=op_fb_ok
+WIDGET wd_fb_delete, WK_BUTTON, "files.ok", "Delete", flags=WGF_PRIMARY, aux=op_fb_ok
 WIDGET wd_fb_prev,   WK_BUTTON, "files.preview", "Preview", flags=WGF_NODRAW, tip="The scene as it was last saved"
 WIDGET wd_fb_prev_no, WK_BUTTON, "files.preview", "No preview", flags=WGF_NODRAW, tip="This scene was saved without a picture (by a script, or before pictures were kept)"
 WIDGET wd_fb_prev_none, WK_BUTTON, "files.preview", "Pick a scene to see it", flags=WGF_NODRAW
@@ -158,6 +181,7 @@ fb_open:
 37: mov     dword ptr [rip+fb_bee], 1
 38:
     mov     dword ptr [rip+fb_overwrite], 0
+    mov     dword ptr [rip+fb_mode], 0
     mov     dword ptr [rip+fb_sel], -1
     mov     dword ptr [rip+fb_scroll], 0
     mov     dword ptr [rip+fb_last_row], -1
@@ -476,6 +500,176 @@ ent_name:
     mov     edx, [rax+rdi*8+4]
     lea     rax, [rip+fb_names]
     add     rax, rcx
+    ret
+
+# ---- a file's menu (right-click on a row) ------------------------------------------
+# fb_row_menu(edi=row) - it becomes the selected row, its menu opens
+fb_row_menu:
+    sub     rsp, 8
+    mov     [rip+fb_ctx], edi
+    mov     [rip+fb_sel], edi
+    mov     dword ptr [rip+fb_mode], 0
+    mov     dword ptr [rip+fb_overwrite], 0
+    lea     rdi, [rip+ctx_files]
+    mov     esi, ctx_files_n
+    call    ctx_open_list
+    add     rsp, 8
+    ret
+
+# ctx_name -> rax = the right-clicked row's name (0: no such row), edx folder
+ctx_name:
+    mov     edi, [rip+fb_ctx]
+    test    edi, edi
+    js      8f
+    cmp     edi, [rip+fb_n]
+    jae     8f
+    jmp     ent_name
+8:  xor     eax, eax
+    ret
+
+fb_open_row:
+    mov     edi, [rip+fb_ctx]
+    test    edi, edi
+    js      9f
+    cmp     edi, [rip+fb_n]
+    jae     9f
+    jmp     activate
+9:  ret
+
+# fb_rename - the name goes to the Name field, OK becomes Rename
+fb_rename:
+    sub     rsp, 8
+    call    ctx_name
+    test    rax, rax
+    jz      9f
+    mov     rsi, rax
+    lea     rdi, [rip+fb_tname]
+    call    scpy255
+    lea     rdi, [rip+fb_name]
+    lea     rsi, [rip+fb_tname]
+    call    scpy
+    mov     dword ptr [rip+fb_mode], 1
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    ret
+
+# fb_delete - OK becomes Delete, with the question above it
+fb_delete:
+    sub     rsp, 8
+    call    ctx_name
+    test    rax, rax
+    jz      9f
+    mov     rsi, rax
+    lea     rdi, [rip+fb_tname]
+    call    scpy255
+    mov     dword ptr [rip+fb_mode], 2
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    ret
+
+# fb_mkdir - "New Folder" (or "New Folder 2" .. 9), selected, then Rename
+fb_mkdir:
+    push    rbx
+    xor     ebx, ebx
+1:  lea     rdi, [rip+fb_tname]
+    lea     rsi, [rip+s_newdir]
+    call    scpy255
+    test    ebx, ebx
+    jz      2f
+    lea     rdi, [rip+fb_tname+10]
+    mov     byte ptr [rdi], ' '
+    lea     eax, [rbx+'1']
+    mov     [rdi+1], al
+    mov     byte ptr [rdi+2], 0
+2:  lea     rdi, [rip+fb_tname]
+    call    full_of_dir
+    lea     rdi, [rip+fb_full]
+    mov     esi, 0755
+    mov     eax, SYS_MKDIR
+    syscall
+    test    rax, rax
+    jns     3f
+    inc     ebx
+    cmp     ebx, 9
+    jb      1b
+    jmp     9f
+3:  call    fb_load
+    xor     ebx, ebx                    # select it, then type its name
+4:  cmp     ebx, [rip+fb_n]
+    jae     9f
+    mov     edi, ebx
+    call    ent_name
+    mov     rdi, rax
+    lea     rsi, [rip+fb_tname]
+    call    str_eq
+    test    eax, eax
+    jnz     5f
+    inc     ebx
+    jmp     4b
+5:  mov     [rip+fb_sel], ebx
+    mov     [rip+fb_ctx], ebx
+    call    fb_rename
+9:  pop     rbx
+    ret
+
+fb_cpath:
+    sub     rsp, 8
+    call    ctx_name
+    test    rax, rax
+    jz      9f
+    mov     rdi, rax
+    call    full_of_dir
+    lea     rdi, [rip+fb_full]
+    call    str_len
+    mov     esi, eax
+    lea     rdi, [rip+fb_full]
+    call    clip_copy
+9:  add     rsp, 8
+    ret
+
+# fb_ok_mode -> eax = 1 when OK was a rename or a delete (done here)
+fb_ok_mode:
+    mov     eax, [rip+fb_mode]
+    test    eax, eax
+    jnz     1f
+    ret
+1:  push    rbx
+    sub     rsp, 768+16
+    mov     dword ptr [rip+fb_mode], 0
+    mov     ebx, eax
+    lea     rdi, [rip+fb_tname]         # the old one's full path, kept
+    call    full_of_dir
+    mov     rdi, rsp
+    lea     rsi, [rip+fb_full]
+    call    scpy
+    cmp     ebx, 2
+    je      3f
+    cmp     byte ptr [rip+fb_name], 0   # rename: to the Name field's text
+    je      8f
+    lea     rdi, [rip+fb_name]
+    call    full_of_dir
+    mov     rdi, rsp
+    lea     rsi, [rip+fb_full]
+    mov     eax, SYS_RENAME
+    syscall
+    jmp     8f
+3:  mov     rdi, rsp                    # delete: a file, or an empty folder
+    mov     eax, SYS_UNLINK
+    syscall
+    test    rax, rax
+    jns     8f
+    mov     rdi, rsp
+    mov     eax, SYS_RMDIR
+    syscall
+    test    rax, rax
+    jns     8f
+    lea     rdi, [rip+s_rm_fail]
+    call    log_line
+8:  mov     byte ptr [rip+fb_name], 0
+    call    fb_load
+    mov     eax, 1
+    add     rsp, 768+16
+    pop     rbx
     ret
 
 # ---- Tab completion ----------------------------------------------------------------
@@ -816,6 +1010,7 @@ fb_row_cb:
     jmp     9f
 1:  mov     [rip+fb_last_row], ebx
     mov     [rip+fb_last_t], r12
+    mov     dword ptr [rip+fb_mode], 0  # (a rename or delete waiting: off)
     mov     edi, ebx                    # a file: its name to the field
     call    ent_name
     test    edx, edx
@@ -933,6 +1128,9 @@ fb_ok:
     push    r12
     sub     rsp, 8
     call    wg_commit
+    call    fb_ok_mode                  # (a rename or a delete instead)
+    test    eax, eax
+    jnz     9f
     cmp     byte ptr [rip+fb_name], 0
     je      9f
     lea     rdi, [rip+fb_name]          # a typed full path counts as it is
@@ -1353,7 +1551,28 @@ fb_draw:
     xor     r9d, r9d
     call    wg
     lea     r12d, [rbp+FB_H-46]
-    cmp     dword ptr [rip+fb_overwrite], 0  # "x exists. Replace it?"
+    cmp     dword ptr [rip+fb_mode], 1  # renaming: a hint
+    jne     91f
+    lea     edi, [rbx+18]
+    lea     esi, [r12+3]
+    lea     rdx, [rip+s_ren_hint]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+    jmp     9f
+91: cmp     dword ptr [rip+fb_mode], 2  # deleting: "x will be deleted ..."
+    jne     92f
+    lea     edi, [rbx+18]
+    lea     esi, [r12+3]
+    lea     rdx, [rip+fb_tname]
+    mov     ecx, COL_WARN
+    call    draw_text
+    mov     edi, eax
+    lea     esi, [r12+3]
+    lea     rdx, [rip+s_del_q]
+    mov     ecx, COL_WARN
+    call    draw_text
+    jmp     9f
+92: cmp     dword ptr [rip+fb_overwrite], 0  # "x exists. Replace it?"
     je      9f
     lea     rdi, [rip+fb_full]
     call    basename
@@ -1374,11 +1593,17 @@ fb_draw:
     xor     r8d, r8d
     xor     r9d, r9d
     call    wg
-    lea     rdi, [rip+wd_fb_ok]         # Open / Save / Replace
+    lea     rdi, [rip+wd_fb_ok]         # Open / Save / Replace / Rename / Delete
     cmp     dword ptr [rip+fb_overwrite], 0
     je      10f
     lea     rdi, [rip+wd_fb_replace]
-10: lea     esi, [rbx+FB_W-112]
+10: cmp     dword ptr [rip+fb_mode], 1
+    jne     101f
+    lea     rdi, [rip+wd_fb_rename]
+101:cmp     dword ptr [rip+fb_mode], 2
+    jne     102f
+    lea     rdi, [rip+wd_fb_delete]
+102:lea     esi, [rbx+FB_W-112]
     mov     edx, r12d
     mov     ecx, 92
     xor     r8d, r8d

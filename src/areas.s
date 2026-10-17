@@ -2679,8 +2679,8 @@ WIDGET wd_props_scroll, WK_SCROLL, "props.page"
 WIDGET wd_obj_vis,   WK_TOGGLE, "object.visible", "Visible", cb=props_vis_cb, undo="Hide", tip="Show or hide the object (H hides the selection, Alt+H shows all)"
 WIDGET wd_obj_color, WK_TEXT, "object.color", "Colour", cb=props_hex_cb, undo="Colour", tip="The object's colour in the viewport, as #rrggbb"
 WIDGET wd_sc_units, WK_ENUM, "scene.units", "Units", cb=props_units_cb, aux=unit_lbl, n=4, tip="What one scene unit is (typed lengths with units convert)"
-WIDGET wd_sc_wstr, WK_FLOAT, "world.strength", "World strength", 0.0, 1000.0, 0.01, 3, WGF_CLAMP, undo="World", tip="How bright the world (sky or HDRI) lights the scene"
-WIDGET wd_sc_wrot, WK_FLOAT, "world.rotation", "World rotation", step=0.00872665, dec=1, flags=WGF_DEG, undo="World", tip="Turns the world image about the vertical axis"
+WIDGET wd_sc_wstr, WK_FLOAT, "world.strength", "World strength", 0.0, 1000.0, 0.01, 3, WGF_CLAMP, undo="World", tip="How bright the world (sky or HDRI) lights the scene", def=1.0
+WIDGET wd_sc_wrot, WK_FLOAT, "world.rotation", "World rotation", step=0.00872665, dec=1, flags=WGF_DEG, undo="World", tip="Turns the world image about the vertical axis", def=0.0
 WIDGET wd_sc_fstart, WK_INT, "scene.frame_start", "Start frame", -100000.0, 100000.0, 0.2, 0, cb=props_range_cb, tip="The first frame of the animation"
 WIDGET wd_sc_fend, WK_INT, "scene.frame_end", "End frame", -100000.0, 100000.0, 0.2, 0, cb=props_range_cb, tip="The last frame of the animation"
 WIDGET wd_sc_fps, WK_INT, "scene.fps", "Frames per second", 1.0, 1000.0, 0.1, 0, WGF_CLAMP, cb=props_range_cb, tip="Playback speed"
@@ -2790,8 +2790,8 @@ WIDGET wd_vp_yaw,     WK_FLOAT,  "viewport.yaw", "Yaw", step=0.00872665, dec=1, 
 WIDGET wd_vp_pitch,   WK_FLOAT,  "viewport.pitch", "Pitch", -1.55, 1.55, 0.00872665, 1, WGF_DEG|WGF_CLAMP
 WIDGET wd_vp_dist,    WK_FLOAT,  "viewport.distance", "Distance", 1.5, 20000.0, 0.05, 2, WGF_CLAMP
 WIDGET wd_obj_name,  WK_TEXT,  "object.name", , flags=WGF_COMPACT, cb=props_rename, undo="Rename", tip="The object's name. Click to type a new one (names stay unique: Cube.001)"
-WIDGET wd_obj_loc,   WK_FLOAT, "object.location", , step=0.01, dec=3, flags=WGF_COMPACT, cb=props_xform, undo="Move", tip="Where the object is, in scene units. Drag sideways (Shift: finer, Ctrl: steps), or click and type a value or expression: 25mm, 2*pi"
-WIDGET wd_obj_rot,   WK_FLOAT, "object.rotation", , step=0.00872665, dec=1, flags=WGF_COMPACT|WGF_DEG, cb=props_xform, undo="Rotate", tip="Euler XYZ rotation in degrees. Drag sideways, or click and type: 90, 45+15, 1.2rad"
-WIDGET wd_obj_scale, WK_FLOAT, "object.scale", , step=0.005, dec=3, flags=WGF_COMPACT, cb=props_xform, undo="Scale", tip="Size along each axis (1 = as modelled). Drag sideways, or click and type a factor"
+WIDGET wd_obj_loc,   WK_FLOAT, "object.location", , step=0.01, dec=3, flags=WGF_COMPACT, cb=props_xform, undo="Move", tip="Where the object is, in scene units. Drag sideways (Shift: finer, Ctrl: steps), or click and type a value or expression: 25mm, 2*pi", def=0.0
+WIDGET wd_obj_rot,   WK_FLOAT, "object.rotation", , step=0.00872665, dec=1, flags=WGF_COMPACT|WGF_DEG, cb=props_xform, undo="Rotate", tip="Euler XYZ rotation in degrees. Drag sideways, or click and type: 90, 45+15, 1.2rad", def=0.0
+WIDGET wd_obj_scale, WK_FLOAT, "object.scale", , step=0.005, dec=3, flags=WGF_COMPACT, cb=props_xform, undo="Scale", tip="Size along each axis (1 = as modelled). Drag sideways, or click and type a factor", def=1.0
 
 .section .note.GNU-stack,"",@progbits

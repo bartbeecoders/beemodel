@@ -108,16 +108,16 @@ WIDGET wd_mt_new,  WK_BUTTON, "material.new", "New", aux=op_mat_new
 WIDGET wd_mt_pre,  WK_ENUM, "material.preset", flags=WGF_DYN, cb=pre_cb, undo="Material Preset", aux=pre_names, tip="A preset look: metals, glass, plastics, wood, marble and more (a new material when there is none)"
 WIDGET wd_mt_itex, WK_BUTTON, "material.import_textures", "Texture Set...", aux=op_mat_import_tex, tip="A PBR material from a texture set: pick any one of its images, the others are found by name"
 WIDGET wd_mt_base, WK_COLOR, "material.base", "Base colour", cb=val_cb, undo="Material", tip="The surface colour (a click opens the colour picker)"
-WIDGET wd_mt_metal, WK_SLIDER, "material.metallic", "Metallic", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="0: plastic, wood, paint ... 1: bare metal"
-WIDGET wd_mt_rough, WK_SLIDER, "material.roughness", "Roughness", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="0: a mirror finish, 1: matte"
-WIDGET wd_mt_spec, WK_SLIDER, "material.specular", "Specular", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="How strongly non-metals reflect (0.5 for most)"
-WIDGET wd_mt_ior,  WK_FLOAT, "material.ior", "IOR", 1.0, 3.0, 0.005, 3, WGF_CLAMP, cb=val_cb, undo="Material", tip="Index of refraction: water 1.33, glass 1.5, diamond 2.42"
-WIDGET wd_mt_trans, WK_SLIDER, "material.transmission", "Transmission", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="Light passing through (glass, water)"
+WIDGET wd_mt_metal, WK_SLIDER, "material.metallic", "Metallic", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="0: plastic, wood, paint ... 1: bare metal", def=0.0
+WIDGET wd_mt_rough, WK_SLIDER, "material.roughness", "Roughness", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="0: a mirror finish, 1: matte", def=0.5
+WIDGET wd_mt_spec, WK_SLIDER, "material.specular", "Specular", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="How strongly non-metals reflect (0.5 for most)", def=0.5
+WIDGET wd_mt_ior,  WK_FLOAT, "material.ior", "IOR", 1.0, 3.0, 0.005, 3, WGF_CLAMP, cb=val_cb, undo="Material", tip="Index of refraction: water 1.33, glass 1.5, diamond 2.42", def=1.45
+WIDGET wd_mt_trans, WK_SLIDER, "material.transmission", "Transmission", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="Light passing through (glass, water)", def=0.0
 WIDGET wd_mt_emit, WK_COLOR, "material.emission", "Emission", cb=val_cb, undo="Material", tip="The colour of light it gives off"
-WIDGET wd_mt_estr, WK_FLOAT, "material.strength", "Emission strength", 0.0, 1000.0, 0.05, 2, WGF_CLAMP, cb=val_cb, undo="Material", tip="How bright the emission is (0: none)"
-WIDGET wd_mt_coat, WK_SLIDER, "material.clearcoat", "Clear coat", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="A clear varnish layer on top"
-WIDGET wd_mt_coatr, WK_SLIDER, "material.coat_roughness", "Coat roughness", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material"
-WIDGET wd_mt_alpha, WK_SLIDER, "material.alpha", "Alpha", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="Opacity: 0 invisible, 1 solid"
+WIDGET wd_mt_estr, WK_FLOAT, "material.strength", "Emission strength", 0.0, 1000.0, 0.05, 2, WGF_CLAMP, cb=val_cb, undo="Material", tip="How bright the emission is (0: none)", def=0.0
+WIDGET wd_mt_coat, WK_SLIDER, "material.clearcoat", "Clear coat", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="A clear varnish layer on top", def=0.0
+WIDGET wd_mt_coatr, WK_SLIDER, "material.coat_roughness", "Coat roughness", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", def=0.03
+WIDGET wd_mt_alpha, WK_SLIDER, "material.alpha", "Alpha", 0.0, 1.0, 0.005, 3, cb=val_cb, undo="Material", tip="Opacity: 0 invisible, 1 solid", def=1.0
 WIDGET wd_mt_dens, WK_FLOAT, "material.density", "Density (g/cm3)", 0.0, 25.0, 0.01, 3, WGF_CLAMP, cb=val_cb, undo="Material", tip="For mass properties: water 1, aluminium 2.7, steel 7.85"
 WIDGET wd_mt_blend, WK_ENUM, "material.blend", flags=WGF_DYN, cb=blend_cb, aux=blend_names, tip="Opaque, Masked (holes where the opacity mask is below the clip value) or Translucent (light through by its opacity)"
 WIDGET wd_mt_sided, WK_TOGGLE, "material.one_sided", "One-sided", cb=sided_cb, tip="Back faces let rays through (leaves, decals, open shells)"
