@@ -35,7 +35,8 @@ s_bk_kinds:     .asciz "normal"
                 .asciz "curvature"
                 .byte 0
 
-OPERATOR op_object_bake, "object.bake", "Bake Maps", do_bake, doc="Bake a high mesh's normal, ambient occlusion or curvature map into an image through a low mesh's UVs: object.bake <low> <high> <normal|ao|curvature> <image> [distance]", form=form_bake
+OPERATOR op_object_bake, "object.bake", "Bake Maps", job_bake, doc="Bake a high mesh's normal, ambient occlusion or curvature map into an image through a low mesh's UVs: object.bake <low> <high> <normal|ao|curvature> <image> [distance]", form=form_bake
+JOB_OP job_bake, do_bake, "Baking maps"
 
 .equ IM_W,      0
 .equ IM_H,      4

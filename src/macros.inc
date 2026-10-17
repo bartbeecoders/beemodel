@@ -101,3 +101,27 @@
     .long \flags
     .popsection
 .endm
+
+# A long job (jobui.s): sym runs inner between job_begin("label") and
+# job_end, so the status bar shows it while it runs (rdi passed through)
+.macro JOB_OP sym, inner, label
+    .pushsection .rodata
+.Ljl\@: .asciz "\label"
+    .popsection
+    .pushsection .text
+\sym:
+    cmp     dword ptr [rip+wl_dispatching], 0  # (from a key or a click: later,
+    jne     .Ljd\@                             #  out of the event dispatch)
+    push    rdi
+    lea     rdi, [rip+.Ljl\@]
+    call    job_begin
+    mov     rdi, [rsp]
+    call    \inner
+    call    job_end
+    pop     rdi
+    ret
+.Ljd\@:
+    lea     rdi, [rip+\sym]
+    jmp     job_defer
+    .popsection
+.endm

@@ -3713,7 +3713,8 @@ f_two:          .float 2.0
 s_pf_iblend:    .asciz "file.import_blend ~/BeeModel/scene.blend"
 s_imported_b:   .asciz "  imported "
 .text
-OPERATOR op_import_blend, "file.import_blend", "Import Blender...", op_iblend, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import a Blender file (.blend, Blender 2.80 to 5.x): its meshes, cameras, lights and materials: file.import_blend <path>", form=form_iblend
+OPERATOR op_import_blend, "file.import_blend", "Import Blender...", job_iblend, flags=OPF_AI_SAFE|OPF_UNDO, doc="Import a Blender file (.blend, Blender 2.80 to 5.x): its meshes, cameras, lights and materials: file.import_blend <path>", form=form_iblend
+JOB_OP job_iblend, op_iblend, "Importing a Blender file"
 
 op_iblend:
     sub     rsp, 8

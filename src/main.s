@@ -194,7 +194,10 @@ _start:
     je      .Lloop
     test    word ptr [rip+pollfds+6], POLLIN|POLLERR|POLLHUP
     jz      1f
+    mov     dword ptr [rip+wl_dispatching], 1   # (long jobs wait: jobui.s)
     call    wl_read_dispatch
+    mov     dword ptr [rip+wl_dispatching], 0
+    call    job_pending                 # a long job a key or click asked for
 1:  test    word ptr [rip+pollfds+14], POLLIN
     jz      2f
     call    kb_on_timer

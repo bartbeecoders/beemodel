@@ -609,6 +609,7 @@ def main():
     tools_ui()
     outliner_ui()
     status_ui()
+    jobs_ui()
     files_more()
     files_complete()
     cad_ui()
@@ -7106,6 +7107,49 @@ def status_ui():
     f.move(600, 300); f.key(15)
     after = bright(10, 600)
     check(after != left, 'edit mode: other hints')
+    f.proc.kill()
+
+
+def jobs_ui():
+    """F9 (#275): a long job (here a lightmap bake) shows a chip with its
+    progress in the status bar while it runs, and frames keep coming; the
+    live link has a chip too (click: the Versions editor)."""
+    print('  -- status bar: job chips, live link --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('add("plane", "Floor", 0, 0, 0); scale("Floor", 4)')
+    def bar_pixels(img):                       # the share of the chip filled: it is the
+        acc = [x for x in range(600, 1271) if img.getpixel((x, 795)) == (0xf2, 0xb1, 0x34)]
+        return round(100 * len(acc) / (1270 - acc[0])) if acc else 0   # rightmost (ends at 1270)
+    f.key(28); f.type('lightmap.bake 1024 256'); f.key(28)
+    t0 = time.time(); n0 = f.frames
+    seen = []
+    while time.time() - t0 < 60:
+        f.pump(0.05)
+        img = f.image()
+        b = bar_pixels(img)
+        if b:
+            seen.append(b)
+            if len(seen) == 2:
+                f.shot('jobs_chip.png')
+        if f.frames - n0 > 4 and not b and seen:
+            break
+    check(len(seen) >= 2 and f.frames - n0 >= 3, f'while the bake runs, frames keep coming with a progress chip ({f.frames - n0} frames)')
+    check(len(seen) >= 3 and seen[-1] > min(seen), f'its bar grows ({min(seen) if seen else 0}% .. {seen[-1] if seen else 0}%)')
+    f.key(1)
+    check(widget(m, 'status.job') is None, 'when it is done the chip goes')
+    q('op("link.serve")'); f.pump(0.3)
+    w = widget(m, 'status.link')
+    check(w is not None, 'serving the live link: a chip in the status bar')
+    if w:
+        f.click(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2); f.pump(0.3)
+    check(widget(m, 'link.stop') is not None, 'clicking it opens the Versions editor (its live link part)')
+    q('op("link.stop")'); f.pump(0.3)
+    check(widget(m, 'status.link') is None, 'stopped: the chip goes')
     f.proc.kill()
 
 

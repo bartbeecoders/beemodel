@@ -136,6 +136,7 @@ pend_w:         .skip 4
 pend_h:         .skip 4
 pend_flags:     .skip 4
 win_flags:      .skip 4                 # bit0 maximized, bit1 tiled/fullscreen
+.globl configured
 configured:     .skip 4
 dirty:          .skip 4
 frame_pending:  .skip 4

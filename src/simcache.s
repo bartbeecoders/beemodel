@@ -74,7 +74,8 @@ s_sc_bad:       .asciz "  not understood: "
 s_sc_freed:     .asciz "  cache freed"
 f_mb:           .float 9.5367431640625e-7
 
-OPERATOR op_sim_bake,  "sim.bake",  "Bake Simulation",  do_sim_bake, flags=OPF_AI_SAFE, doc="Simulate the scene's frame range and keep every frame (saved with the file; edits no longer change it until sim.free): sim.bake [rigid|cloth]"
+OPERATOR op_sim_bake,  "sim.bake",  "Bake Simulation",  job_sim_bake, flags=OPF_AI_SAFE, doc="Simulate the scene's frame range and keep every frame (saved with the file; edits no longer change it until sim.free): sim.bake [rigid|cloth]"
+JOB_OP job_sim_bake, do_sim_bake, "Baking the simulation"
 OPERATOR op_sim_free,  "sim.free",  "Free Simulation Cache", do_sim_free, flags=OPF_AI_SAFE, doc="Forget the simulation cache and bake (simulated again when needed): sim.free [rigid|cloth]"
 OPERATOR op_sim_cache, "sim.cache", "Simulation Cache", do_sim_cache, flags=OPF_AI_SAFE, doc="Show what the simulation cache holds, or set its memory budget: sim.cache [budget MB]"
 
@@ -478,6 +479,15 @@ do_sim_bake:
     jg      6f
     mov     edi, r13d
     call    apply
+    mov     r12, [rip+an_cur]
+    mov     eax, r13d                   # (the status bar: frames done)
+    sub     eax, [r12+AN_START]
+    cvtsi2ss xmm0, eax
+    mov     eax, r14d
+    sub     eax, [r12+AN_START]
+    cvtsi2ss xmm1, eax
+    divss   xmm0, xmm1
+    call    job_set
     mov     r12, [rip+an_cur]
     jmp     5b
 6:  xor     r13d, r13d                  # what has frames is baked
