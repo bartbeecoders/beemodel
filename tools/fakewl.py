@@ -5318,7 +5318,7 @@ def physics_panel():
     f.click(1250, 247)                          # Box -> Sphere
     f.pump(0.2)
     b = rb()
-    f.drag(1170, 269, 1270, 269, steps=5)       # Mass: +100 px x 0.02
+    f.drag(1170, 291, 1270, 291, steps=5)       # Mass: +100 px x 0.02 (under Material)
     f.pump(0.2)
     c = rb()
     f.shot('104_physics_panel.png')
@@ -5332,7 +5332,7 @@ def physics_panel():
       'op("rigid.add", "active box")\nop("rigid.joint", "point Probe world pivot 4 3 0")')
     f.pump(0.2)
     img = f.image()
-    joint = sum(1 for x in range(1130, 1240, 2) if max(img.getpixel((x, 349))[:3]) > 150)
+    joint = sum(1 for x in range(1130, 1240, 2) if max(img.getpixel((x, 371))[:3]) > 150)
     f.move(600, 300)
     f.key(57)                                   # Space: the status line
     f.pump(0.8)
@@ -5340,7 +5340,7 @@ def physics_panel():
     f.pump(0.2)
     f.shot('105_physics_running.png')
     img = f.image()
-    status = sum(1 for y in range(446, 460) for x in range(1130, 1260, 2) if max(img.getpixel((x, y))[:3]) > 90)
+    status = sum(1 for y in range(468, 482) for x in range(1130, 1260, 2) if max(img.getpixel((x, y))[:3]) > 90)
     d = q('print(get("Cube", "y") < 2.5, frame() > 5)')
     f.mods(1); f.key(105); f.mods(0)            # back to the start
     f.pump(0.2)

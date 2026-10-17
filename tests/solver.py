@@ -18,6 +18,11 @@ steps; a box slides down a ramp of many triangles without catching on
 their edges (inactive edges: the face's normal); 1000 balls on a terrain
 of 100 000 triangles run live; an endless plane catches a box 500 m out.
 
+R4: fast bodies, groups, materials - a 1 cm ball at 100 and 300 m/s and a
+tumbling 10 cm box at 60 m/s stop at a 1 cm wall (speculative contacts,
+continuous collision); two groups that ignore each other pass through
+each other but not the ground; rubber bounces higher than wood.
+
     python3 tests/solver.py build/beemodel
 """
 import os, subprocess, sys, tempfile
@@ -173,6 +178,30 @@ PLANE = ('delete("Cube")\nadd("plane", "P", 0, 0, 0)\nselect("P")\nop("rigid.add
          'frame(121)\nprint("plane", get("F", "y"), rbinfo(2))\n')
 
 
+FAST = ('delete("Cube")\nop("rigid.world", "gravity 0 0 0")\n'
+        'add("cube", "W1", 5, 1, 0)\nscale("W1", 0.005, 1, 1)\nadd("cube", "W2", 5, 1, 3)\nscale("W2", 0.005, 1, 1)\n'
+        'add("cube", "W3", 5, 1, 6)\nscale("W3", 0.005, 1, 1)\nselect("W1", "W2", "W3")\nop("rigid.add", "passive box")\n'
+        'add("sphere", "S1", 0, 1, 0)\nscale("S1", 0.005)\nselect("S1")\nop("rigid.add", "active sphere velocity 100 0 0")\n'
+        'add("sphere", "S2", 0, 1, 3)\nscale("S2", 0.005)\nselect("S2")\nop("rigid.add", "active sphere velocity 300 0 0")\n'
+        'add("cube", "B", 0, 1, 6)\nscale("B", 0.05)\nrotate("B", 0.3, 0.5, 0.2)\nselect("B")\n'
+        'op("rigid.add", "active box velocity 60 0 0")\nframe(49)\n'
+        'print("fast", get("S1", "x"), get("S2", "x"), get("B", "x"))\n')
+
+GROUPS = ('delete("Cube")\nadd("plane", "G", 0, 0, 0)\nscale("G", 10)\nselect("G")\nop("rigid.add", "passive box")\n'
+          'add("cube", "Low", 0, 0.5, 0)\nscale("Low", 0.5)\nselect("Low")\nop("rigid.add", "active box group 1 collide 1")\n'
+          'add("cube", "High", 0, 2, 0)\nscale("High", 0.5)\nselect("High")\nop("rigid.add", "active box group 2 collide 1")\n'
+          'add("cube", "Third", 3, 0.5, 0)\nscale("Third", 0.5)\nselect("Third")\nop("rigid.add", "active box")\n'
+          'add("cube", "Top", 3, 2, 0)\nscale("Top", 0.5)\nselect("Top")\nop("rigid.add", "active box")\n'
+          'frame(121)\nprint("groups", round(get("Low", "y") * 100), round(get("High", "y") * 100), round(get("Top", "y") * 100), rigid("High", "group"))\n')
+
+BOUNCE = ('delete("Cube")\nadd("plane", "G", 0, 0, 0)\nscale("G", 10)\nselect("G")\nop("rigid.add", "passive box")\n'
+          'add("sphere", "R", 0, 3, 0)\nscale("R", 0.2)\nselect("R")\nop("rigid.add", "active sphere material rubber")\n'
+          'add("sphere", "W", 3, 3, 0)\nscale("W", 0.2)\nselect("W")\nop("rigid.add", "active sphere material wood")\n'
+          'hr = 0\nhw = 0\nlow = 0\nfor f in 2..60 {\n frame(f)\n if get("R", "y") < 0.3 { low = 1 }\n'
+          ' if low == 1 { hr = max(hr, get("R", "y"))\n  hw = max(hw, get("W", "y")) }\n}\n'
+          'print("bounce", hr, hw, rigid("R", "bounce"), rigid("W", "friction"))\n')
+
+
 def drift(rows):
     """(settling: the largest move start -> 1 s, standing: 1 s -> 10 s,
     the largest drop) in mm"""
@@ -254,6 +283,20 @@ def main():
     r = {x[0]: x[1:] for x in run(PLANE) if x}
     p = r.get('plane', ['0', '1'])
     check(abs(float(p[0]) - 0.5) < 0.01 and p[1] == '0', f'an endless plane catches a box 500 m out ({p})')
+    print('  -- the solver: fast bodies, groups, materials --')
+    r = {x[0]: x[1:] for x in run(FAST) if x}
+    v = [float(x) for x in r.get('fast', ['99', '99', '99'])]
+    check(4.9 < v[0] < 4.995 and 4.9 < v[1] < 4.995 and v[2] < 4.995,
+          f'a 1 cm ball at 100 and 300 m/s and a turning 10 cm box at 60 m/s stop at a 1 cm wall (x {v}; the wall '
+          f'at 4.995)')
+    r = {x[0]: x[1:] for x in run(GROUPS) if x}
+    g = r.get('groups', [])
+    check(g == ['50', '50', '150', '2'],
+          f'groups: a box ignoring the one below falls through it to the ground; others stack ({g})')
+    r = {x[0]: x[1:] for x in run(BOUNCE) if x}
+    b = [float(x) for x in r.get('bounce', ['0', '0', '0', '0'])]
+    check(b[0] > 1.0 and b[1] < 0.5 and abs(b[2] - 0.8) < 1e-6 and abs(b[3] - 0.5) < 1e-6,
+          f'materials: rubber bounces back to {b[0]:.2f} m, wood to {b[1]:.2f} m (from 3 m)')
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nthe solver: all checks passed')
     sys.exit(1 if FAILS else 0)
 

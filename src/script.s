@@ -5556,8 +5556,9 @@ b_colls:
     jmp     ret_num
 
 # rigid(name, prop) -> an object's rigid body setting: "type" (1 active,
-#   2 passive), "shape" (0 box, 1 sphere, 2 capsule, 3 hull, 4 compound),
-#   "mass", "friction", "bounce", "damping"; nil when it is not a body
+#   2 passive), "shape" (0 box, 1 sphere, 2 capsule, 3 hull, 4 compound, 5
+#   mesh, 6 plane), "mass", "friction", "bounce", "damping", "group"; nil
+#   when it is not a body
 b_rigid:
     push    rbx
     push    r12

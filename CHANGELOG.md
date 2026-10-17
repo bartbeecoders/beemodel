@@ -36,12 +36,24 @@ project uses [Semantic Versioning](https://semver.org/).
   thousands of triangles without a bump. Balls and boxes in a bowl, boxes
   on a staircase, 1000 balls on a terrain of 100 000 triangles at about
   50 fps on 8 threads, a box landing on a plane 500 m out.
+- **Fast bodies, groups and materials** (#289). A body that moves more
+  than half its size in a step is stopped short of static bodies by
+  continuous collision, and contacts start as far apart as two bodies can
+  close in a step: a 1 cm ball at 300 m/s and a tumbling box at 60 m/s
+  stop at a 1 cm wall. Collision groups: `rigid.add ... group n collide m`
+  (16 groups; m the groups it meets). Physics materials: `material
+  rubber|ice|wood|metal|stone` and Properties › Physics › Material. A
+  starting velocity: `rigid.add ... velocity x y z`.
 - **The MIT License** (`LICENSE`, also in the release archive). The
   2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): the masterplan's open
   questions, then physics - the solver, ground and landscapes, shatter,
   attractors, particles, smoke and fire.
 
 ### Fixed
+- Rigid bodies: a thin passive box (under 5 cm) was made 25 cm deep on
+  every thin axis - meant for floors, it also thickened thin walls
+  towards whatever came at them. Only a floor's own Y now; a passive body
+  with no bounce no longer stops what comes at it short of it.
 - Sculpting: each thread's sums for a dab (the area's weight, centre and
   normal) get a cache line of their own. Two threads shared one, and how
   much that cost depended on where the linker put them (a brush frame took
