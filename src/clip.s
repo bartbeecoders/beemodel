@@ -67,7 +67,8 @@
 .equ CL_PXB,    CL_PXA + 8
 .equ CL_PIN,    CL_PXB + 8              # the points left (pointer)
 .equ CL_K,      CL_PIN + 8              # chosen (4 ints)
-.equ CL_SZ,     (CL_K + 16 + 15) & -16
+.equ CL_MG,     CL_K + 16               # points kept this far above the face
+.equ CL_SZ,     (CL_MG + 4 + 15) & -16
 
 .macro DOT3 d, s
     dpps    \d, \s, 0x71
@@ -95,14 +96,14 @@ cl_tolk:        .float 0.04                 # a feature: within 4% of the size
 cl_tolmin:      .float 0.0005
 cl_tolmax:      .float 0.02                 #  (2 cm at most: a big ground's
                                             #  top, not its sides)
-cl_margin:      .float 0.02                 # (rbody.s: contacts this far apart)
 cl_big:         .float 1e30
 cl_eps:         .float 1e-9
 cl_half:        .float 0.577
 .text
 
 # poly_clip(rdi=proxy A, rsi=proxy B, xmm0=normal from A to B (unit),
-#   rdx=out: 4 results) -> eax = contact points (0: no face; use GJK's)
+#   xmm1=the contact margin, rdx=out: 4 results) -> eax = contact points (0:
+#   no face; use GJK's)
 poly_clip:
     push    rbp
     mov     rbp, rsp
@@ -116,6 +117,7 @@ poly_clip:
     mov     rbx, rsp
     andps   xmm0, [rip+cl_xyz]
     movaps  [rbx+CL_N], xmm0
+    movss   [rbx+CL_MG], xmm1
     mov     [rbx+CL_PXA], rdi
     mov     [rbx+CL_PXB], rsi
     mov     [rbx+CL_OUT], rdx
@@ -296,7 +298,7 @@ poly_clip:
     cmp     dword ptr [rbx+CL_FLIP], 0  #  B's: d - n.p
     je      611f
     xorps   xmm1, [rip+cl_sign]
-611:comiss  xmm1, [rip+cl_margin]
+611:comiss  xmm1, [rbx+CL_MG]
     ja      612f
     andps   xmm0, [rip+cl_xyz]
     shufps  xmm1, xmm1, 0               # (x y z gap)

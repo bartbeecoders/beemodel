@@ -1190,6 +1190,228 @@ ep_grow:
     pop     r12
     ret
 
+# cx_quick(rbx = collide's simplex: the proxies; r12 = result) -> eax = 1
+#   when it was a pair with an exact answer: two spheres (box cores of no
+#   size), or a sphere and a box (no radius) - the closest point on the box
+cx_quick:
+    mov     r10, [rbx+GJ_PA]
+    mov     r11, [rbx+GJ_PB]
+    mov     rdi, [r10+PX_PART]          # A a sphere?
+    call    cx_sphere
+    mov     r8d, eax
+    mov     rdi, [r11+PX_PART]          # B?
+    call    cx_sphere
+    mov     r9d, eax
+    mov     rdi, r10
+    mov     rsi, r11
+    test    r8d, r8d
+    jz      1f
+    test    r9d, r9d
+    jnz     .Lcq_ss
+    mov     rdi, [r11+PX_PART]          # sphere, box (B)
+    call    cx_box
+    test    eax, eax
+    jz      .Lcq_no
+    mov     rdi, r11                    #  as box, sphere, then turned
+    mov     rsi, r10
+    mov     edx, 1
+    jmp     .Lcq_bs
+1:  test    r9d, r9d
+    jz      .Lcq_no
+    mov     rdi, [r10+PX_PART]          # box (A), sphere
+    call    cx_box
+    test    eax, eax
+    jz      .Lcq_no
+    mov     rdi, r10
+    mov     rsi, r11
+    xor     edx, edx
+    jmp     .Lcq_bs
+.Lcq_ss:                                # two spheres
+    movaps  xmm0, [rsi+PX_C]
+    subps   xmm0, [rdi+PX_C]
+    andps   xmm0, [rip+cx_xyz]
+    movaps  xmm1, xmm0
+    DOT3    xmm1, xmm1
+    sqrtss  xmm1, xmm1
+    movaps  xmm2, [rip+cx_axes+16]      # (one inside the other: up)
+    comiss  xmm1, [rip+cx_eps]
+    jbe     2f
+    movaps  xmm2, xmm0
+    movss   xmm3, xmm1
+    shufps  xmm3, xmm3, 0
+    divps   xmm2, xmm3
+2:  movaps  [r12+CR_N], xmm2
+    mov     rax, [rdi+PX_PART]
+    movss   xmm4, [rax+PT_RAD]
+    mov     rax, [rsi+PX_PART]
+    movss   xmm5, [rax+PT_RAD]
+    subss   xmm1, xmm4                  # sep = d - rA - rB
+    subss   xmm1, xmm5
+    movss   [r12+CR_SEP], xmm1
+    shufps  xmm4, xmm4, 0
+    mulps   xmm4, xmm2
+    addps   xmm4, [rdi+PX_C]
+    andps   xmm4, [rip+cx_xyz]
+    movaps  [r12+CR_PA], xmm4
+    shufps  xmm5, xmm5, 0
+    mulps   xmm5, xmm2
+    movaps  xmm6, [rsi+PX_C]
+    subps   xmm6, xmm5
+    andps   xmm6, [rip+cx_xyz]
+    movaps  [r12+CR_PB], xmm6
+    mov     eax, 1
+    ret
+.Lcq_bs:                                # rdi the box, rsi the sphere; edx 1:
+    push    rdx                         #  the box was B (turned at the end)
+    push    rdx
+    movaps  xmm0, [rsi+PX_C]            # p = R^T (c - C): the sphere's centre
+    subps   xmm0, [rdi+PX_C]            #  in the box's axes
+    movaps  xmm1, xmm0
+    shufps  xmm1, xmm1, 0x00
+    mulps   xmm1, [rdi+PX_R0]
+    movaps  xmm2, xmm0
+    shufps  xmm2, xmm2, 0x55
+    mulps   xmm2, [rdi+PX_R1]
+    addps   xmm1, xmm2
+    movaps  xmm2, xmm0
+    shufps  xmm2, xmm2, 0xAA
+    mulps   xmm2, [rdi+PX_R2]
+    addps   xmm1, xmm2
+    andps   xmm1, [rip+cx_xyz]          # p
+    mov     rax, [rdi+PX_PART]
+    movaps  xmm7, [rax+PT_HALF]         # h
+    andps   xmm7, [rip+cx_xyz]
+    movaps  xmm2, xmm7                  # q = clamp(p, -h, h)
+    xorps   xmm2, [rip+cx_sign]
+    maxps   xmm2, xmm1
+    minps   xmm2, xmm7
+    movaps  xmm3, xmm1
+    subps   xmm3, xmm2                  # p - q
+    movaps  xmm4, xmm3
+    DOT3    xmm4, xmm4
+    comiss  xmm4, [rip+cx_small]
+    jbe     .Lcq_in
+    sqrtss  xmm4, xmm4                  # outside: n = (p - q) / |p - q|
+    movss   xmm5, xmm4
+    shufps  xmm5, xmm5, 0
+    divps   xmm3, xmm5                  # n (box axes)
+    movss   xmm6, xmm4                  # (the distance)
+    jmp     .Lcq_out
+.Lcq_in:                                # inside: the nearest face
+    movaps  xmm3, xmm1                  # |p|
+    andps   xmm3, [rip+cx_absm]
+    movaps  xmm4, xmm7
+    subps   xmm4, xmm3                  # h - |p| per axis
+    xor     ecx, ecx                    # its least of x y z
+    movss   xmm5, xmm4
+    movaps  xmm6, xmm4
+    shufps  xmm6, xmm6, 0x55
+    comiss  xmm6, xmm5
+    jae     3f
+    movss   xmm5, xmm6
+    mov     ecx, 1
+3:  movaps  xmm6, xmm4
+    shufps  xmm6, xmm6, 0xAA
+    comiss  xmm6, xmm5
+    jae     4f
+    movss   xmm5, xmm6
+    mov     ecx, 2
+4:  shl     ecx, 4                      # n = +-axis, q on that face
+    lea     rax, [rip+cx_axes]
+    movaps  xmm3, [rax+rcx]
+    shr     ecx, 4
+    movaps  [rsp-24], xmm1              # (no calls from here: the red zone)
+    movss   xmm0, [rsp-24+rcx*4]
+    xorps   xmm6, xmm6
+    comiss  xmm0, xmm6
+    jae     5f
+    xorps   xmm3, [rip+cx_sign]
+5:  movaps  xmm2, xmm1                  # q = p with that axis at +-h
+    movaps  [rsp-24], xmm7
+    movss   xmm0, [rsp-24+rcx*4]
+    movaps  [rsp-24], xmm3
+    mulss   xmm0, [rsp-24+rcx*4]
+    movaps  [rsp-24], xmm2
+    movss   [rsp-24+rcx*4], xmm0
+    movaps  xmm2, [rsp-24]
+    movss   xmm6, xmm5                  # the distance: -(h - |p|)
+    xorps   xmm6, [rip+cx_sign]
+.Lcq_out:                               # n, q (box axes), xmm6 the distance
+    movaps  xmm0, [rdi+PX_R0]           # into the world: R n, C + R q
+    DOT3    xmm0, xmm3
+    movaps  xmm4, [rdi+PX_R1]
+    DOT3    xmm4, xmm3
+    movaps  xmm5, [rdi+PX_R2]
+    DOT3    xmm5, xmm3
+    unpcklps xmm0, xmm4
+    movlhps xmm0, xmm5
+    andps   xmm0, [rip+cx_xyz]          # nW
+    movaps  xmm1, [rdi+PX_R0]
+    DOT3    xmm1, xmm2
+    movaps  xmm4, [rdi+PX_R1]
+    DOT3    xmm4, xmm2
+    movaps  xmm5, [rdi+PX_R2]
+    DOT3    xmm5, xmm2
+    unpcklps xmm1, xmm4
+    movlhps xmm1, xmm5
+    addps   xmm1, [rdi+PX_C]
+    andps   xmm1, [rip+cx_xyz]          # qW (on the box)
+    mov     rax, [rsi+PX_PART]
+    movss   xmm4, [rax+PT_RAD]
+    subss   xmm6, xmm4                  # sep = distance - r
+    movss   [r12+CR_SEP], xmm6
+    shufps  xmm4, xmm4, 0
+    mulps   xmm4, xmm0
+    movaps  xmm5, [rsi+PX_C]            # the sphere's point: c - r n
+    subps   xmm5, xmm4
+    andps   xmm5, [rip+cx_xyz]
+    pop     rdx
+    pop     rdx
+    test    edx, edx
+    jnz     6f
+    movaps  [r12+CR_PA], xmm1           # box A: n from A to B as it is
+    movaps  [r12+CR_PB], xmm5
+    movaps  [r12+CR_N], xmm0
+    mov     eax, 1
+    ret
+6:  movaps  [r12+CR_PA], xmm5           # box B: the sphere is A; n turned
+    movaps  [r12+CR_PB], xmm1
+    xorps   xmm0, [rip+cx_sign]
+    movaps  [r12+CR_N], xmm0
+    mov     eax, 1
+    ret
+.Lcq_no:
+    xor     eax, eax
+    ret
+
+# cx_sphere(rdi=part) -> eax = 1 when it is a sphere (a box core of no
+#   size, a radius); only eax, ecx, xmm0, xmm1 change
+cx_sphere:
+    xor     eax, eax
+    cmp     dword ptr [rdi+PT_TYPE], 0
+    jne     9f
+    xorps   xmm0, xmm0
+    ucomiss xmm0, [rdi+PT_RAD]
+    je      9f
+    movaps  xmm1, [rdi+PT_HALF]
+    andps   xmm1, [rip+cx_xyz]
+    cmpneqps xmm1, xmm0
+    movmskps ecx, xmm1
+    test    ecx, ecx
+    jnz     9f
+    mov     eax, 1
+9:  ret
+# cx_box(rdi=part) -> eax = 1 when it is a box (a box core, no radius)
+cx_box:
+    xor     eax, eax
+    cmp     dword ptr [rdi+PT_TYPE], 0
+    jne     9f
+    xorps   xmm0, xmm0
+    ucomiss xmm0, [rdi+PT_RAD]
+    jne     9f
+    mov     eax, 1
+9:  ret
+
 # -----------------------------------------------------------------------------
 # collide(rdi=proxy A, rsi=proxy B, rdx=result) - the separation (negative:
 #   overlapping), a point on each surface, the normal from A to B
@@ -1207,6 +1429,9 @@ collide:
     mov     [rbx+GJ_PA], rdi
     mov     [rbx+GJ_PB], rsi
     mov     r12, rdx
+    call    cx_quick                    # spheres, a sphere and a box: exact
+    test    eax, eax                    #  (radii included)
+    jnz     .Lcx_done
     call    gjk
     test    eax, eax
     jnz     2f
@@ -1270,6 +1495,7 @@ collide:
     movaps  xmm0, [r12+CR_PB]
     subps   xmm0, xmm3
     movaps  [r12+CR_PB], xmm0
+.Lcx_done:
     lea     rsp, [rbp-32]
     pop     r14
     pop     r13

@@ -231,13 +231,13 @@ pf_run:
     add     r13, rax
 1:  cmp     dword ptr [rip+pf_cancel], 0
     jne     9f
-    mov     eax, [rip+pf_grain]
-    lock xadd [rip+pf_next], eax        # eax = begin
-    mov     ecx, [rip+pf_count]
+    mov     edx, [rip+pf_grain]         # (read once: a worker late from the
+    mov     eax, edx                    #  last parallel_for can see the new
+    lock xadd [rip+pf_next], eax        #  pf_next with the old grain; its
+    mov     ecx, [rip+pf_count]         #  chunk must be the one it claimed)
     cmp     eax, ecx
     jae     9f
-    mov     edx, eax
-    add     edx, [rip+pf_grain]
+    add     edx, eax
     cmp     edx, ecx
     cmova   edx, ecx                    # end
     mov     r12d, eax

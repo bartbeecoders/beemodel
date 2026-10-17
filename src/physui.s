@@ -38,6 +38,7 @@
 .equ PB_TYPE,   3
 .equ PB_SHAPE,  4
 .equ PB_JOINT,  5                       # (| the joint << 8)
+.equ PB_INST,   6                       # the object / its instances
 .equ PF_MASS,   0                       # fields: body values 0-3,
 .equ PF_GRAV,   4                       #  the world's
 .equ PF_RATE,   5
@@ -62,6 +63,9 @@ s_x:            .asciz "x"
 s_active:       .asciz "Active"
 s_passive:      .asciz "Passive"
 s_l_body:       .asciz "Body"
+s_l_bodies:     .asciz "Bodies"
+s_b_object:     .asciz "The object"
+s_b_inst:       .asciz "Its instances"
 s_l_mass:       .asciz "Mass"
 s_l_fric:       .asciz "Friction"
 s_l_bounce:     .asciz "Bounce"
@@ -384,6 +388,27 @@ rb_props_draw:
     mov     ecx, ebp
     call    rp_button
     add     r12d, 22
+    mov     rdi, rbx                    # instances (geometry nodes): the
+    call    obj_eval                    #  object, or each of them, a body
+    mov     rdi, rax
+    call    inst_count
+    test    eax, eax
+    jz      13f
+    mov     edi, r12d
+    lea     rsi, [rip+s_l_bodies]
+    call    rp_label
+    lea     r8, [rip+s_b_object]
+    test    dword ptr [r13+RB_FLAGS], 2
+    jz      14f
+    lea     r8, [rip+s_b_inst]
+14: mov     edi, PB_INST|0x10000
+    mov     esi, [rip+ed_x]
+    add     esi, 110
+    mov     edx, r12d
+    lea     ecx, [rbp+rbp+4]
+    call    rp_button
+    add     r12d, 22
+13:
     xor     r15d, r15d                  # mass, friction, bounce, damping
 2:  cmp     r15d, 4
     jae     3f
@@ -657,13 +682,18 @@ rb_drag_begin:
     mov     [r13+RB_TYPE], eax
     jmp     .Lpb_done
 3:  cmp     eax, PB_SHAPE
-    jne     4f
+    jne     32f
     mov     eax, [r13+RB_SHAPE]         # the next shape
     inc     eax
     cmp     eax, 5
     jb      31f
     xor     eax, eax
 31: mov     [r13+RB_SHAPE], eax
+    jmp     .Lpb_done
+32: cmp     eax, PB_INST
+    jne     4f
+    call    rb_back                     # the object / its instances
+    xor     dword ptr [r13+RB_FLAGS], 2
     jmp     .Lpb_done
 4:  cmp     eax, PB_REMOVE
     jne     5f

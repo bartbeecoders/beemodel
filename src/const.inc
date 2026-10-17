@@ -426,7 +426,8 @@
 .equ AN_RW_,        AN_RIGEND_          # the physics world: gravity, rate, iterations
 .equ RW_SZ_,        32
 .equ AN_RB_,        AN_RW_ + RW_SZ_     # rigid bodies
-.equ RB_MAX_,       1024
+.equ RB_MAX_,       4096    # (files before v0.17: 1024 - anim.s reads both)
+.equ RB_MAX_V1_,    1024
 .equ RB_SZ_,        80
 .equ AN_JT_,        AN_RB_ + RB_MAX_*RB_SZ_   # joints
 .equ JT_MAX_,       128

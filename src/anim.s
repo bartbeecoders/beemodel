@@ -2532,8 +2532,16 @@ tl_release:
     ret
 
 # -----------------------------------------------------------------------------
-# Files: the ANIM chunk = the frame, then the block from its curve count on
+# Files: the ANIM chunk = the frame, the key count (| AN_V2), then the block
+#   from its curve count on: up to the rigid bodies, the bodies in use, the
+#   rest, the keys. Files before v0.17 (no AN_V2) hold the whole block with
+#   room for 1024 bodies.
 # -----------------------------------------------------------------------------
+.equ AN_V2,     0x40000000
+.equ AN_RBEND_, AN_RB_ + RB_MAX_*RB_SZ_         # (= AN_JT_)
+.equ AN_V1GAP,  (RB_MAX_ - RB_MAX_V1_)*RB_SZ_   # what the old block lacks
+.equ AN_V1END,  AN_KEYS - AN_V1GAP              # the old block's end
+
 # an_write - into wb (nothing when there is no animation)
 an_write:
     push    rbx
@@ -2543,9 +2551,16 @@ an_write:
     mov     edi, [rip+an_frame]
     call    wb_u32
     mov     edi, [rbx+AN_NKEY]
+    or      edi, AN_V2
     call    wb_u32
-    lea     rsi, [rbx+AN_NCUR]
-    mov     edx, AN_KEYS-AN_NCUR
+    lea     rsi, [rbx+AN_NCUR]          # up to the bodies
+    mov     edx, AN_RB_-AN_NCUR
+    call    wb_bytes
+    lea     rsi, [rbx+AN_RB_]           # those in use
+    imul    edx, dword ptr [rbx+AN_NRB_], RB_SZ_
+    call    wb_bytes
+    lea     rsi, [rbx+AN_RBEND_]        # the rest, the keys
+    mov     edx, AN_KEYS-AN_RBEND_
     mov     eax, [rbx+AN_NKEY]
     imul    eax, eax, KY_SZ
     add     edx, eax
@@ -2558,35 +2573,64 @@ an_read:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    push    r15
     mov     r12, rdi
     mov     r13d, esi
-    cmp     r13d, 8+AN_KEYS-AN_NCUR
+    cmp     r13d, 8+AN_RB_-AN_NCUR
     jb      9f
-    mov     eax, [r12+4]                # keys
-    cmp     eax, 0x1000000
+    mov     r14d, [r12+4]               # keys
+    and     r14d, ~AN_V2
+    cmp     r14d, 0x1000000
     ja      9f
-    imul    ecx, eax, KY_SZ
-    add     ecx, 8+AN_KEYS-AN_NCUR
-    cmp     ecx, r13d
+    test    dword ptr [r12+4], AN_V2
+    jz      1f
+    mov     r15d, [r12+8+AN_NRB_-AN_NCUR]   # v2: the bodies in use
+    cmp     r15d, RB_MAX_
     ja      9f
-    mov     edi, eax
+    imul    ecx, r15d, RB_SZ_
+    imul    eax, r14d, KY_SZ
+    add     ecx, eax
+    add     ecx, 8+AN_RB_-AN_NCUR+AN_KEYS-AN_RBEND_
+    jmp     2f
+1:  cmp     dword ptr [r12+8+AN_NRB_-AN_NCUR], RB_MAX_V1_
+    ja      9f
+    imul    ecx, r14d, KY_SZ            # before v0.17: the whole old block
+    add     ecx, 8+AN_V1END-AN_NCUR
+2:  cmp     ecx, r13d
+    ja      9f
+    mov     edi, r14d
     call    an_new
     test    rax, rax
     jz      9f
     mov     rbx, rax
     mov     r8d, [rbx+AN_CAPK]
     mov     r9, [rbx+AN_BYTES]
-    lea     rsi, [r12+8]
+    lea     rsi, [r12+8]                # up to the bodies (both)
     lea     rdi, [rbx+AN_NCUR]
-    mov     ecx, [r12+4]
-    imul    ecx, ecx, KY_SZ
-    add     ecx, AN_KEYS-AN_NCUR
+    mov     ecx, AN_RB_-AN_NCUR
     rep     movsb
-    mov     [rbx+AN_CAPK], r8d
+    test    dword ptr [r12+4], AN_V2
+    jz      3f
+    lea     rdi, [rbx+AN_RB_]           # v2: the bodies in use, the rest
+    imul    ecx, r15d, RB_SZ_
+    rep     movsb
+    lea     rdi, [rbx+AN_RBEND_]
+    imul    ecx, r14d, KY_SZ
+    add     ecx, AN_KEYS-AN_RBEND_
+    rep     movsb
+    jmp     4f
+3:  lea     rdi, [rbx+AN_RB_]           # old: 1024 bodies' room, the rest
+    mov     ecx, RB_MAX_V1_*RB_SZ_      #  after them
+    rep     movsb
+    lea     rdi, [rbx+AN_RBEND_]
+    imul    ecx, r14d, KY_SZ
+    add     ecx, AN_V1END-(AN_RB_+RB_MAX_V1_*RB_SZ_)
+    rep     movsb
+4:  mov     [rbx+AN_CAPK], r8d
     mov     [rbx+AN_BYTES], r9
     mov     dword ptr [rbx+AN_REFS], 1
-    mov     eax, [r12+4]                # the curves tile the keys
-    cmp     [rbx+AN_NKEY], eax
+    cmp     [rbx+AN_NKEY], r14d         # the curves tile the keys
     jne     8f
     cmp     dword ptr [rbx+AN_NCUR], AN_MAXC
     ja      8f
@@ -2610,7 +2654,9 @@ an_read:
     jmp     9f
 8:  mov     rdi, rbx
     call    an_unref
-9:  pop     r13
+9:  pop     r15
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
