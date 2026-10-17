@@ -606,6 +606,7 @@ def main():
     viewport_ui()
     header_ui()
     navigation_ui()
+    motion_ui()
     tools_ui()
     outliner_ui()
     status_ui()
@@ -2302,7 +2303,7 @@ def node_canvas():
     f.wheel(10); f.pump(0.1); f.wheel(10); f.pump(0.2)     # two steps out: 75 %
     w75 = header_w(wave)
     check(w100 == 170 and abs(w75 - 128) <= 2, f'the wheel zooms the canvas (Wave header {w100} -> {w75} px)')
-    f.key(102); f.pump(0.2)                                 # Home: frame all
+    f.key(102); f.pump(0.4)                                 # Home: frame all
     fit = header_w(wave)
     check(fit >= 128, f'Home frames every node ({fit} px wide headers)')
     # box select: everything, then a drag moves the selection together
@@ -6806,10 +6807,10 @@ def viewport_ui():
     check(val('viewport.shading') == 1, 'the wireframe button')
     click('viewport.shading_solid')
     check(val('viewport.shading') == 0, 'the solid button')
-    click('viewport.nav_top')
+    click('viewport.nav_top'); f.pump(0.4)     # (the view glides: F11)
     p = val('viewport.pitch')
     check(p is not None and p > 1.5, f'clicking the gizmo\'s Y looks from the top (pitch {p})')
-    f.move(600, 300); f.key(79)                # Numpad 1: front
+    f.move(600, 300); f.key(79); f.pump(0.4)   # Numpad 1: front
     p, yw = val('viewport.pitch'), val('viewport.yaw')
     check(p is not None and yw is not None and abs(p) < 1e-6 and abs(yw) < 1e-6, f'Numpad 1: the front view ({yw}, {p})')
     f.shot('viewport_header.png')
@@ -6931,7 +6932,7 @@ def navigation_ui():
     rx = ball('right')
     check(moved and rx and rx['x'] != b0['x'], f'dragging a ball orbits the view (top ball {b0 and (b0["x"], b0["y"])} -> {b1 and (b1["x"], b1["y"])})')
     x, y = widget_xy(m, 'viewport.nav_front')
-    f.click(x, y); f.pump(0.2)
+    f.click(x, y); f.pump(0.5)
     fr = ball('front'); c = widget(m, 'viewport.nav_zoom')
     check(fr is not None and abs((fr['x'] + fr['w'] // 2) - (c['x'] + c['w'] // 2)) <= 3,
           'clicking a ball still looks along it (front: its ball in the middle)')
@@ -6977,6 +6978,51 @@ def navigation_ui():
     left = sum(1 for yy in range(150, 600, 3) for xx in range(220, 500, 3) if sum(img.getpixel((xx, yy))) > 420)
     right = sum(1 for yy in range(150, 600, 3) for xx in range(730, 1010, 3) if sum(img.getpixel((xx, yy))) > 420)
     check(left > right, f'dragging the pan handle left moves the scene left ({left} / {right})')
+    f.proc.kill()
+
+
+def motion_ui():
+    """F11 (#277): views glide to where they go (an axis, Frame Selected,
+    Reset Camera); Preferences > Interface > Reduce motion makes them jump."""
+    print('  -- view transitions, reduce motion --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    def off_centre():                          # the front ball: how far from the gizmo's middle
+        b = widget(m, 'viewport.nav_front'); c = widget(m, 'viewport.nav_zoom')
+        return abs((b['x'] + b['w'] // 2) - (c['x'] + c['w'] // 2)) if b and c else -1
+    f.move(600, 300)
+    d0 = off_centre()
+    f.key(79); f.pump(0.06)                    # Numpad 1: the front view
+    d1 = off_centre()
+    f.pump(0.5)
+    d2 = off_centre()
+    check(d0 > 5 and 0 < d1 < d0 and d2 <= 2, f'Numpad 1 glides to the front view ({d0} -> {d1} px -> {d2} px)')
+    q('add("cube", "Far", 30, 1, 0); select("Far")')
+    f.move(600, 300); f.key(83); f.pump(0.5)   # Numpad .: frame the selection
+    img = f.image()
+    cx, cy = 614, 355
+    hit = sum(1 for x in range(cx - 40, cx + 40, 4) for y in range(cy - 40, cy + 40, 4) if img.getpixel((x, y))[0] > 120)
+    check(hit > 20, f'Frame Selected (Numpad .) brings the far cube to the middle ({hit})')
+    f.shot('motion_frame.png')
+    menu_pick(f, m, 'Edit', 'Preferences...')
+    w = widget(m, 'prefs.reduce_motion')
+    check(w is not None, 'Preferences > Interface has Reduce motion')
+    if w:
+        f.click(w['x'] + 10, w['y'] + w['h'] // 2); f.pump(0.2)
+    f.proc.kill()
+    f = Fake(home=f.home)                      # (the preference is kept)
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    f.move(600, 300)
+    f.key(79); f.pump(0.06)
+    d1 = off_centre()
+    check(d1 <= 2, f'with Reduce motion the view jumps there at once ({d1} px after 60 ms)')
     f.proc.kill()
 
 

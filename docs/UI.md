@@ -57,6 +57,8 @@ These work the same everywhere.
 - **Enter** or **Space** works the focused widget, the **arrow keys** step a number or an option, and **Esc** lets go of the focus.
 - In menus: Up / Down, Right / Left for submenus and the next menu, Enter.
 
+Views **glide** to where they go when you align to an axis (the gizmo, Numpad 1 / 3 / 7), reset the camera (Home) or frame the selection (Numpad .: the selection, or everything, in the middle of the view). **Preferences > Interface > Reduce motion** makes them jump there at once; scripts and agents always jump.
+
 ## Menus and dialogs
 
 The menu bar holds every command, in File, Edit, View, Select, Add, Object, Mesh, Render, AI and Help. A command that needs values opens a **dialog** with a form. The values you typed are kept for next time. Commands that read or write files open the **file browser**:

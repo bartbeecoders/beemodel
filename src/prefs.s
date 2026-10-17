@@ -168,6 +168,7 @@ w_tier:         .asciz "agent_permission"
 w_key:          .asciz "key"
 w_welcome:      .asciz "welcome"
 w_cbaxes:       .asciz "colorblind_axes"
+w_rmotion:      .asciz "reduce_motion"
 w_grid:         .asciz "grid"
 w_gridsz:       .asciz "grid_size"
 w_fov:          .asciz "fov"
@@ -202,7 +203,7 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_orbit, pr_orbit, 1, w_autosave, pr_autosave, 0
                 .quad w_threads, pr_threads, 0, w_jit, pr_jit, 0, w_mcp, pr_mcp, 0
                 .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0
-                .quad w_welcome, pr_welcome, 0, w_cbaxes, pr_cbaxes, 0
+                .quad w_welcome, pr_welcome, 0, w_cbaxes, pr_cbaxes, 0, w_rmotion, pr_rmotion, 0
                 .quad w_grid, show_grid, 0, w_gridsz, pr_grid, 1, w_fov, pr_fov, 0
                 .quad w_near, pr_near, 1, w_lvspp, pr_lvspp, 0, w_lvdn, pr_lvdn, 0, w_rw, pr_rw, 0, w_rh, pr_rh, 0
                 .quad w_rspp, pr_rspp, 0, w_rdn, pr_rdn, 0
@@ -831,6 +832,7 @@ WIDGET wd_pf_close, WK_BUTTON, "prefs.close", "Close", flags=WGF_PRIMARY, aux=op
 WIDGET wd_pf_scroll, WK_SCROLL, "prefs.page"
 WIDGET wd_pf_theme, WK_ENUM, "prefs.theme", cb=theme_cb, aux=l_theme, n=3, tip="The colours of the whole window"
 WIDGET wd_pf_scale, WK_ENUM, "prefs.ui_scale", cb=scale_cb, aux=l_scale, n=6, tip="Everything bigger or smaller, on top of the screen's own scale"
+WIDGET wd_pf_rm,   WK_TOGGLE, "prefs.reduce_motion", "Reduce motion", cb=save_cb, tip="Views jump to where they go instead of gliding (aligning, framing, resetting the camera)"
 WIDGET wd_pf_cb,   WK_TOGGLE, "prefs.colorblind_axes", "Colour-blind-safe axis colours", cb=save_cb, tip="X, Y, Z in orange, sky blue and purple instead of red, green and blue"
 WIDGET wd_pf_tip,  WK_INT, "prefs.tooltip_ms", "Tooltip delay (ms)", 0.0, 5000.0, 2.0, 0, WGF_CLAMP, cb=save_cb
 WIDGET wd_pf_emu3, WK_TOGGLE, "prefs.emulate_middle", "Alt + left button is the middle button", cb=save_cb, tip="Orbit with Alt + drag on a touchpad or a two-button mouse"
@@ -868,7 +870,7 @@ WIDGET wd_pf_aiextra, WK_TEXT, "prefs.ai_prompt", "Also tell the AI", cb=cb_aiex
 pf_cats:        .quad wd_pf_c0, wd_pf_c1, wd_pf_c2, wd_pf_c3, wd_pf_c4, wd_pf_c5, wd_pf_c6, wd_pf_c7
 pf_pages:       .quad .Lpf_interface, .Lpf_viewport, .Lpf_input, .Lpf_keymap, .Lpf_render, .Lpf_system, .Lpf_files, .Lpf_ai
 # the defaults, by category: category, variable, value (Reset to Defaults)
-pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxes, 0
+pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxes, 0, 0, pr_rmotion, 0
                 .quad 1, show_grid, 1, 1, pr_grid, 0x3f800000, 1, pr_fov, 50, 1, pr_near, 0x3d4ccccd
                 .quad 1, pr_lvspp, 64, 1, pr_lvdn, 1
                 .quad 2, pr_emu3, 0, 2, pr_orbit, 0x3f800000
@@ -1280,6 +1282,10 @@ pf_reset:
     call    pf_item
     lea     rdi, [rip+wd_pf_cb]
     lea     r8, [rip+pr_cbaxes]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_rm]
+    lea     r8, [rip+pr_rmotion]
     xor     edx, edx
     call    pf_item
     pop     rbx

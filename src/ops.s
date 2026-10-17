@@ -16,6 +16,7 @@
 .globl poll_undo
 .globl poll_redo
 .globl poll_sel
+.globl sel_objects
 .globl poll_two
 .globl poll_render
 .globl poll_rendering

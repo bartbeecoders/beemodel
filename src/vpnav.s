@@ -87,6 +87,7 @@ nav_sx:         .skip 4*6               # each ball on screen, its depth
 nav_sy:         .skip 4*6
 nav_dep:        .skip 4*6
 nav_op:         .skip 8                 # a ball pressed: its view
+va_tgt:         .skip 24                # a view to glide to
 nav_y0:         .skip 4                 # the zoom handle: where it was pressed,
 nav_d0:         .skip 4                 #  the distance then
 
@@ -169,13 +170,21 @@ view_align:
 1:  mov     edi, [rip+vp_area]
     test    edi, edi
     js      9f
-    call    cam_ptr
+    call    cam_ptr                     # the view as it is, turned that way
+    mov     rcx, [rax]
+    mov     [rip+va_tgt], rcx
+    mov     rcx, [rax+8]
+    mov     [rip+va_tgt+8], rcx
+    mov     rcx, [rax+16]
+    mov     [rip+va_tgt+16], rcx
     lea     rcx, [rip+align_tab]
     movss   xmm0, [rcx+rbx*8]
-    movss   [rax], xmm0
+    movss   [rip+va_tgt], xmm0
     movss   xmm0, [rcx+rbx*8+4]
-    movss   [rax+4], xmm0
-    mov     dword ptr [rip+dirty], 1
+    movss   [rip+va_tgt+4], xmm0
+    mov     edi, [rip+vp_area]          # (a glide: viewanim.s)
+    lea     rsi, [rip+va_tgt]
+    call    va_start
 9:  add     rsp, 8
     pop     r12
     pop     rbx

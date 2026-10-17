@@ -163,7 +163,19 @@ _start:
     cmp     eax, edx
     jge     34f
 33: mov     edx, eax
-34: push    rdx                         # (and a toast to take down)
+34: push    rdx                         # (and a view gliding: viewanim.s)
+    push    rsi
+    call    va_wait
+    pop     rsi
+    pop     rdx
+    test    eax, eax
+    js      341f
+    cmp     edx, -1
+    je      342f
+    cmp     eax, edx
+    jge     341f
+342:mov     edx, eax
+341:push    rdx                         # (and a toast to take down)
     push    rsi
     call    toast_wait
     pop     rsi
@@ -216,6 +228,7 @@ _start:
     call    wp_tick
     call    lb_tick                     # library thumbnails, one at a time
     call    play_tick                   # play mode: the player, the scene on
+    call    va_tick                     # a view gliding to its new place
     call    tip_tick                    # a tooltip whose time has come
     call    pie_tick                    # a pie key held long enough
     call    toast_tick                  # a toast whose time is up
