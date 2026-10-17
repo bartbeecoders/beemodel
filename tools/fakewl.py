@@ -1308,10 +1308,18 @@ def redo_panel():
     check(q('volume("Cube")') == '= 12' and panel == 0x2d313a, 'after E 1 the redo panel shows the distance')
     text, err = m.tool('run_operator', {'id': 'edit.redo_last', 'arg': '2'})
     check(not err and q('volume("Cube")') == '= 16', 'an agent re-runs it with distance 2 (edit.redo_last)')
-    f.drag(470, 577, 570, 577, steps=4)         # +100 px * 0.01 = +1 m
+    w = widget(m, 'redo.value', 0)
+    check(w is not None and w['kind'] == 'float' and abs(float(w['value']) - 2) < 1e-4,
+          f'the panel\'s value is a widget field (F5) ({w and w["value"]})')
+    x, y = widget_xy(m, 'redo.value', 0)
+    f.drag(x, y, x + 100, y, steps=4)           # +100 px * 0.01 = +1 m
     check(q('volume("Cube")') == '= 20', 'dragging the value re-runs the extrusion (3 m)')
+    f.click(x, y); f.mods(4); f.key(30); f.mods(0)
+    f.type('1.25*2'); f.key(28); f.pump(0.2)     # typed, an expression
+    v = q('volume("Cube")')
+    check(v == '= 18', f'typing a value (an expression) re-runs it (2.5 m) ({v})')
     f.key(67)                                   # F9: values on the command line
-    f.key(14); f.type('0.5'); f.key(28)
+    f.key(14); f.key(14); f.key(14); f.type('0.5'); f.key(28)
     check(q('volume("Cube")') == '= 10', 'F9 + a typed value (0.5 m)')
     f.key(1)
     f.mods(4); f.key(44); f.mods(0)             # one undo: the cube again

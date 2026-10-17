@@ -166,7 +166,7 @@
 .equ COL_SPLIT_HOT,     0xf2b134
 .equ COL_REC,         0xe5484d
 .equ COL_FIELD,       0x1d2025
-.equ HIT_REDO,          23
+.equ HIT_REDO,          23        # (unused: the redo panel is widgets)
 .equ HIT_MODS,          24
 .equ HIT_UVED,          25
 .equ HIT_NODES,         26
@@ -174,7 +174,7 @@
 .equ HIT_TIMELINE,      28
 .equ HIT_ANIMED,        29
 .equ DRAG_MODS,         9
-.equ DRAG_REDO,         8
+.equ DRAG_REDO,         8         # (unused)
 .equ COL_EDIT_WIRE,   0x0b0c0e
 .equ COL_EDIT_SEL,    0xffa233
 .equ COL_SEAM,          0xe8483c  # UV seams in edit mode

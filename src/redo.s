@@ -2,9 +2,11 @@
 #  BeeModel - the redo panel: adjust the last operation.
 #
 #  Operators with parameters (extrude distance, bevel width / segments...)
-#  report the values they used. The panel in the viewport shows them; drag a
-#  value (or use the wheel, or F9 to type them) and the operator runs again
-#  from its undo snapshot, still as one undo step.
+#  report the values they used. The panel in the viewport shows them as
+#  widget fields (redo.value in ui_tree): drag, Ctrl+wheel, click and type
+#  (expressions too), an axis from a list, or F9 for all of them on the
+#  command line; the operator runs again from its undo snapshot, still as
+#  one undo step.
 #
 #  Parameter list (operator field OP_PARAMS): .long count, then per param
 #  name (ptr), kind (u32: 0 float, 1 int, 2 hidden int, 3 axis), step, min.
@@ -12,6 +14,7 @@
 .intel_syntax noprefix
 .include "const.inc"
 .include "macros.inc"
+.include "widgets.inc"
 
 # exports
 .globl lastop_set
@@ -20,10 +23,6 @@
 .globl lastop_cancel
 .globl lo_op
 .globl redo_draw
-.globl redo_hit
-.globl redo_drag_begin
-.globl redo_drag_move
-.globl redo_wheel
 .globl p_extrude
 .globl p_extrude_ind
 .globl p_inset
@@ -50,9 +49,7 @@ rd_x:           .skip 4             # panel rectangle (logical), valid while sho
 rd_y:           .skip 4
 rd_rows:        .skip 4
 rd_map:         .skip 4*RD_MAX      # row -> parameter
-rd_field:       .skip 4
-rd_x0:          .skip 4
-rd_v0:          .skip 4
+rd_shadow:      .skip 4*RD_MAX      # row -> the value its widget edits
 rr_buf:         .skip 160
 
 .section .rodata
@@ -79,7 +76,12 @@ s_axes:         .ascii "xyz"
 s_redo_cmd:     .asciz "edit.redo_last "
 s_no_redo:      .asciz "  nothing to adjust: run an operator with values first (extrude, inset, bevel...)"
 s_in_script:    .asciz "  inside a script, run the operator again with new values"
-s_f9_hint:      .asciz "drag a value, F9 types them"
+s_f9_hint:      .asciz "drag or type a value, F9: all"
+s_ax_x:         .asciz "X"
+s_ax_y:         .asciz "Y"
+s_ax_z:         .asciz "Z"
+.align 8
+ax_lbl:         .quad s_ax_x, s_ax_y, s_ax_z
 .align 8
 p_extrude:      .long 1
                 .quad pn_distance
@@ -124,6 +126,17 @@ p_spin:         .long 3
                 .quad pn_axis
                 .long 3
                 .float 1, 0, 0
+
+WIDGET wd_rd0, WK_FLOAT, "redo.value", flags=WGF_COMPACT, cb=rd_cb, tip="Drag, or click and type a value: the operation runs again with it", sect=.data
+WIDGET wd_rd1, WK_FLOAT, "redo.value", flags=WGF_COMPACT, cb=rd_cb, tip="Drag, or click and type a value: the operation runs again with it", sect=.data
+WIDGET wd_rd2, WK_FLOAT, "redo.value", flags=WGF_COMPACT, cb=rd_cb, tip="Drag, or click and type a value: the operation runs again with it", sect=.data
+WIDGET wd_rd3, WK_FLOAT, "redo.value", flags=WGF_COMPACT, cb=rd_cb, tip="Drag, or click and type a value: the operation runs again with it", sect=.data
+WIDGET wd_rd4, WK_FLOAT, "redo.value", flags=WGF_COMPACT, cb=rd_cb, tip="Drag, or click and type a value: the operation runs again with it", sect=.data
+WIDGET wd_rd5, WK_FLOAT, "redo.value", flags=WGF_COMPACT, cb=rd_cb, tip="Drag, or click and type a value: the operation runs again with it", sect=.data
+.section .rodata
+.align 8
+rd_desc:        .quad wd_rd0, wd_rd1, wd_rd2, wd_rd3, wd_rd4, wd_rd5
+.text
 
 OPERATOR op_redo_last, "edit.redo_last", "Adjust Last Operation", do_redo_last, flags=OPF_AI_SAFE|OPF_QUIET, doc="Run the last operation again with new values: edit.redo_last \"values\" (as the redo panel shows them)"
 OPERATOR op_redo_prompt, "edit.redo_prompt", "Adjust Last Operation...", do_redo_prompt, key=67, flags=OPF_QUIET, doc="F9: type new values for the last operation"
@@ -475,7 +488,8 @@ tmp_line:       .skip 200
 .text
 
 # -----------------------------------------------------------------------------
-# The panel: bottom-left of the viewport being drawn
+# The panel: bottom-left of the viewport being drawn; a widget field per
+# value (the descriptors are set up for each one's kind, step and minimum)
 # -----------------------------------------------------------------------------
 redo_draw:
     push    rbx
@@ -538,7 +552,7 @@ redo_draw:
     mov     edi, r15d
     call    param
     mov     rbx, rax
-    mov     edi, [rip+rd_x]
+    mov     edi, [rip+rd_x]             # its name
     add     edi, 10
     mov     esi, r14d
     imul    esi, esi, ROW_H
@@ -547,29 +561,52 @@ redo_draw:
     mov     rdx, [rbx]
     mov     ecx, COL_TEXT_DIM
     call    draw_text
-    mov     edi, [rip+rd_x]             # value field
-    add     edi, 110
-    mov     esi, r14d
-    imul    esi, esi, ROW_H
-    add     esi, [rip+rd_y]
-    add     esi, 27
-    mov     edx, PANEL_W-120
-    mov     ecx, ROW_H-4
-    mov     r8d, COL_FIELD
-    call    fill_rect
-    lea     rbx, [rip+rr_buf+100]
-    mov     edi, r15d
-    call    fmt_val
-    mov     byte ptr [rbx], 0
-    mov     edi, [rip+rd_x]
-    add     edi, 118
-    mov     esi, r14d
-    imul    esi, esi, ROW_H
-    add     esi, [rip+rd_y]
-    add     esi, 30
-    lea     rdx, [rip+rr_buf+100]
-    mov     ecx, COL_TEXT
-    call    draw_text
+    lea     rax, [rip+rd_desc]          # its field: kind, step, minimum
+    mov     rdi, [rax+r14*8]
+    lea     rcx, [rip+lo_vals]
+    movss   xmm0, [rcx+r15*4]
+    lea     rdx, [rip+rd_shadow]
+    lea     rdx, [rdx+r14*4]
+    mov     eax, [rbx+8]
+    cmp     eax, 3
+    je      41f
+    test    eax, eax
+    jnz     42f
+    mov     dword ptr [rdi+WD_KIND], WK_FLOAT   # a distance, an angle
+    movss   [rdx], xmm0
+    mov     dword ptr [rdi+WD_DEC], 4
+    jmp     43f
+41: mov     dword ptr [rdi+WD_KIND], WK_ENUM    # an axis
+    cvtss2si eax, xmm0
+    mov     [rdx], eax
+    lea     rax, [rip+ax_lbl]
+    mov     [rdi+WD_AUX], rax
+    mov     dword ptr [rdi+WD_N], 3
+    jmp     44f
+42: mov     dword ptr [rdi+WD_KIND], WK_INT     # a count
+    cvtss2si eax, xmm0
+    mov     [rdx], eax
+    mov     dword ptr [rdi+WD_DEC], 0
+43: movss   xmm0, [rbx+12]              # (integers: one per 10 px)
+    cmp     dword ptr [rdi+WD_KIND], WK_INT
+    jne     431f
+    movss   xmm0, [rip+rf_tenth]
+431:movss   [rdi+WD_STEP], xmm0
+    mov     eax, [rbx+16]
+    mov     [rdi+WD_MIN], eax
+    mov     dword ptr [rdi+WD_MAX], 0x4e6e6b28  # (1e9)
+    mov     dword ptr [rdi+WD_FLAGS], WGF_COMPACT|WGF_CLAMP
+44: mov     esi, [rip+rd_x]
+    add     esi, 110
+    mov     edx, r14d
+    imul    edx, edx, ROW_H
+    add     edx, [rip+rd_y]
+    add     edx, 27
+    mov     ecx, PANEL_W-120
+    lea     r8, [rip+rd_shadow]
+    lea     r8, [r8+r14*4]
+    mov     r9d, r14d
+    call    wg
     inc     r14d
     jmp     3b
 5:  mov     edi, [rip+rd_x]             # hint
@@ -580,7 +617,7 @@ redo_draw:
     add     esi, 32
     lea     rdx, [rip+s_f9_hint]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    call    draw_small
 9:  pop     r15
     pop     r14
     pop     r13
@@ -588,66 +625,30 @@ redo_draw:
     pop     rbx
     ret
 
-# redo_hit(edi=x, esi=y logical) -> eax = row of the value under the
-#   pointer, or -1
-redo_hit:
-    mov     eax, -1
-    cmp     dword ptr [rip+rd_rows], 0
-    je      9f
-    mov     ecx, [rip+rd_x]
-    add     ecx, 110
-    cmp     edi, ecx
-    jl      9f
-    add     ecx, PANEL_W-120
-    cmp     edi, ecx
-    jge     9f
-    sub     esi, [rip+rd_y]
-    sub     esi, 27
-    js      9f
-    mov     eax, esi
-    xor     edx, edx
-    mov     ecx, ROW_H
-    div     ecx
-    cmp     eax, [rip+rd_rows]
-    jb      9f
-    mov     eax, -1
-9:  ret
-
-# redo_drag_begin(edi=row) / redo_drag_move(edi=x logical) - drag a value
-redo_drag_begin:
-    lea     rax, [rip+rd_map]
-    mov     eax, [rax+rdi*4]
-    mov     [rip+rd_field], eax
-    mov     ecx, [rip+ptr_x]
-    mov     [rip+rd_x0], ecx
-    lea     rcx, [rip+lo_vals]
-    mov     eax, [rcx+rax*4]
-    mov     [rip+rd_v0], eax
-    ret
-
-redo_drag_move:
+# rd_cb(rdi=&rd_shadow[row], esi=row) - a field changed: the operation again
+rd_cb:
     push    rbx
     sub     rsp, 16
     call    valid
     test    eax, eax
     jz      9f
-    mov     eax, edi
-    sub     eax, [rip+rd_x0]
-    mov     edi, [rip+rd_field]
-    mov     ebx, eax                    # pixels moved
+    mov     ebx, esi
+    cmp     ebx, [rip+rd_rows]
+    jae     9f
+    lea     rax, [rip+rd_map]
+    mov     edi, [rax+rbx*4]
+    mov     [rsp], edi
     call    param
-    cvtsi2ss xmm0, ebx
-    cmp     dword ptr [rax+8], 0
+    lea     rcx, [rip+rd_shadow]
+    movss   xmm0, [rcx+rbx*4]
+    cmp     dword ptr [rax+8], 0        # (counts and axes: integers)
     je      1f
-    divss   xmm0, [rip+rf_ten_px]       # integers: one per 10 px
-    roundss xmm0, xmm0, 1
-1:  mulss   xmm0, [rax+12]              # * step
-    addss   xmm0, [rip+rd_v0]
-    maxss   xmm0, [rax+16]              # min
+    cvtsi2ss xmm0, dword ptr [rcx+rbx*4]
+1:  maxss   xmm0, [rax+16]              # min
     cmp     dword ptr [rax+8], 3        # axis: 0..2
     jne     2f
     minss   xmm0, [rip+rf_two]
-2:  mov     ecx, [rip+rd_field]
+2:  mov     ecx, [rsp]
     lea     rdx, [rip+lo_vals]
     ucomiss xmm0, [rdx+rcx*4]
     je      9f
@@ -657,36 +658,8 @@ redo_drag_move:
     pop     rbx
     ret
 
-# redo_wheel(edi=row, esi=-1 / +1) - one step per notch
-redo_wheel:
-    push    rbx
-    push    r12
-    sub     rsp, 8
-    mov     ebx, esi
-    lea     rax, [rip+rd_map]
-    mov     r12d, [rax+rdi*4]
-    mov     edi, r12d
-    call    param
-    cvtsi2ss xmm0, ebx
-    xorps   xmm1, xmm1
-    subss   xmm1, xmm0                  # wheel up (negative) increases
-    mulss   xmm1, [rax+12]
-    lea     rdx, [rip+lo_vals]
-    addss   xmm1, [rdx+r12*4]
-    maxss   xmm1, [rax+16]
-    cmp     dword ptr [rax+8], 3
-    jne     1f
-    minss   xmm1, [rip+rf_two]
-1:  movss   [rdx+r12*4], xmm1
-    call    rerun
-    add     rsp, 8
-    pop     r12
-    pop     rbx
-    ret
-
 .section .rodata
 .align 4
-rf_ten_px:      .float 10.0
 rf_two:         .float 2.0
 
 .section .note.GNU-stack,"",@progbits

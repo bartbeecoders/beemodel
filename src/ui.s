@@ -601,10 +601,7 @@ ui_motion:
     pop     rsi
     pop     rdi
     jmp     .Lmo_out
-763:cmp     eax, DRAG_REDO
-    jne     75f
-    call    redo_drag_move              # edi = pointer x
-    jmp     .Lmo_out
+763:
 75: cmp     eax, DRAG_MODS
     jne     77f
     call    mods_drag_move
@@ -1139,12 +1136,7 @@ ui_button:
     jz      .Lbt_done
     mov     dword ptr [rip+drag_mode], DRAG_MODS
     jmp     .Lbt_done
-56: cmp     ebx, HIT_REDO               # drag a value of the redo panel
-    jne     55f
-    mov     edi, r12d
-    call    redo_drag_begin
-    mov     dword ptr [rip+drag_mode], DRAG_REDO
-    jmp     .Lbt_done
+56:
 55: cmp     ebx, HIT_CANVAS            # click selects, drag orbits / pans
     jne     6f
     mov     [rip+vp_area], r12d
@@ -1408,13 +1400,7 @@ ui_axis:
     cmp     eax, ED_OUTLINER
     je      8f
     jmp     9f
-7:  cmp     eax, HIT_REDO               # wheel on a redo panel value
-    jne     71f
-    mov     esi, edi
-    sar     esi, 31
-    or      esi, 1
-    mov     edi, edx
-    jmp     redo_wheel
+7:
 71: cmp     eax, HIT_CANVAS
     jne     9f
     push    rdi
