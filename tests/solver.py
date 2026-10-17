@@ -39,6 +39,7 @@ def check(cond, msg):
 
 CI = bool(os.environ.get('CI'))
 SLOW = 3 if CI else 1                   # (time budgets on shared CI machines)
+FEW = 8 / min(8, os.cpu_count() or 1)   # (the budgets are for 8 threads: fewer, more time)
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -264,12 +265,12 @@ def main():
     p, ins = r.get('pour', ['0', '1e9', '1']), r.get('inside', ['-99', '1'])
     ms = float(p[1])
     check(p[0] == '10805' and p[2] == '0' and float(ins[0]) > 0.08 and ins[1] == '0'
-          and ms < 30000 * SLOW,
+          and ms < 30000 * SLOW * FEW,
           f'10 800 balls (instances, 12 objects) poured into a box: none get out (lowest {float(ins[0]):.3f} m), '
           f'10 s simulated in {ms / 1000:.1f} s on {"8" if eight else "all the"} threads')
     r = {x[0]: x[1:] for x in run(BRICKS, threads=eight) if x}
     b = r.get('bricks', ['0', '0', '1e9', '1'])
-    check(b[0] == '5001' and int(b[1]) > 20 and float(b[2]) < 41.7 * 1.15 * SLOW and b[3] == '0',
+    check(b[0] == '5001' and int(b[1]) > 20 and float(b[2]) < 41.7 * 1.15 * SLOW * FEW and b[3] == '0',
           f'5000 bricks settle: {float(b[2]):.1f} ms a frame while they move ({int(b[1])} frames; 41.7 = 24 fps), '
           f'then sleep')
     r = {x[0]: x[1:] for x in run(CACHE) if x}
@@ -303,7 +304,7 @@ def main():
     r = {x[0]: x[1:] for x in run(TERRAIN, threads=eight) if x}
     t = [float(v) for v in r.get('terrain', ['1e9', '1e9', '-99'])]
     parts = int(r.get('parts', ['0'])[0])
-    check(parts > 100000 and t[0] < 41.7 * SLOW and t[2] > -2.5,
+    check(parts > 100000 and t[0] < 41.7 * SLOW * FEW and t[2] > -2.5,
           f'1000 balls on a terrain of {parts - 1000} triangles: live (the slowest frame {t[0]:.0f} ms, '
           f'{t[1]:.1f} on average), none through it')
     r = {x[0]: x[1:] for x in run(PLANE) if x}
