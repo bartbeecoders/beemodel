@@ -625,6 +625,7 @@ def main():
     anim_ui()
     physics_ui()
     render_ui()
+    lights_ui()
     team_ui()
     prefs_ui()
     workspaces_ui()
@@ -7996,6 +7997,63 @@ def render_ui():
     f.pump(0.3)
     check({'render.header.start', 'render.header.stop', 'render.header.save', 'render.header.denoise', 'render.header.pass'} <= names(),
           'the Render area header: Render, Stop, Save, Denoise, the pass')
+    f.proc.kill()
+
+
+def lights_ui():
+    """F15 (#281): light types (point, sun, spot, area) and a size - soft
+    shadows in the path tracers, the shape in the viewport, the fields in
+    Properties > Object, kept in .bee files."""
+    print('  -- lights: types, radius, soft shadows --')
+    from PIL import Image
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Camera"); add("plane", "Floor", 0, 0, 0); scale("Floor", 8); set("Cube", "y", 1)')
+    q('select("Light"); set("Light", "x", 1.5); set("Light", "y", 6); set("Light", "z", 1); rotate("Light", rad(-90), 0, 0)')
+    q('view(0, 89, 14, 0, 0, 0)')
+    props_tab(m, f, 'object')
+    names = {w['name'] for w in ui_tree(m)}
+    check({'light.type', 'light.size'} <= names and 'light.cone' not in names, 'Properties > Object: a light\'s type and size')
+    def render(name):
+        path = os.path.join(f.home, name)
+        f.move(600, 300); f.key(28); f.type('render("%s", 160, 90, 64)' % path); f.key(28); f.key(1)
+        for _ in range(200):
+            f.pump(0.1)
+            if os.path.exists(path):
+                break
+        return Image.open(path).convert('L') if os.path.exists(path) else None
+    def edge(img):                             # the sharpest step across the shadow's outer edge
+        row = [sum(img.getpixel((x, y)) for y in range(38, 53)) / 15 for x in range(30, 58)]
+        return round(max(abs(row[i + 1] - row[i]) for i in range(len(row) - 1)), 1)   # (rows averaged: noise)
+    hard = render('hard.png')
+    q('op("light.set", "size 1.5")')
+    soft = render('soft.png')
+    check(hard and soft and edge(soft) < edge(hard) * 0.7, f'a radius softens the shadow (steepest step {hard and edge(hard)} -> {soft and edge(soft)})')
+    q('op("light.set", "type spot"); op("light.set", "size 0"); op("light.set", "angle 20")'); f.pump(0.2)
+    check(widget(m, 'light.cone') is not None and (widget(m, 'light.type') or {}).get('value') == 2,
+          'a spot: its cone field')
+    spot = render('spot.png')
+    floor = lambda img: sum(img.getpixel((x, y)) for x in range(2, 30) for y in range(2, 30)) / 784 if img else 0
+    q('op("light.set", "type point")')
+    pt = render('point.png')
+    check(spot and pt and floor(spot) < floor(pt) - 8, f'a spot lights only its cone: the floor outside it darker ({floor(spot):.0f}, a point {floor(pt):.0f})')
+    q('op("light.set", "type area"); op("light.set", "size 2")'); f.pump(0.3)
+    f.shot('lights_area.png')
+    img = f.image()
+    vp = [img.getpixel((x, y)) for x in range(300, 950, 3) for y in range(120, 600, 3)]
+    n = sum(1 for p in vp if p[0] > 200 and p[1] > 130 and p[2] < 90)
+    check(n > 30, f'the viewport draws the area light\'s square ({n} orange pixels)')
+    path = os.path.join(f.home, 'l.bee')
+    f.key(28); f.type('file.save_as ' + path); f.key(28); f.key(1); f.pump(0.3)
+    f.mods(4); f.key(49); f.mods(0); f.pump(0.2)
+    f.key(28); f.type('file.open ' + path); f.key(28); f.key(1); f.pump(0.5)
+    q('select("Light")'); props_tab(m, f, 'object'); f.pump(0.2)
+    check((widget(m, 'light.type') or {}).get('value') == 3 and (widget(m, 'light.size') or {}).get('value') == 2,
+          'saved and opened again: an area light of 2 m')
     f.proc.kill()
 
 

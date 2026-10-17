@@ -18,6 +18,7 @@
 .globl lc_reset
 .globl lc_get
 .globl lc_light
+.globl lc_shape
 .globl lc_lens_tan
 .globl lc_camera
 .globl lc_write
@@ -34,7 +35,12 @@
 .equ LR_UID,    0                       # a record: uid,
 .equ LR_POWER,  4                       #  power (x the default light),
 .equ LR_COL,    8                       #  colour (linear rgb),
-.equ LR_LENS,   20                      #  lens (mm)
+.equ LR_LENS,   20                      #  lens (mm) - a camera's
+.equ LR_TYPE,   20                      #  a light's type: 0 point, 1 sun, 2 spot,
+                                        #  3 area (else point: an old record's lens)
+.equ LR_SIZE,   24                      #  its radius (m), the sun's angle (deg),
+                                        #  the area's edge (m)
+.equ LR_ANGLE,  28                      #  a spot's cone (deg, 0: 45)
 .equ LR_SZ,     32
 .equ LC_MAX,    256
 .equ LC_SIZE,   LC_HDR+LC_MAX*LR_SZ
@@ -54,12 +60,21 @@ s_lc_bad_l:     .asciz "  light.set power <p> | color <r> <g> <b> (0..1; the act
 s_lc_bad_c:     .asciz "  camera.set lens <mm> | active (the active camera)"
 s_lc_none:      .asciz "  select a light (or a camera) first"
 k_power:        .asciz "power"
+k_type:         .asciz "type"
+k_size:         .asciz "size"
+k_angle:        .asciz "angle"
+k_point:        .asciz "point"
+k_sun:          .asciz "sun"
+k_spot:         .asciz "spot"
+k_area:         .asciz "area"
+.align 8
+k_types:        .quad k_point, k_sun, k_spot, k_area, 0
 k_color:        .asciz "color"
 k_lens:         .asciz "lens"
 k_active:       .asciz "active"
 
 .text
-OPERATOR op_light_set, "light.set", "Light Settings", do_light_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="The active light's strength or colour: light.set power <p> | color <r> <g> <b> (power 1: the default light)"
+OPERATOR op_light_set, "light.set", "Light Settings", do_light_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="The active light's settings: light.set power <p> | color <r> <g> <b> | type point|sun|spot|area | size <radius m, sun angle deg, area edge m> | angle <spot cone deg> (power 1: the default light)"
 OPERATOR op_camera_set, "camera.set", "Camera Settings", do_camera_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="The active camera's lens, or make it the one that renders: camera.set lens <mm> | active"
 
 # ---- the block ----------------------------------------------------------------------
@@ -196,6 +211,26 @@ lc_light:
     inc     ecx
     cmp     ecx, 3
     jb      2b
+    ret
+
+# lc_shape(edi=uid) -> eax = the light's type (0 point, 1 sun, 2 spot,
+#   3 area), xmm0 = its size, xmm1 = a spot's cone (deg)
+lc_shape:
+    sub     rsp, 8
+    call    lc_get
+    add     rsp, 8
+    xor     ecx, ecx
+    xorps   xmm0, xmm0
+    xorps   xmm1, xmm1
+    test    rax, rax
+    jz      9f
+    mov     ecx, [rax+LR_TYPE]
+    cmp     ecx, 3
+    jbe     1f
+    xor     ecx, ecx                    # (an older record: its lens field)
+1:  movss   xmm0, [rax+LR_SIZE]
+    movss   xmm1, [rax+LR_ANGLE]
+9:  mov     eax, ecx
     ret
 
 # lc_lens_tan(edi=uid) -> xmm0 = tan(half the horizontal angle) of its lens
@@ -357,7 +392,46 @@ do_light_set:
     maxss   xmm0, xmm1
     movss   [rbx+LR_POWER], xmm0
     jmp     9f
-1:  lea     rdi, [rip+im_word]
+1:  lea     rdi, [rip+im_word]          # type <word>
+    lea     rsi, [rip+k_type]
+    call    str_eq
+    test    eax, eax
+    jz      11f
+    mov     rsi, r12
+    call    im_next_word
+    xor     r13d, r13d
+10: lea     rax, [rip+k_types]
+    mov     rsi, [rax+r13*8]
+    test    rsi, rsi
+    jz      .Lls_bad
+    lea     rdi, [rip+im_word]
+    call    str_eq
+    test    eax, eax
+    jnz     101f
+    inc     r13d
+    jmp     10b
+101:mov     [rbx+LR_TYPE], r13d
+    jmp     9f
+11: lea     rdi, [rip+im_word]          # size / angle <number>
+    lea     rsi, [rip+k_size]
+    call    str_eq
+    mov     r13d, LR_SIZE
+    test    eax, eax
+    jnz     12f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_angle]
+    call    str_eq
+    mov     r13d, LR_ANGLE
+    test    eax, eax
+    jz      13f
+12: mov     rsi, r12
+    call    lc_num
+    jz      .Lls_bad
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    movss   [rbx+r13], xmm0
+    jmp     9f
+13: lea     rdi, [rip+im_word]
     lea     rsi, [rip+k_color]
     call    str_eq
     test    eax, eax

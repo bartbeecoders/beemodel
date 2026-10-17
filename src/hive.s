@@ -69,7 +69,10 @@ hv_nodes:       .skip 8             # BVH4
 hv_root:        .skip 4             # root reference
 hv_nn4:         .skip 4
 hv_cam:         .skip 64            # origin, right, up, forward, tan_h, flags
-hv_points:      .skip MAX_POINTS*32 # point lights: position, colour * power
+hv_points:      .skip MAX_POINTS*64 # light objects: 16 floats each - position,
+                                    #  colour x power, type, size, direction (it
+                                    #  shines along), a cone's / sun's cos, the
+                                    #  area's half-edge axis, a spot's inner cos
 hv_bufs:        .skip NBUF*16       # owned mappings (ptr, bytes)
 hv_nbuf:        .skip 4
 # build scratch
@@ -99,6 +102,11 @@ hf_nbins:       .float 15.999
 hf_cos30:       .float 0.8660254
 hf_tanh:        .float 0.35993             # tan(39.6 deg / 2): a 50 mm lens
 hf_pt_power:    .float 80.0                # point light: watts-ish / 4 pi
+hf_sun_power:   .float 3.0                 # a sun: its irradiance at power 1
+hf_halfk:       .float 0.5
+hf_45:          .float 45.0
+hf_inner:       .float 0.8
+hf_d2r_half:    .float 0.0087266463        # degrees -> radians, halved
 .text
 
 # =============================================================================
@@ -331,7 +339,7 @@ hive_build:
 .Lhb_onext:
     inc     ebx
     jmp     .Lhb_obj
-.Lhb_lights:                            # light objects: points
+.Lhb_lights:                            # light objects (16 floats each)
     mov     dword ptr [rip+hv_npoints], 0
     xor     ebx, ebx
 7:  cmp     ebx, [rip+obj_count]
@@ -340,33 +348,16 @@ hive_build:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_LIGHT
     jne     71f
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN|OBF_NORENDER
+    jnz     71f
     mov     ecx, [rip+hv_npoints]
     cmp     ecx, MAX_POINTS
     jae     71f
-    shl     ecx, 5
-    lea     rdx, [rip+hv_points]
-    add     rdx, rcx
-    mov     rcx, [rax+OB_LOC]
-    mov     [rdx], rcx
-    mov     ecx, [rax+OB_LOC+8]
-    mov     [rdx+8], ecx
-    push    rdx                         # its colour x power (lcam.s), times
-    push    rdx                         #  the default strength
-    mov     edi, [rax+OB_UID]
-    lea     rsi, [rdx+12]
-    call    lc_light
-    pop     rdx
-    pop     rdx
-    movss   xmm0, [rip+hf_pt_power]
-    movss   xmm1, [rdx+12]
-    mulss   xmm1, xmm0
-    movss   [rdx+12], xmm1
-    movss   xmm1, [rdx+16]
-    mulss   xmm1, xmm0
-    movss   [rdx+16], xmm1
-    movss   xmm1, [rdx+20]
-    mulss   xmm1, xmm0
-    movss   [rdx+20], xmm1
+    mov     rdi, rax
+    shl     ecx, 6
+    lea     rsi, [rip+hv_points]
+    add     rsi, rcx
+    call    hv_light
     inc     dword ptr [rip+hv_npoints]
 71: inc     ebx
     jmp     7b
@@ -393,6 +384,111 @@ hive_build:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# hv_light(rdi=light object, rsi=its 16 floats) - where it is, how strong,
+#   its type and shape (lcam.s), the way it shines (its -Z)
+.globl hv_light
+hv_light:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 64
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     rax, [rbx+OB_LOC]           # 0: the position
+    mov     [r12], rax
+    mov     eax, [rbx+OB_LOC+8]
+    mov     [r12+8], eax
+    mov     edi, [rbx+OB_UID]           # 3: colour x power (x the default)
+    lea     rsi, [r12+12]
+    call    lc_light
+    mov     edi, [rbx+OB_UID]           # 6: type, 7: size, [rsp+48] the cone
+    call    lc_shape
+    mov     r13d, eax
+    cvtsi2ss xmm2, eax
+    movss   [r12+24], xmm2
+    movss   [r12+28], xmm0
+    movss   [rsp+48], xmm1
+    movss   xmm0, [rip+hf_pt_power]     # (a point's strength; a sun's)
+    cmp     r13d, 1
+    jne     1f
+    movss   xmm0, [rip+hf_sun_power]
+1:  xor     ecx, ecx
+2:  movss   xmm1, [r12+12+rcx*4]
+    mulss   xmm1, xmm0
+    movss   [r12+12+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    mov     rdi, rbx                    # 8: the direction: -Z (the matrix's
+    lea     rsi, [rsp]                  #  third column), 12: X for an area
+    call    obj_matrix
+    xor     ecx, ecx
+3:  imul    edx, ecx, 16
+    movss   xmm0, [rsp+rdx+8]
+    xorps   xmm0, [rip+hf_signm]
+    movss   [r12+32+rcx*4], xmm0
+    movss   xmm0, [rsp+rdx]
+    movss   [r12+48+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    lea     rdi, [r12+32]
+    call    hv_unit
+    lea     rdi, [r12+48]
+    call    hv_unit
+    movss   xmm0, [r12+28]              # the area: X x half its edge (1 m: 0)
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    ja      4f
+    movss   xmm0, [rip+hf_one]
+4:  mulss   xmm0, [rip+hf_halfk]
+    xor     ecx, ecx
+5:  movss   xmm1, [r12+48+rcx*4]
+    mulss   xmm1, xmm0
+    movss   [r12+48+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      5b
+    mov     dword ptr [r12+44], 0x3f800000   # 11: cos: the sun's half angle,
+    mov     dword ptr [r12+60], 0x3f800000   #  a spot's outer, 15: inner
+    cmp     r13d, 1
+    jne     6f
+    movss   xmm0, [r12+28]              # the sun: half its angle (deg)
+    mulss   xmm0, [rip+hf_d2r_half]
+    call    hv_cos
+    movss   [r12+44], xmm0
+    jmp     9f
+6:  cmp     r13d, 2
+    jne     9f
+    movss   xmm0, [rsp+48]              # a spot: its cone (0: 45 deg)
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    ja      61f
+    movss   xmm0, [rip+hf_45]
+61: mulss   xmm0, [rip+hf_d2r_half]
+    movss   [rsp+52], xmm0
+    call    hv_cos
+    movss   [r12+44], xmm0
+    movss   xmm0, [rsp+52]              # (soft: inner at 80% of it)
+    mulss   xmm0, [rip+hf_inner]
+    call    hv_cos
+    movss   [r12+60], xmm0
+9:  add     rsp, 64
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+hv_cos:                                 # xmm0 -> cos xmm0
+    sub     rsp, 8
+    movss   [rsp], xmm0
+    fld     dword ptr [rsp]
+    fcos
+    fstp    dword ptr [rsp]
+    movss   xmm0, [rsp]
+    add     rsp, 8
     ret
 
 # hv_inst_count(rdi=mesh) -> eax = the triangles its instances add (whole
@@ -1936,5 +2032,9 @@ tri_hit:
 .align 4
 b_cmin_axis:    .skip 4
 b_scale:        .skip 4
+
+.section .rodata
+.align 16
+hf_signm:       .long 0x80000000, 0, 0, 0
 
 .section .note.GNU-stack,"",@progbits

@@ -35,6 +35,9 @@ ru_pass:        .skip 4
 ru_dn:          .skip 4
 ru_power:       .skip 4
 ru_col:         .skip 12
+ru_type:        .skip 4                 # (after the colour: power and colour
+ru_size:        .skip 4                 #  are copied as one)
+ru_angle:       .skip 4
 ru_lens:        .skip 4
 ru_cam:         .skip 4
 
@@ -132,6 +135,9 @@ WIDGET wd_rh_pass, WK_ENUM, "render.header.pass", cb=pass_cb, aux=l_pass, n=4, t
 # lights and cameras
 WIDGET wd_lc_power, WK_FLOAT, "light.power", "Power", 0.0, 100000.0, 0.01, 2, WGF_CLAMP, cb=lpow_cb, undo="Light", tip="How strong the light is (1: the default)"
 WIDGET wd_lc_col,  WK_COLOR, "light.color", "Colour", cb=lcol_cb, undo="Light"
+WIDGET wd_lc_type, WK_ENUM, "light.type", cb=ltype_cb, undo="Light", aux=lt_lbl, n=4, tip="Point: from a spot (or a ball of the size). Sun: from far away, one direction. Spot: a cone. Area: a square panel"
+WIDGET wd_lc_size, WK_FLOAT, "light.size", "Size", 0.0, 1000.0, 0.01, 2, WGF_CLAMP, cb=lsize_cb, undo="Light", tip="Point and spot: the radius (m), soft shadows grow with it. Sun: its angle (degrees). Area: the edge (m)"
+WIDGET wd_lc_angle, WK_FLOAT, "light.cone", "Cone (deg)", 1.0, 179.0, 0.2, 1, WGF_CLAMP, cb=langle_cb, undo="Light", tip="How wide the spot's cone is"
 WIDGET wd_lc_lens, WK_FLOAT, "camera.lens", "Lens (mm)", 1.0, 1000.0, 0.1, 1, WGF_CLAMP, cb=lens_cb, undo="Camera", tip="Focal length: 18 wide, 50 normal, 135 tele"
 WIDGET wd_lc_act,  WK_BUTTON, "camera.make_active", "Render from This Camera", aux=0
 
@@ -583,6 +589,26 @@ lcam_props:
     lea     rdi, [rip+wd_lc_col]
     lea     r8, [rip+ru_col]
     call    pnl_full
+    mov     edi, [rbx+OB_UID]           # its type, size, a spot's cone
+    call    lc_shape
+    mov     [rip+ru_type], eax
+    movss   [rip+ru_size], xmm0
+    movss   [rip+ru_angle], xmm1
+    xorps   xmm0, xmm0
+    comiss  xmm1, xmm0
+    ja      7f
+    mov     dword ptr [rip+ru_angle], 0x42340000   # (45)
+7:  lea     rdi, [rip+wd_lc_type]
+    lea     r8, [rip+ru_type]
+    call    pnl_full
+    lea     rdi, [rip+wd_lc_size]
+    lea     r8, [rip+ru_size]
+    call    pnl_full
+    cmp     dword ptr [rip+ru_type], 2
+    jne     8f
+    lea     rdi, [rip+wd_lc_angle]
+    lea     r8, [rip+ru_angle]
+    call    pnl_full
 8:  add     r12d, 6
 9:  add     rsp, 8
     pop     r13
@@ -590,6 +616,20 @@ lcam_props:
     ret
 
 .section .rodata
+lt_point:       .asciz "Point"
+lt_sun:         .asciz "Sun"
+lt_spot:        .asciz "Spot"
+lt_area:        .asciz "Area"
+lt_wpoint:      .asciz "point"
+lt_wsun:        .asciz "sun"
+lt_wspot:       .asciz "spot"
+lt_warea:       .asciz "area"
+lt_type:        .asciz "type "
+lt_size:        .asciz "size "
+lt_angle:       .asciz "angle "
+.align 8
+lt_lbl:         .quad lt_point, lt_sun, lt_spot, lt_area
+lt_words:       .quad lt_wpoint, lt_wsun, lt_wspot, lt_warea
 .align 4
 rf_film:        .float 18.0
 rf_def:         .float 1.0, 1.0, 1.0, 1.0
@@ -607,6 +647,39 @@ lpow_cb:                                # light.set power <p>
     lea     rdi, [rip+do_light_set]
     call    exec_fmt
     add     rsp, 8
+    ret
+ltype_cb:                               # light.set type <word>
+    sub     rsp, 8
+    call    fmt_reset
+    lea     rdi, [rip+lt_type]
+    call    fmt_str
+    mov     eax, [rip+ru_type]
+    lea     rcx, [rip+lt_words]
+    mov     rdi, [rcx+rax*8]
+    call    fmt_str
+    lea     rdi, [rip+do_light_set]
+    call    exec_fmt
+    add     rsp, 8
+    ret
+lsize_cb:                               # light.set size <v>
+    lea     rdi, [rip+lt_size]
+    movss   xmm0, [rip+ru_size]
+    jmp     lnum_set
+langle_cb:                              # light.set angle <deg>
+    lea     rdi, [rip+lt_angle]
+    movss   xmm0, [rip+ru_angle]
+lnum_set:
+    sub     rsp, 24
+    movss   [rsp], xmm0
+    push    rdi
+    call    fmt_reset
+    pop     rdi
+    call    fmt_str
+    movss   xmm0, [rsp]
+    call    fmt_val3
+    lea     rdi, [rip+do_light_set]
+    call    exec_fmt
+    add     rsp, 24
     ret
 lcol_cb:                                # light.set color r g b
     push    rbx

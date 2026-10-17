@@ -703,7 +703,7 @@ gp_put:
     mov     rbx, rcx
     mov     r14, r8
     # sizes
-    mov     qword ptr [rbx], 48+64+2048+1024
+    mov     qword ptr [rbx], 48+64+4096+1024
     mov     eax, [rip+hv_n]
     imul    rax, rax, 36
     mov     [rbx+8], rax                # tv
@@ -853,11 +853,11 @@ gp_put:
     lea     rdi, [rdi+112]
     lea     rsi, [rip+hv_points]
     mov     ecx, [rip+hv_npoints]
-    shl     ecx, 5
+    shl     ecx, 6                      # (16 floats a light)
     rep     movsb
     mov     rdi, [r14]
     add     rdi, r13
-    lea     rdi, [rdi+112+2048]
+    lea     rdi, [rdi+112+4096]
     lea     rsi, [rip+tx_lut]
     mov     ecx, 1024
     rep     movsb

@@ -127,6 +127,10 @@ pt_2pi:         .float 6.28318531
 pt_inv_pi:      .float 0.31830989
 pt_eps:         .float 1.0e-4
 pt_tiny:        .float 1.0e-8
+ol_eps:         .float 1.0e-6
+ol_three:       .float 3.0
+ol_four:        .float 4.0
+ol_almost:      .float 0.999999
 pt_big:         .float 1.0e30
 pt_amin:        .float 0.0004
 pt_2m24:        .float 5.9604645e-8         # 2^-24
@@ -1495,33 +1499,18 @@ light_sample:
     cmp     ecx, 3
     jb      5b
     jmp     .Lls_ok
-.Lls_point:
-    shl     eax, 5
-    lea     rdx, [rip+hv_points]
-    add     rdx, rax
-    xor     ecx, ecx
-6:  movss   xmm0, [rdx+rcx*4]
-    subss   xmm0, [rbx+rcx*4]
-    movss   [r13+LS_WI+rcx*4], xmm0
-    inc     ecx
-    cmp     ecx, 3
-    jb      6b
-    push    rdx
-    lea     rdi, [r13+LS_WI]
-    call    unit3
-    pop     rdx
-    movss   [r13+LS_DIST], xmm0
-    mulss   xmm0, xmm0                  # Li = I / d^2 ; pdf = p_choice (delta)
-    xor     ecx, ecx
-61: movss   xmm1, [rdx+12+rcx*4]
-    divss   xmm1, xmm0
-    movss   [r13+LS_LI+rcx*4], xmm1
-    inc     ecx
-    cmp     ecx, 3
-    jb      61b
-    mov     eax, [rsp]
-    mov     [r13+LS_PDF], eax
-    mov     dword ptr [r13+LS_DELTA], 1
+.Lls_point:                             # a light object (obj_light)
+    shl     eax, 6
+    lea     rdi, [rip+hv_points]
+    add     rdi, rax
+    mov     rsi, rbx
+    mov     rdx, r13
+    call    obj_light
+    test    eax, eax
+    jz      .Lls_none
+    movss   xmm0, [r13+LS_PDF]          # (x the choice's probability)
+    mulss   xmm0, [rsp]
+    movss   [r13+LS_PDF], xmm0
     jmp     .Lls_ok
 .Lls_sun:                               # a direction in the sun's cone
     cmp     dword ptr [rip+hv_env], 0
@@ -1653,6 +1642,279 @@ light_sample:
     ret
 
 # onb_ro(rdi=n, rsi=t, rdx=b) - onb keeping rdi (n read only)
+# obj_light(rdi=its 16 floats (hive.s hv_light), rsi=p, rdx=sample) -> eax =
+#   1 with a sample towards it (pdf in solid angle, the light's choice not in
+#   it; never hit by BSDF rays, so no MIS: delta), 0 when it cannot light p.
+#   Point and spot: a sphere of the radius (a point when 0), a spot fading
+#   across its cone; sun: a cone of the angle round its direction; area: a
+#   square facing its direction. r15: the random state (rnd).
+obj_light:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 104
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     r13, rdx
+    mov     dword ptr [r13+LS_DELTA], 1
+    cvttss2si r14d, [rbx+24]            # the type
+    cmp     r14d, 1
+    je      .Lol_sun
+    cmp     r14d, 3
+    je      .Lol_area
+    # ---- point, spot: towards the centre ----
+    xor     ecx, ecx
+1:  movss   xmm0, [rbx+rcx*4]
+    subss   xmm0, [r12+rcx*4]
+    movss   [r13+LS_WI+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    lea     rdi, [r13+LS_WI]
+    call    unit3
+    movss   [rsp+64], xmm0              # d
+    movss   xmm0, [rip+pt_one]          # the spot's fade
+    movss   [rsp+68], xmm0
+    cmp     r14d, 2
+    jne     2f
+    lea     rdi, [r13+LS_WI]            # c = -wi . dir
+    lea     rsi, [rbx+32]
+    call    dot3
+    xorps   xmm0, [rip+pt_sign]
+    subss   xmm0, [rbx+44]              # t = (c - outer) / (inner - outer)
+    movss   xmm1, [rbx+60]
+    subss   xmm1, [rbx+44]
+    maxss   xmm1, [rip+ol_eps]
+    divss   xmm0, xmm1
+    maxss   xmm0, [rip+pt_zero]
+    minss   xmm0, [rip+pt_one]
+    movss   xmm1, xmm0                  # smooth: t^2 (3 - 2t)
+    addss   xmm1, xmm0
+    movss   xmm2, [rip+ol_three]
+    subss   xmm2, xmm1
+    mulss   xmm2, xmm0
+    mulss   xmm2, xmm0
+    comiss  xmm2, [rip+pt_zero]
+    jbe     .Lol_none
+    movss   [rsp+68], xmm2
+2:  movss   xmm0, [rbx+28]              # radius 0, or p inside it: a point
+    comiss  xmm0, [rip+pt_zero]
+    jbe     3f
+    comiss  xmm0, [rsp+64]
+    jb      4f
+3:  movss   xmm0, [rsp+64]              # Li = I fade / d^2
+    movss   [r13+LS_DIST], xmm0
+    mulss   xmm0, xmm0
+    movss   xmm1, [rsp+68]
+    divss   xmm1, xmm0
+    call    ol_li
+    mov     eax, [rip+pt_one]
+    mov     [r13+LS_PDF], eax
+    jmp     .Lol_ok
+4:  movss   xmm1, [rsp+64]              # a sphere: its cone, cos max
+    mulss   xmm0, xmm0
+    mulss   xmm1, xmm1
+    divss   xmm0, xmm1
+    movss   xmm1, [rip+pt_one]
+    subss   xmm1, xmm0
+    maxss   xmm1, [rip+pt_zero]
+    sqrtss  xmm1, xmm1
+    movss   [rsp+72], xmm1
+    mov     rax, [r13+LS_WI]            # (round the way to its centre)
+    mov     [rsp+80], rax
+    mov     eax, [r13+LS_WI+8]
+    mov     [rsp+88], eax
+    lea     rdi, [rsp+80]
+    movss   xmm0, [rsp+72]
+    call    ol_cone
+    movss   xmm0, [rsp+64]              # dist: to its surface
+    subss   xmm0, [rbx+28]
+    movss   [r13+LS_DIST], xmm0
+    movss   xmm0, [rbx+28]              # Li = I fade / (pi r^2)
+    mulss   xmm0, xmm0
+    mulss   xmm0, [rip+pt_pi]
+    movss   xmm1, [rsp+68]
+    divss   xmm1, xmm0
+    call    ol_li
+    jmp     .Lol_ok
+    # ---- the sun: a direction in the cone round -dir ----
+.Lol_sun:
+    xor     ecx, ecx
+1:  movss   xmm0, [rbx+32+rcx*4]
+    xorps   xmm0, [rip+pt_sign]
+    movss   [rsp+80+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     dword ptr [r13+LS_DIST], 0x7149f2ca     # (far: 1e30)
+    movss   xmm0, [rbx+44]
+    comiss  xmm0, [rip+ol_almost]       # (no angle: one direction)
+    jb      2f
+    mov     rax, [rsp+80]
+    mov     [r13+LS_WI], rax
+    mov     eax, [rsp+88]
+    mov     [r13+LS_WI+8], eax
+    movss   xmm1, [rip+pt_one]
+    call    ol_li
+    mov     eax, [rip+pt_one]
+    mov     [r13+LS_PDF], eax
+    jmp     .Lol_ok
+2:  lea     rdi, [rsp+80]
+    call    ol_cone
+    movss   xmm0, [rip+pt_one]          # Li = E / its solid angle (pdf's 1 / it)
+    divss   xmm0, [r13+LS_PDF]
+    movss   xmm1, [rip+pt_one]
+    divss   xmm1, xmm0
+    call    ol_li
+    jmp     .Lol_ok
+    # ---- an area: a square facing dir, half-edge axes U and dir x U ----
+.Lol_area:
+    lea     rdi, [rbx+32]               # V = dir x U
+    lea     rsi, [rbx+48]
+    lea     rdx, [rsp+16]
+    call    ol_cross
+    call    rnd
+    addss   xmm0, xmm0
+    subss   xmm0, [rip+pt_one]
+    movss   [rsp+32], xmm0
+    call    rnd
+    addss   xmm0, xmm0
+    subss   xmm0, [rip+pt_one]
+    movss   [rsp+36], xmm0
+    xor     ecx, ecx                    # s - p
+1:  movss   xmm0, [rbx+48+rcx*4]
+    mulss   xmm0, [rsp+32]
+    movss   xmm1, [rsp+16+rcx*4]
+    mulss   xmm1, [rsp+36]
+    addss   xmm0, xmm1
+    addss   xmm0, [rbx+rcx*4]
+    subss   xmm0, [r12+rcx*4]
+    movss   [r13+LS_WI+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    lea     rdi, [r13+LS_WI]
+    call    unit3
+    movss   [r13+LS_DIST], xmm0
+    movss   [rsp+64], xmm0
+    lea     rdi, [r13+LS_WI]            # cos at the light: -wi . dir
+    lea     rsi, [rbx+32]
+    call    dot3
+    xorps   xmm0, [rip+pt_sign]
+    comiss  xmm0, [rip+ol_eps]
+    jbe     .Lol_none
+    movss   [rsp+68], xmm0
+    lea     rdi, [rbx+48]               # A = 4 U . U
+    mov     rsi, rdi
+    call    dot3
+    mulss   xmm0, [rip+ol_four]
+    maxss   xmm0, [rip+pt_tiny]
+    movss   [rsp+72], xmm0
+    movss   xmm1, [rip+ol_four]         # Li = 4 I / A
+    divss   xmm1, xmm0
+    call    ol_li
+    movss   xmm0, [rsp+64]              # pdf = d^2 / (cos A)
+    mulss   xmm0, xmm0
+    movss   xmm1, [rsp+68]
+    mulss   xmm1, [rsp+72]
+    divss   xmm0, xmm1
+    movss   [r13+LS_PDF], xmm0
+.Lol_ok:
+    mov     eax, 1
+    jmp     9f
+.Lol_none:
+    xor     eax, eax
+9:  add     rsp, 104
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ol_li(xmm1=factor) - LS_LI = I factor (rbx = the light, r13 = the sample)
+ol_li:
+    xor     ecx, ecx
+1:  movss   xmm0, [rbx+12+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [r13+LS_LI+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    ret
+
+# ol_cone(rdi=unit axis, xmm0=cos max) - LS_WI uniform in the cone round it,
+#   LS_PDF = 1 / its solid angle (rbx, r13 as obj_light's; r15 rnd)
+ol_cone:
+    push    r12
+    sub     rsp, 64
+    mov     r12, rdi
+    movss   [rsp+48], xmm0
+    call    rnd
+    movss   xmm1, [rip+pt_one]          # cos = 1 - u (1 - cos max)
+    subss   xmm1, [rsp+48]
+    mulss   xmm0, xmm1
+    movss   xmm1, [rip+pt_one]
+    subss   xmm1, xmm0
+    movss   [rsp+52], xmm1
+    mulss   xmm1, xmm1
+    movss   xmm2, [rip+pt_one]
+    subss   xmm2, xmm1
+    maxss   xmm2, [rip+pt_zero]
+    sqrtss  xmm2, xmm2
+    movss   [rsp+56], xmm2
+    call    rnd
+    call    sincos_2pi
+    mulss   xmm0, [rsp+56]
+    mulss   xmm1, [rsp+56]
+    movss   [rsp+32], xmm1              # x = cos phi sin, y = sin phi sin
+    movss   [rsp+36], xmm0
+    mov     rdi, r12
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+12]
+    call    onb_ro
+    movss   xmm0, [rsp+32]
+    movss   xmm1, [rsp+36]
+    movss   xmm2, [rsp+52]
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+12]
+    mov     rcx, r12
+    lea     rdi, [r13+LS_WI]
+    call    local_to_world
+    movss   xmm0, [rip+pt_one]          # pdf = 1 / (2 pi (1 - cos max))
+    subss   xmm0, [rsp+48]
+    mulss   xmm0, [rip+pt_2pi]
+    maxss   xmm0, [rip+pt_tiny]
+    movss   xmm1, [rip+pt_one]
+    divss   xmm1, xmm0
+    movss   [r13+LS_PDF], xmm1
+    add     rsp, 64
+    pop     r12
+    ret
+
+# ol_cross(rdi=a, rsi=b, rdx=out) - a x b
+ol_cross:
+    movss   xmm0, [rdi+4]
+    mulss   xmm0, [rsi+8]
+    movss   xmm1, [rdi+8]
+    mulss   xmm1, [rsi+4]
+    subss   xmm0, xmm1
+    movss   [rdx], xmm0
+    movss   xmm0, [rdi+8]
+    mulss   xmm0, [rsi]
+    movss   xmm1, [rdi]
+    mulss   xmm1, [rsi+8]
+    subss   xmm0, xmm1
+    movss   [rdx+4], xmm0
+    movss   xmm0, [rdi]
+    mulss   xmm0, [rsi+4]
+    movss   xmm1, [rdi+4]
+    mulss   xmm1, [rsi]
+    subss   xmm0, xmm1
+    movss   [rdx+8], xmm0
+    ret
+
+# (onb_ro: onb)
 onb_ro:
     jmp     onb
 
