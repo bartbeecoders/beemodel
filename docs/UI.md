@@ -102,7 +102,7 @@ The tabs down the left side of Properties are:
 
 | Tab | What it holds |
 |---|---|
-| **Object** | Name, location, rotation, scale, visibility, colour. Also a light's power and colour, a camera's lens and "Render from This Camera", and a curve's shape |
+| **Object** | Name, location, rotation, scale, visibility, colour. Also a light's power and colour, a camera's lens and "Render from This Camera", and a curve's shape. After **Object > Print Check**, its findings: closed or not, the thinnest wall, overhangs and the size, each with a **Show** button that selects those edges or faces in edit mode and frames them |
 | **Modifiers** | The stack (on / off, order, Apply, remove) with every value, including object and node-tree pickers |
 | **Material** | Material picker and New, base colour, metallic, roughness, transmission, emission and more. Images, and the paint layer stack while texture painting |
 | **Physics** | Rigid bodies, cloth and soft bodies, colliders, joints, wind, the simulation cache |

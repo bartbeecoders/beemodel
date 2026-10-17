@@ -1766,6 +1766,12 @@ ed_props_draw:
     lea     rsi, [rip+s_p_mesh]
     call    prop_row
     add     r12d, 12
+    mov     edi, [rip+active_obj]       # its Print Check findings (printui.s)
+    call    obj_get
+    test    rax, rax
+    jz      .Lpp_done
+    mov     rdi, rax
+    call    print_props
     jmp     .Lpp_done
 
 .Lpp_mods:

@@ -164,7 +164,13 @@ do_frame_sel:
     movss   [rsp+12], xmm0
     movss   [rsp+16], xmm0
     movss   [rsp+20], xmm0
-    call    sel_objects                 # nothing selected: everything
+    cmp     dword ptr [rip+edit_obj], 0 # edit mode: the selected vertices
+    je      0f
+    lea     rdi, [rsp]
+    call    fs_edit_bounds
+    mov     r12d, eax
+    jmp     3f
+0:  call    sel_objects                 # nothing selected: everything
     mov     r13d, eax
     xor     ebx, ebx
     xor     r12d, r12d                  # objects counted
@@ -233,6 +239,68 @@ do_frame_sel:
     call    va_start
 .Lfs_out:
     add     rsp, 64
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# fs_edit_bounds(rdi=float[6] min, max: grown) -> eax = how many selected
+#   vertices of the edit mesh (world space)
+fs_edit_bounds:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 64
+    mov     r15, rdi
+    xor     r14d, r14d
+    call    edit_get
+    test    rax, rax
+    jz      9f
+    mov     rbx, [rax+OB_MESH]
+    mov     rdi, rax
+    lea     rsi, [rsp]
+    call    obj_matrix                  # row-major 3x4
+    mov     r12, [rbx+ME_VSEL]
+    test    r12, r12
+    jz      9f
+    xor     r13d, r13d
+1:  cmp     r13d, [rbx+ME_NVERTS]
+    jae     9f
+    cmp     byte ptr [r12+r13], 0
+    je      3f
+    inc     r14d
+    mov     rax, [rbx+ME_POS]
+    lea     rcx, [r13+r13*2]
+    lea     rax, [rax+rcx*4]
+    xor     ecx, ecx                    # world = M p + t, each axis
+2:  mov     edx, ecx
+    shl     edx, 4
+    movss   xmm0, [rsp+rdx]
+    mulss   xmm0, [rax]
+    movss   xmm1, [rsp+rdx+4]
+    mulss   xmm1, [rax+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+rdx+8]
+    mulss   xmm1, [rax+8]
+    addss   xmm0, xmm1
+    addss   xmm0, [rsp+rdx+12]
+    movss   xmm1, [r15+rcx*4]
+    minss   xmm1, xmm0
+    movss   [r15+rcx*4], xmm1
+    movss   xmm1, [r15+12+rcx*4]
+    maxss   xmm1, xmm0
+    movss   [r15+12+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+3:  inc     r13d
+    jmp     1b
+9:  mov     eax, r14d
+    add     rsp, 64
+    pop     r15
+    pop     r14
     pop     r13
     pop     r12
     pop     rbx
