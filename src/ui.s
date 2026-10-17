@@ -152,7 +152,7 @@ items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_cad_sketch, sub_generate
                 .quad 0, op_add_light, op_add_camera, op_add_armature
 .equ items_add_n, (. - items_add) / 8
-items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, sub_snap, 0
+items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, sub_snap, sub_parent, 0
                 .quad sub_feature, sub_boolean, sub_mech, op_repair, op_print_check, op_obj_measure
                 .quad 0, op_an_key, op_arm_parent
 .equ items_object_n, (. - items_object) / 8
@@ -184,6 +184,7 @@ sub_ws_l:       .quad op_ws_next, op_ws_prev, 0, op_ws_new, op_ws_rename, op_ws_
 sub_uv_l:       .quad op_uv_unwrap, op_uv_smart, op_uv_pack, 0, op_uv_mark, op_uv_clear, op_uv_sharp
 sub_mech_l:     .quad op_mj_add, op_mj_list, op_mj_check
 sub_snap_l:     .quad op_cursor_sel, op_cursor_reset, op_sel_cursor, op_sel_grid, op_toggle_snap
+sub_parent_l:   .quad op_par_set, op_par_clear
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -201,6 +202,7 @@ SUBMENU sub_generate, "Generate", sub_generate_l, 2
 SUBMENU sub_mech, "Mechanism", sub_mech_l, 3
 SUBMENU sub_uv, "UV", sub_uv_l, 7
 SUBMENU sub_snap, "Snap", sub_snap_l, 5
+SUBMENU sub_parent, "Parent", sub_parent_l, 2
 SUBMENU sub_workspace, "Workspace", sub_ws_l, 6
 
 # -----------------------------------------------------------------------------
@@ -252,6 +254,7 @@ ui_layout:
 # -----------------------------------------------------------------------------
 # hit_test(edi=x, esi=y) -> eax = HIT_*, edx = index
 # -----------------------------------------------------------------------------
+.globl hit_test
 hit_test:
     push    rbx
     push    r12
@@ -611,7 +614,26 @@ ui_motion:
     jne     77f
     call    mods_drag_move
     jmp     .Lmo_out
-77: cmp     eax, DRAG_ZOOM              # the gizmo's zoom handle
+77: cmp     eax, DRAG_OUTL              # an outliner row dragged
+    jne     770f
+    mov     ecx, edi
+    sub     ecx, [rip+press_x]
+    mov     edx, ecx
+    neg     edx
+    cmovs   edx, ecx
+    mov     ecx, esi
+    sub     ecx, [rip+press_y]
+    mov     r8d, ecx
+    neg     r8d
+    cmovs   r8d, ecx
+    add     edx, r8d
+    cmp     edx, 4
+    jle     .Lmo_out
+    mov     dword ptr [rip+outl_dragging], 1
+    mov     dword ptr [rip+dirty], 1
+    mov     edi, CUR_GRABBING
+    jmp     .Lmo_cursor
+770:cmp     eax, DRAG_ZOOM              # the gizmo's zoom handle
     jne     771f
     call    nav_zoom_drag               # (esi = pointer y)
     jmp     .Lmo_out
@@ -1264,18 +1286,25 @@ ui_button:
     mov     edi, r12d
     call    outl_range
     call    macro_select
-    jmp     .Lbt_done
+    jmp     74f
 72: test    dword ptr [rip+key_mods], MOD_CTRL  # Ctrl: this one in or out
     jz      73f
     mov     edi, r12d
     call    outl_toggle
     call    macro_select
-    jmp     .Lbt_done
+    jmp     74f
 73: lea     rax, [rip+obj_list]
     mov     edi, [rax+r12*4]
     xor     esi, esi
     call    obj_click_select
     call    macro_select
+74: mov     dword ptr [rip+drag_mode], DRAG_OUTL  # (a drag onto another row:
+    mov     [rip+outl_drag], r12d               #  it becomes its parent)
+    mov     dword ptr [rip+outl_dragging], 0
+    mov     eax, [rip+ptr_x]
+    mov     [rip+press_x], eax
+    mov     eax, [rip+ptr_y]
+    mov     [rip+press_y], eax
     jmp     .Lbt_done
 
     # ---------------- release ----------------
@@ -1312,10 +1341,15 @@ ui_button:
     call    reset_clip
     jmp     .Lbt_done
 77: cmp     dword ptr [rip+drag_mode], DRAG_PENDING
-    jne     776f
+    jne     775f
     mov     dword ptr [rip+drag_mode], 0
     call    viewport_click
     jmp     .Lbt_done
+775:cmp     dword ptr [rip+drag_mode], DRAG_OUTL  # an outliner row let go
+    jne     7751f
+    call    outl_drop
+    jmp     .Lbt_done
+7751:
 776:cmp     dword ptr [rip+drag_mode], DRAG_NAV   # a gizmo ball clicked
     jne     777f
     call    nav_release
@@ -1775,6 +1809,7 @@ modifier_keys: .byte 29, 42, 56, 54, 97, 100, 125, 126, 58, 69, 0
 #  Drawing
 # =============================================================================
 ui_draw:
+    call    par_sync                    # (children follow their parents)
     call    mat_sync_check              # (material instances up to date)
     call    wg_frame                    # a new list of widgets
     call    an_tick                     # playback: the frame the clock says

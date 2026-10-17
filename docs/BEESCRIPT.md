@@ -95,6 +95,7 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 | `name(i)` | The name of the `i`-th object in the outliner, starting at 0 |
 | `active()` | The active object's name, or `nil` |
 | `issel(name)` | 1 if that object is selected |
+| `parent(name)` | The name of the object it follows (its parent), or `nil`; set with `op("object.parent_set", "child parent")` |
 | `op(id, [arg])` | Runs any operator, e.g. `op("file.save", "~/a.bee")` or, in edit mode, `op("mesh.extrude", 2)`. Modeling operators take their values as text: `op("mesh.bevel", "0.2 3")`, `op("mesh.loopcut", "0 1 2")` (an edge as two vertex indices, plus the number of cuts), `op("mesh.bisect", "0 1 0  0 1 0")` (a world point and normal), `op("mesh.spin", "16 360 x")` |
 | `edit(name)` / `edit()` | Enters edit mode on a mesh (it becomes active) / leaves edit mode |
 | `verts(name)` `edges(name)` `faces(name)` | Mesh sizes |

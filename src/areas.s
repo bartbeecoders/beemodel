@@ -1244,13 +1244,24 @@ ed_outliner_draw:
     push    r14
     push    r15
     sub     rsp, 16
+    call    outl_order                  # the tree's order (parent.s)
     xor     ebx, ebx                    # visible row
     mov     r15d, [rip+outl_scroll]     # objects to skip (scrolled past)
-    xor     r13d, r13d                  # object index
+    mov     dword ptr [rsp+8], 0        # position in that order
     mov     dword ptr [rip+outl_rows], 0
     mov     dword ptr [rip+outl_eye_sel], -1
-1:  cmp     r13d, [rip+obj_count]
+1:  mov     eax, [rsp+8]
+    cmp     eax, [rip+po_n]
     jae     .Lod_done
+    lea     rcx, [rip+po_ord]           # the object there, its depth
+    mov     r13d, [rcx+rax*4]
+    lea     rcx, [rip+po_dep]
+    mov     ecx, [rcx+rax*4]
+    imul    ecx, ecx, 14                # (indented: 14 a level, and room for
+    cmp     dword ptr [rip+po_tree], 0  #  the fold arrows in a tree)
+    je      11f
+    add     ecx, 12
+11: mov     [rsp+12], ecx
     mov     edi, r13d
     call    obj_at
     mov     r14, rax
@@ -1290,8 +1301,35 @@ ed_outliner_draw:
     sub     edx, 8
     mov     ecx, ROW_H
     call    fill_rect
-4:  mov     edi, [rip+ed_x]             # its colour, its type
+4:  lea     rax, [rip+po_kids]          # a parent: its fold arrow
+    cmp     dword ptr [rax+r13*4], 0
+    je      41f
+    lea     rdi, [rip+wd_outl_fold]
+    mov     esi, [rip+ed_x]
+    add     esi, [rsp+12]
+    sub     esi, 10
+    lea     edx, [r12-1]
+    mov     ecx, 18
+    lea     r8, [rip+outl_eye_sel]
+    mov     r9d, r13d
+    call    wg
+    test    eax, eax
+    jz      42f
+    xor     dword ptr [r14+OB_FLAGS], OBF_COLLAPSED
+    mov     dword ptr [rip+redraw_again], 1  # (while drawing: another frame)
+42: mov     edi, [rip+ed_x]
+    add     edi, [rsp+12]
+    sub     edi, 9
+    lea     esi, [r12+2]
+    mov     edx, ICON_CHEVRON_DOWN
+    test    dword ptr [r14+OB_FLAGS], OBF_COLLAPSED
+    jz      43f
+    mov     edx, ICON_CHEVRON_RIGHT
+43: mov     r8d, COL_TEXT_DIM
+    call    draw_icon
+41: mov     edi, [rip+ed_x]             # its colour, its type
     add     edi, 14
+    add     edi, [rsp+12]
     lea     esi, [r12+6]
     mov     edx, 8
     mov     ecx, 8
@@ -1305,6 +1343,7 @@ ed_outliner_draw:
     mov     edx, [rcx+rax*4]
     mov     edi, [rip+ed_x]
     add     edi, 27
+    add     edi, [rsp+12]
     lea     esi, [r12+2]
     mov     r8d, COL_TEXT_DIM
     call    draw_icon
@@ -1318,6 +1357,7 @@ ed_outliner_draw:
     lea     rdi, [rip+wd_outl_name]
     mov     esi, [rip+ed_x]
     add     esi, 46
+    add     esi, [rsp+12]
     lea     edx, [r12-1]
     mov     ecx, [rip+ed_w]
     sub     ecx, 128
@@ -1339,6 +1379,7 @@ ed_outliner_draw:
     mov     ecx, COL_TEXT_OFF
 62: mov     edi, [rip+ed_x]
     add     edi, 48
+    add     edi, [rsp+12]
     lea     esi, [r12+2]
     mov     rdx, r14
     call    draw_text
@@ -1404,7 +1445,7 @@ ed_outliner_draw:
 82: call    draw_icon
     inc     ebx
 .Lod_next:
-    inc     r13d
+    inc     dword ptr [rsp+8]
     jmp     1b
 .Lod_done:
     lea     rdi, [rip+wd_outl_filter]   # the filter, at the bottom
@@ -1466,6 +1507,63 @@ outl_toggle:
     jne     9f
     mov     dword ptr [rip+active_obj], 0
 9:  mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# outl_drop - an outliner row dragged and let go: onto another row, it
+#   becomes that object's child; onto the outliner's empty part, it has no
+#   parent any more (one undo step; it stays where it is)
+.globl outl_drop
+.globl outl_drag
+.globl outl_dragging
+outl_drop:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     dword ptr [rip+drag_mode], 0
+    cmp     dword ptr [rip+outl_dragging], 0
+    je      9f
+    mov     dword ptr [rip+outl_dragging], 0
+    mov     dword ptr [rip+dirty], 1
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    hit_test
+    mov     ebx, edx
+    cmp     eax, HIT_OUTLINER
+    je      1f
+    mov     edi, [rip+hit_area]         # the outliner, not on a row: no parent
+    test    edi, edi
+    js      9f
+    call    area_editor
+    cmp     eax, ED_OUTLINER
+    jne     9f
+    lea     rdi, [rip+s_u_parent]
+    call    undo_push
+    mov     edi, [rip+outl_drag]
+    call    obj_at
+    mov     rdi, rax
+    xor     esi, esi
+    call    par_set
+    jmp     9f
+1:  cmp     ebx, [rip+outl_drag]        # onto another row: under it
+    je      9f
+    lea     rdi, [rip+s_u_parent]
+    call    undo_push
+    mov     edi, ebx
+    call    obj_at
+    mov     r12, rax
+    mov     edi, [rip+outl_drag]
+    call    obj_at
+    mov     rdi, rax
+    mov     rsi, r12
+    call    par_set
+    test    eax, eax
+    jnz     9f
+    call    undo_drop_last              # (its own descendant: no)
+    lea     rdi, [rip+s_par_loop]
+    call    log_line
+9:  add     rsp, 8
+    pop     r12
     pop     rbx
     ret
 
@@ -1837,6 +1935,8 @@ ed_props_draw:
     mov     r9d, 3
     call    fill_rrect
     add     r12d, WG_H+8
+    mov     rdi, rbx                    # its parent (parent.s)
+    call    par_props_row
     mov     rax, [rbx+OB_SKETCH]        # a sketch: its plane, sizes, DOF
     test    rax, rax
     jz      113f
@@ -2907,11 +3007,15 @@ tool_icon_tab:  .quad op_tool_select, ICON_SELECT, op_tool_move, ICON_MOVE, op_t
 .align 4
 outl_rows:      .skip 4                 # rows drawn, and their objects
 outl_map:       .skip OUTL_MAXROWS*4
+outl_drag:      .skip 4                 # a row pressed: its object
+outl_dragging:  .skip 4                 #  and dragged
 outl_eye_sel:   .skip 4
 outl_ren:       .skip 4                 # the object being renamed (handle)
 outl_ren_go:    .skip 4                 #  (start typing when drawn)
 outl_filter:    .skip 32
 .section .rodata
+s_u_parent:     .asciz "Parent"
+s_par_loop:     .asciz "  an object cannot go under its own child"
 s_u_render:     .asciz "Render / Leave Out"
 s_u_lock:       .asciz "Lock"
 s_u_hide:       .asciz "Hide"
@@ -2923,6 +3027,7 @@ type_icons:     .long ICON_MESH, ICON_LIGHT, ICON_CAMERA, ICON_SKETCH, ICON_ARMA
 OPERATOR op_rename, "object.rename", "Rename", do_rename, key=KEY_F1+1, flags=OPF_QUIET, doc="Rename the active object: its outliner row (or the Properties name) becomes a text field (F2, or double-click a row)"
 WIDGET wd_outl_name, WK_TEXT, "outliner.name", "Name", flags=WGF_COMPACT, cb=outl_name_cb, undo="Rename"
 WIDGET wd_outl_eye,  WK_ROW, "outliner.visible", "Show / Hide", cb=outl_eye_cb, tip="Show or hide this object in the viewport"
+WIDGET wd_outl_fold, WK_BUTTON, "outliner.fold", "Fold / Unfold", flags=WGF_NODRAW, tip="Show or hide this object's children"
 WIDGET wd_outl_cam,  WK_ROW, "outliner.render", "Render / Leave Out", cb=outl_cam_cb, tip="Include this object in renders, or leave it out (it still shows in the viewport)"
 WIDGET wd_outl_lock, WK_ROW, "outliner.lock", "Lock / Unlock", cb=outl_lock_cb, tip="Lock: clicks in the viewport pass through it (select it here instead)"
 WIDGET wd_outl_filter, WK_TEXT, "outliner.filter", "Filter", cb=outl_filter_cb, tip="Show only the objects whose name contains this (Enter)"

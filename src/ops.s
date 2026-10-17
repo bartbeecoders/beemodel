@@ -190,6 +190,7 @@ run_op:
     pop     rbp
     call    fa_release
     call    rig_eval                    # (drivers and constraints follow)
+    call    par_sync                    # (and children their parents)
     mov     dword ptr [rip+dirty], 1
     mov     rdi, rbx                    # macro recording
     call    macro_op

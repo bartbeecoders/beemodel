@@ -611,6 +611,7 @@ def main():
     symmetry_ui()
     outliner_ui()
     outliner_more()
+    parent_ui()
     status_ui()
     jobs_ui()
     files_more()
@@ -7223,6 +7224,58 @@ def outliner_more():
     f.mods(4); f.click(e['x'] - 120, e['y'] + 9); f.mods(0); f.pump(0.2)
     r = q('print(issel("Light"), issel("Cube"), issel("A"))')
     check(r == '1 0 1', f'Ctrl+click: that row out, the others kept ({r})')
+    f.proc.kill()
+
+
+def parent_ui():
+    """F14 (#280): parenting - Ctrl+P / Alt+P, children follow their parent,
+    the Parent field, the outliner as a tree (fold, drag a row onto another),
+    undo, saved in .bee files."""
+    print('  -- parenting --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    num = lambda code: [float(v) for v in q(code).split()]
+    q('delete("Camera"); delete("Light"); add("cube", "P", 0, 1, -3); add("cube", "C", 3, 1, -3); select("C", "P")')
+    f.move(600, 300); f.mods(4); f.key(25); f.mods(0); f.pump(0.3)   # Ctrl+P
+    check(q('print(parent("C"), parent("P"))') == 'P nil', f'Ctrl+P: the selected one becomes a child of the active one ({q("print(parent(\"C\"))")})')
+    q('select("P")')
+    f.move(600, 300); f.key(34); f.key(45); f.type('2'); f.key(28); f.pump(0.3)   # G X 2
+    x = num('print(get("P", "x"), get("C", "x"))')
+    check(x == [2.0, 5.0], f'moving the parent moves the child ({x})')
+    f.key(19); f.key(21); f.type('90'); f.key(28); f.pump(0.3)   # R Y 90: the child swings round
+    x, z = num('print(get("C", "x"), get("C", "z"))')
+    check(abs(x - 2) < 1e-3 and abs(abs(z + 3) - 3) < 1e-3, f'turning the parent swings the child round it ({x:.3f}, {z:.3f})')
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.2)  # undo the turn
+    x = num('print(get("C", "x"))')
+    check(x == [5.0], f'undo puts both back ({x})')
+    rows = [w for w in ui_tree(m) if w['name'] == 'outliner.visible']
+    names = [q(f'print(name({w["sub"]}))') for w in rows]
+    fold = [w for w in ui_tree(m) if w['name'] == 'outliner.fold']
+    check(names[-2:] == ['P', 'C'] and len(fold) == 1, f'the outliner: C under P, P with a fold arrow ({names})')
+    f.click(fold[0]['x'] + 9, fold[0]['y'] + 10); f.pump(0.2)
+    n2 = len([w for w in ui_tree(m) if w['name'] == 'outliner.visible'])
+    check(n2 == len(rows) - 1, f'the arrow folds the children away ({len(rows)} -> {n2} rows)')
+    f.click(fold[0]['x'] + 9, fold[0]['y'] + 10); f.pump(0.2)
+    q('select("C")'); f.pump(0.2)
+    pv = (widget(m, 'object.parent') or {})
+    check(pv.get('value') is not None and pv.get('value') > 0, f'Properties > Object shows its parent ({pv.get("value")})')
+    f.move(600, 300); f.mods(8); f.key(25); f.mods(0); f.pump(0.2)   # Alt+P
+    check(q('print(parent("C"))') == 'nil', 'Alt+P: no parent')
+    q('select("P")'); f.move(600, 300); f.key(34); f.key(45); f.type('1'); f.key(28); f.pump(0.3)
+    check(num('print(get("C", "x"))') == [5.0], 'and the child stays when the parent moves')
+    rows = {q(f'print(name({w["sub"]}))'): w for w in ui_tree(m) if w['name'] == 'outliner.visible'}
+    c, cube = rows['C'], rows['Cube']
+    f.drag(c['x'] - 110, c['y'] + 10, cube['x'] - 110, cube['y'] + 10, steps=5); f.pump(0.3)
+    check(q('print(parent("C"))') == 'Cube', f'dragging the row C onto Cube: C follows Cube ({q("print(parent(\"C\"))")})')
+    path = os.path.join(f.home, 'p.bee')
+    f.key(28); f.type('file.save_as ' + path); f.key(28); f.key(1); f.pump(0.3)
+    f.mods(4); f.key(49); f.mods(0); f.pump(0.2)  # Ctrl+N
+    f.key(28); f.type('file.open ' + path); f.key(28); f.key(1); f.pump(0.5)
+    check(q('print(parent("C"))') == 'Cube', 'saved and opened again: still a child of Cube')
     f.proc.kill()
 
 
