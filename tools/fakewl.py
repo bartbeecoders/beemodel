@@ -5908,8 +5908,8 @@ def areas_and_palette():
     check(solid != wire and px(f, 600, 330) == solid, 'Z toggles solid / wireframe shading')
     f.click(1080, 94)                    # outliner: click Camera row
     check(ROWBG(0) == SEL and ROWBG(2) != SEL, 'outliner click selects the Camera only')
-    f.mods(1); f.click(1080, 134); f.mods(0)   # Shift+click Cube: extend
-    check(ROWBG(0) == SEL and ROWBG(2) == SEL, 'Shift+click extends the selection')
+    f.mods(4); f.click(1080, 134); f.mods(0)   # Ctrl+click Cube: add it
+    check(ROWBG(0) == SEL and ROWBG(2) == SEL, 'Ctrl+click adds to the selection')
     f.move(600, 300)
     f.key(45)                            # X deletes Camera and Cube
     check(ICON(0) == 0xe5c07b and ICON(1) == PANE, 'X deletes the selected objects')
@@ -8139,7 +8139,9 @@ def workspaces_ui():
     vm = widget(m, 'viewport.mode')                            # swap: the viewport's header onto the outliner
     of = widget(m, 'outliner.filter')
     hy = vm['y'] + 11                                          # (the header row; empty right of its tools)
-    f.drag(of['x'] - 140, hy, of['x'] + 60, of['y'] - 40, steps=4); f.pump(0.3)
+    ov = widget(m, 'viewport.overlays')
+    hx = ov['x'] + ov['w'] + 8 if ov else of['x'] - 140
+    f.drag(hx, hy, of['x'] + 60, of['y'] - 40, steps=4); f.pump(0.3)
     w = wait_widget(f, m, 'outliner.filter')
     check(w is not None and w['x'] < of['x'] - 200, f'a header dragged onto another area swaps them (the outliner now at x {w and w["x"]})')
     q('op("workspace.set", "1")')                               # (Modeling, as it was)

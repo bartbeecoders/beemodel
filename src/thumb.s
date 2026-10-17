@@ -56,6 +56,10 @@ thumb_make:
     mov     ebx, [rip+vp_area]
     test    ebx, ebx
     js      .Ltm_out
+    mov     edi, ebx                    # (only a 3D viewport)
+    call    area_editor
+    cmp     eax, ED_VIEWPORT
+    jne     .Ltm_out
     mov     edi, [rip+win_w]            # an off-screen window-sized buffer
     call    to_px
     mov     r12d, eax
@@ -78,8 +82,10 @@ thumb_make:
     mov     [rsp+8], eax
     mov     eax, [rip+fb_h]
     mov     [rsp+12], eax
-    mov     eax, [rip+wg_n]             # (its widgets are not this frame's)
-    mov     [rsp+16], eax
+    mov     eax, [rip+wg_n]             # (its widgets are not this frame's,
+    mov     [rsp+16], eax               #  nor is a click waiting for one)
+    mov     eax, [rip+wg_clicked]
+    mov     [rsp+20], eax
     mov     [rip+fb_ptr], r14
     mov     [rip+fb_w], r12d
     mov     [rip+fb_h], r13d
@@ -95,6 +101,8 @@ thumb_make:
     mov     [rip+fb_h], eax
     mov     eax, [rsp+16]
     mov     [rip+wg_n], eax
+    mov     eax, [rsp+20]
+    mov     [rip+wg_clicked], eax
     mov     edi, ebx                    # the viewport's body (physical)
     call    area_node_rect
     mov     r15, rax
