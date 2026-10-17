@@ -209,6 +209,8 @@
 .equ HIT_WGPOP,         31        # an enum's open option list (index = row)
 .equ DRAG_WIDGET,       13
 .equ DRAG_AREA,         14      # an area's header / corner dragged (workspace.s)
+.equ DRAG_NAV,          20      # LMB down on the navigation gizmo: click (a view) or drag (orbit)
+.equ DRAG_ZOOM,         21      # the gizmo's zoom handle dragged
 .equ POPUP_R,           6         # corner radius of menus, palette, dialogs
 .equ FIELD_R,           4         # ... of fields and buttons
 .equ TH_DARK,           0         # UI themes (theme.s)
