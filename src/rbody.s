@@ -7655,6 +7655,8 @@ rb_info:
     mov     eax, [rip+rb_nbroken]
     cmp     edi, 15                     # 15: joints broken
     je      8f
+    cmp     edi, 16                     # 16: every body's place, turn and
+    je      6f                          #  speeds, hashed (24 bits: exact)
     cmp     edi, 8                      # 8-13: ms in the broad phase, the
     jb      7f                          #  narrow, islands, solving, the
     cmp     edi, 13                     #  hash, compacting
@@ -7667,6 +7669,24 @@ rb_info:
 7:  mov     eax, [rip+rb_stepno]
 8:  cvtsi2ss xmm0, eax
 9:  ret
+6:  mov     eax, 0x811c9dc5             # (FNV-1a over the bytes)
+    xor     ecx, ecx
+61: cmp     ecx, [rip+rb_nb]
+    jae     63f
+    BODY    rdx, rcx
+    mov     esi, 64
+62: xor     al, [rdx]
+    imul    eax, eax, 0x01000193
+    inc     rdx
+    dec     esi
+    jnz     62b
+    inc     ecx
+    jmp     61b
+63: mov     edx, eax
+    shr     edx, 24
+    xor     eax, edx
+    and     eax, 0xffffff
+    jmp     8b
 
 # =============================================================================
 #  Operators
