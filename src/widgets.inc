@@ -30,6 +30,7 @@
 .equ WGF_EXPAXIS,   128         # path: ... and Up axis / Scale (OBJ, STL)
 .equ WGF_DYN,       256         # enum: WD_AUX is a function -> rax = labels, edx = how many (objects, trees ...)
 .equ WGF_SECRET,    512         # text: shown as stars, never in ui_tree, typed afresh (API keys)
+.equ WGF_DRAWING,   1024        # path: a drawing export (the browser offers its sheet, views, title)
 
 # descriptor (static, .rodata)
 .equ WD_KIND,       0
