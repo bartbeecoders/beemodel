@@ -839,6 +839,11 @@ def files():
     ICON = lambda row: px(f, 1037, 94 + 20 * row)
     def cmd(c):
         f.key(28); f.type(c); f.key(28); f.pump(0.2)
+        op, _, path = c.partition(' ')
+        if op.startswith(('file.export', 'file.save')):     # (a slow machine: until it is written)
+            end = time.time() + 10
+            while not os.path.exists(path) and time.time() < end:
+                f.pump(0.1)
     name = 's1_234567890.bee'                  # every digit: guards the keymap parser
     cmd(f'file.save {T}/{name}')
     data = open(f'{T}/{name}', 'rb').read() if os.path.exists(f'{T}/{name}') else b''
