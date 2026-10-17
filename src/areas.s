@@ -1320,7 +1320,7 @@ ed_outliner_draw:
     add     esi, 46
     lea     edx, [r12-1]
     mov     ecx, [rip+ed_w]
-    sub     ecx, 80
+    sub     ecx, 128
     mov     r8, r14
     xor     r9d, r9d
     call    wg
@@ -1362,6 +1362,46 @@ ed_outliner_draw:
     mov     edx, ICON_EYE_OFF
     mov     r8d, COL_TEXT_OFF
 8:  call    draw_icon
+    lea     rdi, [rip+wd_outl_cam]      # the camera: rendered / left out
+    mov     esi, [rip+ed_x]
+    add     esi, [rip+ed_w]
+    sub     esi, 54
+    lea     edx, [r12-1]
+    mov     ecx, 22
+    lea     r8, [rip+outl_eye_sel]
+    mov     r9d, r13d
+    call    wg
+    mov     edi, [rip+ed_x]
+    add     edi, [rip+ed_w]
+    sub     edi, 51
+    lea     esi, [r12+2]
+    mov     edx, ICON_RENDER_ON
+    mov     r8d, COL_TEXT_DIM
+    test    dword ptr [r14+OB_FLAGS], OBF_NORENDER
+    jz      81f
+    mov     edx, ICON_CAMERA
+    mov     r8d, COL_TEXT_OFF
+81: call    draw_icon
+    lea     rdi, [rip+wd_outl_lock]     # the lock
+    mov     esi, [rip+ed_x]
+    add     esi, [rip+ed_w]
+    sub     esi, 78
+    lea     edx, [r12-1]
+    mov     ecx, 22
+    lea     r8, [rip+outl_eye_sel]
+    mov     r9d, r13d
+    call    wg
+    mov     edi, [rip+ed_x]
+    add     edi, [rip+ed_w]
+    sub     edi, 75
+    lea     esi, [r12+2]
+    mov     edx, ICON_UNLOCK
+    mov     r8d, COL_TEXT_OFF
+    test    dword ptr [r14+OB_FLAGS], OBF_LOCKED
+    jz      82f
+    mov     edx, ICON_LOCK
+    mov     r8d, COL_TEXT_DIM
+82: call    draw_icon
     inc     ebx
 .Lod_next:
     inc     r13d
@@ -1408,6 +1448,79 @@ ed_outliner_draw:
     pop     rbx
     ret
 
+# outl_toggle(edi=object index) - Ctrl+click: selected or not, the others
+#   kept (selected: it becomes the active one)
+.globl outl_toggle
+outl_toggle:
+    push    rbx
+    mov     ebx, edi
+    call    obj_at
+    xor     dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    lea     rcx, [rip+obj_list]
+    mov     ecx, [rcx+rbx*4]
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      1f
+    mov     [rip+active_obj], ecx
+    jmp     9f
+1:  cmp     ecx, [rip+active_obj]
+    jne     9f
+    mov     dword ptr [rip+active_obj], 0
+9:  mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# outl_range(edi=object index) - Shift+click: the rows from the active one to
+#   this one (those the filter shows), the clicked one active
+.globl outl_range
+outl_range:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     [rsp], edi                  # clicked
+    mov     r12d, edi
+    mov     r13d, edi                   # the active one's index (else itself)
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    lea     rax, [rip+obj_list]
+    mov     eax, [rax+rbx*4]
+    cmp     eax, [rip+active_obj]
+    jne     11f
+    mov     r13d, ebx
+    jmp     2f
+11: inc     ebx
+    jmp     1b
+2:  cmp     r13d, r12d                  # lo .. hi
+    jle     3f
+    xchg    r13d, r12d
+3:  call    select_none
+    mov     ebx, r13d
+4:  cmp     ebx, r12d
+    jg      5f
+    mov     edi, ebx
+    call    obj_at
+    mov     r14, rax
+    mov     rdi, rax
+    call    outl_match
+    test    eax, eax
+    jz      41f
+    or      dword ptr [r14+OB_FLAGS], OBF_SELECTED
+41: inc     ebx
+    jmp     4b
+5:  mov     eax, [rsp]              # the clicked one: active
+    lea     rcx, [rip+obj_list]
+    mov     eax, [rcx+rax*4]
+    mov     [rip+active_obj], eax
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # outl_match(rdi=object) -> eax = 1 if its name contains the filter text
 #   (any case; an empty filter takes all)
 outl_match:
@@ -1448,6 +1561,31 @@ outl_eye_cb:
     jz      9f
     and     dword ptr [rax+OB_FLAGS], ~OBF_SELECTED   # (hidden: not selected)
 9:  pop     rbx
+    ret
+
+# outl_cam_cb / outl_lock_cb(rdi=ptr, esi=object index) - renders leave it
+#   out / clicks in the viewport pass through it (one undo step each)
+outl_cam_cb:
+    mov     ecx, OBF_NORENDER
+    lea     rdi, [rip+s_u_render]
+    jmp     outl_flag
+outl_lock_cb:
+    mov     ecx, OBF_LOCKED
+    lea     rdi, [rip+s_u_lock]
+outl_flag:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, esi
+    mov     r12d, ecx
+    call    undo_push
+    mov     edi, ebx
+    call    obj_at
+    xor     [rax+OB_FLAGS], r12d
+    mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r12
+    pop     rbx
     ret
 
 outl_name_cb:                           # rdi = the new name
@@ -2774,6 +2912,8 @@ outl_ren:       .skip 4                 # the object being renamed (handle)
 outl_ren_go:    .skip 4                 #  (start typing when drawn)
 outl_filter:    .skip 32
 .section .rodata
+s_u_render:     .asciz "Render / Leave Out"
+s_u_lock:       .asciz "Lock"
 s_u_hide:       .asciz "Hide"
 s_obj_name_w:   .asciz "object.name"
 s_filter_hint:  .asciz "Filter by name"
@@ -2783,6 +2923,8 @@ type_icons:     .long ICON_MESH, ICON_LIGHT, ICON_CAMERA, ICON_SKETCH, ICON_ARMA
 OPERATOR op_rename, "object.rename", "Rename", do_rename, key=KEY_F1+1, flags=OPF_QUIET, doc="Rename the active object: its outliner row (or the Properties name) becomes a text field (F2, or double-click a row)"
 WIDGET wd_outl_name, WK_TEXT, "outliner.name", "Name", flags=WGF_COMPACT, cb=outl_name_cb, undo="Rename"
 WIDGET wd_outl_eye,  WK_ROW, "outliner.visible", "Show / Hide", cb=outl_eye_cb, tip="Show or hide this object in the viewport"
+WIDGET wd_outl_cam,  WK_ROW, "outliner.render", "Render / Leave Out", cb=outl_cam_cb, tip="Include this object in renders, or leave it out (it still shows in the viewport)"
+WIDGET wd_outl_lock, WK_ROW, "outliner.lock", "Lock / Unlock", cb=outl_lock_cb, tip="Lock: clicks in the viewport pass through it (select it here instead)"
 WIDGET wd_outl_filter, WK_TEXT, "outliner.filter", "Filter", cb=outl_filter_cb, tip="Show only the objects whose name contains this (Enter)"
 WIDGET wd_tool_row, WK_ROW, "tools.row", cb=tools_cb
 WIDGET wd_vp_sec,     WK_SECTION, "props.viewport", "Viewport"

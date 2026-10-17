@@ -117,7 +117,7 @@ The tabs down the left side of Properties are:
 
 ## Other editors
 
-- **Outliner.** Each row has a type icon, the name (gold when active) and an eye. Double-click a row or press F2 to rename. The filter field at the bottom finds objects by name.
+- **Outliner.** Each row has a type icon, the name (gold when active), a lock (locked: clicks in the viewport pass through it), a camera (off: renders leave it out) and an eye (hidden). All three are saved in `.bee` files. Click a row to select it, Ctrl+click to add or remove it, Shift+click to select the rows from the active one to it. Double-click a row or press F2 to rename. The filter field at the bottom finds objects by name.
 - **Timeline.** Play, step and the frame range, plus auto-key, which keys every confirmed move.
 - **Dope Sheet / Graph Editor.** Interpolation, handles, duplicate and delete for the selected keys.
 - **Node Editor.** The header chooses the graph (a material or a node tree). The Add menu filters as you type.

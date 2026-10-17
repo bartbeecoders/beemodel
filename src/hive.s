@@ -172,7 +172,7 @@ hive_build:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     11f
-    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN|OBF_NORENDER
     jnz     11f
     mov     rcx, [rip+hv_only]          # (one object only: baking)
     test    rcx, rcx
@@ -283,7 +283,7 @@ hive_build:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     .Lhb_onext
-    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN|OBF_NORENDER
     jnz     .Lhb_onext
     mov     rcx, [rip+hv_only]
     test    rcx, rcx

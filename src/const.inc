@@ -461,6 +461,8 @@
 .equ OBF_SELECTED,  1
 .equ OBF_ARM_DIRTY, 0x100   # an armature whose pose changed (shown anew after a frame)
 .equ OBF_HIDDEN,    0x200   # not drawn, rendered or collided with (object.hide, logic graphs)
+.equ OBF_LOCKED,    0x400   # not selectable in the viewport (the outliner's lock)
+.equ OBF_NORENDER,  0x800   # left out of renders (the outliner's camera)
 .equ OT_MESH,       0
 .equ OT_LIGHT,      1
 .equ OT_CAMERA,     2

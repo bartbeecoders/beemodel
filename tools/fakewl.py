@@ -609,6 +609,7 @@ def main():
     motion_ui()
     tools_ui()
     outliner_ui()
+    outliner_more()
     status_ui()
     jobs_ui()
     files_more()
@@ -7115,6 +7116,64 @@ def outliner_ui():
     check(q('print(active())') == 'Camera', 'a filtered row still selects its object')
     f.click(x, y); f.mods(4); f.key(30); f.mods(0); f.key(14); f.key(28); f.pump(0.2)
     check(len(eyes()) == 3, 'an empty filter shows everything')
+    f.proc.kill()
+
+
+def outliner_more():
+    """F13 (#279): the outliner's lock (clicks in the viewport pass through)
+    and camera (left out of renders) toggles, kept in .bee files; Ctrl+click
+    toggles a row, Shift+click selects a range."""
+    print('  -- outliner: lock, render, range select --')
+    from PIL import Image
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = q('print(name(0), name(1), name(2))').split()
+    ci = names.index('Cube') if 'Cube' in names else 2
+    check(widget(m, 'outliner.lock', ci) is not None and widget(m, 'outliner.render', ci) is not None,
+          'each outliner row has a lock and a camera next to the eye')
+    x, y = widget_xy(m, 'outliner.lock', ci); f.click(x, y); f.pump(0.2)
+    q('select()')
+    f.click(*project((0, 1, 0))); f.pump(0.2)
+    check(q('print(issel("Cube"))') == '0', 'locked: a click on the cube in the viewport passes through')
+    f.mods(4); f.key(44); f.mods(0)            # one undo: unlocked
+    q('select()')
+    f.click(*project((0, 1, 0))); f.pump(0.2)
+    check(q('print(issel("Cube"))') == '1', 'one undo unlocks it: the click selects it')
+    def render():
+        path = os.path.join(f.home, 'r.png')
+        if os.path.exists(path):
+            os.remove(path)
+        f.move(600, 300); f.key(28); f.type('render("%s", 64, 36, 4)' % path); f.key(28); f.key(1)
+        for _ in range(100):
+            f.pump(0.1)
+            if os.path.exists(path):
+                break
+        img = Image.open(path).convert('RGB') if os.path.exists(path) else None
+        return img and sum(sum(img.getpixel((xx, yy))) for xx in range(26, 38) for yy in range(12, 24))
+    q('delete("Camera")')                      # (the viewport's view renders)
+    with_cube = render()
+    x, y = widget_xy(m, 'outliner.render', [w.get('sub') for w in ui_tree(m) if w['name'] == 'outliner.render'][-1])
+    nm = q('print(name(1))')
+    check(nm == 'Cube', f'(the cube is the second row now: {nm})')
+    f.click(x, y); f.pump(0.2)
+    without = render()
+    check(with_cube and without is not None and without < with_cube * 0.8,
+          f'the camera off: renders leave the cube out ({with_cube} -> {without})')
+    q('add("cube", "A", 3, 1, 0); select("Light")')   # rows: Light, Cube, A
+    rows = {q(f'print(name({i}))'): i for i in range(3)}
+    eye = lambda n: widget(m, 'outliner.visible', rows[n])
+    e = eye('A')
+    f.mods(1); f.click(e['x'] - 120, e['y'] + 9); f.mods(0); f.pump(0.2)
+    r = q('print(issel("Light"), issel("Cube"), issel("A"), active())')
+    check(r == '1 1 1 A', f'Shift+click: the rows from the active one to it ({r})')
+    e = eye('Cube')
+    f.mods(4); f.click(e['x'] - 120, e['y'] + 9); f.mods(0); f.pump(0.2)
+    r = q('print(issel("Light"), issel("Cube"), issel("A"))')
+    check(r == '1 0 1', f'Ctrl+click: that row out, the others kept ({r})')
     f.proc.kill()
 
 

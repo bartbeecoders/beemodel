@@ -860,6 +860,16 @@ vp_pick:
     pop     rdi
     test    eax, eax
     jz      vp_pick_bounds
+    push    rdi                         # a locked one (the outliner's lock):
+    push    rsi                         #  the click passes through it
+    push    rax
+    lea     edi, [rax-1]
+    call    obj_at
+    test    dword ptr [rax+OB_FLAGS], OBF_LOCKED
+    pop     rax
+    pop     rsi
+    pop     rdi
+    jnz     vp_pick_bounds
     lea     rcx, [rip+obj_list]
     mov     eax, [rcx+rax*4-4]
     ret
@@ -886,7 +896,7 @@ vp_pick_bounds:
     jae     .Lpk_done
     mov     edi, ebx
     call    obj_at
-    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN|OBF_LOCKED  # (locked: not pickable)
     jnz     .Lpk_next
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     1f

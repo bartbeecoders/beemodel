@@ -609,7 +609,7 @@ lv_fingerprint:
     jmp     4f
 3:  cmp     dword ptr [rbx+OB_TYPE], OT_MESH
     jne     4f
-    test    dword ptr [rbx+OB_FLAGS], OBF_HIDDEN
+    test    dword ptr [rbx+OB_FLAGS], OBF_HIDDEN|OBF_NORENDER
     jnz     4f
     mov     rax, [rbx+OB_MESH]          # its own mesh's version
     test    rax, rax
