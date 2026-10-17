@@ -29,7 +29,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
 
       - name: Build (release)
-        run: ./build.sh release && test -x build/beemodel-gpu
+        run: scripts/build.sh release && test -x build/beemodel-gpu
 
       - name: Binary policy checks
         run: ci/check-binary.sh build/beemodel
@@ -41,7 +41,7 @@ jobs:
           BEEMODEL_THREADS=3 ./build/beemodel --selftest
 
       - name: Build (debug, with symbols)
-        run: ./build.sh debug && ./build.sh release
+        run: scripts/build.sh debug && scripts/build.sh release
 
       - uses: actions/setup-python@v5
         with:

@@ -9,9 +9,9 @@ the Linux kernel through raw syscalls and to the compositor through the Wayland
 wire protocol on a UNIX socket.
 
 ```
-./build.sh          # assemble + link  -> build/beemodel  (~300 KB static ELF)
-./build.sh debug    # same, with symbols (for gdb)
-./run.sh            # rebuilds if sources changed, then starts the app
+scripts/build.sh        # assemble + link  -> build/beemodel  (~300 KB static ELF)
+scripts/build.sh debug  # same, with symbols (for gdb)
+scripts/run.sh          # rebuilds if sources changed, then starts the app
 ```
 
 Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, GNOME, KDE...).
@@ -976,5 +976,5 @@ operator spine and how to add an action.
   into a new version section, and merge via a PR. Then tag:
   `git tag -a v0.2.0 -m "BeeModel 0.2.0" && git push origin v0.2.0`.
   The release workflow checks that the tag matches `VERSION`, builds, tests and
-  packages the app (`./package.sh`), and publishes a GitHub release with notes
+  packages the app (`scripts/package.sh`), and publishes a GitHub release with notes
   taken from the changelog.
