@@ -42,7 +42,8 @@
 .align 64
 pf_gen:         .skip 64                # futex: bumped for every parallel_for
 pf_active:      .skip 64                # futex: workers inside a job
-pf_next:        .skip 64                # next unclaimed index
+pf_next:        .skip 64                # the claim: the job's generation (high
+                                        #  32 bits), the next unclaimed index
 .align 8
 pf_fn:          .skip 8
 pf_ctx:         .skip 8
@@ -224,19 +225,30 @@ pf_run:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
     mov     ebx, edi
     mov     eax, ebx
     imul    eax, ARENA_SZ
     lea     r13, [rip+thread_arena]
     add     r13, rax
+    mov     r14, [rip+pf_next]          # the job: its generation
+    shr     r14, 32
 1:  cmp     dword ptr [rip+pf_cancel], 0
     jne     9f
-    mov     edx, [rip+pf_grain]         # (read once: a worker late from the
-    mov     eax, edx                    #  last parallel_for can see the new
-    lock xadd [rip+pf_next], eax        #  pf_next with the old grain; its
-    mov     ecx, [rip+pf_count]         #  chunk must be the one it claimed)
+    mov     rax, [rip+pf_next]          # a chunk: claimed only while the
+    mov     rcx, rax                    #  claim is still this job's (a
+    shr     rcx, 32                     #  worker late from the last one
+    cmp     ecx, r14d                   #  must not take the next's: the
+    jne     9f                          #  count, grain, next index are
+    mov     edx, [rip+pf_grain]         #  written apart, the claim and its
+    mov     ecx, [rip+pf_count]         #  generation at once)
     cmp     eax, ecx
     jae     9f
+    lea     r15, [rax+rdx]              # (index + grain: the high half kept)
+    lock cmpxchg [rip+pf_next], r15
+    jnz     1b
     add     edx, eax
     cmp     edx, ecx
     cmova   edx, ecx                    # end
@@ -251,7 +263,10 @@ pf_run:
     mov     rdi, [rip+pf_ctx]
     call    [rip+pf_fn]
     jmp     1b
-9:  pop     r13
+9:  add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -325,13 +340,19 @@ parallel_for:
     je      .Lpf_serial
     cmp     r13d, r14d
     jbe     .Lpf_serial                 # a single chunk: nobody to wake
+    mov     dword ptr [rip+pf_next], -1 # the last job's claim closed first
+                                        #  (a late worker can read the new
+                                        #  count before the new claim)
     mov     dword ptr [rip+pf_busy], 1
     mov     [rip+pf_fn], rbx
     mov     [rip+pf_ctx], r12
     mov     [rip+pf_count], r13d
     mov     [rip+pf_grain], r14d
     mov     dword ptr [rip+pf_cancel], 0
-    mov     dword ptr [rip+pf_next], 0
+    mov     eax, [rip+pf_gen]           # the claim: the next generation, 0
+    inc     eax                         #  (one store, after the rest)
+    shl     rax, 32
+    mov     [rip+pf_next], rax
     lock inc dword ptr [rip+pf_gen]     # publish (locked op = full barrier)
     lea     rdi, [rip+pf_gen]
     mov     esi, FUTEX_WAKE_PRIV

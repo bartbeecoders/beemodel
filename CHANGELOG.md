@@ -38,10 +38,13 @@ project uses [Semantic Versioning](https://semver.org/).
   normal) get a cache line of their own. Two threads shared one, and how
   much that cost depended on where the linker put them (a brush frame took
   4.1 ms instead of 2.6 when unrelated data moved).
-- `parallel_for`: a worker still finishing one call could claim a chunk of
-  the next with the old chunk size and the new range end, and run part of
-  it twice (a crash or a wrong result when many calls with different chunk
-  sizes ran back to back).
+- `parallel_for`: a worker still leaving one call could take a chunk of
+  the next - with the old chunk size, or past the old count - and part of
+  it ran twice (a crash, or a different result, when many calls with
+  different sizes ran back to back: the rigid-body steps). A chunk is now
+  claimed by compare-and-swap on one word that holds the call's generation
+  and the next index; the caller closes the last call's claim before it
+  writes the next. The self-test runs 3000 calls back to back.
 
 ## [0.16.0] - 2026-10-17
 

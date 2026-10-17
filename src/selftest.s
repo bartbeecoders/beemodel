@@ -37,6 +37,9 @@ s_t6:       .asciz "pool: slot reuse gets a new generation"
 s_t7:       .asciz "pool: full pool returns handle 0"
 s_t8:       .asciz "parallel_for: every element written exactly once"
 s_t9:       .asciz "parallel_for: work spread over worker threads"
+.align 4
+ps_grains:  .long 1, 256, 16, 3
+s_t9b:      .asciz "parallel_for: 3000 calls back to back, the grain changing - every element run once each time"
 s_t10:      .asciz "field JIT: 150 random programs give the VM's bits (SSE and AVX paths)"
 s_jit:      .asciz "field program, 1M elements x 42 instructions: VM "
 s_jit2:     .asciz " ms, JIT "
@@ -56,6 +59,82 @@ s_sum_bad:  .asciz "self-test FAILED\n"
 .text
 
 # check(eax=condition, rdi=label)
+# pf_stress -> eax = 1 when 3000 parallel_for calls in a row, their count
+#   and grain changing each time (1, 256, 16, 3), ran every element exactly
+#   once in each (a worker late from one call must not run the next's
+#   elements twice)
+.equ PS_N,      4096
+pf_stress:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rdi, [rip+t_arr]
+    xor     eax, eax
+    mov     ecx, PS_N
+    rep     stosd
+    xor     ebx, ebx
+1:  cmp     ebx, 3000
+    jae     3f
+    mov     eax, ebx                    # count: 1000 + (round % 7) 400
+    xor     edx, edx
+    mov     ecx, 7
+    div     ecx
+    imul    edx, edx, 400
+    add     edx, 1000
+    mov     r12d, edx
+    mov     eax, ebx                    # grain
+    and     eax, 3
+    lea     rcx, [rip+ps_grains]
+    mov     ecx, [rcx+rax*4]
+    lea     rdi, [rip+ps_job]
+    xor     esi, esi
+    mov     edx, r12d
+    call    parallel_for
+    inc     ebx
+    jmp     1b
+3:  xor     ebx, ebx                    # element i: the rounds that reached it
+    mov     r12, [rip+t_arr]
+4:  cmp     ebx, 3400
+    jae     8f
+    xor     ecx, ecx                    # expected: rounds with count > i
+    xor     r13d, r13d
+5:  cmp     ecx, 7
+    jae     6f
+    imul    eax, ecx, 400
+    add     eax, 1000
+    cmp     ebx, eax
+    jae     51f
+    mov     eax, 3000                   # rounds with this remainder
+    sub     eax, ecx
+    add     eax, 6
+    xor     edx, edx
+    push    rcx
+    mov     ecx, 7
+    div     ecx
+    pop     rcx
+    add     r13d, eax
+51: inc     ecx
+    jmp     5b
+6:  cmp     [r12+rbx*4], r13d
+    jne     9f
+    inc     ebx
+    jmp     4b
+8:  mov     eax, 1
+    jmp     91f
+9:  xor     eax, eax
+91: pop     r13
+    pop     r12
+    pop     rbx
+    ret
+ps_job:
+1:  cmp     esi, edx
+    jae     9f
+    mov     rax, [rip+t_arr]
+    lock inc dword ptr [rax+rsi*4]
+    inc     esi
+    jmp     1b
+9:  ret
+
 check:
     push    rbx
     mov     rbx, rdi
@@ -309,6 +388,9 @@ selftest:
 82: cmp     ebx, 2
     setae   al
 83: lea     rdi, [rip+s_t9]
+    call    check
+    call    pf_stress
+    lea     rdi, [rip+s_t9b]
     call    check
     call    fmt_reset
     lea     rdi, [rip+s_workers]
