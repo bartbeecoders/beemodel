@@ -923,6 +923,7 @@ src/animed.s    the Dope Sheet and the Graph Editor
 src/arm.s       armatures: bones, poses, skinning (LBS / DQS), automatic weights, modes
 src/rig.s       constraints, IK (FABRIK / CCD), drivers, motion paths, onion skins
 src/shape.s     shape keys
+src/clip.s      contact points between polytopes: faces clipped
 src/collide.s   convex collision: support functions, GJK, EPA
 src/mech.s      mechanisms: revolute / slider joints, gears, limits, collisions
 src/cloth.s     cloth and soft bodies: XPBD, pins, colliders, self collision, wind

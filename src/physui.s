@@ -5,7 +5,7 @@
 #  type (Active / Passive) and shape (box, sphere, capsule, hull, compound)
 #  as buttons that step through them, its mass, friction, bounce and
 #  damping as fields to drag, x to remove it; its joints (x removes one);
-#  the world (gravity, steps a second, solver iterations); while the
+#  the world (gravity, steps a second, solver iterations, substeps); while the
 #  simulation runs, what it is doing.
 #
 #  Hit codes carry 0x80000 (mods.s passes them here): | 0x10000 a button
@@ -28,6 +28,7 @@
 .equ RW_GRAV,   0
 .equ RW_RATE,   12
 .equ RW_ITER,   16
+.equ RW_SUB,    24
 .equ RW_SET,    20
 .equ JT_TYPE,   0
 .equ JT_A,      4
@@ -41,18 +42,20 @@
 .equ PF_GRAV,   4                       #  the world's
 .equ PF_RATE,   5
 .equ PF_ITER,   6
-.equ NFIELD,    7
+.equ PF_SUB,    7
+.equ NFIELD,    8
 .equ MAXBTN,    16
 .equ MAXROW,    12
 
 .section .rodata
 .align 4
-pf_step:        .float 0.02, 0.005, 0.005, 0.005, 0.02, 0.5, 0.1
-pf_max:         .float 1e6, 2.0, 1.0, 10.0, 1e3, 1000.0, 200.0
-pf_min:         .float 0.001, 0.0, 0.0, 0.0, -1e3, 1.0, 1.0
+pf_step:        .float 0.02, 0.005, 0.005, 0.005, 0.02, 0.5, 0.1, 0.05
+pf_max:         .float 1e6, 2.0, 1.0, 10.0, 1e3, 1000.0, 200.0, 64.0
+pf_min:         .float 0.001, 0.0, 0.0, 0.0, -1e3, 1.0, 1.0, 1.0
 pf_g:           .float -9.81
 pf_120:         .float 120.0
 pf_10:          .float 10.0
+pf_4:           .float 4.0
 s_physics:      .asciz "Physics"
 s_add_rb:       .asciz "+ Rigid Body"
 s_x:            .asciz "x"
@@ -68,6 +71,7 @@ s_l_world:      .asciz "World"
 s_l_grav:       .asciz "Gravity"
 s_l_rate:       .asciz "Steps / s"
 s_l_iter:       .asciz "Iterations"
+s_l_sub:        .asciz "Substeps"
 s_l_sim:        .asciz "Simulation"
 s_to:           .asciz " to "
 s_world:        .asciz "world"
@@ -288,10 +292,17 @@ rp_value:
     je      9f
     cvtsi2ss xmm0, dword ptr [rcx+RW_RATE]
     ret
-3:  movss   xmm0, [rip+pf_10]
+3:  cmp     edi, PF_SUB
+    je      4f
+    movss   xmm0, [rip+pf_10]
     cmp     dword ptr [rcx+RW_ITER], 0
     je      9f
     cvtsi2ss xmm0, dword ptr [rcx+RW_ITER]
+    ret
+4:  movss   xmm0, [rip+pf_4]
+    cmp     dword ptr [rcx+RW_SUB], 0
+    je      9f
+    cvtsi2ss xmm0, dword ptr [rcx+RW_SUB]
 9:  ret
 
 # rb_props_draw(edi=y) -> eax = y below the section
@@ -527,7 +538,7 @@ rb_props_draw:
 
 .section .rodata
 .align 8
-world_lbl:      .quad s_l_grav, s_l_rate, s_l_iter
+world_lbl:      .quad s_l_grav, s_l_rate, s_l_iter, s_l_sub
 .text
 
 # ---- hits ------------------------------------------------------------------------
@@ -797,7 +808,11 @@ rb_drag_move:
     jne     4f
     mov     [rdx+RW_RATE], eax
     jmp     8f
-4:  mov     [rdx+RW_ITER], eax
+4:  cmp     ecx, PF_SUB
+    jne     5f
+    mov     [rdx+RW_SUB], eax
+    jmp     8f
+5:  mov     [rdx+RW_ITER], eax
 8:  mov     dword ptr [rip+dirty], 1
 9:  add     rsp, 16
     pop     r13

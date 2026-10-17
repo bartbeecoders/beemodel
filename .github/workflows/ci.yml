@@ -93,6 +93,8 @@ jobs:
 
       - name: Logic graphs (events, actions, data nodes in play mode; door, pickup, platform)
         run: timeout 300 python tests/logic.py build/beemodel build/shots
+      - name: Rigid-body solver (stacks)
+        run: timeout 600 python tests/solver.py build/beemodel
 
       - name: Lighting tools (light probes, lightmaps, glTF through the Khronos validator)
         run: timeout 600 python tests/lighting.py build/beemodel build/shots
