@@ -176,7 +176,26 @@ poly_clip:
     mov     dword ptr [rbx+CL_FLIP], 1
     xchg    r12, r14
     xchg    r13d, r15d
-1:  call    cl_basis                    # t1, t2 square to n (t1 x t2 = n)
+1:  movss   xmm1, [rbx+CL_MG]           # the other side: its points within
+    cmp     dword ptr [rbx+CL_FLIP], 0  #  the margin of its support plane
+    jne     11f                         #  (closing fast: all the corners
+    maxss   xmm1, [rbx+CL_TB]           #  that can reach the face this step)
+    lea     rdi, [rbx+CL_VB]
+    mov     esi, [rbx+CL_NB]
+    movaps  xmm0, [rbx+CL_N]
+    xorps   xmm0, [rip+cl_sign]
+    lea     rdx, [rbx+CL_FB]
+    call    cl_feature
+    mov     r15d, eax
+    jmp     12f
+11: maxss   xmm1, [rbx+CL_TA]
+    lea     rdi, [rbx+CL_VA]
+    mov     esi, [rbx+CL_NA]
+    movaps  xmm0, [rbx+CL_N]
+    lea     rdx, [rbx+CL_FA]
+    call    cl_feature
+    mov     r15d, eax
+12: call    cl_basis                    # t1, t2 square to n (t1 x t2 = n)
     mov     rdi, r12                    # its outline, in order
     mov     esi, r13d
     lea     rdx, [rbx+CL_TMP]

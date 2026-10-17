@@ -39,6 +39,7 @@
 .equ PB_SHAPE,  4
 .equ PB_JOINT,  5                       # (| the joint << 8)
 .equ PB_INST,   6                       # the object / its instances
+.equ PB_MAT,    7                       # the next material preset
 .equ PF_MASS,   0                       # fields: body values 0-3,
 .equ PF_GRAV,   4                       #  the world's
 .equ PF_RATE,   5
@@ -66,6 +67,17 @@ s_l_body:       .asciz "Body"
 s_l_bodies:     .asciz "Bodies"
 s_b_object:     .asciz "The object"
 s_b_inst:       .asciz "Its instances"
+s_l_mat:        .asciz "Material"
+pm_lbl:         .quad pm_l0, pm_l1, pm_l2, pm_l3, pm_l4, pm_l5
+pm_l0:          .asciz "Default"
+pm_l1:          .asciz "Rubber"
+pm_l2:          .asciz "Ice"
+pm_l3:          .asciz "Wood"
+pm_l4:          .asciz "Metal"
+pm_l5:          .asciz "Stone"
+pm_custom:      .asciz "Custom"
+.align 4
+pm_fb:          .float 0.5, 0.0,  0.9, 0.8,  0.02, 0.05,  0.5, 0.3,  0.35, 0.15,  0.7, 0.1
 s_l_mass:       .asciz "Mass"
 s_l_fric:       .asciz "Friction"
 s_l_bounce:     .asciz "Bounce"
@@ -156,7 +168,7 @@ rb_get:
     jz      8f
     mov     rbx, rax
     xor     r13d, r13d
-1:  cmp     r13d, 6
+1:  cmp     r13d, 7
     jae     8f
     lea     rax, [rip+get_names]
     mov     rsi, [rax+r13*8]
@@ -166,7 +178,14 @@ rb_get:
     jnz     2f
     inc     r13d
     jmp     1b
-2:  cmp     r13d, 2
+2:  cmp     r13d, 6                     # group: RB_FLAGS bits 4-7
+    jne     21f
+    mov     eax, [rbx+RB_FLAGS]
+    shr     eax, 4
+    and     eax, 15
+    cvtsi2ss xmm0, eax
+    jmp     4f
+21: cmp     r13d, 2
     jae     3f
     cvtsi2ss xmm0, dword ptr [rbx+RB_TYPE+r13*4]
     jmp     4f
@@ -182,13 +201,14 @@ rb_get:
 
 .section .rodata
 .align 8
-get_names:      .quad g_type, g_shape, s_g_mass, g_fric, g_bounce, g_damp
+get_names:      .quad g_type, g_shape, s_g_mass, g_fric, g_bounce, g_damp, g_group
 g_type:         .asciz "type"
 g_shape:        .asciz "shape"
 s_g_mass:       .asciz "mass"
 g_fric:         .asciz "friction"
 g_bounce:       .asciz "bounce"
 g_damp:         .asciz "damping"
+g_group:        .asciz "group"
 .text
 
 # ---- drawing ---------------------------------------------------------------------
@@ -311,6 +331,23 @@ rp_value:
     cvtsi2ss xmm0, dword ptr [rcx+RW_SUB]
 9:  ret
 
+# pm_which(rdi=entry) -> eax = the material preset its friction and bounce
+#   are (-1: its own)
+pm_which:
+    xor     eax, eax
+    lea     rcx, [rip+pm_fb]
+1:  mov     edx, [rcx+rax*8]
+    cmp     edx, [rdi+RB_MASS+4]
+    jne     2f
+    mov     edx, [rcx+rax*8+4]
+    cmp     edx, [rdi+RB_MASS+8]
+    je      9f
+2:  inc     eax
+    cmp     eax, 6
+    jb      1b
+    mov     eax, -1
+9:  ret
+
 # rb_props_draw(edi=y) -> eax = y below the section
 rb_props_draw:
     push    rbx
@@ -410,7 +447,23 @@ rb_props_draw:
     lea     ecx, [rbp+rbp+4]
     call    rp_button
     add     r12d, 22
-13:
+13: mov     edi, r12d                   # Material: [the preset it matches]
+    lea     rsi, [rip+s_l_mat]
+    call    rp_label
+    mov     rdi, r13
+    call    pm_which
+    lea     r8, [rip+pm_custom]
+    test    eax, eax
+    js      14f
+    lea     rcx, [rip+pm_lbl]
+    mov     r8, [rcx+rax*8]
+14: mov     edi, PB_MAT|0x10000
+    mov     esi, [rip+ed_x]
+    add     esi, 110
+    mov     edx, r12d
+    lea     ecx, [rbp+rbp+4]
+    call    rp_button
+    add     r12d, 22
     xor     r15d, r15d                  # mass, friction, bounce, damping
 2:  cmp     r15d, 4
     jae     3f
@@ -692,8 +745,22 @@ rb_drag_begin:
     xor     eax, eax
 31: mov     [r13+RB_SHAPE], eax
     jmp     .Lpb_done
-32: cmp     eax, PB_INST
+33: cmp     eax, PB_MAT                 # the next preset: friction, bounce
     jne     4f
+    mov     rdi, r13
+    call    pm_which
+    inc     eax                         # (custom: -1 -> the first)
+    cmp     eax, 6
+    jb      34f
+    xor     eax, eax
+34: lea     rcx, [rip+pm_fb]
+    mov     edx, [rcx+rax*8]
+    mov     [r13+RB_MASS+4], edx
+    mov     edx, [rcx+rax*8+4]
+    mov     [r13+RB_MASS+8], edx
+    jmp     .Lpb_done
+32: cmp     eax, PB_INST
+    jne     33b
     call    rb_back                     # the object / its instances
     xor     dword ptr [r13+RB_FLAGS], 2
     jmp     .Lpb_done

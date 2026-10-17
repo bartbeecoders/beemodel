@@ -57,6 +57,9 @@
 .equ RB_FLAGS,  28                      # bit 0: RB_INIT holds the start; bit 1:
                                         #  its instances are the bodies
 .equ RB_INIT,   32                      # loc rot scale at the start (9 floats)
+.equ RB_VEL,    68                      # its velocity at the start (3 floats)
+.equ RBF_GRP,   4                       # RB_FLAGS bits 4-7: its group (0-15);
+.equ RBF_IGN,   16                      #  16-31: the groups it does not meet
 .equ JT_TYPE,   0                       # 1 fixed, 2 hinge, 3 point
 .equ JT_A,      4                       # object uids (B 0: the world)
 .equ JT_B,      8
@@ -87,8 +90,12 @@
 .equ BD_JOINT,  272                     # in a joint (no contact with its partner)
 .equ BD_INST,   276                     # an instance: its index + 1 (0: an object)
 .equ BD_BVH,    280                     # a mesh: its triangles' tree (root + 1)
+.equ BD_GRP,    284                     # its group's bit; | the groups it does
+                                        #  not meet << 16
 .equ BD_SCL,    288                     # its scale (instances: their own)
-.equ BD_SZ,     304
+.equ BD_PP,     304                     # where the step began: its position,
+.equ BD_PQ,     320                     #  orientation (continuous collision)
+.equ BD_SZ,     336
 # a part (collide.s)
 .equ PT_TYPE,   0
 .equ PT_NV,     4
@@ -250,6 +257,7 @@ rx_qid:         .float 0, 0, 0, 1
 rx_wmask:       .long 0, 0, 0, -1
 rx_negy:        .long 0, 0x80000000, 0, 0
 rx_negz:        .long 0, 0, 0x80000000, 0
+rx_sign4:       .long 0x80000000, 0x80000000, 0x80000000, 0x80000000
 rx_xy:          .long -1, -1, 0, 0
 rx_yz:          .long 0, -1, -1, 0
 rx_tiny4:       .float 1e-9, 1e-9, 1e-9, 1
@@ -304,6 +312,8 @@ rx_keep:        .float 0.04                 # points kept this far apart,
 rx_drift2:      .float 0.0004               #  sliding less than 2 cm
 rx_same2:       .float 0.0004               # a new point this near an old one
 rx_slop:        .float 0.002
+rx_ccd_tol:     .float 0.005                # continuous collision: touching,
+rx_ccd_back:    .float 0.02                 #  and how far short (of the step)
 rx_gmin:        .float 0.05                 # the grid's smallest cell
 rx_pushmax:     .float 1.0
 rx_hzmax:       .float 60.0                 # soft contacts: at most this stiff,
@@ -1304,6 +1314,21 @@ make_body_ex:
     mov     [rbx+BD_TYPE], ecx
     mov     eax, [rip+rb_npt]
     mov     [rbx+BD_P0], eax
+    mov     eax, [r12+RB_FLAGS]         # its group (a bit), those it ignores
+    mov     ecx, eax
+    shr     ecx, RBF_GRP
+    and     ecx, 15
+    mov     edx, 1
+    shl     edx, cl
+    and     eax, 0xffff0000
+    or      eax, edx
+    mov     [rbx+BD_GRP], eax
+    cmp     dword ptr [r12+RB_TYPE], 1  # moving: its velocity at the start
+    jne     1f
+    movups  xmm0, [r12+RB_VEL-4]
+    psrldq  xmm0, 4
+    movaps  [rbx+BD_V], xmm0
+1:
     movaps  xmm0, [r8+48]               # loc, scale kept
     movaps  [rsp+144], xmm0
     movaps  xmm0, [r8+64]
@@ -1366,9 +1391,9 @@ make_body_ex:
     test    eax, eax
     jne     2f
 0:  cmp     dword ptr [r12+RB_TYPE], 2  # a thin passive box: deep below
-    jne     1f
-    xor     ecx, ecx
-11: movss   xmm0, [rsp+112+rcx*4]
+    jne     1f                          #  (a floor: its own Y only - a thin
+    mov     ecx, 1                      #  wall stays thin, speculative
+    movss   xmm0, [rsp+112+rcx*4]       #  contacts keep fast bodies out)
     comiss  xmm0, [rip+rx_thin]
     jae     12f
     movss   xmm3, [rip+rx_thick]
@@ -1377,10 +1402,7 @@ make_body_ex:
     movss   xmm4, [rsp+96+rcx*4]
     subss   xmm4, xmm3
     movss   [rsp+96+rcx*4], xmm4
-12: inc     ecx
-    cmp     ecx, 3
-    jb      11b
-    movaps  xmm1, [rsp+112]
+12: movaps  xmm1, [rsp+112]
 1:  movaps  [r15+PT_HALF], xmm1
     jmp     .Lmb_mass
 2:  movaps  xmm0, xmm1                  # r = the largest half (sphere),
@@ -1422,6 +1444,7 @@ make_body_ex:
     mov     rdi, r14
     mov     rsi, rax
     call    decompose
+    jmp     .Lmb_mass
 .Lmb_mesh:                              # a mesh collider: a part a triangle
     mov     rdi, r14
     lea     rsi, [rsp+96]
@@ -2573,6 +2596,7 @@ rb_step:
     inc     dword ptr [rip+rb_stepno]
     call    now_ns
     mov     rbx, rax
+    call    ccd_mark                    # where the moving bodies begin
     call    broad                       # pairs of parts: manifolds kept / made
     xor     edi, edi
     call    rb_lap
@@ -2613,11 +2637,256 @@ rb_step:
 23: inc     ebx
     jmp     21b
 22: mov     rbx, [rsp]
-2:  mov     edi, 3
+2:  call    ccd_pass                    # fast ones: stopped short of statics
+    mov     edi, 3
     call    rb_lap
     add     rsp, 16
     pop     rbx
     ret
+# ccd_mark - each moving body's place at the step's start
+ccd_mark:
+    xor     ecx, ecx
+1:  cmp     ecx, [rip+rb_nb]
+    jae     9f
+    BODY    rax, rcx
+    cmp     dword ptr [rax+BD_TYPE], 1
+    jne     2f
+    movaps  xmm0, [rax+BD_POS]
+    movaps  [rax+BD_PP], xmm0
+    movaps  xmm0, [rax+BD_Q]
+    movaps  [rax+BD_PQ], xmm0
+2:  inc     ecx
+    jmp     1b
+9:  ret
+
+# ccd_pass - continuous collision for fast bodies: a moving body that went
+#   more than half its size this step, against each static part it has a
+#   manifold with: conservative advancement from where it began (the gap
+#   over the most it can close: its speed along the normal and its turning
+#   times its reach) to the first time of impact; it is put there (a
+#   little short), its velocity kept - the next step's contact stops it
+.equ CC_PXA,    0                       # (the frame)
+.equ CC_PXB,    80
+.equ CC_RES,    160
+.equ CC_ROWS,   224                     # rows at time t
+.equ CC_POS,    272
+.equ CC_Q,      288
+.equ CC_T,      304                     # its earliest impact so far
+.equ CC_SZ,     320
+ccd_pass:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, CC_SZ
+    xor     r12d, r12d                  # manifold
+1:  cmp     r12d, [rip+rb_nmf]
+    jae     9f
+    mov     rax, r12
+    shl     rax, 5
+    add     rax, [rip+rb_mx]
+    mov     ecx, [rax+MX_A]
+    mov     edx, [rax+MX_B]
+    BODY    r13, rcx                    # the moving one (r13), the static
+    BODY    r14, rdx                    #  (r14)
+    mov     r8d, [rax+MX_PA]
+    mov     r9d, [rax+MX_PB]
+    cmp     dword ptr [r13+BD_TYPE], 1
+    jne     11f
+    cmp     dword ptr [r14+BD_TYPE], 2
+    je      12f
+    jmp     8f
+11: cmp     dword ptr [r14+BD_TYPE], 1
+    jne     8f
+    cmp     dword ptr [r13+BD_TYPE], 2
+    jne     8f
+    xchg    r13, r14
+    xchg    r8d, r9d
+12: mov     [rsp+CC_T+4], r8d           # (its part, the static's)
+    mov     [rsp+CC_T+8], r9d
+    cmp     dword ptr [r13+BD_ASLEEP], 0
+    jne     8f
+    imul    rax, r8, PT_SZ              # fast: moved more than half its
+    add     rax, [rip+rb_pt]            #  smallest half (+ radius)
+    movaps  xmm0, [rax+PT_HALF]         # min(x, y, z) + r, halved
+    movaps  xmm1, xmm0
+    shufps  xmm1, xmm1, 0x55
+    minss   xmm0, xmm1
+    movaps  xmm1, [rax+PT_HALF]
+    shufps  xmm1, xmm1, 0xAA
+    minss   xmm0, xmm1
+    addss   xmm0, [rax+PT_RAD]
+    mulss   xmm0, [rip+rx_half]
+    movaps  xmm1, [r13+BD_POS]
+    subps   xmm1, [r13+BD_PP]
+    DOT3    xmm1, xmm1
+    mulss   xmm0, xmm0
+    comiss  xmm1, xmm0
+    jbe     8f
+    call    cc_toi                      # (r13 moving, r14 static; parts in
+    comiss  xmm0, [rip+rx_one]          #  the frame) -> xmm0 = TOI (>= 1:
+    jae     8f                          #  none)
+    mov     rdi, r13                    # there (its pose at TOI), velocity
+    call    cc_place                    #  kept
+8:  inc     r12d
+    jmp     1b
+9:  lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# cc_toi -> xmm0 = the first time (0..1 of the step) the moving part comes
+#   within 5 mm of the static one (>= 1: not this step)
+cc_toi:
+    push    rbx
+    push    r15
+    sub     rsp, 8                      # (the caller's frame at +32)
+    xorps   xmm0, xmm0
+    movss   [rsp+32+CC_T], xmm0         # t
+    mov     ebx, 24                     # (iterations)
+1:  movss   xmm0, [rsp+32+CC_T]
+    call    cc_pose_here
+    lea     rdi, [rsp+32+CC_PXA]        # the moving part at t
+    lea     rsi, [rsp+32+CC_ROWS]
+    lea     rdx, [rsp+32+CC_POS]
+    mov     ecx, [rsp+32+CC_T+4]
+    imul    rcx, rcx, PT_SZ
+    add     rcx, [rip+rb_pt]
+    call    px_place
+    lea     rdi, [rsp+32+CC_PXB]        # the static one
+    lea     rsi, [r14+BD_R]
+    lea     rdx, [r14+BD_POS]
+    mov     ecx, [rsp+32+CC_T+8]
+    imul    rcx, rcx, PT_SZ
+    add     rcx, [rip+rb_pt]
+    call    px_place
+    lea     rdi, [rsp+32+CC_PXA]
+    lea     rsi, [rsp+32+CC_PXB]
+    lea     rdx, [rsp+32+CC_RES]
+    call    collide
+    movss   xmm0, [rsp+32+CC_RES+CR_SEP]
+    comiss  xmm0, [rip+rx_ccd_tol]
+    jbe     8f                          # touching: there
+    movaps  xmm1, [r13+BD_POS]          # the most it closes over the step:
+    subps   xmm1, [r13+BD_PP]           #  its move along n + its turn x reach
+    DOT3    xmm1, [rsp+32+CC_RES+CR_N]
+    andps   xmm1, [rip+rx_abs]
+    movaps  xmm2, [r13+BD_W]
+    DOT3    xmm2, xmm2
+    sqrtss  xmm2, xmm2
+    mulss   xmm2, [rip+rb_dt]
+    mov     eax, [rsp+32+CC_T+4]
+    imul    rax, rax, PT_SZ
+    add     rax, [rip+rb_pt]
+    movaps  xmm3, [rax+PT_HALF]
+    DOT3    xmm3, xmm3
+    sqrtss  xmm3, xmm3
+    addss   xmm3, [rax+PT_RAD]
+    movaps  xmm4, [rax+PT_OFF]
+    DOT3    xmm4, xmm4
+    sqrtss  xmm4, xmm4
+    addss   xmm3, xmm4
+    mulss   xmm2, xmm3
+    addss   xmm1, xmm2
+    comiss  xmm1, [rip+rx_tiny]
+    jbe     7f                          # not closing: no impact
+    divss   xmm0, xmm1                  # dt = gap / closing
+    addss   xmm0, [rsp+32+CC_T]
+    movss   [rsp+32+CC_T], xmm0
+    comiss  xmm0, [rip+rx_one]
+    jae     7f
+    dec     ebx
+    jnz     1b
+8:  movss   xmm0, [rsp+32+CC_T]
+    jmp     9f
+7:  movss   xmm0, [rip+rx_two]          # none
+9:  add     rsp, 8
+    pop     r15
+    pop     rbx
+    ret
+# cc_pose_here(xmm0=t; r13 the body; ccd_pass's frame at rsp+8+32) - its
+#   rows and centre at t of the step (position lerped, orientation nlerped)
+cc_pose_here:
+    movss   xmm7, xmm0
+    shufps  xmm7, xmm7, 0
+    movaps  xmm0, [r13+BD_POS]
+    subps   xmm0, [r13+BD_PP]
+    mulps   xmm0, xmm7
+    addps   xmm0, [r13+BD_PP]
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [rsp+8+32+CC_POS], xmm0
+    movaps  xmm1, [r13+BD_PQ]
+    movaps  xmm2, [r13+BD_Q]
+    movaps  xmm3, xmm1
+    dpps    xmm3, xmm2, 0xF1
+    xorps   xmm4, xmm4
+    comiss  xmm3, xmm4
+    jae     1f
+    xorps   xmm2, [rip+rx_sign4]
+1:  subps   xmm2, xmm1
+    mulps   xmm2, xmm7
+    addps   xmm2, xmm1
+    movaps  xmm3, xmm2
+    dpps    xmm3, xmm3, 0xF1
+    sqrtss  xmm3, xmm3
+    shufps  xmm3, xmm3, 0
+    divps   xmm2, xmm3
+    movaps  [rsp+8+32+CC_Q], xmm2
+    lea     rdi, [rsp+8+32+CC_Q]
+    lea     rsi, [rsp+8+32+CC_ROWS]
+    jmp     q_rows
+
+# cc_place(rdi=body; xmm0 = TOI; the caller's frame at rsp+8) - the body at
+#   its pose a little before the impact (it keeps its velocity)
+cc_place:
+    push    rbx
+    sub     rsp, 16
+    mov     rbx, rdi
+    subss   xmm0, [rip+rx_ccd_back]
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    movss   xmm7, xmm0
+    shufps  xmm7, xmm7, 0
+    movaps  xmm0, [rbx+BD_POS]
+    subps   xmm0, [rbx+BD_PP]
+    mulps   xmm0, xmm7
+    addps   xmm0, [rbx+BD_PP]
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [rbx+BD_POS], xmm0
+    movaps  xmm1, [rbx+BD_PQ]
+    movaps  xmm2, [rbx+BD_Q]
+    movaps  xmm3, xmm1
+    dpps    xmm3, xmm2, 0xF1
+    xorps   xmm4, xmm4
+    comiss  xmm3, xmm4
+    jae     1f
+    xorps   xmm2, [rip+rx_sign4]
+1:  subps   xmm2, xmm1
+    mulps   xmm2, xmm7
+    addps   xmm2, xmm1
+    movaps  xmm3, xmm2
+    dpps    xmm3, xmm3, 0xF1
+    sqrtss  xmm3, xmm3
+    shufps  xmm3, xmm3, 0
+    divps   xmm2, xmm3
+    movaps  [rbx+BD_Q], xmm2
+    lea     rdi, [rbx+BD_Q]
+    lea     rsi, [rbx+BD_R]
+    call    q_rows
+    mov     rdi, rbx
+    call    body_update
+    add     rsp, 16
+    pop     rbx
+    ret
+
 # rb_lap(edi=part; rbx = the time it began) - its time added; rbx = now
 rb_lap:
     push    rdi
@@ -3285,7 +3554,19 @@ gr_test:
     je      1f
     cmp     dword ptr [rsi+BD_TYPE], 1
     jne     9f
-1:  mov     eax, 1
+1:  mov     ecx, [rdi+BD_GRP]           # groups: either ignoring the other's
+    mov     edx, [rsi+BD_GRP]           #  group, no contact
+    mov     r8d, ecx
+    shr     r8d, 16
+    and     r8d, edx
+    test    r8w, r8w
+    jnz     9f
+    mov     r8d, edx
+    shr     r8d, 16
+    and     r8d, ecx
+    test    r8w, r8w
+    jnz     9f
+    mov     eax, 1
     cmp     dword ptr [rdi+BD_JOINT], 0
     je      9f
     cmp     dword ptr [rsi+BD_JOINT], 0
@@ -3343,7 +3624,19 @@ gr_pair:
     je      1f
     cmp     dword ptr [rsi+BD_TYPE], 1
     jne     9f
-1:  cmp     dword ptr [rdi+BD_JOINT], 0
+1:  mov     r8d, [rdi+BD_GRP]           # groups (as gr_test)
+    mov     r9d, [rsi+BD_GRP]
+    mov     r10d, r8d
+    shr     r10d, 16
+    and     r10d, r9d
+    test    r10w, r10w
+    jnz     9f
+    mov     r10d, r9d
+    shr     r10d, 16
+    and     r10d, r8d
+    test    r10w, r10w
+    jnz     9f
+    cmp     dword ptr [rdi+BD_JOINT], 0
     je      2f
     cmp     dword ptr [rsi+BD_JOINT], 0
     je      2f
@@ -5089,6 +5382,9 @@ mf_bounce:
     push    r15
     sub     rsp, 8
     MFB
+    xorps   xmm0, xmm0                  # (no bounce: nothing to do - a
+    comiss  xmm0, [rbx+MF_REST]         #  speculative contact's pushing must
+    jae     9f                          #  not stop a body short)
     xor     r14d, r14d
 1:  cmp     r14d, [rbx+MF_N]
     jae     9f
@@ -6106,6 +6402,11 @@ rb_sethash:
     add     rsi, 8
     dec     ecx
     jnz     3b
+    sub     rsi, 32                     # its velocity too
+    xor     rax, [rsi+RB_VEL-4]
+    imul    rax, r8
+    xor     rax, [rsi+RB_VEL+4]
+    imul    rax, r8
     inc     edx
     jmp     2b
 4:  mov     ecx, [rbx+AN_NJT_]
@@ -7106,6 +7407,19 @@ OPERATOR op_rb_world, "rigid.world",  "Physics World",     do_rb_world, flags=OP
 
 .section .rodata
 k_active:       .asciz "active"
+k_velocity:     .asciz "velocity"
+k_group:        .asciz "group"
+k_collide:      .asciz "collide"
+k_material:     .asciz "material"
+pm_names:       .quad k_pm_def, k_pm_rubber, k_pm_ice, k_pm_wood, k_pm_metal, k_pm_stone, 0
+k_pm_def:       .asciz "default"
+k_pm_rubber:    .asciz "rubber"
+k_pm_ice:       .asciz "ice"
+k_pm_wood:      .asciz "wood"
+k_pm_metal:     .asciz "metal"
+k_pm_stone:     .asciz "stone"
+.align 4
+pm_vals:        .float 0.5, 0.0,  0.9, 0.8,  0.02, 0.05,  0.5, 0.3,  0.35, 0.15,  0.7, 0.1
 s_rb_mffull:    .asciz "  rigid bodies: no room for more contacts - some bodies may pass through others"
 k_instances:    .asciz "instances"
 k_object:       .asciz "object"
@@ -7206,7 +7520,8 @@ do_rb_add:
     push    r13
     push    r14
     push    r15
-    sub     rsp, 48
+    sub     rsp, 80                     # (+32 velocity, +44 group, +48 the
+                                        #  groups it does not meet)
     mov     dword ptr [rsp], 1          # type
     mov     dword ptr [rsp+4], 0        # shape
     mov     eax, [rip+rx_one]
@@ -7255,6 +7570,72 @@ do_rb_add:
     or      dword ptr [rsp+24], 64
     jmp     1b
 32: lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_velocity]
+    call    str_eq
+    test    eax, eax
+    jz      33f
+    mov     rsi, r12                    # velocity x y z
+    lea     rdi, [rsp+32]
+    call    rb_vec3
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lra_bad
+    or      dword ptr [rsp+24], 128
+    jmp     1b
+33: lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_group]
+    call    str_eq
+    test    eax, eax
+    jz      34f
+    mov     rsi, r12                    # group n (0-15)
+    call    rb_num
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lra_bad
+    cvttss2si eax, xmm0
+    and     eax, 15
+    mov     [rsp+44], eax
+    or      dword ptr [rsp+24], 256
+    jmp     1b
+34: lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_collide]
+    call    str_eq
+    test    eax, eax
+    jz      35f
+    mov     rsi, r12                    # collide m: the groups it meets (bits)
+    call    rb_num
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lra_bad
+    cvttss2si eax, xmm0
+    not     eax
+    and     eax, 0xffff
+    mov     [rsp+20+28], eax
+    or      dword ptr [rsp+24], 512
+    jmp     1b
+35: lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_material]
+    call    str_eq
+    test    eax, eax
+    jz      36f
+    mov     rsi, r12                    # material <preset>: friction, bounce
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lra_bad
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+pm_names]
+    call    rb_word_index
+    test    eax, eax
+    js      .Lra_bad
+    lea     rcx, [rip+pm_vals]
+    mov     edx, [rcx+rax*8]
+    mov     [rsp+12], edx               # friction
+    mov     edx, [rcx+rax*8+4]
+    mov     [rsp+16], edx               # bounce
+    or      dword ptr [rsp+24], 8|16
+    jmp     1b
+36: lea     rdi, [rip+im_word]
     lea     rsi, [rip+shape_names]
     call    rb_word_index
     test    eax, eax
@@ -7347,7 +7728,25 @@ do_rb_add:
     and     dword ptr [rdi+RB_FLAGS], ~2
     mov     ecx, [rsp+28]
     or      [rdi+RB_FLAGS], ecx
-67: and     dword ptr [rdi+RB_FLAGS], ~1  # (its start: from where it is)
+67: test    edx, 128                    # velocity
+    jz      68f
+    mov     rcx, [rsp+32]
+    mov     [rdi+RB_VEL], rcx
+    mov     ecx, [rsp+40]
+    mov     [rdi+RB_VEL+8], ecx
+68: test    edx, 256                    # group
+    jz      69f
+    and     dword ptr [rdi+RB_FLAGS], ~(15 << RBF_GRP)
+    mov     ecx, [rsp+44]
+    shl     ecx, RBF_GRP
+    or      [rdi+RB_FLAGS], ecx
+69: test    edx, 512                    # the groups it meets
+    jz      70f
+    and     dword ptr [rdi+RB_FLAGS], 0xffff
+    mov     ecx, [rsp+48]
+    shl     ecx, RBF_IGN
+    or      [rdi+RB_FLAGS], ecx
+70: and     dword ptr [rdi+RB_FLAGS], ~1  # (its start: from where it is)
     inc     r14d
 61: inc     r15d
     jmp     6b
@@ -7377,7 +7776,7 @@ do_rb_add:
     call    log_pair
     call    undo_drop_last
 .Lra_out:
-    add     rsp, 48
+    add     rsp, 80
     pop     r15
     pop     r14
     pop     r13
