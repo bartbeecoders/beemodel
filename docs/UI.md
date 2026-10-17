@@ -83,9 +83,12 @@ Files dragged from a file manager onto the window open by their kind:
 The header has:
 
 - the **mode** (Object, Edit, Sculpt, Texture / Vertex / Weight Paint);
+- the **View**, **Select** and **Object** menus (Mesh in edit mode), the same as in the menu bar;
 - vertex / edge / face select in edit mode;
 - **shading** (Wireframe, Solid, Material Preview, Rendered);
-- the ground grid and snapping.
+- the ground grid and snapping;
+- the **pivot point and orientation** button. The pivot is what turning (R) and scaling (S) go around: the median point, the 3D cursor, each object's own origin (Individual Origins) or the active object. The orientation is what X, Y and Z mean while moving (G) or turning (R): Global, Local (the active object's axes), View (screen right, up, towards you) or Normal (edit mode: the selected faces' normal). In edit mode, turning and scaling keep to the world's axes. Scripts use `view.pivot` and `view.orientation`;
+- **Overlays**: the ground grid, the text in the corner, the scene's statistics, the navigation gizmo, and the mesh checks (normals, boundary and non-manifold edges, degenerate faces).
 
 The **navigation gizmo** in the top-right corner turns the view: click a ball to look along that axis. Numpad 1, 3 and 7 do the same, with Ctrl for the opposite side. An empty scene offers quick actions in the middle of the viewport: Add a Cube, Start a Sketch, Open, Import and the templates.
 

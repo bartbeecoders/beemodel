@@ -604,6 +604,7 @@ def main():
     clipboard()
     props_ui()
     viewport_ui()
+    header_ui()
     tools_ui()
     outliner_ui()
     status_ui()
@@ -6814,6 +6815,94 @@ def viewport_ui():
     f.move(637, 300); f.move(643, 302); f.button(True); f.button(False)
     x = float(q('print(get("Cube", "x"))') or 'nan')
     check(x == round(x) and x != 0, f'Snap on: G moves in whole steps ({x})')
+    f.proc.kill()
+
+
+def header_ui():
+    """F6 (#272): the 3D viewport header's View / Select / Object (Mesh)
+    menus, the pivot point and orientation lists and the Overlays menu, and
+    transforms that follow them."""
+    print('  -- viewport header: menus, pivot, orientation, overlays --')
+    import math
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    num = lambda code: [float(v) for v in q(code).split()]
+    items = lambda: [w['label'] for w in ui_tree(m) if w['kind'] == 'menuitem']
+    def click(name):
+        x, y = widget_xy(m, name); f.click(x, y); f.pump(0.2)
+    need = {'viewport.menu_view', 'viewport.menu_select', 'viewport.menu_object',
+            'viewport.transform', 'viewport.overlays'}
+    names = {w['name'] for w in ui_tree(m)}
+    check(need <= names, f'the header has the menus, pivot, orientation and Overlays ({sorted(need - names)})')
+    click('viewport.menu_view')
+    got = items()
+    check('Ground Grid' in got and 'Wireframe' in got, f'View opens the View menu at the header ({len(got)} entries)')
+    f.key(1)
+    click('viewport.menu_object')
+    check('Duplicate' in items(), 'Object opens the Object menu')
+    f.key(1)
+    click('viewport.overlays')
+    got = items()
+    check(got[:4] == ['Ground Grid', 'Text Info', 'Statistics', 'Navigation Gizmo'] and 'Show Normals' in got,
+          f'Overlays lists what viewports draw ({got})')
+    it = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == 'Statistics'][0]
+    f.click(it['x'] + 40, it['y'] + it['h'] // 2); f.pump(0.2)
+    f.shot('header_overlays.png')
+    click('viewport.transform')
+    got = items()
+    check(got == ['Median Point', '3D Cursor', 'Individual Origins', 'Active Object', 'Global', 'Local', 'View', 'Normal'],
+          f'the pivot button lists pivot points and orientations ({got})')
+    it = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == '3D Cursor'][0]
+    f.click(it['x'] + 40, it['y'] + it['h'] // 2); f.pump(0.2)
+    f.move(600, 300)
+    def keys(*ks):
+        for k in ks:
+            if isinstance(k, str):
+                f.type(k)
+            else:
+                f.key(k)
+        f.pump(0.2)
+    # pivot: the 3D cursor (at the origin); R Z 90 turns the cube around it
+    q('op("view.cursor_reset")')
+    keys(19, 44, '90', 28)
+    x, y, z = num('print(get("Cube", "x"), get("Cube", "y"), get("Cube", "z"))')
+    check(abs(abs(x) - 1) < 1e-3 and abs(y) < 1e-3, f'pivot 3D Cursor: R Z 90 swings the cube around the origin ({x:.3f}, {y:.3f})')
+    f.mods(4); f.key(44); f.mods(0)
+    # individual origins: two cubes scaled stay where they are
+    q('add("cube", "B", 4, 1, 0); select("Cube", "B")'); q('op("view.pivot", "individual")')
+    keys(31, '2', 28)
+    r = num('print(get("Cube", "x"), get("B", "x"), get("B", "sx"))')
+    check(abs(r[0]) < 1e-3 and abs(r[1] - 4) < 1e-3 and abs(r[2] - 2) < 1e-3,
+          f'pivot Individual Origins: S 2 scales each in place ({r})')
+    f.mods(4); f.key(44); f.mods(0)
+    q('op("view.pivot", "median"); select("Cube")')
+    # orientation local: a cube turned 90 degrees about Z moves along its own X (world Y)
+    q('rotate("Cube", 0, 0, rad(90))'); q('op("view.orientation", "local")')
+    keys(34, 45, '1', 28)
+    x, y = num('print(get("Cube", "x"), get("Cube", "y"))')
+    check(abs(x) < 1e-3 and abs(y - 2) < 1e-3, f'orientation Local: G X 1 moves along the cube\'s own X ({x:.3f}, {y:.3f})')
+    keys(19, 45, '90', 28)                     # R X 90 about the local X (world Y)
+    rx, ry, rz = num('print(get("Cube", "rx"), get("Cube", "ry"), get("Cube", "rz"))')
+    def mat(a, b, c):
+        cx, sx, cy, sy, cz, sz = math.cos(a), math.sin(a), math.cos(b), math.sin(b), math.cos(c), math.sin(c)
+        return [[cy*cz, sx*sy*cz - cx*sz, cx*sy*cz + sx*sz], [cy*sz, sx*sy*sz + cx*cz, cx*sy*sz - sx*cz], [-sy, sx*cy, cx*cy]]
+    R = mat(rx, ry, rz)
+    zax = [R[0][2], R[1][2], R[2][2]]           # the cube's Z after: +-world X
+    check(abs(abs(zax[0]) - 1) < 1e-3, f'orientation Local: R X 90 turns about its own X axis (local Z now {[round(v, 3) for v in zax]})')
+    f.mods(4); f.key(44); f.key(44); f.key(44); f.mods(0)
+    # orientation normal (edit mode): the top face moves along its normal
+    q('op("view.orientation", "normal")')
+    q('rotate("Cube", 0, 0, 0)')
+    f.key(15); f.key(4); f.pump(0.2)            # Tab, 3: face select
+    check((widget(m, 'viewport.menu_object') or {}).get('label') == 'Mesh', 'edit mode: the header\'s Object menu is Mesh')
+    f.click(*project((0.2, 2, -0.3)))           # the top face
+    keys(34, 44, '1', 28)
+    v = q('volume("Cube")')
+    check(v == '= 12', f'orientation Normal: G Z 1 moves the top face along its normal ({v})')
     f.proc.kill()
 
 
