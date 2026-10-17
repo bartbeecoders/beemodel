@@ -94,6 +94,9 @@ Status), and Rendered shading.
   Numpad ., save and reopen with the scene's picture.
 
 ### Fixed
+- A GPU render of a scene with nothing to render (every mesh hidden, left out
+  of renders or deleted) after an earlier render could crash: the upload read
+  the last scene's freed arrays. They are cleared when Hive lets them go.
 - The AI Assistant: a stream line longer than its buffer (an image from
   `viewport_capture`) is left out with a note instead of spilling base64
   into the conversation; a result's later lines are indented.

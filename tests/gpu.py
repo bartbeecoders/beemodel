@@ -227,6 +227,15 @@ def main():
     check(gp[2] == 32 and mad < 0.5, f'denoised (albedo and normal passes from the GPU): the CPU\'s image '
                                      f'(mean difference {mad:.4f})')
 
+    # ---- an empty scene after a full one (the last scene's arrays are gone) ----------
+    e1 = os.path.join(HOME, 'empty1.png'); e2 = os.path.join(HOME, 'empty2.png')
+    r = run(SCENE + 'op("render.image", "%s 64 48 4 0")\n'
+            'n = count()\nfor i in 0..n {\n j = n - 1 - i\n if objtype(name(j)) == 0 { delete(name(j)) }\n}\nm = 0\nfor i in 0..count() {\n if objtype(name(i)) == 0 { m = m + 1 }\n}\nprint("meshes", m)\n'
+            'for k in 0..3 { op("render.image", "%s 64 48 4 0") }\n'
+            'print("empty", gpu(0))\n' % (e1, e2), BEEMODEL_GPU='any')
+    check(r.get('empty') == ['1'] and r.get('meshes') == ['0'] and os.path.exists(e2),
+          f'a scene emptied after a render (no meshes left) renders on the GPU, three times ({r.get("meshes")})')
+
     # ---- the helper dying ------------------------------------------------------------
     c, _ = render('materials_cpu', SCENE, 64, BEEMODEL_GPU='off')
     p, gp = render('fail', SCENE, 64, BEEMODEL_GPU='any', BEEMODEL_GPU_FAIL='2')

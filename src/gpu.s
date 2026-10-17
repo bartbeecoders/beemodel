@@ -782,10 +782,18 @@ gp_put:
     push    rcx
     push    rsi
     mov     ecx, MA_SZ
+    test    rsi, rsi                    # (none: an empty scene, zeros)
+    jz      23f
     rep     movsb
-    pop     rsi
+    jmp     24f
+23: xor     eax, eax
+    rep     stosb
+24: pop     rsi
     pop     rcx
+    test    rsi, rsi
+    jz      25f
     add     rsi, MA_SZ
+25:
     inc     ecx
     jmp     21b
 22:
