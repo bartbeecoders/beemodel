@@ -18,6 +18,7 @@
 #          CADD  the CAD document: unit (mm, double), parameters
 #          SKCH  sketches: count, then (object index, sketch block) each
 #          UIDS  persistent object ids: count, one per object, the next id
+#          PRNT  parents: count, a parent uid per object (0 none; parent.s)
 #          THMB  (first, when saved with a window) a picture of the 3D
 #                viewport for the file browser (thumb.s)
 #  OBJ   import (one object, n-gons, v/vt/vn and negative indices) / export
@@ -67,6 +68,7 @@
 .equ TAG_CADD,      0x44444143          # "CADD"
 .equ TAG_SKCH,      0x48434b53          # "SKCH"
 .equ TAG_UIDS,      0x53444955          # "UIDS"
+.equ TAG_PRNT,      0x544e5250          # "PRNT"
 .equ TAG_MRES,      0x5345524D          # "MRES"
 .equ TAG_MUVS,      0x5356554D          # "MUVS"
 .equ TAG_IMGD,      0x44474D49          # "IMGD"
@@ -116,6 +118,8 @@ mgrf_chunk:     .skip 8
 cadd_chunk:     .skip 8
 skch_chunk:     .skip 8
 uids_chunk:     .skip 8
+prnt_chunk:     .skip 8
+prnt_size:      .skip 4
 ox_vt:          .skip 4                 # OBJ export: the next vt number
 .align 8
 mres_chunk:     .skip 8
@@ -539,6 +543,10 @@ bee_save:
     mov     edi, TAG_UIDS
     call    chunk_begin
     call    uids_write
+    call    chunk_end
+    mov     edi, TAG_PRNT               # PRNT (parents, by uid)
+    call    chunk_begin
+    call    par_write
     call    chunk_end
     mov     edi, TAG_MRES               # MRES (multires displacements)
     call    chunk_begin
@@ -1183,6 +1191,7 @@ bee_load:
     mov     qword ptr [rip+cadd_chunk], 0
     mov     qword ptr [rip+skch_chunk], 0
     mov     qword ptr [rip+uids_chunk], 0
+    mov     qword ptr [rip+prnt_chunk], 0
     mov     qword ptr [rip+mres_chunk], 0
     mov     qword ptr [rip+muvs_chunk], 0
     mov     qword ptr [rip+imgd_chunk], 0
@@ -1211,7 +1220,13 @@ bee_load:
     call    need
     jc      .Lbl_bad
     mov     eax, [rbx]
-    cmp     eax, TAG_MESH
+    cmp     eax, TAG_PRNT
+    jne     201f
+    lea     rax, [rbx+8]
+    mov     [rip+prnt_chunk], rax
+    mov     [rip+prnt_size], ebp
+    jmp     23f
+201:cmp     eax, TAG_MESH
     jne     21f
     cmp     dword ptr [rip+n_mesh_tab], MAX_FILE_MESHES
     jae     .Lbl_bad
@@ -1486,7 +1501,12 @@ bee_load:
     jz      771f
     mov     esi, [rip+uids_size]
     call    uids_read
-771:mov     rdi, [rip+muvs_chunk]       # UVs and seams
+771:mov     rdi, [rip+prnt_chunk]       # parents (by those uids)
+    test    rdi, rdi
+    jz      772f
+    mov     esi, [rip+prnt_size]
+    call    par_read
+772:mov     rdi, [rip+muvs_chunk]       # UVs and seams
     test    rdi, rdi
     jz      773f
     mov     esi, [rip+muvs_size]

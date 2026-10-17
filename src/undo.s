@@ -304,6 +304,7 @@ restore_step:
     jmp     3b
 8:  mov     dword ptr [rip+outl_scroll], 0
     mov     dword ptr [rip+dirty], 1
+    call    par_reset                   # (as they are: nothing to follow)
     pop     r13
     pop     r12
     pop     rbx

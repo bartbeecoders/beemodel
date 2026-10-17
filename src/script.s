@@ -363,6 +363,8 @@ builtins:
     .long 0, 0
     .quad bn_issel, b_issel
     .long 1, 1
+    .quad bn_parent, b_parent
+    .long 1, 1
     .quad bn_op, b_op
     .long 1, 2
     .quad bn_edit, b_edit
@@ -725,6 +727,7 @@ bn_count:       .asciz "count"
 bn_name:        .asciz "name"
 bn_active:      .asciz "active"
 bn_issel:       .asciz "issel"
+bn_parent:      .asciz "parent"
 bn_op:          .asciz "op"
 bn_edit:        .asciz "edit"
 bn_verts:       .asciz "verts"
@@ -4313,6 +4316,29 @@ b_issel:
 1:  add     rsp, 8
     cvtsi2sd xmm0, ecx
     jmp     ret_num
+
+# parent(name) - the name of the object it follows, or nil
+b_parent:
+    sub     rsp, 8
+    call    a_str
+    mov     rdi, rax
+    call    obj_find
+    test    eax, eax
+    jz      8f
+    mov     edi, eax
+    call    obj_get
+    mov     rdi, rax
+    call    par_of
+    test    rax, rax
+    jz      8f
+    mov     rsi, rax                    # (its name)
+    call    sh_dup
+    mov     rdx, rax
+    mov     eax, T_STR
+    add     rsp, 8
+    ret
+8:  add     rsp, 8
+    jmp     ret_nil
 
 b_count:
     cvtsi2sd xmm0, dword ptr [rip+obj_count]

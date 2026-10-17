@@ -57,6 +57,8 @@ These work the same everywhere.
 - **Enter** or **Space** works the focused widget, the **arrow keys** step a number or an option, and **Esc** lets go of the focus.
 - In menus: Up / Down, Right / Left for submenus and the next menu, Enter.
 
+**Parenting.** **Ctrl+P** (Object > Parent) makes the selected objects children of the active one; **Alt+P** frees them. A child stays where it is, then follows its parent: when the parent moves, turns or scales - by hand, by a field, a script, an animation or physics - so does the child, and its children in turn. Parents are kept in `.bee` files; scripts use `op("object.parent_set", "child parent")` and `parent(name)`.
+
 Views **glide** to where they go when you align to an axis (the gizmo, Numpad 1 / 3 / 7), reset the camera (Home) or frame the selection (Numpad .: the selection, or everything, in the middle of the view). **Preferences > Interface > Reduce motion** makes them jump there at once; scripts and agents always jump.
 
 ## Menus and dialogs
@@ -102,7 +104,7 @@ The tabs down the left side of Properties are:
 
 | Tab | What it holds |
 |---|---|
-| **Object** | Name, location, rotation, scale, visibility, colour. Also a light's power and colour, a camera's lens and "Render from This Camera", and a curve's shape. After **Object > Print Check**, its findings: closed or not, the thinnest wall, overhangs and the size, each with a **Show** button that selects those edges or faces in edit mode and frames them |
+| **Object** | Name, location, rotation, scale, visibility, colour, the parent (the object it follows). Also a light's power and colour, a camera's lens and "Render from This Camera", and a curve's shape. After **Object > Print Check**, its findings: closed or not, the thinnest wall, overhangs and the size, each with a **Show** button that selects those edges or faces in edit mode and frames them |
 | **Modifiers** | The stack (on / off, order, Apply, remove) with every value, including object and node-tree pickers |
 | **Material** | Material picker and New, base colour, metallic, roughness, transmission, emission and more. Images, and the paint layer stack while texture painting |
 | **Physics** | Rigid bodies, cloth and soft bodies, colliders, joints, wind, the simulation cache |
@@ -117,7 +119,7 @@ The tabs down the left side of Properties are:
 
 ## Other editors
 
-- **Outliner.** Each row has a type icon, the name (gold when active), a lock (locked: clicks in the viewport pass through it), a camera (off: renders leave it out) and an eye (hidden). All three are saved in `.bee` files. Click a row to select it, Ctrl+click to add or remove it, Shift+click to select the rows from the active one to it. Double-click a row or press F2 to rename. The filter field at the bottom finds objects by name.
+- **Outliner.** Each row has a type icon, the name (gold when active), a lock (locked: clicks in the viewport pass through it), a camera (off: renders leave it out) and an eye (hidden). All three are saved in `.bee` files. Click a row to select it, Ctrl+click to add or remove it, Shift+click to select the rows from the active one to it. Children are listed under their parent, indented; the arrow folds them away. Drag a row onto another to make it that object's child, or onto the empty part of the outliner to free it. Double-click a row or press F2 to rename. The filter field at the bottom finds objects by name.
 - **Timeline.** Play, step and the frame range, plus auto-key, which keys every confirmed move.
 - **Dope Sheet / Graph Editor.** Interpolation, handles, duplicate and delete for the selected keys.
 - **Node Editor.** The header chooses the graph (a material or a node tree). The Add menu filters as you type.

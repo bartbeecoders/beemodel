@@ -211,6 +211,7 @@
 .equ DRAG_AREA,         14      # an area's header / corner dragged (workspace.s)
 .equ DRAG_NAV,          20      # LMB down on the navigation gizmo: click (a view) or drag (orbit)
 .equ DRAG_ZOOM,         21      # the gizmo's zoom handle dragged
+.equ DRAG_OUTL,         22      # an outliner row pressed: a click, or dragged onto another (parent)
 .equ POPUP_R,           6         # corner radius of menus, palette, dialogs
 .equ FIELD_R,           4         # ... of fields and buttons
 .equ TH_DARK,           0         # UI themes (theme.s)
@@ -463,6 +464,7 @@
 .equ OBF_HIDDEN,    0x200   # not drawn, rendered or collided with (object.hide, logic graphs)
 .equ OBF_LOCKED,    0x400   # not selectable in the viewport (the outliner's lock)
 .equ OBF_NORENDER,  0x800   # left out of renders (the outliner's camera)
+.equ OBF_COLLAPSED, 0x1000  # its children folded away in the outliner
 .equ OT_MESH,       0
 .equ OT_LIGHT,      1
 .equ OT_CAMERA,     2

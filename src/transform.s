@@ -264,6 +264,14 @@ tm_start:
     call    obj_at
     test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
     jz      11f
+    push    rax                         # (a selected parent moves it: not twice)
+    push    rax
+    mov     rdi, rax
+    call    par_selected_ancestor
+    test    eax, eax
+    pop     rax
+    pop     rax
+    jnz     11f
     mov     ecx, [rip+tm_n]
     imul    rdi, rcx, TS_SZ
     lea     rdx, [rip+tm_snap]
