@@ -156,6 +156,21 @@ hv_free_all:
     jmp     1b
 2:  mov     dword ptr [rip+hv_nbuf], 0
     mov     dword ptr [rip+hv_ready], 0
+    xor     eax, eax                    # (nothing points at the freed pages:
+    mov     [rip+hv_n], eax             #  an empty scene uploads zeros)
+    mov     [rip+hv_nmats], eax
+    mov     [rip+hv_nn4], eax
+    mov     [rip+hv_tv], rax
+    mov     [rip+hv_tn], rax
+    mov     [rip+hv_tm], rax
+    mov     [rip+hv_to], rax
+    mov     [rip+hv_tuv], rax
+    mov     [rip+hv_tvc], rax
+    mov     [rip+hv_mats], rax
+    mov     [rip+hv_nodes], rax
+    mov     [rip+b_cent], rax
+    mov     [rip+b_box], rax
+    mov     [rip+b_prim], rax
     pop     rbx
     ret
 
