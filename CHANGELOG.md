@@ -34,6 +34,10 @@ project uses [Semantic Versioning](https://semver.org/).
   attractors, particles, smoke and fire.
 
 ### Fixed
+- Sculpting: each thread's sums for a dab (the area's weight, centre and
+  normal) get a cache line of their own. Two threads shared one, and how
+  much that cost depended on where the linker put them (a brush frame took
+  4.1 ms instead of 2.6 when unrelated data moved).
 - `parallel_for`: a worker still finishing one call could claim a chunk of
   the next with the old chunk size and the new range end, and run part of
   it twice (a crash or a wrong result when many calls with different chunk
