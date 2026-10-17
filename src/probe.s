@@ -59,6 +59,9 @@
 .equ RMAX,      8
 
 .section .rodata
+.align 4
+pbj_one:        .float 1.0
+
 .align 16
 qf_xyz:         .long -1, -1, -1, 0
 qf_abs:         .long 0x7fffffff, 0x7fffffff, 0x7fffffff, 0
@@ -104,7 +107,8 @@ pb_nbaked:      .skip 4
 
 .text
 OPERATOR op_probe_add,    "probe.add",    "Add Light Probe", do_probe_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a light probe: probe.add irradiance|reflection [x y z] [half size x y z] [grid points x y z] (an irradiance volume: grid points over its box; a reflection probe: a cube map from its centre, box-projected); probe.bake bakes them"
-OPERATOR op_probe_bake,   "probe.bake",   "Bake Light Probes", do_probe_bake, flags=OPF_AI_SAFE|OPF_UNDO, doc="Bake every light probe with the path tracer: probe.bake [rays a point] (default 256; reflection probes: an eighth of that a texel, at least 4)"
+OPERATOR op_probe_bake,   "probe.bake",   "Bake Light Probes", job_probe_bake, flags=OPF_AI_SAFE|OPF_UNDO, doc="Bake every light probe with the path tracer: probe.bake [rays a point] (default 256; reflection probes: an eighth of that a texel, at least 4)"
+JOB_OP job_probe_bake, do_probe_bake, "Baking light probes"
 OPERATOR op_probe_remove, "probe.remove", "Remove Light Probe", do_probe_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a light probe: probe.remove <number from 1>"
 OPERATOR op_probe_clear,  "probe.clear",  "Remove All Light Probes", do_probe_clear, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove every light probe"
 
@@ -505,6 +509,14 @@ do_probe_bake:
     imul    rcx, rbx, PR_SZ
     lea     r12, [rax+PB_HDR+rcx]
     mov     [rip+pb_rec], r12
+    cvtsi2ss xmm1, dword ptr [rax+PB_N] # (the status bar: each probe a share)
+    cvtsi2ss xmm0, ebx
+    divss   xmm0, xmm1
+    movss   xmm2, [rip+pbj_one]
+    divss   xmm2, xmm1
+    movss   xmm1, xmm2
+    call    job_stage
+    mov     r12, [rip+pb_rec]
     cmp     dword ptr [r12+PR_KIND], 1
     jne     3f
     mov     edx, [r12+PR_RES]           # irradiance: a job a point

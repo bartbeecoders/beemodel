@@ -474,6 +474,8 @@ edge_cursors: .byte  1, 27,27, 1,26,29,28, 1,26,28,29, 1, 1, 1, 1, 1
 # -----------------------------------------------------------------------------
 # ui_motion(edi=x, esi=y)
 ui_motion:
+    cmp     dword ptr [rip+job_on], 0   # (a long job runs: no input)
+    jne     job_ignore
     cmp     dword ptr [rip+tm_mode], 0
     je      0f
     mov     [rip+ptr_x], edi
@@ -786,6 +788,8 @@ toggle_maximize:
 
 # ui_button(edi=button, esi=state, edx=serial, ecx=time)
 ui_button:
+    cmp     dword ptr [rip+job_on], 0   # (a long job runs: no input)
+    jne     job_ignore
     test    esi, esi                    # a press: the keyboard lets go
     jz      71f
     call    kbnav_mouse
@@ -1364,6 +1368,8 @@ ui_button:
 
 # ui_axis(edi=axis, esi=value 24.8 fixed)
 ui_axis:
+    cmp     dword ptr [rip+job_on], 0   # (a long job runs: no input)
+    jne     job_ignore
     test    edi, edi
     jnz     9f
     test    esi, esi
@@ -1605,6 +1611,8 @@ ui_key_repeat:
     jz      kb_repeat_stop
 # ui_key_press(edi=evdev) - one key stroke: menus, text field, then keymap
 ui_key_press:
+    cmp     dword ptr [rip+job_on], 0   # (a long job runs: no input)
+    jne     job_ignore
     cmp     qword ptr [rip+pr_capture], 0  # Preferences > Keymap waits for a key
     jne     prefs_key
     cmp     dword ptr [rip+tm_mode], 0  # a running transform takes every key

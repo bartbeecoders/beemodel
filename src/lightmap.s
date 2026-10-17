@@ -53,6 +53,9 @@
 .equ PAD,       2                       # texels around each region
 
 .section .rodata
+.align 4
+lmj_85:         .float 0.85
+
 .align 16
 lf_xyz:         .long -1, -1, -1, 0
 lf_abs:         .long 0x7fffffff, 0x7fffffff, 0x7fffffff, 0
@@ -102,7 +105,8 @@ lm_tab:         .skip LM_MAX*LE_SZ
 lm_ord:         .skip 4*LM_MAX
 
 .text
-OPERATOR op_lm_bake, "lightmap.bake", "Bake Lightmap", do_lm_bake, flags=OPF_AI_SAFE, doc="Bake the light on every visible mesh into one lightmap atlas with the path tracer (a second UV set per object, packed; denoised, dilated): lightmap.bake [size 64-4096, default 512] [rays a texel, default 64]"
+OPERATOR op_lm_bake, "lightmap.bake", "Bake Lightmap", job_lm_bake, flags=OPF_AI_SAFE, doc="Bake the light on every visible mesh into one lightmap atlas with the path tracer (a second UV set per object, packed; denoised, dilated): lightmap.bake [size 64-4096, default 512] [rays a texel, default 64]"
+JOB_OP job_lm_bake, do_lm_bake, "Baking the lightmap"
 OPERATOR op_lm_save, "lightmap.save", "Save Lightmap", do_lm_save, flags=OPF_AI_SAFE, doc="Write the lightmap atlas: lightmap.save <file.exr | file.png> (EXR linear half floats, PNG sRGB clamped)", form=form_lmsave
 OPERATOR op_lm_clear, "lightmap.clear", "Clear Lightmap", do_lm_clear, flags=OPF_AI_SAFE, doc="Forget the baked lightmap"
 
@@ -445,11 +449,17 @@ do_lm_bake:
 3:  call    hive_prep
     test    eax, eax
     jz      .Llb_none
+    xorps   xmm0, xmm0                  # (the status bar: 85% the light,
+    movss   xmm1, [rip+lmj_85]          #  then the denoising)
+    call    job_stage
     lea     rdi, [rip+job_lm]           # the light: rows in parallel
     xor     esi, esi
     mov     edx, [rip+lm_h]
     mov     ecx, 4
     call    parallel_for
+    movss   xmm0, [rip+lmj_85]          # (the denoising: 85%)
+    xorps   xmm1, xmm1
+    call    job_stage
     mov     ebx, 1                      # denoise: holes 1, 2, 4
 4:  cmp     ebx, 4
     ja      5f

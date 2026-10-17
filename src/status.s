@@ -3,7 +3,8 @@
 #    left:  what the mouse and keys do right now (the mode, a transform,
 #           play mode), as key chips with a word each;
 #    right: chips - the scene's size, the AI's permission (click: the AI
-#           menu), a render's progress, co-editing;
+#           menu), a render's progress, co-editing, the live link (click:
+#           the Versions editor), a long job's progress (jobui.s);
 #    toasts: what an operator reports, for four seconds above the status
 #           bar, green for results, amber for problems; click one to open
 #           the console.
@@ -36,6 +37,11 @@ toast_bad:      .skip 4                 # the toast shown is one
 stat_buf:       .skip 96
 
 .section .rodata
+s_lk_serve:     .asciz "Live link: serving"
+s_lk_mirror:    .asciz "Live link: mirroring"
+.align 4
+sf_100:         .float 100.0
+
 # hints: key, word, ... 0
 h_object:       .quad k_lmb, w_select, k_drag, w_orbit, k_mmb, w_pan, k_wheel, w_zoom
                 .quad k_grs, w_transform, k_rmb, w_menu, k_f3, w_search, 0
@@ -130,6 +136,8 @@ bw_denied:      .asciz "denied"
 
 OPERATOR op_menu_ai, "menu.ai", "AI Menu", do_menu_ai, flags=OPF_QUIET|OPF_HIDDEN, doc="Open the AI menu: permissions, activity, revert"
 WIDGET wd_st_ai,    WK_BUTTON, "status.ai", "AI permission", flags=WGF_NODRAW, aux=op_menu_ai, tip="What AI agents may do here (read only / edit the scene / files too). Click for the AI menu"
+WIDGET wd_st_link,  WK_BUTTON, "status.link", "Live link", flags=WGF_NODRAW, aux=op_area_type_versions, tip="The live link is on. Click for the Versions editor (serve, connect, stop)"
+WIDGET wd_st_job,   WK_BUTTON, "status.job", "Job", flags=WGF_NODRAW, tip="A long job: the window answers again when it is done"
 WIDGET wd_st_toast, WK_BUTTON, "status.toast", "Message", flags=WGF_NODRAW, aux=op_console_focus, tip="Click to open the console with every message"
 
 do_menu_ai:
@@ -411,7 +419,18 @@ draw_statusbar:
     jl      2b
 3:  mov     r12d, [rip+win_w]           # right to left: chips
     sub     r12d, 10
-    cmp     dword ptr [rip+co_on], 0    # co-editing
+    cmp     dword ptr [rip+job_on], 0   # a long job (jobui.s): its progress
+    je      31f
+    call    job_chip
+31: lea     rdi, [rip+s_lk_serve]       # the live link: serving, mirroring
+    cmp     dword ptr [rip+lk_serving], 0
+    jne     32f
+    lea     rdi, [rip+s_lk_mirror]
+    cmp     dword ptr [rip+lk_mstate], 0
+    je      33f
+32: lea     rsi, [rip+wd_st_link]
+    call    chip
+33: cmp     dword ptr [rip+co_on], 0    # co-editing
     je      4f
     lea     rdi, [rip+s_coedit]
     xor     esi, esi
@@ -460,6 +479,76 @@ draw_statusbar:
     pop     r14
     pop     r13
     pop     r12
+    pop     rbx
+    ret
+
+# job_chip (r12d = right edge, moved left) - the job's name and percentage
+#   over a bar filling with its progress
+job_chip:
+    push    rbx
+    push    r13
+    push    r14
+    call    fmt_reset
+    mov     rdi, [rip+job_label]
+    call    fmt_str
+    movss   xmm0, [rip+job_frac]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jb      1f
+    mov     edi, ' '
+    call    fmt_char
+    movss   xmm0, [rip+job_frac]
+    mulss   xmm0, [rip+sf_100]
+    cvttss2si edi, xmm0
+    call    fmt_int
+    lea     rdi, [rip+s_pct]
+    call    fmt_str
+1:  lea     rdi, [rip+stat_buf]
+    lea     rsi, [rip+fmt_buf]
+    call    cpy_s
+    lea     rdi, [rip+stat_buf]
+    call    text_width_small
+    lea     r13d, [rax+16]
+    sub     r12d, r13d
+    mov     edi, r12d                   # the chip
+    mov     esi, [rip+cont_y1]
+    add     esi, 3
+    mov     edx, r13d
+    mov     ecx, STATUS_H-6
+    mov     r8d, COL_MENU_BG
+    mov     r9d, (STATUS_H-6)/2
+    call    fill_rrect
+    movss   xmm0, [rip+job_frac]        # the bar along its bottom
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jb      2f
+    cvtsi2ss xmm1, r13d
+    mulss   xmm0, xmm1
+    cvttss2si edx, xmm0
+    test    edx, edx
+    jz      2f
+    mov     edi, r12d
+    mov     esi, [rip+cont_y1]
+    add     esi, STATUS_H-6
+    mov     ecx, 3
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+2:  lea     edi, [r12+8]
+    mov     esi, [rip+cont_y1]
+    add     esi, 3
+    lea     rdx, [rip+stat_buf]
+    mov     ecx, COL_TEXT
+    call    draw_small
+    lea     rdi, [rip+wd_st_job]        # (ui_tree: it is there)
+    mov     esi, r12d
+    mov     edx, [rip+cont_y1]
+    mov     ecx, r13d
+    lea     r8, [rip+toast_dummy]
+    xor     r9d, r9d
+    call    wg
+    sub     r12d, 6
+    pop     r14
+    pop     r13
     pop     rbx
     ret
 

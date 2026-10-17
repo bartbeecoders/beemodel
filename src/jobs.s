@@ -52,6 +52,7 @@ pf_cancel:      .skip 4
 pf_busy:        .skip 4
 pf_lock:        .skip 4                 # futex mutex: 0 free, 1 held, 2 waited on
 pf_owner:       .skip 4                 # thread id of the parallel_for running
+.globl main_tid
 main_tid:       .skip 4
 bg_tid:         .skip 4                 # the background thread (0: none)
 bg_stack:       .skip 8
@@ -60,6 +61,9 @@ cpumask:        .skip 128
 thread_arena:   .skip ARENA_SZ*MAX_THREADS
 
 .section .rodata
+.align 8
+pf_100ms:       .quad 0, 100000000
+
 s_env_threads:  .asciz "BEEMODEL_THREADS="
 
 .text
@@ -252,6 +256,32 @@ pf_run:
     pop     rbx
     ret
 
+# pf_job_wait - (the UI thread during a long job) the workers run the chunks;
+#   every 100 ms (or when the last one leaves) the progress and a frame
+pf_job_wait:
+    push    rbx
+1:  mov     edi, [rip+pf_next]          # chunks claimed so far
+    mov     esi, [rip+pf_count]
+    cmp     edi, esi
+    cmova   edi, esi
+    call    job_pf
+    mov     eax, [rip+pf_next]
+    cmp     eax, [rip+pf_count]
+    jb      2f
+    cmp     dword ptr [rip+pf_active], 0
+    je      9f
+2:  mov     edx, [rip+pf_active]        # sleep until a worker leaves, 100 ms at most
+    lea     rdi, [rip+pf_active]
+    mov     esi, FUTEX_WAIT_PRIV
+    lea     r10, [rip+pf_100ms]
+    xor     r8d, r8d
+    xor     r9d, r9d
+    mov     eax, SYS_FUTEX
+    syscall
+    jmp     1b
+9:  pop     rbx
+    ret
+
 # -----------------------------------------------------------------------------
 # parallel_for(rdi=fn, rsi=ctx, edx=count, ecx=grain) - returns when done.
 # Called from inside a job it runs inline (thread index -1, no scratch arena).
@@ -307,7 +337,13 @@ parallel_for:
     mov     esi, FUTEX_WAKE_PRIV
     mov     edx, 0x7fffffff
     call    futex
-    mov     edi, [rip+n_workers]        # the caller works too
+    cmp     dword ptr [rip+job_on], 0   # a long job on the UI thread: it
+    je      20f                         #  shows how far the workers are
+    cmp     r15d, [rip+main_tid]        #  instead of working (jobui.s)
+    jne     20f
+    call    pf_job_wait
+    jmp     3f
+20: mov     edi, [rip+n_workers]        # the caller works too
     call    pf_run
 2:  mov     eax, [rip+pf_active]        # wait for workers still in the job
     test    eax, eax

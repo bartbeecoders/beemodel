@@ -139,7 +139,9 @@ The tabs down the left side of Properties are:
 
 ## The status bar
 
-The left side shows what the mouse and keys do right now, as key chips. On the right are the scene's size, the AI permission (click it for the AI menu), the progress of a render and who is co-editing.
+The left side shows what the mouse and keys do right now, as key chips. On the right are the scene's size, the AI permission (click it for the AI menu), the progress of a render, who is co-editing and the live link (serving or mirroring; click it for the Versions editor).
+
+Long jobs (baking maps, light probes, a lightmap or a simulation, and imports) get a chip with their name and a bar filling as they go. The window keeps drawing while they run but does not take input until they finish.
 
 Messages show as **toasts** above the status bar for four seconds:
 
