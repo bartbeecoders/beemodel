@@ -6,7 +6,70 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-17
+
+"UI follow-ups": the parts of the UI plan (phase 11) left open at v0.12.0,
+issues F1-F18 (#267-#284; `Vibecoding/BeeModel-UI-Plan.html`, section
+Status), and Rendered shading.
+
 ### Added
+- **Text fields:** Ctrl+Left / Right jump by word (Shift selects), Ctrl+Backspace /
+  Delete remove a word.
+- **File browser:** Tab completes a folder or file name in the path field (a
+  second Tab lists the matches); opening a scene shows a picture of it - saving
+  from the window keeps a 192 x 120 picture of the 3D viewport in the `.bee`
+  file (THMB, its first chunk).
+- **Pie menus** for the mode (hold Ctrl+Tab) and for the 3D cursor and snapping
+  (hold Shift+S: Cursor to Selected, Selection to Cursor, Selection to Grid,
+  Snap, Reset 3D Cursor - also in Object > Snap); a tap keeps the key's own
+  action. `mode.object` / `mode.edit` / ... operators.
+- **Context menus** on fields (Reset to Default, Copy / Paste Value, Insert
+  Keyframe, Copy Data Path), in the timeline (playback, Start / End at This
+  Frame), the dope sheet and graph editor (interpolation, handles, duplicate,
+  delete), and on files in the file browser (Open, Rename, Delete, New Folder,
+  Copy Path); context menus show over dialogs.
+- **The redo panel** is made of widget fields: drag, type a value or an
+  expression, an axis from a list.
+- **The 3D viewport's header:** View / Select / Object (Mesh) menus, a pivot
+  point and orientation menu - Median Point, 3D Cursor, Individual Origins,
+  Active Object; Global, Local, View, Normal (`view.pivot`,
+  `view.orientation`) - which moves and turns follow, and an Overlays menu
+  (grid, Text Info, Statistics, Navigation Gizmo, the mesh checks).
+- **The navigation gizmo:** drag a ball to orbit; zoom and pan handles under
+  it; an orthographic view (Numpad 5, `view.toggle_ortho`).
+- **Views glide** to an axis, a reset camera or the new **Frame Selected**
+  (Numpad .); Preferences > Interface > **Reduce motion** makes them jump.
+- **Sculpting:** brush falloff curves (smooth, sphere, root, sharp, linear,
+  constant; `sculpt.falloff`), the dynamic-topology detail in the brush bar,
+  and **symmetry across Y and Z** as well as X, in any combination
+  (`sculpt.symmetry xyz`).
+- **Status bar chips for long jobs** - map, probe, lightmap and simulation
+  bakes and imports - with their progress; the window keeps drawing while they
+  run. A chip for the live link (click: the Versions editor).
+- **CAD:** reorder features in the feature tree (up / down buttons,
+  `cad.feature_move`); a feature that now needs a later one is marked.
+- **Print Check** shows its findings in Properties > Object, each with a Show
+  button that selects those edges or faces and frames them.
+- **Outliner:** a lock (viewport clicks pass through) and a camera (left out of
+  renders) next to the eye; Ctrl+click toggles a row, Shift+click selects a
+  range.
+- **Parenting:** Ctrl+P / Alt+P (Object > Parent), a Parent field in
+  Properties > Object, the outliner as a tree (fold arrows, drag a row onto
+  another). Children keep their world transforms and follow their parent's
+  changes, whatever makes them; parents are kept in `.bee` files (PRNT).
+  BeeScript `parent(name)`, `issel(name)`.
+- **Lights:** a type - point, sun, spot, area - and a size: a radius gives
+  soft shadows, a sun its angle, an area light its edge; a spot's cone. Both
+  path tracers sample them alike; the viewport draws each light's shape;
+  Properties > Object and `light.set type / size / angle`.
+- **Export Drawing (PDF) options:** the sheet (A4, A3, A2, Letter; landscape or
+  portrait), the views (front, top, right and an isometric view), the scale
+  (fit, or 2:1 .. 1:100) and the title block's title and author, with today's
+  date; `drawing.options` for scripts.
+- **The welcome screen** shows the version.
+- **Scripts:** `scripts/build.sh`, `scripts/run.sh`, `scripts/package.sh`
+  (moved from the root) and `scripts/deploy-omarchy.sh`, which builds and
+  installs BeeModel on Omarchy with its bar plugin (`omarchy-plugin/`).
 - **Rendered shading:** a fourth viewport shading, drawn on the GPU (the
   optional `beemodel-gpu` helper). While the view or the scene changes, one
   raycast a frame: the sun and point lights with hard shadows through the
@@ -26,6 +89,9 @@ project uses [Semantic Versioning](https://semver.org/).
   See [docs/GPU.md](docs/GPU.md#rendered-shading-the-live-viewport).
 - **The AI Assistant's Copy** button (`ai.copy`): the whole conversation on
   the clipboard.
+- `walkthrough16_ui`: the new pieces driven with clicks and keys only:
+  outliner Ctrl+click, Ctrl+P, the lock, a spot light, the snap pie,
+  Numpad ., save and reopen with the scene's picture.
 
 ### Fixed
 - The AI Assistant: a stream line longer than its buffer (an image from
@@ -1663,7 +1729,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/bartbeecoders/beemodel/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/bartbeecoders/beemodel/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/bartbeecoders/beemodel/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/bartbeecoders/beemodel/compare/v0.12.0...v0.13.0

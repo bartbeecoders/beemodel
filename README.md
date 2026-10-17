@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.15.0/beemodel-0.15.0-linux-x86_64.bin
-chmod +x beemodel-0.15.0-linux-x86_64.bin && ./beemodel-0.15.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.16.0/beemodel-0.16.0-linux-x86_64.bin
+chmod +x beemodel-0.16.0-linux-x86_64.bin && ./beemodel-0.16.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -813,12 +813,16 @@ src/ttf.s       TrueType parser, anti-aliased rasterizer, glyph cache
 src/text.s      font selection, UTF-8 text drawing and measurement
 src/font.s      embedded bitmap font (data in src/font.inc)
 src/jobs.s      worker threads, futex, parallel_for
+src/jobui.s     long jobs: the status bar's chip, frames while they run
 src/mem.s       arenas and generational-handle pools
 src/log.s       string builder + console log
 src/selftest.s  --selftest unit tests + benchmark
 src/scene.s     objects, selection, transforms, object operators
 src/undo.s      undo / redo snapshots
 src/redo.s      adjust-last-operation panel
+src/parent.s    parenting: children follow their parent, the outliner's tree
+src/orient.s    pivot point and transform orientation, 3x3 rotation helpers
+src/viewanim.s  view transitions, Frame Selected, Reduce motion
 src/transform.s G / R / S modal transforms, constraints, numeric input
 src/viewport.s  camera, projection, grid / axes / gizmos, overlays
 src/raster.s    multithreaded triangle rasterizer, depth + visibility buffers
@@ -836,7 +840,8 @@ src/graph.s     shader graphs: nodes, sockets, evaluation, bump, normal maps, so
 src/texture.s   image lookups, box projection
 src/env.s       the world: HDRI lookups, importance sampling, SH irradiance
 src/hive.s      Hive path tracer: triangle soup, SAH BVH4, SSE traversal
-src/hive_pt.s   Hive light transport: NEE + MIS, principled BSDF, passes
+src/hive_pt.s   Hive light transport: NEE + MIS, principled BSDF, passes, light shapes
+src/lshape.s    the viewport's light shapes (radius, cone, sun, area)
 src/gpu.s       the optional GPU helper from this side: start, shared memory, fallback
 src/live.s      Rendered shading: the live viewport on the GPU (raycast, then samples)
 src/gpu/        beemodel-gpu: helper.s (Vulkan), pt.comp / raster.comp, spv.s (SPIR-V)
@@ -877,6 +882,9 @@ src/sdf.s       signed-distance shapes, marching tetrahedra
 src/fab.s       3MF export, DXF / SVG of sketches
 src/drawing.s   PDF drawings: views, hidden lines, dimensions
 src/print.s     printability: wall thickness, print check
+src/printui.s   Print Check's findings panel (Show: select and frame)
+src/thumb.s     scene pictures in .bee files for the file browser
+src/ctxui.s     right-click menus on fields
 src/sculpt.s    sculpt mode: leaf BVH, brushes, delta undo, splat drawing
 src/dyntopo.s   dynamic topology: edge split / collapse under the brush
 src/multires.s  multiresolution: per-level displacements, level sculpting

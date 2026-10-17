@@ -632,6 +632,7 @@ def main():
     help_ui()
     a11y_ui()
     walkthrough_ui()
+    walkthrough16_ui()
     ui_bench()
     transforms()
     undo_redo()
@@ -8502,6 +8503,103 @@ def walkthrough_ui():
     back = q('print(exists("Cylinder"), round(get("Cylinder", "x")), features(), round(matget("Material", "base", 0) * 100))')
     check(back == '1 4 1 100', f'File > Open Recent brings it all back: the cylinder, the part, the material ({back})')
     f.shot('walkthrough.png')
+    f.proc.kill()
+
+
+def walkthrough16_ui():
+    """F18 (#284): the v0.16.0 pieces with clicks and keys only - Ctrl+click
+    in the outliner, Ctrl+P, a child following its parent, the lock, a spot
+    light from its type list, the snap pie, Numpad . and a scene picture in
+    the file browser when it is opened again (scripts only check)."""
+    print('  -- console-free walkthrough (v0.16.0) --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    bee = os.path.join(f.home, 'BeeModel')
+    def click(name, sub=0):
+        w = wait_widget(f, m, name, sub)
+        if w:
+            f.click(w['x'] + min(w['w'] // 2, 40), w['y'] + w['h'] // 2); f.pump(0.2)
+        return w is not None
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
+    def row(n, mods=0):                        # an outliner row, by object name
+        for w in ui_tree(m):
+            if w['name'] == 'outliner.visible' and q(f'print(name({w["sub"]}))') == n:
+                f.mods(mods); f.click(w['x'] - 120, w['y'] + 9); f.mods(0); f.pump(0.2)
+                return w
+        return None
+    menu_pick(f, m, 'Add', 'UV Sphere') or menu_pick(f, m, 'Add', 'Sphere')
+    sp = q('print(active())')
+    f.move(600, 300); f.key(34); f.key(45); f.type('3'); f.key(28); f.pump(0.3)   # G X 3
+    check(sp.startswith('Sphere') and q(f'print(get("{sp}", "x"))') == '3', f'Add > Sphere, G X 3 ({sp})')
+    row('Cube', 4)                             # Ctrl+click: the cube joins, active
+    r = q(f'print(issel("{sp}"), issel("Cube"), active())')
+    check(r == '1 1 Cube', f'Ctrl+click on the Cube row adds it to the selection ({r})')
+    f.move(600, 300); f.mods(4); f.key(25); f.mods(0); f.pump(0.3)   # Ctrl+P
+    check(q(f'print(parent("{sp}"))') == 'Cube', 'Ctrl+P: the sphere follows the cube')
+    row('Cube')
+    f.move(600, 300); f.key(34); f.key(45); f.type('2'); f.key(28); f.pump(0.3)   # G X 2
+    x = q(f'print(get("Cube", "x"), get("{sp}", "x"))')
+    check(x == '2 5', f'moving the cube takes the sphere along ({x})')
+    fold = [w for w in ui_tree(m) if w['name'] == 'outliner.fold']
+    check(len(fold) == 1, 'the outliner shows the cube with a fold arrow')
+    w = row('Cube')
+    lock = [v for v in ui_tree(m) if v['name'] == 'outliner.lock' and w and v['sub'] == w['sub']]
+    if lock:
+        f.click(lock[0]['x'] + lock[0]['w'] // 2, lock[0]['y'] + lock[0]['h'] // 2); f.pump(0.2)
+    f.key(1); f.pump(0.1)
+    f.click(*project((2, 1, 0))); f.pump(0.2)
+    check(bool(lock) and q('print(issel("Cube"))') == '0', 'locked from the outliner: a click on the cube passes through')
+    row('Light')
+    props_tab(m, f, 'object')
+    pick_enum(f, m, 'light.type', 0, 2)
+    check(wait_value(f, m, 'light.type', 0, 2) == 2 and wait_widget(f, m, 'light.cone') is not None,
+          'Properties > Object: Spot from the type list, and its cone')
+    type_into('light.cone', '25')
+    check(wait_value(f, m, 'light.cone', 0, 25) == 25, 'the cone typed in: 25 degrees')
+    y = float(q(f'print(get("{sp}", "y"))') or 0)
+    f.click(*project((5, y, 0))); f.pump(0.2)  # the sphere, in the viewport
+    check(q('print(active())') == sp, 'a click on the sphere selects it')
+    f.move(600, 300); f.mods(1); f.keyev(31, 1); f.pump(0.5)  # Shift+S held: the snap pie
+    pie = [w['label'] for w in ui_tree(m) if w['kind'] == 'pieitem']
+    f.move(480, 300); f.pump(0.1); f.keyev(31, 0); f.mods(0); f.pump(0.3)
+    f.move(600, 300); f.pump(0.1)
+    f.key(34); f.key(45); f.type('1'); f.key(28); f.pump(0.3)   # G X 1, then back with the pie
+    x1 = q(f'print(get("{sp}", "x"))')
+    f.mods(1); f.keyev(31, 1); f.pump(0.5); f.move(720, 300); f.pump(0.1); f.keyev(31, 0); f.mods(0); f.pump(0.3)
+    f.move(600, 300); f.pump(0.1)
+    x = q(f'print(get("{sp}", "x"))')
+    check('Cursor to Selected' in pie and x == '5', f'the snap pie: Cursor to Selected, Selection to Cursor ({x1} -> {x})')
+    big = lambda img: sum(1 for x in range(220, 1010, 4) for y in range(90, 620, 4) if 150 < sum(img.getpixel((x, y))) / 3 < 235)
+    a = big(f.image())
+    f.key(83); f.pump(1.0)                     # Numpad .: frame the sphere
+    b = big(f.image())
+    check(b > a * 2, f'Numpad . frames the sphere: it fills the view ({a} -> {b} light grey px)')
+    f.mods(4); f.key(31); f.mods(0); f.pump(0.3)   # Ctrl+S: the browser
+    type_into('files.name', 'walk16')
+    click('files.ok')
+    check(os.path.exists(os.path.join(bee, 'walk16.bee')), 'Ctrl+S saves ~/BeeModel/walk16.bee')
+    f.mods(4); f.key(49); f.mods(0); f.pump(0.3)   # Ctrl+N
+    if 'dialog.dont_save' in names():
+        click('dialog.dont_save')
+    check(q('print(exists("Cube"))') == '1' and q(f'print(exists("{sp}"))') == '0', 'Ctrl+N: a new scene')
+    f.mods(4); f.key(24); f.mods(0); f.pump(0.3)   # Ctrl+O
+    r = [w for w in ui_tree(m) if w['kind'] == 'row' and w.get('label') == 'walk16.bee']
+    if r:
+        f.click(r[0]['x'] + 30, r[0]['y'] + 11); f.pump(0.3)
+    lab = (widget(m, 'files.preview') or {}).get('label')
+    check(lab == 'Preview', f'Open: picking walk16.bee shows its picture ({lab})')
+    click('files.ok'); f.pump(0.5)
+    back = q(f'print(parent("{sp}"), get("{sp}", "x"))')
+    check(back == 'Cube 5', f'opened again: the sphere still follows the cube ({back})')
+    q('select()'); f.click(*project((2, 1, 0))); f.pump(0.2)
+    check(q('print(issel("Cube"))') == '0', 'and the cube is still locked')
+    f.shot('walkthrough16.png')
     f.proc.kill()
 
 
