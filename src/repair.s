@@ -23,6 +23,7 @@
 .globl mesh_analyze
 .globl an_res
 .globl an_fcls
+.globl an_ecls
 .globl mesh_clean
 
 .equ AN_NORMALS,  1

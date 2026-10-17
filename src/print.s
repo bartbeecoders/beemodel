@@ -34,6 +34,7 @@ pf_third:       .float 0.33333334
 pf_def_min:     .float 1.0                      # mm
 pf_1001:        .float 1.001
 pf_hundred:     .float 100.0
+pf_none:        .float -1.0
 s_pc_head:      .asciz "  "
 s_pc_closed:    .asciz ": closed"
 s_pc_open:      .asciz ": NOT closed ("
@@ -58,6 +59,7 @@ OPERATOR op_show_thin, "view.show_thickness", "Show Thin Walls", do_show_thin, c
 th_cache:       .skip 8                 # per polygon thickness (mapped)
 th_cbytes:      .skip 8
 th_key:         .skip 8                 # mesh pointer
+pc_mm:          .skip 12                # the size in mm (the panel's)
 th_keyn:        .skip 4                 # its polygon count
 th_keysum:      .skip 4                 # a checksum of its positions
 th_mtx:         .skip 48                # its object's matrix then
@@ -879,6 +881,10 @@ do_print_check:
     push    r12
     push    r13
     sub     rsp, 16
+    cmp     dword ptr [rip+op_quiet], 0 # (from the UI: Properties shows the
+    jne     0f                          #  findings on its Object tab)
+    mov     dword ptr [rip+props_tab], 0
+0:
     mov     rsi, [rip+op_arg]           # the minimum
     test    rsi, rsi
     jz      1f
@@ -932,6 +938,8 @@ pc_report:
     push    r14
     sub     rsp, 40
     mov     rbx, rdi
+    mov     dword ptr [rsp+16], 0       # (the panel's: nothing thin yet)
+    mov     dword ptr [rsp+20], 0
     call    mesh_analyze                # boundary / non-manifold / overhangs
     call    fmt_reset
     lea     rdi, [rip+s_pc_head]
@@ -975,6 +983,11 @@ pc_report:
 31: inc     ecx
     jmp     3b
 4:  movss   [rip+th_world_min], xmm1
+    mov     [rsp+16], r13d              # (the panel: faces under, the minimum)
+    call    cad_unit_mm
+    cvtsd2ss xmm0, xmm0
+    mulss   xmm0, [rsp]
+    movss   [rsp+20], xmm0
     lea     rdi, [rip+s_pc_thin]
     call    fmt_str
     movss   xmm0, [rip+th_world_min]
@@ -982,11 +995,16 @@ pc_report:
     jb      41f
     lea     rdi, [rip+s_pc_nowall]
     call    fmt_str
+    movss   xmm0, [rip+pf_none]
+    call    pc_store_wall
     jmp     5f
 41: movss   [rsp+4], xmm0
     call    cad_unit_mm
     cvtsd2ss xmm0, xmm0
     mulss   xmm0, [rsp+4]
+    movss   [rsp+24], xmm0
+    call    pc_store_wall
+    movss   xmm0, [rsp+24]
     call    fmt_val3
     lea     rdi, [rip+s_pc_under]
     call    fmt_str
@@ -1009,6 +1027,7 @@ pc_report:
     call    fmt_str
     call    over_share
     mulss   xmm0, [rip+pf_hundred]
+    movss   [rsp+28], xmm0
     call    fmt_val3
     lea     rdi, [rip+s_pc_pct]
     call    fmt_str
@@ -1028,6 +1047,8 @@ pc_report:
     call    cad_unit_mm
     cvtsd2ss xmm0, xmm0
     mulss   xmm0, [rsp+8]
+    lea     rax, [rip+pc_mm]            # (the panel's size)
+    movss   [rax+r14*4], xmm0
     call    fmt_val3
     inc     r14d
     cmp     r14d, 3
@@ -1036,6 +1057,13 @@ pc_report:
     call    fmt_str
     lea     rdi, [rip+fmt_buf]
     call    log_line
+    lea     rdi, [rip+pc_mm]            # the panel (printui.s): what it found
+    call    pc_store_size
+    mov     rdi, rbx
+    mov     esi, [rsp+16]
+    movss   xmm0, [rsp+20]
+    movss   xmm1, [rsp+28]
+    call    pc_store
     add     rsp, 40
     pop     r14
     pop     r13

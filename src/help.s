@@ -506,6 +506,7 @@ ov_draw:
 9:  ret
 
 # run_later(rdi=op, rsi=argument or 0) - between frames (teamui.s)
+.globl run_later
 run_later:
     jmp     run_t
 

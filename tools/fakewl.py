@@ -613,6 +613,7 @@ def main():
     jobs_ui()
     files_more()
     files_complete()
+    print_ui()
     cad_ui()
     feature_order_ui()
     materials_more()
@@ -7264,6 +7265,41 @@ def files_more():
     r = (n.tool('script_eval', {'code': 'print(exists("Other"))'})[0] or '').strip()
     check(r == '1', 'and opens the scene')
     g.proc.kill()
+
+
+def print_ui():
+    """F12 (#278): Print Check's findings in Properties > Object, each with
+    a Show button that selects those edges or faces and frames them."""
+    print('  -- print check panel --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    q('delete("Cube"); add("plane", "Sheet", 0, 0, 0); select("Sheet")')
+    menu_pick(f, m, 'Object', 'Print Check')
+    f.key(28); f.pump(0.4)                     # the form's OK (minimum 1 mm)
+    names = {w['name'] for w in ui_tree(m)}
+    check({'print.show_edges', 'print.check_again'} <= names, f'Print Check fills a panel in Properties > Object ({sorted(n for n in names if n.startswith("print."))})')
+    f.shot('print_panel.png')
+    x, y = widget_xy(m, 'print.show_edges'); f.click(x, y); f.pump(0.6)
+    mode = (widget(m, 'viewport.mode') or {}).get('value')
+    n = q('print(selected("Sheet"))')
+    check(mode == 1 and n == '4', f'Show: edit mode with the open edges selected ({mode}, {n} vertices)')
+    f.key(15); f.pump(0.2)                     # back to object mode
+    q('add("cube", "Plate", 4, 0, 0); scale("Plate", 1, 0.0002, 1); select("Plate")')
+    menu_pick(f, m, 'Object', 'Print Check')
+    f.key(28); f.pump(0.4)
+    names = {w['name'] for w in ui_tree(m)}
+    check('print.show_thin' in names and 'print.show_edges' not in names, 'a closed thin plate: Show for the thin faces, none for edges')
+    x, y = widget_xy(m, 'print.show_thin'); f.click(x, y); f.pump(0.6)
+    n = q('print(selected("Plate"))')
+    check(n == '8', f'Show: the thin faces selected ({n} vertices)')
+    f.key(15); f.pump(0.2)
+    q('scale("Plate", 1, 1, 1)'); f.pump(0.2)
+    check(widget(m, 'print.show_thin') is None, 'after a change the panel says to check again')
+    f.proc.kill()
 
 
 def cad_ui():
