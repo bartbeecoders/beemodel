@@ -91,7 +91,7 @@ s_left:         .asciz "  sculpt mode off"
 s_hud:          .asciz "Sculpt: "
 s_hud_r:        .asciz "  radius "
 s_hud_s:        .asciz "  strength "
-s_hud_sym:      .asciz "  X symmetry"
+s_hud_sym:      .asciz "  symmetry"
 s_hud_lazy:     .asciz "stabilizer "
 s_hud_pen:      .asciz "pen:"
 s_hud_pstr:     .asciz " strength"
@@ -135,7 +135,7 @@ sc_falloff:     .long 0                 # 0 smooth, 1 sphere, 2 root, 3 sharp, 4
 sc_radius:      .float 50.0             # pixels
 sc_strength:    .float 0.5
 sc_brush:       .long 0
-sc_sym:         .long 0                 # bit 0: X
+sc_sym:         .long 0                 # mirrors: bit 0 X, 1 Y, 2 Z
 sc_pmap:        .long 1                 # pen pressure drives: 1 strength,
                                         #  2 radius
 sc_pcurve:      .long 1                 # 0 soft (sqrt), 1 linear, 2 hard (^2)
@@ -3964,9 +3964,11 @@ job_n_unit:
 # =============================================================================
 #  Strokes
 # =============================================================================
-# do_dab(xmm0=radius) - a dab at dab_p, and its mirror with X symmetry
+# do_dab(xmm0=radius) - a dab at dab_p, and its mirrors (sc_sym: X, Y, Z and
+#   their combinations, across the object's planes through its origin)
 do_dab:
-    sub     rsp, 24
+    push    rbx
+    sub     rsp, 48
     movss   [rsp], xmm0
     call    pen_factor                  # pressure: strength and / or radius
     movss   xmm1, [rip+sc_base_s]
@@ -3984,34 +3986,63 @@ do_dab:
     movss   xmm0, [rsp]                 # dyntopo: the detail there
     xor     edi, edi
     call    dyn_after_dab
-    test    dword ptr [rip+sc_sym], 1
-    jz      9f
-    mov     rax, [rip+dab_p]            # mirrored: x -> -x (and the move)
+    cmp     dword ptr [rip+sc_sym], 0
+    je      9f
+    mov     rax, [rip+dab_p]            # (the dab as it is: kept)
     mov     [rsp+8], rax
     mov     eax, [rip+dab_p+8]
     mov     [rsp+16], eax
-    movss   xmm0, [rip+dab_p]
-    xorps   xmm1, xmm1
-    subss   xmm1, xmm0
-    movss   [rip+dab_p], xmm1
-    movss   xmm0, [rip+dab_move]
-    xorps   xmm1, xmm1
-    subss   xmm1, xmm0
-    movss   [rip+dab_move], xmm1
+    mov     rax, [rip+dab_move]
+    mov     [rsp+20], rax
+    mov     eax, [rip+dab_move+8]
+    mov     [rsp+28], eax
+    mov     ebx, 1                      # each mirror the setting allows
+3:  cmp     ebx, 8
+    jae     8f
+    mov     eax, [rip+sc_sym]           # (a mirror outside the setting: skip)
+    not     eax
+    test    eax, ebx
+    jnz     4f
+    mov     edi, ebx
+    lea     rsi, [rsp+8]
+    lea     rdx, [rip+dab_p]
+    call    sym_mirror
+    mov     edi, ebx
+    lea     rsi, [rsp+20]
+    lea     rdx, [rip+dab_move]
+    call    sym_mirror
     movss   xmm0, [rsp]
     call    dab
     movss   xmm0, [rsp]
-    mov     edi, 1
+    mov     edi, ebx
     call    dyn_after_dab
-    mov     rax, [rsp+8]
+4:  inc     ebx
+    jmp     3b
+8:  mov     rax, [rsp+8]                # back as it was
     mov     [rip+dab_p], rax
     mov     eax, [rsp+16]
     mov     [rip+dab_p+8], eax
-    movss   xmm0, [rip+dab_move]
-    xorps   xmm1, xmm1
-    subss   xmm1, xmm0
-    movss   [rip+dab_move], xmm1
-9:  add     rsp, 24
+    mov     rax, [rsp+20]
+    mov     [rip+dab_move], rax
+    mov     eax, [rsp+28]
+    mov     [rip+dab_move+8], eax
+9:  add     rsp, 48
+    pop     rbx
+    ret
+
+# sym_mirror(edi=mask: 1 X, 2 Y, 4 Z; rsi=float[3] in, rdx=out) - those
+#   components negated
+.globl sym_mirror
+sym_mirror:
+    xor     ecx, ecx
+1:  movss   xmm0, [rsi+rcx*4]
+    bt      edi, ecx
+    jnc     2f
+    xorps   xmm0, [rip+sf_signm]
+2:  movss   [rdx+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
     ret
 
 # pen_factor -> xmm0 = the pen's pressure through the curve (1 for the mouse
@@ -4506,11 +4537,9 @@ grab_capture:
     mov     rdx, [rip+sc_g_idx]
     mov     [rdx+rax*4], ecx
     movss   xmm0, [rsp+4]
-    cmp     dword ptr [rsp], 0          # (mirrored: a negative weight marks
-    je      14f                         #  the x flip)
-    xorps   xmm1, xmm1
-    subss   xmm1, xmm0
-    movss   xmm0, xmm1
+    cvtsi2ss xmm1, dword ptr [rsp]      # (mirrored: the mask rides on the
+    addss   xmm1, xmm1                  #  weight, w + 2 x mask: grab_move)
+    addss   xmm0, xmm1
 14: mov     rdx, [rip+sc_g_w]
     movss   [rdx+rax*4], xmm0
     inc     dword ptr [rip+sc_g_n]
@@ -4519,20 +4548,24 @@ grab_capture:
 19: inc     r12d
     jmp     1b
 .Lgc_pnext:
-    test    dword ptr [rip+sc_sym], 1
-    jz      9f
-    cmp     dword ptr [rsp], 0
-    jne     8f
-    mov     dword ptr [rsp], 1
-    movss   xmm0, [rip+dab_p]
-    xorps   xmm1, xmm1
-    subss   xmm1, xmm0
-    movss   [rip+dab_p], xmm1
+    mov     eax, [rsp]                  # the next mirror the setting allows
+7:  inc     eax
+    cmp     eax, 8
+    jae     8f
+    mov     ecx, [rip+sc_sym]
+    not     ecx
+    test    ecx, eax
+    jnz     7b
+    mov     [rsp], eax
+    mov     edi, eax                    # dab_p: the start, mirrored so
+    lea     rsi, [rip+sc_gstart]
+    lea     rdx, [rip+dab_p]
+    call    sym_mirror
     jmp     .Lgc_pass
-8:  movss   xmm0, [rip+dab_p]
-    xorps   xmm1, xmm1
-    subss   xmm1, xmm0
-    movss   [rip+dab_p], xmm1
+8:  mov     rax, [rip+sc_gstart]        # (back where it started)
+    mov     [rip+dab_p], rax
+    mov     eax, [rip+sc_gstart+8]
+    mov     [rip+dab_p+8], eax
 9:  add     rsp, 16
     pop     r15
     pop     r14
@@ -4615,24 +4648,23 @@ grab_move:
     lea     rax, [rcx+rcx*2]
     mov     rdx, [rip+sv_pos]
     lea     rdx, [rdx+rax*4]
-    movss   xmm0, [rsp]                 # x flips for mirrored captures
-    xorps   xmm1, xmm1
-    comiss  xmm7, xmm1
-    jae     21f
-    subss   xmm1, xmm0
-    movss   xmm0, xmm1
-    andps   xmm7, [rip+sf_abs]
-21: mulss   xmm0, xmm7
-    addss   xmm0, [rdx]
-    movss   [rdx], xmm0
-    movss   xmm0, [rsp+4]
-    mulss   xmm0, xmm7
-    addss   xmm0, [rdx+4]
-    movss   [rdx+4], xmm0
-    movss   xmm0, [rsp+8]
-    mulss   xmm0, xmm7
-    addss   xmm0, [rdx+8]
-    movss   [rdx+8], xmm0
+    movss   xmm0, xmm7                  # mirrored captures: w + 2 x mask
+    mulss   xmm0, [rip+sf_half]
+    cvttss2si r8d, xmm0                 # the mask: those axes flip
+    cvtsi2ss xmm0, r8d
+    addss   xmm0, xmm0
+    subss   xmm7, xmm0                  # the weight
+    xor     ecx, ecx
+21: movss   xmm0, [rsp+rcx*4]
+    bt      r8d, ecx
+    jnc     22f
+    xorps   xmm0, [rip+sf_signm]
+22: mulss   xmm0, xmm7
+    addss   xmm0, [rdx+rcx*4]
+    movss   [rdx+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      21b
     inc     ebx
     jmp     2b
 3:  mov     rax, [rip+pk_p]
@@ -4660,14 +4692,23 @@ grab_move:
     mov     eax, [rip+sc_gstart+8]
     mov     [rip+dab_p+8], eax
     call    grab_region
-    test    dword ptr [rip+sc_sym], 1
-    jz      5f
-    movss   xmm0, [rip+dab_p]
-    xorps   xmm1, xmm1
-    subss   xmm1, xmm0
-    movss   [rip+dab_p], xmm1
+    mov     dword ptr [rsp+16], 0       # and each mirror's
+51: mov     eax, [rsp+16]
+52: inc     eax
+    cmp     eax, 8
+    jae     5f
+    mov     ecx, [rip+sc_sym]
+    not     ecx
+    test    ecx, eax
+    jnz     52b
+    mov     [rsp+16], eax
+    mov     edi, eax
+    lea     rsi, [rip+sc_gstart]
+    lea     rdx, [rip+dab_p]
+    call    sym_mirror
     movss   xmm1, [rsp+12]
     call    grab_region
+    jmp     51b
 5:  mov     dword ptr [rip+dirty], 1
     add     rsp, 24
     pop     r12
@@ -4917,10 +4958,20 @@ sculpt_overlay:
     call    fmt_str
     movss   xmm0, [rip+sc_strength]
     call    fmt_val3
-    test    dword ptr [rip+sc_sym], 1
-    jz      1f
+    cmp     dword ptr [rip+sc_sym], 0   # "  symmetry X Y Z"
+    je      1f
     lea     rdi, [rip+s_hud_sym]
     call    fmt_str
+    xor     ebx, ebx
+11: bt      dword ptr [rip+sc_sym], ebx
+    jnc     12f
+    mov     edi, ' '
+    call    fmt_char
+    lea     edi, [rbx+'X']
+    call    fmt_char
+12: inc     ebx
+    cmp     ebx, 3
+    jb      11b
 1:  lea     rdi, [rip+s_hud_keys]
     call    fmt_str
     mov     edi, [rip+cvs_x0]
@@ -5074,7 +5125,10 @@ OPERATOR op_s_rad_dn,   "sculpt.radius_down",   "Smaller Brush", do_radius, arg=
 OPERATOR op_s_rad_up,   "sculpt.radius_up",     "Bigger Brush",  do_radius, arg=1,      key=KEY_RIGHTBRACE,    flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: brush radius + 15%"
 OPERATOR op_s_str_dn,   "sculpt.strength_down", "Weaker",        do_strength, arg=0,    key=KEY_LEFTBRACE|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: strength - 0.1"
 OPERATOR op_s_str_up,   "sculpt.strength_up",   "Stronger",      do_strength, arg=1,    key=KEY_RIGHTBRACE|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: strength + 0.1"
-OPERATOR op_s_sym,      "sculpt.symmetry_x",    "X Symmetry",    do_sym, check=sym_check, key=KEY_X|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: mirror strokes across the object's X"
+OPERATOR op_s_sym,      "sculpt.symmetry_x",    "X Symmetry",    do_sym, check=sym_check, arg=1, key=KEY_X|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: mirror strokes across the object's X"
+OPERATOR op_s_symy,     "sculpt.symmetry_y",    "Y Symmetry",    do_sym, check=sym_check, arg=2, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: mirror strokes across the object's Y (with X and Z: every combination)"
+OPERATOR op_s_symz,     "sculpt.symmetry_z",    "Z Symmetry",    do_sym, check=sym_check, arg=4, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: mirror strokes across the object's Z (with X and Y: every combination)"
+OPERATOR op_s_symset,   "sculpt.symmetry",      "Sculpt Symmetry", do_symset, flags=OPF_AI_SAFE|OPF_QUIET, doc="Which axes sculpt strokes mirror across: sculpt.symmetry none | x | y | z | xy | xz | yz | xyz"
 OPERATOR op_s_mclear,   "sculpt.mask_clear",    "Clear Mask",    do_mask, arg=0,        key=KEY_M|KM_ALT,      flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: remove the mask"
 OPERATOR op_s_lazy,     "sculpt.stabilizer",    "Stabilizer",    do_lazy, check=lazy_check, key=KEY_S|KM_SHIFT, flags=OPF_AI_SAFE|OPF_QUIET|OPF_SCULPT, doc="Sculpt: the stroke trails the pointer on a string (off, 10, 25, 50 px) for steady lines"
 OPERATOR op_s_pstr,     "sculpt.pressure_strength", "Pressure: Strength", do_pmap, arg=1, check=pstr_check, flags=OPF_AI_SAFE|OPF_QUIET, doc="Sculpt: pen pressure scales the brush strength"
@@ -5110,13 +5164,32 @@ do_strength:
     movss   [rip+sc_strength], xmm0
     mov     dword ptr [rip+dirty], 1
     ret
-do_sym:
-    xor     dword ptr [rip+sc_sym], 1
+do_symset:                              # the letters x y z in the argument
+    xor     eax, eax
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      3f
+1:  movzx   ecx, byte ptr [rsi]
+    test    ecx, ecx
+    jz      3f
+    or      ecx, 0x20
+    sub     ecx, 'x'
+    cmp     ecx, 2
+    ja      2f
+    bts     eax, ecx
+2:  inc     rsi
+    jmp     1b
+3:  mov     [rip+sc_sym], eax
+    mov     dword ptr [rip+dirty], 1
+    ret
+do_sym:                                 # rdi = the axis bit: 1 X, 2 Y, 4 Z
+    xor     [rip+sc_sym], edi
     mov     dword ptr [rip+dirty], 1
     ret
 sym_check:
-    mov     eax, [rip+sc_sym]
-    and     eax, 1
+    xor     eax, eax
+    test    [rip+sc_sym], edi
+    setnz   al
     ret
 do_mask:
     jmp     sculpt_mask_op
@@ -5179,5 +5252,9 @@ do_pcurve:
 sv_pos:         .skip 8
 sv_tris:        .skip 8
 .text
+
+.section .rodata
+.align 16
+sf_signm:       .long 0x80000000, 0, 0, 0
 
 .section .note.GNU-stack,"",@progbits
