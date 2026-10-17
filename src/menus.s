@@ -882,7 +882,19 @@ ctx_open_for:
     jne     9f
 3:  lea     rbx, [rip+ctx_header]
     mov     ecx, ctx_header_n
-5:  lea     rax, [rip+menu_items]       # the context menu's slot
+5:  mov     rdi, rbx
+    mov     esi, ecx
+    call    ctx_open_list
+9:  pop     rbx
+    ret
+
+# ctx_open_list(rdi=entries, esi=count) - a context menu at the pointer
+.globl ctx_open_list
+ctx_open_list:
+    push    rbx
+    mov     rbx, rdi
+    mov     ecx, esi
+    lea     rax, [rip+menu_items]       # the context menu's slot
     mov     [rax+MENU_CTX*8], rbx
     lea     rax, [rip+menu_counts]
     mov     [rax+MENU_CTX*4], ecx

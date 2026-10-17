@@ -1892,18 +1892,45 @@ wg_clip_key:
     je      2f
     cmp     eax, 47                     # V
     jne     9f
-    lea     rdi, [rsp+8]                # paste: type it in and confirm
+    mov     rdi, [rsp]
+    call    wg_val_paste
+    jmp     8f
+2:  mov     rdi, [rsp]
+    call    wg_val_copy
+8:  mov     r12d, 1
+9:  mov     eax, r12d
+    add     rsp, 264
+    pop     r12
+    pop     rbx
+    ret
+
+# wg_val_paste(rdi=widget entry) - the clipboard typed into it and confirmed
+#   (units, expressions, one undo step)
+.globl wg_val_paste
+wg_val_paste:
+    push    rbx
+    sub     rsp, 256
+    mov     rbx, rdi
+    mov     rdi, rsp
     mov     esi, 250
     call    clip_paste
     test    eax, eax
-    jz      8f
-    mov     rdi, [rsp]
+    jz      9f
+    mov     rdi, rbx
     call    edit_begin
-    lea     rsi, [rsp+8]
+    mov     rsi, rsp
     call    tf_load
     call    wg_commit
-    jmp     8f
-2:  mov     rax, [rsp]                  # copy: the value as shown when typing
+9:  add     rsp, 256
+    pop     rbx
+    ret
+
+# wg_val_copy(rdi=widget entry) - its value, as shown when typing, to the
+#   clipboard
+.globl wg_val_copy
+wg_val_copy:
+    sub     rsp, 8
+    mov     rax, rdi
     mov     rdi, [rax+E_DESC]
     mov     rsi, [rax+E_PTR]
     lea     rdx, [rip+wg_txt]
@@ -1925,12 +1952,61 @@ wg_clip_key:
     mov     esi, eax
     lea     rdi, [rip+wg_txt]
     call    clip_copy
-8:  mov     r12d, 1
-9:  mov     eax, r12d
-    add     rsp, 264
-    pop     r12
+    add     rsp, 8
+    ret
+
+# wg_val_reset(rdi=widget entry) -> eax = 1 when the field had a default
+#   (WD_DEF) and got it back, as if typed (its callback, one undo step)
+.globl wg_val_reset
+wg_val_reset:
+    push    rbx
+    sub     rsp, 80                     # (the text: edit_begin uses wg_txt)
+    mov     rbx, rdi
+    call    wg_has_def
+    test    eax, eax
+    jz      9f
+    mov     rdi, [rbx+E_DESC]
+    movss   xmm0, [rdi+WD_DEF]
+    cmp     dword ptr [rdi+WD_KIND], WK_INT
+    jne     1f
+    cvtss2si eax, xmm0                  # an integer: its digits
+    mov     [rsp+64], eax
+    lea     rsi, [rsp+64]
+    mov     rdx, rsp
+    call    value_text
+    jmp     2f
+1:  test    dword ptr [rdi+WD_FLAGS], WGF_DEG
+    jz      11f
+    mulss   xmm0, [rip+f_r2d]
+11: mov     edi, 6
+    mov     rsi, rsp
+    call    wg_ftoa
+2:  mov     rdi, rbx
+    call    edit_begin
+    mov     rsi, rsp
+    call    tf_load
+    call    wg_commit
+    mov     eax, 1
+9:  add     rsp, 80
     pop     rbx
     ret
+
+# wg_has_def(rdi=widget entry) -> eax = 1 for a number field with a default
+.globl wg_has_def
+wg_has_def:
+    xor     eax, eax
+    mov     rdi, [rdi+E_DESC]
+    mov     ecx, [rdi+WD_KIND]
+    cmp     ecx, WK_FLOAT
+    je      1f
+    cmp     ecx, WK_INT
+    je      1f
+    cmp     ecx, WK_SLIDER
+    jne     9f
+1:  movss   xmm0, [rdi+WD_DEF]
+    ucomiss xmm0, xmm0                  # (NaN: none)
+    setnp   al
+9:  ret
 
 # wg_editing -> eax = 1 while a field takes the keys
 wg_editing:

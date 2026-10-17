@@ -306,7 +306,14 @@ hit_test:
 .Lht_nocp:
     cmp     dword ptr [rip+dlg_open], 0 # a dialog: its widgets, or nothing
     je      2f
+    cmp     dword ptr [rip+menu_open], 0  # (a context menu over it first)
+    jl      3f
     mov     edi, ebx
+    mov     esi, r12d
+    call    mn_hit
+    test    eax, eax
+    jnz     .Lht_ret
+3:  mov     edi, ebx
     mov     esi, r12d
     call    wg_hit
     mov     edx, eax
@@ -884,6 +891,7 @@ ui_button:
     jne     .Lbt_nowg
     cmp     r14d, BTN_LEFT
     jne     .Lbt_nowg
+    mov     dword ptr [rip+menu_open], -1   # (a menu open elsewhere closes)
     mov     edi, r12d
     call    wg_press
     mov     dword ptr [rip+drag_mode], DRAG_WIDGET
@@ -999,7 +1007,19 @@ ui_button:
     jmp     .Lbt_done
 1:  cmp     r14d, BTN_RIGHT             # right button: a context menu
     jne     13f
-    cmp     ebx, HIT_CANVAS
+    cmp     ebx, HIT_WIDGET             # a field, a file: its own (ctxui.s)
+    jne     19f
+    mov     edi, r12d
+    call    wg_ctx_open
+    jmp     .Lbt_done
+19: cmp     ebx, HIT_TIMELINE           # the timeline, dope sheet, graph
+    je      191f
+    cmp     ebx, HIT_ANIMED
+    jne     192f
+191: mov    edi, ebx
+    call    anim_ctx_open
+    jmp     .Lbt_done
+192: cmp    ebx, HIT_CANVAS
     jne     14f
     cmp     dword ptr [rip+etool], 0    # (an edit tool: cancels it,
     je      12f
@@ -1632,7 +1652,15 @@ ui_key_press:
     call    kbnav_key                   #  focused widget (a11y.s)
     test    eax, eax
     jnz     9f
-    mov     edi, ebx                    # a dialog takes the keys
+    cmp     dword ptr [rip+dlg_open], 0 # a context menu over a dialog:
+    je      63f                         #  its keys first
+    cmp     dword ptr [rip+menu_open], 0
+    jl      63f
+    mov     edi, ebx
+    call    mn_key
+    test    eax, eax
+    jnz     9f
+63: mov     edi, ebx                    # a dialog takes the keys
     call    dlg_key
     test    eax, eax
     jnz     9f
@@ -1739,6 +1767,12 @@ ui_draw:
     call    palette_draw
     call    pie_draw
     call    dlg_draw                    # a dialog over everything
+    cmp     dword ptr [rip+dlg_open], 0 # (a context menu over a dialog: on top)
+    je      5f
+    cmp     dword ptr [rip+menu_open], 0
+    jl      5f
+    call    mn_draw
+5:
     call    cpk_draw                     # the colour picker (over a dialog too)
     call    ov_draw                     # the welcome screen, the shortcuts
     jmp     tip_draw                    # tooltips on top of everything
