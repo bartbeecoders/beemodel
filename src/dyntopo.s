@@ -94,8 +94,8 @@ sc_capv:        .skip 4                 # room: vertices, triangles
 sc_capt:        .skip 4
 sc_tri_used:    .skip 4                 # triangle-id pool in use
 dy_serial:      .skip 4
-dy_last:        .skip 16                # the last remesh centre, + have
-dy_lastm:       .skip 16                #  (mirrored)
+dy_last:        .skip 16*8              # the last remesh centre, + have
+                                        #  (each mirror: sculpt's mask)
 # one remesh
 rm_r:           .skip 4
 rm_r2:          .skip 4
@@ -496,11 +496,15 @@ carry_mask:
 #  Strokes
 # =============================================================================
 dyn_reset:
-    mov     dword ptr [rip+dy_last+12], 0
-    mov     dword ptr [rip+dy_lastm+12], 0
+    xor     eax, eax                    # (every mirror's)
+1:  lea     rcx, [rip+dy_last]
+    mov     dword ptr [rcx+rax+12], 0
+    add     eax, 16
+    cmp     eax, 16*8
+    jb      1b
     ret
 
-# dyn_after_dab(xmm0=radius (local), edi=0, 1 the mirrored dab) - remesh
+# dyn_after_dab(xmm0=radius (local), edi=0, or the mirror's mask) - remesh
 #   around dab_p once the brush is a quarter radius on (the sphere reaching
 #   back to the last one)
 dyn_after_dab:
@@ -515,10 +519,10 @@ dyn_after_dab:
 2:  push    rbx
     sub     rsp, 16
     movss   [rsp], xmm0
+    and     edi, 7                      # (each mirror its own)
+    shl     edi, 4
     lea     rbx, [rip+dy_last]
-    test    edi, edi
-    jz      3f
-    lea     rbx, [rip+dy_lastm]
+    add     rbx, rdi
 3:  movss   xmm0, [rsp]
     cmp     dword ptr [rbx+12], 0
     je      5f

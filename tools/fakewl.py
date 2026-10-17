@@ -608,6 +608,7 @@ def main():
     navigation_ui()
     motion_ui()
     tools_ui()
+    symmetry_ui()
     outliner_ui()
     outliner_more()
     status_ui()
@@ -7079,6 +7080,53 @@ def tools_ui():
     q('op("sculpt.falloff", "smooth")')
     d1, d2 = vol('S1') - a1, vol('S2') - a2
     check(d1 > 0 and d2 > d1 * 1.3, f'the falloff shapes the stroke: constant raises more than smooth ({d1:.4f}, {d2:.4f})')
+    f.proc.kill()
+
+
+def symmetry_ui():
+    """F16 (#282): sculpt symmetry across Y and Z as well as X, and every
+    combination; the brush bar has a button for each axis."""
+    print('  -- sculpt symmetry: X, Y, Z --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    def pos(n):                                # every vertex, object space
+        t = q(f'for i in 0..verts("{n}") {{ print(vpos("{n}", i, 0), vpos("{n}", i, 1), vpos("{n}", i, 2)) }}')
+        return [tuple(float(v) for v in ln.split()) for ln in t.splitlines() if ln.strip()]
+    def stroke(name, x, sym, p):
+        q(f'add("sphere", "{name}", {x}, 0, 0)')
+        a = pos(name)
+        q(f'op("sculpt.symmetry", "{sym}")')
+        q(f'sculpt("{name}", "draw", {x + p[0]}, {p[1]}, {p[2]}, {x + p[0]}, {p[1] + 0.01}, {p[2]}, 0.35, 0.5)')
+        q('op("sculpt.symmetry", "none")')
+        b = pos(name)
+        oct = [0.0] * 8                        # how far vertices moved, by octant
+        for (x0, y0, z0), (x1, y1, z1) in zip(a, b):
+            d = ((x1 - x0) ** 2 + (y1 - y0) ** 2 + (z1 - z0) ** 2) ** 0.5
+            oct[(x0 < 0) | (y0 < 0) << 1 | (z0 < 0) << 2] += d
+        return [round(v, 3) for v in oct]
+    o = stroke('N', -6, 'none', (0.3, 0.95, 0.2))
+    check(o[0] > 0 and sum(o[1:]) < o[0] * 0.05, f'no symmetry: one corner moves ({o})')
+    o = stroke('Y', -3, 'y', (0.3, 0.95, 0.2))
+    check(o[0] > 0 and abs(o[2] - o[0]) < o[0] * 0.2 and o[1] + o[3] < o[0] * 0.1,
+          f'Y symmetry: the stroke on top moves the bottom alike ({o})')
+    q('add("sphere", "G", 6, 0, 0)')            # the grab brush: mirrored moves
+    a = pos('G')
+    q('op("sculpt.symmetry", "y"); sculpt("G", "grab", 6, 1, 0, 6, 1.5, 0, 0.4, 1); op("sculpt.symmetry", "none")')
+    b = pos('G')
+    up = max(y1 - y0 for (_, y0, _), (_, y1, _) in zip(a, b))
+    down = min(y1 - y0 for (_, y0, _), (_, y1, _) in zip(a, b))
+    check(up > 0.2 and abs(up + down) < up * 0.1, f'Y symmetry with Grab: the top goes up, the bottom down as far ({up:.3f}, {down:.3f})')
+    k = 0.57735
+    o = stroke('A', 3, 'xyz', (k, k, k))
+    check(min(o) > 0 and max(o) < min(o) * 1.25, f'X, Y and Z: every corner alike ({o})')
+    q('select("A"); op("mode.sculpt")'); f.pump(0.2)
+    need = {'brush.symmetry_x', 'brush.symmetry_y', 'brush.symmetry_z'}
+    check(need <= {w['name'] for w in ui_tree(m)}, 'the brush bar has X, Y and Z symmetry buttons')
+    x, y = widget_xy(m, 'brush.symmetry_z'); f.click(x, y); f.pump(0.2)
     f.proc.kill()
 
 

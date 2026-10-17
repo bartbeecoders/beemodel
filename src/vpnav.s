@@ -118,6 +118,8 @@ WIDGET wd_ts_sstr,  WK_SLIDER, "brush.strength", "Strength", 0.0, 1.0, 0.005, 2,
 WIDGET wd_ts_prad,  WK_FLOAT, "paint.radius", "Radius", 1.0, 1000.0, 0.5, 0, WGF_CLAMP, tip="The brush's radius in pixels ([ and ] change it)"
 WIDGET wd_ts_pstr,  WK_SLIDER, "paint.strength", "Strength", 0.0, 1.0, 0.005, 2, tip="How strongly the brush paints (Shift+[ and Shift+])"
 WIDGET wd_ts_sym,   WK_BUTTON, "brush.symmetry_x", "X Symmetry (Shift+X)", flags=WGF_ICON, aux=op_s_sym, n=ICON_SPLIT_H
+WIDGET wd_ts_symy,  WK_BUTTON, "brush.symmetry_y", "Y Symmetry", flags=WGF_ICON, aux=op_s_symy, n=ICON_LETTER_Y
+WIDGET wd_ts_symz,  WK_BUTTON, "brush.symmetry_z", "Z Symmetry", flags=WGF_ICON, aux=op_s_symz, n=ICON_LETTER_Z
 WIDGET wd_ts_dyn,   WK_BUTTON, "brush.dyntopo", "Dynamic Topology (Ctrl+D)", flags=WGF_ICON, aux=op_s_dyn, n=ICON_GRID
 WIDGET wd_ts_lazy,  WK_BUTTON, "brush.stabilizer", "Stabilizer (Shift+S)", flags=WGF_ICON, aux=op_s_lazy, n=ICON_CURVE
 WIDGET wd_ts_pstrp, WK_BUTTON, "brush.pressure_strength", "Pen pressure drives the strength", flags=WGF_ICON, aux=op_s_pstr, n=ICON_BRUSH
@@ -590,6 +592,10 @@ tool_settings_draw:
     cmp     dword ptr [rsp], 0
     jne     4f
     lea     rdi, [rip+wd_ts_sym]        # sculpt: its toggles
+    call    tool_btn
+    lea     rdi, [rip+wd_ts_symy]
+    call    tool_btn
+    lea     rdi, [rip+wd_ts_symz]
     call    tool_btn
     lea     rdi, [rip+wd_ts_dyn]
     call    tool_btn
