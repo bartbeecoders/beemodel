@@ -35,8 +35,10 @@ frame(120)
 Shapes:
 - **Hull**: up to 64 points of the mesh, the farthest along fixed directions.
 - **Compound**: convex pieces cut from the mesh. A triangle set is split at the middle of its longest side while some triangle lies deep inside the piece's hull.
-- **Mesh**: every triangle is a collider, found through a tree.
-- **Plane**: endless, the object's XZ plane.
+- **Mesh**: every triangle is a collider, found through a tree. A
+  landscape is a heightfield instead (below).
+- **Plane**: endless, the object's XZ plane. The Ground (`create.ground`)
+  is one.
 
 Joints: `rigid.joint <type> <object> <object|world>`.
 
@@ -173,6 +175,38 @@ A mesh body's parts are its triangles, each a 3-point hull, in a tree.
 - **Planes** have their own contacts: the other part's points within the
   margin, or a rounded part's core corners.
 
+### Heightfields
+
+A landscape (see [LANDSCAPE.md](LANDSCAPE.md)) made a passive mesh body is
+not cut into triangles. Instead, triangles are made per step:
+- **The cells it needs.** Before the pairs are found, the cells under every
+  moving part's bounds become triangle parts on the fly. Cells above the
+  landscape's highest point are skipped.
+- **Their slots.** Each triangle goes into a slot of its own, 131 072 per
+  landscape, through a hash from the triangle to its slot. The hash is
+  rebuilt each step, and a slot unneeded for 3 steps is free again. A
+  contact keeps its manifold while its triangle is in use.
+- **The rest is the mesh's.** Pairs walk the cells where a mesh walks its
+  tree. The narrow phase, the manifolds, the inactive edges (a neighbour
+  within 5°) and continuous collision work as for a mesh's triangles.
+- **Its material.** Each triangle takes the friction and bounce of the
+  paint under it: the layers' by their weights, the body's for the rest.
+
+The slots' arrays are made only when there is a landscape. 1000 balls
+dropped on a 4097² mountain roll down it, and none goes under its surface
+(1.6 mm at most).
+
+### Water
+
+A mesh object flagged as water (the island preset's sea) is a level over
+its extent. Once a step, a moving body reaching below it is pushed up by
+the water it displaces: 1000 kg/m³ × g × its volume × the share of its
+height below the level. That share also slows it.
+- **Its volume** comes from its parts: boxes, spheres and capsules as they
+  are, a hull 0.7 of its bounds.
+- **What floats.** A wooden box floats with about 0.6 of it under water, and
+  a stone box sinks.
+
 ### Fast bodies
 
 A body that moved more than half its size in a step is checked against the
@@ -217,6 +251,7 @@ From `tools/physbench.py` on a Ryzen 9 7950X (16 cores, 32 threads):
 | 10 800 balls poured into a box, 10 s | 143 s | 44.0 s | 26.6 s | 23.6 s |
 | 5000 bricks settling, a frame | 229 ms | 63.6 ms | 37.4 ms | 43.5 ms |
 | 1000 balls on 100 000 triangles, a frame (mean / slowest) | 54 / 99 ms | 22 / 42 ms | 19 / 32 ms | 22 / 39 ms |
+| 1000 balls rolling down a 4097² landscape, a frame (mean) | 39.3 ms | 13.5 ms | 10.2 ms | 10.0 ms |
 
 Each scene ends with the same hash on every thread count. Past about 8
 threads the solver is bound by memory, not arithmetic: more threads wait
@@ -229,3 +264,5 @@ on the same cache lines.
 - fast bodies, groups and materials;
 - breaking chains, motors and limits;
 - the heap is the same on any number of threads.
+
+`tests/landscape.py` checks the Ground, landscapes as colliders and water.
