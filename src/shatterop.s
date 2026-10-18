@@ -6,8 +6,16 @@
 #  close it) is cut into cells (shatter.s) and every piece becomes a mesh
 #  object of its own, its origin at its centre of volume, placed where it
 #  was. The original is hidden, not deleted; one undo step brings it back.
-#  mesh.separate_loose splits the selected meshes into their loose parts.
-#  shinfo(k) reports the last shatter (tests).
+#  The patterns:
+#   - shards: Voronoi cells from seeds inside the mesh: uniform, around an
+#     impact point (closer likelier) or near the surface;
+#   - bricks: a running bond in the object's axes (rows along Y), cut by
+#     the joints' planes, a mortar gap, joints jittered;
+#   - balls: no cutting - spheres on a face-centred cubic lattice, inside
+#     and clear of the surface, sharing one sphere mesh.
+#  An inner colour goes to the cut faces as vertex colours (their vertices
+#  apart from the surface's). mesh.separate_loose splits the selected
+#  meshes into their loose parts. shinfo(k) reports the last shatter.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -19,6 +27,9 @@
 
 .equ VX_SZ,     24
 .equ TR_SZ,     16
+.equ PLN_SZ,    40                      # (shatter.s: a plane, its tag;
+.equ PLN_TAG,   32                      #  planes a cell at most)
+.equ CPL_MAX,   128
 .equ PP_HDR,    8
 .equ PH_NV,     0                       # a piece: counts, volume, centre;
 .equ PH_NP,     4                       #  vertices (floats), polygons (count,
@@ -29,6 +40,7 @@
 .equ MAXSEEDS,  4096
 .equ NSTAT,     24
 .equ SB_MAX,    16384                   # seeds tried at once
+.equ BL_MAX,    131072                  # ball lattice points tried at once
 
 .section .rodata
 .align 8
@@ -39,18 +51,62 @@ so_1000:        .double 1000.0
 k_count:        .asciz "count"
 k_seed:         .asciz "seed"
 k_shards:       .asciz "shards"
+k_bricks:       .asciz "bricks"
+k_balls:        .asciz "balls"
+k_at:           .asciz "at"
+k_cursor:       .asciz "cursor"
+k_surface:      .asciz "surface"
+k_spread:       .asciz "spread"
+k_size:         .asciz "size"
+k_counts:       .asciz "counts"
+k_offset:       .asciz "offset"
+k_gap:          .asciz "gap"
+k_jitter:       .asciz "jitter"
+k_radius:       .asciz "radius"
+k_inner:        .asciz "inner"
+k_random:       .asciz "random"
+s_sh_brick:     .asciz "_brick_"
+s_sh_ball:      .asciz "_ball_"
 s_sh_cell:      .asciz "_shard_"
 s_sh_part:      .asciz "_part_"
 s_sh_none:      .asciz "  shatter: make a mesh object active"
 s_sh_open:      .asciz "  shatter: the mesh is not closed even after repair (mesh.repair; open edges: "
 s_sh_mem:       .asciz "  shatter: out of memory"
-s_sh_bad:       .asciz "  object.shatter [shards] [count n] [seed s] - not understood: "
+s_sh_bad:       .asciz "  object.shatter <shards|bricks|balls> [count n] [seed s] [at x y z | cursor | surface] [spread f] [size x y z | counts a b c] [offset f|random] [gap g] [jitter f] [radius r] [inner r g b] - not understood: "
 s_sh_noseed:    .asciz "  shatter: no room inside the mesh for the cells"
 s_sh_done:      .asciz "  shattered into "
 s_sh_pieces:    .asciz " pieces ("
 s_sh_ms:        .asciz " ms)"
 s_sl_none:      .asciz "  separate: select mesh objects with loose parts"
 s_sl_done:      .asciz "  separated into loose parts: "
+
+.align 8
+so_kws:         .quad k_shards, k_bricks, k_balls, k_count, k_seed, k_at, k_cursor
+                .quad k_surface, k_spread, k_size, k_counts, k_offset, k_gap
+                .quad k_jitter, k_radius, k_inner, 0
+so_kwfn:        .quad .Lpa_count, .Lpa_seed, .Lpa_at, .Lpa_cursor, .Lpa_surface
+                .quad .Lpa_spread, .Lpa_size, .Lpa_counts, .Lpa_offset, .Lpa_gap
+                .quad .Lpa_jitter, .Lpa_radius, .Lpa_inner
+so_one_d:       .double 1.0
+so_three:       .double 3.0
+so_1em6:        .double 1.0e-6
+so_01:          .double 0.01
+so_001:         .double 0.01
+so_055:         .double 0.55
+so_sph:         .double 4.18879020478639
+so_12:          .double 1.2
+so_097:         .double 0.97
+so_08:          .double 0.8
+so_2r2:         .double 2.8284271247461903
+so_big:         .double 1.0e300
+fcc_off:        .double 0, 0, 0,  0.5, 0.5, 0,  0.5, 0, 0.5,  0, 0.5, 0.5
+.align 16
+so_absf:        .long 0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff
+so_f0:          .float 0.0
+so_f1:          .float 1.0
+so_f255:        .float 255.0
+so_fhalf:       .float 0.5
+so_third:       .float 0.33333334
 
 .section .bss
 .align 8
@@ -68,11 +124,42 @@ so_seed:        .skip 4
 so_first:       .skip 4                 # the first piece's handle
 .align 8
 so_seedsz:      .skip 8
+so_imap:        .skip 8                 # a piece's cut faces' vertex copies
+so_imap_rev:    .skip 8
+so_ipoly:       .skip 4*256
 so_cand:        .skip VX_SZ*SB_MAX      # a batch of tries,
-so_cin:         .skip SB_MAX            #  which are inside
+so_cin:         .skip BL_MAX            #  which are inside (or balls' kept)
+so_bpts:        .skip VX_SZ*BL_MAX      # the balls' lattice
+so_br:          .skip 8
+so_brad:        .skip 8*MAXSEEDS        # the balls' radii (local)
+so_cdf:         .skip 8                 # the triangles' areas, summed
+so_cdfsz:       .skip 8
+so_imat:        .skip 96                # the object's inverse (doubles)
+so_at:          .skip 24                # the impact point (local)
+so_atw:         .skip 12                #  (world)
+so_size:        .skip 12
+so_tmp3:        .skip 12
+so_counts:      .skip 12
+so_joints:      .skip 8*4096            # a row of bricks' joints
+.align 4
+so_pat:         .skip 4                 # 0 shards, 1 bricks, 2 balls
+so_atmode:      .skip 4                 # 0 uniform, 1 around a point, 2 surface
+so_spread:      .skip 4
+so_spreadset:   .skip 4
+so_counted:     .skip 4
+so_hassize:     .skip 4
+so_hascounts:   .skip 4
+so_offset:      .skip 4
+so_offrand:     .skip 4
+so_gap:         .skip 4
+so_jitter:      .skip 4
+so_radius:      .skip 4
+so_inner:       .skip 4
+so_innerc:      .skip 4
+sh_ncell_used:  .skip 4
 
 .text
-OPERATOR op_shatter, "object.shatter", "Shatter", do_shatter, flags=OPF_AI_SAFE|OPF_UNDO, doc="Break the active mesh object into pieces: object.shatter [shards] [count n (50)] [seed s] - Voronoi cells from n points inside it, each piece an object (the original is hidden)"
+OPERATOR op_shatter, "object.shatter", "Shatter", do_shatter, flags=OPF_AI_SAFE|OPF_UNDO, doc="Break the active mesh object into pieces, each an object (the original is hidden): object.shatter <shards|bricks|balls> [count n] [seed s] - shards: Voronoi cells [at x y z | cursor | surface] [spread f]; bricks: a running bond [counts a b c | size x y z] [offset f|random] [gap g] [jitter f]; balls: [radius r] [spread f]; [inner r g b] colours the cut faces"
 OPERATOR op_sep_loose, "mesh.separate_loose", "Separate By Loose Parts", do_sep_loose, flags=OPF_AI_SAFE|OPF_UNDO, doc="Split each selected mesh object into one object per loose part (parts that share no vertex)"
 
 # sh_info(edi=k) -> xmm0 (double): the last shatter's 0 pieces, 1 cells, 2
@@ -80,7 +167,9 @@ OPERATOR op_sep_loose, "mesh.separate_loose", "Separate By Loose Parts", do_sep_
 #   edges in the pieces, 6 ms, 7 glue joints, 8 open edges of the mesh,
 #   9 |pieces' volume - its| / its, 10 the smallest piece / the mean one,
 #   11-13 ms seeding, cutting, making the objects; 14-17 the cut's ms:
-#   the cells, the tree, its levels, the cells from their leaves
+#   the cells, the tree, its levels, the cells from their leaves; balls:
+#   18 the radius, 19 the least gap between two over a radius, 20 the most
+#   one reaches past the surface over its radius
 sh_info:
     xorpd   xmm0, xmm0
     cmp     edi, NSTAT
@@ -234,6 +323,1066 @@ so_source:
     pop     rbx
     ret
 
+# so_diag -> xmm0 = the source's bounds' diagonal (local)
+so_diag:
+    xorpd   xmm0, xmm0
+    xor     ecx, ecx
+    lea     rax, [rip+sh_src_max]
+    lea     rdx, [rip+sh_src_min]
+1:  movsd   xmm1, [rax+rcx*8]
+    subsd   xmm1, [rdx+rcx*8]
+    mulsd   xmm1, xmm1
+    addsd   xmm0, xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    sqrtsd  xmm0, xmm0
+    ret
+
+# so_cand_pt(rdi=3 doubles out) - a point to try as a seed: in the bounds,
+#   around the impact point (closer ones likelier) or near the surface
+so_cand_pt:
+    push    rbx
+    push    r12
+    sub     rsp, 56
+    mov     rbx, rdi
+    mov     eax, [rip+so_atmode]
+    cmp     eax, 1
+    je      .Lsc_at
+    cmp     eax, 2
+    je      .Lsc_surf
+    xor     r12d, r12d                  # anywhere in the bounds
+1:  call    so_rand
+    lea     rax, [rip+sh_src_max]
+    movsd   xmm1, [rax+r12*8]
+    lea     rax, [rip+sh_src_min]
+    movsd   xmm2, [rax+r12*8]
+    subsd   xmm1, xmm2
+    mulsd   xmm0, xmm1
+    addsd   xmm0, xmm2
+    movsd   [rbx+r12*8], xmm0
+    inc     r12d
+    cmp     r12d, 3
+    jb      1b
+    jmp     9f
+.Lsc_at:
+2:  xor     r12d, r12d                  # a way: in the unit ball, not 0
+21: call    so_rand
+    addsd   xmm0, xmm0
+    subsd   xmm0, [rip+so_one]
+    movsd   [rsp+r12*8], xmm0
+    inc     r12d
+    cmp     r12d, 3
+    jb      21b
+    movsd   xmm0, [rsp]
+    mulsd   xmm0, xmm0
+    movsd   xmm1, [rsp+8]
+    mulsd   xmm1, xmm1
+    addsd   xmm0, xmm1
+    movsd   xmm1, [rsp+16]
+    mulsd   xmm1, xmm1
+    addsd   xmm0, xmm1
+    comisd  xmm0, [rip+so_one]
+    ja      2b
+    comisd  xmm0, [rip+so_1em6]
+    jb      2b
+    sqrtsd  xmm0, xmm0
+    movsd   [rsp+24], xmm0
+    call    so_rand                     # how far: the spread x the size x u^2
+    mulsd   xmm0, xmm0
+    movsd   [rsp+32], xmm0
+    call    so_diag
+    mulsd   xmm0, [rsp+32]
+    cvtss2sd xmm1, [rip+so_spread]
+    mulsd   xmm0, xmm1
+    divsd   xmm0, [rsp+24]
+    xor     ecx, ecx
+22: movsd   xmm1, [rsp+rcx*8]
+    mulsd   xmm1, xmm0
+    lea     rax, [rip+so_at]
+    addsd   xmm1, [rax+rcx*8]
+    movsd   [rbx+rcx*8], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      22b
+    jmp     9f
+.Lsc_surf:
+    call    so_rand                     # a triangle by its area
+    mov     ecx, [rip+sh_src_nt]
+    mov     rax, [rip+so_cdf]
+    mulsd   xmm0, [rax+rcx*8-8]
+    xor     edx, edx                    # the first with cdf > u
+    mov     r8d, ecx
+3:  cmp     edx, r8d
+    jae     31f
+    lea     r9d, [rdx+r8]
+    shr     r9d, 1
+    comisd  xmm0, [rax+r9*8]
+    jb      32f
+    lea     edx, [r9+1]
+    jmp     3b
+32: mov     r8d, r9d
+    jmp     3b
+31: cmp     edx, ecx
+    jb      33f
+    lea     edx, [rcx-1]
+33: mov     r12d, edx
+    call    so_rand                     # a point in it
+    movsd   [rsp], xmm0
+    call    so_rand
+    movsd   xmm1, xmm0
+    movsd   xmm0, [rsp]
+    movsd   xmm2, xmm0
+    addsd   xmm2, xmm1
+    comisd  xmm2, [rip+so_one]
+    jbe     34f
+    movsd   xmm2, [rip+so_one]
+    subsd   xmm2, xmm0
+    movsd   xmm0, xmm2
+    movsd   xmm2, [rip+so_one]
+    subsd   xmm2, xmm1
+    movsd   xmm1, xmm2
+34: movsd   [rsp], xmm0                 # u, v
+    movsd   [rsp+8], xmm1
+    mov     rsi, [rip+sh_src_t]
+    shl     r12, 4
+    add     rsi, r12
+    mov     rdi, [rip+sh_src_p]
+    mov     eax, [rsi]
+    imul    r8, rax, VX_SZ
+    mov     eax, [rsi+4]
+    imul    r9, rax, VX_SZ
+    mov     eax, [rsi+8]
+    imul    r10, rax, VX_SZ
+    add     r8, rdi
+    add     r9, rdi
+    add     r10, rdi
+    xor     ecx, ecx                    # e1, e2 at [rsp+16], [rsp+40]?
+35: movsd   xmm2, [r9+rcx*8]            # (the point; e1, e2 kept for n)
+    subsd   xmm2, [r8+rcx*8]
+    movsd   xmm3, [r10+rcx*8]
+    subsd   xmm3, [r8+rcx*8]
+    movsd   xmm4, xmm2
+    mulsd   xmm4, [rsp]
+    movsd   xmm5, xmm3
+    mulsd   xmm5, [rsp+8]
+    addsd   xmm4, xmm5
+    addsd   xmm4, [r8+rcx*8]
+    movsd   [rbx+rcx*8], xmm4
+    inc     ecx
+    cmp     ecx, 3
+    jb      35b
+    movsd   xmm0, [r9]                  # n = e1 x e2
+    subsd   xmm0, [r8]
+    movsd   xmm1, [r9+8]
+    subsd   xmm1, [r8+8]
+    movsd   xmm2, [r9+16]
+    subsd   xmm2, [r8+16]
+    movsd   xmm3, [r10]
+    subsd   xmm3, [r8]
+    movsd   xmm4, [r10+8]
+    subsd   xmm4, [r8+8]
+    movsd   xmm5, [r10+16]
+    subsd   xmm5, [r8+16]
+    movsd   xmm6, xmm1
+    mulsd   xmm6, xmm5
+    movsd   xmm7, xmm2
+    mulsd   xmm7, xmm4
+    subsd   xmm6, xmm7                  # nx
+    movsd   xmm7, xmm2
+    mulsd   xmm7, xmm3
+    movsd   xmm8, xmm0
+    mulsd   xmm8, xmm5
+    subsd   xmm7, xmm8                  # ny
+    movsd   xmm8, xmm0
+    mulsd   xmm8, xmm4
+    movsd   xmm9, xmm1
+    mulsd   xmm9, xmm3
+    subsd   xmm8, xmm9                  # nz
+    movsd   xmm9, xmm6
+    mulsd   xmm9, xmm6
+    movsd   xmm10, xmm7
+    mulsd   xmm10, xmm7
+    addsd   xmm9, xmm10
+    movsd   xmm10, xmm8
+    mulsd   xmm10, xmm8
+    addsd   xmm9, xmm10
+    sqrtsd  xmm9, xmm9
+    maxsd   xmm9, [rip+so_tiny]
+    movsd   [rsp+16], xmm6
+    movsd   [rsp+24], xmm7
+    movsd   [rsp+32], xmm8
+    movsd   [rsp+40], xmm9
+    call    so_diag                     # in by 1% of the size
+    mulsd   xmm0, [rip+so_01]
+    divsd   xmm0, [rsp+40]
+    xor     ecx, ecx
+36: movsd   xmm1, [rsp+16+rcx*8]
+    mulsd   xmm1, xmm0
+    movsd   xmm2, [rbx+rcx*8]
+    subsd   xmm2, xmm1
+    movsd   [rbx+rcx*8], xmm2
+    inc     ecx
+    cmp     ecx, 3
+    jb      36b
+9:  add     rsp, 56
+    pop     r12
+    pop     rbx
+    ret
+
+# so_cdf_make -> eax = 1: so_cdf = the source triangles' areas, summed
+so_cdf_make:
+    push    rbx
+    mov     rdi, [rip+so_cdf]
+    mov     rsi, [rip+so_cdfsz]
+    call    sh_unmap_g
+    mov     esi, [rip+sh_src_nt]
+    shl     rsi, 3
+    mov     [rip+so_cdfsz], rsi
+    call    sh_map_g
+    mov     [rip+so_cdf], rax
+    test    rax, rax
+    jz      9f
+    mov     rbx, rax
+    xorpd   xmm15, xmm15
+    mov     rsi, [rip+sh_src_t]
+    mov     rdi, [rip+sh_src_p]
+    xor     ecx, ecx
+1:  cmp     ecx, [rip+sh_src_nt]
+    jae     8f
+    mov     eax, [rsi]
+    imul    r8, rax, VX_SZ
+    mov     eax, [rsi+4]
+    imul    r9, rax, VX_SZ
+    mov     eax, [rsi+8]
+    imul    r10, rax, VX_SZ
+    add     r8, rdi
+    add     r9, rdi
+    add     r10, rdi
+    movsd   xmm0, [r9]
+    subsd   xmm0, [r8]
+    movsd   xmm1, [r9+8]
+    subsd   xmm1, [r8+8]
+    movsd   xmm2, [r9+16]
+    subsd   xmm2, [r8+16]
+    movsd   xmm3, [r10]
+    subsd   xmm3, [r8]
+    movsd   xmm4, [r10+8]
+    subsd   xmm4, [r8+8]
+    movsd   xmm5, [r10+16]
+    subsd   xmm5, [r8+16]
+    movsd   xmm6, xmm1
+    mulsd   xmm6, xmm5
+    movsd   xmm7, xmm2
+    mulsd   xmm7, xmm4
+    subsd   xmm6, xmm7
+    mulsd   xmm6, xmm6
+    movsd   xmm7, xmm2
+    mulsd   xmm7, xmm3
+    movsd   xmm8, xmm0
+    mulsd   xmm8, xmm5
+    subsd   xmm7, xmm8
+    mulsd   xmm7, xmm7
+    addsd   xmm6, xmm7
+    movsd   xmm7, xmm0
+    mulsd   xmm7, xmm4
+    movsd   xmm8, xmm1
+    mulsd   xmm8, xmm3
+    subsd   xmm7, xmm8
+    mulsd   xmm7, xmm7
+    addsd   xmm6, xmm7
+    sqrtsd  xmm6, xmm6
+    addsd   xmm15, xmm6
+    movsd   [rbx+rcx*8], xmm15
+    add     rsi, 16
+    inc     ecx
+    jmp     1b
+8:  mov     eax, 1
+9:  pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# Bricks: a running bond in the object's axes. Rows along Y, bricks along
+#   X (each row's joints moved on by the offset), layers along Z; a gap
+#   between bricks; joints moved by up to a jitter of a brick. A brick's
+#   cell: the planes of its inner sides (each joint's plane tagged by the
+#   joint: 1 << 24 | row << 12 | joint for those along X, 2 << 24 | row,
+#   3 << 24 | layer).
+# -----------------------------------------------------------------------------
+# so_bricks -> eax = the cells (0: none)
+so_bricks:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 120                    # +0 sizes (3 doubles), +24 counts,
+    xor     ecx, ecx                    #  +40 row, +44 joints in it, +48
+1:  lea     rax, [rip+sh_src_max]       #  gaps (3 doubles), +72 cell, +80
+    movsd   xmm0, [rax+rcx*8]           #  layer, +88 joint
+    lea     rax, [rip+sh_src_min]
+    subsd   xmm0, [rax+rcx*8]
+    lea     rax, [rip+so_counts]        # the counts given, or the sizes'
+    mov     edx, [rax+rcx*4]
+    cmp     dword ptr [rip+so_hassize], 0
+    je      2f
+    cmp     dword ptr [rip+so_hascounts], 0
+    jne     2f
+    mov     rax, [rip+so_obj]           # (size in the world: / the scale)
+    lea     r8, [rip+so_size]
+    cvtss2sd xmm1, [r8+rcx*4]
+    cvtss2sd xmm2, [rax+OB_SCALE+rcx*4]
+    andpd   xmm2, [rip+so_abs]
+    maxsd   xmm2, [rip+so_tiny]
+    divsd   xmm1, xmm2
+    maxsd   xmm1, [rip+so_tiny]
+    movsd   xmm2, xmm0
+    divsd   xmm2, xmm1
+    addsd   xmm2, [rip+so_half]
+    cvttsd2si edx, xmm2
+    cmp     edx, 1
+    jge     11f
+    mov     edx, 1
+11: cmp     edx, 4096
+    jle     2f
+    mov     edx, 4096
+2:  mov     [rsp+24+rcx*4], edx
+    cvtsi2sd xmm1, edx
+    divsd   xmm0, xmm1
+    movsd   [rsp+rcx*8], xmm0
+    mov     rax, [rip+so_obj]           # the gap, local
+    cvtss2sd xmm1, [rip+so_gap]
+    cvtss2sd xmm2, [rax+OB_SCALE+rcx*4]
+    andpd   xmm2, [rip+so_abs]
+    maxsd   xmm2, [rip+so_tiny]
+    divsd   xmm1, xmm2
+    mulsd   xmm1, [rip+so_half]
+    movsd   [rsp+48+rcx*8], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     eax, [rsp+24]               # cells: rows x (count + 1) x layers
+    inc     eax                         #  at most
+    imul    eax, [rsp+28]
+    imul    eax, [rsp+32]
+    cmp     eax, MAXSEEDS
+    jbe     21f
+    xor     eax, eax                    # (too many)
+    jmp     9f
+21: mov     edi, eax
+    call    sh_cells_alloc
+    test    eax, eax
+    jz      9f
+    mov     dword ptr [rsp+72], 0
+    mov     dword ptr [rsp+40], 0       # each row: its joints
+3:  mov     eax, [rsp+40]
+    cmp     eax, [rsp+28]
+    jae     8f
+    cvtss2sd xmm0, [rip+so_offset]      # its offset: row x offset (mod 1), or
+    cvtsi2sd xmm1, eax                  #  at random
+    mulsd   xmm0, xmm1
+    cmp     dword ptr [rip+so_offrand], 0
+    je      31f
+    call    so_rand
+31: roundsd xmm1, xmm0, 1               # (floor)
+    subsd   xmm0, xmm1
+    mulsd   xmm0, [rsp]
+    movsd   xmm1, [rip+sh_src_min]      # joints: min, min + o (when o), then
+    lea     rbx, [rip+so_joints]        #  a brick on, up to max
+    movsd   [rbx], xmm1
+    mov     r12d, 1
+    movsd   xmm2, [rsp]                 # (o less than 1% of a brick: none)
+    mulsd   xmm2, [rip+so_001]
+    comisd  xmm0, xmm2
+    jbe     32f
+    movsd   xmm3, [rsp]
+    subsd   xmm3, xmm2
+    comisd  xmm0, xmm3
+    jae     32f
+    addsd   xmm1, xmm0
+    movsd   [rbx+r12*8], xmm1
+    inc     r12d
+32: movsd   xmm3, [rip+sh_src_max]
+    subsd   xmm3, xmm2                  # (the last within 1% of max: max)
+33: addsd   xmm1, [rsp]
+    comisd  xmm1, xmm3
+    jae     34f
+    movsd   [rbx+r12*8], xmm1
+    inc     r12d
+    cmp     r12d, 4094
+    jb      33b
+34: movsd   xmm1, [rip+sh_src_max]
+    movsd   [rbx+r12*8], xmm1
+    inc     r12d
+    mov     [rsp+44], r12d
+    cvtss2sd xmm6, [rip+so_jitter]      # jitter: the inner joints, by up to
+    xorpd   xmm7, xmm7                  #  half of it either way
+    comisd  xmm6, xmm7
+    jbe     36f
+    mov     r13d, 1
+35: lea     eax, [r13+1]
+    cmp     eax, r12d
+    jae     36f
+    call    so_rand
+    subsd   xmm0, [rip+so_half]
+    cvtss2sd xmm6, [rip+so_jitter]
+    mulsd   xmm0, xmm6
+    mulsd   xmm0, [rsp]
+    mulsd   xmm0, [rip+so_half]
+    lea     rbx, [rip+so_joints]
+    addsd   xmm0, [rbx+r13*8]
+    movsd   [rbx+r13*8], xmm0
+    inc     r13d
+    jmp     35b
+36: mov     dword ptr [rsp+80], 0       # each layer, each brick of the row
+4:  mov     eax, [rsp+80]
+    cmp     eax, [rsp+32]
+    jae     7f
+    mov     dword ptr [rsp+88], 0
+5:  mov     eax, [rsp+88]
+    inc     eax
+    cmp     eax, [rsp+44]
+    jae     6f
+    call    so_brick_cell
+    inc     dword ptr [rsp+88]
+    jmp     5b
+6:  inc     dword ptr [rsp+80]
+    jmp     4b
+7:  inc     dword ptr [rsp+40]
+    jmp     3b
+8:  mov     eax, [rsp+72]
+    mov     [rip+sh_ncell_used], eax
+9:  add     rsp, 120
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# so_brick_cell (so_bricks' frame one return address up: [rsp+8]) - the
+#   brick between joints [+88] and [+88]+1 of row [+40], layer [+80]: its
+#   bounds and the planes of its inner sides into cell [+72]
+so_brick_cell:
+    push    rbx
+    push    r12
+    push    r13
+    lea     rbp, [rsp+32]               # (so_bricks' frame)
+    sub     rsp, 104                    # +0 min, +24 max (doubles), +48 a plane
+    lea     rax, [rip+so_joints]
+    mov     ecx, [rbp+88]
+    movsd   xmm0, [rax+rcx*8]
+    movsd   [rsp], xmm0
+    movsd   xmm0, [rax+rcx*8+8]
+    movsd   [rsp+24], xmm0
+    cvtsi2sd xmm0, dword ptr [rbp+40]   # y: the row
+    mulsd   xmm0, [rbp+8]
+    addsd   xmm0, [rip+sh_src_min+8]
+    movsd   [rsp+8], xmm0
+    addsd   xmm0, [rbp+8]
+    movsd   [rsp+32], xmm0
+    cvtsi2sd xmm0, dword ptr [rbp+80]   # z: the layer
+    mulsd   xmm0, [rbp+16]
+    addsd   xmm0, [rip+sh_src_min+16]
+    movsd   [rsp+16], xmm0
+    addsd   xmm0, [rbp+16]
+    movsd   [rsp+40], xmm0
+    mov     ebx, [rbp+72]               # the cell
+    imul    rdi, rbx, 48                # its bounds
+    add     rdi, [rip+sh_cbb]
+    mov     rsi, rsp
+    mov     ecx, 6
+    rep     movsq
+    imul    r12, rbx, CPL_MAX*PLN_SZ    # its planes
+    add     r12, [rip+sh_cpl]
+    xor     r13d, r13d
+    xor     ecx, ecx                    # the six sides: axis, +/-
+1:  cmp     ecx, 6
+    jae     8f
+    mov     edx, ecx
+    shr     edx, 1                      # (axis)
+    lea     rax, [rip+sh_src_min]       # on the bounds: no plane
+    movsd   xmm0, [rax+rdx*8]
+    lea     rax, [rip+sh_src_max]
+    movsd   xmm1, [rax+rdx*8]
+    movsd   xmm4, [rbp+rdx*8]           # (1% of a brick)
+    mulsd   xmm4, [rip+so_001]
+    addsd   xmm0, xmm4
+    subsd   xmm1, xmm4
+    test    ecx, 1
+    jnz     2f
+    movsd   xmm2, [rsp+24+rdx*8]        # max side: x <= max - gap
+    comisd  xmm2, xmm1
+    jae     7f
+    subsd   xmm2, [rbp+48+rdx*8]
+    movsd   xmm3, [rip+so_one]
+    jmp     3f
+2:  movsd   xmm2, [rsp+rdx*8]           # min side: -x <= -(min + gap)
+    comisd  xmm2, xmm0
+    jbe     7f
+    addsd   xmm2, [rbp+48+rdx*8]
+    xorpd   xmm3, xmm3
+    subsd   xmm3, [rip+so_one]
+    xorpd   xmm4, xmm4
+    subsd   xmm4, xmm2
+    movsd   xmm2, xmm4
+3:  imul    rdi, r13, PLN_SZ
+    add     rdi, r12
+    xorpd   xmm4, xmm4
+    movsd   [rdi], xmm4
+    movsd   [rdi+8], xmm4
+    movsd   [rdi+16], xmm4
+    movsd   [rdi+rdx*8], xmm3
+    movsd   [rdi+24], xmm2
+    mov     eax, ecx                    # its joint's tag
+    test    edx, edx
+    jnz     4f
+    mov     eax, [rbp+88]               # x: row << 12 | joint
+    test    ecx, 1
+    jnz     31f
+    inc     eax
+31: mov     r8d, [rbp+40]
+    shl     r8d, 12
+    or      eax, r8d
+    or      eax, 1 << 24
+    jmp     6f
+4:  cmp     edx, 1
+    jne     5f
+    mov     eax, [rbp+40]               # y: the row boundary
+    test    ecx, 1
+    jnz     41f
+    inc     eax
+41: or      eax, 2 << 24
+    jmp     6f
+5:  mov     eax, [rbp+80]               # z: the layer boundary
+    test    ecx, 1
+    jnz     51f
+    inc     eax
+51: or      eax, 3 << 24
+6:  mov     [rdi+PLN_TAG], eax
+    inc     r13d
+7:  inc     ecx
+    jmp     1b
+8:  mov     rax, [rip+sh_cpn]
+    mov     [rax+rbx*4], r13d
+    inc     dword ptr [rbp+72]
+    add     rsp, 104
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# Balls: the volume packed with spheres: the points of a face-centred
+#   cubic lattice 2r apart that are inside and r (0.8 of it) from the
+#   surface; r shrinks until there are enough, then the count is taken at
+#   random. One sphere mesh for all; each ball the colour of the vertex
+#   nearest it (or the object's).
+# -----------------------------------------------------------------------------
+# so_balls -> eax = balls made
+so_balls:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 88                     # +0 r, +8 the lattice's side a,
+    mov     rax, [rip+so_obj]           #  +16 tries, +24 points, +32 kept,
+    movss   xmm0, [rax+OB_SCALE]        #  +40 the mean scale, +48 sphere
+    addss   xmm0, [rax+OB_SCALE+4]
+    addss   xmm0, [rax+OB_SCALE+8]
+    andps   xmm0, [rip+so_absf]
+    mulss   xmm0, [rip+so_third]
+    cvtss2sd xmm0, xmm0
+    maxsd   xmm0, [rip+so_tiny]
+    movsd   [rsp+40], xmm0
+    cvtss2sd xmm0, [rip+so_radius]      # r: given (world), or the volume's
+    xorpd   xmm1, xmm1
+    comisd  xmm0, xmm1
+    jbe     1f
+    divsd   xmm0, [rsp+40]
+    jmp     2f
+1:  movsd   xmm0, [rip+sh_src_vol]      # (0.55 V / (n 4/3 pi))^(1/3)
+    andpd   xmm0, [rip+so_abs]
+    mulsd   xmm0, [rip+so_055]
+    cvtsi2sd xmm1, dword ptr [rip+so_count]
+    mulsd   xmm1, [rip+so_sph]
+    divsd   xmm0, xmm1
+    call    so_cbrt
+2:  movsd   [rsp], xmm0
+    mov     dword ptr [rsp+16], 0
+3:  inc     dword ptr [rsp+16]          # the lattice for this r
+    cmp     dword ptr [rsp+16], 24
+    ja      .Lbl_take
+    call    bl_lattice
+    mov     [rsp+24], eax
+    cmp     eax, BL_MAX                 # (too many points: a larger r)
+    jb      31f
+    movsd   xmm0, [rsp]
+    mulsd   xmm0, [rip+so_12]
+    movsd   [rsp], xmm0
+    jmp     3b
+31: test    eax, eax
+    jz      34f
+    lea     rdi, [rip+ball_job]         # which are in, clear of the surface
+    xor     esi, esi
+    mov     edx, eax
+    mov     ecx, 16
+    call    parallel_for
+    xor     ecx, ecx                    # kept: packed to the front
+    xor     edx, edx
+32: cmp     ecx, [rsp+24]
+    jae     33f
+    lea     rax, [rip+so_cin]
+    cmp     byte ptr [rax+rcx], 0
+    je      321f
+    imul    rsi, rcx, VX_SZ
+    lea     rax, [rip+so_bpts]
+    add     rsi, rax
+    imul    rdi, rdx, VX_SZ
+    add     rdi, rax
+    push    rcx
+    mov     ecx, VX_SZ
+    rep     movsb
+    pop     rcx
+    inc     edx
+321:inc     ecx
+    jmp     32b
+33: mov     [rsp+32], edx
+    cvtss2sd xmm0, [rip+so_radius]      # (a radius and no count: as many as
+    xorpd   xmm1, xmm1                  #  fit)
+    comisd  xmm0, xmm1
+    jbe     331f
+    cmp     dword ptr [rip+so_counted], 0
+    jne     331f
+    cmp     edx, MAXSEEDS
+    jbe     332f
+    mov     edx, MAXSEEDS
+332:mov     [rip+so_count], edx
+    jmp     .Lbl_take
+331:cmp     edx, [rip+so_count]
+    jae     .Lbl_take
+    test    edx, edx                    # too few: r by (kept / n)^(1/3)
+    jnz     35f
+34: movsd   xmm0, [rsp]
+    mulsd   xmm0, [rip+so_half]
+    movsd   [rsp], xmm0
+    jmp     3b
+35: cvtsi2sd xmm0, edx
+    cvtsi2sd xmm1, dword ptr [rip+so_count]
+    divsd   xmm0, xmm1
+    call    so_cbrt
+    mulsd   xmm0, [rip+so_097]
+    mulsd   xmm0, [rsp]
+    movsd   [rsp], xmm0
+    jmp     3b
+.Lbl_take:
+    mov     ebx, [rsp+32]               # n of them at random (a partial
+    cmp     ebx, [rip+so_count]         #  shuffle)
+    jbe     4f
+    xor     r12d, r12d
+41: cmp     r12d, [rip+so_count]
+    jae     42f
+    call    so_rand
+    mov     eax, ebx
+    sub     eax, r12d
+    cvtsi2sd xmm1, eax
+    mulsd   xmm0, xmm1
+    cvttsd2si eax, xmm0
+    add     eax, r12d                   # swap r12 and eax
+    lea     rdx, [rip+so_bpts]
+    imul    rsi, r12, VX_SZ
+    imul    rdi, rax, VX_SZ
+    add     rsi, rdx
+    add     rdi, rdx
+    xor     ecx, ecx
+411:mov     r8, [rsi+rcx*8]
+    mov     r9, [rdi+rcx*8]
+    mov     [rsi+rcx*8], r9
+    mov     [rdi+rcx*8], r8
+    inc     ecx
+    cmp     ecx, 3
+    jb      411b
+    inc     r12d
+    jmp     41b
+42: mov     ebx, [rip+so_count]
+4:  xor     eax, eax
+    test    ebx, ebx
+    jz      .Lbl_out
+    call    prim_uvsphere               # the sphere (radius 1)
+    test    rax, rax
+    jz      .Lbl_out
+    mov     [rsp+48], rax
+    xor     r12d, r12d                  # each ball
+5:  cmp     r12d, ebx
+    jae     6f
+    call    so_nextname
+    test    r12d, r12d
+    jz      51f
+    mov     rdi, [rsp+48]
+    call    mesh_ref
+51: mov     edi, OT_MESH
+    lea     rsi, [rip+so_name]
+    mov     rdx, [rsp+48]
+    call    obj_new
+    test    eax, eax
+    jz      6f
+    cmp     dword ptr [rip+so_first], 0
+    jne     52f
+    mov     [rip+so_first], eax
+52: mov     edi, eax
+    call    obj_get
+    mov     r13, rax
+    mov     rsi, [rip+so_obj]
+    mov     eax, [rsi+OB_COLOR]
+    mov     [r13+OB_COLOR], eax
+    mov     rax, [rsi+OB_MAT]
+    mov     [r13+OB_MAT], rax
+    or      dword ptr [r13+OB_FLAGS], OBF_SELECTED
+    imul    r14, r12, VX_SZ             # its place: M c
+    lea     rax, [rip+so_bpts]
+    add     r14, rax
+    lea     rax, [rip+so_mat]
+    xor     ecx, ecx
+53: cvtsd2ss xmm0, [r14]
+    mulss   xmm0, [rax]
+    cvtsd2ss xmm1, [r14+8]
+    mulss   xmm1, [rax+4]
+    addss   xmm0, xmm1
+    cvtsd2ss xmm1, [r14+16]
+    mulss   xmm1, [rax+8]
+    addss   xmm0, xmm1
+    addss   xmm0, [rax+12]
+    movss   [r13+OB_LOC+rcx*4], xmm0
+    add     rax, 16
+    inc     ecx
+    cmp     ecx, 3
+    jb      53b
+    movsd   xmm0, [rsp]                 # its radius: r (1 - spread u) x the
+    cvtss2sd xmm1, [rip+so_spread]      #  mean scale
+    cmp     dword ptr [rip+so_spreadset], 0
+    jne     54f
+    xorpd   xmm1, xmm1                  # (balls: one radius unless asked)
+54: movsd   [rsp+56], xmm1
+    movsd   [rsp+64], xmm0
+    call    so_rand
+    mulsd   xmm0, [rsp+56]
+    movsd   xmm1, [rip+so_one]
+    subsd   xmm1, xmm0
+    mulsd   xmm1, [rsp+64]
+    mulsd   xmm1, [rsp+40]
+    cvtsd2ss xmm1, xmm1
+    movss   [r13+OB_SCALE], xmm1
+    movss   [r13+OB_SCALE+4], xmm1
+    movss   [r13+OB_SCALE+8], xmm1
+    lea     rax, [rip+so_brad]          # (its radius, local: for the stats)
+    cvtss2sd xmm0, [r13+OB_SCALE]
+    divsd   xmm0, [rsp+40]
+    movsd   [rax+r12*8], xmm0
+    mov     rdi, r14                    # the colour of the vertex nearest
+    call    so_near_colour
+    test    eax, eax
+    jz      55f
+    mov     [r13+OB_COLOR], edx
+55: inc     r12d
+    jmp     5b
+6:  mov     [rsp+56], r12d
+    lea     rcx, [rip+sh_stat]          # (the radius, world: stat 18)
+    movsd   xmm0, [rsp]
+    mulsd   xmm0, [rsp+40]
+    movsd   [rcx+18*8], xmm0
+    mov     edi, r12d
+    call    so_ball_stats
+    mov     eax, [rsp+56]
+.Lbl_out:
+    add     rsp, 88
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# so_ball_stats(edi=balls) - stat 19: the least gap between two balls over
+#   the radius, 20: the most a ball reaches past the surface over its
+#   radius (so_bpts, so_brad; local)
+so_ball_stats:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     ebx, edi
+    movsd   xmm6, [rip+so_big]          # least gap
+    xorpd   xmm7, xmm7                  # most past (or less)
+    subsd   xmm7, xmm6
+    xor     r12d, r12d
+1:  cmp     r12d, ebx
+    jae     5f
+    imul    r8, r12, VX_SZ
+    lea     rax, [rip+so_bpts]
+    add     r8, rax
+    lea     r9, [rip+so_brad]
+    lea     r13d, [r12+1]
+2:  cmp     r13d, ebx
+    jae     3f
+    imul    r10, r13, VX_SZ
+    add     r10, rax
+    movsd   xmm0, [r10]
+    subsd   xmm0, [r8]
+    mulsd   xmm0, xmm0
+    movsd   xmm1, [r10+8]
+    subsd   xmm1, [r8+8]
+    mulsd   xmm1, xmm1
+    addsd   xmm0, xmm1
+    movsd   xmm1, [r10+16]
+    subsd   xmm1, [r8+16]
+    mulsd   xmm1, xmm1
+    addsd   xmm0, xmm1
+    sqrtsd  xmm0, xmm0
+    subsd   xmm0, [r9+r12*8]
+    subsd   xmm0, [r9+r13*8]
+    divsd   xmm0, [r9+r12*8]
+    minsd   xmm6, xmm0
+    inc     r13d
+    jmp     2b
+3:  movsd   [rsp], xmm6                 # past the surface: r - distance
+    movsd   [rsp+8], xmm7
+    movsd   xmm0, [r8]
+    movsd   xmm1, [r8+8]
+    movsd   xmm2, [r8+16]
+    call    sh_dist2
+    sqrtsd  xmm0, xmm0
+    lea     r9, [rip+so_brad]
+    movsd   xmm1, [r9+r12*8]
+    subsd   xmm1, xmm0
+    divsd   xmm1, [r9+r12*8]
+    movsd   xmm6, [rsp]
+    movsd   xmm7, [rsp+8]
+    maxsd   xmm7, xmm1
+    inc     r12d
+    jmp     1b
+5:  lea     rax, [rip+sh_stat]
+    movsd   [rax+19*8], xmm6
+    movsd   [rax+20*8], xmm7
+    add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bl_lattice ([rsp+8] = so_balls' r: one return address up) -> eax = the
+#   lattice's points in the bounds less r (so_bpts), BL_MAX when more
+bl_lattice:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 48
+    movsd   xmm7, [rsp+48+48]           # r (so_balls' [rsp]: 5 pushes, ret)
+    movsd   xmm6, xmm7                  # a = 2 sqrt 2 r
+    mulsd   xmm6, [rip+so_2r2]
+    movsd   [rsp], xmm6
+    movsd   [rsp+8], xmm7
+    xor     ecx, ecx                    # cells a side: (max - min - 2r) / a + 1
+1:  lea     rax, [rip+sh_src_max]
+    movsd   xmm0, [rax+rcx*8]
+    lea     rax, [rip+sh_src_min]
+    subsd   xmm0, [rax+rcx*8]
+    subsd   xmm0, xmm7
+    subsd   xmm0, xmm7
+    xorpd   xmm1, xmm1
+    maxsd   xmm0, xmm1
+    divsd   xmm0, xmm6
+    cvttsd2si eax, xmm0
+    inc     eax
+    cmp     eax, 4096
+    jbe     11f
+    mov     eax, 4096
+11: mov     [rsp+16+rcx*4], eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     eax, [rsp+16]               # (too many: say so)
+    imul    eax, [rsp+20]
+    jo      8f
+    cmp     eax, BL_MAX
+    jae     8f
+    imul    eax, [rsp+24]
+    jo      8f
+    cmp     eax, BL_MAX/4
+    jae     8f
+    xor     ebx, ebx                    # points
+    xor     r12d, r12d                  # i, j, k; the four of a cell
+2:  cmp     r12d, [rsp+24]
+    jae     7f
+    xor     r13d, r13d
+3:  cmp     r13d, [rsp+20]
+    jae     6f
+    xor     r14d, r14d
+4:  cmp     r14d, [rsp+16]
+    jae     5f
+    xor     r15d, r15d
+41: cmp     r15d, 4
+    jae     42f
+    lea     rax, [rip+fcc_off]
+    imul    rdi, rbx, VX_SZ
+    lea     rdx, [rip+so_bpts]
+    add     rdi, rdx
+    cvtsi2sd xmm0, r14d                 # min + r + (i + o) a
+    cvtsi2sd xmm1, r13d
+    cvtsi2sd xmm2, r12d
+    lea     rdx, [r15+r15*2]
+    addsd   xmm0, [rax+rdx*8]
+    addsd   xmm1, [rax+rdx*8+8]
+    addsd   xmm2, [rax+rdx*8+16]
+    mulsd   xmm0, [rsp]
+    mulsd   xmm1, [rsp]
+    mulsd   xmm2, [rsp]
+    addsd   xmm0, [rsp+8]
+    addsd   xmm1, [rsp+8]
+    addsd   xmm2, [rsp+8]
+    addsd   xmm0, [rip+sh_src_min]
+    addsd   xmm1, [rip+sh_src_min+8]
+    addsd   xmm2, [rip+sh_src_min+16]
+    movsd   [rdi], xmm0
+    movsd   [rdi+8], xmm1
+    movsd   [rdi+16], xmm2
+    inc     ebx
+    inc     r15d
+    jmp     41b
+42: inc     r14d
+    jmp     4b
+5:  inc     r13d
+    jmp     3b
+6:  inc     r12d
+    jmp     2b
+7:  mov     eax, ebx
+    movsd   xmm0, [rsp+8]               # (r for the job)
+    movsd   [rip+so_br], xmm0
+    jmp     9f
+8:  mov     eax, BL_MAX
+9:  add     rsp, 48
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ball_job(rdi, esi=begin, edx=end) - so_cin[i]: point i is inside and at
+#   least 0.8 r from the surface
+ball_job:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, esi
+    mov     r12d, edx
+1:  cmp     ebx, r12d
+    jae     9f
+    imul    rax, rbx, VX_SZ
+    lea     rdx, [rip+so_bpts]
+    add     rax, rdx
+    movsd   xmm0, [rax]
+    movsd   xmm1, [rax+8]
+    movsd   xmm2, [rax+16]
+    call    sh_inside
+    lea     rdx, [rip+so_cin]
+    mov     [rdx+rbx], al
+    test    eax, eax
+    jz      2f
+    imul    rax, rbx, VX_SZ
+    lea     rdx, [rip+so_bpts]
+    add     rax, rdx
+    movsd   xmm0, [rax]
+    movsd   xmm1, [rax+8]
+    movsd   xmm2, [rax+16]
+    call    sh_dist2
+    movsd   xmm1, [rip+so_br]
+    mulsd   xmm1, [rip+so_08]
+    mulsd   xmm1, xmm1
+    xor     eax, eax
+    comisd  xmm0, xmm1
+    setae   al
+    lea     rdx, [rip+so_cin]
+    mov     [rdx+rbx], al
+2:  inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# so_near_colour(rdi=3 doubles, local) -> eax = 1 and edx = the colour of
+#   the source's vertex nearest it (0: the mesh has no colours)
+so_near_colour:
+    mov     rax, [rip+so_obj]
+    mov     rax, [rax+OB_MESH]
+    mov     r8, [rax+ME_VCOL]
+    test    r8, r8
+    jz      8f
+    mov     r9, [rip+sh_src_p]
+    mov     ecx, [rip+sh_src_nv]
+    cmp     ecx, [rax+ME_NVERTS]        # (its own mesh's vertices only)
+    jne     8f
+    movsd   xmm3, [rip+so_big]
+    xor     edx, edx
+    xor     esi, esi
+1:  cmp     esi, ecx
+    jae     2f
+    imul    rax, rsi, VX_SZ
+    movsd   xmm0, [r9+rax]
+    subsd   xmm0, [rdi]
+    mulsd   xmm0, xmm0
+    movsd   xmm1, [r9+rax+8]
+    subsd   xmm1, [rdi+8]
+    mulsd   xmm1, xmm1
+    addsd   xmm0, xmm1
+    movsd   xmm1, [r9+rax+16]
+    subsd   xmm1, [rdi+16]
+    mulsd   xmm1, xmm1
+    addsd   xmm0, xmm1
+    comisd  xmm0, xmm3
+    jae     11f
+    movsd   xmm3, xmm0
+    mov     edx, esi
+11: inc     esi
+    jmp     1b
+2:  mov     edx, [r8+rdx*4]
+    mov     eax, 1
+    ret
+8:  xor     eax, eax
+    ret
+
+# so_cbrt(xmm0) -> xmm0 = its cube root (x > 0; x87)
+so_cbrt:
+    sub     rsp, 8
+    movsd   [rsp], xmm0
+    xorpd   xmm1, xmm1
+    comisd  xmm0, xmm1
+    jbe     9f
+    fld1                                # 2^(log2 x / 3)
+    fld     qword ptr [rsp]
+    fyl2x
+    fdiv    qword ptr [rip+so_three]
+    fld     st(0)
+    frndint
+    fsub    st(1), st(0)
+    fxch
+    f2xm1
+    fld1
+    faddp
+    fscale
+    fstp    st(1)
+    fstp    qword ptr [rsp]
+9:  movsd   xmm0, [rsp]
+    add     rsp, 8
+    ret
+
 # so_seeds(edi=count) -> eax = seeds made: points inside the source, at
 #   random in its bounds; tried in batches, in parallel, kept in order
 so_seeds:
@@ -274,26 +1423,10 @@ so_seeds:
     xor     r15d, r15d                  # the points (in order)
 3:  cmp     r15d, r14d
     jae     4f
-    xor     ecx, ecx
-31: push    rcx
-    push    rcx
-    call    so_rand
-    pop     rcx
-    pop     rcx
-    lea     rax, [rip+sh_src_max]
-    movsd   xmm1, [rax+rcx*8]
-    lea     rax, [rip+sh_src_min]
-    movsd   xmm2, [rax+rcx*8]
-    subsd   xmm1, xmm2
-    mulsd   xmm0, xmm1
-    addsd   xmm0, xmm2
-    imul    rax, r15, VX_SZ
-    lea     rdx, [rip+so_cand]
-    add     rax, rdx
-    movsd   [rax+rcx*8], xmm0
-    inc     ecx
-    cmp     ecx, 3
-    jb      31b
+    imul    rdi, r15, VX_SZ
+    lea     rax, [rip+so_cand]
+    add     rdi, rax
+    call    so_cand_pt
     inc     r15d
     jmp     3b
 4:  lea     rdi, [rip+seed_job]         # inside? (all at once)
@@ -449,6 +1582,67 @@ so_piece_next:
     lea     rax, [rsi+PH_SZ+rax]
     ret
 
+# so_inner_map(rbx=piece) -> eax = how many vertices the cut faces (tag
+#   not 0) use, so_imap = each one's copy (index from the piece's vertex
+#   count), so_imap_rev the other way; 0 without an inner colour
+so_inner_map:
+    xor     eax, eax
+    cmp     dword ptr [rip+so_inner], 0
+    jne     0f
+    ret
+0:  push    r12
+    push    r13
+    sub     rsp, 8
+    mov     esi, [rbx+PH_NV]            # (frame arena: until the next frame)
+    shl     rsi, 3
+    lea     rdi, [rip+frame_arena]
+    call    arena_alloc
+    test    rax, rax
+    jz      8f
+    mov     [rip+so_imap], rax
+    mov     ecx, [rbx+PH_NV]
+    lea     rdx, [rax+rcx*4]
+    mov     [rip+so_imap_rev], rdx
+    mov     rdi, rax
+    mov     eax, -1
+    rep     stosd
+    mov     eax, [rbx+PH_NV]            # the cut faces' vertices
+    imul    eax, eax, 12
+    lea     r8, [rbx+PH_SZ+rax]         # records
+    mov     eax, [rbx+PH_NP]
+    lea     r9, [r8+rax*8]              # loops
+    xor     r12d, r12d                  # copies
+    xor     r13d, r13d
+1:  cmp     r13d, [rbx+PH_NP]
+    jae     7f
+    mov     ecx, [r8]
+    cmp     dword ptr [r8+4], 0
+    je      3f
+    xor     edx, edx
+2:  cmp     edx, ecx
+    jae     3f
+    mov     eax, [r9+rdx*4]
+    mov     rsi, [rip+so_imap]
+    cmp     dword ptr [rsi+rax*4], -1
+    jne     21f
+    mov     [rsi+rax*4], r12d
+    mov     rsi, [rip+so_imap_rev]
+    mov     [rsi+r12*4], eax
+    inc     r12d
+21: inc     edx
+    jmp     2b
+3:  lea     r9, [r9+rcx*4]
+    add     r8, 8
+    inc     r13d
+    jmp     1b
+7:  mov     eax, r12d
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r13
+    pop     r12
+    ret
+
 # so_make(rsi=piece header; so_obj, so_mat) -> eax = its object's handle
 #   (0: none): its mesh (vertices from its centre, its polygons), placed at
 #   the centre, turned and scaled like the original
@@ -460,7 +1654,10 @@ so_make:
     push    r15
     sub     rsp, 32
     mov     rbx, rsi
+    call    so_inner_map                # (an inner colour: the cut faces'
+    mov     [rsp+8], eax                #  vertices twice, eax = how many)
     mov     edi, [rbx+PH_NV]
+    add     edi, eax
     mov     esi, [rbx+PH_NL]
     mov     edx, [rbx+PH_NP]
     call    mesh_new
@@ -470,7 +1667,7 @@ so_make:
     lea     r13, [rbx+PH_SZ]            # vertices
     xor     r14d, r14d
 1:  cmp     r14d, [rbx+PH_NV]
-    jae     2f
+    jae     11f
     movss   xmm0, [r13]
     movss   xmm1, [r13+4]
     movss   xmm2, [r13+8]
@@ -479,13 +1676,61 @@ so_make:
     add     r13, 12
     inc     r14d
     jmp     1b
-2:  mov     eax, [rbx+PH_NP]            # polygons (r13: their records, r15
+11: xor     r14d, r14d                  # (the cut faces' copies, coloured)
+12: cmp     r14d, [rsp+8]
+    jae     2f
+    mov     rax, [rip+so_imap_rev]
+    mov     eax, [rax+r14*4]
+    imul    rax, rax, 12
+    lea     rax, [rbx+PH_SZ+rax]
+    movss   xmm0, [rax]
+    movss   xmm1, [rax+4]
+    movss   xmm2, [rax+8]
+    mov     rdi, r12
+    call    mesh_add_vert
+    inc     r14d
+    jmp     12b
+2:  cmp     dword ptr [rsp+8], 0
+    je      21f
+    mov     rdi, r12
+    call    mesh_vcol_alloc
+    test    rax, rax
+    jz      21f
+    mov     ecx, [rbx+PH_NV]
+    mov     edx, [rip+so_innerc]
+    or      edx, 0xff000000
+    xor     r8d, r8d
+22: cmp     r8d, [rsp+8]
+    jae     21f
+    lea     r9d, [rcx+r8]
+    mov     [rax+r9*4], edx
+    inc     r8d
+    jmp     22b
+21: mov     eax, [rbx+PH_NP]            # polygons (r13: their records, r15
     lea     r15, [r13+rax*8]            #  their loops)
     xor     r14d, r14d
 3:  cmp     r14d, [rbx+PH_NP]
     jae     4f
-    mov     rdi, r12
     mov     rsi, r15
+    cmp     dword ptr [rsp+8], 0        # a cut face: its vertices' copies
+    je      31f
+    cmp     dword ptr [r13+4], 0
+    je      31f
+    mov     ecx, [r13]
+    cmp     ecx, 256
+    ja      31f
+    lea     rdi, [rip+so_ipoly]
+    mov     r8, [rip+so_imap]
+    xor     edx, edx
+32: mov     eax, [r15+rdx*4]
+    mov     eax, [r8+rax*4]
+    add     eax, [rbx+PH_NV]
+    mov     [rdi+rdx*4], eax
+    inc     edx
+    cmp     edx, ecx
+    jb      32b
+    mov     rsi, rdi
+31: mov     rdi, r12
     mov     edx, [r13]
     call    mesh_add_poly
     mov     eax, [r13]
@@ -640,7 +1885,365 @@ so_build:
     pop     rbx
     ret
 
-# object.shatter [shards] [count n] [seed s]
+# so_parse -> eax = 1 when op_arg was understood: the pattern and its
+#   options into so_*
+so_parse:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     r12, [rip+op_arg]
+1:  mov     rsi, r12
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      7f
+    lea     rbx, [rip+so_kws]           # which keyword
+    xor     r13d, r13d
+2:  mov     rsi, [rbx+r13*8]
+    test    rsi, rsi
+    jz      8f
+    lea     rdi, [rip+im_word]
+    call    str_eq
+    test    eax, eax
+    jnz     3f
+    inc     r13d
+    jmp     2b
+3:  cmp     r13d, 3                     # shards bricks balls
+    jae     4f
+    mov     [rip+so_pat], r13d
+    jmp     1b
+4:  lea     rax, [rip+so_kwfn]
+    jmp     [rax+r13*8-24]
+.Lpa_count:
+    mov     dword ptr [rip+so_counted], 1
+    call    pa_num
+    jz      8f
+    cvttss2si eax, xmm0
+    cmp     eax, 1
+    jl      8f
+    cmp     eax, MAXSEEDS
+    jle     5f
+    mov     eax, MAXSEEDS
+5:  mov     [rip+so_count], eax
+    jmp     1b
+.Lpa_seed:
+    call    pa_num
+    jz      8f
+    cvttss2si eax, xmm0
+    mov     [rip+so_seed], eax
+    jmp     1b
+.Lpa_at:
+    lea     rdi, [rip+so_atw]
+    call    pa_vec
+    jz      8f
+    mov     dword ptr [rip+so_atmode], 1
+    jmp     1b
+.Lpa_cursor:
+    mov     rax, [rip+cursor_pos]
+    mov     [rip+so_atw], rax
+    mov     eax, [rip+cursor_pos+8]
+    mov     [rip+so_atw+8], eax
+    mov     dword ptr [rip+so_atmode], 1
+    jmp     1b
+.Lpa_surface:
+    mov     dword ptr [rip+so_atmode], 2
+    jmp     1b
+.Lpa_spread:
+    call    pa_num
+    jz      8f
+    movss   [rip+so_spread], xmm0
+    mov     dword ptr [rip+so_spreadset], 1
+    jmp     1b
+.Lpa_size:
+    lea     rdi, [rip+so_size]
+    call    pa_vec
+    jz      8f
+    mov     dword ptr [rip+so_hassize], 1
+    jmp     1b
+.Lpa_counts:
+    lea     rdi, [rip+so_tmp3]
+    call    pa_vec
+    jz      8f
+    xor     ecx, ecx
+6:  lea     rax, [rip+so_tmp3]
+    cvttss2si eax, [rax+rcx*4]
+    cmp     eax, 1
+    jge     61f
+    mov     eax, 1
+61: cmp     eax, 4096
+    jle     62f
+    mov     eax, 4096
+62: lea     rdx, [rip+so_counts]
+    mov     [rdx+rcx*4], eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      6b
+    mov     dword ptr [rip+so_hascounts], 1
+    jmp     1b
+.Lpa_offset:
+    mov     rsi, r12                    # a number, or "random"
+    call    im_next_word
+    test    eax, eax
+    jz      8f
+    mov     r12, rsi
+    mov     [rsp], eax
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_random]
+    call    str_eq
+    test    eax, eax
+    jz      63f
+    mov     dword ptr [rip+so_offrand], 1
+    jmp     1b
+63: lea     rsi, [rip+im_word]
+    mov     eax, [rsp]
+    lea     rdx, [rsi+rax]
+    call    parse_float
+    test    eax, eax
+    jz      8f
+    movss   [rip+so_offset], xmm0
+    mov     dword ptr [rip+so_offrand], 0
+    jmp     1b
+.Lpa_gap:
+    call    pa_num
+    jz      8f
+    movss   [rip+so_gap], xmm0
+    jmp     1b
+.Lpa_jitter:
+    call    pa_num
+    jz      8f
+    movss   [rip+so_jitter], xmm0
+    jmp     1b
+.Lpa_radius:
+    call    pa_num
+    jz      8f
+    movss   [rip+so_radius], xmm0
+    jmp     1b
+.Lpa_inner:
+    lea     rdi, [rip+so_tmp3]          # r g b (0..1)
+    call    pa_vec
+    jz      8f
+    xor     ecx, ecx
+    mov     edx, 0xff
+64: lea     rax, [rip+so_tmp3]
+    movss   xmm0, [rax+rcx*4]
+    maxss   xmm0, [rip+so_f0]
+    minss   xmm0, [rip+so_f1]
+    mulss   xmm0, [rip+so_f255]
+    cvtss2si eax, xmm0
+    shl     edx, 8
+    or      edx, eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      64b
+    mov     [rip+so_innerc], edx
+    mov     dword ptr [rip+so_inner], 1
+    jmp     1b
+7:  mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pa_num(r12=text) -> ZF clear and xmm0 when a number came (r12 past it)
+pa_num:
+    mov     rsi, r12
+    call    so_num
+    mov     r12, rsi
+    test    eax, eax
+    ret
+
+# pa_vec(rdi=3 floats out; r12=text) -> ZF clear when three numbers came
+pa_vec:
+    push    rbx
+    push    r13
+    sub     rsp, 8
+    mov     rbx, rdi
+    xor     r13d, r13d
+1:  call    pa_num
+    jz      9f
+    movss   [rbx+r13*4], xmm0
+    inc     r13d
+    cmp     r13d, 3
+    jb      1b
+    test    r13d, r13d                  # (ZF clear)
+9:  add     rsp, 8
+    pop     r13
+    pop     rbx
+    ret
+
+# so_defaults - the options before any are given
+so_defaults:
+    xor     eax, eax
+    mov     [rip+so_pat], eax
+    mov     [rip+so_atmode], eax
+    mov     [rip+so_hassize], eax
+    mov     [rip+so_hascounts], eax
+    mov     [rip+so_gap], eax
+    mov     [rip+so_jitter], eax
+    mov     [rip+so_radius], eax
+    mov     [rip+so_inner], eax
+    mov     [rip+so_offrand], eax
+    mov     [rip+so_spreadset], eax
+    mov     [rip+so_counted], eax
+    mov     dword ptr [rip+so_count], 50
+    mov     dword ptr [rip+so_seed], 1
+    mov     eax, [rip+so_fhalf]
+    mov     [rip+so_offset], eax
+    mov     [rip+so_spread], eax
+    mov     dword ptr [rip+so_counts], 8
+    mov     dword ptr [rip+so_counts+4], 4
+    mov     dword ptr [rip+so_counts+8], 1
+    ret
+
+# so_inverse - so_imat (doubles, 3 x 4) = so_mat's inverse (the adjugate
+#   over the determinant; t' = -inv t)
+so_inverse:
+    lea     rsi, [rip+so_mat]
+    lea     rdi, [rip+so_imat]
+    xor     ecx, ecx                    # the 3x3 in doubles: [rsp]
+    sub     rsp, 72
+1:  mov     eax, ecx
+    xor     edx, edx
+    mov     r8d, 3
+    div     r8d                         # row eax, column edx
+    shl     eax, 4
+    lea     eax, [rax+rdx*4]
+    cvtss2sd xmm0, [rsi+rax]
+    movsd   [rsp+rcx*8], xmm0
+    inc     ecx
+    cmp     ecx, 9
+    jb      1b
+    # cofactors: inv[r][c] = cof[c][r] / det, a b c / d e f / g h i
+    movsd   xmm0, [rsp+32]              # ei - fh
+    mulsd   xmm0, [rsp+64]
+    movsd   xmm1, [rsp+40]
+    mulsd   xmm1, [rsp+56]
+    subsd   xmm0, xmm1
+    movsd   [rdi], xmm0
+    movsd   xmm0, [rsp+16]              # ch - bi
+    mulsd   xmm0, [rsp+56]
+    movsd   xmm1, [rsp+8]
+    mulsd   xmm1, [rsp+64]
+    subsd   xmm0, xmm1
+    movsd   [rdi+8], xmm0
+    movsd   xmm0, [rsp+8]               # bf - ce
+    mulsd   xmm0, [rsp+40]
+    movsd   xmm1, [rsp+16]
+    mulsd   xmm1, [rsp+32]
+    subsd   xmm0, xmm1
+    movsd   [rdi+16], xmm0
+    movsd   xmm0, [rsp+40]              # fg - di
+    mulsd   xmm0, [rsp+48]
+    movsd   xmm1, [rsp+24]
+    mulsd   xmm1, [rsp+64]
+    subsd   xmm0, xmm1
+    movsd   [rdi+32], xmm0
+    movsd   xmm0, [rsp]                 # ai - cg
+    mulsd   xmm0, [rsp+64]
+    movsd   xmm1, [rsp+16]
+    mulsd   xmm1, [rsp+48]
+    subsd   xmm0, xmm1
+    movsd   [rdi+40], xmm0
+    movsd   xmm0, [rsp+16]              # cd - af
+    mulsd   xmm0, [rsp+24]
+    movsd   xmm1, [rsp]
+    mulsd   xmm1, [rsp+40]
+    subsd   xmm0, xmm1
+    movsd   [rdi+48], xmm0
+    movsd   xmm0, [rsp+24]              # dh - eg
+    mulsd   xmm0, [rsp+56]
+    movsd   xmm1, [rsp+32]
+    mulsd   xmm1, [rsp+48]
+    subsd   xmm0, xmm1
+    movsd   [rdi+64], xmm0
+    movsd   xmm0, [rsp+8]               # bg - ah
+    mulsd   xmm0, [rsp+48]
+    movsd   xmm1, [rsp]
+    mulsd   xmm1, [rsp+56]
+    subsd   xmm0, xmm1
+    movsd   [rdi+72], xmm0
+    movsd   xmm0, [rsp]                 # ae - bd
+    mulsd   xmm0, [rsp+32]
+    movsd   xmm1, [rsp+8]
+    mulsd   xmm1, [rsp+24]
+    subsd   xmm0, xmm1
+    movsd   [rdi+80], xmm0
+    movsd   xmm2, [rsp]                 # det = a A + b D + c G (A = [0],
+    mulsd   xmm2, [rdi]                 #  D = [32], G = [64])
+    movsd   xmm1, [rsp+8]
+    mulsd   xmm1, [rdi+32]
+    addsd   xmm2, xmm1
+    movsd   xmm1, [rsp+16]
+    mulsd   xmm1, [rdi+64]
+    addsd   xmm2, xmm1
+    movsd   xmm1, xmm2
+    andpd   xmm1, [rip+so_abs]
+    comisd  xmm1, [rip+so_tiny]
+    ja      2f
+    movsd   xmm2, [rip+so_one]
+2:  movsd   xmm3, [rip+so_one]
+    divsd   xmm3, xmm2
+    # the stored cofactors are already transposed rows: [rdi] = (A, B?, ..)
+    # (rows of the inverse: r0 = (ei-fh, ch-bi, bf-ce), r1, r2 as above)
+    xor     ecx, ecx
+3:  mov     eax, ecx
+    xor     edx, edx
+    mov     r8d, 3
+    div     r8d
+    shl     eax, 5
+    lea     eax, [rax+rdx*8]
+    movsd   xmm0, [rdi+rax]
+    mulsd   xmm0, xmm3
+    movsd   [rdi+rax], xmm0
+    inc     ecx
+    cmp     ecx, 9
+    jb      3b
+    xor     ecx, ecx                    # t' = -inv t
+4:  mov     eax, ecx
+    shl     eax, 5
+    xorpd   xmm0, xmm0
+    xor     edx, edx
+41: lea     r9, [rdi+rax]
+    movsd   xmm1, [r9+rdx*8]
+    mov     r8d, edx
+    shl     r8d, 4
+    cvtss2sd xmm2, [rsi+r8+12]
+    mulsd   xmm1, xmm2
+    subsd   xmm0, xmm1
+    inc     edx
+    cmp     edx, 3
+    jb      41b
+    movsd   [rdi+rax+24], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      4b
+    add     rsp, 72
+    ret
+
+# so_tolocal(rsi=3 floats world, rdi=3 doubles out) - by so_imat
+so_tolocal:
+    lea     rax, [rip+so_imat]
+    xor     ecx, ecx
+1:  movsd   xmm0, [rax+24]
+    xor     edx, edx
+2:  cvtss2sd xmm1, [rsi+rdx*4]
+    mulsd   xmm1, [rax+rdx*8]
+    addsd   xmm0, xmm1
+    inc     edx
+    cmp     edx, 3
+    jb      2b
+    movsd   [rdi+rcx*8], xmm0
+    add     rax, 32
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    ret
+
+# object.shatter <shards|bricks|balls> [options] (so_parse)
 do_shatter:
     push    rbx
     push    r12
@@ -659,51 +2262,11 @@ do_shatter:
     xor     eax, eax
     mov     ecx, NSTAT
     rep     stosq
-    mov     dword ptr [rip+so_count], 50
-    mov     dword ptr [rip+so_seed], 1
-    mov     r12, [rip+op_arg]
-1:  mov     rsi, r12
-    call    im_next_word
-    mov     r12, rsi
-    test    eax, eax
-    jz      5f
-    lea     rdi, [rip+im_word]
-    lea     rsi, [rip+k_shards]
-    call    str_eq
-    test    eax, eax
-    jnz     1b
-    lea     rdi, [rip+im_word]
-    lea     rsi, [rip+k_count]
-    call    str_eq
-    test    eax, eax
-    jz      2f
-    mov     rsi, r12
-    call    so_num
-    mov     r12, rsi
+    call    so_defaults
+    call    so_parse
     test    eax, eax
     jz      .Lsh_bad
-    cvttss2si eax, xmm0
-    cmp     eax, 1
-    jl      .Lsh_bad
-    cmp     eax, MAXSEEDS
-    jle     11f
-    mov     eax, MAXSEEDS
-11: mov     [rip+so_count], eax
-    jmp     1b
-2:  lea     rdi, [rip+im_word]
-    lea     rsi, [rip+k_seed]
-    call    str_eq
-    test    eax, eax
-    jz      .Lsh_bad
-    mov     rsi, r12
-    call    so_num
-    mov     r12, rsi
-    test    eax, eax
-    jz      .Lsh_bad
-    cvttss2si eax, xmm0
-    mov     [rip+so_seed], eax
-    jmp     1b
-5:  mov     edi, [rip+active_obj]       # the active mesh
+    mov     edi, [rip+active_obj]       # the active mesh
     call    obj_get
     test    rax, rax
     jz      .Lsh_none
@@ -719,9 +2282,23 @@ do_shatter:
     mov     rdi, [rip+so_obj]
     lea     rsi, [rip+so_mat]
     call    obj_matrix
-    mov     edi, [rip+so_seed]
+    call    so_inverse
+    cmp     dword ptr [rip+so_atmode], 1  # the impact point, local
+    jne     1f
+    lea     rsi, [rip+so_atw]
+    lea     rdi, [rip+so_at]
+    call    so_tolocal
+1:  mov     edi, [rip+so_seed]
     call    so_seed_rng
-    mov     edi, [rip+so_count]
+    mov     eax, [rip+so_pat]
+    cmp     eax, 1
+    je      .Lsh_bricks
+    cmp     eax, 2
+    je      .Lsh_balls
+    cmp     dword ptr [rip+so_atmode], 2  # shards: seeds, Voronoi cells
+    jne     2f
+    call    so_cdf_make
+2:  mov     edi, [rip+so_count]
     call    so_seeds
     push    rax
     push    rax
@@ -736,6 +2313,26 @@ do_shatter:
     movsd   [rcx+8], xmm0
     mov     dword ptr [rip+sh_mode], 1
     mov     edx, eax
+    lea     rsi, [rip+s_sh_cell]
+    jmp     .Lsh_cut
+.Lsh_bricks:
+    call    so_bricks
+    test    eax, eax
+    jz      .Lsh_mem
+    mov     eax, [rip+sh_ncell_used]
+    mov     [rip+sh_ncell], eax
+    lea     rcx, [rip+sh_stat]
+    cvtsi2sd xmm0, eax
+    movsd   [rcx+8], xmm0
+    mov     dword ptr [rip+sh_mode], 0
+    mov     edx, eax
+    lea     rsi, [rip+s_sh_brick]
+.Lsh_cut:
+    push    rdx
+    push    rdx
+    call    so_basename
+    pop     rdx
+    pop     rdx
     call    sh_cut_all
     push    rax
     push    rax
@@ -745,8 +2342,6 @@ do_shatter:
     pop     rax
     test    eax, eax
     jz      .Lsh_mem
-    lea     rsi, [rip+s_sh_cell]
-    call    so_basename
     mov     rdi, [rip+so_obj]           # the original: hidden, not selected
     or      dword ptr [rdi+OB_FLAGS], OBF_HIDDEN
     and     dword ptr [rdi+OB_FLAGS], ~OBF_SELECTED
@@ -754,6 +2349,25 @@ do_shatter:
     mov     ebx, eax
     mov     edi, 13
     call    so_lap
+    jmp     .Lsh_made
+.Lsh_balls:
+    lea     rsi, [rip+s_sh_ball]
+    call    so_basename
+    mov     dword ptr [rip+so_first], 0
+    call    so_balls
+    mov     ebx, eax
+    lea     rcx, [rip+sh_stat]
+    cvtsi2sd xmm0, eax
+    movsd   [rcx], xmm0
+    movsd   [rcx+8], xmm0
+    test    eax, eax
+    jz      .Lsh_noseed
+    mov     rdi, [rip+so_obj]
+    or      dword ptr [rdi+OB_FLAGS], OBF_HIDDEN
+    and     dword ptr [rdi+OB_FLAGS], ~OBF_SELECTED
+    mov     edi, 13
+    call    so_lap
+.Lsh_made:
     lea     rax, [rip+sh_stat]          # 14-17: the cut's phases (ms)
     mov     ecx, 1
 22: lea     rdx, [rip+sh_cnt]

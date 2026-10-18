@@ -7,6 +7,13 @@ closed, the pieces' volumes add up to the original's within 1e-6, and no
 piece is a sliver (under 1e-5 of the mean). An open mesh is repaired
 first; mesh.separate_loose splits a mesh into its loose parts.
 
+S2: the patterns - a 2 x 1 x 0.2 m wall into 10 x 5 bricks (50 without a
+row offset, 52 in a running bond: half bricks at the ends), each a closed
+box of the right size, the wall's material on each and the inner colour on
+the cut faces; a mortar gap takes its volume; a sphere into 500 balls, all
+inside it and none overlapping; a vase into 50 shards around a point:
+smaller near it, the volume kept.
+
     python3 tests/shatter.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -154,9 +161,66 @@ def cube_obj(path, top=True, offsets=(0,)):
                 o.write('f ' + ' '.join(str(x + 8 * n) for x in f) + '\n')
 
 
+def s2(tmp):
+    print('S2: bricks, balls, shards')
+    wall = ('scale("Cube", 1, 0.5, 0.1)\nmaterial("Brick")\nassign("Cube", "Brick")\n')
+    out = run(wall + 'op("object.shatter", "bricks counts 10 5 1 offset 0 inner 0.8 0.3 0.2")\n' + STATS +
+              'n = 0\nv = 0\nm = 0\nbx = 0\nfor i in 1..51 { b = "Cube_brick_" + str(i)\n'
+              '  n = n + manifold(b)\n  v = v + volume(b)\n'
+              '  if matof(b) == "Brick" { m = m + 1 }\n'
+              '  if abs(get(b, "x") - (-0.9 + 0.2 * ((i - 1) % 10))) < 1e-4 { bx = bx + 1 } }\n'
+              'print("w", n, v * 0.05, m, bx, verts("Cube_brick_12"), vcol("Cube_brick_12", 8, 0))\n')
+    st, w = stats(out), vals(out, 'w')
+    check(st and st[0] == 50, 'a 2 x 1 x 0.2 wall into 10 x 5 bricks: %s' % (st and st[0]))
+    check(w and w[0] == 0 and st[5] == 0, 'every brick closed; with an inner colour the cut faces have '
+          'vertices of their own (manifold %s, open edges before %s)' % (w and w[0], st and st[5]))
+    check(w and abs(w[1] - 0.4) < 1e-6, 'the bricks hold the wall\'s 0.4 m^3 (%s)' % (w and w[1]))
+    check(w and w[2] == 50, 'each brick has the wall\'s material (%s)' % (w and w[2]))
+    check(w and w[3] == 50, 'the bricks lie in their rows, 0.2 m apart (%s)' % (w and w[3]))
+    check(w and w[4] > 8 and w[5] == 204, 'a middle brick\'s cut faces have the inner colour (%s vertices, red %s)'
+          % (w and w[4], w and w[5]))
+    out = run(wall + 'op("object.shatter", "bricks counts 10 5 1 gap 0.02")\n' + STATS +
+              'n = 0\nfor i in 1..53 { n = n + manifold("Cube_brick_" + str(i)) }\nprint("m", n)\n')
+    st, mf = stats(out), vals(out, 'm')
+    check(mf and mf[0] == 52, 'without an inner colour every brick is manifold (%s)' % (mf and mf[0]))
+    check(st and st[0] == 52, 'a running bond: 52 bricks (half bricks at the ends of every other row): %s'
+          % (st and st[0]))
+    # gap 0.02 m: each inner joint takes 0.02 x its face
+    check(st and 0.3 < st[2] * 0.05 < 0.39 and st[5] == 0, 'a mortar gap takes its volume (%.4f m^3)' % (st and st[2] * 0.05))
+    out = run('delete("Cube")\nop("create.sphere")\nop("object.shatter", "balls count 500")\n'
+              'for k in 18..21 { print("st", k, shinfo(k)) }\n' + STATS +
+              'out = 0\nfor i in 1..51 { b = "Sphere_ball_" + str(i * 10)\n'
+              '  x = get(b, "x")\n  y = get(b, "y")\n  z = get(b, "z")\n'
+              '  if sqrt(x*x + y*y + z*z) + 0.8 * get(b, "sx") > 1 { out = out + 1 } }\n'
+              'print("b", out, count())\n')
+    st, b = stats(out), vals(out, 'b')
+    check(st and st[0] == 500 and b and b[1] == 503, 'a sphere into 500 balls (%s objects)' % (b and b[1]))
+    check(st and st[19] > -1e-5, 'no two balls overlap (least gap %.2g radii)' % (st and st[19]))
+    check(st and st[20] < 0.2 + 1e-6 and b and b[0] == 0, 'every ball inside the sphere: none reaches past it by '
+          'more than a fifth of its radius (%.3f; %s of 50 checked out)' % (st and st[20], b and b[0]))
+    check(st and 0.08 < st[18] < 0.12, 'radius %.4f: a dense packing' % (st and st[18]))
+    vase = os.path.join(tmp, 'vase2.obj')
+    vase_obj(vase)
+    out = run('delete("Cube")\nop("file.import_obj", "%s")\nmaterial("Clay")\nassign("vase2", "Clay")\n'
+              'op("object.shatter", "shards count 50 at 0.7 0.8 0 spread 0.4")\n' % vase + STATS +
+              'near = 0\nfar = 0\nnn = 0\nnf = 0\nm = 0\n'
+              'for i in 1..51 { s = "vase2_shard_" + str(i)\n'
+              '  if matof(s) == "Clay" { m = m + 1 }\n'
+              '  dx = get(s, "x") - 0.7\n  dy = get(s, "y") - 0.8\n  dz = get(s, "z")\n'
+              '  if sqrt(dx*dx + dy*dy + dz*dz) < 0.4 { near = near + volume(s)\n nn = nn + 1 } else { far = far + volume(s)\n nf = nf + 1 } }\n'
+              'print("v", nn, near / max(nn, 1), nf, far / max(nf, 1), m)\n')
+    st, v = stats(out), vals(out, 'v')
+    check(st and st[0] >= 50 and st[5] == 0 and st[9] < 1e-6,
+          'a vase into 50 shards around a point: %s pieces, closed, the volume kept' % (st and st[0]))
+    check(v and v[0] >= 5 and v[1] < v[3] / 3, 'the shards are smaller near the point (%s near, mean %.5f; far %.5f)'
+          % (v and v[0], v and v[1], v and v[3]))
+    check(v and v[4] >= 50, 'each shard has the vase\'s material (%s)' % (v and v[4]))
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix='bee-shat-')
     s1(tmp)
+    s2(tmp)
     if FAILS:
         print('%d failed' % len(FAILS))
         sys.exit(1)

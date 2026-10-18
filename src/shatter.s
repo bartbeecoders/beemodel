@@ -36,6 +36,8 @@
 .globl sh_nres
 .globl sh_res_free
 .globl sh_inside
+.globl sh_dist2
+.globl sh_ncap
 .globl sh_src_p
 .globl sh_src_t
 .globl sh_src_nv
@@ -51,6 +53,7 @@
 .globl sh_cbb
 .globl sh_cells_alloc
 .globl sh_cells_free
+.globl sh_ncell
 .globl sh_mode
 .globl sh_open_edges
 .globl tris_open
@@ -226,7 +229,8 @@ sh_res:         .skip 8                 # per cell: its result (mapping), size
 sh_seeds:       .skip 8                 # doubles x y z (VX_SZ)
 sh_nseeds:      .skip 4
 sh_open_edges:  .skip 4                 # the mesh's edges without a twin
-sh_ncell:       .skip 4                 # cells:
+sh_ncell:       .skip 4                 # cells (sh_ncap: room for):
+sh_ncap:        .skip 4
 .align 8
 sh_cpl:         .skip 8                 #  their planes (CPL_MAX each),
 sh_cpn:         .skip 8                 #  how many (u32; 0: none),
@@ -760,6 +764,210 @@ polys_open:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# sh_dist2(xmm0, xmm1, xmm2 = a point) -> xmm0 = its squared distance to
+#   the source's surface (the nearest triangle's closest point: its region
+#   by the barycentric signs)
+sh_dist2:
+    push    rbx
+    sub     rsp, 48
+    movsd   [rsp], xmm0
+    movsd   [rsp+8], xmm1
+    movsd   [rsp+16], xmm2
+    movsd   xmm15, [rip+sd_big]
+    mov     rsi, [rip+sh_src_t]
+    mov     rdi, [rip+sh_src_p]
+    mov     ebx, [rip+sh_src_nt]
+    test    ebx, ebx
+    jz      9f
+1:  mov     eax, [rsi]
+    imul    r8, rax, VX_SZ
+    mov     eax, [rsi+4]
+    imul    r9, rax, VX_SZ
+    mov     eax, [rsi+8]
+    imul    r10, rax, VX_SZ
+    add     r8, rdi
+    add     r9, rdi
+    add     r10, rdi
+    lea     rcx, [rsp]
+    call    pt_tri2
+    minsd   xmm15, xmm0
+    add     rsi, TR_SZ
+    dec     ebx
+    jnz     1b
+9:  movsd   xmm0, xmm15
+    add     rsp, 48
+    pop     rbx
+    ret
+
+# pt_tri2(rcx=point, r8 r9 r10 = the corners a b c) -> xmm0 = the squared
+#   distance from the point to the triangle (Ericson's closest point)
+.macro DOT3D out, ax, ay, az, bx, by, bz
+    movsd   \out, \ax
+    mulsd   \out, \bx
+    movsd   xmm14, \ay
+    mulsd   xmm14, \by
+    addsd   \out, xmm14
+    movsd   xmm14, \az
+    mulsd   xmm14, \bz
+    addsd   \out, xmm14
+.endm
+pt_tri2:
+    movsd   xmm0, [r9]                  # ab
+    subsd   xmm0, [r8]
+    movsd   xmm1, [r9+8]
+    subsd   xmm1, [r8+8]
+    movsd   xmm2, [r9+16]
+    subsd   xmm2, [r8+16]
+    movsd   xmm3, [r10]                 # ac
+    subsd   xmm3, [r8]
+    movsd   xmm4, [r10+8]
+    subsd   xmm4, [r8+8]
+    movsd   xmm5, [r10+16]
+    subsd   xmm5, [r8+16]
+    movsd   xmm6, [rcx]                 # ap
+    subsd   xmm6, [r8]
+    movsd   xmm7, [rcx+8]
+    subsd   xmm7, [r8+8]
+    movsd   xmm8, [rcx+16]
+    subsd   xmm8, [r8+16]
+    DOT3D   xmm9, xmm0, xmm1, xmm2, xmm6, xmm7, xmm8      # d1 = ab.ap
+    DOT3D   xmm10, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8     # d2 = ac.ap
+    xorpd   xmm13, xmm13
+    comisd  xmm9, xmm13
+    ja      1f
+    comisd  xmm10, xmm13
+    ja      1f
+    jmp     .Lpt_a                      # region a
+1:  movsd   xmm6, [rcx]                 # bp
+    subsd   xmm6, [r9]
+    movsd   xmm7, [rcx+8]
+    subsd   xmm7, [r9+8]
+    movsd   xmm8, [rcx+16]
+    subsd   xmm8, [r9+16]
+    DOT3D   xmm11, xmm0, xmm1, xmm2, xmm6, xmm7, xmm8     # d3 = ab.bp
+    DOT3D   xmm12, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8     # d4 = ac.bp
+    comisd  xmm11, xmm13                # region b: d3 >= 0, d4 <= d3
+    jb      2f
+    comisd  xmm12, xmm11
+    ja      2f
+    mov     rax, r9
+    jmp     .Lpt_v
+2:  movsd   xmm6, xmm9                  # vc = d1 d4 - d3 d2
+    mulsd   xmm6, xmm12
+    movsd   xmm7, xmm11
+    mulsd   xmm7, xmm10
+    subsd   xmm6, xmm7
+    comisd  xmm6, xmm13                 # edge ab: vc <= 0, d1 >= 0, d3 <= 0
+    ja      3f
+    comisd  xmm9, xmm13
+    jb      3f
+    comisd  xmm11, xmm13
+    ja      3f
+    movsd   xmm7, xmm9                  # v = d1 / (d1 - d3): a + v ab
+    subsd   xmm7, xmm11
+    movsd   xmm8, xmm9
+    divsd   xmm8, xmm7
+    xorpd   xmm7, xmm7
+    jmp     .Lpt_uv                     # (v on ab: xmm8, w on ac: xmm7)
+3:  movsd   [rsp-8], xmm6               # (vc)
+    movsd   xmm6, [rcx]                 # cp
+    subsd   xmm6, [r10]
+    movsd   xmm7, [rcx+8]
+    subsd   xmm7, [r10+8]
+    movsd   xmm8, [rcx+16]
+    subsd   xmm8, [r10+16]
+    DOT3D   xmm13, xmm0, xmm1, xmm2, xmm6, xmm7, xmm8     # d5 = ab.cp
+    movsd   [rsp-16], xmm13
+    DOT3D   xmm13, xmm3, xmm4, xmm5, xmm6, xmm7, xmm8     # d6 = ac.cp
+    movsd   [rsp-24], xmm13
+    xorpd   xmm6, xmm6
+    comisd  xmm13, xmm6                 # region c: d6 >= 0, d5 <= d6
+    jb      4f
+    movsd   xmm7, [rsp-16]
+    comisd  xmm7, xmm13
+    ja      4f
+    mov     rax, r10
+    jmp     .Lpt_v
+4:  movsd   xmm7, [rsp-16]              # vb = d5 d2 - d1 d6
+    mulsd   xmm7, xmm10
+    movsd   xmm8, xmm9
+    mulsd   xmm8, [rsp-24]
+    subsd   xmm7, xmm8
+    movsd   [rsp-32], xmm7
+    comisd  xmm7, xmm6                  # edge ac: vb <= 0, d2 >= 0, d6 <= 0
+    ja      5f
+    comisd  xmm10, xmm6
+    jb      5f
+    movsd   xmm8, [rsp-24]
+    comisd  xmm8, xmm6
+    ja      5f
+    movsd   xmm7, xmm10                 # w = d2 / (d2 - d6)
+    subsd   xmm7, xmm8
+    movsd   xmm8, xmm10
+    divsd   xmm8, xmm7
+    movsd   xmm7, xmm8
+    xorpd   xmm8, xmm8
+    jmp     .Lpt_uv
+5:  movsd   xmm7, xmm11                 # va = d3 d6 - d5 d4
+    mulsd   xmm7, [rsp-24]
+    movsd   xmm8, [rsp-16]
+    mulsd   xmm8, xmm12
+    subsd   xmm7, xmm8
+    comisd  xmm7, xmm6                  # edge bc: va <= 0, d4 - d3 >= 0,
+    ja      6f                          #  d5 - d6 >= 0
+    movsd   xmm8, xmm12
+    subsd   xmm8, xmm11
+    comisd  xmm8, xmm6
+    jb      6f
+    movsd   xmm9, [rsp-16]
+    subsd   xmm9, [rsp-24]
+    comisd  xmm9, xmm6
+    jb      6f
+    addsd   xmm9, xmm8                  # w = (d4 - d3) / ((d4-d3) + (d5-d6))
+    divsd   xmm8, xmm9                  #  on bc: b + w (c - b)
+    movsd   xmm7, xmm8                  # (in a + v ab + w ac: v = 1 - w)
+    movsd   xmm8, [rip+sd_one]
+    subsd   xmm8, xmm7
+    jmp     .Lpt_uv
+6:  addsd   xmm7, [rsp-32]              # inside: denom = va + vb + vc
+    addsd   xmm7, [rsp-8]
+    maxsd   xmm7, [rip+sd_tiny]
+    movsd   xmm8, [rsp-32]              # v = vb / d, w = vc / d
+    divsd   xmm8, xmm7
+    movsd   xmm9, [rsp-8]
+    divsd   xmm9, xmm7
+    movsd   xmm7, xmm9
+.Lpt_uv:                                # q = a + v ab + w ac (v: xmm8, w: xmm7)
+    mulsd   xmm0, xmm8
+    mulsd   xmm1, xmm8
+    mulsd   xmm2, xmm8
+    mulsd   xmm3, xmm7
+    mulsd   xmm4, xmm7
+    mulsd   xmm5, xmm7
+    addsd   xmm0, xmm3
+    addsd   xmm1, xmm4
+    addsd   xmm2, xmm5
+    addsd   xmm0, [r8]
+    addsd   xmm1, [r8+8]
+    addsd   xmm2, [r8+16]
+    jmp     .Lpt_d
+.Lpt_a:
+    mov     rax, r8
+.Lpt_v:
+    movsd   xmm0, [rax]
+    movsd   xmm1, [rax+8]
+    movsd   xmm2, [rax+16]
+.Lpt_d:
+    subsd   xmm0, [rcx]
+    subsd   xmm1, [rcx+8]
+    subsd   xmm2, [rcx+16]
+    mulsd   xmm0, xmm0
+    mulsd   xmm1, xmm1
+    mulsd   xmm2, xmm2
+    addsd   xmm0, xmm1
+    addsd   xmm0, xmm2
     ret
 
 # -----------------------------------------------------------------------------
@@ -3352,6 +3560,7 @@ sh_cells_alloc:
     mov     ebx, edi
     call    sh_cells_free
     mov     [rip+sh_ncell], ebx
+    mov     [rip+sh_ncap], ebx
     imul    rsi, rbx, CPL_MAX*PLN_SZ
     call    sh_map
     mov     [rip+sh_cpl], rax
@@ -3377,7 +3586,7 @@ sh_cells_alloc:
 
 sh_cells_free:
     push    rbx
-    mov     ebx, [rip+sh_ncell]
+    mov     ebx, [rip+sh_ncap]
     mov     rdi, [rip+sh_cpl]
     imul    rsi, rbx, CPL_MAX*PLN_SZ
     call    sh_unmap
@@ -3392,6 +3601,7 @@ sh_cells_free:
     mov     [rip+sh_cpn], rax
     mov     [rip+sh_cbb], rax
     mov     [rip+sh_ncell], eax
+    mov     [rip+sh_ncap], eax
     pop     rbx
     ret
 
