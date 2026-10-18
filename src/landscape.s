@@ -43,35 +43,12 @@
 .globl la_display
 .globl la_obj_set
 .globl la_wheight
+.globl lv_extra
+.globl la_active
+.globl la_word
+.globl la_num
 
-# the block
-.equ LB_REFS,   0
-.equ LB_N,      4                       # samples a side
-.equ LB_SIZE,   8                       # metres a side
-.equ LB_NL,     12                      # layers
-.equ LB_VER,    16                      # bumped by every evaluation
-.equ LB_DISP,   20                      # display samples a side at most (0: 513)
-.equ LB_BYTES,  24                      # u64: the mapping
-.equ LB_H,      32                      # u64 offsets: the heights,
-.equ LB_C,      40                      #  the cache,
-.equ LB_SPLAT,  48                      #  the splat map (0: none)
-.equ LB_CL,     56                      # i32: the layer the cache is the result of (-1)
-.equ LB_NP,     60                      # paint layers
-.equ LB_HMIN,   64                      # the heights' range
-.equ LB_HMAX,   68
-.equ LB_MS,     72                      # the last evaluation's time (ms)
-.equ LB_LAY,    128
-.equ LB_PAINT,  640
-.equ LB_DATA,   4096
-.equ LY_TYPE,   0                       # 1 generate 2 erode 3 terrace 4 sculpted 5 flatten
-.equ LY_FLG,    4                       # 1: hidden
-.equ LY_STR,    8
-.equ LY_P,      12                      # 10 parameters (f32)
-.equ LY_DATA,   56                      # u64: its array's offset (0: none)
-.equ LY_SZ,     64
-.equ LA_MAXL,   8
-.equ LA_DISP,   513
-.equ MAP_ANON_PRIV, 0x22
+.include "landscape.inc"
 
 .section .rodata
 .align 16
@@ -1022,6 +999,9 @@ la_display:
     jmp     6b
 8:  mov     rdi, r14
     call    mesh_bbox
+    mov     rdi, rbx                    # (painted: its colours)
+    mov     rsi, r14
+    call    ls_vcol
     inc     dword ptr [r14+ME_VER]
     mov     [r14+ME_LAND], rbx
     mov     rdi, rbx

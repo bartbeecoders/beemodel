@@ -132,6 +132,8 @@ do_dyntopo:                             # on / off: the leaves built again
     push    rbx
     cmp     dword ptr [rip+sc_obj], 0
     je      9f
+    cmp     dword ptr [rip+sc_land], 0  # (not on a landscape)
+    jne     9f
     cmp     dword ptr [rip+sc_stroking], 0
     jne     9f
     mov     rdi, [rip+sc_mesh]          # (not on a multires level)

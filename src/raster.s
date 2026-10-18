@@ -215,7 +215,10 @@ raster_scene:
     lea     rcx, [rip+obj_list]         # (the sculpt object draws itself)
     mov     ecx, [rcx+rbx*4]
     cmp     ecx, [rip+sc_obj]
+    jne     12f
+    cmp     dword ptr [rip+sc_land], 0  # (a landscape sculpted: drawn here)
     je      11f
+12:
     inc     r12d
     mov     rdi, rax
     call    obj_eval
@@ -263,7 +266,10 @@ raster_scene:
     lea     rcx, [rip+obj_list]
     mov     ecx, [rcx+rbx*4]
     cmp     ecx, [rip+sc_obj]
+    jne     33f
+    cmp     dword ptr [rip+sc_land], 0
     je      31f
+33:
     mov     [r14+RO_OBJ], rax
     xor     ecx, ecx                    # the edit object tints its selection
     cmp     dword ptr [rip+rs_mode], 0  # (colour pass only)

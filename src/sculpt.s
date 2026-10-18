@@ -364,7 +364,13 @@ sculpt_enter:
 1:  cmp     dword ptr [rip+sc_obj], 0
     je      2f
     call    sculpt_exit
-2:  mov     rdi, rbx                    # its own mesh: copied when another
+2:  mov     rdi, rbx                    # a landscape: its own brushes
+    call    ls_enter                    #  (lsculpt.s)
+    test    eax, eax
+    jz      21f
+    mov     [rip+sc_obj], r12d
+    jmp     9f
+21: mov     rdi, rbx                    # its own mesh: copied when another
     call    shared_mesh                 #  object shows it (undo steps may
     test    eax, eax                    #  share it: strokes undo by deltas)
     jz      3f
@@ -442,6 +448,12 @@ shared_mesh:
 # sculpt_exit - the arrays go; the mesh stays as sculpted
 sculpt_exit:
     sub     rsp, 8
+    cmp     dword ptr [rip+sc_land], 0  # (a landscape: nothing of its own)
+    je      2f
+    call    ls_release
+    mov     dword ptr [rip+sc_land], 0
+    jmp     3f
+2:
     mov     rax, [rip+sc_mesh]          # edited in place: a new version (caches
     test    rax, rax                    #  keyed by it, the cluster DAG check)
     jz      1f
@@ -449,7 +461,7 @@ sculpt_exit:
 1:  call    sculpt_free
     call    sdc_free
     call    mr_drop
-    mov     dword ptr [rip+sc_obj], 0
+3:  mov     dword ptr [rip+sc_obj], 0
     mov     qword ptr [rip+sc_mesh], 0
     mov     dword ptr [rip+sc_stroking], 0
     mov     dword ptr [rip+dirty], 1
@@ -1239,7 +1251,11 @@ tocam:
 
 # sculpt_draw - the sculpt object into the viewport being drawn (after the
 #   rasterizer: its colour and depth buffers, rs_x0 / rs_y0 / rs_w / rs_h)
-sculpt_draw:
+sculpt_draw:    cmp     dword ptr [rip+sc_land], 0  # (a landscape: drawn as a mesh;
+    je      1f                          #  its strokes are lsculpt.s's)
+    ret
+1:
+
     push    rbx
     push    r12
     push    r13
@@ -4219,7 +4235,9 @@ mesh_box_leaves:
 
 # sculpt_press(edi, esi = logical pointer) -> eax = 1 when the stroke started
 #   (on the mesh), 0: the click is the viewport's (orbit, select)
-sculpt_press:
+sculpt_press:    cmp     dword ptr [rip+sc_land], 0  # (a landscape: lsculpt.s)
+    jne     ls_press
+
     push    rbx
     push    r12
     sub     rsp, 8
@@ -4320,7 +4338,9 @@ plane_point:
 
 # sculpt_drag(edi, esi = logical pointer) - dabs along the way (every 10%
 #   of the radius)
-sculpt_drag:
+sculpt_drag:    cmp     dword ptr [rip+sc_land], 0  # (a landscape: lsculpt.s)
+    jne     ls_drag
+
     push    rbx
     push    r12
     push    r13
@@ -4458,7 +4478,9 @@ sculpt_drag:
     pop     rbx
     ret
 
-sculpt_release:
+sculpt_release:    cmp     dword ptr [rip+sc_land], 0  # (a landscape: lsculpt.s)
+    jne     ls_release
+
     sub     rsp, 8
     call    stroke_end
     mov     dword ptr [rip+sc_full], 1  # (the splat strides for the view)
@@ -4791,7 +4813,11 @@ sculpt_mask_op:
 #   radius (world), xmm1=strength) -> eax = 1: a stroke of dabs from one
 #   point to the other (scripts and agents; the object must be in sculpt
 #   mode), one undo step
-sculpt_dab_world:
+sculpt_dab_world:    cmp     dword ptr [rip+sc_land], 0  # (a landscape: drawn as a mesh;
+    je      1f                          #  its strokes are lsculpt.s's)
+    ret
+1:
+
     push    rbx
     push    r12
     push    r13
@@ -4951,7 +4977,11 @@ sculpt_overlay:
     mov     eax, [rip+sc_brush]
     lea     rcx, [rip+brush_names]
     mov     rdi, [rcx+rax*8]
-    call    fmt_str
+    cmp     dword ptr [rip+sc_land], 0  # (a landscape: its tool)
+    je      17f
+    call    ls_tool_name
+    mov     rdi, rax
+17: call    fmt_str
     lea     rdi, [rip+s_hud_r]
     call    fmt_str
     cvttss2si edi, [rip+sc_radius]
