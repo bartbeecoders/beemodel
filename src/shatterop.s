@@ -30,6 +30,16 @@
 .equ PLN_SZ,    40                      # (shatter.s: a plane, its tag;
 .equ PLN_TAG,   32                      #  planes a cell at most)
 .equ CPL_MAX,   128
+.equ RB_UID,    0                       # (rbody.s: a body's settings)
+.equ RB_TYPE,   4
+.equ RB_SHAPE,  8
+.equ RB_MASS,   12
+.equ RB_FRIC,   16
+.equ RB_REST,   20
+.equ RB_DAMP,   24
+.equ RB_FLAGS,  28
+.equ RB_VEL,    68
+.equ MA_DENS_,  92                      # (material.s: g/cm^3)
 .equ PP_HDR,    8
 .equ PH_NV,     0                       # a piece: counts, volume, centre;
 .equ PH_NP,     4                       #  vertices (floats), polygons (count,
@@ -65,6 +75,9 @@ k_jitter:       .asciz "jitter"
 k_radius:       .asciz "radius"
 k_inner:        .asciz "inner"
 k_random:       .asciz "random"
+k_density:      .asciz "density"
+k_nobodies:     .asciz "nobodies"
+s_sh_room:      .asciz "  shatter: no room for more rigid bodies (4096) - the rest are not bodies"
 s_sh_brick:     .asciz "_brick_"
 s_sh_ball:      .asciz "_ball_"
 s_sh_cell:      .asciz "_shard_"
@@ -72,7 +85,7 @@ s_sh_part:      .asciz "_part_"
 s_sh_none:      .asciz "  shatter: make a mesh object active"
 s_sh_open:      .asciz "  shatter: the mesh is not closed even after repair (mesh.repair; open edges: "
 s_sh_mem:       .asciz "  shatter: out of memory"
-s_sh_bad:       .asciz "  object.shatter <shards|bricks|balls> [count n] [seed s] [at x y z | cursor | surface] [spread f] [size x y z | counts a b c] [offset f|random] [gap g] [jitter f] [radius r] [inner r g b] - not understood: "
+s_sh_bad:       .asciz "  object.shatter <shards|bricks|balls> [count n] [seed s] [at x y z | cursor | surface] [spread f] [size x y z | counts a b c] [offset f|random] [gap g] [jitter f] [radius r] [inner r g b] [density kg/m3] [nobodies] - not understood: "
 s_sh_noseed:    .asciz "  shatter: no room inside the mesh for the cells"
 s_sh_done:      .asciz "  shattered into "
 s_sh_pieces:    .asciz " pieces ("
@@ -83,10 +96,11 @@ s_sl_done:      .asciz "  separated into loose parts: "
 .align 8
 so_kws:         .quad k_shards, k_bricks, k_balls, k_count, k_seed, k_at, k_cursor
                 .quad k_surface, k_spread, k_size, k_counts, k_offset, k_gap
-                .quad k_jitter, k_radius, k_inner, 0
+                .quad k_jitter, k_radius, k_inner, k_density, k_nobodies, 0
 so_kwfn:        .quad .Lpa_count, .Lpa_seed, .Lpa_at, .Lpa_cursor, .Lpa_surface
                 .quad .Lpa_spread, .Lpa_size, .Lpa_counts, .Lpa_offset, .Lpa_gap
-                .quad .Lpa_jitter, .Lpa_radius, .Lpa_inner
+                .quad .Lpa_jitter, .Lpa_radius, .Lpa_inner, .Lpa_density
+                .quad .Lpa_nobodies
 so_one_d:       .double 1.0
 so_three:       .double 3.0
 so_1em6:        .double 1.0e-6
@@ -107,6 +121,8 @@ so_f1:          .float 1.0
 so_f255:        .float 255.0
 so_fhalf:       .float 0.5
 so_third:       .float 0.33333334
+so_f1000:       .float 1000.0
+so_ffric:       .float 0.5
 
 .section .bss
 .align 8
@@ -147,6 +163,14 @@ so_atmode:      .skip 4                 # 0 uniform, 1 around a point, 2 surface
 so_spread:      .skip 4
 so_spreadset:   .skip 4
 so_counted:     .skip 4
+so_density:     .skip 4
+so_nobodies:    .skip 4
+so_meanscale:   .skip 4
+so_lasth:       .skip 4
+so_npieces:     .skip 4
+.align 8
+so_pieces:      .skip 4*MAX_OBJECTS     # the pieces made: handles, volumes
+so_pvol:        .skip 8*MAX_OBJECTS
 so_hassize:     .skip 4
 so_hascounts:   .skip 4
 so_offset:      .skip 4
@@ -896,6 +920,7 @@ so_balls:
     addss   xmm0, [rax+OB_SCALE+8]
     andps   xmm0, [rip+so_absf]
     mulss   xmm0, [rip+so_third]
+    movss   [rip+so_meanscale], xmm0
     cvtss2sd xmm0, xmm0
     maxsd   xmm0, [rip+so_tiny]
     movsd   [rsp+40], xmm0
@@ -1030,6 +1055,7 @@ so_balls:
     call    obj_new
     test    eax, eax
     jz      6f
+    mov     [rip+so_lasth], eax
     cmp     dword ptr [rip+so_first], 0
     jne     52f
     mov     [rip+so_first], eax
@@ -1082,6 +1108,13 @@ so_balls:
     cvtss2sd xmm0, [r13+OB_SCALE]
     divsd   xmm0, [rsp+40]
     movsd   [rax+r12*8], xmm0
+    movsd   xmm1, xmm0                  # (its volume, local)
+    mulsd   xmm1, xmm0
+    mulsd   xmm1, xmm0
+    mulsd   xmm1, [rip+so_sph]
+    movsd   xmm0, xmm1
+    mov     edi, [rip+so_lasth]
+    call    so_record
     mov     rdi, r14                    # the colour of the vertex nearest
     call    so_near_colour
     test    eax, eax
@@ -1753,6 +1786,9 @@ so_make:
     jz      8f
     mov     r14d, eax
     mov     edi, eax
+    movsd   xmm0, [rbx+PH_VOL]
+    call    so_record
+    mov     edi, r14d
     call    obj_get
     mov     r15, rax
     mov     rsi, [rip+so_obj]           # like the original
@@ -1792,6 +1828,201 @@ so_make:
     jmp     9f
 8:  xor     eax, eax
 9:  add     rsp, 32
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# so_record(edi=handle, xmm0=volume, local) - a piece made (so_pieces)
+so_record:
+    mov     eax, [rip+so_npieces]
+    cmp     eax, MAX_OBJECTS
+    jae     1f
+    lea     rcx, [rip+so_pieces]
+    mov     [rcx+rax*4], edi
+    lea     rcx, [rip+so_pvol]
+    movsd   [rcx+rax*8], xmm0
+    inc     dword ptr [rip+so_npieces]
+1:  ret
+
+# so_bodies -> eax = rigid bodies made: every piece an active body (a hull;
+#   a ball a sphere), its mass its volume x the density (the option's in
+#   kg/m^3, else the material's, else water's), friction, bounce, damping,
+#   group and starting velocity the original's when it is a body; each a
+#   child of the original (hidden, folded in the outliner)
+so_bodies:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 64                     # +0 friction, bounce, damping,
+    mov     rax, [rip+so_obj]           #  flags, +16 velocity, +32 density,
+    or      dword ptr [rax+OB_FLAGS], OBF_COLLAPSED    #  +40 |det S|
+    xor     r12d, r12d                  # each piece a child of the original
+1:  cmp     r12d, [rip+so_npieces]
+    jae     2f
+    lea     rax, [rip+so_pieces]
+    mov     edi, [rax+r12*4]
+    call    obj_get
+    test    rax, rax
+    jz      11f
+    mov     rdi, rax
+    mov     rsi, [rip+so_obj]
+    call    par_set
+11: inc     r12d
+    jmp     1b
+2:  xor     eax, eax
+    cmp     dword ptr [rip+so_nobodies], 0
+    jne     9f
+    xor     edi, edi
+    call    an_own_g
+    test    rax, rax
+    jz      .Lbo_full
+    mov     rbx, rax
+    mov     eax, [rip+so_ffric]         # the defaults, or the original's
+    mov     [rsp], eax
+    xor     eax, eax
+    mov     [rsp+4], eax
+    mov     [rsp+8], eax
+    mov     [rsp+12], eax
+    mov     [rsp+16], rax
+    mov     [rsp+24], eax
+    mov     rax, [rip+so_obj]
+    mov     edx, [rax+OB_UID]
+    xor     ecx, ecx
+3:  cmp     ecx, [rbx+AN_NRB_]
+    jae     4f
+    imul    rax, rcx, RB_SZ_
+    lea     rax, [rbx+AN_RB_+rax]
+    cmp     [rax+RB_UID], edx
+    je      31f
+    inc     ecx
+    jmp     3b
+31: mov     ecx, [rax+RB_FRIC]
+    mov     [rsp], ecx
+    mov     ecx, [rax+RB_REST]
+    mov     [rsp+4], ecx
+    mov     ecx, [rax+RB_DAMP]
+    mov     [rsp+8], ecx
+    mov     ecx, [rax+RB_FLAGS]
+    and     ecx, ~3
+    mov     [rsp+12], ecx
+    mov     rcx, [rax+RB_VEL]
+    mov     [rsp+16], rcx
+    mov     ecx, [rax+RB_VEL+8]
+    mov     [rsp+24], ecx
+4:  movss   xmm0, [rip+so_density]      # the density (kg/m^3)
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    ja      43f
+    movss   xmm0, [rip+so_f1000]
+    mov     rdi, [rip+so_obj]
+    call    mat_of
+    test    eax, eax
+    js      42f
+    mov     edi, eax
+    call    mat_get
+    test    rax, rax
+    jz      42f
+    movss   xmm0, [rax+MA_DENS_]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     41f
+    mulss   xmm0, [rip+so_f1000]
+    jmp     43f
+41: movss   xmm0, [rip+so_f1000]
+    jmp     43f
+42: movss   xmm0, [rip+so_f1000]
+43: cvtss2sd xmm0, xmm0
+    movsd   [rsp+32], xmm0
+    mov     rax, [rip+so_obj]           # |det S| (local volume -> world)
+    cvtss2sd xmm0, [rax+OB_SCALE]
+    cvtss2sd xmm1, [rax+OB_SCALE+4]
+    mulsd   xmm0, xmm1
+    cvtss2sd xmm1, [rax+OB_SCALE+8]
+    mulsd   xmm0, xmm1
+    andpd   xmm0, [rip+so_abs]
+    movsd   [rsp+40], xmm0
+    xorpd   xmm0, xmm0
+    movsd   [rsp+48], xmm0              # (the mass in all)
+    xor     r12d, r12d                  # each piece: an entry
+    xor     r13d, r13d                  # (made)
+5:  cmp     r12d, [rip+so_npieces]
+    jae     8f
+    mov     eax, [rbx+AN_NRB_]
+    cmp     eax, RB_MAX_
+    jae     .Lbo_room
+    lea     rcx, [rip+so_pieces]
+    mov     edi, [rcx+r12*4]
+    call    obj_get
+    test    rax, rax
+    jz      7f
+    mov     r14d, [rax+OB_UID]
+    mov     eax, [rbx+AN_NRB_]
+    inc     dword ptr [rbx+AN_NRB_]
+    imul    rdi, rax, RB_SZ_
+    lea     r15, [rbx+AN_RB_+rdi]
+    mov     rdi, r15
+    xor     eax, eax
+    mov     ecx, RB_SZ_
+    rep     stosb
+    mov     [r15+RB_UID], r14d
+    mov     dword ptr [r15+RB_TYPE], 1
+    mov     dword ptr [r15+RB_SHAPE], 3 # a hull; a ball: a sphere
+    cmp     dword ptr [rip+so_pat], 2
+    jne     51f
+    mov     dword ptr [r15+RB_SHAPE], 1
+51: lea     rcx, [rip+so_pvol]
+    movsd   xmm0, [rcx+r12*8]
+    andpd   xmm0, [rip+so_abs]
+    cmp     dword ptr [rip+so_pat], 2   # (balls: the volume is the world's
+    je      52f                         #  radius already, its scale given)
+    mulsd   xmm0, [rsp+40]
+    jmp     53f
+52: mov     rcx, [rip+so_obj]           # (the ball's local volume x the mean
+    cvtss2sd xmm1, [rip+so_meanscale]   #  scale cubed)
+    mulsd   xmm0, xmm1
+    mulsd   xmm0, xmm1
+    mulsd   xmm0, xmm1
+53: mulsd   xmm0, [rsp+32]
+    movsd   xmm1, [rsp+48]
+    addsd   xmm1, xmm0
+    movsd   [rsp+48], xmm1
+    cvtsd2ss xmm0, xmm0
+    movss   [r15+RB_MASS], xmm0
+    mov     eax, [rsp]
+    mov     [r15+RB_FRIC], eax
+    mov     eax, [rsp+4]
+    mov     [r15+RB_REST], eax
+    mov     eax, [rsp+8]
+    mov     [r15+RB_DAMP], eax
+    mov     eax, [rsp+12]
+    mov     [r15+RB_FLAGS], eax
+    mov     rax, [rsp+16]
+    mov     [r15+RB_VEL], rax
+    mov     eax, [rsp+24]
+    mov     [r15+RB_VEL+8], eax
+    inc     r13d
+7:  inc     r12d
+    jmp     5b
+.Lbo_room:
+    lea     rdi, [rip+s_sh_room]
+    call    log_line
+8:  lea     rax, [rip+sh_stat]
+    cvtsi2sd xmm0, r13d
+    movsd   [rax+22*8], xmm0
+    movsd   xmm0, [rsp+48]
+    movsd   [rax+21*8], xmm0
+    mov     eax, r13d
+    jmp     9f
+.Lbo_full:
+    lea     rdi, [rip+s_sh_room]
+    call    log_line
+    xor     eax, eax
+9:  add     rsp, 64
     pop     r15
     pop     r14
     pop     r13
@@ -2019,6 +2250,14 @@ so_parse:
     jz      8f
     movss   [rip+so_radius], xmm0
     jmp     1b
+.Lpa_density:
+    call    pa_num
+    jz      8f
+    movss   [rip+so_density], xmm0
+    jmp     1b
+.Lpa_nobodies:
+    mov     dword ptr [rip+so_nobodies], 1
+    jmp     1b
 .Lpa_inner:
     lea     rdi, [rip+so_tmp3]          # r g b (0..1)
     call    pa_vec
@@ -2089,6 +2328,8 @@ so_defaults:
     mov     [rip+so_offrand], eax
     mov     [rip+so_spreadset], eax
     mov     [rip+so_counted], eax
+    mov     [rip+so_density], eax
+    mov     [rip+so_nobodies], eax
     mov     dword ptr [rip+so_count], 50
     mov     dword ptr [rip+so_seed], 1
     mov     eax, [rip+so_fhalf]
@@ -2263,6 +2504,7 @@ do_shatter:
     mov     ecx, NSTAT
     rep     stosq
     call    so_defaults
+    mov     dword ptr [rip+so_npieces], 0
     call    so_parse
     test    eax, eax
     jz      .Lsh_bad
@@ -2347,6 +2589,7 @@ do_shatter:
     and     dword ptr [rdi+OB_FLAGS], ~OBF_SELECTED
     call    so_build
     mov     ebx, eax
+    call    so_bodies
     mov     edi, 13
     call    so_lap
     jmp     .Lsh_made
@@ -2365,6 +2608,7 @@ do_shatter:
     mov     rdi, [rip+so_obj]
     or      dword ptr [rdi+OB_FLAGS], OBF_HIDDEN
     and     dword ptr [rdi+OB_FLAGS], ~OBF_SELECTED
+    call    so_bodies
     mov     edi, 13
     call    so_lap
 .Lsh_made:

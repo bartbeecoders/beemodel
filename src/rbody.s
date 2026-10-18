@@ -367,8 +367,15 @@ rx_thin:        .float 0.05                 # a passive box thinner than this
 rx_thick:       .float 0.25                 #  is this deep below its top
 rx_third:       .float 0.33333334
 rx_fifth2:      .float 0.4
+rx_near2:       .float 0.0004               # (2% squared)
 .align 8
 rx_1e6d:        .double 1000000.0
+rx_six_d:       .double 6.0
+rx_24d:         .double 24.0
+rx_120d:        .double 120.0
+rx_tinyd:       .double 1.0e-12
+.align 16
+rx_absd:        .quad 0x7fffffffffffffff, 0
 rx_1000:        .float 1000.0
 rx_24:          .float 24.0
 rx_conc:        .float 0.05                 # compound: a part's hollowness / size
@@ -825,6 +832,8 @@ rb_entry_obj:
     jz      9f
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     8f
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN    # (hidden: not collided
+    jnz     8f                                      #  with)
     cmp     qword ptr [rax+OB_MESH], 0
     jne     9f
 8:  xor     eax, eax
@@ -1527,10 +1536,26 @@ make_body_ex:
     call    mesh_points                 # rax = them, ecx = how many
     cmp     dword ptr [r12+RB_SHAPE], 3
     jne     .Lmb_comp
+    mov     [rsp+64], rax               # (the points)
     mov     rdi, rax
     mov     esi, ecx
     xorps   xmm0, xmm0
     call    hull_part
+    mov     rdi, r14                    # a closed mesh: its centre of volume
+    mov     rsi, [rsp+64]               #  and moments (else its bounds')
+    call    mass_props
+    test    eax, eax
+    jz      .Lmb_mass
+    movaps  xmm0, [rip+rb_mp_c]         # the part from the centre of mass;
+    mov     eax, [rip+rb_npt]           #  the centre the body's
+    dec     eax
+    imul    rax, rax, PT_SZ
+    add     rax, [rip+rb_pt]
+    movaps  xmm1, [rax+PT_OFF]
+    subps   xmm1, xmm0
+    movaps  [rax+PT_OFF], xmm1
+    addps   xmm0, [rsp+96]
+    movaps  [rsp+96], xmm0
     jmp     .Lmb_mass
 .Lmb_comp_pts:
     mov     rdi, r14
@@ -1622,7 +1647,23 @@ make_body_ex:
 51: movss   xmm0, [rip+rx_one]
     divss   xmm0, xmm7
     movss   [rbx+BD_IM], xmm0
-    movaps  xmm1, [rsp+112]             # h^2
+    cmp     dword ptr [r12+RB_SHAPE], 3 # a hull with moments: I = m / V
+    jne     50f                         #  (My + Mz, Mx + Mz, Mx + My)
+    cmp     dword ptr [rip+rb_mp_ok], 0
+    je      50f
+    mov     dword ptr [rip+rb_mp_ok], 0
+    movaps  xmm1, [rip+rb_mp_m]
+    movaps  xmm2, xmm1
+    shufps  xmm2, xmm2, 0xC9            # (y z x)
+    movaps  xmm3, xmm1
+    shufps  xmm3, xmm3, 0xD2            # (z x y)
+    addps   xmm2, xmm3
+    movss   xmm3, xmm7
+    divss   xmm3, [rip+rb_mp_v]
+    shufps  xmm3, xmm3, 0
+    mulps   xmm2, xmm3
+    jmp     53f
+50: movaps  xmm1, [rsp+112]             # h^2
     mulps   xmm1, xmm1
     cmp     dword ptr [r12+RB_SHAPE], 1
     jne     52f
@@ -2166,14 +2207,44 @@ hull_part:
     xor     ebx, ebx                    # kept
     cmp     r13d, HULL_MAX
     ja      3f
-    xor     ecx, ecx                    # few: all
+    movaps  xmm6, [rip+rx_big4]         # few: all but those within 2% of
+    movaps  xmm7, [rip+rx_nbig4]        #  the size of one kept (a pair of
+    xor     ecx, ecx                    #  near points makes the contacts
+10: cmp     ecx, r13d                   #  flicker)
+    jae     11f
+    mov     rax, rcx
+    shl     rax, 4
+    minps   xmm6, [r12+rax]
+    maxps   xmm7, [r12+rax]
+    inc     ecx
+    jmp     10b
+11: subps   xmm7, xmm6
+    andps   xmm7, [rip+rx_xyz]
+    DOT3    xmm7, xmm7
+    mulss   xmm7, [rip+rx_near2]
+    xor     ecx, ecx
 1:  cmp     ecx, r13d
     jae     5f
     mov     rax, rcx
     shl     rax, 4
     movaps  xmm0, [r12+rax]
+    xor     edx, edx
+12: cmp     edx, ebx
+    jae     13f
+    mov     rax, rdx
+    shl     rax, 4
+    movaps  xmm1, [r15+rax]
+    subps   xmm1, xmm0
+    DOT3    xmm1, xmm1
+    comiss  xmm1, xmm7
+    jb      14f
+    inc     edx
+    jmp     12b
+13: mov     rax, rbx
+    shl     rax, 4
     movaps  [r15+rax], xmm0
-    inc     ecx
+    inc     ebx
+14: inc     ecx
     jmp     1b
 3:  mov     rdi, r12                    # many: the farthest along 64 ways
     mov     esi, r13d
@@ -2181,7 +2252,7 @@ hull_part:
     call    extremes
     mov     ebx, eax
     jmp     6f
-5:  mov     ebx, r13d
+5:
 6:  mov     [r14+PT_NV], ebx
     add     [rip+rb_nvx], ebx
     movaps  xmm6, [rip+rx_big4]         # its bounds' centre: the points from it
@@ -2222,6 +2293,146 @@ hull_part:
     pop     r12
     pop     rbx
     pop     rbp
+    ret
+
+# mass_props(rdi=mesh, rsi=its points (vec4, scaled, from the bounds'
+#   centre)) -> eax = 1: rb_mp_v = its volume, rb_mp_c = its centre of
+#   volume, rb_mp_m = its second moments about it (x^2, y^2, z^2
+#   integrated; tetrahedra from the origin, in doubles); 0: no volume
+mass_props:
+    sub     rsp, 72
+    xorpd   xmm8, xmm8                  # 6 V
+    xorpd   xmm9, xmm9                  # 24 S1 (x y z)
+    xorpd   xmm10, xmm10
+    xorpd   xmm11, xmm11
+    xorpd   xmm12, xmm12                # 120 S2
+    xorpd   xmm13, xmm13
+    xorpd   xmm14, xmm14
+    mov     r8, [rdi+ME_TRIS]
+    mov     ecx, [rdi+ME_NTRIS]
+    test    ecx, ecx
+    jz      8f
+1:  xor     edx, edx                    # the corners in doubles: [rsp]
+11: mov     eax, [r8+rdx*4]
+    shl     rax, 4
+    lea     r9, [rdx+rdx*2]
+    cvtss2sd xmm0, [rsi+rax]
+    movsd   [rsp+r9*8], xmm0
+    cvtss2sd xmm0, [rsi+rax+4]
+    movsd   [rsp+r9*8+8], xmm0
+    cvtss2sd xmm0, [rsi+rax+8]
+    movsd   [rsp+r9*8+16], xmm0
+    inc     edx
+    cmp     edx, 3
+    jb      11b
+    movsd   xmm0, [rsp+32]              # d = p1 . (p2 x p3)
+    mulsd   xmm0, [rsp+64]
+    movsd   xmm1, [rsp+40]
+    mulsd   xmm1, [rsp+56]
+    subsd   xmm0, xmm1
+    mulsd   xmm0, [rsp]
+    movsd   xmm1, [rsp+40]
+    mulsd   xmm1, [rsp+48]
+    movsd   xmm2, [rsp+24]
+    mulsd   xmm2, [rsp+64]
+    subsd   xmm1, xmm2
+    mulsd   xmm1, [rsp+8]
+    addsd   xmm0, xmm1
+    movsd   xmm1, [rsp+24]
+    mulsd   xmm1, [rsp+56]
+    movsd   xmm2, [rsp+32]
+    mulsd   xmm2, [rsp+48]
+    subsd   xmm1, xmm2
+    mulsd   xmm1, [rsp+16]
+    addsd   xmm0, xmm1
+    addsd   xmm8, xmm0
+    xor     edx, edx                    # each axis: s, sum of squares
+12: movsd   xmm1, [rsp+rdx*8]
+    addsd   xmm1, [rsp+rdx*8+24]
+    addsd   xmm1, [rsp+rdx*8+48]
+    movsd   xmm2, [rsp+rdx*8]
+    mulsd   xmm2, xmm2
+    movsd   xmm3, [rsp+rdx*8+24]
+    mulsd   xmm3, xmm3
+    addsd   xmm2, xmm3
+    movsd   xmm3, [rsp+rdx*8+48]
+    mulsd   xmm3, xmm3
+    addsd   xmm2, xmm3
+    movsd   xmm3, xmm1
+    mulsd   xmm3, xmm1
+    addsd   xmm2, xmm3                  # (sum p^2 + s^2)
+    mulsd   xmm1, xmm0                  # (d s)
+    mulsd   xmm2, xmm0                  # (d (sum p^2 + s^2))
+    cmp     edx, 1
+    je      13f
+    cmp     edx, 2
+    je      14f
+    addsd   xmm9, xmm1
+    addsd   xmm12, xmm2
+    jmp     15f
+13: addsd   xmm10, xmm1
+    addsd   xmm13, xmm2
+    jmp     15f
+14: addsd   xmm11, xmm1
+    addsd   xmm14, xmm2
+15: inc     edx
+    cmp     edx, 3
+    jb      12b
+    add     r8, 12
+    dec     ecx
+    jnz     1b
+    movsd   xmm0, xmm8                  # V = 6V / 6 (none: no)
+    divsd   xmm0, [rip+rx_six_d]
+    movsd   xmm1, xmm0
+    andpd   xmm1, [rip+rx_absd]
+    comisd  xmm1, [rip+rx_tinyd]
+    jbe     8f
+    cvtsd2ss xmm1, xmm0
+    movss   [rip+rb_mp_v], xmm1
+    movsd   xmm2, [rip+rx_24d]          # c = S1 / V
+    mulsd   xmm2, xmm0
+    divsd   xmm9, xmm2
+    divsd   xmm10, xmm2
+    divsd   xmm11, xmm2
+    movsd   xmm2, [rip+rx_120d]         # M = S2 - V c^2
+    divsd   xmm12, xmm2
+    divsd   xmm13, xmm2
+    divsd   xmm14, xmm2
+    movsd   xmm3, xmm9
+    mulsd   xmm3, xmm9
+    mulsd   xmm3, xmm0
+    subsd   xmm12, xmm3
+    movsd   xmm3, xmm10
+    mulsd   xmm3, xmm10
+    mulsd   xmm3, xmm0
+    subsd   xmm13, xmm3
+    movsd   xmm3, xmm11
+    mulsd   xmm3, xmm11
+    mulsd   xmm3, xmm0
+    subsd   xmm14, xmm3
+    lea     rax, [rip+rb_mp_c]
+    cvtsd2ss xmm1, xmm9
+    movss   [rax], xmm1
+    cvtsd2ss xmm1, xmm10
+    movss   [rax+4], xmm1
+    cvtsd2ss xmm1, xmm11
+    movss   [rax+8], xmm1
+    mov     dword ptr [rax+12], 0
+    lea     rax, [rip+rb_mp_m]
+    cvtsd2ss xmm1, xmm12
+    movss   [rax], xmm1
+    cvtsd2ss xmm1, xmm13
+    movss   [rax+4], xmm1
+    cvtsd2ss xmm1, xmm14
+    movss   [rax+8], xmm1
+    mov     dword ptr [rax+12], 0
+    mov     dword ptr [rip+rb_mp_ok], 1
+    mov     eax, 1
+    add     rsp, 72
+    ret
+8:  mov     dword ptr [rip+rb_mp_ok], 0
+    xor     eax, eax
+    add     rsp, 72
     ret
 
 # extremes(rdi=points, esi=count, rdx=out) -> eax = the points farthest
@@ -2564,6 +2775,11 @@ dc_node:
 .section .bss
 .align 16
 dc_ctx:         .skip 64
+.align 16
+rb_mp_c:        .skip 16                # mass_props: the centre of volume,
+rb_mp_m:        .skip 16                #  second moments about it,
+rb_mp_v:        .skip 4                 #  volume, (valid)
+rb_mp_ok:       .skip 4
 dc_body:        .skip 8
 .text
 
@@ -7184,8 +7400,14 @@ isl_rest:
     BODY    rbx, rax
     movaps  xmm0, [rbx+BD_V]
     DOT3    xmm0, xmm0
-    movaps  xmm1, [rbx+BD_W]
-    DOT3    xmm1, xmm1
+    movaps  xmm1, [rbx+BD_W]            # (a turn by the speed of the body's
+    DOT3    xmm1, xmm1                  #  surface: w x its half size, at
+    movaps  xmm3, [rbx+BD_MAX]          #  most a metre - small pieces
+    subps   xmm3, [rbx+BD_MIN]          #  rest when they barely move)
+    DOT3    xmm3, xmm3
+    mulss   xmm3, [rip+rx_quarter]
+    minss   xmm3, [rip+rx_one]
+    mulss   xmm1, xmm3
     maxss   xmm0, xmm1
     xorps   xmm2, xmm2
     comiss  xmm0, [rip+rx_rest2]
@@ -8820,6 +9042,10 @@ rb_info:
     je      8f
     cmp     edi, 16                     # 16: every body's place, turn and
     je      6f                          #  speeds, hashed (24 bits: exact)
+    cmp     edi, 17                     # 17: the fastest awake body's speed
+    je      64f                         #  (and spin x its size); 18: its
+    cmp     edi, 18                     #  object's uid
+    je      64f
     cmp     edi, 8                      # 8-13: ms in the broad phase, the
     jb      7f                          #  narrow, islands, solving, the
     cmp     edi, 13                     #  hash, compacting
@@ -8850,6 +9076,43 @@ rb_info:
     xor     eax, edx
     and     eax, 0xffffff
     jmp     8b
+64: xorps   xmm2, xmm2                  # (the most: v^2 + (w r)^2)
+    xor     r9d, r9d
+    xor     ecx, ecx
+65: mov     edx, [rip+rb_nb]
+    cmp     ecx, edx
+    jae     67f
+    BODY    rdx, rcx
+    cmp     dword ptr [rdx+BD_TYPE], 1
+    jne     66f
+    cmp     dword ptr [rdx+BD_ASLEEP], 0
+    jne     66f
+    movaps  xmm0, [rdx+BD_V]
+    DOT3    xmm0, xmm0
+    movaps  xmm1, [rdx+BD_MAX]
+    subps   xmm1, [rdx+BD_MIN]
+    DOT3    xmm1, xmm1
+    mulss   xmm1, [rip+rx_quarter]
+    movaps  xmm3, [rdx+BD_W]
+    DOT3    xmm3, xmm3
+    mulss   xmm1, xmm3
+    addss   xmm0, xmm1
+    comiss  xmm0, xmm2
+    jbe     66f
+    movss   xmm2, xmm0
+    mov     r8, [rdx+BD_OBJ]
+    xor     r9d, r9d
+    test    r8, r8
+    jz      66f
+    mov     r9d, [r8+OB_UID]
+66: inc     ecx
+    jmp     65b
+67: cmp     edi, 18
+    je      68f
+    sqrtss  xmm0, xmm2
+    ret
+68: cvtsi2ss xmm0, r9d
+    ret
 
 # =============================================================================
 #  Operators
