@@ -297,6 +297,9 @@ mesh_uv_free:
 51: mov     rdi, [rbx+ME_VGEO]          # (its cluster DAG)
     mov     qword ptr [rbx+ME_VGEO], 0
     call    vg_unref
+    mov     rdi, [rbx+ME_LAND]          # (the landscape it shows)
+    mov     qword ptr [rbx+ME_LAND], 0
+    call    la_unref
     pop     rbx
     ret
 uv_unmap:

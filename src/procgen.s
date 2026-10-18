@@ -28,6 +28,10 @@
 
 .globl tg_terrain
 .globl tg_terrace
+.globl er_run
+.globl er_h
+.globl er_n
+.globl er_rng
 .globl tg_erode
 .globl tg_lsystem
 .globl ls_build
@@ -555,11 +559,50 @@ tg_erode:
     test    r13d, r13d
     jle     .Ler_back
     cmp     r13d, 2000000
-    jle     .Ler_drop
+    jle     1f
     mov     r13d, 2000000
+1:  movss   xmm0, [rsp+4]
+    mov     edi, r13d
+    call    er_run
+.Ler_back:
+    mov     rax, [rip+er_h]             # heights back (world units)
+    mov     rsi, [rbx+ME_POS]
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+ME_NVERTS]
+    jae     2f
+    movss   xmm0, [rax+rcx*4]
+    mulss   xmm0, [rsp]
+    addss   xmm0, [rbx+ME_BMIN+4]
+    imul    rdx, rcx, 12
+    movss   [rsi+rdx+4], xmm0
+    inc     ecx
+    jmp     1b
+2:  mov     rdi, rbx
+    call    mesh_bbox
+.Ler_done:
+    mov     rax, rbx
+.Ler_out:
+    add     rsp, 104
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# er_run(xmm0=rate, edi=droplets) - hydraulic erosion of er_h (er_n a row,
+#   heights 0..1 over the range; er_rng the random state): each droplet
+#   starts anywhere inside and lives up to ER_LIFE steps
+er_run:
+    push    r13
+    push    r14
+    sub     rsp, 72
+    movss   [rsp+4], xmm0
+    mov     r13d, edi
 .Ler_drop:
     test    r13d, r13d
-    jz      .Ler_back
+    jz      .Ler_rdone
     dec     r13d
     mov     eax, [rip+er_n]             # start anywhere inside
     sub     eax, 1
@@ -697,31 +740,10 @@ tg_erode:
     movss   [rsp+28], xmm0
     inc     r14d
     jmp     .Ler_step
-.Ler_back:
-    mov     rax, [rip+er_h]             # heights back (world units)
-    mov     rsi, [rbx+ME_POS]
-    xor     ecx, ecx
-1:  cmp     ecx, [rbx+ME_NVERTS]
-    jae     2f
-    movss   xmm0, [rax+rcx*4]
-    mulss   xmm0, [rsp]
-    addss   xmm0, [rbx+ME_BMIN+4]
-    imul    rdx, rcx, 12
-    movss   [rsi+rdx+4], xmm0
-    inc     ecx
-    jmp     1b
-2:  mov     rdi, rbx
-    call    mesh_bbox
-.Ler_done:
-    mov     rax, rbx
-.Ler_out:
-    add     rsp, 104
-    pop     rbp
-    pop     r15
+.Ler_rdone:
+    add     rsp, 72
     pop     r14
     pop     r13
-    pop     r12
-    pop     rbx
     ret
 
 .section .bss
