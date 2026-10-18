@@ -23,6 +23,7 @@
 .globl hv_to
 .globl hv_tuv
 .globl hv_tvc
+.globl hv_ncatch
 .globl hv_only
 .globl hv_free_all
 .globl corner_normals
@@ -60,6 +61,7 @@ hv_tm:          .skip 8             # u32[n]     material (0 = default)
 hv_to:          .skip 8             # f32[n][9]  object-space v0, e1, e2 (shader graphs)
 hv_tuv:         .skip 8             # f32[n][6]  UVs (u0 NaN: none, box)
 hv_tvc:         .skip 8             # u32[n][3]  vertex colours (0: none)
+hv_ncatch:      .skip 4             # shadow-catcher objects (hv_tm | HV_CATCH)
 hv_only:        .skip 8             # set: only this object (baking)
 hv_ibud:        .skip 4             # instance triangles still allowed
 hv_mats:        .skip 8             # material snapshots (MA_SZ bytes, 0 = default)
@@ -296,6 +298,7 @@ hive_build:
 31: inc     ebx
     jmp     3b
 4:  # triangles, object by object
+    mov     dword ptr [rip+hv_ncatch], 0
     xor     r13d, r13d                  # global triangle
     mov     dword ptr [rip+hv_ibud], HV_IBUDGET
     xor     ebx, ebx
@@ -327,7 +330,11 @@ hive_build:
     mov     rdi, r14
     call    mat_of
     inc     eax
-    mov     [rsp+8], eax                # material + 1
+    test    dword ptr [r14+OB_FLAGS], OBF_CATCH
+    jz      2f
+    or      eax, HV_CATCH               # (a shadow catcher's triangles)
+    inc     dword ptr [rip+hv_ncatch]
+2:  mov     [rsp+8], eax                # material + 1
     mov     [rsp+12], r13d              # first triangle of this object
     xor     ecx, ecx
 5:  cmp     ecx, [r15+ME_NTRIS]

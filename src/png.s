@@ -13,6 +13,7 @@
 .globl png_encode
 .globl png_encode_rgba
 .globl png_write
+.globl png_alpha
 .globl deflate_buf
 .globl zip_crc32
 
@@ -21,6 +22,7 @@
 
 .section .bss
 pe_bpp:         .skip 4                 # PNG out: bytes a pixel (3 / 4)
+png_alpha:      .skip 4                 # 1: png_write keeps the alpha (ARGB)
 .align 8
 .align 8
 crc_table:      .skip 1024
@@ -635,8 +637,12 @@ png_write:
     pop     rcx
     pop     rdx
     pop     rsi
+    cmp     dword ptr [rip+png_alpha], 0
+    jne     1f
     call    png_encode
-    test    eax, eax
+    jmp     2f
+1:  call    png_encode_rgba
+2:  test    eax, eax
     jz      8f
     mov     rdi, rbx
     mov     rsi, [rip+wb_ptr]

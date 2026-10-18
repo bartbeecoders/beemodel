@@ -437,7 +437,10 @@ do_render_save:
     mov     edx, [rip+hv_w]
     mov     ecx, [rip+hv_h]
     mov     r8d, [rip+hv_w]
+    mov     eax, [rip+hv_film]          # (shadow catchers: RGBA)
+    mov     [rip+png_alpha], eax
     call    png_write
+    mov     dword ptr [rip+png_alpha], 0
     test    eax, eax
     jnz     .Lsv_fail
 3:  call    fmt_reset
@@ -802,13 +805,52 @@ ed_render_draw:
     cmp     edx, r8d
     cmova   edx, r8d
     mov     r9d, [rsi+rdx*4]
-    mov     [rdi+rcx*4], r9d
+    cmp     dword ptr [rip+hv_film], 0  # (a film with alpha: over checks)
+    jne     72f
+73: mov     [rdi+rcx*4], r9d
     add     rax, rbp
     inc     ecx
     cmp     ecx, r15d
     jb      71b
     inc     r12d
     jmp     .Lrd_row
+72: push    rax                         # r9d over 8-pixel checks
+    push    rdx
+    push    r8
+    mov     eax, ecx
+    xor     eax, r12d
+    shr     eax, 3
+    and     eax, 1
+    mov     r10d, 0x8a                  # (light, dark)
+    mov     r11d, 0x5c
+    test    eax, eax
+    cmovz   r10d, r11d
+    mov     r11d, r9d
+    shr     r11d, 24                    # alpha
+    xor     edx, edx
+    push    rcx
+    mov     ecx, 16
+74: mov     eax, r9d                    # c a + check (255 - a), / 255
+    shr     eax, cl
+    and     eax, 255
+    imul    eax, r11d
+    mov     r8d, 255
+    sub     r8d, r11d
+    imul    r8d, r10d
+    add     eax, r8d
+    imul    eax, eax, 257               # (/ 255: x 257 >> 16, + rounding)
+    add     eax, 257
+    shr     eax, 16
+    shl     eax, cl
+    or      edx, eax
+    sub     ecx, 8
+    jns     74b
+    pop     rcx
+    mov     r9d, edx
+    pop     r8
+    pop     rdx
+    pop     rax
+    jmp     73b
 .Lrd_out:
     add     rsp, 40
     pop     rbp

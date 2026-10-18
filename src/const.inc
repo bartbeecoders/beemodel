@@ -466,6 +466,9 @@
 .equ OBF_LOCKED,    0x400   # not selectable in the viewport (the outliner's lock)
 .equ OBF_NORENDER,  0x800   # left out of renders (the outliner's camera)
 .equ OBF_COLLAPSED, 0x1000  # its children folded away in the outliner
+.equ OBF_GROUND,    0x2000  # the scene's Ground (ground.s): drawn as a fading grid
+.equ OBF_CATCH,     0x4000  # renders as a shadow catcher (the rest of the film: alpha)
+.equ HV_CATCH,      0x40000000  # hv_tm: a shadow catcher's triangle (hive.s)
 .equ OT_MESH,       0
 .equ OT_LIGHT,      1
 .equ OT_CAMERA,     2

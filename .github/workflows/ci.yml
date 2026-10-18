@@ -95,6 +95,8 @@ jobs:
         run: timeout 300 python tests/logic.py build/beemodel build/shots
       - name: Rigid-body solver (stacks)
         run: timeout 600 python tests/solver.py build/beemodel
+      - name: Ground and landscape
+        run: timeout 600 python tests/landscape.py build/beemodel
 
       - name: Lighting tools (light probes, lightmaps, glTF through the Khronos validator)
         run: timeout 600 python tests/lighting.py build/beemodel build/shots

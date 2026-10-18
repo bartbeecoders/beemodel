@@ -180,9 +180,12 @@ do_frame_sel:
     call    obj_at
     inc     ebx
     test    r13d, r13d
-    jz      11f
+    jz      10f
     test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
     jz      1b
+    jmp     11f
+10: test    dword ptr [rax+OB_FLAGS], OBF_GROUND    # (the whole scene: not
+    jnz     1b                          #  the endless Ground)
 11: test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
     jnz     1b
     inc     r12d
