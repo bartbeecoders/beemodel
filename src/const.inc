@@ -377,7 +377,8 @@
 .equ ME_PIN,        200     # u8 per vertex (own mapping): pinned for cloth, or 0
 .equ ME_VGEO,       208     # cluster LOD DAG (vgeo.s: shared, reference counted), or 0
 .equ ME_VGOK,       216     # u32: ME_VER + 1 when ME_VGEO was checked to be its DAG (negative: not)
-.equ ME_HDR,        224
+.equ ME_LAND,       224     # the landscape it shows (landscape.s: shared, reference counted), or 0
+.equ ME_HDR,        240
 
 # ---- materials (material.s, graph.s) -------------------------------------------------
 .equ MA_SZ,         4096    # a material record: principled values, then its graph

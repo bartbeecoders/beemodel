@@ -6,6 +6,11 @@ rigid body falls and rests on it, a cloth lands on it; the render (F12's
 path tracer) has a transparent background, the cube opaque and its shadow
 caught on the ground; the Ground is saved and reopened.
 
+G2: the Landscape - a 1025 x 1025 landscape generated and eroded in under
+1 s; a layer above the erosion changed in a few ms (from the cache); the
+layers' stack (terrace, flatten, hide, remove, the noises); saved and
+reopened with the same heights.
+
     python3 tests/landscape.py build/beemodel
 """
 import os, subprocess, sys, tempfile, zlib, struct
@@ -117,6 +122,56 @@ print("reopen", n, count(), get("Ground", "y"))
     check(r[0] == r[1] and int(r[0]) > 0, f'the Ground is saved and reopened as the Ground ({r[0]} -> {r[1]} objects)')
 
 
+def landscape():
+    print('-- G2: the Landscape --')
+    tmp = tempfile.mkdtemp(prefix='bee-g2-')
+    bee = os.path.join(tmp, 'l.bee')
+    P = [(33.3, -41.7), (-80, 60), (0, 0), (99, 99), (-99.9, 12.5)]
+    hs = ', '.join(f'height("Landscape", {x}, {z})' for x, z in P)
+    out = run(f'''
+op("landscape.add", "res 1025")
+print("add", landscape("Landscape", 0), landscape("Landscape", 2), landscape("Landscape", 6), landscape("Landscape", 3), landscape("Landscape", 4))
+op("landscape.layer", "add terrace steps 6 smooth 0.3")
+print("terrace", landscape("Landscape", 6), landscape("Landscape", 2))
+op("landscape.layer", "set 2 strength 0.5")
+print("strength", landscape("Landscape", 6))
+op("landscape.layer", "add flatten height 12 at 0 0 30")
+print("flat", height("Landscape", 0, 0), height("Landscape", 5, -5))
+op("landscape.layer", "hide 0")
+print("hide", landscape("Landscape", 3), landscape("Landscape", 4))
+op("landscape.layer", "show 0")
+op("landscape.layer", "remove 3")
+print("remove", landscape("Landscape", 2), height("Landscape", 0, 0))
+{''.join(f'op("landscape.layer", "set 0 noise {k}")\nprint("noise", "{k}", landscape("Landscape", 3), landscape("Landscape", 4))\n' for k in ('ridged', 'billow', 'cells'))}print("h", {hs})
+op("file.save", "{bee}")
+op("file.open", "{bee}")
+print("reopen", landscape("Landscape", 0), landscape("Landscape", 2), {hs})
+''')
+    v = {}
+    for l in out:
+        v.setdefault(l[0], []).append(l[1:])
+    a = [float(x) for x in v.get('add', [['0'] * 5])[0]]
+    check(a[0] == 1025 and a[1] == 2, f'landscape.add: 1025 samples a side, two layers (generate, erode) ({a[:2]})')
+    check(a[2] < 1000 * SLOW, f'generated and eroded in {a[2]:.0f} ms (budget {1000 * SLOW} ms)')
+    check(a[4] - a[3] > 5, f'hills {a[4] - a[3]:.1f} m high')
+    t = [float(x) for x in v.get('terrace', [['1e9', '0']])[0]]
+    s = float(v.get('strength', [['1e9']])[0][0])
+    check(t[1] == 3 and t[0] < 50 * SLOW and s < 50 * SLOW,
+          f'a layer above the erosion added and changed in {t[0]:.0f}, {s:.0f} ms (from the cache)')
+    f = [float(x) for x in v.get('flat', [['0', '0']])[0]]
+    check(abs(f[0] - 12) < 1e-3 and abs(f[1] - 12) < 1e-3, f'Flatten area: 12 m inside it ({f})')
+    h = [float(x) for x in v.get('hide', [['0', '0']])[0]]
+    check(h[1] - h[0] < 13, f'the generate layer hidden: next to flat ({h})')
+    r = v.get('remove', [['0', '0']])[0]
+    check(r[0] == '3' and abs(float(r[1]) - 12) > 1e-3, f'the flatten layer removed ({r})')
+    ns = v.get('noise', [])
+    check(len(ns) == 3 and all(float(n[2]) - float(n[1]) > 1 for n in ns), f'ridged, billow, cells noise ({ns})')
+    h0, h1 = v.get('h', [[]])[0], v.get('reopen', [[]])[0]
+    check(h1[:2] == ['1025', '3'] and h1[2:] == h0 and len(h0) == len(P),
+          f'saved and reopened: the same heights ({h0} / {h1[2:]})')
+
+
 ground()
+landscape()
 print(f'{len(FAILS)} failed' if FAILS else 'all landscape checks passed')
 sys.exit(1 if FAILS else 0)

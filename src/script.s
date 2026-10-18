@@ -425,6 +425,10 @@ builtins:
     .long 3, 3
     .quad bn_rbinfo, b_rbinfo
     .long 1, 1
+    .quad bn_landscape, b_landscape
+    .long 2, 2
+    .quad bn_height, b_height
+    .long 3, 3
     .quad bn_rigid, b_rigid
     .long 2, 2
     .quad bn_joint, b_joint
@@ -761,6 +765,8 @@ bn_prop:        .asciz "prop"
 bn_shapes:      .asciz "shapes"
 bn_bonepos:     .asciz "bonepos"
 bn_rbinfo:      .asciz "rbinfo"
+bn_landscape:   .asciz "landscape"
+bn_height:      .asciz "height"
 bn_rigid:       .asciz "rigid"
 bn_joint:       .asciz "joint"
 bn_colls:       .asciz "collisions"
@@ -4957,6 +4963,59 @@ b_bonepos:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# landscape(name, k) -> a landscape's 0 samples a side, 1 size, 2 layers,
+#   3 lowest, 4 highest, 5 display samples a side, 6 the last evaluation
+#   (ms), 7 paint layers, 8 version; nil: not a landscape
+b_landscape:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si esi, xmm0
+    mov     rdi, r12
+    call    la_info
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    test    eax, eax
+    jz      ret_nil
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# height(name, x, z) -> the landscape's height at world x, z; nil: not over it
+b_height:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     rbx, rdi
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp], xmm0
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvtsd2ss xmm1, xmm0
+    movss   xmm0, [rsp]
+    mov     rdi, r12
+    call    la_wheight
+    add     rsp, 24
+    pop     r12
+    pop     rbx
+    test    eax, eax
+    jz      ret_nil
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
 
 # rbinfo(k) -> the simulation: 0 bodies, 1 contact points, 2 awake, 3
 #   islands, 4 the last frame's time (ms), 5 manifolds, 6 steps, 7 parts

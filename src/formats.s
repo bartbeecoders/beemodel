@@ -80,6 +80,7 @@
 .equ TAG_WSPC,      0x43505357          # "WSPC"
 .equ TAG_LMAP,      0x50414D4C          # "LMAP"
 .equ TAG_CURV,      0x56525543          # "CURV"
+.equ TAG_LAND,      0x444E414C          # "LAND"
 .equ TAG_ANIM,      0x4D494E41          # "ANIM"
 .equ TAG_ARMT,      0x544D5241          # "ARMT"
 .equ TAG_MWGT,      0x5447574D          # "MWGT"
@@ -148,6 +149,7 @@ wspc_size:      .skip 4
 lmap_chunk:     .skip 8
 lmap_size:      .skip 4
 curv_chunk:     .skip 8
+land_chunk:     .skip 8
 anim_chunk:     .skip 8
 anim_size:      .skip 4
 armt_chunk:     .skip 8
@@ -162,6 +164,7 @@ simc_chunk:     .skip 8
 simc_size:      .skip 4
 oi_line:        .skip 4                 # OBJ import: an "l" line
 curv_size:      .skip 4
+land_size:      .skip 4
 mvcl_size:      .skip 4
 .align 8
 uids_size:      .skip 4
@@ -498,6 +501,10 @@ bee_save:
     call    chunk_begin
     call    curv_write
     call    chunk_end
+    mov     edi, TAG_LAND               # LAND (the landscapes meshes show)
+    call    chunk_begin
+    call    land_write
+    call    chunk_end
     mov     edi, TAG_ANIM               # ANIM (keyframes, the frame range)
     call    chunk_begin
     call    an_write
@@ -804,6 +811,71 @@ curv_write:
 8:  inc     ebx
     jmp     1b
 9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# land_write - per mesh (mesh_tab order) showing a landscape: index, bytes,
+#   the block (landscape.s: offsets inside, so it moves as it is)
+land_write:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+n_mesh_tab]
+    jae     9f
+    lea     rax, [rip+mesh_tab]
+    mov     rax, [rax+rbx*8]
+    mov     r12, [rax+ME_LAND]
+    test    r12, r12
+    jz      8f
+    mov     edi, ebx
+    call    wb_u32
+    mov     edi, [r12+24]               # (LB_BYTES)
+    call    wb_u32
+    mov     rsi, r12
+    mov     edx, [r12+24]
+    call    wb_bytes
+8:  inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# land_read(rdi=data, esi=bytes) - landscapes back on the loaded meshes
+land_read:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rdi
+    mov     r13d, esi
+1:  cmp     r13d, 8
+    jb      9f
+    mov     ebx, [r12+4]
+    mov     eax, r13d
+    sub     eax, 8
+    cmp     ebx, eax
+    ja      9f
+    mov     ecx, [r12]
+    cmp     ecx, [rip+n_mesh_tab]
+    jae     8f
+    lea     rdi, [r12+8]
+    mov     esi, ebx
+    call    la_load
+    test    rax, rax
+    jz      8f
+    mov     ecx, [r12]
+    lea     rdx, [rip+mesh_tab]
+    mov     rdx, [rdx+rcx*8]
+    mov     rdi, [rdx+ME_LAND]
+    mov     [rdx+ME_LAND], rax
+    call    la_unref
+8:  add     ebx, 8
+    add     r12, rbx
+    sub     r13d, ebx
+    jmp     1b
+9:  pop     r13
     pop     r12
     pop     rbx
     ret
@@ -1203,6 +1275,7 @@ bee_load:
     mov     qword ptr [rip+wspc_chunk], 0
     mov     qword ptr [rip+lmap_chunk], 0
     mov     qword ptr [rip+curv_chunk], 0
+    mov     qword ptr [rip+land_chunk], 0
     mov     qword ptr [rip+anim_chunk], 0
     mov     qword ptr [rip+armt_chunk], 0
     mov     qword ptr [rip+mwgt_chunk], 0
@@ -1333,10 +1406,16 @@ bee_load:
     mov     [rip+anim_size], ebp
     jmp     23f
 282:cmp     eax, TAG_CURV
-    jne     281f
+    jne     2829f
     lea     rax, [rbx+8]
     mov     [rip+curv_chunk], rax
     mov     [rip+curv_size], ebp
+    jmp     23f
+2829:cmp    eax, TAG_LAND
+    jne     281f
+    lea     rax, [rbx+8]
+    mov     [rip+land_chunk], rax
+    mov     [rip+land_size], ebp
     jmp     23f
 281:cmp     eax, TAG_NTRE
     jne     2811f
@@ -1521,7 +1600,12 @@ bee_load:
     jz      7741f
     mov     esi, [rip+curv_size]
     call    curv_read
-7741:mov     rdi, [rip+armt_chunk]       # armatures
+7741:mov     rdi, [rip+land_chunk]       # landscapes
+    test    rdi, rdi
+    jz      7742f
+    mov     esi, [rip+land_size]
+    call    land_read
+7742:mov     rdi, [rip+armt_chunk]       # armatures
     test    rdi, rdi
     jz      7743f
     mov     esi, [rip+armt_size]
