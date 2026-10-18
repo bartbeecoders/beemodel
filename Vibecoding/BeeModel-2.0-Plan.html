@@ -206,7 +206,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
 
 <section id="roadmap">
   <h2>Roadmap</h2>
-  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the ground and landscape (chosen 2026-10-18, released as v0.18.0), then the decisions (v1.0.0).</p>
+  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the ground and landscape (chosen 2026-10-18, released as v0.18.0), then shatter (released as v0.19.0), then the decisions (v1.0.0).</p>
   <div class="diagram">
   <svg viewBox="0 0 980 250" role="img" aria-label="Stage order: D to v1.0, then R; R leads to G, S and A; G and A lead to P; P leads to V; all lead to Z, v2.0">
     <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
@@ -225,7 +225,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
       <rect x="340" y="30" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--green)" stroke-width="2"/>
       <text x="404" y="55" text-anchor="middle" font-weight="700" fill="var(--ink)">G · ground</text><text x="404" y="75" text-anchor="middle" fill="var(--ink-3)">v0.18.0 · second</text>
       <rect x="340" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--accent)" stroke-width="2"/>
-      <text x="404" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">S · shatter</text><text x="404" y="140" text-anchor="middle" fill="var(--ink-3)">v1.2.0</text>
+      <text x="404" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">S · shatter</text><text x="404" y="140" text-anchor="middle" fill="var(--ink-3)">v0.19.0 · third</text>
       <rect x="340" y="160" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--violet)" stroke-width="2"/>
       <text x="404" y="185" text-anchor="middle" font-weight="700" fill="var(--ink)">A · attractors</text><text x="404" y="205" text-anchor="middle" fill="var(--ink-3)">v1.3.0</text>
       <rect x="510" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>
@@ -242,7 +242,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <tr><td>R · the solver</td><td class="num">R1–R7</td><td class="num">v0.17.0</td><td>10 000 bodies; stacks that stand; bodies landing on any mesh; breakable joints.</td></tr>
     <tr><td>D · decisions</td><td class="num">D1–D7</td><td class="num">v1.0.0</td><td>Rely on the file format and the APIs; the license is clear.</td></tr>
     <tr><td>G · ground &amp; landscape</td><td class="num">G1–G6</td><td class="num">v0.18.0</td><td>Add a ground or a landscape, shape it, and drop things on it.</td></tr>
-    <tr><td>S · shatter</td><td class="num">S1–S6</td><td class="num">v1.2.0</td><td>Break objects into bricks, balls or shards, glued or loose.</td></tr>
+    <tr><td>S · shatter</td><td class="num">S1–S6</td><td class="num">v0.19.0</td><td>Break objects into bricks, balls or shards, glued or loose.</td></tr>
     <tr><td>A · attractors &amp; fields</td><td class="num">A1–A5</td><td class="num">v1.3.0</td><td>Attractors, orbits, gravity zones, wind, vortex; walk around a planet.</td></tr>
     <tr><td>P · particles &amp; liquid</td><td class="num">P1–P6</td><td class="num">v1.4.0</td><td>Rain, snow, sparks, fountains; water that splashes and gets meshed.</td></tr>
     <tr><td>V · smoke, fire, volumes</td><td class="num">V1–V5</td><td class="num">v1.5.0</td><td>Smoke plumes and campfires, rendered as volumes.</td></tr>
@@ -307,22 +307,22 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <div class="card blue"><h4>Balls</h4>The volume is packed with spheres: the given number of them, all one radius or a spread of radii. A dense packing is used, relaxed so balls don't overlap. The original is hidden, and each ball takes the colour of the surface nearest it. Thousands of balls share one sphere mesh (instancing).</div>
     <div class="card violet"><h4>Shards</h4>Voronoi cells from N seed points: uniform, clustered around an <b>impact point</b> (the 3D cursor or a hit), or along the surface. Cells are clipped to the mesh, so concave objects work. An inner material for the new faces.</div>
   </div>
-  <div class="phase"><div class="pn"><b>S1</b>cut</div><div class="card"><h3>Cutting a closed mesh into cells <span class="tag b">core</span></h3>
+  <div class="phase"><div class="pn"><b>S1</b>cut</div><div class="card"><h3>Cutting a closed mesh into cells <span class="tag b">core</span> <span class="tag g">done</span></h3>
     <p>The geometry core: clip a closed mesh by a convex cell (a set of planes) and close the cut with new faces, robust to coplanar and degenerate cases. Uses the exact predicates the boolean code already has. Cells are cut in parallel. A non-manifold input is repaired first (<code>repair.s</code>), or refused with a reason. <b>Mesh › Separate › By Loose Parts</b> comes with it.</p>
     <div class="exit"><b>Exit:</b> a cube, a torus and Suzanne cut into 100 cells each: every piece is closed, the volumes add up to the original's within 1e-6, and there are no slivers under 1e-5.</div></div></div>
-  <div class="phase"><div class="pn"><b>S2</b>patterns</div><div class="card"><h3>The three patterns <span class="tag a">feature</span></h3>
+  <div class="phase"><div class="pn"><b>S2</b>patterns</div><div class="card"><h3>The three patterns <span class="tag a">feature</span> <span class="tag g">done</span></h3>
     <p>Bricks, balls and shards as above. Count, seed, size controls, gap, inner material. For balls, the packing works in the object's volume through its signed distance (the SDF tools), and a ball outside the surface is dropped.</p>
     <div class="exit"><b>Exit:</b> a 2 × 1 × 0.2 m wall into 10 × 5 bricks; a sphere into 500 balls; a vase into 50 shards around a point: counts, volumes and materials as asked.</div></div></div>
-  <div class="phase"><div class="pn"><b>S3</b>bodies</div><div class="card"><h3>Every piece is a rigid body <span class="tag b">physics</span></h3>
+  <div class="phase"><div class="pn"><b>S3</b>bodies</div><div class="card"><h3>Every piece is a rigid body <span class="tag b">physics</span> <span class="tag g">done</span></h3>
     <p>Each piece becomes an active rigid body: its shape is a hull (shards and bricks are convex, so the hull is exact) or a sphere; its mass is its volume times the material's density; it starts with the object's velocity. The pieces are parented to an empty named after the original, so the outliner folds them. The original is hidden, not deleted. One undo step. <code>object.shatter</code> with all the options; Object › Physics › Shatter… is its form.</p>
     <div class="exit"><b>Exit:</b> shatter a cube into 200 shards, press play: they fall and settle on the ground; Ctrl+Z gives the cube back.</div></div></div>
-  <div class="phase"><div class="pn"><b>S4</b>glue</div><div class="card"><h3>Glue: break on impact <span class="tag b">physics</span></h3>
+  <div class="phase"><div class="pn"><b>S4</b>glue</div><div class="card"><h3>Glue: break on impact <span class="tag b">physics</span> <span class="tag g">done</span></h3>
     <p>Neighbouring pieces (those that share a face) get a glue joint (R5) with a strength. A glued object behaves as one body until a contact impulse breaks the joints near it; the pieces that come loose start moving. Strength can vary: weaker towards the impact point, or painted with weight paint.</p>
     <div class="exit"><b>Exit:</b> a ball thrown at a glued brick wall knocks out a hole the size of the ball and the rest stands; a weaker throw leaves it standing.</div></div></div>
-  <div class="phase"><div class="pn"><b>S5</b>live</div><div class="card"><h3>Shatter while it runs <span class="tag v">play</span></h3>
+  <div class="phase"><div class="pn"><b>S5</b>live</div><div class="card"><h3>Shatter while it runs <span class="tag v">play</span> <span class="tag g">done</span></h3>
     <p>An object can be marked <b>Shatter on impact</b>: it stays whole and is cut only when hit above a threshold, around the point of the hit, during the simulation and in play mode. The cutting is precomputed when the run starts, so it costs no frame time. Logic node <code>shatter</code>.</p>
     <div class="exit"><b>Exit:</b> in play mode, a ball shot at a vase breaks it where it hits, with no frame over 16 ms.</div></div></div>
-  <div class="phase"><div class="pn"><b>S6</b>ui</div><div class="card"><h3>The Shatter form and panel <span class="tag v">ui</span></h3>
+  <div class="phase"><div class="pn"><b>S6</b>ui</div><div class="card"><h3>The Shatter form and panel <span class="tag v">ui</span> <span class="tag g">done</span></h3>
     <p>A form with a live preview of the cells (drawn as outlines before anything is cut), presets (Brick wall, Glass, Stone, Gravel balls), and a Shatter section in Properties › Physics for re-cutting with other settings. BeeScript <code>shatter(name, pattern, count [, options])</code>.</p>
     <div class="exit"><b>Exit:</b> a fakewl test shatters a wall from the menu, changes the count in the panel and runs it, with clicks only.</div></div></div>
 </section>

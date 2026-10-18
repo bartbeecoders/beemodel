@@ -25,6 +25,9 @@
 #  nodes are cut in parallel, each in its thread's arena; the pieces (float
 #  vertices from the piece's centre, polygons with the plane that made
 #  them) go to the main thread, which makes the meshes (shatterop.s).
+#  Whether a point is inside: a skewed ray's crossings, odd; on a mesh of
+#  256 triangles or more only those in the point's square of a grid of the
+#  triangles seen along the ray (sh_inside_prep).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -36,6 +39,7 @@
 .globl sh_nres
 .globl sh_res_free
 .globl sh_inside
+.globl sh_inside_prep
 .globl sh_dist2
 .globl sh_ncap
 .globl sh_src_p
@@ -194,6 +198,10 @@ sd_big:         .double 1.0e300
 sd_tolr:        .double 1.0e-9              # the tolerance: this of the size
 sd_pad:         .double 0.01                # the cell box: 1% beyond the mesh
 sd_ray:         .double 0.5773502691896258, 0.5773674398219341, 0.5773330981405107
+sd_rayu:        .double 0.7071172957739438, -0.7070962664427984, 0.0    # (across it)
+sd_rayv:        .double 0.40823007816688506, 0.40824221909578634, -0.8165087224442901
+sd_sg_k:        .double 0.7                 # cells a side: 0.7 sqrt(triangles)
+sd_sg_eps:      .double 1.0e-7              # (bounds widened by this of the size)
 sd_tiny:        .double 1.0e-300
 sd_volr:        .double 1.0e-12             # pieces under this of the volume go
 sd_under:       .double 0.999999
@@ -219,6 +227,18 @@ sh_src_pb:      .skip 8                 #  (their mappings' sizes)
 sh_src_tb:      .skip 8
 sh_src_nv:      .skip 4
 sh_src_nt:      .skip 4
+sg_uv:          .skip 8                 # the inside test's grid: each vertex
+sg_uvb:         .skip 8                 #  seen along the ray (u v, doubles),
+sg_start:       .skip 8                 #  each cell's first entry (+1, from
+sg_startb:      .skip 8                 #  the end: see sh_inside_prep), the
+sg_idx:         .skip 8                 #  entries (triangles)
+sg_idxb:        .skip 8
+sg_g:           .skip 4                 # cells a side
+.align 8
+sg_u0:          .skip 8                 # where it begins, cells a unit
+sg_v0:          .skip 8
+sg_iu:          .skip 8
+sg_iv:          .skip 8
 sh_src_min:     .skip 24                # its bounds (doubles)
 sh_src_max:     .skip 24
 sh_src_vol:     .skip 8
@@ -479,6 +499,19 @@ sh_src_set:
     ret
 
 sh_src_free:
+    mov     rdi, [rip+sg_uv]            # (the grid)
+    mov     rsi, [rip+sg_uvb]
+    call    sh_unmap
+    mov     rdi, [rip+sg_start]
+    mov     rsi, [rip+sg_startb]
+    call    sh_unmap
+    mov     rdi, [rip+sg_idx]
+    mov     rsi, [rip+sg_idxb]
+    call    sh_unmap
+    xor     eax, eax
+    mov     [rip+sg_uv], rax
+    mov     [rip+sg_start], rax
+    mov     [rip+sg_idx], rax
     mov     rdi, [rip+sh_src_p]
     mov     rsi, [rip+sh_src_pb]
     call    sh_unmap
@@ -982,10 +1015,20 @@ sh_inside:
     movsd   [rsp+8], xmm1
     movsd   [rsp+16], xmm2
     xor     ebx, ebx
-    mov     rsi, [rip+sh_src_t]
+    xor     r11d, r11d                  # r11: the grid cell's entries (0:
+    mov     rsi, [rip+sh_src_t]         #  every triangle in turn)
     mov     rdi, [rip+sh_src_p]
     mov     ecx, [rip+sh_src_nt]
+    cmp     qword ptr [rip+sg_start], 0
+    je      0f
+    call    sg_cell                     # only those its cell's square meets
     test    ecx, ecx
+    jz      9f
+    mov     eax, [r11]
+    shl     rax, 4
+    mov     rsi, [rip+sh_src_t]
+    add     rsi, rax
+0:  test    ecx, ecx
     jz      9f
 1:  mov     eax, [rsi]                  # Moller-Trumbore: e1 = b - a,
     imul    rax, rax, VX_SZ             #  e2 = c - a
@@ -1101,12 +1144,301 @@ sh_inside:
     comisd  xmm0, xmm1
     jbe     7f
     inc     ebx
-7:  add     rsi, TR_SZ
-    dec     ecx
-    jnz     1b
+7:  dec     ecx
+    jz      9f
+    test    r11, r11
+    jnz     71f
+    add     rsi, TR_SZ
+    jmp     1b
+71: add     r11, 4
+    mov     eax, [r11]
+    shl     rax, 4
+    mov     rsi, [rip+sh_src_t]
+    add     rsi, rax
+    jmp     1b
 9:  mov     eax, ebx
     and     eax, 1
     add     rsp, 32
+    pop     rbx
+    ret
+
+# sg_cell([rsp+8..] the point, sh_inside's) -> r11 = its cell's entries,
+#   ecx = how many (0: outside the grid - no triangle in the way)
+sg_cell:
+    movsd   xmm0, [rsp+8]               # u = p . across, v = p . up
+    mulsd   xmm0, [rip+sd_rayu]
+    movsd   xmm1, [rsp+16]
+    mulsd   xmm1, [rip+sd_rayu+8]
+    addsd   xmm0, xmm1
+    movsd   xmm1, [rsp+8]
+    mulsd   xmm1, [rip+sd_rayv]
+    movsd   xmm2, [rsp+16]
+    mulsd   xmm2, [rip+sd_rayv+8]
+    addsd   xmm1, xmm2
+    movsd   xmm2, [rsp+24]
+    mulsd   xmm2, [rip+sd_rayv+16]
+    addsd   xmm1, xmm2
+    xor     ecx, ecx
+    subsd   xmm0, [rip+sg_u0]
+    mulsd   xmm0, [rip+sg_iu]
+    subsd   xmm1, [rip+sg_v0]
+    mulsd   xmm1, [rip+sg_iv]
+    xorpd   xmm2, xmm2
+    comisd  xmm0, xmm2
+    jb      9f
+    comisd  xmm1, xmm2
+    jb      9f
+    cvttsd2si eax, xmm0
+    cvttsd2si edx, xmm1
+    cmp     eax, [rip+sg_g]
+    jae     9f
+    cmp     edx, [rip+sg_g]
+    jae     9f
+    imul    edx, [rip+sg_g]
+    add     eax, edx
+    mov     rdx, [rip+sg_start]
+    mov     ecx, [rdx+rax*4+8]
+    mov     eax, [rdx+rax*4+4]
+    sub     ecx, eax
+    mov     r11, [rip+sg_idx]
+    lea     r11, [r11+rax*4]
+9:  ret
+
+# sh_inside_prep - the grid sh_inside looks through (once a source; before
+#   the threads use it): the triangles seen along the ray, binned into
+#   squares by their bounds. Small meshes: none (every triangle tested)
+sh_inside_prep:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    cmp     qword ptr [rip+sg_start], 0
+    jne     9f
+    mov     eax, [rip+sh_src_nt]
+    cmp     eax, 256
+    jb      9f
+    mov     eax, [rip+sh_src_nv]        # u v of each vertex, their bounds
+    shl     rax, 4
+    mov     rsi, rax
+    mov     [rip+sg_uvb], rsi
+    call    sh_map
+    test    rax, rax
+    jz      9f
+    mov     [rip+sg_uv], rax
+    movsd   xmm6, [rip+sd_big]
+    movsd   xmm7, xmm6
+    xorpd   xmm8, xmm8
+    subsd   xmm8, xmm6
+    movsd   xmm9, xmm8
+    mov     rsi, [rip+sh_src_p]
+    mov     rdi, rax
+    xor     ecx, ecx
+1:  cmp     ecx, [rip+sh_src_nv]
+    jae     2f
+    movsd   xmm0, [rsi]
+    mulsd   xmm0, [rip+sd_rayu]
+    movsd   xmm1, [rsi+8]
+    mulsd   xmm1, [rip+sd_rayu+8]
+    addsd   xmm0, xmm1
+    movsd   xmm1, [rsi]
+    mulsd   xmm1, [rip+sd_rayv]
+    movsd   xmm2, [rsi+8]
+    mulsd   xmm2, [rip+sd_rayv+8]
+    addsd   xmm1, xmm2
+    movsd   xmm2, [rsi+16]
+    mulsd   xmm2, [rip+sd_rayv+16]
+    addsd   xmm1, xmm2
+    movsd   [rdi], xmm0
+    movsd   [rdi+8], xmm1
+    minsd   xmm6, xmm0
+    maxsd   xmm8, xmm0
+    minsd   xmm7, xmm1
+    maxsd   xmm9, xmm1
+    add     rsi, VX_SZ
+    add     rdi, 16
+    inc     ecx
+    jmp     1b
+2:  movsd   xmm0, xmm8                  # widened a little: the eps
+    subsd   xmm0, xmm6
+    movsd   xmm1, xmm9
+    subsd   xmm1, xmm7
+    maxsd   xmm0, xmm1
+    mulsd   xmm0, [rip+sd_sg_eps]
+    maxsd   xmm0, [rip+sd_tiny]
+    movsd   xmm15, xmm0                 # (xmm15: eps)
+    subsd   xmm6, xmm0
+    subsd   xmm7, xmm0
+    addsd   xmm8, xmm0
+    addsd   xmm9, xmm0
+    movsd   [rip+sg_u0], xmm6
+    movsd   [rip+sg_v0], xmm7
+    cvtsi2sd xmm0, dword ptr [rip+sh_src_nt]
+    sqrtsd  xmm0, xmm0
+    mulsd   xmm0, [rip+sd_sg_k]
+    cvttsd2si eax, xmm0
+    cmp     eax, 1024
+    jbe     21f
+    mov     eax, 1024
+21: cmp     eax, 4
+    jae     22f
+    mov     eax, 4
+22: mov     [rip+sg_g], eax
+    cvtsi2sd xmm0, eax
+    subsd   xmm8, xmm6
+    subsd   xmm9, xmm7
+    movsd   xmm1, xmm0
+    divsd   xmm1, xmm8
+    movsd   [rip+sg_iu], xmm1
+    divsd   xmm0, xmm9
+    movsd   [rip+sg_iv], xmm0
+    imul    eax, eax                    # the starts: cells + 2
+    lea     rsi, [rax*4+8]
+    mov     [rip+sg_startb], rsi
+    call    sh_map
+    test    rax, rax
+    jz      8f
+    mov     [rip+sg_start], rax
+    xor     r15d, r15d                  # count: into start[cell + 1]
+    call    sg_pass
+    mov     rdx, [rip+sg_start]         # running sums: start[c + 1] = the
+    mov     ecx, [rip+sg_g]             #  end of cell c
+    imul    ecx, ecx
+    xor     eax, eax
+3:  cmp     eax, ecx
+    jae     31f
+    mov     r8d, [rdx+rax*4]
+    add     [rdx+rax*4+4], r8d
+    inc     eax
+    jmp     3b
+31: mov     r8d, [rdx+rcx*4]            # (the total, past the last)
+    mov     [rdx+rcx*4+4], r8d
+    lea     rsi, [r8*4+4]
+    mov     [rip+sg_idxb], rsi
+    call    sh_map
+    test    rax, rax
+    jz      8f
+    mov     [rip+sg_idx], rax
+    mov     r15d, 1                     # fill, from the ends down: start[c
+    call    sg_pass                     #  + 1] = its first
+    jmp     9f
+8:  mov     rdi, [rip+sg_start]         # (no room: none, every triangle
+    mov     rsi, [rip+sg_startb]        #  tested)
+    call    sh_unmap
+    mov     qword ptr [rip+sg_start], 0
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# sg_pass(r15d = 0 count, 1 fill; xmm15 = eps) - each triangle into the
+#   squares its bounds (seen along the ray) cover
+sg_pass:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+sh_src_nt]
+    jae     9f
+    mov     rsi, [rip+sh_src_t]
+    mov     eax, ebx
+    shl     rax, 4
+    add     rsi, rax
+    mov     rdi, [rip+sg_uv]
+    mov     eax, [rsi]
+    shl     rax, 4
+    movsd   xmm0, [rdi+rax]             # bounds: u xmm0-1, v xmm2-3
+    movsd   xmm2, [rdi+rax+8]
+    movsd   xmm1, xmm0
+    movsd   xmm3, xmm2
+    mov     eax, [rsi+4]
+    shl     rax, 4
+    minsd   xmm0, [rdi+rax]
+    maxsd   xmm1, [rdi+rax]
+    minsd   xmm2, [rdi+rax+8]
+    maxsd   xmm3, [rdi+rax+8]
+    mov     eax, [rsi+8]
+    shl     rax, 4
+    minsd   xmm0, [rdi+rax]
+    maxsd   xmm1, [rdi+rax]
+    minsd   xmm2, [rdi+rax+8]
+    maxsd   xmm3, [rdi+rax+8]
+    subsd   xmm0, xmm15
+    addsd   xmm1, xmm15
+    subsd   xmm2, xmm15
+    addsd   xmm3, xmm15
+    movsd   xmm4, [rip+sg_u0]           # -> cells i0..i1 (r12d r13d),
+    movsd   xmm5, [rip+sg_iu]           #  j0..j1 (r14d [rsp])
+    subsd   xmm0, xmm4
+    mulsd   xmm0, xmm5
+    subsd   xmm1, xmm4
+    mulsd   xmm1, xmm5
+    movsd   xmm4, [rip+sg_v0]
+    movsd   xmm5, [rip+sg_iv]
+    subsd   xmm2, xmm4
+    mulsd   xmm2, xmm5
+    subsd   xmm3, xmm4
+    mulsd   xmm3, xmm5
+    mov     r8d, [rip+sg_g]
+    dec     r8d
+    xorpd   xmm4, xmm4
+    maxsd   xmm0, xmm4
+    maxsd   xmm2, xmm4
+    cvttsd2si r12d, xmm0
+    cvttsd2si r13d, xmm1
+    cvttsd2si r14d, xmm2
+    cvttsd2si eax, xmm3
+    cmp     r12d, r8d
+    jle     11f
+    mov     r12d, r8d
+11: cmp     r13d, r8d
+    jle     12f
+    mov     r13d, r8d
+12: cmp     r14d, r8d
+    jle     13f
+    mov     r14d, r8d
+13: cmp     eax, r8d
+    jle     14f
+    mov     eax, r8d
+14: test    r13d, r13d
+    jns     15f
+    xor     r13d, r13d
+15: test    eax, eax
+    jns     16f
+    xor     eax, eax
+16: mov     [rsp], eax
+    mov     rdx, [rip+sg_start]
+2:  cmp     r14d, [rsp]                 # each square
+    jg      8f
+    mov     ecx, r12d
+3:  cmp     ecx, r13d
+    jg      4f
+    mov     eax, r14d
+    imul    eax, [rip+sg_g]
+    add     eax, ecx
+    test    r15d, r15d
+    jnz     31f
+    inc     dword ptr [rdx+rax*4+4]
+    jmp     32f
+31: mov     r9d, [rdx+rax*4+4]          # fill: start[c + 1] down by one
+    dec     r9d
+    mov     [rdx+rax*4+4], r9d
+    mov     r10, [rip+sg_idx]
+    mov     [r10+r9*4], ebx
+32: inc     ecx
+    jmp     3b
+4:  inc     r14d
+    jmp     2b
+8:  inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 

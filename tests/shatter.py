@@ -77,12 +77,14 @@ def vals(out, tag):
     return None
 
 
-def vase_obj(path, n=48):
+def vase_obj(path, n=48, split=1):
     """A closed vase: an outer wall up to a rim, an inner wall down to a
     thick bottom, revolved about Y (counter-clockwise faces seen from
-    outside)."""
+    outside); n segments around, each profile edge split in that many."""
     prof = [(0, 0), (0.5, 0), (0.7, 0.3), (0.8, 0.8), (0.5, 1.4), (0.35, 1.7), (0.45, 2.0),
             (0.4, 2.0), (0.3, 1.7), (0.45, 1.4), (0.72, 0.8), (0.62, 0.3), (0.42, 0.1), (0, 0.1)]
+    prof = [(p[0] + (q[0] - p[0]) * j / split, p[1] + (q[1] - p[1]) * j / split)
+            for p, q in zip(prof, prof[1:]) for j in range(split)] + prof[-1:]
     vs, fs = [], []
     idx = {}
     for i, (r, y) in enumerate(prof):

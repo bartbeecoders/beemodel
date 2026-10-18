@@ -6,6 +6,78 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-18
+
+"Shatter": stage S of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`,
+planned as v1.2.0; released before stage D's v1.0.0), issues S1-S7
+(#309-#315). How it works: `docs/SHATTER.md`, `docs/PHYSICS.md`; the
+benchmark: `tools/physbench.py` (shatter).
+
+### Added
+- **Cutting a closed mesh into cells** (#309): `object.shatter`. Each cell
+  (a set of planes) is clipped from the mesh in doubles, and each plane's
+  hole is filled at once, so every piece is closed. The holes are filled
+  by bridging, ear clipping and merging back into convex polygons. A tree
+  of cells cuts big meshes once near each cell, in parallel. Results:
+  - the pieces' volumes add up to the original's within 1e-6, with no
+    slivers;
+  - 500 cells of a 49 000-triangle vase take about 54 ms;
+  - an open mesh is repaired first.
+
+  `mesh.separate_loose` (Mesh › Separate) splits a mesh into its loose
+  parts.
+- **The three patterns** (#310):
+  - **shards**: Voronoi cells from seeds inside the mesh, spread evenly,
+    gathered around a point (`at`, `cursor`) or near the `surface`;
+  - **bricks**: a running bond in the object's axes, set by `size` or
+    `counts`, with `offset`, a mortar `gap` and `jitter`;
+  - **balls**: packed on a face-centred cubic lattice inside the mesh, none
+    overlapping.
+
+  `inner r g b` colours the cut faces. Each piece keeps the original's
+  material.
+- **Every piece a rigid body** (#311). Each piece is an active convex-hull
+  body whose mass is its volume × the density (from `density`, else the
+  material). Its centre of mass and inertia come from the hull itself. The
+  pieces are children of the hidden original, and one undo step brings the
+  original back. Piles of shards settle and sleep.
+- **Glue** (#312): `glue N/m2 [paint]`. A fixed joint ties every two pieces
+  whose cut faces meet and breaks at the strength × the shared area. Joints
+  now break inside the solve, so a 30 kg ball at 20 m/s knocks a hole the
+  size of the ball in a glued brick wall and the rest stands. Up to 16 384
+  joints are allowed (ANIM v3 saves only those in use).
+- **Shatter while it runs** (#313): `impact N s`. The object stays whole
+  until a blow that hard, then breaks in the same step, where it was hit.
+  Its pieces are made and glued beforehand, so no frame takes over 16 ms.
+  A logic graph's **Shatter** node breaks it on demand. The cache keeps
+  which objects are broken. New `rbinfo` keys 17-21 report the fastest
+  body, joint rows and impact groups.
+- **The Shatter form and panel** (#314):
+  - Object › Physics › **Shatter...** opens a form that draws the cells as
+    outlines on the object while it is open;
+  - presets: Brick wall, Glass, Stone, Gravel balls (`preset`);
+  - a **Shatter** section in Properties › Physics to re-cut with other
+    settings (`again`);
+  - BeeScript `shatter(name, pattern, count [, options])`, `shinfo(k)`,
+    `get(name, "hidden")`, and `rigid(name, "x0")` / `"y0"` / `"z0"`.
+- `tests/shatter.py` checks all of it, the form and the panel with clicks
+  in the fake compositor. `tools/physbench.py` times a 99 072-triangle vase
+  cut into 500 shards: 455 / 163 / 121 / 105 ms on 1 / 4 / 8 / 32 threads.
+
+### Changed
+- Seeds and balls are tested inside the mesh through a grid of its
+  triangles, as seen along the test ray: 250 ms became 12 ms on the
+  100 000-triangle vase.
+- Hidden objects are not rigid bodies, except originals that wait to
+  shatter.
+- The joint list in Properties › Physics shows its first 6 joints.
+
+### Notes
+- Balls are not cut: they are spheres that fit inside the mesh, and the
+  preview draws nothing for them.
+- A lone thin wedge-shaped shard can rock on the ground for a long time
+  before it sleeps.
+
 ## [0.18.0] - 2026-10-18
 
 "Ground and landscape": stage G of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`,
@@ -1874,7 +1946,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/bartbeecoders/beemodel/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/bartbeecoders/beemodel/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/bartbeecoders/beemodel/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/bartbeecoders/beemodel/compare/v0.15.0...v0.16.0
