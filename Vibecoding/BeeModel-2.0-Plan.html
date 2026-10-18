@@ -206,7 +206,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
 
 <section id="roadmap">
   <h2>Roadmap</h2>
-  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the decisions (v1.0.0).</p>
+  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the ground and landscape (chosen 2026-10-18, released as v0.18.0), then the decisions (v1.0.0).</p>
   <div class="diagram">
   <svg viewBox="0 0 980 250" role="img" aria-label="Stage order: D to v1.0, then R; R leads to G, S and A; G and A lead to P; P leads to V; all lead to Z, v2.0">
     <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
@@ -223,7 +223,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
       <rect x="170" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>
       <text x="234" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">R · solver</text><text x="234" y="140" text-anchor="middle" fill="var(--ink-3)">v0.17.0 · first</text>
       <rect x="340" y="30" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--green)" stroke-width="2"/>
-      <text x="404" y="55" text-anchor="middle" font-weight="700" fill="var(--ink)">G · ground</text><text x="404" y="75" text-anchor="middle" fill="var(--ink-3)">v1.1.0</text>
+      <text x="404" y="55" text-anchor="middle" font-weight="700" fill="var(--ink)">G · ground</text><text x="404" y="75" text-anchor="middle" fill="var(--ink-3)">v0.18.0 · second</text>
       <rect x="340" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--accent)" stroke-width="2"/>
       <text x="404" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">S · shatter</text><text x="404" y="140" text-anchor="middle" fill="var(--ink-3)">v1.2.0</text>
       <rect x="340" y="160" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--violet)" stroke-width="2"/>
@@ -241,7 +241,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <tr><th>Stage</th><th>Issues</th><th>Release</th><th>What you can do afterwards</th></tr>
     <tr><td>R · the solver</td><td class="num">R1–R7</td><td class="num">v0.17.0</td><td>10 000 bodies; stacks that stand; bodies landing on any mesh; breakable joints.</td></tr>
     <tr><td>D · decisions</td><td class="num">D1–D7</td><td class="num">v1.0.0</td><td>Rely on the file format and the APIs; the license is clear.</td></tr>
-    <tr><td>G · ground &amp; landscape</td><td class="num">G1–G6</td><td class="num">v1.1.0</td><td>Add a ground or a landscape, shape it, and drop things on it.</td></tr>
+    <tr><td>G · ground &amp; landscape</td><td class="num">G1–G6</td><td class="num">v0.18.0</td><td>Add a ground or a landscape, shape it, and drop things on it.</td></tr>
     <tr><td>S · shatter</td><td class="num">S1–S6</td><td class="num">v1.2.0</td><td>Break objects into bricks, balls or shards, glued or loose.</td></tr>
     <tr><td>A · attractors &amp; fields</td><td class="num">A1–A5</td><td class="num">v1.3.0</td><td>Attractors, orbits, gravity zones, wind, vortex; walk around a planet.</td></tr>
     <tr><td>P · particles &amp; liquid</td><td class="num">P1–P6</td><td class="num">v1.4.0</td><td>Rain, snow, sparks, fountains; water that splashes and gets meshed.</td></tr>
@@ -279,22 +279,22 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
 <section id="ground">
   <h2>Stage G · Ground &amp; landscape</h2>
   <p class="sub">Something solid to land on: a simple floor, or terrain shaped like the real thing.</p>
-  <div class="phase"><div class="pn"><b>G1</b>ground</div><div class="card"><h3>The Ground object <span class="tag g">object</span></h3>
+  <div class="phase"><div class="pn"><b>G1</b>ground</div><div class="card"><h3>The Ground object <span class="tag g">object</span> <span class="tag g">done</span></h3>
     <p><b>Add › Ground</b>: an endless floor at a height, drawn with a fading grid. It catches shadows in renders (shadow-catcher mode, alpha elsewhere) and is a plane collider (R3) for rigid bodies, cloth, particles and the player. It has a physics material (friction, bounce). One per scene by default; <b>Add › Ground</b> on a scene that has one selects it.</p>
     <div class="exit"><b>Exit:</b> a new scene, Add › Ground, a cube made a rigid body falls and rests on it; F12 shows the shadow over a transparent background.</div></div></div>
-  <div class="phase"><div class="pn"><b>G2</b>terrain</div><div class="card"><h3>The Landscape object <span class="tag g">object</span></h3>
+  <div class="phase"><div class="pn"><b>G2</b>terrain</div><div class="card"><h3>The Landscape object <span class="tag g">object</span> <span class="tag g">done</span></h3>
     <p>A new object type: a heightfield of N × N samples (65² to 4097²) over a chosen size, stored in tiles of 64², drawn with tile LOD (far tiles coarser, seams stitched). A non-destructive stack of layers: <b>Generate</b> (fBm, ridged, billow, Voronoi cells, with seed and scale), <b>Erode</b> (the droplet erosion from <code>procgen.s</code>, plus thermal erosion), <b>Terrace</b>, <b>Sculpted</b> (the strokes) and <b>Flatten area</b> (a mask). Each layer has a strength and can be hidden.</p>
     <div class="exit"><b>Exit:</b> a 1025² landscape is generated and eroded in under 1 s, edited at interactive frame rates, saved and reopened the same.</div></div></div>
-  <div class="phase"><div class="pn"><b>G3</b>shape</div><div class="card"><h3>Sculpt and paint the landscape <span class="tag g">tools</span></h3>
+  <div class="phase"><div class="pn"><b>G3</b>shape</div><div class="card"><h3>Sculpt and paint the landscape <span class="tag g">tools</span> <span class="tag g">done</span></h3>
     <p>Landscape brushes in Sculpt mode: raise, lower, smooth, flatten, ramp (between two points), noise, erode (local). Paint mode paints up to 8 material layers (rock, grass, sand, snow…) into a splat map, and an <b>auto layer</b> rule picks them by height and slope. The splat drives the material in the viewport and in both path tracers.</p>
     <div class="exit"><b>Exit:</b> fakewl paints a ramp and a grass layer with clicks; the render shows grass on the flat and rock on the slope.</div></div></div>
-  <div class="phase"><div class="pn"><b>G4</b>collide</div><div class="card"><h3>The heightfield collider <span class="tag b">collide</span></h3>
+  <div class="phase"><div class="pn"><b>G4</b>collide</div><div class="card"><h3>The heightfield collider <span class="tag b">collide</span> <span class="tag g">done</span></h3>
     <p>An exact collider that reads the heightfield directly: the cells under a shape's bounding box become triangle pairs on the fly, with nothing stored. It is used by rigid bodies, cloth, particles (P3) and the play-mode player. A physics material per paint layer, so a ball rolls further on rock than on grass.</p>
     <div class="exit"><b>Exit:</b> 1000 balls rolled down a 4097² mountain stay on its surface; the player walks over it with steps no taller than the step height.</div></div></div>
-  <div class="phase"><div class="pn"><b>G5</b>presets</div><div class="card"><h3>Presets and water <span class="tag g">ui</span></h3>
+  <div class="phase"><div class="pn"><b>G5</b>presets</div><div class="card"><h3>Presets and water <span class="tag g">ui</span> <span class="tag g">done</span></h3>
     <p><b>Add › Landscape ›</b> Flat, Hills, Mountains, Canyon, Dunes, Island. Island adds a <b>Water plane</b> object: a flat level with a water material (transmission, IOR 1.33, ripple normals). The water plane is also a simple buoyancy zone (bodies below it float, by their submerged volume). The welcome screen's Terrain template uses Hills.</p>
     <div class="exit"><b>Exit:</b> each preset is added from the menu; a wooden box dropped in the island's water floats.</div></div></div>
-  <div class="phase"><div class="pn"><b>G6</b>io</div><div class="card"><h3>Heightmaps in and out <span class="tag a">files</span></h3>
+  <div class="phase"><div class="pn"><b>G6</b>io</div><div class="card"><h3>Heightmaps in and out <span class="tag a">files</span> <span class="tag g">done</span></h3>
     <p>Import a 16-bit PNG or EXR heightmap as a landscape; export the heights and the splat map; convert a landscape to a mesh (with the current LOD, or full). World partition streams landscape tiles like its other cells.</p>
     <div class="exit"><b>Exit:</b> a heightmap round-trips exactly; converting to a mesh gives the same surface within 1e-5.</div></div></div>
 </section>

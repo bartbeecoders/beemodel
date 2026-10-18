@@ -6,6 +6,68 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-18
+
+"Ground and landscape": stage G of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`,
+planned as v1.1.0; released before stage D's v1.0.0), issues G1-G7
+(#301-#307). How it works: `docs/LANDSCAPE.md`, `docs/PHYSICS.md`; the
+benchmark: `tools/physbench.py` (mountain).
+
+### Added
+- **The Ground** (#301): Add › Ground (`create.ground [height h]`), an
+  endless floor, one a scene. The viewport draws it as a grid that fades
+  with the distance from the view's centre. Renders make it a **shadow
+  catcher**: the film has alpha (no sky behind objects, the shadows caught
+  on the ground); the render window shows it over checks, and `render.save`
+  and `render()` write RGBA PNGs. It is a passive plane rigid body (friction
+  0.5), a cloth collider, and the player walks on it.
+- **Landscapes** (#302): Add › Landscape, `landscape.add`. A heightfield of
+  65 to 4097 samples a side over a chosen size, kept with its mesh (undo,
+  copies, saving) and built from a stack of layers that stays editable:
+  generate (fBm, ridged, billow, Voronoi cells), erode (droplets, then
+  thermal), terrace, sculpted, flatten (round areas), heightmap; each with
+  a strength, hidden or shown (`landscape.layer add|set|remove|hide|show`;
+  `landscape.set size|res|detail`). A 1025 x 1025 landscape is generated and
+  eroded in about 0.2 s, and a layer above the erosion changes in about
+  4 ms (the erosion's result is cached). `landscape(name, k)`,
+  `height(name, x, z)`.
+- **Sculpting and painting landscapes** (#303). Sculpt mode on a landscape
+  has its own tools, at its full resolution: raise, lower, smooth,
+  flatten, ramp (a straight slope from where the stroke begins to where it
+  ends), noise and erode, into a Sculpted layer; a stroke is one undo step.
+  Paint layers (rock, grass, sand, snow, dirt, gravel, moss, mud: a colour,
+  friction, bounce and a height and slope rule) are painted with clicks or
+  by **Auto Paint** (rock on the slopes, grass on the flat ...); the blend
+  shows in the viewport and in both path tracers. `landscape.brush`,
+  `landscape.paint`.
+- **The heightfield collider** (#304). A landscape made a passive mesh body
+  is not cut into triangles: each step, the cells under whatever moves
+  become triangles on the fly, in slots kept while in use, and contacts
+  work as on a mesh. Each paint layer has its own friction and bounce (a
+  box slides further on rock than on grass). Cloth lands on landscapes by
+  their heights. 1000 balls roll down a 4097 x 4097 mountain, none under its
+  surface, 10 s simulated in 2.4 s.
+- **Presets and water** (#305): Add › Landscape › Flat, Hills, Mountains,
+  Canyon, Dunes, Island. The island comes with its sea: a **Water** plane
+  (the water material, rippled) that floats what is lighter than water - a
+  wooden box floats, a stone one sinks - and that the player does not walk
+  on. Generate gains `island` and `offset`. The welcome screen's Terrain
+  template is a Hills landscape.
+- **Heightmaps in and out** (#306): `landscape.import` (16-bit or 8-bit PNG,
+  grey or colour; OpenEXR scanlines, half or float, uncompressed or ZIP),
+  `landscape.export` (16-bit grey PNG - a PNG made so round-trips exactly -
+  float EXR, or the paint as RGBA PNGs), `landscape.to_mesh [full]`, and
+  `landscape.tiles k`, which splits a landscape into k x k landscapes that
+  world partition streams (its cell files keep them as landscapes).
+- `tests/landscape.py` checks all of it (with clicks on the fake compositor
+  for the brushes, the paint and the menus); `tools/physbench.py` times the
+  mountain.
+
+### Notes
+- A landscape is drawn at up to 513 samples a side (every 2nd, 4th ...
+  sample of a bigger one); the tile LOD drawing the plan names is not done.
+- Landscape painting lives in its sculpt mode's tools, not in Paint mode.
+
 ## [0.17.0] - 2026-10-17
 
 "The solver": stage R of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`),
@@ -1812,7 +1874,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/bartbeecoders/beemodel/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/bartbeecoders/beemodel/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/bartbeecoders/beemodel/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/bartbeecoders/beemodel/compare/v0.14.0...v0.15.0

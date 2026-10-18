@@ -9,6 +9,8 @@ thread counts.
   bricks   5000 bricks settling: the mean awake frame (ms)
   terrain  1000 balls on a 100 000-triangle terrain: the mean and the
            slowest frame (ms)
+  mountain 1000 balls rolling down a 4097 x 4097 landscape (a heightfield):
+           the mean frame (ms), 10 s; and the landscape generated (ms)
 
 Threads are counted as BeeModel counts them: the workers and the UI thread
 (1 = no workers). Each scene also prints the hash of every body's state at
@@ -25,12 +27,21 @@ import solver as S                                      # noqa: E402
 
 THREADS = [int(a) for a in args] or sorted({1, 4, 8, os.cpu_count() or 1})
 HASH = 'print("hash", rbinfo(16))\n'
+MOUNTAIN = ('delete("Cube")\ndelete("Light")\ndelete("Camera")\nt0 = clock()\n'
+            'op("landscape.add", "flat res 4097 size 2000")\n'
+            'op("landscape.layer", "add generate noise fbm scale 1.2 height 300 octaves 8 seed 3")\n'
+            'print("gen", clock() - t0)\nselect("Landscape")\nop("rigid.add", "passive mesh friction 0.6")\n'
+            'n = 0\nfor i in 0..32 { for j in 0..32 { if n < 1000 {\n x = -60 + i * 4\n z = -60 + j * 4\n'
+            ' add("sphere", "B" + n, x, height("Landscape", x, z) + 1.5, z)\n scale("B" + n, 0.5)\n'
+            ' select("B" + n)\n op("rigid.add", "active sphere friction 0.6")\n n = n + 1\n} } }\n'
+            't1 = clock()\nframe(240)\nprint("mountain", (clock() - t1) / 240)\n')
 SCENES = (
     ('heap', S.HEAP.replace('frame(121)', 't0 = clock()\nframe(121)\nprint("ms", clock() - t0)') + HASH,
      lambda r: f'{float(r["ms"][0]) / 1000:6.2f} s'),
     ('pour', S.POUR + HASH, lambda r: f'{float(r["pour"][1]) / 1000:6.1f} s'),
     ('bricks', S.BRICKS + HASH, lambda r: f'{float(r["bricks"][2]):6.1f} ms'),
     ('terrain', S.TERRAIN + HASH, lambda r: f'{float(r["terrain"][1]):5.1f} / {float(r["terrain"][0]):.0f} ms'),
+    ('mountain', MOUNTAIN + HASH, lambda r: f'{float(r["mountain"][0]):5.1f} ms ({float(r["gen"][0]):.0f})'),
 )
 
 

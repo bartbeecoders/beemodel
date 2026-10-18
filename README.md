@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.16.0/beemodel-0.16.0-linux-x86_64.bin
-chmod +x beemodel-0.16.0-linux-x86_64.bin && ./beemodel-0.16.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.18.0/beemodel-0.18.0-linux-x86_64.bin
+chmod +x beemodel-0.18.0-linux-x86_64.bin && ./beemodel-0.18.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -531,6 +531,20 @@ sets all of it up without typing: **+ Rigid Body**, Active / Passive, the shape,
 mass, friction, bounce, damping, gravity, substeps. How the solver works:
 [docs/PHYSICS.md](docs/PHYSICS.md); `tools/physbench.py` times it.
 
+**Ground and landscapes.** Add › Ground is an endless floor: a fading grid in the viewport, a
+shadow catcher in renders (the shadows over a transparent background, saved as RGBA PNGs), and
+a floor for rigid bodies, cloth and the player. Add › Landscape › Flat, Hills, Mountains,
+Canyon, Dunes or Island is a heightfield of up to 4097 x 4097 samples built from a stack of
+layers - generate (fBm, ridged, billow, Voronoi cells), erode (droplets, thermal), terrace,
+sculpted, flatten - that stays editable: a 1025 x 1025 landscape is generated and eroded in
+about 0.2 s. Sculpt mode on it has landscape brushes (raise, lower, smooth, flatten, ramp,
+noise, erode) and paint layers (rock, grass, sand, snow ...) with an Auto Paint by height and
+slope that shows in the viewport and in renders. As a rigid body it is an exact heightfield
+collider (its triangles made on the fly under whatever moves: 1000 balls roll down a 4097 x 4097
+mountain), each paint layer with its own friction; the island's sea floats what is lighter than
+water. Heightmaps come in and go out as 16-bit PNG or EXR, and a landscape splits into tiles
+that world partition streams. [docs/LANDSCAPE.md](docs/LANDSCAPE.md).
+
 **Simulation cache.** Rigid bodies and cloth keep every frame they reach, so scrubbing back
 plays them instead of simulating again; an edit to the setup starts it over. `sim.bake` keeps
 the whole frame range (saved with the file) until `sim.free`, and the timeline shows what is
@@ -932,7 +946,12 @@ src/clip.s      contact points between polytopes: faces clipped
 src/collide.s   convex collision: support functions, GJK, EPA
 src/mech.s      mechanisms: revolute / slider joints, gears, limits, collisions
 src/cloth.s     cloth and soft bodies: XPBD, pins, colliders, self collision, wind
-src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, islands, joints
+src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, islands, joints,
+                heightfields, water
+src/ground.s    the Ground: an endless floor, a shadow catcher
+src/landscape.s landscapes: the heightfield block, its layers, presets, the display mesh
+src/lsculpt.s   sculpting and painting landscapes: brushes, paint layers, Auto Paint
+src/landio.s    landscapes in and out: PNG / EXR heightmaps, to a mesh, tiles
 src/physui.s    the Physics section of the Properties area
 src/simcache.s  the simulation cache: frames kept, played back, baked, saved
 src/vgeo.s      virtualized geometry: the cluster LOD DAG (meshlets, groups, simplification)
