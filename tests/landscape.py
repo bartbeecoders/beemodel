@@ -508,7 +508,6 @@ def write_exr(path, w, h):
     """A scanline OpenEXR file as the spec has it: half G and R (R: 0 at the
     left to 2 at the right), ZIP compression (16 lines a block: bytes split
     into halves, delta-coded, deflated)."""
-    import numpy as np
     def attr(name, typ, data):
         return name.encode() + b'\0' + typ.encode() + b'\0' + struct.pack('<I', len(data)) + data
     ch = b''.join(n + b'\0' + struct.pack('<iB3xii', 1, 0, 1, 1) for n in (b'G', b'R')) + b'\0'
@@ -517,11 +516,13 @@ def write_exr(path, w, h):
            + attr('dataWindow', 'box2i', box) + attr('displayWindow', 'box2i', box) + attr('lineOrder', 'lineOrder', b'\0')
            + attr('pixelAspectRatio', 'float', struct.pack('<f', 1)) + attr('screenWindowCenter', 'v2f', struct.pack('<ff', 0, 0))
            + attr('screenWindowWidth', 'float', struct.pack('<f', 1)) + b'\0')
-    R = np.tile(np.linspace(0, 2, w, dtype=np.float32), (h, 1)).astype(np.float16)
-    G = (np.random.RandomState(1).rand(h, w) * 5).astype(np.float16)
+    import random
+    rnd = random.Random(1)
+    row_r = struct.pack(f'<{w}e', *[2 * x / (w - 1) for x in range(w)])
+    rows_g = [struct.pack(f'<{w}e', *[rnd.random() * 5 for _ in range(w)]) for _ in range(h)]
     blocks = []
     for y0 in range(0, h, 16):
-        raw = b''.join(G[y].tobytes() + R[y].tobytes() for y in range(y0, min(h, y0 + 16)))
+        raw = b''.join(rows_g[y] + row_r for y in range(y0, min(h, y0 + 16)))
         t = bytearray(len(raw))
         half = (len(raw) + 1) // 2
         t[:half], t[half:] = raw[0::2], raw[1::2]
@@ -571,10 +572,12 @@ print("mesh", landscape("Landscape", 0), vpos("Landscape", 201 * n + 37, "y") - 
 ''')
     v = {l[0]: l[1:] for l in out}
     if os.path.exists(f'{tmp}/h1.png') and os.path.exists(f'{tmp}/h2.png'):
-        import numpy as np
-        a, b = np.array(Image.open(f'{tmp}/h1.png')), np.array(Image.open(f'{tmp}/h2.png'))
-        check(a.dtype == np.uint16 and a.shape == (257, 257) and (a != b).sum() == 0 and a.min() == 0 and a.max() == 65535,
-              f'a 16-bit PNG heightmap round-trips exactly ({a.shape}, {(a != b).sum()} samples differ)')
+        ia, ib = Image.open(f'{tmp}/h1.png'), Image.open(f'{tmp}/h2.png')
+        a, b = list(ia.getdata()), list(ib.getdata())
+        diff = sum(1 for x, y in zip(a, b) if x != y)
+        check(ia.mode.startswith('I') and ia.size == (257, 257) and len(a) == len(b) and diff == 0
+              and min(a) == 0 and max(a) == 65535,
+              f'a 16-bit PNG heightmap round-trips exactly ({ia.size}, {ia.mode}, {diff} samples differ)')
     else:
         check(False, 'the PNG heightmaps were written')
     o = [float(x) for x in v.get('orig', ['0'] * 6)]
