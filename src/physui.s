@@ -45,7 +45,8 @@
 .equ SO_PS_SZ,  44                      # (shatterop.s so_pdata rows)
 .equ PB_SPAT,   8                       # shatter: the next pattern,
 .equ PB_SPRE,   9                       #  the next preset,
-.equ PB_SRUN,   10                      #  Shatter / Re-cut
+.equ PB_SRUN,   10                      #  Shatter / Re-cut,
+.equ PB_SOPEN,  11                      #  the section open / closed
 .equ PF_MASS,   0                       # fields: body values 0-3,
 .equ PF_GRAV,   4                       #  the world's
 .equ PF_RATE,   5
@@ -125,6 +126,8 @@ sp_pat_kw:      .quad k_shards, k_bricks, k_balls
 sp_pre_lbl:     .quad s_pre0, s_pre1, s_pre2, s_pre3, s_pre4
 sp_pre_kw:      .quad k_none, k_pre1, k_pre2, k_pre3, k_pre4
 s_l_shatter:    .asciz "Shatter"
+s_sh_closed:    .asciz "+ Shatter"
+s_sh_open:      .asciz "- Shatter"
 s_l_pattern:    .asciz "Pattern"
 s_l_preset:     .asciz "Preset"
 s_b_recut:      .asciz "Re-cut"
@@ -159,6 +162,7 @@ sp_val:         .float 50.0, 0.0, 0.0   # the panel's shatter settings
 sp_pat:         .long 0
 sp_pre:         .long 0
 sp_recut:       .long 0
+sp_open:        .long 0                 # (a piece: open anyway)
 
 .section .bss
 .align 4
@@ -720,10 +724,22 @@ rp_shatter:
     test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
     setnz   cl
 1:  mov     [rip+sp_recut], ecx
-    mov     edi, r12d                   # Shatter (a heading)
-    lea     rsi, [rip+s_l_shatter]
-    call    rp_label
+    mov     eax, [rip+sp_open]          # open: asked to, or a piece
+    or      eax, ecx
+    mov     [rsp], eax
+    lea     r8, [rip+s_sh_closed]       # [+ Shatter] / [- Shatter]
+    test    eax, eax
+    jz      11f
+    lea     r8, [rip+s_sh_open]
+11: mov     edi, PB_SOPEN|0x10000
+    mov     esi, [rip+ed_x]
+    add     esi, 14
+    mov     edx, r12d
+    mov     ecx, 90
+    call    rp_button
     add     r12d, 20
+    cmp     dword ptr [rsp], 0
+    je      9f
     mov     ebp, [rip+ed_w]             # the buttons: as wide as a field
     sub     ebp, 124
     mov     edi, r12d                   # Pattern [Shards]
@@ -797,7 +813,11 @@ rp_shatter:
 #   (no preset then), the next preset (its pattern and values shown), run
 sp_button:
     push    rbx
-    cmp     eax, PB_SPAT
+    cmp     eax, PB_SOPEN
+    jne     0f
+    xor     dword ptr [rip+sp_open], 1
+    jmp     8f
+0:  cmp     eax, PB_SPAT
     jne     2f
     mov     eax, [rip+sp_pat]
     inc     eax

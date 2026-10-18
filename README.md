@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.18.0/beemodel-0.18.0-linux-x86_64.bin
-chmod +x beemodel-0.18.0-linux-x86_64.bin && ./beemodel-0.18.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.19.0/beemodel-0.19.0-linux-x86_64.bin
+chmod +x beemodel-0.19.0-linux-x86_64.bin && ./beemodel-0.19.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -545,6 +545,16 @@ mountain), each paint layer with its own friction; the island's sea floats what 
 water. Heightmaps come in and go out as 16-bit PNG or EXR, and a landscape splits into tiles
 that world partition streams. [docs/LANDSCAPE.md](docs/LANDSCAPE.md).
 
+**Shatter.** Object › Physics › Shatter... breaks a mesh into shards (Voronoi cells, evenly or
+around a point), bricks (a running bond, with a mortar gap) or balls (packed inside it); its
+form draws the cells on the object before anything is cut. Every piece is a closed mesh object
+and a convex rigid body of the right mass; a 100 000-triangle vase goes into 500 shards in about
+0.1 s. Glue ties touching pieces with joints that break at a strength per area, so a ball
+thrown at a glued brick wall knocks out a hole and the rest stands. An object can also wait
+whole until something hits it hard enough and break while it plays. Presets (brick wall, glass,
+stone, gravel), a Shatter section in Properties › Physics to re-cut with other settings, and
+`shatter()` in BeeScript. [docs/SHATTER.md](docs/SHATTER.md).
+
 **Simulation cache.** Rigid bodies and cloth keep every frame they reach, so scrubbing back
 plays them instead of simulating again; an edit to the setup starts it over. `sim.bake` keeps
 the whole frame range (saved with the file) until `sim.free`, and the timeline shows what is
@@ -952,6 +962,8 @@ src/ground.s    the Ground: an endless floor, a shadow catcher
 src/landscape.s landscapes: the heightfield block, its layers, presets, the display mesh
 src/lsculpt.s   sculpting and painting landscapes: brushes, paint layers, Auto Paint
 src/landio.s    landscapes in and out: PNG / EXR heightmaps, to a mesh, tiles
+src/shatter.s   shatter: closed meshes cut into convex cells (clipping, caps, a tree of cells)
+src/shatterop.s shatter: the operator, its patterns, pieces, bodies, glue, the form's preview
 src/physui.s    the Physics section of the Properties area
 src/simcache.s  the simulation cache: frames kept, played back, baked, saved
 src/vgeo.s      virtualized geometry: the cluster LOD DAG (meshlets, groups, simplification)

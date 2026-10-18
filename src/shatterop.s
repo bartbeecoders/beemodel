@@ -1022,6 +1022,11 @@ so_balls:
     jmp     3b
 31: test    eax, eax
     jz      34f
+    push    rax
+    push    rax
+    call    sh_inside_prep              # (the inside test's grid)
+    pop     rax
+    pop     rax
     lea     rdi, [rip+ball_job]         # which are in, clear of the surface
     xor     esi, esi
     mov     edx, eax
@@ -1532,7 +1537,8 @@ so_seeds:
     call    so_cand_pt
     inc     r15d
     jmp     3b
-4:  lea     rdi, [rip+seed_job]         # inside? (all at once)
+4:  call    sh_inside_prep              # (the inside test's grid)
+    lea     rdi, [rip+seed_job]         # inside? (all at once)
     xor     esi, esi
     mov     edx, r14d
     mov     ecx, 8
