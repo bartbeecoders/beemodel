@@ -25,6 +25,7 @@
 .equ RB_SHAPE,  8
 .equ RB_MASS,   12
 .equ RB_FLAGS,  28
+.equ RB_INIT_,  32                      # (where it starts: loc rot scale)
 .equ RW_GRAV,   0
 .equ RW_RATE,   12
 .equ RW_ITER,   16
@@ -169,7 +170,7 @@ rb_get:
     jz      8f
     mov     rbx, rax
     xor     r13d, r13d
-1:  cmp     r13d, 7
+1:  cmp     r13d, 10
     jae     8f
     lea     rax, [rip+get_names]
     mov     rsi, [rax+r13*8]
@@ -179,7 +180,13 @@ rb_get:
     jnz     2f
     inc     r13d
     jmp     1b
-2:  cmp     r13d, 6                     # group: RB_FLAGS bits 4-7
+2:  cmp     r13d, 7                     # x0 y0 z0: where it started (while
+    jb      20f                         #  it runs: nil otherwise)
+    test    dword ptr [rbx+RB_FLAGS], 1
+    jz      8f
+    movss   xmm0, [rbx+RB_INIT_+r13*4-28]
+    jmp     4f
+20: cmp     r13d, 6                     # group: RB_FLAGS bits 4-7
     jne     21f
     mov     eax, [rbx+RB_FLAGS]
     shr     eax, 4
@@ -203,6 +210,7 @@ rb_get:
 .section .rodata
 .align 8
 get_names:      .quad g_type, g_shape, s_g_mass, g_fric, g_bounce, g_damp, g_group
+                .quad g_x0, g_y0, g_z0
 g_type:         .asciz "type"
 g_shape:        .asciz "shape"
 s_g_mass:       .asciz "mass"
@@ -210,6 +218,9 @@ g_fric:         .asciz "friction"
 g_bounce:       .asciz "bounce"
 g_damp:         .asciz "damping"
 g_group:        .asciz "group"
+g_x0:           .asciz "x0"
+g_y0:           .asciz "y0"
+g_z0:           .asciz "z0"
 .text
 
 # ---- drawing ---------------------------------------------------------------------

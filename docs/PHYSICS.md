@@ -223,6 +223,29 @@ height below the level. That share also slows it.
 - **What floats.** A wooden box floats with about 0.6 of it under water, and
   a stone box sinks.
 
+### Shattering on impact
+
+An object shattered with `impact` (see [SHATTER.md](SHATTER.md)) stays a
+whole body; its pieces wait as **dormant** bodies (in no collision group,
+their glue asleep, hidden). A marker joint (type 5: the original, the blow
+it breaks at in N s) ties them.
+- **The blow.** Right after the narrow phase, before the solve, each
+  contact point of the original closing at v with the two's effective mass
+  m is a blow m v.
+- **Breaking.** Past the threshold the original goes dormant and hidden,
+  its contacts are dropped, and its pieces take its place: where it is now,
+  each moving as that point of it moved, shown, their glue awake. The step
+  finds its pairs and contacts again, so the blow lands on the pieces in
+  the same solve and breaks the glue near it.
+- **Asked to.** A logic graph's Shatter node breaks it at the next step
+  (`rb_shatter_obj`; before the bodies are made, it waits with the
+  impulses).
+- **The cache** keeps, each frame, which originals are broken: scrubbing
+  shows the original or its pieces as they were. Back at the start it is
+  whole.
+
+`rbinfo(20)`: originals that shatter on impact; `rbinfo(21)`: those broken.
+
 ### Fast bodies
 
 A body that moved more than half its size in a step is checked against the

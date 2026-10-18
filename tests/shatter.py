@@ -26,6 +26,14 @@ shared face, breaking at the strength x its area) stands on the Ground; a
 bricks around the hit) and the rest stands; at 4 m/s nothing breaks; the
 same on 1 and 8 threads. Glue between shards: one joint a shared face.
 
+S5: shatter while it runs - a vase marked to shatter on impact (its pieces
+made and glued beforehand, waiting hidden): in play mode a 5 kg ball shot
+at it at 20 m/s breaks it where it hits (the pieces there knocked out,
+the rest holding together) with no frame over 16 ms; a ball at 1 m/s
+leaves it whole. Simulated, the frames cached keep which is shown (the
+vase whole before the hit, its pieces after, scrubbing back and forth).
+A logic graph's Shatter node breaks it when play begins.
+
     python3 tests/shatter.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -320,12 +328,77 @@ def s4():
     check(st and 400 < st[7] < 700, '100 shards glued: %s joints (about 11 neighbours a cell)' % (st and st[7]))
 
 
+VASE_HIT = """delete("Cube")
+op("create.ground")
+op("file.import_obj", "%s")
+select("vase5")
+op("object.shatter", "shards count 60 seed 3 glue 50000 impact 15 density 300")
+n = add("sphere", "Ball", 3, 1.2, 0)
+scale(n, 0.15)
+select(n)
+op("rigid.add", "active sphere mass 5 velocity -%d 0 0")
+op("play.start", "walk 0 1.8 8")
+mx = 0
+for f in 1..90 { playstep(1/60)
+  mx = max(mx, rbinfo(4)) }
+nn = 0
+nf = 0
+fs = 0
+for i in 1..61 { s = "vase5_shard_" + str(i)
+  x0 = rigid(s, "x0")
+  y0 = rigid(s, "y0")
+  z0 = rigid(s, "z0")
+  d = sqrt(pow(get(s, "x") - x0, 2) + pow(get(s, "y") - y0, 2) + pow(get(s, "z") - z0, 2))
+  if sqrt(pow(x0 - 0.75, 2) + pow(y0 - 1.2, 2) + pow(z0, 2)) < 0.5 { nn = nn + 1
+    if d > 0.05 { nf = nf + 1 } } else {
+    if d < 0.2 { fs = fs + 1 } } }
+print("v", rbinfo(21), mx, nn, nf, fs, get("vase5", "hidden"), get("vase5_shard_9", "hidden"), rbinfo(15))
+op("play.stop", "discard")
+"""
+
+
+def s5(tmp):
+    print('S5: shatter on impact')
+    vase = os.path.join(tmp, 'vase5.obj')
+    vase_obj(vase)
+    out = run(VASE_HIT % (vase, 20))
+    v = vals(out, 'v')
+    check(v and v[0] == 1 and v[5] == 1 and v[6] == 0, 'in play mode the ball breaks the vase: the vase hidden, '
+          'its pieces shown (%s)' % v)
+    check(v and v[3] >= 3 and v[4] >= 45 and v[7] < 176 / 3, 'where it hits: %s of the %s pieces there knocked out; '
+          '%s of the other 55 stay together (within 20 cm: the vase shifts as one), %s of 176 joints broken'
+          % (v and v[3], v and v[2], v and v[4], v and v[7]))
+    check(v and v[1] < 16 * SLOW, 'no frame over 16 ms (the slowest %.1f ms of simulation)' % (v and v[1]))
+    out = run(VASE_HIT % (vase, 1))
+    v = vals(out, 'v')
+    check(v and v[0] == 0 and v[5] == 0, 'a ball at 1 m/s leaves it whole (%s)' % v)
+    out = run('op("create.ground")\nselect("Cube")\nop("object.shatter", "shards count 40 glue 3000 impact 30")\n'
+              'n = add("sphere", "Ball", -4, 1, 0)\nscale(n, 0.3)\nselect(n)\n'
+              'op("rigid.add", "active sphere mass 10 velocity 10 0 0")\n'
+              'print("c0", get("Cube", "hidden"), get("Cube_shard_3", "hidden"))\n'
+              'frame(200)\nprint("c1", rbinfo(21), get("Cube", "hidden"), get("Cube_shard_3", "hidden"))\n'
+              'frame(1)\nprint("c2", get("Cube", "hidden"), get("Cube_shard_3", "hidden"))\n'
+              'frame(150)\nprint("c3", get("Cube", "hidden"), get("Cube_shard_3", "hidden"))\n'
+              'frame(5)\nprint("c4", get("Cube", "hidden"), get("Cube_shard_3", "hidden"))\n')
+    c = [vals(out, 'c%d' % k) for k in range(5)]
+    check(c == [[0, 1], [1, 1, 0], [0, 1], [1, 0], [0, 1]],
+          'simulated: whole, then broken; the cached frames show the vase or its pieces as they were %s' % c)
+    out = run('op("create.ground")\nselect("Cube")\nop("object.shatter", "shards count 30 impact 1000")\n'
+              'op("logic.new", "Breaker")\nop("logic.node", "Breaker begin")\nop("logic.node", "Breaker shatter")\n'
+              'op("tree.link", "Breaker 1 2 1")\nop("logic.attach", "Breaker Cube")\n'
+              'op("play.start", "walk 0 1.8 8")\nplaystep(0.2)\n'
+              'print("l", rbinfo(21), get("Cube", "hidden"), get("Cube_shard_2", "hidden"))\nop("play.stop", "discard")\n')
+    l = vals(out, 'l')
+    check(l == [1, 1, 0], 'a logic graph\'s Shatter node breaks it when play begins (%s)' % l)
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix='bee-shat-')
     s1(tmp)
     s2(tmp)
     s3()
     s4()
+    s5(tmp)
     if FAILS:
         print('%d failed' % len(FAILS))
         sys.exit(1)

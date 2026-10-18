@@ -10,7 +10,7 @@
 #
 #  Nodes: events start chains (begin play, tick, key, overlap, hit, timer,
 #  message); actions run when the node feeding their Run input fires (move,
-#  rotate, set property, spawn, destroy, play action, impulse, visibility,
+#  rotate, set property, spawn, destroy, play action, impulse, shatter, visibility,
 #  send message, set variable; branch picks one of two ways on); data nodes
 #  (variable, math, info, get property) are pulled for the inputs that need
 #  them. Links point from an input to the output that feeds it, so a chain
@@ -82,7 +82,8 @@
 .equ LT_MATH,   20
 .equ LT_INFO,   21
 .equ LT_GETP,   22
-.equ LG_NTYPES, 22
+.equ LT_SHATTER, 23
+.equ LG_NTYPES, 23
 
 # an instance: an object running a graph
 .equ LI_OBJ,    0                       # object handle
@@ -119,7 +120,7 @@ s_lg_base:      .asciz "Logic"
 s_lg_made:      .asciz "  logic graph: "
 s_lg_none:      .asciz "  no such node tree: "
 s_lg_notlogic:  .asciz "  not a logic graph (logic.new makes one): "
-s_lg_need:      .asciz "  logic.node <graph> <type> [values]; types: begin tick key overlap hit timer message move rotate set_property spawn destroy play_action impulse visibility send set_variable branch variable math info get_property"
+s_lg_need:      .asciz "  logic.node <graph> <type> [values]; types: begin tick key overlap hit timer message move rotate set_property spawn destroy play_action impulse visibility send set_variable branch variable math info get_property shatter"
 s_lg_nameneed:  .asciz "  logic.name <graph> <node> <value 4-7> [text] (15 characters at most)"
 s_lg_attneed:   .asciz "  logic.attach <graph> [object] (a mesh object)"
 s_lg_full:      .asciz "  logic: the graph holds 30 names"
@@ -133,7 +134,8 @@ lg_ntypes:      .long LG_NTYPES
 .align 8
 lg_type_names:  .quad k_begin, k_tick, k_key, k_over, k_hit, k_timer, k_msg
                 .quad k_move, k_rot, k_setp, k_spawn, k_destroy, k_action, k_impulse
-                .quad k_vis, k_send, k_setvar, k_branch, k_var, k_math, k_info, k_getp, 0
+                .quad k_vis, k_send, k_setvar, k_branch, k_var, k_math, k_info, k_getp
+                .quad k_shatter, 0
 k_begin:        .asciz "begin"
 k_tick:         .asciz "tick"
 k_key:          .asciz "key"
@@ -156,9 +158,11 @@ k_var:          .asciz "variable"
 k_math:         .asciz "math"
 k_info:         .asciz "info"
 k_getp:         .asciz "get_property"
+k_shatter:      .asciz "shatter"
 lg_titles:      .quad 0, t_begin, t_tick, t_key, t_over, t_hit, t_timer, t_msg
                 .quad t_move, t_rot, t_setp, t_spawn, t_destroy, t_action, t_impulse
                 .quad t_vis, t_send, t_setvar, t_branch, t_var, t_math, t_info, t_getp
+                .quad t_shatter
 t_begin:        .asciz "Begin Play"
 t_tick:         .asciz "On Tick"
 t_key:          .asciz "On Key"
@@ -181,6 +185,7 @@ t_var:          .asciz "Variable"
 t_math:         .asciz "Math"
 t_info:         .asciz "Info"
 t_getp:         .asciz "Get Property"
+t_shatter:      .asciz "Shatter"
 # per type (as nodeed.s reads it): input names, input kinds (1 value, 2
 #   vector, 4 run), value names, value kinds (0 number, 1 choice, 3 whole,
 #   5 name), the choices, output names, output kinds
@@ -207,6 +212,7 @@ lg_meta:        .quad 0, 0, 0, 0, 0, 0, 0
                 .quad i_ab, lk_22, v_op, lk_1, ch_math, o_result, lk_2         # math
                 .quad nil3, lk_z, v_what, lk_1, ch_info, o_value, lk_2         # info
                 .quad nil3, lk_z, v_setp, lk_55, 0, o_value, lk_1              # get property
+                .quad i_run, lk_4, v_object, lk_5, 0, o_then, lk_4             # shatter
 lk_z:             .byte 0, 0, 0, 0
 lk_4:             .byte 4, 0, 0, 0
 lk_411:           .byte 4, 1, 1, 0
@@ -354,6 +360,7 @@ lg_defaults:    .float 0,0,0,0, 0,0,0, 0,0,0, 0,0,0      # begin
                 .float 0,0,0,0, 0,0,0, 0,0,0, 0,0,0      # math
                 .float 0,0,0,0, 0,0,0, 0,0,0, 0,0,0      # info
                 .float 0,0,0,0, 0,0,0, 0,0,0, 0,0,0      # get property
+                .float 0,0,0,0, 0,0,0, 0,0,0, 0,0,0      # shatter
 # properties: name, offset (-1: visible)
 .align 8
 lg_props:       .ascii "x\0\0\0\0\0\0\0"
@@ -412,7 +419,7 @@ lg_tnow:        .skip 512               # objects the player touched (handles)
 .text
 OPERATOR op_logic_new,    "logic.new",    "New Logic Graph", do_logic_new, flags=OPF_AI_SAFE|OPF_UNDO, doc="A new, empty logic graph (a node tree that runs in play mode): logic.new [name]"
 OPERATOR op_logic_attach, "logic.attach", "Attach Logic", do_logic_attach, flags=OPF_AI_SAFE|OPF_UNDO, doc="Run a logic graph on an object in play mode (a Logic modifier): logic.attach <graph> [object]"
-OPERATOR op_logic_node,   "logic.node",   "Add Logic Node", do_logic_node, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a node to a logic graph: logic.node <graph> <type> [values] (types: begin tick key overlap hit timer message move rotate set_property spawn destroy play_action impulse visibility send set_variable branch variable math info get_property); link and set with tree.link / tree.node_set"
+OPERATOR op_logic_node,   "logic.node",   "Add Logic Node", do_logic_node, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a node to a logic graph: logic.node <graph> <type> [values] (types: begin tick key overlap hit timer message move rotate set_property spawn destroy play_action impulse visibility send set_variable branch variable math info get_property shatter); link and set with tree.link / tree.node_set"
 OPERATOR op_logic_name,   "logic.name",   "Set Logic Name", do_logic_name, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set a node's name value (a message, an object, a property, an action): logic.name <graph> <node> <value 4-7> [text]"
 
 # =============================================================================
@@ -1325,10 +1332,13 @@ lg_run_from:
     mov     edi, ebx
     call    lg_node
     mov     ecx, [rax+ND_TYPE]
+    cmp     ecx, LT_SHATTER             # (actions: move .. branch, shatter)
+    je      21f
     cmp     ecx, LT_MOVE
     jb      2f
     cmp     ecx, LT_BRANCH
     ja      2f
+21:
     mov     ecx, [rax+ND_IN]
     and     ecx, 0xffffff
     cmp     ecx, r12d
@@ -1388,6 +1398,8 @@ lg_exec:
     je      .Lle_setvar
     cmp     eax, LT_BRANCH
     je      .Lle_branch
+    cmp     eax, LT_SHATTER
+    je      .Lle_shatter
     jmp     .Lle_then
 
 .Lle_move:
@@ -1490,6 +1502,16 @@ lg_exec:
     call    lg_add_obj
     call    lg_reenter
     mov     dword ptr [rip+dirty], 1
+    jmp     .Lle_then
+
+.Lle_shatter:                           # its prepared pieces take its place
+    mov     edi, ebx                    #  (object.shatter ... impact)
+    xor     esi, esi
+    call    lg_target
+    test    rax, rax
+    jz      .Lle_then
+    mov     rdi, rax
+    call    rb_shatter_obj
     jmp     .Lle_then
 
 .Lle_destroy:
@@ -1854,6 +1876,8 @@ lg_input:
     jmp     9f
 3:  cmp     eax, LT_VAR                 # data nodes: pulled
     jb      8f
+    cmp     eax, LT_GETP
+    ja      8f
     mov     edi, r12d
     mov     esi, r13d
     call    lg_data
