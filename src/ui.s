@@ -159,7 +159,7 @@ items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit
 items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
                 .quad op_m_loopcut, op_m_knife, op_m_bisect, op_m_subdivide, 0
                 .quad op_m_bridge, op_m_spin, op_m_fill, op_m_dissolve, op_m_dup, 0
-                .quad sub_merge, sub_mdelete, sub_normals, sub_uv, 0, op_cursor_reset
+                .quad sub_merge, sub_mdelete, sub_separate, sub_normals, sub_uv, 0, op_cursor_reset
 .equ items_mesh_n, (. - items_mesh) / 8
 items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_render_save, 0
                 .quad op_render_denoise, op_render_settings, 0, op_object_bake
@@ -186,6 +186,7 @@ sub_uv_l:       .quad op_uv_unwrap, op_uv_smart, op_uv_pack, 0, op_uv_mark, op_u
 sub_mech_l:     .quad op_mj_add, op_mj_list, op_mj_check
 sub_snap_l:     .quad op_cursor_sel, op_cursor_reset, op_sel_cursor, op_sel_grid, op_toggle_snap
 sub_parent_l:   .quad op_par_set, op_par_clear
+sub_separate_l: .quad op_sep_loose
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -205,6 +206,7 @@ SUBMENU sub_mech, "Mechanism", sub_mech_l, 3
 SUBMENU sub_uv, "UV", sub_uv_l, 7
 SUBMENU sub_snap, "Snap", sub_snap_l, 5
 SUBMENU sub_parent, "Parent", sub_parent_l, 2
+SUBMENU sub_separate, "Separate", sub_separate_l, 1
 SUBMENU sub_workspace, "Workspace", sub_ws_l, 6
 
 # -----------------------------------------------------------------------------
