@@ -2532,15 +2532,20 @@ tl_release:
     ret
 
 # -----------------------------------------------------------------------------
-# Files: the ANIM chunk = the frame, the key count (| AN_V2), then the block
-#   from its curve count on: up to the rigid bodies, the bodies in use, the
-#   rest, the keys. Files before v0.17 (no AN_V2) hold the whole block with
-#   room for 1024 bodies.
+# Files: the ANIM chunk = the frame, the key count (| AN_V2 | AN_V3), then
+#   the block from its curve count on: up to the rigid bodies, the bodies in
+#   use, the joints in use, the rest, the keys. v0.17-0.18 files (AN_V2, no
+#   AN_V3) hold all 128 joints' room; files before v0.17 (no AN_V2) the
+#   whole block with room for 1024 bodies and 128 joints.
 # -----------------------------------------------------------------------------
 .equ AN_V2,     0x40000000
+.equ AN_V3,     0x20000000
+.equ JT_MAX_V2_, 128
 .equ AN_RBEND_, AN_RB_ + RB_MAX_*RB_SZ_         # (= AN_JT_)
-.equ AN_V1GAP,  (RB_MAX_ - RB_MAX_V1_)*RB_SZ_   # what the old block lacks
-.equ AN_V1END,  AN_KEYS - AN_V1GAP              # the old block's end
+.equ AN_V1GAP,  (RB_MAX_ - RB_MAX_V1_)*RB_SZ_   # what the old blocks lack
+.equ AN_JTGAP,  (JT_MAX_ - JT_MAX_V2_)*JT_SZ_
+.equ AN_REST,   AN_KEYS - AN_MJ_                # after the joints
+.equ AN_V1END,  AN_KEYS - AN_V1GAP - AN_JTGAP   # the oldest block's end
 
 # an_write - into wb (nothing when there is no animation)
 an_write:
@@ -2551,7 +2556,7 @@ an_write:
     mov     edi, [rip+an_frame]
     call    wb_u32
     mov     edi, [rbx+AN_NKEY]
-    or      edi, AN_V2
+    or      edi, AN_V2|AN_V3
     call    wb_u32
     lea     rsi, [rbx+AN_NCUR]          # up to the bodies
     mov     edx, AN_RB_-AN_NCUR
@@ -2559,8 +2564,12 @@ an_write:
     lea     rsi, [rbx+AN_RB_]           # those in use
     imul    edx, dword ptr [rbx+AN_NRB_], RB_SZ_
     call    wb_bytes
-    lea     rsi, [rbx+AN_RBEND_]        # the rest, the keys
-    mov     edx, AN_KEYS-AN_RBEND_
+    lea     rsi, [rbx+AN_JT_]           # the joints in use
+    mov     edx, [rbx+AN_NJT_]
+    shl     edx, 6
+    call    wb_bytes
+    lea     rsi, [rbx+AN_MJ_]           # the rest, the keys
+    mov     edx, AN_REST
     mov     eax, [rbx+AN_NKEY]
     imul    eax, eax, KY_SZ
     add     edx, eax
@@ -2575,27 +2584,44 @@ an_read:
     push    r13
     push    r14
     push    r15
+    push    rbp
+    sub     rsp, 8
     mov     r12, rdi
     mov     r13d, esi
     cmp     r13d, 8+AN_RB_-AN_NCUR
     jb      9f
     mov     r14d, [r12+4]               # keys
-    and     r14d, ~AN_V2
+    and     r14d, ~(AN_V2|AN_V3)
     cmp     r14d, 0x1000000
     ja      9f
+    mov     r15d, [r12+8+AN_NRB_-AN_NCUR]   # bodies, joints in use
+    mov     ebp, [r12+8+AN_NJT_-AN_NCUR]
     test    dword ptr [r12+4], AN_V2
     jz      1f
-    mov     r15d, [r12+8+AN_NRB_-AN_NCUR]   # v2: the bodies in use
     cmp     r15d, RB_MAX_
     ja      9f
     imul    ecx, r15d, RB_SZ_
-    imul    eax, r14d, KY_SZ
-    add     ecx, eax
-    add     ecx, 8+AN_RB_-AN_NCUR+AN_KEYS-AN_RBEND_
-    jmp     2f
-1:  cmp     dword ptr [r12+8+AN_NRB_-AN_NCUR], RB_MAX_V1_
+    test    dword ptr [r12+4], AN_V3
+    jz      11f
+    cmp     ebp, JT_MAX_                # v3: the joints in use, the rest
     ja      9f
-    imul    ecx, r14d, KY_SZ            # before v0.17: the whole old block
+    mov     eax, ebp
+    shl     eax, 6
+    add     ecx, eax
+    add     ecx, AN_REST
+    jmp     12f
+11: cmp     ebp, JT_MAX_V2_             # v2: 128 joints' room, the rest
+    ja      9f
+    add     ecx, JT_MAX_V2_*JT_SZ_+AN_REST
+12: imul    eax, r14d, KY_SZ
+    add     ecx, eax
+    add     ecx, 8+AN_RB_-AN_NCUR
+    jmp     2f
+1:  cmp     r15d, RB_MAX_V1_            # before v0.17: the whole old block
+    ja      9f
+    cmp     ebp, JT_MAX_V2_
+    ja      9f
+    imul    ecx, r14d, KY_SZ
     add     ecx, 8+AN_V1END-AN_NCUR
 2:  cmp     ecx, r13d
     ja      9f
@@ -2606,26 +2632,26 @@ an_read:
     mov     rbx, rax
     mov     r8d, [rbx+AN_CAPK]
     mov     r9, [rbx+AN_BYTES]
-    lea     rsi, [r12+8]                # up to the bodies (both)
+    lea     rsi, [r12+8]                # up to the bodies (all)
     lea     rdi, [rbx+AN_NCUR]
     mov     ecx, AN_RB_-AN_NCUR
     rep     movsb
+    lea     rdi, [rbx+AN_RB_]           # the bodies: those in use, or the
+    imul    ecx, r15d, RB_SZ_           #  old room for 1024
     test    dword ptr [r12+4], AN_V2
-    jz      3f
-    lea     rdi, [rbx+AN_RB_]           # v2: the bodies in use, the rest
-    imul    ecx, r15d, RB_SZ_
-    rep     movsb
-    lea     rdi, [rbx+AN_RBEND_]
+    jnz     3f
+    mov     ecx, RB_MAX_V1_*RB_SZ_
+3:  rep     movsb
+    lea     rdi, [rbx+AN_JT_]           # the joints: those in use, or 128's
+    mov     ecx, ebp                    #  room
+    shl     ecx, 6
+    test    dword ptr [r12+4], AN_V3
+    jnz     31f
+    mov     ecx, JT_MAX_V2_*JT_SZ_
+31: rep     movsb
+    lea     rdi, [rbx+AN_MJ_]           # the rest, the keys
     imul    ecx, r14d, KY_SZ
-    add     ecx, AN_KEYS-AN_RBEND_
-    rep     movsb
-    jmp     4f
-3:  lea     rdi, [rbx+AN_RB_]           # old: 1024 bodies' room, the rest
-    mov     ecx, RB_MAX_V1_*RB_SZ_      #  after them
-    rep     movsb
-    lea     rdi, [rbx+AN_RBEND_]
-    imul    ecx, r14d, KY_SZ
-    add     ecx, AN_V1END-(AN_RB_+RB_MAX_V1_*RB_SZ_)
+    add     ecx, AN_REST
     rep     movsb
 4:  mov     [rbx+AN_CAPK], r8d
     mov     [rbx+AN_BYTES], r9
@@ -2654,7 +2680,9 @@ an_read:
     jmp     9f
 8:  mov     rdi, rbx
     call    an_unref
-9:  pop     r15
+9:  add     rsp, 8
+    pop     rbp
+    pop     r15
     pop     r14
     pop     r13
     pop     r12

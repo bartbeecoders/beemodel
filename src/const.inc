@@ -431,7 +431,7 @@
 .equ RB_MAX_V1_,    1024
 .equ RB_SZ_,        80
 .equ AN_JT_,        AN_RB_ + RB_MAX_*RB_SZ_   # joints
-.equ JT_MAX_,       128
+.equ JT_MAX_,       16384   # (files before v0.19: 128 - anim.s reads both)
 .equ JT_SZ_,        64
 .equ AN_NMJ_,       60      # mechanism joints in use (mech.s)
 .equ AN_MJ_,        AN_JT_ + JT_MAX_*JT_SZ_   # mechanism joints

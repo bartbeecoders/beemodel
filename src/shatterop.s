@@ -40,6 +40,12 @@
 .equ RB_FLAGS,  28
 .equ RB_VEL,    68
 .equ MA_DENS_,  92                      # (material.s: g/cm^3)
+.equ JT_TYPE,   0                       # (rbody.s: a joint)
+.equ JT_A,      4
+.equ JT_B,      8
+.equ JT_PIV,    16
+.equ JT_AXIS,   28
+.equ JT_BRK,    40
 .equ PP_HDR,    8
 .equ PH_NV,     0                       # a piece: counts, volume, centre;
 .equ PH_NP,     4                       #  vertices (floats), polygons (count,
@@ -77,6 +83,8 @@ k_inner:        .asciz "inner"
 k_random:       .asciz "random"
 k_density:      .asciz "density"
 k_nobodies:     .asciz "nobodies"
+k_glue:         .asciz "glue"
+k_paint:        .asciz "paint"
 s_sh_room:      .asciz "  shatter: no room for more rigid bodies (4096) - the rest are not bodies"
 s_sh_brick:     .asciz "_brick_"
 s_sh_ball:      .asciz "_ball_"
@@ -85,7 +93,7 @@ s_sh_part:      .asciz "_part_"
 s_sh_none:      .asciz "  shatter: make a mesh object active"
 s_sh_open:      .asciz "  shatter: the mesh is not closed even after repair (mesh.repair; open edges: "
 s_sh_mem:       .asciz "  shatter: out of memory"
-s_sh_bad:       .asciz "  object.shatter <shards|bricks|balls> [count n] [seed s] [at x y z | cursor | surface] [spread f] [size x y z | counts a b c] [offset f|random] [gap g] [jitter f] [radius r] [inner r g b] [density kg/m3] [nobodies] - not understood: "
+s_sh_bad:       .asciz "  object.shatter <shards|bricks|balls> [count n] [seed s] [at x y z | cursor | surface] [spread f] [size x y z | counts a b c] [offset f|random] [gap g] [jitter f] [radius r] [inner r g b] [density kg/m3] [nobodies] [glue N/m2 [paint]] - not understood: "
 s_sh_noseed:    .asciz "  shatter: no room inside the mesh for the cells"
 s_sh_done:      .asciz "  shattered into "
 s_sh_pieces:    .asciz " pieces ("
@@ -96,11 +104,12 @@ s_sl_done:      .asciz "  separated into loose parts: "
 .align 8
 so_kws:         .quad k_shards, k_bricks, k_balls, k_count, k_seed, k_at, k_cursor
                 .quad k_surface, k_spread, k_size, k_counts, k_offset, k_gap
-                .quad k_jitter, k_radius, k_inner, k_density, k_nobodies, 0
+                .quad k_jitter, k_radius, k_inner, k_density, k_nobodies
+                .quad k_glue, k_paint, 0
 so_kwfn:        .quad .Lpa_count, .Lpa_seed, .Lpa_at, .Lpa_cursor, .Lpa_surface
                 .quad .Lpa_spread, .Lpa_size, .Lpa_counts, .Lpa_offset, .Lpa_gap
                 .quad .Lpa_jitter, .Lpa_radius, .Lpa_inner, .Lpa_density
-                .quad .Lpa_nobodies
+                .quad .Lpa_nobodies, .Lpa_glue, .Lpa_paint
 so_one_d:       .double 1.0
 so_three:       .double 3.0
 so_1em6:        .double 1.0e-6
@@ -113,6 +122,9 @@ so_097:         .double 0.97
 so_08:          .double 0.8
 so_2r2:         .double 2.8284271247461903
 so_big:         .double 1.0e300
+so_third_d:     .double 0.3333333333333333
+so_02:          .double 0.2
+so_765:         .double 765.0
 fcc_off:        .double 0, 0, 0,  0.5, 0.5, 0,  0.5, 0, 0.5,  0, 0.5, 0.5
 .align 16
 so_absf:        .long 0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff
@@ -123,6 +135,7 @@ so_fhalf:       .float 0.5
 so_third:       .float 0.33333334
 so_f1000:       .float 1000.0
 so_ffric:       .float 0.5
+so_fmin:        .float 1.0e-3
 
 .section .bss
 .align 8
@@ -168,6 +181,14 @@ so_nobodies:    .skip 4
 so_meanscale:   .skip 4
 so_lasth:       .skip 4
 so_npieces:     .skip 4
+so_gluef:       .skip 4                 # glue: the strength (N/m^2), painted
+so_gluepaint:   .skip 4
+so_ngrp:        .skip 4                 # the faces' groups (GR_SZ)
+so_grpcap:      .skip 4
+so_grp:         .skip 8
+so_grpsz:       .skip 8
+so_gtol:        .skip 8
+so_anim:        .skip 8
 .align 8
 so_pieces:      .skip 4*MAX_OBJECTS     # the pieces made: handles, volumes
 so_pvol:        .skip 8*MAX_OBJECTS
@@ -2030,6 +2051,574 @@ so_bodies:
     pop     rbx
     ret
 
+# -----------------------------------------------------------------------------
+# Glue: pieces that share a face are tied by a fixed joint that breaks at
+#   the glue's strength x the face's area (N/m^2 x m^2). Each piece's cut
+#   faces are grouped by their plane's tag (a Voronoi face: the pair of
+#   cells; a brick's: its joint): two groups with one tag, facing each other
+#   and overlapping, are a shared face; its area is the smaller one, or the
+#   overlap of their bounds (bricks over two rows). Weaker towards the
+#   impact point (at, cursor: down to a fifth at it), or painted: the
+#   vertex colours' brightness nearest the face.
+# -----------------------------------------------------------------------------
+.equ GR_PIECE,  0                       # a group: the piece (so_pieces index),
+.equ GR_TAG,    4                       #  the tag,
+.equ GR_AREA,   8                       #  area (local),
+.equ GR_C,      16                      #  area x centre (3 doubles),
+.equ GR_N,      40                      #  area x normal,
+.equ GR_MIN,    64                      #  bounds
+.equ GR_MAX,    88
+.equ GR_SZ,     112
+
+# so_groups_alloc(edi=polygons at most) -> eax = 1
+so_groups_alloc:
+    push    rbx
+    mov     ebx, edi
+    mov     rdi, [rip+so_grp]
+    mov     rsi, [rip+so_grpsz]
+    call    sh_unmap_g
+    mov     dword ptr [rip+so_ngrp], 0
+    mov     [rip+so_grpcap], ebx
+    imul    rsi, rbx, GR_SZ
+    add     rsi, GR_SZ
+    mov     [rip+so_grpsz], rsi
+    call    sh_map_g
+    mov     [rip+so_grp], rax
+    test    rax, rax
+    setnz   al
+    movzx   eax, al
+    pop     rbx
+    ret
+
+# so_groups(rbx=piece header, edi=its index in so_pieces) - its cut faces'
+#   groups by tag
+so_groups:
+    push    rbp
+    mov     rbp, rsp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 64
+    and     rsp, -16
+    mov     [rsp+56], edi
+    cmp     qword ptr [rip+so_grp], 0
+    je      9f
+    mov     eax, [rip+so_ngrp]          # (this piece's groups from here)
+    mov     [rsp+60], eax
+    lea     r12, [rbx+PH_SZ]            # vertices (floats from the centre)
+    mov     eax, [rbx+PH_NV]
+    imul    eax, eax, 12
+    lea     r13, [r12+rax]              # polygon records
+    mov     eax, [rbx+PH_NP]
+    lea     r14, [r13+rax*8]            # loops
+    xor     r15d, r15d
+1:  cmp     r15d, [rbx+PH_NP]
+    jae     9f
+    mov     eax, [r13+r15*8+4]          # tag
+    test    eax, eax
+    jz      8f
+    mov     ecx, [rsp+60]               # its group in this piece, or a new one
+2:  cmp     ecx, [rip+so_ngrp]
+    jae     3f
+    imul    rdx, rcx, GR_SZ
+    add     rdx, [rip+so_grp]
+    cmp     [rdx+GR_TAG], eax
+    je      4f
+    inc     ecx
+    jmp     2b
+3:  cmp     ecx, [rip+so_grpcap]
+    jae     8f
+    inc     dword ptr [rip+so_ngrp]
+    imul    rdx, rcx, GR_SZ
+    add     rdx, [rip+so_grp]
+    push    rdx
+    push    rax
+    mov     rdi, rdx
+    xor     eax, eax
+    mov     ecx, GR_SZ/8
+    rep     stosq
+    pop     rax
+    pop     rdx
+    mov     [rdx+GR_TAG], eax
+    mov     ecx, [rsp+56]
+    mov     [rdx+GR_PIECE], ecx
+    movsd   xmm0, [rip+so_big]
+    xorpd   xmm1, xmm1
+    subsd   xmm1, xmm0
+    movsd   [rdx+GR_MIN], xmm0
+    movsd   [rdx+GR_MIN+8], xmm0
+    movsd   [rdx+GR_MIN+16], xmm0
+    movsd   [rdx+GR_MAX], xmm1
+    movsd   [rdx+GR_MAX+8], xmm1
+    movsd   [rdx+GR_MAX+16], xmm1
+4:  mov     [rsp+48], rdx               # the polygon into it: a fan
+    mov     ecx, [r13+r15*8]            # (its first loop: r14 now)
+    mov     [rsp+40], ecx
+    mov     eax, [r14]                  # p0
+    call    gp_vert
+    movsd   [rsp], xmm0
+    movsd   [rsp+8], xmm1
+    movsd   [rsp+16], xmm2
+    mov     r8d, 1
+5:  lea     eax, [r8+1]
+    cmp     eax, [rsp+40]
+    jae     7f
+    push    r8
+    sub     rsp, 8
+    mov     eax, [r14+r8*4]
+    call    gp_vert
+    movsd   xmm3, xmm0                  # a = p1 - p0
+    subsd   xmm3, [rsp+16]
+    movsd   xmm4, xmm1
+    subsd   xmm4, [rsp+24]
+    movsd   xmm5, xmm2
+    subsd   xmm5, [rsp+32]
+    mov     r8, [rsp+8]
+    mov     eax, [r14+r8*4+4]
+    call    gp_vert
+    subsd   xmm0, [rsp+16]              # b = p2 - p0
+    subsd   xmm1, [rsp+24]
+    subsd   xmm2, [rsp+32]
+    movsd   xmm6, xmm4                  # n = a x b (twice the area)
+    mulsd   xmm6, xmm2
+    movsd   xmm7, xmm5
+    mulsd   xmm7, xmm1
+    subsd   xmm6, xmm7
+    movsd   xmm7, xmm5
+    mulsd   xmm7, xmm0
+    movsd   xmm8, xmm3
+    mulsd   xmm8, xmm2
+    subsd   xmm7, xmm8
+    movsd   xmm8, xmm3
+    mulsd   xmm8, xmm1
+    movsd   xmm9, xmm4
+    mulsd   xmm9, xmm0
+    subsd   xmm8, xmm9
+    mov     rdx, [rsp+16+48]
+    movsd   xmm9, [rdx+GR_N]
+    addsd   xmm9, xmm6
+    movsd   [rdx+GR_N], xmm9
+    movsd   xmm9, [rdx+GR_N+8]
+    addsd   xmm9, xmm7
+    movsd   [rdx+GR_N+8], xmm9
+    movsd   xmm9, [rdx+GR_N+16]
+    addsd   xmm9, xmm8
+    movsd   [rdx+GR_N+16], xmm9
+    mulsd   xmm6, xmm6                  # area = |n| / 2
+    mulsd   xmm7, xmm7
+    addsd   xmm6, xmm7
+    mulsd   xmm8, xmm8
+    addsd   xmm6, xmm8
+    sqrtsd  xmm6, xmm6
+    mulsd   xmm6, [rip+so_half]
+    movsd   xmm7, [rdx+GR_AREA]
+    addsd   xmm7, xmm6
+    movsd   [rdx+GR_AREA], xmm7
+    addsd   xmm0, xmm3                  # centre x 3 - 3 p0 = a + b
+    addsd   xmm1, xmm4
+    addsd   xmm2, xmm5
+    mulsd   xmm0, [rip+so_third_d]
+    mulsd   xmm1, [rip+so_third_d]
+    mulsd   xmm2, [rip+so_third_d]
+    addsd   xmm0, [rsp+16]
+    addsd   xmm1, [rsp+24]
+    addsd   xmm2, [rsp+32]
+    mulsd   xmm0, xmm6
+    mulsd   xmm1, xmm6
+    mulsd   xmm2, xmm6
+    addsd   xmm0, [rdx+GR_C]
+    movsd   [rdx+GR_C], xmm0
+    addsd   xmm1, [rdx+GR_C+8]
+    movsd   [rdx+GR_C+8], xmm1
+    addsd   xmm2, [rdx+GR_C+16]
+    movsd   [rdx+GR_C+16], xmm2
+    add     rsp, 8
+    pop     r8
+    inc     r8d
+    jmp     5b
+7:  mov     rdx, [rsp+48]               # its corners in the bounds
+    xor     r8d, r8d
+71: cmp     r8d, [rsp+40]
+    jae     8f
+    mov     eax, [r14+r8*4]
+    call    gp_vert
+    minsd   xmm3, xmm0
+    movsd   xmm3, [rdx+GR_MIN]
+    minsd   xmm3, xmm0
+    movsd   [rdx+GR_MIN], xmm3
+    movsd   xmm3, [rdx+GR_MIN+8]
+    minsd   xmm3, xmm1
+    movsd   [rdx+GR_MIN+8], xmm3
+    movsd   xmm3, [rdx+GR_MIN+16]
+    minsd   xmm3, xmm2
+    movsd   [rdx+GR_MIN+16], xmm3
+    movsd   xmm3, [rdx+GR_MAX]
+    maxsd   xmm3, xmm0
+    movsd   [rdx+GR_MAX], xmm3
+    movsd   xmm3, [rdx+GR_MAX+8]
+    maxsd   xmm3, xmm1
+    movsd   [rdx+GR_MAX+8], xmm3
+    movsd   xmm3, [rdx+GR_MAX+16]
+    maxsd   xmm3, xmm2
+    movsd   [rdx+GR_MAX+16], xmm3
+    inc     r8d
+    jmp     71b
+8:  mov     eax, [r13+r15*8]            # the next polygon's loops
+    lea     r14, [r14+rax*4]
+    inc     r15d
+    jmp     1b
+9:  lea     rsp, [rbp-32]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    ret
+
+# gp_vert(eax=vertex; r12 = the piece's vertices, rbx = its header) ->
+#   xmm0-2: its place in the object (doubles)
+gp_vert:
+    imul    rax, rax, 12
+    cvtss2sd xmm0, [r12+rax]
+    cvtss2sd xmm1, [r12+rax+4]
+    cvtss2sd xmm2, [r12+rax+8]
+    addsd   xmm0, [rbx+PH_C]
+    addsd   xmm1, [rbx+PH_C+8]
+    addsd   xmm2, [rbx+PH_C+16]
+    ret
+
+# so_glue -> eax = glue joints made (so_glue: the strength, N/m^2)
+so_glue:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 200
+    xor     eax, eax
+    mov     [rsp+192], eax              # (made)
+    movss   xmm0, [rip+so_gluef]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     .Lgl_out
+    cmp     dword ptr [rip+so_nobodies], 0
+    jne     .Lgl_out
+    mov     ebx, [rip+so_ngrp]
+    cmp     ebx, 2
+    jb      .Lgl_out
+    mov     rsi, rbx                    # the groups by tag (sort keys)
+    shl     rsi, 3
+    mov     [rsp+184], rsi
+    call    sh_map_g
+    test    rax, rax
+    jz      .Lgl_out
+    mov     [rsp+176], rax
+    xor     ecx, ecx
+1:  cmp     ecx, ebx
+    jae     2f
+    imul    rdx, rcx, GR_SZ
+    add     rdx, [rip+so_grp]
+    mov     edi, [rdx+GR_TAG]           # the centre and normal over the area
+    shl     rdi, 32
+    or      rdi, rcx
+    mov     [rax+rcx*8], rdi
+    movsd   xmm0, [rdx+GR_AREA]
+    maxsd   xmm0, [rip+so_tiny]
+    xor     r8d, r8d
+11: movsd   xmm1, [rdx+GR_C+r8*8]
+    divsd   xmm1, xmm0
+    movsd   [rdx+GR_C+r8*8], xmm1
+    inc     r8d
+    cmp     r8d, 3
+    jb      11b
+    inc     ecx
+    jmp     1b
+2:  mov     rdi, rax
+    mov     esi, ebx
+    call    sort_u64
+    xor     edi, edi
+    call    an_own_g
+    test    rax, rax
+    jz      .Lgl_free
+    mov     [rip+so_anim], rax          # (the anim block)
+    call    so_gap_tol                  # (faces this far apart still meet)
+    movsd   [rip+so_gtol], xmm0
+    xor     r12d, r12d                  # runs of one tag: each pair
+3:  cmp     r12d, ebx
+    jae     .Lgl_free
+    mov     rax, [rsp+176]
+    mov     rdx, [rax+r12*8]
+    shr     rdx, 32
+    lea     r13d, [r12+1]               # the run's end
+31: cmp     r13d, ebx
+    jae     32f
+    mov     rcx, [rax+r13*8]
+    shr     rcx, 32
+    cmp     rcx, rdx
+    jne     32f
+    inc     r13d
+    jmp     31b
+32: mov     r14d, r12d
+4:  cmp     r14d, r13d
+    jae     7f
+    lea     r15d, [r14+1]
+5:  cmp     r15d, r13d
+    jae     6f
+    mov     rax, [rsp+176]
+    mov     edi, [rax+r14*8]
+    mov     esi, [rax+r15*8]
+    lea     rdx, [rsp]
+    call    gl_meet
+    test    eax, eax
+    jz      51f
+    lea     rdi, [rsp]
+    call    gl_joint
+    add     [rsp+192], eax
+51: inc     r15d
+    jmp     5b
+6:  inc     r14d
+    jmp     4b
+7:  mov     r12d, r13d
+    jmp     3b
+.Lgl_free:
+    mov     rdi, [rsp+176]
+    mov     rsi, [rsp+184]
+    call    sh_unmap_g
+.Lgl_out:
+    mov     eax, [rsp+192]
+    lea     rcx, [rip+sh_stat]
+    cvtsi2sd xmm0, eax
+    movsd   [rcx+7*8], xmm0
+    add     rsp, 200
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# so_gap_tol -> xmm0: how far apart two faces of a joint can be (the gap's
+#   largest local reach + a hair of the size)
+so_gap_tol:
+    call    so_diag
+    mulsd   xmm0, [rip+so_1em6]
+    mov     rax, [rip+so_obj]
+    cvtss2sd xmm1, [rip+so_gap]
+    xor     ecx, ecx
+1:  cvtss2sd xmm2, [rax+OB_SCALE+rcx*4]
+    andpd   xmm2, [rip+so_abs]
+    maxsd   xmm2, [rip+so_tiny]
+    movsd   xmm3, xmm1
+    divsd   xmm3, xmm2
+    addsd   xmm3, xmm0
+    maxsd   xmm0, xmm3
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    addsd   xmm0, [rip+so_1em6]
+    ret
+
+# gl_meet(edi, esi = groups, rdx=out: area (double), pivot (3 doubles,
+#   local), pieces (2 u32)) -> eax = 1 when they are one face from two
+#   pieces: facing each other, their bounds overlapping (a hair apart at
+#   most, along the normal: the gap)
+gl_meet:
+    push    rbx
+    mov     rbx, rdx
+    imul    r8, rdi, GR_SZ
+    add     r8, [rip+so_grp]
+    imul    r9, rsi, GR_SZ
+    add     r9, [rip+so_grp]
+    mov     eax, [r8+GR_PIECE]
+    cmp     eax, [r9+GR_PIECE]
+    je      8f
+    mov     [rbx+32], eax
+    mov     eax, [r9+GR_PIECE]
+    mov     [rbx+36], eax
+    movsd   xmm0, [r8+GR_N]             # n1 . n2 < -0.9 |n1| |n2|
+    mulsd   xmm0, [r9+GR_N]
+    movsd   xmm1, [r8+GR_N+8]
+    mulsd   xmm1, [r9+GR_N+8]
+    addsd   xmm0, xmm1
+    movsd   xmm1, [r8+GR_N+16]
+    mulsd   xmm1, [r9+GR_N+16]
+    addsd   xmm0, xmm1
+    xorpd   xmm1, xmm1
+    comisd  xmm0, xmm1
+    jae     8f
+    xor     ecx, ecx                    # the overlap: each axis (a gap's worth
+    movsd   xmm6, [rip+so_gtol]         #  apart allowed), its area from the
+    xorpd   xmm5, xmm5                  #  two widest
+    sub     rsp, 32
+1:  movsd   xmm0, [r8+GR_MAX+rcx*8]
+    minsd   xmm0, [r9+GR_MAX+rcx*8]
+    movsd   xmm1, [r8+GR_MIN+rcx*8]
+    maxsd   xmm1, [r9+GR_MIN+rcx*8]
+    movsd   xmm2, xmm0
+    addsd   xmm2, xmm1
+    mulsd   xmm2, [rip+so_half]
+    movsd   [rbx+8+rcx*8], xmm2         # (the pivot: the overlap's middle)
+    subsd   xmm0, xmm1
+    movsd   xmm2, xmm6
+    xorpd   xmm3, xmm3
+    subsd   xmm3, xmm2
+    comisd  xmm0, xmm3
+    jb      81f
+    maxsd   xmm0, xmm5
+    movsd   [rsp+rcx*8], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    movsd   xmm0, [rsp]                 # area: the two largest widths'
+    mulsd   xmm0, [rsp+8]               #  product (the largest of the three
+    movsd   xmm1, [rsp]                 #  products)
+    mulsd   xmm1, [rsp+16]
+    maxsd   xmm0, xmm1
+    movsd   xmm1, [rsp+8]
+    mulsd   xmm1, [rsp+16]
+    maxsd   xmm0, xmm1
+    add     rsp, 32
+    movsd   xmm1, [r8+GR_AREA]          # and no more than either face
+    minsd   xmm1, [r9+GR_AREA]
+    minsd   xmm0, xmm1
+    comisd  xmm0, [rip+so_tiny]
+    jbe     8f
+    movsd   [rbx], xmm0
+    mov     eax, 1
+    pop     rbx
+    ret
+81: add     rsp, 32
+8:  xor     eax, eax
+    pop     rbx
+    ret
+
+# gl_joint(rdi=gl_meet's result) -> eax = 1: a fixed joint between the two
+#   pieces at the face, breaking at the strength x the area (x the falloff)
+gl_joint:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 48
+    mov     rbx, rdi
+    mov     r12, [rip+so_anim]
+    mov     eax, [r12+AN_NJT_]
+    cmp     eax, JT_MAX_
+    jae     8f
+    lea     rcx, [rip+so_pieces]        # the two objects' uids
+    mov     eax, [rbx+32]
+    mov     edi, [rcx+rax*4]
+    call    obj_get
+    test    rax, rax
+    jz      8f
+    mov     r13d, [rax+OB_UID]
+    lea     rcx, [rip+so_pieces]
+    mov     eax, [rbx+36]
+    mov     edi, [rcx+rax*4]
+    call    obj_get
+    test    rax, rax
+    jz      8f
+    mov     eax, [rax+OB_UID]
+    mov     [rsp], eax
+    mov     eax, [r12+AN_NJT_]          # the entry
+    inc     dword ptr [r12+AN_NJT_]
+    imul    rdi, rax, JT_SZ_
+    lea     r12, [r12+AN_JT_+rdi]
+    mov     rdi, r12
+    xor     eax, eax
+    mov     ecx, JT_SZ_
+    rep     stosb
+    mov     dword ptr [r12+JT_TYPE], 1
+    mov     [r12+JT_A], r13d
+    mov     eax, [rsp]
+    mov     [r12+JT_B], eax
+    mov     eax, [rip+so_f1]            # (axis: Y)
+    mov     [r12+JT_AXIS+4], eax
+    lea     rax, [rip+so_mat]           # pivot = M p
+    xor     ecx, ecx
+1:  movss   xmm0, [rax+12]
+    xor     edx, edx
+2:  cvtsd2ss xmm1, [rbx+8+rdx*8]
+    mulss   xmm1, [rax+rdx*4]
+    addss   xmm0, xmm1
+    inc     edx
+    cmp     edx, 3
+    jb      2b
+    movss   [r12+JT_PIV+rcx*4], xmm0
+    add     rax, 16
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     rax, [rip+so_obj]           # area in the world: x |det S|^(2/3)
+    cvtss2sd xmm0, [rax+OB_SCALE]
+    cvtss2sd xmm1, [rax+OB_SCALE+4]
+    mulsd   xmm0, xmm1
+    cvtss2sd xmm1, [rax+OB_SCALE+8]
+    mulsd   xmm0, xmm1
+    andpd   xmm0, [rip+so_abs]
+    call    so_cbrt
+    mulsd   xmm0, xmm0
+    mulsd   xmm0, [rbx]
+    cvtss2sd xmm1, [rip+so_gluef]
+    mulsd   xmm0, xmm1
+    movsd   [rsp+8], xmm0
+    cmp     dword ptr [rip+so_atmode], 1 # weaker near the impact point: the
+    jne     3f                          #  distance / (spread x size), 0.2 - 1
+    xorpd   xmm0, xmm0
+    xor     ecx, ecx
+21: movsd   xmm1, [rbx+8+rcx*8]
+    lea     rax, [rip+so_at]
+    subsd   xmm1, [rax+rcx*8]
+    mulsd   xmm1, xmm1
+    addsd   xmm0, xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      21b
+    sqrtsd  xmm0, xmm0
+    movsd   [rsp+16], xmm0
+    call    so_diag
+    cvtss2sd xmm1, [rip+so_spread]
+    mulsd   xmm0, xmm1
+    maxsd   xmm0, [rip+so_tiny]
+    movsd   xmm1, [rsp+16]
+    divsd   xmm1, xmm0
+    maxsd   xmm1, [rip+so_02]
+    minsd   xmm1, [rip+so_one]
+    mulsd   xmm1, [rsp+8]
+    movsd   [rsp+8], xmm1
+3:  cmp     dword ptr [rip+so_gluepaint], 0 # painted: the brightness nearest
+    je      4f                          #  the face
+    lea     rdi, [rbx+8]
+    call    so_near_colour
+    test    eax, eax
+    jz      4f
+    xor     ecx, ecx                    # (r + g + b) / 765
+    xor     eax, eax
+31: movzx   r8d, dl
+    add     eax, r8d
+    shr     edx, 8
+    inc     ecx
+    cmp     ecx, 3
+    jb      31b
+    cvtsi2sd xmm0, eax
+    divsd   xmm0, [rip+so_765]
+    mulsd   xmm0, [rsp+8]
+    movsd   [rsp+8], xmm0
+4:  cvtsd2ss xmm0, [rsp+8]
+    movss   xmm1, [rip+so_fmin]         # (never 0: that would be unbreakable)
+    maxss   xmm0, xmm1
+    movss   [r12+JT_BRK], xmm0
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 48
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # so_build -> eax = pieces made: every cell's pieces into objects; the
 #   stats
 so_build:
@@ -2041,6 +2630,34 @@ so_build:
     sub     rsp, 16
     xor     r15d, r15d                  # pieces
     mov     dword ptr [rip+so_first], 0
+    xor     edi, edi                    # (room for the faces' groups: a
+    xor     ecx, ecx                    #  polygon each at most)
+91: cmp     ecx, [rip+sh_nres]
+    jae     93f
+    mov     rax, [rip+sh_res]
+    mov     rdx, rcx
+    shl     rdx, 4
+    mov     rsi, [rax+rdx]
+    test    rsi, rsi
+    jz      92f
+    mov     r8d, [rsi]
+    add     rsi, PP_HDR
+921:test    r8d, r8d
+    jz      92f
+    add     edi, [rsi+PH_NP]
+    push    rdi
+    push    rcx
+    push    r8
+    call    so_piece_next
+    pop     r8
+    pop     rcx
+    pop     rdi
+    mov     rsi, rax
+    dec     r8d
+    jmp     921b
+92: inc     ecx
+    jmp     91b
+93: call    so_groups_alloc
     lea     rax, [rip+sh_stat]
     xorpd   xmm0, xmm0
     movsd   [rax+2*8], xmm0
@@ -2082,6 +2699,13 @@ so_build:
     call    so_make
     test    eax, eax
     jz      3f
+    push    rax
+    push    rax
+    mov     edi, [rip+so_npieces]       # (its faces' groups)
+    dec     edi
+    call    so_groups
+    pop     rax
+    pop     rax
     inc     r15d
     cmp     dword ptr [rip+so_first], 0
     jne     3f
@@ -2255,6 +2879,14 @@ so_parse:
     jz      8f
     movss   [rip+so_density], xmm0
     jmp     1b
+.Lpa_glue:
+    call    pa_num
+    jz      8f
+    movss   [rip+so_gluef], xmm0
+    jmp     1b
+.Lpa_paint:
+    mov     dword ptr [rip+so_gluepaint], 1
+    jmp     1b
 .Lpa_nobodies:
     mov     dword ptr [rip+so_nobodies], 1
     jmp     1b
@@ -2330,6 +2962,8 @@ so_defaults:
     mov     [rip+so_counted], eax
     mov     [rip+so_density], eax
     mov     [rip+so_nobodies], eax
+    mov     [rip+so_gluef], eax
+    mov     [rip+so_gluepaint], eax
     mov     dword ptr [rip+so_count], 50
     mov     dword ptr [rip+so_seed], 1
     mov     eax, [rip+so_fhalf]
@@ -2590,6 +3224,7 @@ do_shatter:
     call    so_build
     mov     ebx, eax
     call    so_bodies
+    call    so_glue
     mov     edi, 13
     call    so_lap
     jmp     .Lsh_made

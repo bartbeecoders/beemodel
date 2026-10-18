@@ -4,7 +4,7 @@
 past the scene's start they fall, collide, rest and sleep, and they come
 back when the frame returns to the start. Everything about them lives in
 the animation block: the world (`AN_RW_`), up to 4096 bodies (`AN_RB_`) and
-128 joints (`AN_JT_`). So they undo, save with the file and go into the
+16 384 joints (`AN_JT_`; files keep those in use). So they undo, save with the file and go into the
 simulation cache. The code is `src/rbody.s` (the solver),
 `src/clip.s` (face clipping) and `src/physui.s` (Properties › Physics).
 The tests are `tests/solver.py` (and the physics panel in `tools/fakewl.py`), and the benchmark
@@ -82,6 +82,7 @@ Script reports:
   - 16: a hash of every body's state
   - 17: the fastest awake body's speed (its turn counted at its surface)
   - 18: that body's object's uid
+  - 19: joints in the run
 
 ## A step
 
@@ -167,8 +168,13 @@ relative turn about the axis) or the slider's distance along its axis.
 - **A motor** drives towards its target speed. Its impulse over a substep
   is clamped by the torque or force times the substep.
 - **Breaking.** Each joint sums its row impulses over a step. Past its
-  breaking force times the step's time, it is marked broken: no rows, no
-  island tie, for the rest of the run (`rbinfo(15)`).
+  breaking force times the step's time, it breaks at once, in the middle
+  of the solve: it passes no more of a blow on, so a hit breaks the glue
+  near it and the rest holds. Broken: no rows, no island tie, its bodies
+  collide again, for the rest of the run (`rbinfo(15)`).
+- **Many joints.** Whether two bodies are tied (they don't collide then) is
+  a hash of the joints' pairs; joints find their bodies through a hash of
+  uids. A big island with joints is solved in stages like any other.
 
 ### Mesh colliders
 
