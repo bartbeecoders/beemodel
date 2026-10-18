@@ -148,7 +148,7 @@ items_select:   .quad op_select_all, 0, op_mesh_all, op_mesh_inv, op_mesh_linked
                 .quad op_selmode_v, op_selmode_e, op_selmode_f
 .equ items_select_n, (. - items_select) / 8
 items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
-                .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_ground, op_la_add, 0, sub_curve
+                .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_ground, sub_landscape, 0, sub_curve
                 .quad op_cad_sketch, sub_generate
                 .quad 0, op_add_light, op_add_camera, op_add_armature
 .equ items_add_n, (. - items_add) / 8
@@ -180,6 +180,7 @@ sub_normals_l:  .quad op_m_flip, op_m_recalc
 sub_feature_l:  .quad op_cad_pad, op_cad_pocket, op_cad_revolve, op_cad_hole, 0
                 .quad op_cad_shell, op_cad_fillet, op_cad_chamfer, op_cad_pattern, op_cad_infill
 sub_generate_l: .quad op_gen_lsystem, op_gen_wfc
+sub_landscape_l: .quad op_la_flat, op_la_hills, op_la_mount, op_la_canyon, op_la_dunes, op_la_island
 sub_ws_l:       .quad op_ws_next, op_ws_prev, 0, op_ws_new, op_ws_rename, op_ws_delete
 sub_uv_l:       .quad op_uv_unwrap, op_uv_smart, op_uv_pack, 0, op_uv_mark, op_uv_clear, op_uv_sharp
 sub_mech_l:     .quad op_mj_add, op_mj_list, op_mj_check
@@ -199,6 +200,7 @@ SUBMENU sub_curve, "Curve", sub_curve_l, 3
 SUBMENU sub_normals, "Normals", sub_normals_l, 2
 SUBMENU sub_feature, "Part Feature", sub_feature_l, 10
 SUBMENU sub_generate, "Generate", sub_generate_l, 2
+SUBMENU sub_landscape, "Landscape", sub_landscape_l, 6
 SUBMENU sub_mech, "Mechanism", sub_mech_l, 3
 SUBMENU sub_uv, "UV", sub_uv_l, 7
 SUBMENU sub_snap, "Snap", sub_snap_l, 5

@@ -71,7 +71,7 @@ l_keymap:       .quad s_km0, s_km1
 t_empty:        .asciz "n = count()\nfor i in 0..n { delete(name(0)) }"
 t_product:      .asciz "n = count()\nfor i in 0..n { delete(name(0)) }\nop(\"scene.units\", \"mm\")\nparam(\"w\", \"60mm\")\nparam(\"d\", \"40mm\")\nparam(\"h\", \"20mm\")\ns = sketch(\"Base\", \"XZ\")\nrect(s, 0, 0, 60, 40)\npad(\"Part\", s, \"h\")\nfillet(\"Part\", \"3mm\", \"vertical\")\nselect(\"Part\")\nop(\"create.light\")\nop(\"create.camera\")"
 t_character:    .asciz "n = count()\nfor i in 0..n { delete(name(0)) }\na = armature(\"Rig\")\nop(\"arm.bone\", \"Spine Bone 0 1 0 0 1.8 0\")\nadd(\"cylinder\", \"Body\", 0, 1, 0)\nscale(\"Body\", 0.4)\nop(\"arm.parent\", \"Body Rig\")\nselect(\"Body\")\nop(\"create.light\")\nop(\"create.camera\")"
-t_terrain:      .asciz "n = count()\nfor i in 0..n { delete(name(0)) }\nadd(\"grid\", \"Terrain\", 0, 0, 0)\nscale(\"Terrain\", 20)\nselect(\"Terrain\")\nop(\"create.light\")\nop(\"create.camera\")"
+t_terrain:      .asciz "n = count()\nfor i in 0..n { delete(name(0)) }\nop(\"landscape.add\", \"hills size 40\")\nop(\"landscape.layer\", \"set 0 height 4\")\nop(\"create.light\")\nop(\"create.camera\")"
 t_tree:         .asciz "n = count()\nfor i in 0..n { delete(name(0)) }\nselect(lsystem(\"Tree\", \"X\", \"X=F+[[X]-X]-F[-FX]+X; F=FF\", 5, 25, 0.05, 0.01))\nop(\"create.light\")"
 t_ball:         .asciz "n = count()\nfor i in 0..n { delete(name(0)) }\nadd(\"plane\", \"Floor\", 0, 0, 0)\nscale(\"Floor\", 5)\nadd(\"sphere\", \"Ball\", 0, 3, 0)\nselect(\"Floor\")\nop(\"rigid.add\", \"passive\")\nselect(\"Ball\")\nop(\"rigid.add\", \"active sphere\")\nop(\"create.light\")"
 
@@ -156,7 +156,7 @@ WIDGET wd_wl_empty, WK_BUTTON, "welcome.empty", "Empty Scene", tip="Nothing in i
 WIDGET wd_wl_default, WK_BUTTON, "welcome.default", "Default Scene", flags=WGF_PRIMARY, tip="A cube, a light and a camera"
 WIDGET wd_wl_product, WK_BUTTON, "welcome.product", "Product (CAD)", tip="A part from a sketch and parameters, in millimetres"
 WIDGET wd_wl_character, WK_BUTTON, "welcome.character", "Character", tip="A body skinned to an armature"
-WIDGET wd_wl_terrain, WK_BUTTON, "welcome.terrain", "Terrain", tip="A big grid to sculpt"
+WIDGET wd_wl_terrain, WK_BUTTON, "welcome.terrain", "Terrain", tip="Hills to sculpt and paint (a landscape)"
 WIDGET wd_wl_open, WK_BUTTON, "welcome.open", "Open...", aux=op_file_open
 WIDGET wd_wl_recent, WK_BUTTON, "welcome.recent", flags=WGF_COMPACT
 WIDGET wd_wl_tree, WK_BUTTON, "welcome.sample_tree", "L-system Tree", tip="A plant grown by rewriting rules"
