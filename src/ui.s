@@ -153,7 +153,7 @@ items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad 0, op_add_light, op_add_camera, op_add_armature
 .equ items_add_n, (. - items_add) / 8
 items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, sub_snap, sub_parent, 0
-                .quad sub_feature, sub_boolean, sub_mech, op_repair, op_print_check, op_obj_measure
+                .quad sub_feature, sub_boolean, sub_mech, sub_physics, op_repair, op_print_check, op_obj_measure
                 .quad 0, op_an_key, op_arm_parent
 .equ items_object_n, (. - items_object) / 8
 items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
@@ -187,6 +187,7 @@ sub_mech_l:     .quad op_mj_add, op_mj_list, op_mj_check
 sub_snap_l:     .quad op_cursor_sel, op_cursor_reset, op_sel_cursor, op_sel_grid, op_toggle_snap
 sub_parent_l:   .quad op_par_set, op_par_clear
 sub_separate_l: .quad op_sep_loose
+sub_physics_l:  .quad op_rb_add, op_rb_rem, op_rb_joint, 0, op_shatter
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -207,6 +208,7 @@ SUBMENU sub_uv, "UV", sub_uv_l, 7
 SUBMENU sub_snap, "Snap", sub_snap_l, 5
 SUBMENU sub_parent, "Parent", sub_parent_l, 2
 SUBMENU sub_separate, "Separate", sub_separate_l, 1
+SUBMENU sub_physics, "Physics", sub_physics_l, 5
 SUBMENU sub_workspace, "Workspace", sub_ws_l, 6
 
 # -----------------------------------------------------------------------------

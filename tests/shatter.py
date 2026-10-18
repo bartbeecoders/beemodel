@@ -14,6 +14,12 @@ the cut faces; a mortar gap takes its volume; a sphere into 500 balls, all
 inside it and none overlapping; a vase into 50 shards around a point:
 smaller near it, the volume kept.
 
+S3: every piece a rigid body - a cube held up in the air shattered into
+200 shards: 200 active hull bodies, children of the hidden cube, whose
+masses add up to the cube's (its volume x the density); played, they fall,
+land on the Ground (none below it) and settle (asleep); in the window
+(the fake compositor) Ctrl+Z gives the cube back.
+
     python3 tests/shatter.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -217,10 +223,52 @@ def s2(tmp):
     check(v and v[4] >= 50, 'each shard has the vase\'s material (%s)' % (v and v[4]))
 
 
+def s3():
+    print('S3: pieces as rigid bodies')
+    out = run('op("create.ground")\nmove("Cube", 0, 3, 0)\nselect("Cube")\n'
+              'op("object.shatter", "shards count 200 seed 4 density 600")\n' + STATS +
+              'for k in 21..23 { print("st", k, shinfo(k)) }\n'
+              'h = 0\nm = 0\nfor i in 1..201 { n = "Cube_shard_" + str(i)\n'
+              '  h = h + (rigid(n, "type") == 1) * (rigid(n, "shape") == 3)\n  m = m + rigid(n, "mass") }\n'
+              'print("b", h, m)\n'
+              'frame(1200)\nlow = 100\nfor i in 1..201 { y = get("Cube_shard_" + str(i), "y")\n'
+              '  if y < low { low = y } }\nprint("f", rbinfo(0), rbinfo(2), low)\n')
+    st, b, fl = stats(out), vals(out, 'b'), vals(out, 'f')
+    check(b and b[0] == 200, 'a cube into 200 shards, each an active hull body (%s)' % (b and b[0]))
+    check(b and abs(b[1] - 8 * 600) < 1e-2 * 8 * 600 and st and abs(st[21] - 4800) < 1,
+          'their masses add up to the cube\'s: 8 m^3 x 600 kg/m^3 (%s kg)' % (b and b[1]))
+    check(fl and fl[0] == 201, 'played: 200 bodies and the Ground (the hidden cube is not one): %s' % (fl and fl[0]))
+    check(fl and fl[2] > -0.01, 'they land on the Ground, none below it (lowest centre %.3f m)' % (fl and fl[2]))
+    check(fl and fl[1] == 0, 'and settle: all asleep after 50 s (%s awake)' % (fl and fl[1]))
+    # the window: Ctrl+Z after a shatter
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
+    argv = sys.argv
+    sys.argv = [argv[0], tempfile.mkdtemp(prefix='bee-shat-shots-')]
+    import fakewl
+    sys.argv = argv
+    f = fakewl.Fake()
+    try:
+        f.pump(1.0, until_frame=True)
+        f.keymap(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'keymaps', 'us.xkb'))
+        m = fakewl.Mcp(f)
+        q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+        f.enter(600, 300)
+        f.move(600, 300)
+        q('select("Cube")')
+        f.key(28); f.type('object.shatter shards count 200'); f.key(28); f.pump(0.5); f.key(1)
+        n1 = q('print(count())')
+        f.mods(4); f.key(44); f.mods(0); f.pump(0.5)          # Ctrl+Z
+        n2 = q('print(count())')
+        check(n1.split()[:1] == ['203'] and n2 == '3', 'Ctrl+Z gives the cube back: %s objects, then %s' % (n1, n2))
+    finally:
+        f.proc.kill()
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix='bee-shat-')
     s1(tmp)
     s2(tmp)
+    s3()
     if FAILS:
         print('%d failed' % len(FAILS))
         sys.exit(1)

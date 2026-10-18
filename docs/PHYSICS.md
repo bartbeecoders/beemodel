@@ -10,6 +10,8 @@ simulation cache. The code is `src/rbody.s` (the solver),
 The tests are `tests/solver.py` (and the physics panel in `tools/fakewl.py`), and the benchmark
 is `tools/physbench.py`.
 
+Hidden objects (`object.hide`, a shattered original) are not bodies.
+
 ## Setting it up
 
 ```
@@ -33,7 +35,11 @@ frame(120)
 | groups | `group n` (0-15), `collide m` | m: a bit mask of the groups it meets (all by default) |
 
 Shapes:
-- **Hull**: up to 64 points of the mesh, the farthest along fixed directions.
+- **Hull**: up to 64 points of the mesh, the farthest along fixed directions
+  (points within 2% of its size of one kept are left out: two near
+  points make the contacts flicker). A closed mesh's hull body takes the
+  mesh's centre of volume and its moments (the inertia's diagonal) instead
+  of its bounds' centre and box.
 - **Compound**: convex pieces cut from the mesh. A triangle set is split at the middle of its longest side while some triangle lies deep inside the piece's hull.
 - **Mesh**: every triangle is a collider, found through a tree. A
   landscape is a heightfield instead (below).
@@ -74,6 +80,8 @@ Script reports:
   - 14: pairs that found no room
   - 15: joints broken
   - 16: a hash of every body's state
+  - 17: the fastest awake body's speed (its turn counted at its surface)
+  - 18: that body's object's uid
 
 ## A step
 
@@ -130,7 +138,9 @@ frame runs the steps up to its time. Each step does the following:
    - Restitution, only for contacts with some bounce.
    - Joints whose load passed their breaking force break.
    - Continuous collision (below).
-   - Sleep: bodies slow for long enough stop until something touches them.
+   - Sleep: bodies slow for long enough stop until something touches them
+     (under 5 cm/s, a turn counted by the speed of the body's surface:
+     its turn x half its size, at most a metre).
 7. **Write back.** Each body's place goes into its object or its instance.
 
 Each contact point keeps its rows for the step: r x d and the inverse inertia
