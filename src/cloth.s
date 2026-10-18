@@ -302,7 +302,16 @@ cl_build:
     jmp     1b
 2:  cmp     dword ptr [rsp], 0
     je      .Lcb_out
-    mov     eax, [rsp+8]
+    call    ground_any                  # (and the Ground's triangles)
+    test    rax, rax
+    jz      22f
+    mov     rdi, rax
+    call    obj_eval
+    test    rax, rax
+    jz      22f
+    mov     ecx, [rax+ME_NTRIS]
+    add     [rsp+8], ecx
+22: mov     eax, [rsp+8]
     add     eax, 16
     mov     [rip+cx_capct], eax
     # a hash size: a power of two >= 2 x (collider entries guess, particles)
@@ -1379,6 +1388,7 @@ cl_colliders:
     mov     rbx, [rip+an_cur]
     xorps   xmm0, xmm0
     movss   [rsp+96], xmm0              # their sizes, summed
+    mov     dword ptr [rsp+40], 0       # (1: the Ground's turn, after them)
     xor     r13d, r13d
 1:  cmp     r13d, [rbx+AN_CW_+CW_N]
     jae     5f
@@ -1391,7 +1401,7 @@ cl_colliders:
     test    rax, rax
     jz      4f
     mov     r15, rax
-    mov     rdi, rax
+10: mov     rdi, r15
     lea     rsi, [rsp+48]
     call    obj_matrix
     mov     rdi, r15
@@ -1456,14 +1466,24 @@ cl_colliders:
     shufps  xmm0, xmm0, 0xAA
     movhlps xmm2, xmm1
     maxss   xmm1, xmm2
+    cmp     dword ptr [rsp+40], 0       # (the Ground's: no part in the cell)
+    jne     41f
     addss   xmm1, [rsp+96]
     movss   [rsp+96], xmm1
-    inc     dword ptr [rip+cx_nct]
+41: inc     dword ptr [rip+cx_nct]
     inc     r12d
     jmp     2b
 4:  inc     r13d
     jmp     1b
-5:  cmp     dword ptr [rip+cx_nct], 0
+5:  cmp     dword ptr [rsp+40], 0       # then the Ground, a collider always
+    jne     51f
+    mov     dword ptr [rsp+40], 1
+    call    ground_any
+    test    rax, rax
+    jz      51f
+    mov     r15, rax
+    jmp     10b
+51: cmp     dword ptr [rip+cx_nct], 0
     je      .Lcc_out
     # the cell: the average triangle size, at least 5 cm
     cvtsi2ss xmm0, dword ptr [rip+cx_nct]

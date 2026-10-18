@@ -38,6 +38,7 @@
 .globl rb_impulse
 .globl rb_live
 .globl rb_inst_mesh
+.globl do_rb_add
 
 # the settings (anim block)
 .equ RW_GRAV,   0                       # gravity (3 floats; all 0: -9.81 Y)

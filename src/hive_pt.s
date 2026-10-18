@@ -35,6 +35,8 @@
 .globl hv_pass
 .globl hv_next
 .globl hv_m2
+.globl hv_film
+.globl hv_alpha
 .globl hv_aux
 .globl hv_accum
 .globl hv_rowspp
@@ -106,6 +108,10 @@ hv_next:        .skip 4             # the next row of the running pass
 hv_aux:         .skip 8             # f32[w*h][7]: albedo, normal, depth
 hv_rowspp:      .skip 8             # u32[h]: samples in each row
 hv_m2:          .skip 8             # f32[w*h]: sum of squared luminance
+hv_alpha:       .skip 8             # f32[w*h][4] (hv_film): camera rays that hit
+                                    #  something, a shadow catcher; its light
+                                    #  unshadowed, shadowed (sums)
+hv_film:        .skip 4             # 1: the film has alpha (shadow catchers)
 .align 8
 hv_lcdf:        .skip 8             # emissive triangles: CDF over (area * power)
 hv_ltri:        .skip 8             # their triangle
@@ -1298,6 +1304,7 @@ light_prep:
 tri_material:
     mov     rax, [rip+hv_tm]
     mov     eax, [rax+rdi*4]
+    btr     eax, 30                     # (HV_CATCH: not part of the index)
     test    eax, eax
     jz      1f
     shl     rax, MA_SHIFT
@@ -2080,7 +2087,7 @@ trace_path:
     lea     rbx, [rsp]
     mov     [rsp+PF_SZ], rsi
     xor     eax, eax                    # aux: nothing (a miss) unless hit
-    mov     ecx, 7
+    mov     ecx, 11                     # (+ the film's alpha terms)
 1:  mov     [rsi+rcx*4-4], eax
     loop    1b
     # camera ray
@@ -2115,7 +2122,11 @@ trace_path:
     call    pt_trace
     test    eax, eax
     jnz     .Ltp_hit
-    # missed: the sky (+ sun), MIS against the light choices
+    cmp     dword ptr [rip+hv_film], 0  # (a film with alpha: the camera sees
+    je      1f                          #  no sky)
+    cmp     dword ptr [rbx+PF_DEPTH], 0
+    je      .Ltp_done
+1:  # missed: the sky (+ sun), MIS against the light choices
     lea     rdi, [rbx+PF_RAY+RAY_D]
     lea     rsi, [rbx+PF_TMP]
     call    sky_rad
@@ -2297,6 +2308,12 @@ trace_path:
     mov     [rax+20], ecx
     mov     ecx, [rbx+PF_RAY+RAY_T]
     mov     [rax+24], ecx
+    cmp     dword ptr [rip+hv_film], 0  # a film with alpha: something seen,
+    je      79f                         #  or a shadow catcher
+    mov     rcx, [rip+hv_tm]
+    test    dword ptr [rcx+r12*4], HV_CATCH
+    jnz     .Ltp_catch
+    mov     dword ptr [rax+28], 0x3f800000
 79: # next-event estimation
     lea     rdi, [rbx+PF_P]
     lea     rsi, [rbx+PF_CTX+C_N]
@@ -2347,6 +2364,73 @@ trace_path:
     jb      72b
     lea     rsi, [rbx+PF_TMP]
     call    add_beta_l
+    jmp     .Ltp_bsdf
+.Ltp_catch:
+    # a shadow catcher seen: one light sample's light here, unshadowed and
+    #   shadowed (the film's alpha: 1 - shadowed / unshadowed); no colour
+    mov     dword ptr [rax+32], 0x3f800000
+    lea     rdi, [rbx+PF_P]
+    lea     rsi, [rbx+PF_CTX+C_N]
+    lea     rdx, [rbx+PF_LS]
+    call    light_sample
+    test    eax, eax
+    jz      .Ltp_done
+    lea     rdi, [rbx+PF_CTX+C_N]
+    lea     rsi, [rbx+PF_LS+LS_WI]
+    call    dot3
+    maxss   xmm0, [rip+pt_zero]
+    divss   xmm0, [rbx+PF_LS+LS_PDF]
+    movss   [rbx+PF_TMP+16], xmm0
+    lea     rdi, [rbx+PF_LS+LS_LI]
+    call    lum
+    mulss   xmm0, [rbx+PF_TMP+16]
+    ucomiss xmm0, xmm0                  # (NaN: none)
+    jp      .Ltp_done
+    comiss  xmm0, [rip+pt_tiny]
+    jbe     .Ltp_done
+    movss   [rbx+PF_TMP+16], xmm0
+    mov     rax, [rbx+PF_SZ]
+    movss   [rax+36], xmm0
+    lea     rdi, [rbx+PF_SRAY]
+    lea     rsi, [rbx+PF_LS+LS_WI]
+    call    spawn_ray
+    movss   xmm0, [rbx+PF_LS+LS_DIST]
+    mulss   xmm0, [rip+pt_one_m]
+    subss   xmm0, [rip+pt_eps]
+    movss   [rbx+PF_SRAY+RAY_TMAX], xmm0
+    mov     dword ptr [rbx+PF_TMP+20], 8 # (catchers let it through: they
+.Ltp_cray:                              #  catch shadows, they cast none)
+    lea     rdi, [rbx+PF_SRAY]
+    call    pt_trace
+    test    eax, eax
+    jz      .Ltp_clit
+    mov     eax, [rbx+PF_SRAY+RAY_TRI]
+    mov     rcx, [rip+hv_tm]
+    test    dword ptr [rcx+rax*4], HV_CATCH
+    jz      .Ltp_done
+    dec     dword ptr [rbx+PF_TMP+20]
+    jz      .Ltp_done
+    movss   xmm1, [rbx+PF_SRAY+RAY_T]   # on from just past it
+    addss   xmm1, [rip+pt_eps]
+    xor     ecx, ecx
+1:  movss   xmm0, [rbx+PF_SRAY+RAY_D+rcx*4]
+    mulss   xmm0, xmm1
+    addss   xmm0, [rbx+PF_SRAY+RAY_O+rcx*4]
+    movss   [rbx+PF_SRAY+RAY_O+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    movss   xmm0, [rbx+PF_SRAY+RAY_TMAX]
+    subss   xmm0, xmm1
+    comiss  xmm0, [rip+pt_eps]
+    jbe     .Ltp_clit
+    movss   [rbx+PF_SRAY+RAY_TMAX], xmm0
+    jmp     .Ltp_cray
+.Ltp_clit:
+    mov     rax, [rbx+PF_SZ]
+    movss   xmm0, [rbx+PF_TMP+16]
+    movss   [rax+40], xmm0
+    jmp     .Ltp_done
 .Ltp_bsdf:
     # continue along a BSDF sample
     lea     rdi, [rbx+PF_CTX]
@@ -2907,6 +2991,21 @@ hive_start:
     mov     ecx, r13d
     mov     eax, -1
     rep     stosd
+    mov     dword ptr [rip+hv_film], 0  # a shadow catcher: the film keeps
+    cmp     dword ptr [rip+hv_ncatch], 0 #  its alpha (renders, on the CPU)
+    je      10f
+    cmp     dword ptr [rip+gt_cpu], 0
+    jne     10f
+    mov     eax, r12d
+    imul    eax, r13d
+    shl     eax, 4
+    mov     edi, eax
+    call    pt_map
+    test    rax, rax
+    jz      8f
+    mov     [rip+hv_alpha], rax
+    mov     dword ptr [rip+hv_film], 1
+10:
     mov     dword ptr [rip+hv_den_on], 0
     mov     qword ptr [rip+dn_base], 0
     mov     dword ptr [rip+hv_next], 0
@@ -2927,6 +3026,8 @@ hive_start:
     inc     dword ptr [rip+hv_seed]
     mov     dword ptr [rip+gt_batch], 1
     cmp     dword ptr [rip+gt_cpu], 0   # (hive_prep: trace_ray, the CPU's)
+    jne     11f
+    cmp     dword ptr [rip+hv_film], 0  # (a shadow catcher: the CPU's too)
     jne     11f
     call    gpu_pt_begin                # its passes on the GPU (gpu.s)?
 11:
@@ -3032,7 +3133,16 @@ job_rows:
 4:  inc     ecx
     cmp     ecx, 7
     jb      3b
-    movss   xmm0, [rsp+16]              # luminance^2 (the variance estimate)
+    cmp     dword ptr [rip+hv_film], 0  # the film's alpha terms
+    je      6f
+    mov     rax, rbp
+    shl     rax, 4
+    add     rax, [rip+hv_alpha]
+    movups  xmm0, [rsp+56]
+    movups  xmm1, [rax]
+    addps   xmm0, xmm1
+    movups  [rax], xmm0
+6:  movss   xmm0, [rsp+16]              # luminance^2 (the variance estimate)
     mulss   xmm0, [rip+pt_lum]
     movss   xmm1, [rsp+20]
     mulss   xmm1, [rip+pt_lum+4]
@@ -3104,8 +3214,8 @@ job_resolve:
     push    r14
     push    r15
     push    rbp
-    sub     rsp, 8
-    mov     rbx, [rip+rv_out]
+    sub     rsp, 24                     # +4 the scale of sums, +8 the alpha
+    mov     rbx, [rip+rv_out]           #  (<< 24), +12 the scale of means
     mov     r12d, [rip+rv_stride]
     mov     r13d, esi                   # y
     mov     ebp, edx
@@ -3134,7 +3244,46 @@ job_resolve:
     imul    eax, [rip+hv_w]
     add     eax, r14d
     mov     r15d, eax                   # pixel
-    xor     edx, edx                    # packed
+    movss   [rsp+4], xmm6
+    mov     dword ptr [rsp+8], 0
+    mov     dword ptr [rsp+12], 0x3f800000
+    cmp     dword ptr [rip+hv_film], 0  # a film with alpha (the beauty):
+    je      30f                         #  a = (seen + catcher (1 - shadowed
+    cmp     dword ptr [rip+hv_pass], 0  #  / unshadowed)) / samples, the
+    jne     30f                         #  colour divided by it (straight)
+    mov     rax, r15
+    shl     rax, 4
+    add     rax, [rip+hv_alpha]
+    xorps   xmm1, xmm1
+    movss   xmm0, [rax+8]
+    comiss  xmm0, [rip+pt_tiny]
+    jbe     31f
+    movss   xmm1, [rax+12]
+    divss   xmm1, xmm0
+    movss   xmm2, [rip+pt_one]
+    subss   xmm2, xmm1
+    maxss   xmm2, [rip+pt_zero]
+    movaps  xmm1, xmm2
+31: mulss   xmm1, [rax+4]
+    addss   xmm1, [rax]
+    mulss   xmm1, xmm6
+    minss   xmm1, [rip+pt_one]
+    xorps   xmm0, xmm0
+    xorps   xmm2, xmm2
+    comiss  xmm1, [rip+pt_tiny]
+    jbe     32f
+    movaps  xmm0, xmm6
+    divss   xmm0, xmm1
+    movss   xmm2, [rip+pt_one]
+    divss   xmm2, xmm1
+32: movss   [rsp+4], xmm0
+    movss   [rsp+12], xmm2
+    mulss   xmm1, [rip+pt_255]
+    addss   xmm1, [rip+pt_half]
+    cvttss2si eax, xmm1
+    shl     eax, 24
+    mov     [rsp+8], eax
+30: xor     edx, edx                    # packed
     xor     ecx, ecx
 4:  mov     eax, [rip+hv_pass]
     test    eax, eax
@@ -3145,6 +3294,7 @@ job_resolve:
     shl     rax, 4
     add     rax, [rip+hv_den]
     movss   xmm0, [rax+rcx*4]
+    mulss   xmm0, [rsp+12]
     maxss   xmm0, [rip+pt_zero]
     call    aces_srgb
     jmp     48f
@@ -3152,7 +3302,7 @@ job_resolve:
     shl     rax, 2
     add     rax, [rip+hv_accum]
     movss   xmm0, [rax+rcx*4]
-    mulss   xmm0, xmm6
+    mulss   xmm0, [rsp+4]
     maxss   xmm0, [rip+pt_zero]
     call    aces_srgb
     jmp     48f
@@ -3197,6 +3347,7 @@ job_resolve:
     inc     ecx
     cmp     ecx, 3
     jb      4b
+    or      edx, [rsp+8]
     mov     eax, r13d
     imul    eax, r12d
     add     eax, r14d
@@ -3205,7 +3356,7 @@ job_resolve:
     jmp     3b
 5:  inc     r13d
     jmp     2b
-9:  add     rsp, 8
+9:  add     rsp, 24
     pop     rbp
     pop     r15
     pop     r14
@@ -3463,7 +3614,10 @@ hive_render_file:
     mov     edx, [rip+hv_w]
     mov     ecx, [rip+hv_h]
     mov     r8d, [rip+hv_w]
+    mov     eax, [rip+hv_film]          # (shadow catchers: RGBA)
+    mov     [rip+png_alpha], eax
     call    png_write
+    mov     dword ptr [rip+png_alpha], 0
     test    eax, eax
     jnz     8f
     mov     eax, [rip+hv_ms]

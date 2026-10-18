@@ -60,6 +60,12 @@ vp_grid:    .float 1.0                  # the ground grid's spacing (preferences
 
 .section .rodata
 .align 4
+gg_reach:   .float 2.0                  # the Ground's grid: reach x the view distance,
+gg_8:       .float 8.0                  #  at least 8 steps,
+gg_n:       .float 40.0                 #  40 steps across at most
+gg_10:      .float 10.0
+gg_half:    .float 0.5
+gg_one:     .float 1.0
 f_zero:     .float 0.0
 f_one:      .float 1.0
 f_orbit_k:  .float 0.008
@@ -418,6 +424,168 @@ line3d:
     pop     rbx
     ret
 
+# ground_grid -> eax = 1 if the Ground was drawn: lines across its plane
+#   (at its height) every grid step - ten times coarser while 40 steps
+#   do not reach - around the view's centre, fading to the background with
+#   the distance from it; every 10th line major (selected: highlighted)
+.equ GG_N, 40
+ground_grid:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 64                     # +0 step, +4 reach, +8 centre x z,
+    call    ground_any                  #  +16 y, +20 view centre x z, +28
+    test    rax, rax                    #  line colour, +32 background, +40
+    jz      8f                          #  the line's place, +44 its square
+    mov     r15, rax                    #  distance, +48 centre steps x z,
+    mov     eax, [r15+OB_LOC+4]         #  +56 segment colour
+    mov     [rsp+16], eax
+    movss   xmm0, [rip+vp_grid]
+    movss   [rsp], xmm0
+    movss   xmm1, [rip+cam_dist]
+    mulss   xmm1, [rip+gg_reach]
+    movss   xmm2, xmm0
+    mulss   xmm2, [rip+gg_8]
+    maxss   xmm1, xmm2
+    movss   [rsp+4], xmm1
+1:  movss   xmm2, [rsp]
+    mulss   xmm2, [rip+gg_n]
+    comiss  xmm2, [rsp+4]
+    jae     2f
+    movss   xmm2, [rsp]
+    mulss   xmm2, [rip+gg_10]
+    movss   [rsp], xmm2
+    jmp     1b
+2:  mov     eax, [rip+cam_tx]
+    mov     [rsp+20], eax
+    mov     eax, [rip+cam_tz]
+    mov     [rsp+24], eax
+    xor     ecx, ecx
+3:  movss   xmm0, [rsp+20+rcx*4]
+    divss   xmm0, [rsp]
+    cvtss2si eax, xmm0
+    mov     [rsp+48+rcx*4], eax
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rsp]
+    movss   [rsp+8+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 2
+    jb      3b
+    mov     r8d, COL_CANVAS_BOT
+    call    th_map
+    mov     [rsp+32], r8d
+    xor     r14d, r14d                  # lines along Z, then along X
+40: mov     r12d, -GG_N
+41: mov     eax, [rsp+48+r14*4]
+    add     eax, r12d
+    cdq
+    mov     ecx, 10
+    idiv    ecx
+    mov     r8d, COL_GRID
+    test    edx, edx
+    jnz     42f
+    mov     r8d, COL_GRID_MAJOR
+    test    dword ptr [r15+OB_FLAGS], OBF_SELECTED
+    jz      42f
+    mov     r8d, COL_SELECTED
+42: call    th_map
+    mov     [rsp+28], r8d
+    cvtsi2ss xmm0, r12d                 # its place across
+    mulss   xmm0, [rsp]
+    addss   xmm0, [rsp+8+r14*4]
+    movss   [rsp+40], xmm0
+    subss   xmm0, [rsp+20+r14*4]
+    mulss   xmm0, xmm0
+    movss   [rsp+44], xmm0
+    mov     r13d, -GG_N
+43: mov     eax, r14d                   # a segment: faded by its middle's
+    xor     eax, 1                      #  distance
+    cvtsi2ss xmm0, r13d
+    addss   xmm0, [rip+gg_half]
+    mulss   xmm0, [rsp]
+    addss   xmm0, [rsp+8+rax*4]
+    subss   xmm0, [rsp+20+rax*4]
+    mulss   xmm0, xmm0
+    addss   xmm0, [rsp+44]
+    sqrtss  xmm0, xmm0
+    divss   xmm0, [rsp+4]
+    movss   xmm1, [rip+gg_one]
+    subss   xmm1, xmm0
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jbe     49f
+    mov     edi, [rsp+32]
+    mov     esi, [rsp+28]
+    movaps  xmm0, xmm1
+    call    gg_mix
+    mov     [rsp+56], edx
+    mov     eax, r14d
+    xor     eax, 1
+    cvtsi2ss xmm6, r13d
+    mulss   xmm6, [rsp]
+    addss   xmm6, [rsp+8+rax*4]
+    movss   xmm7, xmm6
+    addss   xmm7, [rsp]
+    movss   xmm1, [rsp+16]
+    movss   xmm4, xmm1
+    test    r14d, r14d
+    jnz     44f
+    movss   xmm0, [rsp+40]
+    movss   xmm2, xmm6
+    movss   xmm3, [rsp+40]
+    movss   xmm5, xmm7
+    jmp     45f
+44: movss   xmm0, xmm6
+    movss   xmm2, [rsp+40]
+    movss   xmm3, xmm7
+    movss   xmm5, [rsp+40]
+45: call    set_lp
+    mov     edx, [rsp+56]
+    call    line3d
+49: inc     r13d
+    cmp     r13d, GG_N
+    jl      43b
+    inc     r12d
+    cmp     r12d, GG_N
+    jle     41b
+    inc     r14d
+    cmp     r14d, 2
+    jb      40b
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 64
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gg_mix(edi=colour a, esi=colour b, xmm0=t) -> edx = a + (b - a) t
+gg_mix:
+    xor     edx, edx
+    mov     ecx, 16
+1:  mov     eax, edi
+    shr     eax, cl
+    and     eax, 255
+    cvtsi2ss xmm1, eax
+    mov     eax, esi
+    shr     eax, cl
+    and     eax, 255
+    cvtsi2ss xmm2, eax
+    subss   xmm2, xmm1
+    mulss   xmm2, xmm0
+    addss   xmm1, xmm2
+    cvtss2si eax, xmm1
+    shl     eax, cl
+    or      edx, eax
+    sub     ecx, 8
+    jns     1b
+    ret
+
 # set_lp(xmm0..xmm2 -> lp0, xmm3..xmm5 -> lp1)
 set_lp:
     movss   [rip+lp0], xmm0
@@ -453,8 +621,11 @@ viewport_draw:
     call    set_clip
     call    cam_setup
 
-    cmp     dword ptr [rip+show_grid], 0
+    call    ground_grid                 # the Ground: its fading grid (the
+    cmp     dword ptr [rip+show_grid], 0 #  floor grid gives way to it)
     je      .Lvp_object
+    test    eax, eax
+    jnz     .Lvp_axes
     # ---- ground grid ---------------------------------------------------------
     mov     ebx, -GRID_N
 .Lvp_grid:
@@ -507,6 +678,7 @@ viewport_draw:
     cmp     ebx, GRID_N
     jle     .Lvp_grid
 
+.Lvp_axes:
     # ---- world axes ------------------------------------------------------------
     mov     eax, -GRID_N                # X (red)
     cvtsi2ss xmm0, eax

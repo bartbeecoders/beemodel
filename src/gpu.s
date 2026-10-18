@@ -769,6 +769,17 @@ gp_put:
     mov     rdi, [r14+24]
     mov     rcx, [rbx+24]
     call    put_bytes
+    cmp     dword ptr [rip+hv_ncatch], 0    # (shadow catchers' triangles:
+    je      1f                          #  the bit is not the shader's)
+    mov     rdi, [r14+24]
+    add     rdi, r13
+    mov     ecx, [rip+hv_n]
+2:  test    ecx, ecx
+    jz      1f
+    dec     ecx
+    btr     dword ptr [rdi+rcx*4], 30
+    jmp     2b
+1:
     mov     rsi, [rip+hv_tvc]
     mov     rdi, [r14+32]
     mov     rcx, [rbx+32]
