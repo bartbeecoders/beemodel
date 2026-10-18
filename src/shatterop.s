@@ -24,6 +24,8 @@
 .globl sh_info
 .globl op_shatter
 .globl op_sep_loose
+.globl so_pdata
+.globl so_preview_draw
 
 .equ VX_SZ,     24
 .equ TR_SZ,     16
@@ -87,6 +89,31 @@ k_nobodies:     .asciz "nobodies"
 k_glue:         .asciz "glue"
 k_paint:        .asciz "paint"
 k_impact:       .asciz "impact"
+k_preset:       .asciz "preset"
+k_again:        .asciz "again"
+k_none:         .asciz "none"
+k_brickwall:    .asciz "brickwall"
+k_glass:        .asciz "glass"
+k_stone:        .asciz "stone"
+k_gravel:       .asciz "gravel"
+.align 8
+so_presets:     .quad k_none, k_brickwall, k_glass, k_stone, k_gravel, 0
+# a preset: pattern, count, glue (N/m2), impact (N s), density, gap, spread,
+#   spread given, bricks a row, rows, inner colour (0: none)
+.equ PS_SZ,     44
+.align 4
+so_pdata:       .long 1, 50
+                .float 40000.0, 0.0, 1900.0, 0.005, 0.5
+                .long 0, 10, 5, 0xff9a8f84      # brick wall: mortar grey
+                .long 0, 60
+                .float 15000.0, 10.0, 2500.0, 0.0, 0.5
+                .long 0, 8, 4, 0xffd8f0f0       # glass: on impact, pale
+                .long 0, 25
+                .float 150000.0, 0.0, 2600.0, 0.0, 0.5
+                .long 0, 8, 4, 0xff8c8c88       # stone
+                .long 2, 300
+                .float 0.0, 0.0, 1800.0, 0.0, 0.5
+                .long 1, 8, 4, 0                # gravel: balls, radii spread
 s_sh_room:      .asciz "  shatter: no room for more rigid bodies (4096) - the rest are not bodies"
 s_sh_brick:     .asciz "_brick_"
 s_sh_ball:      .asciz "_ball_"
@@ -95,7 +122,7 @@ s_sh_part:      .asciz "_part_"
 s_sh_none:      .asciz "  shatter: make a mesh object active"
 s_sh_open:      .asciz "  shatter: the mesh is not closed even after repair (mesh.repair; open edges: "
 s_sh_mem:       .asciz "  shatter: out of memory"
-s_sh_bad:       .asciz "  object.shatter <shards|bricks|balls> [count n] [seed s] [at x y z | cursor | surface] [spread f] [size x y z | counts a b c] [offset f|random] [gap g] [jitter f] [radius r] [inner r g b] [density kg/m3] [nobodies] [glue N/m2 [paint]] [impact Ns] - not understood: "
+s_sh_bad:       .asciz "  object.shatter <shards|bricks|balls> [count n] [seed s] [at x y z | cursor | surface] [spread f] [size x y z | counts a b c] [offset f|random] [gap g] [jitter f] [radius r] [inner r g b] [density kg/m3] [nobodies] [glue N/m2 [paint]] [impact Ns] [preset brickwall|glass|stone|gravel] [again] - not understood: "
 s_sh_noseed:    .asciz "  shatter: no room inside the mesh for the cells"
 s_sh_done:      .asciz "  shattered into "
 s_sh_pieces:    .asciz " pieces ("
@@ -107,11 +134,12 @@ s_sl_done:      .asciz "  separated into loose parts: "
 so_kws:         .quad k_shards, k_bricks, k_balls, k_count, k_seed, k_at, k_cursor
                 .quad k_surface, k_spread, k_size, k_counts, k_offset, k_gap
                 .quad k_jitter, k_radius, k_inner, k_density, k_nobodies
-                .quad k_glue, k_paint, k_impact, 0
+                .quad k_glue, k_paint, k_impact, k_preset, k_again, 0
 so_kwfn:        .quad .Lpa_count, .Lpa_seed, .Lpa_at, .Lpa_cursor, .Lpa_surface
                 .quad .Lpa_spread, .Lpa_size, .Lpa_counts, .Lpa_offset, .Lpa_gap
                 .quad .Lpa_jitter, .Lpa_radius, .Lpa_inner, .Lpa_density
                 .quad .Lpa_nobodies, .Lpa_glue, .Lpa_paint, .Lpa_impact
+                .quad .Lpa_preset, .Lpa_again
 so_one_d:       .double 1.0
 so_three:       .double 3.0
 so_1em6:        .double 1.0e-6
@@ -187,6 +215,8 @@ so_gluef:       .skip 4                 # glue: the strength (N/m^2), painted
 so_gluepaint:   .skip 4
 so_impact:      .skip 4                 # on impact: the blow it breaks at
 so_impactset:   .skip 4                 #  (N s)
+so_preset:      .skip 4                 # the preset named (0: none)
+so_again:       .skip 4                 # again: the pieces made before go
 so_ngrp:        .skip 4                 # the faces' groups (GR_SZ)
 so_grpcap:      .skip 4
 so_grp:         .skip 8
@@ -208,7 +238,7 @@ so_innerc:      .skip 4
 sh_ncell_used:  .skip 4
 
 .text
-OPERATOR op_shatter, "object.shatter", "Shatter", do_shatter, flags=OPF_AI_SAFE|OPF_UNDO, doc="Break the active mesh object into pieces, each an object (the original is hidden): object.shatter <shards|bricks|balls> [count n] [seed s] - shards: Voronoi cells [at x y z | cursor | surface] [spread f]; bricks: a running bond [counts a b c | size x y z] [offset f|random] [gap g] [jitter f]; balls: [radius r] [spread f]; [inner r g b] colours the cut faces"
+OPERATOR op_shatter, "object.shatter", "Shatter...", do_shatter, flags=OPF_AI_SAFE|OPF_UNDO, form=form_shatter, doc="Break the active mesh object into pieces, each an object (the original is hidden): object.shatter <shards|bricks|balls> [count n] [seed s] - shards: Voronoi cells [at x y z | cursor | surface] [spread f]; bricks: a running bond [counts a b c | size x y z] [offset f|random] [gap g] [jitter f]; balls: [radius r] [spread f]; [inner r g b] colours the cut faces; [glue N/m2 [paint]] ties neighbours; [impact N s]: whole until hit that hard; [preset brickwall|glass|stone|gravel]; [again]: a piece or the original: the pieces made before go first"
 OPERATOR op_sep_loose, "mesh.separate_loose", "Separate By Loose Parts", do_sep_loose, flags=OPF_AI_SAFE|OPF_UNDO, doc="Split each selected mesh object into one object per loose part (parts that share no vertex)"
 
 # sh_info(edi=k) -> xmm0 (double): the last shatter's 0 pieces, 1 cells, 2
@@ -666,7 +696,22 @@ so_bricks:
     push    r14
     push    r15
     push    rbp
-    sub     rsp, 120                    # +0 sizes (3 doubles), +24 counts,
+    sub     rsp, 120
+    cmp     dword ptr [rip+so_counted], 0   # count n: n a row, n / 2 rows
+    je      91f
+    cmp     dword ptr [rip+so_hascounts], 0
+    jne     91f
+    cmp     dword ptr [rip+so_hassize], 0
+    jne     91f
+    mov     eax, [rip+so_count]
+    mov     [rip+so_counts], eax
+    shr     eax, 1
+    cmp     eax, 1
+    jge     92f
+    mov     eax, 1
+92: mov     [rip+so_counts+4], eax
+    mov     dword ptr [rip+so_counts+8], 1
+91:                    # +0 sizes (3 doubles), +24 counts,
     xor     ecx, ecx                    #  +40 row, +44 joints in it, +48
 1:  lea     rax, [rip+sh_src_max]       #  gaps (3 doubles), +72 cell, +80
     movsd   xmm0, [rax+rcx*8]           #  layer, +88 joint
@@ -2712,6 +2757,148 @@ so_impact_marks:
     pop     rbx
     ret
 
+# so_unshatter(rdi=a piece or an original) -> rax = the original, whole
+#   again: shown, selected, active; its pieces (its children), their bodies
+#   and joints and its marker gone
+so_unshatter:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    par_of                      # a piece: its parent is the original
+    test    rax, rax
+    jz      1f
+    mov     rbx, rax
+1:  xor     edi, edi
+    call    an_own_g
+    mov     r12, rax
+    test    r12, r12
+    jz      5f
+    mov     ecx, [r12+AN_NRB_]          # bodies of its children go (the last
+2:  test    ecx, ecx                    #  into each one's place)
+    jz      3f
+    dec     ecx
+    imul    rax, rcx, RB_SZ_
+    lea     r13, [r12+AN_RB_+rax]
+    push    rcx
+    push    rcx
+    mov     edi, [r13+RB_UID]
+    call    so_is_piece
+    pop     rcx
+    pop     rcx
+    test    eax, eax
+    jz      2b
+    mov     eax, [r12+AN_NRB_]
+    dec     eax
+    mov     [r12+AN_NRB_], eax
+    imul    rsi, rax, RB_SZ_
+    lea     rsi, [r12+AN_RB_+rsi]
+    mov     rdi, r13
+    push    rcx
+    mov     ecx, RB_SZ_
+    rep     movsb
+    pop     rcx
+    jmp     2b
+3:  mov     ecx, [r12+AN_NJT_]          # joints of them, and its marker
+31: test    ecx, ecx
+    jz      5f
+    dec     ecx
+    imul    rax, rcx, JT_SZ_
+    lea     r13, [r12+AN_JT_+rax]
+    mov     eax, [rbx+OB_UID]
+    cmp     dword ptr [r13+JT_TYPE], 5
+    jne     32f
+    cmp     [r13+JT_A], eax
+    je      34f
+32: push    rcx
+    push    rcx
+    mov     edi, [r13+JT_A]
+    call    so_is_piece
+    mov     r14d, eax
+    mov     edi, [r13+JT_B]
+    call    so_is_piece
+    or      eax, r14d
+    pop     rcx
+    pop     rcx
+    test    eax, eax
+    jz      31b
+34: mov     eax, [r12+AN_NJT_]
+    dec     eax
+    mov     [r12+AN_NJT_], eax
+    imul    rsi, rax, JT_SZ_
+    lea     rsi, [r12+AN_JT_+rsi]
+    mov     rdi, r13
+    push    rcx
+    mov     ecx, JT_SZ_
+    rep     movsb
+    pop     rcx
+    jmp     31b
+5:  mov     ecx, [rip+obj_count]        # the children themselves
+51: test    ecx, ecx
+    jz      6f
+    dec     ecx
+    push    rcx
+    push    rcx
+    mov     edi, ecx
+    call    obj_at
+    mov     rdi, rax
+    call    par_of
+    pop     rcx
+    pop     rcx
+    cmp     rax, rbx
+    jne     51b
+    push    rcx
+    push    rcx
+    mov     edi, ecx
+    call    obj_remove_at
+    pop     rcx
+    pop     rcx
+    jmp     51b
+6:  and     dword ptr [rbx+OB_FLAGS], ~OBF_HIDDEN  # the original
+    or      dword ptr [rbx+OB_FLAGS], OBF_SELECTED
+    xor     ecx, ecx                    # (its handle: active)
+61: cmp     ecx, [rip+obj_count]
+    jae     7f
+    push    rcx
+    push    rcx
+    mov     edi, ecx
+    call    obj_at
+    pop     rcx
+    pop     rcx
+    cmp     rax, rbx
+    je      62f
+    inc     ecx
+    jmp     61b
+62: lea     rax, [rip+obj_list]
+    mov     eax, [rax+rcx*4]
+    mov     [rip+active_obj], eax
+7:  mov     rax, rbx
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# so_is_piece(edi=uid; rbx = the original) -> eax = 1: a child of it
+so_is_piece:
+    sub     rsp, 8
+    call    obj_by_uid
+    test    rax, rax
+    jz      8f
+    mov     rdi, rax
+    call    par_of
+    cmp     rax, rbx
+    jne     8f
+    mov     eax, 1
+    add     rsp, 8
+    ret
+8:  xor     eax, eax
+    add     rsp, 8
+    ret
+
 # so_build -> eax = pieces made: every cell's pieces into objects; the
 #   stats
 so_build:
@@ -2977,6 +3164,66 @@ so_parse:
     jz      8f
     movss   [rip+so_gluef], xmm0
     jmp     1b
+.Lpa_again:
+    mov     dword ptr [rip+so_again], 1
+    jmp     1b
+.Lpa_preset:                            # a preset: its pattern and values
+    mov     rsi, r12                    #  (what follows can change them)
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      8f
+    xor     r13d, r13d
+91: lea     rax, [rip+so_presets]
+    mov     rsi, [rax+r13*8]
+    test    rsi, rsi
+    jz      8f
+    lea     rdi, [rip+im_word]
+    call    str_eq
+    test    eax, eax
+    jnz     92f
+    inc     r13d
+    jmp     91b
+92: mov     [rip+so_preset], r13d
+    test    r13d, r13d                  # (none)
+    jz      1b
+    imul    rax, r13, PS_SZ
+    lea     rcx, [rip+so_pdata-PS_SZ]
+    add     rcx, rax
+    mov     eax, [rcx]
+    mov     [rip+so_pat], eax
+    mov     eax, [rcx+4]
+    mov     [rip+so_count], eax
+    xor     edx, edx                    # (bricks: their own rows and
+    cmp     dword ptr [rcx], 1          #  columns, not the count)
+    setne   dl
+    mov     [rip+so_counted], edx
+    mov     eax, [rcx+8]
+    mov     [rip+so_gluef], eax
+    mov     eax, [rcx+12]
+    mov     [rip+so_impact], eax
+    xor     edx, edx
+    test    eax, eax
+    setnz   dl
+    mov     [rip+so_impactset], edx
+    mov     eax, [rcx+16]
+    mov     [rip+so_density], eax
+    mov     eax, [rcx+20]
+    mov     [rip+so_gap], eax
+    mov     eax, [rcx+24]
+    mov     [rip+so_spread], eax
+    mov     eax, [rcx+28]
+    mov     [rip+so_spreadset], eax
+    mov     eax, [rcx+32]
+    mov     [rip+so_counts], eax
+    mov     eax, [rcx+36]
+    mov     [rip+so_counts+4], eax
+    mov     eax, [rcx+40]               # an inner colour
+    test    eax, eax
+    jz      1b
+    mov     [rip+so_innerc], eax
+    mov     dword ptr [rip+so_inner], 1
+    jmp     1b
 .Lpa_impact:
     call    pa_num
     jz      8f
@@ -3048,6 +3295,7 @@ pa_vec:
 # so_defaults - the options before any are given
 so_defaults:
     xor     eax, eax
+    mov     [rip+so_preset], eax
     mov     [rip+so_pat], eax
     mov     [rip+so_atmode], eax
     mov     [rip+so_hassize], eax
@@ -3065,6 +3313,7 @@ so_defaults:
     mov     [rip+so_gluepaint], eax
     mov     [rip+so_impact], eax
     mov     [rip+so_impactset], eax
+    mov     [rip+so_again], eax
     mov     dword ptr [rip+so_count], 50
     mov     dword ptr [rip+so_seed], 1
     mov     eax, [rip+so_fhalf]
@@ -3243,6 +3492,12 @@ do_shatter:
     call    so_parse
     test    eax, eax
     jz      .Lsh_bad
+    mov     edi, [rip+so_pat]           # the Physics panel: these settings
+    mov     esi, [rip+so_preset]
+    mov     edx, [rip+so_count]
+    movss   xmm0, [rip+so_gluef]
+    movss   xmm1, [rip+so_impact]
+    call    sp_sync
     mov     edi, [rip+active_obj]       # the active mesh
     call    obj_get
     test    rax, rax
@@ -3252,7 +3507,12 @@ do_shatter:
     cmp     qword ptr [rax+OB_MESH], 0
     je      .Lsh_none
     mov     [rip+so_obj], rax
+    cmp     dword ptr [rip+so_again], 0 # again: from the original, its
+    je      24f                         #  pieces gone first
     mov     rdi, rax
+    call    so_unshatter
+    mov     [rip+so_obj], rax
+24: mov     rdi, [rip+so_obj]
     call    so_source
     test    eax, eax
     jz      .Lsh_drop
@@ -3416,6 +3676,251 @@ do_shatter:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# the preview: while the Shatter form is open, the cells it would cut drawn
+#   as outlines (the cut faces' edges, in the world) - made again only when
+#   its values or the object change
+# -----------------------------------------------------------------------------
+.equ PV_MAX,    32768                   # segments at most
+.section .bss
+.align 8
+pv_seg:         .skip PV_MAX*24         # from, to (world, floats)
+pv_n:           .skip 4
+pv_obj:         .skip 4                 # made for: the object, its mesh,
+.align 8
+pv_mesh:        .skip 8                 #  the argument
+pv_key:         .skip 512
+.text
+
+# so_preview_draw - in the viewport, after the overlays
+so_preview_draw:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    lea     rdi, [rip+op_shatter]
+    call    dlg_form_arg
+    test    rax, rax
+    jz      9f
+    mov     rbx, rax
+    mov     edi, [rip+active_obj]
+    call    obj_get
+    test    rax, rax
+    jz      9f
+    mov     r12, rax
+    mov     eax, [r12+OB_UID]
+    cmp     eax, [rip+pv_obj]
+    jne     1f
+    mov     rax, [r12+OB_MESH]
+    cmp     rax, [rip+pv_mesh]
+    jne     1f
+    mov     rdi, rbx
+    lea     rsi, [rip+pv_key]
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+1:  mov     eax, [r12+OB_UID]           # made again
+    mov     [rip+pv_obj], eax
+    mov     rax, [r12+OB_MESH]
+    mov     [rip+pv_mesh], rax
+    mov     rsi, rbx
+    lea     rdi, [rip+pv_key]
+    mov     ecx, 511
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    mov     rdi, rbx
+    mov     rsi, r12
+    call    pv_make
+2:  xor     ebx, ebx                    # drawn
+3:  cmp     ebx, [rip+pv_n]
+    jae     9f
+    imul    rsi, rbx, 24
+    lea     rax, [rip+pv_seg]
+    add     rsi, rax
+    lea     rdi, [rip+lp0]
+    mov     ecx, 24
+    rep     movsb
+    mov     edx, 0xffffb02e
+    call    line3d
+    inc     ebx
+    jmp     3b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# pv_make(rdi=argument, rsi=object) - pv_seg, pv_n: the cells' outlines
+#   (shards and bricks; balls: none)
+pv_make:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     dword ptr [rip+pv_n], 0
+    mov     r12, rsi
+    mov     rax, [rip+op_arg]
+    mov     [rsp], rax
+    mov     [rip+op_arg], rdi
+    call    so_defaults
+    call    so_parse
+    mov     rcx, [rsp]
+    mov     [rip+op_arg], rcx
+    test    eax, eax
+    jz      .Lpv_out
+    cmp     dword ptr [rip+so_pat], 2   # (balls: not cells)
+    je      .Lpv_out
+    cmp     dword ptr [r12+OB_TYPE], OT_MESH
+    jne     .Lpv_out
+    cmp     dword ptr [rip+so_again], 0 # again, a piece: its original
+    je      1f
+    mov     rdi, r12
+    call    par_of
+    test    rax, rax
+    jz      1f
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jz      1f
+    mov     r12, rax
+1:  cmp     qword ptr [r12+OB_MESH], 0
+    je      .Lpv_out
+    mov     [rip+so_obj], r12
+    mov     rdi, r12
+    call    so_source
+    test    eax, eax
+    jz      .Lpv_out
+    mov     rdi, [rip+so_obj]
+    lea     rsi, [rip+so_mat]
+    call    obj_matrix
+    call    so_inverse
+    cmp     dword ptr [rip+so_atmode], 1
+    jne     2f
+    lea     rsi, [rip+so_atw]
+    lea     rdi, [rip+so_at]
+    call    so_tolocal
+2:  mov     edi, [rip+so_seed]
+    call    so_seed_rng
+    cmp     dword ptr [rip+so_pat], 1
+    je      3f
+    cmp     dword ptr [rip+so_atmode], 2
+    jne     21f
+    call    so_cdf_make
+21: mov     edi, [rip+so_count]
+    call    so_seeds
+    test    eax, eax
+    jz      .Lpv_src
+    mov     dword ptr [rip+sh_mode], 1
+    mov     edx, eax
+    jmp     4f
+3:  call    so_bricks
+    test    eax, eax
+    jz      .Lpv_src
+    mov     eax, [rip+sh_ncell_used]
+    mov     [rip+sh_ncell], eax
+    mov     dword ptr [rip+sh_mode], 0
+    mov     edx, eax
+4:  call    sh_cut_all
+    test    eax, eax
+    jz      .Lpv_res
+    xor     r13d, r13d                  # each cell's pieces
+5:  cmp     r13d, [rip+sh_nres]
+    jae     .Lpv_res
+    mov     rax, [rip+sh_res]
+    mov     rcx, r13
+    shl     rcx, 4
+    mov     rbx, [rax+rcx]
+    test    rbx, rbx
+    jz      58f
+    mov     r14d, [rbx]
+    add     rbx, PP_HDR
+51: test    r14d, r14d
+    jz      58f
+    mov     eax, [rbx+PH_NV]            # r15: its polygons (count, tag),
+    imul    eax, eax, 12                #  [rsp+8]: their loops
+    lea     r15, [rbx+PH_SZ+rax]
+    mov     eax, [rbx+PH_NP]
+    lea     rax, [r15+rax*8]
+    mov     [rsp+8], rax
+    xor     ecx, ecx
+52: cmp     ecx, [rbx+PH_NP]
+    jae     57f
+    mov     r8d, [r15+rcx*8]            # its corners
+    cmp     dword ptr [r15+rcx*8+4], 0  # (a cut face only)
+    je      56f
+    xor     r9d, r9d
+53: cmp     r9d, r8d
+    jae     56f
+    mov     eax, [rip+pv_n]
+    cmp     eax, PV_MAX
+    jae     .Lpv_res
+    imul    rdi, rax, 24
+    lea     rax, [rip+pv_seg]
+    add     rdi, rax
+    mov     rax, [rsp+8]
+    mov     esi, [rax+r9*4]             # this corner
+    call    pv_point
+    lea     edx, [r9+1]
+    cmp     edx, r8d
+    jb      54f
+    xor     edx, edx
+54: mov     rax, [rsp+8]
+    mov     esi, [rax+rdx*4]            # the next
+    add     rdi, 12
+    call    pv_point
+    inc     dword ptr [rip+pv_n]
+    inc     r9d
+    jmp     53b
+56: mov     rax, [rsp+8]                # the next polygon
+    lea     rax, [rax+r8*4]
+    mov     [rsp+8], rax
+    inc     ecx
+    jmp     52b
+57: mov     rsi, rbx
+    call    so_piece_next
+    mov     rbx, rax
+    dec     r14d
+    jmp     51b
+58: inc     r13d
+    jmp     5b
+.Lpv_res:
+    call    sh_res_free
+.Lpv_src:
+    call    sh_src_free
+.Lpv_out:
+    cvtsi2sd xmm0, dword ptr [rip+pv_n] # (shinfo(23): the outlines drawn)
+    lea     rax, [rip+sh_stat]
+    movsd   [rax+23*8], xmm0
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pv_point(rdi=out, esi=vertex; rbx=piece) - its place in the world: the
+#   original's matrix x (the piece's centre + the vertex) (rcx r8 r9 kept)
+pv_point:
+    imul    rax, rsi, 12
+    lea     rsi, [rbx+PH_SZ+rax]
+    lea     rax, [rip+so_mat]
+    xor     edx, edx
+1:  movss   xmm0, [rax+12]
+    xor     r10d, r10d
+2:  cvtss2sd xmm1, [rsi+r10*4]
+    addsd   xmm1, [rbx+PH_C+r10*8]
+    cvtsd2ss xmm1, xmm1
+    mulss   xmm1, [rax+r10*4]
+    addss   xmm0, xmm1
+    inc     r10d
+    cmp     r10d, 3
+    jb      2b
+    movss   [rdi+rdx*4], xmm0
+    add     rax, 16
+    inc     edx
+    cmp     edx, 3
+    jb      1b
     ret
 
 # -----------------------------------------------------------------------------

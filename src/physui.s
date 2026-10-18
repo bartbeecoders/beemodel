@@ -19,6 +19,7 @@
 .globl rb_drag_begin
 .globl rb_drag_move
 .globl rb_get
+.globl sp_sync
 
 .equ RB_UID,    0
 .equ RB_TYPE,   4
@@ -41,20 +42,27 @@
 .equ PB_JOINT,  5                       # (| the joint << 8)
 .equ PB_INST,   6                       # the object / its instances
 .equ PB_MAT,    7                       # the next material preset
+.equ SO_PS_SZ,  44                      # (shatterop.s so_pdata rows)
+.equ PB_SPAT,   8                       # shatter: the next pattern,
+.equ PB_SPRE,   9                       #  the next preset,
+.equ PB_SRUN,   10                      #  Shatter / Re-cut
 .equ PF_MASS,   0                       # fields: body values 0-3,
 .equ PF_GRAV,   4                       #  the world's
 .equ PF_RATE,   5
 .equ PF_ITER,   6
 .equ PF_SUB,    7
-.equ NFIELD,    8
+.equ NWORLD,    8
+.equ PF_SCNT,   8                       # shatter: count, glue, impact
+.equ PF_SIMP,   10
+.equ NFIELD,    11
 .equ MAXBTN,    16
 .equ MAXROW,    12
 
 .section .rodata
 .align 4
-pf_step:        .float 0.02, 0.005, 0.005, 0.005, 0.02, 0.5, 0.1, 0.05
-pf_max:         .float 1e6, 2.0, 1.0, 10.0, 1e3, 1000.0, 200.0, 64.0
-pf_min:         .float 0.001, 0.0, 0.0, 0.0, -1e3, 1.0, 1.0, 1.0
+pf_step:        .float 0.02, 0.005, 0.005, 0.005, 0.02, 0.5, 0.1, 0.05, 0.25, 200.0, 0.05
+pf_max:         .float 1e6, 2.0, 1.0, 10.0, 1e3, 1000.0, 200.0, 64.0, 4096.0, 1e7, 1e5
+pf_min:         .float 0.001, 0.0, 0.0, 0.0, -1e3, 1.0, 1.0, 1.0, 2.0, 0.0, 0.0
 pf_g:           .float -9.81
 pf_120:         .float 120.0
 pf_10:          .float 10.0
@@ -111,6 +119,46 @@ jt_fixed:       .asciz "Fixed"
 jt_hinge:       .asciz "Hinge"
 jt_point:       .asciz "Point"
 fld_lbl:        .quad s_l_mass, s_l_fric, s_l_bounce, s_l_damp
+sp_fld_lbl:     .quad s_l_count, s_l_glue, s_l_impact
+sp_pat_lbl:     .quad s_shards, s_bricks, s_balls
+sp_pat_kw:      .quad k_shards, k_bricks, k_balls
+sp_pre_lbl:     .quad s_pre0, s_pre1, s_pre2, s_pre3, s_pre4
+sp_pre_kw:      .quad k_none, k_pre1, k_pre2, k_pre3, k_pre4
+s_l_shatter:    .asciz "Shatter"
+s_l_pattern:    .asciz "Pattern"
+s_l_preset:     .asciz "Preset"
+s_b_recut:      .asciz "Re-cut"
+s_l_count:      .asciz "Count"
+s_l_glue:       .asciz "Glue N/m2"
+s_l_impact:     .asciz "Breaks at N s"
+s_shards:       .asciz "Shards"
+s_bricks:       .asciz "Bricks"
+s_balls:        .asciz "Balls"
+k_shards:       .asciz "shards "
+k_bricks:       .asciz "bricks "
+k_balls:        .asciz "balls "
+s_pre0:         .asciz "No preset"
+s_pre1:         .asciz "Brick wall"
+s_pre2:         .asciz "Glass"
+s_pre3:         .asciz "Stone"
+s_pre4:         .asciz "Gravel balls"
+k_none:         .asciz ""
+k_pre1:         .asciz "preset brickwall "
+k_pre2:         .asciz "preset glass "
+k_pre3:         .asciz "preset stone "
+k_pre4:         .asciz "preset gravel "
+k_again:        .asciz "again "
+k_count:        .asciz "count "
+k_glue:         .asciz " glue "
+k_impact:       .asciz " impact "
+s_sh_op:        .asciz "object.shatter"
+
+.data
+.align 4
+sp_val:         .float 50.0, 0.0, 0.0   # the panel's shatter settings
+sp_pat:         .long 0
+sp_pre:         .long 0
+sp_recut:       .long 0
 
 .section .bss
 .align 4
@@ -311,7 +359,12 @@ rp_field:
 
 # rp_value(edi=field, rsi=block, rdx=entry) -> xmm0 = what the field shows
 rp_value:
-    cmp     edi, PF_GRAV
+    cmp     edi, PF_SCNT
+    jb      0f
+    lea     rax, [rip+sp_val]
+    movss   xmm0, [rax+rdi*4-PF_SCNT*4]
+    ret
+0:  cmp     edi, PF_GRAV
     jae     1f
     movss   xmm0, [rdx+RB_MASS+rdi*4]
     ret
@@ -399,6 +452,10 @@ rb_props_draw:
     lea     r8, [rip+s_add_rb]
     call    rp_button
     add     r12d, 26
+    mov     edi, r12d
+    mov     rsi, rbx
+    call    rp_shatter
+    mov     r12d, eax
     jmp     .Lpd_out
 1:  mov     edi, PB_REMOVE|0x10000      # x
     mov     esi, [rip+ed_x]
@@ -496,7 +553,10 @@ rb_props_draw:
     inc     r15d
     jmp     2b
 3:  xor     r15d, r15d                  # its joints: Hinge to world  x
+    mov     dword ptr [rsp+8], 0        #  (the first 6: glued pieces have many)
 4:  cmp     r15d, [r14+AN_NJT_]
+    jae     5f
+    cmp     dword ptr [rsp+8], 6
     jae     5f
     imul    rax, r15, JT_SZ_
     lea     rcx, [r14+AN_JT_+rax]
@@ -506,6 +566,7 @@ rb_props_draw:
     cmp     [rcx+JT_B], eax
     jne     45f
 41: mov     [rsp], rcx
+    inc     dword ptr [rsp+8]
     mov     edi, r12d
     lea     rsi, [rip+s_l_joint]
     call    rp_label
@@ -562,7 +623,7 @@ rb_props_draw:
     call    rp_label
     add     r12d, 20
     mov     r15d, PF_GRAV
-6:  cmp     r15d, NFIELD
+6:  cmp     r15d, NWORLD
     jae     7f
     lea     rax, [rip+world_lbl]
     mov     rsi, [rax+r15*8-PF_GRAV*8]
@@ -619,7 +680,10 @@ rb_props_draw:
     mov     ecx, COL_TEXT_DIM
     call    draw_text
     add     r12d, 20
-8:  add     r12d, 6
+8:  mov     edi, r12d
+    mov     rsi, rbx
+    call    rp_shatter
+    lea     r12d, [rax+6]
 .Lpd_out:
     mov     eax, r12d
     add     rsp, 24
@@ -635,6 +699,222 @@ rb_props_draw:
 .align 8
 world_lbl:      .quad s_l_grav, s_l_rate, s_l_iter, s_l_sub
 .text
+
+# rp_shatter(edi=y, rsi=object) -> eax = y below: Shatter [Shatter|Re-cut],
+#   the pattern and the preset, count, glue and impact (a piece of a hidden
+#   original: Re-cut, the original broken again)
+rp_shatter:
+    push    rbx
+    push    r12
+    push    r13
+    push    rbp
+    sub     rsp, 8
+    mov     r12d, edi
+    mov     rbx, rsi
+    add     r12d, 4
+    mov     rdi, rbx
+    call    par_of
+    xor     ecx, ecx
+    test    rax, rax
+    jz      1f
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    setnz   cl
+1:  mov     [rip+sp_recut], ecx
+    mov     edi, r12d                   # Shatter (a heading)
+    lea     rsi, [rip+s_l_shatter]
+    call    rp_label
+    add     r12d, 20
+    mov     ebp, [rip+ed_w]             # the buttons: as wide as a field
+    sub     ebp, 124
+    mov     edi, r12d                   # Pattern [Shards]
+    lea     rsi, [rip+s_l_pattern]
+    call    rp_label
+    mov     eax, [rip+sp_pat]
+    lea     rcx, [rip+sp_pat_lbl]
+    mov     r8, [rcx+rax*8]
+    mov     edi, PB_SPAT|0x10000
+    mov     esi, [rip+ed_x]
+    add     esi, 110
+    mov     edx, r12d
+    mov     ecx, ebp
+    call    rp_button
+    add     r12d, 20
+    mov     edi, r12d                   # Preset [No preset]
+    lea     rsi, [rip+s_l_preset]
+    call    rp_label
+    mov     eax, [rip+sp_pre]
+    lea     rcx, [rip+sp_pre_lbl]
+    mov     r8, [rcx+rax*8]
+    mov     edi, PB_SPRE|0x10000
+    mov     esi, [rip+ed_x]
+    add     esi, 110
+    mov     edx, r12d
+    mov     ecx, ebp
+    call    rp_button
+    add     r12d, 20
+    mov     r13d, PF_SCNT               # count, glue, impact
+3:  cmp     r13d, PF_SIMP
+    ja      6f
+    lea     rax, [rip+sp_fld_lbl]
+    mov     rsi, [rax+r13*8-PF_SCNT*8]
+    mov     edi, r12d
+    call    rp_label
+    mov     edi, r13d
+    call    rp_value
+    call    fmt_reset
+    cmp     r13d, PF_SIMP
+    jne     4f
+    call    fmt_val3
+    jmp     5f
+4:  cvtss2si edi, xmm0
+    call    fmt_int
+5:  mov     edi, r13d
+    mov     esi, r12d
+    call    rp_field
+    add     r12d, 20
+    inc     r13d
+    jmp     3b
+6:  lea     r8, [rip+s_l_shatter]       # [Shatter] / [Re-cut]
+    cmp     dword ptr [rip+sp_recut], 0
+    je      7f
+    lea     r8, [rip+s_b_recut]
+7:  mov     edi, PB_SRUN|0x10000
+    mov     esi, [rip+ed_x]
+    add     esi, 110
+    mov     edx, r12d
+    mov     ecx, ebp
+    call    rp_button
+    add     r12d, 22
+9:  mov     eax, r12d
+    add     rsp, 8
+    pop     rbp
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# sp_button(eax=code) - the shatter section's buttons: the next pattern
+#   (no preset then), the next preset (its pattern and values shown), run
+sp_button:
+    push    rbx
+    cmp     eax, PB_SPAT
+    jne     2f
+    mov     eax, [rip+sp_pat]
+    inc     eax
+    cmp     eax, 3
+    jb      1f
+    xor     eax, eax
+1:  mov     [rip+sp_pat], eax
+    mov     dword ptr [rip+sp_pre], 0
+    jmp     8f
+2:  cmp     eax, PB_SPRE
+    jne     4f
+    mov     eax, [rip+sp_pre]
+    inc     eax
+    cmp     eax, 5
+    jb      3f
+    xor     eax, eax
+3:  mov     [rip+sp_pre], eax
+    test    eax, eax
+    jz      8f
+    dec     eax
+    imul    eax, eax, SO_PS_SZ
+    lea     rcx, [rip+so_pdata]
+    add     rcx, rax
+    mov     eax, [rcx]                  # pattern 0 shards, 1 bricks, 2 balls
+    mov     [rip+sp_pat], eax
+    cvtsi2ss xmm0, dword ptr [rcx+4]
+    movss   [rip+sp_val], xmm0
+    mov     eax, [rcx+8]
+    mov     [rip+sp_val+4], eax
+    mov     eax, [rcx+12]
+    mov     [rip+sp_val+8], eax
+    jmp     8f
+4:  call    fmt_reset                   # [again] [preset p] pattern count n
+    cmp     dword ptr [rip+sp_recut], 0 #  [glue g] [impact i] (what differs
+    je      41f                         #  from the preset)
+    lea     rdi, [rip+k_again]
+    call    fmt_str
+41: mov     eax, [rip+sp_pre]
+    lea     rcx, [rip+sp_pre_kw]
+    mov     rdi, [rcx+rax*8]
+    call    fmt_str
+    xor     ebx, ebx                    # rbx = the preset's row, or 0
+    mov     eax, [rip+sp_pre]
+    test    eax, eax
+    jz      42f
+    dec     eax
+    imul    eax, eax, SO_PS_SZ
+    lea     rbx, [rip+so_pdata]
+    add     rbx, rax
+42: mov     eax, [rip+sp_pat]
+    test    rbx, rbx
+    jz      43f
+    cmp     eax, [rbx]
+    je      44f
+43: lea     rcx, [rip+sp_pat_kw]
+    mov     rdi, [rcx+rax*8]
+    call    fmt_str
+44: cvtss2si eax, dword ptr [rip+sp_val]
+    test    rbx, rbx
+    jz      45f
+    cmp     eax, [rbx+4]
+    je      46f
+45: lea     rdi, [rip+k_count]
+    call    fmt_str
+    cvtss2si edi, dword ptr [rip+sp_val]
+    call    fmt_int
+46: mov     eax, [rip+sp_val+4]         # glue: when set (or not the preset's)
+    test    rbx, rbx
+    jz      47f
+    cmp     eax, [rbx+8]
+    je      48f
+    jmp     471f
+47: test    eax, eax
+    jz      48f
+471: lea    rdi, [rip+k_glue]
+    call    fmt_str
+    movss   xmm0, [rip+sp_val+4]
+    call    fmt_val3
+48: mov     eax, [rip+sp_val+8]         # impact: the same
+    test    rbx, rbx
+    jz      49f
+    cmp     eax, [rbx+12]
+    je      50f
+    jmp     491f
+49: test    eax, eax
+    jz      50f
+491: lea    rdi, [rip+k_impact]
+    call    fmt_str
+    movss   xmm0, [rip+sp_val+8]
+    call    fmt_val3
+50: lea     rsi, [rip+fmt_buf]          # the operator, with that argument
+    lea     rdi, [rip+op_argbuf]
+    mov     ecx, 128
+    rep     movsb
+    lea     rdi, [rip+s_sh_op]
+    call    find_op_by_name
+    test    rax, rax
+    jz      8f
+    lea     rcx, [rip+op_argbuf]
+    mov     [rip+op_arg], rcx
+    mov     rdi, rax
+    call    run_op
+    mov     qword ptr [rip+op_arg], 0
+8:  mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# sp_sync(edi=pattern, esi=preset, edx=count, xmm0=glue, xmm1=impact) - the
+#   last shatter's settings, shown for a re-cut
+sp_sync:
+    mov     [rip+sp_pat], edi
+    mov     [rip+sp_pre], esi
+    cvtsi2ss xmm2, edx
+    movss   [rip+sp_val], xmm2
+    movss   [rip+sp_val+4], xmm0
+    movss   [rip+sp_val+8], xmm1
+    ret
 
 # ---- hits ------------------------------------------------------------------------
 # rb_props_hit(edi=x, esi=y) -> eax = code | 0x80000, or -1
@@ -714,7 +994,13 @@ rb_drag_begin:
     mov     r14d, edi
     test    r14d, 0x10000
     jz      .Lpb_field
-    call    rp_own
+    mov     eax, r14d
+    and     eax, 0xff
+    cmp     eax, PB_SPAT                # (shatter: no undo step of its own)
+    jb      1f
+    call    sp_button
+    jmp     .Lpb_out
+1:  call    rp_own
     test    rbx, rbx
     jz      .Lpb_out
     test    r12, r12
@@ -823,9 +1109,15 @@ rb_drag_begin:
     cmp     eax, NFIELD
     jae     .Lpb_out
     mov     [rip+rp_code], eax
+    mov     edi, eax
     mov     eax, [rip+ptr_x]
     mov     [rip+rp_x0], eax
-    call    rp_own
+    cmp     edi, PF_SCNT                # shatter's: the panel's own
+    jb      1f
+    call    rp_value
+    movss   [rip+rp_v0], xmm0
+    jmp     .Lpb_out
+1:  call    rp_own
     test    rbx, rbx
     jz      .Lpb_out
     mov     edi, [rip+rp_code]
@@ -886,7 +1178,12 @@ rb_drag_move:
     lea     rax, [rip+pf_min]
     maxss   xmm0, [rax+rcx*4]
     movss   [rsp], xmm0
-    xor     edi, edi
+    cmp     ecx, PF_SCNT                # shatter's: the panel's own
+    jb      1f
+    lea     rax, [rip+sp_val]
+    movss   [rax+rcx*4-PF_SCNT*4], xmm0
+    jmp     8f
+1:  xor     edi, edi
     call    an_own_g
     test    rax, rax
     jz      9f

@@ -736,6 +736,7 @@ viewport_draw:
     call    play_hud                    # play mode: the keys, or the question
     call    edit_draw                   # edit mode: edges, vertices, faces
     call    analysis_draw               # View > Show ... overlays
+    call    so_preview_draw             # the Shatter form: the cells
     call    etool_draw                  # loop cut / knife previews
     call    cursor_draw                 # the 3D cursor
     call    gizmo_draw

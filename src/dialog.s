@@ -26,6 +26,7 @@
 .globl dlg_parg
 .globl dlg_run_pending
 .globl dlg_open_prefs
+.globl dlg_form_arg
 
 .equ DLG_FORM,      1
 .equ DLG_CONFIRM,   2
@@ -304,6 +305,22 @@ dlg_key:
     ret
 8:  xor     eax, eax
     ret
+
+# dlg_form_arg(rdi=operator) -> rax = the argument its open form's values
+#   make now (a preview of what OK runs), or 0: its form is not open
+dlg_form_arg:
+    xor     eax, eax
+    cmp     dword ptr [rip+dlg_open], 0
+    je      9f
+    cmp     dword ptr [rip+dlg_kind], DLG_FORM
+    jne     9f
+    cmp     [rip+dlg_op], rdi
+    jne     9f
+    sub     rsp, 8
+    call    form_arg
+    add     rsp, 8
+    lea     rax, [rip+dlg_arg]
+9:  ret
 
 # form_arg - dlg_arg = the form's values as the operator's argument text
 form_arg:

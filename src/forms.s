@@ -12,6 +12,28 @@
 
 .section .rodata
 p_mass:         .asciz "mass"
+p_count:        .asciz "count"
+p_seed:         .asciz "seed"
+p_glue:         .asciz "glue"
+p_impact:       .asciz "impact"
+p_gap:          .asciz "gap"
+p_preset:       .asciz "preset"
+s_shards:       .asciz "Shards"
+s_bricks:       .asciz "Bricks"
+s_balls:        .asciz "Balls"
+k_shards:       .asciz "shards"
+k_bricks:       .asciz "bricks"
+k_balls:        .asciz "balls"
+s_pre_none:     .asciz "None"
+s_pre_wall:     .asciz "Brick wall"
+s_pre_glass:    .asciz "Glass"
+s_pre_stone:    .asciz "Stone"
+s_pre_gravel:   .asciz "Gravel balls"
+k_pre_none:     .asciz "none"
+k_pre_wall:     .asciz "brickwall"
+k_pre_glass:    .asciz "glass"
+k_pre_stone:    .asciz "stone"
+k_pre_gravel:   .asciz "gravel"
 p_fric:         .asciz "friction"
 p_bounce:       .asciz "bounce"
 p_damp:         .asciz "damping"
@@ -60,6 +82,10 @@ k_diff:         .asciz "difference"
 k_isect:        .asciz "intersect"
 .align 8
 l_rbtype:       .quad s_active, s_passive
+l_shpat:        .quad s_shards, s_bricks, s_balls
+kw_shpat:       .quad k_shards, k_bricks, k_balls
+l_shpre:        .quad s_pre_none, s_pre_wall, s_pre_glass, s_pre_stone, s_pre_gravel
+kw_shpre:       .quad k_pre_none, k_pre_wall, k_pre_glass, k_pre_stone, k_pre_gravel
 kw_rbtype:      .quad k_active, k_passive
 l_shape:        .quad s_box, s_sphere, s_capsule, s_hull, s_compound
 kw_shape:       .quad k_box, k_sphere, k_capsule, k_hull, k_compound
@@ -120,6 +146,23 @@ WIDGET fw_rbm,  WK_FLOAT, "form.rigid.mass", "Mass (kg)", 0.001, 1000000.0, 0.02
 WIDGET fw_rbf,  WK_FLOAT, "form.rigid.friction", "Friction", 0.0, 2.0, 0.005, 3, WGF_CLAMP
 WIDGET fw_rbb,  WK_FLOAT, "form.rigid.bounce", "Bounce", 0.0, 1.0, 0.005, 3, WGF_CLAMP
 WIDGET fw_rbd,  WK_FLOAT, "form.rigid.damping", "Damping", 0.0, 10.0, 0.005, 3, WGF_CLAMP
+# ---- object.shatter <pattern> [preset p] [count n] [seed s] [glue g] [impact i] [gap m]
+WIDGET fw_shp,  WK_ENUM, "form.shatter.pattern", "Pattern", aux=l_shpat, n=3
+WIDGET fw_shr,  WK_ENUM, "form.shatter.preset", "Preset", aux=l_shpre, n=5
+WIDGET fw_shc,  WK_FLOAT, "form.shatter.count", "Count", 1.0, 4096.0, 1.0, 0, WGF_CLAMP
+WIDGET fw_shs,  WK_FLOAT, "form.shatter.seed", "Seed", 0.0, 100000.0, 1.0, 0, WGF_CLAMP
+WIDGET fw_shg,  WK_FLOAT, "form.shatter.glue", "Glue (N/m2)", 0.0, 10000000.0, 500.0, 0, WGF_CLAMP
+WIDGET fw_shi,  WK_FLOAT, "form.shatter.impact", "Breaks at (N s, 0 = now)", 0.0, 100000.0, 0.5, 1, WGF_CLAMP
+WIDGET fw_shgap, WK_FLOAT, "form.shatter.gap", "Gap (m)", 0.0, 1.0, 0.001, 3, WGF_CLAMP
+FORM form_shatter, 7
+FFIELD fw_shp, kw=kw_shpat
+FFIELD fw_shr, p_preset, kw=kw_shpre
+FFIELD fw_shc, p_count, def=50.0, flags=FF_CHANGED
+FFIELD fw_shs, p_seed, def=1.0, flags=FF_CHANGED
+FFIELD fw_shg, p_glue, def=0.0, flags=FF_CHANGED
+FFIELD fw_shi, p_impact, def=0.0, flags=FF_CHANGED
+FFIELD fw_shgap, p_gap, def=0.0, flags=FF_CHANGED
+
 FORM form_rigid, 6
 FFIELD fw_rbt, kw=kw_rbtype
 FFIELD fw_rbs, kw=kw_shape
