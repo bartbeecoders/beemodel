@@ -427,6 +427,8 @@ builtins:
     .long 1, 1
     .quad bn_landscape, b_landscape
     .long 2, 2
+    .quad bn_shinfo, b_shinfo
+    .long 1, 1
     .quad bn_height, b_height
     .long 3, 3
     .quad bn_rigid, b_rigid
@@ -766,6 +768,7 @@ bn_shapes:      .asciz "shapes"
 bn_bonepos:     .asciz "bonepos"
 bn_rbinfo:      .asciz "rbinfo"
 bn_landscape:   .asciz "landscape"
+bn_shinfo:      .asciz "shinfo"
 bn_height:      .asciz "height"
 bn_rigid:       .asciz "rigid"
 bn_joint:       .asciz "joint"
@@ -4987,6 +4990,17 @@ b_landscape:
     test    eax, eax
     jz      ret_nil
     cvtss2sd xmm0, xmm0
+    jmp     ret_num
+
+# shinfo(k) -> the last shatter: 0 pieces, 1 cells, 2 their volume, 3 the
+#   original's, 4 the smallest piece's, 5 open edges in the pieces, 6 ms,
+#   7 glue joints, 8 open edges of the mesh before repair
+b_shinfo:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    sh_info
+    add     rsp, 8
     jmp     ret_num
 
 # height(name, x, z) -> the landscape's height at world x, z; nil: not over it
