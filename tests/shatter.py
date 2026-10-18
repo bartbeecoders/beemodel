@@ -34,6 +34,13 @@ leaves it whole. Simulated, the frames cached keep which is shown (the
 vase whole before the hit, its pieces after, scrubbing back and forth).
 A logic graph's Shatter node breaks it when play begins.
 
+S6: the form and the panel - in the window, with clicks only: a wall
+shattered from Object > Physics > Shatter... (the form: Bricks, OK), then
+in Properties > Physics the pattern changed to Shards, the count dragged
+down to 20 and Re-cut: the bricks go, 20 shards stand in their place.
+The presets (Brick wall, Glass, Stone, Gravel balls) each make their kind;
+BeeScript shatter(name, pattern, count, options).
+
     python3 tests/shatter.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -392,6 +399,68 @@ def s5(tmp):
     check(l == [1, 1, 0], 'a logic graph\'s Shatter node breaks it when play begins (%s)' % l)
 
 
+def s6():
+    print('-- S6: the form, the panel, presets, shatter() --')
+    out = run("""
+n = shatter("Cube", "shards", 12)
+m = shatter("Cube_shard_2", "bricks", 4, "again gap 0.01")
+print("f", n, m, count())
+""" + ''.join('select("Cube")\nop("object.shatter", "again preset %s")\n'
+               'print("p", "%s", shinfo(0), shinfo(7), shinfo(18) > 0)\n' % (p, p)
+               for p in ('brickwall', 'glass', 'stone', 'gravel')))
+    fn = vals(out, 'f')
+    check(fn == [12, 9, 12], 'shatter("Cube", "shards", 12): 12 shards; again as bricks 4 a row: 9 (%s)' % fn)
+    pre = {l[1]: l[2:] for l in out if l and l[0] == 'p'}
+    check(pre.get('brickwall', ['0'])[0] == '52' and int(pre['brickwall'][1]) > 0,
+          'preset brickwall: 52 bricks (10 x 5 in a running bond), glued (%s)' % pre.get('brickwall'))
+    check(pre.get('glass', ['0'])[0] == '60' and pre.get('stone', ['0'])[0] == '25',
+          'preset glass: 60 shards, stone: 25 (%s, %s)' % (pre.get('glass'), pre.get('stone')))
+    check(pre.get('gravel', ['0', '0', '0'])[2] == '1', 'preset gravel: balls (%s)' % pre.get('gravel'))
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
+    argv = sys.argv
+    sys.argv = [argv[0], tempfile.mkdtemp(prefix='bee-shat-shots-')]
+    import fakewl
+    sys.argv = argv
+    f = fakewl.Fake()
+    try:
+        f.pump(1.0, until_frame=True)
+        f.keymap(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'keymaps', 'us.xkb'))
+        m = fakewl.Mcp(f)
+        q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+        f.enter(600, 300)
+        f.move(600, 300)
+        q('scale("Cube", 1, 0.5, 0.1)\nselect("Cube")')          # (the wall)
+        fakewl.props_tab(m, f, 'physics')
+        ok = fakewl.menu_pick(f, m, 'Object', 'Physics', 'Shatter...')
+        f.pump(0.3)
+        form = fakewl.widget(m, 'form.shatter.count') is not None
+        pv1 = q('print(shinfo(23), count())').split()
+        fakewl.pick_enum(f, m, 'form.shatter.pattern', 0, 1)     # Bricks
+        f.pump(0.3)
+        pv2 = q('print(shinfo(23), count())').split()
+        check(len(pv1) == 2 and len(pv2) == 2 and int(pv1[0]) > 100 and int(pv2[0]) > 100 and pv1[0] != pv2[0]
+              and pv1[1] == pv2[1] == '3',
+              'the form: a live preview of the cells, outlines only (%s edges as shards, %s as bricks; nothing cut)'
+              % (pv1[:1], pv2[:1]))
+        x, y = fakewl.widget_xy(m, 'dialog.ok')
+        f.click(x, y); f.pump(1.0)
+        a = q('print(count(), shinfo(0), active())').split()
+        check(ok and form and len(a) == 3 and a[2].startswith('Cube_brick_') and int(a[1]) > 20,
+              'Object > Physics > Shatter...: the form, Bricks, OK: %s bricks, one active' % (a[1:2]))
+        f.click(1210, 499); f.pump(0.2)                          # Pattern: Bricks -> Balls
+        f.click(1210, 499); f.pump(0.2)                          #  -> Shards
+        f.drag(1250, 539, 1130, 539, steps=8)                    # Count: 50 - 120 px x 0.25
+        f.pump(0.2)
+        f.shot('s6_panel.png')
+        f.click(1210, 599); f.pump(1.0)                          # Re-cut
+        b = q('print(count(), shinfo(0), active())').split()
+        check(len(b) == 3 and b[0] == '23' and b[1] == '20' and b[2].startswith('Cube_shard_'),
+              'Properties > Physics > Shatter: Shards, Count dragged to 20, Re-cut: the bricks gone, '
+              '20 shards (%s objects, %s pieces, %s)' % tuple((b + ['?'] * 3)[:3]))
+    finally:
+        f.proc.kill()
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix='bee-shat-')
     s1(tmp)
@@ -399,6 +468,7 @@ def main():
     s3()
     s4()
     s5(tmp)
+    s6()
     if FAILS:
         print('%d failed' % len(FAILS))
         sys.exit(1)

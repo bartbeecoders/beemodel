@@ -155,6 +155,7 @@ script_src_buf: .skip SRC_MAX
 script_out:     .skip OUT_MAX
 mac_buf:        .skip MAC_MAX
 ln_buf:         .skip LN_MAX+8
+.globl op_argbuf
 op_argbuf:      .skip 520
 opbuf:          .skip 64
 name_tmp:       .skip 40
@@ -431,6 +432,8 @@ builtins:
     .long 2, 2
     .quad bn_shinfo, b_shinfo
     .long 1, 1
+    .quad bn_shatter, b_shatter
+    .long 3, 4
     .quad bn_height, b_height
     .long 3, 3
     .quad bn_rigid, b_rigid
@@ -771,6 +774,9 @@ bn_bonepos:     .asciz "bonepos"
 bn_rbinfo:      .asciz "rbinfo"
 bn_landscape:   .asciz "landscape"
 bn_shinfo:      .asciz "shinfo"
+bn_shatter:     .asciz "shatter"
+s_sh_opname:    .asciz "object.shatter"
+s_sh_cnt:       .asciz " count "
 bn_height:      .asciz "height"
 bn_rigid:       .asciz "rigid"
 bn_joint:       .asciz "joint"
@@ -5023,6 +5029,60 @@ b_shinfo:
     call    sh_info
     add     rsp, 8
     jmp     ret_num
+
+# shatter(name, pattern, count [, options]) -> the pieces made: the object
+#   broken by object.shatter (pattern shards, bricks or balls; the options
+#   its words: "glue 20000 impact 15", ...)
+b_shatter:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_obj
+    mov     [rip+active_obj], eax
+    call    fmt_reset
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     rdi, rax
+    call    fmt_str
+    lea     rdi, [rip+s_sh_cnt]
+    call    fmt_str
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    fmt_int
+    cmp     r12d, 4
+    jb      1f
+    mov     edi, ' '
+    call    fmt_char
+    lea     rdi, [rbx+48]
+    call    a_str
+    mov     rdi, rax
+    call    fmt_str
+1:  lea     rsi, [rip+fmt_buf]          # the operator's argument
+    lea     rdi, [rip+op_argbuf]
+    mov     ecx, 128
+    rep     movsb
+    lea     rdi, [rip+s_sh_opname]
+    call    find_op_by_name
+    test    rax, rax
+    jz      8f
+    lea     rcx, [rip+op_argbuf]
+    mov     [rip+op_arg], rcx
+    mov     rdi, rax
+    call    run_op
+    mov     qword ptr [rip+op_arg], 0
+    xor     edi, edi
+    call    sh_info
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+8:  pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
 
 # height(name, x, z) -> the landscape's height at world x, z; nil: not over it
 b_height:
