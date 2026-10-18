@@ -18,6 +18,13 @@ layers are made by painting with them; Auto Paint covers the flat with
 grass and the slope with rock, and the render shows both. Every brush by
 script (raise, lower, smooth, flatten, noise, erode, ramp, paint).
 
+G4: the heightfield collider - 1000 balls dropped on a 4097 x 4097
+mountain roll down it and none goes under its surface; a ball comes to rest
+on it; a box slides further on rock than on grass (each paint layer's
+friction); cloth lands on it (by its heights, no triangles); the player
+walks over it, following the ground, and a cliff taller than a step stops
+it.
+
     python3 tests/landscape.py build/beemodel
 """
 import os, subprocess, sys, tempfile, time, zlib, struct
@@ -280,8 +287,154 @@ print("paint", landscape("Landscape", 7))
     check(v.get('paint', [0])[0] == 1, f'paint layers ({v.get("paint")})')
 
 
+def collider():
+    print('-- G4: the heightfield collider --')
+    out = run('''
+delete("Cube")
+delete("Light")
+delete("Camera")
+op("landscape.add", "flat res 4097 size 2000")
+op("landscape.layer", "add generate noise fbm scale 1.2 height 300 octaves 8 seed 3")
+select("Landscape")
+op("rigid.add", "passive mesh friction 0.6")
+n = 0
+for i in 0..32 {
+  for j in 0..32 {
+    if n < 1000 {
+      x = -60 + i * 4
+      z = -60 + j * 4
+      add("sphere", "B" + n, x, height("Landscape", x, z) + 1.5, z)
+      scale("B" + n, 0.5)
+      select("B" + n)
+      op("rigid.add", "active sphere friction 0.6")
+      n = n + 1
+    }
+  }
+}
+t1 = clock()
+frame(240)
+print("sim", clock() - t1, rbinfo(0))
+below = 0
+above = 0
+out = 0
+worst = 0
+moved = 0
+n = 0
+for i in 0..32 {
+  for j in 0..32 {
+    if n < 1000 {
+      x = get("B" + n, "x")
+      z = get("B" + n, "z")
+      dx = x - (-60 + i * 4)
+      dz = z - (-60 + j * 4)
+      moved = moved + sqrt(dx * dx + dz * dz)
+      h = height("Landscape", x, z)
+      if h == nil { out = out + 1 } else {
+        d = get("B" + n, "y") - 0.5 - h
+        if d < worst { worst = d }
+        if d < -0.05 { below = below + 1 }
+        if d > 0.5 { above = above + 1 }
+      }
+      n = n + 1
+    }
+  }
+}
+print("balls", below, above, out, worst, moved / 1000)
+''', timeout=900)
+    v = {l[0]: [float(x) for x in l[1:]] for l in out if l[0] in ('sim', 'balls')}
+    s = v.get('sim', [1e9, 0])
+    b = v.get('balls', [1, 1, 1, -1, 0])
+    check(s[1] == 1001, f'1000 balls on a 4097 x 4097 mountain: {s[0] / 1000:.1f} s for 10 s simulated')
+    check(b[0] == 0 and b[2] == 0 and b[3] > -0.05,
+          f'none under its surface (deepest {b[3] * 1000:.1f} mm; {b[1]:.0f} in the air, {b[2]:.0f} off it)')
+    check(b[4] > 1, f'they rolled down it ({b[4]:.1f} m on average)')
+    out = run('''
+delete("Cube")
+op("landscape.add", "res 257 size 60")
+op("landscape.layer", "add flatten height 5 at 3 2 6")
+select("Landscape")
+op("rigid.add", "passive mesh")
+add("sphere", "Ball", 3, 30, 2)
+scale("Ball", 0.5)
+select("Ball")
+op("rigid.add", "active sphere")
+frame(240)
+print("ball", get("Ball", "y") - height("Landscape", get("Ball", "x"), get("Ball", "z")))
+''') + run('''
+delete("Cube")
+op("landscape.add", "flat res 257 size 60")
+op("landscape.paint", "add rock")
+op("landscape.paint", "add grass friction 2")
+op("landscape.brush", "rock -15 0 radius 14 strength 2")
+op("landscape.brush", "grass 15 0 radius 14 strength 2")
+op("landscape.brush", "rock -15 0 radius 14 strength 2")
+op("landscape.brush", "grass 15 0 radius 14 strength 2")
+select("Landscape")
+op("rigid.add", "passive mesh friction 0.5")
+add("cube", "A", -15, 0.6, -10)
+scale("A", 0.5)
+select("A")
+op("rigid.add", "active box friction 0.5 velocity 0 0 6")
+add("cube", "C", 15, 0.6, -10)
+scale("C", 0.5)
+select("C")
+op("rigid.add", "active box friction 0.5 velocity 0 0 6")
+frame(96)
+print("slide", get("A", "z") + 10, get("C", "z") + 10)
+''')
+    v = {l[0]: [float(x) for x in l[1:]] for l in out}
+    d = v.get('ball', [9])[0]
+    check(abs(d - 0.5) < 0.02, f'a ball comes to rest on it ({d:.3f} m above the ground, radius 0.5)')
+    s = v.get('slide', [0, 0])
+    check(s[0] > s[1] * 1.3 and s[1] > 0.5, f'a box slides further on rock than on grass ({s[0]:.2f} m, {s[1]:.2f} m)')
+    out = run('''
+delete("Cube")
+op("landscape.add", "res 257 size 40")
+select("Landscape")
+op("cloth.add", "collider")
+h = height("Landscape", 0, 0)
+add("grid", "Sheet", 0, h + 3, 0)
+select("Sheet")
+op("cloth.add", "cloth")
+frame(72)
+worst = 99
+for v in 0..121 {
+  x = evpos("Sheet", v, "x")
+  z = evpos("Sheet", v, "z")
+  d = evpos("Sheet", v, "y") + h + 3 - height("Landscape", x, z)
+  if d < worst { worst = d }
+}
+print("cloth", worst, clothinfo(6), clothinfo(5))
+''') + run('''
+delete("Cube")
+op("landscape.add", "res 1025 size 200")
+op("landscape.layer", "add flatten height 60 at -12 -12 1.5")
+h0 = height("Landscape", 0, 0)
+op("play.start", "walk 0 " + (h0 + 2) + " 0")
+playstep(1.5)
+worst = 0
+for k in 0..8 {
+  playstep(0.5, 1, 0, 0)
+  d = playinfo(2) - height("Landscape", playinfo(1), playinfo(3))
+  if abs(d) > worst { worst = abs(d) }
+}
+x = playinfo(1)
+playstep(3, 1, 0, 0)
+print("walk", worst, x, playinfo(1), playinfo(3), playinfo(2) - h0)
+op("play.stop")
+''')
+    v = {l[0]: [float(x) for x in l[1:]] for l in out}
+    c = v.get('cloth', [-1, 1, 0])
+    check(-0.005 < c[0] < 0.1 and c[1] == 0 and c[2] > 0,
+          f'cloth lands on it by its heights ({c[0] * 1000:.0f} mm above at the lowest, {c[1]:.0f} collider triangles)')
+    w = v.get('walk', [9, 0, 0, 0, 99])
+    check(w[0] < 0.1, f'the player walks over it, on the ground ({w[0] * 100:.1f} cm at most from it)')
+    check(w[2] > -11.5 and w[4] < 5, f'a cliff taller than a step stops it (at x {w[2]:.2f}, z {w[3]:.2f}; feet {w[4]:.2f} m up)')
+
+
 ground()
 landscape()
 sculpt_paint()
+collider()
 print(f'{len(FAILS)} failed' if FAILS else 'all landscape checks passed')
 sys.exit(1 if FAILS else 0)

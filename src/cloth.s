@@ -98,6 +98,7 @@
 .align 16
 cq_xyz:         .long -1, -1, -1, 0
 cq_w:           .long 0, 0, 0, -1
+cq_w1:          .long 0, 0, 0, 0x3f800000
 cq_big4:        .float 1e30, 1e30, 1e30, 0
 cq_nbig4:       .float -1e30, -1e30, -1e30, 0
 cq_tiny4:       .float 1e-12, 1e-12, 1e-12, 1e-12
@@ -148,6 +149,9 @@ cx_sent:        .skip 8                 #  particles
 cx_mask:        .skip 8                 # (colouring: 8 bytes a particle)
 cx_gr:          .skip 8                 # volume gradients (vec4 a particle)
 cx_big:         .skip 8                 # collider triangles too big to hash
+cx_nhf:         .skip 4                 # landscape colliders: their block,
+.align 16
+cx_hf:          .skip 48*4              #  place, scale (by their heights)
 cx_tmp:         .skip 8                 # (scratch)
 cx_hash:        .skip 8                 # the settings simulated
 cx_frame0:      .skip 4
@@ -286,6 +290,7 @@ cl_build:
     call    cl_entry_obj
     test    rax, rax
     jz      11f
+    mov     [rsp+16], rax
     mov     rdi, rax
     call    obj_eval
     test    rax, rax
@@ -293,6 +298,12 @@ cl_build:
     mov     ecx, [rax+ME_NTRIS]
     cmp     dword ptr [r14+CL_TYPE], 3
     jne     12f
+    mov     [rsp+24], ecx
+    mov     rdi, [rsp+16]               # (a landscape: its heights, not
+    call    la_of                       #  triangles)
+    test    rax, rax
+    jnz     11f
+    mov     ecx, [rsp+24]
     add     [rsp+8], ecx
     jmp     11f
 12: add     [rsp+4], ecx
@@ -972,8 +983,9 @@ cl_step:
 41: inc     ebx
     jmp     4b
 5:  call    cl_volumes
-    cmp     dword ptr [rip+cx_nct], 0
-    je      6f
+    mov     eax, [rip+cx_nct]
+    or      eax, [rip+cx_nhf]
+    jz      6f
     lea     rdi, [rip+col_job]
     xor     esi, esi
     mov     edx, [rip+cx_np]
@@ -1385,6 +1397,7 @@ cl_colliders:
     sub     rsp, 112
     mov     dword ptr [rip+cx_nct], 0
     mov     dword ptr [rip+cx_nbig], 0
+    mov     dword ptr [rip+cx_nhf], 0
     mov     rbx, [rip+an_cur]
     xorps   xmm0, xmm0
     movss   [rsp+96], xmm0              # their sizes, summed
@@ -1401,6 +1414,25 @@ cl_colliders:
     test    rax, rax
     jz      4f
     mov     r15, rax
+    mov     rdi, rax                    # a landscape: by its heights
+    call    la_of
+    test    rax, rax
+    jz      10f
+    mov     ecx, [rip+cx_nhf]
+    cmp     ecx, 4
+    jae     4f
+    inc     dword ptr [rip+cx_nhf]
+    imul    rcx, rcx, 48
+    lea     rdx, [rip+cx_hf]
+    add     rdx, rcx
+    mov     [rdx], rax
+    movups  xmm0, [r15+OB_LOC]
+    andps   xmm0, [rip+cq_xyz]
+    movaps  [rdx+16], xmm0
+    movups  xmm0, [r15+OB_SCALE]
+    andps   xmm0, [rip+cq_xyz]
+    movaps  [rdx+32], xmm0
+    jmp     4f
 10: mov     rdi, r15
     lea     rsi, [rsp+48]
     call    obj_matrix
@@ -1645,6 +1677,15 @@ col_job:
     movss   [rsp+144], xmm0
     movss   xmm0, [rax+CR_FRIC]
     movss   [rsp+148], xmm0
+    xor     r15d, r15d                  # landscapes
+21: cmp     r15d, [rip+cx_nhf]
+    jae     22f
+    mov     edi, r15d
+    call    pt_hf
+    inc     r15d
+    jmp     21b
+22: cmp     dword ptr [rip+cx_nct], 0
+    je      8f
     xor     r15d, r15d                  # the big ones
 2:  cmp     r15d, [rip+cx_nbig]
     jae     3f
@@ -1744,6 +1785,56 @@ pt_tri:
     andps   xmm0, [rip+cq_w]
     orps    xmm2, xmm0
     movaps  [rbx], xmm2
+    lock inc dword ptr [rip+cx_hits]
+9:  pop     r13
+    ret
+
+# pt_hf(edi=landscape collider; rbx=particle, r12d its number, the
+#   caller's [rsp+144] thickness, [rsp+148] friction (here +8)) - a
+#   particle under the ground (and its thickness) put back on it, straight
+#   up; its sliding there slowed by the friction
+pt_hf:
+    push    r13
+    imul    rax, rdi, 48
+    lea     r13, [rip+cx_hf]
+    add     r13, rax
+    movaps  xmm0, [rbx]                 # its place in the landscape's space
+    subps   xmm0, [r13+16]
+    movaps  xmm1, [r13+32]
+    orps    xmm1, [rip+cq_w1]
+    divps   xmm0, xmm1
+    movaps  [rsp+16+16], xmm0
+    movaps  xmm1, xmm0
+    shufps  xmm1, xmm1, 0xAA
+    mov     rdi, [r13]
+    call    la_height
+    test    eax, eax
+    jz      9f
+    mulss   xmm0, [r13+32+4]            # (in the world)
+    addss   xmm0, [r13+16+4]
+    addss   xmm0, [rsp+16+144]
+    movss   xmm1, [rbx+4]
+    comiss  xmm1, xmm0
+    jae     9f
+    movss   [rbx+4], xmm0               # up onto it
+    mov     rax, r12                    # friction: less of the sliding
+    shl     rax, 4
+    add     rax, [rip+cx_xp]
+    movss   xmm5, [rsp+16+148]
+    movss   xmm1, [rbx]
+    movss   xmm2, [rax]
+    subss   xmm1, xmm2
+    mulss   xmm1, xmm5
+    movss   xmm2, [rbx]
+    subss   xmm2, xmm1
+    movss   [rbx], xmm2
+    movss   xmm1, [rbx+8]
+    movss   xmm2, [rax+8]
+    subss   xmm1, xmm2
+    mulss   xmm1, xmm5
+    movss   xmm2, [rbx+8]
+    subss   xmm2, xmm1
+    movss   [rbx+8], xmm2
     lock inc dword ptr [rip+cx_hits]
 9:  pop     r13
     ret

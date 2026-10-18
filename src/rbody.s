@@ -30,6 +30,24 @@
 .intel_syntax noprefix
 .include "const.inc"
 .include "macros.inc"
+.include "landscape.inc"
+.equ HF_SLOTS,  131072
+.equ HF_MAX,    4
+.equ HF_HBITS,  18
+.equ HF_BLK,    0                       # the landscape block (referenced)
+.equ HF_BODY,   8
+.equ HF_N,      12
+.equ HF_CELL,   16                      # its space
+.equ HF_HALF,   20
+.equ HF_HMAX,   24
+.equ HF_IDX,    28
+.equ HF_SCL,    32                      # the body's scale, centre of mass
+.equ HF_COM,    48
+.equ HF_SLOT0,  64                      # its parts, vertices, corners (world)
+.equ HF_VX0,    68
+.equ HF_TW0,    72
+.equ HF_NFREE,  76
+.equ HF_SZ,     128
 
 .globl rb_frame
 .globl rb_gravity
@@ -421,6 +439,12 @@ rb_isb:         .skip 8                 #  (starts: nb + 1 each)
 rb_ism:         .skip 8
 rb_isj:         .skip 8
 rb_iaw:         .skip 8                 #  awake
+hf_keyp:        .skip 8                 # heightfields: triangles in slots,
+hf_seenp:       .skip 8                 #  the step each was last needed,
+hf_freelp:      .skip 8                 #  free slots, the hash, each slot's
+hf_tabp:        .skip 8                 #  friction and bounce
+hf_fricp:       .skip 8
+hf_restp:       .skip 8
 rb_jr:          .skip 8
 rb_hash:        .skip 8                 # the settings it was made from
 rb_frame0:      .skip 4                 # the start frame
@@ -779,6 +803,7 @@ rb_reserve:
 
 # rb_free - no simulation
 rb_free:
+    call    hf_reset
     call    rbi_drop
     cmp     dword ptr [rip+rb_on], 0
     je      9f
@@ -856,6 +881,8 @@ rb_build:
     xor     r13d, r13d
     xor     r14d, r14d                  # (its vertices, triangles)
     mov     dword ptr [rsp], 0
+    mov     dword ptr [rsp+40], 0       # (landscapes)
+    mov     dword ptr [rip+rb_xhf], 0
     mov     dword ptr [rip+rb_xparts], 0
 1:  cmp     r12d, [rbx+AN_NRB_]
     jae     2f
@@ -897,7 +924,21 @@ rb_build:
     cmp     dword ptr [rdi+RB_TYPE], 2
     jne     103f
     mov     ecx, [rax+ME_NTRIS]
-    add     [rip+rb_xparts], ecx
+    mov     [rsp+32], rax
+    call    rb_entry_obj                # (a landscape: slots, not triangles)
+    mov     rdi, rax
+    call    la_of
+    test    rax, rax
+    mov     rax, [rsp+32]
+    mov     ecx, [rax+ME_NTRIS]
+    jz      1031f
+    cmp     dword ptr [rsp+40], HF_MAX
+    jae     1031f
+    inc     dword ptr [rsp+40]
+    mov     ecx, HF_SLOTS
+1031:add     [rip+rb_xparts], ecx
+    mov     edx, [rsp+40]
+    mov     [rip+rb_xhf], edx
 103:mov     ecx, [rax+ME_NVERTS]
     cmp     ecx, r14d
     cmova   r14d, ecx
@@ -1078,6 +1119,29 @@ rb_build:
     call    rb_lay
     lea     rdi, [rip+rb_jr]
     mov     esi, JT_MAX_*JR_SZ
+    call    rb_lay
+    mov     edx, [rip+rb_xhf]           # heightfields' slots
+    imul    rdx, rdx, 4*HF_SLOTS
+    add     rdx, 64
+    lea     rdi, [rip+hf_keyp]
+    mov     rsi, rdx
+    call    rb_lay
+    lea     rdi, [rip+hf_seenp]
+    mov     rsi, rdx
+    call    rb_lay
+    lea     rdi, [rip+hf_freelp]
+    mov     rsi, rdx
+    call    rb_lay
+    lea     rdi, [rip+hf_fricp]
+    mov     rsi, rdx
+    call    rb_lay
+    lea     rdi, [rip+hf_restp]
+    mov     rsi, rdx
+    call    rb_lay
+    mov     esi, [rip+rb_xhf]
+    shl     rsi, HF_HBITS+2
+    add     rsi, 64
+    lea     rdi, [rip+hf_tabp]
     call    rb_lay
     mov     rsi, r12
     mov     [rip+rb_bytes], rsi
@@ -1392,8 +1456,22 @@ make_body_ex:
     cmp     dword ptr [r12+RB_TYPE], 2
     jne     .Lmb_moving
     cmp     eax, 5
-    je      .Lmb_mesh
-    jmp     .Lmb_plane
+    jne     .Lmb_plane
+    mov     rdi, r13                    # a landscape: a heightfield (while
+    call    la_of                       #  there is room for one)
+    test    rax, rax
+    jz      .Lmb_mesh
+    cmp     dword ptr [rip+rb_nhf], HF_MAX
+    jae     .Lmb_mesh
+    mov     rdi, rax
+    lea     rsi, [rsp+96]
+    call    hf_new
+    call    new_part                    # one part: its bounds (pairs only;
+    mov     dword ptr [rax+PT_TYPE], 3  #  the triangles come per step)
+    movaps  xmm0, [rsp+112]
+    addps   xmm0, [rip+hf_pad]
+    movaps  [rax+PT_HALF], xmm0
+    jmp     .Lmb_mass
 .Lmb_moving:                            # (moving: a mesh as a compound, a
     cmp     eax, 5                      #  plane as a box)
     je      .Lmb_comp_pts
@@ -1573,7 +1651,11 @@ make_body_ex:
     movaps  [rbx+BD_IIL], xmm3
 8:  mov     rdi, rbx
     call    body_update
-    cmp     dword ptr [r12+RB_SHAPE], 5 # a mesh collider: its edges, its
+    cmp     dword ptr [rbx+BD_BVH], 0   # a heightfield: its slots
+    jge     81f
+    call    hf_reserve
+    jmp     9f
+81: cmp     dword ptr [r12+RB_SHAPE], 5 # a mesh collider: its edges, its
     jne     9f                          #  tree
     cmp     dword ptr [r12+RB_TYPE], 2
     jne     9f
@@ -2633,6 +2715,7 @@ rb_step:
     call    now_ns
     mov     rbx, rax
     call    ccd_mark                    # where the moving bodies begin
+    call    hf_prepare                  # heightfields: triangles under them
     call    broad                       # pairs of parts: manifolds kept / made
     xor     edi, edi
     call    rb_lap
@@ -3090,6 +3173,22 @@ mf_get:
     movss   xmm0, [r8+BD_REST]
     maxss   xmm0, [r9+BD_REST]
     movss   [rbx+MF_REST], xmm0
+    mov     rdi, r8                     # a heightfield's triangle: the
+    mov     esi, r14d                   #  paint's friction and bounce there
+    mov     r10, r9
+    cmp     dword ptr [r8+BD_BVH], 0
+    jl      33f
+    mov     rdi, r9
+    mov     esi, r15d
+    mov     r10, r8
+    cmp     dword ptr [r9+BD_BVH], 0
+    jge     9f
+33: call    hf_part_mat
+    mulss   xmm0, [r10+BD_FRIC]
+    sqrtss  xmm0, xmm0
+    movss   [rbx+MF_FRIC], xmm0
+    maxss   xmm1, [r10+BD_REST]
+    movss   [rbx+MF_REST], xmm1
 9:  pop     r15
     pop     r14
     pop     r13
@@ -3901,8 +4000,10 @@ pp_tree:
     addss   xmm0, [rip+rx_keep]
     mulss   xmm0, xmm0
     movss   [rsp+272], xmm0
-    mov     eax, [r15+BD_BVH]           # the walk: a stack of nodes
-    dec     eax
+    mov     eax, [r15+BD_BVH]           # (a heightfield: its cells)
+    test    eax, eax
+    js      .Lph_hf
+    dec     eax                         # the walk: a stack of nodes
     mov     [rsp+64], eax
     mov     dword ptr [rsp+12], 1       # (its depth, at +64 on)
 63: mov     ecx, [rsp+12]
@@ -3983,6 +4084,87 @@ pp_tree:
     jmp     66b
 69: inc     r13d
     jmp     62b
+.Lph_hf:                                # the cells under the part, their
+    not     eax                         #  triangles' slots (made before)
+    imul    rax, rax, HF_SZ
+    lea     rcx, [rip+rb_hf]
+    add     rax, rcx
+    mov     [rsp+96], rax
+    mov     rdi, r14
+    mov     esi, r13d
+    lea     rdx, [rsp+112]
+    call    hf_box
+    mov     rdi, [rsp+96]
+    lea     rsi, [rsp+112]
+    call    hf_cells
+    test    eax, eax
+    jz      69b
+    mov     [rsp+64], r8d
+    mov     [rsp+68], r9d
+    mov     [rsp+72], r10d
+    mov     [rsp+76], r11d
+    mov     [rsp+84], r10d              # j
+.Lph_j:
+    mov     eax, [rsp+84]
+    cmp     eax, [rsp+76]
+    jg      69b
+    mov     eax, [rsp+64]
+    mov     [rsp+80], eax               # i
+.Lph_i:
+    mov     eax, [rsp+80]
+    cmp     eax, [rsp+68]
+    jg      .Lph_nj
+    mov     dword ptr [rsp+88], 0       # t
+.Lph_t:
+    mov     rdi, [rsp+96]
+    mov     eax, [rsp+84]
+    mov     ecx, [rdi+HF_N]
+    dec     ecx
+    imul    eax, ecx
+    add     eax, [rsp+80]
+    shl     eax, 1
+    add     eax, [rsp+88]
+    mov     esi, eax
+    xor     edx, edx
+    call    hfs_get
+    test    eax, eax
+    js      .Lph_nt
+    mov     rcx, [rsp+96]
+    add     eax, [rcx+HF_SLOT0]
+    mov     [rsp+56], eax
+    mov     ecx, eax
+    call    pp_reach
+    mov     ecx, [rsp+56]
+    test    eax, eax
+    jz      .Lph_nt
+    mov     edi, [rsp]
+    mov     esi, [rsp+4]
+    mov     edx, r13d                   # (parts in the bodies' order)
+    cmp     dword ptr [rsp+8], 0
+    je      1f
+    xchg    edx, ecx
+1:  cmp     dword ptr [rsp+60], 0       # (only looking: there already?)
+    je      3f
+    mov     edi, edx
+    mov     esi, ecx
+    call    mf_find
+    test    rax, rax
+    jz      2f
+    mov     ecx, [rip+rb_stepno]
+    mov     [rax+MX_KEEP], ecx
+    jmp     .Lph_nt
+2:  inc     dword ptr [rsp+276]
+    jmp     .Lph_nt
+3:  call    mf_get
+.Lph_nt:
+    inc     dword ptr [rsp+88]
+    cmp     dword ptr [rsp+88], 2
+    jb      .Lph_t
+    inc     dword ptr [rsp+80]
+    jmp     .Lph_i
+.Lph_nj:
+    inc     dword ptr [rsp+84]
+    jmp     .Lph_j
 .Lpt_out:
     mov     eax, [rsp+276]
     lea     rsp, [rbp-40]
@@ -4016,6 +4198,802 @@ mf_find:
     and     eax, [rip+rb_hmask]
     jmp     1b
 8:  xor     eax, eax
+    ret
+
+# =============================================================================
+#  Heightfields: landscapes as colliders. A landscape made a passive mesh
+#  body is not cut into triangles: each step, the cells under every moving
+#  part (its bounds, as the pairs see them) become triangle parts on the fly
+#  in slots of their own (a hash from the triangle to its slot; a slot not
+#  needed for a few steps is free again), so pairs, manifolds and contacts
+#  work as for a mesh's triangles and keep their slot while in use. A cell
+#  (i, j) is the triangles (i, j)(i, j+1)(i+1, j+1) and (i, j)(i+1, j+1)
+#  (i+1, j), as the display mesh; an edge with a neighbour within 5 degrees
+#  is inactive (tri_fix).
+# =============================================================================
+
+.section .bss
+.align 16
+rb_hf:          .skip HF_SZ*HF_MAX
+rb_nhf:         .skip 4
+.align 16
+rb_xhf:         .skip 4                 # (heightfields to make room for)
+.section .rodata
+.align 4
+hf_cos5:        .float 0.9961947
+.align 16
+hf_w1:          .long 0, 0, 0, 0x3f800000
+hf_pad:         .float 0.5, 2.0, 0.5, 0
+# a triangle's edge (t, edge 0-1, 1-2, 2-0) -> its neighbour: di, dj, t
+hf_nb:          .long -1, 0, 1,   0, 1, 1,   0, 0, 1
+                .long  0, 0, 0,   1, 0, 0,   0, -1, 0
+.text
+
+# hf_reset - the heightfields let go
+hf_reset:
+    push    rbx
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+rb_nhf]
+    jae     9f
+    imul    rax, rbx, HF_SZ
+    lea     rcx, [rip+rb_hf]
+    mov     rdi, [rcx+rax+HF_BLK]
+    mov     qword ptr [rcx+rax+HF_BLK], 0
+    call    la_unref
+    inc     ebx
+    jmp     1b
+9:  mov     dword ptr [rip+rb_nhf], 0
+    pop     rbx
+    ret
+
+# hf_new(rbx=body, rdi=block, rsi=centre of mass (vec4)) - the body a
+#   heightfield (BD_BVH = -(index + 1))
+hf_new:
+    mov     eax, [rip+rb_nhf]
+    inc     dword ptr [rip+rb_nhf]
+    mov     ecx, eax
+    not     ecx
+    mov     [rbx+BD_BVH], ecx
+    imul    rcx, rax, HF_SZ
+    lea     rdx, [rip+rb_hf]
+    add     rdx, rcx
+    mov     [rdx+HF_IDX], eax
+    mov     [rdx+HF_BLK], rdi
+    lock inc dword ptr [rdi+LB_REFS]
+    mov     rax, rbx
+    sub     rax, [rip+rb_bd]
+    push    rdx
+    xor     edx, edx
+    mov     ecx, BD_SZ
+    div     rcx
+    pop     rdx
+    mov     [rdx+HF_BODY], eax
+    mov     eax, [rdi+LB_N]
+    mov     [rdx+HF_N], eax
+    dec     eax
+    cvtsi2ss xmm1, eax
+    movss   xmm0, [rdi+LB_SIZE]
+    divss   xmm0, xmm1
+    movss   [rdx+HF_CELL], xmm0
+    movss   xmm0, [rdi+LB_SIZE]
+    mulss   xmm0, [rip+rx_half4]
+    movss   [rdx+HF_HALF], xmm0
+    mov     eax, [rdi+LB_HMAX]
+    mov     [rdx+HF_HMAX], eax
+    movaps  xmm0, [rbx+BD_SCL]
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [rdx+HF_SCL], xmm0
+    movaps  xmm0, [rsi]
+    movaps  [rdx+HF_COM], xmm0
+    ret
+
+# hf_reserve(rbx=body) - its slots: parts, vertices, corners
+hf_reserve:
+    mov     eax, [rbx+BD_BVH]
+    not     eax
+    imul    rax, rax, HF_SZ
+    lea     rdi, [rip+rb_hf]
+    add     rdi, rax
+    mov     eax, [rip+rb_npt]
+    mov     [rdi+HF_SLOT0], eax
+    add     dword ptr [rip+rb_npt], HF_SLOTS
+    mov     eax, [rip+rb_nvx]
+    mov     [rdi+HF_VX0], eax
+    add     dword ptr [rip+rb_nvx], 3*HF_SLOTS
+    mov     eax, [rip+rb_nbvi]
+    mov     [rdi+HF_TW0], eax
+    add     dword ptr [rip+rb_nbvi], HF_SLOTS
+    mov     dword ptr [rdi+HF_NFREE], HF_SLOTS
+    mov     eax, [rdi+HF_IDX]
+    imul    rax, rax, 4*HF_SLOTS
+    mov     rdx, [rip+hf_freelp]
+    add     rdx, rax
+    mov     r8, [rip+hf_seenp]
+    add     r8, rax
+    xor     ecx, ecx
+1:  mov     r9d, HF_SLOTS-1             # (slot 0 taken first)
+    sub     r9d, ecx
+    mov     [rdx+rcx*4], r9d
+    mov     dword ptr [r8+rcx*4], 0
+    inc     ecx
+    cmp     ecx, HF_SLOTS
+    jb      1b
+    ret
+
+# hf_arrays(rdi=heightfield) -> r8 keys, r9 seen, r10 free list, r11 hash
+hf_arrays:
+    mov     eax, [rdi+HF_IDX]
+    imul    rax, rax, 4*HF_SLOTS
+    mov     r8, [rip+hf_keyp]
+    add     r8, rax
+    mov     r9, [rip+hf_seenp]
+    add     r9, rax
+    mov     r10, [rip+hf_freelp]
+    add     r10, rax
+    mov     eax, [rdi+HF_IDX]
+    shl     rax, HF_HBITS+2
+    mov     r11, [rip+hf_tabp]
+    add     r11, rax
+    ret
+
+# hf_hash(eax=triangle) -> eax = its first place in the hash
+.macro HF_HASHI
+    imul    eax, eax, 0x9E3779B1
+    shr     eax, 32-HF_HBITS
+.endm
+
+# hf_sweep(rdi=heightfield) - slots unneeded for 3 steps freed, the hash
+#   made again from the rest
+hf_sweep:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    call    hf_arrays
+    push    rdi
+    mov     rdi, r11
+    mov     ecx, 1<<HF_HBITS
+    xor     eax, eax
+    rep     stosd
+    pop     rdi
+    mov     r12d, [rip+rb_stepno]
+    xor     ecx, ecx
+1:  cmp     ecx, HF_SLOTS
+    jae     9f
+    mov     edx, [r9+rcx*4]
+    test    edx, edx
+    jz      8f
+    mov     r13d, r12d
+    sub     r13d, edx
+    cmp     r13d, 3
+    jbe     2f
+    mov     dword ptr [r9+rcx*4], 0     # free again
+    mov     edx, [rbx+HF_NFREE]
+    mov     [r10+rdx*4], ecx
+    inc     dword ptr [rbx+HF_NFREE]
+    jmp     8f
+2:  mov     eax, [r8+rcx*4]             # in the hash
+    HF_HASHI
+3:  cmp     dword ptr [r11+rax*4], 0
+    je      4f
+    inc     eax
+    and     eax, (1<<HF_HBITS)-1
+    jmp     3b
+4:  lea     edx, [rcx+1]
+    mov     [r11+rax*4], edx
+8:  inc     ecx
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hfs_get(rdi=heightfield, esi=triangle, edx=1 make it (and mark it seen),
+#   0 only look) -> eax = its slot, or -1
+hfs_get:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13d, edx
+    call    hf_arrays
+    mov     eax, r12d
+    HF_HASHI
+1:  mov     ecx, [r11+rax*4]
+    test    ecx, ecx
+    jz      3f
+    dec     ecx
+    cmp     [r8+rcx*4], r12d
+    je      2f
+    inc     eax
+    and     eax, (1<<HF_HBITS)-1
+    jmp     1b
+2:  test    r13d, r13d
+    jz      21f
+    mov     edx, [rip+rb_stepno]
+    mov     [r9+rcx*4], edx
+21: mov     eax, ecx
+    jmp     9f
+3:  test    r13d, r13d
+    jz      8f
+    mov     ecx, [rbx+HF_NFREE]
+    test    ecx, ecx
+    jz      8f
+    dec     ecx
+    mov     [rbx+HF_NFREE], ecx
+    mov     ecx, [r10+rcx*4]
+    lea     edx, [rcx+1]
+    mov     [r11+rax*4], edx
+    mov     [r8+rcx*4], r12d
+    mov     edx, [rip+rb_stepno]
+    mov     [r9+rcx*4], edx
+    mov     r14d, ecx
+    mov     rdi, rbx
+    mov     esi, ecx
+    mov     edx, r12d
+    call    hf_tri
+    mov     eax, r14d
+    jmp     9f
+8:  mov     eax, -1
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hf_pt(rdi=heightfield, esi=i, edx=j) -> xmm0 = the sample in the body's
+#   space: scale (x, h, z) - centre of mass
+hf_pt:
+    mov     rax, [rdi+HF_BLK]
+    mov     rcx, [rax+LB_H]
+    add     rcx, rax
+    mov     eax, edx
+    imul    eax, [rdi+HF_N]
+    add     eax, esi
+    movss   xmm1, [rcx+rax*4]           # y
+    cvtsi2ss xmm0, esi
+    mulss   xmm0, [rdi+HF_CELL]
+    subss   xmm0, [rdi+HF_HALF]         # x
+    cvtsi2ss xmm2, edx
+    mulss   xmm2, [rdi+HF_CELL]
+    subss   xmm2, [rdi+HF_HALF]         # z
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    mulps   xmm0, [rdi+HF_SCL]
+    subps   xmm0, [rdi+HF_COM]
+    andps   xmm0, [rip+rx_xyz]
+    ret
+
+# hf_corners(rdi=heightfield, esi=i, edx=j, ecx=t, r8=out vec4[3]) -> eax =
+#   1 (0: outside the grid)
+hf_corners:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     r14d, ecx
+    mov     r15, r8
+    xor     eax, eax
+    test    r12d, r12d
+    js      9f
+    test    r13d, r13d
+    js      9f
+    mov     ecx, [rbx+HF_N]
+    sub     ecx, 2
+    cmp     r12d, ecx
+    jg      9f
+    cmp     r13d, ecx
+    jg      9f
+    mov     rdi, rbx                    # v0 (i, j)
+    mov     esi, r12d
+    mov     edx, r13d
+    call    hf_pt
+    movaps  [r15], xmm0
+    mov     rdi, rbx                    # t0: (i, j+1); t1: (i+1, j+1)
+    mov     esi, r12d
+    add     esi, r14d
+    lea     edx, [r13+1]
+    call    hf_pt
+    movaps  [r15+16], xmm0
+    mov     rdi, rbx                    # t0: (i+1, j+1); t1: (i+1, j)
+    lea     esi, [r12+1]
+    lea     edx, [r13+1]
+    sub     edx, r14d
+    call    hf_pt
+    movaps  [r15+32], xmm0
+    mov     eax, 1
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hf_tnorm(rdi, esi=i, edx=j, ecx=t; r8=scratch vec4[3]) -> xmm0 = the
+#   triangle's unit normal, eax = 0 outside the grid
+hf_tnorm:
+    sub     rsp, 8
+    call    hf_corners
+    test    eax, eax
+    jz      9f
+    movaps  xmm1, [r8+16]
+    subps   xmm1, [r8]
+    movaps  xmm2, [r8+32]
+    subps   xmm2, [r8]
+    CROSS   xmm0, xmm1, xmm2, xmm3
+    movaps  xmm1, xmm0
+    DOT3    xmm1, xmm1
+    sqrtss  xmm1, xmm1
+    maxss   xmm1, [rip+rx_tiny2]
+    shufps  xmm1, xmm1, 0
+    divps   xmm0, xmm1
+    mov     eax, 1
+9:  add     rsp, 8
+    ret
+
+# hf_tri(rdi=heightfield, esi=slot, edx=triangle) - the slot's part: the
+#   triangle (body space), its corners in the world, its active edges
+hf_tri:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 160                    # +0 corners, +48 normal, +64 scratch
+    mov     rbx, rdi                    #  (48), +112 i j t
+    mov     r12d, esi
+    mov     eax, edx
+    mov     ecx, eax
+    and     ecx, 1
+    mov     [rsp+120], ecx              # t
+    shr     eax, 1
+    mov     ecx, [rbx+HF_N]
+    dec     ecx
+    xor     edx, edx
+    div     ecx
+    mov     [rsp+112], edx              # i
+    mov     [rsp+116], eax              # j
+    mov     rdi, rbx
+    mov     esi, edx
+    mov     edx, eax
+    mov     ecx, [rsp+120]
+    lea     r8, [rsp]
+    call    hf_tnorm
+    movaps  [rsp+48], xmm0
+    mov     eax, [rbx+HF_SLOT0]         # the part
+    add     eax, r12d
+    imul    r13, rax, PT_SZ
+    add     r13, [rip+rb_pt]
+    mov     rdi, r13
+    xor     eax, eax
+    mov     ecx, PT_SZ/8
+    rep     stosq
+    mov     dword ptr [r13+PT_TYPE], 1
+    mov     dword ptr [r13+PT_NV], 3
+    mov     eax, [rbx+HF_BODY]
+    mov     [r13+PT_BODY], eax
+    mov     eax, [rbx+HF_TW0]
+    add     eax, r12d
+    mov     [r13+PT_TW], eax
+    lea     eax, [r12+r12*2]            # its vertices: from the bounds' centre
+    add     eax, [rbx+HF_VX0]
+    shl     rax, 4
+    add     rax, [rip+rb_vx]
+    mov     [r13+PT_VERTS], rax
+    mov     r14, rax
+    movaps  xmm6, [rsp]
+    movaps  xmm7, xmm6
+    minps   xmm6, [rsp+16]
+    maxps   xmm7, [rsp+16]
+    minps   xmm6, [rsp+32]
+    maxps   xmm7, [rsp+32]
+    movaps  xmm0, xmm6
+    addps   xmm0, xmm7
+    mulps   xmm0, [rip+rx_half4]
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [r13+PT_OFF], xmm0
+    subps   xmm7, xmm6
+    mulps   xmm7, [rip+rx_half4]
+    andps   xmm7, [rip+rx_xyz]
+    movaps  [r13+PT_HALF], xmm7
+    xor     ecx, ecx
+1:  mov     edx, ecx
+    shl     edx, 4
+    movaps  xmm1, [rsp+rdx]
+    subps   xmm1, xmm0
+    movaps  [r14+rdx], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     eax, [r13+PT_TW]            # the corners in the world (static)
+    imul    r8, rax, 48
+    add     r8, [rip+rb_tvw]
+    mov     eax, [rbx+HF_BODY]
+    imul    r9, rax, BD_SZ
+    add     r9, [rip+rb_bd]
+    xor     ecx, ecx
+2:  mov     edx, ecx
+    shl     edx, 4
+    movaps  xmm0, [rsp+rdx]
+    MV3     xmm1, r9+BD_R, xmm0, xmm2, xmm3
+    addps   xmm1, [r9+BD_POS]
+    andps   xmm1, [rip+rx_xyz]
+    movaps  [r8+rdx], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    mov     r15d, 1                     # its edges: active unless a
+    xor     r14d, r14d                  #  neighbour lies within 5 degrees
+3:  mov     eax, [rsp+120]
+    imul    eax, eax, 3
+    add     eax, r14d
+    imul    eax, eax, 12
+    lea     rcx, [rip+hf_nb]
+    add     rcx, rax
+    mov     esi, [rsp+112]
+    add     esi, [rcx]
+    mov     edx, [rsp+116]
+    add     edx, [rcx+4]
+    mov     ecx, [rcx+8]
+    mov     rdi, rbx
+    lea     r8, [rsp+64]
+    call    hf_tnorm
+    lea     ecx, [r14+1]
+    mov     edx, 1
+    shl     edx, cl
+    test    eax, eax
+    jz      31f
+    DOT3    xmm0, [rsp+48]
+    comiss  xmm0, [rip+hf_cos5]
+    jae     32f
+31: or      r15d, edx
+32: inc     r14d
+    cmp     r14d, 3
+    jb      3b
+    mov     [r13+PT_FLG], r15d
+    mov     rdi, rbx                    # its material (the paint there)
+    mov     esi, r12d
+    mov     edx, [rsp+112]
+    mov     ecx, [rsp+116]
+    call    hf_mat
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# hf_part_mat(rdi=heightfield body, esi=its triangle's part) -> xmm0 =
+#   friction, xmm1 = bounce there (rdi, rsi, r10 kept... only rax, rcx, rdx
+#   and xmm0, xmm1 change)
+hf_part_mat:
+    movss   xmm0, [rdi+BD_FRIC]
+    movss   xmm1, [rdi+BD_REST]
+    mov     eax, [rdi+BD_BVH]
+    not     eax
+    imul    rcx, rax, HF_SZ
+    lea     rdx, [rip+rb_hf]
+    add     rcx, rdx
+    mov     edx, esi
+    sub     edx, [rcx+HF_SLOT0]
+    cmp     edx, HF_SLOTS
+    jae     9f
+    imul    rax, rax, HF_SLOTS
+    add     rax, rdx
+    mov     rcx, [rip+hf_fricp]
+    movss   xmm0, [rcx+rax*4]
+    mov     rcx, [rip+hf_restp]
+    movss   xmm1, [rcx+rax*4]
+9:  ret
+
+# hf_mat(rdi=heightfield, esi=slot, edx=i, ecx=j) - the slot's friction and
+#   bounce: the paint layers' by their weights at (i, j), the body's for
+#   the rest
+hf_mat:
+    push    rbx
+    push    r12
+    mov     r8d, [rdi+HF_BODY]
+    imul    r8, r8, BD_SZ
+    add     r8, [rip+rb_bd]
+    movss   xmm0, [r8+BD_FRIC]          # (unpainted: the body's)
+    movss   xmm1, [r8+BD_REST]
+    mov     rbx, [rdi+HF_BLK]
+    cmp     qword ptr [rbx+LB_SPLAT], 0
+    je      8f
+    cmp     dword ptr [rbx+LB_NP], 0
+    je      8f
+    mov     r9, [rbx+LB_SPLAT]
+    add     r9, rbx
+    mov     eax, ecx
+    imul    eax, [rdi+HF_N]
+    add     eax, edx
+    lea     r9, [r9+rax*8]
+    xorps   xmm2, xmm2                  # sum w f, sum w b, sum w
+    xorps   xmm3, xmm3
+    xor     r12d, r12d
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+LB_NP]
+    jae     2f
+    movzx   eax, byte ptr [r9+rcx]
+    add     r12d, eax
+    cvtsi2ss xmm4, eax
+    imul    rdx, rcx, LP_SZ
+    movss   xmm5, [rbx+LB_PAINT+rdx+LP_FRIC]
+    mulss   xmm5, xmm4
+    addss   xmm2, xmm5
+    movss   xmm5, [rbx+LB_PAINT+rdx+LP_BOUNCE]
+    mulss   xmm5, xmm4
+    addss   xmm3, xmm5
+    inc     ecx
+    jmp     1b
+2:  mov     eax, 255
+    sub     eax, r12d
+    jns     21f
+    xor     eax, eax
+21: cvtsi2ss xmm4, eax
+    mulss   xmm0, xmm4
+    addss   xmm0, xmm2
+    mulss   xmm1, xmm4
+    addss   xmm1, xmm3
+    mov     eax, 255
+    cvtsi2ss xmm4, eax
+    divss   xmm0, xmm4
+    divss   xmm1, xmm4
+8:  mov     eax, [rdi+HF_IDX]
+    imul    rax, rax, HF_SLOTS
+    add     eax, esi
+    mov     rcx, [rip+hf_fricp]
+    movss   [rcx+rax*4], xmm0
+    mov     rcx, [rip+hf_restp]
+    movss   [rcx+rax*4], xmm1
+    pop     r12
+    pop     rbx
+    ret
+
+# hf_box(rdi=body, esi=part, rdx=out min, max) - the part's bounds as the
+#   heightfield sees them (part_bounds + the contacts' keep distance)
+hf_box:
+    push    rdx
+    call    part_bounds
+    pop     rdx
+    movss   xmm0, [rip+rx_keep]
+    addss   xmm0, xmm0
+    shufps  xmm0, xmm0, 0
+    andps   xmm0, [rip+rx_xyz]
+    movaps  xmm1, [rdx]
+    subps   xmm1, xmm0
+    movaps  [rdx], xmm1
+    movaps  xmm1, [rdx+16]
+    addps   xmm1, xmm0
+    movaps  [rdx+16], xmm1
+    ret
+
+# hf_cells(rdi=heightfield, rsi=bounds (world min, max)) -> eax = 1 and the
+#   cells under them: r8d i0, r9d i1, r10d j0, r11d j1 (0: none - outside,
+#   or above its highest)
+hf_cells:
+    mov     eax, [rdi+HF_BODY]
+    imul    rcx, rax, BD_SZ
+    add     rcx, [rip+rb_bd]
+    movaps  xmm0, [rsi]
+    movaps  xmm1, [rsi+16]
+    movaps  xmm2, xmm0                  # centre, half (world)
+    addps   xmm2, xmm1
+    mulps   xmm2, [rip+rx_half4]
+    subps   xmm1, xmm0
+    mulps   xmm1, [rip+rx_half4]
+    subps   xmm2, [rcx+BD_POS]
+    movaps  xmm3, [rcx+BD_R]            # into the body: R^T (c - pos), |R|^T h
+    movaps  xmm4, [rcx+BD_R+16]
+    movaps  xmm5, [rcx+BD_R+32]
+    movaps  xmm6, xmm2
+    shufps  xmm6, xmm6, 0x00
+    mulps   xmm6, xmm3
+    movaps  xmm7, xmm2
+    shufps  xmm7, xmm7, 0x55
+    mulps   xmm7, xmm4
+    addps   xmm6, xmm7
+    movaps  xmm7, xmm2
+    shufps  xmm7, xmm7, 0xAA
+    mulps   xmm7, xmm5
+    addps   xmm6, xmm7
+    andps   xmm3, [rip+rx_abs]
+    andps   xmm4, [rip+rx_abs]
+    andps   xmm5, [rip+rx_abs]
+    movaps  xmm7, xmm1
+    shufps  xmm7, xmm7, 0x00
+    mulps   xmm7, xmm3
+    movaps  xmm8, xmm1
+    shufps  xmm8, xmm8, 0x55
+    mulps   xmm8, xmm4
+    addps   xmm7, xmm8
+    movaps  xmm8, xmm1
+    shufps  xmm8, xmm8, 0xAA
+    mulps   xmm8, xmm5
+    addps   xmm7, xmm8
+    addps   xmm6, [rdi+HF_COM]          # its space: / scale
+    movaps  xmm8, [rdi+HF_SCL]          # (w: 1, not 0)
+    andps   xmm8, [rip+rx_xyz]
+    orps    xmm8, [rip+hf_w1]
+    divps   xmm6, xmm8
+    divps   xmm7, xmm8
+    andps   xmm7, [rip+rx_abs]
+    movaps  xmm0, xmm6                  # above its highest: none
+    shufps  xmm0, xmm0, 0x55
+    movaps  xmm1, xmm7
+    shufps  xmm1, xmm1, 0x55
+    subss   xmm0, xmm1
+    comiss  xmm0, [rdi+HF_HMAX]
+    ja      8f
+    mov     edx, [rdi+HF_N]
+    sub     edx, 2                      # the last cell
+    movss   xmm0, xmm6                  # x: (c -+ h + half) / cell
+    subss   xmm0, xmm7
+    addss   xmm0, [rdi+HF_HALF]
+    divss   xmm0, [rdi+HF_CELL]
+    roundss xmm0, xmm0, 1
+    cvttss2si r8d, xmm0
+    movss   xmm0, xmm6
+    addss   xmm0, xmm7
+    addss   xmm0, [rdi+HF_HALF]
+    divss   xmm0, [rdi+HF_CELL]
+    roundss xmm0, xmm0, 1
+    cvttss2si r9d, xmm0
+    shufps  xmm6, xmm6, 0xAA            # z
+    shufps  xmm7, xmm7, 0xAA
+    movss   xmm0, xmm6
+    subss   xmm0, xmm7
+    addss   xmm0, [rdi+HF_HALF]
+    divss   xmm0, [rdi+HF_CELL]
+    roundss xmm0, xmm0, 1
+    cvttss2si r10d, xmm0
+    movss   xmm0, xmm6
+    addss   xmm0, xmm7
+    addss   xmm0, [rdi+HF_HALF]
+    divss   xmm0, [rdi+HF_CELL]
+    roundss xmm0, xmm0, 1
+    cvttss2si r11d, xmm0
+    xor     eax, eax                    # clamped: none past the edges
+    cmp     r8d, eax
+    cmovl   r8d, eax
+    cmp     r10d, eax
+    cmovl   r10d, eax
+    cmp     r9d, edx
+    cmovg   r9d, edx
+    cmp     r11d, edx
+    cmovg   r11d, edx
+    cmp     r8d, r9d
+    jg      8f
+    cmp     r10d, r11d
+    jg      8f
+    mov     eax, 1
+    ret
+8:  xor     eax, eax
+    ret
+
+# hf_prepare - each step, before the pairs: the triangles under every
+#   moving part over a heightfield in their slots (made when new)
+hf_prepare:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 96                     # +0 bounds, +48 part, +52 end, +56
+    xor     r12d, r12d                  #  i0 i1 j0 j1, +72 j, +76 i, +80 id
+.Lhp_hf:
+    cmp     r12d, [rip+rb_nhf]
+    jae     .Lhp_out
+    imul    rax, r12, HF_SZ
+    lea     r13, [rip+rb_hf]
+    add     r13, rax
+    mov     rdi, r13
+    call    hf_sweep
+    mov     eax, [r13+HF_BODY]
+    imul    r14, rax, BD_SZ
+    add     r14, [rip+rb_bd]
+    xor     ebx, ebx
+.Lhp_body:
+    cmp     ebx, [rip+rb_nb]
+    jae     .Lhp_next
+    imul    r15, rbx, BD_SZ
+    add     r15, [rip+rb_bd]
+    cmp     dword ptr [r15+BD_TYPE], 1
+    jne     .Lhp_nb
+    movaps  xmm0, [r15+BD_MIN]          # over it?
+    cmpleps xmm0, [r14+BD_MAX]
+    movaps  xmm1, [r14+BD_MIN]
+    cmpleps xmm1, [r15+BD_MAX]
+    andps   xmm0, xmm1
+    movmskps eax, xmm0
+    and     eax, 7
+    cmp     eax, 7
+    jne     .Lhp_nb
+    mov     eax, [r15+BD_P0]
+    mov     [rsp+48], eax
+    add     eax, [r15+BD_NP]
+    mov     [rsp+52], eax
+.Lhp_part:
+    mov     esi, [rsp+48]
+    cmp     esi, [rsp+52]
+    jae     .Lhp_nb
+    mov     rdi, r15
+    lea     rdx, [rsp]
+    call    hf_box
+    mov     rdi, r13
+    lea     rsi, [rsp]
+    call    hf_cells
+    test    eax, eax
+    jz      .Lhp_np
+    mov     [rsp+56], r8d
+    mov     [rsp+60], r9d
+    mov     [rsp+64], r10d
+    mov     [rsp+68], r11d
+    mov     [rsp+72], r10d
+.Lhp_j:
+    mov     eax, [rsp+72]
+    cmp     eax, [rsp+68]
+    jg      .Lhp_np
+    mov     eax, [rsp+56]
+    mov     [rsp+76], eax
+.Lhp_i:
+    mov     eax, [rsp+76]
+    cmp     eax, [rsp+60]
+    jg      .Lhp_nj
+    mov     eax, [rsp+72]               # (j (N - 1) + i) 2 + t
+    mov     ecx, [r13+HF_N]
+    dec     ecx
+    imul    eax, ecx
+    add     eax, [rsp+76]
+    shl     eax, 1
+    mov     [rsp+80], eax
+    mov     rdi, r13
+    mov     esi, eax
+    mov     edx, 1
+    call    hfs_get
+    mov     rdi, r13
+    mov     esi, [rsp+80]
+    inc     esi
+    mov     edx, 1
+    call    hfs_get
+    inc     dword ptr [rsp+76]
+    jmp     .Lhp_i
+.Lhp_nj:
+    inc     dword ptr [rsp+72]
+    jmp     .Lhp_j
+.Lhp_np:
+    inc     dword ptr [rsp+48]
+    jmp     .Lhp_part
+.Lhp_nb:
+    inc     ebx
+    jmp     .Lhp_body
+.Lhp_next:
+    inc     r12d
+    jmp     .Lhp_hf
+.Lhp_out:
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
     ret
 
 # pp_reach(ecx=a triangle's part of r15; the caller's frame: +256 the
