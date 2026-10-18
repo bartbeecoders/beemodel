@@ -995,8 +995,8 @@ pl_contact:
     mov     [rip+pl_cur_obj], eax
     cmp     dword ptr [r12+OB_TYPE], OT_MESH
     jne     .Lco_next
-    test    dword ptr [r12+OB_FLAGS], OBF_HIDDEN
-    jnz     .Lco_next
+    test    dword ptr [r12+OB_FLAGS], OBF_HIDDEN|OBF_WATER   # (water: not
+    jnz     .Lco_next                                       #  walked on)
     mov     rdi, r12
     call    obj_eval
     test    rax, rax

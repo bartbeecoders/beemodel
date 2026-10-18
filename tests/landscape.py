@@ -25,6 +25,11 @@ friction); cloth lands on it (by its heights, no triangles); the player
 walks over it, following the ground, and a cliff taller than a step stops
 it.
 
+G5: presets and water - Add > Landscape > Flat, Hills, Mountains, Canyon,
+Dunes, Island from the menu (clicks); each has its own shape; the island
+brings a Water plane (the water material: transmission, IOR 1.33); a
+wooden box dropped in its water floats, a stone one sinks.
+
     python3 tests/landscape.py build/beemodel
 """
 import os, subprocess, sys, tempfile, time, zlib, struct
@@ -432,9 +437,69 @@ op("play.stop")
     check(w[2] > -11.5 and w[4] < 5, f'a cliff taller than a step stops it (at x {w[2]:.2f}, z {w[3]:.2f}; feet {w[4]:.2f} m up)')
 
 
+def presets():
+    print('-- G5: presets and water --')
+    tmp = tempfile.mkdtemp(prefix='bee-g5-')
+    argv = sys.argv
+    sys.argv = [argv[0], tmp]
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
+    import fakewl
+    sys.argv = argv
+    f = fakewl.Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'keymaps', 'us.xkb'))
+    m = fakewl.Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.enter(640, 400)
+    q('delete("Cube")')
+    shapes = {}
+    for label in ('Flat', 'Hills', 'Mountains', 'Canyon', 'Dunes', 'Island'):
+        n0 = int(q('print(count())') or 0)
+        ok = fakewl.menu_pick(f, m, 'Add', 'Landscape', label)
+        f.pump(0.5)
+        n = int(q('print(count())') or 0)
+        name = q('print(name(count() - 1))') if label != 'Island' else q('print(name(count() - 2))')
+        info = q(f'print(landscape("{name}", 2), landscape("{name}", 3), landscape("{name}", 4))').split()
+        shapes[label] = (ok, n - n0, name, info)
+        q(f'move("{name}", 0, -500, 0)')                # (out of the next one's way)
+    f.shot('g5_presets.png')
+    want = {'Flat': 0, 'Hills': 2, 'Mountains': 2, 'Canyon': 3, 'Dunes': 2, 'Island': 2}
+    for label, (ok, made, name, info) in shapes.items():
+        check(ok and made == (2 if label == 'Island' else 1) and info and int(float(info[0])) == want[label],
+              f'Add > Landscape > {label}: {name}, {info[0] if info else "?"} layers, heights {info[1:] if info else "?"}')
+    rng = {k: float(v[3][2]) - float(v[3][1]) for k, v in shapes.items() if len(v[3]) == 3}
+    check(rng.get('Flat', 1) == 0 and rng.get('Mountains', 0) > rng.get('Hills', 0) > rng.get('Dunes', 99) > 0,
+          f'each its own shape: heights over {rng}')
+    w = q('print(name(count() - 1), material("Water"))')
+    f.proc.kill()
+    out = run('''
+delete("Cube")
+op("landscape.add", "island")
+print("water", name(count() - 1), get("Water", "y"), landscape("Landscape", 3), landscape("Landscape", 4))
+select("Landscape")
+op("rigid.add", "passive mesh")
+add("cube", "Wood", 95, 5, 95)
+select("Wood")
+op("rigid.add", "active box material wood mass 4800")
+add("cube", "Stone", -95, 5, -95)
+select("Stone")
+op("rigid.add", "active box material stone mass 19200")
+for f in 1..400 { frame(f) }
+print("float", get("Wood", "y"), get("Stone", "y"), height("Landscape", -95, -95))
+''')
+    v = {l[0]: l[1:] for l in out}
+    wa = v.get('water', ['?', '1', '0', '0'])
+    check(wa[0] == 'Water' and float(wa[1]) == 0 and float(wa[2]) < -5 < 5 < float(wa[3]),
+          f'the island: its Water plane at 0 m, the sea floor at {wa[2]} m, the top {wa[3]} m')
+    fl = [float(x) for x in v.get('float', ['-9', '9', '0'])]
+    check(-0.4 < fl[0] < 0, f'a wooden box (600 kg/m3) floats, {-fl[0] + 1:.2f} m of its 2 m under water')
+    check(fl[2] + 0.8 < fl[1] < fl[2] + 1.2, f'a stone one (2400 kg/m3) sinks to the sea floor ({fl[1]:.2f} m, floor {fl[2]:.2f} m)')
+
+
 ground()
 landscape()
 sculpt_paint()
 collider()
+presets()
 print(f'{len(FAILS)} failed' if FAILS else 'all landscape checks passed')
 sys.exit(1 if FAILS else 0)

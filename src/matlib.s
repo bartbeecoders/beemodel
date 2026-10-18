@@ -21,6 +21,7 @@
 .include "const.inc"
 .include "macros.inc"
 
+.globl do_preset
 .globl op_mat_import_tex
 .globl op_mat_preset
 .globl op_mat_bake

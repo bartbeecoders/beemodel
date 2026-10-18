@@ -2716,6 +2716,7 @@ rb_step:
     mov     rbx, rax
     call    ccd_mark                    # where the moving bodies begin
     call    hf_prepare                  # heightfields: triangles under them
+    call    rb_water                    # water planes: what is in them floats
     call    broad                       # pairs of parts: manifolds kept / made
     xor     edi, edi
     call    rb_lap
@@ -4221,6 +4222,13 @@ rb_xhf:         .skip 4                 # (heightfields to make room for)
 .section .rodata
 .align 4
 hf_cos5:        .float 0.9961947
+rx_rho:         .float 1000.0               # water (kg/m3)
+rx_zero:        .float 0.0
+rx_wdrag:       .float 1.5
+rx_eight:       .float 8.0
+rx_sph:         .float 4.18879              # 4/3 pi
+rx_2pi:         .float 6.2831853
+rx_hullv:       .float 0.7
 .align 16
 hf_w1:          .long 0, 0, 0, 0x3f800000
 hf_pad:         .float 0.5, 2.0, 0.5, 0
@@ -4995,6 +5003,182 @@ hf_prepare:
     pop     rbx
     pop     rbp
     ret
+
+# =============================================================================
+#  Water: a mesh object flagged OBF_WATER (landscape.add island makes one)
+#  is a level over its extent. A moving body reaching below it is pushed up
+#  by the water it displaces (1000 kg/m3 x g x its volume x the share of
+#  its height below the level - its bounds), once a step, and slowed (its
+#  speeds and spin) by that share.
+# =============================================================================
+rb_water:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 128                    # +0 the waters (4 x level, x0 x1 z0 z1),
+    xor     ebx, ebx                    #  +80 up (vec4), +96 |g|
+    xor     r12d, r12d
+1:  cmp     ebx, [rip+obj_count]
+    jae     2f
+    cmp     r12d, 4
+    jae     2f
+    mov     edi, ebx
+    call    obj_at
+    test    dword ptr [rax+OB_FLAGS], OBF_WATER
+    jz      11f
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jnz     11f
+    mov     rcx, [rax+OB_MESH]
+    test    rcx, rcx
+    jz      11f
+    imul    rdx, r12, 20
+    lea     rdx, [rsp+rdx]
+    movss   xmm0, [rax+OB_LOC+4]
+    movss   [rdx], xmm0
+    movss   xmm0, [rcx+ME_BMIN]
+    mulss   xmm0, [rax+OB_SCALE]
+    addss   xmm0, [rax+OB_LOC]
+    movss   [rdx+4], xmm0
+    movss   xmm0, [rcx+ME_BMAX]
+    mulss   xmm0, [rax+OB_SCALE]
+    addss   xmm0, [rax+OB_LOC]
+    movss   [rdx+8], xmm0
+    movss   xmm0, [rcx+ME_BMIN+8]
+    mulss   xmm0, [rax+OB_SCALE+8]
+    addss   xmm0, [rax+OB_LOC+8]
+    movss   [rdx+12], xmm0
+    movss   xmm0, [rcx+ME_BMAX+8]
+    mulss   xmm0, [rax+OB_SCALE+8]
+    addss   xmm0, [rax+OB_LOC+8]
+    movss   [rdx+16], xmm0
+    inc     r12d
+11: inc     ebx
+    jmp     1b
+2:  test    r12d, r12d
+    jz      9f
+    movaps  xmm0, [rip+rb_g]            # up: against gravity
+    movaps  xmm1, xmm0
+    DOT3    xmm1, xmm1
+    sqrtss  xmm1, xmm1
+    comiss  xmm1, [rip+rx_tiny2]
+    jbe     9f
+    movss   [rsp+96], xmm1
+    shufps  xmm1, xmm1, 0
+    divps   xmm0, xmm1
+    xorps   xmm0, [rip+rx_sign4]
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [rsp+80], xmm0
+    xor     r13d, r13d                  # each body
+3:  cmp     r13d, [rip+rb_nb]
+    jae     9f
+    imul    r14, r13, BD_SZ
+    add     r14, [rip+rb_bd]
+    cmp     dword ptr [r14+BD_TYPE], 1
+    jne     8f
+    cmp     dword ptr [r14+BD_ASLEEP], 0
+    jne     8f
+    xor     r15d, r15d                  # the first water it is over
+4:  cmp     r15d, r12d
+    jae     8f
+    imul    rax, r15, 20
+    lea     rax, [rsp+rax]
+    movss   xmm0, [r14+BD_POS]
+    comiss  xmm0, [rax+4]
+    jb      41f
+    comiss  xmm0, [rax+8]
+    ja      41f
+    movss   xmm0, [r14+BD_POS+8]
+    comiss  xmm0, [rax+12]
+    jb      41f
+    comiss  xmm0, [rax+16]
+    jbe     5f
+41: inc     r15d
+    jmp     4b
+5:  movss   xmm0, [rax]                 # the share below: (level - min) /
+    subss   xmm0, [r14+BD_MIN+4]        #  (max - min)
+    movss   xmm1, [r14+BD_MAX+4]
+    subss   xmm1, [r14+BD_MIN+4]
+    maxss   xmm1, [rip+rx_tiny2]
+    divss   xmm0, xmm1
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     8f
+    minss   xmm0, [rip+rx_one]
+    movss   [rsp+100], xmm0
+    mov     rdi, r14
+    call    rb_volume
+    mulss   xmm0, [rsp+100]             # dv = rho g V f / m dt, up
+    mulss   xmm0, [rip+rx_rho]
+    mulss   xmm0, [rsp+96]
+    mulss   xmm0, [r14+BD_IM]
+    mulss   xmm0, [rip+rb_dt]
+    shufps  xmm0, xmm0, 0
+    mulps   xmm0, [rsp+80]
+    addps   xmm0, [r14+BD_V]
+    movss   xmm1, [rsp+100]             # drag: x (1 - 1.5 f dt)
+    mulss   xmm1, [rip+rx_wdrag]
+    mulss   xmm1, [rip+rb_dt]
+    movss   xmm2, [rip+rx_one]
+    subss   xmm2, xmm1
+    maxss   xmm2, [rip+rx_zero]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm0, xmm2
+    andps   xmm0, [rip+rx_xyz]
+    movaps  [r14+BD_V], xmm0
+    movaps  xmm0, [r14+BD_W]
+    mulps   xmm0, xmm2
+    movaps  [r14+BD_W], xmm0
+8:  inc     r13d
+    jmp     3b
+9:  lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# rb_volume(rdi=body) -> xmm0 = its volume: its parts' (a box, sphere or
+#   capsule as it is; a hull 0.7 of its bounds; heightfield, plane: 0)
+rb_volume:
+    xorps   xmm0, xmm0
+    mov     ecx, [rdi+BD_NP]
+    mov     eax, [rdi+BD_P0]
+    imul    rdx, rax, PT_SZ
+    add     rdx, [rip+rb_pt]
+1:  test    ecx, ecx
+    jz      9f
+    movss   xmm1, [rdx+PT_HALF]         # 8 hx hy hz
+    mulss   xmm1, [rdx+PT_HALF+4]
+    mulss   xmm1, [rdx+PT_HALF+8]
+    mulss   xmm1, [rip+rx_eight]
+    movss   xmm2, [rdx+PT_RAD]          # r: 4/3 pi r^3 + pi r^2 2 hy
+    movss   xmm3, xmm2
+    mulss   xmm3, xmm2
+    mulss   xmm3, xmm2
+    mulss   xmm3, [rip+rx_sph]
+    addss   xmm1, xmm3
+    movss   xmm3, xmm2
+    mulss   xmm3, xmm2
+    mulss   xmm3, [rip+rx_2pi]
+    mulss   xmm3, [rdx+PT_HALF+4]
+    addss   xmm1, xmm3
+    cmp     dword ptr [rdx+PT_TYPE], 1
+    jne     2f
+    mulss   xmm1, [rip+rx_hullv]
+2:  cmp     dword ptr [rdx+PT_TYPE], 2
+    jae     3f
+    addss   xmm0, xmm1
+3:  add     rdx, PT_SZ
+    dec     ecx
+    jmp     1b
+9:  ret
 
 # pp_reach(ecx=a triangle's part of r15; the caller's frame: +256 the
 #   other part's centre, +272 its reach squared) -> eax = 1 when the

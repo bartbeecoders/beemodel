@@ -469,6 +469,7 @@
 .equ OBF_COLLAPSED, 0x1000  # its children folded away in the outliner
 .equ OBF_GROUND,    0x2000  # the scene's Ground (ground.s): drawn as a fading grid
 .equ OBF_CATCH,     0x4000  # renders as a shadow catcher (the rest of the film: alpha)
+.equ OBF_WATER,     0x8000  # a water plane: bodies below its level float (rbody.s)
 .equ HV_CATCH,      0x40000000  # hv_tm: a shadow catcher's triangle (hive.s)
 .equ OT_MESH,       0
 .equ OT_LIGHT,      1

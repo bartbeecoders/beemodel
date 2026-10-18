@@ -70,6 +70,12 @@ la_fric:        .float 0.5
 la_200:         .float 200.0
 la_rate:        .float 0.3
 la_talus:       .float 35.0
+la_075:         .float 0.75
+la_r1:          .float 101.0
+la_r2:          .float 37.0
+la_r3:          .float 67.0
+la_r4:          .float 23.0
+la_wave:        .float 0.03
 # a new layer's parameters, by type (strength, then 10)
 la_defs:        .float 1.0, 0, 1, 3, 30, 6, 0, 0, 0, 0, 0     # generate: fbm, seed 1, scale 3, 30 m, 6 octaves
                 .float 1.0, 0, 0.3, 1, 0, 35, 0, 0, 0, 0, 0   # erode: droplets (0: N^2 / 8), rate, seed, thermal, talus
@@ -77,6 +83,37 @@ la_defs:        .float 1.0, 0, 1, 3, 30, 6, 0, 0, 0, 0, 0     # generate: fbm, s
                 .float 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0      # sculpted
                 .float 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0      # flatten: height
 s_landscape:    .asciz "Landscape"
+# the presets' layers: per preset a count, then per layer its type,
+#   strength and 10 parameters (12 dwords)
+.align 4
+la_pdata:       .long 0                                                     # flat
+                .long 2                                                     # hills
+                .long 1
+                .float 1.0, 0, 1, 3, 30, 6, 0, 0, 0, 0, 0
+                .long 2
+                .float 1.0, 0, 0.3, 1, 0, 35, 0, 0, 0, 0, 0
+                .long 2                                                     # mountains
+                .long 1
+                .float 1.0, 1, 2, 2.5, 140, 8, 0, 0, 0, 0, 0
+                .long 2
+                .float 1.0, 0, 0.45, 2, 6, 40, 0, 0, 0, 0, 0
+                .long 3                                                     # canyon
+                .long 1
+                .float 1.0, 0, 4, 2, 60, 5, 0, 0, 0, 0, 0
+                .long 3
+                .float 1.0, 6, 0.12, 0, 0, 0, 0, 0, 0, 0, 0
+                .long 2
+                .float 1.0, 0, 0.35, 5, 0, 35, 0, 0, 0, 0, 0
+                .long 2                                                     # dunes
+                .long 1
+                .float 1.0, 2, 6, 7, 7, 3, 0, 0, 0, 0, 0
+                .long 2
+                .float 1.0, 1, 0.1, 7, 25, 30, 0, 0, 0, 0, 0
+                .long 2                                                     # island
+                .long 1
+                .float 1.0, 0, 9, 2.5, 50, 7, 1, -14, 0, 0, 0
+                .long 2
+                .float 1.0, 0, 0.3, 9, 0, 35, 0, 0, 0, 0, 0
 k_la_size:      .asciz "size"
 k_la_res:       .asciz "res"
 k_la_seed:      .asciz "seed"
@@ -91,6 +128,12 @@ k_la_noise:     .asciz "noise"
 k_la_at:        .asciz "at"
 k_flat:         .asciz "flat"
 k_hills:        .asciz "hills"
+k_mountains:    .asciz "mountains"
+k_canyon:       .asciz "canyon"
+k_dunes:        .asciz "dunes"
+k_island:       .asciz "island"
+s_water:        .asciz "Water"
+s_wpreset:      .asciz "water"
 k_generate:     .asciz "generate"
 k_erode:        .asciz "erode"
 k_terrace:      .asciz "terrace"
@@ -110,17 +153,19 @@ k_p_thermal:    .asciz "thermal"
 k_p_talus:      .asciz "talus"
 k_p_steps:      .asciz "steps"
 k_p_smooth:     .asciz "smooth"
+k_p_island:     .asciz "island"
+k_p_offset:     .asciz "offset"
 .align 8
 la_types:       .quad k_generate, k_erode, k_terrace, k_sculpted, k_flatten, 0
 la_noises:      .quad k_fbm, k_ridged, k_billow, k_cells, 0
 # each type's parameter names (by slot; 0 ends)
-la_pn_gen:      .quad k_la_noise, k_p_seed, k_p_scale, k_p_height, k_p_octaves, 0
+la_pn_gen:      .quad k_la_noise, k_p_seed, k_p_scale, k_p_height, k_p_octaves, k_p_island, k_p_offset, 0
 la_pn_ero:      .quad k_p_droplets, k_p_rate, k_p_seed, k_p_thermal, k_p_talus, 0
 la_pn_ter:      .quad k_p_steps, k_p_smooth, 0
 la_pn_none:     .quad 0
 la_pn_flat:     .quad k_p_height, 0
 la_pnames:      .quad la_pn_gen, la_pn_ero, la_pn_ter, la_pn_none, la_pn_flat
-la_presets:     .quad k_flat, k_hills, 0
+la_presets:     .quad k_flat, k_hills, k_mountains, k_canyon, k_dunes, k_island, 0
 s_la_nosel:     .asciz "  landscape: the active object is not a landscape"
 s_la_bad:       .asciz "  landscape: not understood: "
 s_la_full:      .asciz "  landscape: 8 layers at most"
@@ -129,7 +174,13 @@ s_la_add:       .asciz "  added "
 s_la_ms:        .asciz "  landscape evaluated in "
 s_la_msu:       .asciz " ms"
 
-OPERATOR op_la_add,   "landscape.add",   "Landscape", do_la_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a landscape: a heightfield with a stack of layers (generate, erode, terrace, sculpted, flatten): landscape.add [flat|hills] [size metres (200)] [res samples a side (65-4097: 2^k + 1; 513)] [seed k]"
+OPERATOR op_la_add,   "landscape.add",   "Landscape", do_la_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a landscape: a heightfield with a stack of layers (generate, erode, terrace, sculpted, flatten): landscape.add [flat|hills|mountains|canyon|dunes|island] [size metres (200)] [res samples a side (65-4097: 2^k + 1; 513)] [seed k]"
+OPERATOR op_la_flat,  "landscape.add_flat",  "Flat",      do_la_addp, arg=0, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a flat landscape (to sculpt): landscape.add flat"
+OPERATOR op_la_hills, "landscape.add_hills", "Hills",     do_la_addp, arg=1, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a landscape of eroded hills: landscape.add hills"
+OPERATOR op_la_mount, "landscape.add_mountains", "Mountains", do_la_addp, arg=2, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a landscape of ridged, eroded mountains: landscape.add mountains"
+OPERATOR op_la_canyon,"landscape.add_canyon", "Canyon",   do_la_addp, arg=3, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a terraced canyon landscape: landscape.add canyon"
+OPERATOR op_la_dunes, "landscape.add_dunes", "Dunes",     do_la_addp, arg=4, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a landscape of dunes (billows, slid to their talus): landscape.add dunes"
+OPERATOR op_la_island,"landscape.add_island", "Island",   do_la_addp, arg=5, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add an island landscape and its sea: a Water plane at the landscape's height (water material, ripples; bodies below it float): landscape.add island"
 OPERATOR op_la_layer, "landscape.layer", "Landscape Layer", do_la_layer, flags=OPF_AI_SAFE|OPF_UNDO, doc="Change the active landscape's layers: landscape.layer add <generate|erode|terrace|sculpted|flatten> [key value ...] | set <i> [key value ...] | remove <i> | hide <i> | show <i>. Keys: strength; generate: noise fbm|ridged|billow|cells, seed, scale, height, octaves; erode: droplets, rate, seed, thermal (iterations), talus (degrees); terrace: steps, smooth; flatten: height, at x z radius (adds a round area)"
 OPERATOR op_la_set,   "landscape.set",   "Landscape Settings", do_la_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="The active landscape's size and samples: landscape.set [size metres] [res samples a side] [detail display samples a side (at most)]"
 
@@ -148,6 +199,8 @@ lv_amp:         .skip 4                 #  strength x height,
 lv_kind:        .skip 4                 #  the noise,
 lv_oct:         .skip 4                 #  octaves,
 lv_seed:        .skip 4
+lv_isl:         .skip 4                 #  an island,
+lv_off:         .skip 4                 #  an offset (m)
 lv_extra:       .skip 8                 # la_make: the extra array's offset
 .text
 
@@ -452,6 +505,14 @@ lg_generate:
     cvttss2si ecx, [rax+LY_P]
     and     ecx, 3
     mov     [rip+lv_kind], ecx
+    xor     ecx, ecx                    # island, offset
+    movss   xmm0, [rax+LY_P+20]
+    comiss  xmm0, [rip+la_zero]
+    seta    cl
+    mov     [rip+lv_isl], ecx
+    movss   xmm0, [rax+LY_P+24]
+    mulss   xmm0, [rax+LY_STR]
+    movss   [rip+lv_off], xmm0
     cvttss2si ecx, [rax+LY_P+16]
     cmp     ecx, 1
     jge     1f
@@ -617,7 +678,25 @@ lg_job:
     sqrtss  xmm0, xmm4
     minss   xmm0, [rip+la_one]
 .Llg_put:
-    mulss   xmm0, [rip+lv_amp]
+    cmp     dword ptr [rip+lv_isl], 0   # an island: down towards the edges
+    je      1f                          #  (1 - r^2, r from the middle 0..1
+    cvtsi2ss xmm1, r14d                 #  at the edges' middles)
+    mulss   xmm1, [rip+lv_inv]
+    subss   xmm1, [rip+la_half]
+    cvtsi2ss xmm2, r12d
+    mulss   xmm2, [rip+lv_inv]
+    subss   xmm2, [rip+la_half]
+    mulss   xmm1, xmm1
+    mulss   xmm2, xmm2
+    addss   xmm1, xmm2
+    addss   xmm1, xmm1
+    addss   xmm1, xmm1
+    movss   xmm2, [rip+la_one]
+    subss   xmm2, xmm1
+    maxss   xmm2, [rip+la_zero]
+    mulss   xmm0, xmm2
+1:  mulss   xmm0, [rip+lv_amp]
+    addss   xmm0, [rip+lv_off]
     mov     eax, r12d
     imul    eax, [rip+lv_n]
     add     eax, r14d
@@ -1529,31 +1608,52 @@ la_active:
     add     rsp, 8
     ret
 
-# la_preset(rdi=block, esi=preset) - its layers: 0 flat (none), 1 hills
+# la_preset(rdi=block, esi=preset) - its layers: 0 flat (none), 1 hills,
+#   2 mountains, 3 canyon, 4 dunes, 5 island (la_pdata)
 la_preset:
-    push    rbx
-    mov     rbx, rdi
-    mov     dword ptr [rbx+LB_NL], 0
-    cmp     esi, 1
-    jne     9f
-    lea     rdi, [rbx+LB_LAY]           # hills: fBm, then erosion
-    mov     esi, 1
-    call    la_layer_init
-    lea     rdi, [rbx+LB_LAY+LY_SZ]
-    mov     esi, 2
-    call    la_layer_init
-    mov     dword ptr [rbx+LB_NL], 2
-9:  pop     rbx
-    ret
+    lea     rax, [rip+la_pdata]         # the preset's record
+    xor     ecx, ecx
+1:  cmp     ecx, esi
+    jae     2f
+    mov     edx, [rax]
+    imul    edx, edx, 48
+    lea     rax, [rax+rdx+4]
+    inc     ecx
+    jmp     1b
+2:  mov     ecx, [rax]
+    mov     [rdi+LB_NL], ecx
+    add     rax, 4
+    lea     rdx, [rdi+LB_LAY]
+3:  test    ecx, ecx
+    jz      9f
+    mov     r8d, [rax]
+    mov     [rdx+LY_TYPE], r8d
+    mov     dword ptr [rdx+LY_FLG], 0
+    mov     qword ptr [rdx+LY_DATA], 0
+    mov     r8d, [rax+4]
+    mov     [rdx+LY_STR], r8d
+    xor     r9d, r9d
+4:  mov     r8d, [rax+8+r9*4]
+    mov     [rdx+LY_P+r9*4], r8d
+    inc     r9d
+    cmp     r9d, 10
+    jb      4b
+    add     rax, 48
+    add     rdx, LY_SZ
+    dec     ecx
+    jmp     3b
+9:  ret
 
 # do_la_add - landscape.add [preset] [size s] [res n] [seed k]
 do_la_add:
+    mov     edi, 1                      # (hills, unless named)
+do_la_addp:                             # (edi: the preset)
     push    rbx
     push    r12
     push    r13
     push    r14
     sub     rsp, 24
-    mov     dword ptr [rsp], 1          # preset (hills)
+    mov     [rsp], edi                  # preset
     mov     eax, [rip+la_200]
     mov     [rsp+4], eax                # size
     mov     dword ptr [rsp+8], 513      # samples
@@ -1661,7 +1761,16 @@ do_la_add:
     mov     [rax+OB_LOC], rcx
     mov     ecx, [rip+cursor_pos+8]
     mov     [rax+OB_LOC+8], ecx
-    cmp     dword ptr [rip+op_quiet], 0
+    cmp     dword ptr [rsp], 5          # an island: its sea
+    jne     53f
+    mov     rdi, rax
+    call    la_water
+    mov     edi, r14d
+    xor     esi, esi
+    call    obj_click_select
+    mov     edi, r14d
+    call    obj_get
+53: cmp     dword ptr [rip+op_quiet], 0
     jne     9f
     mov     rsi, rax
     lea     rdi, [rip+s_la_add]
@@ -1678,6 +1787,93 @@ do_la_add:
     call    log_line
 9:  add     rsp, 24
     pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# la_water(rdi=landscape object) - its sea: a Water plane (1.5 times the
+#   landscape, at its height) in 1 m-ish ripples (a grid of 192 x 192,
+#   waves 3 cm high), the water material, flagged OBF_WATER (bodies below
+#   its level float: rbody.s)
+la_water:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     rbx, rdi
+    call    la_of
+    test    rax, rax
+    jz      9f
+    movss   xmm0, [rax+LB_SIZE]
+    mulss   xmm0, [rip+la_075]          # half of 1.5 x the size
+    movss   [rsp], xmm0
+    mov     edi, 192
+    call    prim_grid_n
+    test    rax, rax
+    jz      9f
+    mov     r12, rax
+    mov     ecx, [r12+ME_NVERTS]
+    mov     rdx, [r12+ME_POS]
+1:  test    ecx, ecx
+    jz      2f
+    movss   xmm0, [rdx]                 # (x, z in -1..1) -> the size
+    movss   xmm2, [rdx+8]
+    movss   xmm3, xmm0                  # ripples: sin(37 x + 11 z) sin(23 z - 7 x)
+    mulss   xmm3, [rip+la_r1]
+    movss   xmm4, xmm2
+    mulss   xmm4, [rip+la_r2]
+    addss   xmm3, xmm4
+    movss   xmm4, xmm2
+    mulss   xmm4, [rip+la_r3]
+    movss   xmm5, xmm0
+    mulss   xmm5, [rip+la_r4]
+    subss   xmm4, xmm5
+    movss   [rsp+4], xmm3
+    movss   [rsp+8], xmm4
+    fld     dword ptr [rsp+4]
+    fsin
+    fld     dword ptr [rsp+8]
+    fsin
+    fmulp   st(1), st(0)
+    fstp    dword ptr [rsp+4]
+    movss   xmm3, [rsp+4]
+    mulss   xmm3, [rip+la_wave]
+    movss   [rdx+4], xmm3
+    mulss   xmm0, [rsp]
+    movss   [rdx], xmm0
+    mulss   xmm2, [rsp]
+    movss   [rdx+8], xmm2
+    add     rdx, 12
+    dec     ecx
+    jmp     1b
+2:  mov     rdi, r12
+    call    mesh_bbox
+    mov     edi, OT_MESH
+    lea     rsi, [rip+s_water]
+    mov     rdx, r12
+    call    obj_new
+    test    eax, eax
+    jz      9f
+    mov     r13d, eax
+    mov     edi, eax
+    call    obj_get
+    or      dword ptr [rax+OB_FLAGS], OBF_WATER
+    mov     rcx, [rbx+OB_LOC]
+    mov     [rax+OB_LOC], rcx
+    mov     ecx, [rbx+OB_LOC+8]
+    mov     [rax+OB_LOC+8], ecx
+    mov     ecx, [rbx+OB_LOC+4]
+    mov     [rax+OB_LOC+4], ecx
+    mov     edi, r13d                   # the water material (active: it)
+    xor     esi, esi
+    call    obj_click_select
+    mov     rbx, [rip+op_arg]
+    lea     rax, [rip+s_wpreset]
+    mov     [rip+op_arg], rax
+    call    do_preset
+    mov     [rip+op_arg], rbx
+9:  add     rsp, 16
     pop     r13
     pop     r12
     pop     rbx
