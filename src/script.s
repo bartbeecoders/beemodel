@@ -282,6 +282,8 @@ props:          .ascii "x\0\0\0\0\0\0\0"
                 .quad OB_SCALE+8
                 .ascii "color\0\0\0"          # 0xRRGGBB, an integer
                 .quad OB_COLOR
+                .ascii "hidden\0\0"           # 1 hidden (object.hide), 0 shown
+                .quad OB_FLAGS
                 .ascii "lens\0\0\0\0"           # cameras and lights (lcam.s):
                 .quad PR_LC+20              #  the lens (mm),
                 .ascii "power\0\0\0"          #  the power (x the default),
@@ -4171,7 +4173,14 @@ b_get:
     and     eax, 0xffffff
     cvtsi2sd xmm0, eax
     jmp     2f
-1:  cvtss2sd xmm0, [rax+r12]
+1:  cmp     r12d, OB_FLAGS
+    jne     11f
+    xor     ecx, ecx
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    setnz   cl
+    cvtsi2sd xmm0, ecx
+    jmp     2f
+11: cvtss2sd xmm0, [rax+r12]
 2:  add     rsp, 8
     pop     r12
     pop     rbx
@@ -4194,7 +4203,12 @@ b_set:
     and     eax, 0xffffff
     mov     [rsp], eax
     jmp     2f
-1:  cvtsd2ss xmm0, xmm0
+1:  cmp     r12d, OB_FLAGS
+    jne     12f
+    cvttsd2si eax, xmm0
+    mov     [rsp], eax
+    jmp     2f
+12: cvtsd2ss xmm0, xmm0
     movss   [rsp], xmm0
 2:  mov     rdi, rbx
     call    a_obj
@@ -4210,7 +4224,14 @@ b_set:
     test    rax, rax
     jz      4f
     sub     r12d, PR_LC
-3:  movss   xmm0, [rsp]
+3:  cmp     r12d, OB_FLAGS          # (hidden: the flag)
+    jne     31f
+    and     dword ptr [rax+OB_FLAGS], ~OBF_HIDDEN
+    cmp     dword ptr [rsp], 0
+    je      4f
+    or      dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jmp     4f
+31: movss   xmm0, [rsp]
     movss   [rax+r12], xmm0
 4:
     mov     dword ptr [rip+dirty], 1

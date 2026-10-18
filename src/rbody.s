@@ -59,6 +59,7 @@
 .globl rb_live
 .globl rb_inst_mesh
 .globl do_rb_add
+.globl rb_shatter_obj
 
 # the settings (anim block)
 .equ RW_GRAV,   0                       # gravity (3 floats; all 0: -9.81 Y)
@@ -122,7 +123,18 @@
 .equ BD_SCL,    288                     # its scale (instances: their own)
 .equ BD_PP,     304                     # where the step began: its position,
 .equ BD_PQ,     320                     #  orientation (continuous collision)
-.equ BD_SZ,     336
+.equ BD_GRP0,   336                     # (dormant: its groups to be)
+.equ BD_SZ,     352
+.equ IMP_MAX,   64                      # shatter on impact: groups,
+.equ IMP_BODY,  0                       #  the original's body,
+.equ IMP_THR,   4                       #  the blow it takes (N s),
+.equ IMP_ON,    8                       #  broken,
+.equ IMP_FRAME, 12                      #  (when),
+.equ IMP_P0,    16                      #  its pieces (rb_impc),
+.equ IMP_NP,    20
+.equ IMP_PEND,  24                      #  asked to break,
+.equ IMP_HIT,   32                      #  where (vec4)
+.equ IMP_SZ,    48
 # a part (collide.s)
 .equ PT_TYPE,   0
 .equ PT_NV,     4
@@ -227,7 +239,7 @@
 .equ RBI_WINV,  16                      #  own instance block), the object's
 .equ RBI_SZ,    64                      #  inverse matrix
 .equ RBI_MAX,   64
-.equ RB_CVER,   0x52425632              # the cache's records ("RBV2")
+.equ RB_CVER,   0x52425633              # the cache's records ("RBV3")
 .equ IB_N_,     4                       # (inst.s: an instance block)
 .equ IB_NP_,    8
 .equ IB_PROTO_, 24
@@ -476,6 +488,14 @@ rb_busy:        .skip 4
 rb_noinst:      .skip 4                 # (obj_eval: the source, not ours)
 rb_mffull:      .skip 4                 # pairs that found no room
 rb_nbroken:     .skip 4                 # joints broken this run
+rb_nimp:        .skip 4                 # shatter on impact: groups, pieces
+rb_nimpc:       .skip 4
+.align 16
+rb_imp:         .skip IMP_SZ*IMP_MAX
+rb_impc:        .skip 4*RB_MAX_
+.align 16
+rb_imprel:      .skip 32*RB_MAX_        #  each piece: where it is from the
+                                        #  original (p, q)
 rbi_n:          .skip 4
 .align 16
 rbi_tab:        .skip RBI_SZ*RBI_MAX
@@ -828,21 +848,26 @@ rb_free:
 
 # rb_entry_obj(rdi=entry) -> rax = its object when it can be a body, or 0
 rb_entry_obj:
-    sub     rsp, 8
+    push    rbx
     cmp     dword ptr [rdi+RB_TYPE], 0
     je      8f
+    mov     ebx, [rdi+RB_FLAGS]
     mov     edi, [rdi+RB_UID]
     call    obj_by_uid
     test    rax, rax
     jz      9f
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     8f
+    test    ebx, 8|4                    # (a piece waiting for its original
+    jnz     10f                         #  to break, an original that breaks:
+                                        #  hidden, still a body)
     test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN    # (hidden: not collided
     jnz     8f                                      #  with)
+10:
     cmp     qword ptr [rax+OB_MESH], 0
     jne     9f
 8:  xor     eax, eax
-9:  add     rsp, 8
+9:  pop     rbx
     ret
 
 # rb_restore - objects back where they were at the start; the start forgotten
@@ -872,10 +897,434 @@ rb_restore:
     mov     dword ptr [rip+dirty], 1
 2:  inc     r12d
     jmp     1b
-9:  pop     r13
+9:  call    imp_restore             # (shattering ones: whole again)
+    pop     r13
     pop     r12
     pop     rbx
     ret
+
+# =============================================================================
+#  Shatter on impact: an original (a body) whose pieces wait as dormant
+#  bodies (type 3: in no collision group, their glue asleep) until it is hit
+#  hard enough. A marker joint (type 5: the original, the threshold as its
+#  breaking force, N s) ties them: each piece is a child of the original.
+#  Before a step, the original's contacts of the step before are read: a
+#  point closing at v with the two's effective mass m is a blow m v; past
+#  the threshold the original goes dormant and hidden and its pieces take
+#  its place (where it is now, its velocity at each), visible, their glue
+#  awake - in time for the blow to land on them this step. rb_shatter_obj
+#  (the logic node) breaks one at once.
+# =============================================================================
+# imp_register(r13=the marker joint) - a group: the original, its threshold,
+#   its pieces (the dormant bodies that are its children) and where each is
+#   from it
+imp_register:
+    push    rbx
+    push    r12
+    push    r14
+    push    r15
+    sub     rsp, 40
+    mov     eax, [rip+rb_nimp]
+    cmp     eax, IMP_MAX
+    jae     9f
+    mov     edi, [r13+JT_A]
+    call    body_of_uid
+    test    eax, eax
+    js      9f
+    mov     r14d, eax                   # the original's body
+    BODY    r15, r14
+    cmp     dword ptr [r15+BD_TYPE], 1
+    jne     9f
+    mov     eax, [rip+rb_nimp]
+    inc     dword ptr [rip+rb_nimp]
+    imul    rbx, rax, IMP_SZ
+    lea     rax, [rip+rb_imp]
+    add     rbx, rax
+    mov     [rbx+IMP_BODY], r14d
+    mov     eax, [r13+JT_BRK]
+    mov     [rbx+IMP_THR], eax
+    xor     eax, eax
+    mov     [rbx+IMP_ON], eax
+    mov     [rbx+IMP_PEND], eax
+    mov     dword ptr [rbx+IMP_FRAME], -1
+    mov     eax, [rip+rb_nimpc]
+    mov     [rbx+IMP_P0], eax
+    mov     dword ptr [rbx+IMP_NP], 0
+    mov     rax, [r15+BD_OBJ]           # (the original shown)
+    and     dword ptr [rax+OB_FLAGS], ~OBF_HIDDEN
+    xor     r12d, r12d                  # its pieces
+1:  mov     eax, [rip+rb_nb]
+    dec     eax
+    cmp     r12d, eax
+    jae     9f
+    BODY    rdi, r12
+    cmp     dword ptr [rdi+BD_TYPE], 3
+    jne     3f
+    mov     rdi, [rdi+BD_OBJ]
+    test    rdi, rdi
+    jz      3f
+    call    par_of
+    cmp     rax, [r15+BD_OBJ]
+    jne     3f
+    mov     eax, [rip+rb_nimpc]
+    cmp     eax, RB_MAX_
+    jae     3f
+    inc     dword ptr [rip+rb_nimpc]
+    inc     dword ptr [rbx+IMP_NP]
+    lea     rcx, [rip+rb_impc]
+    mov     [rcx+rax*4], r12d
+    shl     rax, 5                      # where: R0^T (p - p0), conj(q0) q
+    lea     rcx, [rip+rb_imprel]
+    add     rcx, rax
+    mov     [rsp+32], rcx
+    BODY    rdi, r12
+    movaps  xmm1, [rdi+BD_POS]
+    subps   xmm1, [r15+BD_POS]
+    lea     rax, [r15+BD_R]
+    MTV3    xmm2, rax, xmm1, xmm3
+    andps   xmm2, [rip+rx_xyz]
+    movaps  [rcx], xmm2
+    movaps  xmm0, [r15+BD_Q]
+    xorps   xmm0, [rip+rx_sign]
+    movaps  xmm1, [rdi+BD_Q]
+    call    q_mul
+    mov     rcx, [rsp+32]
+    movaps  [rcx+16], xmm0
+    BODY    rdi, r12                    # (hidden)
+    mov     rax, [rdi+BD_OBJ]
+    or      dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+3:  inc     r12d
+    jmp     1b
+9:  add     rsp, 40
+    pop     r15
+    pop     r14
+    pop     r12
+    pop     rbx
+    ret
+
+# imp_check -> eax = 1 when one broke: after the narrow phase, before the
+#   solve: each original not broken yet, hit hard enough (or asked to
+#   break): broken
+imp_check:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 48
+    mov     dword ptr [rsp+40], 0
+    xor     r12d, r12d
+1:  cmp     r12d, [rip+rb_nimp]
+    jae     9f
+    imul    rbx, r12, IMP_SZ
+    lea     rax, [rip+rb_imp]
+    add     rbx, rax
+    cmp     dword ptr [rbx+IMP_ON], 0
+    jne     8f
+    cmp     dword ptr [rbx+IMP_PEND], 0
+    jne     7f
+    xorps   xmm7, xmm7                  # the hardest blow, where
+    movss   [rsp], xmm7
+    xor     r13d, r13d                  # each manifold with the original
+2:  cmp     r13d, [rip+rb_nmf]
+    jae     6f
+    imul    r14, r13, MF_SZ
+    add     r14, [rip+rb_mf]
+    mov     eax, [rbx+IMP_BODY]
+    cmp     [r14+MF_A], eax
+    je      21f
+    cmp     [r14+MF_B], eax
+    jne     5f
+21: mov     eax, [r14+MF_A]
+    BODY    r8, rax
+    mov     eax, [r14+MF_B]
+    BODY    r9, rax
+    xorps   xmm6, xmm6                  # 1 / (imA + imB): moving ones'
+    cmp     dword ptr [r8+BD_TYPE], 1
+    jne     22f
+    addss   xmm6, [r8+BD_IM]
+22: cmp     dword ptr [r9+BD_TYPE], 1
+    jne     23f
+    addss   xmm6, [r9+BD_IM]
+23: comiss  xmm6, [rip+rx_tiny]
+    jbe     5f
+    movss   xmm5, [rip+rx_one]
+    divss   xmm5, xmm6
+    xor     r15d, r15d                  # each point: closing speed
+3:  cmp     r15d, [r14+MF_N]
+    jae     5f
+    imul    r10, r15, CP_SZ
+    lea     r10, [r14+MF_PTS+r10]
+    movaps  xmm0, [r8+BD_W]             # vA + wA x rA (r: the point on A
+    movaps  xmm1, [r10+CP_WA]           #  from each centre)
+    subps   xmm1, [r8+BD_POS]
+    andps   xmm1, [rip+rx_xyz]
+    CROSS   xmm2, xmm0, xmm1, xmm3
+    addps   xmm2, [r8+BD_V]
+    movaps  xmm0, [r9+BD_W]             # vB + wB x rB
+    movaps  xmm1, [r10+CP_WA]
+    subps   xmm1, [r9+BD_POS]
+    andps   xmm1, [rip+rx_xyz]
+    CROSS   xmm4, xmm0, xmm1, xmm3
+    addps   xmm4, [r9+BD_V]
+    subps   xmm4, xmm2                  # (B - A) . n: closing when < 0
+    DOT3    xmm4, [r14+MF_NRM]
+    xorps   xmm4, [rip+rx_sign]
+    mulss   xmm4, xmm5
+    comiss  xmm4, [rsp]
+    jbe     4f
+    movss   [rsp], xmm4
+    movaps  xmm0, [r10+CP_WA]
+    movaps  [rsp+16], xmm0
+4:  inc     r15d
+    jmp     3b
+5:  inc     r13d
+    jmp     2b
+6:  movss   xmm0, [rsp]
+    comiss  xmm0, [rbx+IMP_THR]
+    jbe     8f
+    movaps  xmm0, [rsp+16]
+    movaps  [rbx+IMP_HIT], xmm0
+7:  mov     rdi, rbx
+    call    imp_break
+    mov     dword ptr [rsp+40], 1
+8:  inc     r12d
+    jmp     1b
+9:  mov     eax, [rsp+40]
+    add     rsp, 48
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# imp_break(rdi=group) - the original dormant and hidden; its pieces where
+#   it is now, moving with it, shown, their glue awake
+imp_break:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 56
+    mov     rbx, rdi
+    mov     dword ptr [rbx+IMP_ON], 1
+    mov     dword ptr [rbx+IMP_PEND], 0
+    cvttss2si eax, [rip+rb_fnow]
+    mov     [rbx+IMP_FRAME], eax
+    mov     eax, [rbx+IMP_BODY]
+    BODY    r15, rax                    # the original
+    mov     eax, [r15+BD_GRP]
+    mov     [r15+BD_GRP0], eax
+    mov     dword ptr [r15+BD_GRP], 0xffff0000
+    mov     dword ptr [r15+BD_TYPE], 3
+    mov     rax, [r15+BD_OBJ]
+    or      dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    and     dword ptr [rax+OB_FLAGS], ~OBF_SELECTED
+    mov     edx, [rbx+IMP_BODY]         # its contacts: stale, so the pairs
+    mov     r8d, [rip+rb_stepno]        #  found again leave them out
+    dec     r8d
+    xor     ecx, ecx
+71: cmp     ecx, [rip+rb_nmf]
+    jae     73f
+    imul    rax, rcx, MF_SZ
+    add     rax, [rip+rb_mf]
+    cmp     [rax+MF_A], edx
+    je      72f
+    cmp     [rax+MF_B], edx
+    jne     74f
+72: mov     [rax+MF_KEEP], r8d
+    mov     rax, rcx
+    shl     rax, 5
+    add     rax, [rip+rb_mx]
+    mov     [rax+MX_KEEP], r8d
+74: inc     ecx
+    jmp     71b
+73: xor     r12d, r12d                  # each piece
+1:  cmp     r12d, [rbx+IMP_NP]
+    jae     5f
+    mov     eax, [rbx+IMP_P0]
+    add     eax, r12d
+    lea     rcx, [rip+rb_impc]
+    mov     r13d, [rcx+rax*4]
+    BODY    r14, r13
+    shl     rax, 5
+    lea     rbp, [rip+rb_imprel]
+    add     rbp, rax
+    movaps  xmm0, [r15+BD_Q]            # q = q0 rel (unit)
+    movaps  xmm1, [rbp+16]
+    call    q_mul
+    movaps  xmm1, xmm0
+    dpps    xmm1, xmm1, 0xFF
+    sqrtps  xmm1, xmm1
+    divps   xmm0, xmm1
+    movaps  [r14+BD_Q], xmm0
+    lea     rdi, [r14+BD_Q]
+    lea     rsi, [r14+BD_R]
+    call    q_rows
+    movaps  xmm0, [rbp]                 # p = p0 + R0 rel
+    MV3     xmm1, r15+BD_R, xmm0, xmm2, xmm3
+    andps   xmm1, [rip+rx_xyz]
+    movaps  xmm4, xmm1                  # (r, for the velocity)
+    addps   xmm1, [r15+BD_POS]
+    movaps  [r14+BD_POS], xmm1
+    movaps  [r14+BD_PP], xmm1
+    movaps  xmm0, [r14+BD_Q]
+    movaps  [r14+BD_PQ], xmm0
+    movaps  xmm0, [r15+BD_W]            # v = v0 + w0 x r, w = w0
+    CROSS   xmm2, xmm0, xmm4, xmm3
+    addps   xmm2, [r15+BD_V]
+    andps   xmm2, [rip+rx_xyz]
+    movaps  [r14+BD_V], xmm2
+    movaps  xmm0, [r15+BD_W]
+    movaps  [r14+BD_W], xmm0
+    mov     eax, [r14+BD_GRP0]
+    mov     [r14+BD_GRP], eax
+    mov     dword ptr [r14+BD_TYPE], 1
+    mov     dword ptr [r14+BD_ASLEEP], 0
+    mov     dword ptr [r14+BD_SLEEP], 0
+    mov     rdi, r14
+    call    body_update
+    mov     rax, [r14+BD_OBJ]
+    and     dword ptr [rax+OB_FLAGS], ~OBF_HIDDEN
+    inc     r12d
+    jmp     1b
+5:  xor     ecx, ecx                    # glue between awake bodies: awake
+6:  cmp     ecx, [rip+rb_njr]
+    jae     8f
+    imul    rax, rcx, JR_SZ
+    add     rax, [rip+rb_jr]
+    test    dword ptr [rax+JR_FL], 8
+    jz      7f
+    mov     edx, [rax+JR_A]
+    BODY    r8, rdx
+    cmp     dword ptr [r8+BD_TYPE], 3
+    je      7f
+    mov     edx, [rax+JR_B]
+    BODY    r8, rdx
+    cmp     dword ptr [r8+BD_TYPE], 3
+    je      7f
+    and     dword ptr [rax+JR_FL], ~12
+7:  inc     ecx
+    jmp     6b
+8:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 56
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# rb_shatter_obj(rdi=object) - its pieces take its place at the next step
+#   (an original shattering on impact; a logic graph's Shatter); eax = 1
+rb_shatter_obj:
+    xor     eax, eax
+    cmp     dword ptr [rip+rb_on], 0    # no bodies yet: when they are made
+    jne     0f                          #  (with the impulses waiting)
+    mov     eax, [rip+rb_npend]
+    cmp     eax, 16
+    jae     8f
+    inc     dword ptr [rip+rb_npend]
+    shl     eax, 5
+    lea     rcx, [rip+rb_pend]
+    mov     [rcx+rax], rdi
+    movaps  xmm0, [rip+rx_qid]
+    movaps  [rcx+rax+16], xmm0
+    mov     eax, 1
+    ret
+8:  xor     eax, eax
+    ret
+0:  xor     eax, eax
+    xor     ecx, ecx
+1:  cmp     ecx, [rip+rb_nimp]
+    jae     9f
+    imul    rdx, rcx, IMP_SZ
+    lea     r8, [rip+rb_imp]
+    add     rdx, r8
+    mov     r8d, [rdx+IMP_BODY]
+    BODY    r9, r8
+    cmp     [r9+BD_OBJ], rdi
+    jne     2f
+    cmp     dword ptr [rdx+IMP_ON], 0
+    jne     9f
+    mov     dword ptr [rdx+IMP_PEND], 1
+    movaps  xmm0, [r9+BD_POS]
+    movaps  [rdx+IMP_HIT], xmm0
+    mov     eax, 1
+    ret
+2:  inc     ecx
+    jmp     1b
+9:  ret
+
+# imp_show(rdi=original object, esi=1 broken) - it hidden or shown, its
+#   children (its pieces) the other way
+imp_show:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    and     dword ptr [rbx+OB_FLAGS], ~OBF_HIDDEN
+    test    r12d, r12d
+    jz      1f
+    or      dword ptr [rbx+OB_FLAGS], OBF_HIDDEN
+1:  xor     r13d, r13d
+2:  cmp     r13d, [rip+obj_count]
+    jae     9f
+    mov     edi, r13d
+    call    obj_at
+    push    rax
+    mov     rdi, rax
+    call    par_of
+    pop     rdx
+    cmp     rax, rbx
+    jne     4f
+    or      dword ptr [rdx+OB_FLAGS], OBF_HIDDEN
+    test    r12d, r12d
+    jz      4f
+    and     dword ptr [rdx+OB_FLAGS], ~OBF_HIDDEN
+4:  inc     r13d
+    jmp     2b
+9:  mov     dword ptr [rip+dirty], 1
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# imp_restore - back at the start: each marked original whole, shown, its
+#   pieces hidden (the anim block's marker joints)
+imp_restore:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, [rip+an_cur]
+    test    rbx, rbx
+    jz      9f
+    xor     r12d, r12d
+1:  cmp     r12d, [rbx+AN_NJT_]
+    jae     9f
+    imul    rax, r12, JT_SZ_
+    lea     rax, [rbx+AN_JT_+rax]
+    cmp     dword ptr [rax+JT_TYPE], 5
+    jne     2f
+    mov     edi, [rax+JT_A]
+    call    obj_by_uid
+    test    rax, rax
+    jz      2f
+    mov     rdi, rax
+    xor     esi, esi
+    call    imp_show
+2:  inc     r12d
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
 
 # rb_build - bodies, parts, joints from the settings and the objects
 rb_build:
@@ -1230,10 +1679,22 @@ rb_build:
     mov     rsi, r14
     mov     rdx, r15
     call    make_body
-    inc     r13d
+    test    dword ptr [r14+RB_FLAGS], 8 # a piece waiting for its original:
+    jz      45f                         #  dormant (in no group, still)
+    BODY    rax, r13
+    mov     ecx, [rax+BD_GRP]
+    mov     [rax+BD_GRP0], ecx
+    mov     dword ptr [rax+BD_GRP], 0xffff0000
+    mov     dword ptr [rax+BD_TYPE], 3
+    xorps   xmm0, xmm0
+    movaps  [rax+BD_V], xmm0
+    movaps  [rax+BD_W], xmm0
+45: inc     r13d
 41: inc     r12d
     jmp     4b
-5:  BODY    rax, r13                    # the world: static, at the origin
+5:  mov     dword ptr [rip+rb_nimp], 0  # (shatter on impact: anew)
+    mov     dword ptr [rip+rb_nimpc], 0
+    BODY    rax, r13                    # the world: static, at the origin
     mov     dword ptr [rax+BD_TYPE], 2
     movaps  xmm0, [rip+rx_qid]
     movaps  [rax+BD_Q], xmm0
@@ -2812,7 +3273,11 @@ make_joints:
     jae     9f
     imul    r13, r12, JT_SZ_
     lea     r13, [rbx+AN_JT_+r13]
-    mov     edi, [r13+JT_A]
+    cmp     dword ptr [r13+JT_TYPE], 5  # shatter on impact: a group, no rows
+    jne     10f
+    call    imp_register
+    jmp     8f
+10: mov     edi, [r13+JT_A]
     call    body_of_uid
     test    eax, eax
     js      8f
@@ -2863,6 +3328,12 @@ make_joints:
     BODY    r9, r15
     mov     dword ptr [r8+BD_JOINT], 1
     mov     dword ptr [r9+BD_JOINT], 1
+    cmp     dword ptr [r8+BD_TYPE], 3   # (a dormant piece's: asleep - no rows,
+    je      11f                         #  no tie - until it is awake)
+    cmp     dword ptr [r9+BD_TYPE], 3
+    jne     12f
+11: or      dword ptr [rdi+JR_FL], 12
+12:
     movups  xmm0, [r13+JT_PIV]          # anchors: R^T (pivot - centre)
     andps   xmm0, [rip+rx_xyz]
     movaps  xmm1, xmm0
@@ -3008,7 +3479,23 @@ rb_step:
     test    edx, edx
     jz      1f
     call    parallel_for
-1:  mov     edi, 1
+1:  cmp     dword ptr [rip+rb_nimp], 0  # shatter on impact: this step's
+    je      92f                         #  blows, before they are solved
+    call    imp_check
+    test    eax, eax
+    jz      92f
+    call    ccd_mark                    # broken: the pieces in, the original
+    call    hf_prepare                  #  out, from the pairs on
+    call    broad
+    call    compact
+    lea     rdi, [rip+narrow_job]
+    xor     esi, esi
+    mov     edx, [rip+rb_nmf]
+    mov     ecx, 16
+    test    edx, edx
+    jz      92f
+    call    parallel_for
+92: mov     edi, 1
     call    rb_lap
     call    islands
     mov     edi, 2
@@ -8384,8 +8871,12 @@ rb_pend_apply:
     lea     rcx, [rip+rb_pend]
     mov     rdi, [rcx+rax]
     movaps  xmm0, [rcx+rax+16]
-    call    rb_impulse_now
-    inc     ebx
+    cmp     dword ptr [rcx+rax+28], 0   # (w set: a shatter asked for)
+    je      2f
+    call    rb_shatter_obj
+    jmp     3f
+2:  call    rb_impulse_now
+3:  inc     ebx
     jmp     1b
 9:  mov     dword ptr [rip+rb_npend], 0
     pop     rbx
@@ -8555,7 +9046,8 @@ rb_record:
 2:  imul    edx, r12d, 28
     imul    eax, r15d, 56
     add     edx, eax
-    add     edx, 8
+    mov     eax, [rip+rb_nimp]          # (and the shattering ones: original,
+    lea     edx, [rdx+rax*8+12]         #  broken - each)
     xor     edi, edi
     mov     esi, r14d
     call    sc_add
@@ -8597,7 +9089,26 @@ rb_record:
     add     r15, 56
 4:  inc     r12d
     jmp     3b
-8:  mov     eax, 1
+8:  mov     eax, [rip+rb_nimp]          # the shattering ones
+    mov     [r15], eax
+    add     r15, 4
+    xor     ecx, ecx
+81: cmp     ecx, [rip+rb_nimp]
+    jae     82f
+    imul    rdx, rcx, IMP_SZ
+    lea     rax, [rip+rb_imp]
+    add     rdx, rax
+    mov     eax, [rdx+IMP_BODY]
+    BODY    r8, rax
+    mov     r8, [r8+BD_OBJ]
+    mov     eax, [r8+OB_UID]
+    mov     [r15], eax
+    mov     eax, [rdx+IMP_ON]
+    mov     [r15+4], eax
+    add     r15, 8
+    inc     ecx
+    jmp     81b
+82: mov     eax, 1
 9:  pop     r15
     pop     r14
     pop     r13
@@ -8657,7 +9168,23 @@ rb_play:
 4:  add     rbx, 56
     dec     r14d
     jmp     3b
-9:  call    rbi_touch
+9:  mov     r12d, [rbx]                 # the shattering ones: whole or broken
+    add     rbx, 4
+91: test    r12d, r12d
+    jz      92f
+    cmp     r12d, IMP_MAX
+    ja      92f
+    mov     edi, [rbx]
+    call    obj_by_uid
+    test    rax, rax
+    jz      93f
+    mov     rdi, rax
+    mov     esi, [rbx+4]
+    call    imp_show
+93: add     rbx, 8
+    dec     r12d
+    jmp     91b
+92: call    rbi_touch
     mov     dword ptr [rip+dirty], 1
     pop     r15
     pop     r14
@@ -9193,6 +9720,21 @@ rb_info:
     mov     eax, [rip+rb_njr]
     cmp     edi, 19                     # 19: joints in the run
     je      8f
+    mov     eax, [rip+rb_nimp]
+    cmp     edi, 20                     # 20: shattering on impact, 21: of
+    je      8f                          #  them broken
+    cmp     edi, 21
+    jne     212f
+    xor     eax, eax
+    xor     ecx, ecx
+211:cmp     ecx, [rip+rb_nimp]
+    jae     8f
+    imul    rdx, rcx, IMP_SZ
+    lea     r8, [rip+rb_imp]
+    add     eax, [r8+rdx+IMP_ON]
+    inc     ecx
+    jmp     211b
+212:
     cmp     edi, 16                     # 16: every body's place, turn and
     je      6f                          #  speeds, hashed (24 bits: exact)
     cmp     edi, 17                     # 17: the fastest awake body's speed

@@ -39,6 +39,7 @@
 .equ RB_DAMP,   24
 .equ RB_FLAGS,  28
 .equ RB_VEL,    68
+.equ RB_SZ_O,   80
 .equ MA_DENS_,  92                      # (material.s: g/cm^3)
 .equ JT_TYPE,   0                       # (rbody.s: a joint)
 .equ JT_A,      4
@@ -85,6 +86,7 @@ k_density:      .asciz "density"
 k_nobodies:     .asciz "nobodies"
 k_glue:         .asciz "glue"
 k_paint:        .asciz "paint"
+k_impact:       .asciz "impact"
 s_sh_room:      .asciz "  shatter: no room for more rigid bodies (4096) - the rest are not bodies"
 s_sh_brick:     .asciz "_brick_"
 s_sh_ball:      .asciz "_ball_"
@@ -93,7 +95,7 @@ s_sh_part:      .asciz "_part_"
 s_sh_none:      .asciz "  shatter: make a mesh object active"
 s_sh_open:      .asciz "  shatter: the mesh is not closed even after repair (mesh.repair; open edges: "
 s_sh_mem:       .asciz "  shatter: out of memory"
-s_sh_bad:       .asciz "  object.shatter <shards|bricks|balls> [count n] [seed s] [at x y z | cursor | surface] [spread f] [size x y z | counts a b c] [offset f|random] [gap g] [jitter f] [radius r] [inner r g b] [density kg/m3] [nobodies] [glue N/m2 [paint]] - not understood: "
+s_sh_bad:       .asciz "  object.shatter <shards|bricks|balls> [count n] [seed s] [at x y z | cursor | surface] [spread f] [size x y z | counts a b c] [offset f|random] [gap g] [jitter f] [radius r] [inner r g b] [density kg/m3] [nobodies] [glue N/m2 [paint]] [impact Ns] - not understood: "
 s_sh_noseed:    .asciz "  shatter: no room inside the mesh for the cells"
 s_sh_done:      .asciz "  shattered into "
 s_sh_pieces:    .asciz " pieces ("
@@ -105,11 +107,11 @@ s_sl_done:      .asciz "  separated into loose parts: "
 so_kws:         .quad k_shards, k_bricks, k_balls, k_count, k_seed, k_at, k_cursor
                 .quad k_surface, k_spread, k_size, k_counts, k_offset, k_gap
                 .quad k_jitter, k_radius, k_inner, k_density, k_nobodies
-                .quad k_glue, k_paint, 0
+                .quad k_glue, k_paint, k_impact, 0
 so_kwfn:        .quad .Lpa_count, .Lpa_seed, .Lpa_at, .Lpa_cursor, .Lpa_surface
                 .quad .Lpa_spread, .Lpa_size, .Lpa_counts, .Lpa_offset, .Lpa_gap
                 .quad .Lpa_jitter, .Lpa_radius, .Lpa_inner, .Lpa_density
-                .quad .Lpa_nobodies, .Lpa_glue, .Lpa_paint
+                .quad .Lpa_nobodies, .Lpa_glue, .Lpa_paint, .Lpa_impact
 so_one_d:       .double 1.0
 so_three:       .double 3.0
 so_1em6:        .double 1.0e-6
@@ -183,6 +185,8 @@ so_lasth:       .skip 4
 so_npieces:     .skip 4
 so_gluef:       .skip 4                 # glue: the strength (N/m^2), painted
 so_gluepaint:   .skip 4
+so_impact:      .skip 4                 # on impact: the blow it breaks at
+so_impactset:   .skip 4                 #  (N s)
 so_ngrp:        .skip 4                 # the faces' groups (GR_SZ)
 so_grpcap:      .skip 4
 so_grp:         .skip 8
@@ -2026,13 +2030,28 @@ so_bodies:
     mov     [r15+RB_VEL], rax
     mov     eax, [rsp+24]
     mov     [r15+RB_VEL+8], eax
-    inc     r13d
+    cmp     dword ptr [rip+so_impactset], 0 # on impact: waiting for the
+    je      71f                         #  original to break (hidden)
+    or      dword ptr [r15+RB_FLAGS], 8
+    lea     rcx, [rip+so_pieces]
+    mov     edi, [rcx+r12*4]
+    call    obj_get
+    or      dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    and     dword ptr [rax+OB_FLAGS], ~OBF_SELECTED
+71: inc     r13d
 7:  inc     r12d
     jmp     5b
 .Lbo_room:
     lea     rdi, [rip+s_sh_room]
     call    log_line
-8:  lea     rax, [rip+sh_stat]
+8:  cmp     dword ptr [rip+so_impactset], 0 # on impact: the original a
+    je      81f                         #  body (a hull, if it is not one) and
+    mov     rdi, rbx                    #  the marker joint
+    lea     rsi, [rsp]
+    movsd   xmm0, [rsp+32]
+    movsd   xmm1, [rsp+40]
+    call    so_impact_marks
+81: lea     rax, [rip+sh_stat]
     cvtsi2sd xmm0, r13d
     movsd   [rax+22*8], xmm0
     movsd   xmm0, [rsp+48]
@@ -2619,6 +2638,80 @@ gl_joint:
     pop     rbx
     ret
 
+# so_impact_marks(rdi=anim block, rsi=the defaults (friction, bounce,
+#   damping, flags, velocity), xmm0=density, xmm1=|det S|) - the original
+#   an active body (as it is; else a hull of its volume x the density) and
+#   a marker joint: type 5, the original, the blow it breaks at
+so_impact_marks:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     r12, rsi
+    movsd   [rsp], xmm0
+    movsd   [rsp+8], xmm1
+    mov     rax, [rip+so_obj]
+    mov     edx, [rax+OB_UID]
+    xor     ecx, ecx                    # its entry
+1:  cmp     ecx, [rbx+AN_NRB_]
+    jae     2f
+    imul    rax, rcx, RB_SZ_
+    lea     rax, [rbx+AN_RB_+rax]
+    cmp     [rax+RB_UID], edx
+    je      3f
+    inc     ecx
+    jmp     1b
+3:  mov     r13, rax
+    jmp     4f
+2:  mov     eax, [rbx+AN_NRB_]          # none: an active hull
+    cmp     eax, RB_MAX_
+    jae     9f
+    inc     dword ptr [rbx+AN_NRB_]
+    imul    rdi, rax, RB_SZ_
+    lea     r13, [rbx+AN_RB_+rdi]
+    mov     rdi, r13
+    xor     eax, eax
+    mov     ecx, RB_SZ_
+    rep     stosb
+    mov     rax, [rip+so_obj]
+    mov     eax, [rax+OB_UID]
+    mov     [r13+RB_UID], eax
+    mov     dword ptr [r13+RB_TYPE], 1
+    mov     dword ptr [r13+RB_SHAPE], 3
+    movsd   xmm0, [rip+sh_src_vol]
+    andpd   xmm0, [rip+so_abs]
+    mulsd   xmm0, [rsp+8]
+    mulsd   xmm0, [rsp]
+    cvtsd2ss xmm0, xmm0
+    movss   [r13+RB_MASS], xmm0
+    mov     eax, [r12]
+    mov     [r13+RB_FRIC], eax
+    mov     eax, [r12+4]
+    mov     [r13+RB_REST], eax
+4:  or      dword ptr [r13+RB_FLAGS], 4 # (it breaks on impact: a body
+    mov     eax, [rbx+AN_NJT_]          #  even hidden) the marker
+    cmp     eax, JT_MAX_
+    jae     9f
+    inc     dword ptr [rbx+AN_NJT_]
+    imul    rdi, rax, JT_SZ_
+    lea     r13, [rbx+AN_JT_+rdi]
+    mov     rdi, r13
+    xor     eax, eax
+    mov     ecx, JT_SZ_
+    rep     stosb
+    mov     dword ptr [r13+JT_TYPE], 5
+    mov     rax, [rip+so_obj]
+    mov     eax, [rax+OB_UID]
+    mov     [r13+JT_A], eax
+    mov     eax, [rip+so_impact]
+    mov     [r13+JT_BRK], eax
+9:  add     rsp, 16
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # so_build -> eax = pieces made: every cell's pieces into objects; the
 #   stats
 so_build:
@@ -2884,6 +2977,12 @@ so_parse:
     jz      8f
     movss   [rip+so_gluef], xmm0
     jmp     1b
+.Lpa_impact:
+    call    pa_num
+    jz      8f
+    movss   [rip+so_impact], xmm0
+    mov     dword ptr [rip+so_impactset], 1
+    jmp     1b
 .Lpa_paint:
     mov     dword ptr [rip+so_gluepaint], 1
     jmp     1b
@@ -2964,6 +3063,8 @@ so_defaults:
     mov     [rip+so_nobodies], eax
     mov     [rip+so_gluef], eax
     mov     [rip+so_gluepaint], eax
+    mov     [rip+so_impact], eax
+    mov     [rip+so_impactset], eax
     mov     dword ptr [rip+so_count], 50
     mov     dword ptr [rip+so_seed], 1
     mov     eax, [rip+so_fhalf]
@@ -3219,9 +3320,11 @@ do_shatter:
     test    eax, eax
     jz      .Lsh_mem
     mov     rdi, [rip+so_obj]           # the original: hidden, not selected
+    cmp     dword ptr [rip+so_impactset], 0 #  (on impact: it stays, whole,
+    jne     23f                         #  until it is hit)
     or      dword ptr [rdi+OB_FLAGS], OBF_HIDDEN
     and     dword ptr [rdi+OB_FLAGS], ~OBF_SELECTED
-    call    so_build
+23: call    so_build
     mov     ebx, eax
     call    so_bodies
     call    so_glue
@@ -3261,6 +3364,8 @@ do_shatter:
     mov     eax, [rip+so_first]
     test    eax, eax
     jz      21f
+    cmp     dword ptr [rip+so_impactset], 0
+    jne     21f
     mov     [rip+active_obj], eax
 21: call    so_now
     sub     rax, [rip+so_t0]
