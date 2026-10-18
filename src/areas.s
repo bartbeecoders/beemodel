@@ -1190,6 +1190,10 @@ tools_list:
     mov     edx, [rip+tl_arm_c]
     cmp     dword ptr [rip+arm_mode], 0
     jne     9f
+    lea     rax, [rip+tl_lsculpt]       # (a landscape: its brushes, paint)
+    mov     edx, [rip+tl_lsculpt_c]
+    cmp     dword ptr [rip+sc_land], 0
+    jne     9f
     lea     rax, [rip+tl_sculpt]
     mov     edx, [rip+tl_sculpt_c]
     cmp     dword ptr [rip+sc_obj], 0
@@ -2941,6 +2945,7 @@ s_t_brushes:    .asciz "BRUSHES"
 s_t_tools:      .asciz "TOOLS"
 s_t_constr:     .asciz "CONSTRAIN"
 s_t_layers:     .asciz "LAYERS"
+s_t_lpaint:     .asciz "PAINT"
 .align 8
 cap_add:        .quad 2, s_t_add
 cap_select:     .quad 2, s_t_select
@@ -2948,6 +2953,7 @@ cap_brushes:    .quad 2, s_t_brushes
 cap_tools:      .quad 2, s_t_tools
 cap_constr:     .quad 2, s_t_constr
 cap_layers:     .quad 2, s_t_layers
+cap_lpaint:     .quad 2, s_t_lpaint
 tl_object:      .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale, cap_add
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane, op_add_light, op_add_camera
                 .quad 0, op_view_measure, op_cursor_reset
@@ -2960,6 +2966,9 @@ tl_sculpt:      .quad op_sb_draw, op_sb_clay, op_sb_crease, op_sb_inflate, op_sb
                 .quad op_sb_smooth, op_sb_flatten, op_sb_pinch, op_sb_layer, op_sb_mask, 0
                 .quad op_s_mclear, op_s_minv, op_s_dyn
 .equ tl_sculpt_n, (. - tl_sculpt) / 8
+tl_lsculpt:     .quad op_lt_raise, op_lt_lower, op_lt_smooth, op_lt_flatten, op_lt_ramp, op_lt_noise
+                .quad op_lt_erode, cap_lpaint, op_lt_rock, op_lt_grass, op_lt_sand, op_lt_snow, op_lt_auto
+.equ tl_lsculpt_n, (. - tl_lsculpt) / 8
 tl_paint:       .quad op_pt_color, op_pt_rad_up, op_pt_rad_dn, op_pt_str_up, op_pt_str_dn, cap_layers
                 .quad op_pt_ladd, op_pt_lup, op_pt_ldn, op_pt_lmerge
 .equ tl_paint_n, (. - tl_paint) / 8
@@ -2978,6 +2987,7 @@ tl_arm:         .quad op_arm_extrude, op_arm_delete, op_arm_selall, 0, op_arm_ke
 tl_object_c:    .long tl_object_n
 tl_edit_c:      .long tl_edit_n
 tl_sculpt_c:    .long tl_sculpt_n
+tl_lsculpt_c:   .long tl_lsculpt_n
 tl_paint_c:     .long tl_paint_n
 tl_wpaint_c:    .long tl_wpaint_n
 tl_sketch_c:    .long tl_sketch_n

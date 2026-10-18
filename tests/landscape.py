@@ -11,9 +11,16 @@ G2: the Landscape - a 1025 x 1025 landscape generated and eroded in under
 layers' stack (terrace, flatten, hide, remove, the noises); saved and
 reopened with the same heights.
 
+G3: sculpt and paint - in sculpt mode on a landscape (the fake compositor,
+clicks only): the Ramp tool dragged from a plateau down to the flat lays a
+straight slope (undone and redone as one step); Grass and Rock paint
+layers are made by painting with them; Auto Paint covers the flat with
+grass and the slope with rock, and the render shows both. Every brush by
+script (raise, lower, smooth, flatten, noise, erode, ramp, paint).
+
     python3 tests/landscape.py build/beemodel
 """
-import os, subprocess, sys, tempfile, zlib, struct
+import os, subprocess, sys, tempfile, time, zlib, struct
 
 BIN = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else 'build/beemodel')
 FAILS = []
@@ -171,7 +178,110 @@ print("reopen", landscape("Landscape", 0), landscape("Landscape", 2), {hs})
           f'saved and reopened: the same heights ({h0} / {h1[2:]})')
 
 
+def sculpt_paint():
+    print('-- G3: sculpt and paint --')
+    import math
+    tmp = tempfile.mkdtemp(prefix='bee-g3-')
+    argv = sys.argv
+    sys.argv = [argv[0], tmp]
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
+    import fakewl
+    sys.argv = argv
+    f = fakewl.Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'keymaps', 'us.xkb'))
+    m = fakewl.Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    hs = lambda: [float(x) for x in q('print(height("Landscape", -3, -3), height("Landscape", 0, 0), height("Landscape", 3, 3))').split()]
+    f.enter(640, 400)
+    def cmd(c):
+        f.key(28); f.type(c); f.key(28); f.pump(0.3)
+    cmd('delete("Cube")')
+    cmd('delete("Camera")')
+    cmd('landscape.add flat res 257 size 12')
+    cmd('landscape.layer add flatten height 2 at -3 -3 3')
+    cmd('object.sculpt_mode')
+    f.key(1); f.pump(0.3)
+    P = fakewl.project
+    tool = {'ramp': 223, 'grass': 371, 'rock': 341, 'auto': 461}
+    f.click(55, tool['ramp']); f.pump(0.2)
+    f.drag(*P((-3, 2, -3)), *P((3, 0, 3)), steps=12); f.pump(0.3)
+    h = hs()
+    check(abs(h[0] - 2) < 0.05 and abs(h[1] - 1) < 0.15 and abs(h[2]) < 0.05,
+          f'Ramp dragged from the plateau to the flat: a straight slope (heights {h}, want 2 1 0)')
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.3)            # Ctrl+Z
+    u = hs()
+    f.mods(5); f.key(44); f.mods(0); f.pump(0.3)            # Ctrl+Shift+Z
+    r = hs()
+    check(abs(u[1]) < 0.05 and abs(r[1] - h[1]) < 1e-4, f'the stroke undone and redone as one step ({u[1]:.3f}, {r[1]:.3f})')
+    f.click(55, tool['grass']); f.pump(0.2)
+    for p in ((4, 0, -4), (4.5, 0, -3.5)):
+        f.click(*P(p)); f.pump(0.1)
+    f.click(55, tool['rock']); f.pump(0.2)
+    f.click(*P((0, 1, 0))); f.pump(0.1)
+    n = q('print(landscape("Landscape", 7))')
+    check(n == '2', f'painting with Grass and Rock made their paint layers ({n})')
+    f.click(55, tool['auto']); f.pump(0.5)
+    f.shot('g3_landscape.png')
+    png = os.path.join(tmp, 'g3.png')
+    cmd(f'render("{png}", 400, 270, 16)')
+    end = time.time() + 30
+    while not os.path.exists(png) and time.time() < end:
+        f.pump(0.2)
+    if os.path.exists(png):
+        w, hh, ctype, px, bpp = png_rgba(png)
+        green = rock = 0
+        sky = px[0:3]                                   # (the top corner: the sky)
+        for i in range(w * hh):
+            r_, g_, b_ = px[i * bpp], px[i * bpp + 1], px[i * bpp + 2]
+            if max(abs(r_ - sky[0]), abs(g_ - sky[1]), abs(b_ - sky[2])) < 12:
+                continue
+            if g_ > r_ + 10 and g_ > b_ + 10:
+                green += 1
+            elif max(r_, g_, b_) - min(r_, g_, b_) < 30:  # (grey: rock)
+                rock += 1
+        check(green / (w * hh) > 0.05, f'the render: grass on the flat ({green / (w * hh):.0%} green)')
+        check(rock / (w * hh) > 0.03, f'the render: rock on the slope ({rock / (w * hh):.1%} rock grey)')
+    else:
+        check(False, 'the render was written')
+    f.proc.kill()
+    out = run('''
+op("landscape.add", "flat res 257 size 100")
+op("landscape.brush", "raise 0 0 radius 10 strength 1")
+print("raise", height("Landscape", 0, 0), height("Landscape", 11, 0), landscape("Landscape", 2))
+op("landscape.brush", "lower 30 30 radius 10 strength 1")
+print("lower", height("Landscape", 30, 30))
+op("landscape.brush", "flatten 5 0 radius 4 strength 1")
+print("flatten", height("Landscape", 5, 0))
+op("landscape.brush", "smooth 0 0 radius 10 strength 1")
+print("smooth", height("Landscape", 0, 0))
+op("landscape.brush", "noise -30 -30 radius 10 strength 1")
+print("noise", height("Landscape", -32, -29))
+op("landscape.brush", "erode 0 0 radius 12 strength 1")
+print("erode", height("Landscape", 0, 0))
+op("landscape.brush", "ramp -40 30 to -10 30 radius 5")
+op("landscape.brush", "raise -40 30 radius 3 strength 1")
+op("landscape.brush", "ramp -40 30 to -10 30 radius 5")
+print("ramp", height("Landscape", -40, 30), height("Landscape", -25, 30), height("Landscape", -10, 30))
+op("landscape.paint", "add snow")
+op("landscape.brush", "snow 0 0 radius 10 strength 1")
+print("paint", landscape("Landscape", 7))
+''')
+    v = {l[0]: [float(x) for x in l[1:]] for l in out}
+    a = v.get('raise', [0, 1, 0])
+    check(abs(a[0] - 1) < 1e-3 and a[1] == 0 and a[2] == 1, f'raise: 1 m in the middle, nothing past the radius, a Sculpted layer ({a})')
+    check(abs(v.get('lower', [0])[0] + 1) < 1e-3, f'lower ({v.get("lower")})')
+    check(0 < v.get('smooth', [0])[0] < 1, f'smooth ({v.get("smooth")})')
+    check(v.get('noise', [0])[0] != 0, f'noise ({v.get("noise")})')
+    e = v.get('erode', [1])[0]
+    check(e != v.get('smooth', [0])[0], f'erode ({e})')
+    rp = v.get('ramp', [0, 0, 0])
+    check(rp[0] > 0.2 and abs(rp[1] - (rp[0] + rp[2]) / 2) < 0.05 * rp[0], f'ramp: half way down in the middle ({rp})')
+    check(v.get('paint', [0])[0] == 1, f'paint layers ({v.get("paint")})')
+
+
 ground()
 landscape()
+sculpt_paint()
 print(f'{len(FAILS)} failed' if FAILS else 'all landscape checks passed')
 sys.exit(1 if FAILS else 0)
