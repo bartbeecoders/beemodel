@@ -68,6 +68,7 @@
 .equ TAG_MVCL,  0x4C43564D
 .equ TAG_VGEO,  0x4F454756
 .equ TAG_CELO,  0x4F4C4543              # "CELO"
+.equ TAG_LAND,  0x444E414C              # "LAND" (landscapes their meshes show)
 .equ CO_SZ,     120                     # a CELO record: name, transform, colour
                                         #  (72), type, flags, mesh, uid, material
 .equ SYS_UNLINK, 87
@@ -107,9 +108,11 @@ wp_nmoved:      .skip 4
 wp_cmuvs:       .skip 8
 wp_cmvcl:       .skip 8
 wp_ccelo:       .skip 8
+wp_cland:       .skip 8
 wp_smuvs:       .skip 4
 wp_smvcl:       .skip 4
 wp_scelo:       .skip 4
+wp_sland:       .skip 4
 
 .section .rodata
 .align 16
@@ -622,6 +625,10 @@ cell_write:
     call    mvcl_write
     call    chunk_end
     call    vgeo_chunks
+    mov     edi, TAG_LAND               # (landscapes: their blocks)
+    call    chunk_begin
+    call    land_write
+    call    chunk_end
     mov     edi, TAG_CELO               # the objects
     call    chunk_begin
     mov     edi, r12d
@@ -814,6 +821,7 @@ cell_load:
     mov     qword ptr [rip+wp_cmuvs], 0
     mov     qword ptr [rip+wp_cmvcl], 0
     mov     qword ptr [rip+wp_ccelo], 0
+    mov     qword ptr [rip+wp_cland], 0
     lea     r14, [r12+16]               # chunks
 .Lcl_chunk:
     lea     rax, [r12+r13]
@@ -852,10 +860,16 @@ cell_load:
     mov     [rip+wp_smvcl], ebp
     jmp     .Lcl_next
 3:  cmp     eax, TAG_CELO
-    jne     4f
+    jne     31f
     lea     rax, [r14+8]
     mov     [rip+wp_ccelo], rax
     mov     [rip+wp_scelo], ebp
+    jmp     .Lcl_next
+31: cmp     eax, TAG_LAND
+    jne     4f
+    lea     rax, [r14+8]
+    mov     [rip+wp_cland], rax
+    mov     [rip+wp_sland], ebp
     jmp     .Lcl_next
 4:  cmp     eax, TAG_VGEO
     jne     .Lcl_next
@@ -887,7 +901,12 @@ cell_load:
     jz      6f
     mov     esi, [rip+wp_smvcl]
     call    mvcl_read
-6:  mov     r14, [rip+wp_ccelo]         # the objects
+6:  mov     rdi, [rip+wp_cland]         # (landscapes)
+    test    rdi, rdi
+    jz      61f
+    mov     esi, [rip+wp_sland]
+    call    land_read
+61: mov     r14, [rip+wp_ccelo]         # the objects
     test    r14, r14
     jz      .Lcl_meshes
     mov     ebp, [rip+wp_scelo]

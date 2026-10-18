@@ -14,6 +14,7 @@
 .globl png_encode_rgba
 .globl png_write
 .globl png_alpha
+.globl png_raw
 .globl deflate_buf
 .globl zip_crc32
 
@@ -23,6 +24,7 @@
 .section .bss
 pe_bpp:         .skip 4                 # PNG out: bytes a pixel (3 / 4)
 png_alpha:      .skip 4                 # 1: png_write keeps the alpha (ARGB)
+pe_ihdr:        .skip 4                 # png_raw: bit depth | colour type << 8
 .align 8
 .align 8
 crc_table:      .skip 1024
@@ -394,6 +396,25 @@ chunk_end:
 #   appends a PNG file to wb -> eax = 1 on success. png_encode_rgba: the
 #   same with the alpha (ARGB pixels, an RGBA PNG)
 # -----------------------------------------------------------------------------
+# png_raw(rsi=filtered rows (a filter byte first in each), rdx=bytes,
+#   ecx=width, r8d=height, r9d=bit depth | colour type << 8) - appends a PNG
+#   of them to wb -> eax = 1 on success (16-bit grey heightmaps, splats)
+png_raw:
+    mov     [rip+pe_ihdr], r9d
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 24
+    mov     [rsp], rdx
+    mov     [rsp+8], rsi
+    mov     r13d, ecx
+    mov     r14d, r8d
+    call    init_tables
+    jmp     .Lpe_deflate
+
 png_encode_rgba:
     mov     dword ptr [rip+pe_bpp], 4
     jmp     pe_go
@@ -547,7 +568,11 @@ pe_go:
     cmp     dword ptr [rip+pe_bpp], 4   #  adaptive filter
     jne     11f
     mov     edi, 0x00000608
-11: call    wb_u32
+11: cmp     dword ptr [rip+pe_ihdr], 0  # (png_raw: as given)
+    je      12f
+    mov     edi, [rip+pe_ihdr]
+    mov     dword ptr [rip+pe_ihdr], 0
+12: call    wb_u32
     xor     edi, edi
     call    wb_char                     # no interlace
     call    chunk_end

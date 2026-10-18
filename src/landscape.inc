@@ -18,6 +18,7 @@
 .equ LB_PAINT,  640
 .equ LB_DATA,   4096
 .equ LY_TYPE,   0                       # 1 generate 2 erode 3 terrace 4 sculpted 5 flatten
+                                        #  6 heightmap (imported heights, added)
 .equ LY_FLG,    4                       # 1: hidden
 .equ LY_STR,    8
 .equ LY_P,      12                      # 10 parameters (f32)

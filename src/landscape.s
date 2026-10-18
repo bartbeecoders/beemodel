@@ -82,6 +82,7 @@ la_defs:        .float 1.0, 0, 1, 3, 30, 6, 0, 0, 0, 0, 0     # generate: fbm, s
                 .float 1.0, 8, 0.2, 0, 0, 0, 0, 0, 0, 0, 0    # terrace: steps, smooth
                 .float 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0      # sculpted
                 .float 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0      # flatten: height
+                .float 1.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0      # heightmap (imported)
 s_landscape:    .asciz "Landscape"
 # the presets' layers: per preset a count, then per layer its type,
 #   strength and 10 parameters (12 dwords)
@@ -139,6 +140,7 @@ k_erode:        .asciz "erode"
 k_terrace:      .asciz "terrace"
 k_sculpted:     .asciz "sculpted"
 k_flatten:      .asciz "flatten"
+k_heightmap:    .asciz "heightmap"
 k_fbm:          .asciz "fbm"
 k_ridged:       .asciz "ridged"
 k_billow:       .asciz "billow"
@@ -156,7 +158,7 @@ k_p_smooth:     .asciz "smooth"
 k_p_island:     .asciz "island"
 k_p_offset:     .asciz "offset"
 .align 8
-la_types:       .quad k_generate, k_erode, k_terrace, k_sculpted, k_flatten, 0
+la_types:       .quad k_generate, k_erode, k_terrace, k_sculpted, k_flatten, k_heightmap, 0
 la_noises:      .quad k_fbm, k_ridged, k_billow, k_cells, 0
 # each type's parameter names (by slot; 0 ends)
 la_pn_gen:      .quad k_la_noise, k_p_seed, k_p_scale, k_p_height, k_p_octaves, k_p_island, k_p_offset, 0
@@ -164,7 +166,7 @@ la_pn_ero:      .quad k_p_droplets, k_p_rate, k_p_seed, k_p_thermal, k_p_talus, 
 la_pn_ter:      .quad k_p_steps, k_p_smooth, 0
 la_pn_none:     .quad 0
 la_pn_flat:     .quad k_p_height, 0
-la_pnames:      .quad la_pn_gen, la_pn_ero, la_pn_ter, la_pn_none, la_pn_flat
+la_pnames:      .quad la_pn_gen, la_pn_ero, la_pn_ter, la_pn_none, la_pn_flat, la_pn_none
 la_presets:     .quad k_flat, k_hills, k_mountains, k_canyon, k_dunes, k_island, 0
 s_la_nosel:     .asciz "  landscape: the active object is not a landscape"
 s_la_bad:       .asciz "  landscape: not understood: "
@@ -449,9 +451,11 @@ la_eval:
     jne     5f
     call    lg_terrace
     jmp     7f
-5:  cmp     ecx, 4
+5:  cmp     ecx, 4                      # (sculpted, a heightmap: added)
+    je      51f
+    cmp     ecx, 6
     jne     6f
-    call    lg_sculpted
+51: call    lg_sculpted
     jmp     7f
 6:  cmp     ecx, 5
     jne     7f

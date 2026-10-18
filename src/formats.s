@@ -37,6 +37,8 @@
 .globl bee_load
 .globl muvs_write
 .globl muvs_read
+.globl land_write
+.globl land_read
 .globl vgeo_chunks
 .globl mesh_from
 .globl mesh_index

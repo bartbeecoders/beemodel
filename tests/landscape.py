@@ -30,6 +30,14 @@ Dunes, Island from the menu (clicks); each has its own shape; the island
 brings a Water plane (the water material: transmission, IOR 1.33); a
 wooden box dropped in its water floats, a stone one sinks.
 
+G6: heightmaps in and out - a 16-bit PNG heightmap round-trips exactly
+(export, import, export: the same samples); a float EXR round-trips the
+heights; an 8-bit RGB PNG of another size and a half-float ZIP EXR (as
+render.save writes) import (resampled to 2^k + 1); landscape.to_mesh full
+gives every sample as a vertex, on the surface within 1e-5; landscape.tiles
+splits it into landscapes that world partition streams out and back in
+with the same heights.
+
     python3 tests/landscape.py build/beemodel
 """
 import os, subprocess, sys, tempfile, time, zlib, struct
@@ -496,10 +504,132 @@ print("float", get("Wood", "y"), get("Stone", "y"), height("Landscape", -95, -95
     check(fl[2] + 0.8 < fl[1] < fl[2] + 1.2, f'a stone one (2400 kg/m3) sinks to the sea floor ({fl[1]:.2f} m, floor {fl[2]:.2f} m)')
 
 
+def write_exr(path, w, h):
+    """A scanline OpenEXR file as the spec has it: half G and R (R: 0 at the
+    left to 2 at the right), ZIP compression (16 lines a block: bytes split
+    into halves, delta-coded, deflated)."""
+    import numpy as np
+    def attr(name, typ, data):
+        return name.encode() + b'\0' + typ.encode() + b'\0' + struct.pack('<I', len(data)) + data
+    ch = b''.join(n + b'\0' + struct.pack('<iB3xii', 1, 0, 1, 1) for n in (b'G', b'R')) + b'\0'
+    box = struct.pack('<iiii', 0, 0, w - 1, h - 1)
+    hdr = (struct.pack('<II', 20000630, 2) + attr('channels', 'chlist', ch) + attr('compression', 'compression', b'\3')
+           + attr('dataWindow', 'box2i', box) + attr('displayWindow', 'box2i', box) + attr('lineOrder', 'lineOrder', b'\0')
+           + attr('pixelAspectRatio', 'float', struct.pack('<f', 1)) + attr('screenWindowCenter', 'v2f', struct.pack('<ff', 0, 0))
+           + attr('screenWindowWidth', 'float', struct.pack('<f', 1)) + b'\0')
+    R = np.tile(np.linspace(0, 2, w, dtype=np.float32), (h, 1)).astype(np.float16)
+    G = (np.random.RandomState(1).rand(h, w) * 5).astype(np.float16)
+    blocks = []
+    for y0 in range(0, h, 16):
+        raw = b''.join(G[y].tobytes() + R[y].tobytes() for y in range(y0, min(h, y0 + 16)))
+        t = bytearray(len(raw))
+        half = (len(raw) + 1) // 2
+        t[:half], t[half:] = raw[0::2], raw[1::2]
+        p = bytearray(t)
+        for i in range(1, len(t)):
+            p[i] = (t[i] - t[i - 1] + 128) & 255
+        blocks.append((y0, zlib.compress(bytes(p))))
+    off = len(hdr) + 8 * len(blocks)
+    table, data = b'', b''
+    for y0, z in blocks:
+        table += struct.pack('<Q', off + len(data))
+        data += struct.pack('<ii', y0, len(z)) + z
+    open(path, 'wb').write(hdr + table + data)
+
+
+def heightmaps():
+    print('-- G6: heightmaps in and out --')
+    from PIL import Image
+    tmp = tempfile.mkdtemp(prefix='bee-g6-')
+    write_exr(os.path.join(tmp, 'r.exr'), 64, 48)
+    im = Image.new('RGB', (300, 200))
+    im.putdata([(int(255 * x / 299), y % 256, 0) for y in range(200) for x in range(300)])
+    im.save(os.path.join(tmp, 'rgb.png'))
+    P = [(12.3, -40), (-30, 25.5), (0, 0), (49, 49)]
+    hs = lambda n: ', '.join(f'height("{n}", {x}, {z})' for x, z in P)
+    out = run(f'''
+delete("Cube")
+op("landscape.add", "res 257 size 100")
+op("landscape.export", "{tmp}/h1.png")
+op("landscape.export", "{tmp}/h1.exr")
+print("orig", {hs("Landscape")}, landscape("Landscape", 3), landscape("Landscape", 4))
+op("landscape.import", "{tmp}/h1.png size 100 height 100")
+select("Landscape.001")
+op("landscape.export", "{tmp}/h2.png")
+print("png", {hs("Landscape.001")})
+op("landscape.import", "{tmp}/h1.exr size 100")
+print("exr", landscape("Landscape.002", 0), {hs("Landscape.002")})
+op("landscape.import", "{tmp}/rgb.png size 300 height 10")
+print("rgb", landscape("Landscape.003", 0), landscape("Landscape.003", 3), landscape("Landscape.003", 4), height("Landscape.003", 149, 0))
+op("landscape.import", "{tmp}/r.exr size 64")
+print("rexr", landscape("Landscape.004", 0), landscape("Landscape.004", 3), landscape("Landscape.004", 4))
+select("Landscape")
+n = landscape("Landscape", 0)
+a = height("Landscape", -50 + 37 * 100 / 256, -50 + 201 * 100 / 256)
+op("landscape.to_mesh", "full")
+print("mesh", landscape("Landscape", 0), vpos("Landscape", 201 * n + 37, "y") - a, vpos("Landscape", 201 * n + 37, "x") + 50 - 37 * 100 / 256)
+''')
+    v = {l[0]: l[1:] for l in out}
+    if os.path.exists(f'{tmp}/h1.png') and os.path.exists(f'{tmp}/h2.png'):
+        import numpy as np
+        a, b = np.array(Image.open(f'{tmp}/h1.png')), np.array(Image.open(f'{tmp}/h2.png'))
+        check(a.dtype == np.uint16 and a.shape == (257, 257) and (a != b).sum() == 0 and a.min() == 0 and a.max() == 65535,
+              f'a 16-bit PNG heightmap round-trips exactly ({a.shape}, {(a != b).sum()} samples differ)')
+    else:
+        check(False, 'the PNG heightmaps were written')
+    o = [float(x) for x in v.get('orig', ['0'] * 6)]
+    p = [float(x) for x in v.get('png', ['9'] * 4)]
+    tol = (o[5] - o[4]) / 65535
+    check(all(abs(p[i] - (o[i] - o[4]) * 100 / (o[5] - o[4])) < 100 / 65535 + 1e-4 for i in range(4)),
+          f'imported: the heights to 1/65535 of the range ({p} / {o[:4]})')
+    e = v.get('exr', ['0'] + ['9'] * 4)
+    check(e[0] == '257' and [float(x) for x in e[1:]] == o[:4], f'a float EXR round-trips the heights ({e[1:]})')
+    r = [float(x) for x in v.get('rgb', ['0', '9', '0', '0'])]
+    check(r[0] == 513 and abs(r[1]) < 1e-3 and abs(r[2] - 10) < 1e-3 and abs(r[3] - 10) < 0.05,
+          f'an 8-bit RGB PNG of 300 x 200: resampled to 513 x 513, 0..10 m ({r})')
+    x = [float(x) for x in v.get('rexr', ['0', '9', '0'])]
+    check(x[0] == 65 and abs(x[1]) < 0.01 and abs(x[2] - 2) < 0.01,
+          f'a half-float ZIP EXR (64 x 48; R 0..2, G noise) imports by its R channel: 65 x 65, {x[1]}..{x[2]} m')
+    m = v.get('mesh', ['x', '1', '1'])
+    check(m[0] == 'nil' and abs(float(m[1])) < 1e-5 and abs(float(m[2])) < 1e-5,
+          f'landscape.to_mesh full: a plain mesh, a sample within 1e-5 of the surface ({m[1]}, {m[2]})')
+    out = run(f'''
+delete("Cube")
+op("landscape.add", "res 1025 size 400")
+h = height("Landscape", 30, -40)
+op("landscape.tiles", "4")
+t = 0
+for i in 0..count() {{ if landscape(name(i), 0) != nil {{ t = t + 1 }} }}
+print("tiles", t, landscape(name(count() - 1), 0), landscape(name(count() - 1), 1))
+op("file.save", "{tmp}/wp.bee")
+op("world.partition", "100 150")
+view(45, 22, 90, 2000, 25, 2000)
+op("world.update")
+op("world.update")
+far = 0
+for i in 0..count() {{ if landscape(name(i), 0) != nil {{ far = far + 1 }} }}
+view(45, 22, 90, 0, 25, 0)
+for k in 0..20 {{ op("world.update") }}
+near = 0
+hh = -1
+for i in 0..count() {{ if landscape(name(i), 0) != nil {{ near = near + 1
+  v = height(name(i), 30, -40)
+  if v != nil {{ hh = v }} }} }}
+print("stream", far, near, hh - h)
+''')
+    v = {l[0]: l[1:] for l in out}
+    tl = v.get('tiles', ['0', '0', '0'])
+    check(tl == ['16', '257', '100'], f'landscape.tiles 4: 16 landscapes of 257 samples, 100 m ({tl})')
+    st = v.get('stream', ['9', '0', '9'])
+    check(st[0] == '0' and int(st[1]) > 0 and abs(float(st[2])) < 1e-5,
+          f'world partition streams the tiles out and back in (far {st[0]}, near {st[1]} loaded; height {st[2]} off)')
+
+
 ground()
 landscape()
 sculpt_paint()
 collider()
 presets()
+heightmaps()
 print(f'{len(FAILS)} failed' if FAILS else 'all landscape checks passed')
 sys.exit(1 if FAILS else 0)
