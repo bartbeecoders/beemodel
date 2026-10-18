@@ -20,6 +20,12 @@ masses add up to the cube's (its volume x the density); played, they fall,
 land on the Ground (none below it) and settle (asleep); in the window
 (the fake compositor) Ctrl+Z gives the cube back.
 
+S4: glue - a 2 x 1 x 0.2 m wall of 10 x 5 bricks glued (40 kPa: a joint a
+shared face, breaking at the strength x its area) stands on the Ground; a
+30 kg ball thrown at it at 20 m/s knocks out a hole about its size (a few
+bricks around the hit) and the rest stands; at 4 m/s nothing breaks; the
+same on 1 and 8 threads. Glue between shards: one joint a shared face.
+
     python3 tests/shatter.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -36,10 +42,12 @@ def check(cond, msg):
         FAILS.append(msg)
 
 
-def run(code, timeout=600, home=None):
+def run(code, timeout=600, home=None, threads=None):
     home = home or tempfile.mkdtemp(prefix='bee-shat-')
     os.makedirs(os.path.join(home, 'BeeModel'), exist_ok=True)
     env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    if threads is not None:
+        env['BEEMODEL_THREADS'] = str(threads)
     r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=timeout)
     if r.returncode != 0:
         print(r.stdout[-1500:], r.stderr[-1500:])
@@ -264,11 +272,60 @@ def s3():
         f.proc.kill()
 
 
+WALL = """op("create.ground")
+scale("Cube", 1, 0.5, 0.1)
+move("Cube", 0, 0.5, 0)
+select("Cube")
+op("object.shatter", "bricks counts 10 5 1 glue 40000 density 2000")
+n = add("sphere", "Ball", 0.1, 0.45, 1.5)
+scale(n, 0.2)
+select(n)
+op("rigid.add", "active sphere mass 30 velocity 0 0 -%d")
+frame(240)
+print("h", rbinfo(15), rbinfo(16))
+moved = 0
+far = 0
+for i in 1..53 { b = "Cube_brick_" + str(i)
+  frame(1)
+  x = get(b, "x")
+  y = get(b, "y")
+  z = get(b, "z")
+  frame(240)
+  d = sqrt(pow(get(b, "x") - x, 2) + pow(get(b, "y") - y, 2) + pow(get(b, "z") - z, 2))
+  if d > 0.05 { moved = moved + 1
+    if sqrt(pow(x - 0.1, 2) + pow(y - 0.45, 2)) > 0.5 { far = far + 1 } } }
+print("w", moved, far, shinfo(7))
+"""
+
+
+def s4():
+    print('S4: glue')
+    out = run(WALL % 20)
+    w, h = vals(out, 'w'), vals(out, 'h')
+    check(w and w[2] == 127, 'the running bond glued: a joint a shared face (%s: 47 in the rows, 80 between them)'
+          % (w and w[2]))
+    check(w and 2 <= w[0] <= 8 and w[1] == 0 and h and h[0] > 0,
+          'a 30 kg ball at 20 m/s knocks out a hole the size of the ball: %s bricks, none far from the hit '
+          '(%s), %s joints broken; the rest stands' % (w and w[0], w and w[1], h and h[0]))
+    out = run(WALL % 4)
+    w2 = vals(out, 'w')
+    check(w2 and w2[0] == 0, 'at 4 m/s the wall stands (%s bricks moved)' % (w2 and w2[0]))
+    out8 = run(WALL % 20, threads=7)
+    h1 = vals(run(WALL % 20, threads=0), 'h')
+    h8 = vals(out8, 'h')
+    check(h1 and h8 and h1[1] == h8[1] and h1[0] == h8[0],
+          'the same on 1 and 8 threads (hash %s, %s; broken %s, %s)' % (h1 and h1[1], h8 and h8[1], h1 and h1[0], h8 and h8[0]))
+    out = run('op("object.shatter", "shards count 100 glue 10000")\n' + STATS)
+    st = stats(out)
+    check(st and 400 < st[7] < 700, '100 shards glued: %s joints (about 11 neighbours a cell)' % (st and st[7]))
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix='bee-shat-')
     s1(tmp)
     s2(tmp)
     s3()
+    s4()
     if FAILS:
         print('%d failed' % len(FAILS))
         sys.exit(1)

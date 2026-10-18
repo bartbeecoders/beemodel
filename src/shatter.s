@@ -54,6 +54,7 @@
 .globl sh_cells_alloc
 .globl sh_cells_free
 .globl sh_ncell
+.globl sort_u64
 .globl sh_mode
 .globl sh_open_edges
 .globl tris_open
@@ -3649,7 +3650,26 @@ planes_job:
     add     rdi, [rip+sh_cpl]
     mov     rsi, r13
     imul    ecx, r14d, PLN_SZ
+    push    rdi
     rep     movsb
+    pop     rdi
+    xor     ecx, ecx                    # the tags: the pair's, the same on
+111:cmp     ecx, r14d                   #  both sides (1 << 30 | lower << 12
+    jae     112f                        #  | higher; the seed j + 1 before)
+    imul    rax, rcx, PLN_SZ
+    mov     edx, [rdi+rax+PLN_TAG]
+    dec     edx
+    mov     r8d, r12d
+    cmp     r8d, edx
+    jbe     113f
+    xchg    r8d, edx
+113:shl     r8d, 12
+    or      edx, r8d
+    or      edx, 1 << 30
+    mov     [rdi+rax+PLN_TAG], edx
+    inc     ecx
+    jmp     111b
+112:
     imul    rdi, r12, 48                # its bounds: the cell's corners
     add     rdi, [rip+sh_cbb]
     call    cx_bounds

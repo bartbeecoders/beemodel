@@ -48,6 +48,8 @@
 .equ HF_TW0,    72
 .equ HF_NFREE,  76
 .equ HF_SZ,     128
+.equ JH_N,      32768                   # (a power of two: 2 x JT_MAX_)
+.equ UH_N,      16384                   # (a power of two: 4 x RB_MAX_)
 
 .globl rb_frame
 .globl rb_gravity
@@ -452,6 +454,9 @@ hf_freelp:      .skip 8                 #  free slots, the hash, each slot's
 hf_tabp:        .skip 8                 #  friction and bounce
 hf_fricp:       .skip 8
 hf_restp:       .skip 8
+rb_jh:          .skip 8                 # joints' pairs: keys, joints
+rb_jhv:         .skip 8
+rb_uh:          .skip 8                 # object uids -> bodies
 rb_jr:          .skip 8
 rb_hash:        .skip 8                 # the settings it was made from
 rb_frame0:      .skip 4                 # the start frame
@@ -1125,6 +1130,15 @@ rb_build:
     call    rb_lay
     lea     rdi, [rip+rb_iaw]
     lea     rsi, [r15*4+16]
+    call    rb_lay
+    lea     rdi, [rip+rb_jh]            # joints' pairs, uids -> bodies
+    mov     esi, JH_N*8
+    call    rb_lay
+    lea     rdi, [rip+rb_jhv]
+    mov     esi, JH_N*4
+    call    rb_lay
+    lea     rdi, [rip+rb_uh]
+    mov     esi, UH_N*8
     call    rb_lay
     lea     rdi, [rip+rb_jr]
     mov     esi, JT_MAX_*JR_SZ
@@ -2791,6 +2805,7 @@ make_joints:
     push    r14
     push    r15
     sub     rsp, 32
+    call    uh_build
     mov     rbx, [rip+an_cur]
     xor     r12d, r12d
 1:  cmp     r12d, [rbx+AN_NJT_]
@@ -2837,6 +2852,13 @@ make_joints:
     mov     dword ptr [rdi+JR_IMP], 0
     mov     dword ptr [rdi+JR_IMP+4], 0
     mov     dword ptr [rdi+JR_IMP+8], 0
+    push    rdi
+    mov     r8d, r14d                   # (the pair, for jointed)
+    mov     r9d, r15d
+    mov     ecx, [rip+rb_njr]
+    dec     ecx
+    call    jh_put
+    pop     rdi
     BODY    r8, r14
     BODY    r9, r15
     mov     dword ptr [r8+BD_JOINT], 1
@@ -2894,24 +2916,64 @@ make_joints:
     pop     rbx
     ret
 
-# body_of_uid(edi=object uid) -> eax = its body, or -1
+# body_of_uid(edi=object uid) -> eax = its body, or -1 (rb_uh: made by
+#   uh_build when the joints are)
 body_of_uid:
-    xor     eax, eax
-    mov     rcx, [rip+rb_bd]
-1:  mov     edx, [rip+rb_nb]
-    dec     edx
-    cmp     eax, edx
-    jae     8f
-    mov     rdx, [rcx+BD_OBJ]
-    test    rdx, rdx
-    jz      2f
-    cmp     [rdx+OB_UID], edi
-    je      9f
-2:  add     rcx, BD_SZ
-    inc     eax
+    lea     eax, [rdi+1]
+    mov     ecx, eax
+    imul    ecx, ecx, -0x61C8864F
+    shr     ecx, 18
+    and     ecx, UH_N-1
+    mov     rdx, [rip+rb_uh]
+1:  mov     r8d, [rdx+rcx*8]
+    test    r8d, r8d
+    jz      8f
+    cmp     r8d, eax
+    je      2f
+    inc     ecx
+    and     ecx, UH_N-1
     jmp     1b
+2:  mov     eax, [rdx+rcx*8+4]
+    ret
 8:  mov     eax, -1
-9:  ret
+    ret
+
+# uh_build - rb_uh: each body's object's uid -> the body (objects, not
+#   instances: the first body of an object)
+uh_build:
+    push    rbx
+    xor     ebx, ebx
+1:  mov     eax, [rip+rb_nb]
+    dec     eax
+    cmp     ebx, eax
+    jae     9f
+    BODY    rdx, rbx
+    cmp     dword ptr [rdx+BD_INST], 0
+    jne     3f
+    mov     rdx, [rdx+BD_OBJ]
+    test    rdx, rdx
+    jz      3f
+    mov     eax, [rdx+OB_UID]
+    inc     eax
+    mov     ecx, eax
+    imul    ecx, ecx, -0x61C8864F
+    shr     ecx, 18
+    and     ecx, UH_N-1
+    mov     rdx, [rip+rb_uh]
+2:  mov     r8d, [rdx+rcx*8]
+    test    r8d, r8d
+    jz      21f
+    cmp     r8d, eax
+    je      3f
+    inc     ecx
+    and     ecx, UH_N-1
+    jmp     2b
+21: mov     [rdx+rcx*8], eax
+    mov     [rdx+rcx*8+4], ebx
+3:  inc     ebx
+    jmp     1b
+9:  pop     rbx
+    ret
 
 # -----------------------------------------------------------------------------
 # A step
@@ -4024,7 +4086,8 @@ gr_pair:
 9:  add     rsp, 8
     ret
 
-# jointed(rdi=body, rsi=body) -> eax = 1 when a joint ties them
+# jointed(rdi=body, rsi=body) -> eax = 1 when an unbroken joint ties them
+#   (rb_jh: the pairs, made with the joints; rcx, rdx, r8-r11 used)
 jointed:
     mov     rax, rdi
     sub     rax, [rip+rb_bd]
@@ -4037,28 +4100,76 @@ jointed:
     xor     edx, edx
     div     rcx
     mov     r9d, eax
-    mov     rdx, [rip+rb_jr]
-    xor     ecx, ecx
-1:  cmp     ecx, [rip+rb_njr]
-    jae     8f
-    test    dword ptr [rdx+JR_FL], 4    # (broken: no longer)
-    jnz     3f
-    mov     eax, [rdx+JR_A]
-    mov     r10d, [rdx+JR_B]
-    cmp     eax, r8d
-    jne     2f
-    cmp     r10d, r9d
-    je      9f
-2:  cmp     eax, r9d
-    jne     3f
-    cmp     r10d, r8d
-    je      9f
-3:  add     rdx, JR_SZ
-    inc     ecx
-    jmp     1b
+    call    jh_key                      # rax = the pair's key
+    call    jh_find
+    cmp     eax, -1
+    je      8f
+    imul    rax, rax, JR_SZ
+    add     rax, [rip+rb_jr]
+    test    dword ptr [rax+JR_FL], 4    # (broken: no longer)
+    jnz     8f
+    mov     eax, 1
+    ret
 8:  xor     eax, eax
     ret
-9:  mov     eax, 1
+
+# jh_key(r8d, r9d = bodies) -> rax = (lower << 32 | higher) + 1
+jh_key:
+    mov     eax, r8d
+    mov     edx, r9d
+    cmp     eax, edx
+    jbe     1f
+    xchg    eax, edx
+1:  shl     rax, 32
+    or      rax, rdx
+    inc     rax
+    ret
+
+# jh_find(rax=key) -> eax = the joint it was put with, or -1
+jh_find:
+    mov     r10, rax
+    imul    r10, r10, -0x61C8864F
+    shr     r10, 17
+    and     r10d, JH_N-1
+    mov     r11, [rip+rb_jh]
+1:  mov     rdx, [r11+r10*8]
+    test    rdx, rdx
+    jz      8f
+    cmp     rdx, rax
+    je      2f
+    inc     r10d
+    and     r10d, JH_N-1
+    jmp     1b
+2:  mov     rdx, [rip+rb_jhv]
+    mov     eax, [rdx+r10*4]
+    ret
+8:  mov     eax, -1
+    ret
+
+# jh_put(r8d, r9d = bodies, ecx = joint) - the pair into rb_jh (the first
+#   joint of a pair kept)
+jh_put:
+    push    rcx
+    call    jh_key
+    mov     r10, rax
+    imul    r10, r10, -0x61C8864F
+    shr     r10, 17
+    and     r10d, JH_N-1
+    mov     r11, [rip+rb_jh]
+1:  mov     rdx, [r11+r10*8]
+    test    rdx, rdx
+    jz      2f
+    cmp     rdx, rax
+    je      9f
+    inc     r10d
+    and     r10d, JH_N-1
+    jmp     1b
+2:  mov     [r11+r10*8], rax
+    mov     rdx, [rip+rb_jhv]
+    pop     rcx
+    mov     [rdx+r10*4], ecx
+    ret
+9:  pop     rcx
     ret
 
 # body_index(rdi=body) -> eax
@@ -6992,13 +7103,19 @@ rb_atan2:
 jr_relax:
     push    r14
     push    r15
-    sub     rsp, 24
+    push    rbp                         # (aligned: the stages' jobs come in
+    mov     rbp, rsp                    #  with the other parity)
+    and     rsp, -16
+    sub     rsp, 32
     mov     dword ptr [rsp+20], 0
     jmp     jr_solve_in
 jr_solve:
     push    r14
     push    r15
-    sub     rsp, 24
+    push    rbp
+    mov     rbp, rsp
+    and     rsp, -16
+    sub     rsp, 32
     mov     eax, [rip+rx_one]
     mov     [rsp+20], eax               # (how much of the error to pull back)
 jr_solve_in:
@@ -7049,6 +7166,8 @@ jr_solve_in:
     lea     rdi, [rbx+JR_RA]
     lea     rsi, [rbx+JR_RB]
     call    impulse
+    call    jr_overload                 # past its strength: broken now (it
+    jnz     9f                          #  passes no more of a blow on)
     inc     r14d
     jmp     1b
 2:  call    jr_extra                    # limits, a motor
@@ -7098,7 +7217,8 @@ jr_solve_in:
     call    ang_impulse
     inc     r14d
     jmp     3b
-9:  add     rsp, 24
+9:  mov     rsp, rbp
+    pop     rbp
     pop     r15
     pop     r14
     ret
@@ -7225,6 +7345,34 @@ jr_axis_push:
 9:  add     rsp, 8
     ret
 
+# jr_overload(rbx=joint) -> ZF clear when its load this step passed its
+#   breaking force (it is broken then: flag 4, counted)
+jr_overload:
+    movss   xmm0, [rbx+JR_BRK]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     8f
+    mulss   xmm0, [rip+rb_dt]
+    movss   xmm1, [rbx+JR_IMP]
+    mulss   xmm1, xmm1
+    movss   xmm2, [rbx+JR_IMP+4]
+    mulss   xmm2, xmm2
+    addss   xmm1, xmm2
+    movss   xmm2, [rbx+JR_IMP+8]
+    mulss   xmm2, xmm2
+    addss   xmm1, xmm2
+    sqrtss  xmm1, xmm1
+    comiss  xmm0, xmm1
+    jae     8f
+    or      dword ptr [rbx+JR_FL], 4
+    lock inc dword ptr [rip+rb_nbroken]
+    test    ebx, ebx                    # (ZF clear: rbx is never 0)
+    jnz     9f
+    test    rbx, rbx
+9:  ret
+8:  cmp     eax, eax                    # (ZF set)
+    ret
+
 # jr_breaks - after a step: a joint whose load passed its breaking force
 #   (impulse over the step's time) is gone for the rest of the run; the
 #   loads start again
@@ -7234,6 +7382,8 @@ jr_breaks:
     jae     9f
     imul    rax, rcx, JR_SZ
     add     rax, [rip+rb_jr]
+    test    dword ptr [rax+JR_FL], 4    # (broken already)
+    jnz     2f
     movss   xmm0, [rax+JR_BRK]
     xorps   xmm1, xmm1
     comiss  xmm0, xmm1
@@ -9039,6 +9189,9 @@ rb_info:
     je      8f
     mov     eax, [rip+rb_nbroken]
     cmp     edi, 15                     # 15: joints broken
+    je      8f
+    mov     eax, [rip+rb_njr]
+    cmp     edi, 19                     # 19: joints in the run
     je      8f
     cmp     edi, 16                     # 16: every body's place, turn and
     je      6f                          #  speeds, hashed (24 bits: exact)
