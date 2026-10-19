@@ -6811,6 +6811,12 @@ def props_ui():
     set_field('color.hex', 'ff8000')
     f.key(1); f.pump(0.2)
     check(q('print(get("Cube", "color"))') == str(0xff8000), 'the colour swatch opens the picker; #ff8000 typed there colours the cube')
+    x, y = widget_xy(m, 'object.location', 0); f.click(x, y); f.pump(0.2)
+    f.mods(4); f.key(30); f.mods(0)
+    for k in (74, 80, 83, 76):                                  # the keypad: - 2 . 5,
+        f.key(k)
+    f.key(96); f.pump(0.3)                                      #  then its Enter
+    check(q('print(get("Cube", "x"))') == '-2.5', f'a value typed on the keypad ({q("print(get(\"Cube\", \"x\"))")})')
     props_tab(m, f, 'scene')
     x, y = widget_xy(m, 'scene.units')
     f.click(x, y)

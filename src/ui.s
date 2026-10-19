@@ -1677,7 +1677,7 @@ ui_key_press:
     mov     ebx, edi
     cmp     dword ptr [rip+pal_open], 0  # the palette takes every key
     je      0f
-    call    kb_sym
+    call    kb_text
     mov     esi, eax
     mov     edi, ebx
     call    palette_key
@@ -1763,7 +1763,7 @@ ui_key_press:
     lea     rdi, [rip+tfi_console]
     call    tf_select
     mov     edi, ebx
-    call    kb_sym
+    call    kb_text
     mov     esi, eax
     mov     edi, ebx
     call    tf_key
