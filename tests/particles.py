@@ -764,7 +764,40 @@ print("opened", cacheinfo(9), cacheinfo(10), particles(33, 1), manifold("Water")
         f.proc.kill()
 
 
+def keyed_fields():
+    print('-- keyed force fields and the cache --')
+    # a field moved by keys and one whose strength is keyed change every
+    # frame: the cache's key takes their keys, so each frame is one step on
+    # (not the whole run again: a frame's time near one step's, not 40), and
+    # editing a key still runs it again
+    out = run('''
+delete("Light")
+emit("Cube", "from volume burst 200000 speed 0 life 100 gravity 0")
+field("vortex", "Whirl", "strength 6 falloff smooth radius 4")
+key("Whirl:x", 1, -2)
+key("Whirl:x", 40, 2)
+field("wind", "Gust", "strength 1")
+key("field:Gust:strength", 1, 1)
+key("field:Gust:strength", 40, 5)
+for f in 2..41 { frame(f) }
+print("steps", particles(5), particles(2), particles(3))
+x0 = particles(6, 7)
+key("Whirl:x", 1, 1)
+frame(1)
+for f in 2..41 { frame(f) }
+print("edit", particles(5), x0, particles(6, 7))
+''')
+    st = vals(out, 'steps')
+    ed = vals(out, 'edit')
+    check(len(st) == 3 and st[0] == 39 and st[1] < 8 * st[2],
+          'a keyed field moving and a keyed strength: frame 41 is one step on from 40 (%.2f ms, a step %.2f ms)'
+          % (st[1] if st else -1, st[2] if st else -1))
+    check(len(ed) == 3 and ed[0] == 39 and abs(ed[1] - ed[2]) > 0.01,
+          'a key edited: simulated again from the start, to another place (%s)' % ed)
+
+
 if __name__ == '__main__':
+    keyed_fields()
     p1()
     p2()
     p3()

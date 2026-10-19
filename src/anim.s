@@ -47,6 +47,7 @@
 .globl an_apply
 .globl an_hash
 .globl an_moves
+.globl an_fkeyed
 .globl an_write
 .globl an_read
 .globl an_path_key
@@ -2254,6 +2255,28 @@ an_moves:
     add     rdx, MJ_SZ_
     inc     ecx
     jmp     61b
+7:  mov     eax, 1
+    ret
+8:  xor     eax, eax
+    ret
+
+# an_fkeyed(edi=field object uid) -> eax = 1 when its strength is keyed
+#   (field:<name>:strength)
+an_fkeyed:
+    mov     r8, [rip+an_cur]
+    test    r8, r8
+    jz      8f
+    xor     ecx, ecx
+    lea     rdx, [r8+AN_CUR]
+1:  cmp     ecx, [r8+AN_NCUR]
+    jae     8f
+    cmp     dword ptr [rdx+CU_KIND], K_FIELD
+    jne     2f
+    cmp     [rdx+CU_A], edi
+    je      7f
+2:  add     rdx, CU_SZ
+    inc     ecx
+    jmp     1b
 7:  mov     eax, 1
     ret
 8:  xor     eax, eax
