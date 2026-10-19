@@ -80,11 +80,22 @@ Files dragged from a file manager onto the window open by their kind:
 
 - `.blend`, `.glb` / `.gltf`, `.obj`, `.stl` and `.step` are imported, each
   as one undo step;
-- a `.bee` file opens when the scene has no unsaved changes.
+- a `.bee` file opens when the scene has no unsaved changes;
+- a `.png`, `.jpg` or `.jpeg` becomes a reference image.
 
 **File › Open Recent** lists the last eight scenes. New, Open and Exit ask "Save changes?" when the scene has changes.
 
 ## The 3D viewport
+
+**Reference images** are photos or drawings to model over. **Add › Reference Image...** (or an image dropped on the window, or `refimage(path [, name])`) puts one at the 3D cursor, square to the view's nearest axis (front, side or top) and upright, at the image's aspect ratio. It shows in every shading mode, solid included, and is left out of renders (its camera is off). **Properties › Object** shows its settings:
+
+- **Opacity**;
+- **Drawn**: behind the scene (objects cover it) or in front of it (to trace over);
+- **Seen from**: both sides, or the front only;
+- **Only in orthographic views**;
+- **Only when seen square-on**, as a front, side or top reference.
+
+Click its outline to select it; it moves, turns and scales like any object. Its image travels in its material ("Reference <image>"), so it is saved with the scene.
 
 The header has:
 

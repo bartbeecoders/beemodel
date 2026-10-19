@@ -2305,6 +2305,14 @@ ed_props_draw:
     call    curve_props
     mov     rdi, rbx                    # a light / camera: its settings
     call    lcam_props
+    test    dword ptr [rbx+OB_FLAGS], OBF_REFIMG  # a reference image: its own
+    jz      114f
+    mov     edi, r12d
+    mov     rsi, rbx
+    call    ref_props
+    mov     r12d, eax
+    add     r12d, 6
+114:
     call    fmt_reset                   # mesh statistics
     mov     rbx, [rbx+OB_MESH]
     mov     edi, [rbx+ME_NVERTS]

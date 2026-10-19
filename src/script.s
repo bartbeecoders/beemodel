@@ -438,6 +438,8 @@ builtins:
     .long 1, 2
     .quad bn_folders, b_folders
     .long 0, 0
+    .quad bn_refimage, b_refimage
+    .long 1, 2
     .quad bn_shatter, b_shatter
     .long 3, 4
     .quad bn_height, b_height
@@ -783,6 +785,7 @@ bn_shinfo:      .asciz "shinfo"
 bn_folder:      .asciz "folder"
 bn_infolder:    .asciz "infolder"
 bn_folders:     .asciz "folders"
+bn_refimage:    .asciz "refimage"
 bn_shatter:     .asciz "shatter"
 s_sh_opname:    .asciz "object.shatter"
 s_sh_cnt:       .asciz " count "
@@ -5731,6 +5734,41 @@ b_infolder:
     jz      ret_nil
     mov     rsi, rax
     jmp     ret_text
+
+# refimage(path [, name]) -> the name of a new reference image (Add >
+#   Reference Image: object.add_reference), nil when the file does not load
+b_refimage:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_str
+    mov     r13d, [rip+active_obj]
+    push    qword ptr [rip+op_arg]
+    mov     [rip+op_arg], rax
+    lea     rdi, [rip+op_ref_add]
+    call    run_op
+    pop     qword ptr [rip+op_arg]
+    mov     edi, [rip+active_obj]
+    cmp     edi, r13d                   # (nothing new: nil)
+    je      8f
+    cmp     r12d, 2
+    jb      7f
+    lea     rdi, [rbx+16]               # its name
+    call    a_str
+    mov     rsi, rax
+    mov     edi, [rip+active_obj]
+    call    obj_rename
+7:  mov     edi, [rip+active_obj]
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_name
+8:  pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
 
 # folders() -> how many folders the outliner has
 b_folders:

@@ -210,8 +210,9 @@ raster_scene:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     11f
-    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN|OBF_GROUND
-    jnz     11f                         # (the Ground: a grid, viewport.s)
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN|OBF_GROUND|OBF_REFIMG
+    jnz     11f                         # (the Ground: a grid, viewport.s; a
+                                        #  reference image: refimg.s)
     lea     rcx, [rip+obj_list]         # (the sculpt object draws itself)
     mov     ecx, [rcx+rbx*4]
     cmp     ecx, [rip+sc_obj]
@@ -261,7 +262,7 @@ raster_scene:
     call    obj_at
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     31f
-    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN|OBF_GROUND
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN|OBF_GROUND|OBF_REFIMG
     jnz     31f
     lea     rcx, [rip+obj_list]
     mov     ecx, [rcx+rbx*4]
