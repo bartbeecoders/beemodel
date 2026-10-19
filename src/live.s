@@ -37,6 +37,7 @@
 .equ LV_OWN_MS,     500                 # the owner viewport lapses (not drawn)
 .equ LV_BATCH_MAX,  64
 .equ LV_QUICK_MS,   30                  # builds this quick follow every change
+.equ LV_STILL_MS,   150                 # samples begin this long after a build
 .equ MAP_ANON_PRIV, 0x22
 .equ LV_NOREAD,     0x10000             # gpu_lv_run: no pixels back
 .equ LV_DN_STAGES,  6                   # the variance, five a-trous passes
@@ -196,6 +197,10 @@ lv_shade:
     call    lv_dn_want                  # (denoise turned on or off: the
     cmp     eax, [rip+lv_dn]            #  samples again)
     jne     .Lls_ray
+    mov     rax, rbx                    # the scene went up a moment ago: not
+    sub     rax, [rip+lv_built_at]      #  still yet (playback changes it every
+    cmp     rax, LV_STILL_MS            #  other frame: samples between its
+    jl      .Lls_show                   #  raycasts would flicker)
     call    lv_target                   # still: samples, while some remain
     cmp     [rip+lv_spp], eax
     jae     .Lls_show
