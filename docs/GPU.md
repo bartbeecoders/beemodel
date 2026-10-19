@@ -25,6 +25,23 @@ The helper needs a Vulkan device with compute queues and 64-bit integers in
 shaders. The console reports the device (`GPU helper: <name>`), or says the
 helper is not used.
 
+## Choosing the device
+
+**Properties › Render › Device** (and **Preferences › System › Render
+device**, `render.device auto|rtx|gpu|cpu`) picks where renders run:
+
+- **Auto**: the best there is: RTX ray tracing when the GPU has it, else
+  the GPU's compute path, else the CPU.
+- **GPU (RTX)**, **GPU**: that path (when it cannot render the scene, the
+  CPU does).
+- **CPU**: never the GPU.
+
+Under it the panel says the GPU found, and after a render where it ran:
+"Last render: on the GPU", or "on the CPU (an HDRI world)" and the like.
+The Render area's header says GPU or CPU next to the samples, and the
+console's "rendering ..." line says where and why. `gpu(18)` gives the
+reason as a number.
+
 ## How it works
 
 BeeModel starts the helper on first use (`src/gpu.s`). It runs as a child
@@ -223,6 +240,10 @@ takes 0.55 s; the small one, 4 ms.
 | 12 | The last scene build's milliseconds |
 | 13 | 1 when the image shown is denoised |
 | 14 | The last denoise's milliseconds |
+| 15 | The last scene build's milliseconds (Hive: triangles, materials, BVH) |
+| 16 | Of which the BVH's |
+| 17 | The last scene's triangles |
+| 18 | Where the last render ran, and why: 0 the GPU; on the CPU: 1 Device is CPU, 2 no helper or device, 3 an HDRI world, 4 a shadow catcher, 5 a material node the GPU lacks, 6 the helper failed, 7 a bake |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 

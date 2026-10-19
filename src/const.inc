@@ -590,3 +590,14 @@
 .equ KEY_K,             37
 .equ KEY_LEFTBRACE,     26
 .equ KEY_RIGHTBRACE,    27
+
+# why a render is where it is (hv_why, gpu(18), Render › Device)
+.equ HW_GPU,        0                   # on the GPU
+.equ HW_SETTING,    1                   # Render › Device: CPU
+.equ HW_NONE,       2                   # no GPU helper or device
+.equ HW_WORLD,      3                   # an HDRI world
+.equ HW_CATCH,      4                   # a shadow catcher
+.equ HW_NODE,       5                   # a material node the GPU does not run
+.equ HW_FAILED,     6                   # the helper failed
+.equ HW_INTERNAL,   7                   # a bake or probe (the CPU's tracer)
+.equ HW_LAST,       7

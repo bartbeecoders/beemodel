@@ -8380,7 +8380,7 @@ def render_ui():
         click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
     f.key(28); f.type('agent.permission_files'); f.key(28); f.pump(0.2); f.key(1)   # (scripts may save)
     props_tab(m, f, 'render')
-    check({'render.bounces', 'render.gpu', 'render.to_file', 'vgeo.build', 'world.partition', 'probe.add_irradiance',
+    check({'render.bounces', 'render.device_list', 'render.to_file', 'vgeo.build', 'world.partition', 'probe.add_irradiance',
            'probe.bake', 'lightmap.bake', 'play.start', 'play.mode'} <= names(),
           'the Render tab: bounces, GPU, Render to File, virtualized geometry, world partition, probes, lightmap, play')
     type_into('render.bounces', '4')
@@ -8658,7 +8658,7 @@ def prefs_ui():
     f.key(65); f.pump(0.3)                                      # F7 (free)
     check('key object.duplicate' in prefs(), f'Set, then a key: kept ({prefs()[-60:]!r})')
     cat(5)
-    check({'prefs.threads', 'prefs.gpu', 'prefs.jit'} <= names(), 'System: threads, GPU, JIT')
+    check({'prefs.threads', 'prefs.gpu_device', 'prefs.jit'} <= names(), 'System: threads, render device, JIT')
     cat(6)
     check({'prefs.autosave', 'prefs.library_add'} <= names(), 'Files: autosave, library folders')
     cat(7)

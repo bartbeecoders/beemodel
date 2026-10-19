@@ -44,6 +44,7 @@
 .globl hv_den
 .globl hv_den_on
 .globl now_ms
+.globl hv_why
 .globl hv_seed
 .globl hv_lcdf
 .globl hv_ltri
@@ -3025,11 +3026,13 @@ hive_start:
     mov     dword ptr [rip+hv_ms], 0
     inc     dword ptr [rip+hv_seed]
     mov     dword ptr [rip+gt_batch], 1
+    mov     dword ptr [rip+hv_why], HW_INTERNAL
     cmp     dword ptr [rip+gt_cpu], 0   # (hive_prep: trace_ray, the CPU's)
     jne     11f
+    mov     dword ptr [rip+hv_why], HW_CATCH
     cmp     dword ptr [rip+hv_film], 0  # (a shadow catcher: the CPU's too)
     jne     11f
-    call    gpu_pt_begin                # its passes on the GPU (gpu.s)?
+    call    gpu_pt_begin                # its passes on the GPU (gpu.s)? (hv_why)
 11:
     mov     eax, 1
     jmp     9f
@@ -3047,9 +3050,10 @@ hive_pass:
     mov     edi, 1
     call    gpu_pt_pass
     test    eax, eax
-    jz      1f
+    jz      2f
     add     rsp, 8
     ret
+2:  mov     dword ptr [rip+hv_why], HW_FAILED
 1:  mov     dword ptr [rip+hv_next], 0
     lea     rdi, [rip+job_rows]
     xor     esi, esi
@@ -3740,6 +3744,7 @@ pt_nmaps:       .skip 4
 hv_debug:       .skip 4
 gt_batch:       .skip 4                 # gpu_tick's samples per batch
 gt_cpu:         .skip 4                 # hive_start without the GPU
+hv_why:         .skip 4                 # where the render is and why (HW_*)
 hv_den_on:      .skip 4                 # beauty shows hv_den (denoised)
 hv_env:         .skip 4                 # the world is an HDRI (no studio sky, sun)
 rv_stride:      .skip 4

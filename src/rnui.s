@@ -56,6 +56,10 @@ s_h_play:       .asciz "Play Mode"
 s_h_light:      .asciz "Light"
 s_h_camera:     .asciz "Camera"
 s_gpu:          .asciz "GPU: "
+s_dev:          .asciz "Device"
+s_last:         .asciz "Last render: "
+s_tag_gpu:      .asciz "  -  GPU"
+s_tag_cpu:      .asciz "  -  CPU"
 s_gpu0:         .asciz "starts with the first render"
 s_gpu_none:     .asciz "none found (the CPU renders)"
 s_gpu_off:      .asciz "off (the CPU renders)"
@@ -75,6 +79,10 @@ s_depth:        .asciz "Depth"
 s_walk:         .asciz "Walk"
 s_fly:          .asciz "Fly"
 k_beauty:       .asciz "beauty"
+k_dauto:        .asciz "auto"
+k_drtx:         .asciz "rtx"
+k_dgpu:         .asciz "gpu"
+k_dcpu:         .asciz "cpu"
 k_albedo:       .asciz "albedo"
 k_normal:       .asciz "normal"
 k_depth:        .asciz "depth"
@@ -91,13 +99,14 @@ s_sp:           .asciz " "
 .align 8
 gpu_types:      .quad s_gpu0, s_gpu_t1, s_gpu_t2, s_gpu_t3, s_gpu_t4
 l_pass:         .quad s_beauty, s_albedo, s_normal, s_depth
+dev_keys_ui:    .quad k_dauto, k_drtx, k_dgpu, k_dcpu
 kw_pass:        .quad k_beauty, k_albedo, k_normal, k_depth
 l_pmode:        .quad s_walk, s_fly
 kw_pmode:       .quad k_walk, k_fly
 
 .text
 WIDGET wd_ru_bounce, WK_INT, "render.bounces", "Bounces", 1.0, 64.0, 0.1, 0, WGF_CLAMP, tip="How many times light may bounce (more: brighter interiors, slower)"
-WIDGET wd_ru_gpu,  WK_TOGGLE, "render.gpu", "Use the GPU", cb=gpu_cb, tip="Path trace on the GPU helper when there is one"
+WIDGET wd_ru_dev,  WK_ENUM, "render.device_list", cb=dev_cb, aux=dev_names, n=4, tip="Where renders run. Auto: RTX ray tracing when the GPU has it, else the GPU, else the CPU"
 WIDGET wd_ru_file, WK_BUTTON, "render.to_file", "Render to File...", aux=op_render_image, tip="Render straight into a PNG (the size and samples above)"
 WIDGET wd_ru_vgbuild, WK_BUTTON, "vgeo.build", "Build", aux=op_vg_build, tip="Cluster LODs for the active mesh: millions of triangles stay fast"
 WIDGET wd_ru_vgclear, WK_BUTTON, "vgeo.clear", "Clear", aux=op_vg_clear
@@ -150,10 +159,11 @@ render_more:
     lea     rdi, [rip+wd_ru_bounce]     # bounces, the GPU, Render to File
     lea     r8, [rip+hv_bounces]
     call    pnl_full
-    mov     eax, [rip+gpu_off]
-    xor     eax, 1
+    lea     rdx, [rip+s_dev]            # Device: Auto / GPU (RTX) / GPU / CPU
+    call    pnl_hint
+    mov     eax, [rip+gpu_dev]
     mov     [rip+ru_gpu], eax
-    lea     rdi, [rip+wd_ru_gpu]
+    lea     rdi, [rip+wd_ru_dev]
     lea     r8, [rip+ru_gpu]
     call    pnl_full
     call    fmt_reset                   # "GPU: discrete"
@@ -178,7 +188,21 @@ render_more:
 2:  call    fmt_str
     lea     rdx, [rip+fmt_buf]
     call    pnl_hint
-    lea     rdi, [rip+wd_ru_file]
+    cmp     dword ptr [rip+hv_target], 0 # "Last render: on the CPU (why)"
+    je      4f
+    call    fmt_reset
+    lea     rdi, [rip+s_last]
+    call    fmt_str
+    mov     eax, [rip+hv_why]
+    cmp     eax, HW_LAST
+    jbe     3f
+    xor     eax, eax
+3:  lea     rcx, [rip+why_names]
+    mov     rdi, [rcx+rax*8]
+    call    fmt_str
+    lea     rdx, [rip+fmt_buf]
+    call    pnl_hint
+4:  lea     rdi, [rip+wd_ru_file]
     xor     r8d, r8d
     call    pnl_full
 
@@ -365,11 +389,15 @@ bake_line:
 9:  ret
 
 # ---- callbacks ----------------------------------------------------------------------
-gpu_cb:                                 # rdi = &ru_gpu
+dev_cb:                                 # rdi = &ru_gpu: render.device <it>
     mov     eax, [rdi]
-    xor     eax, 1
-    mov     [rip+gpu_off], eax
-    ret
+    cmp     eax, 3
+    jbe     1f
+    xor     eax, eax
+1:  lea     rcx, [rip+dev_keys_ui]
+    mov     rsi, [rcx+rax*8]
+    lea     rdi, [rip+op_render_device]
+    jmp     run_arg_r
 vg_err_cb:                              # vgeo.error <px>
     sub     rsp, 8
     call    fmt_reset
@@ -505,6 +533,11 @@ rn_header_tools:
     call    fmt_int
     lea     rdi, [rip+s_samples]
     call    fmt_str
+    lea     rdi, [rip+s_tag_gpu]        # "  -  GPU" / "  -  CPU"
+    cmp     dword ptr [rip+hv_gpu], 0
+    jne     2f
+    lea     rdi, [rip+s_tag_cpu]
+2:  call    fmt_str
     lea     esi, [r12+4]
     mov     edi, ebx
     lea     rdx, [rip+fmt_buf]

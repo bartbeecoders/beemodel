@@ -14,6 +14,7 @@
 
 # exports
 .globl hive_build
+.globl hv_query
 .globl hv_trace
 .globl hv_occluded
 .globl hv_n
@@ -52,6 +53,10 @@ hv_camuid:      .skip 4
 .align 8
 hv_ready:       .skip 4
 hv_n:           .skip 4             # triangles
+hv_build_ms:    .skip 8             # the last hive_build (ms: all of it, its BVH)
+hv_bvh_ms:      .skip 8
+hv_t0:          .skip 8
+hv_t1:          .skip 8
 hv_nmats:       .skip 4
 hv_npoints:     .skip 4
 .align 8
@@ -181,6 +186,24 @@ hv_free_all:
 # =============================================================================
 #  hive_build -> eax = 1 (the scene as of now)
 # =============================================================================
+# hv_query(edi=k) -> eax (gpu(k)): 15 the last scene build's milliseconds,
+#   16 its BVH's, 17 its triangles, 18 where the render is and why (HW_*)
+hv_query:
+    mov     eax, [rip+hv_build_ms]
+    cmp     edi, 15
+    je      9f
+    mov     eax, [rip+hv_bvh_ms]
+    cmp     edi, 16
+    je      9f
+    mov     eax, [rip+hv_n]
+    cmp     edi, 17
+    je      9f
+    mov     eax, [rip+hv_why]
+    cmp     edi, 18
+    je      9f
+    xor     eax, eax
+9:  ret
+
 hive_build:
     push    rbx
     push    r12
@@ -189,6 +212,8 @@ hive_build:
     push    r15
     push    rbp
     sub     rsp, 56
+    call    now_ms
+    mov     [rip+hv_t0], rax
     call    hv_free_all
     xor     r12d, r12d                  # triangles
     mov     dword ptr [rip+hv_ibud], HV_IBUDGET
@@ -389,9 +414,17 @@ hive_build:
 71: inc     ebx
     jmp     7b
 .Lhb_bvh:
+    call    now_ms
+    mov     [rip+hv_t1], rax
     call    build_bvh
     test    eax, eax
     jz      .Lhb_fail
+    call    now_ms
+    mov     rcx, rax
+    sub     rax, [rip+hv_t1]
+    mov     [rip+hv_bvh_ms], rax
+    sub     rcx, [rip+hv_t0]
+    mov     [rip+hv_build_ms], rcx
     call    hv_camera
     mov     dword ptr [rip+hv_ready], 1
     mov     eax, 1

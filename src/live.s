@@ -854,7 +854,8 @@ live_tick:
 #   image, 9 scene uploads, 10 the last Rendered frame: 1 the GPU's, 2
 #   another viewport's live view, 0 Material Preview; 11 the last raycast's
 #   milliseconds (with its readback), 12 the last scene build's; 13 1 when
-#   the image shown is denoised, 14 the last denoise's milliseconds
+#   the image shown is denoised, 14 the last denoise's milliseconds; 15..
+#   hv_query's
 lv_query:
     mov     eax, [rip+lv_nray]
     cmp     edi, 7
@@ -882,7 +883,7 @@ lv_query:
 1:  mov     eax, [rip+lv_dn_ms]
     cmp     edi, 14
     je      9f
-    xor     eax, eax
+    jmp     hv_query                    # (15..: Hive's, hive.s)
 9:  ret
 
 .section .note.GNU-stack,"",@progbits
