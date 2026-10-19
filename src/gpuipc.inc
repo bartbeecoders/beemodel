@@ -29,6 +29,7 @@
 .equ MSG_RUN,       3
 .equ MSG_QUIT,      4
 .equ MSG_REPLY,     5
+.equ MSG_WARM,      6                   # main -> helper: make every kernel now (a reply)
 
 .equ GPU_MAGIC,     0x55504742          # 'BGPU'
 .equ GH_OK,         0                   # MSG_HELLO status
