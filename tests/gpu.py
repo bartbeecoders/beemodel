@@ -283,6 +283,18 @@ def main():
           f'an HDRI world on the GPU (its texels, the importance-sampling CDF, MIS): the CPU\'s image (mean '
           f'difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical; why {r.get("why")})')
 
+    # ---- the Vertex Color node (H4): particles glowing in their own colours ---------
+    vc = ('m = material("Glow")\nmatset(m, "base", 0, 0, 0)\nc = node(m, "vcolor")\nsocket(m, "emission", c)\n'
+          'matset(m, "strength", 4)\nassign("Cube", "Glow")\n'
+          'emit("Cube", "from faces burst 3000 speed 2 size 0.06 gravity 0 color ff3020 color_end 20ff80 life 3")\n'
+          'frame(30)\n')
+    c, _ = render('vcol_cpu', vc, 32, BEEMODEL_GPU='off')
+    p, gp = render('vcol_gpu', vc, 32, BEEMODEL_GPU='any')
+    mad, same = compare(c, p)
+    check(gp[2] == 32 and mad < 0.25 and same > 0.97,
+          f'a graph with the Vertex Color node (particles\' colours as emission) on the GPU: the CPU\'s image '
+          f'(mean difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical)')
+
     c, _ = render('den_cpu', SCENE, 32, 1, BEEMODEL_GPU='off')
     p, gp = render('den_gpu', SCENE, 32, 1, BEEMODEL_GPU='any')
     mad, same = compare(c, p)
