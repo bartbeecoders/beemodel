@@ -6,6 +6,50 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-19
+
+Stage A of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): attractors
+and force fields, issues A1-A6 (#329-#334). [docs/FIELDS.md](docs/FIELDS.md).
+
+### Added
+- Force field objects (A1, #329): **Add › Force Field ›** Attractor (strength /
+  distance squared, softened near its centre, or strength / distance; a
+  negative strength pushes), Gravity Zone (a box or sphere whose down is its
+  -Y), Wind (along its +X, with gusts), Vortex (turning round its +Y, with
+  lift and inflow), Turbulence (curl noise) and Drag. Each has a falloff
+  (none, radius, smooth), a strength that keys (`field:Name:strength`), the
+  collision groups it acts on, and an on/off switch. They draw a gizmo of
+  their kind and their reach. A Force Field section in Properties ›
+  Physics, `field.add_<type>` and `field.set`, BeeScript `field()` and
+  `force(x, y, z)`. Fields undo, save (a FLDS chunk) and copy with a
+  duplicate.
+- Fields on everything (A2, #330): rigid bodies feel the sum at their
+  centre of mass each substep (velocity first, so a circular orbit keeps
+  its radius within 0.1% over ten turns); cloth and soft bodies per
+  particle, with wind fields as air for each triangle. World › Gravity
+  switches the world's gravity off for space scenes. Changing a field runs
+  the simulation again (the cache's key).
+- Bodies that attract each other (A3, #331): **Attracts the others** on a
+  rigid body (`rigid.add attracts`), G in World (`rigid.world g`). A
+  Barnes-Hut octree once a step, the pulls across the workers, given as a
+  leapfrog kick: two bodies orbit their common centre within 0.04%; 5445
+  attracting bodies run at about 500 steps a second (physbench `nbody`).
+  `rbinfo(22-24)`.
+- Walk on a planet (A4, #332): in play mode the player's up follows the
+  pull where it stands and the camera turns with it, so walking round a
+  sphere with an attractor brings you back to where you started. Logic
+  nodes **Set Strength** and **Field** (the pull at a point).
+  `playinfo(16-18)`: the player's up.
+- Seeing the fields (A5, #333): **View › Force Field Arrows** (the pull on a
+  grid round the fields) and **View › Force Field Lines** (streamlines from
+  the selected objects). Presets Planet (a sphere with its core, the
+  world's gravity off), Black Hole, Tornado and Breeze, also as
+  `field("tornado")`. `fieldinfo(k)`.
+
+### Fixed
+- A new armature's colour no longer comes from past the end of the
+  per-type colour table.
+
 ## [0.20.0] - 2026-10-19
 
 "UI round 2": the interface before the rest of the 2.0 plan
@@ -2012,7 +2056,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/bartbeecoders/beemodel/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/bartbeecoders/beemodel/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/bartbeecoders/beemodel/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/bartbeecoders/beemodel/compare/v0.17.0...v0.18.0

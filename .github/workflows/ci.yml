@@ -99,6 +99,8 @@ jobs:
         run: timeout 600 python tests/landscape.py build/beemodel
       - name: Shatter
         run: timeout 600 python tests/shatter.py build/beemodel
+      - name: Attractors and force fields
+        run: timeout 600 python tests/fields.py build/beemodel
 
       - name: Lighting tools (light probes, lightmaps, glTF through the Khronos validator)
         run: timeout 600 python tests/lighting.py build/beemodel build/shots
