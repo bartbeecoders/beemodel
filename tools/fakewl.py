@@ -6799,7 +6799,7 @@ def props_ui():
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
     val = lambda n: (widget(m, n) or {}).get('value')
     tabs = [w['label'] for w in ui_tree(m) if w['name'].startswith('props.tab.')]
-    check(tabs == ['Object', 'Modifiers', 'Material', 'Physics', 'CAD', 'Scene', 'Render', 'Viewport', 'Animation', 'Rig'],
+    check(tabs == ['Object', 'Modifiers', 'Material', 'Physics', 'CAD', 'Scene', 'Render', 'Viewport', 'Animation', 'Rig', 'Particles'],
           f'Properties has a tab per page ({len(tabs)})')
     def set_field(name, text):
         x, y = widget_xy(m, name); f.click(x, y)

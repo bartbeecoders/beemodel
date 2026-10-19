@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.21.0/beemodel-0.21.0-linux-x86_64.bin
-chmod +x beemodel-0.21.0-linux-x86_64.bin && ./beemodel-0.21.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.22.0/beemodel-0.22.0-linux-x86_64.bin
+chmod +x beemodel-0.22.0-linux-x86_64.bin && ./beemodel-0.22.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -578,7 +578,19 @@ mode the player's down follows the pull, so a sphere with an attractor is a plan
 round. View › Force Field Arrows and Lines draw the pull; presets Planet, Black Hole, Tornado,
 Breeze; `field()` and `force()` in BeeScript. [docs/FIELDS.md](docs/FIELDS.md).
 
-**Simulation cache.** Rigid bodies and cloth keep every frame they reach, so scrubbing back
+**Particles and liquid.** Add › Particles makes rain, snow, sparks, confetti, a fountain or a
+water tank; any object can emit from its faces, volume, vertices, origin or another system's
+events, at a rate (smooth between frames) or all at once. Particles feel gravity, drag and the
+force fields (a fountain's arc is the ballistic curve to 1e-3), collide with the ground,
+landscapes, rigid bodies and colliders (bounce, die, stick, split; hits feed splashes), and draw
+as points, sprites or instanced objects with colour and size over their life; renders show them
+as balls or their objects on the CPU and the GPU alike. 1M step in about 0.2 ms. Liquid on makes
+them water (position-based fluids: honey to water, a light box floats), meshed each frame into
+a closed surface its emitter shows and exports as OBJ frames; a 200k-particle dam break runs at
+about 350 ms a frame on 8 threads. The Particles tab, presets, the cache and bake, `emit()` and
+`particles()` in BeeScript. [docs/PARTICLES.md](docs/PARTICLES.md).
+
+**Simulation cache.** Rigid bodies, cloth and particles keep every frame they reach, so scrubbing back
 plays them instead of simulating again; an edit to the setup starts it over. `sim.bake` keeps
 the whole frame range (saved with the file) until `sim.free`, and the timeline shows what is
 cached.
@@ -991,6 +1003,10 @@ src/shatterop.s shatter: the operator, its patterns, pieces, bodies, glue, the f
 src/fields.s    force fields: the objects, their settings, the pull at a point, gizmos, overlay
 src/fieldui.s   the Force Field section of Properties › Physics
 src/nbody.s     bodies that attract each other: a Barnes-Hut octree of masses
+src/particles.s particle systems: settings, pooled particles, emitting, stepping, collisions, events,
+                drawing, renders, the liquid's surface, the cache, presets
+src/liquid.s    the liquid solver: position-based fluids, walls, bodies pushed both ways
+src/partui.s    the Particles tab of Properties
 src/physui.s    the Physics tab: rigid body, joints, shatter, world (sections of widgets)
 src/landui.s    the Landscape tab: size, the layer stack, paint layers, sea and files
 src/refimg.s    reference images: adding them, drawing them in screen space, their panel

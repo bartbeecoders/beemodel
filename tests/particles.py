@@ -292,7 +292,7 @@ for f in 3..23 {
   if particles(3) < best { best = particles(3) }
 }
 print("bench", particles(0), particles(2), t / 20, best)
-''', threads=8)
+''', threads=7)
     b, bu = vals(out, 'bench'), vals(out, 'burst')
     lim = 40 if CI else 10
     check(len(b) == 4 and b[0] == 1000000 and b[2] < lim,
@@ -584,7 +584,7 @@ for f in 3..9 {
   t = t + particles(23)
 }
 print("dam", particles(0), t / 6, particles(27))
-''', threads=8)
+''', threads=7)
     d = vals(out, 'dam')
     lim = 3000 if CI else 1000
     check(len(d) == 3 and d[0] == 200000 and d[1] < lim,
@@ -606,7 +606,7 @@ for f in 2..20 {
   if manifold("Cube") != 1 or analyze("Cube", "boundary") != 0 or efaces("Cube") != particles(33, 0) { bad = bad + 1 }
 }
 print("surf", bad, worst, particles(33, 0))
-''', threads=8)
+''', threads=7)
     sf = vals(out, 'surf')
     lim = 600 if CI else 200
     check(len(sf) == 3 and sf[0] == 0 and sf[2] > 100000 and sf[1] < lim,

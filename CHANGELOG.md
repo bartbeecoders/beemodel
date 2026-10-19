@@ -6,6 +6,54 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-19
+
+Stage P of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): particles
+and liquid, issues P1-P7 (#337-#343). [docs/PARTICLES.md](docs/PARTICLES.md).
+
+### Added
+- Particle systems (P1, #337): any object emits from its faces (by area),
+  its volume, its vertices or its origin, at a rate between two frames
+  (each particle moved on from its own moment of birth) or all at once,
+  with a lifetime, a speed along the normal or a direction, a cone of
+  spread, a size and a colour, each as random as asked (a hash of the
+  seed and the id). Gravity, the force fields and drag; one step a frame,
+  exact for a steady pull (a fountain follows the ballistic curve to
+  1e-3). Up to 4M particles in pooled blocks, stepped in parallel (1M in
+  about 0.2 ms), the same on any number of threads. `particles.add`,
+  `particles.set`, `particles.remove`; BeeScript `emit()` and
+  `particles(k, i)`. Systems undo, save (a PSYS chunk) and copy with a
+  duplicate.
+- Drawing and rendering them (P2, #338): points, sprites (round, their
+  size) or instances of up to 8 objects (at random or along their way),
+  with the colour and the size changing over their life; 1M points draw
+  in about 1 ms, the same picture on any number of threads. Renders show
+  them as tinted balls or their objects; the GPU helper renders them the
+  same (100k instanced leaves, tests/gpu.py).
+- Collisions and events (P3, #339): particles hit the Ground, landscapes,
+  rigid bodies and cloth colliders (a segment cast a step: none passes
+  through) and bounce, die, stick or split. Births, hits and deaths are
+  events a second system is born of: rain that splashes, sparks that
+  throw sparks.
+- Liquid (P4, #340): position-based fluids (src/liquid.s) with water, oil
+  and honey viscosities, vorticity confinement and surface tension; a
+  domain box and the Ground as walls, the scene's colliders, and moving
+  rigid bodies pushed both ways (a light box floats, a heavy one sinks).
+  A dam break of 200k particles runs at about 350 ms a frame on 8
+  threads; at rest the level is flat within one particle radius. `from
+  fill` puts particles on a lattice inside the emitter.
+- The liquid's surface (P5, #341): meshed each frame (a smoothed density
+  field, marching tetrahedra) into a closed, manifold surface that its
+  emitter shows and renders, with the water material; spray where it
+  breaks feeds foam; `file.export_liquid` writes an OBJ a frame. The dam
+  break meshes in about 140 ms on 8 threads.
+- The Particles tab and presets (P6, #342): **Add › Particles ›** Rain,
+  Snow, Sparks, Confetti, Fountain, Water Tank; Properties › Particles
+  (systems, Emission, Motion, Look, Collisions, Liquid, Cache with Bake and
+  Free). The simulation cache keeps particles (channel 2) and liquids
+  (channel 3), plays them back when scrubbing, bakes them
+  (`sim.bake particles liquid`) and saves them with the file.
+
 ### Fixed
 - Material Preview is no longer much slower than Solid on big meshes: each
   mesh's smooth corner normals are kept between frames (made again only
@@ -2067,7 +2115,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/bartbeecoders/beemodel/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/bartbeecoders/beemodel/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/bartbeecoders/beemodel/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/bartbeecoders/beemodel/compare/v0.18.0...v0.19.0

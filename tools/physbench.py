@@ -15,8 +15,12 @@ thread counts.
            and the cut alone (ms); the hash is the pieces made
   nbody    5445 bodies that attract each other (instances, no gravity): a
            step (ms), and the octree and pulls alone
+  particles 1M particles in the air (gravity, drag): a step (ms, the mean of 20)
+  liquid   a dam break of 200k liquid particles: a frame (ms, the mean of 6),
+           and its surface meshed (ms, the last frame)
 
-BENCH_ONLY=nbody,shatter runs just those scenes.
+BENCH_ONLY=nbody,shatter runs just those scenes. The particle scenes' hash
+is a sum over some of their particles' places.
 
 Threads are counted as BeeModel counts them: the workers and the UI thread
 (1 = no workers). Each scene also prints the hash of every body's state at
@@ -48,6 +52,14 @@ VASE = os.path.join(tempfile.mkdtemp(prefix='bee-bench-'), 'vase.obj')
 SH.vase_obj(VASE, n=384, split=10)                      # 99 072 triangles
 SHATTER = ('delete("Cube")\nop("file.import_obj", "%s")\nop("object.shatter", "count 500 seed 7 nobodies")\n'
            'print("shatter", shinfo(6), shinfo(12))\nprint("hash", shinfo(0))\n' % VASE)
+PHASH = ('s = 0\nfor i in 0..1000 {\n k = i * 97\n s = s + particles(6, k) * 1.3 + particles(7, k) - particles(8, k) * 0.7\n}\n'
+         'print("hash", s)\n')
+PARTICLES = ('delete("Light")\nemit("Cube", "from volume burst 1000000 speed 3 spread 30 life 100 drag 0.1")\n'
+             'frame(2)\nt = 0\nfor f in 3..23 {\n frame(f)\n t = t + particles(3)\n}\nprint("parts", t / 20)\n' + PHASH)
+LIQUID = ('delete("Light")\nscale("Cube", 0.5, 0.8, 0.5)\nmove("Cube", -1.5, 0.8, 0)\n'
+          'emit("Cube", "from fill size 0.02 life 1000 liquid on domain -2 0 -0.5 2 2 0.5 speed 0 surface on")\n'
+          'frame(2)\nt = 0\nfor f in 3..9 {\n frame(f)\n t = t + particles(23)\n}\n'
+          'print("liquid", t / 6, particles(32, 0))\n' + PHASH)
 SCENES = (
     ('heap', S.HEAP.replace('frame(121)', 't0 = clock()\nframe(121)\nprint("ms", clock() - t0)') + HASH,
      lambda r: f'{float(r["ms"][0]) / 1000:6.2f} s'),
@@ -57,12 +69,14 @@ SCENES = (
     ('mountain', MOUNTAIN + HASH, lambda r: f'{float(r["mountain"][0]):5.1f} ms ({float(r["gen"][0]):.0f})'),
     ('shatter', SHATTER, lambda r: f'{float(r["shatter"][0]):5.0f} / {float(r["shatter"][1]):.0f} ms'),
     ('nbody', FI.CLOUD + HASH, lambda r: f'{float(r["cloud"][1]) / 120:5.2f} / {float(r["cloud"][2]):.2f} ms'),
+    ('particles', PARTICLES, lambda r: f'{float(r["parts"][0]):6.2f} ms'),
+    ('liquid', LIQUID, lambda r: f'{float(r["liquid"][0]):5.0f} / {float(r["liquid"][1]):.0f} ms'),
 )
 ONLY = [s for s in os.environ.get('BENCH_ONLY', '').split(',') if s]
 
 
 def main():
-    print(f'{"scene":8}' + ''.join(f'{str(t) + " thread" + ("s" if t > 1 else ""):>18}' for t in THREADS) + '   hash')
+    print(f'{"scene":9}' + ''.join(f'{str(t) + " thread" + ("s" if t > 1 else ""):>18}' for t in THREADS) + '   hash')
     for name, code, show in SCENES:
         if ONLY and name not in ONLY:
             continue
@@ -75,7 +89,7 @@ def main():
                 cells.append('failed')
             hashes.add(r.get('hash', ['?'])[0])
         same = hashes.pop() if len(hashes) == 1 else 'differs'
-        print(f'{name:8}' + ''.join(f'{c:>18}' for c in cells) + f'   {same}', flush=True)
+        print(f'{name:9}' + ''.join(f'{c:>18}' for c in cells) + f'   {same}', flush=True)
 
 
 if __name__ == '__main__':
