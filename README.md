@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.19.0/beemodel-0.19.0-linux-x86_64.bin
-chmod +x beemodel-0.19.0-linux-x86_64.bin && ./beemodel-0.19.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.20.0/beemodel-0.20.0-linux-x86_64.bin
+chmod +x beemodel-0.20.0-linux-x86_64.bin && ./beemodel-0.20.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -33,7 +33,7 @@ chmod +x beemodel-0.19.0-linux-x86_64.bin && ./beemodel-0.19.0-linux-x86_64.bin
 | Menu bar | File, Edit, View, Select, Add, Object, Mesh, Render, AI, Help, with submenus, then the workspace tabs (Modeling, Sculpt, CAD, Shading, Animation, World, your own). F10 / Alt+letter open them from the keyboard. |
 | Areas | Any area can be any editor: 3D Viewport, Tools, Outliner, Properties, Console, Timeline, Dope Sheet, Graph, Node, UV, Render, Asset Browser, AI Activity, Versions, Preferences, Help. Split, join (drag a corner), swap (drag a header), maximize. |
 | 3D Viewport | Software renderer with a header (mode, select mode, shading, grid, snap), a navigation gizmo, quick actions in an empty scene, right-click menus, a Z pie. |
-| Properties | Object, Modifiers, Material, Physics, CAD, Scene, Render, Viewport, Animation and Rig tabs: every feature as fields, buttons and pickers. |
+| Properties | Object, Modifiers, Material, Physics, CAD, Scene, Render, Viewport, Animation and Rig tabs (and Landscape for a landscape): every feature as fields, buttons and pickers, in sections that fold. |
 | Status bar | What the mouse and keys do now; scene size, AI permission, render progress, peers; toasts for messages. |
 
 Every command is in a menu, a panel or a dialog with a form; tooltips say what
@@ -526,9 +526,11 @@ object's geometry nodes can be a body: 10 800 balls poured into a box, 5000 bric
 pyramids stand, fast bodies stop at thin walls, collision groups and materials (rubber, ice,
 wood, metal, stone) set what meets what and how. Joints (fixed, hinge, point, slider) tie them
 together or to the world, with limits, motors and a strength past which they break. The result
-is the same bit for bit on any number of threads. The Properties area's **Physics** section
-sets all of it up without typing: **+ Rigid Body**, Active / Passive, the shape, material,
-mass, friction, bounce, damping, gravity, substeps. How the solver works:
+is the same bit for bit on any number of threads. The Properties area's **Physics** tab
+sets all of it up without typing, in sections that fold: the body (type, shape, material
+preset, mass, friction, bounce, damping, start velocity, group; a change goes to every
+selected body), its joints (each one's type, pivot, axis, limits, motor and breaking force),
+shatter, the world's gravity and steps, cloth and the simulation cache. How the solver works:
 [docs/PHYSICS.md](docs/PHYSICS.md); `tools/physbench.py` times it.
 
 **Ground and landscapes.** Add › Ground is an endless floor: a fading grid in the viewport, a
@@ -543,7 +545,18 @@ slope that shows in the viewport and in renders. As a rigid body it is an exact 
 collider (its triangles made on the fly under whatever moves: 1000 balls roll down a 4097 x 4097
 mountain), each paint layer with its own friction; the island's sea floats what is lighter than
 water. Heightmaps come in and go out as 16-bit PNG or EXR, and a landscape splits into tiles
-that world partition streams. [docs/LANDSCAPE.md](docs/LANDSCAPE.md).
+that world partition streams. The **Landscape** tab in Properties edits it all: the layer
+stack (values, order, eyes), paint layers with their colours and rules, the sea, the files.
+[docs/LANDSCAPE.md](docs/LANDSCAPE.md).
+
+**Workflow.** Nine UI themes (Dark, Light, High contrast, Honey, Graphite, Nord, Solarized
+Dark and Light, Dracula) and an accent colour of your own; every colour is a swatch that opens
+a picker (square, hue, R G B and H S V numbers, hex, eyedropper, recent and scene colours).
+The file dialog has favourites, the mounted drives with their free space, recent folders,
+back / forward, the folder's parts as buttons, sortable size and date columns, a filter, hidden
+files and image previews. The outliner has folders (Ctrl+G) with their own eye, camera and lock.
+Reference images (Add › Reference Image..., or drop a picture on the window) sit behind or in
+front of the scene to model over, in every shading mode.
 
 **Shatter.** Object › Physics › Shatter... breaks a mesh into shards (Voronoi cells, evenly or
 around a point), bricks (a running bond, with a mortar gap) or balls (packed inside it); its
@@ -850,6 +863,7 @@ src/scene.s     objects, selection, transforms, object operators
 src/undo.s      undo / redo snapshots
 src/redo.s      adjust-last-operation panel
 src/parent.s    parenting: children follow their parent, the outliner's tree
+src/folder.s    the outliner's folders: the block, FOLD chunks, their operators
 src/orient.s    pivot point and transform orientation, 3x3 rotation helpers
 src/viewanim.s  view transitions, Frame Selected, Reduce motion
 src/transform.s G / R / S modal transforms, constraints, numeric input
@@ -964,7 +978,9 @@ src/lsculpt.s   sculpting and painting landscapes: brushes, paint layers, Auto P
 src/landio.s    landscapes in and out: PNG / EXR heightmaps, to a mesh, tiles
 src/shatter.s   shatter: closed meshes cut into convex cells (clipping, caps, a tree of cells)
 src/shatterop.s shatter: the operator, its patterns, pieces, bodies, glue, the form's preview
-src/physui.s    the Physics section of the Properties area
+src/physui.s    the Physics tab: rigid body, joints, shatter, world (sections of widgets)
+src/landui.s    the Landscape tab: size, the layer stack, paint layers, sea and files
+src/refimg.s    reference images: adding them, drawing them in screen space, their panel
 src/simcache.s  the simulation cache: frames kept, played back, baked, saved
 src/vgeo.s      virtualized geometry: the cluster LOD DAG (meshlets, groups, simplification)
 src/vgdraw.s    virtualized geometry: per-frame cuts, frustum and occlusion culling, streaming
