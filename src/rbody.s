@@ -54,6 +54,8 @@
 .globl rb_frame
 .globl rb_gravity
 .globl rb_bd
+.globl rb_on
+.globl rb_pt
 .globl rb_nb
 .globl rb_info
 .globl rb_reset

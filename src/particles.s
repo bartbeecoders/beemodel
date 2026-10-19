@@ -51,6 +51,10 @@
 .globl pt_iblock
 .globl pt_sphere
 .globl pt_stamp
+.globl pc_cast
+.globl pc_any
+.globl pc_gnd
+.globl pc_gy
 
 .equ PB_REFS,   0                       # the settings block
 .equ PB_N,      4
@@ -129,7 +133,7 @@
 .equ SR_EVD,    296
 .equ SR_EVS,    304                     # the system whose events it is born of
 .equ SR_EVA,    312                     #  the events used now
-.equ SR_SZ,     384
+.equ SR_SZ,     448
 .equ EV_SZ,     48                      # an event: place (w: kind), velocity,
                                         #  the surface's normal
 .equ EV_CAP,    2*BLK*NBLK              # (a system's events a step, at most)
@@ -236,7 +240,14 @@ ps_defs:        .long 0, 0, 0, 0                # uid flags from mode
                 .float 0.3, 0.1                 # bounce, friction
                 .long 0, 2, 1, 3                # bounces, splits in 2; events: hits, 3 each
                 .float 0.0                      # inherit
-                .skip PS_SZ-224
+                .skip 16                        # the events' system
+                .long 0                         # not a liquid
+                .float 0.02, 0.0, 0.0           # viscosity, vorticity, tension
+                .long 8, 2                      # substeps, iterations
+                .float 0, 0, 0, 0, 0, 0         # the domain
+                .long 0                         #  (off)
+                .float 1000.0                   # density
+                .skip PS_SZ-296
 
 k_from:         .asciz "from"
 k_faces:        .asciz "faces"
@@ -292,6 +303,18 @@ k_hit:          .asciz "hit"
 k_died:         .asciz "died"
 k_per:          .asciz "per"
 k_inherit:      .asciz "inherit"
+k_fill:         .asciz "fill"
+k_liquid:       .asciz "liquid"
+k_viscosity:    .asciz "viscosity"
+k_water:        .asciz "water"
+k_oil:          .asciz "oil"
+k_honey:        .asciz "honey"
+k_vorticity:    .asciz "vorticity"
+k_tension:      .asciz "tension"
+k_substeps:     .asciz "substeps"
+k_iterations:   .asciz "iterations"
+k_domain:       .asciz "domain"
+k_density:      .asciz "density"
 s_bad:          .asciz "  particles: not understood: "
 s_noobj:        .asciz "  particles: select the object to emit from first"
 s_nosys:        .asciz "  particles: no such system on "
@@ -299,7 +322,9 @@ s_full:         .asciz "  particles: a scene has at most 64 systems"
 s_added:        .asciz "  particles on "
 s_removed:      .asciz "  particles removed from "
 .align 8
-kw_from:        .quad k_faces, k_volume, k_verts, k_point, k_events, 0
+kw_from:        .quad k_faces, k_volume, k_verts, k_point, k_events, k_fill, 0
+kw_visc:        .quad k_water, k_oil, k_honey, 0
+pq_viscs:       .float 0.02, 0.2, 0.6
 kw_onhit:       .quad k_bounce, k_die, k_stick, k_split, 0
 kw_ev:          .quad k_born, k_hit, k_died, 0
 kw_draw:        .quad k_points, k_sprites, k_objects, 0
@@ -423,6 +448,30 @@ pp_tab:         .quad k_from
                 .quad 0
                 .quad k_inherit
                 .long PS_INHERIT, 0
+                .quad 0
+                .quad k_liquid
+                .long PS_LIQ, 16
+                .quad kw_onoff
+                .quad k_viscosity
+                .long PS_VISC, 19
+                .quad kw_visc
+                .quad k_vorticity
+                .long PS_VORT, 0
+                .quad 0
+                .quad k_tension
+                .long PS_TENS, 0
+                .quad 0
+                .quad k_substeps
+                .long PS_LSUB, 1
+                .quad 0
+                .quad k_iterations
+                .long PS_LITER, 1
+                .quad 0
+                .quad k_domain
+                .long PS_DOMAIN, 20
+                .quad 0
+                .quad k_density
+                .long PS_DENS, 0
                 .quad 0
                 .quad k_on
                 .long 0, 5
@@ -762,6 +811,66 @@ pp_word:
     pop     rbx
     ret
 
+# world_box(rdi=object, rsi=out: min, max (6 floats)) -> eax = 1: its mesh's
+#   bounds' corners in the world, their box
+world_box:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    and     rsp, -16
+    sub     rsp, 96
+    mov     rbx, rdi
+    mov     r12, rsi
+    call    obj_eval
+    test    rax, rax
+    jz      8f
+    mov     r13, rax
+    mov     rdi, rbx
+    lea     rsi, [rsp]
+    call    obj_matrix
+    movaps  xmm6, [rip+pq_bigw]
+    movaps  xmm7, xmm6
+    xorps   xmm7, [rip+pq_sgn]
+    xor     r14d, r14d                  # the eight corners
+1:  cmp     r14d, 8
+    jae     2f
+    xor     ecx, ecx
+11: lea     rax, [r13+ME_BMIN]
+    bt      r14d, ecx
+    jnc     12f
+    lea     rax, [r13+ME_BMAX]
+12: mov     eax, [rax+rcx*4]
+    mov     [rsp+48+rcx*4], eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      11b
+    movups  xmm0, [rsp+48]
+    lea     rdi, [rsp]
+    call    m_pt
+    minps   xmm6, xmm0
+    maxps   xmm7, xmm0
+    inc     r14d
+    jmp     1b
+2:  movlps  [r12], xmm6
+    movhlps xmm0, xmm6
+    movss   [r12+8], xmm0
+    movlps  [r12+12], xmm7
+    movhlps xmm0, xmm7
+    movss   [r12+20], xmm0
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  lea     rsp, [rbp-32]
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
 # pp_hex(rdi=text) -> eax = its value (RRGGBB, # or 0x before it), edx = 1
 #   when it was one
 pp_hex:
@@ -863,6 +972,10 @@ ps_parse:
     je      .Lpp_events
     cmp     ecx, 18
     je      .Lpp_split
+    cmp     ecx, 19
+    je      .Lpp_visc
+    cmp     ecx, 20
+    je      .Lpp_domain
     lea     rsi, [rip+im_word]          # a number
     lea     rdx, [rsi+rax]
     call    parse_float
@@ -920,13 +1033,84 @@ ps_parse:
     jnz     .Lpp_next
     or      dword ptr [rbx+PS_RFLAGS], 1
     jmp     .Lpp_next
-.Lpp_coll:                              # collide on / off
+.Lpp_coll:                              # collide / liquid on / off: bit 0
     mov     rdi, [r14+16]
     call    pp_word
     test    eax, eax
     js      .Lpp_bad
-    and     dword ptr [rbx+PS_COLL], ~1
-    or      [rbx+PS_COLL], eax
+    mov     ecx, [r14+8]
+    and     dword ptr [rbx+rcx], ~1
+    or      [rbx+rcx], eax
+    jmp     .Lpp_next
+.Lpp_visc:                              # viscosity water|oil|honey|k
+    push    rax
+    push    rax
+    mov     rdi, [r14+16]
+    call    pp_word
+    mov     ecx, eax
+    pop     rax
+    pop     rax
+    test    ecx, ecx
+    js      1f
+    lea     rax, [rip+pq_viscs]
+    mov     eax, [rax+rcx*4]
+    mov     [rbx+PS_VISC], eax
+    jmp     .Lpp_next
+1:  lea     rsi, [rip+im_word]
+    lea     rdx, [rsi+rax]
+    call    parse_float
+    test    eax, eax
+    jz      .Lpp_bad
+    movss   [rbx+PS_VISC], xmm0
+    jmp     .Lpp_next
+.Lpp_domain:                            # domain off | x0 y0 z0 x1 y1 z1 | Name
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_off]
+    push    rax
+    push    rax
+    call    str_eq
+    mov     ecx, eax
+    pop     rax
+    pop     rax
+    test    ecx, ecx
+    jz      1f
+    and     dword ptr [rbx+PS_DOMON], ~1
+    jmp     .Lpp_next
+1:  lea     rsi, [rip+im_word]          # a number: six of them
+    lea     rdx, [rsi+rax]
+    call    parse_float
+    test    eax, eax
+    jz      3f
+    movss   [rbx+PS_DOMAIN], xmm0
+    mov     r15d, 1
+2:  mov     rsi, r12
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lpp_bad
+    lea     rsi, [rip+im_word]
+    lea     rdx, [rsi+rax]
+    call    parse_float
+    test    eax, eax
+    jz      .Lpp_bad
+    movss   [rbx+PS_DOMAIN+r15*4], xmm0
+    inc     r15d
+    cmp     r15d, 6
+    jb      2b
+    or      dword ptr [rbx+PS_DOMON], 1
+    jmp     .Lpp_next
+3:  lea     rdi, [rip+im_word]          # an object: its bounds in the world
+    call    obj_find
+    test    eax, eax
+    jz      .Lpp_bad
+    mov     edi, eax
+    call    obj_get
+    mov     rdi, rax
+    lea     rsi, [rbx+PS_DOMAIN]
+    call    world_box
+    test    eax, eax
+    jz      .Lpp_bad
+    or      dword ptr [rbx+PS_DOMON], 1
     jmp     .Lpp_next
 .Lpp_split:                             # split n: on a hit, into n
     lea     rsi, [rip+im_word]
@@ -1190,7 +1374,13 @@ pt_stop:
     mov     rsi, EV_CAP*EV_SZ
     mov     eax, SYS_MUNMAP
     syscall
-13: inc     ebx
+13: mov     rdi, [r12+SR_FILLP]         # its lattice
+    test    rdi, rdi
+    jz      14f
+    mov     esi, [r12+SR_FILLB]
+    mov     eax, SYS_MUNMAP
+    syscall
+14: inc     ebx
     jmp     1b
 2:  lea     rdi, [rip+pt_sr]
     mov     ecx, SR_SZ*PB_MAX
@@ -1235,6 +1425,7 @@ pt_build:
     push    r14
     push    r15
     call    pt_stop
+    call    lq_reset
     call    pool_init
     test    eax, eax
     jz      9f
@@ -1491,7 +1682,12 @@ pt_step:
     call    sys_prep
     mov     [r12+SR_L0], r13d
     mov     eax, [r12+SR_NB]
-    mov     [r12+SR_LN], eax
+    cmp     dword ptr [r12+SR_LIQON], 0 # (a liquid: liquid.s moves it)
+    je      20f
+    xor     eax, eax
+20: mov     [r12+SR_LN], eax
+    test    eax, eax
+    jz      22f
     mov     edi, ebx
     call    sys_blocks
     xor     ecx, ecx
@@ -1514,7 +1710,18 @@ pt_step:
     mov     edx, r13d
     mov     ecx, 1
     call    parallel_for
-    xor     ebx, ebx                    # empty blocks back; then the newborn
+    xor     ebx, ebx                    # liquids
+41: cmp     ebx, [rip+pt_ns]
+    jae     42f
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    cmp     dword ptr [r12+SR_LIQON], 0
+    je      43f
+    call    sys_liquid
+43: inc     ebx
+    jmp     41b
+42: xor     ebx, ebx                    # empty blocks back; then the newborn
 4:  cmp     ebx, [rip+pt_ns]
     jae     5f
     imul    r12, rbx, SR_SZ
@@ -1623,6 +1830,9 @@ sys_prep:
     mov     [r12+SR_FRIC], eax
     mov     eax, [r14+PS_ONHIT]
     mov     [r12+SR_ONHIT], eax
+    mov     eax, [r14+PS_LIQ]
+    and     eax, 1
+    mov     [r12+SR_LIQON], eax
     movaps  xmm0, [r12+SR_ACC]
     DOT3    xmm0, xmm0
     mulss   xmm0, [rip+pt_dt]
@@ -1643,7 +1853,9 @@ sys_prep:
     call    obj_matrix
     mov     eax, [r13+PS_FROM]
     cmp     eax, 3
-    jae     2f
+    je      2f
+    cmp     eax, 4
+    je      2f
     mov     rdi, rbx
     call    obj_eval
     test    rax, rax
@@ -1678,6 +1890,113 @@ sys_prep:
     movsd   xmm0, [rip+pt_t1]
     movsd   [r12+SR_T1], xmm0
 9:  pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# sys_liquid(r12=system) - its particles to liquid.s, moved, back (older)
+sys_liquid:
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    mov     edi, [r12+SR_N]
+    test    edi, edi
+    jz      9f
+    call    lq_room
+    test    eax, eax
+    jz      9f
+    xor     esi, esi                    # gather
+    call    lq_copy
+    mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    test    rax, rax
+    jz      9f
+    mov     rsi, rax
+    mov     edi, [r12+SR_N]
+    movss   xmm0, [rip+pt_dt]
+    lea     rdx, [r12+SR_ACC]
+    lea     rcx, [r12+SR_GADJ]
+    mov     r8d, [r12+SR_GBIT]
+    call    lq_solve
+    mov     esi, 1                      # back
+    call    lq_copy
+9:  add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# lq_copy(r12=system, esi=0 into lq_x / lq_v, 1 back (and a step older))
+lq_copy:
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    mov     ebp, esi
+    mov     edi, [r12+SR_SI]
+    call    sys_blocks
+    mov     r13, rax
+    xor     r14d, r14d                  # block
+    xor     r15d, r15d                  # particle
+1:  cmp     r14d, [r12+SR_NB]
+    jae     9f
+    mov     edi, [r13+r14*4]
+    inc     r14d
+    lea     rax, [rip+pt_bn]
+    mov     ecx, [rax+rdi*4]
+    call    blk_at
+    mov     rbx, rax
+    xor     edx, edx
+2:  cmp     edx, ecx
+    jae     1b
+    mov     rax, r15
+    shl     rax, 4
+    mov     r8, rax
+    add     rax, [rip+lq_x]
+    add     r8, [rip+lq_v]
+    test    ebp, ebp
+    jnz     3f
+    movss   xmm0, [rbx+A_X+rdx*4]
+    movss   xmm1, [rbx+A_Y+rdx*4]
+    movss   xmm2, [rbx+A_Z+rdx*4]
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    andps   xmm0, [rip+pq_xyz]
+    movaps  [rax], xmm0
+    movss   xmm0, [rbx+A_VX+rdx*4]
+    movss   xmm1, [rbx+A_VY+rdx*4]
+    movss   xmm2, [rbx+A_VZ+rdx*4]
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    andps   xmm0, [rip+pq_xyz]
+    movaps  [r8], xmm0
+    jmp     4f
+3:  movss   xmm0, [rax]
+    movss   [rbx+A_X+rdx*4], xmm0
+    movss   xmm0, [rax+4]
+    movss   [rbx+A_Y+rdx*4], xmm0
+    movss   xmm0, [rax+8]
+    movss   [rbx+A_Z+rdx*4], xmm0
+    movss   xmm0, [r8]
+    movss   [rbx+A_VX+rdx*4], xmm0
+    movss   xmm0, [r8+4]
+    movss   [rbx+A_VY+rdx*4], xmm0
+    movss   xmm0, [r8+8]
+    movss   [rbx+A_VZ+rdx*4], xmm0
+    movss   xmm0, [rbx+A_AGE+rdx*4]
+    addss   xmm0, [rip+pt_dt]
+    movss   [rbx+A_AGE+rdx*4], xmm0
+4:  inc     r15d
+    inc     edx
+    jmp     2b
+9:  pop     rbp
+    pop     r15
+    pop     r14
     pop     r13
     pop     rbx
     ret
@@ -1741,6 +2060,8 @@ sys_emit:
     jnz     .Lse_events
     cmp     dword ptr [r13+PS_FROM], 4  # (born of events only)
     je      .Lse_out
+    cmp     dword ptr [r13+PS_FROM], 5  # (a fill: all at once)
+    je      .Lse_burst
     cmp     dword ptr [r13+PS_MODE], 0
     jne     .Lse_burst
     movsd   xmm2, [r12+SR_RATE]         # at a rate: ids born before the end
@@ -1792,7 +2113,11 @@ sys_emit:
     comisd  xmm0, [r12+SR_T1]
     jae     .Lse_out
     mov     ebx, [r13+PS_NUM]
-    test    ebx, ebx
+    cmp     dword ptr [r12+SR_SRC], 5   # a fill: the lattice's points inside
+    jne     1f
+    call    fill_build
+    mov     ebx, eax
+1:  test    ebx, ebx
     jz      .Lse_out
     mov     [r12+SR_NEXT], ebx
     xor     r14d, r14d
@@ -2202,6 +2527,137 @@ inside:
     pop     rbx
     ret
 
+# fill_build(r12=system) -> eax = the points of a lattice (its spacing:
+#   the size, in the world) inside its object's mesh, listed at SR_FILLP
+fill_build:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 64
+    mov     r13, [r12+SR_MESH]
+    mov     edi, [r12+SR_UID]
+    call    obj_by_uid
+    test    rax, rax
+    jz      .Lfb_none
+    movss   xmm0, [rax+OB_SCALE]        # the spacing in its object's space
+    movss   xmm1, [rax+OB_SCALE+4]
+    movss   xmm2, [rax+OB_SCALE+8]
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    andps   xmm0, [rip+pq_abs]
+    maxps   xmm0, [rip+pq_tiny4]
+    mov     rax, [r12+SR_REC]
+    movss   xmm1, [rax+PS_SIZE]
+    maxss   xmm1, [rip+pq_k]
+    shufps  xmm1, xmm1, 0
+    divps   xmm1, xmm0
+    andps   xmm1, [rip+pq_xyz]
+    movaps  [r12+SR_FD], xmm1
+    lea     rax, [r13+ME_BMIN]          # points a side, centred in the box
+    LD3     xmm2, rax, xmm5
+    lea     rax, [r13+ME_BMAX]
+    LD3     xmm3, rax, xmm5
+    subps   xmm3, xmm2
+    movaps  xmm4, xmm3
+    divps   xmm4, xmm1
+    roundps xmm4, xmm4, 1
+    cvtps2dq xmm5, xmm4
+    movdqa  [rsp], xmm5
+    mulps   xmm4, xmm1
+    subps   xmm3, xmm4                  # the room left over: half each side,
+    mulps   xmm3, [rip+pq_half4]        #  then half a spacing
+    addps   xmm2, xmm3
+    movaps  xmm0, xmm1
+    mulps   xmm0, [rip+pq_half4]
+    addps   xmm2, xmm0
+    andps   xmm2, [rip+pq_xyz]
+    movaps  [r12+SR_FO], xmm2
+    mov     eax, [rsp]
+    mov     ecx, [rsp+4]
+    mov     edx, [rsp+8]
+    test    eax, eax
+    jle     .Lfb_none
+    test    ecx, ecx
+    jle     .Lfb_none
+    test    edx, edx
+    jle     .Lfb_none
+    mov     [r12+SR_FNX], eax
+    mov     [r12+SR_FNY], ecx
+    imul    rax, rcx
+    imul    rax, rdx
+    cmp     rax, 4194304
+    ja      .Lfb_none
+    mov     [rsp+16], eax               # points in the box
+    lea     rsi, [rax*4+4095]           # room for their indices
+    and     rsi, -4096
+    cmp     esi, [r12+SR_FILLB]
+    jbe     1f
+    push    rsi
+    push    rsi
+    mov     rdi, [r12+SR_FILLP]
+    test    rdi, rdi
+    jz      11f
+    mov     esi, [r12+SR_FILLB]
+    mov     eax, SYS_MUNMAP
+    syscall
+11: pop     rsi
+    pop     rsi
+    mov     dword ptr [r12+SR_FILLB], 0
+    mov     qword ptr [r12+SR_FILLP], 0
+    mov     [rsp+20], esi
+    xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_NORES
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jae     .Lfb_none
+    mov     [r12+SR_FILLP], rax
+    mov     eax, [rsp+20]
+    mov     [r12+SR_FILLB], eax
+1:  xor     ebx, ebx                    # each point: inside?
+    xor     r14d, r14d
+    mov     r15, [r12+SR_FILLP]
+2:  cmp     ebx, [rsp+16]
+    jae     3f
+    mov     eax, ebx
+    xor     edx, edx
+    div     dword ptr [r12+SR_FNX]
+    mov     [rsp+32], edx
+    xor     edx, edx
+    div     dword ptr [r12+SR_FNY]
+    mov     [rsp+36], edx
+    mov     [rsp+40], eax
+    mov     dword ptr [rsp+44], 0
+    movdqa  xmm0, [rsp+32]
+    cvtdq2ps xmm0, xmm0
+    mulps   xmm0, [r12+SR_FD]
+    addps   xmm0, [r12+SR_FO]
+    call    inside
+    test    eax, eax
+    jz      21f
+    mov     [r15+r14*4], ebx
+    inc     r14d
+21: inc     ebx
+    jmp     2b
+3:  mov     eax, r14d
+    jmp     9f
+.Lfb_none:
+    xor     eax, eax
+9:  lea     rsp, [rbp-32]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbx
+    pop     rbp
+    ret
+
 # place(edi=id, r12=system, rsi=out: the point, the normal (vec4 each)) -
 #   where a new particle starts, from its source
 place:
@@ -2224,6 +2680,8 @@ place:
     je      .Lpl_vert
     cmp     eax, 3
     je      .Lpl_point
+    cmp     eax, 5
+    je      .Lpl_fill
     mov     edi, ebx                    # faces: one by its area
     xor     esi, esi
     call    prand
@@ -2375,6 +2833,43 @@ place:
     mov     rdi, r15
     call    m_vec
     call    unit
+    movaps  [r14+16], xmm0
+    jmp     .Lpl_out
+.Lpl_fill:                              # a fill: its lattice point (a hair off)
+    mov     rax, [r12+SR_FILLP]
+    mov     eax, [rax+rbx*4]
+    xor     edx, edx
+    div     dword ptr [r12+SR_FNX]
+    mov     [rsp], edx                  # x
+    xor     edx, edx
+    div     dword ptr [r12+SR_FNY]
+    mov     [rsp+4], edx                # y
+    mov     [rsp+8], eax                # z
+    mov     dword ptr [rsp+12], 0
+    movdqa  xmm0, [rsp]
+    cvtdq2ps xmm0, xmm0
+    movaps  [rsp+16], xmm0
+    xor     ecx, ecx                    # the jitter: 1% of the spacing
+51: mov     [rsp+40], ecx
+    mov     edi, ebx
+    lea     esi, [rcx+12]
+    call    prand
+    subss   xmm0, [rip+pq_half]
+    mulss   xmm0, [rip+pq_jit2]
+    mov     ecx, [rsp+40]
+    addss   xmm0, [rsp+16+rcx*4]
+    movss   [rsp+16+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      51b
+    movaps  xmm0, [rsp+16]
+    mulps   xmm0, [r12+SR_FD]
+    addps   xmm0, [r12+SR_FO]
+    mov     rdi, r15
+    call    m_pt
+    movaps  [r14], xmm0
+    movaps  [r14+16], xmm1
+    movaps  xmm0, [rip+pq_ey]
     movaps  [r14+16], xmm0
     jmp     .Lpl_out
 .Lpl_point:                             # its origin, its +Y
@@ -2994,7 +3489,9 @@ step_job:
 #   place, 9..11 its velocity, 12 its age, 13 its lifetime, 14 its size, 15
 #   its id, 16 its colour; 17 the last viewport draw (ms), 18 the
 #   particles it drew; 19 hits so far (all systems); 20 system i's
-#   particles born of events so far, 21 its hits so far, 22 its particles
+#   particles born of events so far, 21 its hits so far, 22 its particles;
+#   the liquid solver: 23 its last frame (ms), 24 the most neighbours, 25
+#   a particle's mass, 26 the kernel's size, 27 the densest (rho / rho0)
 pt_info:
     xorps   xmm0, xmm0
     cmp     edi, 0
@@ -3063,7 +3560,11 @@ pt_info:
     lea     rdx, [rip+pt_sr]
     cvtsi2ss xmm0, dword ptr [rdx+rax+SR_ENEXT]
     ret
-64: cmp     edi, 21
+64: cmp     edi, 23                     # 23.. the liquid solver's
+    jb      640f
+    sub     edi, 23
+    jmp     lq_info
+640:cmp     edi, 21
     jb      65f
     cmp     edi, 22
     ja      9f
@@ -3332,6 +3833,8 @@ pd_any:         .skip 4
 
 .section .rodata
 .align 16
+pq_bigw:        .float 1e30, 1e30, 1e30, 0
+pq_jit2:        .float 0.02
 pq_inf4:        .long -1, -1, -1, -1
 pq_c255:        .float 255.0
 pq_shade0:      .float 0.55
@@ -4233,6 +4736,13 @@ pt_render:
 .equ SR_HITS,   336                     # hits so far
 .equ SR_REST,   340                     # a bounce slower than this rests
                                         #  (squared: twice its pull in a step)
+.equ SR_LIQON,  344                     # a liquid (liquid.s moves it)
+.equ SR_FILLP,  352                     # fill: the lattice's points inside (u32)
+.equ SR_FILLB,  360                     #  bytes mapped for them
+.equ SR_FNX,    364                     #  points along x, y
+.equ SR_FNY,    368
+.equ SR_FO,     384                     #  the first point (its object's space)
+.equ SR_FD,     400                     #  the spacing there
 .equ CT_SZ,     64                      # a collider triangle: a, e1, e2, n
 .equ CN_SZ,     32                      # a tree node: min (w: left / first),
                                         #  max (w: right / count; bit 31 leaf)

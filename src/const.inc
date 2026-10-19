@@ -556,7 +556,16 @@
 .equ PS_EVPER,      216     #  this many particles each
 .equ PS_INHERIT,    220     #  with this much of the other's velocity
 .equ PS_EVNAME,     224     #  of the system with this name (16 bytes)
-.equ PS_SZ,         256
+.equ PS_LIQ,        240     # bit 0: a liquid (liquid.s; its size is the spacing)
+.equ PS_VISC,       244     #  viscosity (XSPH: water 0.02, oil 0.2, honey 0.6)
+.equ PS_VORT,       248     #  vorticity confinement
+.equ PS_TENS,       252     #  surface tension (the tensile term's k)
+.equ PS_LSUB,       256     #  substeps a frame
+.equ PS_LITER,      260     #  solver iterations a substep
+.equ PS_DOMAIN,     264     #  its box: 6 floats (min, max; the world)
+.equ PS_DOMON,      288     #  bit 0: kept in the box
+.equ PS_DENS,       292     #  rest density (kg/m3)
+.equ PS_SZ,         384
 .equ MAX_OBJECTS,   4096
 .equ KEY_A,             30
 .equ KEY_D,             32
