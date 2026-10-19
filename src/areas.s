@@ -10,7 +10,7 @@
 .include "widgets.inc"
 .include "icons.inc"
 .equ PTAB_W, 32                          # the Properties tab strip
-.equ PTAB_N, 11                         # (the last, Landscape: only for a landscape)
+.equ PTAB_N, 12                         # (the last, Landscape: only for a landscape)
 .equ OUTL_MAXROWS, 256
 .include "macros.inc"
 
@@ -2621,6 +2621,11 @@ ed_props_draw:
     call    land_props
     mov     r12d, eax
     jmp     .Lpp_done
+.Lpp_part:
+    mov     edi, r12d
+    call    part_props
+    mov     r12d, eax
+    jmp     .Lpp_done
 .Lpp_view:
     lea     rdi, [rip+wd_vp_sec]
     mov     esi, [rip+ed_x]
@@ -3431,13 +3436,13 @@ fd_icons:       .long ICON_EYE, ICON_EYE_OFF, ICON_RENDER_ON, ICON_CAMERA, ICON_
 .align 4
 unit_mm_tab:    .float 1.0, 10.0, 1000.0, 25.4
 ptab_icons:     .long ICON_OBJECT, ICON_MODIFIER, ICON_MATERIAL, ICON_PHYSICS, ICON_SKETCH
-                .long ICON_WORLD, ICON_RENDERED, ICON_WIRE, ICON_KEY, ICON_ARMATURE, ICON_GRID
+                .long ICON_WORLD, ICON_RENDERED, ICON_WIRE, ICON_KEY, ICON_ARMATURE, ICON_SPARKLE, ICON_GRID
 .align 8
 unit_lbl:       .quad s_u_mm, s_u_cm, s_u_m, s_u_in
 unit_kw:        .quad k_u_mm, k_u_cm, k_u_m, k_u_in
-ptab_descs:     .quad wd_pt0, wd_pt1, wd_pt2, wd_pt3, wd_pt4, wd_pt5, wd_pt6, wd_pt7, wd_pt8, wd_pt9, wd_pt10
+ptab_descs:     .quad wd_pt0, wd_pt1, wd_pt2, wd_pt3, wd_pt4, wd_pt5, wd_pt6, wd_pt7, wd_pt8, wd_pt9, wd_pt11, wd_pt10
 props_pages:    .quad .Lpp_object, .Lpp_mods, .Lpp_mat, .Lpp_phys, .Lpp_cad, .Lpp_scene, .Lpp_render, .Lpp_view
-                .quad .Lpp_anim, .Lpp_rig, .Lpp_land
+                .quad .Lpp_anim, .Lpp_rig, .Lpp_part, .Lpp_land
 .text
 WIDGET wd_pt0, WK_ROW, "props.tab.object", "Object", tip="Name, place, rotation, size, visibility and colour of the active object"
 WIDGET wd_pt1, WK_ROW, "props.tab.modifiers", "Modifiers", tip="The modifier stack: mirror, array, subdivision, booleans, geometry nodes ..."
@@ -3448,6 +3453,7 @@ WIDGET wd_pt5, WK_ROW, "props.tab.scene", "Scene", tip="Units, the world's light
 WIDGET wd_pt6, WK_ROW, "props.tab.render", "Render", tip="Render size, samples and denoising, Render and Save"
 WIDGET wd_pt7, WK_ROW, "props.tab.viewport", "Viewport", tip="Shading, grid, theme and the viewport camera"
 WIDGET wd_pt8, WK_ROW, "props.tab.animation", "Animation", tip="Shape keys, actions and layers, drivers, onion skins, motion paths"
+WIDGET wd_pt11, WK_ROW, "props.tab.particles", "Particles", tip="Particle systems on the active object: emission, motion, look, collisions, liquid, the cache"
 WIDGET wd_pt10, WK_ROW, "props.tab.landscape", "Landscape", tip="The landscape's size, layers, paint, sea and files"
 WIDGET wd_pt9, WK_ROW, "props.tab.rig", "Rig", tip="Bones and their pose, constraints, parenting to an armature"
 WIDGET wd_props_scroll, WK_SCROLL, "props.page"

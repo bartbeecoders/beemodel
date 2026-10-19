@@ -38,6 +38,7 @@
 .globl ps_count
 .globl ps_add
 .globl ps_parse
+.globl ps_nth_own
 .globl pt_frame
 .globl pt_reset
 .globl pt_info
@@ -182,6 +183,8 @@ pt_fields:      .skip 4                 # force fields this step
 pt_msf:         .skip 4                 # the last frame's time (ms)
 pt_mss:         .skip 4                 #  and step's
 pt_used:        .skip 4                 # blocks ever used (given back on reset)
+pt_played:      .skip 4                 # what is there was played from the cache
+pt_start:       .skip 4                 # the scene's first frame
 ev_bh:          .skip 4*NBLK            # each listed block's hits this step,
 ev_bd:          .skip 4*NBLK            #  deaths
 .align 8
@@ -503,9 +506,9 @@ pp_tab:         .quad k_from
                 .quad 0
 
 .text
-OPERATOR op_ps_add,    "particles.add",    "Particle System", do_ps_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a particle system to the active object: particles.add [from faces|volume|verts|point] [rate n | burst n] [start f] [end f] [life s] [life_random 0..1] [speed m/s] [speed_random 0..1] [normal | direction x y z] [spread deg] [size m] [size_random 0..1] [drag k] [gravity k] [color RRGGBB] [seed n] [group 0..15] [max n] [name text] [on|off]"
+OPERATOR op_ps_add,    "particles.add",    "Particle System", do_ps_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a particle system to the active object: particles.add [rain|snow|sparks|confetti|fountain|tank (a preset, then:)] [from faces|volume|verts|point] [rate n | burst n] [start f] [end f] [life s] [life_random 0..1] [speed m/s] [speed_random 0..1] [normal | direction x y z] [spread deg] [size m] [size_random 0..1] [drag k] [gravity k] [color RRGGBB] [seed n] [group 0..15] [max n] [name text] [on|off]"
 OPERATOR op_ps_set,    "particles.set",    "Particle Settings", do_ps_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="A particle system's settings on the active object: particles.set [system n] then the words particles.add takes"
-OPERATOR op_ps_export, "file.export_liquid", "Export Liquid Surface...", do_ps_export, doc="Export the active object's liquid surface (or its mesh) at each frame as OBJ files: file.export_liquid <prefix> [first last] (prefix_0001.obj ...; the scene's frames when not said)"
+OPERATOR op_ps_export, "file.export_liquid", "Export Liquid Surface...", do_ps_export, doc="Export the active object's liquid surface (or its mesh) at each frame as OBJ files: file.export_liquid <prefix> [first last] (prefix_0001.obj ..., the scene's frames when not said)"
 OPERATOR op_ps_remove, "particles.remove", "Remove Particle System", do_ps_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a particle system from the active object: particles.remove [system n] (the first when not said)"
 
 # =============================================================================
@@ -1488,7 +1491,8 @@ pt_build:
     inc     ebx
     jmp     1b
 8:  mov     dword ptr [rip+pt_on], 1
-9:  pop     r15
+9:  mov     dword ptr [rip+pt_played], 0
+    pop     r15
     pop     r14
     pop     r13
     pop     r12
@@ -1568,7 +1572,7 @@ pt_frame:
     push    r14
     push    r15
     and     rsp, -16
-    sub     rsp, 32
+    sub     rsp, 64
     cmp     dword ptr [rip+pt_busy], 0
     jne     .Lpf_ret
     mov     dword ptr [rip+pt_busy], 1
@@ -1600,12 +1604,60 @@ pt_frame:
     test    rbx, rbx
     jz      2f
     mov     eax, [rbx+AN_START]
-2:  sub     r12d, eax
+2:  mov     [rsp+28], eax               # the scene's start
+    mov     [rip+pt_start], eax
+    sub     r12d, eax
     jle     .Lpf_none
+    mov     [rip+pt_tgt], r12d
     call    pt_key
     mov     r13, rax
-    cmp     dword ptr [rip+pt_on], 0
+    call    pt_kinds                    # the cache: what it needs, what it has
+    mov     [rsp+8], eax                #  (bit 0 particles, 1 liquids)
+    mov     edi, 2
+    mov     rsi, r13
+    mov     edx, [rsp+28]
+    call    sc_check
+    mov     [rsp+12], eax               # (baked)
+    mov     edi, 3
+    mov     rsi, r13
+    mov     edx, [rsp+28]
+    call    sc_check
+    mov     [rsp+16], eax
+    mov     qword ptr [rsp+32], 0       # its records for the frame
+    mov     qword ptr [rsp+40], 0
+    xor     r15d, r15d
+    test    dword ptr [rsp+8], 1
+    jz      31f
+    mov     edi, 2
+    mov     esi, [rsp+12]
+    call    pt_cached
+    mov     [rsp+32], rax
+    test    rax, rax
+    jnz     31f
+    inc     r15d                        # (one is missing)
+31: test    dword ptr [rsp+8], 2
+    jz      32f
+    mov     edi, 3
+    mov     esi, [rsp+16]
+    call    pt_cached
+    mov     [rsp+40], rax
+    test    rax, rax
+    jnz     32f
+    inc     r15d
+32: test    r15d, r15d                  # all there: played back
+    jnz     33f
+    call    now_ns
+    mov     r14, rax
+    mov     rdi, [rsp+32]
+    mov     rsi, [rsp+40]
+    mov     edx, r12d
+    mov     rcx, r13
+    call    pt_play
+    jmp     6f
+33: cmp     dword ptr [rip+pt_on], 0
     je      3f
+    cmp     dword ptr [rip+pt_played], 0
+    jne     3f
     cmp     r13, [rip+pt_hash]
     jne     3f
     cmp     r12d, [rip+pt_now]
@@ -1620,6 +1672,9 @@ pt_frame:
     jae     6f
     call    pt_step
     inc     dword ptr [rip+pt_now]
+    mov     edi, [rip+pt_now]           # a whole frame: kept
+    add     edi, [rip+pt_start]
+    call    pt_record
     jmp     5b
 6:  xor     ebx, ebx                    # the liquids' surfaces now
 61: cmp     ebx, [rip+pt_ns]
@@ -1639,6 +1694,10 @@ pt_frame:
     mov     dword ptr [rip+dirty], 1
     jmp     .Lpf_out
 .Lpf_gone:
+    mov     edi, 2                      # (no systems: nothing cached)
+    call    sc_clear
+    mov     edi, 3
+    call    sc_clear
     cmp     dword ptr [rip+pt_on], 0
     je      .Lpf_out
     call    pt_reset
@@ -3766,7 +3825,15 @@ ps_add:
     test    rax, rax
     jz      8f
     mov     r13, rax
-    mov     rdi, rax
+    mov     rsi, r12                    # a preset first?
+    call    pr_text
+    mov     r12, rsi
+    test    rax, rax
+    jz      1f
+    mov     rdi, r13
+    mov     rsi, rax
+    call    ps_parse
+1:  mov     rdi, r13
     mov     rsi, r12
     call    ps_parse
     mov     rdi, rbx
@@ -3986,6 +4053,7 @@ pd_any:         .skip 4
 .section .rodata
 .align 16
 pq_bigw:        .float 1e30, 1e30, 1e30, 0
+pq_mone:        .float -1.0
 pq_jit2:        .float 0.02
 pq_inf4:        .long -1, -1, -1, -1
 pq_c255:        .float 255.0
@@ -6577,5 +6645,680 @@ s_px_done:      .asciz "  exported "
 s_px_files:     .asciz " frames (OBJ)"
 s_px_bad:       .asciz "  file.export_liquid <prefix> [first last]: the files' path and name before _0001.obj"
 .text
+
+
+# =============================================================================
+#  Presets (stage P6)
+# =============================================================================
+.section .rodata
+k_rain:         .asciz "rain"
+k_snow:         .asciz "snow"
+k_sparks:       .asciz "sparks"
+k_confetti:     .asciz "confetti"
+k_fountain:     .asciz "fountain"
+k_tank:         .asciz "tank"
+s_pr_rain:      .asciz "from faces rate 3000 speed 2 direction 0 -1 0 life 4 size 0.02 draw points point_px 1 color a8c8ff collide on on_hit die name Rain"
+s_pr_snow:      .asciz "from faces rate 400 speed 0 gravity 0.1 drag 1.5 life 15 size 0.05 color ffffff collide on on_hit stick name Snow"
+s_pr_sparks:    .asciz "from point rate 300 speed 6 spread 35 direction 0 1 0 life 0.8 life_random 0.5 size 0.03 color ffd060 color_end ff3000 size_end 0.3 drag 0.5 collide on bounce 0.4 name Sparks"
+s_pr_confetti:  .asciz "from point burst 600 speed 7 spread 40 speed_random 0.4 direction 0 1 0 drag 2 gravity 0.4 life 6 size 0.06 color ff4080 color_end 40c0ff collide on bounce 0.1 friction 0.6 name Confetti"
+s_pr_fountain:  .asciz "from point rate 600 speed 6 spread 6 direction 0 1 0 life 2.5 size 0.04 color 80c0ff color_end ffffff collide on bounce 0.2 name Fountain"
+s_pr_tank:      .asciz "from fill size 0.05 life 100000 speed 0 liquid on surface on name Water"
+s_pn_rain:      .asciz "Rain Cloud"
+s_pn_snow:      .asciz "Snow Cloud"
+s_pn_sparks:    .asciz "Sparks"
+s_pn_confetti:  .asciz "Confetti"
+s_pn_fountain:  .asciz "Fountain"
+s_pn_tank:      .asciz "Water"
+.align 8
+# (keyword, settings, its emitter's name, primitive (create.*), height, scale)
+pr_tab:         .quad k_rain, s_pr_rain, s_pn_rain
+                .long 3
+                .float 8.0, 5.0, 1.0, 5.0
+                .quad k_snow, s_pr_snow, s_pn_snow
+                .long 3
+                .float 8.0, 5.0, 1.0, 5.0
+                .quad k_sparks, s_pr_sparks, s_pn_sparks
+                .long 1
+                .float 0.1, 0.1, 0.1, 0.1
+                .quad k_confetti, s_pr_confetti, s_pn_confetti
+                .long 1
+                .float 0.1, 0.1, 0.1, 0.1
+                .quad k_fountain, s_pr_fountain, s_pn_fountain
+                .long 2
+                .float 0.1, 0.4, 0.1, 0.4
+                .quad k_tank, s_pr_tank, s_pn_tank
+                .long 0
+                .float 0.4, 0.5, 0.4, 0.5
+                .quad 0
+.equ PR_SZ,     44
+.text
+OPERATOR op_ps_rain,     "particles.add_rain",     "Rain",       do_ps_preset, arg=0, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add rain: a cloud (a 10 m plane 8 m up) raining drops that die where they land"
+OPERATOR op_ps_snow,     "particles.add_snow",     "Snow",       do_ps_preset, arg=1, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add snow: a cloud of slowly falling flakes that stick where they land"
+OPERATOR op_ps_sparks,   "particles.add_sparks",   "Sparks",     do_ps_preset, arg=2, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add sparks: hot, short-lived, bouncing, yellow to red"
+OPERATOR op_ps_confetti, "particles.add_confetti", "Confetti",   do_ps_preset, arg=3, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add confetti: a burst of 600 drifting down"
+OPERATOR op_ps_fountain, "particles.add_fountain", "Fountain",   do_ps_preset, arg=4, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a fountain: a jet of water drops"
+OPERATOR op_ps_tank,     "particles.add_tank",     "Water Tank", do_ps_preset, arg=5, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a water tank: a block of liquid in a box twice its size, meshed into a surface"
+
+# pr_find(rdi=word) -> rax = its preset's entry, or 0
+pr_find:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, rdi
+    lea     rbx, [rip+pr_tab]
+1:  mov     rsi, [rbx]
+    test    rsi, rsi
+    jz      8f
+    mov     rdi, r12
+    call    str_eq
+    test    eax, eax
+    jnz     9f
+    add     rbx, PR_SZ
+    jmp     1b
+8:  xor     ebx, ebx
+9:  mov     rax, rbx
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# pr_text(rsi=text or 0) -> rax = a preset's settings when its first word
+#   names one (0: none), rsi = the rest
+pr_text:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rsi
+    xor     r12d, r12d
+    test    rsi, rsi
+    jz      9f
+    call    im_next_word
+    test    eax, eax
+    jz      9f
+    push    rsi
+    push    rsi
+    lea     rdi, [rip+im_word]
+    call    pr_find
+    pop     rsi
+    pop     rsi
+    test    rax, rax
+    jz      9f
+    mov     r12, [rax+8]
+    mov     rbx, rsi
+9:  mov     rax, r12
+    mov     rsi, rbx
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# do_ps_preset(rdi=which) - an emitter at the 3D cursor with that preset's
+#   system (then op_arg's settings)
+do_ps_preset:
+    push    rbx
+    push    r12
+    push    r13
+    imul    ebx, edi, PR_SZ
+    lea     rax, [rip+pr_tab]
+    add     rbx, rax
+    mov     edi, [rbx+24]
+    call    op_create
+    mov     edi, [rip+active_obj]
+    mov     rsi, [rbx+16]
+    call    obj_rename
+    mov     edi, [rip+active_obj]
+    call    obj_get
+    test    rax, rax
+    jz      9f
+    mov     r12, rax
+    movss   xmm0, [rbx+28]              # its height, its size
+    addss   xmm0, [r12+OB_LOC+4]
+    movss   [r12+OB_LOC+4], xmm0
+    mov     eax, [rbx+32]
+    mov     [r12+OB_SCALE], eax
+    mov     eax, [rbx+36]
+    mov     [r12+OB_SCALE+4], eax
+    mov     eax, [rbx+40]
+    mov     [r12+OB_SCALE+8], eax
+    mov     rdi, r12
+    mov     rsi, [rbx+8]
+    call    ps_add
+    test    eax, eax
+    jz      9f
+    lea     esi, [rax-1]
+    mov     edi, [r12+OB_UID]
+    call    ps_nth_own
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    lea     rdi, [rip+k_tank]           # a tank: its box (twice its block,
+    cmp     rdi, [rbx]                  #  from the floor)
+    jne     8f
+    movss   xmm0, [r12+OB_LOC]
+    movss   xmm1, [r12+OB_SCALE]
+    addss   xmm1, xmm1
+    movss   xmm2, xmm0
+    subss   xmm2, xmm1
+    movss   [r13+PS_DOMAIN], xmm2
+    addss   xmm0, xmm1
+    movss   [r13+PS_DOMAIN+12], xmm0
+    movss   xmm0, [r12+OB_LOC+4]
+    subss   xmm0, [r12+OB_SCALE+4]
+    movss   [r13+PS_DOMAIN+4], xmm0
+    movss   xmm1, [r12+OB_SCALE+4]
+    mulss   xmm1, [rip+pq_four]
+    addss   xmm0, xmm1
+    movss   [r13+PS_DOMAIN+16], xmm0
+    movss   xmm0, [r12+OB_LOC+8]
+    movss   xmm1, [r12+OB_SCALE+8]
+    movss   xmm2, xmm0
+    subss   xmm2, xmm1
+    movss   [r13+PS_DOMAIN+8], xmm2
+    addss   xmm0, xmm1
+    movss   [r13+PS_DOMAIN+20], xmm0
+    or      dword ptr [r13+PS_DOMON], 1
+8:  mov     rdi, r13
+    mov     rsi, [rip+op_arg]
+    call    ps_parse
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+
+# =============================================================================
+#  The simulation cache (stage P6): channel 2 particles, 3 liquids
+#
+#  A frame's record: the systems in it; each: its index, its particles,
+#  their bounds (min, max), the largest speed along an axis and size; then
+#  20 bytes a particle: its place (3 x u16 in the bounds), velocity (3 x
+#  i16 of the largest), how far through its life (u16), size (u16), id.
+#  Played back, they are what the systems hold (drawn, rendered, meshed);
+#  going on past the cache simulates again from the start.
+# =============================================================================
+.equ CR_HDR,    40
+.equ CR_P,      20
+.section .bss
+.align 4
+pt_tgt:         .skip 4                 # (pt_frame: the steps to the frame)
+.section .rodata
+.align 4
+pq_65535:       .float 65535.0
+pq_32767:       .float 32767.0
+pq_i65535:      .float 1.5259022e-5
+pq_i32767:      .float 3.0518509e-5
+.text
+
+# pt_kinds -> eax: bit 0 a system of particles, bit 1 a liquid
+pt_kinds:
+    xor     eax, eax
+    mov     rdx, [rip+ps_cur]
+    test    rdx, rdx
+    jz      9f
+    mov     ecx, [rdx+PB_N]
+    lea     rdx, [rdx+PB_HDR]
+1:  test    ecx, ecx
+    jz      9f
+    mov     r8d, 1
+    test    dword ptr [rdx+PS_LIQ], 1
+    jz      2f
+    mov     r8d, 2
+2:  or      eax, r8d
+    add     rdx, PS_SZ
+    dec     ecx
+    jmp     1b
+9:  ret
+
+# pt_cached(edi=channel, esi=1 baked) -> rax = its record for this frame
+#   (baked: past its end, its last), or 0
+pt_cached:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    mov     r12d, [rip+pt_tgt]
+    add     r12d, [rip+pt_start]
+    test    esi, esi
+    jz      1f
+    call    sc_last                     # (edi: the channel)
+    cmp     r12d, eax
+    cmovg   r12d, eax
+1:  mov     edi, ebx
+    mov     esi, r12d
+    call    sc_get
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# cr_size(edi=kind 1 particles / 2 liquids) -> eax = a record's bytes
+cr_size:
+    mov     eax, 4
+    xor     ecx, ecx
+    lea     rdx, [rip+pt_sr]
+1:  cmp     ecx, [rip+pt_ns]
+    jae     9f
+    mov     r8d, 1
+    cmp     dword ptr [rdx+SR_LIQON], 0
+    je      2f
+    mov     r8d, 2
+2:  cmp     r8d, edi
+    jne     3f
+    imul    r9d, [rdx+SR_N], CR_P
+    add     eax, r9d
+    add     eax, CR_HDR
+3:  add     rdx, SR_SZ
+    inc     ecx
+    jmp     1b
+9:  ret
+
+# pt_record(edi=frame) - the systems as they are, into channels 2 and 3
+#   (when each takes this frame next)
+pt_record:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 96
+    mov     [rsp+64], edi
+    mov     r15d, 1                     # kind
+.Lpr_kind:
+    cmp     r15d, 2
+    ja      .Lpr_out
+    mov     edi, r15d
+    call    cr_size
+    cmp     eax, 4
+    je      .Lpr_next
+    lea     edi, [r15+1]                # (channel 2 or 3)
+    mov     esi, [rsp+64]
+    mov     edx, eax
+    call    sc_add
+    test    rax, rax
+    jz      .Lpr_next
+    mov     r14, rax                    # where it goes
+    mov     [rsp+72], rax
+    mov     dword ptr [r14], 0
+    add     r14, 4
+    xor     ebx, ebx
+.Lpr_sys:
+    cmp     ebx, [rip+pt_ns]
+    jae     .Lpr_next
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    inc     ebx
+    mov     eax, 1
+    cmp     dword ptr [r12+SR_LIQON], 0
+    je      1f
+    mov     eax, 2
+1:  cmp     eax, r15d
+    jne     .Lpr_sys
+    mov     rax, [rsp+72]               # one more system in the record
+    inc     dword ptr [rax]
+    mov     eax, [r12+SR_SI]
+    mov     [r14], eax
+    mov     eax, [r12+SR_N]
+    mov     [r14+4], eax
+    call    cr_bounds                   # min, max, vmax, smax at [rsp]
+    movups  xmm0, [rsp]
+    movups  [r14+8], xmm0               # (min x y z, max x)
+    movsd   xmm0, [rsp+16]
+    movsd   [r14+24], xmm0              # (max y z)
+    mov     eax, [rsp+32]
+    mov     [r14+32], eax               # vmax
+    mov     eax, [rsp+36]
+    mov     [r14+36], eax               # smax
+    lea     r13, [r14+CR_HDR]
+    call    cr_write
+    imul    eax, [r12+SR_N], CR_P
+    lea     r14, [r14+CR_HDR+rax]
+    jmp     .Lpr_sys
+.Lpr_next:
+    inc     r15d
+    jmp     .Lpr_kind
+.Lpr_out:
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# cr_bounds(r12=system) -> the caller's [rsp+8..]: min (3), max (3), vmax,
+#   smax (12 floats from its rsp+8: the caller's [rsp])
+cr_bounds:
+    push    rbx
+    push    r13
+    push    r14
+    movaps  xmm6, [rip+pq_bigw]
+    movaps  xmm7, xmm6
+    xorps   xmm7, [rip+pq_sgn]
+    xorps   xmm8, xmm8                  # |v| largest, size largest
+    xorps   xmm9, xmm9
+    mov     edi, [r12+SR_SI]
+    call    sys_blocks
+    mov     r13, rax
+    xor     r14d, r14d
+1:  cmp     r14d, [r12+SR_NB]
+    jae     3f
+    mov     edi, [r13+r14*4]
+    inc     r14d
+    lea     rax, [rip+pt_bn]
+    mov     ecx, [rax+rdi*4]
+    call    blk_at
+    xor     edx, edx
+2:  cmp     edx, ecx
+    jae     1b
+    movss   xmm0, [rax+A_X+rdx*4]
+    movss   xmm1, [rax+A_Y+rdx*4]
+    movss   xmm2, [rax+A_Z+rdx*4]
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    andps   xmm0, [rip+pq_xyz]
+    minps   xmm6, xmm0
+    maxps   xmm7, xmm0
+    movss   xmm0, [rax+A_VX+rdx*4]
+    movss   xmm1, [rax+A_VY+rdx*4]
+    movss   xmm2, [rax+A_VZ+rdx*4]
+    andps   xmm0, [rip+pq_abs]
+    andps   xmm1, [rip+pq_abs]
+    andps   xmm2, [rip+pq_abs]
+    maxss   xmm8, xmm0
+    maxss   xmm8, xmm1
+    maxss   xmm8, xmm2
+    maxss   xmm9, [rax+A_SIZE+rdx*4]
+    inc     edx
+    jmp     2b
+3:  andps   xmm6, [rip+pq_xyz]
+    lea     rax, [rsp+32]               # (the caller's rsp)
+    movlps  [rax], xmm6
+    movhlps xmm0, xmm6
+    movss   [rax+8], xmm0
+    movlps  [rax+12], xmm7
+    movhlps xmm0, xmm7
+    movss   [rax+20], xmm0
+    maxss   xmm8, [rip+pq_tiny]
+    maxss   xmm9, [rip+pq_tiny]
+    movss   [rax+32], xmm8
+    movss   [rax+36], xmm9
+    pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# q16(xmm0=value, xmm1=low, xmm2=its range) -> eax (0..65535)
+q16:
+    subss   xmm0, xmm1
+    maxss   xmm2, [rip+pq_tiny]
+    divss   xmm0, xmm2
+    xorps   xmm3, xmm3
+    maxss   xmm0, xmm3
+    minss   xmm0, [rip+pq_one]
+    mulss   xmm0, [rip+pq_65535]
+    cvtss2si eax, xmm0
+    ret
+
+# cr_write(r12=system, r14=its header, r13=out) - its particles, 20 bytes
+#   each
+cr_write:
+    push    rbx
+    push    r15
+    push    rbp
+    sub     rsp, 32
+    movss   xmm0, [r14+20]              # ranges
+    subss   xmm0, [r14+8]
+    movss   [rsp], xmm0
+    movss   xmm0, [r14+24]
+    subss   xmm0, [r14+12]
+    movss   [rsp+4], xmm0
+    movss   xmm0, [r14+28]
+    subss   xmm0, [r14+16]
+    movss   [rsp+8], xmm0
+    mov     edi, [r12+SR_SI]
+    call    sys_blocks
+    mov     rbp, rax
+    xor     r15d, r15d
+1:  cmp     r15d, [r12+SR_NB]
+    jae     9f
+    mov     edi, [rbp+r15*4]
+    inc     r15d
+    lea     rax, [rip+pt_bn]
+    mov     ecx, [rax+rdi*4]
+    mov     [rsp+16], ecx
+    call    blk_at
+    mov     rbx, rax
+    xor     edx, edx
+2:  cmp     edx, [rsp+16]
+    jae     1b
+    mov     [rsp+20], edx
+    xor     ecx, ecx                    # place
+3:  imul    eax, ecx, AR
+    lea     rax, [rbx+rax]
+    movss   xmm0, [rax+rdx*4]
+    movss   xmm1, [r14+8+rcx*4]
+    movss   xmm2, [rsp+rcx*4]
+    call    q16
+    mov     [r13+rcx*2], ax
+    inc     ecx
+    cmp     ecx, 3
+    jb      3b
+    xor     ecx, ecx                    # velocity
+4:  imul    eax, ecx, AR
+    lea     rax, [rbx+A_VX+rax]
+    movss   xmm0, [rax+rdx*4]
+    divss   xmm0, [r14+32]
+    maxss   xmm0, [rip+pq_mone]
+    minss   xmm0, [rip+pq_one]
+    mulss   xmm0, [rip+pq_32767]
+    cvtss2si eax, xmm0
+    mov     [r13+6+rcx*2], ax
+    inc     ecx
+    cmp     ecx, 3
+    jb      4b
+    movss   xmm0, [rbx+A_AGE+rdx*4]     # how far through its life
+    divss   xmm0, [rbx+A_LIFE+rdx*4]
+    xorps   xmm1, xmm1
+    movss   xmm2, [rip+pq_one]
+    call    q16
+    mov     [r13+12], ax
+    movss   xmm0, [rbx+A_SIZE+rdx*4]
+    xorps   xmm1, xmm1
+    movss   xmm2, [r14+36]
+    call    q16
+    mov     [r13+14], ax
+    mov     eax, [rbx+A_ID+rdx*4]
+    mov     [r13+16], eax
+    add     r13, CR_P
+    inc     edx
+    jmp     2b
+9:  add     rsp, 32
+    pop     rbp
+    pop     r15
+    pop     rbx
+    ret
+
+# pt_play(rdi=particles' record or 0, rsi=liquids' or 0, edx=steps, rcx=key)
+#   - the systems hold those frames' particles (not to be stepped on)
+pt_play:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 64
+    mov     [rsp], rdi
+    mov     [rsp+8], rsi
+    mov     [rsp+16], edx
+    mov     [rsp+24], rcx
+    cmp     dword ptr [rip+pt_on], 0    # the systems, empty
+    jne     1f
+    call    pt_build
+    jmp     2f
+1:  xor     ebx, ebx
+11: cmp     ebx, [rip+pt_ns]
+    jae     12f
+    imul    rax, rbx, SR_SZ
+    lea     rcx, [rip+pt_sr]
+    mov     dword ptr [rcx+rax+SR_NB], 0
+    mov     dword ptr [rcx+rax+SR_N], 0
+    inc     ebx
+    jmp     11b
+12: call    free_all_blocks
+2:  cmp     dword ptr [rip+pt_on], 0
+    je      .Lpp2_out
+    xor     r15d, r15d                  # the two records
+.Lpp2_rec:
+    cmp     r15d, 2
+    jae     .Lpp2_done
+    mov     r14, [rsp+r15*8]
+    inc     r15d
+    test    r14, r14
+    jz      .Lpp2_rec
+    mov     eax, [r14]
+    mov     [rsp+32], eax               # systems in it
+    add     r14, 4
+.Lpp2_sys:
+    cmp     dword ptr [rsp+32], 0
+    je      .Lpp2_rec
+    dec     dword ptr [rsp+32]
+    mov     eax, [r14]
+    cmp     eax, [rip+pt_ns]
+    jae     .Lpp2_skip
+    imul    r12, rax, SR_SZ
+    lea     rcx, [rip+pt_sr]
+    add     r12, rcx
+    call    cr_read
+.Lpp2_skip:
+    imul    eax, [r14+4], CR_P
+    lea     r14, [r14+CR_HDR+rax]
+    jmp     .Lpp2_sys
+.Lpp2_done:
+    mov     eax, [rsp+16]
+    mov     [rip+pt_now], eax
+    mov     rax, [rsp+24]
+    mov     [rip+pt_hash], rax
+    mov     dword ptr [rip+pt_played], 1
+.Lpp2_out:
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# cr_read(r12=system, r14=its part of a record) - its particles from it
+cr_read:
+    push    rbx
+    push    r13
+    push    r15
+    push    rbp
+    sub     rsp, 40
+    mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    mov     ecx, 0x9fc8ff
+    test    rax, rax
+    jz      1f
+    mov     ecx, [rax+PS_COLOR]
+1:  mov     [rsp+24], ecx
+    movss   xmm0, [r14+20]              # ranges, scaled to u16
+    subss   xmm0, [r14+8]
+    mulss   xmm0, [rip+pq_i65535]
+    movss   [rsp], xmm0
+    movss   xmm0, [r14+24]
+    subss   xmm0, [r14+12]
+    mulss   xmm0, [rip+pq_i65535]
+    movss   [rsp+4], xmm0
+    movss   xmm0, [r14+28]
+    subss   xmm0, [r14+16]
+    mulss   xmm0, [rip+pq_i65535]
+    movss   [rsp+8], xmm0
+    mov     eax, [r14+4]
+    mov     [rsp+16], eax               # left to place
+    lea     r13, [r14+CR_HDR]
+    mov     edi, [r12+SR_SI]
+    call    sys_blocks
+    mov     rbp, rax
+2:  mov     eax, [rsp+16]               # a block at a time
+    test    eax, eax
+    jz      9f
+    call    blk_get
+    test    eax, eax
+    js      9f
+    mov     ecx, [r12+SR_NB]
+    mov     [rbp+rcx*4], eax
+    inc     dword ptr [r12+SR_NB]
+    lea     rcx, [rip+pt_bsys]
+    mov     edx, [r12+SR_SI]
+    mov     [rcx+rax*4], edx
+    mov     ecx, [rsp+16]
+    cmp     ecx, BLK
+    jbe     3f
+    mov     ecx, BLK
+3:  lea     rdx, [rip+pt_bn]
+    mov     [rdx+rax*4], ecx
+    add     [r12+SR_N], ecx
+    sub     [rsp+16], ecx
+    mov     [rsp+20], ecx
+    mov     edi, eax
+    call    blk_at
+    mov     rbx, rax
+    xor     r15d, r15d
+4:  cmp     r15d, [rsp+20]
+    jae     2b
+    xor     ecx, ecx
+5:  movzx   eax, word ptr [r13+rcx*2]   # place
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rsp+rcx*4]
+    addss   xmm0, [r14+8+rcx*4]
+    imul    eax, ecx, AR
+    lea     rax, [rbx+rax]
+    movss   [rax+r15*4], xmm0
+    movsx   eax, word ptr [r13+6+rcx*2] # velocity
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+pq_i32767]
+    mulss   xmm0, [r14+32]
+    imul    eax, ecx, AR
+    lea     rax, [rbx+A_VX+rax]
+    movss   [rax+r15*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      5b
+    movzx   eax, word ptr [r13+12]      # age (its life: 1)
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+pq_i65535]
+    movss   [rbx+A_AGE+r15*4], xmm0
+    mov     eax, [rip+pq_one]
+    mov     [rbx+A_LIFE+r15*4], eax
+    movzx   eax, word ptr [r13+14]      # size
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+pq_i65535]
+    mulss   xmm0, [r14+36]
+    movss   [rbx+A_SIZE+r15*4], xmm0
+    mov     eax, [r13+16]
+    mov     [rbx+A_ID+r15*4], eax
+    mov     eax, [rsp+24]
+    mov     [rbx+A_COL+r15*4], eax
+    mov     dword ptr [rbx+A_FLAG+r15*4], 0
+    add     r13, CR_P
+    inc     r15d
+    jmp     4b
+9:  add     rsp, 40
+    pop     rbp
+    pop     r15
+    pop     r13
+    pop     rbx
+    ret
 
 .section .note.GNU-stack,"",@progbits

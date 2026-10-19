@@ -32,6 +32,13 @@ P5: the liquid's surface - the dam break is meshed every frame into a
 closed, manifold surface its emitter shows, in under 200 ms; spray
 events make foam where it breaks; the surface exports as OBJ frames.
 
+P6: the Particles tab and presets - every preset from Add > Particles
+makes its emitter and particles; emit(object, preset, settings); the
+cache plays frames back (channel 2 particles, 3 liquids), sim.bake keeps
+them within the budget, and a saved file plays the same frames; in the
+fake compositor: Add > Particles > Fountain by clicks, its rate typed in
+the tab (and undone), a preset added from the tab's list, Bake.
+
     python3 tests/particles.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -314,6 +321,7 @@ def fake_session(threads=None):
     f.pump(2.0, until_frame=True)
     m = fakewl.Mcp(f)
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.mcp = m
     return f, q
 
 
@@ -631,12 +639,138 @@ op("file.export_liquid", "%s/w 5 8")
           'file.export_liquid writes a frame per OBJ file (%s), frame 6 with its %s faces (%d)' % (objs, f6, n6))
 
 
+def p6():
+    print('-- P6: the Particles tab, presets, the cache --')
+    out = run('''delete("Cube")
+delete("Light")
+op("particles.add_rain")
+op("particles.add_snow")
+op("particles.add_sparks")
+op("particles.add_confetti")
+op("particles.add_fountain")
+op("particles.add_tank")
+frame(30)
+s = ""
+for k in 0..6 {
+  s = s + " " + str(particles(22, k))
+}
+print("pre", count(), s)
+print("names", name(1), name(2), name(3), name(4), name(5), name(6))
+emit("Water", "sparks", "rate 48 life 100 name Late")
+frame(31)
+frame(54)
+print("emit", particles(22, 6))
+''')
+    pre, nm, em = vals(out, 'pre'), vals(out, 'names'), vals(out, 'emit')
+    check(len(pre) == 7 and all(v > 0 for v in pre[1:]),
+          'Add > Particles: rain, snow, sparks, confetti, a fountain and a water tank, each with particles by '
+          'frame 30 (%s)' % pre[1:])
+    check(nm == ['Rain', 'Cloud', 'Snow', 'Cloud', 'Sparks', 'Confetti', 'Fountain', 'Water'][:0] + nm and
+          ' '.join(nm) == 'Rain Cloud Snow Cloud Sparks Confetti Fountain Water',
+          'each preset makes its own emitter (%s)' % nm)
+    check(em and abs(em[0] - 106) <= 1, 'emit(object, preset, settings): sparks at 48 a second (life 100), 106 by frame 54 (%s)' % em)
+
+    tmp = tempfile.mkdtemp(prefix='bee-particles-')
+    bee = os.path.join(tmp, 'p.bee')
+    out = run(f'''delete("Cube")
+op("particles.add_fountain")
+frame(60)
+a = particles(6, 200)
+b = particles(7, 200)
+frame(10)
+print("back", particles(2), particles(0))
+frame(60)
+print("again", particles(2), abs(particles(6, 200) - a) + abs(particles(7, 200) - b))
+op("particles.add_tank")
+op("anim.range", "1 60")
+op("sim.bake")
+print("bake", cacheinfo(7), cacheinfo(8), cacheinfo(9), cacheinfo(10), cacheinfo(2), cacheinfo(6))
+frame(45)
+p = ""
+for i in 0..5 {{
+  p = p + " " + str(particles(6, i * 37)) + " " + str(particles(7, i * 37))
+}}
+print("before", particles(0), p)
+op("file.save", "{bee}")
+op("file.new")
+op("file.open", "{bee}")
+frame(45)
+p = ""
+for i in 0..5 {{
+  p = p + " " + str(particles(6, i * 37)) + " " + str(particles(7, i * 37))
+}}
+print("before", particles(0), p)
+print("opened", cacheinfo(9), cacheinfo(10), particles(33, 1), manifold("Water"))
+''')
+    bk, ag, bake = vals(out, 'back'), vals(out, 'again'), vals(out, 'bake')
+    befores = rows(out, 'before')
+    op_ = vals(out, 'opened')
+    check(len(bk) == 2 and bk[0] < 1 and bk[1] > 100 and len(ag) == 2 and ag[0] < 1 and ag[1] < 0.01,
+          'the cache: frame 10 again is played back (%.3f ms), and frame 60 too, the same particles (within %.4f m)'
+          % (bk[0] if bk else -1, ag[1] if ag else -1))
+    check(len(bake) == 6 and bake[0] == 59 and bake[1] == 59 and bake[2] == 1 and bake[3] == 1 and bake[4] < bake[5],
+          'sim.bake: the fountain (channel 2) and the tank (channel 3) baked, 59 frames each, %.1f MB of a %d MB budget'
+          % (bake[4] if bake else -1, bake[5] if bake else -1))
+    check(len(befores) == 2 and befores[0] == befores[1] and op_[:2] == [1, 1] and op_[2] > 0 and op_[3] == 1,
+          'saved and opened: the baked frames play back the same particles (%s), and the tank\'s closed surface'
+          % (befores[0][:3] if befores else '?'))
+
+    f, q = fake_session()
+    try:
+        f.keymap(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'keymaps', 'us.xkb'))
+        f.enter(600, 300)
+        f.move(600, 300)
+        import fakewl
+        q('delete("Cube")')
+        m = f.mcp
+        ok = fakewl.menu_pick(f, m, 'Add', 'Particles', 'Fountain')
+        f.pump(0.3)
+        a = q('print(active(), particles(1))').split()
+        check(ok and a[:1] == ['Fountain'], 'Add > Particles > Fountain by clicks: a fountain, active (%s)' % a)
+        fakewl.props_tab(m, f, 'particles')
+        r = fakewl.wait_widget(f, m, 'particles.rate')
+        check(r is not None and r.get('value') == 600, 'Properties > Particles: its Emission, 600 a second (%s)'
+              % (r and r.get('value')))
+        x, y = fakewl.widget_xy(m, 'particles.rate')
+        f.click(x, y)
+        f.mods(4); f.key(30); f.mods(0); f.type('240'); f.key(28); f.pump(0.3)
+        n1 = q('frame(1)\nframe(25)\nprint(particles(0))').split()
+        f.mods(4); f.key(44); f.mods(0); f.pump(0.3)          # Ctrl+Z
+        n2 = q('frame(1)\nframe(25)\nprint(particles(0))').split()
+        check(n1 == ['240'] and n2 == ['600'], 'its rate typed in the tab: 240 born in a second (%s); Ctrl+Z: 600 again (%s)'
+              % (n1, n2))
+        fakewl.pick_enum(f, m, 'particles.add_list', 0, 3)    # Sparks
+        f.pump(0.3)
+        n3 = q('print(particles(1))\nframe(2)\nprint(particles(1))').split()
+        check(n3[-1:] == ['2'], 'Add System... > Sparks in the tab: a second system on the fountain (%s)' % n3)
+        for name in ('particles.section.emission', 'particles.section.motion', 'particles.section.look'):
+            w = fakewl.widget(m, name)                          # (folded: the cache comes into view)
+            if w:
+                f.click(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2); f.pump(0.2)
+        x, y = fakewl.widget_xy(m, 'particles.section.cache')
+        f.click(x, y); f.pump(0.3)
+        q('op("anim.range", "1 48")')
+        b = fakewl.wait_widget(f, m, 'particles.bake')
+        if b:
+            f.click(b['x'] + b['w'] // 2, b['y'] + b['h'] // 2)
+        for _ in range(40):
+            f.pump(0.25)
+            c = q('print(cacheinfo(9), cacheinfo(7), cacheinfo(2))').split()
+            if c[:1] == ['1']:
+                break
+        check(b is not None and c[:2] == ['1', '47'], 'the tab\'s Cache > Bake: 47 frames baked (%s)' % c)
+        f.shot('p6_particles.png')
+    finally:
+        f.proc.kill()
+
+
 if __name__ == '__main__':
     p1()
     p2()
     p3()
     p4()
     p5()
+    p6()
     if FAILS:
         print('%d FAILED' % len(FAILS))
         sys.exit(1)
