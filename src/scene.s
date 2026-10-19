@@ -25,6 +25,7 @@
 .globl obj_copy
 .globl obj_remove_at
 .globl obj_rename
+.globl op_create
 .globl select_none
 .globl scene_clear
 .globl scene_defaults

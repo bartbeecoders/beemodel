@@ -444,6 +444,8 @@ builtins:
     .long 1, 3
     .quad bn_force, b_force
     .long 3, 4
+    .quad bn_fieldinfo, b_fieldinfo
+    .long 1, 1
     .quad bn_shatter, b_shatter
     .long 3, 4
     .quad bn_height, b_height
@@ -792,6 +794,7 @@ bn_folders:     .asciz "folders"
 bn_refimage:    .asciz "refimage"
 bn_field:       .asciz "field"
 bn_force:       .asciz "force"
+bn_fieldinfo:   .asciz "fieldinfo"
 bn_shatter:     .asciz "shatter"
 s_sh_opname:    .asciz "object.shatter"
 s_sh_cnt:       .asciz " count "
@@ -5778,8 +5781,9 @@ b_refimage:
 
 # field(type [, name [, settings]]) -> the name of a new force field at the
 #   3D cursor (Add > Force Field: attractor, zone, wind, vortex, turbulence,
-#   drag; settings as field.set takes them: "strength 20 falloff smooth"),
-#   nil when the type is not one
+#   drag, or a preset: planet, blackhole, tornado, breeze; settings as
+#   field.set takes them: "strength 20 falloff smooth"), nil when the type
+#   is not one
 b_field:
     push    rbx
     push    r12
@@ -5821,6 +5825,17 @@ b_field:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# fieldinfo(k) -> 0 force fields in the scene, 1 the overlay's arrows (as
+#   last drawn), 2 its streamline segments, 3 the largest pull it showed
+b_fieldinfo:
+    sub     rsp, 8
+    call    a_num
+    cvttsd2si edi, xmm0
+    call    fl_info
+    add     rsp, 8
+    cvtss2sd xmm0, xmm0
+    jmp     ret_num
 
 # force(x, y, z [, axis]) -> the force fields' and gravity's acceleration at
 #   that point (m/s2, on a still thing of group 0): its size, or one axis

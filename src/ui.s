@@ -142,7 +142,7 @@ items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_palette_open, 0
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
                 .quad op_view_wire, op_view_matprev, op_view_rendered, op_view_grid, op_view_reset_cam, op_console_clear, 0
-                .quad sub_analysis, op_view_measure, 0, sub_theme, sub_workspace
+                .quad sub_analysis, op_view_measure, op_fl_arrows, op_fl_lines, 0, sub_theme, sub_workspace
 .equ items_view_n, (. - items_view) / 8
 items_select:   .quad op_select_all, 0, op_mesh_all, op_mesh_inv, op_mesh_linked, op_mesh_box, 0
                 .quad op_selmode_v, op_selmode_e, op_selmode_f
@@ -189,7 +189,8 @@ sub_snap_l:     .quad op_cursor_sel, op_cursor_reset, op_sel_cursor, op_sel_grid
 sub_parent_l:   .quad op_par_set, op_par_clear
 sub_separate_l: .quad op_sep_loose
 sub_physics_l:  .quad op_rb_add, op_rb_rem, op_rb_joint, 0, op_shatter
-sub_field_l:    .quad op_fl_attr, op_fl_zone, op_fl_wind, op_fl_vortex, op_fl_turb, op_fl_drag
+sub_field_l:    .quad op_fl_attr, op_fl_zone, op_fl_wind, op_fl_vortex, op_fl_turb, op_fl_drag, 0
+                .quad op_fl_planet, op_fl_hole, op_fl_tornado, op_fl_breeze
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -211,7 +212,7 @@ SUBMENU sub_snap, "Snap", sub_snap_l, 5
 SUBMENU sub_parent, "Parent", sub_parent_l, 2
 SUBMENU sub_separate, "Separate", sub_separate_l, 1
 SUBMENU sub_physics, "Physics", sub_physics_l, 5
-SUBMENU sub_field, "Force Field", sub_field_l, 6
+SUBMENU sub_field, "Force Field", sub_field_l, 11
 SUBMENU sub_workspace, "Workspace", sub_ws_l, 6
 
 # -----------------------------------------------------------------------------
