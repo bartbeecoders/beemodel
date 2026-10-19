@@ -204,8 +204,8 @@ def main():
     mcpcfg = json.load(open(a[a.index('--mcp-config') + 1]))['mcpServers']['beemodel']
     check(a[:2] == ['-p', 'build a tower'] and 'stream-json' in a and '--verbose' in a
           and '--strict-mcp-config' in a and a[a.index('--allowedTools') + 1] == 'mcp__beemodel'
-          and a[a.index('--max-turns') + 1] == '40' and '--resume' not in a,
-          'claude -p ... --output-format stream-json --strict-mcp-config --allowedTools mcp__beemodel --max-turns 40')
+          and a[a.index('--max-turns') + 1] == '100' and '--resume' not in a,
+          'claude -p ... --output-format stream-json --strict-mcp-config --allowedTools mcp__beemodel --max-turns 100')
     sysprompt = a[a.index('--append-system-prompt') + 1]
     check('scene_summary' in sysprompt and 'script_eval' in sysprompt and 'Y is up' in sysprompt,
           'the world-building instructions go with it (--append-system-prompt)')
@@ -292,6 +292,10 @@ def main():
     wait_idle()
     a = json.load(open(os.path.join(home, 'grok.runs.json')))[-1]['args']
     check('-r' in a and a[a.index('-r') + 1].startswith('sess-'), 'a Grok follow-up resumes (-r <session>)')
+    send('a long job')
+    t = '\n'.join(wait_idle())
+    check('Stopped after 100 turns' in t and 'Type continue' in t and 'error_max_turns' not in t,
+          f'the turn limit reached: a note saying so and how to go on, not a bare error ({t[-160:]!r})')
 
     # -- OpenRouter
     print('  -- OpenRouter --')

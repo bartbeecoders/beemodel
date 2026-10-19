@@ -176,6 +176,9 @@ v_text:         .asciz "text"
 v_tool_use:     .asciz "tool_use"
 v_tool_result:  .asciz "tool_result"
 v_success:      .asciz "success"
+v_maxturns:     .asciz "error_max_turns"
+s_maxturns1:    .asciz "Stopped after "
+s_maxturns2:    .asciz " turns (Preferences > AI > Turns at most). Type continue to go on from where it stopped."
 s_op_pfx:       .asciz "op_"
 s_run_op:       .asciz "run_operator"
 s_agent:        .asciz "Agent: "
@@ -1191,7 +1194,23 @@ ai_cli_line:
     mov     r13d, 1
 71: test    r13d, r13d
     jz      .Lcl_out
-    mov     rsi, rbx
+    lea     rdi, [rip+ai_type]          # the turn limit: a note, and how to go
+    lea     rsi, [rip+v_maxturns]       #  on (the session is kept: "continue"
+    call    str_eq                      #  resumes it)
+    test    eax, eax
+    jz      73f
+    call    fmt_reset
+    lea     rdi, [rip+s_maxturns1]
+    call    fmt_str
+    lea     rdi, [rip+ai_turns]
+    call    fmt_str
+    lea     rdi, [rip+s_maxturns2]
+    call    fmt_str
+    mov     edi, K_NOTE
+    lea     rsi, [rip+fmt_buf]
+    call    ai_add_z
+    jmp     .Lcl_out
+73: mov     rsi, rbx
     lea     rdi, [rip+k_result]
     call    ai_text
     test    eax, eax
