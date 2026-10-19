@@ -87,7 +87,7 @@ Vulkan function through `vkGetInstanceProcAddr`. Its shaders are GLSL
 Shader graphs run on the GPU too (v0.13): a second build of the shader
 (`ptg`, made the first time a scene needs it) interprets each material's
 node graph per hit: texture samples (the images go up as 8-bit texels),
-texture coordinates, checker, gradient and noise patterns, mix, ramp, math
+texture coordinates, the vertex colour (v0.23), checker, gradient and noise patterns, mix, ramp, math
 and vector math, separate / combine, invert, constants and parameters,
 and the bump and normal-map normals. Masked, translucent and one-sided
 materials let rays through as on the CPU (by chance, as much as they do).

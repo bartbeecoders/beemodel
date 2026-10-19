@@ -72,6 +72,7 @@ const float SUN_PDF = 4181.5;
 const vec3 LUMW = vec3(0.2126, 0.7152, 0.0722);
 
 uint64_t rng;
+bool g_vcol = false;                    // the graph read the vertex colour (no tint after)
 
 float rnd() {
     uint64_t x = rng;
@@ -361,6 +362,7 @@ vec4 R[48 * 5];
 vec3 G_P;                           // the object point
 vec2 G_UV;
 vec3 G_N;                           // the shading normal (world)
+vec3 G_VC;                              // the vertex colour (linear; white if none)
 
 vec4 node_in(uint m, uint j, uint k) {
     uint l = mwu(m, nw(m, j, 1u + k * 4u));
@@ -605,6 +607,7 @@ void graph_eval(uint m, uint64_t live) {
             for (uint k = 1u; k < 4u; k++) put_out(j, k, vec4(v[k - 1u]));
             put_out(j, 0u, vec4(v, v.x));
             break; }
+        case 14u: put_col(j, G_VC); g_vcol = true; break;      // vertex colour
         case 16u: put_val(j, np(m, j, 0u)); break;              // constant
         case 17u: put_col(j, node_in(m, j, 0u).xyz); break;     // color
         case 19u: {                                             // vector math
@@ -736,6 +739,7 @@ void graph_shade(uint m, uint t, float u, float v, bool cover, inout Mat mt, ino
     }
     S_PU = tv3(t, 1u); S_PV = tv3(t, 2u);
     G_N = ns;
+    G_VC = tvc[t * 3u] != 0u ? vcol_lin3(t, u, v) : vec3(1.0);     // (none: white)
     if (isnan(tuv[t * 6u])) box_uv();
     else for (int k = 0; k < 3; k++) S_UV[k] = vec2(tuv[t * 6u + uint(2 * k)], tuv[t * 6u + uint(2 * k + 1)]);
     // one evaluation site (each one is inlined): the point, then for a bump
@@ -1303,12 +1307,14 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
         if (P.debug == 1u) { L = ns * 0.5 + vec3(0.5); break; }
         Mat m = mat_of(t);
 #ifdef GRAPHS
+        g_vcol = false;
         if (tmat(t) != 0u && mwu(tmat(t), W_GRN) != 0u) {     // its graph here
             float al, mk;
             graph_shade(tmat(t), t, ray.u, ray.v, false, m, ns, al, mk);
         }
 #endif
-        if (tvc[t * 3u] != 0u) m.base *= vcol_lin3(t, ray.u, ray.v);
+        if (tvc[t * 3u] != 0u && !g_vcol) m.base *= vcol_lin3(t, ray.u, ray.v);   // (a graph that
+                                                                                //  reads them: no tint)
         if (m.strength > 0.0) {                         // emission
             float wgt = 1.0;
             if (!spec) wgt = mis(prev, light_pdf_tri(t, ray.t, ray.d));
