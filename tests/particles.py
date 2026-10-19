@@ -23,6 +23,11 @@ never get inside a passive rigid-body cube; sticking stops them on it;
 split makes new particles at each hit; births and deaths feed other
 systems too.
 
+P4: liquid - a tank of water comes to rest flat within one particle
+radius at the level its volume gives; a light box floats in it and a
+heavy one sinks; water runs further than honey; the same on 1 and 8
+threads; a dam break of 200k particles steps under 1 s a frame on 8.
+
     python3 tests/particles.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -481,10 +486,105 @@ print("ev", particles(20, 1), particles(20, 2), particles(22, 0))
     check(e == [20, 10, 0], 'events: 10 sparks born and died: 2 ash each when they died, 1 trail each when born (%s)' % e)
 
 
+TANK = '''delete("Light")
+scale("Cube", 0.5, 0.15, 0.25)
+move("Cube", 0, H, 0)
+emit("Cube", "from fill size 0.04 life 1000 liquid on domain -0.5 0 -0.25 0.5 1 0.25 speed 0 VISC")
+'''
+
+
+def p4():
+    print('-- P4: liquid --')
+    out = run(TANK.replace('H', '0.3').replace('VISC', '') + '''
+for f in 2..120 {
+  frame(f)
+}
+lo = 9
+hi = -9
+for b in 0..10 {
+  x0 = -0.5 + b * 0.1
+  top = -9
+  for i in 0..particles(0) {
+    x = particles(6, i)
+    if x >= x0 and x < x0 + 0.1 {
+      if particles(7, i) > top { top = particles(7, i) }
+    }
+  }
+  if top < lo { lo = top }
+  if top > hi { hi = top }
+}
+print("level", particles(0), lo, hi)
+''')
+    lv = vals(out, 'level')
+    want = lv[0] * 0.04 ** 3 / 0.5 if lv else 0
+    check(len(lv) == 3 and lv[2] - lv[1] < 0.02 and abs(lv[2] - want) < 0.04,
+          'a tank of water dropped 0.15 m: at rest its level is flat within one particle radius (0.02 m: '
+          '%s) and where its volume puts it (%.3f m)' % (lv[1:], want))
+    box = TANK.replace('H', '0.16').replace('VISC', '') + '''op("create.ground")
+add("cube", "Box", -0.2, 0.6, 0)
+scale("Box", 0.08, 0.08, 0.08)
+select("Box")
+op("rigid.add", "active box mass MASS")
+lo = 9
+for f in 2..150 {
+  frame(f)
+  if f > 60 {
+    y = get("Box", "y")
+    if y < lo { lo = y }
+  }
+}
+print("box", lo, get("Box", "y"))
+'''
+    fl = vals(run(box.replace('MASS', '1.5')), 'box')
+    sk = vals(run(box.replace('MASS', '15')), 'box')
+    check(len(fl) == 2 and fl[0] > 0.17 and len(sk) == 2 and sk[1] < 0.1,
+          'a 0.16 m box of 370 kg/m3 floats (never below %.3f m, the floor holds it at 0.08), one of 3700 kg/m3 '
+          'sinks (%.3f m)' % (fl[0] if fl else -1, sk[1] if sk else -1))
+    front = TANK.replace('H', '0.3').replace('scale("Cube", 0.5, 0.15, 0.25)', 'scale("Cube", 0.15, 0.3, 0.25)').replace(
+        'move("Cube", 0, 0.3, 0)', 'move("Cube", -0.35, 0.3, 0)') + '''frame(9)
+m = -9
+for i in 0..particles(0) {
+  if particles(6, i) > m { m = particles(6, i) }
+}
+print("front", m)
+'''
+    fw = vals(run(front.replace('VISC', 'viscosity water')), 'front')
+    fh = vals(run(front.replace('VISC', 'viscosity honey')), 'front')
+    check(fw and fh and fw[0] > fh[0] + 0.05,
+          'a dam of water runs further in 0.33 s than one of honey (fronts at %s and %s m)' % (fw, fh))
+    code = TANK.replace('H', '0.3').replace('VISC', 'vorticity 0.5') + '''frame(20)
+s = 0
+for i in 0..particles(0) {
+  s = s + particles(6, i) * 1.7 - particles(7, i) + particles(8, i) * 0.3
+}
+print("hash", s)
+'''
+    hs = [vals(run(code, threads=t), 'hash') for t in (1, 8)]
+    check(hs[0] and hs[0] == hs[1], 'the same liquid on 1 and 8 threads (vorticity on) (%s)' % hs)
+    out = run('''delete("Light")
+scale("Cube", 0.5, 0.8, 0.5)
+move("Cube", -1.5, 0.8, 0)
+emit("Cube", "from fill size 0.02 life 1000 liquid on domain -2 0 -0.5 2 2 0.5 speed 0")
+frame(2)
+t = 0
+for f in 3..9 {
+  frame(f)
+  t = t + particles(23)
+}
+print("dam", particles(0), t / 6, particles(27))
+''', threads=8)
+    d = vals(out, 'dam')
+    lim = 3000 if CI else 1000
+    check(len(d) == 3 and d[0] == 200000 and d[1] < lim,
+          'a dam break of 200k particles: %.0f ms a frame on 8 threads (under %d; the densest %.2f x rest)'
+          % (d[1] if d else -1, lim, d[2] if d else -1))
+
+
 if __name__ == '__main__':
     p1()
     p2()
     p3()
+    p4()
     if FAILS:
         print('%d FAILED' % len(FAILS))
         sys.exit(1)
