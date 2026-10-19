@@ -53,6 +53,8 @@
 
 .globl rb_frame
 .globl rb_gravity
+.globl rb_bd
+.globl rb_nb
 .globl rb_info
 .globl rb_reset
 .globl rb_impulse
@@ -67,6 +69,7 @@
 .equ RW_ITER,   16                      # solver iterations (0: 10)
 .equ RW_SET,    20                      # gravity was set
 .equ RW_SUB,    24                      # substeps a step (0: 4)
+.equ RW_G,      28                      # bodies' attraction: G (0: 1; nbody.s)
 .equ RB_UID,    0
 .equ RB_TYPE,   4                       # 1 active, 2 passive
 .equ RB_SHAPE,  8                       # 0 box 1 sphere 2 capsule 3 hull 4 compound
@@ -82,6 +85,7 @@
 .equ RB_VEL,    68                      # its velocity at the start (3 floats)
 .equ RBF_GRP,   4                       # RB_FLAGS bits 4-7: its group (0-15);
 .equ RBF_IGN,   16                      #  16-31: the groups it does not meet
+.equ RBF_ATTR,  0x100                   # bit 8: it attracts the others (nbody.s)
 .equ JT_TYPE,   0                       # 1 fixed, 2 hinge, 3 point, 4 slider
 .equ JT_A,      4                       # object uids (B 0: the world)
 .equ JT_B,      8
@@ -124,7 +128,9 @@
 .equ BD_PP,     304                     # where the step began: its position,
 .equ BD_PQ,     320                     #  orientation (continuous collision)
 .equ BD_GRP0,   336                     # (dormant: its groups to be)
-.equ BD_SZ,     352
+.equ BD_AM,     340                     # its attracting mass (0: it does not; nbody.s)
+.equ BD_NBA,    352                     # the bodies' pull this step (nbody.s)
+.equ BD_SZ,     368
 .equ IMP_MAX,   64                      # shatter on impact: groups,
 .equ IMP_BODY,  0                       #  the original's body,
 .equ IMP_THR,   4                       #  the blow it takes (N s),
@@ -1891,6 +1897,11 @@ make_body_ex:
     and     eax, 0xffff0000
     or      eax, edx
     mov     [rbx+BD_GRP], eax
+    xor     eax, eax                    # it attracts: by its mass
+    test    dword ptr [r12+RB_FLAGS], RBF_ATTR
+    jz      2f
+    mov     eax, [r12+RB_MASS]
+2:  mov     [rbx+BD_AM], eax
     cmp     dword ptr [r12+RB_TYPE], 1  # moving: its velocity at the start
     jne     1f
     movups  xmm0, [r12+RB_VEL-4]
@@ -3465,6 +3476,19 @@ rb_step:
     mulss   xmm0, [rip+rb_dt]
     lea     rdi, [rip+rb_g]
     call    fl_prep
+    mov     rax, [rip+an_cur]           # bodies that attract (nbody.s)
+    movss   xmm0, [rip+rx_one]
+    test    rax, rax
+    jz      91f
+    movss   xmm1, [rax+AN_RW_+RW_G]
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    je      91f
+    movss   xmm0, xmm1
+91: cmp     dword ptr [rip+rb_stepno], 1    # (the first step: half a kick -
+    jne     92f                             #  leapfrog, the speeds half a
+    mulss   xmm0, [rip+rx_half4]            #  step ahead from then on)
+92: call    nb_step
     call    now_ns
     mov     rbx, rax
     call    ccd_mark                    # where the moving bodies begin
@@ -8100,7 +8124,15 @@ body_force:
     call    fl_accel
     pop     rdi
     movaps  xmm7, xmm0
-1:  movss   xmm6, [rip+rb_h]
+1:  cmp     dword ptr [rip+nb_on], 0    # bodies that attract: the step's pull
+    je      2f                          #  as one kick in its first substep
+    cvtsi2ss xmm6, dword ptr [rip+rb_nsub]  # (kick, then drift: symplectic; the
+    shufps  xmm6, xmm6, 0               #  pull is from where the step began)
+    mulps   xmm6, [rdi+BD_NBA]
+    addps   xmm7, xmm6
+    xorps   xmm6, xmm6
+    movaps  [rdi+BD_NBA], xmm6
+2:  movss   xmm6, [rip+rb_h]
     shufps  xmm6, xmm6, 0
     mulps   xmm7, xmm6                  # g h
     movaps  xmm0, [rdi+BD_V]
@@ -9750,6 +9782,13 @@ rb_info:
     inc     ecx
     jmp     211b
 212:
+    cmp     edi, 22                     # 22-24: bodies that attract, the
+    jb      213f                        #  tree's cells, its ms (nbody.s)
+    cmp     edi, 24
+    ja      213f
+    sub     edi, 22
+    jmp     nb_info
+213:
     cmp     edi, 16                     # 16: every body's place, turn and
     je      6f                          #  speeds, hashed (24 bits: exact)
     cmp     edi, 17                     # 17: the fastest awake body's speed
@@ -9827,16 +9866,19 @@ rb_info:
 # =============================================================================
 #  Operators
 # =============================================================================
-OPERATOR op_rb_add,   "rigid.add",    "Add Rigid Body",    do_rb_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects rigid bodies (or change them): rigid.add [active|passive] [box|sphere|capsule|hull|compound] [instances|object] [mass m] [friction f] [bounce b] [damping d]. Active ones fall when the frame goes past the start; instances: each instance of the object's geometry (nodes) is a body of its own, shaped like its prototype", form=form_rigid
+OPERATOR op_rb_add,   "rigid.add",    "Add Rigid Body",    do_rb_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the selected objects rigid bodies (or change them): rigid.add [active|passive] [box|sphere|capsule|hull|compound] [instances|object] [mass m] [friction f] [bounce b] [damping d] [velocity x y z] [group n] [collide bits] [attracts|noattract] (attracts: it pulls the other bodies by its mass). Active ones fall when the frame goes past the start; instances: each instance of the object's geometry (nodes) is a body of its own, shaped like its prototype", form=form_rigid
 OPERATOR op_rb_rem,   "rigid.remove", "Remove Rigid Body", do_rb_rem, flags=OPF_AI_SAFE|OPF_UNDO, doc="The selected objects are no longer rigid bodies"
 OPERATOR op_rb_joint, "rigid.joint",  "Add Joint",         do_rb_joint, flags=OPF_AI_SAFE|OPF_UNDO, doc="Tie two bodies (or one to the world): rigid.joint <fixed|hinge|point|slider> <object> <object|world> [pivot x y z] [axis x y z] [break force] [limits lo hi] [motor speed force] (pivot: the first object's place; axis: Y; hinge limits and motor speed in degrees)", form=form_rjoint
-OPERATOR op_rb_world, "rigid.world",  "Physics World",     do_rb_world, flags=OPF_AI_SAFE|OPF_UNDO, doc="Physics settings: rigid.world [gravity x y z] [rate steps-a-second] [iterations n (a step, over its substeps)] [substeps n (1-64; 4)]"
+OPERATOR op_rb_world, "rigid.world",  "Physics World",     do_rb_world, flags=OPF_AI_SAFE|OPF_UNDO, doc="Physics settings: rigid.world [gravity x y z] [g n (bodies that attract: G, 1 by default)] [rate steps-a-second] [iterations n (a step, over its substeps)] [substeps n (1-64; 4)]"
 
 .section .rodata
 k_active:       .asciz "active"
 k_velocity:     .asciz "velocity"
 k_group:        .asciz "group"
 k_collide:      .asciz "collide"
+k_attracts:     .asciz "attracts"
+k_noattr:       .asciz "noattract"
+k_g:            .asciz "g"
 k_material:     .asciz "material"
 pm_names:       .quad k_pm_def, k_pm_rubber, k_pm_ice, k_pm_wood, k_pm_metal, k_pm_stone, 0
 k_pm_def:       .asciz "default"
@@ -10069,6 +10111,21 @@ do_rb_add:
     or      dword ptr [rsp+24], 8|16
     jmp     1b
 36: lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_attracts]
+    call    str_eq
+    mov     ecx, RBF_ATTR
+    test    eax, eax
+    jnz     37f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_noattr]
+    call    str_eq
+    xor     ecx, ecx
+    test    eax, eax
+    jz      38f
+37: mov     [rsp+52], ecx               # attracts | not
+    or      dword ptr [rsp+24], 1024
+    jmp     1b
+38: lea     rdi, [rip+im_word]
     lea     rsi, [rip+shape_names]
     call    rb_word_index
     test    eax, eax
@@ -10179,7 +10236,12 @@ do_rb_add:
     mov     ecx, [rsp+48]
     shl     ecx, RBF_IGN
     or      [rdi+RB_FLAGS], ecx
-70: and     dword ptr [rdi+RB_FLAGS], ~1  # (its start: from where it is)
+70: test    edx, 1024                   # attracts
+    jz      71f
+    and     dword ptr [rdi+RB_FLAGS], ~RBF_ATTR
+    mov     ecx, [rsp+52]
+    or      [rdi+RB_FLAGS], ecx
+71: and     dword ptr [rdi+RB_FLAGS], ~1  # (its start: from where it is)
     inc     r14d
 61: inc     r15d
     jmp     6b
@@ -10491,6 +10553,18 @@ do_rb_world:
     mov     dword ptr [rbx+RW_SET], 1
     jmp     1b
 2:  lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_g]
+    call    str_eq
+    test    eax, eax
+    jz      21f
+    mov     rsi, r12                    # g n: bodies' attraction
+    call    rb_num
+    mov     r12, rsi
+    test    eax, eax
+    jz      8f
+    movss   [rbx+RW_G], xmm0
+    jmp     1b
+21: lea     rdi, [rip+im_word]
     lea     rsi, [rip+k_rate]
     call    str_eq
     mov     r8d, RW_RATE

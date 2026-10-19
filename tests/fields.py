@@ -15,6 +15,11 @@ sheet hung by one edge blows out in a wind field; a field for one
 collision group leaves the others alone; a gravity zone lands a body on
 a wall.
 
+A3: bodies that attract each other - two 1000 kg bodies marked Attracts
+(G 1) orbit their common centre: it stays put, their distance within 1%;
+5445 attracting bodies (instances) run at 10 steps a second or better
+(the tree and pulls timed: rbinfo(24)); Attracts in Properties > Physics.
+
     python3 tests/fields.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile, time
@@ -239,6 +244,17 @@ def a1_ui():
         check(len(g0) == 1 and len(g1) == 1 and abs(float(g0[0]) + 9.81) < 0.01 and abs(float(g1[0])) < 0.01,
               'World > Gravity unticked: no gravity (space), the fields still pull (%s -> %s)'
               % (g0, g1))
+        q('add("sphere", "Moon", 30, 0, 0)\nselect("Moon")\nop("rigid.add", "active sphere")')
+        f.pump(0.3)
+        for name in ('physics.section.world', 'physics.section.field'):
+            w = fakewl.widget(m, name)
+            if w:
+                f.click(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2); f.pump(0.2)
+        at = fakewl.wait_widget(f, m, 'rigid.attracts')
+        if at:
+            f.click(at['x'] + at['w'] // 2, at['y'] + at['h'] // 2); f.pump(0.3)
+        n = q('frame(3)\nprint(rbinfo(22))\nframe(1)').split()
+        check(at is not None and n[:1] == ['1'], 'Properties > Physics > Attracts the others: the Moon pulls (%s attracting)' % n[:1])
         f.shot('a1_fields.png')
     finally:
         f.proc.kill()
@@ -327,9 +343,79 @@ print("zone", get("Box", "x"), get("Box", "y"))
           % tuple(z) if len(z) == 2 else 'zone (%s)' % z)
 
 
+def a3():
+    print('-- A3: bodies that attract each other --')
+    out = run('''
+delete("Cube")
+op("rigid.world", "gravity 0 0 0")
+add("sphere", "P", 5, 0, 0)
+scale("P", 0.2)
+select("P")
+op("rigid.add", "active sphere mass 1000 attracts velocity 0 0 -7.0710678")
+add("sphere", "Q", -5, 0, 0)
+scale("Q", 0.2)
+select("Q")
+op("rigid.add", "active sphere mass 1000 attracts velocity 0 0 7.0710678")
+lo = 100
+hi = 0
+cm = 0
+for f in 2..480 {
+  if f % 4 == 0 {
+    frame(f)
+    dx = get("P", "x") - get("Q", "x")
+    dz = get("P", "z") - get("Q", "z")
+    d = sqrt(dx*dx + dz*dz)
+    lo = min(lo, d)
+    hi = max(hi, d)
+    c = abs(get("P", "x") + get("Q", "x")) + abs(get("P", "z") + get("Q", "z"))
+    cm = max(cm, c)
+  }
+}
+print("pair", lo, hi, cm, rbinfo(22))
+''')
+    p = vals(out, 'pair')
+    check(len(p) == 4 and p[0] > 9.9 and p[1] < 10.1 and p[2] < 1e-3 and p[3] == 2,
+          'two bodies that attract orbit their common centre (4.5 orbits): distance %.4f .. %.4f m, the centre '
+          'moves %.1e m' % tuple(p[:3]) if len(p) == 4 else 'pair (%s)' % p)
+    out = run('''
+delete("Cube")
+delete("Light")
+delete("Camera")
+op("rigid.world", "gravity 0 0 0 g 0.5")
+t = gtree("Cloud")
+o = gnode(t, "output")
+g = gnode(t, "grid", 100, 32)
+s = gnode(t, "sphere", 0.2)
+ip = gnode(t, "instance", 0, 0, 0)
+glink(t, g, ip, 1)
+glink(t, s, ip, 2)
+glink(t, ip, o, 1)
+for k in 0..5 {
+  n = "L" + str(k)
+  add("cube", n, k * 0.7, -40 + k * 20, k * 1.3)
+  m = modifier(n, "geometry")
+  modset(n, m, "tree", t)
+  select(n)
+  op("rigid.add", "active sphere mass 10 attracts instances")
+}
+y0 = instpos("L0", 500, 1)
+frame(2)
+t1 = clock()
+frame(26)
+t2 = clock()
+print("cloud", rbinfo(22), t2 - t1, rbinfo(24), instpos("L0", 500, 1) - y0)
+''')
+    c = vals(out, 'cloud')
+    sps = 120 / (c[1] / 1000) if len(c) == 4 and c[1] > 0 else 0
+    check(len(c) == 4 and c[0] >= 5000 and sps >= 10 and c[3] > 0,
+          '%d attracting bodies: %.0f steps a second (the tree and pulls %.2f ms a step); the bottom layer rises'
+          % (c[0], sps, c[2]) if len(c) == 4 else 'cloud (%s)' % c)
+
+
 if __name__ == '__main__':
     a1()
     a1_ui()
     a2()
+    a3()
     print('FAILS', FAILS)
     sys.exit(1 if FAILS else 0)
