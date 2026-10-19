@@ -2881,16 +2881,10 @@ fmt_val3:
     pop     rbx
     ret
 
-# mods_drag_begin / mods_drag_move - the physics section's fields (rbody.s)
+# mods_drag_begin / mods_drag_move - (the physics section is widgets now)
 mods_drag_begin:
-    test    edi, 0x80000
-    jz      1f
-    mov     dword ptr [rip+md_mat], 2
-    jmp     rb_drag_begin
-1:  ret
+    ret
 mods_drag_move:
-    cmp     dword ptr [rip+md_mat], 2
-    je      rb_drag_move
     ret
 
 mods_drag_end:

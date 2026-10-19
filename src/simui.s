@@ -1,9 +1,10 @@
 # =============================================================================
 #  BeeModel - physics from the Properties editor (below the rigid body
-#  section): cloth / soft body / collider with their settings and pins, the
-#  cloth world's wind, joints between two selected objects, and the
-#  simulation cache (bake, free, budget; the cached range shows in the
-#  timeline).
+#  sections, each a section that folds): cloth / soft body / collider with
+#  their settings and pins (open on cloth, closed on other objects), the
+#  cloth world's wind (closed at first), and the simulation cache (what is
+#  cached or baked for rigid bodies and cloth; bake, free, budget; the
+#  cached range shows in the timeline).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -29,12 +30,7 @@ sm_budget:      .skip 4
 sm_arg:         .skip 256
 
 .section .rodata
-s_h_cloth:      .asciz "Cloth and Soft Body"
-s_h_world:      .asciz "Cloth World"
-s_h_joint:      .asciz "Joints"
-s_h_cache:      .asciz "Simulation Cache"
 s_no_cloth:     .asciz "Make the selected objects cloth, soft bodies or colliders:"
-s_joint_hint:   .asciz "Select two objects (or one, tied to the world)."
 s_cloth_k:      .asciz "cloth"
 s_soft_k:       .asciz "soft"
 s_coll_k:       .asciz "collider"
@@ -55,8 +51,11 @@ k_budget:       .asciz "budget "
 k_selected:     .asciz "selected"
 k_none:         .asciz "none"
 s_sp:           .asciz " "
-s_frames:       .asciz " frames cached (rigid), "
-s_frames2:      .asciz " (cloth), "
+s_c_rigid:      .asciz "Rigid bodies: "
+s_c_cloth:      .asciz "Cloth: "
+s_c_frames:     .asciz " frames"
+s_c_baked:      .asciz " (baked)"
+s_c_mem:        .asciz "Memory in use: "
 s_mb:           .asciz " MB"
 .align 8
 l_cltype:       .quad s_cl_cloth, s_cl_soft, s_cl_coll
@@ -83,7 +82,10 @@ WIDGET wd_sm_wx,   WK_FLOAT, "cloth.wind_x", "Wind X", step=0.01, dec=2, flags=W
 WIDGET wd_sm_wy,   WK_FLOAT, "cloth.wind_y", "Y", step=0.01, dec=2, flags=WGF_COMPACT, cb=wind_cb, undo="Cloth World"
 WIDGET wd_sm_wz,   WK_FLOAT, "cloth.wind_z", "Z", step=0.01, dec=2, flags=WGF_COMPACT, cb=wind_cb, undo="Cloth World"
 WIDGET wd_sm_sub,  WK_INT, "cloth.substeps", "Substeps", 1.0, 100.0, 0.1, 0, WGF_CLAMP, cb=wind_cb, undo="Cloth World", tip="More is more accurate and slower"
-WIDGET wd_sm_joint, WK_BUTTON, "rigid.add_joint", "Add Joint...", aux=op_rb_joint
+WIDGET wd_sm_scl,  WK_SECTION, "physics.section.cloth", "Cloth and Soft Body"
+WIDGET wd_sm_scl0, WK_SECTION, "physics.section.cloth_add", "Cloth and Soft Body", flags=WGF_SHUT
+WIDGET wd_sm_swd,  WK_SECTION, "physics.section.cloth_world", "Cloth World", flags=WGF_SHUT
+WIDGET wd_sm_sch,  WK_SECTION, "physics.section.cache", "Simulation Cache", flags=WGF_SHUT
 WIDGET wd_sm_bake, WK_BUTTON, "sim.bake", "Bake", aux=op_sim_bake, tip="Simulate the frame range and keep it (saved with the file)"
 WIDGET wd_sm_free, WK_BUTTON, "sim.free", "Free", aux=op_sim_free, tip="Forget the cache (simulated again when played)"
 WIDGET wd_sm_budget, WK_INT, "sim.budget", "Memory budget (MB)", 16.0, 1048576.0, 1.0, 0, WGF_CLAMP, cb=budget_cb
@@ -102,9 +104,6 @@ sim_props:
     push    r15
     mov     r12d, edi
     call    pnl_begin
-    add     r12d, 8
-    lea     rdx, [rip+s_h_cloth]
-    call    pnl_heading
     mov     edi, [rip+active_obj]
     call    obj_get
     test    rax, rax
@@ -112,6 +111,13 @@ sim_props:
     mov     ebx, [rax+OB_UID]
     call    cloth_rec                   # (rax: its record, or 0)
     mov     r14, rax
+    lea     rdi, [rip+wd_sm_scl]        # open on cloth, closed on the rest
+    test    r14, r14
+    jnz     31f
+    lea     rdi, [rip+wd_sm_scl0]
+31: call    sm_section
+    test    eax, eax
+    jz      .Lsp_world
     test    r14, r14
     jnz     1f
     lea     rdx, [rip+s_no_cloth]       # not yet: Cloth | Soft Body | Collider
@@ -192,12 +198,13 @@ sim_props:
     call    pnl_full
 
 .Lsp_world:                             # ---- the cloth world ----
-    add     r12d, 8
-    lea     rdx, [rip+s_h_world]
-    call    pnl_heading
+    lea     rdi, [rip+wd_sm_swd]
+    call    sm_section
+    test    eax, eax
+    jz      .Lsp_cache
     mov     rax, [rip+an_cur]
     test    rax, rax
-    jz      .Lsp_joint
+    jz      .Lsp_cache
     lea     rsi, [rax+AN_CW_+CW_WIND]
     lea     rdi, [rip+sm_wind]
     mov     ecx, 12
@@ -232,31 +239,19 @@ sim_props:
     lea     r8, [rip+sm_sub]
     call    pnl_full
 
-.Lsp_joint:                             # ---- joints ----
-    add     r12d, 8
-    lea     rdx, [rip+s_h_joint]
-    call    pnl_heading
-    lea     rdx, [rip+s_joint_hint]
-    call    pnl_hint
-    lea     rdi, [rip+wd_sm_joint]
-    xor     r8d, r8d
-    call    pnl_full
-
-    add     r12d, 8                     # ---- the cache ----
-    lea     rdx, [rip+s_h_cache]
-    call    pnl_heading
-    call    fmt_reset                   # "n frames (rigid), m (cloth), k MB"
-    xor     edi, edi
-    call    sc_info
-    cvtss2si edi, xmm0
-    call    fmt_int
-    lea     rdi, [rip+s_frames]
-    call    fmt_str
-    mov     edi, 1
-    call    sc_info
-    cvtss2si edi, xmm0
-    call    fmt_int
-    lea     rdi, [rip+s_frames2]
+.Lsp_cache:                             # ---- the cache ----
+    lea     rdi, [rip+wd_sm_sch]
+    call    sm_section
+    test    eax, eax
+    jz      .Lsp_out
+    lea     rdi, [rip+s_c_rigid]        # Rigid bodies: 120 frames (baked)
+    xor     esi, esi
+    call    sm_cache_line
+    lea     rdi, [rip+s_c_cloth]        # Cloth: 0 frames
+    mov     esi, 1
+    call    sm_cache_line
+    call    fmt_reset                   # Memory in use: 12.5 MB
+    lea     rdi, [rip+s_c_mem]
     call    fmt_str
     mov     edi, 2
     call    sc_info
@@ -279,6 +274,7 @@ sim_props:
     lea     rdi, [rip+wd_sm_budget]
     lea     r8, [rip+sm_budget]
     call    pnl_full
+.Lsp_out:
     mov     eax, r12d
     pop     r15
     pop     r14
@@ -292,6 +288,51 @@ sim_props:
 mk_btns:        .quad wd_sm_mk1, wd_sm_mk2, wd_sm_mk3
 wind_fields:    .quad wd_sm_wx, wd_sm_wy, wd_sm_wz
 .text
+
+# sm_section(rdi=desc) -> eax = 1 open; r12d moves down
+sm_section:
+    sub     rsp, 8
+    mov     esi, [rip+pnl_x]
+    sub     esi, 6
+    mov     ecx, [rip+pnl_w]
+    add     ecx, 12
+    mov     edx, r12d
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    add     r12d, 28
+    add     rsp, 8
+    ret
+
+# sm_cache_line(rdi=label, esi=0 rigid / 1 cloth) - "n frames", "(baked)"
+sm_cache_line:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    fmt_reset
+    mov     rdi, rbx
+    call    fmt_str
+    mov     edi, r12d                   # cacheinfo 0 / 1: frames
+    call    sc_info
+    cvtss2si edi, xmm0
+    call    fmt_int
+    lea     rdi, [rip+s_c_frames]
+    call    fmt_str
+    lea     edi, [r12+3]                # 3 / 4: baked
+    call    sc_info
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     1f
+    lea     rdi, [rip+s_c_baked]
+    call    fmt_str
+1:  lea     rdx, [rip+fmt_buf]
+    call    pnl_text
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
 
 # cloth_rec(ebx=uid) -> rax = its cloth record, or 0
 cloth_rec:
