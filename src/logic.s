@@ -83,7 +83,9 @@
 .equ LT_INFO,   21
 .equ LT_GETP,   22
 .equ LT_SHATTER, 23
-.equ LG_NTYPES, 23
+.equ LT_SETSTR, 24                      # a force field's strength (fields.s)
+.equ LT_FIELD,  25                      # the pull at a point (data)
+.equ LG_NTYPES, 25
 
 # an instance: an object running a graph
 .equ LI_OBJ,    0                       # object handle
@@ -135,7 +137,7 @@ lg_ntypes:      .long LG_NTYPES
 lg_type_names:  .quad k_begin, k_tick, k_key, k_over, k_hit, k_timer, k_msg
                 .quad k_move, k_rot, k_setp, k_spawn, k_destroy, k_action, k_impulse
                 .quad k_vis, k_send, k_setvar, k_branch, k_var, k_math, k_info, k_getp
-                .quad k_shatter, 0
+                .quad k_shatter, k_setstr, k_field, 0
 k_begin:        .asciz "begin"
 k_tick:         .asciz "tick"
 k_key:          .asciz "key"
@@ -159,10 +161,12 @@ k_math:         .asciz "math"
 k_info:         .asciz "info"
 k_getp:         .asciz "get_property"
 k_shatter:      .asciz "shatter"
+k_setstr:       .asciz "set_strength"
+k_field:        .asciz "field"
 lg_titles:      .quad 0, t_begin, t_tick, t_key, t_over, t_hit, t_timer, t_msg
                 .quad t_move, t_rot, t_setp, t_spawn, t_destroy, t_action, t_impulse
                 .quad t_vis, t_send, t_setvar, t_branch, t_var, t_math, t_info, t_getp
-                .quad t_shatter
+                .quad t_shatter, t_setstr, t_field
 t_begin:        .asciz "Begin Play"
 t_tick:         .asciz "On Tick"
 t_key:          .asciz "On Key"
@@ -186,6 +190,8 @@ t_math:         .asciz "Math"
 t_info:         .asciz "Info"
 t_getp:         .asciz "Get Property"
 t_shatter:      .asciz "Shatter"
+t_setstr:       .asciz "Set Strength"
+t_field:        .asciz "Field"
 # per type (as nodeed.s reads it): input names, input kinds (1 value, 2
 #   vector, 4 run), value names, value kinds (0 number, 1 choice, 3 whole,
 #   5 name), the choices, output names, output kinds
@@ -213,6 +219,8 @@ lg_meta:        .quad 0, 0, 0, 0, 0, 0, 0
                 .quad nil3, lk_z, v_what, lk_1, ch_info, o_value, lk_2         # info
                 .quad nil3, lk_z, v_setp, lk_55, 0, o_value, lk_1              # get property
                 .quad i_run, lk_4, v_object, lk_5, 0, o_then, lk_4             # shatter
+                .quad i_value, lk_41, v_object, lk_5, 0, o_then, lk_4          # set strength
+                .quad i_point, lk_2, nil4, lk_z, 0, o_force, lk_21             # field
 lk_z:             .byte 0, 0, 0, 0
 lk_4:             .byte 4, 0, 0, 0
 lk_411:           .byte 4, 1, 1, 0
@@ -220,6 +228,7 @@ lk_41:            .byte 4, 1, 0, 0
 lk_42:            .byte 4, 2, 0, 0
 lk_44:            .byte 4, 4, 0, 0
 lk_22:            .byte 2, 2, 0, 0
+lk_21:            .byte 2, 1, 0, 0
 lk_2:             .byte 2, 0, 0, 0
 lk_1:             .byte 1, 0, 0, 0
 lk_3:             .byte 3, 0, 0, 0
@@ -246,6 +255,8 @@ i_impulse:      .quad s_run, s_impulse, 0
 i_visible:      .quad s_run, s_visible, 0
 i_cond:         .quad s_run, s_condition, 0
 i_ab:           .quad s_a, s_b, 0
+i_point:        .quad s_point, 0, 0
+o_force:        .quad s_force, s_size, 0
 v_key:          .quad s_keyv, s_when, 0, 0
 v_over:         .quad s_with, s_when, s_margin, 0
 v_timer:        .quad s_seconds, s_repeat, 0, 0
@@ -298,6 +309,9 @@ s_to:           .asciz "To"
 s_variable:     .asciz "Variable"
 s_operation:    .asciz "Operation"
 s_what:         .asciz "What"
+s_point:        .asciz "Point"
+s_force:        .asciz "Force"
+s_size:         .asciz "Size"
 c_pressed:      .asciz "Pressed"
 c_released:     .asciz "Released"
 c_held:         .asciz "Held"
@@ -419,7 +433,7 @@ lg_tnow:        .skip 512               # objects the player touched (handles)
 .text
 OPERATOR op_logic_new,    "logic.new",    "New Logic Graph", do_logic_new, flags=OPF_AI_SAFE|OPF_UNDO, doc="A new, empty logic graph (a node tree that runs in play mode): logic.new [name]"
 OPERATOR op_logic_attach, "logic.attach", "Attach Logic", do_logic_attach, flags=OPF_AI_SAFE|OPF_UNDO, doc="Run a logic graph on an object in play mode (a Logic modifier): logic.attach <graph> [object]"
-OPERATOR op_logic_node,   "logic.node",   "Add Logic Node", do_logic_node, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a node to a logic graph: logic.node <graph> <type> [values] (types: begin tick key overlap hit timer message move rotate set_property spawn destroy play_action impulse visibility send set_variable branch variable math info get_property shatter); link and set with tree.link / tree.node_set"
+OPERATOR op_logic_node,   "logic.node",   "Add Logic Node", do_logic_node, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a node to a logic graph: logic.node <graph> <type> [values] (types: begin tick key overlap hit timer message move rotate set_property spawn destroy play_action impulse visibility send set_variable branch variable math info get_property shatter set_strength field); link and set with tree.link / tree.node_set"
 OPERATOR op_logic_name,   "logic.name",   "Set Logic Name", do_logic_name, flags=OPF_AI_SAFE|OPF_UNDO, doc="Set a node's name value (a message, an object, a property, an action): logic.name <graph> <node> <value 4-7> [text]"
 
 # =============================================================================
@@ -1332,7 +1346,9 @@ lg_run_from:
     mov     edi, ebx
     call    lg_node
     mov     ecx, [rax+ND_TYPE]
-    cmp     ecx, LT_SHATTER             # (actions: move .. branch, shatter)
+    cmp     ecx, LT_SHATTER             # (actions: move .. branch, shatter,
+    je      21f                         #  set strength)
+    cmp     ecx, LT_SETSTR
     je      21f
     cmp     ecx, LT_MOVE
     jb      2f
@@ -1400,6 +1416,31 @@ lg_exec:
     je      .Lle_branch
     cmp     eax, LT_SHATTER
     je      .Lle_shatter
+    cmp     eax, LT_SETSTR
+    je      .Lle_setstr
+    jmp     .Lle_then
+
+.Lle_setstr:                            # a force field's strength: Value's x
+    mov     edi, ebx
+    xor     esi, esi
+    call    lg_target
+    test    rax, rax
+    jz      .Lle_then
+    cmp     dword ptr [rax+OB_TYPE], OT_FIELD
+    jne     .Lle_then
+    mov     r13d, [rax+OB_UID]
+    mov     edi, ebx
+    mov     esi, 1
+    call    lg_input
+    movss   [rsp+32], xmm0
+    mov     edi, r13d
+    xor     esi, esi
+    call    fl_rec_own
+    test    rax, rax
+    jz      .Lle_then
+    movss   xmm0, [rsp+32]
+    movss   [rax+FF_STR], xmm0
+    mov     dword ptr [rip+dirty], 1
     jmp     .Lle_then
 
 .Lle_move:
@@ -1874,11 +1915,13 @@ lg_input:
 2:  shufps  xmm0, xmm0, 0
     andps   xmm0, [rip+lf_xyz]
     jmp     9f
-3:  cmp     eax, LT_VAR                 # data nodes: pulled
+3:  cmp     eax, LT_FIELD               # data nodes: pulled
+    je      31f
+    cmp     eax, LT_VAR
     jb      8f
     cmp     eax, LT_GETP
     ja      8f
-    mov     edi, r12d
+31: mov     edi, r12d
     mov     esi, r13d
     call    lg_data
     jmp     9f
@@ -1901,6 +1944,7 @@ lg_data:
     jae     .Lld_ret
     inc     dword ptr [rip+lg_depth]
     mov     ebx, edi
+    mov     [rsp+56], esi               # (the output: a field's Force, Size)
     call    lg_node
     mov     r12, rax
     mov     eax, [r12+ND_TYPE]
@@ -1912,8 +1956,27 @@ lg_data:
     je      .Lld_info
     cmp     eax, LT_GETP
     je      .Lld_getp
+    cmp     eax, LT_FIELD
+    je      .Lld_field
     xorps   xmm0, xmm0
     jmp     .Lld_out
+
+.Lld_field:                             # the pull at Point: Force, its Size
+    mov     r13d, [rsp+56]
+    mov     edi, ebx
+    xor     esi, esi
+    call    lg_input
+    movups  [rsp], xmm0
+    lea     rdi, [rsp]
+    lea     rsi, [rsp+16]
+    call    fl_sample
+    movups  xmm0, [rsp+16]
+    andps   xmm0, [rip+lf_xyz]
+    test    r13d, r13d
+    jz      .Lld_vec
+    dpps    xmm0, xmm0, 0x71
+    sqrtss  xmm0, xmm0
+    jmp     .Lld_bcast
 
 .Lld_var:
     cvttss2si ecx, [r12+ND_P]

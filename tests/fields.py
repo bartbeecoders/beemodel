@@ -20,6 +20,12 @@ A3: bodies that attract each other - two 1000 kg bodies marked Attracts
 5445 attracting bodies (instances) run at 10 steps a second or better
 (the tree and pulls timed: rbinfo(24)); Attracts in Properties > Physics.
 
+A4: walk on a planet - in play mode on a 20 m sphere with an attractor at
+its centre (the world's gravity off) the player walks forward: a quarter
+round it stands on the side (its up: sideways), half way on the bottom
+(up: down), and once round it is back at its start; the logic nodes Set
+Strength (a field's strength in play) and Field (the pull at a point).
+
     python3 tests/fields.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile, time
@@ -412,10 +418,67 @@ print("cloud", rbinfo(22), t2 - t1, rbinfo(24), instpos("L0", 500, 1) - y0)
           % (c[0], sps, c[2]) if len(c) == 4 else 'cloud (%s)' % c)
 
 
+def a4():
+    print('-- A4: walk on a planet --')
+    planet = '''
+delete("Cube")
+op("rigid.world", "gravity 0 0 0")
+add("sphere", "Planet", 0, 0, 0)
+scale("Planet", 20)
+field("attractor", "Core", "strength 3924 soft 1")
+'''
+    st = 'print("%s", playinfo(1), playinfo(2), playinfo(3), playinfo(4), playinfo(16), playinfo(17), playinfo(18))\n'
+    out = run(planet + 'op("play.start", "walk 0 21.7 0")\nplaylook(0, 0)\nplaystep(1, 0, 0, 0)\n' + st % 'start'
+              + 'playstep(3.927, 1, 0, 0, 1)\n' + st % 'quarter'
+              + 'playstep(3.927, 1, 0, 0, 1)\n' + st % 'half'
+              + 'playstep(7.854, 1, 0, 0, 1)\n' + st % 'round')
+    s, qu, h, r = (vals(out, k) for k in ('start', 'quarter', 'half', 'round'))
+    ok = all(len(v) == 7 for v in (s, qu, h, r))
+    check(ok and abs(s[1] - 20) < 0.05 and s[3] == 1 and near(s[5], 1),
+          'play.start on top of a 20 m planet: it lands and stands, up +Y (%s)' % s)
+    check(ok and abs(qu[2] + 20) < 0.5 and abs(qu[1]) < 0.5 and qu[3] == 1 and qu[6] < -0.99,
+          'a quarter round (31 m forward): on its side, standing, up along -Z (%s)' % qu)
+    check(ok and abs(h[1] + 20) < 0.05 and h[3] == 1 and h[5] < -0.99,
+          'half way round: on the bottom, standing, up -Y (%s)' % h)
+    d = math.dist(r[:3], s[:3]) if ok else 99
+    check(ok and d < 1 and r[3] == 1 and r[5] > 0.99,
+          'once round (126 m): back at its start (%.2f m off), up +Y again' % d)
+    out = run(planet + '''
+op("logic.new", "L")
+op("logic.node", "L begin")
+op("logic.node", "L set_strength")
+op("logic.name", "L 2 4 Core")
+op("tree.node_set", "L 2 2 2000")
+op("tree.link", "L 1 2 1")
+op("logic.node", "L tick")
+op("logic.node", "L set_variable 0")
+op("logic.node", "L field")
+op("tree.node_set", "L 5 1 0 25 0")
+op("tree.link", "L 3 4 1")
+op("tree.link", "L 5 4 2")
+op("logic.node", "L set_variable 1")
+op("tree.link", "L 3 6 1")
+op("tree.link", "L 5:1 6 2")
+op("logic.attach", "L Planet")
+b = force(0, 25, 0, "y")
+op("play.start", "walk 0 21.7 0")
+playstep(0.2, 0, 0, 0)
+print("logic", b, force(0, 25, 0, "y"), logicvar("Planet", 0, 1), logicvar("Planet", 1, 0))
+op("play.stop", "discard")
+print("after", force(0, 25, 0, "y"))
+''')
+    lg, af = vals(out, 'logic'), vals(out, 'after')
+    want = -2000 * 25 / (625 + 1) ** 1.5
+    check(len(lg) == 4 and near(lg[1], want) and near(lg[2], want) and near(lg[3], -want) and af and near(af[0], lg[0]),
+          'logic: Set Strength makes the Core 2000 in play (the pull at 25 m %s), the Field node reads it (Force y %s, '
+          'Size %s); play.stop discard: back (%s)' % tuple((lg + [0] * 4)[1:4] + [af]))
+
+
 if __name__ == '__main__':
     a1()
     a1_ui()
     a2()
     a3()
+    a4()
     print('FAILS', FAILS)
     sys.exit(1 if FAILS else 0)
