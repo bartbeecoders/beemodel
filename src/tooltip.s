@@ -16,6 +16,7 @@
 .globl tip_why
 .globl tip_hover
 .globl wrap_text
+.globl wt_hook
 .globl tip_block
 .globl tip_wait
 .globl tip_tick
@@ -516,7 +517,15 @@ wrap_text:
     mov     [rsp+28], eax
 7:  test    r13d, r13d                  # draw it (a copy: the text may
     jz      8f                          #  be read-only)
+    mov     rax, [rip+wt_hook]          # (a hook first: where each line is,
+    test    rax, rax                    #  e.g. a selection drawn under it)
+    jz      71f
     mov     rdi, rbx
+    mov     esi, r15d
+    mov     edx, r13d
+    mov     ecx, r14d
+    call    rax
+71: mov     rdi, rbx
     mov     esi, r15d
     lea     rdx, [rip+wt_buf]
     call    copy_n
@@ -540,6 +549,11 @@ wrap_text:
     pop     rbp
     pop     rbx
     ret
+
+.section .bss
+.align 8
+wt_hook:        .skip 8                 # wrap_text: fn(rdi=line, esi=bytes, edx=x, ecx=y)
+.text
 
 # copy_n(rdi=src, esi=bytes, rdx=dest) - copies and ends the text (255 max)
 copy_n:

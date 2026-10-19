@@ -46,6 +46,8 @@
 .globl wg_ftoa
 .globl wg_desc_of
 .globl wg_find
+.globl wg_x0
+.globl wg_y0
 .globl wg_clicked
 .globl wg_n
 .globl wg_set_label

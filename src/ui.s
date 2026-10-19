@@ -1715,6 +1715,10 @@ ui_key_press:
     call    wg_key
     jmp     9f
 .Lkp_notyping:
+    mov     edi, ebx                    # Ctrl+C over the AI Assistant's
+    call    ai_sel_key                  #  selected text (before the console's
+    test    eax, eax                    #  own Ctrl+C)
+    jnz     9f
     mov     edi, ebx                    # keyboard navigation: F6, Tab, the
     call    kbnav_key                   #  focused widget (a11y.s)
     test    eax, eax

@@ -21,6 +21,12 @@ project uses [Semantic Versioning](https://semver.org/).
 - The AI Assistant reaching its turn limit (`error_max_turns`, Claude Code
   or Grok CLI) now says so and how to go on ("continue" resumes the
   session), and the default limit is 100 turns (was 40).
+- Grok CLI no longer calls BeeModel's tools by their bare names (rejected as
+  "not a valid MCP tool name"): its rules name them `beemodel__...` and say
+  that a failed call does not mean BeeModel is disconnected.
+- The AI Assistant's transcript can be selected: drag over the text, or
+  double-click a message; Ctrl+C or Copy copies just the selection (Copy
+  with nothing selected still copies everything).
 - Rendered shading no longer flickers while an animation plays: it shows a
   raycast each frame until the scene holds still for 150 ms, then the
   path-traced samples.
