@@ -223,6 +223,23 @@ def main():
     check(clip.startswith('> build a tower\n') and 'Looking at the scene first.\n' in clip
           and '  scene_summary {}\n' in clip and 'Ask for a roof next.\n' in clip,
           'Copy puts the whole conversation on the clipboard, a line an entry')
+    full = clip
+    p = fakewl.widget(m, 'ai.text')                         # selecting a part of it
+    sel = dbl = ''
+    if p:
+        y = p['y'] + 8                                      # (the first line)
+        f.drag(p['x'] + 12, y, p['x'] + 90, y, steps=4)
+        f.pump(0.2)
+        f.move(p['x'] + 40, y)
+        f.mods(4); f.key(46); f.mods(0); f.pump(0.3)        # Ctrl+C
+        sel = f.clipboard() or ''
+        f.click(p['x'] + 40, y); f.click(p['x'] + 40, y); f.pump(0.2)   # a double-click
+        f.mods(4); f.key(46); f.mods(0); f.pump(0.3)
+        dbl = f.clipboard() or ''
+    check(0 < len(sel) < 20 and sel in full and '\n' not in sel,
+          f'a drag over the text selects part of a line; Ctrl+C copies just that ({sel!r})')
+    check(len(dbl) > len(sel) and dbl.strip() in full and '\n' not in dbl.strip(),
+          f'a double-click selects a whole message ({dbl!r})')
     w = fakewl.wait_widget(f, m, 'ai.revert')
     check(w is not None, 'Revert shows once the AI changed the scene')
     if w:
@@ -288,6 +305,9 @@ def main():
           and '--trust' in a and {'run_terminal_command', 'write', 'read_file'} <= set(a[a.index('--disallowed-tools') + 1].split(',')) and '--rules' in a
           and runs[-1]['cwd'] == gdir and 'BEEMODEL_SOCKET = "' in toml and '--mcp-bridge' in toml,
           'grok --cwd <its own directory> --trust -p ... streaming-messages-json, no shell or files, its .grok/config.toml')
+    rules = a[a.index('--rules') + 1]
+    check('beemodel__scene_summary' in rules and 'beemodel__script_eval' in rules and 'disconnected' in rules,
+          'Grok\'s rules name its tools in full (beemodel__...) and say a failed call is not a lost connection')
     send('again with grok')
     wait_idle()
     a = json.load(open(os.path.join(home, 'grok.runs.json')))[-1]['args']

@@ -237,6 +237,8 @@ s_world:
     .ascii "6. Check: viewport_capture, then fix what is wrong. Keep to a few thousand objects; use instances and node trees for many copies.\n"
     .ascii "Each request of the user is one undo step they can revert in one click. Answer briefly: what you built and what they could ask for next.\0"
 s_world_extra:  .asciz "\n\nThe user also asks: "
+s_world_grok:   .ascii "\nYour BeeModel tools come from the MCP server named beemodel. Always call them by their full names: beemodel__scene_summary, beemodel__script_eval, beemodel__viewport_capture, beemodel__run_operator and so on (the names above are short for these; with use_tool, pass the full name). "
+                .asciz "A tool call that fails says why in its error: read it and correct the call. It does not mean BeeModel disconnected, so never stop or tell the user it is disconnected because of one; try again with the right name or values.\n"
 j_wp_a:         .asciz "{\"description\":\"Build a world\",\"messages\":[{\"role\":\"user\",\"content\":{\"type\":\"text\",\"text\":"
 j_wp_b:         .asciz "}}]}"
 s_wp_goal:      .asciz "\n\nWhat to build: "
@@ -245,7 +247,8 @@ s_wp_goal:      .asciz "\n\nWhat to build: "
 WIDGET wd_ai_prov, WK_ENUM, "ai.connection", cb=ai_prov_cb, aux=l_ai_prov, n=3, tip="The connection this conversation uses (set them up in Preferences > AI)"
 WIDGET wd_ai_new, WK_BUTTON, "ai.new", "New", flags=WGF_COMPACT, tip="Start a new conversation (the scene stays as it is)"
 WIDGET wd_ai_revert, WK_BUTTON, "ai.revert", "Revert", flags=WGF_COMPACT, tip="Undo the AI's last request (one step)"
-WIDGET wd_ai_copy, WK_BUTTON, "ai.copy", "Copy", flags=WGF_COMPACT, tip="Copy the whole conversation to the clipboard"
+WIDGET wd_ai_copy, WK_BUTTON, "ai.copy", "Copy", flags=WGF_COMPACT, tip="Copy the text selected in the conversation (drag over it, double-click: a whole message), or all of it"
+WIDGET wd_ai_text, WK_PAD, "ai.text", cb=ai_pad_cb, tip="Drag to select text, double-click a message, Ctrl+C copies it", sect=.data
 WIDGET wd_ai_scroll, WK_SCROLL, "ai.transcript"
 WIDGET wd_ai_prompt, WK_TEXT, "ai.prompt", "Prompt", cb=ai_prompt_cb, tip="What to build or change. Enter sends it"
 WIDGET wd_ai_send, WK_BUTTON, "ai.send", "Send", flags=WGF_PRIMARY, tip="Send the prompt (Enter)"
@@ -380,6 +383,8 @@ ai_room:
     add     eax, edi
     cmp     eax, TX_CAP
     jb      9f
+    mov     dword ptr [rip+ai_sel_a], 0 # (the text moves: no selection)
+    mov     dword ptr [rip+ai_sel_b], 0
     lea     rsi, [rip+ai_tx]            # the first entry past half
     mov     ecx, TX_CAP/2
 1:  cmp     ecx, [rip+ai_tx_len]
@@ -507,7 +512,8 @@ ai_send:
     jbe     5f
     xor     eax, eax
 5:  mov     [rip+ai_run], eax
-    call    ai_sys_make
+    mov     edi, eax                    # (Grok: its tools' full names too)
+    call    ai_sys_for
     mov     edi, [rip+ai_run]
     cmp     edi, 2
     je      6f
@@ -540,12 +546,26 @@ ai_finish:
     add     rsp, 8
     ret
 
+# ai_sys_for(edi=provider) - ai_sys for that agent: Grok calls MCP tools by
+#   their server-qualified names, and must not take a failed call for a
+#   lost connection
+ai_sys_for:
+    cmp     edi, 1
+    jne     ai_sys_make
+    sub     rsp, 8
+    lea     rdi, [rip+ai_sys]
+    lea     rsi, [rip+s_world]
+    call    ai_cpy
+    lea     rsi, [rip+s_world_grok]
+    call    ai_cpy
+    jmp     1f
 # ai_sys_make - ai_sys = the world instructions + the user's addition
 ai_sys_make:
     sub     rsp, 8
     lea     rdi, [rip+ai_sys]
     lea     rsi, [rip+s_world]
     call    ai_cpy
+1:
     cmp     byte ptr [rip+ai_extra], 0
     je      1f
     lea     rsi, [rip+s_world_extra]
@@ -2101,6 +2121,8 @@ do_ai_new:
     cmp     dword ptr [rip+ai_busy], 0
     jne     9f
     mov     dword ptr [rip+ai_tx_len], 0
+    mov     dword ptr [rip+ai_sel_a], 0
+    mov     dword ptr [rip+ai_sel_b], 0
     mov     byte ptr [rip+ai_sid], 0
     mov     dword ptr [rip+ai_sid_prov], 0
     mov     qword ptr [rip+ai_hist_st+8], 0
@@ -2108,12 +2130,15 @@ do_ai_new:
     mov     dword ptr [rip+dirty], 1
 9:  ret
 
-# ai.copy - the transcript as shown (a line an entry, a blank line before
-#   each prompt but the first) becomes the clipboard
+# ai.copy - the selection, else the transcript as shown (a line an entry, a
+#   blank line before each prompt but the first), becomes the clipboard
 do_ai_copy:
     push    rbx
     push    r12
     push    r13
+    call    ai_sel_copy
+    test    eax, eax
+    jnz     9f
     cmp     dword ptr [rip+ai_tx_len], 0
     jne     1f
     lea     rdi, [rip+s_nothing_copy]
@@ -2461,6 +2486,9 @@ ed_ai_draw:
     add     ebp, eax
     jmp     8f
 4:  xor     ebx, ebx
+    mov     dword ptr [rip+ai_nlines], 0
+    lea     rax, [rip+ai_line_hook]     # (each line: where it is; the
+    mov     [rip+wt_hook], rax          #  selection under it)
 5:  cmp     ebx, [rip+ai_tx_len]
     jae     8f
     lea     rdi, [rip+ai_tx]
@@ -2490,8 +2518,21 @@ ed_ai_draw:
     call    str_len
     lea     ebx, [rbx+rax+2]
     jmp     5b
-8:  mov     edi, ebp
+8:  mov     qword ptr [rip+wt_hook], 0
+    mov     edi, ebp
     call    wg_scroll_end
+    cmp     dword ptr [rip+ai_tx_len], 0  # the text: a pad to select it in
+    je      .Lad_prompt
+    mov     eax, [rsp+4]
+    mov     [rip+wd_ai_text+WD_N], eax
+    lea     rdi, [rip+wd_ai_text]
+    mov     esi, [rip+ed_x]
+    mov     edx, r12d
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 14                     # (the scrollbar stays the scrollbar's)
+    lea     r8, [rip+ai_pad]
+    xor     r9d, r9d
+    call    wg
 .Lad_prompt:
     cmp     dword ptr [rip+ai_busy], 0  # the status line
     je      9f
@@ -2567,9 +2608,308 @@ ed_ai_draw:
     pop     rbx
     ret
 
+# ---- selecting text in the conversation ------------------------------------------
+.equ AI_MAXL,   4096
+# ai_line_hook(rdi=line, esi=bytes, edx=x, ecx=y) - wrap_text's: the line kept
+#   for hits, the selection drawn under it
+ai_line_hook:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     r14d, ecx
+    lea     rax, [rip+ai_tx]
+    mov     r15, rbx
+    sub     r15, rax                    # its offset
+    mov     eax, [rip+ai_nlines]
+    cmp     eax, AI_MAXL
+    jae     1f
+    shl     eax, 4
+    lea     rcx, [rip+ai_lines]
+    mov     [rcx+rax], r15d
+    mov     [rcx+rax+4], r12d
+    mov     [rcx+rax+8], r13d
+    mov     [rcx+rax+12], r14d
+    inc     dword ptr [rip+ai_nlines]
+1:  mov     eax, [rip+ai_sel_a]         # the selection over it
+    mov     ecx, [rip+ai_sel_b]
+    cmp     eax, ecx
+    je      9f
+    jl      2f
+    xchg    eax, ecx                    # eax lo, ecx hi
+2:  lea     edx, [r15+r12]              # the line's end
+    cmp     eax, edx
+    jg      9f
+    cmp     ecx, r15d
+    jle     9f
+    sub     eax, r15d                   # from (0 when it began before)
+    jns     3f
+    xor     eax, eax
+3:  push    rcx
+    push    rax
+    mov     rdi, rbx
+    mov     esi, eax
+    call    text_width_n
+    mov     r8d, eax                    # x0 - x
+    pop     rax
+    pop     rcx
+    sub     ecx, r15d                   # to (past the line: its end and a bit)
+    xor     r9d, r9d
+    cmp     ecx, r12d
+    jle     4f
+    mov     ecx, r12d
+    mov     r9d, 6
+4:  push    r8
+    push    r9
+    mov     rdi, rbx
+    mov     esi, ecx
+    call    text_width_n
+    pop     r9
+    pop     r8
+    add     eax, r9d
+    lea     edi, [r13+r8]
+    lea     edx, [rax]
+    sub     edx, r8d
+    jle     9f
+    lea     esi, [r14-1]
+    mov     ecx, LINE_H
+    mov     r8d, COL_SELECTION
+    call    fill_rect
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ai_hit(edi=x, esi=y) -> eax = the transcript offset nearest that point
+ai_hit:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     ecx, [rip+ai_nlines]
+    test    ecx, ecx
+    jz      8f
+    lea     rbx, [rip+ai_lines]         # the line: the last one starting at
+    mov     r14, rbx                    #  or above y (the first when above)
+    xor     edx, edx
+1:  cmp     edx, ecx
+    jae     2f
+    imul    eax, edx, 16
+    cmp     [rbx+rax+12], r13d
+    jg      2f
+    lea     r14, [rbx+rax]
+    inc     edx
+    jmp     1b
+2:  mov     eax, [r14+12]               # below its line (past the text): the
+    add     eax, LINE_H                 #  end of it
+    cmp     r13d, eax
+    jl      21f
+    mov     eax, [rip+ai_nlines]
+    dec     eax
+    shl     eax, 4
+    lea     rax, [rbx+rax]
+    cmp     r14, rax
+    jne     21f
+    mov     eax, [r14]
+    add     eax, [r14+4]
+    jmp     9f
+21: mov     r15d, [r14]                 # the character: the most that fit
+    lea     rax, [rip+ai_tx]            #  left of x (and half the next)
+    lea     rbx, [rax+r15]
+    xor     ecx, ecx
+3:  cmp     ecx, [r14+4]
+    jge     5f
+    push    rcx
+    push    rcx
+    lea     esi, [rcx+1]
+    mov     rdi, rbx
+    call    text_width_n
+    mov     edx, eax                    # the right of character c
+    pop     rcx
+    pop     rcx
+    push    rcx
+    push    rdx
+    mov     rdi, rbx
+    mov     esi, ecx
+    call    text_width_n                # its left
+    pop     rdx
+    pop     rcx
+    add     eax, edx
+    shr     eax, 1                      # its middle
+    add     eax, [r14+8]
+    cmp     r12d, eax
+    jl      5f
+    inc     ecx
+    jmp     3b
+5:  lea     eax, [r15+rcx]
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ai_pad_cb - pressed: the selection starts there (a double-click: the whole
+#   message); dragged: it ends there
+ai_pad_cb:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    ai_hit
+    mov     ebx, eax
+    mov     eax, [rip+ptr_x]            # a press: where the drag began
+    cmp     eax, [rip+wg_x0]
+    jne     5f
+    mov     eax, [rip+ptr_y]
+    cmp     eax, [rip+wg_y0]
+    jne     5f
+    call    mono_ns
+    mov     r12, rax
+    sub     rax, [rip+ai_click_t]
+    cmp     rax, 400000000
+    ja      2f
+    mov     edi, ebx                    # twice: the message it is in
+    call    ai_entry_of
+    mov     [rip+ai_sel_a], eax
+    mov     [rip+ai_sel_b], edx
+    mov     qword ptr [rip+ai_click_t], 0
+    jmp     9f
+2:  mov     [rip+ai_click_t], r12
+    mov     [rip+ai_sel_a], ebx
+5:  mov     [rip+ai_sel_b], ebx
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ai_entry_of(edi=offset) -> eax, edx = its message's text, start and end
+ai_entry_of:
+    lea     rcx, [rip+ai_tx]
+    mov     eax, edi
+1:  test    eax, eax                    # back to the kind byte after a 0
+    jz      2f
+    cmp     byte ptr [rcx+rax-1], 0
+    je      2f
+    dec     eax
+    jmp     1b
+2:  cmp     eax, edi                    # (the kind byte: the text after it)
+    jge     21f
+    inc     eax
+21: test    eax, eax
+    jnz     22f
+    inc     eax
+22: mov     edx, edi
+3:  cmp     edx, [rip+ai_tx_len]
+    jae     4f
+    cmp     byte ptr [rcx+rdx], 0
+    je      4f
+    inc     edx
+    jmp     3b
+4:  ret
+
+# ai_sel_copy -> eax = 1: the selection (if any) to the clipboard, its
+#   messages a line each
+ai_sel_copy:
+    push    rbx
+    push    r12
+    push    r13
+    mov     eax, [rip+ai_sel_a]
+    mov     ecx, [rip+ai_sel_b]
+    cmp     eax, ecx
+    je      8f
+    jl      1f
+    xchg    eax, ecx
+1:  mov     ebx, eax
+    mov     r13d, ecx
+    cmp     r13d, [rip+ai_tx_len]
+    jbe     11f
+    mov     r13d, [rip+ai_tx_len]
+11: lea     r12, [rip+ai_copy_buf]
+    xor     edx, edx
+2:  cmp     ebx, r13d
+    jae     4f
+    lea     rcx, [rip+ai_tx]
+    mov     al, [rcx+rbx]
+    inc     ebx
+    test    al, al
+    jnz     3f
+    mov     al, 10                      # a message's end: a new line, and its
+    inc     ebx                         #  kind byte left out
+3:  mov     [r12+rdx], al
+    inc     edx
+    jmp     2b
+4:  mov     rdi, r12
+    mov     esi, edx
+    call    clip_copy
+    lea     rdi, [rip+s_copied]
+    call    log_line
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ai_sel_key(edi=evdev) -> eax = 1 when used: Ctrl+C over the AI Assistant
+#   copies the text selected in it
+.globl ai_sel_key
+ai_sel_key:
+    push    rbx
+    mov     ebx, edi
+    mov     eax, [rip+key_mods]
+    and     eax, MOD_CTRL|MOD_ALT|MOD_SHIFT
+    cmp     eax, MOD_CTRL
+    jne     8f
+    mov     edi, ebx
+    call    kb_layout_code
+    cmp     eax, 46                     # C
+    jne     8f
+    mov     eax, [rip+ai_sel_a]
+    cmp     eax, [rip+ai_sel_b]
+    je      8f
+    mov     edi, [rip+ptr_x]            # the area under the pointer (hit_area
+    mov     esi, [rip+ptr_y]            #  is stale over widgets)
+    call    area_hit
+    mov     edi, [rip+hit_area]
+    test    edi, edi
+    js      8f
+    call    area_editor
+    cmp     eax, ED_AI
+    jne     8f
+    call    ai_sel_copy
+    pop     rbx
+    ret
+8:  xor     eax, eax
+    pop     rbx
+    ret
+
 .section .bss
 .align 8
 ap_argv_ai:     .skip 8*48
+ai_lines:       .skip 16*AI_MAXL        # the lines drawn: offset, bytes, x, y
+ai_click_t:     .skip 8
+ai_pad:         .skip 8
+ai_nlines:      .skip 4
+.section .data
+.align 4
+ai_sel_a:       .long 0                 # the selection: anchor, head (offsets)
+ai_sel_b:       .long 0
+.section .bss
 ai_trline:      .skip 96
 ai_copy_buf:    .skip TX_CAP+8
 .section .rodata

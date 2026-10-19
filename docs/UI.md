@@ -180,7 +180,7 @@ Click a toast to open the console.
 - the connection (Claude Code, Grok or OpenRouter);
 - **New**, which starts a new conversation;
 - **Revert**, which undoes the AI's last request: one step;
-- the transcript;
+- the transcript. Drag over it to select text, or double-click a message to select all of it; **Ctrl+C** (or **Copy**) copies the selection, and with nothing selected **Copy** copies the whole conversation;
 - the prompt. **Enter** or **Send** sends it, and **Stop** ends a request that is running.
 
 Connections are set up and tested in Preferences › AI. The guide is [AI.md](AI.md).
