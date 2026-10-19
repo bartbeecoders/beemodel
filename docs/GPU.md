@@ -165,6 +165,9 @@ A camera move changes none of these. When the fingerprint changes:
 - a slower one waits until the change is over (the fingerprint is the same
   two frames running); meanwhile the camera stays live on the last
   snapshot.
+- samples begin 150 ms after the last build. Playback changes the scene
+  every other frame, so it shows a raycast every frame rather than
+  raycasts and samples in turn, which flickered.
 
 **Beside an F12 render.** The render owns Hive's scene, so the live view
 keeps its snapshot. When F12 opens the Render area and narrows the viewport,

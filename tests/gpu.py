@@ -356,6 +356,18 @@ def live_view():
         moved = f.image().crop(BOX)
         check(st[0] == 2 and compare_img(conv, moved) > 0.5,
               f'an object moves: the scene goes up again ({st[0]} uploads) and the image follows')
+        q('op("view.rendered_samples", "64")\nop("anim.range", "1 60 30")\nframe(1)\n'
+          'key("Box:y", 1, 0)\nkey("Box:y", 60, 1.5)\nop("anim.play")')
+        shown = []                                      # playback: the scene changes every
+        for _ in range(30):                             #  other frame; the raycast stays
+            f.pump(0.03)                                #  (samples between the raycasts
+            shown += g(8)                               #  flickered)
+        up = g(9)
+        q('op("anim.play")\nunkey("Box:y", 1)\nunkey("Box:y", 60)\nmove("Box", 2, 0, -1.5)')
+        settle(64)
+        check(len(shown) == 30 and max(shown) == 0 and up[0] > 5 and (g(8) or [0])[0] == 64,
+              f'playing an animation: a raycast every frame ({up[0]} uploads, samples shown {max(shown or [-1])}),'
+              f' then the samples once it stops ({g(8)})')
         q('op("render.settings", "160 90 512")')
         f.key(88)                                       # F12 meanwhile (its area
         f.pump(0.2)                                     #  narrows the viewport)
