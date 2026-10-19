@@ -12,6 +12,10 @@ is `tools/physbench.py`.
 
 Hidden objects (`object.hide`, a shattered original) are not bodies.
 
+Force fields (attractors, gravity zones, wind, vortex, turbulence, drag)
+add to gravity each substep, and bodies marked `attracts` pull each other
+(Barnes-Hut): [FIELDS.md](FIELDS.md).
+
 ## Setting it up
 
 ```
@@ -33,6 +37,7 @@ frame(120)
 | material | `material default\|rubber\|ice\|wood\|metal\|stone` | sets friction and bounce |
 | start | `velocity x y z` | its velocity when the run begins |
 | groups | `group n` (0-15), `collide m` | m: a bit mask of the groups it meets (all by default) |
+| attraction | `attracts`, `noattract` | it pulls every other moving body by its mass (`rigid.world g n`: G, 1 by default) |
 
 Shapes:
 - **Hull**: up to 64 points of the mesh, the farthest along fixed directions
@@ -291,6 +296,7 @@ From `tools/physbench.py` on a Ryzen 9 7950X (16 cores, 32 threads):
 | 5000 bricks settling, a frame | 229 ms | 63.6 ms | 37.4 ms | 43.5 ms |
 | 1000 balls on 100 000 triangles, a frame (mean / slowest) | 54 / 99 ms | 22 / 42 ms | 19 / 32 ms | 22 / 39 ms |
 | 1000 balls rolling down a 4097² landscape, a frame (mean) | 39.3 ms | 13.5 ms | 10.2 ms | 10.0 ms |
+| 5445 bodies attracting each other, a step (the tree and pulls) | 7.04 (5.84) ms | 3.29 (1.92) ms | 2.03 (1.18) ms | 1.91 (0.81) ms |
 
 Each scene ends with the same hash on every thread count. Past about 8
 threads the solver is bound by memory, not arithmetic: more threads wait

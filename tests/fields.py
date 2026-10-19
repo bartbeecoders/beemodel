@@ -71,6 +71,36 @@ def near(a, b, rel=0.01, eps=1e-4):
     return abs(a - b) <= max(eps, rel * abs(b))
 
 
+CLOUD = '''
+delete("Cube")
+delete("Light")
+delete("Camera")
+op("rigid.world", "gravity 0 0 0 g 0.5")
+t = gtree("Cloud")
+o = gnode(t, "output")
+g = gnode(t, "grid", 100, 32)
+s = gnode(t, "sphere", 0.2)
+ip = gnode(t, "instance", 0, 0, 0)
+glink(t, g, ip, 1)
+glink(t, s, ip, 2)
+glink(t, ip, o, 1)
+for k in 0..5 {
+  n = "L" + str(k)
+  add("cube", n, k * 0.7, -40 + k * 20, k * 1.3)
+  m = modifier(n, "geometry")
+  modset(n, m, "tree", t)
+  select(n)
+  op("rigid.add", "active sphere mass 10 attracts instances")
+}
+y0 = instpos("L0", 500, 1)
+frame(2)
+t1 = clock()
+frame(26)
+t2 = clock()
+print("cloud", rbinfo(22), t2 - t1, rbinfo(24), instpos("L0", 500, 1) - y0)
+'''
+
+
 def a1():
     print('-- A1: force field objects --')
     out = run('''
@@ -389,34 +419,7 @@ print("pair", lo, hi, cm, rbinfo(22))
     check(len(p) == 4 and p[0] > 9.9 and p[1] < 10.1 and p[2] < 1e-3 and p[3] == 2,
           'two bodies that attract orbit their common centre (4.5 orbits): distance %.4f .. %.4f m, the centre '
           'moves %.1e m' % tuple(p[:3]) if len(p) == 4 else 'pair (%s)' % p)
-    out = run('''
-delete("Cube")
-delete("Light")
-delete("Camera")
-op("rigid.world", "gravity 0 0 0 g 0.5")
-t = gtree("Cloud")
-o = gnode(t, "output")
-g = gnode(t, "grid", 100, 32)
-s = gnode(t, "sphere", 0.2)
-ip = gnode(t, "instance", 0, 0, 0)
-glink(t, g, ip, 1)
-glink(t, s, ip, 2)
-glink(t, ip, o, 1)
-for k in 0..5 {
-  n = "L" + str(k)
-  add("cube", n, k * 0.7, -40 + k * 20, k * 1.3)
-  m = modifier(n, "geometry")
-  modset(n, m, "tree", t)
-  select(n)
-  op("rigid.add", "active sphere mass 10 attracts instances")
-}
-y0 = instpos("L0", 500, 1)
-frame(2)
-t1 = clock()
-frame(26)
-t2 = clock()
-print("cloud", rbinfo(22), t2 - t1, rbinfo(24), instpos("L0", 500, 1) - y0)
-''')
+    out = run(CLOUD)
     c = vals(out, 'cloud')
     sps = 120 / (c[1] / 1000) if len(c) == 4 and c[1] > 0 else 0
     check(len(c) == 4 and c[0] >= 5000 and sps >= 10 and c[3] > 0,

@@ -13,6 +13,10 @@ thread counts.
            the mean frame (ms), 10 s; and the landscape generated (ms)
   shatter  a 100 000-triangle vase cut into 500 shards: the whole operator
            and the cut alone (ms); the hash is the pieces made
+  nbody    5445 bodies that attract each other (instances, no gravity): a
+           step (ms), and the octree and pulls alone
+
+BENCH_ONLY=nbody,shatter runs just those scenes.
 
 Threads are counted as BeeModel counts them: the workers and the UI thread
 (1 = no workers). Each scene also prints the hash of every body's state at
@@ -27,6 +31,7 @@ BIN = args.pop(0) if args and not args[0].isdigit() else 'build/beemodel'
 sys.argv = [sys.argv[0], BIN]
 import solver as S                                      # noqa: E402
 import shatter as SH                                    # noqa: E402
+import fields as FI                                     # noqa: E402
 import tempfile                                         # noqa: E402
 
 THREADS = [int(a) for a in args] or sorted({1, 4, 8, os.cpu_count() or 1})
@@ -51,12 +56,16 @@ SCENES = (
     ('terrain', S.TERRAIN + HASH, lambda r: f'{float(r["terrain"][1]):5.1f} / {float(r["terrain"][0]):.0f} ms'),
     ('mountain', MOUNTAIN + HASH, lambda r: f'{float(r["mountain"][0]):5.1f} ms ({float(r["gen"][0]):.0f})'),
     ('shatter', SHATTER, lambda r: f'{float(r["shatter"][0]):5.0f} / {float(r["shatter"][1]):.0f} ms'),
+    ('nbody', FI.CLOUD + HASH, lambda r: f'{float(r["cloud"][1]) / 120:5.2f} / {float(r["cloud"][2]):.2f} ms'),
 )
+ONLY = [s for s in os.environ.get('BENCH_ONLY', '').split(',') if s]
 
 
 def main():
     print(f'{"scene":8}' + ''.join(f'{str(t) + " thread" + ("s" if t > 1 else ""):>18}' for t in THREADS) + '   hash')
     for name, code, show in SCENES:
+        if ONLY and name not in ONLY:
+            continue
         cells, hashes = [], set()
         for t in THREADS:
             r = {x[0]: x[1:] for x in S.run(code, threads=t - 1) if x}

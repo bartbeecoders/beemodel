@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.20.0/beemodel-0.20.0-linux-x86_64.bin
-chmod +x beemodel-0.20.0-linux-x86_64.bin && ./beemodel-0.20.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.21.0/beemodel-0.21.0-linux-x86_64.bin
+chmod +x beemodel-0.21.0-linux-x86_64.bin && ./beemodel-0.21.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -568,6 +568,16 @@ whole until something hits it hard enough and break while it plays. Presets (bri
 stone, gravel), a Shatter section in Properties › Physics to re-cut with other settings, and
 `shatter()` in BeeScript. [docs/SHATTER.md](docs/SHATTER.md).
 
+**Attractors and force fields.** Add › Force Field places an attractor (pulls, or pushes, by
+the inverse square), a gravity zone with its own down, gusty wind, a vortex with lift and
+inflow, curl-noise turbulence or drag; each has a falloff, a keyframable strength and the
+collision groups it acts on. Rigid bodies feel them at their centre of mass, cloth on every
+particle (wind as air), and an orbit keeps its radius within 0.1% over ten turns. Bodies can
+attract each other (a Barnes-Hut octree: 5445 of them at about 500 steps a second), and in play
+mode the player's down follows the pull, so a sphere with an attractor is a planet to walk
+round. View › Force Field Arrows and Lines draw the pull; presets Planet, Black Hole, Tornado,
+Breeze; `field()` and `force()` in BeeScript. [docs/FIELDS.md](docs/FIELDS.md).
+
 **Simulation cache.** Rigid bodies and cloth keep every frame they reach, so scrubbing back
 plays them instead of simulating again; an edit to the setup starts it over. `sim.bake` keeps
 the whole frame range (saved with the file) until `sim.free`, and the timeline shows what is
@@ -978,6 +988,9 @@ src/lsculpt.s   sculpting and painting landscapes: brushes, paint layers, Auto P
 src/landio.s    landscapes in and out: PNG / EXR heightmaps, to a mesh, tiles
 src/shatter.s   shatter: closed meshes cut into convex cells (clipping, caps, a tree of cells)
 src/shatterop.s shatter: the operator, its patterns, pieces, bodies, glue, the form's preview
+src/fields.s    force fields: the objects, their settings, the pull at a point, gizmos, overlay
+src/fieldui.s   the Force Field section of Properties › Physics
+src/nbody.s     bodies that attract each other: a Barnes-Hut octree of masses
 src/physui.s    the Physics tab: rigid body, joints, shatter, world (sections of widgets)
 src/landui.s    the Landscape tab: size, the layer stack, paint layers, sea and files
 src/refimg.s    reference images: adding them, drawing them in screen space, their panel

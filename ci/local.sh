@@ -23,6 +23,7 @@ timeout 300 python3 tests/logic.py build/beemodel build/shots
 timeout 600 python3 tests/solver.py build/beemodel
 timeout 600 python3 tests/landscape.py build/beemodel
 timeout 600 python3 tests/shatter.py build/beemodel
+timeout 600 python3 tests/fields.py build/beemodel
 timeout 600 python3 tests/lighting.py build/beemodel build/shots
 timeout 600 python3 tests/materials.py build/beemodel build/shots
 timeout 300 python3 tests/ai.py build/beemodel build/shots

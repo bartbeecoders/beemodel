@@ -5362,6 +5362,7 @@ def physics_panel():
     f.pump(0.2)
     check('rigid.joint_row' in names() and val('rigid.joint_type') == 1 and val('rigid.joint_other') is not None,
           'Joints: the hinge listed and picked, its type and the other body')
+    click('physics.section.body')                               # (folded: the joint's rows on screen)
     click('rigid.joint_limited')
     type_into('rigid.joint_lo', '-30')
     type_into('rigid.joint_break', '5000')
@@ -5374,6 +5375,7 @@ def physics_panel():
     click('rigid.joint_remove')
     names()                                                     # (it goes in the frame the click is read)
     check('rigid.joint_row' not in names(), 'Remove Joint')
+    click('physics.section.body')                               # (open again)
     click('physics.section.world')
     type_into('physics.gravity', '-3', 1)
     check(val('physics.gravity', 1) == -3, 'World (opened): gravity as X Y Z')
