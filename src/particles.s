@@ -46,6 +46,11 @@
 .globl pt_bn
 .globl pt_pool
 .globl sr_blk
+.globl pt_draw
+.globl pt_render
+.globl pt_iblock
+.globl pt_sphere
+.globl pt_stamp
 
 .equ PB_REFS,   0                       # the settings block
 .equ PB_N,      4
@@ -157,6 +162,7 @@ pt_mss:         .skip 4                 #  and step's
 pt_used:        .skip 4                 # blocks ever used (given back on reset)
 .align 16
 pt_rec:         .skip PS_SZ             # (a record being made)
+pt_name:        .skip 32
 
 .section .rodata
 .align 16
@@ -200,7 +206,12 @@ ps_defs:        .long 0, 0, 0, 0                # uid flags from mode
                 .long 0, 0, 0
                 .ascii "Particles"
                 .skip 7
-                .skip PS_SZ-128
+                .long 1, 0x9fc8ff, 0            # sprites, the end colour, no ramp
+                .float 1.0                      # size at the end
+                .long 0, 0, 0, 0, 0, 0, 0, 0    # objects
+                .long 0, 0, 0                   # how many, align, render
+                .float 2.0                      # points: pixels
+                .skip PS_SZ-192
 
 k_from:         .asciz "from"
 k_faces:        .asciz "faces"
@@ -231,6 +242,18 @@ k_name:         .asciz "name"
 k_on:           .asciz "on"
 k_off:          .asciz "off"
 k_system:       .asciz "system"
+k_draw:         .asciz "draw"
+k_points:       .asciz "points"
+k_sprites:      .asciz "sprites"
+k_objects:      .asciz "objects"
+k_color_end:    .asciz "color_end"
+k_colour_end:   .asciz "colour_end"
+k_size_end:     .asciz "size_end"
+k_align:        .asciz "align"
+k_random:       .asciz "random"
+k_velocity:     .asciz "velocity"
+k_render:       .asciz "render"
+k_px:           .asciz "point_px"
 s_bad:          .asciz "  particles: not understood: "
 s_noobj:        .asciz "  particles: select the object to emit from first"
 s_nosys:        .asciz "  particles: no such system on "
@@ -239,9 +262,13 @@ s_added:        .asciz "  particles on "
 s_removed:      .asciz "  particles removed from "
 .align 8
 kw_from:        .quad k_faces, k_volume, k_verts, k_point, 0
+kw_draw:        .quad k_points, k_sprites, k_objects, 0
+kw_align:       .quad k_random, k_velocity, 0
+kw_onoff:       .quad k_off, k_on, 0
 # particles.set words: (word, offset, kind, list); kinds: 0 float, 1 whole,
 #   2 one of list, 5 on, 6 off, 7 colour, 8 rate, 9 burst, 10 normal,
-#   11 direction (3 numbers), 12 a name
+#   11 direction (3 numbers), 12 a name, 13 the end colour, 14 objects by
+#   name (A,B,C), 15 render on/off
 pp_tab:         .quad k_from
                 .long PS_FROM, 2
                 .quad kw_from
@@ -307,6 +334,30 @@ pp_tab:         .quad k_from
                 .quad 0
                 .quad k_name
                 .long PS_NAME, 12
+                .quad 0
+                .quad k_draw
+                .long PS_DRAW, 2
+                .quad kw_draw
+                .quad k_color_end
+                .long PS_COLOR2, 13
+                .quad 0
+                .quad k_colour_end
+                .long PS_COLOR2, 13
+                .quad 0
+                .quad k_size_end
+                .long PS_SIZEEND, 0
+                .quad 0
+                .quad k_objects
+                .long PS_OBJS, 14
+                .quad 0
+                .quad k_align
+                .long PS_ALIGN, 2
+                .quad kw_align
+                .quad k_render
+                .long PS_RFLAGS, 15
+                .quad kw_onoff
+                .quad k_px
+                .long PS_PX, 0
                 .quad 0
                 .quad k_on
                 .long 0, 5
@@ -735,6 +786,12 @@ ps_parse:
     je      .Lpp_col
     cmp     ecx, 12
     je      .Lpp_name
+    cmp     ecx, 13
+    je      .Lpp_col2
+    cmp     ecx, 14
+    je      .Lpp_objs
+    cmp     ecx, 15
+    je      .Lpp_render
     lea     rsi, [rip+im_word]          # a number
     lea     rdx, [rsi+rax]
     call    parse_float
@@ -773,6 +830,61 @@ ps_parse:
     test    edx, edx
     jz      .Lpp_bad
     mov     [rbx+PS_COLOR], eax
+    jmp     .Lpp_next
+.Lpp_col2:                              # the end colour: a ramp to it
+    lea     rdi, [rip+im_word]
+    call    pp_hex
+    test    edx, edx
+    jz      .Lpp_bad
+    mov     [rbx+PS_COLOR2], eax
+    or      dword ptr [rbx+PS_RAMP], 1
+    jmp     .Lpp_next
+.Lpp_render:                            # render on / off
+    mov     rdi, [r14+16]
+    call    pp_word
+    test    eax, eax
+    js      .Lpp_bad
+    and     dword ptr [rbx+PS_RFLAGS], ~1
+    test    eax, eax
+    jnz     .Lpp_next
+    or      dword ptr [rbx+PS_RFLAGS], 1
+    jmp     .Lpp_next
+.Lpp_objs:                              # objects A,B,C: drawn as them
+    mov     dword ptr [rbx+PS_NOBJ], 0
+    lea     r15, [rip+im_word]
+81: cmp     byte ptr [r15], 0
+    je      85f
+    lea     rdi, [rip+pt_name]          # one name (up to a comma)
+    xor     ecx, ecx
+82: mov     al, [r15]
+    test    al, al
+    jz      83f
+    inc     r15
+    cmp     al, ','
+    je      83f
+    cmp     ecx, 31
+    jae     82b
+    mov     [rdi+rcx], al
+    inc     ecx
+    jmp     82b
+83: mov     byte ptr [rdi+rcx], 0
+    test    ecx, ecx
+    jz      81b
+    call    obj_find
+    test    eax, eax
+    jz      .Lpp_bad
+    mov     edi, eax
+    call    obj_get
+    mov     ecx, [rbx+PS_NOBJ]
+    cmp     ecx, 8
+    jae     81b
+    mov     eax, [rax+OB_UID]
+    mov     [rbx+PS_OBJS+rcx*4], eax
+    inc     dword ptr [rbx+PS_NOBJ]
+    jmp     81b
+85: cmp     dword ptr [rbx+PS_NOBJ], 0
+    je      .Lpp_bad
+    mov     dword ptr [rbx+PS_DRAW], 2
     jmp     .Lpp_next
 .Lpp_name:
     lea     rsi, [rip+im_word]
@@ -2429,7 +2541,8 @@ step_job:
 #   running, 2 the last frame's time (ms), 3 the last step's (ms), 4 blocks
 #   in use, 5 steps done; for particle i (in the systems' order): 6..8 its
 #   place, 9..11 its velocity, 12 its age, 13 its lifetime, 14 its size, 15
-#   its id, 16 its colour
+#   its id, 16 its colour; 17 the last viewport draw (ms), 18 the
+#   particles it drew
 pt_info:
     xorps   xmm0, xmm0
     cmp     edi, 0
@@ -2469,7 +2582,15 @@ pt_info:
     jne     6f
     cvtsi2ss xmm0, dword ptr [rip+pt_now]
     ret
-6:  cmp     edi, 16
+6:  cmp     edi, 17
+    jne     61f
+    movss   xmm0, [rip+pd_ms]
+    ret
+61: cmp     edi, 18
+    jne     62f
+    cvtsi2ss xmm0, dword ptr [rip+pd_n]
+    ret
+62: cmp     edi, 16
     ja      9f
     test    esi, esi
     js      9f
@@ -2679,6 +2800,930 @@ do_ps_remove:
     call    log_pair
     mov     dword ptr [rip+dirty], 1
 9:  pop     rbx
+    ret
+
+
+# =============================================================================
+#  Drawing (stage P2)
+#
+#  Points and sprites: every particle projected in parallel (by block) into
+#  a buffer of 64-bit keys a pixel - the depth (1/z, nearest smallest) over
+#  the colour - by an atomic minimum, so the picture is the same on any
+#  number of threads; then the rows composited over the rasterizer's
+#  colour and depth. Objects: an instance block of the particles (pt_iblock,
+#  also what renders see) drawn by inst.s.
+# =============================================================================
+.equ SR_DMODE,  220                     # (drawing) how: 0 points, 1 sprites,
+.equ SR_DC1,    224                     #  2 objects, -1 not; the colours,
+.equ SR_DC2,    228
+.equ SR_DRAMP,  232                     #  a ramp,
+.equ SR_DSE,    236                     #  the size at the end,
+.equ SR_DPX,    240                     #  points' pixels
+.section .bss
+.align 16
+pd_eye:         .skip 16
+pd_right:       .skip 16
+pd_up:          .skip 16
+pd_fwd:         .skip 16
+.align 8
+pd_buf:         .skip 8                 # the keys
+pd_ib:          .skip 8*PB_MAX          # each system's instance block
+pd_ibk:         .skip 8*PB_MAX          #  made for (steps, key)
+pd_icol:        .skip 8*PB_MAX          #  its particles' colours (u32)
+pd_icap:        .skip 4*PB_MAX          #  room for them
+pt_sphere:      .skip 8                 # a sphere (an icosahedron, radius 1)
+.align 4
+pd_ms:          .skip 4                 # the last draw (ms)
+pd_n:           .skip 4                 #  particles drawn
+pd_w:           .skip 4
+pd_h:           .skip 4
+pd_cx:          .skip 4
+pd_cy:          .skip 4
+pd_f:           .skip 4
+pd_any:         .skip 4
+
+.section .rodata
+.align 16
+pq_inf4:        .long -1, -1, -1, -1
+pq_c255:        .float 255.0
+pq_shade0:      .float 0.55
+pq_shade1:      .float 0.45
+pq_rmax:        .float 48.0
+pq_rmin:        .float 0.75
+pq_px1:         .float 1.0
+pq_px8:         .float 8.0
+# an icosahedron: 12 corners (radius 1), 20 faces
+pq_ico_a:       .float 0.0, 0.0
+ico_v:          .float -0.52573111,  0.85065081, 0
+                .float  0.52573111,  0.85065081, 0
+                .float -0.52573111, -0.85065081, 0
+                .float  0.52573111, -0.85065081, 0
+                .float 0, -0.52573111,  0.85065081
+                .float 0,  0.52573111,  0.85065081
+                .float 0, -0.52573111, -0.85065081
+                .float 0,  0.52573111, -0.85065081
+                .float  0.85065081, 0, -0.52573111
+                .float  0.85065081, 0,  0.52573111
+                .float -0.85065081, 0, -0.52573111
+                .float -0.85065081, 0,  0.52573111
+ico_f:          .long 0, 11, 5,  0, 5, 1,  0, 1, 7,  0, 7, 10,  0, 10, 11
+                .long 1, 5, 9,  5, 11, 4,  11, 10, 2,  10, 7, 6,  7, 1, 8
+                .long 3, 9, 4,  3, 4, 2,  3, 2, 6,  3, 6, 8,  3, 8, 9
+                .long 4, 9, 5,  2, 4, 11,  6, 2, 10,  8, 6, 7,  9, 8, 1
+.text
+
+# ramp(eax=colour at birth, edx=at the end, xmm0=t 0..1) -> eax (leaf)
+ramp:
+    xor     r8d, r8d
+    mov     ecx, 16
+1:  mov     r9d, eax
+    shr     r9d, cl
+    and     r9d, 255
+    mov     r10d, edx
+    shr     r10d, cl
+    and     r10d, 255
+    sub     r10d, r9d
+    cvtsi2ss xmm1, r10d
+    mulss   xmm1, xmm0
+    cvtss2si r10d, xmm1
+    add     r9d, r10d
+    shl     r9d, cl
+    or      r8d, r9d
+    sub     ecx, 8
+    jns     1b
+    mov     eax, r8d
+    ret
+
+# shade(eax=colour, xmm0=k 0..1) -> eax = colour x k (leaf)
+shade:
+    xor     r8d, r8d
+    mov     ecx, 16
+1:  mov     r9d, eax
+    shr     r9d, cl
+    and     r9d, 255
+    cvtsi2ss xmm1, r9d
+    mulss   xmm1, xmm0
+    cvttss2si r9d, xmm1
+    shl     r9d, cl
+    or      r8d, r9d
+    sub     ecx, 8
+    jns     1b
+    mov     eax, r8d
+    ret
+
+# pd_put(r8d=x, r9d=y (viewport), r11=key) - the nearest wins (leaf: rax,
+#   r10)
+pd_put:
+    cmp     r8d, [rip+pd_w]
+    jae     9f
+    cmp     r9d, [rip+pd_h]
+    jae     9f
+    mov     r10d, r9d
+    imul    r10d, [rip+pd_w]
+    add     r10d, r8d
+    shl     r10, 3
+    add     r10, [rip+pd_buf]
+    mov     rax, [r10]
+1:  cmp     r11, rax
+    jae     9f
+    lock cmpxchg [r10], r11
+    jnz     1b
+9:  ret
+
+# pt_draw - the particles into the viewport being drawn (after the
+#   rasterizer and instances: its colour and depth)
+pt_draw:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 32
+    mov     dword ptr [rip+pd_n], 0
+    cmp     dword ptr [rip+pt_ns], 0
+    je      .Ldr_out
+    cmp     dword ptr [rip+rs_w], 0
+    jle     .Ldr_out
+    cmp     dword ptr [rip+rs_h], 0
+    jle     .Ldr_out
+    call    now_ns
+    mov     [rsp], rax
+    mov     eax, [rip+rs_w]             # the view
+    mov     [rip+pd_w], eax
+    mov     eax, [rip+rs_h]
+    mov     [rip+pd_h], eax
+    movss   xmm0, [rip+vp_cx]
+    cvtsi2ss xmm1, dword ptr [rip+rs_x0]
+    subss   xmm0, xmm1
+    movss   [rip+pd_cx], xmm0
+    movss   xmm0, [rip+vp_cy]
+    cvtsi2ss xmm1, dword ptr [rip+rs_y0]
+    subss   xmm0, xmm1
+    movss   [rip+pd_cy], xmm0
+    mov     eax, [rip+vp_focal]
+    mov     [rip+pd_f], eax
+    lea     rax, [rip+eye]
+    LD3     xmm0, rax, xmm1
+    movaps  [rip+pd_eye], xmm0
+    lea     rax, [rip+right]
+    LD3     xmm0, rax, xmm1
+    movaps  [rip+pd_right], xmm0
+    lea     rax, [rip+up]
+    LD3     xmm0, rax, xmm1
+    movaps  [rip+pd_up], xmm0
+    lea     rax, [rip+fwd]
+    LD3     xmm0, rax, xmm1
+    movaps  [rip+pd_fwd], xmm0
+    xor     ebx, ebx                    # each system: how it is drawn
+    xor     r13d, r13d                  #  (the blocks of points and sprites)
+    mov     dword ptr [rip+pd_any], 0
+1:  cmp     ebx, [rip+pt_ns]
+    jae     3f
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    mov     dword ptr [r12+SR_DMODE], -1
+    cmp     dword ptr [r12+SR_N], 0
+    je      2f
+    mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    test    rax, rax
+    jz      2f
+    mov     r14, rax
+    mov     eax, [r14+PS_DRAW]
+    mov     [r12+SR_DMODE], eax
+    mov     eax, [r14+PS_COLOR]
+    mov     [r12+SR_DC1], eax
+    mov     eax, [r14+PS_COLOR2]
+    mov     [r12+SR_DC2], eax
+    mov     eax, [r14+PS_RAMP]
+    mov     [r12+SR_DRAMP], eax
+    mov     eax, [r14+PS_SIZEEND]
+    mov     [r12+SR_DSE], eax
+    movss   xmm0, [r14+PS_PX]
+    maxss   xmm0, [rip+pq_px1]
+    minss   xmm0, [rip+pq_px8]
+    cvttss2si eax, xmm0
+    mov     [r12+SR_DPX], eax
+    mov     eax, [r12+SR_N]
+    add     [rip+pd_n], eax
+    cmp     dword ptr [r14+PS_DRAW], 2
+    jne     11f
+    mov     edi, ebx                    # objects: instances
+    call    pt_iblock
+    test    rax, rax
+    jz      2f
+    mov     rdi, rax
+    mov     esi, [r12+SR_DC1]
+    call    inst_draw_ib
+    jmp     2f
+11: mov     dword ptr [rip+pd_any], 1
+    mov     edi, ebx
+    call    sys_blocks
+    xor     ecx, ecx
+12: cmp     ecx, [r12+SR_NB]
+    jae     2f
+    mov     edx, [rax+rcx*4]
+    lea     rsi, [rip+pt_list]
+    mov     [rsi+r13*4], edx
+    lea     rsi, [rip+pt_bsys]
+    mov     [rsi+rdx*4], ebx
+    inc     r13d
+    inc     ecx
+    jmp     12b
+2:  inc     ebx
+    jmp     1b
+3:  cmp     dword ptr [rip+pd_any], 0
+    je      .Ldr_time
+    mov     eax, [rip+pd_w]             # the keys: none yet
+    imul    eax, [rip+pd_h]
+    lea     rdi, [rip+frame_arena]
+    lea     rsi, [rax*8+64]
+    mov     [rsp+8], eax
+    call    arena_alloc
+    test    rax, rax
+    jz      .Ldr_time
+    add     rax, 15
+    and     rax, -16
+    mov     [rip+pd_buf], rax
+    lea     rdi, [rip+dj_clear]
+    xor     esi, esi
+    mov     edx, [rip+pd_h]
+    mov     ecx, 8
+    call    parallel_for
+    lea     rdi, [rip+dj_splat]         # the particles
+    xor     esi, esi
+    mov     edx, r13d
+    mov     ecx, 1
+    call    parallel_for
+    lea     rdi, [rip+dj_comp]          # over the picture
+    xor     esi, esi
+    mov     edx, [rip+pd_h]
+    mov     ecx, 8
+    call    parallel_for
+.Ldr_time:
+    call    now_ns
+    sub     rax, [rsp]
+    cvtsi2ss xmm0, rax
+    mulss   xmm0, [rip+pq_k]
+    mulss   xmm0, [rip+pq_k]
+    movss   [rip+pd_ms], xmm0
+.Ldr_out:
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# dj_clear(ctx, esi=first row, edx=end) - no keys in those rows
+dj_clear:
+    mov     eax, edx
+    sub     eax, esi
+    imul    eax, [rip+pd_w]
+    mov     ecx, eax
+    mov     eax, esi
+    imul    eax, [rip+pd_w]
+    mov     rdi, [rip+pd_buf]
+    lea     rdi, [rdi+rax*8]
+    mov     rax, -1
+    rep     stosq
+    ret
+
+# dj_comp(ctx, esi=first row, edx=end) - the nearest particle at each pixel,
+#   when nearer than what is drawn there
+dj_comp:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     r9, [rip+rs_depth]
+    mov     r10, [rip+fb_ptr]
+1:  cmp     r12d, r13d
+    jae     9f
+    mov     eax, r12d
+    imul    eax, [rip+pd_w]
+    mov     r11, [rip+pd_buf]
+    lea     r11, [r11+rax*8]            # the row's keys
+    lea     rbx, [r9+rax*4]             # its depth
+    mov     eax, [rip+rs_y0]
+    add     eax, r12d
+    imul    eax, [rip+fb_w]
+    add     eax, [rip+rs_x0]
+    lea     rdi, [r10+rax*4]            # its pixels
+    xor     ecx, ecx
+2:  cmp     ecx, [rip+pd_w]
+    jae     3f
+    mov     rax, [r11+rcx*8]
+    cmp     rax, -1
+    je      21f
+    mov     rdx, rax
+    shr     rdx, 32
+    not     edx                         # 1/z
+    movd    xmm0, edx
+    comiss  xmm0, [rbx+rcx*4]
+    jbe     21f
+    movss   [rbx+rcx*4], xmm0
+    mov     [rdi+rcx*4], eax
+21: inc     ecx
+    jmp     2b
+3:  inc     r12d
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# dj_splat(ctx, esi=begin, edx=end) - pt_list's blocks begin..end: each
+#   particle as a point (a few pixels) or a sprite (a shaded disc of its
+#   size), its colour along its ramp
+dj_splat:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 64     # [0] block, [4] n, [8] i, [16] cx cy r iz, [32] colour
+    mov     r12d, esi
+    mov     r13d, edx
+.Lds_blk:
+    cmp     r12d, r13d
+    jae     .Lds_out
+    lea     rax, [rip+pt_list]
+    mov     edi, [rax+r12*4]
+    inc     r12d
+    lea     rax, [rip+pt_bsys]
+    mov     eax, [rax+rdi*4]
+    imul    r14, rax, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r14, rax
+    lea     rax, [rip+pt_bn]
+    mov     eax, [rax+rdi*4]
+    mov     [rsp+4], eax
+    call    blk_at
+    mov     rbx, rax
+    xor     r15d, r15d
+.Lds_one:
+    cmp     r15d, [rsp+4]
+    jae     .Lds_blk
+    movss   xmm0, [rbx+A_X+r15*4]       # to the camera
+    movss   xmm1, [rbx+A_Y+r15*4]
+    movss   xmm2, [rbx+A_Z+r15*4]
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    subps   xmm0, [rip+pd_eye]
+    andps   xmm0, [rip+pq_xyz]
+    movaps  xmm3, xmm0
+    DOT3    xmm3, [rip+pd_fwd]          # z
+    comiss  xmm3, [rip+f_near]
+    jb      .Lds_next
+    movss   xmm4, [rip+pq_one]
+    divss   xmm4, xmm3                  # 1/z
+    movaps  xmm1, xmm0
+    DOT3    xmm1, [rip+pd_right]
+    movaps  xmm2, xmm0
+    DOT3    xmm2, [rip+pd_up]
+    movss   xmm5, xmm4
+    mulss   xmm5, [rip+pd_f]
+    mulss   xmm1, xmm5
+    addss   xmm1, [rip+pd_cx]           # x
+    mulss   xmm2, xmm5
+    movss   xmm6, [rip+pd_cy]
+    subss   xmm6, xmm2                  # y
+    movss   [rsp+16], xmm1
+    movss   [rsp+20], xmm6
+    movss   [rsp+28], xmm4
+    movss   [rsp+36], xmm5              # px a metre there
+    movss   xmm0, [rbx+A_AGE+r15*4]     # how far through its life
+    divss   xmm0, [rbx+A_LIFE+r15*4]
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    minss   xmm0, [rip+pq_one]
+    movss   [rsp+40], xmm0
+    mov     eax, [r14+SR_DC1]
+    test    dword ptr [r14+SR_DRAMP], 1
+    jz      1f
+    mov     edx, [r14+SR_DC2]
+    call    ramp
+1:  and     eax, 0xffffff
+    mov     [rsp+32], eax
+    mov     edx, [rsp+28]               # the key: depth over colour
+    not     edx
+    shl     rdx, 32
+    mov     r11, rdx
+    cmp     dword ptr [r14+SR_DMODE], 1
+    je      .Lds_sprite
+.Lds_point:                             # a square of px pixels
+    or      r11, rax
+    movss   xmm0, [rsp+16]
+    cvttss2si r8d, xmm0
+    movss   xmm0, [rsp+20]
+    cvttss2si r9d, xmm0
+    mov     ecx, [r14+SR_DPX]
+    mov     eax, ecx
+    shr     eax, 1
+    sub     r8d, eax
+    sub     r9d, eax
+    mov     [rsp+44], r8d
+    mov     [rsp+48], ecx
+    mov     [rsp+52], ecx
+2:  mov     r8d, [rsp+44]
+    mov     ecx, [rsp+48]
+3:  call    pd_put
+    inc     r8d
+    dec     ecx
+    jnz     3b
+    inc     r9d
+    dec     dword ptr [rsp+52]
+    jnz     2b
+    jmp     .Lds_next
+.Lds_sprite:                            # a disc: its radius in pixels
+    movss   xmm0, [r14+SR_DSE]
+    subss   xmm0, [rip+pq_one]
+    mulss   xmm0, [rsp+40]
+    addss   xmm0, [rip+pq_one]
+    mulss   xmm0, [rbx+A_SIZE+r15*4]
+    mulss   xmm0, [rip+pq_half]
+    mulss   xmm0, [rsp+36]
+    minss   xmm0, [rip+pq_rmax]
+    comiss  xmm0, [rip+pq_rmin]
+    ja      4f
+    mov     eax, [rsp+32]               # under a pixel: one
+    or      r11, rax
+    movss   xmm0, [rsp+16]
+    cvttss2si r8d, xmm0
+    movss   xmm0, [rsp+20]
+    cvttss2si r9d, xmm0
+    call    pd_put
+    jmp     .Lds_next
+4:  movss   [rsp+24], xmm0              # r
+    mulss   xmm0, xmm0
+    movss   [rsp+56], xmm0              # r^2
+    movss   xmm0, [rsp+20]
+    subss   xmm0, [rsp+24]
+    cvttss2si r9d, xmm0
+    movss   xmm0, [rsp+20]
+    addss   xmm0, [rsp+24]
+    cvttss2si eax, xmm0
+    mov     [rsp+52], eax               # the last row
+    movss   xmm0, [rsp+16]
+    subss   xmm0, [rsp+24]
+    cvttss2si eax, xmm0
+    mov     [rsp+44], eax               # the first column
+    movss   xmm0, [rsp+16]
+    addss   xmm0, [rsp+24]
+    cvttss2si eax, xmm0
+    mov     [rsp+48], eax               # the last
+5:  cmp     r9d, [rsp+52]
+    jg      .Lds_next
+    mov     r8d, [rsp+44]
+6:  cmp     r8d, [rsp+48]
+    jg      7f
+    cvtsi2ss xmm0, r8d                  # in the disc: shaded like a ball
+    addss   xmm0, [rip+pq_half]
+    subss   xmm0, [rsp+16]
+    mulss   xmm0, xmm0
+    cvtsi2ss xmm1, r9d
+    addss   xmm1, [rip+pq_half]
+    subss   xmm1, [rsp+20]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    comiss  xmm0, [rsp+56]
+    ja      61f
+    divss   xmm0, [rsp+56]
+    movss   xmm1, [rip+pq_one]
+    subss   xmm1, xmm0
+    sqrtss  xmm1, xmm1
+    mulss   xmm1, [rip+pq_shade1]
+    addss   xmm1, [rip+pq_shade0]
+    movss   xmm0, xmm1
+    mov     eax, [rsp+32]
+    push    r8
+    push    r9
+    call    shade
+    pop     r9
+    pop     r8
+    mov     r11d, [rsp+28]
+    not     r11d
+    shl     r11, 32
+    or      r11, rax
+    call    pd_put
+61: inc     r8d
+    jmp     6b
+7:  inc     r9d
+    jmp     5b
+.Lds_next:
+    inc     r15d
+    jmp     .Lds_one
+.Lds_out:
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# =============================================================================
+#  As instances (objects mode, and what renders see)
+# =============================================================================
+# sphere -> rax = a ball of radius 1 (an icosahedron, made once), or 0
+sphere:
+    mov     rax, [rip+pt_sphere]
+    test    rax, rax
+    jnz     9f
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     edi, 12
+    mov     esi, 60
+    mov     edx, 20
+    call    mesh_new
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    xor     r12d, r12d
+1:  imul    eax, r12d, 12
+    lea     rcx, [rip+ico_v]
+    movss   xmm0, [rcx+rax]
+    movss   xmm1, [rcx+rax+4]
+    movss   xmm2, [rcx+rax+8]
+    mov     rdi, rbx
+    call    mesh_add_vert
+    inc     r12d
+    cmp     r12d, 12
+    jb      1b
+    xor     r12d, r12d
+2:  imul    eax, r12d, 12
+    lea     rsi, [rip+ico_f]
+    add     rsi, rax
+    mov     rdi, rbx
+    mov     edx, 3
+    call    mesh_add_poly
+    inc     r12d
+    cmp     r12d, 20
+    jb      2b
+    mov     rdi, rbx
+    call    mesh_finish
+    mov     [rip+pt_sphere], rbx
+    mov     rax, rbx
+8:  add     rsp, 24
+    pop     r12
+    pop     rbx
+9:  ret
+
+# pt_iblock(edi=system) -> rax = an instance block of its particles (made
+#   again when they moved), rdx = their colours (u32 each), or 0: spheres
+#   of their size, or its objects (each picked by the id), turned at random
+#   or along the velocity
+pt_iblock:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 128
+    mov     ebx, edi
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    mov     eax, [rip+pt_now]           # made for these steps already?
+    shl     rax, 32
+    xor     rax, [rip+pt_hash]
+    lea     rcx, [rip+pd_ibk]
+    lea     rdx, [rip+pd_ib]
+    cmp     qword ptr [rdx+rbx*8], 0
+    je      1f
+    cmp     [rcx+rbx*8], rax
+    je      .Lib_have
+1:  mov     [rcx+rbx*8], rax
+    mov     rdi, [rdx+rbx*8]            # (the old one goes)
+    mov     qword ptr [rdx+rbx*8], 0
+    call    inst_unref
+    mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    test    rax, rax
+    jz      .Lib_none
+    mov     r15, rax                    # its settings
+    mov     r13d, [r12+SR_N]
+    test    r13d, r13d
+    jz      .Lib_none
+    mov     edi, r13d
+    call    inst_new
+    test    rax, rax
+    jz      .Lib_none
+    lea     rcx, [rip+pd_ib]
+    mov     [rcx+rbx*8], rax
+    mov     r14, rax                    # the block
+    lea     rcx, [rip+pd_icap]          # room for the colours
+    cmp     [rcx+rbx*4], r13d
+    jae     2f
+    lea     rcx, [rip+pd_icol]
+    mov     rdi, [rcx+rbx*8]
+    test    rdi, rdi
+    jz      11f
+    lea     rcx, [rip+pd_icap]
+    mov     esi, [rcx+rbx*4]
+    shl     rsi, 2
+    mov     eax, SYS_MUNMAP
+    syscall
+11: lea     esi, [r13+r13*1]            # (twice: room to grow)
+    lea     rcx, [rip+pd_icap]
+    mov     [rcx+rbx*4], esi
+    shl     rsi, 2
+    xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jb      12f
+    xor     eax, eax
+    lea     rcx, [rip+pd_icap]
+    mov     [rcx+rbx*4], eax
+12: lea     rcx, [rip+pd_icol]
+    mov     [rcx+rbx*8], rax
+    test    rax, rax
+    jz      .Lib_none
+2:  mov     dword ptr [rsp+64], 0       # the prototypes: its objects, or a ball
+    cmp     dword ptr [r15+PS_DRAW], 2
+    jne     3f
+    xor     ecx, ecx
+21: cmp     ecx, [r15+PS_NOBJ]
+    jae     3f
+    mov     [rsp+68], ecx
+    mov     edi, [r15+PS_OBJS+rcx*4]
+    call    obj_by_uid
+    test    rax, rax
+    jz      22f
+    mov     rdi, rax
+    call    obj_eval
+    test    rax, rax
+    jz      22f
+    cmp     dword ptr [rax+ME_NTRIS], 0
+    je      22f
+    mov     rdi, r14
+    mov     rsi, rax
+    call    inst_proto
+    test    eax, eax
+    js      22f
+    mov     ecx, [rsp+64]
+    mov     [rsp+72+rcx], al            # (the ids that are there)
+    inc     dword ptr [rsp+64]
+22: mov     ecx, [rsp+68]
+    inc     ecx
+    jmp     21b
+3:  cmp     dword ptr [rsp+64], 0
+    jne     4f
+    call    sphere
+    test    rax, rax
+    jz      .Lib_none
+    mov     rdi, r14
+    mov     rsi, rax
+    call    inst_proto
+    mov     byte ptr [rsp+72], 0
+    mov     dword ptr [rsp+64], 1
+4:  mov     [r14+4], r13d               # (IB_N) every particle
+    mov     dword ptr [rsp+80], 0       # instance
+    xor     ecx, ecx                    # block in the system's list
+    mov     [rsp+84], ecx
+.Lib_blk:
+    mov     ecx, [rsp+84]
+    cmp     ecx, [r12+SR_NB]
+    jae     .Lib_have
+    inc     dword ptr [rsp+84]
+    mov     edi, [r12+SR_SI]
+    call    sys_blocks
+    mov     ecx, [rsp+84]
+    mov     edi, [rax+rcx*4-4]
+    lea     rax, [rip+pt_bn]
+    mov     eax, [rax+rdi*4]
+    mov     [rsp+88], eax
+    call    blk_at
+    mov     rbx, rax
+    xor     r13d, r13d
+.Lib_one:
+    cmp     r13d, [rsp+88]
+    jae     .Lib_blk
+    mov     edi, [rbx+A_ID+r13*4]       # its prototype, by its id
+    mov     esi, 9
+    call    prand
+    cvtsi2ss xmm1, dword ptr [rsp+64]
+    mulss   xmm0, xmm1
+    cvttss2si eax, xmm0
+    mov     ecx, [rsp+64]
+    dec     ecx
+    cmp     eax, ecx
+    cmova   eax, ecx
+    movzx   eax, byte ptr [rsp+72+rax]
+    mov     rdi, r14
+    mov     ecx, [rsp+80]
+    push    rax
+    push    rax
+    call    inst_pids
+    pop     rdx
+    pop     rdx
+    mov     ecx, [rsp+80]
+    mov     [rax+rcx], dl
+    movss   xmm0, [rbx+A_AGE+r13*4]     # its size now (spheres: half of it)
+    divss   xmm0, [rbx+A_LIFE+r13*4]
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    minss   xmm0, [rip+pq_one]
+    movss   [rsp+92], xmm0
+    movss   xmm1, [r15+PS_SIZEEND]
+    subss   xmm1, [rip+pq_one]
+    mulss   xmm1, xmm0
+    addss   xmm1, [rip+pq_one]
+    mulss   xmm1, [rbx+A_SIZE+r13*4]
+    cmp     dword ptr [r15+PS_DRAW], 2
+    je      41f
+    mulss   xmm1, [rip+pq_half]
+41: movss   [rsp+96], xmm1              # the scale
+    mov     eax, [r15+PS_COLOR]         # its colour
+    test    dword ptr [r15+PS_RAMP], 1
+    jz      42f
+    mov     edx, [r15+PS_COLOR2]
+    movss   xmm0, [rsp+92]
+    call    ramp
+42: or      eax, 0xff000000
+    lea     rcx, [rip+pd_icol]
+    mov     edx, [r12+SR_SI]
+    mov     rcx, [rcx+rdx*8]
+    mov     edx, [rsp+80]
+    mov     [rcx+rdx*4], eax
+    # its turn: an axis (x) and the two square to it
+    cmp     dword ptr [r15+PS_ALIGN], 1
+    jne     43f
+    movss   xmm0, [rbx+A_VX+r13*4]      # along the velocity: x
+    movss   xmm1, [rbx+A_VY+r13*4]
+    movss   xmm2, [rbx+A_VZ+r13*4]
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    movaps  xmm1, xmm0
+    DOT3    xmm1, xmm1
+    comiss  xmm1, [rip+pq_tiny]
+    ja      44f
+43: mov     edi, [rbx+A_ID+r13*4]       # at random: a direction
+    mov     esi, 10
+    call    prand
+    addss   xmm0, xmm0
+    subss   xmm0, [rip+pq_one]          # cos
+    movss   [rsp], xmm0
+    mov     edi, [rbx+A_ID+r13*4]
+    mov     esi, 11
+    call    prand
+    mulss   xmm0, [rip+pq_2pi]
+    call    sincos
+    movss   xmm2, [rsp]
+    movss   xmm3, xmm2
+    mulss   xmm3, xmm3
+    movss   xmm4, [rip+pq_one]
+    subss   xmm4, xmm3
+    xorps   xmm3, xmm3
+    maxss   xmm4, xmm3
+    sqrtss  xmm4, xmm4
+    mulss   xmm0, xmm4
+    mulss   xmm1, xmm4
+    unpcklps xmm1, xmm0                 # (s cos p, s sin p, c)
+    movlhps xmm1, xmm2
+    movaps  xmm0, xmm1
+44: call    unit
+    movaps  [rsp], xmm0                 # x
+    movaps  xmm1, [rip+pq_ey]
+    movss   xmm2, xmm0
+    shufps  xmm2, xmm2, 0x55
+    andps   xmm2, [rip+pq_abs]
+    comiss  xmm2, [rip+pq_09]
+    jbe     45f
+    movaps  xmm1, [rip+pq_ex]
+45: CROSS   xmm2, xmm0, xmm1, xmm3      # z = x x helper
+    movaps  xmm0, xmm2
+    call    unit
+    movaps  [rsp+32], xmm0
+    movaps  xmm1, [rsp]
+    CROSS   xmm2, xmm0, xmm1, xmm3      # y = z x x
+    movaps  [rsp+16], xmm2
+    mov     rdi, r14                    # the matrix: columns x y z x scale,
+                                        #  the place
+    call    inst_mats
+    imul    ecx, [rsp+80], 48
+    add     rax, rcx
+    movss   xmm5, [rsp+96]
+    xor     ecx, ecx
+5:  movss   xmm0, [rsp+rcx*4]
+    mulss   xmm0, xmm5
+    movss   [rax], xmm0
+    movss   xmm0, [rsp+16+rcx*4]
+    mulss   xmm0, xmm5
+    movss   [rax+4], xmm0
+    movss   xmm0, [rsp+32+rcx*4]
+    mulss   xmm0, xmm5
+    movss   [rax+8], xmm0
+    imul    edx, ecx, AR
+    add     rdx, rbx
+    movss   xmm0, [rdx+r13*4]           # (A_X, A_Y, A_Z)
+    movss   [rax+12], xmm0
+    add     rax, 16
+    inc     ecx
+    cmp     ecx, 3
+    jb      5b
+    inc     dword ptr [rsp+80]
+    inc     r13d
+    jmp     .Lib_one
+.Lib_have:
+    mov     ebx, [r12+SR_SI]
+    lea     rcx, [rip+pd_ib]
+    mov     rax, [rcx+rbx*8]
+    lea     rcx, [rip+pd_icol]
+    mov     rdx, [rcx+rbx*8]
+    jmp     9f
+.Lib_none:
+    xor     eax, eax
+    xor     edx, edx
+9:  lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# pt_stamp -> rax: changes when the particles do (live.s)
+pt_stamp:
+    mov     eax, [rip+pt_now]
+    shl     rax, 32
+    or      eax, [rip+pt_ns]
+    xor     rax, [rip+pt_hash]
+    ret
+
+# pt_render(edi=system) -> rax = its instance block for a render, rdx = the
+#   particles' colours, ecx = the material (+1) its emitter has, or rax 0
+#   (none, or left out of renders)
+pt_render:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    cmp     ebx, [rip+pt_ns]
+    jae     8f
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    test    rax, rax
+    jz      8f
+    test    dword ptr [rax+PS_RFLAGS], 1
+    jnz     8f
+    mov     edi, ebx
+    call    pt_iblock
+    test    rax, rax
+    jz      8f
+    push    rax
+    push    rdx
+    mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    mov     edi, [r12+SR_UID]
+    cmp     dword ptr [rax+PS_DRAW], 2  # (objects: the first one's material)
+    jne     2f
+    cmp     dword ptr [rax+PS_NOBJ], 0
+    je      2f
+    mov     edi, [rax+PS_OBJS]
+2:  call    obj_by_uid
+    xor     ecx, ecx
+    test    rax, rax
+    jz      1f
+    mov     rdi, rax
+    call    mat_of
+    lea     ecx, [rax+1]
+1:  pop     rdx
+    pop     rax
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 .section .note.GNU-stack,"",@progbits

@@ -23,6 +23,8 @@ to the CPU paths and the same images.
     outline over it, raycast alone with 0 samples, the denoiser, an F12
     render beside it,
     and Material Preview without the helper or when it dies.
+  * Particles (v0.22): 100k leaves instanced on particles and tinted balls,
+    the GPU's render against the CPU's.
 
 With no usable Vulkan device the GPU checks are skipped (--require fails
 instead: CI runs it on llvmpipe with BEEMODEL_GPU=any).
@@ -226,6 +228,18 @@ def main():
     mad, same = compare(c, p)
     check(gp[2] == 32 and mad < 0.5, f'denoised (albedo and normal passes from the GPU): the CPU\'s image '
                                      f'(mean difference {mad:.4f})')
+
+    # ---- particles (v0.22): 100k instanced leaves and tinted balls ----------------
+    ps = ('add("plane", "Leaf", 0, -20, 0)\nscale("Leaf", 0.5, 1, 0.3)\nm = material("Green")\n'
+          'matset(m, "base", 0.2, 0.7, 0.2)\nassign("Leaf", m)\nadd("sphere", "Tree", 0, 3, 0)\n'
+          'emit("Tree", "from volume burst 100000 speed 0.3 gravity 0 life 100 size 0.25 objects Leaf")\n'
+          'emit("Cube", "from faces burst 2000 speed 1 life 100 size 0.1 gravity 0 color ff4010")\nframe(5)\n')
+    c, _ = render('leaves_cpu', ps, 16, BEEMODEL_GPU='off')
+    p, gp = render('leaves_gpu', ps, 16, BEEMODEL_GPU='any')
+    mad, same = compare(c, p)
+    check(gp[2] == 16 and mad < 0.25 and same > 0.97,
+          f'particles: 100k leaves instanced on particles and 2000 tinted balls on the GPU, the CPU\'s image '
+          f'(mean difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical)')
 
     # ---- an empty scene after a full one (the last scene's arrays are gone) ----------
     e1 = os.path.join(HOME, 'empty1.png'); e2 = os.path.join(HOME, 'empty2.png')

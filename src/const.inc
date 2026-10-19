@@ -538,6 +538,15 @@
 .equ PS_GROUP,      92      # collision group (0..15): the fields that act on it
 .equ PS_MAX,        96      # at most this many at once (0: no limit but the pool's)
 .equ PS_NAME,       112     # 16 bytes
+.equ PS_DRAW,       128     # drawn as: 0 points, 1 sprites (round, facing the view), 2 objects
+.equ PS_COLOR2,     132     # 0xRRGGBB at the end of its life (PS_RAMP bit 0)
+.equ PS_RAMP,       136     # bit 0: the colour goes from PS_COLOR to PS_COLOR2
+.equ PS_SIZEEND,    140     # the size x this at the end of its life
+.equ PS_OBJS,       144     # objects mode: up to 8 object uids, one picked by the id
+.equ PS_NOBJ,       176     #  how many
+.equ PS_ALIGN,      180     #  turned: 0 at random, 1 along the velocity
+.equ PS_RFLAGS,     184     # bit 0: left out of renders
+.equ PS_PX,         188     # points: pixels across (1..8)
 .equ PS_SZ,         256
 .equ MAX_OBJECTS,   4096
 .equ KEY_A,             30

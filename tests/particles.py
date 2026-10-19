@@ -10,6 +10,12 @@ drag slows them by 1 / (1 + k dt) a step; a wind field pushes them; the
 same particles on 1, 8 and 32 threads; a duplicate and a saved file
 keep the systems; 1M particles step in under 10 ms.
 
+P2: drawing and rendering - in the fake compositor 1M points draw in
+under 16.7 ms (60 fps); a sprite draws in the start colour when young and
+near the end colour when old (a ramp); the same picture on 1 and 32
+threads; a render shows the particles (as tinted balls) unless they are
+left out of renders. (CPU against GPU: tests/gpu.py.)
+
     python3 tests/particles.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -271,8 +277,106 @@ print("bench", particles(0), particles(2), t / 20, best)
           % (lim, b[2] if b else -1, b[3] if b else -1, bu[0] if bu else -1))
 
 
+def fake_session(threads=None):
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
+    argv = sys.argv
+    sys.argv = [argv[0], tempfile.mkdtemp(prefix='bee-particles-shots-')]
+    import fakewl
+    sys.argv = argv
+    fakewl.BIN = BIN
+    old = os.environ.get('BEEMODEL_THREADS')
+    if threads is not None:
+        os.environ['BEEMODEL_THREADS'] = str(threads)
+    try:
+        f = fakewl.Fake()
+    finally:
+        if threads is not None:
+            if old is None:
+                os.environ.pop('BEEMODEL_THREADS', None)
+            else:
+                os.environ['BEEMODEL_THREADS'] = old
+    f.pump(2.0, until_frame=True)
+    m = fakewl.Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    return f, q
+
+
+BOX = (214, 80, 1014, 620)                              # the viewport
+
+
+def p2():
+    print('-- P2: drawing and rendering --')
+    f, q = fake_session()
+    try:
+        q('emit("Cube", "from volume burst 1000000 speed 2 spread 180 life 100 draw points point_px 1 gravity 0")\n'
+          'frame(12)')
+        f.pump(1.0)
+        ms, r = [], []
+        for k in range(6):
+            f.pump(0.3)
+            r = q('print(particles(17), particles(18))').split()
+            if len(r) == 2:
+                ms.append(float(r[0]))
+        lim = 60 if CI else 16.7
+        med = sorted(ms)[len(ms) // 2] if ms else -1
+        check(ms and r[1] == '1000000' and med < lim,
+              '1M points draw in under %.1f ms (60 fps): median %.2f ms, best %.2f' %
+              (lim, med, min(ms) if ms else -1))
+        q('select("Cube")\nop("particles.remove", "")\ndelete("Cube")\nview(0, 0, 10, 0, 0, 0)\n'
+          'add("plane", "E", 0, 0, 0)\n'
+          'emit("E", "from point burst 1 speed 0 gravity 0 life 10 size 1 color ff0000 color_end 0000ff")\n'
+          'frame(2)')
+        f.pump(1.0)
+        a = f.image().crop(BOX)
+        q('frame(220)')
+        f.pump(1.0)
+        b = f.image().crop(BOX)
+        w, h = a.size
+        ca, cb = a.getpixel((w // 2 + 14, h // 2 + 8)), b.getpixel((w // 2 + 14, h // 2 + 8))
+        check(ca[0] > 120 and ca[2] < 40 and cb[2] > 120 and cb[0] < 60,
+              'a sprite in the middle of the view: red when young (%s), near the end colour (blue) when old (%s)'
+              % (ca[:3], cb[:3]))
+    finally:
+        f.proc.kill()
+
+    imgs = []
+    for t in (1, 32):
+        f, q = fake_session(threads=t)
+        try:
+            q('emit("Cube", "from faces burst 200000 speed 2 spread 60 life 100 size 0.05 speed_random 0.5 '
+              'color_end 20ff40 life_random 0.5")\nframe(20)')
+            f.pump(1.5)
+            imgs.append(f.image().crop(BOX))
+        finally:
+            f.proc.kill()
+    check(len(imgs) == 2 and imgs[0].tobytes() == imgs[1].tobytes(),
+          'the same sprites, pixel for pixel, on 1 and 32 threads')
+
+    tmp = tempfile.mkdtemp(prefix='bee-particles-')
+    a, b = os.path.join(tmp, 'a.png'), os.path.join(tmp, 'b.png')
+    run('emit("Cube", "from faces burst 3000 speed 1 life 100 size 0.15 gravity 0 color ff2020")\n'
+        'frame(10)\n'
+        'op("render.image", "%s 160 120 4 0")\n'
+        'select("Cube")\n'
+        'op("particles.set", "render off")\n'
+        'op("render.image", "%s 160 120 4 0")\n' % (a, b))
+    try:
+        from PIL import Image
+        def reds(path):
+            px = Image.open(path).convert('RGB')
+            px = px.get_flattened_data() if hasattr(px, 'get_flattened_data') else px.getdata()
+            return sum(1 for p in px if p[0] > p[1] + 60 and p[0] > p[2] + 60)
+        red, redb = reds(a), reds(b)
+    except Exception as e:
+        print('  ', e)
+        red, redb = -1, -1
+    check(red > 200 and redb == 0,
+          'a render shows the particles as red balls (%d red pixels), none with render off (%d)' % (red, redb))
+
+
 if __name__ == '__main__':
     p1()
+    p2()
     if FAILS:
         print('%d FAILED' % len(FAILS))
         sys.exit(1)

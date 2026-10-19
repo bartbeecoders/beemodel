@@ -31,6 +31,7 @@
 .globl inst_xform
 .globl inst_merge
 .globl inst_mul
+.globl inst_draw_ib
 
 .equ IB_REFS,   0
 .equ IB_N,      4
@@ -598,6 +599,7 @@ id_object:
     lea     rsi, [rsp]
     call    obj_matrix
     call    id_cam                      # (rsp+8: the object matrix)
+.Lio_protos:
     mov     r12, [rip+id_ib]            # prototype spheres
     xor     ecx, ecx
 1:  cmp     ecx, [r12+IB_NP]
@@ -711,6 +713,32 @@ id_object:
     pop     r12
     pop     rbx
     ret
+
+# inst_draw_ib(rdi=block, esi=colour) - a block of instances in the world
+#   (particles.s) drawn like an object's
+inst_draw_ib:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 104
+    mov     [rip+id_ib], rdi
+    mov     [rip+id_col], esi
+    cmp     dword ptr [rdi+IB_N], 0
+    je      .Lio_out
+    xor     eax, eax                    # the world: no matrix
+    mov     ecx, 12
+1:  mov     [rsp+rcx*4-4], eax
+    dec     ecx
+    jnz     1b
+    mov     eax, [rip+in_one]
+    mov     [rsp], eax
+    mov     [rsp+20], eax
+    mov     [rsp+40], eax
+    call    id_cam
+    jmp     .Lio_protos
 
 # id_cam (the caller's frame: the object matrix at its rsp+8 ... wait:
 #   called with the matrix at [rsp+8] here) - id_cw = view x object
