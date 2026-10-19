@@ -24,6 +24,9 @@
 .globl env_irr_pv
 .globl env_spec_pv
 .globl env_on
+.globl env_img
+.globl env_cond
+.globl env_total
 .globl env_forget
 .globl op_world_hdri
 .globl op_world_strength

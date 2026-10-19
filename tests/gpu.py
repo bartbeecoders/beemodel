@@ -132,6 +132,28 @@ add("light", "Bulb", 2, 2, 2)
 '''
 
 
+def write_hdr(path, w=256, h=128):
+    """A Radiance RGBE world: a sky gradient, a dark ground and a small sun."""
+    import math
+    def rgbe(r, g, b):
+        m = max(r, g, b)
+        if m < 1e-32:
+            return bytes(4)
+        e = math.frexp(m)[1]
+        f = math.ldexp(1.0, -e) * 256
+        return bytes([int(r * f), int(g * f), int(b * f), e + 128])
+    out = bytearray(b'#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y %d +X %d\n' % (h, w))
+    for y in range(h):
+        th = (y + 0.5) / h * math.pi
+        for x in range(w):
+            sky = max(math.cos(th), 0)
+            r, g, b = (0.2 + 0.3 * sky, 0.25 + 0.4 * sky, 0.3 + 0.7 * sky) if th <= math.pi / 2 else (0.15, 0.12, 0.1)
+            if (x - 60) ** 2 + (y - 30) ** 2 < 9:
+                r, g, b = 500, 450, 380
+            out += rgbe(r, g, b)
+    open(path, 'wb').write(out)
+
+
 def check(cond, msg):
     print(('  ok   ' if cond else '  FAIL ') + msg)
     if not cond:
@@ -246,6 +268,20 @@ def main():
     check(gp[2] == 64 and mad < 0.25 and amad < 0.25 and min(pa) == 0 and max(pa) == 255,
           f'a shadow catcher on the GPU: the CPU\'s colour (mean difference {mad:.4f}) and alpha (shadows on a '
           f'clear film, mean difference {amad:.4f})')
+
+    # ---- an HDRI world (H3): a Radiance .hdr with a small, bright sun -------------
+    hdr = os.path.join(HOME, 'world.hdr')
+    write_hdr(hdr)
+    ws = ('sky = image("%s")\nop("world.hdri", sky)\nop("world.rotation", "30")\nop("world.strength", "1.5")\n'
+          'add("sphere", "S", 2, 1, 0)\nm = material("Chrome")\nmatset(m, "metallic", 1)\nmatset(m, "roughness", 0.1)\n'
+          'assign("S", "Chrome")\nadd("plane", "P", 0, 0, 0)\nscale("P", 6)\n' % hdr)
+    c, _ = render('hdri_cpu', ws, 64, BEEMODEL_GPU='off')
+    p, gp = render('hdri_gpu', ws, 64, BEEMODEL_GPU='any')
+    mad, same = compare(c, p)
+    r = run(ws + 'op("render.image", "%s/h.png 32 24 1 0")\nprint("why", gpu(18))\n' % HOME, BEEMODEL_GPU='any')
+    check(gp[2] == 64 and r.get('why') == ['0'] and mad < 0.25 and same > 0.97,
+          f'an HDRI world on the GPU (its texels, the importance-sampling CDF, MIS): the CPU\'s image (mean '
+          f'difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical; why {r.get("why")})')
 
     c, _ = render('den_cpu', SCENE, 32, 1, BEEMODEL_GPU='off')
     p, gp = render('den_gpu', SCENE, 32, 1, BEEMODEL_GPU='any')

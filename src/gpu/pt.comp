@@ -107,7 +107,7 @@ vec2 sincos_2pi(float u) { float a = u * TWO_PI; return vec2(sin(a), cos(a)); }
 
 // ---- the scene -------------------------------------------------------------
 const uint CATCH = 0x40000000u;         // tm: a shadow catcher's triangle (HV_CATCH)
-uint mid(uint t) { return tm[t] & ~CATCH; }
+uint tmat(uint t) { return tm[t] & ~CATCH; }
 vec3 tv3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tv[o], tv[o + 1u], tv[o + 2u]); }
 vec3 tn3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tn[o], tn[o + 1u], tn[o + 2u]); }
 
@@ -203,8 +203,96 @@ bool trace(inout Ray r, bool anyhit) {
 }
 
 // ---- the world: studio sky and sun -------------------------------------------
+// ---- an HDRI world (env.s): the equirect image as rgb floats (binding 17);
+//   binding 18: a header (w, h, the CDF's total, the rotation, the strength),
+//   then the conditional CDF per row (w h), the row sums (h), the marginal (h)
+bool env_on() { return (floatBitsToUint(P.cam[14]) & 32u) != 0u; }
+uint ENV_W() { return floatBitsToUint(envcdf[0]); }
+uint ENV_H() { return floatBitsToUint(envcdf[1]); }
+const uint EH = 8u;                     // the header's floats
+uint env_cond(uint i) { return EH + i; }
+uint env_rows(uint y) { return EH + ENV_W() * ENV_H() + y; }
+uint env_marg(uint y) { return EH + ENV_W() * ENV_H() + ENV_H() + y; }
+
+// u = 0.5 + (atan2(x, -z) - rotation) / 2 pi (wrapped), v = theta / pi
+vec3 env_dir_uv(vec3 d) {
+    float phi = atan(d.x, -d.z);
+    float ct = clamp(d.y, -1.0, 1.0);
+    float st = sqrt(max(1.0 - ct * ct, 0.0));
+    float th = atan(st, ct);
+    float u = (phi - envcdf[3]) * 0.15915494 + 0.5;
+    u -= floor(u);
+    return vec3(u, th * INV_PI, st);
+}
+
+vec3 env_uv_dir(float u, float v) {
+    float phi = u * TWO_PI - PI + envcdf[3];
+    float th = v * PI;
+    float st = sin(th), ctt = cos(th);
+    return vec3(sin(phi) * st, ctt, -(cos(phi) * st));
+}
+
+vec3 env_texel(uint x, uint y) { uint o = (y * ENV_W() + x) * 3u; return vec3(envimg[o], envimg[o + 1u], envimg[o + 2u]); }
+
+vec3 env_rad(vec3 d) {                  // bilinear: u wraps, v clamps
+    vec3 uv = env_dir_uv(d);
+    int W = int(ENV_W()), H = int(ENV_H());
+    float fx = uv.x * float(W) - 0.5;
+    float fy = max(uv.y * float(H) - 0.5, 0.0);
+    float x0f = floor(fx);
+    fx -= x0f;
+    int x0 = int(x0f) % W;
+    if (x0 < 0) x0 += W;
+    int y0 = int(fy);
+    fy -= float(y0);
+    y0 = min(y0, H - 1);
+    int y1 = min(y0 + 1, H - 1);
+    int x1 = x0 + 1 >= W ? 0 : x0 + 1;
+    vec3 a = env_texel(uint(x0), uint(y0)), b = env_texel(uint(x1), uint(y0));
+    vec3 c = env_texel(uint(x0), uint(y1)), e = env_texel(uint(x1), uint(y1));
+    vec3 top = (b - a) * fx + a;
+    vec3 bot = (e - c) * fx + c;
+    return ((bot - top) * fy + top) * envcdf[4];
+}
+
+uint env_bsearch(uint base, uint n, float u) {
+    uint lo = 0u, hi = n;
+    while (lo < hi) {
+        uint m = (lo + hi) >> 1;
+        if (u < envcdf[base + m]) hi = m; else lo = m + 1u;
+    }
+    return min(lo, n - 1u);
+}
+
+float env_pdf_px(uint x, uint y, float st) {
+    uint i = env_cond(y * ENV_W() + x);
+    float f = envcdf[i];
+    if (x != 0u) f -= envcdf[i - 1u];
+    f *= envcdf[env_rows(y)];
+    f /= envcdf[2];
+    f *= float(ENV_W()) * float(ENV_H());
+    return f / max(st * 19.7392088, 1.0e-12);
+}
+
+float env_pdf(vec3 d) {
+    vec3 uv = env_dir_uv(d);
+    uint x = uint(clamp(int(uv.x * float(ENV_W())), 0, int(ENV_W()) - 1));
+    uint y = uint(clamp(int(uv.y * float(ENV_H())), 0, int(ENV_H()) - 1));
+    return env_pdf_px(x, y, uv.z);
+}
+
+float env_sample(float u0, float u1, float u2, float u3, out vec3 dir) {
+    uint y = env_bsearch(env_marg(0u), ENV_H(), u0);
+    uint x = env_bsearch(env_cond(y * ENV_W()), ENV_W(), u1);
+    float u = (float(x) + u2) / float(ENV_W());
+    float v = (float(y) + u3) / float(ENV_H());
+    dir = env_uv_dir(u, v);
+    return env_pdf_px(x, y, sin(v * PI));
+}
+
 vec3 sky_rad(vec3 d) {
     if (P.debug == 3u) return vec3(0.5);
+    if (env_on()) return env_rad(d);
     if (d.y > 0.0) {
         float s = sqrt(d.y);
         return (SKY_ZENITH - SKY_HORIZON) * s + SKY_HORIZON;
@@ -213,7 +301,7 @@ vec3 sky_rad(vec3 d) {
 }
 
 bool in_sun(vec3 d) {
-    if (P.debug >= 2u) return false;
+    if (P.debug >= 2u || env_on()) return false;
     return dot(d, SUN_DIR) > SUN_COS;
 }
 
@@ -224,7 +312,7 @@ struct Mat { vec3 base; float metal, rough, spec, ior, trans; vec3 emit; float s
 
 Mat mat_of(uint t) {
     Mat m;
-    uint i = mid(t);
+    uint i = tmat(t);
     if (i == 0u) {
         m.base = vec3(0.8); m.metal = 0.0; m.rough = 0.5; m.spec = 0.5; m.ior = 1.45; m.trans = 0.0;
         m.emit = vec3(0.0); m.strength = 0.0; m.coat = 0.0; m.crough = 0.03;
@@ -705,7 +793,7 @@ uint mwu(uint m, uint k) { return floatBitsToUint(mats[m * MW + k]); }
 //   hive_pt.s): 1 opaque, 0 a hole (one-sided from behind, masked below its
 //   clip), else a translucent material's opacity
 float cover(uint t, float u, float v, vec3 d) {
-    uint m = mid(t);
+    uint m = tmat(t);
     if (m == 0u) return 1.0;
     if (mwf(m, W_SIDED) >= 0.5) {
         vec3 e1 = tv3(t, 1u), e2 = tv3(t, 2u);
@@ -1030,6 +1118,15 @@ bool light_sample(vec3 p, vec3 n, out LSample ls) {
     int slot = int(rnd() * ns);
     if (slot >= int(P.nslots)) slot = int(P.nslots) - 1;
     float pc = 1.0 / ns;
+    if (slot == 0 && env_on()) {                        // the HDRI by its CDF
+        float a0 = rnd(), a1 = rnd(), a2 = rnd(), a3 = rnd();
+        float pdf = env_sample(a0, a1, a2, a3, ls.wi) * pc;
+        if (!(pdf > TINY)) return false;
+        ls.pdf = pdf;
+        ls.dist = BIG;
+        ls.li = env_rad(ls.wi);
+        return true;
+    }
     if (slot == 0) {                                    // the sky: cosine about n
         float u1 = rnd();
         vec2 sc = sincos_2pi(rnd());
@@ -1046,6 +1143,7 @@ bool light_sample(vec3 p, vec3 n, out LSample ls) {
         return true;
     }
     if (slot == 1) {                                    // the sun's cone
+        if (env_on()) return false;                     // (an HDRI: no sun)
         float u1 = rnd(), u2 = rnd();
         float cs = 1.0 - (1.0 - SUN_COS) * u1;
         float sn = sqrt(max(1.0 - cs * cs, 0.0));
@@ -1178,8 +1276,8 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
             vec3 sky = sky_rad(ray.d);
             float wgt = 1.0;
             if (!spec) {
-                float pb = max(dot(nsPrev, ray.d), 0.0) * INV_PI / float(P.nslots);
-                wgt = mis(prev, pb);
+                float pb = env_on() ? env_pdf(ray.d) : max(dot(nsPrev, ray.d), 0.0) * INV_PI;
+                wgt = mis(prev, pb / float(P.nslots));
             }
             sky *= wgt;
             if (in_sun(ray.d)) {
@@ -1205,9 +1303,9 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
         if (P.debug == 1u) { L = ns * 0.5 + vec3(0.5); break; }
         Mat m = mat_of(t);
 #ifdef GRAPHS
-        if (mid(t) != 0u && mwu(mid(t), W_GRN) != 0u) {       // its graph here
+        if (tmat(t) != 0u && mwu(tmat(t), W_GRN) != 0u) {     // its graph here
             float al, mk;
-            graph_shade(mid(t), t, ray.u, ray.v, false, m, ns, al, mk);
+            graph_shade(tmat(t), t, ray.u, ray.v, false, m, ns, al, mk);
         }
 #endif
         if (tvc[t * 3u] != 0u) m.base *= vcol_lin3(t, ray.u, ray.v);
