@@ -51,6 +51,7 @@
 .globl pt_iblock
 .globl pt_sphere
 .globl pt_stamp
+.globl pt_mesh
 .globl pc_cast
 .globl pc_any
 .globl pc_gnd
@@ -247,7 +248,10 @@ ps_defs:        .long 0, 0, 0, 0                # uid flags from mode
                 .float 0, 0, 0, 0, 0, 0         # the domain
                 .long 0                         #  (off)
                 .float 1000.0                   # density
-                .skip PS_SZ-296
+                .long 0                         # no surface
+                .float 1.0, 2.0                 # its grid, spray speed
+                .long 14                        #  and neighbours
+                .skip PS_SZ-312
 
 k_from:         .asciz "from"
 k_faces:        .asciz "faces"
@@ -315,6 +319,11 @@ k_substeps:     .asciz "substeps"
 k_iterations:   .asciz "iterations"
 k_domain:       .asciz "domain"
 k_density:      .asciz "density"
+k_spray:        .asciz "spray"
+k_surface:      .asciz "surface"
+k_resolution:   .asciz "resolution"
+k_sprayv:       .asciz "spray_speed"
+k_sprayn:       .asciz "spray_neighbours"
 s_bad:          .asciz "  particles: not understood: "
 s_noobj:        .asciz "  particles: select the object to emit from first"
 s_nosys:        .asciz "  particles: no such system on "
@@ -326,7 +335,7 @@ kw_from:        .quad k_faces, k_volume, k_verts, k_point, k_events, k_fill, 0
 kw_visc:        .quad k_water, k_oil, k_honey, 0
 pq_viscs:       .float 0.02, 0.2, 0.6
 kw_onhit:       .quad k_bounce, k_die, k_stick, k_split, 0
-kw_ev:          .quad k_born, k_hit, k_died, 0
+kw_ev:          .quad k_born, k_hit, k_died, k_spray, 0
 kw_draw:        .quad k_points, k_sprites, k_objects, 0
 kw_align:       .quad k_random, k_velocity, 0
 kw_onoff:       .quad k_off, k_on, 0
@@ -473,6 +482,18 @@ pp_tab:         .quad k_from
                 .quad k_density
                 .long PS_DENS, 0
                 .quad 0
+                .quad k_surface
+                .long PS_SURF, 16
+                .quad kw_onoff
+                .quad k_resolution
+                .long PS_SRES, 0
+                .quad 0
+                .quad k_sprayv
+                .long PS_SPRAYV, 0
+                .quad 0
+                .quad k_sprayn
+                .long PS_SPRAYN, 1
+                .quad 0
                 .quad k_on
                 .long 0, 5
                 .quad 0
@@ -484,6 +505,7 @@ pp_tab:         .quad k_from
 .text
 OPERATOR op_ps_add,    "particles.add",    "Particle System", do_ps_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a particle system to the active object: particles.add [from faces|volume|verts|point] [rate n | burst n] [start f] [end f] [life s] [life_random 0..1] [speed m/s] [speed_random 0..1] [normal | direction x y z] [spread deg] [size m] [size_random 0..1] [drag k] [gravity k] [color RRGGBB] [seed n] [group 0..15] [max n] [name text] [on|off]"
 OPERATOR op_ps_set,    "particles.set",    "Particle Settings", do_ps_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="A particle system's settings on the active object: particles.set [system n] then the words particles.add takes"
+OPERATOR op_ps_export, "file.export_liquid", "Export Liquid Surface...", do_ps_export, doc="Export the active object's liquid surface (or its mesh) at each frame as OBJ files: file.export_liquid <prefix> [first last] (prefix_0001.obj ...; the scene's frames when not said)"
 OPERATOR op_ps_remove, "particles.remove", "Remove Particle System", do_ps_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a particle system from the active object: particles.remove [system n] (the first when not said)"
 
 # =============================================================================
@@ -1362,7 +1384,8 @@ pt_stop:
     shl     rsi, 12
     mov     eax, SYS_MUNMAP
     syscall
-11: mov     rdi, [r12+SR_EVH]           # its events
+11: call    sf_free                     # its surface
+    mov     rdi, [r12+SR_EVH]           # its events
     test    rdi, rdi
     jz      12f
     mov     rsi, EV_CAP*EV_SZ
@@ -1598,7 +1621,16 @@ pt_frame:
     call    pt_step
     inc     dword ptr [rip+pt_now]
     jmp     5b
-6:  call    now_ns
+6:  xor     ebx, ebx                    # the liquids' surfaces now
+61: cmp     ebx, [rip+pt_ns]
+    jae     62f
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    call    sf_build
+    inc     ebx
+    jmp     61b
+62: call    now_ns
     sub     rax, r14
     cvtsi2ss xmm0, rax
     mulss   xmm0, [rip+pq_k]
@@ -1857,7 +1889,9 @@ sys_prep:
     cmp     eax, 4
     je      2f
     mov     rdi, rbx
+    mov     dword ptr [rip+pt_raw], 1   # (as it is, not its surface)
     call    obj_eval
+    mov     dword ptr [rip+pt_raw], 0
     test    rax, rax
     jz      1f
     cmp     dword ptr [rax+ME_NVERTS], 0
@@ -1921,11 +1955,72 @@ sys_liquid:
     lea     rcx, [r12+SR_GADJ]
     mov     r8d, [r12+SR_GBIT]
     call    lq_solve
+    call    lq_spray
     mov     esi, 1                      # back
     call    lq_copy
 9:  add     rsp, 8
     pop     r15
     pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# lq_spray(r12=system) - where the surface breaks: fast particles with few
+#   neighbours, as events (in its hits' place: events spray Name)
+lq_spray:
+    push    rbx
+    push    r13
+    push    r14
+    mov     dword ptr [r12+SR_NH], 0
+    mov     dword ptr [r12+SR_ND], 0
+    test    dword ptr [r12+SR_LISTEN], 1
+    jz      9f
+    cmp     qword ptr [r12+SR_EVH], 0
+    jne     1f
+    call    ev_reserve
+    mov     [r12+SR_EVH], rax
+    test    rax, rax
+    jz      9f
+1:  mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    test    rax, rax
+    jz      9f
+    movss   xmm6, [rax+PS_SPRAYV]
+    mulss   xmm6, xmm6
+    mov     r13d, [rax+PS_SPRAYN]
+    xor     ebx, ebx
+    xor     r14d, r14d
+2:  cmp     ebx, [r12+SR_N]
+    jae     8f
+    mov     rax, [rip+lq_nn]
+    cmp     [rax+rbx*4], r13d
+    jae     3f
+    mov     rax, rbx
+    shl     rax, 4
+    mov     rcx, rax
+    add     rax, [rip+lq_v]
+    movaps  xmm0, [rax]
+    movaps  xmm1, xmm0
+    DOT3    xmm1, xmm1
+    comiss  xmm1, xmm6
+    jbe     3f
+    add     rcx, [rip+lq_x]
+    imul    rdx, r14, EV_SZ
+    add     rdx, [r12+SR_EVH]
+    movaps  xmm2, [rcx]
+    movaps  [rdx], xmm2
+    mov     dword ptr [rdx+12], 3
+    movaps  [rdx+16], xmm0
+    mov     [rdx+28], ebx
+    movaps  xmm0, [rax]
+    call    unit
+    movaps  [rdx+32], xmm0
+    inc     r14d
+3:  inc     ebx
+    jmp     2b
+8:  mov     [r12+SR_NH], r14d
+9:  pop     r14
     pop     r13
     pop     rbx
     ret
@@ -2143,6 +2238,8 @@ sys_emit:
     mov     ecx, [r13+PS_EVPER]
     mov     eax, [r13+PS_EVKIND]
     cmp     eax, 1
+    je      1f
+    cmp     eax, 3                      # (spray: a liquid's, where its hits go)
     je      1f
     cmp     eax, 2
     je      2f
@@ -3491,7 +3588,8 @@ step_job:
 #   particles it drew; 19 hits so far (all systems); 20 system i's
 #   particles born of events so far, 21 its hits so far, 22 its particles;
 #   the liquid solver: 23 its last frame (ms), 24 the most neighbours, 25
-#   a particle's mass, 26 the kernel's size, 27 the densest (rho / rho0)
+#   a particle's mass, 26 the kernel's size, 27 the densest (rho / rho0);
+#   32 system i's surface: the last meshing (ms), 33 its triangles
 pt_info:
     xorps   xmm0, xmm0
     cmp     edi, 0
@@ -3560,7 +3658,25 @@ pt_info:
     lea     rdx, [rip+pt_sr]
     cvtsi2ss xmm0, dword ptr [rdx+rax+SR_ENEXT]
     ret
-64: cmp     edi, 23                     # 23.. the liquid solver's
+64: cmp     edi, 32                     # 32, 33: system i's surface: its time,
+    jb      644f                        #  its triangles
+    cmp     edi, 33
+    ja      9f
+    cmp     esi, [rip+pt_ns]
+    jae     9f
+    imul    rax, rsi, SR_SZ
+    lea     rdx, [rip+pt_sr]
+    add     rdx, rax
+    cmp     edi, 32
+    jne     643f
+    movss   xmm0, [rdx+SR_SMS]
+    ret
+643:mov     rax, [rdx+SR_SMESH]
+    test    rax, rax
+    jz      9f
+    cvtsi2ss xmm0, dword ptr [rax+ME_NTRIS]
+    ret
+644:cmp     edi, 23                     # 23.. the liquid solver's
     jb      640f
     sub     edi, 23
     jmp     lq_info
@@ -3649,9 +3765,13 @@ ps_add:
     call    ps_new
     test    rax, rax
     jz      8f
+    mov     r13, rax
     mov     rdi, rax
     mov     rsi, r12
     call    ps_parse
+    mov     rdi, rbx
+    mov     rsi, r13
+    call    ps_water
     mov     dword ptr [rip+dirty], 1
     mov     edi, [rbx+OB_UID]
     call    ps_count
@@ -3659,6 +3779,34 @@ ps_add:
 8:  lea     rdi, [rip+s_full]
     call    log_line
     xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ps_water(rdi=object, rsi=its system) - a surface on an object with no
+#   material: the water preset's (material.preset water)
+ps_water:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    test    dword ptr [rsi+PS_SURF], 1
+    jz      9f
+    cmp     dword ptr [rbx+OB_MAT], 0
+    jne     9f
+    mov     rdi, rbx
+    call    obj_find
+    test    eax, eax
+    jz      9f
+    mov     r12d, [rip+active_obj]      # (on it: the active object for now)
+    mov     [rip+active_obj], eax
+    mov     r13, [rip+op_arg]
+    lea     rax, [rip+k_water]
+    mov     [rip+op_arg], rax
+    call    do_preset
+    mov     [rip+op_arg], r13
+    mov     [rip+active_obj], r12d
 9:  pop     r13
     pop     r12
     pop     rbx
@@ -3756,9 +3904,13 @@ do_ps_set:
     call    ps_nth_own
     test    rax, rax
     jz      8f
+    mov     r13, rax
     mov     rdi, rax
     mov     rsi, r12
     call    ps_parse
+    mov     rdi, rbx
+    mov     rsi, r13
+    call    ps_water
     mov     dword ptr [rip+dirty], 1
     jmp     9f
 8:  lea     rdi, [rip+s_nosys]
@@ -4686,6 +4838,8 @@ pt_render:
     jz      8f
     test    dword ptr [rax+PS_RFLAGS], 1
     jnz     8f
+    test    dword ptr [rax+PS_SURF], 1  # (its surface stands for it)
+    jnz     8f
     mov     edi, ebx
     call    pt_iblock
     test    rax, rax
@@ -5555,9 +5709,11 @@ pt_listen:
     jz      5b
     mov     [r12+SR_EVS], r15
     mov     eax, [r13+PS_EVKIND]
+    cmp     eax, 3
+    je      61f
     cmp     eax, 1
     jne     6f
-    or      dword ptr [r15+SR_LISTEN], 1
+61: or      dword ptr [r15+SR_LISTEN], 1
     jmp     3b
 6:  cmp     eax, 2
     jne     3b
@@ -5575,6 +5731,8 @@ sys_gather:
     push    rbx
     push    r13
     push    r14
+    cmp     dword ptr [r12+SR_LIQON], 0 # (a liquid: its spray is kept, sys_liquid)
+    jne     9f
     xor     eax, eax
     mov     [r12+SR_NH], eax
     mov     [r12+SR_ND], eax
@@ -5711,5 +5869,713 @@ ev_place:
     pop     r13
     pop     rbx
     ret
+
+
+# =============================================================================
+#  The liquid's surface (stage P5)
+#
+#  Each frame, a system with surface on is meshed: a density field on a
+#  grid over its particles' bounds (each particle adds (1 - r^2/R^2)^3 out
+#  to R = 2 spacings, scaled so the lattice's sum is 1; the field is 0.5 -
+#  that), splatted by z slab in parallel (each slab its own, in order), then
+#  sdf_fmesh (marching tetrahedra: closed, manifold) at half the density.
+#  The mesh goes into its emitter's space, and the emitter shows it
+#  (obj_eval -> pt_mesh) while the particles run.
+# =============================================================================
+.equ SR_SMESH,  416                     # its surface (ours), or 0
+.equ SR_SMS,    424                     #  the time it took (ms)
+.equ SF_MAXP,   24000000                # grid points at most
+.equ SF_MAXZ,   65536                   #  slabs
+.section .bss
+.align 16
+sf_org:         .skip 16                # the grid: origin, spacing
+sf_ix:          .skip 16                # (1 / spacing)
+.align 8
+sf_f:           .skip 8                 # the field (SF_MAXP floats, reserved)
+sf_p:           .skip 8                 # positions (vec4, by slab)
+sf_k:           .skip 8                 # each particle's slab (u32)
+sf_s:           .skip 8                 # each slab's first (u32, slabs + 2)
+sf_u:           .skip 8                 # positions as gathered (vec4)
+.align 4
+sf_nx:          .skip 4
+sf_ny:          .skip 4
+sf_nz:          .skip 4
+sf_r:           .skip 4                 # R
+sf_ir2:         .skip 4                 # 1 / R^2
+sf_is0:         .skip 4                 # 1 / the lattice's sum
+sf_rk:          .skip 4                 # R in slabs (rounded up)
+pt_raw:         .skip 4                 # 1: obj_eval shows emitters as they are
+pt_nsurf:       .skip 4                 # surfaces made
+sf_minv:        .skip 48                # the emitter's inverse matrix
+.section .rodata
+.align 4
+sf_iso:         .float 0.5
+sf_grow:        .float 1.25
+sf_r2:          .float 2.0
+sf_minres:      .float 0.25
+.text
+
+# pt_mesh(rdi=object) -> rax = the surface it shows now, or 0 (obj_eval)
+pt_mesh:
+    xor     eax, eax
+    cmp     dword ptr [rip+pt_nsurf], 0
+    je      9f
+    cmp     dword ptr [rip+pt_raw], 0
+    jne     9f
+    mov     edx, [rdi+OB_UID]
+    xor     ecx, ecx
+    lea     r8, [rip+pt_sr]
+1:  cmp     ecx, [rip+pt_ns]
+    jae     8f
+    cmp     [r8+SR_UID], edx
+    jne     2f
+    mov     rax, [r8+SR_SMESH]
+    test    rax, rax
+    jnz     9f
+2:  add     r8, SR_SZ
+    inc     ecx
+    jmp     1b
+8:  xor     eax, eax
+9:  ret
+
+# sf_free(r12=system) - its surface goes
+sf_free:
+    mov     rdi, [r12+SR_SMESH]
+    test    rdi, rdi
+    jz      9f
+    mov     qword ptr [r12+SR_SMESH], 0
+    dec     dword ptr [rip+pt_nsurf]
+    sub     rsp, 8
+    call    mesh_unref
+    add     rsp, 8
+9:  ret
+
+# sf_room -> eax = 1 when the grid and lists have their room
+sf_room:
+    cmp     qword ptr [rip+sf_f], 0
+    jne     8f
+    mov     rsi, SF_MAXP*4
+    call    pc_map
+    mov     [rip+sf_f], rax
+    mov     rsi, 4194304*16
+    call    pc_map
+    mov     [rip+sf_p], rax
+    mov     rsi, 4194304*4
+    call    pc_map
+    mov     [rip+sf_k], rax
+    mov     rsi, 4*(SF_MAXZ+4)
+    call    pc_map
+    mov     [rip+sf_s], rax
+    mov     rsi, 4194304*16
+    call    pc_map
+    mov     [rip+sf_u], rax
+8:  xor     eax, eax
+    cmp     qword ptr [rip+sf_u], 0
+    je      9f
+    cmp     qword ptr [rip+sf_f], 0
+    je      9f
+    cmp     qword ptr [rip+sf_p], 0
+    je      9f
+    cmp     qword ptr [rip+sf_k], 0
+    je      9f
+    cmp     qword ptr [rip+sf_s], 0
+    je      9f
+    mov     eax, 1
+9:  ret
+
+# sf_build(r12=system) - its surface this frame (or none)
+sf_build:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 128
+    call    now_ns
+    mov     [rsp+112], rax
+    mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    test    rax, rax
+    jz      .Lsf_none
+    mov     r15, rax
+    test    dword ptr [r15+PS_SURF], 1
+    jz      .Lsf_none
+    cmp     dword ptr [r12+SR_N], 0
+    je      .Lsf_none
+    call    sf_room
+    test    eax, eax
+    jz      .Lsf_none
+    movss   xmm0, [r15+PS_SIZE]         # R = 2 spacings; the grid's spacing
+    maxss   xmm0, [rip+pq_k]
+    movss   xmm1, xmm0
+    mulss   xmm1, [rip+sf_r2]
+    movss   [rip+sf_r], xmm1
+    mulss   xmm1, xmm1
+    movss   xmm2, [rip+pq_one]
+    divss   xmm2, xmm1
+    movss   [rip+sf_ir2], xmm2
+    movss   xmm1, [r15+PS_SRES]
+    maxss   xmm1, [rip+sf_minres]
+    mulss   xmm1, xmm0
+    movss   [rsp+64], xmm1              # spacing
+    call    sf_lattice
+    xor     eax, eax                    # the particles, their bounds
+    mov     [rsp+68], eax
+    movaps  xmm6, [rip+pq_bigw]
+    movaps  xmm7, xmm6
+    xorps   xmm7, [rip+pq_sgn]
+    mov     edi, [r12+SR_SI]
+    call    sys_blocks
+    mov     r13, rax
+    xor     r14d, r14d
+    xor     ebx, ebx                    # particles
+1:  cmp     r14d, [r12+SR_NB]
+    jae     2f
+    mov     edi, [r13+r14*4]
+    inc     r14d
+    lea     rax, [rip+pt_bn]
+    mov     ecx, [rax+rdi*4]
+    call    blk_at
+    xor     edx, edx
+11: cmp     edx, ecx
+    jae     1b
+    movss   xmm0, [rax+A_X+rdx*4]
+    movss   xmm1, [rax+A_Y+rdx*4]
+    movss   xmm2, [rax+A_Z+rdx*4]
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    andps   xmm0, [rip+pq_xyz]
+    minps   xmm6, xmm0
+    maxps   xmm7, xmm0
+    mov     r8, rbx
+    shl     r8, 4
+    add     r8, [rip+sf_u]
+    movaps  [r8], xmm0
+    inc     ebx
+    inc     edx
+    jmp     11b
+2:  mov     [rsp+68], ebx               # n
+    movss   xmm0, [rip+sf_r]            # the grid: the bounds, padded
+    addss   xmm0, [rsp+64]
+    addss   xmm0, [rsp+64]
+    shufps  xmm0, xmm0, 0
+    subps   xmm6, xmm0
+    addps   xmm7, xmm0
+    andps   xmm6, [rip+pq_xyz]
+    movaps  [rsp], xmm6
+    movaps  [rsp+16], xmm7
+3:  movaps  xmm0, [rsp+16]              # points a side (spacing grows until
+    subps   xmm0, [rsp]                 #  they fit)
+    movss   xmm1, [rsp+64]
+    shufps  xmm1, xmm1, 0
+    divps   xmm0, xmm1
+    roundps xmm0, xmm0, 2
+    cvtps2dq xmm0, xmm0
+    movdqa  [rsp+32], xmm0
+    mov     eax, [rsp+32]
+    inc     eax
+    mov     [rip+sf_nx], eax
+    mov     ecx, [rsp+36]
+    inc     ecx
+    mov     [rip+sf_ny], ecx
+    mov     edx, [rsp+40]
+    inc     edx
+    mov     [rip+sf_nz], edx
+    cmp     edx, SF_MAXZ
+    ja      41f
+    imul    rax, rcx
+    imul    rax, rdx
+    cmp     rax, SF_MAXP
+    jbe     4f
+41:
+    movss   xmm0, [rsp+64]
+    mulss   xmm0, [rip+sf_grow]
+    movss   [rsp+64], xmm0
+    jmp     3b
+4:  movaps  xmm0, [rsp]
+    movaps  [rip+sf_org], xmm0
+    mov     eax, [rsp+64]
+    mov     [rip+sf_org+12], eax
+    movss   xmm0, [rip+pq_one]
+    divss   xmm0, [rsp+64]
+    movss   [rip+sf_ix], xmm0
+    movss   xmm0, [rip+sf_r]            # R in slabs
+    divss   xmm0, [rsp+64]
+    roundss xmm0, xmm0, 2
+    cvttss2si eax, xmm0
+    mov     [rip+sf_rk], eax
+    mov     r9, [rip+sf_k]              # the particles by slab (counting
+    mov     rdi, [rip+sf_s]             #  sort, in order)
+    mov     ecx, [rip+sf_nz]
+    add     ecx, 2
+    xor     eax, eax
+    rep     stosd
+    mov     rdi, [rip+sf_s]
+    xor     ecx, ecx
+5:  cmp     ecx, [rsp+68]
+    jae     6f
+    mov     rax, rcx
+    shl     rax, 4
+    add     rax, [rip+sf_u]
+    movss   xmm0, [rax+8]
+    subss   xmm0, [rip+sf_org+8]
+    mulss   xmm0, [rip+sf_ix]
+    cvttss2si eax, xmm0
+    xor     edx, edx
+    test    eax, eax
+    cmovs   eax, edx
+    mov     edx, [rip+sf_nz]
+    dec     edx
+    cmp     eax, edx
+    cmova   eax, edx
+    mov     [r9+rcx*4], eax
+    inc     dword ptr [rdi+rax*4+4]
+    inc     ecx
+    jmp     5b
+6:  mov     ecx, [rip+sf_nz]            # prefix sums
+    xor     eax, eax
+    xor     edx, edx
+61: cmp     edx, ecx
+    jae     62f
+    add     eax, [rdi+rdx*4+4]
+    mov     [rdi+rdx*4+4], eax
+    inc     edx
+    jmp     61b
+62: xor     ecx, ecx                    # fill (cursors: start[k]++), sf_p
+    mov     r10, [rip+sf_p]
+63: cmp     ecx, [rsp+68]
+    jae     64f
+    mov     eax, [r9+rcx*4]
+    mov     edx, [rdi+rax*4]
+    inc     dword ptr [rdi+rax*4]
+    mov     r8, rcx
+    shl     r8, 4
+    add     r8, [rip+sf_u]
+    movaps  xmm0, [r8]
+    shl     rdx, 4
+    movaps  [r10+rdx], xmm0
+    inc     ecx
+    jmp     63b
+64: mov     ecx, [rip+sf_nz]            # starts back
+65: test    ecx, ecx
+    jz      66f
+    mov     eax, [rdi+rcx*4-4]
+    mov     [rdi+rcx*4], eax
+    dec     ecx
+    jmp     65b
+66: mov     dword ptr [rdi], 0
+    mov     [rip+sf_slabs], rdi
+    lea     rdi, [rip+sf_job]           # the field, slab by slab
+    xor     esi, esi
+    mov     edx, [rip+sf_nz]
+    mov     ecx, 1
+    call    parallel_for
+    lea     rdi, [rip+sf_org]           # its surface
+    mov     rsi, [rip+sf_f]
+    mov     edx, [rip+sf_nx]
+    mov     ecx, [rip+sf_ny]
+    mov     r8d, [rip+sf_nz]
+    call    sdf_fmesh
+    test    rax, rax
+    jz      .Lsf_none
+    mov     rbx, rax
+    mov     edi, [r12+SR_UID]           # into its emitter's space
+    call    obj_by_uid
+    test    rax, rax
+    jz      .Lsf_drop
+    mov     rdi, rax
+    lea     rsi, [rsp]
+    call    obj_matrix
+    lea     rdi, [rsp]
+    lea     rsi, [rip+sf_minv]
+    call    sdf_invert
+    lea     rax, [rip+sf_minv]          # (rows to aligned memory)
+    movups  xmm0, [rax]
+    movaps  [rsp+48], xmm0
+    movups  xmm0, [rax+16]
+    movaps  [rsp+64], xmm0
+    movups  xmm0, [rax+32]
+    movaps  [rsp+80], xmm0
+    xor     ecx, ecx
+    mov     rdx, [rbx+ME_POS]
+7:  cmp     ecx, [rbx+ME_NVERTS]
+    jae     71f
+    LD3     xmm0, rdx, xmm5
+    lea     rdi, [rsp+48]
+    push    rcx
+    push    rdx
+    call    m_pt
+    pop     rdx
+    pop     rcx
+    movlps  [rdx], xmm0
+    movhlps xmm0, xmm0
+    movss   [rdx+8], xmm0
+    add     rdx, 12
+    inc     ecx
+    jmp     7b
+71: mov     rdi, rbx
+    call    mesh_bbox
+    call    sf_free                     # this one instead
+    mov     [r12+SR_SMESH], rbx
+    inc     dword ptr [rip+pt_nsurf]
+    call    now_ns
+    sub     rax, [rsp+112]
+    cvtsi2ss xmm0, rax
+    mulss   xmm0, [rip+pq_k]
+    mulss   xmm0, [rip+pq_k]
+    movss   [r12+SR_SMS], xmm0
+    jmp     9f
+.Lsf_drop:
+    mov     rdi, rbx
+    call    mesh_unref
+.Lsf_none:
+    call    sf_free
+9:  lea     rsp, [rbp-32]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbx
+    pop     rbp
+    ret
+
+.section .bss
+.align 8
+sf_slabs:       .skip 8
+.text
+
+# sf_lattice - 1 / the lattice's sum of (1 - r^2/R^2)^3 (r15 = settings)
+sf_lattice:
+    xorps   xmm6, xmm6
+    mov     eax, -2
+1:  cmp     eax, 2
+    jg      4f
+    mov     ecx, -2
+2:  cmp     ecx, 2
+    jg      31f
+    mov     edx, -2
+3:  cmp     edx, 2
+    jg      21f
+    mov     r8d, eax
+    imul    r8d, eax
+    mov     r9d, ecx
+    imul    r9d, ecx
+    add     r8d, r9d
+    mov     r9d, edx
+    imul    r9d, edx
+    add     r8d, r9d
+    cvtsi2ss xmm0, r8d                  # r^2 / d^2, R^2 = 4 d^2
+    mulss   xmm0, [rip+pq_quart]
+    movss   xmm1, [rip+pq_one]
+    subss   xmm1, xmm0
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jbe     35f
+    movss   xmm0, xmm1
+    mulss   xmm0, xmm1
+    mulss   xmm0, xmm1
+    addss   xmm6, xmm0
+35: inc     edx
+    jmp     3b
+21: inc     ecx
+    jmp     2b
+31: inc     eax
+    jmp     1b
+4:  movss   xmm0, [rip+pq_one]
+    divss   xmm0, xmm6
+    movss   [rip+sf_is0], xmm0
+    ret
+
+.section .rodata
+.align 4
+pq_quart:       .float 0.25
+.text
+
+# sf_job(ctx, esi=first slab, edx=end) - each slab's field: 0.5 less the
+#   particles near it (from the slabs within R)
+sf_job:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 64
+    mov     r12d, esi
+    mov     r13d, edx
+.Lsj2_slab:
+    cmp     r12d, r13d
+    jae     .Lsj2_out
+    mov     eax, [rip+sf_nx]            # its row of points: 0.5
+    imul    eax, [rip+sf_ny]
+    mov     [rsp+48], eax
+    mov     ecx, eax
+    imul    eax, r12d
+    mov     rdi, [rip+sf_f]
+    lea     rdi, [rdi+rax*4]
+    mov     rbx, rdi                    # the slab's field
+    mov     eax, [rip+sf_iso]
+    rep     stosd
+    cvtsi2ss xmm0, r12d                 # its z
+    mulss   xmm0, [rip+sf_org+12]
+    addss   xmm0, [rip+sf_org+8]
+    movss   [rsp+52], xmm0
+    mov     r14d, r12d                  # the slabs round it
+    sub     r14d, [rip+sf_rk]
+    xor     eax, eax
+    test    r14d, r14d
+    cmovs   r14d, eax
+    mov     r15d, r12d
+    add     r15d, [rip+sf_rk]
+    inc     r15d
+    cmp     r15d, [rip+sf_nz]
+    jbe     1f
+    mov     r15d, [rip+sf_nz]
+1:  mov     rax, [rip+sf_slabs]
+    mov     ecx, [rax+r14*4]            # their particles: first .. end
+    mov     edx, [rax+r15*4]
+    mov     [rsp+56], edx
+.Lsj2_p:
+    cmp     ecx, [rsp+56]
+    jae     .Lsj2_next
+    mov     [rsp+60], ecx
+    mov     rax, rcx
+    shl     rax, 4
+    add     rax, [rip+sf_p]
+    movaps  xmm6, [rax]                 # p
+    movaps  xmm0, xmm6                  # dz^2
+    shufps  xmm0, xmm0, 0xAA
+    subss   xmm0, [rsp+52]
+    mulss   xmm0, xmm0
+    movss   xmm1, [rip+sf_r]
+    mulss   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jae     .Lsj2_pn
+    movss   [rsp+32], xmm0              # dz^2
+    movss   xmm2, [rip+sf_r]            # its square of points: j0 .. j1,
+    movaps  xmm3, xmm6                  #  i0 .. i1
+    shufps  xmm3, xmm3, 0x55
+    movss   xmm4, xmm3
+    subss   xmm3, xmm2
+    subss   xmm3, [rip+sf_org+4]
+    mulss   xmm3, [rip+sf_ix]
+    roundss xmm3, xmm3, 2
+    cvttss2si r8d, xmm3                 # j0
+    addss   xmm4, xmm2
+    subss   xmm4, [rip+sf_org+4]
+    mulss   xmm4, [rip+sf_ix]
+    cvttss2si r9d, xmm4                 # j1
+    movss   xmm3, xmm6
+    movss   xmm4, xmm6
+    subss   xmm3, xmm2
+    subss   xmm3, [rip+sf_org]
+    mulss   xmm3, [rip+sf_ix]
+    roundss xmm3, xmm3, 2
+    cvttss2si r10d, xmm3                # i0
+    addss   xmm4, xmm2
+    subss   xmm4, [rip+sf_org]
+    mulss   xmm4, [rip+sf_ix]
+    cvttss2si r11d, xmm4                # i1
+    xor     eax, eax
+    test    r8d, r8d
+    cmovs   r8d, eax
+    test    r10d, r10d
+    cmovs   r10d, eax
+    mov     eax, [rip+sf_ny]
+    dec     eax
+    cmp     r9d, eax
+    cmovg   r9d, eax
+    mov     eax, [rip+sf_nx]
+    dec     eax
+    cmp     r11d, eax
+    cmovg   r11d, eax
+2:  cmp     r8d, r9d                    # rows
+    jg      .Lsj2_pn
+    cvtsi2ss xmm0, r8d
+    mulss   xmm0, [rip+sf_org+12]
+    addss   xmm0, [rip+sf_org+4]
+    movaps  xmm1, xmm6
+    shufps  xmm1, xmm1, 0x55
+    subss   xmm0, xmm1
+    mulss   xmm0, xmm0
+    addss   xmm0, [rsp+32]              # dy^2 + dz^2
+    movss   [rsp+36], xmm0
+    mov     eax, r8d
+    imul    eax, [rip+sf_nx]
+    lea     rdi, [rbx+rax*4]            # the row
+    mov     ecx, r10d
+3:  cmp     ecx, r11d
+    jg      4f
+    cvtsi2ss xmm0, ecx
+    mulss   xmm0, [rip+sf_org+12]
+    addss   xmm0, [rip+sf_org]
+    subss   xmm0, xmm6
+    mulss   xmm0, xmm0
+    addss   xmm0, [rsp+36]
+    mulss   xmm0, [rip+sf_ir2]          # r^2 / R^2
+    movss   xmm1, [rip+pq_one]
+    subss   xmm1, xmm0
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jbe     31f
+    movss   xmm0, xmm1
+    mulss   xmm0, xmm1
+    mulss   xmm0, xmm1
+    mulss   xmm0, [rip+sf_is0]
+    movss   xmm1, [rdi+rcx*4]
+    subss   xmm1, xmm0
+    movss   [rdi+rcx*4], xmm1
+31: inc     ecx
+    jmp     3b
+4:  inc     r8d
+    jmp     2b
+.Lsj2_pn:
+    mov     ecx, [rsp+60]
+    inc     ecx
+    jmp     .Lsj2_p
+.Lsj2_next:
+    inc     r12d
+    jmp     .Lsj2_slab
+.Lsj2_out:
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+
+# file.export_liquid <prefix> [first last] - the active object's surface (or
+#   mesh) at each frame as an OBJ file: prefix_0001.obj ...
+do_ps_export:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 576                    # [0] the prefix, [288] a path
+    call    active
+    test    rax, rax
+    jz      .Lpx_out
+    mov     rbx, rax
+    mov     rsi, [rip+op_arg]
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lpx_bad
+    lea     rdi, [rip+im_word]
+    call    path_expand
+    lea     rdi, [rsp]                  # (kept: path_buf is used again)
+    mov     ecx, 255
+1:  mov     dl, [rax]
+    mov     [rdi], dl
+    test    dl, dl
+    jz      2f
+    inc     rax
+    inc     rdi
+    dec     ecx
+    jnz     1b
+    mov     byte ptr [rdi], 0
+2:  call    an_range                    # the frames: the scene's, or given
+    mov     r13d, eax
+    mov     r14d, edx
+    mov     rsi, r12
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      3f
+    lea     rsi, [rip+im_word]
+    lea     rdx, [rsi+rax]
+    call    parse_float
+    test    eax, eax
+    jz      .Lpx_bad
+    cvttss2si r13d, xmm0
+    mov     rsi, r12
+    call    im_next_word
+    test    eax, eax
+    jz      3f
+    lea     rsi, [rip+im_word]
+    lea     rdx, [rsi+rax]
+    call    parse_float
+    test    eax, eax
+    jz      .Lpx_bad
+    cvttss2si r14d, xmm0
+3:  movss   xmm0, [rip+an_frame]
+    movss   [rsp+568], xmm0
+    xor     r15d, r15d                  # files
+4:  cmp     r13d, r14d
+    jg      7f
+    cvtsi2ss xmm0, r13d
+    call    an_set_frame
+    lea     rsi, [rsp]                  # prefix_NNNN.obj
+    lea     rdi, [rsp+288]
+5:  mov     al, [rsi]
+    test    al, al
+    jz      51f
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    jmp     5b
+51: mov     byte ptr [rdi], '_'
+    mov     eax, r13d
+    xor     edx, edx
+    test    eax, eax
+    cmovs   eax, edx
+    mov     ecx, 4
+    lea     r8, [rdi+5]
+52: xor     edx, edx
+    mov     r9d, 10
+    div     r9d
+    add     dl, '0'
+    dec     r8
+    mov     [r8], dl
+    dec     ecx
+    jnz     52b
+    mov     dword ptr [rdi+5], 0x6a626f2e   # ".obj"
+    mov     byte ptr [rdi+9], 0
+    call    select_none                 # this object only
+    or      dword ptr [rbx+OB_FLAGS], OBF_SELECTED
+    mov     dword ptr [rip+exp_sel_only], 1
+    lea     rdi, [rsp+288]
+    call    obj_export
+    mov     dword ptr [rip+exp_sel_only], 0
+    inc     r15d
+    inc     r13d
+    jmp     4b
+7:  movss   xmm0, [rsp+568]
+    call    an_set_frame
+    call    fmt_reset
+    lea     rdi, [rip+s_px_done]
+    call    fmt_str
+    mov     edi, r15d
+    call    fmt_int
+    lea     rdi, [rip+s_px_files]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+    jmp     .Lpx_out
+.Lpx_bad:
+    lea     rdi, [rip+s_px_bad]
+    call    log_line
+.Lpx_out:
+    add     rsp, 576
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+.section .rodata
+s_px_done:      .asciz "  exported "
+s_px_files:     .asciz " frames (OBJ)"
+s_px_bad:       .asciz "  file.export_liquid <prefix> [first last]: the files' path and name before _0001.obj"
+.text
 
 .section .note.GNU-stack,"",@progbits

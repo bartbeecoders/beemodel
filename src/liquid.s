@@ -31,6 +31,7 @@
 .globl lq_v
 .globl lq_info
 .globl lq_reset
+.globl lq_nn
 
 .equ LQ_MAXN,   4194304
 .equ NB,        96                      # neighbours at most
