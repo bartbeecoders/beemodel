@@ -19,7 +19,7 @@ BeeModelHome/
   media/          raw captures (git-ignored)
   Dockerfile      nginx (unprivileged, :8080) with site/
   nginx.conf      caching, CSP, /healthz
-  deploy/k3s/     namespace, deployment, NodePort service 32110, kustomization
+  deploy/k3s/     namespace, deployment, NodePort service 32111, kustomization
   scripts/deploy-k3s.sh
 ```
 
