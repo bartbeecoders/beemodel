@@ -96,9 +96,14 @@ render's film keeps an alpha, and the shader sums the same four terms a
 pixel as the CPU (seen, a catcher seen, its light unshadowed and lit); the
 catcher's shadow ray is the path's own light-sample ray, told to let
 catchers through. The image and its alpha match the CPU's.
-Scenes the shader does not cover stay on the CPU: an HDRI world, or a
-graph with another node type (Voronoi, bricks, wave, functions ...) or an
-HDR image in it.
+An HDRI world runs there too (v0.23): its texels go up as rgb floats (8-bit
+images through the sRGB curve), with env.s's importance-sampling tables
+(the conditional CDF per row, the row sums, the marginal) behind a small
+header (size, total, rotation, strength). The shader looks it up, samples
+it and weighs it (MIS) as `env.s` does, so the image matches the CPU's.
+Rendered shading draws it as well.
+Scenes the shader does not cover stay on the CPU: a graph with another
+node type (Voronoi, bricks, wave, functions ...) or an HDR image in it.
 
 On an RTX 4080 SUPER, 128 samples of that scene at 1920 x 1080 take 0.9 s,
 including the scene upload and readback. The CPU path takes 9.8 s on 32
@@ -206,7 +211,7 @@ Material Preview, and the console says why once. The status line under
 the viewport's label always says what is shown: `raycast`,
 `n / N samples`, or the fallback. Materials whose graphs `pt.comp` does
 not evaluate are drawn with their plain values. An HDRI world is drawn
-with the studio sky.
+as it is (v0.23).
 
 On an RTX 4080 SUPER, at an 800 x 540 viewport, a raycast takes 2 to 3 ms,
 including the readback. That holds for the 1,600-triangle test scene and

@@ -58,6 +58,10 @@
 .equ PT_NBIND,      20                  # pt.comp: 0-15, the film, the HDRI, its CDF, spheres
 .equ LV_NOREAD,     0x10000             # gpu_lv_run: no pixels back
 .equ RS_NBIND,      8
+.equ IM_W_,         0                   # an image (image.s): size, format,
+.equ IM_H_,         4                   #  texels
+.equ IM_FMT_,       8
+.equ IM_DATA_,      64
 
 .section .rodata
 s_gpu_env:      .asciz "BEEMODEL_GPU="
@@ -81,6 +85,7 @@ g_pid:          .long 0
 .align 8
 g_type:         .skip 4
 g_ms:           .skip 4                 # GPU-side milliseconds, summed
+gp_tx4:         .skip 16                # a texel (gp_env_put)
 g_npt:          .skip 4                 # path tracer runs
 g_nrs:          .skip 4                 # raster batches
 g_spp:          .skip 4                 # samples traced on the GPU
@@ -654,9 +659,6 @@ gpu_pt_begin:
     push    r15
     sub     rsp, 16
     mov     dword ptr [rip+hv_gpu], 0
-    mov     dword ptr [rip+hv_why], HW_WORLD
-    cmp     dword ptr [rip+hv_env], 0   # (an HDRI world: the CPU's)
-    jne     9f
     mov     dword ptr [rip+hv_why], HW_NODE
     call    hv_gpu_ok
     test    eax, eax
@@ -788,9 +790,24 @@ gp_put:
     mov     rax, r12
     shl     rax, 4
 12: mov     [rbx+128], rax
-    mov     qword ptr [rbx+136], 16     # (H3: the HDRI, its CDF; H6: spheres)
-    mov     qword ptr [rbx+144], 16
-    mov     qword ptr [rbx+152], 16
+    mov     qword ptr [rbx+136], 16     # an HDRI world: rgb floats a texel,
+    mov     qword ptr [rbx+144], 16     #  and its CDF (env.s's tables)
+    cmp     dword ptr [rip+hv_env], 0
+    je      14f
+    mov     rcx, [rip+env_img]
+    mov     eax, [rcx+IM_W_]
+    imul    eax, [rcx+IM_H_]
+    lea     rax, [rax+rax*2]
+    shl     rax, 2
+    mov     [rbx+136], rax
+    mov     eax, [rcx+IM_W_]
+    inc     eax
+    imul    eax, [rcx+IM_H_]
+    add     eax, [rcx+IM_H_]
+    add     eax, 8
+    shl     rax, 2
+    mov     [rbx+144], rax
+14: mov     qword ptr [rbx+152], 16     # (H6: spheres)
     mov     rdi, rbx
     mov     rsi, r14
     mov     edx, PT_NBIND
@@ -869,6 +886,14 @@ gp_put:
     mov     rdi, [r14+120]
     add     rdi, r13
     call    gp_img_put
+    cmp     dword ptr [rip+hv_env], 0   # the HDRI and its tables
+    je      15f
+    mov     rdi, [r14+136]
+    add     rdi, r13
+    mov     rsi, [r14+144]
+    add     rsi, r13
+    call    gp_env_put
+15:
     # the constants (pt.comp's Params): sizes, the camera, lights, the table
     mov     rdi, [r14]
     add     rdi, r13
@@ -901,7 +926,12 @@ gp_put:
     lea     rdi, [rdi+48]
     mov     ecx, 13*4
     rep     movsb
-    cmp     dword ptr [rsp], 0          # cam[14] |= 16: the film (slot 0)
+    cmp     dword ptr [rip+hv_env], 0   # cam[14] |= 32: an HDRI world
+    je      16f
+    mov     rdi, [r14]
+    add     rdi, r13
+    or      dword ptr [rdi+48+14*4], 32
+16: cmp     dword ptr [rsp], 0          # cam[14] |= 16: the film (slot 0)
     jne     13f
     cmp     dword ptr [rip+hv_film], 0
     je      13f
@@ -938,6 +968,82 @@ gp_put:
     pop     rbx
     ret
 
+# gp_env_put(rdi=image out, rsi=CDF out) - the HDRI world for pt.comp: its
+#   texels as linear rgb floats, then the header (w, h, the CDF's total,
+#   the rotation, the strength) and env.s's tables (conditional, rows,
+#   marginal: one block)
+gp_env_put:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12, rdi
+    mov     r13, rsi
+    mov     rbx, [rip+env_img]
+    mov     r14d, [rbx+IM_W_]
+    imul    r14d, [rbx+IM_H_]
+    cmp     dword ptr [rbx+IM_FMT_], 0  # float rgb: as it is
+    je      2f
+    lea     rsi, [rbx+IM_DATA_]
+    mov     rdi, r12
+    lea     rcx, [r14+r14*2]
+    shl     rcx, 2
+    rep     movsb
+    jmp     3f
+2:  xor     r15d, r15d                  # 8 bits: through the sRGB curve
+21: cmp     r15d, r14d
+    jae     3f
+    mov     eax, r15d
+    xor     edx, edx
+    div     dword ptr [rbx+IM_W_]
+    mov     ecx, edx                    # x
+    mov     edx, eax                    # y
+    mov     rdi, rbx
+    lea     rsi, [r12+r15*4]
+    lea     rsi, [rsi+r15*8]
+    sub     rsp, 16                     # (texel writes 4 floats)
+    mov     rax, rsi
+    mov     [rsp], rax
+    lea     rsi, [rip+gp_tx4]
+    call    tex_texel
+    mov     rdi, [rsp]
+    add     rsp, 16
+    lea     rsi, [rip+gp_tx4]
+    mov     rax, [rsi]
+    mov     [rdi], rax
+    mov     eax, [rsi+8]
+    mov     [rdi+8], eax
+    inc     r15d
+    jmp     21b
+3:  mov     eax, [rbx+IM_W_]            # the header
+    mov     [r13], eax
+    mov     eax, [rbx+IM_H_]
+    mov     [r13+4], eax
+    mov     eax, [rip+env_total]
+    mov     [r13+8], eax
+    mov     eax, [rip+env_rot]
+    mov     [r13+12], eax
+    mov     eax, [rip+env_str]
+    mov     [r13+16], eax
+    xor     eax, eax
+    mov     [r13+20], eax
+    mov     [r13+24], rax
+    lea     rdi, [r13+32]
+    mov     rsi, [rip+env_cond]
+    mov     eax, [rbx+IM_W_]
+    inc     eax
+    imul    eax, [rbx+IM_H_]
+    add     eax, [rbx+IM_H_]
+    lea     rcx, [rax*4]
+    rep     movsb
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # put_bytes(rsi=from, rdi=offset in r13's slot, rcx=bytes) (none: zeros)
 put_bytes:
     add     rdi, r13
@@ -949,13 +1055,11 @@ put_bytes:
     rep     stosb
     ret
 
-# hv_gpu_ok -> eax = 1 if pt.comp covers this scene: no HDRI world, and
-#   the materials' graphs of node types it evaluates
+# hv_gpu_ok -> eax = 1 if pt.comp covers this scene: the materials' graphs
+#   of node types it evaluates
 hv_gpu_ok:
     push    rbx
     xor     eax, eax
-    cmp     dword ptr [rip+hv_env], 0
-    jne     9f
     mov     ebx, 1
 1:  cmp     ebx, [rip+hv_nmats]
     ja      8f

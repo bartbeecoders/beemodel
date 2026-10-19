@@ -421,6 +421,7 @@ lv_build:
     call    mat_sync_check              # (material instances up to date)
     call    tex_init
     call    env_prep
+    mov     [rip+hv_env], eax           # (an HDRI world: the GPU draws it too)
     call    hive_build
     test    eax, eax
     jz      8f
