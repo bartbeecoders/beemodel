@@ -81,6 +81,7 @@ s_mat:          .asciz "material "
 s_mod:          .asciz " modifier "
 s_node:         .asciz "node tree "
 s_unknown:      .asciz "?"
+s_fstr:         .asciz " strength"
 s_op_move:      .asciz "anim.move_keys"
 s_op_handle_l:  .asciz "Key Handle"
 s_op_sel:       .asciz "anim.select_keys"
@@ -218,7 +219,19 @@ ae_curve_label:
     je      2f
     cmp     eax, K_MAT
     je      3f
-    lea     rdi, [rip+s_node]           # a node: tree, node, slot
+    cmp     eax, 8                      # (anim.s K_FIELD) a field's strength
+    jne     4f
+    mov     edi, [rbx+CU_A]
+    call    obj_by_uid
+    mov     rdi, rax
+    test    rdi, rdi
+    jnz     41f
+    lea     rdi, [rip+s_unknown]
+41: call    fmt_str
+    lea     rdi, [rip+s_fstr]
+    call    fmt_str
+    jmp     8f
+4:  lea     rdi, [rip+s_node]           # a node: tree, node, slot
     call    fmt_str
     mov     edi, [rbx+CU_A]
     inc     edi

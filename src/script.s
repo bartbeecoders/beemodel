@@ -440,6 +440,10 @@ builtins:
     .long 0, 0
     .quad bn_refimage, b_refimage
     .long 1, 2
+    .quad bn_field, b_field
+    .long 1, 3
+    .quad bn_force, b_force
+    .long 3, 4
     .quad bn_shatter, b_shatter
     .long 3, 4
     .quad bn_height, b_height
@@ -786,6 +790,8 @@ bn_folder:      .asciz "folder"
 bn_infolder:    .asciz "infolder"
 bn_folders:     .asciz "folders"
 bn_refimage:    .asciz "refimage"
+bn_field:       .asciz "field"
+bn_force:       .asciz "force"
 bn_shatter:     .asciz "shatter"
 s_sh_opname:    .asciz "object.shatter"
 s_sh_cnt:       .asciz " count "
@@ -5769,6 +5775,105 @@ b_refimage:
     pop     r12
     pop     rbx
     jmp     ret_nil
+
+# field(type [, name [, settings]]) -> the name of a new force field at the
+#   3D cursor (Add > Force Field: attractor, zone, wind, vortex, turbulence,
+#   drag; settings as field.set takes them: "strength 20 falloff smooth"),
+#   nil when the type is not one
+b_field:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_str
+    mov     rdi, rax
+    call    fl_type_of
+    test    eax, eax
+    js      8f
+    mov     r13d, eax
+    xor     eax, eax
+    cmp     r12d, 3
+    jb      1f
+    lea     rdi, [rbx+32]
+    call    a_str
+1:  push    qword ptr [rip+op_arg]
+    push    qword ptr [rip+op_arg]
+    mov     [rip+op_arg], rax
+    lea     rax, [rip+fl_ops]
+    mov     rdi, [rax+r13*8]
+    call    run_op
+    pop     rax
+    pop     qword ptr [rip+op_arg]
+    cmp     r12d, 2
+    jb      7f
+    lea     rdi, [rbx+16]               # its name
+    call    a_str
+    mov     rsi, rax
+    mov     edi, [rip+active_obj]
+    call    obj_rename
+7:  mov     edi, [rip+active_obj]
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_name
+8:  pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_nil
+
+# force(x, y, z [, axis]) -> the force fields' and gravity's acceleration at
+#   that point (m/s2, on a still thing of group 0): its size, or one axis
+#   ("x", "y", "z" or 0-2)
+b_force:
+    push    rbx
+    push    r12
+    sub     rsp, 40
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp], xmm0
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+4], xmm0
+    lea     rdi, [rbx+32]
+    call    a_num
+    cvtsd2ss xmm0, xmm0
+    movss   [rsp+8], xmm0
+    lea     rdi, [rsp]
+    lea     rsi, [rsp+16]
+    call    fl_sample
+    cmp     r12d, 4
+    jb      5f
+    lea     rdi, [rbx+48]
+    cmp     dword ptr [rdi], T_STR
+    jne     2f
+    call    a_str
+    movzx   eax, byte ptr [rax]
+    sub     eax, 'x'
+    jmp     3f
+2:  call    a_num
+    cvttsd2si eax, xmm0
+3:  cmp     eax, 2
+    ja      5f
+    movss   xmm0, [rsp+16+rax*4]
+    jmp     6f
+5:  movss   xmm0, [rsp+16]
+    mulss   xmm0, xmm0
+    movss   xmm1, [rsp+20]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+24]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    sqrtss  xmm0, xmm0
+6:  cvtss2sd xmm0, xmm0
+    add     rsp, 40
+    pop     r12
+    pop     rbx
+    jmp     ret_num
 
 # folders() -> how many folders the outliner has
 b_folders:

@@ -124,6 +124,7 @@
 .equ K_NODE,    4
 .equ K_BONE,    5
 .equ K_SHAPE,   K_SHAPE_
+.equ K_FIELD,   8                       # a force field's strength (fields.s)
 .equ GR_N,      128
 .equ GR_NODES,  160
 .equ NODE_SZ,   72
@@ -824,6 +825,8 @@ an_chan:
     je      .Lch_bone
     cmp     ebx, K_PARAM_
     je      .Lch_param
+    cmp     ebx, K_FIELD
+    je      .Lch_field
     cmp     ebx, K_SHAPE
     jne     .Lch_fail
     mov     edi, r12d                   # a shape key's value (shape.s)
@@ -831,6 +834,14 @@ an_chan:
     mov     edx, r15d
     movss   xmm0, [rsp]
     call    sk_chan
+    test    eax, eax
+    jz      .Lch_fail
+    jmp     .Lch_ok
+.Lch_field:                             # a force field's strength (fields.s)
+    mov     edi, r12d
+    mov     esi, r15d
+    movss   xmm0, [rsp]
+    call    fl_chan
     test    eax, eax
     jz      .Lch_fail
     jmp     .Lch_ok
@@ -1275,6 +1286,11 @@ an_path:
     call    str_eq
     test    eax, eax
     jnz     .Lap_param
+    lea     rdi, [rip+ap_word]
+    lea     rsi, [rip+k_field]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lap_field
     lea     rdi, [rip+ap_word]          # an object: its property
     call    obj_find
     test    eax, eax
@@ -1434,6 +1450,34 @@ an_path:
     mov     [rip+ap_b], eax
     mov     [rip+ap_c], eax
     mov     dword ptr [rip+ap_kind], K_PARAM_
+    jmp     .Lap_ok
+.Lap_field:                             # field:Wind:strength
+    mov     rsi, r12
+    call    ap_field
+    mov     r12, rsi
+    lea     rdi, [rip+ap_word]
+    call    obj_find
+    test    eax, eax
+    jz      .Lap_bad
+    mov     edi, eax
+    call    obj_get
+    cmp     dword ptr [rax+OB_TYPE], OT_FIELD
+    jne     .Lap_bad
+    mov     eax, [rax+OB_UID]
+    mov     [rip+ap_a], eax
+    mov     rsi, r12
+    call    ap_field
+    test    eax, eax
+    jle     .Lap_bad
+    lea     rdi, [rip+ap_word]
+    lea     rsi, [rip+k_strength]
+    call    str_eq
+    test    eax, eax
+    jz      .Lap_bad
+    xor     eax, eax
+    mov     [rip+ap_b], eax
+    mov     [rip+ap_c], eax
+    mov     dword ptr [rip+ap_kind], K_FIELD
     jmp     .Lap_ok
 .Lap_shape:                             # shape:Cube:Smile
     mov     rsi, r12
@@ -1596,6 +1640,8 @@ k_node:         .asciz "node"
 k_bone:         .asciz "bone"
 k_shape:        .asciz "shape"
 k_param:        .asciz "param"
+k_field:        .asciz "field"
+k_strength:     .asciz "strength"
 .align 8
 obj_props:      .quad p_x, p_y, p_z, p_rx, p_ry, p_rz, p_sx, p_sy, p_sz
 p_x:            .asciz "x"
@@ -1618,7 +1664,7 @@ p_sz:           .asciz "sz"
 
 OPERATOR op_an_key,    "anim.insert_key", "Insert Keyframe",  do_an_key, key=KEY_I_, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Key the selected objects' location, rotation and scale at the current frame"
 OPERATOR op_an_del,    "anim.delete_key", "Delete Keyframe",  do_an_del, key=KEY_I_|KM_ALT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Remove the selected objects' keys at the current frame"
-OPERATOR op_an_path,   "anim.key",        "Key Property",     do_an_path, flags=OPF_AI_SAFE|OPF_UNDO, doc="Key one property: anim.key <path> [frame] [value] [constant|linear|bezier] (paths: Cube:x .. sz, material:M:roughness[:k], modifier:Cube:0:levels, node:Tree:3:5[:k]; no value: its value now)"
+OPERATOR op_an_path,   "anim.key",        "Key Property",     do_an_path, flags=OPF_AI_SAFE|OPF_UNDO, doc="Key one property: anim.key <path> [frame] [value] [constant|linear|bezier] (paths: Cube:x .. sz, material:M:roughness[:k], modifier:Cube:0:levels, node:Tree:3:5[:k], field:Wind:strength; no value: its value now)"
 OPERATOR op_an_unpath, "anim.unkey",      "Unkey Property",   do_an_unpath, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a key: anim.unkey <path> [frame]"
 OPERATOR op_an_frame,  "anim.frame",      "Go to Frame",      do_an_frame, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show the scene at a frame: anim.frame <n>"
 OPERATOR op_an_play,   "anim.play",       "Play Animation",   do_an_play, chk_an_play, key=KEY_SPACE, flags=OPF_AI_SAFE|OPF_QUIET, doc="Play or pause the animation (it loops over the scene's frame range)"

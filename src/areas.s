@@ -1358,7 +1358,7 @@ ed_outliner_draw:
     mov     r8d, [r14+OB_COLOR]
     call    fill_rect
     mov     eax, [r14+OB_TYPE]
-    cmp     eax, 4
+    cmp     eax, OT_FIELD
     jbe     5f
     xor     eax, eax
 5:  lea     rcx, [rip+type_icons]
@@ -1940,7 +1940,7 @@ outl_drag_draw:
 54: mov     r8d, COL_ACCENT
     call    popup_frame
     mov     eax, [rbx+OB_TYPE]          # its type's icon, its name
-    cmp     eax, 4
+    cmp     eax, OT_FIELD
     jbe     55f
     xor     eax, eax
 55: lea     rcx, [rip+type_icons]
@@ -3579,7 +3579,7 @@ s_u_hide:       .asciz "Hide"
 s_obj_name_w:   .asciz "object.name"
 s_filter_hint:  .asciz "Filter by name"
 .align 4
-type_icons:     .long ICON_MESH, ICON_LIGHT, ICON_CAMERA, ICON_SKETCH, ICON_ARMATURE
+type_icons:     .long ICON_MESH, ICON_LIGHT, ICON_CAMERA, ICON_SKETCH, ICON_ARMATURE, ICON_PHYSICS
 .text
 OPERATOR op_rename, "object.rename", "Rename", do_rename, key=KEY_F1+1, flags=OPF_QUIET, doc="Rename the active object: its outliner row (or the Properties name) becomes a text field (F2, or double-click a row)"
 WIDGET wd_outl_name, WK_TEXT, "outliner.name", "Name", flags=WGF_COMPACT, cb=outl_name_cb, undo="Rename"

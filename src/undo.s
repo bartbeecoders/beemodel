@@ -47,7 +47,8 @@
 .equ ST_PROBES,     128     # the light probes it saw (a reference)
 .equ ST_LCAM,       136     # the light / camera settings it saw (a reference)
 .equ ST_FOLD,       144     # the outliner's folders it saw (a reference)
-.equ ST_HDR,        152
+.equ ST_FLD,        152     # the force fields' settings it saw (a reference)
+.equ ST_HDR,        160
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -146,6 +147,9 @@ snapshot:
     mov     rdi, [rip+fd_cur]           # the folders, shared
     mov     [rbx+ST_FOLD], rdi
     call    fd_ref
+    mov     rdi, [rip+fl_cur]           # the force fields, shared
+    mov     [rbx+ST_FLD], rdi
+    call    fl_ref
     xor     r12d, r12d
 2:  cmp     r12d, [rip+obj_count]
     jae     8f
@@ -203,6 +207,8 @@ release:
     call    lc_unref
     mov     rdi, [rbx+ST_FOLD]
     call    fd_unref
+    mov     rdi, [rbx+ST_FLD]
+    call    fl_unref
     mov     rdi, [rbx+ST_DELTA]         # its delta goes too
     test    rdi, rdi
     jz      3f
@@ -283,6 +289,12 @@ restore_step:
     mov     rax, [rbx+ST_FOLD]
     mov     [rip+fd_cur], rax
     call    fd_unref
+    mov     rdi, [rbx+ST_FLD]           # the force fields it saw
+    call    fl_ref
+    mov     rdi, [rip+fl_cur]
+    mov     rax, [rbx+ST_FLD]
+    mov     [rip+fl_cur], rax
+    call    fl_unref
     call    cad_sync
     lea     rdi, [rip+scene_pool]
     call    pool_clear
