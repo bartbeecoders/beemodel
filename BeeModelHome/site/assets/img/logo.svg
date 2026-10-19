@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="BeeModel">
+  <defs>
+    <linearGradient id="hg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffc24a"/><stop offset=".55" stop-color="#f5a623"/><stop offset="1" stop-color="#e0862a"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 3 57 17.5v29L32 61 7 46.5v-29Z" fill="url(#hg)"/>
+  <path d="M32 15 46 23v16L32 47 18 39V23Z" fill="#1b1204" opacity=".92"/>
+  <path d="M32 15 46 23 32 31 18 23Z" fill="#ffd27a"/>
+  <path d="M32 31v16L18 39V23Z" fill="#f5a623"/>
+  <path d="M32 31 46 23v16L32 47Z" fill="#c26f17"/>
+</svg>

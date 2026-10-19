@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeeModel — a 3D creation suite in pure x86-64 assembly</title>
+<meta name="description" content="BeeModel: model, sculpt, paint, animate, simulate and path-trace — one small static binary written entirely in x86-64 assembly. Free and open source under the MIT license.">
+<meta property="og:title" content="BeeModel — 3D in pure assembly">
+<meta property="og:description" content="Model, sculpt, paint, animate, simulate and render. One {{BIN_SIZE}} binary, zero libraries, MIT licensed.">
+<meta property="og:image" content="https://beemodel.hideterms.com/assets/img/studio.webp">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#0d0f13">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/css/site.css?v={{STAMP}}">
+</head>
+<body>
+{{HEADER}}
+
+<main>
+<!-- ======================================================================= hero -->
+<section class="hero">
+  <canvas class="hex-bg" aria-hidden="true"></canvas>
+  <div class="wrap hero-grid">
+    <div>
+      <span class="eyebrow">Free &amp; open source · MIT</span>
+      <h1>3D creation,<br>written in <span class="grad">pure assembly</span>.</h1>
+      <p class="lead">BeeModel models, sculpts, paints, rigs, animates, simulates and path-traces —
+        in one {{BIN_SIZE}} static binary for Linux. No libc, no toolkit, no libraries:
+        x86-64 assembly talking straight to the kernel and the Wayland compositor.</p>
+      <div class="btn-row">
+        <a class="btn primary" href="#download" data-latest="page-anchor">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16"/></svg>
+          <span>Download v<span data-latest="version">{{VERSION}}</span></span>
+        </a>
+        <a class="btn ghost" href="https://github.com/bartbeecoders/beemodel">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
+          Source on GitHub
+        </a>
+      </div>
+      <div class="badges">
+        <span class="badge"><span class="dot"></span> Latest <b>v<span data-latest="version">{{VERSION}}</span></b> · <span data-latest="date">{{DATE}}</span></span>
+        <span class="badge">Linux x86-64 · Wayland</span>
+        <span class="badge">{{N_RELEASES}} releases</span>
+      </div>
+    </div>
+    <div class="hero-visual reveal">
+      <div class="hero-render"><img src="assets/img/studio.webp" alt="A path-traced studio scene: clear-coated red sphere, gold ring, glass ball on a stone plinth" width="1600" height="900"></div>
+      <div class="hero-ui"><img src="assets/img/modeling-sm.webp" alt="The BeeModel interface in Material Preview" width="800" height="500"></div>
+      <div class="hero-chip"><b>mov</b> rax, SYS_MMAP<br><b>syscall</b> ; no libc here</div>
+    </div>
+  </div>
+</section>
+
+<div class="ticker" aria-hidden="true">
+  <div class="ticker-track">
+    <span><b>●</b> path tracer on every core</span><span><b>●</b> Vulkan GPU helper</span><span><b>●</b> sculpting with dynamic topology</span>
+    <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
+    <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
+    <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
+    <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
+    <span><b>●</b> path tracer on every core</span><span><b>●</b> Vulkan GPU helper</span><span><b>●</b> sculpting with dynamic topology</span>
+    <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
+    <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
+    <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
+    <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
+  </div>
+</div>
+
+<!-- ======================================================================= numbers -->
+<section class="tight">
+  <div class="wrap">
+    <div class="stats reveal">
+      <div class="stat"><div class="num" data-count="{{BIN_MB}}">0<small>MB</small></div><div class="lbl">one static binary</div></div>
+      <div class="stat"><div class="num" data-count="0">0</div><div class="lbl">libraries linked</div></div>
+      <div class="stat"><div class="num" data-count="{{N_FILES}}">0</div><div class="lbl">assembly source files</div></div>
+      <div class="stat"><div class="num" data-count="{{N_RELEASES}}">0</div><div class="lbl">releases so far</div></div>
+      <div class="stat"><div class="num">MIT</div><div class="lbl">free, forever</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= features -->
+<section id="features">
+  <div class="wrap">
+    <div class="center reveal">
+      <span class="eyebrow">Everything in one place</span>
+      <h2>A complete 3D suite — not a toy</h2>
+      <p class="lead">From the first cube to a rendered, simulated, animated scene: every tool lives in
+        the same tiny program, works on every core, and is scriptable and reachable by AI agents.</p>
+    </div>
+    <div class="features">
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 2 9 5v10l-9 5-9-5V7Z"/><path d="m3 7 9 5 9-5M12 12v10"/></svg></div>
+        <h3>Polygon modeling</h3><p>Extrude, inset, bevel, loop cut, knife, bridge, spin, booleans — and a non-destructive modifier stack with Catmull–Clark subdivision, mirror, array, solidify, remesh and multires.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20c4-1 6-4 7-8M15 3l6 6-8 8-6-6Z"/></svg></div>
+        <h3>Sculpt &amp; paint</h3><p>Draw, clay strips, crease, grab, snake hook and more, with dynamic topology, multires and pen pressure. Texture, vertex and weight painting with layers, baking AO and normal maps.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18M3 12h18"/></svg></div>
+        <h3>Materials &amp; path tracing</h3><p>Principled materials with node graphs, HDRI lighting and Hive — a physically based path tracer with a denoiser on every core, plus an optional Vulkan GPU helper for live rendered viewports.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/><path d="M10 7h3a2 2 0 0 1 2 2v5"/></svg></div>
+        <h3>Geometry nodes</h3><p>Procedural trees for terrain, erosion, scattering, instancing, curves and L-systems. A million blades of grass, placed not realized.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/></svg></div>
+        <h3>Parametric CAD</h3><p>Constraint-solved sketches, pads, pockets, revolves, holes, shells, fillets and patterns driven by parameters; an exact B-rep kernel, STEP export and dimensioned 2D drawings.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="5" r="2"/><path d="M12 7v6l-4 7M12 13l4 7M7 10h10"/></svg></div>
+        <h3>Animation &amp; rigging</h3><p>Keys on anything, a dope sheet and graph editor, actions and layers, armatures with IK and automatic weights, constraints, drivers, shape keys, onion skins and motion paths.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="13" width="6" height="6" rx="1"/><rect x="10" y="7" width="6" height="6" rx="1" transform="rotate(15 13 10)"/><circle cx="18" cy="17" r="3"/></svg></div>
+        <h3>Physics</h3><p>A parallel rigid-body solver for 10 000 bodies with joints, mesh and heightfield colliders; XPBD cloth and soft bodies; shatter into bricks, shards or balls; a simulation cache.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7c4-3 12-3 16 0M5 12c4-2.5 10-2.5 14 0M8 17c2.5-1.5 5.5-1.5 8 0"/></svg></div>
+        <h3>Attractors &amp; force fields</h3><p>Attractors, gravity zones, wind, vortices, turbulence and drag on bodies and cloth. Bodies that attract each other (Barnes–Hut), and planets you can walk around.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m2 19 6-9 4 5 3-4 7 8Z"/><circle cx="17" cy="6" r="2"/></svg></div>
+        <h3>Landscapes</h3><p>Generate, erode, sculpt and paint heightfields with layers; presets from hills to islands with a sea that floats things; PNG/EXR heightmaps in and out.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 12h4m-2-2v4M15 11h.01M18 13h.01"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg></div>
+        <h3>Play mode &amp; logic</h3><p>Press F5 and walk through your scene while it simulates. Logic graphs give objects behaviour — events, actions, messages — no code required.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><path d="m5 5 14 14M19 5 5 19" opacity=".5"/></svg></div>
+        <h3>A billion triangles</h3><p>Nanite-style virtualized geometry draws huge meshes through a cluster LOD cut every frame; world partition streams big worlds by cell.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5"/><circle cx="12" cy="12" r="4"/></svg></div>
+        <h3>AI assistant &amp; MCP</h3><p>A built-in AI assistant (Claude Code, Grok or OpenRouter) and an MCP server, so agents can see the scene, run any command and propose changes you accept or revert.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.3 7.2l7.4 3.6"/></svg></div>
+        <h3>Versions &amp; co-editing</h3><p>Every saved scene keeps a content-addressed history with diffs and merges; live co-editing sessions and a live link to other tools.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M13 6l-2 12"/></svg></div>
+        <h3>BeeScript</h3><p>A small scripting language for everything: build scenes, run any operator, drive the viewport, test — from the console, files or agents.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M9 14l2 2 4-4"/></svg></div>
+        <h3>Files in, files out</h3><p>Its own .bee format, plus OBJ, STL, glTF/GLB, STEP, 3MF, DXF, SVG, PDF drawings and Blender .blend import and export.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg></div>
+        <h3>Fast &amp; frugal</h3><p>Event driven: 0% CPU when idle, a few MB of memory, a multithreaded software rasterizer, SIMD everywhere — and it starts in a blink.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= tour -->
+<section id="tour" style="background: var(--bg-2)">
+  <div class="wrap tour">
+    <div class="center reveal">
+      <span class="eyebrow">Take the tour</span>
+      <h2>See it at work</h2>
+      <p class="lead">Every picture on this page was made by BeeModel itself — the screenshots by its test harness, the renders by its path tracer.</p>
+    </div>
+    <div class="tour-tabs" role="tablist">
+      <button role="tab">Modeling</button><button role="tab">Materials</button><button role="tab">Sculpting</button>
+      <button role="tab">CAD</button><button role="tab">Animation</button><button role="tab">Physics</button>
+      <button role="tab">Force fields</button><button role="tab">Landscapes</button><button role="tab">Procedural</button>
+    </div>
+
+    <div class="tour-pane"><div class="spot">
+      <div class="spot-text">
+        <h3>Model the way you already know</h3>
+        <p>Blender-style keys and areas: G, R, S with axis locks, snapping and typed values; Tab into edit mode for vertices, edges and faces. Material Preview shades it live with smooth normals.</p>
+        <ul><li>Booleans that stay exact, a full modifier stack</li><li>Nine themes, any area any editor, workspaces</li><li>Every command searchable with F3, undo for everything</li></ul>
+        <div class="spot-tag">Modeling workspace · Material Preview</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/modeling.webp" data-caption="Modeling in Material Preview"><img loading="lazy" src="assets/img/modeling-sm.webp" alt="Modeling workspace" width="800" height="500"></div>
+    </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>Node-based materials</h3>
+        <p>Principled BSDF materials, driven by Unreal-style node graphs: noise, ramps, bump, math, image textures — with live previews on every node and in the viewport.</p>
+        <ul><li>Presets from gold to car paint, glass and marble</li><li>Material functions and instances</li><li>Bake to texture maps</li></ul>
+        <div class="spot-tag">Shading workspace · node editor</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/nodes.webp" data-caption="A procedural stone material"><img loading="lazy" src="assets/img/nodes-sm.webp" alt="Node editor with a stone material" width="800" height="500"></div>
+    </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>Sculpt, then paint</h3>
+        <p>A stone head sculpted on a dense ball, its detail baked into the maps of a light, unwrapped mesh, then painted in layers — and rendered by the path tracer.</p>
+        <ul><li>Dynamic topology, multires, symmetry, stabilizer</li><li>Texture, vertex and weight paint with layers</li><li>Bake ambient occlusion, curvature and normal maps</li></ul>
+        <div class="spot-tag">Sculpt workspace · Hive path tracer</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/sculpt-render.webp" data-caption="Sculpted and painted, path-traced"><img loading="lazy" src="assets/img/sculpt-render-sm.webp" alt="A sculpted stone head, rendered" width="800" height="450"></div>
+    </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>Design parts that fit</h3>
+        <p>An electronics enclosure from dimensioned sketches and parameters: change one value and every feature rebuilds. Export STEP for CAD, 3MF for the slicer, a PDF drawing for the workshop.</p>
+        <ul><li>Constraint solver: coincident, tangent, equal, dimensions</li><li>Pad, pocket, revolve, hole, shell, fillet, chamfer, pattern</li><li>Exact B-rep kernel, mechanisms with joints</li></ul>
+        <div class="spot-tag">CAD workspace · parameters &amp; feature tree</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/cad.webp" data-caption="A parametric enclosure"><img loading="lazy" src="assets/img/cad-sm.webp" alt="CAD workspace with a parametric enclosure" width="800" height="500"></div>
+    </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>Bring it to life</h3>
+        <p>A skinned character on an armature with IK legs walks; gears turn on a keyed crank; a thousand boxes heap up and a tablecloth drapes — all in one scene, baked and played back.</p>
+        <ul><li>Timeline, dope sheet, graph editor with Bézier handles</li><li>Actions, layers, drivers and constraints</li><li>Automatic weights, pose mode, onion skins</li></ul>
+        <div class="spot-tag">Animation workspace</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/animation.webp" data-caption="Animation and simulation in one scene"><img loading="lazy" src="assets/img/animation-sm.webp" alt="Animation workspace" width="800" height="500"></div>
+    </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>Break things — properly</h3>
+        <p>A glued brick wall, cut with Shatter, takes a steel ball on a chain of joints: only the bricks it reaches come loose. Substepped, parallel and deterministic on any number of threads.</p>
+        <ul><li>Boxes, spheres, capsules, hulls, compounds, meshes</li><li>Hinges, sliders, motors, limits, breakable joints</li><li>Shatter on impact, during the simulation and in play</li></ul>
+        <div class="spot-tag">Properties › Physics</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/physics.webp" data-caption="The wrecking ball"><img loading="lazy" src="assets/img/physics-sm.webp" alt="A wrecking ball hitting a brick wall" width="800" height="500"></div>
+    </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>Place gravity anywhere</h3>
+        <p>A tornado — a vortex with lift and inflow — and its streamlines from a probe ball. Attractors, gravity zones, wind, turbulence and drag act on rigid bodies, cloth and the player.</p>
+        <ul><li>Falloff, keyframed strength, collision groups</li><li>N-body attraction with a Barnes–Hut tree</li><li>Arrows and streamline overlays to see the pull</li></ul>
+        <div class="spot-tag">Add › Force Field · View › Force Field Lines</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/fields.webp" data-caption="A tornado and its streamlines"><img loading="lazy" src="assets/img/fields-sm.webp" alt="A tornado force field with streamlines" width="800" height="500"></div>
+    </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>Worlds to land on</h3>
+        <p>An island generated, eroded and painted by slope and height: sand at the shore, grass, rock and snow — with a sea that floats wood and sinks stone.</p>
+        <ul><li>Generate, erode, terrace, flatten — as layers</li><li>Sculpt and paint landscapes with brushes</li><li>A heightfield collider for bodies, cloth and the player</li></ul>
+        <div class="spot-tag">Add › Landscape · Properties › Landscape</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/landscape.webp" data-caption="An island landscape"><img loading="lazy" src="assets/img/landscape-sm.webp" alt="A painted island landscape" width="800" height="500"></div>
+    </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>Procedural everything</h3>
+        <p>One geometry-node tree makes a valley: ridged noise, 200 000 erosion droplets, rocks scattered by area, plants grown from an L-system, a rail swept along a curve.</p>
+        <ul><li>Distribute points, instance, realize, curves to mesh</li><li>Terrain, erosion and wave-function-collapse generators</li><li>Node groups and reusable assets</li></ul>
+        <div class="spot-tag">Geometry nodes · path traced</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/valley.webp" data-caption="A procedural valley, path-traced"><img loading="lazy" src="assets/img/valley-sm.webp" alt="A procedural valley render" width="800" height="450"></div>
+    </div></div>
+  </div>
+</section>
+
+<!-- ======================================================================= videos -->
+<section id="videos">
+  <div class="wrap">
+    <div class="center reveal">
+      <span class="eyebrow">In motion</span>
+      <h2>Demos</h2>
+      <p class="lead">Each demo is one BeeScript file that builds the scene; the films are path-traced frame by frame by BeeModel's own renderer, the screencasts are its viewport.</p>
+    </div>
+    <div class="videos">
+      <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/wrecking-ball.webp"><source src="assets/video/wrecking-ball.mp4" type="video/mp4"></video>
+        <div class="vc-body"><h3>Wrecking ball</h3><p>A glued brick wall cut by Shatter, hit by a steel ball on a chain of point joints. Only the bricks it reaches break loose.</p></div></div>
+      <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/rockfall-island.webp"><source src="assets/video/rockfall-island.mp4" type="video/mp4"></video>
+        <div class="vc-body"><h3>Rockfall island</h3><p>Boulders roll down an eroded island on its heightfield collider, topple a glued tower, and sink in the sea while crates float.</p></div></div>
+      <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/gallery-smash.webp"><source src="assets/video/gallery-smash.mp4" type="video/mp4"></video>
+        <div class="vc-body"><h3>Gallery smash</h3><p>A glass vase, a marble sphere and a sandstone cube stay whole until a ball lands — then shatter on impact.</p></div></div>
+      <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/tornado.webp"><source src="assets/video/tornado.mp4" type="video/mp4"></video>
+        <div class="vc-body"><h3>Tornado</h3><p>A vortex field with lift and inflow throws 80 rigid boxes around — live in the viewport.</p></div></div>
+      <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/orbits.webp"><source src="assets/video/orbits.mp4" type="video/mp4"></video>
+        <div class="vc-body"><h3>Orbits</h3><p>Moons circling a planet that attracts them by its mass: N-body gravity, leapfrog-integrated, energy kept.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= gallery -->
+<section id="gallery" style="background: var(--bg-2)">
+  <div class="wrap">
+    <div class="center reveal">
+      <span class="eyebrow">Hive path tracer</span>
+      <h2>Rendered in BeeModel</h2>
+      <p class="lead">Physically based materials — clear coat, metals, glass, emission — under a studio sky, denoised. On the CPU across every core, or on a Vulkan GPU.</p>
+    </div>
+    <div class="gallery">
+      <figure class="g-a reveal" data-full="assets/img/studio.webp" data-caption="Studio: clear-coated paint, brushed gold, glass and a noise-bumped plinth"><img loading="lazy" src="assets/img/studio-sm.webp" alt="Studio render"><figcaption>Studio product shot</figcaption></figure>
+      <figure class="g-b reveal" data-full="assets/img/sculpt-render.webp" data-caption="Sculpted, baked and painted heads"><img loading="lazy" src="assets/img/sculpt-render-sm.webp" alt="Sculpted heads render"><figcaption>Sculpt &amp; paint</figcaption></figure>
+      <figure class="g-c reveal" data-full="assets/img/gallery.webp" data-caption="The gallery demo before the ball lands"><img loading="lazy" src="assets/img/gallery-sm.webp" alt="Gallery demo render"><figcaption>Gallery pedestals</figcaption></figure>
+      <figure class="g-d reveal" data-full="assets/img/valley.webp" data-caption="A procedural valley from one node tree"><img loading="lazy" src="assets/img/valley-sm.webp" alt="Procedural valley render"><figcaption>Procedural valley</figcaption></figure>
+      <figure class="g-e reveal" data-full="assets/img/nodes.webp" data-caption="The stone material's node graph"><img loading="lazy" src="assets/img/nodes-sm.webp" alt="Node editor"><figcaption>Shader graph</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= download -->
+<section id="download">
+  <div class="wrap">
+    <div class="download reveal">
+      <div class="dl-grid">
+        <div>
+          <span class="eyebrow">Download</span>
+          <h2>Get BeeModel <span data-latest="version">{{VERSION}}</span></h2>
+          <p class="lead">One static binary. No installer, no dependencies, nothing to configure — download it, make it executable, run it.</p>
+          <div class="dl-files">
+            <a class="dl-file" data-asset="bin" href="{{BIN_URL}}"><span class="ext">BIN</span><span class="name">{{BIN_NAME}}</span><span class="size">{{BIN_SIZE}}</span></a>
+            <a class="dl-file" data-asset="tar" href="{{TAR_URL}}"><span class="ext">TAR.GZ</span><span class="name">{{TAR_NAME}}</span><span class="size">{{TAR_SIZE}}</span></a>
+            <a class="dl-file" data-asset="gpu" href="{{GPU_URL}}"><span class="ext">GPU</span><span class="name">{{GPU_NAME}}</span><span class="size">{{GPU_SIZE}}</span></a>
+            <a class="dl-file" data-asset="sums" href="{{SUMS_URL}}"><span class="ext">SHA256</span><span class="name">SHA256SUMS</span><span class="size">checksums</span></a>
+          </div>
+          <p class="muted" style="margin-top:14px">Released <span data-latest="date">{{DATE}}</span> ·
+            <a data-latest="page" href="{{RELEASE_URL}}">release notes</a> · <a href="releases.html">all releases</a></p>
+        </div>
+        <div>
+          <div class="terminal">
+            <div class="bar"><i></i><i></i><i></i></div>
+            <button class="copy" type="button">Copy</button>
+            <pre data-install data-copy="curl -LO {{BIN_URL}}
+chmod +x {{BIN_NAME}}
+./{{BIN_NAME}}"><span class="c"># download, make executable, run</span>
+<span class="p">$</span> curl -LO {{BIN_URL}}
+<span class="p">$</span> chmod +x {{BIN_NAME}}
+<span class="p">$</span> ./{{BIN_NAME}}</pre>
+          </div>
+          <div class="reqs">
+            <div class="req"><b>Linux x86-64</b>any distribution, static binary</div>
+            <div class="req"><b>A Wayland compositor</b>GNOME, KDE, Hyprland, sway…</div>
+            <div class="req"><b>Optional: Vulkan</b>the GPU helper for live rendering</div>
+            <div class="req"><b>Build it yourself</b><code>scripts/build.sh</code> — binutils only</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================================= license -->
+<section id="license" class="tight">
+  <div class="wrap license reveal">
+    <div class="mit-badge">MIT<small>LICENSE</small></div>
+    <div>
+      <span class="eyebrow">Free and open source</span>
+      <h2>Free to download. Free to use. Free to change.</h2>
+      <p class="lead">BeeModel is released under the MIT license: use it at home, at work or in your
+        products, read and change the source, share it — commercially or not, with no fees and no strings
+        beyond keeping the copyright notice.</p>
+      <div class="freedoms">
+        <div class="freedom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>Free download</div>
+        <div class="freedom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>Commercial use</div>
+        <div class="freedom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>Modify &amp; share</div>
+        <div class="freedom"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5L20 7"/></svg>No accounts, no telemetry</div>
+      </div>
+      <p style="margin-top:16px"><a href="https://github.com/bartbeecoders/beemodel/blob/main/LICENSE">Read the full license text →</a></p>
+    </div>
+  </div>
+</section>
+</main>
+
+{{FOOTER}}
+<script src="assets/js/site.js?v={{STAMP}}" defer></script>
+</body>
+</html>
