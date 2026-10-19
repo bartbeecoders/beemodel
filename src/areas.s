@@ -1258,6 +1258,12 @@ ed_outliner_draw:
     push    r14
     push    r15
     sub     rsp, 16
+    mov     eax, [rip+ed_x]             # (where its rows are: drag feedback)
+    mov     [rip+outl_x0], eax
+    mov     eax, [rip+ed_y]
+    mov     [rip+outl_y0], eax
+    mov     eax, [rip+ed_w]
+    mov     [rip+outl_w0], eax
     call    outl_order                  # the tree's order (parent.s)
     xor     ebx, ebx                    # visible row
     mov     r15d, [rip+outl_scroll]     # objects to skip (scrolled past)
@@ -1760,6 +1766,239 @@ outl_fren_cb:
     lea     rdi, [rip+op_fd_ren]
     call    run_with_arg
 9:  mov     dword ptr [rip+outl_fren], 0
+    pop     rbx
+    ret
+
+# outl_drag_draw - while an outliner row is dragged: the row or folder that
+#   would take it lit, and at the pointer a label: what is dragged, and what
+#   letting go does there
+.globl outl_drag_draw
+outl_drag_draw:
+    cmp     dword ptr [rip+drag_mode], DRAG_OUTL
+    jne     9f
+    cmp     dword ptr [rip+outl_dragging], 0
+    je      9f
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    call    reset_clip
+    mov     edi, [rip+outl_drag]        # the one dragged
+    call    obj_at
+    test    rax, rax
+    jz      .Lodd_out
+    mov     rbx, rax
+    xor     r12d, r12d                  # the others selected with it
+    xor     ecx, ecx
+1:  cmp     ecx, [rip+obj_count]
+    jae     2f
+    push    rcx
+    push    rcx
+    mov     edi, ecx
+    call    obj_at
+    pop     rcx
+    pop     rcx
+    inc     ecx
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      1b
+    cmp     rax, rbx
+    je      1b
+    inc     r12d
+    jmp     1b
+2:  lea     r14, [rip+s_dg_out]         # r14 = the line saying what happens
+    xor     r15d, r15d                  # (0: nothing; 1: into a folder)
+    call    outl_drop_folder            # a folder row: lit, "Into it"
+    test    eax, eax
+    js      3f
+    mov     edi, eax
+    call    fd_rec
+    test    rax, rax
+    jz      3f
+    lea     r13, [rax+16]               # (its name)
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    wg_hit
+    mov     edi, eax
+    call    wg_find
+    test    rax, rax
+    jz      3f
+    mov     edi, [rax+8]                # (E_X, E_Y, E_W, E_H)
+    sub     edi, 4
+    mov     esi, [rax+12]
+    mov     edx, [rax+16]
+    add     edx, 4
+    mov     ecx, [rax+20]
+    call    drag_box
+    call    fmt_reset
+    lea     rdi, [rip+s_dg_into]
+    call    fmt_str
+    mov     rdi, r13
+    call    fmt_str
+    lea     r14, [rip+fmt_buf]
+    mov     r15d, 1
+    jmp     5f
+3:  mov     edi, [rip+ptr_x]            # an object's row: "Child of it"
+    mov     esi, [rip+ptr_y]
+    call    hit_test
+    cmp     eax, HIT_OUTLINER
+    jne     4f
+    test    edx, edx
+    js      4f
+    cmp     edx, [rip+outl_drag]
+    je      41f
+    mov     r13d, edx
+    xor     ecx, ecx                    # its row
+31: cmp     ecx, [rip+outl_rows]
+    jae     41f
+    lea     rax, [rip+outl_map]
+    cmp     [rax+rcx*4], r13d
+    je      32f
+    inc     ecx
+    jmp     31b
+32: mov     esi, ecx
+    imul    esi, ROW_H
+    add     esi, [rip+outl_y0]
+    add     esi, 4
+    mov     edi, [rip+outl_x0]
+    add     edi, 4
+    mov     edx, [rip+outl_w0]
+    sub     edx, 8
+    mov     ecx, ROW_H
+    call    drag_box
+    mov     edi, r13d
+    call    obj_at
+    mov     r13, rax
+    call    fmt_reset
+    lea     rdi, [rip+s_dg_child]
+    call    fmt_str
+    mov     rdi, r13
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]          # (a copy: the name line uses fmt_buf)
+    lea     rsi, [rip+outl_ghost+64]
+    xchg    rdi, rsi
+    mov     ecx, 63
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    lea     r14, [rip+outl_ghost+64]
+    jmp     5f
+41: xor     r14d, r14d                  # (onto itself: nothing)
+    jmp     5f
+4:  mov     edi, [rip+hit_area]         # the outliner's empty part: "No parent,
+    test    edi, edi                    #  no folder"; elsewhere nothing
+    js      41b
+    call    area_editor
+    cmp     eax, ED_OUTLINER
+    jne     41b
+5:  lea     rax, [rip+fmt_buf]          # (keep the action across the name line)
+    cmp     r14, rax
+    jne     51f
+    lea     rdi, [rip+outl_ghost+64]    # the action out of fmt_buf
+    mov     rsi, rax
+    mov     ecx, 63
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    lea     r14, [rip+outl_ghost+64]
+51: call    fmt_reset                   # the name line: "Ball and 2 more"
+    mov     rdi, rbx
+    call    fmt_str
+    test    r15d, r15d
+    jz      52f
+    test    r12d, r12d
+    jz      52f
+    lea     rdi, [rip+s_dg_more]
+    call    fmt_str
+    mov     edi, r12d
+    call    fmt_int
+    lea     rdi, [rip+s_dg_more2]
+    call    fmt_str
+52: lea     rdi, [rip+outl_ghost]
+    lea     rsi, [rip+fmt_buf]
+    mov     ecx, 63
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    lea     rdi, [rip+outl_ghost]       # the label's width
+    call    text_width
+    mov     r13d, eax
+    test    r14, r14
+    jz      53f
+    mov     rdi, r14
+    call    text_width_small
+    cmp     eax, r13d
+    cmova   r13d, eax
+53: add     r13d, 40
+    mov     edi, [rip+ptr_x]            # the label, below right of the pointer
+    add     edi, 16
+    mov     esi, [rip+ptr_y]
+    add     esi, 14
+    mov     edx, r13d
+    mov     ecx, 26
+    test    r14, r14
+    jz      54f
+    mov     ecx, 42
+54: mov     r8d, COL_ACCENT
+    call    popup_frame
+    mov     eax, [rbx+OB_TYPE]          # its type's icon, its name
+    cmp     eax, 4
+    jbe     55f
+    xor     eax, eax
+55: lea     rcx, [rip+type_icons]
+    mov     edx, [rcx+rax*4]
+    mov     edi, [rip+ptr_x]
+    add     edi, 24
+    mov     esi, [rip+ptr_y]
+    add     esi, 18
+    mov     r8d, COL_ACCENT
+    call    draw_icon
+    mov     edi, [rip+ptr_x]
+    add     edi, 46
+    mov     esi, [rip+ptr_y]
+    add     esi, 18
+    lea     rdx, [rip+outl_ghost]
+    mov     ecx, COL_TEXT
+    call    draw_text
+    test    r14, r14
+    jz      .Lodd_out
+    mov     edi, [rip+ptr_x]
+    add     edi, 46
+    mov     esi, [rip+ptr_y]
+    add     esi, 38
+    mov     rdx, r14
+    mov     ecx, COL_TEXT_DIM
+    call    draw_small
+.Lodd_out:
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+9:  ret
+
+# drag_box(edi=x, esi=y, edx=w, ecx=h) - a drop target: two accent frames
+drag_box:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     ebx, edi
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     r14d, ecx
+    mov     r8d, COL_ACCENT
+    call    rect_outline
+    lea     edi, [rbx+1]
+    lea     esi, [r12+1]
+    lea     edx, [r13-2]
+    lea     ecx, [r14-2]
+    mov     r8d, COL_ACCENT
+    call    rect_outline
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 
@@ -3320,10 +3559,19 @@ outl_fsel:      .skip 4                 # (folder rows: none stays lit)
 outl_fclick:    .skip 4                 # the folder row clicked last,
 outl_fclick_t:  .skip 8                 #  when (a second click: rename)
 outl_fname:     .skip 64
+outl_x0:        .skip 4                 # the outliner last drawn: its rows' place
+outl_y0:        .skip 4
+outl_w0:        .skip 4
+outl_ghost:     .skip 128               # the drag's label
 outl_filter:    .skip 32
 .section .rodata
 s_u_parent:     .asciz "Parent"
 s_u_folder:     .asciz "Folder"
+s_dg_more:      .asciz " and "
+s_dg_more2:     .asciz " more"
+s_dg_into:      .asciz "Into "
+s_dg_child:     .asciz "Child of "
+s_dg_out:       .asciz "No parent, no folder"
 s_par_loop:     .asciz "  an object cannot go under its own child"
 s_u_render:     .asciz "Render / Leave Out"
 s_u_lock:       .asciz "Lock"

@@ -8241,9 +8241,18 @@ def folders_ui():
     rows = [w for w in ui_tree(m) if w['name'] == 'outliner.visible']
     cone = [w for w in ui_tree(m) if w['name'] == 'outliner.visible' and q(f'print(name({w["sub"]}))') == 'Cone']
     fr = frows()[0]
+    acc = lambda img: sum(1 for p in img.getdata() if abs(p[0] - 0xf2) < 10 and abs(p[1] - 0xb1) < 10 and abs(p[2] - 0x34) < 10)
+    a0, a1 = acc(f.image()), 0
     if cone:
         cy = cone[0]['y'] + 10
-        f.drag(fr['x'] + 60, cy, fr['x'] + 60, fr['y'] + 10, steps=6); f.pump(0.3)
+        f.move(fr['x'] + 60, cy); f.button(True, 0x110)         # (W11: held over the folder)
+        for i in range(1, 7):
+            f.move(fr['x'] + 60, cy + (fr['y'] + 10 - cy) * i // 6); f.pump(0.03)
+        f.pump(0.2)
+        a1 = acc(f.image())
+        f.shot('w11_drag.png')
+        f.button(False, 0x110); f.pump(0.3)
+    check(a1 > a0 + 300, f'while dragging: a label at the pointer and the folder lit ({a0} -> {a1} accent pixels)')
     e = q('print(infolder("Cone"))')
     f.mods(4); f.key(44); f.mods(0); f.pump(0.3)              # Ctrl+Z
     e2 = q('print(infolder("Cone"))')
