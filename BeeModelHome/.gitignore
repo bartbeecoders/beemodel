@@ -1,0 +1,4 @@
+# raw captures (tools/capture.py, render.py, screencast.py): big; site/ keeps the web-sized ones
+media/
+.deploy-k3s.version
+__pycache__/

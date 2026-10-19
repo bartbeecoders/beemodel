@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Releases — BeeModel</title>
+<meta name="description" content="Every BeeModel release: what's new, what was fixed, and the downloads. Free and open source under the MIT license.">
+<meta name="theme-color" content="#0d0f13">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="alternate" type="application/atom+xml" title="BeeModel releases" href="releases.xml">
+<link rel="stylesheet" href="assets/css/site.css?v={{STAMP}}">
+</head>
+<body>
+{{HEADER}}
+<main>
+<section class="rel-hero">
+  <div class="wrap">
+    <span class="eyebrow">Changelog</span>
+    <h2 style="font-size:clamp(2.2rem,4.5vw,3.4rem)">Releases</h2>
+    <p class="lead">{{N_RELEASES}} releases since {{FIRST_DATE}}. Each one is a static Linux binary on GitHub,
+      built and tested by CI, with checksums — free to download and use under the MIT license.</p>
+    <div class="rel-filter" style="margin-top:20px">
+      <input id="rel-filter" type="search" placeholder="Search the release notes…  (e.g. shatter, STEP, sculpt)" aria-label="Search the release notes">
+      <a class="btn primary" href="index.html#download">Download the latest</a>
+      <a class="btn ghost" href="releases.xml">Atom feed</a>
+    </div>
+  </div>
+</section>
+<section class="tight" style="padding-bottom:80px">
+  <div class="wrap timeline">
+{{RELEASES}}
+  </div>
+</section>
+</main>
+{{FOOTER}}
+<script src="assets/js/site.js?v={{STAMP}}" defer></script>
+</body>
+</html>
