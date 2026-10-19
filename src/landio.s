@@ -87,10 +87,10 @@ s_chlist:       .asciz "channels"
 s_compr:        .asciz "compression"
 s_dwin:         .asciz "dataWindow"
 
-OPERATOR op_la_import, "landscape.import", "Import Heightmap", do_la_import, flags=OPF_UNDO, doc="A landscape from a heightmap: landscape.import <file.png|file.exr> [size metres (1 a sample)] [height metres (PNG: 100; EXR: 1 x its values)] [base metres]. 16-bit PNGs (grey or colour: the first channel) and OpenEXR scanline files (Y, else R); 2^k + 1 samples a side, or resampled to it"
-OPERATOR op_la_export, "landscape.export", "Export Heightmap", do_la_export, flags=0, doc="The active landscape's heights to a file: landscape.export <file.png> (16-bit grey, lowest..highest) | <file.exr> (float metres); landscape.export <file.png> splat - its paint (RGBA: paint layers 1-4; 5-8 in <file>_2.png)"
+OPERATOR op_la_import, "landscape.import", "Import Heightmap", do_la_import, flags=OPF_UNDO, form=form_laimp, doc="A landscape from a heightmap: landscape.import <file.png|file.exr> [size metres (1 a sample)] [height metres (PNG: 100; EXR: 1 x its values)] [base metres]. 16-bit PNGs (grey or colour: the first channel) and OpenEXR scanline files (Y, else R); 2^k + 1 samples a side, or resampled to it"
+OPERATOR op_la_export, "landscape.export", "Export Heightmap", do_la_export, flags=0, form=form_laexp, doc="The active landscape's heights to a file: landscape.export <file.png> (16-bit grey, lowest..highest) | <file.exr> (float metres); landscape.export <file.png> splat - its paint (RGBA: paint layers 1-4; 5-8 in <file>_2.png)"
 OPERATOR op_la_tomesh, "landscape.to_mesh", "Landscape to Mesh", do_la_tomesh, flags=OPF_AI_SAFE|OPF_UNDO, doc="Make the active landscape a plain mesh: landscape.to_mesh (the display grid) | landscape.to_mesh full (every sample, up to 2049 a side)"
-OPERATOR op_la_tiles, "landscape.tiles", "Landscape Tiles", do_la_tiles, flags=OPF_AI_SAFE|OPF_UNDO, doc="Split the active landscape into k x k landscapes (its heights baked into each, its paint copied): landscape.tiles <k> - so world partition streams them by cell"
+OPERATOR op_la_tiles, "landscape.tiles", "Landscape Tiles", do_la_tiles, flags=OPF_AI_SAFE|OPF_UNDO, form=form_latiles, doc="Split the active landscape into k x k landscapes (its heights baked into each, its paint copied): landscape.tiles <k> - so world partition streams them by cell"
 
 .section .bss
 .align 8

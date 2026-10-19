@@ -52,6 +52,32 @@ the object.
   sample, at most 513 a side (`landscape.set detail n`).
 - **Colliders read the full heights.**
 
+### The Landscape tab
+
+When the active object is a landscape, Properties has a **Landscape** tab
+(the grid icon). A line at the top says what it is: samples, size, the
+heights' range, layers and the last evaluation. Below it are sections that
+fold:
+
+- **Size and Samples** (closed at first): size, samples a side, display
+  detail (`landscape.set`).
+- **Layers**: the stack, top first. The eye hides a layer, and a click
+  on its row picks it. The layer picked shows its strength and its own
+  values (Generate: noise, seed, scale, height, octaves, island, offset;
+  Erode: droplets, rate, seed, thermal passes, talus; Terrace: steps,
+  smooth; Flatten: its level). **Add Layer...** lists the types; **Up**,
+  **Down** (`landscape.layer up|down <i>`) and **Remove** act on the one
+  picked.
+- **Paint**: the paint layers with their colours. The one picked has its
+  colour (the colour picker), friction, bounce, and its rule's heights and
+  slopes (`landscape.paint rule`). **Add Paint Layer...** lists the eight
+  materials; **Remove**, **Auto Paint**.
+- **Sea and Files** (closed at first): **Add Sea** (`landscape.sea`),
+  Import Heightmap..., Export Heights..., To Mesh, Split into Tiles...
+
+**Add › Landscape** presets ask for the size, samples and seed first.
+**Add › Water** (`landscape.add_water [size]`) makes a Water plane on its own.
+
 ### Layers
 
 A non-destructive stack, bottom up, up to 8 layers. Each layer has a

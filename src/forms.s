@@ -14,6 +14,18 @@
 p_mass:         .asciz "mass"
 p_count:        .asciz "count"
 p_seed:         .asciz "seed"
+p_size:         .asciz "size"
+p_res:          .asciz "res"
+s_r65:          .asciz "65"
+s_r129:         .asciz "129"
+s_r257:         .asciz "257"
+s_r513:         .asciz "513"
+s_r1025:        .asciz "1025"
+s_r2049:        .asciz "2049"
+s_r4097:        .asciz "4097"
+.align 8
+l_lares:        .quad s_r65, s_r129, s_r257, s_r513, s_r1025, s_r2049, s_r4097
+kw_lares:       .quad s_r65, s_r129, s_r257, s_r513, s_r1025, s_r2049, s_r4097
 p_glue:         .asciz "glue"
 p_impact:       .asciz "impact"
 p_gap:          .asciz "gap"
@@ -623,6 +635,7 @@ n_sketch_svg:   .asciz "sketch.svg"
 n_drawing_pdf:  .asciz "drawing.pdf"
 n_render_png:   .asciz "render.png"
 n_lightmap:     .asciz "lightmap.exr"
+n_heights:      .asciz "heights.png"
 .align 8
 x_bee:          .quad e_bee, 0
 x_obj:          .quad e_obj, 0
@@ -666,6 +679,22 @@ PATHFORM form_iload, "image.load", 0, x_imgin
 PATHFORM form_itex, "material.import_textures", 0, x_imgin
 PATHFORM form_rimage, "render.image", 1, x_pngonly, n_render_png
 PATHFORM form_lmsave, "lightmap.save", 1, x_img, n_lightmap
+PATHFORM form_laimp, "landscape.import", 0, x_img
+PATHFORM form_laexp, "landscape.export", 1, x_img, n_heights
+
+# ---- landscape.tiles <k> ----------------------------------------------------------
+WIDGET fw_lat,  WK_INT, "form.landscape.tiles", "Tiles a side", 2.0, 16.0, 0.05, 0, WGF_CLAMP
+FORM form_latiles, 1
+FFIELD fw_lat, def=2.0
+
+# ---- landscape.add_<preset> [size m] [res n] [seed s] ------------------------------
+WIDGET fw_las,  WK_FLOAT, "form.landscape.size", "Size (m)", 10.0, 100000.0, 1.0, 0, WGF_CLAMP
+WIDGET fw_lar,  WK_ENUM, "form.landscape.samples", "Samples a side", aux=l_lares, n=7
+WIDGET fw_lasd, WK_INT, "form.landscape.seed", "Seed (-1: the preset's)", -1.0, 100000.0, 0.1, 0, WGF_CLAMP
+FORM form_ladd, 3
+FFIELD fw_las, p_size, def=200.0, flags=FF_CHANGED
+FFIELD fw_lar, p_res, kw=kw_lares, def=3.0, flags=FF_CHANGED
+FFIELD fw_lasd, p_seed, def=-1.0, flags=FF_CHANGED
 
 # ---- image.new <name> [width height] ----------------------------------------------
 WIDGET fw_imn,  WK_TEXT, "form.image.name", "Name"

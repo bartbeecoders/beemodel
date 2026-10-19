@@ -124,6 +124,8 @@ k_la_set:       .asciz "set"
 k_la_remove:    .asciz "remove"
 k_la_hide:      .asciz "hide"
 k_la_show:      .asciz "show"
+k_la_up:        .asciz "up"
+k_la_down:      .asciz "down"
 k_la_strength:  .asciz "strength"
 k_la_noise:     .asciz "noise"
 k_la_at:        .asciz "at"
@@ -177,12 +179,12 @@ s_la_ms:        .asciz "  landscape evaluated in "
 s_la_msu:       .asciz " ms"
 
 OPERATOR op_la_add,   "landscape.add",   "Landscape", do_la_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a landscape: a heightfield with a stack of layers (generate, erode, terrace, sculpted, flatten): landscape.add [flat|hills|mountains|canyon|dunes|island] [size metres (200)] [res samples a side (65-4097: 2^k + 1; 513)] [seed k]"
-OPERATOR op_la_flat,  "landscape.add_flat",  "Flat",      do_la_addp, arg=0, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a flat landscape (to sculpt): landscape.add flat"
-OPERATOR op_la_hills, "landscape.add_hills", "Hills",     do_la_addp, arg=1, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a landscape of eroded hills: landscape.add hills"
-OPERATOR op_la_mount, "landscape.add_mountains", "Mountains", do_la_addp, arg=2, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a landscape of ridged, eroded mountains: landscape.add mountains"
-OPERATOR op_la_canyon,"landscape.add_canyon", "Canyon",   do_la_addp, arg=3, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a terraced canyon landscape: landscape.add canyon"
-OPERATOR op_la_dunes, "landscape.add_dunes", "Dunes",     do_la_addp, arg=4, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a landscape of dunes (billows, slid to their talus): landscape.add dunes"
-OPERATOR op_la_island,"landscape.add_island", "Island",   do_la_addp, arg=5, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add an island landscape and its sea: a Water plane at the landscape's height (water material, ripples; bodies below it float): landscape.add island"
+OPERATOR op_la_flat,  "landscape.add_flat",  "Flat",      do_la_addp, arg=0, flags=OPF_AI_SAFE|OPF_UNDO, form=form_ladd, doc="Add a flat landscape (to sculpt): landscape.add flat"
+OPERATOR op_la_hills, "landscape.add_hills", "Hills",     do_la_addp, arg=1, flags=OPF_AI_SAFE|OPF_UNDO, form=form_ladd, doc="Add a landscape of eroded hills: landscape.add hills"
+OPERATOR op_la_mount, "landscape.add_mountains", "Mountains", do_la_addp, arg=2, flags=OPF_AI_SAFE|OPF_UNDO, form=form_ladd, doc="Add a landscape of ridged, eroded mountains: landscape.add mountains"
+OPERATOR op_la_canyon,"landscape.add_canyon", "Canyon",   do_la_addp, arg=3, flags=OPF_AI_SAFE|OPF_UNDO, form=form_ladd, doc="Add a terraced canyon landscape: landscape.add canyon"
+OPERATOR op_la_dunes, "landscape.add_dunes", "Dunes",     do_la_addp, arg=4, flags=OPF_AI_SAFE|OPF_UNDO, form=form_ladd, doc="Add a landscape of dunes (billows, slid to their talus): landscape.add dunes"
+OPERATOR op_la_island,"landscape.add_island", "Island",   do_la_addp, arg=5, flags=OPF_AI_SAFE|OPF_UNDO, form=form_ladd, doc="Add an island landscape and its sea: a Water plane at the landscape's height (water material, ripples; bodies below it float): landscape.add island"
 OPERATOR op_la_layer, "landscape.layer", "Landscape Layer", do_la_layer, flags=OPF_AI_SAFE|OPF_UNDO, doc="Change the active landscape's layers: landscape.layer add <generate|erode|terrace|sculpted|flatten> [key value ...] | set <i> [key value ...] | remove <i> | hide <i> | show <i>. Keys: strength; generate: noise fbm|ridged|billow|cells, seed, scale, height, octaves; erode: droplets, rate, seed, thermal (iterations), talus (degrees); terrace: steps, smooth; flatten: height, at x z radius (adds a round area)"
 OPERATOR op_la_set,   "landscape.set",   "Landscape Settings", do_la_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="The active landscape's size and samples: landscape.set [size metres] [res samples a side] [detail display samples a side (at most)]"
 
@@ -1808,10 +1810,21 @@ la_water:
     mov     rbx, rdi
     call    la_of
     test    rax, rax
-    jz      9f
+    jz      .Lwa_out
     movss   xmm0, [rax+LB_SIZE]
     mulss   xmm0, [rip+la_075]          # half of 1.5 x the size
     movss   [rsp], xmm0
+    jmp     la_water_body
+# la_water_free(xmm0 = half its size) - a Water plane of its own, at the
+#   3D cursor
+la_water_free:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 16
+    xor     ebx, ebx
+    movss   [rsp], xmm0
+la_water_body:
     mov     edi, 192
     call    prim_grid_n
     test    rax, rax
@@ -1863,12 +1876,15 @@ la_water:
     mov     edi, eax
     call    obj_get
     or      dword ptr [rax+OB_FLAGS], OBF_WATER
+    test    rbx, rbx                    # (a landscape's sea: where it is)
+    jz      3f
     mov     rcx, [rbx+OB_LOC]
     mov     [rax+OB_LOC], rcx
     mov     ecx, [rbx+OB_LOC+8]
     mov     [rax+OB_LOC+8], ecx
     mov     ecx, [rbx+OB_LOC+4]
     mov     [rax+OB_LOC+4], ecx
+3:
     mov     edi, r13d                   # the water material (active: it)
     xor     esi, esi
     call    obj_click_select
@@ -1877,11 +1893,40 @@ la_water:
     mov     [rip+op_arg], rax
     call    do_preset
     mov     [rip+op_arg], rbx
-9:  add     rsp, 16
+9:
+.Lwa_out:
+    add     rsp, 16
     pop     r13
     pop     r12
     pop     rbx
     ret
+
+OPERATOR op_la_water, "landscape.add_water", "Water", do_la_water, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a Water plane at the 3D cursor: bodies below its level float (the water material, ripples): landscape.add_water [size metres (200)]"
+OPERATOR op_la_sea,   "landscape.sea", "Add Sea", do_la_sea, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a sea to the active landscape: a Water plane 1.5 times its size at its height"
+do_la_water:
+    sub     rsp, 8
+    movss   xmm0, [rip+la_200]          # 200 m, or the size given
+    movss   [rsp], xmm0
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      1f
+    call    la_num
+    test    eax, eax
+    jz      1f
+    movss   [rsp], xmm0
+1:  movss   xmm0, [rsp]
+    mulss   xmm0, [rip+la_half]
+    add     rsp, 8
+    jmp     la_water_free
+do_la_sea:
+    sub     rsp, 8
+    call    la_active                   # (not a landscape: it says so)
+    add     rsp, 8
+    test    rax, rax
+    jz      9f
+    mov     rdi, rax
+    jmp     la_water
+9:  ret
 
 # la_log_ms - "landscape evaluated in N ms" (the active object's)
 la_log_ms:
@@ -1997,6 +2042,18 @@ do_la_layer:
     lea     rsi, [rip+k_la_show]
     call    str_eq
     test    eax, eax
+    jnz     3f
+    inc     r13d
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_la_up]
+    call    str_eq
+    test    eax, eax
+    jnz     3f
+    inc     r13d
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_la_down]
+    call    str_eq
+    test    eax, eax
     jz      .Lll_bad
 3:  mov     rsi, r12
     call    la_num
@@ -2035,8 +2092,32 @@ do_la_layer:
     or      dword ptr [rdi+LY_FLG], 1
     jmp     .Lll_done
 32: cmp     r13d, 3
-    jne     33f
+    jne     34f
     and     dword ptr [rdi+LY_FLG], -2
+    jmp     .Lll_done
+34: cmp     r13d, 4                     # up: swapped with the one above,
+    jb      33f                         #  down: with the one below
+    mov     rsi, rdi
+    jne     35f
+    mov     eax, [rsp]
+    inc     eax
+    cmp     eax, [rbx+LB_NL]
+    jae     .Lll_done
+    add     rsi, LY_SZ
+    jmp     36f
+35: cmp     dword ptr [rsp], 0
+    je      .Lll_done
+    sub     rsi, LY_SZ
+    dec     dword ptr [rsp]             # (evaluated from the lower one)
+36: mov     ecx, LY_SZ/8
+37: mov     rax, [rdi]
+    mov     rdx, [rsi]
+    mov     [rdi], rdx
+    mov     [rsi], rax
+    add     rdi, 8
+    add     rsi, 8
+    dec     ecx
+    jnz     37b
     jmp     .Lll_done
 33: mov     rsi, rdi                    # set
     mov     rdi, rbx
