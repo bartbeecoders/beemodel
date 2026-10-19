@@ -44,7 +44,13 @@ reason as a number.
 
 ## How it works
 
-BeeModel starts the helper on first use (`src/gpu.s`). It runs as a child
+The window starts the helper in the background as BeeModel opens
+(`gpu_prewarm`, v0.23), and asks it (`MSG_WARM`) to make every kernel,
+the shader graphs' too, so the first render finds it ready; scripts
+(`--eval`, `--run`) start it on first use (`src/gpu.s`). Building the
+kernels is the slow part of a cold start (3.5 s on an RTX 4080 SUPER the
+first time); the driver keeps the compiled pipelines in its own disk cache
+(`~/.cache/nvidia`), after which the helper is up in about 0.1 s. It runs as a child
 process with a `SOCK_SEQPACKET` socket on its fd 3, using the protocol in
 `src/gpuipc.inc`:
 

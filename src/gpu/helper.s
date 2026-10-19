@@ -272,7 +272,18 @@ main:
     je      .Lm_map
     cmp     eax, MSG_RUN
     je      .Lm_run
+    cmp     eax, MSG_WARM
+    je      .Lm_warm
     jmp     .Lm_exit                    # MSG_QUIT (or anything else)
+.Lm_warm:                               # every kernel made now (shader
+    lea     rax, [rip+kernels]          #  graphs' too: the first render
+    cmp     qword ptr [rax+2*KR_SZ+KR_PIPE], 0  #  finds it ready); a
+    jne     1f                          #  failure is not fatal here
+    mov     edi, 2
+    call    make_kernel
+1:  xor     eax, eax
+    mov     dword ptr [rip+count], 0
+    jmp     .Lm_answer
 .Lm_map:
     call    do_map
     jmp     .Lm_answer

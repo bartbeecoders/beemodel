@@ -64,6 +64,7 @@ _start:
     call    clip_init                   # (the clipboard's data device)
     call    kb_timer_init
     call    mcp_init
+    call    gpu_prewarm                 # (the GPU helper starts meanwhile)
     mov     rdi, [rip+link_target]      # --link host:port: mirror that session
     test    rdi, rdi
     jz      1f

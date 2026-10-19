@@ -347,6 +347,7 @@ def main():
     else:
         check(False, 'the window frames')
     live_view()
+    prewarm()
     return finish()
 
 
@@ -376,6 +377,20 @@ def fake(**env):
     f.pump(1.0, until_frame=True)
     m = fakewl.Mcp(f)
     return f, m, (lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip())
+
+
+def prewarm():
+    """H5: the window starts the helper in the background (and has it make the
+    shader graphs' kernel), so a render a few seconds later finds it ready."""
+    f, m, q = fake(BEEMODEL_GPU='any')
+    try:
+        f.pump(6.0)
+        r = q('t = clock()\nr = gpu(0)\nprint("ready", r, clock() - t)').split()
+        ok = len(r) == 3 and r[1] == '1' and float(r[2]) < 100
+        check(ok, f'the window starts the helper meanwhile: ready {r[2:] if len(r) == 3 else r} ms after 6 s '
+                  f'(a cold start takes seconds)')
+    finally:
+        f.proc.kill()
 
 
 def live_view():

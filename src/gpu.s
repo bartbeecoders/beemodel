@@ -33,6 +33,7 @@
 .globl gpu_dev
 .globl gpu_set_dev
 .globl gpu_ready
+.globl gpu_prewarm
 .globl gpu_stop
 .globl gpu_query
 .globl gpu_pt_begin
@@ -75,11 +76,13 @@ s_g_off:        .asciz "  GPU helper: not used (CPU paths)"
 
 .section .data
 .align 4
-g_state:        .long 0                 # 0 not tried, 1 running, -1 none
+g_state:        .long 0                 # 0 not tried, 1 running, 2 started (its
+                                        #  hello not read: gpu_prewarm), -1 none
 gpu_off:        .long 0                 # 1: renders stay on the CPU
 gpu_dev:        .long 0                 # Render › Device: 0 auto, 1 RTX, 2 GPU, 3 CPU
 g_fd:           .long -1
 g_pid:          .long 0
+g_warm:         .long 0                 # MSG_WARM sent, its answer not read
 
 .section .bss
 .align 8
@@ -147,8 +150,9 @@ gpu_ready:
     cmp     dword ptr [rip+gpu_off], 0
     je      0f
     ret
-0:
-    mov     eax, [rip+g_state]
+0:  mov     eax, [rip+g_state]
+    cmp     eax, 2                      # started early (gpu_prewarm): its hello
+    je      g_hello
     test    eax, eax
     jz      1f
     xor     ecx, ecx
@@ -156,7 +160,38 @@ gpu_ready:
     sete    cl
     mov     eax, ecx
     ret
-1:  push    rbx
+1:  call    g_spawn
+    test    eax, eax
+    jnz     g_hello
+    ret
+
+# gpu_prewarm - start the helper now, in the background (the window's
+#   start: it sets up Vulkan and its kernels, shader graphs' too, while
+#   BeeModel starts; the first render then finds it ready)
+gpu_prewarm:
+    cmp     dword ptr [rip+gpu_off], 0
+    jne     9f
+    cmp     dword ptr [rip+g_state], 0
+    jne     9f
+    sub     rsp, 8
+    call    g_spawn
+    test    eax, eax
+    jz      8f
+    lea     rdi, [rip+g_msg]            # MSG_WARM: the graphs' kernel too
+    xor     eax, eax
+    mov     ecx, GM_SZ/8
+    rep     stosq
+    mov     dword ptr [rip+g_msg+GM_CMD], MSG_WARM
+    mov     edi, -1
+    call    g_send
+    mov     dword ptr [rip+g_warm], 1
+8:  add     rsp, 8
+9:  ret
+
+# g_spawn -> eax = 1: the helper forked and exec'd with its socket on fd 3
+#   (g_state 2: its hello not read yet); 0: none (g_state -1, said)
+g_spawn:
+    push    rbx
     push    r12
     sub     rsp, 24
     mov     dword ptr [rip+g_state], -1
@@ -263,27 +298,7 @@ gpu_ready:
     syscall
     mov     eax, [rsp]
     mov     [rip+g_fd], eax
-    mov     edi, HELLO_MS
-    call    g_recv
-    test    eax, eax
-    jz      .Lgr_fail
-    cmp     dword ptr [rip+g_msg+GM_CMD], MSG_HELLO
-    jne     .Lgr_fail
-    cmp     dword ptr [rip+g_msg+GM_MAGIC], GPU_MAGIC
-    jne     .Lgr_fail
-    cmp     dword ptr [rip+g_msg+GM_STATUS], GH_OK
-    jne     .Lgr_fail
-    mov     eax, [rip+g_msg+GM_TYPE]
-    mov     [rip+g_type], eax
-    lea     rsi, [rip+g_msg+GM_NAME]
-    lea     rdi, [rip+g_name]
-    mov     ecx, 47
-    rep     movsb
-    mov     byte ptr [rdi], 0
-    mov     dword ptr [rip+g_state], 1
-    lea     rdi, [rip+s_g_on]           # "  GPU helper: <device>"
-    lea     rsi, [rip+g_name]
-    call    log_pair
+    mov     dword ptr [rip+g_state], 2
     mov     eax, 1
     jmp     9f
 .Lgr_close2:
@@ -293,10 +308,54 @@ gpu_ready:
     mov     edi, [rsp+4]
     mov     eax, SYS_CLOSE
     syscall
-    jmp     .Lgr_none
-.Lgr_fail:
-    call    gpu_stop
 .Lgr_none:
+    mov     dword ptr [rip+g_state], -1
+    lea     rdi, [rip+s_g_off]
+    call    log_line
+    xor     eax, eax
+9:  add     rsp, 24
+    pop     r12
+    pop     rbx
+    ret
+
+# g_hello -> eax = 1 when the started helper says it has a device (and, when
+#   it was warmed, has made the graphs' kernel); 0: none (stopped, said)
+g_hello:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     edi, HELLO_MS
+    call    g_recv
+    test    eax, eax
+    jz      .Lgh_fail
+    cmp     dword ptr [rip+g_msg+GM_CMD], MSG_HELLO
+    jne     .Lgh_fail
+    cmp     dword ptr [rip+g_msg+GM_MAGIC], GPU_MAGIC
+    jne     .Lgh_fail
+    cmp     dword ptr [rip+g_msg+GM_STATUS], GH_OK
+    jne     .Lgh_fail
+    mov     eax, [rip+g_msg+GM_TYPE]
+    mov     [rip+g_type], eax
+    lea     rsi, [rip+g_msg+GM_NAME]
+    lea     rdi, [rip+g_name]
+    mov     ecx, 47
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    cmp     dword ptr [rip+g_warm], 0   # (the warm-up's answer)
+    je      51f
+    mov     dword ptr [rip+g_warm], 0
+    mov     edi, HELLO_MS
+    call    g_recv
+    test    eax, eax
+    jz      .Lgh_fail
+51: mov     dword ptr [rip+g_state], 1
+    lea     rdi, [rip+s_g_on]           # "  GPU helper: <device>"
+    lea     rsi, [rip+g_name]
+    call    log_pair
+    mov     eax, 1
+    jmp     9f
+.Lgh_fail:
+    call    gpu_stop
     mov     dword ptr [rip+g_state], -1
     lea     rdi, [rip+s_g_off]
     call    log_line
