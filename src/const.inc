@@ -514,6 +514,31 @@
 .equ FF_SOFT,       48      # attractor: softening radius (m)
 .equ FF_SEED,       52      # turbulence, gusts: another pattern
 .equ FF_SZ,         64
+.equ PS_UID,        0       # a particle system's record (particles.s): its emitter's uid
+.equ PS_FLAGS,      4       # 1: off
+.equ PS_FROM,       8       # emits from: 0 faces, 1 the volume, 2 vertices, 3 a point (its origin)
+.equ PS_MODE,       12      # 0 at a rate, 1 all at once (a burst)
+.equ PS_RATE,       16      # particles a second
+.equ PS_NUM,        20      # a burst's count
+.equ PS_START,      24      # frames: emitting from (a burst: then),
+.equ PS_END,        28      #  until
+.equ PS_LIFE,       32      # seconds
+.equ PS_LIFER,      36      #  shorter by up to this part, at random (0..1)
+.equ PS_SPEED,      40      # m/s
+.equ PS_SPEEDR,     44      #  more or less by up to this part (0..1)
+.equ PS_DIR,        48      # 3 floats: the direction (object axes) when PS_VMODE is 1
+.equ PS_VMODE,      60      # 0 along the normal, 1 along PS_DIR
+.equ PS_SPREAD,     64      # degrees: a cone round it
+.equ PS_SIZE,       68      # m
+.equ PS_SIZER,      72      #  more or less by up to this part (0..1)
+.equ PS_DRAG,       76      # 1/s
+.equ PS_GRAV,       80      # gravity x this
+.equ PS_COLOR,      84      # 0xRRGGBB
+.equ PS_SEED,       88
+.equ PS_GROUP,      92      # collision group (0..15): the fields that act on it
+.equ PS_MAX,        96      # at most this many at once (0: no limit but the pool's)
+.equ PS_NAME,       112     # 16 bytes
+.equ PS_SZ,         256
 .equ MAX_OBJECTS,   4096
 .equ KEY_A,             30
 .equ KEY_D,             32

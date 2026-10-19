@@ -446,6 +446,10 @@ builtins:
     .long 3, 4
     .quad bn_fieldinfo, b_fieldinfo
     .long 1, 1
+    .quad bn_emit, b_emit
+    .long 1, 2
+    .quad bn_particles, b_particles
+    .long 1, 2
     .quad bn_shatter, b_shatter
     .long 3, 4
     .quad bn_height, b_height
@@ -795,6 +799,8 @@ bn_refimage:    .asciz "refimage"
 bn_field:       .asciz "field"
 bn_force:       .asciz "force"
 bn_fieldinfo:   .asciz "fieldinfo"
+bn_emit:        .asciz "emit"
+bn_particles:   .asciz "particles"
 bn_shatter:     .asciz "shatter"
 s_sh_opname:    .asciz "object.shatter"
 s_sh_cnt:       .asciz " count "
@@ -5828,6 +5834,63 @@ b_field:
 
 # fieldinfo(k) -> 0 force fields in the scene, 1 the overlay's arrows (as
 #   last drawn), 2 its streamline segments, 3 the largest pull it showed
+# emit(object [, settings]) -> the number of a new particle system on it
+#   (settings as particles.add takes them: "rate 200 life 2 speed 4"), nil
+#   when there is no room
+b_emit:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     r13, rax
+    xor     eax, eax
+    cmp     r12d, 2
+    jb      1f
+    lea     rdi, [rbx+16]
+    call    a_str
+1:  mov     rdi, r13
+    mov     rsi, rax
+    call    ps_add
+    pop     r13
+    pop     r12
+    pop     rbx
+    test    eax, eax
+    jz      ret_nil
+    cvtsi2sd xmm0, eax
+    jmp     ret_num
+
+# particles(k [, i]) -> 0 particles alive, 1 systems running, 2 the last
+#   frame's time (ms), 3 the last step's, 4 blocks in use, 5 steps done;
+#   particle i: 6..8 its place, 9..11 its velocity, 12 age, 13 lifetime, 14
+#   size, 15 id, 16 colour
+b_particles:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_num
+    cvttsd2si eax, xmm0
+    mov     [rsp], eax
+    xor     ecx, ecx
+    cmp     r12d, 2
+    jb      1f
+    lea     rdi, [rbx+16]
+    call    a_num
+    cvttsd2si ecx, xmm0
+1:  mov     edi, [rsp]
+    mov     esi, ecx
+    call    pt_info
+    cvtss2sd xmm0, xmm0
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+
 b_fieldinfo:
     sub     rsp, 8
     call    a_num

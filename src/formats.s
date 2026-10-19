@@ -81,6 +81,7 @@
 .equ TAG_LCAM,      0x4d41434c          # "LCAM"
 .equ TAG_FOLD,      0x444c4f46          # "FOLD"
 .equ TAG_FLDS,      0x53444c46          # "FLDS"
+.equ TAG_PSYS,      0x53595350          # "PSYS"
 .equ TAG_WSPC,      0x43505357          # "WSPC"
 .equ TAG_LMAP,      0x50414D4C          # "LMAP"
 .equ TAG_CURV,      0x56525543          # "CURV"
@@ -151,6 +152,9 @@ fold_size:      .skip 4
 .align 8
 flds_chunk:     .skip 8
 flds_size:      .skip 4
+.align 8
+psys_chunk:     .skip 8
+psys_size:      .skip 4
 lcam_size:      .skip 4
 .align 8
 wspc_chunk:     .skip 8
@@ -505,6 +509,10 @@ bee_save:
     mov     edi, TAG_FLDS               # FLDS (force fields' settings)
     call    chunk_begin
     call    fl_write
+    call    chunk_end
+    mov     edi, TAG_PSYS               # PSYS (particle systems' settings)
+    call    chunk_begin
+    call    ps_write
     call    chunk_end
     mov     edi, TAG_WSPC               # WSPC (the workspaces)
     call    chunk_begin
@@ -1291,6 +1299,7 @@ bee_load:
     mov     qword ptr [rip+lcam_chunk], 0
     mov     qword ptr [rip+fold_chunk], 0
     mov     qword ptr [rip+flds_chunk], 0
+    mov     qword ptr [rip+psys_chunk], 0
     mov     qword ptr [rip+wspc_chunk], 0
     mov     qword ptr [rip+lmap_chunk], 0
     mov     qword ptr [rip+curv_chunk], 0
@@ -1461,10 +1470,16 @@ bee_load:
     mov     [rip+fold_size], ebp
     jmp     23f
 2821:cmp    eax, TAG_FLDS
-    jne     2819f
+    jne     2822f
     lea     rax, [rbx+8]
     mov     [rip+flds_chunk], rax
     mov     [rip+flds_size], ebp
+    jmp     23f
+2822:cmp    eax, TAG_PSYS
+    jne     2819f
+    lea     rax, [rbx+8]
+    mov     [rip+psys_chunk], rax
+    mov     [rip+psys_size], ebp
     jmp     23f
 2819:cmp    eax, TAG_PRBE
     jne     2812f
@@ -1702,7 +1717,12 @@ bee_load:
     jz      7761f
     mov     esi, [rip+flds_size]
     call    fl_read
-7761:mov     rdi, [rip+mres_chunk]       # multires displacements
+7761:mov    rdi, [rip+psys_chunk]       # particle systems' settings
+    test    rdi, rdi
+    jz      7762f
+    mov     esi, [rip+psys_size]
+    call    ps_read
+7762:mov     rdi, [rip+mres_chunk]       # multires displacements
     test    rdi, rdi
     jz      772f
     mov     esi, [rip+mres_size]

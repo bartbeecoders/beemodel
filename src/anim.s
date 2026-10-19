@@ -1132,6 +1132,8 @@ an_apply:
     call    rb_frame
     movss   xmm0, [rip+an_frame]        # cloth (cloth.s)
     call    cl_frame
+    movss   xmm0, [rip+an_frame]        # particles (particles.s)
+    call    pt_frame
     call    rig_eval                    # drivers, constraints (rig.s)
     call    arm_refresh                 # armatures show their new pose
     add     rsp, 32
