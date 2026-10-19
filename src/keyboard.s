@@ -15,6 +15,7 @@
 # exports
 .globl kb_keymap
 .globl kb_sym
+.globl kb_text
 .globl kb_canon_mods
 .globl kb_layout_code
 .globl kb_timer_init
@@ -699,6 +700,30 @@ kb_sym:
     jnz     9f
     mov     eax, [rdx]
 9:  ret
+
+# kb_text(edi=evdev) -> eax = the character the key types in a text field:
+#   the keypad's digits, point and operators whatever Num Lock says (the
+#   keymaps' KP_ symbols are not characters), else kb_sym's
+kb_text:
+    cmp     edi, 55                     # KP *
+    jne     1f
+    mov     eax, '*'
+    ret
+1:  cmp     edi, 98                     # KP /
+    jne     2f
+    mov     eax, '/'
+    ret
+2:  cmp     edi, 71                     # KP 7 .. KP .
+    jb      kb_sym
+    cmp     edi, 83
+    ja      kb_sym
+    lea     rax, [rip+kp_text]
+    movzx   eax, byte ptr [rax+rdi-71]
+    ret
+
+.section .rodata
+kp_text:        .byte '7', '8', '9', '-', '4', '5', '6', '+', '1', '2', '3', '0', '.'
+.text
 
 # kb_layout_code(edi=evdev) -> eax = the QWERTY code carrying the same letter
 # (so Ctrl+Z means the key labelled Z on AZERTY / QWERTZ layouts too)

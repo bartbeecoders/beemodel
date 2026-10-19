@@ -2062,7 +2062,7 @@ wg_key:
     lea     rdi, [rip+tfi_widget]
     call    tf_select
     mov     edi, ebx
-    call    kb_sym
+    call    kb_text                     # (the keypad types digits too)
     mov     esi, eax
     mov     edi, ebx
     call    tf_key
