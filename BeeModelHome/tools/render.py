@@ -24,6 +24,7 @@ RENDERS = {
     'sculpt': ('tests/sculpt_paint.bees', 1600, 900, 192, ''),
     'valley': ('tests/procedural.bees', 1920, 1080, 128, ''),
     'gallery': ('Vibecoding/demos/gallery-smash.bees', 1600, 900, 128, 'frame(1)\n'),
+    'particles': ('Vibecoding/demos/dam-break.bees', 1600, 1000, 128, 'for f in 2..41 { frame(f) }\n'),
 }
 
 
