@@ -45,6 +45,7 @@
 .globl pl_stat
 .globl pl_script_step
 .globl pl_script_look
+.globl pl_basis
 
 .equ KEY_F5,    63
 .equ KEY_A,     30
@@ -90,6 +91,11 @@ pl_look_k:      .float 0.0025
 
 .section .bss
 .align 16
+pl_RX:          .skip 16                # the player's frame: its X, up, Z (A4)
+pl_up:          .skip 16
+pl_RZ:          .skip 16
+pl_k:           .skip 16                #  (a turn: its axis, cos and sin)
+pl_gacc:        .skip 16                # the pull where it stands
 pl_pos:         .skip 16                # feet
 pl_vel:         .skip 16
 pl_start:       .skip 16
@@ -118,6 +124,7 @@ pl_gground:     .skip 4                 # (the last ground contact's object)
 pl_gloc:        .skip 12
 pl_t_last:      .skip 8
 pl_ts:          .skip 16
+pl_cs:          .skip 8
 pl_lastx:       .skip 4
 pl_lasty:       .skip 4
 pl_haspos:      .skip 4
@@ -132,6 +139,8 @@ pl_ntab:        .skip 4
 f_abs:          .long 0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff
 f_xyz:          .long -1, -1, -1, 0
 f_up:           .float 0, 1, 0, 0
+f_ax:           .float 1, 0, 0, 0
+f_az:           .float 0, 0, 1, 0
 f_zero:         .float 0.0
 f_one:          .float 1.0
 f_half:         .float 0.5
@@ -148,6 +157,7 @@ f_snap:         .float 0.25             # down a slope: kept on it
 f_cam_d:        .float 0.05
 f_rad2deg:      .float 57.29578
 f_ceil:         .float -0.7
+f_turn:         .float 0.05             # the frame turns 6 rad/s at most
 f_grav:         .float 0, -9.81, 0, 0
 s_hud:          .asciz "PLAY   WASD move   mouse look   Space jump   Shift run   F fly   Esc stop"
 s_hud_fly:      .asciz "PLAY (fly)   WASD move   mouse look   Space up   C down   Shift faster   F walk   Esc stop"
@@ -239,6 +249,9 @@ do_play_start:
     mov     dword ptr [rip+pl_acc], 0
     mov     dword ptr [rip+pl_steps], 0
     mov     dword ptr [rip+pl_gobj], 0
+    call    pl_frame_reset              # (up: the world's, until pulled round)
+    xorps   xmm0, xmm0
+    movaps  [rip+pl_gacc], xmm0
     mov     edi, 1                      # simulations live, the logic graphs
     call    rb_live
     call    lg_begin
@@ -546,18 +559,212 @@ pl_advance:
     pop     rbx
     ret
 
-# pl_camera - the viewport's camera at the player's eyes
+# PCROSS d, a, b, t: d = a x b (a, b kept)
+.macro PCROSS d, a, b, t
+    movaps  \d, \b
+    shufps  \d, \d, 0xC9
+    mulps   \d, \a
+    movaps  \t, \a
+    shufps  \t, \t, 0xC9
+    mulps   \t, \b
+    subps   \d, \t
+    shufps  \d, \d, 0xC9
+.endm
+
+# ---- the player's frame (A4): its up follows the pull where it stands ---------
+# pl_frame_reset - X, Y, Z: the world's
+pl_frame_reset:
+    movaps  xmm0, [rip+f_ax]
+    movaps  [rip+pl_RX], xmm0
+    movaps  xmm0, [rip+f_up]
+    movaps  [rip+pl_up], xmm0
+    movaps  xmm0, [rip+f_az]
+    movaps  [rip+pl_RZ], xmm0
+    ret
+
+# pl_to_world(xmm0 = x y z in the player's frame) -> xmm0 in the world
+#   (leaf: xmm1-xmm3)
+pl_to_world:
+    movaps  xmm1, xmm0
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rip+pl_RX]
+    movaps  xmm2, xmm0
+    shufps  xmm2, xmm2, 0x55
+    mulps   xmm2, [rip+pl_up]
+    addps   xmm1, xmm2
+    movaps  xmm3, xmm0
+    shufps  xmm3, xmm3, 0xAA
+    mulps   xmm3, [rip+pl_RZ]
+    addps   xmm1, xmm3
+    andps   xmm1, [rip+f_xyz]
+    movaps  xmm0, xmm1
+    ret
+
+# pl_basis - (viewport.s cam_setup, while playing) the camera's right, up,
+#   fwd turned into the player's frame
+pl_basis:
+    cmp     dword ptr [rip+pl_on], 1
+    jne     9f
+    lea     rdi, [rip+right]
+    call    1f
+    lea     rdi, [rip+up]
+    call    1f
+    lea     rdi, [rip+fwd]
+1:  movsd   xmm0, [rdi]
+    movss   xmm1, [rdi+8]
+    movlhps xmm0, xmm1
+    call    pl_to_world
+    movlps  [rdi], xmm0
+    movhlps xmm0, xmm0
+    movss   [rdi+8], xmm0
+9:  ret
+
+# pl_rot(rdi = a vector (4 floats)) - turned by pl_k, pl_cs (Rodrigues:
+#   v c + (k x v) s + k (k . v)(1 - c))
+pl_rot:
+    movaps  xmm0, [rdi]
+    movaps  xmm1, [rip+pl_k]
+    PCROSS  xmm3, xmm1, xmm0, xmm2      # k x v
+    movss   xmm4, [rip+pl_cs+4]
+    shufps  xmm4, xmm4, 0
+    mulps   xmm3, xmm4                  # (k x v) s
+    movaps  xmm2, xmm1
+    dpps    xmm2, xmm0, 0x7f            # k . v
+    movss   xmm4, [rip+f_one]
+    subss   xmm4, [rip+pl_cs]
+    shufps  xmm4, xmm4, 0
+    mulps   xmm2, xmm4
+    mulps   xmm2, xmm1                  # k (k . v)(1 - c)
+    movss   xmm4, [rip+pl_cs]
+    shufps  xmm4, xmm4, 0
+    mulps   xmm0, xmm4
+    addps   xmm0, xmm3
+    addps   xmm0, xmm2
+    andps   xmm0, [rip+f_xyz]
+    movaps  [rdi], xmm0
+    ret
+
+# pl_unit(xmm0) -> xmm0 / |xmm0| (leaf: xmm1)
+pl_unit:
+    movaps  xmm1, xmm0
+    dpps    xmm1, xmm1, 0x7f
+    maxps   xmm1, [rip+f_tiny4]
+    sqrtps  xmm1, xmm1
+    divps   xmm0, xmm1
+    andps   xmm0, [rip+f_xyz]
+    ret
+
+# pl_turn(xmm0 = the up wanted, unit) - the frame turned towards it, at most
+#   f_turn a step (the camera turns with it), kept orthonormal
+pl_turn:
+    sub     rsp, 40
+    movaps  [rsp], xmm0
+    movaps  xmm1, [rip+pl_up]           # k = up x t, s = |k|, c = up . t
+    PCROSS  xmm2, xmm1, xmm0, xmm3
+    andps   xmm2, [rip+f_xyz]
+    movaps  xmm3, xmm2
+    dpps    xmm3, xmm3, 0x7f
+    sqrtss  xmm3, xmm3                  # s
+    movaps  xmm4, xmm1
+    dpps    xmm4, xmm0, 0x71            # c
+    comiss  xmm3, [rip+f_tiny]
+    ja      1f
+    comiss  xmm4, [rip+f_zero]          # parallel: done; opposite: about X
+    ja      9f
+    movaps  xmm2, [rip+pl_RX]
+    movss   xmm3, [rip+f_one]
+1:  movss   [rsp+16], xmm3
+    movss   [rsp+20], xmm4
+    shufps  xmm3, xmm3, 0
+    divps   xmm2, xmm3
+    movaps  [rip+pl_k], xmm2
+    fld     dword ptr [rsp+16]          # the angle: atan2(s, c), at most
+    fld     dword ptr [rsp+20]          #  f_turn
+    fpatan
+    fstp    dword ptr [rsp+16]
+    movss   xmm0, [rsp+16]
+    minss   xmm0, [rip+f_turn]
+    call    sincos
+    movss   [rip+pl_cs], xmm1
+    movss   [rip+pl_cs+4], xmm0
+    lea     rdi, [rip+pl_RX]
+    call    pl_rot
+    lea     rdi, [rip+pl_up]
+    call    pl_rot
+    movaps  xmm0, [rip+pl_up]           # orthonormal again: up, Z = X x up,
+    call    pl_unit                     #  X = up x Z
+    movaps  [rip+pl_up], xmm0
+    movaps  xmm1, [rip+pl_RX]
+    PCROSS  xmm3, xmm1, xmm0, xmm2      # Z = X x up
+    movaps  xmm0, xmm3
+    call    pl_unit
+    movaps  [rip+pl_RZ], xmm0
+    movaps  xmm1, [rip+pl_up]           # X = up x Z
+    PCROSS  xmm3, xmm1, xmm0, xmm2
+    movaps  xmm0, xmm3
+    call    pl_unit
+    movaps  [rip+pl_RX], xmm0
+9:  add     rsp, 40
+    ret
+
+# pl_down - the pull where the player stands (pl_gacc): the force fields
+#   and gravity at its middle (else the world's gravity); its up turns
+#   against it
+pl_down:
+    sub     rsp, 40
+    call    rb_gravity
+    movaps  xmm0, [rax]
+    movaps  [rsp], xmm0
+    mov     rdi, rax
+    movss   xmm0, [rip+pl_time]
+    call    fl_prep
+    cmp     dword ptr [rip+fl_n], 0
+    je      1f
+    movss   xmm0, [rip+pl_height]       # its middle
+    mulss   xmm0, [rip+f_half]
+    shufps  xmm0, xmm0, 0
+    mulps   xmm0, [rip+pl_up]
+    addps   xmm0, [rip+pl_pos]
+    movaps  [rsp+16], xmm0
+    lea     rdi, [rsp+16]
+    lea     rsi, [rip+pl_vel]
+    mov     edx, 1
+    xor     ecx, ecx
+    call    fl_accel
+    movaps  [rsp], xmm0
+1:  movaps  xmm0, [rsp]
+    movaps  [rip+pl_gacc], xmm0
+    movaps  xmm1, xmm0
+    dpps    xmm1, xmm1, 0x7f
+    comiss  xmm1, [rip+f_tiny]          # (nothing pulls: up stays)
+    jbe     9f
+    call    pl_unit
+    xorps   xmm0, [rip+f_sign4]
+    call    pl_turn
+9:  add     rsp, 40
+    ret
+
+# pl_vup(xmm0 = v) -> xmm1 = (v . up) up, xmm2 = v . up (all lanes)
+pl_vup:
+    movaps  xmm2, xmm0
+    dpps    xmm2, [rip+pl_up], 0x7f
+    movaps  xmm1, xmm2
+    mulps   xmm1, [rip+pl_up]
+    ret
+
+# pl_camera - the viewport's camera at the player's eyes (its frame)
 pl_camera:
     sub     rsp, 40
     movaps  xmm0, [rip+pl_pos]
     cmp     dword ptr [rip+pl_mode], 2
     je      1f
-    xorps   xmm1, xmm1
-    insertps xmm1, [rip+pl_eye_h], 0x10
+    movss   xmm1, [rip+pl_eye_h]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rip+pl_up]
     addps   xmm0, xmm1
 1:  movaps  [rsp], xmm0                 # the eye
     fld     dword ptr [rip+cam_yaw]     # target = eye + fwd x d,
-    fsincos                             #  fwd = -(cp sy, sp, cp cy)
+    fsincos                             #  fwd = -(cp sy, sp, cp cy), turned
     fstp    dword ptr [rsp+16]          # cos yaw
     fstp    dword ptr [rsp+20]          # sin yaw
     fld     dword ptr [rip+cam_pitch]
@@ -565,22 +772,21 @@ pl_camera:
     fstp    dword ptr [rsp+24]          # cos pitch
     fstp    dword ptr [rsp+28]          # sin pitch
     movss   xmm0, [rsp+24]
-    mulss   xmm0, [rsp+20]
-    mulss   xmm0, [rip+f_cam_d]
-    movss   xmm1, [rsp]
-    subss   xmm1, xmm0
-    movss   [rip+cam_tx], xmm1
-    movss   xmm0, [rsp+28]
-    mulss   xmm0, [rip+f_cam_d]
-    movss   xmm1, [rsp+4]
-    subss   xmm1, xmm0
-    movss   [rip+cam_ty], xmm1
-    movss   xmm0, [rsp+24]
-    mulss   xmm0, [rsp+16]
-    mulss   xmm0, [rip+f_cam_d]
-    movss   xmm1, [rsp+8]
-    subss   xmm1, xmm0
-    movss   [rip+cam_tz], xmm1
+    mulss   xmm0, [rsp+20]              # cp sy
+    movss   xmm1, [rsp+28]              # sp
+    movss   xmm2, [rsp+24]
+    mulss   xmm2, [rsp+16]              # cp cy
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    xorps   xmm0, [rip+f_sign4]
+    call    pl_to_world
+    movss   xmm1, [rip+f_cam_d]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm0, xmm1
+    addps   xmm0, [rsp]
+    movss   [rip+cam_tx], xmm0
+    extractps dword ptr [rip+cam_ty], xmm0, 1
+    extractps dword ptr [rip+cam_tz], xmm0, 2
     mov     eax, [rip+f_cam_d]
     mov     [rip+cam_dist], eax
     mov     edi, [rip+vp_area]
@@ -588,7 +794,8 @@ pl_camera:
     add     rsp, 40
     ret
 
-# pl_wish -> xmm0 = the velocity the keys ask for (walk: horizontal)
+# pl_wish -> xmm0 = the velocity the keys ask for (walk: along the ground,
+#   in the player's frame; fly: where it looks, and its up)
 pl_wish:
     sub     rsp, 24
     fld     dword ptr [rip+cam_yaw]
@@ -650,7 +857,7 @@ pl_wish:
     subss   xmm2, xmm0                  # z = -(cy f + sy r)
     xorps   xmm0, xmm0
     jmp     8f
-7:  # fly: forward = fwd (with pitch), right, world up
+7:  # fly: forward = fwd (with pitch), right, up
     movss   xmm0, [rsp+8]
     mulss   xmm0, [rsp+4]
     mulss   xmm0, xmm3
@@ -684,7 +891,8 @@ pl_wish:
     shufps  xmm7, xmm7, 0
     mulps   xmm1, xmm7
 9:  movaps  xmm0, xmm1
-    add     rsp, 24
+    call    pl_to_world                 # (the player's frame: the world's
+    add     rsp, 24                     #  unless something pulls it round)
     ret
 
 # pl_step - one fixed step
@@ -701,20 +909,26 @@ pl_step:
     jmp     9f
 1:  movaps  [rsp], xmm0
     call    pl_ride                     # (on something that moved: along)
-    movaps  xmm0, [rsp]
-    movaps  xmm1, [rip+pl_vel]          # walk: horizontal as asked, the
-    insertps xmm0, xmm1, 0x50           #  vertical by gravity
+    call    pl_down                     # the pull here; up against it
+    movaps  xmm0, [rip+pl_vel]          # walk: along the ground as asked,
+    call    pl_vup                      #  along up by the pull
+    movaps  xmm0, [rsp]                 # (the wish, flat in the new frame)
+    call    pl_vup2
+    movaps  xmm3, xmm0
+    addps   xmm0, xmm1
     movaps  [rip+pl_vel], xmm0
     cmp     dword ptr [rip+pl_ground], 0
     je      2f
     test    dword ptr [rip+pl_keys], IN_UP
     jz      2f
-    movss   xmm1, [rip+pl_jump]         # jump
-    insertps xmm0, xmm1, 0x10
+    movss   xmm1, [rip+pl_jump]         # jump: up at its speed
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rip+pl_up]
+    movaps  xmm0, xmm3
+    addps   xmm0, xmm1
     movaps  [rip+pl_vel], xmm0
     mov     dword ptr [rip+pl_ground], 0
-2:  call    rb_gravity                  # (rax: the world's gravity)
-    movaps  xmm1, [rax]
+2:  movaps  xmm1, [rip+pl_gacc]         # the pull
     mulps   xmm1, [rip+pl_dt4]
     addps   xmm1, [rip+pl_vel]
     movaps  [rip+pl_vel], xmm1
@@ -736,8 +950,9 @@ pl_step:
     je      6f
     cmp     dword ptr [rip+pl_ground], 0
     jne     6f
-    movss   xmm0, [rip+pl_vel+4]
-    comiss  xmm0, [rip+f_zero]
+    movaps  xmm0, [rip+pl_vel]
+    call    pl_vup
+    comiss  xmm2, [rip+f_zero]
     ja      6f
     call    pl_snap_down
 6:  call    pl_ride_mark                # what it stands on now, and where
@@ -748,8 +963,17 @@ pl_step:
     movaps  [rip+pl_pos], xmm0
     xorps   xmm0, xmm0
     movaps  [rip+pl_vel], xmm0
+    call    pl_frame_reset
 9:  add     rsp, 48
     pop     rbx
+    ret
+
+# pl_vup2(xmm0 = v) -> xmm0 = v without its part along up (xmm1, xmm2 kept)
+pl_vup2:
+    movaps  xmm4, xmm0
+    dpps    xmm4, [rip+pl_up], 0x7f
+    mulps   xmm4, [rip+pl_up]
+    subps   xmm0, xmm4
     ret
 
 # pl_ride - standing on an object that moved since the last step (a moving
@@ -795,10 +1019,11 @@ pl_ride_mark:
     ret
 
 # pl_resolve - up to five times: the deepest contact left; pl_ground,
-#   pl_wall. Ground (facing up within 50 degrees): out straight up, no
-#   falling into it. A ceiling: out along it, no rising into it. A wall or a
-#   steep slope: out sideways only, the velocity into it taken away
-#   sideways (nothing climbs it; gravity slides down it)
+#   pl_wall. All of it in the player's frame (up: pl_up). Ground (facing up
+#   within 50 degrees): out straight up, no falling into it. A ceiling: out
+#   along it, no rising into it. A wall or a steep slope: out sideways only,
+#   the velocity into it taken away sideways (nothing climbs it; the pull
+#   slides it down)
 pl_resolve:
     push    rbx
     sub     rsp, 16
@@ -817,21 +1042,23 @@ pl_resolve:
     addss   xmm0, [rip+f_skin]
     movaps  xmm1, [rip+pl_best_n]
     movaps  xmm2, xmm1
-    shufps  xmm2, xmm2, 0x55            # n.y
+    dpps    xmm2, [rip+pl_up], 0x71     # n . up
     comiss  xmm2, [rip+pl_ground_cos]
     jb      2f
     divss   xmm0, xmm2                  # ground: straight up
-    xorps   xmm3, xmm3
-    insertps xmm3, xmm0, 0x10
-    addps   xmm3, [rip+pl_pos]
-    movaps  [rip+pl_pos], xmm3
+    shufps  xmm0, xmm0, 0
+    mulps   xmm0, [rip+pl_up]
+    addps   xmm0, [rip+pl_pos]
+    movaps  [rip+pl_pos], xmm0
     mov     dword ptr [rip+pl_ground], 1
     mov     eax, [rip+pl_best_obj]      # (what it stands on)
     mov     [rip+pl_gground], eax
-    movss   xmm3, [rip+pl_vel+4]
-    comiss  xmm3, [rip+f_zero]
+    movaps  xmm0, [rip+pl_vel]
+    call    pl_vup
+    comiss  xmm2, [rip+f_zero]
     jae     8f
-    mov     dword ptr [rip+pl_vel+4], 0
+    subps   xmm0, xmm1
+    movaps  [rip+pl_vel], xmm0
     jmp     8f
 2:  comiss  xmm2, [rip+f_ceil]
     ja      3f
@@ -839,13 +1066,18 @@ pl_resolve:
     mulps   xmm0, xmm1
     addps   xmm0, [rip+pl_pos]
     movaps  [rip+pl_pos], xmm0
-    movss   xmm3, [rip+pl_vel+4]
-    comiss  xmm3, [rip+f_zero]
+    movaps  xmm0, [rip+pl_vel]
+    call    pl_vup
+    comiss  xmm2, [rip+f_zero]
     jbe     8f
-    mov     dword ptr [rip+pl_vel+4], 0
+    subps   xmm0, xmm1
+    movaps  [rip+pl_vel], xmm0
     jmp     8f
 3:  mov     dword ptr [rip+pl_wall], 1  # a wall: sideways
-    insertps xmm1, xmm1, 0x0a           # (n.x, 0, n.z)
+    shufps  xmm2, xmm2, 0               # n - (n . up) up
+    mulps   xmm2, [rip+pl_up]
+    subps   xmm1, xmm2
+    andps   xmm1, [rip+f_xyz]
     movaps  xmm3, xmm1
     dpps    xmm3, xmm3, 0x7f
     sqrtps  xmm3, xmm3
@@ -883,7 +1115,7 @@ pl_try_step:
     movaps  xmm0, [rip+pl_vel]
     movaps  [rsp+16], xmm0
     call    pl_wish                     # the move asked for, flat: at
-    insertps xmm0, xmm0, 0x0a           #  least the radius on (the round
+    call    pl_vup2                     #  least the radius on (the round
     andps   xmm0, [rip+f_xyz]           #  bottom past the step's edge)
     movaps  xmm2, xmm0
     dpps    xmm2, xmm2, 0x7f
@@ -896,8 +1128,9 @@ pl_try_step:
     shufps  xmm2, xmm2, 0
     mulps   xmm0, xmm2
     movaps  xmm2, xmm0
-    xorps   xmm1, xmm1
-    insertps xmm1, [rip+pl_step_h], 0x10
+    movss   xmm1, [rip+pl_step_h]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rip+pl_up]
     movaps  xmm3, [rsp]
     addps   xmm3, xmm1                  # up
     addps   xmm3, xmm2                  # and on
@@ -914,17 +1147,16 @@ pl_try_step:
     je      8f
     cmp     dword ptr [rip+pl_wall], 0
     jne     8f
-    movss   xmm0, [rip+pl_pos+4]        # higher than before: a step taken -
-    subss   xmm0, [rsp+4]               #  up onto it where it stands (the
-    comiss  xmm0, [rip+f_rise]          #  walk takes it on from there)
+    movaps  xmm0, [rip+pl_pos]          # higher than before: a step taken -
+    subps   xmm0, [rsp]                 #  up onto it where it stands (the
+    call    pl_vup                      #  walk takes it on from there)
+    comiss  xmm2, [rip+f_rise]
     jbe     8f
-    movss   xmm0, [rip+pl_pos+4]
-    movaps  xmm1, [rsp]
-    insertps xmm1, xmm0, 0x10
+    addps   xmm1, [rsp]
     movaps  [rip+pl_pos], xmm1
     movaps  xmm0, [rsp+16]
+    call    pl_vup2
     movaps  [rip+pl_vel], xmm0
-    mov     dword ptr [rip+pl_vel+4], 0
     mov     dword ptr [rip+pl_ground], 1
     jmp     9f
 8:  movaps  xmm0, [rsp]                 # no: as it was
@@ -942,8 +1174,9 @@ pl_snap_down:
     sub     rsp, 24
     movaps  xmm0, [rip+pl_pos]
     movaps  [rsp], xmm0
-    xorps   xmm1, xmm1
-    insertps xmm1, [rip+f_snap], 0x10
+    movss   xmm1, [rip+f_snap]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rip+pl_up]
     subps   xmm0, xmm1
     movaps  [rip+pl_pos], xmm0
     call    pl_resolve
@@ -968,19 +1201,23 @@ pl_contact:
     push    rbp
     sub     rsp, 56
     mov     dword ptr [rip+pl_best_d], 0
-    movaps  xmm0, [rip+pl_pos]          # the capsule's box
-    movss   xmm1, [rip+pl_radius]
-    shufps  xmm1, xmm1, 0
+    movss   xmm1, [rip+pl_radius]       # the capsule's box: its axis (feet +
+    shufps  xmm1, xmm1, 0               #  r .. feet + (h - r) along up) +- r
+    movaps  xmm0, xmm1
+    mulps   xmm0, [rip+pl_up]
+    addps   xmm0, [rip+pl_pos]          # a
+    movss   xmm3, [rip+pl_height]
+    subss   xmm3, [rip+pl_radius]
+    shufps  xmm3, xmm3, 0
+    mulps   xmm3, [rip+pl_up]
+    addps   xmm3, [rip+pl_pos]          # b
     movaps  xmm2, xmm0
+    minps   xmm2, xmm3
+    maxps   xmm0, xmm3
     subps   xmm2, xmm1
     andps   xmm2, [rip+f_xyz]
     movaps  [rip+pl_box0], xmm2
     addps   xmm0, xmm1
-    movss   xmm3, [rip+pl_height]
-    subss   xmm3, [rip+pl_radius]
-    xorps   xmm4, xmm4
-    insertps xmm4, xmm3, 0x10
-    addps   xmm0, xmm4
     andps   xmm0, [rip+f_xyz]
     movaps  [rip+pl_box1], xmm0
     xor     ebx, ebx
@@ -1312,17 +1549,18 @@ tri_world:
 .equ CT_E,      80                      # (an edge's index)
 cap_tri:
     sub     rsp, 104
-    movaps  xmm0, [rip+pl_pos]
-    xorps   xmm2, xmm2
-    insertps xmm2, [rip+pl_radius], 0x10
+    movaps  xmm0, [rip+pl_pos]          # its axis: along the player's up
+    movss   xmm2, [rip+pl_radius]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm2, [rip+pl_up]
     addps   xmm0, xmm2
     movaps  [rsp+CT_A], xmm0
     movss   xmm1, [rip+pl_height]
     subss   xmm1, [rip+pl_radius]
     subss   xmm1, [rip+pl_radius]
-    xorps   xmm2, xmm2
-    insertps xmm2, xmm1, 0x10
-    addps   xmm0, xmm2
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rip+pl_up]
+    addps   xmm0, xmm1
     movaps  [rsp+CT_B], xmm0
     mov     eax, [rip+f_big]
     mov     [rsp+CT_D2], eax
@@ -2096,7 +2334,8 @@ pl_script_look:
 # pl_stat(edi=k) -> xmm0: 0 state (0 off, 1 playing, 2 asking), 1-3 the feet
 #   (x y z), 4 on the ground, 5-7 velocity, 8 mode (1 walk, 2 fly), 9 yaw,
 #   10 pitch (degrees), 11 seconds played, 12 the frame, 13 the mouse
-#   captured (a locked pointer), 14 steps taken, 15 meshes with a grid
+#   captured (a locked pointer), 14 steps taken, 15 meshes with a grid,
+#   16-18 its up (the pull where it stands turns it)
 pl_stat:
     xorps   xmm0, xmm0
     cmp     edi, 0
@@ -2148,8 +2387,15 @@ pl_stat:
     cvtsi2ss xmm0, dword ptr [rip+pl_steps]
     ret
 83: cmp     edi, 15
-    jne     9f
+    jne     84f
     cvtsi2ss xmm0, dword ptr [rip+pl_ntab]
+    ret
+84: cmp     edi, 16                     # 16-18: its up (x y z)
+    jb      9f
+    cmp     edi, 18
+    ja      9f
+    lea     rax, [rip+pl_up]
+    movss   xmm0, [rax+rdi*4-64]
 9:  ret
 
 # play_hud - (viewport_draw) what the keys do, or the question

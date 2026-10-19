@@ -160,6 +160,8 @@ cam_setup:
     xorps   xmm1, xmm1
     subss   xmm1, xmm0
     movss   [rip+fwd+8], xmm1
+    call    pl_basis                    # playing: turned into the player's
+                                        #  frame (walking round a planet)
 
     movss   xmm2, [rip+cam_dist]        # eye = target - fwd * dist
     cmp     dword ptr [rip+cam_ortho], 0  # (orthographic: a long lens from far
