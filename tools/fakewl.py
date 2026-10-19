@@ -624,6 +624,7 @@ def main():
     paint_ui()
     anim_ui()
     physics_ui()
+    landscape_ui()
     render_ui()
     lights_ui()
     team_ui()
@@ -1035,7 +1036,7 @@ def add_modifier(f, m, label):
 
 def props_tab(m, f, name):
     """Open a Properties tab (U10) by name: object, modifiers, material, ..."""
-    tabs = ['object', 'modifiers', 'material', 'physics', 'cad', 'scene', 'render', 'viewport', 'animation', 'rig']
+    tabs = ['object', 'modifiers', 'material', 'physics', 'cad', 'scene', 'render', 'viewport', 'animation', 'rig', 'landscape']
     x, y = widget_xy(m, 'props.tab.' + name, tabs.index(name))
     if x:
         f.click(x, y); f.pump(0.2)
@@ -8028,6 +8029,99 @@ def physics_ui():
     check({'sim.bake', 'sim.free', 'sim.budget'} <= names(), 'the cache: Bake, Free, its budget')
     type_into('sim.budget', '512')
     check(wait_value(f, m, 'sim.budget', 0, 512) == 512, 'the budget from the field')
+    f.proc.kill()
+
+
+def landscape_ui():
+    """W5 (#321): the Landscape tab (only for a landscape): what it is, the
+    layer stack (a value changed, a layer added, moved, hidden), paint
+    layers (added, coloured with the picker, Auto Paint), the sea; Add >
+    Water; Add > Landscape's form (size, samples, seed); the sculpt shelf's
+    eight paint materials."""
+    print('  -- landscape panel --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    val = lambda n, sub=0: (widget(m, n, sub) or {}).get('value')
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.4)
+    la = lambda k: q(f'print(landscape("Landscape", {k}))')
+    check('props.tab.landscape' not in names(), 'no Landscape tab while the active object is not a landscape')
+    q('delete("Cube")\nop("landscape.add", "hills")\nselect("Landscape")')
+    f.pump(0.2)
+    check('props.tab.landscape' in names(), 'a landscape: the Landscape tab')
+    props_tab(m, f, 'landscape')
+    check({'landscape.layer', 'landscape.layer_visible', 'landscape.seed', 'landscape.noise', 'landscape.layer_add',
+           'landscape.paint_add', 'landscape.section.more'} <= names(),
+          'the layer stack, the bottom layer (Generate) picked with its noise and seed, Add lists')
+    h0 = la(4)
+    type_into('landscape.seed', '7')
+    h1 = la(4)
+    check(val('landscape.seed') == 7 and h0 != h1, f'its seed changed: the heights follow ({h0} -> {h1})')
+    pick_enum(f, m, 'landscape.noise', 0, 1)
+    check(val('landscape.noise') == 1, 'its noise: Ridged')
+    pick_enum(f, m, 'landscape.layer_add', 0, 3)                # Terrace, on top
+    f.pump(0.3)
+    check(la(2) == '3', f'Add Layer > Terrace: three layers ({la(2)})')
+    click('landscape.layer', 2)
+    check(val('landscape.steps') is not None, 'the terrace picked: its steps and smoothing')
+    type_into('landscape.steps', '4')
+    ht = q('print(height("Landscape", 37, -23))')
+    click('landscape.layer_down')
+    names()
+    h2 = q('print(height("Landscape", 37, -23))')
+    click('landscape.layer_up')
+    names()
+    h3 = q('print(height("Landscape", 37, -23))')
+    check(h2 != ht and h3 == ht, f'Down puts the terrace under the erosion (the ground changes), Up back ({ht}, {h2}, {h3})')
+    click('landscape.layer_visible', 2)
+    names()
+    check(val('landscape.layer_visible', 2) == 0, 'the eye hides a layer')
+    pick_enum(f, m, 'landscape.paint_add', 0, 2)                # Grass
+    f.pump(0.3)
+    check(la(7) == '1' and 'landscape.paint_colour' in names(), f'Add Paint Layer > Grass ({la(7)} paint layer)')
+    click('landscape.paint_colour')
+    type_into('color.hex', '#204010')
+    f.key(1); f.pump(0.2)
+    check(widget(m, 'landscape.paint_colour') is not None, 'its colour from the picker')
+    click('landscape.paint_auto_btn')
+    names()
+    click('landscape.section.layers')                           # (folded: the rest in reach)
+    click('landscape.section.paint')
+    click('landscape.section.more')
+    click('landscape.add_sea')
+    names()
+    check(q('print(exists("Water"))') == '1', 'Sea and Files > Add Sea: a Water plane')
+    f.shot('w5_landscape_panel.png')
+    q('select("Water")')
+    f.pump(0.2)
+    check('props.tab.landscape' not in names(), 'the Water selected: no Landscape tab')
+    n0 = int(q('print(count())'))
+    menu_pick(f, m, 'Add', 'Water')
+    f.pump(0.3)
+    check(int(q('print(count())')) == n0 + 1, 'Add > Water: a Water plane of its own')
+    menu_pick(f, m, 'Add', 'Landscape', 'Dunes')
+    f.pump(0.3)
+    ok = {'form.landscape.size', 'form.landscape.samples', 'form.landscape.seed'} <= names()
+    type_into('form.landscape.size', '64')
+    pick_enum(f, m, 'form.landscape.samples', 0, 1)             # 129
+    click('dialog.ok')
+    f.pump(0.5)
+    r = q('n = name(count() - 1)\nprint(landscape(n, 0), landscape(n, 1))')
+    check(ok and r == '129 64', f'Add > Landscape > Dunes asks size, samples and seed ({r})')
+    q('select("Landscape")')
+    f.move(600, 300)
+    f.mods(4); f.key(15); f.mods(0)                             # Ctrl+Tab: sculpt mode
+    f.pump(0.3)
+    tools = [w.get('label') for w in ui_tree(m) if w['name'] == 'tools.row']
+    check({'Rock', 'Grass', 'Sand', 'Snow', 'Dirt', 'Gravel', 'Moss', 'Mud'} <= set(tools),
+          f'the sculpt shelf paints all eight materials ({[t for t in tools if t]})')
     f.proc.kill()
 
 

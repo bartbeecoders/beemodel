@@ -223,7 +223,9 @@ def sculpt_paint():
     cmd('object.sculpt_mode')
     f.key(1); f.pump(0.3)
     P = fakewl.project
-    tool = {'ramp': 223, 'grass': 371, 'rock': 341, 'auto': 461}
+    rows = {w.get('label'): w for w in fakewl.ui_tree(m) if w['name'] == 'tools.row'}   # (by label:
+    tool = {k: rows[l]['y'] + 11 for k, l in (('ramp', 'Ramp'), ('grass', 'Grass'),         #  the shelf
+                                                ('rock', 'Rock'), ('auto', 'Auto Paint')) if l in rows}  #  grew in W5)
     f.click(55, tool['ramp']); f.pump(0.2)
     f.drag(*P((-3, 2, -3)), *P((3, 0, 3)), steps=12); f.pump(0.3)
     h = hs()
@@ -464,6 +466,10 @@ def presets():
     for label in ('Flat', 'Hills', 'Mountains', 'Canyon', 'Dunes', 'Island'):
         n0 = int(q('print(count())') or 0)
         ok = fakewl.menu_pick(f, m, 'Add', 'Landscape', label)
+        f.pump(0.3)
+        ok = ok and fakewl.widget(m, 'form.landscape.size') is not None   # (W5: size, samples, seed)
+        x, y = fakewl.widget_xy(m, 'dialog.ok')
+        f.click(x, y)
         f.pump(0.5)
         n = int(q('print(count())') or 0)
         name = q('print(name(count() - 1))') if label != 'Island' else q('print(name(count() - 2))')

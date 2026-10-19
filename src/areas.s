@@ -10,7 +10,7 @@
 .include "widgets.inc"
 .include "icons.inc"
 .equ PTAB_W, 32                          # the Properties tab strip
-.equ PTAB_N, 10
+.equ PTAB_N, 11                         # (the last, Landscape: only for a landscape)
 .equ OUTL_MAXROWS, 256
 .include "macros.inc"
 
@@ -1856,7 +1856,15 @@ ed_props_draw:
     cmp     eax, PTAB_N
     jb      1f
     xor     eax, eax
-1:  lea     rcx, [rip+props_pages]
+1:  cmp     eax, PTAB_N-1               # Landscape: while one is active
+    jne     2f
+    call    land_is_active
+    mov     ecx, eax
+    mov     eax, PTAB_N-1
+    test    rcx, rcx
+    jnz     2f
+    xor     eax, eax
+2:  lea     rcx, [rip+props_pages]
     jmp     [rcx+rax*8]
 
 .Lpp_object:
@@ -2053,6 +2061,11 @@ ed_props_draw:
     call    rigui_props
     mov     r12d, eax
     jmp     .Lpp_done
+.Lpp_land:
+    mov     edi, r12d
+    call    land_props
+    mov     r12d, eax
+    jmp     .Lpp_done
 .Lpp_view:
     lea     rdi, [rip+wd_vp_sec]
     mov     esi, [rip+ed_x]
@@ -2115,7 +2128,12 @@ props_tabs:
     xor     ebx, ebx
 1:  cmp     ebx, PTAB_N
     jae     9f
-    lea     rax, [rip+ptab_descs]
+    cmp     ebx, PTAB_N-1               # (Landscape: only for a landscape)
+    jne     11f
+    call    land_is_active
+    test    rax, rax
+    jz      9f
+11: lea     rax, [rip+ptab_descs]
     mov     rdi, [rax+rbx*8]
     mov     esi, [rip+ed_x]
     add     esi, 3
@@ -2855,13 +2873,13 @@ k_u_in:         .asciz "in"
 .align 4
 unit_mm_tab:    .float 1.0, 10.0, 1000.0, 25.4
 ptab_icons:     .long ICON_OBJECT, ICON_MODIFIER, ICON_MATERIAL, ICON_PHYSICS, ICON_SKETCH
-                .long ICON_WORLD, ICON_RENDERED, ICON_WIRE, ICON_KEY, ICON_ARMATURE
+                .long ICON_WORLD, ICON_RENDERED, ICON_WIRE, ICON_KEY, ICON_ARMATURE, ICON_GRID
 .align 8
 unit_lbl:       .quad s_u_mm, s_u_cm, s_u_m, s_u_in
 unit_kw:        .quad k_u_mm, k_u_cm, k_u_m, k_u_in
-ptab_descs:     .quad wd_pt0, wd_pt1, wd_pt2, wd_pt3, wd_pt4, wd_pt5, wd_pt6, wd_pt7, wd_pt8, wd_pt9
+ptab_descs:     .quad wd_pt0, wd_pt1, wd_pt2, wd_pt3, wd_pt4, wd_pt5, wd_pt6, wd_pt7, wd_pt8, wd_pt9, wd_pt10
 props_pages:    .quad .Lpp_object, .Lpp_mods, .Lpp_mat, .Lpp_phys, .Lpp_cad, .Lpp_scene, .Lpp_render, .Lpp_view
-                .quad .Lpp_anim, .Lpp_rig
+                .quad .Lpp_anim, .Lpp_rig, .Lpp_land
 .text
 WIDGET wd_pt0, WK_ROW, "props.tab.object", "Object", tip="Name, place, rotation, size, visibility and colour of the active object"
 WIDGET wd_pt1, WK_ROW, "props.tab.modifiers", "Modifiers", tip="The modifier stack: mirror, array, subdivision, booleans, geometry nodes ..."
@@ -2872,6 +2890,7 @@ WIDGET wd_pt5, WK_ROW, "props.tab.scene", "Scene", tip="Units, the world's light
 WIDGET wd_pt6, WK_ROW, "props.tab.render", "Render", tip="Render size, samples and denoising, Render and Save"
 WIDGET wd_pt7, WK_ROW, "props.tab.viewport", "Viewport", tip="Shading, grid, theme and the viewport camera"
 WIDGET wd_pt8, WK_ROW, "props.tab.animation", "Animation", tip="Shape keys, actions and layers, drivers, onion skins, motion paths"
+WIDGET wd_pt10, WK_ROW, "props.tab.landscape", "Landscape", tip="The landscape's size, layers, paint, sea and files"
 WIDGET wd_pt9, WK_ROW, "props.tab.rig", "Rig", tip="Bones and their pose, constraints, parenting to an armature"
 WIDGET wd_props_scroll, WK_SCROLL, "props.page"
 WIDGET wd_obj_vis,   WK_TOGGLE, "object.visible", "Visible", cb=props_vis_cb, undo="Hide", tip="Show or hide the object (H hides the selection, Alt+H shows all)"
@@ -2920,7 +2939,8 @@ tl_sculpt:      .quad op_sb_draw, op_sb_clay, op_sb_crease, op_sb_inflate, op_sb
                 .quad op_s_mclear, op_s_minv, op_s_dyn
 .equ tl_sculpt_n, (. - tl_sculpt) / 8
 tl_lsculpt:     .quad op_lt_raise, op_lt_lower, op_lt_smooth, op_lt_flatten, op_lt_ramp, op_lt_noise
-                .quad op_lt_erode, cap_lpaint, op_lt_rock, op_lt_grass, op_lt_sand, op_lt_snow, op_lt_auto
+                .quad op_lt_erode, cap_lpaint, op_lt_rock, op_lt_grass, op_lt_sand, op_lt_snow
+                .quad op_lt_dirt, op_lt_gravel, op_lt_moss, op_lt_mud, op_lt_auto
 .equ tl_lsculpt_n, (. - tl_lsculpt) / 8
 tl_paint:       .quad op_pt_color, op_pt_rad_up, op_pt_rad_dn, op_pt_str_up, op_pt_str_dn, cap_layers
                 .quad op_pt_ladd, op_pt_lup, op_pt_ldn, op_pt_lmerge
