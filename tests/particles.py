@@ -28,6 +28,10 @@ radius at the level its volume gives; a light box floats in it and a
 heavy one sinks; water runs further than honey; the same on 1 and 8
 threads; a dam break of 200k particles steps under 1 s a frame on 8.
 
+P5: the liquid's surface - the dam break is meshed every frame into a
+closed, manifold surface its emitter shows, in under 200 ms; spray
+events make foam where it breaks; the surface exports as OBJ frames.
+
     python3 tests/particles.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -580,11 +584,59 @@ print("dam", particles(0), t / 6, particles(27))
           % (d[1] if d else -1, lim, d[2] if d else -1))
 
 
+def p5():
+    print('-- P5: the liquid\'s surface --')
+    out = run('''delete("Light")
+scale("Cube", 0.5, 0.8, 0.5)
+move("Cube", -1.5, 0.8, 0)
+emit("Cube", "from fill size 0.02 life 1000 liquid on domain -2 0 -0.5 2 2 0.5 speed 0 surface on")
+bad = 0
+worst = 0
+for f in 2..20 {
+  frame(f)
+  if particles(32, 0) > worst { worst = particles(32, 0) }
+  if manifold("Cube") != 1 or analyze("Cube", "boundary") != 0 or efaces("Cube") != particles(33, 0) { bad = bad + 1 }
+}
+print("surf", bad, worst, particles(33, 0))
+''', threads=8)
+    sf = vals(out, 'surf')
+    lim = 600 if CI else 200
+    check(len(sf) == 3 and sf[0] == 0 and sf[2] > 100000 and sf[1] < lim,
+          'the dam break (200k particles) is a closed, manifold surface every frame, shown by its emitter '
+          '(%s triangles at the end), meshed in under %d ms (the slowest frame %.0f ms, 8 threads)'
+          % (sf[2:] or '?', lim, sf[1] if sf else -1))
+    tmp = tempfile.mkdtemp(prefix='bee-particles-')
+    out = run('''delete("Light")
+scale("Cube", 0.25, 0.3, 0.25)
+move("Cube", -0.25, 0.3, 0)
+select("Cube")
+emit("Cube", "from fill size 0.04 life 1000 liquid on domain -0.5 0 -0.25 0.5 1 0.25 speed 0 surface on name Water")
+emit("Cube", "from events events spray Water per 1 speed 0 inherit 1 life 0.5 size 0.01 name Foam")
+for f in 2..20 {
+  frame(f)
+}
+print("foam", particles(20, 1))
+frame(6)
+print("faces6", efaces("Cube"))
+op("file.export_liquid", "%s/w 5 8")
+''' % tmp)
+    fo, f6 = vals(out, 'foam'), vals(out, 'faces6')
+    files = sorted(os.listdir(tmp))
+    objs = [f for f in files if f.endswith('.obj')]
+    n6 = 0
+    if 'w_0006.obj' in objs:
+        n6 = sum(1 for l in open(os.path.join(tmp, 'w_0006.obj')) if l.startswith('f '))
+    check(fo and fo[0] > 50, 'where the surface breaks (fast, few neighbours) spray events make foam (%s)' % fo)
+    check(objs == ['w_0005.obj', 'w_0006.obj', 'w_0007.obj', 'w_0008.obj'] and f6 and n6 == f6[0],
+          'file.export_liquid writes a frame per OBJ file (%s), frame 6 with its %s faces (%d)' % (objs, f6, n6))
+
+
 if __name__ == '__main__':
     p1()
     p2()
     p3()
     p4()
+    p5()
     if FAILS:
         print('%d FAILED' % len(FAILS))
         sys.exit(1)

@@ -29,6 +29,7 @@
 .globl sdf_prism
 .globl sdf_invert
 .globl mesh_append
+.globl sdf_fmesh
 
 .equ ND_SZ,     256
 .equ ND_TYPE,   0
@@ -839,6 +840,7 @@ sdf_mesh:
     mov     edx, [rip+sm_nz]
     mov     ecx, 1
     call    parallel_for
+.Lsm_edges:
     # edge -> vertex ids: 7 edges (x, y, z and the diagonals) per point
     mov     eax, [rip+sm_nx]
     mov     ecx, [rip+sm_ny]
@@ -904,6 +906,33 @@ sdf_mesh:
     pop     rbx
     ret
 
+# sdf_fmesh(rdi=its origin x y z and spacing (4 floats), rsi=a field
+#   (floats, (k ny + j) nx + i; negative inside, positive at the border),
+#   edx=nx, ecx=ny, r8d=nz) -> rax = its surface: a closed mesh (the field
+#   is the caller's), or 0
+sdf_fmesh:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 72
+    mov     eax, [rdi]
+    mov     [rip+sm_org], eax
+    mov     eax, [rdi+4]
+    mov     [rip+sm_org+4], eax
+    mov     eax, [rdi+8]
+    mov     [rip+sm_org+8], eax
+    mov     eax, [rdi+12]
+    mov     [rip+sm_h], eax
+    mov     [rip+sm_f], rsi
+    mov     qword ptr [rip+sm_fbytes], 0    # (not ours: not unmapped)
+    mov     [rip+sm_nx], edx
+    mov     [rip+sm_ny], ecx
+    mov     [rip+sm_nz], r8d
+    jmp     .Lsm_edges
+
 # map(rdi=bytes) -> rax = zeroed memory or 0
 map:
     mov     rsi, rdi
@@ -924,9 +953,11 @@ unmap_all:
     test    rdi, rdi
     jz      1f
     mov     rsi, [rip+sm_fbytes]
+    mov     qword ptr [rip+sm_f], 0
+    test    rsi, rsi
+    jz      1f
     mov     eax, SYS_MUNMAP
     syscall
-    mov     qword ptr [rip+sm_f], 0
 1:  mov     rdi, [rip+sm_cell]
     test    rdi, rdi
     jz      2f

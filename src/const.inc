@@ -565,6 +565,10 @@
 .equ PS_DOMAIN,     264     #  its box: 6 floats (min, max; the world)
 .equ PS_DOMON,      288     #  bit 0: kept in the box
 .equ PS_DENS,       292     #  rest density (kg/m3)
+.equ PS_SURF,       296     #  bit 0: meshed into a surface each frame (its emitter shows it)
+.equ PS_SRES,       300     #  the surface grid's spacing (x the particles')
+.equ PS_SPRAYV,     304     #  spray events: faster than this (m/s),
+.equ PS_SPRAYN,     308     #   with fewer neighbours than this
 .equ PS_SZ,         384
 .equ MAX_OBJECTS,   4096
 .equ KEY_A,             30
