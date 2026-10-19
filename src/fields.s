@@ -602,38 +602,64 @@ fl_chan:
     ret
 
 # fl_mix(rax=hash) -> rax: the fields (where they are, their settings) mixed
-#   in (a simulation's cache key)
+#   in (a simulation's cache key). A field that keys move, or whose strength
+#   is keyed, mixes in the animation instead of where it is and its strength
+#   now: those change every frame, and the cache would be begun again on each
 fl_mix:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    sub     rsp, FF_SZ+8
     mov     r13, rax
     xor     ebx, ebx
+    xor     r14d, r14d                  # (an animated field)
 1:  cmp     ebx, [rip+obj_count]
-    jae     9f
+    jae     8f
     mov     edi, ebx
     call    obj_at
     inc     ebx
     cmp     dword ptr [rax+OB_TYPE], OT_FIELD
     jne     1b
     mov     r12, rax
-    mov     rax, r13
+    mov     edi, [r12+OB_UID]
+    call    an_moves
+    test    eax, eax
+    jz      2f
+    mov     r14d, 1
+    jmp     3f
+2:  mov     rax, r13
     lea     rdi, [r12+OB_LOC]
     mov     esi, 36
     call    sc_mix
-    mov     ecx, [r12+OB_FLAGS]
-    and     ecx, OBF_HIDDEN
-    xor     rax, rcx
     mov     r13, rax
+3:  mov     ecx, [r12+OB_FLAGS]
+    and     ecx, OBF_HIDDEN
+    xor     r13, rcx
     mov     rdi, r12
     call    fl_view
-    mov     rdi, rax
+    mov     rsi, rax                    # (a copy: the keyed strength left out)
+    mov     rdi, rsp
+    mov     ecx, FF_SZ
+    rep     movsb
+    mov     edi, [r12+OB_UID]
+    call    an_fkeyed
+    test    eax, eax
+    jz      4f
+    mov     r14d, 1
+    mov     dword ptr [rsp+FF_STR], 0
+4:  mov     rdi, rsp
     mov     esi, FF_SZ
     mov     rax, r13
     call    sc_mix
     mov     r13, rax
     jmp     1b
-9:  mov     rax, r13
+8:  mov     rax, r13
+    test    r14d, r14d
+    jz      9f
+    call    an_hash
+9:  add     rsp, FF_SZ+8
+    pop     r14
     pop     r13
     pop     r12
     pop     rbx
