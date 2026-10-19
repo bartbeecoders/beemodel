@@ -152,7 +152,7 @@ items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_cad_sketch, sub_generate
                 .quad 0, op_add_light, op_add_camera, op_add_armature
 .equ items_add_n, (. - items_add) / 8
-items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, sub_snap, sub_parent, 0
+items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, sub_snap, sub_parent, op_fd_move, 0
                 .quad sub_feature, sub_boolean, sub_mech, sub_physics, op_repair, op_print_check, op_obj_measure
                 .quad 0, op_an_key, op_arm_parent
 .equ items_object_n, (. - items_object) / 8

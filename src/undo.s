@@ -46,7 +46,8 @@
 .equ ST_ANIM,       120     # the animation it saw (a reference)
 .equ ST_PROBES,     128     # the light probes it saw (a reference)
 .equ ST_LCAM,       136     # the light / camera settings it saw (a reference)
-.equ ST_HDR,        144
+.equ ST_FOLD,       144     # the outliner's folders it saw (a reference)
+.equ ST_HDR,        152
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -142,6 +143,9 @@ snapshot:
     mov     rdi, [rip+lc_cur]           # lights' and cameras' settings, shared
     mov     [rbx+ST_LCAM], rdi
     call    lc_ref
+    mov     rdi, [rip+fd_cur]           # the folders, shared
+    mov     [rbx+ST_FOLD], rdi
+    call    fd_ref
     xor     r12d, r12d
 2:  cmp     r12d, [rip+obj_count]
     jae     8f
@@ -197,6 +201,8 @@ release:
     call    pb_unref
     mov     rdi, [rbx+ST_LCAM]
     call    lc_unref
+    mov     rdi, [rbx+ST_FOLD]
+    call    fd_unref
     mov     rdi, [rbx+ST_DELTA]         # its delta goes too
     test    rdi, rdi
     jz      3f
@@ -271,6 +277,12 @@ restore_step:
     mov     rax, [rbx+ST_LCAM]
     mov     [rip+lc_cur], rax
     call    lc_unref
+    mov     rdi, [rbx+ST_FOLD]          # the folders it saw
+    call    fd_ref
+    mov     rdi, [rip+fd_cur]
+    mov     rax, [rbx+ST_FOLD]
+    mov     [rip+fd_cur], rax
+    call    fd_unref
     call    cad_sync
     lea     rdi, [rip+scene_pool]
     call    pool_clear

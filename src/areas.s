@@ -583,7 +583,19 @@ area_hit:
 .Lah_tools:                             # (its rows are widgets)
     jmp     .Lah_pane2
 .Lah_outliner:
-    mov     eax, r12d                   # row under the pointer -> object
+    mov     eax, r12d                   # row under the pointer -> object (a
+    sub     eax, [rip+ed_y]             #  folder row: -1, its widgets)
+    sub     eax, 4
+    js      .Lah_pane2
+    xor     edx, edx
+    mov     ecx, ROW_H
+    div     ecx
+    cmp     eax, [rip+outl_rows]
+    jae     .Lah_pane2
+    lea     rcx, [rip+outl_map]
+    cmp     dword ptr [rcx+rax*4], 0
+    jl      .Lah_pane2
+    mov     eax, r12d
     sub     eax, [rip+ed_y]
     sub     eax, 4
     js      .Lah_pane2
@@ -1264,6 +1276,8 @@ ed_outliner_draw:
     je      11f
     add     ecx, 12
 11: mov     [rsp+12], ecx
+    test    r13d, 0x40000000            # a folder (parent.s OO_FOLDER)
+    jnz     .Lod_folder
     mov     edi, r13d
     call    obj_at
     mov     r14, rax
@@ -1449,6 +1463,163 @@ ed_outliner_draw:
 .Lod_next:
     inc     dword ptr [rsp+8]
     jmp     1b
+.Lod_folder:                            # ---- a folder's row ----
+    test    r15d, r15d
+    jz      21f
+    dec     r15d
+    jmp     .Lod_next
+21: mov     edi, ebx
+    call    row_y
+    mov     r12d, eax
+    mov     ecx, [rip+ed_y]
+    add     ecx, [rip+ed_h]
+    cmp     r12d, ecx
+    jge     .Lod_done
+    cmp     ebx, OUTL_MAXROWS
+    jae     .Lod_done
+    lea     rax, [rip+outl_map]         # (not an object: its widgets take
+    mov     dword ptr [rax+rbx*4], -1   #  the clicks)
+    inc     dword ptr [rip+outl_rows]
+    and     r13d, 0xffff
+    mov     edi, r13d
+    call    fd_rec
+    test    rax, rax
+    jz      .Lod_fnext
+    mov     r14, rax
+    mov     eax, [r14]                  # the folder picked: lit
+    cmp     eax, [rip+fd_active]
+    jne     22f
+    mov     edi, [rip+ed_x]
+    add     edi, 4
+    mov     esi, r12d
+    mov     edx, [rip+ed_w]
+    sub     edx, 8
+    mov     ecx, ROW_H
+    mov     r8d, COL_ACCENT_DARK
+    call    fill_rect
+22: lea     rdi, [rip+wd_outl_frow]     # the row: pick it (its objects
+    mov     esi, [rip+ed_x]             #  selected), twice: rename it
+    add     esi, 4
+    add     esi, [rsp+12]
+    add     esi, 10
+    lea     edx, [r12-1]
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 96
+    sub     ecx, [rsp+12]
+    lea     r8, [rip+outl_fsel]
+    mov     dword ptr [r8], -1
+    mov     r9d, r13d
+    call    wg
+    lea     rdi, [r14+16]               # (FR_NAME, for ui_tree)
+    call    wg_set_label
+    lea     rdi, [rip+wd_outl_ffold]    # its fold arrow
+    mov     esi, [rip+ed_x]
+    add     esi, [rsp+12]
+    sub     esi, 10
+    lea     edx, [r12-1]
+    mov     ecx, 18
+    xor     r8d, r8d
+    mov     r9d, r13d
+    call    wg
+    test    eax, eax
+    jz      23f
+    mov     edi, r13d
+    mov     esi, 1
+    call    fd_toggle
+    mov     dword ptr [rip+redraw_again], 1
+    jmp     .Lod_fnext                  # (the block may have moved)
+23: mov     edi, [rip+ed_x]
+    add     edi, [rsp+12]
+    sub     edi, 9
+    lea     esi, [r12+2]
+    mov     edx, ICON_CHEVRON_DOWN
+    test    dword ptr [r14+8], 1        # (FR_FLG 1: folded)
+    jz      24f
+    mov     edx, ICON_CHEVRON_RIGHT
+24: mov     r8d, COL_TEXT_DIM
+    call    draw_icon
+    mov     edi, [rip+ed_x]             # its icon
+    add     edi, 14
+    add     edi, [rsp+12]
+    lea     esi, [r12+2]
+    mov     edx, ICON_FOLDER
+    mov     r8d, COL_ACCENT
+    call    draw_icon
+    lea     eax, [r13+1]                # being renamed: a text field
+    cmp     eax, [rip+outl_fren]
+    jne     25f
+    lea     rdi, [rip+wd_outl_fname]
+    mov     esi, [rip+ed_x]
+    add     esi, 34
+    add     esi, [rsp+12]
+    lea     edx, [r12-1]
+    mov     ecx, [rip+ed_w]
+    sub     ecx, 128
+    lea     r8, [rip+outl_fname]
+    xor     r9d, r9d
+    call    wg
+    cmp     dword ptr [rip+outl_fren_go], 0
+    je      26f
+    mov     dword ptr [rip+outl_fren_go], 0
+    call    wg_edit_last
+    jmp     26f
+25: mov     edi, [rip+ed_x]             # its name
+    add     edi, 36
+    add     edi, [rsp+12]
+    lea     esi, [r12+2]
+    lea     rdx, [r14+16]
+    mov     ecx, COL_TEXT
+    call    draw_text
+26: xor     ecx, ecx                    # its eye, camera, lock (for all inside)
+27: mov     [rsp], ecx
+    lea     rax, [rip+fd_toggles]
+    mov     rdi, [rax+rcx*8]
+    mov     esi, [rip+ed_x]
+    add     esi, [rip+ed_w]
+    imul    eax, ecx, 24
+    sub     esi, 30
+    sub     esi, eax
+    lea     edx, [r12-1]
+    mov     ecx, 22
+    xor     r8d, r8d
+    mov     r9d, r13d
+    call    wg
+    test    eax, eax
+    jz      28f
+    lea     rdi, [rip+s_u_folder]
+    call    undo_push
+    mov     ecx, [rsp]
+    mov     esi, 2
+    shl     esi, cl
+    mov     edi, r13d
+    call    fd_toggle
+    mov     dword ptr [rip+redraw_again], 1
+    jmp     .Lod_fnext
+28: mov     ecx, [rsp]
+    mov     edi, [rip+ed_x]
+    add     edi, [rip+ed_w]
+    imul    eax, ecx, 24
+    sub     edi, 27
+    sub     edi, eax
+    lea     esi, [r12+2]
+    mov     eax, 2
+    shl     eax, cl
+    lea     rdx, [rip+fd_icons]         # on (the flag set) / off
+    lea     rdx, [rdx+rcx*8]
+    mov     r8d, COL_TEXT_DIM
+    test    [r14+8], eax
+    jz      29f
+    add     rdx, 4
+    mov     r8d, COL_TEXT_OFF
+29: mov     edx, [rdx]
+    call    draw_icon
+    mov     ecx, [rsp]
+    inc     ecx
+    cmp     ecx, 3
+    jb      27b
+.Lod_fnext:
+    inc     ebx
+    jmp     .Lod_next
 .Lod_done:
     lea     rdi, [rip+wd_outl_filter]   # the filter, at the bottom
     mov     esi, [rip+ed_x]
@@ -1457,7 +1628,7 @@ ed_outliner_draw:
     add     edx, [rip+ed_h]
     sub     edx, WG_H+4
     mov     ecx, [rip+ed_w]
-    sub     ecx, 12
+    sub     ecx, 12+32
     lea     r8, [rip+outl_filter]
     xor     r9d, r9d
     call    wg
@@ -1474,8 +1645,27 @@ ed_outliner_draw:
     lea     rdx, [rip+s_filter_hint]
     mov     ecx, COL_TEXT_OFF
     call    draw_small
+    lea     rdi, [rip+wd_outl_fnew]     # + a folder (the selection into it)
+    mov     esi, [rip+ed_x]
+    add     esi, [rip+ed_w]
+    sub     esi, 34
+    mov     edx, [rip+ed_y]
+    add     edx, [rip+ed_h]
+    sub     edx, WG_H+4
+    mov     ecx, 28
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
 .Lod_ren:
-    cmp     dword ptr [rip+outl_ren], 0 # a rename that ended: done
+    cmp     dword ptr [rip+outl_fren], 0  # a folder's rename that ended: done
+    je      91f
+    cmp     dword ptr [rip+outl_fren_go], 0
+    jne     91f
+    call    wg_editing
+    test    eax, eax
+    jnz     91f
+    mov     dword ptr [rip+outl_fren], 0
+91: cmp     dword ptr [rip+outl_ren], 0 # a rename that ended: done
     je      9f
     cmp     dword ptr [rip+outl_ren_go], 0
     jne     9f
@@ -1512,6 +1702,90 @@ outl_toggle:
     pop     rbx
     ret
 
+# outl_frow_cb(rdi, esi=folder index) - a click picks the folder and selects
+#   what is in it; a second click on it within 400 ms renames it
+outl_frow_cb:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, esi
+    call    mono_ns
+    mov     r12, rax
+    cmp     ebx, [rip+outl_fclick]
+    jne     1f
+    sub     rax, [rip+outl_fclick_t]
+    cmp     rax, 400000000
+    ja      1f
+    mov     dword ptr [rip+outl_fclick], -1
+    mov     edi, ebx                    # rename: the field with its name
+    call    fd_rec
+    test    rax, rax
+    jz      9f
+    lea     rsi, [rax+16]
+    lea     rdi, [rip+outl_fname]
+    mov     ecx, 32
+    rep     movsb
+    lea     eax, [rbx+1]
+    mov     [rip+outl_fren], eax
+    mov     dword ptr [rip+outl_fren_go], 1
+    jmp     9f
+1:  mov     [rip+outl_fclick], ebx
+    mov     [rip+outl_fclick_t], r12
+    mov     edi, ebx
+    call    fd_rec
+    test    rax, rax
+    jz      9f
+    mov     edi, [rax]
+    mov     [rip+fd_active], edi
+    call    fd_select
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# outl_fren_cb(rdi=the name typed) - the folder renamed (its own undo step)
+outl_fren_cb:
+    push    rbx
+    mov     rbx, rdi
+    mov     edi, [rip+outl_fren]
+    dec     edi
+    js      9f
+    call    fd_rec
+    test    rax, rax
+    jz      9f
+    mov     eax, [rax]
+    mov     [rip+fd_active], eax
+    mov     rax, rbx
+    lea     rdi, [rip+op_fd_ren]
+    call    run_with_arg
+9:  mov     dword ptr [rip+outl_fren], 0
+    pop     rbx
+    ret
+
+# outl_drop_folder -> eax = the folder index under the pointer (a folder row),
+#   -1 none
+outl_drop_folder:
+    sub     rsp, 8
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    wg_hit
+    test    eax, eax
+    jz      8f
+    mov     edi, eax
+    call    wg_find
+    test    rax, rax
+    jz      8f
+    lea     rcx, [rip+wd_outl_frow]
+    cmp     [rax+32], rcx               # (E_DESC)
+    jne     8f
+    mov     eax, [rax+40]               # (E_SUB: the folder's index)
+    add     rsp, 8
+    ret
+8:  mov     eax, -1
+    add     rsp, 8
+    ret
+
 # outl_drop - an outliner row dragged and let go: onto another row, it
 #   becomes that object's child; onto the outliner's empty part, it has no
 #   parent any more (one undo step; it stays where it is)
@@ -1527,7 +1801,40 @@ outl_drop:
     je      9f
     mov     dword ptr [rip+outl_dragging], 0
     mov     dword ptr [rip+dirty], 1
-    mov     edi, [rip+ptr_x]
+    call    outl_drop_folder            # onto a folder: the selection in it
+    test    eax, eax
+    js      60f
+    mov     edi, eax
+    call    fd_rec
+    test    rax, rax
+    jz      9f
+    mov     eax, [rax]
+    push    rax
+    push    rax
+    lea     rdi, [rip+s_u_folder]
+    call    undo_push
+    pop     rax
+    pop     rax
+    xor     ebx, ebx
+61: cmp     ebx, [rip+obj_count]
+    jae     9f
+    push    rax
+    push    rax
+    mov     edi, ebx
+    call    obj_at
+    mov     rdi, rax
+    pop     rsi
+    pop     rsi
+    push    rsi
+    push    rsi
+    inc     ebx
+    test    dword ptr [rdi+OB_FLAGS], OBF_SELECTED
+    jz      62f
+    call    fd_set_obj
+62: pop     rax
+    pop     rax
+    jmp     61b
+60: mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
     call    hit_test
     mov     ebx, edx
@@ -1543,6 +1850,7 @@ outl_drop:
     call    undo_push
     mov     edi, [rip+outl_drag]
     call    obj_at
+    mov     dword ptr [rax+OB_FOLDER], 0    # (and out of its folder)
     mov     rdi, rax
     xor     esi, esi
     call    par_set
@@ -2870,6 +3178,9 @@ k_u_mm:         .asciz "mm"
 k_u_cm:         .asciz "cm"
 k_u_m:          .asciz "m"
 k_u_in:         .asciz "in"
+.align 8
+fd_toggles:     .quad wd_outl_feye, wd_outl_fcam, wd_outl_flock
+fd_icons:       .long ICON_EYE, ICON_EYE_OFF, ICON_RENDER_ON, ICON_CAMERA, ICON_UNLOCK, ICON_LOCK
 .align 4
 unit_mm_tab:    .float 1.0, 10.0, 1000.0, 25.4
 ptab_icons:     .long ICON_OBJECT, ICON_MODIFIER, ICON_MATERIAL, ICON_PHYSICS, ICON_SKETCH
@@ -2995,9 +3306,16 @@ outl_dragging:  .skip 4                 #  and dragged
 outl_eye_sel:   .skip 4
 outl_ren:       .skip 4                 # the object being renamed (handle)
 outl_ren_go:    .skip 4                 #  (start typing when drawn)
+outl_fren:      .skip 4                 # the folder being renamed (index + 1)
+outl_fren_go:   .skip 4
+outl_fsel:      .skip 4                 # (folder rows: none stays lit)
+outl_fclick:    .skip 4                 # the folder row clicked last,
+outl_fclick_t:  .skip 8                 #  when (a second click: rename)
+outl_fname:     .skip 64
 outl_filter:    .skip 32
 .section .rodata
 s_u_parent:     .asciz "Parent"
+s_u_folder:     .asciz "Folder"
 s_par_loop:     .asciz "  an object cannot go under its own child"
 s_u_render:     .asciz "Render / Leave Out"
 s_u_lock:       .asciz "Lock"
@@ -3011,6 +3329,13 @@ OPERATOR op_rename, "object.rename", "Rename", do_rename, key=KEY_F1+1, flags=OP
 WIDGET wd_outl_name, WK_TEXT, "outliner.name", "Name", flags=WGF_COMPACT, cb=outl_name_cb, undo="Rename"
 WIDGET wd_outl_eye,  WK_ROW, "outliner.visible", "Show / Hide", cb=outl_eye_cb, tip="Show or hide this object in the viewport"
 WIDGET wd_outl_fold, WK_BUTTON, "outliner.fold", "Fold / Unfold", flags=WGF_NODRAW, tip="Show or hide this object's children"
+WIDGET wd_outl_frow, WK_ROW, "outliner.folder", cb=outl_frow_cb, tip="A folder: click to pick it and select what is in it, twice to rename it. Drop objects here to move them in"
+WIDGET wd_outl_ffold, WK_BUTTON, "outliner.folder_fold", "Fold / Unfold", flags=WGF_NODRAW, tip="Show or hide what is in this folder"
+WIDGET wd_outl_fname, WK_TEXT, "outliner.folder_name", "Name", flags=WGF_COMPACT, cb=outl_fren_cb
+WIDGET wd_outl_feye, WK_BUTTON, "outliner.folder_visible", "Show / Hide", flags=WGF_NODRAW, tip="Show or hide everything in this folder"
+WIDGET wd_outl_fcam, WK_BUTTON, "outliner.folder_render", "Render / Leave Out", flags=WGF_NODRAW, tip="Render everything in this folder, or leave it out"
+WIDGET wd_outl_flock, WK_BUTTON, "outliner.folder_lock", "Lock / Unlock", flags=WGF_NODRAW, tip="Lock everything in this folder against selection and edits"
+WIDGET wd_outl_fnew, WK_BUTTON, "outliner.new_folder", "+", aux=op_fd_new, tip="A new folder, the selected objects in it (Ctrl+G)"
 WIDGET wd_outl_cam,  WK_ROW, "outliner.render", "Render / Leave Out", cb=outl_cam_cb, tip="Include this object in renders, or leave it out (it still shows in the viewport)"
 WIDGET wd_outl_lock, WK_ROW, "outliner.lock", "Lock / Unlock", cb=outl_lock_cb, tip="Lock: clicks in the viewport pass through it (select it here instead)"
 WIDGET wd_outl_filter, WK_TEXT, "outliner.filter", "Filter", cb=outl_filter_cb, tip="Show only the objects whose name contains this (Enter)"

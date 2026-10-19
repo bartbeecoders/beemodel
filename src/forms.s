@@ -682,6 +682,14 @@ PATHFORM form_lmsave, "lightmap.save", 1, x_img, n_lightmap
 PATHFORM form_laimp, "landscape.import", 0, x_img
 PATHFORM form_laexp, "landscape.export", 1, x_img, n_heights
 
+# ---- object.move_to_folder <name | none> -------------------------------------------
+WIDGET fw_fdm,  WK_TEXT, "form.folder.name", "Folder (none: out of it)", tip="A folder's name (a new one is made when there is none)"
+FORM form_fdmove, 1
+FFIELD fw_fdm, kw=n_none_fd
+.section .rodata
+n_none_fd:      .asciz "none"
+.text
+
 # ---- landscape.tiles <k> ----------------------------------------------------------
 WIDGET fw_lat,  WK_INT, "form.landscape.tiles", "Tiles a side", 2.0, 16.0, 0.05, 0, WGF_CLAMP
 FORM form_latiles, 1

@@ -331,6 +331,7 @@ scene_clear:
     call    nt_reset
     call    pb_reset                    # (light probes)
     call    lc_reset                    # (light and camera settings)
+    call    fd_reset                    # (the outliner's folders)
     call    lm_reset                    # (the lightmap)
     call    an_reset                    # (and the animation)
     call    rig_reset                   #  (motion paths, onion skins)
