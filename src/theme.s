@@ -18,6 +18,7 @@
 .globl th_id
 .globl th_name
 .globl th_set
+.globl th_choose
 
 .section .data
 .align 4
@@ -150,6 +151,14 @@ th_set:
     mov     dword ptr [rip+dirty], 1
 9:  ret
 
+# th_choose(edi = theme id) - the user picks a theme (any of its menus,
+#   panels or operators): set, and kept in the preferences
+th_choose:
+    sub     rsp, 8
+    call    th_set
+    add     rsp, 8
+    jmp     prefs_save
+
 # th_name -> rax = the active theme's name
 th_name:
     mov     eax, [rip+th_id]
@@ -204,7 +213,7 @@ th_is:                                  # rdi = theme id -> 1 if active
     ret
 
 do_theme_n:                             # rdi = theme id
-    jmp     th_set
+    jmp     th_choose
 
 do_theme:
     sub     rsp, 8
@@ -215,7 +224,7 @@ do_theme:
     test    eax, eax
     js      2f
     mov     edi, eax
-    call    th_set
+    call    th_choose
 1:  call    th_name
     lea     rdi, [rip+s_th_now]
     mov     rsi, rax

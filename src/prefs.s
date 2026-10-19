@@ -1697,8 +1697,7 @@ save_cb:
 theme_cb:                               # rdi = &pr_theme
     mov     edi, [rdi]
     sub     rsp, 8
-    call    th_set
-    call    prefs_save
+    call    th_choose
     add     rsp, 8
     mov     dword ptr [rip+dirty], 1
     ret
