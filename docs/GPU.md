@@ -91,6 +91,11 @@ texture coordinates, checker, gradient and noise patterns, mix, ramp, math
 and vector math, separate / combine, invert, constants and parameters,
 and the bump and normal-map normals. Masked, translucent and one-sided
 materials let rays through as on the CPU (by chance, as much as they do).
+Shadow catchers (the Ground) run there too (v0.23): with one in the scene the
+render's film keeps an alpha, and the shader sums the same four terms a
+pixel as the CPU (seen, a catcher seen, its light unshadowed and lit); the
+catcher's shadow ray is the path's own light-sample ray, told to let
+catchers through. The image and its alpha match the CPU's.
 Scenes the shader does not cover stay on the CPU: an HDRI world, or a
 graph with another node type (Voronoi, bricks, wave, functions ...) or an
 HDR image in it.

@@ -44,4 +44,4 @@
 .equ GBF_OUT,       2
 .equ GPU_DATA0,     4096                # the first binding's offset
 .equ GPU_ALIGN,     256                 # bindings' alignment
-.equ GPU_MAXBIND,   16
+.equ GPU_MAXBIND,   24

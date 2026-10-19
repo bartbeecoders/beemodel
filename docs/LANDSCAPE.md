@@ -27,7 +27,7 @@ op("create.ground", "height -2")
     and the colour is straight.
 
   The render window shows it over checks, and `render.save` and `render()`
-  write RGBA PNGs. A render with a catcher in it stays on the CPU.
+  write RGBA PNGs. The GPU renders catchers too (v0.23), with the same film.
 - It is a passive plane rigid body (friction 0.5, bounce 0; Properties ›
   Physics changes them), a cloth collider, and something the player walks
   on.

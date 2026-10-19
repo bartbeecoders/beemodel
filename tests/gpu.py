@@ -234,7 +234,18 @@ def main():
           f'render.device cpu: on the CPU, why 1 ({r.get("cpu")}); gpu: on the GPU, why 0 ({r.get("gpu")})')
     check(len(b) == 3 and b[0] >= b[1] >= 0 and b[2] == 12,
           f'gpu(15..17): the scene build\'s ms, its BVH\'s, its triangles (the cube: 12) ({b})')
-    check(r.get('ground') is not None, f'a shadow catcher (the Ground) says why ({r.get("ground")})')
+    check(r.get('ground') == ['0'], f'a shadow catcher (the Ground) renders on the GPU ({r.get("ground")})')
+    gs2 = 'op("create.ground")\nadd("sphere", "S", 2, 1, 0)\n'      # (H2: the film's alpha)
+    c, _ = render('catch_cpu', gs2, 64, BEEMODEL_GPU='off')
+    p, gp = render('catch_gpu', gs2, 64, BEEMODEL_GPU='any')
+    from PIL import Image
+    ca = [q[3] for q in pixels(Image.open(c).convert('RGBA'))]
+    pa = [q[3] for q in pixels(Image.open(p).convert('RGBA'))]
+    amad = sum(abs(x - y) for x, y in zip(ca, pa)) / max(len(ca), 1)
+    mad, same = compare(c, p)
+    check(gp[2] == 64 and mad < 0.25 and amad < 0.25 and min(pa) == 0 and max(pa) == 255,
+          f'a shadow catcher on the GPU: the CPU\'s colour (mean difference {mad:.4f}) and alpha (shadows on a '
+          f'clear film, mean difference {amad:.4f})')
 
     c, _ = render('den_cpu', SCENE, 32, 1, BEEMODEL_GPU='off')
     p, gp = render('den_gpu', SCENE, 32, 1, BEEMODEL_GPU='any')
