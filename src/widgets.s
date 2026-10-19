@@ -621,7 +621,13 @@ wg:
     call    fill_rrect
 1:  mov     edi, ebp
     call    closed_find
-    mov     [rsp+12], eax               # >= 0: closed
+    test    dword ptr [rbx+WD_FLAGS], WGF_SHUT  # (closed at first: in the list
+    jz      11f                                 #  means opened)
+    test    eax, eax
+    mov     eax, 0                      # not in it: closed
+    js      11f
+    mov     eax, -1                     # in it: open
+11: mov     [rsp+12], eax               # >= 0: closed
     test    eax, eax
     jns     2f
     lea     edi, [r12+5]                # open: a down-pointing chevron
@@ -1648,7 +1654,8 @@ wg_release:
     jz      1f
     call    run_op_ui                   # (greyed, a form or a question first)
     jmp     9f
-1:  mov     [rip+wg_clicked], ebx
+1:  mov     [rip+wg_clicked], ebx       # (the caller acts when it draws it next:
+    mov     dword ptr [rip+dirty], 1    #  a frame for that)
     jmp     9f
 .Lwr_toggle:
     call    act_undo

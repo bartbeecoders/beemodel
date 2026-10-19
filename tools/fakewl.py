@@ -5301,59 +5301,97 @@ def rigid_bodies():
     f.proc.kill()
 
 def physics_panel():
-    """The Physics section of the Properties area: + Rigid Body makes the
-    active object one; its type and shape buttons step through them; a
-    drag on Mass changes it (one undo step); a joint shows with x to remove
-    it; while it plays, what the simulation does; x removes the body."""
+    """W4 (#320): Properties > Physics in sections that fold. A status line;
+    Rigid Body: the type and shape picked first, Add Rigid Body; then type and
+    shape lists, a material preset, mass (dragged, one undo step), the start
+    velocity, a change made to every selected body; Joints: the object's joints
+    as a list, the one picked edited (type, limits, the force that breaks it),
+    removed; World (closed at first): gravity as a vector; Remove Rigid Body."""
     print('  -- physics panel --')
     f = Fake()
     f.pump(1.0, until_frame=True)
     f.keymap('tests/keymaps/us.xkb')
     m = Mcp(f)
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip().split('\n')[0]
-    rb = lambda: q('print(rigid("Cube", "type"), rigid("Cube", "shape"), round(rigid("Cube", "mass") * 10))')
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    val = lambda n, sub=0: (widget(m, n, sub) or {}).get('value')
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.2)
+    def type_into(name, text, sub=0):
+        click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
+    rb = lambda n='Cube': q(f'print(rigid("{n}", "type"), rigid("{n}", "shape"), round(rigid("{n}", "mass") * 10))')
     f.enter(600, 300)
     q('select("Cube")')
     f.pump(0.2)
     props_tab(m, f, 'physics')
-    f.click(1215, 223)                          # + Rigid Body
-    f.pump(0.2)
+    check({'physics.section.body', 'rigid.new_type', 'rigid.new_shape', 'rigid.add', 'physics.section.joints',
+           'physics.section.shatter', 'physics.section.world'} <= names() and 'shatter.pattern' not in names()
+          and 'physics.gravity' not in names(),
+          'not a body: sections, the type and shape to add with, Shatter and World closed')
+    pick_enum(f, m, 'rigid.new_shape', 0, 1)                    # Sphere
+    click('rigid.add')
     a = rb()
-    f.click(1187, 247)                          # Active -> Passive
-    f.click(1250, 247)                          # Box -> Sphere
-    f.pump(0.2)
+    pick_enum(f, m, 'rigid.type', 0, 1)                         # Passive
+    pick_enum(f, m, 'rigid.shape', 0, 0)                        # Box
     b = rb()
-    f.drag(1170, 291, 1270, 291, steps=5)       # Mass: +100 px x 0.02 (under Material)
+    w = widget(m, 'rigid.mass')
+    f.drag(w['x'] + w['w'] // 2, w['y'] + 10, w['x'] + w['w'] // 2 + 100, w['y'] + 10, steps=5)
     f.pump(0.2)
     c = rb()
     f.shot('104_physics_panel.png')
     f.mods(4); f.key(44); f.mods(0)             # Ctrl+Z: the drag back
     f.pump(0.2)
     c2 = rb()
-    check(a == '1 0 10' and b == '2 1 10' and c == '2 1 30' and c2 == '2 1 10',
-          f'the physics panel: + Rigid Body, Active/Passive, the shape, Mass dragged and undone ({a}, {b}, {c}, {c2})')
-    q('add("plane", "Ground", 0, 0, 0)\nscale("Ground", 6)\nselect("Ground")\nop("rigid.add", "passive box")\n'
-      'select("Cube")\nop("rigid.add", "active box")\nmove("Cube", 0, 3, 0)\nadd("cube", "Probe", 4, 2, 0)\nscale("Probe", 0.3)\nselect("Probe")\n'
-      'op("rigid.add", "active box")\nop("rigid.joint", "point Probe world pivot 4 3 0")')
+    check(a == '1 1 10' and b == '2 0 10' and c == '2 0 60' and c2 == '2 0 10',
+          f'Add Rigid Body (Active, Sphere picked first), then Passive and Box from their lists, Mass dragged and undone '
+          f'({a}, {b}, {c}, {c2})')
+    pick_enum(f, m, 'rigid.material', 0, 1)                     # Rubber
+    type_into('rigid.velocity', '2', 0)
+    r = q('print(round(rigid("Cube", "friction") * 100), round(rigid("Cube", "bounce") * 100))')
+    check(r == '90 80' and val('rigid.velocity', 0) == 2, f'a material preset sets friction and bounce ({r}); the start velocity')
+    q('add("cube", "Box2", 3, 1, 0)\nselect("Box2")\nop("rigid.add", "active box")\nselect("Box2", "Cube")')
     f.pump(0.2)
-    img = f.image()
-    joint = sum(1 for x in range(1130, 1240, 2) if max(img.getpixel((x, 371))[:3]) > 150)
-    f.move(600, 300)
-    f.key(57)                                   # Space: the status line
-    f.pump(0.8)
-    f.key(57)
+    type_into('rigid.mass', '3')
+    r = q('print(rigid("Cube", "mass"), rigid("Box2", "mass"))')
+    check(r == '3 3', f'a value goes to every selected body ({r})')
+    q('op("rigid.joint", "hinge Cube Box2 pivot 1.5 1 0 axis 0 0 1")\nselect("Cube")')
     f.pump(0.2)
-    f.shot('105_physics_running.png')
-    img = f.image()
-    status = sum(1 for y in range(468, 482) for x in range(1130, 1260, 2) if max(img.getpixel((x, y))[:3]) > 90)
-    d = q('print(get("Cube", "y") < 2.5, frame() > 5)')
-    f.mods(1); f.key(105); f.mods(0)            # back to the start
+    check('rigid.joint_row' in names() and val('rigid.joint_type') == 1 and val('rigid.joint_other') is not None,
+          'Joints: the hinge listed and picked, its type and the other body')
+    click('rigid.joint_limited')
+    type_into('rigid.joint_lo', '-30')
+    type_into('rigid.joint_break', '5000')
     f.pump(0.2)
-    f.click(1253, 223)                          # x: Probe no longer a body
-    f.pump(0.2)
-    e = q('print(rigid("Probe", "type"), get("Cube", "y"))')
-    check(d == '1 1' and e == 'nil 3' and joint > 5 and status > 10,
-          f'the physics panel: a joint listed, the simulation shown while playing, x removes the body ({d}, {e}, {joint}, {status})')
+    lo, brk = val('rigid.joint_lo'), val('rigid.joint_break')
+    check(val('rigid.joint_limited') == 1 and lo is not None and abs(lo + 0.5236) < 0.001 and brk == 5000,
+          f'its limits (degrees) and breaking force set in the joint ({lo}, {brk})')
+    pick_enum(f, m, 'rigid.joint_type', 0, 0)                   # Fixed
+    check(val('rigid.joint_type') == 0 and 'rigid.joint_axis' not in names(), 'a fixed joint: no axis or limits')
+    click('rigid.joint_remove')
+    names()                                                     # (it goes in the frame the click is read)
+    check('rigid.joint_row' not in names(), 'Remove Joint')
+    click('physics.section.world')
+    type_into('physics.gravity', '-3', 1)
+    check(val('physics.gravity', 1) == -3, 'World (opened): gravity as X Y Z')
+    q('select("Cube")\nmove("Cube", 0, 3, 0)')
+    pick_enum(f, m, 'rigid.type', 0, 0)                         # Active again
+    q('frame(30)')
+    d = q('print(get("Cube", "y") < 2.9)')
+    q('frame(1)')
+    click('rigid.remove')
+    e = q('print(rigid("Cube", "type"))')
+    check(d == '1' and e == 'nil' and 'rigid.add' in names(), f'it falls when played; Remove Rigid Body ({d}, {e})')
+    click('physics.section.world')                              # (folded again)
+    click('physics.section.joints')
+    click('physics.section.shatter')
+    pick_enum(f, m, 'shatter.pattern', 0, 1)                    # Bricks, 4 a row,
+    type_into('shatter.count', '4')
+    click('shatter.inner_on')                                   #  the cut faces coloured
+    check('shatter.inner' in names() and 'shatter.gap' in names(), 'Shatter: bricks show the gap, the cut faces a colour')
+    click('shatter.run')
+    names()
+    r = q('print(shinfo(0), vcol(active(), 0, 3) >= 0)')
+    check(r.split()[:1] == ['9'], f'Shatter from the panel: 9 bricks with coloured cut faces ({r})')
     f.proc.kill()
 def mechanisms():
     """Mechanisms: a crank parameter keyed over the timeline turns a gear;
@@ -7957,6 +7995,8 @@ def physics_ui():
         click(name, sub); f.mods(4); f.key(30); f.mods(0); f.type(text); f.key(28); f.pump(0.3)
     q('add("plane", "Sheet", 0, 2, 0)\nselect("Sheet")')
     props_tab(m, f, 'physics')
+    check('cloth.make_cloth' not in names(), 'not cloth: its section closed at first')
+    click('physics.section.cloth_add')
     check({'cloth.make_cloth', 'cloth.make_soft', 'cloth.make_collider'} <= names(), 'not cloth yet: Cloth, Soft Body, Collider')
     click('cloth.make_cloth')
     w = wait_widget(f, m, 'cloth.stretch')
@@ -7968,15 +8008,23 @@ def physics_ui():
     check(wait_value(f, m, 'cloth.self', 0, 1) == 1 and wait_value(f, m, 'cloth.mass', 0, 2.5) == 2.5, 'self collision on, the rest kept')
     pick_enum(f, m, 'cloth.type', 0, 1)
     check(wait_value(f, m, 'cloth.type', 0, 1) == 1, 'cloth becomes a soft body')
+    click('physics.section.cloth')                              # (folded: the world in reach)
+    click('physics.section.body')
+    click('physics.section.joints')
+    click('physics.section.cloth_world')
     type_into('cloth.wind_x', '3')
     check(wait_value(f, m, 'cloth.wind_x', 0, 3) == 3, 'the wind')
+    click('physics.section.cloth_world')
+    click('physics.section.cloth')
     click('cloth.remove')
     check(wait_widget(f, m, 'cloth.make_cloth') is not None, 'Remove: no longer cloth')
     q('add("sphere", "Ball", 3, 0, 0)\nselect("Ball", "Cube")')
+    click('physics.section.joints')
     click('rigid.add_joint')
     a, b = widget(m, 'form.rjoint.a'), widget(m, 'form.rjoint.b')
     check(a and b and a['value'] == 'Cube' and b['value'] == 'Ball', f'Add Joint: the two selected objects ({a and a["value"]}, {b and b["value"]})')
     f.key(1); f.pump(0.2)
+    click('physics.section.cache')
     check({'sim.bake', 'sim.free', 'sim.budget'} <= names(), 'the cache: Bake, Free, its budget')
     type_into('sim.budget', '512')
     check(wait_value(f, m, 'sim.budget', 0, 512) == 512, 'the budget from the field')

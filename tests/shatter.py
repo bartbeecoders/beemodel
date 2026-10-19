@@ -449,16 +449,21 @@ print("f", n, m, count())
         a = q('print(count(), shinfo(0), active())').split()
         check(ok and form and len(a) == 3 and a[2].startswith('Cube_brick_') and int(a[1]) > 20,
               'Object > Physics > Shatter...: the form, Bricks, OK: %s bricks, one active' % (a[1:2]))
-        f.click(1210, 499); f.pump(0.2)                          # Pattern: Bricks -> Balls
-        f.click(1210, 499); f.pump(0.2)                          #  -> Shards
-        f.drag(1250, 539, 1130, 539, steps=8)                    # Count: 50 - 120 px x 0.25
-        f.pump(0.2)
+        def click(name):
+            x, y = fakewl.widget_xy(m, name); f.click(x, y); f.pump(0.2)
+        click('physics.section.body')                            # (W4: sections; these folded,
+        click('physics.section.joints')                          #  Shatter opened)
+        click('physics.section.shatter')
+        fakewl.pick_enum(f, m, 'shatter.pattern', 0, 0)          # Pattern: Shards
+        click('shatter.count')                                   # Count: 20
+        f.mods(4); f.key(30); f.mods(0); f.type('20'); f.key(28); f.pump(0.3)
         f.shot('s6_panel.png')
-        f.click(1210, 599); f.pump(1.0)                          # Re-cut
+        label = (fakewl.widget(m, 'shatter.run') or {}).get('label')
+        click('shatter.run'); f.pump(1.0)                        # Re-cut
         b = q('print(count(), shinfo(0), active())').split()
-        check(len(b) == 3 and b[0] == '23' and b[1] == '20' and b[2].startswith('Cube_shard_'),
-              'Properties > Physics > Shatter: Shards, Count dragged to 20, Re-cut: the bricks gone, '
-              '20 shards (%s objects, %s pieces, %s)' % tuple((b + ['?'] * 3)[:3]))
+        check(len(b) == 3 and b[0] == '23' and b[1] == '20' and b[2].startswith('Cube_shard_') and label == 'Re-cut',
+              'Properties > Physics > Shatter: Shards, Count 20, Re-cut (on a piece): the bricks gone, '
+              '20 shards (%s objects, %s pieces, %s, %s)' % tuple((b + ['?'] * 3)[:3] + [label]))
     finally:
         f.proc.kill()
 

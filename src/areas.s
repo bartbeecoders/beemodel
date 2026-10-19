@@ -596,10 +596,8 @@ area_hit:
     mov     edx, [rcx+rax*4]
     mov     eax, HIT_OUTLINER
     jmp     .Lah_ret
-.Lah_props:                             # material, modifier buttons and fields
-    mov     edi, ebx
-    mov     esi, r12d
-    call    rb_props_hit
+.Lah_props:                             # (the physics panel: widgets now)
+    mov     eax, -1
 1:
     test    eax, eax
     js      .Lah_pane
@@ -2868,7 +2866,7 @@ props_pages:    .quad .Lpp_object, .Lpp_mods, .Lpp_mat, .Lpp_phys, .Lpp_cad, .Lp
 WIDGET wd_pt0, WK_ROW, "props.tab.object", "Object", tip="Name, place, rotation, size, visibility and colour of the active object"
 WIDGET wd_pt1, WK_ROW, "props.tab.modifiers", "Modifiers", tip="The modifier stack: mirror, array, subdivision, booleans, geometry nodes ..."
 WIDGET wd_pt2, WK_ROW, "props.tab.material", "Material", tip="The object's material: colour, roughness, metal, emission, textures"
-WIDGET wd_pt3, WK_ROW, "props.tab.physics", "Physics", tip="Rigid body, joints and the physics world"
+WIDGET wd_pt3, WK_ROW, "props.tab.physics", "Physics", tip="Rigid bodies, joints, shatter, cloth, the physics world and the simulation cache"
 WIDGET wd_pt4, WK_ROW, "props.tab.cad", "CAD", tip="Parameters and the features of parts"
 WIDGET wd_pt5, WK_ROW, "props.tab.scene", "Scene", tip="Units, the world's light and the frame range"
 WIDGET wd_pt6, WK_ROW, "props.tab.render", "Render", tip="Render size, samples and denoising, Render and Save"

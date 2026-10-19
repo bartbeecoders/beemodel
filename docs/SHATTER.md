@@ -24,8 +24,10 @@ From the menus:
   open, the viewport draws the cells it would cut as outlines on the
   object. The outlines are made again when a value or the object changes;
   nothing is cut until OK.
-- **Properties › Physics › Shatter** (closed under **+ Shatter**, open on
-  a piece) has the same settings for the active mesh: pattern, preset, count, glue and impact. Below them is a
+- **Properties › Physics › Shatter** (a section, closed at first) has the
+  same settings for the active mesh: pattern, preset, count, seed, glue
+  (and **Show glued faces**), the blow it breaks at, the bricks' gap and a
+  colour for the cut faces (the colour picker). Below them is a
   **Shatter** button; on a piece it reads **Re-cut**, which brings the
   original back and breaks it again with the settings shown. The section
   shows the settings of the last shatter.
