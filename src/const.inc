@@ -217,6 +217,14 @@
 .equ TH_DARK,           0         # UI themes (theme.s)
 .equ TH_LIGHT,          1
 .equ TH_CONTRAST,       2
+.equ TH_HONEY,          3
+.equ TH_GRAPHITE,       4
+.equ TH_NORD,           5
+.equ TH_SOLARIZED,      6
+.equ TH_SOLARIZED_L,    7
+.equ TH_DRACULA,        8
+.equ TH_LAST,           8
+.equ TH_N,              9
 .equ COL_SEPARATOR,     0x434956
 .equ COL_GRID,          0x454b55
 .equ COL_GRID_MAJOR,    0x5a616d

@@ -2865,14 +2865,10 @@ tool_icons:     .long ICON_SELECT, ICON_MOVE, ICON_ROTATE, ICON_SCALE, ICON_CUBE
                 .long ICON_SPHERE, ICON_CYLINDER, ICON_PLANE, ICON_LIGHT, ICON_CAMERA
 .align 8
 vp_shade_lbl:   .quad s_sh_solid, s_sh_wire, s_sh_mat, s_sh_rend
-vp_theme_lbl:   .quad s_th_d, s_th_l, s_th_c
 s_sh_solid:     .asciz "Solid"
 s_sh_wire:      .asciz "Wireframe"
 s_sh_mat:       .asciz "Material Preview"
 s_sh_rend:      .asciz "Rendered"
-s_th_d:         .asciz "Dark theme"
-s_th_l:         .asciz "Light theme"
-s_th_c:         .asciz "High contrast"
 .text
 .section .bss
 .align 4
@@ -3045,7 +3041,7 @@ WIDGET wd_tool_row, WK_ROW, "tools.row", cb=tools_cb
 WIDGET wd_vp_sec,     WK_SECTION, "props.viewport", "Viewport"
 WIDGET wd_vp_shading, WK_ENUM,   "viewport.shading", aux=vp_shade_lbl, n=4
 WIDGET wd_vp_grid,    WK_TOGGLE, "viewport.grid", "Ground grid"
-WIDGET wd_vp_theme,   WK_ENUM,   "ui.theme", cb=vp_theme_cb, aux=vp_theme_lbl, n=3
+WIDGET wd_vp_theme,   WK_ENUM,   "ui.theme", cb=vp_theme_cb, aux=th_labels, n=TH_N, flags=WGF_THEMES
 WIDGET wd_vp_yaw,     WK_FLOAT,  "viewport.yaw", "Yaw", step=0.00872665, dec=1, flags=WGF_DEG
 WIDGET wd_vp_pitch,   WK_FLOAT,  "viewport.pitch", "Pitch", -1.55, 1.55, 0.00872665, 1, WGF_DEG|WGF_CLAMP
 WIDGET wd_vp_dist,    WK_FLOAT,  "viewport.distance", "Distance", 1.5, 20000.0, 0.05, 2, WGF_CLAMP

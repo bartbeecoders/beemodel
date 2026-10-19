@@ -2260,7 +2260,16 @@ wg_pop_draw:
     lea     esi, [r12+3]
     mov     ecx, COL_TEXT
     call    draw_text
-    add     r12d, POP_ROW
+    mov     rax, [rip+wg_pop_e+E_DESC]  # the themes: each one's colours
+    test    dword ptr [rax+WD_FLAGS], WGF_THEMES
+    jz      4f
+    mov     edi, [rip+wg_pop_x]
+    add     edi, [rip+wg_pop_w]
+    sub     edi, 4*11+8
+    lea     esi, [r12+(POP_ROW-10)/2]
+    mov     edx, ebx
+    call    th_swatch
+4:  add     r12d, POP_ROW
     inc     ebx
     jmp     1b
 8:  pop     r13
