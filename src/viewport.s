@@ -728,6 +728,7 @@ viewport_draw:
     je      1f
 2:  call    sculpt_draw                 # the sculpt mesh: its own path
     call    inst_draw                   # instances: splats and triangles
+    call    pt_draw                     # particles (particles.s)
 1:  call    ref_draw                    # reference images (refimg.s)
     call    draw_objects                # wires (all objects, or non-meshes)
     call    wp_draw                     # world cells not loaded, the minimap

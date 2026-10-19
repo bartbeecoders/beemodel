@@ -581,6 +581,8 @@ lv_fingerprint:
     LV_MIX  rax
     mov     eax, [rip+img_count]
     LV_MIX  rax
+    call    pt_stamp                    # the particles (particles.s)
+    LV_MIX  rax
     xor     r14d, r14d
 1:  cmp     r14d, [rip+obj_count]
     jae     5f

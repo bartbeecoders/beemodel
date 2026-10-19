@@ -89,6 +89,8 @@ b_bins:         .skip NBINS*32      # count, min[3], max[3], pad
 b_lr:           .skip NBINS*8       # sweep: left area, right area
 
 .section .rodata
+.align 4
+hv_ptiny:       .float 1.0e-12
 .align 16
 hf_inf:         .float 3.0e38, 3.0e38, 3.0e38, 3.0e38
 hf_ninf:        .float -3.0e38, -3.0e38, -3.0e38, -3.0e38
@@ -212,7 +214,9 @@ hive_build:
     add     r12d, eax
 11: inc     ebx
     jmp     1b
-2:  mov     [rip+hv_n], r12d
+2:  call    hv_part_count               # particles (particles.s)
+    add     r12d, eax
+    mov     [rip+hv_n], r12d
     test    r12d, r12d
     jz      .Lhb_empty
     imul    edi, r12d, 36
@@ -362,6 +366,7 @@ hive_build:
     inc     ebx
     jmp     .Lhb_obj
 .Lhb_lights:                            # light objects (16 floats each)
+    call    hv_part_emit                # (the particles first)
     mov     dword ptr [rip+hv_npoints], 0
     xor     ebx, ebx
 7:  cmp     ebx, [rip+obj_count]
@@ -639,6 +644,212 @@ hv_inst_emit:
     inc     dword ptr [rsp+112]
     jmp     1b
 9:  add     rsp, 128
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r12
+    pop     rbx
+    ret
+
+# hv_part_count -> eax = the triangles the particles add (whole ones while
+#   the instance budget lasts; hv_ibud spent)
+hv_part_count:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    xor     r13d, r13d
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+pt_ns]
+    jae     9f
+    mov     edi, ebx
+    inc     ebx
+    call    pt_render
+    test    rax, rax
+    jz      1b
+    mov     r12, rax
+    mov     rdi, rax
+    call    inst_pids
+    mov     r14, rax
+    xor     ecx, ecx
+2:  cmp     ecx, [r12+4]                # (IB_N)
+    jae     1b
+    movzx   eax, byte ptr [r14+rcx]
+    mov     rdx, [r12+24+rax*8]         # (IB_PROTO)
+    mov     eax, [rdx+ME_NTRIS]
+    cmp     eax, [rip+hv_ibud]
+    ja      9f
+    sub     [rip+hv_ibud], eax
+    add     r13d, eax
+    inc     ecx
+    jmp     2b
+9:  mov     eax, r13d
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hv_part_emit (hive_build's r13 = the next global triangle, advanced) -
+#   each particle system's instances (already in the world) as triangles,
+#   tinted by each particle's colour; balls get round normals
+hv_part_emit:
+    push    rbx
+    push    r12
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 128    # [0] system [8] colours [16] material [20] instance
+                        # [24] first triangle [32] mark [40] its centre
+    mov     dword ptr [rsp], 0
+.Lpe_sys:
+    mov     edi, [rsp]
+    cmp     edi, [rip+pt_ns]
+    jae     .Lpe_out
+    inc     dword ptr [rsp]
+    call    pt_render
+    test    rax, rax
+    jz      .Lpe_sys
+    mov     r12, rax
+    mov     [rsp+8], rdx
+    mov     [rsp+16], ecx
+    mov     dword ptr [rsp+20], 0
+.Lpe_one:
+    mov     ecx, [rsp+20]
+    cmp     ecx, [r12+4]
+    jae     .Lpe_sys
+    mov     rdi, r12
+    call    inst_pids
+    mov     ecx, [rsp+20]
+    movzx   eax, byte ptr [rax+rcx]
+    mov     r15, [r12+24+rax*8]         # the prototype
+    mov     eax, [r15+ME_NTRIS]
+    cmp     eax, [rip+hv_ibud]
+    ja      .Lpe_out
+    sub     [rip+hv_ibud], eax
+    imul    eax, ecx, 48                # its matrix (the world)
+    lea     rbx, [r12+128+rax]          # (IB_DATA)
+    mov     eax, [rbx+12]
+    mov     [rsp+40], eax
+    mov     eax, [rbx+28]
+    mov     [rsp+44], eax
+    mov     eax, [rbx+44]
+    mov     [rsp+48], eax
+    call    fa_mark
+    mov     [rsp+32], rax
+    lea     rdi, [rip+frame_arena]      # its points, placed
+    mov     esi, [r15+ME_NVERTS]
+    imul    esi, esi, 12
+    add     esi, 16
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lpe_rel
+    mov     rbp, rax
+    xor     ecx, ecx
+2:  cmp     ecx, [r15+ME_NVERTS]
+    jae     3f
+    imul    eax, ecx, 12
+    mov     rdx, [r15+ME_POS]
+    add     rdx, rax
+    lea     rdi, [rbp+rax]
+    xor     r8d, r8d
+21: movss   xmm0, [rbx+r8]
+    mulss   xmm0, [rdx]
+    movss   xmm1, [rbx+r8+4]
+    mulss   xmm1, [rdx+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rbx+r8+8]
+    mulss   xmm1, [rdx+8]
+    addss   xmm0, xmm1
+    addss   xmm0, [rbx+r8+12]
+    mov     eax, r8d
+    shr     eax, 2
+    movss   [rdi+rax], xmm0
+    add     r8d, 16
+    cmp     r8d, 48
+    jb      21b
+    inc     ecx
+    jmp     2b
+3:  mov     [rsp+24], r13d              # its triangles: material, colour
+    xor     r14d, r14d
+4:  cmp     r14d, [r15+ME_NTRIS]
+    jae     5f
+    mov     edi, r14d
+    mov     esi, r13d
+    call    put_tri
+    mov     eax, [rsp+16]
+    mov     rdx, [rip+hv_tm]
+    mov     [rdx+r13*4], eax
+    mov     rdx, [rsp+8]
+    mov     ecx, [rsp+20]
+    mov     eax, [rdx+rcx*4]
+    imul    rdx, r13, 12
+    add     rdx, [rip+hv_tvc]
+    mov     [rdx], eax
+    mov     [rdx+4], eax
+    mov     [rdx+8], eax
+    inc     r13d
+    inc     r14d
+    jmp     4b
+5:  cmp     r15, [rip+pt_sphere]        # a ball: normals from its centre
+    jne     7f
+    mov     ecx, [rsp+24]
+6:  cmp     ecx, r13d
+    jae     .Lpe_rel
+    mov     eax, ecx
+    lea     rax, [rax+rax*8]
+    mov     r8, [rip+hv_tv]
+    lea     r8, [r8+rax*4]              # v0 e1 e2
+    mov     r9, [rip+hv_tn]
+    lea     r9, [r9+rax*4]
+    xor     edx, edx
+61: xor     r10d, r10d
+62: movss   xmm0, [r8+r10*4]            # the corner, less the centre
+    test    edx, edx
+    jz      63f
+    lea     eax, [rdx+rdx*2]
+    add     eax, r10d
+    addss   xmm0, [r8+rax*4]
+63: subss   xmm0, [rsp+40+r10*4]
+    movss   [rsp+56+r10*4], xmm0
+    inc     r10d
+    cmp     r10d, 3
+    jb      62b
+    movss   xmm0, [rsp+56]
+    mulss   xmm0, xmm0
+    movss   xmm1, [rsp+60]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [rsp+64]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    sqrtss  xmm0, xmm0
+    maxss   xmm0, [rip+hv_ptiny]
+    lea     eax, [rdx+rdx*2]
+    xor     r10d, r10d
+64: movss   xmm1, [rsp+56+r10*4]
+    divss   xmm1, xmm0
+    lea     r11d, [rax+r10]
+    movss   [r9+r11*4], xmm1
+    inc     r10d
+    cmp     r10d, 3
+    jb      64b
+    inc     edx
+    cmp     edx, 3
+    jb      61b
+    inc     ecx
+    jmp     6b
+7:  mov     edi, [rsp+24]
+    call    corner_normals
+.Lpe_rel:
+    mov     rdi, [rsp+32]
+    call    fa_release
+    inc     dword ptr [rsp+20]
+    jmp     .Lpe_one
+.Lpe_out:
+    add     rsp, 128
     pop     rbp
     pop     r15
     pop     r14
