@@ -314,7 +314,7 @@
 .equ PL_FREE,       28
 .equ PL_NEXT,       32
 .equ POOL_SZ,       40
-.equ FRAME_ARENA_BYTES, 0x40000000    # 1 GiB reserved, touched lazily
+.equ FRAME_ARENA_BYTES, 0x400000000   # 16 GiB of address space reserved (noreserve), touched lazily
 
 # ---- areas & palette -------------------------------------------------------------
 .equ HIT_AREA_TYPE,     18

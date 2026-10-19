@@ -39,7 +39,7 @@ _start:
     call    area_init
     call    wsp_init                    # workspaces: the last session's, or the built-in ones
     lea     rdi, [rip+frame_arena]
-    mov     esi, FRAME_ARENA_BYTES
+    mov     rsi, FRAME_ARENA_BYTES
     call    arena_init
     call    scene_init
     call    jobs_init
@@ -333,7 +333,7 @@ handle_cli_args:
 .Lcli_selftest:
     sub     rsp, 8                      # (16-byte aligned calls)
     lea     rdi, [rip+frame_arena]      # (meshes made by the tests)
-    mov     esi, FRAME_ARENA_BYTES
+    mov     rsi, FRAME_ARENA_BYTES
     call    arena_init
     call    jobs_init
     call    selftest
@@ -383,7 +383,7 @@ headless_init:
     call    text_init
     call    area_init
     lea     rdi, [rip+frame_arena]
-    mov     esi, FRAME_ARENA_BYTES
+    mov     rsi, FRAME_ARENA_BYTES
     call    arena_init
     call    scene_init
     call    jobs_init

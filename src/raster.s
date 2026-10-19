@@ -241,13 +241,13 @@ raster_scene:
     jz      .Lrs_out
     call    vgd_extra                   # (and its triangles)
     add     eax, r13d
-    lea     eax, [rax*2+1]              # clipping can split a triangle in two
-    mov     ecx, FRAME_ARENA_BYTES/2/TRI_SZ  # (at most half the frame arena:
-    cmp     eax, ecx                    #  past that a huge mesh draws the
-    cmova   eax, ecx                    #  triangles that fit)
-    mov     [rip+rs_cap_tris], eax
+    lea     eax, [rax*2+1]              # clipping can split a triangle in two:
+    mov     ecx, FRAME_ARENA_BYTES/2/TRI_SZ  #  two slots each (only those kept
+    cmp     eax, ecx                    #  are written: the rest is address
+    cmova   eax, ecx                    #  space; past half the frame arena a
+    mov     [rip+rs_cap_tris], eax      #  huge mesh draws the ones that fit)
     lea     rdi, [rip+frame_arena]
-    imul    esi, eax, TRI_SZ
+    imul    rsi, rax, TRI_SZ
     call    arena_alloc
     mov     [rip+rs_tris], rax
     test    rax, rax
