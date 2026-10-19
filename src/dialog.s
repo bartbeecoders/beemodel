@@ -126,7 +126,12 @@ dlg_open_form:
     jbe     4f
     call    copy63
     jmp     4f
-5:  cmp     esi, WK_FLOAT
+5:  cmp     esi, WK_COLOR           # a colour: its default is 0xrrggbb
+    jne     51f
+    cvttss2si eax, xmm0
+    call    cpk_put
+    jmp     4f
+51: cmp     esi, WK_FLOAT
     je      3f
     cmp     esi, WK_SLIDER
     je      3f
@@ -360,7 +365,31 @@ form_arg:
     ucomiss xmm0, [r15+FF_DEF]
     je      .Lfa_next
 0:
-    cmp     eax, WK_TOGGLE              # a toggle: its word when on
+    cmp     eax, WK_COLOR               # a colour: "r g b", 0..255 as shown
+    jne     93f
+    push    rcx
+    push    rcx
+    call    put_space
+    mov     rsi, [r15+FF_PREFIX]
+    test    rsi, rsi
+    jz      92f
+    call    put_str
+    call    put_space
+92: mov     rdi, [rsp]
+    call    cpk_rgb_of
+    mov     [rsp], eax
+    shr     eax, 16
+    call    put_byte
+    call    put_space
+    movzx   eax, byte ptr [rsp+1]
+    call    put_byte
+    call    put_space
+    movzx   eax, byte ptr [rsp]
+    call    put_byte
+    pop     rcx
+    pop     rcx
+    jmp     .Lfa_next
+93: cmp     eax, WK_TOGGLE              # a toggle: its word when on
     jne     1f
     cmp     dword ptr [rcx], 0
     je      .Lfa_next
@@ -432,6 +461,17 @@ form_arg:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# put_byte(eax = 0..255) - its digits at r14
+put_byte:
+    sub     rsp, 8
+    cvtsi2ss xmm0, eax
+    xor     edi, edi
+    mov     rsi, r14
+    call    wg_ftoa
+    mov     r14, rax
+    add     rsp, 8
     ret
 
 # doc_plain -> rdi = the operator's doc up to its syntax ("Hollow a part: cad.shell

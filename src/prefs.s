@@ -97,6 +97,7 @@ pr_tab:         .skip 4
 pr_scroll:      .skip 4
 pr_sel_scale:   .skip 4
 pr_theme:       .skip 4
+pr_accf:        .skip 12                # the accent as the colour field shows it
 pr_gpu:         .skip 4
 pr_tierv:       .skip 4
 pr_search:      .skip 64
@@ -188,6 +189,8 @@ w_orurl:        .asciz "openrouter_url"
 w_ormodel:      .asciz "openrouter_model"
 w_orsteps:      .asciz "openrouter_steps"
 w_aiextra:      .asciz "ai_prompt"
+w_recent:       .asciz "recent_colours"
+w_accent:       .asciz "accent"
 .align 8
 l_tabs:         .quad s_h_interface, s_h_input, s_h_keymap, s_h_system, s_h_files, s_h_ai
 l_scale:        .quad s_75, s_100, s_125, s_150, s_175, s_200
@@ -208,7 +211,8 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_blender, pr_blender, 2
                 .quad w_clpath, ai_cl_path, 2, w_clmodel, ai_cl_model, 2
                 .quad w_gkpath, ai_gk_path, 2, w_gkmodel, ai_gk_model, 2
-                .quad w_orurl, ai_or_url, 2, w_ormodel, ai_or_model, 2, w_aiextra, ai_extra, 2, 0
+                .quad w_orurl, ai_or_url, 2, w_ormodel, ai_or_model, 2, w_aiextra, ai_extra, 2
+                .quad w_recent, cpk_recent, 2, w_accent, th_accent, 0, 0
 
 .section .data
 .align 4
@@ -827,6 +831,8 @@ WIDGET wd_pf_reset, WK_BUTTON, "prefs.reset", "Reset to Defaults", tip="Every se
 WIDGET wd_pf_close, WK_BUTTON, "prefs.close", "Close", flags=WGF_PRIMARY, aux=op_dlg_cancel, tip="Close the preferences (Esc): every change is already kept"
 WIDGET wd_pf_scroll, WK_SCROLL, "prefs.page"
 WIDGET wd_pf_theme, WK_ENUM, "prefs.theme", cb=theme_cb, aux=th_labels, n=TH_N, flags=WGF_THEMES, tip="The colours of the whole window (each with a strip of its colours)"
+WIDGET wd_pf_accent, WK_COLOR, "prefs.accent", cb=accent_cb, tip="The accent colour (highlights, the active tab, primary buttons) in every theme"
+WIDGET wd_pf_accno, WK_BUTTON, "prefs.accent_theme", "Theme's Accent", aux=op_accent_none, tip="Back to the theme's own accent colour"
 WIDGET wd_pf_scale, WK_ENUM, "prefs.ui_scale", cb=scale_cb, aux=l_scale, n=6, tip="Everything bigger or smaller, on top of the screen's own scale"
 WIDGET wd_pf_rm,   WK_TOGGLE, "prefs.reduce_motion", "Reduce motion", cb=save_cb, tip="Views jump to where they go instead of gliding (aligning, framing, resetting the camera)"
 WIDGET wd_pf_cb,   WK_TOGGLE, "prefs.colorblind_axes", "Colour-blind-safe axis colours", cb=save_cb, tip="X, Y, Z in orange, sky blue and purple instead of red, green and blue"
@@ -882,11 +888,13 @@ s_pf_found:     .asciz "Settings found"
 s_pf_nothing:   .asciz "No setting matches."
 s_pf_hint:      .asciz "Search settings"
 c_theme:        .asciz "Theme"
+c_accent:       .asciz "Accent"
 c_scale:        .asciz "UI scale"
 c_tier:         .asciz "AI agents may"
 .align 4
 pf_gmin:        .float 0.01
 pf_nmin:        .float 0.001
+pf_f255:        .float 255.0
 pf_deg2:        .float 0.008726646          # pi / 360: half the angle, radians
 pf_half:        .float 0.5
 .text
@@ -1258,6 +1266,22 @@ pf_reset:
     lea     r8, [rip+pr_theme]
     lea     rdx, [rip+c_theme]
     call    pf_item
+    mov     r8d, COL_ACCENT             # the accent as it is drawn now
+    call    th_map
+    mov     eax, r8d
+    lea     rdi, [rip+pr_accf]
+    call    accent_put
+    lea     rdi, [rip+wd_pf_accent]
+    lea     r8, [rip+pr_accf]
+    lea     rdx, [rip+c_accent]
+    call    pf_item
+    cmp     dword ptr [rip+th_accent], 0
+    je      11f
+    lea     rdi, [rip+wd_pf_accno]
+    xor     r8d, r8d
+    xor     edx, edx
+    call    pf_item
+11:
     xor     ecx, ecx                    # the scale: its place in the list
     lea     rax, [rip+scales]
 1:  cmp     ecx, 5
@@ -1690,6 +1714,38 @@ save_cb:
     call    prefs_save
     add     rsp, 8
     ret
+accent_cb:                              # rdi = &pr_accf: the accent chosen
+    sub     rsp, 8
+    call    cpk_rgb_of
+    inc     eax
+    mov     [rip+th_accent], eax
+    call    prefs_save
+    add     rsp, 8
+    mov     dword ptr [rip+dirty], 1
+    ret
+
+# accent_put(rdi = float[3], eax = 0xrrggbb) - linear, as colour fields keep
+accent_put:
+    mov     ecx, 2
+1:  mov     edx, eax
+    shr     edx, 16
+    and     edx, 255
+    cvtsi2ss xmm0, edx
+    divss   xmm0, [rip+pf_f255]
+    mulss   xmm0, xmm0
+    movss   [rdi], xmm0
+    add     rdi, 4
+    shl     eax, 8
+    dec     ecx
+    jns     1b
+    ret
+
+OPERATOR op_accent_none, "view.accent_theme", "Theme's Accent", do_accent_none, flags=OPF_AI_SAFE|OPF_QUIET, doc="The UI accent colour back to the theme's own"
+do_accent_none:
+    mov     dword ptr [rip+th_accent], 0
+    mov     dword ptr [rip+dirty], 1
+    jmp     prefs_save
+
 theme_cb:                               # rdi = &pr_theme
     mov     edi, [rdi]
     sub     rsp, 8

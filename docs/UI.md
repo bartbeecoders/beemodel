@@ -115,7 +115,11 @@ The tabs down the left side of Properties are:
 | **Animation** | Shape keys, actions and layers, drivers, onion skins, motion paths |
 | **Rig** | The armature's bones and pose, constraints, Parent to Armature |
 
-**Colour fields** open a picker with a saturation / value square, a hue strip, the old and new colour, a hex code, and **Pick**, which takes the next colour you click anywhere on screen.
+**Colour fields** are swatches: a click opens the picker. It has a saturation / value square, a hue strip, the old and new colour, a hex code, and **Pick**, which takes the next colour you click anywhere on screen. Below them:
+- R G B (0–255) and H S V (degrees, percent) as numbers to drag or type;
+- the ten colours used last (kept in the preferences), and the scene's own colours (its materials' base colours): a click takes one.
+
+Right-click a colour field to copy it as `#rrggbb`, paste a hex code, or reset it to its default. Every colour in the UI works this way: materials, lights, the object colour, the paint colour (and its form), and the accent colour in Preferences › Interface.
 
 ## Other editors
 
@@ -172,7 +176,7 @@ Connections are set up and tested in Preferences › AI. The guide is [AI.md](AI
 
 | Category | Settings |
 |---|---|
-| **Interface** | Theme (Dark, Light, High contrast, Honey, Graphite, Nord, Solarized Dark, Solarized Light, Dracula; the list shows a strip of each one's colours), UI scale 75–200 %, tooltip delay, colour-blind-safe axis colours, the welcome screen |
+| **Interface** | Accent colour (any theme; **Theme's Accent** goes back), theme (Dark, Light, High contrast, Honey, Graphite, Nord, Solarized Dark, Solarized Light, Dracula; the list shows a strip of each one's colours), UI scale 75–200 %, tooltip delay, colour-blind-safe axis colours, the welcome screen |
 | **Viewport** | The ground grid and its spacing, the field of view, the clip start, Rendered shading's samples and denoise |
 | **Input** | Alt + left button as the middle button, orbit speed |
 | **Keymap** | Search, Set (then press the key), Clear, Reset All Keys. It warns you when a key is already taken |

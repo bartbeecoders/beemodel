@@ -1912,10 +1912,11 @@ ed_props_draw:
     lea     rdi, [rip+wd_obj_vis]
     lea     r8, [rip+props_vis]
     call    vp_row
-    mov     edi, [rbx+OB_COLOR]         # its colour as #rrggbb
-    call    hex_color
+    mov     eax, [rbx+OB_COLOR]         # its colour: a swatch (the picker)
+    lea     rdi, [rip+props_objc]
+    call    cpk_put
     lea     rdi, [rip+wd_obj_color]
-    lea     r8, [rip+props_hex]
+    lea     r8, [rip+props_objc]
     mov     esi, [rip+ed_x]
     add     esi, 80
     mov     edx, r12d
@@ -2248,40 +2249,15 @@ props_vis_cb:                           # rdi = &props_vis
     or      dword ptr [rax+OB_FLAGS], OBF_HIDDEN
 9:  ret
 
-props_hex_cb:                           # rdi = typed text: #rrggbb or rrggbb
+props_objc_cb:                          # rdi = &props_objc: the colour picked
     push    rbx
-    mov     rbx, rdi
-    cmp     byte ptr [rbx], '#'
-    jne     1f
-    inc     rbx
-1:  xor     edx, edx
-    xor     ecx, ecx
-2:  movzx   eax, byte ptr [rbx+rcx]
-    test    eax, eax
-    jz      4f
-    sub     eax, '0'
-    cmp     eax, 9
-    jbe     3f
-    movzx   eax, byte ptr [rbx+rcx]
-    or      eax, 0x20
-    sub     eax, 'a'
-    cmp     eax, 5
-    ja      8f                          # not hex: ignored
-    add     eax, 10
-3:  shl     edx, 4
-    or      edx, eax
-    inc     ecx
-    cmp     ecx, 6
-    jb      2b
-4:  cmp     ecx, 6
-    jne     8f
-    push    rdx
+    call    cpk_rgb_of
+    mov     ebx, eax
     mov     edi, [rip+active_obj]
     call    obj_get
-    pop     rdx
     test    rax, rax
     jz      8f
-    mov     [rax+OB_COLOR], edx
+    mov     [rax+OB_COLOR], ebx
 8:  pop     rbx
     ret
 
@@ -2321,22 +2297,6 @@ run_with_arg:
     mov     [rip+op_arg], rax
     call    run_op
     pop     qword ptr [rip+op_arg]
-    ret
-
-# hex_color(edi=0xrrggbb) -> props_hex = "#rrggbb"
-hex_color:
-    lea     rsi, [rip+props_hex]
-    mov     byte ptr [rsi], '#'
-    mov     ecx, 6
-1:  mov     eax, edi
-    and     eax, 15
-    lea     rdx, [rip+hex_digits_p]
-    mov     al, [rdx+rax]
-    mov     [rsi+rcx], al
-    shr     edi, 4
-    dec     ecx
-    jnz     1b
-    mov     byte ptr [rsi+7], 0
     ret
 
 # vp_row(rdi=widget, r8=value; r12d = y, advanced) - one full-width row
@@ -2880,13 +2840,12 @@ props_fstart:   .skip 4
 props_fend:     .skip 4
 props_fps:      .skip 4
 props_dummy:    .skip 4
-props_hex:      .skip 32
+props_objc:     .skip 12                # the object colour, linear (the swatch)
 props_arg:      .skip 64
 .section .rodata
 s_p_color:      .asciz "Colour"
 s_pg_scene:     .asciz "Scene"
 s_pg_render:    .asciz "Render"
-hex_digits_p:   .ascii "0123456789abcdef"
 s_u_mm:         .asciz "Millimetres"
 s_u_cm:         .asciz "Centimetres"
 s_u_m:          .asciz "Metres"
@@ -2918,7 +2877,7 @@ WIDGET wd_pt8, WK_ROW, "props.tab.animation", "Animation", tip="Shape keys, acti
 WIDGET wd_pt9, WK_ROW, "props.tab.rig", "Rig", tip="Bones and their pose, constraints, parenting to an armature"
 WIDGET wd_props_scroll, WK_SCROLL, "props.page"
 WIDGET wd_obj_vis,   WK_TOGGLE, "object.visible", "Visible", cb=props_vis_cb, undo="Hide", tip="Show or hide the object (H hides the selection, Alt+H shows all)"
-WIDGET wd_obj_color, WK_TEXT, "object.color", "Colour", cb=props_hex_cb, undo="Colour", tip="The object's colour in the viewport, as #rrggbb"
+WIDGET wd_obj_color, WK_COLOR, "object.color", cb=props_objc_cb, undo="Colour", tip="The object's colour in the viewport: click for the colour picker"
 WIDGET wd_sc_units, WK_ENUM, "scene.units", "Units", cb=props_units_cb, aux=unit_lbl, n=4, tip="What one scene unit is (typed lengths with units convert)"
 WIDGET wd_sc_wstr, WK_FLOAT, "world.strength", "World strength", 0.0, 1000.0, 0.01, 3, WGF_CLAMP, undo="World", tip="How bright the world (sky or HDRI) lights the scene", def=1.0
 WIDGET wd_sc_wrot, WK_FLOAT, "world.rotation", "World rotation", step=0.00872665, dec=1, flags=WGF_DEG, undo="World", tip="Turns the world image about the vertical axis", def=0.0

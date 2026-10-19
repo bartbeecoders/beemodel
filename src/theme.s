@@ -22,12 +22,18 @@
 .globl th_set
 .globl th_choose
 .globl th_labels
+.globl th_raw
+.globl th_accent
 .globl th_swatch
 
 .section .data
 .align 4
 th_id:          .long TH_DARK
 th_tab:         .quad 0                 # pairs for the active theme (0 = dark)
+th_raw:         .long 0                 # 1: colours drawn as they are (a picker's
+                                        #  swatches: a picked colour is not a theme's)
+th_accent:      .long 0                 # the accent colour chosen in the preferences
+                                        #  (0xrrggbb + 1: exact as a float), 0: the theme's
 
 .section .rodata
 s_env_theme:    .asciz "BEEMODEL_THEME="
@@ -414,7 +420,17 @@ OPERATOR op_theme_drac,     "view.theme_dracula",  "Dracula",       do_theme_n, 
 # th_map(r8d = colour) -> r8d = the active theme's colour
 #   clobbers rax only, so the primitives can call it on their arguments
 th_map:
-    call    cb_axis_map                 # (colour-blind-safe axes: a11y.s)
+    cmp     dword ptr [rip+th_raw], 0
+    jne     9f
+    cmp     r8d, COL_ACCENT             # the preferences' accent, any theme
+    jne     3f
+    mov     eax, [rip+th_accent]
+    test    eax, eax
+    jz      3f
+    dec     eax
+    mov     r8d, eax
+    ret
+3:  call    cb_axis_map                 # (colour-blind-safe axes: a11y.s)
     mov     rax, [rip+th_tab]
     test    rax, rax
     jz      9f                          # dark: the colours as written

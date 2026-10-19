@@ -3,7 +3,10 @@
 #  it under the field. A saturation x value square and a hue strip (both
 #  widget pads, dragged), the old and new colour side by side, the hex code
 #  (typed) and Pick, an eyedropper: the next click anywhere takes the
-#  colour on screen there. A click outside or Esc closes it.
+#  colour on screen there. Below: R G B (0..255) and H S V (degrees,
+#  percent) as numbers to drag or type, the last colours used (kept in the
+#  preferences: recent_colours) and the scene's own (its materials' base
+#  colours). A click outside or Esc closes it.
 #
 #  Colours are stored linear (renderer, materials); the picker works in
 #  display values, taken as their square roots (as the swatches are).
@@ -22,12 +25,21 @@
 .globl cpk_outside
 .globl cpk_rgb_of
 .globl cpk_hex_of
+.globl cpk_apply
+.globl cpk_parse_hex
+.globl cpk_recent
+.globl cpk_put
 
 .equ SQ_W,      170
 .equ SQ_H,      130
 .equ HUE_W,     16
 .equ CP_W,      10+SQ_W+8+HUE_W+10
-.equ CP_H,      10+SQ_H+8+22+10
+.equ NUM_Y,     10+SQ_H+8+22+6      # the R G B row, then H S V
+.equ SW_Y,      NUM_Y+2*22+6        # the recent colours, then the scene's
+.equ SW_N,      10                  # swatches a row
+.equ SW_S,      16                  # a swatch's size
+.equ SW_STEP,   (CP_W-20+2)/SW_N
+.equ CP_H,      SW_Y+2*(SW_S+4)+6
 
 .section .bss
 .align 8
@@ -46,7 +58,13 @@ cpk_hsv:         .skip 16                # h s v (display)
 cpk_sv:          .skip 8                 # pad values
 cpk_hue:         .skip 8
 cpk_hex:         .skip 32
-
+cpk_rgbi:        .skip 12                # R G B as numbers (0..255)
+cpk_hsvi:        .skip 12                # H S V (degrees, percent)
+cpk_padr:        .skip 8                 # the swatch rows' pads
+cpk_pads:        .skip 8
+cpk_scene:       .skip 4*SW_N            # the scene's colours this frame
+cpk_nscene:      .skip 4
+cpk_recent:      .skip 256               # "rrggbb rrggbb ..." (prefs: recent_colours)
 .section .rodata
 .align 4
 f_0:            .float 0.0
@@ -54,6 +72,8 @@ f_1:            .float 1.0
 f_6:            .float 6.0
 f_255:          .float 255.0
 f_half:         .float 0.5
+f_360:          .float 360.0
+f_100:          .float 100.0
 s_pick_hint:    .asciz "  Pick: click anywhere to take the colour there (Esc: never mind)"
 hexd:           .ascii "0123456789abcdef"
 
@@ -62,6 +82,15 @@ WIDGET wd_cp_sv,  WK_PAD, "color.sv", undo="Colour", cb=sv_cb, n=SQ_H, tip="Satu
 WIDGET wd_cp_hue, WK_PAD, "color.hue", undo="Colour", cb=hue_cb, n=SQ_H, tip="Hue", sect=.data
 WIDGET wd_cp_hex, WK_TEXT, "color.hex", cb=hex_cb, undo="Colour", tip="The colour as #rrggbb (Enter)", sect=.data
 WIDGET wd_cp_pick, WK_BUTTON, "color.pick", "Pick", aux=op_cpk_pick, tip="Take a colour from anywhere on the screen: click Pick, then click there"
+WIDGET wd_cp_r, WK_INT, "color.r", "R", 0.0, 255.0, 1.0, 0, WGF_CLAMP|WGF_COMPACT, cb=rgb_cb, undo="Colour", tip="Red, 0 to 255 (as shown)", sect=.data
+WIDGET wd_cp_g, WK_INT, "color.g", "G", 0.0, 255.0, 1.0, 0, WGF_CLAMP|WGF_COMPACT, cb=rgb_cb, undo="Colour", tip="Green, 0 to 255", sect=.data
+WIDGET wd_cp_b, WK_INT, "color.b", "B", 0.0, 255.0, 1.0, 0, WGF_CLAMP|WGF_COMPACT, cb=rgb_cb, undo="Colour", tip="Blue, 0 to 255", sect=.data
+WIDGET wd_cp_h, WK_INT, "color.h", "H", 0.0, 360.0, 1.0, 0, WGF_CLAMP|WGF_COMPACT, cb=hsvn_cb, undo="Colour", tip="Hue, in degrees", sect=.data
+WIDGET wd_cp_s, WK_INT, "color.s", "S", 0.0, 100.0, 1.0, 0, WGF_CLAMP|WGF_COMPACT, cb=hsvn_cb, undo="Colour", tip="Saturation, percent", sect=.data
+WIDGET wd_cp_v, WK_INT, "color.v", "V", 0.0, 100.0, 1.0, 0, WGF_CLAMP|WGF_COMPACT, cb=hsvn_cb, undo="Colour", tip="Brightness, percent", sect=.data
+WIDGET wd_cp_rec, WK_PAD, "color.recent", undo="Colour", cb=rec_cb, n=SW_S, tip="The colours used last: click one to take it", sect=.data
+WIDGET wd_cp_scn, WK_PAD, "color.scene", undo="Colour", cb=scn_cb, n=SW_S, tip="The scene's colours (its materials): click one to take it", sect=.data
+cpk_nums:       .quad wd_cp_r, wd_cp_g, wd_cp_b, wd_cp_h, wd_cp_s, wd_cp_v
 
 OPERATOR op_cpk_pick, "color.pick", "Pick a Colour", do_pick, flags=OPF_QUIET|OPF_HIDDEN, doc="The open colour picker's eyedropper: the next click anywhere takes the colour on screen there"
 do_pick:
@@ -84,6 +113,15 @@ cpk_open:
     mov     [rip+wd_cp_sv+WD_UNDO], rax
     mov     [rip+wd_cp_hue+WD_UNDO], rax
     mov     [rip+wd_cp_hex+WD_UNDO], rax
+    mov     [rip+wd_cp_rec+WD_UNDO], rax
+    mov     [rip+wd_cp_scn+WD_UNDO], rax
+    lea     rcx, [rip+wd_cp_r]
+    mov     [rcx+WD_UNDO], rax
+    mov     [rcx+WD_SZ+WD_UNDO], rax        # (G B H S V follow R, WD_SZ apart)
+    mov     [rcx+2*WD_SZ+WD_UNDO], rax
+    mov     [rcx+3*WD_SZ+WD_UNDO], rax
+    mov     [rcx+4*WD_SZ+WD_UNDO], rax
+    mov     [rcx+5*WD_SZ+WD_UNDO], rax
     mov     eax, [rbx+40]
     mov     [rip+cpk_sub], eax
     mov     eax, [rbx+8]                # under the field, right-aligned
@@ -117,7 +155,18 @@ cpk_open:
     ret
 
 cpk_close:
-    mov     dword ptr [rip+cpk_on], 0
+    cmp     dword ptr [rip+cpk_on], 0   # a new colour: the first of the recent
+    je      1f
+    sub     rsp, 8
+    mov     rdi, [rip+cpk_ptr]
+    call    cpk_rgb_of
+    add     rsp, 8
+    cmp     eax, [rip+cpk_old]
+    je      1f
+    sub     rsp, 8
+    call    rec_push
+    add     rsp, 8
+1:  mov     dword ptr [rip+cpk_on], 0
     mov     dword ptr [rip+cpk_drop], 0
     mov     dword ptr [rip+cpk_floor], 0
     mov     dword ptr [rip+dirty], 1
@@ -179,18 +228,7 @@ cpk_outside:
 set_packed:
     sub     rsp, 8
     mov     rdi, [rip+cpk_ptr]
-    mov     ecx, 2
-1:  mov     edx, eax                    # each channel: (c / 255)^2
-    shr     edx, 16
-    and     edx, 255
-    cvtsi2ss xmm0, edx
-    divss   xmm0, [rip+f_255]
-    mulss   xmm0, xmm0
-    movss   [rdi], xmm0
-    add     rdi, 4
-    shl     eax, 8
-    dec     ecx
-    jns     1b
+    call    put_packed
     mov     rdi, [rip+cpk_ptr]
     call    cpk_rgb_of
     call    to_hsv
@@ -239,7 +277,21 @@ hue_cb:
     jmp     from_hsv
 
 hex_cb:                                 # rdi = "#rrggbb" or "rrggbb"
-    cmp     byte ptr [rdi], '#'
+    sub     rsp, 8
+    call    cpk_parse_hex
+    add     rsp, 8
+    test    edx, edx
+    jnz     set_packed
+    ret
+
+# cpk_parse_hex(rdi = "#rrggbb" or "rrggbb", spaces before it) -> eax =
+#   0xrrggbb, edx = 1 (0: not a colour)
+cpk_parse_hex:
+1:  cmp     byte ptr [rdi], ' '
+    jne     2f
+    inc     rdi
+    jmp     1b
+2:  cmp     byte ptr [rdi], '#'
     jne     1f
     inc     rdi
 1:  xor     eax, eax
@@ -258,8 +310,190 @@ hex_cb:                                 # rdi = "#rrggbb" or "rrggbb"
     or      eax, edx
     dec     ecx
     jnz     2b
+    mov     edx, 1
+    ret
+9:  xor     edx, edx
+    ret
+
+# cpk_apply(rdi = a colour field's widget entry, esi = 0xrrggbb display) -
+#   the field takes that colour (its undo step, its callback): Paste and
+#   Reset to Default
+cpk_apply:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     rax, [rbx+32]               # (E_DESC)
+    mov     rdi, [rax+WD_UNDO]
+    test    rdi, rdi
+    jz      1f
+    call    undo_push
+1:  mov     rdi, [rbx+24]               # (E_PTR)
+    mov     eax, r12d
+    call    put_packed
+    mov     dword ptr [rip+dirty], 1
+    mov     rax, [rbx+32]
+    mov     rax, [rax+WD_CB]
+    test    rax, rax
+    jz      2f
+    mov     rdi, [rbx+24]
+    mov     esi, [rbx+40]               # (E_SUB)
+    call    rax
+2:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# cpk_put / put_packed(rdi = float[3] linear, eax = 0xrrggbb display)
+cpk_put:
+put_packed:
+    mov     ecx, 2
+1:  mov     edx, eax                    # each channel: (c / 255)^2
+    shr     edx, 16
+    and     edx, 255
+    cvtsi2ss xmm0, edx
+    divss   xmm0, [rip+f_255]
+    mulss   xmm0, xmm0
+    movss   [rdi], xmm0
+    add     rdi, 4
+    shl     eax, 8
+    dec     ecx
+    jns     1b
+    ret
+
+rgb_cb:                                 # the R G B numbers
+    mov     eax, [rip+cpk_rgbi]
+    shl     eax, 8
+    or      eax, [rip+cpk_rgbi+4]
+    shl     eax, 8
+    or      eax, [rip+cpk_rgbi+8]
+    jmp     set_packed
+
+hsvn_cb:                                # the H S V numbers
+    cvtsi2ss xmm0, dword ptr [rip+cpk_hsvi]
+    divss   xmm0, [rip+f_360]
+    minss   xmm0, [rip+f_1]
+    movss   [rip+cpk_hsv], xmm0
+    cvtsi2ss xmm0, dword ptr [rip+cpk_hsvi+4]
+    divss   xmm0, [rip+f_100]
+    movss   [rip+cpk_hsv+4], xmm0
+    cvtsi2ss xmm0, dword ptr [rip+cpk_hsvi+8]
+    divss   xmm0, [rip+f_100]
+    movss   [rip+cpk_hsv+8], xmm0
+    jmp     from_hsv
+
+rec_cb:                                 # a recent colour clicked
+    lea     rdi, [rip+cpk_padr]
+    call    sw_index
+    sub     rsp, 8
+    call    rec_get
+    add     rsp, 8
+    test    eax, eax
+    js      9f
     jmp     set_packed
 9:  ret
+
+scn_cb:                                 # one of the scene's colours
+    lea     rdi, [rip+cpk_pads]
+    call    sw_index
+    cmp     eax, [rip+cpk_nscene]
+    jae     9f
+    lea     rcx, [rip+cpk_scene]
+    mov     eax, [rcx+rax*4]
+    jmp     set_packed
+9:  ret
+
+# sw_index(rdi = a swatch row's pad) -> eax = the swatch under it
+sw_index:
+    movss   xmm0, [rdi]
+    mov     eax, SW_N
+    cvtsi2ss xmm1, eax
+    mulss   xmm0, xmm1
+    cvttss2si eax, xmm0
+    cmp     eax, SW_N-1
+    jbe     1f
+    mov     eax, SW_N-1
+1:  ret
+
+# rec_get(eax = i) -> eax = the i-th recent colour, -1 when there is none
+rec_get:
+    imul    eax, eax, 7
+    lea     rdi, [rip+cpk_recent]
+    add     rdi, rax
+    cmp     eax, 256-8
+    jae     9f
+    cmp     byte ptr [rdi], 0
+    je      9f
+    sub     rsp, 8
+    call    cpk_parse_hex
+    add     rsp, 8
+    test    edx, edx
+    jnz     1f
+9:  mov     eax, -1
+1:  ret
+
+# rec_push(eax = 0xrrggbb) - first of the recent colours (once), the
+#   preferences saved
+rec_push:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 112
+    mov     r12d, eax
+    mov     rdi, rsp                    # (cleared: no stale entries after it)
+    xor     eax, eax
+    mov     ecx, 112
+    rep     stosb
+    mov     eax, r12d
+    lea     rsi, [rip+hexd]             # the new list: it, then the others
+    mov     rdi, rsp
+    call    hex6
+    mov     byte ptr [rdi], ' '
+    inc     rdi
+    mov     r13, rdi
+    xor     ebx, ebx
+1:  cmp     ebx, SW_N-1
+    jae     3f
+    mov     eax, ebx
+    call    rec_get
+    test    eax, eax
+    js      3f
+    cmp     eax, r12d
+    je      2f
+    mov     rdi, r13
+    lea     rsi, [rip+hexd]
+    call    hex6
+    mov     byte ptr [rdi], ' '
+    inc     rdi
+    mov     r13, rdi
+2:  inc     ebx
+    jmp     1b
+3:  mov     byte ptr [r13-1], 0
+    lea     rdi, [rip+cpk_recent]
+    mov     rsi, rsp
+    mov     ecx, 7*SW_N
+    rep     movsb
+    mov     byte ptr [rip+cpk_recent+7*SW_N], 0
+    call    prefs_save
+    add     rsp, 112
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hex6(eax = 0xrrggbb, rdi = dest, rsi = hexd) -> rdi past six digits
+hex6:
+    mov     ecx, 5
+1:  mov     edx, eax
+    and     edx, 15
+    mov     dl, [rsi+rdx]
+    mov     [rdi+rcx], dl
+    shr     eax, 4
+    dec     ecx
+    jns     1b
+    add     rdi, 6
+    ret
 
 # to_hsv(eax=0xrrggbb display) -> cpk_hsv (the hue kept for greys)
 to_hsv:
@@ -433,6 +667,151 @@ cpk_hex_of:
     mov     byte ptr [rsi+7], 0
     ret
 
+# cpk_numbers - the R G B and H S V rows (r12d, r13d = the picker's corner)
+cpk_numbers:
+    push    rbx
+    push    rbp
+    sub     rsp, 8
+    mov     rdi, [rip+cpk_ptr]          # the values now
+    call    cpk_rgb_of
+    mov     ecx, eax
+    shr     ecx, 16
+    mov     [rip+cpk_rgbi], ecx
+    movzx   ecx, ah
+    mov     [rip+cpk_rgbi+4], ecx
+    movzx   ecx, al
+    mov     [rip+cpk_rgbi+8], ecx
+    movss   xmm0, [rip+cpk_hsv]
+    mulss   xmm0, [rip+f_360]
+    cvtss2si eax, xmm0
+    mov     [rip+cpk_hsvi], eax
+    movss   xmm0, [rip+cpk_hsv+4]
+    mulss   xmm0, [rip+f_100]
+    cvtss2si eax, xmm0
+    mov     [rip+cpk_hsvi+4], eax
+    movss   xmm0, [rip+cpk_hsv+8]
+    mulss   xmm0, [rip+f_100]
+    cvtss2si eax, xmm0
+    mov     [rip+cpk_hsvi+8], eax
+    xor     ebx, ebx
+1:  lea     rax, [rip+cpk_nums]
+    mov     rdi, [rax+rbx*8]
+    mov     eax, ebx                    # column, row
+    xor     edx, edx
+    mov     ecx, 3
+    div     ecx
+    imul    esi, edx, (CP_W-20+4)/3
+    add     esi, r12d
+    add     esi, 10
+    imul    edx, eax, 22
+    add     edx, r13d
+    add     edx, NUM_Y
+    mov     ecx, (CP_W-20+4)/3-4
+    lea     r8, [rip+cpk_rgbi]          # (rgbi then hsvi: 6 ints in a row)
+    lea     r8, [r8+rbx*4]
+    cmp     ebx, 3
+    jb      2f
+    lea     r8, [rip+cpk_hsvi-12]
+    lea     r8, [r8+rbx*4]
+2:  xor     r9d, r9d
+    call    wg
+    inc     ebx
+    cmp     ebx, 6
+    jb      1b
+    add     rsp, 8
+    pop     rbp
+    pop     rbx
+    ret
+
+# cpk_swatches - the recent colours and the scene's, each row a pad
+cpk_swatches:
+    push    rbx
+    push    rbp
+    push    r14
+    push    r15
+    sub     rsp, 8
+    xor     ebp, ebp                    # the scene's colours: the materials'
+    xor     ebx, ebx                    #  base colours, each once
+1:  cmp     ebp, SW_N
+    jae     4f
+    call    mat_count
+    cmp     ebx, eax
+    jae     4f
+    mov     edi, ebx
+    call    mat_get
+    inc     ebx
+    test    rax, rax
+    jz      1b
+    lea     rdi, [rax+32]               # (MA_BASE)
+    call    cpk_rgb_of
+    lea     rcx, [rip+cpk_scene]
+    xor     edx, edx
+2:  cmp     edx, ebp
+    jae     3f
+    cmp     [rcx+rdx*4], eax
+    je      1b
+    inc     edx
+    jmp     2b
+3:  mov     [rcx+rbp*4], eax
+    inc     ebp
+    jmp     1b
+4:  mov     [rip+cpk_nscene], ebp
+    xor     r15d, r15d                  # row 0 recent, 1 the scene's
+5:  xor     r14d, r14d
+6:  mov     r8d, -1
+    test    r15d, r15d
+    jnz     61f
+    mov     eax, r14d
+    call    rec_get
+    mov     r8d, eax
+    jmp     62f
+61: cmp     r14d, [rip+cpk_nscene]
+    jae     62f
+    lea     rcx, [rip+cpk_scene]
+    mov     r8d, [rcx+r14*4]
+62: imul    edi, r14d, SW_STEP
+    add     edi, r12d
+    add     edi, 10
+    imul    esi, r15d, SW_S+4
+    add     esi, r13d
+    add     esi, SW_Y
+    mov     edx, SW_S
+    mov     ecx, SW_S
+    mov     r9d, 3
+    test    r8d, r8d
+    js      63f
+    mov     dword ptr [rip+th_raw], 1
+    call    fill_rrect
+    mov     dword ptr [rip+th_raw], 0
+    jmp     64f
+63: mov     r8d, COL_FIELD              # (an empty slot)
+    call    fill_rrect
+64: inc     r14d
+    cmp     r14d, SW_N
+    jb      6b
+    lea     rdi, [rip+wd_cp_rec]        # the row's pad
+    lea     r8, [rip+cpk_padr]
+    test    r15d, r15d
+    jz      65f
+    lea     rdi, [rip+wd_cp_scn]
+    lea     r8, [rip+cpk_pads]
+65: lea     esi, [r12+10]
+    imul    edx, r15d, SW_S+4
+    add     edx, r13d
+    add     edx, SW_Y
+    mov     ecx, SW_N*SW_STEP
+    xor     r9d, r9d
+    call    wg
+    inc     r15d
+    cmp     r15d, 2
+    jb      5b
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     rbp
+    pop     rbx
+    ret
+
 # cpk_draw - the picker, over everything but tooltips
 cpk_draw:
     cmp     dword ptr [rip+cpk_on], 0
@@ -458,6 +837,7 @@ cpk_draw:
     mov     ecx, CP_H
     mov     r8d, COL_DROP_BORDER
     call    popup_frame
+    mov     dword ptr [rip+th_raw], 1   # (colours as they are, not the theme's)
     xor     ebx, ebx                    # the square: a column at a time
 1:  cvtsi2ss xmm1, ebx
     mov     eax, SQ_W-1
@@ -544,6 +924,7 @@ cpk_draw:
     mov     edx, 24
     mov     ecx, 22
     call    fill_rect
+    mov     dword ptr [rip+th_raw], 0
     # the pads, the hex code, Pick
     mov     eax, [rip+cpk_hsv+4]
     mov     [rip+cpk_sv], eax
@@ -583,6 +964,8 @@ cpk_draw:
     xor     r8d, r8d
     xor     r9d, r9d
     call    wg
+    call    cpk_numbers
+    call    cpk_swatches
     add     rsp, 24
     pop     r15
     pop     r14
