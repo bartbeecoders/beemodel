@@ -1830,8 +1830,7 @@ ui_draw:
     cmp     dword ptr [rip+menu_open], 0
     jl      4f
     call    mn_draw
-4:  call    wg_pop_draw
-    call    palette_draw
+4:  call    palette_draw
     call    pie_draw
     call    dlg_draw                    # a dialog over everything
     cmp     dword ptr [rip+dlg_open], 0 # (a context menu over a dialog: on top)
@@ -1839,7 +1838,8 @@ ui_draw:
     cmp     dword ptr [rip+menu_open], 0
     jl      5f
     call    mn_draw
-5:
+5:  call    wg_pop_draw                 # an enum's list (over a dialog: its
+                                        #  clicks go to it, so it shows)
     call    cpk_draw                     # the colour picker (over a dialog too)
     call    ov_draw                     # the welcome screen, the shortcuts
     jmp     tip_draw                    # tooltips on top of everything

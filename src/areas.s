@@ -2355,7 +2355,7 @@ vp_row:
 
 vp_theme_cb:                            # rdi = th_id
     mov     edi, [rdi]
-    jmp     th_set
+    jmp     th_choose
 
 ed_console_draw:
     push    rbx

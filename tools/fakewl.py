@@ -8152,8 +8152,22 @@ def prefs_ui():
     check({'prefs.category.interface', 'prefs.search', 'prefs.reset', 'prefs.theme', 'prefs.ui_scale', 'prefs.tooltip_ms'} <= names(),
           'Edit > Preferences: a dialog with categories, a search and the Interface settings')
     f.shot('71_preferences.png')
-    pick_enum(f, m, 'prefs.theme', 0, 1)
+    x, y = widget_xy(m, 'prefs.theme')                         # (the list opened under
+    shut = f.image()                                            #  the dialog: drawn over,
+    f.click(x, y); f.pump(0.3)                                  #  clicked blind)
+    lst = [w for w in ui_tree(m) if w['kind'] == 'list']
+    diff = 0
+    if lst:
+        box = (lst[0]['x'], lst[0]['y'], lst[0]['x'] + lst[0]['w'], lst[0]['y'] + lst[0]['h'])
+        diff = sum(1 for a, b in zip(shut.crop(box).getdata(), f.image().crop(box).getdata())
+                   if max(abs(p - q) for p, q in zip(a, b)) > 8)
+    check(lst and diff > 1500, f'the Theme list shows over the dialog ({diff} pixels change)')
+    if lst:
+        f.click(lst[0]['x'] + 30, lst[0]['y'] + 4 + 22 + 11); f.pump(0.3)
     check('theme 1' in prefs(), f'the theme goes into the prefs file ({prefs()[:60]!r})')
+    q('op("view.theme_contrast")')
+    check('theme 2' in prefs(), 'View > Theme keeps the choice in the prefs file too')
+    q('op("view.theme_light")')
     w0 = widget(m, 'prefs.tooltip_ms')['w']
     pick_enum(f, m, 'prefs.ui_scale', 0, 3)                     # 150 %
     f.pump(0.3)
