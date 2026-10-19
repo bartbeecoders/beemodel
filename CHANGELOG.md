@@ -6,6 +6,59 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-19
+
+"UI round 2": the interface before the rest of the 2.0 plan
+(`Vibecoding/BeeModel-UI2-Plan.html`), issues W1-W9 (#317-#325).
+
+### Fixed
+- **Picking a theme** (#317): a dropdown inside a dialog (Preferences'
+  Theme, UI scale, the AI provider ...) opened under the dialog and took
+  clicks unseen. Lists are drawn over dialogs now. A theme picked from the
+  View menu or the Viewport panel is kept in the preferences too.
+- Rendered shading no longer flickers while an animation plays: it shows a
+  raycast each frame until the scene holds still for 150 ms, then the
+  path-traced samples.
+
+### Added
+- **More themes** (#318): Honey, Graphite, Nord, Solarized Dark, Solarized
+  Light and Dracula, nine in all, each list showing a strip of every
+  theme's colours.
+- **A colour picker for every colour** (#319): R G B and H S V numbers, the
+  ten colours used last (kept) and the scene's own; copy, paste and reset
+  on any colour field; the object colour and the paint colour form are
+  swatches; an accent colour of your own for any theme.
+- **A clearer Physics panel** (#320): built from widgets in sections that
+  fold (Rigid Body, Joints, Shatter, World, Cloth, Cloth World, the cache)
+  under a status line. Type and shape before Add Rigid Body; dropdowns,
+  units, start velocity and group; changes go to every selected body.
+  Joints are listed and edited (type, the other body, pivot, axis, limits,
+  motor, breaking force). Shatter gains seed, glue painting, the gap and
+  the cut faces' colour; the cache says what is cached or baked.
+- **A Landscape panel** (#321): a Landscape tab for a landscape: size and
+  samples; the layer stack with eyes, the picked layer's values, Add, Up,
+  Down, Remove (`landscape.layer up|down`); paint layers with their colour,
+  friction, bounce and rules; Add Sea, import, export, to mesh, tiles.
+  Add › Water (`landscape.add_water`); the presets ask size, samples and
+  seed; the sculpt shelf paints all eight materials.
+- **A more powerful file dialog** (#322): favourites, drives (mounted under
+  /run/media, /media, /mnt, with their free space), recent folders (kept in
+  `~/.config/beemodel/places`), back and forward, the folder's parts as
+  buttons, size and modified columns sorted by a click, a filter box,
+  hidden files (Ctrl+H), all files, image previews.
+- **Folders in the outliner** (#323): nested groups that never move their
+  objects, each with an eye, camera and lock for all inside; Ctrl+G, Move to
+  Folder..., drag and drop, rename, fold; saved (FOLD) and undone;
+  `folder()`, `infolder()`, `folders()`.
+- **Reference images** (#324): Add › Reference Image... (or a picture
+  dropped on the window, or `refimage()`): square to the view, upright,
+  drawn in every shading mode behind or in front of the scene, with an
+  opacity, the sides it shows, and orthographic-only or square-on-only
+  views; not rendered.
+- Demo scenes in `Vibecoding/demos`: a wrecking ball through a glued brick
+  wall, exhibits that break on impact, a rockfall on an island; `play.sh`
+  and `render.sh` (an MP4 through each demo's camera).
+
 ## [0.19.0] - 2026-10-18
 
 "Shatter": stage S of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`,
@@ -1946,7 +1999,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/bartbeecoders/beemodel/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/bartbeecoders/beemodel/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/bartbeecoders/beemodel/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/bartbeecoders/beemodel/compare/v0.16.0...v0.17.0

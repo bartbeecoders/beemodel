@@ -9065,7 +9065,12 @@ def ui_bench():
     m = Mcp(f)
     q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
     res = {}
-    for tab in ('object', 'modifiers', 'material', 'render'):
+    for tab in ('object', 'modifiers', 'material', 'render', 'physics', 'landscape'):
+        if tab == 'physics':                                   # (W4: a body with a joint)
+            q('add("sphere", "B", 3, 1, 0)\nselect("B")\nop("rigid.add", "active sphere")\nselect("Cube")\n'
+              'op("rigid.add", "active hull")\nop("rigid.joint", "hinge Cube B pivot 1.5 1 0 axis 0 0 1")')
+        if tab == 'landscape':                                 # (W5: a landscape, painted)
+            q('op("landscape.add", "hills")\nselect("Landscape")\nop("landscape.paint", "add grass")')
         props_tab(m, f, tab)
         n0 = int(q('print(frames())'))
         for i in range(40):                                    # over the Properties and the outliner
