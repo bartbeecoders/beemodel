@@ -6,12 +6,19 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-10-19
+
+Particle demos, a cache fix for keyed force fields, and the website.
+
 ### Added
 - Particle demo scenes in `Vibecoding/demos/`: fireworks (chained died
   events, glowing through Vertex Color → Emission), dam-break (liquid,
   surface, foam, floating crates), leaf-twister (leaves drawn as objects
   in a keyed vortex) and rainstorm (hit events on a landscape and a roof,
   keyed wind).
+- The website (`BeeModelHome/`, beemodel.hideterms.com): features, a tour,
+  the demo films, renders, downloads and every release's notes; now with
+  particles and liquid and the four particle films.
 
 ### Fixed
 - A force field moved by keys, or with a keyed strength, changed the
@@ -2130,7 +2137,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.22.1...HEAD
+[0.22.1]: https://github.com/bartbeecoders/beemodel/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/bartbeecoders/beemodel/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/bartbeecoders/beemodel/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/bartbeecoders/beemodel/compare/v0.19.0...v0.20.0

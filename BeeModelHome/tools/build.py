@@ -40,12 +40,16 @@ IMAGES = {
     'gallery': 'renders/gallery.png', 'modeling': 'shots/modeling.png', 'nodes': 'shots/nodes.png',
     'cad': 'shots/cad.png', 'animation': 'shots/animation.png', 'physics': 'shots/physics.png',
     'fields': 'shots/fields.png', 'landscape': 'shots/landscape.png', 'procedural': 'shots/procedural.png',
-    'sculpt': 'shots/sculpt.png',
+    'sculpt': 'shots/sculpt.png', 'particles': 'renders/particles.png',
 }
 VIDEOS = {
     'wrecking-ball': os.path.join(ROOT, 'Vibecoding', 'demos', 'out', 'wrecking-ball.mp4'),
     'rockfall-island': os.path.join(ROOT, 'Vibecoding', 'demos', 'out', 'rockfall-island.mp4'),
     'gallery-smash': os.path.join(ROOT, 'Vibecoding', 'demos', 'out', 'gallery-smash.mp4'),
+    'fireworks': os.path.join(ROOT, 'Vibecoding', 'demos', 'out', 'fireworks.mp4'),
+    'dam-break': os.path.join(ROOT, 'Vibecoding', 'demos', 'out', 'dam-break.mp4'),
+    'leaf-twister': os.path.join(ROOT, 'Vibecoding', 'demos', 'out', 'leaf-twister.mp4'),
+    'rainstorm': os.path.join(ROOT, 'Vibecoding', 'demos', 'out', 'rainstorm.mp4'),
     'tornado': os.path.join(MEDIA, 'video', 'tornado.mp4'),
     'orbits': os.path.join(MEDIA, 'video', 'orbits.mp4'),
 }
