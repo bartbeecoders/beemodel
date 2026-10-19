@@ -9,7 +9,7 @@ set -euo pipefail
 #
 # Architecture (namespace: beemodel-home):
 #   • beemodel-home   nginx (unprivileged, port 8080) serving site/.
-#                     NodePort 32110 — Cloudflare Tunnel forwards
+#                     NodePort 32111 — Cloudflare Tunnel forwards
 #                     https://beemodel.hideterms.com here over HTTP.
 #
 # Registry:  beecodersregistry.azurecr.io  (reuses the existing acr-secret
@@ -45,7 +45,7 @@ COMMAND="${1:-all}"
 REGISTRY="${REGISTRY:-beecodersregistry.azurecr.io}"
 NAMESPACE="beemodel-home"
 IMAGE="$REGISTRY/beemodel-home"
-NODE_PORT=32110
+NODE_PORT="${NODE_PORT:-32111}"
 PUBLIC_HOST="${PUBLIC_HOST:-beemodel.hideterms.com}"
 
 VPS_IP="${VPS_IP:-212.47.77.32}"
@@ -140,6 +140,7 @@ deploy_manifests() {
   tmp="$(mktemp -d)"
   cp "$K8S_DIR"/*.yaml "$tmp/"
   sed -i "s|newTag: .*|newTag: \"$APP_VERSION\"|" "$tmp/kustomization.yaml"
+  sed -i "s|nodePort: .*|nodePort: $NODE_PORT|" "$tmp/service.yaml"
   tar -C "$tmp" -czf - . | ssh -o StrictHostKeyChecking=accept-new "$VPS_USER@$VPS_IP" \
     "bash -lc $(printf %q "set -e; d=\$(mktemp -d); trap 'rm -rf \$d' EXIT; tar -xzf - -C \$d; $KUBECTL_VPS apply -k \$d")"
   rm -rf "$tmp"

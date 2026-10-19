@@ -51,10 +51,10 @@ to the URL to show every section at once (whole-page screenshots).
 `deploy-k3s.sh` follows BeeGit's: podman builds and pushes
 `beecodersregistry.azurecr.io/beemodel-home:<version>-<sha>` (and `:latest`),
 then applies `deploy/k3s` on the VPS over ssh (namespace `beemodel-home`,
-NodePort **32110**, the `acr-secret` pull secret copied from another namespace).
+NodePort **32111** (32110 is reportai's reportgenerator), the `acr-secret` pull secret copied from another namespace).
 Cloudflare Tunnel needs one ingress rule (`deploy-k3s.sh tunnel` prints it):
 
 ```
 - hostname: beemodel.hideterms.com
-  service: http://localhost:32110
+  service: http://localhost:32111
 ```
