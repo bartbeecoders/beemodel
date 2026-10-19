@@ -5867,7 +5867,8 @@ b_emit:
 #   frame's time (ms), 3 the last step's, 4 blocks in use, 5 steps done;
 #   particle i: 6..8 its place, 9..11 its velocity, 12 age, 13 lifetime, 14
 #   size, 15 id, 16 colour; 17 the last viewport draw (ms), 18 the
-#   particles it drew
+#   particles it drew; 19 hits so far; 20 system i's particles born of
+#   events so far, 21 its hits so far, 22 its particles
 b_particles:
     push    rbx
     push    r12

@@ -547,6 +547,15 @@
 .equ PS_ALIGN,      180     #  turned: 0 at random, 1 along the velocity
 .equ PS_RFLAGS,     184     # bit 0: left out of renders
 .equ PS_PX,         188     # points: pixels across (1..8)
+.equ PS_COLL,       192     # bit 0: collides (the ground, landscapes, rigid bodies, colliders)
+.equ PS_BOUNCE,     196     #  how much of its speed into the surface comes back (0..1)
+.equ PS_FRIC,       200     #  how much along it is lost (0..1)
+.equ PS_ONHIT,      204     #  on a hit: 0 bounces, 1 dies, 2 sticks, 3 splits
+.equ PS_SPLITN,     208     #  splits into this many
+.equ PS_EVKIND,     212     # from events (PS_FROM 4): 0 born, 1 hit, 2 died -
+.equ PS_EVPER,      216     #  this many particles each
+.equ PS_INHERIT,    220     #  with this much of the other's velocity
+.equ PS_EVNAME,     224     #  of the system with this name (16 bytes)
 .equ PS_SZ,         256
 .equ MAX_OBJECTS,   4096
 .equ KEY_A,             30

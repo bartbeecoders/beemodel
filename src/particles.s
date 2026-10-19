@@ -115,7 +115,24 @@
 .equ SR_SEED,   208
 .equ SR_TOT,    212                     # faces: all of the area
 .equ SR_SI,     216                     # its index
-.equ SR_SZ,     256
+                                        # (220 .. 243: drawing, below)
+.equ SR_LISTEN, 256                     # events to keep: 1 hits, 2 deaths
+.equ SR_L0,     260                     # its blocks in pt_list this step: first,
+.equ SR_LN,     264                     #  how many
+.equ SR_NH,     268                     # this step's hits,
+.equ SR_ND,     272                     #  deaths
+.equ SR_EMODE,  276                     # being born from: 0 its source, 1 hits,
+                                        #  2 births, 3 its own hits (split), 4 deaths
+.equ SR_EVP,    280                     #  so many an event
+.equ SR_ENEXT,  284                     #  the next id born of events
+.equ SR_EVH,    288                     # its hits (event records), deaths
+.equ SR_EVD,    296
+.equ SR_EVS,    304                     # the system whose events it is born of
+.equ SR_EVA,    312                     #  the events used now
+.equ SR_SZ,     384
+.equ EV_SZ,     48                      # an event: place (w: kind), velocity,
+                                        #  the surface's normal
+.equ EV_CAP,    2*BLK*NBLK              # (a system's events a step, at most)
 
 .macro DOT3 d, s
     dpps    \d, \s, 0x71
@@ -160,6 +177,10 @@ pt_fields:      .skip 4                 # force fields this step
 pt_msf:         .skip 4                 # the last frame's time (ms)
 pt_mss:         .skip 4                 #  and step's
 pt_used:        .skip 4                 # blocks ever used (given back on reset)
+ev_bh:          .skip 4*NBLK            # each listed block's hits this step,
+ev_bd:          .skip 4*NBLK            #  deaths
+.align 8
+pt_stage:       .skip 8                 # events by listed block (2 x BLK each)
 .align 16
 pt_rec:         .skip PS_SZ             # (a record being made)
 pt_name:        .skip 32
@@ -211,7 +232,11 @@ ps_defs:        .long 0, 0, 0, 0                # uid flags from mode
                 .long 0, 0, 0, 0, 0, 0, 0, 0    # objects
                 .long 0, 0, 0                   # how many, align, render
                 .float 2.0                      # points: pixels
-                .skip PS_SZ-192
+                .long 0                         # collides: no
+                .float 0.3, 0.1                 # bounce, friction
+                .long 0, 2, 1, 3                # bounces, splits in 2; events: hits, 3 each
+                .float 0.0                      # inherit
+                .skip PS_SZ-224
 
 k_from:         .asciz "from"
 k_faces:        .asciz "faces"
@@ -254,6 +279,19 @@ k_random:       .asciz "random"
 k_velocity:     .asciz "velocity"
 k_render:       .asciz "render"
 k_px:           .asciz "point_px"
+k_events:       .asciz "events"
+k_collide:      .asciz "collide"
+k_bounce:       .asciz "bounce"
+k_friction:     .asciz "friction"
+k_on_hit:       .asciz "on_hit"
+k_die:          .asciz "die"
+k_stick:        .asciz "stick"
+k_split:        .asciz "split"
+k_born:         .asciz "born"
+k_hit:          .asciz "hit"
+k_died:         .asciz "died"
+k_per:          .asciz "per"
+k_inherit:      .asciz "inherit"
 s_bad:          .asciz "  particles: not understood: "
 s_noobj:        .asciz "  particles: select the object to emit from first"
 s_nosys:        .asciz "  particles: no such system on "
@@ -261,14 +299,17 @@ s_full:         .asciz "  particles: a scene has at most 64 systems"
 s_added:        .asciz "  particles on "
 s_removed:      .asciz "  particles removed from "
 .align 8
-kw_from:        .quad k_faces, k_volume, k_verts, k_point, 0
+kw_from:        .quad k_faces, k_volume, k_verts, k_point, k_events, 0
+kw_onhit:       .quad k_bounce, k_die, k_stick, k_split, 0
+kw_ev:          .quad k_born, k_hit, k_died, 0
 kw_draw:        .quad k_points, k_sprites, k_objects, 0
 kw_align:       .quad k_random, k_velocity, 0
 kw_onoff:       .quad k_off, k_on, 0
 # particles.set words: (word, offset, kind, list); kinds: 0 float, 1 whole,
 #   2 one of list, 5 on, 6 off, 7 colour, 8 rate, 9 burst, 10 normal,
 #   11 direction (3 numbers), 12 a name, 13 the end colour, 14 objects by
-#   name (A,B,C), 15 render on/off
+#   name (A,B,C), 15 render on/off, 16 collide on/off, 17 events
+#   born|hit|died NAME (from them), 18 split n
 pp_tab:         .quad k_from
                 .long PS_FROM, 2
                 .quad kw_from
@@ -358,6 +399,30 @@ pp_tab:         .quad k_from
                 .quad kw_onoff
                 .quad k_px
                 .long PS_PX, 0
+                .quad 0
+                .quad k_collide
+                .long PS_COLL, 16
+                .quad kw_onoff
+                .quad k_bounce
+                .long PS_BOUNCE, 0
+                .quad 0
+                .quad k_friction
+                .long PS_FRIC, 0
+                .quad 0
+                .quad k_on_hit
+                .long PS_ONHIT, 2
+                .quad kw_onhit
+                .quad k_split
+                .long PS_SPLITN, 18
+                .quad 0
+                .quad k_events
+                .long PS_EVKIND, 17
+                .quad kw_ev
+                .quad k_per
+                .long PS_EVPER, 1
+                .quad 0
+                .quad k_inherit
+                .long PS_INHERIT, 0
                 .quad 0
                 .quad k_on
                 .long 0, 5
@@ -792,6 +857,12 @@ ps_parse:
     je      .Lpp_objs
     cmp     ecx, 15
     je      .Lpp_render
+    cmp     ecx, 16
+    je      .Lpp_coll
+    cmp     ecx, 17
+    je      .Lpp_events
+    cmp     ecx, 18
+    je      .Lpp_split
     lea     rsi, [rip+im_word]          # a number
     lea     rdx, [rsi+rax]
     call    parse_float
@@ -848,6 +919,56 @@ ps_parse:
     test    eax, eax
     jnz     .Lpp_next
     or      dword ptr [rbx+PS_RFLAGS], 1
+    jmp     .Lpp_next
+.Lpp_coll:                              # collide on / off
+    mov     rdi, [r14+16]
+    call    pp_word
+    test    eax, eax
+    js      .Lpp_bad
+    and     dword ptr [rbx+PS_COLL], ~1
+    or      [rbx+PS_COLL], eax
+    jmp     .Lpp_next
+.Lpp_split:                             # split n: on a hit, into n
+    lea     rsi, [rip+im_word]
+    lea     rdx, [rsi+rax]
+    call    parse_float
+    test    eax, eax
+    jz      .Lpp_bad
+    cvttss2si eax, xmm0
+    cmp     eax, 1
+    jge     1f
+    mov     eax, 1
+1:  cmp     eax, 64
+    jle     2f
+    mov     eax, 64
+2:  mov     [rbx+PS_SPLITN], eax
+    mov     dword ptr [rbx+PS_ONHIT], 3
+    or      dword ptr [rbx+PS_COLL], 1
+    jmp     .Lpp_next
+.Lpp_events:                            # events hit Rain: from another's
+    mov     rdi, [r14+16]
+    call    pp_word
+    test    eax, eax
+    js      .Lpp_bad
+    mov     [rbx+PS_EVKIND], eax
+    mov     dword ptr [rbx+PS_FROM], 4
+    mov     rsi, r12                    # the system's name
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Lpp_bad
+    lea     rsi, [rip+im_word]
+    lea     rdi, [rbx+PS_EVNAME]
+    mov     ecx, 15
+3:  mov     al, [rsi]
+    test    al, al
+    jz      4f
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    dec     ecx
+    jnz     3b
+4:  mov     byte ptr [rdi], 0
     jmp     .Lpp_next
 .Lpp_objs:                              # objects A,B,C: drawn as them
     mov     dword ptr [rbx+PS_NOBJ], 0
@@ -954,8 +1075,35 @@ pool_init:
     ret
 1:  mov     [rip+pt_pool], rax
     call    free_all_blocks
+    xor     edi, edi                    # the events' staging
+    mov     rsi, NBLK*2*BLK*EV_SZ
+    mov     edx, PROT_RW
+    mov     r10d, MAP_NORES
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jb      2f
+    xor     eax, eax
+2:  mov     [rip+pt_stage], rax
 8:  mov     eax, 1
     ret
+
+# ev_reserve -> rax = room for a system's events a step (0: none)
+ev_reserve:
+    xor     edi, edi
+    mov     rsi, EV_CAP*EV_SZ
+    mov     edx, PROT_RW
+    mov     r10d, MAP_NORES
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jb      1f
+    xor     eax, eax
+1:  ret
 
 # free_all_blocks - every block free again (popped 0, 1, 2 ...)
 free_all_blocks:
@@ -1030,7 +1178,19 @@ pt_stop:
     shl     rsi, 12
     mov     eax, SYS_MUNMAP
     syscall
-11: inc     ebx
+11: mov     rdi, [r12+SR_EVH]           # its events
+    test    rdi, rdi
+    jz      12f
+    mov     rsi, EV_CAP*EV_SZ
+    mov     eax, SYS_MUNMAP
+    syscall
+12: mov     rdi, [r12+SR_EVD]
+    test    rdi, rdi
+    jz      13f
+    mov     rsi, EV_CAP*EV_SZ
+    mov     eax, SYS_MUNMAP
+    syscall
+13: inc     ebx
     jmp     1b
 2:  lea     rdi, [rip+pt_sr]
     mov     ecx, SR_SZ*PB_MAX
@@ -1315,7 +1475,13 @@ pt_step:
     call    fl_prep
     mov     eax, [rip+fl_n]
     mov     [rip+pt_fields], eax
-    xor     ebx, ebx                    # each system now; its blocks listed
+    call    any_coll                    # the colliders (when any system collides)
+    test    eax, eax
+    jz      11f
+    call    pt_colliders
+    jmp     12f
+11: mov     dword ptr [rip+pc_any], 0
+12: xor     ebx, ebx                    # each system now; its blocks listed
     xor     r13d, r13d
 2:  cmp     ebx, [rip+pt_ns]
     jae     3f
@@ -1323,6 +1489,9 @@ pt_step:
     lea     rax, [rip+pt_sr]
     add     r12, rax
     call    sys_prep
+    mov     [r12+SR_L0], r13d
+    mov     eax, [r12+SR_NB]
+    mov     [r12+SR_LN], eax
     mov     edi, ebx
     call    sys_blocks
     xor     ecx, ecx
@@ -1339,6 +1508,7 @@ pt_step:
 22: inc     ebx
     jmp     2b
 3:  mov     [rip+pt_nlist], r13d
+    call    pt_listen
     lea     rdi, [rip+step_job]
     xor     esi, esi
     mov     edx, r13d
@@ -1350,11 +1520,23 @@ pt_step:
     imul    r12, rbx, SR_SZ
     lea     rax, [rip+pt_sr]
     add     r12, rax
+    call    sys_gather
     call    sys_tidy
+    xor     esi, esi
     call    sys_emit
     inc     ebx
     jmp     4b
-5:  call    now_ns
+5:  xor     ebx, ebx                    # then what events give birth to
+51: cmp     ebx, [rip+pt_ns]
+    jae     52f
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    mov     esi, 1
+    call    sys_emit
+    inc     ebx
+    jmp     51b
+52: call    now_ns
     sub     rax, [rsp]
     cvtsi2ss xmm0, rax
     mulss   xmm0, [rip+pq_k]
@@ -1367,6 +1549,33 @@ pt_step:
     pop     r12
     pop     rbx
     pop     rbp
+    ret
+
+# any_coll -> eax = 1 when a running system collides
+any_coll:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+pt_ns]
+    jae     8f
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    inc     ebx
+    mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    test    rax, rax
+    jz      1b
+    test    dword ptr [rax+PS_COLL], 1
+    jz      1b
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
     ret
 
 # sys_prep(r12=system) - its settings, its object's place and mesh, its
@@ -1404,6 +1613,22 @@ sys_prep:
     mov     eax, 1
     shl     eax, cl
     mov     [r12+SR_GBIT], eax
+    mov     eax, [r14+PS_COLL]          # its collisions
+    and     eax, 1
+    and     eax, [rip+pc_any]
+    mov     [r12+SR_COLLON], eax
+    mov     eax, [r14+PS_BOUNCE]
+    mov     [r12+SR_BOUNCE], eax
+    mov     eax, [r14+PS_FRIC]
+    mov     [r12+SR_FRIC], eax
+    mov     eax, [r14+PS_ONHIT]
+    mov     [r12+SR_ONHIT], eax
+    movaps  xmm0, [r12+SR_ACC]
+    DOT3    xmm0, xmm0
+    mulss   xmm0, [rip+pt_dt]
+    mulss   xmm0, [rip+pt_dt]
+    mulss   xmm0, [rip+pq_four]
+    movss   [r12+SR_REST], xmm0
     test    r13, r13
     jz      9f
     test    dword ptr [r13+PS_FLAGS], 1
@@ -1496,17 +1721,26 @@ sys_tidy:
 # =============================================================================
 #  Being born
 # =============================================================================
-# sys_emit(r12=system) - the particles born during this step: how many,
-#   their places in its blocks, then made in parallel
+# sys_emit(r12=system, esi=0 from its source, 1 from events: another's, or
+#   its own hits when it splits) - the particles born during this step: how
+#   many, their places in its blocks, then made in parallel
 sys_emit:
     push    rbx
     push    r13
     push    r14
     push    r15
     sub     rsp, 8
-    mov     r13, [r12+SR_REC]
+    test    esi, esi
+    jnz     1f
+    mov     dword ptr [r12+SR_EN], 0    # (none born yet this step)
+1:  mov     r13, [r12+SR_REC]
     test    r13, r13
     jz      .Lse_out
+    mov     dword ptr [r12+SR_EMODE], 0
+    test    esi, esi
+    jnz     .Lse_events
+    cmp     dword ptr [r13+PS_FROM], 4  # (born of events only)
+    je      .Lse_out
     cmp     dword ptr [r13+PS_MODE], 0
     jne     .Lse_burst
     movsd   xmm2, [r12+SR_RATE]         # at a rate: ids born before the end
@@ -1562,6 +1796,53 @@ sys_emit:
     jz      .Lse_out
     mov     [r12+SR_NEXT], ebx
     xor     r14d, r14d
+    jmp     .Lse_have
+.Lse_events:
+    mov     eax, [r12+SR_ENEXT]         # (their ids: apart from the others)
+    lea     r14d, [rax+0x40000000]
+    cmp     dword ptr [r13+PS_FROM], 4
+    je      .Lse_other
+    test    dword ptr [r13+PS_COLL], 1  # its own hits: it splits
+    jz      .Lse_out
+    cmp     dword ptr [r13+PS_ONHIT], 3
+    jne     .Lse_out
+    mov     ecx, [r13+PS_SPLITN]
+    mov     ebx, [r12+SR_NH]
+    mov     rax, [r12+SR_EVH]
+    mov     edx, 3
+    jmp     .Lse_count
+.Lse_other:                             # another system's births, hits, deaths
+    mov     rsi, [r12+SR_EVS]
+    test    rsi, rsi
+    jz      .Lse_out
+    mov     ecx, [r13+PS_EVPER]
+    mov     eax, [r13+PS_EVKIND]
+    cmp     eax, 1
+    je      1f
+    cmp     eax, 2
+    je      2f
+    mov     ebx, [rsi+SR_EN]            # born: its newborn this step
+    xor     eax, eax
+    mov     edx, 2
+    jmp     .Lse_count
+1:  mov     ebx, [rsi+SR_NH]
+    mov     rax, [rsi+SR_EVH]
+    mov     edx, 1
+    jmp     .Lse_count
+2:  mov     ebx, [rsi+SR_ND]
+    mov     rax, [rsi+SR_EVD]
+    mov     edx, 4
+.Lse_count:                             # ebx events x ecx each
+    cmp     ecx, 1
+    jge     3f
+    mov     ecx, 1
+3:  mov     [r12+SR_EVA], rax
+    mov     [r12+SR_EMODE], edx
+    mov     [r12+SR_EVP], ecx
+    imul    ebx, ecx
+    test    ebx, ebx
+    jz      .Lse_out
+    add     [r12+SR_ENEXT], ebx
 .Lse_have:                              # ebx born, ids from r14d
     mov     eax, [r13+PS_MAX]           # at most so many at once
     test    eax, eax
@@ -2139,7 +2420,8 @@ emit_job:
     push    r14
     push    r15
     and     rsp, -16
-    sub     rsp, 96         # [0] p [16] n [32] dir [48] u [64] w [80] id, slot
+    sub     rsp, 128        # [0] p [16] n [32] dir [48] u [64] w [80] id, slot
+                            # [96] the event's velocity
     mov     r12, rdi
     mov     r13d, esi
     mov     r14d, edx
@@ -2170,16 +2452,37 @@ emit_job:
     mov     eax, [r12+SR_EID]
     add     eax, r13d
     mov     [rsp+80], eax
+    cmp     dword ptr [r12+SR_EMODE], 0
+    jne     20f
     mov     edi, eax
     lea     rsi, [rsp]
     call    place
-    movaps  xmm0, [rsp+16]              # the way: its normal, or the direction
+    xorps   xmm0, xmm0
+    movaps  [rsp+96], xmm0
+    jmp     21f
+20: mov     edi, r13d                   # born of an event: there
+    lea     rsi, [rsp]
+    call    ev_place
+21: movaps  xmm0, [rsp+16]              # the way: its normal, or the direction
+    mov     eax, [r12+SR_EMODE]
+    cmp     eax, 3                      #  (a split: on along the bounce)
+    je      23f
     cmp     dword ptr [r15+PS_VMODE], 0
-    je      3f
+    je      22f
     lea     rax, [r15+PS_DIR]
     LD3     xmm0, rax, xmm5
     lea     rdi, [r12+SR_MAT]
     call    m_vec
+    jmp     3f
+22: cmp     eax, 2                      # births, deaths: along their velocity
+    je      23f
+    cmp     eax, 4
+    jne     3f
+23: movaps  xmm1, [rsp+96]
+    DOT3    xmm1, xmm1
+    comiss  xmm1, [rip+pq_tiny]
+    jbe     3f
+    movaps  xmm0, [rsp+96]
 3:  call    unit
     movaps  [rsp+32], xmm0
     movss   xmm0, [r15+PS_SPREAD]       # in a cone round it
@@ -2244,13 +2547,35 @@ emit_job:
     subss   xmm0, [rip+pq_one]
     mulss   xmm0, [r15+PS_SPEEDR]
     addss   xmm0, [rip+pq_one]
-    mulss   xmm0, [r15+PS_SPEED]
-    shufps  xmm0, xmm0, 0
+    cmp     dword ptr [r12+SR_EMODE], 3
+    jne     51f
+    movaps  xmm1, [rsp+96]              # a split: as fast as the bounce
+    DOT3    xmm1, xmm1
+    sqrtss  xmm1, xmm1
+    mulss   xmm0, xmm1
+    jmp     52f
+51: mulss   xmm0, [r15+PS_SPEED]
+52: shufps  xmm0, xmm0, 0
     mulps   xmm0, [rsp+32]
     andps   xmm0, [rip+pq_xyz]
-    movaps  [rsp+32], xmm0              # v
+    mov     eax, [r12+SR_EMODE]         # events: some of the other's velocity
+    cmp     eax, 3
+    je      53f
+    test    eax, eax
+    jz      53f
+    movss   xmm1, [r15+PS_INHERIT]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rsp+96]
+    addps   xmm0, xmm1
+    andps   xmm0, [rip+pq_xyz]
+53: movaps  [rsp+32], xmm0              # v
     movsd   xmm1, [r12+SR_T1]           # born when: moved on since
-    cmp     dword ptr [r15+PS_MODE], 0
+    cmp     dword ptr [r12+SR_EMODE], 0 #  (of an event: at the step's end)
+    je      54f
+    xorpd   xmm2, xmm2
+    xorpd   xmm1, xmm1
+    jmp     7f
+54: cmp     dword ptr [r15+PS_MODE], 0
     jne     6f
     cvtsi2sd xmm2, dword ptr [rsp+80]
     divsd   xmm2, [r12+SR_RATE]
@@ -2337,7 +2662,9 @@ emit_job:
 # =============================================================================
 # step_job(ctx, esi=begin, edx=end) - pt_list's blocks begin..end: each
 #   particle moved by the pull (gravity, or the fields' at it), slowed by its
-#   drag, aged; the dead dropped (the rest kept in order)
+#   drag, aged; when its system collides, its path cast against the
+#   colliders (bounce, die, stick, split; the hits kept as events); the dead
+#   dropped (the rest kept in order, their deaths kept as events)
 step_job:
     push    rbp
     mov     rbp, rsp
@@ -2347,7 +2674,9 @@ step_job:
     push    r14
     push    r15
     and     rsp, -16
-    sub     rsp, 64                     # [0] p [16] v [32] a
+    sub     rsp, 192    # [0] p [16] v [32] a [48] block [52] n4 [56] i [60] its
+                        #  place in the list [64] p1 [80] the hit [96] normal
+                        #  [112] t
     mov     r12d, esi
     mov     r13d, edx
 .Lsj_blk:
@@ -2356,6 +2685,11 @@ step_job:
     lea     rax, [rip+pt_list]
     mov     edi, [rax+r12*4]
     mov     [rsp+48], edi
+    mov     [rsp+60], r12d
+    lea     rax, [rip+ev_bh]            # no events yet
+    mov     dword ptr [rax+r12*4], 0
+    lea     rax, [rip+ev_bd]
+    mov     dword ptr [rax+r12*4], 0
     inc     r12d
     lea     rax, [rip+pt_bsys]
     mov     eax, [rax+rdi*4]
@@ -2379,6 +2713,7 @@ step_job:
     mov     [rbx+A_VY+rax*4], edx
     mov     [rbx+A_VZ+rax*4], edx
     mov     [rbx+A_AGE+rax*4], edx
+    mov     [rbx+A_FLAG+rax*4], edx
     mov     edx, [rip+pq_bigf]
     mov     [rbx+A_LIFE+rax*4], edx
     inc     eax
@@ -2390,7 +2725,9 @@ step_job:
     shufps  xmm13, xmm13, 0
     xor     r9d, r9d                    # any dead
     cmp     dword ptr [rip+pt_fields], 0
-    jne     .Lsj_fields
+    jne     .Lsj_one
+    cmp     dword ptr [r14+SR_COLLON], 0
+    jne     .Lsj_one
     movaps  xmm9, xmm8                  # dt^2 / 2
     mulps   xmm9, xmm8
     mulps   xmm9, [rip+pq_half4]
@@ -2437,11 +2774,17 @@ step_job:
     or      r9d, edx
     add     eax, 4
     jmp     .Lsj_four
-.Lsj_fields:                            # the fields' pull at each one
+.Lsj_one:                               # one at a time: the fields, the colliders
     mov     dword ptr [rsp+56], 0
+    mov     [rsp+120], r9d
 3:  mov     eax, [rsp+56]
     cmp     eax, r15d
-    jae     .Lsj_dead
+    jae     .Lsj_done1
+    movss   xmm0, [rbx+A_AGE+rax*4]     # older
+    addss   xmm0, [rip+pt_dt]
+    movss   [rbx+A_AGE+rax*4], xmm0
+    test    dword ptr [rbx+A_FLAG+rax*4], 1 # stuck: stays
+    jnz     .Lsj_age
     movss   xmm0, [rbx+A_X+rax*4]
     movss   xmm1, [rbx+A_Y+rax*4]
     movss   xmm2, [rbx+A_Z+rax*4]
@@ -2456,13 +2799,16 @@ step_job:
     movlhps xmm0, xmm2
     andps   xmm0, [rip+pq_xyz]
     movaps  [rsp+16], xmm0
+    movaps  xmm0, [r14+SR_ACC]
+    cmp     dword ptr [rip+pt_fields], 0
+    je      31f
     lea     rdi, [rsp]
     lea     rsi, [rsp+16]
     mov     edx, [r14+SR_GBIT]
     xor     ecx, ecx
     call    fl_accel
     addps   xmm0, [r14+SR_GADJ]
-    movss   xmm8, [rip+pt_dt]
+31: movss   xmm8, [rip+pt_dt]
     shufps  xmm8, xmm8, 0
     movaps  xmm1, xmm0                  # x += v dt + a dt^2 / 2
     mulps   xmm1, xmm8
@@ -2478,7 +2824,80 @@ step_job:
     movss   xmm4, [r14+SR_DAMP]
     shufps  xmm4, xmm4, 0
     mulps   xmm3, xmm4
+    andps   xmm1, [rip+pq_xyz]
+    andps   xmm3, [rip+pq_xyz]
+    movaps  [rsp+64], xmm1
+    movaps  [rsp+16], xmm3
+    cmp     dword ptr [r14+SR_COLLON], 0
+    je      .Lsj_store
+    lea     rdi, [rsp]                  # its path: does it hit something?
+    call    pc_cast
+    test    eax, eax
+    jz      .Lsj_store
+    movaps  xmm0, [rsp+96]              # back off the surface a little
+    mulps   xmm0, [rip+pq_eps4]
+    addps   xmm0, [rsp+80]
+    movaps  [rsp+64], xmm0
+    movaps  xmm0, [rsp+16]              # v . n < 0: bounce, rub
+    movaps  xmm1, xmm0
+    DOT3    xmm1, [rsp+96]
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jae     4f
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rsp+96]              # the normal part
+    subps   xmm0, xmm1                  # along the surface
+    movss   xmm2, [rip+pq_one]
+    subss   xmm2, [r14+SR_FRIC]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm0, xmm2
+    movss   xmm2, [r14+SR_BOUNCE]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm1, xmm2
+    movaps  xmm2, xmm1                  # too slow to leave: it rests there
+    DOT3    xmm2, xmm2
+    comiss  xmm2, [r14+SR_REST]
+    jae     43f
+    xorps   xmm1, xmm1
+43: subps   xmm0, xmm1
+    andps   xmm0, [rip+pq_xyz]
+    movaps  [rsp+16], xmm0
+4:  mov     eax, [rsp+56]
+    mov     ecx, [r14+SR_ONHIT]
+    cmp     ecx, 2
+    jne     41f
+    or      dword ptr [rbx+A_FLAG+rax*4], 1     # sticks
+    xorps   xmm0, xmm0
+    movaps  [rsp+16], xmm0
+    jmp     42f
+41: test    ecx, ecx                    # dies (or splits)
+    jz      42f
+    mov     edx, [rbx+A_LIFE+rax*4]
+    mov     [rbx+A_AGE+rax*4], edx
+    mov     dword ptr [rsp+120], 1
+42: mov     r8d, [rsp+60]               # the hit: counted, kept as an event
+    lea     r11, [rip+ev_bh]
+    mov     ecx, [r11+r8*4]
+    inc     dword ptr [r11+r8*4]
+    test    dword ptr [r14+SR_LISTEN], 1
+    jz      .Lsj_store
+    imul    r8, r8, 2*BLK*EV_SZ
+    add     r8, [rip+pt_stage]
+    imul    rcx, rcx, EV_SZ
+    add     r8, rcx
+    movaps  xmm0, [rsp+80]
+    movaps  [r8], xmm0
+    mov     dword ptr [r8+12], 1
+    movaps  xmm0, [rsp+16]
+    movaps  [r8+16], xmm0
+    mov     ecx, [rbx+A_ID+rax*4]
+    mov     [r8+28], ecx
+    movaps  xmm0, [rsp+96]
+    movaps  [r8+32], xmm0
+.Lsj_store:
     mov     eax, [rsp+56]
+    movaps  xmm1, [rsp+64]
+    movaps  xmm3, [rsp+16]
     movss   [rbx+A_X+rax*4], xmm1
     shufps  xmm1, xmm1, 0x39
     movss   [rbx+A_Y+rax*4], xmm1
@@ -2489,14 +2908,16 @@ step_job:
     movss   [rbx+A_VY+rax*4], xmm3
     shufps  xmm3, xmm3, 0x39
     movss   [rbx+A_VZ+rax*4], xmm3
+.Lsj_age:
+    mov     eax, [rsp+56]
     movss   xmm0, [rbx+A_AGE+rax*4]
-    addss   xmm0, xmm8
-    movss   [rbx+A_AGE+rax*4], xmm0
     comiss  xmm0, [rbx+A_LIFE+rax*4]
-    jb      4f
-    mov     r9d, 1
-4:  inc     dword ptr [rsp+56]
+    jb      5f
+    mov     dword ptr [rsp+120], 1
+5:  inc     dword ptr [rsp+56]
     jmp     3b
+.Lsj_done1:
+    mov     r9d, [rsp+120]
 .Lsj_dead:                              # the dead out, the rest in order
     test    r9d, r9d
     jz      .Lsj_blk
@@ -2518,7 +2939,37 @@ step_job:
     cmp     ecx, NARR
     jb      52b
 51: inc     edx
-6:  inc     eax
+    inc     eax
+    jmp     5b
+6:  test    dword ptr [r14+SR_LISTEN], 2    # a death: an event
+    jz      61f
+    mov     r8d, [rsp+60]
+    lea     r11, [rip+ev_bd]
+    mov     ecx, [r11+r8*4]
+    inc     dword ptr [r11+r8*4]
+    imul    r8, r8, 2*BLK*EV_SZ
+    add     r8, [rip+pt_stage]
+    add     r8, BLK*EV_SZ
+    imul    rcx, rcx, EV_SZ
+    add     r8, rcx
+    mov     r10d, [rbx+A_X+rax*4]
+    mov     [r8], r10d
+    mov     r10d, [rbx+A_Y+rax*4]
+    mov     [r8+4], r10d
+    mov     r10d, [rbx+A_Z+rax*4]
+    mov     [r8+8], r10d
+    mov     dword ptr [r8+12], 2
+    mov     r10d, [rbx+A_VX+rax*4]
+    mov     [r8+16], r10d
+    mov     r10d, [rbx+A_VY+rax*4]
+    mov     [r8+20], r10d
+    mov     r10d, [rbx+A_VZ+rax*4]
+    mov     [r8+24], r10d
+    mov     r10d, [rbx+A_ID+rax*4]
+    mov     [r8+28], r10d
+    xorps   xmm0, xmm0
+    movaps  [r8+32], xmm0
+61: inc     eax
     jmp     5b
 7:  mov     edi, [rsp+48]
     lea     rax, [rip+pt_bn]
@@ -2542,7 +2993,8 @@ step_job:
 #   in use, 5 steps done; for particle i (in the systems' order): 6..8 its
 #   place, 9..11 its velocity, 12 its age, 13 its lifetime, 14 its size, 15
 #   its id, 16 its colour; 17 the last viewport draw (ms), 18 the
-#   particles it drew
+#   particles it drew; 19 hits so far (all systems); 20 system i's
+#   particles born of events so far, 21 its hits so far, 22 its particles
 pt_info:
     xorps   xmm0, xmm0
     cmp     edi, 0
@@ -2590,7 +3042,43 @@ pt_info:
     jne     62f
     cvtsi2ss xmm0, dword ptr [rip+pd_n]
     ret
-62: cmp     edi, 16
+62: cmp     edi, 19
+    jne     63f
+    xor     eax, eax
+    xor     ecx, ecx
+    lea     rdx, [rip+pt_sr]
+621:cmp     ecx, [rip+pt_ns]
+    jae     622f
+    add     eax, [rdx+SR_HITS]
+    add     rdx, SR_SZ
+    inc     ecx
+    jmp     621b
+622:cvtsi2ss xmm0, eax
+    ret
+63: cmp     edi, 20
+    jne     64f
+    cmp     esi, [rip+pt_ns]
+    jae     9f
+    imul    rax, rsi, SR_SZ
+    lea     rdx, [rip+pt_sr]
+    cvtsi2ss xmm0, dword ptr [rdx+rax+SR_ENEXT]
+    ret
+64: cmp     edi, 21
+    jb      65f
+    cmp     edi, 22
+    ja      9f
+    cmp     esi, [rip+pt_ns]
+    jae     9f
+    imul    rax, rsi, SR_SZ
+    lea     rdx, [rip+pt_sr]
+    add     rdx, rax
+    mov     eax, [rdx+SR_HITS]
+    cmp     edi, 21
+    je      641f
+    mov     eax, [rdx+SR_N]
+641:cvtsi2ss xmm0, eax
+    ret
+65: cmp     edi, 16
     ja      9f
     test    esi, esi
     js      9f
@@ -3723,6 +4211,994 @@ pt_render:
 8:  xor     eax, eax
 9:  pop     r13
     pop     r12
+    pop     rbx
+    ret
+
+
+# =============================================================================
+#  Collisions and events (stage P3)
+#
+#  The colliders, gathered once a step (kept while nothing about them
+#  changes): the Ground (a plane at its height), landscapes (their heights,
+#  la_wheight), and the triangles of rigid bodies and cloth colliders in the
+#  world, in a bounding-volume tree (split at the middle of the centres'
+#  box, four to a leaf). A colliding particle's path this step (the segment
+#  from where it was to where it would be) is cast against all of them; the
+#  first hit is where it stops.
+# =============================================================================
+.equ SR_COLLON, 320                     # (this step) it collides,
+.equ SR_BOUNCE, 324                     #  its bounce,
+.equ SR_FRIC,   328                     #  friction,
+.equ SR_ONHIT,  332                     #  what a hit does
+.equ SR_HITS,   336                     # hits so far
+.equ SR_REST,   340                     # a bounce slower than this rests
+                                        #  (squared: twice its pull in a step)
+.equ CT_SZ,     64                      # a collider triangle: a, e1, e2, n
+.equ CN_SZ,     32                      # a tree node: min (w: left / first),
+                                        #  max (w: right / count; bit 31 leaf)
+.equ PC_MAXO,   256                     # objects with triangles
+.equ PC_MAXL,   8                       # landscapes
+.equ PC_STACK,  64
+
+.section .bss
+.align 8
+pc_tri:         .skip 8                 # the triangles
+pc_ix:          .skip 8                 #  in the tree's order (u32)
+pc_cen:         .skip 8                 #  their centres (vec4, building)
+pc_node:        .skip 8
+pc_cap:         .skip 8                 # bytes mapped for each (triangles x)
+pc_key:         .skip 8
+pc_objs:        .skip 8*PC_MAXO
+pc_land:        .skip 8*PC_MAXL
+.align 4
+pc_ntri:        .skip 4
+pc_nn:          .skip 4
+pc_no:          .skip 4
+pc_nl:          .skip 4
+pc_gnd:         .skip 4                 # a ground,
+pc_gy:          .skip 4                 #  at this height
+pc_any:         .skip 4                 # any colliders
+
+.section .rodata
+.align 16
+pq_eps4:        .float 0.001, 0.001, 0.001, 0
+pq_big4:        .float 1e30, 1e30, 1e30, 1e30
+pq_one4:        .float 1.0, 1.0, 1.0, 1.0
+pq_third4:      .float 0.33333334, 0.33333334, 0.33333334, 0
+pq_nbig4:       .float -1e30, -1e30, -1e30, -1e30
+.align 4
+pq_dx:          .float 0.05
+pq_four:        .float 4.0
+pq_ev:          .float 0.002
+pq_mtiny:       .float 1.0e-9
+.text
+
+# pc_add(rdi=object) - one more object with triangles (not twice)
+pc_add:
+    mov     ecx, [rip+pc_no]
+    cmp     ecx, PC_MAXO
+    jae     9f
+    xor     eax, eax
+    lea     rdx, [rip+pc_objs]
+1:  cmp     eax, ecx
+    jae     2f
+    cmp     [rdx+rax*8], rdi
+    je      9f
+    inc     eax
+    jmp     1b
+2:  mov     [rdx+rcx*8], rdi
+    inc     dword ptr [rip+pc_no]
+9:  ret
+
+# pc_usable(rdi=object or 0) -> eax = 1 when its triangles can be hit: a
+#   visible mesh, not the Ground, not water, not a landscape
+pc_usable:
+    xor     eax, eax
+    test    rdi, rdi
+    jz      9f
+    cmp     dword ptr [rdi+OB_TYPE], OT_MESH
+    jne     9f
+    test    dword ptr [rdi+OB_FLAGS], OBF_HIDDEN|OBF_GROUND|OBF_WATER
+    jnz     9f
+    push    rdi
+    call    la_of
+    pop     rdi
+    test    rax, rax
+    mov     eax, 0
+    jnz     9f
+    mov     eax, 1
+9:  ret
+
+# pt_colliders - what particles hit this step (made again when it changed)
+pt_colliders:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 64
+    xor     eax, eax
+    mov     [rip+pc_no], eax
+    mov     [rip+pc_nl], eax
+    mov     [rip+pc_gnd], eax
+    mov     rbx, [rip+an_cur]           # rigid bodies, cloth colliders
+    test    rbx, rbx
+    jz      3f
+    xor     r12d, r12d
+1:  cmp     r12d, [rbx+AN_NRB_]
+    jae     2f
+    imul    eax, r12d, RB_SZ_
+    mov     edi, [rbx+AN_RB_+rax]
+    inc     r12d
+    call    obj_by_uid
+    mov     rdi, rax
+    call    pc_usable
+    test    eax, eax
+    jz      1b
+    call    pc_add
+    jmp     1b
+2:  xor     r12d, r12d
+21: cmp     r12d, [rbx+AN_CW_+20]       # (CW_N)
+    jae     3f
+    imul    eax, r12d, CL_SZ_
+    lea     r13, [rbx+AN_CL_+rax]
+    inc     r12d
+    cmp     dword ptr [r13+4], 3        # (CL_TYPE: a collider)
+    jne     21b
+    mov     edi, [r13]
+    call    obj_by_uid
+    mov     rdi, rax
+    call    pc_usable
+    test    eax, eax
+    jz      21b
+    call    pc_add
+    jmp     21b
+3:  xor     r12d, r12d                  # landscapes, the ground
+31: cmp     r12d, [rip+obj_count]
+    jae     4f
+    mov     edi, r12d
+    call    obj_at
+    inc     r12d
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    jne     31b
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jnz     31b
+    test    dword ptr [rax+OB_FLAGS], OBF_GROUND
+    jz      32f
+    mov     dword ptr [rip+pc_gnd], 1
+    mov     ecx, [rax+OB_LOC+4]
+    mov     [rip+pc_gy], ecx
+    jmp     31b
+32: mov     r13, rax
+    mov     rdi, rax
+    call    la_of
+    test    rax, rax
+    jz      31b
+    mov     ecx, [rip+pc_nl]
+    cmp     ecx, PC_MAXL
+    jae     31b
+    lea     rdx, [rip+pc_land]
+    mov     [rdx+rcx*8], r13
+    inc     dword ptr [rip+pc_nl]
+    jmp     31b
+4:  mov     r13, 0x2545F4914F6CDD1D     # what the triangles were made from
+    xor     r12d, r12d
+    xor     r14d, r14d                  # triangles
+41: cmp     r12d, [rip+pc_no]
+    jae     42f
+    lea     rax, [rip+pc_objs]
+    mov     r15, [rax+r12*8]
+    inc     r12d
+    mov     rax, r13
+    lea     rdi, [r15+OB_LOC]
+    mov     esi, 36
+    call    sc_mix
+    mov     r13, rax
+    mov     rdi, r15
+    call    obj_eval
+    xor     r13, rax
+    mov     ecx, [rax+ME_VER]
+    xor     r13, rcx
+    mov     rcx, 0x9E3779B97F4A7C15
+    imul    r13, rcx
+    add     r14d, [rax+ME_NTRIS]
+    jmp     41b
+42: mov     eax, [rip+pc_no]
+    xor     r13, rax
+    mov     dword ptr [rip+pc_any], 0
+    mov     eax, [rip+pc_gnd]
+    or      eax, [rip+pc_nl]
+    or      eax, r14d
+    jz      9f
+    mov     dword ptr [rip+pc_any], 1
+    test    r14d, r14d
+    jz      43f
+    cmp     r13, [rip+pc_key]
+    je      9f
+43: mov     [rip+pc_key], r13
+    mov     [rip+pc_ntri], r14d
+    mov     dword ptr [rip+pc_nn], 0
+    test    r14d, r14d
+    jz      9f
+    mov     eax, r14d                   # room: triangles, order, centres,
+    cmp     rax, [rip+pc_cap]           #  nodes (2 a triangle)
+    jbe     5f
+    call    pc_unmap
+    lea     rax, [r14+r14]
+    mov     [rip+pc_cap], rax
+    imul    rsi, rax, CT_SZ
+    call    pc_map
+    mov     [rip+pc_tri], rax
+    mov     rax, [rip+pc_cap]
+    lea     rsi, [rax*4]
+    call    pc_map
+    mov     [rip+pc_ix], rax
+    mov     rax, [rip+pc_cap]
+    shl     rax, 4
+    mov     rsi, rax
+    call    pc_map
+    mov     [rip+pc_cen], rax
+    mov     rax, [rip+pc_cap]
+    imul    rsi, rax, 2*CN_SZ
+    call    pc_map
+    mov     [rip+pc_node], rax
+    cmp     qword ptr [rip+pc_tri], 0
+    je      .Lpc_fail
+    cmp     qword ptr [rip+pc_ix], 0
+    je      .Lpc_fail
+    cmp     qword ptr [rip+pc_cen], 0
+    je      .Lpc_fail
+    cmp     qword ptr [rip+pc_node], 0
+    je      .Lpc_fail
+5:  xor     r12d, r12d                  # the triangles in the world
+    xor     r14d, r14d
+51: cmp     r12d, [rip+pc_no]
+    jae     6f
+    lea     rax, [rip+pc_objs]
+    mov     r15, [rax+r12*8]
+    inc     r12d
+    mov     rdi, r15
+    lea     rsi, [rsp]
+    call    obj_matrix
+    mov     rdi, r15
+    call    obj_eval
+    mov     rbx, rax
+    xor     r13d, r13d
+52: cmp     r13d, [rbx+ME_NTRIS]
+    jae     51b
+    imul    eax, r13d, 12
+    add     rax, [rbx+ME_TRIS]
+    mov     r8, rax
+    mov     r9, [rbx+ME_POS]
+    imul    rdx, r14, CT_SZ
+    add     rdx, [rip+pc_tri]
+    xor     ecx, ecx
+53: mov     eax, [r8+rcx*4]
+    lea     rax, [rax+rax*2]
+    LD3     xmm0, r9+rax*4, xmm5
+    lea     rdi, [rsp]
+    push    rcx
+    push    rdx
+    call    m_pt
+    pop     rdx
+    pop     rcx
+    shl     ecx, 4
+    movaps  [rdx+rcx], xmm0
+    shr     ecx, 4
+    inc     ecx
+    cmp     ecx, 3
+    jb      53b
+    movaps  xmm0, [rdx]                 # a, e1, e2, n
+    movaps  xmm1, [rdx+16]
+    movaps  xmm2, [rdx+32]
+    movaps  xmm6, xmm0                  # (the centre)
+    addps   xmm6, xmm1
+    addps   xmm6, xmm2
+    mulps   xmm6, [rip+pq_third4]
+    subps   xmm1, xmm0
+    subps   xmm2, xmm0
+    movaps  [rdx+16], xmm1
+    movaps  [rdx+32], xmm2
+    CROSS   xmm3, xmm1, xmm2, xmm4
+    movaps  xmm0, xmm3
+    call    unit
+    movaps  [rdx+48], xmm0
+    mov     rax, [rip+pc_cen]
+    mov     rcx, r14
+    shl     rcx, 4
+    movaps  [rax+rcx], xmm6
+    mov     rax, [rip+pc_ix]
+    mov     [rax+r14*4], r14d
+    inc     r14d
+    inc     r13d
+    jmp     52b
+6:  xor     edi, edi                    # the tree
+    mov     esi, r14d
+    call    pc_build
+    jmp     9f
+.Lpc_fail:
+    call    pc_unmap
+    mov     dword ptr [rip+pc_ntri], 0
+    mov     qword ptr [rip+pc_key], 0
+9:  lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# pc_map(rsi=bytes) -> rax (0: none)
+pc_map:
+    xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_NORES
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jb      1f
+    xor     eax, eax
+1:  ret
+
+# pc_unmap - the triangles' memory goes
+pc_unmap:
+    push    rbx
+    mov     rbx, [rip+pc_cap]
+    test    rbx, rbx
+    jz      9f
+    mov     rdi, [rip+pc_tri]
+    imul    rsi, rbx, CT_SZ
+    call    1f
+    mov     rdi, [rip+pc_ix]
+    lea     rsi, [rbx*4]
+    call    1f
+    mov     rdi, [rip+pc_cen]
+    mov     rsi, rbx
+    shl     rsi, 4
+    call    1f
+    mov     rdi, [rip+pc_node]
+    imul    rsi, rbx, 2*CN_SZ
+    call    1f
+    xor     eax, eax
+    mov     [rip+pc_tri], rax
+    mov     [rip+pc_ix], rax
+    mov     [rip+pc_cen], rax
+    mov     [rip+pc_node], rax
+    mov     [rip+pc_cap], rax
+9:  pop     rbx
+    ret
+1:  test    rdi, rdi
+    jz      2f
+    mov     eax, SYS_MUNMAP
+    syscall
+2:  ret
+
+# pc_build(edi=first, esi=end in pc_ix) -> eax = a node over them (made
+#   with its children)
+pc_build:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     ebx, [rip+pc_nn]
+    inc     dword ptr [rip+pc_nn]
+    imul    r14, rbx, CN_SZ
+    add     r14, [rip+pc_node]
+    movaps  xmm6, [rip+pq_big4]         # its box (corners), the centres' box
+    movaps  xmm7, [rip+pq_nbig4]
+    movaps  xmm8, xmm6
+    movaps  xmm9, xmm7
+    mov     ecx, r12d
+1:  cmp     ecx, r13d
+    jae     2f
+    mov     rax, [rip+pc_ix]
+    mov     eax, [rax+rcx*4]
+    imul    rdx, rax, CT_SZ
+    add     rdx, [rip+pc_tri]
+    movaps  xmm0, [rdx]
+    minps   xmm6, xmm0
+    maxps   xmm7, xmm0
+    movaps  xmm1, xmm0
+    addps   xmm1, [rdx+16]
+    minps   xmm6, xmm1
+    maxps   xmm7, xmm1
+    addps   xmm0, [rdx+32]
+    minps   xmm6, xmm0
+    maxps   xmm7, xmm0
+    shl     rax, 4
+    add     rax, [rip+pc_cen]
+    minps   xmm8, [rax]
+    maxps   xmm9, [rax]
+    inc     ecx
+    jmp     1b
+2:  andps   xmm6, [rip+pq_xyz]
+    andps   xmm7, [rip+pq_xyz]
+    movaps  [r14], xmm6
+    movaps  [r14+16], xmm7
+    mov     eax, r13d
+    sub     eax, r12d
+    cmp     eax, 4
+    ja      3f
+    mov     [r14+12], r12d              # a leaf
+    or      eax, 0x80000000
+    mov     [r14+28], eax
+    jmp     9f
+3:  subps   xmm9, xmm8                  # split the longest side at its middle
+    xor     r15d, r15d
+    movss   xmm0, xmm9
+    movaps  xmm1, xmm9
+    shufps  xmm1, xmm1, 0x55
+    comiss  xmm1, xmm0
+    jbe     31f
+    mov     r15d, 1
+    movss   xmm0, xmm1
+31: movaps  xmm1, xmm9
+    shufps  xmm1, xmm1, 0xAA
+    comiss  xmm1, xmm0
+    jbe     32f
+    mov     r15d, 2
+    movss   xmm0, xmm1
+32: mulss   xmm0, [rip+pq_half]
+    addss   xmm0, [rip+pq_tiny]
+    movss   [rsp-8], xmm0
+    movaps  [rsp-32], xmm8
+    movss   xmm1, [rsp-32+r15*4]        # the middle
+    addss   xmm1, [rsp-8]
+    mov     ecx, r12d                   # partition: below it first
+    mov     edx, r13d
+    mov     rsi, [rip+pc_ix]
+    mov     rdi, [rip+pc_cen]
+4:  cmp     ecx, edx
+    jae     5f
+    mov     eax, [rsi+rcx*4]
+    mov     r8, rax
+    shl     r8, 4
+    add     r8, rdi
+    movss   xmm2, [r8+r15*4]
+    comiss  xmm2, xmm1
+    jae     41f
+    inc     ecx
+    jmp     4b
+41: dec     edx
+    mov     r8d, [rsi+rdx*4]
+    mov     [rsi+rcx*4], r8d
+    mov     [rsi+rdx*4], eax
+    jmp     4b
+5:  cmp     ecx, r12d                   # all one side: halves
+    je      51f
+    cmp     ecx, r13d
+    jne     52f
+51: mov     ecx, r12d
+    add     ecx, r13d
+    shr     ecx, 1
+52: mov     r15d, ecx
+    mov     edi, r12d
+    mov     esi, r15d
+    call    pc_build
+    imul    r14, rbx, CN_SZ             # (the nodes do not move)
+    add     r14, [rip+pc_node]
+    mov     [r14+12], eax
+    mov     edi, r15d
+    mov     esi, r13d
+    call    pc_build
+    imul    r14, rbx, CN_SZ
+    add     r14, [rip+pc_node]
+    mov     [r14+28], eax
+9:  mov     eax, ebx
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pc_cast(rdi=its state: [0] where it was, [64] would be; out [80] the hit,
+#   [96] the surface's normal (against the motion)) -> eax = 1 on a hit:
+#   the first of the ground, the landscapes, the triangles. Re-entrant.
+pc_cast:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 128+PC_STACK*4     # [0] p0 [16] d [32] 1/d [48] n
+                                    # [64] t [68] hit [72] k [76] h0 [80] x
+    mov     rbx, rdi
+    movaps  xmm0, [rbx]
+    movaps  [rsp], xmm0
+    movaps  xmm1, [rbx+64]
+    subps   xmm1, xmm0
+    andps   xmm1, [rip+pq_xyz]
+    movaps  [rsp+16], xmm1
+    mov     eax, [rip+pq_one]
+    mov     [rsp+64], eax               # the first hit so far: none (t 1)
+    mov     dword ptr [rsp+68], 0
+    mov     dword ptr [rsp+72], 0       # (1: a landscape's, its point at +112)
+    cmp     dword ptr [rip+pc_any], 0
+    je      .Lpk_out
+    cmp     dword ptr [rip+pc_gnd], 0   # the ground: y crosses its height
+    je      .Lpk_land
+    movss   xmm1, [rsp+64]
+    movss   xmm0, [rbx+68]              # where it would be, above it
+    subss   xmm0, [rip+pc_gy]
+    xorps   xmm2, xmm2
+    comiss  xmm0, xmm2
+    jae     .Lpk_land
+    movss   xmm1, [rbx+4]               # was above: where it crossed
+    subss   xmm1, [rip+pc_gy]
+    xorps   xmm3, xmm3
+    comiss  xmm1, xmm2
+    jbe     1f
+    movss   xmm3, xmm1
+    subss   xmm1, xmm0
+    divss   xmm3, xmm1
+1:  movss   [rsp+64], xmm3
+    mov     dword ptr [rsp+68], 1
+    mov     dword ptr [rsp+72], 0
+    movaps  xmm0, [rip+pq_ey]
+    movaps  [rsp+48], xmm0
+.Lpk_land:                              # landscapes: under their height
+    xor     r12d, r12d
+2:  cmp     r12d, [rip+pc_nl]
+    jae     .Lpk_tris
+    lea     rax, [rip+pc_land]
+    mov     r13, [rax+r12*8]
+    inc     r12d
+    mov     rdi, r13
+    movss   xmm0, [rbx+64]
+    movss   xmm1, [rbx+72]
+    call    la_wheight
+    test    eax, eax
+    jz      2b
+    movss   xmm1, [rbx+68]
+    subss   xmm1, xmm0                  # f1: under it when < 0
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jae     2b
+    movss   [rsp+80], xmm1
+    mov     rdi, r13
+    movss   xmm0, [rbx]
+    movss   xmm1, [rbx+8]
+    call    la_wheight
+    xorps   xmm3, xmm3                  # t: where f crosses 0
+    test    eax, eax
+    jz      21f
+    movss   xmm1, [rbx+4]
+    subss   xmm1, xmm0                  # f0
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jbe     21f
+    movss   xmm3, xmm1
+    subss   xmm1, [rsp+80]
+    divss   xmm3, xmm1
+21: comiss  xmm3, [rsp+64]
+    jae     2b
+    movss   [rsp+64], xmm3
+    mov     dword ptr [rsp+68], 1
+    movss   xmm0, [rsp+16]              # its normal there (by differences)
+    mulss   xmm0, xmm3
+    addss   xmm0, [rsp]
+    movss   [rsp+84], xmm0              # x
+    movss   xmm1, [rsp+24]
+    mulss   xmm1, xmm3
+    addss   xmm1, [rsp+8]
+    movss   [rsp+88], xmm1              # z
+    movss   xmm0, [rsp+84]              # the point: on the surface
+    mov     rdi, r13
+    call    la_wheight
+    movss   [rsp+116], xmm0
+    mov     eax, [rsp+84]
+    mov     [rsp+112], eax
+    mov     eax, [rsp+88]
+    mov     [rsp+120], eax
+    mov     dword ptr [rsp+124], 0
+    mov     dword ptr [rsp+72], 1
+    movss   xmm0, [rsp+84]
+    movss   xmm1, [rsp+88]
+    addss   xmm0, [rip+pq_dx]
+    mov     rdi, r13
+    call    la_wheight
+    movss   [rsp+92], xmm0
+    movss   xmm0, [rsp+84]
+    subss   xmm0, [rip+pq_dx]
+    movss   xmm1, [rsp+88]
+    mov     rdi, r13
+    call    la_wheight
+    movss   xmm1, [rsp+92]
+    subss   xmm1, xmm0
+    movss   [rsp+92], xmm1              # dh/dx (x 2 dx)
+    movss   xmm0, [rsp+84]
+    movss   xmm1, [rsp+88]
+    addss   xmm1, [rip+pq_dx]
+    mov     rdi, r13
+    call    la_wheight
+    movss   [rsp+96], xmm0
+    movss   xmm0, [rsp+84]
+    movss   xmm1, [rsp+88]
+    subss   xmm1, [rip+pq_dx]
+    mov     rdi, r13
+    call    la_wheight
+    movss   xmm1, [rsp+96]
+    subss   xmm1, xmm0                  # dh/dz
+    movss   xmm0, [rsp+92]
+    xorps   xmm0, [rip+pq_sgn]
+    movss   xmm2, [rip+pq_dx]
+    addss   xmm2, xmm2
+    xorps   xmm1, [rip+pq_sgn]
+    unpcklps xmm0, xmm2                 # (-hx, 2dx, -hz)
+    movlhps xmm0, xmm1
+    call    unit
+    movaps  [rsp+48], xmm0
+    jmp     2b
+.Lpk_tris:                              # the triangles: the tree
+    cmp     dword ptr [rip+pc_ntri], 0
+    je      .Lpk_out
+    movaps  xmm0, [rsp+16]              # 1/d (huge where d is 0)
+    movaps  xmm1, xmm0
+    andps   xmm1, [rip+pq_abs]
+    cmpltps xmm1, [rip+pq_tiny4]
+    movaps  xmm2, xmm1
+    andps   xmm2, [rip+pq_tiny4]
+    orps    xmm0, xmm2                  # (tiny where 0)
+    movaps  xmm2, [rip+pq_one4]
+    divps   xmm2, xmm0
+    movaps  [rsp+32], xmm2
+    mov     dword ptr [rsp+128], 0      # the stack: the root
+    mov     r12d, 1
+.Lpk_walk:
+    test    r12d, r12d
+    jz      .Lpk_out
+    dec     r12d
+    mov     eax, [rsp+128+r12*4]
+    imul    r13, rax, CN_SZ
+    add     r13, [rip+pc_node]
+    movaps  xmm0, [r13]                 # the slabs: enters before t, leaves
+    subps   xmm0, [rsp]                 #  after 0
+    mulps   xmm0, [rsp+32]
+    movaps  xmm1, [r13+16]
+    subps   xmm1, [rsp]
+    mulps   xmm1, [rsp+32]
+    movaps  xmm2, xmm0
+    minps   xmm0, xmm1                  # near
+    maxps   xmm1, xmm2                  # far
+    movaps  xmm2, xmm0
+    shufps  xmm2, xmm2, 0x55
+    maxss   xmm0, xmm2
+    movaps  xmm2, xmm0
+    movhlps xmm2, xmm2
+    maxss   xmm0, xmm2                  # (lanes 0 1 2)
+    movaps  xmm2, xmm1
+    shufps  xmm2, xmm2, 0x55
+    minss   xmm1, xmm2
+    movaps  xmm2, xmm1
+    movhlps xmm2, xmm2
+    minss   xmm1, xmm2
+    xorps   xmm3, xmm3
+    maxss   xmm0, xmm3
+    minss   xmm1, [rsp+64]
+    comiss  xmm0, xmm1
+    ja      .Lpk_walk
+    mov     eax, [r13+28]
+    test    eax, eax
+    js      .Lpk_leaf
+    cmp     r12d, PC_STACK-2
+    jae     .Lpk_walk
+    mov     [rsp+128+r12*4], eax
+    inc     r12d
+    mov     eax, [r13+12]
+    mov     [rsp+128+r12*4], eax
+    inc     r12d
+    jmp     .Lpk_walk
+.Lpk_leaf:
+    and     eax, 0x7fffffff
+    mov     r14d, [r13+12]
+    lea     r15d, [r14+rax]
+3:  cmp     r14d, r15d
+    jae     .Lpk_walk
+    mov     rax, [rip+pc_ix]
+    mov     eax, [rax+r14*4]
+    inc     r14d
+    imul    rdx, rax, CT_SZ
+    add     rdx, [rip+pc_tri]
+    movaps  xmm7, [rsp+16]              # Moller-Trumbore: p = d x e2
+    movaps  xmm8, [rdx+32]
+    CROSS   xmm9, xmm7, xmm8, xmm4
+    movaps  xmm10, [rdx+16]
+    movaps  xmm0, xmm10
+    DOT3    xmm0, xmm9                  # det
+    movaps  xmm1, xmm0
+    andps   xmm1, [rip+pq_abs]
+    comiss  xmm1, [rip+pq_mtiny]
+    jbe     3b
+    movss   xmm11, [rip+pq_one]
+    divss   xmm11, xmm0                 # 1 / det
+    movaps  xmm12, [rsp]
+    subps   xmm12, [rdx]                # s = p0 - a
+    andps   xmm12, [rip+pq_xyz]
+    movaps  xmm0, xmm12
+    DOT3    xmm0, xmm9
+    mulss   xmm0, xmm11                 # u
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jb      3b
+    comiss  xmm0, [rip+pq_one]
+    ja      3b
+    movss   xmm13, xmm0
+    CROSS   xmm14, xmm12, xmm10, xmm4   # q = s x e1
+    movaps  xmm0, xmm7
+    DOT3    xmm0, xmm14
+    mulss   xmm0, xmm11                 # v
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jb      3b
+    addss   xmm0, xmm13
+    comiss  xmm0, [rip+pq_one]
+    ja      3b
+    movaps  xmm0, xmm8
+    DOT3    xmm0, xmm14
+    mulss   xmm0, xmm11                 # t
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jb      3b
+    comiss  xmm0, [rsp+64]
+    jae     3b
+    movss   [rsp+64], xmm0
+    mov     dword ptr [rsp+68], 1
+    mov     dword ptr [rsp+72], 0
+    movaps  xmm0, [rdx+48]              # its normal, against the motion
+    movaps  xmm1, xmm0
+    DOT3    xmm1, xmm7
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jbe     31f
+    xorps   xmm0, [rip+pq_sgn]
+    andps   xmm0, [rip+pq_xyz]
+31: movaps  [rsp+48], xmm0
+    jmp     3b
+.Lpk_out:
+    xor     eax, eax
+    cmp     dword ptr [rsp+68], 0
+    je      9f
+    movss   xmm0, [rsp+64]              # the hit: p0 + t d
+    shufps  xmm0, xmm0, 0
+    mulps   xmm0, [rsp+16]
+    addps   xmm0, [rsp]
+    andps   xmm0, [rip+pq_xyz]
+    cmp     dword ptr [rsp+72], 0
+    je      8f
+    movaps  xmm0, [rsp+112]
+8:  movaps  [rbx+80], xmm0
+    movaps  xmm0, [rsp+48]
+    movaps  [rbx+96], xmm0
+    mov     eax, 1
+9:  lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# pt_listen - which systems keep their events this step, and whose events
+#   each one born of events uses (by its name)
+pt_listen:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+pt_ns]
+    jae     2f
+    imul    rax, rbx, SR_SZ
+    lea     rcx, [rip+pt_sr]
+    mov     dword ptr [rcx+rax+SR_LISTEN], 0
+    mov     qword ptr [rcx+rax+SR_EVS], 0
+    inc     ebx
+    jmp     1b
+2:  xor     ebx, ebx
+3:  cmp     ebx, [rip+pt_ns]
+    jae     9f
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    inc     ebx
+    mov     r13, [r12+SR_REC]
+    test    r13, r13
+    jz      3b
+    cmp     dword ptr [r12+SR_COLLON], 0    # it splits: its own hits
+    je      4f
+    cmp     dword ptr [r13+PS_ONHIT], 3
+    jne     4f
+    or      dword ptr [r12+SR_LISTEN], 1
+4:  cmp     dword ptr [r13+PS_FROM], 4
+    jne     3b
+    xor     r14d, r14d                  # the one with that name
+5:  cmp     r14d, [rip+pt_ns]
+    jae     3b
+    imul    r15, r14, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r15, rax
+    inc     r14d
+    mov     edi, [r15+SR_UID]
+    mov     esi, [r15+SR_K]
+    call    ps_nth
+    test    rax, rax
+    jz      5b
+    lea     rdi, [rax+PS_NAME]
+    lea     rsi, [r13+PS_EVNAME]
+    call    str_eq
+    test    eax, eax
+    jz      5b
+    mov     [r12+SR_EVS], r15
+    mov     eax, [r13+PS_EVKIND]
+    cmp     eax, 1
+    jne     6f
+    or      dword ptr [r15+SR_LISTEN], 1
+    jmp     3b
+6:  cmp     eax, 2
+    jne     3b
+    or      dword ptr [r15+SR_LISTEN], 2
+    jmp     3b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# sys_gather(r12=system) - its blocks' hits and deaths this step, in order
+sys_gather:
+    push    rbx
+    push    r13
+    push    r14
+    xor     eax, eax
+    mov     [r12+SR_NH], eax
+    mov     [r12+SR_ND], eax
+    mov     ecx, [r12+SR_L0]            # its hits, kept or not
+    mov     edx, ecx
+    add     edx, [r12+SR_LN]
+    lea     rsi, [rip+ev_bh]
+1:  cmp     ecx, edx
+    jae     2f
+    add     eax, [rsi+rcx*4]
+    inc     ecx
+    jmp     1b
+2:  add     [r12+SR_HITS], eax
+    cmp     qword ptr [rip+pt_stage], 0
+    je      9f
+    xor     r13d, r13d                  # 0 hits, 1 deaths
+1:  cmp     r13d, 2
+    jae     9f
+    lea     ecx, [r13+1]
+    test    [r12+SR_LISTEN], ecx
+    jz      7f
+    lea     r14, [r12+SR_EVH+r13*8]     # its room
+    cmp     qword ptr [r14], 0
+    jne     2f
+    call    ev_reserve
+    mov     [r14], rax
+    test    rax, rax
+    jz      7f
+2:  mov     rdi, [r14]
+    xor     ebx, ebx
+    mov     r8d, [r12+SR_L0]
+3:  mov     eax, [r12+SR_L0]
+    add     eax, [r12+SR_LN]
+    cmp     r8d, eax
+    jae     6f
+    lea     rax, [rip+ev_bh]
+    test    r13d, r13d
+    jz      4f
+    lea     rax, [rip+ev_bd]
+4:  mov     ecx, [rax+r8*4]
+    imul    rsi, r8, 2*BLK*EV_SZ
+    add     rsi, [rip+pt_stage]
+    imul    rax, r13, BLK*EV_SZ
+    add     rsi, rax
+    add     ebx, ecx
+    imul    ecx, ecx, EV_SZ
+    rep     movsb
+    inc     r8d
+    jmp     3b
+6:  mov     [r12+SR_NH+r13*4], ebx
+7:  inc     r13d
+    jmp     1b
+9:  pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# ev_place(edi=which of this step's newborn, r12=system, rsi=out: the
+#   point, the normal, [96] the event's velocity) - where one born of an
+#   event starts: the event's place (a little off the surface for a hit)
+ev_place:
+    push    rbx
+    push    r13
+    push    r14
+    mov     r14, rsi
+    mov     eax, edi
+    xor     edx, edx
+    div     dword ptr [r12+SR_EVP]      # the event
+    cmp     dword ptr [r12+SR_EMODE], 2
+    je      .Lev_born
+    imul    rax, rax, EV_SZ
+    add     rax, [r12+SR_EVA]
+    movaps  xmm0, [rax]
+    andps   xmm0, [rip+pq_xyz]
+    movaps  xmm1, [rax+16]
+    andps   xmm1, [rip+pq_xyz]
+    movaps  [r14+96], xmm1
+    movaps  xmm2, [rax+32]
+    movaps  [r14+16], xmm2
+    movss   xmm3, [rip+pq_ev]
+    shufps  xmm3, xmm3, 0
+    mulps   xmm3, xmm2
+    addps   xmm0, xmm3
+    movaps  [r14], xmm0
+    movaps  xmm0, xmm2                  # (none: up)
+    DOT3    xmm0, xmm0
+    comiss  xmm0, [rip+pq_tiny]
+    ja      9f
+    movaps  xmm0, [rip+pq_ey]
+    movaps  [r14+16], xmm0
+    jmp     9f
+.Lev_born:                              # the other's newborn: where it is
+    mov     r13, [r12+SR_EVS]
+    cmp     eax, [r13+SR_ER]
+    jae     1f
+    mov     edi, [r13+SR_ELB]
+    add     eax, [r13+SR_EC]
+    jmp     2f
+1:  sub     eax, [r13+SR_ER]
+    mov     ecx, eax
+    shr     ecx, BLKSH
+    and     eax, BLK-1
+    add     ecx, [r13+SR_ENB]
+    mov     edx, [r13+SR_SI]
+    shl     rdx, 12
+    lea     rsi, [rip+sr_blk]
+    add     rdx, rsi
+    mov     edi, [rdx+rcx*4]
+2:  mov     ebx, eax
+    call    blk_at
+    lea     rax, [rax+rbx*4]
+    movss   xmm0, [rax+A_X]
+    movss   xmm1, [rax+A_Y]
+    movss   xmm2, [rax+A_Z]
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    andps   xmm0, [rip+pq_xyz]
+    movaps  [r14], xmm0
+    movss   xmm0, [rax+A_VX]
+    movss   xmm1, [rax+A_VY]
+    movss   xmm2, [rax+A_VZ]
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2
+    andps   xmm0, [rip+pq_xyz]
+    movaps  [r14+96], xmm0
+    movaps  xmm1, xmm0
+    DOT3    xmm1, xmm1
+    comiss  xmm1, [rip+pq_tiny]
+    ja      3f
+    movaps  xmm0, [rip+pq_ey]
+3:  call    unit
+    movaps  [r14+16], xmm0
+9:  pop     r14
+    pop     r13
     pop     rbx
     ret
 

@@ -16,6 +16,13 @@ near the end colour when old (a ramp); the same picture on 1 and 32
 threads; a render shows the particles (as tinted balls) unless they are
 left out of renders. (CPU against GPU: tests/gpu.py.)
 
+P3: collisions and events - a ball dropped on the Ground bounces and comes
+to rest on it; rain on a landscape: no particle passes through it, and
+every hit makes three splashes (a system born of the rain's hits); drops
+never get inside a passive rigid-body cube; sticking stops them on it;
+split makes new particles at each hit; births and deaths feed other
+systems too.
+
     python3 tests/particles.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile
@@ -374,9 +381,110 @@ def p2():
           'a render shows the particles as red balls (%d red pixels), none with render off (%d)' % (red, redb))
 
 
+def p3():
+    print('-- P3: collisions and events --')
+    out = run('''
+delete("Light")
+op("create.ground")
+emit("Cube", "from point burst 1 speed 0 life 100 collide on bounce 0.5 friction 0")
+lo = 9
+for f in 2..72 {
+  frame(f)
+  if particles(7, 0) < lo { lo = particles(7, 0) }
+}
+print("ground", lo, particles(7, 0), particles(10, 0), particles(21, 0))
+''')
+    g = vals(out, 'ground')
+    check(len(g) == 4 and g[0] >= 0 and g[1] < 0.01 and g[2] == 0 and g[3] > 3,
+          'a ball dropped on the Ground bounces (%s hits), never goes under it, and comes to rest on it (%s)'
+          % (g[3:] if g else '?', g[:3]))
+    out = run('''
+delete("Light")
+delete("Cube")
+op("landscape.add", "hills size 40")
+add("plane", "Cloud", 0, 40, 0)
+scale("Cloud", 15, 1, 15)
+emit("Cloud", "from faces rate 4000 speed 0 life 4 collide on on_hit die name Rain size 0.03")
+emit("Cloud", "from events events hit Rain per 3 speed 2 spread 50 life 0.4 size 0.02 name Splash collide on bounce 0.2")
+below = 0
+seen = 0
+for f in 2..90 {
+  frame(f)
+  for i in 0..particles(0) {
+    x = particles(6, i)
+    z = particles(8, i)
+    if abs(x) < 19.5 and abs(z) < 19.5 {
+      seen = seen + 1
+      if particles(7, i) < height("Landscape", x, z) - 0.0001 { below = below + 1 }
+    }
+  }
+}
+print("rain", particles(21, 0), particles(20, 1), below, seen, particles(22, 1))
+''')
+    r = vals(out, 'rain')
+    check(len(r) == 5 and r[0] > 3000 and r[1] == 3 * r[0] and r[2] == 0 and r[3] > 100000,
+          'rain on a landscape: %s drops hit it, each made 3 splashes (%s), and of %s particles seen over 88 frames '
+          'none was under the ground (%s)' % (r[:1], r[1:2], r[3:4], r[2:3]))
+    out = run('''
+delete("Light")
+select("Cube")
+op("rigid.add", "passive")
+add("plane", "Src", 0, 6, 0)
+scale("Src", 1.5, 1, 1.5)
+emit("Src", "from faces rate 2000 speed 0 life 3 collide on bounce 0.4 friction 0.2 name Drops size 0.03")
+inside = 0
+for f in 2..60 {
+  frame(f)
+  for i in 0..particles(0) {
+    x = abs(particles(6, i))
+    y = abs(particles(7, i) - 1)
+    z = abs(particles(8, i))
+    if x < 0.999 and y < 0.999 and z < 0.999 { inside = inside + 1 }
+  }
+}
+print("cube", particles(21, 0), inside)
+select("Src")
+op("particles.set", "on_hit stick")
+frame(1)
+frame(40)
+st = 0
+on = 0
+for i in 0..particles(0) {
+  v = abs(particles(9, i)) + abs(particles(10, i)) + abs(particles(11, i))
+  if v == 0 {
+    st = st + 1
+    if abs(particles(7, i) - 2) < 0.01 { on = on + 1 }
+  }
+}
+print("stick", particles(21, 0), st, on)
+op("particles.set", "split 3")
+frame(1)
+frame(40)
+print("split", particles(21, 0), particles(20, 0))
+''')
+    c, s, sp = vals(out, 'cube'), vals(out, 'stick'), vals(out, 'split')
+    check(len(c) == 2 and c[0] > 1000 and c[1] == 0,
+          'drops on a passive rigid-body cube: %s hits, none ever inside it (%s)' % (c[:1], c[1:]))
+    check(len(s) == 3 and s[1] > 500 and s[1] == s[2] and s[1] <= s[0],
+          'on_hit stick: %s particles stopped, all on the cube\'s top (%s)' % (s[1:2], s[2:]))
+    check(len(sp) == 2 and sp[0] > 100 and sp[1] == 3 * sp[0],
+          'split 3: each of %s hits makes 3 new particles (%s)' % (sp[:1], sp[1:]))
+    out = run('''
+delete("Light")
+emit("Cube", "from point burst 10 speed 1 spread 90 life 0.5 name Spark")
+emit("Cube", "from events events died Spark per 2 speed 1 life 5 name Ash")
+emit("Cube", "from events events born Spark per 1 speed 0 life 5 name Trail inherit 1")
+frame(30)
+print("ev", particles(20, 1), particles(20, 2), particles(22, 0))
+''')
+    e = vals(out, 'ev')
+    check(e == [20, 10, 0], 'events: 10 sparks born and died: 2 ash each when they died, 1 trail each when born (%s)' % e)
+
+
 if __name__ == '__main__':
     p1()
     p2()
+    p3()
     if FAILS:
         print('%d FAILED' % len(FAILS))
         sys.exit(1)
