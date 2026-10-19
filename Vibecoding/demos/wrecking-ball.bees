@@ -1,0 +1,73 @@
+# Wrecking Ball — BeeModel v0.19 demo
+# A glued brick wall (Shatter › bricks + glue) on a concrete yard, hit by a steel
+# ball on a chain of point joints. Only the bricks the ball reaches break loose.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+op("anim.range", "1 240 30")
+PZ = 1.25
+PY = 8.2
+op("rigid.world", "gravity 0 -9.81 0 rate 120 iterations 16 substeps 4")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Brick", 0.55, 0.18, 0.10, 0.85, 0)
+mat("Steel", 0.55, 0.56, 0.58, 0.28, 1)
+mat("Chain", 0.25, 0.25, 0.27, 0.4, 1)
+mat("Crane", 0.95, 0.68, 0.05, 0.45, 0)
+mat("Concrete", 0.42, 0.41, 0.39, 0.9, 0)
+
+f = add("plane", "Yard", 0, 0, 0); scale(f, 40); assign(f, "Concrete")
+select(f); op("rigid.add", "passive plane friction 0.7")
+
+# the wall: 7 m wide, 3.6 m tall, 0.4 m thick, 12 bricks a row in 10 rows
+w = add("cube", "Wall", 0, 1.8, 0); scale(w, 3.5, 1.8, 0.2); assign(w, "Brick")
+select(w)
+op("object.shatter", "bricks counts 12 10 1 glue 30000 density 1900 inner 0.62 0.6 0.56")
+print("bricks", shinfo(0), "glue joints", shinfo(7))
+
+# the crane: a yellow gantry the chain hangs from (just set dressing)
+for s in 0..2 {
+    x = -4.6 + s * 9.2
+    p = add("cube", "Mast " + s, x, PY / 2, PZ); scale(p, 0.15, PY / 2, 0.15); assign(p, "Crane")
+}
+b = add("cube", "Beam", 0, PY + 0.1, PZ); scale(b, 4.75, 0.15, 0.15); assign(b, "Crane")
+
+# the chain: 6 links from the beam, then the ball, pulled back and let go
+N = 6
+L = 0.9
+for i in 0..N {
+    c = add("cylinder", "Link" + i, 0, PY - (i + 0.5) * L, PZ)
+    scale(c, 0.06, L / 2 * 0.9, 0.06); assign(c, "Chain")
+}
+ball = add("sphere", "Ball", 0, PY - N * L - 0.7, PZ); scale(ball, 0.7); assign(ball, "Steel")
+
+# swing it all up to the side (about the pivot at the beam) before the run
+a = 75deg
+for i in 0..N + 1 {
+    n = "Link" + i
+    r = (i + 0.5) * L
+    if i == N { n = "Ball"; r = N * L + 0.7 }
+    move(n, 0, PY - cos(a) * r, PZ + sin(a) * r)
+    rotate(n, -a, 0, 0)
+}
+for i in 0..N { select("Link" + i); op("rigid.add", "active capsule mass 60 material metal") }
+select("Ball"); op("rigid.add", "active sphere mass 2500 material metal")
+op("rigid.joint", "point Link0 world pivot 0 " + PY + " " + PZ)
+for i in 1..N {
+    r = i * L
+    op("rigid.joint", "point Link" + i + " Link" + (i - 1) + " pivot 0 " + (PY - cos(a) * r) + " " + (PZ + sin(a) * r))
+}
+r = N * L
+op("rigid.joint", "point Ball Link" + (N - 1) + " pivot 0 " + (PY - cos(a) * r) + " " + (PZ + sin(a) * r))
+
+# camera: from the front, in close for the hit, then round the side to the hole
+cam = add("camera", "Cam", 12, 5, 14)
+key("Cam:x", 1, 12); key("Cam:y", 1, 5); key("Cam:z", 1, 14); key("Cam:rx", 1, -10.4deg); key("Cam:ry", 1, 40.6deg)
+key("Cam:x", 60, 7); key("Cam:y", 60, 3); key("Cam:z", 60, 9.5); key("Cam:rx", 60, -6.8deg); key("Cam:ry", 60, 36.4deg)
+key("Cam:x", 150, 13); key("Cam:y", 150, 3.5); key("Cam:z", 150, 1); key("Cam:rx", 150, -8.3deg); key("Cam:ry", 150, 85.6deg)
+key("Cam:x", 240, 8); key("Cam:y", 240, 2.5); key("Cam:z", 240, -9); key("Cam:rx", 240, -4.3deg); key("Cam:ry", 240, 138.4deg)
+add("light", "Sun", 6, 12, 8)
+view(40, 15, 22, 0, 2.5, 2)
+frame(1)
