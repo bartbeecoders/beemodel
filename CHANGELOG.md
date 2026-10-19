@@ -6,6 +6,17 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Material Preview is no longer much slower than Solid on big meshes: each
+  mesh's smooth corner normals are kept between frames (made again only
+  when the mesh changes) and turned into the view in parallel - 31 ms to
+  3 ms a frame with a 127 000-face sphere.
+- A huge mesh (millions of triangles, e.g. an Array of a dense mesh) no
+  longer clips the viewport: the triangles past ~5.6 million, and every
+  object after them, were dropped (the triangle slots were capped by a
+  1 GiB frame arena; it reserves 16 GiB of address space now, used as
+  touched).
+
 ## [0.21.0] - 2026-10-19
 
 Stage A of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): attractors
