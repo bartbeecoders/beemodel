@@ -42,6 +42,7 @@
 .equ RW_ITER,   16
 .equ RW_SET,    20
 .equ RW_SUB,    24
+.equ RW_G,      28
 .equ JT_TYPE,   0
 .equ JT_A,      4
 .equ JT_B,      8
@@ -162,6 +163,7 @@ sp_pre_kw:      .quad k_none, k_pre1, k_pre2, k_pre3, k_pre4
 .align 4
 pm_fb:          .float 0.5, 0.0,  0.9, 0.8,  0.02, 0.05,  0.5, 0.3,  0.35, 0.15,  0.7, 0.1
 pf_g:           .float -9.81
+rx1:            .float 1.0
 pf_255:         .float 255.0
 
 .data
@@ -188,6 +190,8 @@ rp_mat:         .skip 4
 rp_vals:        .skip 16                # mass friction bounce damping
 rp_vel:         .skip 12
 rp_grp:         .skip 4
+rp_attr:        .skip 4                 # it attracts the others (nbody.s)
+rp_g:           .skip 4                 # the world's G
 rp_grav:        .skip 12                # the world's
 rp_gon:         .skip 4                 #  gravity on (not all 0)
 rp_rate:        .skip 4
@@ -228,6 +232,7 @@ WIDGET wd_rb_bounce, WK_FLOAT, "rigid.bounce", "Bounce", 0.0, 1.0, 0.005, 3, WGF
 WIDGET wd_rb_damp,   WK_FLOAT, "rigid.damping", "Damping", 0.0, 10.0, 0.005, 3, WGF_CLAMP, cb=val_cb, undo="Physics", def=0.0, tip="Air drag: speed lost a second"
 WIDGET wd_rb_vel,    WK_FLOAT, "rigid.velocity", step=0.05, dec=2, cb=vel_cb, undo="Physics", def=0.0, tip="Its velocity when the run begins (m/s, X Y Z)"
 WIDGET wd_rb_grp,    WK_INT, "rigid.group", "Collision group", 0.0, 15.0, 0.1, 0, WGF_CLAMP, cb=grp_cb, undo="Physics", def=0.0, tip="Its group, 0 to 15 (rigid.add collide picks the groups it meets)"
+WIDGET wd_rb_attr,   WK_TOGGLE, "rigid.attracts", "Attracts the others", cb=attr_cb, undo="Physics", tip="It pulls every other body by its mass (G in World): planets, moons, clumping pieces"
 WIDGET wd_rb_rem,    WK_BUTTON, "rigid.remove", "Remove Rigid Body", aux=op_rb_rem
 WIDGET wd_jt_row,    WK_ROW, "rigid.joint_row", tip="A joint of this object: click to edit it"
 WIDGET wd_jt_type,   WK_ENUM, "rigid.joint_type", cb=jtype_cb, undo="Physics", aux=l_jtype, n=4, tip="Fixed: held together. Hinge: turns about an axis. Point: a ball joint. Slider: moves along an axis"
@@ -261,6 +266,7 @@ WIDGET wd_w_gon,     WK_TOGGLE, "physics.gravity_on", "Gravity", cb=wgon_cb, und
 WIDGET wd_w_grav,    WK_FLOAT, "physics.gravity", step=0.02, dec=2, cb=wgrav_cb, undo="Physics", tip="Gravity (m/s2, X Y Z, -9.81 Y on Earth)"
 WIDGET wd_w_rate,    WK_INT, "physics.rate", "Steps a second", 1.0, 1000.0, 0.5, 0, WGF_CLAMP, cb=wnum_cb, undo="Physics", def=120.0, tip="More steps: fast things collide better, slower to run"
 WIDGET wd_w_iter,    WK_INT, "physics.iterations", "Iterations", 1.0, 200.0, 0.1, 0, WGF_CLAMP, cb=wnum_cb, undo="Physics", def=10.0, tip="Solver passes a step: stiffer stacks and joints"
+WIDGET wd_w_g,       WK_FLOAT, "physics.g", "G (bodies' pull)", 0.0, 1000000000.0, 0.01, 3, WGF_CLAMP, cb=wg_cb, undo="Physics", def=1.0, tip="How hard bodies that attract pull: a = G m / d2 (1: game scale)"
 WIDGET wd_w_sub,     WK_INT, "physics.substeps", "Substeps", 1.0, 64.0, 0.05, 0, WGF_CLAMP, cb=wnum_cb, undo="Physics", def=4.0, tip="Soft steps a step"
 
 .section .rodata
@@ -580,6 +586,27 @@ put_grp:
     shl     eax, 4
     or      [rdi+RB_FLAGS], eax
     ret
+attr_cb:
+    lea     rdi, [rip+put_attr]
+    jmp     rp_each
+put_attr:
+    and     dword ptr [rdi+RB_FLAGS], ~0x100
+    mov     eax, [rip+rp_attr]
+    and     eax, 1
+    shl     eax, 8
+    or      [rdi+RB_FLAGS], eax
+    ret
+wg_cb:
+    sub     rsp, 8
+    xor     edi, edi
+    call    an_own_g
+    add     rsp, 8
+    test    rax, rax
+    jz      9f
+    mov     ecx, [rip+rp_g]
+    mov     [rax+AN_RW_+RW_G], ecx
+    mov     dword ptr [rip+dirty], 1
+9:  ret
 
 # the world
 wgrav_cb:
@@ -1070,6 +1097,10 @@ rb_props_draw:
     shr     eax, 4
     and     eax, 15
     mov     [rip+rp_grp], eax
+    mov     eax, [r13+RB_FLAGS]
+    shr     eax, 8
+    and     eax, 1
+    mov     [rip+rp_attr], eax
     lea     rdi, [rip+wd_rb_type]
     lea     r8, [rip+rp_type]
     lea     rdx, [rip+s_c_type]
@@ -1112,6 +1143,9 @@ rb_props_draw:
     call    rp_vec3
     lea     rdi, [rip+wd_rb_grp]
     lea     r8, [rip+rp_grp]
+    call    pnl_full
+    lea     rdi, [rip+wd_rb_attr]
+    lea     r8, [rip+rp_attr]
     call    pnl_full
     lea     rdi, [rip+wd_rb_rem]
     xor     r8d, r8d
@@ -1579,8 +1613,15 @@ rp_world:
     mov     dword ptr [rip+rp_rate], 120
     mov     dword ptr [rip+rp_iter], 10
     mov     dword ptr [rip+rp_sub], 4
+    mov     eax, [rip+rx1]
+    mov     [rip+rp_g], eax
     test    r14, r14
     jz      5f
+    mov     eax, [r14+AN_RW_+RW_G]
+    test    eax, eax
+    jz      4f
+    mov     [rip+rp_g], eax
+4:
     cmp     dword ptr [r14+AN_RW_+RW_SET], 0
     je      1f
     mov     rax, [r14+AN_RW_+RW_GRAV]
@@ -1621,6 +1662,9 @@ rp_world:
     call    pnl_full
     lea     rdi, [rip+wd_w_sub]
     lea     r8, [rip+rp_sub]
+    call    pnl_full
+    lea     rdi, [rip+wd_w_g]
+    lea     r8, [rip+rp_g]
     call    pnl_full
     add     rsp, 8
     ret
