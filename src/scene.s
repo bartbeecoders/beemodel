@@ -334,6 +334,8 @@ scene_clear:
     call    lc_reset                    # (light and camera settings)
     call    fd_reset                    # (the outliner's folders)
     call    fl_reset                    # (force fields' settings)
+    call    ps_reset                    # (particle systems' settings)
+    call    pt_reset                    #  (and their particles)
     call    lm_reset                    # (the lightmap)
     call    an_reset                    # (and the animation)
     call    rig_reset                   #  (motion paths, onion skins)
@@ -791,7 +793,11 @@ obj_copy:
     mov     edi, [r12+OB_UID]
     mov     esi, [rax+OB_UID]
     call    fl_copy
-1:
+1:  mov     edi, ebx                    # its particle systems
+    call    obj_get
+    mov     esi, [rax+OB_UID]
+    mov     edi, [r12+OB_UID]
+    call    ps_copy
     mov     eax, ebx
     jmp     9f
 8:  xor     eax, eax

@@ -48,7 +48,8 @@
 .equ ST_LCAM,       136     # the light / camera settings it saw (a reference)
 .equ ST_FOLD,       144     # the outliner's folders it saw (a reference)
 .equ ST_FLD,        152     # the force fields' settings it saw (a reference)
-.equ ST_HDR,        160
+.equ ST_PSYS,       160     # the particle systems' settings it saw (a reference)
+.equ ST_HDR,        168
 .equ MAP_ANON_PRIV, 0x22
 
 .section .bss
@@ -150,6 +151,9 @@ snapshot:
     mov     rdi, [rip+fl_cur]           # the force fields, shared
     mov     [rbx+ST_FLD], rdi
     call    fl_ref
+    mov     rdi, [rip+ps_cur]           # the particle systems, shared
+    mov     [rbx+ST_PSYS], rdi
+    call    ps_ref
     xor     r12d, r12d
 2:  cmp     r12d, [rip+obj_count]
     jae     8f
@@ -209,6 +213,8 @@ release:
     call    fd_unref
     mov     rdi, [rbx+ST_FLD]
     call    fl_unref
+    mov     rdi, [rbx+ST_PSYS]
+    call    ps_unref
     mov     rdi, [rbx+ST_DELTA]         # its delta goes too
     test    rdi, rdi
     jz      3f
@@ -295,6 +301,12 @@ restore_step:
     mov     rax, [rbx+ST_FLD]
     mov     [rip+fl_cur], rax
     call    fl_unref
+    mov     rdi, [rbx+ST_PSYS]          # the particle systems it saw
+    call    ps_ref
+    mov     rdi, [rip+ps_cur]
+    mov     rax, [rbx+ST_PSYS]
+    mov     [rip+ps_cur], rax
+    call    ps_unref
     call    cad_sync
     lea     rdi, [rip+scene_pool]
     call    pool_clear
