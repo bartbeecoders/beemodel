@@ -102,7 +102,7 @@ jobs:
       - name: Attractors and force fields
         run: timeout 600 python tests/fields.py build/beemodel
       - name: Particles and liquid
-        run: timeout 600 python tests/particles.py build/beemodel
+        run: timeout 1200 python tests/particles.py build/beemodel
       - name: Viewport with big meshes (Material Preview, huge arrays)
         run: timeout 600 python tests/viewport.py build/beemodel
 

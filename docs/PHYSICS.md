@@ -12,6 +12,10 @@ is `tools/physbench.py`.
 
 Hidden objects (`object.hide`, a shattered original) are not bodies.
 
+Particles and liquid collide with the Ground, landscapes, rigid bodies
+and cloth colliders, and a liquid pushes moving bodies (they float):
+[PARTICLES.md](PARTICLES.md).
+
 Force fields (attractors, gravity zones, wind, vortex, turbulence, drag)
 add to gravity each substep, and bodies marked `attracts` pull each other
 (Barnes-Hut): [FIELDS.md](FIELDS.md).
@@ -297,6 +301,8 @@ From `tools/physbench.py` on a Ryzen 9 7950X (16 cores, 32 threads):
 | 1000 balls on 100 000 triangles, a frame (mean / slowest) | 54 / 99 ms | 22 / 42 ms | 19 / 32 ms | 22 / 39 ms |
 | 1000 balls rolling down a 4097² landscape, a frame (mean) | 39.3 ms | 13.5 ms | 10.2 ms | 10.0 ms |
 | 5445 bodies attracting each other, a step (the tree and pulls) | 7.04 (5.84) ms | 3.29 (1.92) ms | 2.03 (1.18) ms | 1.91 (0.81) ms |
+| 1M particles, a step | 0.74 ms | 0.56 ms | 0.77 ms | 0.69 ms |
+| a dam break of 200k liquid particles, a frame (its surface meshed) | 2299 (110) ms | 628 (51) ms | 347 (42) ms | 188 (34) ms |
 
 Each scene ends with the same hash on every thread count. Past about 8
 threads the solver is bound by memory, not arithmetic: more threads wait
