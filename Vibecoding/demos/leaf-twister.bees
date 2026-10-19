@@ -1,0 +1,72 @@
+# Leaf Twister — BeeModel v0.22 demo
+# A whirlwind (a Vortex force field, plus Turbulence) crosses an autumn park.
+# Leaves are particles drawn as objects (a leaf, turned at random, in three
+# colours) lying on the lawn; the whirl lifts them, spins them up its funnel and
+# drops them behind it. Dust (sprites) rides the same fields.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+op("anim.range", "1 300 30")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Lawn", 0.16, 0.26, 0.07, 0.95, 0)
+mat("Bark", 0.18, 0.12, 0.08, 0.9, 0)
+mat("Leaf", 1, 1, 1, 0.7, 0)           # the particles' colours tint it
+mat("Foliage", 0.62, 0.30, 0.06, 0.9, 0)
+mat("Dust", 0.5, 0.42, 0.3, 1, 0)
+
+op("create.ground")
+lawn = add("plane", "Lawn", 0, 0.004, 0); scale(lawn, 30); assign(lawn, "Lawn")
+
+# a few trees behind the lawn (set dressing; the leaves come from under them)
+for k in 0..5 {
+    a = 200deg + k * 35deg
+    x = cos(a) * 12
+    z = sin(a) * 12
+    t = add("cylinder", "Trunk" + k, x, 2, z); scale(t, 0.22, 2, 0.22); assign(t, "Bark")
+    c = add("sphere", "Crown" + k, x, 5, z); scale(c, 2.2, 1.8, 2.2); assign(c, "Foliage")
+}
+
+# the leaf the particles are drawn as: a plane (2 m across, so a particle's
+# size is half a leaf's width), kept out of sight under the lawn
+add("plane", "Leaf", 0, -5, 0); assign("Leaf", "Leaf")
+
+# the leaves: a burst lying on the lawn at the start, then a steady fall from
+# the crowns; light (gravity 0.35) with a lot of drag, so the air carries them
+add("plane", "Litter", 0, 0.02, 0); scale("Litter", 16); assign("Litter", "Lawn")
+emit("Litter", "from faces burst 9000 speed 0 life 100 gravity 0.35 drag 2.5 draw objects objects Leaf"
+    + " align random size 0.045 size_random 0.4 color d06018 collide on bounce 0.05 friction 0.9 seed 3 name Leaves")
+emit("Litter", "from faces burst 5000 speed 0 life 100 gravity 0.35 drag 2.5 draw objects objects Leaf"
+    + " align random size 0.045 size_random 0.4 color e0b020 collide on bounce 0.05 friction 0.9 seed 5 name Gold")
+emit("Litter", "from faces burst 4000 speed 0 life 100 gravity 0.35 drag 2.5 draw objects objects Leaf"
+    + " align random size 0.045 size_random 0.4 color 902010 collide on bounce 0.05 friction 0.9 seed 7 name Red")
+for k in 0..5 {
+    emit("Crown" + k, "from volume rate 25 speed 0.2 life 100 gravity 0.35 drag 2.5 draw objects objects Leaf"
+        + " align random size 0.045 size_random 0.4 color d07020 collide on bounce 0.05 friction 0.9 seed " + (20 + k))
+}
+# dust kicked up where the whirl touches down (renders take the emitter's
+# material: a dust-coloured pad just under the lawn, over the Ground)
+add("plane", "DustPad", 0, 0.002, 0); scale("DustPad", 16); assign("DustPad", "Dust")
+emit("DustPad", "from faces rate 1500 speed 0.3 life 3 life_random 0.5 gravity 0.1 drag 1.5 draw sprites size 0.012"
+    + " size_end 2 color 8a7050 color_end c0b090 collide on name Dust")
+
+# the whirl: a vortex that lifts and pulls in, and turbulence for the gusts;
+# it wanders across the park
+tw = field("vortex", "Twister", "strength 14 lift 13 inflow 6 falloff smooth radius 4.5")
+key("Twister:x", 1, -14); key("Twister:z", 1, -6)
+key("Twister:x", 100, -4); key("Twister:z", 100, 2)
+key("Twister:x", 200, 4); key("Twister:z", 200, -1)
+key("Twister:x", 300, 14); key("Twister:z", 300, 5)
+field("turbulence", "Gusts", "strength 3 scale 3 falloff none")
+
+cam = add("camera", "Cam", -6, 3.5, 20)
+select(cam); op("camera.set", "lens 28")
+key("Cam:x", 1, -10); key("Cam:y", 1, 3); key("Cam:z", 1, 20); key("Cam:rx", 1, 2deg); key("Cam:ry", 1, -18deg)
+key("Cam:x", 150, -2); key("Cam:y", 150, 4); key("Cam:z", 150, 18); key("Cam:rx", 150, 6deg); key("Cam:ry", 150, 2deg)
+key("Cam:x", 300, 8); key("Cam:y", 300, 3.5); key("Cam:z", 300, 19); key("Cam:rx", 300, 4deg); key("Cam:ry", 300, 22deg)
+add("light", "Sun", 8, 12, 10)
+select("Sun"); op("light.set", "type sun"); op("light.set", "power 2.5"); op("light.set", "size 1")
+view(10, 18, 30, 0, 2, 0)
+frame(1)

@@ -1,0 +1,444 @@
+# Battlestar Galactica - BeeModel demo
+# The reimagined (2004) Galactica at full scale: 1 438 m long, 536 m across the
+# flight pods, about 214 m high. Y is up, the bow points along +X, metres
+# throughout. Starboard is +Z (green light), port -Z (red).
+# First: python3 starfield.py (writes space.hdr, the star field).
+# Run: script.run <this file>  (it replaces the scene), then press Space,
+# or ./render.sh galactica for the film through the keyed camera.
+
+while count() > 0 { delete(name(0)) }
+seed(1978)
+
+# ---- building blocks -------------------------------------------------------
+# A chiselled octagon (a hull cross-section) in the Z-Y plane: half width W,
+# bottom yb, top yt, chamfers cb (bottom corners) and ct (top corners).
+# Corner k, going round from the right side up (counter-clockwise).
+fn ocz(k, W, cb, ct) {
+    if k == 0 or k == 1 { return W }
+    if k == 2 { return W - ct }
+    if k == 3 { return -W + ct }
+    if k == 4 or k == 5 { return -W }
+    if k == 6 { return -W + cb }
+    return W - cb
+}
+fn ocy(k, yb, yt, cb, ct) {
+    if k == 0 or k == 5 { return yb + cb }
+    if k == 1 or k == 4 { return yt - ct }
+    if k == 2 or k == 3 { return yt }
+    return yb
+}
+# A section lofted from octagon A (at x0) to octagon B (at x1), centred at
+# z = cz: a 32-sided cylinder whose two rings are moved onto the octagons,
+# 4 vertices an edge (rings: 0..31 at x0, 32..63 at x1).
+fn loft(n, x0, x1, cz, aW, ayb, ayt, acb, act, bW, byb, byt, bcb, bct) {
+    c = add("cylinder", n, 0, 0, 0)
+    for i in 0..32 {
+        k = floor(i / 4); t = (i % 4) / 4; k2 = (k + 1) % 8
+        za = ocz(k, aW, acb, act) * (1 - t) + ocz(k2, aW, acb, act) * t
+        ya = ocy(k, ayb, ayt, acb, act) * (1 - t) + ocy(k2, ayb, ayt, acb, act) * t
+        zb = ocz(k, bW, bcb, bct) * (1 - t) + ocz(k2, bW, bcb, bct) * t
+        yb = ocy(k, byb, byt, bcb, bct) * (1 - t) + ocy(k2, byb, byt, bcb, bct) * t
+        vmove(c, i, x0, ya, za + cz)
+        vmove(c, i + 32, x1, yb, zb + cz)
+    }
+    return c
+}
+fn prism(n, x0, x1, cz, W, yb, yt, cb, ct) {
+    return loft(n, x0, x1, cz, W, yb, yt, cb, ct, W, yb, yt, cb, ct)
+}
+# A round section along X: radius r0 at x0 to r1 at x1 (bells, barrels, tubes)
+fn tube(n, x0, x1, y, z, r0, r1) {
+    c = add("cylinder", n, 0, 0, 0)
+    for i in 0..32 {
+        a = i * 360deg / 32
+        vmove(c, i, x0, y + sin(a) * r0, z + cos(a) * r0)
+        vmove(c, i + 32, x1, y + sin(a) * r1, z + cos(a) * r1)
+    }
+    return c
+}
+# A rod from one point to another (any direction), radius r
+fn rod(n, x0, y0, z0, x1, y1, z1, r) {
+    dx = x1 - x0; dy = y1 - y0; dz = z1 - z0; L = sqrt(dx * dx + dy * dy + dz * dz)
+    dx /= L; dy /= L; dz /= L
+    # u: perpendicular to d, v = u x d (the cylinder's x, z about its y)
+    if abs(dy) < 0.9 { ux = dz; uy = 0; uz = -dx } else { ux = 0; uy = -dz; uz = dy }
+    ul = sqrt(ux * ux + uy * uy + uz * uz); ux /= ul; uy /= ul; uz /= ul
+    vx = uy * dz - uz * dy; vy = uz * dx - ux * dz; vz = ux * dy - uy * dx
+    c = add("cylinder", n, 0, 0, 0)
+    for i in 0..32 {
+        a = i * 360deg / 32; ca = cos(a) * r; sa = sin(a) * r
+        vmove(c, i, x0 + ux * ca + vx * sa, y0 + uy * ca + vy * sa, z0 + uz * ca + vz * sa)
+        vmove(c, i + 32, x1 + ux * ca + vx * sa, y1 + uy * ca + vy * sa, z1 + uz * ca + vz * sa)
+    }
+    return c
+}
+fn box(n, x0, y0, z0, x1, y1, z1) {
+    b = add("cube", n, (x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2)
+    scale(b, abs(x1 - x0) / 2, abs(y1 - y0) / 2, abs(z1 - z0) / 2)
+    return b
+}
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+fn glow(n, r, g, b, strength) {
+    m = material(n); matset(m, "base", 0, 0, 0); matset(m, "roughness", 1)
+    matset(m, "emission", r, g, b); matset(m, "strength", strength); return m
+}
+# Painted armour: plates (a grid of Voronoi cells with no randomness, each a
+# shade of its own), darker seams that also dent the normal, and grime.
+fn armour(n, r, g, b, plx, ply, plz) {
+    m = mat(n, r, g, b, 0.62, 0)
+    p = node(m, "position", 1)
+    mp = node(m, "mapping", 0, 0, 0); link(m, p, mp, 1); nodeset(m, mp, 3, 1 / plx, 1 / ply, 1 / plz)
+    cell = node(m, "voronoi", 1, 0, 0); link(m, mp, cell, 1)
+    edge = node(m, "voronoi", 1, 0, 2); link(m, mp, edge, 1)
+    tone = node(m, "separate"); link(m, cell, tone, 1, 1)
+    grime = node(m, "noise", 0.012, 5, 0.6); link(m, p, grime, 1)
+    a = node(m, "math", 30); link(m, tone, a, 1); nodeset(m, a, 2, 0.16); nodeset(m, a, 3, 0.88)
+    w = node(m, "math", 30); link(m, grime, w, 1); nodeset(m, w, 2, 0.45); nodeset(m, w, 3, 0.70)
+    seam = node(m, "math", 23); nodeset(m, seam, 1, 0); nodeset(m, seam, 2, 0.012); link(m, edge, seam, 3)
+    sf = node(m, "math", 30); link(m, seam, sf, 1); nodeset(m, sf, 2, 0.35); nodeset(m, sf, 3, 0.65)
+    f1 = node(m, "math", 2); link(m, a, f1, 1); link(m, w, f1, 2)
+    f = node(m, "math", 2); link(m, f1, f, 1); link(m, sf, f, 2)
+    c = node(m, "color"); nodeset(m, c, 1, r, g, b)
+    base = node(m, "vmath", 9); link(m, c, base, 1); link(m, f, base, 2)
+    socket(m, "base", base)
+    ro = node(m, "math", 30); link(m, grime, ro, 1); nodeset(m, ro, 2, -0.25); nodeset(m, ro, 3, 0.74)
+    socket(m, "roughness", ro)
+    bu = node(m, "bump", 0.35, 0.15); link(m, seam, bu, 1)
+    socket(m, "normal", bu)
+    return m
+}
+
+# ---- materials (linear colours, physically based values) --------------------
+# Armour: rolled steel plate under matte naval grey paint. Paint is a
+# dielectric: metallic 0, roughness from the paint (0.6-0.75 when weathered).
+armour("Armour", 0.15, 0.152, 0.158, 31, 9, 17)
+armour("ArmourDark", 0.075, 0.077, 0.08, 19, 7, 11)
+# Exposed ribs and machinery: bare structural steel (metal, albedo ~0.55).
+mat("Rib", 0.42, 0.42, 0.43, 0.5, 1)
+mat("Gun", 0.2, 0.2, 0.21, 0.45, 1)
+# Engine bells: heat-tinted refractory alloy (niobium / inconel).
+mat("Bell", 0.26, 0.23, 0.25, 0.36, 1)
+# Light sources: colours from their temperatures (blackbody, linear sRGB)
+glow("Exhaust", 1.0, 0.42, 0.12, 2.5)          # ~2 200 K throat glow at idle
+glow("BayLight", 1.0, 0.86, 0.68, 6)         # 4 000 K sodium-white floods
+glow("NavRed", 1.0, 0.02, 0.01, 14)
+glow("NavGreen", 0.02, 1.0, 0.08, 14)
+glow("Strobe", 1.0, 1.0, 1.0, 80)
+mat("BayDark", 0.02, 0.02, 0.022, 0.8, 0)
+
+# ---- the hull: stations along X ------------------------------------------------
+# Station i: x, half width, bottom, top, bottom chamfer, top chamfer
+fn pick(w, a, b, c, d, e, f) {
+    if w == 0 { return a }
+    if w == 1 { return b }
+    if w == 2 { return c }
+    if w == 3 { return d }
+    if w == 4 { return e }
+    return f
+}
+fn st(i, w) {
+    if i == 0 { return pick(w, 719, 54, -24, 10, 14, 16) }     # the blunt nose
+    if i == 1 { return pick(w, 600, 76, -40, 30, 18, 24) }
+    if i == 2 { return pick(w, 250, 102, -52, 46, 22, 28) }   # the head's widest
+    if i == 3 { return pick(w, 232, 74, -48, 40, 16, 18) }    # stepping in
+    if i == 4 { return pick(w, -186, 74, -48, 40, 16, 18) }   # the neck
+    if i == 5 { return pick(w, -204, 98, -58, 58, 22, 24) }
+    if i == 6 { return pick(w, -520, 118, -70, 80, 24, 28) }
+    return pick(w, -700, 124, -78, 84, 26, 30)                # the stern face
+}
+# a value of the main hull at x (between stations, linear)
+fn sec(x, w) {
+    for i in 0..7 {
+        if x <= st(i, 0) and x >= st(i + 1, 0) {
+            t = (x - st(i + 1, 0)) / (st(i, 0) - st(i + 1, 0))
+            return st(i + 1, w) * (1 - t) + st(i, w) * t
+        }
+    }
+    return 0
+}
+fn hull(n, i, m) {
+    j = i + 1
+    loft(n, st(j, 0), st(i, 0), 0, st(j, 1), st(j, 2), st(j, 3), st(j, 4), st(j, 5),
+         st(i, 1), st(i, 2), st(i, 3), st(i, 4), st(i, 5))
+    assign(n, m)
+}
+hull("Bow", 0, "Armour")
+hull("Head", 1, "Armour")
+hull("Collar", 2, "ArmourDark")
+hull("Neck", 3, "ArmourDark")
+hull("Shoulder", 4, "ArmourDark")
+hull("Aft", 5, "Armour")
+hull("Stern", 6, "Armour")
+
+# the head's dorsal ridge: a raised spine from the collar almost to the nose
+loft("Ridge", 250, 640, 0, 30, 40, 60, 0, 12,  20, 22, 36, 0, 10); assign("Ridge", "Armour")
+# a keel under the aft hull
+loft("Keel", -640, -230, 0, 70, -96, -60, 26, 0,  56, -74, -50, 20, 0); assign("Keel", "ArmourDark")
+# the aft dorsal block, where the hull is tallest (214 m from keel to top)
+loft("Dorsal", -660, -300, 0, 70, 70, 118, 0, 22,  52, 60, 92, 0, 18); assign("Dorsal", "Armour")
+
+# the exposed ribs of the neck: frames around the core, as on the real ship
+for i in 0..17 {
+    x = -176 + i * 24
+    prism("Rib" + i, x, x + 6, 0, 82, -54, 48, 18, 20)
+    assign("Rib" + i, "Rib")
+}
+# spine girders along the top and bottom of the neck
+box("Girder0", -186, 40, -30, 232, 50, -22); assign("Girder0", "Rib")
+box("Girder1", -186, 40, 22, 232, 50, 30); assign("Girder1", "Rib")
+
+# armour plates proud of the hull on the head and the aft section (the
+# real hull is a patchwork of plates of many sizes)
+fn plates(x0, x1, count) {
+    for k in 0..count {
+        L = 14 + rand() * 30; Wd = 8 + rand() * 20
+        x = x0 + rand() * (x1 - x0 - L)
+        top = min(sec(x, 3), sec(x + L, 3))
+        half = min(sec(x, 1) - sec(x, 5), sec(x + L, 1) - sec(x + L, 5)) - 4
+        z = (rand() * 2 - 1) * (half - Wd / 2)
+        p = box("Plate" + x0 + "_" + k, x, top - 1, z - Wd / 2, x + L, top + 1.2 + rand() * 1.8, z + Wd / 2)
+        if rand() < 0.3 { assign(p, "ArmourDark") } else { assign(p, "Armour") }
+    }
+}
+plates(255, 700, 40)
+plates(-690, -210, 40)
+
+# ---- flight pods --------------------------------------------------------------
+# Each pod: 640 m long, 112 m wide, on three heavy pylons. The forward end
+# holds the launch tubes, the after end the landing bay.
+PODZ = 214
+for side in 0..2 {
+    sg = 1 - side * 2
+    zc = sg * PODZ
+    prism("Pod" + side, -300, 250, zc, 56, -38, 22, 12, 16)
+    loft("PodNose" + side, 250, 300, zc, 56, -38, 22, 12, 16,  50, -32, 14, 10, 12)
+    loft("PodTail" + side, -340, -300, zc, 48, -32, 16, 10, 12,  56, -38, 22, 12, 16)
+    assign("Pod" + side, "Armour"); assign("PodNose" + side, "Armour"); assign("PodTail" + side, "Armour")
+    # the pod's own dorsal armour band
+    loft("PodSpine" + side, -280, 230, zc, 30, 18, 30, 0, 8,  30, 18, 30, 0, 8); assign("PodSpine" + side, "ArmourDark")
+    # pylons from the neck out to the pod
+    for j in 0..3 {
+        px = 170 - j * 175
+        pl = box("Pylon" + side + j, px - 20, -30, sg * 66, px + 20, 4, sg * 162)
+        assign(pl, "Rib")
+        br = box("Brace" + side + j, px - 12, 4, sg * 66, px + 12, 14, sg * 162)
+        assign(br, "ArmourDark")
+    }
+    # launch tubes: two rows of mouths in the forward face, lit inside
+    for r in 0..2 {
+        for k in 0..5 {
+            tz = zc + (k - 2) * 18; ty = -18 + r * 18
+            box("TubeMouth" + side + r + k, 299, ty - 3.5, tz - 4.5, 301, ty + 3.5, tz + 4.5)
+            assign("TubeMouth" + side + r + k, "BayDark")
+            box("TubeLight" + side + r + k, 299.5, ty - 4.1, tz - 5.1, 300.5, ty - 3.6, tz + 5.1)
+            assign("TubeLight" + side + r + k, "BayLight")
+        }
+    }
+    # the landing bay: a wide opening in the after end, its deck lit
+    box("BayMouth" + side, -342, -26, zc - 40, -339, 8, zc + 40); assign("BayMouth" + side, "BayDark")
+    box("BayDeck" + side, -343, -27, zc - 40, -339, -24.5, zc + 40); assign("BayDeck" + side, "BayLight")
+    # navigation lights at the pod's outer bow corner
+    nl = add("sphere", "Nav" + side, 300, 14, zc + sg * 50); scale(nl, 0.9)
+    if sg > 0 { assign(nl, "NavGreen") } else { assign(nl, "NavRed") }
+}
+st0 = add("sphere", "Strobe", -700, 118, 0); scale(st0, 2.2); assign(st0, "Strobe")
+
+# ---- guns: twin-barrel point-defence mounts along the hull ------------------
+fn turret(n, x, y, z, yaw, pitch) {
+    b = add("cylinder", n + "Base", x, y + 1.5, z); scale(b, 6, 1.5, 6); assign(b, "Gun")
+    h = add("cube", n, x, y + 5, z); scale(h, 5, 2.5, 4); rotate(h, 0, yaw, 0); assign(h, "ArmourDark")
+    for s in 0..2 {
+        o = (s * 2 - 1) * 1.8
+        bx = x + cos(yaw) * 3 + sin(yaw) * o; bz = z - sin(yaw) * 3 + cos(yaw) * o
+        L = 16; ex = cos(yaw) * cos(pitch) * L; ey = sin(pitch) * L; ez = -sin(yaw) * cos(pitch) * L
+        g = rod(n + "Barrel" + s, bx, y + 5.5, bz, bx + ex, y + 5.5 + ey, bz + ez, 0.55); assign(g, "Gun")
+    }
+}
+for k in 0..7 {
+    x = 300 + k * 52
+    for s in 0..2 {
+        sg = s * 2 - 1
+        z = sg * (sec(x, 1) - sec(x, 5) - 8)
+        turret("PD" + k + s, x, sec(x, 3), z, sg * (20deg + k * 9deg), 18deg + rand() * 20deg)
+    }
+}
+for k in 0..5 {
+    x = -640 + k * 80
+    for s in 0..2 {
+        sg = s * 2 - 1
+        turret("AD" + k + s, x, sec(x, 3), sg * (sec(x, 1) - sec(x, 5) - 10), sg * (60deg + k * 15deg), 25deg + rand() * 25deg)
+    }
+}
+for side in 0..2 {
+    sg = 1 - side * 2
+    for k in 0..4 {
+        turret("PG" + side + k, -220 + k * 130, 30, sg * PODZ, sg * (80deg - k * 20deg), 30deg)
+    }
+}
+
+# ---- engines: six main bells in two rows of three, with glowing throats ------
+for r in 0..2 {
+    for k in 0..3 {
+        ey = -30 + r * 74; ez = (k - 1) * 80
+        tube("Bell" + r + k, -748, -700, ey, ez, 34, 26); assign("Bell" + r + k, "Bell")
+        tube("Throat" + r + k, -749, -748.5, ey, ez, 30, 30); assign("Throat" + r + k, "Exhaust")
+    }
+}
+# manoeuvring thruster blocks at the stern corners
+for s in 0..4 {
+    tz = (s % 2 * 2 - 1) * 112; ty = (floor(s / 2) * 2 - 1) * 60
+    box("RCS" + s, -716, ty - 10, tz - 10, -700, ty + 10, tz + 10); assign("RCS" + s, "ArmourDark")
+    tube("RCSBell" + s, -728, -716, ty, tz, 7, 5); assign("RCSBell" + s, "Bell")
+}
+
+
+# ---- small craft ---------------------------------------------------------------
+# Viper: painted aluminium-lithium airframe; the canopy a dark tinted glass.
+mat("ViperPaint", 0.55, 0.55, 0.53, 0.42, 0)
+mat("ViperDark", 0.06, 0.06, 0.065, 0.5, 0)
+mat("Canopy", 0.015, 0.02, 0.025, 0.04, 0)
+glow("ViperBurn", 1.0, 0.62, 0.32, 40)
+# Raider: a polished silver alloy hull (metal, low roughness); a red eye.
+mat("Raider", 0.8, 0.8, 0.82, 0.3, 1)
+glow("RaiderEye", 1.0, 0.03, 0.01, 40)
+
+# A part of a craft: built about the origin, moved onto the craft (so it has
+# the craft's place), then it follows the craft's rigid body.
+fn part(n, o, m, x, y, z) {
+    assign(o, m); move(o, x, y, z); op("constraint.add", o + " child_of " + n)
+}
+# Colonial Viper Mk II, nose along +X: 8.6 m long, 6.4 m span. The fuselage
+# is the rigid body; the other parts follow it.
+fn viper(n, x, y, z) {
+    f = loft(n, -4.2, 2.6, 0, 0.62, -0.55, 0.5, 0.2, 0.25,  0.36, -0.36, 0.3, 0.12, 0.12)
+    assign(f, "ViperPaint"); move(f, x, y, z)
+    part(n, loft(n + "Nose", 2.6, 4.4, 0, 0.36, -0.36, 0.3, 0.12, 0.12,  0.06, -0.1, 0.0, 0.02, 0.02), "ViperPaint", x, y, z)
+    part(n, loft(n + "Canopy", 0.2, 2.4, 0, 0.36, 0.3, 0.95, 0, 0.22,  0.2, 0.3, 0.42, 0, 0.08), "Canopy", x, y, z)
+    for s in 0..2 {
+        sg = s * 2 - 1
+        part(n, loft(n + "Wing" + s, -3.8, -0.2, sg * 1.75, 1.3, -0.22, -0.08, 0.04, 0.04,  0.25, -0.18, -0.08, 0.03, 0.03), "ViperPaint", x, y, z)
+        part(n, tube(n + "Eng" + s, -4.9, -3.4, -0.22, sg * 0.46, 0.36, 0.4), "ViperDark", x, y, z)
+        part(n, tube(n + "Burn" + s, -4.95, -4.9, -0.22, sg * 0.46, 0.3, 0.3), "ViperBurn", x, y, z)
+        part(n, tube(n + "Gun" + s, -0.2, 3.0, -0.18, sg * 0.95, 0.06, 0.06), "ViperDark", x, y, z)
+    }
+    part(n, tube(n + "Eng2", -4.9, -3.4, 0.25, 0, 0.36, 0.4), "ViperDark", x, y, z)
+    part(n, tube(n + "Burn2", -4.95, -4.9, 0.25, 0, 0.3, 0.3), "ViperBurn", x, y, z)
+    part(n, loft(n + "Fin", -4.3, -2.4, 0, 0.07, 0.3, 1.9, 0, 0.02,  0.07, 0.3, 0.5, 0, 0.02), "ViperPaint", x, y, z)
+    return f
+}
+# Cylon Raider: a crescent of flat wings swept back from a bulbous body,
+# 7.5 m from nose to wingtips, 9.5 m across. One closed mesh (signed
+# distance fields), so it can shatter. Its eye scans from a slot in the nose.
+fn raider(n, x, y, z, yaw) {
+    sclear()
+    ring = sisect(smove(storus(4.6, 1.2), -1.2, 0, 0), smove(sbox(20, 8, 20), 8.8, 0, 0))
+    body = sunion(smove(ssphere(1.7), 3.2, 0, 0), smove(ssphere(1.2), 1.6, 0.5, 0), 1.0)
+    shape = sisect(sunion(ring, body, 1.4), sbox(30, 2.0, 30), 0.25)
+    shape = ssub(shape, smove(sbox(1.2, 0.35, 1.8), 4.85, 0.25, 0), 0.1)
+    smesh(n, shape, 96)
+    assign(n, "Raider"); move(n, x, y, z); rotate(n, 0, yaw, 0)
+    e = tube(n + "Eye", 4.3, 4.5, 0.25, 0, 0.13, 0.13)
+    part(n, e, "RaiderEye", x, y, z); rotate(e, 0, yaw, 0)
+    return n
+}
+
+# ---- physics: free fall in deep space -------------------------------------------
+# No gravity worth speaking of (the nearest star is far; the ship's own pull
+# on a Viper is ~1e-6 g) and no air: nothing slows a body (damping 0), so
+# everything coasts in a straight line at the speed it was given.
+op("anim.range", "1 300 30")
+op("rigid.world", "gravity 0 0 0 rate 480 iterations 12 substeps 4")
+# The starboard pod's armour is a static collider (Galactica: ~3.4 Mt, so a
+# raider's blow moves her by microns). A solid box: its flank, where the
+# raider hits, is flat, and a solid pushes out what reaches inside it.
+select("Pod0"); op("rigid.add", "passive box friction 0.45 bounce 0.15")
+
+# Vipers: magnetic catapults fling them out of the starboard tubes at
+# 125 m/s, one after another. Each starts inside its tube, as far back as it
+# travels before its launch, and coasts out once the catapult lets go (the
+# tube's guide rails keep it on the axis: no collisions with the pod).
+VS = 125
+for k in 0..6 {
+    r = k % 2; c = 1 + floor(k / 2)
+    t = 0.5 + k * 0.62
+    ty = -18 + r * 18; tz = PODZ + (c - 2) * 18
+    vy = (rand() - 0.5) * 5; vz = (rand() - 0.5) * 6 + (c - 2) * 2
+    v = viper("Viper" + k, 300 - 4.5 - VS * t, ty - vy * t, tz - vz * t)
+    select(v)
+    op("rigid.add", "active hull mass 9000 damping 0 group 1 collide 2 velocity " + VS + " " + vy + " " + vz)
+}
+
+# The Raider: on a ramming run at 240 m/s into the starboard pod's flank,
+# where it breaks up. Its pieces (density for a ~4 t hollow airframe) keep
+# its momentum and tumble away; the armour does not notice.
+RVX = -70; RVY = 8; RVZ = -232
+HX = 60; HY = -6; HZ = 275; TH = 6.0
+yaw = atan2(-RVZ, RVX)
+raider("Raider", HX - RVX * TH, HY - RVY * TH, HZ - RVZ * TH, yaw)
+select("Raider")
+op("rigid.add", "active hull mass 4200 damping 0 friction 0.3 velocity " + RVX + " " + RVY + " " + RVZ)
+nx = HX - RVX * TH + cos(yaw) * 4; nz = HZ - RVZ * TH - sin(yaw) * 4
+print("raider pieces", shatter("Raider", "shards", 48, "impact 25000 density 60 at " + nx + " " + (HY - RVY * TH) + " " + nz + " spread 0.6 inner 0.12 0.1 0.09"))
+
+# ---- Ragnar: the gas giant below -----------------------------------------------
+# 800 km in radius (small for a gas giant; on screen what counts is its angle,
+# 15 degrees across from 3 100 km). Cloud bands: a wave along the latitude
+# (the normal's y),
+# bent by turbulence, albedo ~0.5 like Jupiter's. A sphere that big is shaded
+# in its material: a convex Lambertian body lit by the sun gives off exactly
+# albedo x E x max(0, N.L) / pi, so that is its emission (no shadow rays
+# needed: at 800 km they would only meet float rounding). What it gives off
+# is the only fill light the ship gets: planetshine.
+SUNX = 0.45; SUNY = 0.42; SUNZ = 0.79           # toward the sun (unit)
+SUNE = 3 * 0.9                                  # its irradiance (power 0.9)
+PR = 0.8e6
+m = material("Ragnar"); matset(m, "base", 0, 0, 0); matset(m, "roughness", 1); matset(m, "specular", 0)
+matset(m, "emission", 1, 1, 1); matset(m, "strength", 1)
+nrm = node(m, "normal")                         # its y: the sine of the latitude
+w = node(m, "wave", 15, 0.5, 0, 1); link(m, nrm, w, 1)
+n = node(m, "noise", 7, 5, 0.55); link(m, nrm, n, 1)
+ca = node(m, "color"); nodeset(m, ca, 1, 0.56, 0.47, 0.36)
+cb = node(m, "color"); nodeset(m, cb, 1, 0.34, 0.24, 0.16)
+alb = node(m, "vmath", 16); link(m, ca, alb, 1); link(m, cb, alb, 2); link(m, w, alb, 3)
+nl = node(m, "vmath", 10); link(m, nrm, nl, 1); nodeset(m, nl, 2, SUNX, SUNY, SUNZ)
+lam = node(m, "math", 6); link(m, nl, lam, 1); nodeset(m, lam, 2, 0)
+tur = node(m, "math", 30); link(m, n, tur, 1); nodeset(m, tur, 2, 0.35); nodeset(m, tur, 3, 0.8)
+e1 = node(m, "math", 2); link(m, lam, e1, 1); link(m, tur, e1, 2)
+e2 = node(m, "math", 2); link(m, e1, e2, 1); nodeset(m, e2, 2, SUNE / pi)
+em = node(m, "vmath", 9); link(m, alb, em, 1); link(m, e2, em, 2)
+socket(m, "emission", em)
+pl = add("sphere", "Ragnar", -1.6e6, -1.5e6, -2.2e6); scale(pl, PR)
+modifier(pl, "subsurf"); modset(pl, 0, "levels", 3); assign(pl, "Ragnar")
+
+# ---- light, camera, world ------------------------------------------------------
+# The sky is a star field (starfield.py); it adds next to no light, so the
+# sun does it all: hard shadows and black where it does not reach, as in space.
+# (make it with: python3 starfield.py; the path is from where BeeModel runs)
+sky = image("space.hdr")
+if sky { op("world.hdri", sky); op("world.strength", 1) } else { print("no space.hdr: run starfield.py here first (the studio sky stays)") }
+fn aim(o, px, py, pz, tx, ty, tz) {
+    dx = tx - px; dy = ty - py; dz = tz - pz
+    move(o, px, py, pz); rotate(o, atan2(dy, sqrt(dx * dx + dz * dz)), atan2(-dx, -dz), 0)
+}
+add("light", "Sun", 0, 3000, 0)
+select("Sun"); op("light.set", "type sun"); op("light.set", "power 0.9"); op("light.set", "size 0.53")
+aim("Sun", 0, 0, 0, -SUNX, -SUNY, -SUNZ)
+# the camera: at the launch tubes as the Vipers come out, across to the
+# Raider's run, then back to show the whole ship
+cam = add("camera", "Cam", 0, 0, 0)
+select(cam); op("camera.set", "active"); op("camera.set", "lens 35")
+fn shot(f, px, py, pz, tx, ty, tz) {
+    aim("Cam", px, py, pz, tx, ty, tz)
+    for a in 0..6 {
+        key("Cam:" + pick(a, "x", "y", "z", "rx", "ry", "rz"), f)
+    }
+}
+shot(1, 385, 12, 292, 300, -9, 210)
+shot(70, 420, 22, 330, 330, -6, 225)
+shot(165, 205, 28, 410, 70, -6, 268)
+shot(225, 175, 34, 432, 62, -6, 272)
+shot(300, 960, 360, 1280, 70, -20, 0)
+frame(1)
+print("objects", count(), "bodies", rbinfo(0))
