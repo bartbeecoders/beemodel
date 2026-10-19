@@ -425,19 +425,25 @@ wg:
     add     esi, [rsp+28]
     mov     ecx, COL_TEXT_DIM
     call    draw_text
-2:  mov     rdi, r15                    # the swatch: the right half
-    call    cpk_rgb_of
+2:  mov     rdi, r15                    # the swatch: the right half (all
+    call    cpk_rgb_of                  #  of it without a label)
     mov     r8d, eax
     mov     eax, r14d
     shr     eax, 1
     lea     edi, [r12+rax]
-    lea     esi, [r13+3]
+    cmp     qword ptr [rbx+WD_LABEL], 0
+    jne     3f
+    lea     eax, [r14-3]
+    lea     edi, [r12+3]
+3:  lea     esi, [r13+3]
     mov     edx, eax
     sub     edx, 3
     mov     ecx, [rsp+4]
     sub     ecx, 6
     mov     r9d, FIELD_R-1
+    mov     dword ptr [rip+th_raw], 1   # (the colour as it is)
     call    fill_rrect
+    mov     dword ptr [rip+th_raw], 0
     xor     eax, eax
     jmp     .Lwg_ret
 
@@ -1917,7 +1923,18 @@ wg_val_paste:
     call    clip_paste
     test    eax, eax
     jz      9f
+    mov     rax, [rbx+E_DESC]
+    cmp     dword ptr [rax+WD_KIND], WK_COLOR
+    jne     1f
+    mov     rdi, rsp                    # a colour: the hex code
+    call    cpk_parse_hex
+    test    edx, edx
+    jz      9f
     mov     rdi, rbx
+    mov     esi, eax
+    call    cpk_apply
+    jmp     9f
+1:  mov     rdi, rbx
     call    edit_begin
     mov     rsi, rsp
     call    tf_load
@@ -1935,7 +1952,13 @@ wg_val_copy:
     mov     rdi, [rax+E_DESC]
     mov     rsi, [rax+E_PTR]
     lea     rdx, [rip+wg_txt]
-    cmp     dword ptr [rdi+WD_KIND], WK_TEXT
+    cmp     dword ptr [rdi+WD_KIND], WK_COLOR
+    jne     2f
+    mov     rdi, rsi                    # a colour: #rrggbb
+    mov     rsi, rdx
+    call    cpk_hex_of
+    jmp     5f
+2:  cmp     dword ptr [rdi+WD_KIND], WK_TEXT
     je      3f
     cmp     dword ptr [rdi+WD_KIND], WK_INT
     je      3f
@@ -1968,7 +1991,14 @@ wg_val_reset:
     jz      9f
     mov     rdi, [rbx+E_DESC]
     movss   xmm0, [rdi+WD_DEF]
-    cmp     dword ptr [rdi+WD_KIND], WK_INT
+    cmp     dword ptr [rdi+WD_KIND], WK_COLOR
+    jne     12f
+    cvttss2si esi, xmm0                 # a colour: its default as 0xrrggbb
+    mov     rdi, rbx
+    call    cpk_apply
+    mov     eax, 1
+    jmp     9f
+12: cmp     dword ptr [rdi+WD_KIND], WK_INT
     jne     1f
     cvtss2si eax, xmm0                  # an integer: its digits
     mov     [rsp+64], eax
@@ -2003,6 +2033,8 @@ wg_has_def:
     cmp     ecx, WK_INT
     je      1f
     cmp     ecx, WK_SLIDER
+    je      1f
+    cmp     ecx, WK_COLOR               # (a colour's default: 0xrrggbb)
     jne     9f
 1:  movss   xmm0, [rdi+WD_DEF]
     ucomiss xmm0, xmm0                  # (NaN: none)

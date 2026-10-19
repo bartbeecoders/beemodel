@@ -131,13 +131,9 @@ FORM form_units, 1
 FFIELD fw_un, kw=kw_units, def=2.0
 
 # ---- paint.color <r> <g> <b> -----------------------------------------------------
-WIDGET fw_pr,   WK_INT, "form.paint.red", "Red", 0.0, 255.0, 1.0, 0, WGF_CLAMP
-WIDGET fw_pg,   WK_INT, "form.paint.green", "Green", 0.0, 255.0, 1.0, 0, WGF_CLAMP
-WIDGET fw_pb,   WK_INT, "form.paint.blue", "Blue", 0.0, 255.0, 1.0, 0, WGF_CLAMP
-FORM form_pcolor, 3
-FFIELD fw_pr, def=230.0
-FFIELD fw_pg, def=60.0
-FFIELD fw_pb, def=40.0
+WIDGET fw_pcol, WK_COLOR, "form.paint.color", "Colour", tip="The paint colour: click for the colour picker"
+FORM form_pcolor, 1
+FFIELD fw_pcol, def=15088680.0              # 0xe63c28
 
 # ---- rigid.add [active|passive] [shape] [mass m] [friction f] [bounce b] [damping d]
 WIDGET fw_rbt,  WK_ENUM, "form.rigid.type", "Type", aux=l_rbtype, n=2

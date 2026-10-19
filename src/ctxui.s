@@ -24,7 +24,6 @@ ctx_wid:        .skip 4                 # the field the menu is for
 ctx_field:      .quad op_fld_reset, 0, op_fld_copy, op_fld_paste, 0, op_fld_key, op_fld_path
 .equ ctx_field_n, (. - ctx_field) / 8
 s_no_def:       .asciz "This field has no default value"
-s_no_val:       .asciz "Colours: copy and paste the hex code"
 s_no_key:       .asciz "Only numbers and colours can be keyed"
 s_no_path:      .asciz "This field has no data path for scripts"
 s_gone:         .asciz "The field is no longer shown"
@@ -107,11 +106,7 @@ poll_fld_val:
     add     rsp, 8
     test    eax, eax
     jz      8f
-    cmp     eax, WK_COLOR
-    je      7f
     xor     eax, eax
-    ret
-7:  lea     rax, [rip+s_no_val]
     ret
 8:  lea     rax, [rip+s_gone]
     ret
