@@ -150,7 +150,7 @@ items_select:   .quad op_select_all, 0, op_mesh_all, op_mesh_inv, op_mesh_linked
 items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_ground, sub_landscape, op_la_water, 0, op_ref_add, 0, sub_curve
                 .quad op_cad_sketch, sub_generate
-                .quad 0, op_add_light, op_add_camera, op_add_armature
+                .quad 0, op_add_light, op_add_camera, op_add_armature, sub_field
 .equ items_add_n, (. - items_add) / 8
 items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, sub_snap, sub_parent, op_fd_move, 0
                 .quad sub_feature, sub_boolean, sub_mech, sub_physics, op_repair, op_print_check, op_obj_measure
@@ -189,6 +189,7 @@ sub_snap_l:     .quad op_cursor_sel, op_cursor_reset, op_sel_cursor, op_sel_grid
 sub_parent_l:   .quad op_par_set, op_par_clear
 sub_separate_l: .quad op_sep_loose
 sub_physics_l:  .quad op_rb_add, op_rb_rem, op_rb_joint, 0, op_shatter
+sub_field_l:    .quad op_fl_attr, op_fl_zone, op_fl_wind, op_fl_vortex, op_fl_turb, op_fl_drag
 tool_ops:       .quad op_tool_select, op_tool_move, op_tool_rotate, op_tool_scale
                 .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_plane
                 .quad op_add_light, op_add_camera
@@ -210,6 +211,7 @@ SUBMENU sub_snap, "Snap", sub_snap_l, 5
 SUBMENU sub_parent, "Parent", sub_parent_l, 2
 SUBMENU sub_separate, "Separate", sub_separate_l, 1
 SUBMENU sub_physics, "Physics", sub_physics_l, 5
+SUBMENU sub_field, "Force Field", sub_field_l, 6
 SUBMENU sub_workspace, "Workspace", sub_ws_l, 6
 
 # -----------------------------------------------------------------------------

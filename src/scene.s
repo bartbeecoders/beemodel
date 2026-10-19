@@ -73,7 +73,7 @@ prim_table:     .quad prim_cube,     s_cube,     OT_MESH
                 .quad prim_cone,     s_cone,     OT_MESH
                 .quad prim_torus,    s_torus,    OT_MESH
                 .quad prim_grid,     s_grid,     OT_MESH
-type_colors:    .long 0xb4b8c0, 0xe5c07b, 0x61afef, 0x8a9bb0
+type_colors:    .long 0xb4b8c0, 0xe5c07b, 0x61afef, 0x8a9bb0, 0xb4b8c0, 0x9ad0a0
 
 # ---- operators ---------------------------------------------------------------------
 OPERATOR op_add_cube,     "create.cube",     "Cube",     op_create, arg=0, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a cube"
@@ -332,6 +332,7 @@ scene_clear:
     call    pb_reset                    # (light probes)
     call    lc_reset                    # (light and camera settings)
     call    fd_reset                    # (the outliner's folders)
+    call    fl_reset                    # (force fields' settings)
     call    lm_reset                    # (the lightmap)
     call    an_reset                    # (and the animation)
     call    rig_reset                   #  (motion paths, onion skins)
@@ -781,7 +782,15 @@ obj_copy:
     pop     rax
     mov     rdi, [r12+OB_MRES]          # ... and multires displacements
     mov     [rax+OB_MRES], rdi
+    push    rax
     call    mesh_ref
+    pop     rax
+    cmp     dword ptr [r12+OB_TYPE], OT_FIELD   # a force field: its settings
+    jne     1f
+    mov     edi, [r12+OB_UID]
+    mov     esi, [rax+OB_UID]
+    call    fl_copy
+1:
     mov     eax, ebx
     jmp     9f
 8:  xor     eax, eax

@@ -490,6 +490,30 @@
 .equ OT_CAMERA,     2
 .equ OT_SKETCH,     3
 .equ OT_ARMATURE,   4
+.equ OT_FIELD,      5       # a force field (fields.s): its settings by uid in fl_cur
+.equ FLD_ATTR,      0       # field types: attractor, gravity zone, wind, vortex,
+.equ FLD_ZONE,      1       #  turbulence, drag
+.equ FLD_WIND,      2
+.equ FLD_VORTEX,    3
+.equ FLD_TURB,      4
+.equ FLD_DRAG,      5
+.equ FLD_N,         6
+.equ FF_UID,        0       # a field's record (fields.s)
+.equ FF_TYPE,       4
+.equ FF_STR,        8       # strength (keyframable: field:<name>:strength)
+.equ FF_FALL,       12      # falloff: 0 none, 1 radius (stops there), 2 smooth
+.equ FF_RAD,        16      # its radius (m); a zone's half size
+.equ FF_LAW,        20      # an attractor's law (0 inverse square, 1 1/d); a zone's
+                            #  shape (0 box, 1 sphere)
+.equ FF_GUST,       24      # wind: gusts 0..1
+.equ FF_SCALE,      28      # turbulence: the size of its swirls (m)
+.equ FF_SKIP,       32      # collision groups it leaves alone (bits; 0: all feel it)
+.equ FF_FLAGS,      36      # 1: off
+.equ FF_LIFT,       40      # vortex: pull along its axis
+.equ FF_INFLOW,     44      # vortex: pull towards its axis
+.equ FF_SOFT,       48      # attractor: softening radius (m)
+.equ FF_SEED,       52      # turbulence, gusts: another pattern
+.equ FF_SZ,         64
 .equ MAX_OBJECTS,   4096
 .equ KEY_A,             30
 .equ KEY_D,             32

@@ -189,6 +189,7 @@ rp_vals:        .skip 16                # mass friction bounce damping
 rp_vel:         .skip 12
 rp_grp:         .skip 4
 rp_grav:        .skip 12                # the world's
+rp_gon:         .skip 4                 #  gravity on (not all 0)
 rp_rate:        .skip 4
 rp_iter:        .skip 4
 rp_sub:         .skip 4
@@ -256,6 +257,7 @@ WIDGET wd_sh_gap,    WK_FLOAT, "shatter.gap", "Gap (m)", 0.0, 1.0, 0.001, 3, WGF
 WIDGET wd_sh_inon,   WK_TOGGLE, "shatter.inner_on", "Colour the cut faces", tip="The faces the cut makes get a colour of their own"
 WIDGET wd_sh_inner,  WK_COLOR, "shatter.inner", tip="The cut faces' colour"
 WIDGET wd_sh_run,    WK_BUTTON, "shatter.run", "Shatter", flags=WGF_PRIMARY, tip="Break it with these settings (on a piece: Re-cut, the original broken again)", sect=.data
+WIDGET wd_w_gon,     WK_TOGGLE, "physics.gravity_on", "Gravity", cb=wgon_cb, undo="Physics", tip="Off: nothing falls (space scenes - force fields still pull)"
 WIDGET wd_w_grav,    WK_FLOAT, "physics.gravity", step=0.02, dec=2, cb=wgrav_cb, undo="Physics", tip="Gravity (m/s2, X Y Z, -9.81 Y on Earth)"
 WIDGET wd_w_rate,    WK_INT, "physics.rate", "Steps a second", 1.0, 1000.0, 0.5, 0, WGF_CLAMP, cb=wnum_cb, undo="Physics", def=120.0, tip="More steps: fast things collide better, slower to run"
 WIDGET wd_w_iter,    WK_INT, "physics.iterations", "Iterations", 1.0, 200.0, 0.1, 0, WGF_CLAMP, cb=wnum_cb, undo="Physics", def=10.0, tip="Solver passes a step: stiffer stacks and joints"
@@ -594,6 +596,15 @@ wgrav_cb:
     mov     dword ptr [rax+AN_RW_+RW_SET], 1
     mov     dword ptr [rip+dirty], 1
 9:  ret
+wgon_cb:                                # on: Earth's again, off: none
+    xor     eax, eax
+    mov     [rip+rp_grav], eax
+    mov     [rip+rp_grav+8], eax
+    cmp     dword ptr [rip+rp_gon], 0
+    je      1f
+    mov     eax, [rip+pf_g]
+1:  mov     [rip+rp_grav+4], eax
+    jmp     wgrav_cb
 wnum_cb:
     sub     rsp, 8
     xor     edi, edi
@@ -983,8 +994,17 @@ rb_props_draw:
     call    pnl_begin
     call    rp_obj
     test    rax, rax
+    jnz     10f
+    call    fl_active                   # a force field: its section, the world
+    test    rax, rax
     jz      .Lpd_out
-    mov     rbx, rax                    # the object
+    add     r12d, 8
+    mov     edi, r12d
+    call    fl_props
+    mov     r12d, eax
+    mov     r14, [rip+an_cur]
+    jmp     .Lpd_world
+10: mov     rbx, rax                    # the object
     add     r12d, 8
     mov     r14, [rip+an_cur]           # the block (0: none yet)
     mov     rdi, r14
@@ -1579,7 +1599,17 @@ rp_world:
     test    eax, eax
     jz      5f
     mov     [rip+rp_sub], eax
-5:  lea     rdi, [rip+wd_w_grav]
+5:  mov     eax, [rip+rp_grav]          # gravity on: any of it
+    or      eax, [rip+rp_grav+4]
+    or      eax, [rip+rp_grav+8]
+    and     eax, 0x7fffffff
+    setnz   al
+    movzx   eax, al
+    mov     [rip+rp_gon], eax
+    lea     rdi, [rip+wd_w_gon]
+    lea     r8, [rip+rp_gon]
+    call    pnl_full
+    lea     rdi, [rip+wd_w_grav]
     lea     r8, [rip+rp_grav]
     lea     rdx, [rip+s_c_grav]
     call    rp_vec3
