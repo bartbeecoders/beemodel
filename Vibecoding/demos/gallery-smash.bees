@@ -1,0 +1,71 @@
+# Gallery Smash — BeeModel v0.19 demo
+# Three exhibits wait whole on their plinths until steel balls drop on them
+# (Shatter › "impact"): a glass vase (preset glass), a marble sphere (shards,
+# seeded round the point it is hit) and a sandstone cube that bursts into
+# gravel balls. Run: script.run <this file>, then press Space.
+
+while count() > 0 { delete(name(0)) }
+op("anim.range", "1 180 30")
+op("rigid.world", "gravity 0 -9.81 0 rate 120 iterations 10 substeps 4")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Gallery Floor", 0.16, 0.15, 0.15, 0.25, 0)
+mat("Plinth", 0.92, 0.91, 0.88, 0.6, 0)
+mat("Steel", 0.6, 0.6, 0.62, 0.2, 1)
+m = mat("Vase Glass", 0.55, 0.85, 0.75, 0.03, 0); matset(m, "transmission", 0.9); matset(m, "ior", 1.5)
+mat("Marble", 0.93, 0.92, 0.9, 0.15, 0)
+mat("Sandstone", 0.8, 0.63, 0.4, 0.9, 0)
+m = mat("Strip", 1, 0.9, 0.75, 0.5, 0); matset(m, "emission", 1, 0.9, 0.75); matset(m, "strength", 6)
+
+f = add("plane", "Floor", 0, 0, 0); scale(f, 30)
+assign(f, "Gallery Floor")
+select(f); op("rigid.add", "passive plane friction 0.6")
+w = add("cube", "Back Wall", 0, 4, -4); scale(w, 15, 4, 0.2); assign(w, "Plinth")
+s = add("cube", "Light Strip", 0, 6.5, -3.75); scale(s, 9, 0.05, 0.05); assign(s, "Strip")
+
+X = -3.5
+for i in 0..3 {
+    p = add("cube", "Plinth " + i, X + i * 3.5, 0.6, 0); scale(p, 0.6, 0.6, 0.6); assign(p, "Plinth")
+    select(p); op("rigid.add", "passive box friction 0.6")
+}
+
+# 1. the glass vase: a revolved profile, glass preset (60 shards, breaks at 10 N s)
+k = sketch("Vase Profile", "XY")
+fn vp(x, y) { return point(k, x, y) }
+a0 = vp(0, 0);       a1 = vp(0.22, 0);     a2 = vp(0.38, 0.25);  a3 = vp(0.42, 0.55)
+a4 = vp(0.30, 0.95); a5 = vp(0.17, 1.15);  a6 = vp(0.22, 1.35);  a7 = vp(0.19, 1.35)
+a8 = vp(0.14, 1.16); a9 = vp(0.26, 0.95);  a10 = vp(0.37, 0.55); a11 = vp(0.33, 0.27)
+a12 = vp(0.18, 0.06); a13 = vp(0, 0.06)
+line(k, a0, a1); line(k, a1, a2); line(k, a2, a3); line(k, a3, a4); line(k, a4, a5); line(k, a5, a6); line(k, a6, a7)
+line(k, a7, a8); line(k, a8, a9); line(k, a9, a10); line(k, a10, a11); line(k, a11, a12); line(k, a12, a13); line(k, a13, a0)
+revolve("Vase", k, 360deg, "v")
+select("Vase Profile"); op("object.hide")
+move("Vase", X, 1.2, 0); assign("Vase", "Vase Glass")
+select("Vase"); op("object.shatter", "preset glass count 80 inner 0.8 0.95 0.9")
+print("vase", shinfo(0), "pieces")
+
+# 2. the marble sphere: shards gathered where the ball lands, glued, breaks at 800 N s
+m = add("sphere", "Marble Sphere", X + 3.5, 1.9, 0); scale(m, 0.7); assign(m, "Marble")
+select(m); op("object.shatter", "shards count 90 at " + (X + 3.5) + " 2.6 0 spread 0.6 glue 60000 impact 800 density 800 inner 0.75 0.73 0.7")
+print("sphere", shinfo(0), "pieces")
+
+# 3. the sandstone cube: whole until hit, then a heap of gravel
+c = add("cube", "Sand Cube", X + 7, 1.75, 0); scale(c, 0.55); assign(c, "Sandstone")
+select(c); op("object.shatter", "balls count 260 impact 30 density 1800")
+print("cube", shinfo(0), "balls")
+
+# the steel balls, dropped from heights so they land one after another
+for i in 0..3 {
+    b = add("sphere", "Drop " + i, X + i * 3.5 + 0.05 * i, 4.5 + i * 5, 0.03); scale(b, 0.22); assign(b, "Steel")
+    select(b); op("rigid.add", "active sphere mass 150 material metal")
+}
+
+# camera: a wide shot of the row that slowly pushes in
+cam = add("camera", "Cam", 0, 3.6, 13)
+key("Cam:x", 1, -1.5); key("Cam:y", 1, 3.6); key("Cam:z", 1, 13); key("Cam:rx", 1, -9.5deg); key("Cam:ry", 1, -6.6deg)
+key("Cam:x", 180, 2.0); key("Cam:y", 180, 2.4); key("Cam:z", 180, 8.0); key("Cam:rx", 180, -9.9deg); key("Cam:ry", 180, 5.7deg)
+add("light", "Key", 3, 8, 6)
+view(0, 12, 12, 0, 1.5, 0)
+frame(1)
