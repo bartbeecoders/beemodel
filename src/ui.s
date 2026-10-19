@@ -1828,6 +1828,7 @@ ui_draw:
     call    area_draw_all
     call    kbnav_ring                  # (the keyboard's active area)
     call    draw_statusbar
+    call    outl_drag_draw              # an outliner row dragged: its label
     cmp     dword ptr [rip+menu_open], 0
     jl      4f
     call    mn_draw

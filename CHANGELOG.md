@@ -9,13 +9,15 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [0.20.0] - 2026-10-19
 
 "UI round 2": the interface before the rest of the 2.0 plan
-(`Vibecoding/BeeModel-UI2-Plan.html`), issues W1-W9 (#317-#325).
+(`Vibecoding/BeeModel-UI2-Plan.html`), issues W1-W11 (#317-#327).
 
 ### Fixed
 - **Picking a theme** (#317): a dropdown inside a dialog (Preferences'
   Theme, UI scale, the AI provider ...) opened under the dialog and took
   clicks unseen. Lists are drawn over dialogs now. A theme picked from the
   View menu or the Viewport panel is kept in the preferences too.
+- The numeric keypad types values in fields, the console and the palette
+  (#326).
 - Rendered shading no longer flickers while an animation plays: it shows a
   raycast each frame until the scene holds still for 150 ms, then the
   path-traced samples.
@@ -49,7 +51,9 @@ project uses [Semantic Versioning](https://semver.org/).
 - **Folders in the outliner** (#323): nested groups that never move their
   objects, each with an eye, camera and lock for all inside; Ctrl+G, Move to
   Folder..., drag and drop, rename, fold; saved (FOLD) and undone;
-  `folder()`, `infolder()`, `folders()`.
+  `folder()`, `infolder()`, `folders()`. Dragging a row shows a label at
+  the pointer (what is dragged, what letting go does) and lights the row or
+  folder that would take it (#327).
 - **Reference images** (#324): Add › Reference Image... (or a picture
   dropped on the window, or `refimage()`): square to the view, upright,
   drawn in every shading mode behind or in front of the scene, with an
