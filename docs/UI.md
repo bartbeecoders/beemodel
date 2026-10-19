@@ -65,11 +65,13 @@ Views **glide** to where they go when you align to an axis (the gizmo, Numpad 1 
 
 The menu bar holds every command, in File, Edit, View, Select, Add, Object, Mesh, Render, AI and Help. A command that needs values opens a **dialog** with a form. The values you typed are kept for next time. Commands that read or write files open the **file browser**:
 
-- folders come first;
+- folders come first, then the files in columns: name, size and when they were changed. A click on a column's header sorts by it, and a second click turns the order round;
 - a click picks, and a double-click (or Enter) opens or takes;
-- Backspace goes up;
+- Backspace goes up, **<** and **>** (Alt+Left, Alt+Right) go back and forward, and each part of the folder above the list is a button that goes there;
 - the path field takes a typed folder or file, and Tab completes a name in it (when several match, a second Tab shows them in the list);
-- opening a scene shows a picture of it beside the list: BeeModel keeps a small picture of the 3D viewport in each `.bee` file it saves from the window;
+- the filter box keeps only the names with what you type in them; **Hidden files** (Ctrl+H) shows names that start with a dot, and **All files** shows every file, not only the kinds the command can take;
+- the column at the left has the places (home, `~/BeeModel`, the whole computer), your **favourites** (**+ Favorite** adds the folder shown, **- Favorite** takes it out), the **drives** mounted under `/run/media`, `/media` and `/mnt` with their free space, and the last folders used. Favourites and recent folders are kept in `~/.config/beemodel/places`;
+- a scene shows a picture of it beside the list (BeeModel keeps a small picture of the 3D viewport in each `.bee` file it saves from the window), and an image (PNG, JPEG, HDR) shows itself;
 - saving over a file asks first.
 
 Exports add their own options: selected objects only, the up axis and the scale. **Export Drawing (PDF)** adds the sheet (A4, A3, A2, Letter; landscape or portrait), the views (front, top, right and an isometric one), the scale (the largest that fits, or a fixed one) and the title block's title and author; the date is today's. Scripts set the same with `drawing.options`.
