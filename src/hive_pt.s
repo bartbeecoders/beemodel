@@ -2993,7 +2993,7 @@ hive_start:
     mov     eax, -1
     rep     stosd
     mov     dword ptr [rip+hv_film], 0  # a shadow catcher: the film keeps
-    cmp     dword ptr [rip+hv_ncatch], 0 #  its alpha (renders, on the CPU)
+    cmp     dword ptr [rip+hv_ncatch], 0 #  its alpha (renders)
     je      10f
     cmp     dword ptr [rip+gt_cpu], 0
     jne     10f
@@ -3028,9 +3028,6 @@ hive_start:
     mov     dword ptr [rip+gt_batch], 1
     mov     dword ptr [rip+hv_why], HW_INTERNAL
     cmp     dword ptr [rip+gt_cpu], 0   # (hive_prep: trace_ray, the CPU's)
-    jne     11f
-    mov     dword ptr [rip+hv_why], HW_CATCH
-    cmp     dword ptr [rip+hv_film], 0  # (a shadow catcher: the CPU's too)
     jne     11f
     call    gpu_pt_begin                # its passes on the GPU (gpu.s)? (hv_why)
 11:

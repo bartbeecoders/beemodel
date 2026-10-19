@@ -155,7 +155,7 @@ vk_names2:      .asciz "vkGetDeviceQueue"
                 .asciz "vkUnmapMemory"
                 .byte 0
 .align 8
-k_nbind:        .long 16, 8, 16         # bindings per kernel (2: the path tracer
+k_nbind:        .long 20, 8, 20         # bindings per kernel (2: the path tracer
                                         #  with shader graphs, made when asked)
 k_code:         .quad spv_pt, spv_pt_end, spv_raster, spv_raster_end, spv_ptg, spv_ptg_end
 
@@ -637,7 +637,7 @@ vk_setup:
     lea     rdi, [rip+ci]               # a pool for both sets
     call    zero256
     mov     dword ptr [rip+ci2], DESC_STORAGE
-    mov     dword ptr [rip+ci2+4], 48
+    mov     dword ptr [rip+ci2+4], 64
     mov     dword ptr [rip+ci], ST_DPOOL
     mov     dword ptr [rip+ci+20], 3
     mov     dword ptr [rip+ci+24], 1

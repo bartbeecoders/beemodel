@@ -55,7 +55,7 @@
 .equ SOCK_SEQPACKET_CLOEXEC, 0x80005
 .equ HELLO_MS,      15000               # a slow driver start is fine
 .equ RUN_MS,        120000
-.equ PT_NBIND,      16
+.equ PT_NBIND,      20                  # pt.comp: 0-15, the film, the HDRI, its CDF, spheres
 .equ LV_NOREAD,     0x10000             # gpu_lv_run: no pixels back
 .equ RS_NBIND,      8
 
@@ -700,6 +700,14 @@ gpu_pt_begin:
     mov     [rip+hv_m2], rdi
     mov     rcx, [rbx+96]
     rep     stosb
+    cmp     dword ptr [rip+hv_film], 0  # the film's sums too
+    je      1f
+    mov     rdi, [r14+128]
+    add     rdi, r13
+    mov     [rip+hv_alpha], rdi
+    mov     rcx, [rbx+128]
+    rep     stosb
+1:
     mov     dword ptr [rip+gp_first], 1
     mov     dword ptr [rip+hv_gpu], 1
 9:  add     rsp, 16
@@ -772,6 +780,17 @@ gp_put:
     mov     [rbx+112], rax              # tuv
     call    gp_img_bytes
     mov     [rbx+120], rax              # images
+    mov     eax, 16                     # the film (renders with shadow
+    cmp     dword ptr [rsp], 0          #  catchers): 4 floats a pixel
+    jne     12f
+    cmp     dword ptr [rip+hv_film], 0
+    je      12f
+    mov     rax, r12
+    shl     rax, 4
+12: mov     [rbx+128], rax
+    mov     qword ptr [rbx+136], 16     # (H3: the HDRI, its CDF; H6: spheres)
+    mov     qword ptr [rbx+144], 16
+    mov     qword ptr [rbx+152], 16
     mov     rdi, rbx
     mov     rsi, r14
     mov     edx, PT_NBIND
@@ -795,17 +814,6 @@ gp_put:
     mov     rdi, [r14+24]
     mov     rcx, [rbx+24]
     call    put_bytes
-    cmp     dword ptr [rip+hv_ncatch], 0    # (shadow catchers' triangles:
-    je      1f                          #  the bit is not the shader's)
-    mov     rdi, [r14+24]
-    add     rdi, r13
-    mov     ecx, [rip+hv_n]
-2:  test    ecx, ecx
-    jz      1f
-    dec     ecx
-    btr     dword ptr [rdi+rcx*4], 30
-    jmp     2b
-1:
     mov     rsi, [rip+hv_tvc]
     mov     rdi, [r14+32]
     mov     rcx, [rbx+32]
@@ -893,6 +901,14 @@ gp_put:
     lea     rdi, [rdi+48]
     mov     ecx, 13*4
     rep     movsb
+    cmp     dword ptr [rsp], 0          # cam[14] |= 16: the film (slot 0)
+    jne     13f
+    cmp     dword ptr [rip+hv_film], 0
+    je      13f
+    mov     rdi, [r14]
+    add     rdi, r13
+    or      dword ptr [rdi+48+14*4], 16
+13:
     mov     rdi, [r14]
     add     rdi, r13
     lea     rdi, [rdi+112]
@@ -1126,9 +1142,11 @@ gpu_pt_pass:
     mov     dword ptr [r13+10*GB_SZ+GB_FLAGS], GBF_OUT
     mov     dword ptr [r13+11*GB_SZ+GB_FLAGS], GBF_OUT
     mov     dword ptr [r13+12*GB_SZ+GB_FLAGS], GBF_OUT
+    mov     dword ptr [r13+16*GB_SZ+GB_FLAGS], GBF_OUT
     jmp     3f
 2:  mov     dword ptr [r13+11*GB_SZ+GB_FLAGS], GBF_IN|GBF_OUT
     mov     dword ptr [r13+12*GB_SZ+GB_FLAGS], GBF_IN|GBF_OUT
+    mov     dword ptr [r13+16*GB_SZ+GB_FLAGS], GBF_IN|GBF_OUT
 3:  mov     edx, [rip+hv_w]
     add     edx, 7
     shr     edx, 3

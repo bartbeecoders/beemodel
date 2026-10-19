@@ -49,6 +49,10 @@ layout(std430, binding = 12) buffer M2 { uint m2[]; };               // w h: f32
 layout(std430, binding = 13) readonly buffer TO { float to_[]; };    // object-space v0 e1 e2
 layout(std430, binding = 14) readonly buffer TU { float tuv[]; };    // UVs (u0 NaN: none)
 layout(std430, binding = 15) readonly buffer IM { uint img[]; };     // 64 x (texel offset, w, h, fmt), texels
+layout(std430, binding = 16) buffer FL { float film[]; };            // w h 4: a film with alpha (flag 16)
+layout(std430, binding = 17) readonly buffer EV { float envimg[]; };  // (H3)
+layout(std430, binding = 18) readonly buffer EC { float envcdf[]; };  // (H3)
+layout(std430, binding = 19) readonly buffer SP { float sph[]; };     // (H6)
 
 const float PI = 3.14159265;
 const float INV_PI = 0.31830989;
@@ -102,10 +106,13 @@ vec3 local_to_world(vec3 l, vec3 t, vec3 b, vec3 n) { return t * l.x + b * l.y +
 vec2 sincos_2pi(float u) { float a = u * TWO_PI; return vec2(sin(a), cos(a)); }
 
 // ---- the scene -------------------------------------------------------------
+const uint CATCH = 0x40000000u;         // tm: a shadow catcher's triangle (HV_CATCH)
+uint mid(uint t) { return tm[t] & ~CATCH; }
 vec3 tv3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tv[o], tv[o + 1u], tv[o + 2u]); }
 vec3 tn3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tn[o], tn[o + 1u], tn[o + 2u]); }
 
 struct Ray { vec3 o; vec3 d; float tmax; float t; int tri; float u; float v; };
+bool skipc = false;                     // trace: shadow catchers' triangles let through
 
 bool tri_hit(uint t, inout Ray r, out float tt, out float uu, out float vv) {
     vec3 v0 = tv3(t, 0u), e1 = tv3(t, 1u), e2 = tv3(t, 2u);
@@ -182,6 +189,7 @@ bool trace(inout Ray r, bool anyhit) {
             uint end = first + ((ref >> 27) & 0xfu);
             for (uint t = first; t < end; t++) {
                 float tt, uu, vv;
+                if (skipc && (tm[t] & CATCH) != 0u) continue;
                 if (!tri_hit(t, r, tt, uu, vv)) continue;
                 if (!(tt < best)) continue;
                 best = tt;
@@ -216,7 +224,7 @@ struct Mat { vec3 base; float metal, rough, spec, ior, trans; vec3 emit; float s
 
 Mat mat_of(uint t) {
     Mat m;
-    uint i = tm[t];
+    uint i = mid(t);
     if (i == 0u) {
         m.base = vec3(0.8); m.metal = 0.0; m.rough = 0.5; m.spec = 0.5; m.ior = 1.45; m.trans = 0.0;
         m.emit = vec3(0.0); m.strength = 0.0; m.coat = 0.0; m.crough = 0.03;
@@ -697,7 +705,7 @@ uint mwu(uint m, uint k) { return floatBitsToUint(mats[m * MW + k]); }
 //   hive_pt.s): 1 opaque, 0 a hole (one-sided from behind, masked below its
 //   clip), else a translucent material's opacity
 float cover(uint t, float u, float v, vec3 d) {
-    uint m = tm[t];
+    uint m = mid(t);
     if (m == 0u) return 1.0;
     if (mwf(m, W_SIDED) >= 0.5) {
         vec3 e1 = tv3(t, 1u), e2 = tv3(t, 2u);
@@ -1143,8 +1151,16 @@ uint xrgb(vec3 c) {
 //   each light's direct light (hard shadows) and the sky through RC_AO
 //   occlusion rays (a pattern turned per pixel), then on through mirrors and
 //   glass, else the sky's glossy reflection and the end
-void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float auxo[7]) {
+// film (flag 16, renders with shadow catchers: hive_pt.s's): the camera sees no
+//   sky; ft = seen, a catcher seen, its light unshadowed, and lit (the
+//   film's alpha: seen + catcher (1 - lit / unshadowed))
+bool film_on() { return (floatBitsToUint(P.cam[14]) & 16u) != 0u; }
+
+void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float auxo[7], out vec4 ft) {
     for (int k = 0; k < 7; k++) auxo[k] = 0.0;
+    ft = vec4(0.0);
+    bool film = film_on() && !rc;
+    bool catcher = false;
     Ray ray = cam_ray(sx, sy);
     beta = vec3(1.0);
     L = vec3(0.0);
@@ -1158,6 +1174,7 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
     for (;;) {
         ray.tmax = BIG;
         if (!trace_cut(ray, false)) {
+            if (film && depth == 0u) break;         // (the film: no sky seen)
             vec3 sky = sky_rad(ray.d);
             float wgt = 1.0;
             if (!spec) {
@@ -1188,9 +1205,9 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
         if (P.debug == 1u) { L = ns * 0.5 + vec3(0.5); break; }
         Mat m = mat_of(t);
 #ifdef GRAPHS
-        if (tm[t] != 0u && mwu(tm[t], W_GRN) != 0u) {         // its graph here
+        if (mid(t) != 0u && mwu(mid(t), W_GRN) != 0u) {       // its graph here
             float al, mk;
-            graph_shade(tm[t], t, ray.u, ray.v, false, m, ns, al, mk);
+            graph_shade(mid(t), t, ray.u, ray.v, false, m, ns, al, mk);
         }
 #endif
         if (tvc[t * 3u] != 0u) m.base *= vcol_lin3(t, ray.u, ray.v);
@@ -1204,6 +1221,10 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
             auxo[0] = c.base.x; auxo[1] = c.base.y; auxo[2] = c.base.z;
             auxo[3] = ns.x; auxo[4] = ns.y; auxo[5] = ns.z;
             auxo[6] = ray.t;
+            if (film) {                 // a shadow catcher: the light sample
+                if ((tm[t] & CATCH) == 0u) ft.x = 1.0;  //  below, unshadowed
+                else { ft.y = 1.0; catcher = true; }    //  and shadowed
+            }
         }
         // next-event estimation: a light sample (rc: the sun, each point
         //   light, the occlusion rays)
@@ -1229,13 +1250,22 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
             }
             vec3 f = vec3(0.0);
             float pb = 0.0;
-            if (!ao) {
+            float cu = 0.0;
+            if (catcher) {              // its light here, unshadowed
+                cu = lum(ls.li) * (max(dot(c.n, ls.wi), 0.0) / ls.pdf);
+                if (isnan(cu) || !(cu > TINY)) break;
+                ft.z = cu;
+            } else if (!ao) {
                 pb = bsdf_eval(c, ls.wi, f);
                 if (!(lum(f) > TINY)) continue;
             }
             Ray sr = spawn_ray(p, ng, ls.wi);
             sr.tmax = ao ? RC_AO_DIST : ls.dist * 0.99999994 - EPS;
-            if (trace_cut(sr, !ao)) {
+            skipc = catcher;            // (catchers cast no shadow on catchers)
+            bool shadowed = trace_cut(sr, !ao);
+            skipc = false;
+            if (catcher) { if (!shadowed) ft.w = cu; break; }
+            if (shadowed) {
                 if (ao) {               // occluded nearby: roughly what that
                     uint th = uint(sr.tri);     //  surface sends back (lit by
                     vec3 nh = tri_geo_normal(th);   //  half the sky and the
@@ -1251,6 +1281,7 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
             float k = abs(dot(c.n, ls.wi)) * wgt / ls.pdf;
             add_beta_l(f * ls.li * k);
         }
+        if (catcher) break;
         if (rc) {                       // the raycast: the sky, then onwards
             skyl *= 1.0 / float(RC_AO);
             open *= 1.0 / float(RC_AO);
@@ -1431,7 +1462,8 @@ void main() {
         float sy = (1.0 - (jy + float(y)) * 2.0 / fh) * fh / fw;
         vec3 lo;
         float ax[7];
-        trace_path(sx, sy, rc, px, lo, ax);
+        vec4 ft;
+        trace_path(sx, sy, rc, px, lo, ax, ft);
         if (rc) { m2[px] = xrgb(lo); return; }
         if ((live & 1u) != 0u) {                        // live: the mean only
             bool first = P.spp + s == 0u;
@@ -1453,6 +1485,8 @@ void main() {
         }
         for (int k = 0; k < 7; k++)
             if (!isnan(ax[k])) aux[px * 7u + uint(k)] += ax[k];
+        if (film_on())
+            for (int k = 0; k < 4; k++) film[px * 4u + uint(k)] += ft[k];
         float l = lum(lo);
         if (!isnan(l)) m2[px] = floatBitsToUint(uintBitsToFloat(m2[px]) + l * l);
         for (int k = 0; k < 3; k++)
