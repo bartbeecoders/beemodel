@@ -447,7 +447,7 @@ builtins:
     .quad bn_fieldinfo, b_fieldinfo
     .long 1, 1
     .quad bn_emit, b_emit
-    .long 1, 2
+    .long 1, 3
     .quad bn_particles, b_particles
     .long 1, 2
     .quad bn_shatter, b_shatter
@@ -5191,7 +5191,8 @@ b_clinfo:
     jmp     ret_num
 
 # cacheinfo(k) -> the simulation cache: 0 rigid frames, 1 cloth frames,
-#   2 MB in use, 3 rigid baked, 4 cloth baked, 5 full, 6 the budget (MB)
+#   2 MB in use, 3 rigid baked, 4 cloth baked, 5 full, 6 the budget (MB),
+#   7 particles frames, 8 liquid frames, 9 particles baked, 10 liquid baked
 b_cainfo:
     sub     rsp, 8
     call    a_num
@@ -5834,13 +5835,16 @@ b_field:
 
 # fieldinfo(k) -> 0 force fields in the scene, 1 the overlay's arrows (as
 #   last drawn), 2 its streamline segments, 3 the largest pull it showed
-# emit(object [, settings]) -> the number of a new particle system on it
-#   (settings as particles.add takes them: "rate 200 life 2 speed 4"), nil
-#   when there is no room
+# emit(object [, preset or settings [, settings]]) -> the number of a new
+#   particle system on it (a preset: rain, snow, sparks, confetti,
+#   fountain, tank; settings as particles.add takes them: "rate 200 life
+#   2 speed 4"), nil when there is no room
 b_emit:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    sub     rsp, 8
     mov     rbx, rdi
     mov     r12d, esi
     call    a_obj
@@ -5855,6 +5859,27 @@ b_emit:
 1:  mov     rdi, r13
     mov     rsi, rax
     call    ps_add
+    mov     r14d, eax
+    test    eax, eax
+    jz      2f
+    cmp     r12d, 3                     # and then these
+    jb      2f
+    lea     rdi, [rbx+32]
+    call    a_str
+    push    rax
+    push    rax
+    mov     edi, [r13+OB_UID]
+    lea     esi, [r14-1]
+    call    ps_nth_own
+    pop     rsi
+    pop     rsi
+    test    rax, rax
+    jz      2f
+    mov     rdi, rax
+    call    ps_parse
+2:  mov     eax, r14d
+    add     rsp, 8
+    pop     r14
     pop     r13
     pop     r12
     pop     rbx

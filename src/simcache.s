@@ -1,9 +1,10 @@
 # =============================================================================
 #  BeeModel - the simulation cache.
 #
-#  Two channels: 0 rigid bodies (each moving body's object place a frame),
+#  Four channels: 0 rigid bodies (each moving body's object place a frame),
 #  1 cloth (each cloth's vertices a frame, quantized to 16 bits within its
-#  bounds). A channel holds frames start+1 .. start+n, recorded as the
+#  bounds), 2 particles and 3 liquids (particles.s: each particle's place
+#  and velocity in 16 bits within its system's bounds, its age, size, id). A channel holds frames start+1 .. start+n, recorded as the
 #  simulation reaches them (rbody.s, cloth.s), and played back after: going
 #  back on the timeline shows them without simulating again.
 #
@@ -41,7 +42,7 @@
 .equ SC_USED,   32
 .equ SC_IDX,    40                      # each frame's offset (u64)
 .equ SC_SZ,     64
-.equ SC_NCH,    2
+.equ SC_NCH,    4
 .equ SC_CAP,    0x100000000             # 4 GiB of address space a channel
 .equ SC_MAXF,   0x100000                # frames a channel
 .equ MAP_NORES, 0x4022
@@ -60,30 +61,36 @@ sc_ch:          .skip SC_SZ*SC_NCH
 .section .rodata
 k_rigid:        .asciz "rigid"
 k_cloth:        .asciz "cloth"
+k_parts:        .asciz "particles"
+k_liquid:       .asciz "liquid"
 k_budget:       .asciz "budget"
 s_sc_head:      .asciz "  cache: rigid "
 s_sc_cloth:     .asciz ", cloth "
+s_sc_parts:     .asciz ", particles "
+s_sc_liq:       .asciz ", liquid "
 s_sc_frames:    .asciz " frames"
 s_sc_baked:     .asciz " (baked)"
 s_sc_full:      .asciz " (full)"
 s_sc_mb:        .asciz ", "
 s_sc_of:        .asciz " MB of "
 s_sc_mbend:     .asciz " MB"
-s_sc_nothing:   .asciz "  sim.bake: no rigid bodies or cloth to bake"
+s_sc_nothing:   .asciz "  sim.bake: no rigid bodies, cloth or particles to bake"
+.align 8
+sc_names:       .quad s_sc_cloth, s_sc_parts, s_sc_liq
 s_sc_bad:       .asciz "  not understood: "
 s_sc_freed:     .asciz "  cache freed"
 f_mb:           .float 9.5367431640625e-7
 
-OPERATOR op_sim_bake,  "sim.bake",  "Bake Simulation",  job_sim_bake, flags=OPF_AI_SAFE, doc="Simulate the scene's frame range and keep every frame (saved with the file; edits no longer change it until sim.free): sim.bake [rigid|cloth]"
+OPERATOR op_sim_bake,  "sim.bake",  "Bake Simulation",  job_sim_bake, flags=OPF_AI_SAFE, doc="Simulate the scene's frame range and keep every frame (saved with the file; edits no longer change it until sim.free): sim.bake [rigid|cloth|particles|liquid]"
 JOB_OP job_sim_bake, do_sim_bake, "Baking the simulation"
-OPERATOR op_sim_free,  "sim.free",  "Free Simulation Cache", do_sim_free, flags=OPF_AI_SAFE, doc="Forget the simulation cache and bake (simulated again when needed): sim.free [rigid|cloth]"
+OPERATOR op_sim_free,  "sim.free",  "Free Simulation Cache", do_sim_free, flags=OPF_AI_SAFE, doc="Forget the simulation cache and bake (simulated again when needed): sim.free [rigid|cloth|particles|liquid]"
 OPERATOR op_sim_cache, "sim.cache", "Simulation Cache", do_sim_cache, flags=OPF_AI_SAFE, doc="Show what the simulation cache holds, or set its memory budget: sim.cache [budget MB]"
 
 .text
 
 # chan(edi=channel) -> rax = its record
 chan:
-    and     edi, 1
+    and     edi, SC_NCH-1
     imul    eax, edi, SC_SZ
     lea     rcx, [rip+sc_ch]
     add     rax, rcx
@@ -160,13 +167,17 @@ sc_meshhash:
 
 # sc_reset - a new scene: nothing cached
 sc_reset:
-    xor     edi, edi
+    push    rbx
+    xor     ebx, ebx
+1:  mov     edi, ebx
     call    sc_clear
-    mov     edi, 1
-    call    sc_clear
-    xor     eax, eax
-    mov     [rip+sc_ch+SC_KEY], rax
-    mov     [rip+sc_ch+SC_SZ+SC_KEY], rax
+    mov     edi, ebx
+    call    chan
+    mov     qword ptr [rax+SC_KEY], 0
+    inc     ebx
+    cmp     ebx, SC_NCH
+    jb      1b
+    pop     rbx
     ret
 
 # sc_clear(edi=channel) - its frames (and its bake) go
@@ -270,8 +281,14 @@ sc_range:
 
 # total -> rax = bytes in use, all channels
 total:
-    mov     rax, [rip+sc_ch+SC_USED]
-    add     rax, [rip+sc_ch+SC_SZ+SC_USED]
+    xor     eax, eax
+    xor     ecx, ecx
+    lea     r8, [rip+sc_ch]
+1:  add     rax, [r8+SC_USED]
+    add     r8, SC_SZ
+    inc     ecx
+    cmp     ecx, SC_NCH
+    jb      1b
     ret
 
 # frame_room(rbx=channel record, rdx=bytes) -> rax = room for the next frame, or 0
@@ -353,10 +370,27 @@ fsize:
     ret
 
 # sc_info(edi=what) -> xmm0: 0 rigid frames, 1 cloth frames, 2 MB in use,
-#   3 rigid baked, 4 cloth baked, 5 full, 6 the budget (MB)
+#   3 rigid baked, 4 cloth baked, 5 full, 6 the budget (MB), 7 particles
+#   frames, 8 liquid frames, 9 particles baked, 10 liquid baked
 sc_info:
     xorps   xmm0, xmm0
-    cmp     edi, 1
+    cmp     edi, 7
+    jb      70f
+    cmp     edi, 10
+    ja      70f
+    mov     edx, edi
+    sub     edi, 5                      # 7, 8 frames; 9, 10 baked
+    cmp     edx, 9
+    jb      72f
+    sub     edi, 2
+72: call    chan
+    mov     ecx, [rax+SC_N]
+    cmp     edx, 9
+    jb      71f
+    mov     ecx, [rax+SC_BAKED]
+71: cvtsi2ss xmm0, ecx
+    ret
+70: cmp     edi, 1
     ja      2f
     call    chan
     mov     eax, [rax+SC_N]
@@ -378,6 +412,8 @@ sc_info:
 4:  jne     5f
     mov     eax, [rip+sc_ch+SC_FULL]
     or      eax, [rip+sc_ch+SC_SZ+SC_FULL]
+    or      eax, [rip+sc_ch+2*SC_SZ+SC_FULL]
+    or      eax, [rip+sc_ch+3*SC_SZ+SC_FULL]
     cvtsi2ss xmm0, eax
     ret
 5:  mov     rax, [rip+sc_budget]
@@ -412,13 +448,27 @@ which:
     lea     rsi, [rip+k_cloth]
     call    str_eq
     test    eax, eax
-    jz      8f
+    jz      3f
     or      ebx, 2
+    jmp     1b
+3:  lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_parts]
+    call    str_eq
+    test    eax, eax
+    jz      4f
+    or      ebx, 4
+    jmp     1b
+4:  lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_liquid]
+    call    str_eq
+    test    eax, eax
+    jz      8f
+    or      ebx, 8
     jmp     1b
 5:  mov     eax, ebx
     test    eax, eax
     jnz     9f
-    mov     eax, 3
+    mov     eax, 15
     jmp     9f
 8:  lea     rdi, [rip+s_sc_bad]
     lea     rsi, [rip+im_word]
@@ -448,15 +498,28 @@ do_sim_bake:
     mov     ebx, eax
     mov     r12, [rip+an_cur]
     test    r12, r12
+    jnz     10f
+    mov     rax, [rip+ps_cur]           # particles alone: their frame range
+    test    rax, rax                    #  (an animation block for it)
     jz      7f
-    xor     eax, eax                    # something to bake
+    call    an_own_g
+    mov     r12, rax
+    test    r12, r12
+    jz      7f
+10: xor     eax, eax                    # something to bake
     test    ebx, 1
     jz      1f
     or      eax, [r12+AN_NRB_]
 1:  test    ebx, 2
     jz      2f
     or      eax, [r12+AN_CW_+20]        # (CW_N)
-2:  test    eax, eax
+2:  test    ebx, 12                     # particles (any system)
+    jz      21f
+    mov     rcx, [rip+ps_cur]
+    test    rcx, rcx
+    jz      21f
+    or      eax, [rcx+4]                # (particles.s PB_N)
+21: test    eax, eax
     jz      7f
     movss   xmm0, [rip+an_frame]
     movss   [rsp], xmm0
@@ -465,13 +528,22 @@ do_sim_bake:
     xor     edi, edi
     call    sc_clear
 3:  test    ebx, 2
-    jz      4f
+    jz      31f
     mov     edi, 1
+    call    sc_clear
+31: test    ebx, 4
+    jz      32f
+    mov     edi, 2
+    call    sc_clear
+32: test    ebx, 8
+    jz      4f
+    mov     edi, 3
     call    sc_clear
 4:  mov     edi, [r12+AN_START]         # from the start: simulated again
     call    apply
     call    rb_reset
     call    cl_reset
+    call    pt_reset
     mov     r13d, [r12+AN_START]
     mov     r14d, [r12+AN_END]
 5:  inc     r13d
@@ -532,7 +604,17 @@ do_sim_free:
     mov     edi, 1
     call    sc_clear
     call    cl_reset
-2:  lea     rdi, [rip+s_sc_freed]
+2:  test    ebx, 4
+    jz      21f
+    mov     edi, 2
+    call    sc_clear
+    call    pt_reset
+21: test    ebx, 8
+    jz      22f
+    mov     edi, 3
+    call    sc_clear
+    call    pt_reset
+22: lea     rdi, [rip+s_sc_freed]
     call    log_line
     movss   xmm0, [rip+an_frame]        # simulated again to here
     call    an_apply
@@ -572,6 +654,8 @@ do_sim_cache:
     mov     [rip+sc_budget], rax
     mov     dword ptr [rip+sc_ch+SC_FULL], 0     # room again, perhaps
     mov     dword ptr [rip+sc_ch+SC_SZ+SC_FULL], 0
+    mov     dword ptr [rip+sc_ch+2*SC_SZ+SC_FULL], 0
+    mov     dword ptr [rip+sc_ch+3*SC_SZ+SC_FULL], 0
     jmp     8f
 7:  lea     rdi, [rip+s_sc_bad]
     lea     rsi, [rip+im_word]
@@ -604,9 +688,10 @@ status:
     cmp     dword ptr [rax+SC_FULL], 0
     je      3f
 2:  call    fmt_str
-3:  test    ebx, ebx
-    jnz     4f
-    lea     rdi, [rip+s_sc_cloth]
+3:  cmp     ebx, SC_NCH-1
+    jae     4f
+    lea     rax, [rip+sc_names]
+    mov     rdi, [rax+rbx*8]
     call    fmt_str
     inc     ebx
     jmp     1b

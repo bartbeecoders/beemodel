@@ -1039,7 +1039,7 @@ def add_modifier(f, m, label):
 
 def props_tab(m, f, name):
     """Open a Properties tab (U10) by name: object, modifiers, material, ..."""
-    tabs = ['object', 'modifiers', 'material', 'physics', 'cad', 'scene', 'render', 'viewport', 'animation', 'rig', 'landscape']
+    tabs = ['object', 'modifiers', 'material', 'physics', 'cad', 'scene', 'render', 'viewport', 'animation', 'rig', 'particles', 'landscape']
     x, y = widget_xy(m, 'props.tab.' + name, tabs.index(name))
     if x:
         f.click(x, y); f.pump(0.2)
