@@ -1,0 +1,61 @@
+# Dam Break — BeeModel v0.22 demo
+# A column of water (the liquid solver, ~45 000 particles) is let go at one end
+# of a long tank. It runs down the tank, breaks round a concrete pier, throws up
+# foam where the surface tears, and catches three pine crates dropped into it,
+# while a steel ball rolls along the bottom.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+op("anim.range", "1 180 30")
+op("rigid.world", "gravity 0 -9.81 0 rate 120 iterations 12 substeps 4")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Concrete", 0.45, 0.44, 0.42, 0.9, 0)
+mat("Tile", 0.82, 0.84, 0.86, 0.35, 0)
+mat("Pine", 0.72, 0.52, 0.30, 0.7, 0)
+mat("Steel", 0.6, 0.6, 0.62, 0.25, 1)
+g = mat("Glass", 0.95, 0.97, 0.97, 0.02, 0); matset(g, "transmission", 1); matset(g, "ior", 1.5)
+
+# the tank: 6 m long, 1.2 m wide; the liquid's domain is its inside
+X0 = -3
+X1 = 3
+ZW = 0.6
+op("create.ground")
+fl = add("cube", "Floor", 0, -0.05, 0); scale(fl, 3.25, 0.05, 0.8); assign(fl, "Tile")
+bk = add("cube", "Back", 0, 0.8, -ZW - 0.07); scale(bk, 3.25, 0.8, 0.05); assign(bk, "Tile")
+e0 = add("cube", "End0", X0 - 0.07, 0.8, 0); scale(e0, 0.05, 0.8, 0.7); assign(e0, "Tile")
+e1 = add("cube", "End1", X1 + 0.07, 0.8, 0); scale(e1, 0.05, 0.8, 0.7); assign(e1, "Tile")
+fr = add("cube", "Front", 0, 0.8, ZW + 0.04); scale(fr, 3.25, 0.8, 0.02); assign(fr, "Glass")
+# the walls hold the crates (the domain holds the water: they stand 2 cm outside it)
+select(bk); op("rigid.add", "passive box"); select(e0); op("rigid.add", "passive box")
+select(e1); op("rigid.add", "passive box"); select(fr); op("rigid.add", "passive box")
+
+# a pier the wave breaks round (a passive collider: the liquid flows past it)
+p = add("cube", "Pier", 0.6, 0.45, 0); scale(p, 0.18, 0.45, 0.18); rotate(p, 0, 45deg, 0); assign(p, "Concrete")
+select(p); op("rigid.add", "passive box")
+
+# the water: a column at the left end, filled with particles 3.5 cm apart
+w = add("cube", "Water", X0 + 0.6, 0.8, 0); scale(w, 0.6, 0.8, ZW - 0.02)
+emit("Water", "from fill size 0.035 life 100000 speed 0 liquid on viscosity water vorticity 0.4 surface on"
+    + " domain " + X0 + " 0 " + (-ZW) + " " + X1 + " 2.2 " + ZW + " name Water")
+# foam: where the surface tears, fast particles with few neighbours spray off
+emit("Water", "from events events spray Water per 1 speed 0.3 spread 180 inherit 1 life 0.7 life_random 0.5"
+    + " size 0.012 size_end 0.3 drag 0.5 color ffffff collide on bounce 0.1 name Foam")
+
+# pine crates (light: about 450 kg/m³) dropped from high up into the wave after it
+# a steel ball on the bottom in front of the column, which the wave rolls along
+for k in 0..3 {
+    c = add("cube", "Crate" + k, 0.9 + k * 0.7, 6 + k * 2, -0.3 + k * 0.3); scale(c, 0.12)
+    rotate(c, (10 + 15 * k) * 1deg, (20 + 35 * k) * 1deg, 0)
+    assign(c, "Pine"); select(c); op("rigid.add", "active box mass 6.5 friction 0.5")
+}
+b = add("sphere", "Ball", -1.4, 0.12, 0.2); scale(b, 0.12); assign(b, "Steel")
+select(b); op("rigid.add", "active sphere mass 56 material metal")
+
+cam = add("camera", "Cam", -2.5, 3.2, 6.5)
+select(cam); op("camera.set", "lens 30")
+key("Cam:x", 1, -2.5); key("Cam:y", 1, 3.2); key("Cam:z", 1, 6.5); key("Cam:rx", 1, -24deg); key("Cam:ry", 1, -14deg)
+key("Cam:x", 70, -0.4); key("Cam:y", 70, 2.8); key("Cam:z", 70, 6.2); key("Cam:rx", 70, -22deg); key("Cam:ry", 70, 0)
+key("Cam:x", 180, 4.6); key("Cam:y", 180, 3.0); key("Cam:z", 180, 5.4); key("Cam:rx", 180, -24deg); key("Cam:ry", 180, 34deg)

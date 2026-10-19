@@ -1,0 +1,61 @@
+# Rainstorm — BeeModel v0.22 demo
+# A squall crosses a valley. Rain falls from a cloud deck, every drop that hits
+# the hills (the landscape's heights) or the cabin's roof (a rigid body's
+# triangles) dies there and throws up three splash droplets (hit events).
+# Gusts of Wind (a force field, keyed stronger as the squall passes) slant
+# it. A lamp on the porch catches the drops.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+op("anim.range", "1 240 30")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Timber", 0.30, 0.20, 0.12, 0.8, 0)
+mat("Roof", 0.20, 0.08, 0.06, 0.6, 0)
+mat("Rain", 0.75, 0.82, 0.9, 0.2, 0)
+m = material("Lamp"); matset(m, "base", 0, 0, 0); matset(m, "emission", 1, 0.7, 0.4); matset(m, "strength", 30)
+
+# the valley: rolling hills with a level pad in the middle for the cabin
+op("landscape.add", "hills size 200 seed 4")
+op("landscape.layer", "set 0 height 24")
+op("landscape.layer", "add flatten height 9 at 0 0 24")
+op("landscape.paint", "add grass colour 0.18 0.32 0.10 friction 0.7")
+op("landscape.paint", "add rock colour 0.32 0.31 0.29 friction 0.8")
+op("landscape.paint_auto")
+
+# the cabin: walls, a pitched roof, a porch lamp (passive: a collider)
+H = height("Landscape", 0, 0)
+c = add("cube", "Cabin", 0, H + 1.2, 0); scale(c, 2.2, 1.2, 1.6); assign(c, "Timber")
+select(c); op("rigid.add", "passive box")
+for s in 0..2 {
+    sg = 1 - 2 * s
+    p = add("cube", "Roof" + s, 0, H + 3.0, sg * 0.9); scale(p, 2.5, 0.06, 1.15); rotate(p, sg * 30deg, 0, 0)
+    assign(p, "Roof"); select(p); op("rigid.add", "passive box")
+}
+add("sphere", "Bulb", 1.2, H + 2.0, 1.75); scale("Bulb", 0.08); assign("Bulb", "Lamp")
+
+# the cloud deck the rain falls from (out of shot, 28 m up)
+add("plane", "Cloud", 0, 28, 0); scale("Cloud", 14, 1, 14); assign("Cloud", "Rain")
+emit("Cloud", "from faces rate 40000 speed 6 direction 0 -1 0 life 3 size 0.03 drag 0.25 collide on on_hit die"
+    + " color c0d0e0 start 1 name Rain")
+emit("Cloud", "from events events hit Rain per 3 speed 1.6 spread 55 life 0.35 life_random 0.5 size 0.012"
+    + " collide on bounce 0.2 color e0f0ff name Splash")
+
+# the squall: wind across the valley, gusting, stronger in the middle of it
+field("wind", "Gale", "strength 2 gust 0.6")
+move("Gale", -10, 12, 0)
+key("field:Gale:strength", 1, 1)
+key("field:Gale:strength", 90, 9)
+key("field:Gale:strength", 170, 9)
+key("field:Gale:strength", 240, 2)
+
+cam = add("camera", "Cam", 9, H + 2.2, 11)
+select(cam); op("camera.set", "lens 30")
+key("Cam:x", 1, 8); key("Cam:y", 1, H + 2.2); key("Cam:z", 1, 10); key("Cam:rx", 1, -6deg); key("Cam:ry", 1, 38deg)
+key("Cam:x", 240, 5); key("Cam:y", 240, H + 1.7); key("Cam:z", 240, 7.5); key("Cam:rx", 240, -4deg); key("Cam:ry", 240, 28deg)
+add("light", "Sun", -20, 30, 10)
+select("Sun"); op("light.set", "type sun"); op("light.set", "power 0.35"); op("light.set", "size 6")
+view(35, 12, 26, 0, 3, 0)
+frame(1)

@@ -1,0 +1,60 @@
+# Fireworks — BeeModel v0.22 demo
+# Three launchers on a jetty fire rockets into a night sky. Each rocket's death
+# is an event: it bursts into a shell of stars, and each star that burns out
+# drops a short-lived glitter spark. Stars that reach the water die on it.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+op("anim.range", "1 300 30")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+# the particles' colour lights them: Vertex Color drives the emission
+fn glow(n, strength) {
+    m = material(n); matset(m, "base", 0, 0, 0); matset(m, "roughness", 1)
+    c = node(m, "vcolor"); socket(m, "emission", c); matset(m, "strength", strength); return m
+}
+mat("Wood", 0.22, 0.13, 0.07, 0.8, 0)
+mat("Water", 0.01, 0.02, 0.04, 0.05, 0)
+mat("Tube", 0.08, 0.08, 0.09, 0.5, 1)
+glow("Glow", 6)
+
+sea = add("plane", "Sea", 0, 0, 0); scale(sea, 120); assign(sea, "Water")
+select(sea); op("rigid.add", "passive plane")
+j = add("cube", "Jetty", 0, 0.3, 0); scale(j, 9, 0.3, 1.5); assign(j, "Wood")
+select(j); op("rigid.add", "passive box")
+
+# a launcher: a tube that fires rockets, the bursts their deaths make, and glitter
+fn launcher(i, x, tilt, c0, c1, start) {
+    t = "Tube" + i
+    o = add("cylinder", t, x, 0.95, 0); scale(o, 0.12, 0.35, 0.12); rotate(o, 0, 0, tilt); assign(o, "Glow")
+    emit(t, "from point rate 1.3 start " + start + " speed 32 speed_random 0.15 spread 6 life 1.7 life_random 0.25"
+        + " drag 0.15 size 0.06 color ffd0a0 color_end ff6020 seed " + (11 * i) + " name Rocket" + i)
+    emit(t, "from events events died Rocket" + i + " per 400 speed 11 speed_random 0.2 spread 180 inherit 0.3"
+        + " life 1.9 life_random 0.35 drag 1.1 gravity 0.35 size 0.1 size_end 0.3"
+        + " color " + c0 + " color_end " + c1 + " collide on on_hit die name Stars" + i)
+    emit(t, "from events events died Stars" + i + " per 1 speed 0.4 spread 180 inherit 0.5"
+        + " life 0.35 gravity 0.6 size 0.03 size_end 0 color ffffff color_end ffe080 name Glitter" + i)
+}
+launcher(0, -6, 10deg, "ff3050", "ffa020", 10)
+launcher(1, 0, 0, "40c0ff", "c060ff", 32)
+launcher(2, 6, -10deg, "60ff70", "fff060", 54)
+
+# lanterns along the jetty, and a low moon
+m = material("Lantern"); matset(m, "base", 0, 0, 0); matset(m, "emission", 1, 0.62, 0.3); matset(m, "strength", 8)
+for k in 0..7 {
+    x = -8.4 + k * 2.8
+    p = add("cylinder", "Post" + k, x, 1.1, 1.3); scale(p, 0.04, 0.5, 0.04); assign(p, "Wood")
+    l = add("sphere", "Lantern" + k, x, 1.7, 1.3); scale(l, 0.12); assign(l, "Lantern")
+}
+add("light", "Moon", -40, 30, -60)
+select("Moon"); op("light.set", "type sun"); op("light.set", "power 0.06"); op("light.set", "size 0.5")
+
+sky = image("space.hdr")
+if sky { op("world.hdri", sky); op("world.strength", 0.4) } else { print("no space.hdr: run starfield.py here first") }
+
+cam = add("camera", "Cam", -12, 2, 62)
+select(cam); op("camera.set", "lens 28")
+key("Cam:x", 1, -12); key("Cam:y", 1, 2); key("Cam:z", 1, 62); key("Cam:rx", 1, 15deg); key("Cam:ry", 1, -11deg)
+key("Cam:x", 300, 12); key("Cam:y", 300, 3); key("Cam:z", 300, 56); key("Cam:rx", 300, 16deg); key("Cam:ry", 300, 12deg)

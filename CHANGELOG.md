@@ -6,6 +6,21 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Particle demo scenes in `Vibecoding/demos/`: fireworks (chained died
+  events, glowing through Vertex Color → Emission), dam-break (liquid,
+  surface, foam, floating crates), leaf-twister (leaves drawn as objects
+  in a keyed vortex) and rainstorm (hit events on a landscape and a roof,
+  keyed wind).
+
+### Fixed
+- A force field moved by keys, or with a keyed strength, changed the
+  simulation cache's key every frame, so particles and rigid bodies (and
+  cloth, whose key mixes the same hash) simulated again from the start on
+  each frame (leaf-twister reached 930 ms a frame; 60 balls 62 ms by frame
+  100). The key now takes such a field's animation instead of
+  where it is and its strength now (`fl_mix`, `an_fkeyed`).
+
 ## [0.22.0] - 2026-10-19
 
 Stage P of the 2.0 plan (`Vibecoding/BeeModel-2.0-Plan.html`): particles
