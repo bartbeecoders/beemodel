@@ -161,6 +161,8 @@ w_autosave:     .asciz "autosave"
 w_threads:      .asciz "threads"
 w_jit:          .asciz "jit"
 w_gpu:          .asciz "gpu"
+w_gpudev:       .asciz "gpu_device"
+c_gpudev:       .asciz "Render device"
 w_mcp:          .asciz "mcp"
 w_tier:         .asciz "agent_permission"
 w_key:          .asciz "key"
@@ -201,7 +203,7 @@ l_prov:         .quad s_p_claude, s_p_grok, s_p_or
 pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_orbit, pr_orbit, 1, w_autosave, pr_autosave, 0
                 .quad w_threads, pr_threads, 0, w_jit, pr_jit, 0, w_mcp, pr_mcp, 0
-                .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0
+                .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0, w_gpudev, pr_gpu_dev, 0
                 .quad w_welcome, pr_welcome, 0, w_cbaxes, pr_cbaxes, 0, w_rmotion, pr_rmotion, 0
                 .quad w_grid, show_grid, 0, w_gridsz, pr_grid, 1, w_fov, pr_fov, 0
                 .quad w_near, pr_near, 1, w_lvspp, pr_lvspp, 0, w_lvdn, pr_lvdn, 0, w_rw, pr_rw, 0, w_rh, pr_rh, 0
@@ -216,7 +218,8 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
 
 .section .data
 .align 4
-pr_gpu_on:      .long 1                 # (gpu_off is its opposite)
+pr_gpu_on:      .long 1                 # (gpu_off is its opposite; an old file's)
+pr_gpu_dev:     .long 0                 # Render device: 0 auto, 1 RTX, 2 GPU, 3 CPU
 pf_pick:        .long -1                # a category picked while searching
 
 .text
@@ -544,10 +547,13 @@ pr_apply:
     jle     2f
     mov     eax, 200
 2:  mov     [rip+pr_scale], eax
-    mov     eax, [rip+pr_gpu_on]
-    xor     eax, 1
-    and     eax, 1
-    mov     [rip+gpu_off], eax
+    mov     edi, [rip+pr_gpu_dev]       # the render device (an old file's
+    cmp     dword ptr [rip+pr_gpu_on], 0 #  "gpu 0": the CPU)
+    jne     21f
+    test    edi, edi
+    jnz     21f
+    mov     edi, 3
+21: call    gpu_set_dev
     mov     edi, [rip+th_id]
     cmp     edi, TH_LAST
     jbe     3f
@@ -606,6 +612,8 @@ prefs_save:
     mov     eax, [rip+gpu_off]
     xor     eax, 1
     mov     [rip+pr_gpu_on], eax
+    mov     eax, [rip+gpu_dev]
+    mov     [rip+pr_gpu_dev], eax
     lea     r12, [rip+pr_vars]
 1:  mov     rsi, [r12]
     test    rsi, rsi
@@ -844,7 +852,7 @@ WIDGET wd_pf_kset, WK_BUTTON, "prefs.key_set", "Set", flags=WGF_COMPACT, tip="Th
 WIDGET wd_pf_kclr, WK_BUTTON, "prefs.key_clear", "Clear", flags=WGF_COMPACT, tip="No key for it"
 WIDGET wd_pf_kreset, WK_BUTTON, "prefs.keys_reset", "Reset All Keys", tip="Every operator back to its own key"
 WIDGET wd_pf_threads, WK_INT, "prefs.threads", "Worker threads (0: one a CPU)", 0.0, 255.0, 0.05, 0, WGF_CLAMP, cb=save_cb
-WIDGET wd_pf_gpu,  WK_TOGGLE, "prefs.gpu", "Render on the GPU when there is one", cb=gpu_cb
+WIDGET wd_pf_gpu,  WK_ENUM, "prefs.gpu_device", cb=gpu_cb, aux=dev_names, n=4, tip="Where renders run. Auto: RTX ray tracing when the GPU has it, else the GPU, else the CPU"
 WIDGET wd_pf_jit,  WK_TOGGLE, "prefs.jit", "Compile node programs to machine code (JIT)", cb=save_cb
 WIDGET wd_pf_autosave, WK_INT, "prefs.autosave", "Autosave every N changes (0: never)", 0.0, 10000.0, 0.1, 0, WGF_CLAMP, cb=save_cb
 WIDGET wd_pf_libadd, WK_BUTTON, "prefs.library_add", "Add Library Folder...", aux=op_lb_add
@@ -878,7 +886,7 @@ pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxe
                 .quad 2, pr_emu3, 0, 2, pr_orbit, 0x3f800000
                 .quad 3, pr_nkey, 0
                 .quad 4, pr_rw, 960, 4, pr_rh, 540, 4, pr_rspp, 128, 4, pr_rdn, 1
-                .quad 5, pr_threads, 0, 5, pr_jit, 1, 5, pr_gpu_on, 1
+                .quad 5, pr_threads, 0, 5, pr_jit, 1, 5, pr_gpu_on, 1, 5, pr_gpu_dev, 0
                 .quad 6, pr_autosave, 25
                 .quad 7, pr_tier, -1, 7, pr_mcp, 1, 7, ai_prov, 0, 7, ai_cl_turns, 100
                 .quad 7, ai_gk_turns, 100, 7, ai_or_steps, 30
@@ -1498,12 +1506,11 @@ pf_reset:
     lea     r8, [rip+pr_threads]
     xor     edx, edx
     call    pf_item
-    mov     eax, [rip+gpu_off]
-    xor     eax, 1
+    mov     eax, [rip+gpu_dev]
     mov     [rip+pr_gpu], eax
     lea     rdi, [rip+wd_pf_gpu]
     lea     r8, [rip+pr_gpu]
-    xor     edx, edx
+    lea     rdx, [rip+c_gpudev]
     call    pf_item
     lea     rdi, [rip+wd_pf_jit]
     lea     r8, [rip+pr_jit]
@@ -1759,10 +1766,9 @@ scale_cb:                               # rdi = &pr_sel_scale: the UI scale
     mov     eax, [rcx+rax*4]
     mov     [rip+pr_scale], eax
     jmp     scale_now
-gpu_cb:                                 # rdi = &pr_gpu
-    mov     eax, [rdi]
-    xor     eax, 1
-    mov     [rip+gpu_off], eax
+gpu_cb:                                 # rdi = &pr_gpu: the render device
+    mov     edi, [rdi]
+    call    gpu_set_dev
     jmp     save_cb
 tier_cb:                                # rdi = &pr_tierv
     mov     eax, [rdi]

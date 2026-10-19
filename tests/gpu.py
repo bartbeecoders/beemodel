@@ -223,6 +223,19 @@ def main():
     p, gp = render('vor_gpu', vs, 16, BEEMODEL_GPU='any')
     check(gp[2] == 0 and compare(c, p)[0] == 0,
           f'a graph with a node the GPU does not evaluate (Voronoi): the CPU renders it, the same image ({gp})')
+    # ---- the render device and why a render is where it is (H1) -----------------
+    r = run('op("render.device", "cpu")\nop("render.image", "%s/d1.png 64 48 4 0")\nprint("cpu", gpu(18), gpu(6))\n'
+            'op("render.device", "gpu")\nop("render.image", "%s/d2.png 64 48 4 0")\nprint("gpu", gpu(18), gpu(6))\n'
+            'print("build", gpu(15), gpu(16), gpu(17))\n'
+            'op("render.device", "auto")\nop("create.ground")\nop("render.image", "%s/d3.png 64 48 4 0")\n'
+            'print("ground", gpu(18))\n' % (HOME, HOME, HOME), BEEMODEL_GPU='any')
+    b = [float(x) for x in r.get('build', ['-1', '-1', '-1'])]
+    check(r.get('cpu') == ['1', '0'] and r.get('gpu') == ['0', '1'],
+          f'render.device cpu: on the CPU, why 1 ({r.get("cpu")}); gpu: on the GPU, why 0 ({r.get("gpu")})')
+    check(len(b) == 3 and b[0] >= b[1] >= 0 and b[2] == 12,
+          f'gpu(15..17): the scene build\'s ms, its BVH\'s, its triangles (the cube: 12) ({b})')
+    check(r.get('ground') is not None, f'a shadow catcher (the Ground) says why ({r.get("ground")})')
+
     c, _ = render('den_cpu', SCENE, 32, 1, BEEMODEL_GPU='off')
     p, gp = render('den_gpu', SCENE, 32, 1, BEEMODEL_GPU='any')
     mad, same = compare(c, p)

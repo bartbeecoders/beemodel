@@ -30,6 +30,8 @@
 
 .globl gpu_status
 .globl gpu_off
+.globl gpu_dev
+.globl gpu_set_dev
 .globl gpu_ready
 .globl gpu_stop
 .globl gpu_query
@@ -71,6 +73,7 @@ s_g_off:        .asciz "  GPU helper: not used (CPU paths)"
 .align 4
 g_state:        .long 0                 # 0 not tried, 1 running, -1 none
 gpu_off:        .long 0                 # 1: renders stay on the CPU
+gpu_dev:        .long 0                 # Render › Device: 0 auto, 1 RTX, 2 GPU, 3 CPU
 g_fd:           .long -1
 g_pid:          .long 0
 
@@ -118,6 +121,19 @@ gp_types:       .quad (1<<1)|(1<<2)|(1<<3)|(1<<4)|(1<<5)|(1<<6)|(1<<7)|(1<<8)|(1
 gpu_status:
     mov     eax, [rip+g_state]
     mov     edx, [rip+g_type]
+    ret
+
+# gpu_set_dev(edi=device: 0 auto, 1 RTX, 2 GPU, 3 CPU) - Render › Device
+#   (gpu_off follows it: the CPU alone)
+gpu_set_dev:
+    cmp     edi, 3
+    jbe     1f
+    xor     edi, edi
+1:  mov     [rip+gpu_dev], edi
+    xor     eax, eax
+    cmp     edi, 3
+    sete    al
+    mov     [rip+gpu_off], eax
     ret
 
 # gpu_ready -> eax = 1 if the helper runs (it is started on the first call)
@@ -638,15 +654,24 @@ gpu_pt_begin:
     push    r15
     sub     rsp, 16
     mov     dword ptr [rip+hv_gpu], 0
+    mov     dword ptr [rip+hv_why], HW_WORLD
+    cmp     dword ptr [rip+hv_env], 0   # (an HDRI world: the CPU's)
+    jne     9f
+    mov     dword ptr [rip+hv_why], HW_NODE
     call    hv_gpu_ok
     test    eax, eax
     jz      9f
     call    gp_has_graphs               # (graphs: the kernel that has them)
     imul    eax, eax, 3
     mov     [rip+gp_kern], eax
+    mov     dword ptr [rip+hv_why], HW_SETTING
+    cmp     dword ptr [rip+gpu_off], 0
+    jne     9f
+    mov     dword ptr [rip+hv_why], HW_NONE
     call    gpu_ready
     test    eax, eax
     jz      9f
+    mov     dword ptr [rip+hv_why], HW_FAILED
     xor     edi, edi
     mov     esi, [rip+hv_w]
     mov     edx, [rip+hv_h]
@@ -655,6 +680,7 @@ gpu_pt_begin:
     call    gp_put
     test    rax, rax
     jz      9f
+    mov     dword ptr [rip+hv_why], HW_GPU
     mov     r13, rax                    # base
     lea     rbx, [rip+gp_bytes]
     lea     r14, [rip+gp_off]
@@ -1113,8 +1139,10 @@ gpu_pt_pass:
     mov     esi, PT_NBIND
     call    gpu_run
     test    eax, eax
-    jz      9f
-    mov     dword ptr [rip+gp_first], 0
+    jnz     6f
+    mov     dword ptr [rip+hv_why], HW_FAILED  # (the rest on the CPU)
+    jmp     9f
+6:  mov     dword ptr [rip+gp_first], 0
     add     [rip+hv_spp], ebx
     add     [rip+g_spp], ebx
     inc     dword ptr [rip+g_npt]

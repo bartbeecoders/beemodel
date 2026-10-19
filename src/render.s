@@ -23,6 +23,9 @@
 .globl op_render_save
 .globl op_render_pass
 .globl op_render_settings
+.globl op_render_device
+.globl dev_names
+.globl why_names
 
 .equ MAP_ANON_PRIV, 0x22
 .equ RN_SLICE_MS,   14                  # rendering per main-loop iteration
@@ -51,6 +54,8 @@ s_rn_start:     .asciz "  rendering "
 s_rn_x:         .asciz " x "
 s_rn_s:         .asciz " px, "
 s_rn_s2:        .asciz " samples (Esc stops)"
+s_rn_spl2:      .asciz " samples, "
+s_rn_esc:       .asciz " (Esc stops)"
 s_rn_done:      .asciz "  render finished: "
 s_rn_stopped:   .asciz "  render stopped: "
 s_rn_in:        .asciz " samples, "
@@ -67,6 +72,29 @@ s_rn_savefail:  .asciz "  render: could not write the file"
 s_rn_needsave:  .asciz "  render.save <path.png> [beauty|albedo|normal|depth]"
 s_rn_badpass:   .asciz "  render pass: beauty, albedo, normal or depth"
 s_rn_pass:      .asciz "  render pass: "
+s_rn_dev:       .asciz "  render device: "
+s_rn_baddev:    .asciz "  render device: auto, rtx, gpu or cpu"
+s_dev_auto:     .asciz "Auto"
+s_dev_rtx:      .asciz "GPU (RTX)"
+s_dev_gpu:      .asciz "GPU"
+s_dev_cpu:      .asciz "CPU"
+k_dev_auto:     .asciz "auto"
+k_dev_rtx:      .asciz "rtx"
+k_dev_gpu:      .asciz "gpu"
+k_dev_cpu:      .asciz "cpu"
+s_why0:         .asciz "on the GPU"
+s_why1:         .asciz "on the CPU (Device: CPU)"
+s_why2:         .asciz "on the CPU (no GPU helper or device)"
+s_why3:         .asciz "on the CPU (an HDRI world)"
+s_why4:         .asciz "on the CPU (a shadow catcher)"
+s_why5:         .asciz "on the CPU (a material node the GPU lacks)"
+s_why6:         .asciz "on the CPU (the GPU helper failed)"
+s_why7:         .asciz "on the CPU (a bake)"
+s_rn_on2:       .asciz ", "
+.align 8
+dev_names:      .quad s_dev_auto, s_dev_rtx, s_dev_gpu, s_dev_cpu
+dev_keys:       .quad k_dev_auto, k_dev_rtx, k_dev_gpu, k_dev_cpu
+why_names:      .quad s_why0, s_why1, s_why2, s_why3, s_why4, s_why5, s_why6, s_why7
 s_rn_set:       .asciz "  render settings: "
 s_rn_hint:      .asciz "Press F12 to render the scene"
 s_rn_hint2:     .asciz "(camera object, or the viewport's view)"
@@ -92,6 +120,7 @@ OPERATOR op_render_start, "render.start", "Render", do_render_start, key=KEY_F12
 OPERATOR op_render_stop, "render.stop", "Stop Render", do_render_stop, flags=OPF_AI_SAFE|OPF_QUIET, doc="Stop the running render (keeps the samples so far)", poll=poll_rendering
 OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, doc="Save the render as PNG, or .exr (linear half floats): render.save <path> [beauty|albedo|normal|depth]", poll=poll_render, form=form_rsave
 OPERATOR op_render_pass, "render.pass", "Next Render Pass", do_render_pass, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)", poll=poll_render
+OPERATOR op_render_device, "render.device", "Render Device", do_render_device, flags=OPF_AI_SAFE|OPF_QUIET, doc="Where renders run: render.device [auto|rtx|gpu|cpu] (auto: the best there is - RTX ray tracing, the GPU, else the CPU; none: says which; kept in the preferences)"
 OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>", form=form_render
 OPERATOR op_render_denoise, "render.denoise", "Denoise", do_render_denoise, check_denoise, flags=OPF_AI_SAFE|OPF_QUIET, doc="Toggle denoising the beauty pass when a render ends (guided by albedo, normal, depth)", poll=poll_render
 
@@ -249,7 +278,16 @@ do_render_start:
     call    fmt_str
     mov     edi, [rip+hv_target]
     call    fmt_int
-    lea     rdi, [rip+s_rn_s2]
+    lea     rdi, [rip+s_rn_spl2]
+    call    fmt_str
+    mov     eax, [rip+hv_why]           # ", on the GPU" / ", on the CPU (why)"
+    cmp     eax, HW_LAST
+    jbe     31f
+    xor     eax, eax
+31: lea     rcx, [rip+why_names]
+    mov     rdi, [rcx+rax*8]
+    call    fmt_str
+    lea     rdi, [rip+s_rn_esc]
     call    fmt_str
     lea     rdi, [rip+fmt_buf]
     call    log_line
@@ -382,6 +420,42 @@ do_render_pass:
     lea     rdi, [rip+fmt_buf]
     call    log_line
 9:  add     rsp, 8
+    ret
+
+# ---- render.device [auto|rtx|gpu|cpu] -----------------------------------------
+do_render_device:
+    push    rbx
+    mov     rsi, [rip+op_arg]
+    call    rn_word
+    test    eax, eax
+    jz      5f
+    xor     ebx, ebx
+1:  lea     rax, [rip+dev_keys]
+    mov     rsi, [rax+rbx*8]
+    lea     rdi, [rip+rn_wordbuf]
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+    inc     ebx
+    cmp     ebx, 4
+    jb      1b
+    lea     rdi, [rip+s_rn_baddev]
+    call    log_line
+    jmp     9f
+2:  mov     edi, ebx
+    call    gpu_set_dev
+    call    prefs_save
+    mov     dword ptr [rip+dirty], 1
+5:  call    fmt_reset                   # "render device: GPU (RTX)"
+    lea     rdi, [rip+s_rn_dev]
+    call    fmt_str
+    mov     eax, [rip+gpu_dev]
+    lea     rcx, [rip+dev_names]
+    mov     rdi, [rcx+rax*8]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+9:  pop     rbx
     ret
 
 # ---- render.save <path> [pass] ----------------------------------------------

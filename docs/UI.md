@@ -127,7 +127,7 @@ The tabs down the left side of Properties are:
 | **Landscape** | Only for a landscape: what it is, then Size and Samples, the layer stack (eyes, pick, add, up, down, remove, the picked layer's values), paint layers (colour, friction, bounce, rules, Auto Paint), Sea and Files |
 | **CAD** | Parameters (expressions), the feature tree with sizes you can edit, a health dot, and up / down buttons that reorder it (the part rebuilds; `cad.feature_move`), units, the B-rep kernel, mechanism joints, measuring |
 | **Scene** | Units, the world's sky (studio or an HDRI), its strength, the frame range |
-| **Render** | Size, samples, denoise, bounces, the GPU, Render and Save; virtualized geometry, world partition, light probes, lightmaps, play mode |
+| **Render** | Size, samples, denoise, bounces, the Device (Auto, GPU (RTX), GPU, CPU) and where the last render ran and why, Render and Save; virtualized geometry, world partition, light probes, lightmaps, play mode |
 | **Viewport** | Shading, grid, theme, camera |
 | **Animation** | Shape keys, actions and layers, drivers, onion skins, motion paths |
 | **Rig** | The armature's bones and pose, constraints, Parent to Armature |
@@ -157,7 +157,7 @@ Right-click a colour field to copy it as `#rrggbb`, paste a hex code, or reset i
   - **Values.** Drag a value sideways, or click it twice to type it in the console. The selected node's values and its unlinked inputs also appear as fields at the top of the Material tab (Properties), where you can type numbers or expressions. The Material Output dims the pins the blend mode doesn't use.
   - **Wires.** Drop a wire in empty space to pick the node it should feed. Double-click a wire for a reroute knot. Alt+click a wire to cut it, or Alt+drag a knife across several. Wires take the colour of what they carry.
 - **UV Editor.** Unwrap, Pack, Select All, the stretch heat map. More is in Mesh › UV.
-- **Render.** Render, Stop, Save, Denoise, the pass shown, the samples done.
+- **Render.** Render, Stop, Save, Denoise, the pass shown, the samples done, and GPU or CPU.
 - **Asset Browser.** Search, a kind filter, Save to Library. Right-click a tile to place it, tag it, show its dependencies or remove it.
 - **Versions.** Commit, branches, merge with conflict choices, history. It also handles collaboration (host, join, follow a peer, let an agent join) and the live link.
 - **AI Activity.** What agents did, their permission, and Accept / Revert for a waiting proposal.
