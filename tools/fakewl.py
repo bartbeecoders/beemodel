@@ -627,6 +627,7 @@ def main():
     physics_ui()
     landscape_ui()
     folders_ui()
+    reference_ui()
     render_ui()
     lights_ui()
     team_ui()
@@ -8108,6 +8109,80 @@ def physics_ui():
     type_into('sim.budget', '512')
     check(wait_value(f, m, 'sim.budget', 0, 512) == 512, 'the budget from the field')
     f.proc.kill()
+
+
+def reference_ui():
+    """W8 (#324): reference images: Add > Reference Image... (the file dialog,
+    images), square to the view, upright, behind the scene; in front, its
+    opacity, only in orthographic views (Properties > Object); refimage();
+    a dropped PNG; saved and opened again."""
+    print('  -- reference images --')
+    from PIL import Image as PImage, ImageDraw
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.3)
+    d = os.path.join(f.home, 'BeeModel')
+    os.makedirs(d, exist_ok=True)
+    im = PImage.new('RGB', (200, 100), (30, 60, 200))
+    ImageDraw.Draw(im).rectangle((0, 0, 199, 49), fill=(220, 40, 40))
+    im.save(os.path.join(d, 'ref.png'))
+    q('view(0, 0, 12, 0, 1, 0)')                                # a front view
+    menu_pick(f, m, 'Add', 'Reference Image...')
+    f.pump(0.3)
+    rr = [w for w in ui_tree(m) if w['name'] == 'files.row' and w.get('label') == 'ref.png']
+    if rr:
+        f.click(rr[0]['x'] + 40, rr[0]['y'] + 10); f.pump(0.3)
+        click('files.ok')
+    f.pump(0.5)
+    a = q('n = active()\nprint(n, round(deg(get(n, "rx"))), round(get(n, "sx") / get(n, "sz") * 10))')
+    check(a.startswith('Reference') and a.split()[1:] == ['90', '20'],
+          f'Add > Reference Image...: a plane stood up to face the front view, 2:1 like the image ({a})')
+    img = f.image()
+    cx, cy = 612, 350                                           # (the cube, at the centre)
+    top, bot, cube = img.getpixel((450, 260)), img.getpixel((450, 520)), img.getpixel((cx, cy))
+    check(top[0] > 150 and top[2] < 100 and bot[2] > 150 and bot[0] < 100 and abs(cube[0] - cube[2]) < 30,
+          f'upright (red above, blue below), behind the cube ({top[:3]}, {bot[:3]}, cube {cube[:3]})')
+    props_tab(m, f, 'object')
+    check({'reference.opacity', 'reference.depth', 'reference.sides', 'reference.ortho_only', 'reference.axis_only'} <= names(),
+          'Properties > Object: opacity, in front or behind, sides, orthographic only, square-on only')
+    pick_enum(f, m, 'reference.depth', 0, 1)                    # in front
+    f.pump(0.3)
+    cube2 = f.image().getpixel((cx, cy))
+    x, y = widget_xy(m, 'reference.opacity')
+    f.click(x, y); f.mods(4); f.key(30); f.mods(0); f.type('0.5'); f.key(28); f.pump(0.3)
+    cube3 = f.image().getpixel((cx, cy))
+    check(abs(cube2[0] - cube2[2]) > 100 and abs(cube3[0] - cube3[2]) < abs(cube2[0] - cube2[2]),
+          f'in front it covers the cube; at half opacity the cube shows through ({cube2[:3]}, {cube3[:3]})')
+    click('reference.ortho_only')
+    q('view(0, 0, 12, 0, 1, 0)')
+    f.pump(0.3)
+    gone = f.image().getpixel((450, 260))
+    check(not (gone[0] > 150 and gone[2] < 100), f'only in orthographic views: gone in perspective ({gone[:3]})')
+    click('reference.ortho_only')
+    n2 = q(f'print(refimage("{os.path.join(d, "ref.png")}", "Side"))')
+    check(n2 == 'Side' and q('print(matof("Side") != nil)') == '1', f'refimage() adds one ({n2})')
+    c0 = int(q('print(count())'))
+    f.drop_files([os.path.join(d, 'ref.png')])
+    f.pump(0.5)
+    dn = q('print(count(), active())').split()
+    check(len(dn) == 2 and int(dn[0]) == c0 + 1 and dn[1].startswith('Reference'),
+          f'a PNG dropped on the window: a reference image ({dn})')
+    f.proc.kill()
+    home = tempfile.mkdtemp(prefix='bee-ref-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    im.save(os.path.join(home, 'BeeModel', 'ref.png'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('n = refimage("~/BeeModel/ref.png", "Plan")\nop("file.save", "~/BeeModel/r.bee")\nop("file.new")\n'
+            'op("file.open", "~/BeeModel/r.bee")\nprint(exists("Plan"), matof("Plan"), round(get("Plan", "sx") / get("Plan", "sz") * 10))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=60)
+    out = (r.stdout.strip().split('\n') or [''])[-1]
+    check(out.startswith('1 Reference') and out.endswith(' 20'), f'saved and opened again, its image with it ({out})')
 
 
 def folders_ui():

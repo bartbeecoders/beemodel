@@ -726,7 +726,8 @@ viewport_draw:
     je      1f
 2:  call    sculpt_draw                 # the sculpt mesh: its own path
     call    inst_draw                   # instances: splats and triangles
-1:  call    draw_objects                # wires (all objects, or non-meshes)
+1:  call    ref_draw                    # reference images (refimg.s)
+    call    draw_objects                # wires (all objects, or non-meshes)
     call    wp_draw                     # world cells not loaded, the minimap
     call    lb_ghost                    # a library asset being dragged in
     call    pb_draw                     # light probes: their boxes
@@ -1074,6 +1075,8 @@ vp_pick_bounds:
     jnz     .Lpk_next
     cmp     dword ptr [rax+OB_TYPE], OT_MESH
     jne     1f
+    test    dword ptr [rax+OB_FLAGS], OBF_REFIMG    # (a reference image: its
+    jnz     1f                                      #  outline, not in the IDs)
     push    rax                         # meshes: the ID buffer, unless lines
     mov     rdi, rax
     call    edge_only

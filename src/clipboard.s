@@ -66,7 +66,8 @@ s_drop_what:    .asciz "  cannot open a dropped file of that kind: "
 .align 8
 drop_kinds:     .quad x_blend_s, op_import_blend, x_glb_s, op_import_gltf, x_gltf_s, op_import_gltf
                 .quad x_obj_s, op_import_obj, x_stl_s, op_import_stl, x_step_s, op_import_step
-                .quad x_stp_s, op_import_step, x_bee_s, op_file_open, 0
+                .quad x_stp_s, op_import_step, x_bee_s, op_file_open
+                .quad x_png_s, op_ref_add, x_jpg_s, op_ref_add, x_jpeg_s, op_ref_add, 0
 x_blend_s:      .asciz ".blend"
 x_glb_s:        .asciz ".glb"
 x_gltf_s:       .asciz ".gltf"
@@ -75,6 +76,9 @@ x_stl_s:        .asciz ".stl"
 x_step_s:       .asciz ".step"
 x_stp_s:        .asciz ".stp"
 x_bee_s:        .asciz ".bee"
+x_png_s:        .asciz ".png"
+x_jpg_s:        .asciz ".jpg"
+x_jpeg_s:       .asciz ".jpeg"
 
 .text
 

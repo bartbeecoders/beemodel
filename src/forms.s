@@ -680,6 +680,7 @@ PATHFORM form_itex, "material.import_textures", 0, x_imgin
 PATHFORM form_rimage, "render.image", 1, x_pngonly, n_render_png
 PATHFORM form_lmsave, "lightmap.save", 1, x_img, n_lightmap
 PATHFORM form_laimp, "landscape.import", 0, x_img
+PATHFORM form_refadd, "object.add_reference", 0, x_imgin
 PATHFORM form_laexp, "landscape.export", 1, x_img, n_heights
 
 # ---- object.move_to_folder <name | none> -------------------------------------------

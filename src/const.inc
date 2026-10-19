@@ -479,6 +479,11 @@
 .equ OBF_GROUND,    0x2000  # the scene's Ground (ground.s): drawn as a fading grid
 .equ OBF_CATCH,     0x4000  # renders as a shadow catcher (the rest of the film: alpha)
 .equ OBF_WATER,     0x8000  # a water plane: bodies below its level float (rbody.s)
+.equ OBF_REFIMG,    0x10000 # a reference image (refimg.s): drawn in screen space, not rasterized
+.equ OBF_REF_FRONT, 0x20000 #  in front of the scene (else behind it)
+.equ OBF_REF_ORTHO, 0x40000 #  only in orthographic views
+.equ OBF_REF_AXIS,  0x80000 #  only when seen square-on
+.equ OBF_REF_BACK,  0x100000 #  seen from behind too
 .equ HV_CATCH,      0x40000000  # hv_tm: a shadow catcher's triangle (hive.s)
 .equ OT_MESH,       0
 .equ OT_LIGHT,      1
