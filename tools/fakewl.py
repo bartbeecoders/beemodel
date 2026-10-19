@@ -6119,8 +6119,8 @@ def themes():
         check(px(f, 640, 5) == t['COL_TITLE_BG'] and px(f, 4, 300) == t['COL_PANE_BG'],
               f'view.theme {th}: title bar and panels take its colours')
     m = Mcp(f)
-    menu_pick(f, m, 'View', 'Theme', 'Light Theme')
-    check(px(f, 640, 5) == tabs['light']['COL_TITLE_BG'], 'View > Theme > Light Theme switches the theme')
+    menu_pick(f, m, 'View', 'Theme', 'Light')
+    check(px(f, 640, 5) == tabs['light']['COL_TITLE_BG'], 'View > Theme > Light switches the theme')
     t = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == 'View'][0]
     f.click(t['x'] + 10, t['y'] + 10)
     f.shot('themes_light_menu.png')
