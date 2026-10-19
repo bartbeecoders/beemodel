@@ -53,6 +53,9 @@
 .globl fl_active
 .globl fl_sample
 .globl fl_time
+.globl fl_show_a
+.globl fl_show_l
+.globl fl_info
 .globl fl_type_of
 .globl fl_ops
 .globl do_fl_add
@@ -84,6 +87,11 @@
 .equ FT_SZ,     144
 .equ FT_MAX,    64
 .equ SEGS,      24
+.equ FO_NX,     9                       # the overlay's grid: 9 x 5 x 9
+.equ FO_NY,     5
+.equ FO_N,      FO_NX*FO_NY*FO_NX
+.equ FO_SEEDS,  16                      # streamlines from an object
+.equ FO_STEPS,  80
 
 .macro DOT3 d, s
     dpps    \d, \s, 0x71
@@ -116,6 +124,21 @@ fl_nw:          .skip 4                 #  of them wind
 fd_col:         .skip 4
 fd_k:           .skip 4                 # the icon's size (its scale)
 fl_dflt:        .skip FF_SZ             # (no record: the defaults)
+fo_na:          .skip 4                 # the overlay: arrows drawn,
+fo_nl:          .skip 4                 #  line segments drawn,
+fo_max:         .skip 4                 #  the largest pull
+fo_cell:        .skip 4
+.align 16
+fo_c:           .skip 16                # its grid: centre, half sizes
+fo_h:           .skip 16
+fo_p:           .skip 16                # (a point)
+fo_q:           .skip 16
+fo_acc:         .skip 16*FO_N           # the pulls on the grid
+.section .data
+.align 4
+fl_show_a:      .long 0                 # View > Force Field Arrows
+fl_show_l:      .long 0                 #  ... Lines
+.section .bss
 
 .section .rodata
 .align 16
@@ -124,6 +147,7 @@ fq_abs:         .long 0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff
 fq_sign:        .long 0x80000000, 0x80000000, 0x80000000, 0x80000000
 .align 4
 fq_one:         .float 1.0
+fq_ten:         .float 10.0
 fq_tiny:        .float 1.0e-6
 fq_min:         .float 0.01
 fq_half:        .float 0.5
@@ -166,6 +190,10 @@ fl_defs:        FDEF 10.0, 0, 10.0
 .equ FDEF_SZ,   56
 # gizmo numbers
 gz_a:           .float 0.45, 0.9, 0.18, 1.5, 0.4, 0.8, 0.25, 1.0, 0.3
+fo_zero4:       .float 0, 0, 0, 0
+fo_k:           .float 0.85                 # an arrow: at most this of a cell
+fo_seed_r:      .float 0.8
+fo_eps:         .float 1.0e-5
 
 s_fl_attr:      .asciz "Attractor"
 s_fl_zone:      .asciz "Gravity Zone"
@@ -179,6 +207,19 @@ k_wind:         .asciz "wind"
 k_vortex:       .asciz "vortex"
 k_turb:         .asciz "turbulence"
 k_drag:         .asciz "drag"
+k_planet:       .asciz "planet"
+k_hole:         .asciz "blackhole"
+k_tornado:      .asciz "tornado"
+k_breeze:       .asciz "breeze"
+s_pr_planet:    .asciz "Planet"
+s_pr_core:      .asciz "Planet Core"
+s_pr_hole:      .asciz "Black Hole"
+s_pr_tornado:   .asciz "Tornado"
+s_pr_breeze:    .asciz "Breeze"
+s_ps_planet:    .asciz "strength 981 soft 1"
+s_ps_hole:      .asciz "strength 2000 soft 0.2 falloff smooth radius 8"
+s_ps_tornado:   .asciz "strength 15 lift 8 inflow 4 falloff smooth radius 6"
+s_ps_breeze:    .asciz "strength 2 gust 0.6"
 k_none:         .asciz "none"
 k_radius:       .asciz "radius"
 k_smooth:       .asciz "smooth"
@@ -207,8 +248,15 @@ s_bad:          .asciz "  field: not understood: "
 s_nofield:      .asciz "  select a force field first (Add > Force Field)"
 .align 8
 fl_tnames:      .quad s_fl_attr, s_fl_zone, s_fl_wind, s_fl_vortex, s_fl_turb, s_fl_drag
-fl_kwtypes:     .quad k_attr, k_zone, k_wind, k_vortex, k_turb, k_drag, 0
+fl_kwtypes:     .quad k_attr, k_zone, k_wind, k_vortex, k_turb, k_drag
+                .quad k_planet, k_hole, k_tornado, k_breeze, 0
 fl_ops:         .quad op_fl_attr, op_fl_zone, op_fl_wind, op_fl_vortex, op_fl_turb, op_fl_drag
+                .quad op_fl_planet, op_fl_hole, op_fl_tornado, op_fl_breeze
+# presets: type, name, settings
+fl_presets:     .quad FLD_ATTR, s_pr_core, s_ps_planet
+                .quad FLD_ATTR, s_pr_hole, s_ps_hole
+                .quad FLD_VORTEX, s_pr_tornado, s_ps_tornado
+                .quad FLD_WIND, s_pr_breeze, s_ps_breeze
 kw_fall:        .quad k_none, k_radius, k_smooth, 0
 kw_law:         .quad k_square, k_linear, 0
 kw_shape:       .quad k_box, k_sphere, 0
@@ -272,6 +320,12 @@ OPERATOR op_fl_wind,   "field.add_wind",       "Wind",         do_fl_add, arg=2,
 OPERATOR op_fl_vortex, "field.add_vortex",     "Vortex",       do_fl_add, arg=3, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a Vortex: it turns things round the object's +Y: field.add_vortex [strength s] [lift s] [inflow s] [falloff none|radius|smooth] [radius m]"
 OPERATOR op_fl_turb,   "field.add_turbulence", "Turbulence",   do_fl_add, arg=4, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add Turbulence: swirling curl noise: field.add_turbulence [strength s] [scale m] [seed n] [falloff none|radius|smooth] [radius m]"
 OPERATOR op_fl_drag,   "field.add_drag",       "Drag",         do_fl_add, arg=5, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add Drag: it slows things down (strength x their velocity): field.add_drag [strength s] [falloff none|radius|smooth] [radius m]"
+OPERATOR op_fl_planet,  "field.add_planet",    "Planet",     do_fl_preset, arg=0, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a planet at the 3D cursor: a 10 m sphere with an Attractor at its centre (9.81 m/s2 at its surface) and the world's gravity off - walk round it in play mode"
+OPERATOR op_fl_hole,    "field.add_blackhole", "Black Hole", do_fl_preset, arg=1, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a Black Hole: a strong, short Attractor (strength 2000, smooth falloff to 8 m)"
+OPERATOR op_fl_tornado, "field.add_tornado",   "Tornado",    do_fl_preset, arg=2, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a Tornado: a Vortex that turns things round its +Y, lifts them and pulls them in (smooth falloff to 6 m)"
+OPERATOR op_fl_breeze,  "field.add_breeze",    "Breeze",     do_fl_preset, arg=3, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a Breeze: gentle, gusty Wind along +X"
+OPERATOR op_fl_arrows,  "view.field_arrows",   "Force Field Arrows", op_toggle_flag, op_check_flag, fl_show_a, doc="Show the force fields' pull as arrows on a grid round them (gravity left out)"
+OPERATOR op_fl_lines,   "view.field_lines",    "Force Field Lines",  op_toggle_flag, op_check_flag, fl_show_l, doc="Show the force fields' pull as lines (streamlines) from the selected objects"
 OPERATOR op_fl_set,    "field.set",            "Field Settings", do_fl_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="The active force field's settings: field.set [type attractor|zone|wind|vortex|turbulence|drag] [strength s] [falloff none|radius|smooth] [radius m] [law square|linear] [shape box|sphere] [gust 0..1] [scale m] [seed n] [lift s] [inflow s] [soft m] [groups all|0,3] [on|off]"
 
 # ---- the block ----------------------------------------------------------------------
@@ -1164,17 +1218,27 @@ fl_active:
 # ---- operators ------------------------------------------------------------------------
 # do_fl_add(rdi=type) - field.add_<type> [settings]: at the 3D cursor
 do_fl_add:
+    lea     rcx, [rip+fl_tnames]
+    mov     eax, edi
+    mov     rsi, [rcx+rax*8]
+    xor     edx, edx
+# fl_add_named(edi=type, rsi=name, rdx=preset settings or 0) - a field at the
+#   3D cursor, with the preset's settings, then op_arg's
+fl_add_named:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    push    r15
     mov     ebx, edi
+    mov     r14, rsi
+    mov     r15, rdx
     call    prim_light
     test    rax, rax
     jz      9f
     mov     rdx, rax
     mov     edi, OT_FIELD
-    lea     rcx, [rip+fl_tnames]
-    mov     rsi, [rcx+rbx*8]
+    mov     rsi, r14
     call    obj_new
     test    eax, eax
     jz      9f
@@ -1194,7 +1258,11 @@ do_fl_add:
     call    fl_rec_own
     test    rax, rax
     jz      8f
+    mov     r12, rax
     mov     rdi, rax
+    mov     rsi, r15
+    call    fl_parse
+    mov     rdi, r12
     mov     rsi, [rip+op_arg]
     call    fl_parse
 8:  mov     dword ptr [rip+dirty], 1
@@ -1203,8 +1271,50 @@ do_fl_add:
     lea     rdi, [rip+s_added]
     mov     rsi, r13
     call    log_pair
-9:  pop     r13
+9:  pop     r15
+    pop     r14
+    pop     r13
     pop     r12
+    pop     rbx
+    ret
+
+# do_fl_preset(rdi=0 planet, 1 black hole, 2 tornado, 3 breeze) - a field
+#   (and for a planet its sphere, the world's gravity off) set for it
+do_fl_preset:
+    push    rbx
+    sub     rsp, 16
+    mov     ebx, edi
+    test    edi, edi
+    jnz     1f
+    mov     edi, 1                      # a planet: a 10 m sphere (the UV
+    call    op_create                   #  sphere's create.* index) at the
+    mov     edi, [rip+active_obj]       #  cursor, gravity off
+    lea     rsi, [rip+s_pr_planet]
+    call    obj_rename
+    mov     edi, [rip+active_obj]
+    call    obj_get
+    test    rax, rax
+    jz      11f
+    mov     ecx, [rip+fq_ten]
+    mov     [rax+OB_SCALE], ecx
+    mov     [rax+OB_SCALE+4], ecx
+    mov     [rax+OB_SCALE+8], ecx
+11: xor     edi, edi
+    call    an_own_g
+    test    rax, rax
+    jz      1f
+    xor     ecx, ecx
+    mov     [rax+AN_RW_], ecx
+    mov     [rax+AN_RW_+4], ecx
+    mov     [rax+AN_RW_+8], ecx
+    mov     dword ptr [rax+AN_RW_+20], 1        # (rbody.s RW_SET)
+1:  lea     rax, [rip+fl_presets]
+    imul    ecx, ebx, 24
+    mov     edi, [rax+rcx]
+    mov     rsi, [rax+rcx+8]
+    mov     rdx, [rax+rcx+16]
+    call    fl_add_named
+    add     rsp, 16
     pop     rbx
     ret
 
@@ -1811,6 +1921,7 @@ fl_draw:
     jmp     .Lfd_obj
 
 .Lfd_out:
+    call    fl_overlay                  # View > Force Field Arrows / Lines
     pop     r13
     pop     r12
     pop     rbx
@@ -1868,5 +1979,330 @@ fd_box:
 9:  add     rsp, 16
     pop     rbx
     ret
+
+# ---- the overlay (A5): the pull as arrows on a grid, or streamlines --------------
+# fo_world - the fd_* drawing in world space (centre 0, X Y Z, size 1)
+fo_world:
+    xorps   xmm0, xmm0
+    movaps  [rip+fd_c], xmm0
+    movaps  xmm0, [rip+fo_ex]
+    movaps  [rip+fd_x], xmm0
+    movaps  xmm0, [rip+fo_ey]
+    movaps  [rip+fd_y], xmm0
+    movaps  xmm0, [rip+fo_ez]
+    movaps  [rip+fd_z], xmm0
+    mov     eax, [rip+fq_one]
+    mov     [rip+fd_k], eax
+    ret
+
+# fo_pull(xmm0 = a point) -> xmm0 = the fields' pull there (no gravity:
+#   fl_prep'd with none), xmm1 = its size
+fo_pull:
+    sub     rsp, 24
+    movups  [rsp], xmm0
+    mov     rdi, rsp
+    xor     esi, esi
+    mov     edx, 1
+    xor     ecx, ecx
+    call    fl_accel
+    movaps  xmm1, xmm0
+    dpps    xmm1, xmm1, 0x71
+    sqrtss  xmm1, xmm1
+    add     rsp, 24
+    ret
+
+# fo_point(ebx = ix, r12d = iy, r13d = iz) -> fo_p = the grid's point
+fo_point:
+    cvtsi2ss xmm0, ebx
+    cvtsi2ss xmm1, r12d
+    cvtsi2ss xmm2, r13d
+    unpcklps xmm0, xmm1
+    movlhps xmm0, xmm2                  # i
+    mulps   xmm0, [rip+fo_two4]
+    divps   xmm0, [rip+fo_nm1]          # 2 i / (n - 1) - 1
+    subps   xmm0, [rip+fo_one4]
+    mulps   xmm0, [rip+fo_h]
+    addps   xmm0, [rip+fo_c]
+    andps   xmm0, [rip+fq_xyz]
+    movaps  [rip+fo_p], xmm0
+    ret
+
+# fl_overlay - (fl_draw) the fields' pull where it is asked for
+fl_overlay:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    and     rsp, -16
+    sub     rsp, 32
+    xor     eax, eax
+    mov     [rip+fo_na], eax
+    mov     [rip+fo_nl], eax
+    mov     [rip+fo_max], eax
+    mov     eax, [rip+fl_show_a]
+    or      eax, [rip+fl_show_l]
+    jz      .Lfo_out
+    call    fl_time
+    lea     rdi, [rip+fo_zero4]
+    call    fl_prep
+    cmp     dword ptr [rip+fl_n], 0
+    je      .Lfo_out
+    call    fo_world
+    mov     dword ptr [rip+fd_col], 0x4fb0e0
+    cmp     dword ptr [rip+fl_show_a], 0
+    je      .Lfo_lines
+    # the grid: round the fields (their centres, their reach up to 10 m)
+    movaps  xmm6, [rip+fo_big4]
+    movaps  xmm7, [rip+fo_nbig4]
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+fl_n]
+    jae     2f
+    imul    rax, rbx, FT_SZ
+    lea     rcx, [rip+fl_tab]
+    add     rax, rcx
+    movss   xmm1, [rax+FT_RAD]
+    minss   xmm1, [rip+fo_ten]
+    shufps  xmm1, xmm1, 0
+    movaps  xmm0, [rax+FT_C]
+    movaps  xmm2, xmm0
+    subps   xmm2, xmm1
+    minps   xmm6, xmm2
+    addps   xmm0, xmm1
+    maxps   xmm7, xmm0
+    inc     ebx
+    jmp     1b
+2:  movaps  xmm0, xmm6
+    addps   xmm0, xmm7
+    mulps   xmm0, [rip+fo_half4]
+    andps   xmm0, [rip+fq_xyz]
+    movaps  [rip+fo_c], xmm0
+    subps   xmm7, xmm6
+    mulps   xmm7, [rip+fo_half4]
+    addps   xmm7, [rip+fo_extra4]
+    maxps   xmm7, [rip+fo_minh4]
+    minps   xmm7, [rip+fo_maxh4]
+    andps   xmm7, [rip+fq_xyz]
+    movaps  [rip+fo_h], xmm7
+    movss   xmm0, [rip+fo_h]            # a cell: the smaller of x, z
+    minss   xmm0, [rip+fo_h+8]
+    addss   xmm0, xmm0
+    divss   xmm0, [rip+fo_nm1]
+    mulss   xmm0, [rip+fo_k]
+    movss   [rip+fo_cell], xmm0
+    xor     r14d, r14d                  # pass 1: the pulls, the largest
+    xor     ebx, ebx
+3:  xor     r12d, r12d
+31: xor     r13d, r13d
+32: call    fo_point
+    movaps  xmm0, [rip+fo_p]
+    call    fo_pull
+    imul    rax, r14, 16
+    lea     rcx, [rip+fo_acc]
+    movaps  [rcx+rax], xmm0
+    maxss   xmm1, [rip+fo_max]
+    movss   [rip+fo_max], xmm1
+    inc     r14d
+    inc     r13d
+    cmp     r13d, FO_NX
+    jb      32b
+    inc     r12d
+    cmp     r12d, FO_NY
+    jb      31b
+    inc     ebx
+    cmp     ebx, FO_NX
+    jb      3b
+    movss   xmm0, [rip+fo_max]
+    comiss  xmm0, [rip+fo_eps]
+    jbe     .Lfo_lines
+    xor     r14d, r14d                  # pass 2: an arrow each, sqrt-scaled
+    xor     ebx, ebx
+4:  xor     r12d, r12d
+41: xor     r13d, r13d
+42: imul    rax, r14, 16
+    lea     rcx, [rip+fo_acc]
+    movaps  xmm0, [rcx+rax]
+    movaps  xmm1, xmm0
+    dpps    xmm1, xmm1, 0x71
+    sqrtss  xmm1, xmm1                  # its size
+    movss   xmm2, [rip+fo_max]
+    mulss   xmm2, [rip+fo_tiny]
+    comiss  xmm1, xmm2
+    jbe     43f
+    movss   xmm2, xmm1                  # length: cell sqrt(s / max)
+    divss   xmm2, [rip+fo_max]
+    sqrtss  xmm2, xmm2
+    mulss   xmm2, [rip+fo_cell]
+    divss   xmm2, xmm1
+    shufps  xmm2, xmm2, 0
+    mulps   xmm0, xmm2
+    movaps  [rsp], xmm0
+    call    fo_point
+    movaps  xmm3, [rip+fo_p]
+    addps   xmm3, [rsp]
+    movaps  [rip+fo_q], xmm3
+    movss   xmm0, [rip+fo_p]
+    movss   xmm1, [rip+fo_p+4]
+    movss   xmm2, [rip+fo_p+8]
+    movss   xmm3, [rip+fo_q]
+    movss   xmm4, [rip+fo_q+4]
+    movss   xmm5, [rip+fo_q+8]
+    call    fd_arrow
+    inc     dword ptr [rip+fo_na]
+43: inc     r14d
+    inc     r13d
+    cmp     r13d, FO_NX
+    jb      42b
+    inc     r12d
+    cmp     r12d, FO_NY
+    jb      41b
+    inc     ebx
+    cmp     ebx, FO_NX
+    jb      4b
+
+.Lfo_lines:                             # streamlines from the selected objects
+    cmp     dword ptr [rip+fl_show_l], 0
+    je      .Lfo_out
+    xor     ebx, ebx
+5:  cmp     ebx, [rip+obj_count]
+    jae     .Lfo_out
+    mov     edi, ebx
+    call    obj_at
+    inc     ebx
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      5b
+    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN
+    jnz     5b
+    movups  xmm0, [rax+OB_LOC]
+    andps   xmm0, [rip+fq_xyz]
+    movaps  [rsp], xmm0                 # its place
+    movss   xmm0, [rax+OB_SCALE]        # the seeds' ring: its size
+    maxss   xmm0, [rip+fq_one]
+    mulss   xmm0, [rip+fo_seed_r]
+    movss   [rsp+16], xmm0
+    xor     r12d, r12d                  # seed: two rings of 8 in XZ
+6:  cmp     r12d, FO_SEEDS
+    jae     5b
+    mov     eax, r12d
+    and     eax, 7
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+fq_2pi]
+    mulss   xmm0, [rip+fo_eighth]
+    call    sincos
+    mulss   xmm0, [rsp+16]              # (r sin, h, r cos)
+    mulss   xmm1, [rsp+16]
+    movss   xmm2, [rsp+16]
+    mulss   xmm2, [rip+fo_ring_y]
+    cmp     r12d, 8
+    jb      61f
+    xorps   xmm2, [rip+fq_sign]
+61: unpcklps xmm0, xmm2
+    movlhps xmm0, xmm1
+    addps   xmm0, [rsp]
+    andps   xmm0, [rip+fq_xyz]
+    movaps  [rip+fo_p], xmm0
+    xor     r13d, r13d
+7:  cmp     r13d, FO_STEPS
+    jae     8f
+    movaps  xmm0, [rip+fo_p]            # RK2: half a step along it, then
+    call    fo_pull                     #  a step along it there
+    comiss  xmm1, [rip+fo_eps]
+    jbe     8f
+    shufps  xmm1, xmm1, 0
+    divps   xmm0, xmm1
+    mulps   xmm0, [rip+fo_hstep4]
+    addps   xmm0, [rip+fo_p]
+    call    fo_pull
+    comiss  xmm1, [rip+fo_eps]
+    jbe     8f
+    shufps  xmm1, xmm1, 0
+    divps   xmm0, xmm1
+    mulps   xmm0, [rip+fo_step4]
+    addps   xmm0, [rip+fo_p]
+    andps   xmm0, [rip+fq_xyz]
+    movaps  [rip+fo_q], xmm0
+    movss   xmm0, [rip+fo_p]
+    movss   xmm1, [rip+fo_p+4]
+    movss   xmm2, [rip+fo_p+8]
+    movss   xmm3, [rip+fo_q]
+    movss   xmm4, [rip+fo_q+4]
+    movss   xmm5, [rip+fo_q+8]
+    call    fd_seg
+    inc     dword ptr [rip+fo_nl]
+    movaps  xmm0, [rip+fo_q]
+    movaps  [rip+fo_p], xmm0
+    inc     r13d
+    jmp     7b
+8:  inc     r12d
+    jmp     6b
+.Lfo_out:
+    lea     rsp, [rbp-32]
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# fl_info(edi=what) -> xmm0: 0 force fields in the scene, 1 the overlay's
+#   arrows (last drawn), 2 its line segments, 3 the largest pull it showed
+fl_info:
+    xorps   xmm0, xmm0
+    cmp     edi, 1
+    jne     1f
+    cvtsi2ss xmm0, dword ptr [rip+fo_na]
+    ret
+1:  cmp     edi, 2
+    jne     2f
+    cvtsi2ss xmm0, dword ptr [rip+fo_nl]
+    ret
+2:  cmp     edi, 3
+    jne     3f
+    movss   xmm0, [rip+fo_max]
+    ret
+3:  test    edi, edi
+    jnz     9f
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+    xor     r12d, r12d
+4:  cmp     ebx, [rip+obj_count]
+    jae     5f
+    mov     edi, ebx
+    call    obj_at
+    inc     ebx
+    cmp     dword ptr [rax+OB_TYPE], OT_FIELD
+    jne     4b
+    inc     r12d
+    jmp     4b
+5:  cvtsi2ss xmm0, r12d
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+9:  ret
+
+.section .rodata
+.align 16
+fo_ex:          .float 1, 0, 0, 0
+fo_ey:          .float 0, 1, 0, 0
+fo_ez:          .float 0, 0, 1, 0
+fo_big4:        .float 1e30, 1e30, 1e30, 0
+fo_nbig4:       .float -1e30, -1e30, -1e30, 0
+fo_half4:       .float 0.5, 0.5, 0.5, 0
+fo_two4:        .float 2, 2, 2, 0
+fo_one4:        .float 1, 1, 1, 0
+fo_nm1:         .float 8, 4, 8, 1               # (n - 1 per axis)
+fo_extra4:      .float 3, 3, 3, 0
+fo_minh4:       .float 4, 2, 4, 0
+fo_maxh4:       .float 60, 30, 60, 0
+fo_step4:       .float 0.25, 0.25, 0.25, 0
+fo_hstep4:      .float 0.125, 0.125, 0.125, 0
+.align 4
+fo_ten:         .float 10.0
+fo_tiny:        .float 0.001
+fo_eighth:      .float 0.125
+fo_ring_y:      .float 0.3
 
 .section .note.GNU-stack,"",@progbits

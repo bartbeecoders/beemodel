@@ -26,6 +26,12 @@ round it stands on the side (its up: sideways), half way on the bottom
 (up: down), and once round it is back at its start; the logic nodes Set
 Strength (a field's strength in play) and Field (the pull at a point).
 
+A5: seeing the fields - Add > Force Field > Tornado from the menu (fake
+compositor); View > Force Field Arrows draws its pull on a grid, View >
+Force Field Lines streamlines from the selected cube that swirl round the
+tornado's axis as they rise; the presets Planet (a sphere, gravity off),
+Black Hole, Breeze by BeeScript field().
+
     python3 tests/fields.py build/beemodel
 """
 import math, os, subprocess, sys, tempfile, time
@@ -474,11 +480,91 @@ print("after", force(0, 25, 0, "y"))
           'Size %s); play.stop discard: back (%s)' % tuple((lg + [0] * 4)[1:4] + [af]))
 
 
+def a5():
+    print('-- A5: seeing the fields --')
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
+    argv = sys.argv
+    sys.argv = [argv[0], tempfile.mkdtemp(prefix='bee-fields-shots-')]
+    import fakewl
+    sys.argv = argv
+    f = fakewl.Fake()
+    try:
+        f.pump(1.0, until_frame=True)
+        m = fakewl.Mcp(f)
+        q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+        f.enter(600, 300)
+        f.move(600, 300)
+        q('op("rigid.world", "gravity 0 0 0")')                # (the tornado's own pull)
+        ok = fakewl.menu_pick(f, m, 'Add', 'Force Field', 'Tornado')
+        f.pump(0.3)
+        t = q('print(active(), objtype(active()), force(2, 0, 0, "z") < -1, force(2, 0, 0, "y") > 0, force(2, 0, 0, "x") < 0)').split()
+        check(ok and t[:5] == ['Tornado', '5', '1', '1', '1'],
+              'Add > Force Field > Tornado: a vortex that turns things round it, lifts them and pulls them in (%s)' % t[:5])
+        fakewl.menu_pick(f, m, 'View', 'Force Field Arrows')
+        f.pump(0.5)
+        q('view(30, 35, 22, 0, 0, 0)')
+        f.pump(0.5)
+        a = q('print(fieldinfo(1), fieldinfo(3))').split()
+        f.shot('a5_arrows.png')
+        fakewl.menu_pick(f, m, 'View', 'Force Field Arrows')
+        fakewl.menu_pick(f, m, 'View', 'Force Field Lines')
+        q('move("Cube", 3, 0, 0)\nselect("Cube")')
+        f.pump(0.5)
+        l = q('print(fieldinfo(1), fieldinfo(2))').split()
+        f.shot('a5_lines.png')
+        check(len(a) >= 2 and int(a[0]) > 50 and float(a[1]) > 5 and len(l) >= 2 and l[0] == '0' and int(l[1]) > 500,
+              'View > Force Field Arrows: %s arrows (the largest pull %s); Arrows off, Lines on: %s segments of '
+              'streamlines from the selected cube' % (a[:1], a[1:2], l[1:2]))
+        # the streamlines swirl: a point carried along the pull turns round the axis as it rises
+        sw = q('''x = 3
+y = 0
+z = 0
+a0 = 0
+for i in 0..60 {
+  fx = force(x, y, z, "x")
+  fy = force(x, y, z, "y")
+  fz = force(x, y, z, "z")
+  s = sqrt(fx*fx + fy*fy + fz*fz)
+  x = x + fx / s * 0.25
+  y = y + fy / s * 0.25
+  z = z + fz / s * 0.25
+}
+print(y, sqrt(x*x + z*z), x, z)''').split()
+        check(len(sw) >= 4 and float(sw[0]) > 2 and float(sw[1]) < 3 and (float(sw[2]) < 2.5 or abs(float(sw[3])) > 0.5),
+              'along a streamline from the cube: up (y %s), in (r %s) and round (x %s, z %s)' % tuple(sw[:4]))
+    finally:
+        f.proc.kill()
+    out = run('''
+delete("Cube")
+p = field("planet")
+print("planet", exists("Planet Core"), count(), objtype("Planet"), get("Planet", "sx"), force(0, 10, 0, "y"), force(0, 30, 0, "y"))
+delete("Planet")
+delete("Planet Core")
+b = field("blackhole", "Hole")
+move("Hole", 50, 0, 0)
+print("hole", b, force(51, 0, 0, "x"), force(60, 0, 0, "x"))
+w = field("breeze")
+print("breeze", w, objtype(w))
+''')
+    pl, h, br = out and [l for l in out if l[0] == 'planet'], [l for l in out if l[0] == 'hole'], [l for l in out if l[0] == 'breeze']
+    pl = pl[0] if pl else []
+    check(len(pl) == 7 and pl[1] == '1' and pl[2] == '4' and pl[3] == '0' and pl[4] == '10'
+          and near(float(pl[5]), -981 * 10 / 101 ** 1.5) and near(float(pl[6]), -981 * 30 / 901 ** 1.5),
+          'field("planet"): a 10 m sphere (Planet) and its Planet Core: 9.7 m/s2 at the surface, the world\'s gravity off '
+          '(%s)' % pl[1:])
+    h = h[0] if h else []
+    check(len(h) == 4 and float(h[2]) < -100 and h[3] == '0',
+          'field("blackhole"): strong near (%s m/s2 at 1 m), nothing past 8 m (%s)' % tuple(h[2:4]) if len(h) == 4 else 'hole (%s)' % h)
+    br = br[0] if br else []
+    check(len(br) == 3 and br[1] == 'Breeze' and br[2] == '5', 'field("breeze"): a wind field (%s)' % br[1:])
+
+
 if __name__ == '__main__':
     a1()
     a1_ui()
     a2()
     a3()
     a4()
+    a5()
     print('FAILS', FAILS)
     sys.exit(1 if FAILS else 0)
