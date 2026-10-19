@@ -47,8 +47,8 @@ pr_rot:         .skip 36
 pr_tmp:         .skip 64
 .align 4
 pr_maxd:        .skip 4
-po_ord:         .skip 4*MAX_OBJECTS     # the outliner's order: object indices,
-po_dep:         .skip 4*MAX_OBJECTS     #  their depth,
+po_ord:         .skip 4*(MAX_OBJECTS+256)   # the outliner's order: object indices
+po_dep:         .skip 4*(MAX_OBJECTS+256)   #  (or OO_FOLDER | a folder), depth,
 po_kids:        .skip 4*MAX_OBJECTS     #  1 when it has children (by object index)
 po_par:         .skip 4*MAX_OBJECTS     # each object's parent index (-1 none)
 po_stk:         .skip 8*MAX_OBJECTS     # (object, depth) still to list
@@ -614,6 +614,8 @@ outl_order:
 4:  inc     ebx
     jmp     3b
 5:  mov     dword ptr [rip+po_n], 0
+    call    fd_count                    # (folders: a tree too)
+    add     r14d, eax
     mov     [rip+po_tree], r14d
     test    r14d, r14d                  # none parented: the scene's order
     jnz     6f
@@ -626,24 +628,126 @@ outl_order:
     mov     dword ptr [rax+rbx*4], 0
     inc     ebx
     jmp     51b
-6:  xor     ebx, ebx                    # roots, each with its subtree
-61: cmp     ebx, [rip+obj_count]
-    jae     .Loo_out
+6:  xor     edi, edi                    # the folders, each with what is in it,
+    xor     esi, esi                    #  then the objects in none
+    call    oo_container
+.Loo_out:
+    mov     eax, [rip+obj_count]        # (no parents: all of them listed)
+    cmp     dword ptr [rip+po_n], 0
+    jne     9f
+    mov     [rip+po_n], eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# oo_container(edi=folder uid, esi=depth) - its folders (each followed by what
+#   is in it unless folded), then its objects' trees (the root objects whose
+#   folder it is: a folder that is gone counts as none)
+.equ OO_FOLDER, 0x40000000
+.equ FR_UID_,   0                       # (folder.s records)
+.equ FR_PAR_,   4
+.equ FR_FLG_,   8
+oo_container:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, edi
+    mov     r13d, esi
+    xor     ebx, ebx
+1:  mov     edi, ebx                    # the folders in it
+    call    fd_rec
+    test    rax, rax
+    jz      3f
+    mov     r14, rax
+    mov     eax, [r14+FR_PAR_]
+    test    eax, eax                    # (its folder gone: at the top)
+    jz      11f
+    mov     edi, eax
+    call    fd_index
+    test    eax, eax
+    jns     11f
+    xor     eax, eax
+    jmp     12f
+11: mov     eax, [r14+FR_PAR_]
+12: cmp     eax, r12d
+    jne     2f
+    mov     eax, [rip+po_n]
+    cmp     eax, MAX_OBJECTS+256
+    jae     2f
+    lea     rcx, [rip+po_ord]
+    mov     edx, ebx
+    or      edx, OO_FOLDER
+    mov     [rcx+rax*4], edx
+    lea     rcx, [rip+po_dep]
+    mov     [rcx+rax*4], r13d
+    inc     dword ptr [rip+po_n]
+    test    dword ptr [r14+FR_FLG_], 1  # folded: its contents stay hidden
+    jnz     2f
+    cmp     r13d, MAXDEPTH
+    jae     2f
+    mov     edi, [r14+FR_UID_]
+    lea     esi, [r13+1]
+    call    oo_container
+2:  inc     ebx
+    jmp     1b
+3:  xor     ebx, ebx                    # its objects: each root with its tree
+4:  cmp     ebx, [rip+obj_count]
+    jae     9f
     lea     rax, [rip+po_par]
     cmp     dword ptr [rax+rbx*4], -1
-    jne     69f
+    jne     8f
+    mov     edi, ebx
+    call    obj_at
+    mov     edi, [rax+OB_FOLDER]
+    test    edi, edi
+    jz      5f
+    push    rdi
+    push    rdi
+    call    fd_index
+    pop     rdi
+    pop     rdi
+    test    eax, eax
+    jns     5f
+    xor     edi, edi                    # (a folder that is gone: none)
+5:  cmp     edi, r12d
+    jne     8f
+    mov     edi, ebx
+    mov     esi, r13d
+    call    oo_tree
+8:  inc     ebx
+    jmp     4b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# oo_tree(edi=root object index, esi=its depth) - it, then its children
+#   (unless it is collapsed), deeper ones after them
+oo_tree:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
     lea     r15, [rip+po_stk]           # a stack: (object, depth)
-    mov     dword ptr [r15], ebx
-    mov     dword ptr [r15+4], 0
+    mov     dword ptr [r15], edi
+    mov     dword ptr [r15+4], esi
     mov     r12d, 1
 7:  test    r12d, r12d
-    jz      69f
+    jz      9f
     dec     r12d
     mov     r13d, [r15+r12*8]           # pop: list it
     mov     r14d, [r15+r12*8+4]
     mov     eax, [rip+po_n]
-    cmp     eax, MAX_OBJECTS
-    jae     69f
+    cmp     eax, MAX_OBJECTS+256
+    jae     9f
     lea     rcx, [rip+po_ord]
     mov     [rcx+rax*4], r13d
     lea     rcx, [rip+po_dep]
@@ -668,13 +772,6 @@ outl_order:
     mov     [r15+r12*8+4], eax
     inc     r12d
     jmp     8b
-69: inc     ebx
-    jmp     61b
-.Loo_out:
-    mov     eax, [rip+obj_count]        # (no parents: all of them listed)
-    cmp     dword ptr [rip+po_n], 0
-    jne     9f
-    mov     [rip+po_n], eax
 9:  pop     r15
     pop     r14
     pop     r13

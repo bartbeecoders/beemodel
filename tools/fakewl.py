@@ -626,6 +626,7 @@ def main():
     anim_ui()
     physics_ui()
     landscape_ui()
+    folders_ui()
     render_ui()
     lights_ui()
     team_ui()
@@ -8106,6 +8107,72 @@ def physics_ui():
     check({'sim.bake', 'sim.free', 'sim.budget'} <= names(), 'the cache: Bake, Free, its budget')
     type_into('sim.budget', '512')
     check(wait_value(f, m, 'sim.budget', 0, 512) == 512, 'the budget from the field')
+    f.proc.kill()
+
+
+def folders_ui():
+    """W7 (#323): folders in the outliner: Ctrl+G puts the selection in a new
+    folder; a click on a folder selects what is in it, its eye hides it all,
+    two clicks rename it, an object dragged onto it goes in (undone), it
+    folds; folder() / infolder() / folders(); saved and opened again."""
+    print('  -- outliner folders --')
+    home = tempfile.mkdtemp(prefix='bee-fd-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='')
+    code = ('folder("Props")\nfolder("Small", "Props")\nadd("sphere", "Ball", 2, 1, 0)\ninfolder("Ball", "Small")\n'
+            'infolder("Cube", "Props")\nop("file.save", "~/BeeModel/f.bee")\nop("file.new")\nprint(folders())\n'
+            'op("file.open", "~/BeeModel/f.bee")\nprint(folders(), infolder("Ball"), infolder("Cube"), infolder("Light"))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=60)
+    out = [l.strip() for l in r.stdout.split('\n')] + ['', '']
+    check(out[0] == '0' and out[1] == '2 Small Props nil', f'folders saved in the file and opened again ({out[:2]})')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    frows = lambda: [w for w in ui_tree(m) if w['name'] == 'outliner.folder']
+    q('delete("Camera")\nadd("sphere", "Ball", 2, 1, 0)\nadd("cone", "Cone", -2, 1, 0)\nselect("Cube", "Ball")')
+    f.move(600, 300)
+    f.mods(4); f.key(34); f.mods(0); f.pump(0.3)              # Ctrl+G
+    a = q('print(folders(), infolder("Cube"), infolder("Ball"), infolder("Cone"))')
+    check(a == '1 Folder Folder nil', f'Ctrl+G: the selection in a new folder ({a})')
+    q('op("area.type_outliner")\nop("area.maximize")')        # (a big outliner)
+    f.pump(0.3)
+    q('select("Cone")')
+    w = frows()[0]
+    f.click(w['x'] + 30, w['y'] + 10); f.pump(0.5)
+    b = q('print(issel("Cube"), issel("Ball"), issel("Cone"))')
+    check(b == '1 1 0', f'a click on the folder selects what is in it ({b})')
+    x, y = widget_xy(m, 'outliner.folder_visible')
+    f.click(x, y); f.pump(0.3)
+    c = q('print(get("Cube", "hidden"), get("Ball", "hidden"), get("Cone", "hidden"))')
+    f.click(x, y); f.pump(0.3)
+    c2 = q('print(get("Cube", "hidden"), get("Ball", "hidden"))')
+    check(c == '1 1 0' and c2 == '0 0', f'the folder\'s eye hides everything in it, and shows it again ({c}, {c2})')
+    w = frows()[0]
+    f.click(w['x'] + 30, w['y'] + 10); f.click(w['x'] + 30, w['y'] + 10); f.pump(0.3)
+    check('outliner.folder_name' in names(), 'two clicks: its name to type')
+    f.mods(4); f.key(30); f.mods(0); f.type('Props'); f.key(28); f.pump(0.3)
+    d = q('print(infolder("Cube"))')
+    check(d == 'Props', f'renamed ({d})')
+    rows = [w for w in ui_tree(m) if w['name'] == 'outliner.visible']
+    cone = [w for w in ui_tree(m) if w['name'] == 'outliner.visible' and q(f'print(name({w["sub"]}))') == 'Cone']
+    fr = frows()[0]
+    if cone:
+        cy = cone[0]['y'] + 10
+        f.drag(fr['x'] + 60, cy, fr['x'] + 60, fr['y'] + 10, steps=6); f.pump(0.3)
+    e = q('print(infolder("Cone"))')
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.3)              # Ctrl+Z
+    e2 = q('print(infolder("Cone"))')
+    check(e == 'Props' and e2 == 'nil', f'an object dragged onto the folder goes in; Ctrl+Z takes it out ({e}, {e2})')
+    n0 = len([w for w in ui_tree(m) if w['name'] == 'outliner.visible'])
+    x, y = widget_xy(m, 'outliner.folder_fold')
+    f.click(x, y); f.pump(0.3)
+    n1 = len([w for w in ui_tree(m) if w['name'] == 'outliner.visible'])
+    check(n1 == n0 - 2, f'folded: its two objects\' rows gone ({n0} -> {n1})')
+    f.shot('w7_folders.png')
     f.proc.kill()
 
 

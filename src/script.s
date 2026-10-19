@@ -432,6 +432,12 @@ builtins:
     .long 2, 2
     .quad bn_shinfo, b_shinfo
     .long 1, 1
+    .quad bn_folder, b_folder
+    .long 1, 2
+    .quad bn_infolder, b_infolder
+    .long 1, 2
+    .quad bn_folders, b_folders
+    .long 0, 0
     .quad bn_shatter, b_shatter
     .long 3, 4
     .quad bn_height, b_height
@@ -774,6 +780,9 @@ bn_bonepos:     .asciz "bonepos"
 bn_rbinfo:      .asciz "rbinfo"
 bn_landscape:   .asciz "landscape"
 bn_shinfo:      .asciz "shinfo"
+bn_folder:      .asciz "folder"
+bn_infolder:    .asciz "infolder"
+bn_folders:     .asciz "folders"
 bn_shatter:     .asciz "shatter"
 s_sh_opname:    .asciz "object.shatter"
 s_sh_cnt:       .asciz " count "
@@ -5655,6 +5664,81 @@ b_libinfo:
     jz      ret_nil
     mov     rsi, rax
     jmp     ret_text
+
+# folder(name [, parent]) -> its name: the outliner folder of that name, made
+#   (inside the parent folder, itself made when missing) when there is none
+b_folder:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    xor     r13d, r13d
+    cmp     r12d, 2
+    jb      1f
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     rdi, rax
+    xor     esi, esi
+    call    fd_ensure
+    mov     r13d, eax
+1:  mov     rdi, rbx
+    call    a_str
+    mov     rdi, rax
+    mov     esi, r13d
+    call    fd_ensure
+    mov     edi, eax
+    call    fd_name_of
+    pop     r13
+    pop     r12
+    pop     rbx
+    test    rax, rax
+    jz      ret_nil
+    mov     rsi, rax
+    jmp     ret_text
+
+# infolder(object [, folder]) -> the name of the folder it is in (nil: none);
+#   with a folder: it goes there ("": out of any; a new name: made)
+b_infolder:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     r13, rax
+    cmp     r12d, 2
+    jb      2f
+    lea     rdi, [rbx+16]
+    call    a_str
+    xor     esi, esi
+    cmp     byte ptr [rax], 0
+    je      1f
+    mov     rdi, rax
+    xor     esi, esi
+    call    fd_ensure
+    mov     esi, eax
+1:  mov     rdi, r13
+    call    fd_set_obj
+2:  mov     edi, [r13+OB_FOLDER]
+    call    fd_name_of
+    pop     r13
+    pop     r12
+    pop     rbx
+    test    rax, rax
+    jz      ret_nil
+    mov     rsi, rax
+    jmp     ret_text
+
+# folders() -> how many folders the outliner has
+b_folders:
+    sub     rsp, 8
+    call    fd_count
+    add     rsp, 8
+    cvtsi2sd xmm0, eax
+    jmp     ret_num
 
 # ret_text(rsi=text) - a copy of it
 ret_text:
