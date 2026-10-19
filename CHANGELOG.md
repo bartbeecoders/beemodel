@@ -18,6 +18,9 @@ project uses [Semantic Versioning](https://semver.org/).
   View menu or the Viewport panel is kept in the preferences too.
 - The numeric keypad types values in fields, the console and the palette
   (#326).
+- The AI Assistant reaching its turn limit (`error_max_turns`, Claude Code
+  or Grok CLI) now says so and how to go on ("continue" resumes the
+  session), and the default limit is 100 turns (was 40).
 - Rendered shading no longer flickers while an animation plays: it shows a
   raycast each frame until the scene holds still for 150 ms, then the
   path-traced samples.

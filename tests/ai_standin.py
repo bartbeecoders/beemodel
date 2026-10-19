@@ -75,6 +75,9 @@ def main():
     if 'slow' in prompt:
         time.sleep(60)
         return 0
+    if 'long job' in prompt:                    # the turn limit reached
+        say({'type': 'result', 'subtype': 'error_max_turns', 'is_error': True, 'session_id': sid})
+        return 0
     if 'fail' in prompt:
         print('the stand-in failed on purpose', file=sys.stderr, flush=True)
         return 3

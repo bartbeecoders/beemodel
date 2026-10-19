@@ -80,8 +80,8 @@ pr_rh:          .long 540               #  denoise
 pr_rspp:        .long 128
 pr_rdn:         .long 1
 ai_prov:        .long 0                 # AI: the connection (0 Claude Code, 1
-ai_cl_turns:    .long 40                #  Grok CLI, 2 OpenRouter), turn limits
-ai_gk_turns:    .long 40
+ai_cl_turns:    .long 100               #  Grok CLI, 2 OpenRouter), turn limits
+ai_gk_turns:    .long 100
 ai_or_steps:    .long 30
 ai_or_url:      .asciz "https://openrouter.ai/api/v1"
                 .skip 256-29
@@ -880,8 +880,8 @@ pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxe
                 .quad 4, pr_rw, 960, 4, pr_rh, 540, 4, pr_rspp, 128, 4, pr_rdn, 1
                 .quad 5, pr_threads, 0, 5, pr_jit, 1, 5, pr_gpu_on, 1
                 .quad 6, pr_autosave, 25
-                .quad 7, pr_tier, -1, 7, pr_mcp, 1, 7, ai_prov, 0, 7, ai_cl_turns, 40
-                .quad 7, ai_gk_turns, 40, 7, ai_or_steps, 30
+                .quad 7, pr_tier, -1, 7, pr_mcp, 1, 7, ai_prov, 0, 7, ai_cl_turns, 100
+                .quad 7, ai_gk_turns, 100, 7, ai_or_steps, 30
                 .quad -1
 s_pf_title:     .asciz "Preferences"
 s_pf_found:     .asciz "Settings found"
