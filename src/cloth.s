@@ -938,6 +938,9 @@ cl_step:
     push    r12
     push    r13
     sub     rsp, 16
+    call    fl_time                     # the force fields now (fields.s)
+    lea     rdi, [rip+cx_g]
+    call    fl_prep
     xor     ebx, ebx                    # each cloth's object now (pins follow)
 1:  cmp     ebx, [rip+cx_nc]
     jae     2f
@@ -1034,9 +1037,35 @@ pred_job:
     xorps   xmm2, xmm2
     comiss  xmm1, xmm2
     jbe     2f
-    movaps  xmm2, [r9]                  # v += g h; x += v h
+    cmp     dword ptr [rip+fl_n], 0     # force fields: their pull (gravity in
+    je      21f                         #  it; wind is air: cl_wind)
+    push    rsi
+    push    rdx
+    push    r8
+    push    r9
+    push    rax
+    sub     rsp, 8
+    mov     rdi, rbx
+    mov     rsi, r9
+    mov     edx, 1
+    mov     ecx, 1
+    call    fl_accel
+    add     rsp, 8
+    pop     rax
+    pop     r9
+    pop     r8
+    pop     rdx
+    pop     rsi
+    movss   xmm6, [rip+cx_hs]
+    shufps  xmm6, xmm6, 0
+    mulps   xmm0, xmm6                  # a h
+    movaps  xmm2, [r9]
+    addps   xmm2, xmm0
+    movaps  xmm0, [rbx]
+    jmp     22f
+21: movaps  xmm2, [r9]                  # v += g h; x += v h
     addps   xmm2, xmm7
-    andps   xmm2, [rip+cq_xyz]
+22: andps   xmm2, [rip+cq_xyz]
     movaps  [r9], xmm2
     mulps   xmm2, xmm6
     addps   xmm0, xmm2
@@ -1255,17 +1284,22 @@ cl_volumes:
 #   a third to each corner (as velocity: h w f / 3)
 cl_wind:
     movaps  xmm7, [rip+cx_wind]
+    cmp     dword ptr [rip+fl_nw], 0    # (wind fields: air of their own)
+    jne     0f
     movaps  xmm0, xmm7
     DOT3    xmm0, xmm0
     xorps   xmm1, xmm1
     comiss  xmm0, xmm1
     jbe     9f
-    push    rbx
+0:  push    rbx
     push    r12
     xor     ebx, ebx
 1:  cmp     ebx, [rip+cx_nt]
     jae     8f
-    imul    rax, rbx, 12
+    cmp     dword ptr [rip+fl_nw], 0
+    je      11f
+    call    cl_tri_wind
+11: imul    rax, rbx, 12
     add     rax, [rip+cx_tr]
     mov     ecx, [rax]
     mov     edx, [rax+4]
@@ -1316,6 +1350,26 @@ cl_wind:
 8:  pop     r12
     pop     rbx
 9:  ret
+# cl_tri_wind(ebx=triangle) -> xmm7 = the air at its centre: the world's
+#   wind and the wind fields' (fields.s)
+cl_tri_wind:
+    imul    rax, rbx, 12
+    add     rax, [rip+cx_tr]
+    mov     ecx, [rax]
+    mov     edx, [rax+4]
+    mov     r8d, [rax+8]
+    XPTR    r9, rcx
+    XPTR    r10, rdx
+    XPTR    r11, r8
+    movaps  xmm0, [r9]
+    addps   xmm0, [r10]
+    addps   xmm0, [r11]
+    mulps   xmm0, [rip+cq_third4]
+    call    fl_wind
+    addps   xmm0, [rip+cx_wind]
+    andps   xmm0, [rip+cq_xyz]
+    movaps  xmm7, xmm0
+    ret
 wind_to:                                # rax = particle x 16; xmm5 = dv / w
     movss   xmm0, [r9+rax+12]
     shufps  xmm0, xmm0, 0
@@ -2359,7 +2413,8 @@ cl_key:
     call    sc_meshhash
 3:  inc     r12d
     jmp     2b
-9:  pop     r13
+9:  call    fl_mix                      # the force fields
+    pop     r13
     pop     r12
     pop     rbx
     ret

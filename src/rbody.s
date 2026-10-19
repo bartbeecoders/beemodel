@@ -3461,6 +3461,10 @@ rb_step:
     push    rbx
     sub     rsp, 16
     inc     dword ptr [rip+rb_stepno]
+    cvtsi2ss xmm0, dword ptr [rip+rb_stepno]   # the force fields now (fields.s)
+    mulss   xmm0, [rip+rb_dt]
+    lea     rdi, [rip+rb_g]
+    call    fl_prep
     call    now_ns
     mov     rbx, rax
     call    ccd_mark                    # where the moving bodies begin
@@ -8083,10 +8087,20 @@ isl_rest:
     pop     rbp
     ret
 
-# body_force(rdi=body) - a substep's gravity and damping
+# body_force(rdi=body) - a substep's gravity (and force fields) and damping
 body_force:
-    movss   xmm6, [rip+rb_h]
     movaps  xmm7, [rip+rb_g]
+    cmp     dword ptr [rip+fl_n], 0     # fields: their pull at its centre of
+    je      1f                          #  mass, gravity in it (fields.s)
+    push    rdi
+    lea     rsi, [rdi+BD_V]
+    mov     edx, [rdi+BD_GRP]
+    and     edx, 0xffff
+    xor     ecx, ecx
+    call    fl_accel
+    pop     rdi
+    movaps  xmm7, xmm0
+1:  movss   xmm6, [rip+rb_h]
     shufps  xmm6, xmm6, 0
     mulps   xmm7, xmm6                  # g h
     movaps  xmm0, [rdi+BD_V]
@@ -9628,7 +9642,8 @@ rb_key:
     call    sc_meshhash
 2:  inc     r12d
     jmp     1b
-9:  mov     dword ptr [rip+rb_noinst], 0
+9:  call    fl_mix                      # the force fields
+    mov     dword ptr [rip+rb_noinst], 0
     pop     r13
     pop     r12
     pop     rbx
