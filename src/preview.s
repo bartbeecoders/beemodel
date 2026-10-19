@@ -47,6 +47,31 @@
 .equ SH_AO,     192             # ambient occlusion (a graph's; else 1)
 .equ SH_SZ,     208
 .equ MA_ALPHA_,  88                      # (material.s)
+# kept corner normals (pc_tab): an entry
+.equ PE_MESH,   0
+.equ PE_FP,     8                       # the vertices' fingerprint
+.equ PE_VER,    16
+.equ PE_NT,     20
+.equ PE_NV,     24
+.equ PE_LAST,   28                      # the frame it was last used
+.equ PE_DATA,   32                      # f32[3] a corner, its own space
+.equ PE_BYTES,  40
+.equ PE_BUILD,  48                      # the frame it was last made
+.equ PE_SZ,     64
+.equ PC_N,      256
+.equ PC_AGE,    600                     # unused this many frames: freed
+.equ CN_CHUNK,  8192                    # triangles a job turns
+
+.macro PVCROSS d, a, b, t
+    movaps  \d, \b
+    shufps  \d, \d, 0xC9
+    mulps   \d, \a
+    movaps  \t, \a
+    shufps  \t, \t, 0xC9
+    mulps   \t, \b
+    subps   \d, \t
+    shufps  \d, \d, 0xC9
+.endm
 
 .section .bss
 .align 8
@@ -54,6 +79,14 @@ pv_map:         .skip 8             # object id -> record index
 pv_cn:          .skip 8             # per record: corner normals (camera)
 pv_mat:         .skip 8             # per record: material record or 0
 pv_mapn:        .skip 4
+pv_src:         .skip 8             # per record: its kept normals, or 0
+pv_k:           .skip 8             # per record: K (3 columns, aligned)
+pv_build:       .skip 8             # entries to make this frame
+pv_chunks:      .skip 8             # (record, first, count) to turn
+pv_nbuild:      .skip 4
+pc_frame:       .skip 4
+.align 8
+pc_tab:         .skip PC_N*PE_SZ
 
 .section .rodata
 .align 16
@@ -64,6 +97,11 @@ pf_half:        .float 0.5
 pf_zero:        .float 0.0
 pf_eps:         .float 1.0e-4
 pf_cos30:       .float 0.8660254
+pv_tiny:        .float 1.0e-20
+.align 16
+pv_xyz:         .long -1, -1, -1, 0
+pv_tiny4:       .float 1.0e-20, 1.0e-20, 1.0e-20, 1.0e-20
+.align 4
 pf_inv_pi:      .float 0.31830989
 pf_255:         .float 255.0
 pf_two:         .float 2.0
@@ -163,11 +201,7 @@ preview_shade:
     mov     [rcx+rbx*8], rax
     inc     ebx
     jmp     1b
-2:  lea     rdi, [rip+job_normals]      # normals, one object per job
-    xor     esi, esi
-    mov     edx, [rip+rs_nobjs]
-    mov     ecx, 1
-    call    parallel_for
+2:  call    pv_normals                  # corner normals: kept, turned
     lea     rdi, [rip+job_shade]        # then the pixels, by rows
     xor     esi, esi
     mov     edx, [rip+rs_h]
@@ -180,73 +214,215 @@ preview_shade:
     ret
 
 # =============================================================================
-# job_normals(ctx, esi=first record, edx=end, ecx=thread, r8=arena) - corner
-#   normals in camera space: per corner the area-weighted normals of the
-#   triangles at that vertex within 30 degrees of this one
+# Corner normals: per corner the area-weighted normals of the triangles at
+# that vertex within 30 degrees of this one. A mesh's are made once in its
+# own space and kept (pc_tab: by the mesh, its version, counts and a
+# fingerprint of its vertices - an edit, a deformation or cloth makes them
+# again); each frame they are only turned into camera space (the cofactor
+# of the object's camera matrix, as the cross products of its edges would
+# turn), in parallel chunks. Meshes made for one frame (no mapping of their
+# own: virtualized geometry's cuts) are done each frame, in camera space.
 # =============================================================================
-job_normals:
+
+# pv_normals - (preview_shade) every record's corner normals in camera space:
+#   kept meshes' made again where they changed, then turned; the others
+#   made in camera space
+pv_normals:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    inc     dword ptr [rip+pc_frame]
+    call    pc_age
+    mov     dword ptr [rip+pv_nbuild], 0
+    mov     ebx, [rip+rs_nobjs]
+    lea     rdi, [rip+frame_arena]
+    lea     esi, [rbx*8+8]
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lpn_out
+    mov     [rip+pv_src], rax
+    lea     rdi, [rip+frame_arena]
+    lea     esi, [rbx*8+8]
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lpn_out
+    mov     [rip+pv_build], rax
+    lea     rdi, [rip+frame_arena]
+    imul    esi, ebx, 48
+    add     esi, 16
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lpn_out
+    mov     [rip+pv_k], rax
+    xor     ebx, ebx                    # each record: kept, or not
+    xor     r14d, r14d                  # chunks to turn
+1:  cmp     ebx, [rip+rs_nobjs]
+    jae     2f
+    mov     rax, [rip+pv_src]
+    mov     qword ptr [rax+rbx*8], 0
+    imul    r12, rbx, RO_SZ
+    add     r12, [rip+rs_objs]
+    mov     r13, [r12+RO_MESH]
+    mov     rax, [rip+pv_cn]
+    cmp     qword ptr [rax+rbx*8], 0
+    je      11f
+    cmp     qword ptr [r13+ME_BYTES], 0 # (made for this frame: not kept)
+    je      11f
+    cmp     dword ptr [r13+ME_NTRIS], 0
+    je      11f
+    mov     rdi, r13
+    call    pc_entry
+    test    rax, rax
+    jz      11f
+    mov     rcx, [rip+pv_src]
+    mov     rax, [rax+PE_DATA]
+    mov     [rcx+rbx*8], rax
+    mov     rdi, r12
+    imul    rsi, rbx, 48
+    add     rsi, [rip+pv_k]
+    call    pv_kmat
+    mov     eax, [r13+ME_NTRIS]
+    add     eax, CN_CHUNK-1
+    shr     eax, 13
+    add     r14d, eax
+11: inc     ebx
+    jmp     1b
+2:  lea     rdi, [rip+job_build]        # the changed meshes, made again
+    xor     esi, esi
+    mov     edx, [rip+pv_nbuild]
+    mov     ecx, 1
+    call    parallel_for
+    lea     rdi, [rip+job_normals]      # the ones not kept
+    xor     esi, esi
+    mov     edx, [rip+rs_nobjs]
+    mov     ecx, 1
+    call    parallel_for
+    test    r14d, r14d
+    jz      .Lpn_out
+    lea     rdi, [rip+frame_arena]      # the kept ones turned, in chunks
+    mov     esi, r14d
+    shl     esi, 4
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lpn_out
+    mov     [rip+pv_chunks], rax
+    mov     rdi, rax
+    xor     ebx, ebx
+    xor     r14d, r14d
+3:  cmp     ebx, [rip+rs_nobjs]
+    jae     5f
+    mov     rax, [rip+pv_src]
+    cmp     qword ptr [rax+rbx*8], 0
+    je      4f
+    imul    rax, rbx, RO_SZ
+    add     rax, [rip+rs_objs]
+    mov     rax, [rax+RO_MESH]
+    mov     ecx, [rax+ME_NTRIS]
+    xor     edx, edx                    # first
+31: cmp     edx, ecx
+    jae     4f
+    mov     eax, ecx
+    sub     eax, edx
+    cmp     eax, CN_CHUNK
+    jbe     32f
+    mov     eax, CN_CHUNK
+32: mov     [rdi], ebx
+    mov     [rdi+4], edx
+    mov     [rdi+8], eax
+    add     rdi, 16
+    inc     r14d
+    add     edx, eax
+    jmp     31b
+4:  inc     ebx
+    jmp     3b
+5:  lea     rdi, [rip+job_xform]
+    xor     esi, esi
+    mov     edx, r14d
+    mov     ecx, 1
+    call    parallel_for
+.Lpn_out:
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# cn_build(rdi=mesh, rsi=its vertices (f32[3]), rdx=out (36 bytes a
+#   triangle), rcx=arena) - its corner normals, in the vertices' space
+cn_build:
     push    rbx
     push    rbp
     push    r12
     push    r13
     push    r14
     push    r15
-    sub     rsp, 104
-    mov     [rsp], esi
-    mov     [rsp+4], edx
-    mov     [rsp+8], r8                 # this thread's arena
-.Ljn_obj:
-    mov     eax, [rsp]
-    cmp     eax, [rsp+4]
-    jae     .Ljn_out
-    imul    r12, rax, RO_SZ
-    add     r12, [rip+rs_objs]
-    mov     r13, [r12+RO_MESH]
-    mov     rcx, [rip+pv_cn]
-    mov     r14, [rcx+rax*8]            # out
-    test    r14, r14
-    jz      .Ljn_next
-    mov     rbp, [r12+RO_CV]
-    mov     rdi, [rsp+8]                # face normals (unnormalized) f32[3]
+    sub     rsp, 72
+    mov     r13, rdi
+    mov     rbp, rsi
+    mov     r14, rdx
+    mov     [rsp], rcx                  # the arena
+    mov     rdi, rcx                    # faces: unit normal, |n| (16 bytes)
     mov     esi, [r13+ME_NTRIS]
-    imul    esi, esi, 12
+    shl     esi, 4
     add     esi, 16
     call    arena_alloc
     test    rax, rax
-    jz      .Ljn_flat
+    jz      .Lcb_flat
     mov     [rsp+16], rax
-    mov     rdi, [rsp+8]                # vertex -> triangles (CSR)
+    mov     rdi, [rsp]                  # vertex -> triangles (CSR)
     mov     esi, [r13+ME_NVERTS]
     lea     esi, [rsi*4+8]
     call    arena_alloc
     test    rax, rax
-    jz      .Ljn_flat
+    jz      .Lcb_flat
     mov     [rsp+24], rax
     mov     rdi, rax
     mov     ecx, [r13+ME_NVERTS]
     inc     ecx
     xor     eax, eax
     rep     stosd
-    mov     rdi, [rsp+8]
+    mov     rdi, [rsp]
     mov     esi, [r13+ME_NTRIS]
     imul    esi, esi, 12
     add     esi, 8
     call    arena_alloc
     test    rax, rax
-    jz      .Ljn_flat
+    jz      .Lcb_flat
     mov     [rsp+32], rax
-    # face normals and counts
-    xor     ebx, ebx
+    xor     ebx, ebx                    # faces and counts
 1:  cmp     ebx, [r13+ME_NTRIS]
     jae     2f
     mov     edi, ebx
-    call    tri_cn                      # xmm0..2 = (p1-p0) x (p2-p0), camera
-    mov     rax, [rsp+16]
-    lea     rcx, [rbx+rbx*2]
-    movss   [rax+rcx*4], xmm0
-    movss   [rax+rcx*4+4], xmm1
-    movss   [rax+rcx*4+8], xmm2
+    call    tri_cn                      # xmm0..2 = (p1-p0) x (p2-p0)
+    movss   xmm3, xmm0
+    mulss   xmm3, xmm0
+    movss   xmm4, xmm1
+    mulss   xmm4, xmm1
+    addss   xmm3, xmm4
+    movss   xmm4, xmm2
+    mulss   xmm4, xmm2
+    addss   xmm3, xmm4
+    sqrtss  xmm3, xmm3                  # |n|
+    xorps   xmm4, xmm4
+    comiss  xmm3, xmm4
+    jbe     11f
+    movss   xmm4, [rip+pf_one]
+    divss   xmm4, xmm3
+    mulss   xmm0, xmm4
+    mulss   xmm1, xmm4
+    mulss   xmm2, xmm4
+11: mov     rax, [rsp+16]
+    mov     rcx, rbx
+    shl     rcx, 4
+    movss   [rax+rcx], xmm0
+    movss   [rax+rcx+4], xmm1
+    movss   [rax+rcx+8], xmm2
+    movss   [rax+rcx+12], xmm3
     mov     rax, [r13+ME_TRIS]
+    lea     rcx, [rbx+rbx*2]
     mov     rdx, [rsp+24]
     mov     edi, [rax+rcx*4]
     inc     dword ptr [rdx+rdi*4+4]
@@ -292,23 +468,19 @@ job_normals:
     dec     ecx
     jmp     61b
 62: mov     dword ptr [rdx], 0
-    # corner normals
-    xor     ebx, ebx
-.Ljn_tri:
+    xor     ebx, ebx                    # the corners
+.Lcb_tri:
     cmp     ebx, [r13+ME_NTRIS]
-    jae     .Ljn_next
+    jae     .Lcb_out
     mov     rax, [rsp+16]               # this face's unit normal
-    lea     rcx, [rbx+rbx*2]
-    lea     rsi, [rax+rcx*4]
-    lea     rdi, [rsp+48]
-    call    unit3
-    xor     r15d, r15d                  # corner
-.Ljn_corner:
+    mov     rcx, rbx
+    shl     rcx, 4
+    movups  xmm8, [rax+rcx]
+    xor     r15d, r15d
+.Lcb_corner:
     cmp     r15d, 3
-    jae     .Ljn_tnext
-    xorps   xmm4, xmm4                  # sum
-    xorps   xmm5, xmm5
-    xorps   xmm6, xmm6
+    jae     .Lcb_tnext
+    xorps   xmm4, xmm4                  # the sum
     mov     rax, [r13+ME_TRIS]
     lea     rcx, [rbx+rbx*2]
     add     rcx, r15
@@ -316,82 +488,62 @@ job_normals:
     mov     rdx, [rsp+24]
     mov     ecx, [rdx+rdi*4]
     mov     edx, [rdx+rdi*4+4]
-    mov     [rsp+40], edx
-7:  cmp     ecx, [rsp+40]
+    mov     r8, [rsp+32]
+    mov     r9, [rsp+16]
+7:  cmp     ecx, edx
     jae     8f
-    mov     rax, [rsp+32]
-    mov     eax, [rax+rcx*4]            # a triangle at the vertex
-    mov     rsi, [rsp+16]
-    lea     rax, [rax+rax*2]
-    lea     rsi, [rsi+rax*4]
-    lea     rdi, [rsp+64]
-    push    rcx
-    call    unit3                       # its unit normal; xmm3 = |n| (area*2)
-    pop     rcx
-    movss   xmm0, [rsp+64]              # within 30 degrees of this face?
-    mulss   xmm0, [rsp+48]
-    movss   xmm1, [rsp+68]
-    mulss   xmm1, [rsp+52]
-    addss   xmm0, xmm1
-    movss   xmm1, [rsp+72]
-    mulss   xmm1, [rsp+56]
-    addss   xmm0, xmm1
-    comiss  xmm0, [rip+pf_cos30]
+    mov     eax, [r8+rcx*4]             # a face at the vertex: within 30
+    shl     rax, 4                      #  degrees? its normal x |n|
+    movups  xmm0, [r9+rax]
+    movaps  xmm1, xmm0
+    dpps    xmm1, xmm8, 0x71
+    comiss  xmm1, [rip+pf_cos30]
     jb      71f
-    movss   xmm0, [rsp+64]              # area weighted
-    mulss   xmm0, xmm3
-    addss   xmm4, xmm0
-    movss   xmm0, [rsp+68]
-    mulss   xmm0, xmm3
-    addss   xmm5, xmm0
-    movss   xmm0, [rsp+72]
-    mulss   xmm0, xmm3
-    addss   xmm6, xmm0
+    movaps  xmm2, xmm0
+    shufps  xmm2, xmm2, 0xFF
+    mulps   xmm0, xmm2
+    addps   xmm4, xmm0
 71: inc     ecx
     jmp     7b
-8:  movss   [rsp+80], xmm4
-    movss   [rsp+84], xmm5
-    movss   [rsp+88], xmm6
-    lea     rsi, [rsp+80]
-    lea     rdi, [rsp+80]
-    call    unit3
-    xorps   xmm0, xmm0                  # nothing (degenerate): the face's
-    comiss  xmm3, xmm0
-    ja      81f
-    mov     rax, [rsp+48]
-    mov     [rsp+80], rax
-    mov     eax, [rsp+56]
-    mov     [rsp+88], eax
+8:  andps   xmm4, [rip+pv_xyz]          # unit (nothing: the face's)
+    movaps  xmm0, xmm4
+    dpps    xmm0, xmm0, 0x7f
+    movaps  xmm1, xmm8
+    andps   xmm1, [rip+pv_xyz]
+    comiss  xmm0, [rip+pv_tiny]
+    jbe     81f
+    sqrtps  xmm0, xmm0
+    movaps  xmm1, xmm4
+    divps   xmm1, xmm0
 81: lea     rcx, [rbx+rbx*2]            # out[tri][corner]
     add     rcx, r15
     lea     rcx, [rcx+rcx*2]
-    mov     rax, [rsp+80]
-    mov     [r14+rcx*4], rax
-    mov     eax, [rsp+88]
-    mov     [r14+rcx*4+8], eax
+    movlps  [r14+rcx*4], xmm1
+    movhlps xmm1, xmm1
+    movss   [r14+rcx*4+8], xmm1
     inc     r15d
-    jmp     .Ljn_corner
-.Ljn_tnext:
+    jmp     .Lcb_corner
+.Lcb_tnext:
     inc     ebx
-    jmp     .Ljn_tri
-.Ljn_flat:                              # (no memory: face normals only)
+    jmp     .Lcb_tri
+.Lcb_flat:                              # (no memory: face normals only)
     xor     ebx, ebx
 9:  cmp     ebx, [r13+ME_NTRIS]
-    jae     .Ljn_next
+    jae     .Lcb_out
     mov     edi, ebx
     call    tri_cn
-    movss   [rsp+80], xmm0
-    movss   [rsp+84], xmm1
-    movss   [rsp+88], xmm2
-    lea     rsi, [rsp+80]
-    lea     rdi, [rsp+80]
+    movss   [rsp+48], xmm0
+    movss   [rsp+52], xmm1
+    movss   [rsp+56], xmm2
+    lea     rsi, [rsp+48]
+    lea     rdi, [rsp+48]
     call    unit3
     lea     rcx, [rbx+rbx*2]
     lea     rcx, [rcx+rcx*2]
     xor     edx, edx
-91: mov     rax, [rsp+80]
+91: mov     rax, [rsp+48]
     mov     [r14+rcx*4], rax
-    mov     eax, [rsp+88]
+    mov     eax, [rsp+56]
     mov     [r14+rcx*4+8], eax
     add     rcx, 3
     inc     edx
@@ -399,11 +551,8 @@ job_normals:
     jb      91b
     inc     ebx
     jmp     9b
-.Ljn_next:
-    inc     dword ptr [rsp]
-    jmp     .Ljn_obj
-.Ljn_out:
-    add     rsp, 104
+.Lcb_out:
+    add     rsp, 72
     pop     r15
     pop     r14
     pop     r13
@@ -411,6 +560,388 @@ job_normals:
     pop     rbp
     pop     rbx
     ret
+
+# job_normals(ctx, esi=first record, edx=end, ecx=thread, r8=arena) - the
+#   records whose mesh is not kept: corner normals in camera space
+job_normals:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, esi
+    mov     r12d, edx
+    mov     r13, r8
+1:  cmp     ebx, r12d
+    jae     9f
+    mov     rax, [rip+pv_src]
+    cmp     qword ptr [rax+rbx*8], 0
+    jne     2f
+    mov     rax, [rip+pv_cn]
+    mov     rdx, [rax+rbx*8]
+    test    rdx, rdx
+    jz      2f
+    imul    rax, rbx, RO_SZ
+    add     rax, [rip+rs_objs]
+    mov     rdi, [rax+RO_MESH]
+    mov     rsi, [rax+RO_CV]
+    mov     rcx, r13
+    call    cn_build
+2:  inc     ebx
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# job_build(ctx, esi=first, edx=end, ecx=thread, r8=arena) - kept meshes made
+#   again: their corner normals in their own space
+job_build:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, esi
+    mov     r12d, edx
+    mov     r13, r8
+1:  cmp     ebx, r12d
+    jae     9f
+    mov     rax, [rip+pv_build]
+    mov     rax, [rax+rbx*8]            # an entry
+    mov     rdi, [rax+PE_MESH]
+    mov     rsi, [rdi+ME_POS]
+    mov     rdx, [rax+PE_DATA]
+    mov     rcx, r13
+    call    cn_build
+    inc     ebx
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# job_xform(ctx, esi=first chunk, edx=end) - kept corner normals turned into
+#   camera space: K n (K: the cofactor of the record's camera matrix), unit
+job_xform:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     ebx, esi
+    mov     r12d, edx
+.Ljx_chunk:
+    cmp     ebx, r12d
+    jae     .Ljx_out
+    mov     rax, [rip+pv_chunks]
+    mov     rcx, rbx
+    shl     rcx, 4
+    mov     r13d, [rax+rcx]             # the record
+    mov     r14d, [rax+rcx+4]           # first triangle
+    mov     r15d, [rax+rcx+8]           # how many
+    imul    rax, r13, 48                # K's columns
+    add     rax, [rip+pv_k]
+    movaps  xmm5, [rax]
+    movaps  xmm6, [rax+16]
+    movaps  xmm7, [rax+32]
+    mov     rax, [rip+pv_src]
+    mov     rsi, [rax+r13*8]
+    mov     rax, [rip+pv_cn]
+    mov     rdi, [rax+r13*8]
+    imul    rax, r14, 36
+    add     rsi, rax
+    add     rdi, rax
+    lea     ecx, [r15+r15*2]            # corners
+1:  test    ecx, ecx
+    jz      .Ljx_next
+    movss   xmm0, [rsi]
+    shufps  xmm0, xmm0, 0
+    mulps   xmm0, xmm5
+    movss   xmm1, [rsi+4]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, xmm6
+    addps   xmm0, xmm1
+    movss   xmm1, [rsi+8]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, xmm7
+    addps   xmm0, xmm1
+    movaps  xmm1, xmm0
+    dpps    xmm1, xmm1, 0x7f
+    maxps   xmm1, [rip+pv_tiny4]
+    sqrtps  xmm1, xmm1
+    divps   xmm0, xmm1
+    movlps  [rdi], xmm0
+    movhlps xmm0, xmm0
+    movss   [rdi+8], xmm0
+    add     rsi, 12
+    add     rdi, 12
+    dec     ecx
+    jmp     1b
+.Ljx_next:
+    inc     ebx
+    jmp     .Ljx_chunk
+.Ljx_out:
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pc_fp(rdi=mesh) -> rax = a fingerprint of its vertices (their order counts)
+pc_fp:
+    mov     rsi, [rdi+ME_POS]
+    mov     ecx, [rdi+ME_NVERTS]
+    imul    rcx, rcx, 12
+    pxor    xmm0, xmm0
+    pxor    xmm1, xmm1
+1:  cmp     rcx, 16
+    jb      2f
+    movdqu  xmm2, [rsi]
+    pxor    xmm0, xmm2
+    pshufd  xmm1, xmm1, 0x39
+    paddd   xmm1, xmm2
+    add     rsi, 16
+    sub     rcx, 16
+    jmp     1b
+2:  cmp     rcx, 4
+    jb      3f
+    movd    xmm2, dword ptr [rsi]
+    pxor    xmm0, xmm2
+    pshufd  xmm1, xmm1, 0x39
+    paddd   xmm1, xmm2
+    add     rsi, 4
+    sub     rcx, 4
+    jmp     2b
+3:  movq    rax, xmm0
+    pextrq  rdx, xmm0, 1
+    xor     rax, rdx
+    movq    rdx, xmm1
+    rol     rdx, 17
+    xor     rax, rdx
+    pextrq  rdx, xmm1, 1
+    rol     rdx, 31
+    xor     rax, rdx
+    ret
+
+# pc_entry(rdi=mesh) -> rax = its entry: kept and the same (PE_BUILD old),
+#   or one to make again (PE_BUILD = this frame; its data room for it), or
+#   0 (no room)
+pc_entry:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r12, rdi
+    call    pc_fp
+    mov     r13, rax
+    lea     rbx, [rip+pc_tab]           # the mesh's own entry
+    xor     ecx, ecx
+1:  cmp     ecx, PC_N
+    jae     2f
+    cmp     [rbx+PE_MESH], r12
+    je      5f
+    add     rbx, PE_SZ
+    inc     ecx
+    jmp     1b
+2:  lea     rbx, [rip+pc_tab]           # none: a free one, or the least used
+    xor     r14, r14
+    xor     ecx, ecx
+    mov     edx, -1
+3:  cmp     ecx, PC_N
+    jae     4f
+    cmp     qword ptr [rbx+PE_MESH], 0
+    je      31f
+    mov     eax, [rip+pc_frame]
+    sub     eax, [rbx+PE_LAST]
+    cmp     eax, 1                      # (not one in use this frame)
+    jb      32f
+    cmp     [rbx+PE_LAST], edx
+    jae     32f
+    mov     edx, [rbx+PE_LAST]
+    mov     r14, rbx
+32: add     rbx, PE_SZ
+    inc     ecx
+    jmp     3b
+31: mov     r14, rbx
+4:  test    r14, r14
+    jz      .Lpe_none
+    mov     rbx, r14
+    mov     [rbx+PE_MESH], r12
+    mov     qword ptr [rbx+PE_FP], 0
+    mov     dword ptr [rbx+PE_NT], -1   # (never the same: made again)
+5:  mov     eax, [rip+pc_frame]
+    mov     [rbx+PE_LAST], eax
+    cmp     [rbx+PE_FP], r13
+    jne     6f
+    mov     eax, [r12+ME_VER]
+    cmp     [rbx+PE_VER], eax
+    jne     6f
+    mov     eax, [r12+ME_NTRIS]
+    cmp     [rbx+PE_NT], eax
+    jne     6f
+    mov     eax, [r12+ME_NVERTS]
+    cmp     [rbx+PE_NV], eax
+    je      8f                          # the same
+6:  mov     eax, [rip+pc_frame]         # made again this frame (once)
+    cmp     [rbx+PE_BUILD], eax
+    je      8f
+    mov     esi, [r12+ME_NTRIS]         # room: 36 bytes a triangle
+    imul    rsi, rsi, 36
+    add     rsi, 4095
+    and     rsi, -4096
+    cmp     rsi, [rbx+PE_BYTES]
+    jbe     7f
+    push    rsi
+    push    rsi
+    mov     rdi, [rbx+PE_DATA]
+    mov     rsi, [rbx+PE_BYTES]
+    test    rdi, rdi
+    jz      61f
+    mov     eax, SYS_MUNMAP
+    syscall
+61: mov     qword ptr [rbx+PE_DATA], 0
+    mov     qword ptr [rbx+PE_BYTES], 0
+    pop     rsi
+    pop     rsi
+    push    rsi
+    push    rsi
+    xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, 0x22
+    mov     r8, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    pop     rsi
+    pop     rsi
+    cmp     rax, -4096
+    jae     .Lpe_drop
+    mov     [rbx+PE_DATA], rax
+    mov     [rbx+PE_BYTES], rsi
+7:  mov     [rbx+PE_FP], r13
+    mov     eax, [r12+ME_VER]
+    mov     [rbx+PE_VER], eax
+    mov     eax, [r12+ME_NTRIS]
+    mov     [rbx+PE_NT], eax
+    mov     eax, [r12+ME_NVERTS]
+    mov     [rbx+PE_NV], eax
+    mov     eax, [rip+pc_frame]
+    mov     [rbx+PE_BUILD], eax
+    mov     rax, [rip+pv_build]         # into the list to make
+    mov     ecx, [rip+pv_nbuild]
+    mov     [rax+rcx*8], rbx
+    inc     dword ptr [rip+pv_nbuild]
+8:  mov     rax, rbx
+    jmp     9f
+.Lpe_drop:
+    mov     qword ptr [rbx+PE_MESH], 0
+.Lpe_none:
+    xor     eax, eax
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pv_kmat(rdi=record, rsi=out: 3 columns (16-byte aligned)) - K = the
+#   cofactor of its camera matrix's 3x3 C = (right, up, fwd) . M: columns
+#   b x c, c x a, a x b of C's columns a b c (what the edges' cross products
+#   become in camera space)
+pv_kmat:
+    push    rbx
+    sub     rsp, 80
+    mov     rbx, rsi
+    mov     rdi, [rdi+RO_OBJ]
+    lea     rsi, [rsp+16]               # M (3x4 rows)
+    call    obj_matrix
+    xor     ecx, ecx                    # C's column c: basis . M's column c
+1:  movss   xmm0, [rsp+16+rcx*4]        # (M0c, M1c, M2c)
+    movss   xmm1, [rsp+32+rcx*4]
+    movss   xmm2, [rsp+48+rcx*4]
+    movss   xmm3, [rip+right]
+    mulss   xmm3, xmm0
+    movss   xmm4, [rip+right+4]
+    mulss   xmm4, xmm1
+    addss   xmm3, xmm4
+    movss   xmm4, [rip+right+8]
+    mulss   xmm4, xmm2
+    addss   xmm3, xmm4
+    movss   [rsp+rcx*4], xmm3           # (scratch: x of each column)
+    movss   xmm3, [rip+up]
+    mulss   xmm3, xmm0
+    movss   xmm4, [rip+up+4]
+    mulss   xmm4, xmm1
+    addss   xmm3, xmm4
+    movss   xmm4, [rip+up+8]
+    mulss   xmm4, xmm2
+    addss   xmm3, xmm4
+    movss   [rsp+64+rcx*4], xmm3        # (y)
+    movss   xmm3, [rip+fwd]
+    mulss   xmm3, xmm0
+    movss   xmm4, [rip+fwd+4]
+    mulss   xmm4, xmm1
+    addss   xmm3, xmm4
+    movss   xmm4, [rip+fwd+8]
+    mulss   xmm4, xmm2
+    addss   xmm3, xmm4
+    lea     rax, [rbx+rcx*4]            # (z, into out: rebuilt below)
+    movss   [rax+32], xmm3
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    # columns a b c as vectors: (x[c], y[c], z[c])
+    movss   xmm0, [rsp]
+    insertps xmm0, [rsp+64], 0x10
+    insertps xmm0, [rbx+32], 0x20       # a
+    movss   xmm1, [rsp+4]
+    insertps xmm1, [rsp+68], 0x10
+    insertps xmm1, [rbx+36], 0x20       # b
+    movss   xmm2, [rsp+8]
+    insertps xmm2, [rsp+72], 0x10
+    insertps xmm2, [rbx+40], 0x20       # c
+    andps   xmm0, [rip+pv_xyz]
+    andps   xmm1, [rip+pv_xyz]
+    andps   xmm2, [rip+pv_xyz]
+    PVCROSS xmm3, xmm1, xmm2, xmm6      # b x c
+    PVCROSS xmm4, xmm2, xmm0, xmm6      # c x a
+    PVCROSS xmm5, xmm0, xmm1, xmm6      # a x b
+    movaps  [rbx], xmm3
+    movaps  [rbx+16], xmm4
+    movaps  [rbx+32], xmm5
+    add     rsp, 80
+    pop     rbx
+    ret
+
+# pc_age - kept normals not used for PC_AGE frames go (their memory back)
+pc_age:
+    lea     rcx, [rip+pc_tab]
+    xor     edx, edx
+1:  cmp     edx, PC_N
+    jae     9f
+    cmp     qword ptr [rcx+PE_MESH], 0
+    je      2f
+    mov     eax, [rip+pc_frame]
+    sub     eax, [rcx+PE_LAST]
+    cmp     eax, PC_AGE
+    jb      2f
+    push    rcx
+    push    rdx
+    mov     rdi, [rcx+PE_DATA]
+    mov     rsi, [rcx+PE_BYTES]
+    test    rdi, rdi
+    jz      11f
+    mov     eax, SYS_MUNMAP
+    syscall
+11: pop     rdx
+    pop     rcx
+    xor     eax, eax
+    mov     [rcx+PE_MESH], rax
+    mov     [rcx+PE_DATA], rax
+    mov     [rcx+PE_BYTES], rax
+2:  add     rcx, PE_SZ
+    inc     edx
+    jmp     1b
+9:  ret
 
 # tri_cn(edi=triangle; r13 = mesh, rbp = camera-space vertices) -> xmm0..2 =
 #   (p1 - p0) x (p2 - p0)
