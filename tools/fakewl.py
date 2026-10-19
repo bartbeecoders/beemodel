@@ -615,6 +615,7 @@ def main():
     status_ui()
     jobs_ui()
     files_more()
+    files_places()
     files_complete()
     print_ui()
     drawing_ui()
@@ -7407,6 +7408,82 @@ def jobs_ui():
     check(widget(m, 'link.stop') is not None, 'clicking it opens the Versions editor (its live link part)')
     q('op("link.stop")'); f.pump(0.3)
     check(widget(m, 'status.link') is None, 'stopped: the chip goes')
+    f.proc.kill()
+
+
+def files_places():
+    """W6 (#322): the file dialog's columns (sorted by a click on a header),
+    the filter box, Hidden files, All files, the folder's parts as buttons,
+    Back and Forward, favourites (kept in ~/.config/beemodel/places), an
+    image's preview."""
+    print('  -- file dialog: places, columns, filter --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    rows = lambda: [w.get('label') for w in ui_tree(m) if w['name'] == 'files.row']
+    def click(name, sub=0):
+        x, y = widget_xy(m, name, sub); f.click(x, y); f.pump(0.3)
+    d = os.path.join(f.home, 'BeeModel')
+    os.makedirs(os.path.join(d, 'sub'), exist_ok=True)
+    from PIL import Image
+    Image.new('RGB', (64, 32), (200, 40, 40)).save(os.path.join(d, 'big.png'))
+    Image.new('RGB', (4, 4), (40, 200, 40)).save(os.path.join(d, 'small.png'))
+    Image.new('RGB', (4, 4), (40, 40, 200)).save(os.path.join(d, '.secret.png'))
+    open(os.path.join(d, 'notes.txt'), 'w').write('x')
+    props_tab(m, f, 'scene')
+    click('images.load')
+    check({'files.back', 'files.forward', 'files.favorite', 'files.crumb', 'files.filter', 'files.hidden', 'files.all',
+           'files.sort_name', 'files.sort_size', 'files.sort_date', 'files.places'} <= names(),
+          'the file dialog: back, forward, favourite, the folder\'s parts, filter, hidden, all files, sortable columns')
+    r0 = rows()
+    check(r0 == ['sub', 'big.png', 'small.png'], f'folders first, then the images by name; no hidden files or text ({r0})')
+    click('files.sort_size')
+    r1 = rows()
+    click('files.sort_size')
+    r2 = rows()
+    check(r1 == ['sub', 'small.png', 'big.png'] and r2 == ['sub', 'big.png', 'small.png'],
+          f'Size sorts small to big, a second click big to small ({r1}, {r2})')
+    click('files.sort_name')
+    click('files.hidden')
+    r3 = rows()
+    click('files.all')
+    r4 = rows()
+    check('.secret.png' in r3 and 'notes.txt' not in r3 and 'notes.txt' in r4,
+          f'Hidden files shows .secret.png; All files the text file too ({r3}, {r4})')
+    click('files.hidden')
+    click('files.all')
+    x, y = widget_xy(m, 'files.filter')
+    f.click(x, y); f.type('big'); f.key(28); f.pump(0.3)
+    r5 = rows()
+    check(r5 == ['big.png'], f'the filter keeps the names with "big" in them ({r5})')
+    f.click(x, y); f.mods(4); f.key(30); f.mods(0); f.key(14); f.key(28); f.pump(0.3)
+    rr = [w for w in ui_tree(m) if w['name'] == 'files.row' and w.get('label') == 'big.png']
+    if rr:
+        f.click(rr[0]['x'] + 40, rr[0]['y'] + 10); f.pump(0.4)
+    pv = [w.get('label') for w in ui_tree(m) if w['name'] == 'files.preview']
+    check(pv == ['Preview'], f'an image picked: its preview ({pv})')
+    click('files.favorite')
+    places = open(os.path.join(f.home, '.config', 'beemodel', 'places')).read()
+    check(f'fav {d}' in places and widget(m, 'files.favorite')['label'] == '- Favorite' and widget(m, 'files.place', 16),
+          'the star: the folder among the favourites (and in the places file)')
+    rr = [w for w in ui_tree(m) if w['name'] == 'files.row' and w.get('label') == 'sub']
+    f.click(rr[0]['x'] + 40, rr[0]['y'] + 10); f.click(rr[0]['x'] + 40, rr[0]['y'] + 10); f.pump(0.4)
+    p1 = widget(m, 'files.path')['value']
+    click('files.back')
+    p2 = widget(m, 'files.path')['value']
+    click('files.forward')
+    p3 = widget(m, 'files.path')['value']
+    check(p1.endswith('/sub') and p2 == d and p3 == p1, f'into sub, Back, Forward ({p1}, {p2}, {p3})')
+    crumbs = [w for w in ui_tree(m) if w['name'] == 'files.crumb']
+    lbl = [c.get('label') for c in crumbs]
+    if len(crumbs) >= 2:
+        f.click(crumbs[-2]['x'] + 8, crumbs[-2]['y'] + 10); f.pump(0.3)
+    check(lbl[-2:] == ['BeeModel', 'sub'] and widget(m, 'files.path')['value'] == d,
+          f'the folder\'s parts are buttons: BeeModel goes up there ({lbl[-3:]})')
+    f.key(1); f.pump(0.2)
     f.proc.kill()
 
 
