@@ -131,9 +131,6 @@ s_rn_hint:      .asciz "For new scenes: a scene keeps its own (the Render area).
 s_press:        .asciz "press a key (Esc: never mind)"
 s_none:         .asciz "-"
 s_taken:        .asciz "  that key is also: "
-s_dark:         .asciz "Dark"
-s_light:        .asciz "Light"
-s_contrast:     .asciz "High contrast"
 s_75:           .asciz "75 %"
 s_100:          .asciz "100 %"
 s_125:          .asciz "125 %"
@@ -193,7 +190,6 @@ w_orsteps:      .asciz "openrouter_steps"
 w_aiextra:      .asciz "ai_prompt"
 .align 8
 l_tabs:         .quad s_h_interface, s_h_input, s_h_keymap, s_h_system, s_h_files, s_h_ai
-l_theme:        .quad s_dark, s_light, s_contrast
 l_scale:        .quad s_75, s_100, s_125, s_150, s_175, s_200
 scales:         .long 75, 100, 125, 150, 175, 200
 l_tier:         .quad s_tenv, s_tr, s_te, s_tf
@@ -549,7 +545,7 @@ pr_apply:
     and     eax, 1
     mov     [rip+gpu_off], eax
     mov     edi, [rip+th_id]
-    cmp     edi, 2
+    cmp     edi, TH_LAST
     jbe     3f
     xor     edi, edi
 3:  call    th_set
@@ -830,7 +826,7 @@ WIDGET wd_pf_rdn, WK_TOGGLE, "prefs.render_denoise", "Denoise the finished rende
 WIDGET wd_pf_reset, WK_BUTTON, "prefs.reset", "Reset to Defaults", tip="Every setting of this category back to how BeeModel comes"
 WIDGET wd_pf_close, WK_BUTTON, "prefs.close", "Close", flags=WGF_PRIMARY, aux=op_dlg_cancel, tip="Close the preferences (Esc): every change is already kept"
 WIDGET wd_pf_scroll, WK_SCROLL, "prefs.page"
-WIDGET wd_pf_theme, WK_ENUM, "prefs.theme", cb=theme_cb, aux=l_theme, n=3, tip="The colours of the whole window"
+WIDGET wd_pf_theme, WK_ENUM, "prefs.theme", cb=theme_cb, aux=th_labels, n=TH_N, flags=WGF_THEMES, tip="The colours of the whole window (each with a strip of its colours)"
 WIDGET wd_pf_scale, WK_ENUM, "prefs.ui_scale", cb=scale_cb, aux=l_scale, n=6, tip="Everything bigger or smaller, on top of the screen's own scale"
 WIDGET wd_pf_rm,   WK_TOGGLE, "prefs.reduce_motion", "Reduce motion", cb=save_cb, tip="Views jump to where they go instead of gliding (aligning, framing, resetting the camera)"
 WIDGET wd_pf_cb,   WK_TOGGLE, "prefs.colorblind_axes", "Colour-blind-safe axis colours", cb=save_cb, tip="X, Y, Z in orange, sky blue and purple instead of red, green and blue"

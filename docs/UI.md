@@ -172,7 +172,7 @@ Connections are set up and tested in Preferences › AI. The guide is [AI.md](AI
 
 | Category | Settings |
 |---|---|
-| **Interface** | Theme (Dark, Light, High contrast), UI scale 75–200 %, tooltip delay, colour-blind-safe axis colours, the welcome screen |
+| **Interface** | Theme (Dark, Light, High contrast, Honey, Graphite, Nord, Solarized Dark, Solarized Light, Dracula; the list shows a strip of each one's colours), UI scale 75–200 %, tooltip delay, colour-blind-safe axis colours, the welcome screen |
 | **Viewport** | The ground grid and its spacing, the field of view, the clip start, Rendered shading's samples and denoise |
 | **Input** | Alt + left button as the middle button, orbit speed |
 | **Keymap** | Search, Set (then press the key), Clear, Reset All Keys. It warns you when a key is already taken |
@@ -184,6 +184,7 @@ Connections are set up and tested in Preferences › AI. The guide is [AI.md](AI
 ## Accessibility
 
 - Every text and background pair in every theme has a contrast of at least 4.5:1. The High contrast theme goes further.
+- A theme picked anywhere (Preferences, View › Theme, the Viewport panel, `view.theme <name>`) is kept in the preferences.
 - The UI scale enlarges everything, independent of the compositor's scale.
 - Colour-blind-safe axes swap the red / green / blue axis colours for orange, sky blue and purple (Okabe-Ito).
 - The whole window works from the keyboard (see above).

@@ -8167,6 +8167,20 @@ def prefs_ui():
     check('theme 1' in prefs(), f'the theme goes into the prefs file ({prefs()[:60]!r})')
     q('op("view.theme_contrast")')
     check('theme 2' in prefs(), 'View > Theme keeps the choice in the prefs file too')
+    src = open('src/theme.s').read()                            # W2: every table maps the
+    tabs = re.findall(r'\n(th_\w+):\n((?:    \.long .*\n)+)', src)  #  same colours
+    keys = {n: set(re.findall(r'(COL_\w+)', b)) for n, b in tabs}
+    odd = [n for n in keys if keys[n] != keys['th_light']]
+    check(len(keys) == 8 and not odd, f'nine themes, every table mapping the same {len(keys["th_light"])} colours '
+          f'({len(keys)} tables, differing: {odd})')
+    x, y = widget_xy(m, 'prefs.theme')
+    f.click(x, y); f.pump(0.3)
+    lst = [w for w in ui_tree(m) if w['kind'] == 'list']
+    if lst:
+        f.click(lst[0]['x'] + 30, lst[0]['y'] + 4 + 3 * 22 + 11); f.pump(0.3)
+    honey = f.image().getpixel((5, 400))
+    check('theme 3' in prefs() and lst and lst[0]['h'] >= 9 * 22 and honey[0] > honey[2] + 6, f'the list offers nine themes; Honey picked by a click '
+          f'is kept ({prefs()[:40]!r}), the window warm brown ({honey})')
     q('op("view.theme_light")')
     w0 = widget(m, 'prefs.tooltip_ms')['w']
     pick_enum(f, m, 'prefs.ui_scale', 0, 3)                     # 150 %
