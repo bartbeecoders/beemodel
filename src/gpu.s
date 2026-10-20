@@ -138,6 +138,10 @@ gd_pend:        .skip 4*3               #  as its memory does; a put not run yet
 gd_kb:          .skip 4*3               # KiB the last put sent up (gpu(21, 22))
 gd_cap:         .skip 8*PT_NTAB*3      # each binding's room (slots 0, 2)
 gd_total:       .skip 8*3
+gd_sent:        .skip 8*PT_NTAB*3      # each binding's bytes the device has had
+gd_slot:        .skip 4                 # this put's slot, its sizes, offsets
+gd_szp:         .skip 8
+gd_offp:        .skip 8
 gd_delta:       .skip 4                 # this put: only what changed goes up
 gd_nr:          .skip 4                 #  its ranges so far
 gd_bind:        .skip 4                 #  the binding being put, its first
@@ -224,6 +228,10 @@ gpu_prewarm:
     mov     ecx, GM_SZ/8
     rep     stosq
     mov     dword ptr [rip+g_msg+GM_CMD], MSG_WARM
+    cmp     dword ptr [rip+gpu_dev], 1  # (Auto, RTX: RTX if there is one,
+    ja      1f                          #  the compute graphs' kernel unused)
+    mov     dword ptr [rip+g_msg+GM_SLOT], 1
+1:
     mov     edi, -1
     call    g_send
     mov     dword ptr [rip+g_warm], 1
@@ -1432,7 +1440,10 @@ gd_layout:
     mov     qword ptr [r12+rcx*8], 16
 11: inc     ecx
     jmp     1b
-2:  lea     rax, [rip+gd_ok]            # the device has the last put (it ran)
+2:  mov     [rip+gd_slot], ebx
+    mov     [rip+gd_szp], r12
+    mov     [rip+gd_offp], r13
+    lea     rax, [rip+gd_ok]            # the device has the last put (it ran)
     cmp     dword ptr [rax+rbx*4], 0
     je      4f
     lea     rax, [rip+gd_pend]
@@ -1450,7 +1461,13 @@ gd_layout:
     lea     rax, [rip+gd_total]
     mov     rax, [rax+rbx*8]
     jmp     9f
-4:  xor     ecx, ecx                    # a new layout: an eighth more room
+4:  imul    eax, ebx, 8*PT_NTAB         # a new layout: none sent yet (gd_close
+    lea     rdi, [rip+gd_sent]          #  notes what goes up)
+    add     rdi, rax
+    xor     eax, eax
+    mov     ecx, PT_NTAB
+    rep     stosq
+    xor     ecx, ecx                    # an eighth more room
 5:  cmp     ecx, PT_NTAB
     jae     6f
     mov     rax, [r12+rcx*8]
@@ -1508,10 +1525,31 @@ gd_open:
     ret
 
 # gd_close - the binding's flags in a delta put: its ranges, none (the
-#   device has it), or all of it (too many ranges)
+#   device has it), or all of it (too many ranges). A binding grown past
+#   what the device has had sends its new tail whole: that memory never went
+#   up, so a block equal to it there says nothing of the device's.
 gd_close:
+    mov     eax, [rip+gd_slot]
+    imul    eax, eax, PT_NTAB
+    add     eax, [rip+gd_bind]
+    lea     rcx, [rip+gd_sent]
+    lea     r8, [rcx+rax*8]
+    mov     ecx, [rip+gd_bind]
+    mov     rdx, [rip+gd_szp]
+    mov     rsi, [rdx+rcx*8]            # its size
     cmp     dword ptr [rip+gd_delta], 0
-    je      9f
+    jne     0f
+    mov     [r8], rsi                   # (a whole put: all of it)
+    ret
+0:  mov     rdi, [r8]
+    cmp     rsi, rdi
+    jbe     3f
+    mov     [r8], rsi
+    sub     rsi, rdi
+    mov     rdx, [rip+gd_offp]
+    add     rdi, [rdx+rcx*8]
+    call    gd_range
+3:
     imul    eax, [rip+gd_bind], GB_SZ
     mov     rdx, [rip+gd_tab]
     add     rdx, rax

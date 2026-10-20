@@ -14,7 +14,8 @@
 .equ GM_SZ,         64
 .equ GM_CMD,        0
 .equ GM_SLOT,       4                   # MSG_MAP / MSG_RUN: 0 path tracer, 1 raster,
-                                        #   2 the live viewport
+                                        #   2 the live viewport; MSG_WARM: 1 when
+                                        #   RTX would be taken (ptg not needed)
 .equ GM_SIZE,       8                   # MSG_MAP: bytes (u64)
 .equ GM_NBIND,      8                   # MSG_RUN: bindings in the table
 .equ GM_GX,         12                  #   workgroups
