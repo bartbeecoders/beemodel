@@ -72,6 +72,8 @@ wsp_fbuf:       .skip 8+WS_MAX*WS_FILE
 .section .rodata
 s_cfgdir:       .asciz "/.config/beemodel"
 s_wfile:        .asciz "/workspaces"
+.align 4
+cam_home:       .float 0.7853982, 0.5, 18.0, 0.0, 0.0, 0.0  # (viewport.s cam_yaw ..: the default view)
 n_model:        .asciz "Modeling"
 n_sculpt:       .asciz "Sculpt"
 n_cad:          .asciz "CAD"
@@ -702,6 +704,7 @@ wsp_load_file:
     mov     rdi, rbx
     mov     rsi, r12
     call    file_unmap
+    call    wsp_home_cams
     xor     eax, eax
     cmp     dword ptr [rip+wsp_n], 0
     setne   al
@@ -710,6 +713,35 @@ wsp_load_file:
 9:  add     rsp, 8
     pop     r12
     pop     rbx
+    ret
+
+# wsp_home_cams - every workspace's viewports get the default camera: the
+#   last session's layouts are for a new scene, and their cameras were
+#   aimed at the last one (a view 100 m up showed an empty viewport); a
+#   .bee file keeps its own (wsp_read alone)
+wsp_home_cams:
+    push    rbx
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+wsp_n]
+    jae     3f
+    mov     edi, ebx
+    call    wsp_rec
+    lea     rdi, [rax+WS_CAMS]
+    mov     ecx, MAX_NODES
+2:  lea     rsi, [rip+cam_home]
+    mov     edx, CAM_SZ
+    xchg    ecx, edx
+    rep     movsb
+    mov     ecx, edx
+    dec     ecx
+    jnz     2b
+    inc     ebx
+    jmp     1b
+3:  cmp     dword ptr [rip+wsp_n], 0
+    je      9f
+    mov     edi, [rip+wsp_cur]
+    call    wsp_give
+9:  pop     rbx
     ret
 
 wsp_cfg:                                # -> wsp_path
