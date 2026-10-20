@@ -44,6 +44,7 @@
 .globl hv_ready
 .globl hv_nobvh
 .globl hv_shutter
+.globl hv_reuse
 .globl hv_mblur
 .globl hv_bvhless
 .globl hv_fldon
@@ -204,6 +205,8 @@ hv_nfld:        .skip 4             # this scene's fields (HF_* records in hv_fl
 .align 16
 hv_flds:        .skip HF_MAX*HF_SZ
 hv_shutter:     .skip 4             # motion blur: the shutter open, frames (0: off)
+hv_reuse:       .skip 4             # render_frames: samples reused from up to so many
+                                    #  frames before (0: off; H14)
 hv_mblur:       .skip 4             # this scene's balls move while it is (rays
                                     #  then have a time: RAY_TIME, [r15+8])
 .align 8

@@ -178,7 +178,9 @@ switches passes (beauty, albedo, normal, depth) and saves them
 (`render.save <path> [pass]`, PNG or linear half-float `.exr`); `render.settings <width>
 <height> <samples>` sets the size and samples, which are saved with the scene.
 `render.animation <folder> [first last]` renders every frame into `0001.png`, `0002.png` ...;
-on the GPU the next frame is simulated and built while the GPU traces one.
+on the GPU the next frame is simulated and built while the GPU traces one. With
+`render.sample_reuse <frames>` later frames trace fewer samples and reuse the frames before's
+where a pixel sees the same surface.
 
 **Images.** `image.load <path>` reads PNG (every colour type, depth and interlacing), baseline
 JPEG and Radiance HDR files, all with BeeModel's own decoders; `image.save <name> <path>`

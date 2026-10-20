@@ -31,6 +31,10 @@ to the CPU paths and the same images.
   * Liquid surfaces (H13): the GPU traces a liquid's field instead of its
     mesh (none is made); the CPU's meshed image, and the CPU meshing it when
     the helper dies.
+  * Sample reuse (H14): render_frames with render.sample_reuse traces fewer
+    samples after the first frame and comes nearer the reference than as
+    few samples alone, on the GPU and the CPU, with a moving ball too; the
+    setting is saved.
 
 With no usable Vulkan device the GPU checks are skipped (--require fails
 instead: CI runs it on llvmpipe with BEEMODEL_GPU=any).
@@ -482,6 +486,43 @@ def main():
     check(lq['fail'][1][2] == lq['cpu'][1][2] and lq['fail'][1][3] == 16 and mad < 1.0,
           f'the helper dying at its second run: the CPU meshes the surface and goes on ({lq["fail"][1]}: 16 '
           f'samples the GPU\'s), the CPU\'s image (mean difference {mad:.3f})')
+
+    # ---- sample reuse between frames (H14) -------------------------------------
+    def reuse_run(tag, spp, reuse, moving, dev='auto'):
+        d = os.path.join(HOME, 'ru_' + tag)
+        q = run('while count() > 0 { delete(name(0)) }\nop("anim.range", "1 24 24")\n'
+                'g = add("plane", "G", 0, 0, 0)\nscale(g, 6)\nc = add("cube", "C", -1.2, 0.5, 0)\nscale(c, 0.5)\n'
+                's = add("sphere", "S", -2, 0.6, 1)\nscale(s, 0.6)\n'
+                + ('key("S:x", 1, -2)\nkey("S:x", 24, 2.5)\n' if moving else '') +
+                'k = add("camera", "Cam", 0, 2, 7)\nkey("Cam:rx", 1, -0.2)\nkey("Cam:x", 1, -1)\nkey("Cam:x", 24, 1.5)\n'
+                'op("render.device", "%s")\nop("render.sample_reuse", "%d")\n'
+                'g0 = gpu(4)\nprint("ru", render_frames("%s", 1, 6, 160, 120, %d, 0), gpu(4) - g0, gpu(26))\n'
+                % (dev, reuse, d, spp), BEEMODEL_GPU='any')
+        return d, [float(x) for x in q.get('ru', ['-1', '-1', '-1'])]
+
+    def reuse_err(ref, d):
+        es = [compare(os.path.join(ref, '%04d.png' % f), os.path.join(d, '%04d.png' % f))[0]
+              if os.path.exists(os.path.join(d, '%04d.png' % f)) else 255.0 for f in range(2, 7)]
+        return sum(es) / len(es)
+    ru = {}
+    for tag, spp, reuse, moving, dev in (('ref', 256, 0, False, 'auto'), ('s4', 4, 0, False, 'auto'),
+                                         ('r3', 16, 3, False, 'auto'), ('cpu', 16, 3, False, 'cpu'),
+                                         ('mref', 256, 0, True, 'auto'), ('m4', 4, 0, True, 'auto'),
+                                         ('m3', 16, 3, True, 'auto')):
+        ru[tag] = reuse_run(tag, spp, reuse, moving, dev)
+    e4, e3, ec = reuse_err(ru['ref'][0], ru['s4'][0]), reuse_err(ru['ref'][0], ru['r3'][0]), \
+        reuse_err(ru['ref'][0], ru['cpu'][0])
+    check(ru['r3'][1][1:] == [16 + 5 * 4, 3] and e3 < 0.6 * e4 and ec < 0.6 * e4,
+          f'sample reuse (3 frames, 16 samples): the first frame 16, then 4 new a frame ({ru["r3"][1][1]:.0f} on '
+          f'the GPU), the camera panning: off the 256-sample frames by {e3:.2f} levels (on the CPU {ec:.2f}) '
+          f'where 4 samples alone are {e4:.2f}')
+    m4, m3 = reuse_err(ru['mref'][0], ru['m4'][0]), reuse_err(ru['mref'][0], ru['m3'][0])
+    check(m3 < m4, f'a ball moving through it (its samples alone, no ghost of where it was): off by {m3:.2f} '
+                   f'levels, 4 samples alone {m4:.2f}')
+    bee = os.path.join(HOME, 'ru.bee')
+    run('op("render.sample_reuse", "5")\nop("file.save", "%s")\n' % bee)
+    q = run('op("file.open", "%s")\nprint("rq", gpu(26))\n' % bee)
+    check(q.get('rq') == ['5'], f'sample reuse is saved with the scene ({q.get("rq")})')
 
     # ---- RTX (H10): ray queries through acceleration structures built on the GPU --
     r = run('print("rtx", gpu(0), gpu(24))\n', BEEMODEL_GPU='any')
