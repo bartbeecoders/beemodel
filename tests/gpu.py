@@ -213,6 +213,31 @@ def main():
         r = run(pb + 'op("render.image", "%s 96 72 2 0")\nprint("bvh", gpu(16), gpu(19))\n' % p, BEEMODEL_THREADS=t)
         imgs.append((p, r.get('bvh')))
     ok = all(os.path.exists(p) for p, _ in imgs) and compare(imgs[0][0], imgs[1][0]) == (0.0, 1.0)
+    # ---- objects' BVHs kept between renders (H8): never stale ----------------------
+    base = ('op("render.device", "cpu")\nadd("sphere", "S", 2, 1, 0)\nadd("plane", "P", 0, 0, 0)\nscale("P", 6)\n'
+            'm = material("Red")\nmatset(m, "base", 0.8, 0.1, 0.1)\nn = material("Gold")\n'
+            'matset(n, "base", 0.9, 0.7, 0.2)\nmatset(n, "metallic", 1)\nassign("S", "Red")\n')
+    steps = [('moved', 'move("Cube", 1, 0.5, -1)\n'), ('material', 'assign("S", "Gold")\n'),
+             ('mesh', 'modifier("S", "subsurf")\n'), ('deleted', 'delete("P")\n')]
+    code = base + ''.join('op("render.image", "%s/k%d.png 96 72 2 0")\nprint("warm%d", gpu(20))\n' % (HOME, i, i)
+                          for i in range(3))
+    done = ''
+    for name, step in steps:
+        done += step
+        code += step + 'op("render.image", "%s/kept_%s.png 96 72 2 0")\nprint("%s", gpu(20))\n' % (HOME, name, name)
+    r = run(code)
+    hits = [r.get('warm2'), *(r.get(n) for n, _ in steps)]
+    same = []
+    done = ''
+    for i, (name, step) in enumerate(steps):           # (a fresh process, its renders
+        done += step                                    #  as many: each one's seed is
+        f = os.path.join(HOME, 'fresh_%s.png' % name)   #  the next)
+        run(base + done + 'for k in 0..%d { op("render.image", "%s/w.png 8 6 1 0") }\n' % (3 + i, HOME)
+            + 'op("render.image", "%s 96 72 2 0")\n' % f)
+        same.append(os.path.exists(f) and compare(os.path.join(HOME, 'kept_%s.png' % name), f) == (0.0, 1.0))
+    check(hits[0] == ['3'] and all(same), f'objects kept between renders (3 on the third: {hits[0]}; then '
+                                           f'{[h[0] if h else None for h in hits[1:]]}): after a move, a material, a '
+                                           f'modifier and a deletion, each image is a fresh render\'s ({same})')
     check(ok and imgs[0][1][1] == '100000', f'100k balls: the BVH built on 4 threads gives the image one thread '
                                             f'does (BVH ms on 1 and 4 threads: {imgs[0][1][0]}, {imgs[1][1][0]})')
     if not os.path.exists(HELPER):
