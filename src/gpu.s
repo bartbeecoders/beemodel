@@ -26,6 +26,8 @@
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
+.equ HF_MAX, 8                          # hive.s's liquid fields
+.equ HF_SZ, 112
 .include "gpuipc.inc"
 
 .globl gpu_status
@@ -44,6 +46,7 @@
 .globl gpu_lv_put
 .globl gpu_lv_run
 .globl gpu_rtx_likely
+.globl gpu_fld_likely
 .globl hv_gpu
 
 .equ SYS_ACCESS,    21
@@ -129,6 +132,7 @@ gq_rtx:         .skip 4                 # gp_put: for an RTX kernel
 gp_nb:          .skip 4                 # the path tracer's table entries
 lv_nb:          .skip 4                 #  the live viewport's
 gp_rtx:         .skip 4                 # the last render traced with RTX
+gp_nfld:        .skip 4                 #  liquids' fields it traced (H13)
 gd_ok:          .skip 4*3               # the device holds the slot's bindings
 gd_pend:        .skip 4*3               #  as its memory does; a put not run yet
 gd_kb:          .skip 4*3               # KiB the last put sent up (gpu(21, 22))
@@ -148,6 +152,8 @@ pd_ext:         .skip 16*PD_MAXCH       # each chunk's changed bytes (from, to)
 pd_zero:        .skip PD_BLK
 gp_itab:        .skip 1024              # the images' table (gp_img_put)
 gp_ehdr:        .skip 32                # the HDRI's header (gp_env_put)
+.align 16
+gp_fhdr:        .skip 16+HF_MAX*128     # the liquids' fields: header, records
 
 .section .rodata
 .align 8
@@ -795,6 +801,9 @@ gpu_query:
     mov     eax, [rip+g_rtx]
     cmp     edi, 24
     je      9f
+    mov     eax, [rip+gp_nfld]          # 25: liquid fields it traced
+    cmp     edi, 25
+    je      9f
     cmp     edi, 7                      # 7.. the live viewport's (live.s)
     jb      8f
     jmp     lv_query
@@ -816,6 +825,18 @@ gpu_rtx_likely:
     test    eax, eax
     jz      9f
     jmp     g_use_rtx
+9:  ret
+
+# gpu_fld_likely -> eax = 1 when the next render is likely on the GPU (the
+#   helper runs, Render › Device is not the CPU): hive_build then gives it
+#   liquids' fields instead of their meshes
+gpu_fld_likely:
+    xor     eax, eax
+    cmp     dword ptr [rip+gpu_off], 0
+    jne     9f
+    sub     rsp, 8
+    call    gpu_ready
+    add     rsp, 8
 9:  ret
 
 # g_use_rtx -> eax = 1 when renders trace with ray queries: the helper has
@@ -848,6 +869,7 @@ gpu_pt_begin:
     mov     [rip+gp_kern], eax
     mov     dword ptr [rip+gp_nb], PT_NBIND
     mov     dword ptr [rip+gp_rtx], 0
+    mov     dword ptr [rip+gp_nfld], 0
     mov     dword ptr [rip+hv_why], HW_SETTING
     cmp     dword ptr [rip+gpu_off], 0
     jne     9f
@@ -876,6 +898,8 @@ gpu_pt_begin:
     jz      9f
     mov     dword ptr [rip+hv_why], HW_GPU
     mov     r13, rax                    # base
+    mov     eax, [rip+hv_nfld]
+    mov     [rip+gp_nfld], eax
     lea     rbx, [rip+gp_bytes]
     lea     r14, [rip+gp_off]
     mov     rdi, [r14+80]               # the accumulators: zero, and the
@@ -1002,8 +1026,11 @@ gp_put:
     add     eax, 8
     shl     rax, 2
     mov     [rbx+144], rax
-14: mov     eax, [rip+hv_ns]            # spheres: their records
-    imul    rax, rax, SP_SZ
+14: mov     eax, [rip+hv_ns]            # spheres: their records, then the
+    imul    rax, rax, SP_SZ             #  liquids' fields
+    mov     [rsp+16], rax
+    call    gp_fld_bytes
+    add     rax, [rsp+16]
     mov     [rbx+152], rax
     mov     qword ptr [rbx+160], 16     # RTX: positions, boxes (asprep's)
     mov     qword ptr [rbx+168], 16
@@ -1077,12 +1104,17 @@ gp_put:
     call    gd_open
     call    gp_img_put
     call    gd_close
-    xor     esi, esi                    # the spheres
-    cmp     dword ptr [rip+hv_ns], 0
-    je      17f
+    mov     edi, 19                     # the spheres, the liquids' fields
+    call    gd_open
+    mov     eax, [rip+hv_ns]
+    imul    rcx, rax, SP_SZ
+    test    rcx, rcx
+    jz      17f
     mov     rsi, [rip+hv_sp]
-17: mov     edi, 19
-    call    gd_put
+    mov     rdi, [r14+19*8]
+    call    put_delta
+17: call    gp_fld_put
+    call    gd_close
     cmp     dword ptr [rip+hv_env], 0   # the HDRI and its tables
     je      15f
     call    gp_env_put
@@ -1159,6 +1191,132 @@ gp_put:
     pop     r15
     pop     r14
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gp_fld_bytes -> rax = binding 19's bytes after the spheres: the liquids'
+#   fields (gp_fld_put)
+gp_fld_bytes:
+    mov     eax, [rip+hv_nfld]
+    shl     eax, 7
+    add     eax, 16
+    xor     ecx, ecx
+    lea     rdx, [rip+hv_flds]
+1:  cmp     ecx, [rip+hv_nfld]
+    jae     9f
+    mov     r8d, [rdx+16]               # values: nx ny nz floats
+    imul    r8d, [rdx+20]
+    imul    r8d, [rdx+24]
+    lea     rax, [rax+r8*4]
+    mov     r8d, [rdx+48]               # bricks: two floats each
+    imul    r8d, [rdx+52]
+    imul    r8d, [rdx+56]
+    lea     rax, [rax+r8*8]
+    add     rdx, HF_SZ
+    inc     ecx
+    jmp     1b
+9:  ret
+
+# gp_fld_put - in gp_put (r13 the slot, r14 its offsets; binding 19 open,
+#   the spheres in it): the liquids' fields after them. A header (how many),
+#   a record each (32 floats: origin, spacing; nx ny nz, material + 1; the
+#   grid's corners, each followed by where its values and its bricks start,
+#   in floats; bricks a side; its emitter's inverse matrix), then each one's
+#   values and bricks (pt.comp fld_*)
+gp_fld_put:
+    push    rbx
+    push    r12
+    push    r15
+    lea     rdi, [rip+gp_fhdr]
+    xor     eax, eax
+    mov     ecx, 16+HF_MAX*128
+    rep     stosb
+    mov     eax, [rip+hv_nfld]
+    mov     [rip+gp_fhdr], eax
+    mov     r15d, [rip+hv_ns]           # where the values start: bytes
+    imul    r15, r15, SP_SZ
+    add     r15, 16
+    shl     eax, 7
+    add     r15, rax
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+hv_nfld]
+    jae     8f
+    imul    r12d, ebx, HF_SZ
+    lea     rax, [rip+hv_flds]
+    add     r12, rax
+    mov     eax, ebx
+    shl     eax, 7
+    lea     rdi, [rip+gp_fhdr+16]
+    add     rdi, rax                    # its record
+    movups  xmm0, [r12]                 # origin, spacing
+    movups  [rdi], xmm0
+    movups  xmm0, [r12+16]              # nx ny nz, material
+    movups  [rdi+16], xmm0
+    movups  xmm1, [r12]                 # the corners: origin, origin +
+    movups  [rdi+32], xmm1              #  (n - 1) spacing
+    movss   xmm2, [r12+12]
+    xor     ecx, ecx
+2:  mov     eax, [r12+16+rcx*4]
+    dec     eax
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, xmm2
+    addss   xmm0, [r12+rcx*4]
+    movss   [rdi+48+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    mov     rax, r15                    # the values' offset (floats)
+    shr     rax, 2
+    mov     [rdi+44], eax
+    mov     eax, [r12+16]
+    imul    eax, [r12+20]
+    imul    eax, [r12+24]
+    lea     rax, [r15+rax*4]
+    mov     rdx, rax
+    shr     rax, 2
+    mov     [rdi+60], eax               # the bricks' offset
+    movups  xmm0, [r12+48]              # bricks a side
+    movups  [rdi+64], xmm0
+    movups  xmm0, [r12+64]              # the inverse matrix
+    movups  [rdi+80], xmm0
+    movups  xmm0, [r12+80]
+    movups  [rdi+96], xmm0
+    movups  xmm0, [r12+96]
+    movups  [rdi+112], xmm0
+    push    rdx
+    push    rdx
+    mov     rsi, [r12+32]               # the values
+    mov     rdi, [r14+19*8]
+    add     rdi, r15
+    mov     eax, [r12+16]
+    imul    eax, [r12+20]
+    imul    eax, [r12+24]
+    lea     rcx, [rax*4]
+    call    put_delta
+    pop     r15
+    pop     r15
+    mov     rsi, [r12+40]               # the bricks
+    mov     rdi, [r14+19*8]
+    add     rdi, r15
+    mov     eax, [r12+48]
+    imul    eax, [r12+52]
+    imul    eax, [r12+56]
+    lea     rcx, [rax*8]
+    add     r15, rcx
+    call    put_delta
+    inc     ebx
+    jmp     1b
+8:  lea     rsi, [rip+gp_fhdr]          # the header, the records
+    mov     rdi, [r14+19*8]
+    mov     eax, [rip+hv_ns]
+    imul    rax, rax, SP_SZ
+    add     rdi, rax
+    mov     ecx, [rip+hv_nfld]
+    shl     ecx, 7
+    add     ecx, 16
+    call    put_delta
+    pop     r15
     pop     r12
     pop     rbx
     ret

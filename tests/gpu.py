@@ -28,6 +28,9 @@ to the CPU paths and the same images.
   * Animations (H12): render_frames builds the next frame while the GPU
     traces one; every frame the image frame() and render() make, and the
     helper dying meanwhile puts that frame again on the CPU.
+  * Liquid surfaces (H13): the GPU traces a liquid's field instead of its
+    mesh (none is made); the CPU's meshed image, and the CPU meshing it when
+    the helper dies.
 
 With no usable Vulkan device the GPU checks are skipped (--require fails
 instead: CI runs it on llvmpipe with BEEMODEL_GPU=any).
@@ -456,6 +459,29 @@ def main():
     run(ms + 'op("render.settings", "96 72 4")\nop("render.animation", "%s 2 4")\n' % op, BEEMODEL_GPU='any')
     check((sorted(os.listdir(op)) if os.path.isdir(op) else []) == ['0002.png', '0003.png', '0004.png'],
           'render.animation <folder> 2 4: the frames at the render settings')
+
+    # ---- liquid surfaces (H13): their fields traced on the GPU, not meshed --------
+    tank = 'op("particles.add_tank")\nfor f in 2..21 { frame(f) }\n'
+    lq = {}
+    for name, dev, fail in (('cpu', 'cpu', None), ('gpu', 'gpu', None), ('auto', 'auto', None), ('fail', 'auto', '2')):
+        f = os.path.join(HOME, 'lq_%s.png' % name)
+        env = {'BEEMODEL_GPU': 'any'}
+        if fail:
+            env['BEEMODEL_GPU_FAIL'] = fail
+        q = run(tank + 'op("render.device", "%s")\nop("render.image", "%s 160 120 64 0")\n'
+                'print("lq", gpu(25), gpu(18), gpu(17), gpu(4))\n' % (dev, f), **env)
+        lq[name] = (f, [int(float(x)) for x in q.get('lq', ['-1'] * 4)])
+    surf = int(float(run(tank + 'print("st", particles(33, 0))\n').get('st', ['0'])[0]))
+    for name in ('gpu', 'auto'):
+        mad, same = compare(lq['cpu'][0], lq[name][0])
+        check(lq['cpu'][1][0] == 0 and lq[name][1][:2] == [1, 0] and lq[name][1][2] + surf == lq['cpu'][1][2]
+              and mad < 1.0,
+              f'a liquid\'s surface on the GPU ({name}): its field traced there, not its {surf} triangles '
+              f'({lq[name][1]}; the CPU meshes it: {lq["cpu"][1]}), the CPU\'s image (mean difference {mad:.3f})')
+    mad, same = compare(lq['cpu'][0], lq['fail'][0])
+    check(lq['fail'][1][2] == lq['cpu'][1][2] and lq['fail'][1][3] == 16 and mad < 1.0,
+          f'the helper dying at its second run: the CPU meshes the surface and goes on ({lq["fail"][1]}: 16 '
+          f'samples the GPU\'s), the CPU\'s image (mean difference {mad:.3f})')
 
     # ---- RTX (H10): ray queries through acceleration structures built on the GPU --
     r = run('print("rtx", gpu(0), gpu(24))\n', BEEMODEL_GPU='any')

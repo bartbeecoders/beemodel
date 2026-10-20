@@ -53,6 +53,8 @@
 .globl pt_sphere
 .globl pt_stamp
 .globl pt_mesh
+.globl pt_field
+.globl pt_fld_info
 .globl pc_cast
 .globl pc_any
 .globl pc_gnd
@@ -135,7 +137,7 @@
 .equ SR_EVD,    296
 .equ SR_EVS,    304                     # the system whose events it is born of
 .equ SR_EVA,    312                     #  the events used now
-.equ SR_SZ,     448
+.equ SR_SZ,     512
 .equ EV_SZ,     48                      # an event: place (w: kind), velocity,
                                         #  the surface's normal
 .equ EV_CAP,    2*BLK*NBLK              # (a system's events a step, at most)
@@ -1387,8 +1389,14 @@ pt_stop:
     shl     rsi, 12
     mov     eax, SYS_MUNMAP
     syscall
-11: call    sf_free                     # its surface
-    mov     rdi, [r12+SR_EVH]           # its events
+11: call    sf_free                     # its surface, its field
+    mov     rdi, [r12+SR_SF]
+    test    rdi, rdi
+    jz      15f
+    mov     rsi, SF_MAXP*4
+    mov     eax, SYS_MUNMAP
+    syscall
+15: mov     rdi, [r12+SR_EVH]           # its events
     test    rdi, rdi
     jz      12f
     mov     rsi, EV_CAP*EV_SZ
@@ -3730,7 +3738,10 @@ pt_info:
     jne     643f
     movss   xmm0, [rdx+SR_SMS]
     ret
-643:mov     rax, [rdx+SR_SMESH]
+643:push    r12                         # (meshed now if not yet)
+    mov     r12, rdx
+    call    sf_mesh
+    pop     r12
     test    rax, rax
     jz      9f
     cvtsi2ss xmm0, dword ptr [rax+ME_NTRIS]
@@ -5970,13 +5981,22 @@ ev_place:
 #  Each frame, a system with surface on is meshed: a density field on a
 #  grid over its particles' bounds (each particle adds (1 - r^2/R^2)^3 out
 #  to R = 2 spacings, scaled so the lattice's sum is 1; the field is 0.5 -
-#  that), splatted by z slab in parallel (each slab its own, in order), then
-#  sdf_fmesh (marching tetrahedra: closed, manifold) at half the density.
-#  The mesh goes into its emitter's space, and the emitter shows it
-#  (obj_eval -> pt_mesh) while the particles run.
+#  that), splatted by z slab in parallel (each slab its own, in order) into
+#  the system's own field. sdf_fmesh (marching tetrahedra: closed, manifold)
+#  meshes it at half the density when the mesh is first asked for (sf_mesh):
+#  a render on the GPU traces the field instead (pt_field, hive_build) and
+#  never needs it. The mesh goes into its emitter's space, and the emitter
+#  shows it (obj_eval -> pt_mesh) while the particles run.
 # =============================================================================
 .equ SR_SMESH,  416                     # its surface (ours), or 0
 .equ SR_SMS,    424                     #  the time it took (ms)
+.equ SR_SF,     432                     # its field (SF_MAXP floats, reserved)
+.equ SR_SHAS,   440                     # 1: a surface this frame (the field)
+.equ SR_SDIRTY, 444                     #  1: not meshed yet (sf_mesh)
+.equ SR_SORG,   448                     #  the field's grid: origin, spacing,
+.equ SR_SNX,    464                     #  points a side
+.equ SR_SNY,    468
+.equ SR_SNZ,    472
 .equ SF_MAXP,   24000000                # grid points at most
 .equ SF_MAXZ,   65536                   #  slabs
 .section .bss
@@ -6008,8 +6028,21 @@ sf_r2:          .float 2.0
 sf_minres:      .float 0.25
 .text
 
-# pt_mesh(rdi=object) -> rax = the surface it shows now, or 0 (obj_eval)
+# pt_mesh(rdi=object) -> rax = the surface it shows now (meshed now if not
+#   yet), or 0 (obj_eval)
 pt_mesh:
+    push    r12
+    call    pt_field
+    test    rax, rax
+    jz      9f
+    mov     r12, rax
+    call    sf_mesh
+9:  pop     r12
+    ret
+
+# pt_field(rdi=object) -> rax = the system whose surface it shows (its field:
+#   SR_SF, SR_SORG, SR_SNX ...), or 0
+pt_field:
     xor     eax, eax
     cmp     dword ptr [rip+pt_nsurf], 0
     je      9f
@@ -6017,27 +6050,52 @@ pt_mesh:
     jne     9f
     mov     edx, [rdi+OB_UID]
     xor     ecx, ecx
-    lea     r8, [rip+pt_sr]
+    lea     rax, [rip+pt_sr]
 1:  cmp     ecx, [rip+pt_ns]
     jae     8f
-    cmp     [r8+SR_UID], edx
+    cmp     [rax+SR_UID], edx
     jne     2f
-    mov     rax, [r8+SR_SMESH]
-    test    rax, rax
-    jnz     9f
-2:  add     r8, SR_SZ
+    cmp     dword ptr [rax+SR_SHAS], 0
+    jne     9f
+2:  add     rax, SR_SZ
     inc     ecx
     jmp     1b
 8:  xor     eax, eax
 9:  ret
 
-# sf_free(r12=system) - its surface goes
+# pt_fld_info(rdi=object, rsi=out: origin, spacing (16), nx ny nz (+16),
+#   the values (+32: (z ny + y) nx + x, below 0 inside)) -> eax = 1 when the
+#   object shows a liquid's surface (hive_build: traced on the GPU)
+pt_fld_info:
+    push    rsi
+    call    pt_field
+    pop     rsi
+    test    rax, rax
+    jz      9f
+    movups  xmm0, [rax+SR_SORG]
+    movups  [rsi], xmm0
+    mov     ecx, [rax+SR_SNX]
+    mov     [rsi+16], ecx
+    mov     ecx, [rax+SR_SNY]
+    mov     [rsi+20], ecx
+    mov     ecx, [rax+SR_SNZ]
+    mov     [rsi+24], ecx
+    mov     rcx, [rax+SR_SF]
+    mov     [rsi+32], rcx
+    mov     eax, 1
+9:  ret
+
+# sf_free(r12=system) - its surface goes (the field stays mapped)
 sf_free:
+    cmp     dword ptr [r12+SR_SHAS], 0
+    je      1f
+    mov     dword ptr [r12+SR_SHAS], 0
+    dec     dword ptr [rip+pt_nsurf]
+1:  mov     dword ptr [r12+SR_SDIRTY], 0
     mov     rdi, [r12+SR_SMESH]
     test    rdi, rdi
     jz      9f
     mov     qword ptr [r12+SR_SMESH], 0
-    dec     dword ptr [rip+pt_nsurf]
     sub     rsp, 8
     call    mesh_unref
     add     rsp, 8
@@ -6188,7 +6246,16 @@ sf_build:
     mulss   xmm0, [rip+sf_grow]
     movss   [rsp+64], xmm0
     jmp     3b
-4:  movaps  xmm0, [rsp]
+4:  mov     rax, [r12+SR_SF]            # its own field
+    test    rax, rax
+    jnz     42f
+    mov     rsi, SF_MAXP*4
+    call    pc_map
+    test    rax, rax
+    jz      .Lsf_none
+    mov     [r12+SR_SF], rax
+42: mov     [rip+sf_f], rax
+    movaps  xmm0, [rsp]
     movaps  [rip+sf_org], xmm0
     mov     eax, [rsp+64]
     mov     [rip+sf_org+12], eax
@@ -6266,19 +6333,73 @@ sf_build:
     mov     edx, [rip+sf_nz]
     mov     ecx, 1
     call    parallel_for
-    lea     rdi, [rip+sf_org]           # its surface
-    mov     rsi, [rip+sf_f]
-    mov     edx, [rip+sf_nx]
-    mov     ecx, [rip+sf_ny]
-    mov     r8d, [rip+sf_nz]
+    call    sf_free                     # the field is its surface now (the
+    movaps  xmm0, [rip+sf_org]          #  mesh: when asked for)
+    movups  [r12+SR_SORG], xmm0
+    mov     eax, [rip+sf_nx]
+    mov     [r12+SR_SNX], eax
+    mov     eax, [rip+sf_ny]
+    mov     [r12+SR_SNY], eax
+    mov     eax, [rip+sf_nz]
+    mov     [r12+SR_SNZ], eax
+    mov     dword ptr [r12+SR_SHAS], 1
+    mov     dword ptr [r12+SR_SDIRTY], 1
+    inc     dword ptr [rip+pt_nsurf]
+    call    now_ns
+    sub     rax, [rsp+112]
+    cvtsi2ss xmm0, rax
+    mulss   xmm0, [rip+pq_k]
+    mulss   xmm0, [rip+pq_k]
+    movss   [r12+SR_SMS], xmm0
+    jmp     9f
+.Lsf_none:
+    call    sf_free
+9:  lea     rsp, [rbp-32]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbx
+    pop     rbp
+    ret
+
+.section .bss
+.align 8
+sf_slabs:       .skip 8
+.text
+
+# sf_mesh(r12=system) -> rax = its surface's mesh: meshed from its field now
+#   if not yet (sdf_fmesh, then into its emitter's space), or 0
+sf_mesh:
+    mov     rax, [r12+SR_SMESH]
+    cmp     dword ptr [r12+SR_SDIRTY], 0
+    jne     1f
+    ret
+1:  push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16
+    sub     rsp, 128
+    mov     dword ptr [r12+SR_SDIRTY], 0
+    call    now_ns
+    mov     [rsp+112], rax
+    movups  xmm0, [r12+SR_SORG]
+    movaps  [rip+sf_org], xmm0
+    lea     rdi, [rip+sf_org]
+    mov     rsi, [r12+SR_SF]
+    mov     edx, [r12+SR_SNX]
+    mov     ecx, [r12+SR_SNY]
+    mov     r8d, [r12+SR_SNZ]
     call    sdf_fmesh
     test    rax, rax
-    jz      .Lsf_none
+    jz      .Lsm_none
     mov     rbx, rax
     mov     edi, [r12+SR_UID]           # into its emitter's space
     call    obj_by_uid
     test    rax, rax
-    jz      .Lsf_drop
+    jz      .Lsm_drop
     mov     rdi, rax
     lea     rsi, [rsp]
     call    obj_matrix
@@ -6311,21 +6432,21 @@ sf_build:
     jmp     7b
 71: mov     rdi, rbx
     call    mesh_bbox
-    call    sf_free                     # this one instead
     mov     [r12+SR_SMESH], rbx
-    inc     dword ptr [rip+pt_nsurf]
-    call    now_ns
+    call    now_ns                      # (its time: the field's and this)
     sub     rax, [rsp+112]
     cvtsi2ss xmm0, rax
     mulss   xmm0, [rip+pq_k]
     mulss   xmm0, [rip+pq_k]
+    addss   xmm0, [r12+SR_SMS]
     movss   [r12+SR_SMS], xmm0
+    mov     rax, rbx
     jmp     9f
-.Lsf_drop:
+.Lsm_drop:
     mov     rdi, rbx
     call    mesh_unref
-.Lsf_none:
-    call    sf_free
+.Lsm_none:
+    xor     eax, eax
 9:  lea     rsp, [rbp-32]
     pop     r15
     pop     r14
@@ -6333,11 +6454,6 @@ sf_build:
     pop     rbx
     pop     rbp
     ret
-
-.section .bss
-.align 8
-sf_slabs:       .skip 8
-.text
 
 # sf_lattice - 1 / the lattice's sum of (1 - r^2/R^2)^3 (r15 = settings)
 sf_lattice:

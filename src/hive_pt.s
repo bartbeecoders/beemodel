@@ -3267,8 +3267,11 @@ hive_scene:
     jne     12f                         #  (made if the CPU takes over)
     call    gpu_rtx_likely
     mov     [rip+hv_nobvh], eax
+    call    gpu_fld_likely              # (liquids' surfaces: their fields,
+    mov     [rip+hv_fldon], eax         #  not meshed)
 12: call    hive_build
     mov     dword ptr [rip+hv_nobvh], 0
+    mov     dword ptr [rip+hv_fldon], 0
     cmp     dword ptr [rip+gt_cpu], 0   # (trace_ray: no motion blur)
     je      13f
     mov     dword ptr [rip+hv_mblur], 0
