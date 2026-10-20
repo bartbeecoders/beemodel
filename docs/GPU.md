@@ -108,6 +108,13 @@ images through the sRGB curve), with env.s's importance-sampling tables
 header (size, total, rotation, strength). The shader looks it up, samples
 it and weighs it (MIS) as `env.s` does, so the image matches the CPU's.
 Rendered shading draws it as well.
+Particle balls are exact spheres (v0.23): a 48-byte record each (centre,
+radius, material, colour; binding 19) behind the triangles in one BVH,
+their own subtree under the root so a leaf holds one kind. Both tracers
+intersect from the closest approach (`k = oc.d / d.d`, `l = oc - k d`,
+`h = r^2 - l.l`) rather than `b^2 - ac`, which loses most of its digits
+for a 5 cm ball 10 m away and made the CPU and GPU disagree; emissive
+balls are lights sampled by the cone they fill.
 Scenes the shader does not cover stay on the CPU: a graph with another
 node type (Voronoi, bricks, wave, functions ...) or an HDR image in it.
 
@@ -260,6 +267,7 @@ takes 0.55 s; the small one, 4 ms.
 | 16 | Of which the BVH's |
 | 17 | The last scene's triangles |
 | 18 | Where the last render ran, and why: 0 the GPU; on the CPU: 1 Device is CPU, 2 no helper or device, 3 an HDRI world, 4 a shadow catcher, 5 a material node the GPU lacks, 6 the helper failed, 7 a bake |
+| 19 | The last scene's spheres (particles drawn as balls) |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 

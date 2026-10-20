@@ -18,6 +18,8 @@
 .globl hv_trace
 .globl hv_occluded
 .globl hv_n
+.globl hv_ns
+.globl hv_sp
 .globl hv_tv
 .globl hv_tn
 .globl hv_tm
@@ -47,12 +49,16 @@
 .equ N4_SZ,     128             # BVH4 node: minx maxx miny maxy minz maxz [4] child[4]
 .equ NBUF,      32
 .equ MAX_POINTS, 64
+.equ HV_SMAX,   16000000          # spheres the path tracer takes
 
 .section .bss
 hv_camuid:      .skip 4
 .align 8
 hv_ready:       .skip 4
 hv_n:           .skip 4             # triangles
+hv_ns:          .skip 4             # spheres (particles drawn as balls): their
+hv_sp:          .skip 8             #  primitives follow the triangles' (hv_n + k);
+hv_spk:         .skip 4             #  SP_SZ bytes each (const.inc), being filled
 hv_build_ms:    .skip 8             # the last hive_build (ms: all of it, its BVH)
 hv_bvh_ms:      .skip 8
 hv_t0:          .skip 8
@@ -201,6 +207,9 @@ hv_query:
     mov     eax, [rip+hv_why]
     cmp     edi, 18
     je      9f
+    mov     eax, [rip+hv_ns]
+    cmp     edi, 19
+    je      9f
     xor     eax, eax
 9:  ret
 
@@ -239,11 +248,23 @@ hive_build:
     add     r12d, eax
 11: inc     ebx
     jmp     1b
-2:  call    hv_part_count               # particles (particles.s)
-    add     r12d, eax
+2:  call    hv_part_count               # particles (particles.s): their
+    add     r12d, eax                   #  triangles; hv_ns their balls
     mov     [rip+hv_n], r12d
-    test    r12d, r12d
+    mov     dword ptr [rip+hv_spk], 0
+    mov     eax, r12d
+    add     eax, [rip+hv_ns]
+    test    eax, eax
     jz      .Lhb_empty
+    cmp     dword ptr [rip+hv_ns], 0    # the spheres' records
+    je      21f
+    imul    edi, [rip+hv_ns], SP_SZ
+    add     edi, 64
+    call    hv_map
+    test    rax, rax
+    jz      .Lhb_fail
+    mov     [rip+hv_sp], rax
+21:
     imul    edi, r12d, 36
     add     edi, 64
     call    hv_map
@@ -279,19 +300,23 @@ hive_build:
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_tvc], rax
-    imul    edi, r12d, 12
+    mov     eax, r12d                   # the build's: every primitive
+    add     eax, [rip+hv_ns]
+    mov     [rsp+16], eax
+    imul    edi, eax, 12
     add     edi, 64
     call    hv_map
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+b_cent], rax
-    imul    edi, r12d, 24
+    imul    edi, [rsp+16], 24
     add     edi, 64
     call    hv_map
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+b_box], rax
-    lea     edi, [r12*4+64]
+    mov     edi, [rsp+16]
+    lea     edi, [rdi*4+64]
     call    hv_map
     test    rax, rax
     jz      .Lhb_fail
@@ -685,7 +710,8 @@ hv_inst_emit:
     ret
 
 # hv_part_count -> eax = the triangles the particles add (whole ones while
-#   the instance budget lasts; hv_ibud spent)
+#   the instance budget lasts; hv_ibud spent); hv_ns = their balls (spheres,
+#   up to HV_SMAX)
 hv_part_count:
     push    rbx
     push    r12
@@ -693,7 +719,10 @@ hv_part_count:
     push    r14
     sub     rsp, 8
     xor     r13d, r13d
+    mov     dword ptr [rip+hv_ns], 0
     xor     ebx, ebx
+    cmp     qword ptr [rip+hv_only], 0  # (a bake of one object: none)
+    jne     9f
 1:  cmp     ebx, [rip+pt_ns]
     jae     9f
     mov     edi, ebx
@@ -710,7 +739,14 @@ hv_part_count:
     jae     1b
     movzx   eax, byte ptr [r14+rcx]
     mov     rdx, [r12+24+rax*8]         # (IB_PROTO)
-    mov     eax, [rdx+ME_NTRIS]
+    cmp     rdx, [rip+pt_sphere]        # a ball: a sphere (no triangles)
+    jne     3f
+    cmp     dword ptr [rip+hv_ns], HV_SMAX
+    jae     9f
+    inc     dword ptr [rip+hv_ns]
+    inc     ecx
+    jmp     2b
+3:  mov     eax, [rdx+ME_NTRIS]
     cmp     eax, [rip+hv_ibud]
     ja      9f
     sub     [rip+hv_ibud], eax
@@ -737,6 +773,8 @@ hv_part_emit:
     sub     rsp, 128    # [0] system [8] colours [16] material [20] instance
                         # [24] first triangle [32] mark [40] its centre
     mov     dword ptr [rsp], 0
+    cmp     qword ptr [rip+hv_only], 0  # (a bake of one object: none)
+    jne     .Lpe_out
 .Lpe_sys:
     mov     edi, [rsp]
     cmp     edi, [rip+pt_ns]
@@ -758,6 +796,8 @@ hv_part_emit:
     mov     ecx, [rsp+20]
     movzx   eax, byte ptr [rax+rcx]
     mov     r15, [r12+24+rax*8]         # the prototype
+    cmp     r15, [rip+pt_sphere]        # a ball: a sphere
+    je      .Lpe_sph
     mov     eax, [r15+ME_NTRIS]
     cmp     eax, [rip+hv_ibud]
     ja      .Lpe_out
@@ -879,6 +919,67 @@ hv_part_emit:
 .Lpe_rel:
     mov     rdi, [rsp+32]
     call    fa_release
+    inc     dword ptr [rsp+20]
+    jmp     .Lpe_one
+.Lpe_sph:                               # centre, radius (its matrix: the unit
+    mov     eax, [rip+hv_spk]           #  ball scaled), material, colour
+    cmp     eax, [rip+hv_ns]
+    jae     .Lpe_skip
+    inc     dword ptr [rip+hv_spk]
+    mov     r8d, eax
+    imul    rdx, r8, SP_SZ
+    add     rdx, [rip+hv_sp]
+    mov     ecx, [rsp+20]
+    imul    eax, ecx, 48
+    lea     rax, [r12+128+rax]          # (IB_DATA: 3 x 4, rows)
+    mov     r9d, [rax+12]
+    mov     [rdx+SP_C], r9d
+    mov     r9d, [rax+28]
+    mov     [rdx+SP_C+4], r9d
+    mov     r9d, [rax+44]
+    mov     [rdx+SP_C+8], r9d
+    movss   xmm0, [rax]                 # |column 0|
+    mulss   xmm0, xmm0
+    movss   xmm1, [rax+16]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [rax+32]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    sqrtss  xmm0, xmm0
+    movss   [rdx+SP_R], xmm0
+    mov     eax, [rsp+16]
+    mov     [rdx+SP_MAT], eax
+    xor     eax, eax
+    mov     r9, [rsp+8]
+    test    r9, r9
+    jz      2f
+    mov     eax, [r9+rcx*4]
+2:  mov     [rdx+SP_COL], eax
+    xor     eax, eax
+    mov     [rdx+SP_VEL], rax
+    mov     [rdx+SP_VEL+8], rax
+    mov     [rdx+SP_VEL+16], rax
+    mov     [rdx+SP_VEL+24], eax
+    mov     eax, r8d                    # its box and centre (primitive hv_n + k)
+    add     eax, [rip+hv_n]
+    lea     r9, [rax+rax*2]
+    mov     r10, [rip+b_cent]
+    lea     r10, [r10+r9*4]
+    mov     r11, [rip+b_box]
+    lea     r11, [r11+r9*8]
+    xor     ecx, ecx
+1:  movss   xmm1, [rdx+SP_C+rcx*4]
+    movss   [r10+rcx*4], xmm1
+    movss   xmm2, xmm1
+    subss   xmm2, xmm0
+    movss   [r11+rcx*4], xmm2
+    addss   xmm1, xmm0
+    movss   [r11+12+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+.Lpe_skip:
     inc     dword ptr [rsp+20]
     jmp     .Lpe_one
 .Lpe_out:
@@ -1335,7 +1436,8 @@ build_bvh:
     push    r15
     push    rbp
     sub     rsp, 104
-    mov     r12d, [rip+hv_n]
+    mov     r12d, [rip+hv_n]            # triangles, then spheres
+    add     r12d, [rip+hv_ns]
     mov     rdi, [rip+b_prim]           # prims in order
     xor     ecx, ecx
 1:  cmp     ecx, r12d
@@ -1413,6 +1515,16 @@ build_bvh:
     mov     eax, r15d
     sub     eax, r14d                   # count
     mov     [rsp+64], eax
+    test    ebx, ebx                    # the root, with triangles and spheres:
+    jnz     43f                         #  split between them (each side's
+    cmp     dword ptr [rip+hv_ns], 0    #  leaves are of one kind)
+    je      43f
+    mov     eax, [rip+hv_n]
+    test    eax, eax
+    jz      43f
+    mov     [rsp+72], eax
+    jmp     .Lbb_children
+43:
     cmp     eax, 2
     jbe     .Lbb_leaf
     # the widest centroid axis
@@ -1870,7 +1982,7 @@ set_child:
     ret
 
 # reorder_tris - triangle arrays in leaf order (b_prim), so leaves index
-#   them directly
+#   them directly; the spheres' records too (b_prim from hv_n on)
 reorder_tris:
     push    rbx
     push    r12
@@ -1997,6 +2109,32 @@ reorder_tris:
     inc     ebx
     jmp     5b
 6:  mov     [rip+hv_tm], r13
+    mov     eax, [rip+hv_ns]            # spheres, in their leaves' order
+    test    eax, eax
+    jz      9f
+    imul    edi, eax, SP_SZ
+    add     edi, 64
+    call    hv_map
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    xor     ebx, ebx
+7:  cmp     ebx, [rip+hv_ns]
+    jae     8f
+    mov     eax, ebx
+    add     eax, r12d
+    mov     rdx, [rip+b_prim]
+    mov     eax, [rdx+rax*4]
+    sub     eax, r12d
+    imul    rsi, rax, SP_SZ
+    add     rsi, [rip+hv_sp]
+    imul    rdi, rbx, SP_SZ
+    add     rdi, r13
+    mov     ecx, SP_SZ
+    rep     movsb
+    inc     ebx
+    jmp     7b
+8:  mov     [rip+hv_sp], r13
 9:  add     rsp, 8
     pop     r13
     pop     r12
@@ -2036,7 +2174,9 @@ trace_common:
     mov     [rsp+64], esi               # any-hit
     mov     dword ptr [rbx+RAY_TRI], -1
     xor     eax, eax
-    cmp     dword ptr [rip+hv_n], 0
+    mov     ecx, [rip+hv_n]
+    add     ecx, [rip+hv_ns]
+    test    ecx, ecx
     je      .Ltr_out
     # broadcast o, 1/d; near / far offsets per axis
     xor     ecx, ecx
@@ -2165,7 +2305,12 @@ trace_common:
 7:  cmp     r14d, r15d
     jae     .Ltr_pop
     mov     edi, r14d
+    cmp     edi, [rip+hv_n]             # (a leaf of spheres)
+    jae     72f
     call    tri_hit                     # xmm0 = t, xmm1 = u, xmm2 = v; eax
+    jmp     73f
+72: call    sph_hit
+73:
     test    eax, eax
     jz      71f
     comiss  xmm0, [rsp+68]
@@ -2190,6 +2335,80 @@ trace_common:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# sph_hit(edi=primitive >= hv_n; rbx = ray) -> eax = 1 with xmm0 = t (the
+#   nearer crossing past epsilon: from inside, the far one), xmm1 = xmm2 = 0.
+#   From the closest approach (Ray Tracing Gems ch. 7): k = (oc . d) / d^2,
+#   l = oc - k d, h = r^2 - l^2, t = -k -+ sqrt(h / d^2); b^2 - ac loses
+#   most of its digits for small, far balls. pt.comp's sph_hit: the same steps
+sph_hit:
+    sub     edi, [rip+hv_n]
+    imul    rax, rdi, SP_SZ
+    add     rax, [rip+hv_sp]
+    movss   xmm3, [rbx+RAY_O]           # oc = o - c
+    subss   xmm3, [rax+SP_C]
+    movss   xmm4, [rbx+RAY_O+4]
+    subss   xmm4, [rax+SP_C+4]
+    movss   xmm5, [rbx+RAY_O+8]
+    subss   xmm5, [rax+SP_C+8]
+    movss   xmm6, [rbx+RAY_D]           # a = d . d
+    mulss   xmm6, xmm6
+    movss   xmm7, [rbx+RAY_D+4]
+    mulss   xmm7, xmm7
+    addss   xmm6, xmm7
+    movss   xmm7, [rbx+RAY_D+8]
+    mulss   xmm7, xmm7
+    addss   xmm6, xmm7
+    comiss  xmm6, [rip+hf_tiny]
+    jbe     8f
+    movss   xmm9, [rip+hf_one]          # inv = 1 / a
+    divss   xmm9, xmm6
+    movss   xmm7, xmm3                  # b = oc . d
+    mulss   xmm7, [rbx+RAY_D]
+    movss   xmm8, xmm4
+    mulss   xmm8, [rbx+RAY_D+4]
+    addss   xmm7, xmm8
+    movss   xmm8, xmm5
+    mulss   xmm8, [rbx+RAY_D+8]
+    addss   xmm7, xmm8
+    mulss   xmm7, xmm9                  # k = b inv
+    movss   xmm8, xmm7                  # l = oc - k d
+    mulss   xmm8, [rbx+RAY_D]
+    subss   xmm3, xmm8
+    movss   xmm8, xmm7
+    mulss   xmm8, [rbx+RAY_D+4]
+    subss   xmm4, xmm8
+    movss   xmm8, xmm7
+    mulss   xmm8, [rbx+RAY_D+8]
+    subss   xmm5, xmm8
+    mulss   xmm3, xmm3                  # h = r^2 - l . l
+    mulss   xmm4, xmm4
+    addss   xmm3, xmm4
+    mulss   xmm5, xmm5
+    addss   xmm3, xmm5
+    movss   xmm8, [rax+SP_R]
+    mulss   xmm8, xmm8
+    subss   xmm8, xmm3
+    xorps   xmm3, xmm3
+    comiss  xmm8, xmm3
+    jb      8f
+    mulss   xmm8, xmm9                  # s = sqrt(h inv)
+    sqrtss  xmm8, xmm8
+    movss   xmm0, xmm7                  # t = -(k + s), else s - k
+    addss   xmm0, xmm8
+    xorps   xmm0, [rip+hf_sign]
+    comiss  xmm0, [rip+hf_eps_t]
+    ja      1f
+    movss   xmm0, xmm8
+    subss   xmm0, xmm7
+    comiss  xmm0, [rip+hf_eps_t]
+    jbe     8f
+1:  xorps   xmm1, xmm1
+    xorps   xmm2, xmm2
+    mov     eax, 1
+    ret
+8:  xor     eax, eax
     ret
 
 # tri_hit(edi=triangle; rbx = ray) -> eax = 1 with xmm0 = t, xmm1 = u,

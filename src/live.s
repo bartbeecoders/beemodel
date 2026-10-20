@@ -425,7 +425,9 @@ lv_build:
     call    hive_build
     test    eax, eax
     jz      8f
-    cmp     dword ptr [rip+hv_n], 0     # (nothing to draw: Material Preview)
+    mov     eax, [rip+hv_n]             # (nothing to draw: Material Preview)
+    add     eax, [rip+hv_ns]
+    test    eax, eax
     je      8f
     mov     eax, [rip+pt_nmaps]
     mov     [rsp+8], eax
@@ -481,8 +483,10 @@ lv_reput:
     push    r13
     mov     r12d, edi
     mov     r13d, esi
-    xor     eax, eax
-    cmp     dword ptr [rip+hv_n], 0
+    mov     eax, [rip+hv_n]
+    add     eax, [rip+hv_ns]
+    test    eax, eax
+    mov     eax, 0
     je      9f
     cmp     qword ptr [rip+hv_lsel], 0  # (its light tables are there)
     je      9f

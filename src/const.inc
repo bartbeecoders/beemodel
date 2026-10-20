@@ -601,3 +601,11 @@
 .equ HW_FAILED,     6                   # the helper failed
 .equ HW_INTERNAL,   7                   # a bake or probe (the CPU's tracer)
 .equ HW_LAST,       7
+
+# a sphere of the path tracer (hive.s hv_sp: particles drawn as balls)
+.equ SP_C,          0                   # centre
+.equ SP_R,          12                  # radius
+.equ SP_MAT,        16                  # material + 1 (0: the default)
+.equ SP_COL,        20                  # colour (0xAARRGGBB, sRGB; 0: none)
+.equ SP_VEL,        24                  # velocity (m/s; motion blur)
+.equ SP_SZ,         48

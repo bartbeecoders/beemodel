@@ -142,9 +142,11 @@ sprites are drawn by the CPU into a buffer of depth-and-colour keys (the
 nearest wins), so the picture is the same on any number of threads.
 
 Renders (Hive and the GPU helper) show each particle as a small ball
-(an icosahedron of its size with round normals) or as its object, tinted
-by its colour, in the material of its emitter (objects mode: the first
-object's). `render off` leaves a system out. A liquid with its surface on
+(an exact sphere of its size: one primitive, 48 bytes, where a mesh ball
+would take 20 triangles) or as its object, tinted by its colour, in the
+material of its emitter (objects mode: the first object's). Up to 16
+million balls a render; an emissive ball is a light, sampled by the cone
+it fills. `render off` leaves a system out. A liquid with its surface on
 renders as the surface instead.
 
 ## Collisions and events

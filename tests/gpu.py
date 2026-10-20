@@ -313,6 +313,13 @@ def main():
           f'particles: 100k leaves instanced on particles and 2000 tinted balls on the GPU, the CPU\'s image '
           f'(mean difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical)')
 
+    # ---- particles as analytic spheres (H6): a ball is one primitive, no triangles ----
+    bs = 'emit("Cube", "from faces burst 2000 speed 1 life 100 size 0.1 gravity 0 color ff4010")\nframe(5)\n'
+    r = run(bs + 'op("render.image", "%s/b.png 64 48 4 0")\nprint("prims", gpu(17), gpu(19))\n' % HOME,
+            BEEMODEL_GPU='any')
+    check(r.get('prims') == ['12', '2000'], f'2000 balls: 2000 spheres, no triangles (the cube\'s 12) '
+                                            f'({r.get("prims")})')
+
     # ---- an empty scene after a full one (the last scene's arrays are gone) ----------
     e1 = os.path.join(HOME, 'empty1.png'); e2 = os.path.join(HOME, 'empty2.png')
     r = run(SCENE + 'op("render.image", "%s 64 48 4 0")\n'

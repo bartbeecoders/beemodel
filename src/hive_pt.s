@@ -1222,25 +1222,22 @@ light_prep:
     push    r13
     sub     rsp, 48
     mov     dword ptr [rip+hv_nl], 0
-    mov     edi, [rip+hv_n]
-    lea     esi, [rdi*4+16]
-    lea     rdi, [rip+frame_arena]      # (render lifetime: hv_map'd below)
-    mov     edi, esi
+    mov     r12d, [rip+hv_n]            # every primitive: triangles, spheres
+    add     r12d, [rip+hv_ns]
+    lea     edi, [r12*4+16]
     call    pt_map
     mov     [rip+hv_lsel], rax
     test    rax, rax
     jz      9f
-    mov     edi, [rip+hv_n]
-    lea     edi, [rdi*4+16]
+    lea     edi, [r12*4+16]
     call    pt_map
     mov     [rip+hv_lcdf], rax
-    mov     edi, [rip+hv_n]
-    lea     edi, [rdi*4+16]
+    lea     edi, [r12*4+16]
     call    pt_map
     mov     [rip+hv_ltri], rax
     xorps   xmm7, xmm7                  # running total
     xor     ebx, ebx
-1:  cmp     ebx, [rip+hv_n]
+1:  cmp     ebx, r12d
     jae     2f
     mov     edi, ebx
     call    tri_material
@@ -1255,8 +1252,10 @@ light_prep:
     comiss  xmm0, xmm1
     jbe     11f
     movss   [rsp], xmm0
+    movss   [rsp+4], xmm7
     mov     edi, ebx
-    call    tri_area
+    call    prim_area
+    movss   xmm7, [rsp+4]
     mulss   xmm0, [rsp]
     addss   xmm7, xmm0
     mov     ecx, [rip+hv_nl]
@@ -1301,17 +1300,33 @@ light_prep:
     pop     rbx
     ret
 
-# tri_material(edi=triangle) -> rax = its material record (or 0 = default)
+# tri_material(edi=primitive) -> rax = its material record (or 0 = default)
 tri_material:
-    mov     rax, [rip+hv_tm]
+    cmp     edi, [rip+hv_n]             # (a sphere: its record's)
+    jb      2f
+    call    sph_rec
+    mov     eax, [rax+SP_MAT]
+    jmp     3f
+2:  mov     rax, [rip+hv_tm]
     mov     eax, [rax+rdi*4]
-    btr     eax, 30                     # (HV_CATCH: not part of the index)
+3:  btr     eax, 30                     # (HV_CATCH: not part of the index)
     test    eax, eax
     jz      1f
     shl     rax, MA_SHIFT
     add     rax, [rip+hv_mats]
     ret
 1:  xor     eax, eax
+    ret
+
+# prim_area(edi=primitive) -> xmm0 (a sphere: 4 pi r^2)
+prim_area:
+    cmp     edi, [rip+hv_n]
+    jb      tri_area
+    call    sph_rec
+    movss   xmm0, [rax+SP_R]
+    mulss   xmm0, xmm0
+    mulss   xmm0, [rip+pt_2pi]
+    addss   xmm0, xmm0
     ret
 
 # tri_area(edi) -> xmm0
@@ -1450,6 +1465,8 @@ light_sample:
     dec     ecx
 31: mov     rax, [rip+hv_ltri]
     mov     r14d, [rax+rcx*4]           # the triangle
+    cmp     r14d, [rip+hv_n]            # (or a sphere: its cone)
+    jae     .Lls_sph
     call    rnd                         # barycentric: su = sqrt(u1)
     sqrtss  xmm0, xmm0
     movss   [rsp+8], xmm0
@@ -1506,6 +1523,29 @@ light_sample:
     inc     ecx
     cmp     ecx, 3
     jb      5b
+    jmp     .Lls_ok
+.Lls_sph:                               # an emissive sphere: the cone of it
+    mov     edi, r14d                   #  seen from p
+    mov     rsi, rbx
+    mov     rdx, r13
+    call    sph_light
+    test    eax, eax
+    jz      .Lls_none
+    movss   xmm1, [r13+LS_PDF]
+    mov     rax, [rip+hv_lsel]
+    mulss   xmm1, [rax+r14*4]
+    mulss   xmm1, [rsp]
+    movss   [r13+LS_PDF], xmm1
+    mov     edi, r14d                   # Li = emission * strength
+    call    tri_material
+    movss   xmm1, [rax+76]
+    xor     ecx, ecx
+6:  movss   xmm0, [rax+64+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [r13+LS_LI+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      6b
     jmp     .Lls_ok
 .Lls_point:                             # a light object (obj_light)
     shl     eax, 6
@@ -1953,9 +1993,151 @@ tri_geo_normal:
     movss   [rdi+8], xmm0
     jmp     unit3
 
-# light_pdf_tri(edi=triangle, xmm0=distance, rsi=direction (from the
-#   shading point)) -> xmm0 = the NEE pdf of reaching that point
+# sph_omc(edi=sphere primitive, rsi=from a point) -> xmm0 = 1 - cos of the
+#   half angle it fills there (x / (1 + sqrt(1 - x)), x = r^2 / d^2: stable
+#   for small, far balls), xmm1 = d^2, xmm2 = r^2, rax = its record; xmm0 =
+#   0 from inside it
+sph_omc:
+    call    sph_rec
+    xorps   xmm1, xmm1
+    xor     ecx, ecx
+1:  movss   xmm3, [rax+SP_C+rcx*4]
+    subss   xmm3, [rsi+rcx*4]
+    mulss   xmm3, xmm3
+    addss   xmm1, xmm3
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    movss   xmm2, [rax+SP_R]
+    mulss   xmm2, xmm2
+    xorps   xmm0, xmm0
+    comiss  xmm1, xmm2
+    jbe     2f
+    movss   xmm0, xmm2
+    divss   xmm0, xmm1                  # x
+    movss   xmm3, [rip+pt_one]
+    subss   xmm3, xmm0
+    maxss   xmm3, [rip+pt_zero]
+    sqrtss  xmm3, xmm3
+    addss   xmm3, [rip+pt_one]
+    divss   xmm0, xmm3
+2:  ret
+
+# sph_light(edi=sphere primitive, rsi=p, rdx=light sample) -> eax = 1: a
+#   direction uniform in the cone the ball fills seen from p, LS_PDF = 1 /
+#   its solid angle (the ball's choice not in it), LS_DIST to its near
+#   surface; 0 from inside it. (r15: rnd)
+sph_light:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 64
+    mov     r12, rsi
+    mov     r13, rdx
+    mov     dword ptr [r13+LS_DELTA], 0
+    call    sph_omc
+    xorps   xmm3, xmm3
+    comiss  xmm0, xmm3
+    jbe     8f
+    mov     rbx, rax
+    movss   [rsp+48], xmm0              # 1 - cos max
+    movss   [rsp+52], xmm1              # d^2
+    movss   [rsp+56], xmm2              # r^2
+    xor     ecx, ecx                    # the axis: towards the centre
+1:  movss   xmm0, [rbx+SP_C+rcx*4]
+    subss   xmm0, [r12+rcx*4]
+    movss   [rsp+32+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    lea     rdi, [rsp+32]
+    call    unit3
+    movss   [rsp+60], xmm0              # d
+    call    rnd                         # cos = 1 - u (1 - cos max)
+    mulss   xmm0, [rsp+48]
+    movss   xmm1, [rip+pt_one]
+    subss   xmm1, xmm0
+    movss   [rsp+44], xmm1
+    mulss   xmm1, xmm1
+    movss   xmm2, [rip+pt_one]
+    subss   xmm2, xmm1
+    maxss   xmm2, [rip+pt_zero]
+    sqrtss  xmm2, xmm2
+    movss   [rsp+40], xmm2              # sin
+    call    rnd
+    call    sincos_2pi
+    mulss   xmm0, [rsp+40]
+    mulss   xmm1, [rsp+40]
+    movss   [rsp+24], xmm1              # x = cos phi sin, y = sin phi sin
+    movss   [rsp+28], xmm0
+    lea     rdi, [rsp+32]
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+12]
+    call    onb_ro
+    movss   xmm0, [rsp+24]
+    movss   xmm1, [rsp+28]
+    movss   xmm2, [rsp+44]
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+12]
+    lea     rcx, [rsp+32]
+    lea     rdi, [r13+LS_WI]
+    call    local_to_world
+    movss   xmm0, [rsp+60]              # its near surface along wi: b - sqrt(r^2
+    mulss   xmm0, [rsp+44]              #  - (d^2 - b^2)), b = d cos
+    movss   xmm1, xmm0
+    mulss   xmm1, xmm1
+    movss   xmm2, [rsp+52]
+    subss   xmm2, xmm1
+    movss   xmm1, [rsp+56]
+    subss   xmm1, xmm2
+    maxss   xmm1, [rip+pt_zero]
+    sqrtss  xmm1, xmm1
+    subss   xmm0, xmm1
+    movss   [r13+LS_DIST], xmm0
+    movss   xmm0, [rsp+48]              # pdf = 1 / (2 pi (1 - cos max))
+    mulss   xmm0, [rip+pt_2pi]
+    maxss   xmm0, [rip+pt_tiny]
+    movss   xmm1, [rip+pt_one]
+    divss   xmm1, xmm0
+    movss   [r13+LS_PDF], xmm1
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 64
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# light_pdf_tri(edi=primitive, xmm0=distance, rsi=direction (from the
+#   shading point); rbx = the path frame) -> xmm0 = the NEE pdf of reaching
+#   that point (a sphere: its cone from the ray's origin)
 light_pdf_tri:
+    cmp     edi, [rip+hv_n]
+    jb      0f
+    mov     rax, [rip+hv_lsel]
+    movss   xmm0, [rax+rdi*4]
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     1f
+    sub     rsp, 24
+    movss   [rsp], xmm0
+    lea     rsi, [rbx+PF_RAY+RAY_O]
+    call    sph_omc
+    xorps   xmm3, xmm3
+    comiss  xmm0, xmm3
+    jbe     2f
+    mulss   xmm0, [rip+pt_2pi]
+    cvtsi2ss xmm1, dword ptr [rip+hv_nslots]
+    mulss   xmm0, xmm1
+    movss   xmm1, [rsp]
+    divss   xmm1, xmm0
+    movss   xmm0, xmm1
+2:  add     rsp, 24
+    ret
+1:  xorps   xmm0, xmm0
+    ret
+0:
     push    rbx
     push    r12
     sub     rsp, 40
@@ -2218,9 +2400,9 @@ trace_path:
     mov     r13, rax
     test    r13, r13
     jnz     63f
-    mov     rax, [rip+hv_tvc]           # (no material: the default, made
-    lea     rcx, [r12+r12*2]            #  here when colours tint it)
-    cmp     dword ptr [rax+rcx*4], 0
+    mov     edi, r12d                   # (no material: the default, made
+    call    prim_vc                     #  here when colours tint it)
+    cmp     dword ptr [rsi], 0
     je      7f
     lea     rdi, [rbx+PF_MAT]
     xor     eax, eax
@@ -2237,9 +2419,8 @@ trace_path:
     call    hit_graph
 64: test    dword ptr [rbx+PF_SC+112], 0x80000000   # (a graph that reads them:
     jnz     65f                         #  no tint)
-    mov     rax, [rip+hv_tvc]           # vertex colours tint the base
-    lea     rcx, [r12+r12*2]
-    lea     rsi, [rax+rcx*4]
+    mov     edi, r12d                   # vertex colours tint the base
+    call    prim_vc
     cmp     dword ptr [rsi], 0
     je      65f
     lea     rax, [rbx+PF_MAT]           # (the material's copy, to change)
@@ -2311,9 +2492,12 @@ trace_path:
     mov     [rax+24], ecx
     cmp     dword ptr [rip+hv_film], 0  # a film with alpha: something seen,
     je      79f                         #  or a shadow catcher
+    cmp     r12d, [rip+hv_n]            # (spheres catch nothing)
+    jae     78f
     mov     rcx, [rip+hv_tm]
     test    dword ptr [rcx+r12*4], HV_CATCH
     jnz     .Ltp_catch
+78:
     mov     dword ptr [rax+28], 0x3f800000
 79: # next-event estimation
     lea     rdi, [rbx+PF_P]
@@ -2406,6 +2590,8 @@ trace_path:
     test    eax, eax
     jz      .Ltp_clit
     mov     eax, [rbx+PF_SRAY+RAY_TRI]
+    cmp     eax, [rip+hv_n]             # (a sphere: a shadow)
+    jae     .Ltp_done
     mov     rcx, [rip+hv_tm]
     test    dword ptr [rcx+rax*4], HV_CATCH
     jz      .Ltp_done
@@ -2599,7 +2785,11 @@ pt_walk:
 #   material from behind, a masked one below its clip value), else a
 #   translucent material's opacity
 cover:
-    push    rbx
+    cmp     edi, [rip+hv_n]             # (spheres: opaque)
+    jb      0f
+    movss   xmm0, [rip+pt_one]
+    ret
+0:  push    rbx
     push    r12
     push    r13
     sub     rsp, 336
@@ -2734,11 +2924,60 @@ cover:
     pop     rbx
     ret
 
+# sph_graph_ctx(rbx=path frame, r12d=sphere primitive) - the graph's context
+#   for a sphere: the object-space point on the unit ball (no edges), no UVs
+#   (box), the world "edges" its tangents times the radius, the normal
+sph_graph_ctx:
+    push    r14
+    sub     rsp, 32
+    mov     edi, r12d
+    call    sph_rec
+    mov     r14, rax
+    movss   xmm1, [rip+pt_one]
+    divss   xmm1, [r14+SP_R]
+    xor     ecx, ecx
+1:  movss   xmm0, [rbx+PF_P+rcx*4]
+    subss   xmm0, [r14+SP_C+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [rbx+PF_SC+rcx*4], xmm0
+    mov     dword ptr [rbx+PF_SC+12+rcx*4], 0
+    mov     dword ptr [rbx+PF_SC+24+rcx*4], 0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    mov     dword ptr [rbx+PF_SC+36], 0
+    mov     dword ptr [rbx+PF_SC+40], 0
+    lea     rdi, [rbx+PF_NS]            # tangents (onb of the normal)
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+12]
+    call    onb_ro
+    movss   xmm1, [r14+SP_R]
+    xor     ecx, ecx
+2:  movss   xmm0, [rsp+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [rbx+PF_SC+44+rcx*4], xmm0
+    movss   xmm0, [rsp+12+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [rbx+PF_SC+56+rcx*4], xmm0
+    mov     eax, [rbx+PF_NS+rcx*4]
+    mov     [rbx+PF_SC+68+rcx*4], eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    mov     qword ptr [rbx+PF_SC+120], 0
+    add     rsp, 32
+    pop     r14
+    ret
+
 # hit_graph(rbx=path frame, r12d=triangle, r13=material) - evaluate the
 #   material's graph here: r13 -> PF_MAT with the results, PF_NS bumped
 hit_graph:
     push    r14
-    mov     rax, [rip+hv_to]            # object-space corner and edges
+    cmp     r12d, [rip+hv_n]            # a sphere: its own context
+    jb      0f
+    call    sph_graph_ctx
+    jmp     .Lhg_sph
+0:  mov     rax, [rip+hv_to]            # object-space corner and edges
     lea     rcx, [r12+r12*8]
     lea     rsi, [rax+rcx*4]
     lea     rdi, [rbx+PF_SC]
@@ -2769,13 +3008,18 @@ hit_graph:
     lea     rdi, [rbx+PF_SC+152]
     mov     ecx, 6
     rep     movsd
-    mov     eax, 0x3f800000             # the vertex colour (none: white)
+    jmp     3f
+.Lhg_sph:
+    lea     rsi, [rbx+PF_P]             # (a sphere's, from here on the same)
+    lea     rdi, [rbx+PF_SC+152]
+    mov     ecx, 6
+    rep     movsd
+3:  mov     eax, 0x3f800000             # the vertex colour (none: white)
     mov     [rbx+PF_SC+176], eax
     mov     [rbx+PF_SC+180], eax
     mov     [rbx+PF_SC+184], eax
-    mov     rax, [rip+hv_tvc]
-    lea     rcx, [r12+r12*2]
-    lea     rsi, [rax+rcx*4]
+    mov     edi, r12d
+    call    prim_vc
     cmp     dword ptr [rsi], 0
     je      2f
     movss   xmm0, [rbx+PF_RAY+RAY_U]
@@ -2850,6 +3094,8 @@ spawn_ray:
 # hit_normals(edi=triangle; rbx = path frame one level up) - geometric and
 #   interpolated normals, outward; PF_OUT = 1 when the ray came from outside
 hit_normals:
+    cmp     edi, [rip+hv_n]             # a sphere: from its centre
+    jae     sph_normals
     push    r12
     mov     r12d, edi
     mov     rax, [rip+hv_tv]
@@ -2925,6 +3171,55 @@ hit_normals:
     mov     eax, 1
 4:  mov     [rbx+PF_OUT], eax
     pop     r12
+    ret
+
+# sph_normals(edi=sphere primitive; rbx = path frame) - hit_normals for a
+#   sphere: both normals from its centre, PF_OUT as for a face
+sph_normals:
+    call    sph_rec
+    xor     ecx, ecx
+1:  movss   xmm0, [rbx+PF_P+rcx*4]
+    subss   xmm0, [rax+SP_C+rcx*4]
+    movss   [rbx+PF_NG+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    lea     rdi, [rbx+PF_NG]
+    call    unit3
+    mov     rax, [rbx+PF_NG]
+    mov     [rbx+PF_NS], rax
+    mov     eax, [rbx+PF_NG+8]
+    mov     [rbx+PF_NS+8], eax
+    lea     rdi, [rbx+PF_NG]
+    lea     rsi, [rbx+PF_WO]
+    call    dot3
+    xor     eax, eax
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jbe     2f
+    mov     eax, 1
+2:  mov     [rbx+PF_OUT], eax
+    ret
+
+# sph_rec(edi=sphere primitive (hv_n + k)) -> rax = its record (hv_sp)
+sph_rec:
+    mov     eax, edi
+    sub     eax, [rip+hv_n]
+    imul    rax, rax, SP_SZ
+    add     rax, [rip+hv_sp]
+    ret
+
+# prim_vc(edi=primitive) -> rsi = its three corner colours (vcol_lin3's; a
+#   sphere: its one colour, read with u = v = 0)
+prim_vc:
+    cmp     edi, [rip+hv_n]
+    jae     1f
+    mov     rsi, [rip+hv_tvc]
+    lea     eax, [rdi+rdi*2]
+    lea     rsi, [rsi+rax*4]
+    ret
+1:  call    sph_rec
+    lea     rsi, [rax+SP_COL]
     ret
 
 # =============================================================================

@@ -108,7 +108,17 @@ vec2 sincos_2pi(float u) { float a = u * TWO_PI; return vec2(sin(a), cos(a)); }
 
 // ---- the scene -------------------------------------------------------------
 const uint CATCH = 0x40000000u;         // tm: a shadow catcher's triangle (HV_CATCH)
-uint tmat(uint t) { return tm[t] & ~CATCH; }
+// spheres (particles drawn as balls, hive.s hv_sp): primitives from ntri on,
+//   12 floats each (SP_*: centre, radius, material + 1, colour, velocity)
+const uint SPW = 12u;
+uint NSPH() { return floatBitsToUint(P.cam[13]); }
+bool is_sph(uint t) { return t >= P.ntri; }
+uint sph_o(uint t) { return (t - P.ntri) * SPW; }
+vec3 sph_c(uint t) { uint o = sph_o(t); return vec3(sph[o], sph[o + 1u], sph[o + 2u]); }
+float sph_r(uint t) { return sph[sph_o(t) + 3u]; }
+uint tmat(uint t) { return is_sph(t) ? floatBitsToUint(sph[sph_o(t) + 4u]) & ~CATCH : tm[t] & ~CATCH; }
+bool has_vcol(uint t) { return is_sph(t) ? floatBitsToUint(sph[sph_o(t) + 5u]) != 0u : tvc[t * 3u] != 0u; }
+bool is_catch(uint t) { return !is_sph(t) && (tm[t] & CATCH) != 0u; }
 vec3 tv3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tv[o], tv[o + 1u], tv[o + 2u]); }
 vec3 tn3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tn[o], tn[o + 1u], tn[o + 2u]); }
 
@@ -133,6 +143,35 @@ bool tri_hit(uint t, inout Ray r, out float tt, out float uu, out float vv) {
     return true;
 }
 
+// o + d t, rounded as the CPU does (no fused multiply-add; a function of its
+//   own: precise in trace_path makes glslang take tens of gigabytes)
+vec3 hit_point(Ray r) { precise vec3 p = r.d * r.t + r.o; return p; }
+
+// a sphere: the nearer crossing past epsilon (from inside, the far one), from
+//   the closest approach: k = (oc . d) / d^2, l = oc - k d, h = r^2 - l^2,
+//   t = -k -+ sqrt(h / d^2) (b^2 - ac loses most of its digits for small, far
+//   balls); hive.s sph_hit, step for step
+bool sph_hit(uint t, inout Ray r, out float tt) {
+    uint o = sph_o(t);
+    precise vec3 oc = r.o - vec3(sph[o], sph[o + 1u], sph[o + 2u]);
+    precise float a = r.d.x * r.d.x + r.d.y * r.d.y + r.d.z * r.d.z;
+    if (!(a > 1.0e-12)) return false;
+    float inv = 1.0 / a;
+    precise float k = (oc.x * r.d.x + oc.y * r.d.y + oc.z * r.d.z) * inv;
+    precise vec3 l = oc - vec3(k * r.d.x, k * r.d.y, k * r.d.z);
+    precise float rr = sph[o + 3u] * sph[o + 3u];
+    precise float h = rr - (l.x * l.x + l.y * l.y + l.z * l.z);
+    if (h < 0.0) return false;
+    precise float sq = sqrt(h * inv);
+    precise float t0 = -(k + sq);
+    if (!(t0 > 1.0e-4)) {
+        t0 = sq - k;
+        if (!(t0 > 1.0e-4)) return false;
+    }
+    tt = t0;
+    return true;
+}
+
 // one axis of the 4-wide box test (lanes: the node's four children)
 void slab(uint base, float o, float iv, inout vec4 tn4, inout vec4 tf4) {
     vec4 lo = vec4(nodes[base], nodes[base + 1u], nodes[base + 2u], nodes[base + 3u]);
@@ -147,7 +186,7 @@ void slab(uint base, float o, float iv, inout vec4 tn4, inout vec4 tf4) {
 // the nearest hit (any: the first closer than tmax)
 bool trace(inout Ray r, bool anyhit) {
     r.tri = -1;
-    if (P.ntri == 0u) return false;
+    if (P.ntri == 0u && NSPH() == 0u) return false;
     float ix = abs(r.d.x) > 1.0e-12 ? 1.0 / r.d.x : 1.0e30;
     float iy = abs(r.d.y) > 1.0e-12 ? 1.0 / r.d.y : 1.0e30;
     float iz = abs(r.d.z) > 1.0e-12 ? 1.0 / r.d.z : 1.0e30;
@@ -188,10 +227,16 @@ bool trace(inout Ray r, bool anyhit) {
             if (ref == 0xffffffffu) continue;
             uint first = ref & 0x07ffffffu;
             uint end = first + ((ref >> 27) & 0xfu);
+            bool sl = first >= P.ntri;          // (a leaf of spheres)
             for (uint t = first; t < end; t++) {
                 float tt, uu, vv;
-                if (skipc && (tm[t] & CATCH) != 0u) continue;
-                if (!tri_hit(t, r, tt, uu, vv)) continue;
+                if (sl) {
+                    if (!sph_hit(t, r, tt)) continue;
+                    uu = 0.0; vv = 0.0;
+                } else {
+                    if (skipc && (tm[t] & CATCH) != 0u) continue;
+                    if (!tri_hit(t, r, tt, uu, vv)) continue;
+                }
                 if (!(tt < best)) continue;
                 best = tt;
                 r.tri = int(t); r.t = tt; r.u = uu; r.v = vv;
@@ -328,6 +373,12 @@ Mat mat_of(uint t) {
     return m;
 }
 
+vec3 vcol_lin3(uint t, float u, float v);
+vec3 prim_vcol(uint t, float u, float v) {      // a sphere: its one colour
+    if (!is_sph(t)) return vcol_lin3(t, u, v);
+    uint c = floatBitsToUint(sph[sph_o(t) + 5u]);
+    return vec3(P.lut[(c >> 16) & 0xffu], P.lut[(c >> 8) & 0xffu], P.lut[c & 0xffu]);
+}
 vec3 vcol_lin3(uint t, float u, float v) {
     float wt[3] = float[3](1.0 - u - v, u, v);
     vec3 out_c;
@@ -360,6 +411,7 @@ float np(uint m, uint j, uint k) { return mwf(m, nw(m, j, 13u + k)); }  // its v
 
 vec4 R[48 * 5];
 vec3 G_P;                           // the object point
+vec3 G_WP;                          // the world point (spheres' context)
 vec2 G_UV;
 vec3 G_N;                           // the shading normal (world)
 vec3 G_VC;                              // the vertex colour (linear; white if none)
@@ -734,14 +786,24 @@ void normal_map(uint m, uint t, uint b, inout vec3 ns) {
 void graph_shade(uint m, uint t, float u, float v, bool cover, inout Mat mt, inout vec3 ns,
                  out float alpha, out float mask) {
     alpha = -1.0; mask = -1.0;
+    G_N = ns;
+    if (is_sph(t)) {                    // a sphere: the unit ball's point, no
+        S_P0 = (G_WP - sph_c(t)) * (1.0 / sph_r(t));    //  edges, its tangents x r,
+        S_E1 = vec3(0.0); S_E2 = vec3(0.0);     //  box UVs (hive_pt.s sph_graph_ctx)
+        vec3 tt, bb;
+        onb(ns, tt, bb);
+        S_PU = tt * sph_r(t); S_PV = bb * sph_r(t);
+        G_VC = has_vcol(t) ? prim_vcol(t, 0.0, 0.0) : vec3(1.0);
+        box_uv();
+    } else {
     for (int k = 0; k < 3; k++) {
         S_P0[k] = to_[t * 9u + uint(k)]; S_E1[k] = to_[t * 9u + 3u + uint(k)]; S_E2[k] = to_[t * 9u + 6u + uint(k)];
     }
     S_PU = tv3(t, 1u); S_PV = tv3(t, 2u);
-    G_N = ns;
     G_VC = tvc[t * 3u] != 0u ? vcol_lin3(t, u, v) : vec3(1.0);     // (none: white)
     if (isnan(tuv[t * 6u])) box_uv();
     else for (int k = 0; k < 3; k++) S_UV[k] = vec2(tuv[t * 6u + uint(2 * k)], tuv[t * 6u + uint(2 * k + 1)]);
+    }
     // one evaluation site (each one is inlined): the point, then for a bump
     //   its height a little along u and along v
     uint64_t lv = graph_live(m, pin_mask(m, cover));
@@ -797,6 +859,7 @@ uint mwu(uint m, uint k) { return floatBitsToUint(mats[m * MW + k]); }
 //   hive_pt.s): 1 opaque, 0 a hole (one-sided from behind, masked below its
 //   clip), else a translucent material's opacity
 float cover(uint t, float u, float v, vec3 d) {
+    if (is_sph(t)) return 1.0;                  // (spheres: opaque)
     uint m = tmat(t);
     if (m == 0u) return 1.0;
     if (mwf(m, W_SIDED) >= 0.5) {
@@ -1046,6 +1109,22 @@ vec3 tri_geo_normal(uint t) {
     return unit3(vec3(e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x));
 }
 
+// a primitive's geometric normal at p (a sphere: from its centre)
+vec3 prim_geo_normal(uint t, vec3 p) { return is_sph(t) ? unit3(p - sph_c(t)) : tri_geo_normal(t); }
+float prim_area(uint t) { float r = is_sph(t) ? sph_r(t) : 0.0; return is_sph(t) ? r * r * TWO_PI * 2.0 : tri_area(t); }
+
+// 1 - cos of the half angle a sphere fills seen from q (x / (1 + sqrt(1 - x)),
+//   x = r^2 / d^2: stable for small, far balls); 0 from inside (hive_pt.s sph_omc)
+float sph_omc(uint t, vec3 q, out float d2, out float r2) {
+    vec3 w = sph_c(t) - q;
+    precise float dd = w.x * w.x + w.y * w.y + w.z * w.z;
+    d2 = dd;
+    r2 = sph_r(t) * sph_r(t);
+    if (!(d2 > r2)) return 0.0;
+    float x = r2 / d2;
+    return x / (sqrt(max(1.0 - x, 0.0)) + 1.0);
+}
+
 struct LSample { vec3 wi; vec3 li; float dist; float pdf; bool delta; };
 
 // a direction in the cone of half-angle acos(cm) round the unit axis a
@@ -1174,6 +1253,26 @@ bool light_sample(vec3 p, vec3 n, out LSample ls) {
     }
     if (lo >= P.nl) lo = P.nl - 1u;
     uint t = ltri[lo];
+    if (is_sph(t)) {                                    // a sphere: its cone
+        float d2, r2;
+        float omc = sph_omc(t, p, d2, r2);
+        if (!(omc > 0.0)) return false;
+        vec3 ax = unit3(sph_c(t) - p);
+        float d = sqrt(d2);
+        precise float cs = 1.0 - rnd() * omc;
+        precise float sn = sqrt(max(1.0 - cs * cs, 0.0));
+        vec2 sc = sincos_2pi(rnd());
+        vec3 ta, ba;
+        onb(ax, ta, ba);
+        ls.wi = local_to_world(vec3(sc.y * sn, sc.x * sn, cs), ta, ba, ax);
+        precise float b = d * cs;
+        precise float hh = r2 - (d2 - b * b);
+        ls.dist = b - sqrt(max(hh, 0.0));
+        ls.pdf = 1.0 / max(omc * TWO_PI, TINY) * lsel[t] * pc;
+        Mat ms = mat_of(t);
+        ls.li = ms.emit * ms.strength;
+        return true;
+    }
     float su = sqrt(rnd());
     float bb = rnd() * su;
     float aa = 1.0 - su;
@@ -1189,9 +1288,15 @@ bool light_sample(vec3 p, vec3 n, out LSample ls) {
     return true;
 }
 
-float light_pdf_tri(uint t, float dist, vec3 dir) {
+float light_pdf_tri(uint t, float dist, vec3 dir, vec3 o) {
     float sel = lsel[t];
     if (!(sel > 0.0)) return 0.0;
+    if (is_sph(t)) {                                    // its cone from o
+        float d2, r2;
+        float omc = sph_omc(t, o, d2, r2);
+        if (!(omc > 0.0)) return 0.0;
+        return sel / (omc * TWO_PI * float(P.nslots));
+    }
     float cl = abs(dot(tri_geo_normal(t), dir));
     if (!(cl > TINY)) return 0.0;
     return dist * dist / (tri_area(t) * cl) * sel / float(P.nslots);
@@ -1293,31 +1398,38 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
             break;
         }
         uint t = uint(ray.tri);
-        vec3 p = ray.d * ray.t + ray.o;
+        vec3 p = hit_point(ray);
         vec3 wo = -ray.d;
-        // normals
-        vec3 e1 = tv3(t, 1u), e2 = tv3(t, 2u);
-        vec3 ng = unit3(vec3(e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x));
-        float wv = 1.0 - ray.u - ray.v;
-        float nl;
-        vec3 ns = unit3(tn3(t, 0u) * wv + tn3(t, 1u) * ray.u + tn3(t, 2u) * ray.v, nl);
-        if (!(nl > 0.0)) ns = ng;
-        if (dot(ns, ng) < 0.0) ns = ng;
+        // normals (a sphere: both from its centre)
+        vec3 ng, ns;
+        if (is_sph(t)) {
+            ng = unit3(p - sph_c(t));
+            ns = ng;
+        } else {
+            vec3 e1 = tv3(t, 1u), e2 = tv3(t, 2u);
+            ng = unit3(vec3(e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x));
+            float wv = 1.0 - ray.u - ray.v;
+            float nl;
+            ns = unit3(tn3(t, 0u) * wv + tn3(t, 1u) * ray.u + tn3(t, 2u) * ray.v, nl);
+            if (!(nl > 0.0)) ns = ng;
+            if (dot(ns, ng) < 0.0) ns = ng;
+        }
         bool outside = dot(ng, wo) > 0.0;
         if (P.debug == 1u) { L = ns * 0.5 + vec3(0.5); break; }
         Mat m = mat_of(t);
 #ifdef GRAPHS
         g_vcol = false;
+        G_WP = p;
         if (tmat(t) != 0u && mwu(tmat(t), W_GRN) != 0u) {     // its graph here
             float al, mk;
             graph_shade(tmat(t), t, ray.u, ray.v, false, m, ns, al, mk);
         }
 #endif
-        if (tvc[t * 3u] != 0u && !g_vcol) m.base *= vcol_lin3(t, ray.u, ray.v);   // (a graph that
+        if (has_vcol(t) && !g_vcol) m.base *= prim_vcol(t, ray.u, ray.v);   // (a graph that
                                                                                 //  reads them: no tint)
         if (m.strength > 0.0) {                         // emission
             float wgt = 1.0;
-            if (!spec) wgt = mis(prev, light_pdf_tri(t, ray.t, ray.d));
+            if (!spec) wgt = mis(prev, light_pdf_tri(t, ray.t, ray.d, ray.o));
             add_beta_l(m.emit * (wgt * m.strength));
         }
         Ctx c = bsdf_init(m, ns, wo, outside);
@@ -1326,7 +1438,7 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
             auxo[3] = ns.x; auxo[4] = ns.y; auxo[5] = ns.z;
             auxo[6] = ray.t;
             if (film) {                 // a shadow catcher: the light sample
-                if ((tm[t] & CATCH) == 0u) ft.x = 1.0;  //  below, unshadowed
+                if (!is_catch(t)) ft.x = 1.0;           //  below, unshadowed
                 else { ft.y = 1.0; catcher = true; }    //  and shadowed
             }
         }
@@ -1372,7 +1484,7 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
             if (shadowed) {
                 if (ao) {               // occluded nearby: roughly what that
                     uint th = uint(sr.tri);     //  surface sends back (lit by
-                    vec3 nh = tri_geo_normal(th);   //  half the sky and the
+                    vec3 nh = prim_geo_normal(th, sr.d * sr.t + sr.o);  //  half the sky and the
                     if (dot(nh, ls.wi) > 0.0) nh = -nh;  //  sun, unshadowed)
                     Mat mh = mat_of(th);
                     float sh = max(dot(nh, SUN_DIR), 0.0) * (0.5 * INV_PI / SUN_PDF);

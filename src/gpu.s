@@ -806,7 +806,10 @@ gp_put:
     mov     eax, [rip+hv_n]
     shl     rax, 2
     mov     [rbx+24], rax               # tm
-    mov     [rbx+72], rax               # lsel
+    mov     eax, [rip+hv_n]             # lsel: every primitive's
+    add     eax, [rip+hv_ns]
+    shl     rax, 2
+    mov     [rbx+72], rax
     mov     eax, [rip+hv_n]
     imul    rax, rax, 12
     mov     [rbx+32], rax               # tvc
@@ -866,7 +869,9 @@ gp_put:
     add     eax, 8
     shl     rax, 2
     mov     [rbx+144], rax
-14: mov     qword ptr [rbx+152], 16     # (H6: spheres)
+14: mov     eax, [rip+hv_ns]            # spheres: their records
+    imul    rax, rax, SP_SZ
+    mov     [rbx+152], rax
     mov     rdi, rbx
     mov     rsi, r14
     mov     edx, PT_NBIND
@@ -945,6 +950,13 @@ gp_put:
     mov     rdi, [r14+120]
     add     rdi, r13
     call    gp_img_put
+    mov     rsi, [rip+hv_sp]            # the spheres
+    mov     rdi, [r14+152]
+    mov     rcx, [rbx+152]
+    cmp     dword ptr [rip+hv_ns], 0
+    jne     17f
+    xor     esi, esi
+17: call    put_bytes
     cmp     dword ptr [rip+hv_env], 0   # the HDRI and its tables
     je      15f
     mov     rdi, [r14+136]
@@ -985,6 +997,10 @@ gp_put:
     lea     rdi, [rdi+48]
     mov     ecx, 13*4
     rep     movsb
+    mov     rdi, [r14]                  # cam[13]: the spheres
+    add     rdi, r13
+    mov     eax, [rip+hv_ns]
+    mov     [rdi+48+13*4], eax
     cmp     dword ptr [rip+hv_env], 0   # cam[14] |= 32: an HDRI world
     je      16f
     mov     rdi, [r14]
