@@ -52,7 +52,8 @@ class Fake:
                    XDG_CACHE_HOME=os.path.join(self.home, 'cache'),
                    XDG_RUNTIME_DIR=self.home,       # MCP socket lands here
                    BEEMODEL_WELCOME='1' if welcome else '0')
-        self.env = env
+        env.setdefault('BEEMODEL_GPU_VIEW', 'off')     # (the CPU's viewport, as CI's;
+        self.env = env                                  #  tests/gpu.py turns it on)
         self.t0 = time.time()
         self.proc = subprocess.Popen([BIN, *args], env=env)
         self.first_frame_ms = None

@@ -20,6 +20,10 @@
 #  ray queries and acceleration structures (Vulkan 1.2, RTX) the path tracer
 #  can trace through those instead of its BVH4 (H10): each run then builds
 #  them, on the GPU, from the triangles and balls it has (when they changed).
+#  With a graphics queue it also draws the 3D viewport (v0.24, slot 3): one
+#  render pass, the triangles pulled from storage buffers by view.vert and
+#  shaded by view.frag (Solid, Material Preview), drawn by one indirect call;
+#  its colour, 1/z and object ids are copied into the slot's out bindings.
 # =============================================================================
 .intel_syntax noprefix
 .include "gpuipc.inc"
@@ -59,6 +63,50 @@
 .equ ST_CBALLOC,            40
 .equ ST_CBBEGIN,            42
 .equ ST_MEMBARRIER,         46
+.equ ST_IMAGE,              14
+.equ ST_IMAGEVIEW,          15
+.equ ST_GRAPHICS,           28
+.equ ST_VI,                 19
+.equ ST_IA,                 20
+.equ ST_VPS,                22
+.equ ST_RS,                 23
+.equ ST_MS,                 24
+.equ ST_DS,                 25
+.equ ST_CBS,                26
+.equ ST_DYN,                27
+.equ ST_FRAMEBUFFER,        37
+.equ ST_RENDERPASS,         38
+.equ ST_RPBEGIN,            43
+.equ FMT_BGRA8,             44
+.equ FMT_R32F,              100
+.equ FMT_R32U,              98
+.equ FMT_D32F,              126
+.equ STAGE_VERTEX,          1
+.equ STAGE_FRAGMENT,        16
+.equ BIND_GRAPHICS,         0
+.equ QUEUE_GRAPHICS,        1
+.equ USAGE_INDIRECT,        256
+.equ IMG_TSRC,              1
+.equ IMG_COLOR,             16
+.equ IMG_DEPTH,             32
+.equ LAYOUT_COLOR,          2
+.equ LAYOUT_DEPTH,          3
+.equ LAYOUT_TSRC,           6
+.equ PS_INDIRECT,           2
+.equ PS_VERTEX,             8
+.equ PS_FRAGMENT,           128
+.equ PS_EARLY_FRAG,         256
+.equ PS_COLOR_OUT,          1024
+.equ AC_INDIRECT,           1
+.equ AC_COLOR_WRITE,        256
+.equ AC_DEPTH_WRITE,        1024
+.equ PF_MDI,                36          # multiDrawIndirect
+.equ ST_EXTBUF,             1000072000  # host memory imported (v0.24):
+.equ ST_IMPORTHOST,         1000178000  #  VK_EXT_external_memory_host
+.equ ST_HOSTPTRPROPS,       1000178001
+.equ ST_EXTHOSTPROPS,       1000178002
+.equ HT_HOST,               0x80        #  (a host allocation)
+.equ PF_DIFI,               40          # drawIndirectFirstInstance
 .equ API_1_2,               4202496
 .equ ST_FEATS2,             1000059000
 .equ ST_PROPS2,             1000059001
@@ -118,10 +166,12 @@
 .equ PF_SZ,                 220
 .equ MAXDEV,                16
 
-.equ NSLOT,         3                   # path tracer, rasterizer, live viewport
+.equ NSLOT,         4                   # path tracer, rasterizer, live viewport,
+                                        #  the viewport drawn (GV_SLOT)
 .equ NKERN,         5                   # pt, raster, ptg, ptr, ptgr (asked for)
 .equ K_PREP,        5                   #  and asprep (the builds' inputs)
-.equ NKALL,         6
+.equ K_VIEW,        GV_KERN             #  and the viewport's (graphics)
+.equ NKALL,         7
 .equ T_VP,          20                  # an RTX run's table: positions, boxes
 .equ T_AB,          21
 .equ SL_BASE,       0                   # a slot: its shared memory, the device
@@ -148,17 +198,21 @@
 .equ SL_SCAP,       152
 .equ SL_LCAP,       160
 .equ SL_XCAP,       168
-.equ SL_SZ,         176
+.equ SL_HOST,       176                 # 1: the staging buffer is the shared
+.equ SL_STCAP,      184                 #  memory itself (imported); else its own,
+.equ SL_SZ,         192                 #  this large
 
 .equ KR_MOD,        0                   # a kernel: module, set layout, pipeline
 .equ KR_DSL,        8                   #   layout, pipeline, descriptor set
 .equ KR_PL,         16
 .equ KR_PIPE,       24
 .equ KR_SET,        32
-.equ KR_SZ,         40
+.equ KR_FRAG,       40                  # (the viewport's: its fragment module)
+.equ KR_SZ,         48
 
 .section .rodata
 s_any:          .asciz "BEEMODEL_GPU=any"
+s_nohm:         .asciz "BEEMODEL_GPU_HOSTMEM=off"
 s_fail:         .asciz "BEEMODEL_GPU_FAIL="
 s_main:         .asciz "main"
 s_app:          .asciz "beemodel-gpu"
@@ -205,6 +259,8 @@ vk_names2:      .asciz "vkGetDeviceQueue"
                 .asciz "vkResetFences"
                 .asciz "vkUnmapMemory"
                 .byte 0
+vk_names6:      .asciz "vkCmdFillBuffer"
+                .byte 0
 vk_names1b:     .asciz "vkEnumerateDeviceExtensionProperties"
                 .asciz "vkGetPhysicalDeviceFeatures2"
                 .asciz "vkGetPhysicalDeviceProperties2"
@@ -216,24 +272,48 @@ vk_names3:      .asciz "vkGetBufferDeviceAddress"
                 .asciz "vkCmdBuildAccelerationStructuresKHR"
                 .asciz "vkGetAccelerationStructureDeviceAddressKHR"
                 .byte 0
+vk_names4:      .asciz "vkCreateImage"          # (the viewport's: with a graphics
+                .asciz "vkDestroyImage"         #  queue)
+                .asciz "vkGetImageMemoryRequirements"
+                .asciz "vkBindImageMemory"
+                .asciz "vkCreateImageView"
+                .asciz "vkDestroyImageView"
+                .asciz "vkCreateRenderPass"
+                .asciz "vkCreateFramebuffer"
+                .asciz "vkDestroyFramebuffer"
+                .asciz "vkCreateGraphicsPipelines"
+                .asciz "vkCmdBeginRenderPass"
+                .asciz "vkCmdEndRenderPass"
+                .asciz "vkCmdDrawIndirect"
+                .asciz "vkCmdSetViewport"
+                .asciz "vkCmdSetScissor"
+                .asciz "vkCmdCopyImageToBuffer"
+                .byte 0
+vk_names5:      .asciz "vkGetMemoryHostPointerPropertiesEXT"  # (host memory)
+                .byte 0
 s_ext_as:       .asciz "VK_KHR_acceleration_structure"
 s_ext_rq:       .asciz "VK_KHR_ray_query"
 s_ext_dho:      .asciz "VK_KHR_deferred_host_operations"
+s_ext_hm:       .asciz "VK_EXT_external_memory_host"
 .align 8
-k_nbind:        .long 20, 8, 20, 21, 21, 5  # bindings per kernel (2: the path
-                                        #  tracer with shader graphs, made when
-                                        #  asked; 3, 4: with ray queries, 20 the
-                                        #  structure)
-k_ntab:         .long 20, 8, 20, 22, 22, 0  # entries in their runs' tables
+k_nbind:        .long 20, 8, 20, 21, 21, 5, GV_NB  # bindings per kernel (2: the
+                                        #  path tracer with shader graphs, made
+                                        #  when asked; 3, 4: with ray queries,
+                                        #  20 the structure; 6 the viewport's)
+k_ntab:         .long 20, 8, 20, 22, 22, 0, GV_NB  # entries in their runs' tables
 k_code:         .quad spv_pt, spv_pt_end, spv_raster, spv_raster_end, spv_ptg, spv_ptg_end
                 .quad spv_ptr, spv_ptr_end, spv_ptgr, spv_ptgr_end, spv_asprep, spv_asprep_end
+                .quad spv_viewv, spv_viewv_end
+gv_dyn:         .long 0, 1                  # dynamic: the viewport, the scissor
+gv_fmts:        .long FMT_BGRA8, FMT_R32F, FMT_R32U, FMT_D32F  # the attachments
+gv_outs:        .long GV_COL, GV_INVZ, GV_ID    # (copied into these bindings)
 ext_names:      .quad s_ext_as, s_ext_rq, s_ext_dho
 prep_tab:       .long 0, 1, 19, T_VP, T_AB  # asprep's bindings: table entries
 id34:           .float 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0
 
 .section .bss
 .align 8
-vkf:            .skip 8*64              # the function pointers, in name order
+vkf:            .skip 8*80              # the function pointers, in name order
 .equ F_CREATEINSTANCE,  0
 .equ F_ENUMPD,          8
 .equ F_PDPROPS,         16
@@ -281,6 +361,24 @@ vkf:            .skip 8*64              # the function pointers, in name order
 .equ F_ASSIZES,         352
 .equ F_CMDBUILDAS,      360
 .equ F_ASADDR,          368
+.equ F_CREATEIMAGE,     376
+.equ F_DESTROYIMAGE,    384
+.equ F_IMGREQS,         392
+.equ F_BINDIMGMEM,      400
+.equ F_CREATEVIEW,      408
+.equ F_DESTROYVIEW,     416
+.equ F_CREATERP,        424
+.equ F_CREATEFB,        432
+.equ F_DESTROYFB,       440
+.equ F_CREATEGFX,       448
+.equ F_CMDBEGINRP,      456
+.equ F_CMDENDRP,        464
+.equ F_CMDDRAWIND,      472
+.equ F_CMDVIEWPORT,     480
+.equ F_CMDSCISSOR,      488
+.equ F_CMDCOPYIMG,      496
+.equ F_HOSTPROPS,       504
+.equ F_CMDFILL,         512
 rtx:            .skip 4                 # ray queries on (H10)
 alloc_da:       .skip 4                 # make_buffer: with a device address
 extprops:       .skip 260*MAXEXT
@@ -337,6 +435,24 @@ table:          .skip GB_SZ*GPU_MAXBIND
 handle:         .skip 8
 count:          .skip 4
 prio:           .skip 4
+.align 16                               # (v0.24: kept after the rest, whose
+                                        #  alignment the driver relies on)
+gfx:            .skip 4                 # the viewport kernel can run (v0.24)
+hostmem:        .skip 4                 # shared memory imported as staging
+ext_on:         .skip 8*4               # the device's extensions
+hm_props:       .skip 24
+.align 16
+hm_p2:          .skip 840               # (VkPhysicalDeviceProperties2)
+qgfx:           .skip 4                 # the queue family has graphics
+gv_rp:          .skip 8                 # its render pass, made with the kernel
+gv_w:           .skip 4                 # its images' size (0: none yet)
+gv_h:           .skip 4
+gv_img:         .skip 8*4               # colour, 1/z, ids, depth: images,
+gv_mem:         .skip 8*4               #  their memory, views
+gv_view:        .skip 8*4
+gv_fb:          .skip 8
+gv_ci:          .skip 1024              # create-info scratch (the pipeline's)
+gv_clear:       .skip 64                # its clear values: zeros
 
 .text
 .globl main
@@ -358,9 +474,16 @@ main:
     mov     dword ptr [rip+reply+GM_MAGIC], GPU_MAGIC
     test    ebx, ebx
     jnz     1f
-    mov     eax, [rip+rtx]              # the type; bit 8: RTX
-    shl     eax, 8
+    mov     eax, [rip+rtx]              # the type; bit 8: RTX, bit 9: the
+    shl     eax, 8                      #  viewport kernel
     or      eax, [rip+pdprops+PD_TYPE]
+    cmp     dword ptr [rip+gfx], 0
+    je      2f
+    or      eax, GH_GFX
+2:  cmp     dword ptr [rip+hostmem], 0
+    je      3f
+    or      eax, GH_HOSTMEM
+3:
     mov     [rip+reply+GM_TYPE], eax
     lea     rsi, [rip+pdprops+PD_NAME]
     lea     rdi, [rip+reply+GM_NAME]
@@ -385,10 +508,15 @@ main:
     mov     ebx, 2                      #  graphs' too, RTX's: the first
 1:  cmp     ebx, NKALL                  #  render finds it ready); a failure
     jae     3f                          #  is not fatal here
-    cmp     ebx, 3
+    cmp     ebx, K_VIEW                 # (the viewport's: with graphics)
+    jne     12f
+    cmp     dword ptr [rip+gfx], 0
+    je      21f
+    jmp     2f
+12: cmp     ebx, 3
     jb      11f
-    cmp     dword ptr [rip+rtx], 0
-    je      3f
+    cmp     dword ptr [rip+rtx], 0      # (RTX's: with it)
+    je      21f
     jmp     2f
 11: cmp     dword ptr [rip+rtx], 0      # (ptg: not when the renders take
     je      2f                          #  RTX; made when first asked)
@@ -438,11 +566,15 @@ msg_clear:
 
 # find_any -> eax = 1 if BEEMODEL_GPU=any is in the environment
 find_any:
+    lea     rdi, [rip+s_any]
+# find_exact(rdi="NAME=value") -> eax = 1 when the environment has it
+find_exact:
+    mov     r8, rdi
     mov     rdx, [rip+envp]
 1:  mov     rsi, [rdx]
     test    rsi, rsi
     jz      8f
-    lea     rdi, [rip+s_any]
+    mov     rdi, r8
 2:  mov     al, [rdi]
     test    al, al
     jz      3f
@@ -672,6 +804,7 @@ vk_setup:
     cmp     eax, -1
     je      21f
     mov     [rip+qfam], eax
+    mov     [rip+qgfx], edx
     mov     r12d, r13d
     lea     rax, [rip+pdlist]
     mov     rax, [rax+rbx*8]
@@ -702,6 +835,21 @@ vk_setup:
     xor     eax, eax
     rep     stosb
     mov     dword ptr [rip+feats_on+PF_INT64], 1
+    mov     dword ptr [rip+gfx], 0      # the viewport: graphics, one indirect
+    cmp     dword ptr [rip+qgfx], 0     #  call of many draws, each its own
+    je      40f                         #  first instance (its record)
+    mov     rdi, [rip+phys]
+    lea     rsi, [rip+pdfeats]
+    call    [rip+vkf+F_PDFEATS]
+    cmp     dword ptr [rip+pdfeats+PF_MDI], 0
+    je      40f
+    cmp     dword ptr [rip+pdfeats+PF_DIFI], 0
+    je      40f
+    mov     dword ptr [rip+feats_on+PF_MDI], 1
+    mov     dword ptr [rip+feats_on+PF_DIFI], 1
+    mov     dword ptr [rip+gfx], 1
+40:
+    call    hm_probe                    # shared memory as staging?
 4:  lea     rdi, [rip+ci]               # VkDeviceCreateInfo
     call    zero256
     mov     dword ptr [rip+ci], ST_DEVICE
@@ -710,15 +858,28 @@ vk_setup:
     mov     [rip+ci+24], rax
     lea     rax, [rip+feats_on]
     mov     [rip+ci+64], rax
+    lea     rax, [rip+ext_on]
+    mov     [rip+ci+56], rax
     cmp     dword ptr [rip+rtx], 0      # RTX: its extensions and features
     je      41f
     call    rtx_enable
     lea     rax, [rip+f_bda]
     mov     [rip+ci+8], rax
+    mov     rax, [rip+ext_names]
+    mov     [rip+ext_on], rax
+    mov     rax, [rip+ext_names+8]
+    mov     [rip+ext_on+8], rax
+    mov     rax, [rip+ext_names+16]
+    mov     [rip+ext_on+16], rax
     mov     dword ptr [rip+ci+48], 3
-    lea     rax, [rip+ext_names]
-    mov     [rip+ci+56], rax
-41: mov     rdi, [rip+phys]
+41: cmp     dword ptr [rip+hostmem], 0  # host memory: its extension
+    je      45f
+    mov     eax, [rip+ci+48]
+    lea     rcx, [rip+s_ext_hm]
+    lea     rdx, [rip+ext_on]
+    mov     [rdx+rax*8], rcx
+    inc     dword ptr [rip+ci+48]
+45: mov     rdi, [rip+phys]
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [rip+device]
@@ -726,12 +887,23 @@ vk_setup:
     test    eax, eax
     jz      42f
     cmp     dword ptr [rip+rtx], 0      # (without them, then)
-    je      .Lvs_nodevice
+    je      46f
     mov     dword ptr [rip+rtx], 0
+    jmp     4b
+46: cmp     dword ptr [rip+hostmem], 0
+    je      .Lvs_nodevice
+    mov     dword ptr [rip+hostmem], 0
     jmp     4b
 42:
     lea     rdi, [rip+vk_names2]
     lea     rsi, [rip+vkf+F_GETQUEUE]
+    mov     rdx, [rip+vkf+F_GETDEVPROC]
+    mov     rcx, [rip+device]
+    call    load
+    test    eax, eax
+    jz      .Lvs_nodevice
+    lea     rdi, [rip+vk_names6]
+    lea     rsi, [rip+vkf+F_CMDFILL]
     mov     rdx, [rip+vkf+F_GETDEVPROC]
     mov     rcx, [rip+device]
     call    load
@@ -752,7 +924,27 @@ vk_setup:
     test    eax, eax
     jnz     43f
     mov     dword ptr [rip+rtx], 0
-43:
+43: cmp     dword ptr [rip+hostmem], 0  # host memory's function
+    je      47f
+    lea     rdi, [rip+vk_names5]
+    lea     rsi, [rip+vkf+F_HOSTPROPS]
+    mov     rdx, [rip+vkf+F_GETDEVPROC]
+    mov     rcx, [rip+device]
+    call    load
+    test    eax, eax
+    jnz     47f
+    mov     dword ptr [rip+hostmem], 0
+47: cmp     dword ptr [rip+gfx], 0      # the viewport's functions
+    je      44f
+    lea     rdi, [rip+vk_names4]
+    lea     rsi, [rip+vkf+F_CREATEIMAGE]
+    mov     rdx, [rip+vkf+F_GETDEVPROC]
+    mov     rcx, [rip+device]
+    call    load
+    test    eax, eax
+    jnz     44f
+    mov     dword ptr [rip+gfx], 0
+44:
     # command pool, buffer, fence
     lea     rdi, [rip+ci]
     call    zero256
@@ -794,7 +986,7 @@ vk_setup:
     lea     rdi, [rip+ci]               # a pool for every kernel's set
     call    zero256
     mov     dword ptr [rip+ci2], DESC_STORAGE
-    mov     dword ptr [rip+ci2+4], 160
+    mov     dword ptr [rip+ci2+4], 176
     mov     dword ptr [rip+ci2+8], DESC_AS
     mov     dword ptr [rip+ci2+12], 4
     mov     dword ptr [rip+ci], ST_DPOOL
@@ -848,7 +1040,8 @@ zero256:
     rep     stosq
     ret
 
-# find_queue(rdi=physical device) -> eax = a queue family with compute, -1
+# find_queue(rdi=physical device) -> eax = a queue family with compute, -1;
+#   edx = 1 when it has graphics too (one with both is taken first)
 find_queue:
     push    rbx
     push    r12
@@ -859,27 +1052,38 @@ find_queue:
     lea     rsi, [rip+handle]
     lea     rdx, [rip+qprops]
     call    [rip+vkf+F_PDQUEUES]
-    xor     ecx, ecx
+    mov     r12d, QUEUE_COMPUTE|QUEUE_GRAPHICS
+0:  xor     ecx, ecx
 1:  cmp     ecx, [rip+handle]
     jae     8f
     imul    eax, ecx, 24
     lea     rdx, [rip+qprops]
-    test    dword ptr [rdx+rax], QUEUE_COMPUTE
-    jz      2f
+    mov     r8d, [rdx+rax]
+    and     r8d, r12d
+    cmp     r8d, r12d
+    jne     2f
     cmp     dword ptr [rdx+rax+4], 0
     je      2f
     mov     eax, ecx
+    xor     edx, edx
+    test    r12d, QUEUE_GRAPHICS
+    setnz   dl
     jmp     9f
 2:  inc     ecx
     jmp     1b
-8:  mov     eax, -1
+8:  cmp     r12d, QUEUE_COMPUTE         # (then compute alone)
+    mov     r12d, QUEUE_COMPUTE
+    jne     0b
+    mov     eax, -1
+    xor     edx, edx
 9:  add     rsp, 8
     pop     r12
     pop     rbx
     ret
 
 # make_kernel(edi=kernel) -> eax = 1: its module, set layout (n storage
-#   buffers), pipeline layout, compute pipeline and descriptor set
+#   buffers), pipeline layout, compute pipeline and descriptor set (K_VIEW: two
+#   modules, the render pass, a graphics pipeline: gv_pipeline)
 make_kernel:
     push    rbx
     push    r12
@@ -907,7 +1111,24 @@ make_kernel:
     call    [rip+vkf+F_CREATESHADER]
     test    eax, eax
     jnz     8f
-    lea     rax, [rip+k_nbind]          # the set layout: bindings 0 .. n-1
+    cmp     ebx, K_VIEW                 # (the viewport: its fragment shader)
+    jne     10f
+    lea     rdi, [rip+ci]
+    call    zero256
+    mov     dword ptr [rip+ci], ST_SHADER
+    lea     rcx, [rip+spv_viewf]
+    lea     rdx, [rip+spv_viewf_end]
+    sub     rdx, rcx
+    mov     [rip+ci+24], rdx
+    mov     [rip+ci+32], rcx
+    mov     rdi, [rip+device]
+    lea     rsi, [rip+ci]
+    xor     edx, edx
+    lea     rcx, [r12+KR_FRAG]
+    call    [rip+vkf+F_CREATESHADER]
+    test    eax, eax
+    jnz     8f
+10: lea     rax, [rip+k_nbind]          # the set layout: bindings 0 .. n-1
     mov     r13d, [rax+rbx*4]
     xor     ecx, ecx
 1:  cmp     ecx, r13d
@@ -925,7 +1146,10 @@ make_kernel:
     mov     dword ptr [rdx+rax+4], DESC_AS
 11: mov     dword ptr [rdx+rax+8], 1
     mov     dword ptr [rdx+rax+12], STAGE_COMPUTE
-    mov     qword ptr [rdx+rax+16], 0
+    cmp     ebx, K_VIEW
+    jne     12f
+    mov     dword ptr [rdx+rax+12], STAGE_VERTEX|STAGE_FRAGMENT
+12: mov     qword ptr [rdx+rax+16], 0
     inc     ecx
     jmp     1b
 2:  lea     rdi, [rip+ci]
@@ -954,7 +1178,14 @@ make_kernel:
     call    [rip+vkf+F_CREATEPL]
     test    eax, eax
     jnz     8f
-    lea     rdi, [rip+ci]               # the pipeline (stage at +24)
+    cmp     ebx, K_VIEW                 # the viewport's: a graphics pipeline
+    jne     13f
+    mov     rdi, r12
+    call    gv_pipeline
+    test    eax, eax
+    jz      8f
+    jmp     14f
+13: lea     rdi, [rip+ci]               # the pipeline (stage at +24)
     call    zero256
     mov     dword ptr [rip+ci], ST_COMPUTE
     mov     dword ptr [rip+ci+24], ST_STAGE
@@ -975,7 +1206,7 @@ make_kernel:
     call    [rip+vkf+F_CREATECOMPUTE]
     test    eax, eax
     jnz     8f
-    lea     rdi, [rip+ci]               # its descriptor set
+14: lea     rdi, [rip+ci]               # its descriptor set
     call    zero256
     mov     dword ptr [rip+ci], ST_DSALLOC
     mov     rax, [rip+dpool]
@@ -1115,7 +1346,22 @@ do_map:
     add     rbx, rax
     cmp     qword ptr [rip+handle], -1
     je      8f
-    mov     rdi, [rbx+SL_BASE]          # the old mapping goes
+    cmp     dword ptr [rbx+SL_HOST], 0  # an imported staging buffer goes with
+    je      0f                          #  its mapping (before it is unmapped)
+    mov     rdi, [rip+device]
+    mov     rsi, [rbx+SL_SBUF]
+    xor     edx, edx
+    call    [rip+vkf+F_DESTROYBUFFER]
+    mov     rdi, [rip+device]
+    mov     rsi, [rbx+SL_SMEM]
+    xor     edx, edx
+    call    [rip+vkf+F_FREEMEM]
+    xor     eax, eax
+    mov     [rbx+SL_SBUF], rax
+    mov     [rbx+SL_SMEM], rax
+    mov     [rbx+SL_SPTR], rax
+    mov     [rbx+SL_HOST], eax
+0:  mov     rdi, [rbx+SL_BASE]          # the old mapping goes
     test    rdi, rdi
     jz      1f
     mov     rsi, [rbx+SL_SIZE]
@@ -1139,10 +1385,10 @@ do_map:
     ja      8f
     mov     [rbx+SL_BASE], r13
     mov     [rbx+SL_SIZE], r12
-    cmp     r12, [rbx+SL_CAP]           # the buffers: grown (never shrunk)
-    jbe     7f
-    mov     rdi, [rbx+SL_DBUF]          # (the old ones are dropped: no work
-    test    rdi, rdi                    #  is in flight between messages)
+    cmp     r12, [rbx+SL_CAP]           # the device's buffer: grown (never
+    jbe     5f                          #  shrunk; the old one dropped: no
+    mov     rdi, [rbx+SL_DBUF]          #  work is in flight between messages)
+    test    rdi, rdi
     jz      2f
     mov     rdi, [rip+device]
     mov     rsi, [rbx+SL_DBUF]
@@ -1152,18 +1398,10 @@ do_map:
     mov     rsi, [rbx+SL_DMEM]
     xor     edx, edx
     call    [rip+vkf+F_FREEMEM]
-    mov     rdi, [rip+device]
-    mov     rsi, [rbx+SL_SBUF]
-    xor     edx, edx
-    call    [rip+vkf+F_DESTROYBUFFER]
-    mov     rdi, [rip+device]           # (freeing unmaps it)
-    mov     rsi, [rbx+SL_SMEM]
-    xor     edx, edx
-    call    [rip+vkf+F_FREEMEM]
 2:  mov     dword ptr [rbx+SL_ASOK], 0  # (the structures' inputs move)
-    mov     rdi, r12                    # device-local storage (RTX: the
-    mov     esi, USAGE_STORAGE|USAGE_TSRC|USAGE_TDST  #  builds' input too)
-    mov     eax, [rip+rtx]
+    mov     rdi, r12                    # device-local storage, the draws'
+    mov     esi, USAGE_STORAGE|USAGE_TSRC|USAGE_TDST|USAGE_INDIRECT  # commands
+    mov     eax, [rip+rtx]              #  (RTX: the builds' input too)
     mov     [rip+alloc_da], eax
     test    eax, eax
     jz      21f
@@ -1176,9 +1414,32 @@ do_map:
     mov     dword ptr [rip+alloc_da], 0
     test    eax, eax
     jz      8f
-    mov     rdi, r12                    # host-visible staging: cached when
-    mov     esi, USAGE_TSRC|USAGE_TDST  #  it can be (the outputs are read
-    mov     edx, MEM_HOST_VISIBLE|MEM_HOST_COHERENT|MEM_HOST_CACHED  #  back)
+    mov     [rbx+SL_CAP], r12
+    mov     rdi, [rbx+SL_DBUF]          # zeros: what a run reads of it before
+    call    zero_buffer                 #  anything is sent is the same each
+    test    eax, eax                    #  time (not the last allocation's)
+    jz      8f
+5:  cmp     dword ptr [rip+hostmem], 0  # staging: the mapping itself (nothing
+    je      6f                          #  copied through it then), else one
+    mov     rdi, rbx                    #  of our own
+    call    hm_import
+    test    eax, eax
+    jnz     7f
+6:  cmp     r12, [rbx+SL_STCAP]
+    jbe     7f
+    mov     rsi, [rbx+SL_SBUF]
+    test    rsi, rsi
+    jz      61f
+    mov     rdi, [rip+device]
+    xor     edx, edx
+    call    [rip+vkf+F_DESTROYBUFFER]
+    mov     rdi, [rip+device]           # (freeing unmaps it)
+    mov     rsi, [rbx+SL_SMEM]
+    xor     edx, edx
+    call    [rip+vkf+F_FREEMEM]
+61: mov     rdi, r12                    # host-visible: cached when it can be
+    mov     esi, USAGE_TSRC|USAGE_TDST  #  (the outputs are read back)
+    mov     edx, MEM_HOST_VISIBLE|MEM_HOST_COHERENT|MEM_HOST_CACHED
     mov     ecx, MEM_HOST_VISIBLE|MEM_HOST_COHERENT
     lea     r8, [rbx+SL_SBUF]
     lea     r9, [rbx+SL_SMEM]
@@ -1194,11 +1455,240 @@ do_map:
     call    [rip+vkf+F_MAPMEM]
     test    eax, eax
     jnz     8f
-    mov     [rbx+SL_CAP], r12
+    mov     [rbx+SL_STCAP], r12
 7:  xor     eax, eax
     jmp     9f
 8:  mov     eax, 1
 9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# zero_buffer(rdi=buffer) -> eax = 1: filled with zeros (on the queue, waited
+#   for: nothing else is in flight between messages)
+zero_buffer:
+    push    rbx
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     rdi, [rip+cbuf]
+    xor     esi, esi
+    call    [rip+vkf+F_RESETCB]
+    lea     rdi, [rip+ci]
+    call    zero256
+    mov     dword ptr [rip+ci], ST_CBBEGIN
+    mov     dword ptr [rip+ci+16], 1
+    mov     rdi, [rip+cbuf]
+    lea     rsi, [rip+ci]
+    call    [rip+vkf+F_BEGINCB]
+    test    eax, eax
+    jnz     8f
+    mov     rdi, [rip+cbuf]
+    mov     rsi, rbx
+    xor     edx, edx
+    mov     rcx, -1                     # VK_WHOLE_SIZE
+    xor     r8d, r8d
+    call    [rip+vkf+F_CMDFILL]
+    mov     rdi, [rip+cbuf]
+    call    [rip+vkf+F_ENDCB]
+    test    eax, eax
+    jnz     8f
+    lea     rdi, [rip+ci]
+    call    zero256
+    mov     dword ptr [rip+ci], ST_SUBMIT
+    mov     dword ptr [rip+ci+40], 1
+    lea     rax, [rip+cbuf]
+    mov     [rip+ci+48], rax
+    mov     rdi, [rip+queue]
+    mov     esi, 1
+    lea     rdx, [rip+ci]
+    mov     rcx, [rip+fence]
+    call    [rip+vkf+F_SUBMIT]
+    test    eax, eax
+    jnz     8f
+    mov     rdi, [rip+device]
+    mov     esi, 1
+    lea     rdx, [rip+fence]
+    mov     ecx, 1
+    mov     r8, 60000000000
+    call    [rip+vkf+F_WAITFENCES]
+    test    eax, eax
+    jnz     8f
+    mov     rdi, [rip+device]
+    mov     esi, 1
+    lea     rdx, [rip+fence]
+    call    [rip+vkf+F_RESETFENCES]
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# hm_probe - hostmem = 1 when the device can import host memory (the shared
+#   memory then serves as the staging buffer: no copies through it) and its
+#   pointers need no more than page alignment
+hm_probe:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     dword ptr [rip+hostmem], 0
+    lea     rdi, [rip+s_nohm]           # (BEEMODEL_GPU_HOSTMEM=off: copies)
+    call    find_exact
+    test    eax, eax
+    jnz     9f
+    cmp     qword ptr [rip+vkf+F_ENUMDEVEXT], 0
+    jne     1f
+    lea     rdi, [rip+vk_names1b]
+    lea     rsi, [rip+vkf+F_ENUMDEVEXT]
+    lea     rdx, [rip+vk_gipa]
+    mov     rcx, [rip+instance]
+    call    load
+    test    eax, eax
+    jz      9f
+1:  mov     dword ptr [rip+count], MAXEXT
+    mov     rdi, [rip+phys]
+    xor     esi, esi
+    lea     rdx, [rip+count]
+    lea     rcx, [rip+extprops]
+    call    [rip+vkf+F_ENUMDEVEXT]
+    test    eax, eax
+    js      9f
+    xor     ebx, ebx
+2:  cmp     ebx, [rip+count]
+    jae     9f
+    imul    edi, ebx, 260
+    lea     rax, [rip+extprops]
+    add     rdi, rax
+    lea     rsi, [rip+s_ext_hm]
+    call    streq
+    test    eax, eax
+    jnz     3f
+    inc     ebx
+    jmp     2b
+3:  lea     rdi, [rip+hm_p2]            # its alignment (its own query: p2
+    xor     eax, eax                    #  and p_as keep RTX's)
+    mov     ecx, 840/8
+    rep     stosq
+    mov     dword ptr [rip+hm_p2], ST_PROPS2
+    lea     rax, [rip+hm_props]
+    mov     [rip+hm_p2+8], rax
+    mov     dword ptr [rip+hm_props], ST_EXTHOSTPROPS
+    mov     qword ptr [rip+hm_props+8], 0
+    mov     qword ptr [rip+hm_props+16], -1
+    mov     rdi, [rip+phys]
+    lea     rsi, [rip+hm_p2]
+    call    [rip+vkf+F_PDPROPS2]
+    cmp     qword ptr [rip+hm_props+16], 4096
+    ja      9f
+    mov     dword ptr [rip+hostmem], 1
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# hm_import(rdi=slot) -> eax = 1: a buffer over its shared memory (imported:
+#   SL_SBUF, SL_SMEM; SL_SPTR its own base; SL_HOST)
+hm_import:
+    push    rbx
+    push    r12
+    sub     rsp, 104
+    mov     rbx, rdi
+    lea     rdi, [rsp]                  # VkMemoryHostPointerPropertiesEXT
+    xor     eax, eax
+    mov     ecx, 13
+    rep     stosq
+    mov     dword ptr [rsp], ST_HOSTPTRPROPS
+    mov     rdi, [rip+device]
+    mov     esi, HT_HOST
+    mov     rdx, [rbx+SL_BASE]
+    lea     rcx, [rsp]
+    call    [rip+vkf+F_HOSTPROPS]
+    test    eax, eax
+    jnz     8f
+    mov     r12d, [rsp+16]              # the memory types it can be
+    mov     dword ptr [rsp+24], ST_EXTBUF   # VkExternalMemoryBufferCreateInfo
+    mov     qword ptr [rsp+32], 0
+    mov     dword ptr [rsp+40], HT_HOST
+    lea     rdi, [rip+ci]
+    call    zero256
+    mov     dword ptr [rip+ci], ST_BUFFER
+    lea     rax, [rsp+24]
+    mov     [rip+ci+8], rax
+    mov     rax, [rbx+SL_SIZE]
+    mov     [rip+ci+24], rax
+    mov     dword ptr [rip+ci+32], USAGE_TSRC|USAGE_TDST
+    mov     rdi, [rip+device]
+    lea     rsi, [rip+ci]
+    xor     edx, edx
+    lea     rcx, [rbx+SL_SBUF]
+    call    [rip+vkf+F_CREATEBUFFER]
+    test    eax, eax
+    jnz     8f
+    mov     rdi, [rip+device]           # requirements: size, alignment, bits
+    mov     rsi, [rbx+SL_SBUF]
+    lea     rdx, [rsp+48]
+    call    [rip+vkf+F_BUFREQS]
+    mov     rax, [rsp+48]
+    cmp     rax, [rbx+SL_SIZE]
+    ja      7f
+    and     r12d, [rsp+64]
+    mov     edi, r12d                   # cached when it can be, coherent
+    mov     esi, MEM_HOST_VISIBLE|MEM_HOST_COHERENT|MEM_HOST_CACHED
+    call    mem_type
+    cmp     eax, -1
+    jne     1f
+    mov     edi, r12d
+    mov     esi, MEM_HOST_VISIBLE|MEM_HOST_COHERENT
+    call    mem_type
+    cmp     eax, -1
+    je      7f
+1:  mov     dword ptr [rsp+72], ST_IMPORTHOST   # VkImportMemoryHostPointerInfoEXT
+    mov     qword ptr [rsp+80], 0
+    mov     dword ptr [rsp+88], HT_HOST
+    mov     rcx, [rbx+SL_BASE]
+    mov     [rsp+96], rcx
+    push    rax
+    lea     rdi, [rip+ci]
+    call    zero256
+    pop     rax
+    mov     dword ptr [rip+ci], ST_MEMALLOC
+    lea     rcx, [rsp+72]
+    mov     [rip+ci+8], rcx
+    mov     rcx, [rbx+SL_SIZE]
+    mov     [rip+ci+16], rcx
+    mov     [rip+ci+24], eax
+    mov     rdi, [rip+device]
+    lea     rsi, [rip+ci]
+    xor     edx, edx
+    lea     rcx, [rbx+SL_SMEM]
+    call    [rip+vkf+F_ALLOCMEM]
+    test    eax, eax
+    jnz     7f
+    mov     rdi, [rip+device]
+    mov     rsi, [rbx+SL_SBUF]
+    mov     rdx, [rbx+SL_SMEM]
+    xor     ecx, ecx
+    call    [rip+vkf+F_BINDBUFMEM]
+    test    eax, eax
+    jnz     6f
+    mov     rax, [rbx+SL_BASE]
+    mov     [rbx+SL_SPTR], rax
+    mov     dword ptr [rbx+SL_HOST], 1
+    mov     qword ptr [rbx+SL_STCAP], 0 # (its own staging, if any, is made
+    mov     eax, 1                      #  again when needed)
+    jmp     9f
+6:  mov     rdi, [rip+device]
+    mov     rsi, [rbx+SL_SMEM]
+    xor     edx, edx
+    call    [rip+vkf+F_FREEMEM]
+7:  mov     rdi, [rip+device]
+    mov     rsi, [rbx+SL_SBUF]
+    xor     edx, edx
+    call    [rip+vkf+F_DESTROYBUFFER]
+8:  xor     eax, eax
+    mov     [rbx+SL_SBUF], rax
+    mov     [rbx+SL_SMEM], rax
+9:  add     rsp, 104
     pop     r12
     pop     rbx
     ret
@@ -1227,7 +1717,14 @@ do_run:
     test    eax, eax
     jz      1f
     dec     eax
-    cmp     eax, NKERN
+    cmp     eax, K_VIEW                 # (the viewport's: its slot, graphics)
+    jne     10f
+    cmp     dword ptr [rip+gfx], 0
+    je      .Lr_fail
+    cmp     r15d, GV_SLOT
+    jne     .Lr_fail
+    jmp     11f
+10: cmp     eax, NKERN
     jae     .Lr_fail
     cmp     eax, 3                      # (RTX's: only with it)
     jb      11f
@@ -1253,6 +1750,8 @@ do_run:
     jne     .Lr_fail
     mov     [rsp+24], r13d              # storage descriptors: the table's
     mov     dword ptr [rsp+20], 0       #  (RTX: 20, then the structure)
+    cmp     r15d, K_VIEW
+    je      12f
     cmp     r15d, 3
     jb      12f
     mov     dword ptr [rsp+24], 20
@@ -1283,7 +1782,33 @@ do_run:
     ja      .Lr_fail
     inc     ecx
     jmp     1b
-2:  # inputs: shared memory -> staging; descriptors
+2:  cmp     r15d, K_VIEW                # the viewport: its images at the size,
+    jne     21f                         #  which its out bindings must hold
+    mov     eax, [rip+msg+GM_GX]
+    mov     ecx, [rip+msg+GM_GY]
+    test    eax, eax
+    jz      .Lr_fail
+    test    ecx, ecx
+    jz      .Lr_fail
+    cmp     eax, 16384
+    ja      .Lr_fail
+    cmp     ecx, 16384
+    ja      .Lr_fail
+    imul    rax, rcx
+    shl     rax, 2
+    lea     rdx, [rip+table]
+    cmp     rax, [rdx+GV_COL*GB_SZ+GB_BYTES]
+    ja      .Lr_fail
+    cmp     rax, [rdx+GV_INVZ*GB_SZ+GB_BYTES]
+    ja      .Lr_fail
+    cmp     rax, [rdx+GV_ID*GB_SZ+GB_BYTES]
+    ja      .Lr_fail
+    mov     edi, [rip+msg+GM_GX]
+    mov     esi, [rip+msg+GM_GY]
+    call    gv_images
+    test    eax, eax
+    jz      .Lr_fail
+21: # inputs: shared memory -> staging; descriptors
     xor     r14d, r14d                  # regions to copy
     xor     ebp, ebp                    # binding
 3:  cmp     ebp, r13d
@@ -1419,8 +1944,13 @@ do_run:
     je      51f
     mov     rdi, rbx
     call    as_record
-51:
-    mov     rdi, [rip+cbuf]
+51: cmp     r15d, K_VIEW                # the viewport: drawn, its images into
+    jne     52f                         #  their bindings
+    mov     rdi, rbx
+    mov     rsi, r12
+    call    gv_record
+    jmp     53f
+52: mov     rdi, [rip+cbuf]
     mov     esi, BIND_COMPUTE
     mov     rdx, [r12+KR_PIPE]
     call    [rip+vkf+F_CMDBINDPIPE]
@@ -1445,8 +1975,10 @@ do_run:
     mov     edx, AC_SHADER_WRITE
     mov     ecx, AC_TRANSFER_READ
     call    barrier
-    xor     r14d, r14d                  # outputs: device -> staging
-    xor     ebp, ebp
+53: xor     r14d, r14d                  # outputs: device -> staging (the
+    xor     ebp, ebp                    #  viewport's are there already)
+    cmp     r15d, K_VIEW
+    je      7f
 6:  cmp     ebp, r13d
     jae     7f
     imul    eax, ebp, GB_SZ
@@ -1506,7 +2038,9 @@ do_run:
     mov     esi, 1
     lea     rdx, [rip+fence]
     call    [rip+vkf+F_RESETFENCES]
-    xor     ebp, ebp                    # staging -> shared memory
+    xor     ebp, ebp                    # staging -> shared memory (imported:
+    cmp     dword ptr [rbx+SL_HOST], 0  #  there already)
+    jne     9f
 8:  cmp     ebp, r13d
     jae     9f
     imul    eax, ebp, GB_SZ
@@ -1541,6 +2075,8 @@ do_run:
 # up_range(rax=slot offset, rcx=bytes) - in do_run (rbx the slot, r14d the
 #   regions so far): shared memory -> staging, and a VkBufferCopy for it
 up_range:
+    cmp     dword ptr [rbx+SL_HOST], 0  # (imported: the staging is the memory)
+    jne     1f
     mov     rsi, [rbx+SL_BASE]
     add     rsi, rax
     mov     rdi, [rbx+SL_SPTR]
@@ -1548,6 +2084,7 @@ up_range:
     push    rcx
     rep     movsb
     pop     rcx
+1:
     imul    edi, r14d, 24
     lea     rsi, [rip+regions]
     mov     [rsi+rdi], rax
@@ -2256,6 +2793,455 @@ as_build:
     mov     ecx, AC_AS_READ|AC_AS_WRITE
     call    barrier
     add     rsp, 8
+    ret
+
+# =============================================================================
+#  The viewport (v0.24): a render pass drawn into colour, 1/z, object id and
+#  depth images, which are then copied into the slot's out bindings
+# =============================================================================
+# gv_pipeline(rdi=kernel record) -> eax = 1: the render pass (once) and the
+#   graphics pipeline (no vertex input: view.vert pulls the corners; reversed
+#   depth, GREATER; the viewport and scissor dynamic)
+gv_pipeline:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    cmp     qword ptr [rip+gv_rp], 0
+    jne     5f
+    lea     r12, [rip+gv_ci]            # the render pass
+    mov     rdi, r12
+    xor     eax, eax
+    mov     ecx, 128
+    rep     stosq
+    xor     ecx, ecx                    # attachments (36 bytes): cleared,
+1:  imul    eax, ecx, 36                #  kept (depth: not), then read by
+    lea     rdx, [r12+rax]              #  the copies
+    lea     rax, [rip+gv_fmts]
+    mov     eax, [rax+rcx*4]
+    mov     [rdx+4], eax
+    mov     dword ptr [rdx+8], 1
+    mov     dword ptr [rdx+12], 1       # load: clear
+    mov     dword ptr [rdx+20], 2       # stencil: don't care
+    mov     dword ptr [rdx+24], 1
+    mov     dword ptr [rdx+32], LAYOUT_TSRC
+    cmp     ecx, 3
+    jne     2f
+    mov     dword ptr [rdx+16], 1       # (depth: not stored)
+    mov     dword ptr [rdx+32], LAYOUT_DEPTH
+2:  mov     [r12+144+rcx*8], ecx        # its reference
+    mov     dword ptr [r12+144+rcx*8+4], LAYOUT_COLOR
+    inc     ecx
+    cmp     ecx, 4
+    jb      1b
+    mov     dword ptr [r12+144+28], LAYOUT_DEPTH
+    mov     dword ptr [r12+176+24], 3   # the subpass: three colours, depth
+    lea     rax, [r12+144]
+    mov     [r12+176+32], rax
+    lea     rax, [r12+168]
+    mov     [r12+176+48], rax
+    mov     dword ptr [r12+248], -1     # before: the last run's copies read
+    mov     dword ptr [r12+248+4], 0    #  them
+    mov     dword ptr [r12+248+8], PS_TRANSFER
+    mov     dword ptr [r12+248+12], PS_COLOR_OUT|PS_EARLY_FRAG
+    mov     dword ptr [r12+248+20], AC_COLOR_WRITE|AC_DEPTH_WRITE
+    mov     dword ptr [r12+276], 0      # after: the copies read what it drew
+    mov     dword ptr [r12+276+4], -1
+    mov     dword ptr [r12+276+8], PS_COLOR_OUT
+    mov     dword ptr [r12+276+12], PS_TRANSFER
+    mov     dword ptr [r12+276+16], AC_COLOR_WRITE
+    mov     dword ptr [r12+276+20], AC_TRANSFER_READ
+    mov     dword ptr [r12+304], ST_RENDERPASS
+    mov     dword ptr [r12+304+20], 4
+    mov     [r12+304+24], r12
+    mov     dword ptr [r12+304+32], 1
+    lea     rax, [r12+176]
+    mov     [r12+304+40], rax
+    mov     dword ptr [r12+304+48], 2
+    lea     rax, [r12+248]
+    mov     [r12+304+56], rax
+    mov     rdi, [rip+device]
+    lea     rsi, [r12+304]
+    xor     edx, edx
+    lea     rcx, [rip+gv_rp]
+    call    [rip+vkf+F_CREATERP]
+    test    eax, eax
+    jnz     8f
+5:  lea     r12, [rip+gv_ci]            # the pipeline
+    mov     rdi, r12
+    xor     eax, eax
+    mov     ecx, 128
+    rep     stosq
+    lea     rcx, [rip+s_main]
+    mov     dword ptr [r12], ST_STAGE   # the stages
+    mov     dword ptr [r12+20], STAGE_VERTEX
+    mov     rax, [rbx+KR_MOD]
+    mov     [r12+24], rax
+    mov     [r12+32], rcx
+    mov     dword ptr [r12+48], ST_STAGE
+    mov     dword ptr [r12+48+20], STAGE_FRAGMENT
+    mov     rax, [rbx+KR_FRAG]
+    mov     [r12+48+24], rax
+    mov     [r12+48+32], rcx
+    mov     dword ptr [r12+96], ST_VI   # no vertex input
+    mov     dword ptr [r12+144], ST_IA
+    mov     dword ptr [r12+144+20], 3   # triangle lists
+    mov     dword ptr [r12+176], ST_VPS
+    mov     dword ptr [r12+176+20], 1
+    mov     dword ptr [r12+176+32], 1
+    mov     dword ptr [r12+224], ST_RS  # filled, both sides
+    mov     dword ptr [r12+224+56], 0x3f800000
+    mov     dword ptr [r12+288], ST_MS
+    mov     dword ptr [r12+288+20], 1
+    mov     dword ptr [r12+336], ST_DS  # depth: nearer is greater (1/z)
+    mov     dword ptr [r12+336+20], 1
+    mov     dword ptr [r12+336+24], 1
+    mov     dword ptr [r12+336+28], 4
+    mov     dword ptr [r12+336+100], 0x3f800000
+    mov     dword ptr [r12+440+28], 15  # each colour written whole
+    mov     dword ptr [r12+472+28], 15
+    mov     dword ptr [r12+504+28], 15
+    mov     dword ptr [r12+536], ST_CBS
+    mov     dword ptr [r12+536+28], 3
+    lea     rax, [r12+440]
+    mov     [r12+536+32], rax
+    mov     dword ptr [r12+592], ST_DYN
+    mov     dword ptr [r12+592+20], 2
+    lea     rax, [rip+gv_dyn]
+    mov     [r12+592+24], rax
+    lea     rdi, [r12+624]              # VkGraphicsPipelineCreateInfo
+    mov     dword ptr [rdi], ST_GRAPHICS
+    mov     dword ptr [rdi+20], 2
+    mov     [rdi+24], r12
+    lea     rax, [r12+96]
+    mov     [rdi+32], rax
+    lea     rax, [r12+144]
+    mov     [rdi+40], rax
+    lea     rax, [r12+176]
+    mov     [rdi+56], rax
+    lea     rax, [r12+224]
+    mov     [rdi+64], rax
+    lea     rax, [r12+288]
+    mov     [rdi+72], rax
+    lea     rax, [r12+336]
+    mov     [rdi+80], rax
+    lea     rax, [r12+536]
+    mov     [rdi+88], rax
+    lea     rax, [r12+592]
+    mov     [rdi+96], rax
+    mov     rax, [rbx+KR_PL]
+    mov     [rdi+104], rax
+    mov     rax, [rip+gv_rp]
+    mov     [rdi+112], rax
+    mov     dword ptr [rdi+136], -1
+    mov     rcx, rdi
+    mov     rdi, [rip+device]
+    xor     esi, esi
+    mov     edx, 1
+    xor     r8d, r8d
+    lea     r9, [rbx+KR_PIPE]
+    call    [rip+vkf+F_CREATEGFX]
+    test    eax, eax
+    jnz     8f
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# gv_images(edi=width, esi=height) -> eax = 1: the attachments and the
+#   framebuffer at least this large (made again, larger, when they are not:
+#   viewports of other sizes draw into a corner of them)
+gv_images:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 40
+    cmp     edi, [rip+gv_w]
+    ja      1f
+    cmp     esi, [rip+gv_h]
+    ja      1f
+    mov     eax, 1
+    jmp     9f
+1:  cmp     edi, [rip+gv_w]             # (grown to both sizes' largest)
+    cmovb   edi, [rip+gv_w]
+    cmp     esi, [rip+gv_h]
+    cmovb   esi, [rip+gv_h]
+    mov     r13d, edi
+    mov     r14d, esi
+    cmp     dword ptr [rip+gv_w], 0     # the old ones go (nothing is in flight:
+    je      3f                          #  every run waits for its fence)
+    mov     rdi, [rip+device]
+    mov     rsi, [rip+gv_fb]
+    xor     edx, edx
+    call    [rip+vkf+F_DESTROYFB]
+    xor     ebx, ebx
+2:  mov     rdi, [rip+device]
+    lea     rax, [rip+gv_view]
+    mov     rsi, [rax+rbx*8]
+    xor     edx, edx
+    call    [rip+vkf+F_DESTROYVIEW]
+    mov     rdi, [rip+device]
+    lea     rax, [rip+gv_img]
+    mov     rsi, [rax+rbx*8]
+    xor     edx, edx
+    call    [rip+vkf+F_DESTROYIMAGE]
+    mov     rdi, [rip+device]
+    lea     rax, [rip+gv_mem]
+    mov     rsi, [rax+rbx*8]
+    xor     edx, edx
+    call    [rip+vkf+F_FREEMEM]
+    inc     ebx
+    cmp     ebx, 4
+    jb      2b
+    mov     dword ptr [rip+gv_w], 0
+3:  xor     ebx, ebx                    # each image: device-local, its view
+4:  lea     r12, [rip+gv_ci]
+    mov     rdi, r12
+    xor     eax, eax
+    mov     ecx, 32
+    rep     stosq
+    mov     dword ptr [r12], ST_IMAGE
+    mov     dword ptr [r12+20], 1       # 2D
+    lea     rax, [rip+gv_fmts]
+    mov     eax, [rax+rbx*4]
+    mov     [r12+24], eax
+    mov     [r12+28], r13d
+    mov     [r12+32], r14d
+    mov     dword ptr [r12+36], 1
+    mov     dword ptr [r12+40], 1
+    mov     dword ptr [r12+44], 1
+    mov     dword ptr [r12+48], 1
+    mov     dword ptr [r12+56], IMG_COLOR|IMG_TSRC
+    cmp     ebx, 3
+    jne     41f
+    mov     dword ptr [r12+56], IMG_DEPTH
+41: mov     rdi, [rip+device]
+    mov     rsi, r12
+    xor     edx, edx
+    lea     rax, [rip+gv_img]
+    lea     rcx, [rax+rbx*8]
+    call    [rip+vkf+F_CREATEIMAGE]
+    test    eax, eax
+    jnz     8f
+    mov     rdi, [rip+device]           # its memory
+    lea     rax, [rip+gv_img]
+    mov     rsi, [rax+rbx*8]
+    lea     rdx, [rsp]
+    call    [rip+vkf+F_IMGREQS]
+    mov     edi, [rsp+16]
+    mov     esi, MEM_DEVICE_LOCAL
+    call    mem_type
+    cmp     eax, -1
+    je      8f
+    lea     rdi, [rip+ci]
+    push    rax
+    call    zero256
+    pop     rax
+    mov     dword ptr [rip+ci], ST_MEMALLOC
+    mov     rcx, [rsp]
+    mov     [rip+ci+16], rcx
+    mov     [rip+ci+24], eax
+    mov     rdi, [rip+device]
+    lea     rsi, [rip+ci]
+    xor     edx, edx
+    lea     rax, [rip+gv_mem]
+    lea     rcx, [rax+rbx*8]
+    call    [rip+vkf+F_ALLOCMEM]
+    test    eax, eax
+    jnz     8f
+    mov     rdi, [rip+device]
+    lea     rax, [rip+gv_img]
+    mov     rsi, [rax+rbx*8]
+    lea     rax, [rip+gv_mem]
+    mov     rdx, [rax+rbx*8]
+    xor     ecx, ecx
+    call    [rip+vkf+F_BINDIMGMEM]
+    test    eax, eax
+    jnz     8f
+    mov     rdi, r12                    # its view
+    xor     eax, eax
+    mov     ecx, 32
+    rep     stosq
+    mov     dword ptr [r12], ST_IMAGEVIEW
+    lea     rax, [rip+gv_img]
+    mov     rax, [rax+rbx*8]
+    mov     [r12+24], rax
+    mov     dword ptr [r12+32], 1
+    lea     rax, [rip+gv_fmts]
+    mov     eax, [rax+rbx*4]
+    mov     [r12+36], eax
+    mov     dword ptr [r12+56], 1       # colour
+    cmp     ebx, 3
+    jne     42f
+    mov     dword ptr [r12+56], 2       # depth
+42: mov     dword ptr [r12+64], 1
+    mov     dword ptr [r12+72], 1
+    mov     rdi, [rip+device]
+    mov     rsi, r12
+    xor     edx, edx
+    lea     rax, [rip+gv_view]
+    lea     rcx, [rax+rbx*8]
+    call    [rip+vkf+F_CREATEVIEW]
+    test    eax, eax
+    jnz     8f
+    inc     ebx
+    cmp     ebx, 4
+    jb      4b
+    mov     rdi, r12                    # the framebuffer
+    xor     eax, eax
+    mov     ecx, 8
+    rep     stosq
+    mov     dword ptr [r12], ST_FRAMEBUFFER
+    mov     rax, [rip+gv_rp]
+    mov     [r12+24], rax
+    mov     dword ptr [r12+32], 4
+    lea     rax, [rip+gv_view]
+    mov     [r12+40], rax
+    mov     [r12+48], r13d
+    mov     [r12+52], r14d
+    mov     dword ptr [r12+56], 1
+    mov     rdi, [rip+device]
+    mov     rsi, r12
+    xor     edx, edx
+    lea     rcx, [rip+gv_fb]
+    call    [rip+vkf+F_CREATEFB]
+    test    eax, eax
+    jnz     8f
+    mov     [rip+gv_w], r13d
+    mov     [rip+gv_h], r14d
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax                    # (a later size tries again: what was
+9:  add     rsp, 40                     #  made of this one is not freed)
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gv_record(rdi=slot, rsi=kernel record) - in do_run's commands, after the
+#   uploads: the render pass and its draws (GM_NDRAW, from GV_IND), then the
+#   images into the GV_COL, GV_INVZ, GV_ID bindings' places in staging
+#   (tightly packed rows; do_run copies only the staging to shared memory)
+gv_record:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 96
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     edi, PS_TRANSFER            # the uploads before the draws read them
+    mov     esi, PS_INDIRECT|PS_VERTEX|PS_FRAGMENT
+    mov     edx, AC_TRANSFER_WRITE
+    mov     ecx, AC_INDIRECT|AC_SHADER_READ
+    call    barrier
+    lea     rdi, [rsp]                  # VkRenderPassBeginInfo; four clear
+    xor     eax, eax                    #  values (zeros) at +64 (the frame
+    mov     ecx, 12                     #  below them is zeroed too)
+    rep     stosq
+    mov     dword ptr [rsp], ST_RPBEGIN
+    mov     rax, [rip+gv_rp]
+    mov     [rsp+16], rax
+    mov     rax, [rip+gv_fb]
+    mov     [rsp+24], rax
+    mov     eax, [rip+msg+GM_GX]        # (this run's size: a corner of them)
+    mov     [rsp+40], eax
+    mov     eax, [rip+msg+GM_GY]
+    mov     [rsp+44], eax
+    mov     dword ptr [rsp+48], 4
+    lea     rax, [rip+gv_clear]
+    mov     [rsp+56], rax
+    mov     rdi, [rip+cbuf]
+    lea     rsi, [rsp]
+    xor     edx, edx                    # inline
+    call    [rip+vkf+F_CMDBEGINRP]
+    mov     rdi, [rip+cbuf]
+    mov     esi, BIND_GRAPHICS
+    mov     rdx, [r12+KR_PIPE]
+    call    [rip+vkf+F_CMDBINDPIPE]
+    sub     rsp, 16
+    mov     qword ptr [rsp], 0
+    mov     qword ptr [rsp+8], 0
+    mov     rdi, [rip+cbuf]
+    mov     esi, BIND_GRAPHICS
+    mov     rdx, [r12+KR_PL]
+    xor     ecx, ecx
+    mov     r8d, 1
+    lea     r9, [r12+KR_SET]
+    call    [rip+vkf+F_CMDBINDSETS]
+    add     rsp, 16
+    xor     eax, eax                    # the viewport: x y 0, w h, depth 0 .. 1
+    mov     [rsp], rax
+    cvtsi2ss xmm0, dword ptr [rip+msg+GM_GX]
+    movss   [rsp+8], xmm0
+    cvtsi2ss xmm0, dword ptr [rip+msg+GM_GY]
+    movss   [rsp+12], xmm0
+    mov     dword ptr [rsp+16], 0
+    mov     dword ptr [rsp+20], 0x3f800000
+    mov     rdi, [rip+cbuf]
+    xor     esi, esi
+    mov     edx, 1
+    lea     rcx, [rsp]
+    call    [rip+vkf+F_CMDVIEWPORT]
+    mov     qword ptr [rsp], 0          # the scissor: all of it
+    mov     eax, [rip+msg+GM_GX]
+    mov     [rsp+8], eax
+    mov     eax, [rip+msg+GM_GY]
+    mov     [rsp+12], eax
+    mov     rdi, [rip+cbuf]
+    xor     esi, esi
+    mov     edx, 1
+    lea     rcx, [rsp]
+    call    [rip+vkf+F_CMDSCISSOR]
+    mov     r8d, [rip+msg+GM_NDRAW]
+    test    r8d, r8d
+    jz      1f
+    mov     rdi, [rip+cbuf]
+    mov     rsi, [rbx+SL_DBUF]
+    lea     rax, [rip+table]
+    mov     rdx, [rax+GV_IND*GB_SZ+GB_OFF]
+    mov     ecx, r8d
+    mov     r8d, 16
+    call    [rip+vkf+F_CMDDRAWIND]
+1:  mov     rdi, [rip+cbuf]
+    call    [rip+vkf+F_CMDENDRP]
+    xor     r13d, r13d                  # the images into their bindings
+2:  lea     rdi, [rsp]                  # VkBufferImageCopy
+    xor     eax, eax
+    mov     ecx, 7
+    rep     stosq
+    lea     rax, [rip+gv_outs]
+    mov     eax, [rax+r13*4]
+    shl     eax, 5                      # (GB_SZ)
+    lea     rcx, [rip+table]
+    mov     rax, [rcx+rax+GB_OFF]
+    mov     [rsp], rax
+    mov     dword ptr [rsp+16], 1       # colour aspect, layer 0, 1 layer
+    mov     dword ptr [rsp+28], 1
+    mov     eax, [rip+msg+GM_GX]
+    mov     [rsp+44], eax
+    mov     eax, [rip+msg+GM_GY]
+    mov     [rsp+48], eax
+    mov     dword ptr [rsp+52], 1
+    mov     rdi, [rip+cbuf]
+    lea     rax, [rip+gv_img]
+    mov     rsi, [rax+r13*8]
+    mov     edx, LAYOUT_TSRC
+    mov     rcx, [rbx+SL_SBUF]          # (straight into staging: the shared
+    mov     r8d, 1                      #  memory itself when imported)
+    lea     r9, [rsp]
+    call    [rip+vkf+F_CMDCOPYIMG]
+    inc     r13d
+    cmp     r13d, 3
+    jb      2b
+    add     rsp, 96
+    pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # barrier(edi=source stages, esi=destination stages, edx=source access,

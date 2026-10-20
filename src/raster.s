@@ -36,6 +36,7 @@
 .globl rs_nty
 .globl rs_mode
 .globl rs_noclear
+.globl rs_total
 
 .equ TILE_SHIFT,    4
 .equ TILE,          1 << TILE_SHIFT
@@ -94,6 +95,7 @@ rs_counts:      .skip 8
 rs_chunk:       .skip 4
 rs_tbase:       .skip 4             # the batch's first output slot
 rs_noclear:     .skip 4             # 1: a second batch over the first
+rs_gpu:         .skip 4             # 1: the GPU drew this pass (gview.s)
 rs_ccount:      .skip 4*CHUNKS
 
 .section .rodata
@@ -312,7 +314,11 @@ raster_scene:
     add     r14, RO_SZ
 31: inc     ebx
     jmp     3b
-4:  mov     dword ptr [rip+rs_tbase], 0
+4:  call    gv_draw                     # the GPU, when it can (v0.24)
+    mov     [rip+rs_gpu], eax
+    test    eax, eax
+    jnz     .Lrs_post
+    mov     dword ptr [rip+rs_tbase], 0
     mov     dword ptr [rip+rs_noclear], 0
     call    rs_batch
     test    eax, eax
@@ -374,12 +380,16 @@ raster_scene:
     jne     .Lrs_out
     cmp     dword ptr [rip+vp_shading], 3   # rendered: the GPU's image
     jne     2f                              #  (live.s), else as material
-    call    lv_shade                        #  preview
-    test    eax, eax
+    call    lv_shade                        #  preview (drawn by gv_draw:
+    test    eax, eax                        #  Solid stays)
     jnz     1f
+    cmp     dword ptr [rip+rs_gpu], 0
+    jne     1f
     call    preview_shade
     jmp     1f
-2:  cmp     dword ptr [rip+vp_shading], 2   # material preview: shade
+2:  cmp     dword ptr [rip+vp_shading], 2   # material preview: shade (gv_draw
+    jne     1f                              #  shaded it)
+    cmp     dword ptr [rip+rs_gpu], 0
     jne     1f
     call    preview_shade
 1:
