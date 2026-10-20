@@ -48,7 +48,9 @@ reason as a number.
 
 The window starts the helper in the background as BeeModel opens
 (`gpu_prewarm`, v0.23), and asks it (`MSG_WARM`) to make every kernel,
-the shader graphs' too, so the first render finds it ready; scripts
+the shader graphs' too, so the first render finds it ready (with RTX and
+Device on Auto or RTX, all but the compute path's graph kernel, which is
+made if it is ever asked for); scripts
 (`--eval`, `--run`) start it on first use (`src/gpu.s`). Building the
 kernels is the slow part of a cold start (3.5 s on an RTX 4080 SUPER the
 first time); the driver keeps the compiled pipelines in its own disk cache
@@ -77,6 +79,9 @@ written and listed (`gpu.s`'s `put_delta`). For an animation frame of the
 rainstorm demo (525k triangles, 94k balls) that is 7.7 MB of the scene's
 100 MB. The same scene again sends only its constants (5 KiB). A scene that
 outgrows its room, or a new image size, gets a new layout and goes up whole.
+A binding that grows into its room sends its new part whole (`gd_sent`):
+the device never had those bytes, so a block that matches the slot's
+memory there says nothing about the device's copy.
 The accumulators never go up: the first pass of a render starts the sums,
 which the shader keeps in registers and stores once a pass.
 
@@ -361,6 +366,26 @@ surface meshed (`hv_need_bvh`, as for RTX). In the dam-break demo a frame
   on the CPU from where it was. The accumulators hold every finished
   sample, and the CPU continues the same random streams, so the image is
   still the one the CPU alone would make.
+
+## Benchmark
+
+`tools/renderbench.py` path-traces the four particle demos at 960 x 540, 16
+samples: a render after simulating to the frame, the same again, ten frames
+with `render_frames`, and ten with 64 samples and sample reuse 3 (16 new a
+frame). On a Ryzen 9 7950X with an RTX 4080 SUPER, in milliseconds (v0.22.1
+ran three of them on the CPU):
+
+| Scene (frame) | v0.22.1 again | v0.23.0 again | v0.23.0 a frame | 64 samples, reuse 3 |
+|---|---|---|---|---|
+| rainstorm (120) | 1377 | 103 (RTX) | 74 | 102 |
+| dam-break (60) | 1201 (CPU) | 63 (RTX) | 108 | 212 |
+| leaf-twister (120) | 313 (CPU) | 27 (RTX) | 23 | 51 |
+| fireworks (90) | 122 (CPU) | 24 (RTX) | 28 | 25 |
+
+A frame of `render_frames` includes simulating it; the dam break's liquid
+solver is most of its 108 ms. The first render of a run also starts the
+helper; in the benchmark's throwaway HOME the driver's shader cache is
+empty, so that takes 0.6 to 3 s (the graphs' kernels are the slow ones).
 
 ## BeeScript
 
