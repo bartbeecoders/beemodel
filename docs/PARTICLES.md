@@ -213,12 +213,19 @@ used).
 
 ## The surface
 
-With `surface on` a liquid is meshed each frame: a density field on a grid
-over its particles (each adds (1 − r²/R²)³ out to two spacings, the field
-at half the lattice's density), splatted in parallel by z slab, then
-marching tetrahedra (the SDF mesher). The surface is closed and manifold.
-The emitter shows it while the particles run, so the viewport, renders
-and exporters see it, and it gets the water material when it has none.
+With `surface on` a liquid has a surface each frame: a density field on a
+grid over its particles (each adds (1 − r²/R²)³ out to two spacings, the
+field at half the lattice's density), splatted in parallel by z slab.
+Marching tetrahedra (the SDF mesher) turn it into a closed, manifold mesh
+when something first asks for it. The emitter shows that mesh while the
+particles run, so the viewport, CPU renders and exporters see it, and it
+gets the water material when it has none.
+
+A render on the GPU never meshes it (v0.23): the helper traces the field
+itself ([GPU.md](GPU.md)). In the dam-break demo that takes a third off a
+frame's simulation (the 35 ms of meshing) and the triangles' build and
+upload off its render. The image differs a little from the meshed one,
+the surface being smoother.
 
 Where the surface breaks, fast particles with few neighbours are **spray**
 events: `emit("Tank", "from events events spray Water per 1 inherit 1 life 0.5")`

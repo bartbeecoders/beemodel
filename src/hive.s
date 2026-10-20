@@ -11,6 +11,11 @@
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
+.equ HF_MAX, 8                          # liquid fields a scene (the GPU's)
+.equ HF_SZ, 112                         # a field: origin, spacing (16), nx ny nz,
+                                        #  material + 1 (16), its values, its
+                                        #  bricks (8 each), bricks a side (16),
+                                        #  its emitter's inverse matrix (48)
 
 # exports
 .globl hive_build
@@ -41,6 +46,9 @@
 .globl hv_shutter
 .globl hv_mblur
 .globl hv_bvhless
+.globl hv_fldon
+.globl hv_nfld
+.globl hv_flds
 .globl hv_nodes
 .globl hv_root
 .globl hv_nn4
@@ -190,6 +198,11 @@ hv_ksplit:      .skip 4             # 1: the top's root splits triangles | spher
 hv_nobvh:       .skip 4             # the next build for RTX alone: no BVH but
                                     #  for objects the cache is about to keep
 hv_bvhless:     .skip 4             # the scene built so (the CPU: hive_build again)
+hv_fldon:       .skip 4             # the next build for the GPU: liquids' surfaces
+                                    #  as their fields (traced there), not meshes
+hv_nfld:        .skip 4             # this scene's fields (HF_* records in hv_flds)
+.align 16
+hv_flds:        .skip HF_MAX*HF_SZ
 hv_shutter:     .skip 4             # motion blur: the shutter open, frames (0: off)
 hv_mblur:       .skip 4             # this scene's balls move while it is (rays
                                     #  then have a time: RAY_TIME, [r15+8])
@@ -224,6 +237,7 @@ ss_size:        .long 36, 36, 36, 24, 12, 4                       #  arrays, the
 hf_eps_t:       .float 1.0e-4
 hf_tiny:        .float 1.0e-12
 hf_big:         .float 1.0e30
+hf_nbig:        .float -1.0e30
 hf_nbins:       .float 15.999
 hf_cos30:       .float 0.8660254
 hf_tanh:        .float 0.35993             # tan(39.6 deg / 2): a 50 mm lens
@@ -422,6 +436,7 @@ hive_build:
     mov     eax, [rip+hv_nobvh]
     mov     [rip+hv_bvhless], eax
     call    hv_free_all
+    mov     dword ptr [rip+hv_nfld], 0
     xor     r12d, r12d                  # triangles
     mov     dword ptr [rip+hv_ibud], HV_IBUDGET
     mov     dword ptr [rip+hv_nseg], 0  # the segments: an object each, the
@@ -448,7 +463,18 @@ hive_build:
     jz      10f
     cmp     rax, rcx
     jne     11f
-10: mov     rdi, rax                    # its triangles, its instances' (a
+10: cmp     dword ptr [rip+hv_fldon], 0 # a liquid's surface for the GPU:
+    je      12f                         #  its field, traced there (no
+    push    rax                         #  triangles)
+    push    rax
+    mov     rdi, rax
+    call    hv_fld_add
+    mov     ecx, eax
+    pop     rax
+    pop     rax
+    test    ecx, ecx
+    jnz     11f
+12: mov     rdi, rax                    # its triangles, its instances' (a
     mov     esi, r12d                   #  budget): kept, or to be made
     call    hv_seg_object
     add     r12d, eax
@@ -2775,6 +2801,165 @@ hc_end:
     cmp     r12d, HC_MAX
     jb      1b
     add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# hv_fld_add(rdi=object) -> eax = 1: the liquid surface it shows goes to the
+#   GPU as its field (pt_fld_info), with its material, its emitter's inverse
+#   matrix (object space for graphs) and each 8^3 brick's smallest and
+#   largest value (empty space skipped); 0: not a surface (or no room)
+hv_fld_add:
+    push    rbx
+    push    r12
+    sub     rsp, 56
+    xor     eax, eax
+    cmp     dword ptr [rip+hv_nfld], HF_MAX
+    jae     9f
+    mov     rbx, rdi
+    imul    eax, [rip+hv_nfld], HF_SZ
+    lea     r12, [rip+hv_flds]
+    add     r12, rax
+    mov     rsi, r12
+    call    pt_fld_info
+    test    eax, eax
+    jz      9f
+    mov     rdi, rbx
+    call    mat_of
+    inc     eax
+    mov     [r12+28], eax
+    mov     rdi, rbx
+    lea     rsi, [rsp]
+    call    obj_matrix
+    lea     rdi, [rsp]
+    lea     rsi, [r12+64]
+    call    sdf_invert
+    mov     ecx, 16                     # bricks a side: (n - 1) / 8, up
+1:  mov     eax, [r12+rcx]
+    add     eax, 6
+    shr     eax, 3
+    mov     [r12+rcx+32], eax
+    add     ecx, 4
+    cmp     ecx, 28
+    jb      1b
+    mov     eax, [r12+48]
+    imul    eax, [r12+52]
+    imul    eax, [r12+56]
+    xor     ecx, ecx
+    test    eax, eax
+    jz      9f
+    lea     edi, [rax*8]
+    call    hv_map
+    test    rax, rax
+    jz      9f
+    mov     [r12+40], rax
+    lea     rdi, [rip+hf_job]
+    mov     rsi, r12
+    mov     edx, [r12+56]
+    mov     ecx, 1
+    call    parallel_for
+    inc     dword ptr [rip+hv_nfld]
+    mov     dword ptr [rip+hv_bvhless], 1   # (the CPU: built again, meshed)
+    mov     eax, 1
+9:  add     rsp, 56
+    pop     r12
+    pop     rbx
+    ret
+
+# hf_job(rdi=the field's record, esi=first brick layer, edx=end) - each
+#   brick's smallest and largest value (its 9^3 points: neighbours share a
+#   face), at bricks[(bz by_n + by) bx_n + bx]
+hf_job:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 24                     # +0 the end, +4 z, +8 z's last,
+    mov     rbx, rdi                    #  +12 y's last
+    mov     [rsp], edx
+    mov     r12d, esi                   # bz
+.Lhf_z:
+    cmp     r12d, [rsp]
+    jae     .Lhf_out
+    xor     r13d, r13d                  # by
+.Lhf_y:
+    cmp     r13d, [rbx+52]
+    jae     .Lhf_zn
+    xor     r14d, r14d                  # bx
+.Lhf_x:
+    cmp     r14d, [rbx+48]
+    jae     .Lhf_yn
+    movss   xmm0, [rip+hf_big]
+    movss   xmm1, [rip+hf_nbig]
+    lea     eax, [r12*8]
+    mov     [rsp+4], eax
+    add     eax, 8
+    mov     edx, [rbx+24]
+    dec     edx
+    cmp     eax, edx
+    cmova   eax, edx
+    mov     [rsp+8], eax
+    lea     eax, [r13*8+8]
+    mov     edx, [rbx+20]
+    dec     edx
+    cmp     eax, edx
+    cmova   eax, edx
+    mov     [rsp+12], eax
+1:  mov     eax, [rsp+4]
+    cmp     eax, [rsp+8]
+    ja      4f
+    lea     r15d, [r13*8]
+2:  cmp     r15d, [rsp+12]
+    ja      3f
+    mov     eax, [rsp+4]                # the row: (z ny + y) nx + x0
+    imul    eax, [rbx+20]
+    add     eax, r15d
+    imul    eax, [rbx+16]
+    lea     ecx, [r14*8]
+    add     eax, ecx
+    mov     rdx, [rbx+32]
+    lea     rdx, [rdx+rax*4]
+    lea     eax, [rcx+8]                # its points: x0 .. min(x0 + 8, nx - 1)
+    mov     ebp, [rbx+16]
+    dec     ebp
+    cmp     eax, ebp
+    cmova   eax, ebp
+    sub     eax, ecx
+    inc     eax
+21: movss   xmm2, [rdx]
+    minss   xmm0, xmm2
+    maxss   xmm1, xmm2
+    add     rdx, 4
+    dec     eax
+    jnz     21b
+    inc     r15d
+    jmp     2b
+3:  inc     dword ptr [rsp+4]
+    jmp     1b
+4:  mov     eax, r12d
+    imul    eax, [rbx+52]
+    add     eax, r13d
+    imul    eax, [rbx+48]
+    add     eax, r14d
+    mov     rdx, [rbx+40]
+    movss   [rdx+rax*8], xmm0
+    movss   [rdx+rax*8+4], xmm1
+    inc     r14d
+    jmp     .Lhf_x
+.Lhf_yn:
+    inc     r13d
+    jmp     .Lhf_y
+.Lhf_zn:
+    inc     r12d
+    jmp     .Lhf_z
+.Lhf_out:
+    add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret

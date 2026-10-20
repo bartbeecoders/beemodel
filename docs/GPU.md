@@ -303,6 +303,25 @@ pixel for pixel. The rainstorm demo at 960 x 540 and 16 samples takes
 78 ms a frame instead of 109 ms. If the helper dies during the overlap,
 the scene goes back to that frame and the CPU renders it again.
 
+### Liquid surfaces (v0.23)
+
+A render headed for the GPU (`gpu_fld_likely`) builds a liquid's surface
+as its field, not its mesh (`hv_fld_add`): its grid's values, and each 8³
+brick's smallest and largest value. They go up after the balls in binding
+19: a count, a 32-float record per field (origin, spacing, size, material,
+the grid's corners, where its values and bricks start, the emitter's
+inverse matrix for graphs), then the values and the bricks. `trace` tests
+the fields after the triangles and balls (`fld_hit`): a ray marches the
+grid a cell a step from its box, past bricks all on its side of the
+surface, then halves the step that crosses 0 six times and interpolates.
+The normal is the field's gradient. A field is opaque to `cover`, is
+never sampled as a light, and has no vertex colours.
+
+The CPU never sees a field: if a render goes to the CPU after all (the
+helper fails, or a node it lacks), the scene is built again with the
+surface meshed (`hv_need_bvh`, as for RTX). In the dam-break demo a frame
+(`render_frames`, 960 x 540, 16 samples) takes 109 ms instead of 157 ms.
+
 ### Falling back
 
 - **Missing or unusable:** no helper, no device, a scene `pt.comp` does not
@@ -344,6 +363,7 @@ the scene goes back to that frame and the CPU renders it again.
 | 22 | The same for Rendered shading's last scene |
 | 23 | 1 if the last render traced with RTX (ray queries) |
 | 24 | 1 if the helper has RTX |
+| 25 | Liquid surfaces the last render traced as fields |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 

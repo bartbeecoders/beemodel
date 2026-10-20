@@ -125,7 +125,11 @@ const uint CATCH = 0x40000000u;         // tm: a shadow catcher's triangle (HV_C
 //   12 floats each (SP_*: centre, radius, material + 1, colour, velocity)
 const uint SPW = 12u;
 uint NSPH() { return floatBitsToUint(P.cam[13]); }
-bool is_sph(uint t) { return t >= P.ntri; }
+// liquids' surfaces (H13): fields after the balls, primitives from NTS() on
+uint NFLD = 0u;                         // (main: binding 19's header)
+uint NTS() { return P.ntri + NSPH(); }
+bool is_fld(uint t) { return t >= NTS(); }
+bool is_sph(uint t) { return t >= P.ntri && t < NTS(); }
 uint sph_o(uint t) { return (t - P.ntri) * SPW; }
 // motion blur: the sample's time in the shutter, from its middle (-0.5 .. 0.5;
 //   0 without), and where a ball is then: c + v t (v: its movement while the
@@ -139,9 +143,13 @@ vec3 sph_c(uint t) {
     return rtime != 0.0 ? sph_move(o, c) : c;
 }
 float sph_r(uint t) { return sph[sph_o(t) + 3u]; }
-uint tmat(uint t) { return is_sph(t) ? floatBitsToUint(sph[sph_o(t) + 4u]) & ~CATCH : tm[t] & ~CATCH; }
-bool has_vcol(uint t) { return is_sph(t) ? floatBitsToUint(sph[sph_o(t) + 5u]) != 0u : tvc[t * 3u] != 0u; }
-bool is_catch(uint t) { return !is_sph(t) && (tm[t] & CATCH) != 0u; }
+uint fld_rec(uint t) { return NSPH() * SPW + 4u + (t - NTS()) * 32u; }
+uint tmat(uint t) {
+    if (is_fld(t)) return floatBitsToUint(sph[fld_rec(t) + 7u]);
+    return is_sph(t) ? floatBitsToUint(sph[sph_o(t) + 4u]) & ~CATCH : tm[t] & ~CATCH;
+}
+bool has_vcol(uint t) { return is_fld(t) ? false : is_sph(t) ? floatBitsToUint(sph[sph_o(t) + 5u]) != 0u : tvc[t * 3u] != 0u; }
+bool is_catch(uint t) { return t < P.ntri && (tm[t] & CATCH) != 0u; }
 vec3 tv3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tv[o], tv[o + 1u], tv[o + 2u]); }
 vec3 tn3(uint t, uint k) { uint o = t * 9u + k * 3u; return vec3(tn[o], tn[o + 1u], tn[o + 2u]); }
 
@@ -206,52 +214,151 @@ void slab(uint base, float o, float iv, inout vec4 tn4, inout vec4 tf4) {
     tf4 = min(tf4, tfar);
 }
 
+// ---- a liquid's surface as its field (H13) -----------------------------------
+// binding 19 after the balls: how many fields, then a record each (32 floats:
+//   origin, spacing; nx ny nz, material + 1; the grid's low corner, where its
+//   values start; its high corner, where its bricks start; bricks a side; the
+//   emitter's inverse matrix, 3 rows), each one's values ((z ny + y) nx + x:
+//   below 0 inside, the surface at 0) and each 8^3 brick's smallest and
+//   largest value. Rays march it a cell a step, past bricks all on their
+//   side; the step that crosses 0 is halved six times, then interpolated.
+struct Fld { vec3 o; float sp; uvec3 n; vec3 lo; uint doff; vec3 hi; uint boff; uvec3 nb; };
+Fld fld_get(uint t) {
+    uint r = fld_rec(t);
+    Fld f;
+    f.o = vec3(sph[r], sph[r + 1u], sph[r + 2u]); f.sp = sph[r + 3u];
+    f.n = uvec3(floatBitsToUint(sph[r + 4u]), floatBitsToUint(sph[r + 5u]), floatBitsToUint(sph[r + 6u]));
+    f.lo = vec3(sph[r + 8u], sph[r + 9u], sph[r + 10u]); f.doff = floatBitsToUint(sph[r + 11u]);
+    f.hi = vec3(sph[r + 12u], sph[r + 13u], sph[r + 14u]); f.boff = floatBitsToUint(sph[r + 15u]);
+    f.nb = uvec3(floatBitsToUint(sph[r + 16u]), floatBitsToUint(sph[r + 17u]), floatBitsToUint(sph[r + 18u]));
+    return f;
+}
+float fld_at(Fld f, vec3 p) {           // trilinear
+    vec3 g = clamp((p - f.o) / f.sp, vec3(0.0), vec3(f.n - 1u));
+    uvec3 i = min(uvec3(g), f.n - 2u);
+    vec3 a = g - vec3(i);
+    uint nx = f.n.x, nxy = f.n.x * f.n.y;
+    uint b = f.doff + i.z * nxy + i.y * nx + i.x;
+    vec4 z0 = vec4(sph[b], sph[b + 1u], sph[b + nx], sph[b + nx + 1u]);
+    b += nxy;
+    vec4 z1 = vec4(sph[b], sph[b + 1u], sph[b + nx], sph[b + nx + 1u]);
+    vec4 c = mix(z0, z1, a.z);
+    vec2 e = mix(c.xz, c.yw, a.x);
+    return mix(e.x, e.y, a.y);
+}
+vec3 fld_normal(uint t, vec3 p) {       // the field's gradient: outward
+    Fld f = fld_get(t);
+    vec3 g = vec3(0.0);
+    for (int k = 0; k < 6; k++) {       // (one fld_at: inlined once)
+        vec3 e = vec3(0.0);
+        e[k >> 1] = (k & 1) == 0 ? 0.5 * f.sp : -0.5 * f.sp;
+        g[k >> 1] += (k & 1) == 0 ? fld_at(f, p + e) : -fld_at(f, p + e);
+    }
+    float l = length(g);
+    return l > 1.0e-20 ? g / l : vec3(0.0, 1.0, 0.0);
+}
+// the nearest crossing of field primitive t before best (then best = it)
+bool fld_hit(uint t, Ray r, inout float best) {
+    Fld f = fld_get(t);
+    vec3 iv = vec3(abs(r.d.x) > 1.0e-12 ? 1.0 / r.d.x : 1.0e30, abs(r.d.y) > 1.0e-12 ? 1.0 / r.d.y : 1.0e30,
+                   abs(r.d.z) > 1.0e-12 ? 1.0 / r.d.z : 1.0e30);
+    vec3 a0 = (f.lo - r.o) * iv, a1 = (f.hi - r.o) * iv;
+    vec3 tn = min(a0, a1), tf = max(a0, a1);
+    float dl = length(r.d);
+    float stp = f.sp / dl;                               // a cell a step
+    float ta = max(max(tn.x, tn.y), max(tn.z, 0.05 * stp));   // (off the surface it starts on)
+    float tb = min(min(tf.x, tf.y), min(tf.z, best));
+    if (!(ta < tb)) return false;
+    bool ins = false;                   // one loop, one sample a turn (fld_at
+    int mode = 0, k = 0;                //  is inlined once): 0 the start, 1
+    float lo = ta, hi = ta, flo = 0.0, fhi = 0.0, tc = ta;  //  marching, 2 halving
+    for (int it = 0; it < 4096; it++) {
+        float fv = fld_at(f, r.o + r.d * tc);
+        if (mode == 0) { ins = fv < 0.0; mode = 1; lo = tc; flo = fv; }
+        else if (mode == 1) {
+            if ((fv < 0.0) != ins) { hi = tc; fhi = fv; mode = 2; }
+            else { if (tc >= tb) return false; lo = tc; flo = fv; }
+        } else {
+            if ((fv < 0.0) == ins) { lo = tc; flo = fv; } else { hi = tc; fhi = fv; }
+            if (++k == 6) break;
+        }
+        if (mode == 2) { tc = 0.5 * (lo + hi); continue; }
+        float tq = lo + 0.01 * stp;     // the brick just ahead: all on this side,
+        vec3 g = (r.o + r.d * tq - f.o) / f.sp;                 //  past it; else a cell
+        uvec3 bi = min(uvec3(max(g, vec3(0.0)) * 0.125), f.nb - 1u);
+        uint bo = f.boff + ((bi.z * f.nb.y + bi.y) * f.nb.x + bi.x) * 2u;
+        if (ins ? sph[bo + 1u] < 0.0 : sph[bo] > 0.0) {
+            vec3 b0 = (f.o + vec3(bi * 8u) * f.sp - r.o) * iv;
+            vec3 b1 = (f.o + vec3(min(bi * 8u + 8u, f.n - 1u)) * f.sp - r.o) * iv;
+            vec3 bf = max(b0, b1);
+            tc = max(min(min(bf.x, bf.y), bf.z), tq);
+        } else tc = lo + stp;
+        tc = min(tc, tb);
+    }
+    if (mode != 2) return false;
+    float th = lo + (hi - lo) * clamp(flo / (flo - fhi), 0.0, 1.0);   // (then linear)
+    if (!(th < best)) return false;
+    best = th;
+    return true;
+}
+// the fields after the triangles and balls (trace's last step)
+bool fld_trace(inout Ray r, bool anyhit, float best, bool hit) {
+    for (uint k = 0u; k < NFLD; k++) {
+        uint t = NTS() + k;
+        if (!fld_hit(t, r, best)) continue;
+        r.tri = int(t); r.t = best; r.u = 0.0; r.v = 0.0;
+        hit = true;
+        if (anyhit) return true;
+    }
+    return hit;
+}
+
 // the nearest hit (any: the first closer than tmax)
 #ifdef RTX
 bool trace(inout Ray r, bool anyhit) {
     r.tri = -1;
-    if (P.ntri == 0u && NSPH() == 0u) return false;
-    rayQueryEXT q;
-    rayQueryInitializeEXT(q, tlas, gl_RayFlagsNoneEXT, 0xffu, r.o, 0.0, r.d, r.tmax);
     float best = r.tmax, hwbest = r.tmax;
     bool hit = false;
-    while (rayQueryProceedEXT(q)) {
-        uint t = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
-        bool tri = rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT;
-        float tt, uu = 0.0, vv = 0.0;
-        if (tri) {
-            if (skipc && (tm[t] & CATCH) != 0u) continue;
-            if (!tri_hit(t, r, tt, uu, vv)) continue;
-        } else {
-            t += P.ntri;
-            if (!sph_hit(t, r, tt)) continue;
+    if (P.ntri != 0u || NSPH() != 0u) {     // (none: the fields alone)
+        rayQueryEXT q;
+        rayQueryInitializeEXT(q, tlas, gl_RayFlagsNoneEXT, 0xffu, r.o, 0.0, r.d, r.tmax);
+        while (rayQueryProceedEXT(q)) {
+            uint t = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+            bool tri = rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT;
+            float tt, uu = 0.0, vv = 0.0;
+            if (tri) {
+                if (skipc && (tm[t] & CATCH) != 0u) continue;
+                if (!tri_hit(t, r, tt, uu, vv)) continue;
+            } else {
+                t += P.ntri;
+                if (!sph_hit(t, r, tt)) continue;
+            }
+            if (!(tt < best)) continue;
+            if (tri) {
+                rayQueryConfirmIntersectionEXT(q);
+                hwbest = min(hwbest, rayQueryGetIntersectionTEXT(q, false));
+            } else {
+                if (tt > hwbest) continue;          // (past what the hardware holds)
+                rayQueryGenerateIntersectionEXT(q, tt);
+                hwbest = tt;
+            }
+            best = tt;
+            r.tri = int(t); r.t = tt; r.u = uu; r.v = vv;
+            hit = true;
+            if (anyhit) { rayQueryTerminateEXT(q); return true; }
         }
-        if (!(tt < best)) continue;
-        if (tri) {
-            rayQueryConfirmIntersectionEXT(q);
-            hwbest = min(hwbest, rayQueryGetIntersectionTEXT(q, false));
-        } else {
-            if (tt > hwbest) continue;          // (past what the hardware holds)
-            rayQueryGenerateIntersectionEXT(q, tt);
-            hwbest = tt;
-        }
-        best = tt;
-        r.tri = int(t); r.t = tt; r.u = uu; r.v = vv;
-        hit = true;
-        if (anyhit) { rayQueryTerminateEXT(q); break; }
     }
-    return hit;
+    return fld_trace(r, anyhit, best, hit);
 }
 #else
 bool trace(inout Ray r, bool anyhit) {
     r.tri = -1;
-    if (P.ntri == 0u && NSPH() == 0u) return false;
     float ix = abs(r.d.x) > 1.0e-12 ? 1.0 / r.d.x : 1.0e30;
     float iy = abs(r.d.y) > 1.0e-12 ? 1.0 / r.d.y : 1.0e30;
     float iz = abs(r.d.z) > 1.0e-12 ? 1.0 / r.d.z : 1.0e30;
     uint stk[64];
     float stt[64];
-    int sp = 1;
+    int sp = P.ntri == 0u && NSPH() == 0u ? 0 : 1;      // (none: the fields alone)
     stk[0] = P.root;
     float best = r.tmax;
     bool hit = false;
@@ -304,7 +411,7 @@ bool trace(inout Ray r, bool anyhit) {
             }
         }
     }
-    return hit;
+    return fld_trace(r, anyhit, best, hit);
 }
 #endif
 
@@ -847,7 +954,20 @@ void graph_shade(uint m, uint t, float u, float v, bool cover, inout Mat mt, ino
                  out float alpha, out float mask) {
     alpha = -1.0; mask = -1.0;
     G_N = ns;
-    if (is_sph(t)) {                    // a sphere: the unit ball's point, no
+    if (is_fld(t)) {                    // a field: the point in its emitter's
+        uint r = fld_rec(t) + 20u;      //  space (the mesh's), no edges, box UVs
+        vec4 p4 = vec4(G_WP, 1.0);
+        S_P0 = vec3(dot(vec4(sph[r], sph[r + 1u], sph[r + 2u], sph[r + 3u]), p4),
+                    dot(vec4(sph[r + 4u], sph[r + 5u], sph[r + 6u], sph[r + 7u]), p4),
+                    dot(vec4(sph[r + 8u], sph[r + 9u], sph[r + 10u], sph[r + 11u]), p4));
+        S_E1 = vec3(0.0); S_E2 = vec3(0.0);
+        vec3 tt, bb;
+        onb(ns, tt, bb);
+        float sp = sph[fld_rec(t) + 3u];
+        S_PU = tt * sp; S_PV = bb * sp;
+        G_VC = vec3(1.0);
+        box_uv();
+    } else if (is_sph(t)) {             // a sphere: the unit ball's point, no
         S_P0 = (G_WP - sph_c(t)) * (1.0 / sph_r(t));    //  edges, its tangents x r,
         S_E1 = vec3(0.0); S_E2 = vec3(0.0);     //  box UVs (hive_pt.s sph_graph_ctx)
         vec3 tt, bb;
@@ -919,7 +1039,7 @@ uint mwu(uint m, uint k) { return floatBitsToUint(mats[m * MW + k]); }
 //   hive_pt.s): 1 opaque, 0 a hole (one-sided from behind, masked below its
 //   clip), else a translucent material's opacity
 float cover(uint t, float u, float v, vec3 d) {
-    if (is_sph(t)) return 1.0;                  // (spheres: opaque)
+    if (t >= P.ntri) return 1.0;                // (spheres, fields: opaque)
     uint m = tmat(t);
     if (m == 0u) return 1.0;
     if (mwf(m, W_SIDED) >= 0.5) {
@@ -952,12 +1072,14 @@ float cover(uint t, float u, float v, vec3 d) {
 // trace, but through what lets the ray pass (by chance, as much as it does);
 //   t from the ray's origin (pt_walk)
 bool trace_cut(inout Ray r, bool anyhit) {
-    if (P.cut == 0u) return trace(r, anyhit);
+    bool cut = P.cut != 0u;             // (one trace: each call is inlined)
     vec3 o0 = r.o;
     float tm0 = r.tmax, gone = 0.0;
     int layers = 32;
     for (;;) {
-        if (!trace(r, false)) { r.o = o0; r.tmax = tm0; return false; }
+        bool h = trace(r, anyhit && !cut);
+        if (!cut) return h;
+        if (!h) { r.o = o0; r.tmax = tm0; return false; }
         layers--;
         if (layers == 0) break;
         float c = cover(uint(r.tri), r.u, r.v, r.d);
@@ -1170,7 +1292,7 @@ vec3 tri_geo_normal(uint t) {
 }
 
 // a primitive's geometric normal at p (a sphere: from its centre)
-vec3 prim_geo_normal(uint t, vec3 p) { return is_sph(t) ? unit3(p - sph_c(t)) : tri_geo_normal(t); }
+vec3 prim_geo_normal(uint t, vec3 p) { return is_fld(t) ? fld_normal(t, p) : is_sph(t) ? unit3(p - sph_c(t)) : tri_geo_normal(t); }
 float prim_area(uint t) { float r = is_sph(t) ? sph_r(t) : 0.0; return is_sph(t) ? r * r * TWO_PI * 2.0 : tri_area(t); }
 
 // 1 - cos of the half angle a sphere fills seen from q (x / (1 + sqrt(1 - x)),
@@ -1465,6 +1587,9 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
         if (is_sph(t)) {
             ng = unit3(p - sph_c(t));
             ns = ng;
+        } else if (is_fld(t)) {
+            ng = fld_normal(t, p);
+            ns = ng;
         } else {
             vec3 e1 = tv3(t, 1u), e2 = tv3(t, 2u);
             ng = unit3(vec3(e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x));
@@ -1489,7 +1614,7 @@ void trace_path(float sx, float sy, bool rc, uint px, out vec3 lout, out float a
                                                                                 //  reads them: no tint)
         if (m.strength > 0.0) {                         // emission
             float wgt = 1.0;
-            if (!spec) wgt = mis(prev, light_pdf_tri(t, ray.t, ray.d, ray.o));
+            if (!spec && !is_fld(t)) wgt = mis(prev, light_pdf_tri(t, ray.t, ray.d, ray.o));   // (fields: never sampled)
             add_beta_l(m.emit * (wgt * m.strength));
         }
         Ctx c = bsdf_init(m, ns, wo, outside);
@@ -1721,6 +1846,7 @@ void main() {
     if (x >= P.w || y >= P.h) return;
     uint px = y * P.w + x;
     float fw = float(P.w), fh = float(P.h);
+    NFLD = floatBitsToUint(sph[NSPH() * SPW]);
     uint live = floatBitsToUint(P.cam[14]);
     uint stage = (live >> 8) & 15u;
     if (stage != 0u) { dn_stage(stage, x, y, px); return; }
