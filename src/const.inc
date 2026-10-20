@@ -607,5 +607,6 @@
 .equ SP_R,          12                  # radius
 .equ SP_MAT,        16                  # material + 1 (0: the default)
 .equ SP_COL,        20                  # colour (0xAARRGGBB, sRGB; 0: none)
-.equ SP_VEL,        24                  # velocity (m/s; motion blur)
+.equ SP_VEL,        24                  # movement while the shutter is open (m;
+                                        #  motion blur: v x shutter / fps)
 .equ SP_SZ,         48

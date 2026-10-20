@@ -123,6 +123,9 @@ images through the sRGB curve), with env.s's importance-sampling tables
 header (size, total, rotation, strength). The shader looks it up, samples
 it and weighs it (MIS) as `env.s` does, so the image matches the CPU's.
 Rendered shading draws it as well.
+Motion blur (v0.23, [PARTICLES.md](PARTICLES.md)) draws a time per
+sample, after the pixel's jitter (`cam[15]` says the balls move); a ball
+is at `c + v t` then, `v` its movement while the shutter is open.
 Particle balls are exact spheres (v0.23): a 48-byte record each (centre,
 radius, material, colour; binding 19) behind the triangles in one BVH,
 their own subtree under the root so a leaf holds one kind. Both tracers

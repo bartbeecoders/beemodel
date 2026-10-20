@@ -38,6 +38,8 @@
 .globl hv_npoints
 .globl hv_ready
 .globl hv_nobvh
+.globl hv_shutter
+.globl hv_mblur
 .globl hv_bvhless
 .globl hv_nodes
 .globl hv_root
@@ -188,6 +190,9 @@ hv_ksplit:      .skip 4             # 1: the top's root splits triangles | spher
 hv_nobvh:       .skip 4             # the next build for RTX alone: no BVH but
                                     #  for objects the cache is about to keep
 hv_bvhless:     .skip 4             # the scene built so (the CPU: hive_build again)
+hv_shutter:     .skip 4             # motion blur: the shutter open, frames (0: off)
+hv_mblur:       .skip 4             # this scene's balls move while it is (rays
+                                    #  then have a time: RAY_TIME, [r15+8])
 .align 8
 hc_tab:         .skip HC_MAX*HS_SZ  # the cache's slots (kept across builds)
 kp_tab:         .skip K_N*16        # kept buffers: address, bytes
@@ -459,6 +464,13 @@ hive_build:
     xor     edx, edx
     call    hv_seg_add
 22: mov     [rip+hv_n], r12d
+    xor     eax, eax                    # motion blur: a shutter, and balls
+    cmp     dword ptr [rip+hv_ns], 0
+    je      24f
+    xorps   xmm0, xmm0
+    comiss  xmm0, [rip+hv_shutter]
+    setb    al
+24: mov     [rip+hv_mblur], eax
     cmp     dword ptr [rip+hv_ns], 0
     je      23f
     mov     edi, r12d
@@ -1007,6 +1019,13 @@ hv_part_emit:
     mov     dword ptr [rsp], 0
     cmp     qword ptr [rip+hv_only], 0  # (a bake of one object: none)
     jne     .Lpe_out
+    mov     dword ptr [rsp+60], 0       # balls' movement: velocity x the
+    cmp     dword ptr [rip+hv_mblur], 0 #  shutter (s): [60]
+    je      .Lpe_sys
+    call    an_range
+    movss   xmm1, [rip+hv_shutter]
+    divss   xmm1, xmm0
+    movss   [rsp+60], xmm1
 .Lpe_sys:
     mov     edi, [rsp]
     cmp     edi, [rip+pt_ns]
@@ -1192,8 +1211,30 @@ hv_part_emit:
     mov     [rdx+SP_VEL], rax
     mov     [rdx+SP_VEL+8], rax
     mov     [rdx+SP_VEL+16], rax
-    mov     [rdx+SP_VEL+24], eax
-    mov     eax, r8d                    # its box and centre (primitive hv_n + k)
+    cmp     dword ptr [rsp+60], 0       # moving: where it goes while the
+    je      3f                          #  shutter is open
+    mov     [rsp+56], r8d
+    mov     edi, [rsp]
+    dec     edi
+    call    pt_ivel
+    mov     r8d, [rsp+56]
+    imul    rdx, r8, SP_SZ
+    add     rdx, [rip+hv_sp]
+    test    rax, rax
+    jz      3f
+    mov     ecx, [rsp+20]
+    lea     rcx, [rcx+rcx*2]
+    lea     rax, [rax+rcx*4]
+    xor     ecx, ecx
+31: movss   xmm1, [rax+rcx*4]
+    mulss   xmm1, [rsp+60]
+    movss   [rdx+SP_VEL+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      31b
+3:  movss   xmm0, [rdx+SP_R]
+    mov     eax, r8d                    # its box (all it sweeps) and centre
+                                        #  (primitive hv_n + k)
     add     eax, [rip+hv_n]
     lea     r9, [rax+rax*2]
     mov     r10, [rip+b_cent]
@@ -1203,9 +1244,14 @@ hv_part_emit:
     xor     ecx, ecx
 1:  movss   xmm1, [rdx+SP_C+rcx*4]
     movss   [r10+rcx*4], xmm1
+    movss   xmm3, [rdx+SP_VEL+rcx*4]    # (half its movement each way)
+    mulss   xmm3, [rip+hf_half]
+    andps   xmm3, [rip+hf_absm]
     movss   xmm2, xmm1
+    subss   xmm2, xmm3
     subss   xmm2, xmm0
     movss   [r11+rcx*4], xmm2
+    addss   xmm1, xmm3
     addss   xmm1, xmm0
     movss   [r11+12+rcx*4], xmm1
     inc     ecx
@@ -4102,6 +4148,7 @@ ro_job:
 .equ RAY_TRI,   32
 .equ RAY_U,     36
 .equ RAY_V,     40
+.equ RAY_TIME,  44              # motion blur: the shutter time - 0.5 (hv_mblur)
 
 # hv_trace(rdi=ray) -> eax = 1 if it hit (t, tri, u, v filled)
 hv_trace:
@@ -4287,6 +4334,28 @@ trace_common:
     pop     rbx
     ret
 
+# (sph_hit, a moving ball: oc = o - (c + v t), t the ray's time)
+.Lsh_moving:
+    movss   xmm3, [rax+SP_VEL]
+    mulss   xmm3, [rbx+RAY_TIME]
+    addss   xmm3, [rax+SP_C]
+    movss   xmm6, [rbx+RAY_O]
+    subss   xmm6, xmm3
+    movss   xmm4, [rax+SP_VEL+4]
+    mulss   xmm4, [rbx+RAY_TIME]
+    addss   xmm4, [rax+SP_C+4]
+    movss   xmm7, [rbx+RAY_O+4]
+    subss   xmm7, xmm4
+    movss   xmm5, [rax+SP_VEL+8]
+    mulss   xmm5, [rbx+RAY_TIME]
+    addss   xmm5, [rax+SP_C+8]
+    movss   xmm8, [rbx+RAY_O+8]
+    subss   xmm8, xmm5
+    movaps  xmm3, xmm6
+    movaps  xmm4, xmm7
+    movaps  xmm5, xmm8
+    jmp     .Lsh_oc
+
 # sph_hit(edi=primitive >= hv_n; rbx = ray) -> eax = 1 with xmm0 = t (the
 #   nearer crossing past epsilon: from inside, the far one), xmm1 = xmm2 = 0.
 #   From the closest approach (Ray Tracing Gems ch. 7): k = (oc . d) / d^2,
@@ -4296,12 +4365,15 @@ sph_hit:
     sub     edi, [rip+hv_n]
     imul    rax, rdi, SP_SZ
     add     rax, [rip+hv_sp]
+    cmp     dword ptr [rip+hv_mblur], 0 # (moving: at the ray's time)
+    jne     .Lsh_moving
     movss   xmm3, [rbx+RAY_O]           # oc = o - c
     subss   xmm3, [rax+SP_C]
     movss   xmm4, [rbx+RAY_O+4]
     subss   xmm4, [rax+SP_C+4]
     movss   xmm5, [rbx+RAY_O+8]
     subss   xmm5, [rax+SP_C+8]
+.Lsh_oc:
     movss   xmm6, [rbx+RAY_D]           # a = d . d
     mulss   xmm6, xmm6
     movss   xmm7, [rbx+RAY_D+4]

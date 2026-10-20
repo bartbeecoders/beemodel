@@ -38,7 +38,8 @@ layout(std430, binding = 0) readonly buffer Params {
     uint w, h, spp, count;          // the first sample's number, how many
     uint seed, nslots, npoints, nl;
     uint ntri, root, debug, cut;    // cut: masked / translucent / one-sided in it
-    float cam[16];                  // origin, right, up, forward, tan_h; [14]: live flags
+    float cam[16];                  // origin, right, up, forward, tan_h; [13]: the balls,
+                                    //  [14]: live flags, [15]: 1 they move (motion blur)
     float points[64 * 16];          // light objects: position, colour * power, type, size,
                                     //  direction, cos (sun / spot outer), area axis, inner cos
     float lut[256];                 // sRGB byte -> linear (srgb_to_lin)
@@ -126,7 +127,17 @@ const uint SPW = 12u;
 uint NSPH() { return floatBitsToUint(P.cam[13]); }
 bool is_sph(uint t) { return t >= P.ntri; }
 uint sph_o(uint t) { return (t - P.ntri) * SPW; }
-vec3 sph_c(uint t) { uint o = sph_o(t); return vec3(sph[o], sph[o + 1u], sph[o + 2u]); }
+// motion blur: the sample's time in the shutter, from its middle (-0.5 .. 0.5;
+//   0 without), and where a ball is then: c + v t (v: its movement while the
+//   shutter is open), rounded as hive_pt.s's SPC
+float rtime = 0.0;
+bool mblur() { return floatBitsToUint(P.cam[15]) != 0u; }
+vec3 sph_move(uint o, vec3 c) { precise vec3 m = vec3(sph[o + 6u], sph[o + 7u], sph[o + 8u]) * rtime; precise vec3 p = m + c; return p; }
+vec3 sph_c(uint t) {
+    uint o = sph_o(t);
+    vec3 c = vec3(sph[o], sph[o + 1u], sph[o + 2u]);
+    return rtime != 0.0 ? sph_move(o, c) : c;
+}
 float sph_r(uint t) { return sph[sph_o(t) + 3u]; }
 uint tmat(uint t) { return is_sph(t) ? floatBitsToUint(sph[sph_o(t) + 4u]) & ~CATCH : tm[t] & ~CATCH; }
 bool has_vcol(uint t) { return is_sph(t) ? floatBitsToUint(sph[sph_o(t) + 5u]) != 0u : tvc[t * 3u] != 0u; }
@@ -165,7 +176,7 @@ vec3 hit_point(Ray r) { precise vec3 p = r.d * r.t + r.o; return p; }
 //   balls); hive.s sph_hit, step for step
 bool sph_hit(uint t, inout Ray r, out float tt) {
     uint o = sph_o(t);
-    precise vec3 oc = r.o - vec3(sph[o], sph[o + 1u], sph[o + 2u]);
+    precise vec3 oc = r.o - sph_c(t);
     precise float a = r.d.x * r.d.x + r.d.y * r.d.y + r.d.z * r.d.z;
     if (!(a > 1.0e-12)) return false;
     float inv = 1.0 / a;
@@ -1735,6 +1746,7 @@ void main() {
         rng = hsh | 1UL;
         float jx = rc ? 0.5 : rnd();
         float jy = rc ? 0.5 : rnd();
+        rtime = !rc && mblur() ? rnd() - 0.5 : 0.0;
         float sx = (jx + float(x)) * 2.0 / fw - 1.0;
         float sy = (1.0 - (jy + float(y)) * 2.0 / fh) * fh / fw;
         vec3 lo;

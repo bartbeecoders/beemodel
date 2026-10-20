@@ -149,6 +149,18 @@ million balls a render; an emissive ball is a light, sampled by the cone
 it fills. `render off` leaves a system out. A liquid with its surface on
 renders as the surface instead.
 
+**Motion blur** (v0.23): **Properties › Render › Motion blur (shutter)**, or
+`render.motion_blur <shutter>`, says how long the shutter is open as a
+part of a frame (0.5: half of it; 0, the default, is off). It is saved
+with the scene. Each sample then has a time in the shutter, and every
+ball is where its velocity takes it by then: velocity × shutter / fps,
+from half that before the frame to half after. Fast rain draws streaks,
+and a still frame keeps its exact look. The BVH and the GPU's
+acceleration structures bound each ball's whole sweep (a capsule round
+its path). The CPU, the GPU and RTX take the same time for a sample, so
+they agree as without blur. Particles drawn as objects, and moving
+objects, are drawn at the frame's time.
+
 ## Collisions and events
 
 With `collide on`, each particle's way through the step is cast against:

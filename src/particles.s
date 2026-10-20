@@ -4037,8 +4037,10 @@ pd_fwd:         .skip 16
 pd_buf:         .skip 8                 # the keys
 pd_ib:          .skip 8*PB_MAX          # each system's instance block
 pd_ibk:         .skip 8*PB_MAX          #  made for (steps, key)
-pd_icol:        .skip 8*PB_MAX          #  its particles' colours (u32)
-pd_icap:        .skip 4*PB_MAX          #  room for them
+pd_icol:        .skip 8*PB_MAX          #  its particles' colours (u32), then
+pd_icap:        .skip 4*PB_MAX          #  their velocities (3 floats), room
+                                        #  for them (colours at pd_icol, the
+                                        #  velocities from icap colours on)
 pt_sphere:      .skip 8                 # a sphere (an icosahedron, radius 1)
 .align 4
 pd_ms:          .skip 4                 # the last draw (ms)
@@ -4650,13 +4652,13 @@ pt_iblock:
     jz      11f
     lea     rcx, [rip+pd_icap]
     mov     esi, [rcx+rbx*4]
-    shl     rsi, 2
+    shl     rsi, 4
     mov     eax, SYS_MUNMAP
     syscall
 11: lea     esi, [r13+r13*1]            # (twice: room to grow)
     lea     rcx, [rip+pd_icap]
     mov     [rcx+rbx*4], esi
-    shl     rsi, 2
+    shl     rsi, 4
     xor     edi, edi
     mov     edx, PROT_RW
     mov     r10d, MAP_ANON_PRIV
@@ -4778,8 +4780,18 @@ pt_iblock:
     lea     rcx, [rip+pd_icol]
     mov     edx, [r12+SR_SI]
     mov     rcx, [rcx+rdx*8]
+    lea     r8, [rip+pd_icap]           # (its velocity, after the colours:
+    mov     r8d, [r8+rdx*4]             #  motion blur)
+    lea     r8, [rcx+r8*4]
     mov     edx, [rsp+80]
     mov     [rcx+rdx*4], eax
+    lea     r9d, [rdx+rdx*2]
+    mov     r10d, [rbx+A_VX+r13*4]
+    mov     [r8+r9*4], r10d
+    mov     r10d, [rbx+A_VY+r13*4]
+    mov     [r8+r9*4+4], r10d
+    mov     r10d, [rbx+A_VZ+r13*4]
+    mov     [r8+r9*4+8], r10d
     # its turn: an axis (x) and the two square to it
     cmp     dword ptr [r15+PS_ALIGN], 1
     jne     43f
@@ -4885,6 +4897,19 @@ pt_stamp:
     or      eax, [rip+pt_ns]
     xor     rax, [rip+pt_hash]
     ret
+
+# pt_ivel(edi=system) -> rax = its instances' velocities (3 floats each, as
+#   pt_render's block has them; m/s), or 0
+.globl pt_ivel
+pt_ivel:
+    lea     rcx, [rip+pd_icol]
+    mov     rax, [rcx+rdi*8]
+    test    rax, rax
+    jz      9f
+    lea     rcx, [rip+pd_icap]
+    mov     ecx, [rcx+rdi*4]
+    lea     rax, [rax+rcx*4]
+9:  ret
 
 # pt_render(edi=system) -> rax = its instance block for a render, rdx = the
 #   particles' colours, ecx = the material (+1) its emitter has, or rax 0

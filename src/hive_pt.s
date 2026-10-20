@@ -15,6 +15,19 @@
 .include "const.inc"
 .include "macros.inc"
 
+# SPC dst, rec - a ball's centre, axis rcx, where it is at the path's time
+#   ([r15+8], beside the rng) when balls move (hv_mblur); xmm15 scratch
+.macro SPC dst, rec
+    movss   \dst, [\rec+SP_C+rcx*4]
+    cmp     dword ptr [rip+hv_mblur], 0
+    je      .Lspc\@
+    movss   xmm15, [\rec+SP_VEL+rcx*4]
+    mulss   xmm15, [r15+8]
+    addss   xmm15, \dst
+    movss   \dst, xmm15
+.Lspc\@:
+.endm
+
 # exports
 .globl hv_bounces
 .globl hive_start
@@ -67,6 +80,7 @@
 .equ RAY_TRI,   32
 .equ RAY_U,     36
 .equ RAY_V,     40
+.equ RAY_TIME,  44              # motion blur: the shutter time - 0.5 (hv_mblur)
 .equ RAY_SZ,    48
 .equ MAX_DEPTH, 12
 # BSDF context
@@ -2002,7 +2016,7 @@ sph_omc:
     call    sph_rec
     xorps   xmm1, xmm1
     xor     ecx, ecx
-1:  movss   xmm3, [rax+SP_C+rcx*4]
+1:  SPC     xmm3, rax
     subss   xmm3, [rsi+rcx*4]
     mulss   xmm3, xmm3
     addss   xmm1, xmm3
@@ -2045,7 +2059,7 @@ sph_light:
     movss   [rsp+52], xmm1              # d^2
     movss   [rsp+56], xmm2              # r^2
     xor     ecx, ecx                    # the axis: towards the centre
-1:  movss   xmm0, [rbx+SP_C+rcx*4]
+1:  SPC     xmm0, rbx
     subss   xmm0, [r12+rcx*4]
     movss   [rsp+32+rcx*4], xmm0
     inc     ecx
@@ -2234,6 +2248,8 @@ trace_ray:
     mov     [rbx+PF_RAY+RAY_O+rcx*4], eax
     mov     eax, [rsi+rcx*4]
     mov     [rbx+PF_RAY+RAY_D+rcx*4], eax
+    mov     dword ptr [rbx+PF_RAY+RAY_TIME], 0      # (no motion blur here)
+    mov     dword ptr [rbx+PF_SRAY+RAY_TIME], 0
     mov     dword ptr [rbx+PF_BETA+rcx*4], 0x3f800000
     mov     dword ptr [rbx+PF_L+rcx*4], 0
     inc     ecx
@@ -2294,6 +2310,14 @@ trace_path:
     inc     ecx
     cmp     ecx, 3
     jb      1b
+    xorps   xmm0, xmm0                  # motion blur: a time in the shutter
+    cmp     dword ptr [rip+hv_mblur], 0 #  (from its middle: -0.5 .. 0.5),
+    je      2f                          #  on the rays and beside the rng
+    call    rnd
+    subss   xmm0, [rip+pt_half]
+2:  movss   [rbx+PF_RAY+RAY_TIME], xmm0
+    movss   [rbx+PF_SRAY+RAY_TIME], xmm0
+    movss   [r15+8], xmm0
 .Ltp_dir:
     lea     rdi, [rbx+PF_RAY+RAY_D]
     call    unit3
@@ -2937,8 +2961,9 @@ sph_graph_ctx:
     movss   xmm1, [rip+pt_one]
     divss   xmm1, [r14+SP_R]
     xor     ecx, ecx
-1:  movss   xmm0, [rbx+PF_P+rcx*4]
-    subss   xmm0, [r14+SP_C+rcx*4]
+1:  SPC     xmm14, r14
+    movss   xmm0, [rbx+PF_P+rcx*4]
+    subss   xmm0, xmm14
     mulss   xmm0, xmm1
     movss   [rbx+PF_SC+rcx*4], xmm0
     mov     dword ptr [rbx+PF_SC+12+rcx*4], 0
@@ -3179,8 +3204,9 @@ hit_normals:
 sph_normals:
     call    sph_rec
     xor     ecx, ecx
-1:  movss   xmm0, [rbx+PF_P+rcx*4]
-    subss   xmm0, [rax+SP_C+rcx*4]
+1:  SPC     xmm14, rax
+    movss   xmm0, [rbx+PF_P+rcx*4]
+    subss   xmm0, xmm14
     movss   [rbx+PF_NG+rcx*4], xmm0
     inc     ecx
     cmp     ecx, 3
@@ -3254,7 +3280,10 @@ hive_start:
     mov     [rip+hv_nobvh], eax
 12: call    hive_build
     mov     dword ptr [rip+hv_nobvh], 0
-    test    eax, eax
+    cmp     dword ptr [rip+gt_cpu], 0   # (trace_ray: no motion blur)
+    je      13f
+    mov     dword ptr [rip+hv_mblur], 0
+13: test    eax, eax
     jz      8f
     mov     [rip+hv_w], r12d
     mov     [rip+hv_h], r13d
