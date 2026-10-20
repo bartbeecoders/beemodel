@@ -73,6 +73,11 @@ s_rn_needsave:  .asciz "  render.save <path.png> [beauty|albedo|normal|depth]"
 s_rn_badpass:   .asciz "  render pass: beauty, albedo, normal or depth"
 s_rn_pass:      .asciz "  render pass: "
 s_rn_dev:       .asciz "  render device: "
+s_rn_anim:      .asciz "  rendered frames "
+s_rn_anim2:     .asciz " to "
+s_rn_anim3:     .asciz ", ms: "
+s_rn_animneed:  .asciz "  render.animation <folder> [first last]"
+s_rn_animfail:  .asciz "  render.animation: could not render or write the frames"
 s_rn_mb:        .asciz "  motion blur: the shutter open "
 s_rn_mb2:       .asciz "% of a frame"
 s_rn_mboff:     .asciz "  motion blur: off"
@@ -127,6 +132,7 @@ OPERATOR op_render_stop, "render.stop", "Stop Render", do_render_stop, flags=OPF
 OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, doc="Save the render as PNG, or .exr (linear half floats): render.save <path> [beauty|albedo|normal|depth]", poll=poll_render, form=form_rsave
 OPERATOR op_render_pass, "render.pass", "Next Render Pass", do_render_pass, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)", poll=poll_render
 OPERATOR op_render_device, "render.device", "Render Device", do_render_device, flags=OPF_AI_SAFE|OPF_QUIET, doc="Where renders run: render.device [auto|rtx|gpu|cpu] (auto: the best there is - RTX ray tracing, the GPU, else the CPU; none: says which; kept in the preferences)"
+OPERATOR op_render_anim, "render.animation", "Render Animation", do_render_anim, flags=OPF_AI_SAFE, doc="Render every frame into a folder of PNGs (0001.png ...) at the render settings: render.animation <folder> [first last] (none: the animation's range). On the GPU the next frame is simulated and built while it traces one"
 OPERATOR op_render_mblur, "render.motion_blur", "Motion Blur", do_render_mblur, flags=OPF_AI_SAFE, doc="Motion blur: render.motion_blur <shutter> - how long the shutter is open, as a part of a frame (0.5: half of it; 0: off). Particle balls are drawn where they are at each sample's time: rain streaks"
 OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>", form=form_render
 OPERATOR op_render_denoise, "render.denoise", "Denoise", do_render_denoise, check_denoise, flags=OPF_AI_SAFE|OPF_QUIET, doc="Toggle denoising the beauty pass when a render ends (guided by albedo, normal, depth)", poll=poll_render
@@ -477,6 +483,95 @@ do_render_device:
     lea     rdi, [rip+fmt_buf]
     call    log_line
 9:  pop     rbx
+    ret
+
+# ---- render.animation <folder> [first last] ---------------------------------
+# render.animation <folder> [first last] - the frames into folder/NNNN.png
+#   at the render settings (hive_render_frames)
+do_render_anim:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 288                    # +0 the last frame (the 7th
+    mov     rsi, [rip+op_arg]           #  argument), +8 the first, +32 the
+    test    rsi, rsi                    #  folder
+    jz      .Lra_need
+    lea     rdi, [rsp+32]
+    xor     ecx, ecx
+1:  cmp     byte ptr [rsi], ' '
+    jne     11f
+    inc     rsi
+    jmp     1b
+11: mov     al, [rsi]
+    test    al, al
+    jz      2f
+    cmp     al, ' '
+    je      2f
+    cmp     ecx, 250
+    jae     12f
+    mov     [rdi+rcx], al
+    inc     ecx
+12: inc     rsi
+    jmp     11b
+2:  mov     byte ptr [rdi+rcx], 0
+    test    ecx, ecx
+    jz      .Lra_need
+    mov     rbx, rsi
+    call    an_range
+    mov     [rsp+8], eax
+    mov     [rsp], edx
+    mov     rsi, rbx
+    lea     rdx, [rsi+64]
+    call    parse_float
+    test    eax, eax
+    jz      3f
+    cvttss2si eax, xmm0
+    mov     [rsp+8], eax
+    lea     rdx, [rsi+64]
+    call    parse_float
+    test    eax, eax
+    jz      3f
+    cvttss2si eax, xmm0
+    mov     [rsp], eax
+3:  lea     rdi, [rsp+32]
+    call    path_expand
+    lea     rdi, [rip+path_buf]
+    mov     esi, [rip+rn_w]
+    mov     edx, [rip+rn_h]
+    mov     ecx, [rip+rn_spp]
+    mov     r8d, [rip+rn_denoise]
+    mov     r9d, [rsp+8]
+    call    hive_render_frames
+    test    eax, eax
+    js      .Lra_fail
+    mov     r12d, eax
+    call    fmt_reset
+    lea     rdi, [rip+s_rn_anim]
+    call    fmt_str
+    mov     edi, [rsp+8]
+    call    fmt_int
+    lea     rdi, [rip+s_rn_anim2]
+    call    fmt_str
+    mov     edi, [rsp]
+    call    fmt_int
+    lea     rdi, [rip+s_rn_anim3]
+    call    fmt_str
+    mov     edi, r12d
+    call    fmt_int
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+    jmp     9f
+.Lra_need:
+    lea     rdi, [rip+s_rn_animneed]
+    call    log_line
+    jmp     9f
+.Lra_fail:
+    lea     rdi, [rip+s_rn_animfail]
+    call    log_line
+9:  add     rsp, 288
+    pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # ---- render.motion_blur [shutter] -------------------------------------------

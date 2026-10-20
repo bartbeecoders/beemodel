@@ -285,6 +285,24 @@ for one million triangles. 1024 samples of the small scene take 1.5 s
 (3.3 s with the million triangles). Building the million-triangle scene
 takes 0.55 s; the small one, 4 ms.
 
+### Animations (v0.23)
+
+`render_frames(folder, first, last, ...)` and `render.animation <folder>
+[first last]` render a range of frames into `folder/0001.png` and so on
+(`hive_render_frames`). On the GPU the frames overlap. The last batch of
+a frame is sent (`gpu_pt_send`) without waiting for it. While the GPU
+traces it, the CPU writes the PNG of the frame before, moves the scene to
+the next frame (animation, simulations) and builds it (`hive_scene`). Then
+it takes the batch's reply (`gpu_pt_wait`), resolves the image and puts
+the next frame's scene up. Slot 0 is not written while a batch is in
+flight: anything else that talks to the helper reads the reply first
+(`g_drain`).
+
+The images are the ones `frame()` and `render()` make frame by frame,
+pixel for pixel. The rainstorm demo at 960 x 540 and 16 samples takes
+78 ms a frame instead of 109 ms. If the helper dies during the overlap,
+the scene goes back to that frame and the CPU renders it again.
+
 ### Falling back
 
 - **Missing or unusable:** no helper, no device, a scene `pt.comp` does not

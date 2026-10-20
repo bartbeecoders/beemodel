@@ -46,6 +46,7 @@
 .globl hv_active
 .globl hv_ms
 .globl hive_render_file
+.globl hive_render_frames
 .globl hv_pass
 .globl hv_next
 .globl hv_m2
@@ -3252,25 +3253,13 @@ prim_vc:
 # =============================================================================
 #  The driver
 # =============================================================================
-# hive_start(edi=width, esi=height, edx=target samples) -> eax = 1
-hive_start:
-    push    rbx
-    push    r12
-    push    r13
-    push    rdi
-    push    rsi
-    push    rdx
+# hive_scene -> eax = 1: the scene as it is now, built (materials, images,
+#   the world, hive_build), for the next hive_start. It leaves the last
+#   render's samples alone: hive_render_frames builds the next frame while
+#   the GPU still traces this one.
+hive_scene:
     sub     rsp, 8
     call    mat_sync_check              # (material instances up to date)
-    add     rsp, 8
-    pop     rdx
-    pop     rsi
-    pop     rdi
-    mov     r12d, edi
-    mov     r13d, esi
-    mov     [rip+hv_target], edx
-    mov     dword ptr [rip+hv_gpu], 0   # (nothing of the last render's)
-    call    pt_unmap_all
     call    tex_init
     call    env_prep
     mov     [rip+hv_env], eax
@@ -3283,7 +3272,29 @@ hive_start:
     cmp     dword ptr [rip+gt_cpu], 0   # (trace_ray: no motion blur)
     je      13f
     mov     dword ptr [rip+hv_mblur], 0
-13: test    eax, eax
+13: inc     eax
+    mov     [rip+hv_pre], eax
+    dec     eax
+    add     rsp, 8
+    ret
+
+# hive_start(edi=width, esi=height, edx=target samples) -> eax = 1 (the
+#   scene hive_scene built, else built now)
+hive_start:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     [rip+hv_target], edx
+    mov     dword ptr [rip+hv_gpu], 0   # (nothing of the last render's)
+    call    pt_unmap_all
+    mov     eax, [rip+hv_pre]
+    dec     eax
+    jns     13f
+    call    hive_scene
+13: mov     dword ptr [rip+hv_pre], 0
+    test    eax, eax
     jz      8f
     mov     [rip+hv_w], r12d
     mov     [rip+hv_h], r13d
@@ -3976,6 +3987,248 @@ hive_render_file:
     pop     rbx
     ret
 
+# hive_render_frames(rdi=folder, esi=width, edx=height, ecx=samples,
+#   r8d=denoise, r9d=first frame, [rsp+8]=last frame) -> eax = milliseconds,
+#   or -1: every frame through the path tracer into folder/NNNN.png (made if
+#   missing). On the GPU the frames overlap: while it traces a frame's last
+#   batch the CPU writes the PNG of the frame before, moves the scene to the
+#   next frame (its simulations) and builds that (hive_scene).
+hive_render_frames:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 56                     # +0 the last frame, +4 denoise,
+    mov     [rsp+4], r8d                #  +24 the start, +32 hv_pass
+    mov     r15d, r9d
+    mov     eax, [rsp+112]
+    mov     [rsp], eax
+    cmp     r15d, eax
+    jg      .Lrf_no
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     r14d, ecx
+    lea     rbx, [rip+rf_path]          # the folder (no trailing /)
+    xor     ecx, ecx
+1:  mov     al, [rdi+rcx]
+    mov     [rbx+rcx], al
+    test    al, al
+    jz      2f
+    inc     ecx
+    cmp     ecx, 1000
+    jb      1b
+    jmp     .Lrf_no
+2:  cmp     ecx, 1
+    jbe     3f
+    cmp     byte ptr [rbx+rcx-1], '/'
+    jne     3f
+    dec     ecx
+    mov     byte ptr [rbx+rcx], 0
+    jmp     2b
+3:  test    ecx, ecx
+    jz      .Lrf_no
+    mov     [rip+rf_len], ecx
+    mov     rdi, rbx
+    call    ensure_dir
+    mov     [rip+rf_w], r12d
+    mov     [rip+rf_h], r13d
+    mov     dword ptr [rip+rf_has], 0
+    mov     dword ptr [rip+rf_err], 0
+    mov     eax, r12d                   # the image of the frame resolved last
+    imul    eax, r13d
+    lea     rsi, [rax*4+64]
+    xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8d, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    ja      .Lrf_no
+    mov     [rip+rf_pix], rax
+    call    render_abort                # the Render area's samples are gone
+    mov     eax, [rip+hv_pass]          # files get the beauty pass
+    mov     [rsp+32], eax
+    mov     dword ptr [rip+hv_pass], 0
+    call    now_ms
+    mov     [rsp+24], rax
+    cvtsi2ss xmm0, r15d
+    call    an_set_frame
+    call    hive_scene
+.Lrf_frame:
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    call    hive_start
+    test    eax, eax
+    jz      .Lrf_fail
+.Lrf_pass:
+    mov     eax, [rip+hv_spp]
+    cmp     eax, [rip+hv_target]
+    jae     .Lrf_done
+    cmp     dword ptr [rip+hv_gpu], 0   # on the GPU: batches as
+    je      .Lrf_cpu                    #  hive_render_file's
+    mov     eax, r12d
+    imul    eax, r13d
+    mov     ecx, eax
+    mov     eax, 16*1024*1024
+    xor     edx, edx
+    div     ecx
+    cmp     eax, 16
+    jbe     4f
+    mov     eax, 16
+4:  test    eax, eax
+    jnz     5f
+    mov     eax, 1
+5:  mov     edi, [rip+hv_target]
+    sub     edi, [rip+hv_spp]
+    cmp     edi, eax
+    jbe     .Lrf_last
+    mov     edi, eax
+    call    gpu_pt_pass
+    test    eax, eax
+    jnz     .Lrf_pass
+    jmp     .Lrf_cpu
+.Lrf_last:                              # the last batch: meanwhile the PNG
+    call    gpu_pt_send                 #  before, the next frame built
+    test    eax, eax
+    jz      .Lrf_cpu
+    call    rf_flush
+    cmp     r15d, [rsp]
+    jge     6f
+    lea     eax, [r15+1]
+    cvtsi2ss xmm0, eax
+    call    an_set_frame
+    call    hive_scene
+6:  call    gpu_pt_wait
+    test    eax, eax
+    jnz     .Lrf_pass
+    mov     dword ptr [rip+hv_pre], 0   # the GPU failed: this frame again
+    cvtsi2ss xmm0, r15d                 #  (on the CPU)
+    call    an_set_frame
+    jmp     .Lrf_frame
+.Lrf_cpu:
+    call    hive_pass
+    jmp     .Lrf_pass
+.Lrf_done:
+    call    rf_flush                    # (the CPU's frames: not yet)
+    cmp     dword ptr [rsp+4], 0
+    je      7f
+    call    hive_denoise
+7:  mov     rdi, [rip+rf_pix]
+    mov     esi, r12d
+    call    hive_resolve
+    mov     [rip+rf_pend], r15d
+    mov     eax, [rip+hv_film]          # (shadow catchers: RGBA)
+    mov     [rip+rf_film], eax
+    mov     dword ptr [rip+rf_has], 1
+    cmp     dword ptr [rip+rf_err], 0
+    jne     .Lrf_fail
+    cmp     r15d, [rsp]
+    jge     .Lrf_end
+    inc     r15d
+    cmp     dword ptr [rip+hv_pre], 0   # (built ahead: the scene is there)
+    jne     .Lrf_frame
+    cvtsi2ss xmm0, r15d
+    call    an_set_frame
+    jmp     .Lrf_frame
+.Lrf_end:
+    call    rf_flush
+    cmp     dword ptr [rip+rf_err], 0
+    jne     .Lrf_fail
+    call    now_ms
+    sub     rax, [rsp+24]
+    mov     [rip+hv_ms], eax
+    mov     ebp, eax
+    jmp     .Lrf_out
+.Lrf_fail:
+    mov     ebp, -1
+.Lrf_out:
+    mov     dword ptr [rip+hv_pre], 0
+    mov     dword ptr [rip+rf_has], 0
+    mov     eax, [rsp+32]
+    mov     [rip+hv_pass], eax
+    mov     rdi, [rip+rf_pix]
+    mov     eax, r12d
+    imul    eax, r13d
+    lea     rsi, [rax*4+64]
+    mov     eax, SYS_MUNMAP
+    syscall
+    mov     eax, ebp
+    jmp     9f
+.Lrf_no:
+    mov     eax, -1
+9:  add     rsp, 56
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# rf_flush - the frame resolved last (rf_pix), if not written yet, into
+#   rf_path/NNNN.png (rf_err set if that fails)
+rf_flush:
+    cmp     dword ptr [rip+rf_has], 0
+    je      9f
+    push    rbx
+    mov     dword ptr [rip+rf_has], 0
+    lea     rbx, [rip+rf_path]
+    mov     eax, [rip+rf_len]
+    add     rbx, rax
+    mov     byte ptr [rbx], '/'
+    inc     rbx
+    mov     eax, [rip+rf_pend]
+    test    eax, eax
+    jns     1f
+    mov     byte ptr [rbx], '-'
+    inc     rbx
+    neg     eax
+1:  mov     ecx, 10                     # the digits (four at least)
+    xor     r8d, r8d
+    lea     rsi, [rip+rf_dig]
+2:  xor     edx, edx
+    div     ecx
+    add     dl, '0'
+    mov     [rsi+r8], dl
+    inc     r8d
+    test    eax, eax
+    jnz     2b
+3:  cmp     r8d, 4
+    jae     4f
+    mov     byte ptr [rsi+r8], '0'
+    inc     r8d
+    jmp     3b
+4:  dec     r8d
+    mov     al, [rsi+r8]
+    mov     [rbx], al
+    inc     rbx
+    test    r8d, r8d
+    jnz     4b
+    mov     dword ptr [rbx], 0x676e702e # ".png"
+    mov     byte ptr [rbx+4], 0
+    lea     rdi, [rip+rf_path]
+    mov     rsi, [rip+rf_pix]
+    mov     edx, [rip+rf_w]
+    mov     ecx, [rip+rf_h]
+    mov     r8d, edx
+    mov     eax, [rip+rf_film]
+    mov     [rip+png_alpha], eax
+    call    png_write
+    mov     dword ptr [rip+png_alpha], 0
+    test    eax, eax
+    jz      8f
+    mov     dword ptr [rip+rf_err], 1
+8:  mov     eax, [rip+rf_len]           # (the folder again)
+    lea     rcx, [rip+rf_path]
+    mov     byte ptr [rcx+rax], 0
+    pop     rbx
+9:  ret
+
 # render.image <path> [width height samples]
 do_render_image:
     push    rbx
@@ -4085,6 +4338,17 @@ pt_nmaps:       .skip 4
 hv_debug:       .skip 4
 gt_batch:       .skip 4                 # gpu_tick's samples per batch
 gt_cpu:         .skip 4                 # hive_start without the GPU
+hv_pre:         .skip 4                 # hive_scene's built it: its result + 1
+rf_pix:         .skip 8                 # hive_render_frames: the frame resolved
+rf_pend:        .skip 4                 #  last, its number, 1 if its PNG is
+rf_has:         .skip 4                 #  not written yet, its alpha
+rf_film:        .skip 4
+rf_err:         .skip 4                 #  a PNG failed
+rf_w:           .skip 4
+rf_h:           .skip 4
+rf_len:         .skip 4                 #  the folder's length
+rf_dig:         .skip 16
+rf_path:        .skip 1040
 hv_why:         .skip 4                 # where the render is and why (HW_*)
 hv_den_on:      .skip 4                 # beauty shows hv_den (denoised)
 hv_env:         .skip 4                 # the world is an HDRI (no studio sky, sun)
