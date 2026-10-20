@@ -815,6 +815,40 @@ def gpu_viewport():
               f'{mode}: the GPU drew the viewport ({na} frames; the CPU {nb}), the CPU\'s image '   # on a side)
               f'({100 * same:.2f}% of pixels identical, {100 * far:.3f}% more than 8 levels apart)')
     check(edit == 0, f'edit mode: the CPU draws the viewport ({edit} GPU frames)')
+    # particles: points, sprites (a colour ramp, growing), objects (instances)
+    pbee = os.path.join(HOME, 'vp_parts.bee')
+    run('add("cube", "Box", 0, -40, 0)\nscale("Box", 0.25)\n'
+        'emit("Cube", "from volume burst 400 speed 2 spread 180 life 100 gravity 0 draw points point_px 3 '
+        'color ff4010 name Dots")\n'
+        'emit("Cube", "from volume burst 300 speed 3 spread 180 life 20 gravity 0 size 0.1 size_end 3 '
+        'color 20a0ff color_end ffe080 draw sprites name Puffs")\n'
+        'emit("Cube", "from volume burst 60 speed 2.5 spread 180 life 100 gravity 0 draw objects objects Box '
+        'color 60ff60 name Boxes")\n'
+        'op("file.save_as", "%s")\n' % pbee)
+    pshots = {}
+    for dev in ('gpu', 'cpu'):
+        f, m, q = fake([pbee], BEEMODEL_GPU='any', BEEMODEL_GPU_VIEW='on' if dev == 'gpu' else 'off')
+        try:
+            g = lambda k: int(float(q('print(gpu(%d))' % k) or -1))
+            q('view(30, 20, 14, 0, 0, 0)\nframe(10)\nop("view.shading_solid")')
+            t = time.time()
+            while dev == 'gpu' and time.time() - t < 60 and g(27) < 1:
+                q('frame(10)')
+                f.pump(0.3)
+            f.pump(0.5)
+            pshots[dev] = (f.image().crop(BOX), g(32))
+            if OUT and dev == 'gpu':
+                f.shot('gpu_view_particles.png')
+        finally:
+            f.proc.kill()
+    a, b = pshots['gpu'][0], pshots['cpu'][0]
+    px = list(zip(pixels(a), pixels(b)))
+    same = sum(1 for p, q2 in px if p == q2) / len(px)
+    far = sum(1 for p, q2 in px if max(abs(x - y) for x, y in zip(p, q2)) > 8) / len(px)
+    lit = sum(1 for p in pixels(a) if p[0] > 200 and p[1] < 120) / len(px)       # (the red dots)
+    check(pshots['gpu'][1] == 1 and same > 0.99 and far < 0.003 and lit > 0.0005,
+          f'particles on the GPU (gpu(32) {pshots["gpu"][1]}): points, sprites and objects as the CPU draws them '
+          f'({100 * same:.2f}% of pixels identical, {100 * far:.3f}% more than 8 levels apart)')
     check(clicks > 0 and picked == 'Floor',
           f'a click picks through the GPU\'s ids ({picked}, {clicks} GPU frames)')
 

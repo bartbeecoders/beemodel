@@ -10,12 +10,19 @@
 #  frame sends the camera, a record per object (its matrix, colour,
 #  material, id), the indirect draws and the materials. The colour comes
 #  back into the framebuffer where an object is, and 1/z and the ids into
-#  rs_depth and rs_id, so everything drawn after (particles, instances,
-#  wires, edit overlays, the outline, picking) works as before.
+#  rs_depth and rs_id, so everything drawn after (wires, edit overlays, the
+#  outline, picking) works as before.
+#
+#  Instances (a mesh's ME_INST: its prototypes' triangles, an entry with its
+#  matrix each) and particles are drawn in the same pass (VP2): objects-mode
+#  systems as instances, points and sprites as quads made by view.vert from
+#  pt_vfill's records; these leave the ids (the helper's second pipeline),
+#  as the CPU's particles did. gv_parts tells viewport.s not to draw them.
 #
 #  The CPU draws instead without the helper, in edit and paint modes, with
-#  virtualized geometry, and in Material Preview with an HDRI world, light
-#  probes or a material with a shader graph (until those are done here).
+#  virtualized geometry, with light probes in Material Preview or a shader
+#  graph the GPU cannot evaluate, and over GV_MAXT triangles; instances and
+#  particles over GV_MAXI of either (then those alone, after).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -23,6 +30,7 @@
 
 .globl gv_draw
 .globl gv_query
+.globl gv_parts
 
 .equ RO_MESH,   8                       # (raster.s's object records)
 .equ RO_NTRIS,  20
@@ -50,6 +58,31 @@
 .equ GV_MAXT,   4*1024*1024             # triangles at most (108 bytes each, in the
                                         #  shared memory and on the GPU)
 .equ ENV_SZ,    (32+128*64*3)*4         # the HDRI's preview tables (view.frag)
+.equ GV_MAXI,   4*1024*1024             # instances, particles at most
+.equ INSW,      64                      # an instance's entry (view.glsl INW)
+.equ PRTW,      20                      # a particle's record (pt_vfill)
+.equ S_BLK,     0                       # an instance source: its block, object
+.equ S_OBJ,     8                       #  (0: a particle system's, in the world),
+.equ S_COL,     16                      #  colour, material + 1, id, group (0:
+.equ S_MAT,     20                      #  writes the ids, 1: leaves them)
+.equ S_ID,      24
+.equ S_GRP,     28
+.equ S_SZ,      32
+.equ Q_SYS,     0                       # a points' or sprites' system: its index,
+.equ Q_N,       4                       #  particles, kind (2 points, 3 sprites),
+.equ Q_KIND,    8                       #  pixels, first record
+.equ Q_PX,      12
+.equ Q_BASE,    16
+.equ Q_SZ,      24
+.equ IB_N_,     4                       # (inst.s's blocks)
+.equ IB_NP_,    8
+.equ IB_CAP_,   12
+.equ IB_PROTO_, 24
+.equ IB_DATA_,  128
+.equ SR_SZ_,    512                     # (particles.s's systems)
+.equ SR_UID_,   0
+.equ SR_K_,     4
+.equ SR_N_,     12
 
 .section .bss
 .align 8
@@ -71,9 +104,31 @@ gv_kb:          .skip 4                 #  KiB of meshes it sent
 gv_nmat:        .skip 4
 gv_env:         .skip 4                 # BEEMODEL_GPU_VIEW read (off: gv_fail 2)
 gv_img:         .skip 4                 # a drawn material has a graph: images
+gv_parts:       .skip 4                 # 1: this pass drew instances, particles
+gv_mlist:       .skip 8                 # the meshes to keep (frame arena)
+gv_nml:         .skip 4
+gv_srcs:        .skip 8                 # instance sources
+gv_nsrc:        .skip 4
+gv_psys:        .skip 8                 # points' and sprites' systems
+gv_npsys:       .skip 4
+gv_ninst:       .skip 4                 # instances, particles in them
+gv_npart:       .skip 4
+gv_nrec:        .skip 4                 # draws' records, indirect draws
+gv_nind:        .skip 4
+gv_pover:       .skip 4                 # 1: too many: the CPU draws them
+gv_crec:        .skip 4                 # gv_draws: the next record, indirect
+gv_cind:        .skip 4                 #  draw, instance entry; the record
+gv_cent:        .skip 4                 #  gv_rec made
+gv_crid:        .skip 4
 
 .section .rodata
 s_gv_env:       .asciz "BEEMODEL_GPU_VIEW="
+.align 4
+gf_amb:         .float 0.28, 0.72       # Solid: raster.s's ambient, direct
+gf_iamb:        .float 0.25, 0.75       #  inst.s's
+gf_px1:         .float 1.0              # points' pixels
+gf_px8:         .float 8.0
+gf_id34:        .float 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0
 .text
 
 # gv_draw -> eax = 1: raster_scene's records (rs_objs, rs_nobjs) drawn by the
@@ -89,6 +144,7 @@ gv_draw:
     sub     rsp, 24
     call    now_ms
     mov     [rsp+8], rax
+    mov     dword ptr [rip+gv_parts], 0
     cmp     dword ptr [rip+gv_env], 0   # BEEMODEL_GPU_VIEW=off: always the CPU
     jne     0f
     mov     dword ptr [rip+gv_env], 1
@@ -132,8 +188,11 @@ gv_draw:
 1:  call    gpu_view_ready
     test    eax, eax
     jz      .Lgd_no
+    call    gv_gather                   # the meshes, instances, particles
+    test    eax, eax
+    jz      .Lgd_no
     # ---- the meshes: kept, or to write (again) ------------------------------
-    mov     edi, [rip+rs_nobjs]
+    mov     edi, [rip+gv_nml]
     lea     esi, [rdi*8+8]
     lea     rdi, [rip+frame_arena]
     call    arena_alloc
@@ -199,8 +258,6 @@ gv_draw:
 24:
     mov     rdi, r12
     call    gv_table
-    mov     eax, [rip+rs_nobjs]
-    mov     [rip+gv_ndraw], eax
     mov     edi, GV_SLOT
     mov     esi, GV_NB
     mov     edx, [rip+rs_w]
@@ -215,6 +272,9 @@ gv_draw:
     mov     edx, [rip+rs_h]
     mov     ecx, 16
     call    parallel_for
+    mov     eax, 1                      # (instances, particles: drawn here,
+    sub     eax, [rip+gv_pover]         #  unless there were too many)
+    mov     [rip+gv_parts], eax
     inc     dword ptr [rip+gv_frames]
     call    now_ms
     sub     rax, [rsp+8]
@@ -309,11 +369,10 @@ gv_meshes:
     sub     rsp, 8
     mov     dword ptr [rip+gv_ndirty], 0
     xor     ebx, ebx
-1:  cmp     ebx, [rip+rs_nobjs]
+1:  cmp     ebx, [rip+gv_nml]
     jae     7f
-    imul    r12, rbx, RO_SZ
-    add     r12, [rip+rs_objs]
-    mov     r13, [r12+RO_MESH]
+    mov     rax, [rip+gv_mlist]
+    mov     r13, [rax+rbx*8]
     mov     rdi, r13
     call    gc_find
     test    rax, rax
@@ -397,11 +456,10 @@ gv_relayout:
     mov     dword ptr [rip+gv_ttop], 0
     xor     eax, eax                    # (shared meshes counted twice: room)
     xor     ecx, ecx
-    mov     rdx, [rip+rs_objs]
-1:  cmp     ecx, [rip+rs_nobjs]
+    mov     rdx, [rip+gv_mlist]
+1:  cmp     ecx, [rip+gv_nml]
     jae     2f
-    imul    r8, rcx, RO_SZ
-    mov     r8, [rdx+r8+RO_MESH]
+    mov     r8, [rdx+rcx*8]
     add     eax, [r8+ME_NTRIS]
     inc     ecx
     jmp     1b
@@ -430,11 +488,28 @@ gv_layout:
     imul    rcx, rax, 12
     mov     [rip+gv_bytes+GV_VC*8], rcx
     mov     qword ptr [rip+gv_bytes+GV_PAR*8], PAR_SZ
-    mov     eax, [rip+rs_nobjs]
+    mov     eax, [rip+rs_nobjs]         # records: the objects, the instance
+    add     eax, [rip+gv_nsrc]          #  sources, the particle systems
+    add     eax, [rip+gv_npsys]
+    mov     [rip+gv_nrec], eax
     imul    rcx, rax, DRW
     mov     [rip+gv_bytes+GV_DRAW*8], rcx
+    mov     eax, [rip+gv_nsrc]          # indirect draws: a source's for each
+    shl     eax, 3                      #  prototype (8 at most)
+    add     eax, [rip+rs_nobjs]
+    add     eax, [rip+gv_npsys]
+    mov     [rip+gv_nind], eax
     shl     rax, 4
     mov     [rip+gv_bytes+GV_IND*8], rax
+    mov     eax, [rip+rs_nobjs]         # instance entries: each object's own,
+    add     eax, [rip+gv_ninst]         #  the instances, each particle system's
+    add     eax, [rip+gv_npsys]
+    imul    rax, rax, INSW
+    mov     [rip+gv_bytes+GV_INST*8], rax
+    mov     eax, [rip+gv_npart]
+    imul    rax, rax, PRTW
+    add     rax, 16
+    mov     [rip+gv_bytes+GV_PART*8], rax
     call    mat_count
     mov     [rip+gv_nmat], eax
     inc     eax
@@ -472,8 +547,8 @@ gv_layout:
 9:  ret
 
 .section .rodata
-gv_order:       .byte GV_POS, GV_NRM, GV_UV, GV_VC, GV_PAR, GV_DRAW, GV_IND, GV_MAT
-                .byte GV_IMG, GV_ENV, GV_COL, GV_INVZ, GV_ID
+gv_order:       .byte GV_POS, GV_NRM, GV_UV, GV_VC, GV_PAR, GV_DRAW, GV_IND, GV_INST
+                .byte GV_PART, GV_MAT, GV_IMG, GV_ENV, GV_COL, GV_INVZ, GV_ID
 .align 4
 gf_one:         .float 1.0
 .text
@@ -677,7 +752,270 @@ gv_env_put:
     rep     movsd
     ret
 
-# gv_draws(rdi=slot memory) - a record and an indirect draw per object
+# gv_gather -> eax = 1: this frame's meshes (gv_mlist: the objects', the
+#   instances' prototypes), instance sources (meshes with ME_INST, objects-
+#   mode particle systems) and points' and sprites' systems, counted; 0: no
+#   frame memory. Over GV_MAXI instances or particles: none of them (gv_pover,
+#   the CPU draws them after)
+gv_gather:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 24
+    xor     eax, eax
+    mov     [rip+gv_nsrc], eax
+    mov     [rip+gv_npsys], eax
+    mov     [rip+gv_ninst], eax
+    mov     [rip+gv_npart], eax
+    mov     [rip+gv_pover], eax
+    mov     ebx, [rip+obj_count]        # room: sources (objects, systems),
+    add     ebx, [rip+pt_ns]            #  meshes (the objects', 8 a source)
+    imul    esi, ebx, S_SZ
+    add     esi, 16
+    lea     rdi, [rip+frame_arena]
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lgg_no
+    mov     [rip+gv_srcs], rax
+    mov     esi, [rip+pt_ns]
+    imul    esi, esi, Q_SZ
+    add     esi, 16
+    lea     rdi, [rip+frame_arena]
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lgg_no
+    mov     [rip+gv_psys], rax
+    lea     esi, [rbx*8]
+    add     esi, [rip+rs_nobjs]
+    lea     esi, [rsi*8+16]
+    lea     rdi, [rip+frame_arena]
+    call    arena_alloc
+    test    rax, rax
+    jz      .Lgg_no
+    mov     [rip+gv_mlist], rax
+    xor     ecx, ecx                    # the objects' meshes
+1:  cmp     ecx, [rip+rs_nobjs]
+    jae     2f
+    imul    rdx, rcx, RO_SZ
+    add     rdx, [rip+rs_objs]
+    mov     rdx, [rdx+RO_MESH]
+    mov     [rax+rcx*8], rdx
+    inc     ecx
+    jmp     1b
+2:  mov     [rip+gv_nml], ecx
+    # ---- meshes with instances (as inst_draw; not hidden ones) ---------------
+    xor     ebx, ebx
+3:  cmp     ebx, [rip+obj_count]
+    jae     4f
+    mov     edi, ebx
+    call    obj_at
+    mov     r12, rax
+    cmp     dword ptr [r12+OB_TYPE], OT_MESH
+    jne     31f
+    test    dword ptr [r12+OB_FLAGS], OBF_HIDDEN
+    jnz     31f
+    mov     rdi, r12
+    call    obj_eval
+    test    rax, rax
+    jz      31f
+    mov     r13, [rax+ME_INST]
+    test    r13, r13
+    jz      31f
+    cmp     dword ptr [r13+IB_N_], 0
+    je      31f
+    mov     rdi, r12
+    call    mat_display_color
+    mov     r14d, eax
+    lea     r15d, [rbx+1]
+    mov     rdi, r13                    # (a source: its material below)
+    mov     rsi, r12
+    mov     edx, r14d
+    mov     ecx, r15d
+    xor     r8d, r8d
+    call    gv_src
+31: inc     ebx
+    jmp     3b
+4:  # ---- particle systems ----------------------------------------------------
+    xor     ebx, ebx
+5:  cmp     ebx, [rip+pt_ns]
+    jae     7f
+    imul    r12, rbx, SR_SZ_
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    cmp     dword ptr [r12+SR_N_], 0
+    je      61f
+    mov     edi, [r12+SR_UID_]
+    mov     esi, [r12+SR_K_]
+    call    ps_nth
+    test    rax, rax
+    jz      61f
+    mov     r13, rax
+    cmp     dword ptr [r13+PS_DRAW], 2  # objects: their instance block
+    jne     6f
+    mov     edi, ebx
+    call    pt_iblock
+    test    rax, rax
+    jz      61f
+    cmp     dword ptr [rax+IB_N_], 0
+    je      61f
+    mov     rdi, rax
+    xor     esi, esi
+    mov     edx, [r13+PS_COLOR]
+    and     edx, 0xffffff
+    xor     ecx, ecx
+    mov     r8d, 1
+    call    gv_src
+    mov     rax, [rip+gv_srcs]          # (the material: its first object's)
+    mov     ecx, [rip+gv_nsrc]
+    dec     ecx
+    imul    ecx, ecx, S_SZ
+    add     rax, rcx
+    mov     dword ptr [rax+S_MAT], 0
+    cmp     dword ptr [r13+PS_NOBJ], 0
+    je      61f
+    mov     [rsp], rax
+    mov     edi, [r13+PS_OBJS]
+    call    obj_by_uid
+    test    rax, rax
+    jz      61f
+    mov     rdi, rax
+    call    gv_matof
+    mov     rcx, [rsp]
+    mov     [rcx+S_MAT], eax
+    jmp     61f
+6:  mov     edi, ebx                    # points, sprites: their particles
+    xor     esi, esi
+    call    pt_vfill
+    test    eax, eax
+    jz      61f
+    mov     rdx, [rip+gv_psys]
+    mov     r8d, [rip+gv_npsys]
+    imul    r8d, r8d, Q_SZ
+    add     rdx, r8
+    mov     [rdx+Q_SYS], ebx
+    mov     [rdx+Q_N], eax
+    add     ecx, 2
+    cmp     ecx, 3
+    jbe     62f
+    mov     ecx, 2
+62: mov     [rdx+Q_KIND], ecx
+    mov     [rdx+Q_PX], edx
+    movss   xmm0, [r13+PS_PX]           # (pixels: a float, 1 .. 8)
+    maxss   xmm0, [rip+gf_px1]
+    minss   xmm0, [rip+gf_px8]
+    cvttss2si r8d, xmm0
+    mov     [rdx+Q_PX], r8d
+    mov     ecx, [rip+gv_npart]
+    mov     [rdx+Q_BASE], ecx
+    add     [rip+gv_npart], eax
+    inc     dword ptr [rip+gv_npsys]
+61: inc     ebx
+    jmp     5b
+7:  mov     eax, [rip+gv_ninst]         # too many: none of them
+    cmp     eax, GV_MAXI
+    ja      71f
+    mov     eax, [rip+gv_npart]
+    cmp     eax, GV_MAXI
+    jbe     8f
+71: mov     dword ptr [rip+gv_pover], 1
+    xor     eax, eax
+    mov     [rip+gv_nsrc], eax
+    mov     [rip+gv_npsys], eax
+    mov     [rip+gv_ninst], eax
+    mov     [rip+gv_npart], eax
+    mov     eax, [rip+rs_nobjs]
+    mov     [rip+gv_nml], eax
+8:  mov     eax, 1
+    jmp     9f
+.Lgg_no:
+    xor     eax, eax
+9:  add     rsp, 24
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# gv_src(rdi=instance block, rsi=object or 0, edx=colour, ecx=id, r8d=group) -
+#   a source listed (its material: the object's), its instances counted, its
+#   prototypes' meshes into gv_mlist
+gv_src:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rdi
+    mov     rax, [rip+gv_srcs]
+    mov     r9d, [rip+gv_nsrc]
+    imul    r9d, r9d, S_SZ
+    lea     rbx, [rax+r9]
+    mov     [rbx+S_BLK], rdi
+    mov     [rbx+S_OBJ], rsi
+    mov     [rbx+S_COL], edx
+    mov     [rbx+S_ID], ecx
+    mov     [rbx+S_GRP], r8d
+    mov     dword ptr [rbx+S_MAT], 0
+    test    rsi, rsi
+    jz      1f
+    mov     rdi, rsi
+    call    gv_matof
+    mov     [rbx+S_MAT], eax
+1:  inc     dword ptr [rip+gv_nsrc]
+    mov     eax, [r12+IB_N_]
+    add     [rip+gv_ninst], eax
+    xor     r13d, r13d                  # its prototypes
+2:  cmp     r13d, [r12+IB_NP_]
+    jae     9f
+    cmp     r13d, 8
+    jae     9f
+    mov     rax, [r12+IB_PROTO_+r13*8]
+    test    rax, rax
+    jz      3f
+    mov     rdx, [rip+gv_mlist]
+    mov     ecx, [rip+gv_nml]
+    mov     [rdx+rcx*8], rax
+    inc     dword ptr [rip+gv_nml]
+3:  inc     r13d
+    jmp     2b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gv_matof(rdi=object) -> eax = its material + 1 for the viewport (0: none,
+#   or a graph the GPU cannot evaluate); gv_img set when it has one
+gv_matof:
+    push    rbx
+    call    mat_of
+    test    eax, eax
+    js      8f
+    lea     ebx, [rax+1]
+    mov     edi, eax
+    call    mat_get
+    test    rax, rax
+    jz      8f
+    cmp     dword ptr [rax+GR_N_], 0
+    je      7f
+    mov     dword ptr [rip+gv_img], 1
+    mov     rdi, rax
+    call    gp_graph_ok
+    test    eax, eax
+    jz      8f
+7:  mov     eax, ebx
+    pop     rbx
+    ret
+8:  xor     eax, eax
+    pop     rbx
+    ret
+
+# gv_draws(rdi=slot memory) - the records, instance entries and indirect
+#   draws: the objects' and the instance sources that write ids (gv_ndraw),
+#   then those that leave them (gv_ndraw2): particle objects, points, sprites
+#   (their particles' records filled here by pt_vfill)
 gv_draws:
     push    rbx
     push    rbp
@@ -685,26 +1023,142 @@ gv_draws:
     push    r13
     push    r14
     push    r15
-    sub     rsp, 56
+    sub     rsp, 8
     mov     r15, rdi
-    xor     ebx, ebx
+    xor     eax, eax                    # the next record, indirect draw, entry
+    mov     [rip+gv_crec], eax
+    mov     [rip+gv_cind], eax
+    mov     [rip+gv_cent], eax
+    xor     ebx, ebx                    # the objects
 1:  cmp     ebx, [rip+rs_nobjs]
-    jae     9f
+    jae     2f
     imul    r12, rbx, RO_SZ
     add     r12, [rip+rs_objs]
-    imul    r13, rbx, DRW               # its record
+    mov     rdi, [r12+RO_OBJ]
+    call    gv_rec                      # r13 = its record
+    mov     rdi, [r12+RO_OBJ]
+    call    gv_matof
+    mov     [r13+84], eax
+    mov     eax, [r12+RO_COL]
+    mov     [r13+88], eax
+    mov     eax, [r12+RO_ID]
+    mov     [r13+92], eax
+    call    gv_entry                    # its own entry (the identity)
+    mov     rdi, [r12+RO_MESH]
+    mov     esi, 1
+    call    gv_ind
+    inc     ebx
+    jmp     1b
+2:  xor     ebp, ebp                    # the sources: group 0, then 1
+3:  xor     ebx, ebx
+4:  cmp     ebx, [rip+gv_nsrc]
+    jae     5f
+    imul    r12, rbx, S_SZ
+    add     r12, [rip+gv_srcs]
+    cmp     [r12+S_GRP], ebp
+    jne     41f
+    mov     rdi, [r12+S_OBJ]
+    call    gv_rec
+    mov     dword ptr [r13+100], 1      # instances, shaded as inst.s's
+    lea     rax, [rip+gf_iamb]
+    mov     rax, [rax]
+    mov     [r13+108], rax
+    mov     eax, [r12+S_MAT]
+    mov     [r13+84], eax
+    mov     eax, [r12+S_COL]
+    mov     [r13+88], eax
+    mov     eax, [r12+S_ID]
+    mov     [r13+92], eax
+    mov     rdi, r12
+    call    gv_inst
+41: inc     ebx
+    jmp     4b
+5:  test    ebp, ebp
+    jnz     6f
+    mov     eax, [rip+gv_cind]          # (those that write ids)
+    mov     [rip+gv_ndraw], eax
+    inc     ebp
+    jmp     3b
+6:  xor     ebx, ebx                    # points, sprites
+7:  cmp     ebx, [rip+gv_npsys]
+    jae     8f
+    imul    r12, rbx, Q_SZ
+    add     r12, [rip+gv_psys]
+    xor     edi, edi
+    call    gv_rec
+    mov     eax, [r12+Q_KIND]
+    mov     [r13+100], eax
+    mov     eax, [r12+Q_PX]
+    mov     [r13+104], eax
+    mov     edi, [r12+Q_SYS]            # its particles' records
+    mov     esi, [r12+Q_BASE]
+    imul    rsi, rsi, PRTW
+    add     rsi, [rip+gv_off+GV_PART*8]
+    add     rsi, r15
+    call    pt_vfill
+    cmp     eax, [r12+Q_N]              # (no more than counted)
+    jbe     71f
+    mov     eax, [r12+Q_N]
+71: mov     r14d, eax
+    call    gv_entry
+    mov     eax, [rip+gv_cind]          # its draw: 6 corners a particle
+    shl     rax, 4
+    add     rax, [rip+gv_off+GV_IND*8]
+    add     rax, r15
+    lea     ecx, [r14+r14*2]
+    add     ecx, ecx
+    mov     [rax], ecx
+    mov     dword ptr [rax+4], 1
+    mov     ecx, [r12+Q_BASE]
+    lea     ecx, [rcx+rcx*2]
+    add     ecx, ecx
+    mov     [rax+8], ecx
+    mov     ecx, [rip+gv_cent]
+    dec     ecx                         # (gv_entry counted it)
+    mov     [rax+12], ecx
+    inc     dword ptr [rip+gv_cind]
+    inc     ebx
+    jmp     7b
+8:  mov     eax, [rip+gv_cind]
+    sub     eax, [rip+gv_ndraw]
+    mov     [rip+gv_ndraw2], eax
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# gv_rec(rdi=object or 0: the world) - in gv_draws (r15 the slot's memory):
+#   the next record (r13, gv_crid), zeroed, with the matrix and its cofactor,
+#   Solid's ambient and direct parts (raster.s's)
+gv_rec:
+    push    rbx
+    mov     rbx, rdi
+    mov     eax, [rip+gv_crec]
+    mov     [rip+gv_crid], eax
+    inc     dword ptr [rip+gv_crec]
+    imul    r13, rax, DRW
     add     r13, [rip+gv_off+GV_DRAW*8]
     add     r13, r15
     mov     rdi, r13
     xor     eax, eax
     mov     ecx, DRW/8
     rep     stosq
-    mov     rdi, [r12+RO_OBJ]           # the matrix (3 rows of 4)
+    test    rbx, rbx
+    jz      1f
+    mov     rdi, rbx                    # the matrix (3 rows of 4)
     mov     rsi, r13
     call    obj_matrix
-    # the cofactor of its 3x3: columns b x c, c x a, a x b of its columns
-    lea     rdi, [r13+48]
-    mov     esi, 1
+    jmp     2f
+1:  lea     rsi, [rip+gf_id34]          # (the world's: the identity)
+    mov     rdi, r13
+    mov     ecx, 12
+    rep     movsd
+2:  lea     rdi, [r13+48]               # the cofactor of its 3x3: columns
+    mov     esi, 1                      #  b x c, c x a, a x b
     mov     edx, 2
     call    gv_cross
     lea     rdi, [r13+60]
@@ -715,44 +1169,113 @@ gv_draws:
     xor     esi, esi
     mov     edx, 1
     call    gv_cross
-    mov     rdi, [r12+RO_OBJ]           # material + 1 (0: none)
-    call    mat_of
-    inc     eax
-    cmp     eax, [rip+gv_nmat]
-    jbe     2f
+    lea     rax, [rip+gf_amb]
+    mov     rax, [rax]
+    mov     [r13+108], rax
+    pop     rbx
+    ret
+
+# gv_entry - in gv_draws: the next instance entry: the identity, for the
+#   record gv_rec made
+gv_entry:
+    mov     eax, [rip+gv_cent]
+    inc     dword ptr [rip+gv_cent]
+    imul    rdi, rax, INSW
+    add     rdi, [rip+gv_off+GV_INST*8]
+    add     rdi, r15
+    lea     rsi, [rip+gf_id34]
+    mov     ecx, 12
+    rep     movsd
+    mov     eax, [rip+gv_crid]
+    mov     [rdi], eax
     xor     eax, eax
-2:  mov     [r13+84], eax
-    mov     eax, [r12+RO_COL]
-    mov     [r13+88], eax
-    mov     eax, [r12+RO_ID]
-    mov     [r13+92], eax
-    mov     rcx, [r12+RO_MESH]          # flags: vertex colours
-    xor     eax, eax
-    cmp     qword ptr [rcx+ME_VCOL], 0
-    setne   al
-    mov     [r13+96], eax
-    mov     rdi, [r12+RO_MESH]          # its draw: the mesh's triangles
+    mov     [rdi+4], eax
+    mov     [rdi+8], rax
+    ret
+
+# gv_ind(rdi=mesh, esi=instances) - in gv_draws: the next indirect draw of
+#   the mesh's triangles, for the last esi entries
+gv_ind:
+    push    rbx
+    mov     ebx, esi
     call    gc_find
-    mov     rdx, rbx
+    mov     edx, [rip+gv_cind]
+    inc     dword ptr [rip+gv_cind]
     shl     rdx, 4
     add     rdx, [rip+gv_off+GV_IND*8]
     add     rdx, r15
-    mov     ecx, [r12+RO_NTRIS]
+    mov     ecx, [rax+GC_NT]
     lea     ecx, [rcx+rcx*2]
     mov     [rdx], ecx                  # vertexCount
-    mov     dword ptr [rdx+4], 1        # instanceCount
+    mov     [rdx+4], ebx                # instanceCount
     mov     ecx, [rax+GC_TB]
     lea     ecx, [rcx+rcx*2]
     mov     [rdx+8], ecx                # firstVertex
-    mov     [rdx+12], ebx               # firstInstance: its record
-    inc     ebx
+    mov     ecx, [rip+gv_cent]          # firstInstance: the last entries
+    sub     ecx, ebx
+    mov     [rdx+12], ecx
+    pop     rbx
+    ret
+
+# gv_inst(rdi=source) - in gv_draws: its instances' entries by prototype
+#   (the matrix, the record gv_rec made), a draw for each prototype
+gv_inst:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    rbp
+    mov     r12, [rdi+S_BLK]
+    mov     r14d, [r12+IB_CAP_]
+    imul    r14, r14, 48
+    lea     r14, [r12+IB_DATA_+r14]     # the prototype ids
+    xor     ebx, ebx
+1:  cmp     ebx, [r12+IB_NP_]
+    jae     9f
+    cmp     ebx, 8
+    jae     9f
+    mov     rax, [r12+IB_PROTO_+rbx*8]
+    test    rax, rax
+    jz      5f
+    cmp     dword ptr [rax+ME_NTRIS], 0
+    je      5f
+    mov     eax, [rip+gv_cent]
+    imul    rdi, rax, INSW
+    add     rdi, [rip+gv_off+GV_INST*8]
+    add     rdi, r15
+    mov     eax, [rip+gv_crid]
+    xor     ecx, ecx
+    xor     ebp, ebp                    # this prototype's instances
+2:  cmp     ecx, [r12+IB_N_]
+    jae     4f
+    movzx   edx, byte ptr [r14+rcx]
+    cmp     edx, ebx
+    jne     3f
+    imul    rsi, rcx, 48
+    lea     rsi, [r12+IB_DATA_+rsi]
+    mov     r13d, ecx
+    mov     ecx, 12
+    rep     movsd
+    mov     ecx, r13d
+    mov     [rdi], eax
+    mov     dword ptr [rdi+4], 0
+    mov     qword ptr [rdi+8], 0
+    add     rdi, 16
+    inc     ebp
+3:  inc     ecx
+    jmp     2b
+4:  test    ebp, ebp
+    jz      5f
+    add     [rip+gv_cent], ebp
+    mov     rdi, [r12+IB_PROTO_+rbx*8]
+    mov     esi, ebp
+    call    gv_ind
+5:  inc     ebx
     jmp     1b
-9:  add     rsp, 56
-    pop     r15
+9:  pop     rbp
     pop     r14
     pop     r13
     pop     r12
-    pop     rbp
     pop     rbx
     ret
 
@@ -851,6 +1374,8 @@ gv_table:
     mov     [r12+GV_PAR*GB_SZ+GB_FLAGS], eax
     mov     [r12+GV_DRAW*GB_SZ+GB_FLAGS], eax
     mov     [r12+GV_IND*GB_SZ+GB_FLAGS], eax
+    mov     [r12+GV_INST*GB_SZ+GB_FLAGS], eax
+    mov     [r12+GV_PART*GB_SZ+GB_FLAGS], eax
     mov     [r12+GV_MAT*GB_SZ+GB_FLAGS], eax
     mov     [r12+GV_IMG*GB_SZ+GB_FLAGS], eax
     mov     [r12+GV_ENV*GB_SZ+GB_FLAGS], eax
@@ -941,7 +1466,7 @@ gv_rbytes:      .byte 36, 36, 24, 12
 .text
 
 # gv_job_rows(rdi=slot memory, esi=first row, edx=end) - the GPU's rows into
-#   rs_depth, rs_id and (where an object is) the framebuffer
+#   rs_depth, rs_id and (where something was drawn) the framebuffer
 gv_job_rows:
     push    rbx
     push    r12
@@ -974,10 +1499,10 @@ gv_job_rows:
     rep     movsd
     cmp     dword ptr [rip+gv_mode], 1
     je      8f
-    mov     rsi, [rip+gv_off+GV_COL*8]  # the colour where there is an id
-    add     rsi, r12
+    mov     rsi, [rip+gv_off+GV_COL*8]  # the colour where something was drawn
+    add     rsi, r12                    #  (1/z not 0: particles leave the ids)
     add     rsi, rbx
-    mov     rdx, [rip+gv_off+GV_ID*8]
+    mov     rdx, [rip+gv_off+GV_INVZ*8]
     add     rdx, r12
     add     rdx, rbx
     mov     eax, r13d                   # the framebuffer's row
@@ -991,7 +1516,7 @@ gv_job_rows:
 2:  lea     eax, [rcx+4]
     cmp     eax, r15d
     ja      3f
-    movdqu  xmm0, [rdx+rcx*4]           # ids: 0 keeps the canvas
+    movdqu  xmm0, [rdx+rcx*4]           # 1/z 0: the canvas stays
     pcmpeqd xmm0, xmm7
     movdqu  xmm1, [rsi+rcx*4]
     movdqu  xmm2, [rdi+rcx*4]
@@ -1019,7 +1544,8 @@ gv_job_rows:
     ret
 
 # gv_query(edi=k) -> eax: 0 frames the GPU drew, 1 the last one's ms, 2 KiB
-#   of meshes it sent, 3 1 if it is off (a failure)
+#   of meshes it sent, 3 1 if it is off (a failure), 5 1 if it drew the
+#   instances and particles too
 gv_query:
     mov     eax, [rip+gv_frames]
     test    edi, edi
@@ -1029,6 +1555,9 @@ gv_query:
     je      9f
     mov     eax, [rip+gv_kb]
     cmp     edi, 2
+    je      9f
+    mov     eax, [rip+gv_parts]
+    cmp     edi, 5
     je      9f
     mov     eax, [rip+gv_fail]
 9:  ret

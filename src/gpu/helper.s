@@ -207,8 +207,9 @@
 .equ KR_PL,         16
 .equ KR_PIPE,       24
 .equ KR_SET,        32
-.equ KR_FRAG,       40                  # (the viewport's: its fragment module)
-.equ KR_SZ,         48
+.equ KR_FRAG,       40                  # (the viewport's: its fragment module,
+.equ KR_PIPE2,      48                  #  its pipeline that leaves the ids)
+.equ KR_SZ,         56
 
 .section .rodata
 s_any:          .asciz "BEEMODEL_GPU=any"
@@ -2943,6 +2944,16 @@ gv_pipeline:
     call    [rip+vkf+F_CREATEGFX]
     test    eax, eax
     jnz     8f
+    mov     dword ptr [r12+504+28], 0   # again, the ids not written (particles
+    lea     rcx, [r12+624]              #  over an object: its outline, its
+    mov     rdi, [rip+device]           #  clicks stay the object's)
+    xor     esi, esi
+    mov     edx, 1
+    xor     r8d, r8d
+    lea     r9, [rbx+KR_PIPE2]
+    call    [rip+vkf+F_CREATEGFX]
+    test    eax, eax
+    jnz     8f
     mov     eax, 1
     jmp     9f
 8:  xor     eax, eax
@@ -3207,7 +3218,24 @@ gv_record:
     mov     ecx, r8d
     mov     r8d, 16
     call    [rip+vkf+F_CMDDRAWIND]
-1:  mov     rdi, [rip+cbuf]
+1:  mov     r8d, [rip+msg+GM_NDRAW2]    # then those that leave the ids
+    test    r8d, r8d
+    jz      11f
+    mov     rdi, [rip+cbuf]
+    mov     esi, BIND_GRAPHICS
+    mov     rdx, [r12+KR_PIPE2]
+    call    [rip+vkf+F_CMDBINDPIPE]
+    mov     rdi, [rip+cbuf]
+    mov     rsi, [rbx+SL_DBUF]
+    lea     rax, [rip+table]
+    mov     rdx, [rax+GV_IND*GB_SZ+GB_OFF]
+    mov     eax, [rip+msg+GM_NDRAW]
+    shl     rax, 4
+    add     rdx, rax
+    mov     ecx, [rip+msg+GM_NDRAW2]
+    mov     r8d, 16
+    call    [rip+vkf+F_CMDDRAWIND]
+11: mov     rdi, [rip+cbuf]
     call    [rip+vkf+F_CMDENDRP]
     xor     r13d, r13d                  # the images into their bindings
 2:  lea     rdi, [rsp]                  # VkBufferImageCopy

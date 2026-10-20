@@ -212,6 +212,19 @@ mesh changes: its version, counts or a fingerprint of its vertices. A frame
 sends the camera, a record per object (its matrix and normal matrix,
 colour, material, id) and the materials; a moving object costs 128 bytes.
 
+Instances and particles are drawn in the same pass (VP2). A mesh's
+instances (`ME_INST`: geometry nodes, rigid bodies) and particles drawn as
+objects are instanced draws: an entry each (its matrix, its draw's record)
+in a buffer sorted by prototype, one indirect draw a prototype, the
+prototypes' triangles kept like any mesh. Points and sprites are quads the
+vertex stage makes from a record a particle (`pt_vfill`: its place, its
+colour through its ramp, its sprite radius), as `pt_draw` draws them: a
+square of `point_px` pixels, or a disc shaded like a ball. Particles leave
+the object ids alone (the helper's second pipeline), as on the CPU, so the
+outline and clicks stay the objects'. Instances are drawn from both sides
+with their vertex colours, as renders show them (the CPU's viewport culled
+back faces and drew far ones as dots).
+
 The vertex stage projects as the CPU's rasterizer does, with depth near / z,
 so 1/z comes back exactly as raster.s keeps it. Solid shading is the CPU's
 flat headlight, pixel for pixel; Material Preview is preview.s's principled
@@ -229,8 +242,10 @@ GPU and BeeModel's own memory with no copies on either side.
 The CPU draws the viewport instead without a helper (or with Device CPU),
 in edit and paint modes, with virtualized geometry, with light probes in
 Material Preview, a shader graph the GPU cannot evaluate, or more than
-4M triangles. Rainstorm in Material Preview at 2560 x 1440 draws in 13 ms a
-frame instead of 46 ms.
+4M triangles; instances and particles over 4M (then those alone, after).
+At 2560 x 1440 in Material Preview a frame of the rainstorm (94k drops)
+draws in 4-7 ms instead of 46 ms, leaf-twister (18k leaves) in 4-6 ms
+instead of 23 ms.
 
 ### Rendered shading (the live viewport)
 
@@ -459,6 +474,7 @@ empty, so that takes 0.6 to 3 s (the graphs' kernels are the slow ones).
 | 29 | KiB of meshes it sent |
 | 30 | 1 if the GPU's viewport is off (a failure; 2: `BEEMODEL_GPU_VIEW=off`) |
 | 31 | 1 if the helper imports the shared memory (no copies) |
+| 32 | 1 if the last viewport pass drew the instances and particles on the GPU too |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 
@@ -468,7 +484,8 @@ empty, so that takes 0.6 to 3 s (the graphs' kernels are the slow ones).
 - the rasterizer's frame in the fake compositor;
 - the viewport drawn by the GPU: Solid, Material Preview (shader graphs,
   textures, bump and normal maps, vertex colours) and an HDRI world against
-  the CPU's image; edit mode on the CPU; a click picking through its ids;
+  the CPU's image; points, sprites and particle objects against the CPU's;
+  edit mode on the CPU; a click picking through its ids;
 - Rendered shading: the raycast, then the samples; a camera move against a
   scene change; the selection outline; 0 samples; the denoiser against
   plain samples; an F12 render beside it;
