@@ -28,6 +28,7 @@ layout(location = 2) flat in uint v_draw;
 layout(location = 3) in vec3 v_wp;
 layout(location = 4) in vec3 v_n;
 layout(location = 5) in vec2 v_bc;
+layout(location = 6) flat in vec4 v_disc;
 
 layout(location = 0) out vec4 o_col;
 layout(location = 1) out float o_invz;
@@ -133,7 +134,7 @@ vec3 material(uint d, uint t) {
     s.v = normalize(eye3() - v_wp);
     s.n = dot(n, s.v) < 0.0 ? -n : n;
     uint m = dru(d, D_MAT);
-    bool vcol = (dru(d, D_FLAGS) & DF_VCOL) != 0u;
+    bool vcol = has_vcol(t);
     vec2 bc = clamp(v_bc, 0.0, 1.0);
     Mat mt;
     if (m == 0u) {
@@ -197,6 +198,20 @@ vec3 material(uint d, uint t) {
 void main() {
     o_invz = gl_FragCoord.w;
     o_id = dru(v_draw, D_ID);
+    if (dru(v_draw, D_KIND) >= K_POINTS) {      // a particle: flat in every mode
+        uint c = v_col;
+        if (v_disc.w != 0.0) {                  // a sprite: the disc, shaded like a
+            vec2 q = gl_FragCoord.xy - v_disc.xy;   //  ball (particles.s shade)
+            float d2 = dot(q, q);
+            if (d2 > v_disc.z) discard;
+            float k = sqrt(1.0 - d2 / v_disc.z) * 0.45 + 0.55;
+            uint o = 0u;
+            for (int sh = 16; sh >= 0; sh -= 8) o |= uint(float((c >> uint(sh)) & 0xffu) * k) << uint(sh);
+            c = o;
+        }
+        o_col = vec4(float((c >> 16) & 0xffu), float((c >> 8) & 0xffu), float(c & 0xffu), 0.0) / 255.0;
+        return;
+    }
     if (P.mode == 2u) {
         vec3 c = material(v_draw, v_tri);
         o_col = vec4(floor(c * 255.0 + 0.5) / 255.0, 0.0);

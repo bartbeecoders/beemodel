@@ -727,6 +727,8 @@ viewport_draw:
     cmp     eax, 1
     je      1f
 2:  call    sculpt_draw                 # the sculpt mesh: its own path
+    cmp     dword ptr [rip+gv_parts], 0 # (the GPU drew them with the objects:
+    jne     1f                          #  gview.s)
     call    inst_draw                   # instances: splats and triangles
     call    pt_draw                     # particles (particles.s)
 1:  call    ref_draw                    # reference images (refimg.s)

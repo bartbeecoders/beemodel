@@ -54,6 +54,7 @@
 .globl g_size
 .globl gd_ok
 .globl gv_ndraw
+.globl gv_ndraw2
 .globl gp_graph_ok
 .globl gp_img_bytes
 .globl gpu_img_into
@@ -152,7 +153,8 @@ gd_sent:        .skip 8*PT_NTAB*3      # each binding's bytes the device has had
 g_gfx:          .skip 4                 # the helper draws the viewport (v0.24)
 g_hostmem:      .skip 4                 #  and imports the shared memory
 g_hseen:        .skip 4                 # its hello read, the warm-up's answer not
-gv_ndraw:       .skip 4                 # the viewport's run: its draws (gview.s)
+gv_ndraw:       .skip 4                 # the viewport's run: its draws (gview.s),
+gv_ndraw2:      .skip 4                 #  then those that leave the ids
 gd_slot:        .skip 4                 # this put's slot, its sizes, offsets
 gd_szp:         .skip 8
 gd_offp:        .skip 8
@@ -774,6 +776,8 @@ gpu_run_send:
     mov     dword ptr [rip+g_msg+GM_KERN], GV_KERN+1
     mov     eax, [rip+gv_ndraw]
     mov     [rip+g_msg+GM_NDRAW], eax
+    mov     eax, [rip+gv_ndraw2]
+    mov     [rip+g_msg+GM_NDRAW2], eax
 3:
     mov     edi, -1
     call    g_send
@@ -907,10 +911,12 @@ gpu_query:
     mov     eax, [rip+g_hostmem]        # 31: the helper imports shared memory
     cmp     edi, 31
     je      9f
-    cmp     edi, 27                     # 27..30: the viewport drawn by the GPU
-    jb      26f                         #  (gview.s: frames, ms, KiB, off)
-    cmp     edi, 30
+    cmp     edi, 27                     # 27..30, 32: the viewport drawn by the
+    jb      26f                         #  GPU (gview.s: frames, ms, KiB, off;
+    cmp     edi, 32                     #  instances and particles too)
     ja      26f
+    cmp     edi, 31
+    je      26f
     sub     edi, 27
     jmp     gv_query
 26:

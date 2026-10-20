@@ -183,6 +183,7 @@ raster_scene:
     push    r15
     sub     rsp, 8
     mov     [rip+rs_mode], edi
+    mov     dword ptr [rip+gv_parts], 0 # (gv_draw says when it drew them)
     mov     eax, [rip+clip_x0]
     mov     [rip+rs_x0], eax
     mov     ecx, [rip+clip_x1]
