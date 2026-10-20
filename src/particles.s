@@ -60,6 +60,12 @@
 .globl pc_any
 .globl pc_gnd
 .globl pc_gy
+.globl pc_nl
+.globl pc_tri
+.globl pc_node
+.globl pc_ix
+.globl pc_ntri
+.globl pc_nn
 
 .equ PB_REFS,   0                       # the settings block
 .equ PB_N,      4

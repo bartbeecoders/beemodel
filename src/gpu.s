@@ -55,6 +55,7 @@
 .globl gd_ok
 .globl gv_ndraw
 .globl gv_ndraw2
+.globl gv_ndraw3
 .globl gp_graph_ok
 .globl gp_img_bytes
 .globl gpu_img_into
@@ -78,6 +79,8 @@
                                         #  builds (the device's alone)
 .equ LV_NOREAD,     0x10000             # gpu_lv_run: no pixels back
 .equ RS_NBIND,      8
+.equ NSLOTS,        5                   # path tracer, raster, live view, the
+                                        #  viewport drawn, the liquid
 .equ PD_BLK,        4096                # put_delta: compared in blocks,
 .equ PD_MAXCH,      4096                #  chunks of 256 KiB or more (jobs),
 .equ PD_GAP,        65536               #  ranges this close joined
@@ -122,8 +125,8 @@ g_rsmode:       .skip 4                 # 0 auto (DAG frames), 1 all, -1 off
 hv_gpu:         .skip 4                 # this render's passes run on the GPU
 gp_first:       .skip 4                 # the next pass uploads the scene
 .align 8
-g_base:         .skip 8*4               # each slot's shared memory, bytes
-g_size:         .skip 8*4
+g_base:         .skip 8*NSLOTS          # each slot's shared memory, bytes
+g_size:         .skip 8*NSLOTS
 g_path:         .skip 512
 g_argv:         .skip 16
 g_msg:          .skip GM_SZ
@@ -144,9 +147,9 @@ gp_nb:          .skip 4                 # the path tracer's table entries
 lv_nb:          .skip 4                 #  the live viewport's
 gp_rtx:         .skip 4                 # the last render traced with RTX
 gp_nfld:        .skip 4                 #  liquids' fields it traced (H13)
-gd_ok:          .skip 4*4               # the device holds the slot's bindings
-gd_pend:        .skip 4*4               #  as its memory does; a put not run yet
-gd_kb:          .skip 4*4               # KiB the last put sent up (gpu(21, 22))
+gd_ok:          .skip 4*NSLOTS          # the device holds the slot's bindings
+gd_pend:        .skip 4*NSLOTS          #  as its memory does; a put not run yet
+gd_kb:          .skip 4*NSLOTS          # KiB the last put sent up (gpu(21, 22))
 gd_cap:         .skip 8*PT_NTAB*3      # each binding's room (slots 0, 2)
 gd_total:       .skip 8*3
 gd_sent:        .skip 8*PT_NTAB*3      # each binding's bytes the device has had
@@ -155,6 +158,7 @@ g_hostmem:      .skip 4                 #  and imports the shared memory
 g_hseen:        .skip 4                 # its hello read, the warm-up's answer not
 gv_ndraw:       .skip 4                 # the viewport's run: its draws (gview.s),
 gv_ndraw2:      .skip 4                 #  then those that leave the ids
+gv_ndraw3:      .skip 4                 #  (liquids' surfaces: between them)
 gd_slot:        .skip 4                 # this put's slot, its sizes, offsets
 gd_szp:         .skip 8
 gd_offp:        .skip 8
@@ -561,6 +565,7 @@ gpu_stop:
     xor     eax, eax
     mov     [rip+gd_ok], rax
     mov     [rip+gd_ok+8], rax
+    mov     [rip+gd_ok+16], eax
     mov     [rip+g_hseen], eax
     ret
 
@@ -771,13 +776,18 @@ gpu_run_send:
     jne     2f
     mov     eax, [rip+lv_kern]
     mov     [rip+g_msg+GM_KERN], eax
-2:  cmp     ebx, GV_SLOT                # (the viewport drawn: its kernel,
+2:  cmp     ebx, LQ_SLOT                # (the liquid: its kernel)
+    jne     21f
+    mov     dword ptr [rip+g_msg+GM_KERN], LQ_KERN+1
+21: cmp     ebx, GV_SLOT                # (the viewport drawn: its kernel,
     jne     3f                          #  its draws)
     mov     dword ptr [rip+g_msg+GM_KERN], GV_KERN+1
     mov     eax, [rip+gv_ndraw]
     mov     [rip+g_msg+GM_NDRAW], eax
     mov     eax, [rip+gv_ndraw2]
     mov     [rip+g_msg+GM_NDRAW2], eax
+    mov     eax, [rip+gv_ndraw3]
+    mov     [rip+g_msg+GM_NDRAW3], eax
 3:
     mov     edi, -1
     call    g_send
@@ -911,9 +921,18 @@ gpu_query:
     mov     eax, [rip+g_hostmem]        # 31: the helper imports shared memory
     cmp     edi, 31
     je      9f
-    cmp     edi, 27                     # 27..30, 32: the viewport drawn by the
+    mov     eax, [rip+lq_gms]           # 33: liquid frames the GPU solved,
+    cmp     edi, 33                     #  34: 1 if it failed (the CPU since)
+    je      9f
+    mov     eax, [rip+lq_gfail]
+    cmp     edi, 34
+    je      9f
+    cmp     edi, 35                     # 35: liquids' surfaces it marched
+    jne     25f
+    mov     edi, 6+27
+25: cmp     edi, 27                     # 27..30, 32: the viewport drawn by the
     jb      26f                         #  GPU (gview.s: frames, ms, KiB, off;
-    cmp     edi, 32                     #  instances and particles too)
+    cmp     edi, 6+27                   #  instances and particles too)
     ja      26f
     cmp     edi, 31
     je      26f

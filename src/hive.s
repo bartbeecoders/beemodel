@@ -50,6 +50,7 @@
 .globl hv_fldon
 .globl hv_nfld
 .globl hv_flds
+.globl hf_job
 .globl hv_nodes
 .globl hv_root
 .globl hv_nn4

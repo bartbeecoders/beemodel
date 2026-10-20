@@ -95,6 +95,8 @@ rs_counts:      .skip 8
 rs_chunk:       .skip 4
 rs_tbase:       .skip 4             # the batch's first output slot
 rs_noclear:     .skip 4             # 1: a second batch over the first
+rs_fskip:       .skip 4             # 1: liquids' surfaces left as fields (the
+rs_nfld:        .skip 4             #  GPU marches them: gv_draw), so many
 rs_gpu:         .skip 4             # 1: the GPU drew this pass (gview.s)
 rs_ccount:      .skip 4*CHUNKS
 
@@ -201,9 +203,13 @@ raster_scene:
     imul    ecx, edx
     mov     edi, ecx
     call    rs_ensure
+    call    gv_fskip                    # (liquids' surfaces: the GPU's fields)
+    mov     [rip+rs_fskip], eax
+.Lrs_again:
     call    vgd_begin                   # objects drawn through cluster DAGs
 
     # ---- pass A: one record per mesh object, triangle numbering --------------
+    mov     dword ptr [rip+rs_nfld], 0
     xor     r12d, r12d                  # mesh objects
     xor     r13d, r13d                  # total triangles
     xor     ebx, ebx
@@ -224,11 +230,9 @@ raster_scene:
     je      11f
 12:
     inc     r12d
-    mov     rdi, rax
-    call    obj_eval
     mov     rdi, rax                    # (or the cut of its DAG)
     mov     esi, ebx
-    call    vgd_swap
+    call    rs_eval
     add     r13d, [rax+ME_NTRIS]
 11: inc     ebx
     jmp     1b
@@ -256,6 +260,7 @@ raster_scene:
     test    rax, rax
     jz      .Lrs_out
     mov     dword ptr [rip+rs_ntris], 0
+    mov     dword ptr [rip+rs_nfld], 0
     mov     r14, [rip+rs_objs]          # fill the records
     xor     r13d, r13d                  # running triangle base
     xor     ebx, ebx
@@ -283,10 +288,8 @@ raster_scene:
     mov     rcx, [rip+edit_psel]
 32: mov     [r14+RO_PSEL], rcx
     mov     rdi, rax
-    call    obj_eval
-    mov     rdi, rax
     mov     esi, ebx
-    call    vgd_swap
+    call    rs_eval
     mov     r15, rax
     mov     [rsp], rdx                  # (drawn through its DAG: the record)
     test    rdx, rdx
@@ -319,6 +322,11 @@ raster_scene:
     mov     [rip+rs_gpu], eax
     test    eax, eax
     jnz     .Lrs_post
+    cmp     dword ptr [rip+rs_nfld], 0  # (liquids' surfaces left as fields:
+    je      41f                         #  again, meshed)
+    mov     dword ptr [rip+rs_fskip], 0
+    jmp     .Lrs_again
+41:
     mov     dword ptr [rip+rs_tbase], 0
     mov     dword ptr [rip+rs_noclear], 0
     call    rs_batch
@@ -409,6 +417,37 @@ raster_scene:
     pop     r13
     pop     r12
     pop     rbp
+    pop     rbx
+    ret
+
+# rs_eval(rdi=object, esi=its index) -> rax = the mesh to draw (or the cut
+#   of its DAG), rdx = its DAG's record (vgd_swap); a liquid's surface left
+#   to the GPU as its field (rs_fskip; 8 at most): gview.s's empty mesh, not
+#   meshed
+rs_eval:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    cmp     dword ptr [rip+rs_fskip], 0
+    je      1f
+    cmp     dword ptr [rip+rs_nfld], 8
+    jae     1f
+    call    pt_field
+    test    rax, rax
+    jz      1f
+    inc     dword ptr [rip+rs_nfld]
+    lea     rax, [rip+gv_nomesh]
+    xor     edx, edx
+    jmp     9f
+1:  mov     rdi, rbx
+    call    obj_eval
+    mov     rdi, rax
+    mov     esi, r12d
+    call    vgd_swap
+9:  add     rsp, 8
+    pop     r12
     pop     rbx
     ret
 

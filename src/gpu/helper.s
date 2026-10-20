@@ -166,12 +166,14 @@
 .equ PF_SZ,                 220
 .equ MAXDEV,                16
 
-.equ NSLOT,         4                   # path tracer, rasterizer, live viewport,
-                                        #  the viewport drawn (GV_SLOT)
+.equ NSLOT,         5                   # path tracer, rasterizer, live viewport,
+                                        #  the viewport drawn (GV_SLOT), the
+                                        #  liquid (LQ_SLOT)
 .equ NKERN,         5                   # pt, raster, ptg, ptr, ptgr (asked for)
 .equ K_PREP,        5                   #  and asprep (the builds' inputs)
-.equ K_VIEW,        GV_KERN             #  and the viewport's (graphics)
-.equ NKALL,         7
+.equ K_VIEW,        GV_KERN             #  and the viewport's (graphics), the
+.equ K_LIQ,         LQ_KERN             #  liquid's (its phases, lq_record)
+.equ NKALL,         8
 .equ T_VP,          20                  # an RTX run's table: positions, boxes
 .equ T_AB,          21
 .equ SL_BASE,       0                   # a slot: its shared memory, the device
@@ -208,8 +210,10 @@
 .equ KR_PIPE,       24
 .equ KR_SET,        32
 .equ KR_FRAG,       40                  # (the viewport's: its fragment module,
-.equ KR_PIPE2,      48                  #  its pipeline that leaves the ids)
-.equ KR_SZ,         56
+.equ KR_PIPE2,      48                  #  its pipeline that leaves the ids, the
+.equ KR_FRAG2,      56                  #  liquids' fragment module, pipeline)
+.equ KR_PIPE3,      64
+.equ KR_SZ,         72
 
 .section .rodata
 s_any:          .asciz "BEEMODEL_GPU=any"
@@ -297,14 +301,14 @@ s_ext_rq:       .asciz "VK_KHR_ray_query"
 s_ext_dho:      .asciz "VK_KHR_deferred_host_operations"
 s_ext_hm:       .asciz "VK_EXT_external_memory_host"
 .align 8
-k_nbind:        .long 20, 8, 20, 21, 21, 5, GV_NB  # bindings per kernel (2: the
+k_nbind:        .long 20, 8, 20, 21, 21, 5, GV_NB, LQ_NB  # bindings per kernel (2: the
                                         #  path tracer with shader graphs, made
                                         #  when asked; 3, 4: with ray queries,
                                         #  20 the structure; 6 the viewport's)
-k_ntab:         .long 20, 8, 20, 22, 22, 0, GV_NB  # entries in their runs' tables
+k_ntab:         .long 20, 8, 20, 22, 22, 0, GV_NB, LQ_NB  # entries in their runs' tables
 k_code:         .quad spv_pt, spv_pt_end, spv_raster, spv_raster_end, spv_ptg, spv_ptg_end
                 .quad spv_ptr, spv_ptr_end, spv_ptgr, spv_ptgr_end, spv_asprep, spv_asprep_end
-                .quad spv_viewv, spv_viewv_end
+                .quad spv_viewv, spv_viewv_end, spv_liq, spv_liq_end
 gv_dyn:         .long 0, 1                  # dynamic: the viewport, the scissor
 gv_fmts:        .long FMT_BGRA8, FMT_R32F, FMT_R32U, FMT_D32F  # the attachments
 gv_outs:        .long GV_COL, GV_INVZ, GV_ID    # (copied into these bindings)
@@ -454,6 +458,10 @@ gv_view:        .skip 8*4
 gv_fb:          .skip 8
 gv_ci:          .skip 1024              # create-info scratch (the pipeline's)
 gv_clear:       .skip 64                # its clear values: zeros
+lq_gn:          .skip 4                 # lq_record's groups: particles,
+lq_gb1:         .skip 4                 #  buckets + 1, buckets, blocks of
+lq_gb:          .skip 4                 #  1024 buckets
+lq_gk:          .skip 4
 
 .text
 .globl main
@@ -509,6 +517,8 @@ main:
     mov     ebx, 2                      #  graphs' too, RTX's: the first
 1:  cmp     ebx, NKALL                  #  render finds it ready); a failure
     jae     3f                          #  is not fatal here
+    cmp     ebx, K_LIQ                  # (the liquid's: always)
+    je      2f
     cmp     ebx, K_VIEW                 # (the viewport's: with graphics)
     jne     12f
     cmp     dword ptr [rip+gfx], 0
@@ -1129,6 +1139,21 @@ make_kernel:
     call    [rip+vkf+F_CREATESHADER]
     test    eax, eax
     jnz     8f
+    lea     rdi, [rip+ci]               # (and the liquids' surfaces')
+    call    zero256
+    mov     dword ptr [rip+ci], ST_SHADER
+    lea     rcx, [rip+spv_viewff]
+    lea     rdx, [rip+spv_viewff_end]
+    sub     rdx, rcx
+    mov     [rip+ci+24], rdx
+    mov     [rip+ci+32], rcx
+    mov     rdi, [rip+device]
+    lea     rsi, [rip+ci]
+    xor     edx, edx
+    lea     rcx, [r12+KR_FRAG2]
+    call    [rip+vkf+F_CREATESHADER]
+    test    eax, eax
+    jnz     8f
 10: lea     rax, [rip+k_nbind]          # the set layout: bindings 0 .. n-1
     mov     r13d, [rax+rbx*4]
     xor     ecx, ecx
@@ -1718,7 +1743,12 @@ do_run:
     test    eax, eax
     jz      1f
     dec     eax
-    cmp     eax, K_VIEW                 # (the viewport's: its slot, graphics)
+    cmp     eax, K_LIQ                  # (the liquid's: its slot)
+    jne     13f
+    cmp     r15d, LQ_SLOT
+    jne     .Lr_fail
+    jmp     11f
+13: cmp     eax, K_VIEW                 # (the viewport's: its slot, graphics)
     jne     10f
     cmp     dword ptr [rip+gfx], 0
     je      .Lr_fail
@@ -1752,7 +1782,7 @@ do_run:
     mov     [rsp+24], r13d              # storage descriptors: the table's
     mov     dword ptr [rsp+20], 0       #  (RTX: 20, then the structure)
     cmp     r15d, K_VIEW
-    je      12f
+    jae     12f
     cmp     r15d, 3
     jb      12f
     mov     dword ptr [rsp+24], 20
@@ -1951,7 +1981,13 @@ do_run:
     mov     rsi, r12
     call    gv_record
     jmp     53f
-52: mov     rdi, [rip+cbuf]
+52: cmp     r15d, K_LIQ                 # the liquid: its frame's phases
+    jne     54f
+    mov     rdi, rbx
+    mov     rsi, r12
+    call    lq_record
+    jmp     55f
+54: mov     rdi, [rip+cbuf]
     mov     esi, BIND_COMPUTE
     mov     rdx, [r12+KR_PIPE]
     call    [rip+vkf+F_CMDBINDPIPE]
@@ -1971,7 +2007,7 @@ do_run:
     mov     edx, [rip+msg+GM_GY]
     mov     ecx, 1
     call    [rip+vkf+F_CMDDISPATCH]
-    mov     edi, PS_COMPUTE             # the shader before the downloads
+55: mov     edi, PS_COMPUTE             # the shader before the downloads
     mov     esi, PS_TRANSFER
     mov     edx, AC_SHADER_WRITE
     mov     ecx, AC_TRANSFER_READ
@@ -2954,6 +2990,18 @@ gv_pipeline:
     call    [rip+vkf+F_CREATEGFX]
     test    eax, eax
     jnz     8f
+    mov     dword ptr [r12+504+28], 15  # again, the liquids' surfaces: marched
+    mov     rax, [rbx+KR_FRAG2]         #  by their own fragment shader (it
+    mov     [r12+48+24], rax            #  writes the depth), the ids written
+    lea     rcx, [r12+624]
+    mov     rdi, [rip+device]
+    xor     esi, esi
+    mov     edx, 1
+    xor     r8d, r8d
+    lea     r9, [rbx+KR_PIPE3]
+    call    [rip+vkf+F_CREATEGFX]
+    test    eax, eax
+    jnz     8f
     mov     eax, 1
     jmp     9f
 8:  xor     eax, eax
@@ -3218,7 +3266,24 @@ gv_record:
     mov     ecx, r8d
     mov     r8d, 16
     call    [rip+vkf+F_CMDDRAWIND]
-1:  mov     r8d, [rip+msg+GM_NDRAW2]    # then those that leave the ids
+1:  mov     r8d, [rip+msg+GM_NDRAW3]    # then the liquids' surfaces
+    test    r8d, r8d
+    jz      12f
+    mov     rdi, [rip+cbuf]
+    mov     esi, BIND_GRAPHICS
+    mov     rdx, [r12+KR_PIPE3]
+    call    [rip+vkf+F_CMDBINDPIPE]
+    mov     rdi, [rip+cbuf]
+    mov     rsi, [rbx+SL_DBUF]
+    lea     rax, [rip+table]
+    mov     rdx, [rax+GV_IND*GB_SZ+GB_OFF]
+    mov     eax, [rip+msg+GM_NDRAW]
+    shl     rax, 4
+    add     rdx, rax
+    mov     ecx, [rip+msg+GM_NDRAW3]
+    mov     r8d, 16
+    call    [rip+vkf+F_CMDDRAWIND]
+12: mov     r8d, [rip+msg+GM_NDRAW2]    # then those that leave the ids
     test    r8d, r8d
     jz      11f
     mov     rdi, [rip+cbuf]
@@ -3230,6 +3295,7 @@ gv_record:
     lea     rax, [rip+table]
     mov     rdx, [rax+GV_IND*GB_SZ+GB_OFF]
     mov     eax, [rip+msg+GM_NDRAW]
+    add     eax, [rip+msg+GM_NDRAW3]
     shl     rax, 4
     add     rdx, rax
     mov     ecx, [rip+msg+GM_NDRAW2]
@@ -3270,6 +3336,220 @@ gv_record:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# =============================================================================
+#  The liquid (v0.24, liq.comp): a frame's substeps, phase by phase
+# =============================================================================
+.equ LP_N,      0                       # (liq.comp's constants: particles,
+.equ LP_MASK,   4                       #  buckets - 1, iterations, substeps,
+.equ LP_ITERS,  8                       #  bodies, flags)
+.equ LP_K,      12
+.equ LP_NBD,    16
+.equ LP_FLAGS,  24
+.equ LF_COLL,   2
+.equ LF_VORT,   4
+.equ QP_ZEROIMP, 0                      # (its phases)
+.equ QP_PREDICT, 1
+.equ QP_CLEAR,  2
+.equ QP_HASH,   3
+.equ QP_SCAN1,  4
+.equ QP_SCAN2,  5
+.equ QP_SCAN3,  6
+.equ QP_COPYCUR, 7
+.equ QP_SCATTER, 8
+.equ QP_BSORT,  9
+.equ QP_NBRS,   10
+.equ QP_LAMBDA, 11
+.equ QP_DELTA,  12
+.equ QP_APPLY,  13
+.equ QP_COLLIDE, 14
+.equ QP_VEL,    15
+.equ QP_XSPH,   16
+.equ QP_VORT,   17
+.equ QP_COMMIT, 18
+.equ QP_IMPRED, 19
+
+# lq_record(rdi=slot, rsi=kernel record) - in do_run's commands: the
+#   kernel bound, then every phase of the frame (lq_phase), its counts read
+#   from the constants in the slot's memory
+lq_record:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 24
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     rdi, [rip+cbuf]
+    mov     esi, BIND_COMPUTE
+    mov     rdx, [r12+KR_PIPE]
+    call    [rip+vkf+F_CMDBINDPIPE]
+    sub     rsp, 16
+    mov     qword ptr [rsp], 0
+    mov     qword ptr [rsp+8], 0
+    mov     rdi, [rip+cbuf]
+    mov     esi, BIND_COMPUTE
+    mov     rdx, [r12+KR_PL]
+    xor     ecx, ecx
+    mov     r8d, 1
+    lea     r9, [r12+KR_SET]
+    call    [rip+vkf+F_CMDBINDSETS]
+    add     rsp, 16
+    lea     rax, [rip+table]            # the constants (host memory)
+    mov     r13, [rax+GB_OFF]
+    add     r13, [rbx+SL_BASE]
+    mov     eax, [r13+LP_N]             # groups: particles, buckets (+1),
+    add     eax, 255                    #  buckets' blocks of 1024
+    shr     eax, 8
+    mov     [rip+lq_gn], eax
+    mov     eax, [r13+LP_MASK]
+    add     eax, 2+255
+    shr     eax, 8
+    mov     [rip+lq_gb1], eax
+    mov     eax, [r13+LP_MASK]
+    add     eax, 1+255
+    shr     eax, 8
+    mov     [rip+lq_gb], eax
+    mov     eax, [r13+LP_MASK]
+    inc     eax
+    shr     eax, 10
+    mov     [rip+lq_gk], eax
+    xor     r14d, r14d                  # (substep 0)
+    mov     eax, [r13+LP_NBD]           # the impulses: zero
+    test    eax, eax
+    jz      1f
+    imul    eax, [r13+LP_N]
+    add     eax, 255
+    shr     eax, 8
+    mov     edi, QP_ZEROIMP
+    mov     esi, eax
+    call    lq_phase
+1:  cmp     r14d, [r13+LP_K]            # each substep
+    jae     5f
+    mov     edi, QP_PREDICT
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    mov     edi, QP_CLEAR
+    mov     esi, [rip+lq_gb1]
+    call    lq_phase
+    mov     edi, QP_HASH
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    mov     edi, QP_SCAN1
+    mov     esi, [rip+lq_gk]
+    call    lq_phase
+    mov     edi, QP_SCAN2
+    mov     esi, 1
+    call    lq_phase
+    mov     edi, QP_SCAN3
+    mov     esi, [rip+lq_gk]
+    call    lq_phase
+    mov     edi, QP_COPYCUR
+    mov     esi, [rip+lq_gb1]
+    call    lq_phase
+    mov     edi, QP_SCATTER
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    mov     edi, QP_BSORT
+    mov     esi, [rip+lq_gb]
+    call    lq_phase
+    mov     edi, QP_NBRS
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    mov     r15d, [r13+LP_ITERS]
+2:  mov     edi, QP_LAMBDA
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    mov     edi, QP_DELTA
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    mov     edi, QP_APPLY
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    dec     r15d
+    jnz     2b
+    test    dword ptr [r13+LP_FLAGS], LF_COLL
+    jz      3f
+    mov     edi, QP_COLLIDE
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+3:  mov     edi, QP_VEL
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    mov     edi, QP_XSPH
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    test    dword ptr [r13+LP_FLAGS], LF_VORT
+    jz      4f
+    mov     edi, QP_VORT
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+4:  mov     edi, QP_COMMIT
+    mov     esi, [rip+lq_gn]
+    call    lq_phase
+    inc     r14d
+    jmp     1b
+5:  mov     eax, [r13+LP_NBD]           # the impulses: chunks x bodies
+    test    eax, eax
+    jz      9f
+    mov     ecx, [r13+LP_N]
+    add     ecx, 2047
+    shr     ecx, 11
+    imul    eax, ecx
+    add     eax, 255
+    shr     eax, 8
+    mov     edi, QP_IMPRED
+    mov     esi, eax
+    call    lq_phase
+9:  add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# lq_phase(edi=phase, esi=groups; r14d = the substep, rbx = the slot) - its
+#   word into the step binding, then the dispatch, each after the last
+lq_phase:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    mov     r12d, edi
+    mov     r13d, esi
+    test    r13d, r13d
+    jz      9f
+    mov     edi, PS_COMPUTE             # (the last dispatch read the word)
+    mov     esi, PS_TRANSFER
+    xor     edx, edx
+    xor     ecx, ecx
+    call    barrier
+    mov     r8d, r14d                   # phase | substep << 16
+    shl     r8d, 16
+    or      r8d, r12d
+    mov     rdi, [rip+cbuf]
+    mov     rsi, [rbx+SL_DBUF]
+    lea     rax, [rip+table]
+    mov     rdx, [rax+LQB_STEP*GB_SZ+GB_OFF]
+    mov     ecx, 4
+    call    [rip+vkf+F_CMDFILL]
+    mov     edi, PS_TRANSFER|PS_COMPUTE # the word, and the last phase's
+    mov     esi, PS_COMPUTE             #  writes, before this one
+    mov     edx, AC_TRANSFER_WRITE|AC_SHADER_WRITE
+    mov     ecx, AC_SHADER_READ|AC_SHADER_WRITE
+    call    barrier
+    mov     rdi, [rip+cbuf]
+    mov     esi, r13d
+    mov     edx, 1
+    mov     ecx, 1
+    call    [rip+vkf+F_CMDDISPATCH]
+9:  add     rsp, 8
+    pop     r13
+    pop     r12
     ret
 
 # barrier(edi=source stages, esi=destination stages, edx=source access,

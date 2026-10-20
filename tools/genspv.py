@@ -13,10 +13,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GPU = os.path.join(HERE, '..', 'src', 'gpu')
 # (name, source, defines, target): ptg is pt.comp with shader graphs; ptr and
 # ptgr trace with ray queries (RTX, Vulkan 1.2); asprep feeds their builds;
-# viewv, viewf draw the viewport (a source without an extension is a .comp)
+# viewv, viewf draw the viewport; liq solves the liquid (a source without
+# an extension is a .comp)
 SHADERS = [('pt', 'pt', [], '1.1'), ('raster', 'raster', [], '1.1'), ('ptg', 'pt', ['-DGRAPHS'], '1.1'),
            ('ptr', 'pt', ['-DRTX'], '1.2'), ('ptgr', 'pt', ['-DGRAPHS', '-DRTX'], '1.2'),
-           ('asprep', 'asprep', [], '1.1'), ('viewv', 'view.vert', [], '1.1'), ('viewf', 'view.frag', [], '1.1')]
+           ('asprep', 'asprep', [], '1.1'), ('viewv', 'view.vert', [], '1.1'), ('viewf', 'view.frag', [], '1.1'),
+           ('viewff', 'view.frag', ['-DFIELD'], '1.1'),
+           ('liq', 'liq', [], '1.1')]
 
 
 def kept():

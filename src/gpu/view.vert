@@ -8,7 +8,8 @@
 // average) times amb + dif |n.z| / |n| of the camera-space face normal.
 // Points and sprites are particles.s's: a square of px pixels from the
 // truncated centre, or a disc of radius r = size f / z (at most 48 pixels;
-// under 0.75 one pixel), all at the centre's 1/z.
+// under 0.75 one pixel), all at the centre's 1/z. A liquid's field is its
+// grid's box, marched by view.frag's FIELD variant.
 #version 460
 #extension GL_GOOGLE_include_directive : require
 #include "view.glsl"
@@ -80,19 +81,28 @@ void particle(uint d, uint kind) {
     gl_Position = at_pixel(q, c.z);
 }
 
+const uint BOX[36] = uint[36](0u, 2u, 1u, 1u, 2u, 3u, 4u, 5u, 6u, 5u, 7u, 6u, 0u, 1u, 4u, 1u, 5u, 4u,
+                              2u, 6u, 3u, 3u, 6u, 7u, 0u, 4u, 2u, 2u, 4u, 6u, 1u, 3u, 5u, 3u, 7u, 5u);
+
 void main() {
     uint i = uint(gl_InstanceIndex);
     uint d = inst_draw(i);
     uint kind = dru(d, D_KIND);
     v_draw = d;
     v_tri = 0u; v_wp = vec3(0.0); v_n = vec3(0.0, 1.0, 0.0); v_bc = vec2(0.0); v_disc = vec4(0.0);
-    if (kind >= K_POINTS) { particle(d, kind); return; }
+    if (kind == K_POINTS || kind == K_SPRITES) { particle(d, kind); return; }
     uint t = uint(gl_VertexIndex) / 3u, k = uint(gl_VertexIndex) - t * 3u;
-    vec3 wp = world(i, d, kind, corner(t, k));
+    vec3 wp;
+    if (kind == K_FIELD) {                  // the box (the world's)
+        Fld f = fld_get(dru(d, D_PX));
+        uint b = BOX[gl_VertexIndex];
+        wp = vec3((b & 1u) != 0u ? f.hi.x : f.lo.x, (b & 2u) != 0u ? f.hi.y : f.lo.y, (b & 4u) != 0u ? f.hi.z : f.lo.z);
+    } else wp = world(i, d, kind, corner(t, k));
     vec3 c = to_cam(wp);
     float W = float(P.w), H = float(P.h);
     gl_Position = vec4((P.focal * c.x + P.cx * c.z) * (2.0 / W) - c.z,
                        (P.cy * c.z - P.focal * c.y) * (2.0 / H) - c.z, P.near, c.z);
+    if (kind == K_FIELD) { v_tri = dru(d, D_PX); v_wp = wp; return; }
     v_col = P.mode == 0u ? solid(i, d, kind, t) : 0u;
     v_tri = t;
     v_wp = wp;

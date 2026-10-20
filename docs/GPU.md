@@ -21,6 +21,7 @@ driver (`cc`) and `libvulkan.so.1` are present.
 | `BEEMODEL_GPU_HELPER=path` | Where the helper is |
 | `BEEMODEL_GPU_RASTER=all` / `off` | Rasterize every frame's tiles on the GPU, or none. By default only frames with objects drawn through cluster DAGs use it |
 | `BEEMODEL_GPU_VIEW=off` | Draw the 3D viewport on the CPU even with a helper that can draw it (v0.24; the window tests' default, so their images are the CPU's) |
+| `BEEMODEL_GPU_LIQUID=off` | Solve liquids on the CPU even with a helper that can (v0.24) |
 | `BEEMODEL_GPU_HOSTMEM=off` | Copy through the helper's own staging buffers instead of importing the shared memory |
 
 The helper needs a Vulkan device with compute queues and 64-bit integers in
@@ -239,6 +240,15 @@ The helper imports the shared memory as its staging buffer when the device
 can (`VK_EXT_external_memory_host`): uploads and readbacks go between the
 GPU and BeeModel's own memory with no copies on either side.
 
+A liquid's surface is not meshed for the viewport when the GPU draws it
+(VP3): raster_scene leaves the object without triangles and the helper's
+third pipeline draws its field's box, whose fragment shader marches the
+ray from the eye through the field (as the path tracer's `fld_hit`: a cell
+a step, 8^3 bricks all on one side skipped, the crossing halved, then
+interpolated) and writes the surface's depth, 1/z and the object's id;
+its normal is the field's gradient. When the GPU does not draw the frame
+after all, raster_scene starts again with the surfaces meshed.
+
 The CPU draws the viewport instead without a helper (or with Device CPU),
 in edit and paint modes, with virtualized geometry, with light probes in
 Material Preview, a shader graph the GPU cannot evaluate, or more than
@@ -246,6 +256,27 @@ Material Preview, a shader graph the GPU cannot evaluate, or more than
 At 2560 x 1440 in Material Preview a frame of the rainstorm (94k drops)
 draws in 4-7 ms instead of 46 ms, leaf-twister (18k leaves) in 4-6 ms
 instead of 23 ms.
+
+### Liquids solved on the GPU (v0.24)
+
+A liquid's substeps run in the helper's compute kernel `src/gpu/liq.comp`
+(slot 4), a port of `liquid.s`'s solver phase by phase: predict, the hash
+grid (counted, summed, sorted), neighbours, the density constraint's
+iterations with the domain and bodies, the colliders' triangles (their BVH
+uploaded), velocities, XSPH viscosity and vorticity. The particles go up
+and their places, velocities, densities, neighbour counts and the impulses
+on rigid bodies come back each frame. Force fields and landscapes as
+colliders keep the CPU's solver, as does `BEEMODEL_GPU_LIQUID=off` and a
+helper that fails (from then on). The GPU's sums run in another order, so
+its liquid matches the CPU's closely at first and then diverges as any
+change to a liquid does.
+
+The dam break (200k particles) solves a frame in 6 ms on an RTX 4080 SUPER
+instead of 67 ms. With its surface drawn by the viewport's march (nothing
+on the CPU meshes it: the DAG scan, the instance scan and the wires skip
+it), it plays in real time at 2560 x 1440 in Solid and Material Preview:
+16 ms a frame that steps the simulation, 4 ms one that only redraws (2 fps
+before v0.24).
 
 ### Rendered shading (the live viewport)
 
@@ -475,6 +506,9 @@ empty, so that takes 0.6 to 3 s (the graphs' kernels are the slow ones).
 | 30 | 1 if the GPU's viewport is off (a failure; 2: `BEEMODEL_GPU_VIEW=off`) |
 | 31 | 1 if the helper imports the shared memory (no copies) |
 | 32 | 1 if the last viewport pass drew the instances and particles on the GPU too |
+| 33 | Liquid frames the GPU solved |
+| 34 | 1 if solving a liquid on the GPU failed (the CPU's solver since) |
+| 35 | Liquids' surfaces the last viewport pass marched on the GPU |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 
@@ -485,6 +519,7 @@ empty, so that takes 0.6 to 3 s (the graphs' kernels are the slow ones).
 - the viewport drawn by the GPU: Solid, Material Preview (shader graphs,
   textures, bump and normal maps, vertex colours) and an HDRI world against
   the CPU's image; points, sprites and particle objects against the CPU's;
+  a liquid's surface marched from its field against the CPU's mesh;
   edit mode on the CPU; a click picking through its ids;
 - Rendered shading: the raycast, then the samples; a camera move against a
   scene change; the selection outline; 0 samples; the denoiser against
