@@ -45,6 +45,23 @@
 .equ MAP_ANON_PRIV, 0x22
 .equ LEAF_MAX,  15
 .equ NBINS,     16
+.equ C_STACK,   0               # a BVH build context: its stack (node, start, end)
+.equ C_TOP,     8               # 1: the top (children: to the frontier or tasks)
+.equ C_PAR,     24              # 1: big nodes' passes over chunks in parallel
+.equ C_SCALE,   12              # the bins: 16 / extent, the axis' minimum
+.equ C_CMIN,    16
+.equ C_NEXT,    20              # the next free BVH2 node (its own block)
+.equ BN_MIN,    16              # a bin: count, its box's min and max (a
+.equ BN_MAX,    32              #  vector each: min at +4 overlapped max.x,
+.equ BN_SZ,     48              #  which kept the last primitive's)
+.equ C_BINS,    64              # NBINS bins
+.equ C_LR,      C_BINS+NBINS*BN_SZ  # sweep: left area, right area
+.equ C_SZ,      C_LR+NBINS*8
+.equ PB_SHIFT,  6
+.equ PB_K,      1<<PB_SHIFT     # chunks of a big node's parallel passes
+.equ BVH_PB_MIN, 65536          # a node this big at the top: its passes in parallel
+.equ BVH_PAR_N, 32768           # fewer primitives: all on one thread
+.equ BVH_CUT_MIN, 2048
 .equ N2_SZ,     32              # BVH2 node: min[3] max[3] a b
 .equ N4_SZ,     128             # BVH4 node: minx maxx miny maxy minz maxz [4] child[4]
 .equ NBUF,      32
@@ -96,8 +113,31 @@ b_prim:         .skip 8             # u32[n]
 b_n2:           .skip 8             # BVH2 nodes
 b_nn2:          .skip 4
 b_stack:        .skip 8
-b_bins:         .skip NBINS*32      # count, min[3], max[3], pad
-b_lr:           .skip NBINS*8       # sweep: left area, right area
+b_cut:          .skip 4             # nodes under this many: tasks (0: none)
+fr_n:           .skip 4             # the level's nodes
+.align 8
+fr_cur:         .skip 8             # (node, start, end) of this level
+fr_next:        .skip 8             #  and the next
+b_tasks:        .skip 8             # (node, start, end, its first node)
+b_ctxs:         .skip 8             # C_SZ each: a thread's index + 1
+pb_start:       .skip 4             # a big node's parallel passes
+pb_end:         .skip 4
+pb_axis:        .skip 4
+pb_cmin:        .skip 4
+pb_scale:       .skip 4
+pb_split:       .skip 4
+pb_mid:         .skip 4
+.align 8
+b_ptmp:         .skip 8             # u32[n]: big nodes' partitions
+pb_off:         .skip PB_K*8        # a chunk's left and right places
+ro_new:         .skip 7*8           # reorder_tris's new arrays
+.align 64
+b_topnext:      .skip 64            # the top's next node (atomic: a line each)
+b_ntask:        .skip 64
+fr_nn:          .skip 64            # the next level's nodes
+b_ctx0:         .skip C_SZ          # the top's context
+pb_part:        .skip PB_K*64       # a chunk's box and centroid box
+pb_bins:        .skip PB_K*NBINS*BN_SZ  # a chunk's bins
 
 .section .rodata
 .align 4
@@ -1426,7 +1466,15 @@ hv_unit:
 1:  ret
 
 # =============================================================================
-#  BVH build: binned SAH over centroids (BVH2), then collapse to 4-wide
+#  BVH build: binned SAH over centroids (BVH2), then collapse to 4-wide.
+#  The top is built a level at a time: big nodes on this thread with their
+#  bounds and bins over PB_K chunks in parallel, the rest of the level's
+#  nodes on every thread at once. Nodes under b_cut primitives become tasks
+#  that the workers build, each in its own context (bins, sweep, stack). A task
+#  of c primitives gets a block of 2c - 2 nodes for its own (no shared
+#  counter: an atomic one next to b_prim's line made more threads slower).
+#  Each subtree partitions only its own range of b_prim, so the leaves are
+#  the same on any number of threads
 # =============================================================================
 build_bvh:
     push    rbx
@@ -1435,45 +1483,301 @@ build_bvh:
     push    r14
     push    r15
     push    rbp
-    sub     rsp, 104
-    mov     r12d, [rip+hv_n]            # triangles, then spheres
-    add     r12d, [rip+hv_ns]
+    sub     rsp, 24
+    mov     ebx, [rip+hv_n]             # triangles, then spheres
+    add     ebx, [rip+hv_ns]
     mov     rdi, [rip+b_prim]           # prims in order
     xor     ecx, ecx
-1:  cmp     ecx, r12d
+1:  cmp     ecx, ebx
     jae     2f
     mov     [rdi+rcx*4], ecx
     inc     ecx
     jmp     1b
-2:  lea     edi, [r12*2+8]              # BVH2 nodes: at most 2n - 1
+2:  lea     edi, [rbx*2+8]              # BVH2 nodes: at most 2n - 1
     shl     edi, 5
     call    hv_map
     test    rax, rax
     jz      .Lbb_fail
     mov     [rip+b_n2], rax
-    lea     edi, [r12*2+8]              # stack: (node, start, end)
+    lea     edi, [rbx*2+8]              # the top's stack: (node, start, end)
     imul    edi, edi, 12
     call    hv_map
     test    rax, rax
     jz      .Lbb_fail
     mov     [rip+b_stack], rax
     mov     dword ptr [rip+b_nn2], 1    # the root
-    mov     rax, [rip+b_stack]
+    cmp     ebx, BVH_PB_MIN             # big nodes' partitions go through here
+    jb      21f
+    lea     edi, [rbx*4+64]
+    call    hv_map
+    test    rax, rax
+    jz      .Lbb_fail
+    mov     [rip+b_ptmp], rax
+21:
+    mov     dword ptr [rip+b_cut], 0
+    mov     dword ptr [rip+b_ntask], 0
+    mov     ecx, [rip+n_workers]        # the cut: n / (8 threads), 2048 at
+    test    ecx, ecx                    #  least (none: one thread, or small)
+    jz      5f
+    cmp     ebx, BVH_PAR_N
+    jb      5f
+    inc     ecx
+    shl     ecx, 3
+    mov     eax, ebx
+    xor     edx, edx
+    div     ecx
+    cmp     eax, BVH_CUT_MIN
+    jae     22f
+    mov     eax, BVH_CUT_MIN
+22: cmp     eax, BVH_PB_MIN             # (big nodes only on this thread)
+    jb      3f
+    mov     eax, BVH_PB_MIN-1
+3:  mov     [rip+b_cut], eax
+    mov     ecx, eax                    # a level's nodes over the cut: n /
+    mov     eax, ebx                    #  cut at most (disjoint)
+    xor     edx, edx
+    div     ecx
+    lea     edi, [rax+16]
+    imul    edi, edi, 12
+    mov     [rsp+8], edi
+    call    hv_map
+    test    rax, rax
+    jz      .Lbb_fail
+    mov     [rip+fr_cur], rax
+    mov     edi, [rsp+8]
+    call    hv_map
+    test    rax, rax
+    jz      .Lbb_fail
+    mov     [rip+fr_next], rax
+    lea     edi, [rbx+16]               # tasks: one a primitive at most
+    shl     edi, 4
+    call    hv_map
+    test    rax, rax
+    jz      .Lbb_fail
+    mov     [rip+b_tasks], rax
+    mov     eax, [rip+n_workers]        # contexts: a thread's index + 1 (-1:
+    add     eax, 2                      #  nested, inline), each a stack of
+    mov     [rsp], eax                  #  2 cut + 16 entries
+    imul    edi, eax, C_SZ
+    add     edi, 64
+    call    hv_map
+    test    rax, rax
+    jz      .Lbb_fail
+    add     rax, 63
+    and     rax, -64
+    mov     [rip+b_ctxs], rax
+    mov     eax, [rip+b_cut]
+    lea     eax, [rax*2+16]
+    imul    eax, eax, 12
+    mov     [rsp+4], eax
+    mov     edi, eax
+    imul    edi, [rsp]
+    call    hv_map
+    test    rax, rax
+    jz      .Lbb_fail
+    mov     rdi, [rip+b_ctxs]
+    mov     ecx, [rsp]
+4:  mov     [rdi+C_STACK], rax
+    mov     dword ptr [rdi+C_TOP], 0
+    mov     dword ptr [rdi+C_PAR], 0
+    mov     edx, [rsp+4]
+    add     rax, rdx
+    add     rdi, C_SZ
+    dec     ecx
+    jnz     4b
+    mov     rax, [rip+fr_cur]           # the top: the root, a level at a time
     mov     dword ptr [rax], 0
     mov     dword ptr [rax+4], 0
-    mov     [rax+8], r12d
-    mov     r13d, 1                     # stack depth
+    mov     [rax+8], ebx
+    mov     dword ptr [rip+fr_n], 1
+    mov     dword ptr [rip+b_topnext], 1
+    lea     rdi, [rip+b_ctx0]
+    mov     rax, [rip+b_stack]
+    mov     [rdi+C_STACK], rax
+    mov     dword ptr [rdi+C_TOP], 1
+    mov     dword ptr [rdi+C_PAR], 1
+.Lbb_level:
+    cmp     dword ptr [rip+fr_n], 0
+    je      .Lbb_top_done
+    mov     dword ptr [rip+fr_nn], 0
+    xor     ebp, ebp                    # big ones here, their passes in parallel
+51: cmp     ebp, [rip+fr_n]
+    jae     52f
+    mov     rax, [rip+fr_cur]
+    lea     rcx, [rbp+rbp*2]
+    lea     rsi, [rax+rcx*4]
+    mov     eax, [rsi+8]
+    sub     eax, [rsi+4]
+    cmp     eax, BVH_PB_MIN
+    jb      53f
+    lea     rdi, [rip+b_ctx0]
+    mov     rdx, [rdi+C_STACK]
+    mov     rax, [rsi]
+    mov     [rdx], rax
+    mov     eax, [rsi+8]
+    mov     [rdx+8], eax
+    mov     esi, 1
+    call    bvh_loop
+53: inc     ebp
+    jmp     51b
+52: lea     rdi, [rip+fr_job]           # the rest on every thread
+    xor     esi, esi
+    mov     edx, [rip+fr_n]
+    mov     ecx, 1
+    call    parallel_for
+    mov     rax, [rip+fr_cur]           # the next level
+    mov     rcx, [rip+fr_next]
+    mov     [rip+fr_cur], rcx
+    mov     [rip+fr_next], rax
+    mov     eax, [rip+fr_nn]
+    mov     [rip+fr_n], eax
+    jmp     .Lbb_level
+5:  lea     rdi, [rip+b_ctx0]           # (small, or one thread: all here)
+    mov     rax, [rip+b_stack]
+    mov     [rdi+C_STACK], rax
+    mov     dword ptr [rdi+C_TOP], 0
+    mov     dword ptr [rdi+C_PAR], 0
+    mov     dword ptr [rdi+C_NEXT], 1   # (the root taken)
+    mov     dword ptr [rax], 0
+    mov     dword ptr [rax+4], 0
+    mov     [rax+8], ebx
+    mov     esi, 1
+    call    bvh_loop
+    mov     eax, [rip+b_ctx0+C_NEXT]
+    mov     [rip+b_nn2], eax
+    jmp     6f
+.Lbb_top_done:
+    mov     eax, [rip+b_topnext]        # (the nodes, the tasks' blocks too)
+    mov     [rip+b_nn2], eax
+    mov     edx, [rip+b_ntask]          # the subtrees, on every thread
+    test    edx, edx
+    jz      6f
+    lea     rdi, [rip+bvh_task]
+    xor     esi, esi
+    mov     ecx, 1
+    call    parallel_for
+6:  call    collapse4
+    test    eax, eax
+    jz      .Lbb_fail
+    call    reorder_tris
+    mov     eax, 1
+    jmp     9f
+.Lbb_fail:
+    xor     eax, eax
+9:  add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# fr_job(esi=first, edx=end, ecx=thread index) - split those nodes of the
+#   level (parallel_for's chunk; the big ones are done)
+fr_job:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, esi
+    mov     r13d, edx
+    lea     eax, [rcx+1]
+    imul    eax, eax, C_SZ
+    mov     r12, [rip+b_ctxs]
+    add     r12, rax
+    mov     dword ptr [r12+C_TOP], 1
+    mov     dword ptr [r12+C_PAR], 0
+1:  cmp     ebx, r13d
+    jae     9f
+    mov     rax, [rip+fr_cur]
+    lea     rcx, [rbx+rbx*2]
+    lea     rsi, [rax+rcx*4]
+    mov     eax, [rsi+8]
+    sub     eax, [rsi+4]
+    cmp     eax, BVH_PB_MIN
+    jae     2f
+    mov     rdi, [r12+C_STACK]
+    mov     rax, [rsi]
+    mov     [rdi], rax
+    mov     eax, [rsi+8]
+    mov     [rdi+8], eax
+    mov     rdi, r12
+    mov     esi, 1
+    call    bvh_loop
+2:  inc     ebx
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bvh_task(esi=first task, edx=end, ecx=thread index) - build those subtrees
+#   (parallel_for's chunk: b_tasks entries, in the thread's context)
+bvh_task:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, esi
+    mov     r13d, edx
+    lea     eax, [rcx+1]
+    imul    eax, eax, C_SZ
+    mov     r12, [rip+b_ctxs]
+    add     r12, rax
+    mov     dword ptr [r12+C_TOP], 0
+    mov     dword ptr [r12+C_PAR], 0
+1:  cmp     ebx, r13d
+    jae     9f
+    mov     rsi, rbx
+    shl     rsi, 4
+    add     rsi, [rip+b_tasks]
+    mov     rdi, [r12+C_STACK]
+    mov     rax, [rsi]
+    mov     [rdi], rax
+    mov     eax, [rsi+8]
+    mov     [rdi+8], eax
+    mov     eax, [rsi+12]               # its block of nodes
+    mov     [r12+C_NEXT], eax
+    mov     rdi, r12
+    mov     esi, 1
+    call    bvh_loop
+    inc     ebx
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bvh_loop(rdi=context, esi=entries on its stack) - split until leaves; at
+#   the top (C_TOP) one split, its children to the next level or, under
+#   b_cut, to the tasks with their blocks of nodes (top_child). (bin_sweep
+#   reads this frame: box at +0, centroid box at +32, count at +64)
+bvh_loop:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 104
+    mov     r12, rdi
+    mov     r13d, esi                   # stack depth
 .Lbb_pop:
     test    r13d, r13d
-    jz      .Lbb_collapse
+    jz      .Lbb_done
     dec     r13d
-    mov     rax, [rip+b_stack]
+    mov     rax, [r12+C_STACK]
     lea     rcx, [r13+r13*2]
     mov     ebx, [rax+rcx*4]            # node
     mov     r14d, [rax+rcx*4+4]         # start
     mov     r15d, [rax+rcx*4+8]         # end
     # bounds and centroid bounds
-    movaps  xmm0, [rip+hf_inf]          # box min (x y z in lanes)
+    mov     eax, r15d
+    sub     eax, r14d
+    cmp     eax, BVH_PB_MIN             # (a big node: in parallel; only the
+    jb      31f                         #  top's context sees them)
+    call    bvh_pbounds
+    jmp     4f
+31: movaps  xmm0, [rip+hf_inf]          # box min (x y z in lanes)
     movaps  xmm1, [rip+hf_ninf]         # box max
     movaps  xmm2, [rip+hf_inf]          # centroid min
     movaps  xmm3, [rip+hf_ninf]
@@ -1554,23 +1858,18 @@ build_bvh:
     mov     [rsp+72], eax
     jmp     .Lbb_children
 .Lbb_bins:
-    lea     rdi, [rip+b_bins]           # clear
-    xor     ecx, ecx
-5:  mov     dword ptr [rdi], 0
-    movaps  xmm0, [rip+hf_inf]
-    movups  [rdi+4], xmm0
-    movaps  xmm0, [rip+hf_ninf]
-    movups  [rdi+16], xmm0
-    add     rdi, 32
-    inc     ecx
-    cmp     ecx, NBINS
-    jb      5b
     movss   xmm7, [rip+hf_nbins]        # scale = 16 / extent (a hair less)
     divss   xmm7, [rsp+68]
     movss   [rsp+76], xmm7
-    movss   [rip+b_scale], xmm7
+    movss   [r12+C_SCALE], xmm7
     mov     eax, [rsp+32+rbp*4]         # the axis' centroid minimum
-    mov     [rip+b_cmin_axis], eax
+    mov     [r12+C_CMIN], eax
+    cmp     dword ptr [rsp+64], BVH_PB_MIN  # (a big node: in parallel)
+    jb      50f
+    call    bvh_pbins
+    jmp     7f
+50: lea     rdi, [r12+C_BINS]           # clear
+    call    bins_clear
     mov     ecx, r14d
 6:  cmp     ecx, r15d
     jae     7f
@@ -1578,8 +1877,8 @@ build_bvh:
     mov     eax, [rax+rcx*4]
     call    bin_of
     mov     edx, eax
-    shl     edx, 5
-    lea     rdi, [rip+b_bins]
+    imul    edx, edx, BN_SZ
+    lea     rdi, [r12+C_BINS]
     add     rdi, rdx
     inc     dword ptr [rdi]
     mov     rax, [rip+b_prim]
@@ -1587,14 +1886,14 @@ build_bvh:
     mov     rdx, [rip+b_box]
     lea     r8, [rax+rax*2]
     lea     rdx, [rdx+r8*8]
-    movups  xmm0, [rdi+4]
+    movups  xmm0, [rdi+BN_MIN]
     movups  xmm4, [rdx]
     minps   xmm0, xmm4
-    movups  [rdi+4], xmm0
-    movups  xmm1, [rdi+16]
+    movups  [rdi+BN_MIN], xmm0
+    movups  xmm1, [rdi+BN_MAX]
     movups  xmm4, [rdx+12]
     maxps   xmm1, xmm4
-    movups  [rdi+16], xmm1
+    movups  [rdi+BN_MAX], xmm1
     inc     ecx
     jmp     6b
 7:  # sweep: left areas and counts, then right; best split
@@ -1605,17 +1904,18 @@ build_bvh:
     jbe     .Lbb_leaf
     mov     eax, NBINS/2                # too many for a leaf: split anyway
 71: mov     [rsp+80], eax
-    mov     r8d, r14d                   # partition by bin < split
+    cmp     dword ptr [rsp+64], BVH_PB_MIN  # a big node: a stable partition
+    jb      72f                         #  in parallel (the same on any
+    call    bvh_ppart                   #  number of threads)
+    mov     r8d, eax
+    jmp     81f
+72: mov     r8d, r14d                   # partition by bin < split
     lea     r9d, [r15-1]
 8:  cmp     r8d, r9d
     jg      81f
     mov     rdx, [rip+b_prim]
     mov     eax, [rdx+r8*4]
-    push    r8
-    push    r9
     call    bin_of
-    pop     r9
-    pop     r8
     cmp     eax, [rsp+80]
     jae     82f
     inc     r8d
@@ -1637,14 +1937,34 @@ build_bvh:
     shr     eax, 1
     mov     [rsp+72], eax
 .Lbb_children:
-    mov     eax, [rip+b_nn2]            # two new nodes
-    add     dword ptr [rip+b_nn2], 2
+    cmp     dword ptr [r12+C_TOP], 0
+    je      84f
+    mov     eax, 2                      # the top: two new nodes (shared)
+    lock xadd [rip+b_topnext], eax
+    mov     rcx, [rip+b_n2]
+    mov     edx, ebx
+    shl     edx, 5
+    mov     [rcx+rdx+24], eax
+    mov     dword ptr [rcx+rdx+28], 0
+    mov     [rsp+84], eax
+    mov     edi, eax                    # left: start .. split
+    mov     esi, r14d
+    mov     edx, [rsp+72]
+    call    top_child
+    mov     edi, [rsp+84]               # right: split .. end
+    inc     edi
+    mov     esi, [rsp+72]
+    mov     edx, r15d
+    call    top_child
+    jmp     .Lbb_pop
+84: mov     eax, [r12+C_NEXT]           # two new nodes
+    add     dword ptr [r12+C_NEXT], 2
     mov     rcx, [rip+b_n2]
     mov     edx, ebx
     shl     edx, 5
     mov     [rcx+rdx+24], eax           # left (right = left + 1)
     mov     dword ptr [rcx+rdx+28], 0
-    mov     rcx, [rip+b_stack]          # push both
+    mov     rcx, [r12+C_STACK]          # push both
     lea     rdx, [r13+r13*2]
     mov     [rcx+rdx*4], eax
     mov     [rcx+rdx*4+4], r14d
@@ -1667,16 +1987,8 @@ build_bvh:
     or      eax, 0x80000000
     mov     [rcx+rdx+28], eax
     jmp     .Lbb_pop
-.Lbb_collapse:
-    call    collapse4
-    test    eax, eax
-    jz      .Lbb_fail
-    call    reorder_tris
-    mov     eax, 1
-    jmp     9f
-.Lbb_fail:
-    xor     eax, eax
-9:  add     rsp, 104
+.Lbb_done:
+    add     rsp, 104
     pop     rbp
     pop     r15
     pop     r14
@@ -1685,15 +1997,382 @@ build_bvh:
     pop     rbx
     ret
 
-# bin_of(eax=prim; ebp = axis; b_cmin_axis, b_scale) -> eax = bin
+# top_child(edi=node, esi=start, edx=end) - a child at the top: over b_cut
+#   to the next level, else a task with its block of 2 count - 2 nodes
+top_child:
+    mov     eax, edx
+    sub     eax, esi
+    cmp     eax, [rip+b_cut]
+    jbe     1f
+    mov     ecx, 1
+    lock xadd [rip+fr_nn], ecx
+    mov     rax, [rip+fr_next]
+    lea     rcx, [rcx+rcx*2]
+    lea     rax, [rax+rcx*4]
+    mov     [rax], edi
+    mov     [rax+4], esi
+    mov     [rax+8], edx
+    ret
+1:  lea     r8d, [rax*2-2]
+    lock xadd [rip+b_topnext], r8d
+    mov     ecx, 1
+    lock xadd [rip+b_ntask], ecx
+    shl     rcx, 4
+    add     rcx, [rip+b_tasks]
+    mov     [rcx], edi
+    mov     [rcx+4], esi
+    mov     [rcx+8], edx
+    mov     [rcx+12], r8d
+    ret
+
+# bvh_ppart(eax=split bin; r14d / r15d, after bvh_pbins) -> eax = the first
+#   primitive right of the split: a stable partition of the node's range of
+#   b_prim, each chunk's places from its bins' counts, through b_ptmp
+bvh_ppart:
+    push    rbx
+    mov     [rip+pb_split], eax
+    lea     rsi, [rip+pb_bins]          # each chunk's left count
+    lea     rdi, [rip+pb_off]
+    xor     ecx, ecx
+    xor     r9d, r9d                    # all the left
+1:  xor     eax, eax
+    xor     edx, edx
+2:  cmp     edx, [rip+pb_split]
+    jae     3f
+    mov     r8d, edx
+    imul    r8d, r8d, BN_SZ
+    add     eax, [rsi+r8]
+    inc     edx
+    jmp     2b
+3:  mov     [rdi+rcx*8], eax
+    add     r9d, eax
+    add     rsi, NBINS*BN_SZ
+    inc     ecx
+    cmp     ecx, PB_K
+    jb      1b
+    mov     r10d, r14d                  # the places: left from start, right
+    lea     r11d, [r14+r9]              #  from start + all the left
+    mov     [rip+pb_mid], r11d          # (the split)
+    xor     ebx, ebx
+4:  mov     edi, ebx
+    call    pb_range
+    lea     rsi, [rip+pb_off]
+    mov     eax, [rsi+rbx*8]            # left count -> left place
+    mov     [rsi+rbx*8], r10d
+    add     r10d, eax
+    sub     edx, ecx                    # right count -> right place
+    sub     edx, eax
+    mov     [rsi+rbx*8+4], r11d
+    add     r11d, edx
+    inc     ebx
+    cmp     ebx, PB_K
+    jb      4b
+    lea     rdi, [rip+pb_part_job]
+    xor     esi, esi
+    mov     edx, PB_K
+    mov     ecx, 1
+    call    parallel_for
+    lea     rdi, [rip+pb_back_job]
+    xor     esi, esi
+    mov     edx, PB_K
+    mov     ecx, 1
+    call    parallel_for
+    mov     eax, [rip+pb_mid]
+    pop     rbx
+    ret
+
+# pb_part_job(esi=first chunk, edx=end) - each chunk's primitives to their
+#   places in b_ptmp (pb_off: left, right), in order
+pb_part_job:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    mov     ebx, esi
+    mov     r12d, edx
+1:  cmp     ebx, r12d
+    jae     9f
+    mov     edi, ebx
+    call    pb_range
+    lea     rax, [rip+pb_off]
+    mov     r13d, [rax+rbx*8]           # left place
+    mov     r14d, [rax+rbx*8+4]         # right place
+    mov     r9, [rip+b_prim]
+    mov     r11, [rip+b_cent]
+    mov     rdi, [rip+b_ptmp]
+    mov     esi, [rip+pb_axis]
+    movss   xmm2, [rip+pb_cmin]
+    movss   xmm3, [rip+pb_scale]
+2:  cmp     ecx, edx
+    jae     3f
+    mov     r10d, [r9+rcx*4]
+    lea     r8, [r10+r10*2]
+    lea     rax, [r11+r8*4]
+    movss   xmm0, [rax+rsi*4]           # (bin_of)
+    subss   xmm0, xmm2
+    mulss   xmm0, xmm3
+    cvttss2si eax, xmm0
+    test    eax, eax
+    jns     4f
+    xor     eax, eax
+4:  cmp     eax, NBINS-1
+    jbe     5f
+    mov     eax, NBINS-1
+5:  cmp     eax, [rip+pb_split]
+    jae     6f
+    mov     [rdi+r13*4], r10d
+    inc     r13d
+    jmp     7f
+6:  mov     [rdi+r14*4], r10d
+    inc     r14d
+7:  inc     ecx
+    jmp     2b
+3:  inc     ebx
+    jmp     1b
+9:  pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pb_back_job(esi=first chunk, edx=end) - b_ptmp's range back into b_prim
+pb_back_job:
+    push    rbx
+    push    r12
+    mov     ebx, esi
+    mov     r12d, edx
+1:  cmp     ebx, r12d
+    jae     9f
+    mov     edi, ebx
+    call    pb_range
+    mov     r9, [rip+b_prim]
+    mov     r10, [rip+b_ptmp]
+2:  cmp     ecx, edx
+    jae     3f
+    mov     eax, [r10+rcx*4]
+    mov     [r9+rcx*4], eax
+    inc     ecx
+    jmp     2b
+3:  inc     ebx
+    jmp     1b
+9:  pop     r12
+    pop     rbx
+    ret
+
+# bins_clear(rdi=NBINS bins) - empty: count 0, boxes inside out
+bins_clear:
+    xor     ecx, ecx
+1:  mov     dword ptr [rdi], 0
+    movaps  xmm0, [rip+hf_inf]
+    movups  [rdi+BN_MIN], xmm0
+    movaps  xmm0, [rip+hf_ninf]
+    movups  [rdi+BN_MAX], xmm0
+    add     rdi, BN_SZ
+    inc     ecx
+    cmp     ecx, NBINS
+    jb      1b
+    ret
+
+# bvh_pbounds(r14d=start, r15d=end) -> xmm0 / xmm1 the box, xmm2 / xmm3 the
+#   centroids' box: PB_K chunks in parallel, merged
+bvh_pbounds:
+    sub     rsp, 8
+    mov     [rip+pb_start], r14d
+    mov     [rip+pb_end], r15d
+    lea     rdi, [rip+pb_bounds_job]
+    xor     esi, esi
+    mov     edx, PB_K
+    mov     ecx, 1
+    call    parallel_for
+    movaps  xmm0, [rip+hf_inf]
+    movaps  xmm1, [rip+hf_ninf]
+    movaps  xmm2, [rip+hf_inf]
+    movaps  xmm3, [rip+hf_ninf]
+    lea     rax, [rip+pb_part]
+    xor     ecx, ecx
+1:  minps   xmm0, [rax]
+    maxps   xmm1, [rax+16]
+    minps   xmm2, [rax+32]
+    maxps   xmm3, [rax+48]
+    add     rax, 64
+    inc     ecx
+    cmp     ecx, PB_K
+    jb      1b
+    add     rsp, 8
+    ret
+
+# pb_range(edi=chunk) -> ecx = its first primitive, edx = its end (pb_start
+#   .. pb_end in PB_K parts)
+pb_range:
+    mov     r8d, [rip+pb_end]
+    sub     r8d, [rip+pb_start]
+    mov     eax, edi
+    imul    rax, r8
+    shr     rax, PB_SHIFT
+    add     eax, [rip+pb_start]
+    mov     ecx, eax
+    lea     eax, [rdi+1]
+    imul    rax, r8
+    shr     rax, PB_SHIFT
+    add     eax, [rip+pb_start]
+    mov     edx, eax
+    ret
+
+# pb_bounds_job(esi=first chunk, edx=end) - each chunk's boxes into pb_part
+pb_bounds_job:
+    push    rbx
+    push    r12
+    mov     ebx, esi
+    mov     r12d, edx
+1:  cmp     ebx, r12d
+    jae     9f
+    mov     edi, ebx
+    call    pb_range
+    movaps  xmm0, [rip+hf_inf]
+    movaps  xmm1, [rip+hf_ninf]
+    movaps  xmm2, [rip+hf_inf]
+    movaps  xmm3, [rip+hf_ninf]
+    mov     r9, [rip+b_prim]
+    mov     r10, [rip+b_box]
+    mov     r11, [rip+b_cent]
+2:  cmp     ecx, edx
+    jae     3f
+    mov     eax, [r9+rcx*4]
+    lea     r8, [rax+rax*2]
+    movups  xmm4, [r10+r8*8]
+    minps   xmm0, xmm4
+    movups  xmm4, [r10+r8*8+12]
+    maxps   xmm1, xmm4
+    movups  xmm4, [r11+r8*4]
+    minps   xmm2, xmm4
+    maxps   xmm3, xmm4
+    inc     ecx
+    jmp     2b
+3:  mov     eax, ebx
+    shl     eax, 6
+    lea     rcx, [rip+pb_part]
+    add     rcx, rax
+    movaps  [rcx], xmm0
+    movaps  [rcx+16], xmm1
+    movaps  [rcx+32], xmm2
+    movaps  [rcx+48], xmm3
+    inc     ebx
+    jmp     1b
+9:  pop     r12
+    pop     rbx
+    ret
+
+# bvh_pbins(r12=context, r14d=start, r15d=end, ebp=axis) - the context's bins
+#   (C_SCALE, C_CMIN set): PB_K chunks' bins in parallel, merged
+bvh_pbins:
+    sub     rsp, 8
+    mov     [rip+pb_start], r14d
+    mov     [rip+pb_end], r15d
+    mov     [rip+pb_axis], ebp
+    mov     eax, [r12+C_SCALE]
+    mov     [rip+pb_scale], eax
+    mov     eax, [r12+C_CMIN]
+    mov     [rip+pb_cmin], eax
+    lea     rdi, [rip+pb_bins_job]
+    xor     esi, esi
+    mov     edx, PB_K
+    mov     ecx, 1
+    call    parallel_for
+    lea     rdi, [r12+C_BINS]           # merged: counts, then min, then max
+    call    bins_clear
+    lea     rsi, [rip+pb_bins]
+    xor     ecx, ecx
+1:  lea     rdi, [r12+C_BINS]
+    xor     edx, edx
+2:  mov     eax, [rsi]
+    add     [rdi], eax
+    movups  xmm0, [rdi+BN_MIN]
+    movups  xmm1, [rsi+BN_MIN]
+    minps   xmm0, xmm1
+    movups  [rdi+BN_MIN], xmm0
+    movups  xmm0, [rdi+BN_MAX]
+    movups  xmm1, [rsi+BN_MAX]
+    maxps   xmm0, xmm1
+    movups  [rdi+BN_MAX], xmm0
+    add     rsi, BN_SZ
+    add     rdi, BN_SZ
+    inc     edx
+    cmp     edx, NBINS
+    jb      2b
+    inc     ecx
+    cmp     ecx, PB_K
+    jb      1b
+    add     rsp, 8
+    ret
+
+# pb_bins_job(esi=first chunk, edx=end) - each chunk's bins into pb_bins (as
+#   bin_of: pb_axis, pb_cmin, pb_scale)
+pb_bins_job:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, esi
+    mov     r12d, edx
+1:  cmp     ebx, r12d
+    jae     9f
+    mov     eax, ebx
+    imul    eax, eax, NBINS*BN_SZ       # (a chunk's bins)
+    lea     r13, [rip+pb_bins]
+    add     r13, rax
+    mov     rdi, r13
+    call    bins_clear
+    mov     edi, ebx
+    call    pb_range
+    mov     r9, [rip+b_prim]
+    mov     r10, [rip+b_box]
+    mov     r11, [rip+b_cent]
+    mov     esi, [rip+pb_axis]
+    movss   xmm2, [rip+pb_cmin]
+    movss   xmm3, [rip+pb_scale]
+2:  cmp     ecx, edx
+    jae     3f
+    mov     eax, [r9+rcx*4]
+    lea     r8, [rax+rax*2]
+    lea     rax, [r11+r8*4]
+    movss   xmm0, [rax+rsi*4]
+    subss   xmm0, xmm2
+    mulss   xmm0, xmm3
+    cvttss2si eax, xmm0
+    test    eax, eax
+    jns     4f
+    xor     eax, eax
+4:  cmp     eax, NBINS-1
+    jbe     5f
+    mov     eax, NBINS-1
+5:  imul    eax, eax, BN_SZ
+    lea     rdi, [r13+rax]
+    inc     dword ptr [rdi]
+    movups  xmm0, [rdi+BN_MIN]
+    movups  xmm4, [r10+r8*8]
+    minps   xmm0, xmm4
+    movups  [rdi+BN_MIN], xmm0
+    movups  xmm1, [rdi+BN_MAX]
+    movups  xmm4, [r10+r8*8+12]
+    maxps   xmm1, xmm4
+    movups  [rdi+BN_MAX], xmm1
+    inc     ecx
+    jmp     2b
+3:  inc     ebx
+    jmp     1b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bin_of(eax=prim; ebp = axis; r12 = context: C_CMIN, C_SCALE) -> eax = bin
 bin_of:
     mov     rdx, [rip+b_cent]
     lea     r10, [rax+rax*2]
     lea     rdx, [rdx+r10*4]
     movss   xmm0, [rdx+rbp*4]
-    movss   xmm1, [rip+b_cmin_axis]
+    movss   xmm1, [r12+C_CMIN]
     subss   xmm0, xmm1
-    mulss   xmm0, [rip+b_scale]
+    mulss   xmm0, [r12+C_SCALE]
     cvttss2si eax, xmm0
     test    eax, eax
     jns     1f
@@ -1703,8 +2382,8 @@ bin_of:
     mov     eax, NBINS-1
 2:  ret
 
-# bin_sweep - (build_bvh's [rsp+..] one level up: count at +64) -> eax =
-#   the best split bin, or 0 when a leaf costs less
+# bin_sweep - (r12 = context; bvh_loop's [rsp+..] one level up: count at
+#   +64) -> eax = the best split bin, or 0 when a leaf costs less
 bin_sweep:
     push    rbx
     sub     rsp, 16
@@ -1713,40 +2392,40 @@ bin_sweep:
     movaps  xmm1, [rip+hf_ninf]
     xor     ecx, ecx
     xor     ebx, ebx                    # running count
-    lea     rdi, [rip+b_bins]
+    lea     rdi, [r12+C_BINS]
 1:  cmp     ecx, NBINS-1
     jae     2f
-    movups  xmm2, [rdi+4]
+    movups  xmm2, [rdi+BN_MIN]
     minps   xmm0, xmm2
-    movups  xmm2, [rdi+16]
+    movups  xmm2, [rdi+BN_MAX]
     maxps   xmm1, xmm2
     add     ebx, [rdi]
     call    half_area                   # xmm0/xmm1 -> xmm4 (keeps both)
     cvtsi2ss xmm5, ebx
     mulss   xmm4, xmm5
-    lea     rdx, [rip+b_lr]
+    lea     rdx, [r12+C_LR]
     movss   [rdx+rcx*8], xmm4
-    add     rdi, 32
+    add     rdi, BN_SZ
     inc     ecx
     jmp     1b
 2:  movaps  xmm0, [rip+hf_inf]          # right, from the end
     movaps  xmm1, [rip+hf_ninf]
     xor     ebx, ebx
     mov     ecx, NBINS-1
-    lea     rdi, [rip+b_bins+(NBINS-1)*32]
+    lea     rdi, [r12+C_BINS+(NBINS-1)*BN_SZ]
 3:  test    ecx, ecx
     jz      4f
-    movups  xmm2, [rdi+4]
+    movups  xmm2, [rdi+BN_MIN]
     minps   xmm0, xmm2
-    movups  xmm2, [rdi+16]
+    movups  xmm2, [rdi+BN_MAX]
     maxps   xmm1, xmm2
     add     ebx, [rdi]
     call    half_area
     cvtsi2ss xmm5, ebx
     mulss   xmm4, xmm5
-    lea     rdx, [rip+b_lr]
+    lea     rdx, [r12+C_LR]
     movss   [rdx+rcx*8-4], xmm4         # split at ecx: right part from bin ecx
-    sub     rdi, 32
+    sub     rdi, BN_SZ
     dec     ecx
     jmp     3b
 4:  movss   xmm6, [rip+hf_big]          # best = min over splits 1..15
@@ -1754,7 +2433,7 @@ bin_sweep:
     mov     ecx, 1
 5:  cmp     ecx, NBINS
     jae     6f
-    lea     rdx, [rip+b_lr]
+    lea     rdx, [r12+C_LR]
     movss   xmm4, [rdx+rcx*8-8]         # left of split ecx: bins 0..ecx-1
     addss   xmm4, [rdx+rcx*8-4]         # right: bins ecx..15
     comiss  xmm4, xmm6
@@ -1987,157 +2666,150 @@ reorder_tris:
     push    rbx
     push    r12
     push    r13
-    sub     rsp, 8
     mov     r12d, [rip+hv_n]
-    imul    edi, r12d, 36               # positions
+    lea     rbx, [rip+ro_new]           # the new arrays: positions, normals,
+    imul    edi, r12d, 36               #  object space (shader graphs)
     add     edi, 64
     call    hv_map
-    test    rax, rax
-    jz      9f
-    mov     r13, rax
-    xor     ebx, ebx
-1:  cmp     ebx, r12d
-    jae     2f
-    mov     rax, [rip+b_prim]
-    mov     eax, [rax+rbx*4]
-    lea     rsi, [rax+rax*8]
-    shl     rsi, 2
-    add     rsi, [rip+hv_tv]
-    lea     rdi, [rbx+rbx*8]
-    lea     rdi, [r13+rdi*4]
-    mov     ecx, 36
-    rep     movsb
-    inc     ebx
-    jmp     1b
-2:  mov     [rip+hv_tv], r13
-    imul    edi, r12d, 36               # normals
+    mov     [rbx], rax
+    imul    edi, r12d, 36
     add     edi, 64
     call    hv_map
-    test    rax, rax
-    jz      9f
-    mov     r13, rax
-    xor     ebx, ebx
-3:  cmp     ebx, r12d
-    jae     4f
-    mov     rax, [rip+b_prim]
-    mov     eax, [rax+rbx*4]
-    lea     rsi, [rax+rax*8]
-    shl     rsi, 2
-    add     rsi, [rip+hv_tn]
-    lea     rdi, [rbx+rbx*8]
-    lea     rdi, [r13+rdi*4]
-    mov     ecx, 36
-    rep     movsb
-    inc     ebx
-    jmp     3b
-4:  mov     [rip+hv_tn], r13
-    imul    edi, r12d, 36               # object space (shader graphs)
+    mov     [rbx+8], rax
+    imul    edi, r12d, 36
     add     edi, 64
     call    hv_map
-    test    rax, rax
-    jz      9f
-    mov     r13, rax
-    xor     ebx, ebx
-41: cmp     ebx, r12d
-    jae     42f
-    mov     rax, [rip+b_prim]
-    mov     eax, [rax+rbx*4]
-    lea     rsi, [rax+rax*8]
-    shl     rsi, 2
-    add     rsi, [rip+hv_to]
-    lea     rdi, [rbx+rbx*8]
-    lea     rdi, [r13+rdi*4]
-    mov     ecx, 36
-    rep     movsb
-    inc     ebx
-    jmp     41b
-42: mov     [rip+hv_to], r13
-    imul    edi, r12d, 24               # UVs, the same order
+    mov     [rbx+16], rax
+    imul    edi, r12d, 24               # UVs, colours, materials
     add     edi, 64
     call    hv_map
-    test    rax, rax
-    jz      9f
-    mov     r13, rax
-    xor     ebx, ebx
-43: cmp     ebx, r12d
-    jae     44f
-    mov     rax, [rip+b_prim]
-    mov     eax, [rax+rbx*4]
-    lea     rsi, [rax+rax*2]
-    shl     rsi, 3
-    add     rsi, [rip+hv_tuv]
-    lea     rdi, [rbx+rbx*2]
-    lea     rdi, [r13+rdi*8]
-    mov     ecx, 24
-    rep     movsb
-    inc     ebx
-    jmp     43b
-44: mov     [rip+hv_tuv], r13
-    imul    edi, r12d, 12               # colours, the same order
+    mov     [rbx+24], rax
+    imul    edi, r12d, 12
     add     edi, 64
     call    hv_map
-    test    rax, rax
-    jz      9f
-    mov     r13, rax
-    xor     ebx, ebx
-45: cmp     ebx, r12d
-    jae     46f
-    mov     rax, [rip+b_prim]
-    mov     eax, [rax+rbx*4]
-    imul    rsi, rax, 12
-    add     rsi, [rip+hv_tvc]
-    imul    rdi, rbx, 12
-    add     rdi, r13
-    mov     ecx, 12
-    rep     movsb
-    inc     ebx
-    jmp     45b
-46: mov     [rip+hv_tvc], r13
-    lea     edi, [r12*4+64]             # materials
+    mov     [rbx+32], rax
+    lea     edi, [r12*4+64]
     call    hv_map
-    test    rax, rax
-    jz      9f
-    mov     r13, rax
-    xor     ebx, ebx
-5:  cmp     ebx, r12d
-    jae     6f
-    mov     rax, [rip+b_prim]
-    mov     eax, [rax+rbx*4]
-    mov     rdx, [rip+hv_tm]
-    mov     eax, [rdx+rax*4]
-    mov     [r13+rbx*4], eax
-    inc     ebx
-    jmp     5b
-6:  mov     [rip+hv_tm], r13
-    mov     eax, [rip+hv_ns]            # spheres, in their leaves' order
+    mov     [rbx+40], rax
+    mov     qword ptr [rbx+48], 0       # spheres
+    mov     eax, [rip+hv_ns]
     test    eax, eax
-    jz      9f
+    jz      1f
     imul    edi, eax, SP_SZ
     add     edi, 64
     call    hv_map
+    mov     [rbx+48], rax
     test    rax, rax
     jz      9f
-    mov     r13, rax
-    xor     ebx, ebx
-7:  cmp     ebx, [rip+hv_ns]
-    jae     8f
-    mov     eax, ebx
-    add     eax, r12d
-    mov     rdx, [rip+b_prim]
-    mov     eax, [rdx+rax*4]
-    sub     eax, r12d
-    imul    rsi, rax, SP_SZ
-    add     rsi, [rip+hv_sp]
-    imul    rdi, rbx, SP_SZ
-    add     rdi, r13
-    mov     ecx, SP_SZ
-    rep     movsb
-    inc     ebx
-    jmp     7b
-8:  mov     [rip+hv_sp], r13
-9:  add     rsp, 8
-    pop     r13
+1:  xor     ecx, ecx                    # (any one missing: as they were)
+2:  cmp     qword ptr [rbx+rcx*8], 0
+    je      9f
+    inc     ecx
+    cmp     ecx, 6
+    jb      2b
+    lea     rdi, [rip+ro_job]           # every primitive, in parallel
+    xor     esi, esi
+    mov     edx, r12d
+    add     edx, [rip+hv_ns]
+    mov     ecx, 4096
+    call    parallel_for
+    mov     rax, [rbx]
+    mov     [rip+hv_tv], rax
+    mov     rax, [rbx+8]
+    mov     [rip+hv_tn], rax
+    mov     rax, [rbx+16]
+    mov     [rip+hv_to], rax
+    mov     rax, [rbx+24]
+    mov     [rip+hv_tuv], rax
+    mov     rax, [rbx+32]
+    mov     [rip+hv_tvc], rax
+    mov     rax, [rbx+40]
+    mov     [rip+hv_tm], rax
+    mov     rax, [rbx+48]
+    test    rax, rax
+    jz      9f
+    mov     [rip+hv_sp], rax
+9:  pop     r13
     pop     r12
+    pop     rbx
+    ret
+
+# ro_job(esi=first, edx=end) - leaf position i takes primitive b_prim[i]'s
+#   records (triangles: every per-triangle array; spheres: theirs)
+ro_job:
+    push    rbx
+    push    r12
+    lea     r12, [rip+ro_new]
+    mov     r11d, [rip+hv_n]
+    mov     r10, [rip+b_prim]
+1:  cmp     esi, edx
+    jae     9f
+    mov     eax, [r10+rsi*4]
+    cmp     esi, r11d
+    jae     5f
+    lea     r8, [rax+rax*8]             # 36 bytes: positions, normals, object
+    lea     r9, [rsi+rsi*8]
+    mov     rcx, [rip+hv_tv]
+    mov     rbx, [r12]
+    movups  xmm0, [rcx+r8*4]
+    movups  xmm1, [rcx+r8*4+16]
+    mov     ecx, [rcx+r8*4+32]
+    movups  [rbx+r9*4], xmm0
+    movups  [rbx+r9*4+16], xmm1
+    mov     [rbx+r9*4+32], ecx
+    mov     rcx, [rip+hv_tn]
+    mov     rbx, [r12+8]
+    movups  xmm0, [rcx+r8*4]
+    movups  xmm1, [rcx+r8*4+16]
+    mov     ecx, [rcx+r8*4+32]
+    movups  [rbx+r9*4], xmm0
+    movups  [rbx+r9*4+16], xmm1
+    mov     [rbx+r9*4+32], ecx
+    mov     rcx, [rip+hv_to]
+    mov     rbx, [r12+16]
+    movups  xmm0, [rcx+r8*4]
+    movups  xmm1, [rcx+r8*4+16]
+    mov     ecx, [rcx+r8*4+32]
+    movups  [rbx+r9*4], xmm0
+    movups  [rbx+r9*4+16], xmm1
+    mov     [rbx+r9*4+32], ecx
+    lea     r8, [rax+rax*2]             # 24 bytes: UVs
+    lea     r9, [rsi+rsi*2]
+    mov     rcx, [rip+hv_tuv]
+    mov     rbx, [r12+24]
+    movups  xmm0, [rcx+r8*8]
+    mov     rcx, [rcx+r8*8+16]
+    movups  [rbx+r9*8], xmm0
+    mov     [rbx+r9*8+16], rcx
+    mov     rcx, [rip+hv_tvc]           # 12 bytes: colours
+    mov     rbx, [r12+32]
+    mov     r8, [rcx+r8*4]
+    mov     [rbx+r9*4], r8
+    lea     r8, [rax+rax*2]
+    mov     r8d, [rcx+r8*4+8]
+    mov     [rbx+r9*4+8], r8d
+    mov     rcx, [rip+hv_tm]            # the material
+    mov     rbx, [r12+40]
+    mov     ecx, [rcx+rax*4]
+    mov     [rbx+rsi*4], ecx
+    inc     esi
+    jmp     1b
+5:  sub     eax, r11d                   # a sphere: its 48 bytes
+    imul    rax, rax, SP_SZ
+    add     rax, [rip+hv_sp]
+    mov     ecx, esi
+    sub     ecx, r11d
+    imul    rcx, rcx, SP_SZ
+    add     rcx, [r12+48]
+    movups  xmm0, [rax]
+    movups  xmm1, [rax+16]
+    movups  xmm2, [rax+32]
+    movups  [rcx], xmm0
+    movups  [rcx+16], xmm1
+    movups  [rcx+32], xmm2
+    inc     esi
+    jmp     1b
+9:  pop     r12
     pop     rbx
     ret
 
@@ -2515,8 +3187,6 @@ tri_hit:
 
 .section .bss
 .align 4
-b_cmin_axis:    .skip 4
-b_scale:        .skip 4
 
 .section .rodata
 .align 16

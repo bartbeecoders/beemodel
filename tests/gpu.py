@@ -204,6 +204,17 @@ def main():
     # ---- fallbacks ---------------------------------------------------------------
     cpu, g = render('none', '', 16, BEEMODEL_GPU_HELPER='/nonexistent/beemodel-gpu', BEEMODEL_GPU='any')
     check(os.path.exists(cpu) and g[0] == 0, f'no helper: the CPU renders, gpu(0) = 0 ({g})')
+    # ---- the BVH built on every thread (H7): the same tree as on one ----------------
+    pb = ('emit("Cube", "from volume burst 100000 speed 3 life 100 size 0.02 gravity 0 color 40a0ff")\nframe(4)\n'
+          'op("render.device", "cpu")\n')
+    imgs = []
+    for t in ('0', '3'):
+        p = os.path.join(HOME, 'bvh_t%s.png' % t)
+        r = run(pb + 'op("render.image", "%s 96 72 2 0")\nprint("bvh", gpu(16), gpu(19))\n' % p, BEEMODEL_THREADS=t)
+        imgs.append((p, r.get('bvh')))
+    ok = all(os.path.exists(p) for p, _ in imgs) and compare(imgs[0][0], imgs[1][0]) == (0.0, 1.0)
+    check(ok and imgs[0][1][1] == '100000', f'100k balls: the BVH built on 4 threads gives the image one thread '
+                                            f'does (BVH ms on 1 and 4 threads: {imgs[0][1][0]}, {imgs[1][1][0]})')
     if not os.path.exists(HELPER):
         print(f'  skip the GPU checks: {HELPER} was not built (needs cc and libvulkan.so.1)')
         if REQUIRE:
