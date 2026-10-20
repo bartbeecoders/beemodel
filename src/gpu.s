@@ -38,6 +38,8 @@
 .globl gpu_query
 .globl gpu_pt_begin
 .globl gpu_pt_pass
+.globl gpu_pt_send
+.globl gpu_pt_wait
 .globl gpu_rs_tiles
 .globl gpu_lv_put
 .globl gpu_lv_run
@@ -91,6 +93,8 @@ gpu_dev:        .long 0                 # Render › Device: 0 auto, 1 RTX, 2 GP
 g_fd:           .long -1
 g_pid:          .long 0
 g_warm:         .long 0                 # MSG_WARM sent, its answer not read
+g_pend:         .long 0                 # gpu_pt_send's samples, its reply not read
+g_pres:         .long 0                 #  that reply once read: 1 done, 0 failed
 
 .section .bss
 .align 8
@@ -454,6 +458,7 @@ gpu_stop:
     mov     dword ptr [rip+g_pid], 0
 2:  mov     dword ptr [rip+g_state], -1
     mov     dword ptr [rip+hv_gpu], 0
+    mov     dword ptr [rip+g_pend], 0
     xor     eax, eax
     mov     [rip+gd_ok], rax
     mov     [rip+gd_ok+8], eax
@@ -540,6 +545,7 @@ gpu_slot:
     sub     rsp, 8
     mov     ebx, edi
     mov     r12, rsi
+    call    g_drain                     # (a batch in flight: its reply first)
     lea     rax, [rip+g_size]
     cmp     r12, [rax+rbx*8]
     ja      1f
@@ -629,6 +635,19 @@ gpu_slot:
 #   0: the helper failed (it is stopped)
 gpu_run:
     push    rbx
+    mov     ebx, edi
+    call    gpu_run_send
+    test    eax, eax
+    jz      9f
+    mov     edi, ebx
+    call    gpu_run_wait
+9:  pop     rbx
+    ret
+
+# gpu_run_send(edi=slot, esi=bindings, edx=workgroups x, ecx=y) -> eax = 1:
+#   MSG_RUN sent, its reply for gpu_run_wait; 0: the helper failed (stopped)
+gpu_run_send:
+    push    rbx
     push    r12
     push    r13
     push    r14
@@ -637,6 +656,7 @@ gpu_run:
     mov     r12d, esi
     mov     r13d, edx
     mov     r14d, ecx
+    call    g_drain
     call    g_clear
     mov     dword ptr [rip+g_msg+GM_CMD], MSG_RUN
     mov     [rip+g_msg+GM_SLOT], ebx
@@ -655,7 +675,21 @@ gpu_run:
     mov     edi, -1
     call    g_send
     test    eax, eax
-    jz      8f
+    jnz     9f
+    call    gpu_stop
+    xor     eax, eax
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gpu_run_wait(edi=slot) -> eax = 1: the run gpu_run_send sent is done; 0:
+#   the helper failed (it is stopped)
+gpu_run_wait:
+    push    rbx
+    mov     ebx, edi
     mov     edi, RUN_MS
     call    g_recv
     test    eax, eax
@@ -674,11 +708,15 @@ gpu_run:
     jmp     9f
 8:  call    gpu_stop
     xor     eax, eax
-9:  add     rsp, 8
-    pop     r14
-    pop     r13
-    pop     r12
-    pop     rbx
+9:  pop     rbx
+    ret
+
+# g_drain - a path tracer batch still in flight (gpu_pt_send): its reply is
+#   read now (gpu_pt_wait keeps it), before anything else talks to the helper
+#   or writes slot 0
+g_drain:
+    cmp     dword ptr [rip+g_pend], 0
+    jne     gpu_pt_wait
     ret
 
 # layout(rdi=sizes in, rsi=offsets out, edx=count, rcx=table base or 0) ->
@@ -799,6 +837,7 @@ gpu_pt_begin:
     push    r14
     push    r15
     sub     rsp, 16
+    call    g_drain                     # (slot 0 is written)
     mov     dword ptr [rip+hv_gpu], 0
     mov     dword ptr [rip+hv_why], HW_NODE
     call    hv_gpu_ok
@@ -1762,10 +1801,23 @@ gp_img_put:
 #   (hv_spp and every row's count go up); 0: the helper failed (stopped,
 #   hv_gpu 0; the accumulators hold every sample before this call)
 gpu_pt_pass:
+    sub     rsp, 8
+    call    gpu_pt_send
+    test    eax, eax
+    jz      9f
+    call    gpu_pt_wait
+9:  add     rsp, 8
+    ret
+
+# gpu_pt_send(edi=samples) -> eax = 1: the batch is sent and the GPU traces
+#   it while the caller goes on (gpu_pt_wait counts it); 0: no GPU (the
+#   helper failed: stopped, hv_gpu 0)
+gpu_pt_send:
     push    rbx
     push    r12
     push    r13
     mov     ebx, edi
+    call    g_drain
     xor     eax, eax
     cmp     dword ptr [rip+hv_gpu], 0
     je      9f
@@ -1797,7 +1849,33 @@ gpu_pt_pass:
     shr     ecx, 3
     xor     edi, edi
     mov     esi, [rip+gp_nb]
-    call    gpu_run
+    call    gpu_run_send
+    test    eax, eax
+    jnz     6f
+    mov     dword ptr [rip+hv_why], HW_FAILED  # (the rest on the CPU)
+    mov     [rip+g_pres], eax
+    jmp     9f
+6:  mov     [rip+g_pend], ebx
+    mov     eax, 1
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gpu_pt_wait -> eax = 1: the batch gpu_pt_send sent is traced (hv_spp and
+#   every row's count go up); 0: the helper failed (stopped, hv_gpu 0; the
+#   accumulators hold every sample before it). Read once: later calls (or
+#   none sent) say what it was.
+gpu_pt_wait:
+    mov     eax, [rip+g_pres]
+    cmp     dword ptr [rip+g_pend], 0
+    jne     1f
+    ret
+1:  push    rbx
+    mov     ebx, [rip+g_pend]
+    mov     dword ptr [rip+g_pend], 0
+    xor     edi, edi
+    call    gpu_run_wait
     test    eax, eax
     jnz     6f
     mov     dword ptr [rip+hv_why], HW_FAILED  # (the rest on the CPU)
@@ -1814,8 +1892,7 @@ gpu_pt_pass:
     inc     ecx
     jmp     4b
 5:  mov     eax, 1
-9:  pop     r13
-    pop     r12
+9:  mov     [rip+g_pres], eax
     pop     rbx
     ret
 

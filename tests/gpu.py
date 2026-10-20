@@ -25,6 +25,9 @@ to the CPU paths and the same images.
     and Material Preview without the helper or when it dies.
   * Particles (v0.22): 100k leaves instanced on particles and tinted balls,
     the GPU's render against the CPU's.
+  * Animations (H12): render_frames builds the next frame while the GPU
+    traces one; every frame the image frame() and render() make, and the
+    helper dying meanwhile puts that frame again on the CPU.
 
 With no usable Vulkan device the GPU checks are skipped (--require fails
 instead: CI runs it on llvmpipe with BEEMODEL_GPU=any).
@@ -428,6 +431,31 @@ def main():
         'op("render.image", "%s 240 180 64 0")\n' % (bee, f), BEEMODEL_GPU='any')
     check(os.path.exists(f) and compare(mb['cpu'][0], f) == (0.0, 1.0),
           'motion blur is saved with the scene: opened again, the same streaks')
+
+    # ---- overlapped animation renders (H12): the next frame built while one traces --
+    an = os.path.join(HOME, 'an')
+    seq = run(ms + 'for f in 3..7 { frame(f)\n render("%s/s" + str(f) + ".png", 160, 120, 16, 0) }\n'
+              'print("seq", gpu(4))\n' % HOME, BEEMODEL_GPU='any')
+    ovl = run(ms + 'print("rf", render_frames("%s/", 3, 6, 160, 120, 16, 0), gpu(4))\n' % an, BEEMODEL_GPU='any')
+    names = sorted(os.listdir(an)) if os.path.isdir(an) else []
+    diffs = [compare(os.path.join(HOME, 's%d.png' % f), os.path.join(an, '%04d.png' % f)) for f in range(3, 7)
+             if '%04d.png' % f in names]
+    check(names == ['0003.png', '0004.png', '0005.png', '0006.png'] and diffs == [(0.0, 1.0)] * 4
+          and float(ovl.get('rf', ['-1'])[0]) > 0 and ovl.get('rf', ['', '0'])[1] == seq.get('seq', ['-1'])[0],
+          f'render_frames: frames 3 to 6 as 0003.png ... ({names}), each the image frame() and render() make '
+          f'({diffs}; samples on the GPU {ovl.get("rf")} against {seq.get("seq")})')
+    fl = os.path.join(HOME, 'anfail')
+    q = run(ms + 'print("rf", render_frames("%s", 3, 6, 160, 120, 16, 0), gpu(23))\n' % fl,
+            BEEMODEL_GPU='any', BEEMODEL_GPU_FAIL='2')
+    fd = [compare(os.path.join(an, '%04d.png' % f), os.path.join(fl, '%04d.png' % f))
+          if os.path.exists(os.path.join(fl, '%04d.png' % f)) else (255.0, 0.0) for f in range(3, 7)]
+    check(fd[0] == (0.0, 1.0) and all(d[0] < 8 for d in fd) and float(q.get('rf', ['-1'])[0]) > 0,
+          f'the helper dying while the next frame is built: that frame again on the CPU, every frame written '
+          f'(mean differences {[round(d[0], 2) for d in fd]} levels; {q.get("rf")})')
+    op = os.path.join(HOME, 'anop')
+    run(ms + 'op("render.settings", "96 72 4")\nop("render.animation", "%s 2 4")\n' % op, BEEMODEL_GPU='any')
+    check((sorted(os.listdir(op)) if os.path.isdir(op) else []) == ['0002.png', '0003.png', '0004.png'],
+          'render.animation <folder> 2 4: the frames at the render settings')
 
     # ---- RTX (H10): ray queries through acceleration structures built on the GPU --
     r = run('print("rtx", gpu(0), gpu(24))\n', BEEMODEL_GPU='any')

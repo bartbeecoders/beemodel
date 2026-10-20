@@ -177,6 +177,8 @@ passes; Render › Denoise turns it off), so 16 samples look close to 256. The R
 switches passes (beauty, albedo, normal, depth) and saves them
 (`render.save <path> [pass]`, PNG or linear half-float `.exr`); `render.settings <width>
 <height> <samples>` sets the size and samples, which are saved with the scene.
+`render.animation <folder> [first last]` renders every frame into `0001.png`, `0002.png` ...;
+on the GPU the next frame is simulated and built while the GPU traces one.
 
 **Images.** `image.load <path>` reads PNG (every colour type, depth and interlacing), baseline
 JPEG and Radiance HDR files, all with BeeModel's own decoders; `image.save <name> <path>`

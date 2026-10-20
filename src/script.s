@@ -558,6 +558,8 @@ builtins:
     .long 1, 1
     .quad bn_render, b_render
     .long 1, 5
+    .quad bn_rframes, b_rframes
+    .long 1, 7
     .quad bn_image, b_image
     .long 1, 1
     .quad bn_imgsize, b_imgsize
@@ -856,6 +858,7 @@ bn_matget:      .asciz "matget"
 bn_assign:      .asciz "assign"
 bn_matof:       .asciz "matof"
 bn_render:      .asciz "render"
+bn_rframes:     .asciz "render_frames"
 bn_image:       .asciz "image"
 bn_imgsize:     .asciz "imgsize"
 bn_imgpixel:    .asciz "imgpixel"
@@ -1079,6 +1082,7 @@ e_node_bad:     .asciz "no such node, input, output or socket (or the link would
 e_image:        .asciz "image: could not load "
 e_no_image:     .asciz "no image called "
 e_render:       .asciz "render: could not render or write "
+rf_slot:        .byte 0, 8, 0, 12, 16, 20, 24 # render_frames' arguments: where kept
 e_no_mat:       .asciz "no material named "
 e_mat_param:    .asciz "material parameters: base metallic roughness specular ior transmission emission strength clearcoat coat_roughness alpha density, not "
 e_mat_full:     .asciz "the scene holds 1024 materials"
@@ -6792,6 +6796,79 @@ b_render:
     jmp     sc_rt
 8:  lea     rdi, [rip+e_render]
     mov     rsi, [rsp]
+    jmp     sc_rt
+
+# render_frames(folder [, first, last, width, height, samples, denoise]) ->
+#   milliseconds: every frame of the range through the path tracer into
+#   folder/NNNN.png (on the GPU the next frame is simulated and built while
+#   it traces one). Defaults: the animation's range, the render settings
+b_rframes:
+    push    rbx
+    push    r12
+    push    r13
+    sub     rsp, 48                     # +0 the last frame (the 7th
+    mov     rbx, rdi                    #  argument), +8 first, w, h, spp, dn
+    mov     r12d, esi
+    call    an_range
+    mov     [rsp+8], eax
+    mov     [rsp], edx
+    mov     eax, [rip+rn_w]
+    mov     [rsp+12], eax
+    mov     eax, [rip+rn_h]
+    mov     [rsp+16], eax
+    mov     eax, [rip+rn_spp]
+    mov     [rsp+20], eax
+    mov     eax, [rip+rn_denoise]
+    mov     [rsp+24], eax
+    mov     r13d, 1                     # the numbers given
+1:  cmp     r13d, r12d
+    jae     3f
+    mov     rdi, r13
+    shl     rdi, 4
+    add     rdi, rbx
+    call    a_num
+    cvttsd2si eax, xmm0
+    cmp     r13d, 2                     # (first, last: as given; the rest
+    jbe     2f                          #  at least 1, denoise 0 or 1)
+    cmp     r13d, 6
+    je      2f
+    cmp     eax, 1
+    jge     2f
+    mov     eax, 1
+2:  lea     rcx, [rip+rf_slot]
+    movzx   ecx, byte ptr [rcx+r13]
+    mov     [rsp+rcx], eax
+    inc     r13d
+    jmp     1b
+3:  mov     rdi, rbx
+    call    a_str
+    mov     [rsp+32], rax
+    cmp     dword ptr [rip+sc_agent], 0 # agents need file access
+    je      31f
+    cmp     dword ptr [rip+agent_tier], 2
+    jb      7f
+31: mov     rdi, [rsp+32]
+    call    path_expand
+    lea     rdi, [rip+path_buf]
+    mov     esi, [rsp+12]
+    mov     edx, [rsp+16]
+    mov     ecx, [rsp+20]
+    mov     r8d, [rsp+24]
+    mov     r9d, [rsp+8]
+    call    hive_render_frames
+    test    eax, eax
+    js      8f
+    cvtsi2sd xmm0, eax
+    add     rsp, 48
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     ret_num
+7:  lea     rdi, [rip+e_op_perm]
+    lea     rsi, [rip+bn_rframes]
+    jmp     sc_rt
+8:  lea     rdi, [rip+e_render]
+    mov     rsi, [rsp+32]
     jmp     sc_rt
 
 # image(path) -> the new image's name: loads PNG, JPEG or Radiance HDR
