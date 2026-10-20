@@ -365,6 +365,33 @@ def main():
     check(r.get('empty') == ['1'] and r.get('meshes') == ['0'] and os.path.exists(e2),
           f'a scene emptied after a render (no meshes left) renders on the GPU, three times ({r.get("meshes")})')
 
+    # ---- the scene kept on the GPU between renders (H9): only what changed goes up --
+    gb = base.replace('op("render.device", "cpu")\n', '')
+    gsteps = steps[:3] + [('balls', 'emit("Cube", "from faces burst 500 speed 1 life 100 size 0.1 gravity 0 '
+                                     'color ff4010")\nframe(3)\n'), steps[3], ('bigger', '')]
+    size = lambda name: '128 96' if name == 'bigger' else '96 72'
+    code = gb + ''.join('op("render.image", "%s/u%d.png 96 72 2 0")\nprint("up%d", gpu(21), gpu(18))\n'
+                        % (HOME, i, i) for i in range(3))
+    for name, step in gsteps:
+        code += step + 'op("render.image", "%s/gk_%s.png %s 2 0")\nprint("%s", gpu(21), gpu(18))\n' % (
+            HOME, name, size(name), name)
+    r = run(code, BEEMODEL_GPU='any')
+    up = [int(r.get('up%d' % i, ['-1'])[0]) for i in range(3)] + [int(r.get(n, ['-1'])[0]) for n, _ in gsteps]
+    where = {r.get(n, ['-', '-'])[1] for n, _ in gsteps} | {r.get('up%d' % i, ['-', '-'])[1] for i in range(3)}
+    same = []
+    done = ''
+    for i, (name, step) in enumerate(gsteps):          # (a fresh process: everything up;
+        done += step                                    #  as many renders before it, on
+        f = os.path.join(HOME, 'gfresh_%s.png' % name)  #  the CPU, for the seed)
+        run(gb + done + 'op("render.device", "cpu")\nfor k in 0..%d { op("render.image", "%s/w.png 8 6 1 0") }\n'
+            'op("render.device", "auto")\nop("render.image", "%s %s 2 0")\n' % (3 + i, HOME, f, size(name)),
+            BEEMODEL_GPU='any')
+        same.append(os.path.exists(f) and compare(os.path.join(HOME, 'gk_%s.png' % name), f) == (0.0, 1.0))
+    check(where == {'0'} and all(same) and up[0] > 0 and up[1] <= 8 and up[2] <= 8 and up[3] < up[0] // 2
+          and up[4] <= 16, f'the scene stays on the GPU: the same scene again sends {up[1]} and {up[2]} KiB (the '
+          f'first {up[0]}), a move {up[3]}, a material {up[4]}; after them, a modifier, 500 balls, a deletion and '
+          f'a bigger image ({up[5:]} KiB) each image is a fresh process\'s ({same})')
+
     # ---- the helper dying ------------------------------------------------------------
     c, _ = render('materials_cpu', SCENE, 64, BEEMODEL_GPU='off')
     p, gp = render('fail', SCENE, 64, BEEMODEL_GPU='any', BEEMODEL_GPU_FAIL='2')
