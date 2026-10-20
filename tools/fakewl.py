@@ -8750,6 +8750,19 @@ def workspaces_ui():
     t2 = [w.get('label') for w in ui_tree(n) if w['name'] == 'workspace.tab']
     check(t2[-1:] == ['Custom 1'], f'and after a restart ({t2[-1:]})')
     g.proc.kill()
+    wf = os.path.join(home, '.config', 'beemodel', 'workspaces')   # cameras aimed at the last scene
+    b = bytearray(open(wf, 'rb').read())                           #  (100 m up: an empty viewport)
+    rec = 64 + 32 * 32 + 32 * 24
+    for i in range(struct.unpack_from('<I', b, 0)[0]):
+        for k in range(32):
+            struct.pack_into('<6f', b, 8 + i * rec + 64 + 32 * 32 + k * 24, 1.73, 0.2, 81.6, -27.2, 106.4, 15.6)
+    open(wf, 'wb').write(b)
+    g = Fake(home=home)
+    g.pump(1.0, until_frame=True)
+    n = Mcp(g)
+    v = (n.tool('script_eval', {'code': 'print(viewinfo(2), viewinfo(4))'})[0] or '').split()
+    check(v == ['18', '0'], f'the last session\'s layouts start with the default view, not the last scene\'s ({v})')
+    g.proc.kill()
 
 
 def help_ui():
