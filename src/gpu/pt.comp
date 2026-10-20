@@ -1666,6 +1666,18 @@ void main() {
     if (stage != 0u) { dn_stage(stage, x, y, px); return; }
     bool rc = (live & 2u) != 0u;                        // the raycast: once,
     uint n = rc ? 1u : P.count;                         //  the pixel's centre
+    bool sum = !rc && (live & 1u) == 0u;                // a render: the sums
+    bool fresh = P.spp == 0u;                           //  here, stored once (the
+    vec3 sa = vec3(0.0);                                //  first pass starts them:
+    float xs[7] = float[7](0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);  //  nothing read)
+    vec4 sf = vec4(0.0);
+    float sm = 0.0;
+    if (sum && !fresh) {
+        sa = vec3(accum[px * 3u], accum[px * 3u + 1u], accum[px * 3u + 2u]);
+        for (int k = 0; k < 7; k++) xs[k] = aux[px * 7u + uint(k)];
+        if (film_on()) sf = vec4(film[px * 4u], film[px * 4u + 1u], film[px * 4u + 2u], film[px * 4u + 3u]);
+        sm = uintBitsToFloat(m2[px]);
+    }
     for (uint s = 0u; s < n; s++) {
         uint64_t hsh = uint64_t(px) * 0x9E3779B97F4A7C15UL;
         hsh ^= (uint64_t(P.spp + s) << 32) | uint64_t(P.seed);
@@ -1700,13 +1712,19 @@ void main() {
             continue;
         }
         for (int k = 0; k < 7; k++)
-            if (!isnan(ax[k])) aux[px * 7u + uint(k)] += ax[k];
-        if (film_on())
-            for (int k = 0; k < 4; k++) film[px * 4u + uint(k)] += ft[k];
+            if (!isnan(ax[k])) xs[k] += ax[k];
+        sf += ft;
         float l = lum(lo);
-        if (!isnan(l)) m2[px] = floatBitsToUint(uintBitsToFloat(m2[px]) + l * l);
+        if (!isnan(l)) sm += l * l;
         for (int k = 0; k < 3; k++)
-            if (!isnan(lo[k])) accum[px * 3u + uint(k)] += lo[k];
+            if (!isnan(lo[k])) sa[k] += lo[k];
+    }
+    if (sum) {
+        for (int k = 0; k < 3; k++) accum[px * 3u + uint(k)] = sa[k];
+        for (int k = 0; k < 7; k++) aux[px * 7u + uint(k)] = xs[k];
+        if (film_on())
+            for (int k = 0; k < 4; k++) film[px * 4u + uint(k)] = sf[k];
+        m2[px] = floatBitsToUint(sm);
     }
     if ((live & 1u) != 0u && P.count != 0u) {
         float inv = 1.0 / float(P.spp + P.count);

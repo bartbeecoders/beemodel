@@ -63,7 +63,20 @@ process with a `SOCK_SEQPACKET` socket on its fd 3, using the protocol in
    dispatch and back after it.
 4. `MSG_RUN` copies the inputs through a host-visible staging buffer into
    device-local buffers, dispatches the kernel, copies the outputs back into
-   the shared memory, and replies.
+   the shared memory, and replies. An input can instead go up in pieces:
+   the ranges of it that changed, listed after the table (v0.23).
+
+The scene stays on the GPU between renders (v0.23). Each binding of a slot
+gets an eighth more room than it needs, so the next scene keeps the same
+layout while it fits. The slot's memory then still holds the last scene,
+and the device its copy. A new scene is compared with it in 4 KiB blocks
+(256 KiB chunks across the threads), and only the blocks that differ are
+written and listed (`gpu.s`'s `put_delta`). For an animation frame of the
+rainstorm demo (525k triangles, 94k balls) that is 7.7 MB of the scene's
+100 MB. The same scene again sends only its constants (5 KiB). A scene that
+outgrows its room, or a new image size, gets a new layout and goes up whole.
+The accumulators never go up: the first pass of a render starts the sums,
+which the shader keeps in registers and stores once a pass.
 
 The helper (`src/gpu/helper.s`) is written in assembly too. It loads every
 Vulkan function through `vkGetInstanceProcAddr`. Its shaders are GLSL
@@ -119,7 +132,9 @@ Scenes the shader does not cover stay on the CPU: a graph with another
 node type (Voronoi, bricks, wave, functions ...) or an HDR image in it.
 
 On an RTX 4080 SUPER, 128 samples of that scene at 1920 x 1080 take 0.9 s,
-including the scene upload and readback. The CPU path takes 9.8 s on 32
+including the scene upload and readback. A rainstorm frame (960 x 540,
+16 samples) takes 164 ms from frame to PNG, 240 ms before the scene stayed
+on the GPU. The CPU path takes 9.8 s on 32
 threads.
 
 ### Rasterization (`raster.comp`)
@@ -269,6 +284,8 @@ takes 0.55 s; the small one, 4 ms.
 | 18 | Where the last render ran, and why: 0 the GPU; on the CPU: 1 Device is CPU, 2 no helper or device, 3 an HDRI world, 4 a shadow catcher, 5 a material node the GPU lacks, 6 the helper failed, 7 a bake |
 | 19 | The last scene's spheres (particles drawn as balls) |
 | 20 | Objects the last scene build took from the cache (their BVH and triangles kept) |
+| 21 | KiB the last render's scene sent to the GPU (what changed; the pixels' buffers aside) |
+| 22 | The same for Rendered shading's last scene |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 

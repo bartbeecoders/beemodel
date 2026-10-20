@@ -59,6 +59,11 @@
 .equ PT_NBIND,      20                  # pt.comp: 0-15, the film, the HDRI, its CDF, spheres
 .equ LV_NOREAD,     0x10000             # gpu_lv_run: no pixels back
 .equ RS_NBIND,      8
+.equ PD_BLK,        4096                # put_delta: compared in blocks,
+.equ PD_MAXCH,      4096                #  chunks of 256 KiB or more (jobs),
+.equ PD_GAP,        65536               #  ranges this close joined
+.equ GD_FIXED,      (1<<0)|(1<<10)|(1<<11)|(1<<12)|(1<<16)  # no room to grow:
+                                        #  the constants, the pixels' buffers
 .equ IM_W_,         0                   # an image (image.s): size, format,
 .equ IM_H_,         4                   #  texels
 .equ IM_FMT_,       8
@@ -112,6 +117,25 @@ lv_first:       .skip 4                 # its next run uploads the scene
 lv_off:         .skip 8*PT_NBIND        # its layout (slot 2, as pt.comp)
 lv_bytes:       .skip 8*PT_NBIND
 gr_bytes:       .skip 8*RS_NBIND
+gd_ok:          .skip 4*3               # the device holds the slot's bindings
+gd_pend:        .skip 4*3               #  as its memory does; a put not run yet
+gd_kb:          .skip 4*3               # KiB the last put sent up (gpu(21, 22))
+gd_cap:         .skip 8*PT_NBIND*3      # each binding's room (slots 0, 2)
+gd_total:       .skip 8*3
+gd_delta:       .skip 4                 # this put: only what changed goes up
+gd_nr:          .skip 4                 #  its ranges so far
+gd_bind:        .skip 4                 #  the binding being put, its first
+gd_first:       .skip 4                 #  range, 1 if they ran out (all of it)
+gd_full:        .skip 4
+gd_tab:         .skip 8                 #  the slot
+pd_src:         .skip 8                 # put_delta's jobs: from (0 zeros),
+pd_dst:         .skip 8                 #  to, bytes, a chunk's
+pd_bytes:       .skip 8
+pd_chunk:       .skip 8
+pd_ext:         .skip 16*PD_MAXCH       # each chunk's changed bytes (from, to)
+pd_zero:        .skip PD_BLK
+gp_itab:        .skip 1024              # the images' table (gp_img_put)
+gp_ehdr:        .skip 32                # the HDRI's header (gp_env_put)
 
 .section .rodata
 .align 8
@@ -418,6 +442,9 @@ gpu_stop:
     mov     dword ptr [rip+g_pid], 0
 2:  mov     dword ptr [rip+g_state], -1
     mov     dword ptr [rip+hv_gpu], 0
+    xor     eax, eax
+    mov     [rip+gd_ok], rax
+    mov     [rip+gd_ok+8], eax
     ret
 
 # g_recv(edi=timeout ms) -> eax = 1 with a message in g_msg
@@ -564,6 +591,9 @@ gpu_slot:
     mov     [rax+rbx*8], r14
     lea     rax, [rip+g_size]
     mov     [rax+rbx*8], r12
+    lea     rax, [rip+gd_ok]            # (new memory: everything goes up)
+    mov     dword ptr [rax+rbx*4], 0
+    mov     dword ptr [rip+gd_delta], 0
     mov     rax, r14
     jmp     9f
 6:  mov     rdi, r14
@@ -624,6 +654,10 @@ gpu_run:
     jne     8f
     mov     eax, [rip+g_msg+GM_MS]
     add     [rip+g_ms], eax
+    lea     rax, [rip+gd_ok]            # (its bindings are up)
+    mov     dword ptr [rax+rbx*4], 1
+    lea     rax, [rip+gd_pend]
+    mov     dword ptr [rax+rbx*4], 0
     mov     eax, 1
     jmp     9f
 8:  call    gpu_stop
@@ -669,6 +703,7 @@ put_table:
     mov     r10, [rdx+r9*8]
     mov     [rdi+rax+GB_BYTES], r10
     mov     [rdi+rax+GB_FLAGS], r8d
+    mov     qword ptr [rdi+rax+GB_R0], 0
     inc     r9d
     jmp     1b
 2:  ret
@@ -697,6 +732,12 @@ gpu_query:
     je      9f
     mov     eax, [rip+hv_gpu]
     cmp     edi, 6
+    je      9f
+    mov     eax, [rip+gd_kb]            # 21, 22: KiB the last scene put sent
+    cmp     edi, 21                     #  up (renders, the live viewport)
+    je      9f
+    mov     eax, [rip+gd_kb+8]
+    cmp     edi, 22
     je      9f
     cmp     edi, 7                      # 7.. the live viewport's (live.s)
     jb      8f
@@ -872,97 +913,73 @@ gp_put:
 14: mov     eax, [rip+hv_ns]            # spheres: their records
     imul    rax, rax, SP_SZ
     mov     [rbx+152], rax
-    mov     rdi, rbx
-    mov     rsi, r14
-    mov     edx, PT_NBIND
-    call    layout
+    mov     edi, [rsp]                  # where: as last time when it fits
+    mov     rsi, rbx                    #  (then only what changed goes up)
+    mov     rdx, r14
+    call    gd_layout
     mov     rsi, rax
     mov     edi, [rsp]
     call    gpu_slot
     test    rax, rax
     jz      9f
     mov     r13, rax                    # base
+    mov     [rip+gd_tab], r13
+    mov     dword ptr [rip+gd_nr], 0
+    mov     ecx, [rsp]                  # (put, not run yet)
+    lea     rax, [rip+gd_pend]
+    mov     dword ptr [rax+rcx*4], 1
+    mov     rdi, r13                    # every binding uploads, unless
+    mov     rsi, r14                    #  gd_close says only some of it
+    mov     rdx, rbx
+    mov     ecx, PT_NBIND
+    mov     r8d, GBF_IN
+    call    put_table
     # the arrays, as the CPU has them
+    mov     edi, 1
     mov     rsi, [rip+hv_tv]
-    mov     rdi, [r14+8]
-    mov     rcx, [rbx+8]
-    call    put_bytes
+    call    gd_put
+    mov     edi, 2
     mov     rsi, [rip+hv_tn]
-    mov     rdi, [r14+16]
-    mov     rcx, [rbx+16]
-    call    put_bytes
+    call    gd_put
+    mov     edi, 3
     mov     rsi, [rip+hv_tm]
-    mov     rdi, [r14+24]
-    mov     rcx, [rbx+24]
-    call    put_bytes
+    call    gd_put
+    mov     edi, 4
     mov     rsi, [rip+hv_tvc]
-    mov     rdi, [r14+32]
-    mov     rcx, [rbx+32]
-    call    put_bytes
-    xor     ecx, ecx                    # the materials, whole (pt.comp:
-    mov     rsi, [rip+hv_mats]          #  1024 words a record)
-    mov     rdi, [r14+40]
-    add     rdi, r13
-21: cmp     ecx, [rip+hv_nmats]
-    ja      22f
-    push    rcx
-    push    rsi
-    mov     ecx, MA_SZ
-    test    rsi, rsi                    # (none: an empty scene, zeros)
-    jz      23f
-    rep     movsb
-    jmp     24f
-23: xor     eax, eax
-    rep     stosb
-24: pop     rsi
-    pop     rcx
-    test    rsi, rsi
-    jz      25f
-    add     rsi, MA_SZ
-25:
-    inc     ecx
-    jmp     21b
-22:
+    call    gd_put
+    mov     edi, 5                      # the materials, whole records (pt.comp:
+    mov     rsi, [rip+hv_mats]          #  1024 words each; none: zeros)
+    call    gd_put
+    mov     edi, 6
     mov     rsi, [rip+hv_nodes]
-    mov     rdi, [r14+48]
-    mov     rcx, [rbx+48]
-    call    put_bytes
+    call    gd_put
+    mov     edi, 7
     mov     rsi, [rip+hv_lcdf]
-    mov     rdi, [r14+56]
-    mov     rcx, [rbx+56]
-    call    put_bytes
+    call    gd_put
+    mov     edi, 8
     mov     rsi, [rip+hv_ltri]
-    mov     rdi, [r14+64]
-    mov     rcx, [rbx+64]
-    call    put_bytes
+    call    gd_put
+    mov     edi, 9
     mov     rsi, [rip+hv_lsel]
-    mov     rdi, [r14+72]
-    mov     rcx, [rbx+72]
-    call    put_bytes
-    mov     rsi, [rip+hv_to]            # graphs: object corners, UVs, images
-    mov     rdi, [r14+104]
-    mov     rcx, [rbx+104]
-    call    put_bytes
+    call    gd_put
+    mov     edi, 13                     # graphs: object corners, UVs, images
+    mov     rsi, [rip+hv_to]
+    call    gd_put
+    mov     edi, 14
     mov     rsi, [rip+hv_tuv]
-    mov     rdi, [r14+112]
-    mov     rcx, [rbx+112]
-    call    put_bytes
-    mov     rdi, [r14+120]
-    add     rdi, r13
+    call    gd_put
+    mov     edi, 15
+    call    gd_open
     call    gp_img_put
-    mov     rsi, [rip+hv_sp]            # the spheres
-    mov     rdi, [r14+152]
-    mov     rcx, [rbx+152]
+    call    gd_close
+    xor     esi, esi                    # the spheres
     cmp     dword ptr [rip+hv_ns], 0
-    jne     17f
-    xor     esi, esi
-17: call    put_bytes
+    je      17f
+    mov     rsi, [rip+hv_sp]
+17: mov     edi, 19
+    call    gd_put
     cmp     dword ptr [rip+hv_env], 0   # the HDRI and its tables
     je      15f
-    mov     rdi, [r14+136]
-    add     rdi, r13
-    mov     rsi, [r14+144]
-    add     rsi, r13
     call    gp_env_put
 15:
     # the constants (pt.comp's Params): sizes, the camera, lights, the table
@@ -1027,12 +1044,8 @@ gp_put:
     lea     rsi, [rip+tx_lut]
     mov     ecx, 1024
     rep     movsb
-    mov     rdi, r13                    # every binding uploads first
-    mov     rsi, r14
-    mov     rdx, rbx
-    mov     ecx, PT_NBIND
-    mov     r8d, GBF_IN
-    call    put_table
+    mov     edi, [rsp]
+    call    gd_tally
     mov     rax, r13
 9:  add     rsp, 24
     pop     rbp
@@ -1043,31 +1056,30 @@ gp_put:
     pop     rbx
     ret
 
-# gp_env_put(rdi=image out, rsi=CDF out) - the HDRI world for pt.comp: its
-#   texels as linear rgb floats, then the header (w, h, the CDF's total,
-#   the rotation, the strength) and env.s's tables (conditional, rows,
-#   marginal: one block)
+# gp_env_put - in gp_put (r13 the slot, r14 its offsets): the HDRI world
+#   for pt.comp (binding 17): its texels as linear rgb floats, then (18) the
+#   header (w, h, the CDF's total, the rotation, the strength) and env.s's
+#   tables (conditional, rows, marginal: one block)
 gp_env_put:
     push    rbx
     push    r12
-    push    r13
-    push    r14
     push    r15
-    mov     r12, rdi
-    mov     r13, rsi
     mov     rbx, [rip+env_img]
-    mov     r14d, [rbx+IM_W_]
-    imul    r14d, [rbx+IM_H_]
+    mov     r12d, [rbx+IM_W_]
+    imul    r12d, [rbx+IM_H_]
     cmp     dword ptr [rbx+IM_FMT_], 0  # float rgb: as it is
     je      2f
+    mov     edi, 17
+    call    gd_open
     lea     rsi, [rbx+IM_DATA_]
-    mov     rdi, r12
-    lea     rcx, [r14+r14*2]
+    mov     rdi, [r14+17*8]
+    lea     rcx, [r12+r12*2]
     shl     rcx, 2
-    rep     movsb
+    call    put_delta
+    call    gd_close
     jmp     3f
 2:  xor     r15d, r15d                  # 8 bits: through the sRGB curve
-21: cmp     r15d, r14d
+21: cmp     r15d, r12d                  #  (in place: all of it goes up)
     jae     3f
     mov     eax, r15d
     xor     edx, edx
@@ -1075,15 +1087,12 @@ gp_env_put:
     mov     ecx, edx                    # x
     mov     edx, eax                    # y
     mov     rdi, rbx
-    lea     rsi, [r12+r15*4]
-    lea     rsi, [rsi+r15*8]
-    sub     rsp, 16                     # (texel writes 4 floats)
-    mov     rax, rsi
-    mov     [rsp], rax
     lea     rsi, [rip+gp_tx4]
     call    tex_texel
-    mov     rdi, [rsp]
-    add     rsp, 16
+    mov     rdi, [r14+17*8]
+    add     rdi, r13
+    lea     rax, [r15+r15*2]
+    lea     rdi, [rdi+rax*4]
     lea     rsi, [rip+gp_tx4]
     mov     rax, [rsi]
     mov     [rdi], rax
@@ -1091,32 +1100,416 @@ gp_env_put:
     mov     [rdi+8], eax
     inc     r15d
     jmp     21b
-3:  mov     eax, [rbx+IM_W_]            # the header
-    mov     [r13], eax
+3:  mov     edi, 18
+    call    gd_open
+    lea     rdi, [rip+gp_ehdr]          # the header
+    mov     eax, [rbx+IM_W_]
+    mov     [rdi], eax
     mov     eax, [rbx+IM_H_]
-    mov     [r13+4], eax
+    mov     [rdi+4], eax
     mov     eax, [rip+env_total]
-    mov     [r13+8], eax
+    mov     [rdi+8], eax
     mov     eax, [rip+env_rot]
-    mov     [r13+12], eax
+    mov     [rdi+12], eax
     mov     eax, [rip+env_str]
-    mov     [r13+16], eax
+    mov     [rdi+16], eax
     xor     eax, eax
-    mov     [r13+20], eax
-    mov     [r13+24], rax
-    lea     rdi, [r13+32]
-    mov     rsi, [rip+env_cond]
+    mov     [rdi+20], eax
+    mov     [rdi+24], rax
+    mov     rsi, rdi
+    mov     rdi, [r14+18*8]
+    mov     ecx, 32
+    call    put_delta
+    mov     rsi, [rip+env_cond]         # the tables
+    mov     rdi, [r14+18*8]
+    add     rdi, 32
     mov     eax, [rbx+IM_W_]
     inc     eax
     imul    eax, [rbx+IM_H_]
     add     eax, [rbx+IM_H_]
     lea     rcx, [rax*4]
+    call    put_delta
+    call    gd_close
+    pop     r15
+    pop     r12
+    pop     rbx
+    ret
+
+# =============================================================================
+#  Delta puts: a slot keeps its layout while the scene fits it (each binding
+#  has room to grow), so its memory still holds the last put and the device
+#  its copy of it; a put then writes, and sends up, only the 4 KiB blocks
+#  that differ.
+# =============================================================================
+# gd_layout(edi=slot, rsi=sizes (16 bytes at least from here), rdx=offsets)
+#   -> rax = the slot's bytes; gd_delta = 1 when the last layout holds them
+#   (its offsets kept), 0: a new one, with room
+gd_layout:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     ebx, edi
+    mov     r12, rsi
+    mov     r13, rdx
+    imul    eax, ebx, 8*PT_NBIND
+    lea     r14, [rip+gd_cap]
+    add     r14, rax
+    xor     ecx, ecx
+1:  cmp     ecx, PT_NBIND
+    jae     2f
+    cmp     qword ptr [r12+rcx*8], 16
+    jae     11f
+    mov     qword ptr [r12+rcx*8], 16
+11: inc     ecx
+    jmp     1b
+2:  lea     rax, [rip+gd_ok]            # the device has the last put (it ran)
+    cmp     dword ptr [rax+rbx*4], 0
+    je      4f
+    lea     rax, [rip+gd_pend]
+    cmp     dword ptr [rax+rbx*4], 0
+    jne     4f
+    xor     ecx, ecx
+3:  cmp     ecx, PT_NBIND
+    jae     31f
+    mov     rax, [r12+rcx*8]
+    cmp     rax, [r14+rcx*8]
+    ja      4f
+    inc     ecx
+    jmp     3b
+31: mov     dword ptr [rip+gd_delta], 1
+    lea     rax, [rip+gd_total]
+    mov     rax, [rax+rbx*8]
+    jmp     9f
+4:  xor     ecx, ecx                    # a new layout: an eighth more room
+5:  cmp     ecx, PT_NBIND
+    jae     6f
+    mov     rax, [r12+rcx*8]
+    mov     edx, GD_FIXED
+    bt      edx, ecx
+    jc      51f
+    mov     rdx, rax
+    shr     rdx, 3
+    add     rax, rdx
+51: add     rax, GPU_ALIGN-1
+    and     rax, -GPU_ALIGN
+    mov     [r14+rcx*8], rax
+    inc     ecx
+    jmp     5b
+6:  mov     rdi, r14
+    mov     rsi, r13
+    mov     edx, PT_NBIND
+    xor     ecx, ecx
+    call    layout
+    lea     rcx, [rip+gd_total]
+    mov     [rcx+rbx*8], rax
+    mov     dword ptr [rip+gd_delta], 0
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# gd_put(edi=binding, rsi=from (0: zeros)) - in gp_put (r13 the slot, r14
+#   its offsets, rbx its sizes): a binding, whole or what changed
+gd_put:
+    push    r12
+    push    r15
+    sub     rsp, 8
+    mov     r12d, edi
+    mov     r15, rsi
+    call    gd_open
+    mov     rsi, r15
+    mov     rdi, [r14+r12*8]
+    mov     rcx, [rbx+r12*8]
+    call    put_delta
+    call    gd_close
+    add     rsp, 8
+    pop     r15
+    pop     r12
+    ret
+
+# gd_open(edi=binding) - put_delta's ranges from now on are its
+gd_open:
+    mov     [rip+gd_bind], edi
+    mov     eax, [rip+gd_nr]
+    mov     [rip+gd_first], eax
+    mov     dword ptr [rip+gd_full], 0
+    ret
+
+# gd_close - the binding's flags in a delta put: its ranges, none (the
+#   device has it), or all of it (too many ranges)
+gd_close:
+    cmp     dword ptr [rip+gd_delta], 0
+    je      9f
+    imul    eax, [rip+gd_bind], GB_SZ
+    mov     rdx, [rip+gd_tab]
+    add     rdx, rax
+    cmp     dword ptr [rip+gd_full], 0
+    je      1f
+    mov     ecx, [rip+gd_first]         # (its ranges freed)
+    mov     [rip+gd_nr], ecx
+    mov     dword ptr [rdx+GB_FLAGS], GBF_IN
+    ret
+1:  mov     ecx, [rip+gd_nr]
+    sub     ecx, [rip+gd_first]
+    mov     eax, GBF_IN|GBF_DELTA
+    test    ecx, ecx
+    jnz     2f
+    xor     eax, eax
+2:  mov     [rdx+GB_FLAGS], eax
+    mov     eax, [rip+gd_first]
+    mov     [rdx+GB_R0], eax
+    mov     [rdx+GB_RN], ecx
+9:  ret
+
+# gd_range(rdi=slot offset, rsi=bytes) - a changed range of the binding
+#   (joined to its last when close after it)
+gd_range:
+    cmp     dword ptr [rip+gd_full], 0
+    jne     9f
+    mov     eax, [rip+gd_nr]
+    mov     rdx, [rip+gd_tab]
+    add     rdx, GPU_RANGES
+    cmp     eax, [rip+gd_first]
+    jbe     2f
+    lea     ecx, [rax-1]
+    shl     rcx, 4
+    lea     r8, [rdx+rcx]
+    cmp     rdi, [r8]
+    jb      2f
+    mov     r9, [r8]
+    add     r9, [r8+8]                  # its end
+    lea     r10, [r9+PD_GAP]
+    cmp     rdi, r10
+    ja      2f
+    lea     r10, [rdi+rsi]
+    cmp     r10, r9
+    jbe     9f
+    sub     r10, [r8]
+    mov     [r8+8], r10
+    ret
+2:  cmp     eax, GPU_MAXRANGE
+    jb      3f
+    mov     dword ptr [rip+gd_full], 1
+    ret
+3:  mov     ecx, eax
+    shl     rcx, 4
+    mov     [rdx+rcx], rdi
+    mov     [rdx+rcx+8], rsi
+    inc     dword ptr [rip+gd_nr]
+9:  ret
+
+# gd_tally(edi=slot) - in gp_put: the KiB its table sends up (the pixels'
+#   buffers aside) into gd_kb
+gd_tally:
+    xor     r8d, r8d
+    xor     ecx, ecx
+1:  cmp     ecx, PT_NBIND
+    jae     5f
+    mov     eax, GD_FIXED & ~1
+    bt      eax, ecx
+    jc      4f
+    imul    eax, ecx, GB_SZ
+    lea     rdx, [r13+rax]
+    test    dword ptr [rdx+GB_FLAGS], GBF_IN
+    jz      4f
+    test    dword ptr [rdx+GB_FLAGS], GBF_DELTA
+    jnz     2f
+    add     r8, [rdx+GB_BYTES]
+    jmp     4f
+2:  mov     eax, [rdx+GB_R0]
+    mov     r9d, [rdx+GB_RN]
+    add     r9d, eax
+3:  cmp     eax, r9d
+    jae     4f
+    mov     r10, rax
+    shl     r10, 4
+    add     r8, [r13+r10+GPU_RANGES+8]
+    inc     eax
+    jmp     3b
+4:  inc     ecx
+    jmp     1b
+5:  shr     r8, 10
+    lea     rax, [rip+gd_kb]
+    mov     [rax+rdi*4], r8d
+    ret
+
+# put_delta(rsi=from (0: zeros), rdi=offset in r13's slot, rcx=bytes) - as
+#   put_bytes; in a delta put only the blocks that differ from what the slot
+#   holds are written, their ranges noted for the binding (gd_range). Big
+#   ones in chunks, on every thread.
+put_delta:
+    cmp     dword ptr [rip+gd_delta], 0
+    je      put_bytes
+    test    rcx, rcx
+    jz      put_ret
+    push    rbx
+    push    r12
+    push    r15
+    mov     r12, rdi
+    mov     [rip+pd_src], rsi
+    lea     rax, [r13+rdi]
+    mov     [rip+pd_dst], rax
+    mov     [rip+pd_bytes], rcx
+    lea     rax, [rcx+PD_MAXCH-1]       # a chunk: 256 KiB, or a PD_MAXCH-th
+    shr     rax, 12                     #  (whole blocks)
+    add     rax, PD_BLK-1
+    and     rax, -PD_BLK
+    cmp     rax, 0x40000
+    jae     1f
+    mov     eax, 0x40000
+1:  mov     [rip+pd_chunk], rax
+    mov     rbx, rax
+    lea     rax, [rcx+rbx-1]
+    xor     edx, edx
+    div     rbx
+    mov     r15d, eax                   # chunks
+    cmp     r15d, 1
+    ja      2f
+    xor     edi, edi
+    xor     esi, esi
+    mov     edx, 1
+    call    pd_job
+    jmp     3f
+2:  lea     rdi, [rip+pd_job]
+    xor     esi, esi
+    mov     edx, r15d
+    mov     ecx, 1
+    call    parallel_for
+3:  xor     ebx, ebx                    # their changes: ranges
+4:  cmp     ebx, r15d
+    jae     8f
+    mov     rax, rbx
+    shl     rax, 4
+    lea     rcx, [rip+pd_ext]
+    mov     rdi, [rcx+rax]
+    mov     rsi, [rcx+rax+8]
+    cmp     rdi, rsi
+    jae     5f
+    sub     rsi, rdi
+    add     rdi, r12
+    call    gd_range
+5:  inc     ebx
+    jmp     4b
+8:  pop     r15
+    pop     r12
+    pop     rbx
+put_ret:
+    ret
+
+# pd_job(rdi=ctx, esi=first chunk, edx=end) - each chunk: its blocks that
+#   differ written, the bytes they span in pd_ext (none: from > to)
+pd_job:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 8
+    mov     r12d, esi
+    mov     r13d, edx
+1:  cmp     r12d, r13d
+    jae     9f
+    mov     rbx, [rip+pd_chunk]
+    imul    rbx, r12                    # its start
+    mov     r14, rbx
+    add     r14, [rip+pd_chunk]
+    cmp     r14, [rip+pd_bytes]
+    jbe     2f
+    mov     r14, [rip+pd_bytes]         # its end
+2:  mov     [rsp], r14                  # changed: from (none yet: the end),
+    mov     rbp, rbx                    #  to
+    mov     r15, rbx                    # the block
+3:  cmp     r15, r14
+    jae     7f
+    mov     rcx, r14
+    sub     rcx, r15
+    cmp     rcx, PD_BLK
+    jbe     4f
+    mov     ecx, PD_BLK
+4:  mov     rdi, [rip+pd_dst]
+    add     rdi, r15
+    lea     rsi, [rip+pd_zero]
+    mov     rax, [rip+pd_src]
+    test    rax, rax
+    jz      5f
+    lea     rsi, [rax+r15]
+5:  push    rcx
+    push    rsi
+    push    rdi
+    call    blk_same
+    pop     rdi
+    pop     rsi
+    pop     rcx
+    test    eax, eax
+    jnz     6f
+    lea     rax, [r15+rcx]              # differs: written
+    mov     rbp, rax
     rep     movsb
+    cmp     r15, [rsp]
+    jae     6f
+    mov     [rsp], r15
+6:  add     r15, PD_BLK
+    jmp     3b
+7:  mov     rax, r12
+    shl     rax, 4
+    lea     rcx, [rip+pd_ext]
+    mov     rdx, [rsp]
+    mov     [rcx+rax], rdx
+    mov     [rcx+rax+8], rbp
+    inc     r12d
+    jmp     1b
+9:  add     rsp, 8
+    pop     rbp
     pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# blk_same(rsi=a, rdi=b, rcx=bytes) -> eax = 1 when they are the same
+blk_same:
+1:  cmp     rcx, 64
+    jb      3f
+    movdqu  xmm0, [rsi]
+    movdqu  xmm1, [rdi]
+    pcmpeqb xmm0, xmm1
+    movdqu  xmm2, [rsi+16]
+    movdqu  xmm3, [rdi+16]
+    pcmpeqb xmm2, xmm3
+    pand    xmm0, xmm2
+    movdqu  xmm2, [rsi+32]
+    movdqu  xmm3, [rdi+32]
+    pcmpeqb xmm2, xmm3
+    pand    xmm0, xmm2
+    movdqu  xmm2, [rsi+48]
+    movdqu  xmm3, [rdi+48]
+    pcmpeqb xmm2, xmm3
+    pand    xmm0, xmm2
+    pmovmskb eax, xmm0
+    cmp     eax, 0xffff
+    jne     8f
+    add     rsi, 64
+    add     rdi, 64
+    sub     rcx, 64
+    jmp     1b
+3:  test    rcx, rcx
+    jz      7f
+    mov     al, [rsi]
+    cmp     al, [rdi]
+    jne     8f
+    inc     rsi
+    inc     rdi
+    dec     rcx
+    jmp     3b
+7:  mov     eax, 1
+    ret
+8:  xor     eax, eax
     ret
 
 # put_bytes(rsi=from, rdi=offset in r13's slot, rcx=bytes) (none: zeros)
@@ -1245,45 +1638,54 @@ gp_img_bytes:
     pop     rbx
     ret
 
-# gp_img_put(rdi=where) - that buffer
+# gp_img_put - in gp_put (r13 the slot, r14 its offsets): that buffer
+#   (binding 15)
 gp_img_put:
     push    rbx
     push    r12
-    push    r13
-    mov     r13, rdi
-    mov     rcx, 128                    # (the table: zeros first)
+    push    r15
+    lea     rdi, [rip+gp_itab]          # the table: zeros first
+    mov     ecx, 128
     xor     eax, eax
     rep     stosq
     mov     r12d, 256                   # texels after the table (words)
     xor     ebx, ebx
 1:  cmp     ebx, [rip+img_count]
-    jae     9f
+    jae     3f
     cmp     ebx, 64
-    jae     9f
+    jae     3f
     mov     edi, ebx
     call    image_ptr
     test    rax, rax
     jz      2f
     cmp     dword ptr [rax+8], 0
     jne     2f
+    lea     rdi, [rip+gp_itab]
     mov     edx, ebx
     shl     edx, 4
     mov     ecx, r12d
     sub     ecx, 256
-    mov     [r13+rdx], ecx
+    mov     [rdi+rdx], ecx
     mov     ecx, [rax]
-    mov     [r13+rdx+4], ecx
+    mov     [rdi+rdx+4], ecx
     mov     ecx, [rax+4]
-    mov     [r13+rdx+8], ecx
+    mov     [rdi+rdx+8], ecx
+    lea     rsi, [rax+64]               # (IM_DATA)
     mov     ecx, [rax]
     imul    ecx, [rax+4]
-    lea     rsi, [rax+64]               # (IM_DATA)
-    lea     rdi, [r13+r12*4]
-    add     r12d, ecx
-    rep     movsd
+    mov     r15d, ecx
+    shl     rcx, 2
+    mov     rdi, [r14+15*8]
+    lea     rdi, [rdi+r12*4]
+    call    put_delta
+    add     r12d, r15d
 2:  inc     ebx
     jmp     1b
-9:  pop     r13
+3:  lea     rsi, [rip+gp_itab]
+    mov     rdi, [r14+15*8]
+    mov     ecx, 1024
+    call    put_delta
+    pop     r15
     pop     r12
     pop     rbx
     ret
@@ -1315,18 +1717,11 @@ gpu_pt_pass:
     xor     r8d, r8d
     call    put_table
     mov     dword ptr [r13+GB_FLAGS], GBF_IN
-1:  mov     dword ptr [r13+10*GB_SZ+GB_FLAGS], GBF_IN|GBF_OUT
-    cmp     dword ptr [rip+gp_first], 0
-    jne     2f
-    mov     dword ptr [r13+10*GB_SZ+GB_FLAGS], GBF_OUT
-    mov     dword ptr [r13+11*GB_SZ+GB_FLAGS], GBF_OUT
-    mov     dword ptr [r13+12*GB_SZ+GB_FLAGS], GBF_OUT
-    mov     dword ptr [r13+16*GB_SZ+GB_FLAGS], GBF_OUT
-    jmp     3f
-2:  mov     dword ptr [r13+11*GB_SZ+GB_FLAGS], GBF_IN|GBF_OUT
-    mov     dword ptr [r13+12*GB_SZ+GB_FLAGS], GBF_IN|GBF_OUT
-    mov     dword ptr [r13+16*GB_SZ+GB_FLAGS], GBF_IN|GBF_OUT
-3:  mov     edx, [rip+hv_w]
+1:  mov     dword ptr [r13+10*GB_SZ+GB_FLAGS], GBF_OUT  # (the sums: the
+    mov     dword ptr [r13+11*GB_SZ+GB_FLAGS], GBF_OUT  #  first pass starts
+    mov     dword ptr [r13+12*GB_SZ+GB_FLAGS], GBF_OUT  #  them, the device
+    mov     dword ptr [r13+16*GB_SZ+GB_FLAGS], GBF_OUT  #  keeps them)
+    mov     edx, [rip+hv_w]
     add     edx, 7
     shr     edx, 3
     mov     ecx, [rip+hv_h]
@@ -1683,3 +2078,5 @@ fb_row:
     shl     rax, 2
     add     rax, [rip+fb_ptr]
     ret
+
+.section .note.GNU-stack, "", @progbits

@@ -10,7 +10,8 @@
 #    1. it says MSG_HELLO: whether a device was found, its type and name;
 #    2. MSG_MAP hands it a slot's shared memory (a memfd);
 #    3. MSG_RUN: the slot's table of bindings is read, the inputs copied to
-#       device-local buffers (through a host-visible staging buffer), the
+#       device-local buffers (through a host-visible staging buffer; whole,
+#       or only the ranges listed for them: the device keeps the rest), the
 #       kernel dispatched, the outputs copied back into the shared memory,
 #       and MSG_REPLY sent;
 #    4. MSG_QUIT or the socket closing ends it.
@@ -228,7 +229,7 @@ ci:             .skip 256               # create-info scratch
 ci2:            .skip 256
 binds:          .skip 24*GPU_MAXBIND    # DescriptorSetLayoutBinding / BufferInfo
 writes:         .skip 64*GPU_MAXBIND
-regions:        .skip 24*GPU_MAXBIND
+regions:        .skip 24*(GPU_MAXBIND+GPU_MAXRANGE)
 table:          .skip GB_SZ*GPU_MAXBIND
 handle:         .skip 8
 count:          .skip 4
@@ -1133,20 +1134,38 @@ do_run:
     mov     [rdi+48], rax
     test    dword ptr [r8+GB_FLAGS], GBF_IN
     jz      31f
-    mov     rsi, [rbx+SL_BASE]
-    add     rsi, [r8+GB_OFF]
-    mov     rdi, [rbx+SL_SPTR]
-    add     rdi, [r8+GB_OFF]
+    test    dword ptr [r8+GB_FLAGS], GBF_DELTA
+    jnz     32f
+    mov     rax, [r8+GB_OFF]            # all of it
     mov     rcx, [r8+GB_BYTES]
-    rep     movsb
-    imul    eax, r14d, 24               # VkBufferCopy
-    lea     rdx, [rip+regions]
-    mov     rcx, [r8+GB_OFF]
-    mov     [rdx+rax], rcx
-    mov     [rdx+rax+8], rcx
-    mov     rcx, [r8+GB_BYTES]
-    mov     [rdx+rax+16], rcx
-    inc     r14d
+    call    up_range
+    jmp     31f
+32: mov     edx, [r8+GB_R0]             # its ranges (the device has the
+    mov     r9d, [r8+GB_RN]             #  rest), each inside it
+    add     r9, rdx
+    cmp     r9, GPU_MAXRANGE
+    ja      .Lr_fail
+33: cmp     rdx, r9
+    jae     31f
+    mov     r10, rdx
+    shl     r10, 4
+    add     r10, [rbx+SL_BASE]
+    mov     rax, [r10+GPU_RANGES]
+    mov     rcx, [r10+GPU_RANGES+8]
+    test    rcx, rcx
+    jz      .Lr_fail
+    cmp     rax, [r8+GB_OFF]
+    jb      .Lr_fail
+    mov     r10, rax
+    add     r10, rcx
+    jc      .Lr_fail
+    mov     r11, [r8+GB_OFF]
+    add     r11, [r8+GB_BYTES]
+    cmp     r10, r11
+    ja      .Lr_fail
+    call    up_range
+    inc     rdx
+    jmp     33b
 31: inc     ebp
     jmp     3b
 4:  mov     rdi, [rip+device]
@@ -1297,6 +1316,24 @@ do_run:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# up_range(rax=slot offset, rcx=bytes) - in do_run (rbx the slot, r14d the
+#   regions so far): shared memory -> staging, and a VkBufferCopy for it
+up_range:
+    mov     rsi, [rbx+SL_BASE]
+    add     rsi, rax
+    mov     rdi, [rbx+SL_SPTR]
+    add     rdi, rax
+    push    rcx
+    rep     movsb
+    pop     rcx
+    imul    edi, r14d, 24
+    lea     rsi, [rip+regions]
+    mov     [rsi+rdi], rax
+    mov     [rsi+rdi+8], rax
+    mov     [rsi+rdi+16], rcx
+    inc     r14d
     ret
 
 # barrier(edi=source stages, esi=destination stages, edx=source access,

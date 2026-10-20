@@ -7,7 +7,9 @@
 #  with MSG_MAP as SCM_RIGHTS. A slot's memory starts with a table of
 #  bindings (GB_SZ each): where each storage buffer of the kernel's shader
 #  lies in it, whether to copy it to the GPU before the dispatch (in) and
-#  back after (out).
+#  back after (out). A binding can instead go up in pieces (delta): the
+#  ranges of the slot that changed since its last run, listed after the
+#  table (the device keeps the rest from before).
 # =============================================================================
 .equ GM_SZ,         64
 .equ GM_CMD,        0
@@ -37,12 +39,18 @@
 .equ GH_NODEVICE,   2                   #   no usable device (int64 compute)
 .equ GH_NOPIPE,     3                   #   the shaders did not build
 
-.equ GB_SZ,         32                  # a binding: offset, bytes, flags
-.equ GB_OFF,        0
+.equ GB_SZ,         32                  # a binding: offset, bytes, flags, its
+.equ GB_OFF,        0                   #   ranges (delta: the first, how many)
 .equ GB_BYTES,      8
 .equ GB_FLAGS,      16
+.equ GB_R0,         24
+.equ GB_RN,         28
 .equ GBF_IN,        1
 .equ GBF_OUT,       2
+.equ GBF_DELTA,     4                   # with GBF_IN: only its ranges go up
+.equ GPU_RANGES,    1024                # the ranges: slot offset, bytes (u64s)
+.equ GPU_RANGE_SZ,  16
+.equ GPU_MAXRANGE,  192
 .equ GPU_DATA0,     4096                # the first binding's offset
 .equ GPU_ALIGN,     256                 # bindings' alignment
 .equ GPU_MAXBIND,   24
