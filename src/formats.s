@@ -424,6 +424,7 @@ bee_save:
     sub     rsp, 8
     mov     r14, rdi
     call    thumb_make                  # (a picture of the viewport, if shown)
+    mov     rdi, r14
     call    wp_save_begin               # (a partitioned world: its cells first,
     call    wb_reset                    #  their objects out of this file)
     mov     edi, BEE_MAGIC
