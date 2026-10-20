@@ -143,7 +143,7 @@ jobs:
       - name: GPU helper (Vulkan on llvmpipe, CPU fallback, the same images)
         env:
           BEEMODEL_GPU: any
-        run: timeout 900 python tests/gpu.py build/beemodel build/shots --require
+        run: timeout 2400 python -u tests/gpu.py build/beemodel build/shots --require   # (llvmpipe; 5.5 min on 4 local cores)
 
       - name: Headless UI test (fake Wayland compositor, TrueType fonts)
         run: timeout 1200 python tools/fakewl.py build/shots
