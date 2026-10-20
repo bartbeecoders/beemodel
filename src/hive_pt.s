@@ -18,6 +18,7 @@
 # exports
 .globl hv_bounces
 .globl hive_start
+.globl hv_need_bvh
 .globl hive_prep
 .globl trace_ray
 .globl hv_rnd
@@ -3247,7 +3248,12 @@ hive_start:
     call    tex_init
     call    env_prep
     mov     [rip+hv_env], eax
-    call    hive_build
+    cmp     dword ptr [rip+gt_cpu], 0   # traced with RTX: no BVH for the CPU
+    jne     12f                         #  (made if the CPU takes over)
+    call    gpu_rtx_likely
+    mov     [rip+hv_nobvh], eax
+12: call    hive_build
+    mov     dword ptr [rip+hv_nobvh], 0
     test    eax, eax
     jz      8f
     mov     [rip+hv_w], r12d
@@ -3334,6 +3340,18 @@ hive_start:
     pop     rbx
     ret
 
+# hv_need_bvh - before the CPU traces a render's scene: built for RTX alone
+#   (no BVH), it is built again with one, and its lights
+hv_need_bvh:
+    cmp     dword ptr [rip+hv_bvhless], 0
+    jne     1f
+    ret
+1:  sub     rsp, 8
+    call    hive_build
+    call    light_prep
+    add     rsp, 8
+    ret
+
 # hive_pass - one more sample per pixel (rows in parallel)
 hive_pass:
     sub     rsp, 8
@@ -3346,7 +3364,8 @@ hive_pass:
     add     rsp, 8
     ret
 2:  mov     dword ptr [rip+hv_why], HW_FAILED
-1:  mov     dword ptr [rip+hv_next], 0
+1:  call    hv_need_bvh
+    mov     dword ptr [rip+hv_next], 0
     lea     rdi, [rip+job_rows]
     xor     esi, esi
     mov     edx, [rip+hv_h]
@@ -3717,7 +3736,8 @@ hive_tick:
     call    gpu_tick
     test    eax, eax
     jns     9f                          # (-1: the GPU failed, go on here)
-1:  mov     eax, [rip+hv_spp]
+1:  call    hv_need_bvh
+    mov     eax, [rip+hv_spp]
     cmp     eax, [rip+hv_target]
     jae     8f
     mov     r13d, [rip+n_workers]       # a band: a row per thread (a slice

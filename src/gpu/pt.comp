@@ -20,8 +20,17 @@
 // leave the filter's input instead of XRGB); bits 8-11 a denoise stage
 // (count 0): 1 the variance blurred, 2-6 the a-trous passes, the last one
 // leaving XRGB (denoise.s's filter, the same steps).
-#version 450
+//
+// RTX (built as ptr and ptgr, Vulkan 1.2): trace() walks the helper's
+// acceleration structures (binding 20: one instance of the triangles, one of
+// the balls as boxes) with a ray query instead of the BVH4. Every triangle
+// is non-opaque, so each candidate comes here and tri_hit / sph_hit decide
+// it with the same arithmetic as the BVH path: the hardware only finds them.
+#version 460
 #extension GL_ARB_gpu_shader_int64 : require
+#ifdef RTX
+#extension GL_EXT_ray_query : require
+#endif
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
@@ -53,6 +62,9 @@ layout(std430, binding = 16) buffer FL { float film[]; };            // w h 4: a
 layout(std430, binding = 17) readonly buffer EV { float envimg[]; };  // (H3)
 layout(std430, binding = 18) readonly buffer EC { float envcdf[]; };  // (H3)
 layout(std430, binding = 19) readonly buffer SP { float sph[]; };     // (H6)
+#ifdef RTX
+layout(binding = 20) uniform accelerationStructureEXT tlas;            // (H10)
+#endif
 
 const float PI = 3.14159265;
 const float INV_PI = 0.31830989;
@@ -184,6 +196,42 @@ void slab(uint base, float o, float iv, inout vec4 tn4, inout vec4 tf4) {
 }
 
 // the nearest hit (any: the first closer than tmax)
+#ifdef RTX
+bool trace(inout Ray r, bool anyhit) {
+    r.tri = -1;
+    if (P.ntri == 0u && NSPH() == 0u) return false;
+    rayQueryEXT q;
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsNoneEXT, 0xffu, r.o, 0.0, r.d, r.tmax);
+    float best = r.tmax, hwbest = r.tmax;
+    bool hit = false;
+    while (rayQueryProceedEXT(q)) {
+        uint t = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, false));
+        bool tri = rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT;
+        float tt, uu = 0.0, vv = 0.0;
+        if (tri) {
+            if (skipc && (tm[t] & CATCH) != 0u) continue;
+            if (!tri_hit(t, r, tt, uu, vv)) continue;
+        } else {
+            t += P.ntri;
+            if (!sph_hit(t, r, tt)) continue;
+        }
+        if (!(tt < best)) continue;
+        if (tri) {
+            rayQueryConfirmIntersectionEXT(q);
+            hwbest = min(hwbest, rayQueryGetIntersectionTEXT(q, false));
+        } else {
+            if (tt > hwbest) continue;          // (past what the hardware holds)
+            rayQueryGenerateIntersectionEXT(q, tt);
+            hwbest = tt;
+        }
+        best = tt;
+        r.tri = int(t); r.t = tt; r.u = uu; r.v = vv;
+        hit = true;
+        if (anyhit) { rayQueryTerminateEXT(q); break; }
+    }
+    return hit;
+}
+#else
 bool trace(inout Ray r, bool anyhit) {
     r.tri = -1;
     if (P.ntri == 0u && NSPH() == 0u) return false;
@@ -247,6 +295,7 @@ bool trace(inout Ray r, bool anyhit) {
     }
     return hit;
 }
+#endif
 
 // ---- the world: studio sky and sun -------------------------------------------
 // ---- an HDRI world (env.s): the equirect image as rgb floats (binding 17);

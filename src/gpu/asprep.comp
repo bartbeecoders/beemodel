@@ -1,0 +1,38 @@
+// BeeModel - the inputs of the helper's acceleration structures (H10).
+//
+// pt.comp's triangles are a corner and two edges (v0 e1 e2); a BLAS wants
+// three positions. Balls (48-byte records: centre, radius, ...) want boxes.
+// One invocation per primitive, before the builds (src/gpu/helper.s).
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(std430, binding = 0) readonly buffer Params {
+    uint w, h, spp, count, seed, nslots, npoints, nl, ntri, root, debug, cut;
+    float cam[16];                  // [13]: the balls
+} P;
+layout(std430, binding = 1) readonly buffer TV { float tv[]; };
+layout(std430, binding = 2) readonly buffer SP { float sph[]; };
+layout(std430, binding = 3) writeonly buffer VP { float vp[]; };     // 3 positions a triangle
+layout(std430, binding = 4) writeonly buffer AB { float ab[]; };     // min, max a ball
+
+void main() {
+    uint i = (gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x) * 64u + gl_LocalInvocationID.x;
+    if (i < P.ntri) {
+        uint o = i * 9u;
+        vec3 v0 = vec3(tv[o], tv[o + 1u], tv[o + 2u]);
+        vec3 a = v0 + vec3(tv[o + 3u], tv[o + 4u], tv[o + 5u]);
+        vec3 b = v0 + vec3(tv[o + 6u], tv[o + 7u], tv[o + 8u]);
+        vp[o] = v0.x; vp[o + 1u] = v0.y; vp[o + 2u] = v0.z;
+        vp[o + 3u] = a.x; vp[o + 4u] = a.y; vp[o + 5u] = a.z;
+        vp[o + 6u] = b.x; vp[o + 7u] = b.y; vp[o + 8u] = b.z;
+    }
+    if (i < floatBitsToUint(P.cam[13])) {
+        uint o = i * 12u;
+        vec3 c = vec3(sph[o], sph[o + 1u], sph[o + 2u]);
+        float r = sph[o + 3u] * 1.0001 + 1.0e-6;   // (a little more: sph_hit decides)
+        uint q = i * 6u;
+        ab[q] = c.x - r; ab[q + 1u] = c.y - r; ab[q + 2u] = c.z - r;
+        ab[q + 3u] = c.x + r; ab[q + 4u] = c.y + r; ab[q + 5u] = c.z + r;
+    }
+}

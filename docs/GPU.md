@@ -32,12 +32,14 @@ device**, `render.device auto|rtx|gpu|cpu`) picks where renders run:
 
 - **Auto**: the best there is: RTX ray tracing when the GPU has it, else
   the GPU's compute path, else the CPU.
-- **GPU (RTX)**, **GPU**: that path (when it cannot render the scene, the
-  CPU does).
+- **GPU (RTX)**: ray queries when the GPU has them, else the compute path
+  (when neither can render the scene, the CPU does).
+- **GPU**: the compute path (its own BVH), even on an RTX card.
 - **CPU**: never the GPU.
 
 Under it the panel says the GPU found, and after a render where it ran:
-"Last render: on the GPU", or "on the CPU (an HDRI world)" and the like.
+"Last render: on the GPU (RTX)", "on the GPU", or "on the CPU (an HDRI
+world)" and the like.
 The Render area's header says GPU or CPU next to the samples, and the
 console's "rendering ..." line says where and why. `gpu(18)` gives the
 reason as a number.
@@ -132,10 +134,43 @@ Scenes the shader does not cover stay on the CPU: a graph with another
 node type (Voronoi, bricks, wave, functions ...) or an HDR image in it.
 
 On an RTX 4080 SUPER, 128 samples of that scene at 1920 x 1080 take 0.9 s,
-including the scene upload and readback. A rainstorm frame (960 x 540,
-16 samples) takes 164 ms from frame to PNG, 240 ms before the scene stayed
-on the GPU. The CPU path takes 9.8 s on 32
+including the scene upload and readback. The CPU path takes 9.8 s on 32
 threads.
+
+### RTX: ray queries (v0.23)
+
+When the device has Vulkan 1.2 with `VK_KHR_acceleration_structure` and
+`VK_KHR_ray_query`, the helper says so in its hello. Renders and Rendered
+shading (Device Auto or GPU (RTX)) then use `ptr` / `ptgr`: `pt.comp` built
+with `RTX`, whose `trace()` walks acceleration structures with a ray query
+instead of the BVH4.
+
+- **The structures:** each run whose triangles or balls changed (or whose
+  counts did) rebuilds them on the GPU before the dispatch. `asprep.comp`
+  turns the uploaded triangles (a corner and two edges) into three
+  positions each, and the balls into boxes, in two more bindings of the
+  slot that only the device uses. One bottom-level structure holds the
+  triangles and one the balls, under a top level of two instances. The
+  balls' structure is rebuilt alone when only they moved, and passes after
+  a render's first reuse what is there.
+- **The same hits:** every triangle is non-opaque, so each candidate the
+  hardware finds comes back to the shader. `tri_hit` and `sph_hit` decide
+  it with the arithmetic of the BVH path, and catchers are let through as
+  before. The images match the compute path's: the test sees 100% of
+  pixels identical, or within 0.0001 levels.
+- **No BVH on the CPU:** for a render that will trace with RTX, Hive skips
+  its BVH. Only objects the cache is about to keep get theirs, so the
+  cache stays whole for CPU renders. The rest keep their order, and there
+  is no top level. If the CPU has to take over (a material the GPU lacks,
+  the helper failing), the scene is built again with its BVH first. The
+  triangles' order then differs from the CPU's on the first render, and so
+  does which emissive triangle a light sample picks. The noise differs;
+  the image does not.
+
+A rainstorm frame (960 x 540, 16 samples, an animation's third frame)
+takes 96 ms from frame to PNG: the scene build 12 ms (20 with the BVH),
+the GPU 60 ms. The compute path takes 165 ms (its GPU 120 ms), and 240 ms
+before v0.23's scene stayed on the GPU.
 
 ### Rasterization (`raster.comp`)
 
@@ -286,6 +321,8 @@ takes 0.55 s; the small one, 4 ms.
 | 20 | Objects the last scene build took from the cache (their BVH and triangles kept) |
 | 21 | KiB the last render's scene sent to the GPU (what changed; the pixels' buffers aside) |
 | 22 | The same for Rendered shading's last scene |
+| 23 | 1 if the last render traced with RTX (ray queries) |
+| 24 | 1 if the helper has RTX |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 

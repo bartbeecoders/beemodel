@@ -387,10 +387,39 @@ def main():
             'op("render.device", "auto")\nop("render.image", "%s %s 2 0")\n' % (3 + i, HOME, f, size(name)),
             BEEMODEL_GPU='any')
         same.append(os.path.exists(f) and compare(os.path.join(HOME, 'gk_%s.png' % name), f) == (0.0, 1.0))
-    check(where == {'0'} and all(same) and up[0] > 0 and up[1] <= 8 and up[2] <= 8 and up[3] < up[0] // 2
-          and up[4] <= 16, f'the scene stays on the GPU: the same scene again sends {up[1]} and {up[2]} KiB (the '
+    # (with RTX the second render's objects come in the cache's order, and an
+    #  object changed leaves it: those go up again)
+    check(where == {'0'} and all(same) and up[0] > 0 and up[1] < up[0] and up[2] <= 8 and up[3] < up[0] // 2
+          and up[4] < up[0], f'the scene stays on the GPU: the same scene again sends {up[1]} and {up[2]} KiB (the '
           f'first {up[0]}), a move {up[3]}, a material {up[4]}; after them, a modifier, 500 balls, a deletion and '
           f'a bigger image ({up[5:]} KiB) each image is a fresh process\'s ({same})')
+
+    # ---- RTX (H10): ray queries through acceleration structures built on the GPU --
+    r = run('print("rtx", gpu(0), gpu(24))\n', BEEMODEL_GPU='any')
+    if r.get('rtx', ['0', '0'])[1] != '1':
+        print('  skip the RTX checks: the device has no ray queries')
+    else:
+        for name, scene in (('materials', SCENE), ('graphs', gs), ('catcher', gs2), ('particles', ps)):
+            got = {}
+            for dev in ('auto', 'gpu', 'cpu'):
+                f = os.path.join(HOME, 'rtx_%s_%s.png' % (name, dev))
+                q = run(scene + 'op("render.device", "%s")\nop("render.image", "%s 240 180 64 0")\n'
+                        'print("dev", gpu(23), gpu(4), gpu(16))\n' % (dev, f), BEEMODEL_GPU='any')
+                got[dev] = (f, q.get('dev', ['-1', '-1', '-1']))
+            mc, sc = compare(got['auto'][0], got['cpu'][0])
+            mg, sg = compare(got['auto'][0], got['gpu'][0])
+            check(got['auto'][1][:2] == ['1', '64'] and got['gpu'][1][0] == '0' and mc < 0.25 and sc > 0.97
+                  and mg < 0.25, f'RTX, {name}: 64 samples traced by ray queries (gpu(23) {got["auto"][1][0]}), the '
+                  f'CPU\'s image (mean difference {mc:.4f} levels, {100 * sc:.2f}% identical) and the compute '
+                  f'path\'s ({mg:.4f}, {100 * sg:.2f}%)')
+        f1 = os.path.join(HOME, 'rtx_fb1.png'); f2 = os.path.join(HOME, 'rtx_fb2.png')
+        run(SCENE + 'op("render.image", "%s 240 180 64 0")\n' % f1, BEEMODEL_GPU='off')
+        q = run(SCENE + 'op("render.image", "%s 240 180 64 0")\nprint("fb", gpu(4), gpu(18))\n' % f2,
+                BEEMODEL_GPU='any', BEEMODEL_GPU_FAIL='2')
+        mad, _ = compare(f1, f2)
+        check(q.get('fb', ['-1'])[0] == '16' and mad < 0.5,
+              f'an RTX render whose helper dies at its second run: the CPU builds the BVH it skipped and goes on '
+              f'({q.get("fb")}: 16 samples the GPU\'s), the CPU\'s image (mean difference {mad:.4f})')
 
     # ---- the helper dying ------------------------------------------------------------
     c, _ = render('materials_cpu', SCENE, 64, BEEMODEL_GPU='off')
