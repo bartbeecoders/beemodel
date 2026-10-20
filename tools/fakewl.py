@@ -8389,12 +8389,19 @@ def render_ui():
     check('files.name' in names(), 'Render to File asks where (the file browser)')
     f.key(1); f.pump(0.2)
     q(f'op("file.save_as", "{os.path.join(f.home, "w.bee")}")')   # (cells go beside the file)
+    for _ in range(50):                         # (the save's toast covers the
+        if 'status.toast' not in names():       #  panel's bottom rows for 4 s)
+            break
+        f.pump(0.1)
     click('world.partition')
     for _ in range(5):
         if q('print(world(0))') == '1':
             break
         f.pump(0.1)
     check(q('print(world(0))') == '1', 'Partition the world turns it on')
+    q('op("file.save")')                        # (bee_save gave the cells a path
+    check(q('print(world(0) + 1)') == '2' and os.path.isdir(os.path.join(f.home, 'w.cells')),
+          'saved from the window: its cells beside it')   #  thumb_make had clobbered)
     click('world.partition')
     check(q('print(world(0))') == '0', '... and off')
     lname = q('op("create.light")\nprint(active())')

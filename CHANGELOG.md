@@ -61,6 +61,8 @@ dam-break 1201 -> 63 ms, leaf-twister 313 -> 27 ms, fireworks 122 -> 24 ms.
   driver cache (about 7.5 s since the RTX kernels came): with RTX it no
   longer builds the compute path's graph kernel, which Auto never uses
   (ready in under 5 s).
+- Saving a partitioned world from the window crashed: the thumbnail taken
+  first overwrote the path its cells were to be saved beside.
 - A saved file's Denoise setting was read back only when its sample count
   was large enough (the count was compared instead of the chunk's size).
 - After the scene stayed on the GPU (H9), particles growing within their
