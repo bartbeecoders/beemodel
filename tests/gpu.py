@@ -483,13 +483,13 @@ def main():
     lq = {}
     for name, dev, fail in (('cpu', 'cpu', None), ('gpu', 'gpu', None), ('auto', 'auto', None), ('fail', 'auto', '2')):
         f = os.path.join(HOME, 'lq_%s.png' % name)
-        env = {'BEEMODEL_GPU': 'any'}
-        if fail:
-            env['BEEMODEL_GPU_FAIL'] = fail
+        env = {'BEEMODEL_GPU': 'any', 'BEEMODEL_GPU_LIQUID': 'off'}   # (the same liquid each
+        if fail:                                                        #  time; the render's run
+            env['BEEMODEL_GPU_FAIL'] = fail                             #  dies, not its solve)
         q = run(tank + 'op("render.device", "%s")\nop("render.image", "%s 160 120 64 0")\n'
                 'print("lq", gpu(25), gpu(18), gpu(17), gpu(4))\n' % (dev, f), **env)
         lq[name] = (f, [int(float(x)) for x in q.get('lq', ['-1'] * 4)])
-    surf = int(float(run(tank + 'print("st", particles(33, 0))\n').get('st', ['0'])[0]))
+    surf = int(float(run(tank + 'print("st", particles(33, 0))\n', BEEMODEL_GPU_LIQUID='off').get('st', ['0'])[0]))
     for name in ('gpu', 'auto'):
         mad, same = compare(lq['cpu'][0], lq[name][0])
         check(lq['cpu'][1][0] == 0 and lq[name][1][:2] == [1, 0] and lq[name][1][2] + surf == lq['cpu'][1][2]
@@ -500,6 +500,20 @@ def main():
     check(lq['fail'][1][2] == lq['cpu'][1][2] and lq['fail'][1][3] == 16 and mad < 1.0,
           f'the helper dying at its second run: the CPU meshes the surface and goes on ({lq["fail"][1]}: 16 '
           f'samples the GPU\'s), the CPU\'s image (mean difference {mad:.3f})')
+
+    # ---- liquids solved on the GPU (v0.24): the CPU's solver's particles -----------
+    code = ('op("particles.add_tank")\nfor f in 2..5 { frame(f) }\n'
+            'print("lg", gpu(33), gpu(34))\nfor i in 0..400 { print("p" + i, particles(6, i), particles(7, i), '
+            'particles(8, i), particles(9, i), particles(10, i), particles(11, i)) }\n')
+    sol = {}
+    for dev, off in (('gpu', 'on'), ('cpu', 'off')):
+        r = run(code, BEEMODEL_GPU='any', BEEMODEL_GPU_LIQUID=off)
+        sol[dev] = (r.get('lg', ['-1', '-1']), [[float(x) for x in r.get('p%d' % i, ['nan'] * 6)] for i in range(400)])
+    dx = max(max(abs(a - b) for a, b in zip(p[:3], q2[:3])) for p, q2 in zip(sol['gpu'][1], sol['cpu'][1]))
+    dv = max(max(abs(a - b) for a, b in zip(p[3:], q2[3:])) for p, q2 in zip(sol['gpu'][1], sol['cpu'][1]))
+    check(int(sol['gpu'][0][0]) > 0 and sol['gpu'][0][1] == '0' and sol['cpu'][0][0] == '0' and dx < 1e-3 and dv < 0.05,
+          f'a liquid solved on the GPU ({sol["gpu"][0]} frames, failed; the CPU {sol["cpu"][0]}): the CPU\'s '
+          f'particles after 4 frames (400 of them: places within {dx:.2g} m, velocities {dv:.2g} m/s)')
 
     # ---- sample reuse between frames (H14) -------------------------------------
     def reuse_run(tag, spp, reuse, moving, dev='auto'):
@@ -851,6 +865,32 @@ def gpu_viewport():
           f'({100 * same:.2f}% of pixels identical, {100 * far:.3f}% more than 8 levels apart)')
     check(clicks > 0 and picked == 'Floor',
           f'a click picks through the GPU\'s ids ({picked}, {clicks} GPU frames)')
+    # a liquid's surface (VP3): its field marched by the GPU, not meshed
+    lbee = os.path.join(HOME, 'vp_liquid.bee')
+    run('op("particles.add_tank")\nop("file.save_as", "%s")\n' % lbee)
+    lshots = {}
+    for dev in ('gpu', 'cpu'):
+        f, m, q = fake([lbee], BEEMODEL_GPU='any', BEEMODEL_GPU_VIEW='on' if dev == 'gpu' else 'off')
+        try:
+            g = lambda k: int(float(q('print(gpu(%d))' % k) or -1))
+            q('view(30, 40, 9, 0, 0.5, 0)\nfor f in 2..21 { frame(f) }\nop("view.shading_material")')
+            t = time.time()
+            while dev == 'gpu' and time.time() - t < 60 and g(27) < 1:
+                q('op("view.shading_material")')
+                f.pump(0.3)
+            f.pump(0.5)
+            lshots[dev] = (f.image().crop(BOX), g(35), g(27))
+            if OUT and dev == 'gpu':
+                f.shot('gpu_view_liquid.png')
+        finally:
+            f.proc.kill()
+    a, b = lshots['gpu'][0], lshots['cpu'][0]
+    px = list(zip(pixels(a), pixels(b)))
+    same = sum(1 for p, q2 in px if max(abs(x - y) for x, y in zip(p, q2)) <= 8) / len(px)
+    mad = compare_img(a, b)
+    check(lshots['gpu'][1] == 1 and lshots['cpu'][1] == 0 and same > 0.97 and mad < 2.0,
+          f'a liquid on the GPU (gpu(35) {lshots["gpu"][1]}): its field marched, not meshed, the CPU\'s '
+          f'image ({100 * same:.2f}% of pixels within 8 levels, mean difference {mad:.3f})')
 
 
 def compare_img(a, b):

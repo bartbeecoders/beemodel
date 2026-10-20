@@ -719,6 +719,7 @@ viewport_draw:
     cmp     dword ptr [rip+vp_shading], 1   # (wireframe: no raster)
     je      1f
     xor     edi, edi                    # solid: rasterize meshes (+ outline)
+    xor     edi, edi
     call    raster_scene
     cmp     dword ptr [rip+vp_shading], 3   # (rendered on the GPU: both are
     jne     2f                              #  in its image)
@@ -934,7 +935,13 @@ draw_objects:
 
 # edge_only(rdi=mesh object) -> eax = 1 when what it shows has lines but no
 #   faces (a curve without a bevel): drawn as a wire, picked by its bounds
+#   (a liquid's surface has faces: not meshed to ask)
 edge_only:
+    push    rdi
+    call    pt_field
+    pop     rdi
+    test    rax, rax
+    jnz     2f
     sub     rsp, 8
     call    obj_eval
     add     rsp, 8
@@ -944,6 +951,8 @@ edge_only:
     cmp     dword ptr [rax+ME_NEDGES], 0
     setne   cl
 1:  mov     eax, ecx
+    ret
+2:  xor     eax, eax
     ret
 
 # world_verts(rdi=object) -> rax = world-space positions (frame arena), ecx = n

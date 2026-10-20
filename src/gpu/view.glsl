@@ -6,7 +6,7 @@
 // words). Its triangles t come from gl_VertexIndex / 3 (the mesh's range of
 // the triangle arrays, kept on the GPU while the mesh stays the same); for
 // points and sprites gl_VertexIndex / 6 is the particle, % 6 its quad's
-// corner.
+// corner; for a liquid's field / 3 is a triangle of its box (12).
 
 layout(std430, binding = 0) readonly buffer Params {
     uint w, h, mode, flags;         // the canvas; 0 Solid, 1 ids only, 2 Material
@@ -26,11 +26,17 @@ layout(std430, binding = 3) readonly buffer Pos { float vpos[]; };   // 9 a tria
 layout(std430, binding = 4) readonly buffer Nrm { float vnrm[]; };   // corner normals, object space
 layout(std430, binding = 5) readonly buffer Uvs { float vuv[]; };    // 6 a triangle (u0 NaN: none)
 layout(std430, binding = 6) readonly buffer Vcs { uint vvc[]; };     // 3 a triangle, 0xAARRGGBB (0: none)
+// liquids' fields (gview.s gv_fput, as pt.comp's): how many, then a record
+// each (32 floats: origin, spacing; nx ny nz, material + 1; the grid's low
+// corner, where its values start; its high corner, where its bricks start;
+// bricks a side; the emitter's inverse matrix, 3 rows), the values ((z ny +
+// y) nx + x: below 0 inside) and each 8^3 brick's smallest and largest value
+layout(std430, binding = 15) readonly buffer Fl { float fl[]; };
 
 const uint DRW = 32u;
 const uint D_MAT = 21u, D_COL = 22u, D_ID = 23u, D_FLAGS = 24u, D_KIND = 25u, D_PX = 26u;
 const uint D_AMB = 27u, D_DIF = 28u;
-const uint K_MESH = 0u, K_INST = 1u, K_POINTS = 2u, K_SPRITES = 3u;
+const uint K_MESH = 0u, K_INST = 1u, K_POINTS = 2u, K_SPRITES = 3u, K_FIELD = 4u;
 const uint INW = 16u, I_DRAW = 12u;
 
 uint inst_draw(uint i) { return floatBitsToUint(ins[i * INW + I_DRAW]); }
@@ -66,4 +72,17 @@ vec3 to_cam(vec3 w) {
     vec3 q = w - eye3();
     return vec3(dot(q, vec3(P.right[0], P.right[1], P.right[2])), dot(q, vec3(P.up[0], P.up[1], P.up[2])),
                 dot(q, vec3(P.fwd[0], P.fwd[1], P.fwd[2])));
+}
+
+struct Fld { vec3 o; float sp; uvec3 n; vec3 lo; uint doff; vec3 hi; uint boff; uvec3 nb; uint r; };
+Fld fld_get(uint i) {
+    uint r = 4u + i * 32u;
+    Fld f;
+    f.r = r;
+    f.o = vec3(fl[r], fl[r + 1u], fl[r + 2u]); f.sp = fl[r + 3u];
+    f.n = uvec3(floatBitsToUint(fl[r + 4u]), floatBitsToUint(fl[r + 5u]), floatBitsToUint(fl[r + 6u]));
+    f.lo = vec3(fl[r + 8u], fl[r + 9u], fl[r + 10u]); f.doff = floatBitsToUint(fl[r + 11u]);
+    f.hi = vec3(fl[r + 12u], fl[r + 13u], fl[r + 14u]); f.boff = floatBitsToUint(fl[r + 15u]);
+    f.nb = uvec3(floatBitsToUint(fl[r + 16u]), floatBitsToUint(fl[r + 17u]), floatBitsToUint(fl[r + 18u]));
+    return f;
 }

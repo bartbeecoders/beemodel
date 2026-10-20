@@ -1,0 +1,398 @@
+// BeeModel - the liquid solver on the GPU (v0.24, VP3): liquid.s's
+// position-based fluids, phase by phase. The helper records a frame's
+// substeps as dispatches of this kernel, each told its phase (and substep)
+// through the Step binding, with barriers between them (src/gpu/helper.s
+// lq_record); liquid.s does what is once a frame (the constants, the walls'
+// tables, the bodies) and reads back the positions, velocities, neighbour
+// counts, densities and the bodies' impulses (lq_gpu).
+//
+// Each phase is liquid.s's job, line for line: per particle, its sums in
+// its neighbour list's order (a Jacobi update: what it reads was written by
+// the phase before). The neighbours are found as j_nbrs finds them: the
+// buckets of the 27 cells round it in dz, dy, dx order, each once, each
+// bucket's particles by their index (a stable counting sort: counted with
+// atomics, scanned, scattered, then each bucket sorted), at most 96. The
+// impulses the moving bodies get are kept per particle and summed in
+// chunks of 2048 in their order at the end (the CPU sums each substep's).
+#version 460
+layout(local_size_x = 256) in;
+
+layout(std430, binding = 0) readonly buffer LP {
+    uint n, mask, iters, K, nbd, nw, flags, ntri;   // flags: 1 domain, 2 colliders,
+                                                     //  4 vorticity, 8 ground
+    float dt, idt, h, h2, ih, k6, ks, m, mr, rho0, eps, wdq, tk, rp, visc, vort, gy, pad0;
+    uint pad[6];
+    vec4 acc, gadj, dmin, dmax;
+    vec4 wall[8];                   // normal into the liquid, w: offset (s = n.p - w)
+    float wd[36], wg[36];           // a wall's sum of W, grad W at s = k h / 32
+    vec4 bc0[16], bc1[16], bh[16];  // bodies: centre then and now, half size (w: radius)
+    vec4 br0[16], br1[16], br2[16]; //  rotation rows
+    vec4 bmin[16], bmax[16];
+} L;
+layout(std430, binding = 1) readonly buffer ST { uint word; } S;    // phase | substep << 16
+layout(std430, binding = 2) buffer BX { vec4 x[]; };
+layout(std430, binding = 3) buffer BV { vec4 v[]; };
+layout(std430, binding = 4) buffer BP { vec4 p[]; };
+layout(std430, binding = 5) buffer BD { vec4 dp[]; };
+layout(std430, binding = 6) buffer BW { vec4 w[]; };
+layout(std430, binding = 7) buffer BV2 { vec4 v2[]; };
+layout(std430, binding = 8) buffer BL { float lam[]; };
+layout(std430, binding = 9) buffer BR { float rho[]; };
+layout(std430, binding = 10) buffer BC { uint cell[]; };
+layout(std430, binding = 11) buffer BS { uint srt[]; };
+layout(std430, binding = 12) buffer BT { uint start[]; };       // mask + 2
+layout(std430, binding = 13) buffer BN { uint nb[]; };          // 96 a particle
+layout(std430, binding = 14) buffer BNN { uint nn[]; };
+layout(std430, binding = 15) buffer BI { vec4 imp[]; };         // chunk x 16 bodies
+layout(std430, binding = 16) readonly buffer BTR { vec4 tri[]; };   // a, e1, e2, n
+layout(std430, binding = 17) readonly buffer BND { vec4 node[]; };  // min (w: left / first),
+                                                                    //  max (w: right / count)
+layout(std430, binding = 18) readonly buffer BIX { uint ix[]; };
+layout(std430, binding = 19) buffer BB { uint bsum[]; };        // the scan's blocks
+layout(std430, binding = 20) buffer BU { uint cur[]; };         // scatter cursors
+layout(std430, binding = 21) buffer BPI { vec4 pimp[]; };       // a particle's impulses (x nbd)
+
+const uint NB = 96u, GRAIN = 2048u;
+const uint P_ZEROIMP = 0u, P_PREDICT = 1u, P_CLEAR = 2u, P_HASH = 3u, P_SCAN1 = 4u, P_SCAN2 = 5u,
+           P_SCAN3 = 6u, P_COPYCUR = 7u, P_SCATTER = 8u, P_BSORT = 9u, P_NBRS = 10u, P_LAMBDA = 11u,
+           P_DELTA = 12u, P_APPLY = 13u, P_COLLIDE = 14u, P_VEL = 15u, P_XSPH = 16u, P_VORT = 17u,
+           P_COMMIT = 18u, P_IMPRED = 19u;
+const float TINY = 1.0e-12;
+
+shared uint sh[256];
+
+float dot3(vec3 a, vec3 b) { return (a.x * b.x + a.y * b.y) + a.z * b.z; }   // (dpps 0x71)
+
+float w6(float r2) {
+    float t = L.h2 - r2;
+    return t > 0.0 ? ((t * t) * t) * L.k6 : 0.0;
+}
+vec3 gw(vec3 d, float r) {          // spiky's gradient (no test against h: as gw)
+    float c = ((L.h - r) * (L.h - r)) * L.ks;
+    return d * (c / max(r, TINY));
+}
+vec3 clampd(vec3 q) { return (L.flags & 1u) != 0u ? min(max(q, L.dmin.xyz), L.dmax.xyz) : q; }
+
+ivec3 cell_of(vec3 q) { return ivec3(floor(q * L.ih)); }
+uint hashc(ivec3 c) {
+    return ((uint(c.x) * 73856093u) ^ (uint(c.y) * 19349663u) ^ (uint(c.z) * 83492791u)) & L.mask;
+}
+
+// apart: two at one place get a small way apart (odd in i - j)
+void apart(uint i, uint j, inout vec3 d, inout float r2) {
+    if (!(r2 < 1.0e-10)) return;
+    int e = int(i) - int(j);
+    uint u = uint(abs(e)) * 2654435761u;
+    vec3 a = vec3(float(u & 255u), float((u >> 8) & 255u), float((u >> 16) & 255u)) - 128.0;
+    if (e < 0) a = -a;
+    d = a * ((0.001 * L.h) / 128.0);
+    r2 = max(dot3(d, d), TINY);
+}
+
+// the walls: their sum of W and of grad W at a point
+float walls(vec3 q, out vec3 g) {
+    float s0 = 0.0;
+    g = vec3(0.0);
+    for (uint k = 0u; k < L.nw; k++) {
+        vec4 wl = L.wall[k];
+        float s = max(dot3(q, wl.xyz) - wl.w, 0.0);
+        if (s >= L.h) continue;
+        float t = (s * 32.0) / L.h;
+        int ti = int(t);
+        float f = t - float(ti);
+        s0 += (L.wd[ti + 1] - L.wd[ti]) * f + L.wd[ti];
+        g += wl.xyz * ((L.wg[ti + 1] - L.wg[ti]) * f + L.wg[ti]);
+    }
+    return s0;
+}
+
+bool collide(vec3 p0, inout vec3 q) {   // particles.s pc_cast: the ground, the triangles
+    vec3 d = q - p0;
+    float t = 1.0;
+    bool hit = false;
+    vec3 nrm = vec3(0.0, 1.0, 0.0);
+    if ((L.flags & 8u) != 0u) {
+        float f1 = q.y - L.gy;
+        if (f1 < 0.0) {
+            float f0 = p0.y - L.gy, t3 = 0.0;
+            if (f0 > 0.0) t3 = f0 / (f0 - f1);
+            t = t3; hit = true;
+        }
+    }
+    if (L.ntri > 0u) {
+        vec3 dd = d;
+        for (int k = 0; k < 3; k++) if (abs(dd[k]) < 1.0e-20) dd[k] = 1.0e-20;
+        vec3 id = 1.0 / dd;
+        uint stk[64];
+        uint sp = 1u;
+        stk[0] = 0u;
+        while (sp > 0u) {
+            uint ni = stk[--sp];
+            vec4 lo = node[ni * 2u], hi = node[ni * 2u + 1u];
+            vec3 a = (lo.xyz - p0) * id, b = (hi.xyz - p0) * id;
+            vec3 nr = min(a, b), fr = max(a, b);
+            float tn = max(max(max(nr.x, nr.y), nr.z), 0.0);
+            float tf = min(min(min(fr.x, fr.y), fr.z), t);
+            if (tn > tf) continue;
+            uint r = floatBitsToUint(hi.w), l = floatBitsToUint(lo.w);
+            if ((r & 0x80000000u) == 0u) {
+                if (sp < 62u) { stk[sp++] = r; stk[sp++] = l; }
+                continue;
+            }
+            uint e = l + (r & 0x7fffffffu);
+            for (uint k = l; k < e; k++) {
+                uint ti = ix[k] * 4u;
+                vec3 ta = tri[ti].xyz, e1 = tri[ti + 1u].xyz, e2 = tri[ti + 2u].xyz;
+                vec3 pv = cross(d, e2);
+                float det = dot3(e1, pv);
+                if (!(abs(det) > 1.0e-9)) continue;
+                float inv = 1.0 / det;
+                vec3 s = p0 - ta;
+                float u = dot3(s, pv) * inv;
+                if (u < 0.0 || u > 1.0) continue;
+                vec3 qv = cross(s, e1);
+                float vv = dot3(d, qv) * inv;
+                if (vv < 0.0 || vv + u > 1.0) continue;
+                float tt = dot3(e2, qv) * inv;
+                if (tt < 0.0 || tt >= t) continue;
+                t = tt; hit = true;
+                vec3 tn3 = tri[ti + 3u].xyz;
+                nrm = dot3(tn3, d) > 0.0 ? -tn3 : tn3;
+            }
+        }
+    }
+    if (!hit) return false;
+    q = (d * t + p0) + nrm * L.rp;
+    return true;
+}
+
+// an inclusive scan of sh[] (256) in place
+void scan256(uint li) {
+    for (uint o = 1u; o < 256u; o <<= 1) {
+        barrier();
+        uint a = li >= o ? sh[li - o] : 0u;
+        barrier();
+        sh[li] += a;
+    }
+    barrier();
+}
+
+void main() {
+    uint gi = gl_GlobalInvocationID.x;
+    uint li = gl_LocalInvocationID.x;
+    uint ph = S.word & 0xffffu;
+    uint nbuck = L.mask + 1u;
+    if (ph == P_SCAN1) {                    // each block of 1024 counts (start[1..]):
+        uint base = gl_WorkGroupID.x * 1024u + 1u;  //  inclusive in place, its total
+        uint c[4]; uint s = 0u;
+        for (uint k = 0u; k < 4u; k++) { c[k] = start[base + li * 4u + k]; s += c[k]; }
+        sh[li] = s;
+        scan256(li);
+        uint run = sh[li] - s;
+        for (uint k = 0u; k < 4u; k++) { run += c[k]; start[base + li * 4u + k] = run; }
+        if (li == 255u) bsum[gl_WorkGroupID.x] = sh[255];
+        return;
+    }
+    if (ph == P_SCAN2) {                    // the blocks' totals: exclusive prefixes
+        uint nblk = nbuck / 1024u;
+        uint per = (nblk + 255u) / 256u;
+        uint s = 0u;
+        for (uint k = 0u; k < per; k++) { uint b = li * per + k; if (b < nblk) s += bsum[b]; }
+        sh[li] = s;
+        scan256(li);
+        uint run = sh[li] - s;
+        for (uint k = 0u; k < per; k++) {
+            uint b = li * per + k;
+            if (b < nblk) { uint c = bsum[b]; bsum[b] = run; run += c; }
+        }
+        return;
+    }
+    if (ph == P_SCAN3) {
+        uint base = gl_WorkGroupID.x * 1024u + 1u;
+        uint add = bsum[gl_WorkGroupID.x];
+        for (uint k = 0u; k < 4u; k++) start[base + li * 4u + k] += add;
+        return;
+    }
+    if (ph == P_CLEAR || ph == P_COPYCUR) {
+        if (gi >= nbuck + 1u) return;
+        if (ph == P_CLEAR) start[gi] = 0u; else cur[gi] = start[gi];
+        return;
+    }
+    if (ph == P_BSORT) {                    // each bucket by index (stable)
+        if (gi >= nbuck) return;
+        uint a = start[gi], b = start[gi + 1u];
+        for (uint k = a + 1u; k < b; k++) {
+            uint key = srt[k];
+            uint j = k;
+            while (j > a && srt[j - 1u] > key) { srt[j] = srt[j - 1u]; j--; }
+            srt[j] = key;
+        }
+        return;
+    }
+    if (ph == P_ZEROIMP) {
+        if (gi < L.n * L.nbd) pimp[gi] = vec4(0.0);
+        return;
+    }
+    if (ph == P_IMPRED) {                   // chunk c, body b: its particles' in order
+        uint nch = (L.n + GRAIN - 1u) / GRAIN;
+        if (gi >= nch * L.nbd) return;
+        uint c = gi / L.nbd, b = gi - c * L.nbd;
+        uint e = min(L.n, (c + 1u) * GRAIN);
+        vec3 s = vec3(0.0);
+        for (uint i = c * GRAIN; i < e; i++) s += pimp[i * L.nbd + b].xyz;
+        imp[c * 16u + b] = vec4(s, 0.0);
+        return;
+    }
+    if (gi >= L.n) return;
+    uint i = gi;
+    if (ph == P_PREDICT) {
+        vec3 vv = L.acc.xyz * L.dt + v[i].xyz;
+        v[i] = vec4(vv, 0.0);
+        p[i] = vec4(clampd(vv * L.dt + x[i].xyz), 0.0);
+    } else if (ph == P_HASH) {
+        uint b = hashc(cell_of(p[i].xyz));
+        cell[i] = b;
+        atomicAdd(start[b + 1u], 1u);
+    } else if (ph == P_SCATTER) {
+        uint k = atomicAdd(cur[cell[i]], 1u);
+        srt[k] = i;
+    } else if (ph == P_NBRS) {
+        vec3 pi = p[i].xyz;
+        ivec3 c = cell_of(pi);
+        uint seen[27]; uint ns = 0u, cnt = 0u;
+        for (int dz = -1; dz <= 1; dz++)
+        for (int dy = -1; dy <= 1; dy++)
+        for (int dx = -1; dx <= 1; dx++) {
+            uint b = hashc(c + ivec3(dx, dy, dz));
+            bool dup = false;
+            for (uint k = 0u; k < ns; k++) if (seen[k] == b) { dup = true; break; }
+            if (dup) continue;
+            seen[ns++] = b;
+            uint e = start[b + 1u];
+            for (uint k = start[b]; k < e; k++) {
+                uint j = srt[k];
+                if (j == i) continue;
+                vec3 d = pi - p[j].xyz;
+                if (dot3(d, d) >= L.h2) continue;
+                if (cnt >= NB) continue;
+                nb[i * NB + cnt++] = j;
+            }
+        }
+        nn[i] = cnt;
+    } else if (ph == P_LAMBDA) {
+        vec3 pi = p[i].xyz;
+        float S0 = w6(0.0);
+        vec3 gr = vec3(0.0);
+        float Q = 0.0;
+        uint c = nn[i];
+        for (uint k = 0u; k < c; k++) {
+            uint j = nb[i * NB + k];
+            vec3 d = pi - p[j].xyz;
+            float r2 = dot3(d, d);
+            apart(i, j, d, r2);
+            S0 = w6(r2) + S0;
+            vec3 g = gw(d, sqrt(r2)) * L.mr;
+            gr += g;
+            Q += dot3(g, g);
+        }
+        vec3 wg;
+        S0 = walls(pi, wg) + S0;
+        gr += wg * L.mr;
+        float r = S0 * L.m;
+        rho[i] = r;
+        float C = max(r / L.rho0 - 1.0, 0.0);
+        lam[i] = -(C / ((Q + dot3(gr, gr)) + L.eps));
+    } else if (ph == P_DELTA) {
+        vec3 pi = p[i].xyz;
+        float li2 = lam[i];
+        vec3 acc = vec3(0.0);
+        uint c = nn[i];
+        for (uint k = 0u; k < c; k++) {
+            uint j = nb[i * NB + k];
+            float co = lam[j] + li2;
+            vec3 d = pi - p[j].xyz;
+            float r2 = dot3(d, d);
+            apart(i, j, d, r2);
+            float q = w6(r2) / L.wdq;
+            q = q * q;
+            co -= (q * q) * L.tk;
+            acc += gw(d, sqrt(r2)) * co;
+        }
+        vec3 wg;
+        walls(pi, wg);
+        acc += wg * (li2 + li2);
+        dp[i] = vec4(acc * L.mr, 0.0);
+    } else if (ph == P_APPLY) {
+        vec3 q = clampd(p[i].xyz + dp[i].xyz);
+        float fk = float((S.word >> 16) + 1u) / float(L.K);
+        for (uint b = 0u; b < L.nbd; b++) {
+            if (any(lessThan(q, L.bmin[b].xyz)) || any(lessThan(L.bmax[b].xyz, q))) continue;
+            vec3 bc = (L.bc1[b].xyz - L.bc0[b].xyz) * fk + L.bc0[b].xyz;
+            vec3 d = q - bc;
+            vec3 loc = d.x * L.br0[b].xyz + d.y * L.br1[b].xyz + d.z * L.br2[b].xyz;
+            vec3 qq = abs(loc) - L.bh[b].xyz;
+            float rad = L.bh[b].w;
+            float mq = max(max(qq.x, qq.y), qq.z);
+            vec3 nl; float push;
+            if (mq < 0.0) {                 // inside the core: out of its nearest face
+                int ax = 0; float vq = qq.x;
+                if (qq.y > vq) { ax = 1; vq = qq.y; }
+                if (qq.z > vq) { ax = 2; vq = qq.z; }
+                push = rad - vq;
+                nl = vec3(0.0);
+                nl[ax] = (floatBitsToUint(loc[ax]) & 0x80000000u) != 0u ? -1.0 : 1.0;
+            } else {
+                vec3 qp = max(qq, vec3(0.0));
+                float Lq = sqrt(dot3(qp, qp));
+                if (Lq >= rad || Lq <= TINY) continue;
+                push = rad - Lq;
+                nl = uintBitsToFloat(floatBitsToUint(qp) | (floatBitsToUint(loc) & 0x80000000u)) / Lq;
+            }
+            vec3 nw = vec3(dot3(nl, L.br0[b].xyz), dot3(nl, L.br1[b].xyz), dot3(nl, L.br2[b].xyz)) * push;
+            q += nw;
+            pimp[i * L.nbd + b].xyz -= nw * (L.m * L.idt);
+        }
+        p[i] = vec4(q, 0.0);
+    } else if (ph == P_COLLIDE) {
+        vec3 q = p[i].xyz;
+        if (collide(x[i].xyz, q)) p[i] = vec4(q, 0.0);
+    } else if (ph == P_VEL) {
+        v[i] = vec4((p[i].xyz - x[i].xyz) * L.idt, 0.0);
+    } else if (ph == P_XSPH) {
+        vec3 pi = p[i].xyz, vi = v[i].xyz;
+        vec3 vs = vec3(0.0), om = vec3(0.0);
+        uint c = nn[i];
+        for (uint k = 0u; k < c; k++) {
+            uint j = nb[i * NB + k];
+            float mj = L.m / max(rho[j], TINY);
+            vec3 dv = v[j].xyz - vi;
+            vec3 d = pi - p[j].xyz;
+            float r2 = dot3(d, d);
+            vs += dv * (w6(r2) * mj);
+            om += cross(dv, gw(d, sqrt(r2))) * mj;
+        }
+        vec3 wg;
+        float ws = walls(pi, wg);
+        vs -= vi * (ws * L.mr);
+        v2[i] = vec4(vs * L.visc + vi, 0.0);
+        w[i] = vec4(om, 0.0);
+    } else if (ph == P_VORT) {
+        vec3 pi = p[i].xyz;
+        vec3 eta = vec3(0.0);
+        uint c = nn[i];
+        for (uint k = 0u; k < c; k++) {
+            uint j = nb[i * NB + k];
+            float mj = (L.m / max(rho[j], TINY)) * sqrt(dot3(w[j].xyz, w[j].xyz));
+            vec3 d = pi - p[j].xyz;
+            eta += gw(d, sqrt(dot3(d, d))) * mj;
+        }
+        float e2 = dot3(eta, eta);
+        if (e2 > TINY) {
+            vec3 N = eta / sqrt(e2);
+            v2[i].xyz += cross(N, w[i].xyz) * (L.vort * L.dt);
+        }
+    } else if (ph == P_COMMIT) {
+        x[i] = p[i];
+        v[i] = v2[i];
+    }
+}

@@ -225,7 +225,14 @@ A render on the GPU never meshes it (v0.23): the helper traces the field
 itself ([GPU.md](GPU.md)). In the dam-break demo that takes a third off a
 frame's simulation (the 35 ms of meshing) and the triangles' build and
 upload off its render. The image differs a little from the meshed one,
-the surface being smoother.
+the surface being smoother. Nor does the viewport mesh it when the GPU
+draws it (v0.24): the helper marches the field there too, so a liquid
+playing back costs its simulation and the field only.
+
+With a GPU helper the solver itself runs there too (v0.24, `liq.comp`):
+the dam break's frame takes 6 ms instead of 67 on an RTX 4080 SUPER. Force
+fields and landscapes as colliders keep the CPU's solver
+([GPU.md](GPU.md)).
 
 Where the surface breaks, fast particles with few neighbours are **spray**
 events: `emit("Tank", "from events events spray Water per 1 inherit 1 life 0.5")`
