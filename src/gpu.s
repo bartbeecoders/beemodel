@@ -47,6 +47,16 @@
 .globl gpu_lv_run
 .globl gpu_rtx_likely
 .globl gpu_fld_likely
+.globl gpu_view_ready
+.globl gpu_slot
+.globl gpu_run
+.globl g_base
+.globl g_size
+.globl gd_ok
+.globl gv_ndraw
+.globl gp_graph_ok
+.globl gp_img_bytes
+.globl gpu_img_into
 .globl hv_gpu
 
 .equ SYS_ACCESS,    21
@@ -111,8 +121,8 @@ g_rsmode:       .skip 4                 # 0 auto (DAG frames), 1 all, -1 off
 hv_gpu:         .skip 4                 # this render's passes run on the GPU
 gp_first:       .skip 4                 # the next pass uploads the scene
 .align 8
-g_base:         .skip 8*3               # each slot's shared memory, bytes
-g_size:         .skip 8*3
+g_base:         .skip 8*4               # each slot's shared memory, bytes
+g_size:         .skip 8*4
 g_path:         .skip 512
 g_argv:         .skip 16
 g_msg:          .skip GM_SZ
@@ -133,12 +143,16 @@ gp_nb:          .skip 4                 # the path tracer's table entries
 lv_nb:          .skip 4                 #  the live viewport's
 gp_rtx:         .skip 4                 # the last render traced with RTX
 gp_nfld:        .skip 4                 #  liquids' fields it traced (H13)
-gd_ok:          .skip 4*3               # the device holds the slot's bindings
-gd_pend:        .skip 4*3               #  as its memory does; a put not run yet
-gd_kb:          .skip 4*3               # KiB the last put sent up (gpu(21, 22))
+gd_ok:          .skip 4*4               # the device holds the slot's bindings
+gd_pend:        .skip 4*4               #  as its memory does; a put not run yet
+gd_kb:          .skip 4*4               # KiB the last put sent up (gpu(21, 22))
 gd_cap:         .skip 8*PT_NTAB*3      # each binding's room (slots 0, 2)
 gd_total:       .skip 8*3
 gd_sent:        .skip 8*PT_NTAB*3      # each binding's bytes the device has had
+g_gfx:          .skip 4                 # the helper draws the viewport (v0.24)
+g_hostmem:      .skip 4                 #  and imports the shared memory
+g_hseen:        .skip 4                 # its hello read, the warm-up's answer not
+gv_ndraw:       .skip 4                 # the viewport's run: its draws (gview.s)
 gd_slot:        .skip 4                 # this put's slot, its sizes, offsets
 gd_szp:         .skip 8
 gd_offp:        .skip 8
@@ -374,27 +388,16 @@ g_hello:
     push    rbx
     push    r12
     sub     rsp, 24
+    cmp     dword ptr [rip+g_hseen], 0  # (gpu_view_ready read it already)
+    jne     50f
     mov     edi, HELLO_MS
     call    g_recv
     test    eax, eax
     jz      .Lgh_fail
-    cmp     dword ptr [rip+g_msg+GM_CMD], MSG_HELLO
-    jne     .Lgh_fail
-    cmp     dword ptr [rip+g_msg+GM_MAGIC], GPU_MAGIC
-    jne     .Lgh_fail
-    cmp     dword ptr [rip+g_msg+GM_STATUS], GH_OK
-    jne     .Lgh_fail
-    mov     eax, [rip+g_msg+GM_TYPE]   # (bit 8: ray queries)
-    movzx   ecx, al
-    mov     [rip+g_type], ecx
-    shr     eax, 8
-    and     eax, 1
-    mov     [rip+g_rtx], eax
-    lea     rsi, [rip+g_msg+GM_NAME]
-    lea     rdi, [rip+g_name]
-    mov     ecx, 47
-    rep     movsb
-    mov     byte ptr [rdi], 0
+    call    g_hello_take
+    test    eax, eax
+    jz      .Lgh_fail
+50: mov     dword ptr [rip+g_hseen], 0
     cmp     dword ptr [rip+g_warm], 0   # (the warm-up's answer)
     je      51f
     mov     dword ptr [rip+g_warm], 0
@@ -417,6 +420,86 @@ g_hello:
 9:  add     rsp, 24
     pop     r12
     pop     rbx
+    ret
+
+# g_hello_take -> eax = 1: g_msg is a good MSG_HELLO (its device kept)
+g_hello_take:
+    xor     eax, eax
+    cmp     dword ptr [rip+g_msg+GM_CMD], MSG_HELLO
+    jne     9f
+    cmp     dword ptr [rip+g_msg+GM_MAGIC], GPU_MAGIC
+    jne     9f
+    cmp     dword ptr [rip+g_msg+GM_STATUS], GH_OK
+    jne     9f
+    mov     eax, [rip+g_msg+GM_TYPE]    # (bit 8: ray queries; GH_GFX: the
+    movzx   ecx, al                     #  viewport kernel)
+    mov     [rip+g_type], ecx
+    mov     ecx, eax
+    shr     ecx, 8
+    and     ecx, 1
+    mov     [rip+g_rtx], ecx
+    xor     ecx, ecx
+    test    eax, GH_GFX
+    setnz   cl
+    mov     [rip+g_gfx], ecx
+    xor     ecx, ecx
+    test    eax, GH_HOSTMEM
+    setnz   cl
+    mov     [rip+g_hostmem], ecx
+    lea     rsi, [rip+g_msg+GM_NAME]
+    lea     rdi, [rip+g_name]
+    mov     ecx, 47
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    mov     eax, 1
+9:  ret
+
+# gpu_view_ready -> eax = 1: the helper is up and draws the viewport. Never
+#   waits: a helper started early (gpu_prewarm) has its hello, then the
+#   warm-up's answer, taken as each arrives (the frames meanwhile draw on the
+#   CPU)
+gpu_view_ready:
+    cmp     dword ptr [rip+gpu_off], 0
+    jne     8f
+    mov     eax, [rip+g_state]
+    cmp     eax, 1
+    je      7f
+    cmp     eax, 2
+    jne     8f
+    cmp     dword ptr [rip+g_hseen], 0
+    jne     2f
+    xor     edi, edi                    # its hello?
+    call    g_recv
+    test    eax, eax
+    jz      8f
+    call    g_hello_take
+    test    eax, eax
+    jz      g_hello_bad
+    mov     dword ptr [rip+g_hseen], 1
+2:  cmp     dword ptr [rip+g_warm], 0   # the warm-up's answer?
+    je      3f
+    xor     edi, edi
+    call    g_recv
+    test    eax, eax
+    jz      8f
+    mov     dword ptr [rip+g_warm], 0
+3:  sub     rsp, 8                      # up: as g_hello says it
+    call    g_hello
+    add     rsp, 8
+    test    eax, eax
+    jz      8f
+7:  mov     eax, [rip+g_gfx]
+    ret
+8:  xor     eax, eax
+    ret
+g_hello_bad:                            # (a bad hello: as g_hello's failure)
+    sub     rsp, 8
+    call    gpu_stop
+    mov     dword ptr [rip+g_state], -1
+    lea     rdi, [rip+s_g_off]
+    call    log_line
+    add     rsp, 8
+    xor     eax, eax
     ret
 
 # log_pair(rdi=asciz, rsi=asciz) - one console line of both
@@ -475,7 +558,8 @@ gpu_stop:
     mov     dword ptr [rip+g_pend], 0
     xor     eax, eax
     mov     [rip+gd_ok], rax
-    mov     [rip+gd_ok+8], eax
+    mov     [rip+gd_ok+8], rax
+    mov     [rip+g_hseen], eax
     ret
 
 # g_recv(edi=timeout ms) -> eax = 1 with a message in g_msg
@@ -685,7 +769,12 @@ gpu_run_send:
     jne     2f
     mov     eax, [rip+lv_kern]
     mov     [rip+g_msg+GM_KERN], eax
-2:
+2:  cmp     ebx, GV_SLOT                # (the viewport drawn: its kernel,
+    jne     3f                          #  its draws)
+    mov     dword ptr [rip+g_msg+GM_KERN], GV_KERN+1
+    mov     eax, [rip+gv_ndraw]
+    mov     [rip+g_msg+GM_NDRAW], eax
+3:
     mov     edi, -1
     call    g_send
     test    eax, eax
@@ -815,6 +904,16 @@ gpu_query:
     mov     eax, [rip+hv_reuse]         # 26: render.sample_reuse's frames
     cmp     edi, 26
     je      9f
+    mov     eax, [rip+g_hostmem]        # 31: the helper imports shared memory
+    cmp     edi, 31
+    je      9f
+    cmp     edi, 27                     # 27..30: the viewport drawn by the GPU
+    jb      26f                         #  (gview.s: frames, ms, KiB, off)
+    cmp     edi, 30
+    ja      26f
+    sub     edi, 27
+    jmp     gv_query
+26:
     cmp     edi, 7                      # 7.. the live viewport's (live.s)
     jb      8f
     jmp     lv_query
@@ -1913,6 +2012,27 @@ gp_graph_ok:
 8:  mov     eax, 1
     ret
 9:  xor     eax, eax
+    ret
+
+# gpu_img_into(rdi=slot memory, rsi=offset) - the images there as gp_img_put
+#   lays them out for the path tracer (the viewport's binding, gview.s):
+#   written whole
+gpu_img_into:
+    push    r13
+    push    r14
+    push    rbx
+    sub     rsp, 16*8
+    mov     r13, rdi
+    mov     [rsp+15*8], rsi
+    mov     r14, rsp
+    mov     ebx, [rip+gd_delta]
+    mov     dword ptr [rip+gd_delta], 0
+    call    gp_img_put
+    mov     [rip+gd_delta], ebx
+    add     rsp, 16*8
+    pop     rbx
+    pop     r14
+    pop     r13
     ret
 
 # gp_img_bytes -> rax = the images' buffer: 64 x (offset, w, h, format) and

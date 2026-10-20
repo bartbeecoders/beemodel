@@ -590,6 +590,7 @@ def main():
     else:
         check(False, 'the window frames')
     live_view()
+    gpu_viewport()
     prewarm()
     return finish()
 
@@ -597,20 +598,21 @@ def main():
 BOX = (214, 80, 1014, 620)                              # the viewport
 
 
-def fake(**env):
-    """The fake compositor with BeeModel in it (these GPU variables)."""
+def fake(args=(), **env):
+    """The fake compositor with BeeModel in it (these GPU variables; args:
+    a file to open)."""
     sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
     argv = sys.argv
     sys.argv = [argv[0], OUT or tempfile.mkdtemp(prefix='bee-gpu-shots-')]
     import fakewl
     sys.argv = argv
-    keys = ('BEEMODEL_GPU', 'BEEMODEL_GPU_HELPER', 'BEEMODEL_GPU_FAIL')
+    keys = ('BEEMODEL_GPU', 'BEEMODEL_GPU_HELPER', 'BEEMODEL_GPU_FAIL', 'BEEMODEL_GPU_VIEW')
     saved = {k: os.environ.get(k) for k in keys}
     for k in keys:
         os.environ.pop(k, None)
     os.environ.update(env)
     try:
-        f = fakewl.Fake()
+        f = fakewl.Fake(args)
     finally:
         for k, v in saved.items():
             if v is None:
@@ -752,6 +754,69 @@ def live_view():
                   f'but for the line saying so)')
         finally:
             f.proc.kill()
+
+
+def gpu_viewport():
+    """VP1 (v0.24): the viewport drawn by the GPU (Solid, Material Preview:
+    shader graphs, textures, bumps, normal maps, vertex colours, an HDRI
+    world) is the CPU's image, its ids pick, and edit mode stays on the CPU."""
+    print('  -- the viewport drawn by the GPU --')
+    land = ('op("landscape.add", "hills size 30 seed 4")\nop("landscape.paint", "add grass colour 0.18 0.32 0.10")\n'
+            'op("landscape.paint", "add rock colour 0.32 0.31 0.29")\nop("landscape.paint_auto")\n'
+            'move("Landscape", 0, -3, -14)\n')
+    hdr = os.path.join(HOME, 'vp_sky.hdr')
+    write_hdr(hdr)
+    world = 'op("world.hdri", "vp_sky")\nop("world.rotation", "30")\n'
+    bee = os.path.join(HOME, 'vp.bee')                  # (built headless: a window's scripts
+    run(graph_scene() + land + 'image("%s")\nop("file.save_as", "%s")\n' % (hdr, bee))   #  read no files)
+    shots = {}
+    for dev in ('gpu', 'cpu'):
+        f, m, q = fake([bee], BEEMODEL_GPU='any', BEEMODEL_GPU_VIEW='on' if dev == 'gpu' else 'off')
+        try:
+            g = lambda k: int(float(q('print(gpu(%d))' % k) or -1))
+            q('view(30, 25, 11, 0, 0, 0)')
+            t = time.time()                             # (the helper's warm-up: a cold
+            while dev == 'gpu' and time.time() - t < 60 and g(27) < 1:     #  driver cache)
+                q('op("view.shading_solid")')
+                f.pump(0.3)
+            for mode in ('solid', 'material'):
+                q('op("view.shading_%s")' % mode)
+                n0 = g(27)
+                f.pump(0.5)
+                shots[dev, mode] = (f.image().crop(BOX), g(27) - n0)
+            q(world + 'op("view.shading_material")')
+            n0 = g(27)
+            f.pump(0.8)
+            shots[dev, 'hdri'] = (f.image().crop(BOX), g(27) - n0)
+            if dev == 'gpu':
+                if OUT:
+                    f.shot('gpu_view_material.png')
+                q('op("view.shading_solid")\nselect("Floor")\nop("mode.toggle_edit")')   # edit mode: the CPU
+                n0 = g(27)
+                f.pump(0.5)
+                edit = g(27) - n0
+                q('op("mode.toggle_edit")\nselect("Leaf")')
+                f.pump(0.5)
+                bx, by = 380, 520                       # a click picks through the GPU's ids
+                n0 = g(27)
+                f.click(bx, by)
+                f.pump(0.5)
+                picked = q('print(active())')
+                clicks = g(27) - n0
+        finally:
+            f.proc.kill()
+    for mode in ('solid', 'material', 'hdri'):
+        a, na = shots['gpu', mode]
+        b, nb = shots['cpu', mode]
+        px = list(zip(pixels(a), pixels(b)))
+        same = sum(1 for p, q2 in px if p == q2) / len(px)
+        far = sum(1 for p, q2 in px if max(abs(x - y) for x, y in zip(p, q2)) > 8) / len(px)
+        check(na > 0 and nb == 0 and same > 0.99 and far < 0.001,      # (edges: a pixel's centre
+              f'{mode}: the GPU drew the viewport ({na} frames; the CPU {nb}), the CPU\'s image '   # on a side)
+              f'({100 * same:.2f}% of pixels identical, {100 * far:.3f}% more than 8 levels apart)')
+    check(edit == 0, f'edit mode: the CPU draws the viewport ({edit} GPU frames)')
+    check(clicks > 0 and picked == 'Floor',
+          f'a click picks through the GPU\'s ids ({picked}, {clicks} GPU frames)')
 
 
 def compare_img(a, b):

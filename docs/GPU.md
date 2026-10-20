@@ -20,6 +20,8 @@ driver (`cc`) and `libvulkan.so.1` are present.
 | `BEEMODEL_GPU=any` | Also accept a CPU Vulkan implementation (llvmpipe), which the tests use. Otherwise discrete GPUs come first, then integrated and virtual ones |
 | `BEEMODEL_GPU_HELPER=path` | Where the helper is |
 | `BEEMODEL_GPU_RASTER=all` / `off` | Rasterize every frame's tiles on the GPU, or none. By default only frames with objects drawn through cluster DAGs use it |
+| `BEEMODEL_GPU_VIEW=off` | Draw the 3D viewport on the CPU even with a helper that can draw it (v0.24; the window tests' default, so their images are the CPU's) |
+| `BEEMODEL_GPU_HOSTMEM=off` | Copy through the helper's own staging buffers instead of importing the shared memory |
 
 The helper needs a Vulkan device with compute queues and 64-bit integers in
 shaders. The console reports the device (`GPU helper: <name>`), or says the
@@ -197,6 +199,38 @@ Depth, object ids, the visibility buffer and colour come back exactly as
 the CPU leaves them, so the frame is pixel-identical. By default this runs
 for frames that draw objects through cluster DAGs (virtualized geometry),
 including both batches of the occlusion pass.
+
+### The viewport drawn by the GPU (v0.24)
+
+With a graphics queue, the helper also draws the 3D viewport's objects in
+Solid and Material Preview: a render pass of four images (colour, 1/z,
+object ids, depth), one pipeline (`src/gpu/view.vert`, `view.frag`) and one
+indirect draw call for the whole scene (`src/gview.s`; slot 3). Each mesh's
+triangles stay on the GPU in object space (corners, corner normals smooth
+within 30 degrees, UVs, vertex colours) and are written again only when the
+mesh changes: its version, counts or a fingerprint of its vertices. A frame
+sends the camera, a record per object (its matrix and normal matrix,
+colour, material, id) and the materials; a moving object costs 128 bytes.
+
+The vertex stage projects as the CPU's rasterizer does, with depth near / z,
+so 1/z comes back exactly as raster.s keeps it. Solid shading is the CPU's
+flat headlight, pixel for pixel; Material Preview is preview.s's principled
+BSDF under the studio environment or an HDRI world (its SH irradiance and
+blurred copy), with the materials' shader graphs evaluated by the path
+tracer's graph code (`src/gpu/graph.glsl`, shared with `pt.comp`). The
+colour comes back into the window's buffer where an object is, 1/z and the
+ids into the CPU's depth and id buffers, so particles, instances, wires,
+the selection outline and clicks work on top as before.
+
+The helper imports the shared memory as its staging buffer when the device
+can (`VK_EXT_external_memory_host`): uploads and readbacks go between the
+GPU and BeeModel's own memory with no copies on either side.
+
+The CPU draws the viewport instead without a helper (or with Device CPU),
+in edit and paint modes, with virtualized geometry, with light probes in
+Material Preview, a shader graph the GPU cannot evaluate, or more than
+4M triangles. Rainstorm in Material Preview at 2560 x 1440 draws in 13 ms a
+frame instead of 46 ms.
 
 ### Rendered shading (the live viewport)
 
@@ -420,6 +454,11 @@ empty, so that takes 0.6 to 3 s (the graphs' kernels are the slow ones).
 | 24 | 1 if the helper has RTX |
 | 25 | Liquid surfaces the last render traced as fields |
 | 26 | `render.sample_reuse`: frames whose samples animation renders reuse (0: off) |
+| 27 | Viewport frames the GPU drew (v0.24) |
+| 28 | The last one's milliseconds |
+| 29 | KiB of meshes it sent |
+| 30 | 1 if the GPU's viewport is off (a failure; 2: `BEEMODEL_GPU_VIEW=off`) |
+| 31 | 1 if the helper imports the shared memory (no copies) |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 
@@ -427,6 +466,9 @@ empty, so that takes 0.6 to 3 s (the graphs' kernels are the slow ones).
 - the path tracer against the CPU, including the denoised render;
 - the helper dying at its second run (`BEEMODEL_GPU_FAIL=2`, a test hook);
 - the rasterizer's frame in the fake compositor;
+- the viewport drawn by the GPU: Solid, Material Preview (shader graphs,
+  textures, bump and normal maps, vertex colours) and an HDRI world against
+  the CPU's image; edit mode on the CPU; a click picking through its ids;
 - Rendered shading: the raycast, then the samples; a camera move against a
   scene change; the selection outline; 0 samples; the denoiser against
   plain samples; an F12 render beside it;
