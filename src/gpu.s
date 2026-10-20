@@ -1084,6 +1084,8 @@ gp_put:
     add     rdi, r13
     mov     eax, [rip+hv_ns]
     mov     [rdi+48+13*4], eax
+    mov     eax, [rip+hv_mblur]         # cam[15]: the balls move (a time
+    mov     [rdi+48+15*4], eax          #  a sample)
     cmp     dword ptr [rip+hv_env], 0   # cam[14] |= 32: an HDRI world
     je      16f
     mov     rdi, [r14]

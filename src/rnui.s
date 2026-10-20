@@ -105,6 +105,7 @@ l_pmode:        .quad s_walk, s_fly
 kw_pmode:       .quad k_walk, k_fly
 
 .text
+WIDGET wd_ru_mblur, WK_FLOAT, "render.shutter", "Motion blur (shutter)", 0.0, 1.0, 0.01, 2, WGF_CLAMP, tip="How long the shutter is open, as a part of a frame: particles moving meanwhile streak (0: off)"
 WIDGET wd_ru_bounce, WK_INT, "render.bounces", "Bounces", 1.0, 64.0, 0.1, 0, WGF_CLAMP, tip="How many times light may bounce (more: brighter interiors, slower)"
 WIDGET wd_ru_dev,  WK_ENUM, "render.device_list", cb=dev_cb, aux=dev_names, n=4, tip="Where renders run. Auto: RTX ray tracing when the GPU has it, else the GPU, else the CPU"
 WIDGET wd_ru_file, WK_BUTTON, "render.to_file", "Render to File...", aux=op_render_image, tip="Render straight into a PNG (the size and samples above)"
@@ -156,8 +157,11 @@ render_more:
     push    r13
     sub     rsp, 8
     call    pnl_begin
-    lea     rdi, [rip+wd_ru_bounce]     # bounces, the GPU, Render to File
-    lea     r8, [rip+hv_bounces]
+    lea     rdi, [rip+wd_ru_bounce]     # bounces, motion blur, the GPU,
+    lea     r8, [rip+hv_bounces]        #  Render to File
+    call    pnl_full
+    lea     rdi, [rip+wd_ru_mblur]
+    lea     r8, [rip+hv_shutter]
     call    pnl_full
     lea     rdx, [rip+s_dev]            # Device: Auto / GPU (RTX) / GPU / CPU
     call    pnl_hint

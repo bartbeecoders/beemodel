@@ -30,9 +30,11 @@ void main() {
     if (i < floatBitsToUint(P.cam[13])) {
         uint o = i * 12u;
         vec3 c = vec3(sph[o], sph[o + 1u], sph[o + 2u]);
-        float r = sph[o + 3u] * 1.0001 + 1.0e-6;   // (a little more: sph_hit decides)
+        vec3 h = abs(vec3(sph[o + 6u], sph[o + 7u], sph[o + 8u])) * 0.5;  // (motion blur:
+        float r = sph[o + 3u] * 1.0001 + 1.0e-6;   //  all it sweeps; a little more:
+        vec3 lo = c - h - r, hi = c + h + r;       //  sph_hit decides)
         uint q = i * 6u;
-        ab[q] = c.x - r; ab[q + 1u] = c.y - r; ab[q + 2u] = c.z - r;
-        ab[q + 3u] = c.x + r; ab[q + 4u] = c.y + r; ab[q + 5u] = c.z + r;
+        ab[q] = lo.x; ab[q + 1u] = lo.y; ab[q + 2u] = lo.z;
+        ab[q + 3u] = hi.x; ab[q + 4u] = hi.y; ab[q + 5u] = hi.z;
     }
 }

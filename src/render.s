@@ -73,6 +73,11 @@ s_rn_needsave:  .asciz "  render.save <path.png> [beauty|albedo|normal|depth]"
 s_rn_badpass:   .asciz "  render pass: beauty, albedo, normal or depth"
 s_rn_pass:      .asciz "  render pass: "
 s_rn_dev:       .asciz "  render device: "
+s_rn_mb:        .asciz "  motion blur: the shutter open "
+s_rn_mb2:       .asciz "% of a frame"
+s_rn_mboff:     .asciz "  motion blur: off"
+rn_f100:        .float 100.0
+rn_f1:          .float 1.0
 s_rn_baddev:    .asciz "  render device: auto, rtx, gpu or cpu"
 s_dev_auto:     .asciz "Auto"
 s_dev_rtx:      .asciz "GPU (RTX)"
@@ -122,6 +127,7 @@ OPERATOR op_render_stop, "render.stop", "Stop Render", do_render_stop, flags=OPF
 OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, doc="Save the render as PNG, or .exr (linear half floats): render.save <path> [beauty|albedo|normal|depth]", poll=poll_render, form=form_rsave
 OPERATOR op_render_pass, "render.pass", "Next Render Pass", do_render_pass, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)", poll=poll_render
 OPERATOR op_render_device, "render.device", "Render Device", do_render_device, flags=OPF_AI_SAFE|OPF_QUIET, doc="Where renders run: render.device [auto|rtx|gpu|cpu] (auto: the best there is - RTX ray tracing, the GPU, else the CPU; none: says which; kept in the preferences)"
+OPERATOR op_render_mblur, "render.motion_blur", "Motion Blur", do_render_mblur, flags=OPF_AI_SAFE, doc="Motion blur: render.motion_blur <shutter> - how long the shutter is open, as a part of a frame (0.5: half of it; 0: off). Particle balls are drawn where they are at each sample's time: rain streaks"
 OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>", form=form_render
 OPERATOR op_render_denoise, "render.denoise", "Denoise", do_render_denoise, check_denoise, flags=OPF_AI_SAFE|OPF_QUIET, doc="Toggle denoising the beauty pass when a render ends (guided by albedo, normal, depth)", poll=poll_render
 
@@ -471,6 +477,41 @@ do_render_device:
     lea     rdi, [rip+fmt_buf]
     call    log_line
 9:  pop     rbx
+    ret
+
+# ---- render.motion_blur [shutter] -------------------------------------------
+do_render_mblur:
+    sub     rsp, 8
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      5f
+    lea     rdx, [rsi+64]
+    call    parse_float
+    test    eax, eax
+    jz      5f
+    xorps   xmm1, xmm1                  # 0 .. 1 frame
+    maxss   xmm0, xmm1
+    minss   xmm0, [rip+rn_f1]
+    movss   [rip+hv_shutter], xmm0
+    mov     dword ptr [rip+dirty], 1
+5:  call    fmt_reset
+    xorps   xmm0, xmm0
+    comiss  xmm0, [rip+hv_shutter]
+    jb      6f
+    lea     rdi, [rip+s_rn_mboff]
+    call    log_line
+    jmp     9f
+6:  lea     rdi, [rip+s_rn_mb]
+    call    fmt_str
+    movss   xmm0, [rip+hv_shutter]
+    mulss   xmm0, [rip+rn_f100]
+    cvtss2si edi, xmm0
+    call    fmt_int
+    lea     rdi, [rip+s_rn_mb2]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+9:  add     rsp, 8
     ret
 
 # ---- render.save <path> [pass] ----------------------------------------------

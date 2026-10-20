@@ -191,6 +191,7 @@ n_mesh_tab:     .skip 4
 msg_buf:        .skip 600
 
 .section .rodata
+fr_one:         .float 1.0              # (rndr_read's shutter at most)
 s_bee_ext:      .asciz ".bee"
 s_obj_head:     .asciz "# BeeModel OBJ export\n"
 s_o:            .asciz "o "
@@ -616,6 +617,8 @@ bee_save:
     mov     edi, [rip+hv_pass]
     call    wb_u32
     mov     edi, [rip+rn_denoise]
+    call    wb_u32
+    mov     edi, [rip+hv_shutter]       # (since 0.23: motion blur)
     call    wb_u32
     call    chunk_end
     mov     edi, TAG_VIEW               # VIEW
@@ -1128,6 +1131,7 @@ uids_read:
 
 # rndr_read(rdi=RNDR data) - the render settings, kept in range
 rndr_read:
+    mov     r8d, esi                    # (the chunk's bytes)
     mov     eax, [rdi]
     mov     ecx, [rdi+4]
     mov     edx, [rdi+8]
@@ -1146,11 +1150,19 @@ rndr_read:
     mov     eax, [rdi+12]
     and     eax, 3
     mov     [rip+hv_pass], eax
-    cmp     esi, 20                     # (since 0.6: denoise)
+    mov     dword ptr [rip+hv_shutter], 0
+    cmp     r8d, 20                     # (since 0.6: denoise)
     jb      9f
     mov     eax, [rdi+16]
     and     eax, 1
     mov     [rip+rn_denoise], eax
+    cmp     r8d, 24                     # (since 0.23: motion blur, 0 .. 1)
+    jb      9f
+    movss   xmm0, [rdi+20]
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1                  # (NaN: 0)
+    minss   xmm0, [rip+fr_one]
+    movss   [rip+hv_shutter], xmm0
 9:  ret
 
 # need(rsi=pointer, rdx=bytes) -> CF=1 if [pointer, pointer+bytes) leaves the file

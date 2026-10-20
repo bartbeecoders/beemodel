@@ -127,7 +127,7 @@ The tabs down the left side of Properties are:
 | **Landscape** | Only for a landscape: what it is, then Size and Samples, the layer stack (eyes, pick, add, up, down, remove, the picked layer's values), paint layers (colour, friction, bounce, rules, Auto Paint), Sea and Files |
 | **CAD** | Parameters (expressions), the feature tree with sizes you can edit, a health dot, and up / down buttons that reorder it (the part rebuilds; `cad.feature_move`), units, the B-rep kernel, mechanism joints, measuring |
 | **Scene** | Units, the world's sky (studio or an HDRI), its strength, the frame range |
-| **Render** | Size, samples, denoise, bounces, the Device (Auto, GPU (RTX), GPU, CPU) and where the last render ran and why, Render and Save; virtualized geometry, world partition, light probes, lightmaps, play mode |
+| **Render** | Size, samples, denoise, bounces, motion blur (the shutter), the Device (Auto, GPU (RTX), GPU, CPU) and where the last render ran and why, Render and Save; virtualized geometry, world partition, light probes, lightmaps, play mode |
 | **Viewport** | Shading, grid, theme, camera |
 | **Animation** | Shape keys, actions and layers, drivers, onion skins, motion paths |
 | **Rig** | The armature's bones and pose, constraints, Parent to Armature |

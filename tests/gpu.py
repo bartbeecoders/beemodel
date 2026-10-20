@@ -394,6 +394,41 @@ def main():
           f'first {up[0]}), a move {up[3]}, a material {up[4]}; after them, a modifier, 500 balls, a deletion and '
           f'a bigger image ({up[5:]} KiB) each image is a fresh process\'s ({same})')
 
+    # ---- motion blur (H11): balls where they are at each sample's time -----------
+    ms = ('add("plane", "P", 0, 0, 0)\nscale("P", 6)\nemit("Cube", "from faces burst 300 speed 25 life 100 '
+          'size 0.08 gravity 0 color 2050ff")\nframe(3)\n')
+    mb = {}
+    rtx_on = run('print("rtx", gpu(0), gpu(24))\n', BEEMODEL_GPU='any').get('rtx', ['0', '0'])[1] == '1'
+    for name, sh, dev in (('still', 0, 'cpu'), ('cpu', 1, 'cpu'), ('gpu', 1, 'gpu'), ('rtx', 1, 'auto')):
+        if name == 'rtx' and not rtx_on:
+            continue
+        f = os.path.join(HOME, 'mb_%s.png' % name)
+        q = run(ms + 'op("render.motion_blur", "%s")\nop("render.device", "%s")\nop("render.image", "%s 240 180 64 0")\n'
+                'print("mb", gpu(4), gpu(23))\n' % (sh, dev, f), BEEMODEL_GPU='any')
+        mb[name] = (f, q.get('mb', ['-1', '-1']))
+    from PIL import Image
+
+    def tint(f):
+        px = pixels(Image.open(f).convert('RGB'))
+        return sum(1 for r, g, b in px if b > r + 12), sum(1 for r, g, b in px if b > r + 80)
+    ts, tb = tint(mb['still'][0]), tint(mb['cpu'][0])
+    check(tb[0] > ts[0] * 1.2 and tb[1] * 20 < ts[1],
+          f'motion blur (a whole frame\'s shutter, balls at 25 m/s): streaks - more pixels tinted ({tb[0]} against '
+          f'{ts[0]}), few left solid ({tb[1]} against {ts[1]})')
+    for name in ('gpu', 'rtx'):
+        if name in mb:
+            mad, same = compare(mb['cpu'][0], mb[name][0])
+            check(mb[name][1][0] == '64' and mad < 0.25 and same > 0.97,
+                  f'motion blur on the GPU ({name}: {mb[name][1]}): the CPU\'s image (mean difference {mad:.4f} '
+                  f'levels, {100 * same:.2f}% identical)')
+    bee = os.path.join(HOME, 'mb.bee')
+    run(ms + 'op("render.motion_blur", "1")\nop("file.save", "%s")\n' % bee)
+    f = os.path.join(HOME, 'mb_open.png')
+    run('op("file.open", "%s")\nframe(1)\nframe(2)\nframe(3)\nop("render.device", "cpu")\n'
+        'op("render.image", "%s 240 180 64 0")\n' % (bee, f), BEEMODEL_GPU='any')
+    check(os.path.exists(f) and compare(mb['cpu'][0], f) == (0.0, 1.0),
+          'motion blur is saved with the scene: opened again, the same streaks')
+
     # ---- RTX (H10): ray queries through acceleration structures built on the GPU --
     r = run('print("rtx", gpu(0), gpu(24))\n', BEEMODEL_GPU='any')
     if r.get('rtx', ['0', '0'])[1] != '1':
