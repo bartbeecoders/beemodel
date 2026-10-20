@@ -37,6 +37,8 @@
 .globl hv_points
 .globl hv_npoints
 .globl hv_ready
+.globl hv_nobvh
+.globl hv_bvhless
 .globl hv_nodes
 .globl hv_root
 .globl hv_nn4
@@ -183,6 +185,9 @@ hv_nseg:        .skip 4
 hv_pfirst:      .skip 4             # the particles' first triangle
 hv_nhit:        .skip 4             # segments from the cache (gpu(20))
 hv_ksplit:      .skip 4             # 1: the top's root splits triangles | spheres
+hv_nobvh:       .skip 4             # the next build for RTX alone: no BVH but
+                                    #  for objects the cache is about to keep
+hv_bvhless:     .skip 4             # the scene built so (the CPU: hive_build again)
 .align 8
 hc_tab:         .skip HC_MAX*HS_SZ  # the cache's slots (kept across builds)
 kp_tab:         .skip K_N*16        # kept buffers: address, bytes
@@ -409,6 +414,8 @@ hive_build:
     sub     rsp, 56
     call    now_ms
     mov     [rip+hv_t0], rax
+    mov     eax, [rip+hv_nobvh]
+    mov     [rip+hv_bvhless], eax
     call    hv_free_all
     xor     r12d, r12d                  # triangles
     mov     dword ptr [rip+hv_ibud], HV_IBUDGET
@@ -1812,19 +1819,38 @@ build_bvh:
     jne     83f
     cmp     dword ptr [r13+SG_N], 0
     je      83f
-    mov     rdi, r13
+    cmp     dword ptr [rip+hv_nobvh], 0 # (for RTX: only what the cache keeps;
+    je      84f                         #  the rest stays in its order)
+    cmp     dword ptr [r13+SG_STORE], 0
+    je      83f
+84: mov     rdi, r13
     call    build_range
 83: inc     r12d
     add     r13, SG_SZ
     jmp     81b
 82:
-    call    seg_top                     # the top level
+    cmp     dword ptr [rip+hv_nobvh], 0 # for RTX: no tree (a node, empty)
+    je      85f
+    mov     edi, 128
+    mov     esi, K_NODES
+    call    hv_keep
+    test    rax, rax
+    jz      .Lbb_fail
+    mov     [rip+hv_nodes], rax
+    mov     rdi, rax
+    xor     eax, eax
+    mov     ecx, 16
+    rep     stosq
+    mov     dword ptr [rip+hv_nn4], 1
+    mov     dword ptr [rip+hv_root], 0xffffffff
+    jmp     88f
+85: call    seg_top                     # the top level
     test    eax, eax
     jz      .Lbb_fail
     call    collapse4
     test    eax, eax
     jz      .Lbb_fail
-    call    reorder_tris                # the built ones' ranges, then
+88: call    reorder_tris                # the built ones' ranges, then
 86:
     cmp     qword ptr [rip+hv_only], 0  # (a bake: the cache as it is)
     jne     87f
@@ -1988,6 +2014,11 @@ seg_small:
     jz      11f
     cmp     eax, BVH_PAR_N
     jae     11f
+    cmp     dword ptr [rip+hv_nobvh], 0 # (for RTX: only what the cache keeps)
+    je      12f
+    cmp     dword ptr [rsi+SG_STORE], 0
+    je      11f
+12:
     mov     rax, [rip+sg_list]
     mov     [rax+rdx*4], ecx
     inc     edx

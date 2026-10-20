@@ -193,12 +193,7 @@ render_more:
     call    fmt_reset
     lea     rdi, [rip+s_last]
     call    fmt_str
-    mov     eax, [rip+hv_why]
-    cmp     eax, HW_LAST
-    jbe     3f
-    xor     eax, eax
-3:  lea     rcx, [rip+why_names]
-    mov     rdi, [rcx+rax*8]
+    call    why_text
     call    fmt_str
     lea     rdx, [rip+fmt_buf]
     call    pnl_hint

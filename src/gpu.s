@@ -41,6 +41,7 @@
 .globl gpu_rs_tiles
 .globl gpu_lv_put
 .globl gpu_lv_run
+.globl gpu_rtx_likely
 .globl hv_gpu
 
 .equ SYS_ACCESS,    21
@@ -57,6 +58,8 @@
 .equ HELLO_MS,      15000               # a slow driver start is fine
 .equ RUN_MS,        120000
 .equ PT_NBIND,      20                  # pt.comp: 0-15, the film, the HDRI, its CDF, spheres
+.equ PT_NTAB,       22                  #  RTX (ptr, ptgr): positions, boxes for its
+                                        #  builds (the device's alone)
 .equ LV_NOREAD,     0x10000             # gpu_lv_run: no pixels back
 .equ RS_NBIND,      8
 .equ PD_BLK,        4096                # put_delta: compared in blocks,
@@ -109,18 +112,23 @@ g_msg:          .skip GM_SZ
 g_ctl:          .skip 32
 g_name:         .skip 48
 gp_kern:        .skip 4                 # its kernel + 1 (3: with graphs; 0)
-gp_off:         .skip 8*PT_NBIND        # the path tracer's layout
-gp_bytes:       .skip 8*PT_NBIND
+gp_off:         .skip 8*PT_NTAB        # the path tracer's layout
+gp_bytes:       .skip 8*PT_NTAB
 gr_off:         .skip 8*RS_NBIND
 lv_kern:        .skip 4                 # the live viewport's kernel + 1
 lv_first:       .skip 4                 # its next run uploads the scene
-lv_off:         .skip 8*PT_NBIND        # its layout (slot 2, as pt.comp)
-lv_bytes:       .skip 8*PT_NBIND
+lv_off:         .skip 8*PT_NTAB        # its layout (slot 2, as pt.comp)
+lv_bytes:       .skip 8*PT_NTAB
 gr_bytes:       .skip 8*RS_NBIND
+g_rtx:          .skip 4                 # the helper traces with ray queries (H10)
+gq_rtx:         .skip 4                 # gp_put: for an RTX kernel
+gp_nb:          .skip 4                 # the path tracer's table entries
+lv_nb:          .skip 4                 #  the live viewport's
+gp_rtx:         .skip 4                 # the last render traced with RTX
 gd_ok:          .skip 4*3               # the device holds the slot's bindings
 gd_pend:        .skip 4*3               #  as its memory does; a put not run yet
 gd_kb:          .skip 4*3               # KiB the last put sent up (gpu(21, 22))
-gd_cap:         .skip 8*PT_NBIND*3      # each binding's room (slots 0, 2)
+gd_cap:         .skip 8*PT_NTAB*3      # each binding's room (slots 0, 2)
 gd_total:       .skip 8*3
 gd_delta:       .skip 4                 # this put: only what changed goes up
 gd_nr:          .skip 4                 #  its ranges so far
@@ -358,8 +366,12 @@ g_hello:
     jne     .Lgh_fail
     cmp     dword ptr [rip+g_msg+GM_STATUS], GH_OK
     jne     .Lgh_fail
-    mov     eax, [rip+g_msg+GM_TYPE]
-    mov     [rip+g_type], eax
+    mov     eax, [rip+g_msg+GM_TYPE]   # (bit 8: ray queries)
+    movzx   ecx, al
+    mov     [rip+g_type], ecx
+    shr     eax, 8
+    and     eax, 1
+    mov     [rip+g_rtx], eax
     lea     rsi, [rip+g_msg+GM_NAME]
     lea     rdi, [rip+g_name]
     mov     ecx, 47
@@ -739,6 +751,12 @@ gpu_query:
     mov     eax, [rip+gd_kb+8]
     cmp     edi, 22
     je      9f
+    mov     eax, [rip+gp_rtx]           # 23: the last render traced with RTX,
+    cmp     edi, 23                     #  24: the helper can
+    je      9f
+    mov     eax, [rip+g_rtx]
+    cmp     edi, 24
+    je      9f
     cmp     edi, 7                      # 7.. the live viewport's (live.s)
     jb      8f
     jmp     lv_query
@@ -748,6 +766,29 @@ gpu_query:
 # =============================================================================
 #  The path tracer (slot 0; bindings as pt.comp)
 # =============================================================================
+# gpu_rtx_likely -> eax = 1 when the next render will trace with RTX (the
+#   helper started for it): its scene needs no BVH
+gpu_rtx_likely:
+    xor     eax, eax
+    cmp     dword ptr [rip+gpu_off], 0
+    jne     9f
+    sub     rsp, 8
+    call    gpu_ready
+    add     rsp, 8
+    test    eax, eax
+    jz      9f
+    jmp     g_use_rtx
+9:  ret
+
+# g_use_rtx -> eax = 1 when renders trace with ray queries: the helper has
+#   them and Render › Device is Auto or RTX
+g_use_rtx:
+    xor     eax, eax
+    cmp     dword ptr [rip+gpu_dev], 2
+    je      9f
+    mov     eax, [rip+g_rtx]
+9:  ret
+
 # gpu_pt_begin - after hive_start: the scene to the helper when the GPU can
 #   render it (studio sky, no shader graphs); hv_accum, hv_aux, hv_m2 then
 #   live in the shared memory. hv_gpu = 1 when its passes go there.
@@ -763,9 +804,11 @@ gpu_pt_begin:
     call    hv_gpu_ok
     test    eax, eax
     jz      9f
-    call    gp_has_graphs               # (graphs: the kernel that has them)
-    imul    eax, eax, 3
+    call    gp_has_graphs               # (graphs: the kernel that has them;
+    imul    eax, eax, 3                 #  RTX: ptr, ptgr)
     mov     [rip+gp_kern], eax
+    mov     dword ptr [rip+gp_nb], PT_NBIND
+    mov     dword ptr [rip+gp_rtx], 0
     mov     dword ptr [rip+hv_why], HW_SETTING
     cmp     dword ptr [rip+gpu_off], 0
     jne     9f
@@ -774,7 +817,17 @@ gpu_pt_begin:
     test    eax, eax
     jz      9f
     mov     dword ptr [rip+hv_why], HW_FAILED
-    xor     edi, edi
+    call    g_use_rtx
+    mov     [rip+gq_rtx], eax
+    mov     [rip+gp_rtx], eax
+    test    eax, eax
+    jz      2f
+    mov     dword ptr [rip+gp_nb], PT_NTAB
+    mov     eax, [rip+gp_kern]          # 0 -> 4 (ptr), 3 -> 5 (ptgr)
+    shr     eax, 1
+    add     eax, 4
+    mov     [rip+gp_kern], eax
+2:  xor     edi, edi
     mov     esi, [rip+hv_w]
     mov     edx, [rip+hv_h]
     lea     rcx, [rip+gp_bytes]
@@ -913,6 +966,17 @@ gp_put:
 14: mov     eax, [rip+hv_ns]            # spheres: their records
     imul    rax, rax, SP_SZ
     mov     [rbx+152], rax
+    mov     qword ptr [rbx+160], 16     # RTX: positions, boxes (asprep's)
+    mov     qword ptr [rbx+168], 16
+    cmp     dword ptr [rip+gq_rtx], 0
+    je      18f
+    mov     eax, [rip+hv_n]
+    imul    rax, rax, 36
+    mov     [rbx+160], rax
+    mov     eax, [rip+hv_ns]
+    imul    rax, rax, 24
+    mov     [rbx+168], rax
+18:
     mov     edi, [rsp]                  # where: as last time when it fits
     mov     rsi, rbx                    #  (then only what changed goes up)
     mov     rdx, r14
@@ -931,9 +995,11 @@ gp_put:
     mov     rdi, r13                    # every binding uploads, unless
     mov     rsi, r14                    #  gd_close says only some of it
     mov     rdx, rbx
-    mov     ecx, PT_NBIND
+    mov     ecx, PT_NTAB
     mov     r8d, GBF_IN
     call    put_table
+    mov     dword ptr [r13+20*GB_SZ+GB_FLAGS], 0  # (asprep's: on the device)
+    mov     dword ptr [r13+21*GB_SZ+GB_FLAGS], 0
     # the arrays, as the CPU has them
     mov     edi, 1
     mov     rsi, [rip+hv_tv]
@@ -1153,11 +1219,11 @@ gd_layout:
     mov     ebx, edi
     mov     r12, rsi
     mov     r13, rdx
-    imul    eax, ebx, 8*PT_NBIND
+    imul    eax, ebx, 8*PT_NTAB
     lea     r14, [rip+gd_cap]
     add     r14, rax
     xor     ecx, ecx
-1:  cmp     ecx, PT_NBIND
+1:  cmp     ecx, PT_NTAB
     jae     2f
     cmp     qword ptr [r12+rcx*8], 16
     jae     11f
@@ -1171,7 +1237,7 @@ gd_layout:
     cmp     dword ptr [rax+rbx*4], 0
     jne     4f
     xor     ecx, ecx
-3:  cmp     ecx, PT_NBIND
+3:  cmp     ecx, PT_NTAB
     jae     31f
     mov     rax, [r12+rcx*8]
     cmp     rax, [r14+rcx*8]
@@ -1183,7 +1249,7 @@ gd_layout:
     mov     rax, [rax+rbx*8]
     jmp     9f
 4:  xor     ecx, ecx                    # a new layout: an eighth more room
-5:  cmp     ecx, PT_NBIND
+5:  cmp     ecx, PT_NTAB
     jae     6f
     mov     rax, [r12+rcx*8]
     mov     edx, GD_FIXED
@@ -1199,7 +1265,7 @@ gd_layout:
     jmp     5b
 6:  mov     rdi, r14
     mov     rsi, r13
-    mov     edx, PT_NBIND
+    mov     edx, PT_NTAB
     xor     ecx, ecx
     call    layout
     lea     rcx, [rip+gd_total]
@@ -1713,7 +1779,7 @@ gpu_pt_pass:
     mov     rdi, r13
     lea     rsi, [rip+gp_off]
     lea     rdx, [rip+gp_bytes]
-    mov     ecx, PT_NBIND
+    mov     ecx, PT_NTAB
     xor     r8d, r8d
     call    put_table
     mov     dword ptr [r13+GB_FLAGS], GBF_IN
@@ -1728,7 +1794,7 @@ gpu_pt_pass:
     add     ecx, 7
     shr     ecx, 3
     xor     edi, edi
-    mov     esi, PT_NBIND
+    mov     esi, [rip+gp_nb]
     call    gpu_run
     test    eax, eax
     jnz     6f
@@ -1767,9 +1833,20 @@ gpu_lv_put:
     test    eax, eax
     jz      9f
     call    gp_has_graphs
-    imul    eax, eax, 2                 # 1 pt, 3 ptg (kernel + 1)
-    inc     eax
+    imul    eax, eax, 2                 # 1 pt, 3 ptg (kernel + 1); RTX:
+    inc     eax                         #  4 ptr, 5 ptgr
     mov     [rip+lv_kern], eax
+    mov     dword ptr [rip+lv_nb], PT_NBIND
+    call    g_use_rtx
+    mov     [rip+gq_rtx], eax
+    test    eax, eax
+    jz      4f
+    mov     dword ptr [rip+lv_nb], PT_NTAB
+    mov     eax, [rip+lv_kern]
+    shr     eax, 1
+    add     eax, 4
+    mov     [rip+lv_kern], eax
+4:
     mov     edi, 2
     mov     esi, ebx
     mov     edx, r12d
@@ -1852,7 +1929,7 @@ gpu_lv_run:
     shr     edx, 3
     xchg    ecx, edx
     mov     edi, 2
-    mov     esi, PT_NBIND
+    mov     esi, [rip+lv_nb]
     call    gpu_run
     test    eax, eax
     jz      9f

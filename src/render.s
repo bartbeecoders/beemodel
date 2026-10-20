@@ -83,6 +83,7 @@ k_dev_rtx:      .asciz "rtx"
 k_dev_gpu:      .asciz "gpu"
 k_dev_cpu:      .asciz "cpu"
 s_why0:         .asciz "on the GPU"
+s_why0r:        .asciz "on the GPU (RTX)"
 s_why1:         .asciz "on the CPU (Device: CPU)"
 s_why2:         .asciz "on the CPU (no GPU helper or device)"
 s_why3:         .asciz "on the CPU (an HDRI world)"
@@ -236,6 +237,25 @@ fmt_samples_time:
     add     rsp, 8
     ret
 
+# why_text -> rdi = where the last render ran, and why (hv_why; RTX: said)
+.globl why_text
+why_text:
+    mov     eax, [rip+hv_why]
+    cmp     eax, HW_LAST
+    jbe     1f
+    xor     eax, eax
+1:  lea     rcx, [rip+why_names]
+    mov     rdi, [rcx+rax*8]
+    test    eax, eax
+    jnz     9f
+    mov     edi, 23                     # (gpu(23): it traced with RTX)
+    call    gpu_query
+    lea     rdi, [rip+s_why0]
+    test    eax, eax
+    jz      9f
+    lea     rdi, [rip+s_why0r]
+9:  ret
+
 # ---- render.start -----------------------------------------------------------
 do_render_start:
     push    rbx
@@ -280,12 +300,7 @@ do_render_start:
     call    fmt_int
     lea     rdi, [rip+s_rn_spl2]
     call    fmt_str
-    mov     eax, [rip+hv_why]           # ", on the GPU" / ", on the CPU (why)"
-    cmp     eax, HW_LAST
-    jbe     31f
-    xor     eax, eax
-31: lea     rcx, [rip+why_names]
-    mov     rdi, [rcx+rax*8]
+    call    why_text                    # ", on the GPU" / ", on the CPU (why)"
     call    fmt_str
     lea     rdi, [rip+s_rn_esc]
     call    fmt_str
