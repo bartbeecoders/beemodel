@@ -45,6 +45,50 @@
 .equ MAP_ANON_PRIV, 0x22
 .equ LEAF_MAX,  15
 .equ NBINS,     16
+.equ SG_FIRST,  0               # a segment: its first primitive, how many,
+.equ SG_N,      4               #  its cache entry (0: built), its nodes (the
+.equ SG_ENTRY,  8               #  block's first, how many it took), its
+.equ SG_NODE,   16              #  object (0: particles), uid, the instance
+.equ SG_NN,     20              #  triangles it spent, kind (1 spheres), 1:
+.equ SG_OBJ,    24              #  keep it after this build
+.equ SG_UID,    32
+.equ SG_INST,   36
+.equ SG_KIND,   40
+.equ SG_STORE,  44
+.equ SG_SZ,     48
+.equ HC_NTRI,   0               # a cache entry (its own mapping): triangles,
+.equ HC_INST,   4               #  instance triangles spent, nodes, mapped
+.equ HC_NN,     8               #  bytes; then from HC_HEAD positions,
+.equ HC_SIZE,   16              #  normals, object space (36 bytes), UVs
+.equ HC_HEAD,   64              #  (24), colours (12), materials (4), nodes
+.equ HS_UID,    0               # a cache slot: uid, state, fingerprint, data
+.equ HS_STATE,  4
+.equ HS_FP,     8
+.equ HS_DATA,   16
+.equ HS_SZ,     24
+.equ HC_MAX,    4096
+.equ K_TV,      0               # kept buffers (hv_keep): the triangle arrays
+.equ K_TN,      1               #  (in ro_new's order), spheres, the
+.equ K_TO,      2               #  leaf-ordered ones to be (K_RO + the same),
+.equ K_TUV,     3               #  the build's
+.equ K_TVC,     4
+.equ K_TM,      5
+.equ K_SP,      6
+.equ K_RO,      7
+.equ K_CENT,    14
+.equ K_BOX,     15
+.equ K_PRIM,    16
+.equ K_N2,      17
+.equ K_NODES,   18
+.equ K_PTMP,    19
+.equ K_TASKS,   20
+.equ K_STK,     21
+.equ K_BSTACK,  22
+.equ K_N,       24
+.equ HC_BUDGET, 0x80000000      # bytes kept at most (2 GiB)
+.equ HIB_N,     4               # (inst.s: an instance block)
+.equ HIB_NP,    8
+.equ HIB_PROTO, 24
 .equ C_STACK,   0               # a BVH build context: its stack (node, start, end)
 .equ C_TOP,     8               # 1: the top (children: to the frontier or tasks)
 .equ C_PAR,     24              # 1: big nodes' passes over chunks in parallel
@@ -64,7 +108,7 @@
 .equ BVH_CUT_MIN, 2048
 .equ N2_SZ,     32              # BVH2 node: min[3] max[3] a b
 .equ N4_SZ,     128             # BVH4 node: minx maxx miny maxy minz maxz [4] child[4]
-.equ NBUF,      32
+.equ NBUF,      64
 .equ MAX_POINTS, 64
 .equ HV_SMAX,   16000000          # spheres the path tracer takes
 
@@ -130,6 +174,18 @@ pb_mid:         .skip 4
 .align 8
 b_ptmp:         .skip 8             # u32[n]: big nodes' partitions
 pb_off:         .skip PB_K*8        # a chunk's left and right places
+hv_segs:        .skip 8             # SG_SZ each
+sg_list:        .skip 8             # segment indices (seg_small, seg_top)
+sg_items:       .skip 8             # seg_copy_in's chunks
+hc_bytes:       .skip 8             # the cache's data, mapped
+hc_offs:        .skip 7*8           # hc_arrays's offsets
+hv_nseg:        .skip 4
+hv_pfirst:      .skip 4             # the particles' first triangle
+hv_nhit:        .skip 4             # segments from the cache (gpu(20))
+hv_ksplit:      .skip 4             # 1: the top's root splits triangles | spheres
+.align 8
+hc_tab:         .skip HC_MAX*HS_SZ  # the cache's slots (kept across builds)
+kp_tab:         .skip K_N*16        # kept buffers: address, bytes
 ro_new:         .skip 7*8           # reorder_tris's new arrays
 .align 64
 b_topnext:      .skip 64            # the top's next node (atomic: a line each)
@@ -150,6 +206,11 @@ hf_sign:        .long 0x80000000, 0, 0, 0
 hf_zero4:       .float 0, 0, 0, 0
 hf_one:         .float 1.0
 hf_half:        .float 0.5
+.align 16
+hf_half4:       .float 0.5, 0.5, 0.5, 0.5
+.align 8
+ss_arrs:        .quad hv_tv, hv_tn, hv_to, hv_tuv, hv_tvc, hv_tm  # (seg_store: the
+ss_size:        .long 36, 36, 36, 24, 12, 4                       #  arrays, their records)
 hf_eps_t:       .float 1.0e-4
 hf_tiny:        .float 1.0e-12
 hf_big:         .float 1.0e30
@@ -193,6 +254,88 @@ hv_map:
     mov     [rdx+rcx+8], rbx
     inc     dword ptr [rip+hv_nbuf]
 9:  pop     rbx
+    ret
+
+# hv_keep(edi=bytes, esi=slot K_*) -> rax: a buffer kept across builds (its
+#   pages stay faulted in: mapping the big arrays afresh each build cost
+#   more than filling them), grown a quarter over when too small, given
+#   back when over 4x too big (and 64 MiB); not zeroed when kept. 0: failed
+hv_keep:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, edi
+    lea     rbx, [rip+kp_tab]
+    mov     eax, esi
+    shl     eax, 4
+    add     rbx, rax
+    mov     rax, [rbx]
+    test    rax, rax
+    jz      2f
+    mov     rcx, [rbx+8]
+    cmp     rcx, r12
+    jb      1f
+    cmp     rcx, 0x4000000
+    jbe     9f
+    lea     rdx, [r12*4]
+    cmp     rcx, rdx
+    jbe     9f
+1:  mov     rdi, rax
+    mov     rsi, rcx
+    mov     eax, SYS_MUNMAP
+    syscall
+    mov     qword ptr [rbx], 0
+2:  mov     rsi, r12
+    shr     rsi, 2
+    add     rsi, r12
+    add     rsi, 0x1fffff
+    and     rsi, -0x200000
+    mov     r13, rsi
+    xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8d, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    jbe     3f
+    xor     eax, eax
+    jmp     9f
+3:  mov     [rbx], rax
+    mov     [rbx+8], r13
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hv_keep_swap(edi=slot, esi=slot) - the two buffers change places
+hv_keep_swap:
+    lea     rax, [rip+kp_tab]
+    shl     edi, 4
+    shl     esi, 4
+    movups  xmm0, [rax+rdi]
+    movups  xmm1, [rax+rsi]
+    movups  [rax+rdi], xmm1
+    movups  [rax+rsi], xmm0
+    ret
+
+# hv_keep_free - every kept buffer given back (an empty scene)
+hv_keep_free:
+    push    rbx
+    lea     rbx, [rip+kp_tab]
+1:  mov     rdi, [rbx]
+    test    rdi, rdi
+    jz      2f
+    mov     rsi, [rbx+8]
+    mov     eax, SYS_MUNMAP
+    syscall
+    mov     qword ptr [rbx], 0
+2:  add     rbx, 16
+    lea     rax, [rip+kp_tab+K_N*16]
+    cmp     rbx, rax
+    jb      1b
+    pop     rbx
     ret
 
 hv_free_all:
@@ -250,6 +393,9 @@ hv_query:
     mov     eax, [rip+hv_ns]
     cmp     edi, 19
     je      9f
+    mov     eax, [rip+hv_nhit]
+    cmp     edi, 20
+    je      9f
     xor     eax, eax
 9:  ret
 
@@ -266,6 +412,16 @@ hive_build:
     call    hv_free_all
     xor     r12d, r12d                  # triangles
     mov     dword ptr [rip+hv_ibud], HV_IBUDGET
+    mov     dword ptr [rip+hv_nseg], 0  # the segments: an object each, the
+    mov     dword ptr [rip+hv_nhit], 0
+    mov     edi, [rip+obj_count]        #  particles' triangles, their balls
+    add     edi, 4
+    imul    edi, edi, SG_SZ
+    call    hv_map
+    test    rax, rax
+    jz      .Lhb_fail
+    mov     [rip+hv_segs], rax
+    call    hc_begin
     xor     ebx, ebx
 1:  cmp     ebx, [rip+obj_count]
     jae     2f
@@ -280,63 +436,82 @@ hive_build:
     jz      10f
     cmp     rax, rcx
     jne     11f
-10: mov     rdi, rax
-    call    obj_eval
-    add     r12d, [rax+ME_NTRIS]
-    mov     rdi, rax                    # its instances: triangles (a budget)
-    call    hv_inst_count
+10: mov     rdi, rax                    # its triangles, its instances' (a
+    mov     esi, r12d                   #  budget): kept, or to be made
+    call    hv_seg_object
     add     r12d, eax
 11: inc     ebx
     jmp     1b
-2:  call    hv_part_count               # particles (particles.s): their
-    add     r12d, eax                   #  triangles; hv_ns their balls
-    mov     [rip+hv_n], r12d
+2:  mov     [rip+hv_pfirst], r12d
+    call    hv_part_count               # particles (particles.s): their
+    test    eax, eax                    #  triangles; hv_ns their balls
+    jz      22f
+    mov     edi, r12d
+    mov     esi, eax
+    add     r12d, eax
+    xor     edx, edx
+    call    hv_seg_add
+22: mov     [rip+hv_n], r12d
+    cmp     dword ptr [rip+hv_ns], 0
+    je      23f
+    mov     edi, r12d
+    mov     esi, [rip+hv_ns]
+    mov     edx, 1
+    call    hv_seg_add
+23:
     mov     dword ptr [rip+hv_spk], 0
     mov     eax, r12d
     add     eax, [rip+hv_ns]
     test    eax, eax
     jz      .Lhb_empty
-    cmp     dword ptr [rip+hv_ns], 0    # the spheres' records
+    cmp     dword ptr [rip+hv_ns], 0    # the spheres' records (kept buffers)
     je      21f
     imul    edi, [rip+hv_ns], SP_SZ
     add     edi, 64
-    call    hv_map
+    mov     esi, K_SP
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_sp], rax
 21:
     imul    edi, r12d, 36
     add     edi, 64
-    call    hv_map
+    mov     esi, K_TV
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_tv], rax
     imul    edi, r12d, 36
     add     edi, 64
-    call    hv_map
+    mov     esi, K_TN
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_tn], rax
     lea     edi, [r12*4+64]
-    call    hv_map
+    mov     esi, K_TM
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_tm], rax
     imul    edi, r12d, 36
     add     edi, 64
-    call    hv_map
+    mov     esi, K_TO
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_to], rax
     imul    edi, r12d, 24
     add     edi, 64
-    call    hv_map
+    mov     esi, K_TUV
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_tuv], rax
     imul    edi, r12d, 12
     add     edi, 64
-    call    hv_map
+    mov     esi, K_TVC
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+hv_tvc], rax
@@ -345,19 +520,22 @@ hive_build:
     mov     [rsp+16], eax
     imul    edi, eax, 12
     add     edi, 64
-    call    hv_map
+    mov     esi, K_CENT
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+b_cent], rax
     imul    edi, [rsp+16], 24
     add     edi, 64
-    call    hv_map
+    mov     esi, K_BOX
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+b_box], rax
     mov     edi, [rsp+16]
     lea     edi, [rdi*4+64]
-    call    hv_map
+    mov     esi, K_PRIM
+    call    hv_keep
     test    rax, rax
     jz      .Lhb_fail
     mov     [rip+b_prim], rax
@@ -391,27 +569,29 @@ hive_build:
     mov     dword ptr [rip+hv_cut], 1
 31: inc     ebx
     jmp     3b
-4:  # triangles, object by object
+4:  # triangles, segment by segment (the kept ones: copied in by build_bvh)
     mov     dword ptr [rip+hv_ncatch], 0
-    xor     r13d, r13d                  # global triangle
     mov     dword ptr [rip+hv_ibud], HV_IBUDGET
     xor     ebx, ebx
 .Lhb_obj:
-    cmp     ebx, [rip+obj_count]
+    cmp     ebx, [rip+hv_nseg]
     jae     .Lhb_lights
-    mov     edi, ebx
-    call    obj_at
-    cmp     dword ptr [rax+OB_TYPE], OT_MESH
-    jne     .Lhb_onext
-    test    dword ptr [rax+OB_FLAGS], OBF_HIDDEN|OBF_NORENDER
-    jnz     .Lhb_onext
-    mov     rcx, [rip+hv_only]
+    imul    rax, rbx, SG_SZ
+    add     rax, [rip+hv_segs]
+    mov     r14, [rax+SG_OBJ]           # (the particles: below)
+    test    r14, r14
+    jz      .Lhb_onext
+    mov     r13d, [rax+SG_FIRST]        # global triangle
+    mov     rcx, [rax+SG_ENTRY]
     test    rcx, rcx
     jz      1f
-    cmp     rax, rcx
-    jne     .Lhb_onext
-1:  mov     r14, rax                    # object
-    call    fa_mark
+    mov     ecx, [rcx+HC_INST]          # kept: its budget spent as then
+    sub     [rip+hv_ibud], ecx
+    test    dword ptr [r14+OB_FLAGS], OBF_CATCH
+    jz      .Lhb_onext
+    inc     dword ptr [rip+hv_ncatch]
+    jmp     .Lhb_onext
+1:  call    fa_mark
     mov     [rsp], rax
     mov     rdi, r14
     call    world_verts
@@ -456,7 +636,8 @@ hive_build:
     inc     ebx
     jmp     .Lhb_obj
 .Lhb_lights:                            # light objects (16 floats each)
-    call    hv_part_emit                # (the particles first)
+    mov     r13d, [rip+hv_pfirst]       # (the particles first)
+    call    hv_part_emit
     mov     dword ptr [rip+hv_npoints], 0
     xor     ebx, ebx
 7:  cmp     ebx, [rip+obj_count]
@@ -495,7 +676,11 @@ hive_build:
     mov     eax, 1
     jmp     9f
 .Lhb_empty:
-    call    hv_camera
+    call    hv_keep_free                # (nothing to draw: the memory back,
+    cmp     qword ptr [rip+hv_only], 0  #  and what the cache kept for objects
+    jne     1f                          #  gone)
+    call    hc_end
+1:  call    hv_camera
     mov     dword ptr [rip+hv_ready], 1
     mov     eax, 1
     jmp     9f
@@ -1037,6 +1222,13 @@ put_tri:
     push    rbx
     push    r12
     mov     ebx, esi
+    lea     rax, [rbx+rbx*8]            # no normals yet (instances keep none:
+    shl     rax, 2                      #  the face's; kept buffers are not
+    add     rax, [rip+hv_tn]            #  zeroed)
+    xorps   xmm0, xmm0
+    movups  [rax], xmm0
+    movups  [rax+16], xmm0
+    mov     dword ptr [rax+32], 0
     mov     rax, [r15+ME_TRIS]
     lea     rcx, [rdi+rdi*2]
     mov     edx, [rax+rcx*4]
@@ -1467,14 +1659,21 @@ hv_unit:
 
 # =============================================================================
 #  BVH build: binned SAH over centroids (BVH2), then collapse to 4-wide.
-#  The top is built a level at a time: big nodes on this thread with their
-#  bounds and bins over PB_K chunks in parallel, the rest of the level's
-#  nodes on every thread at once. Nodes under b_cut primitives become tasks
-#  that the workers build, each in its own context (bins, sweep, stack). A task
-#  of c primitives gets a block of 2c - 2 nodes for its own (no shared
-#  counter: an atomic one next to b_prim's line made more threads slower).
-#  Each subtree partitions only its own range of b_prim, so the leaves are
-#  the same on any number of threads
+#  Two levels, joined into one tree: each segment (an object with its
+#  instances, the particles' triangles, their balls) has a subtree in its
+#  own block of nodes, and a small top level joins them. An object that has
+#  not changed (hv_seg_object's fingerprint) brings its subtree and its
+#  leaf-ordered triangles from the cache (hc_*); the rest are built: big
+#  segments with every thread on each, small ones side by side.
+#  A big segment's top is built a level at a time: nodes of BVH_PB_MIN+
+#  on this thread with their bounds, bins and partition over PB_K chunks in
+#  parallel, the rest of the level's nodes on every thread at once. Nodes
+#  under b_cut primitives become tasks that the workers build, each in its
+#  own context (bins, sweep, stack). A task of c primitives gets a block of
+#  2c - 2 nodes for its own (no shared counter: an atomic one next to
+#  b_prim's line made more threads slower). Each subtree partitions only
+#  its own range of b_prim (big nodes stably), so the tree is the same on
+#  any number of threads
 # =============================================================================
 build_bvh:
     push    rbx
@@ -1493,51 +1692,50 @@ build_bvh:
     mov     [rdi+rcx*4], ecx
     inc     ecx
     jmp     1b
-2:  lea     edi, [rbx*2+8]              # BVH2 nodes: at most 2n - 1
+2:  mov     ecx, [rip+hv_nseg]          # the nodes: the top's 2k, then each
+    lea     edx, [rcx*2+2]              #  segment's 2n - 1
+    mov     rsi, [rip+hv_segs]
+3:  test    ecx, ecx
+    jz      4f
+    mov     [rsi+SG_NODE], edx
+    mov     dword ptr [rsi+SG_NN], 0
+    mov     eax, [rsi+SG_N]
+    test    eax, eax
+    jz      31f
+    lea     edx, [rdx+rax*2-1]
+31: add     rsi, SG_SZ
+    dec     ecx
+    jmp     3b
+4:  mov     [rip+b_nn2], edx
+    lea     edi, [rdx+8]
     shl     edi, 5
-    call    hv_map
+    mov     esi, K_N2
+    call    hv_keep
     test    rax, rax
     jz      .Lbb_fail
     mov     [rip+b_n2], rax
-    lea     edi, [rbx*2+8]              # the top's stack: (node, start, end)
+    mov     eax, [rip+hv_nseg]          # a stack: (node, start, end)
+    add     eax, ebx
+    lea     edi, [rax*2+16]
     imul    edi, edi, 12
-    call    hv_map
+    mov     esi, K_BSTACK
+    call    hv_keep
     test    rax, rax
     jz      .Lbb_fail
     mov     [rip+b_stack], rax
-    mov     dword ptr [rip+b_nn2], 1    # the root
     cmp     ebx, BVH_PB_MIN             # big nodes' partitions go through here
-    jb      21f
+    jb      5f
     lea     edi, [rbx*4+64]
-    call    hv_map
+    mov     esi, K_PTMP
+    call    hv_keep
     test    rax, rax
     jz      .Lbb_fail
     mov     [rip+b_ptmp], rax
-21:
-    mov     dword ptr [rip+b_cut], 0
-    mov     dword ptr [rip+b_ntask], 0
-    mov     ecx, [rip+n_workers]        # the cut: n / (8 threads), 2048 at
-    test    ecx, ecx                    #  least (none: one thread, or small)
-    jz      5f
-    cmp     ebx, BVH_PAR_N
-    jb      5f
-    inc     ecx
-    shl     ecx, 3
-    mov     eax, ebx
-    xor     edx, edx
+5:  mov     eax, ebx                    # a level's nodes over the cut: n /
+    xor     edx, edx                    #  cut at most (disjoint)
+    mov     ecx, BVH_CUT_MIN
     div     ecx
-    cmp     eax, BVH_CUT_MIN
-    jae     22f
-    mov     eax, BVH_CUT_MIN
-22: cmp     eax, BVH_PB_MIN             # (big nodes only on this thread)
-    jb      3f
-    mov     eax, BVH_PB_MIN-1
-3:  mov     [rip+b_cut], eax
-    mov     ecx, eax                    # a level's nodes over the cut: n /
-    mov     eax, ebx                    #  cut at most (disjoint)
-    xor     edx, edx
-    div     ecx
-    lea     edi, [rax+16]
+    lea     edi, [rax+64]
     imul    edi, edi, 12
     mov     [rsp+8], edi
     call    hv_map
@@ -1551,14 +1749,15 @@ build_bvh:
     mov     [rip+fr_next], rax
     lea     edi, [rbx+16]               # tasks: one a primitive at most
     shl     edi, 4
-    call    hv_map
+    mov     esi, K_TASKS
+    call    hv_keep
     test    rax, rax
     jz      .Lbb_fail
     mov     [rip+b_tasks], rax
     mov     eax, [rip+n_workers]        # contexts: a thread's index + 1 (-1:
     add     eax, 2                      #  nested, inline), each a stack of
-    mov     [rsp], eax                  #  2 cut + 16 entries
-    imul    edi, eax, C_SZ
+    mov     [rsp], eax                  #  the biggest cut's 2 + 16 entries
+    imul    edi, eax, C_SZ              #  (small segments' BVH_PAR_N + 16)
     add     edi, 64
     call    hv_map
     test    rax, rax
@@ -1566,31 +1765,148 @@ build_bvh:
     add     rax, 63
     and     rax, -64
     mov     [rip+b_ctxs], rax
-    mov     eax, [rip+b_cut]
-    lea     eax, [rax*2+16]
+    mov     edi, ebx
+    call    bvh_cut
+    add     eax, eax
+    cmp     eax, BVH_PAR_N
+    jae     6f
+    mov     eax, BVH_PAR_N
+6:  add     eax, 16
     imul    eax, eax, 12
     mov     [rsp+4], eax
     mov     edi, eax
     imul    edi, [rsp]
-    call    hv_map
+    mov     esi, K_STK
+    call    hv_keep
     test    rax, rax
     jz      .Lbb_fail
     mov     rdi, [rip+b_ctxs]
     mov     ecx, [rsp]
-4:  mov     [rdi+C_STACK], rax
+7:  mov     [rdi+C_STACK], rax
     mov     dword ptr [rdi+C_TOP], 0
     mov     dword ptr [rdi+C_PAR], 0
     mov     edx, [rsp+4]
     add     rax, rdx
     add     rdi, C_SZ
     dec     ecx
-    jnz     4b
-    mov     rax, [rip+fr_cur]           # the top: the root, a level at a time
-    mov     dword ptr [rax], 0
-    mov     dword ptr [rax+4], 0
-    mov     [rax+8], ebx
+    jnz     7b
+    call    ro_alloc                    # the leaf-ordered arrays to be
+    test    eax, eax                    #  (the kept ones copied straight in)
+    jz      .Lbb_fail
+    call    seg_copy_in                 # the cached ones
+    test    eax, eax
+    jz      .Lbb_fail
+    cmp     dword ptr [rip+n_workers], 0
+    je      8f
+    call    seg_small                   # small ones side by side
+    test    eax, eax
+    jz      .Lbb_fail
+8:
+    xor     r12d, r12d                  # the rest: every thread on each
+    mov     r13, [rip+hv_segs]
+81: cmp     r12d, [rip+hv_nseg]
+    jae     82f
+    cmp     qword ptr [r13+SG_ENTRY], 0
+    jne     83f
+    cmp     dword ptr [r13+SG_NN], 0    # (built already)
+    jne     83f
+    cmp     dword ptr [r13+SG_N], 0
+    je      83f
+    mov     rdi, r13
+    call    build_range
+83: inc     r12d
+    add     r13, SG_SZ
+    jmp     81b
+82:
+    call    seg_top                     # the top level
+    test    eax, eax
+    jz      .Lbb_fail
+    call    collapse4
+    test    eax, eax
+    jz      .Lbb_fail
+    call    reorder_tris                # the built ones' ranges, then
+86:
+    cmp     qword ptr [rip+hv_only], 0  # (a bake: the cache as it is)
+    jne     87f
+    call    seg_store
+    call    hc_end
+87:
+    mov     eax, 1
+    jmp     9f
+.Lbb_fail:
+    xor     eax, eax
+9:  add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bvh_cut(edi=primitives) -> eax = the size under which nodes become tasks:
+#   n / (8 threads), at least BVH_CUT_MIN, under BVH_PB_MIN
+bvh_cut:
+    mov     ecx, [rip+n_workers]
+    inc     ecx
+    shl     ecx, 3
+    mov     eax, edi
+    xor     edx, edx
+    div     ecx
+    cmp     eax, BVH_CUT_MIN
+    jae     1f
+    mov     eax, BVH_CUT_MIN
+1:  cmp     eax, BVH_PB_MIN             # (big nodes only on this thread)
+    jb      2f
+    mov     eax, BVH_PB_MIN-1
+2:  ret
+
+# build_range(rdi=segment) - its subtree in its block of nodes (SG_NN: the
+#   nodes it took): one thread for a small one (or no workers), else a level
+#   at a time, then its tasks
+build_range:
+    push    rbx
+    push    r12
+    push    r13
+    push    rbp
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, [rbx+SG_FIRST]
+    mov     r13d, r12d
+    add     r13d, [rbx+SG_N]
+    cmp     dword ptr [rip+n_workers], 0
+    je      1f
+    cmp     dword ptr [rbx+SG_N], BVH_PAR_N
+    jae     2f
+1:  lea     rdi, [rip+b_ctx0]           # on this thread
+    mov     rax, [rip+b_stack]
+    mov     [rdi+C_STACK], rax
+    mov     dword ptr [rdi+C_TOP], 0
+    mov     dword ptr [rdi+C_PAR], 0
+    mov     ecx, [rbx+SG_NODE]
+    lea     edx, [rcx+1]                # (its root taken)
+    mov     [rdi+C_NEXT], edx
+    mov     [rax], ecx
+    mov     [rax+4], r12d
+    mov     [rax+8], r13d
+    mov     esi, 1
+    call    bvh_loop
+    mov     eax, [rip+b_ctx0+C_NEXT]
+    sub     eax, [rbx+SG_NODE]
+    mov     [rbx+SG_NN], eax
+    jmp     9f
+2:  mov     edi, [rbx+SG_N]
+    call    bvh_cut
+    mov     [rip+b_cut], eax
+    mov     dword ptr [rip+b_ntask], 0
+    mov     rax, [rip+fr_cur]           # the root, a level at a time
+    mov     ecx, [rbx+SG_NODE]
+    mov     [rax], ecx
+    mov     [rax+4], r12d
+    mov     [rax+8], r13d
+    inc     ecx
+    mov     [rip+b_topnext], ecx
     mov     dword ptr [rip+fr_n], 1
-    mov     dword ptr [rip+b_topnext], 1
     lea     rdi, [rip+b_ctx0]
     mov     rax, [rip+b_stack]
     mov     [rdi+C_STACK], rax
@@ -1632,23 +1948,7 @@ build_bvh:
     mov     eax, [rip+fr_nn]
     mov     [rip+fr_n], eax
     jmp     .Lbb_level
-5:  lea     rdi, [rip+b_ctx0]           # (small, or one thread: all here)
-    mov     rax, [rip+b_stack]
-    mov     [rdi+C_STACK], rax
-    mov     dword ptr [rdi+C_TOP], 0
-    mov     dword ptr [rdi+C_PAR], 0
-    mov     dword ptr [rdi+C_NEXT], 1   # (the root taken)
-    mov     dword ptr [rax], 0
-    mov     dword ptr [rax+4], 0
-    mov     [rax+8], ebx
-    mov     esi, 1
-    call    bvh_loop
-    mov     eax, [rip+b_ctx0+C_NEXT]
-    mov     [rip+b_nn2], eax
-    jmp     6f
 .Lbb_top_done:
-    mov     eax, [rip+b_topnext]        # (the nodes, the tasks' blocks too)
-    mov     [rip+b_nn2], eax
     mov     edx, [rip+b_ntask]          # the subtrees, on every thread
     test    edx, edx
     jz      6f
@@ -1656,17 +1956,902 @@ build_bvh:
     xor     esi, esi
     mov     ecx, 1
     call    parallel_for
-6:  call    collapse4
+6:  mov     eax, [rip+b_topnext]        # (the tasks' blocks too)
+    sub     eax, [rbx+SG_NODE]
+    mov     [rbx+SG_NN], eax
+9:  add     rsp, 8
+    pop     rbp
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# seg_small -> eax = 1: the small segments to build (under BVH_PAR_N), each
+#   on one thread, side by side
+seg_small:
+    push    rbx
+    mov     edi, [rip+hv_nseg]
+    lea     edi, [rdi*4+64]
+    call    hv_map
+    test    rax, rax
+    jz      9f
+    mov     [rip+sg_list], rax
+    xor     ecx, ecx
+    xor     edx, edx                    # (how many)
+    mov     rsi, [rip+hv_segs]
+1:  cmp     ecx, [rip+hv_nseg]
+    jae     2f
+    cmp     qword ptr [rsi+SG_ENTRY], 0
+    jne     11f
+    mov     eax, [rsi+SG_N]
     test    eax, eax
-    jz      .Lbb_fail
-    call    reorder_tris
-    mov     eax, 1
-    jmp     9f
-.Lbb_fail:
-    xor     eax, eax
-9:  add     rsp, 24
+    jz      11f
+    cmp     eax, BVH_PAR_N
+    jae     11f
+    mov     rax, [rip+sg_list]
+    mov     [rax+rdx*4], ecx
+    inc     edx
+11: inc     ecx
+    add     rsi, SG_SZ
+    jmp     1b
+2:  test    edx, edx
+    jz      3f
+    lea     rdi, [rip+seg_small_job]
+    xor     esi, esi
+    mov     ecx, 1
+    call    parallel_for
+3:  mov     eax, 1
+9:  pop     rbx
+    ret
+
+# seg_small_job(esi=first, edx=end, ecx=thread index) - those of sg_list,
+#   each by bvh_loop in the thread's context
+seg_small_job:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     ebx, esi
+    mov     r13d, edx
+    lea     eax, [rcx+1]
+    imul    eax, eax, C_SZ
+    mov     r12, [rip+b_ctxs]
+    add     r12, rax
+    mov     dword ptr [r12+C_TOP], 0
+    mov     dword ptr [r12+C_PAR], 0
+1:  cmp     ebx, r13d
+    jae     9f
+    mov     rax, [rip+sg_list]
+    mov     eax, [rax+rbx*4]
+    imul    r14, rax, SG_SZ
+    add     r14, [rip+hv_segs]
+    mov     ecx, [r14+SG_NODE]
+    lea     edx, [rcx+1]
+    mov     [r12+C_NEXT], edx
+    mov     rax, [r12+C_STACK]
+    mov     [rax], ecx
+    mov     edx, [r14+SG_FIRST]
+    mov     [rax+4], edx
+    add     edx, [r14+SG_N]
+    mov     [rax+8], edx
+    mov     rdi, r12
+    mov     esi, 1
+    call    bvh_loop
+    mov     eax, [r12+C_NEXT]
+    sub     eax, [r14+SG_NODE]
+    mov     [r14+SG_NN], eax
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# seg_copy_in -> eax = 1: the cached segments' triangles and nodes into
+#   their places, in chunks on every thread (sg_items: segment, from, to;
+#   bit 31 of to: nodes)
+seg_copy_in:
+    push    rbx
+    push    r12
+    push    r13
+    mov     edi, [rip+b_nn2]            # (chunks: of 8192 triangles, of
+    shr     edi, 13                     #  16384 nodes, a segment's last)
+    mov     eax, [rip+hv_n]
+    shr     eax, 13
+    add     edi, eax
+    add     edi, [rip+hv_nseg]
+    add     edi, [rip+hv_nseg]
+    add     edi, 64
+    shl     edi, 4
+    call    hv_map
+    test    rax, rax
+    jz      9f
+    mov     [rip+sg_items], rax
+    mov     r12, rax                    # the next item
+    xor     ebx, ebx
+    mov     r13, [rip+hv_segs]
+1:  cmp     ebx, [rip+hv_nseg]
+    jae     5f
+    mov     rcx, [r13+SG_ENTRY]
+    test    rcx, rcx
+    jz      4f
+    mov     eax, [rcx+HC_NN]            # (its nodes, as kept)
+    mov     [r13+SG_NN], eax
+    xor     edx, edx                    # triangles
+2:  cmp     edx, [rcx+HC_NTRI]
+    jae     3f
+    mov     [r12], r13
+    mov     [r12+8], edx
+    add     edx, 8192
+    mov     eax, edx
+    cmp     eax, [rcx+HC_NTRI]
+    jbe     21f
+    mov     eax, [rcx+HC_NTRI]
+21: mov     [r12+12], eax
+    add     r12, 16
+    jmp     2b
+3:  xor     edx, edx                    # nodes
+31: cmp     edx, [rcx+HC_NN]
+    jae     4f
+    mov     [r12], r13
+    mov     [r12+8], edx
+    add     edx, 16384
+    mov     eax, edx
+    cmp     eax, [rcx+HC_NN]
+    jbe     32f
+    mov     eax, [rcx+HC_NN]
+32: or      eax, 0x80000000
+    mov     [r12+12], eax
+    add     r12, 16
+    jmp     31b
+4:  inc     ebx
+    add     r13, SG_SZ
+    jmp     1b
+5:  mov     rdx, r12
+    sub     rdx, [rip+sg_items]
+    shr     rdx, 4
+    test    edx, edx
+    jz      6f
+    lea     rdi, [rip+seg_copy_job]
+    xor     esi, esi
+    mov     ecx, 1
+    call    parallel_for
+6:  mov     eax, 1
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hc_arrays(rdi=cache entry) -> rax = its triangle arrays' offsets table
+#   filled at hc_offs: positions, normals, object space, UVs, colours,
+#   materials, nodes (byte offsets from the entry)
+hc_arrays:
+    mov     ecx, [rdi+HC_NTRI]
+    lea     rax, [rip+hc_offs]
+    mov     edx, HC_HEAD
+    mov     [rax], rdx
+    imul    r8, rcx, 36
+    add     rdx, r8
+    mov     [rax+8], rdx
+    add     rdx, r8
+    mov     [rax+16], rdx
+    add     rdx, r8
+    mov     [rax+24], rdx
+    imul    r8, rcx, 24
+    add     rdx, r8
+    mov     [rax+32], rdx
+    imul    r8, rcx, 12
+    add     rdx, r8
+    mov     [rax+40], rdx
+    lea     r8, [rcx*4]
+    add     rdx, r8
+    mov     [rax+48], rdx
+    ret
+
+# seg_copy_job(esi=first item, edx=end) - each item: triangles (every array,
+#   as rep movsb runs) or nodes (children and leaves moved to their places)
+seg_copy_job:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 72
+    mov     ebx, esi
+    mov     [rsp+64], edx
+1:  cmp     ebx, [rsp+64]
+    jae     9f
+    mov     rax, rbx
+    shl     rax, 4
+    add     rax, [rip+sg_items]
+    mov     r12, [rax]                  # segment
+    mov     r13d, [rax+8]               # from
+    mov     r14d, [rax+12]              # to (bit 31: nodes)
+    mov     r15, [r12+SG_ENTRY]
+    mov     ecx, [r15+HC_NTRI]          # (the entry's offsets, here)
+    mov     edx, HC_HEAD
+    mov     [rsp], rdx
+    imul    r8, rcx, 36
+    add     rdx, r8
+    mov     [rsp+8], rdx
+    add     rdx, r8
+    mov     [rsp+16], rdx
+    add     rdx, r8
+    mov     [rsp+24], rdx
+    imul    r8, rcx, 24
+    add     rdx, r8
+    mov     [rsp+32], rdx
+    imul    r8, rcx, 12
+    add     rdx, r8
+    mov     [rsp+40], rdx
+    lea     r8, [rcx*4]
+    add     rdx, r8
+    mov     [rsp+48], rdx
+    btr     r14d, 31
+    jc      .Lscj_nodes
+    mov     ebp, [r12+SG_FIRST]         # triangles: global = first + t
+    lea     rdi, [rip+ro_new+0]      # (into the leaf-ordered arrays)
+    mov     esi, 36
+    xor     edx, edx
+    call    scj_arr
+    lea     rdi, [rip+ro_new+8]
+    mov     esi, 36
+    mov     edx, 1
+    call    scj_arr
+    lea     rdi, [rip+ro_new+16]
+    mov     esi, 36
+    mov     edx, 2
+    call    scj_arr
+    lea     rdi, [rip+ro_new+24]
+    mov     esi, 24
+    mov     edx, 3
+    call    scj_arr
+    lea     rdi, [rip+ro_new+32]
+    mov     esi, 12
+    mov     edx, 4
+    call    scj_arr
+    lea     rdi, [rip+ro_new+40]
+    mov     esi, 4
+    mov     edx, 5
+    call    scj_arr
+    jmp     8f
+.Lscj_nodes:
+    mov     rsi, [rsp+48]               # the entry's nodes
+    add     rsi, r15
+    mov     rdi, [rip+b_n2]
+    mov     r8d, [r12+SG_NODE]
+    mov     r9d, [r12+SG_FIRST]
+2:  cmp     r13d, r14d
+    jae     8f
+    mov     rax, r13
+    shl     rax, 5
+    lea     rcx, [r8+r13]
+    shl     rcx, 5
+    movups  xmm0, [rsi+rax]
+    movups  [rdi+rcx], xmm0
+    mov     rdx, [rsi+rax+16]
+    mov     [rdi+rcx+16], rdx
+    mov     edx, [rsi+rax+24]
+    mov     r10d, [rsi+rax+28]
+    test    r10d, r10d
+    js      3f
+    add     edx, r8d                    # a child: in this block
+    jmp     4f
+3:  add     edx, r9d                    # a leaf: in this segment's range
+4:  mov     [rdi+rcx+24], edx
+    mov     [rdi+rcx+28], r10d
+    inc     r13d
+    jmp     2b
+8:  inc     ebx
+    jmp     1b
+9:  add     rsp, 72
     pop     rbp
     pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# scj_arr(rdi=&global array, esi=record size, edx=the entry's array k;
+#   seg_copy_job's r13d..r14d, ebp = first, r15 = entry, its offsets one
+#   frame up) - that run of records into place
+scj_arr:
+    mov     r8d, esi
+    mov     rax, [rsp+8+rdx*8]          # (seg_copy_job's [rsp]: offsets)
+    add     rax, r15
+    mov     rcx, r13
+    imul    rcx, r8
+    lea     rsi, [rax+rcx]
+    mov     rdi, [rdi]
+    lea     rcx, [rbp+r13]
+    imul    rcx, r8
+    add     rdi, rcx
+    mov     ecx, r14d
+    sub     ecx, r13d
+    imul    rcx, r8
+    rep     movsb
+    ret
+
+# seg_top -> eax = 1: the top level, nodes 0 .. 2k - 2 over the segments'
+#   roots (one alone: its root copied in), halves of the widest axis of
+#   their centres' box
+seg_top:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 88
+    mov     edi, [rip+hv_nseg]          # the segments with primitives
+    lea     edi, [rdi*4+64]
+    call    hv_map
+    test    rax, rax
+    jz      .Lst_fail
+    mov     [rip+sg_list], rax
+    xor     ecx, ecx
+    xor     edx, edx
+    mov     rsi, [rip+hv_segs]
+1:  cmp     ecx, [rip+hv_nseg]
+    jae     2f
+    cmp     dword ptr [rsi+SG_N], 0
+    je      11f
+    mov     [rax+rdx*4], ecx
+    inc     edx
+11: inc     ecx
+    add     rsi, SG_SZ
+    jmp     1b
+2:  test    edx, edx
+    jz      .Lst_fail
+    mov     r15d, 1                     # next free top node
+    mov     dword ptr [rip+hv_ksplit], 0
+    mov     rax, [rip+b_stack]
+    mov     dword ptr [rax], 0
+    mov     dword ptr [rax+4], 0
+    mov     [rax+8], edx
+    mov     r13d, 1
+.Lst_pop:
+    test    r13d, r13d
+    jz      .Lst_done
+    dec     r13d
+    mov     rax, [rip+b_stack]
+    lea     rcx, [r13+r13*2]
+    mov     ebx, [rax+rcx*4]            # node
+    mov     r12d, [rax+rcx*4+4]         # start
+    mov     r14d, [rax+rcx*4+8]         # end
+    mov     eax, r14d
+    sub     eax, r12d
+    cmp     eax, 1
+    jne     3f
+    mov     rax, [rip+sg_list]          # one segment: its root here
+    mov     eax, [rax+r12*4]
+    imul    rax, rax, SG_SZ
+    add     rax, [rip+hv_segs]
+    mov     esi, [rax+SG_NODE]
+    shl     rsi, 5
+    add     rsi, [rip+b_n2]
+    mov     rdi, rbx
+    shl     rdi, 5
+    add     rdi, [rip+b_n2]
+    movups  xmm0, [rsi]
+    movups  [rdi], xmm0
+    movups  xmm0, [rsi+16]
+    movups  [rdi+16], xmm0
+    jmp     .Lst_pop
+3:  movaps  xmm0, [rip+hf_inf]          # the box, the centres' box
+    movaps  xmm1, [rip+hf_ninf]
+    movaps  xmm2, [rip+hf_inf]
+    movaps  xmm3, [rip+hf_ninf]
+    mov     ecx, r12d
+4:  cmp     ecx, r14d
+    jae     5f
+    call    st_box                      # xmm4 min, xmm5 max of segment ecx
+    minps   xmm0, xmm4
+    maxps   xmm1, xmm5
+    addps   xmm4, xmm5
+    mulps   xmm4, [rip+hf_half4]
+    minps   xmm2, xmm4
+    maxps   xmm3, xmm4
+    inc     ecx
+    jmp     4b
+5:  movups  [rsp], xmm0                 # the node's box
+    movups  [rsp+16], xmm1
+    mov     rax, rbx
+    shl     rax, 5
+    add     rax, [rip+b_n2]
+    mov     rdx, [rsp]
+    mov     [rax], rdx
+    mov     edx, [rsp+8]
+    mov     [rax+8], edx
+    mov     rdx, [rsp+16]
+    mov     [rax+12], rdx
+    mov     edx, [rsp+24]
+    mov     [rax+20], edx
+    movups  [rsp+32], xmm2
+    movups  [rsp+48], xmm3
+    xor     ebp, ebp                    # the widest axis of the centres
+    movss   xmm5, [rsp+48]
+    subss   xmm5, [rsp+32]
+    movss   xmm6, [rsp+52]
+    subss   xmm6, [rsp+36]
+    comiss  xmm6, xmm5
+    jbe     51f
+    mov     ebp, 1
+    movss   xmm5, xmm6
+51: movss   xmm6, [rsp+56]
+    subss   xmm6, [rsp+40]
+    comiss  xmm6, xmm5
+    jbe     52f
+    mov     ebp, 2
+52: mov     r8d, r12d                   # triangles and spheres: those
+    lea     r9d, [r14-1]                #  apart first, the triangles right
+65: cmp     r8d, r9d                    #  (a tie pops the later child first:
+    jg      66f                         #  any-hit rays meet the triangles'
+    mov     ecx, r8d                    #  occluders before the balls, as
+    call    st_kind                     #  when they were one tree)
+    test    eax, eax
+    jz      67f
+    inc     r8d
+    jmp     65b
+67: mov     rdx, [rip+sg_list]
+    mov     eax, [rdx+r8*4]
+    mov     ecx, [rdx+r9*4]
+    mov     [rdx+r8*4], ecx
+    mov     [rdx+r9*4], eax
+    dec     r9d
+    jmp     65b
+66: cmp     r8d, r12d                   # (both kinds: that split)
+    je      68f
+    cmp     r8d, r14d
+    je      68f
+    test    ebx, ebx
+    jnz     64f
+    mov     dword ptr [rip+hv_ksplit], 1
+    jmp     64f
+68: movss   xmm7, [rsp+32+rbp*4]        # its middle
+    addss   xmm7, [rsp+48+rbp*4]
+    mulss   xmm7, [rip+hf_half]
+    movss   [rsp+64], xmm7
+    mov     r8d, r12d                   # partition: centre < middle first
+    lea     r9d, [r14-1]
+6:  cmp     r8d, r9d
+    jg      61f
+    mov     ecx, r8d
+    call    st_box
+    addps   xmm4, xmm5
+    mulps   xmm4, [rip+hf_half4]
+    movups  [rsp+72], xmm4
+    movss   xmm0, [rsp+72+rbp*4]
+    comiss  xmm0, [rsp+64]
+    jae     62f
+    inc     r8d
+    jmp     6b
+62: mov     rdx, [rip+sg_list]
+    mov     eax, [rdx+r8*4]
+    mov     ecx, [rdx+r9*4]
+    mov     [rdx+r8*4], ecx
+    mov     [rdx+r9*4], eax
+    dec     r9d
+    jmp     6b
+61: cmp     r8d, r12d                   # one side empty: halves
+    je      63f
+    cmp     r8d, r14d
+    jne     64f
+63: lea     r8d, [r12+r14]
+    shr     r8d, 1
+64: mov     eax, r15d                   # two children
+    add     r15d, 2
+    mov     rcx, rbx
+    shl     rcx, 5
+    add     rcx, [rip+b_n2]
+    mov     [rcx+24], eax
+    mov     dword ptr [rcx+28], 0
+    mov     rcx, [rip+b_stack]
+    lea     rdx, [r13+r13*2]
+    mov     [rcx+rdx*4], eax
+    mov     [rcx+rdx*4+4], r12d
+    mov     [rcx+rdx*4+8], r8d
+    inc     r13d
+    lea     rdx, [r13+r13*2]
+    inc     eax
+    mov     [rcx+rdx*4], eax
+    mov     [rcx+rdx*4+4], r8d
+    mov     [rcx+rdx*4+8], r14d
+    inc     r13d
+    jmp     .Lst_pop
+.Lst_done:
+    mov     eax, 1
+    jmp     9f
+.Lst_fail:
+    xor     eax, eax
+9:  add     rsp, 88
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# st_kind(ecx=index into sg_list) -> eax = that segment's kind (keeps ecx,
+#   r8, r9)
+st_kind:
+    mov     rax, [rip+sg_list]
+    mov     eax, [rax+rcx*4]
+    imul    rax, rax, SG_SZ
+    add     rax, [rip+hv_segs]
+    mov     eax, [rax+SG_KIND]
+    ret
+
+# st_box(ecx=index into sg_list) -> xmm4 = min, xmm5 = max of that segment's
+#   root (lane 3 undefined; keeps ecx, r8, r9)
+st_box:
+    mov     rax, [rip+sg_list]
+    mov     eax, [rax+rcx*4]
+    imul    rax, rax, SG_SZ
+    add     rax, [rip+hv_segs]
+    mov     eax, [rax+SG_NODE]
+    shl     rax, 5
+    add     rax, [rip+b_n2]
+    movups  xmm4, [rax]
+    movups  xmm5, [rax+12]
+    ret
+
+# seg_store - the objects that looked the same twice (SG_STORE) keep their
+#   leaf-ordered triangles and nodes (theirs: children and leaves relative)
+#   in the cache, within HC_BUDGET bytes
+seg_store:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 72
+    xor     ebx, ebx
+    mov     r12, [rip+hv_segs]
+.Lss_seg:
+    cmp     ebx, [rip+hv_nseg]
+    jae     .Lss_done
+    cmp     dword ptr [r12+SG_STORE], 0
+    je      .Lss_next
+    cmp     qword ptr [r12+SG_ENTRY], 0
+    jne     .Lss_next
+    mov     edi, [r12+SG_UID]
+    call    hc_find
+    test    rax, rax
+    jz      .Lss_next
+    mov     r15, rax                    # its slot
+    mov     rdi, rax
+    call    hc_drop
+    mov     eax, [r12+SG_N]             # the size: head, 148 bytes a
+    imul    rsi, rax, 148               #  triangle, 32 a node
+    mov     ecx, [r12+SG_NN]
+    shl     rcx, 5
+    add     rsi, rcx
+    add     rsi, HC_HEAD+4095
+    and     rsi, -4096
+    mov     rax, [rip+hc_bytes]
+    add     rax, rsi
+    mov     rcx, HC_BUDGET
+    cmp     rax, rcx
+    ja      .Lss_next
+    mov     [rsp+64], rsi
+    xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8d, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    ja      .Lss_next
+    mov     r13, rax                    # the entry
+    mov     rsi, [rsp+64]
+    mov     [r13+HC_SIZE], rsi
+    add     [rip+hc_bytes], rsi
+    mov     eax, [r12+SG_N]
+    mov     [r13+HC_NTRI], eax
+    mov     eax, [r12+SG_INST]
+    mov     [r13+HC_INST], eax
+    mov     eax, [r12+SG_NN]
+    mov     [r13+HC_NN], eax
+    mov     rdi, r13
+    call    hc_arrays
+    mov     ebp, [r12+SG_FIRST]
+    xor     r14d, r14d                  # the arrays: positions .. materials
+1:  lea     rax, [rip+ss_arrs]
+    mov     rsi, [rax+r14*8]
+    mov     rsi, [rsi]                  # (the global array)
+    lea     rax, [rip+ss_size]
+    mov     ecx, [rax+r14*4]
+    mov     rax, rbp
+    imul    rax, rcx
+    add     rsi, rax
+    lea     rax, [rip+hc_offs]
+    mov     rdi, [rax+r14*8]
+    add     rdi, r13
+    mov     eax, [r12+SG_N]
+    imul    rcx, rax
+    rep     movsb
+    inc     r14d
+    cmp     r14d, 6
+    jb      1b
+    lea     rax, [rip+hc_offs]          # the nodes, made relative
+    mov     rdi, [rax+48]
+    add     rdi, r13
+    mov     esi, [r12+SG_NODE]
+    shl     rsi, 5
+    add     rsi, [rip+b_n2]
+    xor     ecx, ecx
+2:  cmp     ecx, [r12+SG_NN]
+    jae     3f
+    mov     rax, rcx
+    shl     rax, 5
+    movups  xmm0, [rsi+rax]
+    movups  [rdi+rax], xmm0
+    mov     rdx, [rsi+rax+16]
+    mov     [rdi+rax+16], rdx
+    mov     edx, [rsi+rax+24]
+    mov     r8d, [rsi+rax+28]
+    test    r8d, r8d
+    js      21f
+    sub     edx, [r12+SG_NODE]
+    jmp     22f
+21: sub     edx, ebp
+22: mov     [rdi+rax+24], edx
+    mov     [rdi+rax+28], r8d
+    inc     ecx
+    jmp     2b
+3:  mov     [r15+HS_DATA], r13
+.Lss_next:
+    inc     ebx
+    add     r12, SG_SZ
+    jmp     .Lss_seg
+.Lss_done:
+    add     rsp, 72
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# =============================================================================
+#  The cache of objects' BVHs: slots by uid (state 0 free, 1 kept, 2 seen in
+#  this build), each with the last fingerprint and maybe its data
+# =============================================================================
+# hc_begin - a build starts: nothing seen yet
+hc_begin:
+    lea     rax, [rip+hc_tab]
+    xor     ecx, ecx
+1:  cmp     dword ptr [rax+HS_STATE], 2
+    jne     2f
+    mov     dword ptr [rax+HS_STATE], 1
+2:  add     rax, HS_SZ
+    inc     ecx
+    cmp     ecx, HC_MAX
+    jb      1b
+    ret
+
+# hc_find(edi=uid) -> rax = its slot, seen (a new one: fingerprint 0, no
+#   data), or 0 when the table is full
+hc_find:
+    lea     rax, [rip+hc_tab]
+    xor     ecx, ecx
+    xor     edx, edx                    # (the first free one)
+1:  cmp     dword ptr [rax+HS_STATE], 0
+    je      3f
+    cmp     [rax+HS_UID], edi
+    jne     4f
+    mov     dword ptr [rax+HS_STATE], 2
+    ret
+3:  test    rdx, rdx
+    jnz     4f
+    mov     rdx, rax
+4:  add     rax, HS_SZ
+    inc     ecx
+    cmp     ecx, HC_MAX
+    jb      1b
+    mov     rax, rdx
+    test    rax, rax
+    jz      9f
+    mov     [rax+HS_UID], edi
+    mov     dword ptr [rax+HS_STATE], 2
+    mov     qword ptr [rax+HS_FP], 0
+    mov     qword ptr [rax+HS_DATA], 0
+9:  ret
+
+# hc_drop(rdi=slot) - its data, if any, unmapped
+hc_drop:
+    mov     rax, [rdi+HS_DATA]
+    test    rax, rax
+    jz      9f
+    mov     qword ptr [rdi+HS_DATA], 0
+    mov     rsi, [rax+HC_SIZE]
+    sub     [rip+hc_bytes], rsi
+    mov     rdi, rax
+    mov     eax, SYS_MUNMAP
+    syscall
+9:  ret
+
+# hc_end - a build ends: slots not seen (objects gone or hidden) let go
+hc_end:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    lea     rbx, [rip+hc_tab]
+    xor     r12d, r12d
+1:  cmp     dword ptr [rbx+HS_STATE], 1
+    jne     2f
+    mov     rdi, rbx
+    call    hc_drop
+    mov     dword ptr [rbx+HS_STATE], 0
+2:  add     rbx, HS_SZ
+    inc     r12d
+    cmp     r12d, HC_MAX
+    jb      1b
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# hv_seg_add(edi=first, esi=primitives, edx=kind) -> rax = a new segment
+#   (the rest zero)
+hv_seg_add:
+    mov     eax, [rip+hv_nseg]
+    inc     dword ptr [rip+hv_nseg]
+    imul    rax, rax, SG_SZ
+    add     rax, [rip+hv_segs]
+    xor     ecx, ecx
+1:  mov     qword ptr [rax+rcx], 0
+    add     ecx, 8
+    cmp     ecx, SG_SZ
+    jb      1b
+    mov     [rax+SG_FIRST], edi
+    mov     [rax+SG_N], esi
+    mov     [rax+SG_KIND], edx
+    ret
+
+# hv_seg_object(rdi=object, esi=its first triangle) -> eax = its triangles
+#   (its instances' too): a segment for it, from the cache when its
+#   fingerprint is the one kept (the instance budget spent as then)
+hv_seg_object:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     rdi, rbx
+    call    hv_obj_fp
+    mov     r13, rax
+    mov     edi, r12d
+    xor     esi, esi
+    xor     edx, edx
+    call    hv_seg_add
+    mov     r14, rax
+    mov     [r14+SG_OBJ], rbx
+    mov     eax, [rbx+OB_UID]
+    mov     [r14+SG_UID], eax
+    cmp     qword ptr [rip+hv_only], 0  # (a bake, the edited object: built)
+    jne     5f
+    cmp     rbx, [rip+edit_ro_obj]
+    je      5f
+    mov     edi, [rbx+OB_UID]
+    call    hc_find
+    test    rax, rax
+    jz      5f
+    cmp     [rax+HS_FP], r13
+    jne     4f
+    mov     rcx, [rax+HS_DATA]
+    test    rcx, rcx
+    jz      3f
+    mov     [r14+SG_ENTRY], rcx         # kept: its triangles as they were
+    inc     dword ptr [rip+hv_nhit]
+    mov     eax, [rcx+HC_INST]
+    mov     [r14+SG_INST], eax
+    sub     [rip+hv_ibud], eax
+    mov     eax, [rcx+HC_NTRI]
+    jmp     8f
+3:  mov     dword ptr [r14+SG_STORE], 1 # the same twice: keep it this time
+    jmp     5f
+4:  mov     [rax+HS_FP], r13            # changed: what was kept goes
+    mov     rdi, rax
+    call    hc_drop
+5:  mov     rdi, rbx
+    call    obj_eval
+    mov     ecx, [rax+ME_NTRIS]
+    mov     [rsp], ecx
+    mov     rdi, rax
+    call    hv_inst_count
+    mov     [r14+SG_INST], eax
+    add     eax, [rsp]
+8:  mov     [r14+SG_N], eax
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hv_obj_fp(rdi=object) -> rax = a hash of what its triangles depend on:
+#   its matrix, flags, material, the evaluated mesh (which, its version and
+#   size), its own mesh's version, its instances (the block, its prototypes'
+#   versions) and the instance budget left before it
+.macro HV_MIX reg
+    xor     r12, \reg
+    imul    r12, r13
+.endm
+hv_obj_fp:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 56
+    mov     rbx, rdi
+    mov     r12, 0xcbf29ce484222325
+    mov     r13, 0x100000001b3
+    mov     eax, [rip+hv_ibud]
+    HV_MIX  rax
+    mov     rdi, rbx
+    lea     rsi, [rsp]
+    call    obj_matrix
+    xor     ecx, ecx
+1:  mov     rax, [rsp+rcx*8]
+    HV_MIX  rax
+    inc     ecx
+    cmp     ecx, 6
+    jb      1b
+    mov     eax, [rbx+OB_FLAGS]
+    and     eax, ~(OBF_SELECTED|OBF_ARM_DIRTY)
+    HV_MIX  rax
+    mov     rdi, rbx
+    call    mat_of
+    HV_MIX  rax
+    mov     rax, [rbx+OB_MESH]
+    test    rax, rax
+    jz      2f
+    mov     eax, [rax+ME_VER]
+    HV_MIX  rax
+2:  mov     rdi, rbx
+    call    obj_eval
+    mov     r14, rax
+    HV_MIX  rax
+    mov     eax, [r14+ME_VER]
+    HV_MIX  rax
+    mov     rax, [r14+ME_NVERTS]
+    HV_MIX  rax
+    mov     eax, [r14+ME_NTRIS]
+    HV_MIX  rax
+    mov     r14, [r14+ME_INST]
+    HV_MIX  r14
+    test    r14, r14
+    jz      9f
+    mov     rax, [r14+HIB_N]             # (count, prototypes)
+    HV_MIX  rax
+    xor     ecx, ecx
+3:  cmp     ecx, [r14+HIB_NP]
+    jae     9f
+    cmp     ecx, 8
+    jae     9f
+    mov     rax, [r14+HIB_PROTO+rcx*8]
+    HV_MIX  rax
+    test    rax, rax
+    jz      4f
+    mov     eax, [rax+ME_VER]
+    HV_MIX  rax
+4:  inc     ecx
+    jmp     3b
+9:  mov     rax, r12
+    add     rsp, 56
     pop     r14
     pop     r13
     pop     r12
@@ -1819,16 +3004,6 @@ bvh_loop:
     mov     eax, r15d
     sub     eax, r14d                   # count
     mov     [rsp+64], eax
-    test    ebx, ebx                    # the root, with triangles and spheres:
-    jnz     43f                         #  split between them (each side's
-    cmp     dword ptr [rip+hv_ns], 0    #  leaves are of one kind)
-    je      43f
-    mov     eax, [rip+hv_n]
-    test    eax, eax
-    jz      43f
-    mov     [rsp+72], eax
-    jmp     .Lbb_children
-43:
     cmp     eax, 2
     jbe     .Lbb_leaf
     # the widest centroid axis
@@ -2491,7 +3666,8 @@ collapse4:
     shr     edi, 1
     add     edi, 2
     shl     edi, 7
-    call    hv_map
+    mov     esi, K_NODES
+    call    hv_keep
     test    rax, rax
     jz      .Lc4_fail
     mov     [rip+hv_nodes], rax
@@ -2529,6 +3705,10 @@ collapse4:
     inc     edx
     mov     [rsp+4], edx
     mov     r14d, 2                     # count
+    test    ebx, ebx                    # (the root, triangles | spheres: kept
+    jnz     2f                          #  two, so any-hit rays meet the
+    cmp     dword ptr [rip+hv_ksplit], 0 #  triangles' occluders before
+    jne     4f                          #  wading through the balls)
 2:  cmp     r14d, 4
     jae     4f
     mov     r15d, -1                    # the internal child of largest area
@@ -2666,53 +3846,50 @@ reorder_tris:
     push    rbx
     push    r12
     push    r13
-    mov     r12d, [rip+hv_n]
-    lea     rbx, [rip+ro_new]           # the new arrays: positions, normals,
-    imul    edi, r12d, 36               #  object space (shader graphs)
-    add     edi, 64
+    mov     edi, [rip+hv_n]             # chunks of 8192 of the built ranges
+    add     edi, [rip+hv_ns]
+    shr     edi, 13
+    add     edi, [rip+hv_nseg]
+    add     edi, 16
+    shl     edi, 3
     call    hv_map
-    mov     [rbx], rax
-    imul    edi, r12d, 36
-    add     edi, 64
-    call    hv_map
-    mov     [rbx+8], rax
-    imul    edi, r12d, 36
-    add     edi, 64
-    call    hv_map
-    mov     [rbx+16], rax
-    imul    edi, r12d, 24               # UVs, colours, materials
-    add     edi, 64
-    call    hv_map
-    mov     [rbx+24], rax
-    imul    edi, r12d, 12
-    add     edi, 64
-    call    hv_map
-    mov     [rbx+32], rax
-    lea     edi, [r12*4+64]
-    call    hv_map
-    mov     [rbx+40], rax
-    mov     qword ptr [rbx+48], 0       # spheres
-    mov     eax, [rip+hv_ns]
-    test    eax, eax
-    jz      1f
-    imul    edi, eax, SP_SZ
-    add     edi, 64
-    call    hv_map
-    mov     [rbx+48], rax
     test    rax, rax
     jz      9f
-1:  xor     ecx, ecx                    # (any one missing: as they were)
-2:  cmp     qword ptr [rbx+rcx*8], 0
-    je      9f
-    inc     ecx
-    cmp     ecx, 6
-    jb      2b
-    lea     rdi, [rip+ro_job]           # every primitive, in parallel
+    mov     [rip+sg_items], rax
+    mov     r12, rax
+    xor     ebx, ebx
+    mov     r13, [rip+hv_segs]
+1:  cmp     ebx, [rip+hv_nseg]
+    jae     4f
+    cmp     qword ptr [r13+SG_ENTRY], 0
+    jne     3f
+    mov     edx, [r13+SG_FIRST]
+    mov     ecx, edx
+    add     ecx, [r13+SG_N]
+2:  cmp     edx, ecx
+    jae     3f
+    mov     [r12], edx
+    add     edx, 8192
+    mov     eax, edx
+    cmp     eax, ecx
+    jbe     21f
+    mov     eax, ecx
+21: mov     [r12+4], eax
+    add     r12, 8
+    jmp     2b
+3:  inc     ebx
+    add     r13, SG_SZ
+    jmp     1b
+4:  mov     rdx, r12
+    sub     rdx, [rip+sg_items]
+    shr     rdx, 3
+    test    edx, edx
+    jz      5f
+    lea     rdi, [rip+ro_items_job]
     xor     esi, esi
-    mov     edx, r12d
-    add     edx, [rip+hv_ns]
-    mov     ecx, 4096
+    mov     ecx, 1
     call    parallel_for
+5:  lea     rbx, [rip+ro_new]           # the new arrays take over
     mov     rax, [rbx]
     mov     [rip+hv_tv], rax
     mov     rax, [rbx+8]
@@ -2725,11 +3902,81 @@ reorder_tris:
     mov     [rip+hv_tvc], rax
     mov     rax, [rbx+40]
     mov     [rip+hv_tm], rax
+    xor     r12d, r12d
+6:  mov     edi, r12d                   # (and their kept buffers)
+    lea     esi, [r12+K_RO]
+    call    hv_keep_swap
+    inc     r12d
+    cmp     r12d, 6
+    jb      6b
     mov     rax, [rbx+48]
     test    rax, rax
     jz      9f
     mov     [rip+hv_sp], rax
+    mov     edi, K_SP
+    mov     esi, K_RO+6
+    call    hv_keep_swap
 9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ro_alloc -> eax = 1: ro_new, the leaf-ordered arrays (kept buffers)
+ro_alloc:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, [rip+hv_n]
+    lea     rbx, [rip+ro_new]
+    xor     r13d, r13d
+1:  lea     rax, [rip+ss_size]
+    mov     edi, [rax+r13*4]
+    imul    edi, r12d
+    add     edi, 64
+    lea     esi, [r13+K_RO]
+    call    hv_keep
+    test    rax, rax
+    jz      8f
+    mov     [rbx+r13*8], rax
+    inc     r13d
+    cmp     r13d, 6
+    jb      1b
+    mov     qword ptr [rbx+48], 0       # spheres
+    mov     eax, [rip+hv_ns]
+    test    eax, eax
+    jz      2f
+    imul    edi, eax, SP_SZ
+    add     edi, 64
+    mov     esi, K_RO+6
+    call    hv_keep
+    test    rax, rax
+    jz      8f
+    mov     [rbx+48], rax
+2:  mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ro_items_job(esi=first item, edx=end) - each item (sg_items: from, to)
+#   through ro_job
+ro_items_job:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, esi
+    mov     r12d, edx
+1:  cmp     ebx, r12d
+    jae     9f
+    mov     rax, [rip+sg_items]
+    mov     esi, [rax+rbx*8]
+    mov     edx, [rax+rbx*8+4]
+    call    ro_job
+    inc     ebx
+    jmp     1b
+9:  add     rsp, 8
     pop     r12
     pop     rbx
     ret

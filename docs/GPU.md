@@ -268,6 +268,7 @@ takes 0.55 s; the small one, 4 ms.
 | 17 | The last scene's triangles |
 | 18 | Where the last render ran, and why: 0 the GPU; on the CPU: 1 Device is CPU, 2 no helper or device, 3 an HDRI world, 4 a shadow catcher, 5 a material node the GPU lacks, 6 the helper failed, 7 a bake |
 | 19 | The last scene's spheres (particles drawn as balls) |
+| 20 | Objects the last scene build took from the cache (their BVH and triangles kept) |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 
