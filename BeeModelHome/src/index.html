@@ -53,12 +53,12 @@
 
 <div class="ticker" aria-hidden="true">
   <div class="ticker-track">
-    <span><b>●</b> path tracer on every core</span><span><b>●</b> Vulkan GPU helper</span><span><b>●</b> sculpting with dynamic topology</span>
+    <span><b>●</b> path tracer on every core</span><span><b>●</b> RTX ray tracing on Vulkan</span><span><b>●</b> sculpting with dynamic topology</span>
     <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
     <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
     <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
     <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
-    <span><b>●</b> path tracer on every core</span><span><b>●</b> Vulkan GPU helper</span><span><b>●</b> sculpting with dynamic topology</span>
+    <span><b>●</b> path tracer on every core</span><span><b>●</b> RTX ray tracing on Vulkan</span><span><b>●</b> sculpting with dynamic topology</span>
     <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
     <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
     <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
@@ -94,7 +94,7 @@
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20c4-1 6-4 7-8M15 3l6 6-8 8-6-6Z"/></svg></div>
         <h3>Sculpt &amp; paint</h3><p>Draw, clay strips, crease, grab, snake hook and more, with dynamic topology, multires and pen pressure. Texture, vertex and weight painting with layers, baking AO and normal maps.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18M3 12h18"/></svg></div>
-        <h3>Materials &amp; path tracing</h3><p>Principled materials with node graphs, HDRI lighting and Hive — a physically based path tracer with a denoiser on every core, plus an optional Vulkan GPU helper for live rendered viewports.</p></div>
+        <h3>Materials &amp; path tracing</h3><p>Principled materials with node graphs, HDRI lighting and Hive — a physically based path tracer with a denoiser on every core, and on the GPU through Vulkan, with hardware ray tracing on RTX cards. Animations render frame after frame while the next one is built, reusing samples between frames.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/><path d="M10 7h3a2 2 0 0 1 2 2v5"/></svg></div>
         <h3>Geometry nodes</h3><p>Procedural trees for terrain, erosion, scattering, instancing, curves and L-systems. A million blades of grass, placed not realized.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/></svg></div>
@@ -280,7 +280,7 @@
     <div class="center reveal">
       <span class="eyebrow">Hive path tracer</span>
       <h2>Rendered in BeeModel</h2>
-      <p class="lead">Physically based materials — clear coat, metals, glass, emission — under a studio sky, denoised. On the CPU across every core, or on a Vulkan GPU.</p>
+      <p class="lead">Physically based materials — clear coat, metals, glass, emission — under a studio sky, denoised. On the CPU across every core, or on a Vulkan GPU with RTX ray tracing: a frame of the rainstorm demo — a landscape, a cabin and 94 000 raindrops — in about a tenth of a second.</p>
     </div>
     <div class="gallery">
       <figure class="g-a reveal" data-full="assets/img/studio.webp" data-caption="Studio: clear-coated paint, brushed gold, glass and a noise-bumped plinth"><img loading="lazy" src="assets/img/studio-sm.webp" alt="Studio render"><figcaption>Studio product shot</figcaption></figure>
@@ -324,7 +324,7 @@ chmod +x {{BIN_NAME}}
           <div class="reqs">
             <div class="req"><b>Linux x86-64</b>any distribution, static binary</div>
             <div class="req"><b>A Wayland compositor</b>GNOME, KDE, Hyprland, sway…</div>
-            <div class="req"><b>Optional: Vulkan</b>the GPU helper for live rendering</div>
+            <div class="req"><b>Optional: Vulkan</b>the GPU helper for GPU and RTX rendering</div>
             <div class="req"><b>Build it yourself</b><code>scripts/build.sh</code> — binutils only</div>
           </div>
         </div>

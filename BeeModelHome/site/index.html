@@ -6,12 +6,12 @@
 <title>BeeModel — a 3D creation suite in pure x86-64 assembly</title>
 <meta name="description" content="BeeModel: model, sculpt, paint, animate, simulate and path-trace — one small static binary written entirely in x86-64 assembly. Free and open source under the MIT license.">
 <meta property="og:title" content="BeeModel — 3D in pure assembly">
-<meta property="og:description" content="Model, sculpt, paint, animate, simulate and render. One 1.4 MB binary, zero libraries, MIT licensed.">
+<meta property="og:description" content="Model, sculpt, paint, animate, simulate and render. One 1.5 MB binary, zero libraries, MIT licensed.">
 <meta property="og:image" content="https://beemodel.hideterms.com/assets/img/studio.webp">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#0d0f13">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="assets/css/site.css?v=202610191546">
+<link rel="stylesheet" href="assets/css/site.css?v=202610202215">
 </head>
 <body>
 <header class="site-header">
@@ -41,12 +41,12 @@
       <span class="eyebrow">Free &amp; open source · MIT</span>
       <h1>3D creation,<br>written in <span class="grad">pure assembly</span>.</h1>
       <p class="lead">BeeModel models, sculpts, paints, rigs, animates, simulates and path-traces —
-        in one 1.4 MB static binary for Linux. No libc, no toolkit, no libraries:
+        in one 1.5 MB static binary for Linux. No libc, no toolkit, no libraries:
         x86-64 assembly talking straight to the kernel and the Wayland compositor.</p>
       <div class="btn-row">
         <a class="btn primary" href="#download" data-latest="page-anchor">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16"/></svg>
-          <span>Download v<span data-latest="version">0.21.0</span></span>
+          <span>Download v<span data-latest="version">0.23.0</span></span>
         </a>
         <a class="btn ghost" href="https://github.com/bartbeecoders/beemodel">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
@@ -54,9 +54,9 @@
         </a>
       </div>
       <div class="badges">
-        <span class="badge"><span class="dot"></span> Latest <b>v<span data-latest="version">0.21.0</span></b> · <span data-latest="date">19 October 2026</span></span>
+        <span class="badge"><span class="dot"></span> Latest <b>v<span data-latest="version">0.23.0</span></b> · <span data-latest="date">20 October 2026</span></span>
         <span class="badge">Linux x86-64 · Wayland</span>
-        <span class="badge">21 releases</span>
+        <span class="badge">24 releases</span>
       </div>
     </div>
     <div class="hero-visual reveal">
@@ -69,15 +69,15 @@
 
 <div class="ticker" aria-hidden="true">
   <div class="ticker-track">
-    <span><b>●</b> path tracer on every core</span><span><b>●</b> Vulkan GPU helper</span><span><b>●</b> sculpting with dynamic topology</span>
+    <span><b>●</b> path tracer on every core</span><span><b>●</b> RTX ray tracing on Vulkan</span><span><b>●</b> sculpting with dynamic topology</span>
     <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
     <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
-    <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
+    <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
     <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
-    <span><b>●</b> path tracer on every core</span><span><b>●</b> Vulkan GPU helper</span><span><b>●</b> sculpting with dynamic topology</span>
+    <span><b>●</b> path tracer on every core</span><span><b>●</b> RTX ray tracing on Vulkan</span><span><b>●</b> sculpting with dynamic topology</span>
     <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
     <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
-    <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
+    <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
     <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
   </div>
 </div>
@@ -86,10 +86,10 @@
 <section class="tight">
   <div class="wrap">
     <div class="stats reveal">
-      <div class="stat"><div class="num" data-count="1.4">0<small>MB</small></div><div class="lbl">one static binary</div></div>
+      <div class="stat"><div class="num" data-count="1.5">0<small>MB</small></div><div class="lbl">one static binary</div></div>
       <div class="stat"><div class="num" data-count="0">0</div><div class="lbl">libraries linked</div></div>
-      <div class="stat"><div class="num" data-count="179">0</div><div class="lbl">assembly source files</div></div>
-      <div class="stat"><div class="num" data-count="21">0</div><div class="lbl">releases so far</div></div>
+      <div class="stat"><div class="num" data-count="182">0</div><div class="lbl">assembly source files</div></div>
+      <div class="stat"><div class="num" data-count="24">0</div><div class="lbl">releases so far</div></div>
       <div class="stat"><div class="num">MIT</div><div class="lbl">free, forever</div></div>
     </div>
   </div>
@@ -110,7 +110,7 @@
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20c4-1 6-4 7-8M15 3l6 6-8 8-6-6Z"/></svg></div>
         <h3>Sculpt &amp; paint</h3><p>Draw, clay strips, crease, grab, snake hook and more, with dynamic topology, multires and pen pressure. Texture, vertex and weight painting with layers, baking AO and normal maps.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18M3 12h18"/></svg></div>
-        <h3>Materials &amp; path tracing</h3><p>Principled materials with node graphs, HDRI lighting and Hive — a physically based path tracer with a denoiser on every core, plus an optional Vulkan GPU helper for live rendered viewports.</p></div>
+        <h3>Materials &amp; path tracing</h3><p>Principled materials with node graphs, HDRI lighting and Hive — a physically based path tracer with a denoiser on every core, and on the GPU through Vulkan, with hardware ray tracing on RTX cards. Animations render frame after frame while the next one is built, reusing samples between frames.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/><path d="M10 7h3a2 2 0 0 1 2 2v5"/></svg></div>
         <h3>Geometry nodes</h3><p>Procedural trees for terrain, erosion, scattering, instancing, curves and L-systems. A million blades of grass, placed not realized.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/></svg></div>
@@ -121,6 +121,8 @@
         <h3>Physics</h3><p>A parallel rigid-body solver for 10 000 bodies with joints, mesh and heightfield colliders; XPBD cloth and soft bodies; shatter into bricks, shards or balls; a simulation cache.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7c4-3 12-3 16 0M5 12c4-2.5 10-2.5 14 0M8 17c2.5-1.5 5.5-1.5 8 0"/></svg></div>
         <h3>Attractors &amp; force fields</h3><p>Attractors, gravity zones, wind, vortices, turbulence and drag on bodies and cloth. Bodies that attract each other (Barnes–Hut), and planets you can walk around.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c3 4 5 6.5 5 9.5a5 5 0 0 1-10 0C7 9.5 9 7 12 3Z"/><path d="M4 6h.01M20 8h.01M5 17h.01M19 18h.01"/></svg></div>
+        <h3>Particles &amp; liquid</h3><p>Millions of particles from faces, volumes or points, with collisions and chained events — rain, sparks, fireworks. Position-based fluids with a meshed surface, foam and floating bodies.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m2 19 6-9 4 5 3-4 7 8Z"/><circle cx="17" cy="6" r="2"/></svg></div>
         <h3>Landscapes</h3><p>Generate, erode, sculpt and paint heightfields with layers; presets from hills to islands with a sea that floats things; PNG/EXR heightmaps in and out.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 12h4m-2-2v4M15 11h.01M18 13h.01"/><rect x="2" y="6" width="20" height="12" rx="6"/></svg></div>
@@ -152,7 +154,7 @@
     <div class="tour-tabs" role="tablist">
       <button role="tab">Modeling</button><button role="tab">Materials</button><button role="tab">Sculpting</button>
       <button role="tab">CAD</button><button role="tab">Animation</button><button role="tab">Physics</button>
-      <button role="tab">Force fields</button><button role="tab">Landscapes</button><button role="tab">Procedural</button>
+      <button role="tab">Force fields</button><button role="tab">Particles</button><button role="tab">Landscapes</button><button role="tab">Procedural</button>
     </div>
 
     <div class="tour-pane"><div class="spot">
@@ -227,6 +229,16 @@
 
     <div class="tour-pane" hidden><div class="spot">
       <div class="spot-text">
+        <h3>Pour it, burst it, blow it away</h3>
+        <p>A dam break: 50 000 particles of water run down a tank, break round a pier and lift the crates dropped into them. The surface is meshed every frame; spray turns to foam.</p>
+        <ul><li>Emit from faces, volumes, vertices or a point; draw as points, sprites or objects</li><li>Collisions with the ground, landscapes and bodies; hit, death and spray events</li><li>Position-based fluids, a closed surface, a simulation cache you can bake</li></ul>
+        <div class="spot-tag">Add › Particles · Properties › Particles</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/particles.webp" data-caption="A dam break, path-traced"><img loading="lazy" src="assets/img/particles-sm.webp" alt="Water breaking round a pier in a glass tank" width="800" height="500"></div>
+    </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
         <h3>Worlds to land on</h3>
         <p>An island generated, eroded and painted by slope and height: sand at the shore, grass, rock and snow — with a sea that floats wood and sinks stone.</p>
         <ul><li>Generate, erode, terrace, flatten — as layers</li><li>Sculpt and paint landscapes with brushes</li><li>A heightfield collider for bodies, cloth and the player</li></ul>
@@ -256,6 +268,14 @@
       <p class="lead">Each demo is one BeeScript file that builds the scene; the films are path-traced frame by frame by BeeModel's own renderer, the screencasts are its viewport.</p>
     </div>
     <div class="videos">
+      <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/fireworks.webp"><source src="assets/video/fireworks.mp4" type="video/mp4"></video>
+        <div class="vc-body"><h3>Fireworks</h3><p>Rockets whose deaths burst into shells of stars, and stars whose deaths drop glitter: particle events feeding particle systems, glowing through their vertex colour.</p></div></div>
+      <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/dam-break.webp"><source src="assets/video/dam-break.mp4" type="video/mp4"></video>
+        <div class="vc-body"><h3>Dam break</h3><p>50 000 liquid particles let go in a glass tank: a meshed surface, foam from the spray, and pine crates that float on the wave.</p></div></div>
+      <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/leaf-twister.webp"><source src="assets/video/leaf-twister.mp4" type="video/mp4"></video>
+        <div class="vc-body"><h3>Leaf twister</h3><p>A wandering vortex lifts 18 000 leaves — particles drawn as objects — up its funnel and drops them behind it.</p></div></div>
+      <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/rainstorm.webp"><source src="assets/video/rainstorm.mp4" type="video/mp4"></video>
+        <div class="vc-body"><h3>Rainstorm</h3><p>40 000 drops a second on a landscape and a cabin roof. Every hit throws up three splashes while a keyed wind slants the rain.</p></div></div>
       <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/wrecking-ball.webp"><source src="assets/video/wrecking-ball.mp4" type="video/mp4"></video>
         <div class="vc-body"><h3>Wrecking ball</h3><p>A glued brick wall cut by Shatter, hit by a steel ball on a chain of point joints. Only the bricks it reaches break loose.</p></div></div>
       <div class="video-card reveal"><video data-autoplay muted loop playsinline preload="none" poster="assets/video/rockfall-island.webp"><source src="assets/video/rockfall-island.mp4" type="video/mp4"></video>
@@ -276,7 +296,7 @@
     <div class="center reveal">
       <span class="eyebrow">Hive path tracer</span>
       <h2>Rendered in BeeModel</h2>
-      <p class="lead">Physically based materials — clear coat, metals, glass, emission — under a studio sky, denoised. On the CPU across every core, or on a Vulkan GPU.</p>
+      <p class="lead">Physically based materials — clear coat, metals, glass, emission — under a studio sky, denoised. On the CPU across every core, or on a Vulkan GPU with RTX ray tracing: a frame of the rainstorm demo — a landscape, a cabin and 94 000 raindrops — in about a tenth of a second.</p>
     </div>
     <div class="gallery">
       <figure class="g-a reveal" data-full="assets/img/studio.webp" data-caption="Studio: clear-coated paint, brushed gold, glass and a noise-bumped plinth"><img loading="lazy" src="assets/img/studio-sm.webp" alt="Studio render"><figcaption>Studio product shot</figcaption></figure>
@@ -295,32 +315,32 @@
       <div class="dl-grid">
         <div>
           <span class="eyebrow">Download</span>
-          <h2>Get BeeModel <span data-latest="version">0.21.0</span></h2>
+          <h2>Get BeeModel <span data-latest="version">0.23.0</span></h2>
           <p class="lead">One static binary. No installer, no dependencies, nothing to configure — download it, make it executable, run it.</p>
           <div class="dl-files">
-            <a class="dl-file" data-asset="bin" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.21.0/beemodel-0.21.0-linux-x86_64.bin"><span class="ext">BIN</span><span class="name">beemodel-0.21.0-linux-x86_64.bin</span><span class="size">1.4 MB</span></a>
-            <a class="dl-file" data-asset="tar" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.21.0/beemodel-0.21.0-linux-x86_64.tar.gz"><span class="ext">TAR.GZ</span><span class="name">beemodel-0.21.0-linux-x86_64.tar.gz</span><span class="size">798 KB</span></a>
-            <a class="dl-file" data-asset="gpu" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.21.0/beemodel-gpu-0.21.0-linux-x86_64.tar.gz"><span class="ext">GPU</span><span class="name">beemodel-gpu-0.21.0-linux-x86_64.tar.gz</span><span class="size">159 KB</span></a>
-            <a class="dl-file" data-asset="sums" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.21.0/SHA256SUMS"><span class="ext">SHA256</span><span class="name">SHA256SUMS</span><span class="size">checksums</span></a>
+            <a class="dl-file" data-asset="bin" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.23.0/beemodel-0.23.0-linux-x86_64.bin"><span class="ext">BIN</span><span class="name">beemodel-0.23.0-linux-x86_64.bin</span><span class="size">1.5 MB</span></a>
+            <a class="dl-file" data-asset="tar" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.23.0/beemodel-0.23.0-linux-x86_64.tar.gz"><span class="ext">TAR.GZ</span><span class="name">beemodel-0.23.0-linux-x86_64.tar.gz</span><span class="size">842 KB</span></a>
+            <a class="dl-file" data-asset="gpu" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.23.0/beemodel-gpu-0.23.0-linux-x86_64.tar.gz"><span class="ext">GPU</span><span class="name">beemodel-gpu-0.23.0-linux-x86_64.tar.gz</span><span class="size">397 KB</span></a>
+            <a class="dl-file" data-asset="sums" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.23.0/SHA256SUMS"><span class="ext">SHA256</span><span class="name">SHA256SUMS</span><span class="size">checksums</span></a>
           </div>
-          <p class="muted" style="margin-top:14px">Released <span data-latest="date">19 October 2026</span> ·
-            <a data-latest="page" href="https://github.com/bartbeecoders/beemodel/releases/tag/v0.21.0">release notes</a> · <a href="releases.html">all releases</a></p>
+          <p class="muted" style="margin-top:14px">Released <span data-latest="date">20 October 2026</span> ·
+            <a data-latest="page" href="https://github.com/bartbeecoders/beemodel/releases/tag/v0.23.0">release notes</a> · <a href="releases.html">all releases</a></p>
         </div>
         <div>
           <div class="terminal">
             <div class="bar"><i></i><i></i><i></i></div>
             <button class="copy" type="button">Copy</button>
-            <pre data-install data-copy="curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.21.0/beemodel-0.21.0-linux-x86_64.bin
-chmod +x beemodel-0.21.0-linux-x86_64.bin
-./beemodel-0.21.0-linux-x86_64.bin"><span class="c"># download, make executable, run</span>
-<span class="p">$</span> curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.21.0/beemodel-0.21.0-linux-x86_64.bin
-<span class="p">$</span> chmod +x beemodel-0.21.0-linux-x86_64.bin
-<span class="p">$</span> ./beemodel-0.21.0-linux-x86_64.bin</pre>
+            <pre data-install data-copy="curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.23.0/beemodel-0.23.0-linux-x86_64.bin
+chmod +x beemodel-0.23.0-linux-x86_64.bin
+./beemodel-0.23.0-linux-x86_64.bin"><span class="c"># download, make executable, run</span>
+<span class="p">$</span> curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.23.0/beemodel-0.23.0-linux-x86_64.bin
+<span class="p">$</span> chmod +x beemodel-0.23.0-linux-x86_64.bin
+<span class="p">$</span> ./beemodel-0.23.0-linux-x86_64.bin</pre>
           </div>
           <div class="reqs">
             <div class="req"><b>Linux x86-64</b>any distribution, static binary</div>
             <div class="req"><b>A Wayland compositor</b>GNOME, KDE, Hyprland, sway…</div>
-            <div class="req"><b>Optional: Vulkan</b>the GPU helper for live rendering</div>
+            <div class="req"><b>Optional: Vulkan</b>the GPU helper for GPU and RTX rendering</div>
             <div class="req"><b>Build it yourself</b><code>scripts/build.sh</code> — binutils only</div>
           </div>
         </div>
@@ -365,6 +385,6 @@ chmod +x beemodel-0.21.0-linux-x86_64.bin
   </div>
 </footer>
 
-<script src="assets/js/site.js?v=202610191546" defer></script>
+<script src="assets/js/site.js?v=202610202215" defer></script>
 </body>
 </html>
