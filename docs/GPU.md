@@ -303,6 +303,36 @@ pixel for pixel. The rainstorm demo at 960 x 540 and 16 samples takes
 78 ms a frame instead of 109 ms. If the helper dies during the overlap,
 the scene goes back to that frame and the CPU renders it again.
 
+### Sample reuse between frames (v0.23)
+
+`render.sample_reuse <frames>` (Properties › Render › Sample reuse, saved
+with the scene) makes animation renders (`render_frames`,
+`render.animation`) reuse samples. The first frame traces all its samples.
+Each later one traces samples / (frames + 1) new ones, then merges in the
+frame before's (`rf_reuse`, on the CPU, whichever device traced, so the
+same for the CPU, the GPU and RTX). For each pixel:
+
+- Its primary hit (the depth pass along its centre) is carried through this
+  frame's camera into the last one's. The four pixels round where it lands
+  count, bilinearly, each only if it saw the same place (within 2% of the
+  distance), the same way (normals within 37°) and the same albedo (within
+  0.08), or both saw no hit.
+- What they hold counts only if its brightness lies within this frame's
+  own 3x3 round the pixel: the mean ± (2σ + 5%). Lights and shadows that
+  moved are not reused.
+- The history then counts as up to (samples − new) samples, so a pixel
+  never claims more than the target. The sums are rewritten as
+  target-sample sums, and the second moments so that the denoiser sees
+  each pixel's variance from its own count.
+
+Moving objects, and what comes into view, keep their own samples alone:
+the reprojection follows the camera, not objects. A film with alpha (shadow
+catchers) is never reused. A still scene seen by a panning camera at 16
+samples and 3 frames (4 new samples a frame) comes out at 1.25 levels from
+the 256-sample frames where 16 samples a frame are 1.47 and 4 are 3.04.
+12 frames at 960 x 540 and 64 samples take 2.7 s on the CPU instead of
+7.9 s.
+
 ### Liquid surfaces (v0.23)
 
 A render headed for the GPU (`gpu_fld_likely`) builds a liquid's surface
@@ -364,6 +394,7 @@ surface meshed (`hv_need_bvh`, as for RTX). In the dam-break demo a frame
 | 23 | 1 if the last render traced with RTX (ray queries) |
 | 24 | 1 if the helper has RTX |
 | 25 | Liquid surfaces the last render traced as fields |
+| 26 | `render.sample_reuse`: frames whose samples animation renders reuse (0: off) |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 

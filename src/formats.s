@@ -618,7 +618,9 @@ bee_save:
     call    wb_u32
     mov     edi, [rip+rn_denoise]
     call    wb_u32
-    mov     edi, [rip+hv_shutter]       # (since 0.23: motion blur)
+    mov     edi, [rip+hv_shutter]       # (since 0.23: motion blur, sample
+    call    wb_u32                      #  reuse)
+    mov     edi, [rip+hv_reuse]
     call    wb_u32
     call    chunk_end
     mov     edi, TAG_VIEW               # VIEW
@@ -1151,6 +1153,7 @@ rndr_read:
     and     eax, 3
     mov     [rip+hv_pass], eax
     mov     dword ptr [rip+hv_shutter], 0
+    mov     dword ptr [rip+hv_reuse], 0
     cmp     r8d, 20                     # (since 0.6: denoise)
     jb      9f
     mov     eax, [rdi+16]
@@ -1163,6 +1166,13 @@ rndr_read:
     maxss   xmm0, xmm1                  # (NaN: 0)
     minss   xmm0, [rip+fr_one]
     movss   [rip+hv_shutter], xmm0
+    cmp     r8d, 28                     # (since 0.23: sample reuse, 0 .. 16)
+    jb      9f
+    mov     eax, [rdi+24]
+    mov     ecx, 16
+    cmp     eax, ecx
+    cmova   eax, ecx
+    mov     [rip+hv_reuse], eax
 9:  ret
 
 # need(rsi=pointer, rdx=bytes) -> CF=1 if [pointer, pointer+bytes) leaves the file

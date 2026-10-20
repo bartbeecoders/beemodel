@@ -4052,7 +4052,34 @@ hive_render_frames:
     cmp     rax, -4096
     ja      .Lrf_no
     mov     [rip+rf_pix], rax
-    call    render_abort                # the Render area's samples are gone
+    mov     [rip+rf_target], r14d       # sample reuse (H14): two histories
+    mov     dword ptr [rip+rq_hok], 0
+    mov     dword ptr [rip+rf_ron], 0
+    cmp     dword ptr [rip+hv_reuse], 0
+    je      31f
+    mov     eax, r12d
+    imul    eax, r13d
+    imul    rax, rax, 2*RQ_SZ+4         # (two histories, the luminances)
+    mov     rsi, rax
+    xor     edi, edi
+    mov     edx, PROT_RW
+    mov     r10d, MAP_ANON_PRIV
+    mov     r8d, -1
+    xor     r9d, r9d
+    mov     eax, SYS_MMAP
+    syscall
+    cmp     rax, -4096
+    ja      31f                         # (no room: no reuse)
+    mov     [rip+rq_hin], rax
+    mov     ecx, r12d
+    imul    ecx, r13d
+    shl     rcx, 6
+    add     rax, rcx
+    mov     [rip+rq_hout], rax
+    add     rax, rcx
+    mov     [rip+rq_lum], rax
+    mov     dword ptr [rip+rf_ron], 1
+31: call    render_abort                # the Render area's samples are gone
     mov     eax, [rip+hv_pass]          # files get the beauty pass
     mov     [rsp+32], eax
     mov     dword ptr [rip+hv_pass], 0
@@ -4062,9 +4089,20 @@ hive_render_frames:
     call    an_set_frame
     call    hive_scene
 .Lrf_frame:
-    mov     edi, r12d
+    mov     ecx, r14d                   # history to reuse: the target /
+    cmp     dword ptr [rip+rf_ron], 0   #  (frames + 1) new samples, up
+    je      32f
+    cmp     dword ptr [rip+rq_hok], 0
+    je      32f
+    mov     ecx, [rip+hv_reuse]
+    inc     ecx
+    lea     eax, [r14+rcx-1]
+    xor     edx, edx
+    div     ecx
+    mov     ecx, eax
+32: mov     edi, r12d
     mov     esi, r13d
-    mov     edx, r14d
+    mov     edx, ecx
     call    hive_start
     test    eax, eax
     jz      .Lrf_fail
@@ -4118,7 +4156,11 @@ hive_render_frames:
     jmp     .Lrf_pass
 .Lrf_done:
     call    rf_flush                    # (the CPU's frames: not yet)
-    cmp     dword ptr [rsp+4], 0
+    cmp     dword ptr [rip+rf_ron], 0   # the last frame's samples where it
+    je      33f                         #  saw the same
+    mov     edi, r14d
+    call    rf_reuse
+33: cmp     dword ptr [rsp+4], 0
     je      7f
     call    hive_denoise
 7:  mov     rdi, [rip+rf_pix]
@@ -4151,6 +4193,19 @@ hive_render_frames:
     mov     ebp, -1
 .Lrf_out:
     mov     dword ptr [rip+hv_pre], 0
+    cmp     dword ptr [rip+rf_ron], 0   # (the histories go)
+    je      34f
+    mov     rdi, [rip+rq_hin]
+    cmp     rdi, [rip+rq_hout]
+    cmova   rdi, [rip+rq_hout]
+    mov     eax, r12d
+    imul    eax, r13d
+    imul    rax, rax, 2*RQ_SZ+4
+    mov     rsi, rax
+    mov     eax, SYS_MUNMAP
+    syscall
+    mov     dword ptr [rip+rf_ron], 0
+34:
     mov     dword ptr [rip+rf_has], 0
     mov     eax, [rsp+32]
     mov     [rip+hv_pass], eax
@@ -4231,6 +4286,578 @@ rf_flush:
     mov     byte ptr [rcx+rax], 0
     pop     rbx
 9:  ret
+
+# =============================================================================
+#  Sample reuse between frames (H14: render_frames with hv_reuse frames)
+#
+#  After a frame's own samples, each pixel looks for what it saw in the
+#  frame before: its primary hit (the depth pass along the pixel's centre)
+#  through this frame's camera, then into the last one's (rq_job). Of the
+#  four pixels round where it lands, those that saw the same place (within
+#  2% of the distance), the same way (the normals within 37 degrees) and
+#  the same albedo (within 0.08) count, bilinearly (rq_tap); what they hold
+#  counts if its brightness lies within this frame's 3x3 round the pixel
+#  (rq_box: a light or a shadow moved), as samples up to the frame's
+#  target: (new sums + history x weight) / (n + weight), weight = min(its
+#  count, target - n). Moving things and what comes into view keep their
+#  own samples alone. The sums are then rewritten as target-sample sums
+#  (the rows' counts the target; m2 so that the variance is the pixel's own
+#  count's), so the denoiser and the resolve take them as they are; the
+#  history for the next frame is the merged mean, its count, and this
+#  frame's passes. A film with alpha (shadow catchers) is never reused.
+# =============================================================================
+.equ RQ_SZ, 64                          # history a pixel: L, count; albedo,
+                                        #  m2; normal, depth
+# rf_reuse(edi=target samples) - the frame just traced (hv_rowspp: its own
+#   samples) with the last frame's history merged in, its history kept
+rf_reuse:
+    push    rbx
+    cmp     dword ptr [rip+hv_film], 0
+    je      1f
+    mov     dword ptr [rip+rq_hok], 0
+    jmp     9f
+1:  cvtsi2ss xmm0, edi
+    movss   [rip+rq_s], xmm0
+    cvtsi2ss xmm0, dword ptr [rip+hv_w]
+    cvtsi2ss xmm1, dword ptr [rip+hv_h]
+    movss   [rip+rq_w], xmm0
+    movss   [rip+rq_h], xmm1
+    movss   xmm2, xmm1                  # h / w, w / h, 2 / w, 2 / h
+    divss   xmm2, xmm0
+    movss   [rip+rq_hw], xmm2
+    movss   xmm2, xmm0
+    divss   xmm2, xmm1
+    movss   [rip+rq_wh], xmm2
+    movss   xmm2, [rip+pt_two]
+    divss   xmm2, xmm0
+    movss   [rip+rq_2w], xmm2
+    movss   xmm2, [rip+pt_two]
+    divss   xmm2, xmm1
+    movss   [rip+rq_2h], xmm2
+    lea     rsi, [rip+hv_cam]           # this frame's camera
+    lea     rdi, [rip+rq_o]
+    call    rq_cam
+    lea     rsi, [rip+rf_pcam]          # the last one's
+    lea     rdi, [rip+rq_po]
+    call    rq_cam
+    movaps  xmm0, [rip+rq_pf]           # (its projection: |f|^2 / |r|^2 / th,
+    dpps    xmm0, xmm0, 0x71            #  |f|^2 / |u|^2 / th)
+    movaps  xmm1, [rip+rq_pr]
+    dpps    xmm1, xmm1, 0x71
+    movaps  xmm2, [rip+rq_pu]
+    dpps    xmm2, xmm2, 0x71
+    movss   xmm3, xmm0
+    divss   xmm3, xmm1
+    divss   xmm3, [rip+rq_pth]
+    movss   [rip+rq_kr], xmm3
+    divss   xmm0, xmm2
+    divss   xmm0, [rip+rq_pth]
+    movss   [rip+rq_ku], xmm0
+    lea     rdi, [rip+rq_lum_job]       # this frame's luminances, then every
+    xor     esi, esi                    #  row
+    mov     edx, [rip+hv_h]
+    mov     ecx, 8
+    call    parallel_for
+    lea     rdi, [rip+rq_job]
+    xor     esi, esi
+    mov     edx, [rip+hv_h]
+    mov     ecx, 4
+    call    parallel_for
+    mov     rax, [rip+hv_rowspp]        # the sums are the target's now
+    mov     edx, [rip+rf_target]
+    xor     ecx, ecx
+2:  cmp     ecx, [rip+hv_h]
+    jae     3f
+    mov     [rax+rcx*4], edx
+    inc     ecx
+    jmp     2b
+3:  mov     rax, [rip+rq_hin]           # this frame's history: the next one's
+    mov     rcx, [rip+rq_hout]
+    mov     [rip+rq_hin], rcx
+    mov     [rip+rq_hout], rax
+    lea     rsi, [rip+hv_cam]
+    lea     rdi, [rip+rf_pcam]
+    mov     ecx, 13
+    rep     movsd
+    mov     dword ptr [rip+rq_hok], 1
+9:  pop     rbx
+    ret
+
+# rq_cam(rsi=13 floats: origin, right, up, forward, tan_h, rdi=out: four
+#   vec4s (w 0) then tan_h)
+rq_cam:
+    xor     ecx, ecx
+1:  mov     eax, [rsi]
+    mov     [rdi], eax
+    mov     eax, [rsi+4]
+    mov     [rdi+4], eax
+    mov     eax, [rsi+8]
+    mov     [rdi+8], eax
+    mov     dword ptr [rdi+12], 0
+    add     rsi, 12
+    add     rdi, 16
+    inc     ecx
+    cmp     ecx, 4
+    jb      1b
+    mov     eax, [rsi]
+    mov     [rdi], eax
+    ret
+
+# rq_job(ctx, esi=first row, edx=end) - those rows' pixels: history found
+#   and merged, the sums rewritten, the history out
+rq_job:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    and     rsp, -16                    # (a worker's stack: aligned here)
+    sub     rsp, 160                    # +16 p, +32 the passes' means (7),
+    mov     r12d, esi                   #  +80 1 / n, +84 n, +88 0: history
+    mov     r13d, edx                   #  found (-1 none), +96 it (as RQ_SZ:
+                                        #  L, count, +28 m2), +128 x0 y0 fx
+                                        #  fy, +144 the weights, +148 the tap
+.Lrq_row:
+    cmp     r12d, r13d
+    jae     .Lrq_out
+    xor     r14d, r14d
+.Lrq_px:
+    cmp     r14d, [rip+hv_w]
+    jae     .Lrq_rown
+    mov     eax, r12d
+    imul    eax, [rip+hv_w]
+    add     eax, r14d
+    mov     r15d, eax                   # i
+    mov     rax, [rip+hv_rowspp]        # its samples
+    mov     eax, [rax+r12*4]
+    mov     ecx, 1
+    test    eax, eax
+    cmovz   eax, ecx
+    cvtsi2ss xmm0, eax
+    movss   [rsp+84], xmm0
+    movss   xmm1, [rip+pt_one]
+    divss   xmm1, xmm0
+    movss   [rsp+80], xmm1
+    imul    rbx, r15, 28                # the passes' means
+    add     rbx, [rip+hv_aux]
+    xor     ecx, ecx
+1:  movss   xmm0, [rbx+rcx*4]
+    mulss   xmm0, xmm1
+    movss   [rsp+32+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 7
+    jb      1b
+    mov     dword ptr [rsp+60], 0
+    mov     dword ptr [rsp+88], -1
+    cmp     dword ptr [rip+rq_hok], 0
+    je      .Lrq_merge
+    cvtsi2ss xmm0, r14d                 # its centre's ray
+    addss   xmm0, [rip+pt_half]
+    mulss   xmm0, [rip+rq_2w]
+    subss   xmm0, [rip+pt_one]
+    mulss   xmm0, [rip+rq_th]
+    cvtsi2ss xmm1, r12d
+    addss   xmm1, [rip+pt_half]
+    mulss   xmm1, [rip+rq_2h]
+    movss   xmm2, [rip+pt_one]
+    subss   xmm2, xmm1
+    mulss   xmm2, [rip+rq_hw]
+    mulss   xmm2, [rip+rq_th]
+    lea     rdi, [rip+rq_r]
+    call    rq_dir
+    xorps   xmm4, xmm4
+    movss   xmm3, [rsp+56]              # the depth: a point, or (none) the
+    comiss  xmm3, xmm4                  #  direction itself
+    ja      2f
+    movaps  xmm5, xmm0
+    jmp     3f
+2:  shufps  xmm3, xmm3, 0
+    mulps   xmm3, xmm0
+    addps   xmm3, [rip+rq_o]
+    movaps  [rsp+16], xmm3
+    movaps  xmm5, xmm3
+    subps   xmm5, [rip+rq_po]
+3:  movaps  xmm6, xmm5                  # into the last camera: z, then the
+    dpps    xmm6, [rip+rq_pf], 0x71     #  pixel
+    comiss  xmm6, xmm4
+    jbe     .Lrq_merge
+    movaps  xmm7, xmm5
+    dpps    xmm7, [rip+rq_pr], 0x71
+    mulss   xmm7, [rip+rq_kr]
+    divss   xmm7, xmm6
+    movaps  xmm8, xmm5
+    dpps    xmm8, [rip+rq_pu], 0x71
+    mulss   xmm8, [rip+rq_ku]
+    divss   xmm8, xmm6
+    addss   xmm7, [rip+pt_one]          # x = (sx + 1) w / 2 - 1/2, y = (1 -
+    mulss   xmm7, [rip+rq_w]            #  sy w / h) h / 2 - 1/2: between
+    mulss   xmm7, [rip+pt_half]         #  the centres x0, x0 + 1 (fx) ...
+    subss   xmm7, [rip+pt_half]
+    mulss   xmm8, [rip+rq_wh]
+    movss   xmm9, [rip+pt_one]
+    subss   xmm9, xmm8
+    mulss   xmm9, [rip+rq_h]
+    mulss   xmm9, [rip+pt_half]
+    subss   xmm9, [rip+pt_half]
+    roundss xmm10, xmm7, 1
+    roundss xmm11, xmm9, 1
+    subss   xmm7, xmm10
+    subss   xmm9, xmm11
+    cvttss2si eax, xmm10
+    cvttss2si ecx, xmm11
+    mov     [rsp+128], eax
+    mov     [rsp+132], ecx
+    movss   [rsp+136], xmm7
+    movss   [rsp+140], xmm9
+    xorps   xmm0, xmm0                  # the four taps that saw the same,
+    movaps  [rsp+96], xmm0              #  bilinear
+    movaps  [rsp+112], xmm0
+    mov     dword ptr [rsp+144], 0
+    mov     dword ptr [rsp+148], 0
+.Lrq_tap:
+    mov     edx, [rsp+148]
+    cmp     edx, 4
+    jae     .Lrq_taps
+    inc     dword ptr [rsp+148]
+    movss   xmm0, [rip+pt_one]          # its weight
+    movss   xmm1, [rsp+136]
+    test    edx, 1
+    jnz     11f
+    movss   xmm2, xmm0
+    subss   xmm2, xmm1
+    movss   xmm1, xmm2
+11: movss   xmm2, [rsp+140]
+    test    edx, 2
+    jnz     12f
+    movss   xmm3, xmm0
+    subss   xmm3, xmm2
+    movss   xmm2, xmm3
+12: mulss   xmm1, xmm2
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    jbe     .Lrq_tap
+    movss   [rsp+152], xmm1
+    mov     eax, edx
+    and     eax, 1
+    add     eax, [rsp+128]
+    mov     ecx, edx
+    shr     ecx, 1
+    add     ecx, [rsp+132]
+    test    eax, eax
+    js      .Lrq_tap
+    cmp     eax, [rip+hv_w]
+    jge     .Lrq_tap
+    test    ecx, ecx
+    js      .Lrq_tap
+    cmp     ecx, [rip+hv_h]
+    jge     .Lrq_tap
+    mov     edx, ecx
+    imul    edx, [rip+hv_w]
+    add     edx, eax
+    shl     rdx, 6
+    add     rdx, [rip+rq_hin]
+    mov     rbx, rdx                    # its history
+    call    rq_tap
+    jc      .Lrq_tap
+    movss   xmm1, [rsp+152]             # += it x its weight
+    movaps  xmm0, [rbx]
+    movss   xmm2, xmm1
+    shufps  xmm2, xmm2, 0
+    mulps   xmm0, xmm2
+    addps   xmm0, [rsp+96]
+    movaps  [rsp+96], xmm0
+    movss   xmm0, [rbx+28]
+    mulss   xmm0, xmm1
+    addss   xmm0, [rsp+124]
+    movss   [rsp+124], xmm0
+    addss   xmm1, [rsp+144]
+    movss   [rsp+144], xmm1
+    jmp     .Lrq_tap
+.Lrq_taps:
+    movss   xmm1, [rsp+144]             # enough of it: its mean (L, count,
+    comiss  xmm1, [rip+rq_wmin]         #  m2)
+    jb      .Lrq_merge
+    movss   xmm0, [rip+pt_one]
+    divss   xmm0, xmm1
+    movss   xmm2, xmm0
+    shufps  xmm2, xmm2, 0
+    movaps  xmm3, [rsp+96]
+    mulps   xmm3, xmm2
+    movaps  [rsp+96], xmm3
+    mulss   xmm0, [rsp+124]
+    movss   [rsp+124], xmm0
+    lea     rbx, [rsp+96]
+    call    rq_box                      # its brightness as round it now
+    jc      .Lrq_merge
+    mov     dword ptr [rsp+88], 0
+.Lrq_merge:
+    imul    rsi, r15, 12                # the new sums
+    add     rsi, [rip+hv_accum]
+    movsd   xmm0, [rsi]
+    movss   xmm1, [rsi+8]
+    movlhps xmm0, xmm1                  # L sums
+    mov     rax, [rip+hv_m2]
+    movss   xmm2, [rax+r15*4]           # m2 sum
+    movss   xmm3, [rsp+84]              # n: the count
+    cmp     dword ptr [rsp+88], 0
+    jl      6f
+    lea     rax, [rsp+96]               # with history: weight = min(its
+                                        #  count, target - n)
+    movss   xmm4, [rax+12]
+    movss   xmm5, [rip+rq_s]
+    subss   xmm5, xmm3
+    minss   xmm4, xmm5
+    xorps   xmm5, xmm5
+    maxss   xmm4, xmm5
+    movaps  xmm5, [rax]                 # L += its mean x weight
+    shufps  xmm4, xmm4, 0
+    mulps   xmm5, xmm4
+    andps   xmm5, [rip+rq_xyz]
+    addps   xmm0, xmm5
+    movss   xmm5, [rax+28]              # m2 likewise
+    mulss   xmm5, xmm4
+    addss   xmm2, xmm5
+    addss   xmm3, xmm4
+6:  movss   xmm4, [rip+pt_one]          # the means
+    divss   xmm4, xmm3
+    movss   xmm6, xmm4
+    shufps  xmm6, xmm6, 0
+    mulps   xmm0, xmm6
+    mulss   xmm2, xmm4
+    mov     eax, r15d                   # the history out: L, count; the
+    shl     rax, 6                      #  albedo, m2; the normal, depth
+    add     rax, [rip+rq_hout]
+    movaps  xmm6, xmm0
+    andps   xmm6, [rip+rq_xyz]
+    movaps  [rax], xmm6
+    movss   [rax+12], xmm3
+    movups  xmm6, [rsp+32]
+    movups  [rax+16], xmm6
+    movss   [rax+28], xmm2
+    movups  xmm6, [rsp+44]
+    movups  [rax+32], xmm6
+    movss   xmm6, [rsp+56]
+    movss   [rax+44], xmm6
+    movaps  xmm7, xmm0                  # m2 for the denoiser: its variance
+    dpps    xmm7, [rip+rq_lw4], 0x71    #  as from its own count (lum^2 +
+    mulss   xmm7, xmm7                  #  var x target / count)
+    movss   xmm8, xmm2
+    subss   xmm8, xmm7
+    xorps   xmm9, xmm9
+    maxss   xmm8, xmm9
+    mulss   xmm8, [rip+rq_s]
+    divss   xmm8, xmm3
+    addss   xmm7, xmm8
+    movss   xmm2, xmm7
+    movss   xmm6, [rip+rq_s]            # the sums: the target's
+    shufps  xmm6, xmm6, 0
+    mulps   xmm0, xmm6
+    movlps  [rsi], xmm0
+    movhlps xmm0, xmm0
+    movss   [rsi+8], xmm0
+    mulss   xmm2, xmm6
+    mov     rax, [rip+hv_m2]
+    movss   [rax+r15*4], xmm2
+    imul    rbx, r15, 28
+    add     rbx, [rip+hv_aux]
+    xor     ecx, ecx
+7:  movss   xmm0, [rsp+32+rcx*4]
+    mulss   xmm0, xmm6
+    movss   [rbx+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 7
+    jb      7b
+    inc     r14d
+    jmp     .Lrq_px
+.Lrq_rown:
+    inc     r12d
+    jmp     .Lrq_row
+.Lrq_out:
+    lea     rsp, [rbp-40]
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    pop     rbp
+    ret
+
+# rq_tap (in rq_job: eax = x, ecx = y of a pixel of the last frame, rbx its
+#   history) -> CF = 0 when it saw what this pixel sees: no hit both, or its
+#   point (the last camera's ray through its centre, its depth) near this
+#   one's; the normals and albedos alike
+rq_tap:
+    xorps   xmm4, xmm4
+    movss   xmm10, [rbx+44]             # its depth
+    movss   xmm3, [rsp+8+56]
+    comiss  xmm3, xmm4
+    ja      4f
+    comiss  xmm10, xmm4                 # (none here: none there)
+    ja      8f
+    jmp     5f
+4:  comiss  xmm10, xmm4
+    jbe     8f
+    cvtsi2ss xmm0, eax
+    addss   xmm0, [rip+pt_half]
+    mulss   xmm0, [rip+rq_2w]
+    subss   xmm0, [rip+pt_one]
+    mulss   xmm0, [rip+rq_pth]
+    cvtsi2ss xmm1, ecx
+    addss   xmm1, [rip+pt_half]
+    mulss   xmm1, [rip+rq_2h]
+    movss   xmm2, [rip+pt_one]
+    subss   xmm2, xmm1
+    mulss   xmm2, [rip+rq_hw]
+    mulss   xmm2, [rip+rq_pth]
+    lea     rdi, [rip+rq_pr]
+    call    rq_dir
+    movss   xmm10, [rbx+44]
+    shufps  xmm10, xmm10, 0
+    mulps   xmm0, xmm10
+    addps   xmm0, [rip+rq_po]
+    subps   xmm0, [rsp+8+16]
+    dpps    xmm0, xmm0, 0x71            # |q - p|^2 < (0.02 d + 0.002)^2
+    movss   xmm1, [rsp+8+56]
+    mulss   xmm1, [rip+rq_ptol]
+    addss   xmm1, [rip+rq_atol]
+    mulss   xmm1, xmm1
+    comiss  xmm0, xmm1
+    jae     8f
+5:  movups  xmm0, [rsp+8+44]            # the normals
+    dpps    xmm0, [rbx+32], 0x71
+    comiss  xmm0, [rip+rq_ncos]
+    jb      8f
+    movups  xmm0, [rsp+8+32]            # the albedos
+    subps   xmm0, [rbx+16]
+    andps   xmm0, [rip+rq_abs]
+    movaps  xmm1, [rip+rq_atol4]
+    cmpltps xmm0, xmm1
+    movmskps eax, xmm0
+    and     eax, 7
+    cmp     eax, 7
+    jne     8f
+    clc
+    ret
+8:  stc
+    ret
+
+# rq_lum_job(ctx, esi=first row, edx=end) - each pixel's luminance now (its
+#   own samples' mean) into rq_lum
+rq_lum_job:
+1:  cmp     esi, edx
+    jae     9f
+    mov     rax, [rip+hv_rowspp]
+    mov     eax, [rax+rsi*4]
+    mov     ecx, 1
+    test    eax, eax
+    cmovz   eax, ecx
+    cvtsi2ss xmm1, eax
+    movss   xmm2, [rip+pt_one]
+    divss   xmm2, xmm1
+    mov     eax, esi
+    imul    eax, [rip+hv_w]
+    xor     ecx, ecx
+2:  cmp     ecx, [rip+hv_w]
+    jae     3f
+    lea     r8d, [rax+rcx]
+    imul    r9, r8, 12
+    add     r9, [rip+hv_accum]
+    movss   xmm0, [r9]
+    mulss   xmm0, [rip+rq_lw]
+    movss   xmm3, [r9+4]
+    mulss   xmm3, [rip+rq_lw+4]
+    addss   xmm0, xmm3
+    movss   xmm3, [r9+8]
+    mulss   xmm3, [rip+rq_lw+8]
+    addss   xmm0, xmm3
+    mulss   xmm0, xmm2
+    mov     r9, [rip+rq_lum]
+    movss   [r9+r8*4], xmm0
+    inc     ecx
+    jmp     2b
+3:  inc     esi
+    jmp     1b
+9:  ret
+
+# rq_box (in rq_job: r12d y, r14d x, rbx the history) -> CF = 1 when the
+#   history's luminance is outside this frame's 3x3 round the pixel: mean
+#   -+ (2 sigma + 5% of it) (a light, a shadow moved: not the same)
+rq_box:
+    xorps   xmm0, xmm0                  # sum, sum of squares, count
+    xorps   xmm1, xmm1
+    xorps   xmm2, xmm2
+    mov     edx, r12d
+    dec     edx
+1:  lea     eax, [r12+1]
+    cmp     edx, eax
+    jg      4f
+    test    edx, edx
+    js      3f
+    cmp     edx, [rip+hv_h]
+    jge     3f
+    mov     ecx, r14d
+    dec     ecx
+2:  lea     eax, [r14+1]
+    cmp     ecx, eax
+    jg      3f
+    test    ecx, ecx
+    js      21f
+    cmp     ecx, [rip+hv_w]
+    jge     21f
+    mov     eax, edx
+    imul    eax, [rip+hv_w]
+    add     eax, ecx
+    mov     r8, [rip+rq_lum]
+    movss   xmm3, [r8+rax*4]
+    addss   xmm0, xmm3
+    mulss   xmm3, xmm3
+    addss   xmm1, xmm3
+    addss   xmm2, [rip+pt_one]
+21: inc     ecx
+    jmp     2b
+3:  inc     edx
+    jmp     1b
+4:  divss   xmm0, xmm2                  # mean
+    divss   xmm1, xmm2
+    movss   xmm3, xmm0
+    mulss   xmm3, xmm3
+    subss   xmm1, xmm3
+    xorps   xmm3, xmm3
+    maxss   xmm1, xmm3
+    sqrtss  xmm1, xmm1                  # sigma
+    addss   xmm1, xmm1
+    movss   xmm3, xmm0
+    mulss   xmm3, [rip+rq_brel]
+    addss   xmm1, xmm3                  # the box's half
+    movss   xmm3, [rbx]                 # the history's luminance
+    mulss   xmm3, [rip+rq_lw]
+    movss   xmm4, [rbx+4]
+    mulss   xmm4, [rip+rq_lw+4]
+    addss   xmm3, xmm4
+    movss   xmm4, [rbx+8]
+    mulss   xmm4, [rip+rq_lw+8]
+    addss   xmm3, xmm4
+    subss   xmm3, xmm0
+    andps   xmm3, [rip+rq_abs]
+    comiss  xmm1, xmm3                  # CF: half < |difference|
+    ret
+
+# rq_dir(xmm0 = sx th, xmm2 = sy th, rdi = right (then up, forward:
+#   vec4s)) -> xmm0 = unit(forward + right sx th + up sy th) (w 0)
+rq_dir:
+    shufps  xmm0, xmm0, 0
+    mulps   xmm0, [rdi]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm2, [rdi+16]
+    addps   xmm0, xmm2
+    addps   xmm0, [rdi+32]
+    movaps  xmm1, xmm0
+    dpps    xmm1, xmm0, 0x7F
+    sqrtps  xmm1, xmm1
+    divps   xmm0, xmm1
+    ret
 
 # render.image <path> [width height samples]
 do_render_image:
@@ -4332,6 +4959,17 @@ do_render_image:
 .section .rodata
 .align 4
 pt_amin_spec:   .float 0.0025           # alpha below this: a mirror
+rq_ptol:        .float 0.02             # reuse: the same place (x the distance,
+rq_atol:        .float 0.002            #  plus), the same way (normals' cos),
+rq_ncos:        .float 0.8
+rq_brel:        .float 0.05             #  (and the brightness's box: + 5%)
+rq_wmin:        .float 0.3              #  the taps' weight that saw the same
+rq_lw:          .float 0.2126, 0.7152, 0.0722
+.align 16
+rq_atol4:       .float 0.08, 0.08, 0.08, 0.08   # the same albedo
+rq_abs:         .long 0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff
+rq_xyz:         .long -1, -1, -1, 0
+rq_lw4:         .float 0.2126, 0.7152, 0.0722, 0.0
 pt_mdepth:      .float -0.1202          # -1 / (12 ln 2): exp(-d / 12) via 2^x
 
 .section .bss
@@ -4352,6 +4990,33 @@ rf_h:           .skip 4
 rf_len:         .skip 4                 #  the folder's length
 rf_dig:         .skip 16
 rf_path:        .skip 1040
+rf_target:      .skip 4                 #  the samples a frame
+rf_ron:         .skip 4                 #  1: reusing samples (hv_reuse)
+.align 16
+rq_o:           .skip 16                # rf_reuse: this frame's camera
+rq_r:           .skip 16                #  (origin, right, up, forward;
+rq_u:           .skip 16                #  tan_h)
+rq_f:           .skip 16
+rq_th:          .skip 16
+rq_po:          .skip 16                #  the last frame's
+rq_pr:          .skip 16
+rq_pu:          .skip 16
+rq_pf:          .skip 16
+rq_pth:         .skip 16
+rq_hin:         .skip 8                 #  the history read, the one written
+rq_hout:        .skip 8                 #  (RQ_SZ a pixel)
+rq_hok:         .skip 4                 #  1: rq_hin holds the last frame's
+rq_lum:         .skip 8                 #  this frame's luminances (rq_lum_job)
+rq_s:           .skip 4                 #  the target
+rq_w:           .skip 4
+rq_h:           .skip 4
+rq_hw:          .skip 4
+rq_wh:          .skip 4
+rq_2w:          .skip 4
+rq_2h:          .skip 4
+rq_kr:          .skip 4
+rq_ku:          .skip 4
+rf_pcam:        .skip 64                #  the last frame's camera (hv_cam)
 hv_why:         .skip 4                 # where the render is and why (HW_*)
 hv_den_on:      .skip 4                 # beauty shows hv_den (denoised)
 hv_env:         .skip 4                 # the world is an HDRI (no studio sky, sun)

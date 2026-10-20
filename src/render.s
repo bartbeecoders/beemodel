@@ -81,6 +81,9 @@ s_rn_animfail:  .asciz "  render.animation: could not render or write the frames
 s_rn_mb:        .asciz "  motion blur: the shutter open "
 s_rn_mb2:       .asciz "% of a frame"
 s_rn_mboff:     .asciz "  motion blur: off"
+s_rn_ru:        .asciz "  sample reuse: from up to "
+s_rn_ru2:       .asciz " frames before"
+s_rn_ruoff:     .asciz "  sample reuse: off"
 rn_f100:        .float 100.0
 rn_f1:          .float 1.0
 s_rn_baddev:    .asciz "  render device: auto, rtx, gpu or cpu"
@@ -133,6 +136,7 @@ OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, doc="S
 OPERATOR op_render_pass, "render.pass", "Next Render Pass", do_render_pass, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)", poll=poll_render
 OPERATOR op_render_device, "render.device", "Render Device", do_render_device, flags=OPF_AI_SAFE|OPF_QUIET, doc="Where renders run: render.device [auto|rtx|gpu|cpu] (auto: the best there is - RTX ray tracing, the GPU, else the CPU; none: says which; kept in the preferences)"
 OPERATOR op_render_anim, "render.animation", "Render Animation", do_render_anim, flags=OPF_AI_SAFE, doc="Render every frame into a folder of PNGs (0001.png ...) at the render settings: render.animation <folder> [first last] (none: the animation's range). On the GPU the next frame is simulated and built while it traces one"
+OPERATOR op_render_reuse, "render.sample_reuse", "Sample Reuse", do_render_reuse, flags=OPF_AI_SAFE, doc="Animation renders (render.animation, render_frames) reuse samples from up to so many frames before where a pixel sees the same surface, tracing only samples / (frames + 1) new ones: render.sample_reuse <frames> (0: off, up to 16)"
 OPERATOR op_render_mblur, "render.motion_blur", "Motion Blur", do_render_mblur, flags=OPF_AI_SAFE, doc="Motion blur: render.motion_blur <shutter> - how long the shutter is open, as a part of a frame (0.5: half of it; 0: off). Particle balls are drawn where they are at each sample's time: rain streaks"
 OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>", form=form_render
 OPERATOR op_render_denoise, "render.denoise", "Denoise", do_render_denoise, check_denoise, flags=OPF_AI_SAFE|OPF_QUIET, doc="Toggle denoising the beauty pass when a render ends (guided by albedo, normal, depth)", poll=poll_render
@@ -572,6 +576,42 @@ do_render_anim:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# ---- render.sample_reuse [frames] -------------------------------------------
+do_render_reuse:
+    sub     rsp, 8
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      5f
+    lea     rdx, [rsi+64]
+    call    parse_float
+    test    eax, eax
+    jz      5f
+    cvttss2si eax, xmm0                 # 0 .. 16 frames
+    xor     ecx, ecx
+    test    eax, eax
+    cmovs   eax, ecx
+    mov     ecx, 16
+    cmp     eax, ecx
+    cmova   eax, ecx
+    mov     [rip+hv_reuse], eax
+    mov     dword ptr [rip+dirty], 1
+5:  cmp     dword ptr [rip+hv_reuse], 0
+    jne     6f
+    lea     rdi, [rip+s_rn_ruoff]
+    call    log_line
+    jmp     9f
+6:  call    fmt_reset
+    lea     rdi, [rip+s_rn_ru]
+    call    fmt_str
+    mov     edi, [rip+hv_reuse]
+    call    fmt_int
+    lea     rdi, [rip+s_rn_ru2]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+9:  add     rsp, 8
     ret
 
 # ---- render.motion_blur [shutter] -------------------------------------------

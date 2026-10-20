@@ -804,6 +804,9 @@ gpu_query:
     mov     eax, [rip+gp_nfld]          # 25: liquid fields it traced
     cmp     edi, 25
     je      9f
+    mov     eax, [rip+hv_reuse]         # 26: render.sample_reuse's frames
+    cmp     edi, 26
+    je      9f
     cmp     edi, 7                      # 7.. the live viewport's (live.s)
     jb      8f
     jmp     lv_query
