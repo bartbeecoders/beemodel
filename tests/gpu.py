@@ -403,6 +403,20 @@ def main():
           and up[4] < up[0], f'the scene stays on the GPU: the same scene again sends {up[1]} and {up[2]} KiB (the '
           f'first {up[0]}), a move {up[3]}, a material {up[4]}; after them, a modifier, 500 balls, a deletion and '
           f'a bigger image ({up[5:]} KiB) each image is a fresh process\'s ({same})')
+    # (balls growing within their binding's room: its new tail goes up whole,
+    #  the liquids' header after them too; the device's memory there was never
+    #  sent, so zeros on both sides proved nothing: fireworks lost the device)
+    grow = ('emit("Cube", "from faces burst 2000 speed 1 life 100 size 0.05 gravity 0 color ff4010")\nframe(3)\n'
+            'op("render.image", "%s/w.png 96 72 2 0")\n'
+            'emit("Cube", "from faces burst 200 speed 1 life 100 size 0.05 gravity 0 color 4010ff")\nframe(4)\n' % HOME)
+    q = run(gb + grow + 'op("render.image", "%s/grow.png 96 72 2 0")\nprint("grow", gpu(18), gpu(19), gpu(0))\n'
+            % HOME, BEEMODEL_GPU='any')
+    f = os.path.join(HOME, 'grow_fresh.png')
+    run(gb + grow.replace('op("render.image", "%s/w.png 96 72 2 0")\n' % HOME, '') +
+        'op("render.device", "cpu")\nop("render.image", "%s/w.png 8 6 1 0")\nop("render.device", "auto")\n'
+        'op("render.image", "%s 96 72 2 0")\n' % (HOME, f), BEEMODEL_GPU='any')
+    check(q.get('grow') == ['0', '2200', '1'] and compare(os.path.join(HOME, 'grow.png'), f) == (0.0, 1.0),
+          f'balls grown within their room (2000 -> 2200): still on the GPU ({q.get("grow")}), a fresh process\'s image')
 
     # ---- motion blur (H11): balls where they are at each sample's time -----------
     ms = ('add("plane", "P", 0, 0, 0)\nscale("P", 6)\nemit("Cube", "from faces burst 300 speed 25 life 100 '

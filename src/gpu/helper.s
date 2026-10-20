@@ -386,9 +386,14 @@ main:
 1:  cmp     ebx, NKALL                  #  render finds it ready); a failure
     jae     3f                          #  is not fatal here
     cmp     ebx, 3
-    jb      2f
+    jb      11f
     cmp     dword ptr [rip+rtx], 0
     je      3f
+    jmp     2f
+11: cmp     dword ptr [rip+rtx], 0      # (ptg: not when the renders take
+    je      2f                          #  RTX; made when first asked)
+    cmp     dword ptr [rip+msg+GM_SLOT], 1
+    je      21f
 2:  imul    eax, ebx, KR_SZ
     lea     rcx, [rip+kernels]
     cmp     qword ptr [rcx+rax+KR_PIPE], 0
