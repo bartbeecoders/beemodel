@@ -6,6 +6,68 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-20
+
+Rendering performance, issues H1-H15 (#346-#360): every demo scene renders
+on the GPU, with RTX where there is one, and animations render faster.
+[docs/GPU.md](docs/GPU.md); `tools/renderbench.py` times it. A warm render
+at 960 x 540, 16 samples, on an RTX 4080 SUPER: rainstorm 1377 -> 103 ms,
+dam-break 1201 -> 63 ms, leaf-twister 313 -> 27 ms, fireworks 122 -> 24 ms.
+
+### Added
+- A render device setting (H1, #346): Properties › Render › Device and
+  Preferences › System › Render device (`render.device auto|rtx|gpu|cpu`).
+  Each render says where it ran and why ("Last render: on the CPU (a
+  shadow catcher)"), in the Render panel, the Render area's header and the
+  console; `gpu(15..18)`.
+- On the GPU now, instead of the CPU: shadow catchers such as the Ground
+  (H2, #347), HDRI worlds (H3, #348) and the Vertex Color node (H4, #349),
+  each matching the CPU's image.
+- The GPU helper starts with the window and builds its kernels before the
+  first render asks (H5, #350).
+- RTX (H10, #355): on a card with hardware ray tracing, renders and
+  Rendered shading trace with ray queries; the images match the compute
+  path's. Rainstorm frame: 165 -> 96 ms.
+- Motion blur from particle velocities (H11, #356): `render.motion_blur
+  <shutter>` (Properties › Render › Motion blur): rain streaks.
+- Animation rendering (H12, #357): `render_frames(folder [, first, last,
+  w, h, samples, denoise])` and `render.animation <folder> [first last]`.
+  The next frame is simulated and built while the GPU traces one: the
+  rainstorm 109 -> 78 ms a frame. `render.sh` uses it.
+- Sample reuse between animation frames (H14, #359): `render.sample_reuse
+  <frames>` (Properties › Render › Sample reuse). Later frames trace
+  samples / (frames + 1) new samples and keep the frame before's where a
+  pixel sees the same surface. A still scene with a panning camera at 16
+  samples and reuse 3 comes out closer to the reference than 16 new
+  samples a frame, at a quarter of the cost. Moving objects keep only
+  their own samples (the camera is reprojected, objects are not).
+
+### Changed
+- Particle balls are exact spheres, not 20-triangle balls (H6, #351): the
+  rainstorm's scene build 1025 -> 206 ms.
+- BVHs are built on every thread (H7, #352), and each object keeps its own
+  BVH between renders while it does not change (H8, #353): the rainstorm's
+  BVH 949 -> 39 ms, its scene build on a third render 15 ms.
+- The scene stays on the GPU between renders (H9, #354): only the 4 KiB
+  blocks that changed go up (a rainstorm frame sends 7.7 of its 100 MB).
+- A liquid's surface is traced on the GPU from its density field instead
+  of being meshed every frame (H13, #358): the dam break 157 -> 109 ms a
+  frame. It is still meshed for the viewport, CPU renders and exports.
+
+### Fixed
+- A new scene started with the last session's viewport cameras: a camera
+  left far off made every new scene's viewport look empty.
+- The window's early helper start was ready too late again on a cold
+  driver cache (about 7.5 s since the RTX kernels came): with RTX it no
+  longer builds the compute path's graph kernel, which Auto never uses
+  (ready in under 5 s).
+- A saved file's Denoise setting was read back only when its sample count
+  was large enough (the count was compared instead of the chunk's size).
+- After the scene stayed on the GPU (H9), particles growing within their
+  buffer's spare room left the bytes after them unsent; with liquid fields
+  read from there (H13) the GPU could lose its device (fireworks frame
+  107, then the CPU took over).
+
 ## [0.22.1] - 2026-10-19
 
 Particle demos, a cache fix for keyed force fields, and the website.
@@ -2137,7 +2199,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.22.1...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/bartbeecoders/beemodel/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/bartbeecoders/beemodel/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/bartbeecoders/beemodel/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/bartbeecoders/beemodel/compare/v0.20.0...v0.21.0

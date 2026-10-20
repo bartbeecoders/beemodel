@@ -21,8 +21,8 @@ Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, G
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.22.1/beemodel-0.22.1-linux-x86_64.bin
-chmod +x beemodel-0.22.1-linux-x86_64.bin && ./beemodel-0.22.1-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.23.0/beemodel-0.23.0-linux-x86_64.bin
+chmod +x beemodel-0.23.0-linux-x86_64.bin && ./beemodel-0.23.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -1044,6 +1044,9 @@ operator spine and how to add an action.
   `glslc`) into `src/gpu/spv.s`.
 * `tools/genmatnodes.py` regenerates the material node catalogue in
   `src/matnodes.s` (names, kinds, choices, defaults) from its node list.
+* `tools/physbench.py` times the physics; `tools/renderbench.py` path-traces
+  the four particle demos (a still, the same again, `render_frames`, sample
+  reuse) and prints where the time goes.
 * `tests/keymaps/*.xkb` are real US, Belgian and German keymaps, used by the
   headless tests.
 * Golden images (`tests/golden/*.png`) are compared pixel by pixel when the
