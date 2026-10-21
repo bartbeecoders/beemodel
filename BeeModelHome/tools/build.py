@@ -90,8 +90,18 @@ def changelog():
 def render_body(body):
     """-> (summary html, sections html, plain text summary)."""
     lines = body.splitlines()
-    summary, html_out, items, para = [], [], [], []
+    summary, html_out, items, para, rows = [], [], [], [], []
     seen_heading = False
+
+    def flush_rows():                                                # a Markdown table
+        if rows:
+            cells = [[c.strip() for c in r.strip().strip('|').split('|')] for r in rows
+                     if not re.fullmatch(r'\|?[\s:|-]+\|?', r.strip())]
+            head, rest = cells[0], cells[1:]
+            html_out.append('<table><thead><tr>%s</tr></thead><tbody>%s</tbody></table>' % (
+                ''.join('<th>%s</th>' % inline(c) for c in head),
+                ''.join('<tr>%s</tr>' % ''.join('<td>%s</td>' % inline(c) for c in r) for r in rest)))
+            rows.clear()
 
     def flush_items():
         if items:
@@ -108,6 +118,11 @@ def render_body(body):
             para.clear()
 
     for line in lines:
+        if line.startswith('|'):
+            flush_para(); flush_items()
+            rows.append(line)
+            continue
+        flush_rows()
         if line.startswith('### '):
             flush_para(); flush_items()
             seen_heading = True
@@ -127,7 +142,7 @@ def render_body(body):
         else:
             flush_items()
             para.append(line.strip())
-    flush_para(); flush_items()
+    flush_para(); flush_items(); flush_rows()
     s = ' '.join(summary)
     if not s:                                                        # (no lead paragraph: the first item)
         first = re.search(r'^\s*[-*] (.+)$', body, re.M)
