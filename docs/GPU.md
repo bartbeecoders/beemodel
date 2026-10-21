@@ -257,6 +257,24 @@ At 2560 x 1440 in Material Preview a frame of the rainstorm (94k drops)
 draws in 4-7 ms instead of 46 ms, leaf-twister (18k leaves) in 4-6 ms
 instead of 23 ms.
 
+**Playback** (`tools/playbench.py`: each demo played through its camera
+in the fake compositor at 2560 x 1440 for four seconds; window frames a
+second and a frame's median milliseconds, Ryzen 9 7950X with an RTX 4080
+SUPER, v0.23.0 -> v0.24.0):
+
+| demo | Solid | Material Preview | Rendered |
+|---|---|---|---|
+| dam break | 4 -> 130 fps (4 ms) | 3 -> 135 fps (4 ms) | 4 -> 71 fps |
+| rainstorm | 80 -> 185 fps (13 -> 4 ms) | 23 -> 181 fps (46 -> 4 ms) | 20 -> 27 fps (59 -> 13 ms) |
+| leaf-twister | 77 -> 131 fps (11 -> 4 ms) | 45 -> 144 fps (23 -> 4 ms) | 45 -> 76 fps (29 -> 17 ms) |
+| fireworks | 218 -> 218 fps (4 -> 3 ms) | 75 -> 214 fps (13 -> 3 ms) | 130 -> 169 fps (4 ms) |
+| wrecking ball | 202 -> 174 fps (4 -> 6 ms) | 58 -> 172 fps (18 -> 6 ms) | 88 -> 133 fps (6 ms) |
+
+Every demo plays its frames in real time now. A light scene in Solid pays
+the helper's round trip (the wrecking ball, 2 ms). The rainstorm in
+Rendered is held by its 525k still triangles, copied and compared at each
+scene build (19 ms); the build could keep them in place.
+
 ### Liquids solved on the GPU (v0.24)
 
 A liquid's substeps run in the helper's compute kernel `src/gpu/liq.comp`
