@@ -113,9 +113,10 @@ def main():
     check(secs < BUDGET_S, f'the walkthrough runs in {secs:.1f} s (budget {BUDGET_S:.0f} s)')
     fr, lat = window(os.path.join(d, 'animation.bee'))
     ms = lat[len(lat) // 2] if lat else 1e9
-    check(fr == '49 1 1' and ms < FRAME_MS * CI,
+    budget = FRAME_MS * (3 if CI > 1 else 1)        # (GitHub's 20261018 runners take ~35 ms where
+    check(fr == '49 1 1' and ms < budget,            #  20261012's took ~25, the same build; 12 ms locally)
           f'in the window, Right steps the scene a frame in {ms:.1f} ms at the median, '
-          f'{lat[int(len(lat) * 0.95)] if lat else 0:.1f} ms at the 95th percentile ({fr})')
+          f'{lat[int(len(lat) * 0.95)] if lat else 0:.1f} ms at the 95th percentile, budget {budget:.1f} ({fr})')
     if OUT:
         os.makedirs(OUT, exist_ok=True)
         for f in files[1:]:
