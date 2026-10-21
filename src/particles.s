@@ -4920,7 +4920,8 @@ pt_iblock:
 pt_stamp:
     mov     eax, [rip+pt_now]
     shl     rax, 32
-    or      eax, [rip+pt_ns]
+    mov     ecx, [rip+pt_ns]            # (not "or eax": that clears the top)
+    or      rax, rcx
     xor     rax, [rip+pt_hash]
     ret
 

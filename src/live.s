@@ -417,12 +417,19 @@ lv_build:
     mov     r12d, edi
     mov     r13d, esi
     call    now_ms
-    mov     [rsp], rax
+    sub     rax, [rip+g_grow_ms]        # (slots grown meanwhile: not the
+    mov     [rsp], rax                  #  build's own time)
     call    mat_sync_check              # (material instances up to date)
     call    tex_init
     call    env_prep
     mov     [rip+hv_env], eax           # (an HDRI world: the GPU draws it too)
+    call    gpu_rtx_likely              # as a render's (hive_scene): traced
+    mov     [rip+hv_nobvh], eax         #  with RTX, no BVH on the CPU; a
+    call    gpu_fld_likely              #  liquid's surface as its field, not
+    mov     [rip+hv_fldon], eax         #  meshed
     call    hive_build
+    mov     dword ptr [rip+hv_nobvh], 0
+    mov     dword ptr [rip+hv_fldon], 0
     test    eax, eax
     jz      8f
     mov     eax, [rip+hv_n]             # (nothing to draw: Material Preview)
@@ -463,6 +470,7 @@ lv_build:
     jz      8f
     call    now_ms
     mov     [rip+lv_built_at], rax
+    sub     rax, [rip+g_grow_ms]
     sub     rax, [rsp]
     mov     [rip+lv_build_ms], eax
     mov     eax, 1
@@ -628,7 +636,11 @@ lv_fingerprint:
     jz      31f
     mov     eax, [rax+ME_VER]
     LV_MIX  rax
-31: mov     rdi, rbx                    # and the evaluated one's
+31: mov     rdi, rbx                    # (a liquid's surface: pt_stamp's,
+    call    pt_field                    #  not meshed to ask)
+    test    rax, rax
+    jnz     4f
+    mov     rdi, rbx                    # and the evaluated one's
     call    obj_eval
     LV_MIX  rax
     mov     r15, rax

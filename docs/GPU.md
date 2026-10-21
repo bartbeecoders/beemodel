@@ -330,7 +330,8 @@ and the shader applies ACES and the sRGB curve as the CPU's resolve does.
 **When the scene goes up again.** A fingerprint is taken every frame:
 
 - each object's place, flags (not its selection), material and modifiers;
-- its evaluated mesh, with the mesh's version and size;
+- its evaluated mesh, with the mesh's version and size (a liquid's
+  surface instead by its particles' state, without meshing it);
 - each light's colour and power;
 - the material records;
 - the undo and redo depths;
@@ -346,6 +347,14 @@ A camera move changes none of these. When the fingerprint changes:
 - samples begin 150 ms after the last build. Playback changes the scene
   every other frame, so it shows a raycast every frame rather than
   raycasts and samples in turn, which flickered.
+
+A build's time leaves out a slot's memory being made or grown (a first
+build's 80 ms in the dam break would otherwise keep it waiting for good).
+The scene is built as a render's is (v0.24): with RTX, no BVH on the CPU,
+and a liquid's surface as its field, not meshed. During playback at
+2560 x 1440, a frame takes (v0.23.0 -> v0.24.0): dam break 71 -> 5 ms,
+leaf-twister 25 -> 5 ms, rainstorm 52 -> 38 ms (its 525k still triangles
+are copied and compared each build).
 
 **Beside an F12 render.** The render owns Hive's scene, so the live view
 keeps its snapshot. When F12 opens the Render area and narrows the viewport,
