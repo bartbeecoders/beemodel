@@ -6,6 +6,56 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-21
+
+The viewport on the GPU, issues VP1-VP5 (#363-#367): playing an animation
+in Solid, Material Preview and Rendered now keeps up at 2560 x 1440.
+[docs/GPU.md](docs/GPU.md); `tools/playbench.py` times it. Window frames a
+second while playing, on an RTX 4080 SUPER (v0.23.0 -> v0.24.0):
+
+| demo | Solid | Material Preview | Rendered |
+|---|---|---|---|
+| dam break | 4 -> 130 | 3 -> 135 | 4 -> 71 |
+| rainstorm | 80 -> 185 | 23 -> 181 | 20 -> 27 |
+| leaf-twister | 77 -> 131 | 45 -> 144 | 45 -> 76 |
+| fireworks | 218 -> 218 | 75 -> 214 | 130 -> 169 |
+
+### Added
+- The 3D viewport drawn by the GPU helper (VP1, #363): Solid and Material
+  Preview (shader graphs, textures, bump and normal maps, vertex colours,
+  HDRI worlds) on a Vulkan graphics pipeline, each mesh's triangles kept
+  on the GPU while it does not change; the colour, depth and object ids
+  come back, so overlays, the outline and clicks work as before. The
+  helper imports BeeModel's shared memory where the device can
+  (`VK_EXT_external_memory_host`). `BEEMODEL_GPU_VIEW=off` keeps the CPU's
+  viewport; edit and paint modes, virtualized geometry and light probes
+  stay on the CPU. `gpu(27..32)`.
+- Instances and particles in the same pass (VP2, #364): geometry-node and
+  rigid-body instances and particle objects as instanced draws, points and
+  sprites as quads made on the GPU. The rainstorm in Material Preview 46 ->
+  5 ms a frame.
+- Liquids solved on the GPU (VP3, #365): `src/gpu/liq.comp`, liquid.s's
+  solver phase by phase (the dam break 67 -> 6 ms a frame);
+  `BEEMODEL_GPU_LIQUID=off`, force fields and landscape colliders keep the
+  CPU's. The viewport marches a liquid's field instead of meshing its
+  surface. `gpu(33..35)`.
+- `tools/playbench.py`: the demos played in the viewport at 2560 x 1440 in
+  each shading (VP5, #367).
+
+### Changed
+- Rendered shading keeps up while playing (VP4, #366): the live view
+  builds its scene as a render does (no CPU BVH with RTX, liquids as
+  fields), fingerprints a liquid by its particles instead of meshing it,
+  and no longer counts a slot's first allocation as build time (the dam
+  break showed a still image until playback stopped).
+
+### Fixed
+- A liquid's surface was meshed every frame by the viewport's DAG scan,
+  its wires' check and the live view's fingerprint even when nothing drew
+  the mesh (30 ms each time in the dam break).
+- `pt_stamp` dropped the particles' step count, so the live view noticed a
+  liquid's steps only through its re-meshed surface.
+
 ## [0.23.0] - 2026-10-20
 
 Rendering performance, issues H1-H15 (#346-#360): every demo scene renders
@@ -2201,7 +2251,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/bartbeecoders/beemodel/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/bartbeecoders/beemodel/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/bartbeecoders/beemodel/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/bartbeecoders/beemodel/compare/v0.21.0...v0.22.0
