@@ -130,14 +130,25 @@ jobs:
       - name: B-rep kernel (NURBS, exact solids, booleans, fillets, the enclosure on the kernel)
         run: timeout 600 python tests/brep.py build/beemodel
 
-      - name: FreeCAD (for the STEP round trips)
+      - name: FreeCAD, else OpenCASCADE (for the STEP round trips)
         run: |
-          sudo add-apt-repository -y ppa:freecad-maintainers/freecad-stable
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends freecad
-          freecadcmd --version
+          # FreeCAD from its PPA; when Launchpad is down (503s, time-outs), the
+          # OpenCASCADE bindings FreeCAD is built on (tests/step.py takes either)
+          if sudo add-apt-repository -y ppa:freecad-maintainers/freecad-stable && sudo apt-get update; then
+            for try in 1 2 3; do
+              sudo apt-get install -y --no-install-recommends -o Acquire::Retries=5 freecad && break
+              sleep 60
+            done
+          fi
+          if command -v freecadcmd; then
+            freecadcmd --version
+          else
+            sudo add-apt-repository -y -r ppa:freecad-maintainers/freecad-stable || true
+            python -m pip install --quiet cadquery-ocp==8.0.1.1.0
+            python -c "import OCP; print('OpenCASCADE (OCP) instead of FreeCAD')"
+          fi
 
-      - name: STEP (assemblies, units, colours; round trips through FreeCAD)
+      - name: STEP (assemblies, units, colours; round trips through FreeCAD or OpenCASCADE)
         run: timeout 900 python tests/step.py build/beemodel
 
       - name: GPU helper (Vulkan on llvmpipe, CPU fallback, the same images)
