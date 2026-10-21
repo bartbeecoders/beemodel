@@ -17,6 +17,10 @@
 .globl env_idx
 .globl env_str
 .globl env_rot
+.globl env_sh
+.globl env_small
+.globl env_cr
+.globl env_sr
 .globl env_prep
 .globl env_rad
 .globl env_sample

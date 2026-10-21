@@ -15,6 +15,8 @@
 
 # exports
 .globl preview_shade
+.globl cn_build
+.globl pc_fp
 
 .equ RO_CV,     0
 .equ RO_MESH,   8

@@ -49,6 +49,7 @@
 .globl sr_blk
 .globl pt_draw
 .globl pt_render
+.globl pt_vfill
 .globl pt_iblock
 .globl pt_sphere
 .globl pt_stamp
@@ -59,6 +60,12 @@
 .globl pc_any
 .globl pc_gnd
 .globl pc_gy
+.globl pc_nl
+.globl pc_tri
+.globl pc_node
+.globl pc_ix
+.globl pc_ntri
+.globl pc_nn
 
 .equ PB_REFS,   0                       # the settings block
 .equ PB_N,      4
@@ -159,6 +166,14 @@
 .section .bss
 .align 64
 pt_sr:          .skip SR_SZ*PB_MAX
+pv_out:         .skip 8                 # pt_vfill: where, the system's blocks,
+pv_blks:        .skip 8                 #  each one's first record, its colours,
+pv_first:       .skip 8                 #  ramp and end size
+pv_nb:          .skip 4
+pv_c1:          .skip 4
+pv_c2:          .skip 4
+pv_ramp:        .skip 4
+pv_se:          .skip 4
 .align 16
 pt_g:           .skip 16                # the world's gravity this step
 .align 8
@@ -4905,7 +4920,8 @@ pt_iblock:
 pt_stamp:
     mov     eax, [rip+pt_now]
     shl     rax, 32
-    or      eax, [rip+pt_ns]
+    mov     ecx, [rip+pt_ns]            # (not "or eax": that clears the top)
+    or      rax, rcx
     xor     rax, [rip+pt_hash]
     ret
 
@@ -4921,6 +4937,149 @@ pt_ivel:
     mov     ecx, [rcx+rdi*4]
     lea     rax, [rax+rcx*4]
 9:  ret
+
+# pt_vfill(edi=system, rsi=out or 0: only counted) -> eax = its particles
+#   written there, 20
+#   bytes each (gview.s: the viewport drawn by the GPU): x y z, the colour
+#   (0xRRGGBB, through its ramp as pt_draw takes it), the sprite's radius in
+#   metres (size x its end factor over its life, halved); the blocks in
+#   parallel. ecx = how it is drawn (PS_DRAW), edx = point pixels (1..8)
+pt_vfill:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     ebx, edi
+    mov     [rip+pv_out], rsi
+    imul    r12, rbx, SR_SZ
+    lea     rax, [rip+pt_sr]
+    add     r12, rax
+    mov     edi, [r12+SR_UID]
+    mov     esi, [r12+SR_K]
+    call    ps_nth
+    test    rax, rax
+    jz      8f
+    mov     r13, rax
+    mov     eax, [r13+PS_COLOR]
+    mov     [rip+pv_c1], eax
+    mov     eax, [r13+PS_COLOR2]
+    mov     [rip+pv_c2], eax
+    mov     eax, [r13+PS_RAMP]
+    mov     [rip+pv_ramp], eax
+    mov     eax, [r13+PS_SIZEEND]
+    mov     [rip+pv_se], eax
+    mov     edi, ebx                    # each block's first record: the live
+    call    sys_blocks                  #  counts before it
+    mov     [rip+pv_blks], rax
+    mov     r14d, [r12+SR_NB]
+    mov     [rip+pv_nb], r14d
+    lea     rdi, [rip+frame_arena]
+    lea     esi, [r14*4+16]
+    call    arena_alloc
+    test    rax, rax
+    jz      8f
+    mov     [rip+pv_first], rax
+    xor     ecx, ecx
+    xor     edx, edx                    # (the total)
+1:  cmp     ecx, r14d
+    jae     2f
+    mov     [rax+rcx*4], edx
+    mov     r8, [rip+pv_blks]
+    mov     r8d, [r8+rcx*4]
+    lea     r9, [rip+pt_bn]
+    add     edx, [r9+r8*4]
+    inc     ecx
+    jmp     1b
+2:  mov     [rsp], edx
+    cmp     qword ptr [rip+pv_out], 0   # (only counted)
+    je      21f
+    lea     rdi, [rip+pv_job]
+    xor     esi, esi
+    mov     edx, r14d
+    mov     ecx, 1
+    call    parallel_for
+21: mov     ecx, [r13+PS_DRAW]
+    movss   xmm0, [r13+PS_PX]           # (a float: 1 .. 8, as pt_draw takes it)
+    maxss   xmm0, [rip+pq_px1]
+    minss   xmm0, [rip+pq_px8]
+    cvttss2si edx, xmm0
+    mov     eax, [rsp]
+    jmp     9f
+8:  xor     eax, eax
+    mov     ecx, -1
+    xor     edx, edx
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pv_job(ctx, esi=first block, edx=end) - pt_vfill's blocks
+pv_job:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, esi
+    mov     r13d, edx
+1:  cmp     r12d, r13d
+    jae     9f
+    mov     rax, [rip+pv_blks]
+    mov     edi, [rax+r12*4]
+    lea     rax, [rip+pt_bn]
+    mov     r15d, [rax+rdi*4]           # its live count
+    call    blk_at
+    mov     rbx, rax
+    mov     rax, [rip+pv_first]
+    mov     r14d, [rax+r12*4]
+    imul    r14, r14, 20
+    add     r14, [rip+pv_out]
+    xor     ecx, ecx
+2:  cmp     ecx, r15d
+    jae     8f
+    mov     eax, [rbx+A_X+rcx*4]
+    mov     [r14], eax
+    mov     eax, [rbx+A_Y+rcx*4]
+    mov     [r14+4], eax
+    mov     eax, [rbx+A_Z+rcx*4]
+    mov     [r14+8], eax
+    movss   xmm0, [rbx+A_AGE+rcx*4]     # how far through its life
+    divss   xmm0, [rbx+A_LIFE+rcx*4]
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    minss   xmm0, [rip+pq_one]
+    movss   xmm2, [rip+pv_se]           # the radius: size (1 + (end - 1) t) / 2
+    subss   xmm2, [rip+pq_one]
+    mulss   xmm2, xmm0
+    addss   xmm2, [rip+pq_one]
+    mulss   xmm2, [rbx+A_SIZE+rcx*4]
+    mulss   xmm2, [rip+pq_half]
+    movss   [r14+16], xmm2
+    mov     eax, [rip+pv_c1]            # the colour
+    test    dword ptr [rip+pv_ramp], 1
+    jz      3f
+    mov     edx, [rip+pv_c2]
+    push    rcx
+    push    rcx
+    call    ramp
+    pop     rcx
+    pop     rcx
+3:  and     eax, 0xffffff
+    mov     [r14+12], eax
+    add     r14, 20
+    inc     ecx
+    jmp     2b
+8:  inc     r12d
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
 
 # pt_render(edi=system) -> rax = its instance block for a render, rdx = the
 #   particles' colours, ecx = the material (+1) its emitter has, or rax 0

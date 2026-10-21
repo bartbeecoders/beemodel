@@ -483,13 +483,13 @@ def main():
     lq = {}
     for name, dev, fail in (('cpu', 'cpu', None), ('gpu', 'gpu', None), ('auto', 'auto', None), ('fail', 'auto', '2')):
         f = os.path.join(HOME, 'lq_%s.png' % name)
-        env = {'BEEMODEL_GPU': 'any'}
-        if fail:
-            env['BEEMODEL_GPU_FAIL'] = fail
+        env = {'BEEMODEL_GPU': 'any', 'BEEMODEL_GPU_LIQUID': 'off'}   # (the same liquid each
+        if fail:                                                        #  time; the render's run
+            env['BEEMODEL_GPU_FAIL'] = fail                             #  dies, not its solve)
         q = run(tank + 'op("render.device", "%s")\nop("render.image", "%s 160 120 64 0")\n'
                 'print("lq", gpu(25), gpu(18), gpu(17), gpu(4))\n' % (dev, f), **env)
         lq[name] = (f, [int(float(x)) for x in q.get('lq', ['-1'] * 4)])
-    surf = int(float(run(tank + 'print("st", particles(33, 0))\n').get('st', ['0'])[0]))
+    surf = int(float(run(tank + 'print("st", particles(33, 0))\n', BEEMODEL_GPU_LIQUID='off').get('st', ['0'])[0]))
     for name in ('gpu', 'auto'):
         mad, same = compare(lq['cpu'][0], lq[name][0])
         check(lq['cpu'][1][0] == 0 and lq[name][1][:2] == [1, 0] and lq[name][1][2] + surf == lq['cpu'][1][2]
@@ -500,6 +500,20 @@ def main():
     check(lq['fail'][1][2] == lq['cpu'][1][2] and lq['fail'][1][3] == 16 and mad < 1.0,
           f'the helper dying at its second run: the CPU meshes the surface and goes on ({lq["fail"][1]}: 16 '
           f'samples the GPU\'s), the CPU\'s image (mean difference {mad:.3f})')
+
+    # ---- liquids solved on the GPU (v0.24): the CPU's solver's particles -----------
+    code = ('op("particles.add_tank")\nfor f in 2..5 { frame(f) }\n'
+            'print("lg", gpu(33), gpu(34))\nfor i in 0..400 { print("p" + i, particles(6, i), particles(7, i), '
+            'particles(8, i), particles(9, i), particles(10, i), particles(11, i)) }\n')
+    sol = {}
+    for dev, off in (('gpu', 'on'), ('cpu', 'off')):
+        r = run(code, BEEMODEL_GPU='any', BEEMODEL_GPU_LIQUID=off)
+        sol[dev] = (r.get('lg', ['-1', '-1']), [[float(x) for x in r.get('p%d' % i, ['nan'] * 6)] for i in range(400)])
+    dx = max(max(abs(a - b) for a, b in zip(p[:3], q2[:3])) for p, q2 in zip(sol['gpu'][1], sol['cpu'][1]))
+    dv = max(max(abs(a - b) for a, b in zip(p[3:], q2[3:])) for p, q2 in zip(sol['gpu'][1], sol['cpu'][1]))
+    check(int(sol['gpu'][0][0]) > 0 and sol['gpu'][0][1] == '0' and sol['cpu'][0][0] == '0' and dx < 1e-3 and dv < 0.05,
+          f'a liquid solved on the GPU ({sol["gpu"][0]} frames, failed; the CPU {sol["cpu"][0]}): the CPU\'s '
+          f'particles after 4 frames (400 of them: places within {dx:.2g} m, velocities {dv:.2g} m/s)')
 
     # ---- sample reuse between frames (H14) -------------------------------------
     def reuse_run(tag, spp, reuse, moving, dev='auto'):
@@ -590,6 +604,7 @@ def main():
     else:
         check(False, 'the window frames')
     live_view()
+    gpu_viewport()
     prewarm()
     return finish()
 
@@ -597,20 +612,21 @@ def main():
 BOX = (214, 80, 1014, 620)                              # the viewport
 
 
-def fake(**env):
-    """The fake compositor with BeeModel in it (these GPU variables)."""
+def fake(args=(), **env):
+    """The fake compositor with BeeModel in it (these GPU variables; args:
+    a file to open)."""
     sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
     argv = sys.argv
     sys.argv = [argv[0], OUT or tempfile.mkdtemp(prefix='bee-gpu-shots-')]
     import fakewl
     sys.argv = argv
-    keys = ('BEEMODEL_GPU', 'BEEMODEL_GPU_HELPER', 'BEEMODEL_GPU_FAIL')
+    keys = ('BEEMODEL_GPU', 'BEEMODEL_GPU_HELPER', 'BEEMODEL_GPU_FAIL', 'BEEMODEL_GPU_VIEW')
     saved = {k: os.environ.get(k) for k in keys}
     for k in keys:
         os.environ.pop(k, None)
     os.environ.update(env)
     try:
-        f = fakewl.Fake()
+        f = fakewl.Fake(args)
     finally:
         for k, v in saved.items():
             if v is None:
@@ -752,6 +768,142 @@ def live_view():
                   f'but for the line saying so)')
         finally:
             f.proc.kill()
+
+
+def gpu_viewport():
+    """VP1 (v0.24): the viewport drawn by the GPU (Solid, Material Preview:
+    shader graphs, textures, bumps, normal maps, vertex colours, an HDRI
+    world) is the CPU's image, its ids pick, and edit mode stays on the CPU."""
+    print('  -- the viewport drawn by the GPU --')
+    land = ('op("landscape.add", "hills size 30 seed 4")\nop("landscape.paint", "add grass colour 0.18 0.32 0.10")\n'
+            'op("landscape.paint", "add rock colour 0.32 0.31 0.29")\nop("landscape.paint_auto")\n'
+            'move("Landscape", 0, -3, -14)\n')
+    hdr = os.path.join(HOME, 'vp_sky.hdr')
+    write_hdr(hdr)
+    world = 'op("world.hdri", "vp_sky")\nop("world.rotation", "30")\n'
+    bee = os.path.join(HOME, 'vp.bee')                  # (built headless: a window's scripts
+    run(graph_scene() + land + 'image("%s")\nop("file.save_as", "%s")\n' % (hdr, bee))   #  read no files)
+    shots = {}
+    for dev in ('gpu', 'cpu'):
+        f, m, q = fake([bee], BEEMODEL_GPU='any', BEEMODEL_GPU_VIEW='on' if dev == 'gpu' else 'off')
+        try:
+            g = lambda k: int(float(q('print(gpu(%d))' % k) or -1))
+            q('view(30, 25, 11, 0, 0, 0)')
+            t = time.time()                             # (the helper's warm-up: a cold
+            while dev == 'gpu' and time.time() - t < 60 and g(27) < 1:     #  driver cache)
+                q('op("view.shading_solid")')
+                f.pump(0.3)
+            for mode in ('solid', 'material'):
+                q('op("view.shading_%s")' % mode)
+                n0 = g(27)
+                f.pump(0.5)
+                shots[dev, mode] = (f.image().crop(BOX), g(27) - n0)
+            q(world + 'op("view.shading_material")')
+            n0 = g(27)
+            f.pump(0.8)
+            shots[dev, 'hdri'] = (f.image().crop(BOX), g(27) - n0)
+            if dev == 'gpu':
+                if OUT:
+                    f.shot('gpu_view_material.png')
+                q('op("view.shading_solid")\nselect("Floor")\nop("mode.toggle_edit")')   # edit mode: the CPU
+                n0 = g(27)
+                f.pump(0.5)
+                edit = g(27) - n0
+                q('op("mode.toggle_edit")\nselect("Leaf")')
+                f.pump(0.5)
+                bx, by = 380, 520                       # a click picks through the GPU's ids
+                n0 = g(27)
+                f.click(bx, by)
+                f.pump(0.5)
+                picked = q('print(active())')
+                clicks = g(27) - n0
+        finally:
+            f.proc.kill()
+    for mode in ('solid', 'material', 'hdri'):
+        a, na = shots['gpu', mode]
+        b, nb = shots['cpu', mode]
+        px = list(zip(pixels(a), pixels(b)))
+        same = sum(1 for p, q2 in px if p == q2) / len(px)
+        far = sum(1 for p, q2 in px if max(abs(x - y) for x, y in zip(p, q2)) > 8) / len(px)
+        check(na > 0 and nb == 0 and same > 0.99 and far < 0.001,      # (edges: a pixel's centre
+              f'{mode}: the GPU drew the viewport ({na} frames; the CPU {nb}), the CPU\'s image '   # on a side)
+              f'({100 * same:.2f}% of pixels identical, {100 * far:.3f}% more than 8 levels apart)')
+    check(edit == 0, f'edit mode: the CPU draws the viewport ({edit} GPU frames)')
+    # particles: points, sprites (a colour ramp, growing), objects (instances)
+    pbee = os.path.join(HOME, 'vp_parts.bee')
+    run('add("cube", "Box", 0, -40, 0)\nscale("Box", 0.25)\n'
+        'emit("Cube", "from volume burst 400 speed 2 spread 180 life 100 gravity 0 draw points point_px 3 '
+        'color ff4010 name Dots")\n'
+        'emit("Cube", "from volume burst 300 speed 3 spread 180 life 20 gravity 0 size 0.1 size_end 3 '
+        'color 20a0ff color_end ffe080 draw sprites name Puffs")\n'
+        'emit("Cube", "from volume burst 60 speed 2.5 spread 180 life 100 gravity 0 draw objects objects Box '
+        'color 60ff60 name Boxes")\n'
+        'op("file.save_as", "%s")\n' % pbee)
+    pshots = {}
+    for dev in ('gpu', 'cpu'):
+        f, m, q = fake([pbee], BEEMODEL_GPU='any', BEEMODEL_GPU_VIEW='on' if dev == 'gpu' else 'off')
+        try:
+            g = lambda k: int(float(q('print(gpu(%d))' % k) or -1))
+            q('view(30, 20, 14, 0, 0, 0)\nframe(10)\nop("view.shading_solid")')
+            t = time.time()
+            while dev == 'gpu' and time.time() - t < 60 and g(27) < 1:
+                q('frame(10)')
+                f.pump(0.3)
+            f.pump(0.5)
+            pshots[dev] = (f.image().crop(BOX), g(32))
+            if OUT and dev == 'gpu':
+                f.shot('gpu_view_particles.png')
+        finally:
+            f.proc.kill()
+    a, b = pshots['gpu'][0], pshots['cpu'][0]
+    px = list(zip(pixels(a), pixels(b)))
+    same = sum(1 for p, q2 in px if p == q2) / len(px)
+    far = sum(1 for p, q2 in px if max(abs(x - y) for x, y in zip(p, q2)) > 8) / len(px)
+    lit = sum(1 for p in pixels(a) if p[0] > 200 and p[1] < 120) / len(px)       # (the red dots)
+    check(pshots['gpu'][1] == 1 and same > 0.99 and far < 0.003 and lit > 0.0005,
+          f'particles on the GPU (gpu(32) {pshots["gpu"][1]}): points, sprites and objects as the CPU draws them '
+          f'({100 * same:.2f}% of pixels identical, {100 * far:.3f}% more than 8 levels apart)')
+    check(clicks > 0 and picked == 'Floor',
+          f'a click picks through the GPU\'s ids ({picked}, {clicks} GPU frames)')
+    # a liquid's surface (VP3): its field marched by the GPU, not meshed
+    lbee = os.path.join(HOME, 'vp_liquid.bee')
+    run('op("particles.add_tank")\nop("file.save_as", "%s")\n' % lbee)
+    lshots = {}
+    for dev in ('gpu', 'cpu'):
+        f, m, q = fake([lbee], BEEMODEL_GPU='any', BEEMODEL_GPU_VIEW='on' if dev == 'gpu' else 'off')
+        try:
+            g = lambda k: int(float(q('print(gpu(%d))' % k) or -1))
+            q('view(30, 40, 9, 0, 0.5, 0)\nfor f in 2..21 { frame(f) }\nop("view.shading_material")')
+            t = time.time()
+            while dev == 'gpu' and time.time() - t < 60 and g(27) < 1:
+                q('op("view.shading_material")')
+                f.pump(0.3)
+            f.pump(0.5)
+            lshots[dev] = (f.image().crop(BOX), g(35), g(27))
+            if OUT and dev == 'gpu':
+                f.shot('gpu_view_liquid.png')
+            if dev == 'gpu':                            # Rendered follows it frame by
+                q('op("view.shading_rendered")')        #  frame: its field, no mesh
+                t = time.time()
+                while time.time() - t < 60 and g(7) < 1:
+                    f.pump(0.3)
+                n0 = g(9)
+                for fr in range(22, 30):
+                    q('frame(%d)' % fr)
+                    f.pump(0.3)
+                lrend = (g(9) - n0, g(17), g(10))
+        finally:
+            f.proc.kill()
+    a, b = lshots['gpu'][0], lshots['cpu'][0]
+    px = list(zip(pixels(a), pixels(b)))
+    same = sum(1 for p, q2 in px if max(abs(x - y) for x, y in zip(p, q2)) <= 8) / len(px)
+    mad = compare_img(a, b)
+    check(lshots['gpu'][1] == 1 and lshots['cpu'][1] == 0 and same > 0.97 and mad < 2.0,
+          f'a liquid on the GPU (gpu(35) {lshots["gpu"][1]}): its field marched, not meshed, the CPU\'s '
+          f'image ({100 * same:.2f}% of pixels within 8 levels, mean difference {mad:.3f})')
+    check(lrend[0] >= 6 and lrend[1] < 1000 and lrend[2] == 1,
+          f'Rendered with a liquid: the scene goes up each frame ({lrend[0]} uploads over 8 frames), its surface '
+          f'as its field, not meshed ({lrend[1]} triangles in the scene)')
 
 
 def compare_img(a, b):

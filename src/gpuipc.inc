@@ -21,6 +21,9 @@
 .equ GM_GX,         12                  #   workgroups
 .equ GM_GY,         16
 .equ GM_KERN,       20                  #   the kernel + 1 (0: the slot's)
+.equ GM_NDRAW,      24                  #   the viewport's (GV_KERN): draws, then
+.equ GM_NDRAW2,     28                  #   those that leave the ids (particles)
+.equ GM_NDRAW3,     32                  #   liquids' surfaces (marched; after the first)
 .equ GM_STATUS,     4                   # replies: 0 ok
 .equ GM_MS,         8                   #   MSG_RUN: milliseconds on the GPU side
 .equ GM_MAGIC,      8                   # MSG_HELLO: 'BGPU', the device type,
@@ -55,3 +58,38 @@
 .equ GPU_DATA0,     4096                # the first binding's offset
 .equ GPU_ALIGN,     256                 # bindings' alignment
 .equ GPU_MAXBIND,   24
+
+# The 3D viewport drawn by the GPU (v0.24, src/gview.s): slot 3, the helper's
+# graphics kernel (view.vert / view.frag; GM_GX, GM_GY the image's size).
+.equ GV_SLOT,       3
+.equ GV_KERN,       6
+.equ GV_NB,         16                  # its bindings:
+.equ GV_PAR,        0                   #   the camera, sizes, the sRGB table
+.equ GV_DRAW,       1                   #   a record a draw (matrix, colour, id)
+.equ GV_IND,        2                   #   VkDrawIndirectCommand a draw
+.equ GV_POS,        3                   #   triangles' corners, object space
+.equ GV_NRM,        4                   #   their corner normals
+.equ GV_UV,         5                   #   UVs (u0 NaN: none)
+.equ GV_VC,         6                   #   vertex colours (0: none)
+.equ GV_MAT,        7                   #   materials (as the path tracer's)
+.equ GV_IMG,        8                   #   images (as the path tracer's)
+.equ GV_ENV,        9                   #   the HDRI's preview tables
+.equ GV_COL,        10                  #   out: XRGB
+.equ GV_INVZ,       11                  #   out: 1/z (0: nothing)
+.equ GV_ID,         12                  #   out: object index + 1
+.equ GV_INST,       13                  #   an entry a drawn instance: matrix, draw
+.equ GV_PART,       14                  #   points' and sprites' particles (20 bytes)
+.equ GV_FLD,        15                  #   liquids' fields (records, values, bricks)
+# The liquid solved by the GPU (v0.24, liquid.s lq_gpu): slot 4, the helper's
+# liq.comp, a frame's substeps recorded by the helper (GM_GX the particles).
+.equ LQ_SLOT,       4
+.equ LQ_KERN,       7
+.equ LQ_NB,         22                  # its bindings (liq.comp): 0 the constants,
+.equ LQB_STEP,      1                   #  1 the phase (filled before each dispatch),
+.equ LQB_X,         2                   #  2.. the particles' arrays
+.equ LQB_V,         3
+.equ LQB_RHO,        9
+.equ LQB_NN,        14
+.equ LQB_IMP,        15
+.equ GH_GFX,        0x200               # MSG_HELLO GM_TYPE: the viewport kernel works,
+.equ GH_HOSTMEM,    0x400               #  shared memory is imported (no copies)

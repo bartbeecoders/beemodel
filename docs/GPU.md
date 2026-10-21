@@ -20,6 +20,9 @@ driver (`cc`) and `libvulkan.so.1` are present.
 | `BEEMODEL_GPU=any` | Also accept a CPU Vulkan implementation (llvmpipe), which the tests use. Otherwise discrete GPUs come first, then integrated and virtual ones |
 | `BEEMODEL_GPU_HELPER=path` | Where the helper is |
 | `BEEMODEL_GPU_RASTER=all` / `off` | Rasterize every frame's tiles on the GPU, or none. By default only frames with objects drawn through cluster DAGs use it |
+| `BEEMODEL_GPU_VIEW=off` | Draw the 3D viewport on the CPU even with a helper that can draw it (v0.24; the window tests' default, so their images are the CPU's) |
+| `BEEMODEL_GPU_LIQUID=off` | Solve liquids on the CPU even with a helper that can (v0.24) |
+| `BEEMODEL_GPU_HOSTMEM=off` | Copy through the helper's own staging buffers instead of importing the shared memory |
 
 The helper needs a Vulkan device with compute queues and 64-bit integers in
 shaders. The console reports the device (`GPU helper: <name>`), or says the
@@ -198,6 +201,101 @@ the CPU leaves them, so the frame is pixel-identical. By default this runs
 for frames that draw objects through cluster DAGs (virtualized geometry),
 including both batches of the occlusion pass.
 
+### The viewport drawn by the GPU (v0.24)
+
+With a graphics queue, the helper also draws the 3D viewport's objects in
+Solid and Material Preview: a render pass of four images (colour, 1/z,
+object ids, depth), one pipeline (`src/gpu/view.vert`, `view.frag`) and one
+indirect draw call for the whole scene (`src/gview.s`; slot 3). Each mesh's
+triangles stay on the GPU in object space (corners, corner normals smooth
+within 30 degrees, UVs, vertex colours) and are written again only when the
+mesh changes: its version, counts or a fingerprint of its vertices. A frame
+sends the camera, a record per object (its matrix and normal matrix,
+colour, material, id) and the materials; a moving object costs 128 bytes.
+
+Instances and particles are drawn in the same pass (VP2). A mesh's
+instances (`ME_INST`: geometry nodes, rigid bodies) and particles drawn as
+objects are instanced draws: an entry each (its matrix, its draw's record)
+in a buffer sorted by prototype, one indirect draw a prototype, the
+prototypes' triangles kept like any mesh. Points and sprites are quads the
+vertex stage makes from a record a particle (`pt_vfill`: its place, its
+colour through its ramp, its sprite radius), as `pt_draw` draws them: a
+square of `point_px` pixels, or a disc shaded like a ball. Particles leave
+the object ids alone (the helper's second pipeline), as on the CPU, so the
+outline and clicks stay the objects'. Instances are drawn from both sides
+with their vertex colours, as renders show them (the CPU's viewport culled
+back faces and drew far ones as dots).
+
+The vertex stage projects as the CPU's rasterizer does, with depth near / z,
+so 1/z comes back exactly as raster.s keeps it. Solid shading is the CPU's
+flat headlight, pixel for pixel; Material Preview is preview.s's principled
+BSDF under the studio environment or an HDRI world (its SH irradiance and
+blurred copy), with the materials' shader graphs evaluated by the path
+tracer's graph code (`src/gpu/graph.glsl`, shared with `pt.comp`). The
+colour comes back into the window's buffer where an object is, 1/z and the
+ids into the CPU's depth and id buffers, so particles, instances, wires,
+the selection outline and clicks work on top as before.
+
+The helper imports the shared memory as its staging buffer when the device
+can (`VK_EXT_external_memory_host`): uploads and readbacks go between the
+GPU and BeeModel's own memory with no copies on either side.
+
+A liquid's surface is not meshed for the viewport when the GPU draws it
+(VP3): raster_scene leaves the object without triangles and the helper's
+third pipeline draws its field's box, whose fragment shader marches the
+ray from the eye through the field (as the path tracer's `fld_hit`: a cell
+a step, 8^3 bricks all on one side skipped, the crossing halved, then
+interpolated) and writes the surface's depth, 1/z and the object's id;
+its normal is the field's gradient. When the GPU does not draw the frame
+after all, raster_scene starts again with the surfaces meshed.
+
+The CPU draws the viewport instead without a helper (or with Device CPU),
+in edit and paint modes, with virtualized geometry, with light probes in
+Material Preview, a shader graph the GPU cannot evaluate, or more than
+4M triangles; instances and particles over 4M (then those alone, after).
+At 2560 x 1440 in Material Preview a frame of the rainstorm (94k drops)
+draws in 4-7 ms instead of 46 ms, leaf-twister (18k leaves) in 4-6 ms
+instead of 23 ms.
+
+**Playback** (`tools/playbench.py`: each demo played through its camera
+in the fake compositor at 2560 x 1440 for four seconds; window frames a
+second and a frame's median milliseconds, Ryzen 9 7950X with an RTX 4080
+SUPER, v0.23.0 -> v0.24.0):
+
+| demo | Solid | Material Preview | Rendered |
+|---|---|---|---|
+| dam break | 4 -> 130 fps (4 ms) | 3 -> 135 fps (4 ms) | 4 -> 71 fps |
+| rainstorm | 80 -> 185 fps (13 -> 4 ms) | 23 -> 181 fps (46 -> 4 ms) | 20 -> 27 fps (59 -> 13 ms) |
+| leaf-twister | 77 -> 131 fps (11 -> 4 ms) | 45 -> 144 fps (23 -> 4 ms) | 45 -> 76 fps (29 -> 17 ms) |
+| fireworks | 218 -> 218 fps (4 -> 3 ms) | 75 -> 214 fps (13 -> 3 ms) | 130 -> 169 fps (4 ms) |
+| wrecking ball | 202 -> 174 fps (4 -> 6 ms) | 58 -> 172 fps (18 -> 6 ms) | 88 -> 133 fps (6 ms) |
+
+Every demo plays its frames in real time now. A light scene in Solid pays
+the helper's round trip (the wrecking ball, 2 ms). The rainstorm in
+Rendered is held by its 525k still triangles, copied and compared at each
+scene build (19 ms); the build could keep them in place.
+
+### Liquids solved on the GPU (v0.24)
+
+A liquid's substeps run in the helper's compute kernel `src/gpu/liq.comp`
+(slot 4), a port of `liquid.s`'s solver phase by phase: predict, the hash
+grid (counted, summed, sorted), neighbours, the density constraint's
+iterations with the domain and bodies, the colliders' triangles (their BVH
+uploaded), velocities, XSPH viscosity and vorticity. The particles go up
+and their places, velocities, densities, neighbour counts and the impulses
+on rigid bodies come back each frame. Force fields and landscapes as
+colliders keep the CPU's solver, as does `BEEMODEL_GPU_LIQUID=off` and a
+helper that fails (from then on). The GPU's sums run in another order, so
+its liquid matches the CPU's closely at first and then diverges as any
+change to a liquid does.
+
+The dam break (200k particles) solves a frame in 6 ms on an RTX 4080 SUPER
+instead of 67 ms. With its surface drawn by the viewport's march (nothing
+on the CPU meshes it: the DAG scan, the instance scan and the wires skip
+it), it plays in real time at 2560 x 1440 in Solid and Material Preview:
+16 ms a frame that steps the simulation, 4 ms one that only redraws (2 fps
+before v0.24).
+
 ### Rendered shading (the live viewport)
 
 **Rendered** is the fourth viewport shading, next to Wireframe, Solid and
@@ -250,7 +348,8 @@ and the shader applies ACES and the sRGB curve as the CPU's resolve does.
 **When the scene goes up again.** A fingerprint is taken every frame:
 
 - each object's place, flags (not its selection), material and modifiers;
-- its evaluated mesh, with the mesh's version and size;
+- its evaluated mesh, with the mesh's version and size (a liquid's
+  surface instead by its particles' state, without meshing it);
 - each light's colour and power;
 - the material records;
 - the undo and redo depths;
@@ -266,6 +365,14 @@ A camera move changes none of these. When the fingerprint changes:
 - samples begin 150 ms after the last build. Playback changes the scene
   every other frame, so it shows a raycast every frame rather than
   raycasts and samples in turn, which flickered.
+
+A build's time leaves out a slot's memory being made or grown (a first
+build's 80 ms in the dam break would otherwise keep it waiting for good).
+The scene is built as a render's is (v0.24): with RTX, no BVH on the CPU,
+and a liquid's surface as its field, not meshed. During playback at
+2560 x 1440, a frame takes (v0.23.0 -> v0.24.0): dam break 71 -> 5 ms,
+leaf-twister 25 -> 5 ms, rainstorm 52 -> 38 ms (its 525k still triangles
+are copied and compared each build).
 
 **Beside an F12 render.** The render owns Hive's scene, so the live view
 keeps its snapshot. When F12 opens the Render area and narrows the viewport,
@@ -420,6 +527,15 @@ empty, so that takes 0.6 to 3 s (the graphs' kernels are the slow ones).
 | 24 | 1 if the helper has RTX |
 | 25 | Liquid surfaces the last render traced as fields |
 | 26 | `render.sample_reuse`: frames whose samples animation renders reuse (0: off) |
+| 27 | Viewport frames the GPU drew (v0.24) |
+| 28 | The last one's milliseconds |
+| 29 | KiB of meshes it sent |
+| 30 | 1 if the GPU's viewport is off (a failure; 2: `BEEMODEL_GPU_VIEW=off`) |
+| 31 | 1 if the helper imports the shared memory (no copies) |
+| 32 | 1 if the last viewport pass drew the instances and particles on the GPU too |
+| 33 | Liquid frames the GPU solved |
+| 34 | 1 if solving a liquid on the GPU failed (the CPU's solver since) |
+| 35 | Liquids' surfaces the last viewport pass marched on the GPU |
 
 [tests/gpu.py](../tests/gpu.py) checks:
 
@@ -427,6 +543,11 @@ empty, so that takes 0.6 to 3 s (the graphs' kernels are the slow ones).
 - the path tracer against the CPU, including the denoised render;
 - the helper dying at its second run (`BEEMODEL_GPU_FAIL=2`, a test hook);
 - the rasterizer's frame in the fake compositor;
+- the viewport drawn by the GPU: Solid, Material Preview (shader graphs,
+  textures, bump and normal maps, vertex colours) and an HDRI world against
+  the CPU's image; points, sprites and particle objects against the CPU's;
+  a liquid's surface marched from its field against the CPU's mesh;
+  edit mode on the CPU; a click picking through its ids;
 - Rendered shading: the raycast, then the samples; a camera move against a
   scene change; the selection outline; 0 samples; the denoiser against
   plain samples; an F12 render beside it;

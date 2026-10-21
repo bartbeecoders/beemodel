@@ -24,6 +24,7 @@
 .intel_syntax noprefix
 .include "const.inc"
 .include "macros.inc"
+.include "gpuipc.inc"
 
 .globl lq_room
 .globl lq_solve
@@ -133,6 +134,8 @@ lq_rmaxi:       .skip 4
 lq_tjob:        .skip 8                 # (time in the jobs, ns)
 .align 4
 lq_fdt:         .skip 4                 # the frame's step
+.align 8
+lq_grec:        .skip 8                 # its settings (lq_gpu)
 
 .section .rodata
 .align 16
@@ -374,6 +377,7 @@ lq_solve:
     sub     rsp, 64
     mov     [rip+lq_n], edi
     mov     r12, rsi
+    mov     [rip+lq_grec], rsi
     movss   [rsp], xmm0
     movss   [rip+lq_fdt], xmm0
     movups  xmm1, [rdx]
@@ -425,6 +429,10 @@ lq_solve:
     movss   [rip+lq_visc], xmm0
     mov     dword ptr [rip+lq_nmax], 0
     mov     r14d, ebx                   # (K)
+    mov     edi, ebx                    # the GPU, when it can: every substep
+    call    lq_gpu                      #  there (v0.24)
+    test    eax, eax
+    jnz     .Lls_done
 .Lls_sub:
     test    ebx, ebx
     jz      .Lls_done
@@ -1731,5 +1739,383 @@ j_commit:
     inc     r12d
     jmp     1b
 9:  JOB_OUT
+
+
+# =============================================================================
+#  lq_gpu(edi=substeps) -> eax = 1: the frame's substeps solved by the GPU
+#    helper (src/gpu/liq.comp, slot 4; v0.24) instead of the jobs below:
+#    the constants, walls, bodies made here sent with the positions,
+#    velocities and the colliders' tree; back come the positions,
+#    velocities, neighbour counts, densities and each chunk's impulses
+#    (lq_push_bodies, the spray, the statistics read them as the CPU's). Not
+#    with force fields or landscapes as colliders (the CPU then), nor with
+#    BEEMODEL_GPU_LIQUID=off; a failure: the CPU from then on
+# =============================================================================
+.equ LQ_LPSZ,   2656                    # liq.comp's constants (std430 LP)
+.equ LQ_TRISZ,  64                      # (particles.s's collider triangles,
+.equ LQ_NODESZ, 32                      #  tree nodes)
+
+.section .rodata
+s_lq_env:       .asciz "BEEMODEL_GPU_LIQUID="
+.section .bss
+.align 8
+lq_goff:        .skip 8*LQ_NB           # the slot's layout
+lq_gbytes:      .skip 8*LQ_NB
+lq_genv:        .skip 4                 # the variable read (2: off)
+lq_gfail:       .skip 4
+lq_gk:          .skip 4                 # substeps
+lq_gms:         .skip 4                 # the GPU's frames (gpu(33))
+.globl lq_gms
+.globl lq_gfail
+.text
+
+lq_gpu:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     [rip+lq_gk], edi
+    cmp     dword ptr [rip+lq_genv], 0  # BEEMODEL_GPU_LIQUID=off
+    jne     1f
+    mov     dword ptr [rip+lq_genv], 1
+    lea     rdi, [rip+s_lq_env]
+    call    getenv
+    test    rax, rax
+    jz      1f
+    cmp     word ptr [rax], 0x666f      # "of"
+    jne     1f
+    mov     dword ptr [rip+lq_genv], 2
+1:  cmp     dword ptr [rip+lq_genv], 2
+    je      .Lqg_no
+    cmp     dword ptr [rip+lq_gfail], 0
+    jne     .Lqg_no
+    cmp     dword ptr [rip+lq_fields], 0    # (force fields: the CPU's)
+    jne     .Lqg_no
+    cmp     dword ptr [rip+pc_any], 0   # (landscapes as colliders: the CPU's)
+    je      2f
+    cmp     dword ptr [rip+pc_nl], 0
+    jne     .Lqg_no
+2:  call    gpu_ready
+    test    eax, eax
+    jz      .Lqg_no
+    # ---- the layout --------------------------------------------------------
+    mov     ebx, [rip+lq_n]
+    lea     r12, [rip+lq_gbytes]
+    mov     qword ptr [r12+0*8], LQ_LPSZ
+    mov     qword ptr [r12+1*8], 16
+    mov     rax, rbx
+    shl     rax, 4                      # vec4 arrays
+    mov     [r12+2*8], rax
+    mov     [r12+3*8], rax
+    mov     [r12+4*8], rax
+    mov     [r12+5*8], rax
+    mov     [r12+6*8], rax
+    mov     [r12+7*8], rax
+    lea     rax, [rbx*4]                # u32 / f32 arrays
+    mov     [r12+8*8], rax
+    mov     [r12+9*8], rax
+    mov     [r12+10*8], rax
+    mov     [r12+11*8], rax
+    mov     [r12+14*8], rax
+    imul    rax, rbx, NB*4
+    mov     [r12+13*8], rax
+    mov     eax, [rip+lq_mask]
+    add     eax, 2
+    shl     rax, 2
+    mov     [r12+12*8], rax
+    mov     [r12+20*8], rax
+    mov     eax, [rip+lq_mask]
+    inc     eax
+    shr     eax, 10
+    shl     rax, 2
+    add     rax, 16
+    mov     [r12+19*8], rax
+    lea     eax, [rbx+GRAIN-1]          # impulses: chunks x MAXB
+    shr     eax, 11
+    imul    rax, rax, MAXB*16
+    add     rax, 16
+    mov     [r12+15*8], rax
+    xor     eax, eax                    # the colliders' tree (when it collides)
+    cmp     dword ptr [rip+pc_any], 0
+    je      3f
+    mov     eax, [rip+pc_ntri]
+3:  mov     r15d, eax                   # (triangles sent)
+    imul    rcx, rax, LQ_TRISZ
+    add     rcx, 16
+    mov     [r12+16*8], rcx
+    lea     rcx, [rax*4+16]
+    mov     [r12+18*8], rcx
+    xor     ecx, ecx
+    test    eax, eax
+    jz      31f
+    mov     ecx, [rip+pc_nn]
+31: imul    rcx, rcx, LQ_NODESZ
+    add     rcx, 16
+    mov     [r12+17*8], rcx
+    mov     eax, [rip+lq_nbd]
+    imul    rax, rbx
+    shl     rax, 4
+    add     rax, 16
+    mov     [r12+21*8], rax
+    lea     rdx, [rip+lq_goff]          # offsets: in order, 256 apart
+    mov     eax, GPU_DATA0
+    xor     ecx, ecx
+4:  cmp     ecx, LQ_NB
+    jae     5f
+    mov     [rdx+rcx*8], rax
+    add     rax, [r12+rcx*8]
+    add     rax, GPU_ALIGN-1
+    and     rax, -GPU_ALIGN
+    inc     ecx
+    jmp     4b
+5:  mov     edi, LQ_SLOT
+    mov     rsi, rax
+    call    gpu_slot
+    test    rax, rax
+    jz      .Lqg_no
+    mov     r13, rax                    # the slot's memory
+    # ---- the table: the inputs up, the outputs back -------------------------
+    xor     ecx, ecx
+6:  cmp     ecx, LQ_NB
+    jae     7f
+    imul    eax, ecx, GB_SZ
+    lea     rdx, [r13+rax]
+    lea     rax, [rip+lq_goff]
+    mov     rax, [rax+rcx*8]
+    mov     [rdx+GB_OFF], rax
+    lea     rax, [rip+lq_gbytes]
+    mov     rax, [rax+rcx*8]
+    mov     [rdx+GB_BYTES], rax
+    mov     qword ptr [rdx+GB_FLAGS], 0
+    mov     dword ptr [rdx+GB_RN], 0
+    inc     ecx
+    jmp     6b
+7:  mov     dword ptr [r13+0*GB_SZ+GB_FLAGS], GBF_IN
+    mov     dword ptr [r13+2*GB_SZ+GB_FLAGS], GBF_IN|GBF_OUT
+    mov     dword ptr [r13+3*GB_SZ+GB_FLAGS], GBF_IN|GBF_OUT
+    mov     dword ptr [r13+LQB_RHO*GB_SZ+GB_FLAGS], GBF_OUT
+    mov     dword ptr [r13+LQB_NN*GB_SZ+GB_FLAGS], GBF_OUT
+    mov     dword ptr [r13+LQB_IMP*GB_SZ+GB_FLAGS], GBF_OUT
+    mov     dword ptr [r13+16*GB_SZ+GB_FLAGS], GBF_IN
+    mov     dword ptr [r13+17*GB_SZ+GB_FLAGS], GBF_IN
+    mov     dword ptr [r13+18*GB_SZ+GB_FLAGS], GBF_IN
+    # ---- the constants ------------------------------------------------------
+    mov     rdi, [rip+lq_goff]
+    add     rdi, r13
+    mov     r14, rdi
+    xor     eax, eax
+    mov     ecx, LQ_LPSZ/8
+    rep     stosq
+    mov     [r14], ebx                  # n, mask, iterations, substeps,
+    mov     eax, [rip+lq_mask]          #  bodies, walls, flags, triangles
+    mov     [r14+4], eax
+    mov     rax, [rip+lq_grec]          # (its settings: the iterations)
+    mov     ecx, [rax+PS_LITER]
+    cmp     ecx, 1
+    jge     71f
+    mov     ecx, 1
+71: cmp     ecx, 50
+    jle     72f
+    mov     ecx, 50
+72: mov     [r14+8], ecx
+    mov     eax, [rip+lq_gk]
+    mov     [r14+12], eax
+    mov     eax, [rip+lq_nbd]
+    mov     [r14+16], eax
+    mov     eax, [rip+lq_nw]
+    mov     [r14+20], eax
+    mov     eax, [rip+lq_dom]           # flags: 1 the domain, 2 colliders,
+    mov     ecx, [rip+pc_any]           #  4 vorticity, 8 the ground
+    test    ecx, ecx
+    jz      73f
+    or      eax, 2
+    cmp     dword ptr [rip+pc_gnd], 0
+    je      73f
+    or      eax, 8
+73: xorps   xmm0, xmm0
+    comiss  xmm0, [rip+lq_vort]
+    jae     74f
+    or      eax, 4
+74: mov     [r14+24], eax
+    mov     [r14+28], r15d
+    lea     rsi, [rip+lq_gconsts]       # the floats, in LP's order
+    xor     ecx, ecx
+75: mov     rax, [rsi+rcx*8]
+    test    rax, rax
+    jz      76f
+    mov     eax, [rax]
+    mov     [r14+32+rcx*4], eax
+    inc     ecx
+    jmp     75b
+76: movaps  xmm0, [rip+lq_acc]
+    movups  [r14+128], xmm0
+    movaps  xmm0, [rip+lq_gadj]
+    movups  [r14+144], xmm0
+    movaps  xmm0, [rip+lq_dmin]
+    movups  [r14+160], xmm0
+    movaps  xmm0, [rip+lq_dmax]
+    movups  [r14+176], xmm0
+    lea     rsi, [rip+lq_wall]          # the walls, their tables
+    lea     rdi, [r14+192]
+    mov     ecx, 4*MAXW
+    rep     movsd
+    lea     rsi, [rip+lq_wd]
+    lea     rdi, [r14+320]
+    mov     ecx, WT+2
+    rep     movsd
+    lea     rsi, [rip+lq_wg]
+    lea     rdi, [r14+464]
+    mov     ecx, WT+2
+    rep     movsd
+    lea     rsi, [rip+lq_bc0]           # the bodies: then, now, half
+    lea     rdi, [r14+608]
+    mov     ecx, 4*MAXB
+    rep     movsd
+    lea     rsi, [rip+lq_bc1]
+    lea     rdi, [r14+864]
+    mov     ecx, 4*MAXB
+    rep     movsd
+    lea     rsi, [rip+lq_bh]
+    lea     rdi, [r14+1120]
+    mov     ecx, 4*MAXB
+    rep     movsd
+    xor     ecx, ecx                    # rotations: by row
+77: cmp     ecx, MAXB
+    jae     78f
+    imul    rax, rcx, 48
+    lea     rsi, [rip+lq_br]
+    add     rsi, rax
+    mov     rdx, rcx
+    shl     rdx, 4
+    movups  xmm0, [rsi]
+    movups  [r14+1376+rdx], xmm0
+    movups  xmm0, [rsi+16]
+    movups  [r14+1632+rdx], xmm0
+    movups  xmm0, [rsi+32]
+    movups  [r14+1888+rdx], xmm0
+    inc     ecx
+    jmp     77b
+78: lea     rsi, [rip+lq_bmin]
+    lea     rdi, [r14+2144]
+    mov     ecx, 4*MAXB
+    rep     movsd
+    lea     rsi, [rip+lq_bmax]
+    lea     rdi, [r14+2400]
+    mov     ecx, 4*MAXB
+    rep     movsd
+    # ---- the particles, the colliders ---------------------------------------
+    mov     rsi, [rip+lq_x]
+    mov     rdi, [rip+lq_goff+2*8]
+    add     rdi, r13
+    mov     rcx, rbx
+    shl     rcx, 4
+    rep     movsb
+    mov     rsi, [rip+lq_v]
+    mov     rdi, [rip+lq_goff+3*8]
+    add     rdi, r13
+    mov     rcx, rbx
+    shl     rcx, 4
+    rep     movsb
+    test    r15d, r15d
+    jz      79f
+    mov     rsi, [rip+pc_tri]
+    mov     rdi, [rip+lq_goff+16*8]
+    add     rdi, r13
+    imul    rcx, r15, LQ_TRISZ
+    rep     movsb
+    mov     rsi, [rip+pc_ix]
+    mov     rdi, [rip+lq_goff+18*8]
+    add     rdi, r13
+    lea     rcx, [r15*4]
+    rep     movsb
+    mov     rsi, [rip+pc_node]
+    mov     rdi, [rip+lq_goff+17*8]
+    add     rdi, r13
+    mov     ecx, [rip+pc_nn]
+    imul    rcx, rcx, LQ_NODESZ
+    rep     movsb
+79: # ---- the run ------------------------------------------------------------
+    mov     edi, LQ_SLOT
+    mov     esi, LQ_NB
+    mov     edx, ebx
+    mov     ecx, 1
+    call    gpu_run
+    test    eax, eax
+    jnz     8f
+    mov     dword ptr [rip+lq_gfail], 1 # (the helper is stopped: the CPU's)
+    jmp     .Lqg_no
+8:  mov     r13, [rip+g_base+LQ_SLOT*8] # (the same memory: back)
+    mov     rsi, [rip+lq_goff+2*8]
+    add     rsi, r13
+    mov     rdi, [rip+lq_x]
+    mov     rcx, rbx
+    shl     rcx, 4
+    rep     movsb
+    mov     rsi, [rip+lq_goff+3*8]
+    add     rsi, r13
+    mov     rdi, [rip+lq_v]
+    mov     rcx, rbx
+    shl     rcx, 4
+    rep     movsb
+    mov     rsi, [rip+lq_goff+LQB_RHO*8]
+    add     rsi, r13
+    mov     rdi, [rip+lq_rho]
+    lea     rcx, [rbx*4]
+    rep     movsb
+    mov     rsi, [rip+lq_goff+LQB_NN*8]
+    add     rsi, r13
+    mov     rdi, [rip+lq_nn]
+    lea     rcx, [rbx*4]
+    rep     movsb
+    mov     rsi, [rip+lq_goff+LQB_IMP*8]
+    add     rsi, r13
+    mov     rdi, [rip+lq_imp]
+    lea     ecx, [rbx+GRAIN-1]
+    shr     ecx, 11
+    imul    rcx, rcx, MAXB*16
+    rep     movsb
+    xor     ecx, ecx                    # the statistics: the most neighbours,
+    xor     edx, edx                    #  the densest
+    mov     rsi, [rip+lq_nn]
+    mov     rdi, [rip+lq_rho]
+    xor     r8d, r8d
+    xor     r9d, r9d
+9:  cmp     ecx, ebx
+    jae     91f
+    mov     eax, [rsi+rcx*4]
+    cmp     eax, edx
+    cmova   edx, eax
+    movss   xmm0, [rdi+rcx*4]
+    divss   xmm0, [rip+lq_rho0]
+    movd    eax, xmm0
+    cmp     eax, r8d
+    jbe     92f
+    mov     r8d, eax
+    mov     r9d, ecx
+92: inc     ecx
+    jmp     9b
+91: mov     [rip+lq_nmax], edx
+    mov     [rip+lq_rmax], r8d
+    mov     [rip+lq_rmaxi], r9d
+    inc     dword ptr [rip+lq_gms]
+    mov     eax, 1
+    jmp     99f
+.Lqg_no:
+    xor     eax, eax
+99: add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+.section .rodata
+.align 8
+lq_gconsts:     .quad lq_dt, lq_idt, lq_h, lq_h2, lq_ih, lq_k6, lq_ks, lq_m, lq_mr
+                .quad lq_rho0, lq_eps, lq_wdq, lq_tk, lq_rp, lq_visc, lq_vort, pc_gy, 0
+.text
 
 .section .note.GNU-stack,"",@progbits

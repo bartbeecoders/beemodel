@@ -221,6 +221,10 @@ vgd_begin:
     je      .Lvb_next
     cmp     r12, [rip+edit_ro_obj]
     je      .Lvb_next
+    mov     rdi, r12                    # (a liquid's surface: never a DAG,
+    call    pt_field                    #  not meshed for it)
+    test    rax, rax
+    jnz     .Lvb_next
     mov     rdi, r12
     call    obj_eval
     test    rax, rax
