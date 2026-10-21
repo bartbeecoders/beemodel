@@ -620,7 +620,7 @@ def fake(args=(), **env):
     sys.argv = [argv[0], OUT or tempfile.mkdtemp(prefix='bee-gpu-shots-')]
     import fakewl
     sys.argv = argv
-    keys = ('BEEMODEL_GPU', 'BEEMODEL_GPU_HELPER', 'BEEMODEL_GPU_FAIL', 'BEEMODEL_GPU_VIEW')
+    keys = ('BEEMODEL_GPU', 'BEEMODEL_GPU_HELPER', 'BEEMODEL_GPU_FAIL', 'BEEMODEL_GPU_VIEW', 'BEEMODEL_GPU_LIQUID')
     saved = {k: os.environ.get(k) for k in keys}
     for k in keys:
         os.environ.pop(k, None)
@@ -869,8 +869,9 @@ def gpu_viewport():
     lbee = os.path.join(HOME, 'vp_liquid.bee')
     run('op("particles.add_tank")\nop("file.save_as", "%s")\n' % lbee)
     lshots = {}
-    for dev in ('gpu', 'cpu'):
-        f, m, q = fake([lbee], BEEMODEL_GPU='any', BEEMODEL_GPU_VIEW='on' if dev == 'gpu' else 'off')
+    for dev in ('gpu', 'cpu'):                          # (the same liquid both times: on a slow
+        f, m, q = fake([lbee], BEEMODEL_GPU='any',      #  device the GPU solves only some frames)
+                       BEEMODEL_GPU_VIEW='on' if dev == 'gpu' else 'off', BEEMODEL_GPU_LIQUID='off')
         try:
             g = lambda k: int(float(q('print(gpu(%d))' % k) or -1))
             q('view(30, 40, 9, 0, 0.5, 0)\nfor f in 2..21 { frame(f) }\nop("view.shading_material")')
