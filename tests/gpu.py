@@ -882,6 +882,16 @@ def gpu_viewport():
             lshots[dev] = (f.image().crop(BOX), g(35), g(27))
             if OUT and dev == 'gpu':
                 f.shot('gpu_view_liquid.png')
+            if dev == 'gpu':                            # Rendered follows it frame by
+                q('op("view.shading_rendered")')        #  frame: its field, no mesh
+                t = time.time()
+                while time.time() - t < 60 and g(7) < 1:
+                    f.pump(0.3)
+                n0 = g(9)
+                for fr in range(22, 30):
+                    q('frame(%d)' % fr)
+                    f.pump(0.3)
+                lrend = (g(9) - n0, g(17), g(10))
         finally:
             f.proc.kill()
     a, b = lshots['gpu'][0], lshots['cpu'][0]
@@ -891,6 +901,9 @@ def gpu_viewport():
     check(lshots['gpu'][1] == 1 and lshots['cpu'][1] == 0 and same > 0.97 and mad < 2.0,
           f'a liquid on the GPU (gpu(35) {lshots["gpu"][1]}): its field marched, not meshed, the CPU\'s '
           f'image ({100 * same:.2f}% of pixels within 8 levels, mean difference {mad:.3f})')
+    check(lrend[0] >= 6 and lrend[1] < 1000 and lrend[2] == 1,
+          f'Rendered with a liquid: the scene goes up each frame ({lrend[0]} uploads over 8 frames), its surface '
+          f'as its field, not meshed ({lrend[1]} triangles in the scene)')
 
 
 def compare_img(a, b):

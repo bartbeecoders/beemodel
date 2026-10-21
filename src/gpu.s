@@ -49,6 +49,7 @@
 .globl gpu_fld_likely
 .globl gpu_view_ready
 .globl gpu_slot
+.globl g_grow_ms
 .globl gpu_run
 .globl g_base
 .globl g_size
@@ -127,6 +128,8 @@ gp_first:       .skip 4                 # the next pass uploads the scene
 .align 8
 g_base:         .skip 8*NSLOTS          # each slot's shared memory, bytes
 g_size:         .skip 8*NSLOTS
+g_grow_ms:      .skip 8                 # time spent growing slots (lv_build
+                                        #  leaves it out of its build's)
 g_path:         .skip 512
 g_argv:         .skip 16
 g_msg:          .skip GM_SZ
@@ -657,7 +660,9 @@ gpu_slot:
     lea     rax, [rip+g_base]
     mov     rax, [rax+rbx*8]
     jmp     9f
-1:  add     r12, 0xfffff                # a new memfd, in 1 MiB steps
+1:  call    now_ms                      # (its time: g_grow_ms)
+    sub     [rip+g_grow_ms], rax
+    add     r12, 0xfffff                # a new memfd, in 1 MiB steps
     and     r12, -0x100000
     lea     rdi, [rip+s_memfd]
     mov     esi, MFD_CLOEXEC
@@ -717,6 +722,8 @@ gpu_slot:
     lea     rax, [rip+gd_ok]            # (new memory: everything goes up)
     mov     dword ptr [rax+rbx*4], 0
     mov     dword ptr [rip+gd_delta], 0
+    call    now_ms
+    add     [rip+g_grow_ms], rax
     mov     rax, r14
     jmp     9f
 6:  mov     rdi, r14
@@ -728,7 +735,9 @@ gpu_slot:
 7:  mov     edi, r13d
     mov     eax, SYS_CLOSE
     syscall
-8:  xor     eax, eax
+8:  call    now_ms
+    add     [rip+g_grow_ms], rax
+    xor     eax, eax
 9:  add     rsp, 8
     pop     r14
     pop     r13
