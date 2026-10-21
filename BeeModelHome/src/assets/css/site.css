@@ -351,6 +351,9 @@ section.tight { padding-top: 32px; padding-bottom: 32px; }
 .rel-body h4 { margin: 16px 0 6px; font-size: .82rem; text-transform: uppercase; letter-spacing: .1em; color: var(--honey); }
 .rel-body ul { margin: 0; padding-left: 20px; color: var(--ink-2); }
 .rel-body li { margin: 4px 0; }
+.rel-body table { border-collapse: collapse; margin: 10px 0 4px; font-size: .88rem; color: var(--ink-2); }
+.rel-body th, .rel-body td { padding: 4px 12px 4px 0; text-align: left; white-space: nowrap; }
+.rel-body th { color: var(--ink); font-weight: 600; }
 .rel-filter { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .rel-filter input {
   flex: 1; min-width: 220px; padding: 12px 16px; border-radius: 12px; border: 1px solid var(--line);
