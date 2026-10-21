@@ -309,6 +309,39 @@ section.tight { padding-top: 32px; padding-bottom: 32px; }
 .req { padding: 14px; border-radius: 12px; border: 1px solid var(--line); background: var(--bg-2); font-size: .9rem; color: var(--ink-2); }
 .req b { display: block; color: var(--ink); margin-bottom: 2px; }
 
+/* ---- comparison --------------------------------------------------------------------------------- */
+.cmp-scroll {
+  margin-top: 40px; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); -webkit-overflow-scrolling: touch;
+}
+.cmp { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; font-size: .92rem; }
+.cmp thead th:first-child { width: 17%; }
+.cmp th, .cmp td { padding: 13px 16px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+.cmp tbody tr:last-child > * { border-bottom: 0; }
+.cmp thead th { font-size: .95rem; color: var(--ink); background: var(--panel-2); white-space: nowrap; }
+.cmp tbody th { color: var(--ink); font-weight: 600; }
+.cmp td { color: var(--ink-2); }
+.cmp th:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+.cmp thead th:first-child { background: var(--panel-2); }
+.cmp .bee { background: color-mix(in srgb, var(--honey) 8%, var(--panel)); color: var(--ink); }
+.cmp thead .bee { color: var(--honey); background: color-mix(in srgb, var(--honey) 16%, var(--panel-2)); }
+.cmp small { color: var(--ink-3); }
+.cmp i, .cmp-key i {
+  display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; vertical-align: .08em;
+}
+.cmp i.y, .cmp-key i.y { background: var(--green); }
+.cmp i.p, .cmp-key i.p { background: var(--honey); }
+.cmp i.n, .cmp-key i.n { background: transparent; box-shadow: inset 0 0 0 2px var(--ink-3); }
+.cmp-key { font-size: .82rem; margin-top: 12px; }
+.cmp-key span { margin-right: 16px; white-space: nowrap; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.picks { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 32px; }
+.pick { padding: 22px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); }
+.pick.bee { border-color: color-mix(in srgb, var(--honey) 55%, var(--line)); }
+.pick h3 { font-size: 1.05rem; margin-bottom: .35em; }
+.pick.bee h3 { color: var(--honey); }
+.pick p { font-size: .93rem; margin: 0; color: var(--ink-2); }
+
 /* ---- license ------------------------------------------------------------------------------------ */
 .license { display: grid; grid-template-columns: auto 1fr; gap: 32px; align-items: center; }
 .mit-badge {
