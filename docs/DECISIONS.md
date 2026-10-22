@@ -24,3 +24,24 @@ AI agents write it reliably, and its errors say what to do instead
   described colours that way, and agents write them.
 * `tests/beescript.py` runs 50 tasks the way an agent writes them. Every 1.x version
   must run them without an error and with the same answers.
+
+## D2 · BeeModel's keymap stays the default, with a Blender 4.x preset
+
+*Decided 2026-10-22 ([#294](https://github.com/bartbeecoders/beemodel/issues/294)).*
+
+**Question.** Should the default keymap copy Blender's, or be BeeModel's own with a
+Blender preset?
+
+**Decision.** BeeModel's own keymap stays the default. It is already close to Blender's
+for most keys, and copying Blender's would take away some of its own shortcuts
+(Shift+Tab texture paint, F reset camera, Shift+Q/W/E/R tools). A **Blender 4.x** preset
+changes only the keys that differ.
+
+**What follows.**
+
+* The preset is in Preferences › Keymap and on the welcome screen. The welcome screen
+  offers it with or without Alt + left button as the middle button (laptops).
+  `prefs.keymap blender | beemodel` sets it from the console or a script.
+* The preset is stored as ordinary key overrides, plus `keymap 1` in the prefs file, so
+  you can still change any key afterwards.
+* [UI.md](UI.md#the-blender-4x-keymap) lists every difference and why.

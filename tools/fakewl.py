@@ -8665,6 +8665,13 @@ def prefs_ui():
     click('prefs.key_set', 0)
     f.key(65); f.pump(0.3)                                      # F7 (free)
     check('key object.duplicate' in prefs(), f'Set, then a key: kept ({prefs()[-60:]!r})')
+    pick_enum(f, m, 'prefs.keymap', 0, 1)                       # D2: the Blender 4.x preset
+    p = prefs()
+    check('keymap 1' in p and 'key tool.select 17' in p and f'key view.toggle_wireframe {44 | 1 << 16}' in p
+          and 'key object.duplicate' in p, 'Keymap Blender 4.x: W the select tool, Shift+Z wireframe; a key set by hand stays')
+    pick_enum(f, m, 'prefs.keymap', 0, 0)
+    p = prefs()
+    check('keymap 0' in p and 'key tool.select' not in p and 'key object.duplicate' in p, 'Keymap BeeModel: the preset\'s keys go back')
     cat(5)
     check({'prefs.threads', 'prefs.gpu_device', 'prefs.jit'} <= names(), 'System: threads, render device, JIT')
     cat(6)
@@ -8790,6 +8797,12 @@ def help_ui():
     check({'welcome.default', 'welcome.empty', 'welcome.product', 'welcome.character', 'welcome.terrain', 'welcome.open',
            'welcome.sample_tree', 'welcome.keymap', 'welcome.show'} <= names(),
           'the welcome screen: templates, open, samples, keymap, show at start')
+    pick_enum(f, m, 'welcome.keymap', 0, 3)                     # D2: Blender 4.x, laptop
+    pf = os.path.join(f.home, '.config', 'beemodel', 'prefs')
+    p = open(pf).read() if os.path.exists(pf) else ''
+    check('keymap 1' in p and 'emulate_middle 1' in p and 'key tool.select 17' in p,
+          'the welcome screen\'s keymap: Blender 4.x with Alt + left as the middle button')
+    pick_enum(f, m, 'welcome.keymap', 0, 0)
     click('welcome.product')
     for _ in range(10):
         if 'welcome.product' not in names():

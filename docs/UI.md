@@ -197,11 +197,38 @@ Connections are set up and tested in Preferences › AI. The guide is [AI.md](AI
 | **Interface** | Accent colour (any theme; **Theme's Accent** goes back), theme (Dark, Light, High contrast, Honey, Graphite, Nord, Solarized Dark, Solarized Light, Dracula; the list shows a strip of each one's colours), UI scale 75–200 %, tooltip delay, colour-blind-safe axis colours, the welcome screen |
 | **Viewport** | The ground grid and its spacing, the field of view, the clip start, Rendered shading's samples and denoise |
 | **Input** | Alt + left button as the middle button, orbit speed |
-| **Keymap** | Search, Set (then press the key), Clear, Reset All Keys. It warns you when a key is already taken |
+| **Keymap** | The preset (BeeModel or Blender 4.x, below), then Search, Set (then press the key), Clear, Reset All Keys. It warns you when a key is already taken |
 | **Rendering** | New scenes' render width, height, samples and denoise (each scene keeps its own) |
 | **System** | Worker threads, the GPU, the JIT |
 | **Files** | Autosave interval, library folders |
 | **AI** | The agents' permission at start-up, the MCP server |
+
+### The Blender 4.x keymap
+
+BeeModel's own keymap is the default, and it is already close to Blender's: G R S, Tab,
+Shift+A, Shift+D, H / Alt+H, X / Delete, E, I, K, Ctrl+R, Ctrl+B, the numpad views, F3,
+F9, F12, Space to play, I to key, the Ctrl+Tab mode pie and the Z shading pie all match.
+The **Blender 4.x** preset (Preferences › Keymap, the welcome screen, or
+`prefs.keymap blender`) changes only the keys that differ:
+
+| Operator | BeeModel | Blender 4.x preset | Why |
+|---|---|---|---|
+| Wireframe | Z (tap) | Shift+Z | Blender's Z only opens the shading pie |
+| Material Preview | Shift+Z | none | Shift+Z is Blender's wireframe toggle |
+| Reset Camera | F | none (Home stays) | F does nothing in Blender's object mode |
+| Ground Grid | Shift+G | none | Shift+G is Select Grouped |
+| Texture Paint | Shift+Tab | none | Shift+Tab is snapping; the modes are on the Ctrl+Tab pie |
+| Vertex Paint | Shift+V | none | Shift+V is Vertex Slide |
+| Weight Paint | Ctrl+W | none | on the Ctrl+Tab pie |
+| Select tool | Shift+Q | W | W is Blender's select tool |
+| Move / Rotate / Scale tools | Shift+W / Shift+E / Shift+R | none | Shift+E is Edge Crease, Shift+R Repeat Last |
+| Node editor: Frame Selected | F | Numpad . | as in the 3D viewport |
+| Node editor: Comment Frame | C | Ctrl+J | Blender's Join in New Frame |
+
+The preset writes these as key overrides, so they show in the Keymap list. Keys you set
+yourself on other operators stay as they are. Choosing **BeeModel** again (or Reset All
+Keys) takes the preset's keys back. Some Blender keys have no BeeModel operator yet
+(Ctrl+A Apply, Ctrl+J Join, M Move to Collection); the F3 search finds those commands.
 
 ## Accessibility
 
@@ -220,7 +247,7 @@ The **welcome screen** at start-up offers:
 - templates: a parametric CAD product, a rigged character, a terrain;
 - samples;
 - your recent files;
-- the keymap choice (BeeModel, or laptop, where Alt + left button pans).
+- the keymap choice: BeeModel or Blender 4.x, each also for a laptop (Alt + left button as the middle button).
 
 **Help › Welcome Screen** brings it back. To skip it at start-up, turn off "Show this at start" or set `BEEMODEL_WELCOME=0`.
 
