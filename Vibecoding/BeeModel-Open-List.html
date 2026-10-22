@@ -153,30 +153,23 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <div class="kicker">Living list · updated with every stage</div>
   <h1>Open features &amp; issues</h1>
   <p class="lede">Everything that is open, in one place: the plan stages still to build, known bugs, performance follow-ups, features that were put off, and loose ends on GitHub. The plans say what to build. This list says what is still open. It is updated with every commit that opens or closes something here.</p>
-  <div class="meta">BeeModel · Vibecoding/BeeModel-Open-List.html · Plans: <a href="BeeModel-2.0-Plan.html">2.0</a>, <a href="BeeModel-Win11-Port-Plan.html">Windows 11 port</a>, <a href="BeeModel-Masterplan.html">Masterplan</a> · Last updated <b>2026-10-22</b>, against <b>v0.24.0</b></div>
+  <div class="meta">BeeModel · Vibecoding/BeeModel-Open-List.html · Plans: <a href="BeeModel-2.0-Plan.html">2.0</a>, <a href="BeeModel-Win11-Port-Plan.html">Windows 11 port</a>, <a href="BeeModel-Masterplan.html">Masterplan</a> · Last updated <b>2026-10-22</b>, against <b>v1.0.0</b></div>
 </header>
 
 <section id="now">
   <h2>Now</h2>
   <p class="sub">What is being worked on, and what comes next.</p>
   <div class="grid g2">
-    <div class="card accent"><h3>Releasing: Stage D · Decisions → v1.0.0</h3>Milestone 17, issues <a href="https://github.com/bartbeecoders/beemodel/issues/293">#293</a>–<a href="https://github.com/bartbeecoders/beemodel/issues/299">#299</a>, all committed on branch <code>decisions</code>: the BeeScript grammar frozen, a Blender 4.x keymap, <code>docs/mcp-tools.json</code>, mates, session keys for co-editing, and the 1.0 compatibility fixture. Next: local CI, the PR, then the v1.0.0 tag.</div>
+    <div class="card accent"><h3>Released: v1.0.0 · Stage D · Decisions</h3>Milestone 17, issues <a href="https://github.com/bartbeecoders/beemodel/issues/293">#293</a>–<a href="https://github.com/bartbeecoders/beemodel/issues/299">#299</a>, merged in <a href="https://github.com/bartbeecoders/beemodel/pull/372">#372</a> and tagged 2026-10-22. From here on, <code>.bee</code> files, BeeScript and the MCP tools change only by adding (<code>docs/DECISIONS.md</code>).</div>
     <div class="card blue"><h3>Next: Stage V · Smoke, fire, volumes</h3>V1–V5 in the <a href="BeeModel-2.0-Plan.html#gas">2.0 plan</a>: a sparse gas grid, fire, volumes in both path tracers and in the viewport, caching and OpenVDB export. After that, stage Z (v2.0.0).</div>
   </div>
 </section>
 
 <section id="stages">
   <h2>Plan stages left</h2>
-  <p class="sub">The 2.0 plan: R, G, S, A and P are released (v0.17–v0.22), as are two stages that were added along the way: rendering performance H (v0.23) and the GPU viewport VP (v0.24).</p>
+  <p class="sub">The 2.0 plan: R, G, S, A and P are released (v0.17–v0.22), as are two stages that were added along the way: rendering performance H (v0.23) and the GPU viewport VP (v0.24). The decisions D are released as v1.0.0.</p>
   <div class="table-wrap"><table>
     <tr><th>#</th><th>Item</th><th>Plan</th><th>Status</th></tr>
-    <tr><td class="num"><span class="issue">D1</span></td><td>BeeScript syntax frozen for 1.x: the grammar in <code>docs/BEESCRIPT.md</code>, a 50-task test</td><td>2.0</td><td><span class="tag g">done</span> <a href="https://github.com/bartbeecoders/beemodel/issues/293">#293</a></td></tr>
-    <tr><td class="num"><span class="issue">D2</span></td><td>Keymap: a Blender 4.x preset, its differences listed in <code>docs/UI.md</code></td><td>2.0</td><td><span class="tag g">done</span> <a href="https://github.com/bartbeecoders/beemodel/issues/294">#294</a></td></tr>
-    <tr><td class="num"><span class="issue">D3</span></td><td>MIT license line in the README and archives; <code>docs/mcp-tools.json</code> checked by CI</td><td>2.0</td><td><span class="tag g">done</span> <a href="https://github.com/bartbeecoders/beemodel/issues/295">#295</a></td></tr>
-    <tr><td class="num"><span class="issue">D4</span></td><td>CAD scope: parts and light assemblies (mates: coincident, concentric, distance)</td><td>2.0</td><td><span class="tag g">done</span> <a href="https://github.com/bartbeecoders/beemodel/issues/296">#296</a></td></tr>
-    <tr><td class="num"><span class="issue">D5</span></td><td>GPU helper stays optional; the CPU is the reference</td><td>2.0</td><td><span class="tag g">done</span> <a href="https://github.com/bartbeecoders/beemodel/issues/297">#297</a></td></tr>
-    <tr><td class="num"><span class="issue">D6</span></td><td>Collaboration: LAN first, with a shared session key</td><td>2.0</td><td><span class="tag g">done</span> <a href="https://github.com/bartbeecoders/beemodel/issues/298">#298</a></td></tr>
-    <tr><td class="num"><span class="issue">D7</span></td><td>Release v1.0.0: stability promises, a 1.0 walkthrough</td><td>2.0</td><td><span class="tag a">release PR</span> <a href="https://github.com/bartbeecoders/beemodel/issues/299">#299</a></td></tr>
     <tr><td class="num"><span class="issue">V1–V5</span></td><td>Gas solver, fire, volumes in Hive and on the GPU, viewport volumes, VDB export</td><td>2.0</td><td><span class="tag">planned</span> v1.1.0</td></tr>
     <tr><td class="num"><span class="issue">Z1–Z2</span></td><td>The 2.0 walkthrough scene, docs, the v2.0.0 release</td><td>2.0</td><td><span class="tag">planned</span> v2.0.0</td></tr>
     <tr><td class="num"><span class="issue">W·</span></td><td>Windows 11 port: a WSLg check, a platform layer, a native Win32 backend</td><td>Win11</td><td><span class="tag">not started</span> no milestone yet</td></tr>
@@ -223,6 +216,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <tr><th>#</th><th>Item</th><th>Status</th></tr>
     <tr><td class="num"><span class="issue">K1</span></td><td>Milestones 11 (v0.12.0) and 22 (v0.22.0) are still open with no open issues. Close them: <code>gh api -X PATCH repos/bartbeecoders/beemodel/milestones/11 -f state=closed</code>, and the same for 22.</td><td><span class="tag">open</span> needs the user</td></tr>
     <tr><td class="num"><span class="issue">K2</span></td><td>Merged branches left on the remote: <code>gpu-viewport</code>, <code>website-0.23</code>, <code>ci-liquid-view</code>, <code>marketing</code>, <code>website-compare</code>. Delete them once they are no longer needed.</td><td><span class="tag">open</span> needs the user</td></tr>
+    <tr><td class="num"><span class="issue">K3</span></td><td>Milestone 17 (v1.0.0 – Decisions) has all its issues closed. Close it: <code>gh api -X PATCH repos/bartbeecoders/beemodel/milestones/17 -f state=closed</code>.</td><td><span class="tag">open</span> needs the user</td></tr>
   </table></div>
 </section>
 
@@ -231,6 +225,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <p class="sub">Moved here when done, with where it was done. The oldest entries drop off after a few releases.</p>
   <div class="table-wrap"><table>
     <tr><th>Item</th><th>Closed by</th><th>Date</th></tr>
+    <tr><td>Stage D: the open questions decided (BeeScript frozen, Blender keymap, MCP schema, mates, GPU optional, session keys)</td><td>D1–D7, <a href="https://github.com/bartbeecoders/beemodel/pull/372">#372</a>, v1.0.0</td><td class="num">2026-10-22</td></tr>
     <tr><td>Setting values with the number keypad didn't work (bug-fixes.md)</td><td>W10, <a href="https://github.com/bartbeecoders/beemodel/issues/326">#326</a>, v0.20.0</td><td class="num">2026-10-19</td></tr>
     <tr><td>Drag and drop in the outliner should show what is being dragged (bug-fixes.md)</td><td>W11, <a href="https://github.com/bartbeecoders/beemodel/issues/327">#327</a>, v0.20.0</td><td class="num">2026-10-19</td></tr>
     <tr><td>Slow rendering of the particle demos; a GPU rendering setting (bug-fixes.md)</td><td>Stage H, v0.23.0</td><td class="num">2026-10-20</td></tr>
