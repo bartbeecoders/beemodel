@@ -160,8 +160,8 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <h2>Now</h2>
   <p class="sub">What is being worked on, and what comes next.</p>
   <div class="grid g2">
-    <div class="card accent"><h3>Released: v1.0.0 · Stage D · Decisions</h3>Milestone 17, issues <a href="https://github.com/bartbeecoders/beemodel/issues/293">#293</a>–<a href="https://github.com/bartbeecoders/beemodel/issues/299">#299</a>, merged in <a href="https://github.com/bartbeecoders/beemodel/pull/372">#372</a> and tagged 2026-10-22. From here on, <code>.bee</code> files, BeeScript and the MCP tools change only by adding (<code>docs/DECISIONS.md</code>).</div>
-    <div class="card blue"><h3>Next: Stage V · Smoke, fire, volumes</h3>V1–V5 in the <a href="BeeModel-2.0-Plan.html#gas">2.0 plan</a>: a sparse gas grid, fire, volumes in both path tracers and in the viewport, caching and OpenVDB export. After that, stage Z (v2.0.0).</div>
+    <div class="card accent"><h3>In progress: Stage Q · Ask AI about the selection → v1.1.0</h3>Milestone 25, issues <a href="https://github.com/bartbeecoders/beemodel/issues/374">#374</a>–<a href="https://github.com/bartbeecoders/beemodel/issues/378">#378</a>. Branch <code>ask-ai</code>. Alt+right-click an object (or <b>Ask AI…</b> in the viewport menu), type what to change, and the AI changes the selection in one undo step. See the <a href="BeeModel-2.0-Plan.html#ask">2.0 plan</a>.</div>
+    <div class="card blue"><h3>Next: Stage V · Smoke, fire, volumes → v1.2.0</h3>V1–V5 in the <a href="BeeModel-2.0-Plan.html#gas">2.0 plan</a>: a sparse gas grid, fire, volumes in both path tracers and in the viewport, caching and OpenVDB export. After that, stage Z (v2.0.0).</div>
   </div>
 </section>
 
@@ -170,7 +170,12 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <p class="sub">The 2.0 plan: R, G, S, A and P are released (v0.17–v0.22), as are two stages that were added along the way: rendering performance H (v0.23) and the GPU viewport VP (v0.24). The decisions D are released as v1.0.0.</p>
   <div class="table-wrap"><table>
     <tr><th>#</th><th>Item</th><th>Plan</th><th>Status</th></tr>
-    <tr><td class="num"><span class="issue">V1–V5</span></td><td>Gas solver, fire, volumes in Hive and on the GPU, viewport volumes, VDB export</td><td>2.0</td><td><span class="tag">planned</span> v1.1.0</td></tr>
+    <tr><td class="num"><span class="issue">Q1</span></td><td>The Ask box: Alt+right-click or <b>Ask AI…</b> in the viewport menu, a prompt at the pointer, recent prompts, quick buttons; <code>ai.ask</code></td><td>2.0</td><td><span class="tag a">in progress</span> <a href="https://github.com/bartbeecoders/beemodel/issues/374">#374</a></td></tr>
+    <tr><td class="num"><span class="issue">Q2</span></td><td>What the AI is told about the selection: objects (or edit-mode elements), sizes, materials, modifiers</td><td>2.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/375">#375</a></td></tr>
+    <tr><td class="num"><span class="issue">Q3</span></td><td><b>Only the selection</b>: objects outside it that changed are named in a warning</td><td>2.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/376">#376</a></td></tr>
+    <tr><td class="num"><span class="issue">Q4</span></td><td>Feedback in the status bar while the AI works: Stop, the answer as a message</td><td>2.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/377">#377</a></td></tr>
+    <tr><td class="num"><span class="issue">Q5</span></td><td>Docs, <code>tests/askai.py</code>, release v1.1.0</td><td>2.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/378">#378</a></td></tr>
+    <tr><td class="num"><span class="issue">V1–V5</span></td><td>Gas solver, fire, volumes in Hive and on the GPU, viewport volumes, VDB export</td><td>2.0</td><td><span class="tag">planned</span> v1.2.0</td></tr>
     <tr><td class="num"><span class="issue">Z1–Z2</span></td><td>The 2.0 walkthrough scene, docs, the v2.0.0 release</td><td>2.0</td><td><span class="tag">planned</span> v2.0.0</td></tr>
     <tr><td class="num"><span class="issue">W·</span></td><td>Windows 11 port: a WSLg check, a platform layer, a native Win32 backend</td><td>Win11</td><td><span class="tag">not started</span> no milestone yet</td></tr>
   </table></div>
