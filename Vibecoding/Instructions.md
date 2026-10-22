@@ -49,3 +49,6 @@ Before we continue onn th eopen parts in plan 2.0, I want to work on some improv
 - add the possibility for folders in the outliner
 - add the possibility to insert reference images
 
+AI improvements / idea
+I think it could be usefull the closer integrate AI.
+I was thinking about a prompt dialog that appears when the user shift-right clicks an object. The user coulmd the prompt someting about the object/objects selected. Like: change the material to ..., or make it bigger etc

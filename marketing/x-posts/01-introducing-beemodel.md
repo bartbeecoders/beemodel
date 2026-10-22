@@ -10,8 +10,6 @@ Meet BeeModel 🐝: a full 3D modeller written entirely in x86-64 assembly.
 
 No libc, no toolkit, a single 1.5 MB binary. Modeling, sculpting, CAD, animation, physics, liquids and a path tracer.
 
-v0.24 moves the viewport to the GPU. Free for Linux:
-
 https://beemodel.hideterms.com
 ```
 
