@@ -1594,4 +1594,477 @@ do_mj_check:
 9:  add     rsp, 8
     ret
 
+# =============================================================================
+#  Mates (D4): place a component against another. A mate moves the part
+#  once, as a placing tool (no constraint solver: run it again after a
+#  part changes). References: a face number of the object's mesh (its
+#  centre and normal: a plane, or the axis through it), or
+#  "axis px py pz dx dy dz" in the object's own space (a hole, a shaft).
+#    coincident  the faces' planes meet, facing each other
+#    distance d  the same, with a gap of d
+#    concentric  the axes on one line, pointing the same way
+#  "flip" turns the part round. It turns about its origin by the shortest
+#  arc, then moves the least: along the target's normal (coincident,
+#  distance) or across its axis (concentric).
+# =============================================================================
+.section .rodata
+s_coinc:        .asciz "coincident"
+s_conc:         .asciz "concentric"
+s_dist:         .asciz "distance"
+s_flip:         .asciz "flip"
+s_as_bad:       .asciz "  asm.mate <coincident|concentric|distance> <part> <face|axis px py pz dx dy dz> <target> <face|axis ...> [distance] [flip] - not understood: "
+s_as_done:      .asciz "  mated: "
+s_as_to:        .asciz " to "
+.align 4
+as_two:         .float 2.0
+.section .bss
+.align 16
+as_p:           .skip 12                # the part's reference (its space)
+as_n:           .skip 12
+as_q:           .skip 12                # the target's
+as_m:           .skip 12
+as_pw:          .skip 12                # in the world
+as_nw:          .skip 12
+as_qw:          .skip 12
+as_mw:          .skip 12
+as_ax:          .skip 12
+as_v:           .skip 12
+as_eu:          .skip 12
+as_R:           .skip 36
+as_Rd:          .skip 36
+as_M:           .skip 48
+as_d:           .skip 4
+as_flip:        .skip 4
+as_type:        .skip 4                 # 1 coincident, 2 concentric, 3 distance
+.text
+OPERATOR op_asm_mate, "asm.mate", "Mate Parts", do_asm_mate, flags=OPF_AI_SAFE|OPF_UNDO, doc="Place a part against another: asm.mate <coincident|concentric|distance> <part> <face|axis px py pz dx dy dz> <target> <face|axis ...> [distance] [flip] (faces: centre and normal; axis: in the object's own space; the part moves, once)"
+
+do_asm_mate:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     dword ptr [rip+as_d], 0
+    mov     dword ptr [rip+as_flip], 0
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      .Las_bad
+    call    im_next_word                # the kind
+    mov     r12, rsi
+    mov     r14d, 1
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+s_coinc]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     r14d, 2
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+s_conc]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     r14d, 3
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+s_dist]
+    call    str_eq
+    test    eax, eax
+    jz      .Las_bad
+1:  mov     [rip+as_type], r14d
+    mov     rsi, r12                    # the part and its reference
+    call    im_next_word
+    mov     r12, rsi
+    lea     rdi, [rip+im_word]
+    call    mx_obj
+    test    rax, rax
+    jz      .Las_bad
+    mov     rbx, rax
+    mov     rdi, rbx
+    lea     rsi, [rip+as_p]
+    lea     rdx, [rip+as_n]
+    call    as_ref
+    test    eax, eax
+    jz      .Las_bad
+    mov     rsi, r12                    # the target and its reference
+    call    im_next_word
+    mov     r12, rsi
+    lea     rdi, [rip+im_word]
+    call    mx_obj
+    test    rax, rax
+    jz      .Las_bad
+    cmp     rax, rbx
+    je      .Las_bad
+    mov     r13, rax
+    mov     rdi, r13
+    lea     rsi, [rip+as_q]
+    lea     rdx, [rip+as_m]
+    call    as_ref
+    test    eax, eax
+    jz      .Las_bad
+    cmp     r14d, 3                     # distance: its value
+    jne     2f
+    mov     rsi, r12
+    call    mx_word_expr
+    mov     r12, rsi
+    test    eax, eax
+    jz      .Las_bad
+    movss   [rip+as_d], xmm0
+2:  mov     rsi, r12                    # flip
+    call    im_next_word
+    mov     r12, rsi
+    test    eax, eax
+    jz      3f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+s_flip]
+    call    str_eq
+    test    eax, eax
+    jz      .Las_bad
+    mov     dword ptr [rip+as_flip], 1
+    jmp     2b
+3:  mov     rdi, r13                    # the target in the world
+    lea     rsi, [rip+as_q]
+    lea     rdx, [rip+as_qw]
+    call    as_wpoint
+    mov     rdi, r13
+    lea     rsi, [rip+as_m]
+    lea     rdx, [rip+as_mw]
+    call    as_wdir
+    mov     rdi, rbx                    # the part's normal in the world
+    lea     rsi, [rip+as_n]
+    lea     rdx, [rip+as_nw]
+    call    as_wdir
+    xor     ecx, ecx                    # where it should point: the
+    mov     eax, [rip+as_flip]          #  target's way (concentric) or
+    cmp     r14d, 2                     #  against it, flip turning it round
+    je      40f
+    xor     eax, 1
+40: lea     r8, [rip+as_mw]
+    lea     r9, [rip+as_v]
+4:  movss   xmm0, [r8+rcx*4]
+    test    eax, eax
+    jz      41f
+    xorps   xmm1, xmm1
+    subss   xmm1, xmm0
+    movaps  xmm0, xmm1
+41: movss   [r9+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      4b
+    lea     rdi, [rip+as_nw]            # the turn: axis n x want, the angle
+    lea     rsi, [rip+as_v]             #  atan2(|n x want|, n . want)
+    lea     rdx, [rip+as_ax]
+    call    as_cross
+    lea     rdi, [rip+as_ax]
+    call    as_len
+    movss   [rsp], xmm0
+    lea     rdi, [rip+as_nw]
+    lea     rsi, [rip+as_v]
+    call    as_dot
+    movss   [rsp+4], xmm0
+    movss   xmm0, [rsp]
+    comiss  xmm0, [rip+mx_eps]
+    ja      5f
+    movss   xmm0, [rsp+4]               # parallel: done, or half a turn
+    xorps   xmm1, xmm1
+    comiss  xmm0, xmm1
+    ja      7f
+    lea     rdi, [rip+as_nw]            #  about any axis across n
+    call    as_perp
+    mov     dword ptr [rsp+4], 0xbf800000
+    mov     dword ptr [rsp], 0
+5:  lea     rdi, [rip+as_ax]
+    call    normalize
+    fld     dword ptr [rsp]
+    fld     dword ptr [rsp+4]
+    fpatan
+    fstp    dword ptr [rsp]
+    movss   xmm0, [rsp]
+    lea     rdi, [rip+as_ax]
+    lea     rsi, [rip+as_Rd]
+    call    o_axis_mat
+    lea     rdi, [rbx+OB_ROT]           # R' = Rd R
+    lea     rsi, [rip+as_R]
+    call    o_euler_mat
+    lea     rdi, [rip+as_Rd]
+    lea     rsi, [rip+as_R]
+    lea     rdx, [rip+as_R]
+    call    o_mul
+    lea     rdi, [rip+as_R]
+    lea     rsi, [rip+as_eu]
+    call    o_mat_euler
+    mov     rax, [rip+as_eu]
+    mov     [rbx+OB_ROT], rax
+    mov     eax, [rip+as_eu+8]
+    mov     [rbx+OB_ROT+8], eax
+7:  mov     rdi, rbx                    # the part's point, turned
+    lea     rsi, [rip+as_p]
+    lea     rdx, [rip+as_pw]
+    call    as_wpoint
+    xor     ecx, ecx                    # v = target point - part point
+    lea     r8, [rip+as_qw]
+    lea     r9, [rip+as_pw]
+    lea     r10, [rip+as_v]
+8:  movss   xmm0, [r8+rcx*4]
+    subss   xmm0, [r9+rcx*4]
+    movss   [r10+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      8b
+    lea     rdi, [rip+as_v]
+    lea     rsi, [rip+as_mw]
+    call    as_dot                      # xmm0 = v . m
+    cmp     r14d, 2
+    je      9f
+    addss   xmm0, [rip+as_d]            # planes: along m by v.m + d
+    xor     ecx, ecx
+    lea     r8, [rip+as_mw]
+81: movss   xmm1, [r8+rcx*4]
+    mulss   xmm1, xmm0
+    addss   xmm1, [rbx+OB_LOC+rcx*4]
+    movss   [rbx+OB_LOC+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      81b
+    jmp     .Las_done
+9:  xor     ecx, ecx                    # axes: by v less its part along m
+    lea     r8, [rip+as_mw]
+    lea     r9, [rip+as_v]
+91: movss   xmm1, [r8+rcx*4]
+    mulss   xmm1, xmm0
+    movss   xmm2, [r9+rcx*4]
+    subss   xmm2, xmm1
+    addss   xmm2, [rbx+OB_LOC+rcx*4]
+    movss   [rbx+OB_LOC+rcx*4], xmm2
+    inc     ecx
+    cmp     ecx, 3
+    jb      91b
+.Las_done:
+    mov     dword ptr [rip+dirty], 1
+    call    fmt_reset
+    lea     rdi, [rip+s_as_done]
+    call    fmt_str
+    lea     rdi, [rbx+OB_NAME]
+    call    fmt_str
+    lea     rdi, [rip+s_as_to]
+    call    fmt_str
+    lea     rdi, [r13+OB_NAME]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+    jmp     .Las_out
+.Las_bad:
+    lea     rdi, [rip+s_as_bad]
+    lea     rsi, [rip+im_word]
+    call    log_pair
+    call    undo_drop_last
+.Las_out:
+    add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# as_ref(rdi=object, rsi=out point, rdx=out direction; r12=text) -> eax = 1
+#   when read (r12 after it): a face of its mesh, or "axis px py pz dx dy dz"
+as_ref:
+    push    rbx
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r13, rsi
+    mov     r14, rdx
+    mov     rsi, r12
+    call    im_next_word
+    mov     [rsp], rsi
+    test    eax, eax
+    jz      8f
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_axis]
+    call    str_eq
+    test    eax, eax
+    jz      3f
+    xor     r15d, r15d                  # six values: the point, the way
+    mov     rsi, [rsp]
+1:  call    mx_word_expr
+    test    eax, eax
+    jz      8f
+    lea     rax, [r13+r15*4]
+    cmp     r15d, 3
+    jb      2f
+    lea     rax, [r14+r15*4-12]
+2:  movss   [rax], xmm0
+    inc     r15d
+    cmp     r15d, 6
+    jb      1b
+    mov     r12, rsi
+    mov     rdi, r14
+    call    normalize
+    jmp     7f
+3:  cmp     dword ptr [rbx+OB_TYPE], OT_MESH   # a face: im_word is its number
+    jne     8f
+    mov     r15, [rbx+OB_MESH]
+    test    r15, r15
+    jz      8f
+    mov     rsi, r12
+    call    mx_num
+    test    eax, eax
+    jz      8f
+    mov     r12, rsi
+    cvttss2si eax, xmm0
+    test    eax, eax
+    js      8f
+    cmp     eax, [r15+ME_NPOLYS]
+    jae     8f
+    mov     [rsp], eax
+    mov     rdi, r15
+    mov     esi, eax
+    mov     rdx, r13
+    call    poly_center
+    mov     rdi, r15
+    mov     esi, [rsp]
+    call    poly_normal
+    mov     rax, [rip+nrm]
+    mov     [r14], rax
+    mov     eax, [rip+nrm+8]
+    mov     [r14+8], eax
+    mov     rdi, r14
+    call    normalize
+7:  mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# as_wpoint(rdi=object, rsi=point in its space, rdx=out) - in the world
+as_wpoint:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rsi
+    mov     r12, rdx
+    lea     rsi, [rip+as_M]
+    call    obj_matrix
+    lea     rdx, [rip+as_M]
+    xor     ecx, ecx
+1:  movss   xmm0, [rdx+12]
+    movss   xmm1, [rdx]
+    mulss   xmm1, [rbx]
+    addss   xmm0, xmm1
+    movss   xmm1, [rdx+4]
+    mulss   xmm1, [rbx+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rdx+8]
+    mulss   xmm1, [rbx+8]
+    addss   xmm0, xmm1
+    movss   [r12+rcx*4], xmm0
+    add     rdx, 16
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# as_wdir(rdi=object, rsi=direction in its space, rdx=out) - in the world:
+#   R (n / s), unit (a normal under the object's scale)
+as_wdir:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12, rdx
+    xor     ecx, ecx
+1:  movss   xmm0, [rsi+rcx*4]
+    movss   xmm1, [rbx+OB_SCALE+rcx*4]
+    xorps   xmm2, xmm2
+    comiss  xmm1, xmm2
+    je      2f
+    divss   xmm0, xmm1
+2:  movss   [r12+rcx*4], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      1b
+    lea     rdi, [rbx+OB_ROT]
+    lea     rsi, [rip+as_Rd]
+    call    o_euler_mat
+    lea     rdi, [rip+as_Rd]
+    mov     rsi, r12
+    mov     rdx, r12
+    call    o_mulv
+    mov     rdi, r12
+    call    normalize
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# as_cross(rdi=a, rsi=b, rdx=out) ; as_dot(rdi=a, rsi=b) -> xmm0 ;
+#   as_len(rdi=a) -> xmm0
+as_cross:
+    movss   xmm0, [rdi+4]
+    mulss   xmm0, [rsi+8]
+    movss   xmm1, [rdi+8]
+    mulss   xmm1, [rsi+4]
+    subss   xmm0, xmm1
+    movss   [rdx], xmm0
+    movss   xmm0, [rdi+8]
+    mulss   xmm0, [rsi]
+    movss   xmm1, [rdi]
+    mulss   xmm1, [rsi+8]
+    subss   xmm0, xmm1
+    movss   [rdx+4], xmm0
+    movss   xmm0, [rdi]
+    mulss   xmm0, [rsi+4]
+    movss   xmm1, [rdi+4]
+    mulss   xmm1, [rsi]
+    subss   xmm0, xmm1
+    movss   [rdx+8], xmm0
+    ret
+as_dot:
+    movss   xmm0, [rdi]
+    mulss   xmm0, [rsi]
+    movss   xmm1, [rdi+4]
+    mulss   xmm1, [rsi+4]
+    addss   xmm0, xmm1
+    movss   xmm1, [rdi+8]
+    mulss   xmm1, [rsi+8]
+    addss   xmm0, xmm1
+    ret
+as_len:
+    mov     rsi, rdi
+    call    as_dot
+    sqrtss  xmm0, xmm0
+    ret
+
+# as_perp(rdi=unit n) -> as_ax = an axis across it (n x X, or n x Z)
+as_perp:
+    sub     rsp, 24
+    mov     dword ptr [rsp], 0x3f800000
+    mov     dword ptr [rsp+4], 0
+    mov     dword ptr [rsp+8], 0
+    movss   xmm0, [rdi]
+    andps   xmm0, [rip+as_absm]
+    comiss  xmm0, [rip+as_09]
+    jb      1f
+    mov     dword ptr [rsp], 0
+    mov     dword ptr [rsp+8], 0x3f800000
+1:  lea     rsi, [rsp]
+    lea     rdx, [rip+as_ax]
+    call    as_cross
+    add     rsp, 24
+    ret
+.section .rodata
+.align 16
+as_absm:        .long 0x7fffffff, 0x7fffffff, 0x7fffffff, 0x7fffffff
+as_09:          .float 0.9
+.text
+
 .section .note.GNU-stack,"",@progbits

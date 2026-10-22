@@ -19,6 +19,10 @@ project uses [Semantic Versioning](https://semver.org/).
 - docs/mcp-tools.json (D3, #295): every MCP tool with its input as JSON
   Schema, published in the release archive and checked against the running
   server by `tests/mcp_schema.py`. The README states the MIT License.
+- Mates (D4, #296): `asm.mate coincident | concentric | distance` places
+  a part against another by faces, or by an axis in the object's own
+  space; with mechanism joints, a light assembly that moves.
+  `tests/assembly.py`.
 
 ## [0.24.0] - 2026-10-21
 

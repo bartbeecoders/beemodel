@@ -522,7 +522,8 @@ the wind (`cloth.world wind 0 0 8`).
 turns a gear by a parameter, `gear 1 -2` makes a second follow, a slider from it is a rack, and
 limits hold a joint. Key a parameter (`key("param:angle", 1, 0)`) and the whole assembly moves
 over the timeline. Its features rebuild with it, and parts that run into each other are
-reported.
+reported. Mates place the parts first: `asm.mate concentric Pin 33 Base axis 0.5 0 0 0 1 0`
+puts a pin in a hole, `coincident` sets a face on a face and `distance` leaves a gap.
 
 **Physics.** `rigid.add` makes the selected objects rigid bodies: boxes, spheres, capsules,
 convex hulls, or compounds of convex parts cut from the mesh; static ones can also be any mesh

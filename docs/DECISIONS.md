@@ -66,3 +66,27 @@ as a versioned JSON Schema, so clients and other apps can rely on them.
   tools and fails when the file differs, or when a published tool is gone.
   `--update` rewrites the file after a deliberate change, and on every version bump.
 * From v1.0 on, tools are only added (D7).
+
+## D4 · CAD in v1.0: parts and light assemblies
+
+*Decided 2026-10-22 ([#296](https://github.com/bartbeecoders/beemodel/issues/296)).*
+
+**Question.** Should v1.0's CAD cover parts only, or parts and assemblies?
+
+**Decision.** Parts, plus light assemblies. A component is an ordinary object. **Mates**
+place it against another component, and mechanism joints (`mech.joint`) move it. A full
+assembly constraint solver, where mates stay solved while parts change, waits until after
+2.0.
+
+**What follows.**
+
+* `asm.mate <coincident|concentric|distance> <part> <ref> <target> <ref> [distance] [flip]`
+  moves the part once, as one undo step. A reference is a face number of the mesh (its
+  centre and normal), or `axis px py pz dx dy dz` in the object's own space, for holes
+  and shafts that have no face of their own.
+* The part turns about its origin by the shortest arc, then moves the least it can: along
+  the target's normal (coincident, distance) or across its axis (concentric). Mates run
+  one after another and nothing re-solves them, so a later mate can move the part away
+  from where an earlier one put it. Order them from the most to the least important.
+* `tests/assembly.py`: a plate, a pin and a wheel, placed by four mates from wherever
+  they started, then a revolute joint turns the wheel about the pin over the timeline.
