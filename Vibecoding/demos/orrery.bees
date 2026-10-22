@@ -1,0 +1,115 @@
+# Orrery — BeeModel v1.0 demo
+# A clockwork model of the solar system, with no keyframes on the planets at all.
+# Each planet rides on a brass arm round a hub, and each hub is turned by a
+# driver - an expression of the frame - at a rate from its planet's year (the
+# years squeezed so that Saturn still moves). Arms and planets are parented to
+# their hubs; the Moon has a hub of its own on the Earth's arm. The Sun glows
+# (an emission material and a light inside it), Jupiter's bands and the Earth's
+# oceans are small node graphs, and the camera keeps the Sun in view with a
+# Track To constraint while it circles.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+sclear()
+op("anim.range", "1 360 30")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Brass", 0.88, 0.64, 0.3, 0.25, 1)
+material("Base"); op("material.preset", "wood Base")
+mat("Velvet", 0.05, 0.02, 0.06, 0.95, 0)
+mat("Mercury", 0.5, 0.48, 0.45, 0.8, 0)
+mat("Venus", 0.88, 0.76, 0.5, 0.6, 0)
+mat("Mars", 0.75, 0.3, 0.15, 0.8, 0)
+mat("Moon", 0.6, 0.6, 0.6, 0.9, 0)
+mat("Saturn", 0.85, 0.75, 0.52, 0.6, 0)
+mat("Rings", 0.75, 0.68, 0.55, 0.5, 0)
+
+# the Sun: emission, and a light inside it
+m = mat("Sun", 1, 0.75, 0.3, 0.5, 0)
+matset(m, "emission", 1, 0.62, 0.22); matset(m, "strength", 2.2)
+
+# Jupiter: bands from a wave texture along y, between two colours
+m = material("Jupiter")
+w = node(m, "wave", 9, 1.5, 0, 1)
+r = node(m, "ramp", 0.2, 0.8)
+link(m, w, r, 1)
+c = node(m, "mix", 0)
+nodeset(m, c, 2, 0.85, 0.7, 0.5)
+nodeset(m, c, 3, 0.55, 0.35, 0.22)
+link(m, r, c, 1)
+socket(m, "base", c)
+matset(m, "roughness", 0.6)
+
+# the Earth: noise decides land or sea
+m = material("Earth")
+n = node(m, "noise", 3.5, 4, 0.55)
+st = node(m, "math", 22)
+link(m, n, st, 2)
+nodeset(m, st, 1, 0.52)
+c = node(m, "mix", 0)
+nodeset(m, c, 2, 0.05, 0.16, 0.45)
+nodeset(m, c, 3, 0.2, 0.42, 0.14)
+link(m, st, c, 1)
+socket(m, "base", c)
+matset(m, "roughness", 0.5)
+
+# the stand: a round wooden base, a brass column, the Sun on top
+b = add("cylinder", "Base", 0, 0.08, 0); scale(b, 2.6, 0.08, 2.6); assign(b, "Base")
+col = add("cylinder", "Column", 0, 0.75, 0); scale(col, 0.07, 0.6, 0.07); assign(col, "Brass")
+sun = add("sphere", "Sun", 0, 1.55, 0); scale(sun, 0.32); assign(sun, "Sun")
+add("light", "Sunlight", 0, 1.55, 0); op("light.set", "power 1.4")
+
+# planet(name, radius of its orbit, its size, year in Earth years, height):
+# a hub on the column, an arm out to the orbit, a post up to the planet
+fn planet(n, orbit, size, year, h) {
+    hub = add("cylinder", n + "Hub", 0, h, 0); scale(hub, 0.11, 0.02, 0.11); assign(hub, "Brass")
+    arm = add("cube", n + "Arm", orbit / 2, h, 0); scale(arm, orbit / 2, 0.012, 0.02); assign(arm, "Brass")
+    post = add("cylinder", n + "Post", orbit, h + 0.12, 0); scale(post, 0.012, 0.12, 0.012); assign(post, "Brass")
+    p = add("sphere", n, orbit, h + 0.24 + size, 0); scale(p, size); assign(p, n)
+    op("object.parent_set", n + "Arm " + n + "Hub")
+    op("object.parent_set", n + "Post " + n + "Hub")
+    op("object.parent_set", n + " " + n + "Hub")
+    rate = 7.0 / pow(year, 0.55)            # degrees a frame
+    op("anim.driver", n + "Hub:ry frame * " + rate + " * pi / 180")
+    key(n + ":ry", 1, 0, "linear")          # (its own day)
+    key(n + ":ry", 360, 12 * pi, "linear")
+    return hub
+}
+planet("Mercury", 0.62, 0.05, 0.24, 1.05)
+planet("Venus", 0.92, 0.08, 0.62, 0.98)
+planet("Earth", 1.28, 0.085, 1.0, 0.91)
+planet("Mars", 1.62, 0.065, 1.88, 0.84)
+planet("Jupiter", 2.05, 0.17, 11.9, 0.77)
+planet("Saturn", 2.45, 0.14, 29.5, 0.7)
+
+# Saturn's rings, tilted, carried by its hub; the Moon round the Earth
+ring = add("torus", "SaturnRings", 2.45, get("Saturn", "y"), 0); scale(ring, 0.27, 0.02, 0.27)
+rotate(ring, 0.45, 0, 0.2); assign(ring, "Rings")
+op("object.parent_set", "SaturnRings SaturnHub")
+mh = add("cylinder", "MoonHub", 1.28, get("Earth", "y"), 0); scale(mh, 0.01, 0.01, 0.01); assign(mh, "Brass")
+mo = add("sphere", "Moon", 1.28 + 0.2, get("Earth", "y"), 0); scale(mo, 0.025); assign(mo, "Moon")
+op("object.parent_set", "Moon MoonHub")
+op("object.parent_set", "MoonHub EarthHub")
+op("anim.driver", "MoonHub:ry frame * 30 * pi / 180")
+frame(90)
+print("Earth at frame 90:", round(get("EarthHub", "ry") * 180 / pi), "deg; Saturn:", round(get("SaturnHub", "ry") * 180 / pi), "deg")
+
+# a dark velvet room; the camera circles, and a Track To keeps the Sun in view
+g = add("plane", "Floor", 0, 0, 0); scale(g, 20); assign(g, "Velvet")
+d = add("sphere", "Dome", 0, 0, 0); scale(d, 16); assign(d, "Velvet")
+add("light", "Fill", 3, 4, 4); op("light.set", "power 0.5")
+add("light", "Fill2", -4, 3, -3); op("light.set", "power 0.3")
+add("camera", "Cam", 0, 2.5, 6); set("Cam", "lens", 32)
+for k in 0..9 {
+    a = k * 45deg
+    f = 1 + k * 45
+    rr = 5.6 - 1.2 * sin(k * 1.1)
+    key("Cam:x", f, sin(a) * rr); key("Cam:z", f, cos(a) * rr); key("Cam:y", f, 2.3 + 0.8 * cos(k * 0.9))
+}
+op("constraint.add", "Cam track_to Sun track -z up y")
+select("Cam"); op("camera.set", "active")
+op("world.strength", 0.05)
+view(20, 25, 7, 0, 1, 0)
+frame(1)

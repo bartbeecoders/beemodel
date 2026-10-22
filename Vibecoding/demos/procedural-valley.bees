@@ -1,0 +1,127 @@
+# Procedural Valley — BeeModel v1.0 demo
+# Everything here is geometry nodes, nothing is modelled by hand. One node tree
+# makes a 120 m terrain and erodes it with 40 000 droplets; the forest and the
+# boulders are other trees that make the same terrain, scatter points on it and
+# put an instance on each: L-system trees, grown from a rule set, and rocks.
+# A lake fills the low ground. The seed is keyed, so halfway through the valley
+# grows again from another one.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+op("anim.range", "1 240 30")
+SIZE = 120
+HEIGHT = 40
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Grass", 0.21, 0.3, 0.1, 0.9, 0)
+mat("Foliage", 0.09, 0.2, 0.07, 0.85, 0)
+mat("Stone", 0.42, 0.4, 0.37, 0.85, 0)
+material("Lake"); op("material.preset", "water Lake")
+
+# land(tree): terrain -> erosion, the same in every tree here; returns the
+# erosion node. The terrain's height is keyed, so the land rises out of the
+# lake in the first three seconds and the trees and rocks ride up with it
+fn land(t, name) {
+    n = gnode(t, "terrain", SIZE, 160, HEIGHT, 7)
+    e = gnode(t, "erode", 40000, 0.5, 3)
+    glink(t, n, e, 1)
+    key("node:" + name + ":" + n + ":6", 1, 1.5)
+    key("node:" + name + ":" + n + ":6", 90, HEIGHT)
+    return e
+}
+
+# the ground
+tg = gtree("Ground")
+o = gnode(tg, "output")
+glink(tg, land(tg, "Ground"), o, 1)
+g = add("plane", "Ground"); k = modifier(g, "geometry"); modset(g, k, "tree", tg); assign(g, "Grass")
+
+# the forest: points on the land, and on each a trunk and a crown. They are two
+# objects (bark and leaves) made by two trees that scatter with the same seed,
+# so every crown sits on its trunk; each tree is turned and scaled 0.7 to 1.5
+fn forest(name, crown) {
+    t = gtree(name)
+    d = gnode(t, "distribute", 0.01, 11, 4)
+    glink(t, land(t, name), d, 1)
+    if crown {
+        part = gnode(t, "sphere", 1.7)
+        lift = gnode(t, "transform", 0, 0, 0)
+        glink(t, part, lift, 1)
+        gset(t, lift, 2, 0, 5.2, 0)
+        gset(t, lift, 3, 1, 1.5, 1)
+    } else {
+        part = gnode(t, "cylinder", 0.22, 4.4)
+        lift = gnode(t, "transform", 0, 0, 0)
+        glink(t, part, lift, 1)
+        gset(t, lift, 2, 0, 2.2, 0)
+    }
+    sc = gnode(t, "random", 0.7, 1.5, 5)
+    inst = gnode(t, "instance", 1, 0, 9)
+    glink(t, d, inst, 1)
+    glink(t, lift, inst, 2)
+    glink(t, sc, inst, 3)
+    o = gnode(t, "output")
+    glink(t, inst, o, 1)
+    return t
+}
+mat("Bark", 0.24, 0.16, 0.1, 0.9, 0)
+tf = forest("Trunks", 0)
+f = add("plane", "Trunks"); k = modifier(f, "geometry"); modset(f, k, "tree", tf); assign(f, "Bark")
+tf = forest("Crowns", 1)
+f = add("plane", "Crowns"); k = modifier(f, "geometry"); modset(f, k, "tree", tf); assign(f, "Foliage")
+
+# and an L-system: one big old tree on the hill, grown from its rules
+o = lsystem("Old Oak", "X", "X=F[+X][-X][&X][^X]FX; F=FF", 5, 24, 0.35, 0.16)
+scale(o, 1.4)
+assign(o, "Bark")
+
+# boulders: fewer points, spheres squashed by random scale
+tr = gtree("Boulders")
+d = gnode(tr, "distribute", 0.004, 23, 6)
+glink(tr, land(tr, "Boulders"), d, 1)
+rock = gnode(tr, "sphere", 1.1)
+sc = gnode(tr, "random", 0.4, 1.6, 8)
+inst = gnode(tr, "instance", 1, 1, 4)
+glink(tr, d, inst, 1)
+glink(tr, rock, inst, 2)
+glink(tr, sc, inst, 3)
+o = gnode(tr, "output")
+glink(tr, inst, o, 1)
+r = add("plane", "Boulders"); k = modifier(r, "geometry"); modset(r, k, "tree", tr); assign(r, "Stone")
+print("trees", instances("Crowns"), "boulders", instances("Boulders"))
+
+# the oak goes on the highest ground near (-30, 30), and rises with it
+fn ground_at(x, z) {
+    best = 1e9
+    h = 0
+    for i in 0..everts("Ground") {
+        dx = evpos("Ground", i, "x") - x; dz = evpos("Ground", i, "z") - z
+        if dx * dx + dz * dz < best { best = dx * dx + dz * dz; h = evpos("Ground", i, "y") }
+    }
+    return h
+}
+frame(1); key("Old Oak:y", 1, ground_at(-30, 30) - 0.3)
+frame(90); key("Old Oak:y", 90, ground_at(-30, 30) - 0.3)
+move("Old Oak", -30, get("Old Oak", "y"), 30)
+key("Old Oak:x", 1, -30); key("Old Oak:z", 1, 30)
+
+# the lake
+w = add("plane", "Lake", 0, 16, 0); scale(w, SIZE / 2); assign(w, "Lake")
+
+# evening light: a low warm sun, a cool sky, and a camera that flies down the valley
+add("light", "Sun", -60, 45, 30); op("light.set", "power 30")
+op("world.strength", 0.6)
+fn shot(f, x, y, z, tx, ty, tz) {
+    dx = x - tx; dy = y - ty; dz = z - tz
+    key("Cam:x", f, x); key("Cam:y", f, y); key("Cam:z", f, z)
+    key("Cam:ry", f, atan2(dx, dz)); key("Cam:rx", f, -atan2(dy, sqrt(dx * dx + dz * dz)))
+}
+add("camera", "Cam", 0, 60, 90); set("Cam", "lens", 28)
+shot(1, 0, 70, 105, 0, 8, 0)
+shot(100, 80, 60, 70, 0, 12, 0)
+shot(240, 45, 42, -85, -5, 14, 5)
+select("Cam"); op("camera.set", "active")
+view(30, 35, 150, 0, 5, 0)
+frame(1)

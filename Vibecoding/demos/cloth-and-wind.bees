@@ -1,0 +1,89 @@
+# Cloth and Wind — BeeModel v1.0 demo
+# The cloth solver (XPBD, in parallel colours): a 6 561-particle tablecloth falls
+# onto a round table and drapes over its edge and the vase on it, colliding with
+# itself; a flag pinned to its pole flies in a wind that gusts; three jelly soft
+# bodies drop onto the floor and wobble back into shape.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+op("anim.range", "1 180 30")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+material("Linen"); op("material.preset", "fabric Linen")       # (a blue gingham)
+mat("Flag", 0.95, 0.62, 0.05, 0.85, 0)
+material("Table"); op("material.preset", "wood Table")
+material("Vase"); op("material.preset", "ceramic Vase")
+mat("Pole", 0.7, 0.7, 0.72, 0.3, 1)
+mat("Floor", 0.36, 0.37, 0.4, 0.8, 0)
+mat("Jelly0", 0.9, 0.15, 0.3, 0.15, 0)
+mat("Jelly1", 0.2, 0.75, 0.25, 0.15, 0)
+mat("Jelly2", 0.15, 0.4, 0.95, 0.15, 0)
+
+# the floor and a round table with a vase on it: colliders
+g = add("plane", "Floor", 0, 0, 0); scale(g, 12); assign(g, "Floor")
+t = add("cylinder", "Table Top", 0, 0.76, 0); scale(t, 0.85, 0.03, 0.85); assign(t, "Table")
+l = add("cylinder", "Table Leg", 0, 0.37, 0); scale(l, 0.07, 0.37, 0.07); assign(l, "Table")
+v = add("cylinder", "Vase", 0.25, 0.97, -0.1); scale(v, 0.09, 0.18, 0.09); assign(v, "Vase")
+select("Floor", "Table Top", "Table Leg", "Vase")
+op("cloth.add", "collider friction 0.6")
+
+# the tablecloth: a grid subdivided to 81 x 81, 2.2 m square, dropped from above
+c = add("grid", "Tablecloth", 0, 1.6, 0)
+k = modifier(c, "subsurf"); modset(c, k, "levels", 3); modapply(c, k)
+scale(c, 1.1)
+rotate(c, 0, 20deg, 0)
+assign(c, "Linen")
+select(c)
+op("cloth.add", "cloth self thickness 0.008 bend 0.02 friction 0.5")
+
+# the flag: 41 x 41 on a pole, pinned along the pole's edge
+p = add("cylinder", "Pole", -2.2, 1.2, -0.8); scale(p, 0.035, 1.2, 0.035); assign(p, "Pole")
+f = add("grid", "FlagCloth", -1.6, 2.05, -0.8)
+k = modifier(f, "subsurf"); modset(f, k, "levels", 2); modapply(f, k)
+scale(f, 0.6, 1, 0.4)
+rotate(f, 90deg, 0, 0)
+assign(f, "Flag")
+select(f)
+op("cloth.add", "cloth bend 0.05 mass 0.03")
+op("cloth.pin", "below x -0.98")
+
+# the wind blows along +x (a Wind field blows along its own +X) and gusts: its
+# strength is keyed, and its own gusts add to that; the cloth world has a breeze too
+op("cloth.world", "wind 7 0 1 substeps 12")
+w = field("wind", "Gust", "strength 4 gust 0.5")
+move(w, -2, 2, -0.8)
+key("field:Gust:strength", 1, 5)
+key("field:Gust:strength", 40, 16)
+key("field:Gust:strength", 70, 6)
+key("field:Gust:strength", 110, 20)
+key("field:Gust:strength", 150, 8)
+
+# three jelly blobs: soft bodies, soft enough to squash, stiff enough to recover
+for i in 0..3 {
+    b = add("sphere", "Jelly" + i, 1.15 + i * 0.45, 0.9 + i * 0.5, 1.1 - i * 0.35)
+    scale(b, 0.28)
+    assign(b, "Jelly" + i)
+    select(b)
+    op("cloth.add", "soft stretch 0.002 bend 0.2 volume 0.0005 friction 0.4")
+}
+frame(2)
+print("cloths", clothinfo(0), "particles", clothinfo(1))
+
+# light and camera
+add("light", "Key", 2.5, 4, 3); op("light.set", "power 0.6")
+add("light", "Back", -3, 3, -3); op("light.set", "power 0.25")
+fn shot(f, x, y, z, tx, ty, tz) {
+    dx = x - tx; dy = y - ty; dz = z - tz
+    key("Cam:x", f, x); key("Cam:y", f, y); key("Cam:z", f, z)
+    key("Cam:ry", f, atan2(dx, dz)); key("Cam:rx", f, -atan2(dy, sqrt(dx * dx + dz * dz)))
+}
+add("camera", "Cam", 0, 2, 5); set("Cam", "lens", 35)
+shot(1, 0.4, 2.0, 4.6, 0, 1.1, 0)
+shot(70, 3.3, 1.7, 4.4, 0.6, 0.6, 0.3)
+shot(130, 0.6, 1.9, 4.2, -1.3, 1.5, -0.8)
+shot(180, -0.4, 1.6, 4.5, -0.2, 1.1, -0.2)
+select("Cam"); op("camera.set", "active")
+view(20, 20, 6, 0, 1, 0)
+frame(1)

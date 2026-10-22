@@ -1,0 +1,106 @@
+# Gear Train — BeeModel v1.0 demo
+# Four spur gears (12, 30, 18 and 40 teeth, module 50 mm) modelled as signed-
+# distance shapes, set on steel pins that are placed in a base plate by
+# assembly mates. The first gear is driven by the frame; each of the others is
+# a revolute joint geared to the one before (ratio -teeth1 / teeth2), so the
+# big wheel turns slowly and the wrong way round, as it should. The collision
+# check watches that no teeth pass through each other.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+sclear()
+op("anim.range", "1 240 30")
+
+M = 0.05                            # module: the pitch radius is M * teeth / 2
+T = 0.12                            # gear thickness
+GAP = 0.008                         # backlash: the centres are this much further apart
+TW = 0.8                            # a tooth's width at the pitch circle, of half the pitch
+H = 0.2                             # the gears' height above the plate
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Brass", 0.89, 0.66, 0.32, 0.28, 1)
+mat("Steel", 0.62, 0.63, 0.65, 0.22, 1)
+mat("Blued", 0.12, 0.16, 0.26, 0.3, 1)
+mat("Plate", 0.07, 0.07, 0.08, 0.55, 0)
+mat("Bench", 0.32, 0.22, 0.14, 0.7, 0)
+
+# gear(name, teeth, x, z, turn): a disc with teeth round it, an axle hole and,
+# on the big ones, four lightening holes and a hub; meshed and put at x z
+fn gear(n, teeth, x, z, turn) {
+    rp = M * teeth / 2
+    g = scyl(rp - 1.25 * M, T)
+    for i in 0..teeth {
+        tooth = smove(sbox(2.25 * M, T, 0.5 * pi * M * TW, 0.008), rp - 0.15 * M, 0, 0)
+        g = sunion(g, srot(tooth, 0, i * 2 * pi / teeth, 0))
+    }
+    if teeth >= 24 {
+        for k in 0..4 {
+            a = k * pi / 2 + pi / 4
+            g = ssub(g, smove(scyl(rp * 0.22, T * 3), cos(a) * rp * 0.5, 0, sin(a) * rp * 0.5), 0.01)
+        }
+        g = sunion(g, scyl(0.1, T * 1.6), 0.01)
+    }
+    g = ssub(g, scyl(0.06, T * 3))
+    o = smesh(n, g, min(512, round(rp * 2 / 0.006)))
+    move(o, x, H + T / 2, z)
+    rotate(o, 0, turn, 0)
+    return o
+}
+
+# the plate and four pins, placed by mates: each pin stands on the plate's top
+# face (cube face 1, cylinder face 32 is a pin's bottom) and on an axis through
+# where its gear goes
+p = add("cube", "Plate", 1.85, 0.05, 0); scale(p, 2.65, 0.05, 1.15); assign(p, "Plate")
+fn teeth(i) {
+    if i == 0 { return 12 } else if i == 1 { return 30 } else if i == 2 { return 18 }
+    return 40
+}
+x = 0
+for i in 0..4 {
+    if i > 0 { x = x + M * (teeth(i - 1) + teeth(i)) / 2 + GAP }
+    pin = add("cylinder", "Pin" + i, x, 2, 0.6); scale(pin, 0.04, 0.17, 0.04); assign(pin, "Steel")
+    op("asm.mate", "coincident Pin" + i + " 32 Plate 1")
+    op("asm.mate", "concentric Pin" + i + " 33 Plate axis " + ((x - 1.85) / 2.65) + " 0 0 0 1 0")
+}
+print("pins at", get("Pin0", "x"), get("Pin1", "x"), get("Pin3", "x"), "height", get("Pin0", "y"))
+
+# the gears on the pins: each one turned half a tooth where it meets the one
+# before, so tooth goes into gap
+x = 0
+for i in 0..4 {
+    if i > 0 { x = x + M * (teeth(i - 1) + teeth(i)) / 2 + GAP }
+    turn = 0
+    if i % 2 == 1 { turn = pi / teeth(i) }
+    gear("Gear" + i, teeth(i), x, 0, turn)
+}
+assign("Gear0", "Blued"); assign("Gear1", "Brass"); assign("Gear2", "Steel"); assign("Gear3", "Brass")
+
+# the joints: the first turns with the frame, the others follow at their ratios
+op("mech.joint", "revolute Gear0 world pivot 0 0 0 axis 0 1 0 value frame * 6deg")
+x = 0
+for i in 1..4 {
+    x = x + M * (teeth(i - 1) + teeth(i)) / 2 + GAP
+    op("mech.joint", "revolute Gear" + i + " world pivot " + x + " 0 0 axis 0 1 0 gear " + i + " " + (0 - teeth(i - 1) / teeth(i)))
+}
+frame(120)
+print("gear angles at frame 120 (deg):", round(deg(joint(1))), round(deg(joint(2))), round(deg(joint(3))), round(deg(joint(4))), "collisions", collisions())
+
+# the bench, a warm key light, a cool fill, and a camera that comes in low
+b = add("cube", "Bench", 1.2, -0.5, 0); scale(b, 4, 0.5, 2.5); assign(b, "Bench")
+add("light", "Key", 2.5, 3.5, 2.5); op("light.set", "power 0.5")
+add("light", "Fill", -2, 2, -1.5); op("light.set", "power 0.12")
+fn shot(f, x, y, z, tx, ty, tz) {
+    dx = x - tx; dy = y - ty; dz = z - tz
+    key("Cam:x", f, x); key("Cam:y", f, y); key("Cam:z", f, z)
+    key("Cam:ry", f, atan2(dx, dz)); key("Cam:rx", f, -atan2(dy, sqrt(dx * dx + dz * dz)))
+}
+add("camera", "Cam", 1.2, 3, 4)
+shot(1, 2.2, 4.3, 6.1, 2.2, 0.2, 0)
+shot(120, 3.2, 1.3, 2.2, 1.6, 0.25, 0)
+shot(240, -0.6, 0.9, 1.6, 0.4, 0.25, 0)
+select("Cam"); op("camera.set", "active")
+op("world.strength", 0.4)
+view(20, 40, 5, 1.2, 0.2, 0)
+frame(1)
