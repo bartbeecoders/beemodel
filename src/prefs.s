@@ -25,6 +25,8 @@
 
 .globl pr_scale
 .globl pr_emu3
+.globl pr_kmap
+.globl km_preset
 .globl pr_orbit
 .globl pr_autosave
 .globl pr_threads
@@ -63,6 +65,7 @@
 .align 4
 pr_scale:       .long 100               # the UI scale (%)
 pr_emu3:        .long 0                 # Alt + left = middle button
+pr_kmap:        .long 0                 # the keymap preset: 0 BeeModel, 1 Blender 4.x
 pr_orbit:       .float 1.0              # orbit speed
 pr_autosave:    .long 25                # changes between autosaves (0: never)
 pr_threads:     .long 0                 # worker threads (0: one a CPU)
@@ -156,6 +159,7 @@ w_scale:        .asciz "scale"
 w_theme:        .asciz "theme"
 w_tip:          .asciz "tooltip_ms"
 w_emu3:         .asciz "emulate_middle"
+w_kmap:         .asciz "keymap"
 w_orbit:        .asciz "orbit_speed"
 w_autosave:     .asciz "autosave"
 w_threads:      .asciz "threads"
@@ -200,7 +204,7 @@ scales:         .long 75, 100, 125, 150, 175, 200
 l_tier:         .quad s_tenv, s_tr, s_te, s_tf
 l_prov:         .quad s_p_claude, s_p_grok, s_p_or
 # word, variable, kind (0 int, 1 float)
-pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
+pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0, w_kmap, pr_kmap, 0
                 .quad w_orbit, pr_orbit, 1, w_autosave, pr_autosave, 0
                 .quad w_threads, pr_threads, 0, w_jit, pr_jit, 0, w_mcp, pr_mcp, 0
                 .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0, w_gpudev, pr_gpu_dev, 0
@@ -265,6 +269,92 @@ do_prefs_open:
     jmp     dlg_open_prefs
 
 # ---- key overrides ----------------------------------------------------------------
+# The Blender 4.x preset: Blender's key for each operator whose key differs
+#   (0: none, where Blender has the key for something else). Choosing it
+#   makes these overrides; choosing BeeModel takes them back.
+.equ KEY_J_,    36
+.equ KEY_KPDOT, 83
+.section .rodata
+.align 8
+km_blender:     .quad op_view_wire, KEY_Z|KM_SHIFT     # Z alone: the shading pie
+                .quad op_view_matprev, 0
+                .quad op_view_reset_cam, 0
+                .quad op_view_grid, 0                  # Shift+G: select grouped
+                .quad op_paint_mode, 0                 # Shift+Tab: snapping
+                .quad op_vpaint_mode, 0                # (the modes: the Ctrl+Tab pie)
+                .quad op_wpaint_mode, 0
+                .quad op_tool_select, KEY_W            # W: the select tool
+                .quad op_tool_move, 0                  # Shift+E: crease, Shift+R: repeat
+                .quad op_tool_rotate, 0
+                .quad op_tool_scale, 0
+                .quad op_ne_fsel, KEY_KPDOT            # node editor: Num. frames
+                .quad op_ne_comment, KEY_J_|KM_CTRL    #  and Ctrl+J joins in a frame
+                .quad 0
+s_km_bee:       .asciz "BeeModel"
+s_km_blender:   .asciz "Blender 4.x"
+s_km_now:       .asciz "  keymap: "
+s_km_bad:       .asciz "  prefs.keymap beemodel | blender"
+.align 8
+l_kmap:         .quad s_km_bee, s_km_blender
+.text
+OPERATOR op_prefs_keymap, "prefs.keymap", "Keymap Preset", do_keymap, flags=0, doc="The keymap: prefs.keymap beemodel | blender (Blender 4.x's keys where BeeModel's differ, your own keys kept)"
+
+# km_preset(edi = 0 BeeModel, 1 Blender 4.x) - the preset's overrides, saved
+km_preset:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12d, edi
+    mov     [rip+pr_kmap], edi
+    lea     rbx, [rip+km_blender]
+1:  mov     rdi, [rbx]
+    test    rdi, rdi
+    jz      9f
+    mov     esi, [rdi+OP_KEY]           # BeeModel: its own (the override goes)
+    test    r12d, r12d
+    jz      2f
+    mov     esi, [rbx+8]
+2:  call    key_set
+    add     rbx, 16
+    jmp     1b
+9:  call    prefs_save
+    mov     dword ptr [rip+dirty], 1
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+do_keymap:
+    push    rbx
+    mov     rbx, [rip+op_arg]
+    test    rbx, rbx
+    jz      3f
+    cmp     byte ptr [rbx], 0
+    je      3f
+    lea     rdi, [rip+s_km_bee]           # (the word given, in the name)
+    mov     rsi, rbx
+    call    has_word
+    xor     edi, edi
+    test    eax, eax
+    jnz     2f
+    lea     rdi, [rip+s_km_blender]           # (the word given, in the name)
+    mov     rsi, rbx
+    call    has_word
+    mov     edi, 1
+    test    eax, eax
+    jnz     2f
+    lea     rdi, [rip+s_km_bad]
+    pop     rbx
+    jmp     log_line
+2:  call    km_preset
+3:  lea     rdi, [rip+s_km_now]
+    lea     rsi, [rip+s_km_bee]
+    cmp     dword ptr [rip+pr_kmap], 0
+    je      4f
+    lea     rsi, [rip+s_km_blender]
+4:  pop     rbx
+    jmp     log_pair
+
 # key_eff(rdi=op) -> eax = its key in use (an override, or its own); keeps
 #   every other register
 key_eff:
@@ -847,6 +937,7 @@ WIDGET wd_pf_cb,   WK_TOGGLE, "prefs.colorblind_axes", "Colour-blind-safe axis c
 WIDGET wd_pf_tip,  WK_INT, "prefs.tooltip_ms", "Tooltip delay (ms)", 0.0, 5000.0, 2.0, 0, WGF_CLAMP, cb=save_cb
 WIDGET wd_pf_emu3, WK_TOGGLE, "prefs.emulate_middle", "Alt + left button is the middle button", cb=save_cb, tip="Orbit with Alt + drag on a touchpad or a two-button mouse"
 WIDGET wd_pf_orbit, WK_FLOAT, "prefs.orbit_speed", "Orbit speed", 0.1, 5.0, 0.005, 2, WGF_CLAMP, cb=save_cb
+WIDGET wd_pf_kmap, WK_ENUM, "prefs.keymap", cb=kmap_cb, aux=l_kmap, n=2, tip="Blender 4.x: Blender's keys where BeeModel's differ (docs/UI.md lists them). Keys you set yourself stay"
 WIDGET wd_pf_search, WK_TEXT, "prefs.key_search", "Find", tip="Part of an operator's name or label"
 WIDGET wd_pf_kset, WK_BUTTON, "prefs.key_set", "Set", flags=WGF_COMPACT, tip="Then press the key (with Ctrl / Shift / Alt) for it"
 WIDGET wd_pf_kclr, WK_BUTTON, "prefs.key_clear", "Clear", flags=WGF_COMPACT, tip="No key for it"
@@ -884,7 +975,7 @@ pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxe
                 .quad 1, show_grid, 1, 1, pr_grid, 0x3f800000, 1, pr_fov, 50, 1, pr_near, 0x3d4ccccd
                 .quad 1, pr_lvspp, 64, 1, pr_lvdn, 1
                 .quad 2, pr_emu3, 0, 2, pr_orbit, 0x3f800000
-                .quad 3, pr_nkey, 0
+                .quad 3, pr_nkey, 0, 3, pr_kmap, 0
                 .quad 4, pr_rw, 960, 4, pr_rh, 540, 4, pr_rspp, 128, 4, pr_rdn, 1
                 .quad 5, pr_threads, 0, 5, pr_jit, 1, 5, pr_gpu_on, 1, 5, pr_gpu_dev, 0
                 .quad 6, pr_autosave, 25
@@ -896,6 +987,7 @@ s_pf_found:     .asciz "Settings found"
 s_pf_nothing:   .asciz "No setting matches."
 s_pf_hint:      .asciz "Search settings"
 c_theme:        .asciz "Theme"
+c_kmap:         .asciz "Keymap"
 c_accent:       .asciz "Accent"
 c_scale:        .asciz "UI scale"
 c_tier:         .asciz "AI agents may"
@@ -1391,6 +1483,10 @@ pf_reset:
     push    r14
     push    r15
     sub     rsp, 16
+    lea     rdi, [rip+wd_pf_kmap]       # the preset
+    lea     r8, [rip+pr_kmap]
+    lea     rdx, [rip+c_kmap]
+    call    pf_item
     lea     r15, [rip+pr_search]        # (searching: the search narrows it)
     cmp     byte ptr [rip+pr_find], 0
     je      0f
@@ -1405,6 +1501,7 @@ pf_reset:
     test    eax, eax
     jz      1f
     mov     dword ptr [rip+pr_nkey], 0
+    mov     dword ptr [rip+pr_kmap], 0
     call    prefs_save
 1:  lea     rbx, [rip+__start_bee_ops]  # the operators: label, key, Set, Clear
     xor     r14d, r14d                  # (rows shown)
@@ -1753,6 +1850,9 @@ do_accent_none:
     mov     dword ptr [rip+dirty], 1
     jmp     prefs_save
 
+kmap_cb:                                # rdi = &pr_kmap
+    mov     edi, [rdi]
+    jmp     km_preset
 theme_cb:                               # rdi = &pr_theme
     mov     edi, [rdi]
     sub     rsp, 8

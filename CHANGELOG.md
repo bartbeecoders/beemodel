@@ -12,6 +12,10 @@ project uses [Semantic Versioning](https://semver.org/).
   1.x (D1, #293): nothing that runs changes meaning, built-ins may be
   added. `tests/beescript.py` runs 50 tasks the way an agent writes them.
 - Hexadecimal numbers in BeeScript: `set(c, "color", 0xff8800)`.
+- A Blender 4.x keymap preset (D2, #294): Preferences > Keymap, the
+  welcome screen (also with Alt + left as the middle button) or
+  `prefs.keymap blender`. It changes only the keys that differ from
+  Blender's; docs/UI.md lists them.
 
 ## [0.24.0] - 2026-10-21
 

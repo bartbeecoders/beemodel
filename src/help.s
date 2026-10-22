@@ -65,8 +65,10 @@ s_help_head:    .asciz "Help"
 s_none:         .asciz ""
 s_km0:          .asciz "Keymap: BeeModel"
 s_km1:          .asciz "Keymap: laptop (Alt + left pans)"
+s_km2:          .asciz "Keymap: Blender 4.x"
+s_km3:          .asciz "Keymap: Blender 4.x, laptop"
 .align 8
-l_keymap:       .quad s_km0, s_km1
+l_keymap:       .quad s_km0, s_km1, s_km2, s_km3
 # the templates and samples (BeeScript)
 t_empty:        .asciz "n = count()\nfor i in 0..n { delete(name(0)) }"
 t_product:      .asciz "n = count()\nfor i in 0..n { delete(name(0)) }\nop(\"scene.units\", \"mm\")\nparam(\"w\", \"60mm\")\nparam(\"d\", \"40mm\")\nparam(\"h\", \"20mm\")\ns = sketch(\"Base\", \"XZ\")\nrect(s, 0, 0, 60, 40)\npad(\"Part\", s, \"h\")\nfillet(\"Part\", \"3mm\", \"vertical\")\nselect(\"Part\")\nop(\"create.light\")\nop(\"create.camera\")"
@@ -161,7 +163,7 @@ WIDGET wd_wl_open, WK_BUTTON, "welcome.open", "Open...", aux=op_file_open
 WIDGET wd_wl_recent, WK_BUTTON, "welcome.recent", flags=WGF_COMPACT
 WIDGET wd_wl_tree, WK_BUTTON, "welcome.sample_tree", "L-system Tree", tip="A plant grown by rewriting rules"
 WIDGET wd_wl_ball, WK_BUTTON, "welcome.sample_ball", "Bouncing Ball", tip="Rigid bodies: press Space to play"
-WIDGET wd_wl_keymap, WK_ENUM, "welcome.keymap", cb=km_cb, aux=l_keymap, n=2
+WIDGET wd_wl_keymap, WK_ENUM, "welcome.keymap", cb=km_cb, aux=l_keymap, n=4
 WIDGET wd_wl_show, WK_TOGGLE, "welcome.show", "Show this at start", cb=show_cb
 WIDGET wd_wl_close, WK_BUTTON, "welcome.close", "Close", tip="Esc"
 WIDGET wd_ks_search, WK_TEXT, "shortcuts.search", "Find", tip="Part of an operator's name or label"
@@ -363,7 +365,9 @@ ov_draw:
     add     r14, 16
     jmp     6b
 7:  add     r15d, 16
-    mov     eax, [rip+pr_emu3]
+    mov     eax, [rip+pr_kmap]          # emulate_middle + 2 x the preset
+    add     eax, eax
+    or      eax, [rip+pr_emu3]
     mov     [rip+wl_keymap], eax
     lea     rdi, [rip+wd_wl_keymap]
     mov     esi, r12d
@@ -532,10 +536,13 @@ has_ci:                                 # rdi = text, rsi = word -> eax = 1 if i
 7:  mov     eax, 1
     ret
 
-km_cb:                                  # the keymap: laptop = Alt + left pans
-    mov     eax, [rdi]
+km_cb:                                  # the keymap: laptop = Alt + left pans,
+    mov     eax, [rdi]                  #  2-3: Blender 4.x (km_preset saves)
+    mov     edi, eax
+    and     eax, 1
     mov     [rip+pr_emu3], eax
-    jmp     prefs_save
+    shr     edi, 1
+    jmp     km_preset
 show_cb:
     jmp     prefs_save
 
