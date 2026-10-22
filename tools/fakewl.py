@@ -6350,8 +6350,8 @@ def menus_ui():
     check(q('print(count())') == '4', 'Add > Curve > Bezier Curve (a submenu by the mouse)')
     f.click(600, 420, 0x111)                   # RMB on the viewport: a context menu
     labels = [w['label'] for w in items()]
-    check(labels[:2] == ['Duplicate', 'Delete'] and 'Boolean' in labels,
-          f'right-click in the viewport: the object menu ({len(labels)})')
+    check(labels[:3] == ['Ask AI...', 'Duplicate', 'Delete'] and 'Boolean' in labels,
+          f'right-click in the viewport: the object menu, Ask AI... first ({len(labels)})')
     w = [w for w in items() if w['label'] == 'Duplicate'][0]
     f.click(w['x'] + 40, w['y'] + 12)
     check(q('print(count())') == '5', 'its Duplicate duplicates')

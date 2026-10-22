@@ -35,6 +35,7 @@
 .globl wg_key
 .globl wg_editing
 .globl wg_by_enter
+.globl wg_edit
 .globl wg_commit
 .globl wg_pop_draw
 .globl wg_pop_hit
@@ -2645,9 +2646,11 @@ wg_tree_json:
     movsxd  rdi, dword ptr [rbx+E_H]
     call    wb_int
     mov     rsi, [r13+WD_LABEL]
-    cmp     dword ptr [rbx+E_KIND], WK_ROW  # (a row: its own text, if set)
+    cmp     dword ptr [rbx+E_KIND], WK_ROW  # (a row, a button: its own text,
+    je      30f                             #  if set - a toast's message)
+    cmp     dword ptr [rbx+E_KIND], WK_BUTTON
     jne     31f
-    cmp     qword ptr [rbx+E_AUX], 0
+30: cmp     qword ptr [rbx+E_AUX], 0
     je      31f
     mov     rsi, [rbx+E_AUX]
 31: test    rsi, rsi

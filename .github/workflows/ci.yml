@@ -121,6 +121,9 @@ jobs:
       - name: AI Assistant (stand-in Claude Code and Grok, a localhost OpenRouter; no network)
         run: timeout 300 python tests/ai.py build/beemodel build/shots
 
+      - name: Ask AI about the selection (the box, the context sent, Only the selection; a stand-in Claude Code)
+        run: timeout 300 python tests/askai.py build/beemodel build/shots
+
       - name: The published MCP tool schema (docs/mcp-tools.json)
         run: timeout 300 python tests/mcp_schema.py build/beemodel
 

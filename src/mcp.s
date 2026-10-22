@@ -97,6 +97,7 @@ k_type:         .asciz "type"
 k_location:     .asciz "location"
 k_rotation:     .asciz "rotation_deg"
 k_scale:        .asciz "scale"
+k_size:         .asciz "size"
 k_name_m:       .asciz "name"
 k_names:        .asciz "names"
 k_extend:       .asciz "extend"
@@ -1891,6 +1892,25 @@ scene_json:
     mov     edi, ','
     call    wb_char
 2:  mov     edi, ebx
+    call    obj_json
+    inc     ebx
+    jmp     1b
+9:  call    mats_json                   # ],"materials":[...],"images":[...],"world":{..}
+    mov     edi, '}'
+    call    wb_char
+    pop     r12
+    pop     rbx
+    ret
+
+# obj_json(edi=index) - one object as JSON (appended to wb): name, type,
+#   location, rotation, scale, selected, active, vertices, faces, size (its
+#   box, scaled), modifiers, sketch, material
+.globl obj_json
+obj_json:
+    push    rbx
+    push    r12
+    sub     rsp, 24
+    mov     ebx, edi
     call    obj_at
     mov     r12, rax
     mov     edi, '{'
@@ -1951,6 +1971,18 @@ scene_json:
     mov     rax, [r12+OB_MESH]
     mov     edi, [rax+ME_NPOLYS]
     call    wb_int
+    mov     rdi, r12                    # "size":[x,y,z] (a mesh's box, scaled)
+    mov     rsi, rsp
+    call    obj_size
+    test    eax, eax
+    jz      71f
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_size]
+    mov     rdi, rsp
+    xor     edx, edx
+    call    vec_json
+71:
     mov     rax, [r12+OB_MODS]          # "modifiers":["subsurf", ...]
     test    rax, rax
     jz      8f
@@ -2032,14 +2064,78 @@ scene_json:
     call    jb_q
 81: mov     edi, '}'
     call    wb_char
-    inc     ebx
-    jmp     1b
-9:  call    mats_json                   # ],"materials":[...],"images":[...],"world":{..}
-    mov     edi, '}'
-    call    wb_char
+    add     rsp, 24
     pop     r12
     pop     rbx
     ret
+
+# obj_size(rdi=object, rsi=out float[3]) -> eax = 1: a mesh's size, its
+#   box (as drawn: with its modifiers) times its scale; 0 for other kinds
+.globl obj_size
+obj_size:
+    xor     eax, eax
+    cmp     dword ptr [rdi+OB_TYPE], OT_MESH
+    jne     9f
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     rax, [rbx+OB_MESH]          # (a liquid's surface: its base mesh)
+    test    rax, rax
+    jz      8f
+    call    pt_field
+    mov     rcx, rax
+    mov     rax, [rbx+OB_MESH]
+    test    rcx, rcx
+    jnz     1f
+    mov     rdi, rbx
+    call    obj_eval
+    test    rax, rax
+    jz      8f
+1:  mov     ecx, [rax+ME_NVERTS]
+    test    ecx, ecx
+    jz      8f
+    mov     rdx, [rax+ME_POS]
+    movss   xmm0, [rdx]                 # min xmm0-2, max xmm3-5
+    movss   xmm1, [rdx+4]
+    movss   xmm2, [rdx+8]
+    movaps  xmm3, xmm0
+    movaps  xmm4, xmm1
+    movaps  xmm5, xmm2
+2:  minss   xmm0, [rdx]
+    maxss   xmm3, [rdx]
+    minss   xmm1, [rdx+4]
+    maxss   xmm4, [rdx+4]
+    minss   xmm2, [rdx+8]
+    maxss   xmm5, [rdx+8]
+    add     rdx, 12
+    dec     ecx
+    jnz     2b
+    subss   xmm3, xmm0
+    subss   xmm4, xmm1
+    subss   xmm5, xmm2
+    mov     eax, 0x7fffffff             # times |scale|
+    movd    xmm6, eax
+    movss   xmm0, [rbx+OB_SCALE]
+    andps   xmm0, xmm6
+    mulss   xmm3, xmm0
+    movss   xmm0, [rbx+OB_SCALE+4]
+    andps   xmm0, xmm6
+    mulss   xmm4, xmm0
+    movss   xmm0, [rbx+OB_SCALE+8]
+    andps   xmm0, xmm6
+    mulss   xmm5, xmm0
+    movss   [r12], xmm3
+    movss   [r12+4], xmm4
+    movss   [r12+8], xmm5
+    mov     eax, 1
+    jmp     81f
+8:  xor     eax, eax
+81: add     rsp, 8
+    pop     r12
+    pop     rbx
+9:  ret
 
 # mats_json - closes the objects array and writes the materials:
 #   ],"materials":[{"name":"Gold","base":[1,0.766,0.336],"metallic":1,...}

@@ -114,6 +114,7 @@ s_objects:      .asciz " objects  "
 s_object1:      .asciz " object  "
 s_faces:        .asciz " faces"
 s_ai:           .asciz "AI: "
+s_ai_stop:      .asciz "...   Stop"
 s_render:       .asciz "Render "
 s_pct:          .asciz "%"
 s_coedit:       .asciz "Co-editing"
@@ -137,6 +138,7 @@ bw_denied:      .asciz "denied"
 OPERATOR op_menu_ai, "menu.ai", "AI Menu", do_menu_ai, flags=OPF_QUIET|OPF_HIDDEN, doc="Open the AI menu: permissions, activity, revert"
 WIDGET wd_st_ai,    WK_BUTTON, "status.ai", "AI permission", flags=WGF_NODRAW, aux=op_menu_ai, tip="What AI agents may do here (read only / edit the scene / files too). Click for the AI menu"
 WIDGET wd_st_link,  WK_BUTTON, "status.link", "Live link", flags=WGF_NODRAW, aux=op_area_type_versions, tip="The live link is on. Click for the Versions editor (serve, connect, stop)"
+WIDGET wd_st_aiwork, WK_BUTTON, "status.ai_working", "AI working", flags=WGF_NODRAW, aux=op_ai_stop, tip="The AI is working on this request (one undo step). Click to stop it"
 WIDGET wd_st_job,   WK_BUTTON, "status.job", "Job", flags=WGF_NODRAW, tip="A long job: the window answers again when it is done"
 WIDGET wd_st_toast, WK_BUTTON, "status.toast", "Message", flags=WGF_NODRAW, aux=op_console_focus, tip="Click to open the console with every message"
 
@@ -338,6 +340,8 @@ draw_toast:
     lea     r8, [rip+toast_dummy]
     xor     r9d, r9d
     call    wg
+    mov     rdi, rbx                    # (ui_tree: its message)
+    call    wg_set_label
     add     rsp, 8
     pop     r14
     pop     r13
@@ -457,7 +461,34 @@ draw_statusbar:
     lea     rdi, [rip+stat_buf]
     xor     esi, esi
     call    chip
-5:  call    fmt_reset                   # the AI's permission
+5:  cmp     dword ptr [rip+ai_busy], 0  # the AI at work: its prompt, Stop
+    je      51f
+    call    fmt_reset
+    lea     rdi, [rip+s_ai]
+    call    fmt_str
+    lea     rsi, [rip+ai_label+7]       # ("Agent: <prompt>")
+    lea     rdi, [rip+stat_buf]
+    mov     ecx, 36
+52: mov     al, [rsi]
+    mov     [rdi], al
+    test    al, al
+    jz      53f
+    inc     rsi
+    inc     rdi
+    dec     ecx
+    jnz     52b
+    mov     byte ptr [rdi], 0
+53: lea     rdi, [rip+stat_buf]
+    call    fmt_str
+    lea     rdi, [rip+s_ai_stop]
+    call    fmt_str
+    lea     rdi, [rip+stat_buf]
+    lea     rsi, [rip+fmt_buf]
+    call    cpy_s
+    lea     rdi, [rip+stat_buf]
+    lea     rsi, [rip+wd_st_aiwork]
+    call    chip
+51: call    fmt_reset                   # the AI's permission
     lea     rdi, [rip+s_ai]
     call    fmt_str
     mov     edi, [rip+agent_tier]

@@ -31,6 +31,7 @@ timeout 600 python3 tests/viewport.py build/beemodel
 timeout 600 python3 tests/lighting.py build/beemodel build/shots
 timeout 600 python3 tests/materials.py build/beemodel build/shots
 timeout 300 python3 tests/ai.py build/beemodel build/shots
+timeout 300 python3 tests/askai.py build/beemodel build/shots
 timeout 300 python3 tests/mcp_schema.py build/beemodel
 timeout 600 python3 tests/blend.py build/beemodel build/shots   # the export round trip when Blender is installed
 timeout 300 python3 tests/livelink.py build/beemodel build/shots

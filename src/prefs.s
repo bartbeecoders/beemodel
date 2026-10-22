@@ -195,6 +195,7 @@ w_orurl:        .asciz "openrouter_url"
 w_ormodel:      .asciz "openrouter_model"
 w_orsteps:      .asciz "openrouter_steps"
 w_aiextra:      .asciz "ai_prompt"
+w_aiscope:      .asciz "ai_only_selection"
 w_recent:       .asciz "recent_colours"
 w_accent:       .asciz "accent"
 .align 8
@@ -213,7 +214,7 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_near, pr_near, 1, w_lvspp, pr_lvspp, 0, w_lvdn, pr_lvdn, 0, w_rw, pr_rw, 0, w_rh, pr_rh, 0
                 .quad w_rspp, pr_rspp, 0, w_rdn, pr_rdn, 0
                 .quad w_aiprov, ai_prov, 0, w_clturns, ai_cl_turns, 0, w_gkturns, ai_gk_turns, 0
-                .quad w_orsteps, ai_or_steps, 0
+                .quad w_orsteps, ai_or_steps, 0, w_aiscope, ask_scope, 0
                 .quad w_blender, pr_blender, 2
                 .quad w_clpath, ai_cl_path, 2, w_clmodel, ai_cl_model, 2
                 .quad w_gkpath, ai_gk_path, 2, w_gkmodel, ai_gk_model, 2
@@ -980,7 +981,7 @@ pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxe
                 .quad 5, pr_threads, 0, 5, pr_jit, 1, 5, pr_gpu_on, 1, 5, pr_gpu_dev, 0
                 .quad 6, pr_autosave, 25
                 .quad 7, pr_tier, -1, 7, pr_mcp, 1, 7, ai_prov, 0, 7, ai_cl_turns, 100
-                .quad 7, ai_gk_turns, 100, 7, ai_or_steps, 30
+                .quad 7, ai_gk_turns, 100, 7, ai_or_steps, 30, 7, ask_scope, 1
                 .quad -1
 s_pf_title:     .asciz "Preferences"
 s_pf_found:     .asciz "Settings found"

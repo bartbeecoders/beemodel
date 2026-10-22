@@ -166,7 +166,7 @@ items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_ren
 .equ items_render_n, (. - items_render) / 8
 items_help:     .quad op_help_keys, op_welcome, op_area_type_help, 0, op_console_ops, op_help_about
 .equ items_help_n, (. - items_help) / 8
-items_ai:       .quad op_ai_mode, op_ai_stop, op_ai_new, op_ai_copy, 0
+items_ai:       .quad op_ai_mode, op_ai_ask, op_ai_stop, op_ai_new, op_ai_copy, 0
                 .quad op_view_activity, op_agent_revert, 0
                 .quad op_agent_read, op_agent_edit, op_agent_files
 .equ items_ai_n, (. - items_ai) / 8
@@ -946,6 +946,11 @@ ui_button:
     jmp     .Lbt_done
 .Lbt_nowg:
     call    wg_commit                   # a press elsewhere confirms typing
+    mov     edi, [rip+ptr_x]            # (outside the Ask AI box: closes it)
+    mov     esi, [rip+ptr_y]
+    call    ask_outside
+    test    eax, eax
+    jnz     .Lbt_done
     cmp     dword ptr [rip+ne_menu], 0  # node editor (its menu takes a click)
     jne     763f
     cmp     ebx, HIT_NODES
@@ -1073,7 +1078,18 @@ ui_button:
     je      12f
     call    etool_cancel
     jmp     .Lbt_done
-12: test    dword ptr [rip+key_mods], MOD_SHIFT  #  Shift: places the 3D cursor)
+12: test    dword ptr [rip+key_mods], MOD_ALT   #  Alt: Ask AI about it,
+    jz      121f
+    mov     [rip+vp_area], r12d
+    mov     [rip+drag_node], r12d
+    call    vp_setup_drag
+    call    ask_pick                    #  selected first)
+    call    reset_clip
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    ask_open
+    jmp     .Lbt_done
+121: test   dword ptr [rip+key_mods], MOD_SHIFT  #  Shift: places the 3D cursor)
     jz      15f
     mov     [rip+vp_area], r12d
     mov     [rip+drag_node], r12d
@@ -1713,6 +1729,10 @@ ui_key_press:
     mov     dword ptr [rip+dirty], 1
     jmp     9f
 .Lkp_noesc:
+    mov     edi, ebx                    # the Ask AI box: Esc, Up / Down
+    call    ask_key
+    test    eax, eax
+    jnz     9f
     call    wg_editing                  # typing into a field takes the keys
     test    eax, eax
     jz      .Lkp_notyping
