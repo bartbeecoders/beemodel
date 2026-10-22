@@ -45,3 +45,24 @@ changes only the keys that differ.
 * The preset is stored as ordinary key overrides, plus `keymap 1` in the prefs file, so
   you can still change any key afterwards.
 * [UI.md](UI.md#the-blender-4x-keymap) lists every difference and why.
+
+## D3 · MIT license, and the MCP tool schema is published
+
+*Decided 2026-10-17, done 2026-10-22 ([#295](https://github.com/bartbeecoders/beemodel/issues/295)).*
+
+**Question.** Which license, and is BeeModel's MCP tool set an open standard others can
+build on?
+
+**Decision.** BeeModel is released under the **MIT License**. The MCP tools are published
+as a versioned JSON Schema, so clients and other apps can rely on them.
+
+**What follows.**
+
+* `LICENSE` is in the repository and in every release archive, and the README says so.
+* [mcp-tools.json](mcp-tools.json) lists every tool the server offers (`tools/list`):
+  its name, description and input as JSON Schema, with the app's version. It is in
+  every release archive too.
+* `tests/mcp_schema.py` (local and GitHub CI) starts BeeModel, asks the server for its
+  tools and fails when the file differs, or when a published tool is gone.
+  `--update` rewrites the file after a deliberate change, and on every version bump.
+* From v1.0 on, tools are only added (D7).

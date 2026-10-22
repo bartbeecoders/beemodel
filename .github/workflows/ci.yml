@@ -118,6 +118,9 @@ jobs:
       - name: AI Assistant (stand-in Claude Code and Grok, a localhost OpenRouter; no network)
         run: timeout 300 python tests/ai.py build/beemodel build/shots
 
+      - name: The published MCP tool schema (docs/mcp-tools.json)
+        run: timeout 300 python tests/mcp_schema.py build/beemodel
+
       - name: Blender files (fixtures from Blender 5.2 and 4.2; no Blender needed)
         run: timeout 300 python tests/blend.py build/beemodel build/shots
 

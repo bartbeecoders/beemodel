@@ -16,6 +16,8 @@ scripts/run.sh          # rebuilds if sources changed, then starts the app
 
 Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, GNOME, KDE...).
 
+BeeModel is free software under the [MIT License](LICENSE).
+
 ### Download a release
 
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
