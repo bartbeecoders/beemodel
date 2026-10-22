@@ -6,6 +6,10 @@ loader (`libvulkan.so.1`) and runs compute shaders for BeeModel. When it is
 missing, or cannot help, everything runs on the CPU as before, with the same
 images.
 
+This is a decision for all of 1.x ([DECISIONS.md](DECISIONS.md#d5--the-gpu-helper-stays-optional-the-cpu-is-the-reference)):
+the helper stays optional, and the CPU code is the reference that the GPU's
+results are checked against (`tests/gpu.py`).
+
 ## Installing it
 
 Unpack `beemodel-gpu-<version>-linux-x86_64.tar.gz` (the release's second

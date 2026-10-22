@@ -90,3 +90,25 @@ assembly constraint solver, where mates stay solved while parts change, waits un
   from where an earlier one put it. Order them from the most to the least important.
 * `tests/assembly.py`: a plate, a pin and a wheel, placed by four mates from wherever
   they started, then a revolute joint turns the wheel about the pin over the timeline.
+
+## D5 · The GPU helper stays optional; the CPU is the reference
+
+*Decided 2026-10-22 ([#297](https://github.com/bartbeecoders/beemodel/issues/297)).*
+
+**Question.** Should BeeModel build on the optional GPU helper, or commit to the CPU?
+
+**Decision.** Both, with the CPU first. `beemodel` itself links nothing and runs
+everything on the CPU. The helper (`beemodel-gpu`, a second release asset, v0.11) is
+optional. When it is there it path-traces, rasterizes, draws the viewport (v0.24) and
+solves liquids for the viewport. When it is missing, or can't help, the CPU gives the
+same result.
+
+**What follows.**
+
+* Every GPU path has a CPU twin, which is the reference. `tests/gpu.py` compares their
+  images and results. A GPU feature without a CPU twin is not merged.
+* Physics stays CPU-first and deterministic (bakes are the same on every machine). A
+  solver may move to the GPU (liquid has, for drawing; gas may) only when it is checked
+  against the CPU result. Bakes, files and co-editing always use the CPU's.
+* `BEEMODEL_GPU=off` turns the helper off, and so does a missing helper. Nothing else
+  changes. [GPU.md](GPU.md) lists the switches.

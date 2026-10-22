@@ -23,6 +23,8 @@ project uses [Semantic Versioning](https://semver.org/).
   a part against another by faces, or by an axis in the object's own
   space; with mechanism joints, a light assembly that moves.
   `tests/assembly.py`.
+- D5 (#297), recorded in docs/DECISIONS.md: the GPU helper stays
+  optional and the CPU is the reference for every GPU path.
 
 ## [0.24.0] - 2026-10-21
 
