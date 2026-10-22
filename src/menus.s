@@ -138,10 +138,10 @@ pie_defs:       .long KEY_Z, 0
 .equ PIE_DEF_SZ, 24
 .equ pie_defs_n, (. - pie_defs) / PIE_DEF_SZ
 
-ctx_object:     .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0
+ctx_object:     .quad op_ai_ask, 0, op_duplicate, op_delete, 0, op_hide, op_reveal, 0
                 .quad op_edit_toggle, 0, sub_boolean, op_repair, 0, op_obj_measure
 .equ ctx_object_n, (. - ctx_object) / 8
-ctx_edit:       .quad op_m_extrude, op_m_inset, op_m_bevel, op_m_loopcut, op_m_knife, 0
+ctx_edit:       .quad op_ai_ask, 0, op_m_extrude, op_m_inset, op_m_bevel, op_m_loopcut, op_m_knife, 0
                 .quad op_m_subdivide, op_m_fill, op_m_bridge, sub_merge, sub_mdelete, 0
                 .quad op_m_flip, op_m_recalc, 0, op_edit_toggle
 .equ ctx_edit_n, (. - ctx_edit) / 8

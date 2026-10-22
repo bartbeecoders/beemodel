@@ -25,6 +25,10 @@
 
 .globl ed_ai_draw
 .globl ai_send
+.globl ai_send_as
+.globl ai_note
+.globl ai_answer
+.globl ai_label
 .globl ai_test
 .globl ai_world_get
 .globl ai_busy
@@ -65,6 +69,7 @@ ai_focus:       .skip 4                 # start typing in the prompt (ai.mode)
 ai_sid_prov:    .skip 4                 # the connection ai_sid is for, + 1
 ai_or_n:        .skip 4                 # OpenRouter: steps taken
 ai_iserr:       .skip 4
+ai_req_off:     .skip 4                 # where the request's entries start
 ai_tx:          .skip TX_CAP
 ai_line:        .skip LINE_CAP
 ai_reply:       .skip REPLY_CAP
@@ -396,13 +401,49 @@ ai_room:
 2:  mov     edx, [rip+ai_tx_len]
     sub     edx, ecx
     jbe     3f
-    lea     rdi, [rip+ai_tx]
+    sub     [rip+ai_req_off], ecx       # (the request's start moves too)
+    jns     21f
+    mov     dword ptr [rip+ai_req_off], 0
+21: lea     rdi, [rip+ai_tx]
     add     rsi, rcx
     mov     ecx, edx
     rep     movsb
     mov     [rip+ai_tx_len], edx
     ret
 3:  mov     dword ptr [rip+ai_tx_len], 0
+    mov     dword ptr [rip+ai_req_off], 0
+9:  ret
+
+# ai_answer -> rax = the last request's answer: the first line of the AI's
+#   last message, or its last error (edx = 1), or 0
+ai_answer:
+    lea     r8, [rip+ai_tx]
+    mov     ecx, [rip+ai_req_off]
+    xor     eax, eax                    # the answer so far
+    xor     edx, edx
+    xor     r9d, r9d                    # the entry before's kind
+1:  cmp     ecx, [rip+ai_tx_len]
+    jae     9f
+    movzx   r10d, byte ptr [r8+rcx]     # an entry: kind, text, 0
+    lea     r11, [r8+rcx+1]
+    cmp     r10d, K_ERR
+    jne     2f
+    mov     rax, r11
+    mov     edx, 1
+    jmp     4f
+2:  cmp     r10d, K_AI                  # a message's first line
+    jne     4f
+    cmp     r9d, K_AI
+    je      4f
+    cmp     edx, 1                      # (an error stays the answer)
+    je      4f
+    mov     rax, r11
+4:  mov     r9d, r10d
+5:  inc     ecx                         # to the next entry
+    cmp     byte ptr [r8+rcx], 0
+    jne     5b
+    inc     ecx
+    jmp     1b
 9:  ret
 
 # ai_cpy(rdi=dest, rsi=text) -> rdi at its 0
@@ -466,10 +507,17 @@ ai_add_tool:
 # =============================================================================
 # ai_send(rdi=prompt) - to the connection chosen (ai_prov)
 ai_send:
+    mov     rsi, rdi
+    xor     edx, edx
+# ai_send_as(rdi=prompt shown, rsi=text sent, rdx=a note after it or 0) - the
+#   same, with more sent than the transcript shows (Ask AI: the selection)
+ai_send_as:
     push    rbx
     push    r12
-    sub     rsp, 8
+    push    r13
     mov     rbx, rdi
+    mov     r12, rsi
+    mov     r13, rdx
     test    rbx, rbx
     jz      9f
 1:  cmp     byte ptr [rbx], ' '         # (leading spaces)
@@ -478,7 +526,11 @@ ai_send:
     jmp     1b
 2:  cmp     byte ptr [rbx], 0
     je      9f
-    cmp     dword ptr [rip+ai_busy], 0
+1:  cmp     byte ptr [r12], ' '
+    jne     2f
+    inc     r12
+    jmp     1b
+2:  cmp     dword ptr [rip+ai_busy], 0
     jne     .Lsd_busy
     call    ai_proc_running             # (a test)
     test    eax, eax
@@ -488,6 +540,14 @@ ai_send:
     mov     rdx, rbx
     mov     ecx, -1
     call    ai_add
+    mov     eax, [rip+ai_tx_len]
+    mov     [rip+ai_req_off], eax
+    test    r13, r13
+    jz      21f
+    mov     edi, K_NOTE
+    mov     rsi, r13
+    call    ai_add_z
+21:
     lea     rdi, [rip+ai_label]         # one undo step: "Agent: <the prompt>"
     lea     rsi, [rip+s_agent]
     call    ai_cpy
@@ -517,10 +577,10 @@ ai_send:
     mov     edi, [rip+ai_run]
     cmp     edi, 2
     je      6f
-    mov     rsi, rbx
+    mov     rsi, r12
     call    ai_cli_start
     jmp     7f
-6:  mov     rdi, rbx
+6:  mov     rdi, r12
     call    ai_or_start
 7:  test    eax, eax
     jnz     9f
@@ -529,12 +589,13 @@ ai_send:
 .Lsd_busy:
     lea     rdi, [rip+s_busy]
     call    log_line
-9:  add     rsp, 8
+9:  pop     r13
     pop     r12
     pop     rbx
     ret
 
-# ai_finish - the request is over: its undo step closed
+# ai_finish - the request is over: its undo step closed (and, from Ask AI,
+#   checked for changes outside the selection)
 ai_finish:
     sub     rsp, 8
     cmp     dword ptr [rip+ai_grouped], 0
@@ -543,8 +604,15 @@ ai_finish:
     call    undo_group_end
 1:  mov     dword ptr [rip+ai_busy], 0
     mov     dword ptr [rip+dirty], 1
+    call    ask_done
     add     rsp, 8
     ret
+
+# ai_note(rdi=text) - a note in the transcript (Ask AI's)
+ai_note:
+    mov     rsi, rdi
+    mov     edi, K_NOTE
+    jmp     ai_add_z
 
 # ai_sys_for(edi=provider) - ai_sys for that agent: Grok calls MCP tools by
 #   their server-qualified names, and must not take a failed call for a

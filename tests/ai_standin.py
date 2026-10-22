@@ -93,6 +93,8 @@ def main():
         say({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Seen the image.',
              'session_id': sid})
         return 0
+    if '--- What this request is about' in prompt:
+        return ask(prompt, sid)
     m = Mcp()
     pre = 'mcp__beemodel__'
     say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [
@@ -114,6 +116,42 @@ def main():
         {'type': 'text', 'text': 'Built a tower of 3 cubes.\nAsk for a roof next.'}]}})
     say({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Built a tower of 3 cubes.',
          'session_id': sid})
+    m.p.stdin.close()
+    m.p.wait(5)
+    return 0
+
+
+
+def ask(prompt, sid):
+    """Ask AI (tests/askai.py): the request, then what was selected. "bigger"
+    doubles the selected objects, "stray" moves the Light too, "delete the
+    light" deletes it, "extrude" extrudes the selected faces 20 cm."""
+    req = prompt.split('\n\n--- What')[0].strip()
+    low = req.lower()
+    names = [json.loads(ln[ln.index('{"name":'):])['name'] for ln in prompt.split('\n') if '{"name":' in ln]
+    if 'extrude' in low:
+        code = 'op("mesh.extrude", 0.2)\nprint(verts("%s"))' % names[0]
+    elif 'delete the light' in low:
+        code = 'delete("Light")\nprint(count())'
+    elif 'bigger' in low or 'stray' in low:
+        code = ''.join('scale("%s", get("%s", "sx") * 2, get("%s", "sy") * 2, get("%s", "sz") * 2)\n'
+                       % (n, n, n, n) for n in names)
+        if 'stray' in low:
+            code += 'move("Light", 9, 9, 9)\n'
+        code += 'print("done")'
+    else:
+        code = 'print("nothing to do")'
+    m = Mcp()
+    pre = 'mcp__beemodel__'
+    say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [
+        {'type': 'tool_use', 'id': 't1', 'name': pre + 'script_eval', 'input': {'code': code}}]},
+        'session_id': sid})
+    text, err = m.tool('script_eval', {'code': code})
+    say({'type': 'user', 'message': {'role': 'user', 'content': [
+        {'type': 'tool_result', 'tool_use_id': 't1', 'content': text, 'is_error': err}]}})
+    say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [
+        {'type': 'text', 'text': 'Done: %s (%s).\nAnything else?' % (req, ', '.join(names))}]}})
+    say({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.', 'session_id': sid})
     m.p.stdin.close()
     m.p.wait(5)
     return 0

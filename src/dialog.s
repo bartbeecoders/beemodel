@@ -27,11 +27,13 @@
 .globl dlg_run_pending
 .globl dlg_open_prefs
 .globl dlg_form_arg
+.globl dlg_kind
 
 .equ DLG_FORM,      1
 .equ DLG_CONFIRM,   2
 .equ DLG_FILE,      3                   # the file browser (filebrowser.s)
 .equ DLG_PREFS,     4                   # the Preferences (prefs.s)
+.equ DLG_ASK,       5                   # Ask AI (aiask.s): a box at the pointer
 .equ DLG_W,         460
 .equ VAL_SZ,        64                  # each field's value slot
 .equ MAXF,          16
@@ -289,7 +291,19 @@ dlg_key:
     cmp     dword ptr [rip+dlg_kind], DLG_FILE
     je      fb_key
     sub     rsp, 8
-    cmp     dword ptr [rip+dlg_kind], DLG_PREFS # (the Preferences: Esc only)
+    cmp     dword ptr [rip+dlg_kind], DLG_ASK   # (Ask AI: Enter sends, Esc closes)
+    jne     31f
+    cmp     edi, KEY_ESC
+    je      32f
+    cmp     edi, KEY_ENTER
+    je      33f
+    cmp     edi, 96
+    jne     9f
+33: call    ask_enter
+    jmp     9f
+32: call    dlg_close
+    jmp     9f
+31: cmp     dword ptr [rip+dlg_kind], DLG_PREFS # (the Preferences: Esc only)
     jne     0f
     cmp     edi, KEY_ESC
     jne     9f
@@ -577,6 +591,12 @@ put_str:                                # rsi = text or 0 -> at r14
 dlg_draw:
     cmp     dword ptr [rip+dlg_open], 0
     je      .Ldd_ret
+    cmp     dword ptr [rip+dlg_kind], DLG_ASK   # Ask AI: its own box, nothing
+    jne     72f                                 #  dimmed
+    mov     eax, [rip+wg_n]
+    mov     [rip+dlg_floor], eax
+    jmp     ask_draw
+72:
     cmp     dword ptr [rip+dlg_kind], DLG_FILE
     je      71f
     cmp     dword ptr [rip+dlg_kind], DLG_PREFS
