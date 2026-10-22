@@ -290,6 +290,7 @@ Describe a world, a model or a change, and BeeModel builds it while you watch.
 - **Ctrl+Shift+Space** opens the AI workspace. Type a prompt and press Enter.
 - The assistant uses Claude Code, the Grok CLI or OpenRouter (any model). Each one acts through BeeModel's own tools.
 - Each request is one undo step, with a **Revert** button.
+- **Alt+right-click** an object (or **Ask AI...** in the viewport's menu) to ask about the selection: *make it bigger*, *brushed steel*, *extrude these 20 cm*. The AI is told what is selected, and names any other object it changed anyway.
 - Connections, models and keys are set and tested in **Edit › Preferences › AI**. The OpenRouter key is kept in a 0600 secrets file.
 
 The guide is [docs/AI.md](docs/AI.md).
@@ -995,6 +996,7 @@ src/mcp.s       MCP server (unix socket, JSON-RPC) and the --mcp-bridge relay
 src/copilot.s   the procedural co-pilot: node catalogue, graphs as JSON, proposals
 src/ai.s        the AI Assistant: Claude Code / Grok / OpenRouter connections, transcript, area
 src/aiproc.s    a child process for the AI connections (pipes, stop), HTTPS through curl
+src/aiask.s     Ask AI about the selection: the box at the pointer, the context sent, Only the selection
 src/anim.s      animation: keyframes, F-curves, playback, actions and layers, the Timeline
 src/animed.s    the Dope Sheet and the Graph Editor
 src/arm.s       armatures: bones, poses, skinning (LBS / DQS), automatic weights, modes
