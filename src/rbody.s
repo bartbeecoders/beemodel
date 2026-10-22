@@ -6318,6 +6318,7 @@ mf_update:
     jne     32f
 31: movss   xmm0, [rsp+MU_MG]
     lea     rcx, [rsp+MU_CL]
+    mov     r8, rbx                     # (the points it keeps: kept first)
     call    poly_plane
     mov     edx, eax
     mov     rdi, rbx

@@ -179,6 +179,17 @@ TERRAIN = ('delete("Cube")\ndelete("Light")\ndelete("Camera")\n'
            ' if abs(instpos(n, i, 0)) < 11.5 and abs(instpos(n, i, 2)) < 11.5 { lo = min(lo, instpos(n, i, 1)) }\n} }\n'
            'print("terrain", w1, sum / 70, lo, w4)\n')
 
+# B1: thin Voronoi shards (an 8 cm plate cut into 40) lying alone on the Ground.
+# Their faces have 5-8 corners; picking four from the deepest made them rock
+# for ever (29 of 40). Four of the worst, apart: all asleep after 12 s.
+WEDGES = ('delete("Cube")\nop("anim.range", "1 1000 30")\nop("create.ground")\n'
+          'p = add("cube", "Plate", 0, 1.2, 0)\nscale(p, 1, 0.04, 1)\nrotate(p, 0.3, 0.2, 0.1)\nselect(p)\n'
+          'op("object.shatter", "shards count 40 seed 3 nobodies")\n'
+          'keep = 0\nfor i in 1..41 {\n n = "Plate_shard_" + i\n'
+          ' if i == 5 or i == 27 or i == 28 or i == 31 {\n  move(n, get(n, "x") + keep * 4, get(n, "y"), get(n, "z"))\n'
+          '  keep += 1\n  select(n)\n  op("rigid.add", "active hull")\n } else { delete(n) }\n}\n'
+          'for f in 2..362 { frame(f) }\nprint("wedges", rbinfo(0) - 1, rbinfo(2), round(rbinfo(17) * 1000))\n')
+
 PLANE = ('delete("Cube")\nadd("plane", "P", 0, 0, 0)\nselect("P")\nop("rigid.add", "passive plane")\n'
          'add("cube", "F", 500, 2, -300)\nscale("F", 0.5)\nrotate("F", 0.3, 0.2, 0.1)\nselect("F")\nop("rigid.add", "active box")\n'
          'frame(121)\nprint("plane", get("F", "y"), rbinfo(2))\n')
@@ -327,6 +338,11 @@ def main():
     check(parts > 100000 and fast(t) and t[2] > -2.5,
           f'1000 balls on a terrain of {parts - 1000} triangles: live (95% of frames within {t[3]:.0f} ms, '
           f'the slowest {t[0]:.0f}, {t[1]:.1f} on average{", second try" if tries > 1 else ""}), none through it')
+    r = {x[0]: x[1:] for x in run(WEDGES) if x}
+    w = r.get('wedges', ['0', '9', '9'])
+    check(w[0] == '4' and w[1] == '0',
+          f'thin wedge shards alone on the Ground come to rest and sleep (awake after 12 s: {w[1]} of {w[0]}; '
+          f'their contacts held round the centre, the ones kept kept)')
     r = {x[0]: x[1:] for x in run(PLANE) if x}
     p = r.get('plane', ['0', '1'])
     check(abs(float(p[0]) - 0.5) < 0.01 and p[1] == '0', f'an endless plane catches a box 500 m out ({p})')
