@@ -146,6 +146,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <li><a href="#shatter">Stage S · Shatter</a></li>
     <li><a href="#fields">Stage A · Attractors &amp; fields</a></li>
     <li><a href="#particles">Stage P · Particles</a></li>
+    <li><a href="#ask">Stage Q · Ask AI about the selection</a></li>
     <li><a href="#gas">Stage V · Smoke, fire, volumes</a></li>
     <li><a href="#release">Stage Z · v2.0.0</a></li>
     <li><a href="#data">Data, files &amp; scripting</a></li>
@@ -206,7 +207,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
 
 <section id="roadmap">
   <h2>Roadmap</h2>
-  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the ground and landscape (chosen 2026-10-18, released as v0.18.0), then shatter (released as v0.19.0), then attractors and force fields (released as v0.21.0, after the UI round v0.20.0), then particles and liquid (released as v0.22.0). Two stages were added that this plan did not have: <b>H · rendering performance</b> (v0.23.0: parallel and two-level BVHs, a resident GPU scene, RTX ray tracing) and <b>VP · the viewport on the GPU</b> (v0.24.0: Solid, Material Preview, particles and liquid drawn by Vulkan, Rendered shading during playback). <b>Then, chosen 2026-10-22, the decisions</b> (D1–D7 done 2026-10-22, released as v1.0.0; see <code>docs/DECISIONS.md</code>), then smoke and fire as <b>v1.1.0</b> (not v1.5.0: the version numbers stayed below 1.0 until D), then v2.0.0.</p>
+  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the ground and landscape (chosen 2026-10-18, released as v0.18.0), then shatter (released as v0.19.0), then attractors and force fields (released as v0.21.0, after the UI round v0.20.0), then particles and liquid (released as v0.22.0). Two stages were added that this plan did not have: <b>H · rendering performance</b> (v0.23.0: parallel and two-level BVHs, a resident GPU scene, RTX ray tracing) and <b>VP · the viewport on the GPU</b> (v0.24.0: Solid, Material Preview, particles and liquid drawn by Vulkan, Rendered shading during playback). <b>Then, chosen 2026-10-22, the decisions</b> (D1–D7 done 2026-10-22, released as v1.0.0; see <code>docs/DECISIONS.md</code>), then, added 2026-10-22, <b>Q · ask the AI about the selection</b> as <b>v1.1.0</b>, then smoke and fire as <b>v1.2.0</b> (not v1.5.0: the version numbers stayed below 1.0 until D), then v2.0.0.</p>
   <div class="diagram">
   <svg viewBox="0 0 980 250" role="img" aria-label="Stage order: D to v1.0, then R; R leads to G, S and A; G and A lead to P; P leads to V; all lead to Z, v2.0">
     <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
@@ -231,7 +232,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
       <rect x="510" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>
       <text x="574" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">P · particles</text><text x="574" y="140" text-anchor="middle" fill="var(--ink-3)">v0.22.0 · fifth</text>
       <rect x="680" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--red)" stroke-width="2"/>
-      <text x="744" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">V · gas, volumes</text><text x="744" y="140" text-anchor="middle" fill="var(--ink-3)">v1.1.0</text>
+      <text x="744" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">V · gas, volumes</text><text x="744" y="140" text-anchor="middle" fill="var(--ink-3)">v1.2.0</text>
       <rect x="850" y="95" width="120" height="60" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
       <text x="910" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">Z · release</text><text x="910" y="140" text-anchor="middle" fill="var(--ink-3)">v2.0.0</text>
     </g>
@@ -247,7 +248,8 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <tr><td>P · particles &amp; liquid</td><td class="num">P1–P6</td><td class="num">v0.22.0</td><td>Rain, snow, sparks, fountains; water that splashes and gets meshed.</td></tr>
     <tr><td>H · rendering performance <span class="tag v">added</span></td><td class="num">H1–H15</td><td class="num">v0.23.0</td><td>Particle films render in seconds; RTX hardware ray tracing; motion blur; sample reuse between frames.</td></tr>
     <tr><td>VP · viewport on the GPU <span class="tag v">added</span></td><td class="num">VP1–VP5</td><td class="num">v0.24.0</td><td>Playback in real time at 2560×1440 in Solid, Material Preview and Rendered, liquids included.</td></tr>
-    <tr><td>V · smoke, fire, volumes</td><td class="num">V1–V5</td><td class="num">v1.1.0</td><td>Smoke plumes and campfires, rendered as volumes.</td></tr>
+    <tr><td>Q · ask the AI about the selection <span class="tag v">added</span> <span class="tag a">next</span></td><td class="num">Q1–Q5</td><td class="num">v1.1.0</td><td>Alt+right-click an object, type “make it bigger” or “brushed steel”, and the AI changes that object, in one undo step.</td></tr>
+    <tr><td>V · smoke, fire, volumes</td><td class="num">V1–V5</td><td class="num">v1.2.0</td><td>Smoke plumes and campfires, rendered as volumes.</td></tr>
     <tr><td>Z · release</td><td class="num">Z1–Z2</td><td class="num">v2.0.0</td><td>The demo scene, benchmarks, docs.</td></tr>
   </table></div>
 </section>
@@ -379,6 +381,32 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <div class="phase"><div class="pn"><b>P6</b>ui</div><div class="card"><h3>The Particles tab and presets <span class="tag v">ui</span> <span class="tag g">done</span></h3>
     <p>A new Properties tab, Particles: the systems on the object, emission, motion, render, collisions, liquid. Presets: Rain, Snow, Sparks, Confetti, Fountain, Water tank. Cached in the simulation cache (channel 2 particles, 3 liquid), with positions quantized to 16 bits inside the domain. BeeScript <code>emit(object, preset)</code> and <code>particles(k)</code>.</p>
     <div class="exit"><b>Exit:</b> fakewl adds a fountain with clicks; the bake fits the cache budget; save and reopen plays the same frames.</div></div></div>
+</section>
+
+<section id="ask">
+  <h2>Stage Q · Ask AI about the selection</h2>
+  <p class="sub">Added 2026-10-22. The AI Assistant (v0.14) builds whole worlds from its own area. This stage brings it to the object you are looking at: a small prompt at the pointer, about what is selected, that comes back as one undo step. It uses the same connections (Claude Code, Grok, OpenRouter), tools and permissions as the Assistant.</p>
+  <div class="phase"><div class="pn"><b>Q1</b>ask</div><div class="card"><h3>The Ask box <span class="tag a">ui</span></h3>
+    <p><b>Alt+right-click</b> in the viewport, or <b>Ask AI…</b> at the top of the viewport's right-click menu, opens a small box at the pointer (Shift+right-click keeps placing the 3D cursor, as in Blender). Its title says what it is about: “Ask AI about <b>Cube</b>”, “about <b>3 objects</b>”, “about <b>4 faces of Cube</b>”, or “about the scene” when nothing is selected. A clicked object that is not selected is selected first.</p>
+    <ul>
+      <li>One prompt field, typing at once; Enter sends, Esc closes. Up and Down bring back the last 8 prompts.</li>
+      <li>Quick buttons for the common asks: Bigger, Smaller, Material…, Duplicate around it. Material… puts “change the material to ” in the field.</li>
+      <li>A toggle, <b>Only the selection</b> (on by default, remembered).</li>
+      <li><code>ai.ask [prompt]</code>: from the console, scripts or a key, it sends at once about the current selection; without a prompt it opens the box.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> Alt+right-click on the cube opens the box at the pointer with “Ask AI about Cube”; Enter sends; Esc and a click outside close it; Shift+right-click still places the cursor.</div></div></div>
+  <div class="phase"><div class="pn"><b>Q2</b>context</div><div class="card"><h3>What the AI is told about the selection <span class="tag b">ai</span></h3>
+    <p>The request carries the selection, so “it” and “them” mean something: each selected object’s name, type, location, rotation, size, material and modifiers (16 at most, then “and N more”), the active one marked; in edit mode, the selected vertices, edges and faces with their centre and normal. The instructions add: change these objects; others only when asked. The transcript shows your prompt with a note of what it was about. It is the same conversation as the Assistant’s, so a follow-up there (“a bit more”) continues it.</p>
+    <div class="exit"><b>Exit:</b> “make it twice as big” about Cube scales Cube and nothing else; about 4 faces in edit mode, “extrude these 20 cm” extrudes those faces.</div></div></div>
+  <div class="phase"><div class="pn"><b>Q3</b>scope</div><div class="card"><h3>Only the selection <span class="tag r">safety</span></h3>
+    <p>With the toggle on, BeeModel fingerprints every object before the request (place, mesh, modifiers, material, flags) and compares when it ends. New objects are fine (“duplicate it around a circle”). Objects outside the selection that changed or were deleted are named in a warning: “The AI also changed Light and Floor. Ctrl+Z takes the whole request back.” A material shared with other objects counts as theirs too.</p>
+    <div class="exit"><b>Exit:</b> a stand-in AI that also moves the light is reported, by name; one that only changes the selection is not; Ctrl+Z restores everything in one step.</div></div></div>
+  <div class="phase"><div class="pn"><b>Q4</b>feedback</div><div class="card"><h3>Working without the Assistant’s area <span class="tag a">ui</span></h3>
+    <p>The box closes when the prompt is sent. The status bar shows “AI: make it bigger…” with a Stop button while it works, and the AI’s answer (its first line) as a message when it is done; errors show the same way. The Assistant’s area, when it is open, shows the whole exchange. Each request is one undo step, named “Agent: …”, and shows in AI Activity.</p>
+    <div class="exit"><b>Exit:</b> with no AI area open, a request shows in the status bar, Stop ends it, and the answer shows as a message.</div></div></div>
+  <div class="phase"><div class="pn"><b>Q5</b>release</div><div class="card"><h3>Docs, the walkthrough, v1.1.0 <span class="tag r">release</span></h3>
+    <p><code>docs/AI.md</code> (Ask about the selection), <code>docs/UI.md</code> (the keys), the README. <code>tests/askai.py</code> drives it in the fake compositor with the stand-in CLIs and OpenRouter: the box, the context the AI is sent, edit-mode faces, the scope warning, Stop, undo. <code>ai.ask</code> is not an MCP tool: an agent does not start another agent, like <code>ai.send</code>.</p>
+    <div class="exit"><b>Exit:</b> local and GitHub CI green; v1.1.0 tagged and published.</div></div></div>
 </section>
 
 <section id="gas">
