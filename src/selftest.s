@@ -53,6 +53,9 @@ s_serial:   .asciz "  bench (8M elements): serial "
 s_par:      .asciz " ms, parallel "
 s_speed:    .asciz " ms, speed-up x"
 s_ms_end:   .asciz "\n"
+s_t11:      .asciz "SipHash-2-4 (co-editing's session key): the reference vector"
+.align 8
+sh_msg:     .byte 8, 9, 10, 11, 12, 13, 14      # bytes 8..14 (0..7: the first word)
 s_sum_ok:   .asciz "all self-tests passed\n"
 s_sum_bad:  .asciz "self-test FAILED\n"
 
@@ -457,6 +460,19 @@ selftest:
 1:  call    fmt_str
     lea     rdi, [rip+fmt_buf]
     call    write_out
+
+    lea     rdi, [rip+sh_msg]           # SipHash-2-4, key 00..0f, message
+    mov     esi, 7                      #  00..0e: a129ca6149be45e5
+    mov     rdx, 0x0706050403020100
+    mov     rcx, 0x0f0e0d0c0b0a0908
+    mov     r8, 0x0706050403020100
+    call    siphash
+    mov     rcx, 0xa129ca6149be45e5
+    cmp     rax, rcx
+    sete    al
+    movzx   eax, al
+    lea     rdi, [rip+s_t11]
+    call    check
 
     lea     rdi, [rip+check]            # cluster LOD DAGs: crack-free cuts
     call    vg_selftest

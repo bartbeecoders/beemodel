@@ -1539,6 +1539,19 @@
    }
   },
   {
+   "name": "op_co_key",
+   "description": "Session Key... - The co-editing session key, for sessions hosted or joined from now on: co.key <pass phrase of 8 characters or more> | new (a random one, shown once) | off; peers without it are refused",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_co_agent",
    "description": "Agent Peer - co.agent on: what MCP tools change here is a peer of its own (the agent), with its own undo",
    "inputSchema": {

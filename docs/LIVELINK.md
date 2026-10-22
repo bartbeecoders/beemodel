@@ -114,6 +114,41 @@ Times are `u64` Lamport clocks with the peer below: `clock << 16 | peer`.
 | 51 | NDEL | `tree[32]`, `u64 id`, `u64 time` |
 | 52 | NSET | `tree[32]`, `u64 id`, `u64 time`, the node's 72 bytes (links cleared), 3 `u64` link ids, 3 `u8` outputs |
 
+### Session keys
+
+With `co.key <pass phrase>` (8 characters or more; `co.key new` makes a random
+one and shows it once; `co.key off`) a peer hosts and joins **keyed** sessions.
+The key is 128 bits: SipHash-2-4 of the phrase under the fixed key
+`"BeeModelco.key!!"`, the phrase's hash with first word 0 and 1. It stays in
+memory and is never saved.
+
+1. HELLO grows by a `u64 nonce` (random, per connection). A HELLO without one
+   comes from a peer with no key: refused.
+2. Both sides derive the connection's key: SipHash of the two nonces (the lower
+   first) under the session key, with first word 1 and 2 for its two halves.
+3. Every message after HELLO carries an 8-byte tag at its end, counted in its
+   length: SipHash-2-4 under the connection's key of the first word, then the
+   type and payload. The first word is the sender's message counter on this
+   connection (0, 1, ...), with bit 63 set when the sender's nonce is the
+   lower. A wrong tag drops the connection, and so does a replayed or reordered
+   message.
+4. The first tagged message each way is AUTH (53, no payload). Each side sends its
+   document only after the other's AUTH checks out, so a peer without the key
+   gets nothing.
+
+The key authenticates; it does not encrypt. Anyone on the network path can read
+the scene. To work over the internet, don't open the port. Reach it through a
+tunnel, which also encrypts:
+
+```sh
+ssh -N -L 7462:localhost:7462 you@host     # on the joining machine, then
+co.join localhost:7462                     # in BeeModel
+```
+
+or put the peers on one WireGuard network and use `co.host lan` with its
+addresses. A relay server is not planned for 1.x
+([DECISIONS.md](DECISIONS.md#d6--collaboration-lan-first-with-a-session-key)).
+
 Every register keeps the value with the latest time, every element is alive
 by its latest add / delete, and the object list and each tree's nodes are
 ordered as an RGA (under each element, the newer insertions first): all

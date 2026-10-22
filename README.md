@@ -692,7 +692,10 @@ meshes (moves of different vertices merge), node graphs; a CRDT settles every co
 way everywhere. Ctrl+Z undoes only your own edits. You see the others' cameras, cursors and
 selections in their colours, and `co.follow` keeps your view on someone's. An AI agent joins
 as a peer of its own (`co.agent on`: what MCP tools change is the agent's, with its own undo).
-See [tests/coedit.py](tests/coedit.py).
+On a LAN, set a session key first (`co.key <pass phrase>`, or `co.key new` for a random one)
+on every peer. Peers without it are refused, and every message is authenticated. Over the
+internet, go through an SSH tunnel or WireGuard
+([docs/LIVELINK.md](docs/LIVELINK.md#session-keys)). See [tests/coedit.py](tests/coedit.py).
 
 ### Virtualized geometry
 
