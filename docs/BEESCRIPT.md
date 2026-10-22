@@ -28,7 +28,7 @@ ring(12, 6m)
 
 | Type | Examples | Notes |
 |---|---|---|
-| number | `3`, `2.5`, `1e-3`, `45deg`, `20cm` | 64-bit floats |
+| number | `3`, `2.5`, `.5`, `1e-3`, `45deg`, `20cm`, `0xff8800` | 64-bit floats; `0x` hexadecimal (up to 15 digits, no unit) |
 | text | `"Box"`, `'it\'s'` | escapes: `\n` `\t` `\"` `\'` `\\` |
 | nil | `nil` | "no value" |
 
@@ -68,6 +68,58 @@ fn area(w, h) { return w * h }  # top level only; can call itself
 * Statements end at a newline or `;`.
 * Inside `( )` a newline is just a space.
 * `#` starts a comment that runs to the end of the line.
+
+### Grammar
+
+The whole language, as the compiler in `src/script.s` reads it. `{ }` in the rules
+means "zero or more", `[ ]` "optional", and quoted text is written as is.
+
+```
+script     = { sep } { statement sep { sep } } [ statement ]
+sep        = NEWLINE | ";"
+statement  = fndef                                   (top level only)
+           | "if" expr block { "else" "if" expr block } [ "else" block ]
+           | "while" expr block
+           | "for" NAME "in" expr ".." expr block
+           | "return" [ expr ]                       (at the top level: ends the script)
+           | "break" | "continue"                    (inside a loop only)
+           | NAME assignop expr
+           | expr
+fndef      = "fn" NAME "(" [ NAME { "," NAME } ] ")" block
+block      = "{" { sep } { statement sep { sep } } [ statement ] "}"
+assignop   = "=" | "+=" | "-=" | "*=" | "/="
+
+expr       = and { "or" and }
+and        = not { "and" not }
+not        = "not" not | compare
+compare    = sum [ ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) sum ]
+sum        = product { ( "+" | "-" ) product }
+product    = unary { ( "*" | "/" | "%" ) unary }
+unary      = "-" unary | primary
+primary    = NUMBER | TEXT | "true" | "false" | "nil" | "pi"
+           | NAME | NAME "(" [ expr { "," expr } ] ")"
+           | "(" expr ")"
+
+NUMBER     = digits [ "." digits ] [ exponent ] [ UNIT ]
+           | "." digits [ exponent ] [ UNIT ]
+           | "0x" hexdigits
+UNIT       = "m" | "cm" | "mm" | "km" | "deg" | "rad"
+TEXT       = '"' chars '"' | "'" chars "'"
+NAME       = letter or "_", then letters, digits or "_"   (31 characters at most)
+```
+
+* Binding, loosest first: `or`, `and`, `not`, comparisons, `+ -`, `* / %`, unary `-`.
+  So `not a == b` is `not (a == b)`, and `-2 * 3` is `(-2) * 3`.
+* Comparisons don't chain: `1 < x < 3` is an error. Write `1 < x and x < 3`.
+* `else` may start the next line after the `}`.
+* A function can be called before the line that defines it, and can call itself.
+  A function without `return` gives `nil`.
+* The `for` range is evaluated once. The loop variable is an ordinary variable;
+  after a loop that ran to the end it holds the end value (`for i in 0..3` leaves `i` at 3).
+* Keywords: `fn if else while for in return break continue and or not true false nil pi`.
+  They can't be names. A built-in's name can't be a function's name.
+* There are no lists, maps, `[ ]`, `.` member access, `**` or `^`. Use `pow(x, y)`,
+  and loop over indices: `for i in 0..count() { name(i) }`.
 
 ### Variables
 
@@ -356,6 +408,18 @@ smesh("Knob", ssub(b, smove(scyl(0.4, 6), 0, 1, 0)), 96)
 `beemodel --eval 'code'` and `beemodel --run file.bees` run a script against the default scene without opening a window. Output goes to stdout. The exit code is 1 on errors.
 
 `script.reset` forgets all variables and functions.
+
+## Stability in 1.x
+
+Decided for v1.0 (docs/DECISIONS.md, D1): the syntax above is frozen for every 1.x version.
+
+* Nothing that runs today changes meaning: no keyword, operator, unit, precedence,
+  scoping rule or built-in result changes.
+* New built-in functions and new operator ids may be added, and so may new optional
+  arguments at the end of a built-in's argument list. A script that defines a function
+  with a name a later version makes a built-in must rename it (the error says so).
+* `tests/beescript.py` runs 50 tasks the way an AI agent writes them. Each must run
+  without an error and print the same answer in every 1.x version.
 
 ## Limits and safety
 

@@ -1686,6 +1686,42 @@ pack8:
 # parse_num(rsi=text) -> xmm0 (double, units applied), rsi after it,
 #   eax = 0 ok, 1 unknown unit, 2 no digits
 parse_num:
+    cmp     byte ptr [rsi], '0'         # 0xff: hexadecimal, no units
+    jne     .Lpn_dec
+    mov     al, [rsi+1]
+    or      al, 0x20
+    cmp     al, 'x'
+    jne     .Lpn_dec
+    lea     r8, [rsi+2]
+    xor     r10d, r10d
+    xor     r9d, r9d
+1:  movzx   eax, byte ptr [r8]
+    lea     ecx, [rax-'0']
+    cmp     ecx, 9
+    jbe     2f
+    or      eax, 0x20
+    lea     ecx, [rax-'a'+10]
+    cmp     eax, 'a'
+    jb      3f
+    cmp     eax, 'f'
+    ja      3f
+2:  cmp     r9d, 15
+    jae     3f
+    shl     r10, 4
+    or      r10, rcx
+    inc     r8
+    inc     r9d
+    jmp     1b
+3:  test    r9d, r9d
+    jz      .Lpn_dec
+    cvtsi2sd xmm0, r10
+    mov     rsi, r8
+    movzx   eax, byte ptr [rsi]
+    call    is_ident
+    test    ecx, ecx
+    jnz     .Lpn_unit
+    jmp     .Lpn_ok
+.Lpn_dec:
     xorpd   xmm0, xmm0                  # all digits as one mantissa
     movsd   xmm2, [rip+f_ten]
     xor     ecx, ecx                    # power of ten to divide by

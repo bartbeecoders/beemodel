@@ -52,6 +52,9 @@ jobs:
           python -m pip install --quiet pillow
           sudo apt-get install -y --no-install-recommends fonts-dejavu-core >/dev/null
 
+      - name: BeeScript frozen for 1.x (50 agent tasks)
+        run: timeout 300 python tests/beescript.py build/beemodel
+
       - name: Boolean stress corpus (exact identities, closed results)
         run: timeout 300 python tests/bool_stress.py build/beemodel --cases 300
 
