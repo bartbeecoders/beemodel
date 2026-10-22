@@ -84,7 +84,14 @@
 .equ CC_IN,         32
 .equ CC_INLEN,      40
 .equ CC_PEER,       48
-.equ CC_SZ,         64
+.equ CC_KEYED,      56                  # 1: messages carry tags (D6)
+.equ CC_NOUR,       64                  # our HELLO's nonce
+.equ CC_NTH,        72                  # theirs
+.equ CC_K0,         80                  # the connection's key (from the
+.equ CC_K1,         88                  #  session key and both nonces)
+.equ CC_SCTR,       96                  # messages tagged out
+.equ CC_RCTR,       104                 # and checked in
+.equ CC_SZ,         128
 .equ CE_MAX,        4096
 .equ CE_ID,         0                   # an object element
 .equ CE_UID,        8                   # its object here (0: none)
@@ -140,6 +147,8 @@
 .equ M_VERTS,       45
 .equ M_MAT,         46
 .equ M_PRES,        47
+.equ M_AUTH,        53                  # (keyed sessions) the first tagged message
+.equ SYS_GETRANDOM, 318
 # registers
 .equ K_NAME,        1
 .equ K_MAT,         2
@@ -166,6 +175,16 @@ s_nojoin:       .asciz "  co-editing: could not join "
 s_left:         .asciz "  co-editing: left the session"
 s_peerin:       .asciz "  co-editing: a peer joined"
 s_peerout:      .asciz "  co-editing: a peer left"
+s_refused:      .asciz "  co-editing: refused a peer (no session key, or another one)"
+s_key_set:      .asciz "  co-editing: session key set (for sessions hosted or joined from now on)"
+s_key_new:      .asciz "  co-editing: session key: "
+s_key_off:      .asciz "  co-editing: no session key: anyone who can reach the port can join"
+s_key_short:    .asciz "  co-editing: a session key has 8 characters at least (co.key new makes one)"
+s_off:          .asciz "off"
+s_new:          .asciz "new"
+s_b32:          .ascii "abcdefghijkmnpqrstuvwxyz23456789"
+.align 8
+co_kdf:         .ascii "BeeModelco.key!!"     # the pass phrase's hash key
 s_bad:          .asciz "  co-editing: co.host [port] | lan [port]; co.join host:port"
 s_follow:       .asciz "  co-editing: following "
 s_nofollow:     .asciz "  co-editing: no such peer: "
@@ -206,6 +225,9 @@ co_agsel_new:   .skip 8*16
 co_agsel:       .skip 8*16
 .align 8
 co_clock:       .skip 8                 # the Lamport clock
+co_key0:        .skip 8                 # the session key (D6): 128 bits from
+co_key1:        .skip 8                 #  the pass phrase; never saved
+co_keyset:      .skip 4
 co_cc:          .skip CC_MAX*CC_SZ
 co_ce:          .skip CE_MAX*CE_SZ
 co_cm:          .skip CM_MAX*CM_SZ
@@ -231,6 +253,7 @@ OPERATOR op_co_host, "co.host", "Host Co-Editing", do_co_host, flags=OPF_AI_SAFE
 OPERATOR op_co_join, "co.join", "Join Co-Editing", do_co_join, flags=OPF_AI_SAFE, doc="Join a co-editing session (its scene replaces this one): co.join host:port", form=form_cojoin
 OPERATOR op_co_leave, "co.leave", "Leave Co-Editing", do_co_leave, flags=OPF_AI_SAFE, doc="Leave the co-editing session (the scene stays as it is)"
 OPERATOR op_co_follow, "co.follow", "Follow Peer", do_co_follow, flags=OPF_AI_SAFE, doc="Keep the view on another peer's camera: co.follow <peer name | number> | off"
+OPERATOR op_co_key, "co.key", "Session Key...", do_co_key, flags=OPF_AI_SAFE, doc="The co-editing session key, for sessions hosted or joined from now on: co.key <pass phrase of 8 characters or more> | new (a random one, shown once) | off; peers without it are refused", form=form_cokey
 OPERATOR op_co_agent, "co.agent", "Agent Peer", do_co_agent, flags=OPF_AI_SAFE, doc="co.agent on: what MCP tools change here is a peer of its own (the agent), with its own undo"
 
 # =============================================================================
@@ -392,17 +415,9 @@ to_all:
     add     rdi, rax
     cmp     dword ptr [rdi+CC_STATE], 2
     jne     2f
-    mov     rax, [rdi+CC_LEN]
-    add     rax, r13
-    cmp     rax, BUF_CAP
-    ja      2f
-    mov     rcx, rdi
-    mov     rdi, [rcx+CC_OUT]
-    add     rdi, [rcx+CC_LEN]
-    add     [rcx+CC_LEN], r13
     mov     rsi, r12
-    mov     rcx, r13
-    rep     movsb
+    mov     rdx, r13
+    call    cc_append
 2:  inc     ebx
     jmp     1b
 9:  add     rsp, 8
@@ -2404,6 +2419,109 @@ do_co_host:
     pop     rbx
     ret
 
+# co.key <pass phrase> | new | off - the session key (D6). 128 bits by
+#   SipHash of the phrase; kept in memory only. Each connection's HELLO
+#   then carries a nonce, both sides tag every message after it with a
+#   key of their own (from the session key and both nonces) and send the
+#   document only once the other's AUTH checks out
+do_co_key:
+    push    rbx
+    push    r12
+    sub     rsp, 40
+    mov     rbx, [rip+op_arg]
+    test    rbx, rbx
+    jz      .Lck_show
+1:  cmp     byte ptr [rbx], ' '
+    jne     2f
+    inc     rbx
+    jmp     1b
+2:  cmp     byte ptr [rbx], 0
+    je      .Lck_show
+    mov     rdi, rbx
+    lea     rsi, [rip+s_off]
+    call    str_eq
+    test    eax, eax
+    jz      3f
+    mov     dword ptr [rip+co_keyset], 0
+    jmp     .Lck_show
+3:  mov     rdi, rbx
+    lea     rsi, [rip+s_new]
+    call    str_eq
+    test    eax, eax
+    jz      5f
+    mov     rdi, rsp                    # new: 20 random letters, in fives
+    mov     esi, 20
+    xor     edx, edx
+    mov     eax, SYS_GETRANDOM
+    syscall
+    lea     rbx, [rip+co_tmp]
+    xor     ecx, ecx
+    xor     edx, edx
+4:  movzx   eax, byte ptr [rsp+rcx]
+    and     eax, 31
+    lea     r8, [rip+s_b32]
+    mov     al, [r8+rax]
+    mov     [rbx+rdx], al
+    inc     edx
+    inc     ecx
+    cmp     ecx, 20
+    jae     41f
+    mov     eax, ecx                    # (a dash after every fifth)
+    push    rdx
+    xor     edx, edx
+    mov     r8d, 5
+    div     r8d
+    test    edx, edx
+    pop     rdx
+    jnz     4b
+    mov     byte ptr [rbx+rdx], '-'
+    inc     edx
+    jmp     4b
+41: mov     byte ptr [rbx+rdx], 0
+    lea     rdi, [rip+s_key_new]
+    mov     rsi, rbx
+    call    log_pair
+    mov     r12d, 1
+    jmp     6f
+5:  xor     r12d, r12d
+    mov     rdi, rbx
+    call    str_len
+    cmp     eax, 8
+    jae     6f
+    lea     rdi, [rip+s_key_short]
+    call    log_line
+    jmp     9f
+6:  mov     rdi, rbx
+    call    str_len
+    mov     [rsp], rax
+    mov     rdi, rbx
+    mov     rsi, [rsp]
+    mov     rdx, [rip+co_kdf]
+    mov     rcx, [rip+co_kdf+8]
+    xor     r8d, r8d
+    call    siphash
+    mov     [rip+co_key0], rax
+    mov     rdi, rbx
+    mov     rsi, [rsp]
+    mov     rdx, [rip+co_kdf]
+    mov     rcx, [rip+co_kdf+8]
+    mov     r8d, 1
+    call    siphash
+    mov     [rip+co_key1], rax
+    mov     dword ptr [rip+co_keyset], 1
+    test    r12d, r12d
+    jnz     9f
+.Lck_show:
+    lea     rdi, [rip+s_key_set]
+    cmp     dword ptr [rip+co_keyset], 0
+    jne     7f
+    lea     rdi, [rip+s_key_off]
+7:  call    log_line
+9:  add     rsp, 40
+    pop     r12
+    pop     rbx
+    ret
+
 # co_reset - no session: connections closed, the document empty
 co_reset:
     push    rbx
@@ -2618,6 +2736,9 @@ cc_setup:
     jmp     1b
 2:  mov     [rax+CC_FD], ebx
     mov     dword ptr [rax+CC_STATE], 1
+    mov     dword ptr [rax+CC_KEYED], 0
+    mov     qword ptr [rax+CC_SCTR], 0
+    mov     qword ptr [rax+CC_RCTR], 0
     mov     qword ptr [rax+CC_HEAD], 0
     mov     qword ptr [rax+CC_LEN], 0
     mov     qword ptr [rax+CC_INLEN], 0
@@ -2640,35 +2761,202 @@ cc_hello:
     call    mo_u32
     mov     edi, 1 | (2 << 16)          # version 1, role 2 (a co-editor)
     call    mo_u32
-    mov     rax, [rip+co_op]
+    cmp     dword ptr [rip+co_keyset], 0
+    je      1f
+    lea     rdi, [rbx+CC_NOUR]          # keyed: a nonce; the document only
+    mov     esi, 8                      #  once their AUTH checks out
+    xor     edx, edx
+    mov     eax, SYS_GETRANDOM
+    syscall
+    mov     rdi, [rbx+CC_NOUR]
+    call    mo_u64
+1:  mov     rax, [rip+co_op]
     mov     rcx, [rip+co_oplen]
     sub     ecx, 4
     mov     [rax], ecx
     mov     rdi, rbx
     call    cc_put
+    cmp     dword ptr [rip+co_keyset], 0
+    jne     9f
     mov     dword ptr [rbx+CC_STATE], 2
     mov     dword ptr [rip+co_author], 0
     call    send_state
-    pop     r13
+9:  pop     r13
     pop     r12
     pop     rbx
     ret
 
 # cc_put(rdi=connection) - co_op into its output
 cc_put:
-    mov     rax, [rdi+CC_LEN]
-    add     rax, [rip+co_oplen]
-    cmp     rax, BUF_CAP
-    ja      9f
-    mov     rcx, rdi
-    mov     rdi, [rcx+CC_OUT]
-    add     rdi, [rcx+CC_LEN]
     mov     rsi, [rip+co_op]
     mov     rdx, [rip+co_oplen]
-    add     [rcx+CC_LEN], rdx
-    mov     rcx, rdx
+    jmp     cc_append
+
+# cc_append(rdi=connection, rsi=message, rdx=bytes) - into its output; on a
+#   keyed connection with its tag after it (the length counting it)
+cc_append:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     r13, rdx
+    mov     rax, [rbx+CC_LEN]
+    lea     rax, [rax+r13+8]
+    cmp     rax, BUF_CAP
+    ja      9f
+    mov     rdi, [rbx+CC_OUT]
+    add     rdi, [rbx+CC_LEN]
+    mov     rsi, r12
+    mov     rcx, r13
     rep     movsb
-9:  ret
+    mov     r12, [rbx+CC_OUT]           # (the copy)
+    add     r12, [rbx+CC_LEN]
+    add     [rbx+CC_LEN], r13
+    cmp     dword ptr [rbx+CC_KEYED], 0
+    je      9f
+    add     dword ptr [r12], 8
+    mov     rdi, rbx
+    xor     esi, esi
+    call    cc_prefix
+    lea     rdi, [r12+4]
+    lea     rsi, [r13-4]
+    mov     rdx, [rbx+CC_K0]
+    mov     rcx, [rbx+CC_K1]
+    call    siphash
+    mov     rdi, [rbx+CC_OUT]
+    add     rdi, [rbx+CC_LEN]
+    mov     [rdi], rax
+    add     qword ptr [rbx+CC_LEN], 8
+    inc     qword ptr [rbx+CC_SCTR]
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# cc_prefix(rdi=connection, esi=1 receiving) -> r8 = the tag's first word:
+#   the counter, and which way (bit 63: from the side whose nonce is lower)
+cc_prefix:
+    mov     rax, [rdi+CC_NOUR]
+    mov     rcx, [rdi+CC_NTH]
+    mov     r8, [rdi+CC_SCTR]
+    test    esi, esi
+    jz      1f
+    mov     r8, [rdi+CC_RCTR]
+    xchg    rax, rcx
+1:  cmp     rax, rcx
+    jae     2f
+    bts     r8, 63
+2:  ret
+
+# cc_derive(rdi=connection) - its key: SipHash of both nonces (the lower
+#   first) under the session key
+cc_derive:
+    push    rbx
+    sub     rsp, 16
+    mov     rbx, rdi
+    mov     rax, [rbx+CC_NOUR]
+    mov     rcx, [rbx+CC_NTH]
+    cmp     rax, rcx
+    jbe     1f
+    xchg    rax, rcx
+1:  mov     [rsp], rax
+    mov     [rsp+8], rcx
+    mov     rdi, rsp
+    mov     esi, 16
+    mov     rdx, [rip+co_key0]
+    mov     rcx, [rip+co_key1]
+    mov     r8d, 1
+    call    siphash
+    mov     [rbx+CC_K0], rax
+    mov     rdi, rsp
+    mov     esi, 16
+    mov     rdx, [rip+co_key0]
+    mov     rcx, [rip+co_key1]
+    mov     r8d, 2
+    call    siphash
+    mov     [rbx+CC_K1], rax
+    mov     dword ptr [rbx+CC_KEYED], 1
+    add     rsp, 16
+    pop     rbx
+    ret
+
+# siphash(rdi=data, rsi=bytes, rdx=k0, rcx=k1, r8=a first word) -> rax:
+#   SipHash-2-4 of the word (8 bytes, little-endian) followed by the data
+.globl siphash
+siphash:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12, 0x736f6d6570736575
+    xor     r12, rdx
+    mov     r13, 0x646f72616e646f6d
+    xor     r13, rcx
+    mov     r14, 0x6c7967656e657261
+    xor     r14, rdx
+    mov     r15, 0x7465646279746573
+    xor     r15, rcx
+    lea     rbx, [rsi+8]                # the length, the word too
+    mov     rax, r8
+    call    .Lsh_word
+1:  cmp     rsi, 8
+    jb      2f
+    mov     rax, [rdi]
+    call    .Lsh_word
+    add     rdi, 8
+    sub     rsi, 8
+    jmp     1b
+2:  xor     eax, eax                    # the last bytes, the length on top
+    mov     ecx, esi
+3:  test    ecx, ecx
+    jz      4f
+    dec     ecx
+    shl     rax, 8
+    movzx   edx, byte ptr [rdi+rcx]
+    or      rax, rdx
+    jmp     3b
+4:  shl     rbx, 56
+    or      rax, rbx
+    call    .Lsh_word
+    xor     r14, 0xff
+    call    .Lsh_round
+    call    .Lsh_round
+    call    .Lsh_round
+    call    .Lsh_round
+    mov     rax, r12
+    xor     rax, r13
+    xor     rax, r14
+    xor     rax, r15
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+.Lsh_word:
+    xor     r15, rax
+    call    .Lsh_round
+    call    .Lsh_round
+    xor     r12, rax
+    ret
+.Lsh_round:
+    add     r12, r13
+    rol     r13, 13
+    xor     r13, r12
+    rol     r12, 32
+    add     r14, r15
+    rol     r15, 16
+    xor     r15, r14
+    add     r12, r15
+    rol     r15, 21
+    xor     r15, r12
+    add     r14, r13
+    rol     r13, 17
+    xor     r13, r14
+    rol     r14, 32
+    ret
 
 # send_state(rbx=connection) - every element and material, as operations
 #   with their own times (idempotent wherever they land)
@@ -2958,6 +3246,7 @@ co_read:
     push    r13
     push    r14
     push    r15
+    sub     rsp, 16                     # [rsp] the message's length as sent
     xor     ebx, ebx
 .Lcr_c:
     cmp     ebx, CC_MAX
@@ -2992,11 +3281,37 @@ co_read:
     lea     rcx, [r15+4]
     cmp     rax, rcx
     jb      6f
-    cmp     r15d, 10                    # (too short: skipped)
+    mov     [rsp], r15d
+    cmp     dword ptr [r12+CC_KEYED], 0 # keyed: its tag checked, then taken off
+    je      30f
+    cmp     r15d, 15                    # (AUTH: 7 bytes, and the tag)
+    jb      .Lcr_refuse
+    mov     rdi, r12
+    mov     esi, 1
+    call    cc_prefix
+    lea     rdi, [r14+4]
+    lea     esi, [r15-8]
+    mov     rdx, [r12+CC_K0]
+    mov     rcx, [r12+CC_K1]
+    call    siphash
+    cmp     rax, [r14+r15-4]
+    jne     .Lcr_refuse
+    inc     qword ptr [r12+CC_RCTR]
+    sub     r15d, 8
+    mov     [r14], r15d
+30: cmp     r15d, 7                     # (too short: skipped)
     jb      5f
     cmp     byte ptr [r14+4], M_HELLO
-    je      5f
-    movzx   edi, word ptr [r14+5]       # once each: applied, relayed
+    je      .Lcr_hello
+    cmp     byte ptr [r14+4], M_AUTH
+    je      .Lcr_auth
+    cmp     r15d, 10
+    jb      5f
+    cmp     dword ptr [rip+co_keyset], 0 # keyed: nothing before the AUTH
+    je      31f
+    cmp     dword ptr [r12+CC_STATE], 2
+    jne     .Lcr_refuse
+31: movzx   edi, word ptr [r14+5]       # once each: applied, relayed
     mov     esi, [r14+7]
     call    seen_add
     test    eax, eax
@@ -3007,8 +3322,51 @@ co_read:
     lea     rdx, [r15+4]
     mov     edi, ebx
     call    to_all
-5:  lea     r13, [r13+r15+4]
+5:  mov     eax, [rsp]
+    lea     r13, [r13+rax+4]
     jmp     3b
+.Lcr_hello:                             # keyed: their nonce, our AUTH back
+    cmp     dword ptr [rip+co_keyset], 0
+    je      5b
+    cmp     dword ptr [r12+CC_KEYED], 0
+    jne     .Lcr_refuse
+    cmp     r15d, 23                    # (no nonce: they have no key)
+    jb      .Lcr_refuse
+    mov     rax, [r14+19]
+    mov     [r12+CC_NTH], rax
+    mov     rdi, r12
+    call    cc_derive
+    mov     edi, M_AUTH
+    call    mo_b
+    mov     rax, [rip+co_op]
+    mov     rcx, [rip+co_oplen]
+    sub     ecx, 4
+    mov     [rax], ecx
+    mov     rdi, r12
+    call    cc_put
+    jmp     5b
+.Lcr_auth:                              # keyed, and it checked out: in
+    cmp     dword ptr [r12+CC_KEYED], 0
+    je      5b
+    cmp     dword ptr [r12+CC_STATE], 1
+    jne     5b
+    mov     dword ptr [r12+CC_STATE], 2
+    mov     [rsp+8], rbx
+    mov     rbx, r12
+    mov     dword ptr [rip+co_author], 0
+    call    send_state
+    mov     rbx, [rsp+8]
+    xor     dword ptr [rip+co_preshash], 1  # (presence sent before it got
+    cmp     dword ptr [rip+co_agstamp], 0   #  nowhere: again, the agent's too)
+    je      5b
+    dec     dword ptr [rip+co_agsent]
+    jmp     5b
+.Lcr_refuse:
+    mov     rdi, r12
+    call    cc_drop
+    lea     rdi, [rip+s_refused]
+    call    log_line
+    jmp     .Lcr_next
 6:  mov     rcx, [r12+CC_INLEN]
     sub     rcx, r13
     mov     [r12+CC_INLEN], rcx
@@ -3025,6 +3383,7 @@ co_read:
     inc     ebx
     jmp     .Lcr_c
 .Lcr_out:
+    add     rsp, 16
     pop     r15
     pop     r14
     pop     r13

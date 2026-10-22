@@ -550,6 +550,9 @@ FFIELD fw_vcm
 WIDGET fw_coj,  WK_TEXT, "form.join.address", "Address", tip="host:port, e.g. 192.168.1.20:7462"
 FORM form_cojoin, 1
 FFIELD fw_coj
+WIDGET fw_cok,  WK_TEXT, "form.cokey.key", "Session key", flags=WGF_SECRET, tip="The same pass phrase on every peer (8 characters or more), or new for a random one"
+FORM form_cokey, 1
+FFIELD fw_cok
 WIDGET fw_lkc,  WK_TEXT, "form.link.address", "Address", tip="host:port (7461), or unix:/path"
 FORM form_lkconn, 1
 FFIELD fw_lkc

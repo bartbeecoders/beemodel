@@ -12,6 +12,10 @@ at once - moves, renames, materials, hiding, adds, deletes, vertex moves,
 new topologies - and the three converge to identical documents (by hash)
 and identical scenes.
 
+All three share a session key (D6, co.key): a fourth BeeModel without it,
+and a fifth with another one, are refused and get nothing of the scene;
+two BeeModels without keys still work together as before.
+
     python3 tests/coedit.py build/beemodel [outdir] [--rounds N] [--seed S]
 """
 import os, random, socket, sys, tempfile, time
@@ -21,6 +25,7 @@ OUT = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith('--') else
 ROUNDS = int(sys.argv[sys.argv.index('--rounds') + 1]) if '--rounds' in sys.argv else 300
 SEED = int(sys.argv[sys.argv.index('--seed') + 1]) if '--seed' in sys.argv else 151
 HERE = os.path.dirname(os.path.abspath(__file__))
+KEY = 'correct horse battery'
 FAILS = []
 
 
@@ -81,6 +86,8 @@ def main():
     a, ma, qa = inst()
     b, mb, qb = inst()
     c, mc, qc = inst()
+    for q in (qa, qb, qc):
+        q('op("co.key", "%s")' % KEY)
     qa('add("sphere", "Ball", 2, 1, 0)\nmaterial("Gold")\nmatset("Gold", "base", 1, 0.8, 0.2)\nassign("Ball", "Gold")\n'
        'op("co.host", "%d")' % port)
     pump(3)
@@ -95,7 +102,34 @@ def main():
     h = hashes()
     sa, sb, sc = qa(SCENE_SUMMARY), qb(SCENE_SUMMARY), qc(SCENE_SUMMARY)
     check(h[0] == h[1] == h[2] and sa == sb == sc and 'Ball' in sa,
-          f'joining: all three have the host\'s scene ({h[0]}, {sa.count("|")} objects)')
+          f'joining with the session key: all three have the host\'s scene ({h[0]}, {sa.count("|")} objects)')
+
+    # D6: no key, or another key: refused, nothing of the scene leaks
+    conns = qa('print(costat(1))')
+    d, md, qd = inst()
+    e, me, qe = inst()
+    qe('op("co.key", "another pass phrase")')
+    qd('op("co.join", "127.0.0.1:%d")' % port)
+    qe('op("co.join", "127.0.0.1:%d")' % port)
+    pump(10)
+    got = (qd('print(count(), costat(1))'), qe('print(count(), costat(1))'), qa('print(costat(1))'))
+    check(got[0] == '0 0' and got[1] == '0 0' and got[2] == conns,
+          f'a peer without the session key, and one with another key, are refused and get nothing ({got})')
+    for f in (d, e):
+        f.proc.kill()
+        peers.remove(f)
+    f2, m2, q2 = inst()                         # no keys on either side: as before
+    g2, n2, r2 = inst()
+    port_f = free_port()
+    q2('add("torus", "Ring", 0, 3, 0)\nop("co.host", "%d")' % port_f)
+    pump(3)
+    r2('op("co.join", "127.0.0.1:%d")' % port_f)
+    pump(8)
+    check(r2('print(exists("Ring"), cohash())') == '1 ' + q2('print(cohash())'),
+          'without session keys on either side, joining works as before')
+    for f in (f2, g2):
+        f.proc.kill()
+        peers.remove(f)
 
     # concurrent edits of one property: the same winner everywhere
     qa('set("Ball", "x", 1)')

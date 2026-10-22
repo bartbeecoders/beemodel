@@ -221,6 +221,7 @@ WIDGET wd_vs_abort, WK_BUTTON, "versions.abort", "Abort", aux=op_vc_abort
 WIDGET wd_co_host, WK_BUTTON, "collab.host", "Host", aux=op_co_host, tip="Others on this machine can join (port 7462)"
 WIDGET wd_co_lan,  WK_BUTTON, "collab.host_lan", "Host on LAN", tip="Others on the network can join"
 WIDGET wd_co_join, WK_BUTTON, "collab.join", "Join...", aux=op_co_join
+WIDGET wd_co_key,  WK_BUTTON, "collab.key", "Session Key...", aux=op_co_key, tip="Only peers with the same key can join (set it before hosting or joining)"
 WIDGET wd_co_leave, WK_BUTTON, "collab.leave", "Leave", aux=op_co_leave
 WIDGET wd_co_follow, WK_BUTTON, "collab.follow", "Follow", flags=WGF_COMPACT, tip="Watch through this peer's view"
 WIDGET wd_co_agent, WK_BUTTON, "collab.agent", "Let the AI Agent Join", tip="The agent edits as a peer: its changes show live and undo on their own"
@@ -446,6 +447,9 @@ ed_versions_draw:
     call    run_t
 11: add     r12d, WG_H+4
     lea     rdi, [rip+wd_co_join]
+    xor     r8d, r8d
+    call    pnl_full
+    lea     rdi, [rip+wd_co_key]
     xor     r8d, r8d
     call    pnl_full
     jmp     .Lvs_link

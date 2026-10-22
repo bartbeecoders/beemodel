@@ -25,6 +25,11 @@ project uses [Semantic Versioning](https://semver.org/).
   `tests/assembly.py`.
 - D5 (#297), recorded in docs/DECISIONS.md: the GPU helper stays
   optional and the CPU is the reference for every GPU path.
+- A session key for co-editing (D6, #298): `co.key <pass phrase> | new`
+  (Team panel > Session Key...). Peers without it, or with another, are
+  refused, and every message is authenticated (SipHash-2-4, per-connection
+  keys from nonces, counters against replay). docs/LIVELINK.md documents it,
+  and how to work over the internet through SSH or WireGuard.
 
 ## [0.24.0] - 2026-10-21
 

@@ -112,3 +112,26 @@ same result.
   against the CPU result. Bakes, files and co-editing always use the CPU's.
 * `BEEMODEL_GPU=off` turns the helper off, and so does a missing helper. Nothing else
   changes. [GPU.md](GPU.md) lists the switches.
+
+## D6 · Collaboration: LAN first, with a session key
+
+*Decided 2026-10-22 ([#298](https://github.com/bartbeecoders/beemodel/issues/298)).*
+
+**Question.** Should co-editing stay LAN first, or get a relay server (which needs TLS)?
+
+**Decision.** LAN first, with no relay in 1.x. Co-editing and the live link stay peer to
+peer, on localhost or `lan`. Over the internet, use an SSH tunnel or WireGuard. A shared
+**session key** keeps a LAN session from being joined by anyone who can reach the port.
+
+**What follows.**
+
+* `co.key <pass phrase> | new | off` (Team panel › Session Key...). A keyed peer's HELLO
+  carries a nonce. Every later message is tagged with SipHash-2-4 under a key derived
+  from the session key and both nonces, with a counter against replay. Nobody gets the
+  document before their AUTH checks out.
+* Peers without the key, or with another one, are refused and get nothing.
+  `tests/coedit.py` runs its whole walkthrough keyed and checks both refusals, plus an
+  unkeyed session. The selftest checks SipHash against its reference vector.
+* The key authenticates, it does not encrypt (no TLS in an assembly program with no
+  libraries). [LIVELINK.md](LIVELINK.md#session-keys) has the protocol and the tunnel
+  recipe.
