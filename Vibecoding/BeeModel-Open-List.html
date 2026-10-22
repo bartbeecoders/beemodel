@@ -186,9 +186,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <p class="sub">Found during earlier stages and not fixed yet.</p>
   <div class="table-wrap"><table>
     <tr><th>#</th><th>Bug</th><th>Where</th><th>Since</th><th>Status</th></tr>
-    <tr><td class="num"><span class="issue">B1</span></td><td>A lone, thin wedge-shaped shard resting on the Ground can vibrate forever. Its resting face has 5–6 vertices, the manifold keeps 4, and it tips between the subsets. An angular term in the contact margin did not fix it and slowed the terrain test.</td><td><code>rbody.s</code>, <code>collide.s</code></td><td class="num">v0.19.0</td><td><span class="tag">open</span></td></tr>
-    <tr><td class="num"><span class="issue">B2</span></td><td><code>tests/solver.py</code>: the terrain test's slowest frame (budget 41.7 ms) measures 38–46 ms on the dev machine, and the brick timing flaked once under load. The test is timing-sensitive, not a correctness failure.</td><td><code>tests/solver.py</code></td><td class="num">v0.19.0</td><td><span class="tag">open</span></td></tr>
-    <tr><td class="num"><span class="issue">B3</span></td><td><code>rbinfo()</code> reads 0 after scrubbing back through the cache, because there is no live simulation then. It should answer from the cached frame, or the docs should say it doesn't.</td><td><code>rbody.s</code>, <code>docs/PHYSICS.md</code></td><td class="num">v0.19.0</td><td><span class="tag">open</span></td></tr>
+    <tr><td class="num"><span class="issue">B4</span></td><td>A whole plate of shards cut touching each other (an 8 cm plate into 40, no glue) jams on landing: 128 contacts stay 2-8 mm deep, the solver never pushes them apart (more iterations or substeps don't help), and the one island never sleeps. Each shard alone does sleep (B1). Ideas: a small gap when cutting shards, or stronger recovery for resting hull contacts.</td><td><code>rbody.s</code>, <code>shatter.s</code></td><td class="num">v0.19.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/384">#384</a></td></tr>
   </table></div>
 </section>
 
@@ -228,6 +226,9 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <p class="sub">Moved here when done, with where it was done. The oldest entries drop off after a few releases.</p>
   <div class="table-wrap"><table>
     <tr><th>Item</th><th>Closed by</th><th>Date</th></tr>
+    <tr><td>B1: a thin wedge shard on the Ground rocked for ever (29 of 40 lone shards did): plane contacts now picked round the centre, weighed by depth, the ones kept kept</td><td><a href="https://github.com/bartbeecoders/beemodel/issues/381">#381</a>, <a href="https://github.com/bartbeecoders/beemodel/pull/385">#385</a></td><td class="num">2026-10-22</td></tr>
+    <tr><td>B2: tests/solver.py timing flakes: the 95th percentile frame, one rerun when only the time fails</td><td><a href="https://github.com/bartbeecoders/beemodel/issues/382">#382</a>, <a href="https://github.com/bartbeecoders/beemodel/pull/385">#385</a></td><td class="num">2026-10-22</td></tr>
+    <tr><td>B3: rbinfo() during playback answers for the frame shown (rbinfo(25): from the cache)</td><td><a href="https://github.com/bartbeecoders/beemodel/issues/383">#383</a>, <a href="https://github.com/bartbeecoders/beemodel/pull/385">#385</a></td><td class="num">2026-10-22</td></tr>
     <tr><td>Milestones 11 (v0.12.0), 17 (v1.0.0) and 22 (v0.22.0) left open with no open issues (K1, K3)</td><td>Closed by the user</td><td class="num">2026-10-22</td></tr>
     <tr><td>Stage D: the open questions decided (BeeScript frozen, Blender keymap, MCP schema, mates, GPU optional, session keys)</td><td>D1–D7, <a href="https://github.com/bartbeecoders/beemodel/pull/372">#372</a>, v1.0.0</td><td class="num">2026-10-22</td></tr>
     <tr><td>Setting values with the number keypad didn't work (bug-fixes.md)</td><td>W10, <a href="https://github.com/bartbeecoders/beemodel/issues/326">#326</a>, v0.20.0</td><td class="num">2026-10-19</td></tr>
