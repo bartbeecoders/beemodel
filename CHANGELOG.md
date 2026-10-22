@@ -6,6 +6,13 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- docs/DECISIONS.md: the decisions for v1.0 (stage D of the 2.0 plan).
+- BeeScript's grammar, written out in docs/BEESCRIPT.md, and frozen for
+  1.x (D1, #293): nothing that runs changes meaning, built-ins may be
+  added. `tests/beescript.py` runs 50 tasks the way an agent writes them.
+- Hexadecimal numbers in BeeScript: `set(c, "color", 0xff8800)`.
+
 ## [0.24.0] - 2026-10-21
 
 The viewport on the GPU, issues VP1-VP5 (#363-#367): playing an animation
