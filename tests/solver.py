@@ -113,7 +113,10 @@ BRICKS = GROUND + (
 CACHE = GROUND + LATTICE.replace('"grid", 6, 29', '"grid", 3, 9') + (
     'add("cube", "Balls", 0, 2, 0)\nm = modifier("Balls", "geometry")\nmodset("Balls", m, "tree", t)\n'
     'select("Balls")\nop("rigid.add", "active sphere instances")\n'
-    'frame(40)\na = instpos("Balls", 7, 1)\nb = instpos("Balls", 42, 0)\n'
+    'frame(20)\nh20 = rbinfo(16)\nc20 = rbinfo(1)\n'
+    'frame(40)\na = instpos("Balls", 7, 1)\nb = instpos("Balls", 42, 0)\nh40 = rbinfo(16)\nlive = rbinfo(25)\n'
+    'frame(20)\nprint("rbinfo", rbinfo(16) == h20, rbinfo(1) == c20, rbinfo(25), live)\n'
+    'frame(40)\nprint("rbinfo40", rbinfo(16) == h40, rbinfo(0) > 0)\n'
     'op("sim.bake", "rigid")\nframe(1)\nprint("start", instpos("Balls", 7, 1))\n'
     'frame(40)\nprint("cached", abs(instpos("Balls", 7, 1) - a) < 1e-5, abs(instpos("Balls", 42, 0) - b) < 1e-5, cacheinfo(0) > 0)\n'
     'op("file.save", "~/BeeModel/inst.bee")\nop("file.new")\nop("file.open", "~/BeeModel/inst.bee")\n'
@@ -274,6 +277,9 @@ def main():
           f'5000 bricks settle: {float(b[2]):.1f} ms a frame while they move ({int(b[1])} frames; 41.7 = 24 fps), '
           f'then sleep')
     r = {x[0]: x[1:] for x in run(CACHE) if x}
+    check(r.get('rbinfo') == ['1', '1', '1', '0'] and r.get('rbinfo40') == ['1', '1'],
+          f'scrubbing back, rbinfo answers for the frame shown (its state hash and contacts as when it was '
+          f'simulated; rbinfo(25) 1: from the cache) ({r.get("rbinfo")}, {r.get("rbinfo40")})')
     check(r.get('start') == ['2'] and r.get('cached') == ['1', '1', '1'] and r.get('reopened') == ['1'],
           f'instance bodies baked: back at the start, played from the cache, saved and opened again ({r})')
     old = os.path.join(HERE, 'fixtures', 'physics', 'anim016.bee')

@@ -31,6 +31,9 @@
 .include "const.inc"
 .include "macros.inc"
 .include "landscape.inc"
+.equ RBS_N,     8192                    # frames whose counts are kept for rbinfo
+.equ RBS_K,     16                      #  the counts (rbs_keys)
+.equ RBS_SZ,    8+RBS_K*4               #  the cache key, then the counts
 .equ HF_SLOTS,  131072
 .equ HF_MAX,    4
 .equ HF_HBITS,  18
@@ -358,6 +361,7 @@ rb_dirs:
                 .float 0.395651, -0.890625, -0.224160, 0,  -0.119570, -0.921875, 0.368578, 0
                 .float -0.125566, -0.953125, -0.275292, 0,  0.162100, -0.984375, 0.068771, 0
 rx_one:         .float 1.0
+rbs_keys:       .long 0, 1, 2, 3, 4, 5, 6, 7, 14, 15, 16, 17, 18, 19, 20, 21
 rx_half:        .float 0.5
 rx_quarter:     .float 0.25
 rx_two:         .float 2.0
@@ -402,6 +406,10 @@ rx_1000:        .float 1000.0
 rx_24:          .float 24.0
 rx_conc:        .float 0.05                 # compound: a part's hollowness / size
 rx_0577:        .float 0.57735
+
+.section .data
+.align 4
+rb_pbf:         .long -1                # the frame shown came from the cache: it (-1: live)
 
 .section .bss
 .align 16
@@ -479,6 +487,8 @@ rb_jhv:         .skip 8
 rb_uh:          .skip 8                 # object uids -> bodies
 rb_jr:          .skip 8
 rb_hash:        .skip 8                 # the settings it was made from
+rb_pbkey:       .skip 8                 # the cache's key when rb_pbf was played
+rb_st:          .skip RBS_N*RBS_SZ      # each cached frame's counts (rb_stat_keep)
 rb_frame0:      .skip 4                 # the start frame
 rb_fnow:        .skip 4                 # the frame it is at
 rb_time:        .skip 4                 # seconds simulated
@@ -8808,11 +8818,15 @@ rb_frame:
     jne     13f
     ucomiss xmm0, xmm1
     jne     13f
-12: xor     edi, edi
+12: mov     [rsp+48], esi
+    xor     edi, edi
     call    sc_get
     test    rax, rax
     jz      13f
     mov     [rsp+40], rax
+    mov     eax, [rsp+48]               # (rbinfo: this frame's counts)
+    mov     [rip+rb_pbf], eax
+    mov     [rip+rb_pbkey], r12
     call    rb_capture
     mov     rdi, [rsp+40]
     call    rb_play
@@ -8882,6 +8896,7 @@ rb_frame:
     movss   [rip+rb_ms], xmm0
     movss   xmm0, [rsp]
     movss   [rip+rb_fnow], xmm0
+    mov     dword ptr [rip+rb_pbf], -1  # (rbinfo: live)
     call    writeback
     mov     dword ptr [rip+dirty], 1
     jmp     .Lrf_out
@@ -8889,6 +8904,7 @@ rb_frame:
     xor     edi, edi
     call    sc_clear
 .Lrf_none:                              # no simulation: objects as they began
+    mov     dword ptr [rip+rb_pbf], -1
     call    rb_free
     call    rb_restore
 .Lrf_out:
@@ -9156,7 +9172,9 @@ rb_record:
     add     r15, 8
     inc     ecx
     jmp     81b
-82: mov     eax, 1
+82: mov     edi, r14d                   # (and its counts, for rbinfo)
+    call    rb_stat_keep
+    mov     eax, 1
 9:  pop     r15
     pop     r14
     pop     r13
@@ -9684,8 +9702,71 @@ rb_key:
     ret
 
 # rb_info(edi=what) -> xmm0: 0 bodies, 1 contact points, 2 awake, 3 islands,
-#   4 the last frame's simulation (ms), 5 manifolds, 6 steps, 7 parts
+#   4 the last frame's simulation (ms), 5 manifolds, 6 steps, 7 parts ...;
+#   25: 1 when the frame shown was played from the cache. Then the counts
+#   are the ones kept with that frame when it was simulated (rb_stat_keep);
+#   what was not kept (timings 8-13, the attractors' 22-24, contact points
+#   1000+), or a frame cached before this run (a file's bake), reads 0
 rb_info:
+    cmp     edi, 25
+    jne     1f
+    xorps   xmm0, xmm0
+    cmp     dword ptr [rip+rb_pbf], 0
+    jl      9f
+    movss   xmm0, [rip+rx_one]
+9:  ret
+1:  cmp     dword ptr [rip+rb_pbf], 0   # live: as it is now
+    jl      rb_info_live
+    mov     eax, [rip+rb_pbf]           # played back: what was kept with it
+    cmp     eax, RBS_N
+    jae     8f
+    imul    rax, rax, RBS_SZ
+    lea     rdx, [rip+rb_st]
+    add     rdx, rax
+    mov     rax, [rip+rb_pbkey]
+    cmp     [rdx], rax
+    jne     8f
+    xor     ecx, ecx
+2:  cmp     ecx, RBS_K
+    jae     8f
+    lea     rax, [rip+rbs_keys]
+    cmp     edi, [rax+rcx*4]
+    je      3f
+    inc     ecx
+    jmp     2b
+3:  movss   xmm0, [rdx+8+rcx*4]
+    ret
+8:  xorps   xmm0, xmm0
+    ret
+
+# rb_stat_keep(edi=frame) - (rb_record) the simulation's counts now, kept
+#   with the frame for rbinfo while it plays back
+rb_stat_keep:
+    cmp     edi, RBS_N
+    jae     9f
+    push    rbx
+    push    r12
+    push    r13
+    imul    rax, rdi, RBS_SZ
+    lea     rbx, [rip+rb_st]
+    add     rbx, rax
+    mov     rax, [rip+rb_hash]
+    mov     [rbx], rax
+    xor     r12d, r12d
+1:  cmp     r12d, RBS_K
+    jae     8f
+    lea     rax, [rip+rbs_keys]
+    mov     edi, [rax+r12*4]
+    call    rb_info_live
+    movss   [rbx+8+r12*4], xmm0
+    inc     r12d
+    jmp     1b
+8:  pop     r13
+    pop     r12
+    pop     rbx
+9:  ret
+
+rb_info_live:
     xorps   xmm0, xmm0
     cmp     dword ptr [rip+rb_on], 0
     je      9f
