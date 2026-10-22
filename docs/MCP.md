@@ -43,6 +43,11 @@ Start BeeModel first. The bridge connects to the newest running instance. The st
 | `propose_begin` / `propose_end` | Open a proposal `{title}` (see below), and show it to the user |
 | `proposal_status` | `none`, `building`, `waiting for the user`, `accepted` or `reverted` |
 
+The full list, with each tool's input as JSON Schema, is published as
+[mcp-tools.json](mcp-tools.json) and ships in every release archive. CI checks it
+against the running server (`tests/mcp_schema.py`). From v1.0 on, tools are only
+added: none is removed or renamed, and no argument changes meaning.
+
 * Resources: `bee://scene` (JSON), `bee://graphs` (every node tree and the proposal's state, JSON).
 * Prompt: `procedural` (argument `goal`) walks an agent through a co-pilot proposal.
 * Units are meters, Y is up, and rotations are Euler XYZ in degrees (radians in BeeScript).

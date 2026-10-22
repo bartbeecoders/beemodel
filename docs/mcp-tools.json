@@ -1,0 +1,7184 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "BeeModel MCP tools",
+ "description": "The tools BeeModel's MCP server offers (tools/list), each with its JSON Schema input. Published with every release; in 1.x tools are only added. See docs/MCP.md.",
+ "version": "0.24.0",
+ "protocolVersion": "2025-06-18",
+ "tools": [
+  {
+   "name": "scene_summary",
+   "description": "List every object (name, type, location, rotation_deg, scale, selection, mesh size, modifiers, material) and every material with its values.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   }
+  },
+  {
+   "name": "create_primitive",
+   "description": "Add an object. type: cube, sphere, cylinder, cone, torus, plane, grid, light or camera. Default size: 2 m cube / 1 m radius. Optional name, location, rotation_deg, scale (3 numbers each).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "type": {
+      "type": "string",
+      "enum": [
+       "cube",
+       "sphere",
+       "cylinder",
+       "cone",
+       "torus",
+       "plane",
+       "grid",
+       "light",
+       "camera"
+      ]
+     },
+     "name": {
+      "type": "string"
+     },
+     "location": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     },
+     "rotation_deg": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     },
+     "scale": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     }
+    },
+    "required": [
+     "type"
+    ]
+   }
+  },
+  {
+   "name": "set_transform",
+   "description": "Change an object's location, rotation_deg and/or scale (3 numbers each), or rename it with new_name.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "new_name": {
+      "type": "string"
+     },
+     "location": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     },
+     "rotation_deg": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     },
+     "scale": {
+      "type": "array",
+      "items": {
+       "type": "number"
+      }
+     }
+    },
+    "required": [
+     "name"
+    ]
+   }
+  },
+  {
+   "name": "select",
+   "description": "Select objects by name (the last one becomes active). extend keeps the current selection.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "extend": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "names"
+    ]
+   }
+  },
+  {
+   "name": "delete",
+   "description": "Delete objects by name.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "names": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "names"
+    ]
+   }
+  },
+  {
+   "name": "run_operator",
+   "description": "Run any BeeModel operator by id (see console.list_ops), with an optional text argument such as a file path.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "id": {
+      "type": "string"
+     },
+     "arg": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ]
+   }
+  },
+  {
+   "name": "viewport_capture",
+   "description": "Look at the scene: a PNG image of the 3D viewport as it is now (area: viewport or window).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "area": {
+      "type": "string",
+      "enum": [
+       "viewport",
+       "window"
+      ]
+     }
+    }
+   }
+  },
+  {
+   "name": "script_eval",
+   "description": "Run BeeScript, BeeModel's scripting language, as one undo step; returns what it prints plus the last value. Best for bulk or procedural edits. Syntax: x = 2m; for i in 0..10 { add(\"cube\", \"C\" + i, i * 2, 0, 0) }; if a > 1 and b { } else { }; while c { }; fn f(a) { return a * 2 }. Units: m cm mm km deg rad (angles are radians, 45deg works). Scene: add(type, [name], [x, y, z]) -> name; move / rotate / scale(name, x, y, z); scale(name, s); get(name, prop) and set(name, prop, v) with prop x y z rx ry rz sx sy sz; select(names...); delete(names...); rename(old, new); exists(name); count(); name(i); active(); op(id, [arg]). Also print(...), str, num, len, sin, cos, tan, sqrt, abs, floor, round, min, max, pow, atan2, deg, rad, rand, seed, pi.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "code": {
+      "type": "string",
+      "description": "BeeScript source"
+     }
+    },
+    "required": [
+     "code"
+    ]
+   }
+  },
+  {
+   "name": "ui_tree",
+   "description": "List the widgets on screen this frame (buttons, fields, toggles, lists, sections) with their name, sub index, kind, rectangle in window pixels, label and value. Use it to find what the user sees and where to click.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   }
+  },
+  {
+   "name": "undo",
+   "description": "Undo the last change.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   }
+  },
+  {
+   "name": "redo",
+   "description": "Redo the last undone change.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   }
+  },
+  {
+   "name": "node_types",
+   "description": "The geometry node catalogue: every type with its inputs (slots 1-3, kinds, defaults), values (slots 4-7, kinds, choices, defaults) and outputs, and how the tree.* operators use them.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   }
+  },
+  {
+   "name": "describe_graph",
+   "description": "A geometry node tree as JSON: its nodes (type, links into each input as node + output, constants, values, place) - or every tree when no name is given; also the open proposal's state.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "tree": {
+      "type": "string"
+     }
+    }
+   }
+  },
+  {
+   "name": "propose_begin",
+   "description": "Open a proposal: the changes until the user accepts or reverts are one undo step. Then build with the tree.* operators or script_eval, and call propose_end.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string",
+      "description": "what it does, shown to the user"
+     }
+    },
+    "required": [
+     "title"
+    ]
+   }
+  },
+  {
+   "name": "propose_end",
+   "description": "Show the open proposal to the user: a banner in the viewport to Accept (keep it) or Revert (take it all back).",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   }
+  },
+  {
+   "name": "proposal_status",
+   "description": "The proposal's state: none, building, waiting for the user, accepted or reverted.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   }
+  },
+  {
+   "name": "material_node_types",
+   "description": "The material node catalogue (the node editor's): every type with its inputs (slots 1-3, kinds, defaults), values (slots 4-7, kinds, choices, defaults) and outputs, and how material_graph_set and BeeScript use them.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   }
+  },
+  {
+   "name": "material_graph",
+   "description": "A material's node graph as JSON: nodes (type, values, inputs as constants or links {link: node, output}, pos, parameter name) and the Material Output's sockets.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   }
+  },
+  {
+   "name": "material_graph_set",
+   "description": "Replace a material's node graph (the material is made when missing) from the JSON material_graph returns: graph = {nodes: [...], sockets: {...}}. Nodes are numbered from 1 in order. One undo step.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "graph": {
+      "type": "object"
+     }
+    },
+    "required": [
+     "name",
+     "graph"
+    ]
+   }
+  },
+  {
+   "name": "op_ai_transcript",
+   "description": "AI Transcript - Print the AI Assistant's conversation (its last 24 lines) to the console: Y you, A the AI, T a tool call, R its result, E an error, N a note",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_insert_key",
+   "description": "Insert Keyframe - Key the selected objects' location, rotation and scale at the current frame",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_delete_key",
+   "description": "Delete Keyframe - Remove the selected objects' keys at the current frame",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_key",
+   "description": "Key Property - Key one property: anim.key <path> [frame] [value] [constant|linear|bezier] (paths: Cube:x .. sz, material:M:roughness[:k], modifier:Cube:0:levels, node:Tree:3:5[:k], field:Wind:strength; no value: its value now)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_unkey",
+   "description": "Unkey Property - Remove a key: anim.unkey <path> [frame]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_frame",
+   "description": "Go to Frame - Show the scene at a frame: anim.frame <n>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_play",
+   "description": "Play Animation - Play or pause the animation (it loops over the scene's frame range)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_next_frame",
+   "description": "Next Frame - One frame on",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_prev_frame",
+   "description": "Previous Frame - One frame back",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_first_frame",
+   "description": "First Frame - To the start of the frame range",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_last_frame",
+   "description": "Last Frame - To the end of the frame range",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_range",
+   "description": "Frame Range - The scene's frames and speed: anim.range <start> <end> [fps]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_interpolation",
+   "description": "Interpolation - How the selected objects' keys blend into the next: anim.interpolation <constant|linear|bezier>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_select_keys",
+   "description": "Select Keys - Select keys: anim.select_keys all | none | <path> <frame> [extend] | frame <f> (every curve's key there)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_move_keys",
+   "description": "Move Keys - Move the selected keys: anim.move_keys <frames> [value]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_scale_keys",
+   "description": "Scale Keys - Stretch the selected keys in time around the current frame: anim.scale_keys <factor>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_delete_keys",
+   "description": "Delete Keys - Remove the selected keys",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_duplicate_keys",
+   "description": "Duplicate Keys - Copy the selected keys some frames on (the copies are selected): anim.duplicate_keys <frames>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_handle_type",
+   "description": "Key Handle Type - Handles of the selected keys: anim.handle_type <auto|free>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_handle",
+   "description": "Set Key Handle - One key's handle (it becomes free): anim.handle <path> <frame> <left|right> <frames> <value> (relative to the key)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_action",
+   "description": "New Action - Keep the selected objects' keys as a named action (a clip layers can play): anim.action <name>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_layer",
+   "description": "Add Action Layer - Play an action on top of the scene: anim.layer <action> [object|-] [start frame] [influence] [replace|add] [repeat]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_layer_set",
+   "description": "Set Layer - Change a layer (1..): anim.layer_set <layer> <influence|start|repeat|mode|mute> <value> (mode: 0 replace, 1 add)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_layer_remove",
+   "description": "Remove Layer - Remove a layer: anim.layer_remove <layer>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_auto_key",
+   "description": "Auto-Key - Key what you move: after each move, turn or scale the selected objects get keys at the current frame (on / off)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_split_side",
+   "description": "Split Area Side by Side - Split the active area into two side by side",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_split_stack",
+   "description": "Split Area Top/Bottom - Split the active area into two stacked areas",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_close",
+   "description": "Close Area - Close the active area; its neighbour takes the space",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_maximize",
+   "description": "Maximize Area - Toggle the active area filling the window",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_viewport",
+   "description": "3D Viewport - Show the 3D viewport in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_tools",
+   "description": "Tools - Show the tools in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_outliner",
+   "description": "Outliner - Show the outliner in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_properties",
+   "description": "Properties - Show the properties in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_console",
+   "description": "Console - Show the console in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_activity",
+   "description": "AI Activity - Show what AI agents did in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_render",
+   "description": "Render - Show the render in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_uv_editor",
+   "description": "UV Editor - Show the UV editor in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_asset_browser",
+   "description": "Asset Browser - Show the content library (~/BeeModel/library) in the active area: search, tags, dependencies; drag an asset into a viewport",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_timeline",
+   "description": "Timeline - Show the timeline (frames, keys, playback) in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_dope_sheet",
+   "description": "Dope Sheet - Show every curve's keys in rows in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_graph_editor",
+   "description": "Graph Editor - Show the animation curves with their handles in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_versions",
+   "description": "Versions - Show the scene's versions (branches, commits, merges) and collaboration in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_preferences",
+   "description": "Preferences - Show the preferences in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_ai",
+   "description": "AI Assistant - Show the AI Assistant in the active area: describe what to build",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_help",
+   "description": "Help - Show what the pointer rests on - what it does, its shortcut - in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_type_node_editor",
+   "description": "Node Editor - Show the node editor (the active material's shader graph) in the active area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_activity",
+   "description": "AI Activity Pane - Show or hide the AI Activity area (next to the console)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_tools",
+   "description": "Tools Pane - Show or hide the tools area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_outliner",
+   "description": "Outliner Pane - Show or hide the outliner and properties areas",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_console",
+   "description": "Console Pane - Show or hide the console area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_armature",
+   "description": "Armature - Add an armature (one bone) at the 3D cursor",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_bone",
+   "description": "Add Bone - A bone in the active armature: arm.bone <name> <parent|-> <head x y z> <tail x y z> (armature space; a head on the parent's tail joins them)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_pose",
+   "description": "Pose Bone - Pose a bone of the active armature: arm.pose <bone> <loc|rot|scale> <x> <y> <z> (rot in degrees, in the bone's own axes; Y along it)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_select_bone",
+   "description": "Select Bone - Make a bone of the active armature the active one: arm.select_bone <bone> [extend]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_parent",
+   "description": "Parent to Armature - Skin a mesh to an armature with automatic weights: arm.parent <mesh> <armature> [dual]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_auto_weights",
+   "description": "Automatic Weights - A mesh's skin weights by bone heat again: arm.auto_weights <mesh>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_clear_pose",
+   "description": "Clear Pose - Back to the rest pose: the selected bones of the active armature (all when none is)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_extrude",
+   "description": "Extrude Bone - Armature edit mode: a new bone from each selected tail (joined), then move it",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_delete_bones",
+   "description": "Delete Bones - Armature edit mode: remove the selected bones (children move up; skin weights follow)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_select_all",
+   "description": "Select All Bones - Armature modes: every bone, or none when some are",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_arm_insert_key",
+   "description": "Key Pose - Pose mode: key the selected bones' location, rotation and scale at the frame",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tree_save_asset",
+   "description": "Save Node Tree as Asset - Save a geometry node tree (and the groups it runs) to ~/BeeModel/assets: tree.save_asset <tree>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_save_asset",
+   "description": "Save Material as Asset - Save a material (with its shader graph) to ~/BeeModel/assets: material.save_asset <material>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_asset_load",
+   "description": "Add Asset - Add a saved node tree or material to the scene: asset.load <name>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_asset_list",
+   "description": "List Assets - List the assets in ~/BeeModel/assets",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_bake",
+   "description": "Bake Maps - Bake a high mesh's normal, ambient occlusion or curvature map into an image through a low mesh's UVs: object.bake <low> <high> <normal|ao|curvature> <image> [distance]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_import_blend",
+   "description": "Import Blender... - Import a Blender file (.blend, Blender 2.80 to 5.x): its meshes, cameras, lights and materials: file.import_blend <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_blend",
+   "description": "Export Blender... - Save the scene as a Blender file (.blend), through Blender run in the background: file.export_blend <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_boolean",
+   "description": "Boolean - Combine the active mesh with another selected one: object.boolean union|difference|intersect [keep]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_param_set",
+   "description": "Set Parameter - Define or change a parameter: param.set <name> <expression with units>, e.g. param.set width 10*wall + 2mm",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_param_remove",
+   "description": "Remove Parameter - Remove a parameter: param.remove <name>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_param_list",
+   "description": "List Parameters - List the parameters with their values",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_kernel",
+   "description": "B-rep Kernel - CAD features make exact B-rep solids (NURBS surfaces, STEP export) instead of meshes: cad.kernel on|off",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_scene_units",
+   "description": "Scene Units - Set what one scene unit is: scene.units mm|cm|m|in (lengths typed with units convert)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_sketch",
+   "description": "Sketch... - A new sketch on a plane, ready to draw on (sketch mode): cad.sketch <name> <XY|XZ|YZ> <offset>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_pad",
+   "description": "Pad... - Extrude the active sketch's closed profiles into a part: cad.pad <body> <distance> <normal|symmetric|reverse>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_pocket",
+   "description": "Pocket... - Cut the active sketch's profiles into a part: cad.pocket <body> <depth> <normal|through|symmetric|reverse>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_revolve",
+   "description": "Revolve... - Turn the active sketch's profiles about its u or v axis into a part: cad.revolve <body> <degrees> <u|v>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_hole",
+   "description": "Hole... - Drill a hole at every loose point of the active sketch: cad.hole <body> <diameter> [depth] (no depth or 0: through)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_shell",
+   "description": "Shell... - Hollow a pad of the active part: cad.shell <pad feature> <wall> <normal|bottom> (open at the top or the bottom)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_fillet",
+   "description": "Fillet... - Round the active part's sharp edges: cad.fillet <radius> <all|vertical|horizontal|top|bottom>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_chamfer",
+   "description": "Chamfer... - Bevel the active part's sharp edges: cad.chamfer <size> <all|vertical|horizontal|top|bottom>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_pattern",
+   "description": "Pattern... - Repeat a feature of the active part: cad.pattern <feature> <count> <step or angle> <x|y|z> <linear|circular>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_infill",
+   "description": "Infill... - Fill a shell's cavity of the active part with a lattice: cad.infill <shell feature> <gyroid|grid> <cell> <wall>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_add_lsystem",
+   "description": "L-system... - A plant or fractal drawn by an L-system: add.lsystem <name> <axiom> \"<rules>\" <iterations> <angle> <step> [radius] (no radius: lines)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_add_wfc",
+   "description": "Wave Function Collapse... - Arrange tile objects on a grid so that neighbours fit: add.wfc <name> <nx> <nz> <layers> <seed> \"<tile names>\"",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cad_feature_move",
+   "description": "Move Feature - Move a feature in the tree: cad.feature_move <number> up|down (the part rebuilds; a feature that needs a later one is marked)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cloth_add",
+   "description": "Add Cloth - Make the selected objects cloth, soft bodies or colliders (or change them): cloth.add [cloth|soft|collider] [stretch c] [bend c] [volume c] [mass m] [damping d] [thickness t] [friction f] [self] (c: compliance, m/N; 0 stiff)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cloth_remove",
+   "description": "Remove Cloth - The selected objects are no longer cloth / soft bodies / colliders",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cloth_pin",
+   "description": "Pin Cloth - The pin group of the selected meshes (pinned vertices hold to the object): cloth.pin selected | all | none | above <x|y|z> <value> | below <x|y|z> <value> (object space)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_cloth_world",
+   "description": "Cloth World - Cloth settings: cloth.world [wind x y z] [substeps n] [rate steps-a-second]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_co_host",
+   "description": "Host Co-Editing - Start a co-editing session with this scene: co.host [port] (localhost, default 7462) | lan [port]; in a session: others can join here too",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_co_join",
+   "description": "Join Co-Editing - Join a co-editing session (its scene replaces this one): co.join host:port",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_co_leave",
+   "description": "Leave Co-Editing - Leave the co-editing session (the scene stays as it is)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_co_follow",
+   "description": "Follow Peer - Keep the view on another peer's camera: co.follow <peer name | number> | off",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_co_agent",
+   "description": "Agent Peer - co.agent on: what MCP tools change here is a peer of its own (the agent), with its own undo",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_bezier",
+   "description": "Bezier Curve - Add a Bezier curve (Tab edits its points)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_curve_circle",
+   "description": "Bezier Circle - Add a closed Bezier circle",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_path",
+   "description": "Path - Add a poly path of five points",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_add",
+   "description": "Curve - Add a curve at the 3D cursor: curve.add [bezier|circle|path|empty]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_set",
+   "description": "Set Curve Value - A value of the active curve: curve.set <resolution|bevel|sides|fill|profile|cyclic> <value> (profile: a curve's name, or none)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_point",
+   "description": "Add Curve Point - A control point at the end of the active curve's spline: curve.point <x> <y> <z> (object space)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_spline",
+   "description": "New Spline - Start a spline in the active curve (later points go to it): curve.spline <bezier|poly> [cyclic]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_to_mesh",
+   "description": "Convert Curve to Mesh - The active curve becomes the plain mesh it makes",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_select",
+   "description": "Select Curve Points - Select control points of the active curve: curve.select <i> [i ...] | all | none",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_move",
+   "description": "Move Curve Point - Place a control point (its handles follow) or one handle: curve.move <i> <x> <y> <z> [left|right] (object space)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_select_all",
+   "description": "Select All Points - Curve edit mode: select every point, or none when some are",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_extrude",
+   "description": "Extrude Curve - New points after the selected end points, then move them: curve.extrude [dx dy dz]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_subdivide",
+   "description": "Subdivide Curve - A point between each pair of selected neighbours (the shape kept)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_delete",
+   "description": "Delete Curve Points - Remove the selected control points",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_cyclic",
+   "description": "Toggle Cyclic - Close (or open) the splines holding selected points",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_handle",
+   "description": "Handle Type - Handle type of the selected points: curve.handle [auto|aligned|vector|free] (none: the next type)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_tilt",
+   "description": "Curve Tilt - Tilt the selected points of the active curve: curve.tilt <degrees>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_curve_radius",
+   "description": "Curve Radius - Radius (sweep scale) of the selected points of the active curve: curve.radius <r>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_pdf",
+   "description": "Export Drawing (PDF)... - A drawing of the selected meshes (or all): front, top and right views with hidden lines dashed, overall dimensions and a title block, on A4 as PDF: file.export_pdf <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_drawing_options",
+   "description": "Drawing Options - How Export Drawing lays out the page: drawing.options [a4|a3|a2|letter] [landscape|portrait] [views front top right iso] [scale auto|2:1|1:1|1:2|1:5|1:10|1:20|1:50|1:100] [title \"...\"] [author \"...\"]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_dyntopo",
+   "description": "Dynamic Topology - Sculpt: brushes add and remove triangles to keep the detail size (the mesh becomes triangles)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_detail_finer",
+   "description": "Finer Detail - Sculpt: dyntopo detail size x 0.8 (pixels)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_detail_coarser",
+   "description": "Coarser Detail - Sculpt: dyntopo detail size x 1.25 (pixels)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mode_toggle_edit",
+   "description": "Edit Mode - Switch the active mesh between object mode and edit mode",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_select_mode_vertex",
+   "description": "Vertex Select Mode - Edit mode: pick vertices",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_select_mode_edge",
+   "description": "Edge Select Mode - Edit mode: pick edges",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_select_mode_face",
+   "description": "Face Select Mode - Edit mode: pick faces",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_select_all",
+   "description": "Select All / None (Mesh) - Edit mode: select every vertex, or none if some are selected",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_select_invert",
+   "description": "Invert Selection - Edit mode: invert the vertex selection",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_select_linked",
+   "description": "Select Linked - Edit mode: grow the selection over every connected part",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_world_hdri",
+   "description": "World HDRI - Light the scene with an equirectangular image: world.hdri <image|none>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_world_strength",
+   "description": "World Strength - Scale the world's light: world.strength <factor>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_world_rotation",
+   "description": "World Rotation - Turn the world image about the vertical: world.rotation <degrees>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_3mf",
+   "description": "Export 3MF... - Export the mesh objects for 3D printing as 3MF (millimetres, Z up): file.export_3mf <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_dxf",
+   "description": "Export DXF... - Export the active sketch (or the first) as DXF in millimetres: file.export_dxf <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_svg",
+   "description": "Export SVG... - Export the active sketch (or the first) as SVG in millimetres: file.export_svg <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_attractor",
+   "description": "Attractor - Add an Attractor at the 3D cursor: it pulls rigid bodies, cloth and particles towards it (strength / distance squared; a negative strength pushes away): field.add_attractor [strength s] [law square|linear] [soft m] [falloff none|radius|smooth] [radius m] [groups all|0,3]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_zone",
+   "description": "Gravity Zone - Add a Gravity Zone: inside its box (or sphere) down is the object's -Y at this strength instead of the world's gravity: field.add_zone [strength s] [shape box|sphere] [size half-size m]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_wind",
+   "description": "Wind - Add Wind: it blows along the object's +X (rotate it to aim), with gusts; cloth feels it as air of this speed (m/s): field.add_wind [strength s] [gust 0..1] [falloff none|radius|smooth] [radius m]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_vortex",
+   "description": "Vortex - Add a Vortex: it turns things round the object's +Y: field.add_vortex [strength s] [lift s] [inflow s] [falloff none|radius|smooth] [radius m]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_turbulence",
+   "description": "Turbulence - Add Turbulence: swirling curl noise: field.add_turbulence [strength s] [scale m] [seed n] [falloff none|radius|smooth] [radius m]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_drag",
+   "description": "Drag - Add Drag: it slows things down (strength x their velocity): field.add_drag [strength s] [falloff none|radius|smooth] [radius m]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_planet",
+   "description": "Planet - Add a planet at the 3D cursor: a 10 m sphere with an Attractor at its centre (9.81 m/s2 at its surface) and the world's gravity off - walk round it in play mode",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_blackhole",
+   "description": "Black Hole - Add a Black Hole: a strong, short Attractor (strength 2000, smooth falloff to 8 m)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_tornado",
+   "description": "Tornado - Add a Tornado: a Vortex that turns things round its +Y, lifts them and pulls them in (smooth falloff to 6 m)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_add_breeze",
+   "description": "Breeze - Add a Breeze: gentle, gusty Wind along +X",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_field_arrows",
+   "description": "Force Field Arrows - Show the force fields' pull as arrows on a grid round them (gravity left out)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_field_lines",
+   "description": "Force Field Lines - Show the force fields' pull as lines (streamlines) from the selected objects",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_field_set",
+   "description": "Field Settings - The active force field's settings: field.set [type attractor|zone|wind|vortex|turbulence|drag] [strength s] [falloff none|radius|smooth] [radius m] [law square|linear] [shape box|sphere] [gust 0..1] [scale m] [seed n] [lift s] [inflow s] [soft m] [groups all|0,3] [on|off]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_outliner_folder_new",
+   "description": "New Folder - A new folder (inside the folder picked), the selected objects moved into it: outliner.folder_new [name]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_move_to_folder",
+   "description": "Move to Folder... - The selected objects into a folder (made when there is none of that name), or out of theirs: object.move_to_folder <name | none>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_outliner_folder_delete",
+   "description": "Delete Folder - The folder picked goes; what was in it moves up a level (contents: its objects are deleted too): outliner.folder_delete [contents]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_outliner_folder_select",
+   "description": "Select Folder's Objects - Select every object in the folder picked (and its folders)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_new",
+   "description": "New Scene - Start again from the default scene",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_open",
+   "description": "Open... - Open a .bee scene: file.open <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_save",
+   "description": "Save - Save the scene: file.save [path]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_save_as",
+   "description": "Save As... - Save the scene under a new name",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_import_obj",
+   "description": "Import OBJ... - Import a Wavefront OBJ: file.import_obj <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_import_stl",
+   "description": "Import STL... - Import an STL (binary or ASCII): file.import_stl <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_obj",
+   "description": "Export OBJ... - Export mesh objects as OBJ: file.export_obj <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_import_gltf",
+   "description": "Import glTF... - Import a glTF 2.0 scene (.gltf or .glb): file.import_gltf <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_gltf",
+   "description": "Export glTF... - Export mesh objects and materials as glTF 2.0 (.glb binary, .gltf text): file.export_gltf <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_stl",
+   "description": "Export STL... - Export mesh objects as binary STL: file.export_stl <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_screenshot",
+   "description": "Screenshot - Save the window as PNG: view.screenshot [path]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_recover",
+   "description": "Recover Autosave - Open the last autosave",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tree_new",
+   "description": "New Node Tree - A new, empty geometry node tree: tree.new [name]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tree_node",
+   "description": "Add Geometry Node - Add a node to a tree: tree.node <tree> <type> [values]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tree_link",
+   "description": "Link Geometry Nodes - Feed a node's output into an input: tree.link <tree> <from[:output]> <to> <input 1-3> (the tree keeps itself in evaluation order)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tree_node_set",
+   "description": "Set Geometry Node Value - Set a node input (1-3) or value (4-7): tree.node_set <tree> <node> <slot> <x> [y z]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tree_node_delete",
+   "description": "Delete Geometry Node - Remove a node from a tree: tree.node_delete <tree> <node>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tree_group",
+   "description": "Make Node Group - Move nodes into a new tree run by one Group node: tree.group <tree> <node> [node ...]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tree_node_move",
+   "description": "Move Geometry Node - Place a node in the node editor: tree.node_move <tree> <node> <x> <y>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_node",
+   "description": "Add Shader Node - Add a node to a material's graph: material.node <material> <type> [values] (image: <image> [size])",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_link",
+   "description": "Link Shader Nodes - Feed a node into another node's input: material.link <material> <from> <to> <input 1-3> [output 0-3] (any order; the graph is kept in evaluation order)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_node_set",
+   "description": "Set Shader Node Value - Set a node input (1-3) or value (4-7): material.node_set <material> <node> <slot> <x> [y z]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_socket",
+   "description": "Connect Material Socket - Drive a Material Output pin by a node: material.socket <material> base|metallic|specular|roughness|emission|opacity|normal|ao|clearcoat|coat_roughness|transmission|ior|mask <node|none> [output 0-3]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_node_delete",
+   "description": "Delete Shader Node - Remove a node from a material's graph (its links go): material.node_delete <material> <node>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_node_move",
+   "description": "Move Shader Node - Place a node in the node editor: material.node_move <material> <node (0: the output)> <x> <y>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_nodes_clear",
+   "description": "Clear Shader Nodes - Remove a material's graph: material.nodes_clear <material>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_ground",
+   "description": "Ground - Add the Ground: an endless floor, drawn as a fading grid, that catches shadows in renders (over a transparent background) and that rigid bodies, cloth and the player land on: create.ground [height h]. A scene has one: with one there it is selected",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_help_shortcuts",
+   "description": "Keyboard Shortcuts - Every shortcut, searchable (F1; Esc closes)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_help_welcome",
+   "description": "Welcome Screen - Templates, recent files and samples to start from",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_help_template",
+   "description": "New from Template - A new scene from a template: help.template empty|product|character|terrain|tree|ball",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_image",
+   "description": "Render Image - Path-trace the scene (camera object, or the viewport) into a PNG: render.image <path> [width height samples [denoise]]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_image_load",
+   "description": "Load Image... - Load a PNG, JPEG or Radiance HDR image into the scene: image.load <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_image_new",
+   "description": "New Image... - A new image to paint on: image.new <name> [width height] (1024 x 1024 grey)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_image_save",
+   "description": "Save Image... - Save a scene image: image.save <name> <path.png|path.exr>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_to_mesh",
+   "description": "Landscape to Mesh - Make the active landscape a plain mesh: landscape.to_mesh (the display grid) | landscape.to_mesh full (every sample, up to 2049 a side)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_tiles",
+   "description": "Landscape Tiles - Split the active landscape into k x k landscapes (its heights baked into each, its paint copied): landscape.tiles <k> - so world partition streams them by cell",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_add",
+   "description": "Landscape - Add a landscape: a heightfield with a stack of layers (generate, erode, terrace, sculpted, flatten): landscape.add [flat|hills|mountains|canyon|dunes|island] [size metres (200)] [res samples a side (65-4097: 2^k + 1; 513)] [seed k]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_add_flat",
+   "description": "Flat - Add a flat landscape (to sculpt): landscape.add flat",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_add_hills",
+   "description": "Hills - Add a landscape of eroded hills: landscape.add hills",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_add_mountains",
+   "description": "Mountains - Add a landscape of ridged, eroded mountains: landscape.add mountains",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_add_canyon",
+   "description": "Canyon - Add a terraced canyon landscape: landscape.add canyon",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_add_dunes",
+   "description": "Dunes - Add a landscape of dunes (billows, slid to their talus): landscape.add dunes",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_add_island",
+   "description": "Island - Add an island landscape and its sea: a Water plane at the landscape's height (water material, ripples; bodies below it float): landscape.add island",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_layer",
+   "description": "Landscape Layer - Change the active landscape's layers: landscape.layer add <generate|erode|terrace|sculpted|flatten> [key value ...] | set <i> [key value ...] | remove <i> | hide <i> | show <i>. Keys: strength; generate: noise fbm|ridged|billow|cells, seed, scale, height, octaves; erode: droplets, rate, seed, thermal (iterations), talus (degrees); terrace: steps, smooth; flatten: height, at x z radius (adds a round area)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_set",
+   "description": "Landscape Settings - The active landscape's size and samples: landscape.set [size metres] [res samples a side] [detail display samples a side (at most)]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_add_water",
+   "description": "Water - Add a Water plane at the 3D cursor: bodies below its level float (the water material, ripples): landscape.add_water [size metres (200)]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_sea",
+   "description": "Add Sea - Add a sea to the active landscape: a Water plane 1.5 times its size at its height",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_light_set",
+   "description": "Light Settings - The active light's settings: light.set power <p> | color <r> <g> <b> | type point|sun|spot|area | size <radius m, sun angle deg, area edge m> | angle <spot cone deg> (power 1: the default light)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_camera_set",
+   "description": "Camera Settings - The active camera's lens, or make it the one that renders: camera.set lens <mm> | active",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_save",
+   "description": "Save to Library - Save to the content library: lib.save object|rig|scene [name] [#tag ...] (the selected objects, an armature with its skinned meshes, the scene) or lib.save material|tree|action <name> [#tag ...]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_place",
+   "description": "Place Asset - Put a library asset into the scene: lib.place <name or id> [x y z] (default: the 3D cursor; a scene opens instead)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_tag",
+   "description": "Tag Asset - Tag an asset: lib.tag <asset> <tag> [-tag ...] (-tag takes one away)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_remove",
+   "description": "Remove Asset - Take an asset out of its library (its blob goes when nothing else uses it): lib.remove <asset>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_search",
+   "description": "Search Library - Show the assets whose name, kind or tags hold every word: lib.search [words]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_deps",
+   "description": "Asset Dependencies - What an asset uses and what uses it: lib.deps <asset>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_pack",
+   "description": "Pack Assets - Write an asset pack (a .bee file: a manifest, each blob once, thumbnails): lib.pack <path> [search words]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_import",
+   "description": "Import Asset Pack - Merge an asset pack into the library: lib.import <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_add",
+   "description": "Add Library - List another library folder's assets too: lib.add <folder>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_list",
+   "description": "List Library - List the library's assets (kind, name, tags)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_thumbnails",
+   "description": "Make Thumbnails - Path-trace every missing thumbnail now (the window makes them in the background)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lightmap_bake",
+   "description": "Bake Lightmap - Bake the light on every visible mesh into one lightmap atlas with the path tracer (a second UV set per object, packed; denoised, dilated): lightmap.bake [size 64-4096, default 512] [rays a texel, default 64]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lightmap_save",
+   "description": "Save Lightmap - Write the lightmap atlas: lightmap.save <file.exr | file.png> (EXR linear half floats, PNG sRGB clamped)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lightmap_clear",
+   "description": "Clear Lightmap - Forget the baked lightmap",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_link_serve",
+   "description": "Serve Live Link - Stream the scene to peers (other BeeModels, game engines): link.serve [port] (localhost, default 7461) | lan [port] (every interface) | unix:<path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_link_stop",
+   "description": "Stop Live Link - Stop serving the live link (peers are let go)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_link_connect",
+   "description": "Mirror a Session - Mirror another BeeModel's scene over its live link: link.connect host:port | unix:<path> (IPv4 numbers or localhost)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_link_disconnect",
+   "description": "Stop Mirroring - Stop mirroring (the scene stays as it is)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_rendered_denoise",
+   "description": "Denoise Rendered - Rendered shading: denoise the path-traced samples on the GPU every frame: view.rendered_denoise [0|1] (none: on or off; kept in the preferences)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_rendered_samples",
+   "description": "Rendered Samples - Rendered shading's path-traced samples once the view is still: view.rendered_samples <0..4096> (0: the raycast alone; kept in the preferences)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_logic_new",
+   "description": "New Logic Graph - A new, empty logic graph (a node tree that runs in play mode): logic.new [name]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_logic_attach",
+   "description": "Attach Logic - Run a logic graph on an object in play mode (a Logic modifier): logic.attach <graph> [object]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_logic_node",
+   "description": "Add Logic Node - Add a node to a logic graph: logic.node <graph> <type> [values] (types: begin tick key overlap hit timer message move rotate set_property spawn destroy play_action impulse visibility send set_variable branch variable math info get_property shatter set_strength field); link and set with tree.link / tree.node_set",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_logic_name",
+   "description": "Set Logic Name - Set a node's name value (a message, an object, a property, an action): logic.name <graph> <node> <value 4-7> [text]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_tool_raise",
+   "description": "Raise - Landscape sculpting: raise the ground under the brush",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_tool_lower",
+   "description": "Lower - Landscape sculpting: lower the ground under the brush",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_tool_smooth",
+   "description": "Smooth - Landscape sculpting: smooth the ground towards its neighbours",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_tool_flatten",
+   "description": "Flatten - Landscape sculpting: flatten to the height where the stroke began",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_tool_ramp",
+   "description": "Ramp - Landscape sculpting: a straight slope from where the stroke begins to where it ends",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_tool_noise",
+   "description": "Noise - Landscape sculpting: roughen the ground with noise",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_tool_erode",
+   "description": "Erode - Landscape sculpting: droplet erosion under the brush",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint_rock",
+   "description": "Rock - Landscape painting: paint rock (a paint layer is added when there is none)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint_grass",
+   "description": "Grass - Landscape painting: paint grass",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint_sand",
+   "description": "Sand - Landscape painting: paint sand",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint_snow",
+   "description": "Snow - Landscape painting: paint snow",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint_dirt",
+   "description": "Dirt - Landscape painting: paint dirt",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint_gravel",
+   "description": "Gravel - Landscape painting: paint gravel",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint_moss",
+   "description": "Moss - Landscape painting: paint moss",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint_mud",
+   "description": "Mud - Landscape painting: paint mud",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint_auto",
+   "description": "Auto Paint - Paint the active landscape by its paint layers' rules (height and slope; rock on slopes, grass on the flat, ...)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_brush",
+   "description": "Landscape Brush - One dab on the active landscape: landscape.brush <raise|lower|smooth|flatten|noise|erode|rock|grass|sand|snow|dirt|gravel|moss|mud> x z [radius r (10)] [strength s (0.5)]; landscape.brush ramp x z to x2 z2 [radius r] (world x, z)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_landscape_paint",
+   "description": "Landscape Paint Layers - The active landscape's paint layers: landscape.paint add <rock|grass|sand|snow|dirt|gravel|moss|mud> [colour r g b] [friction f] [bounce b] | rule <i> [height lo hi (0..1)] [slope lo hi (degrees)] | remove <i> | auto",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_new",
+   "description": "New Material - Create a material and give it to the active mesh: material.new [name]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_assign",
+   "description": "Assign Material - Give the active mesh a material: material.assign <name> (none = no material)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_set",
+   "description": "Set Material Value - Set a material value: material.set <name> base|metallic|roughness|specular|ior|transmission|emission|strength|clearcoat|coat_roughness|alpha|density|blend|one_sided|clip <values> (blend 0 opaque, 1 masked, 2 translucent)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_texture",
+   "description": "Material Texture - Give a material a base colour image, box-projected (a one-node graph): material.texture <name> <image|none> [size]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_remove",
+   "description": "Remove Material - Delete a material (objects using it get none): material.remove <name>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_function_new",
+   "description": "New Material Function - A new material function (a graph used by Material Function nodes, In 1..3 to Out 1..3): material.function_new [name]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_make_function",
+   "description": "Make Material Function - Move nodes into a new material function, one Material Function node in their place (node editor: Ctrl+G): material.make_function <material> <node> [node...]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_instance",
+   "description": "New Material Instance - A material instance: the parent's graph and values, its parameters overridable: material.instance <parent> [name] (the active mesh gets it)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_param",
+   "description": "Set Material Parameter - Set a parameter node's value by name (an instance: overrides it): material.param <material> <parameter> <x> [y z w]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_param_reset",
+   "description": "Reset Material Parameter - An instance's parameter back to the parent's value: material.param_reset <material> <parameter>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_node_name",
+   "description": "Name Parameter - Name a parameter node: material.node_name <material> <node> <name>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_import_textures",
+   "description": "Import Texture Set... - A PBR material from a texture set: pick any one of its images (base colour, normal, roughness, metallic, AO, height, emission, opacity, ORM are found by name): material.import_textures <image> [name]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_bake",
+   "description": "Bake Material - Bake an object's material (its node graph) through its UVs into images <material>_base, _orm (occlusion, roughness, metallic), _normal and _emissive; apply: the material then samples them: material.bake <object> [size] [apply]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_material_preset",
+   "description": "Material Preset - Give a material a preset look (none named: a new one for the active mesh): material.preset <gold|silver|copper|chrome|aluminium|plastic|rubber|glass|frosted_glass|water|ceramic|car_paint|wood|marble|concrete|fabric|leather|skin|clay|emissive> [material]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_measure",
+   "description": "Mass Properties - Volume, surface area, mass (from the material's density) and centre of mass of the selected meshes, in scene units",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mech_joint",
+   "description": "Add Mechanism Joint - Join a part to its parent so it moves: mech.joint <revolute|slider> <part> <parent|world> [pivot x y z] [axis x y z] [min e] [max e] [gear <joint> <ratio>] [value <expression>] (the part as it is now is its place at 0; values: parameters, units, frame)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mech_set",
+   "description": "Set Mechanism Joint - Change a joint (1..): mech.set <n> value <expression> | min <e> | max <e> | nolimits | gear <joint> <ratio>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mech_remove",
+   "description": "Remove Mechanism Joint - Remove a mechanism joint: mech.remove <n>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mech_list",
+   "description": "List Mechanism Joints - The mechanism's joints and their values, in the console",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mech_check",
+   "description": "Check Collisions - Which of the mechanism's parts collide now",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_extrude",
+   "description": "Extrude - Extrude the selected faces (or edges) and move them along the normal: mesh.extrude [distance]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_extrude_individual",
+   "description": "Extrude Individual Faces - Extrude every selected face along its own normal: mesh.extrude_individual [distance]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_inset",
+   "description": "Inset Faces - Inset every selected face: mesh.inset [thickness]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_subdivide",
+   "description": "Subdivide - Split the selected faces (quads into four)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_fill",
+   "description": "Fill / Make Face - Make a face from the selected vertices (fills holes)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_dissolve",
+   "description": "Dissolve - Dissolve the selection by select mode: merge the faces around it into n-gons",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_merge_center",
+   "description": "Merge at Center - Merge all selected vertices into one at their centre",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_merge_collapse",
+   "description": "Merge Collapse - Merge each connected group of selected vertices at its centre",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_merge_distance",
+   "description": "Merge by Distance - Merge selected vertices closer than a distance: mesh.merge_distance [0.0001]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_delete_vertices",
+   "description": "Delete Vertices - Delete the selected vertices and their faces",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_delete_edges",
+   "description": "Delete Edges - Delete the faces around the selected edges",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_delete_faces",
+   "description": "Delete Faces - Delete the selected faces",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_duplicate",
+   "description": "Duplicate - Duplicate the selected faces and move the copy",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_flip_normals",
+   "description": "Flip Normals - Reverse the selected faces",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_recalc_normals",
+   "description": "Recalculate Normals - Make the faces consistent and point them outside (selected, or all)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_loopcut",
+   "description": "Loop Cut - Cut a ring of quads: Ctrl+R then click; scripts: mesh.loopcut \"a b [cuts]\"",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_bisect",
+   "description": "Bisect - Cut the mesh with a plane: mesh.bisect \"px py pz nx ny nz\" (world; default: horizontal through the 3D cursor)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_bevel",
+   "description": "Bevel - Bevel the selected edges: drag the width, wheel = segments; scripts: mesh.bevel \"width [segments]\"",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_bridge",
+   "description": "Bridge Edge Loops - Join two selected boundary loops with a band of quads",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_spin",
+   "description": "Spin - Sweep the selected edges around the 3D cursor: mesh.spin \"[steps] [degrees] [x|y|z]\" (12 360 y)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_cursor_reset",
+   "description": "Reset 3D Cursor - Put the 3D cursor back at the origin (Shift+right click places it)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_modifier_add",
+   "description": "Add Modifier - Add a modifier to the active mesh: object.modifier_add mirror|array|solidify|subsurf|bevel|decimate|remesh|boolean|multires",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_modifier_remove",
+   "description": "Remove Modifier - Remove a modifier: object.modifier_remove [index]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_modifier_apply",
+   "description": "Apply Modifier - Make a modifier (and those above it) part of the mesh: object.modifier_apply [index]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_modifier_set",
+   "description": "Set Modifier Value - Change a value: object.modifier_set \"index parameter value\" (e.g. 0 levels 3)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_modifier_move_up",
+   "description": "Move Modifier Up - Move a modifier earlier in the stack: object.modifier_move_up index",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_modifier_move_down",
+   "description": "Move Modifier Down - Move a modifier later in the stack: object.modifier_move_down index",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_modifier_toggle",
+   "description": "Toggle Modifier - Enable / disable a modifier: object.modifier_toggle index",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_multires_propagate_down",
+   "description": "Propagate Down - Multires: the coarser levels take the shape of the finest (which stays exact)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_add_menu",
+   "description": "Add Node... - Node editor: the menu of node types at the pointer",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_delete",
+   "description": "Delete Node - Node editor: remove the selected node",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_toggle_tree",
+   "description": "Material / Geometry Nodes - Node editor: the active object's material graph or its geometry node tree",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_group",
+   "description": "Make Node Group - Node editor: the selected nodes into a group (geometry nodes: a new tree run by one node; a material: a material function run by a Material Function node)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_view_fit",
+   "description": "Frame All - Node editor: every node in view (zoomed to fit, at most 100 %)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_copy",
+   "description": "Copy Nodes - Node editor: the selected nodes to the node clipboard (with the links between them)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_paste",
+   "description": "Paste Nodes - Node editor: the clipboard's nodes at the pointer (another material or tree of the same kind too)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_duplicate",
+   "description": "Duplicate Nodes - Node editor: copies of the selected nodes, a little down and right (links into them kept)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_cut",
+   "description": "Cut Nodes - Node editor: the selected nodes to the clipboard, then removed",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_collapse",
+   "description": "Collapse Nodes - Node editor: the selected nodes shown as their headers alone (again: whole)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_comment",
+   "description": "Comment Frame - Node editor: a comment frame around the selected nodes (moving its title moves them)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_frame_title",
+   "description": "Rename Comment - Node editor: a comment frame's title: node.frame_title <frame 1-6> <title>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_align_left",
+   "description": "Align Left - Node editor: the selected nodes' left edges lined up (on the leftmost)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_align_top",
+   "description": "Align Top - Node editor: the selected nodes' tops lined up (on the highest)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_distribute_x",
+   "description": "Distribute Horizontally - Node editor: the selected nodes evenly spaced from left to right",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_distribute_y",
+   "description": "Distribute Vertically - Node editor: the selected nodes evenly spaced from top to bottom",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_zoom",
+   "description": "Zoom Nodes - Node editor: the zoom in percent, about the middle of the view: node.zoom <25-200>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_preview",
+   "description": "Material Preview - Node editor: the material's preview pane: node.preview 0|1 [sphere|cube|plane]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_thumbnails",
+   "description": "Node Thumbnails - Node editor: each material node's output over a square, below it: node.thumbnails 0|1",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_node_view_selected",
+   "description": "Frame Selected - Node editor: the selected nodes in view",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tool_select",
+   "description": "Select - Selection tool",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tool_move",
+   "description": "Move - Move tool",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tool_rotate",
+   "description": "Rotate - Rotate tool",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_tool_scale",
+   "description": "Scale - Scale tool",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_console_focus",
+   "description": "Command Line - Focus the console command line",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_console_clear",
+   "description": "Clear Console - Clear the console log",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_console_list_ops",
+   "description": "List Operators - List every operator id in the console",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_help_about",
+   "description": "About BeeModel - Show version information",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_pivot",
+   "description": "Pivot Point - What turning and scaling go around: view.pivot median|cursor|individual|active",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_orientation",
+   "description": "Transform Orientation - What X, Y and Z mean while moving or turning: view.orientation global|local|view|normal",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_texture_paint",
+   "description": "Texture Paint - Paint the active mesh's image texture through its UVs (Shift+Tab toggles)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_radius_down",
+   "description": "Smaller Brush - Texture paint: brush radius - 15%",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_radius_up",
+   "description": "Bigger Brush - Texture paint: brush radius + 15%",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_strength_down",
+   "description": "Weaker - Texture paint: strength - 0.1",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_strength_up",
+   "description": "Stronger - Texture paint: strength + 0.1",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_color",
+   "description": "Brush Colour - Texture paint: the brush colour: paint.color <r> <g> <b> (0-255)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_layer_add",
+   "description": "New Paint Layer - Texture paint: a new transparent layer above, painted from now on",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_layer_up",
+   "description": "Layer Above - Texture paint: paint the layer above",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_layer_down",
+   "description": "Layer Below - Texture paint: paint the layer below",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_layer_merge",
+   "description": "Merge Layers - Texture paint: flatten the layers into the image",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_undo",
+   "description": "Undo Stroke - Texture paint: undo the last stroke",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_redo",
+   "description": "Redo Stroke - Texture paint: redo a stroke",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_palette_open",
+   "description": "Command Palette... - Search and run any command",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_parent_set",
+   "description": "Parent - The selected objects become children of the active one (they keep where they are, then follow it): object.parent_set [child parent]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_parent_clear",
+   "description": "Clear Parent - The selected objects no longer follow a parent (they stay where they are)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_add",
+   "description": "Particle System - Add a particle system to the active object: particles.add [rain|snow|sparks|confetti|fountain|tank (a preset, then:)] [from faces|volume|verts|point] [rate n | burst n] [start f] [end f] [life s] [life_random 0..1] [speed m/s] [speed_random 0..1] [normal | direction x y z] [spread deg] [size m] [size_random 0..1] [drag k] [gravity k] [color RRGGBB] [seed n] [group 0..15] [max n] [name text] [on|off]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_set",
+   "description": "Particle Settings - A particle system's settings on the active object: particles.set [system n] then the words particles.add takes",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_liquid",
+   "description": "Export Liquid Surface... - Export the active object's liquid surface (or its mesh) at each frame as OBJ files: file.export_liquid <prefix> [first last] (prefix_0001.obj ..., the scene's frames when not said)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_remove",
+   "description": "Remove Particle System - Remove a particle system from the active object: particles.remove [system n] (the first when not said)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_add_rain",
+   "description": "Rain - Add rain: a cloud (a 10 m plane 8 m up) raining drops that die where they land",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_add_snow",
+   "description": "Snow - Add snow: a cloud of slowly falling flakes that stick where they land",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_add_sparks",
+   "description": "Sparks - Add sparks: hot, short-lived, bouncing, yellow to red",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_add_confetti",
+   "description": "Confetti - Add confetti: a burst of 600 drifting down",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_add_fountain",
+   "description": "Fountain - Add a fountain: a jet of water drops",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_add_tank",
+   "description": "Water Tank - Add a water tank: a block of liquid in a box twice its size, meshed into a surface",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_bake",
+   "description": "Bake Particles - Bake the particles and liquids (sim.bake particles liquid)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_particles_free",
+   "description": "Free Particles Cache - Free the particles' and liquids' cache and bake (sim.free particles liquid)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_play_start",
+   "description": "Play - Play the scene: walk (or fly) from the viewport's eye while simulations and animations run; Esc stops (keep or discard the changes): play.start [walk|fly] [x y z]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_play_stop",
+   "description": "Stop Playing - Stop play mode: play.stop [keep|discard] (default: discard - the scene as it was)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_play_mode",
+   "description": "Walk / Fly - Switch play mode between walking and flying: play.mode walk|fly",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_edit_preferences",
+   "description": "Preferences... - Open the Preferences (Ctrl+Comma): interface, input, keymap, system, files and the AI connections",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_ui_scale",
+   "description": "UI Scale - Make everything bigger or smaller, on top of the screen's own scale: view.ui_scale <75..200> (percent; kept in the preferences)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_accent_theme",
+   "description": "Theme's Accent - The UI accent colour back to the theme's own",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_print_check",
+   "description": "Print Check - For 3D printing, per selected mesh: closed or not, the thinnest wall and faces under the minimum, overhang area, size (Z up, mm): mesh.print_check [minimum wall mm, default 1]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_show_thickness",
+   "description": "Show Thin Walls - Colour the active mesh's faces by wall thickness: red under the minimum, yellow under twice it: view.show_thickness [minimum mm, default 1]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_probe_add",
+   "description": "Add Light Probe - Add a light probe: probe.add irradiance|reflection [x y z] [half size x y z] [grid points x y z] (an irradiance volume: grid points over its box; a reflection probe: a cube map from its centre, box-projected); probe.bake bakes them",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_probe_bake",
+   "description": "Bake Light Probes - Bake every light probe with the path tracer: probe.bake [rays a point] (default 256; reflection probes: an eighth of that a texel, at least 4)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_probe_remove",
+   "description": "Remove Light Probe - Remove a light probe: probe.remove <number from 1>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_probe_clear",
+   "description": "Remove All Light Probes - Remove every light probe",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_rigid_add",
+   "description": "Add Rigid Body - Make the selected objects rigid bodies (or change them): rigid.add [active|passive] [box|sphere|capsule|hull|compound] [instances|object] [mass m] [friction f] [bounce b] [damping d] [velocity x y z] [group n] [collide bits] [attracts|noattract] (attracts: it pulls the other bodies by its mass). Active ones fall when the frame goes past the start; instances: each instance of the object's geometry (nodes) is a body of its own, shaped like its prototype",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_rigid_remove",
+   "description": "Remove Rigid Body - The selected objects are no longer rigid bodies",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_rigid_joint",
+   "description": "Add Joint - Tie two bodies (or one to the world): rigid.joint <fixed|hinge|point|slider> <object> <object|world> [pivot x y z] [axis x y z] [break force] [limits lo hi] [motor speed force] (pivot: the first object's place; axis: Y; hinge limits and motor speed in degrees)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_rigid_world",
+   "description": "Physics World - Physics settings: rigid.world [gravity x y z] [g n (bodies that attract: G, 1 by default)] [rate steps-a-second] [iterations n (a step, over its substeps)] [substeps n (1-64; 4)]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_edit_redo_last",
+   "description": "Adjust Last Operation - Run the last operation again with new values: edit.redo_last \"values\" (as the redo panel shows them)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_start",
+   "description": "Render - Start a progressive render in the Render area (the scene at the render settings)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_stop",
+   "description": "Stop Render - Stop the running render (keeps the samples so far)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_save",
+   "description": "Save Render... - Save the render as PNG, or .exr (linear half floats): render.save <path> [beauty|albedo|normal|depth]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_pass",
+   "description": "Next Render Pass - Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_device",
+   "description": "Render Device - Where renders run: render.device [auto|rtx|gpu|cpu] (auto: the best there is - RTX ray tracing, the GPU, else the CPU; none: says which; kept in the preferences)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_animation",
+   "description": "Render Animation - Render every frame into a folder of PNGs (0001.png ...) at the render settings: render.animation <folder> [first last] (none: the animation's range). On the GPU the next frame is simulated and built while it traces one",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_sample_reuse",
+   "description": "Sample Reuse - Animation renders (render.animation, render_frames) reuse samples from up to so many frames before where a pixel sees the same surface, tracing only samples / (frames + 1) new ones: render.sample_reuse <frames> (0: off, up to 16)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_motion_blur",
+   "description": "Motion Blur - Motion blur: render.motion_blur <shutter> - how long the shutter is open, as a part of a frame (0.5: half of it; 0: off). Particle balls are drawn where they are at each sample's time: rain streaks",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_settings",
+   "description": "Render Settings - Set the render size and samples: render.settings <width> <height> <samples>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_denoise",
+   "description": "Denoise - Toggle denoising the beauty pass when a render ends (guided by albedo, normal, depth)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_show_normals",
+   "description": "Show Normals - Draw the face normals of the active mesh",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_show_nonmanifold",
+   "description": "Show Non-manifold - Mark edges used by more than two faces, or by two facing opposite ways",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_show_boundary",
+   "description": "Show Boundary Edges - Mark edges used by one face only (holes)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_show_degenerate",
+   "description": "Show Degenerate Faces - Mark faces without area",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_show_overhangs",
+   "description": "Show Overhangs - Mark faces facing down steeper than an angle (for 3D printing): view.show_overhangs [degrees, default 45]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_repair",
+   "description": "Repair Mesh - Merge by distance, remove degenerate and duplicate faces, fill holes, fix normals, drop loose vertices: mesh.repair [distance, default 0.0001]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_constraint_add",
+   "description": "Add Constraint - Constrain an object (or, for ik, a bone): constraint.add <object|armature:bone> <copy_location|copy_rotation|copy_scale|track_to|limit_location|limit_rotation|limit_scale|child_of|ik> [target] [axes xyz] [offset] [influence f] [min x y z] [max x y z] [track x|y|z|-x|-y|-z] [up x|y|z] [chain n] [pole object] [solver fabrik|ccd] [iterations n] (limit_rotation in degrees)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_constraint_remove",
+   "description": "Remove Constraint - Remove a constraint by number (1.., as constraint.list shows) or all of an object's: constraint.remove <n|object>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_constraint_set",
+   "description": "Set Constraint - Change a constraint (1..): constraint.set <n> <influence|mute> <value>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_constraint_list",
+   "description": "List Constraints - The constraints and drivers, in the console",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_driver",
+   "description": "Add Driver - Drive a property by an expression of others: anim.driver <path> [name=path ...] <expression> (names: up to 8 letters; frame is the frame), e.g. anim.driver Door:ry a=Handle:rz a*2",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_driver_set",
+   "description": "Set Driver - Change a driver by number (1.., as constraint.list shows): anim.driver_set <n> expression <text> | mute <0|1> | remove",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_driver_remove",
+   "description": "Remove Driver - Remove a property's driver: anim.driver_remove <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_motion_paths",
+   "description": "Motion Paths - Show the selected objects' (pose mode: bones') paths over the frame range: anim.motion_paths [start end] | clear",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_anim_onion",
+   "description": "Onion Skins - Ghosts of the active object some frames before (red) and after (green): anim.onion [before after step] | off",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_cube",
+   "description": "Cube - Add a cube",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_sphere",
+   "description": "UV Sphere - Add a UV sphere",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_cylinder",
+   "description": "Cylinder - Add a cylinder",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_plane",
+   "description": "Plane - Add a plane",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_light",
+   "description": "Light - Add a point light",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_camera",
+   "description": "Camera - Add a camera",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_cone",
+   "description": "Cone - Add a cone",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_torus",
+   "description": "Torus - Add a torus",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_create_grid",
+   "description": "Grid - Add a subdivided grid",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_select_all",
+   "description": "Select All / None - Select every object, or none if some are selected",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_delete",
+   "description": "Delete - Delete the selected objects",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_hide",
+   "description": "Hide - Hide the selected objects (not drawn, rendered or collided with; Alt+H shows them again)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_reveal",
+   "description": "Reveal Hidden - Show every hidden object again (selected)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_duplicate",
+   "description": "Duplicate - Duplicate the selected objects",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_script_reset",
+   "description": "Reset Script State - Forget BeeScript variables and functions",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_sculpt_mode",
+   "description": "Sculpt Mode - Sculpt the active mesh: brushes deform it under the pointer (Ctrl+Tab toggles)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_draw",
+   "description": "Draw - Sculpt brush: raise the surface along its normal",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_clay",
+   "description": "Clay Strips - Sculpt brush: build up towards a plane above the surface",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_crease",
+   "description": "Crease - Sculpt brush: cut a sharp groove",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_inflate",
+   "description": "Inflate - Sculpt brush: push each vertex along its own normal",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_grab",
+   "description": "Grab - Sculpt brush: move what was under the brush with the pointer",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_snake",
+   "description": "Snake Hook - Sculpt brush: pull the surface along the stroke",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_smooth",
+   "description": "Smooth - Sculpt brush: relax towards the neighbours (Shift with any brush)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_flatten",
+   "description": "Flatten - Sculpt brush: towards the average plane",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_pinch",
+   "description": "Pinch - Sculpt brush: draw the surface together",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_layer",
+   "description": "Layer - Sculpt brush: raise a layer of even height",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_brush_mask",
+   "description": "Mask - Sculpt brush: paint a mask that other brushes leave alone (Ctrl erases)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_radius_down",
+   "description": "Smaller Brush - Sculpt: brush radius - 15%",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_radius_up",
+   "description": "Bigger Brush - Sculpt: brush radius + 15%",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_strength_down",
+   "description": "Weaker - Sculpt: strength - 0.1",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_strength_up",
+   "description": "Stronger - Sculpt: strength + 0.1",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_symmetry_x",
+   "description": "X Symmetry - Sculpt: mirror strokes across the object's X",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_symmetry_y",
+   "description": "Y Symmetry - Sculpt: mirror strokes across the object's Y (with X and Z: every combination)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_symmetry_z",
+   "description": "Z Symmetry - Sculpt: mirror strokes across the object's Z (with X and Y: every combination)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_symmetry",
+   "description": "Sculpt Symmetry - Which axes sculpt strokes mirror across: sculpt.symmetry none | x | y | z | xy | xz | yz | xyz",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_mask_clear",
+   "description": "Clear Mask - Sculpt: remove the mask",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_stabilizer",
+   "description": "Stabilizer - Sculpt: the stroke trails the pointer on a string (off, 10, 25, 50 px) for steady lines",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_pressure_strength",
+   "description": "Pressure: Strength - Sculpt: pen pressure scales the brush strength",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_pressure_radius",
+   "description": "Pressure: Radius - Sculpt: pen pressure scales the brush radius",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_pressure_curve",
+   "description": "Pressure Curve - Sculpt: the pressure curve - soft, linear, hard",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_mask_invert",
+   "description": "Invert Mask - Sculpt: invert the mask",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_shape_add",
+   "description": "Add Shape Key - Store the mesh as it is as a shape key (made, or replaced; then the Basis comes back): shape.add <name> [object]. The first also stores the Basis",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_shape_edit",
+   "description": "Edit Shape Key - Show a shape key's shape in the mesh to change it (shape.add <name> stores it again): shape.edit <name> [object]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_shape_set",
+   "description": "Set Shape Key - A shape key's value (0..1, or beyond): shape.set <name> <value> [object]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_shape_remove",
+   "description": "Remove Shape Key - Remove a shape key: shape.remove <name> [object]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_shape_clear",
+   "description": "Clear Shape Keys - Remove every shape key of a mesh: shape.clear [object]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_shatter",
+   "description": "Shatter... - Break the active mesh object into pieces, each an object (the original is hidden): object.shatter <shards|bricks|balls> [count n] [seed s] - shards: Voronoi cells [at x y z | cursor | surface] [spread f]; bricks: a running bond [counts a b c | size x y z] [offset f|random] [gap g] [jitter f]; balls: [radius r] [spread f]; [inner r g b] colours the cut faces; [glue N/m2 [paint]] ties neighbours; [impact N s]: whole until hit that hard; [preset brickwall|glass|stone|gravel]; [again]: a piece or the original: the pieces made before go first",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_mesh_separate_loose",
+   "description": "Separate By Loose Parts - Split each selected mesh object into one object per loose part (parts that share no vertex)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sim_bake",
+   "description": "Bake Simulation - Simulate the scene's frame range and keep every frame (saved with the file; edits no longer change it until sim.free): sim.bake [rigid|cloth|particles|liquid]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sim_free",
+   "description": "Free Simulation Cache - Forget the simulation cache and bake (simulated again when needed): sim.free [rigid|cloth|particles|liquid]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sim_cache",
+   "description": "Simulation Cache - Show what the simulation cache holds, or set its memory budget: sim.cache [budget MB]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_tool_line",
+   "description": "Line - Sketch mode: draw lines (click points; Esc ends)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_tool_circle",
+   "description": "Circle - Sketch mode: draw circles (centre, then a point on it)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_tool_rect",
+   "description": "Rectangle - Sketch mode: draw rectangles (two corners)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_coincident",
+   "description": "Coincident - Sketch: join two points, or put a point on a line or circle",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_horizontal",
+   "description": "Horizontal - Sketch: make the selected lines (or two points) horizontal",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_vertical",
+   "description": "Vertical - Sketch: make the selected lines (or two points) vertical",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_equal",
+   "description": "Equal - Sketch: equal lengths (lines) or radii (circles)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_parallel",
+   "description": "Parallel - Sketch: make two lines parallel",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_perpendicular",
+   "description": "Perpendicular - Sketch: make two lines perpendicular",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_tangent",
+   "description": "Tangent - Sketch: make a line and a circle (or two circles) tangent",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_fix",
+   "description": "Fix - Sketch: fix the selected points where they are",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_midpoint",
+   "description": "Midpoint - Sketch: put a point on a line's middle",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_dimension",
+   "description": "Dimension... - Sketch: dimension the selection (type the value or an expression)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_dim",
+   "description": "Set Dimension - Sketch: give the selection from D a dimension: sketch.dim <value or expression>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sketch_delete",
+   "description": "Delete - Sketch: delete the selected entities and points",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_export_step",
+   "description": "Export STEP... - Export the B-rep solids (cad.kernel on, imported STEP parts) as STEP AP214: one part, or an assembly placed by the objects' transforms: file.export_step <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_theme_dark",
+   "description": "Dark - Dark UI theme (the default)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_theme_light",
+   "description": "Light - Light UI theme",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_theme_contrast",
+   "description": "High Contrast - High-contrast UI theme: black and white, brighter text and splitters",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_theme_honey",
+   "description": "Honey - Honey UI theme: warm browns and BeeModel's amber",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_theme_graphite",
+   "description": "Graphite - Graphite UI theme: neutral greys with a blue accent",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_theme_nord",
+   "description": "Nord - Nord UI theme: arctic blue-greys",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_theme_solarized",
+   "description": "Solarized Dark - Solarized Dark UI theme",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_theme_solarized_light",
+   "description": "Solarized Light - Solarized Light UI theme",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_theme_dracula",
+   "description": "Dracula - Dracula UI theme: purple on dark",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_edit_undo",
+   "description": "Undo - Undo the last change",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_edit_redo",
+   "description": "Redo - Redo the last undone change",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_edit_undo_history",
+   "description": "Undo History - List the undo steps in the console",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_unwrap",
+   "description": "Unwrap - UV: unwrap the mesh along its seams (least squares conformal maps), then pack the islands",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_smart_project",
+   "description": "Smart UV Project - UV: project groups of faces facing alike (within 66 degrees) flat, then pack",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_pack",
+   "description": "Pack Islands - UV: same texel density, smallest boxes, packed into the unit square",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_seam_mark",
+   "description": "Mark Seam - UV: the edges between selected vertices become seams",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_seam_clear",
+   "description": "Clear Seam - UV: the edges between selected vertices are no seams",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_seams_from_sharp",
+   "description": "Seams from Sharp Edges - UV: every edge sharper than 30 degrees becomes a seam",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_select_all",
+   "description": "Select All UVs - UV editor: select every island, or none",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_grab",
+   "description": "Move Islands - UV editor: move the selected islands with the pointer",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_scale",
+   "description": "Scale Islands - UV editor: scale the selected islands about their centre",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_rotate",
+   "description": "Rotate Islands - UV editor: rotate the selected islands about their centre",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_heat_map",
+   "description": "Distortion Heat Map - UV editor: no heat map, area distortion, angle distortion",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_uv_view_fit",
+   "description": "Fit UV View - UV editor: the unit square fills the view",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vc_commit",
+   "description": "Commit Version - Keep the scene as a version in its history (beside the saved file): vc.commit [message]; after a merge: the merge commit",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vc_log",
+   "description": "Version Log - List the branch's commits, newest first",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vc_branch",
+   "description": "New Branch - Start a branch at the current commit: vc.branch <name>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vc_switch",
+   "description": "Switch Branch - Check out a branch (its last commit): vc.switch <name> [force: drop the scene's changes]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vc_diff",
+   "description": "Compare Versions - Show what changed against a branch or commit: vc.diff [branch | commit] [overlay | side] (default: the last commit, overlay); vc.diff off",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vc_merge",
+   "description": "Merge Branch - Merge a branch into the scene, three-way per object and property: vc.merge <branch>; conflicts go to the merge panel (vc.resolve), then vc.commit (vc.abort: back to before)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vc_resolve",
+   "description": "Resolve Conflict - Settle merge conflicts (either side, as often as you like until the commit): vc.resolve <number from 1 | all> <ours | theirs>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vc_abort",
+   "description": "Abort Merge - Give up a merge: the scene as its branch's last commit",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_weight_paint",
+   "description": "Weight Paint - Paint the active mesh's skin weights for the armature's active bone (Ctrl+W toggles; paint.weight sets the value)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_paint_weight",
+   "description": "Brush Weight - Weight paint: the weight the brush paints towards: paint.weight <0..1>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_vertex_paint",
+   "description": "Vertex Paint - Paint the active mesh's vertex colours (Shift+V toggles)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vgeo_budget",
+   "description": "Virtual Geometry Budget - Memory for streamed cluster pages, in MB (vgeo.budget 2048): past it the least recently used pages are given back",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vgeo_error",
+   "description": "Virtual Geometry Error - The error a DAG cut may show, in pixels (vgeo.error 1)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vgeo_view",
+   "description": "Show Clusters - Colour the clusters drawn through cluster DAGs (toggles): vgeo.view clusters / shaded / off (the meshes themselves, not their DAGs) / check (the drawn cut, for cracks)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vgeo_build",
+   "description": "Virtualize Geometry - Build the active mesh's cluster LOD DAG: meshlets of up to 128 triangles, grouped and simplified level by level (in the background; kept with the mesh, saved in the .bee file)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vgeo_clear",
+   "description": "Clear Virtual Geometry - Forget the active mesh's cluster LOD DAG",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vgeo_proxy",
+   "description": "Proxy Mesh - Let the active mesh go for its cluster DAG's roots (welded) wherever it is used: the DAG keeps every detail, drawn and saved with the proxy",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_vgeo_extract",
+   "description": "Extract LOD - Add the active mesh's DAG cut as a new object, its clusters coloured: vgeo.extract <level> or vgeo.extract <error, e.g. 0.01>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_frame_selected",
+   "description": "Frame Selected - Turn and zoom the viewport onto the selection, or the whole scene when nothing is selected (Numpad .)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_wireframe",
+   "description": "Wireframe - Switch the viewport between solid shading and wireframe",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_rendered",
+   "description": "Rendered - Rendered shading on the GPU: a raycast while the view moves, path-traced samples when it is still",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_material_preview",
+   "description": "Material Preview - Shade the viewport with each object's material under a studio light (Shift+Z)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_grid",
+   "description": "Ground Grid - Show or hide the ground grid and axes",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_reset_camera",
+   "description": "Reset Camera - Return the viewport camera to its default view (F in object mode, Home anywhere)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_align_front",
+   "description": "Front View - Look at the scene from the front (along -Z)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_align_back",
+   "description": "Back View - Look at the scene from the back",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_align_right",
+   "description": "Right View - Look at the scene from the right (along -X)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_align_left",
+   "description": "Left View - Look at the scene from the left",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_align_top",
+   "description": "Top View - Look down on the scene from above",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_align_bottom",
+   "description": "Bottom View - Look up at the scene from below",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_overlay_text",
+   "description": "Text Info - Show the view's name and grid size in the top left of 3D viewports",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_overlay_stats",
+   "description": "Statistics - Show the scene's size (objects, faces) in 3D viewports",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_overlay_gizmo",
+   "description": "Navigation Gizmo - Show the axis balls in the top right of 3D viewports",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_ortho",
+   "description": "Orthographic - Switch the 3D viewport between perspective and orthographic (Numpad 5): no shrinking with distance, parallel lines stay parallel",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_toggle_snap",
+   "description": "Snap - Snap moves, turns and scales to whole steps (Ctrl does the opposite while you drag)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_sculpt_falloff",
+   "description": "Brush Falloff - How sculpt brushes fade to their edge: sculpt.falloff smooth|sphere|root|sharp|linear|constant",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_cursor_to_selected",
+   "description": "Cursor to Selected - Put the 3D cursor in the middle of the selected objects",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_to_cursor",
+   "description": "Selection to Cursor - Move the selected objects to the 3D cursor, keeping their spacing",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_object_to_grid",
+   "description": "Selection to Grid - Move each selected object to the nearest point of the 1 m grid",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_workspace_next",
+   "description": "Next Workspace - The workspace to the right (Ctrl+PageDown)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_workspace_prev",
+   "description": "Previous Workspace - The workspace to the left (Ctrl+PageUp)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_workspace_new",
+   "description": "New Workspace - A new workspace: a copy of this one's layout (workspace.new [name])",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_workspace_set",
+   "description": "Workspace - Switch to a workspace: workspace.set <number from 1 | name>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_workspace_rename",
+   "description": "Rename Workspace... - Rename this workspace: workspace.rename <name>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_workspace_delete",
+   "description": "Delete Workspace - Remove this workspace (not the last one)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_world_partition",
+   "description": "World Partition - Split the saved scene into grid cells that load and unload by distance from the camera: world.partition <cell size m> [loading radius m] | off",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_world_radius",
+   "description": "World Loading Radius - How far from the camera cells are loaded: world.radius <m>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_world_budget",
+   "description": "World Memory Budget - Memory for the loaded cells' meshes: world.budget <MB> (past it the farthest cells unload)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_world_update",
+   "description": "Stream World Cells - Load and unload the world's cells for the camera now (scripts; the window does it every frame)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_world_minimap",
+   "description": "World Minimap - Show or hide the world partition's minimap in the viewport",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  }
+ ]
+}

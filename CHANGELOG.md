@@ -16,6 +16,9 @@ project uses [Semantic Versioning](https://semver.org/).
   welcome screen (also with Alt + left as the middle button) or
   `prefs.keymap blender`. It changes only the keys that differ from
   Blender's; docs/UI.md lists them.
+- docs/mcp-tools.json (D3, #295): every MCP tool with its input as JSON
+  Schema, published in the release archive and checked against the running
+  server by `tests/mcp_schema.py`. The README states the MIT License.
 
 ## [0.24.0] - 2026-10-21
 
