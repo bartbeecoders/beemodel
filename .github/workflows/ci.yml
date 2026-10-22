@@ -136,6 +136,9 @@ jobs:
       - name: B-rep kernel (NURBS, exact solids, booleans, fillets, the enclosure on the kernel)
         run: timeout 600 python tests/brep.py build/beemodel
 
+      - name: Light assemblies (mates, a mechanism joint)
+        run: timeout 300 python tests/assembly.py build/beemodel
+
       - name: FreeCAD, else OpenCASCADE (for the STEP round trips)
         run: |
           # FreeCAD from its PPA; when Launchpad is down (503s, time-outs), the

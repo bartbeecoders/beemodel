@@ -3684,6 +3684,19 @@
    }
   },
   {
+   "name": "op_asm_mate",
+   "description": "Mate Parts - Place a part against another: asm.mate <coincident|concentric|distance> <part> <face|axis px py pz dx dy dz> <target> <face|axis ...> [distance] [flip] (faces: centre and normal; axis: in the object's own space; the part moves, once)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_mesh_extrude",
    "description": "Extrude - Extrude the selected faces (or edges) and move them along the normal: mesh.extrude [distance]",
    "inputSchema": {
