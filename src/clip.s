@@ -72,7 +72,14 @@
 .equ CL_PIN,    CL_PXB + 8              # the points left (pointer)
 .equ CL_K,      CL_PIN + 8              # chosen (4 ints)
 .equ CL_MG,     CL_K + 16               # points kept this far above the face
-.equ CL_SZ,     (CL_MG + 4 + 15) & -16
+.equ CL_CEN,    (CL_MG + 4 + 15) & -16  # poly_plane: the body's centre (cl_pick_w)
+.equ CL_OLD,    CL_CEN + 16             #  and its manifold so far, or 0
+.equ CL_W,      CL_OLD + 8              #  each point's weight
+.equ CL_SZ,     (CL_W + CL_MAXP*4 + 15) & -16
+.equ MF_N_,     16                      # (rbody.s: a manifold, its points)
+.equ MF_PTS_,   96
+.equ CP_SZ_,    320
+.equ CP_WA_,    96
 
 .macro DOT3 d, s
     dpps    \d, \s, 0x71
@@ -102,6 +109,9 @@ cl_tolmin:      .float 0.0005
 cl_tolmax:      .float 0.02                 #  (2 cm at most: a big ground's
                                             #  top, not its sides)
 cl_big:         .float 1e30
+cl_wfloor:      .float 0.25                 # (cl_pick_w: a point at the margin's top still counts this much)
+cl_near2:       .float 0.0001               # (within 1 cm of a point kept: it stays)
+cl_two:         .float 2.0
 cl_eps:         .float 1e-9
 cl_half:        .float 0.577
 cl_edge:        .float 0.001                # (a point this near an edge is on it)
@@ -382,9 +392,10 @@ poly_clip:
     ret
 
 # poly_plane(rdi=the plane's proxy, rsi=the other's, edx=1 when the plane
-#   is A, xmm0=the margin, rcx=out: 4 results) -> eax = contact points: the
-#   other's points (a polytope's, or a rounded part's core corners less its
-#   radius) at most the margin above the plane, four kept
+#   is A, xmm0=the margin, rcx=out: 4 results, r8=the manifold so far or 0)
+#   -> eax = contact points: the other's points (a polytope's, or a rounded
+#   part's core corners less its radius) at most the margin above the plane,
+#   four kept (cl_pick_w: round its centre, the points it has kept first)
 poly_plane:
     push    rbp
     mov     rbp, rsp
@@ -401,6 +412,9 @@ poly_plane:
     mov     [rbx+CL_FLIP], edx
     mov     [rbx+CL_PXA], rdi
     mov     [rbx+CL_PXB], rsi
+    mov     [rbx+CL_OLD], r8
+    movaps  xmm1, [rsi+PX_C]            # (the body's centre)
+    movaps  [rbx+CL_CEN], xmm1
     mov     r12, rdi                    # n = R normal, P0 = its centre
     mov     rax, [r12+PX_PART]
     movaps  xmm1, [rax+PT_HALF]
@@ -490,7 +504,7 @@ poly_plane:
     lea     rax, [rbx+CL_P0]
     mov     [rbx+CL_PIN], rax
     mov     r12, rax
-    call    cl_pick
+    call    cl_pick_w
     mov     r13d, eax
     mov     r14, [rbx+CL_OUT]
     xor     r15d, r15d
@@ -1112,6 +1126,144 @@ cl_pick:
     jne     9f
     mov     eax, 3
 9:  pop     r12
+    ret
+
+# cl_pick_w (rbx = frame; points at CL_PIN with the gap in lane 3, CL_NP,
+#   CL_CEN, CL_OLD, CL_MG, CL_N) -> eax = how many chosen (CL_K): all when 4
+#   or fewer, else four that hold the body up, whichever way it leans. Each
+#   point weighs by its depth (margin - gap, plus a quarter of the margin),
+#   twice that when the manifold already has a point there; then the one
+#   farthest from the centre (across the normal) times its weight, the one
+#   farthest from that, and the most area on each side of those two, times
+#   the weights. (Starting from the deepest point, as cl_pick does, a flat
+#   face with more than four corners rocks: each lean makes another corner
+#   the deepest, and another four leave the other side without support.
+#   Faces clipped against meshes keep cl_pick: a box sliding over many
+#   triangles needs the deepest point, and a new four each step.)
+cl_pick_w:
+    cmp     dword ptr [rbx+CL_NP], 4
+    jbe     cl_pick
+    push    r12
+    push    r13
+    push    r14
+    mov     r12, [rbx+CL_PIN]
+    movss   xmm6, [rbx+CL_MG]           # weights
+    movss   xmm7, xmm6
+    mulss   xmm7, [rip+cl_wfloor]
+    addss   xmm7, xmm6                  # margin * 1.25
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+CL_NP]
+    jae     4f
+    mov     r8d, ecx
+    shl     r8d, 4
+    movss   xmm0, xmm7
+    subss   xmm0, [r12+r8+12]
+    maxss   xmm0, [rip+cl_eps]
+    mov     rdx, [rbx+CL_OLD]           # a point already kept near it: x2
+    test    rdx, rdx
+    jz      3f
+    xor     eax, eax
+2:  cmp     eax, [rdx+MF_N_]
+    jae     3f
+    imul    r9, rax, CP_SZ_
+    movaps  xmm1, [r12+r8]
+    subps   xmm1, [rdx+MF_PTS_+r9+CP_WA_]
+    andps   xmm1, [rip+cl_xyz]
+    call    cl_across
+    comiss  xmm1, [rip+cl_near2]
+    ja      21f
+    mulss   xmm0, [rip+cl_two]
+    jmp     3f
+21: inc     eax
+    jmp     2b
+3:  movss   [rbx+CL_W+rcx*4], xmm0
+    inc     ecx
+    jmp     1b
+4:  movaps  xmm5, [rbx+CL_CEN]          # k0: the farthest from the centre
+    andps   xmm5, [rip+cl_xyz]
+    call    cl_far
+    mov     [rbx+CL_K], eax
+    mov     r13d, eax
+    shl     eax, 4
+    movaps  xmm5, [r12+rax]             # k1: the farthest from k0
+    andps   xmm5, [rip+cl_xyz]
+    call    cl_far
+    mov     [rbx+CL_K+4], eax
+    shl     eax, 4                      # k2, k3: the most area each side,
+    movaps  xmm4, [r12+rax]             #  weighed
+    andps   xmm4, [rip+cl_xyz]
+    subps   xmm4, xmm5                  # k1 - k0
+    movss   xmm8, [rip+cl_big]
+    xorps   xmm8, [rip+cl_sign]
+    movss   xmm9, [rip+cl_big]
+    mov     r13d, [rbx+CL_K]
+    mov     r14d, r13d
+    xor     ecx, ecx
+5:  cmp     ecx, [rbx+CL_NP]
+    jae     6f
+    mov     r8d, ecx
+    shl     r8d, 4
+    movaps  xmm0, [r12+r8]
+    andps   xmm0, [rip+cl_xyz]
+    subps   xmm0, xmm5
+    CROSS   xmm1, xmm4, xmm0, xmm2
+    DOT3    xmm1, [rbx+CL_N]
+    mulss   xmm1, [rbx+CL_W+rcx*4]
+    comiss  xmm1, xmm8
+    jbe     51f
+    movss   xmm8, xmm1
+    mov     r13d, ecx
+51: comiss  xmm1, xmm9
+    jae     52f
+    movss   xmm9, xmm1
+    mov     r14d, ecx
+52: inc     ecx
+    jmp     5b
+6:  mov     [rbx+CL_K+8], r13d
+    mov     [rbx+CL_K+12], r14d
+    mov     eax, 4
+    cmp     r13d, r14d                  # (one side only: three)
+    jne     9f
+    mov     eax, 3
+9:  pop     r14
+    pop     r13
+    pop     r12
+    ret
+
+# cl_far(xmm5 = a point; r12 = the points, CL_W) -> eax = the point farthest
+#   from it across the normal, times its weight
+cl_far:
+    xorps   xmm3, xmm3
+    xor     eax, eax
+    xor     ecx, ecx
+1:  cmp     ecx, [rbx+CL_NP]
+    jae     9f
+    mov     r8d, ecx
+    shl     r8d, 4
+    movaps  xmm1, [r12+r8]
+    andps   xmm1, [rip+cl_xyz]
+    subps   xmm1, xmm5
+    push    rax
+    call    cl_across
+    pop     rax
+    mulss   xmm1, [rbx+CL_W+rcx*4]
+    comiss  xmm1, xmm3
+    jbe     2f
+    movss   xmm3, xmm1
+    mov     eax, ecx
+2:  inc     ecx
+    jmp     1b
+9:  ret
+
+# cl_across(xmm1 = a vector; rbx = frame) -> xmm1 = its length squared across
+#   the normal CL_N (xmm2 used)
+cl_across:
+    movaps  xmm2, xmm1
+    DOT3    xmm2, [rbx+CL_N]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm2, [rbx+CL_N]
+    subps   xmm1, xmm2
+    DOT3    xmm1, xmm1
     ret
 
 .section .note.GNU-stack,"",@progbits
