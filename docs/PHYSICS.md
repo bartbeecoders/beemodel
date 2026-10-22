@@ -92,6 +92,17 @@ Script reports:
   - 17: the fastest awake body's speed (its turn counted at its surface)
   - 18: that body's object's uid
   - 19: joints in the run
+  - 20, 21: originals that shatter on impact, and those broken
+  - 22-24: bodies that attract, their tree's cells, its ms
+  - 25: 1 when the frame shown was played back from the cache
+
+  Scrubbing back (or replaying a frame already simulated) plays it from the
+  cache. `rbinfo` then answers for that frame, with the counts kept when it
+  was simulated: bodies, contacts, awake bodies, islands, steps, the state
+  hash (16), the fastest body and so on. What was not kept reads 0 then: the
+  phases' ms (8-13), the attractors' (22-24) and the contact points
+  (1000 + ...), and every count of a frame baked in an earlier session (a
+  file's bake). `rbinfo(25)` tells the two apart.
 
 ## A step
 
