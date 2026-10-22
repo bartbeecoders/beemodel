@@ -43,6 +43,7 @@ These work the same everywhere.
 | Ctrl+Left / Right while typing | Jump a word (Shift: select it); Ctrl+Backspace / Delete remove one |
 | I over a field | Insert a keyframe for that value |
 | Right-click | A context menu: in the viewport, on outliner rows, on area headers, on asset tiles, in the node editor, the timeline (playback, Start / End at This Frame) and the dope sheet / graph editor (interpolation, handles, duplicate, delete), on a field (Reset to Default, Copy / Paste Value, Insert Keyframe, Copy Data Path) and on a file in the file browser (Open, Rename, Delete, New Folder, Copy Path) |
+| Alt+right-click in the viewport | Ask the AI about the selection: a prompt at the pointer (also **Ask AI...** in the right-click menu, see [AI.md](AI.md#ask-about-the-selection)); Shift+right-click places the 3D cursor |
 | Hold Z / Ctrl+Tab / Shift+S in the viewport | A pie menu for the shading / the mode / the 3D cursor and snapping (a quick tap keeps the key's own action; Shift+S stays the stabilizer in sculpt mode) |
 | F3 | Search every command |
 | F1 | Every shortcut, searchable |

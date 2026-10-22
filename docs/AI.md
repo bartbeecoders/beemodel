@@ -44,6 +44,50 @@ tools (the same ones outside agents get, see [MCP.md](MCP.md)):
 The connection picker at the top of the area chooses Claude Code, Grok or
 OpenRouter for the next request.
 
+## Ask about the selection
+
+To change what you are looking at, you don't need the AI workspace.
+**Alt+right-click** an object in the viewport, or pick **Ask AI...** at the
+top of the viewport's right-click menu (or the **AI** menu). A small box
+opens at the pointer.
+
+- Its title says what the request is about: *Ask AI about **Cube***,
+  *about **3 objects***, *about **4 vertices of Cube*** in edit mode, or
+  *about the scene* when nothing is selected. An object you Alt+right-click
+  that was not selected is selected first.
+- Type what to do (*make it twice as tall*, *brushed steel*, *bevel these
+  edges 2 mm*) and press **Enter**. **Esc**, or a click outside the box,
+  closes it. **Up** and **Down** bring back your last 8 prompts.
+- The quick buttons ask the common things at once: **Bigger**, **Smaller**,
+  **Copy Around** (eight copies in a circle). **Material...** starts the
+  prompt with *Change the material to* for you to finish. In edit mode they
+  extrude, inset and bevel instead.
+- The box closes when the request is sent. While the AI works, the status
+  bar shows the request; click it to stop. The AI's answer (its first
+  line) then shows as a message, and the whole exchange is in the AI
+  Assistant's conversation, so a follow-up there (*a bit more*) carries on.
+- Each request is one undo step, like the Assistant's.
+
+**What the AI is told.** The request goes with the selection: each
+selected object as `scene_summary` lists it (name, type, location,
+rotation, scale, size, material, modifiers), the active one first, 16 at
+most. In edit mode it gets the selected vertices (and the whole faces they
+make), their centre, and how the mesh operators act on them. The
+transcript shows only your prompt, with a note of what it was about.
+
+**Only the selection** (on by default, remembered): the AI is asked to
+change the selected objects only, and BeeModel checks that it did. Before
+the request every object is fingerprinted (its place, mesh, modifiers,
+material, and a light's colour); when it ends, objects outside the
+selection that changed or were deleted are named in a warning, for
+example *The AI also changed Light (not selected). Ctrl+Z undoes the
+request.* New objects don't count, so *put four copies around it* is fine.
+A material shared with other objects counts as theirs too.
+
+From the console or a script, `ai.ask <prompt>` sends a request about the
+selection without the box. It is not an MCP tool: an agent does not start
+another agent.
+
 ## Settings: Preferences › AI
 
 Open **Edit › Preferences** (Ctrl+,) and pick the **AI** category:
@@ -52,6 +96,7 @@ Open **Edit › Preferences** (Ctrl+,) and pick the **AI** category:
 |---|---|
 | The AI Assistant uses | The connection used by default (the area's picker changes the same setting) |
 | Also tell the AI | Text added to every request's instructions, such as a style, units, or what to avoid |
+| Only the selection | The Ask AI box's toggle: keep the AI to the selected objects (stored as `ai_only_selection`) |
 | Claude Code: Program, Model, Turns at most | The `claude` program (empty: the one on `PATH`), a model name or alias (empty: Claude Code's default), and how many rounds of tool calls one request may take (40) |
 | Grok CLI: Program, Model, Turns at most | The same for `grok` |
 | OpenRouter: API key, Model, Address, Steps at most | The key (masked), a model id with tool calling (`anthropic/claude-sonnet-4.5`), the API address (`https://openrouter.ai/api/v1`) and the step limit (30) |

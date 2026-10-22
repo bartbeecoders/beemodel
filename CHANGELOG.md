@@ -6,6 +6,24 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Ask AI about the selection (stage Q, #374-#377): **Alt+right-click** an
+  object, or **Ask AI...** at the top of the viewport's right-click menu,
+  opens a prompt at the pointer. The request goes to the AI Assistant's
+  connection with what is selected (objects as `scene_summary` lists them,
+  or the selected vertices and faces in edit mode), and comes back as one
+  undo step. Up / Down bring back the last prompts; quick buttons for
+  Bigger, Smaller, Material... and Copy Around; `ai.ask <prompt>` from the
+  console.
+- **Only the selection** (on by default): the AI is asked to keep to the
+  selection, and objects outside it that it changed or deleted anyway are
+  named in a warning.
+- While the AI works, the status bar shows the request (click: Stop); its
+  answer shows as a message.
+- `scene_summary` (and `bee://scene`) give each mesh's `size`: its box with
+  its modifiers, times its scale.
+- A toast's message is in `ui_tree` (the `status.toast` button's label).
+
 ## [1.0.0] - 2026-10-22
 
 The decisions, issues D1-D7 (#293-#299): the questions the masterplan left
