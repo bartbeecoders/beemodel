@@ -16,15 +16,17 @@ scripts/run.sh          # rebuilds if sources changed, then starts the app
 
 Requirements: `as` + `ld` (binutils) and a Wayland compositor (Hyprland, sway, GNOME, KDE...).
 
-BeeModel is free software under the [MIT License](LICENSE).
+BeeModel is free software under the [MIT License](LICENSE). From 1.0 on, `.bee` files open in
+every later version, and BeeScript and the MCP tools change only by adding
+([docs/DECISIONS.md](docs/DECISIONS.md)).
 
 ### Download a release
 
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.24.0/beemodel-0.24.0-linux-x86_64.bin
-chmod +x beemodel-0.24.0-linux-x86_64.bin && ./beemodel-0.24.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v1.0.0/beemodel-1.0.0-linux-x86_64.bin
+chmod +x beemodel-1.0.0-linux-x86_64.bin && ./beemodel-1.0.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
@@ -1000,7 +1002,7 @@ src/rig.s       constraints, IK (FABRIK / CCD), drivers, motion paths, onion ski
 src/shape.s     shape keys
 src/clip.s      contact points between polytopes: faces clipped
 src/collide.s   convex collision: support functions, GJK, EPA
-src/mech.s      mechanisms: revolute / slider joints, gears, limits, collisions
+src/mech.s      mechanisms: revolute / slider joints, gears, limits, collisions; mates
 src/cloth.s     cloth and soft bodies: XPBD, pins, colliders, self collision, wind
 src/rbody.s     rigid bodies: broad phase, contact manifolds, the solver, islands, joints,
                 heightfields, water
