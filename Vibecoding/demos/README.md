@@ -1,9 +1,10 @@
 # Demo scenes
 
-Short scenes built around the newest features: the rigid body solver
-(v0.17), ground and landscapes (v0.18), shatter (v0.19), and particles and
-liquid (v0.22). Each is one BeeScript file that builds the whole scene. It
-replaces whatever is open.
+Short scenes, each one BeeScript file that builds the whole scene (it
+replaces whatever is open). The first eight show the physics: the rigid body
+solver (v0.17), ground and landscapes (v0.18), shatter (v0.19), and particles
+and liquid (v0.22). The six after them show the rest of BeeModel: CAD,
+mechanisms, geometry nodes, materials, cloth and animation.
 
 | Demo | Length | Shows |
 |---|---|---|
@@ -15,6 +16,12 @@ replaces whatever is open.
 | `dam-break.bees` | 6 s | A column of 50 000 **liquid** particles is let go in a glass tank. Its **surface** is meshed every frame, **spray** events make foam, the wave breaks round a concrete pier, and pine crates dropped into it **float** (the first, landing ahead of the water, stays on the bottom) while a steel ball rolls along it. |
 | `leaf-twister.bees` | 10 s | A **Vortex** field, keyed to wander, crosses an autumn park, with **Turbulence** for gusts. 18 000 leaves drawn as **objects** (turned at random, in three colours) lie on the lawn. The whirl lifts them up its funnel, and they settle again behind it. Dust **sprites** ride the same fields. |
 | `rainstorm.bees` | 8 s | 40 000 drops a second fall on a valley **landscape** and on a cabin's roof (rigid body triangles). Each **hit** kills the drop and throws up three splashes. A **Wind** field whose strength is keyed rises with the squall and slants the rain. |
+| `parametric-enclosure.bees` | 6 s | A **CAD part** from features: a constrained sketch **padded**, its vertical edges **filleted**, **shelled** to 4 mm, a row of vent **holes** made by a **pattern**, and a lid. The width is a **parameter** that is keyed, so the whole feature tree rebuilds as it plays, and the rounds and vents follow. |
+| `gear-train.bees` | 8 s | Four spur gears (12, 30, 18 and 40 teeth) modelled as **signed-distance shapes**, on pins placed in a base plate by **assembly mates**. The first is driven by the frame, and each other one is a **revolute joint geared** to the one before (−teeth₁/teeth₂). The **collision check** reports 0 all the way through. |
+| `procedural-valley.bees` | 8 s | Only **geometry nodes**: an eroded **terrain** rises out of a lake (its height is keyed), and two more trees **distribute** points on the same land and **instance** trunks and crowns on them (same seed, so they line up) and boulders. An **L-system** oak stands on the hill. |
+| `material-gallery.bees` | 10 s | All 20 **material presets**, each on its own SDF shape (sphere, rounded box, torus, a blended knot) on a plinth in a dark curved gallery: metals, dielectrics, glass and water, an emitter, and the five procedural ones built from node graphs. The camera walks the row. |
+| `cloth-and-wind.bees` | 6 s | The **cloth** solver: a 6 561-particle tablecloth drapes over a round table and a vase (**self-collision**, **colliders**), a flag **pinned** to its pole flies in a keyed **Wind field** with gusts, and three jelly **soft bodies** drop and wobble back into shape. |
+| `orrery.bees` | 12 s | A clockwork solar system with no keys on the planets: each hub is turned by a **driver** (an expression of the frame), arms and planets are **parented** to it, and the Moon has a hub of its own. Jupiter's bands and the Earth's seas are small **node graphs**. The Sun **emits** light, and the camera circles with a **Track To** constraint on it. |
 
 ## Running them
 

@@ -1,0 +1,85 @@
+# Parametric Enclosure — BeeModel v1.0 demo
+# A CAD part built from features: a sketch padded into a box, its vertical edges
+# rounded, shelled to 4 mm walls, a row of vent holes patterned along the front,
+# and a lid padded from its own sketch. The width is a parameter, keyed: as the
+# animation plays the whole feature tree rebuilds, and the rounds, walls and
+# vents follow.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+op("anim.range", "1 180 30")
+
+param("w", "320mm")                 # the width (keyed below)
+param("d", "200mm")                 # depth
+param("h", "110mm")                 # height of the base
+param("wall", "4mm")
+param("r", "18mm")                  # the corner rounds
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Shell", 0.86, 0.36, 0.08, 0.38, 0)
+mat("Lid", 0.08, 0.09, 0.1, 0.3, 0)
+mat("Studio", 0.82, 0.83, 0.85, 0.8, 0)
+material("Feet"); op("material.preset", "aluminium Feet")
+
+# the base: a rectangle in the ground plane (x along the width, the depth toward -z), its size held by the parameters
+s = sketch("Base", "XZ")
+r = rect(s, 0, 0, 0.32, 0.2)
+con(s, "length", r, "w")
+con(s, "length", r + 1, "d")
+b = pad("Box", s, "h")
+fillet("Box", "r", "vertical")
+shell("Box", b, "wall")
+assign("Box", "Shell")
+
+# vents: one hole on the front, then a row of them along x
+v = sketch("Vents", "XY")
+point(v, 0.05, 0.075)
+k = hole("Box", v, "9mm", "6mm")
+pattern("Box", k, 9, "(w - 100mm) / 8", "x")
+
+# the lid sits on top, from a sketch lifted to the base's height
+l = sketch("LidSketch", "XZ", 0.112)
+lr = rect(l, 0, 0, 0.32, 0.2)
+con(l, "length", lr, "w")
+con(l, "length", lr + 1, "d")
+pad("Lid", l, "14mm")
+fillet("Lid", "r", "vertical")
+fillet("Lid", "5mm", "top")
+assign("Lid", "Lid")
+print("features", features(), "status", fstatus(0), fstatus(1), fstatus(2), fstatus(3))
+
+# four feet
+for i in 0..4 {
+    x = 0.04 + (i % 2) * 0.24
+    z = -0.03 - floor(i / 2) * 0.14
+    f = add("cylinder", "Foot" + i, x, -0.006, z); scale(f, 0.012, 0.006, 0.012); assign(f, "Feet")
+}
+
+# the width grows, waits and comes back
+key("param:w", 1, 0.32)
+key("param:w", 30, 0.32)
+key("param:w", 90, 0.52)
+key("param:w", 120, 0.52)
+key("param:w", 170, 0.32)
+
+# a studio sweep, a key light, a rim light and a slow orbit
+g = add("plane", "Floor", 0.2, -0.012, -0.1); scale(g, 3); assign(g, "Studio")
+bk = add("cube", "Backdrop", 0.2, 0.6, -0.9); scale(bk, 3, 0.6, 0.02); assign(bk, "Studio")
+add("light", "Key", 0.9, 1.2, 0.9); op("light.set", "power 0.012")
+add("light", "Rim", -0.6, 0.6, -0.5); op("light.set", "power 0.006")
+# shot(frame, camera place, the point it looks at): keys the camera there
+fn shot(f, x, y, z, tx, ty, tz) {
+    dx = x - tx; dy = y - ty; dz = z - tz
+    key("Cam:x", f, x); key("Cam:y", f, y); key("Cam:z", f, z)
+    key("Cam:ry", f, atan2(dx, dz)); key("Cam:rx", f, -atan2(dy, sqrt(dx * dx + dz * dz)))
+}
+add("camera", "Cam", 0.85, 0.45, 0.8)
+shot(1, 1.15, 0.5, 0.8, 0.17, 0.06, -0.1)
+shot(90, 0.75, 0.62, 1.05, 0.27, 0.06, -0.1)
+shot(180, -0.45, 0.48, 0.85, 0.17, 0.06, -0.1)
+select("Cam"); op("camera.set", "active")
+op("world.strength", 0.35)
+view(35, 25, 1.4, 0.2, 0.06, -0.1)
+frame(1)
