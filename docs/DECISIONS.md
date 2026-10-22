@@ -135,3 +135,22 @@ peer, on localhost or `lan`. Over the internet, use an SSH tunnel or WireGuard. 
 * The key authenticates, it does not encrypt (no TLS in an assembly program with no
   libraries). [LIVELINK.md](LIVELINK.md#session-keys) has the protocol and the tunnel
   recipe.
+
+## D7 · Release v1.0.0: what stays stable
+
+*Released 2026-10-22 ([#299](https://github.com/bartbeecoders/beemodel/issues/299)).*
+
+v1.0.0 makes three promises for every 1.x version:
+
+1. **Files.** A `.bee` file saved by 1.0 opens in every later version, with everything as
+   it was. `tests/compat.py` opens `tests/fixtures/compat/v1.0.bee` (meshes, modifiers, a
+   material, keys, CAD features, an armature, folders, a landscape, a force field, a
+   mechanism, a node tree) and compares every property with what 1.0 read. The file is
+   never regenerated.
+2. **BeeScript** changes only by adding (D1). `tests/beescript.py` holds the 50 tasks.
+3. **MCP tools** change only by adding: no tool is removed or renamed, and no argument
+   changes meaning (D3). `tests/mcp_schema.py` fails when a published tool is gone.
+
+Not promised: the look of the UI, the default scene, key bindings (D2 presets aside),
+file sizes, speed, and anything a test does not pin down. The 2.0 plan carries on from
+here (smoke and fire, then v2.0.0).

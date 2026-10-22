@@ -9,6 +9,7 @@ BEEMODEL_THREADS=0 ./build/beemodel --selftest
 BEEMODEL_THREADS=3 ./build/beemodel --selftest
 scripts/build.sh debug >/dev/null && scripts/build.sh >/dev/null
 timeout 300 python3 tests/beescript.py build/beemodel
+timeout 300 python3 tests/compat.py build/beemodel
 timeout 300 python3 tests/bool_stress.py build/beemodel --cases 300
 timeout 300 python3 tests/image_io.py build/beemodel
 timeout 600 python3 tests/enclosure.py build/beemodel

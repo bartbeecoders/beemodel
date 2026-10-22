@@ -6,6 +6,21 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-22
+
+The decisions, issues D1-D7 (#293-#299): the questions the masterplan left
+open are settled in [docs/DECISIONS.md](docs/DECISIONS.md), and 1.0 makes
+promises for every 1.x version:
+
+- **Files.** A `.bee` file saved by 1.0 opens in every later version.
+  `tests/compat.py` opens a 1.0 file with a bit of everything and checks
+  it, from now on in every CI run.
+- **BeeScript.** The grammar is frozen (docs/BEESCRIPT.md). Nothing that
+  runs changes meaning; built-ins may be added. `tests/beescript.py`: 50
+  agent tasks.
+- **MCP.** Tools are only added, none removed or renamed. The schema is
+  published as docs/mcp-tools.json and checked against the server.
+
 ### Added
 - docs/DECISIONS.md: the decisions for v1.0 (stage D of the 2.0 plan).
 - BeeScript's grammar, written out in docs/BEESCRIPT.md, and frozen for
@@ -30,6 +45,8 @@ project uses [Semantic Versioning](https://semver.org/).
   refused, and every message is authenticated (SipHash-2-4, per-connection
   keys from nonces, counters against replay). docs/LIVELINK.md documents it,
   and how to work over the internet through SSH or WireGuard.
+- `tests/compat.py` and tests/fixtures/compat/v1.0.bee (D7, #299): the
+  file every later version must open as 1.0 saved it.
 
 ## [0.24.0] - 2026-10-21
 
@@ -2276,7 +2293,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/bartbeecoders/beemodel/compare/v0.24.0...v1.0.0
 [0.24.0]: https://github.com/bartbeecoders/beemodel/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/bartbeecoders/beemodel/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/bartbeecoders/beemodel/compare/v0.22.0...v0.22.1

@@ -1,0 +1,20 @@
+objects 11
+Camera t2 @7.4,5.3,6.9 r-0.483,0.82,0 s1,1,1 c6402031 h0 fnil pnil
+Light t1 @4,6,1 r0,0,0 s1,1,1 c15057019 h0 fnil pnil
+Cube t0 @1,2,3 r0.1,0.2,0.3 s1,2,1 c3377356 h0 fProps pnil mesh 8/6 eval 8/6 mods 0 mat nil
+Ball t0 @-3,1,0 r0,0,0 s1,1,1 c11843776 h0 fProps pnil mesh 482/512 eval 1986/1984 mods 1 mat Gold
+Base t3 @0,0,0 r0,0,0 s1,1,1 c9083824 h0 fnil pnil
+Part t0 @0,0,0 r0,0,0 s1,1,1 c11843776 h0 fnil pnil mesh 40/22 eval 40/22 mods 0 mat nil
+Rig t4 @0,0,0 r0,0,0 s1,1,1 c11843776 h0 fnil pnil
+Landscape t0 @0,0,0 r0,0,0 s1,1,1 c11843776 h0 fnil pnil mesh 4225/4096 eval 4225/4096 mods 0 mat nil
+Pull t5 @0,0,0 r0,0,0 s1,1,1 c10145952 h0 fnil pnil
+Pin t0 @0.56,0,0 r-0.035,0,-1.571 s0.1,0.5,0.1 c11843776 h0 fnil pnil mesh 64/34 eval 64/34 mods 0 mat nil
+Floor t0 @0,-1,0 r0,0,0 s1,1,1 c11843776 h0 fnil pnil mesh 4/1 eval 16/9 mods 1 mat nil
+vertex0 -1.5,-1
+Gold 1 1 0.3
+key 3
+features 2 status 0,0 w 0.06
+bones 1 folders 1
+light 2 lens 35
+joint 0.035
+fields 1

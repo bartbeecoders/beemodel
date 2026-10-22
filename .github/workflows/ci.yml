@@ -55,6 +55,9 @@ jobs:
       - name: BeeScript frozen for 1.x (50 agent tasks)
         run: timeout 300 python tests/beescript.py build/beemodel
 
+      - name: Files from 1.0 open as they were (tests/fixtures/compat)
+        run: timeout 300 python tests/compat.py build/beemodel
+
       - name: Boolean stress corpus (exact identities, closed results)
         run: timeout 300 python tests/bool_stress.py build/beemodel --cases 300
 
