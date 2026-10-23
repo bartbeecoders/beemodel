@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-23
+
+Ask AI about the selection, issues Q1-Q5 (#374-#378): a prompt at the
+pointer about what is selected, answered by the AI Assistant's connection
+as one undo step.
+
 ### Added
 - Ask AI about the selection (stage Q, #374-#377): **Alt+right-click** an
   object, or **Ask AI...** at the top of the viewport's right-click menu,
@@ -2311,7 +2317,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/bartbeecoders/beemodel/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bartbeecoders/beemodel/compare/v0.24.0...v1.0.0
 [0.24.0]: https://github.com/bartbeecoders/beemodel/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/bartbeecoders/beemodel/compare/v0.22.1...v0.23.0
