@@ -31,6 +31,7 @@
 .globl pf_dep
 .globl pf_scale
 .globl pf_merge
+.globl pf_nest
 .globl pf_earclip
 .globl pf_tri
 .globl pf_ntri
@@ -607,7 +608,8 @@ reverse:
 9:  ret
 
 # nest - depth by containment, parent = the smallest container; material
-#   loops counter-clockwise, holes clockwise
+#   loops counter-clockwise, holes clockwise (pf_nest: the same, for text3d.s)
+pf_nest:
 nest:
     push    rbx
     push    r12

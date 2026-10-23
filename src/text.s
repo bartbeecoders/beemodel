@@ -16,6 +16,7 @@
 .globl draw_heading
 .globl draw_small
 .globl draw_text
+.globl sans_paths
 .globl text_width
 .globl text_width_n
 .globl text_use

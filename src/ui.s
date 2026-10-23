@@ -149,7 +149,7 @@ items_select:   .quad op_select_all, 0, op_mesh_all, op_mesh_inv, op_mesh_linked
 .equ items_select_n, (. - items_select) / 8
 items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad op_add_torus, op_add_plane, op_add_grid, 0, op_add_ground, sub_landscape, op_la_water, 0, op_ref_add, 0, sub_curve
-                .quad op_cad_sketch, sub_generate
+                .quad op_tx_add, op_cad_sketch, sub_generate
                 .quad 0, op_add_light, op_add_camera, op_add_armature, sub_field, sub_part
 .equ items_add_n, (. - items_add) / 8
 items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, sub_snap, sub_parent, op_fd_move, 0

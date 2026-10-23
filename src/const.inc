@@ -386,6 +386,7 @@
 .equ ME_VGEO,       208     # cluster LOD DAG (vgeo.s: shared, reference counted), or 0
 .equ ME_VGOK,       216     # u32: ME_VER + 1 when ME_VGEO was checked to be its DAG (negative: not)
 .equ ME_LAND,       224     # the landscape it shows (landscape.s: shared, reference counted), or 0
+.equ ME_TEXT,       232     # the text it was made from (text3d.s: shared, reference counted), or 0
 .equ ME_HDR,        240
 
 # ---- materials (material.s, graph.s) -------------------------------------------------
@@ -514,6 +515,30 @@
 .equ FF_SOFT,       48      # attractor: softening radius (m)
 .equ FF_SEED,       52      # turbulence, gusts: another pattern
 .equ FF_SZ,         64
+.equ TX_REFS,       0       # a text block (text3d.s), one page: references,
+.equ TX_VER,        4       #  format version,
+.equ TX_ALIGN,      8       #  alignment 0 left, 1 centre, 2 right,
+.equ TX_RMODE,      12      #  reveal: 0 pop, 1 scale, 2 rise, 3 drop
+.equ TX_FLOATS,     16      # then floats (keyframable: text:<name>:<key>, in this order):
+.equ TX_SIZE,       16      #  the em height (m)
+.equ TX_DEPTH,      20      #  extrusion (m)
+.equ TX_BEVEL,      24      #  bevel width (m)
+.equ TX_SPACING,    28      #  extra letter spacing (em)
+.equ TX_LINE,       32      #  line height (em)
+.equ TX_QUALITY,    36      #  curve detail (1: normal)
+.equ TX_REVEAL,     40      #  0..1 of the characters shown
+.equ TX_SOFT,       44      #  over how many characters one appears
+.equ TX_WAVE,       48      #  wave height (em)
+.equ TX_WLEN,       52      #  wavelength (characters)
+.equ TX_PHASE,      56      #  wave phase (turns)
+.equ TX_SHEAR,      60      #  slant (x per y)
+.equ TX_NFLOAT,     12
+.equ TX_HASH,       64      # u64: the expanded body it was last built from (a cache)
+.equ TX_FONT,       128     # font: a .ttf path, or a name; empty: the default
+.equ TX_FONT_MAX,   256
+.equ TX_BODY,       384     # the text, UTF-8, 0-ended; \n starts a line
+.equ TX_BODY_MAX,   2048
+.equ TX_SZ,         4096
 .equ PS_UID,        0       # a particle system's record (particles.s): its emitter's uid
 .equ PS_FLAGS,      4       # 1: off
 .equ PS_FROM,       8       # emits from: 0 faces, 1 the volume, 2 vertices, 3 a point (its origin)

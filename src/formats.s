@@ -86,6 +86,7 @@
 .equ TAG_LMAP,      0x50414D4C          # "LMAP"
 .equ TAG_CURV,      0x56525543          # "CURV"
 .equ TAG_LAND,      0x444E414C          # "LAND"
+.equ TAG_TEXT,      0x54584554          # "TEXT"
 .equ TAG_ANIM,      0x4D494E41          # "ANIM"
 .equ TAG_ARMT,      0x544D5241          # "ARMT"
 .equ TAG_MWGT,      0x5447574D          # "MWGT"
@@ -163,6 +164,7 @@ lmap_chunk:     .skip 8
 lmap_size:      .skip 4
 curv_chunk:     .skip 8
 land_chunk:     .skip 8
+text_chunk:     .skip 8
 anim_chunk:     .skip 8
 anim_size:      .skip 4
 armt_chunk:     .skip 8
@@ -178,6 +180,7 @@ simc_size:      .skip 4
 oi_line:        .skip 4                 # OBJ import: an "l" line
 curv_size:      .skip 4
 land_size:      .skip 4
+text_size:      .skip 4
 mvcl_size:      .skip 4
 .align 8
 uids_size:      .skip 4
@@ -531,6 +534,10 @@ bee_save:
     mov     edi, TAG_LAND               # LAND (the landscapes meshes show)
     call    chunk_begin
     call    land_write
+    call    chunk_end
+    mov     edi, TAG_TEXT               # TEXT (the texts meshes were made from)
+    call    chunk_begin
+    call    tx_write
     call    chunk_end
     mov     edi, TAG_ANIM               # ANIM (keyframes, the frame range)
     call    chunk_begin
@@ -1327,6 +1334,7 @@ bee_load:
     mov     qword ptr [rip+lmap_chunk], 0
     mov     qword ptr [rip+curv_chunk], 0
     mov     qword ptr [rip+land_chunk], 0
+    mov     qword ptr [rip+text_chunk], 0
     mov     qword ptr [rip+anim_chunk], 0
     mov     qword ptr [rip+armt_chunk], 0
     mov     qword ptr [rip+mwgt_chunk], 0
@@ -1463,10 +1471,16 @@ bee_load:
     mov     [rip+curv_size], ebp
     jmp     23f
 2829:cmp    eax, TAG_LAND
-    jne     281f
+    jne     2830f
     lea     rax, [rbx+8]
     mov     [rip+land_chunk], rax
     mov     [rip+land_size], ebp
+    jmp     23f
+2830:cmp    eax, TAG_TEXT
+    jne     281f
+    lea     rax, [rbx+8]
+    mov     [rip+text_chunk], rax
+    mov     [rip+text_size], ebp
     jmp     23f
 281:cmp     eax, TAG_NTRE
     jne     2811f
@@ -1674,6 +1688,11 @@ bee_load:
     jz      7742f
     mov     esi, [rip+land_size]
     call    land_read
+    mov     rdi, [rip+text_chunk]       # texts
+    test    rdi, rdi
+    jz      7742f
+    mov     esi, [rip+text_size]
+    call    tx_read
 7742:mov     rdi, [rip+armt_chunk]       # armatures
     test    rdi, rdi
     jz      7743f

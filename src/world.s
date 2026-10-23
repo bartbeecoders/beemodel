@@ -261,6 +261,8 @@ obj_part:
     jz      9f
     cmp     qword ptr [rcx+ME_CURVE], 0
     jne     9f
+    cmp     qword ptr [rcx+ME_TEXT], 0
+    jne     9f
     cmp     qword ptr [rcx+ME_ARM], 0
     jne     9f
     cmp     qword ptr [rcx+ME_WGT], 0

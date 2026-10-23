@@ -300,6 +300,9 @@ mesh_uv_free:
     mov     rdi, [rbx+ME_LAND]          # (the landscape it shows)
     mov     qword ptr [rbx+ME_LAND], 0
     call    la_unref
+    mov     rdi, [rbx+ME_TEXT]          # (the text it was made from)
+    mov     qword ptr [rbx+ME_TEXT], 0
+    call    tx_unref
     pop     rbx
     ret
 uv_unmap:
