@@ -21,6 +21,7 @@
 .globl op_render_start
 .globl op_render_stop
 .globl op_render_save
+.globl op_render_anim
 .globl op_render_pass
 .globl op_render_settings
 .globl op_render_device
@@ -76,6 +77,8 @@ s_rn_dev:       .asciz "  render device: "
 s_rn_anim:      .asciz "  rendered frames "
 s_rn_anim2:     .asciz " to "
 s_rn_anim3:     .asciz ", ms: "
+s_rn_anim4:     .asciz " -> "
+s_rn_anim5:     .asciz " (stopped)"
 s_rn_animneed:  .asciz "  render.animation <folder> [first last]"
 s_rn_animfail:  .asciz "  render.animation: could not render or write the frames"
 s_rn_mb:        .asciz "  motion blur: the shutter open "
@@ -135,7 +138,8 @@ OPERATOR op_render_stop, "render.stop", "Stop Render", do_render_stop, flags=OPF
 OPERATOR op_render_save, "render.save", "Save Render...", do_render_save, doc="Save the render as PNG, or .exr (linear half floats): render.save <path> [beauty|albedo|normal|depth]", poll=poll_render, form=form_rsave
 OPERATOR op_render_pass, "render.pass", "Next Render Pass", do_render_pass, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show a render pass: render.pass [beauty|albedo|normal|depth] (none: the next)", poll=poll_render
 OPERATOR op_render_device, "render.device", "Render Device", do_render_device, flags=OPF_AI_SAFE|OPF_QUIET, doc="Where renders run: render.device [auto|rtx|gpu|cpu] (auto: the best there is - RTX ray tracing, the GPU, else the CPU; none: says which; kept in the preferences)"
-OPERATOR op_render_anim, "render.animation", "Render Animation", do_render_anim, flags=OPF_AI_SAFE, doc="Render every frame into a folder of PNGs (0001.png ...) at the render settings: render.animation <folder> [first last] (none: the animation's range). On the GPU the next frame is simulated and built while it traces one"
+OPERATOR op_render_anim, "render.animation", "Render Animation...", job_render_anim, flags=OPF_AI_SAFE, doc="Render every frame at the render settings into a video or a folder: render.animation <file or folder> [first last] (none: the animation's range). .mp4 .mov .mkv .webm .gif go through ffmpeg; .apng is an animated PNG; .png or a folder: 0001.png ... Esc stops it, keeping the frames done", form=form_ranim
+JOB_OP job_render_anim, do_render_anim, "Rendering the animation (Esc stops)"
 OPERATOR op_render_reuse, "render.sample_reuse", "Sample Reuse", do_render_reuse, flags=OPF_AI_SAFE, doc="Animation renders (render.animation, render_frames) reuse samples from up to so many frames before where a pixel sees the same surface, tracing only samples / (frames + 1) new ones: render.sample_reuse <frames> (0: off, up to 16)"
 OPERATOR op_render_mblur, "render.motion_blur", "Motion Blur", do_render_mblur, flags=OPF_AI_SAFE, doc="Motion blur: render.motion_blur <shutter> - how long the shutter is open, as a part of a frame (0.5: half of it; 0: off). Particle balls are drawn where they are at each sample's time: rain streaks"
 OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>", form=form_render
@@ -524,6 +528,7 @@ do_render_anim:
     call    an_range
     mov     [rsp+8], eax
     mov     [rsp], edx
+    movss   [rsp+16], xmm0              # (+16 the fps, +20 a video)
     mov     rsi, rbx
     lea     rdx, [rsi+64]
     call    parse_float
@@ -539,6 +544,17 @@ do_render_anim:
     mov     [rsp], eax
 3:  lea     rdi, [rsp+32]
     call    path_expand
+    lea     rdi, [rip+path_buf]         # a video? (video.s)
+    mov     esi, [rip+rn_w]
+    mov     edx, [rip+rn_h]
+    mov     ecx, [rsp]
+    sub     ecx, [rsp+8]
+    inc     ecx
+    movss   xmm0, [rsp+16]
+    call    vid_open
+    test    eax, eax
+    js      9f
+    mov     [rsp+20], eax
     lea     rdi, [rip+path_buf]
     mov     esi, [rip+rn_w]
     mov     edx, [rip+rn_h]
@@ -546,9 +562,17 @@ do_render_anim:
     mov     r8d, [rip+rn_denoise]
     mov     r9d, [rsp+8]
     call    hive_render_frames
-    test    eax, eax
-    js      .Lra_fail
     mov     r12d, eax
+    cmp     dword ptr [rsp+20], 0       # the video finished
+    je      4f
+    xor     edi, edi
+    test    eax, eax
+    setns   dil
+    call    vid_close
+    test    eax, eax
+    js      9f                          # (it said why)
+4:  test    r12d, r12d
+    js      .Lra_fail
     call    fmt_reset
     lea     rdi, [rip+s_rn_anim]
     call    fmt_str
@@ -556,13 +580,23 @@ do_render_anim:
     call    fmt_int
     lea     rdi, [rip+s_rn_anim2]
     call    fmt_str
-    mov     edi, [rsp]
+    mov     edi, [rip+rf_last]
     call    fmt_int
-    lea     rdi, [rip+s_rn_anim3]
+    cmp     dword ptr [rsp+20], 0
+    je      5f
+    lea     rdi, [rip+s_rn_anim4]
+    call    fmt_str
+    lea     rdi, [rip+vd_path]
+    call    fmt_str
+5:  lea     rdi, [rip+s_rn_anim3]
     call    fmt_str
     mov     edi, r12d
     call    fmt_int
-    lea     rdi, [rip+fmt_buf]
+    cmp     dword ptr [rip+job_stop], 0
+    je      6f
+    lea     rdi, [rip+s_rn_anim5]
+    call    fmt_str
+6:  lea     rdi, [rip+fmt_buf]
     call    log_line
     jmp     9f
 .Lra_need:

@@ -161,7 +161,7 @@ items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
                 .quad op_m_bridge, op_m_spin, op_m_fill, op_m_dissolve, op_m_dup, 0
                 .quad sub_merge, sub_mdelete, sub_separate, sub_normals, sub_uv, 0, op_cursor_reset
 .equ items_mesh_n, (. - items_mesh) / 8
-items_render:   .quad op_render_start, op_render_stop, 0, op_render_pass, op_render_save, 0
+items_render:   .quad op_render_start, op_render_stop, 0, op_render_anim, 0, op_render_pass, op_render_save, 0
                 .quad op_render_denoise, op_render_settings, 0, op_object_bake
 .equ items_render_n, (. - items_render) / 8
 items_help:     .quad op_help_keys, op_welcome, op_area_type_help, 0, op_console_ops, op_help_about
@@ -1684,8 +1684,8 @@ ui_key_repeat:
     jz      kb_repeat_stop
 # ui_key_press(edi=evdev) - one key stroke: menus, text field, then keymap
 ui_key_press:
-    cmp     dword ptr [rip+job_on], 0   # (a long job runs: no input)
-    jne     job_ignore
+    cmp     dword ptr [rip+job_on], 0   # (a long job runs: Esc only)
+    jne     job_key
     cmp     qword ptr [rip+pr_capture], 0  # Preferences > Keymap waits for a key
     jne     prefs_key
     cmp     dword ptr [rip+tm_mode], 0  # a running transform takes every key

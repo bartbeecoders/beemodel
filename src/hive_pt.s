@@ -47,6 +47,8 @@
 .globl hv_ms
 .globl hive_render_file
 .globl hive_render_frames
+.globl rf_out
+.globl rf_last
 .globl hv_pass
 .globl hv_next
 .globl hv_m2
@@ -4004,8 +4006,9 @@ hive_render_frames:
     push    r15
     push    rbp
     sub     rsp, 56                     # +0 the last frame, +4 denoise,
-    mov     [rsp+4], r8d                #  +24 the start, +32 hv_pass
-    mov     r15d, r9d
+    mov     [rsp+4], r8d                #  +8 the first, +24 the start,
+    mov     r15d, r9d                   #  +32 hv_pass
+    mov     [rsp+8], r9d
     mov     eax, [rsp+112]
     mov     [rsp], eax
     cmp     r15d, eax
@@ -4089,6 +4092,16 @@ hive_render_frames:
     call    an_set_frame
     call    hive_scene
 .Lrf_frame:
+    mov     eax, [rsp]                  # a long job: this frame's share
+    sub     eax, [rsp+8]
+    inc     eax
+    cvtsi2ss xmm1, eax
+    mov     eax, r15d
+    sub     eax, [rsp+8]
+    cvtsi2ss xmm0, eax
+    divss   xmm0, xmm1
+    rcpss   xmm1, xmm1
+    call    job_stage
     mov     ecx, r14d                   # history to reuse: the target /
     cmp     dword ptr [rip+rf_ron], 0   #  (frames + 1) new samples, up
     je      32f
@@ -4172,6 +4185,8 @@ hive_render_frames:
     mov     dword ptr [rip+rf_has], 1
     cmp     dword ptr [rip+rf_err], 0
     jne     .Lrf_fail
+    cmp     dword ptr [rip+job_stop], 0 # Esc: the frames done so far
+    jne     .Lrf_end
     cmp     r15d, [rsp]
     jge     .Lrf_end
     inc     r15d
@@ -4181,6 +4196,7 @@ hive_render_frames:
     call    an_set_frame
     jmp     .Lrf_frame
 .Lrf_end:
+    mov     [rip+rf_last], r15d
     call    rf_flush
     cmp     dword ptr [rip+rf_err], 0
     jne     .Lrf_fail
@@ -4235,7 +4251,20 @@ rf_flush:
     je      9f
     push    rbx
     mov     dword ptr [rip+rf_has], 0
-    lea     rbx, [rip+rf_path]
+    mov     rax, [rip+rf_out]           # a video (video.s)
+    test    rax, rax
+    jz      0f
+    mov     rdi, [rip+rf_pix]
+    mov     esi, [rip+rf_w]
+    mov     edx, [rip+rf_h]
+    mov     ecx, [rip+rf_film]
+    call    rax
+    test    eax, eax
+    jz      7f
+    mov     dword ptr [rip+rf_err], 1
+7:  pop     rbx
+    ret
+0:  lea     rbx, [rip+rf_path]
     mov     eax, [rip+rf_len]
     add     rbx, rax
     mov     byte ptr [rbx], '/'
@@ -4980,6 +5009,11 @@ hv_debug:       .skip 4
 gt_batch:       .skip 4                 # gpu_tick's samples per batch
 gt_cpu:         .skip 4                 # hive_start without the GPU
 hv_pre:         .skip 4                 # hive_scene's built it: its result + 1
+rf_out:         .skip 8                 # (video.s) where frames go instead of
+                                        #  PNGs: rf_out(rdi=pixels, esi=w,
+                                        #  edx=h, ecx=alpha) -> eax = 0 ok
+rf_last:        .skip 4                 # the last frame written
+.align 8
 rf_pix:         .skip 8                 # hive_render_frames: the frame resolved
 rf_pend:        .skip 4                 #  last, its number, 1 if its PNG is
 rf_has:         .skip 4                 #  not written yet, its alpha
