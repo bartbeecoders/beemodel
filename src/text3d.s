@@ -47,6 +47,10 @@
 .globl tf_names
 .globl tf_index
 .globl tf_label
+.globl tx_chan
+.globl tx_frame
+.globl tx_keyidx
+.globl tx_keyname
 
 .equ PF_MAXP,   8192                    # (prof.s: loop points, loops)
 .equ PF_MAXL,   128
@@ -58,6 +62,7 @@
 .equ MAP_SCRATCH, 0x4022                # private | anonymous | noreserve
 .equ MAP_ANON_PRIV, 0x22
 .equ QBASE,     256                     # outline units per em at quality 1
+.equ TP_MAX,    64                      # texts keyed in one frame (more: built at once)
 .equ TFL_N,     4096                    # fonts found on the system
 .equ TFL_NAME,  64
 .equ SYS_OPEN_, 2
@@ -106,6 +111,11 @@ tg_n:           .skip 4                 # characters (reveal counts them)
 tl_open:        .skip 4                 # collecting: a loop is open,
 tl_skip:        .skip 4                 #  ignored (too many),
 tl_start:       .skip 4                 #  where it starts
+tp_n:           .skip 4                 # keyed values waiting for tx_frame:
+tp_uid:         .skip 4*TP_MAX          #  the object,
+.align 8
+tp_blk:         .skip 8*TP_MAX          #  its new block
+tx_nb:          .skip 64                # a number, as text
 tg_z:           .skip 16                # the layers' z: front, (bevel) outer front,
                                         #  outer back, back
 tb_outer:       .skip 16*PF_MAXP        # a bevelled glyph's outline before the inset
@@ -122,6 +132,10 @@ tfl_pb:         .skip 1024              # the folder being looked through
 td_one:         .double 1.0
 td_eps:         .double 1.0e-9
 td_half:        .double 0.5
+td_whole:       .double 0.0005
+td_big:         .double 2.0e9
+.align 16
+td_abs:         .quad 0x7fffffffffffffff, 0
 tx_defs:        .float 1.0, 0.2, 0.0, 0.0, 1.2, 1.0, 1.0, 1.0, 0.0, 8.0, 0.0, 0.0
 tq_one:         .float 1.0
 tq_half:        .float 0.5
@@ -148,7 +162,11 @@ s_nofont:       .asciz "  text: no such font (the default is used): "
 s_tomesh:       .asciz "  now a plain mesh: "
 s_default_l:    .asciz "Default"
 s_need:         .asciz "Select a text object"
+s_q:            .asciz "?"
 s_env_home:     .asciz "HOME="
+s_frame:        .asciz "frame"
+s_time:         .asciz "time"
+s_fps:          .asciz "fps"
 s_fd1:          .asciz "/usr/share/fonts"
 s_fd2:          .asciz "/usr/local/share/fonts"
 s_fd3:          .asciz "/.local/share/fonts"
@@ -223,6 +241,8 @@ tx_keys:        .quad k_size
                 .long 4, 0
                 .quad 0
 tx_aligns:      .quad k_left, k_center, k_right, k_centre, 0
+tx_fkeys:       .quad k_size, k_depth, k_bevel, k_spacing, k_line, k_quality, k_reveal
+                .quad k_soft, k_wave, k_wlen, k_phase, k_slant, 0  # (TX_FLOATS order)
 tx_modes:       .quad k_pop, k_scale, k_rise, k_drop, k_type, 0
 
 .text
@@ -1855,18 +1875,154 @@ tg_anim:
     pop     rbx
     ret
 
-# tx_expand(rdi=block) - tx_exp = the body as it is built
+# tx_expand(rdi=block) - tx_exp = the body as it is built: {expression}
+#   becomes its value now ({frame}, {time} in seconds, {fps}, any expression
+#   of them: {floor(time)}); {{ and }} are braces; one not understood stays
 tx_expand:
-    lea     rsi, [rdi+TX_BODY]
-    lea     rdi, [rip+tx_exp]
-    mov     ecx, TX_BODY_MAX-1
-1:  lodsb
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    lea     rbx, [rdi+TX_BODY]          # in
+    lea     r12, [rip+tx_exp]           # out
+    lea     r13, [rip+tx_exp+TX_BODY_MAX-1]
+.Lte_next:
+    cmp     r12, r13
+    jae     .Lte_end
+    movzx   eax, byte ptr [rbx]
+    test    eax, eax
+    jz      .Lte_end
+    inc     rbx
+    cmp     eax, '{'
+    je      .Lte_brace
+    cmp     eax, '}'                    # }}: a brace
+    jne     .Lte_put
+    cmp     byte ptr [rbx], '}'
+    jne     .Lte_put
+    inc     rbx
+.Lte_put:
+    mov     [r12], al
+    inc     r12
+    jmp     .Lte_next
+.Lte_brace:
+    cmp     byte ptr [rbx], '{'         # {{: a brace
+    jne     1f
+    inc     rbx
+    jmp     .Lte_put
+1:  mov     rsi, rbx                    # its end
+2:  movzx   ecx, byte ptr [rsi]
+    test    ecx, ecx
+    jz      .Lte_put                    # (none: as it is)
+    cmp     ecx, '}'
+    je      3f
+    inc     rsi
+    jmp     2b
+3:  mov     r14, rsi
+    mov     rcx, rsi                    # the expression into tk_buf
+    sub     rcx, rbx
+    cmp     ecx, TX_BODY_MAX-1
+    jae     .Lte_put
+    lea     rdi, [rip+tk_buf]
+    mov     rsi, rbx
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    mov     r15, [rip+expr_name_hook]
+    lea     rax, [rip+tx_name]
+    mov     [rip+expr_name_hook], rax
+    lea     rdi, [rip+tk_buf]
+    call    expr_eval
+    mov     [rip+expr_name_hook], r15
+    test    eax, eax
+    jz      7f
+    call    tx_num                      # -> tx_nb
+    lea     rsi, [rip+tx_nb]
+4:  lodsb
     test    al, al
+    jz      5f
+    cmp     r12, r13
+    jae     5f
+    mov     [r12], al
+    inc     r12
+    jmp     4b
+5:  lea     rbx, [r14+1]
+    jmp     .Lte_next
+7:  mov     al, '{'                     # not understood: as it is
+    jmp     .Lte_put
+.Lte_end:
+    mov     byte ptr [r12], 0
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tx_name(rdi=word) -> xmm0 (double), eax = 1 when it is frame, time or fps
+#   (expr.s's name hook while a body is expanded)
+tx_name:
+    push    rbx
+    sub     rsp, 16
+    mov     rbx, rdi
+    lea     rsi, [rip+s_frame]
+    call    str_eq
+    test    eax, eax
+    jz      1f
+    cvtss2sd xmm0, [rip+an_frame]
+    jmp     8f
+1:  mov     rdi, rbx
+    lea     rsi, [rip+s_fps]
+    call    str_eq
+    test    eax, eax
     jz      2f
-    stosb
-    dec     ecx
-    jnz     1b
-2:  mov     byte ptr [rdi], 0
+    call    an_range
+    cvtss2sd xmm0, xmm0
+    jmp     8f
+2:  mov     rdi, rbx
+    lea     rsi, [rip+s_time]
+    call    str_eq
+    test    eax, eax
+    jz      9f
+    call    an_range                    # frame / fps
+    movss   xmm1, [rip+an_frame]
+    divss   xmm1, xmm0
+    cvtss2sd xmm0, xmm1
+8:  mov     eax, 1
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# tx_num(xmm0=double) - tx_nb = it as text: whole numbers as such, else up
+#   to three decimals
+tx_num:
+    sub     rsp, 24
+    movsd   [rsp], xmm0
+    call    fmt_reset
+    movsd   xmm0, [rsp]
+    roundsd xmm1, xmm0, 0               # nearest
+    movsd   xmm2, xmm0
+    subsd   xmm2, xmm1
+    andpd   xmm2, [rip+td_abs]
+    comisd  xmm2, [rip+td_whole]
+    jae     2f
+    movsd   xmm2, xmm1
+    andpd   xmm2, [rip+td_abs]
+    comisd  xmm2, [rip+td_big]
+    jae     2f
+    cvtsd2si edi, xmm1
+    call    fmt_int
+    jmp     3f
+2:  cvtsd2ss xmm0, [rsp]
+    call    fmt_val3
+3:  lea     rsi, [rip+fmt_buf]
+    lea     rdi, [rip+tx_nb]
+    mov     ecx, [rip+fmt_pos]
+    cmp     ecx, 63
+    jb      4f
+    mov     ecx, 63
+4:  rep     movsb
+    mov     byte ptr [rdi], 0
+    add     rsp, 24
     ret
 
 # tx_hash(rsi=text) -> rax (FNV-1a)
@@ -2526,6 +2682,200 @@ do_tx_mesh:
 7:  lea     rdi, [rip+s_nosel]
     call    log_line
 9:  pop     rbx
+    ret
+
+# =============================================================================
+#  Animation
+# =============================================================================
+# tx_keyidx(rdi=word) -> eax = its value's index (TX_FLOATS order), or -1
+tx_keyidx:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, rdi
+    xor     ebx, ebx
+1:  lea     rax, [rip+tx_fkeys]
+    mov     rsi, [rax+rbx*8]
+    test    rsi, rsi
+    jz      8f
+    mov     rdi, r12
+    call    str_eq
+    test    eax, eax
+    jnz     9f
+    inc     ebx
+    jmp     1b
+8:  mov     ebx, -1
+9:  mov     eax, ebx
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# tx_keyname(edi=index) -> rax = its name ("?" past the end)
+tx_keyname:
+    lea     rax, [rip+s_q]
+    cmp     edi, TX_NFLOAT
+    jae     9f
+    lea     rax, [rip+tx_fkeys]
+    mov     rax, [rax+rdi*8]
+9:  ret
+
+# tx_chan(edi=object uid, esi=value index, edx=1 to set, xmm0=value) ->
+#   xmm0 = the value, eax = 1 (0: not a text) - the text:<name>:<key>
+#   channel (anim.s). Set values wait in a new block until tx_frame builds it.
+tx_chan:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 24
+    mov     ebx, edi
+    mov     r12d, esi
+    mov     r13d, edx
+    movss   [rsp], xmm0
+    cmp     r12d, TX_NFLOAT
+    jae     .Ltc8
+    call    obj_by_uid
+    test    rax, rax
+    jz      .Ltc8
+    mov     [rsp+8], rax
+    mov     rdi, rax
+    call    tx_of
+    test    rax, rax
+    jz      .Ltc8
+    mov     r14, rax                    # its block, or the one waiting
+    xor     ecx, ecx
+1:  cmp     ecx, [rip+tp_n]
+    jae     2f
+    lea     rdx, [rip+tp_uid]
+    cmp     [rdx+rcx*4], ebx
+    je      11f
+    inc     ecx
+    jmp     1b
+11: lea     rdx, [rip+tp_blk]
+    mov     r14, [rdx+rcx*8]
+2:  lea     rax, [r14+TX_FLOATS+r12*4]
+    test    r13d, r13d
+    jz      .Ltc_get
+    movss   xmm0, [rsp]
+    ucomiss xmm0, [rax]
+    jne     3f
+    jnp     .Ltc_get                    # (unchanged)
+3:  xor     ecx, ecx                    # waiting already?
+4:  cmp     ecx, [rip+tp_n]
+    jae     5f
+    lea     rdx, [rip+tp_uid]
+    cmp     [rdx+rcx*4], ebx
+    je      6f
+    inc     ecx
+    jmp     4b
+5:  mov     rdi, r14                    # a new block to change
+    call    tx_copy
+    test    rax, rax
+    jz      .Ltc8
+    mov     r14, rax
+    mov     ecx, [rip+tp_n]
+    cmp     ecx, TP_MAX
+    jb      51f
+    movss   xmm0, [rsp]                 # (no room: built now)
+    movss   [r14+TX_FLOATS+r12*4], xmm0
+    mov     rdi, r14
+    call    tx_sane
+    mov     rdi, [rsp+8]
+    mov     rsi, r14
+    call    tx_apply
+    mov     rdi, r14
+    call    tx_unref
+    jmp     .Ltc_ok
+51: lea     rdx, [rip+tp_uid]
+    mov     [rdx+rcx*4], ebx
+    lea     rdx, [rip+tp_blk]
+    mov     [rdx+rcx*8], r14
+    inc     dword ptr [rip+tp_n]
+6:  movss   xmm0, [rsp]
+    movss   [r14+TX_FLOATS+r12*4], xmm0
+.Ltc_ok:
+    movss   xmm0, [rsp]
+    mov     eax, 1
+    jmp     9f
+.Ltc_get:
+    movss   xmm0, [r14+TX_FLOATS+r12*4]
+    mov     eax, 1
+    jmp     9f
+.Ltc8:
+    xorps   xmm0, xmm0
+    xor     eax, eax
+9:  add     rsp, 24
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tx_frame - after the channels are set (anim.s an_apply): texts whose keyed
+#   values changed, and texts whose body counts ({frame} ...) and now reads
+#   otherwise, are built anew
+tx_frame:
+    push    rbx
+    push    r12
+    push    r13
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+tp_n]
+    jae     3f
+    lea     rax, [rip+tp_blk]
+    mov     r12, [rax+rbx*8]
+    lea     rax, [rip+tp_uid]
+    mov     edi, [rax+rbx*4]
+    call    obj_by_uid
+    test    rax, rax
+    jz      2f
+    mov     r13, rax
+    mov     rdi, rax
+    call    tx_of
+    test    rax, rax
+    jz      2f
+    mov     rdi, r12
+    call    tx_sane
+    mov     rdi, r13
+    mov     rsi, r12
+    call    tx_apply
+2:  mov     rdi, r12
+    call    tx_unref
+    inc     ebx
+    jmp     1b
+3:  mov     dword ptr [rip+tp_n], 0
+    xor     ebx, ebx                    # bodies with placeholders
+4:  cmp     ebx, [rip+obj_count]
+    jae     9f
+    mov     edi, ebx
+    call    obj_at
+    mov     r13, rax
+    mov     rdi, rax
+    call    tx_of
+    test    rax, rax
+    jz      8f
+    mov     r12, rax
+    lea     rdi, [r12+TX_BODY]          # a brace in it?
+5:  mov     al, [rdi]
+    test    al, al
+    jz      8f
+    inc     rdi
+    cmp     al, '{'
+    jne     5b
+    mov     rdi, r12
+    call    tx_expand
+    lea     rsi, [rip+tx_exp]
+    call    tx_hash
+    cmp     rax, [r12+TX_HASH]
+    je      8f
+    mov     rdi, r13
+    mov     rsi, r12
+    call    tx_apply
+8:  inc     ebx
+    jmp     4b
+9:  pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # =============================================================================

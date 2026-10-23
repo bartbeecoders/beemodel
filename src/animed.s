@@ -219,6 +219,8 @@ ae_curve_label:
     je      2f
     cmp     eax, K_MAT
     je      3f
+    cmp     eax, 9                      # (anim.s K_TEXT) a text's value
+    je      5f
     cmp     eax, 8                      # (anim.s K_FIELD) a field's strength
     jne     4f
     mov     edi, [rbx+CU_A]
@@ -229,6 +231,20 @@ ae_curve_label:
     lea     rdi, [rip+s_unknown]
 41: call    fmt_str
     lea     rdi, [rip+s_fstr]
+    call    fmt_str
+    jmp     8f
+5:  mov     edi, [rbx+CU_A]             # "Title reveal"
+    call    obj_by_uid
+    mov     rdi, rax
+    test    rdi, rdi
+    jnz     51f
+    lea     rdi, [rip+s_unknown]
+51: call    fmt_str
+    lea     rdi, [rip+s_space]
+    call    fmt_str
+    mov     edi, [rbx+CU_B]
+    call    tx_keyname
+    mov     rdi, rax
     call    fmt_str
     jmp     8f
 4:  lea     rdi, [rip+s_node]           # a node: tree, node, slot

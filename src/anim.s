@@ -126,6 +126,7 @@
 .equ K_BONE,    5
 .equ K_SHAPE,   K_SHAPE_
 .equ K_FIELD,   8                       # a force field's strength (fields.s)
+.equ K_TEXT,    9                       # a text's value (text3d.s): size, reveal ...
 .equ GR_N,      128
 .equ GR_NODES,  160
 .equ NODE_SZ,   72
@@ -828,6 +829,8 @@ an_chan:
     je      .Lch_param
     cmp     ebx, K_FIELD
     je      .Lch_field
+    cmp     ebx, K_TEXT
+    je      .Lch_text
     cmp     ebx, K_SHAPE
     jne     .Lch_fail
     mov     edi, r12d                   # a shape key's value (shape.s)
@@ -835,6 +838,15 @@ an_chan:
     mov     edx, r15d
     movss   xmm0, [rsp]
     call    sk_chan
+    test    eax, eax
+    jz      .Lch_fail
+    jmp     .Lch_ok
+.Lch_text:                              # a text's value (text3d.s)
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r15d
+    movss   xmm0, [rsp]
+    call    tx_chan
     test    eax, eax
     jz      .Lch_fail
     jmp     .Lch_ok
@@ -1136,6 +1148,7 @@ an_apply:
     movss   xmm0, [rip+an_frame]        # particles (particles.s)
     call    pt_frame
     call    rig_eval                    # drivers, constraints (rig.s)
+    call    tx_frame                    # texts keyed or counting (text3d.s)
     call    arm_refresh                 # armatures show their new pose
     add     rsp, 32
     pop     r15
@@ -1294,6 +1307,11 @@ an_path:
     call    str_eq
     test    eax, eax
     jnz     .Lap_field
+    lea     rdi, [rip+ap_word]
+    lea     rsi, [rip+k_text]
+    call    str_eq
+    test    eax, eax
+    jnz     .Lap_text
     lea     rdi, [rip+ap_word]          # an object: its property
     call    obj_find
     test    eax, eax
@@ -1482,6 +1500,35 @@ an_path:
     mov     [rip+ap_c], eax
     mov     dword ptr [rip+ap_kind], K_FIELD
     jmp     .Lap_ok
+.Lap_text:                              # text:Title:reveal
+    mov     rsi, r12
+    call    ap_field
+    mov     r12, rsi
+    lea     rdi, [rip+ap_word]
+    call    obj_find
+    test    eax, eax
+    jz      .Lap_bad
+    mov     edi, eax
+    call    obj_get
+    mov     rbx, rax
+    mov     rdi, rax
+    call    tx_of
+    test    rax, rax
+    jz      .Lap_bad
+    mov     eax, [rbx+OB_UID]
+    mov     [rip+ap_a], eax
+    mov     rsi, r12
+    call    ap_field
+    test    eax, eax
+    jle     .Lap_bad
+    lea     rdi, [rip+ap_word]
+    call    tx_keyidx
+    test    eax, eax
+    js      .Lap_bad
+    mov     [rip+ap_b], eax
+    mov     dword ptr [rip+ap_c], 0
+    mov     dword ptr [rip+ap_kind], K_TEXT
+    jmp     .Lap_ok
 .Lap_shape:                             # shape:Cube:Smile
     mov     rsi, r12
     call    ap_field
@@ -1644,6 +1691,7 @@ k_bone:         .asciz "bone"
 k_shape:        .asciz "shape"
 k_param:        .asciz "param"
 k_field:        .asciz "field"
+k_text:         .asciz "text"
 k_strength:     .asciz "strength"
 .align 8
 obj_props:      .quad p_x, p_y, p_z, p_rx, p_ry, p_rz, p_sx, p_sy, p_sz
@@ -1667,7 +1715,7 @@ p_sz:           .asciz "sz"
 
 OPERATOR op_an_key,    "anim.insert_key", "Insert Keyframe",  do_an_key, key=KEY_I_, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Key the selected objects' location, rotation and scale at the current frame"
 OPERATOR op_an_del,    "anim.delete_key", "Delete Keyframe",  do_an_del, key=KEY_I_|KM_ALT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Remove the selected objects' keys at the current frame"
-OPERATOR op_an_path,   "anim.key",        "Key Property",     do_an_path, flags=OPF_AI_SAFE|OPF_UNDO, doc="Key one property: anim.key <path> [frame] [value] [constant|linear|bezier] (paths: Cube:x .. sz, material:M:roughness[:k], modifier:Cube:0:levels, node:Tree:3:5[:k], field:Wind:strength; no value: its value now)"
+OPERATOR op_an_path,   "anim.key",        "Key Property",     do_an_path, flags=OPF_AI_SAFE|OPF_UNDO, doc="Key one property: anim.key <path> [frame] [value] [constant|linear|bezier] (paths: Cube:x .. sz, material:M:roughness[:k], modifier:Cube:0:levels, node:Tree:3:5[:k], field:Wind:strength, text:Title:reveal (size depth bevel spacing line quality reveal soft wave wavelength phase slant); no value: its value now)"
 OPERATOR op_an_unpath, "anim.unkey",      "Unkey Property",   do_an_unpath, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a key: anim.unkey <path> [frame]"
 OPERATOR op_an_frame,  "anim.frame",      "Go to Frame",      do_an_frame, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show the scene at a frame: anim.frame <n>"
 OPERATOR op_an_play,   "anim.play",       "Play Animation",   do_an_play, chk_an_play, key=KEY_SPACE, flags=OPF_AI_SAFE|OPF_QUIET, doc="Play or pause the animation (it loops over the scene's frame range)"
