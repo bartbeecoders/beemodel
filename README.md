@@ -25,8 +25,8 @@ every later version, and BeeScript and the MCP tools change only by adding
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v1.0.0/beemodel-1.0.0-linux-x86_64.bin
-chmod +x beemodel-1.0.0-linux-x86_64.bin && ./beemodel-1.0.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v1.1.0/beemodel-1.1.0-linux-x86_64.bin
+chmod +x beemodel-1.1.0-linux-x86_64.bin && ./beemodel-1.1.0-linux-x86_64.bin
 ```
 
 ## What's in the shell
