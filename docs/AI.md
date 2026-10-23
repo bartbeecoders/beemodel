@@ -137,6 +137,11 @@ Every request carries the world-building instructions:
     and presets, terrain and scattering with geometry nodes, lights, a
     camera, the world HDRI;
   - look again and fix what is wrong.
+- **Text:** `text.add`, then move it into place; `text_set` /
+  `text.set` to change it; `text:Name:reveal` keys to type it on;
+  `{frame}` placeholders to count. A text object's body and settings are
+  in `scene_summary`, so "change the title to ..." finds it
+  ([TEXT.md](TEXT.md)).
 
 Outside agents get the same instructions as the MCP prompt `build_world`
 (argument `goal`).
