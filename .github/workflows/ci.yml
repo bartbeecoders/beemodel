@@ -148,6 +148,11 @@ jobs:
       - name: 3D text (TrueType and block-font solids, lines, alignment, files, reveal)
         run: timeout 300 python tests/text.py build/beemodel
 
+      - name: Render to video (ffmpeg, animated PNG, the menu, Esc)
+        run: |
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=5 ffmpeg >/dev/null || echo "no ffmpeg: its checks are skipped"
+          timeout 300 python tests/video.py build/beemodel build/shots
+
       - name: FreeCAD, else OpenCASCADE (for the STEP round trips)
         run: |
           # FreeCAD from its PPA; when Launchpad is down (503s, time-outs), the

@@ -5115,7 +5115,7 @@
   },
   {
    "name": "op_render_animation",
-   "description": "Render Animation - Render every frame into a folder of PNGs (0001.png ...) at the render settings: render.animation <folder> [first last] (none: the animation's range). On the GPU the next frame is simulated and built while it traces one",
+   "description": "Render Animation... - Render every frame at the render settings into a video or a folder: render.animation <file or folder> [first last] (none: the animation's range). .mp4 .mov .mkv .webm .gif go through ffmpeg; .apng is an animated PNG; .png or a folder: 0001.png ... Esc stops it, keeping the frames done",
    "inputSchema": {
     "type": "object",
     "properties": {

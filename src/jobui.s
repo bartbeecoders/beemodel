@@ -4,8 +4,9 @@
 #  would freeze until it ends. job_begin / job_end bracket one; while it
 #  runs, the UI thread presents a frame at most every 100 ms (from
 #  parallel_for between chunks, or job_set), with a chip showing the job and
-#  how far it is. Input is ignored meanwhile (the job is not interrupted),
-#  and nothing else (MCP, timers) runs. A job asked for by a key or a
+#  how far it is. Input is ignored meanwhile, but for Esc, which sets
+#  job_stop for a job that can stop (a render of an animation); nothing
+#  else (MCP, timers) runs. A job asked for by a key or a
 #  click (inside the Wayland event dispatch, which its frames need) is run
 #  from the main loop instead (job_defer / job_pending).
 # =============================================================================
@@ -22,6 +23,8 @@
 .globl job_set
 .globl job_pf
 .globl job_ignore
+.globl job_key
+.globl job_stop
 .globl job_defer
 .globl job_pending
 .globl wl_dispatching
@@ -31,6 +34,7 @@
 .section .data
 .align 4
 job_on:         .long 0
+job_stop:       .long 0                 # Esc during the job
 job_frac:       .float -1.0             # 0..1, or < 0: unknown
 job_base:       .float 0.0              # the stage running: where it starts
 job_span:       .float 1.0              #  and how much of the job it is
@@ -55,11 +59,19 @@ jf_unknown:     .float -1.0
 job_ignore:
     ret
 
+# job_key(edi=evdev) - (a key while a job runs) Esc asks it to stop
+job_key:
+    cmp     edi, KEY_ESC
+    jne     9f
+    mov     dword ptr [rip+job_stop], 1
+9:  ret
+
 # job_begin(rdi=label) - a job starts: its chip, at once
 job_begin:
     sub     rsp, 8
     mov     [rip+job_label], rdi
     mov     dword ptr [rip+job_on], 1
+    mov     dword ptr [rip+job_stop], 0
     mov     eax, [rip+jf_zero]
     mov     [rip+job_base], eax
     mov     eax, [rip+jf_one]
@@ -74,6 +86,7 @@ job_begin:
 # job_end - it is over: the chip goes, the window draws again
 job_end:
     mov     dword ptr [rip+job_on], 0
+    mov     dword ptr [rip+job_stop], 0
     mov     dword ptr [rip+dirty], 1
     ret
 

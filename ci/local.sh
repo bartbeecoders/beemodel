@@ -40,6 +40,7 @@ timeout 900 python3 tests/coedit.py build/beemodel build/shots
 timeout 600 python3 tests/brep.py build/beemodel
 timeout 300 python3 tests/assembly.py build/beemodel
 timeout 300 python3 tests/text.py build/beemodel
+timeout 300 python3 tests/video.py build/beemodel build/shots   # videos when ffmpeg is installed
 timeout 900 python3 tests/step.py build/beemodel   # FreeCAD or OCP when installed
 timeout 900 python3 tests/gpu.py build/beemodel build/shots   # a Vulkan device when there is one
 timeout 1200 python3 tools/fakewl.py build/shots

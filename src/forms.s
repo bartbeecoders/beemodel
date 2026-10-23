@@ -621,6 +621,12 @@ e_svg:          .asciz "svg"
 e_pdf:          .asciz "pdf"
 e_bees:         .asciz "bees"
 e_png:          .asciz "png"
+e_mp4v:         .asciz "mp4"
+e_mkvv:         .asciz "mkv"
+e_movv:         .asciz "mov"
+e_webmv:        .asciz "webm"
+e_gifv:         .asciz "gif"
+e_apngv:        .asciz "apng"
 e_exr:          .asciz "exr"
 e_jpg:          .asciz "jpg"
 e_jpeg:         .asciz "jpeg"
@@ -639,6 +645,7 @@ n_drawing_pdf:  .asciz "drawing.pdf"
 n_render_png:   .asciz "render.png"
 n_lightmap:     .asciz "lightmap.exr"
 n_heights:      .asciz "heights.png"
+n_anim:         .asciz "animation.mp4"
 .align 8
 x_bee:          .quad e_bee, 0
 x_obj:          .quad e_obj, 0
@@ -654,6 +661,7 @@ x_bees:         .quad e_bees, 0
 x_img:          .quad e_png, e_exr, 0
 x_imgin:        .quad e_png, e_jpg, e_jpeg, e_hdr, 0
 x_pngonly:      .quad e_png, 0
+x_video:        .quad e_mp4v, e_mkvv, e_movv, e_webmv, e_gifv, e_apngv, e_png, 0
 .text
 .macro PATHFORM form, name, mode, ext, defname=0, flags=0
 WIDGET \form\()_w, WK_PATH, \name, flags=\flags, aux=\ext, n=\mode
@@ -685,6 +693,7 @@ PATHFORM form_lmsave, "lightmap.save", 1, x_img, n_lightmap
 PATHFORM form_laimp, "landscape.import", 0, x_img
 PATHFORM form_refadd, "object.add_reference", 0, x_imgin
 PATHFORM form_laexp, "landscape.export", 1, x_img, n_heights
+PATHFORM form_ranim, "render.animation", 1, x_video, n_anim
 
 # ---- object.move_to_folder <name | none> -------------------------------------------
 WIDGET fw_fdm,  WK_TEXT, "form.folder.name", "Folder (none: out of it)", tip="A folder's name (a new one is made when there is none)"
