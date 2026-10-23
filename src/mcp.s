@@ -2051,7 +2051,9 @@ obj_json:
     mov     edi, '}'
     call    wb_char
     add     rsp, 16
-89: mov     rdi, r12                    # "material":"Gold"
+89: mov     rdi, r12                    # "text":{...} (text3d.s)
+    call    tx_json
+    mov     rdi, r12                    # "material":"Gold"
     call    mat_of
     test    eax, eax
     js      81f
