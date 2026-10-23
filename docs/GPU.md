@@ -405,7 +405,7 @@ takes 0.55 s; the small one, 4 ms.
 
 `render_frames(folder, first, last, ...)` and `render.animation <folder>
 [first last]` render a range of frames into `folder/0001.png` and so on
-(`hive_render_frames`). On the GPU the frames overlap. The last batch of
+(`hive_render_frames`), or into a video ([VIDEO.md](VIDEO.md)). On the GPU the frames overlap. The last batch of
 a frame is sent (`gpu_pt_send`) without waiting for it. While the GPU
 traces it, the CPU writes the PNG of the frame before, moves the scene to
 the next frame (animation, simulations) and builds it (`hive_scene`). Then
