@@ -344,7 +344,7 @@
   },
   {
    "name": "op_anim_key",
-   "description": "Key Property - Key one property: anim.key <path> [frame] [value] [constant|linear|bezier] (paths: Cube:x .. sz, material:M:roughness[:k], modifier:Cube:0:levels, node:Tree:3:5[:k], field:Wind:strength; no value: its value now)",
+   "description": "Key Property - Key one property: anim.key <path> [frame] [value] [constant|linear|bezier] (paths: Cube:x .. sz, material:M:roughness[:k], modifier:Cube:0:levels, node:Tree:3:5[:k], field:Wind:strength, text:Title:reveal (size depth bevel spacing line quality reveal soft wave wavelength phase slant); no value: its value now)",
    "inputSchema": {
     "type": "object",
     "properties": {

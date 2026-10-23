@@ -28,11 +28,18 @@ s_c_align:      .asciz "Align"
 l_left:         .asciz "Left"
 l_center:       .asciz "Center"
 l_right:        .asciz "Right"
+s_c_anim:       .asciz "Letter by letter (I over a value: key)"
+s_c_mode:       .asciz "Appear"
+l_pop:          .asciz "Pop"
+l_scale:        .asciz "Scale"
+l_rise:         .asciz "Rise"
+l_drop:         .asciz "Drop"
 .align 8
 tu_aligns:      .quad l_left, l_center, l_right
+tu_modes:       .quad l_pop, l_scale, l_rise, l_drop
 
 .text
-WIDGET wd_tx_body,  WK_TEXT, "text.body", cb=tu_body_cb, undo="Text", tip="What it says (Enter applies). \\n starts a new line"
+WIDGET wd_tx_body,  WK_TEXT, "text.body", cb=tu_body_cb, undo="Text", tip="What it says (Enter applies). \\n starts a new line. An expression in curly brackets (frame, time, floor(time / 60)) is worked out every frame: counters and clocks"
 WIDGET wd_tx_font,  WK_ENUM, "text.font", flags=WGF_DYN, cb=tu_font_cb, undo="Text", aux=tf_names, tip="The font: any TrueType font on the system (Default: the interface's)"
 WIDGET wd_tx_size,  WK_FLOAT, "text.size", "Size (m)", 0.001, 10000.0, 0.01, 3, WGF_CLAMP, cb=tu_val_cb, undo="Text", tip="The height of a line of capitals and descenders (the em). Keyframe it as text:Name:size"
 WIDGET wd_tx_depth, WK_FLOAT, "text.depth", "Depth (m)", 0.0, 10000.0, 0.005, 3, WGF_CLAMP, cb=tu_val_cb, undo="Text", tip="How thick the letters are (0: flat)"
@@ -42,6 +49,12 @@ WIDGET wd_tx_space, WK_FLOAT, "text.spacing", "Letter spacing (em)", -1.0, 10.0,
 WIDGET wd_tx_line,  WK_FLOAT, "text.line", "Line height (em)", 0.0, 100.0, 0.01, 2, WGF_CLAMP, cb=tu_val_cb, undo="Text", tip="From one line's baseline to the next, in ems"
 WIDGET wd_tx_slant, WK_FLOAT, "text.slant", "Slant", -2.0, 2.0, 0.01, 2, WGF_CLAMP, cb=tu_val_cb, undo="Text", tip="Leans the letters (italic): sideways per unit up"
 WIDGET wd_tx_qual,  WK_FLOAT, "text.quality", "Quality", 0.25, 8.0, 0.01, 2, WGF_CLAMP, cb=tu_val_cb, undo="Text", tip="How finely curves are cut into straight pieces (1: normal)"
+WIDGET wd_tx_rev,   WK_SLIDER, "text.reveal", "Reveal", 0.0, 1.0, 0.005, 2, cb=tu_val_cb, undo="Text", tip="How much of the text shows, letter by letter (0 none, 1 all). Key it from 0 to 1 to type it on: text:Name:reveal"
+WIDGET wd_tx_mode,  WK_ENUM, "text.mode", cb=tu_val_cb, undo="Text", aux=tu_modes, n=4, tip="How each letter appears: at once (a typewriter), growing, rising from below or dropping from above"
+WIDGET wd_tx_soft,  WK_FLOAT, "text.soft", "Over letters", 0.0, 100.0, 0.05, 1, WGF_CLAMP, cb=tu_val_cb, undo="Text", tip="How many letters are appearing at a time (Scale, Rise, Drop)"
+WIDGET wd_tx_wave,  WK_FLOAT, "text.wave", "Wave (em)", -10.0, 10.0, 0.005, 3, WGF_CLAMP, cb=tu_val_cb, undo="Text", tip="Letters bob up and down by this much, along a wave. Key the phase to make it travel"
+WIDGET wd_tx_wlen,  WK_FLOAT, "text.wavelength", "Wavelength (letters)", 0.1, 1000.0, 0.05, 1, WGF_CLAMP, cb=tu_val_cb, undo="Text", tip="How many letters one wave spans"
+WIDGET wd_tx_phase, WK_FLOAT, "text.phase", "Phase (turns)", -1000.0, 1000.0, 0.01, 2, cb=tu_val_cb, undo="Text", tip="Where along the wave the first letter is: key it from 0 to 1 and the wave travels once along the text"
 WIDGET wd_tx_mesh,  WK_BUTTON, "text.to_mesh", "Convert to Mesh", aux=op_tx_mesh, tip="Make it a plain mesh to edit (the text is no longer editable)"
 
 # tu_new -> rax = the active text object (rdx = a new copy of its block, with
@@ -246,6 +259,29 @@ tx_props:
     lea     rdi, [rip+wd_tx_qual]
     lea     r8, [rip+tu_flt+TX_QUALITY-TX_FLOATS]
     call    pnl_full
+    add     r12d, 4
+    lea     rdx, [rip+s_c_anim]
+    call    pnl_hint
+    lea     rdi, [rip+wd_tx_rev]
+    lea     r8, [rip+tu_flt+TX_REVEAL-TX_FLOATS]
+    call    pnl_full
+    lea     rdi, [rip+wd_tx_mode]
+    lea     r8, [rip+tu_rmode]
+    lea     rdx, [rip+s_c_mode]
+    call    tu_cap
+    lea     rdi, [rip+wd_tx_soft]
+    lea     r8, [rip+tu_flt+TX_SOFT-TX_FLOATS]
+    call    pnl_full
+    lea     rdi, [rip+wd_tx_wave]
+    lea     r8, [rip+tu_flt+TX_WAVE-TX_FLOATS]
+    call    pnl_full
+    lea     rdi, [rip+wd_tx_wlen]
+    lea     r8, [rip+tu_flt+TX_WLEN-TX_FLOATS]
+    call    pnl_full
+    lea     rdi, [rip+wd_tx_phase]
+    lea     r8, [rip+tu_flt+TX_PHASE-TX_FLOATS]
+    call    pnl_full
+    add     r12d, 4
     lea     rdi, [rip+wd_tx_mesh]
     xor     r8d, r8d
     call    pnl_full

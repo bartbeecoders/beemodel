@@ -316,6 +316,8 @@ n_mod:          .asciz "modifier.value"
 p_mat:          .asciz "material:"
 p_mod:          .asciz "modifier:"
 s_mat_pref:     .asciz "material."
+s_txt_pref:     .asciz "text."
+p_text:         .asciz "text:"
 .text
 # field_key(edi=widget id) -> eax = 1 when it keyed it
 field_key:
@@ -364,7 +366,32 @@ field_key:
     lea     rcx, [rip+s_mat_pref]
     call    pref
     jz      .Lfk_mat
+    mov     rsi, r12                    # "text.reveal": "text:Title:reveal"
+    lea     rcx, [rip+s_txt_pref]
+    call    pref
+    jz      .Lfk_text
     jmp     .Lfk_no
+.Lfk_text:
+    mov     r13, rsi                    # (the value's name)
+    mov     rdi, rsi
+    call    tx_keyidx
+    test    eax, eax
+    js      .Lfk_no
+    mov     rdi, [rip+au_ob]
+    call    tx_of
+    test    rax, rax
+    jz      .Lfk_no
+    lea     rdi, [rip+au_path]
+    lea     rsi, [rip+p_text]
+    call    cpy3
+    mov     rsi, [rip+au_ob]            # (OB_NAME)
+    call    cpy3
+    mov     byte ptr [rdi], ':'
+    inc     rdi
+    mov     rsi, r13
+    call    cpy3
+    call    key_path
+    jmp     .Lfk_yes
 1:  add     edx, r13d                   # the axis
     push    rdx
     mov     rsi, [rip+au_ob]            # (OB_NAME)
