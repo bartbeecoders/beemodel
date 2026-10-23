@@ -588,6 +588,14 @@ mode the player's down follows the pull, so a sphere with an attractor is a plan
 round. View › Force Field Arrows and Lines draw the pull; presets Planet, Black Hole, Tornado,
 Breeze; `field()` and `force()` in BeeScript. [docs/FIELDS.md](docs/FIELDS.md).
 
+**3D text.** Add › Text makes titles, signs and labels from any TrueType font on the system
+(or a built-in block font): closed, outward meshes that keep their holes, with depth, a bevel,
+alignment, spacing, line height and slant, rebuilt as you type in Properties › Text or
+`text.set`. Animate them letter by letter (typed on, scaling, rising, dropping, a travelling
+wave) with `text:Title:reveal` keys, or make them count: `{frame}`, `{floor(time)}` in the body.
+The AI sees what each text says and can add or change it; `text()` and `text_set()` in
+BeeScript. [docs/TEXT.md](docs/TEXT.md).
+
 **Particles and liquid.** Add › Particles makes rain, snow, sparks, confetti, a fountain or a
 water tank; any object can emit from its faces, volume, vertices, origin or another system's
 events, at a rate (smooth between frames) or all at once. Particles feel gravity, drag and the
@@ -1016,6 +1024,9 @@ src/shatter.s   shatter: closed meshes cut into convex cells (clipping, caps, a 
 src/shatterop.s shatter: the operator, its patterns, pieces, bodies, glue, the form's preview
 src/fields.s    force fields: the objects, their settings, the pull at a point, gizmos, overlay
 src/fieldui.s   the Force Field section of Properties › Physics
+src/text3d.s    3D text: the text block, fonts, outlines to solids, layout, bevels, animation,
+                placeholders, text.add / text.set, the TEXT chunk
+src/textui.s    the Text section of Properties › Object
 src/nbody.s     bodies that attract each other: a Barnes-Hut octree of masses
 src/particles.s particle systems: settings, pooled particles, emitting, stepping, collisions, events,
                 drawing, renders, the liquid's surface, the cache, presets

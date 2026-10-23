@@ -88,6 +88,8 @@ Files dragged from a file manager onto the window open by their kind:
 
 ## The 3D viewport
 
+**Text.** **Add › Text** puts 3D text at the 3D cursor, standing up and read from the front. **Properties › Object › Text** has what it says (one line to type; `\n` starts a new line), the font (any TrueType font on the system), size, depth, bevel, alignment, spacing, line height, slant and quality, then **Letter by letter**: reveal, how letters appear (pop, scale, rise, drop), wave. **I** over one of them keys it. **Object › Convert Text to Mesh** makes it a plain mesh to edit. See [TEXT.md](TEXT.md).
+
 **Reference images** are photos or drawings to model over. **Add › Reference Image...** (or an image dropped on the window, or `refimage(path [, name])`) puts one at the 3D cursor, square to the view's nearest axis (front, side or top) and upright, at the image's aspect ratio. It shows in every shading mode, solid included, and is left out of renders (its camera is off). **Properties › Object** shows its settings:
 
 - **Opacity**;

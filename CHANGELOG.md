@@ -6,6 +6,28 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added (stage T, 3D text, #387-#390)
+- **Add › Text** and `text.add ["body"] [size] [depth] [font] ...`: 3D text
+  from the system's TrueType fonts (or the built-in block font), standing
+  in the XY plane on its last baseline. The meshes are closed and face
+  outwards, and letters keep their holes. A text object is a mesh that
+  carries its text, so undo, saving (the TEXT chunk), modifiers, rendering
+  and export work as for any mesh.
+- **Properties › Object › Text:** the body, font (every `.ttf` found;
+  fonts can be named: `font 'DejaVu Serif Bold'`), size, depth, a bevel,
+  alignment, spacing, line height, slant and quality.
+  **Object › Convert Text to Mesh** (`text.to_mesh`).
+- **Animated text:** `text:<name>:size|depth|bevel|spacing|line|quality|reveal|soft|wave|wavelength|phase|slant`
+  channels (I over a value keys it). Reveal types the text on (pop,
+  scale, rise, drop over a soft width), and a wave runs through the
+  letters. `{frame}`, `{time}` or any expression in braces in the body is
+  worked out every frame.
+- **For the AI:** a text object's body and settings are in
+  `scene_summary`, and the instructions cover text. BeeScript `text(name)`
+  and `text_set(name, body)`.
+- `font_load_at`, and outline hooks in the TrueType engine (`ol_begin`,
+  `ol_line`, `ol_end`).
+
 ## [1.1.0] - 2026-10-23
 
 Ask AI about the selection, issues Q1-Q5 (#374-#378): a prompt at the
