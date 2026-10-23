@@ -153,15 +153,15 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <div class="kicker">Living list · updated with every stage</div>
   <h1>Open features &amp; issues</h1>
   <p class="lede">Everything that is open, in one place: the plan stages still to build, known bugs, performance follow-ups, features that were put off, and loose ends on GitHub. The plans say what to build. This list says what is still open. It is updated with every commit that opens or closes something here.</p>
-  <div class="meta">BeeModel · Vibecoding/BeeModel-Open-List.html · Plans: <a href="BeeModel-2.0-Plan.html">2.0</a>, <a href="BeeModel-Win11-Port-Plan.html">Windows 11 port</a>, <a href="BeeModel-Masterplan.html">Masterplan</a> · Last updated <b>2026-10-22</b>, against <b>v1.0.0</b></div>
+  <div class="meta">BeeModel · Vibecoding/BeeModel-Open-List.html · Plans: <a href="BeeModel-2.0-Plan.html">2.0</a>, <a href="BeeModel-Win11-Port-Plan.html">Windows 11 port</a>, <a href="BeeModel-Masterplan.html">Masterplan</a> · Last updated <b>2026-10-23</b>, against <b>v1.0.0</b></div>
 </header>
 
 <section id="now">
   <h2>Now</h2>
   <p class="sub">What is being worked on, and what comes next.</p>
   <div class="grid g2">
-    <div class="card accent"><h3>In progress: Stage Q · Ask AI about the selection → v1.1.0</h3>Milestone 25, issues <a href="https://github.com/bartbeecoders/beemodel/issues/374">#374</a>–<a href="https://github.com/bartbeecoders/beemodel/issues/378">#378</a>. Branch <code>ask-ai</code>. Alt+right-click an object (or <b>Ask AI…</b> in the viewport menu), type what to change, and the AI changes the selection in one undo step. See the <a href="BeeModel-2.0-Plan.html#ask">2.0 plan</a>.</div>
-    <div class="card blue"><h3>Next: Stage V · Smoke, fire, volumes → v1.2.0</h3>V1–V5 in the <a href="BeeModel-2.0-Plan.html#gas">2.0 plan</a>: a sparse gas grid, fire, volumes in both path tracers and in the viewport, caching and OpenVDB export. After that, stage Z (v2.0.0).</div>
+    <div class="card accent"><h3>In progress: Stage T · Text → v1.2.0</h3>Milestone 26, issues <a href="https://github.com/bartbeecoders/beemodel/issues/387">#387</a>–<a href="https://github.com/bartbeecoders/beemodel/issues/391">#391</a>. Branch <code>text</code>. 3D text from TrueType fonts, animated letter by letter, and text the AI can add and change. See the <a href="BeeModel-2.0-Plan.html#text">2.0 plan</a>. Stage Q (Ask AI, v1.1.0) is merged; its release (<a href="https://github.com/bartbeecoders/beemodel/issues/378">#378</a>) waits for the user to try it.</div>
+    <div class="card blue"><h3>Next: Stage V · Smoke, fire, volumes → v1.3.0</h3>V1–V5 in the <a href="BeeModel-2.0-Plan.html#gas">2.0 plan</a>: a sparse gas grid, fire, volumes in both path tracers and in the viewport, caching and OpenVDB export. After that, stage Z (v2.0.0).</div>
   </div>
 </section>
 
@@ -175,7 +175,12 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <tr><td class="num"><span class="issue">Q3</span></td><td><b>Only the selection</b>: objects outside it that changed are named in a warning</td><td>2.0</td><td><span class="tag g">done</span> <a href="https://github.com/bartbeecoders/beemodel/issues/376">#376</a></td></tr>
     <tr><td class="num"><span class="issue">Q4</span></td><td>Feedback in the status bar while the AI works: Stop, the answer as a message</td><td>2.0</td><td><span class="tag g">done</span> <a href="https://github.com/bartbeecoders/beemodel/issues/377">#377</a></td></tr>
     <tr><td class="num"><span class="issue">Q5</span></td><td>Docs, <code>tests/askai.py</code>, release v1.1.0</td><td>2.0</td><td><span class="tag a">in progress</span> <a href="https://github.com/bartbeecoders/beemodel/issues/378">#378</a></td></tr>
-    <tr><td class="num"><span class="issue">V1–V5</span></td><td>Gas solver, fire, volumes in Hive and on the GPU, viewport volumes, VDB export</td><td>2.0</td><td><span class="tag">planned</span> v1.2.0</td></tr>
+    <tr><td class="num"><span class="issue">T1</span></td><td>Text objects from TrueType fonts: <b>Add › Text</b>, <code>text.add</code>, extruded glyphs with holes, a block-font fallback, saved and undoable</td><td>2.0</td><td><span class="tag a">in progress</span> <a href="https://github.com/bartbeecoders/beemodel/issues/387">#387</a></td></tr>
+    <tr><td class="num"><span class="issue">T2</span></td><td>Properties › Text: body, font, size, depth, bevel, alignment, spacing; Convert to Mesh</td><td>2.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/388">#388</a></td></tr>
+    <tr><td class="num"><span class="issue">T3</span></td><td>Animated text: keyed size, depth, spacing, reveal (typewriter, scale, rise, drop), wave; <code>{frame}</code> and expression placeholders</td><td>2.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/389">#389</a></td></tr>
+    <tr><td class="num"><span class="issue">T4</span></td><td>Text for the AI and scripts: <code>text.add</code> / <code>text.set</code> MCP tools, the body in the scene JSON, BeeScript <code>text()</code> / <code>text_set()</code></td><td>2.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/390">#390</a></td></tr>
+    <tr><td class="num"><span class="issue">T5</span></td><td>Docs, <code>tests/text.py</code>, a demo, release v1.2.0</td><td>2.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/391">#391</a></td></tr>
+    <tr><td class="num"><span class="issue">V1–V5</span></td><td>Gas solver, fire, volumes in Hive and on the GPU, viewport volumes, VDB export</td><td>2.0</td><td><span class="tag">planned</span> v1.3.0</td></tr>
     <tr><td class="num"><span class="issue">Z1–Z2</span></td><td>The 2.0 walkthrough scene, docs, the v2.0.0 release</td><td>2.0</td><td><span class="tag">planned</span> v2.0.0</td></tr>
     <tr><td class="num"><span class="issue">W·</span></td><td>Windows 11 port: a WSLg check, a platform layer, a native Win32 backend</td><td>Win11</td><td><span class="tag">not started</span> no milestone yet</td></tr>
   </table></div>
