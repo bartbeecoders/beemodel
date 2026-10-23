@@ -147,6 +147,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <li><a href="#fields">Stage A · Attractors &amp; fields</a></li>
     <li><a href="#particles">Stage P · Particles</a></li>
     <li><a href="#ask">Stage Q · Ask AI about the selection</a></li>
+    <li><a href="#text">Stage T · Text</a></li>
     <li><a href="#gas">Stage V · Smoke, fire, volumes</a></li>
     <li><a href="#release">Stage Z · v2.0.0</a></li>
     <li><a href="#data">Data, files &amp; scripting</a></li>
@@ -207,7 +208,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
 
 <section id="roadmap">
   <h2>Roadmap</h2>
-  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the ground and landscape (chosen 2026-10-18, released as v0.18.0), then shatter (released as v0.19.0), then attractors and force fields (released as v0.21.0, after the UI round v0.20.0), then particles and liquid (released as v0.22.0). Two stages were added that this plan did not have: <b>H · rendering performance</b> (v0.23.0: parallel and two-level BVHs, a resident GPU scene, RTX ray tracing) and <b>VP · the viewport on the GPU</b> (v0.24.0: Solid, Material Preview, particles and liquid drawn by Vulkan, Rendered shading during playback). <b>Then, chosen 2026-10-22, the decisions</b> (D1–D7 done 2026-10-22, released as v1.0.0; see <code>docs/DECISIONS.md</code>), then, added 2026-10-22, <b>Q · ask the AI about the selection</b> as <b>v1.1.0</b>, then smoke and fire as <b>v1.2.0</b> (not v1.5.0: the version numbers stayed below 1.0 until D), then v2.0.0.</p>
+  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the ground and landscape (chosen 2026-10-18, released as v0.18.0), then shatter (released as v0.19.0), then attractors and force fields (released as v0.21.0, after the UI round v0.20.0), then particles and liquid (released as v0.22.0). Two stages were added that this plan did not have: <b>H · rendering performance</b> (v0.23.0: parallel and two-level BVHs, a resident GPU scene, RTX ray tracing) and <b>VP · the viewport on the GPU</b> (v0.24.0: Solid, Material Preview, particles and liquid drawn by Vulkan, Rendered shading during playback). <b>Then, chosen 2026-10-22, the decisions</b> (D1–D7 done 2026-10-22, released as v1.0.0; see <code>docs/DECISIONS.md</code>), then, added 2026-10-22, <b>Q · ask the AI about the selection</b> as <b>v1.1.0</b>, then, added 2026-10-23, <b>T · 3D text</b> as <b>v1.2.0</b>, then smoke and fire as <b>v1.3.0</b> (not v1.5.0: the version numbers stayed below 1.0 until D), then v2.0.0.</p>
   <div class="diagram">
   <svg viewBox="0 0 980 250" role="img" aria-label="Stage order: D to v1.0, then R; R leads to G, S and A; G and A lead to P; P leads to V; all lead to Z, v2.0">
     <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
@@ -232,7 +233,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
       <rect x="510" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>
       <text x="574" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">P · particles</text><text x="574" y="140" text-anchor="middle" fill="var(--ink-3)">v0.22.0 · fifth</text>
       <rect x="680" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--red)" stroke-width="2"/>
-      <text x="744" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">V · gas, volumes</text><text x="744" y="140" text-anchor="middle" fill="var(--ink-3)">v1.2.0</text>
+      <text x="744" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">V · gas, volumes</text><text x="744" y="140" text-anchor="middle" fill="var(--ink-3)">v1.3.0</text>
       <rect x="850" y="95" width="120" height="60" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
       <text x="910" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">Z · release</text><text x="910" y="140" text-anchor="middle" fill="var(--ink-3)">v2.0.0</text>
     </g>
@@ -248,8 +249,9 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <tr><td>P · particles &amp; liquid</td><td class="num">P1–P6</td><td class="num">v0.22.0</td><td>Rain, snow, sparks, fountains; water that splashes and gets meshed.</td></tr>
     <tr><td>H · rendering performance <span class="tag v">added</span></td><td class="num">H1–H15</td><td class="num">v0.23.0</td><td>Particle films render in seconds; RTX hardware ray tracing; motion blur; sample reuse between frames.</td></tr>
     <tr><td>VP · viewport on the GPU <span class="tag v">added</span></td><td class="num">VP1–VP5</td><td class="num">v0.24.0</td><td>Playback in real time at 2560×1440 in Solid, Material Preview and Rendered, liquids included.</td></tr>
-    <tr><td>Q · ask the AI about the selection <span class="tag v">added</span> <span class="tag a">next</span></td><td class="num">Q1–Q5</td><td class="num">v1.1.0</td><td>Alt+right-click an object, type “make it bigger” or “brushed steel”, and the AI changes that object, in one undo step.</td></tr>
-    <tr><td>V · smoke, fire, volumes</td><td class="num">V1–V5</td><td class="num">v1.2.0</td><td>Smoke plumes and campfires, rendered as volumes.</td></tr>
+    <tr><td>Q · ask the AI about the selection <span class="tag v">added</span></td><td class="num">Q1–Q5</td><td class="num">v1.1.0</td><td>Alt+right-click an object, type “make it bigger” or “brushed steel”, and the AI changes that object, in one undo step.</td></tr>
+    <tr><td>T · 3D text <span class="tag v">added</span> <span class="tag a">next</span></td><td class="num">T1–T5</td><td class="num">v1.2.0</td><td>Add a title in any installed font, animate it letter by letter, and ask the AI to write or change it.</td></tr>
+    <tr><td>V · smoke, fire, volumes</td><td class="num">V1–V5</td><td class="num">v1.3.0</td><td>Smoke plumes and campfires, rendered as volumes.</td></tr>
     <tr><td>Z · release</td><td class="num">Z1–Z2</td><td class="num">v2.0.0</td><td>The demo scene, benchmarks, docs.</td></tr>
   </table></div>
 </section>
@@ -407,6 +409,38 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <div class="phase"><div class="pn"><b>Q5</b>release</div><div class="card"><h3>Docs, the walkthrough, v1.1.0 <span class="tag r">release</span></h3>
     <p><code>docs/AI.md</code> (Ask about the selection), <code>docs/UI.md</code> (the keys), the README. <code>tests/askai.py</code> drives it in the fake compositor with the stand-in Claude Code: the box, the context the AI is sent, edit-mode vertices and faces, the scope warning, recent prompts, the quick buttons, Stop, undo. <code>ai.ask</code> is not an MCP tool: an agent does not start another agent, like <code>ai.send</code>.</p>
     <div class="exit"><b>Exit:</b> local and GitHub CI green; v1.1.0 tagged and published.</div></div></div>
+</section>
+
+<section id="text">
+  <h2>Stage T · Text</h2>
+  <p class="sub">Added 2026-10-23 (milestone 26, issues <a href="https://github.com/bartbeecoders/beemodel/issues/387">#387</a>–<a href="https://github.com/bartbeecoders/beemodel/issues/391">#391</a>). Titles, logos, labels and counters as real 3D geometry, from the fonts already on the system, animated letter by letter, and something the AI can write and rewrite. BeeModel already reads TrueType for its UI (<code>ttf.s</code>: outlines, composite glyphs) and already turns closed loops with holes into solids (<code>prof.s</code>, the sketch profiles), so the stage joins the two.</p>
+  <div class="phase"><div class="pn"><b>T1</b>core</div><div class="card"><h3>Text objects from TrueType fonts <span class="tag b">core</span></h3>
+    <p><b>Add › Text</b> (<code>text.add ["body"] [size s] [depth d] …</code>) adds a text object at the 3D cursor, standing in the XY plane and read from the front. It is an ordinary mesh object whose mesh carries a <b>text block</b> (<code>ME_TEXT</code>, like curves and landscapes): drawing, materials, modifiers, rendering, export and physics see a mesh; undo comes for free because meshes are immutable; a <code>TEXT</code> chunk keeps it in .bee files.</p>
+    <ul>
+      <li>Glyph outlines from the TrueType engine: the same contour walker as the UI's rasterizer, with the line segments collected instead of rasterized; quadratic curves flattened at a <b>quality</b> setting.</li>
+      <li>Loops nested by containment into material and holes, holes bridged into their outline and ear-clipped (<code>prof.s</code>), then extruded to a <b>depth</b> with front and back caps.</li>
+      <li>Several lines (<code>\n</code>), alignment (left, centre, right), letter spacing, line height; the origin on the first line's baseline.</li>
+      <li>No TrueType font, or a glyph it lacks: a built-in block font (the 8×16 bitmap font, extruded), so a scene opens the same everywhere. The mesh is saved too, so a file opened where its font is missing still shows the text until it is edited.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> <code>text.add "BeeModel"</code> makes a closed, outward-facing mesh in which the e's, B's and o's keep their holes; save and reopen give the same mesh; Ctrl+Z removes it.</div></div></div>
+  <div class="phase"><div class="pn"><b>T2</b>ui</div><div class="card"><h3>Properties, fonts, convert to mesh <span class="tag a">ui</span></h3>
+    <p>Properties › Object › <b>Text</b>: the body (Enter applies, <code>\n</code> for a new line), the font (fonts found in the usual system folders, or a path), size, depth, bevel, alignment, spacing, line height, quality. Editing the mesh itself (edit mode, sculpting) turns it into a plain mesh; <b>Object › Convert to Mesh</b> (<code>text.to_mesh</code>) does it on purpose.</p>
+    <div class="exit"><b>Exit:</b> fakewl changes the body and the size in the panel and the mesh follows; another font changes the outlines; Convert to Mesh keeps the shape and drops the text block.</div></div></div>
+  <div class="phase"><div class="pn"><b>T3</b>anim</div><div class="card"><h3>Animated text <span class="tag v">animation</span></h3>
+    <p>Keyframable channels <code>text:&lt;name&gt;:size</code>, <code>depth</code>, <code>spacing</code>, <code>reveal</code>, <code>wave</code>, <code>phase</code>:</p>
+    <ul>
+      <li><b>Reveal</b> (0–1 of the characters), letter by letter: Pop (a typewriter), Scale, Rise or Drop, over a soft width of characters.</li>
+      <li>A per-character <b>wave</b>: amplitude, wavelength in characters, phase.</li>
+      <li><b>Placeholders</b> in the body, evaluated every frame: <code>{frame}</code>, <code>{time}</code> and any expression (<code>{floor(frame/24)}</code>, <code>Score {frame*10}</code>): counters, clocks, timers.</li>
+    </ul>
+    <p>The mesh is rebuilt once a frame, only when something it depends on changed.</p>
+    <div class="exit"><b>Exit:</b> a typewriter title keyed 0→1 over 24 frames shows none, half and all of its letters at frames 1, 12 and 24; a counter shows the frame number; a 40-character title plays back at 24 fps.</div></div></div>
+  <div class="phase"><div class="pn"><b>T4</b>ai</div><div class="card"><h3>Text for the AI and scripts <span class="tag b">ai</span></h3>
+    <p><code>text.add</code> and <code>text.set</code> are AI-safe operators, so MCP tools. The scene summary and object JSON carry a text object's body and settings, so the AI sees what it says; Ask AI about a text object understands “change the text to …”, “make it thicker”, “type it on letter by letter”. BeeScript: <code>text(name)</code> reads the body, <code>text_set(name, body)</code> writes it.</p>
+    <div class="exit"><b>Exit:</b> the stand-in AI adds a title “Hello” above the cube, then changes it to “Goodbye”: one text object that reads Goodbye, each step one undo.</div></div></div>
+  <div class="phase"><div class="pn"><b>T5</b>release</div><div class="card"><h3>Docs, tests, a demo, v1.2.0 <span class="tag r">release</span></h3>
+    <p><code>docs/TEXT.md</code>; AI.md and BEESCRIPT.md additions; <code>tests/text.py</code> in local and GitHub CI; an animated title demo; a benchmark (characters built per millisecond).</p>
+    <div class="exit"><b>Exit:</b> local and GitHub CI green; v1.2.0 tagged and published.</div></div></div>
 </section>
 
 <section id="gas">
