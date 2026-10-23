@@ -6258,6 +6258,19 @@
    }
   },
   {
+   "name": "op_text_to_mesh",
+   "description": "Convert Text to Mesh - The active text object becomes a plain mesh (its shape kept, its text no longer editable): then it can be edited, sculpted or booleaned like any mesh",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_text_set",
    "description": "Text Settings - Change the active text object: text.set [\"new body\"] [size m] [depth m] [font path|default] [align left|center|right] [spacing em] [line em] [slant x] [quality q] [reveal 0..1] [mode pop|scale|rise|drop] [soft chars] [wave em] [wavelength chars] [phase turns]",
    "inputSchema": {

@@ -2551,7 +2551,10 @@ ed_props_draw:
     call    ref_props
     mov     r12d, eax
     add     r12d, 6
-114:
+114:mov     edi, r12d                   # a text object: its text (textui.s)
+    mov     rsi, rbx
+    call    tx_props
+    mov     r12d, eax
     call    fmt_reset                   # mesh statistics
     mov     rbx, [rbx+OB_MESH]
     mov     edi, [rbx+ME_NVERTS]
