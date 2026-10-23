@@ -1,0 +1,66 @@
+# Title card — BeeModel v1.2 demo
+# 3D text from the system's fonts, animated letter by letter. The gold title
+# is typed on rising out of the stage (reveal keyed 0 -> 1), then a wave runs
+# through it (its phase keyed); the subtitle grows in letter by letter; a
+# clock in the corner counts the seconds by itself ({floor(time)} in its
+# body). The letters are ordinary meshes: bevelled, with materials, casting
+# shadows on the stage and reflected in it.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+sclear()
+op("anim.range", "1 144 24")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+mat("Gold", 1.0, 0.72, 0.3, 0.22, 1)
+mat("Ivory", 0.92, 0.9, 0.84, 0.45, 0)
+mat("Stage", 0.03, 0.03, 0.035, 0.18, 0)
+mat("Curtain", 0.07, 0.008, 0.014, 0.9, 0)
+m = mat("Clock", 0.4, 0.8, 1.0, 0.5, 0)
+matset(m, "emission", 0.25, 0.7, 1.0); matset(m, "strength", 3)
+
+# the title: gold, bevelled, typed on rising from the stage over 2 s, then a
+#   wave runs through it twice
+op("text.add", "'BeeModel' size 1.5 depth 0.4 bevel 0.035 mode rise soft 3 wave 0 wavelength 5")
+t = rename(active(), "Title")
+move(t, 0, 1.1, 0)
+assign(t, "Gold")
+op("anim.key", "text:Title:reveal 1 0 linear")
+op("anim.key", "text:Title:reveal 48 1 linear")
+op("anim.key", "text:Title:wave 54 0")
+op("anim.key", "text:Title:wave 66 0.12")
+op("anim.key", "text:Title:wave 120 0.12")
+op("anim.key", "text:Title:wave 132 0")
+op("anim.key", "text:Title:phase 54 0 linear")
+op("anim.key", "text:Title:phase 132 2 linear")
+
+# the subtitle: two lines that grow in, letter by letter
+op("text.add", "'3D text from any TrueType font\nin pure x86-64 assembly' size 0.32 depth 0.06 bevel 0.008 line 1.35 mode scale soft 4 reveal 0")
+s = rename(active(), "Subtitle")
+move(s, 0, 0.18, 0.3)
+assign(s, "Ivory")
+op("anim.key", "text:Subtitle:reveal 40 0 linear")
+op("anim.key", "text:Subtitle:reveal 90 1 linear")
+
+# a clock on the stage that counts by itself: its body is worked out every
+#   frame
+op("text.add", "'{floor(time)}.{floor(time * 10) - 10 * floor(time)} s' size 0.28 depth 0.04 align right")
+c = rename(active(), "Clock")
+move(c, 2.6, 0.02, 2.4)
+assign(c, "Clock")
+
+# the stage: a glossy floor, a curtain, a warm key light, a cool rim, a camera
+g = add("plane", "Floor", 0, 0, 0); scale(g, 30); assign(g, "Stage")
+w = add("plane", "Curtain", 0, 4, -2.5); scale(w, 30, 1, 6); rotate(w, 90deg, 0, 0); assign(w, "Curtain")
+add("light", "Key", 2.5, 5, 5); op("light.set", "power 0.9")
+add("light", "Rim", -4, 4, -1.5); op("light.set", "power 0.6")
+add("light", "Fill", -2, 1.5, 6); op("light.set", "power 0.35")
+add("camera", "Cam", 0, 2.0, 8.5); set("Cam", "lens", 40)
+rotate("Cam", -6deg, 0, 0)
+key("Cam:z", 1, 9.5); key("Cam:z", 144, 8.2)
+select("Cam"); op("camera.set", "active")
+op("world.strength", 0.08)
+view(0, 2, 9, 0, 1.4, 0)
+frame(1)

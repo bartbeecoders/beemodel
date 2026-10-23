@@ -22,6 +22,7 @@ mechanisms, geometry nodes, materials, cloth and animation.
 | `material-gallery.bees` | 10 s | All 20 **material presets**, each on its own SDF shape (sphere, rounded box, torus, a blended knot) on a plinth in a dark curved gallery: metals, dielectrics, glass and water, an emitter, and the five procedural ones built from node graphs. The camera walks the row. |
 | `cloth-and-wind.bees` | 6 s | The **cloth** solver: a 6 561-particle tablecloth drapes over a round table and a vase (**self-collision**, **colliders**), a flag **pinned** to its pole flies in a keyed **Wind field** with gusts, and three jelly **soft bodies** drop and wobble back into shape. |
 | `orrery.bees` | 12 s | A clockwork solar system with no keys on the planets: each hub is turned by a **driver** (an expression of the frame), arms and planets are **parented** to it, and the Moon has a hub of its own. Jupiter's bands and the Earth's seas are small **node graphs**. The Sun **emits** light, and the camera circles with a **Track To** constraint on it. |
+| `title-card.bees` | 6 s | **3D text** from the system's fonts: a bevelled gold title **typed on** letter by letter (reveal keyed, letters rising out of the stage), then a **wave** runs through it; a two-line subtitle **grows in**; a clock on the stage counts the seconds by itself (`{floor(time)}` in its body). |
 
 ## Running them
 
