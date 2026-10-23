@@ -148,6 +148,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <li><a href="#particles">Stage P · Particles</a></li>
     <li><a href="#ask">Stage Q · Ask AI about the selection</a></li>
     <li><a href="#text">Stage T · Text</a></li>
+    <li><a href="#video">Stage C · Render to video</a></li>
     <li><a href="#gas">Stage V · Smoke, fire, volumes</a></li>
     <li><a href="#release">Stage Z · v2.0.0</a></li>
     <li><a href="#data">Data, files &amp; scripting</a></li>
@@ -208,7 +209,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
 
 <section id="roadmap">
   <h2>Roadmap</h2>
-  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the ground and landscape (chosen 2026-10-18, released as v0.18.0), then shatter (released as v0.19.0), then attractors and force fields (released as v0.21.0, after the UI round v0.20.0), then particles and liquid (released as v0.22.0). Two stages were added that this plan did not have: <b>H · rendering performance</b> (v0.23.0: parallel and two-level BVHs, a resident GPU scene, RTX ray tracing) and <b>VP · the viewport on the GPU</b> (v0.24.0: Solid, Material Preview, particles and liquid drawn by Vulkan, Rendered shading during playback). <b>Then, chosen 2026-10-22, the decisions</b> (D1–D7 done 2026-10-22, released as v1.0.0; see <code>docs/DECISIONS.md</code>), then, added 2026-10-22, <b>Q · ask the AI about the selection</b> (released as <b>v1.1.0</b>), then, added 2026-10-23, <b>T · 3D text</b> as <b>v1.2.0</b>, then smoke and fire as <b>v1.3.0</b> (not v1.5.0: the version numbers stayed below 1.0 until D), then v2.0.0.</p>
+  <p class="sub">Eight stages, each a milestone with its own release, as in the earlier phases: one branch, one commit per issue, one pull request. Each stage needs the ones before it only where the arrows show. <b>Order chosen 2026-10-17: the solver first</b> (released as v0.17.0), then the ground and landscape (chosen 2026-10-18, released as v0.18.0), then shatter (released as v0.19.0), then attractors and force fields (released as v0.21.0, after the UI round v0.20.0), then particles and liquid (released as v0.22.0). Two stages were added that this plan did not have: <b>H · rendering performance</b> (v0.23.0: parallel and two-level BVHs, a resident GPU scene, RTX ray tracing) and <b>VP · the viewport on the GPU</b> (v0.24.0: Solid, Material Preview, particles and liquid drawn by Vulkan, Rendered shading during playback). <b>Then, chosen 2026-10-22, the decisions</b> (D1–D7 done 2026-10-22, released as v1.0.0; see <code>docs/DECISIONS.md</code>), then, added 2026-10-22, <b>Q · ask the AI about the selection</b> (released as <b>v1.1.0</b>), then, added 2026-10-23, <b>T · 3D text</b> as <b>v1.2.0</b>, then, added the same day, <b>C · render to video</b> as <b>v1.3.0</b>, then smoke and fire as <b>v1.4.0</b> (not v1.5.0: the version numbers stayed below 1.0 until D), then v2.0.0.</p>
   <div class="diagram">
   <svg viewBox="0 0 980 250" role="img" aria-label="Stage order: D to v1.0, then R; R leads to G, S and A; G and A lead to P; P leads to V; all lead to Z, v2.0">
     <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker></defs>
@@ -233,7 +234,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
       <rect x="510" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--blue)" stroke-width="2"/>
       <text x="574" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">P · particles</text><text x="574" y="140" text-anchor="middle" fill="var(--ink-3)">v0.22.0 · fifth</text>
       <rect x="680" y="95" width="128" height="60" rx="10" fill="var(--panel)" stroke="var(--red)" stroke-width="2"/>
-      <text x="744" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">V · gas, volumes</text><text x="744" y="140" text-anchor="middle" fill="var(--ink-3)">v1.3.0</text>
+      <text x="744" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">V · gas, volumes</text><text x="744" y="140" text-anchor="middle" fill="var(--ink-3)">v1.4.0</text>
       <rect x="850" y="95" width="120" height="60" rx="10" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2"/>
       <text x="910" y="120" text-anchor="middle" font-weight="700" fill="var(--ink)">Z · release</text><text x="910" y="140" text-anchor="middle" fill="var(--ink-3)">v2.0.0</text>
     </g>
@@ -251,7 +252,8 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <tr><td>VP · viewport on the GPU <span class="tag v">added</span></td><td class="num">VP1–VP5</td><td class="num">v0.24.0</td><td>Playback in real time at 2560×1440 in Solid, Material Preview and Rendered, liquids included.</td></tr>
     <tr><td>Q · ask the AI about the selection <span class="tag g">released</span></td><td class="num">Q1–Q5</td><td class="num">v1.1.0</td><td>Alt+right-click an object, type “make it bigger” or “brushed steel”, and the AI changes that object, in one undo step.</td></tr>
     <tr><td>T · 3D text <span class="tag v">added</span> <span class="tag a">next</span></td><td class="num">T1–T5</td><td class="num">v1.2.0</td><td>Add a title in any installed font, animate it letter by letter, and ask the AI to write or change it.</td></tr>
-    <tr><td>V · smoke, fire, volumes</td><td class="num">V1–V5</td><td class="num">v1.3.0</td><td>Smoke plumes and campfires, rendered as volumes.</td></tr>
+    <tr><td>C · render to video <span class="tag v">added</span></td><td class="num">C1–C4</td><td class="num">v1.3.0</td><td>Render › Render Animation… saves an .mp4 (or .webm, .gif, an animated PNG) straight from BeeModel, with progress and Esc.</td></tr>
+    <tr><td>V · smoke, fire, volumes</td><td class="num">V1–V5</td><td class="num">v1.4.0</td><td>Smoke plumes and campfires, rendered as volumes.</td></tr>
     <tr><td>Z · release</td><td class="num">Z1–Z2</td><td class="num">v2.0.0</td><td>The demo scene, benchmarks, docs.</td></tr>
   </table></div>
 </section>
@@ -441,6 +443,23 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <div class="phase"><div class="pn"><b>T5</b>release</div><div class="card"><h3>Docs, tests, a demo, v1.2.0 <span class="tag r">release</span></h3>
     <p><code>docs/TEXT.md</code>; AI.md and BEESCRIPT.md additions; <code>tests/text.py</code> in local and GitHub CI; an animated title demo; a benchmark (characters built per millisecond).</p>
     <div class="exit"><b>Exit:</b> local and GitHub CI green; v1.2.0 tagged and published.</div></div></div>
+</section>
+
+<section id="video">
+  <h2>Stage C · Render to video</h2>
+  <p class="sub">Added 2026-10-23 (milestone 27, issues <a href="https://github.com/bartbeecoders/beemodel/issues/394">#394</a>–<a href="https://github.com/bartbeecoders/beemodel/issues/397">#397</a>). <code>render.animation</code> already renders a range of frames into PNGs, and on the GPU it builds the next frame while one traces; a film still had to be put together outside, with ffmpeg. This stage makes the video in BeeModel, from the Render menu.</p>
+  <div class="phase"><div class="pn"><b>C1</b>ui</div><div class="card"><h3>Render › Render Animation… <span class="tag a">ui</span></h3>
+    <p>The save dialog (<code>animation.mp4</code>; .mkv .mov .webm .gif .apng, or .png for a folder of frames named like the file). The render runs as a long job: a chip in the status bar with how far it is; <b>Esc</b>, the one key a long job listens to, stops it after the frame it is on and keeps what is done. <code>render.animation</code> still takes a folder.</p>
+    <div class="exit"><b>Exit:</b> fakewl opens the dialog from the menu, saves menu.mp4 with every frame; Esc during a 600-frame render leaves a shorter video.</div></div></div>
+  <div class="phase"><div class="pn"><b>C2</b>ffmpeg</div><div class="card"><h3>Videos through ffmpeg <span class="tag b">core</span></h3>
+    <p>ffmpeg (on <code>PATH</code>, or <code>$BEEMODEL_FFMPEG</code>) is started with a socket as its stdin and gets each frame raw while the next one renders: no PNGs in between. H.264 for .mp4 .mov .mkv, VP9 for .webm, a GIF with its own palette. Its first line shows when it fails; without it, the console says what works anyway.</p>
+    <div class="exit"><b>Exit:</b> ffprobe finds the codec, the size, the frame rate and every frame; a frame of the video is the PNG's picture; a failing stand-in ffmpeg is reported by what it said.</div></div></div>
+  <div class="phase"><div class="pn"><b>C3</b>apng</div><div class="card"><h3>Animated PNG without ffmpeg <span class="tag b">core</span></h3>
+    <p>.apng: BeeModel's own PNG encoder per frame, its chunks rewrapped (IDAT for the first frame, fdAT after, an fcTL each, acTL counted at the end), so a film can be made and shared with nothing installed.</p>
+    <div class="exit"><b>Exit:</b> chunk order, sequence numbers, CRCs and delays right; Pillow plays every frame, lossless.</div></div></div>
+  <div class="phase"><div class="pn"><b>C4</b>release</div><div class="card"><h3>Docs, tests, v1.3.0 <span class="tag r">release</span></h3>
+    <p><code>docs/VIDEO.md</code>; README, UI, BEESCRIPT, ARCHITECTURE; <code>tests/video.py</code> in local and GitHub CI (ffmpeg installed there).</p>
+    <div class="exit"><b>Exit:</b> local and GitHub CI green; v1.3.0 tagged and published.</div></div></div>
 </section>
 
 <section id="gas">
