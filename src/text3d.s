@@ -9,7 +9,8 @@
 #  the mesh itself copies it without the block: a plain mesh.
 #
 #  The text stands in the XY plane, read from the front (+Z), its origin on
-#  the first line's baseline, aligned left, centred or right. Each glyph's
+#  the last line's baseline (lines stack upwards: a title stands on the
+#  ground), aligned left, centred or right. Each glyph's
 #  outline comes from the TrueType engine (ttf.s walks the contours and calls
 #  the ol_begin / ol_line hooks instead of rasterizing; quadratic curves are
 #  flattened at the quality setting); its loops are nested into material and
@@ -36,11 +37,16 @@
 .globl tx_build
 .globl tx_apply
 .globl tx_parse
+.globl tx_sane
 .globl tx_write
 .globl tx_read
 .globl tx_active
 .globl op_tx_add
 .globl op_tx_set
+.globl op_tx_mesh
+.globl tf_names
+.globl tf_index
+.globl tf_label
 
 .equ PF_MAXP,   8192                    # (prof.s: loop points, loops)
 .equ PF_MAXL,   128
@@ -52,6 +58,11 @@
 .equ MAP_SCRATCH, 0x4022                # private | anonymous | noreserve
 .equ MAP_ANON_PRIV, 0x22
 .equ QBASE,     256                     # outline units per em at quality 1
+.equ TFL_N,     4096                    # fonts found on the system
+.equ TFL_NAME,  64
+.equ SYS_OPEN_, 2
+.equ O_DIR_,    0x90000                 # read-only | directory | close-on-exec
+.equ SYS_GETDENTS64, 217
 
 .section .bss
 .align 16
@@ -88,16 +99,29 @@ tg_cx:          .skip 4                 #   about this point,
 tg_cy:          .skip 4
 tg_dy:          .skip 4                 #   raised by
 tg_shear:       .skip 4
+.align 8
+tg_bev:         .skip 8                 # the bevel (em, double; 0: none)
 tg_inv:         .skip 4                 # 1 / outline units per em
 tg_n:           .skip 4                 # characters (reveal counts them)
 tl_open:        .skip 4                 # collecting: a loop is open,
 tl_skip:        .skip 4                 #  ignored (too many),
 tl_start:       .skip 4                 #  where it starts
+tg_z:           .skip 16                # the layers' z: front, (bevel) outer front,
+                                        #  outer back, back
+tb_outer:       .skip 16*PF_MAXP        # a bevelled glyph's outline before the inset
+tfl_n:          .skip 4                 # the fonts found: how many,
+tfl_done:       .skip 4                 #  (looked)
+tfl_ord:        .skip 4*TFL_N           #  in name order,
+tfl_lbl:        .skip 8*(TFL_N+1)       #  "Default" and their names (the panel's list)
+tfl_name:       .skip TFL_N*TFL_NAME    #  names (file names without .ttf)
+tfl_path:       .skip TFL_N*TX_FONT_MAX #  paths
+tfl_pb:         .skip 1024              # the folder being looked through
 
 .section .rodata
 .align 8
 td_one:         .double 1.0
 td_eps:         .double 1.0e-9
+td_half:        .double 0.5
 tx_defs:        .float 1.0, 0.2, 0.0, 0.0, 1.2, 1.0, 1.0, 1.0, 0.0, 8.0, 0.0, 0.0
 tq_one:         .float 1.0
 tq_half:        .float 0.5
@@ -120,7 +144,16 @@ s_none:         .asciz "none"
 s_added:        .asciz "  added "
 s_bad:          .asciz "  text: not understood: "
 s_nosel:        .asciz "  select a text object first (Add > Text)"
-s_nofont:       .asciz "  text: no such font (the built-in one is used): "
+s_nofont:       .asciz "  text: no such font (the default is used): "
+s_tomesh:       .asciz "  now a plain mesh: "
+s_default_l:    .asciz "Default"
+s_need:         .asciz "Select a text object"
+s_env_home:     .asciz "HOME="
+s_fd1:          .asciz "/usr/share/fonts"
+s_fd2:          .asciz "/usr/local/share/fonts"
+s_fd3:          .asciz "/.local/share/fonts"
+s_fd4:          .asciz "/.fonts"
+s_dot_ttf:      .asciz ".ttf"
 k_body:         .asciz "body"
 k_text:         .asciz "text"
 k_font:         .asciz "font"
@@ -194,6 +227,7 @@ tx_modes:       .quad k_pop, k_scale, k_rise, k_drop, k_type, 0
 
 .text
 OPERATOR op_tx_add, "text.add", "Text", do_tx_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add 3D text at the 3D cursor, standing in the XY plane, read from the front: text.add [\"body\"] [size m] [depth m] [font path] [align left|center|right] [spacing em] [line em] [slant x] [quality q] (\\n in the body starts a line)"
+OPERATOR op_tx_mesh, "text.to_mesh", "Convert Text to Mesh", do_tx_mesh, flags=OPF_AI_SAFE|OPF_UNDO, poll=poll_tx, doc="The active text object becomes a plain mesh (its shape kept, its text no longer editable): then it can be edited, sculpted or booleaned like any mesh"
 OPERATOR op_tx_set, "text.set", "Text Settings", do_tx_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="Change the active text object: text.set [\"new body\"] [size m] [depth m] [font path|default] [align left|center|right] [spacing em] [line em] [slant x] [quality q] [reveal 0..1] [mode pop|scale|rise|drop] [soft chars] [wave em] [wavelength chars] [phase turns]"
 
 # =============================================================================
@@ -379,13 +413,20 @@ tx_font:
     dec     ecx
     jnz     5b
     mov     byte ptr [rdi], 0
-6:  imul    eax, r12d, FNT_SZ
+6:  mov     rdi, rbx                    # a path, or a font's name
+    call    tf_resolve
+    test    rax, rax
+    jz      61f
+    mov     rsi, rax
+    imul    eax, r12d, FNT_SZ
     lea     rdi, [rip+tf_fnt]
     add     rdi, rax
-    mov     rsi, rbx
     call    font_load_at
     test    eax, eax
     jnz     .Ltf_hit
+61: imul    eax, r12d, FNT_SZ           # (not loaded: the default instead)
+    lea     rcx, [rip+tf_fnt]
+    mov     dword ptr [rcx+rax+FNT_LOADED], 0
     cmp     dword ptr [rip+op_quiet], 0
     jne     .Ltf_hit
     lea     rdi, [rip+s_nofont]
@@ -397,8 +438,6 @@ tx_font:
     add     rax, rcx
     cmp     dword ptr [rax+FNT_LOADED], 0
     jne     9f
-    xor     eax, eax
-    jmp     9f
 .Ltf_def:                               # the default: $BEEMODEL_TEXT_FONT, else
     cmp     dword ptr [rip+tf_def_done], 0  #  the UI's sans list
     jne     8f
@@ -445,6 +484,376 @@ tx_font:
 .align 8
 tf_deff:        .skip FNT_SZ            # the default font
 .text
+
+# ---- the fonts on the system -------------------------------------------------
+# tf_scan - the .ttf files under the usual font folders (once), by name
+tf_scan:
+    cmp     dword ptr [rip+tfl_done], 0
+    je      1f
+    ret
+1:  push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     dword ptr [rip+tfl_done], 1
+    lea     rsi, [rip+s_fd1]
+    xor     edi, edi
+    call    tf_root
+    lea     rsi, [rip+s_fd2]
+    xor     edi, edi
+    call    tf_root
+    lea     rdi, [rip+s_env_home]
+    call    getenv
+    test    rax, rax
+    jz      2f
+    mov     rbx, rax
+    mov     rdi, rax
+    lea     rsi, [rip+s_fd3]
+    call    tf_root
+    mov     rdi, rbx
+    lea     rsi, [rip+s_fd4]
+    call    tf_root
+2:  xor     ebx, ebx                    # in name order (insertion sort)
+3:  cmp     ebx, [rip+tfl_n]
+    jae     6f
+    lea     rax, [rip+tfl_ord]
+    mov     [rax+rbx*4], ebx
+    mov     r12d, ebx
+4:  test    r12d, r12d
+    jz      5f
+    lea     rax, [rip+tfl_ord]
+    mov     edi, [rax+r12*4-4]
+    mov     esi, [rax+r12*4]
+    call    tf_before                   # (the earlier one after this one?)
+    test    eax, eax
+    jz      5f
+    lea     rax, [rip+tfl_ord]
+    mov     ecx, [rax+r12*4-4]
+    mov     edx, [rax+r12*4]
+    mov     [rax+r12*4-4], edx
+    mov     [rax+r12*4], ecx
+    dec     r12d
+    jmp     4b
+5:  inc     ebx
+    jmp     3b
+6:  lea     rax, [rip+s_default_l]      # the panel's list
+    mov     [rip+tfl_lbl], rax
+    xor     ebx, ebx
+7:  cmp     ebx, [rip+tfl_n]
+    jae     9f
+    lea     rax, [rip+tfl_ord]
+    mov     eax, [rax+rbx*4]
+    imul    eax, eax, TFL_NAME
+    lea     rcx, [rip+tfl_name]
+    add     rax, rcx
+    lea     rcx, [rip+tfl_lbl]
+    mov     [rcx+rbx*8+8], rax
+    inc     ebx
+    jmp     7b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# tf_before(edi=font a, esi=font b) -> eax = 1 when b's name sorts before a's
+tf_before:
+    imul    edi, edi, TFL_NAME
+    imul    esi, esi, TFL_NAME
+    lea     rax, [rip+tfl_name]
+    add     rdi, rax
+    add     rsi, rax
+1:  movzx   eax, byte ptr [rdi]
+    movzx   ecx, byte ptr [rsi]
+    or      eax, 0x20                   # (letters: case ignored)
+    or      ecx, 0x20
+    cmp     byte ptr [rsi], 0
+    je      8f
+    cmp     byte ptr [rdi], 0
+    je      8f
+    cmp     ecx, eax
+    jb      7f
+    ja      8f
+    inc     rdi
+    inc     rsi
+    jmp     1b
+7:  mov     eax, 1
+    ret
+8:  xor     eax, eax
+    ret
+
+# tf_root(rdi=prefix or 0, rsi=folder) - tfl_pb = prefix + folder, walked
+tf_root:
+    lea     rdx, [rip+tfl_pb]
+    test    rdi, rdi
+    jz      2f
+1:  mov     al, [rdi]
+    test    al, al
+    jz      2f
+    mov     [rdx], al
+    inc     rdi
+    inc     rdx
+    lea     rax, [rip+tfl_pb+512]
+    cmp     rdx, rax
+    jb      1b
+    ret
+2:  mov     al, [rsi]
+    mov     [rdx], al
+    test    al, al
+    jz      3f
+    inc     rsi
+    inc     rdx
+    jmp     2b
+3:  mov     rdi, rdx
+    xor     esi, esi
+    jmp     tf_walk
+
+# tf_walk(rdi=the end of tfl_pb's path, esi=depth) - its .ttf files into the
+#   list, its folders walked (4 deep at most)
+tf_walk:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 4104
+    mov     r12, rdi                    # the path's end
+    mov     r13d, esi                   # depth
+    lea     rdi, [rip+tfl_pb]
+    mov     esi, O_DIR_
+    xor     edx, edx
+    mov     eax, SYS_OPEN_
+    syscall
+    test    eax, eax
+    js      .Ltw_out
+    mov     r14d, eax                   # fd
+.Ltw_read:
+    mov     edi, r14d
+    lea     rsi, [rsp]
+    mov     edx, 4096
+    mov     eax, SYS_GETDENTS64
+    syscall
+    test    eax, eax
+    jle     .Ltw_close
+    mov     r15d, eax                   # bytes
+    xor     ebx, ebx                    # offset
+.Ltw_ent:
+    cmp     ebx, r15d
+    jae     .Ltw_read
+    lea     rbp, [rsp+rbx]
+    movzx   eax, word ptr [rbp+16]      # d_reclen
+    add     ebx, eax
+    lea     rsi, [rbp+19]               # d_name
+    cmp     byte ptr [rsi], '.'
+    je      .Ltw_ent                    # (., .., hidden)
+    mov     rdi, rsi                    # room for "/" + the name?
+    call    str_len
+    lea     rcx, [r12+rax+2]
+    lea     rdx, [rip+tfl_pb+1000]
+    cmp     rcx, rdx
+    jae     .Ltw_ent
+    mov     byte ptr [r12], '/'         # the entry's path
+    lea     rdi, [r12+1]
+    lea     rsi, [rbp+19]
+    mov     ecx, eax
+    inc     ecx
+    rep     movsb
+    lea     r8, [r12+rax+1]             # (its end)
+    movzx   ecx, byte ptr [rbp+18]      # d_type
+    cmp     ecx, 4                      # a folder: walk it
+    jne     1f
+    cmp     r13d, 4
+    jae     .Ltw_next
+    mov     rdi, r8
+    lea     esi, [r13+1]
+    call    tf_walk
+    jmp     .Ltw_next
+1:  cmp     eax, 4                      # a file: name.ttf
+    jbe     .Ltw_next
+    mov     edx, [r8-4]
+    or      edx, 0x20202000             # (.TTF too)
+    cmp     edx, 0x6674742e             # ".ttf"
+    jne     .Ltw_next
+    mov     r9d, eax                    # (the name's length)
+    mov     ecx, [rip+tfl_n]
+    cmp     ecx, TFL_N
+    jae     .Ltw_next
+    inc     dword ptr [rip+tfl_n]
+    imul    edi, ecx, TX_FONT_MAX       # its path
+    lea     rdx, [rip+tfl_path]
+    add     rdi, rdx
+    lea     rsi, [rip+tfl_pb]
+    mov     edx, TX_FONT_MAX-1
+2:  lodsb
+    test    al, al
+    jz      21f
+    stosb
+    dec     edx
+    jnz     2b
+21: mov     byte ptr [rdi], 0
+    imul    edi, ecx, TFL_NAME          # its name: the file's, without .ttf
+    lea     rdx, [rip+tfl_name]
+    add     rdi, rdx
+    lea     rsi, [r12+1]
+    lea     edx, [r9-4]
+    cmp     edx, TFL_NAME-1
+    jb      3f
+    mov     edx, TFL_NAME-1
+3:  mov     ecx, edx
+    rep     movsb
+    mov     byte ptr [rdi], 0
+.Ltw_next:
+    mov     byte ptr [r12], 0
+    jmp     .Ltw_ent
+.Ltw_close:
+    mov     edi, r14d
+    mov     eax, SYS_CLOSE
+    syscall
+.Ltw_out:
+    mov     byte ptr [r12], 0
+    add     rsp, 4104
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tf_same(rdi=a, rsi=b) -> eax = 1 when the names match, case, spaces,
+#   hyphens and underscores aside ("DejaVu Sans Bold" = "DejaVuSans-Bold")
+tf_same:
+1:  movzx   eax, byte ptr [rdi]
+    cmp     eax, ' '
+    je      2f
+    cmp     eax, '-'
+    je      2f
+    cmp     eax, '_'
+    jne     3f
+2:  inc     rdi
+    jmp     1b
+3:  movzx   ecx, byte ptr [rsi]
+    cmp     ecx, ' '
+    je      4f
+    cmp     ecx, '-'
+    je      4f
+    cmp     ecx, '_'
+    jne     5f
+4:  inc     rsi
+    jmp     3b
+5:  test    eax, eax
+    jz      6f
+    test    ecx, ecx
+    jz      8f
+    or      eax, 0x20
+    or      ecx, 0x20
+    cmp     eax, ecx
+    jne     8f
+    inc     rdi
+    inc     rsi
+    jmp     1b
+6:  test    ecx, ecx
+    jnz     8f
+    mov     eax, 1
+    ret
+8:  xor     eax, eax
+    ret
+
+# tf_find(rdi=name) -> eax = its index in the list (-1)
+tf_find:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, rdi
+    call    tf_scan
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+tfl_n]
+    jae     8f
+    imul    esi, ebx, TFL_NAME
+    lea     rax, [rip+tfl_name]
+    add     rsi, rax
+    mov     rdi, r12
+    call    tf_same
+    test    eax, eax
+    jnz     9f
+    inc     ebx
+    jmp     1b
+8:  mov     ebx, -1
+9:  mov     eax, ebx
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# tf_resolve(rdi=a block's font) -> rax = the path to load, or 0: a path as it
+#   is (~ expanded), a name through the list
+tf_resolve:
+    mov     rsi, rdi
+1:  mov     al, [rsi]
+    test    al, al
+    jz      2f
+    cmp     al, '/'
+    je      3f
+    inc     rsi
+    jmp     1b
+2:  sub     rsp, 8
+    call    tf_find
+    add     rsp, 8
+    test    eax, eax
+    js      8f
+    imul    eax, eax, TX_FONT_MAX
+    lea     rcx, [rip+tfl_path]
+    add     rax, rcx
+    ret
+3:  jmp     path_expand
+8:  xor     eax, eax
+    ret
+
+# tf_names -> rax = the panel's list ("Default", then the fonts), edx = count
+tf_names:
+    sub     rsp, 8
+    call    tf_scan
+    add     rsp, 8
+    lea     rax, [rip+tfl_lbl]
+    mov     edx, [rip+tfl_n]
+    inc     edx
+    ret
+
+# tf_index(rdi=a block's font) -> eax = its row in tf_names (0: Default, or
+#   a path that is not in the list)
+tf_index:
+    cmp     byte ptr [rdi], 0
+    je      8f
+    push    rbx
+    call    tf_find
+    mov     ebx, eax
+    test    eax, eax
+    js      7f
+    xor     ecx, ecx                    # (the sorted row)
+1:  cmp     ecx, [rip+tfl_n]
+    jae     7f
+    lea     rax, [rip+tfl_ord]
+    cmp     [rax+rcx*4], ebx
+    je      2f
+    inc     ecx
+    jmp     1b
+2:  lea     eax, [rcx+1]
+    pop     rbx
+    ret
+7:  pop     rbx
+8:  xor     eax, eax
+    ret
+
+# tf_label(edi=row in tf_names) -> rax = its name (0: Default)
+tf_label:
+    xor     eax, eax
+    test    edi, edi
+    jz      9f
+    dec     edi
+    cmp     edi, [rip+tfl_n]
+    jae     9f
+    lea     rax, [rip+tfl_lbl]
+    mov     rax, [rax+rdi*8+8]
+9:  ret
 
 # =============================================================================
 #  Collecting outlines (ttf.s calls these instead of rasterizing)
@@ -615,8 +1024,8 @@ tb_room:
 9:  mov     dword ptr [rip+tb_full], 1
     ret
 
-# tb_vert(xmm0=u, xmm1=v (em, doubles, the glyph's own), edi=1 back / 0
-#   front) -> eax = its index: through the glyph's scale, raise and slant to
+# tb_vert(xmm0=u, xmm1=v (em, doubles, the glyph's own), edi=layer 0..3:
+#   tg_z's) -> eax = its index: through the glyph's scale, raise and slant to
 #   the pen, times the size
 tb_vert:
     cvtsd2ss xmm0, xmm0
@@ -635,13 +1044,9 @@ tb_vert:
     addss   xmm1, [rip+tg_py]
     mulss   xmm0, [rip+tg_size]
     mulss   xmm1, [rip+tg_size]
-    movss   xmm2, [rip+tg_h]
-    test    edi, edi
-    jz      1f
-    xorps   xmm3, xmm3
-    subss   xmm3, xmm2
-    movss   xmm2, xmm3
-1:  mov     eax, [rip+tb_nv]
+    lea     rax, [rip+tg_z]
+    movss   xmm2, [rax+rdi*4]
+    mov     eax, [rip+tb_nv]
     mov     rcx, [rip+tb_v]
     lea     rdx, [rax+rax*2]
     movss   [rcx+rdx*4], xmm0
@@ -749,8 +1154,141 @@ tl_part:
     add     rsp, 8
     ret
 
-# tg_solid - the loops in pf_* extruded: walls, then front and back caps
-#   (each point: a front vertex, then a back one)
+# tg_crossed -> eax = 1 when two edges of the loops in pf_* cross (edges that
+#   share a point aside)
+tg_crossed:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 40
+    xor     r12d, r12d                  # loop of edge 1
+.Ltc_l1:
+    cmp     r12d, [rip+pf_nl]
+    jae     .Ltc_no
+    xor     r13d, r13d                  # its edge
+.Ltc_e1:
+    lea     rax, [rip+pf_ln]
+    cmp     r13d, [rax+r12*4]
+    jae     .Ltc_nl1
+    mov     edi, r12d
+    mov     esi, r13d
+    call    tc_edge
+    mov     [rsp], eax                  # a, b
+    mov     [rsp+4], edx
+    mov     r14d, r12d                  # edge 2: this loop's later ones, then
+    lea     r15d, [r13+1]               #  the later loops'
+.Ltc_l2:
+    cmp     r14d, [rip+pf_nl]
+    jae     .Ltc_ne1
+.Ltc_e2:
+    lea     rax, [rip+pf_ln]
+    cmp     r15d, [rax+r14*4]
+    jae     .Ltc_nl2
+    mov     edi, r14d
+    mov     esi, r15d
+    call    tc_edge
+    mov     ecx, [rsp]                  # sharing a point: not a crossing
+    mov     ebx, [rsp+4]
+    cmp     eax, ecx
+    je      .Ltc_ne2
+    cmp     eax, ebx
+    je      .Ltc_ne2
+    cmp     edx, ecx
+    je      .Ltc_ne2
+    cmp     edx, ebx
+    je      .Ltc_ne2
+    mov     edi, ecx                    # c, d either side of ab, a, b of cd
+    mov     esi, ebx
+    mov     ebp, edx
+    mov     [rsp+8], eax
+    mov     edx, eax
+    call    tc_side
+    movsd   [rsp+16], xmm0
+    mov     edi, [rsp]
+    mov     esi, [rsp+4]
+    mov     edx, ebp
+    call    tc_side
+    mulsd   xmm0, [rsp+16]
+    xorpd   xmm1, xmm1
+    comisd  xmm0, xmm1
+    jae     .Ltc_ne2
+    mov     edi, [rsp+8]
+    mov     esi, ebp
+    mov     edx, [rsp]
+    call    tc_side
+    movsd   [rsp+16], xmm0
+    mov     edi, [rsp+8]
+    mov     esi, ebp
+    mov     edx, [rsp+4]
+    call    tc_side
+    mulsd   xmm0, [rsp+16]
+    xorpd   xmm1, xmm1
+    comisd  xmm0, xmm1
+    jb      .Ltc_yes
+.Ltc_ne2:
+    inc     r15d
+    jmp     .Ltc_e2
+.Ltc_nl2:
+    inc     r14d
+    xor     r15d, r15d
+    jmp     .Ltc_l2
+.Ltc_ne1:
+    inc     r13d
+    jmp     .Ltc_e1
+.Ltc_nl1:
+    inc     r12d
+    jmp     .Ltc_l1
+.Ltc_yes:
+    mov     eax, 1
+    jmp     9f
+.Ltc_no:
+    xor     eax, eax
+9:  add     rsp, 40
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+# tc_edge(edi=loop, esi=edge) -> eax, edx = its points
+tc_edge:
+    lea     rax, [rip+pf_ln]
+    mov     ecx, [rax+rdi*4]
+    lea     rax, [rip+pf_ls]
+    mov     r8d, [rax+rdi*4]
+    lea     eax, [rsi+1]
+    xor     edx, edx
+    div     ecx
+    lea     eax, [r8+rsi]
+    add     edx, r8d
+    ret
+# tc_side(edi=a, esi=b, edx=c) -> xmm0 = (b - a) x (c - a)
+tc_side:
+    lea     rax, [rip+pf_pt]
+    shl     edi, 4
+    shl     esi, 4
+    shl     edx, 4
+    movsd   xmm0, [rax+rsi]
+    subsd   xmm0, [rax+rdi]
+    movsd   xmm1, [rax+rdx+8]
+    subsd   xmm1, [rax+rdi+8]
+    mulsd   xmm0, xmm1
+    movsd   xmm1, [rax+rsi+8]
+    subsd   xmm1, [rax+rdi+8]
+    movsd   xmm2, [rax+rdx]
+    subsd   xmm2, [rax+rdi]
+    mulsd   xmm1, xmm2
+    subsd   xmm0, xmm1
+    ret
+
+# tg_solid - the loops in pf_* extruded: walls, then front and back caps.
+#   Each point: a front and a back vertex; bevelled (tg_bev > 0), four: the
+#   inset front, the outline at the front and at the back, the inset back
+#   (layers 0..3), with chamfers between them and the caps on the inset.
 tg_solid:
     push    rbx
     push    r12
@@ -759,37 +1297,93 @@ tg_solid:
     push    r15
     push    rbp
     sub     rsp, 24
-    mov     eax, [rip+pf_np]            # room: 2 vertices, a wall and two cap
-    lea     edi, [rax*2]                #  triangles per point (and per bridge)
+    mov     eax, [rip+pf_np]            # room: 4 vertices, 3 walls and two cap
+    lea     edi, [rax*4]                #  triangles per point (and per bridge)
     mov     ecx, [rip+pf_nl]
     lea     edx, [rax+rcx*2]
     lea     edx, [rdx*2+rax]
+    lea     edx, [rdx+rax*2]
     lea     esi, [rdx*4]
     call    tb_room
     test    eax, eax
     jz      .Lgs_out
-    mov     ebp, [rip+tb_nv]            # the first vertex
+    mov     dword ptr [rsp+16], 2       # vertices per point
+    xorpd   xmm0, xmm0
+    comisd  xmm0, [rip+tg_bev]
+    jae     1f
+    mov     ecx, [rip+pf_np]            # bevelled: keep the outline, inset the
+    shl     ecx, 4                      #  loops; where the inset loops cross
+    lea     rsi, [rip+pf_pt]            #  (thin strokes, the bowl of a d meeting
+    lea     rdi, [rip+tb_outer]         #  its stem), half as much, up to 5 times
+    rep     movsb
+    movsd   xmm0, [rip+tg_bev]
+    movsd   [rsp], xmm0
+    mov     dword ptr [rsp+8], 5
+11: movsd   xmm0, [rsp]
+    call    prof_offset
+    call    tg_crossed
+    test    eax, eax
+    jz      13f
+    mov     ecx, [rip+pf_np]            # (back to the outline)
+    shl     ecx, 4
+    lea     rsi, [rip+tb_outer]
+    lea     rdi, [rip+pf_pt]
+    rep     movsb
+    dec     dword ptr [rsp+8]
+    jz      1f                          # (no bevel on this glyph)
+    movsd   xmm0, [rsp]
+    mulsd   xmm0, [rip+td_half]
+    movsd   [rsp], xmm0
+    jmp     11b
+13: mov     dword ptr [rsp+16], 4
+    cvtsd2ss xmm0, [rsp]                # the chamfer's layers for this inset
+    mulss   xmm0, [rip+tg_size]
+    movss   xmm1, [rip+tg_z]
+    subss   xmm1, xmm0
+    movss   [rip+tg_z+4], xmm1
+    xorps   xmm2, xmm2
+    subss   xmm2, xmm1
+    movss   [rip+tg_z+8], xmm2
+1:  mov     ebp, [rip+tb_nv]            # the first vertex
     xor     ebx, ebx
-1:  cmp     ebx, [rip+pf_np]
-    jae     2f
+2:  cmp     ebx, [rip+pf_np]
+    jae     .Lgs_walls
     mov     eax, ebx
     shl     eax, 4
     lea     rcx, [rip+pf_pt]
     movsd   xmm0, [rcx+rax]
     movsd   xmm1, [rcx+rax+8]
-    movsd   [rsp], xmm0
-    movsd   [rsp+8], xmm1
-    xor     edi, edi
+    xor     edi, edi                    # the (inset) front
     call    tb_vert
-    movsd   xmm0, [rsp]
-    movsd   xmm1, [rsp+8]
+    cmp     dword ptr [rsp+16], 4
+    jne     3f
+    mov     eax, ebx                    # the outline, front and back
+    shl     eax, 4
+    lea     rcx, [rip+tb_outer]
+    movsd   xmm0, [rcx+rax]
+    movsd   xmm1, [rcx+rax+8]
     mov     edi, 1
     call    tb_vert
+    mov     eax, ebx
+    shl     eax, 4
+    lea     rcx, [rip+tb_outer]
+    movsd   xmm0, [rcx+rax]
+    movsd   xmm1, [rcx+rax+8]
+    mov     edi, 2
+    call    tb_vert
+3:  mov     eax, ebx                    # the (inset) back
+    shl     eax, 4
+    lea     rcx, [rip+pf_pt]
+    movsd   xmm0, [rcx+rax]
+    movsd   xmm1, [rcx+rax+8]
+    mov     edi, 3
+    call    tb_vert
     inc     ebx
-    jmp     1b
-2:  xor     r12d, r12d                  # walls: edge a -> b: (a back, b back,
-3:  cmp     r12d, [rip+pf_nl]           #  b front, a front)
-    jae     5f
+    jmp     2b
+.Lgs_walls:                             # walls: edge a -> b: (a lower, b lower,
+    xor     r12d, r12d                  #  b upper, a upper)
+3:  cmp     r12d, [rip+pf_nl]
+    jae     .Lgs_caps
     lea     rax, [rip+pf_ls]
     mov     r13d, [rax+r12*4]
     lea     rax, [rip+pf_ln]
@@ -802,17 +1396,41 @@ tg_solid:
     div     r14d
     lea     eax, [r13+rdx]              # b
     lea     ecx, [r13+rbx]              # a
-    lea     eax, [rbp+rax*2]
-    lea     ecx, [rbp+rcx*2]
-    lea     edi, [rcx+1]
+    imul    eax, [rsp+16]
+    imul    ecx, [rsp+16]
+    add     eax, ebp                    # their first vertices
+    add     ecx, ebp
+    mov     r15d, eax
+    mov     [rsp+20], ecx
+    cmp     dword ptr [rsp+16], 4
+    je      5f
+    lea     edi, [rcx+1]                # back a, back b, front b, front a
     lea     esi, [rax+1]
     mov     edx, eax
     call    tb_quad
-    inc     ebx
+    jmp     6f
+5:  lea     edi, [rcx+2]                # bevelled: the outline's wall,
+    lea     esi, [rax+2]
+    lea     edx, [rax+1]
+    inc     ecx
+    call    tb_quad
+    mov     ecx, [rsp+20]               #  the front chamfer,
+    lea     edi, [rcx+1]
+    lea     esi, [r15+1]
+    mov     edx, r15d
+    call    tb_quad
+    mov     ecx, [rsp+20]               #  the back chamfer
+    lea     edi, [rcx+3]
+    lea     esi, [r15+3]
+    lea     edx, [r15+2]
+    add     ecx, 2
+    call    tb_quad
+6:  inc     ebx
     jmp     4b
 41: inc     r12d
     jmp     3b
-5:  xor     r12d, r12d                  # caps: each material loop with its holes
+.Lgs_caps:                              # caps: each material loop with its holes
+    xor     r12d, r12d
 6:  cmp     r12d, [rip+pf_nl]
     jae     .Lgs_out
     lea     rax, [rip+pf_dep]
@@ -829,13 +1447,21 @@ tg_solid:
     mov     r13d, [rcx+rax*4]
     mov     r14d, [rcx+rax*4+4]
     mov     r15d, [rcx+rax*4+8]
-    lea     edi, [rbp+r13*2]            # front: counter-clockwise
-    lea     esi, [rbp+r14*2]
-    lea     edx, [rbp+r15*2]
+    imul    r13d, [rsp+16]
+    imul    r14d, [rsp+16]
+    imul    r15d, [rsp+16]
+    add     r13d, ebp
+    add     r14d, ebp
+    add     r15d, ebp
+    mov     edi, r13d                   # front: counter-clockwise
+    mov     esi, r14d
+    mov     edx, r15d
     call    tb_tri
-    lea     edi, [rbp+r13*2+1]          # back: reversed
-    lea     esi, [rbp+r15*2+1]
-    lea     edx, [rbp+r14*2+1]
+    mov     eax, [rsp+16]               # back (the last layer): reversed
+    dec     eax
+    lea     edi, [r13+rax]
+    lea     esi, [r15+rax]
+    lea     edx, [r14+rax]
     call    tb_tri
     inc     ebx
     jmp     7b
@@ -915,7 +1541,7 @@ bm_v:
     cvtss2sd xmm2, [rip+tq_px]
     mulsd   xmm0, xmm2
     mulsd   xmm1, xmm2
-    mov     edi, r14d
+    lea     edi, [r14+r14*2]            # (front: layer 0, back: 3)
     call    tb_vert
     lea     rcx, [rip+tb_bm]
     mov     [rcx+rbp*4], eax
@@ -1287,10 +1913,26 @@ tx_build:
     movss   xmm0, [rbx+TX_SIZE]
     maxss   xmm0, [rip+tq_min]
     movss   [rip+tg_size], xmm0
-    movss   xmm0, [rbx+TX_DEPTH]
-    maxss   xmm0, [rip+tq_zero]
-    mulss   xmm0, [rip+tq_half]
+    movss   xmm0, [rbx+TX_DEPTH]        # the layers: front at +depth / 2,
+    maxss   xmm0, [rip+tq_zero]         #  back at -depth / 2, the bevel's in
+    mulss   xmm0, [rip+tq_half]         #  between
     movss   [rip+tg_h], xmm0
+    movss   xmm1, [rbx+TX_BEVEL]
+    maxss   xmm1, [rip+tq_zero]
+    minss   xmm1, xmm0
+    movss   [rip+tg_z], xmm0
+    movss   xmm2, xmm0
+    subss   xmm2, xmm1
+    movss   [rip+tg_z+4], xmm2
+    xorps   xmm3, xmm3
+    subss   xmm3, xmm2
+    movss   [rip+tg_z+8], xmm3
+    xorps   xmm3, xmm3
+    subss   xmm3, xmm0
+    movss   [rip+tg_z+12], xmm3
+    divss   xmm1, [rip+tg_size]         # (in em)
+    cvtss2sd xmm1, xmm1
+    movsd   [rip+tg_bev], xmm1
     movss   xmm0, [rbx+TX_SHEAR]
     movss   [rip+tg_shear], xmm0
     # pass 1: each line's width, the characters
@@ -1329,11 +1971,13 @@ tx_build:
 .Ltb_p1end:
     call    .Ltb_lineend
     mov     [rip+tg_n], r13d
-    # pass 2: the glyphs
+    # pass 2: the glyphs, the first line on top: the last one's baseline at
+    #   the origin (text stands on the ground)
+    cvtsi2ss xmm0, r12d
+    mulss   xmm0, [rbx+TX_LINE]
+    movss   [rip+tg_py], xmm0
     xor     r12d, r12d                  # line
     xor     r13d, r13d                  # character index
-    xorps   xmm0, xmm0
-    movss   [rip+tg_py], xmm0
     call    .Ltb_linestart
     lea     rsi, [rip+tx_exp]
 .Ltb_p2:
@@ -1845,6 +2489,43 @@ do_tx_set:
 9:  add     rsp, 8
     pop     r12
     pop     rbx
+    ret
+
+# poll_tx -> rax = 0 when the active object is text, else why not
+poll_tx:
+    sub     rsp, 8
+    call    tx_active
+    add     rsp, 8
+    test    rax, rax
+    lea     rax, [rip+s_need]
+    jz      9f
+    xor     eax, eax
+9:  ret
+
+# text.to_mesh - the active text object: a plain mesh (a copy without the text)
+do_tx_mesh:
+    push    rbx
+    call    tx_active
+    test    rax, rax
+    jz      7f
+    mov     rbx, rax
+    mov     rdi, [rbx+OB_MESH]
+    call    mesh_copy
+    test    rax, rax
+    jz      9f
+    mov     rdi, [rbx+OB_MESH]
+    mov     [rbx+OB_MESH], rax
+    call    mesh_unref
+    mov     dword ptr [rip+dirty], 1
+    cmp     dword ptr [rip+op_quiet], 0
+    jne     9f
+    lea     rdi, [rip+s_tomesh]
+    mov     rsi, rbx
+    call    log_pair
+    jmp     9f
+7:  lea     rdi, [rip+s_nosel]
+    call    log_line
+9:  pop     rbx
     ret
 
 # =============================================================================

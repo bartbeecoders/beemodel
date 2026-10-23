@@ -8,11 +8,19 @@ parts stay closed, lines stack, alignment and size do what they say, the
 text block survives a save and reopen, text.set changes it (and refuses
 what it does not understand), reveal shows part of the characters.
 
-    python3 tests/text.py build/beemodel
+T2: fonts by name (text.set font "Noto Serif Bold", through the system's
+font folders; an unknown name: the default), a bevel that keeps the mesh
+closed; in the fake compositor: Add > Text, Properties > Object > Text (the
+body typed with \\n for a new line, the size, a font from the list, a
+bevel), Ctrl+Z, Convert to Mesh (the shape kept, the text gone).
+
+    python3 tests/text.py build/beemodel [shots dir]
 """
 import os, subprocess, sys, tempfile
 
 BIN = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else 'build/beemodel')
+OUT = sys.argv[2] if len(sys.argv) > 2 else None
+HERE = os.path.dirname(os.path.abspath(__file__))
 FAILS = []
 
 CLEAR = 'n = count()\nfor i in 0..n { delete(name(0)) }\n'
@@ -86,8 +94,8 @@ op("text.add", "HH size 2")
 print("Z", round(volume("Text") / v1 * 100))
 ''', home)
         L = lines(out, 'L')
-        check(code == 0 and L and L[0][0] == L[0][1] and int(L[0][2]) < 0,
-              f'\\n starts a line below the first: the same glyphs, lower down ({L})')
+        check(code == 0 and L and L[0][0] == L[0][1] and int(L[0][2]) > 0,
+              f'\\n starts a line below the first, which goes up: the last line stands on the origin ({L})')
         X = [int(r[0]) for r in lines(out, 'X')]
         check(len(X) == 3 and X[0] > 20 and abs(X[1]) <= 2 and X[2] < -20,
               f'align left / center / right put the text right of, on, left of the origin ({X})')
@@ -128,8 +136,102 @@ print("R", verts("Text"), faces("Text"))
         R = [(int(a), int(b)) for a, b in lines(out, 'R')]
         check(len(R) == 4 and R[1] == (1, 0) and 0 < R[2][0] < R[0][0] and R[3] == R[0],
               f'reveal 0 shows nothing, 0.5 some of the letters, 1 all ({R})')
+        # ---- T2: fonts by name, bevel ----------------------------------------------------
+        code, out = run(CLEAR + '''op("text.add", "BeeModel")
+print("F", verts("Text"))
+select("Text")
+op("text.set", "font NoSuchFontAtAll")
+print("F", verts("Text"))
+op("text.set", "bevel 0.02")
+print("V", manifold("Text"), analyze("Text", "boundary"), round(volume("Text") * 1000))
+op("text.set", "bevel 0")
+print("V", manifold("Text"), analyze("Text", "boundary"), round(volume("Text") * 1000))
+''', home)
+        F = [r[0] for r in lines(out, 'F')]
+        check(len(F) == 2 and F[0] == F[1], f'a font name that is not on the system: the default font ({F})')
+        V = lines(out, 'V')
+        check(len(V) == 2 and V[0][:2] == ['1', '0'] and V[1][:2] == ['1', '0'] and int(V[0][2]) < int(V[1][2]),
+              f'a bevel keeps the mesh closed and takes a little off the edges ({V})')
+        fonts = sorted({os.path.splitext(n)[0] for _, _, fs in os.walk('/usr/share/fonts')
+                        for n in fs if n.lower().endswith('.ttf')})
+        alt = next((n for n in fonts if 'serif' in n.lower() and 'bold' in n.lower()), fonts[0] if fonts else None)
+        if alt:
+            spaced = alt.replace('-', ' ')
+            code, out = run(CLEAR + 'op("text.add", "BeeModel")\nprint("N", verts("Text"))\nselect("Text")\n'
+                            f'op("text.set", "font \'{spaced}\'")\nprint("N", verts("Text"))\n', home)
+            N = [r[0] for r in lines(out, 'N')]
+            check(len(N) == 2 and N[0] != N[1], f'a font by its name, spaces for hyphens ({spaced!r}: {N})')
+    ui()
     print('text: ' + ('all green' if not FAILS else f'{len(FAILS)} failed'))
     sys.exit(1 if FAILS else 0)
+
+
+def ui():
+    """T2 in the fake compositor."""
+    print('  -- the Text panel --')
+    home = tempfile.mkdtemp(prefix='bee-text-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    argv = sys.argv
+    sys.argv = [argv[0], OUT or tempfile.mkdtemp(prefix='bee-text-shots-')]
+    sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
+    import fakewl
+    sys.argv = argv
+    fakewl.BIN = BIN
+    f = fakewl.Fake(home=home)
+    f.pump(1.0, until_frame=True)
+    f.keymap(os.path.join(HERE, 'keymaps', 'us.xkb'))
+    f.enter(600, 300)
+    m = fakewl.Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in fakewl.ui_tree(m)}
+
+    def typed(name, text):                      # a field: click, select all, type, Enter
+        x, y = fakewl.widget_xy(m, name)
+        f.click(x, y); f.pump(0.2)
+        f.mods(4); f.key(30); f.mods(0)
+        f.type(text); f.key(28); f.pump(0.4)
+
+    def undo():
+        f.move(600, 300); f.pump(0.1)
+        f.mods(4); f.key(44); f.mods(0); f.pump(0.4)
+
+    fakewl.menu_pick(f, m, 'Add', 'Text')
+    f.pump(0.4)
+    a = q('print(active(), verts(active()))').split()
+    check(len(a) == 2 and a[0] == 'Text' and int(a[1]) > 8, f'Add > Text: a text object at the cursor ({a})')
+    fakewl.props_tab(m, f, 'object')
+    want = {'text.body', 'text.font', 'text.size', 'text.depth', 'text.bevel', 'text.align', 'text.spacing',
+            'text.line', 'text.slant', 'text.quality', 'text.to_mesh'}
+    got = names()
+    check(want <= got, 'Properties > Object > Text: body, font, size, depth, bevel, align, spacing, line, '
+                       f'slant, quality, Convert to Mesh (missing {sorted(want - got)})')
+    vy = 'print(round(volume("Text") * 1000), round(centroid("Text", "y") * 100))'
+    v0 = q(vy).split()
+    typed('text.body', 'Hi\\nthere')
+    v1 = q(vy).split()
+    check(len(v1) == 2 and v1 != v0 and int(v1[1]) > int(v0[1]), f'the body typed with \\n: two lines, the first above ({v0} -> {v1})')
+    typed('text.size', '2')
+    v2 = q('print(round(volume("Text") * 1000))')
+    check(len(v1) == 2 and v2.isdigit() and abs(int(v2) - 4 * int(v1[0])) <= 2, f'size 2: four times the volume ({v1[:1]} -> {v2})')
+    n0 = q('print(verts("Text"))')
+    fakewl.pick_enum(f, m, 'text.font', 0, 1)
+    n1 = q('print(verts("Text"))')
+    check(n1 != n0, f'another font from the list changes the outlines ({n0} -> {n1})')
+    undo()
+    n2 = q('print(verts("Text"))')
+    check(n2 == n0, f'Ctrl+Z: the font as it was ({n2})')
+    typed('text.bevel', '0.02')
+    b = q('print(manifold("Text"), analyze("Text", "boundary"))')
+    check(b == '1 0', f'a bevel from the panel: still closed ({b})')
+    n3 = q('print(verts("Text"))')
+    x, y = fakewl.widget_xy(m, 'text.to_mesh')
+    f.click(x, y); f.pump(0.4)
+    n4 = q('print(verts("Text"))')
+    check(n4 == n3 and 'text.body' not in names() and 'text.to_mesh' not in names(),
+          f'Convert to Mesh: the same mesh, no Text section any more ({n3} -> {n4})')
+    undo()
+    check('text.body' in names(), 'Ctrl+Z: a text object again')
+    f.proc.kill()
 
 
 if __name__ == '__main__':
