@@ -5538,7 +5538,7 @@ def sim_cache():
     code = ('delete("Cube")\nadd("plane", "Ground", 0, 0, 0)\nscale("Ground", 20)\nselect("Ground")\nop("rigid.add", "passive box")\n'
             'add("cube", "Box", 0, 3, 0)\nscale("Box", 0.5)\nrotate("Box", 0.3, 0.2, 0.1)\nselect("Box")\nop("rigid.add", "active box")\n'
             'y30 = 0\nfor f in 2..61 {\n frame(f)\n if f == 30 { y30 = get("Box", "y") }\n}\nprint(cacheinfo(0), rbinfo(6))\n'
-            'frame(30)\nprint(cacheinfo(0), rbinfo(6), get("Box", "y") == y30)\n'
+            'frame(30)\nprint(cacheinfo(0), rbinfo(6), get("Box", "y") == y30, rbinfo(25))\n'
             'frame(1)\nprint(get("Box", "y"), cacheinfo(0))\nframe(30)\nprint(get("Box", "y") == y30, cacheinfo(0))\n'
             'frame(1)\nmove("Box", 0, 4, 0)\nframe(30)\nprint(cacheinfo(0), get("Box", "y") == y30)\n'
             'op("sim.bake")\nprint(cacheinfo(0), cacheinfo(3))\nframe(100)\nb = get("Box", "y")\n'
@@ -5548,8 +5548,9 @@ def sim_cache():
             'op("sim.free")\nprint(cacheinfo(0), cacheinfo(3), get("Box", "y") > 3)\n')
     r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
     out = [l.strip() for l in r.stdout.split('\n')] + [''] * 12
-    check(out[0] == '59 295' and out[1] == '59 295 1' and out[2] == '3 59' and out[3] == '1 59',
-          f'rigid bodies: each frame kept; scrubbing back plays it (no steps), the start keeps it ({out[:4]})')
+    check(out[0] == '59 295' and out[1] == '59 145 1 1' and out[2] == '3 59' and out[3] == '1 59',
+          f'rigid bodies: each frame kept; scrubbing back plays it (from the cache, rbinfo as it was then: '
+          f'145 steps at frame 30), the start keeps it ({out[:4]})')
     check(out[4] == '29 0', f'moving a body at the start drops the cache; simulated again from there ({out[4]})')
     check(out[5] == '249 1' and out[6] == '1 249' and out[7] == '249 1 1' and out[8] == '1' and out[9] == '299 0 1',
           f'a bake: the frame range kept through a change of gravity, saved and reopened, its last frame held; sim.free simulates again ({out[5:10]})')
