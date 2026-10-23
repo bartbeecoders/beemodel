@@ -88,6 +88,8 @@ Files dragged from a file manager onto the window open by their kind:
 
 ## The 3D viewport
 
+**Videos.** **Render › Render Animation...** renders the animation's frames at the render settings into a video: the save dialog suggests `animation.mp4` (also `.mkv`, `.mov`, `.webm`, `.gif` through ffmpeg; `.apng` without it; `.png` for a folder of frames). Esc stops it. See [VIDEO.md](VIDEO.md).
+
 **Text.** **Add › Text** puts 3D text at the 3D cursor, standing up and read from the front. **Properties › Object › Text** has what it says (one line to type; `\n` starts a new line), the font (any TrueType font on the system), size, depth, bevel, alignment, spacing, line height, slant and quality, then **Letter by letter**: reveal, how letters appear (pop, scale, rise, drop), wave. **I** over one of them keys it. **Object › Convert Text to Mesh** makes it a plain mesh to edit. See [TEXT.md](TEXT.md).
 
 **Reference images** are photos or drawings to model over. **Add › Reference Image...** (or an image dropped on the window, or `refimage(path [, name])`) puts one at the 3D cursor, square to the view's nearest axis (front, side or top) and upright, at the image's aspect ratio. It shows in every shading mode, solid included, and is left out of renders (its camera is off). **Properties › Object** shows its settings:
@@ -170,7 +172,7 @@ Right-click a colour field to copy it as `#rrggbb`, paste a hex code, or reset i
 
 The left side shows what the mouse and keys do right now, as key chips. On the right are the scene's size, the AI permission (click it for the AI menu), the progress of a render, who is co-editing and the live link (serving or mirroring; click it for the Versions editor).
 
-Long jobs (baking maps, light probes, a lightmap or a simulation, and imports) get a chip with their name and a bar filling as they go. The window keeps drawing while they run but does not take input until they finish.
+Long jobs (baking maps, light probes, a lightmap or a simulation, imports, rendering an animation) get a chip with their name and a bar filling as they go. The window keeps drawing while they run but does not take input until they finish, except **Esc**, which stops a render of an animation (the frames done are kept).
 
 Messages show as **toasts** above the status bar for four seconds:
 

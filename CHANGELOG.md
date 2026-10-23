@@ -28,6 +28,26 @@ project uses [Semantic Versioning](https://semver.org/).
 - `font_load_at`, and outline hooks in the TrueType engine (`ol_begin`,
   `ol_line`, `ol_end`).
 
+### Added (stage C, render to video, #394-#396)
+- **Render › Render Animation...**: the save dialog (`animation.mp4`), then
+  the animation's frames at the render settings, as a long job: the status
+  bar shows how far it is, and **Esc** stops it, keeping the frames done.
+- `render.animation <file> [first last]` makes a video when the name ends
+  in `.mp4`, `.mov`, `.mkv` (H.264), `.webm` (VP9) or `.gif` (its own
+  palette), through ffmpeg (on `PATH`, or `$BEEMODEL_FFMPEG`): raw frames
+  on its stdin while the next frame renders, no PNGs in between. ffmpeg's
+  first line shows when it fails (its log: `~/.cache/beemodel/ffmpeg.log`);
+  without ffmpeg the console says what works without it.
+- `.apng`: an animated PNG written by BeeModel itself (no ffmpeg needed).
+- `.png`: a folder of frames named like the file (`shot.png`: `shot/0001.png`).
+- Esc during a long job asks it to stop (`job_stop`); render animations
+  listen to it.
+- docs/VIDEO.md; `tests/video.py`.
+
+### Changed
+- The release binary may be up to 2 MB (`ci/check-binary.sh`), as the
+  masterplan allows from 1.0; it was 1.5 MiB.
+
 ## [1.1.0] - 2026-10-23
 
 Ask AI about the selection, issues Q1-Q5 (#374-#378): a prompt at the

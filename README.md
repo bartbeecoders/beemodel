@@ -181,8 +181,10 @@ passes; Render › Denoise turns it off), so 16 samples look close to 256. The R
 switches passes (beauty, albedo, normal, depth) and saves them
 (`render.save <path> [pass]`, PNG or linear half-float `.exr`); `render.settings <width>
 <height> <samples>` sets the size and samples, which are saved with the scene.
-`render.animation <folder> [first last]` renders every frame into `0001.png`, `0002.png` ...;
-on the GPU the next frame is simulated and built while the GPU traces one. With
+**Render › Render Animation...** (`render.animation <file> [first last]`) renders every frame into
+a video: `.mp4`, `.mkv`, `.mov`, `.webm` or `.gif` through ffmpeg, an animated PNG (`.apng`)
+without it, or a folder of `0001.png`, `0002.png` ... ([docs/VIDEO.md](docs/VIDEO.md)); Esc stops
+it. On the GPU the next frame is simulated and built while the GPU traces one. With
 `render.sample_reuse <frames>` later frames trace fewer samples and reuse the frames before's
 where a pixel sees the same surface.
 
@@ -595,6 +597,11 @@ alignment, spacing, line height and slant, rebuilt as you type in Properties ›
 wave) with `text:Title:reveal` keys, or make them count: `{frame}`, `{floor(time)}` in the body.
 The AI sees what each text says and can add or change it; `text()` and `text_set()` in
 BeeScript. [docs/TEXT.md](docs/TEXT.md).
+
+**Videos.** Render › Render Animation... renders the animation into an `.mp4`, `.mkv`, `.mov`,
+`.webm` or `.gif` through ffmpeg (frames streamed to it while the next one renders), an animated
+PNG without it, or a folder of PNGs; the status bar shows how far it is and Esc stops it.
+[docs/VIDEO.md](docs/VIDEO.md).
 
 **Particles and liquid.** Add › Particles makes rain, snow, sparks, confetti, a fountain or a
 water tank; any object can emit from its faces, volume, vertices, origin or another system's
