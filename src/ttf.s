@@ -13,6 +13,17 @@
 # exports
 .globl fonts
 .globl font_load
+.globl font_load_at
+.globl glyph_index
+.globl outline_glyph
+.globl xf_ident
+.globl r_font
+.globl r_scale
+.globl r_ox
+.globl r_oy
+.globl ol_begin
+.globl ol_line
+.globl ol_end
 .globl font_set_size
 .globl glyph_get
 .globl glyph_cache_flush
@@ -65,6 +76,10 @@ c_py:           .skip 4
 c_cx:           .skip 4
 c_cy:           .skip 4
 q_n:            .skip 4
+.align 8
+ol_begin:       .skip 8                 # outline hooks (text3d.s): a contour starts at
+ol_line:        .skip 8                 #  xmm0, xmm1; an edge to xmm2, xmm3 (0: rasterize);
+ol_end:         .skip 8                 #  a simple glyph (or component) is done
 
 .section .rodata
 .align 16
@@ -159,16 +174,18 @@ gamma_init:
 
 # -----------------------------------------------------------------------------
 # font_load(edi=slot, rsi=path) -> eax = 1 on success
+# font_load_at(rdi=font struct, rsi=path): the same, into any struct (text3d.s)
 # -----------------------------------------------------------------------------
 font_load:
+    imul    edi, FNT_SZ
+    lea     rax, [rip+fonts]
+    add     rdi, rax
+font_load_at:
     push    rbx
     push    r12
     push    r13
     push    r14
-    mov     ebx, edi
-    imul    ebx, FNT_SZ
-    lea     rax, [rip+fonts]
-    add     rbx, rax                    # font struct
+    mov     rbx, rdi                    # font struct
     mov     rdi, rsi
     mov     esi, O_RDONLY_CLOEXEC
     xor     edx, edx
@@ -954,7 +971,11 @@ outline_simple:
     inc     ebx
     jmp     6b
 .Los_out:
-    add     rsp, 8
+    mov     rax, [rip+ol_end]
+    test    rax, rax
+    jz      7f
+    call    rax
+7:  add     rsp, 8
     pop     r15
     pop     r14
     pop     r13
@@ -1034,7 +1055,11 @@ emit_contour:
     movss   [rip+c_sy], xmm1
     movss   [rip+c_px], xmm0
     movss   [rip+c_py], xmm1
-    xor     r14d, r14d                  # pending control point?
+    mov     rax, [rip+ol_begin]         # (collecting outlines: a new loop)
+    test    rax, rax
+    jz      39f
+    call    rax
+39: xor     r14d, r14d                  # pending control point?
 4:  test    r13d, r13d
     jz      .Lec_close
     lea     r8, [rip+ptx]
@@ -1182,6 +1207,11 @@ quad_to:
 #   (clobbers xmm0-xmm1 and xmm6-xmm15; keeps xmm2-xmm5)
 # -----------------------------------------------------------------------------
 line_acc:
+    mov     rax, [rip+ol_line]          # (collecting outlines instead)
+    test    rax, rax
+    jz      .Lla_raster
+    jmp     rax
+.Lla_raster:
     ucomiss xmm1, xmm3
     je      .Lla_ret
     push    rbx

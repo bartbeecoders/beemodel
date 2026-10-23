@@ -6245,6 +6245,32 @@
    }
   },
   {
+   "name": "op_text_add",
+   "description": "Text - Add 3D text at the 3D cursor, standing in the XY plane, read from the front: text.add [\"body\"] [size m] [depth m] [font path] [align left|center|right] [spacing em] [line em] [slant x] [quality q] (\\n in the body starts a line)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_text_set",
+   "description": "Text Settings - Change the active text object: text.set [\"new body\"] [size m] [depth m] [font path|default] [align left|center|right] [spacing em] [line em] [slant x] [quality q] [reveal 0..1] [mode pop|scale|rise|drop] [soft chars] [wave em] [wavelength chars] [phase turns]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_view_theme_dark",
    "description": "Dark - Dark UI theme (the default)",
    "inputSchema": {

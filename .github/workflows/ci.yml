@@ -145,6 +145,9 @@ jobs:
       - name: Light assemblies (mates, a mechanism joint)
         run: timeout 300 python tests/assembly.py build/beemodel
 
+      - name: 3D text (TrueType and block-font solids, lines, alignment, files, reveal)
+        run: timeout 300 python tests/text.py build/beemodel
+
       - name: FreeCAD, else OpenCASCADE (for the STEP round trips)
         run: |
           # FreeCAD from its PPA; when Launchpad is down (503s, time-outs), the
