@@ -14,9 +14,15 @@ closed; in the fake compositor: Add > Text, Properties > Object > Text (the
 body typed with \\n for a new line, the size, a font from the list, a
 bevel), Ctrl+Z, Convert to Mesh (the shape kept, the text gone).
 
+T3: text:<name>:reveal and size keyed over the timeline; {frame} in the
+body counts; I over a panel value keys it.
+
+T4: text() and text_set() in BeeScript; the stand-in Claude Code adds a
+title and, finding it in scene_summary, changes it; Ctrl+Z each step.
+
     python3 tests/text.py build/beemodel [shots dir]
 """
-import os, subprocess, sys, tempfile
+import os, subprocess, sys, tempfile, time
 
 BIN = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else 'build/beemodel')
 OUT = sys.argv[2] if len(sys.argv) > 2 else None
@@ -198,6 +204,7 @@ print("C", a, b, verts(c))
         check(len(C) == 1 and C[0][0] != C[0][1] and C[0][0] == C[0][2],
               f'{{frame}} in the body: the mesh follows the frame, and back ({C})')
     ui()
+    ai()
     print('text: ' + ('all green' if not FAILS else f'{len(FAILS)} failed'))
     sys.exit(1 if FAILS else 0)
 
@@ -276,6 +283,62 @@ def ui():
           f'Convert to Mesh: the same mesh, no Text section any more ({n3} -> {n4})')
     undo()
     check('text.body' in names(), 'Ctrl+Z: a text object again')
+    f.proc.kill()
+
+
+def ai():
+    """T4: the AI adds a title and changes it (the stand-in Claude Code, which
+    finds the text in scene_summary); each request one undo step."""
+    print('  -- text for the AI --')
+    home = tempfile.mkdtemp(prefix='bee-text-ai-')
+    os.makedirs(os.path.join(home, 'BeeModel'))
+    bindir = os.path.join(home, 'bin')
+    os.makedirs(bindir)
+    for n in ('claude', 'grok'):
+        os.symlink(os.path.join(HERE, 'ai_standin.py'), os.path.join(bindir, n))
+    os.environ['PATH'] = bindir + ':' + os.environ['PATH']
+    import fakewl
+    f = fakewl.Fake(home=home)
+    f.pump(1.0, until_frame=True)
+    f.keymap(os.path.join(HERE, 'keymaps', 'us.xkb'))
+    f.enter(600, 300)
+    f.move(600, 300)
+    m = fakewl.Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+
+    def wait_idle(secs=20):
+        end = time.time() + secs
+        while time.time() < end:
+            t = [ln for ln in m.tool('op_ai_transcript')[0].split('\n') if ln.startswith('$ ')]
+            if t and 'idle' in t[0]:
+                break
+            f.pump(0.1)
+        f.pump(0.3)
+
+    def send(text):
+        x, y = fakewl.widget_xy(m, 'ai.prompt')
+        f.click(x, y); f.pump(0.1)
+        f.type(text); f.key(28); f.pump(0.2)
+        wait_idle()
+
+    def texts():
+        return q('n = count()\ns = ""\nfor i in 0..n { if text(name(i)) != nil { s = s + name(i) + "=" + text(name(i)) + ";" } }\nprint(s)')
+
+    f.mods(5); f.key(57); f.mods(0)                 # Ctrl+Shift+Space: the AI workspace
+    f.pump(0.4)
+    send("add a title 'Hello' above the cube")
+    a = texts()
+    y = q('print(round(get("Text", "y") * 10))')
+    check(a == 'Text=Hello;' and y == '26', f'"add a title \'Hello\' above the cube": one text object, above the cube ({a}, y {y})')
+    send("change the title to 'Goodbye'")
+    b = texts()
+    check(b == 'Text=Goodbye;', f'"change the title to \'Goodbye\'": the AI found it in the scene and changed it ({b})')
+    f.move(400, 300); f.pump(0.1)
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.4)
+    c = texts()
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.4)
+    d = texts()
+    check(c == 'Text=Hello;' and d == '', f'Ctrl+Z undoes each request: Hello, then no text ({c!r}, {d!r})')
     f.proc.kill()
 
 

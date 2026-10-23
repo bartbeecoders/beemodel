@@ -51,6 +51,8 @@
 .globl tx_frame
 .globl tx_keyidx
 .globl tx_keyname
+.globl tx_body_set
+.globl tx_json
 
 .equ PF_MAXP,   8192                    # (prof.s: loop points, loops)
 .equ PF_MAXL,   128
@@ -163,6 +165,9 @@ s_tomesh:       .asciz "  now a plain mesh: "
 s_default_l:    .asciz "Default"
 s_need:         .asciz "Select a text object"
 s_q:            .asciz "?"
+j_text:         .asciz ",\"text\":{"
+k_alignj:       .asciz "align"
+k_modej:        .asciz "mode"
 s_env_home:     .asciz "HOME="
 s_frame:        .asciz "frame"
 s_time:         .asciz "time"
@@ -2874,6 +2879,110 @@ tx_frame:
 8:  inc     ebx
     jmp     4b
 9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tx_body_set(rdi=object, rsi=body) -> eax = 1: the text says that now (0:
+#   not a text)
+tx_body_set:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12, rsi
+    call    tx_of
+    test    rax, rax
+    jz      8f
+    mov     rdi, rax
+    call    tx_copy
+    test    rax, rax
+    jz      8f
+    mov     r13, rax
+    lea     rdi, [r13+TX_BODY]
+    mov     rsi, r12
+    mov     ecx, TX_BODY_MAX-1
+1:  lodsb
+    stosb
+    test    al, al
+    jz      2f
+    dec     ecx
+    jnz     1b
+    mov     byte ptr [rdi], 0
+2:  mov     rdi, rbx
+    mov     rsi, r13
+    call    tx_apply
+    mov     rdi, r13
+    call    tx_unref
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tx_json(rdi=object) - for a text object, ,"text":{"body":..,"font":..,
+#   "align":..,"mode":.., then its values} appended to the JSON being written
+#   (mcp.s obj_json: so an AI sees what it says)
+tx_json:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    call    tx_of
+    test    rax, rax
+    jz      9f
+    mov     rbx, rax
+    lea     rsi, [rip+j_text]
+    call    wb_str
+    lea     rsi, [rip+k_body]
+    call    jb_key
+    lea     rsi, [rbx+TX_BODY]
+    call    jb_q
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_font]
+    call    jb_key
+    lea     rsi, [rbx+TX_FONT]
+    cmp     byte ptr [rsi], 0
+    jne     1f
+    lea     rsi, [rip+k_default]
+1:  call    jb_q
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_alignj]
+    call    jb_key
+    mov     eax, [rbx+TX_ALIGN]
+    cmp     eax, 3
+    jb      2f
+    xor     eax, eax
+2:  lea     rcx, [rip+tx_aligns]
+    mov     rsi, [rcx+rax*8]
+    call    jb_q
+    mov     edi, ','
+    call    wb_char
+    lea     rsi, [rip+k_modej]
+    call    jb_key
+    mov     eax, [rbx+TX_RMODE]
+    and     eax, 3
+    lea     rcx, [rip+tx_modes]
+    mov     rsi, [rcx+rax*8]
+    call    jb_q
+    xor     r12d, r12d                  # the values
+3:  cmp     r12d, TX_NFLOAT
+    jae     4f
+    mov     edi, ','
+    call    wb_char
+    lea     rcx, [rip+tx_fkeys]
+    mov     rsi, [rcx+r12*8]
+    call    jb_key
+    movss   xmm0, [rbx+TX_FLOATS+r12*4]
+    call    jb_num
+    inc     r12d
+    jmp     3b
+4:  mov     edi, '}'
+    call    wb_char
+9:  add     rsp, 8
     pop     r12
     pop     rbx
     ret

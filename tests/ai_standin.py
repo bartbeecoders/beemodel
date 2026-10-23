@@ -7,10 +7,12 @@ real stream format (stream-json / streaming-messages-json: system,
 assistant, user, result lines). Every run's arguments are kept in
 $HOME/<name>.runs.json for the test to look at.
 
-Prompts: "slow" waits (for Stop), "fail" ends with an error, anything else
-builds a little tower of cubes (Tower0.. for claude, Grok0.. for grok).
+Prompts: "slow" waits (for Stop), "fail" ends with an error, "add a title
+'Hello'" adds 3D text above the cube and "change the title to 'Bye'" finds
+it in scene_summary and changes it (tests/text.py), anything else builds a
+little tower of cubes (Tower0.. for claude, Grok0.. for grok).
 """
-import json, os, subprocess, sys, time
+import json, os, re, subprocess, sys, time
 
 NAME = os.path.basename(sys.argv[0])
 ARGS = sys.argv[1:]
@@ -95,6 +97,8 @@ def main():
         return 0
     if '--- What this request is about' in prompt:
         return ask(prompt, sid)
+    if 'title' in prompt:
+        return title(prompt, sid)
     m = Mcp()
     pre = 'mcp__beemodel__'
     say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [
@@ -120,6 +124,41 @@ def main():
     m.p.wait(5)
     return 0
 
+
+
+def title(prompt, sid):
+    """Text (tests/text.py): "add a title 'X'" (text.add, then moved above the
+    cube), "change the title to 'Y'" (the text object found in scene_summary,
+    text_set)."""
+    words = (re.findall(r"'([^']*)'", prompt) or ['Title'])[-1]
+    m = Mcp()
+    pre = 'mcp__beemodel__'
+    calls = []
+    if 'change' in prompt:
+        summary, _ = m.tool('scene_summary', {})
+        calls.append(('scene_summary', {}, summary))
+        texts = [o['name'] for o in json.loads(summary)['objects'] if 'text' in o]
+        code = 'text_set("%s", "%s")\nprint(text("%s"))' % (texts[0], words, texts[0]) if texts else 'print("no text")'
+        r, _ = m.tool('script_eval', {'code': code})
+        calls.append(('script_eval', {'code': code}, r))
+    else:
+        arg = "'%s' size 0.5 depth 0.1" % words
+        r, _ = m.tool('op_text_add', {'arg': arg})
+        calls.append(('op_text_add', {'arg': arg}, r))
+        code = 't = active()\nmove(t, 0, 2.6, 0)\nprint(t, text(t))'
+        r, _ = m.tool('script_eval', {'code': code})
+        calls.append(('script_eval', {'code': code}, r))
+    for i, (name, args, result) in enumerate(calls):
+        say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [
+            {'type': 'tool_use', 'id': 't%d' % i, 'name': pre + name, 'input': args}]}, 'session_id': sid})
+        say({'type': 'user', 'message': {'role': 'user', 'content': [
+            {'type': 'tool_result', 'tool_use_id': 't%d' % i, 'content': result[:300], 'is_error': False}]}})
+    say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [
+        {'type': 'text', 'text': 'The title reads %s.' % words}]}})
+    say({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'Done.', 'session_id': sid})
+    m.p.stdin.close()
+    m.p.wait(5)
+    return 0
 
 
 def ask(prompt, sid):

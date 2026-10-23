@@ -442,6 +442,10 @@ builtins:
     .long 1, 2
     .quad bn_field, b_field
     .long 1, 3
+    .quad bn_text, b_text
+    .long 1, 1
+    .quad bn_text_set, b_text_set
+    .long 2, 2
     .quad bn_force, b_force
     .long 3, 4
     .quad bn_fieldinfo, b_fieldinfo
@@ -799,6 +803,8 @@ bn_infolder:    .asciz "infolder"
 bn_folders:     .asciz "folders"
 bn_refimage:    .asciz "refimage"
 bn_field:       .asciz "field"
+bn_text:        .asciz "text"
+bn_text_set:    .asciz "text_set"
 bn_force:       .asciz "force"
 bn_fieldinfo:   .asciz "fieldinfo"
 bn_emit:        .asciz "emit"
@@ -6028,6 +6034,47 @@ b_folders:
     call    fd_count
     add     rsp, 8
     cvtsi2sd xmm0, eax
+    jmp     ret_num
+
+# text(name) -> what a text object says (its body, as typed: {frame} and
+#   all), nil when it is not text
+b_text:
+    sub     rsp, 8
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     rdi, rax
+    call    tx_of
+    add     rsp, 8
+    test    rax, rax
+    jz      ret_nil
+    lea     rsi, [rax+TX_BODY]
+    jmp     ret_text
+
+# text_set(name, body) -> 1: the text object says that now (nil: not text)
+b_text_set:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    a_obj
+    mov     edi, eax
+    call    obj_get
+    mov     r12, rax
+    lea     rdi, [rbx+16]
+    call    a_str
+    mov     rbx, rax
+    lea     rdi, [rip+s_script]
+    call    undo_push
+    mov     rdi, r12
+    mov     rsi, rbx
+    call    tx_body_set
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    test    eax, eax
+    jz      ret_nil
+    movsd   xmm0, [rip+f_one]
     jmp     ret_num
 
 # ret_text(rsi=text) - a copy of it
