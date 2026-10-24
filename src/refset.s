@@ -22,8 +22,8 @@
 #  its text ("schaal: 1:50"; a page without one takes its PDF's, or the
 #  set's), so it comes in at its true size.
 #
-#  Into a folder of their own ("Refs <name>"), as references seen only
-#  square-on and from the front: the elevations stood up facing their side
+#  Into a folder of their own ("Refs <name>"), as references seen from
+#  every angle but from the front only: the elevations stood up facing their side
 #  (front +Z, back -Z, right +X, left -X), the plans flat at 3 m a level
 #  with only the ground floor shown; sections, site, terrain profiles, other
 #  pages and every existing drawing in hidden folders. The console lists
@@ -161,7 +161,7 @@ s_head_a:       .asciz "  references: "
 s_head_b:       .asciz " pages from "
 s_head_c:       .asciz " files into the folder "
 s_tail_a:       .asciz " pages in "
-s_tail_b:       .asciz ": seen square-on, Numpad 1 front, 3 right, 7 top"
+s_tail_b:       .asciz " (Numpad 1 front, 3 right, 7 top)"
 s_skip_leg:     .asciz " (a legend: left out)"
 s_failed:       .asciz " (could not be loaded)"
 s_hidden:       .asciz ", hidden"
@@ -1951,7 +1951,6 @@ rs_place:
     mov     r13, rdx                    # the object
     movss   [rsp], xmm0                 # aspect
     and     dword ptr [r13+OB_FLAGS], ~(OBF_REF_BACK|OBF_SELECTED)
-    or      dword ptr [r13+OB_FLAGS], OBF_REF_AXIS
     mov     eax, [rbx+RS_SCALE]         # width (m): pixels x 0.254 mm x n,
     test    eax, eax                    #  else 10 m
     jz      1f
