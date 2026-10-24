@@ -26,6 +26,9 @@
 .globl ref_draw
 .globl ref_props
 .globl ref_image_of
+.globl ref_add_path
+.globl ref_last_w
+.globl ref_last_h
 
 .equ IM_W_,     0                       # (imgread.s)
 .equ IM_H_,     4
@@ -52,6 +55,8 @@ rf_sides:       .skip 4
 rf_ortho:       .skip 4
 rf_axis:        .skip 4
 rf_name:        .skip 64
+ref_last_w:     .skip 4                 # ref_add_path: the image's pixels
+ref_last_h:     .skip 4
 
 .section .rodata
 .align 4
@@ -85,6 +90,64 @@ WIDGET wd_ref_ortho, WK_TOGGLE, "reference.ortho_only", "Only in orthographic vi
 WIDGET wd_ref_axis,  WK_TOGGLE, "reference.axis_only", "Only when seen square-on", cb=ref_flag_cb, undo="Reference Image", tip="As a front, side or top reference: hidden when the view turns away"
 
 # ---- adding one ---------------------------------------------------------------------
+# ref_add_path(rdi=image file, rsi=object name or 0) -> eax = the new
+#   reference's object id (0: the image did not load), rdx = its record,
+#   xmm0 = the image's aspect (w / h). Not placed: at the origin, flat, 2 x 2.
+ref_add_path:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 24
+    mov     rbx, rsi
+    call    image_load                  # -> its index
+    test    eax, eax
+    js      8f
+    mov     r12d, eax
+    mov     edi, eax
+    call    image_ptr
+    test    rax, rax
+    jz      8f
+    mov     ecx, [rax+IM_W_]
+    mov     [rip+ref_last_w], ecx
+    mov     ecx, [rax+IM_H_]
+    mov     [rip+ref_last_h], ecx
+    cvtsi2ss xmm0, dword ptr [rax+IM_W_] # aspect = w / h
+    cvtsi2ss xmm1, dword ptr [rax+IM_H_]
+    divss   xmm0, xmm1
+    movss   [rsp], xmm0
+    call    prim_plane
+    mov     rdx, rax
+    mov     edi, OT_MESH
+    lea     rsi, [rip+s_ref_base]
+    test    rbx, rbx
+    jz      1f
+    mov     rsi, rbx
+1:  call    obj_new
+    test    eax, eax
+    jz      8f
+    mov     r13d, eax
+    mov     edi, eax
+    call    obj_get
+    mov     r14, rax
+    or      dword ptr [r14+OB_FLAGS], OBF_REFIMG|OBF_NORENDER|OBF_REF_BACK
+    mov     dword ptr [r14+OB_COLOR], 0x808080
+    mov     edi, r12d                   # its material: the image, opaque
+    mov     rsi, r14
+    call    ref_material
+    mov     eax, r13d
+    mov     rdx, r14
+    movss   xmm0, [rsp]
+    jmp     9f
+8:  xor     eax, eax
+    xor     edx, edx
+9:  add     rsp, 24
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # do_ref_add - object.add_reference <file>
 do_ref_add:
     push    rbx
@@ -100,31 +163,13 @@ do_ref_add:
     je      .Lra_no
     call    path_expand_any
     mov     rdi, rax
-    call    image_load                  # -> its index
+    xor     esi, esi
+    call    ref_add_path                # the plane, named after the image
     test    eax, eax
-    js      .Lra_no
-    mov     r12d, eax
-    mov     edi, eax
-    call    image_ptr
-    test    rax, rax
     jz      .Lra_no
-    cvtsi2ss xmm0, dword ptr [rax+IM_W_] # aspect = w / h
-    cvtsi2ss xmm1, dword ptr [rax+IM_H_]
-    divss   xmm0, xmm1
     movss   [rsp], xmm0
-    call    prim_plane                  # the plane, named after the image
-    mov     rdx, rax
-    mov     edi, OT_MESH
-    lea     rsi, [rip+s_ref_base]
-    call    obj_new
-    test    eax, eax
-    jz      .Lra_no
     mov     r13d, eax
-    mov     edi, eax
-    call    obj_get
-    mov     r14, rax
-    or      dword ptr [r14+OB_FLAGS], OBF_REFIMG|OBF_NORENDER|OBF_REF_BACK
-    mov     dword ptr [r14+OB_COLOR], 0x808080
+    mov     r14, rdx
     lea     rsi, [rip+cursor_pos]       # at the 3D cursor
     mov     rax, [rsi]
     mov     [r14+OB_LOC], rax
@@ -140,9 +185,6 @@ do_ref_add:
     movss   [r14+OB_SCALE+8], xmm0
     mov     rdi, r14                    # square to the view's nearest axis
     call    ref_face_view
-    mov     edi, r12d                   # its material: the image, opaque
-    mov     rsi, r14
-    call    ref_material
     mov     edi, r13d                   # the new one alone selected, active
     xor     esi, esi
     call    obj_click_select

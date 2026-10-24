@@ -36,6 +36,7 @@
 .globl fd_toggle
 .globl fd_select
 .globl fd_inside
+.globl fd_make
 
 .equ FD_REFS,   0
 .equ FD_N,      4
@@ -313,6 +314,18 @@ fd_ensure:
 8:  xor     eax, eax
 9:  pop     r13
     pop     r12
+    pop     rbx
+    ret
+
+# fd_make(rdi=name, esi=parent uid) -> eax = the uid of a new folder of
+#   that name ("name.001" ... when it is taken), 0: no room
+fd_make:
+    push    rbx
+    mov     ebx, esi
+    call    fd_unique
+    lea     rdi, [rip+fd_tmp]
+    mov     esi, ebx
+    call    fd_ensure
     pop     rbx
     ret
 

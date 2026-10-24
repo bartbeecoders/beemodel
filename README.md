@@ -568,7 +568,10 @@ The file dialog has favourites, the mounted drives with their free space, recent
 back / forward, the folder's parts as buttons, sortable size and date columns, a filter, hidden
 files and image previews. The outliner has folders (Ctrl+G) with their own eye, camera and lock.
 Reference images (Add › Reference Image..., or drop a picture on the window) sit behind or in
-front of the scene to model over, in every shading mode.
+front of the scene to model over, in every shading mode. Add › Reference Images from Folder...
+takes a building's drawings (a folder of PDFs and images, or a PDF of many pages), sorts each
+page out by its name and title block (elevations, plans by level, sections, site), reads its
+scale (1:50) and sets them up around the building at their true size.
 
 **Shatter.** Object › Physics › Shatter... breaks a mesh into shards (Voronoi cells, evenly or
 around a point), bricks (a running bond, with a mortar gap) or balls (packed inside it); its
@@ -1042,6 +1045,7 @@ src/partui.s    the Particles tab of Properties
 src/physui.s    the Physics tab: rigid body, joints, shatter, world (sections of widgets)
 src/landui.s    the Landscape tab: size, the layer stack, paint layers, sea and files
 src/refimg.s    reference images: adding them, drawing them in screen space, their panel
+src/refset.s    reference images from a folder or PDFs: pages drawn by poppler, sorted, set up
 src/simcache.s  the simulation cache: frames kept, played back, baked, saved
 src/vgeo.s      virtualized geometry: the cluster LOD DAG (meshlets, groups, simplification)
 src/vgdraw.s    virtualized geometry: per-frame cuts, frustum and occlusion culling, streaming

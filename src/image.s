@@ -28,7 +28,7 @@
 .globl image_adopt
 .globl im_int
 
-.equ MAX_IMAGES, 64
+.equ MAX_IMAGES, 256
 .equ IR_NAME,  0
 .equ IR_IMG,   32
 .equ IR_PATH,  40
