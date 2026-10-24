@@ -856,8 +856,7 @@ export_pdf:
     call    view_dims
     mov     rdi, [rip+dr_z]
     mov     rsi, [rip+dr_zbytes]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 .Lpd_vnext:
     inc     r15d
     jmp     .Lpd_view
@@ -944,8 +943,7 @@ export_pdf:
     mov     ebx, eax
     mov     rdi, [rip+dr_cont]
     mov     rsi, [rip+dr_ccap]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     eax, ebx
     jmp     .Lpd_out
 .Lpd_fail:
@@ -1040,8 +1038,7 @@ dmap:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax

@@ -38,7 +38,7 @@ if command -v cc >/dev/null && [[ -n "$VKLIB" ]]; then
     as "${ASFLAGS[@]}" -o build/gpu/spv.o src/gpu/spv.s
     LDX=(-no-pie -Wl,-z,noexecstack)
     [[ "$MODE" == "debug" ]] || LDX+=(-s)
-    cc "${LDX[@]}" -o build/beemodel-gpu build/gpu/helper.o build/gpu/spv.o "$VKLIB"
+    cc "${LDX[@]}" -o build/beemodel-gpu build/gpu/helper.o build/gpu/spv.o build/obj/plat_linux.o "$VKLIB"
     echo "built build/beemodel-gpu ($(stat -c %s build/beemodel-gpu) bytes)"
 else
     rm -f build/beemodel-gpu

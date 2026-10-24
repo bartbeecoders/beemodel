@@ -267,8 +267,7 @@ tx_new:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -315,8 +314,7 @@ tx_unref:
     lock dec dword ptr [rdi+TX_REFS]
     jnz     1f
     mov     esi, TX_SZ
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # tx_of(rdi=object or 0) -> rax = its text block, or 0
@@ -421,8 +419,7 @@ tx_font:
     je      31f
     mov     rdi, [r13+FNT_BASE]
     mov     rsi, [r13+FNT_SIZE]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     dword ptr [r13+FNT_LOADED], 0
 31: jmp     4f
 3:  inc     dword ptr [rip+tf_n]
@@ -1025,8 +1022,7 @@ tb_map:                                 # esi = bytes -> rax (0: failed)
     mov     r10d, MAP_SCRATCH
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax

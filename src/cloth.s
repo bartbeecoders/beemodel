@@ -178,8 +178,7 @@ cl_reserve:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax
@@ -225,8 +224,7 @@ cl_free:
 2:  mov     dword ptr [rip+cx_nc], 0
     mov     rdi, [rip+cx_base]
     mov     rsi, [rip+cx_bytes]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     dword ptr [rip+dirty], 1
 9:  add     rsp, 8
     pop     r12

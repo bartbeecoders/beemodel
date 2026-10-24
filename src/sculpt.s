@@ -266,8 +266,7 @@ smap:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax
@@ -286,8 +285,7 @@ sfree:
     add     rsi, 4095
     and     rsi, -4096
     mov     rdi, rax
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rbx], 0
 9:  pop     rbx
     ret
@@ -2953,8 +2951,7 @@ grow_deltas:
 8:  mov     rdi, r13
     mov     esi, r12d
     shl     rsi, 2
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 9:  pop     r13
     pop     r12
     pop     rbx
@@ -2967,8 +2964,7 @@ free_deltas:
     shl     rsi, 2
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  mov     rdi, [rip+sc_d_old]
     test    rdi, rdi
     jz      2f
@@ -2976,8 +2972,7 @@ free_deltas:
     imul    rsi, rsi, 12
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 2:  mov     qword ptr [rip+sc_d_idx], 0
     mov     qword ptr [rip+sc_d_old], 0
     mov     dword ptr [rip+sc_d_cap], 0
@@ -4635,8 +4630,7 @@ grow_grab:
     shl     rsi, 3
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 4:  mov     [rip+sc_g_idx], r13
     mov     eax, r12d
     lea     rax, [r13+rax*4]

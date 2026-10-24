@@ -19,8 +19,7 @@ _start:
     lea     rsi, [rip+_end]
     sub     rsi, rdi
     mov     edx, MADV_NOHUGEPAGE
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
     mov     rax, [rsp]                  # argc
     lea     rax, [rsp+rax*8+16]         # envp = argv + argc + 1
     mov     [rip+envp], rax

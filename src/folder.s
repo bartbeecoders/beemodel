@@ -87,8 +87,7 @@ fd_unref:
     lock dec dword ptr [rdi+FD_REFS]
     jnz     1f
     mov     rsi, [rdi+FD_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 fd_reset:
     mov     dword ptr [rip+fd_active], 0
@@ -103,8 +102,7 @@ fd_alloc:                               # -> rax = an empty block, or 0
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax

@@ -1456,16 +1456,14 @@ ensure_buffers:
     test    rdi, rdi
     jz      4f
     mov     esi, [rip+pool_size]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 4:  xor     edi, edi
     mov     esi, ebx
     mov     edx, PROT_RW
     mov     r10d, MAP_SHARED
     mov     r8d, [rip+shm_fd]
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      8f
     mov     [rip+pool_ptr], rax
@@ -1503,8 +1501,7 @@ ensure_buffers:
     add     rdi, rbx
     mov     esi, eax
     mov     edx, MADV_REMOVE
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
 
 6:  # two buffers: offsets 0 and r13
     xor     ebx, ebx

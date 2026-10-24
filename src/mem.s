@@ -41,8 +41,7 @@ reserve:
     mov     r10d, MAP_RESERVE
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -128,8 +127,7 @@ arena_reset:
     add     rax, [rdi+AR_BASE]
     mov     rdi, rax
     mov     edx, MADV_DONTNEED
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
     pop     rdi
     ret
 2:  mov     qword ptr [rdi+AR_LOW], 0

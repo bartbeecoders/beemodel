@@ -844,8 +844,7 @@ rb_reserve:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax
@@ -860,8 +859,7 @@ rb_free:
     mov     dword ptr [rip+rb_on], 0
     mov     rdi, [rip+rb_base]
     mov     rsi, [rip+rb_bytes]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 9:  ret
 
 # rb_entry_obj(rdi=entry) -> rax = its object when it can be a body, or 0
@@ -2314,8 +2312,7 @@ tri_edges:
 .Lte_done:
     mov     rdi, [rsp+112]
     mov     rsi, [rsp+104]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 .Lte_out:
     lea     rsp, [rbp-40]
     pop     r15

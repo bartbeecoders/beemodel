@@ -130,9 +130,12 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 <nav class="toc">
   <div class="brand"><span class="hex"></span>BeeModel Windows 11 Port</div>
   <ol>
+    <li><a href="#status">Status</a></li>
     <li><a href="#goals">Goals</a></li>
     <li><a href="#today">Where the code stands</a></li>
+    <li><a href="#layer">The platform layer</a></li>
     <li><a href="#map">Linux → Windows map</a></li>
+    <li><a href="#devenv">Working from Omarchy</a></li>
     <li><a href="#phases">Phases</a></li>
     <li><a href="#testing">Testing</a></li>
     <li><a href="#risks">Budgets &amp; risks</a></li>
@@ -142,11 +145,27 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 <main>
 <header class="hero">
-  <div class="kicker">Not scheduled · written against v0.19.0 · Windows 11</div>
+  <div class="kicker">In progress · branch win11-port · updated against v1.1.0 · Windows 11</div>
   <h1>BeeModel on Windows 11</h1>
-  <p class="lede">BeeModel is x86-64 assembly that talks to Linux through raw syscalls and to the compositor through its own Wayland client. Windows 11 runs on the same CPU, so the computation carries over unchanged: geometry, physics, the rasterizer and path tracer, BeeScript, and the file parsers. Everything that touches the OS has to be rewritten. This plan starts with a zero-code check through WSLg, then puts the OS behind a platform layer, then writes a native Windows version of that layer.</p>
-  <div class="meta">BeeModel · Vibecoding/BeeModel-Win11-Port-Plan.html · Companion to the <a href="BeeModel-Masterplan.html">Masterplan</a> · Written 2026-10-19 against v0.19.0</div>
+  <p class="lede">BeeModel is x86-64 assembly that talks to Linux through raw syscalls and to the compositor through its own Wayland client. Windows 11 runs on the same CPU, so the computation carries over unchanged: geometry, physics, the rasterizer and path tracer, BeeScript, and the file parsers. Everything that touches the OS has to be rewritten. This plan first puts the OS behind a platform layer on Linux, then writes a Windows version of that layer, developed on Omarchy with Wine and checked in a Windows 11 VM.</p>
+  <div class="meta">BeeModel · Vibecoding/BeeModel-Win11-Port-Plan.html · Companion to the <a href="BeeModel-Masterplan.html">Masterplan</a> · Written 2026-10-19 against v0.19.0 · Updated 2026-10-24 against v1.1.0</div>
 </header>
+
+<section id="status">
+  <h2>Status</h2>
+  <p class="sub">Each step is one commit on <code>win11-port</code>, with the full local CI green before the next one starts.</p>
+  <div class="table-wrap"><table>
+    <tr><th>Step</th><th>What</th><th>State</th></tr>
+    <tr><td>W1a</td><td>The <code>plat_*</code> contract, <code>src/plat_linux.s</code>, memory (209 sites)</td><td><span class="tag a">in review</span></td></tr>
+    <tr><td>W1b</td><td>Files and directories (~150 sites)</td><td><span class="tag">next</span></td></tr>
+    <tr><td>W1c</td><td>Threads, futexes, time, timers (~26)</td><td><span class="tag">open</span></td></tr>
+    <tr><td>W1d</td><td>Child processes and pipes (~50)</td><td><span class="tag">open</span></td></tr>
+    <tr><td>W1e</td><td>Sockets, shared memory, <code>poll</code> (~55)</td><td><span class="tag">open</span></td></tr>
+    <tr><td>W1f</td><td>Start-up (argv, envp, <code>/proc/self</code>), the window and event-loop interface, the CI guard</td><td><span class="tag">open</span></td></tr>
+    <tr><td>W2–W7</td><td>The port</td><td><span class="tag">open</span></td></tr>
+    <tr><td>W0</td><td>WSLg check</td><td><span class="tag">optional, once the VM is up</span></td></tr>
+  </table></div>
+</section>
 
 <section id="goals">
   <h2>Goals</h2>
@@ -160,103 +179,144 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 <section id="today">
   <h2>Where the code stands</h2>
-  <p class="sub">Measured on the <code>shatter</code> branch after v0.19.0.</p>
+  <p class="sub">Measured on <code>main</code> at v1.1.0 (2026-10-24). The v0.19.0 figures are in brackets.</p>
   <div class="table-wrap"><table>
     <tr><th>What</th><th>Size</th><th>Port impact</th></tr>
-    <tr><td>Source</td><td class="num">173 files, ~296k lines</td><td>Most of it is pure computation and carries over unchanged</td></tr>
-    <tr><td>Raw <code>syscall</code> sites</td><td class="num">~400 in 69 files</td><td>Each one moves behind a <code>plat_*</code> call</td></tr>
+    <tr><td>Source</td><td class="num">200 files, ~341k lines (173, ~296k)</td><td>Most of it is pure computation and carries over unchanged</td></tr>
+    <tr><td>Raw <code>syscall</code> sites</td><td class="num">492 in 79 files (~400 in 69)</td><td>Each one moves behind a <code>plat_*</code> call: memory 209, files 153, sockets and IPC 52, processes 52, threads and time 26</td></tr>
     <tr><td>Wayland / XKB</td><td><code>wayland.s</code>, <code>keyboard.s</code>, <code>clipboard.s</code>, plus <code>main.s</code>, <code>ui</code>, <code>help</code>, <code>matui</code>, <code>jobui</code>, <code>play</code>, <code>fileio</code></td><td>Replaced by a Win32 window, input and clipboard</td></tr>
     <tr><td>Event loop</td><td>one <code>poll</code> on Wayland, timerfds, pipes and sockets</td><td>Restructured around <code>MsgWaitForMultipleObjects</code></td></tr>
+    <tr><td>Memory</td><td>a 16 GiB <code>MAP_NORESERVE</code> frame arena, plus noreserve ranges in cloth, liquid, particles, rbody, vgeo, simcache, ttf and others</td><td>Windows does not commit pages on first touch: see the commit-on-fault design below</td></tr>
     <tr><td>Threads</td><td><code>jobs.s</code>: raw <code>clone</code> + <code>futex</code></td><td><code>CreateThread</code> + <code>WaitOnAddress</code></td></tr>
-    <tr><td>Child processes</td><td><code>aiproc.s</code> (AI tools, curl), <code>blend.s</code> (zstd), <code>library.s</code>, <code>gpu.s</code> (helper)</td><td><code>CreateProcessW</code> with pipe handles</td></tr>
+    <tr><td>Child processes</td><td><code>aiproc.s</code> (AI tools, curl), <code>blend.s</code> (zstd), <code>library.s</code>, <code>gpu.s</code> (helper), <b>new:</b> <code>video.s</code> (ffmpeg, frames over a socketpair), <code>refset.s</code> (pdftoppm, pdftotext, pdfinfo, 8 at once)</td><td><code>CreateProcessW</code> with pipe handles</td></tr>
     <tr><td>GPU IPC</td><td>memfd per slot over <code>SOCK_SEQPACKET</code>, fd 3 (<code>gpuipc.inc</code>)</td><td>Named pipe (message mode) + <code>CreateFileMapping</code></td></tr>
     <tr><td>Sockets</td><td><code>link.s</code> (TCP/UNIX), <code>mcp.s</code>, <code>cosync.s</code></td><td>Winsock; named pipe or AF_UNIX in <code>%TEMP%</code></td></tr>
-    <tr><td>Fonts</td><td><code>text.s</code>: <code>/usr/share/fonts/…</code></td><td>Add <code>C:\Windows\Fonts</code> paths</td></tr>
+    <tr><td>File dialog</td><td><b>new:</b> <code>filebrowser.s</code>: drives from <code>/proc/self/mounts</code>, <code>statfs</code>, <code>stat</code>, <code>rmdir</code>, <code>rename</code>; <code>thumb.s</code> previews</td><td>Drives from <code>GetLogicalDriveStringsW</code>, free space from <code>GetDiskFreeSpaceExW</code></td></tr>
+    <tr><td>Start-up</td><td><code>_start</code> reads argc, argv and envp from the stack; <code>/proc/self/exe</code> in <code>aiproc</code>, <code>gpu</code> and <code>library</code></td><td><code>GetCommandLineW</code> and <code>GetEnvironmentStringsW</code>, turned into UTF-8 argv and envp blocks at start; <code>GetModuleFileNameW</code></td></tr>
+    <tr><td>Fonts</td><td><code>text.s</code>, <code>text3d.s</code>: <code>/usr/share/fonts/…</code></td><td>Add <code>C:\Windows\Fonts</code> paths</td></tr>
+    <tr><td>ELF-only directives</td><td>171 <code>.note.GNU-stack</code> sections; 964 <code>.align</code></td><td>Guarded by a <code>WIN64</code> symbol for the PE build; <code>.align</code> semantics checked once with mingw <code>as</code></td></tr>
   </table></div>
   <p>Two things make the window easier than in most programs. BeeModel already draws every pixel itself into an XRGB buffer, and it draws its own window frame. Windows only has to show a bitmap and say where the frame is.</p>
+</section>
+
+<section id="layer">
+  <h2>The platform layer</h2>
+  <p class="sub">The design decision behind W1, settled in W1a.</p>
+  <div class="grid g2">
+    <div class="card blue"><h3>Linux is the interface</h3>
+      <p>A <code>plat_*</code> routine takes the Linux syscall's arguments in the Linux syscall's registers (rdi, rsi, rdx, r10, r8, r9), with Linux flags and structures, and returns rax as the result or -errno. It keeps every register but rax, rcx and r11, as <code>syscall</code> does. So a call site changes from <code>mov eax, SYS_X</code> + <code>syscall</code> to <code>call plat_x</code> and nothing else, and the Linux version is three instructions.</p>
+      <p>The Windows version keeps the same contract and translates: it saves the registers Windows may clobber, aligns the stack, calls kernel32, and maps the result and the error. No call site has to know which system it runs on.</p></div>
+    <div class="card"><h3>Converted by a checked script</h3>
+      <p>Sites are rewritten by a converter that only touches straight-line <code>mov eax, N … syscall</code> pairs. It flags a site for hand work when a label sits between the two, when eax is used between them, or when the function keeps data in the red zone below rsp, because a <code>call</code> writes there. The converted binary is smaller (each site saves 2 bytes).</p>
+      <p>One class needs care: code that unmaps its own stack and then exits (none so far) cannot <code>ret</code> from <code>plat_munmap</code>.</p></div>
+  </div>
+  <div class="callout"><strong>Commit on fault.</strong> Linux reserves the 16 GiB frame arena and the other noreserve ranges and backs a page on first touch. Windows <code>MEM_RESERVE</code> pages fault, and <code>MEM_COMMIT</code> of 16 GiB counts against the commit limit. <code>plat_mmap</code> on Windows reserves the range and records it, and a vectored exception handler commits the touched 64 KiB chunk and resumes. That keeps every caller unchanged. Partial <code>munmap</code> becomes <code>MEM_DECOMMIT</code>; only a whole recorded range is released.</div>
 </section>
 
 <section id="map">
   <h2>Linux → Windows map</h2>
   <div class="table-wrap"><table>
     <tr><th>Linux</th><th>Windows</th><th>Notes</th></tr>
-    <tr><td><code>mmap</code>, <code>munmap</code>, <code>mprotect</code>, <code>madvise</code></td><td><code>VirtualAlloc</code>, <code>VirtualFree</code>, <code>VirtualProtect</code>, <code>DiscardVirtualMemory</code></td><td>The JIT (<code>fvjit.s</code>) needs <code>VirtualProtect</code> to make pages executable</td></tr>
-    <tr><td><code>mremap</code></td><td>none</td><td>Reserve a large range up front and commit pages as it grows</td></tr>
-    <tr><td><code>openat</code>, <code>read</code>, <code>write</code>, <code>fstat</code>, <code>getdents64</code></td><td><code>CreateFileW</code>, <code>ReadFile</code>, <code>WriteFile</code>, <code>GetFileInformationByHandle</code>, <code>FindFirstFileW</code></td><td>Convert paths from UTF-8 to UTF-16; handle drive letters and <code>\</code></td></tr>
-    <tr><td><code>rename</code>, <code>unlink</code>, <code>mkdir</code>, <code>symlink</code>, <code>readlink</code></td><td><code>MoveFileExW</code>, <code>DeleteFileW</code>, <code>CreateDirectoryW</code>, <code>CreateSymbolicLinkW</code></td><td>Symlinks need Developer Mode; fall back to a copy</td></tr>
-    <tr><td><code>clone</code>, <code>futex</code>, <code>gettid</code></td><td><code>CreateThread</code>, <code>WaitOnAddress</code> / <code>WakeByAddress*</code>, <code>GetCurrentThreadId</code></td><td>Close to one to one</td></tr>
-    <tr><td><code>clock_gettime</code>, <code>timerfd</code></td><td><code>QueryPerformanceCounter</code>, waitable timers</td><td>Key repeat runs from a timer</td></tr>
-    <tr><td><code>fork</code> + <code>execve</code>, <code>pipe2</code>, <code>wait4</code>, <code>kill</code></td><td><code>CreateProcessW</code>, <code>CreatePipe</code>, <code>WaitForSingleObject</code>, <code>TerminateProcess</code></td><td>Windows 11 ships <code>curl.exe</code> but not <code>zstd</code></td></tr>
+    <tr><td><code>mmap</code>, <code>munmap</code>, <code>mprotect</code>, <code>madvise</code></td><td><code>VirtualAlloc</code>, <code>VirtualFree</code>, <code>VirtualProtect</code>, <code>DiscardVirtualMemory</code></td><td>The JIT (<code>fvjit.s</code>) needs <code>VirtualProtect</code> to make pages executable; noreserve ranges commit on fault</td></tr>
+    <tr><td><code>mremap</code>, <code>mincore</code></td><td>none; <code>VirtualQuery</code></td><td>Reserve a large range up front and commit pages as it grows (<code>dyntopo.s</code>, <code>fileio.s</code>)</td></tr>
+    <tr><td><code>openat</code>, <code>read</code>, <code>write</code>, <code>pwrite64</code>, <code>fstat</code>, <code>getdents64</code></td><td><code>CreateFileW</code>, <code>ReadFile</code>, <code>WriteFile</code>, <code>GetFileInformationByHandle</code>, <code>FindFirstFileW</code></td><td>Convert paths from UTF-8 to UTF-16; handle drive letters and <code>\</code>; small ints stand for handles in a table</td></tr>
+    <tr><td><code>rename</code>, <code>unlink</code>, <code>mkdir</code>, <code>rmdir</code>, <code>symlink</code>, <code>readlink</code>, <code>statfs</code></td><td><code>MoveFileExW</code>, <code>DeleteFileW</code>, <code>CreateDirectoryW</code>, <code>RemoveDirectoryW</code>, <code>CreateSymbolicLinkW</code>, <code>GetDiskFreeSpaceExW</code></td><td>Symlinks need Developer Mode; fall back to a copy</td></tr>
+    <tr><td><code>clone</code>, <code>futex</code>, <code>gettid</code>, <code>sched_getaffinity</code></td><td><code>CreateThread</code>, <code>WaitOnAddress</code> / <code>WakeByAddress*</code>, <code>GetCurrentThreadId</code>, <code>GetActiveProcessorCount</code></td><td>Close to one to one</td></tr>
+    <tr><td><code>clock_gettime</code>, <code>timerfd</code>, <code>nanosleep</code></td><td><code>QueryPerformanceCounter</code>, waitable timers, <code>Sleep</code></td><td>Key repeat runs from a timer</td></tr>
+    <tr><td><code>fork</code> + <code>execve</code>, <code>pipe2</code>, <code>dup2</code>, <code>wait4</code>, <code>kill</code></td><td><code>CreateProcessW</code>, <code>CreatePipe</code>, <code>STARTUPINFO</code> handles, <code>WaitForSingleObject</code>, <code>TerminateProcess</code></td><td>The fork-then-exec sites become one spawn call. Windows 11 ships <code>curl.exe</code> but not <code>zstd</code>, <code>ffmpeg</code> or poppler</td></tr>
     <tr><td><code>memfd_create</code> + <code>SCM_RIGHTS</code></td><td><code>CreateFileMapping</code> + <code>DuplicateHandle</code></td><td>Windows AF_UNIX cannot pass handles</td></tr>
-    <tr><td><code>socket</code>, <code>bind</code>, <code>accept4</code>, <code>poll</code></td><td>Winsock, <code>WSAEventSelect</code></td><td>Call <code>WSAStartup</code> once</td></tr>
+    <tr><td><code>socket</code>, <code>bind</code>, <code>accept4</code>, <code>poll</code>, <code>socketpair</code></td><td>Winsock, <code>WSAEventSelect</code>, a loopback pair</td><td>Call <code>WSAStartup</code> once</td></tr>
     <tr><td>Wayland <code>xdg_wm_base</code> + <code>wl_shm</code></td><td><code>CreateWindowExW</code> + <code>StretchDIBits</code></td><td><code>WM_NCHITTEST</code> for the self-drawn frame; per-monitor DPI awareness</td></tr>
     <tr><td><code>wl_keyboard</code> + XKB keymap</td><td><code>WM_KEYDOWN</code> / <code>WM_CHAR</code></td><td>Map scancodes to the evdev codes the app already uses; no keymap parser</td></tr>
     <tr><td><code>zwp_relative_pointer</code>, <code>zwp_pointer_constraints</code></td><td>Raw input (<code>WM_INPUT</code>), <code>ClipCursor</code></td><td>Mouse look and fly navigation</td></tr>
     <tr><td><code>zwp_tablet_manager_v2</code></td><td><code>WM_POINTER</code> pen messages</td><td>Pressure and tilt for sculpting</td></tr>
-    <tr><td><code>wl_data_device_manager</code></td><td><code>OpenClipboard</code>, <code>CF_UNICODETEXT</code>, <code>RegisterDragDrop</code></td><td>Drag and drop of files through OLE, or <code>WM_DROPFILES</code> as the simple route</td></tr>
-    <tr><td><code>$XDG_RUNTIME_DIR</code>, <code>~/.config/beemodel</code></td><td><code>%TEMP%</code>, <code>%APPDATA%\BeeModel</code></td><td><code>SHGetKnownFolderPath</code> or the environment</td></tr>
+    <tr><td><code>wl_data_device_manager</code></td><td><code>OpenClipboard</code>, <code>CF_UNICODETEXT</code>, <code>WM_DROPFILES</code></td><td>Files dropped on the window, the simple route first</td></tr>
+    <tr><td><code>/proc/self/exe</code>, <code>/proc/self/mounts</code></td><td><code>GetModuleFileNameW</code>, <code>GetLogicalDriveStringsW</code></td><td>The file dialog's drive list</td></tr>
+    <tr><td><code>$XDG_RUNTIME_DIR</code>, <code>~/.config/beemodel</code>, <code>~/.cache/beemodel</code></td><td><code>%TEMP%</code>, <code>%APPDATA%\BeeModel</code>, <code>%LOCALAPPDATA%\BeeModel</code></td><td>From the environment</td></tr>
   </table></div>
-  <div class="callout"><strong>Calling convention.</strong> Internal code keeps the System V convention. Only the boundary changes: calls into Windows use rcx/rdx/r8/r9 with 32 bytes of shadow space, a 16-byte-aligned stack, and xmm6–15 preserved. The <code>WndProc</code> and thread entry points arrive in the Windows convention and need small thunks that switch back.</div>
+  <div class="callout"><strong>Calling convention.</strong> Internal code keeps the System V convention. Only the boundary changes: calls into Windows use rcx/rdx/r8/r9 with 32 bytes of shadow space, a 16-byte-aligned stack, and xmm6–15 preserved. The <code>WndProc</code>, thread entry points and the exception handler arrive in the Windows convention and need small thunks that switch back.</div>
+</section>
+
+<section id="devenv">
+  <h2>Working from Omarchy</h2>
+  <p class="sub">There is no Windows machine. Everything is built on Linux; Wine runs the fast loop and a VM gives the real answer.</p>
+  <div class="grid g3">
+    <div class="card accent"><h3>Build</h3>
+      <p><code>sudo pacman -S mingw-w64-binutils</code> gives <code>x86_64-w64-mingw32-as</code>, <code>ld</code> and <code>dlltool</code>. Import libraries for kernel32, user32, gdi32 and ws2_32 come from small <code>.def</code> files in the repo through <code>dlltool</code>, so the mingw C runtime and headers are not needed.</p></div>
+    <div class="card blue"><h3>Daily loop: Wine</h3>
+      <p><code>sudo pacman -S wine</code>. Wine runs a kernel32-only executable directly, so W2 and W3 (the version, a headless render, a BeeScript run, golden images) can be scripted and run next to the Linux suite. Wine is not Windows: anything it passes is checked in the VM before a step closes.</p></div>
+    <div class="card green"><h3>The real check: a Windows 11 VM</h3>
+      <p><code>omarchy-windows-vm install</code> runs Windows 11 in KVM through dockur/windows (this machine has 32 threads, 61 GB and <code>/dev/kvm</code>). It connects over RDP with <code>omarchy-windows-vm launch</code>, and <code>~/Windows</code> is shared into the guest as a network folder. Builds are copied there and run in the guest.</p></div>
+  </div>
+  <div class="callout"><strong>Running tests in the VM.</strong> The VM's compose file only forwards RDP (3389) and the web console (8006), so no SSH. The plan instead: a small runner in the guest, started as a scheduled task at log-in, watches <code>~/Windows/bee-run/</code> for a job file, runs it, and writes the output and exit code back. A Linux script drops the job and waits. That makes the Windows smoke tests scriptable from Omarchy without changing the VM's network. The VM is needed from W3's exit on; W4 (window, pen, DPI) is checked by hand over RDP.</div>
 </section>
 
 <section id="phases">
   <h2>Phases</h2>
-  <p class="sub">W0 can ship on its own. W1 is useful on Linux even if the port stops there. W2–W7 are the port itself.</p>
-
-  <div class="stage">Check first</div>
-  <div class="phase"><div class="pn"><b>W0</b>check</div><div class="card"><h3>Run it through WSLg <span class="tag g">no code</span></h3>
-    <p>Windows 11 runs Linux Wayland apps in normal desktop windows through WSL2 and WSLg, which are built in. Try the static <code>beemodel</code> there, and <code>beemodel-gpu</code> through Mesa's D3D12-backed Vulkan driver (it may fall back to the CPU). Measure frame times, input (mouse look, tablet), clipboard with Windows apps, and file access to <code>/mnt/c</code>.</p>
-    <p>If this is good enough, ship a "Windows 11 through WSL" install note in the README, and decide on W1–W7 later.</p>
-    <div class="exit"><b>Exit:</b> a written result: what works, what doesn't, and frame times next to native Linux on the same machine.</div></div></div>
+  <p class="sub">W1 is useful on Linux even if the port stops there. W2–W7 are the port itself. W0 is an optional side check.</p>
 
   <div class="stage">Groundwork on Linux</div>
-  <div class="phase"><div class="pn"><b>W1</b>refactor</div><div class="card"><h3>The platform layer <span class="tag b">Linux only</span></h3>
-    <p>New <code>src/plat_linux.s</code>, with every OS call behind a <code>plat_*</code> routine: memory, files, directories, threads and futexes, time, processes, pipes, sockets, shared memory. The ~400 <code>syscall</code> sites in 69 files call it instead. Nothing changes in behaviour. A grep in CI keeps new <code>syscall</code> instructions out of everything except <code>plat_linux.s</code>.</p>
-    <p>The window and the event loop get their own interface (<code>plat_win_*</code>, <code>plat_wait</code>) so <code>wayland.s</code> becomes the Linux version of it.</p>
-    <div class="exit"><b>Exit:</b> the full test suite passes, the binary is the same size within 1%, and <code>syscall</code> appears only in the platform files.</div></div></div>
+  <div class="phase"><div class="pn"><b>W1</b>refactor</div><div class="card"><h3>The platform layer <span class="tag b">Linux only</span> <span class="tag a">started</span></h3>
+    <p><code>src/plat_linux.s</code> holds every OS call as a <code>plat_*</code> routine with the contract above. It goes family by family, one commit each, with the full suite green each time:</p>
+    <ul>
+      <li><b>W1a</b> memory: <code>mmap</code>, <code>munmap</code>, <code>mprotect</code>, <code>mremap</code>, <code>mincore</code>, <code>madvise</code> (209 sites in 62 files; the GPU helper links the layer too). <span class="tag a">done, in review</span></li>
+      <li><b>W1b</b> files and directories, the largest family after memory. Several files define their own <code>SYS_*</code> names; the converter resolves them.</li>
+      <li><b>W1c</b> threads, futexes, time, the key-repeat timer.</li>
+      <li><b>W1d</b> child processes: the six fork + execve sites (aiproc, blend, gpu, library, video, refset) become one <code>plat_spawn</code> (path, argv, envp, the child's stdin/stdout/stderr), because Windows has no fork. This is the one step that changes call sites by hand.</li>
+      <li><b>W1e</b> sockets, shared memory and <code>poll</code>.</li>
+      <li><b>W1f</b> start-up (<code>plat_init</code> fills argv and envp; <code>/proc/self/exe</code> becomes <code>plat_self_path</code>), the window and event-loop interface (<code>plat_win_*</code>, <code>plat_wait</code>) so <code>wayland.s</code> becomes the Linux version of it, and a CI check that keeps <code>syscall</code> out of everything but <code>plat_linux.s</code>.</li>
+    </ul>
+    <div class="exit"><b>Exit:</b> the full test suite passes, the binary is the same size within 1%, and <code>syscall</code> appears only in the platform file.</div></div></div>
 
   <div class="stage">The port</div>
   <div class="phase"><div class="pn"><b>W2</b>build</div><div class="card"><h3>Toolchain and a first .exe</h3>
-    <p>mingw-w64 binutils (<code>x86_64-w64-mingw32-as/ld</code>) reads the same Intel-syntax source and writes a Windows executable. Add import libraries for the system DLLs, a Windows target in <code>scripts/build.sh</code>, and <code>src/plat_win.s</code> with the entry point, the exit, and the calling-convention thunks.</p>
-    <div class="exit"><b>Exit:</b> <code>beemodel.exe --version</code> prints the version on Windows 11, built on Linux.</div></div></div>
+    <p>mingw-w64 binutils reads the same Intel-syntax source and writes a PE executable. A Windows target in <code>scripts/build.sh</code> (<code>--defsym WIN64=1</code>, which drops the ELF-only sections), <code>.def</code> files and <code>dlltool</code> for the import libraries, and <code>src/plat_win.s</code> with the entry point, the exit, the console output and the calling-convention thunks. Everything not yet ported returns <code>-ENOSYS</code>.</p>
+    <div class="exit"><b>Exit:</b> <code>beemodel.exe --version</code> prints the version under Wine and in the VM, built on Linux.</div></div></div>
 
   <div class="phase"><div class="pn"><b>W3</b>headless</div><div class="card"><h3>Memory, files, threads</h3>
-    <p>The Windows versions of memory (including the reserved-range replacement for <code>mremap</code> and executable pages for the JIT), files and directories with UTF-16 paths, threads and <code>WaitOnAddress</code>, and time. Config moves to <code>%APPDATA%\BeeModel</code>. Fonts look in <code>C:\Windows\Fonts</code> (Segoe UI, Consolas, Arial).</p>
-    <div class="exit"><b>Exit:</b> a headless render of a test scene and a BeeScript run on Windows give the same pixels and output as on Linux.</div></div></div>
+    <p>The Windows versions of memory (commit on fault, <code>mremap</code> by reserving ahead, executable pages for the JIT), files and directories with UTF-16 paths, threads and <code>WaitOnAddress</code>, and time. Config moves to <code>%APPDATA%\BeeModel</code>, the cache to <code>%LOCALAPPDATA%\BeeModel</code>. Fonts look in <code>C:\Windows\Fonts</code> (Segoe UI, Consolas, Arial).</p>
+    <div class="exit"><b>Exit:</b> a headless render of a test scene and a BeeScript run give the same pixels and output as on Linux, under Wine and in the VM.</div></div></div>
 
   <div class="phase"><div class="pn"><b>W4</b>window</div><div class="card"><h3>Window, input, clipboard</h3>
     <p>A Win32 window showing the XRGB buffer with <code>StretchDIBits</code>. <code>WM_NCHITTEST</code> drives moving and resizing through the self-drawn frame. Per-monitor DPI awareness. Keys arrive as scancodes, mapped to the evdev codes the app uses, and text arrives from <code>WM_CHAR</code>. Mouse look through raw input and <code>ClipCursor</code>. Pen pressure and tilt from <code>WM_POINTER</code>. Clipboard text, and files dropped on the window.</p>
-    <div class="exit"><b>Exit:</b> model, sculpt with a pen, navigate, copy and paste between BeeModel and Notepad, on a 100% and a 150% display.</div></div></div>
+    <div class="exit"><b>Exit:</b> model, navigate, copy and paste between BeeModel and Notepad, at 100% and 150% scaling, in the VM over RDP. Pen input waits for real hardware.</div></div></div>
 
   <div class="phase"><div class="pn"><b>W5</b>loop</div><div class="card"><h3>The event loop</h3>
     <p><code>plat_wait</code> on Windows: <code>MsgWaitForMultipleObjects</code> over the window's message queue, waitable timers, child pipe handles, and Winsock events from <code>WSAEventSelect</code>. Key repeat, the job UI, live shading and playback all run from it, as they do from <code>poll</code> on Linux.</p>
     <div class="exit"><b>Exit:</b> idle CPU near 0%, playback at the Linux frame rate, and no lag while a child process streams output.</div></div></div>
 
   <div class="phase"><div class="pn"><b>W6</b>processes</div><div class="card"><h3>Child processes, sockets, the GPU helper</h3>
-    <p><code>CreateProcessW</code> with inherited pipe handles for the AI connections (with <code>curl.exe</code>, which Windows 11 ships) and for zstd (bundled, or a built-in decoder). The live link, the MCP server and cosync move to Winsock and named pipes. The GPU helper is ported and its IPC becomes a message-mode named pipe plus one <code>CreateFileMapping</code> per slot, with handles passed through <code>DuplicateHandle</code>.</p>
-    <div class="exit"><b>Exit:</b> an AI request, a zstd <code>.blend</code> import, a live link between Windows and Linux, and a GPU path-traced render all work. Killing the helper falls back to the CPU as it does on Linux.</div></div></div>
+    <p><code>plat_spawn</code> on <code>CreateProcessW</code> with inherited pipe handles: the AI connections (with <code>curl.exe</code>, which Windows 11 ships), zstd (bundled, or a built-in decoder), ffmpeg and poppler (found on PATH, with the same "not found" messages as on Linux). The live link, the MCP server and cosync move to Winsock and named pipes. The GPU helper is ported and its IPC becomes a message-mode named pipe plus one <code>CreateFileMapping</code> per slot, with handles passed through <code>DuplicateHandle</code>.</p>
+    <div class="exit"><b>Exit:</b> an AI request, a zstd <code>.blend</code> import, a video export, a PDF reference import, a live link between Windows and Linux, and a GPU path-traced render all work. Killing the helper falls back to the CPU as it does on Linux. (The VM has no GPU passthrough: the GPU render is checked on real hardware or with a software Vulkan driver.)</div></div></div>
 
   <div class="phase"><div class="pn"><b>W7</b>ship</div><div class="card"><h3>CI, signing, release <span class="tag r">release</span></h3>
     <p>A GitHub <code>windows-latest</code> job runs the Windows smoke tests. The release adds <code>beemodel-&lt;ver&gt;-windows-x86_64.zip</code> with <code>beemodel.exe</code> and <code>beemodel-gpu.exe</code>. The executables are signed. Docs: a Windows section in the README and <code>docs/WINDOWS.md</code>, and the CHANGELOG.</p>
     <div class="exit"><b>Exit:</b> a fresh Windows 11 machine downloads the zip and runs BeeModel with no SmartScreen block and no Defender alert.</div></div></div>
+
+  <div class="stage">Side check</div>
+  <div class="phase"><div class="pn"><b>W0</b>check</div><div class="card"><h3>Run it through WSLg <span class="tag g">no code</span> <span class="tag">optional</span></h3>
+    <p>Windows 11 runs Linux Wayland apps in normal desktop windows through WSL2 and WSLg. Inside the VM this needs nested virtualization, so it is a side check rather than the first step it was: try the static <code>beemodel</code> there once the VM runs, and note the result in the README as a stopgap until W7.</p>
+    <div class="exit"><b>Exit:</b> a written result: what works, what doesn't.</div></div></div>
 </section>
 
 <section id="testing">
   <h2>Testing</h2>
   <ul>
-    <li>The full Python suite stays on Linux. It drives the binary through <code>tools/fakewl.py</code>, and the core it tests is the same code on both systems.</li>
-    <li>Windows smoke tests (W7): start, load a scene, a headless render compared to a Linux reference image, a BeeScript run, a save and reload, the GPU helper with fallback.</li>
+    <li>The full Python suite stays on Linux. It drives the binary through <code>tools/fakewl.py</code>, and the core it tests is the same code on both systems. It runs after every W1 step.</li>
+    <li>Wine smoke tests (from W2): the version, a headless render compared to the Linux image, a BeeScript run, a save and reload. They run locally next to the Linux suite.</li>
+    <li>VM smoke tests (from W3): the same set through the shared-folder runner, before a step closes.</li>
+    <li>Windows CI (W7): the same set on <code>windows-latest</code>.</li>
     <li>Golden images: headless renders must match Linux exactly. A difference points to the platform layer, not the renderer.</li>
-    <li>Manual checks for what CI can't drive: pen input, DPI changes when the window moves to another monitor, clipboard with other apps.</li>
+    <li>Manual checks for what scripts can't drive: pen input, DPI changes across monitors, clipboard with other apps.</li>
   </ul>
 </section>
 
 <section id="risks">
   <h2>Budgets &amp; risks</h2>
   <div class="grid g3">
-    <div class="card"><h4>Budgets</h4><ul><li>W1 adds under 1% to the Linux binary and costs no measurable speed</li><li>Windows frame times within 10% of Linux on the same machine</li><li>Idle CPU near 0%</li></ul></div>
-    <div class="card"><h4>Risks</h4><ul><li><b>Antivirus.</b> A hand-assembled executable with no C runtime looks unusual to Defender's heuristics. Sign it, and submit it to Microsoft if it is flagged.</li><li><b>SmartScreen.</b> Unsigned downloads get a warning. A code-signing certificate is a yearly cost.</li><li><b>The event loop.</b> Windows splits waiting across messages, handles and sockets. Getting latency and idle CPU right takes the most tuning.</li></ul></div>
-    <div class="card"><h4>Open questions</h4><ul><li>Is W0 (WSLg) good enough to make the native port optional?</li><li>Bundle <code>zstd.exe</code>, or write a decoder?</li><li>OLE drag and drop, or <code>WM_DROPFILES</code> only?</li></ul></div>
+    <div class="card"><h4>Budgets</h4><ul><li>W1 adds under 1% to the Linux binary and costs no measurable speed (W1a: 370 bytes smaller)</li><li>Windows frame times within 10% of Linux on the same machine</li><li>Idle CPU near 0%</li></ul></div>
+    <div class="card"><h4>Risks</h4><ul><li><b>Antivirus.</b> A hand-assembled executable with no C runtime looks unusual to Defender's heuristics. Sign it, and submit it to Microsoft if it is flagged.</li><li><b>SmartScreen.</b> Unsigned downloads get a warning. A code-signing certificate is a yearly cost.</li><li><b>The event loop.</b> Windows splits waiting across messages, handles and sockets. Getting latency and idle CPU right takes the most tuning.</li><li><b>Commit on fault.</b> A vectored handler on every first touch of the frame arena; if it costs too much, commit ahead in bigger chunks.</li><li><b>Wine is not Windows.</b> Wine passing is a hint, not the exit.</li></ul></div>
+    <div class="card"><h4>Open questions</h4><ul><li>Bundle <code>zstd.exe</code>, or write a decoder?</li><li>OLE drag and drop, or <code>WM_DROPFILES</code> only?</li><li>A Windows 11 license for the VM: dockur installs an unactivated copy, which is enough for testing.</li></ul></div>
   </div>
 </section>
 </main>

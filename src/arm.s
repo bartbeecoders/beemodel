@@ -253,8 +253,7 @@ arm_new:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax
@@ -273,8 +272,7 @@ arm_unref:
     dec     dword ptr [rdi+AR_REFS]
     jnz     1f
     mov     rsi, [rdi+AR_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 arm_copy:
     push    rbx

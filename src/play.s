@@ -2218,8 +2218,7 @@ pl_alloc:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     8f
     mov     ecx, [rip+pl_nmaps]         # remembered for pl_free_grids
@@ -2246,8 +2245,7 @@ pl_free_grids:
     lea     rdx, [rip+pl_maps]
     mov     rdi, [rdx+rax]
     mov     rsi, [rdx+rax+8]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     inc     ebx
     jmp     1b
 2:  mov     dword ptr [rip+pl_nmaps], 0

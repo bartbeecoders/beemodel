@@ -105,8 +105,7 @@ snapshot:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -222,15 +221,13 @@ release:
     sub     [rip+undo_bytes], rsi
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 3:
     mov     rax, [rbx+ST_BYTES]
     sub     [rip+undo_bytes], rax
     mov     rdi, rbx
     mov     rsi, rax
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     add     rsp, 8
     pop     r12
     pop     rbx
@@ -685,8 +682,7 @@ undo_attach_delta:
 8:  mov     rsi, [rdi+16]               # nowhere to keep it
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     ret
 
 in_group:

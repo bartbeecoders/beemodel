@@ -597,8 +597,7 @@ fvj_get:
     mov     rsi, [rbx+8]
     shr     rsi, 32
     shl     rsi, 12
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 4:  add     rsp, 8
     pop     rdx
     mov     [rbx], r12
@@ -640,8 +639,7 @@ fvj_compile:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     .Lfc_fail
     mov     rbx, rax                    # the mapping
@@ -793,8 +791,7 @@ fvj_compile:
     mov     rdi, rbx                    # now executable (and no longer writable)
     mov     rsi, [rsp]
     mov     edx, PROT_RX
-    mov     eax, SYS_MPROTECT
-    syscall
+    call    plat_mprotect
     test    rax, rax
     jnz     .Lfc_unmap
     inc     dword ptr [rip+fvj_compiles]
@@ -804,8 +801,7 @@ fvj_compile:
 .Lfc_unmap:
     mov     rdi, rbx
     mov     rsi, [rsp]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 .Lfc_fail:
     xor     eax, eax
     xor     edx, edx
@@ -942,8 +938,7 @@ fvj_selftest:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     .Lft_bad
     mov     [rip+ft_mem], rax
@@ -1080,8 +1075,7 @@ fvj_selftest:
     mov     esi, TN*4*16
     add     esi, 4095
     and     esi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     xor     eax, eax
     cmp     dword ptr [rip+ft_fails], 0
     jne     .Lft_out
@@ -1149,8 +1143,7 @@ fvj_bench:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     .Lfb_fail
     mov     rbx, rax
@@ -1227,8 +1220,7 @@ fvj_bench:
     mov     r15, rax
     mov     rdi, rbx
     mov     rsi, [rsp]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     rax, r14
     mov     rdx, r15
     jmp     .Lfb_out

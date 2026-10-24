@@ -284,8 +284,7 @@ kb_keymap:
     mov     r10d, MAP_PRIVATE
     mov     r8d, r12d
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      .Lkm_close
     mov     r14, rax                    # text
@@ -297,8 +296,7 @@ kb_keymap:
     call    km_parse
     mov     rdi, r14
     mov     esi, r13d
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     jmp     .Lkm_done
 .Lkm_close:
     mov     edi, r12d
@@ -330,8 +328,7 @@ km_parse:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      .Lkp_out
     mov     [rip+km_names], rax
@@ -584,8 +581,7 @@ km_parse:
 .Lkp_free:
     mov     rdi, [rip+km_names]
     mov     esi, NAMES_BYTES
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 .Lkp_out:
     pop     r15
     pop     r14

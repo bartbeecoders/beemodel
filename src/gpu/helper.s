@@ -1391,8 +1391,7 @@ do_map:
     test    rdi, rdi
     jz      1f
     mov     rsi, [rbx+SL_SIZE]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rbx+SL_BASE], 0
 1:  mov     r12, [rip+msg+GM_SIZE]
     xor     edi, edi
@@ -1401,8 +1400,7 @@ do_map:
     mov     r10d, MAP_SHARED
     mov     r8, [rip+handle]
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     mov     r13, rax
     mov     rdi, [rip+handle]
     mov     eax, SYS_CLOSE

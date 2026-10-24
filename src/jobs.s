@@ -155,8 +155,7 @@ jobs_init:
     mov     r10d, MAP_STACK_FLAGS
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      8f
     lea     rdx, [rax+STACK_BYTES]
@@ -460,8 +459,7 @@ job_spawn:
     mov     r10d, MAP_STACK_FLAGS
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      9f
     mov     [rip+bg_stack], rax

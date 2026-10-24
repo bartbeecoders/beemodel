@@ -941,8 +941,7 @@ map:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax
@@ -956,14 +955,12 @@ unmap_all:
     mov     qword ptr [rip+sm_f], 0
     test    rsi, rsi
     jz      1f
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  mov     rdi, [rip+sm_cell]
     test    rdi, rdi
     jz      2f
     mov     rsi, [rip+sm_cbytes]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rip+sm_cell], 0
 2:  ret
 
@@ -1640,8 +1637,7 @@ sdf_prism:
     jmp     9f
 7:  mov     rdi, r13
     mov     esi, [rsp+16]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 8:  xor     eax, eax
 9:  add     rsp, 48
     pop     r15
@@ -1661,8 +1657,7 @@ sdf_prism_free:
     jz      1f
     mov     esi, [rax+ND_FWD+8]
     mov     qword ptr [rax+ND_FWD], 0
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # sdf_invert(rdi=float[12] m, rsi=float[12] out) - the inverse of a 3x4

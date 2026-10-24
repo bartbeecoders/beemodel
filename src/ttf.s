@@ -209,8 +209,7 @@ font_load_at:
     mov     r10d, MAP_PRIVATE
     mov     r8d, r12d
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      .Lfl_close
     mov     r14, rax
@@ -339,8 +338,7 @@ font_load_at:
 .Lfl_unmap:
     mov     rdi, [rbx+FNT_BASE]
     mov     rsi, [rbx+FNT_SIZE]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     jmp     .Lfl_fail
 .Lfl_close:
     mov     edi, r12d
@@ -654,8 +652,7 @@ glyph_render:
     mov     r10d, MAP_ARENA
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      2f
     mov     [rip+arena], rax

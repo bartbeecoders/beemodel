@@ -202,8 +202,7 @@ ensure_img:
     test    rdi, rdi
     jz      1f
     mov     rsi, [rip+rn_img_sz]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rip+rn_img], 0
     mov     qword ptr [rip+rn_img_sz], 0
 1:  mov     rsi, [rsp]
@@ -212,8 +211,7 @@ ensure_img:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     pop     rsi
     cmp     rax, -4096
     ja      7f

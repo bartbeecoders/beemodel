@@ -272,8 +272,7 @@ file_read:
     mov     r10d, MAP_PRIVATE
     mov     r8d, ebx
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      7f
     push    rax
@@ -296,8 +295,7 @@ file_read:
 file_unmap:
     test    rdi, rdi
     jz      1f
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # file_write_atomic(rdi=path, rsi=data, rdx=bytes) -> eax = 0 ok, else -errno
@@ -407,14 +405,12 @@ wb_reserve:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     jmp     2f
 1:  mov     rsi, [rip+wb_cap]
     mov     rdx, rbx
     mov     r10d, MREMAP_MAYMOVE
-    mov     eax, SYS_MREMAP
-    syscall
+    call    plat_mremap
 2:  cmp     rax, -4096
     ja      7f
     mov     [rip+wb_ptr], rax

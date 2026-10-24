@@ -142,8 +142,7 @@ se_clear:
     shl     eax, 4
     mov     rdi, [rbx+SE_AL+rax]
     mov     rsi, [rbx+SE_AL+rax+8]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     inc     r12d
     jmp     1b
 2:  mov     dword ptr [rbx+SE_NAL], 0
@@ -170,8 +169,7 @@ se_alloc:
     mov     r10d, 0x22
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      8f
     mov     ecx, [rbx+SE_NAL]

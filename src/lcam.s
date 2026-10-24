@@ -89,8 +89,7 @@ lc_unref:
     lock dec dword ptr [rdi+LC_REFS]
     jnz     1f
     mov     rsi, [rdi+LC_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 lc_reset:
     mov     rdi, [rip+lc_cur]
@@ -104,8 +103,7 @@ lc_alloc:                               # -> rax = an empty block, or 0
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax

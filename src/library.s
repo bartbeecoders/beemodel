@@ -3341,8 +3341,7 @@ thumb_px:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     6f
     mov     [rbx+LR_PX], rax

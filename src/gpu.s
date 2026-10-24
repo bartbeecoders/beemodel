@@ -683,8 +683,7 @@ gpu_slot:
     mov     r10d, MAP_SHARED
     mov     r8d, r13d
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      7f
     mov     r14, rax
@@ -713,8 +712,7 @@ gpu_slot:
     jz      2f
     lea     rax, [rip+g_size]
     mov     rsi, [rax+rbx*8]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 2:  lea     rax, [rip+g_base]
     mov     [rax+rbx*8], r14
     lea     rax, [rip+g_size]
@@ -728,8 +726,7 @@ gpu_slot:
     jmp     9f
 6:  mov     rdi, r14
     mov     rsi, r12
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     call    gpu_stop
     jmp     8f
 7:  mov     edi, r13d

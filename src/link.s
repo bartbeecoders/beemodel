@@ -209,8 +209,7 @@ lk_reserve:
     mov     r10d, 0x4022                # PRIVATE | ANONYMOUS | NORESERVE
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
