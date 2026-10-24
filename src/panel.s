@@ -24,6 +24,7 @@
 .align 8
 pnl_x:          .skip 4
 pnl_w:          .skip 4
+pnl_line:       .skip 256
 
 .text
 # pnl_begin - the column: the editor's width less a margin each side
@@ -46,17 +47,73 @@ pnl_heading:
     add     rsp, 8
     add     r12d, 24
     ret
+#   (a hint or a text wraps at spaces to the column's width, a line each 18)
 pnl_hint:
     mov     ecx, COL_TEXT_DIM
     jmp     1f
 pnl_text:
     mov     ecx, COL_TEXT
-1:  mov     edi, [rip+pnl_x]
+1:  push    rbx
+    push    rbp
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdx                    # the text left
+    mov     r15d, ecx
+    mov     edi, FONT_SMALL
+    call    text_use
+    mov     r14d, eax                   # (the font before)
+2:  cmp     byte ptr [rbx], 0
+    je      8f
+    xor     ebp, ebp                    # the longest start that fits, ended
+    xor     r13d, r13d                  #  at a space or the end
+3:  movzx   eax, byte ptr [rbx+r13]
+    test    eax, eax
+    jz      4f
+    cmp     eax, ' '
+    je      4f
+    inc     r13d
+    jmp     3b
+4:  mov     rdi, rbx
+    mov     esi, r13d
+    call    text_width_n
+    cmp     eax, [rip+pnl_w]
+    jg      5f
+    mov     ebp, r13d                   # (fits: try the next word too)
+    cmp     byte ptr [rbx+r13], 0
+    je      6f
+    inc     r13d
+    jmp     3b
+5:  test    ebp, ebp                    # one word wider than the column:
+    jnz     6f                          #  all of it (cut by the clip)
+    mov     ebp, r13d
+6:  cmp     ebp, 255
+    jbe     61f
+    mov     ebp, 255
+61: lea     rdi, [rip+pnl_line]
+    mov     rsi, rbx
+    mov     ecx, ebp
+    rep     movsb
+    mov     byte ptr [rdi], 0
+    add     rbx, rbp
+7:  cmp     byte ptr [rbx], ' '         # (the spaces at the break)
+    jne     71f
+    inc     rbx
+    jmp     7b
+71: mov     edi, [rip+pnl_x]
     mov     esi, r12d
-    sub     rsp, 8
-    call    draw_small
-    add     rsp, 8
+    lea     rdx, [rip+pnl_line]
+    mov     ecx, r15d
+    call    draw_text
     add     r12d, 18
+    jmp     2b
+8:  mov     edi, r14d
+    call    text_use
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     rbp
+    pop     rbx
     ret
 
 # pnl_full / pnl_left / pnl_right(rdi=desc, r8=ptr) -> eax (wg's) at r12d

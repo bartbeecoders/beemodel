@@ -191,6 +191,49 @@ list_h:
     jmp     1b
 9:  ret
 
+# list_w(rdi=entries, esi=count) -> eax = the list's width: MENU_DROP_W, or
+#   wider for its longest label with its shortcut (or a submenu's chevron)
+list_w:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12, rdi
+    mov     r13d, esi
+    mov     r14d, MENU_DROP_W
+    xor     ebx, ebx
+1:  cmp     ebx, r13d
+    jae     9f
+    mov     rdi, [r12+rbx*8]
+    test    rdi, rdi                    # (a separator)
+    jz      5f
+    call    label_of
+    mov     rdi, rax
+    call    text_width
+    lea     r15d, [rax+28+34]           # inset, the chevron / a margin
+    mov     rdi, [r12+rbx*8]
+    cmp     qword ptr [rdi], SUBTAG
+    je      4f
+    mov     edi, [rdi+OP_KEY]           # an operator: its shortcut
+    call    fmt_key
+    test    rax, rax
+    jz      4f
+    mov     rdi, rax
+    call    text_width
+    lea     r15d, [r15+rax-34+24+12]    # (a gap before it, the right inset)
+4:  cmp     r15d, r14d
+    cmovg   r14d, r15d
+5:  inc     ebx
+    jmp     1b
+9:  mov     eax, r14d
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # list_y(rdi=entries, esi=index) -> eax = the entry's offset from the top
 list_y:
     mov     eax, 4
@@ -271,15 +314,21 @@ mn_layout:
 3:  lea     rcx, [rip+menu_x]           # the bar: under its title
     mov     ecx, [rcx+rax*4]
     mov     dword ptr [rip+drop_y], TITLE_H+MENU_H
-4:  mov     edx, [rip+win_w]
-    sub     edx, MENU_DROP_W
+4:  mov     r12d, ecx
+    call    level0                      # (as wide as its entries)
+    mov     rdi, rax
+    mov     esi, edx
+    call    list_w
+    mov     [rip+drop_w], eax
+    mov     ecx, r12d
+    mov     edx, [rip+win_w]
+    sub     edx, eax
     cmp     ecx, edx
     cmovg   ecx, edx
     test    ecx, ecx
     jns     5f
     xor     ecx, ecx
 5:  mov     [rip+drop_x], ecx
-    mov     dword ptr [rip+drop_w], MENU_DROP_W
     call    level0
     mov     rdi, rax
     mov     esi, edx
@@ -306,7 +355,10 @@ mn_layout:
     add     eax, [rip+drop_y]
     sub     eax, 4
     mov     [rip+l1_y], eax
-    mov     dword ptr [rip+l1_w], MENU_DROP_W
+    mov     rdi, [rip+l1_items]
+    mov     esi, [rip+l1_count]
+    call    list_w
+    mov     [rip+l1_w], eax
     mov     rdi, [rip+l1_items]
     mov     esi, [rip+l1_count]
     call    list_h
@@ -318,13 +370,17 @@ mn_layout:
     jle     7f
     mov     [rip+l1_y], ecx
 7:  mov     eax, [rip+drop_x]           # right of the menu, or left of it
-    add     eax, MENU_DROP_W-3
+    add     eax, [rip+drop_w]
+    sub     eax, 3
     mov     ecx, eax
-    add     ecx, MENU_DROP_W
+    add     ecx, [rip+l1_w]
     cmp     ecx, [rip+win_w]
     jle     8f
     mov     eax, [rip+drop_x]
-    sub     eax, MENU_DROP_W-3
+    sub     eax, [rip+l1_w]
+    add     eax, 3
+    jns     8f
+    xor     eax, eax
 8:  mov     [rip+l1_x], eax
 9:  add     rsp, 8
     pop     r12
@@ -1094,7 +1150,9 @@ jlist:
     mov     esi, eax
     add     esi, [rsp+4]
     mov     edi, [rsp]
-    mov     edx, MENU_DROP_W
+    mov     edx, [rip+drop_w]
+    cmp     dword ptr [rsp+8], 0        # (level 1: the submenu's width)
+    cmovne  edx, [rip+l1_w]
     mov     ecx, MENU_ITEM_H
     call    jrect
     lea     rsi, [rip+j_label]

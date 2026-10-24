@@ -16,6 +16,8 @@
 .globl draw_heading
 .globl draw_small
 .globl draw_text
+.globl draw_text_fit
+.globl draw_heading_fit
 .globl sans_paths
 .globl text_width
 .globl text_width_n
@@ -28,10 +30,14 @@
 cur_font:       .long FONT_UI
 node_font_px:   .long UI_FONT_PX            # FONT_NODE's size (the node editor's zoom)
 
+.section .bss
+fit_buf:        .skip 416
+
 .section .rodata
 s_env_font:     .asciz "BEEMODEL_FONT="
 s_env_mono:     .asciz "BEEMODEL_MONO_FONT="
 s_none:         .asciz "none"
+s_dots:         .asciz "..."
 sp1: .asciz "/usr/share/fonts/noto/NotoSans-Regular.ttf"
 sp2: .asciz "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"
 sp3: .asciz "/usr/share/fonts/TTF/DejaVuSans.ttf"
@@ -385,6 +391,81 @@ blit_glyph:
     pop     rbx
 .Lbg_ret:
     ret
+
+# draw_heading_fit(edi=x, esi=y, rdx=text, ecx=colour, r8d=width) - a heading
+#   cut short with "..." to the width (the bitmap font: not bold)
+draw_heading_fit:
+    lea     rax, [rip+fonts]
+    cmp     dword ptr [rax+FONT_HEAD*FNT_SZ+FNT_LOADED], 0
+    je      draw_text_fit
+    push    rbx
+    mov     ebx, FONT_HEAD
+    xchg    ebx, [rip+cur_font]
+    call    draw_text_fit
+    mov     [rip+cur_font], ebx
+    pop     rbx
+    ret
+
+# -----------------------------------------------------------------------------
+# draw_text_fit(edi=x, esi=y, rdx=text, ecx=colour, r8d=width) - draw_text,
+#   cut short with "..." when the text is wider than width
+# -----------------------------------------------------------------------------
+draw_text_fit:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     rbx, rdx
+    mov     r14d, ecx
+    mov     r15d, r8d
+    mov     rdi, rbx
+    call    text_width
+    cmp     eax, r15d
+    jle     8f
+    lea     rdi, [rip+s_dots]
+    call    text_width
+    sub     r15d, eax                   # (room for the text before "...")
+    xor     ecx, ecx                    # the longest start that fits, whole
+1:  mov     edx, ecx                    #  characters (UTF-8)
+2:  inc     edx
+    movzx   eax, byte ptr [rbx+rdx]
+    test    eax, eax
+    jz      4f
+    and     eax, 0xc0
+    cmp     eax, 0x80
+    je      2b
+    cmp     edx, 400
+    ja      4f
+    push    rcx
+    push    rdx
+    mov     rdi, rbx
+    mov     esi, edx
+    call    text_width_n
+    pop     rdx
+    pop     rcx
+    cmp     eax, r15d
+    jg      4f
+    mov     ecx, edx
+    jmp     1b
+4:  lea     rdi, [rip+fit_buf]          # that start and "..."
+    mov     rsi, rbx
+    mov     edx, ecx
+    rep     movsb
+    mov     dword ptr [rdi], 0x2e2e2e
+    lea     rbx, [rip+fit_buf]
+8:  mov     edi, r12d
+    mov     esi, r13d
+    mov     rdx, rbx
+    mov     ecx, r14d
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    jmp     draw_text
 
 # -----------------------------------------------------------------------------
 # text_width(rdi=string) -> eax ; text_width_n(rdi=string, esi=bytes) -> eax

@@ -513,14 +513,17 @@ wg:
     mov     ecx, [rsp+4]
     mov     r9d, FIELD_R
     call    fill_rrect
-    mov     rdi, [rbx+WD_LABEL]         # caption, centred
-    test    rdi, rdi
+    mov     rdi, [rbx+WD_LABEL]         # caption, centred (cut short with
+    test    rdi, rdi                    #  "..." when the button is narrow)
     jz      5f
     call    text_width
     mov     edi, r14d
     sub     edi, eax
     sar     edi, 1
-    add     edi, r12d
+    cmp     edi, 2
+    jge     31f
+    mov     edi, 2
+31: add     edi, r12d
     mov     esi, r13d
     add     esi, [rsp+28]
     mov     rdx, [rbx+WD_LABEL]
@@ -528,7 +531,8 @@ wg:
     test    dword ptr [rbx+WD_FLAGS], WGF_PRIMARY
     jz      4f
     mov     ecx, COL_TEXT_DARK
-4:  call    draw_text
+4:  lea     r8d, [r14-2]
+    call    draw_text_fit
 5:  xor     eax, eax
     cmp     [rip+wg_clicked], ebp
     jne     .Lwg_ret
@@ -687,7 +691,8 @@ wg:
     lea     edi, [r12+20]
     lea     esi, [r13+4]
     mov     ecx, COL_ACCENT
-    call    draw_heading
+    lea     r8d, [r14-22]
+    call    draw_heading_fit
 4:  xor     eax, eax
     cmp     dword ptr [rsp+12], 0
     jns     .Lwg_ret
@@ -715,7 +720,8 @@ wg:
     lea     edi, [r12+8]
     lea     esi, [r13+3]
     mov     ecx, COL_TEXT
-    call    draw_text
+    lea     r8d, [r14-8-20]             # (short of the chevron)
+    call    draw_text_fit
 2:  lea     edi, [r12+r14-16]           # chevron
     lea     esi, [r13+9]
     lea     edx, [r12+r14-12]
@@ -2217,6 +2223,7 @@ wg_release:
     jge     2f
     mov     eax, 120
 2:  mov     [rip+wg_pop_w], eax
+    call    pop_fit                     # (as wide as its longest option)
     call    pop_h                       # (above the field when it would not fit)
     mov     ecx, [rip+wg_pop_y]
     add     ecx, eax
@@ -2825,6 +2832,43 @@ pop_h:                                  # -> eax = height of the open list
     add     rsp, 8
     imul    eax, edx, POP_ROW
     add     eax, 8
+    ret
+
+# pop_fit - widens the open list to its longest option (and the themes'
+#   swatches), then keeps it inside the window
+pop_fit:
+    push    rbx
+    push    r12
+    push    r13
+    xor     ebx, ebx
+1:  mov     rdi, [rip+wg_pop_e+E_DESC]
+    call    enum_list
+    cmp     ebx, edx
+    jae     3f
+    mov     rdi, [rax+rbx*8]
+    call    text_width
+    add     eax, 14+12                  # (the text's inset, a margin)
+    mov     rdx, [rip+wg_pop_e+E_DESC]
+    test    dword ptr [rdx+WD_FLAGS], WGF_THEMES
+    jz      2f
+    add     eax, 4*11+8
+2:  cmp     eax, [rip+wg_pop_w]
+    jle     21f
+    mov     [rip+wg_pop_w], eax
+21: inc     ebx
+    jmp     1b
+3:  mov     eax, [rip+win_w]            # (inside the window)
+    sub     eax, 4
+    cmp     [rip+wg_pop_w], eax
+    jle     4f
+    mov     [rip+wg_pop_w], eax
+4:  sub     eax, [rip+wg_pop_w]
+    cmp     [rip+wg_pop_x], eax
+    jle     5f
+    mov     [rip+wg_pop_x], eax
+5:  pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # enum_list(rdi=desc) -> rax = its labels, edx = how many (rdi kept)

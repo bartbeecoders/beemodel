@@ -50,8 +50,6 @@ s_log_prompt:   .asciz "> "
 s_nl:           .asciz "\n"
 s_log_todo:     .asciz "  not implemented yet - waiting for the modeling core"
 s_about_ver:    .asciz "  BeeModel "
-s_about1:       .asciz "  A 3D modeling shell written in pure x86-64 assembly"
-s_about2:       .asciz "  Talks the Wayland wire protocol directly; no libc, no toolkits"
 s_keys_mouse:   .asciz "  Mouse: LMB orbit | MMB or Shift+LMB pan | wheel zoom | Esc closes menus"
 s_two_sp:       .asciz "  "
 s_k_ctrl:       .asciz "Ctrl+"
@@ -615,10 +613,7 @@ op_about:
     lea     rdi, [rip+s_about_ver]
     lea     rsi, [rip+s_version]
     call    log_pair
-    lea     rdi, [rip+s_about1]
-    call    log_line
-    lea     rdi, [rip+s_about2]
-    jmp     log_line
+    jmp     help_about                  # (and the About box: help.s)
 
 # op_shortcuts - every bound operator, generated from the table
 op_shortcuts:

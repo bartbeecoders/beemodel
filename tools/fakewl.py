@@ -635,6 +635,7 @@ def main():
     prefs_ui()
     workspaces_ui()
     help_ui()
+    ui_review()
     a11y_ui()
     walkthrough_ui()
     walkthrough16_ui()
@@ -8094,13 +8095,13 @@ def physics_ui():
           'cloth: its type, compliances, mass, self collision, pins')
     type_into('cloth.mass', '2.5')
     check(wait_value(f, m, 'cloth.mass', 0, 2.5) == 2.5, 'a value changes the cloth (cloth.add on the selection)')
+    click('physics.section.body')                               # (folded: cloth's rows
+    click('physics.section.joints')                             #  in reach, then the world)
     click('cloth.self')
     check(wait_value(f, m, 'cloth.self', 0, 1) == 1 and wait_value(f, m, 'cloth.mass', 0, 2.5) == 2.5, 'self collision on, the rest kept')
     pick_enum(f, m, 'cloth.type', 0, 1)
     check(wait_value(f, m, 'cloth.type', 0, 1) == 1, 'cloth becomes a soft body')
-    click('physics.section.cloth')                              # (folded: the world in reach)
-    click('physics.section.body')
-    click('physics.section.joints')
+    click('physics.section.cloth')
     click('physics.section.cloth_world')
     type_into('cloth.wind_x', '3')
     check(wait_value(f, m, 'cloth.wind_x', 0, 3) == 3, 'the wind')
@@ -8839,6 +8840,85 @@ def help_ui():
     img1 = f.image()
     d = sum(1 for a, b in zip(img0.getdata(), img1.getdata()) if a != b)
     check(d > 500, f'the Help area shows what the pointer rested on ({d} pixels changed)')
+    f.proc.kill()
+
+
+def ui_review():
+    """The UI review (2026-10-24): lists over the welcome screen and as wide as
+    their options, menus as wide as label + shortcut, the About box, held
+    keys repeating in the palette, long file names cut short, the zoomed
+    preview in the file browser."""
+    print('  -- UI review --')
+    from PIL import Image
+    f = Fake(welcome=True)
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    def region(img, w):
+        return img.crop((w['x'], w['y'], w['x'] + w['w'], w['y'] + w['h']))
+    img0 = f.image()
+    x, y = widget_xy(m, 'welcome.keymap'); f.click(x, y); f.pump(0.3)
+    lst = [w for w in ui_tree(m) if w['kind'] == 'list']
+    fw = (widget(m, 'welcome.keymap') or {}).get('w', 0)
+    check(lst and lst[0]['w'] > fw, f'an enum\'s list is as wide as its longest option ({lst and lst[0]["w"]} > {fw})')
+    if lst:
+        a, b = region(img0, lst[0]), region(f.image(), lst[0])
+        d = sum(1 for p, q in zip(a.getdata(), b.getdata()) if p != q)
+        check(d > 4500, f'the welcome screen\'s keymap list shows over it ({d} pixels changed)')
+    f.key(1); f.key(1); f.pump(0.2)
+    if 'welcome.close' in names():
+        x, y = widget_xy(m, 'welcome.close'); f.click(x, y); f.pump(0.3)
+    menu_pick(f, m, 'Help', 'About BeeModel'); f.pump(0.3)
+    check('about.close' in names(), 'Help > About BeeModel shows the About box')
+    f.key(1); f.pump(0.2)
+    check('about.close' not in names(), 'Esc closes it')
+    t = [w for w in ui_tree(m) if w['kind'] == 'menu' and w['label'] == 'AI'][0]
+    f.click(t['x'] + 10, t['y'] + 10); f.pump(0.3)
+    it = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == 'AI Assistant']
+    check(it and it[0]['w'] > 230, f'a menu is as wide as a label with its shortcut ({it and it[0]["w"]})')
+    f.key(1); f.key(1); f.pump(0.2)
+    f.repeat_info(30, 150)
+    f.move(600, 300)
+    def palette_after(hold):
+        f.key(61); f.pump(0.3)
+        f.keyev(108, 1); f.pump(hold); f.keyev(108, 0); f.pump(0.3)
+        img = f.image()
+        f.key(1); f.pump(0.2)
+        return img
+    a, b = palette_after(0.05), palette_after(1.0)
+    d = sum(1 for p, q in zip(a.getdata(), b.getdata()) if p != q)
+    check(d > 20000, f'a held Down keeps moving through the palette ({d} pixels differ from one step)')
+    bee = os.path.join(f.home, 'BeeModel'); os.makedirs(bee, exist_ok=True)
+    long = 'a_very_long_scene_name_for_a_building_project_version_2026_final.png'
+    im = Image.new('RGB', (400, 300), (200, 80, 40))
+    for x in range(0, 400, 20):
+        for y in range(300): im.putpixel((x, y), (255, 255, 255))
+    im.save(os.path.join(bee, long))
+    menu_pick(f, m, 'Add', 'Reference Image...'); f.pump(0.4)
+    r = [w for w in ui_tree(m) if w['name'] == 'files.row' and w['label'] == long]
+    check(bool(r), 'the long file name is listed')
+    if r:
+        f.click(r[0]['x'] + 30, r[0]['y'] + 10); f.pump(0.4)
+        img = f.image()
+        size = [w for w in ui_tree(m) if w['name'] == 'files.sort_size'][0]
+        strip = img.crop((size['x'] - 8, r[0]['y'] + 2, size['x'] + 4, r[0]['y'] + r[0]['h'] - 2))
+        check(len(set(strip.getdata())) == 1, 'a long name stops short of the Size column')
+        x, y = widget_xy(m, 'files.preview'); f.click(x, y); f.pump(0.3)
+        z = wait_widget(f, m, 'files.zoom')
+        check(z is not None and 'files.row' not in names(), 'clicking the preview shows it big, over the list')
+        if z:
+            img0 = f.image()
+            f.move(z['x'] + z['w'] // 2, z['y'] + z['h'] // 2)
+            for _ in range(4):
+                f.wheel(-10)
+            f.pump(0.3)
+            img1 = f.image()
+            d = sum(1 for p, q in zip(region(img0, z).getdata(), region(img1, z).getdata()) if p != q)
+            check(d > 1000, f'the wheel zooms into it ({d} pixels changed)')
+            f.key(1); f.pump(0.3)
+            check('files.row' in names() and 'files.ok' in names(), 'Esc goes back to the files, the browser stays')
     f.proc.kill()
 
 
