@@ -2645,8 +2645,7 @@ mcp_bridge:
     jz      4f
     lea     rdi, [rip+nanos]
     xor     esi, esi
-    mov     eax, SYS_NANOSLEEP
-    syscall
+    call    plat_nanosleep
     jmp     3b
 4:  lea     rdi, [rip+s_bridge_err]
     call    write_err

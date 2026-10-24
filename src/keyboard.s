@@ -775,8 +775,7 @@ kb_compose:
 kb_timer_init:
     mov     edi, 1                      # CLOCK_MONOTONIC
     mov     esi, TFD_FLAGS
-    mov     eax, SYS_TIMERFD_CREATE
-    syscall
+    call    plat_timerfd_create
     mov     [rip+rep_fd], eax
     ret
 
@@ -802,8 +801,7 @@ kb_arm:
     xor     esi, esi
     mov     rdx, r8
     xor     r10d, r10d
-    mov     eax, SYS_TIMERFD_SETTIME
-    syscall
+    call    plat_timerfd_settime
 1:  ret
 
 # kb_repeat_start(edi=evdev code)

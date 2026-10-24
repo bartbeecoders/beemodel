@@ -251,8 +251,7 @@ mix:
 now_ms:
     mov     edi, 1
     lea     rsi, [rip+vg_ts]
-    mov     eax, SYS_CLOCK_GETTIME
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rip+vg_ts]
     imul    rax, rax, 1000
     mov     rcx, rax

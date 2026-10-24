@@ -357,8 +357,7 @@ now_ns:
     sub     rsp, 24
     mov     edi, 1
     lea     rsi, [rsp]
-    mov     eax, SYS_CLOCK
-    syscall
+    call    plat_clock_gettime
     imul    rax, [rsp], 1000000000
     add     rax, [rsp+8]
     add     rsp, 24

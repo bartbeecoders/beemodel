@@ -1367,8 +1367,7 @@ do_vc_commit:
     lea     rsi, [rip+k_parent]
     call    wb_kv
 4:  xor     edi, edi
-    mov     eax, SYS_TIME
-    syscall
+    call    plat_time
     lea     rsi, [rip+k_time]
     call    wb_kv
     lea     rsi, [rip+k_message]

@@ -2230,8 +2230,7 @@ vd_drop:
 now_us:
     mov     edi, 1
     lea     rsi, [rip+vd_ts]
-    mov     eax, SYS_CLOCK_GETTIME
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rip+vd_ts]
     imul    rax, rax, 1000000
     mov     rcx, rax

@@ -10072,8 +10072,7 @@ b_clock:
     sub     rsp, 24
     mov     edi, 1                      # CLOCK_MONOTONIC
     lea     rsi, [rsp]
-    mov     eax, 228                    # clock_gettime
-    syscall
+    call    plat_clock_gettime
     cvtsi2sd xmm0, qword ptr [rsp]
     mulsd   xmm0, [rip+f_1000]
     cvtsi2sd xmm1, qword ptr [rsp+8]

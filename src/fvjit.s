@@ -1102,8 +1102,7 @@ fvj_selftest:
 ft_us:
     mov     edi, 1
     lea     rsi, [rip+ft_ts]
-    mov     eax, 228
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rip+ft_ts]
     imul    rax, rax, 1000000
     mov     rcx, [rip+ft_ts+8]

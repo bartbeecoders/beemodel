@@ -184,8 +184,7 @@ job_tick:
     sub     rax, [rip+job_t]
     cmp     rax, 100000000
     jb      8f
-    mov     eax, SYS_GETTID
-    syscall
+    call    plat_gettid
     cmp     eax, [rip+main_tid]
     jne     8f
     mov     [rip+job_t], rbx

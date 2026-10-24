@@ -3868,8 +3868,7 @@ sh_lap:
     sub     rsp, 16
     mov     edi, 1
     mov     rsi, rsp
-    mov     eax, 228
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rsp]
     imul    rax, rax, 1000000000
     add     rax, [rsp+8]

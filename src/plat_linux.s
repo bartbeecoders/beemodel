@@ -46,6 +46,15 @@
 .globl plat_readlink
 .globl plat_chmod
 .globl plat_statfs
+.globl plat_thread_start
+.globl plat_futex
+.globl plat_gettid
+.globl plat_sched_getaffinity
+.globl plat_clock_gettime
+.globl plat_nanosleep
+.globl plat_time
+.globl plat_timerfd_create
+.globl plat_timerfd_settime
 
 .equ SYS_MPROTECT_, 10
 .equ SYS_MREMAP_,   25
@@ -72,6 +81,18 @@
 .equ SYS_READLINK_,   89
 .equ SYS_CHMOD_,      90
 .equ SYS_STATFS_,     137
+.equ SYS_CLONE_,      56
+.equ SYS_EXIT_,       60
+.equ SYS_FUTEX_,      202
+.equ SYS_GETTID_,     186
+.equ SYS_SCHED_GETAFFINITY_, 204
+.equ SYS_CLOCK_GETTIME_, 228
+.equ SYS_NANOSLEEP_,  35
+.equ SYS_TIME_,       201
+.equ SYS_TIMERFD_CREATE_, 283
+.equ SYS_TIMERFD_SETTIME_, 286
+.equ CLONE_THREAD_FLAGS, 0x50f00        # VM|FS|FILES|SIGHAND|THREAD|SYSVSEM
+.equ CLONE_TID_FLAGS,   0x01200000      # CHILD_SETTID | CHILD_CLEARTID
 
 .text
 
@@ -214,6 +235,80 @@ plat_chmod:
 
 plat_statfs:
     mov     eax, SYS_STATFS_
+    syscall
+    ret
+
+# ---- threads and time ---------------------------------------------------------
+# plat_thread_start(rdi=entry, rsi=arg, rdx=stack top, rcx=tid word or 0)
+#   -> eax = the new thread's id, or -errno. Not the syscall contract: an
+#   ordinary call (rax, rcx, rdx, rsi, rdi, r8-r11 are not kept). The thread
+#   runs entry(rdi=arg) on the given stack, entered with rsp 16-byte aligned
+#   before the call (as parallel_for's jobs expect), and ends when entry
+#   returns. A tid word gets the thread's id, and 0 and a futex wake when
+#   the thread has ended.
+plat_thread_start:
+    sub     rdx, 16
+    mov     [rdx], rdi
+    mov     [rdx+8], rsi
+    mov     rsi, rdx
+    mov     edi, CLONE_THREAD_FLAGS
+    xor     edx, edx
+    xor     r10d, r10d
+    test    rcx, rcx
+    jz      1f
+    or      edi, CLONE_TID_FLAGS
+    mov     r10, rcx
+1:  xor     r8d, r8d
+    mov     eax, SYS_CLONE_
+    syscall
+    test    eax, eax
+    jnz     2f
+    pop     rax                         # child: entry
+    pop     rdi                         #        arg
+    and     rsp, -16
+    call    rax
+    xor     edi, edi
+    mov     eax, SYS_EXIT_
+    syscall
+2:  ret
+
+plat_futex:
+    mov     eax, SYS_FUTEX_
+    syscall
+    ret
+
+plat_gettid:
+    mov     eax, SYS_GETTID_
+    syscall
+    ret
+
+plat_sched_getaffinity:
+    mov     eax, SYS_SCHED_GETAFFINITY_
+    syscall
+    ret
+
+plat_clock_gettime:
+    mov     eax, SYS_CLOCK_GETTIME_
+    syscall
+    ret
+
+plat_nanosleep:
+    mov     eax, SYS_NANOSLEEP_
+    syscall
+    ret
+
+plat_time:
+    mov     eax, SYS_TIME_
+    syscall
+    ret
+
+plat_timerfd_create:
+    mov     eax, SYS_TIMERFD_CREATE_
+    syscall
+    ret
+
+plat_timerfd_settime:
+    mov     eax, SYS_TIMERFD_SETTIME_
     syscall
     ret
 

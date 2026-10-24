@@ -2057,8 +2057,7 @@ title_block:
 today:
     push    rbx
     xor     edi, edi
-    mov     eax, 201                    # time
-    syscall
+    call    plat_time
     xor     edx, edx
     mov     ecx, 86400
     div     rcx

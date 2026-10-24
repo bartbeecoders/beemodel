@@ -3882,8 +3882,7 @@ now_ms:
     sub     rsp, 24
     mov     edi, 1                      # CLOCK_MONOTONIC
     lea     rsi, [rsp]
-    mov     eax, 228                    # clock_gettime
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rsp]
     imul    rax, rax, 1000
     mov     rcx, [rsp+8]

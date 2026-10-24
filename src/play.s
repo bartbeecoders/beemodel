@@ -2433,8 +2433,7 @@ ms_now:
     sub     rsp, 24
     mov     edi, 1
     mov     rsi, rsp
-    mov     eax, 228
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rsp]
     imul    rax, rax, 1000
     mov     rcx, rax
