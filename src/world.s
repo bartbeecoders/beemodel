@@ -71,9 +71,6 @@
 .equ TAG_LAND,  0x444E414C              # "LAND" (landscapes their meshes show)
 .equ CO_SZ,     120                     # a CELO record: name, transform, colour
                                         #  (72), type, flags, mesh, uid, material
-.equ SYS_UNLINK, 87
-.equ SYS_OPENAT, 257
-.equ SYS_GETDENTS64, 217
 .equ O_DIR_READ, 0x10000                # O_RDONLY | O_DIRECTORY
 .equ AT_FDCWD, -100
 .equ MAP_ANON_PRIV, 0x22

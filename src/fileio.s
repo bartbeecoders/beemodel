@@ -33,11 +33,6 @@
 .globl cache_dir
 .globl basename
 
-.equ SYS_OPENAT,    257
-.equ SYS_RENAME,    82
-.equ SYS_MKDIR,     83
-.equ SYS_MREMAP,    25
-.equ SYS_FSTAT,     5
 .equ AT_FDCWD,      -100
 .equ O_WRITE_NEW,   0x80241             # WRONLY | CREAT | TRUNC | CLOEXEC
 .equ O_READ,        0x80000             # RDONLY | CLOEXEC

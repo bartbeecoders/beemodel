@@ -46,7 +46,6 @@
 .equ NFAV,      16                      # favourites
 .equ NDRV,      12                      # drives
 .equ NHIST,     16                      # back / forward
-.equ SYS_STATFS,    137
 .equ IM_W_,     0                       # (imgread.s: an image's header)
 .equ IM_H_,     4
 .equ IM_FMT_,   8
@@ -62,9 +61,6 @@
 .equ PREV_W,    192                     # a scene's picture (thumb.s TW x TH)
 .equ PREV_H,    120
 .equ NRECENT,   4
-.equ SYS_OPEN,      2
-.equ SYS_STAT,      4
-.equ SYS_GETDENTS64, 217
 .equ O_DIRECTORY,   0x10000
 .equ DT_DIR,    4
 .equ DT_LNK,    10
@@ -72,10 +68,6 @@
 .equ KEY_UP,    103
 .equ KEY_DOWN,  108
 .equ KEY_BACKSPACE, 14
-.equ SYS_RENAME,    82
-.equ SYS_MKDIR,     83
-.equ SYS_RMDIR,     84
-.equ SYS_UNLINK,    87
 
 .section .bss
 .align 8

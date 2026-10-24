@@ -63,13 +63,6 @@
 .globl hmix
 .globl co_author
 
-.equ SYS_BIND,      49
-.equ SYS_LISTEN,    50
-.equ SYS_ACCEPT4,   288
-.equ SYS_SETSOCKOPT, 54
-.equ SYS_FCNTL,     72
-.equ SYS_GETPID,    39
-.equ SYS_CLOCK,     228
 .equ AF_INET,       2
 .equ SOCK_NB,       0x80801
 .equ POLLOUT,       4
@@ -148,7 +141,6 @@
 .equ M_MAT,         46
 .equ M_PRES,        47
 .equ M_AUTH,        53                  # (keyed sessions) the first tagged message
-.equ SYS_GETRANDOM, 318
 # registers
 .equ K_NAME,        1
 .equ K_MAT,         2
@@ -2360,8 +2352,7 @@ do_co_host:
 2:  mov     edi, AF_INET
     mov     esi, SOCK_NB
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      8f
     mov     ebx, eax
@@ -2370,8 +2361,7 @@ do_co_host:
     mov     edx, 2                      # SO_REUSEADDR
     lea     r10, [rip+co_one]
     mov     r8d, 4
-    mov     eax, SYS_SETSOCKOPT
-    syscall
+    call    plat_setsockopt
     lea     rdi, [rip+co_addr]
     mov     word ptr [rdi], AF_INET
     mov     eax, r13d
@@ -2382,14 +2372,12 @@ do_co_host:
     mov     edi, ebx
     lea     rsi, [rip+co_addr]
     mov     edx, 16
-    mov     eax, SYS_BIND
-    syscall
+    call    plat_bind
     test    eax, eax
     jnz     7f
     mov     edi, ebx
     mov     esi, CC_MAX
-    mov     eax, SYS_LISTEN
-    syscall
+    call    plat_listen
     test    eax, eax
     jnz     7f
     mov     [rip+co_lfd], ebx
@@ -2448,8 +2436,7 @@ do_co_key:
     mov     rdi, rsp                    # new: 20 random letters, in fives
     mov     esi, 20
     xor     edx, edx
-    mov     eax, SYS_GETRANDOM
-    syscall
+    call    plat_getrandom
     lea     rbx, [rip+co_tmp]
     xor     ecx, ecx
     xor     edx, edx
@@ -2594,8 +2581,7 @@ do_co_join:
     mov     edi, AF_INET
     mov     esi, SOCK_STREAM_CLOEXEC
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      8f
     mov     ebx, eax
@@ -2609,8 +2595,7 @@ do_co_join:
     mov     edi, ebx
     lea     rsi, [rip+co_addr]
     mov     edx, 16
-    mov     eax, SYS_CONNECT
-    syscall
+    call    plat_connect
     test    eax, eax
     jnz     7f
     mov     edi, ebx
@@ -2711,8 +2696,7 @@ cc_setup:
     mov     edx, 1
     lea     r10, [rip+co_one]
     mov     r8d, 4
-    mov     eax, SYS_SETSOCKOPT
-    syscall
+    call    plat_setsockopt
     mov     edi, ebx
     mov     esi, 4
     mov     edx, 0x800
@@ -2758,8 +2742,7 @@ cc_hello:
     lea     rdi, [rbx+CC_NOUR]          # keyed: a nonce; the document only
     mov     esi, 8                      #  once their AUTH checks out
     xor     edx, edx
-    mov     eax, SYS_GETRANDOM
-    syscall
+    call    plat_getrandom
     mov     rdi, [rbx+CC_NOUR]
     call    mo_u64
 1:  mov     rax, [rip+co_op]
@@ -3209,8 +3192,7 @@ co_accept:
     xor     esi, esi
     xor     edx, edx
     mov     r10d, 0x80000
-    mov     eax, SYS_ACCEPT4
-    syscall
+    call    plat_accept4
     test    eax, eax
     js      9f
     mov     edi, eax
@@ -3403,8 +3385,7 @@ co_flush:
     mov     r10d, MSG_NOSIGNAL
     xor     r8d, r8d
     xor     r9d, r9d
-    mov     eax, 44
-    syscall
+    call    plat_sendto
     cmp     rax, EAGAIN
     je      5f
     test    rax, rax

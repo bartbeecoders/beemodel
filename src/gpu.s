@@ -62,9 +62,6 @@
 .globl gpu_img_into
 .globl hv_gpu
 
-.equ SYS_SOCKETPAIR, 53
-.equ SYS_WAIT4,     61
-.equ SYS_KILL,      62
 .equ SOCK_SEQPACKET_CLOEXEC, 0x80005
 .equ HELLO_MS,      15000               # a slow driver start is fine
 .equ RUN_MS,        120000
@@ -323,8 +320,7 @@ g_spawn:
     mov     esi, SOCK_SEQPACKET_CLOEXEC
     xor     edx, edx
     lea     r10, [rsp]
-    mov     eax, SYS_SOCKETPAIR
-    syscall
+    call    plat_socketpair
     test    eax, eax
     jnz     .Lgr_none
     lea     rax, [rip+g_path]
@@ -554,8 +550,7 @@ g_recv:
     mov     edx, edi
     lea     rdi, [rsp]
     mov     esi, 1
-    mov     eax, SYS_POLL
-    syscall
+    call    plat_poll
     cmp     eax, 1
     jne     8f
     test    word ptr [rsp+6], 1         # readable (not just hung up)
@@ -599,8 +594,7 @@ g_send:
 1:  mov     edi, [rip+g_fd]
     lea     rsi, [rsp]
     mov     edx, MSG_NOSIGNAL
-    mov     eax, SYS_SENDMSG
-    syscall
+    call    plat_sendmsg
     xor     ecx, ecx
     cmp     rax, GM_SZ
     sete    cl
@@ -638,8 +632,7 @@ gpu_slot:
     and     r12, -0x100000
     lea     rdi, [rip+s_memfd]
     mov     esi, MFD_CLOEXEC
-    mov     eax, SYS_MEMFD_CREATE
-    syscall
+    call    plat_memfd_create
     test    eax, eax
     js      8f
     mov     r13d, eax

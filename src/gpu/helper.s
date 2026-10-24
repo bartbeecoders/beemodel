@@ -28,15 +28,6 @@
 .intel_syntax noprefix
 .include "gpuipc.inc"
 
-.equ SYS_READ,      0
-.equ SYS_WRITE,     1
-.equ SYS_CLOSE,     3
-.equ SYS_MMAP,      9
-.equ SYS_MUNMAP,    11
-.equ SYS_SENDMSG,   46
-.equ SYS_RECVMSG,   47
-.equ SYS_EXIT,      60
-.equ SYS_CLOCK,     228
 .equ PROT_RW,       3
 .equ MAP_SHARED,    1
 .equ SOCK_FD,       3
@@ -652,8 +643,7 @@ send_reply:
     mov     edi, SOCK_FD
     lea     rsi, [rsp]
     mov     edx, 0x4000                 # MSG_NOSIGNAL
-    mov     eax, SYS_SENDMSG
-    syscall
+    call    plat_sendmsg
     add     rsp, 88
     ret
 
@@ -677,8 +667,7 @@ recv_msg:
     mov     edi, SOCK_FD
     lea     rsi, [rsp]
     xor     edx, edx
-    mov     eax, SYS_RECVMSG
-    syscall
+    call    plat_recvmsg
     cmp     rax, 0
     jle     9f
     cmp     qword ptr [rsp+40], 20      # a control message: SCM_RIGHTS

@@ -41,9 +41,6 @@
 .globl vc_stat
 .globl vc_text
 
-.equ SYS_OPENAT,    257
-.equ SYS_UNLINK,    87
-.equ SYS_TIME,      201
 .equ AT_FDCWD,      -100
 .equ MF_HDR,        16
 .equ MF_UID,        0

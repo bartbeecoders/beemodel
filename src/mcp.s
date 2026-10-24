@@ -30,13 +30,6 @@
 
 .equ MAX_CLIENTS,   4
 .equ CIN_CAP,       0x40000             # 256 KiB per client request buffer
-.equ SYS_ACCEPT4,   288
-.equ SYS_BIND,      49
-.equ SYS_LISTEN,    50
-.equ SYS_UNLINK,    87
-.equ SYS_SYMLINK,   88
-.equ SYS_GETPID,    39
-.equ SYS_NANOSLEEP, 35
 .equ SOCK_SERVER,   0x80801             # STREAM | NONBLOCK | CLOEXEC
 .equ SOCK_CLIENT,   0x80001             # STREAM | CLOEXEC
 
@@ -336,8 +329,7 @@ mcp_init:
     mov     edi, AF_UNIX
     mov     esi, SOCK_SERVER
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      9f
     mov     ebx, eax
@@ -346,14 +338,12 @@ mcp_init:
     mov     edi, ebx
     lea     rsi, [rip+addr]
     mov     edx, 110
-    mov     eax, SYS_BIND
-    syscall
+    call    plat_bind
     test    eax, eax
     jnz     8f
     mov     edi, ebx
     mov     esi, MAX_CLIENTS
-    mov     eax, SYS_LISTEN
-    syscall
+    call    plat_listen
     test    eax, eax
     jnz     8f
     mov     [rip+lsock], ebx
@@ -415,8 +405,7 @@ mcp_handle:
     xor     esi, esi
     xor     edx, edx
     mov     r10d, 0x80000               # SOCK_CLOEXEC
-    mov     eax, SYS_ACCEPT4
-    syscall
+    call    plat_accept4
     test    eax, eax
     js      2f
     xor     ecx, ecx
@@ -2626,16 +2615,14 @@ mcp_bridge:
 3:  mov     edi, AF_UNIX
     mov     esi, SOCK_CLIENT
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     mov     ebx, eax
     lea     rsi, [rip+link_path]
     call    sockaddr
     mov     edi, ebx
     lea     rsi, [rip+addr]
     mov     edx, 110
-    mov     eax, SYS_CONNECT
-    syscall
+    call    plat_connect
     test    eax, eax
     jz      5f
     mov     edi, ebx
@@ -2657,8 +2644,7 @@ mcp_bridge:
     mov     dword ptr [rdi+12], POLLIN
     mov     esi, 2
     mov     edx, -1
-    mov     eax, SYS_POLL
-    syscall
+    call    plat_poll
     cmp     rax, -4
     je      5b
     test    word ptr [rip+bpoll+6], POLLIN|POLLHUP|POLLERR

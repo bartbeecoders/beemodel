@@ -61,8 +61,6 @@
 .equ VK_MAX,    4096
 .equ MAP_NORES, 0x4022
 .equ MAP_ANON_PRIV, 0x22
-.equ SYS_CLOCK_GETTIME, 228
-.equ SYS_MPROTECT, 10
 
 .section .bss
 .align 16

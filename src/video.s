@@ -24,9 +24,6 @@
 .globl vid_close
 .globl vd_path
 
-.equ SYS_SENDTO,     44
-.equ SYS_SOCKETPAIR, 53
-.equ SYS_WAIT4,      61
 .equ AT_FDCWD,       -100
 .equ O_WRCREAT,      0x80241            # WRONLY | CREAT | TRUNC | CLOEXEC
 
@@ -305,8 +302,7 @@ vid_open:
     mov     esi, SOCK_STREAM_CLOEXEC
     xor     edx, edx
     lea     r10, [rip+vd_sv]
-    mov     eax, SYS_SOCKETPAIR
-    syscall
+    call    plat_socketpair
     test    eax, eax
     js      .Lvo_closelog
     mov     eax, [rip+vd_sv+4]          # the child: stdin the socket,
@@ -491,8 +487,7 @@ vd_pipe:
     mov     r10d, MSG_NOSIGNAL
     xor     r8d, r8d
     xor     r9d, r9d
-    mov     eax, SYS_SENDTO
-    syscall
+    call    plat_sendto
     pop     rdx
     pop     rsi
     cmp     rax, -4                     # (EINTR)

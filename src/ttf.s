@@ -32,8 +32,6 @@
 .globl gamma_lut
 .globl arena
 
-.equ SYS_OPEN,      2
-.equ SYS_FSTAT,     5
 .equ O_RDONLY_CLOEXEC, 0x80000
 .equ MAP_PRIVATE,   2
 .equ PROT_READ,     1

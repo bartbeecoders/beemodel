@@ -46,6 +46,20 @@
 .globl plat_readlink
 .globl plat_chmod
 .globl plat_statfs
+.globl plat_socket
+.globl plat_socketpair
+.globl plat_connect
+.globl plat_bind
+.globl plat_listen
+.globl plat_accept4
+.globl plat_setsockopt
+.globl plat_sendto
+.globl plat_sendmsg
+.globl plat_recvmsg
+.globl plat_poll
+.globl plat_memfd_create
+.globl plat_getrandom
+.globl plat_exit_group
 .globl plat_thread_start
 .globl plat_spawn
 .globl plat_pipe2
@@ -86,6 +100,20 @@
 .equ SYS_READLINK_,   89
 .equ SYS_CHMOD_,      90
 .equ SYS_STATFS_,     137
+.equ SYS_SOCKET_,     41
+.equ SYS_SOCKETPAIR_, 53
+.equ SYS_CONNECT_,    42
+.equ SYS_BIND_,       49
+.equ SYS_LISTEN_,     50
+.equ SYS_ACCEPT4_,    288
+.equ SYS_SETSOCKOPT_, 54
+.equ SYS_SENDTO_,     44
+.equ SYS_SENDMSG_,    46
+.equ SYS_RECVMSG_,    47
+.equ SYS_POLL_,       7
+.equ SYS_MEMFD_CREATE_, 319
+.equ SYS_GETRANDOM_,  318
+.equ SYS_EXIT_GROUP_, 231
 .equ SYS_CLONE_,      56
 .equ SYS_EXIT_,       60
 .equ SYS_FUTEX_,      202
@@ -442,6 +470,77 @@ plat_timerfd_create:
 
 plat_timerfd_settime:
     mov     eax, SYS_TIMERFD_SETTIME_
+    syscall
+    ret
+
+# ---- sockets, shared memory, waiting, the end ---------------------------------
+plat_socket:
+    mov     eax, SYS_SOCKET_
+    syscall
+    ret
+
+plat_socketpair:
+    mov     eax, SYS_SOCKETPAIR_
+    syscall
+    ret
+
+plat_connect:
+    mov     eax, SYS_CONNECT_
+    syscall
+    ret
+
+plat_bind:
+    mov     eax, SYS_BIND_
+    syscall
+    ret
+
+plat_listen:
+    mov     eax, SYS_LISTEN_
+    syscall
+    ret
+
+plat_accept4:
+    mov     eax, SYS_ACCEPT4_
+    syscall
+    ret
+
+plat_setsockopt:
+    mov     eax, SYS_SETSOCKOPT_
+    syscall
+    ret
+
+plat_sendto:
+    mov     eax, SYS_SENDTO_
+    syscall
+    ret
+
+plat_sendmsg:
+    mov     eax, SYS_SENDMSG_
+    syscall
+    ret
+
+plat_recvmsg:
+    mov     eax, SYS_RECVMSG_
+    syscall
+    ret
+
+plat_poll:
+    mov     eax, SYS_POLL_
+    syscall
+    ret
+
+plat_memfd_create:
+    mov     eax, SYS_MEMFD_CREATE_
+    syscall
+    ret
+
+plat_getrandom:
+    mov     eax, SYS_GETRANDOM_
+    syscall
+    ret
+
+plat_exit_group:
+    mov     eax, SYS_EXIT_GROUP_
     syscall
     ret
 

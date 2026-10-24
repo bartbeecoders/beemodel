@@ -35,7 +35,6 @@
 .globl dyn_commit
 .globl dyn_remesh
 
-.equ SYS_MREMAP, 25
 .equ DEAD,       -1                     # a triangle's first corner: removed
 
 .section .data

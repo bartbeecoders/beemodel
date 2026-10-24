@@ -91,7 +91,6 @@
 .equ OA_SZ,     128                     # an OBJA record: name, transform, colour
                                         #  (72), type, flags, mesh, material
                                         #  (32), bound to (index or -1)
-.equ SYS_WAIT4, 61
 .equ WNOHANG,   1
 .equ MAP_ANON_PRIV, 0x22
 .equ TILE_W,    112

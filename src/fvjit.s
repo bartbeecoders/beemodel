@@ -58,7 +58,6 @@
 .equ P_JNZ,     0x3c3c3c3c
 .equ PROT_RX,   5
 .equ MAP_ANON_PRIV, 0x22
-.equ SYS_MPROTECT, 10
 
 .section .data
 .align 4

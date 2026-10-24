@@ -67,9 +67,7 @@
 .equ TP_MAX,    64                      # texts keyed in one frame (more: built at once)
 .equ TFL_N,     4096                    # fonts found on the system
 .equ TFL_NAME,  64
-.equ SYS_OPEN_, 2
 .equ O_DIR_,    0x90000                 # read-only | directory | close-on-exec
-.equ SYS_GETDENTS64, 217
 
 .section .bss
 .align 16

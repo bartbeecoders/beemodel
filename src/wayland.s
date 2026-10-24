@@ -207,8 +207,7 @@ write_err:
 fatal:
     call    write_err
     mov     edi, 1
-    mov     eax, SYS_EXIT_GROUP
-    syscall
+    call    plat_exit_group
 
 # -----------------------------------------------------------------------------
 # getenv(rdi="NAME=") -> rax = value pointer or 0
@@ -292,16 +291,14 @@ wl_connect:
     mov     edi, AF_UNIX
     mov     esi, SOCK_STREAM_CLOEXEC
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      9f
     mov     [rip+sock_fd], eax
     mov     edi, eax
     mov     rsi, rbx
     mov     edx, 110
-    mov     eax, SYS_CONNECT
-    syscall
+    call    plat_connect
     test    eax, eax
     jnz     9f
     pop     r12
@@ -455,8 +452,7 @@ wl_flush:
     mov     qword ptr [rsi+40], 24      # CMSG_SPACE(4)
 2:  mov     edi, [rip+sock_fd]
     mov     edx, MSG_NOSIGNAL
-    mov     eax, SYS_SENDMSG
-    syscall
+    call    plat_sendmsg
     cmp     rax, -4                     # EINTR -> retry
     je      1b
     cmp     rax, -11                    # EAGAIN -> retry
@@ -503,8 +499,7 @@ wl_read_dispatch:
     mov     qword ptr [rsi+48], 0
     mov     edi, [rip+sock_fd]
     mov     edx, MSG_CMSG_CLOEXEC
-    mov     eax, SYS_RECVMSG
-    syscall
+    call    plat_recvmsg
     cmp     rax, -4
     je      1b
     test    rax, rax
@@ -1439,8 +1434,7 @@ ensure_buffers:
     jne     3f
     lea     rdi, [rip+s_memfd_name]
     mov     esi, MFD_CLOEXEC
-    mov     eax, SYS_MEMFD_CREATE
-    syscall
+    call    plat_memfd_create
     test    eax, eax
     js      8f
     mov     [rip+shm_fd], eax

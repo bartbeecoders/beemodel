@@ -29,7 +29,6 @@
 .globl job_pending
 .globl wl_dispatching
 
-.equ SYS_GETTID, 186
 
 .section .data
 .align 4
@@ -206,8 +205,7 @@ job_present:
     lea     rdi, [rip+job_pfd]
     mov     esi, 1
     xor     edx, edx
-    mov     eax, SYS_POLL
-    syscall
+    call    plat_poll
     cmp     eax, 1
     jne     2f
     test    word ptr [rip+job_pfd+6], POLLIN

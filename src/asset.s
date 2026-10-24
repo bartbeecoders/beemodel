@@ -32,8 +32,6 @@
 .equ T_IMAGE,   1
 .equ AS_MAXT,   16
 .equ AS_MAXF,   64                      # files listed
-.equ SYS_GETDENTS64, 217
-.equ SYS_OPENAT, 257
 .equ AT_FDCWD,  -100
 .equ O_DIRECTORY, 0x10000
 .equ AB_ROW,    20

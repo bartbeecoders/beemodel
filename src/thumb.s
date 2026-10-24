@@ -22,7 +22,6 @@
 .equ TW,        192
 .equ TH,        120
 .equ TAG_THMB,  0x424d4854              # "THMB"
-.equ SYS_OPEN,  2
 .equ BEE_MAGIC, 0x4d454542
 
 .section .bss

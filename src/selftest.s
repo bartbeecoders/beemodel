@@ -8,7 +8,6 @@
 # exports
 .globl selftest
 
-.equ SYS_CLOCK_GETTIME, 228
 .equ BENCH_N,           8000000
 
 .section .bss

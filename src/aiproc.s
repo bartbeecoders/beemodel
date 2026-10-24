@@ -30,9 +30,6 @@
 .globl ai_exit_code
 .globl ai_dir_make
 
-.equ SYS_WAIT4,     61
-.equ SYS_KILL,      62
-.equ SYS_PIPE2,     293
 .equ O_NONBLOCK,    0x800
 .equ O_CLOEXEC,     0x80000
 .equ WNOHANG,       1

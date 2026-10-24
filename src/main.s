@@ -200,8 +200,7 @@ _start:
     jge     0f
 35: mov     edx, eax
 0:  lea     rdi, [rip+pollfds]
-    mov     eax, SYS_POLL
-    syscall
+    call    plat_poll
     cmp     rax, -4                     # EINTR
     je      .Lloop
     test    word ptr [rip+pollfds+6], POLLIN|POLLERR|POLLHUP
@@ -243,8 +242,7 @@ _start:
     call    ai_proc_kill                # (an AI connection's child goes too)
     call    mcp_shutdown
     xor     edi, edi
-    mov     eax, SYS_EXIT_GROUP
-    syscall
+    call    plat_exit_group
 
 .Lmissing:
     lea     rdi, [rip+e_globals]
@@ -328,8 +326,7 @@ handle_cli_args:
 .Lcli_bridge:
     call    mcp_bridge
     mov     edi, eax
-    mov     eax, SYS_EXIT_GROUP
-    syscall
+    call    plat_exit_group
 .Lcli_selftest:
     sub     rsp, 8                      # (16-byte aligned calls)
     lea     rdi, [rip+frame_arena]      # (meshes made by the tests)
@@ -338,8 +335,7 @@ handle_cli_args:
     call    jobs_init
     call    selftest
     mov     edi, eax
-    mov     eax, SYS_EXIT_GROUP
-    syscall
+    call    plat_exit_group
 .Lcli_eval:                             # beemodel --eval 'code'
     sub     rsp, 8
     test    r12, r12
@@ -363,8 +359,7 @@ handle_cli_args:
     mov     edx, [rip+script_out_len]
     call    plat_write
     mov     edi, r13d
-    mov     eax, SYS_EXIT_GROUP
-    syscall
+    call    plat_exit_group
 .Lcli_need:
     lea     rdi, [rip+e_need_arg]
     call    fatal

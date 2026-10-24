@@ -18,7 +18,6 @@
 .globl id_ddm
 
 .equ CLIP_CAP,      65536
-.equ SYS_PIPE2,     293
 .equ O_CLOEXEC,     0x80000
 .equ O_NONBLOCK,    0x800
 .equ DDM_CREATE_SOURCE, 0
@@ -199,8 +198,7 @@ clip_paste:
     lea     rdi, [rip+pollfd]
     mov     esi, 1
     mov     edx, 1000
-    mov     eax, SYS_POLL
-    syscall
+    call    plat_poll
     cmp     rax, -4
     je      3b
     test    rax, rax
@@ -435,8 +433,7 @@ offer_read:
     lea     rdi, [rip+pollfd]
     mov     esi, 1
     mov     edx, 1000
-    mov     eax, SYS_POLL
-    syscall
+    call    plat_poll
     cmp     rax, -4
     je      3b
     test    rax, rax

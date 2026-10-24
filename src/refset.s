@@ -35,7 +35,6 @@
 .include "macros.inc"
 .include "widgets.inc"
 
-.equ SYS_WAIT4_,    61
 .equ AT_FDCWD_,     -100
 .equ O_DIR_,        0x10000
 .equ O_WTRUNC_,     0x241               # write, create, truncate

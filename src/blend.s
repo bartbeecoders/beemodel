@@ -30,7 +30,6 @@
 
 .globl blend_import
 
-.equ SYS_WAIT4,     61
 .equ AT_FDCWD,      -100
 .equ O_WRCREAT,     0x241               # O_WRONLY | O_CREAT | O_TRUNC
 

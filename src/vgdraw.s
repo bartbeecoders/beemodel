@@ -83,8 +83,6 @@
 .equ MAP_NORES, 0x4022
 .equ MADV_WILLNEED, 3
 .equ MADV_DONTNEED, 4
-.equ SYS_MINCORE, 27
-.equ SYS_CLOCK_GETTIME, 228
 
 .section .data
 .align 8

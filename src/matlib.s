@@ -32,8 +32,6 @@
 .globl preset_labels
 .globl npresets
 
-.equ SYS_OPENAT, 257
-.equ SYS_GETDENTS64, 217
 .equ AT_FDCWD,  -100
 .equ O_DIRECTORY, 0x10000
 .equ GR_NODES,  160
