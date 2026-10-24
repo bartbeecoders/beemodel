@@ -56,6 +56,7 @@
 .globl wg_edit_last
 .globl wg_edit_named
 .globl wg_op_of
+.globl wg_text_h
 .globl wg_clip_key
 
 .equ WG_MAX,    768
@@ -75,6 +76,15 @@
 .equ CLOSED_N,  64
 .equ POP_ROW,   22
 .equ SCROLL_N,  4               # nested scrolled regions
+.equ ML_LH,     CHAR_H+2        # a multi-line field: a line's height,
+.equ ML_PAD,    (WG_H-CHAR_H)/2 #  the space above the first line,
+.equ ML_MAXL,   512             #  the lines laid out,
+.equ ML_CAP,    4000            #  the text it takes (bytes)
+.equ ML_KHOME,  102
+.equ ML_KUP,    103
+.equ ML_KEND,   107
+.equ ML_KDOWN,  108
+.equ ML_KPENTER, 96
 
 .section .bss
 .align 8
@@ -103,6 +113,9 @@ wg_sc_depth:    .skip 4
 .align 8
 wg_sc_stack:    .skip SCROLL_N*32   # clip (4 x i32), entry index, top y
 wg_txt:         .skip 64
+ml_ls:          .skip (ML_MAXL+1)*4 # where each line starts (ml_layout)
+ml_top:         .skip 4             # the first line shown of the field typed in
+ml_tmp:         .skip 1024          # a line drawn
 
 .section .rodata
 s_secret_set:   .asciz "(set)"
@@ -345,7 +358,17 @@ wg:
     lea     eax, [rdx-CHAR_H]
     shr     eax, 1
     mov     [rsp+28], eax               # text offset in the row
-    mov     rdi, rbx                    # record it, if any of it is visible
+    cmp     dword ptr [rbx+WD_KIND], WK_TEXT  # (several lines: WD_N tall,
+    jne     12f                              #  the first line on top)
+    test    dword ptr [rbx+WD_FLAGS], WGF_MULTI
+    jz      12f
+    mov     edx, [rbx+WD_N]
+    cmp     edx, WG_H
+    jge     13f
+    mov     edx, WG_H
+13: mov     [rsp+4], edx
+    mov     dword ptr [rsp+28], ML_PAD
+12:    mov     rdi, rbx                    # record it, if any of it is visible
     mov     esi, r12d
     mov     edx, r13d
     mov     ecx, r14d
@@ -769,7 +792,11 @@ wg:
 
 # ---- number, slider and text fields ------------------------------------------
 .Lwg_field:
-    mov     r8d, COL_FIELD
+    cmp     dword ptr [rbx+WD_KIND], WK_TEXT
+    jne     0f
+    test    dword ptr [rbx+WD_FLAGS], WGF_MULTI
+    jnz     .Lwg_multi
+0:  mov     r8d, COL_FIELD
     test    dword ptr [rsp+8], 1
     jz      1f
     mov     r8d, COL_FIELD_HOVER
@@ -869,6 +896,497 @@ wg:
     pop     r13
     pop     r12
     pop     rbp
+    pop     rbx
+    ret
+
+# ---- a text field of several lines: wrapped, the caret's line kept in view ----
+.Lwg_multi:
+    mov     r8d, COL_FIELD
+    test    dword ptr [rsp+8], 1
+    jz      1f
+    mov     r8d, COL_FIELD_HOVER
+1:  test    dword ptr [rsp+8], 4        # typing: a focus ring
+    jz      2f
+    mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, [rsp+4]
+    mov     r8d, COL_FOCUS
+    mov     r9d, FIELD_R
+    call    fill_rrect
+    lea     edi, [r12+1]
+    lea     esi, [r13+1]
+    lea     edx, [r14-2]
+    mov     ecx, [rsp+4]
+    sub     ecx, 2
+    mov     r8d, COL_FIELD
+    mov     r9d, FIELD_R-1
+    call    fill_rrect
+    jmp     3f
+2:  mov     edi, r12d
+    mov     esi, r13d
+    mov     edx, r14d
+    mov     ecx, [rsp+4]
+    mov     r9d, FIELD_R
+    call    fill_rrect
+3:  mov     rbp, r15                    # the text: the value, or what is typed
+    test    dword ptr [rsp+8], 4
+    jz      4f
+    lea     rdi, [rip+tfi_widget]
+    call    tf_select
+    lea     rbp, [rip+tf_buf]
+4:  mov     rdi, rbp
+    lea     esi, [r14-14]
+    call    ml_layout
+    mov     [rsp+12], eax               # lines
+    mov     eax, [rsp+4]                # lines shown
+    sub     eax, WG_H-ML_LH
+    xor     edx, edx
+    mov     ecx, ML_LH
+    div     ecx
+    test    eax, eax
+    jnz     5f
+    mov     eax, 1
+5:  mov     [rsp+16], eax
+    mov     dword ptr [rsp+20], 0       # the first one shown
+    mov     dword ptr [rsp+24], -1      # the caret's
+    test    dword ptr [rsp+8], 4
+    jz      6f
+    mov     edi, [rip+tf_caret]
+    mov     esi, [rsp+12]
+    call    ml_line_of
+    mov     [rsp+24], eax
+    mov     ecx, [rip+ml_top]           # scrolled to keep the caret in view
+    cmp     eax, ecx
+    jge     51f
+    mov     ecx, eax
+51: mov     edx, eax
+    sub     edx, [rsp+16]
+    inc     edx
+    cmp     ecx, edx
+    jge     52f
+    mov     ecx, edx
+52: mov     edx, [rsp+12]
+    sub     edx, [rsp+16]
+    cmp     ecx, edx
+    jle     53f
+    mov     ecx, edx
+53: test    ecx, ecx
+    jns     54f
+    xor     ecx, ecx
+54: mov     [rip+ml_top], ecx
+    mov     [rsp+20], ecx
+6:  mov     ebx, [rsp+20]               # each line shown (rbx: its index,
+    mov     r15d, r13d                  #  r15: its y)
+    add     r15d, [rsp+28]
+.Lwm_line:
+    cmp     ebx, [rsp+12]
+    jae     .Lwm_done
+    mov     eax, ebx
+    sub     eax, [rsp+20]
+    cmp     eax, [rsp+16]
+    jae     .Lwm_done
+    lea     rax, [rip+ml_ls]
+    mov     ecx, [rax+rbx*4]
+    mov     [rsp+32], ecx               # [start
+    mov     edx, [rax+rbx*4+4]
+    cmp     edx, ecx                    #  end), without its line break
+    jbe     1f
+    cmp     byte ptr [rbp+rdx-1], 10
+    jne     1f
+    dec     edx
+1:  mov     [rsp+36], edx
+    test    dword ptr [rsp+8], 4        # the selection on it
+    jz      3f
+    mov     eax, [rip+tf_anchor]
+    mov     ecx, [rip+tf_caret]
+    cmp     eax, ecx
+    jbe     2f
+    xchg    eax, ecx
+2:  cmp     eax, [rsp+32]
+    jae     21f
+    mov     eax, [rsp+32]
+21: cmp     ecx, [rsp+36]
+    jbe     22f
+    mov     ecx, [rsp+36]
+22: cmp     eax, ecx
+    jae     3f
+    mov     [rsp], ecx                  # (its end)
+    mov     esi, eax
+    sub     esi, [rsp+32]
+    mov     edi, [rsp+32]
+    add     rdi, rbp
+    call    text_width_n
+    mov     [rsp+4], eax
+    mov     esi, [rsp]
+    sub     esi, [rsp+32]
+    mov     edi, [rsp+32]
+    add     rdi, rbp
+    call    text_width_n
+    mov     edx, eax
+    sub     edx, [rsp+4]
+    lea     edi, [r12+7]
+    add     edi, [rsp+4]
+    mov     esi, r15d
+    mov     ecx, CHAR_H
+    mov     r8d, COL_SELECTION
+    call    fill_rect
+3:  mov     ecx, [rsp+32]               # the text
+    mov     edx, [rsp+36]
+    lea     rdi, [rip+ml_tmp]
+    xor     eax, eax
+4:  cmp     ecx, edx
+    jae     5f
+    cmp     eax, 1023
+    jae     5f
+    mov     sil, [rbp+rcx]
+    mov     [rdi+rax], sil
+    inc     ecx
+    inc     eax
+    jmp     4b
+5:  mov     byte ptr [rdi+rax], 0
+    lea     edi, [r12+7]
+    mov     esi, r15d
+    lea     rdx, [rip+ml_tmp]
+    mov     ecx, COL_TEXT
+    call    draw_text
+    cmp     ebx, [rsp+24]               # the caret
+    jne     6f
+    mov     esi, [rip+tf_caret]
+    sub     esi, [rsp+32]
+    mov     edi, [rsp+32]
+    add     rdi, rbp
+    call    text_width_n
+    lea     edi, [r12+rax+7]
+    mov     esi, r15d
+    mov     edx, 2
+    mov     ecx, CHAR_H
+    mov     r8d, COL_FOCUS
+    call    fill_rect
+6:  add     r15d, ML_LH
+    inc     ebx
+    jmp     .Lwm_line
+.Lwm_done:
+    xor     eax, eax
+    jmp     .Lwg_ret
+
+# ml_layout(rdi=text, esi=width) -> eax = lines; ml_ls[i] = where line i
+#   starts, ml_ls[lines] = the text's length. A line ends at a line break,
+#   else after the last space that fits (spaces may hang past the edge),
+#   else before the character that does not fit (one at least).
+ml_layout:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 24
+    mov     r12, rdi
+    mov     r13d, esi
+    xor     ebx, ebx                    # the line's start
+    xor     r14d, r14d                  # lines
+.Lml_line:
+    lea     rax, [rip+ml_ls]
+    mov     [rax+r14*4], ebx
+    inc     r14d
+    mov     ebp, ebx                    # the character looked at
+    mov     r15d, ebx                   # after its last space (ebx: none)
+    mov     dword ptr [rsp], 0          # its width so far
+.Lml_ch:
+    movzx   eax, byte ptr [r12+rbp]
+    test    eax, eax
+    jz      .Lml_end
+    cmp     eax, 10
+    jne     1f
+    lea     ebx, [rbp+1]
+    jmp     .Lml_next
+1:  lea     ecx, [rbp+1]                # the character's end (UTF-8)
+2:  movzx   edx, byte ptr [r12+rcx]
+    and     edx, 0xc0
+    cmp     edx, 0x80
+    jne     3f
+    inc     ecx
+    jmp     2b
+3:  mov     [rsp+4], ecx
+    mov     [rsp+8], eax
+    lea     rdi, [r12+rbp]
+    mov     esi, ecx
+    sub     esi, ebp
+    call    text_width_n
+    add     eax, [rsp]
+    cmp     dword ptr [rsp+8], ' '
+    je      4f
+    cmp     eax, r13d
+    jle     4f
+    cmp     ebp, ebx
+    je      4f
+    cmp     r15d, ebx                   # the line ends: after the space,
+    cmova   ebp, r15d                   #  or before this character
+    mov     ebx, ebp
+    jmp     .Lml_next
+4:  mov     [rsp], eax
+    mov     ecx, [rsp+4]
+    cmp     dword ptr [rsp+8], ' '
+    jne     5f
+    mov     r15d, ecx
+5:  mov     ebp, ecx
+    jmp     .Lml_ch
+.Lml_next:
+    cmp     r14d, ML_MAXL
+    jb      .Lml_line
+    mov     rdi, r12                    # (no more room: the rest on the last)
+    call    str_len
+    mov     ebp, eax
+.Lml_end:
+    lea     rax, [rip+ml_ls]
+    mov     [rax+r14*4], ebp
+    mov     eax, r14d
+    add     rsp, 24
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# ml_line_of(edi=byte offset, esi=lines) -> eax = the line it is on
+ml_line_of:
+    xor     eax, eax
+    lea     rdx, [rip+ml_ls]
+1:  lea     ecx, [rax+1]
+    cmp     ecx, esi
+    jae     9f
+    cmp     [rdx+rcx*4], edi
+    ja      9f
+    mov     eax, ecx
+    jmp     1b
+9:  ret
+
+# ml_line_end(edi=line, esi=lines, rdx=text) -> eax = the last caret place
+#   on it (before its line break, or before the character a wrap ends with)
+ml_line_end:
+    lea     rcx, [rip+ml_ls]
+    mov     eax, [rcx+rdi*4+4]
+    lea     r8d, [rdi+1]
+    cmp     r8d, esi
+    jae     9f
+    mov     r8d, [rcx+rdi*4]
+1:  cmp     eax, r8d
+    jbe     9f
+    dec     eax
+    movzx   ecx, byte ptr [rdx+rax]
+    and     ecx, 0xc0
+    cmp     ecx, 0x80
+    je      1b
+9:  ret
+
+# ml_at_px(edi=line, esi=x from the text's left, edx=lines, rcx=text)
+#   -> eax = the caret place nearest to it on that line
+ml_at_px:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 8
+    mov     r12, rcx
+    mov     r13d, esi
+    lea     rax, [rip+ml_ls]
+    mov     ebp, [rax+rdi*4]            # the place
+    mov     esi, edx
+    mov     rdx, rcx
+    call    ml_line_end
+    mov     r14d, eax
+    xor     r15d, r15d                  # its x
+1:  cmp     ebp, r14d
+    jae     9f
+    lea     ecx, [rbp+1]
+2:  movzx   edx, byte ptr [r12+rcx]
+    and     edx, 0xc0
+    cmp     edx, 0x80
+    jne     3f
+    inc     ecx
+    jmp     2b
+3:  mov     [rsp], ecx
+    lea     rdi, [r12+rbp]
+    mov     esi, ecx
+    sub     esi, ebp
+    call    text_width_n
+    mov     ecx, eax
+    shr     ecx, 1
+    add     ecx, r15d
+    cmp     r13d, ecx                   # before the character's middle
+    jl      9f
+    add     r15d, eax
+    mov     ebp, [rsp]
+    jmp     1b
+9:  mov     eax, ebp
+    add     rsp, 8
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# ml_lay_edit -> eax = the lines of what is being typed (laid out)
+ml_lay_edit:
+    sub     rsp, 8
+    lea     rdi, [rip+tfi_widget]
+    call    tf_select
+    lea     rdi, [rip+tf_buf]
+    mov     esi, [rip+wg_edit_e+E_W]
+    sub     esi, 14
+    call    ml_layout
+    add     rsp, 8
+    ret
+
+# ml_caret(eax=place) - the caret there; Shift keeps the selection's start
+ml_caret:
+    mov     [rip+tf_caret], eax
+    test    dword ptr [rip+key_mods], MOD_SHIFT
+    jnz     1f
+    mov     [rip+tf_anchor], eax
+1:  mov     dword ptr [rip+dirty], 1
+    ret
+
+# ml_click(edi=x, esi=y) - the caret where the field being typed in is
+#   pressed
+ml_click:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12d, esi
+    call    ml_lay_edit
+    mov     r13d, eax
+    mov     eax, r12d
+    sub     eax, [rip+wg_edit_e+E_Y]
+    sub     eax, ML_PAD
+    jns     1f
+    xor     eax, eax
+1:  xor     edx, edx
+    mov     ecx, ML_LH
+    div     ecx
+    add     eax, [rip+ml_top]
+    lea     ecx, [r13-1]
+    cmp     eax, ecx
+    jbe     2f
+    mov     eax, ecx
+2:  mov     edi, eax
+    mov     esi, ebx
+    sub     esi, [rip+wg_edit_e+E_X]
+    sub     esi, 7
+    mov     edx, r13d
+    lea     rcx, [rip+tf_buf]
+    call    ml_at_px
+    call    ml_caret
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ml_vert(edi=-1 up / 1 down) - the caret a line up or down, as near to
+#   where it is across as there is (past the first / last line: the start /
+#   end)
+ml_vert:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    call    ml_lay_edit
+    mov     r13d, eax
+    mov     edi, [rip+tf_caret]
+    mov     esi, eax
+    call    ml_line_of
+    mov     r12d, eax
+    lea     rcx, [rip+ml_ls]
+    mov     edi, [rcx+rax*4]
+    mov     esi, [rip+tf_caret]
+    sub     esi, edi
+    lea     rax, [rip+tf_buf]
+    add     rdi, rax
+    call    text_width_n
+    mov     esi, eax
+    lea     edi, [r12+rbx]
+    test    edi, edi
+    js      1f
+    cmp     edi, r13d
+    jae     2f
+    mov     edx, r13d
+    lea     rcx, [rip+tf_buf]
+    call    ml_at_px
+    jmp     3f
+1:  xor     eax, eax
+    jmp     3f
+2:  mov     eax, [rip+tf_len]
+3:  call    ml_caret
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ml_home_end(edi=0 Home / 1 End) - the caret to its line's start / end
+ml_home_end:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    call    ml_lay_edit
+    mov     r12d, eax
+    mov     edi, [rip+tf_caret]
+    mov     esi, eax
+    call    ml_line_of
+    lea     rcx, [rip+ml_ls]
+    mov     edx, [rcx+rax*4]
+    test    ebx, ebx
+    jz      1f
+    mov     edi, eax
+    mov     esi, r12d
+    lea     rdx, [rip+tf_buf]
+    call    ml_line_end
+    mov     edx, eax
+1:  mov     eax, edx
+    call    ml_caret
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# wg_text_h(rdi=desc, rsi=text, edx=w, ecx=lines at most) -> eax = the
+#   height of a WGF_MULTI field for its text (what is typed while it is),
+#   for its WD_N
+wg_text_h:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rsi
+    mov     r12d, edx
+    mov     r13d, ecx
+    cmp     dword ptr [rip+wg_edit], 0
+    je      1f
+    cmp     [rip+wg_edit_e+E_DESC], rdi
+    jne     1f
+    lea     rdi, [rip+tfi_widget]
+    call    tf_select
+    lea     rbx, [rip+tf_buf]
+1:  mov     rdi, rbx
+    lea     esi, [r12-14]
+    call    ml_layout
+    cmp     eax, r13d
+    jle     2f
+    mov     eax, r13d
+2:  test    eax, eax
+    jg      3f
+    mov     eax, 1
+3:  imul    eax, eax, ML_LH
+    add     eax, WG_H-ML_LH
+    pop     r13
+    pop     r12
     pop     rbx
     ret
 
@@ -1213,9 +1731,17 @@ wg_cursor:
 wg_press:
     push    rbx
     mov     ebx, edi
-    cmp     ebx, [rip+wg_edit]          # (typing into it already)
+    cmp     ebx, [rip+wg_edit]          # (typing into it already:
+    jne     0f                          #  several lines, the caret there)
+    lea     rdi, [rip+tfi_widget]
+    call    tf_select
+    cmp     dword ptr [rip+tf_multi], 0
     je      9f
-    call    wg_commit                   # a press elsewhere confirms typing
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    ml_click
+    jmp     9f
+0:    call    wg_commit                   # a press elsewhere confirms typing
     mov     edi, ebx
     call    wg_find
     test    rax, rax
@@ -1650,6 +2176,11 @@ wg_release:
     jmp     9f
 1:  lea     rdi, [rip+wg_act_e]         # a field: type into it
     call    edit_begin
+    cmp     dword ptr [rip+tf_multi], 0 # (several lines: where it was
+    je      9f                          #  clicked)
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    ml_click
     jmp     9f
 .Lwr_button:
     mov     rdi, [rcx+WD_AUX]
@@ -1849,7 +2380,22 @@ edit_begin:
     lea     rdi, [rip+tfi_widget]
     call    tf_select
     mov     rdi, [rbx+E_DESC]
+    xor     eax, eax
+    mov     [rip+tf_cap], eax
+    mov     [rip+tf_multi], eax
+    cmp     dword ptr [rdi+WD_KIND], WK_TEXT
+    jne     0f
+    test    dword ptr [rdi+WD_FLAGS], WGF_MULTI
+    jz      0f
+    mov     dword ptr [rip+tf_cap], ML_CAP  # several lines: all of the text,
+    mov     dword ptr [rip+tf_multi], 1     #  the caret at its end
+    mov     dword ptr [rip+ml_top], 0
     mov     rsi, [rbx+E_PTR]
+    call    tf_load
+    mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+0:  mov     rsi, [rbx+E_PTR]
     lea     rdx, [rip+wg_txt]
     cmp     dword ptr [rdi+WD_KIND], WK_TEXT
     je      1f
@@ -1946,7 +2492,11 @@ wg_val_paste:
     jmp     9f
 1:  mov     rdi, rbx
     call    edit_begin
-    mov     rsi, rsp
+    cmp     dword ptr [rip+tf_multi], 0 # (several lines: pasted at the end,
+    je      2f                          #  typing goes on)
+    call    tf_paste
+    jmp     9f
+2:  mov     rsi, rsp
     call    tf_load
     call    wg_commit
 9:  add     rsp, 256
@@ -1980,7 +2530,17 @@ wg_val_copy:
     mov     rsi, rdx
     call    wg_ftoa
     jmp     5f
-3:  call    value_text
+3:  test    dword ptr [rdi+WD_FLAGS], WGF_MULTI  # (several lines: all of it)
+    jz      31f
+    mov     rdi, rsi
+    mov     [rsp], rdi
+    call    str_len
+    mov     esi, eax
+    mov     rdi, [rsp]
+    call    clip_copy
+    add     rsp, 8
+    ret
+31: call    value_text
 5:  lea     rdi, [rip+wg_txt]
     call    str_len
     mov     esi, eax
@@ -2064,7 +2624,37 @@ wg_key:
     mov     ebx, edi
     lea     rdi, [rip+tfi_widget]
     call    tf_select
-    mov     edi, ebx
+    cmp     dword ptr [rip+tf_multi], 0 # several lines: Shift+Enter breaks
+    je      0f                          #  the line, Up / Down / Home / End
+    cmp     ebx, KEY_ENTER              #  go by line
+    je      1f
+    cmp     ebx, ML_KPENTER
+    jne     2f
+1:  test    dword ptr [rip+key_mods], MOD_SHIFT
+    jz      0f
+    mov     edi, 10
+    call    tf_insert
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+2:  mov     edi, -1
+    cmp     ebx, ML_KUP
+    je      3f
+    mov     edi, 1
+    cmp     ebx, ML_KDOWN
+    jne     4f
+3:  call    ml_vert
+    jmp     9f
+4:  test    dword ptr [rip+key_mods], MOD_CTRL  # (Ctrl+Home / End: the text's)
+    jnz     0f
+    xor     edi, edi
+    cmp     ebx, ML_KHOME
+    je      5f
+    mov     edi, 1
+    cmp     ebx, ML_KEND
+    jne     0f
+5:  call    ml_home_end
+    jmp     9f
+0:  mov     edi, ebx
     call    kb_text                     # (the keypad types digits too)
     mov     esi, eax
     mov     edi, ebx

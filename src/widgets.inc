@@ -33,6 +33,7 @@
 .equ WGF_DRAWING,   1024        # path: a drawing export (the browser offers its sheet, views, title)
 .equ WGF_SHUT,      4096        # section: closed until opened (the closed list holds it when open)
 .equ WGF_THEMES,    2048        # enum: the UI themes (its list shows each theme's colours: th_swatch)
+.equ WGF_MULTI,     8192        # text: several lines, wrapped, WD_N tall (wg_text_h); Shift+Enter a new line, a paste keeps its line breaks
 
 # descriptor (static, .rodata)
 .equ WD_KIND,       0

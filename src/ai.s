@@ -14,7 +14,8 @@
 #
 #  A request is one undo step ("Agent: ..."), revertable in one click. The
 #  AI Assistant area: the connection, New Conversation, Revert, the
-#  transcript, the prompt (Enter sends) with Send / Stop. Ctrl+Shift+Space
+#  transcript, the prompt (Enter sends; Shift+Enter, or a paste, makes it
+#  several lines, and it grows to show them) with Send / Stop. Ctrl+Shift+Space
 #  (ai.mode) goes to the prompt, making the AI workspace when no AI
 #  Assistant area is shown.
 # =============================================================================
@@ -45,6 +46,8 @@
 .equ K_RES,      5
 .equ K_NOTE,     6
 .equ LINE_H,     20
+.equ PROMPT_CAP, 4000                   # the prompt's text (widgets.s ML_CAP)
+.equ PROMPT_MAXL, 10                    #  and the lines it grows to
 
 .section .bss
 .align 8
@@ -78,7 +81,7 @@ ai_args:        .skip TMP_CAP
 ai_sys:         .skip 16384             # the instructions (world prompt + extra)
 ai_sid:         .skip 128
 ai_label:       .skip 112
-ai_prompt:      .skip 256               # the prompt field's text
+ai_prompt:      .skip PROMPT_CAP+16     # the prompt field's text
 ai_path:        .skip 512               # the program run
 ai_cfg:         .skip 600               # its MCP configuration file
 ai_cfgarg:      .skip 600
@@ -256,7 +259,7 @@ WIDGET wd_ai_revert, WK_BUTTON, "ai.revert", "Revert", flags=WGF_COMPACT, tip="U
 WIDGET wd_ai_copy, WK_BUTTON, "ai.copy", "Copy", flags=WGF_COMPACT, tip="Copy the text selected in the conversation (drag over it, double-click: a whole message), or all of it"
 WIDGET wd_ai_text, WK_PAD, "ai.text", cb=ai_pad_cb, tip="Drag to select text, double-click a message, Ctrl+C copies it", sect=.data
 WIDGET wd_ai_scroll, WK_SCROLL, "ai.transcript"
-WIDGET wd_ai_prompt, WK_TEXT, "ai.prompt", "Prompt", cb=ai_prompt_cb, tip="What to build or change. Enter sends it"
+WIDGET wd_ai_prompt, WK_TEXT, "ai.prompt", "Prompt", flags=WGF_MULTI, cb=ai_prompt_cb, tip="What to build or change. Enter sends it, Shift+Enter starts a new line", sect=.data
 WIDGET wd_ai_send, WK_BUTTON, "ai.send", "Send", flags=WGF_PRIMARY, tip="Send the prompt (Enter)"
 WIDGET wd_ai_stop, WK_BUTTON, "ai.stop", "Stop", tip="Stop the AI (what it did so far stays, as one undo step)"
 
@@ -521,14 +524,20 @@ ai_send_as:
     mov     r13, rdx
     test    rbx, rbx
     jz      9f
-1:  cmp     byte ptr [rbx], ' '         # (leading spaces)
-    jne     2f
+1:  movzx   eax, byte ptr [rbx]         # (leading spaces, line breaks)
+    test    eax, eax
+    jz      2f
+    cmp     eax, ' '
+    ja      2f
     inc     rbx
     jmp     1b
 2:  cmp     byte ptr [rbx], 0
     je      9f
-1:  cmp     byte ptr [r12], ' '
-    jne     2f
+1:  movzx   eax, byte ptr [r12]
+    test    eax, eax
+    jz      2f
+    cmp     eax, ' '
+    ja      2f
     inc     r12
     jmp     1b
 2:  cmp     dword ptr [rip+ai_busy], 0
@@ -558,7 +567,10 @@ ai_send_as:
     jz      4f
     cmp     ecx, 60
     jae     4f
-    mov     [rdi+rcx], al
+    cmp     al, ' '                     # (one line)
+    jae     31f
+    mov     al, ' '
+31: mov     [rdi+rcx], al
     inc     ecx
     jmp     3b
 4:  mov     byte ptr [rdi+rcx], 0
@@ -2364,7 +2376,7 @@ ai_prompt_cb:                           # rdi = the text
     push    rbx
     mov     rsi, rdi
     lea     rdi, [rip+ai_prompt]
-    mov     ecx, 240
+    mov     ecx, PROMPT_CAP
 1:  mov     al, [rsi]
     mov     [rdi], al
     test    al, al
@@ -2511,10 +2523,26 @@ ed_ai_draw:
     jz      2f
     call    do_ai_revert
 2:  add     r12d, WG_H+8
-    # the prompt row (at the bottom) and the line above it
+    # the prompt (at the bottom, as tall as its lines) and the line above it
+    mov     eax, [rip+ed_h]             # (its lines: 10 at most, fewer in a
+    sub     eax, 160                    #  low area)
+    cdq
+    mov     ecx, 18
+    idiv    ecx
+    mov     ecx, PROMPT_MAXL
+    cmp     eax, ecx
+    cmovl   ecx, eax
+    lea     rdi, [rip+wd_ai_prompt]
+    lea     rsi, [rip+ai_prompt]
+    mov     edx, [rip+pnl_w]
+    sub     edx, 76
+    call    wg_text_h
+    mov     [rip+wd_ai_prompt+WD_N], eax
+    mov     [rsp+16], eax
     mov     r15d, [rip+ed_y]
     add     r15d, [rip+ed_h]
-    sub     r15d, WG_H+8                # the prompt's y
+    sub     r15d, eax
+    sub     r15d, 8                     # the prompt's y
     lea     eax, [r15-22]
     mov     [rsp], eax                  # the status line's y
     sub     eax, 4
@@ -2563,10 +2591,13 @@ ed_ai_draw:
     lea     rdi, [rip+ai_tx]
     movzx   eax, byte ptr [rdi+rbx]
     mov     [rsp+12], eax
-    cmp     eax, K_YOU
-    jne     6f
+    cmp     eax, K_YOU                  # (a gap before each prompt, not
+    jne     6f                          #  before its later lines)
     test    ebx, ebx
     jz      6f
+    lea     rdi, [rip+ai_tx]
+    cmp     byte ptr [rdi+rbx+1], ' '
+    je      6f
     add     ebp, 10
 6:  mov     edi, [rsp+12]
     call    kind_col
@@ -2652,10 +2683,12 @@ ed_ai_draw:
     cmp     dword ptr [rip+ai_busy], 0
     je      12f
     lea     rdi, [rip+wd_ai_stop]
-12: mov     esi, [rip+pnl_x]
+12: mov     esi, [rip+pnl_x]            # (beside its last line)
     add     esi, [rip+pnl_w]
     sub     esi, r13d
     mov     edx, r15d
+    add     edx, [rsp+16]
+    sub     edx, WG_H
     mov     ecx, r13d
     xor     r8d, r8d
     xor     r9d, r9d

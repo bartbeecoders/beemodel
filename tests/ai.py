@@ -290,6 +290,30 @@ def main():
     check('R   = House1 r 0 0 0' in tx and 'R     Roof1 r 0 0 45' in tx,
           'a result\'s later lines are indented under its first')
 
+    # -- a prompt of several lines: pasted, Shift+Enter, Up / Home
+    x, y = fakewl.widget_xy(m, 'ai.prompt')
+    f.click(x, y); f.pump(0.1)
+    f.set_clipboard('Model the house on the plan at:\n'
+                    '/home/user/Plans/PlanTestOct2026/BA_ééngezinswoning_I_N_inplantingsplan.pdf\n')
+    f.mods(4); f.key(47); f.mods(0); f.pump(0.2)    # Ctrl+V
+    h1 = (fakewl.widget(m, 'ai.prompt') or {}).get('h', 0)
+    f.type('two floors')
+    f.mods(1); f.key(28); f.mods(0)                 # Shift+Enter: a new line
+    f.type('and a flat roof'); f.pump(0.2)
+    h2 = (fakewl.widget(m, 'ai.prompt') or {}).get('h', 0)
+    f.key(103); f.key(102); f.type('With '); f.pump(0.1)   # Up, Home: that line's start
+    if OUT:
+        f.shot('142_ai_prompt_lines.png')
+    f.key(28)                                       # Enter sends
+    wait_idle()
+    a = json.load(open(os.path.join(home, 'claude.runs.json')))[-1]['args']
+    check(a[1] == 'Model the house on the plan at:\n/home/user/Plans/PlanTestOct2026/'
+          'BA_ééngezinswoning_I_N_inplantingsplan.pdf\nWith two floors\nand a flat roof',
+          f'a pasted prompt keeps its line breaks; Shift+Enter adds one, Up / Home go by line ({a[1]!r})')
+    h3 = (fakewl.widget(m, 'ai.prompt') or {}).get('h', 0)
+    check(22 < h1 < h2 and h3 == 22,
+          f'the prompt grows with its lines, the long path wrapped (heights {h1}, {h2}), and is one line again once sent ({h3})')
+
     # -- Grok
     print('  -- Grok --')
     v = connection(1)

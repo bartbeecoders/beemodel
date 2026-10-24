@@ -19,7 +19,11 @@ tools (the same ones outside agents get, see [MCP.md](MCP.md)):
    turned into an AI Assistant from its editor-type menu.
 2. Type what you want, for example *"a misty pine forest around a stone
    cabin at dusk"* or *"make the cabin bigger and add a chimney"*, and press
-   **Enter** (or click **Send**).
+   **Enter** (or click **Send**). A prompt can have several lines:
+   **Shift+Enter** starts a new one, and pasted text keeps its line breaks.
+   The prompt wraps long lines, grows to show up to 10 of them and takes
+   up to 4000 bytes. **Up** and **Down** move the caret between lines, and
+   **Home** and **End** go to the start and end of the line.
 3. The transcript shows:
    - your prompt;
    - the model's text;

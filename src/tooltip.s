@@ -460,7 +460,7 @@ jq_or_null:                             # rsi = text or 0
 
 # wrap_text(rdi=text or 0, esi=width, edx=x (0: measure only), ecx=y,
 #   r8d=colour) -> eax = lines, edx = widest line's width
-#   breaks at spaces; a word wider than the line goes on a line of its own
+#   breaks at spaces; a word wider than the line is broken where it fits
 wrap_text:
     push    rbx
     push    rbp
@@ -504,13 +504,29 @@ wrap_text:
     je      5f
 4:  inc     ebp
     jmp     2b
-5:  test    r15d, r15d                  # one long word: take all of it
-    jnz     6f
-    mov     r15d, ebp
+5:  test    r15d, r15d                  # one long word: as much of it
+    jnz     6f                          #  as fits (a character at least)
+51: lea     ecx, [r15+1]
+52: cmp     ecx, ebp
+    jae     53f
+    movzx   eax, byte ptr [rbx+rcx]
+    and     eax, 0xc0
+    cmp     eax, 0x80
+    jne     53f
+    inc     ecx
+    jmp     52b
+53: mov     [rsp+20], ecx
     mov     rdi, rbx
-    mov     esi, ebp
+    mov     esi, ecx
     call    text_width_n
-    mov     [rsp+16], eax
+    test    r15d, r15d
+    jz      54f
+    cmp     eax, r12d
+    jg      6f
+54: mov     [rsp+16], eax
+    mov     r15d, [rsp+20]
+    cmp     r15d, ebp
+    jb      51b
 6:  mov     eax, [rsp+16]
     cmp     eax, [rsp+28]
     jle     7f
