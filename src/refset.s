@@ -114,6 +114,8 @@ rs_cnt:         .skip 4*12              # pages per kind
 rs_skipped:     .skip 4
 rs_tools:       .skip 4                 # 1: poppler found
 rs_nopdf:       .skip 4                 # PDFs left out (no poppler)
+rs_showall:     .skip 4                 # 1: no page goes to a shown folder,
+                                        #  so every folder is shown
 
 .section .rodata
 s_devnull:      .asciz "/dev/null"
@@ -1715,6 +1717,8 @@ rs_folder:
     lea     rcx, [rip+group_shown]
     cmp     dword ptr [rcx+rbx*4], 0
     jne     1f
+    cmp     dword ptr [rip+rs_showall], 0
+    jne     1f
     mov     edi, eax
     call    fd_index
     test    eax, eax
@@ -1748,6 +1752,9 @@ rs_place_all:
     call    fd_make
     mov     [rip+rs_fd+G_ROOT*4], eax
     mov     [rip+rs_last_root], eax
+    call    rs_any_shown                # (only sections, say: all shown)
+    xor     eax, 1
+    mov     [rip+rs_showall], eax
     call    rs_pick_ground              # the plan shown
     mov     r15d, eax
     call    rs_top_level
@@ -1782,12 +1789,39 @@ rs_place_all:
     jmp     8f
 2:  lea     rax, [rip+group_shown]
     mov     ecx, [rax+r13*4]
+    or      ecx, [rip+rs_showall]
     mov     [r12+RS_SHOWN], ecx
 8:  inc     ebx
     jmp     1b
 9:  pop     r15
     pop     r14
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# rs_any_shown -> eax = 1 when some page goes to a folder that is shown
+rs_any_shown:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+rs_n]
+    jae     8f
+    imul    eax, ebx, RS_SZ
+    lea     rdi, [rip+rs_tab]
+    add     rdi, rax
+    inc     ebx
+    call    rs_group
+    test    eax, eax
+    js      1b
+    lea     rcx, [rip+group_shown]
+    cmp     dword ptr [rcx+rax*4], 0
+    je      1b
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
     pop     r12
     pop     rbx
     ret
@@ -2983,6 +3017,7 @@ rs_refile:
     lea     rcx, [rip+rs_fd]            # (rs_folder: made in this set)
     mov     dword ptr [rcx+r14*4], 0
     mov     [rip+rs_fd+G_ROOT*4], r13d
+    mov     dword ptr [rip+rs_showall], 0
     call    rs_folder
 1:  and     dword ptr [rbx+OB_FLAGS], ~OBF_HIDDEN
     mov     rdi, rbx

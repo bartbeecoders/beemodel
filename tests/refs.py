@@ -248,6 +248,14 @@ def main():
     check(len(c) == 4 and not c[2][2] and max(abs(p) for p in pin) < 0.001 and rk == 'Elevations 0',
           f'it pins the front elevation\'s pixel to the origin ({pin[0]:.3f} {pin[1]:.3f} {pin[2]:.3f}) '
           f'and makes the section a left elevation ({rk})')
+    # one PDF of a section alone: shown (nothing else would be)
+    one = os.path.join(home, 'Plannen', 'Huis_S_N_04_snede DD.pdf')
+    pdf(one, [sheet('S_N Snede DD', '1:50')])
+    rep3, _ = m.tool('run_operator', {'id': 'object.add_references', 'arg': one})
+    hid = q('print(get("Ref snede dd", "hidden"), infolder("Ref snede dd"))')
+    check('section    snede dd 1:50, shown' in (rep3 or '') and hid.startswith('0 Sections'),
+          f'one section on its own comes in shown ({hid})')
+
     f.proc.kill()
 
     print('  -- without poppler --')
