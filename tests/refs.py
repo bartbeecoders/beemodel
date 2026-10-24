@@ -16,11 +16,15 @@ without a scale, a photo and a text file. Then, in the fake compositor:
   - the pages are drawn once (poppler), into ~/BeeModel/References/<set>;
     a second import uses them as they are;
   - one undo step takes it all back;
+  - AI > Line Up References with AI hands the set to the AI Assistant (a
+    stand-in Claude Code): it sees each page (reference_view, a PNG, zoomed
+    in on a part), re-sorts one (object.reference_kind) and pins a corner
+    to the origin (object.reference_pin);
   - without poppler, the PDFs are left out with a note; images still come.
 
     python3 tests/refs.py build/beemodel [outdir]
 """
-import os, sys, tempfile, time, zlib, struct
+import json, os, sys, tempfile, time, zlib, struct
 
 BIN = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else 'build/beemodel')
 OUT = sys.argv[2] if len(sys.argv) > 2 else None
@@ -110,6 +114,10 @@ def main():
     os.makedirs(os.path.join(home, 'BeeModel'))
     src = os.path.join(home, 'Plannen', 'Woning Peeters')
     make_set(src)
+    bindir = os.path.join(home, 'bin')              # the stand-in Claude Code
+    os.makedirs(bindir)
+    os.symlink(os.path.join(HERE, 'ai_standin.py'), os.path.join(bindir, 'claude'))
+    os.environ['PATH'] = bindir + ':' + os.environ['PATH']
     argv = sys.argv
     sys.argv = [argv[0], OUT or tempfile.mkdtemp(prefix='bee-refs-shots-')]
     sys.path.insert(0, os.path.join(HERE, '..', 'tools'))
@@ -207,6 +215,39 @@ def main():
     n3 = q('print(count())')
     fold = q('print(infolder("Ref plan gelijkvloers"))')
     check(n3 == '23' and fold == 'Plans', f'from the menu: the file dialog takes the folder shown ({n3} objects)')
+
+    # the AI: AI > Line Up References with AI (the last import's set)
+    print('  -- with the AI --')
+    fakewl.menu_pick(f, m, 'AI', 'Line Up References with AI')
+    end = time.time() + 20
+    while time.time() < end:
+        t = [ln for ln in m.tool('op_ai_transcript')[0].split('\n') if ln.startswith('$ ')]
+        if t and 'idle' in t[0] and len(t) > 2:
+            break
+        f.pump(0.2)
+    log = os.path.join(home, 'refs.ai.json')
+    got = json.load(open(log)) if os.path.exists(log) else {'names': [], 'calls': []}
+    args = json.load(open(os.path.join(home, 'claude.runs.json')))[-1]['args']
+    sent = args[1] if len(args) > 1 else ''
+    tx = '\n'.join(t)
+    if os.environ.get('REFS_DEBUG'):
+        print(tx); print(sent[-1500:]); print(json.dumps(got['calls'], indent=1)[:2000])
+    check('Y > Line up the reference drawings in Refs Woning Peeters.001' in tx and len(got['names']) == 10
+          and '- Ref voorgevel.001: stands facing +Z (the front' in sent and 'reference_pin' in sent
+          and '- Ref plan verdieping.001: lies flat' in sent and '; hidden, 14.859 x 10.503 m, 1170 x 827 px' in sent,
+          f'the AI is asked to line up the set: the rules and each reference, how it stands ({len(got["names"])} of them)')
+    c = got['calls']
+    check(len(c) == 4 and c[0][2] == ['text', 'image'] and '1170 x 827 px; 1 px = 0.025400 m' in c[0][3]
+          and 'x 10..110, y 20..70 at 1/1' in c[1][3],
+          'reference_view shows it the page (a PNG) and its size, and a part of it closer')
+    x, y, z = num('Ref voorgevel', 'x'), num('Ref voorgevel', 'y'), num('Ref voorgevel', 'z')
+    u, v = 100 / 1170 * 2 - 1, 700 / 827 * 2 - 1                  # where that pixel is now
+    w, h = num('Ref voorgevel', 'sx') * 2, num('Ref voorgevel', 'sz') * 2
+    pin = (x + u * w / 2, y - v * h / 2, z)
+    rk = q('print(infolder("Ref doorsnede a-a"), get("Ref doorsnede a-a", "hidden"))')
+    check(len(c) == 4 and not c[2][2] and max(abs(p) for p in pin) < 0.001 and rk == 'Elevations 0',
+          f'it pins the front elevation\'s pixel to the origin ({pin[0]:.3f} {pin[1]:.3f} {pin[2]:.3f}) '
+          f'and makes the section a left elevation ({rk})')
     f.proc.kill()
 
     print('  -- without poppler --')

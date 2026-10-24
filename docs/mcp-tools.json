@@ -304,6 +304,34 @@
    }
   },
   {
+   "name": "reference_view",
+   "description": "Look at a reference image (a drawing or photo to model over, object.add_references): its picture as a PNG, at most 1024 px (thin lines kept), and what it is: its size in pixels, the metres a pixel is, how it stands and its folder. x0 y0 x1 y1 (its pixels; 0,0 its top-left) show a part of it closer, to read a pixel exactly for object.reference_pin.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "description": "the reference's object"
+     },
+     "x0": {
+      "type": "number"
+     },
+     "y0": {
+      "type": "number"
+     },
+     "x1": {
+      "type": "number"
+     },
+     "y1": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   }
+  },
+  {
    "name": "op_ai_transcript",
    "description": "AI Transcript - Print the AI Assistant's conversation (its last 24 lines) to the console: Y you, A the AI, T a tool call, R its result, E an error, N a note",
    "inputSchema": {

@@ -111,6 +111,8 @@ Click its outline to select it; it moves, turns and scales like any object. Its 
 
 The console lists what each page was taken for, its level and scale, and whether it is shown. One undo step takes the import back. Agents need the **Edit + Files** permission to run it.
 
+The drawings stand where their sheets put them, so a front elevation's ground line is wherever it is on the paper. **AI › Line Up References with AI** asks the AI Assistant to look at each page, fix any page taken for the wrong kind, and pin every drawing to the building's front-left corner (see [AI](AI.md#lining-up-reference-drawings)). Without the AI, `object.reference_pin <reference> <u> <v> <x> <y> <z>` moves a reference so its image's pixel u,v lies at x,y,z.
+
 The header has:
 
 - the **mode** (Object, Edit, Sculpt, Texture / Vertex / Weight Paint);
