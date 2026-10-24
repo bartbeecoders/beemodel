@@ -11,25 +11,18 @@
 .include "const.inc"
 
 .text
-.globl _start
+.globl bee_main
 .globl write_out
-_start:
-    lea     rdi, [rip+__bss_start]      # big, mostly idle buffers: keep THP
-    and     rdi, -4096                  # from backing them with 2 MiB pages
-    lea     rsi, [rip+_end]
-    sub     rsi, rdi
-    mov     edx, MADV_NOHUGEPAGE
-    call    plat_madvise
-    mov     rax, [rsp]                  # argc
-    lea     rax, [rsp+rax*8+16]         # envp = argv + argc + 1
-    mov     [rip+envp], rax
-    cmp     qword ptr [rsp], 2
-    jb      1f
-    mov     rbx, [rsp+16]               # argv[1]
-    mov     r12, [rsp+24]               # argv[2] (0 if absent)
+# bee_main(edi=argc, rsi=argv) - the program, from the platform layer's
+#   start (envp is set); it does not return
+bee_main:
     and     rsp, -16
+    cmp     edi, 2
+    jb      1f
+    mov     rbx, [rsi+8]                # argv[1]
+    mov     r12, [rsi+16]               # argv[2] (0 if absent)
     call    handle_cli_args             # --version / --help exit here
-1:  and     rsp, -16
+1:
 
     call    text_init
     call    prefs_load                  # ~/.config/beemodel/prefs (env wins)

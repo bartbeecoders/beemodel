@@ -18,6 +18,7 @@
 .intel_syntax noprefix
 .include "const.inc"
 
+.globl plat_self_path
 .globl plat_mmap
 .globl plat_munmap
 .globl plat_mprotect
@@ -140,8 +141,27 @@
 
 .section .rodata
 s_devnull_:     .asciz "/dev/null"
+s_self_:        .asciz "/proc/self/exe"
 
 .text
+
+# plat_self_path(rdi=buffer, esi=its size) -> rax = the length of this
+#   program's path, written there 0-ended (0: not known). An ordinary call.
+plat_self_path:
+    push    rbx
+    mov     rbx, rdi
+    mov     edx, esi
+    dec     edx
+    mov     rsi, rdi
+    lea     rdi, [rip+s_self_]
+    mov     eax, SYS_READLINK_
+    syscall
+    test    rax, rax
+    jns     1f
+    xor     eax, eax
+1:  mov     byte ptr [rbx+rax], 0
+    pop     rbx
+    ret
 
 # ---- memory -----------------------------------------------------------------
 plat_mmap:

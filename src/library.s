@@ -143,6 +143,7 @@ lb_hex:         .skip 24
 lb_line:        .skip 512
 lb_script:      .skip 128
 lb_argv:        .skip 32
+lb_exe:         .skip 512
 lb_status:      .skip 8
 lb_buf:         .skip 512
 lb_shown_idx:   .skip 4*LB_MAX          # tile -> asset
@@ -162,7 +163,6 @@ s_index:        .asciz "/index.txt"
 s_roots_file:   .asciz "/libraries.txt"
 s_bee:          .asciz ".bee"
 s_png:          .asciz ".png"
-s_exe:          .asciz "/proc/self/exe"
 .align 4
 lb_fds:         .long PS_KEEP, PS_KEEP, PS_KEEP, PS_KEEP
 s_eval:         .asciz "--eval"
@@ -2926,15 +2926,20 @@ lb_spawn:
     call    hex16
     lea     rsi, [rip+s_th_post]
     call    cpy
+    lea     rdi, [rip+lb_exe]           # this program
+    mov     esi, 512
+    call    plat_self_path
+    test    rax, rax
+    jz      1f
     lea     rax, [rip+lb_argv]
-    lea     rcx, [rip+s_exe]
+    lea     rcx, [rip+lb_exe]
     mov     [rax], rcx
     lea     rcx, [rip+s_eval]
     mov     [rax+8], rcx
     lea     rcx, [rip+lb_script]
     mov     [rax+16], rcx
     mov     qword ptr [rax+24], 0
-    lea     rdi, [rip+s_exe]            # the child: our stdin, stdout
+    lea     rdi, [rip+lb_exe]           # the child: our stdin, stdout
     lea     rsi, [rip+lb_argv]          #  and stderr
     mov     rdx, [rip+envp]
     lea     rcx, [rip+lb_fds]

@@ -86,7 +86,6 @@
 s_gpu_env:      .asciz "BEEMODEL_GPU="
 s_helper_env:   .asciz "BEEMODEL_GPU_HELPER="
 s_raster_env:   .asciz "BEEMODEL_GPU_RASTER="
-s_self:         .asciz "/proc/self/exe"
 s_helper:       .asciz "beemodel-gpu"
 s_memfd:        .asciz "beemodel-gpu"
 s_g_on:         .asciz "  GPU helper: "
@@ -291,12 +290,11 @@ g_spawn:
     dec     ecx
     jnz     21b
     jmp     .Lgr_none
-3:  lea     rdi, [rip+s_self]
-    lea     rsi, [rip+g_path]
-    mov     edx, 480
-    call    plat_readlink
-    cmp     rax, 0
-    jle     .Lgr_none
+3:  lea     rdi, [rip+g_path]
+    mov     esi, 481
+    call    plat_self_path
+    test    rax, rax
+    jz      .Lgr_none
     lea     rdi, [rip+g_path]           # cut after the last '/'
     mov     rcx, rax
 31: dec     rcx

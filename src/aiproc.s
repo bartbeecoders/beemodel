@@ -64,7 +64,6 @@ ap_hdrtxt:      .skip 1024
 ap_url:         .skip 1024
 
 .section .rodata
-s_self:         .asciz "/proc/self/exe"
 s_path:         .asciz "PATH="
 s_cachedir:     .asciz "/.cache/beemodel/ai"
 s_curl:         .asciz "curl"
@@ -89,15 +88,9 @@ ai_dir_make:
     lea     rdi, [rip+ai_dir]           # (made by home_join): ours only
     mov     esi, 0700
     call    plat_chmod
-    lea     rdi, [rip+s_self]           # this program's path
-    lea     rsi, [rip+ai_exe]
-    mov     edx, 510
-    call    plat_readlink
-    test    eax, eax
-    jns     1f
-    xor     eax, eax
-1:  lea     rcx, [rip+ai_exe]
-    mov     byte ptr [rcx+rax], 0
+    lea     rdi, [rip+ai_exe]           # this program's path
+    mov     esi, 511
+    call    plat_self_path
     pop     rbx
     ret
 
