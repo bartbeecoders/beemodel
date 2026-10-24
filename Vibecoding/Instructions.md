@@ -49,3 +49,9 @@ Before we continue onn th eopen parts in plan 2.0, I want to work on some improv
 - add the possibility for folders in the outliner
 - add the possibility to insert reference images
 
+Add the following to the plan and open list and start implementing:
+
+Text generation
+ALlow for the user to add Text as 3d object
+Enable animation for text
+Make sure we can use AI to add, modify text
