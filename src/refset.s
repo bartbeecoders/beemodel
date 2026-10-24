@@ -27,7 +27,8 @@
 #  (front +Z, back -Z, right +X, left -X), the plans flat at 3 m a level
 #  with only the ground floor shown; sections, site, terrain profiles, other
 #  pages and every existing drawing in hidden folders. The console lists
-#  what each page was taken for.
+#  what each page was taken for. It runs as a job: the status bar shows how
+#  far it is.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -159,6 +160,8 @@ s_full:         .asciz "  references: 160 pages at most; the rest left out"
 s_head_a:       .asciz "  references: "
 s_head_b:       .asciz " pages from "
 s_head_c:       .asciz " files into the folder "
+s_tail_a:       .asciz " pages in "
+s_tail_b:       .asciz ": seen square-on, Numpad 1 front, 3 right, 7 top"
 s_skip_leg:     .asciz " (a legend: left out)"
 s_failed:       .asciz " (could not be loaded)"
 s_hidden:       .asciz ", hidden"
@@ -294,9 +297,14 @@ rs_3m:          .float 3.0
 rs_90:          .float 1.5707963
 rs_180:         .float 3.1415927
 rs_sink:        .float -0.02
+rs_st_draw:     .float 0.7              # the job's stages (status bar)
+rs_st_read:     .float 0.1
+rs_st_place:    .float 0.8
+rs_st_rest:     .float 0.2
 
 .text
-OPERATOR op_refs_add, "object.add_references", "Reference Images from Folder...", do_refs_add, flags=OPF_UNDO|OPF_AI_SAFE, doc="A building's drawings as reference images: object.add_references <folder | file.pdf | image>. PDF pages (poppler) and images, sorted by name and title block into elevations, plans, sections, site; at their true scale (1:50 in the text), set up around the building in a folder of their own", form=form_refsadd
+JOB_OP job_refs, do_refs_add, "Importing reference drawings"
+OPERATOR op_refs_add, "object.add_references", "Reference Images from Folder...", job_refs, flags=OPF_UNDO|OPF_AI_SAFE, doc="A building's drawings as reference images: object.add_references <folder | file.pdf | image>. PDF pages (poppler) and images, sorted by name and title block into elevations, plans, sections, site; at their true scale (1:50 in the text), set up around the building in a folder of their own", form=form_refsadd
 
 # =============================================================================
 # do_refs_add - object.add_references <folder | file>
@@ -338,6 +346,9 @@ do_refs_add:
     cmp     eax, 0x4000
     jne     2f
     call    rs_scan                     # a folder: each of its files
+    xorps   xmm0, xmm0                  # (the status bar: drawing the pages,
+    movss   xmm1, [rip+rs_st_draw]      #  70% of the job)
+    call    job_stage
     xor     ebx, ebx
 3:  cmp     ebx, [rip+rs_nlist]
     jae     5f
@@ -349,13 +360,22 @@ do_refs_add:
     lea     rdi, [rip+rs_path]
     call    rs_add_file
     inc     ebx
+    mov     edi, ebx
+    mov     esi, [rip+rs_nlist]
+    call    job_pf
     jmp     3b
 2:  lea     rdi, [rip+rs_in]            # one file
     call    rs_add_file
 5:  call    rs_jobs_end
     cmp     dword ptr [rip+rs_n], 0
     je      .Lrs_none
+    movss   xmm0, [rip+rs_st_draw]      # reading them (10%)
+    movss   xmm1, [rip+rs_st_read]
+    call    job_stage
     call    rs_classify_all
+    movss   xmm0, [rip+rs_st_place]     # setting them up (the rest)
+    movss   xmm1, [rip+rs_st_rest]
+    call    job_stage
     call    rs_place_all
     call    rs_report
     mov     dword ptr [rip+dirty], 1
@@ -994,6 +1014,9 @@ rs_classify_all:
     add     rdi, rax
     call    rs_classify
     inc     ebx
+    mov     edi, ebx
+    mov     esi, [rip+rs_n]
+    call    job_pf
     jmp     1b
 2:  call    rs_fill_scales
     pop     r13
@@ -1792,6 +1815,9 @@ rs_place_all:
     or      ecx, [rip+rs_showall]
     mov     [r12+RS_SHOWN], ecx
 8:  inc     ebx
+    mov     edi, ebx
+    mov     esi, [rip+rs_n]
+    call    job_pf
     jmp     1b
 9:  pop     r15
     pop     r14
@@ -2115,6 +2141,24 @@ rs_report:
     test    eax, eax
     jz      9f
     lea     rdi, [rip+s_ai_hint]
+    call    log_line
+    call    fmt_reset                   # the last line (the toast): how many,
+    lea     rdi, [rip+s_head_a]         #  where, how to see them
+    call    fmt_str
+    call    rs_count_made
+    mov     edi, eax
+    call    fmt_int
+    lea     rdi, [rip+s_tail_a]
+    call    fmt_str
+    mov     edi, [rip+rs_fd+G_ROOT*4]
+    call    fd_name_of
+    test    rax, rax
+    jz      1f
+    mov     rdi, rax
+    call    fmt_str
+1:  lea     rdi, [rip+s_tail_b]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
     call    log_line
 9:  pop     r13
     pop     r12
