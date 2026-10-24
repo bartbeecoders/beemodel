@@ -3,7 +3,8 @@
 #  the UI (Open, Save As, Import, Export, Run Script, Save Render ...).
 #
 #  A form (forms.s) whose field is a WK_PATH widget opens it: WD_N is the
-#  mode (0 open, 1 save), WD_AUX a list of file extensions (0-ended), the
+#  mode (0 open, 1 save, 2 a folder or a file: OK with nothing picked takes
+#  the folder shown), WD_AUX a list of file extensions (0-ended), the
 #  field's keyword a default file name. Folders first, then the files the
 #  filter lets through (hidden ones skipped), sorted by name. Click a row to
 #  pick it, double-click (or Enter) to open a folder or take a file; the
@@ -1293,8 +1294,15 @@ fb_ok:
     test    eax, eax
     jnz     9f
     cmp     byte ptr [rip+fb_name], 0
-    je      9f
-    lea     rdi, [rip+fb_name]          # a typed full path counts as it is
+    jne     0f
+    mov     rax, [rip+fb_desc]          # (a folder or a file: nothing picked
+    cmp     dword ptr [rax+WD_N], 2     #  takes the folder shown)
+    jne     9f
+    lea     rdi, [rip+fb_full]
+    lea     rsi, [rip+fb_dir]
+    call    scpy
+    jmp     7f
+0:    lea     rdi, [rip+fb_name]          # a typed full path counts as it is
     cmp     byte ptr [rdi], '/'
     je      1f
     cmp     byte ptr [rdi], '~'
@@ -1306,10 +1314,13 @@ fb_ok:
     jmp     3f
 2:  lea     rdi, [rip+fb_name]
     call    full_of_dir
-3:  lea     rdi, [rip+fb_full]          # a folder: go in instead
-    call    is_dir
+3:  lea     rdi, [rip+fb_full]          # a folder: go in instead (or
+    call    is_dir                      #  taken, for a folder or a file)
     test    eax, eax
     jz      4f
+    mov     rax, [rip+fb_desc]
+    cmp     dword ptr [rax+WD_N], 2
+    je      7f
     lea     rdi, [rip+fb_full]
     call    go_dir
     mov     byte ptr [rip+fb_name], 0

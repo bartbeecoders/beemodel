@@ -102,6 +102,15 @@ Files dragged from a file manager onto the window open by their kind:
 
 Click its outline to select it; it moves, turns and scales like any object. Its image travels in its material ("Reference <image>"), so it is saved with the scene.
 
+**Add › Reference Images from Folder...** (`object.add_references <folder | file.pdf | image>`) takes a building's drawings as an architect's office sends them: a folder of PDFs and images, or one PDF of many pages. In the file dialog, pick the folder (or open it and press OK with nothing picked). Then:
+
+- **PDF pages** are drawn into PNGs by poppler (`pdftoppm`, 100 dpi) and their text is read by `pdftotext`, eight at a time. The PNGs go into `~/BeeModel/References/<the folder's name>/`, where the scene refers to them. A page is drawn again only when its PDF is newer. Without poppler (the `poppler-utils` package) the PDFs are left out and the console says so; images still come in.
+- **Each page is sorted out** by its file name, then by the code in its title block, as Belgian and Dutch plan sets have them (`G_N_01_voorgevel`, "P_N Gelijkvloers"; `_B_` existing, `_N_` new), then by a label ("Drawing: ELEVATION FRONT"). The kinds are elevations (voorgevel / front, achtergevel / rear, gevel links / left, gevel rechts / right), plans with their level (kelder -1, gelijkvloers 0, verdieping 1 ...), sections (snede, doorsnede), site plans (inplanting), terrain profiles and other drawings (3D views, details). Legends are left out.
+- **True size**: a page's scale is the `1:50` in its text ("schaal: 1:50"). A page without one takes the scale most pages of its PDF have, else the set's. An image file has no scale: it comes in 10 m wide.
+- **Set up around the building**, in an outliner folder of their own ("Refs <name>"), seen only square-on and from the front. Elevations stand on the ground facing their side (front +Z, rear -Z, right +X, left -X); plans lie flat at 3 m a level, with only the ground floor shown. Sections, site plans, terrain profiles, other drawings and every existing drawing go into hidden folders, ready to switch on.
+
+The console lists what each page was taken for, its level and scale, and whether it is shown. One undo step takes the import back. Agents need the **Edit + Files** permission to run it.
+
 The header has:
 
 - the **mode** (Object, Edit, Sculpt, Texture / Vertex / Weight Paint);

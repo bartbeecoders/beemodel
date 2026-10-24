@@ -53,6 +53,7 @@ s_render_img:   .asciz "render.image"
 s_render_save:  .asciz "render.save"
 s_image_pfx:    .asciz "image."
 s_image_new:    .asciz "image.new"
+s_refs_add:     .asciz "object.add_references"
 s_shot:         .asciz "view.screenshot"
 s_agent_pfx:    .asciz "Agent:"
 s_revert:       .asciz "Revert last agent change"
@@ -157,6 +158,11 @@ op_tier:
     jnz     1f
     mov     rdi, rbx
     lea     rsi, [rip+s_lib_add]
+    call    str_eq
+    test    eax, eax
+    jnz     1f
+    mov     rdi, rbx                    # drawings read, pages written
+    lea     rsi, [rip+s_refs_add]
     call    str_eq
     test    eax, eax
     jnz     1f

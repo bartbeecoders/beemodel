@@ -124,6 +124,11 @@ jobs:
       - name: Ask AI about the selection (the box, the context sent, Only the selection; a stand-in Claude Code)
         run: timeout 300 python tests/askai.py build/beemodel build/shots
 
+      - name: Reference images from a folder of drawings (PDF pages through poppler, sorted, true scale)
+        run: |
+          sudo apt-get install -y --no-install-recommends -o Acquire::Retries=5 poppler-utils >/dev/null
+          timeout 300 python tests/refs.py build/beemodel build/shots
+
       - name: The published MCP tool schema (docs/mcp-tools.json)
         run: timeout 300 python tests/mcp_schema.py build/beemodel
 

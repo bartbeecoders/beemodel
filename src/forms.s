@@ -660,6 +660,7 @@ x_pdf:          .quad e_pdf, 0
 x_bees:         .quad e_bees, 0
 x_img:          .quad e_png, e_exr, 0
 x_imgin:        .quad e_png, e_jpg, e_jpeg, e_hdr, 0
+x_refs:         .quad e_pdf, e_png, e_jpg, e_jpeg, e_hdr, 0
 x_pngonly:      .quad e_png, 0
 x_video:        .quad e_mp4v, e_mkvv, e_movv, e_webmv, e_gifv, e_apngv, e_png, 0
 .text
@@ -692,6 +693,7 @@ PATHFORM form_rimage, "render.image", 1, x_pngonly, n_render_png
 PATHFORM form_lmsave, "lightmap.save", 1, x_img, n_lightmap
 PATHFORM form_laimp, "landscape.import", 0, x_img
 PATHFORM form_refadd, "object.add_reference", 0, x_imgin
+PATHFORM form_refsadd, "object.add_references", 2, x_refs
 PATHFORM form_laexp, "landscape.export", 1, x_img, n_heights
 PATHFORM form_ranim, "render.animation", 1, x_video, n_anim
 

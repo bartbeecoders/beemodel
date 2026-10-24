@@ -5049,6 +5049,19 @@
    }
   },
   {
+   "name": "op_object_add_references",
+   "description": "Reference Images from Folder... - A building's drawings as reference images: object.add_references <folder | file.pdf | image>. PDF pages (poppler) and images, sorted by name and title block into elevations, plans, sections, site; at their true scale (1:50 in the text), set up around the building in a folder of their own",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_render_start",
    "description": "Render - Start a progressive render in the Render area (the scene at the render settings)",
    "inputSchema": {
