@@ -1,6 +1,8 @@
 # =============================================================================
 #  BeeModel - single-line text field (UTF-8), used as the console command
 #  line: caret, selection, history, Tab completion of operator ids, dead keys.
+#  (A widget's field can take more: tf_cap bytes, and with tf_multi the line
+#  breaks of a paste; widgets.s lays its lines out.)
 #  Ctrl+Left / Right jump by word (Shift extends the selection), and
 #  Ctrl+Backspace / Delete remove one.
 #  Enter runs the typed operator id through the operator spine.
@@ -26,8 +28,13 @@
 .globl tf_caret
 .globl tf_anchor
 .globl tf_px
+.globl tf_cap
+.globl tf_multi
+.globl tf_insert
+.globl tf_paste
 
-.equ TF_CAP,        240                 # max bytes of text
+.equ TF_CAP,        240                 # max bytes of text (unless tf_cap says)
+.equ TF_BUF,        4096                # room for a field's own tf_cap
 .equ HIST_N,        8
 .equ HIST_LEN,      256
 .equ KEY_BACKSPACE, 14
@@ -51,7 +58,7 @@ tf_cur:         .quad tfi_console       # instance whose state is loaded below
 # ---- per-instance state (swapped by tf_select) ----
 tf_state:
 tf_clast:       .skip 8                 # last op offered by Tab completion
-tf_buf:         .skip 256
+tf_buf:         .skip TF_BUF
 tf_prefix:      .skip 64
 tf_len:         .skip 4
 tf_caret:       .skip 4
@@ -60,6 +67,8 @@ tf_scroll:      .skip 4
 tf_text_x:      .skip 4
 tf_tab:         .skip 4
 tf_plen:        .skip 4
+tf_cap:         .skip 4                 # max bytes of text, 0: TF_CAP (< TF_BUF)
+tf_multi:       .skip 4                 # several lines: a paste keeps its line breaks
 .equ TF_STATE_SZ, . - tf_state
 # ---- instances ----
 .align 8
@@ -68,6 +77,7 @@ tfi_palette:    .skip TF_STATE_SZ
 tfi_widget:     .skip TF_STATE_SZ       # a field being typed into (widgets.s)
 # ---- console-only ----
 hist:           .skip HIST_N*HIST_LEN
+tf_pbuf:        .skip TF_BUF            # a paste
 cmd_arg:        .skip 256
 tf_focus:       .skip 4
 hist_n:         .skip 4
@@ -281,14 +291,22 @@ tf_copy:
     add     rdi, rax
     jmp     clip_copy
 
+# tf_room -> eax = the most bytes of text this field takes
+tf_room:
+    mov     eax, [rip+tf_cap]
+    test    eax, eax
+    jnz     1f
+    mov     eax, TF_CAP
+1:  ret
+
 # tf_paste - the clipboard's text in place of the selection (one line:
-#   line breaks and tabs become spaces)
+#   line breaks and tabs become spaces; several lines keep the breaks)
 tf_paste:
     push    rbx
     push    r12
-    sub     rsp, 264
-    lea     rdi, [rsp]
-    mov     esi, 256
+    sub     rsp, 8
+    lea     rdi, [rip+tf_pbuf]
+    mov     esi, TF_BUF
     call    clip_paste
     mov     r12d, eax
     test    eax, eax
@@ -297,12 +315,23 @@ tf_paste:
     xor     ebx, ebx
 1:  cmp     ebx, r12d
     jae     9f
-    movzx   eax, byte ptr [rsp+rbx]
+    lea     rax, [rip+tf_pbuf]
+    movzx   eax, byte ptr [rax+rbx]
     cmp     eax, 0x20
     jae     2f
-    mov     eax, ' '
-2:  mov     edx, [rip+tf_len]           # insert the byte at the caret
-    cmp     edx, TF_CAP
+    cmp     dword ptr [rip+tf_multi], 0
+    je      11f
+    cmp     eax, 13                     # (CR LF: one break)
+    je      8f
+    cmp     eax, 10
+    je      2f
+11: mov     eax, ' '
+2:  mov     r10d, eax                   # insert the byte at the caret
+    call    tf_room
+    mov     ecx, eax
+    mov     eax, r10d
+    mov     edx, [rip+tf_len]
+    cmp     edx, ecx
     jae     9f
     lea     r8, [rip+tf_buf]
     mov     r9d, edx
@@ -319,9 +348,9 @@ tf_paste:
     inc     dword ptr [rip+tf_caret]
     mov     ecx, [rip+tf_caret]
     mov     [rip+tf_anchor], ecx
-    inc     ebx
+8:  inc     ebx
     jmp     1b
-9:  add     rsp, 264
+9:  add     rsp, 8
     pop     r12
     pop     rbx
     ret
@@ -384,9 +413,10 @@ tf_insert:
     or      al, 0x80
     mov     [rsp+3], al
     mov     ecx, 4
-4:  mov     edx, [rip+tf_len]
-    lea     eax, [rdx+rcx]
-    cmp     eax, TF_CAP
+4:  call    tf_room
+    mov     edx, [rip+tf_len]
+    lea     r8d, [rdx+rcx]
+    cmp     r8d, eax
     ja      9f                          # full
     lea     r8, [rip+tf_buf]
     mov     r9d, edx                    # shift the tail right by ecx
@@ -416,6 +446,8 @@ tf_insert:
 
 # tf_load(rsi=asciz) - replace the text, caret at the end
 tf_load:
+    call    tf_room
+    mov     edx, eax
     lea     rdi, [rip+tf_buf]
     xor     ecx, ecx
 1:  mov     al, [rsi+rcx]
@@ -423,7 +455,7 @@ tf_load:
     test    al, al
     jz      2f
     inc     ecx
-    cmp     ecx, TF_CAP
+    cmp     ecx, edx
     jb      1b
     mov     byte ptr [rdi+rcx], 0
 2:  mov     [rip+tf_len], ecx
