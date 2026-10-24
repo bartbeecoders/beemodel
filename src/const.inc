@@ -16,6 +16,9 @@
 .equ SYS_FTRUNCATE,     77
 .equ SYS_EXIT_GROUP,    231
 .equ SYS_MEMFD_CREATE,  319
+# plat_spawn's fd map: four dwords, what the child gets on fds 0..3
+.equ PS_KEEP,          -1               # 0..2: ours, as they are; 3: nothing
+.equ PS_NULL,          -2               # /dev/null (NUL on Windows)
 
 .equ AF_UNIX,           1
 .equ SOCK_STREAM_CLOEXEC, 0x80001

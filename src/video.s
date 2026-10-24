@@ -26,13 +26,7 @@
 
 .equ SYS_SENDTO,     44
 .equ SYS_SOCKETPAIR, 53
-.equ SYS_FORK,       57
-.equ SYS_EXECVE,     59
-.equ SYS_EXIT,       60
 .equ SYS_WAIT4,      61
-.equ SYS_DUP2,       33
-.equ SYS_PWRITE64,   18
-.equ SYS_OPENAT,     257
 .equ AT_FDCWD,       -100
 .equ O_WRCREAT,      0x80241            # WRONLY | CREAT | TRUNC | CLOEXEC
 
@@ -315,31 +309,19 @@ vid_open:
     syscall
     test    eax, eax
     js      .Lvo_closelog
-    mov     eax, SYS_FORK
-    syscall
-    test    rax, rax
-    js      .Lvo_closeall
-    jnz     8f
-    mov     edi, [rip+vd_sv+4]          # the child: stdin, stdout, stderr
-    xor     esi, esi
-    mov     eax, SYS_DUP2
-    syscall
-    mov     edi, r15d
-    mov     esi, 1
-    mov     eax, SYS_DUP2
-    syscall
-    mov     edi, r15d
-    mov     esi, 2
-    mov     eax, SYS_DUP2
-    syscall
+    mov     eax, [rip+vd_sv+4]          # the child: stdin the socket,
+    mov     [rsp+16], eax               #  stdout and stderr the log
+    mov     [rsp+20], r15d
+    mov     [rsp+24], r15d
+    mov     dword ptr [rsp+28], PS_KEEP
     lea     rdi, [rip+vd_exe]
     lea     rsi, [rip+vd_argv]
     mov     rdx, [rip+envp]
-    mov     eax, SYS_EXECVE
-    syscall
-    mov     edi, 127
-    mov     eax, SYS_EXIT
-    syscall
+    lea     rcx, [rsp+16]
+    xor     r8d, r8d
+    call    plat_spawn
+    test    rax, rax
+    js      .Lvo_closeall
 8:  mov     [rip+vd_pid], eax
     mov     edi, [rip+vd_sv+4]
     call    plat_close
@@ -443,8 +425,7 @@ vid_close:
     mov     dword ptr [rsp], 0
     xor     edx, edx
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4
-    syscall
+    call    plat_wait4
     cmp     rax, -4                     # (EINTR)
     je      1b
     test    rax, rax

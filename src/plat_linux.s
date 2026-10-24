@@ -47,6 +47,11 @@
 .globl plat_chmod
 .globl plat_statfs
 .globl plat_thread_start
+.globl plat_spawn
+.globl plat_pipe2
+.globl plat_wait4
+.globl plat_kill
+.globl plat_getpid
 .globl plat_futex
 .globl plat_gettid
 .globl plat_sched_getaffinity
@@ -91,8 +96,22 @@
 .equ SYS_TIME_,       201
 .equ SYS_TIMERFD_CREATE_, 283
 .equ SYS_TIMERFD_SETTIME_, 286
+.equ SYS_FORK_,       57
+.equ SYS_EXECVE_,     59
+.equ SYS_DUP2_,       33
+.equ SYS_CLOSE_RANGE_, 436
+.equ SYS_PIPE2_,      293
+.equ SYS_WAIT4_,      61
+.equ SYS_KILL_,       62
+.equ SYS_GETPID_,     39
+.equ F_DUPFD_,        0
+.equ O_RDWR_,         2
+.equ ENOSYS_,         38
 .equ CLONE_THREAD_FLAGS, 0x50f00        # VM|FS|FILES|SIGHAND|THREAD|SYSVSEM
 .equ CLONE_TID_FLAGS,   0x01200000      # CHILD_SETTID | CHILD_CLEARTID
+
+.section .rodata
+s_devnull_:     .asciz "/dev/null"
 
 .text
 
@@ -235,6 +254,120 @@ plat_chmod:
 
 plat_statfs:
     mov     eax, SYS_STATFS_
+    syscall
+    ret
+
+# ---- child processes --------------------------------------------------------
+# plat_spawn(rdi=path, rsi=argv, rdx=envp, rcx=fd map, r8=working directory
+#   or 0) -> rax = the child's pid, or -errno. Not the syscall contract: an
+#   ordinary call. The map is four dwords, what the child gets on fds 0..3:
+#   one of our fds, PS_KEEP (0..2: ours as they are, 3: nothing) or PS_NULL.
+#   The child gets no other fd of ours. A child that cannot run the program
+#   exits with 127.
+plat_spawn:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 32
+    mov     [rsp+16], rdi               # path
+    mov     r12, rsi
+    mov     r13, rdx
+    mov     r14, rcx
+    mov     r15, r8
+    mov     eax, SYS_FORK_
+    syscall
+    test    rax, rax
+    jnz     9f
+    # ---- the child: each fd it gets first goes to a free fd above 3, so
+    #  that putting one in place cannot overwrite another's source
+    xor     ebx, ebx
+1:  mov     edi, [r14+rbx*4]
+    cmp     edi, PS_NULL
+    jne     2f
+    lea     rdi, [rip+s_devnull_]
+    mov     esi, O_RDWR_
+    xor     edx, edx
+    mov     eax, SYS_OPEN_
+    syscall
+    mov     edi, eax
+2:  test    edi, edi
+    js      3f
+    mov     esi, F_DUPFD_
+    mov     edx, 4
+    mov     eax, SYS_FCNTL_
+    syscall
+    mov     edi, eax
+3:  mov     [rsp+rbx*4], edi            # its stand-in (negative: none)
+    inc     ebx
+    cmp     ebx, 4
+    jb      1b
+    xor     ebx, ebx                    # into place (dup2 drops CLOEXEC)
+4:  mov     edi, [rsp+rbx*4]
+    test    edi, edi
+    js      5f
+    mov     esi, ebx
+    mov     eax, SYS_DUP2_
+    syscall
+5:  inc     ebx
+    cmp     ebx, 4
+    jb      4b
+    mov     ebx, 4                      # nothing else of ours (3 too, when
+    cmp     dword ptr [rsp+12], 0       #  it gets nothing there)
+    jge     6f
+    mov     ebx, 3
+6:  mov     edi, ebx
+    mov     esi, -1
+    xor     edx, edx
+    mov     eax, SYS_CLOSE_RANGE_
+    syscall
+    cmp     eax, -ENOSYS_               # (before Linux 5.9: one at a time)
+    jne     8f
+7:  mov     edi, ebx
+    mov     eax, SYS_CLOSE_
+    syscall
+    inc     ebx
+    cmp     ebx, 1024
+    jb      7b
+8:  test    r15, r15
+    jz      81f
+    mov     rdi, r15
+    mov     eax, SYS_CHDIR_
+    syscall
+81: mov     rdi, [rsp+16]
+    mov     rsi, r12
+    mov     rdx, r13
+    mov     eax, SYS_EXECVE_
+    syscall
+    mov     edi, 127
+    mov     eax, SYS_EXIT_
+    syscall
+9:  add     rsp, 32
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+plat_pipe2:
+    mov     eax, SYS_PIPE2_
+    syscall
+    ret
+
+plat_wait4:
+    mov     eax, SYS_WAIT4_
+    syscall
+    ret
+
+plat_kill:
+    mov     eax, SYS_KILL_
+    syscall
+    ret
+
+plat_getpid:
+    mov     eax, SYS_GETPID_
     syscall
     ret
 

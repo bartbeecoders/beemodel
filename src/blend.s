@@ -30,14 +30,7 @@
 
 .globl blend_import
 
-.equ SYS_READ,      0
-.equ SYS_FORK,      57
-.equ SYS_EXECVE,    59
-.equ SYS_EXIT,      60
 .equ SYS_WAIT4,     61
-.equ SYS_DUP2,      33
-.equ SYS_UNLINK,    87
-.equ SYS_OPENAT,    257
 .equ AT_FDCWD,      -100
 .equ O_WRCREAT,     0x241               # O_WRONLY | O_CREAT | O_TRUNC
 
@@ -313,7 +306,6 @@ k_color:        .asciz "Color"
 s_zstd:         .asciz "zstd"
 a_dc:           .asciz "-dcq"
 s_tmpname:      .asciz "/.cache/beemodel/blend.tmp"
-s_null:         .asciz "/dev/null"
 s_blend:        .asciz "Blender"
 e_old:          .asciz "  blend: files from before Blender 2.80 (or big-endian, 32-bit) are not read: "
 e_bad:          .asciz "  blend: not a Blender file (or damaged): "
@@ -512,31 +504,25 @@ bl_unzstd:
     mov     [rsp+8], rax
     mov     [rsp+16], rbx
     mov     qword ptr [rsp+24], 0
-    mov     eax, SYS_FORK
-    syscall
-    test    rax, rax
-    js      .Luz_close
-    jnz     1f
-    mov     edi, r14d                   # the child: stdout to the file
-    mov     esi, 1
-    mov     eax, SYS_DUP2
-    syscall
+    mov     dword ptr [rsp+48], PS_KEEP # the child: stdout to the file
+    mov     [rsp+52], r14d
+    mov     dword ptr [rsp+56], PS_KEEP
+    mov     dword ptr [rsp+60], PS_KEEP
     mov     rdi, r13
     lea     rsi, [rsp]
     mov     rdx, [rip+envp]
-    mov     eax, SYS_EXECVE
-    syscall
-    mov     edi, 127
-    mov     eax, SYS_EXIT
-    syscall
+    lea     rcx, [rsp+48]
+    xor     r8d, r8d
+    call    plat_spawn
+    test    rax, rax
+    js      .Luz_close
 1:  mov     r12d, eax                   # wait for it
 2:  mov     edi, r12d
     lea     rsi, [rsp+40]
     mov     dword ptr [rsp+40], 0
     xor     edx, edx
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4
-    syscall
+    call    plat_wait4
     cmp     rax, -4                     # (EINTR)
     je      2b
     mov     edi, r14d

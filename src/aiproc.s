@@ -30,20 +30,9 @@
 .globl ai_exit_code
 .globl ai_dir_make
 
-.equ SYS_READ,      0
-.equ SYS_FORK,      57
-.equ SYS_EXECVE,    59
-.equ SYS_EXIT,      60
 .equ SYS_WAIT4,     61
 .equ SYS_KILL,      62
-.equ SYS_DUP2,      33
-.equ SYS_ACCESS,    21
-.equ SYS_CHDIR,     80
-.equ SYS_READLINK,  89
 .equ SYS_PIPE2,     293
-.equ SYS_OPENAT,    257
-.equ SYS_CHMOD,     90
-.equ AT_FDCWD,      -100
 .equ O_NONBLOCK,    0x800
 .equ O_CLOEXEC,     0x80000
 .equ WNOHANG,       1
@@ -79,7 +68,6 @@ ap_url:         .skip 1024
 
 .section .rodata
 s_self:         .asciz "/proc/self/exe"
-s_null:         .asciz "/dev/null"
 s_path:         .asciz "PATH="
 s_cachedir:     .asciz "/.cache/beemodel/ai"
 s_curl:         .asciz "curl"
@@ -189,7 +177,7 @@ ai_proc_spawn:
     push    r13
     push    r14
     push    r15
-    sub     rsp, 16
+    sub     rsp, 32                     # the pipe, the child's fd map
     xor     eax, eax
     cmp     dword ptr [rip+ap_pid], 0
     jne     .Lsp_out
@@ -223,50 +211,22 @@ ai_proc_spawn:
 4:  mov     qword ptr [rdi+rcx*8], 0
     lea     rdi, [rsp]                  # the pipe: read end ours, nonblocking
     mov     esi, O_CLOEXEC
-    mov     eax, SYS_PIPE2
-    syscall
+    call    plat_pipe2
     test    eax, eax
     js      .Lsp_fail
-    mov     eax, SYS_FORK
-    syscall
-    test    rax, rax
-    js      .Lsp_close
-    jnz     .Lsp_parent
-    # ---- the child: stdout and stderr into the pipe, stdin from /dev/null
-    mov     edi, [rsp+4]
-    mov     esi, 1
-    mov     eax, SYS_DUP2
-    syscall
-    mov     edi, [rsp+4]
-    mov     esi, 2
-    mov     eax, SYS_DUP2
-    syscall
-    mov     edi, AT_FDCWD
-    lea     rsi, [rip+s_null]
-    xor     edx, edx
-    call    plat_openat
-    mov     edi, eax
-    xor     esi, esi
-    mov     eax, SYS_DUP2
-    syscall
-    mov     r14d, 3                     # nothing else of ours
-5:  mov     edi, r14d
-    call    plat_close
-    inc     r14d
-    cmp     r14d, 1024
-    jb      5b
-    mov     rdi, [rip+ap_cwd]
-    test    rdi, rdi
-    jz      6f
-    call    plat_chdir
-6:  mov     rdi, rbx
+    mov     eax, [rsp+4]                # the child: stdin nothing, stdout
+    mov     dword ptr [rsp+16], PS_NULL #  and stderr into the pipe
+    mov     [rsp+20], eax
+    mov     [rsp+24], eax
+    mov     dword ptr [rsp+28], PS_KEEP
+    mov     rdi, rbx
     mov     rsi, r12
     lea     rdx, [rip+ap_env]
-    mov     eax, SYS_EXECVE
-    syscall
-    mov     edi, 127
-    mov     eax, SYS_EXIT
-    syscall
+    lea     rcx, [rsp+16]
+    mov     r8, [rip+ap_cwd]
+    call    plat_spawn
+    test    rax, rax
+    js      .Lsp_close
 .Lsp_parent:
     mov     [rip+ap_pid], eax
     mov     edi, [rsp+4]                # (its end)
@@ -288,7 +248,7 @@ ai_proc_spawn:
 .Lsp_fail:
     xor     eax, eax
 .Lsp_out:
-    add     rsp, 16
+    add     rsp, 32
     pop     r15
     pop     r14
     pop     r13
@@ -309,8 +269,7 @@ ai_proc_stop:
     test    edi, edi
     jz      9f
     mov     esi, SIGTERM
-    mov     eax, SYS_KILL
-    syscall
+    call    plat_kill
     mov     dword ptr [rip+ap_kill_at], 6
 9:  ret
 
@@ -320,8 +279,7 @@ ai_proc_kill:
     test    edi, edi
     jz      9f
     mov     esi, SIGKILL
-    mov     eax, SYS_KILL
-    syscall
+    call    plat_kill
 9:  ret
 
 # ai_pollfds(rdi=pollfd array) -> eax = how many added (the child's pipe)
@@ -350,8 +308,7 @@ ai_tick:
     jnz     1f
     mov     edi, [rip+ap_pid]
     mov     esi, SIGKILL
-    mov     eax, SYS_KILL
-    syscall
+    call    plat_kill
 1:  mov     edi, [rip+ap_fd]            # read what there is
     test    edi, edi
     js      5f
@@ -377,8 +334,7 @@ ai_tick:
     mov     dword ptr [rsp], 0
     mov     edx, WNOHANG
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4
-    syscall
+    call    plat_wait4
     test    eax, eax
     jle     9f
     cmp     dword ptr [rip+ap_fd], 0    # (the pipe: drained first: what it

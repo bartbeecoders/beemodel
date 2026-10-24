@@ -35,18 +35,11 @@
 .include "macros.inc"
 .include "widgets.inc"
 
-.equ SYS_OPEN_,     2
-.equ SYS_CLOSE_,    3
-.equ SYS_DUP2_,     33
-.equ SYS_FORK_,     57
-.equ SYS_EXECVE_,   59
-.equ SYS_EXIT_,     60
 .equ SYS_WAIT4_,    61
-.equ SYS_GETDENTS_, 217
-.equ SYS_FSTATAT_,  262
 .equ AT_FDCWD_,     -100
 .equ O_DIR_,        0x10000
 .equ O_WTRUNC_,     0x241               # write, create, truncate
+.equ O_CLOEXEC_,    0x80000
 
 .equ RS_MAX,    160                     # pages at most
 .equ RS_SRC,    0                       # the PDF or image
@@ -119,7 +112,6 @@ rs_showall:     .skip 4                 # 1: no page goes to a shown folder,
                                         #  so every folder is shown
 
 .section .rodata
-s_devnull:      .asciz "/dev/null"
 s_refs_home:    .asciz "/BeeModel/References/"
 s_pdftoppm:     .asciz "pdftoppm"
 s_pdftotext:    .asciz "pdftotext"
@@ -932,48 +924,36 @@ rs_jobs_end:
 rs_spawn:
     push    rbx
     push    r12
-    sub     rsp, 8
+    sub     rsp, 24
     mov     rbx, rdi
-    mov     r12, rsi
-    mov     eax, SYS_FORK_
-    syscall
-    test    rax, rax
-    jnz     9f
-    lea     rdi, [rip+s_devnull]        # the child: stdout to the file (or
-    mov     esi, 1                      #  nowhere), stderr nowhere
-    xor     edx, edx
-    test    r12, r12
+    mov     dword ptr [rsp], PS_KEEP    # the child: our stdin, stdout to the
+    mov     dword ptr [rsp+4], PS_NULL  #  file (or nowhere), stderr nowhere
+    mov     dword ptr [rsp+8], PS_NULL
+    mov     dword ptr [rsp+12], PS_KEEP
+    mov     r12d, -1
+    test    rsi, rsi
     jz      1f
-    mov     rdi, r12
-    mov     esi, O_WTRUNC_
+    mov     rdi, rsi
+    mov     esi, O_WTRUNC_|O_CLOEXEC_
     mov     edx, 0644
-1:
     call    plat_open
     test    eax, eax
-    js      2f
-    mov     edi, eax
-    mov     esi, 1
-    mov     eax, SYS_DUP2_
-    syscall
-2:  lea     rdi, [rip+s_devnull]
-    mov     esi, 1
-    xor     edx, edx
-    call    plat_open
-    test    eax, eax
-    js      3f
-    mov     edi, eax
-    mov     esi, 2
-    mov     eax, SYS_DUP2_
-    syscall
-3:  mov     rdi, [rbx]
+    js      1f
+    mov     r12d, eax
+    mov     [rsp+4], eax
+1:  mov     rdi, [rbx]
     mov     rsi, rbx
     mov     rdx, [rip+envp]
-    mov     eax, SYS_EXECVE_
-    syscall
-    mov     edi, 127
-    mov     eax, SYS_EXIT_
-    syscall
-9:  add     rsp, 8
+    lea     rcx, [rsp]
+    xor     r8d, r8d
+    call    plat_spawn
+    mov     rbx, rax
+    test    r12d, r12d                  # (our copy of the file)
+    js      2f
+    mov     edi, r12d
+    call    plat_close
+2:  mov     rax, rbx
+    add     rsp, 24
     pop     r12
     pop     rbx
     ret
@@ -987,8 +967,7 @@ rs_wait:
     mov     dword ptr [rsp], 0
     xor     edx, edx
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4_
-    syscall
+    call    plat_wait4
     cmp     rax, -4                     # (EINTR)
     je      1b
     mov     eax, [rsp]

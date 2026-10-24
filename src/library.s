@@ -91,10 +91,6 @@
 .equ OA_SZ,     128                     # an OBJA record: name, transform, colour
                                         #  (72), type, flags, mesh, material
                                         #  (32), bound to (index or -1)
-.equ SYS_ACCESS, 21
-.equ SYS_FORK,  57
-.equ SYS_EXECVE, 59
-.equ SYS_EXIT,  60
 .equ SYS_WAIT4, 61
 .equ WNOHANG,   1
 .equ MAP_ANON_PRIV, 0x22
@@ -168,6 +164,8 @@ s_roots_file:   .asciz "/libraries.txt"
 s_bee:          .asciz ".bee"
 s_png:          .asciz ".png"
 s_exe:          .asciz "/proc/self/exe"
+.align 4
+lb_fds:         .long PS_KEEP, PS_KEEP, PS_KEEP, PS_KEEP
 s_eval:         .asciz "--eval"
 s_th_pre:       .asciz "op(\"lib.thumbnail\", \""
 s_th_post:      .asciz "\")"
@@ -2937,18 +2935,12 @@ lb_spawn:
     lea     rcx, [rip+lb_script]
     mov     [rax+16], rcx
     mov     qword ptr [rax+24], 0
-    mov     eax, SYS_FORK
-    syscall
-    test    rax, rax
-    jnz     1f
-    lea     rdi, [rip+s_exe]            # the child
-    lea     rsi, [rip+lb_argv]
+    lea     rdi, [rip+s_exe]            # the child: our stdin, stdout
+    lea     rsi, [rip+lb_argv]          #  and stderr
     mov     rdx, [rip+envp]
-    mov     eax, SYS_EXECVE
-    syscall
-    mov     edi, 127
-    mov     eax, SYS_EXIT
-    syscall
+    lea     rcx, [rip+lb_fds]
+    xor     r8d, r8d
+    call    plat_spawn
 1:  test    rax, rax
     jns     2f
     xor     eax, eax
@@ -3006,8 +2998,7 @@ lb_tick:
     lea     rsi, [rip+lb_status]
     mov     edx, WNOHANG
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4
-    syscall
+    call    plat_wait4
     test    eax, eax
     jz      8f                          # still at it
     mov     dword ptr [rip+lb_busy], 0
@@ -3054,8 +3045,7 @@ do_lb_thumbs:
     lea     rsi, [rip+lb_status]
     xor     edx, edx
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4
-    syscall
+    call    plat_wait4
 2:  mov     edi, ebx
     call    lb_job_done
     mov     edi, ebx

@@ -1133,8 +1133,7 @@ mk_hello:
     shl     esi, 16
     or      edi, esi
     call    op_u32
-    mov     eax, SYS_GETPID
-    syscall
+    call    plat_getpid
     mov     edi, eax
     call    op_u32
     sub     rsp, 32

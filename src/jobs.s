@@ -22,11 +22,8 @@
 .globl job_spawn
 .globl bg_tid
 
-.equ SYS_FUTEX,         202
-.equ SYS_GETTID,        186
 .equ FUTEX_WAIT,        0
 .equ BG_STACK_BYTES,    0x100000        # 1 MiB for the background thread
-.equ SYS_GETAFFINITY,   204
 .equ FUTEX_WAIT_PRIV,   128
 .equ FUTEX_WAKE_PRIV,   129
 .equ MAP_STACK_FLAGS,   0x24022         # private|anon|noreserve|stack

@@ -306,8 +306,7 @@ mcp_init:
     lea     rsi, [rip+s_sock_pfx]
     call    cat
     push    rdi
-    mov     eax, SYS_GETPID
-    syscall
+    call    plat_getpid
     pop     rdi
     sub     rsp, 16                     # pid digits
     xor     ecx, ecx

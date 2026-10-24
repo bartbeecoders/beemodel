@@ -62,16 +62,9 @@
 .globl gpu_img_into
 .globl hv_gpu
 
-.equ SYS_ACCESS,    21
-.equ SYS_DUP2,      33
 .equ SYS_SOCKETPAIR, 53
-.equ SYS_FORK,      57
-.equ SYS_EXECVE,    59
-.equ SYS_EXIT,      60
 .equ SYS_WAIT4,     61
 .equ SYS_KILL,      62
-.equ SYS_FCNTL,     72
-.equ SYS_READLINK,  89
 .equ SOCK_SEQPACKET_CLOEXEC, 0x80005
 .equ HELLO_MS,      15000               # a slow driver start is fine
 .equ RUN_MS,        120000
@@ -337,28 +330,17 @@ g_spawn:
     lea     rax, [rip+g_path]
     mov     [rip+g_argv], rax
     mov     qword ptr [rip+g_argv+8], 0
-    mov     eax, SYS_FORK
-    syscall
-    test    rax, rax
-    jnz     5f
-    mov     edi, [rsp+4]                # the child: its end on fd 3
-    cmp     edi, 3
-    jne     41f
-    mov     esi, 2                      # (already 3: keep it across exec)
-    xor     edx, edx
-    call    plat_fcntl
-    jmp     42f
-41: mov     esi, 3
-    mov     eax, SYS_DUP2
-    syscall
-42: lea     rdi, [rip+g_path]
+    mov     eax, [rsp+4]                # the child: its end on fd 3
+    mov     dword ptr [rsp+8], PS_KEEP
+    mov     dword ptr [rsp+12], PS_KEEP
+    mov     dword ptr [rsp+16], PS_KEEP
+    mov     [rsp+20], eax
+    lea     rdi, [rip+g_path]
     lea     rsi, [rip+g_argv]
     mov     rdx, [rip+envp]
-    mov     eax, SYS_EXECVE
-    syscall
-    mov     edi, 127
-    mov     eax, SYS_EXIT
-    syscall
+    lea     rcx, [rsp+8]
+    xor     r8d, r8d
+    call    plat_spawn
 5:  mov     ebx, eax                    # the parent
     test    eax, eax
     js      .Lgr_close2
@@ -546,14 +528,12 @@ gpu_stop:
     test    edi, edi
     jz      2f
     mov     esi, 9                      # SIGKILL
-    mov     eax, SYS_KILL
-    syscall
+    call    plat_kill
     mov     edi, [rip+g_pid]
     xor     esi, esi
     xor     edx, edx
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4
-    syscall
+    call    plat_wait4
     mov     dword ptr [rip+g_pid], 0
 2:  mov     dword ptr [rip+g_state], -1
     mov     dword ptr [rip+hv_gpu], 0

@@ -264,8 +264,7 @@ co_init:
     jne     9f
     push    rbx
     mov     dword ptr [rip+co_inited], 1
-    mov     eax, SYS_GETPID             # our peer: from the process id
-    syscall
+    call    plat_getpid
     imul    eax, eax, 0x9E3779B1
     shr     eax, 17
     and     eax, 0x7fff

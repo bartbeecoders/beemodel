@@ -178,8 +178,7 @@ clip_paste:
     je      8f
     lea     rdi, [rip+pfds]
     mov     esi, O_CLOEXEC
-    mov     eax, SYS_PIPE2
-    syscall
+    call    plat_pipe2
     test    rax, rax
     js      8f
     mov     edi, [rip+offer_sel]        # receive(mime, write end)
@@ -415,8 +414,7 @@ offer_read:
     xor     r13d, r13d
     lea     rdi, [rip+pfds]
     mov     esi, O_CLOEXEC
-    mov     eax, SYS_PIPE2
-    syscall
+    call    plat_pipe2
     test    rax, rax
     js      8f
     mov     edi, r14d                   # receive(mime, write end)
