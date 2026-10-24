@@ -333,8 +333,7 @@ mcp_init:
     lea     rsi, [rip+s_link]
     call    cat
     lea     rdi, [rip+sock_path]        # stale socket of a crashed run
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     mov     edi, AF_UNIX
     mov     esi, SOCK_SERVER
     xor     edx, edx
@@ -360,18 +359,15 @@ mcp_init:
     jnz     8f
     mov     [rip+lsock], ebx
     lea     rdi, [rip+link_path]        # the newest instance owns beemodel.sock
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     lea     rdi, [rip+sock_path]
     lea     rsi, [rip+link_path]
-    mov     eax, SYS_SYMLINK
-    syscall
+    call    plat_symlink
     lea     rdi, [rip+s_listening]      # (path in the README; keeps output stable)
     call    log_line
     jmp     9f
 8:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 9:  pop     rbx
     ret
 
@@ -379,11 +375,9 @@ mcp_shutdown:
     cmp     dword ptr [rip+lsock], 0
     jl      9f
     lea     rdi, [rip+link_path]
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     lea     rdi, [rip+sock_path]
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
 9:  ret
 
 # mcp_pollfds(rdi=pollfd array) -> eax = entries written (listen + clients)
@@ -434,8 +428,7 @@ mcp_handle:
     cmp     ecx, MAX_CLIENTS
     jb      1b
     mov     edi, eax                    # full
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     jmp     2f
 11: mov     [rdx+rcx*4], eax
     lea     rdx, [rip+cl_len]
@@ -483,8 +476,7 @@ client_read:
     mov     edx, CIN_CAP
     sub     rdx, [r13]
     jz      7f                          # a line larger than the buffer
-    xor     eax, eax                    # SYS_READ
-    syscall
+    call    plat_read
     test    rax, rax
     jle     7f
     add     [r13], rax
@@ -513,8 +505,7 @@ client_read:
 7:  lea     rax, [rip+cl_fd]            # closed or broken: forget the client
     mov     edi, [rax+rbx*4]
     mov     dword ptr [rax+rbx*4], -1
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 9:  add     rsp, 8
     pop     r14
     pop     r13
@@ -559,8 +550,7 @@ send_out:
     push    rdx
     mov     edi, ebx
     mov     rsi, r12
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     pop     rdx
     cmp     rax, -4
     je      1b
@@ -2650,8 +2640,7 @@ mcp_bridge:
     test    eax, eax
     jz      5f
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     dec     r12d
     jz      4f
     lea     rdi, [rip+nanos]
@@ -2701,8 +2690,7 @@ relay:
     mov     r12d, esi
     lea     rsi, [rip+iobuf]
     mov     edx, 65536
-    xor     eax, eax                    # SYS_READ
-    syscall
+    call    plat_read
     test    rax, rax
     jle     8f
     mov     r13, rax
@@ -2712,8 +2700,7 @@ relay:
     mov     edi, r12d
     mov     rsi, rbx
     mov     rdx, r13
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     cmp     rax, -4
     je      1b
     test    rax, rax

@@ -156,9 +156,9 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   <p class="sub">Each step is one commit on <code>win11-port</code>, with the full local CI green before the next one starts.</p>
   <div class="table-wrap"><table>
     <tr><th>Step</th><th>What</th><th>State</th></tr>
-    <tr><td>W1a</td><td>The <code>plat_*</code> contract, <code>src/plat_linux.s</code>, memory (209 sites)</td><td><span class="tag a">in review</span></td></tr>
-    <tr><td>W1b</td><td>Files and directories (~150 sites)</td><td><span class="tag">next</span></td></tr>
-    <tr><td>W1c</td><td>Threads, futexes, time, timers (~26)</td><td><span class="tag">open</span></td></tr>
+    <tr><td>W1a</td><td>The <code>plat_*</code> contract, <code>src/plat_linux.s</code>, memory (209 sites)</td><td><span class="tag g">done</span> 67f422e, CI green</td></tr>
+    <tr><td>W1b</td><td>Files and directories (156 sites, 22 routines)</td><td><span class="tag g">done</span> CI green</td></tr>
+    <tr><td>W1c</td><td>Threads, futexes, time, timers (~26)</td><td><span class="tag">next</span></td></tr>
     <tr><td>W1d</td><td>Child processes and pipes (~50)</td><td><span class="tag">open</span></td></tr>
     <tr><td>W1e</td><td>Sockets, shared memory, <code>poll</code> (~55)</td><td><span class="tag">open</span></td></tr>
     <tr><td>W1f</td><td>Start-up (argv, envp, <code>/proc/self</code>), the window and event-loop interface, the CI guard</td><td><span class="tag">open</span></td></tr>
@@ -259,9 +259,9 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   <div class="phase"><div class="pn"><b>W1</b>refactor</div><div class="card"><h3>The platform layer <span class="tag b">Linux only</span> <span class="tag a">started</span></h3>
     <p><code>src/plat_linux.s</code> holds every OS call as a <code>plat_*</code> routine with the contract above. It goes family by family, one commit each, with the full suite green each time:</p>
     <ul>
-      <li><b>W1a</b> memory: <code>mmap</code>, <code>munmap</code>, <code>mprotect</code>, <code>mremap</code>, <code>mincore</code>, <code>madvise</code> (209 sites in 62 files; the GPU helper links the layer too). <span class="tag a">done, in review</span></li>
-      <li><b>W1b</b> files and directories, the largest family after memory. Several files define their own <code>SYS_*</code> names; the converter resolves them.</li>
-      <li><b>W1c</b> threads, futexes, time, the key-repeat timer.</li>
+      <li><b>W1a</b> memory: <code>mmap</code>, <code>munmap</code>, <code>mprotect</code>, <code>mremap</code>, <code>mincore</code>, <code>madvise</code> (209 sites in 62 files; the GPU helper links the layer too). <span class="tag g">done</span></li>
+      <li><b>W1b</b> files and directories: <code>read</code>, <code>write</code>, <code>pwrite64</code>, <code>open</code>, <code>openat</code>, <code>close</code>, <code>stat</code>, <code>fstat</code>, <code>newfstatat</code>, <code>access</code>, <code>fcntl</code>, <code>ftruncate</code>, <code>getdents64</code>, <code>chdir</code>, <code>rename</code>, <code>mkdir</code>, <code>rmdir</code>, <code>unlink</code>, <code>symlink</code>, <code>readlink</code>, <code>chmod</code>, <code>statfs</code> (156 sites, all converted by the script; several files define their own <code>SYS_*</code> names, which it resolves). <code>read</code>, <code>write</code> and <code>close</code> also act on sockets and pipes, so the Windows version will look up what kind of handle a small int stands for. 127 <code>syscall</code> sites are left. <span class="tag g">done</span></li>
+      <li><b>W1c</b> threads, futexes, time, the key-repeat timer. <code>clone</code> cannot be a plain wrapper: the new thread would return from it on its fresh stack. It becomes <code>plat_thread_start</code> (entry, argument, stack), which matches <code>CreateThread</code> on Windows anyway.</li>
       <li><b>W1d</b> child processes: the six fork + execve sites (aiproc, blend, gpu, library, video, refset) become one <code>plat_spawn</code> (path, argv, envp, the child's stdin/stdout/stderr), because Windows has no fork. This is the one step that changes call sites by hand.</li>
       <li><b>W1e</b> sockets, shared memory and <code>poll</code>.</li>
       <li><b>W1f</b> start-up (<code>plat_init</code> fills argv and envp; <code>/proc/self/exe</code> becomes <code>plat_self_path</code>), the window and event-loop interface (<code>plat_win_*</code>, <code>plat_wait</code>) so <code>wayland.s</code> becomes the Linux version of it, and a CI check that keeps <code>syscall</code> out of everything but <code>plat_linux.s</code>.</li>
@@ -314,7 +314,7 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 <section id="risks">
   <h2>Budgets &amp; risks</h2>
   <div class="grid g3">
-    <div class="card"><h4>Budgets</h4><ul><li>W1 adds under 1% to the Linux binary and costs no measurable speed (W1a: 370 bytes smaller)</li><li>Windows frame times within 10% of Linux on the same machine</li><li>Idle CPU near 0%</li></ul></div>
+    <div class="card"><h4>Budgets</h4><ul><li>W1 adds under 1% to the Linux binary and costs no measurable speed (W1a: 370 bytes smaller, W1b: 121 more)</li><li>Windows frame times within 10% of Linux on the same machine</li><li>Idle CPU near 0%</li></ul></div>
     <div class="card"><h4>Risks</h4><ul><li><b>Antivirus.</b> A hand-assembled executable with no C runtime looks unusual to Defender's heuristics. Sign it, and submit it to Microsoft if it is flagged.</li><li><b>SmartScreen.</b> Unsigned downloads get a warning. A code-signing certificate is a yearly cost.</li><li><b>The event loop.</b> Windows splits waiting across messages, handles and sockets. Getting latency and idle CPU right takes the most tuning.</li><li><b>Commit on fault.</b> A vectored handler on every first touch of the frame arena; if it costs too much, commit ahead in bigger chunks.</li><li><b>Wine is not Windows.</b> Wine passing is a hint, not the exit.</li></ul></div>
     <div class="card"><h4>Open questions</h4><ul><li>Bundle <code>zstd.exe</code>, or write a decoder?</li><li>OLE drag and drop, or <code>WM_DROPFILES</code> only?</li><li>A Windows 11 license for the VM: dockur installs an unactivated copy, which is enough for testing.</li></ul></div>
   </div>

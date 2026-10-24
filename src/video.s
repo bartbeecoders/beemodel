@@ -220,8 +220,7 @@ vid_open:
     lea     rsi, [rip+vd_path]
     mov     edx, O_WRCREAT
     mov     r10d, 0644
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      .Lvo_nofile
     mov     [rip+vd_fd], eax
@@ -304,8 +303,7 @@ vid_open:
     lea     rsi, [rip+vd_log]
     mov     edx, O_WRCREAT
     mov     r10d, 0644
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      .Lvo_nofile
     mov     r15d, eax
@@ -344,11 +342,9 @@ vid_open:
     syscall
 8:  mov     [rip+vd_pid], eax
     mov     edi, [rip+vd_sv+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, r15d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     eax, [rip+vd_sv]
     mov     [rip+vd_fd], eax
     lea     rax, [rip+vd_pipe]
@@ -357,15 +353,12 @@ vid_open:
     jmp     .Lvo_out
 .Lvo_closeall:
     mov     edi, [rip+vd_sv]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, [rip+vd_sv+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lvo_closelog:
     mov     edi, r15d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lvo_nofile:
     lea     rdi, [rip+s_vd_nofile]
     jmp     .Lvo_say
@@ -419,37 +412,32 @@ vid_close:
     lea     rsi, [rsp+4]
     mov     edx, 4
     mov     r10d, 41                    # (8 signature + 25 IHDR + 8)
-    mov     eax, SYS_PWRITE64
-    syscall
+    call    plat_pwrite64
     cmp     rax, 4
     jne     1f
     mov     edi, [rip+vd_fd]
     lea     rsi, [rsp+12]
     mov     edx, 4
     mov     r10d, 49
-    mov     eax, SYS_PWRITE64
-    syscall
+    call    plat_pwrite64
     cmp     rax, 4
     je      2f
 1:  mov     dword ptr [rip+vd_bad], 1
 2:  mov     edi, [rip+vd_fd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     cmp     dword ptr [rip+vd_bad], 0
     je      .Lvc_ok
     jmp     .Lvc_apsay
 .Lvc_apbad:
     mov     edi, [rip+vd_fd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lvc_apsay:
     lea     rdi, [rip+s_vd_nofile]
     call    log_line
     jmp     .Lvc_no
 .Lvc_ff:
     mov     edi, [rip+vd_fd]            # ffmpeg: the end of its input
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 1:  mov     edi, [rip+vd_pid]           # then it finishes
     lea     rsi, [rsp]
     mov     dword ptr [rsp], 0
@@ -725,10 +713,9 @@ vd_put:
 1:  test    rdx, rdx
     jz      9f
     mov     edi, [rip+vd_fd]
-    mov     eax, SYS_WRITE
     push    rsi
     push    rdx
-    syscall
+    call    plat_write
     pop     rdx
     pop     rsi
     cmp     rax, -4

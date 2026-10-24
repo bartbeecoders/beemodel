@@ -377,13 +377,11 @@ vc_put:
     mov     rsi, rax                    # there already?
     mov     edi, AT_FDCWD
     xor     edx, edx
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      1f
     mov     edi, eax
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     jmp     9f
 1:  lea     rdi, [rip+vc_pbuf]
     mov     rsi, rbx
@@ -1093,8 +1091,7 @@ build_manifest:
     lea     rsi, [rip+s_tmp]
     call    vc_fpath
     mov     rdi, rax
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     mov     eax, 1
     jmp     9f
 .Lbm_fail:

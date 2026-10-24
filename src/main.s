@@ -361,8 +361,7 @@ handle_cli_args:
     mov     edi, 1
     lea     rsi, [rip+script_out]
     mov     edx, [rip+script_out_len]
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     mov     edi, r13d
     mov     eax, SYS_EXIT_GROUP
     syscall
@@ -396,8 +395,7 @@ write_out:
     call    str_len
     mov     edx, eax
     mov     edi, 1
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     ret
 
 .section .bss

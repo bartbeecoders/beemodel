@@ -589,8 +589,7 @@ ab_rescan:
     lea     rsi, [rip+as_dir]
     mov     edx, O_DIRECTORY
     xor     r10d, r10d
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      9f
     mov     r12d, eax                   # the folder
@@ -598,8 +597,7 @@ ab_rescan:
     mov     edi, r12d
     lea     rsi, [rip+as_dents]
     mov     edx, 16384
-    mov     eax, SYS_GETDENTS64
-    syscall
+    call    plat_getdents64
     test    eax, eax
     jle     .Lab_done
     mov     r13d, eax                   # bytes
@@ -649,8 +647,7 @@ ab_rescan:
     jmp     1b
 .Lab_done:
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     call    ab_sort
 9:  pop     r15
     pop     r14

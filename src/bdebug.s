@@ -59,8 +59,7 @@ d_str:
     inc     edx
     jmp     1b
 2:  mov     edi, 2
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     ret
 d_int:
     lea     rsi, [rip+db_buf+31]

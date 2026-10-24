@@ -200,8 +200,7 @@ write_err:
     inc     edx
     jmp     1b
 2:  mov     edi, 2
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     ret
 
 # fatal(rdi=asciz) - print and exit(1)
@@ -589,8 +588,7 @@ fdq_push:
     jb      1f
     push    rdi
     mov     edi, [rip+fdq]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     call    fdq_pop_raw
     pop     rdi
     mov     eax, [rip+fdq_n]
@@ -1448,8 +1446,7 @@ ensure_buffers:
     mov     [rip+shm_fd], eax
 3:  mov     edi, [rip+shm_fd]
     mov     esi, ebx
-    mov     eax, SYS_FTRUNCATE
-    syscall
+    call    plat_ftruncate
     test    eax, eax
     jnz     8f
     mov     rdi, [rip+pool_ptr]

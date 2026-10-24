@@ -189,15 +189,13 @@ font_load_at:
     mov     rdi, rsi
     mov     esi, O_RDONLY_CLOEXEC
     xor     edx, edx
-    mov     eax, SYS_OPEN
-    syscall
+    call    plat_open
     test    eax, eax
     js      .Lfl_fail
     mov     r12d, eax
     mov     edi, eax
     lea     rsi, [rip+statbuf]
-    mov     eax, SYS_FSTAT
-    syscall
+    call    plat_fstat
     mov     r13, [rip+statbuf+48]       # st_size
     test    eax, eax
     jnz     .Lfl_close
@@ -214,8 +212,7 @@ font_load_at:
     ja      .Lfl_close
     mov     r14, rax
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     [rbx+FNT_BASE], r14
     mov     [rbx+FNT_SIZE], r13
 
@@ -342,8 +339,7 @@ font_load_at:
     jmp     .Lfl_fail
 .Lfl_close:
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lfl_fail:
     mov     dword ptr [rbx+FNT_LOADED], 0
     xor     eax, eax

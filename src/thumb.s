@@ -289,8 +289,7 @@ thumb_read:
     sub     rsp, 8
     xor     esi, esi                    # O_RDONLY
     xor     edx, edx
-    mov     eax, SYS_OPEN
-    syscall
+    call    plat_open
     test    rax, rax
     js      .Ltr_no
     mov     ebx, eax
@@ -316,14 +315,12 @@ thumb_read:
     cmp     eax, TW*TH*4
     jne     .Ltr_close
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     eax, 1
     jmp     .Ltr_out
 .Ltr_close:
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Ltr_no:
     xor     eax, eax
 .Ltr_out:
@@ -344,8 +341,7 @@ read_full:
     mov     edi, ebx
     lea     rsi, [r13+r12]
     sub     edx, r12d
-    mov     eax, SYS_READ
-    syscall
+    call    plat_read
     pop     rdx
     test    rax, rax
     jle     9f

@@ -107,8 +107,7 @@ blend_export:
     mov     rbx, rax
     mov     rdi, rax
     mov     esi, 0700
-    mov     eax, 90                     # (chmod)
-    syscall
+    call    plat_chmod
     lea     rdi, [rip+bx_glb]
     mov     rsi, rbx
     call    bx_cpy

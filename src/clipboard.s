@@ -191,8 +191,7 @@ clip_paste:
     mov     edi, [rip+pfds+4]
     call    wl_flush                    # (the fd goes with it)
     mov     edi, [rip+pfds+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 3:  cmp     r13d, r12d                  # read until EOF, a second at most
     jae     7f
     mov     eax, [rip+pfds]
@@ -211,8 +210,7 @@ clip_paste:
     lea     rsi, [rbx+r13]
     mov     edx, r12d
     sub     edx, r13d
-    mov     eax, SYS_READ
-    syscall
+    call    plat_read
     cmp     rax, -4
     je      3b
     test    rax, rax
@@ -220,8 +218,7 @@ clip_paste:
     add     r13d, eax
     jmp     3b
 7:  mov     edi, [rip+pfds]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  mov     byte ptr [rbx+r13], 0
     mov     eax, r13d
     add     rsp, 8
@@ -371,11 +368,9 @@ clip_event:
     mov     edi, ebx
     lea     rsi, [rip+clip_buf]
     mov     edx, [rip+clip_len]
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     jmp     .Lce_yes
 5:  cmp     r12d, 2                     # cancelled: another program owns it
     jne     .Lce_yes
@@ -433,8 +428,7 @@ offer_read:
     mov     edi, [rip+pfds+4]
     call    wl_flush
     mov     edi, [rip+pfds+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 3:  cmp     r13d, r12d
     jae     7f
     mov     eax, [rip+pfds]
@@ -453,8 +447,7 @@ offer_read:
     lea     rsi, [rbx+r13]
     mov     edx, r12d
     sub     edx, r13d
-    mov     eax, SYS_READ
-    syscall
+    call    plat_read
     cmp     rax, -4
     je      3b
     test    rax, rax
@@ -462,8 +455,7 @@ offer_read:
     add     r13d, eax
     jmp     3b
 7:  mov     edi, [rip+pfds]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  mov     byte ptr [rbx+r13], 0
     mov     eax, r13d
     pop     r15

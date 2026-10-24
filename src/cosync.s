@@ -2328,8 +2328,7 @@ do_co_host:
 70: cmp     dword ptr [rip+co_lfd], 0
     je      71f
     mov     edi, [rip+co_lfd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+co_lfd], 0
 71:
     mov     r12d, 0x0100007f
@@ -2409,8 +2408,7 @@ do_co_host:
     call    log_line
     jmp     9f
 7:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  lea     rdi, [rip+s_bad]
     call    log_line
 9:  pop     r13
@@ -2538,8 +2536,7 @@ co_reset:
 2:  mov     edi, [rip+co_lfd]
     test    edi, edi
     jz      3f
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+co_lfd], 0
 3:  xor     ebx, ebx                    # stores let go
 4:  cmp     ebx, [rip+co_nce]
@@ -2572,8 +2569,7 @@ cc_drop:
     push    rbx
     mov     rbx, rdi
     mov     edi, [rbx+CC_FD]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rbx+CC_STATE], 0
     mov     qword ptr [rbx+CC_HEAD], 0
     mov     qword ptr [rbx+CC_LEN], 0
@@ -2632,8 +2628,7 @@ do_co_join:
     call    log_pair
     jmp     9f
 7:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  lea     rdi, [rip+s_nojoin]
     mov     rsi, [rip+op_arg]
     test    rsi, rsi
@@ -2722,8 +2717,7 @@ cc_setup:
     mov     edi, ebx
     mov     esi, 4
     mov     edx, 0x800
-    mov     eax, SYS_FCNTL
-    syscall
+    call    plat_fcntl
     xor     ecx, ecx
     lea     rax, [rip+co_cc]
 1:  cmp     ecx, CC_MAX
@@ -3226,8 +3220,7 @@ co_accept:
     test    rax, rax
     jnz     2f
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     jmp     1b
 2:  mov     rdi, rax                    # ours to them now: HELLO, the state
     call    cc_hello
@@ -3261,8 +3254,7 @@ co_read:
     mov     rdx, BUF_CAP
     sub     rdx, [r12+CC_INLEN]
     jz      2f
-    xor     eax, eax
-    syscall
+    call    plat_read
     cmp     rax, EAGAIN
     je      2f
     test    rax, rax

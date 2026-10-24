@@ -450,8 +450,7 @@ do_link_serve:
     jnz     2b
 3:  mov     byte ptr [rdi], 0
     lea     rdi, [rip+lk_unixpath]
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     mov     edi, AF_UNIX
     mov     esi, SOCK_NB
     xor     edx, edx
@@ -499,8 +498,7 @@ do_link_serve:
     jmp     9f
 .Lsv_close:
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lsv_bad:
     lea     rdi, [rip+s_lk_bad]
     call    log_line
@@ -540,8 +538,7 @@ lk_stop_serving:
     cmp     dword ptr [rip+lk_serving], 0
     je      9f
     mov     edi, [rip+lk_lfd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+lk_lfd], -1
     mov     dword ptr [rip+lk_serving], 0
     xor     ebx, ebx
@@ -563,8 +560,7 @@ peer_drop:
     push    rbx
     mov     rbx, rdi
     mov     edi, [rbx+CL_FD]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rbx+CL_STATE], 0
     mov     dword ptr [rbx+CL_FD], -1
     mov     qword ptr [rbx+CL_HEAD], 0
@@ -1048,8 +1044,7 @@ lk_accept:
     call    log_line
     jmp     1b
 8:  mov     edi, ebx                    # full
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     jmp     1b
 9:  add     rsp, 8
     pop     r12
@@ -1073,8 +1068,7 @@ lk_read_peers:
 2:  mov     edi, [r12+CL_FD]            # read what is there
     lea     rsi, [rsp]
     mov     edx, 256
-    xor     eax, eax
-    syscall
+    call    plat_read
     cmp     rax, EAGAIN
     je      5f
     test    rax, rax
@@ -1663,8 +1657,7 @@ do_link_disconnect:
     cmp     dword ptr [rip+lk_mfd], 0
     je      9f
     mov     edi, [rip+lk_mfd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+lk_mfd], 0
 9:  add     rsp, 8
     ret
@@ -1757,8 +1750,7 @@ link_connect_arg:
     mov     edi, ebx
     mov     esi, 4                      # F_SETFL O_NONBLOCK
     mov     edx, 0x800
-    mov     eax, SYS_FCNTL
-    syscall
+    call    plat_fcntl
     mov     [rip+lk_mfd], ebx
     mov     dword ptr [rip+lk_mstate], 1
     mov     qword ptr [rip+lk_inlen], 0
@@ -1780,8 +1772,7 @@ link_connect_arg:
     jmp     9f
 .Lcn_close:
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lcn_bad:
     lea     rdi, [rip+s_lk_noconn]
     lea     rsi, [rip+lk_target]
@@ -1940,8 +1931,7 @@ lk_mirror:
     mov     rdx, IN_CAP
     sub     rdx, [rip+lk_inlen]
     jz      3f
-    xor     eax, eax
-    syscall
+    call    plat_read
     cmp     rax, EAGAIN
     je      3f
     test    rax, rax

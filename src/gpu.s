@@ -304,8 +304,7 @@ g_spawn:
 3:  lea     rdi, [rip+s_self]
     lea     rsi, [rip+g_path]
     mov     edx, 480
-    mov     eax, SYS_READLINK
-    syscall
+    call    plat_readlink
     cmp     rax, 0
     jle     .Lgr_none
     lea     rdi, [rip+g_path]           # cut after the last '/'
@@ -324,8 +323,7 @@ g_spawn:
     jnz     32b
 4:  lea     rdi, [rip+g_path]           # executable?
     mov     esi, 1
-    mov     eax, SYS_ACCESS
-    syscall
+    call    plat_access
     test    eax, eax
     jnz     .Lgr_none
     mov     edi, AF_UNIX
@@ -348,8 +346,7 @@ g_spawn:
     jne     41f
     mov     esi, 2                      # (already 3: keep it across exec)
     xor     edx, edx
-    mov     eax, SYS_FCNTL
-    syscall
+    call    plat_fcntl
     jmp     42f
 41: mov     esi, 3
     mov     eax, SYS_DUP2
@@ -367,8 +364,7 @@ g_spawn:
     js      .Lgr_close2
     mov     [rip+g_pid], eax
     mov     edi, [rsp+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     eax, [rsp]
     mov     [rip+g_fd], eax
     mov     dword ptr [rip+g_state], 2
@@ -376,11 +372,9 @@ g_spawn:
     jmp     9f
 .Lgr_close2:
     mov     edi, [rsp]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, [rsp+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lgr_none:
     mov     dword ptr [rip+g_state], -1
     lea     rdi, [rip+s_g_off]
@@ -546,8 +540,7 @@ gpu_stop:
     mov     edi, [rip+g_fd]
     test    edi, edi
     js      1f
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+g_fd], -1
 1:  mov     edi, [rip+g_pid]
     test    edi, edi
@@ -590,8 +583,7 @@ g_recv:
     mov     edi, [rip+g_fd]
     lea     rsi, [rip+g_msg]
     mov     edx, GM_SZ
-    mov     eax, SYS_READ
-    syscall
+    call    plat_read
     cmp     eax, GM_SZ
     jne     8f
     mov     eax, 1
@@ -673,8 +665,7 @@ gpu_slot:
     mov     r13d, eax
     mov     edi, r13d
     mov     rsi, r12
-    mov     eax, SYS_FTRUNCATE
-    syscall
+    call    plat_ftruncate
     test    eax, eax
     jnz     7f
     xor     edi, edi
@@ -695,8 +686,7 @@ gpu_slot:
     call    g_send
     mov     edi, r13d
     push    rax
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     pop     rax
     test    eax, eax
     jz      6f
@@ -730,8 +720,7 @@ gpu_slot:
     call    gpu_stop
     jmp     8f
 7:  mov     edi, r13d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  call    now_ms
     add     [rip+g_grow_ms], rax
     xor     eax, eax

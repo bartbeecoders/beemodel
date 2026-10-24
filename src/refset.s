@@ -503,8 +503,7 @@ rs_scan:
     lea     rdi, [rip+rs_in]
     mov     esi, O_DIR_
     xor     edx, edx
-    mov     eax, SYS_OPEN_
-    syscall
+    call    plat_open
     test    eax, eax
     js      9f
     mov     r12d, eax
@@ -512,8 +511,7 @@ rs_scan:
 1:  mov     edi, r12d
     lea     rsi, [rip+rs_dents]
     mov     edx, 16384
-    mov     eax, SYS_GETDENTS_
-    syscall
+    call    plat_getdents64
     test    eax, eax
     jle     8f
     mov     r14d, eax
@@ -549,8 +547,7 @@ rs_scan:
     lea     r13, [rax+1]
     jmp     2b
 8:  mov     edi, r12d
-    mov     eax, SYS_CLOSE_
-    syscall
+    call    plat_close
     call    rs_sort
 9:  pop     r15
     pop     r14
@@ -950,8 +947,8 @@ rs_spawn:
     mov     rdi, r12
     mov     esi, O_WTRUNC_
     mov     edx, 0644
-1:  mov     eax, SYS_OPEN_
-    syscall
+1:
+    call    plat_open
     test    eax, eax
     js      2f
     mov     edi, eax
@@ -961,8 +958,7 @@ rs_spawn:
 2:  lea     rdi, [rip+s_devnull]
     mov     esi, 1
     xor     edx, edx
-    mov     eax, SYS_OPEN_
-    syscall
+    call    plat_open
     test    eax, eax
     js      3f
     mov     edi, eax
@@ -3661,8 +3657,7 @@ rs_stat:
     mov     edi, AT_FDCWD_
     mov     rdx, rsp
     xor     r10d, r10d
-    mov     eax, SYS_FSTATAT_
-    syscall
+    call    plat_newfstatat
     test    rax, rax
     js      8f
     mov     eax, [rsp+24]

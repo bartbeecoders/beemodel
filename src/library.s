@@ -341,8 +341,7 @@ lb_pathx:
 # exists(rdi=path) -> eax = 1 when there
 exists:
     xor     esi, esi
-    mov     eax, SYS_ACCESS
-    syscall
+    call    plat_access
     test    eax, eax
     sete    al
     movzx   eax, al
@@ -1373,8 +1372,7 @@ do_lb_save:
     mov     rsi, r13
     call    file_unmap
     lea     rdi, [rip+lb_path2]
-    mov     eax, 87                     # (unlink)
-    syscall
+    call    plat_unlink
     cmp     byte ptr [rip+lb_name], 0
     jne     4f
     lea     rdi, [rip+lb_name]
@@ -2260,8 +2258,7 @@ do_lb_remove:
 2:  mov     rdi, rbx
     call    lb_blob_path
     mov     rdi, rax
-    mov     eax, 87                     # (unlink)
-    syscall
+    call    plat_unlink
 3:  mov     edi, [rbx+LR_ROOT]
     call    lb_write_index
     call    lb_match

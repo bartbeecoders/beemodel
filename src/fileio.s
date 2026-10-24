@@ -157,15 +157,13 @@ ensure_dir:
     mov     byte ptr [rbx], 0           # each parent in turn
     mov     rdi, r12
     mov     esi, 0755
-    mov     eax, SYS_MKDIR
-    syscall
+    call    plat_mkdir
     mov     byte ptr [rbx], '/'
 2:  inc     rbx
     jmp     1b
 3:  mov     rdi, r12
     mov     esi, 0755
-    mov     eax, SYS_MKDIR
-    syscall
+    call    plat_mkdir
     pop     r12
     pop     rbx
     ret
@@ -254,15 +252,13 @@ file_read:
     mov     edi, AT_FDCWD
     mov     edx, O_READ
     xor     r10d, r10d
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      8f
     mov     ebx, eax
     mov     edi, eax
     lea     rsi, [rip+statb]
-    mov     eax, SYS_FSTAT
-    syscall
+    call    plat_fstat
     mov     r12, [rip+statb+48]
     test    r12, r12
     jz      7f
@@ -277,14 +273,12 @@ file_read:
     ja      7f
     push    rax
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     pop     rax
     mov     rdx, r12
     jmp     9f
 7:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  xor     eax, eax
     xor     edx, edx
 9:  pop     r12
@@ -337,8 +331,7 @@ file_write_atomic:
     lea     rsi, [rip+tmp_path]
     mov     edx, O_WRITE_NEW
     mov     r10d, [rip+fw_mode]
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      9f
     mov     ebx, eax
@@ -347,8 +340,7 @@ file_write_atomic:
     mov     edi, ebx
     mov     rsi, r13
     mov     rdx, r14
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     cmp     rax, -4
     je      4b
     test    rax, rax
@@ -357,17 +349,14 @@ file_write_atomic:
     sub     r14, rax
     jmp     4b
 5:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     lea     rdi, [rip+tmp_path]
     mov     rsi, r12
-    mov     eax, SYS_RENAME
-    syscall
+    call    plat_rename
     jmp     9f
 6:  push    rax
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     pop     rax
     test    eax, eax
     jnz     9f

@@ -643,8 +643,7 @@ tf_walk:
     lea     rdi, [rip+tfl_pb]
     mov     esi, O_DIR_
     xor     edx, edx
-    mov     eax, SYS_OPEN_
-    syscall
+    call    plat_open
     test    eax, eax
     js      .Ltw_out
     mov     r14d, eax                   # fd
@@ -652,8 +651,7 @@ tf_walk:
     mov     edi, r14d
     lea     rsi, [rsp]
     mov     edx, 4096
-    mov     eax, SYS_GETDENTS64
-    syscall
+    call    plat_getdents64
     test    eax, eax
     jle     .Ltw_close
     mov     r15d, eax                   # bytes
@@ -728,8 +726,7 @@ tf_walk:
     jmp     .Ltw_ent
 .Ltw_close:
     mov     edi, r14d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Ltw_out:
     mov     byte ptr [r12], 0
     add     rsp, 4104

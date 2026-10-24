@@ -103,13 +103,11 @@ ai_dir_make:
     call    ap_cpy
     lea     rdi, [rip+ai_dir]           # (made by home_join): ours only
     mov     esi, 0700
-    mov     eax, SYS_CHMOD
-    syscall
+    call    plat_chmod
     lea     rdi, [rip+s_self]           # this program's path
     lea     rsi, [rip+ai_exe]
     mov     edx, 510
-    mov     eax, SYS_READLINK
-    syscall
+    call    plat_readlink
     test    eax, eax
     jns     1f
     xor     eax, eax
@@ -164,16 +162,14 @@ ai_which:
     call    ap_cpy
     lea     rdi, [rip+ap_which]         # executable?
     mov     esi, 1                      # (X_OK)
-    mov     eax, SYS_ACCESS
-    syscall
+    call    plat_access
     test    eax, eax
     jz      9f
     jmp     .Lwh_dir
 .Lwh_try:
     lea     rdi, [rip+ap_which]
     mov     esi, 1
-    mov     eax, SYS_ACCESS
-    syscall
+    call    plat_access
     test    eax, eax
     jz      9f
 8:  xor     eax, eax
@@ -248,24 +244,21 @@ ai_proc_spawn:
     mov     edi, AT_FDCWD
     lea     rsi, [rip+s_null]
     xor     edx, edx
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     mov     edi, eax
     xor     esi, esi
     mov     eax, SYS_DUP2
     syscall
     mov     r14d, 3                     # nothing else of ours
 5:  mov     edi, r14d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     inc     r14d
     cmp     r14d, 1024
     jb      5b
     mov     rdi, [rip+ap_cwd]
     test    rdi, rdi
     jz      6f
-    mov     eax, SYS_CHDIR
-    syscall
+    call    plat_chdir
 6:  mov     rdi, rbx
     mov     rsi, r12
     lea     rdx, [rip+ap_env]
@@ -277,13 +270,11 @@ ai_proc_spawn:
 .Lsp_parent:
     mov     [rip+ap_pid], eax
     mov     edi, [rsp+4]                # (its end)
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, [rsp]                  # ours: without waiting
     mov     esi, 4                      # (F_SETFL)
     mov     edx, O_NONBLOCK
-    mov     eax, 72                     # (fcntl)
-    syscall
+    call    plat_fcntl
     mov     eax, [rsp]
     mov     [rip+ap_fd], eax
     mov     dword ptr [rip+ap_kill_at], 0
@@ -291,11 +282,9 @@ ai_proc_spawn:
     jmp     .Lsp_out
 .Lsp_close:
     mov     edi, [rsp]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, [rsp+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lsp_fail:
     xor     eax, eax
 .Lsp_out:
@@ -368,8 +357,7 @@ ai_tick:
     js      5f
     lea     rsi, [rip+ap_buf]
     mov     edx, 65535
-    mov     eax, SYS_READ
-    syscall
+    call    plat_read
     test    rax, rax
     jz      4f                          # (EOF)
     js      5f                          # (nothing now)
@@ -382,8 +370,7 @@ ai_tick:
     call    rcx
     jmp     1b
 4:  mov     edi, [rip+ap_fd]            # its output is done
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+ap_fd], -1
 5:  mov     edi, [rip+ap_pid]           # ended?
     lea     rsi, [rsp]
@@ -399,8 +386,7 @@ ai_tick:
 51: mov     edi, [rip+ap_fd]
     lea     rsi, [rip+ap_buf]
     mov     edx, 65535
-    mov     eax, SYS_READ
-    syscall
+    call    plat_read
     test    rax, rax
     jle     52f
     mov     rcx, [rip+ai_on_data]
@@ -412,8 +398,7 @@ ai_tick:
     call    rcx
     jmp     51b
 52: mov     edi, [rip+ap_fd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+ap_fd], -1
 6:  mov     dword ptr [rip+ap_pid], 0
     mov     dword ptr [rip+ap_kill_at], 0

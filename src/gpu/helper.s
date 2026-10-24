@@ -1403,8 +1403,7 @@ do_map:
     call    plat_mmap
     mov     r13, rax
     mov     rdi, [rip+handle]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     cmp     r13, -4096
     ja      8f
     mov     [rbx+SL_BASE], r13

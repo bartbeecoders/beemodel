@@ -289,8 +289,7 @@ kb_keymap:
     ja      .Lkm_close
     mov     r14, rax                    # text
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     rdi, r14
     mov     esi, r13d
     call    km_parse
@@ -300,8 +299,7 @@ kb_keymap:
     jmp     .Lkm_done
 .Lkm_close:
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lkm_done:
     pop     r15
     pop     r14
@@ -838,8 +836,7 @@ kb_on_timer:
     mov     edi, [rip+rep_fd]
     lea     rsi, [rip+tick_buf]
     mov     edx, 8
-    xor     eax, eax                    # SYS_READ
-    syscall
+    call    plat_read
     test    rax, rax
     jle     9f
     mov     edi, [rip+rep_code]

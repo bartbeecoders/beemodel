@@ -599,8 +599,7 @@ cell_write:
 2:  test    r12d, r12d
     jnz     3f
     lea     rdi, [rip+wp_path]          # none: no file
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     mov     byte ptr [rbx+WC_DISK], 0
     mov     dword ptr [rbx+WC_NOBJ], 0
     mov     qword ptr [rbx+WC_FP], 0
@@ -1569,16 +1568,14 @@ wp_scan_dir:
     lea     rsi, [rip+wp_dir]
     mov     edx, O_DIR_READ
     xor     r10d, r10d
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      9f
     mov     r12d, eax
 2:  mov     edi, r12d
     lea     rsi, [rsp+16]
     mov     edx, 4096
-    mov     eax, SYS_GETDENTS64
-    syscall
+    call    plat_getdents64
     test    eax, eax
     jle     8f
     mov     r13d, eax                   # bytes
@@ -1613,8 +1610,7 @@ wp_scan_dir:
     mov     byte ptr [rax+WC_LOADED], 0
     jmp     3b
 8:  mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 9:  add     rsp, 4096+16
     pop     r15
     pop     r14
@@ -2067,8 +2063,7 @@ wp_drop_files:
     lea     rsi, [rip+wp_path]
     call    cell_path
     lea     rdi, [rip+wp_path]
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     mov     byte ptr [rbx+WC_DISK], 0
 2:  add     rbx, WC_SZ
     dec     r12d

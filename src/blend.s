@@ -502,8 +502,7 @@ bl_unzstd:
     lea     rsi, [rip+bl_tmp]
     mov     edx, O_WRCREAT
     mov     r10d, 0600
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      .Luz_no
     mov     r14d, eax
@@ -541,8 +540,7 @@ bl_unzstd:
     cmp     rax, -4                     # (EINTR)
     je      2b
     mov     edi, r14d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     cmp     dword ptr [rsp+40], 0       # exited 0?
     jne     .Luz_rm
     mov     rdi, [rip+bl_map]           # the compressed file goes
@@ -555,8 +553,7 @@ bl_unzstd:
     mov     [rip+bl_base], rax
     mov     [rip+bl_size], rdx
     lea     rdi, [rip+bl_tmp]
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     xor     eax, eax
     cmp     qword ptr [rip+bl_map], 0
     je      .Luz_out
@@ -565,12 +562,10 @@ bl_unzstd:
     jmp     .Luz_out
 .Luz_close:
     mov     edi, r14d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Luz_rm:
     lea     rdi, [rip+bl_tmp]
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     lea     rax, [rip+e_bad]
     mov     [rip+bl_err], rax
 .Luz_no:
