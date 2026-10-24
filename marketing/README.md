@@ -7,6 +7,7 @@ x-posts/
   01-introducing-beemodel.md   the first post: what BeeModel is (single post + a 5-post thread)
   02-v0.24-gpu-viewport.md     v0.24.0 "Viewport on the GPU" (single post + a 3-post thread)
   03-how-it-compares.md        the website's comparison with Blender, Unreal Engine and Godot
+  04-v1.1-ask-ai.md            v1.1.0 "Ask AI about the selection" (single post + a 3-post thread)
 media/
   beemodel-dam-break.mp4       the dam-break demo playing in the viewport, 1080p60, 5.8 s
 ```
