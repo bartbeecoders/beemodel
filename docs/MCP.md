@@ -31,6 +31,7 @@ Start BeeModel first. The bridge connects to the newest running instance. The st
 | `set_transform` | Changes `{name, location?, rotation_deg?, scale?, new_name?}` |
 | `select` / `delete` | Selects or deletes `{names: [...]}`; `select` also takes `extend` |
 | `viewport_capture` | Returns the viewport as a PNG image block (`area: "window"` captures the whole UI) |
+| `reference_view` | Shows a reference image `{name, x0?, y0?, x1?, y1?}` as a PNG (1024 px at most; each pixel the darkest of its block, so thin lines stay), and says its size in pixels, the metres a pixel is, how it stands and its folder. `x0 y0 x1 y1` (its pixels, 0,0 its top-left) zoom into a part |
 | `script_eval` | Runs [BeeScript](BEESCRIPT.md) `{code}` as one undo step; returns what it prints and its last value |
 | `run_operator` | Runs `{id, arg?}`: any agent-safe operator, such as `file.save` |
 | `op_<id>` | Every agent-safe operator as its own tool, such as `op_view_toggle_grid` |

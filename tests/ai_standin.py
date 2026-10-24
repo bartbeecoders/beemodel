@@ -9,8 +9,9 @@ $HOME/<name>.runs.json for the test to look at.
 
 Prompts: "slow" waits (for Stop), "fail" ends with an error, "add a title
 'Hello'" adds 3D text above the cube and "change the title to 'Bye'" finds
-it in scene_summary and changes it (tests/text.py), anything else builds a
-little tower of cubes (Tower0.. for claude, Grok0.. for grok).
+it in scene_summary and changes it (tests/text.py), AI > Line Up References
+looks at reference images and pins one (tests/refs.py), anything else builds
+a little tower of cubes (Tower0.. for claude, Grok0.. for grok).
 """
 import json, os, re, subprocess, sys, time
 
@@ -74,6 +75,8 @@ def main():
     sid = opt('--resume') or opt('-r') or 'sess-%d' % len(runs)
     say({'type': 'system', 'subtype': 'init', 'session_id': sid, 'model': 'stand-in',
          'tools': ['mcp__beemodel__scene_summary']})
+    if '--- The reference drawings' in prompt:  # (tests/refs.py)
+        return refs(prompt, sid)
     if 'slow' in prompt:
         time.sleep(60)
         return 0
@@ -124,6 +127,30 @@ def main():
     m.p.wait(5)
     return 0
 
+
+
+def refs(prompt, sid):
+    """AI > Line Up References: look at the first reference, re-sort a
+    section taken for an elevation, pin the front elevation's corner to the
+    origin."""
+    m = Mcp()
+    names = [ln[2:].split(':')[0] for ln in prompt.split('\n') if ln.startswith('- ')]
+    calls = []
+    r = m.call('tools/call', {'name': 'reference_view', 'arguments': {'name': names[0]}})['result']
+    kinds = [c['type'] for c in r['content']]
+    calls.append(('reference_view', names[0], kinds, r['content'][0]['text'][:200]))
+    r = m.call('tools/call', {'name': 'reference_view', 'arguments': {'name': names[0], 'x0': 10, 'y0': 20, 'x1': 110, 'y1': 70}})['result']
+    calls.append(('reference_view', 'crop', [c['type'] for c in r['content']], r['content'][0]['text'][:200]))
+    for arg in ('Ref voorgevel 100 700 0 0 0', 'Ref doorsnede a-a left'):
+        t, err = m.tool('run_operator', {'id': 'object.reference_pin' if arg[-1] == '0' else 'object.reference_kind', 'arg': arg})
+        calls.append(('run_operator', arg, err, t))
+    json.dump({'names': names, 'calls': calls}, open(os.path.join(os.environ.get('HOME', '.'), 'refs.ai.json'), 'w'))
+    say({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text':
+        'Looked at %d references; pinned the front elevation, made doorsnede a-a a left elevation.' % len(names)}]}})
+    say({'type': 'result', 'subtype': 'success', 'session_id': sid, 'is_error': False})
+    m.p.stdin.close()
+    m.p.wait(5)
+    return 0
 
 
 def title(prompt, sid):

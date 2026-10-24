@@ -92,6 +92,30 @@ From the console or a script, `ai.ask <prompt>` sends a request about the
 selection without the box. It is not an MCP tool: an agent does not start
 another agent.
 
+## Lining up reference drawings
+
+After **Add › Reference Images from Folder...** (see [UI](UI.md)), **AI ›
+Line Up References with AI** asks the AI to check the drawings and line
+them up. It works on the set the selected reference belongs to, or else on
+the last one imported. The request lists every reference: how it stands,
+its folder, its size in metres and pixels. It also gives the AI the rules:
+
+- Look at each page with the MCP tool `reference_view`, zooming into a
+  part to read a pixel exactly.
+- Re-sort a page taken for the wrong kind with `object.reference_kind
+  <reference> front|back|left|right|plan|section|site|terrain|other [level
+  [turn]]`. It turns the page for its new kind and moves it into that
+  kind's folder.
+- Pin them all to the same corner with `object.reference_pin <reference>
+  <u> <v> <x> <y> <z>`, which moves the image so its pixel u,v lands on
+  the point x,y,z. The origin is the building's front-left corner at
+  ground level. The front faces +Z and the building runs to +X and -Z. The
+  front elevation's ground line starts at 0 0 0, the rear one at W 0 -D,
+  the plans' corners at their floor height.
+
+The whole request is one undo step, like any other. You can run both
+operators yourself from the console too.
+
 ## Settings: Preferences › AI
 
 Open **Edit › Preferences** (Ctrl+,) and pick the **AI** category:

@@ -890,6 +890,8 @@ tools_list:
     call    wb_str
     lea     rsi, [rip+mm_tools_json]    # (the material tools: mcpmat.s)
     call    wb_str
+    lea     rsi, [rip+rs_tools_json]    # (reference images: refset.s)
+    call    wb_str
     lea     rbx, [rip+__start_bee_ops]
 1:  lea     rax, [rip+__stop_bee_ops]
     cmp     rbx, rax
@@ -1064,6 +1066,10 @@ tool_tier:
     call    mm_tier
     test    eax, eax
     jns     9f
+    lea     rdi, [rip+tool]             # reference images (refset.s)
+    call    rs_tier
+    test    eax, eax
+    jns     9f
     lea     rdi, [rip+tool]
     lea     rsi, [rip+c_scene]
     call    str_eq
@@ -1194,6 +1200,8 @@ mcp_clients:
 
 # fail(rdi=message, rsi=detail or 0)
 .globl mcp_fail
+.globl img_state
+.globl has_image
 mcp_fail:
 fail:
     mov     dword ptr [rip+is_error], 1
@@ -1384,6 +1392,10 @@ dispatch_tool:
     jnz     .Ldt_out
     lea     rdi, [rip+tool]             # the material tools
     call    mm_dispatch
+    test    eax, eax
+    jnz     .Ldt_out
+    lea     rdi, [rip+tool]             # reference images
+    call    rs_dispatch
     test    eax, eax
     jnz     .Ldt_out
     # op_<id>: compare against every agent-safe operator's tool name
