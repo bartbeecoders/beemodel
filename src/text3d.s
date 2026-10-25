@@ -174,6 +174,7 @@ s_fd1:          .asciz "/usr/share/fonts"
 s_fd2:          .asciz "/usr/local/share/fonts"
 s_fd3:          .asciz "/.local/share/fonts"
 s_fd4:          .asciz "/.fonts"
+s_fd5:          .asciz "C:/Windows/Fonts"       # (Windows)
 s_dot_ttf:      .asciz ".ttf"
 k_body:         .asciz "body"
 k_text:         .asciz "text"
@@ -519,6 +520,9 @@ tf_scan:
     xor     edi, edi
     call    tf_root
     lea     rsi, [rip+s_fd2]
+    xor     edi, edi
+    call    tf_root
+    lea     rsi, [rip+s_fd5]
     xor     edi, edi
     call    tf_root
     lea     rdi, [rip+s_env_home]

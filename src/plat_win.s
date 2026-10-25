@@ -270,8 +270,8 @@ win_start:
     call    w2u_dup
     mov     r13, rax                    # NAME=value\0 ... \0
     mov     edi, edx                    # envp: at most a pointer per 2 bytes
-    shr     edi, 1
-    add     edi, 2
+    shr     edi, 1                      #  (and win_env's two)
+    add     edi, 4
     shl     edi, 3
     call    win_alloc
     mov     [rip+envp], rax
@@ -285,9 +285,119 @@ win_start:
     jne     5b
     jmp     4b
 6:  mov     qword ptr [rdi], 0
+    call    win_env
     mov     edi, ebx
     mov     rsi, r12
     call    bee_main                    # (does not return)
+
+# win_env: what the program looks for on Linux, from what Windows has.
+# HOME: BEEMODEL_HOME (a portable home; also how tests under Wine, which
+# drops HOME, give one), else HOME as it is (Git Bash sets it), else
+# USERPROFILE. So ~/BeeModel, ~/.config/beemodel and ~/.cache/beemodel sit
+# in the user's folder as on Linux, as git and ssh keep theirs.
+# XDG_RUNTIME_DIR: TEMP, unless set. Both with / for \, as the code splits
+# paths at /. Keeps rbx, r12-r15.
+win_env:
+    lea     rdi, [rip+s_bmhome]
+    call    env_get
+    test    rax, rax
+    jnz     1f
+    lea     rdi, [rip+s_homeq]
+    call    env_get
+    test    rax, rax
+    jnz     2f
+    lea     rdi, [rip+s_uprof]
+    call    env_get
+    test    rax, rax
+    jz      2f
+1:  mov     rsi, rax
+    lea     rdi, [rip+s_homeq]
+    call    env_put
+2:  lea     rdi, [rip+s_xdgrt]
+    call    env_get
+    test    rax, rax
+    jnz     3f
+    lea     rdi, [rip+s_tempq]
+    call    env_get
+    test    rax, rax
+    jz      3f
+    mov     rsi, rax
+    lea     rdi, [rip+s_xdgrt]
+    call    env_put
+3:  ret
+
+# env_get(rdi="NAME=") -> rax = its value, or 0; rdx = its envp slot (or
+#   the end's)
+env_get:
+    mov     rdx, [rip+envp]
+1:  mov     rsi, [rdx]
+    test    rsi, rsi
+    jz      4f
+    xor     ecx, ecx
+2:  mov     al, [rdi+rcx]
+    test    al, al
+    jz      3f
+    cmp     al, [rsi+rcx]
+    jne     5f
+    inc     ecx
+    jmp     2b
+3:  lea     rax, [rsi+rcx]
+    ret
+5:  add     rdx, 8
+    jmp     1b
+4:  xor     eax, eax
+    ret
+
+# env_put(rdi="NAME=", rsi=value): NAME=value (\ as /) in place of NAME's
+#   entry, or after the last
+env_put:
+    push    rbx
+    push    r12
+    push    r13
+    mov     r12, rdi
+    mov     r13, rsi
+    xor     ecx, ecx                    # the size
+1:  cmp     byte ptr [rdi+rcx], 0
+    je      2f
+    inc     ecx
+    jmp     1b
+2:  xor     edx, edx
+3:  cmp     byte ptr [rsi+rdx], 0
+    je      4f
+    inc     edx
+    jmp     3b
+4:  lea     edi, [rcx+rdx+1]
+    call    win_alloc
+    mov     rbx, rax
+    mov     rdi, rax
+    mov     rsi, r12
+5:  mov     al, [rsi]
+    test    al, al
+    jz      6f
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    jmp     5b
+6:  mov     rsi, r13
+7:  mov     al, [rsi]
+    cmp     al, '\\'
+    jne     8f
+    mov     al, '/'
+8:  mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    test    al, al
+    jnz     7b
+    mov     rdi, r12
+    call    env_get
+    test    rax, rax
+    mov     [rdx], rbx
+    jnz     9f
+    mov     qword ptr [rdx+8], 0
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
 
 # split_args(rsi=the command line, rdi=room for the words, r12=room for
 # argv) -> ebx = argc. The rules of the Microsoft C runtime: blanks part
@@ -2151,6 +2261,11 @@ fd_lock:        .skip 4
 qpc_freq:       .skip 8                 # performance counts a second
 
 .section .rodata
+s_bmhome:       .asciz "BEEMODEL_HOME="
+s_homeq:        .asciz "HOME="
+s_uprof:        .asciz "USERPROFILE="
+s_xdgrt:        .asciz "XDG_RUNTIME_DIR="
+s_tempq:        .asciz "TEMP="
 # Linux PROT_* (read 1, write 2, exec 4) -> Windows PAGE_*
 prot_map:       .byte 0x01, 0x02, 0x04, 0x04, 0x10, 0x20, 0x40, 0x40
 # Windows errors -> errno, {error, errno} words; others are EIO
