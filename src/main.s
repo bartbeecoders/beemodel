@@ -340,6 +340,8 @@ handle_cli_args:
 .Lcli_help:
     lea     rdi, [rip+s_help]
     call    write_out
+    lea     rdi, [rip+s_help_plat]      # (the window's platform)
+    call    write_out
     jmp     .Lquit
 
 # headless_init - the scene without a window (--eval / --run)
@@ -388,9 +390,7 @@ e_bad_arg:      .asciz "beemodel: unknown argument: "
 s_help:         .ascii "Usage: beemodel [scene.bee]   (open a scene in the window)\n"
                 .ascii "       beemodel --version | --list-ops | --selftest | --mcp-bridge | --help\n"
                 .ascii "       beemodel --eval 'BeeScript' | --run file.bees   (no window)\n"
-                .ascii "       beemodel --link host:port | unix:<path>   (mirror a session's live link)\n"
-                .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
-                .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
+                .asciz "       beemodel --link host:port | unix:<path>   (mirror a session's live link)\n"
 .include "version.inc"
 .text
 

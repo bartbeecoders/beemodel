@@ -14,7 +14,7 @@ ASFLAGS=(--64 -I src -I build)
 # first so _start leads the text segment, plat_win.s is the Windows build's.
 # C-locale order: the same binary everywhere.
 OBJS=()
-for src in src/plat_linux_start.s $(LC_ALL=C ls src/*.s | grep -vE '^src/plat_(linux_start|win)\.s$'); do
+for src in src/plat_linux_start.s $(LC_ALL=C ls src/*.s | grep -vE '^src/plat_(linux_start|win|win_wnd)\.s$'); do
     obj="build/obj/$(basename "${src%.s}").o"
     mkdir -p build/obj
     as "${ASFLAGS[@]}" -o "$obj" "$src"
@@ -30,7 +30,8 @@ fi
 echo "built build/beemodel v$VERSION ($(stat -c %s build/beemodel) bytes, mode: $MODE)"
 
 # The Windows build (Vibecoding/BeeModel-Win11-Port-Plan.html): the same
-# objects with src/plat_win.s in place of the Linux platform files, linked
+# objects with src/plat_win.s and src/plat_win_wnd.s in place of the Linux
+# platform files and the Wayland window (wayland.s, clipboard.s), linked
 # by ld's PE emulation into build/beemodel.exe. Built when ld has it (GNU
 # ld built with the PE targets, as Arch's is); no mingw needed. Fixed at
 # 0x400000 with no relocations: the code's 32-bit absolute addresses need
@@ -38,9 +39,13 @@ echo "built build/beemodel v$VERSION ($(stat -c %s build/beemodel) bytes, mode: 
 # PE link, so it is left out.)
 if ld -V 2>/dev/null | grep -qw i386pep; then
     as "${ASFLAGS[@]}" -o build/obj/plat_win.o src/plat_win.s
-    WOBJS=(build/obj/plat_win.o)
+    as "${ASFLAGS[@]}" -o build/obj/plat_win_wnd.o src/plat_win_wnd.s
+    WOBJS=(build/obj/plat_win.o build/obj/plat_win_wnd.o)
     for obj in "${OBJS[@]}"; do
-        [[ "$obj" == build/obj/plat_linux* ]] || WOBJS+=("$obj")
+        case "$obj" in
+            build/obj/plat_linux*|build/obj/wayland.o|build/obj/clipboard.o) ;;
+            *) WOBJS+=("$obj") ;;
+        esac
     done
     WLD=(-m i386pep -T src/plat_win.ld -e win_start --subsystem console
          --image-base=0x400000 --disable-dynamicbase --disable-reloc-section

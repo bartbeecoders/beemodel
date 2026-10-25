@@ -43,7 +43,6 @@
 .globl key_mods
 .globl s_app_id
 .globl s_app_title
-.globl s_log_hello
 .globl s_log_hello2
 .globl show_grid
 .globl ui_axis
@@ -113,7 +112,6 @@ s_m_help:       .asciz "Help"
 s_ready:        .asciz "Ready"
 s_colon_sp:     .asciz ": "
 
-s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero libraries"
 s_log_hello2:   .asciz "Tip: F3 searches every command; Enter opens the console"
 
 .align 8

@@ -35,6 +35,9 @@
 .globl wnd_lock_pointer
 .globl wnd_unlock_pointer
 .globl set_cursor
+.globl s_log_hello
+.globl s_about2
+.globl s_help_plat
 
 .section .data
 .align 4
@@ -143,6 +146,11 @@ e_lost:         .asciz "beemodel: Wayland connection lost\n"
 e_globals:      .asciz "beemodel: compositor lacks wl_compositor / wl_shm / xdg_wm_base\n"
 e_shm:          .asciz "beemodel: shared memory allocation failed\n"
 e_proto:        .asciz "beemodel: protocol error: "
+# what the program says about its platform (main.s, ops.s)
+s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero libraries"
+s_about2:       .asciz "  Talks the Wayland wire protocol directly; no libc, no toolkits"
+s_help_plat:    .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
+                .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
 
 .text
 

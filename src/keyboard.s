@@ -30,6 +30,7 @@
 .globl mods_latched
 .globl mods_locked
 .globl km_loaded
+.globl km_syms
 .globl kb_dead
 
 .equ KM_LEVELS,     4

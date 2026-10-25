@@ -43,7 +43,7 @@ if ! fresh; then
     echo "  powershell -ExecutionPolicy Bypass -File \\\\host.lan\\Data\\bee-run\\$(basename "$SHARE"/setup-*.ps1)" >&2
     exit 3
 fi
-for f in build/beemodel.exe build/test-*.exe; do
+for f in build/beemodel.exe build/test-*.exe tools/winvm/gui.ps1; do
     [[ -f "$f" ]] && cp "$f" "$SHARE/bin/"
 done
 id="job$(date +%s%N)"

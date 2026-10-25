@@ -17,6 +17,7 @@
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
+.include "plat_win.inc"
 
 .globl win_start
 .globl plat_self_path
@@ -55,8 +56,9 @@
 .globl plat_nanosleep
 .globl plat_time
 .globl plat_gettid
+.globl plat_poll
+.globl plat_win_msgfd
 
-.equ IMAGE_BASE,        0x400000        # (scripts/build.sh links there)
 .equ CP_UTF8,           65001
 .equ MEM_COMMIT_RESERVE, 0x3000
 .equ MEM_COMMIT,        0x1000
@@ -136,6 +138,9 @@
 .equ FD_AUX,            16
 .equ K_FILE,            1
 .equ K_DIR,             2
+.equ K_MSG,             3               # the window's message queue (plat_poll)
+.equ POLLOUT_,          4
+.equ POLLNVAL_,         0x20
 .equ DS_HANDLE,         0               # a listing (K_DIR): FindFirstFileW's
 .equ DS_PEND,           8               #  handle, an entry found but not yet
 .equ DS_DONE,           12              #  given, the end reached, the last
@@ -148,12 +153,6 @@
 .equ L_W1,              192
 .equ L_W2,              192+WPATH_UNITS*2
 .equ L_SIZE,            192+WPATH_UNITS*4-32
-.equ SV_RDX,            -8              # where WENTER keeps the arguments
-.equ SV_RSI,            -16
-.equ SV_RDI,            -24
-.equ SV_R8,             -32
-.equ SV_R9,             -40
-.equ SV_R10,            -48
 .equ ENOMEM_,           12
 .equ EINVAL_,           22
 .equ EFAULT_,           14
@@ -162,46 +161,6 @@
 .equ EBADF_,            9
 .equ EIO_,              5
 .equ SELF_WCHARS,       32768
-
-# WENTER locals / WLEAVE: around the calls into Windows, keep what the
-# contract keeps and Windows does not (rdx, rsi, rdi, r8-r10, xmm0-xmm5),
-# align the stack and leave the shadow space; [rsp+32...] holds `locals`
-# bytes (a multiple of 16) for stack arguments and results.
-.macro WENTER locals=0
-    push    rbp
-    mov     rbp, rsp
-    push    rdx
-    push    rsi
-    push    rdi
-    push    r8
-    push    r9
-    push    r10
-    sub     rsp, 96
-    movdqu  [rbp-144], xmm0
-    movdqu  [rbp-128], xmm1
-    movdqu  [rbp-112], xmm2
-    movdqu  [rbp-96], xmm3
-    movdqu  [rbp-80], xmm4
-    movdqu  [rbp-64], xmm5
-    and     rsp, -16
-    sub     rsp, 32+\locals
-.endm
-.macro WLEAVE
-    movdqu  xmm0, [rbp-144]
-    movdqu  xmm1, [rbp-128]
-    movdqu  xmm2, [rbp-112]
-    movdqu  xmm3, [rbp-96]
-    movdqu  xmm4, [rbp-80]
-    movdqu  xmm5, [rbp-64]
-    lea     rsp, [rbp-48]
-    pop     r10
-    pop     r9
-    pop     r8
-    pop     rdi
-    pop     rsi
-    pop     rdx
-    pop     rbp
-.endm
 
 # Not ported yet: -ENOSYS
 .macro NOSYS name
@@ -2224,7 +2183,89 @@ plat_gettid:
     WLEAVE
     ret
 
-# ---- the rest: W5 (poll, the key-repeat timerfd), W6 (processes, sockets,
+# ---- poll ------------------------------------------------------------------------
+# plat_win_msgfd(rdi=the window's wait routine) -> eax = an fd standing for
+#   the thread's message queue, for plat_poll. The routine is called in the
+#   Windows convention: ecx = milliseconds (-1 forever) -> eax = 1 when
+#   messages are waiting. (The window, plat_win_wnd.s, has the user32 side,
+#   so the tests' programs link without it.)
+plat_win_msgfd:
+    mov     [rip+msg_wait], rdi
+    push    rdx
+    push    rsi
+    push    rdi
+    xor     edi, edi
+    mov     esi, K_MSG
+    xor     edx, edx
+    call    fd_alloc
+    pop     rdi
+    pop     rsi
+    pop     rdx
+    ret
+
+# plat_poll(rdi=pollfds, esi=count, edx=timeout ms, -1 forever) -> rax = the
+#   fds with news. Files and directories are always ready, as on Linux; the
+#   message queue is waited on (one per call). Pipes and sockets: W5, W6.
+plat_poll:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    WENTER
+    mov     r12, rdi
+    mov     r13d, esi
+    xor     ebx, ebx                    # ready
+    mov     r14d, -1                    # the message queue's entry
+    xor     esi, esi
+1:  cmp     esi, r13d
+    jae     5f
+    lea     rax, [r12+rsi*8]
+    mov     word ptr [rax+6], 0
+    mov     edi, [rax]
+    test    edi, edi                    # (negative: ignored)
+    js      4f
+    call    fd_entry
+    test    rax, rax
+    jnz     2f
+    lea     rax, [r12+rsi*8]
+    mov     word ptr [rax+6], POLLNVAL_
+    inc     ebx
+    jmp     4f
+2:  cmp     dword ptr [rax+FD_KIND], K_MSG
+    jne     3f
+    mov     r14d, esi
+    jmp     4f
+3:  lea     rax, [r12+rsi*8]
+    movzx   ecx, word ptr [rax+4]
+    and     ecx, POLLIN|POLLOUT_
+    mov     [rax+6], cx
+    test    ecx, ecx
+    jz      4f
+    inc     ebx
+4:  inc     esi
+    jmp     1b
+5:  test    ebx, ebx
+    jnz     8f
+    mov     ecx, [rbp+SV_RDX]
+    test    r14d, r14d
+    js      6f
+    call    [rip+msg_wait]
+    test    eax, eax
+    jz      8f
+    lea     rax, [r12+r14*8]
+    mov     word ptr [rax+6], POLLIN
+    inc     ebx
+    jmp     8f
+6:  call    [rip+__imp_Sleep]           # nothing to wait on: the timeout
+8:  mov     eax, ebx
+    WLEAVE
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ---- the rest: W5 (the key-repeat timerfd), W6 (processes, sockets,
 #      shared memory; fcntl and symlink, used only there)
 NOSYS plat_fcntl
 NOSYS plat_symlink
@@ -2238,7 +2279,6 @@ NOSYS plat_setsockopt
 NOSYS plat_sendto
 NOSYS plat_sendmsg
 NOSYS plat_recvmsg
-NOSYS plat_poll
 NOSYS plat_memfd_create
 NOSYS plat_getrandom
 NOSYS plat_spawn
@@ -2259,6 +2299,7 @@ fd_tab:         .skip FD_MAX*32
 fd_lock:        .skip 4
 .align 8
 qpc_freq:       .skip 8                 # performance counts a second
+msg_wait:       .skip 8                 # the window's wait (plat_win_msgfd)
 
 .section .rodata
 s_bmhome:       .asciz "BEEMODEL_HOME="
@@ -2285,45 +2326,7 @@ err_map:
     .short 267, 20                                        # ENOTDIR
     .short 0
 
-# ---- the imports ----------------------------------------------------------------
-# ld puts the .idata$N sections in order and points the PE header at them:
-# $2 one entry per DLL (and an empty one to end), $4 the lookup table, $5
-# the address table the loader fills (__imp_X: call [rip+__imp_X]), $6 the
-# names, $7 the DLL names. Subsection n of $4/$5 is DLL n's run, ended by 0;
-# src/plat_win.ld ends the $2 list.
-.macro DLL n, name
-    .section .idata$2,"a"
-    .long   dll_ilt_\n - IMAGE_BASE, 0, 0, dll_name_\n - IMAGE_BASE, dll_iat_\n - IMAGE_BASE
-    .section .idata$4,"a"
-    .subsection \n
-dll_ilt_\n:
-    .section .idata$5,"aw"
-    .subsection \n
-dll_iat_\n:
-    .section .idata$7,"a"
-dll_name_\n: .asciz "\name"
-.endm
-.macro IMPORT n, func
-    .section .idata$6,"a"
-    .balign 2
-imp_name_\func: .short 0
-    .asciz "\func"
-    .section .idata$4,"a"
-    .subsection \n
-    .quad   imp_name_\func - IMAGE_BASE
-    .section .idata$5,"aw"
-    .subsection \n
-__imp_\func: .quad imp_name_\func - IMAGE_BASE
-.endm
-.macro DLL_END n
-    .section .idata$4,"a"
-    .subsection \n
-    .quad   0
-    .section .idata$5,"aw"
-    .subsection \n
-    .quad   0
-.endm
-
+# ---- the imports (the macros: plat_win.inc) ------------------------------------
 DLL 1, KERNEL32.dll
 IMPORT 1, AddVectoredExceptionHandler
 IMPORT 1, CloseHandle
@@ -2336,8 +2339,10 @@ IMPORT 1, ExitProcess
 IMPORT 1, FindClose
 IMPORT 1, FindFirstFileW
 IMPORT 1, FindNextFileW
+IMPORT 1, FreeConsole
 IMPORT 1, GetActiveProcessorCount
 IMPORT 1, GetCommandLineW
+IMPORT 1, GetConsoleProcessList
 IMPORT 1, GetCurrentProcessId
 IMPORT 1, GetCurrentThreadId
 IMPORT 1, GetDiskFreeSpaceExW
@@ -2347,8 +2352,13 @@ IMPORT 1, GetFileAttributesW
 IMPORT 1, GetFileInformationByHandle
 IMPORT 1, GetLastError
 IMPORT 1, GetModuleFileNameW
+IMPORT 1, GetModuleHandleW
 IMPORT 1, GetStdHandle
 IMPORT 1, GetSystemTimePreciseAsFileTime
+IMPORT 1, GlobalAlloc
+IMPORT 1, GlobalFree
+IMPORT 1, GlobalLock
+IMPORT 1, GlobalUnlock
 IMPORT 1, MapViewOfFile
 IMPORT 1, MoveFileExW
 IMPORT 1, MultiByteToWideChar
