@@ -145,10 +145,10 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 <main>
 <header class="hero">
-  <div class="kicker">In progress · W1 done, W2 next · branch win11-port · updated against v1.1.0 · Windows 11</div>
+  <div class="kicker">In progress · W2 done (Wine and Windows 11), W3 next · branch win11-port · updated against v1.1.0 · Windows 11</div>
   <h1>BeeModel on Windows 11</h1>
   <p class="lede">BeeModel is x86-64 assembly that talks to Linux through raw syscalls and to the compositor through its own Wayland client. Windows 11 runs on the same CPU, so the computation carries over unchanged: geometry, physics, the rasterizer and path tracer, BeeScript, and the file parsers. Everything that touches the OS has to be rewritten. This plan first puts the OS behind a platform layer on Linux, then writes a Windows version of that layer, developed on Omarchy with Wine and checked in a Windows 11 VM.</p>
-  <div class="meta">BeeModel · Vibecoding/BeeModel-Win11-Port-Plan.html · Companion to the <a href="BeeModel-Masterplan.html">Masterplan</a> · Written 2026-10-19 against v0.19.0 · Updated 2026-10-24 against v1.1.0</div>
+  <div class="meta">BeeModel · Vibecoding/BeeModel-Win11-Port-Plan.html · Companion to the <a href="BeeModel-Masterplan.html">Masterplan</a> · Written 2026-10-19 against v0.19.0 · Updated 2026-10-25 against v1.1.0</div>
 </header>
 
 <section id="status">
@@ -162,8 +162,9 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
     <tr><td>W1d</td><td>Child processes: <code>plat_spawn</code> for the six fork + exec sites, and 17 sites of <code>pipe2</code>, <code>wait4</code>, <code>kill</code>, <code>getpid</code></td><td><span class="tag g">done</span> CI green</td></tr>
     <tr><td>W1e</td><td>Sockets, shared memory, <code>poll</code>, <code>exit_group</code> (54 sites, 14 routines): no <code>syscall</code> left outside <code>plat_linux.s</code></td><td><span class="tag g">done</span> CI green</td></tr>
     <tr><td>W1f</td><td>Start-up (<code>_start</code> in <code>plat_linux_start.s</code>, <code>bee_main</code>), <code>plat_self_path</code>, the CI guard</td><td><span class="tag g">done</span> CI green</td></tr>
-    <tr><td>W2</td><td>Toolchain and a first .exe (needs <code>mingw-w64-binutils</code> and <code>wine</code> installed)</td><td><span class="tag">next</span></td></tr>
-    <tr><td>W3–W7</td><td>The port</td><td><span class="tag">open</span></td></tr>
+    <tr><td>W2</td><td>A first <code>build/beemodel.exe</code> from the same objects, <code>src/plat_win.s</code>, <code>ci/check-exe.sh</code></td><td><span class="tag g">done</span> under Wine and in the Windows 11 VM, CI green</td></tr>
+    <tr><td>W3</td><td>Memory, files, threads, time on Windows: a headless render and a BeeScript run</td><td><span class="tag">next</span></td></tr>
+    <tr><td>W4–W7</td><td>The port</td><td><span class="tag">open</span></td></tr>
     <tr><td>W0</td><td>WSLg check</td><td><span class="tag">optional, once the VM is up</span></td></tr>
   </table></div>
 </section>
@@ -195,7 +196,7 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
     <tr><td>File dialog</td><td><b>new:</b> <code>filebrowser.s</code>: drives from <code>/proc/self/mounts</code>, <code>statfs</code>, <code>stat</code>, <code>rmdir</code>, <code>rename</code>; <code>thumb.s</code> previews</td><td>Drives from <code>GetLogicalDriveStringsW</code>, free space from <code>GetDiskFreeSpaceExW</code></td></tr>
     <tr><td>Start-up</td><td><code>_start</code> reads argc, argv and envp from the stack; <code>/proc/self/exe</code> in <code>aiproc</code>, <code>gpu</code> and <code>library</code></td><td><code>GetCommandLineW</code> and <code>GetEnvironmentStringsW</code>, turned into UTF-8 argv and envp blocks at start; <code>GetModuleFileNameW</code></td></tr>
     <tr><td>Fonts</td><td><code>text.s</code>, <code>text3d.s</code>: <code>/usr/share/fonts/…</code></td><td>Add <code>C:\Windows\Fonts</code> paths</td></tr>
-    <tr><td>ELF-only directives</td><td>171 <code>.note.GNU-stack</code> sections; 964 <code>.align</code></td><td>Guarded by a <code>WIN64</code> symbol for the PE build; <code>.align</code> semantics checked once with mingw <code>as</code></td></tr>
+    <tr><td>ELF-only directives</td><td>171 <code>.note.GNU-stack</code> sections; 964 <code>.align</code></td><td>No change needed (W2): the PE build links the same ELF objects, and <code>src/plat_win.ld</code> drops the notes. The ELF linker's <code>__start_bee_ops</code> / <code>__stop_bee_ops</code> (and <code>blend_f</code>) symbols come from that script</td></tr>
   </table></div>
   <p>Two things make the window easier than in most programs. BeeModel already draws every pixel itself into an XRGB buffer, and it draws its own window frame. Windows only has to show a bitmap and say where the frame is.</p>
 </section>
@@ -243,13 +244,13 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   <p class="sub">There is no Windows machine. Everything is built on Linux; Wine runs the fast loop and a VM gives the real answer.</p>
   <div class="grid g3">
     <div class="card accent"><h3>Build</h3>
-      <p><code>sudo pacman -S mingw-w64-binutils</code> gives <code>x86_64-w64-mingw32-as</code>, <code>ld</code> and <code>dlltool</code>. Import libraries for kernel32, user32, gdi32 and ws2_32 come from small <code>.def</code> files in the repo through <code>dlltool</code>, so the mingw C runtime and headers are not needed.</p></div>
+      <p>Nothing to install (found in W2): Arch's own GNU <code>ld</code> has the PE emulation (<code>ld -V</code> lists <code>i386pep</code>) and links the ELF objects that <code>as</code> already writes into a PE executable. <code>src/plat_win.s</code> writes the import table out by hand, so there is no <code>dlltool</code>, <code>.def</code> file, mingw C runtime or header. <code>scripts/build.sh</code> builds <code>build/beemodel.exe</code> next to the Linux binary whenever <code>ld</code> can.</p></div>
     <div class="card blue"><h3>Daily loop: Wine</h3>
-      <p><code>sudo pacman -S wine</code>. Wine runs a kernel32-only executable directly, so W2 and W3 (the version, a headless render, a BeeScript run, golden images) can be scripted and run next to the Linux suite. Wine is not Windows: anything it passes is checked in the VM before a step closes.</p></div>
+      <p><code>sudo pacman -S wine</code>, or with no root: a rootless podman container (Debian trixie with Wine 10) and <code>WINE="podman run --rm -v $PWD:$PWD:ro,Z -w $PWD bee-wine wine" ci/check-exe.sh</code>, which is how W2 was checked. Wine runs a kernel32-only executable directly, so W2 and W3 (the version, a headless render, a BeeScript run, golden images) can be scripted and run next to the Linux suite. Wine is not Windows: anything it passes is checked in the VM before a step closes.</p></div>
     <div class="card green"><h3>The real check: a Windows 11 VM</h3>
       <p><code>omarchy-windows-vm install</code> runs Windows 11 in KVM through dockur/windows (this machine has 32 threads, 61 GB and <code>/dev/kvm</code>). It connects over RDP with <code>omarchy-windows-vm launch</code>, and <code>~/Windows</code> is shared into the guest as a network folder. Builds are copied there and run in the guest.</p></div>
   </div>
-  <div class="callout"><strong>Running tests in the VM.</strong> The VM's compose file only forwards RDP (3389) and the web console (8006), so no SSH. The plan instead: a small runner in the guest, started as a scheduled task at log-in, watches <code>~/Windows/bee-run/</code> for a job file, runs it, and writes the output and exit code back. A Linux script drops the job and waits. That makes the Windows smoke tests scriptable from Omarchy without changing the VM's network. The VM is needed from W3's exit on; W4 (window, pen, DPI) is checked by hand over RDP.</div>
+  <div class="callout"><strong>Running tests in the VM</strong> (working since W2, Windows 11 Pro 25H2, build 26200). The VM's compose file only forwards RDP (3389) and the web console (8006), so no SSH. Instead <code>tools/winvm/runner.ps1</code> runs in the guest, started hidden at every log-on by a scheduled task. It watches <code>~/Windows/bee-run/</code> (<code>\\host.lan\Data</code> in the guest) for a job, copies the build and the job to <code>C:\bee-run</code> (Windows warns before running a program from a network folder), runs it with a time limit, and writes the output and exit code back. On the host, <code>tools/winvm-run.sh beemodel.exe --version</code> drops the job and waits; <code>ci/check-exe.sh</code> uses it whenever the runner is up. Setting it up takes one command in the guest (<code>tools/winvm/setup.ps1</code>); after that the runner updates itself from the share. Two traps found on the way: the guest's network-file cache keeps serving a file the host overwrote, so each runner goes out under a new name and setup turns the caches off; and the guest may only read a file the host wrote 0644, so it could not delete a finished job, so the host writes the share world-writable. W4 (window, pen, DPI) is checked by hand over RDP.</div>
 </section>
 
 <section id="phases">
@@ -272,11 +273,18 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
   <div class="stage">The port</div>
   <div class="phase"><div class="pn"><b>W2</b>build</div><div class="card"><h3>Toolchain and a first .exe</h3>
-    <p>mingw-w64 binutils reads the same Intel-syntax source and writes a PE executable. A Windows target in <code>scripts/build.sh</code> (<code>--defsym WIN64=1</code>, which drops the ELF-only sections), <code>.def</code> files and <code>dlltool</code> for the import libraries, and <code>src/plat_win.s</code> with the entry point, the exit, the console output and the calling-convention thunks. Everything not yet ported returns <code>-ENOSYS</code>.</p>
-    <div class="exit"><b>Exit:</b> <code>beemodel.exe --version</code> prints the version under Wine and in the VM, built on Linux.</div></div></div>
+    <p>Done differently than planned, and simpler: no mingw. The same ELF objects as the Linux binary, with <code>src/plat_win.s</code> in place of the two Linux platform files, go through ld's PE emulation (<code>ld -m i386pep -T src/plat_win.ld</code>) into <code>build/beemodel.exe</code>, 1.59 MB, importing eleven kernel32 routines. <code>scripts/build.sh</code> builds it on every run when <code>ld</code> can; the Linux binary does not change by a byte.</p>
+    <ul>
+      <li><b>The image</b> sits at a fixed <code>0x400000</code> with no relocations, as on Linux: the code uses 32-bit absolute addresses, which the default 64-bit image base above 4 GiB would break. NX on, no ASLR for now. The main thread's 16 MiB stack is committed up front, because Windows grows a stack one guard page at a time and our large frames would skip it. <code>--gc-sections</code> loses the ELF objects' symbols in a PE link, so the exe keeps the few unused sections the Linux link drops.</li>
+      <li><b><code>src/plat_win.s</code></b>: <code>win_start</code> turns <code>GetCommandLineW</code> into UTF-8 argv with the Microsoft C runtime's quoting rules, and <code>GetEnvironmentStringsW</code> into envp, and calls <code>bee_main</code>. <code>plat_write</code> (the console, UTF-8 output), <code>plat_exit_group</code>, <code>plat_self_path</code>, <code>plat_getpid</code> and <code>plat_gettid</code> are real; the other 52 answer <code>-ENOSYS</code>. The <code>WENTER</code>/<code>WLEAVE</code> pair keeps the Linux contract around a Windows call: it saves rdx, rsi, rdi, r8–r10 and xmm0–xmm5, aligns the stack and leaves the shadow space.</li>
+      <li><b><code>ci/check-exe.sh</code></b> (local CI and GitHub CI, which installs Wine): a 64-bit PE that imports only Windows system DLLs, and <code>--version</code> under Wine equal to the Linux binary's.</li>
+    </ul>
+    <p>Under Wine 10, <code>--version</code>, <code>--help</code> and <code>--list-ops</code> (all 672 operators) print exactly what Linux prints, and quotes, backslashes and UTF-8 in arguments arrive unchanged. <code>--eval</code> and <code>--selftest</code> crash on the first allocation, as expected: memory is W3.</p>
+    <div class="exit"><b>Exit:</b> <code>beemodel.exe --version</code> prints the version under Wine and in the VM, built on Linux. <b>Met</b> (2026-10-25), under Wine 10 and in the Windows 11 VM: there too <code>--version</code>, <code>--help</code> and all 672 operators match Linux, quoted and UTF-8 arguments arrive unchanged, and Defender lets the unsigned exe run. <code>--eval</code> ends in an access violation (<code>0xC0000005</code>) without a crash dialog hanging the runner.</div></div></div>
 
   <div class="phase"><div class="pn"><b>W3</b>headless</div><div class="card"><h3>Memory, files, threads</h3>
     <p>The Windows versions of memory (commit on fault, <code>mremap</code> by reserving ahead, executable pages for the JIT), files and directories with UTF-16 paths, threads and <code>WaitOnAddress</code>, and time. Config moves to <code>%APPDATA%\BeeModel</code>, the cache to <code>%LOCALAPPDATA%\BeeModel</code>. Fonts look in <code>C:\Windows\Fonts</code> (Segoe UI, Consolas, Arial).</p>
+    <p>From W2: memory goes first, because nothing past <code>--version</code> runs without it. Worker threads get the stack <code>plat_thread_start</code> is handed, which Windows does not know as a stack: either the thread runs on a <code>CreateThread</code> stack of the asked size, committed up front, or the stack limits in its TEB are set to ours.</p>
     <div class="exit"><b>Exit:</b> a headless render of a test scene and a BeeScript run give the same pixels and output as on Linux, under Wine and in the VM.</div></div></div>
 
   <div class="phase"><div class="pn"><b>W4</b>window</div><div class="card"><h3>Window, input, clipboard</h3>
@@ -305,8 +313,8 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   <h2>Testing</h2>
   <ul>
     <li>The full Python suite stays on Linux. It drives the binary through <code>tools/fakewl.py</code>, and the core it tests is the same code on both systems. It runs after every W1 step.</li>
-    <li>Wine smoke tests (from W2): the version, a headless render compared to the Linux image, a BeeScript run, a save and reload. They run locally next to the Linux suite.</li>
-    <li>VM smoke tests (from W3): the same set through the shared-folder runner, before a step closes.</li>
+    <li>Wine smoke tests (from W2): the version, a headless render compared to the Linux image, a BeeScript run, a save and reload. They run locally next to the Linux suite. W2's part is <code>ci/check-exe.sh</code>, in <code>ci/local.sh</code> and in GitHub CI.</li>
+    <li>VM smoke tests (from W3): the same set through the shared-folder runner (<code>tools/winvm-run.sh</code>, there since W2), before a step closes.</li>
     <li>Windows CI (W7): the same set on <code>windows-latest</code>.</li>
     <li>Golden images: headless renders must match Linux exactly. A difference points to the platform layer, not the renderer.</li>
     <li>Manual checks for what scripts can't drive: pen input, DPI changes across monitors, clipboard with other apps.</li>
@@ -316,9 +324,9 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 <section id="risks">
   <h2>Budgets &amp; risks</h2>
   <div class="grid g3">
-    <div class="card"><h4>Budgets</h4><ul><li>W1 adds under 1% to the Linux binary and costs no measurable speed (W1a: 370 bytes smaller, W1b: 121 more, W1c: the same size, the savings lost to alignment padding; after W1e the text is 409 bytes smaller than on main)</li><li>Windows frame times within 10% of Linux on the same machine</li><li>Idle CPU near 0%</li></ul></div>
+    <div class="card"><h4>Budgets</h4><ul><li>W1 adds under 1% to the Linux binary and costs no measurable speed (W1a: 370 bytes smaller, W1b: 121 more, W1c: the same size, the savings lost to alignment padding; after W1e the text is 409 bytes smaller than on main; W2 does not change it)</li><li><code>beemodel.exe</code> about the size of the Linux binary (W2: 1,592,320 bytes against 1,598,776)</li><li>Windows frame times within 10% of Linux on the same machine</li><li>Idle CPU near 0%</li></ul></div>
     <div class="card"><h4>Risks</h4><ul><li><b>Antivirus.</b> A hand-assembled executable with no C runtime looks unusual to Defender's heuristics. Sign it, and submit it to Microsoft if it is flagged.</li><li><b>SmartScreen.</b> Unsigned downloads get a warning. A code-signing certificate is a yearly cost.</li><li><b>The event loop.</b> Windows splits waiting across messages, handles and sockets. Getting latency and idle CPU right takes the most tuning.</li><li><b>Commit on fault.</b> A vectored handler on every first touch of the frame arena; if it costs too much, commit ahead in bigger chunks.</li><li><b>Wine is not Windows.</b> Wine passing is a hint, not the exit.</li></ul></div>
-    <div class="card"><h4>Open questions</h4><ul><li>Bundle <code>zstd.exe</code>, or write a decoder?</li><li>OLE drag and drop, or <code>WM_DROPFILES</code> only?</li><li>A Windows 11 license for the VM: dockur installs an unactivated copy, which is enough for testing.</li></ul></div>
+    <div class="card"><h4>Open questions</h4><ul><li>Bundle <code>zstd.exe</code>, or write a decoder?</li><li>OLE drag and drop, or <code>WM_DROPFILES</code> only?</li><li>Console or GUI subsystem: W2 is a console program, so <code>--version</code> prints in a terminal, but one started from Explorer opens a console window. A GUI exe that attaches to its parent's console, or two exes, decided in W4.</li><li>A Windows 11 license for the VM: dockur installs an unactivated copy, which is enough for testing.</li></ul></div>
   </div>
 </section>
 </main>

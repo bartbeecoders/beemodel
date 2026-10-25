@@ -153,7 +153,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <div class="kicker">Living list · updated with every stage</div>
   <h1>Open features &amp; issues</h1>
   <p class="lede">Everything that is open, in one place: the plan stages still to build, known bugs, performance follow-ups, features that were put off, and loose ends on GitHub. The plans say what to build. This list says what is still open. It is updated with every commit that opens or closes something here.</p>
-  <div class="meta">BeeModel · Vibecoding/BeeModel-Open-List.html · Plans: <a href="BeeModel-2.0-Plan.html">2.0</a>, <a href="BeeModel-Win11-Port-Plan.html">Windows 11 port</a>, <a href="BeeModel-Masterplan.html">Masterplan</a> · Last updated <b>2026-10-24</b>, against <b>v1.0.0</b></div>
+  <div class="meta">BeeModel · Vibecoding/BeeModel-Open-List.html · Plans: <a href="BeeModel-2.0-Plan.html">2.0</a>, <a href="BeeModel-Win11-Port-Plan.html">Windows 11 port</a>, <a href="BeeModel-Masterplan.html">Masterplan</a> · Last updated <b>2026-10-25</b>, against <b>v1.0.0</b></div>
 </header>
 
 <section id="now">
@@ -187,7 +187,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
     <tr><td class="num"><span class="issue">C4</span></td><td>Docs, <code>tests/video.py</code>, release v1.3.0</td><td>2.0</td><td><span class="tag a">in progress</span> <a href="https://github.com/bartbeecoders/beemodel/issues/397">#397</a></td></tr>
     <tr><td class="num"><span class="issue">V1–V5</span></td><td>Gas solver, fire, volumes in Hive and on the GPU, viewport volumes, VDB export</td><td>2.0</td><td><span class="tag">planned</span> v1.4.0</td></tr>
     <tr><td class="num"><span class="issue">Z1–Z2</span></td><td>The 2.0 walkthrough scene, docs, the v2.0.0 release</td><td>2.0</td><td><span class="tag">planned</span> v2.0.0</td></tr>
-    <tr><td class="num"><span class="issue">W·</span></td><td>Windows 11 port: a platform layer (W1a–W1f), then a native Win32 backend built with mingw-w64, run under Wine and checked in a Windows 11 VM</td><td>Win11</td><td><span class="tag a">in progress</span> branch <code>win11-port</code>: W1 done (the platform layer: every <code>syscall</code> in <code>src/plat_linux.s</code>, a CI guard); W2 (mingw-w64, a first <code>.exe</code> under Wine) next</td></tr>
+    <tr><td class="num"><span class="issue">W·</span></td><td>Windows 11 port: a platform layer (W1a–W1f), then a native Win32 backend linked by GNU ld's PE emulation, run under Wine and checked in a Windows 11 VM</td><td>Win11</td><td><span class="tag a">in progress</span> branch <code>win11-port</code>: W1 done (the platform layer: every <code>syscall</code> in <code>src/plat_linux.s</code>, a CI guard); W2 done (<code>build/beemodel.exe</code> from the same objects, <code>--version</code> under Wine and in the Windows 11 VM, <code>ci/check-exe.sh</code>, a job runner in the VM); W3 (memory, files, threads on Windows) next</td></tr>
   </table></div>
 </section>
 
