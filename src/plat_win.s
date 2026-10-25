@@ -48,6 +48,12 @@
 .globl plat_statfs
 .globl plat_exit_group
 .globl plat_getpid
+.globl plat_thread_start
+.globl plat_futex
+.globl plat_sched_getaffinity
+.globl plat_clock_gettime
+.globl plat_nanosleep
+.globl plat_time
 .globl plat_gettid
 
 .equ IMAGE_BASE,        0x400000        # (scripts/build.sh links there)
@@ -110,6 +116,20 @@
 .equ EISDIR_,           21
 .equ EMFILE_,           24
 .equ ENAMETOOLONG_,     36
+.equ TB_ENTRY,          0               # a new thread's block (plat_thread_start)
+.equ TB_ARG,            8
+.equ TB_TOP,            16
+.equ TB_BOTTOM,         24
+.equ TB_TID,            32
+.equ TB_SIZE,           48
+.equ CREATE_SUSPENDED,  4
+.equ ALL_PROCESSOR_GROUPS, 0xffff
+.equ FUTEX_WAKE_,       1
+.equ FUTEX_PRIVATE_,    128
+.equ ERROR_TIMEOUT,     1460
+.equ WAIT_TIMEOUT,      258
+.equ EAGAIN_,           11
+.equ ETIMEDOUT_,        110
 .equ FD_MAX,            1024            # fd_tab: {handle, kind, aux}, 32 bytes
 .equ FD_HANDLE,         0
 .equ FD_KIND,           8
@@ -205,6 +225,8 @@ win_start:
     mov     ecx, 1                      # first in line: memory first touched
     lea     rdx, [rip+win_veh]
     call    [rip+__imp_AddVectoredExceptionHandler]
+    lea     rcx, [rip+qpc_freq]         # (CLOCK_MONOTONIC's unit)
+    call    [rip+__imp_QueryPerformanceFrequency]
     lea     rbx, [rip+fd_tab]           # fds 0-2: the standard handles
     mov     r12d, STD_INPUT_HANDLE
 1:  mov     ecx, r12d
@@ -1011,7 +1033,15 @@ win_veh:
     test    eax, eax
     jz      5f
     cmp     dword ptr [rsp+32+MBI_STATE], MEM_RESERVE
-    jne     5f                          # (committed: a real fault)
+    je      4f
+    cmp     dword ptr [rsp+32+MBI_STATE], MEM_COMMIT
+    jne     5f
+    mov     eax, [rsp+80]               # committed meanwhile by another thread
+    cmp     [rsp+32+MBI_PROTECT], eax   #  that touched the same 64 KiB: run
+    jne     5f                          #  the access again (any other page
+    mov     eax, -1                     #  committed: a real fault)
+    jmp     6f
+4:
     mov     rcx, rbx
     and     rcx, -0x10000
     cmp     rcx, rsi
@@ -1780,6 +1810,291 @@ plat_statfs:
 9:  WLEAVE
     ret
 
+# ---- threads, futexes, time -------------------------------------------------------
+# plat_thread_start(rdi=entry, rsi=arg, rdx=stack top, rcx=tid word or 0)
+#   -> eax = the new thread's id, or -errno. Not the syscall contract: an
+#   ordinary call (rax, rcx, rdx, rsi, rdi, r8-r11 are not kept). The thread
+#   runs entry(rdi=arg) on the given stack (a MAP_STACK mapping: committed
+#   whole), entered with rsp 16-byte aligned before the call, and ends when
+#   entry returns. A tid word gets the thread's id before it runs, and 0 and
+#   a wake (WakeByAddressAll) when it has ended, as CLONE_CHILD_SETTID and
+#   CLONE_CHILD_CLEARTID do on Linux.
+#
+#   Windows starts the thread on a small stack of its own in win_thread,
+#   which moves to the given stack and points the thread's TEB stack bounds
+#   at it (StackBase gs:[8], StackLimit gs:[16]), so that exception dispatch
+#   and the stack probes inside Windows see the stack the thread is on;
+#   it puts them back before the thread ends.
+plat_thread_start:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdx                    # the block, on top of the new stack:
+    sub     rbx, TB_SIZE                #  {entry, arg, top, bottom, tid word}
+    and     rbx, -16
+    mov     [rbx+TB_ENTRY], rdi
+    mov     [rbx+TB_ARG], rsi
+    mov     [rbx+TB_TOP], rbx
+    mov     [rbx+TB_TID], rcx
+    WENTER 96
+    lea     rcx, [rdx-1]                # the stack's bottom: its allocation
+    lea     rdx, [rsp+32]
+    mov     r8d, 48
+    call    [rip+__imp_VirtualQuery]
+    mov     rax, [rsp+32+MBI_ALLOC]
+    mov     [rbx+TB_BOTTOM], rax
+    xor     ecx, ecx                    # CreateThread, suspended
+    mov     edx, 0x10000                # (its own small stack, for the start)
+    lea     r8, [rip+win_thread]
+    mov     r9, rbx
+    mov     qword ptr [rsp+32], CREATE_SUSPENDED
+    lea     rax, [rsp+88]
+    mov     [rsp+40], rax               # lpThreadId
+    call    [rip+__imp_CreateThread]
+    test    rax, rax
+    jnz     1f
+    call    w_errno
+    jmp     9f
+1:  mov     r12, rax
+    mov     r13d, [rsp+88]
+    mov     rcx, [rbx+TB_TID]           # the tid word, before it runs
+    test    rcx, rcx
+    jz      2f
+    mov     [rcx], r13d
+2:  mov     rcx, r12
+    call    [rip+__imp_ResumeThread]
+    mov     rcx, r12
+    call    [rip+__imp_CloseHandle]
+    mov     eax, r13d
+9:  WLEAVE
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# win_thread(rcx=the block): a new thread's start, in the Windows convention
+win_thread:
+    push    rbx
+    push    rbp
+    push    rsi
+    push    rdi
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 168                    # xmm6-xmm15 (Windows keeps them)
+    movdqu  [rsp], xmm6
+    movdqu  [rsp+16], xmm7
+    movdqu  [rsp+32], xmm8
+    movdqu  [rsp+48], xmm9
+    movdqu  [rsp+64], xmm10
+    movdqu  [rsp+80], xmm11
+    movdqu  [rsp+96], xmm12
+    movdqu  [rsp+112], xmm13
+    movdqu  [rsp+128], xmm14
+    movdqu  [rsp+144], xmm15
+    mov     rbx, rcx
+    mov     r12, gs:[8]                 # Windows' bounds, for the end
+    mov     r13, gs:[16]
+    mov     r14, rsp
+    mov     r15, [rbx+TB_TID]           # (the block may be gone by the end)
+    mov     rax, [rbx+TB_TOP]
+    mov     gs:[8], rax
+    mov     rax, [rbx+TB_BOTTOM]
+    mov     gs:[16], rax
+    mov     rdi, [rbx+TB_ARG]
+    mov     rax, [rbx+TB_ENTRY]
+    mov     rsp, rbx                    # (16-byte aligned)
+    call    rax
+    mov     rsp, r14
+    mov     gs:[8], r12
+    mov     gs:[16], r13
+    test    r15, r15
+    jz      1f
+    mov     dword ptr [r15], 0          # the tid word: 0, and a wake
+    mov     rcx, r15
+    sub     rsp, 32                     # (rsp is 16-byte aligned here)
+    call    [rip+__imp_WakeByAddressAll]
+    add     rsp, 32
+1:  movdqu  xmm6, [rsp]
+    movdqu  xmm7, [rsp+16]
+    movdqu  xmm8, [rsp+32]
+    movdqu  xmm9, [rsp+48]
+    movdqu  xmm10, [rsp+64]
+    movdqu  xmm11, [rsp+80]
+    movdqu  xmm12, [rsp+96]
+    movdqu  xmm13, [rsp+112]
+    movdqu  xmm14, [rsp+128]
+    movdqu  xmm15, [rsp+144]
+    add     rsp, 168
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rdi
+    pop     rsi
+    pop     rbp
+    pop     rbx
+    xor     eax, eax
+    ret
+
+# plat_futex(rdi=the word, esi=op, edx=val, r10=timeout or 0): FUTEX_WAIT
+#   (-EAGAIN when the word is not val, -ETIMEDOUT after the relative
+#   timeout) and FUTEX_WAKE (val 1: one waiter, else all; gives 0, as
+#   WaitOnAddress cannot count them), private or not
+plat_futex:
+    mov     eax, esi
+    and     eax, ~FUTEX_PRIVATE_
+    cmp     eax, FUTEX_WAKE_
+    je      .Lfx_wake
+    test    eax, eax
+    jnz     .Lfx_nosys
+    cmp     [rdi], edx
+    jne     .Lfx_again
+    WENTER 16
+    mov     [rsp+32], edx               # the value it is to have
+    mov     r9d, -1                     # INFINITE
+    test    r10, r10
+    jz      1f
+    mov     rax, [r10]                  # tv_sec * 1000 + tv_nsec rounded up
+    imul    rax, rax, 1000
+    mov     rcx, [r10+8]
+    add     rcx, 999999
+    mov     r8, rax
+    mov     rax, rcx
+    xor     edx, edx
+    mov     ecx, 1000000
+    div     rcx
+    add     rax, r8
+    mov     r9d, 0xfffffffe             # (just short of INFINITE)
+    cmp     rax, r9
+    cmovb   r9d, eax
+1:  mov     rcx, [rbp+SV_RDI]
+    lea     rdx, [rsp+32]
+    mov     r8d, 4
+    call    [rip+__imp_WaitOnAddress]
+    test    eax, eax
+    mov     eax, 0
+    jnz     2f
+    call    [rip+__imp_GetLastError]
+    cmp     eax, ERROR_TIMEOUT
+    je      3f
+    cmp     eax, WAIT_TIMEOUT           # (Wine's answer)
+    je      3f
+    call    w_errno_of
+    jmp     2f
+3:  mov     rax, -ETIMEDOUT_
+2:  WLEAVE
+    ret
+.Lfx_wake:
+    WENTER
+    mov     rcx, rdi
+    cmp     edx, 1
+    je      1f
+    call    [rip+__imp_WakeByAddressAll]
+    jmp     2f
+1:  call    [rip+__imp_WakeByAddressSingle]
+2:  WLEAVE
+    xor     eax, eax
+    ret
+.Lfx_again:
+    mov     rax, -EAGAIN_
+    ret
+.Lfx_nosys:
+    mov     rax, -ENOSYS_
+    ret
+
+# plat_sched_getaffinity(edi=pid, esi=bytes, rdx=mask) -> rax = the bytes
+#   written: a bit for each processor Windows gives the program
+plat_sched_getaffinity:
+    WENTER
+    mov     ecx, ALL_PROCESSOR_GROUPS
+    call    [rip+__imp_GetActiveProcessorCount]
+    mov     rdi, [rbp+SV_RDX]
+    mov     ecx, [rbp+SV_RSI]
+    shl     ecx, 3
+    cmp     eax, ecx
+    cmova   eax, ecx
+    mov     r8d, eax
+    mov     ecx, [rbp+SV_RSI]
+    xor     eax, eax
+    rep stosb
+    mov     rdi, [rbp+SV_RDX]
+    xor     ecx, ecx
+1:  cmp     ecx, r8d
+    jae     2f
+    bts     dword ptr [rdi], ecx
+    inc     ecx
+    jmp     1b
+2:  mov     eax, [rbp+SV_RSI]
+    WLEAVE
+    ret
+
+# plat_clock_gettime(edi=clock, rsi=struct timespec): CLOCK_REALTIME from
+#   the system time; every other clock (the callers' CLOCK_MONOTONIC) from
+#   the performance counter
+plat_clock_gettime:
+    WENTER 16
+    test    edi, edi
+    jnz     1f
+    lea     rcx, [rsp+32]
+    call    [rip+__imp_GetSystemTimePreciseAsFileTime]
+    mov     rax, [rsp+32]
+    call    ft_unix
+    jmp     2f
+1:  lea     rcx, [rsp+32]
+    call    [rip+__imp_QueryPerformanceCounter]
+    mov     rax, [rsp+32]
+    mov     rcx, [rip+qpc_freq]
+    xor     edx, edx
+    div     rcx                         # seconds, and the counts left over
+    mov     r8, rax
+    mov     rax, rdx
+    mov     edx, 1000000000
+    mul     rdx
+    div     rcx
+    mov     rdx, rax
+    mov     rax, r8
+2:  mov     rsi, [rbp+SV_RSI]
+    mov     [rsi], rax
+    mov     [rsi+8], rdx
+    WLEAVE
+    xor     eax, eax
+    ret
+
+# plat_time(rdi=where or 0) -> rax = seconds since 1970
+plat_time:
+    push    rdi
+    push    rsi
+    sub     rsp, 24
+    xor     edi, edi
+    mov     rsi, rsp
+    call    plat_clock_gettime
+    mov     rax, [rsp]
+    add     rsp, 24
+    pop     rsi
+    pop     rdi
+    test    rdi, rdi
+    jz      1f
+    mov     [rdi], rax
+1:  ret
+
+# plat_nanosleep(rdi=struct timespec, rsi=rest or 0): in milliseconds,
+#   rounded up (Sleep)
+plat_nanosleep:
+    WENTER
+    mov     rax, [rdi+8]
+    add     rax, 999999
+    xor     edx, edx
+    mov     ecx, 1000000
+    div     rcx
+    imul    rcx, [rdi], 1000
+    add     rcx, rax
+    call    [rip+__imp_Sleep]
+    WLEAVE
+    xor     eax, eax
+    ret
+
 # ---- processes ----------------------------------------------------------------
 plat_exit_group:
     and     rsp, -16
@@ -1799,7 +2114,7 @@ plat_gettid:
     WLEAVE
     ret
 
-# ---- the rest: W3c (threads, time), W5 (poll), W6 (processes, sockets,
+# ---- the rest: W5 (poll, the key-repeat timerfd), W6 (processes, sockets,
 #      shared memory; fcntl and symlink, used only there)
 NOSYS plat_fcntl
 NOSYS plat_symlink
@@ -1816,16 +2131,10 @@ NOSYS plat_recvmsg
 NOSYS plat_poll
 NOSYS plat_memfd_create
 NOSYS plat_getrandom
-NOSYS plat_thread_start
 NOSYS plat_spawn
 NOSYS plat_pipe2
 NOSYS plat_wait4
 NOSYS plat_kill
-NOSYS plat_futex
-NOSYS plat_sched_getaffinity
-NOSYS plat_clock_gettime
-NOSYS plat_nanosleep
-NOSYS plat_time
 NOSYS plat_timerfd_create
 NOSYS plat_timerfd_settime
 
@@ -1838,6 +2147,8 @@ nr_lock:        .skip 4
 .align 8
 fd_tab:         .skip FD_MAX*32
 fd_lock:        .skip 4
+.align 8
+qpc_freq:       .skip 8                 # performance counts a second
 
 .section .rodata
 # Linux PROT_* (read 1, write 2, exec 4) -> Windows PAGE_*
@@ -1904,11 +2215,13 @@ IMPORT 1, CloseHandle
 IMPORT 1, CreateDirectoryW
 IMPORT 1, CreateFileMappingW
 IMPORT 1, CreateFileW
+IMPORT 1, CreateThread
 IMPORT 1, DeleteFileW
 IMPORT 1, ExitProcess
 IMPORT 1, FindClose
 IMPORT 1, FindFirstFileW
 IMPORT 1, FindNextFileW
+IMPORT 1, GetActiveProcessorCount
 IMPORT 1, GetCommandLineW
 IMPORT 1, GetCurrentProcessId
 IMPORT 1, GetCurrentThreadId
@@ -1920,15 +2233,20 @@ IMPORT 1, GetFileInformationByHandle
 IMPORT 1, GetLastError
 IMPORT 1, GetModuleFileNameW
 IMPORT 1, GetStdHandle
+IMPORT 1, GetSystemTimePreciseAsFileTime
 IMPORT 1, MapViewOfFile
 IMPORT 1, MoveFileExW
 IMPORT 1, MultiByteToWideChar
+IMPORT 1, QueryPerformanceCounter
+IMPORT 1, QueryPerformanceFrequency
 IMPORT 1, ReadFile
 IMPORT 1, RemoveDirectoryW
+IMPORT 1, ResumeThread
 IMPORT 1, SetConsoleOutputCP
 IMPORT 1, SetCurrentDirectoryW
 IMPORT 1, SetEndOfFile
 IMPORT 1, SetFilePointerEx
+IMPORT 1, Sleep
 IMPORT 1, UnmapViewOfFile
 IMPORT 1, VirtualAlloc
 IMPORT 1, VirtualFree
@@ -1937,3 +2255,9 @@ IMPORT 1, VirtualQuery
 IMPORT 1, WideCharToMultiByte
 IMPORT 1, WriteFile
 DLL_END 1
+
+DLL 2, api-ms-win-core-synch-l1-2-0.dll # (WaitOnAddress: not in kernel32)
+IMPORT 2, WaitOnAddress
+IMPORT 2, WakeByAddressAll
+IMPORT 2, WakeByAddressSingle
+DLL_END 2

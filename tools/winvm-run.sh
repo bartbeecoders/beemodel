@@ -33,7 +33,12 @@ publish tools/winvm/runner.ps1 runner
 publish tools/winvm/setup.ps1 setup
 cp tools/winvm/boot.ps1 "$SHARE/boot.ps1"   # (read once, by a fresh setup)
 alive="$SHARE/runner.alive"
-if [[ ! -f "$alive" ]] || (( $(date +%s) - $(stat -c %Y "$alive") > 10 )); then
+fresh() { [[ -f "$alive" ]] && (( $(date +%s) - $(stat -c %Y "$alive") <= 10 )); }
+for _ in $(seq 60); do                  # (no heartbeat while a job runs)
+    fresh && break
+    sleep 0.5
+done
+if ! fresh; then
     echo "winvm-run: the runner in the VM is not running; set it up once (tools/winvm/setup.ps1):" >&2
     echo "  powershell -ExecutionPolicy Bypass -File \\\\host.lan\\Data\\bee-run\\$(basename "$SHARE"/setup-*.ps1)" >&2
     exit 3

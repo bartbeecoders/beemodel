@@ -17,6 +17,7 @@ dlls=$(objdump -p "$EXE" | awk '/DLL Name:/ {print toupper($3)}' | sort -u)
 for d in $dlls; do
     case $d in
         KERNEL32.DLL|USER32.DLL|GDI32.DLL|WS2_32.DLL) ;;
+        API-MS-WIN-CORE-SYNCH-L1-2-0.DLL) ;;  # (WaitOnAddress; an API set of Windows 8+)
         *) fail "imports $d (only Windows system DLLs)" ;;
     esac
 done
