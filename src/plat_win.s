@@ -58,6 +58,7 @@
 .globl plat_gettid
 .globl plat_poll
 .globl plat_win_msgfd
+.globl plat_path_in
 
 .equ CP_UTF8,           65001
 .equ MEM_COMMIT_RESERVE, 0x3000
@@ -147,6 +148,7 @@
 .equ DS_INO,            16              #  d_ino, WIN32_FIND_DATAW, the
 .equ DS_FIND,           32              #  pattern (path\*)
 .equ DS_PAT,            640
+.equ DS_DRV,            24              # "/" listed: the drives still to give (bit 31: it is that)
 .equ DS_SIZE,           16384
 .equ WPATH_UNITS,       4104            # a path in UTF-16, with its 0
 .equ L_SCR,             64              # a path routine's WENTER L_SIZE frame
@@ -214,6 +216,7 @@ win_start:
     mov     rsi, r13
     mov     rdi, r15
     call    split_args                  # ebx = argc
+    call    argv_paths
     call    [rip+__imp_GetEnvironmentStringsW]
     xor     esi, esi                    # its length: up to the empty entry
 1:  cmp     word ptr [rax+rsi*2], 0
@@ -254,8 +257,9 @@ win_start:
 # drops HOME, give one), else HOME as it is (Git Bash sets it), else
 # USERPROFILE. So ~/BeeModel, ~/.config/beemodel and ~/.cache/beemodel sit
 # in the user's folder as on Linux, as git and ssh keep theirs.
-# XDG_RUNTIME_DIR: TEMP, unless set. Both with / for \, as the code splits
-# paths at /. Keeps rbx, r12-r15.
+# XDG_RUNTIME_DIR: TEMP, unless set. Both in the program's form (/ for \,
+# as the code splits paths at /; /C:/... for C:\..., plat_path_in).
+# Keeps rbx, r12-r15.
 win_env:
     lea     rdi, [rip+s_bmhome]
     call    env_get
@@ -307,7 +311,7 @@ env_get:
 4:  xor     eax, eax
     ret
 
-# env_put(rdi="NAME=", rsi=value): NAME=value (\ as /) in place of NAME's
+# env_put(rdi="NAME=", rsi=value): NAME=value (plat_path_in's) in place of NAME's
 #   entry, or after the last
 env_put:
     push    rbx
@@ -325,7 +329,7 @@ env_put:
     je      4f
     inc     edx
     jmp     3b
-4:  lea     edi, [rcx+rdx+1]
+4:  lea     edi, [rcx+rdx+2]
     call    win_alloc
     mov     rbx, rax
     mov     rdi, rax
@@ -337,16 +341,16 @@ env_put:
     inc     rsi
     inc     rdi
     jmp     5b
-6:  mov     rsi, r13
+6:  push    rdi
+    mov     rsi, r13
 7:  mov     al, [rsi]
-    cmp     al, '\\'
-    jne     8f
-    mov     al, '/'
-8:  mov     [rdi], al
+    mov     [rdi], al
     inc     rsi
     inc     rdi
     test    al, al
     jnz     7b
+    pop     rdi                         # (the program's form)
+    call    plat_path_in
     mov     rdi, r12
     call    env_get
     test    rax, rax
@@ -356,6 +360,58 @@ env_put:
 9:  pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# argv_paths(ebx = argc, r12 = argv): arguments that are Windows paths
+#   (C:\... or C:/..., .\... or ..\...) in the program's form, as Explorer
+#   and terminals give them (plat_path_in); keeps rbx, r12-r15
+argv_paths:
+    push    r13
+    push    r14
+    push    r15
+    mov     r13d, 1
+1:  cmp     r13d, ebx
+    jae     9f
+    mov     r14, [r12+r13*8]
+    movzx   eax, byte ptr [r14]
+    cmp     eax, '.'
+    jne     2f
+    lea     rcx, [r14+1]                # .\ or ..\
+    cmp     byte ptr [rcx], '.'
+    jne     11f
+    inc     rcx
+11: cmp     byte ptr [rcx], '\\'
+    je      4f
+    jmp     8f
+2:  or      eax, 0x20                   # X:\ or X:/
+    sub     eax, 'a'
+    cmp     eax, 'z'-'a'
+    ja      8f
+    cmp     byte ptr [r14+1], ':'
+    jne     8f
+    cmp     byte ptr [r14+2], '\\'
+    je      4f
+    cmp     byte ptr [r14+2], '/'
+    jne     8f
+4:  xor     r15d, r15d                  # a copy, a byte longer
+5:  cmp     byte ptr [r14+r15], 0
+    je      6f
+    inc     r15d
+    jmp     5b
+6:  lea     edi, [r15+2]
+    call    win_alloc
+    mov     rdi, rax
+    mov     rsi, r14
+    lea     ecx, [r15+1]
+    rep movsb
+    mov     rdi, rax
+    call    plat_path_in
+    mov     [r12+r13*8], rdi
+8:  inc     r13d
+    jmp     1b
+9:  pop     r15
+    pop     r14
+    pop     r13
     ret
 
 # split_args(rsi=the command line, rdi=room for the words, r12=room for
@@ -556,10 +612,15 @@ plat_self_path:
     lea     rdi, [rip+self_w]
     mov     esi, eax
     mov     r8, rbx
-    lea     r9d, [r12-1]
+    lea     r9d, [r12-2]
     call    w2u
-    mov     r13d, eax
-    mov     byte ptr [rbx+r13], 0
+    mov     byte ptr [rbx+rax], 0
+    mov     rdi, rbx                    # (the program's form)
+    call    plat_path_in
+2:  cmp     byte ptr [rbx+r13], 0
+    je      1f
+    inc     r13d
+    jmp     2b
 1:  mov     eax, r13d
     pop     r13
     pop     r12
@@ -1184,16 +1245,89 @@ fd_alloc:
 # u2w_at(rdi=UTF-8 path, rsi=room for WPATH_UNITS units) -> eax = the units
 #   written with the 0, 0 when it does not fit; keeps rbx, rbp, rsi, rdi,
 #   r12-r15. Called from a WENTER frame (rsp 16-byte aligned there).
+#   "/C:/..." (the program's form of a drive's path, see plat_path_in) is
+#   C:/..., and "/C:" the drive's root, C:\.
 u2w_at:
     sub     rsp, 56
-    mov     ecx, CP_UTF8
-    xor     edx, edx
     mov     r8, rdi
+    call    drive_form
+    jnz     1f
+    inc     r8                          # (past the /)
+1:  mov     ecx, CP_UTF8
+    xor     edx, edx
     mov     r9d, -1
     mov     [rsp+32], rsi
     mov     dword ptr [rsp+40], WPATH_UNITS
     call    [rip+__imp_MultiByteToWideChar]
-    add     rsp, 56
+    cmp     eax, 3                      # "C:" alone: its root
+    jne     2f
+    cmp     word ptr [rsi+2], ':'
+    jne     2f
+    mov     dword ptr [rsi+4], '\\'
+    mov     eax, 4
+2:  add     rsp, 56
+    ret
+
+# drive_form(rdi = UTF-8 path) -> ZF set when it is "/X:" or "/X:/...";
+#   keeps all but rax, flags
+drive_form:
+    test    rdi, rdi                    # (no path: not one)
+    jz      7f
+    cmp     byte ptr [rdi], '/'
+    jne     9f
+    movzx   eax, byte ptr [rdi+1]
+    or      eax, 0x20
+    sub     eax, 'a'
+    cmp     eax, 'z'-'a'
+    ja      8f
+    cmp     byte ptr [rdi+2], ':'
+    jne     9f
+    movzx   eax, byte ptr [rdi+3]
+    test    eax, eax
+    jz      9f
+    cmp     eax, '/'
+    je      9f
+    cmp     eax, '\\'
+9:  ret
+7:  or      eax, 1                      # (ZF clear)
+    ret
+8:  test    rdi, rdi                    # (ZF clear)
+    ret
+
+# plat_path_in(rdi = a path from Windows or typed in, 0-ended, with room
+#   for one byte more) - into the program's form, in place: / for \, and a
+#   drive's path C:/x as /C:/x, so that / stands for the drives above them
+#   all (plat_open lists them) and the code's /-rooted paths work; keeps all
+#   but rax, rcx, r11. (Linux: as it is.)
+plat_path_in:
+    push    rdx
+    xor     ecx, ecx                    # \ -> /, and the length
+1:  mov     al, [rdi+rcx]
+    test    al, al
+    jz      2f
+    cmp     al, '\\'
+    jne     11f
+    mov     byte ptr [rdi+rcx], '/'
+11: inc     ecx
+    jmp     1b
+2:  movzx   eax, byte ptr [rdi]         # X: at the start: / before it
+    or      eax, 0x20
+    sub     eax, 'a'
+    cmp     eax, 'z'-'a'
+    ja      9f
+    cmp     byte ptr [rdi+1], ':'
+    jne     9f
+    movzx   eax, byte ptr [rdi+2]
+    test    eax, eax
+    jz      3f
+    cmp     eax, '/'
+    jne     9f
+3:  mov     dl, [rdi+rcx]               # (from the 0 down)
+    mov     [rdi+rcx+1], dl
+    dec     ecx
+    jns     3b
+    mov     byte ptr [rdi], '/'
+9:  pop     rdx
     ret
 
 # w_errno -> rax = -errno for GetLastError's error (EIO for one not in
@@ -1238,7 +1372,12 @@ w_errno_of:
 #   on Linux.
 plat_open:
     WENTER L_SIZE
-    WPATH   [rbp+SV_RDI], L_W1, 9f
+    mov     rax, [rbp+SV_RDI]           # "/" to list: the drives
+    cmp     word ptr [rax], '/'
+    jne     0f
+    test    dword ptr [rbp+SV_RSI], O_ACCMODE_
+    jz      .Lop_dir
+0:  WPATH   [rbp+SV_RDI], L_W1, 9f
     mov     [rsp+L_SCR], eax            # (its units)
     lea     rcx, [rsp+L_W1]
     call    [rip+__imp_GetFileAttributesW]
@@ -1314,7 +1453,34 @@ plat_open:
     cmp     rax, -4096
     ja      9f
     mov     rdx, rax
-    lea     rdi, [rax+DS_PAT]           # the pattern: the path, \*
+    mov     rcx, [rbp+SV_RDI]
+    cmp     word ptr [rcx], '/'
+    jne     0f
+    mov     [rsp+L_SCR+8], rdx
+    call    [rip+__imp_GetLogicalDrives]
+    test    eax, eax                    # (none known, as under Wine without
+    jnz     1f                          #  its mount manager: each root tried)
+    mov     [rsp+L_SCR+16], rbx
+    xor     ebx, ebx
+    mov     dword ptr [rsp+L_W1], 0x3A0041   # "A:\"
+    mov     dword ptr [rsp+L_W1+4], '\\'
+2:  lea     rcx, [rsp+L_W1]
+    call    [rip+__imp_GetFileAttributesW]
+    cmp     eax, -1
+    je      3f
+    movzx   ecx, word ptr [rsp+L_W1]
+    sub     ecx, 'A'
+    bts     ebx, ecx
+3:  inc     word ptr [rsp+L_W1]
+    cmp     word ptr [rsp+L_W1], 'Z'
+    jbe     2b
+    mov     eax, ebx
+    mov     rbx, [rsp+L_SCR+16]
+1:  mov     rdx, [rsp+L_SCR+8]
+    or      eax, 0x80000000
+    mov     [rdx+DS_DRV], eax
+    jmp     82f
+0:  lea     rdi, [rax+DS_PAT]           # the pattern: the path, \*
     lea     rsi, [rsp+L_W1]
     mov     ecx, [rsp+L_SCR]
     dec     ecx
@@ -1328,7 +1494,7 @@ plat_open:
 8:  mov     word ptr [rdi], '\\'
     add     rdi, 2
 81: mov     dword ptr [rdi], '*'        # '*', 0
-    xor     edi, edi
+82: xor     edi, edi
     mov     esi, K_DIR
     call    fd_alloc
     test    eax, eax
@@ -1699,6 +1865,8 @@ plat_getdents64:
     xor     r14d, r14d
     cmp     dword ptr [rbx+DS_DONE], 0
     jne     .Lgd_out
+    cmp     dword ptr [rbx+DS_DRV], 0
+    jne     .Lgd_drives
     cmp     qword ptr [rbx+DS_HANDLE], 0
     jne     .Lgd_next
     lea     rcx, [rbx+DS_PAT]
@@ -1768,6 +1936,27 @@ plat_getdents64:
     mov     r14d, eax
     mov     dword ptr [rbx+DS_PEND], 0
     jmp     .Lgd_next
+.Lgd_drives:                            # "/": a folder "X:" a drive
+    mov     eax, [rbx+DS_DRV]
+    and     eax, 0x3FFFFFF
+    jz      .Lgd_out
+    bsf     ecx, eax
+    lea     eax, [r14+24]
+    cmp     eax, r13d
+    ja      .Lgd_full
+    btr     dword ptr [rbx+DS_DRV], ecx
+    lea     rdx, [r12+r14]
+    inc     qword ptr [rbx+DS_INO]
+    mov     r8, [rbx+DS_INO]
+    mov     [rdx], r8                   # d_ino
+    mov     [rdx+8], rax                # d_off
+    mov     word ptr [rdx+16], 24       # d_reclen
+    mov     byte ptr [rdx+18], DT_DIR_
+    add     ecx, 'A'
+    mov     [rdx+19], cl
+    mov     dword ptr [rdx+20], ':'
+    mov     r14d, eax
+    jmp     .Lgd_drives
 .Lgd_full:
     test    r14, r14
     jnz     .Lgd_out
@@ -2351,6 +2540,7 @@ IMPORT 1, GetFileAttributesExW
 IMPORT 1, GetFileAttributesW
 IMPORT 1, GetFileInformationByHandle
 IMPORT 1, GetLastError
+IMPORT 1, GetLogicalDrives
 IMPORT 1, GetModuleFileNameW
 IMPORT 1, GetModuleHandleW
 IMPORT 1, GetStdHandle

@@ -76,6 +76,15 @@
 .equ WM_MOUSEHWHEEL,    0x20E
 .equ WM_ENTERSIZEMOVE,  0x231
 .equ WM_EXITSIZEMOVE,   0x232
+.equ WM_DROPFILES,      0x233
+.equ WM_POINTERUPDATE,  0x245
+.equ WM_POINTERDOWN,    0x246
+.equ WM_POINTERUP,      0x247
+.equ PEN_FLAG_INVERTED, 2
+.equ PEN_FLAG_ERASER,   4
+.equ PEN_MASK_PRESSURE, 1
+.equ MI_WP_SIGNATURE,   0xFF515700      # (mouse messages made from a pen or touch)
+.equ WS_EX_ACCEPTFILES, 0x10
 .equ WM_MOUSELEAVE,     0x2A3
 .equ WM_DPICHANGED,     0x2E0
 .equ WS_OVERLAPPEDWINDOW, 0xCF0000
@@ -145,6 +154,7 @@ pt:             .skip 8                 # POINT
 tme:            .skip 24                # TRACKMOUSEEVENT
 rid:            .skip 16                # RAWINPUTDEVICE
 rawbuf:         .skip 64                # RAWINPUT (a mouse's)
+peninfo:        .skip 128               # POINTER_PEN_INFO
 bmi:            .skip 48                # BITMAPINFO (32 bits, top-down)
 wc:             .skip 80                # WNDCLASSEXW
 ks:             .skip 256               # a keyboard state (the keymap)
@@ -159,6 +169,7 @@ buf_h:          .skip 4
 msgfd:          .skip 4
 frame_pending:  .skip 4
 in_sizemove:    .skip 4                 # Windows' move / resize loop runs
+minimized:      .skip 4                 # (no frames then, as Wayland gives none)
 tracking:       .skip 4                 # TrackMouseEvent asked for the leave
 buttons:        .skip 4                 # held: 1 left, 2 right, 4 middle, 8, 16 side
 serial:         .skip 4
@@ -247,7 +258,7 @@ wnd_open:
     mov     edi, DEF_H
     call    from_96
     mov     [rsp+56], eax
-    xor     ecx, ecx
+    mov     ecx, WS_EX_ACCEPTFILES      # (files dropped on it: WM_DROPFILES)
     lea     rdx, [rip+s_class]
     mov     r9d, WS_OVERLAPPEDWINDOW
     lea     r8, [rip+wtitle]
@@ -480,11 +491,13 @@ wnd_pump:
 9:  WLEAVE
     ret
 
-# wnd_ready -> eax = 1 unless the frame timer is still running
+# wnd_ready -> eax = 1 unless the frame timer is still running or the
+#   window is minimized
 wnd_ready:
-    xor     eax, eax
-    cmp     dword ptr [rip+frame_pending], 0
+    mov     eax, [rip+frame_pending]
+    or      eax, [rip+minimized]
     sete    al
+    movzx   eax, al
     ret
 
 # wnd_buffer -> rax = the frame buffer, big enough for phys_w x phys_h
@@ -973,7 +986,13 @@ wnd_proc:
     je      .Lp_exitsm
     cmp     r13d, WM_DPICHANGED
     je      .Lp_dpi
-.Lp_def:
+    cmp     r13d, WM_DROPFILES
+    je      .Lp_drop
+    cmp     r13d, WM_POINTERUPDATE
+    jb      3f
+    cmp     r13d, WM_POINTERUP
+    jbe     .Lp_pointer
+3:.Lp_def:
     mov     rcx, r12
     mov     edx, r13d
     mov     r8, r14
@@ -1008,7 +1027,10 @@ wnd_proc:
     ret
 
 .Lp_size:                               # the client area's new size
+    xor     eax, eax
     cmp     r14d, SIZE_MINIMIZED
+    sete    al
+    mov     [rip+minimized], eax
     je      .Lp_zero
     movzx   eax, r15w
     mov     [rip+cli_w], eax
@@ -1125,6 +1147,75 @@ wnd_proc:
     call    [rip+__imp_SetWindowPos]
     jmp     .Lp_zero
 
+.Lp_pointer:                            # a pen: its pressure and its end; the
+    movzx   ecx, r14w                   #  mouse messages Windows makes of it
+    lea     rdx, [rip+peninfo]          #  then move and click (mouse_or_pen)
+    call    [rip+__imp_GetPointerPenInfo]
+    test    eax, eax
+    jz      .Lp_def                     # (touch: as a mouse)
+    mov     dword ptr [rip+in_pen], 1
+    xor     eax, eax
+    test    dword ptr [rip+peninfo+96], PEN_FLAG_INVERTED|PEN_FLAG_ERASER
+    setnz   al
+    mov     [rip+in_eraser], eax
+    mov     eax, 0x3f800000             # 1.0 without a pressure
+    test    dword ptr [rip+peninfo+100], PEN_MASK_PRESSURE
+    jz      1f
+    cvtsi2ss xmm0, dword ptr [rip+peninfo+104]
+    mulss   xmm0, [rip+pen_scale]       # (0..1024)
+    movd    eax, xmm0
+1:  mov     [rip+in_pressure], eax
+    jmp     .Lp_def
+
+# mouse_or_pen - a mouse message: full pressure, no eraser, unless Windows
+#   made it from a pen (its pressure then stays as WM_POINTER set it)
+mouse_or_pen:
+    sub     rsp, 40
+    call    [rip+__imp_GetMessageExtraInfo]
+    and     eax, 0xFFFFFF00
+    cmp     eax, MI_WP_SIGNATURE
+    je      9f
+    call    mouse_input
+9:  add     rsp, 40
+    ret
+
+.Lp_drop:                               # files dropped: each to drop_one
+    mov     rcx, r14                    # (wParam: the drop's DROPFILES, in
+    call    [rip+__imp_GlobalLock]      #  global memory: no shell32 needed)
+    test    rax, rax
+    jz      3f
+    mov     rbx, rax
+    cmp     dword ptr [rbx+16], 0       # fWide: the names in UTF-16
+    je      2f
+    mov     r13d, [rbx]                 # pFiles: the names, each 0-ended,
+    add     r13, rbx                    #  an empty one last
+1:  cmp     word ptr [r13], 0
+    je      2f
+    mov     ecx, CP_UTF8
+    xor     edx, edx
+    mov     r8, r13
+    mov     r9d, -1
+    lea     rax, [rip+drop_path]
+    mov     [rsp+32], rax
+    mov     dword ptr [rsp+40], 1020
+    mov     qword ptr [rsp+48], 0
+    mov     qword ptr [rsp+56], 0
+    call    [rip+__imp_WideCharToMultiByte]
+    test    eax, eax
+    jz      12f
+    lea     rdi, [rip+drop_path]        # (the program's form: /C:/...)
+    call    plat_path_in
+    call    drop_one
+12: add     r13, 2                      # the next name
+    cmp     word ptr [r13-2], 0
+    jne     12b
+    jmp     1b
+2:  mov     rcx, r14
+    call    [rip+__imp_GlobalUnlock]
+3:  mov     rcx, r14                    # (as DragFinish)
+    call    [rip+__imp_GlobalFree]
+    jmp     .Lp_zero
+
 .Lp_setcursor:
     cmp     r15w, HTCLIENT
     jne     .Lp_def
@@ -1153,7 +1244,7 @@ wnd_proc:
     mov     dword ptr [rip+tracking], 1
     mov     rcx, [rip+cur_h]            # (back in: our cursor)
     call    [rip+__imp_SetCursor]
-1:  call    mouse_input
+1:  call    mouse_or_pen
     call    ptr_ui
     call    ui_motion
     jmp     .Lp_zero
@@ -1220,7 +1311,7 @@ ptr_ui:
     and     [rip+buttons], ebx
     jnz     3f
     call    [rip+__imp_ReleaseCapture]
-3:  call    mouse_input
+3:  call    mouse_or_pen
     call    [rip+__imp_GetMessageTime]
     mov     ecx, eax
     inc     dword ptr [rip+serial]
@@ -1462,6 +1553,7 @@ key_mods_now:
 .section .rodata
 .balign 4
 btn_map:        .long BTN_LEFT, 1, BTN_RIGHT, 2, BTN_MIDDLE, 4, BTN_SIDE, 8
+pen_scale:      .float 0.0009765625     # 1 / 1024
 
 # ---- the imports ------------------------------------------------------------------
 DLL 3, USER32.dll
@@ -1480,7 +1572,9 @@ IMPORT 3, GetDC
 IMPORT 3, GetDpiForSystem
 IMPORT 3, GetDpiForWindow
 IMPORT 3, GetKeyState
+IMPORT 3, GetMessageExtraInfo
 IMPORT 3, GetMessageTime
+IMPORT 3, GetPointerPenInfo
 IMPORT 3, GetRawInputData
 IMPORT 3, GetSystemMetrics
 IMPORT 3, GetSystemMetricsForDpi

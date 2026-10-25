@@ -315,6 +315,57 @@ bee_main:
     cmp     dword ptr [rip+calls], 1
     CHECK   e, "getdents64, 4 KiB: one call, then the end"
 
+    # "/" lists the drives, each a folder "X:"; /X: is that drive's root,
+    # and /X:/... a path on it (the program's form of X:\..., W4c)
+    STR     rdi, "/"
+    mov     esi, O_DIRECTORY
+    call    plat_open
+    mov     ebx, eax
+    test    eax, eax
+    CHECK   ns, "open / to list: the drives"
+    lea     rsi, [rip+buf]
+    CALL3   getdents64, rbx, rsi, 4096
+    cmp     rax, 24
+    CHECK   ge, "getdents64 of /: a drive at least"
+    lea     rax, [rip+buf]
+    cmp     byte ptr [rax+18], 4        # DT_DIR
+    CHECK   e, "the drive: a folder"
+    lea     rax, [rip+buf]
+    movzx   ecx, byte ptr [rax+19]
+    sub     ecx, 'A'
+    cmp     ecx, 25
+    setbe   cl
+    cmp     word ptr [rax+20], ':'      # "X:" and its 0
+    sete    al
+    and     al, cl
+    test    al, al
+    CHECK   nz, "the drive's name: a letter and a colon"
+    mov     edi, ebx
+    call    plat_close
+    lea     rdi, [rip+drv]              # /X:: a folder, as is /X:/
+    mov     byte ptr [rdi], '/'
+    lea     rax, [rip+buf]
+    mov     cl, [rax+19]
+    mov     [rdi+1], cl
+    mov     word ptr [rdi+2], ':'
+    lea     rsi, [rip+statb]
+    call    plat_stat
+    test    rax, rax
+    CHECK   z, "stat /X:, the drive's root"
+    mov     eax, [rip+statb+24]
+    and     eax, 0xF000
+    cmp     eax, 0x4000
+    CHECK   e, "stat /X:: a folder"
+    lea     rdi, [rip+drv]
+    mov     word ptr [rdi+3], '/'
+    mov     esi, O_DIRECTORY
+    call    plat_open
+    mov     ebx, eax
+    test    eax, eax
+    CHECK   ns, "open /X:/ to list"
+    mov     edi, ebx
+    call    plat_close
+
     # rename, access, statfs
     STR     rdi, "a.txt"
     STR     rsi, "c.txt"
@@ -533,3 +584,4 @@ calls:    .skip 4
 dirname:  .skip 64
 statb:    .skip 160
 buf:      .skip 4096
+drv:      .skip 8

@@ -2,7 +2,7 @@
 #  BeeModel - the Windows start's environment, tested on its own
 #  (Vibecoding/BeeModel-Win11-Port-Plan.html, W3d): HOME is BEEMODEL_HOME,
 #  else HOME, else USERPROFILE; XDG_RUNTIME_DIR is TEMP unless set; both
-#  with / for \. Linked with src/plat_win.s into build/test-env.exe by
+#  with / for \, a drive's path as /C:/... (W4c). Linked with src/plat_win.s into build/test-env.exe by
 #  scripts/build.sh; run by ci/check-exe.sh under Wine and in the Windows 11
 #  VM. Prints a line per check; the exit code is the number that failed.
 # =============================================================================
@@ -88,10 +88,18 @@ no_backslash:
 
 # same_path(rdi, rsi) -> eax = 1 when they are the same with \ read as /
 #   (rsi 0: no)
+#   and /C:/x the program's form of C:\x (plat_path_in)
 same_path:
     xor     eax, eax
     test    rsi, rsi
     jz      3f
+    cmp     byte ptr [rdi], '/'
+    jne     1f
+    cmp     byte ptr [rdi+2], ':'
+    jne     1f
+    cmp     byte ptr [rsi+1], ':'
+    jne     1f
+    inc     rdi
 1:  mov     cl, [rdi]
     mov     dl, [rsi]
     cmp     dl, '\\'

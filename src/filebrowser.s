@@ -1224,6 +1224,7 @@ fb_place_cb:
 # fb_path_cb(rdi=typed text) - a folder opens, a file is taken
 fb_path_cb:
     push    rbx
+    call    plat_path_in                # (C:\x on Windows: /C:/x)
     call    path_expand
     mov     rbx, rax
     mov     rdi, rbx
@@ -1282,7 +1283,8 @@ fb_ok:
     lea     rsi, [rip+fb_dir]
     call    scpy
     jmp     7f
-0:    lea     rdi, [rip+fb_name]          # a typed full path counts as it is
+0:  lea     rdi, [rip+fb_name]          # a typed full path counts as it is
+    call    plat_path_in                #  (C:\x on Windows: /C:/x)
     cmp     byte ptr [rdi], '/'
     je      1f
     cmp     byte ptr [rdi], '~'

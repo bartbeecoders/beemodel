@@ -19,6 +19,7 @@
 .include "const.inc"
 
 .globl plat_self_path
+.globl plat_path_in
 .globl plat_mmap
 .globl plat_munmap
 .globl plat_mprotect
@@ -144,6 +145,12 @@ s_devnull_:     .asciz "/dev/null"
 s_self_:        .asciz "/proc/self/exe"
 
 .text
+
+# plat_path_in(rdi = a path typed in or given by the system) - into the
+#   program's form, in place; on Linux it is in it already (Windows turns
+#   \ into / and C:/x into /C:/x)
+plat_path_in:
+    ret
 
 # plat_self_path(rdi=buffer, esi=its size) -> rax = the length of this
 #   program's path, written there 0-ended (0: not known). An ordinary call.
