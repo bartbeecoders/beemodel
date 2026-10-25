@@ -118,7 +118,7 @@ elif [ $QUICK = 1 ]; then
             .github/*|ci/check-binary.sh)
                 echo "quick: $f is shared by everything: the full run"
                 ALL=1 ;;
-            src/plat_win.s|src/plat_win.ld|ci/check-exe.sh)
+            src/plat_win.s|src/plat_win.ld|ci/check-exe.sh|tests/win/*|tools/winvm*)
                 ;;                          # the Windows build: its check always runs
             tests/golden/*)
                 PICK[fakewl_bitmap]=1 ;;

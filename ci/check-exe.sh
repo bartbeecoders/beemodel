@@ -2,8 +2,10 @@
 # Verify the Windows build (build/beemodel.exe, Vibecoding/BeeModel-Win11-
 # Port-Plan.html): a 64-bit PE that imports only Windows system DLLs, no C
 # runtime; and, where Wine runs, that it prints the same version as the
-# Linux binary. WINE names the command (default: wine, else wine64). When
-# the Windows 11 VM's job runner is up (tools/winvm-run.sh), the same there.
+# Linux binary and the platform layer's own tests (build/test-*.exe, from
+# tests/win/) pass. WINE names the command (default: wine, else wine64).
+# When the Windows 11 VM's job runner is up (tools/winvm-run.sh), the same
+# there.
 set -euo pipefail
 EXE="${1:-build/beemodel.exe}"
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -35,6 +37,12 @@ if (( ${#wine[@]} )); then
     got=$(WINEDEBUG=-all "${wine[@]}" "$EXE" --version 2>/dev/null | tr -d '\r') || fail "--version under Wine exited with $?"
     [[ "$got" == "$want" ]] || fail "--version under Wine: '$got', not '$want'"
     echo "under Wine: $got"
+    for t in build/test-*.exe; do
+        [[ -f "$t" ]] || continue
+        WINEDEBUG=-all "${wine[@]}" "$t" 2>/dev/null | tr -d '\r' | grep -v '^  ok ' || true
+        WINEDEBUG=-all "${wine[@]}" "$t" >/dev/null 2>&1 || fail "$t under Wine: $? checks failed"
+        echo "under Wine: $(basename "$t") passed"
+    done
     ran+=" Wine"
 fi
 alive="$HOME/Windows/bee-run/runner.alive"
@@ -43,6 +51,12 @@ if [[ -f "$alive" ]] && (( $(date +%s) - $(stat -c %Y "$alive") <= 10 )); then
         fail "--version in the Windows 11 VM exited with $?"
     [[ "$got" == "$want" ]] || fail "--version in the Windows 11 VM: '$got', not '$want'"
     echo "in the Windows 11 VM: $got"
+    for t in build/test-*.exe; do
+        [[ -f "$t" ]] || continue
+        out=$("$(dirname "$0")/../tools/winvm-run.sh" --timeout 120 "$(basename "$t")" | tr -d '\r') ||
+            { grep -v '^  ok ' <<<"$out"; fail "$t in the Windows 11 VM: $? checks failed"; }
+        echo "in the Windows 11 VM: $(basename "$t") passed"
+    done
     ran+=" VM"
 fi
 echo "exe checks passed (run:${ran:- nowhere: no wine, no VM runner})"

@@ -20,6 +20,12 @@
 
 .globl win_start
 .globl plat_self_path
+.globl plat_mmap
+.globl plat_munmap
+.globl plat_mprotect
+.globl plat_mremap
+.globl plat_mincore
+.globl plat_madvise
 .globl plat_write
 .globl plat_exit_group
 .globl plat_getpid
@@ -28,7 +34,28 @@
 .equ IMAGE_BASE,        0x400000        # (scripts/build.sh links there)
 .equ CP_UTF8,           65001
 .equ MEM_COMMIT_RESERVE, 0x3000
+.equ MEM_COMMIT,        0x1000
+.equ MEM_RESERVE,       0x2000
+.equ MEM_DECOMMIT,      0x4000
+.equ MEM_RELEASE,       0x8000
+.equ MEM_FREE,          0x10000
 .equ PAGE_READWRITE,    4
+.equ MBI_BASE,          0               # MEMORY_BASIC_INFORMATION
+.equ MBI_ALLOC,         8
+.equ MBI_SIZE,          24
+.equ MBI_STATE,         32
+.equ MBI_PROTECT,       36
+.equ EXC_ACCESS_VIOLATION, 0xC0000005
+.equ MAP_SHARED_,       0x01            # Linux mmap flags
+.equ MAP_FIXED_,        0x10
+.equ MAP_ANONYMOUS_,    0x20
+.equ MAP_NORESERVE_,    0x4000
+.equ MAP_STACK_,        0x20000
+.equ MADV_DONTNEED_,    4
+.equ NR_MAX,            1024
+.equ ENOMEM_,           12
+.equ EINVAL_,           22
+.equ EFAULT_,           14
 .equ STD_INPUT_HANDLE,  -10             # -11 out, -12 err
 .equ ENOSYS_,           38
 .equ EBADF_,            9
@@ -94,6 +121,9 @@ win_start:
     sub     rsp, 32
     mov     ecx, CP_UTF8                # (our output is UTF-8)
     call    [rip+__imp_SetConsoleOutputCP]
+    mov     ecx, 1                      # first in line: memory first touched
+    lea     rdx, [rip+win_veh]
+    call    [rip+__imp_AddVectoredExceptionHandler]
     call    [rip+__imp_GetCommandLineW]
     mov     rdi, rax
     mov     esi, -1
@@ -354,6 +384,477 @@ plat_self_path:
     pop     rbx
     ret
 
+# ---- memory -------------------------------------------------------------------
+# Anonymous private mappings only (files: W3b, shared memory: W6). A plain
+# one is reserved and committed at once. A MAP_NORESERVE one (the frame
+# arena, the simulation ranges) is only reserved and goes in nr_tab; when a
+# thread touches it, win_veh commits that 64 KiB and the access runs again,
+# as Linux backs such pages on first touch. Stacks (MAP_STACK) are committed
+# whole: a fault on a stack has no stack to be handled on.
+
+# VQ reg: VirtualQuery(reg) into the MEMORY_BASIC_INFORMATION at [rsp+32]
+# (needs WENTER 64 or more) -> eax = 0 when the address is out of range
+.macro VQ reg
+    mov     rcx, \reg
+    lea     rdx, [rsp+32]
+    mov     r8d, 48
+    call    [rip+__imp_VirtualQuery]
+.endm
+
+plat_mmap:
+    test    r10d, MAP_ANONYMOUS_
+    jz      9f
+    test    r10d, MAP_SHARED_|MAP_FIXED_
+    jnz     9f
+    test    rsi, rsi
+    jz      8f
+    WENTER 16
+    lea     rax, [rip+prot_map]
+    mov     ecx, edx
+    and     ecx, 7
+    movzx   r9d, byte ptr [rax+rcx]     # flProtect
+    mov     [rsp+32], r9
+    lea     rdx, [rsi+4095]             # dwSize
+    and     rdx, -4096
+    mov     [rsp+40], rdx
+    xor     ecx, ecx
+    mov     r8d, MEM_COMMIT|MEM_RESERVE
+    mov     eax, r10d
+    and     eax, MAP_NORESERVE_|MAP_STACK_
+    cmp     eax, MAP_NORESERVE_
+    jne     1f
+    mov     r8d, MEM_RESERVE
+1:  call    [rip+__imp_VirtualAlloc]
+    test    rax, rax
+    jz      2f
+    mov     ecx, [rbp-48]               # (the saved r10: the flags)
+    and     ecx, MAP_NORESERVE_|MAP_STACK_
+    cmp     ecx, MAP_NORESERVE_
+    jne     2f
+    mov     rdi, rax
+    mov     rsi, [rsp+40]
+    mov     rdx, [rsp+32]
+    call    nr_add
+2:  WLEAVE
+    test    rax, rax
+    jz      7f
+    ret
+7:  mov     rax, -ENOMEM_
+    ret
+8:  mov     rax, -EINVAL_
+    ret
+9:  mov     rax, -ENOSYS_
+    ret
+
+# plat_munmap: an allocation the range covers whole is released; of one it
+# covers in part, its pages are decommitted (and the allocation released
+# once none is left, unless it is in nr_tab)
+plat_munmap:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    WENTER 64
+    mov     rbx, rdi                    # rbx = start, r12 = here, r13 = end
+    and     rbx, -4096
+    mov     r12, rbx
+    lea     r13, [rdi+rsi+4095]
+    and     r13, -4096
+.Lmu_next:
+    cmp     r12, r13
+    jae     .Lmu_done
+    VQ      r12
+    test    eax, eax
+    jz      .Lmu_done
+    cmp     dword ptr [rsp+32+MBI_STATE], MEM_FREE
+    jne     1f
+    mov     r12, [rsp+32+MBI_BASE]
+    add     r12, [rsp+32+MBI_SIZE]
+    jmp     .Lmu_next
+1:  mov     r14, [rsp+32+MBI_ALLOC]     # r14 = the allocation, r15 = its end
+    call    .Lmu_alloc_end
+    cmp     r14, rbx
+    jb      2f
+    cmp     r15, r13
+    ja      2f
+    mov     rcx, r14                    # all of it
+    xor     edx, edx
+    mov     r8d, MEM_RELEASE
+    call    [rip+__imp_VirtualFree]
+    mov     rdi, r14
+    call    nr_del
+    mov     r12, r15
+    jmp     .Lmu_next
+2:  mov     rdx, r15                    # part of it
+    cmp     rdx, r13
+    cmova   rdx, r13
+    mov     r15, rdx
+    sub     rdx, r12
+    mov     rcx, r12
+    mov     r8d, MEM_DECOMMIT
+    call    [rip+__imp_VirtualFree]
+    mov     r12, r15
+    mov     rdi, r14
+    call    nr_find
+    test    rax, rax
+    jnz     .Lmu_next
+    mov     [rsp+80], r12
+    mov     r12, r14
+3:  VQ      r12                         # anything still committed?
+    test    eax, eax
+    jz      4f
+    cmp     [rsp+32+MBI_ALLOC], r14
+    jne     4f
+    cmp     dword ptr [rsp+32+MBI_STATE], MEM_COMMIT
+    je      5f
+    mov     r12, [rsp+32+MBI_BASE]
+    add     r12, [rsp+32+MBI_SIZE]
+    jmp     3b
+4:  mov     rcx, r14                    # no: release it
+    xor     edx, edx
+    mov     r8d, MEM_RELEASE
+    call    [rip+__imp_VirtualFree]
+5:  mov     r12, [rsp+80]
+    jmp     .Lmu_next
+.Lmu_done:
+    WLEAVE
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    xor     eax, eax
+    ret
+# r15 = the end of allocation r14 (its regions in a row); a call inside
+# plat_munmap's frame, so the information block is at [rsp+8+32]. (The
+# shadow space goes below the return address.)
+.Lmu_alloc_end:
+    mov     r15, r14
+1:  mov     rcx, r15
+    lea     rdx, [rsp+8+32]
+    mov     r8d, 48
+    sub     rsp, 40
+    call    [rip+__imp_VirtualQuery]
+    add     rsp, 40
+    test    eax, eax
+    jz      2f
+    cmp     [rsp+8+32+MBI_ALLOC], r14
+    jne     2f
+    mov     r15, [rsp+8+32+MBI_BASE]
+    add     r15, [rsp+8+32+MBI_SIZE]
+    jmp     1b
+2:  ret
+
+plat_mprotect:
+    WENTER 16
+    mov     rcx, rdi
+    mov     r9, rdx
+    and     r9d, 7
+    lea     rax, [rip+prot_map]
+    movzx   r8d, byte ptr [rax+r9]
+    mov     rdx, rsi
+    lea     r9, [rsp+32]                # (the old protection)
+    call    [rip+__imp_VirtualProtect]
+    WLEAVE
+    test    eax, eax
+    jz      1f
+    xor     eax, eax
+    ret
+1:  mov     rax, -ENOMEM_
+    ret
+
+# plat_madvise: MADV_DONTNEED and MADV_REMOVE give the pages back; read
+# again they are zero, as on Linux (in nr_tab: committed again on touch;
+# elsewhere: at once). Other advice is a hint Windows does without.
+plat_madvise:
+    cmp     edx, MADV_DONTNEED_
+    je      1f
+    cmp     edx, MADV_REMOVE
+    je      1f
+    xor     eax, eax
+    ret
+1:  push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    WENTER 64
+    mov     r12, rdi
+    and     r12, -4096
+    lea     r13, [rdi+rsi+4095]
+    and     r13, -4096
+2:  cmp     r12, r13
+    jae     4f
+    VQ      r12
+    test    eax, eax
+    jz      4f
+    mov     r15, [rsp+32+MBI_BASE]
+    add     r15, [rsp+32+MBI_SIZE]
+    cmp     r15, r13
+    cmova   r15, r13
+    cmp     dword ptr [rsp+32+MBI_STATE], MEM_COMMIT
+    jne     3f
+    mov     r14, [rsp+32+MBI_ALLOC]
+    mov     ebx, [rsp+32+MBI_PROTECT]
+    mov     rcx, r12
+    mov     rdx, r15
+    sub     rdx, r12
+    mov     r8d, MEM_DECOMMIT
+    call    [rip+__imp_VirtualFree]
+    mov     rdi, r14
+    call    nr_find
+    test    rax, rax
+    jnz     3f
+    mov     rcx, r12
+    mov     rdx, r15
+    sub     rdx, r12
+    mov     r8d, MEM_COMMIT
+    mov     r9d, ebx
+    call    [rip+__imp_VirtualAlloc]
+3:  mov     r12, r15
+    jmp     2b
+4:  WLEAVE
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    xor     eax, eax
+    ret
+
+# plat_mremap(rdi=old, rsi=its size, rdx=new size, r10=MREMAP_MAYMOVE):
+# smaller in place; bigger always moves (a new mapping, the bytes copied,
+# the old one unmapped), so without MREMAP_MAYMOVE it fails
+plat_mremap:
+    push    rbx
+    push    r12
+    push    r13
+    WENTER 64
+    mov     rbx, rdi
+    lea     r12, [rsi+4095]             # r12 = old size, r13 = new
+    and     r12, -4096
+    lea     r13, [rdx+4095]
+    and     r13, -4096
+    cmp     r13, r12
+    ja      2f
+    jae     1f
+    lea     rdi, [rbx+r13]
+    mov     rsi, r12
+    sub     rsi, r13
+    call    plat_munmap
+1:  mov     rax, rbx
+    jmp     9f
+2:  mov     rax, -ENOMEM_
+    test    r10d, 1
+    jz      9f
+    VQ      rbx
+    test    eax, eax
+    mov     rax, -EFAULT_
+    jz      9f
+    xor     ecx, ecx
+    mov     rdx, r13
+    mov     r8d, MEM_COMMIT|MEM_RESERVE
+    mov     r9d, [rsp+32+MBI_PROTECT]
+    call    [rip+__imp_VirtualAlloc]
+    test    rax, rax
+    jz      8f
+    mov     r13, rax
+    mov     rdi, rax
+    mov     rsi, rbx
+    mov     rcx, r12
+    rep movsb
+    mov     rdi, rbx
+    mov     rsi, r12
+    call    plat_munmap
+    mov     rax, r13
+    jmp     9f
+8:  mov     rax, -ENOMEM_
+9:  WLEAVE
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# plat_mincore: a committed page counts as in memory
+plat_mincore:
+    push    r12
+    push    r13
+    push    r14
+    WENTER 64
+    mov     r12, rdi
+    lea     r13, [rdi+rsi+4095]
+    and     r13, -4096
+    mov     r14, rdx
+1:  cmp     r12, r13
+    jae     3f
+    VQ      r12
+    test    eax, eax
+    jz      4f
+    mov     eax, [rsp+32+MBI_STATE]
+    cmp     eax, MEM_FREE
+    je      4f
+    cmp     eax, MEM_COMMIT
+    sete    al
+    mov     rcx, [rsp+32+MBI_BASE]
+    add     rcx, [rsp+32+MBI_SIZE]
+    cmp     rcx, r13
+    cmova   rcx, r13
+2:  mov     [r14], al
+    inc     r14
+    add     r12, 4096
+    cmp     r12, rcx
+    jb      2b
+    jmp     1b
+3:  xor     eax, eax
+    jmp     5f
+4:  mov     rax, -ENOMEM_
+5:  WLEAVE
+    pop     r14
+    pop     r13
+    pop     r12
+    ret
+
+# nr_tab: the MAP_NORESERVE allocations, NR_MAX entries {base, end, Windows
+# protection}; a free entry has end 0. Changed under nr_lock; win_veh reads
+# it without (an entry's end is written last and cleared first).
+.macro NR_LOCK
+1:  lock bts dword ptr [rip+nr_lock], 0
+    jnc     2f
+    pause
+    jmp     1b
+2:
+.endm
+
+# nr_add(rdi=base, rsi=size, rdx=protection); keeps all but rcx, r11. A
+# full table: the range is committed instead (Windows may refuse that).
+nr_add:
+    NR_LOCK
+    lea     r11, [rip+nr_tab]
+    xor     ecx, ecx
+1:  cmp     qword ptr [r11+8], 0
+    je      2f
+    add     r11, 24
+    inc     ecx
+    cmp     ecx, NR_MAX
+    jb      1b
+    mov     dword ptr [rip+nr_lock], 0
+    push    rax
+    WENTER
+    mov     rcx, rdi
+    mov     r9, rdx
+    mov     rdx, rsi
+    mov     r8d, MEM_COMMIT
+    call    [rip+__imp_VirtualAlloc]
+    WLEAVE
+    pop     rax
+    ret
+2:  mov     [r11], rdi
+    mov     [r11+16], rdx
+    lea     rcx, [rdi+rsi]
+    mov     [r11+8], rcx
+    mov     dword ptr [rip+nr_lock], 0
+    ret
+
+# nr_del(rdi=base): its entry goes; keeps all but rcx, r11
+nr_del:
+    NR_LOCK
+    lea     r11, [rip+nr_tab]
+    xor     ecx, ecx
+1:  cmp     qword ptr [r11+8], 0
+    je      2f
+    cmp     [r11], rdi
+    jne     2f
+    mov     qword ptr [r11+8], 0
+    jmp     3f
+2:  add     r11, 24
+    inc     ecx
+    cmp     ecx, NR_MAX
+    jb      1b
+3:  mov     dword ptr [rip+nr_lock], 0
+    ret
+
+# nr_find(rdi=base) -> rax = its entry, or 0; keeps all but rcx, r11
+nr_find:
+    lea     rax, [rip+nr_tab]
+    xor     ecx, ecx
+1:  cmp     qword ptr [rax+8], 0
+    je      2f
+    cmp     [rax], rdi
+    je      3f
+2:  add     rax, 24
+    inc     ecx
+    cmp     ecx, NR_MAX
+    jb      1b
+    xor     eax, eax
+3:  ret
+
+# win_veh(rcx=EXCEPTION_POINTERS) -> eax = -1 (go on) or 0 (not ours): the
+# vectored exception handler, in the Windows convention. An access fault on
+# a reserved page of an nr_tab range commits the 64 KiB around it (within
+# the range); any other fault is left to Windows, a real crash as before.
+win_veh:
+    mov     rax, [rcx]                  # the EXCEPTION_RECORD
+    cmp     dword ptr [rax], EXC_ACCESS_VIOLATION
+    jne     8f
+    cmp     dword ptr [rax+24], 2       # NumberParameters
+    jb      8f
+    mov     rdx, [rax+40]               # ExceptionInformation[1]: the address
+    lea     r8, [rip+nr_tab]
+    xor     r9d, r9d
+1:  mov     r10, [r8+8]
+    test    r10, r10
+    jz      2f
+    cmp     rdx, [r8]
+    jb      2f
+    cmp     rdx, r10
+    jb      3f
+2:  add     r8, 24
+    inc     r9d
+    cmp     r9d, NR_MAX
+    jb      1b
+8:  xor     eax, eax
+    ret
+3:  push    rbx
+    push    rsi
+    push    rdi
+    push    rbp
+    mov     rbp, rsp
+    and     rsp, -16
+    sub     rsp, 96
+    mov     rbx, rdx
+    mov     rsi, [r8]
+    mov     rdi, r10
+    mov     eax, [r8+16]
+    mov     [rsp+80], eax
+    VQ      rbx
+    test    eax, eax
+    jz      5f
+    cmp     dword ptr [rsp+32+MBI_STATE], MEM_RESERVE
+    jne     5f                          # (committed: a real fault)
+    mov     rcx, rbx
+    and     rcx, -0x10000
+    cmp     rcx, rsi
+    cmovb   rcx, rsi
+    lea     rdx, [rcx+0x10000]
+    cmp     rdx, rdi
+    cmova   rdx, rdi
+    sub     rdx, rcx
+    mov     r8d, MEM_COMMIT
+    mov     r9d, [rsp+80]
+    call    [rip+__imp_VirtualAlloc]
+    test    rax, rax
+    jz      5f
+    mov     eax, -1                     # EXCEPTION_CONTINUE_EXECUTION
+    jmp     6f
+5:  xor     eax, eax                    # EXCEPTION_CONTINUE_SEARCH
+6:  mov     rsp, rbp
+    pop     rbp
+    pop     rdi
+    pop     rsi
+    pop     rbx
+    ret
+
 # ---- files ------------------------------------------------------------------
 # plat_write: the console (fds 0-2) only, so far
 plat_write:
@@ -399,14 +900,8 @@ plat_gettid:
     WLEAVE
     ret
 
-# ---- the rest: W3 (memory, files, threads, time), W5 (poll), W6 (processes,
+# ---- the rest: W3 (files, threads, time), W5 (poll), W6 (processes,
 #      sockets, shared memory)
-NOSYS plat_mmap
-NOSYS plat_munmap
-NOSYS plat_mprotect
-NOSYS plat_mremap
-NOSYS plat_mincore
-NOSYS plat_madvise
 NOSYS plat_read
 NOSYS plat_pwrite64
 NOSYS plat_open
@@ -457,6 +952,13 @@ NOSYS plat_timerfd_settime
 .section .bss
 .align 8
 self_w:         .skip SELF_WCHARS*2     # GetModuleFileNameW's answer
+.align 8
+nr_tab:         .skip NR_MAX*24         # the MAP_NORESERVE allocations
+nr_lock:        .skip 4
+
+.section .rodata
+# Linux PROT_* (read 1, write 2, exec 4) -> Windows PAGE_*
+prot_map:       .byte 0x01, 0x02, 0x04, 0x04, 0x10, 0x20, 0x40, 0x40
 
 # ---- the imports ----------------------------------------------------------------
 # ld puts the .idata$N sections in order and points the PE header at them:
@@ -498,6 +1000,7 @@ __imp_\func: .quad imp_name_\func - IMAGE_BASE
 .endm
 
 DLL 1, KERNEL32.dll
+IMPORT 1, AddVectoredExceptionHandler
 IMPORT 1, ExitProcess
 IMPORT 1, GetCommandLineW
 IMPORT 1, GetCurrentProcessId
@@ -507,6 +1010,9 @@ IMPORT 1, GetModuleFileNameW
 IMPORT 1, GetStdHandle
 IMPORT 1, SetConsoleOutputCP
 IMPORT 1, VirtualAlloc
+IMPORT 1, VirtualFree
+IMPORT 1, VirtualProtect
+IMPORT 1, VirtualQuery
 IMPORT 1, WideCharToMultiByte
 IMPORT 1, WriteFile
 DLL_END 1

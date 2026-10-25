@@ -43,6 +43,16 @@ SECTIONS
     KEEP (SORT(*)(.idata$6))
     KEEP (SORT(*)(.idata$7))
   }
+  /* DWARF (scripts/build.sh debug), kept out of the loaded image as ld's
+     own PE script does */
+  .debug_aranges BLOCK(__section_alignment__) (NOLOAD) : { *(.debug_aranges) }
+  .debug_info BLOCK(__section_alignment__) (NOLOAD) : { *(.debug_info) }
+  .debug_abbrev BLOCK(__section_alignment__) (NOLOAD) : { *(.debug_abbrev) }
+  .debug_line BLOCK(__section_alignment__) (NOLOAD) : { *(.debug_line) }
+  .debug_str BLOCK(__section_alignment__) (NOLOAD) : { *(.debug_str) }
+  .debug_line_str BLOCK(__section_alignment__) (NOLOAD) : { *(.debug_line_str) }
+  .debug_rnglists BLOCK(__section_alignment__) (NOLOAD) : { *(.debug_rnglists) }
+  .debug_frame BLOCK(__section_alignment__) (NOLOAD) : { *(.debug_frame) }
   /DISCARD/ :
   {
     *(.note.*) *(.comment) *(.eh_frame)

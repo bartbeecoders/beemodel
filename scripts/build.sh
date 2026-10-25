@@ -50,6 +50,12 @@ if ld -V 2>/dev/null | grep -qw i386pep; then
     [[ "$MODE" == "debug" ]] || WLD+=(-s)
     ld "${WLD[@]}" -o build/beemodel.exe "${WOBJS[@]}"
     echo "built build/beemodel.exe ($(stat -c %s build/beemodel.exe) bytes)"
+    # tests/win/*.s: the platform layer tested on its own (ci/check-exe.sh)
+    for t in tests/win/*.s; do
+        n=$(basename "${t%.s}")
+        as "${ASFLAGS[@]}" -o "build/obj/test-$n.o" "$t"
+        ld "${WLD[@]}" -o "build/test-$n.exe" build/obj/plat_win.o "build/obj/test-$n.o"
+    done
 else
     rm -f build/beemodel.exe
     echo "skipped build/beemodel.exe (needs ld with the i386pep emulation)"

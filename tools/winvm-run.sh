@@ -3,7 +3,7 @@
 # output and exit code, through the folder the VM shares (~/Windows; the VM
 # forwards only RDP, no SSH). The guest's side is tools/winvm/runner.ps1,
 # set up once with tools/winvm/setup.ps1 (see there). build/beemodel.exe
-# goes along and runs from the job's folder:
+# and build/test-*.exe go along and run from the job's folder:
 #   tools/winvm-run.sh beemodel.exe --version
 #   tools/winvm-run.sh --timeout 600 beemodel.exe --eval "print(1)"
 # The command is a cmd.exe line (several: separated by \r\n). Exit codes
@@ -38,7 +38,9 @@ if [[ ! -f "$alive" ]] || (( $(date +%s) - $(stat -c %Y "$alive") > 10 )); then
     echo "  powershell -ExecutionPolicy Bypass -File \\\\host.lan\\Data\\bee-run\\$(basename "$SHARE"/setup-*.ps1)" >&2
     exit 3
 fi
-[[ -f build/beemodel.exe ]] && cp build/beemodel.exe "$SHARE/bin/"
+for f in build/beemodel.exe build/test-*.exe; do
+    [[ -f "$f" ]] && cp "$f" "$SHARE/bin/"
+done
 id="job$(date +%s%N)"
 echo "$TIMEOUT" > "$SHARE/$id.limit"
 printf '@echo off\r\n%s\r\nexit /b %%errorlevel%%\r\n' "$*" > "$SHARE/$id.tmp"
