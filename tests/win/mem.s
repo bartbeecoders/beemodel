@@ -209,7 +209,7 @@ bee_main:
     cmp     eax, 42
     CHECK   e, "mprotect: the code runs"
 
-    # not yet: files (W3b), shared memory (W6)
+    # a file mapping from an fd that is not open
     xor     edi, edi
     mov     esi, 4096
     mov     edx, PROT_R
@@ -217,8 +217,8 @@ bee_main:
     mov     r8d, 3
     xor     r9d, r9d
     call    plat_mmap
-    cmp     rax, -38
-    CHECK   e, "mmap of a file: -ENOSYS until W3b"
+    cmp     rax, -9
+    CHECK   e, "mmap of a file: an fd not open is -EBADF"
 
     # the contract: every register but rax, rcx, r11 kept (the arguments too)
     xor     edi, edi
