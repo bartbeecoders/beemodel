@@ -1,10 +1,11 @@
 # =============================================================================
 #  BeeModel - 3D modeling tool shell
-#  Pure x86-64 Linux assembly (GNU as, Intel syntax). No libc, no libraries:
-#  raw syscalls + the Wayland wire protocol over a UNIX socket.
+#  Pure x86-64 assembly (GNU as, Intel syntax). No libc, no libraries: the
+#  platform layer's system calls, and the window through window.s's wnd_*
+#  (the Wayland wire protocol over a UNIX socket on Linux, Win32 on Windows).
 #
-#  Event loop: block in recvmsg() -> dispatch events -> redraw only when
-#  something changed and the compositor asked for a new frame. Idle = 0% CPU.
+#  Event loop: block in poll() -> dispatch events -> redraw only when
+#  something changed and the window may show a new frame. Idle = 0% CPU.
 # =============================================================================
 .intel_syntax noprefix
 
@@ -35,25 +36,7 @@ bee_main:
     call    arena_init
     call    scene_init
     call    jobs_init
-    call    wl_connect
-
-    call    alloc_id                    # wl_display.get_registry
-    mov     [rip+id_registry], eax
-    mov     edx, eax
-    mov     edi, 1
-    mov     esi, WL_DISPLAY_GET_REGISTRY
-    call    msg1
-    call    wl_roundtrip                # globals arrive -> bound on the fly
-
-    cmp     dword ptr [rip+id_compositor], 0
-    je      .Lmissing
-    cmp     dword ptr [rip+id_shm], 0
-    je      .Lmissing
-    cmp     dword ptr [rip+id_wm_base], 0
-    je      .Lmissing
-
-    call    create_window
-    call    clip_init                   # (the clipboard's data device)
+    call    wnd_open                    # the window (window.s)
     call    kb_timer_init
     call    mcp_init
     call    gpu_prewarm                 # (the GPU helper starts meanwhile)
@@ -81,11 +64,10 @@ bee_main:
     mov     dword ptr [rip+toast_on], 1 # (from now on messages are toasts)
     mov     dword ptr [rip+vg_async], 1 # (the window: DAGs build in the background)
 .Lloop:
-    mov     edi, -1
-    call    wl_flush
-    # sleep until the compositor talks to us or the key-repeat timer fires
+    call    wnd_flush
+    # sleep until the window has news or the key-repeat timer fires
+    call    wnd_fd
     lea     rdi, [rip+pollfds]
-    mov     eax, [rip+sock_fd]
     mov     [rdi], eax
     mov     dword ptr [rdi+4], POLLIN
     mov     eax, [rip+rep_fd]
@@ -199,7 +181,7 @@ bee_main:
     test    word ptr [rip+pollfds+6], POLLIN|POLLERR|POLLHUP
     jz      1f
     mov     dword ptr [rip+wl_dispatching], 1   # (long jobs wait: jobui.s)
-    call    wl_read_dispatch
+    call    wnd_dispatch
     mov     dword ptr [rip+wl_dispatching], 0
     call    job_pending                 # a long job a key or click asked for
 1:  test    word ptr [rip+pollfds+14], POLLIN
@@ -236,10 +218,6 @@ bee_main:
     call    mcp_shutdown
     xor     edi, edi
     call    plat_exit_group
-
-.Lmissing:
-    lea     rdi, [rip+e_globals]
-    call    fatal
 
 # handle_cli_args(rbx = argv[1], r12 = argv[2])
 handle_cli_args:

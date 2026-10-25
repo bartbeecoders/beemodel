@@ -9,72 +9,43 @@
 .include "const.inc"
 
 # exports
-.globl redraw_again
-.globl write_err
-.globl in_pressure
-.globl in_eraser
-.globl in_pen
-.globl fr_ns
-.globl fr_count
-.globl fr_work
-.globl fr_wk
-.globl getenv
-.globl sock_fd
 .globl alloc_id
-.globl create_window
-.globl dirty
-.globl wl_lock_pointer
-.globl wl_unlock_pointer
-.globl e_globals
-.globl envp
-.globl fatal
-.globl id_compositor
-.globl id_registry
 .globl id_seat
-.globl id_shm
-.globl id_toplevel
-.globl id_wm_base
 .globl msg0
 .globl msg1
 .globl msg2
-.globl msg3
-.globl pool_size
-.globl quit_flag
-.globl render
-.globl s_newline
-.globl set_cursor
-.globl str_eq
-.globl win_flags
-.globl win_h
-.globl win_w
-.globl wl_connect
+.globl msg_begin
+.globl put_u32
+.globl msg_end
+.globl put_str
+.globl fdq_pop
 .globl wl_flush
-.globl wl_read_dispatch
-.globl wl_roundtrip
-.globl write_err
+.globl wnd_open
+.globl wnd_fd
+.globl wnd_flush
+.globl wnd_dispatch
+.globl wnd_pump
+.globl wnd_ready
+.globl wnd_buffer
+.globl wnd_present
+.globl wnd_move
+.globl wnd_resize
+.globl wnd_minimize
+.globl wnd_maximize_toggle
+.globl wnd_lock_pointer
+.globl wnd_unlock_pointer
+.globl set_cursor
 
 .section .data
 .align 4
 next_id:        .long 2                 # 1 is always wl_display
-in_pressure:    .float 1.0              # the pen's pressure 0..1 (mouse: 1)
 
 .section .bss
-redraw_again:   .skip 4                 # drawing wants another frame (set while drawing)
-.align 64
-.equ FR_RING, 256
-fr_ns:          .skip FR_RING*8         # the last frames' drawing times
-fr_count:       .skip 4                 # frames drawn
-.align 8
-fr_wk:          .skip FR_RING*8         # their input work (sculpt strokes)
-fr_work:        .skip 8                 # (since the last frame)
-.align 8
-fr_t0:          .skip 8
 sbuf:           .skip SBUF_SIZE
 rbuf:           .skip RBUF_SIZE
 rctl:           .skip 256
 sctl:           .skip 24
 .align 8
-envp:           .skip 8
 smsg:           .skip 56                # struct msghdr (send)
 siov:           .skip 16                # struct iovec  (send)
 rmsg:           .skip 56                # struct msghdr (recv)
@@ -117,30 +88,17 @@ tab_x:          .skip 4                 # the frame being collected
 tab_y:          .skip 4
 tab_ev:         .skip 4                 # 1 moved, 2 down, 4 up
 tab_serial:     .skip 4
-in_eraser:      .skip 4                 # 1: the pen's eraser end
-in_pen:         .skip 4                 # 1: a tablet tool was seen
 sync_done:      .skip 4
 
 # window state
-win_w:          .skip 4
-comp_w:         .skip 4                 # the size the compositor gave (logical)
-comp_h:         .skip 4
-phys_w:         .skip 4
-phys_h:         .skip 4
 id_fscale_mgr:  .skip 4
 id_viewporter:  .skip 4
 id_fscale:      .skip 4
 id_viewport:    .skip 4
-win_h:          .skip 4
 pend_w:         .skip 4
 pend_h:         .skip 4
 pend_flags:     .skip 4
-win_flags:      .skip 4                 # bit0 maximized, bit1 tiled/fullscreen
-.globl configured
-configured:     .skip 4
-dirty:          .skip 4
 frame_pending:  .skip 4
-quit_flag:      .skip 4
 
 # shm
 shm_fd:         .skip 4
@@ -148,6 +106,7 @@ pool_size:      .skip 4
 buf_w:          .skip 4
 buf_h:          .skip 4
 buf_busy:       .skip 8
+buf_cur:        .skip 4                 # the buffer wnd_buffer gave
 .align 8
 pool_ptr:       .skip 8
 
@@ -162,7 +121,6 @@ tool_ops:                               # zwp_tablet_tool_v2 events
     .long ev_done - tool_ops, ev_done - tool_ops, .Ltl_button - tool_ops
     .long .Ltl_frame - tool_ops
 tab_pmax:       .float 65535.0
-sf_one_w:       .float 1.0
 s_env_wd:       .asciz "WAYLAND_DISPLAY="
 s_env_xdg:      .asciz "XDG_RUNTIME_DIR="
 s_wayland0:     .asciz "wayland-0"
@@ -185,69 +143,8 @@ e_lost:         .asciz "beemodel: Wayland connection lost\n"
 e_globals:      .asciz "beemodel: compositor lacks wl_compositor / wl_shm / xdg_wm_base\n"
 e_shm:          .asciz "beemodel: shared memory allocation failed\n"
 e_proto:        .asciz "beemodel: protocol error: "
-s_newline:      .asciz "\n"
 
 .text
-
-# -----------------------------------------------------------------------------
-# write_err(rdi=asciz) - write a string to stderr
-# -----------------------------------------------------------------------------
-write_err:
-    mov     rsi, rdi
-    xor     edx, edx
-1:  cmp     byte ptr [rsi+rdx], 0
-    je      2f
-    inc     edx
-    jmp     1b
-2:  mov     edi, 2
-    call    plat_write
-    ret
-
-# fatal(rdi=asciz) - print and exit(1)
-fatal:
-    call    write_err
-    mov     edi, 1
-    call    plat_exit_group
-
-# -----------------------------------------------------------------------------
-# getenv(rdi="NAME=") -> rax = value pointer or 0
-# -----------------------------------------------------------------------------
-getenv:
-    mov     r8, [rip+envp]
-1:  mov     rsi, [r8]
-    test    rsi, rsi
-    jz      4f
-    xor     ecx, ecx
-2:  mov     al, [rdi+rcx]
-    test    al, al
-    jz      3f                          # whole prefix matched
-    cmp     al, [rsi+rcx]
-    jne     5f
-    inc     ecx
-    jmp     2b
-3:  lea     rax, [rsi+rcx]
-    ret
-5:  add     r8, 8
-    jmp     1b
-4:  xor     eax, eax
-    ret
-
-# -----------------------------------------------------------------------------
-# str_eq(rdi, rsi) -> eax = 1 if equal
-# -----------------------------------------------------------------------------
-str_eq:
-    xor     ecx, ecx
-1:  mov     al, [rdi+rcx]
-    cmp     al, [rsi+rcx]
-    jne     2f
-    test    al, al
-    jz      3f
-    inc     ecx
-    jmp     1b
-2:  xor     eax, eax
-    ret
-3:  mov     eax, 1
-    ret
 
 # -----------------------------------------------------------------------------
 # wl_connect - open the compositor socket
@@ -1195,9 +1092,9 @@ ev_relptr:
     call    play_look
     jmp     ev_done
 
-# wl_lock_pointer -> eax = 1 when the pointer is locked in the window, its
+# wnd_lock_pointer -> eax = 1 when the pointer is locked in the window, its
 #   cursor hidden and its relative motion coming (the compositor has both)
-wl_lock_pointer:
+wnd_lock_pointer:
     xor     eax, eax
     cmp     dword ptr [rip+id_constraints], 0
     je      9f
@@ -1248,8 +1145,8 @@ wl_lock_pointer:
 8:  mov     eax, 1
 9:  ret
 
-# wl_unlock_pointer - the pointer free again (its cursor back on the next move)
-wl_unlock_pointer:
+# wnd_unlock_pointer - the pointer free again (its cursor back on the next move)
+wnd_unlock_pointer:
     cmp     dword ptr [rip+id_locked], 0
     je      9f
     mov     edi, [rip+id_locked]
@@ -1279,13 +1176,6 @@ tab_seat:
     mov     esi, TAB_MGR_GET_SEAT
     call    msg2
 1:  ret
-
-# mouse_input - a pointer event: full pressure, no eraser
-mouse_input:
-    mov     eax, [rip+sf_one_w]
-    mov     [rip+in_pressure], eax
-    mov     dword ptr [rip+in_eraser], 0
-    ret
 
 ev_keyboard:
     cmp     r13d, 3
@@ -1534,53 +1424,40 @@ ensure_buffers:
     call    fatal
 
 # -----------------------------------------------------------------------------
-# render - draw the whole UI into a free buffer and commit it
+# Drawing (window.s's render): two shm buffers, a frame callback between frames
 # -----------------------------------------------------------------------------
-render:
-    cmp     dword ptr [rip+configured], 0
-    je      9f
+# wnd_ready -> eax = 1 unless the compositor's frame callback is pending
+wnd_ready:
+    xor     eax, eax
     cmp     dword ptr [rip+frame_pending], 0
-    jne     9f                          # wait for the compositor's frame callback
-    push    rbx
-    lea     rdi, [rip+frame_arena]
-    call    arena_reset
-    mov     edi, [rip+win_w]            # buffer is physical: logical x scale
-    call    to_px
-    mov     [rip+phys_w], eax
-    mov     edi, [rip+win_h]
-    call    to_px
-    mov     [rip+phys_h], eax
+    sete    al
+    ret
+
+# wnd_buffer -> rax = a free buffer of phys_w x phys_h, 0 when both are busy
+wnd_buffer:
+    sub     rsp, 8
     call    ensure_buffers
-    xor     ebx, ebx
+    add     rsp, 8
+    xor     ecx, ecx
     cmp     dword ptr [rip+buf_busy], 0
     je      1f
-    inc     ebx
+    inc     ecx
+    xor     eax, eax
     cmp     dword ptr [rip+buf_busy+4], 0
-    jne     8f                          # both busy: retry on release
-1:  mov     eax, [rip+phys_w]
-    mov     [rip+fb_w], eax
-    mov     ecx, [rip+phys_h]
-    mov     [rip+fb_h], ecx
-    imul    eax, ecx
+    jne     9f
+1:  mov     [rip+buf_cur], ecx
+    mov     eax, [rip+phys_w]
+    imul    eax, [rip+phys_h]
     shl     rax, 2
-    imul    rax, rbx
+    imul    rax, rcx
     add     rax, [rip+pool_ptr]
-    mov     [rip+fb_ptr], rax
-    call    mono_ns
-    mov     [rip+fr_t0], rax
-    call    ui_draw
-    call    mono_ns                     # how long it took (frametime())
-    sub     rax, [rip+fr_t0]
-    mov     ecx, [rip+fr_count]
-    and     ecx, FR_RING-1
-    lea     rdx, [rip+fr_ns]
-    mov     [rdx+rcx*8], rax
-    mov     rax, [rip+fr_work]
-    lea     rdx, [rip+fr_wk]
-    mov     [rdx+rcx*8], rax
-    mov     qword ptr [rip+fr_work], 0
-    inc     dword ptr [rip+fr_count]
+9:  ret
 
+# wnd_present - attach wnd_buffer's buffer, damage it all, ask for the next
+#   frame callback, commit
+wnd_present:
+    push    rbx
+    mov     ebx, [rip+buf_cur]
     lea     rcx, [rip+buf_busy]
     mov     dword ptr [rcx+rbx*4], 1
     lea     rcx, [rip+id_buf]
@@ -1619,62 +1496,98 @@ render:
     mov     esi, WL_SURFACE_COMMIT
     call    msg0
     mov     dword ptr [rip+frame_pending], 1
-    mov     dword ptr [rip+dirty], 0
-    mov     eax, [rip+an_play]          # playing: the next frame too
-    or      eax, [rip+redraw_again]     # (or drawing asked for one)
-    mov     dword ptr [rip+redraw_again], 0
-    or      [rip+dirty], eax
-8:  pop     rbx
-9:  ret
-
-# mono_ns -> rax = monotonic clock, nanoseconds
-# win_from_comp - win_w / win_h from the compositor's size and the UI scale
-.globl win_from_comp
-win_from_comp:
-    mov     eax, [rip+comp_w]
-    imul    eax, eax, 100
-    xor     edx, edx
-    div     dword ptr [rip+pr_scale]
-    mov     [rip+win_w], eax
-    mov     eax, [rip+comp_h]
-    imul    eax, eax, 100
-    xor     edx, edx
-    div     dword ptr [rip+pr_scale]
-    mov     [rip+win_h], eax
+    pop     rbx
     ret
 
-# pr_ptr(edi=x, esi=y) -> edi, esi in our units (the UI scale)
-pr_ptr:
-    cmp     dword ptr [rip+pr_scale], 100
-    je      9f
-    mov     eax, edi
-    imul    eax, eax, 100
-    cdq
-    idiv    dword ptr [rip+pr_scale]
-    mov     edi, eax
-    mov     eax, esi
-    imul    eax, eax, 100
-    cdq
-    idiv    dword ptr [rip+pr_scale]
-    mov     esi, eax
-9:  ret
+# -----------------------------------------------------------------------------
+# The window interface's rest (window.s)
+# -----------------------------------------------------------------------------
+# wnd_open - connect, bind the globals, make the window and its data device
+wnd_open:
+    sub     rsp, 8
+    call    wl_connect
+    call    alloc_id                    # wl_display.get_registry
+    mov     [rip+id_registry], eax
+    mov     edx, eax
+    mov     edi, 1
+    mov     esi, WL_DISPLAY_GET_REGISTRY
+    call    msg1
+    call    wl_roundtrip                # globals arrive -> bound on the fly
+    cmp     dword ptr [rip+id_compositor], 0
+    je      8f
+    cmp     dword ptr [rip+id_shm], 0
+    je      8f
+    cmp     dword ptr [rip+id_wm_base], 0
+    je      8f
+    call    create_window
+    add     rsp, 8
+    jmp     clip_init                   # (the clipboard's data device)
+8:  lea     rdi, [rip+e_globals]
+    call    fatal
 
-.globl mono_ns
-.globl msg_begin
-.globl put_u32
-.globl msg_end
-.globl put_str
-.globl fdq_pop
-mono_ns:
+# wnd_fd -> eax = the compositor socket
+wnd_fd:
+    mov     eax, [rip+sock_fd]
+    ret
+
+# wnd_flush - send the queued requests
+wnd_flush:
+    mov     edi, -1
+    jmp     wl_flush
+
+# wnd_dispatch - one read of the socket (it is readable), its events handled
+wnd_dispatch:
+    jmp     wl_read_dispatch
+
+# wnd_pump - send what is queued, then handle whatever arrived, never waiting
+wnd_pump:
     sub     rsp, 24
-    mov     edi, 1                      # CLOCK_MONOTONIC
-    mov     rsi, rsp
-    call    plat_clock_gettime
-    mov     rax, [rsp]
-    imul    rax, rax, 1000000000
-    add     rax, [rsp+8]
-    add     rsp, 24
+    call    wnd_flush
+1:  mov     eax, [rip+sock_fd]
+    mov     [rsp], eax
+    mov     dword ptr [rsp+4], POLLIN
+    mov     rdi, rsp
+    mov     esi, 1
+    xor     edx, edx
+    call    plat_poll
+    cmp     eax, 1
+    jne     9f
+    test    word ptr [rsp+6], POLLIN
+    jz      9f
+    call    wl_read_dispatch
+    jmp     1b
+9:  add     rsp, 24
     ret
+
+# wnd_move(edi=serial) - the compositor moves the window with the pointer
+wnd_move:
+    mov     ecx, edi
+    mov     edi, [rip+id_toplevel]
+    mov     esi, XDG_TOPLEVEL_MOVE
+    mov     edx, [rip+id_seat]
+    jmp     msg2
+
+# wnd_resize(edi=serial, esi=edges) - ... or resizes it from those edges
+wnd_resize:
+    mov     r8d, esi
+    mov     ecx, edi
+    mov     edi, [rip+id_toplevel]
+    mov     esi, XDG_TOPLEVEL_RESIZE
+    mov     edx, [rip+id_seat]
+    jmp     msg3
+
+wnd_minimize:
+    mov     edi, [rip+id_toplevel]
+    mov     esi, XDG_TOPLEVEL_SET_MINIMIZED
+    jmp     msg0
+
+wnd_maximize_toggle:
+    mov     edi, [rip+id_toplevel]
+    mov     esi, XDG_TOPLEVEL_SET_MAXIMIZED
+    test    dword ptr [rip+win_flags], 1
+    jz      1f
+    mov     esi, XDG_TOPLEVEL_UNSET_MAXIMIZED
+1:  jmp     msg0
 
 # -----------------------------------------------------------------------------
 # set_cursor(edi = cursor-shape-v1 shape) - only sends when it changes

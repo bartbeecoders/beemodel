@@ -812,14 +812,6 @@ ui_leave:
     mov     dword ptr [rip+dirty], 1
     ret
 
-toggle_maximize:
-    mov     edi, [rip+id_toplevel]
-    mov     esi, XDG_TOPLEVEL_SET_MAXIMIZED
-    test    dword ptr [rip+win_flags], 1
-    jz      1f
-    mov     esi, XDG_TOPLEVEL_UNSET_MAXIMIZED
-1:  jmp     msg0
-
 # ui_button(edi=button, esi=state, edx=serial, ecx=time)
 ui_button:
     cmp     dword ptr [rip+job_on], 0   # (a long job runs: no input)
@@ -1132,12 +1124,9 @@ ui_button:
 
     cmp     ebx, HIT_EDGE
     jne     1f
-    mov     edi, [rip+id_toplevel]
-    mov     esi, XDG_TOPLEVEL_RESIZE
-    mov     edx, [rip+id_seat]
-    mov     ecx, [rip+press_serial]
-    mov     r8d, r12d
-    call    msg3
+    mov     edi, [rip+press_serial]     # (the edges: ui_hit's)
+    mov     esi, r12d
+    call    wnd_resize
     jmp     .Lbt_done
 1:  cmp     ebx, HIT_TITLE
     jne     2f
@@ -1148,14 +1137,11 @@ ui_button:
     cmp     eax, 400
     ja      11f
     mov     dword ptr [rip+last_click], 0
-    call    toggle_maximize
+    call    wnd_maximize_toggle
     jmp     .Lbt_done
 11: mov     [rip+last_click], r13d
-    mov     edi, [rip+id_toplevel]
-    mov     esi, XDG_TOPLEVEL_MOVE
-    mov     edx, [rip+id_seat]
-    mov     ecx, [rip+press_serial]
-    call    msg2
+    mov     edi, [rip+press_serial]
+    call    wnd_move
     jmp     .Lbt_done
 2:  cmp     ebx, HIT_BTN_MIN
     jb      3f
@@ -1420,11 +1406,9 @@ ui_button:
     jmp     .Lbt_done
 11: cmp     eax, HIT_BTN_MAX
     jne     12f
-    call    toggle_maximize
+    call    wnd_maximize_toggle
     jmp     .Lbt_done
-12: mov     edi, [rip+id_toplevel]
-    mov     esi, XDG_TOPLEVEL_SET_MINIMIZED
-    call    msg0
+12: call    wnd_minimize
     jmp     .Lbt_done
 2:  cmp     dword ptr [rip+menu_open], 0  # a menu entry: run it (or open it)
     jl      .Lbt_done

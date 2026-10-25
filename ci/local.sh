@@ -114,7 +114,7 @@ elif [ $QUICK = 1 ]; then
     for f in $changed; do
         case $f in
             src/const.inc|src/macros.inc|src/mem.s|src/jobs.s|src/main.s|src/ops.s|src/scene.s|\
-            src/mesh.s|src/undo.s|src/script.s|src/wayland.s|scripts/build.sh|tools/fakewl.py|\
+            src/mesh.s|src/undo.s|src/script.s|src/wayland.s|src/window.s|scripts/build.sh|tools/fakewl.py|\
             .github/*|ci/check-binary.sh)
                 echo "quick: $f is shared by everything: the full run"
                 ALL=1 ;;

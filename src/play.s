@@ -258,7 +258,7 @@ do_play_start:
     call    ms_now
     mov     [rip+pl_t_last], rax
     mov     dword ptr [rip+pl_on], 1
-    call    wl_lock_pointer             # (the window: the mouse captured)
+    call    wnd_lock_pointer             # (the window: the mouse captured)
     mov     [rip+pl_locked], eax
     mov     dword ptr [rip+pl_lastx], -100000
     call    pl_camera
@@ -325,7 +325,7 @@ play_end:
     mov     ebx, edi
     mov     dword ptr [rip+pl_on], 0
     mov     dword ptr [rip+pl_keys], 0
-    call    wl_unlock_pointer
+    call    wnd_unlock_pointer
     mov     dword ptr [rip+pl_locked], 0
     call    pl_free_grids
     call    lg_end
@@ -412,7 +412,7 @@ play_key:
     mov     dword ptr [rip+pl_on], 2    # stopped: the question
     mov     dword ptr [rip+pl_keys], 0
     sub     rsp, 8
-    call    wl_unlock_pointer
+    call    wnd_unlock_pointer
     add     rsp, 8
     mov     dword ptr [rip+pl_locked], 0
     mov     dword ptr [rip+dirty], 1
