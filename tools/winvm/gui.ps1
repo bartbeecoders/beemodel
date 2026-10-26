@@ -172,7 +172,7 @@ while ($i -lt $args.Count) {
                 $b.StandardInput.Flush()
                 if ($line -match '"id"') {
                     $t = $b.StandardOutput.ReadLineAsync()
-                    if ($t.Wait(10000)) { "mcp: $($t.Result)" } else { "mcp: no answer in 10 s" }
+                    if ($t.Wait(10000)) { "mcp: $($t.Result)" } else { "mcp: no answer in 10 s"; break }
                 }
             }
             $b.StandardInput.Close()

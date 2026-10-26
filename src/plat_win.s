@@ -73,6 +73,9 @@
 .globl plat_setsockopt
 .globl plat_getrandom
 .globl plat_symlink
+.globl plat_memfd_create
+.globl plat_sendmsg
+.globl plat_recvmsg
 .globl plat_spawn
 .globl plat_wait4
 .globl plat_kill
@@ -174,6 +177,8 @@
 .equ PB_NONBLOCK,       72              #  PB_BUF)
 .equ PB_HEAD,           76
 .equ PB_LEN,            80
+.equ PB_FAR,            84              # the far end's fd when made, and the child
+.equ PB_PID,            88              #  it went to (plat_spawn: sendmsg's peer)
 .equ PB_BUF,            128
 .equ PB_CAP,            65536
 .equ PB_SIZE,           PB_BUF+PB_CAP
@@ -233,6 +238,7 @@
 .equ SPN_HLIST,         192
 .equ SPN_SI,            224
 .equ SPN_ABUF,          336
+.equ SPN_FD3,           592             #  (fd 3's inheritable copy)
 .equ SPN_FRAME,         608
 .equ POLLOUT_,          4
 .equ POLLERR_,          8
@@ -263,6 +269,17 @@
 .equ EAFNOSUPPORT_,     97
 .equ ENOTSOCK_,         88
 .equ UN_PATH,           108             # sockaddr_un's path
+.equ K_SHM,             7               # shared memory (a memfd): the section's handle
+                                        #  (0 until ftruncate sizes it), aux its size
+.equ FILE_MAP_WRITE,    2
+.equ FILE_MAP_READ,     4
+.equ PIPE_MESSAGE,      6               # PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE
+.equ PIPE_READMODE_MESSAGE, 2
+.equ PROCESS_DUP_HANDLE, 0x40
+.equ SM_MAX,            1024            # a message sendmsg / recvmsg take (the helper's: 64)
+.equ SM_TAIL,           16              #  and its trailer: a handle passed, then FD_MAGIC
+.equ EMSGSIZE_,         90
+.equ FD_MAGIC,          0x3164662d6c656562  # "beel-fd1": sendmsg's trailer
 .equ DS_HANDLE,         0               # a listing (K_DIR): FindFirstFileW's
 .equ DS_PEND,           8               #  handle, an entry found but not yet
 .equ DS_DONE,           12              #  given, the end reached, the last
@@ -393,7 +410,8 @@ win_start:
 # in the user's folder as on Linux, as git and ssh keep theirs.
 # XDG_RUNTIME_DIR: TEMP, unless set. Both in the program's form (/ for \,
 # as the code splits paths at /; /C:/... for C:\..., plat_path_in).
-# Keeps rbx, r12-r15.
+# BEEMODEL_FD3: a handle a parent gave us as fd 3 (plat_spawn: the GPU
+# helper's socket). Keeps rbx, r12-r15.
 win_env:
     mov     rdx, [rip+envp]             # names in capitals: Windows' are
 1:  mov     rsi, [rdx]                  #  case-blind (Path is PATH), the
@@ -441,7 +459,31 @@ win_env:
     mov     rsi, rax
     lea     rdi, [rip+s_xdgrt]
     call    env_put
-3:  ret
+3:  lea     rdi, [rip+s_fd3]
+    call    env_get
+    test    rax, rax
+    jz      9f
+    xor     ecx, ecx
+5:  movzx   edx, byte ptr [rax]         # (hex)
+    sub     edx, '0'
+    cmp     edx, 9
+    jbe     6f
+    sub     edx, 'a'-'0'-10
+    cmp     edx, 15
+    ja      7f
+    cmp     edx, 10
+    jb      7f
+6:  shl     rcx, 4
+    or      rcx, rdx
+    inc     rax
+    jmp     5b
+7:  test    rcx, rcx
+    jz      9f
+    lea     rdx, [rip+fd_tab+3*32]
+    mov     [rdx+FD_HANDLE], rcx
+    mov     qword ptr [rdx+FD_AUX], 0
+    mov     dword ptr [rdx+FD_KIND], K_FILE
+9:  ret
 
 # env_get(rdi="NAME=") -> rax = its value, or 0; rdx = its envp slot (or
 #   the end's)
@@ -799,8 +841,10 @@ plat_self_path:
 .endm
 
 plat_mmap:
-    test    r10d, MAP_SHARED_|MAP_FIXED_
+    test    r10d, MAP_FIXED_
     jnz     9f
+    test    r10d, MAP_SHARED_
+    jnz     mmap_shm
     test    r10d, MAP_ANONYMOUS_
     jz      mmap_file
     test    rsi, rsi
@@ -1885,6 +1929,8 @@ plat_ftruncate:
     call    fd_entry
     test    rax, rax
     jz      8f
+    cmp     dword ptr [rax+FD_KIND], K_SHM
+    je      shm_size
     push    rbx
     push    r12
     push    r13
@@ -3062,19 +3108,24 @@ plat_pipe2:
     ret
 
 # plat_socketpair(edi=domain, esi=type, edx=protocol, r10=int sv[2]):
-#   AF_UNIX streams only, as a pipe both ways (sockets and the GPU helper's
-#   packets: W6b, W6c)
+#   AF_UNIX, as a pipe both ways: a stream (ffmpeg's stdin), or packets
+#   (SOCK_SEQPACKET, the GPU helper's: a message-mode pipe, each write one
+#   message, each read one)
 plat_socketpair:
     cmp     edi, 1                      # AF_UNIX
     jne     8f
     mov     eax, esi
     and     eax, 0xf
-    cmp     eax, 1                      # SOCK_STREAM
+    mov     ecx, 1                      # SOCK_STREAM: both ways
+    cmp     eax, 1
+    je      1f
+    mov     ecx, 3                      # SOCK_SEQPACKET: and messages
+    cmp     eax, 5
     jne     8f
-    push    rdi
+1:  push    rdi
     push    rsi
     mov     rdi, r10
-    mov     esi, 1
+    mov     esi, ecx
     call    pipe_pair
     pop     rsi
     pop     rdi
@@ -3082,7 +3133,8 @@ plat_socketpair:
 8:  mov     rax, -ENOSYS_
     ret
 
-# pipe_pair(rdi=int fds[2], esi=1: both ways) -> rax = 0 or -errno
+# pipe_pair(rdi=int fds[2], esi=bit 0: both ways, bit 1: messages) ->
+#   rax = 0 or -errno
 pipe_pair:
     push    rbx
     push    r12
@@ -3114,11 +3166,14 @@ pipe_pair:
     mov     word ptr [rdi], 0
     lea     rcx, [rsp+64]               # our end
     mov     edx, PIPE_ACCESS_INBOUND|FILE_FLAG_OVERLAPPED|FILE_FLAG_FIRST_PIPE_INSTANCE
-    test    r13d, r13d
+    test    r13d, 1
     jz      3f
     mov     edx, PIPE_ACCESS_DUPLEX|FILE_FLAG_OVERLAPPED|FILE_FLAG_FIRST_PIPE_INSTANCE
-3:  mov     r8d, PIPE_REJECT_REMOTE_CLIENTS     # (bytes, waiting)
-    mov     r9d, 1
+3:  mov     r8d, PIPE_REJECT_REMOTE_CLIENTS     # (bytes or messages, waiting)
+    test    r13d, 2
+    jz      31f
+    or      r8d, PIPE_MESSAGE
+31: mov     r9d, 1
     mov     dword ptr [rsp+32], PIPE_BUF_BYTES
     mov     dword ptr [rsp+40], PIPE_BUF_BYTES
     mov     dword ptr [rsp+48], 0
@@ -3129,7 +3184,7 @@ pipe_pair:
     mov     rbx, rax
     lea     rcx, [rsp+64]               # the other end
     mov     edx, GENERIC_WRITE
-    test    r13d, r13d
+    test    r13d, 1
     jz      4f
     mov     edx, GENERIC_READ|GENERIC_WRITE
 4:  xor     r8d, r8d
@@ -3141,7 +3196,15 @@ pipe_pair:
     cmp     rax, -1
     je      .Lpp_err
     mov     r14, rax
-    xor     ecx, ecx                    # the block
+    test    r13d, 2                     # (its end reads messages too)
+    jz      41f
+    mov     dword ptr [rsp+48], PIPE_READMODE_MESSAGE
+    mov     rcx, r14
+    lea     rdx, [rsp+48]
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    [rip+__imp_SetNamedPipeHandleState]
+41: xor     ecx, ecx                    # the block
     mov     edx, PB_SIZE
     mov     r8d, MEM_COMMIT_RESERVE
     mov     r9d, PAGE_READWRITE
@@ -3175,6 +3238,7 @@ pipe_pair:
     test    eax, eax
     js      .Lpp_full
     mov     [r12+4], eax
+    mov     [r15+PB_FAR], eax
     xor     eax, eax
     jmp     .Lpp_ret
 .Lpp_full:                              # (the first fd back, then all)
@@ -3218,6 +3282,22 @@ pipe_pair:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# pipe_peer(edi = a pipe's far end, edx = the child's pid it went to) - the
+#   pid noted in the near end's block; keeps rbx, rbp, r12-r15
+pipe_peer:
+    lea     rax, [rip+fd_tab]
+    mov     ecx, FD_MAX
+1:  cmp     dword ptr [rax+FD_KIND], K_PIPE
+    jne     2f
+    mov     rsi, [rax+FD_AUX]
+    cmp     [rsi+PB_FAR], edi
+    jne     2f
+    mov     [rsi+PB_PID], edx
+2:  add     rax, 32
+    dec     ecx
+    jnz     1b
     ret
 
 # hex_w(eax, rdi = where) - eax as 8 hex digits in UTF-16; rdi after them
@@ -4050,7 +4130,9 @@ plat_getrandom:
 #   and the map's fds 0..2 as the child's standard handles: each an
 #   inheritable copy, and the only handles it inherits. A path without its
 #   .exe finds the one with. Arguments and the environment go in Windows'
-#   form of a drive's path (win_form: /C:/x as C:/x). fd 3 (the GPU helper's): W6c. The child gets no
+#   form of a drive's path (win_form: /C:/x as C:/x). fd 3 (the GPU
+#   helper's socket) goes as a fourth inheritable copy, its handle in
+#   BEEMODEL_FD3 for the child's start (win_env). The child gets no
 #   console window of its own. Its process handle waits in proc_tab for
 #   wait4 and kill.
 plat_spawn:
@@ -4071,6 +4153,7 @@ plat_spawn:
     mov     qword ptr [rsp+SPN_DUP], 0
     mov     qword ptr [rsp+SPN_DUP+8], 0
     mov     qword ptr [rsp+SPN_DUP+16], 0
+    mov     qword ptr [rsp+SPN_FD3], 0
     mov     qword ptr [rsp+SPN_ALIST], 0
     xor     ecx, ecx                    # the scratch block
     mov     edx, SP_SIZE
@@ -4105,7 +4188,16 @@ plat_spawn:
     je      .Lsp_noent
     test    eax, FILE_ATTRIBUTE_DIRECTORY
     jnz     .Lsp_noent
-2:  # the command line, in UTF-8 first
+2:  mov     edi, [r14+12]               # fd 3: an inheritable copy (the
+    test    edi, edi                    #  environment tells the child)
+    js      21f
+    call    fd_entry
+    test    rax, rax
+    jz      21f
+    mov     rdx, [rax+FD_HANDLE]
+    call    dup_inherit
+    mov     [rsp+SPN_FD3], rax
+21: # the command line, in UTF-8 first
     lea     rdi, [rbx+SP_U8]
     lea     r15, [rbx+SP_U8+SP_U8_CAP-8]
     mov     r8, r12
@@ -4157,7 +4249,35 @@ plat_spawn:
     jc      .Lsp_long
     add     r8, 8
     jmp     4b
-41: mov     byte ptr [rdi], 0
+41: mov     rax, [rsp+SPN_FD3]          # BEEMODEL_FD3=<fd 3's handle, hex>
+    test    rax, rax
+    jz      42f
+    lea     rcx, [rdi+32]
+    cmp     rcx, r15
+    ja      .Lsp_long
+    lea     rsi, [rip+s_fd3]
+44: mov     cl, [rsi]
+    test    cl, cl
+    jz      45f
+    mov     [rdi], cl
+    inc     rsi
+    inc     rdi
+    jmp     44b
+45: mov     ecx, 16
+46: rol     rax, 4
+    mov     edx, eax
+    and     edx, 15
+    add     edx, '0'
+    cmp     edx, '9'
+    jbe     47f
+    add     edx, 'a'-'9'-1
+47: mov     [rdi], dl
+    inc     rdi
+    dec     ecx
+    jnz     46b
+    mov     byte ptr [rdi], 0
+    inc     rdi
+42: mov     byte ptr [rdi], 0
     lea     rax, [rbx+SP_U8]
     cmp     rdi, rax                    # (none at all: 0 0)
     jne     43f
@@ -4248,6 +4368,12 @@ plat_spawn:
 71: inc     ecx
     cmp     ecx, 3
     jb      7b
+    mov     rax, [rsp+SPN_FD3]
+    test    rax, rax
+    jz      72f
+    mov     [rdi+r15*8], rax
+    inc     r15d
+72:
     mov     qword ptr [rsp+SPN_ASIZE], ALIST_ROOM
     lea     rcx, [rsp+SPN_ABUF]
     mov     edx, 1
@@ -4294,6 +4420,12 @@ plat_spawn:
     mov     edi, [rsp+SPN_PI+16]        # pid, its handle -> proc_tab
     mov     rsi, [rsp+SPN_PI]
     call    proc_add
+    mov     edi, [r14+12]               # fd 3 a pipe's far end: the child is
+    test    edi, edi                    #  that pipe's peer (plat_sendmsg)
+    js      10f
+    mov     edx, [rsp+SPN_PI+16]
+    call    pipe_peer
+10:
     mov     eax, [rsp+SPN_PI+16]
     mov     [rsp+SPN_RES], rax
 .Lsp_clean:
@@ -4305,7 +4437,11 @@ plat_spawn:
 2:  inc     r15d
     cmp     r15d, 3
     jb      1b
-    mov     rcx, [rsp+SPN_ALIST]
+    mov     rcx, [rsp+SPN_FD3]
+    test    rcx, rcx
+    jz      21f
+    call    [rip+__imp_CloseHandle]
+21: mov     rcx, [rsp+SPN_ALIST]
     test    rcx, rcx
     jz      3f
     call    [rip+__imp_DeleteProcThreadAttributeList]
@@ -4582,10 +4718,282 @@ plat_kill:
 8:  mov     rax, -ESRCH_
     ret
 
-# ---- the rest: W6c (the GPU helper's shared memory and packets)
-NOSYS plat_sendmsg
-NOSYS plat_recvmsg
-NOSYS plat_memfd_create
+# ---- shared memory and passing it: the GPU helper's ---------------------------
+# A memfd (K_SHM) is a section of the paging file: ftruncate makes it (once:
+# a section does not grow, and gpu.s makes a new one to grow a slot), mmap
+# with MAP_SHARED maps a view of it. sendmsg passes one to the process at the
+# other end of a pipe (SCM_RIGHTS: a copy of its handle in that process,
+# DuplicateHandle) as a trailer on the message: the handle, then FD_MAGIC;
+# recvmsg takes the trailer off and gives the handle as a new K_SHM fd, in
+# the control message as Linux would.
+
+# plat_memfd_create(rdi=name, esi=flags) -> rax = the fd (no section yet)
+plat_memfd_create:
+    push    rdx
+    push    rsi
+    push    rdi
+    xor     edi, edi
+    mov     esi, K_SHM
+    xor     edx, edx
+    call    fd_alloc
+    pop     rdi
+    pop     rsi
+    pop     rdx
+    ret
+
+# shm_size(rax = a K_SHM entry, rsi = bytes) -> rax = 0 or -errno: its
+#   section made that large (plat_ftruncate's; once)
+shm_size:
+    cmp     qword ptr [rax+FD_HANDLE], 0
+    je      1f
+    cmp     [rax+FD_AUX], rsi
+    jne     7f
+    xor     eax, eax
+    ret
+7:  mov     rax, -EINVAL_
+    ret
+1:  push    rbx
+    mov     rbx, rax
+    WENTER  16
+    mov     rcx, -1                     # (INVALID_HANDLE_VALUE: the paging file)
+    xor     edx, edx
+    mov     r8d, PAGE_READWRITE
+    mov     r9, rsi
+    shr     r9, 32
+    mov     eax, esi
+    mov     [rsp+32], rax
+    mov     qword ptr [rsp+40], 0
+    call    [rip+__imp_CreateFileMappingW]
+    test    rax, rax
+    jnz     2f
+    call    w_errno
+    jmp     9f
+2:  mov     [rbx+FD_HANDLE], rax
+    mov     rax, [rbp+SV_RSI]
+    mov     [rbx+FD_AUX], rax
+    xor     eax, eax
+9:  WLEAVE
+    pop     rbx
+    ret
+
+# mmap_shm: plat_mmap's MAP_SHARED, of a K_SHM fd (r8d) from offset r9 (a
+#   multiple of 64 KiB on Windows): a view of its section
+mmap_shm:
+    push    rdi
+    mov     edi, r8d
+    call    fd_entry
+    pop     rdi
+    test    rax, rax
+    jz      8f
+    cmp     dword ptr [rax+FD_KIND], K_SHM
+    jne     7f
+    cmp     qword ptr [rax+FD_HANDLE], 0
+    je      7f
+    WENTER  16
+    mov     rcx, [rax+FD_HANDLE]
+    mov     edx, FILE_MAP_READ
+    test    dword ptr [rbp+SV_RDX], 2   # PROT_WRITE
+    jz      1f
+    mov     edx, FILE_MAP_READ|FILE_MAP_WRITE
+1:  mov     r8, r9
+    shr     r8, 32
+    mov     r9d, r9d
+    mov     rax, [rbp+SV_RSI]
+    mov     [rsp+32], rax
+    call    [rip+__imp_MapViewOfFile]
+    test    rax, rax
+    jnz     9f
+    call    w_errno
+9:  WLEAVE
+    ret
+7:  mov     rax, -EINVAL_
+    ret
+8:  mov     rax, -EBADF_
+    ret
+
+# plat_sendmsg(edi=fd, rsi=struct msghdr, edx=flags) -> rax = the bytes sent,
+#   or -errno: the iovecs as one message (at most SM_MAX bytes) on a pipe
+#   (ours, K_PIPE, or the far end a parent gave us, K_FILE); with an
+#   SCM_RIGHTS control message, its one fd (a memfd) goes along to the
+#   process at the other end
+plat_sendmsg:
+    push    rbx
+    push    r12
+    push    r13
+    WENTER  SM_MAX+SM_TAIL+48           # [rsp+48] the peer's pid, [rsp+56] its process,
+    mov     r12, rsi                    #  [rsp+64] the message
+    lea     rdi, [rsp+64]
+    mov     r8, [r12+16]                # the iovecs, gathered
+    mov     r9, [r12+24]
+    xor     r13d, r13d
+1:  test    r9, r9
+    jz      2f
+    mov     rsi, [r8]
+    mov     rcx, [r8+8]
+    lea     rax, [r13+rcx]
+    cmp     rax, SM_MAX
+    ja      .Lsm_big
+    add     r13, rcx
+    rep     movsb
+    add     r8, 16
+    dec     r9
+    jmp     1b
+2:  mov     rbx, r13                    # rbx = the bytes to write
+    mov     rax, [r12+32]               # an fd to pass?
+    test    rax, rax
+    jz      6f
+    cmp     qword ptr [r12+40], 20
+    jb      6f
+    cmp     dword ptr [rax+8], 1        # SOL_SOCKET, SCM_RIGHTS
+    jne     6f
+    cmp     dword ptr [rax+12], 1
+    jne     6f
+    mov     edi, [rax+16]
+    call    fd_entry
+    test    rax, rax
+    jz      .Lsm_badf
+    cmp     dword ptr [rax+FD_KIND], K_SHM
+    jne     .Lsm_inval
+    mov     r12, [rax+FD_HANDLE]        # (r12 = the section from here)
+    test    r12, r12
+    jz      .Lsm_inval
+    mov     edi, [rbp+SV_RDI]           # the other end's process: the child
+    call    fd_entry                    #  our end went to (plat_spawn), or the
+    test    rax, rax                    #  parent that made the pipe
+    jz      .Lsm_badf
+    mov     rcx, [rax+FD_HANDLE]
+    lea     rdx, [rsp+48]
+    cmp     dword ptr [rax+FD_KIND], K_PIPE
+    je      3f
+    call    [rip+__imp_GetNamedPipeServerProcessId]
+    jmp     4f
+3:  mov     rax, [rax+FD_AUX]
+    mov     eax, [rax+PB_PID]
+    mov     [rsp+48], eax
+    test    eax, eax
+    jnz     4f
+    call    [rip+__imp_GetNamedPipeClientProcessId]
+4:  test    eax, eax
+    jz      .Lsm_err
+    mov     ecx, PROCESS_DUP_HANDLE
+    xor     edx, edx
+    mov     r8d, [rsp+48]
+    call    [rip+__imp_OpenProcess]
+    test    rax, rax
+    jz      .Lsm_err
+    mov     [rsp+56], rax
+    call    [rip+__imp_GetCurrentProcess]
+    mov     rcx, rax
+    mov     rdx, r12
+    mov     r8, [rsp+56]
+    lea     r9, [rsp+64+rbx]            # (the trailer: the handle there)
+    mov     qword ptr [rsp+32], 0
+    mov     qword ptr [rsp+40], 0
+    mov     qword ptr [rsp+48], DUPLICATE_SAME_ACCESS
+    call    [rip+__imp_DuplicateHandle]
+    mov     r12d, eax
+    mov     rcx, [rsp+56]
+    call    [rip+__imp_CloseHandle]
+    test    r12d, r12d
+    jz      .Lsm_err
+    mov     rax, FD_MAGIC
+    mov     [rsp+64+rbx+8], rax
+    add     rbx, SM_TAIL
+6:  mov     edi, [rbp+SV_RDI]           # one write: one message
+    lea     rsi, [rsp+64]
+    mov     rdx, rbx
+    call    plat_write
+    test    rax, rax
+    js      9f
+    mov     rax, r13
+    jmp     9f
+.Lsm_big:
+    mov     rax, -EMSGSIZE_
+    jmp     9f
+.Lsm_badf:
+    mov     rax, -EBADF_
+    jmp     9f
+.Lsm_inval:
+    mov     rax, -EINVAL_
+    jmp     9f
+.Lsm_err:
+    call    w_errno
+9:  WLEAVE
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# plat_recvmsg(edi=fd, rsi=struct msghdr, edx=flags) -> rax = the bytes of
+#   one message, scattered into the iovecs (0: the end), or -errno; a
+#   handle passed with it (sendmsg's trailer) is a new K_SHM fd in an
+#   SCM_RIGHTS control message (msg_controllen 24; 0 without)
+plat_recvmsg:
+    push    rbx
+    push    r12
+    push    r13
+    WENTER  SM_MAX+SM_TAIL+48           # [rsp+64] the message
+    mov     r12, rsi
+    mov     edi, [rbp+SV_RDI]
+    lea     rsi, [rsp+64]
+    mov     edx, SM_MAX+SM_TAIL
+    call    plat_read
+    test    rax, rax
+    jle     9f
+    mov     r13, rax
+    mov     rbx, [r12+40]               # (the room for control messages)
+    mov     qword ptr [r12+40], 0
+    cmp     r13, SM_TAIL
+    jb      3f
+    mov     rax, FD_MAGIC
+    cmp     [rsp+64+r13-8], rax
+    jne     3f
+    sub     r13, SM_TAIL
+    mov     rdi, [rsp+64+r13]           # the handle passed: ours now
+    mov     esi, K_SHM
+    xor     edx, edx
+    call    fd_alloc
+    test    eax, eax
+    js      2f
+    mov     rcx, [r12+32]
+    test    rcx, rcx
+    jz      1f
+    cmp     rbx, 24
+    jb      1f
+    mov     qword ptr [rcx], 20         # cmsg_len, SOL_SOCKET, SCM_RIGHTS, the fd
+    mov     dword ptr [rcx+8], 1
+    mov     dword ptr [rcx+12], 1
+    mov     [rcx+16], eax
+    mov     qword ptr [r12+40], 24
+    jmp     3f
+1:  mov     edi, eax                    # (no room for it: closed, as Linux does)
+    call    plat_close
+    jmp     3f
+2:  mov     rcx, [rsp+64+r13]
+    call    [rip+__imp_CloseHandle]
+3:  lea     rsi, [rsp+64]               # into the iovecs
+    mov     r8, [r12+16]
+    mov     r9, [r12+24]
+    mov     rdx, r13
+4:  test    r9, r9
+    jz      5f
+    test    rdx, rdx
+    jz      5f
+    mov     rdi, [r8]
+    mov     rcx, [r8+8]
+    cmp     rcx, rdx
+    cmova   rcx, rdx
+    sub     rdx, rcx
+    rep     movsb
+    add     r8, 16
+    dec     r9
+    jmp     4b
+5:  mov     rax, r13
+9:  WLEAVE
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
 
 .section .bss
 .align 8
@@ -4619,6 +5027,7 @@ sa_inherit:     .long 24, 0             # SECURITY_ATTRIBUTES: inheritable
 s_pipename:     .string16 "\\\\.\\pipe\\beemodel-"
 s_nul:          .string16 "NUL"
 s_bmhome:       .asciz "BEEMODEL_HOME="
+s_fd3:          .asciz "BEEMODEL_FD3="
 plat_path_sep:  .asciz ";"              # (between PATH's directories: aiproc.s)
 plat_exe_ext:   .asciz ".exe"            # (a program's file may end in it)
 s_homeq:        .asciz "HOME="
@@ -4693,7 +5102,10 @@ IMPORT 1, GetLastError
 IMPORT 1, GetLogicalDrives
 IMPORT 1, GetModuleFileNameW
 IMPORT 1, GetModuleHandleW
+IMPORT 1, GetNamedPipeClientProcessId
+IMPORT 1, GetNamedPipeServerProcessId
 IMPORT 1, GetOverlappedResult
+IMPORT 1, GetProcAddress
 IMPORT 1, GetStdHandle
 IMPORT 1, GetSystemTimePreciseAsFileTime
 IMPORT 1, GlobalAlloc
@@ -4701,9 +5113,11 @@ IMPORT 1, GlobalFree
 IMPORT 1, GlobalLock
 IMPORT 1, GlobalUnlock
 IMPORT 1, InitializeProcThreadAttributeList
+IMPORT 1, LoadLibraryW
 IMPORT 1, MapViewOfFile
 IMPORT 1, MoveFileExW
 IMPORT 1, MultiByteToWideChar
+IMPORT 1, OpenProcess
 IMPORT 1, PeekNamedPipe
 IMPORT 1, QueryPerformanceCounter
 IMPORT 1, QueryPerformanceFrequency
@@ -4714,6 +5128,7 @@ IMPORT 1, SetConsoleOutputCP
 IMPORT 1, SetCurrentDirectoryW
 IMPORT 1, SetEndOfFile
 IMPORT 1, SetFilePointerEx
+IMPORT 1, SetNamedPipeHandleState
 IMPORT 1, SetWaitableTimer
 IMPORT 1, Sleep
 IMPORT 1, TerminateProcess

@@ -309,6 +309,14 @@ g_spawn:
     inc     rdi
     test    al, al
     jnz     32b
+    dec     rdi                         # and the platform's ending (.exe)
+    lea     rsi, [rip+plat_exe_ext]
+33: mov     al, [rsi]
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    test    al, al
+    jnz     33b
 4:  lea     rdi, [rip+g_path]           # executable?
     mov     esi, 1
     call    plat_access

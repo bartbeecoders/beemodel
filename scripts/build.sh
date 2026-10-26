@@ -55,6 +55,13 @@ if ld -V 2>/dev/null | grep -qw i386pep; then
     [[ "$MODE" == "debug" ]] || WLD+=(-s)
     ld "${WLD[@]}" -o build/beemodel.exe "${WOBJS[@]}"
     echo "built build/beemodel.exe ($(stat -c %s build/beemodel.exe) bytes)"
+    # the GPU helper for Windows: the same src/gpu/helper.s (WIN), linked
+    # with plat_win.o; it loads vulkan-1.dll itself, so it builds anywhere
+    mkdir -p build/gpu
+    as "${ASFLAGS[@]}" --defsym WIN=1 -o build/gpu/helper-win.o src/gpu/helper.s
+    as "${ASFLAGS[@]}" -o build/gpu/spv.o src/gpu/spv.s
+    ld "${WLD[@]}" -o build/beemodel-gpu.exe build/obj/plat_win.o build/gpu/helper-win.o build/gpu/spv.o
+    echo "built build/beemodel-gpu.exe ($(stat -c %s build/beemodel-gpu.exe) bytes)"
     # tests/win/*.s: the platform layer tested on its own (ci/check-exe.sh)
     for t in tests/win/*.s; do
         n=$(basename "${t%.s}")

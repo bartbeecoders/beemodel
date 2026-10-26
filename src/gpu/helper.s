@@ -28,6 +28,22 @@
 .intel_syntax noprefix
 .include "gpuipc.inc"
 
+# On Windows (assembled with --defsym WIN=1, linked with src/plat_win.s into
+# beemodel-gpu.exe) the same program: vulkan-1.dll is loaded when the
+# instance is made (none: GH_NOLOADER, the CPU paths), and its functions,
+# in the Windows calling convention, are called through vkw; fd 3 is the
+# pipe plat_spawn hands it, the slots' memfds sections (plat_win.s).
+.ifdef WIN
+.macro VKCALL f
+    mov     rax, [rip+vkf+\f]
+    call    vkw
+.endm
+.else
+.macro VKCALL f
+    call    [rip+vkf+\f]
+.endm
+.endif
+
 .equ PROT_RW,       3
 .equ MAP_SHARED,    1
 .equ SOCK_FD,       3
@@ -212,6 +228,10 @@ s_nohm:         .asciz "BEEMODEL_GPU_HOSTMEM=off"
 s_fail:         .asciz "BEEMODEL_GPU_FAIL="
 s_main:         .asciz "main"
 s_app:          .asciz "beemodel-gpu"
+.ifdef WIN
+s_vkdll:        .string16 "vulkan-1.dll"
+s_gipa_name:    .asciz "vkGetInstanceProcAddr"
+.endif
 # the functions: through vkGetInstanceProcAddr(NULL), (instance), then
 # vkGetDeviceProcAddr(device); their pointers in this order in vkf
 vk_names0:      .asciz "vkCreateInstance"
@@ -398,6 +418,11 @@ as_max:         .skip 4
 as_wr:          .skip 32                # VkWriteDescriptorSetAccelerationStructureKHR
 pw:             .skip 64*5              # asprep's descriptors
 pb:             .skip 24*5
+.ifdef WIN
+.globl envp
+gipa:           .skip 8                 # vkGetInstanceProcAddr (vulkan-1.dll's)
+gipa_tried:     .skip 4
+.endif
 envp:           .skip 8
 allow_cpu:      .skip 4
 fail_at:        .skip 4                 # tests: die at this run (0: never)
@@ -699,7 +724,18 @@ load:
     je      8f
     mov     rdi, r14
     mov     rsi, rbx
+.ifdef WIN
+    lea     rax, [rip+vk_gipa]          # (vk_gipa is ours; the device's
+    cmp     r13, rax                    #  getter is Vulkan's)
+    je      3f
+    mov     rax, r13
+    call    vkw
+    jmp     4f
+3:  call    r13
+4:
+.else
     call    r13
+.endif
     test    rax, rax
     jz      9f
     mov     [r12], rax
@@ -746,7 +782,7 @@ vk_setup:
     lea     rdi, [rip+ci]
     xor     esi, esi
     lea     rdx, [rip+instance]
-    call    [rip+vkf+F_CREATEINSTANCE]
+    VKCALL  F_CREATEINSTANCE
     test    eax, eax
     jnz     .Lvs_noloader
     lea     rdi, [rip+vk_names1]
@@ -761,7 +797,7 @@ vk_setup:
     mov     rdi, [rip+instance]
     lea     rsi, [rip+count]
     lea     rdx, [rip+pdlist]
-    call    [rip+vkf+F_ENUMPD]
+    VKCALL  F_ENUMPD
     cmp     eax, 0
     jl      .Lvs_nodevice
     xor     r12d, r12d                  # best score
@@ -771,7 +807,7 @@ vk_setup:
     lea     rax, [rip+pdlist]
     mov     rdi, [rax+rbx*8]
     lea     rsi, [rip+pdprops]
-    call    [rip+vkf+F_PDPROPS]
+    VKCALL  F_PDPROPS
     mov     eax, [rip+pdprops+PD_TYPE]  # discrete 4, integrated 3, virtual 2,
     mov     r13d, 4                     #  cpu 1 (when allowed)
     cmp     eax, DT_DISCRETE
@@ -795,7 +831,7 @@ vk_setup:
     lea     rax, [rip+pdlist]
     mov     rdi, [rax+rbx*8]
     lea     rsi, [rip+pdfeats]
-    call    [rip+vkf+F_PDFEATS]
+    VKCALL  F_PDFEATS
     cmp     dword ptr [rip+pdfeats+PF_INT64], 0
     je      21f
     lea     rax, [rip+pdlist]
@@ -815,10 +851,10 @@ vk_setup:
     jz      .Lvs_nodevice
     mov     rdi, [rip+phys]             # (the chosen one's properties again)
     lea     rsi, [rip+pdprops]
-    call    [rip+vkf+F_PDPROPS]
+    VKCALL  F_PDPROPS
     mov     rdi, [rip+phys]
     lea     rsi, [rip+memprops]
-    call    [rip+vkf+F_PDMEM]
+    VKCALL  F_PDMEM
     call    rtx_probe                   # ray queries? (rtx)
     # the device: one compute queue, int64 shaders
     mov     dword ptr [rip+prio], 0x3f800000
@@ -840,7 +876,7 @@ vk_setup:
     je      40f                         #  first instance (its record)
     mov     rdi, [rip+phys]
     lea     rsi, [rip+pdfeats]
-    call    [rip+vkf+F_PDFEATS]
+    VKCALL  F_PDFEATS
     cmp     dword ptr [rip+pdfeats+PF_MDI], 0
     je      40f
     cmp     dword ptr [rip+pdfeats+PF_DIFI], 0
@@ -883,7 +919,7 @@ vk_setup:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [rip+device]
-    call    [rip+vkf+F_CREATEDEVICE]
+    VKCALL  F_CREATEDEVICE
     test    eax, eax
     jz      42f
     cmp     dword ptr [rip+rtx], 0      # (without them, then)
@@ -913,7 +949,7 @@ vk_setup:
     mov     esi, [rip+qfam]
     xor     edx, edx
     lea     rcx, [rip+queue]
-    call    [rip+vkf+F_GETQUEUE]
+    VKCALL  F_GETQUEUE
     cmp     dword ptr [rip+rtx], 0      # the structures' functions
     je      43f
     lea     rdi, [rip+vk_names3]
@@ -956,7 +992,7 @@ vk_setup:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [rip+cpool]
-    call    [rip+vkf+F_CREATECPOOL]
+    VKCALL  F_CREATECPOOL
     test    eax, eax
     jnz     .Lvs_nodevice
     lea     rdi, [rip+ci]
@@ -969,7 +1005,7 @@ vk_setup:
     mov     rdi, [rip+device]
     lea     rsi, [rip+ci]
     lea     rdx, [rip+cbuf]
-    call    [rip+vkf+F_ALLOCCB]
+    VKCALL  F_ALLOCCB
     test    eax, eax
     jnz     .Lvs_nodevice
     lea     rdi, [rip+ci]
@@ -979,7 +1015,7 @@ vk_setup:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [rip+fence]
-    call    [rip+vkf+F_CREATEFENCE]
+    VKCALL  F_CREATEFENCE
     test    eax, eax
     jnz     .Lvs_nodevice
     # the pipelines and their descriptor sets
@@ -1000,7 +1036,7 @@ vk_setup:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [rip+dpool]
-    call    [rip+vkf+F_CREATEDPOOL]
+    VKCALL  F_CREATEDPOOL
     test    eax, eax
     jnz     .Lvs_nopipe
     xor     edi, edi
@@ -1028,11 +1064,91 @@ vk_setup:
     ret
 
 # vk_gipa(rdi=instance, rsi=name) - vkGetInstanceProcAddr (the loader's)
+.ifndef WIN
 vk_gipa:
     sub     rsp, 8
     call    vkGetInstanceProcAddr@PLT
     add     rsp, 8
     ret
+.else
+vk_gipa:                                # (the loader found the first time: 0
+    push    rbx                         #  without one)
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     rax, [rip+gipa]
+    test    rax, rax
+    jnz     2f
+    cmp     byte ptr [rip+gipa_tried], 0
+    jne     8f
+    mov     byte ptr [rip+gipa_tried], 1
+    sub     rsp, 32
+    lea     rcx, [rip+s_vkdll]
+    call    [rip+__imp_LoadLibraryW]
+    test    rax, rax
+    jz      1f
+    mov     rcx, rax
+    lea     rdx, [rip+s_gipa_name]
+    call    [rip+__imp_GetProcAddress]
+1:  add     rsp, 32
+    mov     [rip+gipa], rax
+    test    rax, rax
+    jz      8f
+2:  mov     rdi, rbx
+    mov     rsi, r12
+    call    vkw
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# vkw - a call into Vulkan: rax a function in the Windows convention, its
+#   arguments as the System V convention passes them (rdi, rsi, rdx, rcx,
+#   r8, r9, then up to 8 on the stack); rbx, rbp, r12-r15 kept (Windows
+#   keeps rsi and rdi too)
+vkw:
+    push    rbp
+    mov     rbp, rsp
+    sub     rsp, 112
+    and     rsp, -16
+    mov     [rsp+32], r8
+    mov     [rsp+40], r9
+    mov     r10, [rbp+16]
+    mov     [rsp+48], r10
+    mov     r10, [rbp+24]
+    mov     [rsp+56], r10
+    mov     r10, [rbp+32]
+    mov     [rsp+64], r10
+    mov     r10, [rbp+40]
+    mov     [rsp+72], r10
+    mov     r10, [rbp+48]
+    mov     [rsp+80], r10
+    mov     r10, [rbp+56]
+    mov     [rsp+88], r10
+    mov     r10, [rbp+64]
+    mov     [rsp+96], r10
+    mov     r10, [rbp+72]
+    mov     [rsp+104], r10
+    mov     r9, rcx
+    mov     r8, rdx
+    mov     rdx, rsi
+    mov     rcx, rdi
+    call    rax
+    leave
+    ret
+
+# bee_main(edi=argc, rsi=argv): win_start's; main, then its exit code
+.globl bee_main
+bee_main:
+    sub     rsp, 8
+    mov     rdx, [rip+envp]
+    call    main
+    mov     edi, eax
+    call    plat_exit_group
+.endif
 
 zero256:
     xor     eax, eax
@@ -1051,7 +1167,7 @@ find_queue:
     mov     rdi, rbx
     lea     rsi, [rip+handle]
     lea     rdx, [rip+qprops]
-    call    [rip+vkf+F_PDQUEUES]
+    VKCALL  F_PDQUEUES
     mov     r12d, QUEUE_COMPUTE|QUEUE_GRAPHICS
 0:  xor     ecx, ecx
 1:  cmp     ecx, [rip+handle]
@@ -1108,7 +1224,7 @@ make_kernel:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [r12+KR_MOD]
-    call    [rip+vkf+F_CREATESHADER]
+    VKCALL  F_CREATESHADER
     test    eax, eax
     jnz     8f
     cmp     ebx, K_VIEW                 # (the viewport: its fragment shader)
@@ -1125,7 +1241,7 @@ make_kernel:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [r12+KR_FRAG]
-    call    [rip+vkf+F_CREATESHADER]
+    VKCALL  F_CREATESHADER
     test    eax, eax
     jnz     8f
     lea     rdi, [rip+ci]               # (and the liquids' surfaces')
@@ -1140,7 +1256,7 @@ make_kernel:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [r12+KR_FRAG2]
-    call    [rip+vkf+F_CREATESHADER]
+    VKCALL  F_CREATESHADER
     test    eax, eax
     jnz     8f
 10: lea     rax, [rip+k_nbind]          # the set layout: bindings 0 .. n-1
@@ -1177,7 +1293,7 @@ make_kernel:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [r12+KR_DSL]
-    call    [rip+vkf+F_CREATEDSL]
+    VKCALL  F_CREATEDSL
     test    eax, eax
     jnz     8f
     lea     rdi, [rip+ci]               # the pipeline layout
@@ -1190,7 +1306,7 @@ make_kernel:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [r12+KR_PL]
-    call    [rip+vkf+F_CREATEPL]
+    VKCALL  F_CREATEPL
     test    eax, eax
     jnz     8f
     cmp     ebx, K_VIEW                 # the viewport's: a graphics pipeline
@@ -1218,7 +1334,7 @@ make_kernel:
     lea     rcx, [rip+ci]
     xor     r8d, r8d
     lea     r9, [r12+KR_PIPE]
-    call    [rip+vkf+F_CREATECOMPUTE]
+    VKCALL  F_CREATECOMPUTE
     test    eax, eax
     jnz     8f
 14: lea     rdi, [rip+ci]               # its descriptor set
@@ -1232,7 +1348,7 @@ make_kernel:
     mov     rdi, [rip+device]
     lea     rsi, [rip+ci]
     lea     rdx, [r12+KR_SET]
-    call    [rip+vkf+F_ALLOCSETS]
+    VKCALL  F_ALLOCSETS
     test    eax, eax
     jnz     8f
     mov     eax, 1
@@ -1287,13 +1403,13 @@ make_buffer:
     lea     rsi, [rip+ci]
     xor     edx, edx
     mov     rcx, r14
-    call    [rip+vkf+F_CREATEBUFFER]
+    VKCALL  F_CREATEBUFFER
     test    eax, eax
     jnz     8f
     mov     rdi, [rip+device]           # requirements: size, alignment, bits
     mov     rsi, [r14]
     lea     rdx, [rsp]
-    call    [rip+vkf+F_BUFREQS]
+    VKCALL  F_BUFREQS
     mov     edi, [rsp+16]
     mov     esi, [rsp+24]
     call    mem_type
@@ -1324,14 +1440,14 @@ make_buffer:
     lea     rsi, [rip+ci]
     xor     edx, edx
     mov     rcx, r15
-    call    [rip+vkf+F_ALLOCMEM]
+    VKCALL  F_ALLOCMEM
     test    eax, eax
     jnz     8f
     mov     rdi, [rip+device]
     mov     rsi, [r14]
     mov     rdx, [r15]
     xor     ecx, ecx
-    call    [rip+vkf+F_BINDBUFMEM]
+    VKCALL  F_BINDBUFMEM
     test    eax, eax
     jnz     8f
     mov     eax, 1
@@ -1366,11 +1482,11 @@ do_map:
     mov     rdi, [rip+device]
     mov     rsi, [rbx+SL_SBUF]
     xor     edx, edx
-    call    [rip+vkf+F_DESTROYBUFFER]
+    VKCALL  F_DESTROYBUFFER
     mov     rdi, [rip+device]
     mov     rsi, [rbx+SL_SMEM]
     xor     edx, edx
-    call    [rip+vkf+F_FREEMEM]
+    VKCALL  F_FREEMEM
     xor     eax, eax
     mov     [rbx+SL_SBUF], rax
     mov     [rbx+SL_SMEM], rax
@@ -1405,11 +1521,11 @@ do_map:
     mov     rdi, [rip+device]
     mov     rsi, [rbx+SL_DBUF]
     xor     edx, edx
-    call    [rip+vkf+F_DESTROYBUFFER]
+    VKCALL  F_DESTROYBUFFER
     mov     rdi, [rip+device]
     mov     rsi, [rbx+SL_DMEM]
     xor     edx, edx
-    call    [rip+vkf+F_FREEMEM]
+    VKCALL  F_FREEMEM
 2:  mov     dword ptr [rbx+SL_ASOK], 0  # (the structures' inputs move)
     mov     rdi, r12                    # device-local storage, the draws'
     mov     esi, USAGE_STORAGE|USAGE_TSRC|USAGE_TDST|USAGE_INDIRECT  # commands
@@ -1444,11 +1560,11 @@ do_map:
     jz      61f
     mov     rdi, [rip+device]
     xor     edx, edx
-    call    [rip+vkf+F_DESTROYBUFFER]
+    VKCALL  F_DESTROYBUFFER
     mov     rdi, [rip+device]           # (freeing unmaps it)
     mov     rsi, [rbx+SL_SMEM]
     xor     edx, edx
-    call    [rip+vkf+F_FREEMEM]
+    VKCALL  F_FREEMEM
 61: mov     rdi, r12                    # host-visible: cached when it can be
     mov     esi, USAGE_TSRC|USAGE_TDST  #  (the outputs are read back)
     mov     edx, MEM_HOST_VISIBLE|MEM_HOST_COHERENT|MEM_HOST_CACHED
@@ -1464,7 +1580,7 @@ do_map:
     mov     rcx, -1                     # VK_WHOLE_SIZE
     xor     r8d, r8d
     lea     r9, [rbx+SL_SPTR]
-    call    [rip+vkf+F_MAPMEM]
+    VKCALL  F_MAPMEM
     test    eax, eax
     jnz     8f
     mov     [rbx+SL_STCAP], r12
@@ -1484,14 +1600,14 @@ zero_buffer:
     mov     rbx, rdi
     mov     rdi, [rip+cbuf]
     xor     esi, esi
-    call    [rip+vkf+F_RESETCB]
+    VKCALL  F_RESETCB
     lea     rdi, [rip+ci]
     call    zero256
     mov     dword ptr [rip+ci], ST_CBBEGIN
     mov     dword ptr [rip+ci+16], 1
     mov     rdi, [rip+cbuf]
     lea     rsi, [rip+ci]
-    call    [rip+vkf+F_BEGINCB]
+    VKCALL  F_BEGINCB
     test    eax, eax
     jnz     8f
     mov     rdi, [rip+cbuf]
@@ -1499,9 +1615,9 @@ zero_buffer:
     xor     edx, edx
     mov     rcx, -1                     # VK_WHOLE_SIZE
     xor     r8d, r8d
-    call    [rip+vkf+F_CMDFILL]
+    VKCALL  F_CMDFILL
     mov     rdi, [rip+cbuf]
-    call    [rip+vkf+F_ENDCB]
+    VKCALL  F_ENDCB
     test    eax, eax
     jnz     8f
     lea     rdi, [rip+ci]
@@ -1514,7 +1630,7 @@ zero_buffer:
     mov     esi, 1
     lea     rdx, [rip+ci]
     mov     rcx, [rip+fence]
-    call    [rip+vkf+F_SUBMIT]
+    VKCALL  F_SUBMIT
     test    eax, eax
     jnz     8f
     mov     rdi, [rip+device]
@@ -1522,13 +1638,13 @@ zero_buffer:
     lea     rdx, [rip+fence]
     mov     ecx, 1
     mov     r8, 60000000000
-    call    [rip+vkf+F_WAITFENCES]
+    VKCALL  F_WAITFENCES
     test    eax, eax
     jnz     8f
     mov     rdi, [rip+device]
     mov     esi, 1
     lea     rdx, [rip+fence]
-    call    [rip+vkf+F_RESETFENCES]
+    VKCALL  F_RESETFENCES
     mov     eax, 1
     jmp     9f
 8:  xor     eax, eax
@@ -1562,7 +1678,7 @@ hm_probe:
     xor     esi, esi
     lea     rdx, [rip+count]
     lea     rcx, [rip+extprops]
-    call    [rip+vkf+F_ENUMDEVEXT]
+    VKCALL  F_ENUMDEVEXT
     test    eax, eax
     js      9f
     xor     ebx, ebx
@@ -1589,7 +1705,7 @@ hm_probe:
     mov     qword ptr [rip+hm_props+16], -1
     mov     rdi, [rip+phys]
     lea     rsi, [rip+hm_p2]
-    call    [rip+vkf+F_PDPROPS2]
+    VKCALL  F_PDPROPS2
     cmp     qword ptr [rip+hm_props+16], 4096
     ja      9f
     mov     dword ptr [rip+hostmem], 1
@@ -1614,7 +1730,7 @@ hm_import:
     mov     esi, HT_HOST
     mov     rdx, [rbx+SL_BASE]
     lea     rcx, [rsp]
-    call    [rip+vkf+F_HOSTPROPS]
+    VKCALL  F_HOSTPROPS
     test    eax, eax
     jnz     8f
     mov     r12d, [rsp+16]              # the memory types it can be
@@ -1633,13 +1749,13 @@ hm_import:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [rbx+SL_SBUF]
-    call    [rip+vkf+F_CREATEBUFFER]
+    VKCALL  F_CREATEBUFFER
     test    eax, eax
     jnz     8f
     mov     rdi, [rip+device]           # requirements: size, alignment, bits
     mov     rsi, [rbx+SL_SBUF]
     lea     rdx, [rsp+48]
-    call    [rip+vkf+F_BUFREQS]
+    VKCALL  F_BUFREQS
     mov     rax, [rsp+48]
     cmp     rax, [rbx+SL_SIZE]
     ja      7f
@@ -1673,14 +1789,14 @@ hm_import:
     lea     rsi, [rip+ci]
     xor     edx, edx
     lea     rcx, [rbx+SL_SMEM]
-    call    [rip+vkf+F_ALLOCMEM]
+    VKCALL  F_ALLOCMEM
     test    eax, eax
     jnz     7f
     mov     rdi, [rip+device]
     mov     rsi, [rbx+SL_SBUF]
     mov     rdx, [rbx+SL_SMEM]
     xor     ecx, ecx
-    call    [rip+vkf+F_BINDBUFMEM]
+    VKCALL  F_BINDBUFMEM
     test    eax, eax
     jnz     6f
     mov     rax, [rbx+SL_BASE]
@@ -1692,11 +1808,11 @@ hm_import:
 6:  mov     rdi, [rip+device]
     mov     rsi, [rbx+SL_SMEM]
     xor     edx, edx
-    call    [rip+vkf+F_FREEMEM]
+    VKCALL  F_FREEMEM
 7:  mov     rdi, [rip+device]
     mov     rsi, [rbx+SL_SBUF]
     xor     edx, edx
-    call    [rip+vkf+F_DESTROYBUFFER]
+    VKCALL  F_DESTROYBUFFER
 8:  xor     eax, eax
     mov     [rbx+SL_SBUF], rax
     mov     [rbx+SL_SMEM], rax
@@ -1930,18 +2046,18 @@ do_run:
     lea     rdx, [rip+writes]
     xor     ecx, ecx
     xor     r8d, r8d
-    call    [rip+vkf+F_UPDATESETS]
+    VKCALL  F_UPDATESETS
     # the commands
     mov     rdi, [rip+cbuf]
     xor     esi, esi
-    call    [rip+vkf+F_RESETCB]
+    VKCALL  F_RESETCB
     lea     rdi, [rip+ci]
     call    zero256
     mov     dword ptr [rip+ci], ST_CBBEGIN
     mov     dword ptr [rip+ci+16], 1    # one time
     mov     rdi, [rip+cbuf]
     lea     rsi, [rip+ci]
-    call    [rip+vkf+F_BEGINCB]
+    VKCALL  F_BEGINCB
     test    eax, eax
     jnz     .Lr_fail
     test    r14d, r14d
@@ -1951,7 +2067,7 @@ do_run:
     mov     rdx, [rbx+SL_DBUF]
     mov     ecx, r14d
     lea     r8, [rip+regions]
-    call    [rip+vkf+F_CMDCOPY]
+    VKCALL  F_CMDCOPY
 5:  mov     edi, PS_TRANSFER            # uploads before the shader
     mov     esi, PS_COMPUTE
     mov     edx, AC_TRANSFER_WRITE
@@ -1976,7 +2092,7 @@ do_run:
 54: mov     rdi, [rip+cbuf]
     mov     esi, BIND_COMPUTE
     mov     rdx, [r12+KR_PIPE]
-    call    [rip+vkf+F_CMDBINDPIPE]
+    VKCALL  F_CMDBINDPIPE
     sub     rsp, 16                     # (two arguments on the stack)
     mov     qword ptr [rsp], 0
     mov     qword ptr [rsp+8], 0
@@ -1986,13 +2102,13 @@ do_run:
     xor     ecx, ecx
     mov     r8d, 1
     lea     r9, [r12+KR_SET]
-    call    [rip+vkf+F_CMDBINDSETS]
+    VKCALL  F_CMDBINDSETS
     add     rsp, 16
     mov     rdi, [rip+cbuf]
     mov     esi, [rip+msg+GM_GX]
     mov     edx, [rip+msg+GM_GY]
     mov     ecx, 1
-    call    [rip+vkf+F_CMDDISPATCH]
+    VKCALL  F_CMDDISPATCH
 55: mov     edi, PS_COMPUTE             # the shader before the downloads
     mov     esi, PS_TRANSFER
     mov     edx, AC_SHADER_WRITE
@@ -2026,14 +2142,14 @@ do_run:
     mov     rdx, [rbx+SL_SBUF]
     mov     ecx, r14d
     lea     r8, [rip+regions]
-    call    [rip+vkf+F_CMDCOPY]
+    VKCALL  F_CMDCOPY
 71: mov     edi, PS_TRANSFER            # visible to the host
     mov     esi, PS_HOST
     mov     edx, AC_TRANSFER_WRITE
     mov     ecx, AC_HOST_READ
     call    barrier
     mov     rdi, [rip+cbuf]
-    call    [rip+vkf+F_ENDCB]
+    VKCALL  F_ENDCB
     test    eax, eax
     jnz     .Lr_fail
     lea     rdi, [rip+ci]               # submit, wait (a minute at most)
@@ -2046,7 +2162,7 @@ do_run:
     mov     esi, 1
     lea     rdx, [rip+ci]
     mov     rcx, [rip+fence]
-    call    [rip+vkf+F_SUBMIT]
+    VKCALL  F_SUBMIT
     test    eax, eax
     jnz     .Lr_fail
     mov     rdi, [rip+device]
@@ -2054,13 +2170,13 @@ do_run:
     lea     rdx, [rip+fence]
     mov     ecx, 1
     mov     r8, 60000000000
-    call    [rip+vkf+F_WAITFENCES]
+    VKCALL  F_WAITFENCES
     test    eax, eax
     jnz     .Lr_fail
     mov     rdi, [rip+device]
     mov     esi, 1
     lea     rdx, [rip+fence]
-    call    [rip+vkf+F_RESETFENCES]
+    VKCALL  F_RESETFENCES
     xor     ebp, ebp                    # staging -> shared memory (imported:
     cmp     dword ptr [rbx+SL_HOST], 0  #  there already)
     jne     9f
@@ -2141,7 +2257,7 @@ rtx_probe:
     xor     esi, esi
     lea     rdx, [rip+count]
     lea     rcx, [rip+extprops]
-    call    [rip+vkf+F_ENUMDEVEXT]
+    VKCALL  F_ENUMDEVEXT
     test    eax, eax
     js      9f
     xor     ebx, ebx                    # found: a bit each
@@ -2172,7 +2288,7 @@ rtx_probe:
     mov     [rdi+8], rax
     mov     rdi, [rip+phys]
     lea     rsi, [rip+f2]
-    call    [rip+vkf+F_PDFEATS2]
+    VKCALL  F_PDFEATS2
     cmp     dword ptr [rip+f_bda+16], 0
     je      9f
     cmp     dword ptr [rip+f_as+16], 0
@@ -2189,7 +2305,7 @@ rtx_probe:
     mov     dword ptr [rip+p_as], ST_AS_PROPS
     mov     rdi, [rip+phys]
     lea     rsi, [rip+p2]
-    call    [rip+vkf+F_PDPROPS2]
+    VKCALL  F_PDPROPS2
     cmp     dword ptr [rip+p_as+56], 256
     ja      9f
     mov     dword ptr [rip+rtx], 1
@@ -2244,7 +2360,7 @@ buf_addr:
     mov     qword ptr [rsi+8], 0
     mov     [rsi+16], rdi
     mov     rdi, [rip+device]
-    call    [rip+vkf+F_BUFADDR]
+    VKCALL  F_BUFADDR
     add     rsp, 8
     ret
 
@@ -2256,7 +2372,7 @@ as_addr:
     mov     qword ptr [rsi+8], 0
     mov     [rsi+16], rdi
     mov     rdi, [rip+device]
-    call    [rip+vkf+F_ASADDR]
+    VKCALL  F_ASADDR
     add     rsp, 8
     ret
 
@@ -2269,7 +2385,7 @@ as_drop:
     jz      9f
     mov     rdi, [rip+device]
     xor     edx, edx
-    call    [rip+vkf+F_DESTROYAS]
+    VKCALL  F_DESTROYAS
     mov     qword ptr [rbx], 0
 9:  pop     rbx
     ret
@@ -2293,7 +2409,7 @@ as_make:
     mov     rdi, [rip+device]
     mov     rsi, rax
     xor     edx, edx
-    call    [rip+vkf+F_CREATEAS]
+    VKCALL  F_CREATEAS
     pop     rdi
     test    eax, eax
     jnz     8f
@@ -2329,7 +2445,7 @@ as_size:
     lea     rax, [rip+as_r]
     add     rcx, rax
     lea     r8, [rip+as_sz]
-    call    [rip+vkf+F_ASSIZES]
+    VKCALL  F_ASSIZES
     lea     rax, [rip+as_sizes]
     mov     rcx, [rip+as_sz+16]
     add     rcx, 255
@@ -2407,7 +2523,7 @@ as_prepare:
     mov     rcx, -1
     xor     r8d, r8d
     lea     r9, [rbx+SL_IPTR]
-    call    [rip+vkf+F_MAPMEM]
+    VKCALL  F_MAPMEM
     test    eax, eax
     jnz     8f
 2:  mov     rdi, [rbx+SL_DBUF]          # the geometries: positions, boxes
@@ -2516,11 +2632,11 @@ as_prepare:
     jz      51f
     mov     rdi, [rip+device]
     xor     edx, edx
-    call    [rip+vkf+F_DESTROYBUFFER]
+    VKCALL  F_DESTROYBUFFER
     mov     rdi, [rip+device]
     mov     rsi, [rbx+SL_AMEM]
     xor     edx, edx
-    call    [rip+vkf+F_FREEMEM]
+    VKCALL  F_FREEMEM
     mov     qword ptr [rbx+SL_ABUF], 0
 51: lea     rsi, [rip+as_sizes]
     xor     r15d, r15d                  # the total
@@ -2678,7 +2794,7 @@ as_prepare:
     lea     rdx, [rip+pw]
     xor     ecx, ecx
     xor     r8d, r8d
-    call    [rip+vkf+F_UPDATESETS]
+    VKCALL  F_UPDATESETS
 7:  mov     eax, 1
     jmp     9f
 8:  xor     eax, eax
@@ -2743,7 +2859,7 @@ as_record:
     mov     esi, BIND_COMPUTE
     lea     rax, [rip+kernels+K_PREP*KR_SZ]
     mov     rdx, [rax+KR_PIPE]
-    call    [rip+vkf+F_CMDBINDPIPE]
+    VKCALL  F_CMDBINDPIPE
     sub     rsp, 16
     mov     qword ptr [rsp], 0
     mov     qword ptr [rsp+8], 0
@@ -2754,7 +2870,7 @@ as_record:
     xor     ecx, ecx
     mov     r8d, 1
     lea     r9, [rax+KR_SET]
-    call    [rip+vkf+F_CMDBINDSETS]
+    VKCALL  F_CMDBINDSETS
     add     rsp, 16
     mov     esi, r13d
     cmp     esi, 32768
@@ -2768,7 +2884,7 @@ as_record:
     mov     edx, eax
     mov     rdi, [rip+cbuf]
     mov     ecx, 1
-    call    [rip+vkf+F_CMDDISPATCH]
+    VKCALL  F_CMDDISPATCH
     mov     edi, PS_COMPUTE
     mov     esi, PS_ASBUILD
     mov     edx, AC_SHADER_WRITE
@@ -2809,7 +2925,7 @@ as_build:
     lea     rcx, [rcx+rdi*8]
     mov     rdi, [rip+cbuf]
     mov     esi, 1
-    call    [rip+vkf+F_CMDBUILDAS]
+    VKCALL  F_CMDBUILDAS
     mov     edi, PS_ASBUILD
     mov     esi, PS_ASBUILD
     mov     edx, AC_AS_WRITE
@@ -2887,7 +3003,7 @@ gv_pipeline:
     lea     rsi, [r12+304]
     xor     edx, edx
     lea     rcx, [rip+gv_rp]
-    call    [rip+vkf+F_CREATERP]
+    VKCALL  F_CREATERP
     test    eax, eax
     jnz     8f
 5:  lea     r12, [rip+gv_ci]            # the pipeline
@@ -2963,7 +3079,7 @@ gv_pipeline:
     mov     edx, 1
     xor     r8d, r8d
     lea     r9, [rbx+KR_PIPE]
-    call    [rip+vkf+F_CREATEGFX]
+    VKCALL  F_CREATEGFX
     test    eax, eax
     jnz     8f
     mov     dword ptr [r12+504+28], 0   # again, the ids not written (particles
@@ -2973,7 +3089,7 @@ gv_pipeline:
     mov     edx, 1
     xor     r8d, r8d
     lea     r9, [rbx+KR_PIPE2]
-    call    [rip+vkf+F_CREATEGFX]
+    VKCALL  F_CREATEGFX
     test    eax, eax
     jnz     8f
     mov     dword ptr [r12+504+28], 15  # again, the liquids' surfaces: marched
@@ -2985,7 +3101,7 @@ gv_pipeline:
     mov     edx, 1
     xor     r8d, r8d
     lea     r9, [rbx+KR_PIPE3]
-    call    [rip+vkf+F_CREATEGFX]
+    VKCALL  F_CREATEGFX
     test    eax, eax
     jnz     8f
     mov     eax, 1
@@ -3022,23 +3138,23 @@ gv_images:
     mov     rdi, [rip+device]
     mov     rsi, [rip+gv_fb]
     xor     edx, edx
-    call    [rip+vkf+F_DESTROYFB]
+    VKCALL  F_DESTROYFB
     xor     ebx, ebx
 2:  mov     rdi, [rip+device]
     lea     rax, [rip+gv_view]
     mov     rsi, [rax+rbx*8]
     xor     edx, edx
-    call    [rip+vkf+F_DESTROYVIEW]
+    VKCALL  F_DESTROYVIEW
     mov     rdi, [rip+device]
     lea     rax, [rip+gv_img]
     mov     rsi, [rax+rbx*8]
     xor     edx, edx
-    call    [rip+vkf+F_DESTROYIMAGE]
+    VKCALL  F_DESTROYIMAGE
     mov     rdi, [rip+device]
     lea     rax, [rip+gv_mem]
     mov     rsi, [rax+rbx*8]
     xor     edx, edx
-    call    [rip+vkf+F_FREEMEM]
+    VKCALL  F_FREEMEM
     inc     ebx
     cmp     ebx, 4
     jb      2b
@@ -3069,14 +3185,14 @@ gv_images:
     xor     edx, edx
     lea     rax, [rip+gv_img]
     lea     rcx, [rax+rbx*8]
-    call    [rip+vkf+F_CREATEIMAGE]
+    VKCALL  F_CREATEIMAGE
     test    eax, eax
     jnz     8f
     mov     rdi, [rip+device]           # its memory
     lea     rax, [rip+gv_img]
     mov     rsi, [rax+rbx*8]
     lea     rdx, [rsp]
-    call    [rip+vkf+F_IMGREQS]
+    VKCALL  F_IMGREQS
     mov     edi, [rsp+16]
     mov     esi, MEM_DEVICE_LOCAL
     call    mem_type
@@ -3095,7 +3211,7 @@ gv_images:
     xor     edx, edx
     lea     rax, [rip+gv_mem]
     lea     rcx, [rax+rbx*8]
-    call    [rip+vkf+F_ALLOCMEM]
+    VKCALL  F_ALLOCMEM
     test    eax, eax
     jnz     8f
     mov     rdi, [rip+device]
@@ -3104,7 +3220,7 @@ gv_images:
     lea     rax, [rip+gv_mem]
     mov     rdx, [rax+rbx*8]
     xor     ecx, ecx
-    call    [rip+vkf+F_BINDIMGMEM]
+    VKCALL  F_BINDIMGMEM
     test    eax, eax
     jnz     8f
     mov     rdi, r12                    # its view
@@ -3130,7 +3246,7 @@ gv_images:
     xor     edx, edx
     lea     rax, [rip+gv_view]
     lea     rcx, [rax+rbx*8]
-    call    [rip+vkf+F_CREATEVIEW]
+    VKCALL  F_CREATEVIEW
     test    eax, eax
     jnz     8f
     inc     ebx
@@ -3153,7 +3269,7 @@ gv_images:
     mov     rsi, r12
     xor     edx, edx
     lea     rcx, [rip+gv_fb]
-    call    [rip+vkf+F_CREATEFB]
+    VKCALL  F_CREATEFB
     test    eax, eax
     jnz     8f
     mov     [rip+gv_w], r13d
@@ -3203,11 +3319,11 @@ gv_record:
     mov     rdi, [rip+cbuf]
     lea     rsi, [rsp]
     xor     edx, edx                    # inline
-    call    [rip+vkf+F_CMDBEGINRP]
+    VKCALL  F_CMDBEGINRP
     mov     rdi, [rip+cbuf]
     mov     esi, BIND_GRAPHICS
     mov     rdx, [r12+KR_PIPE]
-    call    [rip+vkf+F_CMDBINDPIPE]
+    VKCALL  F_CMDBINDPIPE
     sub     rsp, 16
     mov     qword ptr [rsp], 0
     mov     qword ptr [rsp+8], 0
@@ -3217,7 +3333,7 @@ gv_record:
     xor     ecx, ecx
     mov     r8d, 1
     lea     r9, [r12+KR_SET]
-    call    [rip+vkf+F_CMDBINDSETS]
+    VKCALL  F_CMDBINDSETS
     add     rsp, 16
     xor     eax, eax                    # the viewport: x y 0, w h, depth 0 .. 1
     mov     [rsp], rax
@@ -3231,7 +3347,7 @@ gv_record:
     xor     esi, esi
     mov     edx, 1
     lea     rcx, [rsp]
-    call    [rip+vkf+F_CMDVIEWPORT]
+    VKCALL  F_CMDVIEWPORT
     mov     qword ptr [rsp], 0          # the scissor: all of it
     mov     eax, [rip+msg+GM_GX]
     mov     [rsp+8], eax
@@ -3241,7 +3357,7 @@ gv_record:
     xor     esi, esi
     mov     edx, 1
     lea     rcx, [rsp]
-    call    [rip+vkf+F_CMDSCISSOR]
+    VKCALL  F_CMDSCISSOR
     mov     r8d, [rip+msg+GM_NDRAW]
     test    r8d, r8d
     jz      1f
@@ -3251,14 +3367,14 @@ gv_record:
     mov     rdx, [rax+GV_IND*GB_SZ+GB_OFF]
     mov     ecx, r8d
     mov     r8d, 16
-    call    [rip+vkf+F_CMDDRAWIND]
+    VKCALL  F_CMDDRAWIND
 1:  mov     r8d, [rip+msg+GM_NDRAW3]    # then the liquids' surfaces
     test    r8d, r8d
     jz      12f
     mov     rdi, [rip+cbuf]
     mov     esi, BIND_GRAPHICS
     mov     rdx, [r12+KR_PIPE3]
-    call    [rip+vkf+F_CMDBINDPIPE]
+    VKCALL  F_CMDBINDPIPE
     mov     rdi, [rip+cbuf]
     mov     rsi, [rbx+SL_DBUF]
     lea     rax, [rip+table]
@@ -3268,14 +3384,14 @@ gv_record:
     add     rdx, rax
     mov     ecx, [rip+msg+GM_NDRAW3]
     mov     r8d, 16
-    call    [rip+vkf+F_CMDDRAWIND]
+    VKCALL  F_CMDDRAWIND
 12: mov     r8d, [rip+msg+GM_NDRAW2]    # then those that leave the ids
     test    r8d, r8d
     jz      11f
     mov     rdi, [rip+cbuf]
     mov     esi, BIND_GRAPHICS
     mov     rdx, [r12+KR_PIPE2]
-    call    [rip+vkf+F_CMDBINDPIPE]
+    VKCALL  F_CMDBINDPIPE
     mov     rdi, [rip+cbuf]
     mov     rsi, [rbx+SL_DBUF]
     lea     rax, [rip+table]
@@ -3286,9 +3402,9 @@ gv_record:
     add     rdx, rax
     mov     ecx, [rip+msg+GM_NDRAW2]
     mov     r8d, 16
-    call    [rip+vkf+F_CMDDRAWIND]
+    VKCALL  F_CMDDRAWIND
 11: mov     rdi, [rip+cbuf]
-    call    [rip+vkf+F_CMDENDRP]
+    VKCALL  F_CMDENDRP
     xor     r13d, r13d                  # the images into their bindings
 2:  lea     rdi, [rsp]                  # VkBufferImageCopy
     xor     eax, eax
@@ -3314,7 +3430,7 @@ gv_record:
     mov     rcx, [rbx+SL_SBUF]          # (straight into staging: the shared
     mov     r8d, 1                      #  memory itself when imported)
     lea     r9, [rsp]
-    call    [rip+vkf+F_CMDCOPYIMG]
+    VKCALL  F_CMDCOPYIMG
     inc     r13d
     cmp     r13d, 3
     jb      2b
@@ -3372,7 +3488,7 @@ lq_record:
     mov     rdi, [rip+cbuf]
     mov     esi, BIND_COMPUTE
     mov     rdx, [r12+KR_PIPE]
-    call    [rip+vkf+F_CMDBINDPIPE]
+    VKCALL  F_CMDBINDPIPE
     sub     rsp, 16
     mov     qword ptr [rsp], 0
     mov     qword ptr [rsp+8], 0
@@ -3382,7 +3498,7 @@ lq_record:
     xor     ecx, ecx
     mov     r8d, 1
     lea     r9, [r12+KR_SET]
-    call    [rip+vkf+F_CMDBINDSETS]
+    VKCALL  F_CMDBINDSETS
     add     rsp, 16
     lea     rax, [rip+table]            # the constants (host memory)
     mov     r13, [rax+GB_OFF]
@@ -3522,7 +3638,7 @@ lq_phase:
     lea     rax, [rip+table]
     mov     rdx, [rax+LQB_STEP*GB_SZ+GB_OFF]
     mov     ecx, 4
-    call    [rip+vkf+F_CMDFILL]
+    VKCALL  F_CMDFILL
     mov     edi, PS_TRANSFER|PS_COMPUTE # the word, and the last phase's
     mov     esi, PS_COMPUTE             #  writes, before this one
     mov     edx, AC_TRANSFER_WRITE|AC_SHADER_WRITE
@@ -3532,7 +3648,7 @@ lq_phase:
     mov     esi, r13d
     mov     edx, 1
     mov     ecx, 1
-    call    [rip+vkf+F_CMDDISPATCH]
+    VKCALL  F_CMDDISPATCH
 9:  add     rsp, 8
     pop     r13
     pop     r12
@@ -3556,7 +3672,7 @@ barrier:
     xor     ecx, ecx                    # dependency flags
     mov     r8d, 1
     lea     r9, [rsp+40]
-    call    [rip+vkf+F_CMDBARRIER]
+    VKCALL  F_CMDBARRIER
     add     rsp, 72
     ret
 

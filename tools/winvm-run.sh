@@ -2,8 +2,8 @@
 # Run a command in the Windows 11 VM (omarchy-windows-vm) and give back its
 # output and exit code, through the folder the VM shares (~/Windows; the VM
 # forwards only RDP, no SSH). The guest's side is tools/winvm/runner.ps1,
-# set up once with tools/winvm/setup.ps1 (see there). build/beemodel.exe
-# and build/test-*.exe go along and run from the job's folder:
+# set up once with tools/winvm/setup.ps1 (see there). build/beemodel.exe,
+# build/beemodel-gpu.exe and build/test-*.exe go along and run from the job's folder:
 #   tools/winvm-run.sh beemodel.exe --version
 #   tools/winvm-run.sh --timeout 600 beemodel.exe --eval "print(1)"
 # The command is a cmd.exe line (several: separated by \r\n). Exit codes
@@ -43,7 +43,7 @@ if ! fresh; then
     echo "  powershell -ExecutionPolicy Bypass -File \\\\host.lan\\Data\\bee-run\\$(basename "$SHARE"/setup-*.ps1)" >&2
     exit 3
 fi
-for f in build/beemodel.exe build/test-*.exe tools/winvm/gui.ps1; do
+for f in build/beemodel.exe build/beemodel-gpu.exe build/test-*.exe tools/winvm/gui.ps1; do
     [[ -f "$f" ]] && cp "$f" "$SHARE/bin/"
 done
 id="job$(date +%s%N)"

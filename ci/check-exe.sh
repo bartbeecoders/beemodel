@@ -11,17 +11,21 @@ EXE="${1:-build/beemodel.exe}"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 [[ -f "$EXE" ]] || fail "no $EXE (scripts/build.sh skips it when ld lacks i386pep)"
-objdump -f "$EXE" | grep -q 'file format pei-x86-64' || fail "not a 64-bit PE executable"
-dlls=$(objdump -p "$EXE" | awk '/DLL Name:/ {print toupper($3)}' | sort -u)
-[[ -n "$dlls" ]] || fail "imports nothing"
-for d in $dlls; do
-    case $d in
-        KERNEL32.DLL|USER32.DLL|GDI32.DLL|WS2_32.DLL) ;;
-        API-MS-WIN-CORE-SYNCH-L1-2-0.DLL) ;;  # (WaitOnAddress; an API set of Windows 8+)
-        *) fail "imports $d (only Windows system DLLs)" ;;
-    esac
+# the program and its GPU helper (which loads vulkan-1.dll itself, when it runs)
+for pe in "$EXE" "$(dirname "$EXE")/beemodel-gpu.exe"; do
+    [[ -f "$pe" ]] || fail "no $pe"
+    objdump -f "$pe" | grep -q 'file format pei-x86-64' || fail "$pe: not a 64-bit PE executable"
+    dlls=$(objdump -p "$pe" | awk '/DLL Name:/ {print toupper($3)}' | sort -u)
+    [[ -n "$dlls" ]] || fail "$pe imports nothing"
+    for d in $dlls; do
+        case $d in
+            KERNEL32.DLL|USER32.DLL|GDI32.DLL|WS2_32.DLL) ;;
+            API-MS-WIN-CORE-SYNCH-L1-2-0.DLL) ;;  # (WaitOnAddress; an API set of Windows 8+)
+            *) fail "$pe imports $d (only Windows system DLLs)" ;;
+        esac
+    done
+    echo "$(basename "$pe") imports: $(tr '\n' ' ' <<<"$dlls")"
 done
-echo "imports: $(tr '\n' ' ' <<<"$dlls")"
 
 want=$(build/beemodel --version)
 ran=
