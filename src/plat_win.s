@@ -65,6 +65,14 @@
 .globl plat_socketpair
 .globl plat_fcntl
 .globl plat_sendto
+.globl plat_socket
+.globl plat_bind
+.globl plat_listen
+.globl plat_accept4
+.globl plat_connect
+.globl plat_setsockopt
+.globl plat_getrandom
+.globl plat_symlink
 .globl plat_spawn
 .globl plat_wait4
 .globl plat_kill
@@ -227,7 +235,34 @@
 .equ SPN_ABUF,          336
 .equ SPN_FRAME,         608
 .equ POLLOUT_,          4
+.equ POLLERR_,          8
+.equ POLLHUP_,          0x10
 .equ POLLNVAL_,         0x20
+.equ FILE_TYPE_PIPE,    3
+.equ IO_CHUNK,          1048576         # a read or write's piece (io_touch)
+.equ PIPE_POLL_NS,      4000000         # a pipe plat_poll cannot wait on: looked at so often
+.equ K_SOCK,            6               # a socket: aux its event (WSAEventSelect),
+.equ SK_FLAGS,          24              #  then O_NONBLOCK as the caller set it
+.equ SK_FAMILY,         28              #  (SKF_NB) and its family
+.equ SKF_NB,            1
+.equ FD_NETWORK,        0x3b            # FD_READ, WRITE, ACCEPT, CONNECT, CLOSE
+.equ WS_POLLRDNORM,     0x100           # WSAPoll's events
+.equ WS_POLLIN,         0x300
+.equ WS_POLLWRNORM,     0x10
+.equ WS_POLLERR,        1
+.equ WS_POLLHUP,        2
+.equ WS_POLLNVAL,       4
+.equ WSAEWOULDBLOCK,    10035
+.equ WSA_FLAG_NO_HANDLE_INHERIT, 0x80
+.equ SOL_SOCKET_W,      0xffff
+.equ SO_KEEPALIVE_W,    8
+.equ SO_SNDBUF_W,       0x1001
+.equ SO_RCVBUF_W,       0x1002
+.equ SO_ERROR_W,        0x1007
+.equ EINPROGRESS_,      115
+.equ EAFNOSUPPORT_,     97
+.equ ENOTSOCK_,         88
+.equ UN_PATH,           108             # sockaddr_un's path
 .equ DS_HANDLE,         0               # a listing (K_DIR): FindFirstFileW's
 .equ DS_PEND,           8               #  handle, an entry found but not yet
 .equ DS_DONE,           12              #  given, the end reached, the last
@@ -1317,8 +1352,9 @@ win_veh:
 # ---- files and directories -----------------------------------------------------
 # An fd is an index into fd_tab: {handle, kind, aux}. 0-2 are the standard
 # handles (set at the start). K_FILE: a handle ReadFile and WriteFile take
-# (files, the console; pipes and sockets come in W6). K_DIR: a directory
-# opened for listing, aux its DS_* block (FindFirstFileW / FindNextFileW).
+# (files, the console, a pipe's far end). K_DIR: a directory opened for
+# listing, aux its DS_* block (FindFirstFileW / FindNextFileW). K_TIMER,
+# K_PIPE, K_SOCK: below, with poll.
 # Paths arrive in UTF-8 and go to Windows in UTF-16 (u2w_at); '/' works as
 # a separator there as it is.
 #
@@ -1458,6 +1494,8 @@ w_errno:
 # w_errno_of(eax=a Windows error) -> rax = -errno
 w_errno_of:
     lea     rcx, [rip+err_map]
+# err_lookup(eax=an error, rcx=its {error, errno} words) -> rax = -errno
+err_lookup:
 1:  movzx   edx, word ptr [rcx]
     test    edx, edx
     jz      2f
@@ -1648,8 +1686,15 @@ plat_close:
     cmp     dword ptr [rdi+FD_KIND], K_TIMER
     je      3f
     cmp     dword ptr [rdi+FD_KIND], K_PIPE
-    jne     11f
+    jne     10f
     call    pipe_close
+    jmp     3f
+10: cmp     dword ptr [rdi+FD_KIND], K_SOCK
+    jne     11f
+    mov     rcx, [rdi+FD_HANDLE]
+    call    [rip+__imp_closesocket]
+    mov     rcx, [rdi+FD_AUX]
+    call    [rip+__imp_WSACloseEvent]
     jmp     3f
 11: mov     rcx, [rdi+FD_HANDLE]
     call    [rip+__imp_CloseHandle]
@@ -1687,19 +1732,40 @@ plat_write:
     jz      7f
     cmp     dword ptr [rax+FD_KIND], K_FILE
     jne     5f
-    WENTER 16
-    mov     rcx, [rax+FD_HANDLE]
-    mov     r8, rdx
-    mov     edx, 0x7ffff000             # (at most, as Linux)
-    cmp     r8, rdx
-    cmova   r8, rdx
-    mov     rdx, rsi
+    WENTER 48                           # [rsp+40] moved by a call, [rsp+48] the handle,
+    mov     rcx, [rax+FD_HANDLE]        #  [rsp+56] moved so far, [rsp+64] to move
+    mov     [rsp+48], rcx
+    mov     qword ptr [rsp+56], 0
+    mov     eax, 0x7ffff000             # (at most, as Linux)
+    cmp     rdx, rax
+    cmova   rdx, rax
+    mov     [rsp+64], rdx
+10: mov     rcx, [rsp+48]               # IO_CHUNK at a time, touched first
+    mov     rdx, [rbp+SV_RSI]
+    add     rdx, [rsp+56]
+    mov     r8, [rsp+64]
+    sub     r8, [rsp+56]
+    mov     eax, IO_CHUNK
+    cmp     r8, rax
+    cmova   r8, rax
+    call    io_touch
     lea     r9, [rsp+40]
     mov     dword ptr [r9], 0
     mov     qword ptr [rsp+32], 0
     call    [rbx]
     test    eax, eax
+    jz      11f
     mov     eax, [rsp+40]
+    add     [rsp+56], rax
+    cmp     eax, IO_CHUNK               # a whole chunk, and more to move: on
+    jne     12f
+    mov     rax, [rsp+56]
+    cmp     rax, [rsp+64]
+    jb      10b
+12: mov     rax, [rsp+56]
+    jmp     2f
+11: mov     rax, [rsp+56]               # (what moved before an error counts)
+    test    rax, rax
     jnz     2f
     call    [rip+__imp_GetLastError]
     cmp     eax, ERROR_BROKEN_PIPE
@@ -1714,11 +1780,17 @@ plat_write:
     ret
 5:  lea     rcx, [rip+__imp_ReadFile]
     cmp     dword ptr [rax+FD_KIND], K_PIPE
-    jne     51f
+    jne     50f
     cmp     rbx, rcx
     pop     rbx
     je      pipe_read
     jmp     pipe_write
+50: cmp     dword ptr [rax+FD_KIND], K_SOCK
+    jne     51f
+    cmp     rbx, rcx
+    pop     rbx
+    je      sock_recv
+    jmp     sock_send
 51: cmp     dword ptr [rax+FD_KIND], K_TIMER
     jne     6f
     cmp     rbx, rcx
@@ -1734,6 +1806,22 @@ plat_write:
 7:  mov     rax, -EBADF_
     pop     rbx
     ret
+
+# io_touch(rdx = bytes, r8 = how many) - each of their pages read once, so
+#   that a MAP_NORESERVE range is committed (win_veh) before Windows reads
+#   or writes it: a fault inside a system call is no fault but an error
+#   (ERROR_NOACCESS). Keeps all but rax, r11 and the flags.
+io_touch:
+    test    r8, r8
+    jz      9f
+    mov     rax, rdx
+    lea     r11, [rdx+r8-1]
+1:  cmp     byte ptr [rax], 0
+    and     rax, -4096
+    add     rax, 4096
+    cmp     rax, r11
+    jbe     1b
+9:  ret
 
 # fd_seek(rcx=handle, rdx=position or 0, r8d=FILE_BEGIN / FILE_CURRENT) ->
 #   rax = the position after; from a WENTER frame
@@ -1769,6 +1857,7 @@ plat_pwrite64:
     mov     rcx, rbx
     mov     rdx, [rbp+SV_RSI]
     mov     r8, [rbp+SV_RDX]
+    call    io_touch
     lea     r9, [rsp+40]
     mov     dword ptr [r9], 0
     mov     qword ptr [rsp+32], 0
@@ -2542,7 +2631,10 @@ plat_win_msgfd:
 #   on the high-resolution timer: Windows' own timeouts go by its tick
 #   (15.6 ms), too coarse for play mode's 8 ms or a frame's 16.7. Our end
 #   of a pipe when data or its end has come (the wait takes its read's
-#   event; at most POLL_PIPES of them). Sockets: W6b.
+#   event); a socket when WSAPoll says so (the wait takes its event). At
+#   most POLL_PIPES events are waited on; past them, and for a pipe handed
+#   to us (stdin from a parent: PeekNamedPipe, as such a pipe cannot be
+#   waited on), the wait is cut to PIPE_POLL_NS and they are looked at again.
 plat_poll:
     push    rbx
     push    r12
@@ -2551,7 +2643,8 @@ plat_poll:
     push    r15
     WENTER  32+8*(POLL_PIPES+4)         # [rsp+48] the timer's due time, [rsp+56] now,
                                         #  [rsp+64] where the handles start: [rsp+72]
-                                        #  the timer, [rsp+80...] the pipes'
+                                        #  the timer, [rsp+80...] the pipes' and
+                                        #  sockets' events; [rsp+568] the caller's end
     mov     r12, rdi
     mov     r13d, esi
     call    w_now_ns
@@ -2563,9 +2656,12 @@ plat_poll:
     imul    rcx, rcx, 1000000
     add     rcx, rax
     mov     r15, rcx
-1:  mov     r8, rax
+1:  mov     [rsp+568], r15
+    mov     r8, rax
     lea     r10, [rsp+80]
+    lea     rdx, [rsp+80+8*POLL_PIPES]
     call    poll_scan
+.Lpoll_wait:
     lea     rax, [rsp+80]               # edi = handles to wait on, esi = ms
     mov     [rsp+64], rax
     sub     r10, rax
@@ -2638,12 +2734,22 @@ plat_poll:
     jmp     7f
 61: mov     ecx, esi
     call    [rip+__imp_Sleep]
-7:  test    ebx, ebx                    # woken by the time: whose has come
+7:  test    ebx, ebx                    # woken by the time or an event: whose
     jnz     8f
     call    w_now_ns
+    mov     [rsp+56], rax
     mov     r8, rax
+    mov     r15, [rsp+568]
     lea     r10, [rsp+80]
+    lea     rdx, [rsp+80+8*POLL_PIPES]
     call    poll_scan
+    test    ebx, ebx                    # nothing (a look cut short): wait on,
+    jnz     8f                          #  to the caller's end
+    mov     rax, [rsp+568]
+    cmp     rax, -1
+    je      .Lpoll_wait
+    cmp     [rsp+56], rax
+    jb      .Lpoll_wait
 8:  mov     eax, ebx
     WLEAVE
     pop     r15
@@ -2653,11 +2759,12 @@ plat_poll:
     pop     rbx
     ret
 
-# poll_scan(r12 = pollfds, r13d = count, r8 = now, r10 = where the pipes'
-#   events go) -> ebx = the fds with news (their revents set), r14d = the
-#   queue's entry or -1, r15 = lowered to the first time to come, r10 after
-#   the events of pipes with a read on its way; keeps rbp, r12, r13; rax,
-#   rcx, rdx, rsi, rdi, r9 lost
+# poll_scan(r12 = pollfds, r13d = count, r8 = now, r10 = where the events
+#   to wait on go, rdx = where their room ends) -> ebx = the fds with news
+#   (their revents set), r14d = the queue's entry or -1, r15 = lowered to
+#   the first time to come, r10 after the events of pipes with a read on
+#   its way and of sockets without news; keeps rbp, r12, r13, rdx; rax, rcx,
+#   rsi, rdi, r9 lost
 poll_scan:
     xor     ebx, ebx
     mov     r14d, -1
@@ -2682,9 +2789,23 @@ poll_scan:
     je      6f
     cmp     ecx, K_PIPE
     je      10f
-    movzx   ecx, word ptr [r9+4]        # files: always ready
-    and     ecx, POLLIN|POLLOUT_
-    mov     [r9+6], cx
+    cmp     ecx, K_SOCK
+    je      13f
+    mov     edi, ecx
+    movzx   ecx, word ptr [r9+4]        # files: always ready; a pipe from a
+    and     ecx, POLLIN|POLLOUT_        #  parent when data or its end is there
+    cmp     edi, K_FILE
+    jne     3f
+    test    ecx, POLLIN
+    jz      3f
+    push    rcx
+    call    file_ready
+    pop     rcx
+    test    eax, eax
+    jnz     3f
+    and     ecx, POLLOUT_
+    call    poll_soon
+3:  mov     [r9+6], cx
     test    ecx, ecx
     jz      4f
     inc     ebx
@@ -2717,23 +2838,88 @@ poll_scan:
     push    rcx
     push    rax
     call    pipe_ready
-    mov     edx, eax
+    mov     edi, eax
     pop     rax
     pop     rcx
-    test    edx, edx
+    test    edi, edi
     jz      11f
     or      ecx, POLLIN
     jmp     12f
-11: mov     rdx, [rax+FD_AUX]
-    mov     rdx, [rdx+PB_OV+OV_EVENT]
-    mov     [r10], rdx
-    add     r10, 8
+11: mov     rdi, [rax+FD_AUX]
+    mov     rdi, [rdi+PB_OV+OV_EVENT]
+    call    poll_on
 12: mov     [r9+6], cx
     test    ecx, ecx
     jz      4b
     inc     ebx
     jmp     4b
+13: movzx   ecx, word ptr [r9+4]        # a socket: as WSAPoll says, else
+    push    rax                         #  its event is waited on
+    call    sock_ready
+    pop     rdi
+    mov     [r9+6], ax
+    test    eax, eax
+    jz      14f
+    inc     ebx
+    jmp     4b
+14: mov     rdi, [rdi+FD_AUX]
+    call    poll_on
+    jmp     4b
 9:  ret
+
+# poll_on(rdi = an event) - it joins poll_scan's wait (r10, room to rdx);
+#   past the room, the wait is cut short (poll_soon); keeps all but r10, r15
+poll_on:
+    cmp     r10, rdx
+    jae     poll_soon
+    mov     [r10], rdi
+    add     r10, 8
+    ret
+
+# poll_soon - poll_scan's wait ends PIPE_POLL_NS after r8 at the latest
+#   (r15), for a look again; keeps all but r15
+poll_soon:
+    push    rax
+    lea     rax, [r8+PIPE_POLL_NS]
+    cmp     rax, r15
+    jae     1f
+    mov     r15, rax
+1:  pop     rax
+    ret
+
+# file_ready(rax = a K_FILE entry) -> eax = 1 when a read would not wait:
+#   always, but for a pipe (a parent's, as stdin) with nothing in it yet
+#   (PeekNamedPipe; a broken one is at its end: ready); keeps all but rax,
+#   rcx, r11
+file_ready:
+    push    rbx
+    mov     rbx, rax
+    WENTER  32                          # [rsp+48] the bytes in it
+    mov     rcx, [rbx+FD_HANDLE]
+    call    [rip+__imp_GetFileType]
+    mov     ecx, eax
+    mov     eax, 1
+    cmp     ecx, FILE_TYPE_PIPE
+    jne     9f
+    mov     rcx, [rbx+FD_HANDLE]
+    xor     edx, edx
+    xor     r8d, r8d
+    xor     r9d, r9d
+    lea     rax, [rsp+48]
+    mov     dword ptr [rax], 0
+    mov     [rsp+32], rax
+    mov     qword ptr [rsp+40], 0
+    call    [rip+__imp_PeekNamedPipe]
+    mov     ecx, eax
+    mov     eax, 1
+    test    ecx, ecx
+    jz      9f
+    xor     eax, eax
+    cmp     dword ptr [rsp+48], 0
+    setne   al
+9:  WLEAVE
+    pop     rbx
+    ret
 
 # w_now_ns -> rax = the monotonic clock in ns (what plat_clock_gettime
 #   gives); from a WENTER frame: rcx, rdx, r8-r11 lost
@@ -3198,6 +3384,7 @@ pipe_write:
     cmp     r8, rdx
     cmova   r8, rdx
     mov     rdx, rsi
+    call    io_touch
     xor     r9d, r9d
     mov     rax, [rbx+FD_AUX]
     lea     rax, [rax+PB_WOV]
@@ -3257,26 +3444,30 @@ pipe_close:
     ret
 
 # plat_fcntl(edi=fd, esi=cmd, rdx=arg): F_GETFL and F_SETFL's O_NONBLOCK on
-#   a pipe (aiproc.s); the rest says 0 (sockets: W6b)
+#   a pipe (aiproc.s) or a socket (link.s, cosync.s); the rest says 0
 plat_fcntl:
     call    fd_entry
     test    rax, rax
     jz      8f
+    lea     rcx, [rax+SK_FLAGS]         # (a socket's SKF_NB: 0 or 1, as a pipe's)
+    cmp     dword ptr [rax+FD_KIND], K_SOCK
+    je      1f
     cmp     dword ptr [rax+FD_KIND], K_PIPE
     jne     7f
     mov     rcx, [rax+FD_AUX]
-    cmp     esi, F_GETFL_
+    add     rcx, PB_NONBLOCK
+1:  cmp     esi, F_GETFL_
     je      2f
     cmp     esi, F_SETFL_
     jne     7f
     xor     eax, eax
     test    edx, O_NONBLOCK_
     setnz   al
-    mov     [rcx+PB_NONBLOCK], eax
+    mov     [rcx], eax
     xor     eax, eax
     ret
 2:  xor     eax, eax
-    cmp     dword ptr [rcx+PB_NONBLOCK], 0
+    cmp     dword ptr [rcx], 0
     je      3f
     mov     eax, O_NONBLOCK_
 3:  ret
@@ -3286,18 +3477,569 @@ plat_fcntl:
     ret
 
 # plat_sendto(edi=fd, rsi=bytes, rdx=how many, r10d=flags, r8=to, r9d=its
-#   size): on a pipe (video.s's frames to ffmpeg) a write; sockets: W6b
+#   size): on a pipe (video.s's frames to ffmpeg) a write; on a socket a
+#   send (connected: no address; MSG_NOSIGNAL is how Windows works anyway)
 plat_sendto:
     call    fd_entry
     test    rax, rax
     jz      8f
+    cmp     dword ptr [rax+FD_KIND], K_SOCK
+    je      sock_send
     cmp     dword ptr [rax+FD_KIND], K_PIPE
     je      pipe_write
     cmp     dword ptr [rax+FD_KIND], K_FILE
     je      plat_write
-    mov     rax, -ENOSYS_
+    mov     rax, -ENOTSOCK_
     ret
 8:  mov     rax, -EBADF_
+    ret
+
+# ---- sockets -----------------------------------------------------------------------
+# A socket (K_SOCK) is a Winsock SOCKET in fd_tab, aux its event, given every
+# network event (WSAEventSelect), [SK_FLAGS] O_NONBLOCK as the caller sees
+# it, [SK_FAMILY] its family. Underneath it is always non-blocking
+# (WSAEventSelect makes it so): a call that would block on a socket the
+# caller made blocking waits in WSAPoll and goes again, so the callers get
+# Linux's behaviour either way. plat_poll asks WSAPoll (at once) whether one
+# is ready, and waits on its event when it is not; the event is reset
+# (WSAEnumNetworkEvents) before each look, so news after the look sets it
+# again. TCP (AF_INET) and AF_UNIX streams (Windows 10 1803 on). An AF_UNIX
+# path goes in Windows' form (C:\x for /C:/x); a "link" (plat_symlink's: a
+# small file holding the target's path, as Windows' own symbolic links need
+# developer mode) is followed by connect. Winsock starts at the first socket.
+
+# ws_start - WSAStartup, once; from a WENTER frame
+ws_start:
+    cmp     byte ptr [rip+ws_up], 0
+    jne     9f
+    sub     rsp, 40
+    mov     ecx, 0x202
+    lea     rdx, [rip+ws_data]
+    call    [rip+__imp_WSAStartup]
+    add     rsp, 40
+    mov     byte ptr [rip+ws_up], 1
+9:  ret
+
+# ws_errno -> rax = -errno for WSAGetLastError's error; ws_errno_of(eax = a
+#   Winsock error) the same; from a WENTER frame
+ws_errno:
+    sub     rsp, 40
+    call    [rip+__imp_WSAGetLastError]
+    add     rsp, 40
+ws_errno_of:
+    lea     rcx, [rip+ws_err_map]
+    jmp     err_lookup
+
+# sock_of(edi = fd) -> rax = its fd_tab entry when it is a socket, else 0;
+#   keeps all but rax, rcx
+sock_of:
+    call    fd_entry
+    test    rax, rax
+    jz      9f
+    cmp     dword ptr [rax+FD_KIND], K_SOCK
+    je      9f
+    xor     eax, eax
+9:  ret
+
+# sock_new(rcx = a SOCKET, edx = SKF_NB or 0, r8d = its family) -> eax = its
+#   fd, or -errno (the socket closed); its event made and given it; from a
+#   WENTER frame (rsi, rdi lost)
+sock_new:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 40
+    mov     rbx, rcx
+    mov     r12d, edx
+    mov     r13d, r8d
+    call    [rip+__imp_WSACreateEvent]
+    mov     r14, rax
+    test    rax, rax
+    jz      7f
+    mov     rcx, rbx
+    mov     rdx, r14
+    mov     r8d, FD_NETWORK
+    call    [rip+__imp_WSAEventSelect]
+    test    eax, eax
+    jnz     7f
+    mov     rdi, rbx
+    mov     esi, K_SOCK
+    mov     rdx, r14
+    call    fd_alloc
+    test    eax, eax
+    js      8f
+    mov     edi, eax
+    call    fd_entry
+    mov     [rax+SK_FLAGS], r12d
+    mov     [rax+SK_FAMILY], r13d
+    mov     eax, edi
+    jmp     9f
+7:  call    ws_errno
+8:  mov     [rsp+32], rax               # (what to say)
+    test    r14, r14
+    jz      1f
+    mov     rcx, r14
+    call    [rip+__imp_WSACloseEvent]
+1:  mov     rcx, rbx
+    call    [rip+__imp_closesocket]
+    mov     rax, [rsp+32]
+9:  add     rsp, 40
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# sock_wait(rbx = a K_SOCK entry, edx = WS_POLLRDNORM / WS_POLLWRNORM) - until
+#   the socket is ready for it, or broken (WSAPoll); from a WENTER frame
+sock_wait:
+    sub     rsp, 56                     # [rsp+32] the WSAPOLLFD
+    mov     rcx, [rbx+FD_HANDLE]
+    mov     [rsp+32], rcx
+    mov     [rsp+40], dx
+    mov     word ptr [rsp+42], 0
+    lea     rcx, [rsp+32]
+    mov     edx, 1
+    mov     r8d, -1
+    call    [rip+__imp_WSAPoll]
+    add     rsp, 56
+    ret
+
+# sock_ready(rax = a K_SOCK entry, ecx = poll events) -> eax = its revents,
+#   as Linux gives them (a closed peer: POLLHUP, and POLLIN when that was
+#   asked, as the read gives the end); its event reset first; keeps all but
+#   rax, rcx, r11
+sock_ready:
+    push    rbx
+    mov     rbx, rax
+    WENTER  64                          # [rsp+32] WSANETWORKEVENTS, [rsp+80] the WSAPOLLFD
+    xor     edx, edx
+    test    ecx, POLLIN
+    jz      1f
+    or      edx, WS_POLLRDNORM
+1:  test    ecx, POLLOUT_
+    jz      2f
+    or      edx, WS_POLLWRNORM
+2:  mov     rax, [rbx+FD_HANDLE]
+    mov     [rsp+80], rax
+    mov     [rsp+88], dx
+    mov     word ptr [rsp+90], 0
+    mov     rcx, rax
+    mov     rdx, [rbx+FD_AUX]
+    lea     r8, [rsp+32]
+    call    [rip+__imp_WSAEnumNetworkEvents]
+    lea     rcx, [rsp+80]
+    mov     edx, 1
+    xor     r8d, r8d
+    call    [rip+__imp_WSAPoll]
+    movzx   ecx, word ptr [rsp+90]
+    xor     eax, eax
+    test    ecx, WS_POLLIN
+    jz      3f
+    or      eax, POLLIN
+3:  test    ecx, WS_POLLWRNORM
+    jz      4f
+    or      eax, POLLOUT_
+4:  test    ecx, WS_POLLERR
+    jz      5f
+    or      eax, POLLERR_
+5:  test    ecx, WS_POLLHUP
+    jz      6f
+    or      eax, POLLHUP_
+    test    word ptr [rsp+88], WS_POLLRDNORM
+    jz      6f
+    or      eax, POLLIN
+6:  test    ecx, WS_POLLNVAL
+    jz      7f
+    or      eax, POLLNVAL_
+7:  WLEAVE
+    pop     rbx
+    ret
+
+# sock_recv / sock_send(rax = a K_SOCK entry, rsi = bytes, rdx = how many) ->
+#   rax = how many moved (a read of 0: the end; at most IO_CHUNK, touched
+#   first: cosync's 64 MiB buffers stay mostly uncommitted), -EAGAIN when
+#   it would wait (O_NONBLOCK; else it waits), or -errno
+sock_recv:
+    push    rbx
+    push    r12
+    mov     rbx, rax
+    lea     r12, [rip+__imp_recv]
+    jmp     1f
+sock_send:
+    push    rbx
+    push    r12
+    mov     rbx, rax
+    lea     r12, [rip+__imp_send]
+1:  WENTER
+2:  mov     rcx, [rbx+FD_HANDLE]
+    mov     rdx, [rbp+SV_RSI]
+    mov     r8, [rbp+SV_RDX]
+    mov     eax, IO_CHUNK
+    cmp     r8, rax
+    cmova   r8, rax
+    call    io_touch
+    xor     r9d, r9d
+    call    [r12]
+    cmp     eax, -1
+    jne     5f
+    call    [rip+__imp_WSAGetLastError]
+    cmp     eax, WSAEWOULDBLOCK
+    jne     7f
+    test    dword ptr [rbx+SK_FLAGS], SKF_NB
+    jnz     6f
+    mov     edx, WS_POLLRDNORM
+    lea     rax, [rip+__imp_recv]
+    cmp     r12, rax
+    je      3f
+    mov     edx, WS_POLLWRNORM
+3:  call    sock_wait
+    jmp     2b
+5:  mov     eax, eax
+    jmp     9f
+6:  mov     rax, -EAGAIN_
+    jmp     9f
+7:  call    ws_errno_of
+9:  WLEAVE
+    pop     r12
+    pop     rbx
+    ret
+
+# un_addr(rsi = a sockaddr_un, rdi = room for one) - it in Windows' form:
+#   the program's form of a drive's path (/C:/x) as C:\x, every / a \;
+#   keeps all but rax, rcx, rsi, rdi
+un_addr:
+    mov     ax, [rsi]
+    mov     [rdi], ax
+    add     rsi, 2
+    add     rdi, 2
+    xchg    rdi, rsi
+    call    drive_form
+    xchg    rdi, rsi
+    jnz     1f
+    inc     rsi                         # (/C:/x: C:/x)
+1:  mov     ecx, UN_PATH-1
+2:  mov     al, [rsi]
+    cmp     al, '/'
+    jne     3f
+    mov     al, '\\'
+3:  mov     [rdi], al
+    test    al, al
+    jz      9f
+    inc     rsi
+    inc     rdi
+    dec     ecx
+    jnz     2b
+    mov     byte ptr [rdi], 0
+9:  ret
+
+# plat_socket(edi=domain, esi=type, edx=protocol) -> rax = the fd: an
+#   AF_INET or AF_UNIX stream (SOCK_NONBLOCK kept; SOCK_CLOEXEC is how it
+#   is anyway: no child inherits it)
+plat_socket:
+    mov     eax, esi
+    and     eax, 0xf
+    cmp     eax, 1                      # SOCK_STREAM
+    jne     8f
+    cmp     edi, 2                      # AF_INET
+    je      1f
+    cmp     edi, 1                      # AF_UNIX
+    jne     8f
+1:  WENTER  16
+    call    ws_start
+    mov     ecx, [rbp+SV_RDI]
+    mov     edx, 1
+    xor     r8d, r8d
+    xor     r9d, r9d
+    mov     qword ptr [rsp+32], 0
+    mov     qword ptr [rsp+40], WSA_FLAG_NO_HANDLE_INHERIT
+    call    [rip+__imp_WSASocketW]
+    cmp     rax, -1
+    je      7f
+    mov     rcx, rax
+    xor     edx, edx
+    test    dword ptr [rbp+SV_RSI], O_NONBLOCK_
+    setnz   dl
+    mov     r8d, [rbp+SV_RDI]
+    call    sock_new
+    jmp     9f
+7:  call    ws_errno
+9:  WLEAVE
+    ret
+8:  mov     rax, -EAFNOSUPPORT_
+    ret
+
+# plat_bind(edi=fd, rsi=address, edx=its size) -> rax = 0 or -errno
+plat_bind:
+    call    sock_of
+    test    rax, rax
+    jz      8f
+    push    rbx
+    mov     rbx, rax
+    WENTER  112                         # [rsp+32] an AF_UNIX address in Windows' form
+    mov     r8d, edx
+    mov     rdx, rsi
+    cmp     word ptr [rsi], 1
+    jne     1f
+    lea     rdi, [rsp+32]
+    call    un_addr
+    lea     rdx, [rsp+32]
+    mov     r8d, 2+UN_PATH
+1:  mov     rcx, [rbx+FD_HANDLE]
+    call    [rip+__imp_bind]
+    test    eax, eax
+    jz      2f
+    call    ws_errno
+    jmp     9f
+2:  xor     eax, eax
+9:  WLEAVE
+    pop     rbx
+    ret
+8:  mov     rax, -EBADF_
+    ret
+
+# plat_listen(edi=fd, esi=backlog) -> rax = 0 or -errno
+plat_listen:
+    call    sock_of
+    test    rax, rax
+    jz      8f
+    WENTER
+    mov     rcx, [rax+FD_HANDLE]
+    mov     edx, [rbp+SV_RSI]
+    call    [rip+__imp_listen]
+    test    eax, eax
+    jz      1f
+    call    ws_errno
+    jmp     9f
+1:  xor     eax, eax
+9:  WLEAVE
+    ret
+8:  mov     rax, -EBADF_
+    ret
+
+# plat_accept4(edi=fd, rsi=address or 0, rdx=its size or 0, r10d=flags) ->
+#   rax = the new connection's fd (SOCK_NONBLOCK kept), -EAGAIN when none
+#   waits on a non-blocking socket (else it waits), or -errno. The peer's
+#   address is not told (*rdx = 0).
+plat_accept4:
+    call    sock_of
+    test    rax, rax
+    jz      8f
+    push    rbx
+    mov     rbx, rax
+    WENTER
+    test    rdx, rdx
+    jz      1f
+    mov     dword ptr [rdx], 0
+1:  mov     rcx, [rbx+FD_HANDLE]
+    xor     edx, edx
+    xor     r8d, r8d
+    call    [rip+__imp_accept]
+    cmp     rax, -1
+    jne     3f
+    call    [rip+__imp_WSAGetLastError]
+    cmp     eax, WSAEWOULDBLOCK
+    jne     7f
+    test    dword ptr [rbx+SK_FLAGS], SKF_NB
+    jnz     6f
+    mov     edx, WS_POLLRDNORM
+    call    sock_wait
+    jmp     1b
+3:  mov     rcx, rax
+    xor     edx, edx
+    test    dword ptr [rbp+SV_R10], O_NONBLOCK_
+    setnz   dl
+    mov     r8d, [rbx+SK_FAMILY]
+    call    sock_new
+    jmp     9f
+6:  mov     rax, -EAGAIN_
+    jmp     9f
+7:  call    ws_errno_of
+9:  WLEAVE
+    pop     rbx
+    ret
+8:  mov     rax, -EBADF_
+    ret
+
+# plat_connect(edi=fd, rsi=address, edx=its size) -> rax = 0, -EINPROGRESS
+#   on a non-blocking socket (else it waits for the outcome), or -errno. An
+#   AF_UNIX path that is a link (plat_symlink: a file holding the path)
+#   connects to what it holds.
+plat_connect:
+    call    sock_of
+    test    rax, rax
+    jz      8f
+    push    rbx
+    mov     rbx, rax
+    WENTER  256                         # [rsp+32] an AF_UNIX address in Windows' form,
+                                        #  [rsp+144] a link's target, [rsp+256] scratch
+    mov     r8d, edx
+    mov     rdx, rsi
+    cmp     word ptr [rsi], 1
+    jne     3f
+    lea     rdi, [rsp+32]
+    call    un_addr
+    mov     rdi, [rbp+SV_RSI]           # a link?
+    add     rdi, 2
+    xor     esi, esi
+    xor     edx, edx
+    call    plat_open
+    test    eax, eax
+    js      2f
+    mov     edi, eax
+    lea     rsi, [rsp+146]
+    mov     edx, UN_PATH-1
+    call    plat_read
+    mov     [rsp+256], rax
+    call    plat_close
+    mov     rax, [rsp+256]
+    test    rax, rax
+    jle     2f
+    cmp     rax, UN_PATH-1
+    jae     2f
+    mov     byte ptr [rsp+146+rax], 0
+    mov     word ptr [rsp+144], 1
+    lea     rsi, [rsp+144]
+    lea     rdi, [rsp+32]
+    call    un_addr
+2:  lea     rdx, [rsp+32]
+    mov     r8d, 2+UN_PATH
+3:  mov     rcx, [rbx+FD_HANDLE]
+    call    [rip+__imp_connect]
+    test    eax, eax
+    jz      5f
+    call    [rip+__imp_WSAGetLastError]
+    cmp     eax, WSAEWOULDBLOCK
+    jne     7f
+    test    dword ptr [rbx+SK_FLAGS], SKF_NB
+    jnz     6f
+    mov     edx, WS_POLLWRNORM          # the outcome
+    call    sock_wait
+    mov     rcx, [rbx+FD_HANDLE]
+    mov     edx, SOL_SOCKET_W
+    mov     r8d, SO_ERROR_W
+    lea     r9, [rsp+256]
+    mov     dword ptr [r9], 0
+    lea     rax, [rsp+264]
+    mov     dword ptr [rax], 4
+    mov     [rsp+32], rax
+    call    [rip+__imp_getsockopt]
+    mov     eax, [rsp+256]
+    test    eax, eax
+    jnz     7f
+5:  xor     eax, eax
+    jmp     9f
+6:  mov     rax, -EINPROGRESS_
+    jmp     9f
+7:  call    ws_errno_of
+9:  WLEAVE
+    pop     rbx
+    ret
+8:  mov     rax, -EBADF_
+    ret
+
+# plat_setsockopt(edi=fd, esi=level, edx=option, r10=value, r8d=its size) ->
+#   rax = 0 or -errno: TCP_NODELAY (an AF_UNIX socket says no, as on
+#   Linux), SO_SNDBUF, SO_RCVBUF, SO_KEEPALIVE; SO_REUSEADDR and the rest
+#   are not needed on Windows (a port in TIME_WAIT can be bound; Windows'
+#   SO_REUSEADDR would let another program take a port in use): 0
+plat_setsockopt:
+    call    sock_of
+    test    rax, rax
+    jz      8f
+    WENTER  16
+    mov     rcx, [rax+FD_HANDLE]
+    mov     [rsp+32], r8                # (its size)
+    mov     r9, r10
+    mov     r8d, edx
+    mov     eax, esi
+    cmp     eax, 6                      # IPPROTO_TCP: as it is
+    je      2f
+    cmp     eax, 1                      # SOL_SOCKET
+    jne     6f
+    mov     eax, SOL_SOCKET_W
+    cmp     r8d, 7
+    mov     edx, SO_SNDBUF_W
+    je      1f
+    cmp     r8d, 8
+    mov     edx, SO_RCVBUF_W
+    je      1f
+    cmp     r8d, 9
+    mov     edx, SO_KEEPALIVE_W
+    jne     6f
+1:  mov     r8d, edx
+2:  mov     edx, eax
+    call    [rip+__imp_setsockopt]
+    test    eax, eax
+    jz      6f
+    call    ws_errno
+    jmp     9f
+6:  xor     eax, eax
+9:  WLEAVE
+    ret
+8:  mov     rax, -EBADF_
+    ret
+
+# plat_symlink(rdi=target, rsi=link path) -> rax = 0 or -errno: the link as
+#   a small file holding the target's path, which plat_connect follows (only
+#   mcp.s makes one: beemodel.sock for the newest instance's socket)
+plat_symlink:
+    push    rbx
+    push    rdi
+    push    rsi
+    push    rdx
+    mov     rbx, rdi
+    mov     rdi, rsi
+    mov     esi, 0x241                  # O_WRONLY | O_CREAT | O_TRUNC
+    mov     edx, 0644
+    call    plat_open
+    test    eax, eax
+    js      9f
+    mov     edi, eax
+    mov     rsi, rbx
+    xor     edx, edx
+1:  cmp     byte ptr [rsi+rdx], 0
+    je      2f
+    inc     rdx
+    jmp     1b
+2:  call    plat_write
+    mov     rbx, rax
+    call    plat_close
+    mov     rax, rbx
+    test    rax, rax
+    js      9f
+    xor     eax, eax
+9:  pop     rdx
+    pop     rsi
+    pop     rdi
+    pop     rbx
+    ret
+
+# plat_getrandom(rdi=bytes, rsi=how many, edx=flags) -> rax = how many: from
+#   the processor (RDRAND, which every processor Windows 11 runs on has)
+plat_getrandom:
+    push    rdi
+    mov     rcx, rsi
+1:  cmp     rcx, 8
+    jb      3f
+2:  rdrand  rax
+    jnc     2b
+    mov     [rdi], rax
+    add     rdi, 8
+    sub     rcx, 8
+    jmp     1b
+3:  test    rcx, rcx
+    jz      5f
+4:  rdrand  rax
+    jnc     4b
+41: mov     [rdi], al
+    shr     rax, 8
+    inc     rdi
+    dec     rcx
+    jnz     41b
+5:  pop     rdi
+    mov     rax, rsi
     ret
 
 # ---- child processes ------------------------------------------------------------
@@ -3840,19 +4582,10 @@ plat_kill:
 8:  mov     rax, -ESRCH_
     ret
 
-# ---- the rest: W6b (sockets; symlink, used only by mcp.s), W6c (the
-#      GPU helper's shared memory and packets)
-NOSYS plat_symlink
-NOSYS plat_socket
-NOSYS plat_connect
-NOSYS plat_bind
-NOSYS plat_listen
-NOSYS plat_accept4
-NOSYS plat_setsockopt
+# ---- the rest: W6c (the GPU helper's shared memory and packets)
 NOSYS plat_sendmsg
 NOSYS plat_recvmsg
 NOSYS plat_memfd_create
-NOSYS plat_getrandom
 
 .section .bss
 .align 8
@@ -3872,6 +4605,9 @@ plat_win_frame_due: .skip 8             # the window's next frame (ns, 0: none)
 proc_tab:       .skip PROC_MAX*16       # children: {pid, signal sent, handle}
 proc_lock:      .skip 4
 pipe_n:         .skip 4                 # pipes made (their names)
+ws_up:          .skip 4                 # Winsock started (ws_start)
+.align 8
+ws_data:        .skip 512               # WSAStartup's WSADATA
 
 .section .data
 .align 8
@@ -3907,6 +4643,17 @@ err_map:
     .short 206, 36                                        # ENAMETOOLONG
     .short 267, 20                                        # ENOTDIR
     .short 0
+# Winsock's errors -> errno, the same way
+ws_err_map:
+    .short 10004, 4,    10009, 9,    10013, 13,   10014, 14   # EINTR, EBADF, EACCES, EFAULT
+    .short 10022, 22,   10024, 24,   10035, 11,   10036, 115  # EINVAL, EMFILE, EAGAIN, EINPROGRESS
+    .short 10037, 114,  10038, 88,   10040, 90,   10047, 97   # EALREADY, ENOTSOCK, EMSGSIZE, EAFNOSUPPORT
+    .short 10048, 98,   10049, 99,   10050, 100,  10051, 101  # EADDRINUSE, EADDRNOTAVAIL, ENETDOWN, ENETUNREACH
+    .short 10053, 103,  10054, 104,  10055, 105,  10056, 106  # ECONNABORTED, ECONNRESET, ENOBUFS, EISCONN
+    .short 10057, 107,  10058, 32,   10060, 110,  10061, 111  # ENOTCONN, EPIPE (shut down), ETIMEDOUT, ECONNREFUSED
+    .short 10065, 113,  10093, 22                             # EHOSTUNREACH, (not started) EINVAL
+    .short 2, 2,        3, 2                                  # (an AF_UNIX path not there) ENOENT
+    .short 0
 
 # ---- the imports (the macros: plat_win.inc) ------------------------------------
 DLL 1, KERNEL32.dll
@@ -3941,6 +4688,7 @@ IMPORT 1, GetExitCodeProcess
 IMPORT 1, GetFileAttributesExW
 IMPORT 1, GetFileAttributesW
 IMPORT 1, GetFileInformationByHandle
+IMPORT 1, GetFileType
 IMPORT 1, GetLastError
 IMPORT 1, GetLogicalDrives
 IMPORT 1, GetModuleFileNameW
@@ -3956,6 +4704,7 @@ IMPORT 1, InitializeProcThreadAttributeList
 IMPORT 1, MapViewOfFile
 IMPORT 1, MoveFileExW
 IMPORT 1, MultiByteToWideChar
+IMPORT 1, PeekNamedPipe
 IMPORT 1, QueryPerformanceCounter
 IMPORT 1, QueryPerformanceFrequency
 IMPORT 1, ReadFile
@@ -3985,3 +4734,23 @@ IMPORT 2, WaitOnAddress
 IMPORT 2, WakeByAddressAll
 IMPORT 2, WakeByAddressSingle
 DLL_END 2
+
+DLL 5, WS2_32.dll                       # (sockets)
+IMPORT 5, WSACloseEvent
+IMPORT 5, WSACreateEvent
+IMPORT 5, WSAEnumNetworkEvents
+IMPORT 5, WSAEventSelect
+IMPORT 5, WSAGetLastError
+IMPORT 5, WSAPoll
+IMPORT 5, WSASocketW
+IMPORT 5, WSAStartup
+IMPORT 5, accept
+IMPORT 5, bind
+IMPORT 5, closesocket
+IMPORT 5, connect
+IMPORT 5, getsockopt
+IMPORT 5, listen
+IMPORT 5, recv
+IMPORT 5, send
+IMPORT 5, setsockopt
+DLL_END 5

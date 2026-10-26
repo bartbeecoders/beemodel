@@ -19,6 +19,9 @@
 #   show <SW_ number>  ShowWindow from outside (9 restore)
 #   cpu                the CPU cycles beemodel.exe has used (exact, where its
 #                      CPU time goes by the tick), and the clock (ms)
+#   mcp <file>         each line of the file (next to this script) to the
+#                      running BeeModel through beemodel.exe --mcp-bridge,
+#                      as an MCP client sends it; each answer printed
 #   quit               end beemodel.exe
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
@@ -153,6 +156,27 @@ while ($i -lt $args.Count) {
             $c = [uint64]0
             [BeeGui.U]::QueryProcessCycleTime($script:proc.Handle, [ref]$c) | Out-Null
             "cpu $([int64]($c / 1000000)) Mcycles at $([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) ms"
+        }
+        'mcp' {
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = Join-Path $PSScriptRoot 'beemodel.exe'
+            $psi.Arguments = '--mcp-bridge'
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardInput = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.CreateNoWindow = $true
+            $b = [System.Diagnostics.Process]::Start($psi)
+            $b.StandardInput.NewLine = "`n"
+            foreach ($line in Get-Content (Join-Path $PSScriptRoot $w[1])) {
+                $b.StandardInput.WriteLine($line)
+                $b.StandardInput.Flush()
+                if ($line -match '"id"') {
+                    $t = $b.StandardOutput.ReadLineAsync()
+                    if ($t.Wait(10000)) { "mcp: $($t.Result)" } else { "mcp: no answer in 10 s" }
+                }
+            }
+            $b.StandardInput.Close()
+            if ($b.WaitForExit(5000)) { "mcp: the bridge ended ($($b.ExitCode))" } else { $b.Kill(); 'mcp: the bridge did not end' }
         }
         'quit' { if ($script:proc) { Stop-Process -Id $script:proc.Id -Force -ErrorAction SilentlyContinue } }
         default { "unknown step: $($w[0])"; exit 2 }
