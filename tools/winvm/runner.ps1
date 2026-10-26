@@ -29,6 +29,8 @@ while ($true) {
             Log "job $id"
             $limit = 900
             if (Test-Path "$share\$id.limit") { $limit = [int](Get-Content "$share\$id.limit"); Remove-Item "$share\$id.limit" }
+            # (a program an earlier job left running holds its .exe)
+            Get-Process | Where-Object { $_.Path -like "$local\*" } | Stop-Process -Force -ErrorAction SilentlyContinue
             if (Test-Path "$share\bin") { Copy-Item "$share\bin\*" $local -Force -Recurse }
             Copy-Item $job.FullName "$local\$id.cmd" -Force
             Remove-Item $job.FullName

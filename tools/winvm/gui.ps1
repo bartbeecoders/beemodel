@@ -17,6 +17,8 @@
 #   state              its rectangle, maximized, minimized
 #   clipset <text>, clipget     the Windows clipboard
 #   show <SW_ number>  ShowWindow from outside (9 restore)
+#   cpu                the CPU cycles beemodel.exe has used (exact, where its
+#                      CPU time goes by the tick), and the clock (ms)
 #   quit               end beemodel.exe
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
@@ -37,6 +39,7 @@ Add-Type -Name U -Namespace BeeGui -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool on);
 [DllImport("user32.dll")] public static extern bool GetKeyboardState(byte[] s);
 [DllImport("user32.dll")] public static extern bool SetKeyboardState(byte[] s);
+[DllImport("kernel32.dll")] public static extern bool QueryProcessCycleTime(IntPtr p, out ulong c);
 '@
 [BeeGui.U]::SetProcessDPIAware() | Out-Null
 $h = [IntPtr]::Zero
@@ -82,6 +85,7 @@ function Press($vk, $mods) {
     [BeeGui.U]::AttachThreadInput($me, $them, $false) | Out-Null
 }
 $i = 0
+try {
 while ($i -lt $args.Count) {
     $w = -split $args[$i]; $i++
     switch ($w[0]) {
@@ -145,7 +149,15 @@ while ($i -lt $args.Count) {
         'clipset' { Set-Clipboard -Value $args[$i - 1].Substring(8) }
         'clipget' { "clipboard: [$(Get-Clipboard -Raw)]" }
         'show' { [BeeGui.U]::ShowWindow((Win), [int]$w[1]) | Out-Null; Start-Sleep -Milliseconds 300 }
+        'cpu' {
+            $c = [uint64]0
+            [BeeGui.U]::QueryProcessCycleTime($script:proc.Handle, [ref]$c) | Out-Null
+            "cpu $([int64]($c / 1000000)) Mcycles at $([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) ms"
+        }
         'quit' { if ($script:proc) { Stop-Process -Id $script:proc.Id -Force -ErrorAction SilentlyContinue } }
         default { "unknown step: $($w[0])"; exit 2 }
     }
+}
+} finally {                             # (a failed step: BeeModel goes too)
+    if ($script:proc -and -not $script:proc.HasExited) { Stop-Process -Id $script:proc.Id -Force -ErrorAction SilentlyContinue }
 }

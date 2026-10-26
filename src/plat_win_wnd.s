@@ -134,7 +134,15 @@
 .equ VK_RMENU,          0xA5
 .equ MAPVK_VSC_TO_VK,   1
 .equ MAPVK_VK_TO_VSC_EX, 4
-.equ FRAME_MS,          10              # the frame timer (Windows rounds it up to its tick)
+.equ FRAME_MS,          10              # the frame timer in Windows' move / resize loop
+.equ MONITOR_DEFAULTTONEAREST, 2
+.equ MONITORINFOEX_SIZE, 104
+.equ MI_DEVICE,         40              # MONITORINFOEXW.szDevice
+.equ ENUM_CURRENT_SETTINGS, -1
+.equ DEVMODE_SIZE,      220             # DEVMODEW
+.equ DM_SIZE,           68
+.equ DM_FREQUENCY,      184
+.equ WM_DISPLAYCHANGE,  0x7E
 .equ CLIP_CAP,          65536
 .equ BTN_SIDE,          0x113
 .equ BTN_EXTRA,         0x114
@@ -162,6 +170,10 @@ wbuf:           .skip 16                # ToUnicode's answer
 wtitle:         .skip 128
 clip_tmp:       .skip CLIP_CAP*4
 dpi:            .skip 4
+mon_info:       .skip MONITORINFOEX_SIZE
+dev_mode:       .skip DEVMODE_SIZE
+.align 8
+frame_last:     .skip 8                 # the last frame's time (ns)
 cli_w:          .skip 4                 # the client area, pixels
 cli_h:          .skip 4
 buf_w:          .skip 4                 # the frame shown (phys_w x phys_h then)
@@ -180,6 +192,10 @@ locked:         .skip 4                 # the pointer captured (play mode)
 abs_x:          .skip 4                 # (absolute raw input, as over RDP:
 abs_y:          .skip 4                 #  the last position)
 abs_have:       .skip 4
+
+.section .data
+.align 8
+frame_ns:       .quad 16666667          # a refresh (frame_rate)
 
 .section .rodata
 s_class:        .string16 "BeeModel"
@@ -278,6 +294,7 @@ wnd_open:
     call    [rip+__imp_GetDpiForWindow]
     mov     [rip+dpi], eax
     call    apply_dpi
+    call    frame_rate
     mov     edi, DEF_W                  # no frame: all client (WM_NCCALCSIZE),
     call    from_96                     #  at the size for that scale
     mov     [rsp+32], eax
@@ -448,20 +465,14 @@ km_build:
     pop     rbx
     ret
 
-# msg_wait(ecx = ms, -1 forever) -> eax = 1 when messages wait; plat_poll
-#   calls it in the Windows convention
+# msg_wait(ecx = handles, rdx = where, r8d = ms, -1 forever) -> eax =
+#   WAIT_OBJECT_0 + ecx when messages wait; plat_poll calls it in the
+#   Windows convention
 msg_wait:
     sub     rsp, 56
-    mov     r8d, ecx
-    xor     ecx, ecx
-    xor     edx, edx
     mov     r9d, QS_ALLINPUT
     mov     dword ptr [rsp+32], MWMO_INPUTAVAILABLE
     call    [rip+__imp_MsgWaitForMultipleObjectsEx]
-    xor     ecx, ecx
-    test    eax, eax                    # WAIT_OBJECT_0 + 0 handles: input
-    sete    cl
-    mov     eax, ecx
     add     rsp, 56
     ret
 
@@ -491,13 +502,28 @@ wnd_pump:
 9:  WLEAVE
     ret
 
-# wnd_ready -> eax = 1 unless the frame timer is still running or the
+# wnd_ready -> eax = 1 unless the next frame is not due yet (its time,
+#   plat_win_frame_due, or the timer in Windows' move / resize loop) or the
 #   window is minimized
 wnd_ready:
     mov     eax, [rip+frame_pending]
     or      eax, [rip+minimized]
-    sete    al
-    movzx   eax, al
+    jnz     8f
+    cmp     qword ptr [rip+plat_win_frame_due], 0
+    je      9f
+    push    rdi
+    push    rsi
+    push    rdx
+    call    mono_ns
+    pop     rdx
+    pop     rsi
+    pop     rdi
+    cmp     rax, [rip+plat_win_frame_due]
+    jb      8f
+    mov     qword ptr [rip+plat_win_frame_due], 0
+9:  mov     eax, 1
+    ret
+8:  xor     eax, eax
     ret
 
 # wnd_buffer -> rax = the frame buffer, big enough for phys_w x phys_h
@@ -563,13 +589,68 @@ wnd_present:
     pop     rdx
     mov     rcx, [rip+hwnd]
     call    [rip+__imp_ReleaseDC]
-    mov     dword ptr [rip+frame_pending], 1
+    cmp     dword ptr [rip+in_sizemove], 0
+    jne     3f
+    call    mono_ns                     # the next frame a refresh after this
+    mov     rcx, [rip+frame_last]       #  one's time, keeping the beat; late
+    add     rcx, [rip+frame_ns]         #  by less than a refresh: at once;
+    cmp     rcx, rax                    #  after a pause: a refresh from now
+    jae     2f
+    mov     rdx, rax
+    sub     rdx, rcx
+    mov     rcx, rax
+    cmp     rdx, [rip+frame_ns]
+    jb      2f
+    add     rcx, [rip+frame_ns]
+2:  mov     [rip+frame_last], rcx
+    mov     [rip+plat_win_frame_due], rcx
+    WLEAVE
+    ret
+3:  mov     dword ptr [rip+frame_pending], 1    # (Windows' loop: its timer)
     mov     rcx, [rip+hwnd]
     mov     edx, 1
     mov     r8d, FRAME_MS
     xor     r9d, r9d
     call    [rip+__imp_SetTimer]
     WLEAVE
+    ret
+
+# frame_rate - frame_ns from the refresh rate of the monitor the window is
+#   on (what Wayland's frame callback keeps to); 60 Hz when Windows does not
+#   say; keeps rbx, rsi, rdi, r12-r15
+frame_rate:
+    push    rbp
+    mov     rbp, rsp
+    and     rsp, -16
+    sub     rsp, 32
+    mov     rcx, [rip+hwnd]
+    mov     edx, MONITOR_DEFAULTTONEAREST
+    call    [rip+__imp_MonitorFromWindow]
+    mov     rcx, rax
+    lea     rdx, [rip+mon_info]
+    mov     dword ptr [rdx], MONITORINFOEX_SIZE
+    call    [rip+__imp_GetMonitorInfoW]
+    test    eax, eax
+    jz      9f
+    lea     rcx, [rip+mon_info+MI_DEVICE]
+    mov     edx, ENUM_CURRENT_SETTINGS
+    lea     r8, [rip+dev_mode]
+    mov     word ptr [r8+DM_SIZE], DEVMODE_SIZE
+    mov     word ptr [r8+DM_SIZE+2], 0
+    call    [rip+__imp_EnumDisplaySettingsW]
+    test    eax, eax
+    jz      9f
+    mov     ecx, [rip+dev_mode+DM_FREQUENCY]
+    cmp     ecx, 24                     # (0 or 1: the hardware's default)
+    jb      9f
+    cmp     ecx, 1000
+    ja      9f
+    mov     eax, 1000000000
+    xor     edx, edx
+    div     ecx
+    mov     [rip+frame_ns], rax
+9:  mov     rsp, rbp
+    pop     rbp
     ret
 
 # blit(rcx = DC) - the last frame onto the client area (stretched by the
@@ -986,6 +1067,8 @@ wnd_proc:
     je      .Lp_exitsm
     cmp     r13d, WM_DPICHANGED
     je      .Lp_dpi
+    cmp     r13d, WM_DISPLAYCHANGE
+    je      .Lp_display
     cmp     r13d, WM_DROPFILES
     je      .Lp_drop
     cmp     r13d, WM_POINTERUPDATE
@@ -1073,7 +1156,11 @@ wnd_proc:
     call    [rip+__imp_EndPaint]
     jmp     .Lp_zero
 
-.Lp_timer:                              # the frame callback
+.Lp_display:                            # a new refresh rate, perhaps
+    call    frame_rate
+    jmp     .Lp_def
+
+.Lp_timer:                              # the frame timer (Windows' loop)
     cmp     r14, 1
     jne     .Lp_def
     mov     rcx, r12
@@ -1092,6 +1179,7 @@ wnd_proc:
     jmp     .Lp_zero
 .Lp_exitsm:
     mov     dword ptr [rip+in_sizemove], 0
+    call    frame_rate                  # (perhaps on another monitor now)
     mov     dword ptr [rip+dirty], 1
     jmp     .Lp_zero
 
@@ -1133,6 +1221,7 @@ wnd_proc:
     movzx   eax, r14w                   #  Windows suggests
     mov     [rip+dpi], eax
     call    apply_dpi
+    call    frame_rate
     mov     rcx, r12
     xor     edx, edx
     mov     r8d, [r15]
@@ -1563,6 +1652,7 @@ IMPORT 3, CloseClipboard
 IMPORT 3, CreateWindowExW
 IMPORT 3, DefWindowProcW
 IMPORT 3, DispatchMessageW
+IMPORT 3, EnumDisplaySettingsW
 IMPORT 3, EmptyClipboard
 IMPORT 3, EndPaint
 IMPORT 3, GetClientRect
@@ -1574,6 +1664,7 @@ IMPORT 3, GetDpiForWindow
 IMPORT 3, GetKeyState
 IMPORT 3, GetMessageExtraInfo
 IMPORT 3, GetMessageTime
+IMPORT 3, GetMonitorInfoW
 IMPORT 3, GetPointerPenInfo
 IMPORT 3, GetRawInputData
 IMPORT 3, GetSystemMetrics
@@ -1585,6 +1676,7 @@ IMPORT 3, LoadCursorW
 IMPORT 3, LoadIconW
 IMPORT 3, MapVirtualKeyW
 IMPORT 3, MapWindowPoints
+IMPORT 3, MonitorFromWindow
 IMPORT 3, MsgWaitForMultipleObjectsEx
 IMPORT 3, OpenClipboard
 IMPORT 3, PeekMessageW

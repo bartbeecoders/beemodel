@@ -58,6 +58,9 @@
 .globl plat_gettid
 .globl plat_poll
 .globl plat_win_msgfd
+.globl plat_win_frame_due
+.globl plat_timerfd_create
+.globl plat_timerfd_settime
 .globl plat_path_in
 
 .equ CP_UTF8,           65001
@@ -140,6 +143,11 @@
 .equ K_FILE,            1
 .equ K_DIR,             2
 .equ K_MSG,             3               # the window's message queue (plat_poll)
+.equ K_TIMER,           4               # a timerfd: aux its due time (ns, 0: not armed)
+.equ FD_TIVL,           24              #  and here its interval (ns, 0: once)
+.equ TFD_TIMER_ABSTIME_, 1
+.equ CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, 2
+.equ TIMER_ALL_ACCESS,  0x1F0003
 .equ POLLOUT_,          4
 .equ POLLNVAL_,         0x20
 .equ DS_HANDLE,         0               # a listing (K_DIR): FindFirstFileW's
@@ -188,6 +196,19 @@ win_start:
     call    [rip+__imp_AddVectoredExceptionHandler]
     lea     rcx, [rip+qpc_freq]         # (CLOCK_MONOTONIC's unit)
     call    [rip+__imp_QueryPerformanceFrequency]
+    xor     ecx, ecx                    # plat_poll's timer: to the ms, not
+    xor     edx, edx                    #  Windows' 15.6 ms tick (Windows 10
+    mov     r8d, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION  # 1803+; else a plain one)
+    mov     r9d, TIMER_ALL_ACCESS
+    call    [rip+__imp_CreateWaitableTimerExW]
+    test    rax, rax
+    jnz     2f
+    xor     ecx, ecx
+    xor     edx, edx
+    xor     r8d, r8d
+    mov     r9d, TIMER_ALL_ACCESS
+    call    [rip+__imp_CreateWaitableTimerExW]
+2:  mov     [rip+poll_timer], rax
     lea     rbx, [rip+fd_tab]           # fds 0-2: the standard handles
     mov     r12d, STD_INPUT_HANDLE
 1:  mov     ecx, r12d
@@ -1526,6 +1547,8 @@ plat_close:
     mov     rdi, rax
     cmp     dword ptr [rdi+FD_KIND], K_DIR
     je      1f
+    cmp     dword ptr [rdi+FD_KIND], K_TIMER
+    je      3f
     mov     rcx, [rdi+FD_HANDLE]
     call    [rip+__imp_CloseHandle]
     jmp     3f
@@ -1561,7 +1584,7 @@ plat_write:
     test    rax, rax
     jz      7f
     cmp     dword ptr [rax+FD_KIND], K_FILE
-    jne     6f
+    jne     5f
     WENTER 16
     mov     rcx, [rax+FD_HANDLE]
     mov     r8, rdx
@@ -1585,6 +1608,16 @@ plat_write:
     jmp     2f
 3:  xor     eax, eax
 2:  WLEAVE
+    pop     rbx
+    ret
+5:  cmp     dword ptr [rax+FD_KIND], K_TIMER
+    jne     6f
+    lea     rcx, [rip+__imp_ReadFile]
+    cmp     rbx, rcx
+    jne     4f
+    pop     rbx
+    jmp     timer_read
+4:  mov     rax, -EINVAL_
     pop     rbx
     ret
 6:  mov     rax, -EISDIR_
@@ -2375,9 +2408,10 @@ plat_gettid:
 # ---- poll ------------------------------------------------------------------------
 # plat_win_msgfd(rdi=the window's wait routine) -> eax = an fd standing for
 #   the thread's message queue, for plat_poll. The routine is called in the
-#   Windows convention: ecx = milliseconds (-1 forever) -> eax = 1 when
-#   messages are waiting. (The window, plat_win_wnd.s, has the user32 side,
-#   so the tests' programs link without it.)
+#   Windows convention: ecx = handles, rdx = where they are, r8d =
+#   milliseconds (-1 forever) -> eax = MsgWaitForMultipleObjectsEx's answer
+#   (ecx: messages are waiting). (The window, plat_win_wnd.s, has the user32
+#   side, so the tests' programs link without it.)
 plat_win_msgfd:
     mov     [rip+msg_wait], rdi
     push    rdx
@@ -2393,69 +2427,289 @@ plat_win_msgfd:
     ret
 
 # plat_poll(rdi=pollfds, esi=count, edx=timeout ms, -1 forever) -> rax = the
-#   fds with news. Files and directories are always ready, as on Linux; the
-#   message queue is waited on (one per call). Pipes and sockets: W5, W6.
+#   fds with news. Files and directories are always ready, as on Linux; a
+#   timerfd is when its time has come; the message queue (one per call)
+#   when messages wait or the window's next frame is due (plat_win_frame_due,
+#   told once). The wait ends at the first of the timeout and those times,
+#   on the high-resolution timer: Windows' own timeouts go by its tick
+#   (15.6 ms), too coarse for play mode's 8 ms or a frame's 16.7. Pipes and
+#   sockets: W6.
 plat_poll:
     push    rbx
     push    r12
     push    r13
     push    r14
-    WENTER
+    push    r15
+    WENTER  32                          # [rsp+48] the timer's due time, [rsp+56] now
     mov     r12, rdi
     mov     r13d, esi
-    xor     ebx, ebx                    # ready
-    mov     r14d, -1                    # the message queue's entry
-    xor     esi, esi
-1:  cmp     esi, r13d
-    jae     5f
-    lea     rax, [r12+rsi*8]
-    mov     word ptr [rax+6], 0
-    mov     edi, [rax]
-    test    edi, edi                    # (negative: ignored)
-    js      4f
-    call    fd_entry
-    test    rax, rax
-    jnz     2f
-    lea     rax, [r12+rsi*8]
-    mov     word ptr [rax+6], POLLNVAL_
-    inc     ebx
-    jmp     4f
-2:  cmp     dword ptr [rax+FD_KIND], K_MSG
-    jne     3f
-    mov     r14d, esi
-    jmp     4f
-3:  lea     rax, [r12+rsi*8]
-    movzx   ecx, word ptr [rax+4]
-    and     ecx, POLLIN|POLLOUT_
-    mov     [rax+6], cx
-    test    ecx, ecx
-    jz      4f
-    inc     ebx
-4:  inc     esi
-    jmp     1b
-5:  test    ebx, ebx
-    jnz     8f
+    call    w_now_ns
+    mov     [rsp+56], rax
+    mov     r15, -1                     # the wait's end (ns), -1: none
     mov     ecx, [rbp+SV_RDX]
-    test    r14d, r14d
-    js      6f
-    call    [rip+msg_wait]
+    test    ecx, ecx
+    js      1f
+    imul    rcx, rcx, 1000000
+    add     rcx, rax
+    mov     r15, rcx
+1:  mov     r8, rax
+    call    poll_scan
+    xor     edi, edi                    # edi = handles to wait on, esi = ms
+    xor     esi, esi
+    test    ebx, ebx                    # news already: only a look at the queue
+    jnz     4f
+    mov     esi, -1
+    cmp     r15, -1
+    je      4f
+    mov     rax, r15
+    sub     rax, [rsp+56]
+    jbe     3f
+    cmp     qword ptr [rip+poll_timer], 0
+    je      2f
+    add     rax, 99                     # (in 100 ns, from now: negative)
+    xor     edx, edx
+    mov     ecx, 100
+    div     rcx
+    neg     rax
+    mov     [rsp+48], rax
+    mov     rcx, [rip+poll_timer]
+    lea     rdx, [rsp+48]
+    xor     r8d, r8d
+    xor     r9d, r9d
+    mov     qword ptr [rsp+32], 0
+    mov     qword ptr [rsp+40], 0
+    call    [rip+__imp_SetWaitableTimer]
     test    eax, eax
-    jz      8f
+    jz      21f
+    mov     edi, 1                      # the timer, and no timeout
+    jmp     4f
+21: mov     rax, r15                    # no timer: Windows' timeout, rounded up
+    sub     rax, [rsp+56]
+2:  add     rax, 999999
+    xor     edx, edx
+    mov     ecx, 1000000
+    div     rcx
+    mov     esi, eax
+    jmp     4f
+3:  xor     esi, esi
+4:  test    r14d, r14d
+    js      6f
+    mov     ecx, edi                    # the queue (and the timer)
+    lea     rdx, [rip+poll_timer]
+    mov     r8d, esi
+    call    [rip+msg_wait]
+    cmp     eax, edi                    # WAIT_OBJECT_0 + n: messages
+    jne     7f
     lea     rax, [r12+r14*8]
+    cmp     word ptr [rax+6], 0
+    jne     7f
     mov     word ptr [rax+6], POLLIN
     inc     ebx
-    jmp     8f
-6:  call    [rip+__imp_Sleep]           # nothing to wait on: the timeout
+    jmp     7f
+6:  test    ebx, ebx                    # no queue
+    jnz     8f
+    test    edi, edi
+    jz      61f
+    mov     rcx, [rip+poll_timer]
+    mov     edx, -1
+    call    [rip+__imp_WaitForSingleObject]
+    jmp     7f
+61: mov     ecx, esi
+    call    [rip+__imp_Sleep]
+7:  test    ebx, ebx                    # woken by the time: whose has come
+    jnz     8f
+    call    w_now_ns
+    mov     r8, rax
+    call    poll_scan
 8:  mov     eax, ebx
     WLEAVE
+    pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
     ret
 
-# ---- the rest: W5 (the key-repeat timerfd), W6 (processes, sockets,
-#      shared memory; fcntl and symlink, used only there)
+# poll_scan(r12 = pollfds, r13d = count, r8 = now) -> ebx = the fds with
+#   news (their revents set), r14d = the queue's entry or -1, r15 = lowered
+#   to the first time to come; keeps rbp, r12, r13; rax, rcx, rsi, rdi, r9 lost
+poll_scan:
+    xor     ebx, ebx
+    mov     r14d, -1
+    xor     esi, esi
+1:  cmp     esi, r13d
+    jae     9f
+    lea     r9, [r12+rsi*8]
+    mov     word ptr [r9+6], 0
+    mov     edi, [r9]
+    test    edi, edi                    # (negative: ignored)
+    js      4f
+    call    fd_entry
+    test    rax, rax
+    jnz     2f
+    mov     word ptr [r9+6], POLLNVAL_
+    inc     ebx
+    jmp     4f
+2:  mov     ecx, [rax+FD_KIND]
+    cmp     ecx, K_MSG
+    je      5f
+    cmp     ecx, K_TIMER
+    je      6f
+    movzx   ecx, word ptr [r9+4]        # files: always ready
+    and     ecx, POLLIN|POLLOUT_
+    mov     [r9+6], cx
+    test    ecx, ecx
+    jz      4f
+    inc     ebx
+4:  inc     esi
+    jmp     1b
+5:  mov     r14d, esi                   # the queue: the frame's time
+    mov     rax, [rip+plat_win_frame_due]
+    jmp     7f
+6:  mov     rax, [rax+FD_AUX]           # a timer: its time
+7:  test    rax, rax                    # (0: none)
+    jz      4b
+    cmp     r8, rax
+    jae     8f
+    cmp     rax, r15
+    jae     4b
+    mov     r15, rax
+    jmp     4b
+8:  test    word ptr [r9+4], POLLIN     # come
+    jz      4b
+    cmp     ecx, K_MSG
+    jne     81f
+    mov     qword ptr [rip+plat_win_frame_due], 0   # (told once)
+81: mov     word ptr [r9+6], POLLIN
+    inc     ebx
+    jmp     4b
+9:  ret
+
+# w_now_ns -> rax = the monotonic clock in ns (what plat_clock_gettime
+#   gives); from a WENTER frame: rcx, rdx, r8-r11 lost
+w_now_ns:
+    sub     rsp, 40
+    lea     rcx, [rsp+32]
+    call    [rip+__imp_QueryPerformanceCounter]
+    mov     rax, [rsp+32]
+    mov     ecx, 1000000000
+    mul     rcx
+    div     qword ptr [rip+qpc_freq]
+    add     rsp, 40
+    ret
+
+# mono_now -> rax = the same, keeping all but rax, rcx, r11
+mono_now:
+    WENTER
+    call    w_now_ns
+    WLEAVE
+    ret
+
+# ---- timers --------------------------------------------------------------------
+# A timerfd is its due time and interval in fd_tab: plat_poll waits for the
+# first one to come, read counts what has come since.
+# plat_timerfd_create(edi=clock, esi=flags) -> rax = the fd (the clock is
+#   the monotonic one; never readable, read says -EAGAIN until it is due)
+plat_timerfd_create:
+    push    rdx
+    push    rsi
+    push    rdi
+    xor     edi, edi
+    mov     esi, K_TIMER
+    xor     edx, edx
+    call    fd_alloc
+    test    eax, eax
+    js      1f
+    mov     edi, eax
+    call    fd_entry
+    mov     qword ptr [rax+FD_TIVL], 0
+    mov     eax, edi
+1:  pop     rdi
+    pop     rsi
+    pop     rdx
+    ret
+
+# plat_timerfd_settime(edi=fd, esi=flags, rdx=struct itimerspec {interval,
+#   value}, r10=the old one or 0) -> rax = 0; a value of 0 disarms it
+plat_timerfd_settime:
+    call    fd_entry
+    test    rax, rax
+    jz      8f
+    cmp     dword ptr [rax+FD_KIND], K_TIMER
+    jne     7f
+    push    rbx
+    push    r12
+    mov     rbx, rax
+    test    r10, r10                    # (the old one: not kept, said 0)
+    jz      1f
+    mov     qword ptr [r10], 0
+    mov     qword ptr [r10+8], 0
+    mov     qword ptr [r10+16], 0
+    mov     qword ptr [r10+24], 0
+1:  imul    rax, [rdx], 1000000000
+    add     rax, [rdx+8]
+    mov     [rbx+FD_TIVL], rax
+    imul    r12, [rdx+16], 1000000000
+    add     r12, [rdx+24]
+    jz      3f
+    test    esi, TFD_TIMER_ABSTIME_
+    jnz     2f
+    call    mono_now
+    add     r12, rax
+2:  mov     [rbx+FD_AUX], r12
+    jmp     4f
+3:  mov     qword ptr [rbx+FD_AUX], 0
+4:  xor     eax, eax
+    pop     r12
+    pop     rbx
+    ret
+7:  mov     rax, -EINVAL_
+    ret
+8:  mov     rax, -EBADF_
+    ret
+
+# timer_read(rax = its fd_tab entry, rsi = 8 bytes, rdx = their size) ->
+#   rax = 8 and how many times it came since (u64), or -EAGAIN
+timer_read:
+    cmp     rdx, 8
+    jb      7f
+    push    rbx
+    push    r12
+    mov     rbx, rax
+    call    mono_now
+    mov     rcx, [rbx+FD_AUX]
+    test    rcx, rcx
+    jz      6f
+    sub     rax, rcx
+    jb      6f
+    mov     r12, [rbx+FD_TIVL]
+    test    r12, r12
+    jnz     1f
+    mov     qword ptr [rbx+FD_AUX], 0   # once: done
+    mov     eax, 1
+    jmp     2f
+1:  push    rdx
+    xor     edx, edx
+    div     r12                         # whole intervals since it came
+    inc     rax
+    mov     rcx, rax
+    imul    rcx, r12
+    add     [rbx+FD_AUX], rcx           # (the next time)
+    pop     rdx
+2:  mov     [rsi], rax
+    mov     eax, 8
+    pop     r12
+    pop     rbx
+    ret
+6:  mov     rax, -EAGAIN_
+    pop     r12
+    pop     rbx
+    ret
+7:  mov     rax, -EINVAL_
+    ret
+
+# ---- the rest: W6 (processes, sockets, shared memory; fcntl and
+#      symlink, used only there)
 NOSYS plat_fcntl
 NOSYS plat_symlink
 NOSYS plat_socket
@@ -2474,8 +2728,6 @@ NOSYS plat_spawn
 NOSYS plat_pipe2
 NOSYS plat_wait4
 NOSYS plat_kill
-NOSYS plat_timerfd_create
-NOSYS plat_timerfd_settime
 
 .section .bss
 .align 8
@@ -2489,6 +2741,8 @@ fd_lock:        .skip 4
 .align 8
 qpc_freq:       .skip 8                 # performance counts a second
 msg_wait:       .skip 8                 # the window's wait (plat_win_msgfd)
+poll_timer:     .skip 8                 # plat_poll's (high-resolution) timer
+plat_win_frame_due: .skip 8             # the window's next frame (ns, 0: none)
 
 .section .rodata
 s_bmhome:       .asciz "BEEMODEL_HOME="
@@ -2523,6 +2777,7 @@ IMPORT 1, CreateDirectoryW
 IMPORT 1, CreateFileMappingW
 IMPORT 1, CreateFileW
 IMPORT 1, CreateThread
+IMPORT 1, CreateWaitableTimerExW
 IMPORT 1, DeleteFileW
 IMPORT 1, ExitProcess
 IMPORT 1, FindClose
@@ -2561,12 +2816,14 @@ IMPORT 1, SetConsoleOutputCP
 IMPORT 1, SetCurrentDirectoryW
 IMPORT 1, SetEndOfFile
 IMPORT 1, SetFilePointerEx
+IMPORT 1, SetWaitableTimer
 IMPORT 1, Sleep
 IMPORT 1, UnmapViewOfFile
 IMPORT 1, VirtualAlloc
 IMPORT 1, VirtualFree
 IMPORT 1, VirtualProtect
 IMPORT 1, VirtualQuery
+IMPORT 1, WaitForSingleObject
 IMPORT 1, WideCharToMultiByte
 IMPORT 1, WriteFile
 DLL_END 1
