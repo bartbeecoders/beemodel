@@ -197,6 +197,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <div class="table-wrap"><table>
     <tr><th>#</th><th>Bug</th><th>Where</th><th>Since</th><th>Status</th></tr>
     <tr><td class="num"><span class="issue">B4</span></td><td>A whole plate of shards cut touching each other (an 8 cm plate into 40, no glue) jams on landing: 128 contacts stay 2-8 mm deep, the solver never pushes them apart (more iterations or substeps don't help), and the one island never sleeps. Each shard alone does sleep (B1). Ideas: a small gap when cutting shards, or stronger recovery for resting hull contacts.</td><td><code>rbody.s</code>, <code>shatter.s</code></td><td class="num">v0.19.0</td><td><span class="tag">open</span> <a href="https://github.com/bartbeecoders/beemodel/issues/384">#384</a></td></tr>
+    <tr><td class="num"><span class="issue">B5</span></td><td>Flaky check: in <code>tools/fakewl.py</code>'s MCP walkthrough, "a script that saves and renders answers with what it printed" once got an empty answer from <code>script_eval</code> (<code>op("file.save")</code> then <code>render()</code>, which may start the GPU helper); the suite alone passed right after, with the same binary. Seen once in a full <code>ci/local.sh --quick</code> run on <code>win11-port</code> (2026-10-26); not reproduced yet.</td><td><code>tools/fakewl.py</code> (MCP, <code>script_eval</code>)</td><td>2026-10-26</td><td><span class="tag">open</span></td></tr>
   </table></div>
 </section>
 
