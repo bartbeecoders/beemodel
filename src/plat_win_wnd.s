@@ -467,13 +467,28 @@ km_build:
 
 # msg_wait(ecx = handles, rdx = where, r8d = ms, -1 forever) -> eax =
 #   WAIT_OBJECT_0 + ecx when messages wait; plat_poll calls it in the
-#   Windows convention
+#   Windows convention. Windows names the lowest signalled index, so a
+#   handle that keeps coming (a child streaming into a pipe) would hide the
+#   messages behind it: when one is named, the queue is asked too
+#   (GetQueueStatus), and messages waiting are said first (the handle's
+#   news is found by the next poll at once)
 msg_wait:
     sub     rsp, 56
+    mov     [rsp+40], ecx
     mov     r9d, QS_ALLINPUT
     mov     dword ptr [rsp+32], MWMO_INPUTAVAILABLE
     call    [rip+__imp_MsgWaitForMultipleObjectsEx]
-    add     rsp, 56
+    cmp     eax, [rsp+40]               # (a handle's: WAIT_OBJECT_0 + i)
+    jae     9f
+    mov     [rsp+44], eax
+    mov     ecx, QS_ALLINPUT
+    call    [rip+__imp_GetQueueStatus]
+    shr     eax, 16                     # (what is in the queue now)
+    test    eax, eax
+    mov     eax, [rsp+44]
+    jz      9f
+    mov     eax, [rsp+40]
+9:  add     rsp, 56
     ret
 
 # ---- the window interface (window.s) ----------------------------------------------
@@ -1665,6 +1680,7 @@ IMPORT 3, GetKeyState
 IMPORT 3, GetMessageExtraInfo
 IMPORT 3, GetMessageTime
 IMPORT 3, GetMonitorInfoW
+IMPORT 3, GetQueueStatus
 IMPORT 3, GetPointerPenInfo
 IMPORT 3, GetRawInputData
 IMPORT 3, GetSystemMetrics
