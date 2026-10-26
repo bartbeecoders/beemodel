@@ -95,24 +95,31 @@ ai_dir_make:
     ret
 
 # ai_which(rdi=program name or path) -> rax = its path (ap_which), or 0 when
-#   no such program can be run
+#   no such program can be run. PATH's directories are split at
+#   plat_path_sep (: on Linux, ; on Windows) and taken through plat_path_in
+#   (C:\x is /C:/x there); a program's file may also end in plat_exe_ext
+#   (.exe on Windows)
 ai_which:
     push    rbx
     push    r12
     push    r13
     mov     rbx, rdi
-    xor     ecx, ecx                    # a path (has a /): as it is
+    xor     ecx, ecx                    # a path (has a / or \\): as it is
 1:  mov     al, [rbx+rcx]
     test    al, al
     jz      3f
     cmp     al, '/'
+    je      2f
+    cmp     al, '\\'
     je      2f
     inc     ecx
     jmp     1b
 2:  lea     rdi, [rip+ap_which]
     mov     rsi, rbx
     call    ap_cpy
-    jmp     .Lwh_try
+    call    ap_try
+    jz      9f
+    jmp     8f
 3:  lea     rdi, [rip+s_path]           # each PATH directory
     call    getenv
     test    rax, rax
@@ -127,35 +134,59 @@ ai_which:
     test    al, al
     jz      5f
     inc     r12
-    cmp     al, ':'
+    cmp     al, [rip+plat_path_sep]
     je      5f
     cmp     ecx, 400
     jae     4b
     mov     [rdi+rcx], al
     inc     ecx
     jmp     4b
-5:  mov     byte ptr [rdi+rcx], '/'
+5:  test    ecx, ecx                    # (an empty one: skipped)
+    jz      .Lwh_dir
+    mov     byte ptr [rdi+rcx], '/'
     lea     rdi, [rdi+rcx+1]
     mov     rsi, rbx
     call    ap_cpy
-    lea     rdi, [rip+ap_which]         # executable?
-    mov     esi, 1                      # (X_OK)
-    call    plat_access
-    test    eax, eax
+    call    ap_try
     jz      9f
     jmp     .Lwh_dir
-.Lwh_try:
-    lea     rdi, [rip+ap_which]
-    mov     esi, 1
-    call    plat_access
-    test    eax, eax
-    jz      9f
 8:  xor     eax, eax
     jmp     10f
 9:  lea     rax, [rip+ap_which]
 10: pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# ap_try(rdi = the end of the path in ap_which) -> ZF set when it (or it
+#   with plat_exe_ext) can be run
+ap_try:
+    push    rdi
+    lea     rdi, [rip+ap_which]
+    call    plat_path_in
+    lea     rdi, [rip+ap_which]
+    mov     esi, 1                      # (X_OK)
+    call    plat_access
+    pop     rdi
+    test    eax, eax
+    jz      9f
+    cmp     byte ptr [rip+plat_exe_ext], 0
+    je      8f
+    lea     rdi, [rip+ap_which]         # (plat_path_in may have moved it)
+    xor     ecx, ecx
+1:  cmp     byte ptr [rdi+rcx], 0
+    je      2f
+    inc     ecx
+    jmp     1b
+2:  add     rdi, rcx
+    lea     rsi, [rip+plat_exe_ext]
+    call    ap_cpy
+    lea     rdi, [rip+ap_which]
+    mov     esi, 1
+    call    plat_access
+    test    eax, eax
+9:  ret
+8:  or      eax, 1                      # (ZF clear)
     ret
 
 # ai_proc_spawn(rdi=program path, rsi=argv (0-ended list of texts), rdx=

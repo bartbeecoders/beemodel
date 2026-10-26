@@ -61,7 +61,16 @@
 .globl plat_win_frame_due
 .globl plat_timerfd_create
 .globl plat_timerfd_settime
+.globl plat_pipe2
+.globl plat_socketpair
+.globl plat_fcntl
+.globl plat_sendto
+.globl plat_spawn
+.globl plat_wait4
+.globl plat_kill
 .globl plat_path_in
+.globl plat_path_sep
+.globl plat_exe_ext
 
 .equ CP_UTF8,           65001
 .equ MEM_COMMIT_RESERVE, 0x3000
@@ -148,6 +157,75 @@
 .equ TFD_TIMER_ABSTIME_, 1
 .equ CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, 2
 .equ TIMER_ALL_ACCESS,  0x1F0003
+.equ K_PIPE,            5               # our end of a pipe: aux its PB_* block
+.equ OV_EVENT,          24              # OVERLAPPED.hEvent
+.equ PB_OV,             0               # a pipe's block: the read's OVERLAPPED,
+.equ PB_WOV,            32              #  a write's, a read on its way, the
+.equ PB_PEND,           64              #  end come, O_NONBLOCK, the bytes read
+.equ PB_EOF,            68              #  and not yet taken (from PB_HEAD in
+.equ PB_NONBLOCK,       72              #  PB_BUF)
+.equ PB_HEAD,           76
+.equ PB_LEN,            80
+.equ PB_BUF,            128
+.equ PB_CAP,            65536
+.equ PB_SIZE,           PB_BUF+PB_CAP
+.equ PIPE_BUF_BYTES,    65536
+.equ PIPE_ACCESS_INBOUND, 1
+.equ PIPE_ACCESS_DUPLEX, 3
+.equ FILE_FLAG_OVERLAPPED, 0x40000000
+.equ FILE_FLAG_FIRST_PIPE_INSTANCE, 0x80000
+.equ PIPE_REJECT_REMOTE_CLIENTS, 8
+.equ ERROR_IO_INCOMPLETE, 996
+.equ ERROR_IO_PENDING,  997
+.equ F_GETFL_,          3
+.equ F_SETFL_,          4
+.equ O_NONBLOCK_,       0x800
+.equ POLL_PIPES,        60              # pipes plat_poll waits on at once
+.equ STARTF_USESTDHANDLES, 0x100
+.equ CREATE_UNICODE_ENVIRONMENT, 0x400
+.equ EXTENDED_STARTUPINFO_PRESENT, 0x80000
+.equ CREATE_NO_WINDOW,  0x8000000
+.equ PROC_THREAD_ATTRIBUTE_HANDLE_LIST, 0x20002
+.equ DUPLICATE_SAME_ACCESS, 2
+.equ ENOENT_,           2
+.equ ESRCH_,            3
+.equ E2BIG_,            7
+.equ ECHILD_,           10
+.equ PROC_MAX,          64              # proc_tab: {pid, signal sent, handle}
+.equ PT_PID,            0
+.equ PT_SIG,            4
+.equ PT_HANDLE,         8
+.equ SP_PATH,           0               # plat_spawn's scratch block: the
+.equ SP_CWD,            0x4000          #  program, the working directory, the
+.equ SP_CMD,            0x8000          #  command line and environment in
+.equ SP_CMD_UNITS,      32768           #  UTF-16, and either in UTF-8 first
+.equ SP_ENVW,           0x18000
+.equ SP_ENV_UNITS,      0x20000
+.equ SP_U8,             0x58000
+.equ SP_U8_CAP,         0x28000
+.equ SP_ARG,            0x80000         # (an argument, in Windows' form)
+.equ SP_ARG_CAP,        0x10000
+.equ SP_SIZE,           0x90000
+.equ SI_FLAGS,          60              # STARTUPINFOEXW
+.equ SI_STDIN,          80
+.equ SI_STDOUT,         88
+.equ SI_STDERR,         96
+.equ SI_ALIST,          104
+.equ SI_SIZE,           112
+.equ ALIST_ROOM,        256
+.equ SPN_PATH8,         80              # plat_spawn's frame (below: the
+.equ SPN_CWD8,          88              #  calls' arguments)
+.equ SPN_DUP,           96
+.equ SPN_ALIST,         120
+.equ SPN_ENV,           128
+.equ SPN_CWDW,          136
+.equ SPN_RES,           144
+.equ SPN_ASIZE,         152
+.equ SPN_PI,            160
+.equ SPN_HLIST,         192
+.equ SPN_SI,            224
+.equ SPN_ABUF,          336
+.equ SPN_FRAME,         608
 .equ POLLOUT_,          4
 .equ POLLNVAL_,         0x20
 .equ DS_HANDLE,         0               # a listing (K_DIR): FindFirstFileW's
@@ -282,7 +360,27 @@ win_start:
 # as the code splits paths at /; /C:/... for C:\..., plat_path_in).
 # Keeps rbx, r12-r15.
 win_env:
-    lea     rdi, [rip+s_bmhome]
+    mov     rdx, [rip+envp]             # names in capitals: Windows' are
+1:  mov     rsi, [rdx]                  #  case-blind (Path is PATH), the
+    test    rsi, rsi                    #  code's getenv is not
+    jz      4f
+    cmp     byte ptr [rsi], '='         # (=C:=C:\x, the drives' folders)
+    je      3f
+2:  mov     al, [rsi]
+    test    al, al
+    jz      3f
+    cmp     al, '='
+    je      3f
+    lea     ecx, [rax-'a']
+    cmp     cl, 'z'-'a'
+    ja      21f
+    sub     al, 'a'-'A'
+    mov     [rsi], al
+21: inc     rsi
+    jmp     2b
+3:  add     rdx, 8
+    jmp     1b
+4:  lea     rdi, [rip+s_bmhome]
     call    env_get
     test    rax, rax
     jnz     1f
@@ -1549,7 +1647,11 @@ plat_close:
     je      1f
     cmp     dword ptr [rdi+FD_KIND], K_TIMER
     je      3f
-    mov     rcx, [rdi+FD_HANDLE]
+    cmp     dword ptr [rdi+FD_KIND], K_PIPE
+    jne     11f
+    call    pipe_close
+    jmp     3f
+11: mov     rcx, [rdi+FD_HANDLE]
     call    [rip+__imp_CloseHandle]
     jmp     3f
 1:  mov     rsi, [rdi+FD_AUX]
@@ -1610,9 +1712,15 @@ plat_write:
 2:  WLEAVE
     pop     rbx
     ret
-5:  cmp     dword ptr [rax+FD_KIND], K_TIMER
+5:  lea     rcx, [rip+__imp_ReadFile]
+    cmp     dword ptr [rax+FD_KIND], K_PIPE
+    jne     51f
+    cmp     rbx, rcx
+    pop     rbx
+    je      pipe_read
+    jmp     pipe_write
+51: cmp     dword ptr [rax+FD_KIND], K_TIMER
     jne     6f
-    lea     rcx, [rip+__imp_ReadFile]
     cmp     rbx, rcx
     jne     4f
     pop     rbx
@@ -2432,15 +2540,18 @@ plat_win_msgfd:
 #   when messages wait or the window's next frame is due (plat_win_frame_due,
 #   told once). The wait ends at the first of the timeout and those times,
 #   on the high-resolution timer: Windows' own timeouts go by its tick
-#   (15.6 ms), too coarse for play mode's 8 ms or a frame's 16.7. Pipes and
-#   sockets: W6.
+#   (15.6 ms), too coarse for play mode's 8 ms or a frame's 16.7. Our end
+#   of a pipe when data or its end has come (the wait takes its read's
+#   event; at most POLL_PIPES of them). Sockets: W6b.
 plat_poll:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
-    WENTER  32                          # [rsp+48] the timer's due time, [rsp+56] now
+    WENTER  32+8*(POLL_PIPES+4)         # [rsp+48] the timer's due time, [rsp+56] now,
+                                        #  [rsp+64] where the handles start: [rsp+72]
+                                        #  the timer, [rsp+80...] the pipes'
     mov     r12, rdi
     mov     r13d, esi
     call    w_now_ns
@@ -2453,8 +2564,13 @@ plat_poll:
     add     rcx, rax
     mov     r15, rcx
 1:  mov     r8, rax
+    lea     r10, [rsp+80]
     call    poll_scan
-    xor     edi, edi                    # edi = handles to wait on, esi = ms
+    lea     rax, [rsp+80]               # edi = handles to wait on, esi = ms
+    mov     [rsp+64], rax
+    sub     r10, rax
+    shr     r10, 3
+    mov     edi, r10d
     xor     esi, esi
     test    ebx, ebx                    # news already: only a look at the queue
     jnz     4f
@@ -2481,7 +2597,11 @@ plat_poll:
     call    [rip+__imp_SetWaitableTimer]
     test    eax, eax
     jz      21f
-    mov     edi, 1                      # the timer, and no timeout
+    mov     rax, [rip+poll_timer]       # the timer too, and no timeout
+    mov     [rsp+72], rax
+    lea     rax, [rsp+72]
+    mov     [rsp+64], rax
+    inc     edi
     jmp     4f
 21: mov     rax, r15                    # no timer: Windows' timeout, rounded up
     sub     rax, [rsp+56]
@@ -2494,8 +2614,8 @@ plat_poll:
 3:  xor     esi, esi
 4:  test    r14d, r14d
     js      6f
-    mov     ecx, edi                    # the queue (and the timer)
-    lea     rdx, [rip+poll_timer]
+    mov     ecx, edi                    # the queue (and the handles)
+    mov     rdx, [rsp+64]
     mov     r8d, esi
     call    [rip+msg_wait]
     cmp     eax, edi                    # WAIT_OBJECT_0 + n: messages
@@ -2510,9 +2630,11 @@ plat_poll:
     jnz     8f
     test    edi, edi
     jz      61f
-    mov     rcx, [rip+poll_timer]
-    mov     edx, -1
-    call    [rip+__imp_WaitForSingleObject]
+    mov     ecx, edi
+    mov     rdx, [rsp+64]
+    xor     r8d, r8d
+    mov     r9d, esi
+    call    [rip+__imp_WaitForMultipleObjects]
     jmp     7f
 61: mov     ecx, esi
     call    [rip+__imp_Sleep]
@@ -2520,6 +2642,7 @@ plat_poll:
     jnz     8f
     call    w_now_ns
     mov     r8, rax
+    lea     r10, [rsp+80]
     call    poll_scan
 8:  mov     eax, ebx
     WLEAVE
@@ -2530,9 +2653,11 @@ plat_poll:
     pop     rbx
     ret
 
-# poll_scan(r12 = pollfds, r13d = count, r8 = now) -> ebx = the fds with
-#   news (their revents set), r14d = the queue's entry or -1, r15 = lowered
-#   to the first time to come; keeps rbp, r12, r13; rax, rcx, rsi, rdi, r9 lost
+# poll_scan(r12 = pollfds, r13d = count, r8 = now, r10 = where the pipes'
+#   events go) -> ebx = the fds with news (their revents set), r14d = the
+#   queue's entry or -1, r15 = lowered to the first time to come, r10 after
+#   the events of pipes with a read on its way; keeps rbp, r12, r13; rax,
+#   rcx, rdx, rsi, rdi, r9 lost
 poll_scan:
     xor     ebx, ebx
     mov     r14d, -1
@@ -2555,6 +2680,8 @@ poll_scan:
     je      5f
     cmp     ecx, K_TIMER
     je      6f
+    cmp     ecx, K_PIPE
+    je      10f
     movzx   ecx, word ptr [r9+4]        # files: always ready
     and     ecx, POLLIN|POLLOUT_
     mov     [r9+6], cx
@@ -2581,6 +2708,29 @@ poll_scan:
     jne     81f
     mov     qword ptr [rip+plat_win_frame_due], 0   # (told once)
 81: mov     word ptr [r9+6], POLLIN
+    inc     ebx
+    jmp     4b
+10: movzx   ecx, word ptr [r9+4]        # a pipe: writing waits for room itself;
+    and     ecx, POLLOUT_               #  reading when data or the end is there,
+    test    word ptr [r9+4], POLLIN     #  else its read's event is waited on
+    jz      12f
+    push    rcx
+    push    rax
+    call    pipe_ready
+    mov     edx, eax
+    pop     rax
+    pop     rcx
+    test    edx, edx
+    jz      11f
+    or      ecx, POLLIN
+    jmp     12f
+11: mov     rdx, [rax+FD_AUX]
+    mov     rdx, [rdx+PB_OV+OV_EVENT]
+    mov     [r10], rdx
+    add     r10, 8
+12: mov     [r9+6], cx
+    test    ecx, ecx
+    jz      4b
     inc     ebx
     jmp     4b
 9:  ret
@@ -2708,26 +2858,1001 @@ timer_read:
 7:  mov     rax, -EINVAL_
     ret
 
-# ---- the rest: W6 (processes, sockets, shared memory; fcntl and
-#      symlink, used only there)
-NOSYS plat_fcntl
+# ---- pipes -----------------------------------------------------------------------
+# A pipe is a named pipe of its own (\\.\pipe\beemodel-<pid>-<n>): our end
+# (fd[0], K_PIPE) is overlapped, with a read always on its way into the
+# block's buffer, so plat_poll can wait on its event among the others; the
+# other end (fd[1], K_FILE) is a plain handle, for a child (anonymous pipes
+# can be neither waited on nor read without blocking). plat_pipe2's is one
+# way (fd[1] writes, fd[0] reads); plat_socketpair's both ways (ffmpeg's
+# stdin: we write the frames on fd[0]).
+
+# plat_pipe2(rdi=int fds[2], esi=flags) -> rax = 0 or -errno
+plat_pipe2:
+    push    rsi
+    xor     esi, esi
+    call    pipe_pair
+    pop     rsi
+    ret
+
+# plat_socketpair(edi=domain, esi=type, edx=protocol, r10=int sv[2]):
+#   AF_UNIX streams only, as a pipe both ways (sockets and the GPU helper's
+#   packets: W6b, W6c)
+plat_socketpair:
+    cmp     edi, 1                      # AF_UNIX
+    jne     8f
+    mov     eax, esi
+    and     eax, 0xf
+    cmp     eax, 1                      # SOCK_STREAM
+    jne     8f
+    push    rdi
+    push    rsi
+    mov     rdi, r10
+    mov     esi, 1
+    call    pipe_pair
+    pop     rsi
+    pop     rdi
+    ret
+8:  mov     rax, -ENOSYS_
+    ret
+
+# pipe_pair(rdi=int fds[2], esi=1: both ways) -> rax = 0 or -errno
+pipe_pair:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    WENTER  128                         # [rsp+64] the name (UTF-16)
+    mov     r12, rdi
+    mov     r13d, esi
+    mov     rbx, -1                     # (the handles: none yet)
+    mov     r14, -1
+    xor     r15d, r15d                  # (the block)
+    lea     rdi, [rsp+64]               # the name
+    lea     rsi, [rip+s_pipename]
+1:  movzx   eax, word ptr [rsi]
+    test    eax, eax
+    jz      2f
+    mov     [rdi], ax
+    add     rsi, 2
+    add     rdi, 2
+    jmp     1b
+2:  call    [rip+__imp_GetCurrentProcessId]
+    call    hex_w
+    mov     word ptr [rdi], '-'
+    add     rdi, 2
+    mov     eax, 1
+    lock xadd [rip+pipe_n], eax
+    call    hex_w
+    mov     word ptr [rdi], 0
+    lea     rcx, [rsp+64]               # our end
+    mov     edx, PIPE_ACCESS_INBOUND|FILE_FLAG_OVERLAPPED|FILE_FLAG_FIRST_PIPE_INSTANCE
+    test    r13d, r13d
+    jz      3f
+    mov     edx, PIPE_ACCESS_DUPLEX|FILE_FLAG_OVERLAPPED|FILE_FLAG_FIRST_PIPE_INSTANCE
+3:  mov     r8d, PIPE_REJECT_REMOTE_CLIENTS     # (bytes, waiting)
+    mov     r9d, 1
+    mov     dword ptr [rsp+32], PIPE_BUF_BYTES
+    mov     dword ptr [rsp+40], PIPE_BUF_BYTES
+    mov     dword ptr [rsp+48], 0
+    mov     qword ptr [rsp+56], 0
+    call    [rip+__imp_CreateNamedPipeW]
+    cmp     rax, -1
+    je      .Lpp_err
+    mov     rbx, rax
+    lea     rcx, [rsp+64]               # the other end
+    mov     edx, GENERIC_WRITE
+    test    r13d, r13d
+    jz      4f
+    mov     edx, GENERIC_READ|GENERIC_WRITE
+4:  xor     r8d, r8d
+    xor     r9d, r9d
+    mov     qword ptr [rsp+32], OPEN_EXISTING
+    mov     qword ptr [rsp+40], 0
+    mov     qword ptr [rsp+48], 0
+    call    [rip+__imp_CreateFileW]
+    cmp     rax, -1
+    je      .Lpp_err
+    mov     r14, rax
+    xor     ecx, ecx                    # the block
+    mov     edx, PB_SIZE
+    mov     r8d, MEM_COMMIT_RESERVE
+    mov     r9d, PAGE_READWRITE
+    call    [rip+__imp_VirtualAlloc]
+    test    rax, rax
+    jz      .Lpp_nomem
+    mov     r15, rax
+    xor     ecx, ecx                    # its events (manual reset)
+    mov     edx, 1
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    [rip+__imp_CreateEventW]
+    mov     [r15+PB_OV+OV_EVENT], rax
+    xor     ecx, ecx
+    mov     edx, 1
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    [rip+__imp_CreateEventW]
+    mov     [r15+PB_WOV+OV_EVENT], rax
+    mov     rdi, rbx                    # the fds
+    mov     esi, K_PIPE
+    mov     rdx, r15
+    call    fd_alloc
+    test    eax, eax
+    js      .Lpp_out
+    mov     [r12], eax
+    mov     rdi, r14
+    mov     esi, K_FILE
+    xor     edx, edx
+    call    fd_alloc
+    test    eax, eax
+    js      .Lpp_full
+    mov     [r12+4], eax
+    xor     eax, eax
+    jmp     .Lpp_ret
+.Lpp_full:                              # (the first fd back, then all)
+    mov     [rsp+48], rax
+    mov     edi, [r12]
+    call    plat_close
+    mov     rcx, r14
+    call    [rip+__imp_CloseHandle]
+    mov     rax, [rsp+48]
+    jmp     .Lpp_ret
+.Lpp_nomem:
+    mov     rax, -ENOMEM_
+    jmp     .Lpp_out
+.Lpp_err:
+    call    w_errno
+.Lpp_out:
+    mov     [rsp+48], rax               # (what to say)
+    cmp     rbx, -1
+    je      5f
+    mov     rcx, rbx
+    call    [rip+__imp_CloseHandle]
+5:  cmp     r14, -1
+    je      6f
+    mov     rcx, r14
+    call    [rip+__imp_CloseHandle]
+6:  test    r15, r15
+    jz      7f
+    mov     rcx, [r15+PB_OV+OV_EVENT]
+    call    [rip+__imp_CloseHandle]
+    mov     rcx, [r15+PB_WOV+OV_EVENT]
+    call    [rip+__imp_CloseHandle]
+    mov     rcx, r15
+    xor     edx, edx
+    mov     r8d, MEM_RELEASE
+    call    [rip+__imp_VirtualFree]
+7:  mov     rax, [rsp+48]
+.Lpp_ret:
+    WLEAVE
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# hex_w(eax, rdi = where) - eax as 8 hex digits in UTF-16; rdi after them
+hex_w:
+    mov     ecx, 8
+1:  rol     eax, 4
+    mov     edx, eax
+    and     edx, 15
+    add     edx, '0'
+    cmp     edx, '9'
+    jbe     2f
+    add     edx, 'a'-'9'-1
+2:  mov     [rdi], dx
+    add     rdi, 2
+    dec     ecx
+    jnz     1b
+    ret
+
+# pipe_start(rbx = a K_PIPE entry) - a read on its way into the block,
+#   unless one is, data waits or the end has come; from a WENTER frame
+pipe_start:
+    sub     rsp, 40
+    mov     rdx, [rbx+FD_AUX]
+    cmp     dword ptr [rdx+PB_PEND], 0
+    jne     9f
+    cmp     dword ptr [rdx+PB_EOF], 0
+    jne     9f
+    cmp     dword ptr [rdx+PB_LEN], 0
+    jne     9f
+    lea     rax, [rdx+PB_OV]
+    mov     [rsp+32], rax
+    mov     rcx, [rbx+FD_HANDLE]
+    lea     rdx, [rdx+PB_BUF]
+    mov     r8d, PB_CAP
+    xor     r9d, r9d
+    call    [rip+__imp_ReadFile]
+    test    eax, eax                    # (done at once: told as on its way)
+    jnz     1f
+    call    [rip+__imp_GetLastError]
+    cmp     eax, ERROR_IO_PENDING
+    je      1f
+    mov     rdx, [rbx+FD_AUX]           # (a broken pipe: the end)
+    mov     dword ptr [rdx+PB_EOF], 1
+    jmp     9f
+1:  mov     rdx, [rbx+FD_AUX]
+    mov     dword ptr [rdx+PB_PEND], 1
+9:  add     rsp, 40
+    ret
+
+# pipe_done(rbx = a K_PIPE entry, ecx = 1: wait for it) - the read on its
+#   way, if it has come: its bytes into the block, or the end; from a
+#   WENTER frame
+pipe_done:
+    sub     rsp, 56
+    mov     rdx, [rbx+FD_AUX]
+    cmp     dword ptr [rdx+PB_PEND], 0
+    je      9f
+    mov     r9d, ecx
+    mov     rcx, [rbx+FD_HANDLE]
+    lea     rdx, [rdx+PB_OV]
+    lea     r8, [rsp+40]
+    mov     dword ptr [r8], 0
+    call    [rip+__imp_GetOverlappedResult]
+    mov     rdx, [rbx+FD_AUX]
+    test    eax, eax
+    jz      2f
+    mov     eax, [rsp+40]
+    mov     [rdx+PB_LEN], eax
+    mov     dword ptr [rdx+PB_HEAD], 0
+    mov     dword ptr [rdx+PB_PEND], 0
+    jmp     9f
+2:  call    [rip+__imp_GetLastError]
+    mov     rdx, [rbx+FD_AUX]
+    cmp     eax, ERROR_IO_INCOMPLETE
+    je      9f
+    mov     dword ptr [rdx+PB_PEND], 0
+    mov     dword ptr [rdx+PB_EOF], 1
+9:  add     rsp, 56
+    ret
+
+# pipe_ready(rax = a K_PIPE entry) -> eax = 1 when data or the end is
+#   there (else its read is on its way: plat_poll waits on its event); keeps
+#   all but rax, rcx, r11
+pipe_ready:
+    push    rbx
+    mov     rbx, rax
+    WENTER
+    mov     esi, 2                      # (a read of 0 bytes: once more)
+1:  call    pipe_start
+    xor     ecx, ecx
+    call    pipe_done
+    mov     rdx, [rbx+FD_AUX]
+    mov     eax, 1
+    cmp     dword ptr [rdx+PB_LEN], 0
+    jne     9f
+    cmp     dword ptr [rdx+PB_EOF], 0
+    jne     9f
+    xor     eax, eax
+    cmp     dword ptr [rdx+PB_PEND], 0
+    jne     9f
+    dec     esi
+    jnz     1b
+9:  WLEAVE
+    pop     rbx
+    ret
+
+# pipe_read(rax = a K_PIPE entry, rsi = bytes, rdx = how many) -> rax = how
+#   many, 0 at the end, -EAGAIN when none (O_NONBLOCK) or else it waits
+pipe_read:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rax
+    WENTER
+    mov     r12, [rbx+FD_AUX]
+1:  mov     eax, [r12+PB_LEN]
+    test    eax, eax
+    jnz     5f
+    cmp     dword ptr [r12+PB_EOF], 0
+    jne     4f
+    call    pipe_start
+    mov     ecx, [r12+PB_NONBLOCK]
+    xor     ecx, 1
+    call    pipe_done
+    mov     eax, [r12+PB_LEN]
+    test    eax, eax
+    jnz     5f
+    cmp     dword ptr [r12+PB_EOF], 0
+    jne     4f
+    cmp     dword ptr [r12+PB_PEND], 0
+    je      1b                          # (0 bytes came: again)
+    mov     rax, -EAGAIN_
+    jmp     9f
+4:  xor     eax, eax
+    jmp     9f
+5:  mov     r13, [rbp+SV_RDX]           # min(what waits, what is asked)
+    cmp     r13, rax
+    cmova   r13, rax
+    mov     rdi, [rbp+SV_RSI]
+    mov     eax, [r12+PB_HEAD]
+    lea     rsi, [r12+PB_BUF+rax]
+    mov     rcx, r13
+    rep     movsb
+    add     [r12+PB_HEAD], r13d
+    sub     [r12+PB_LEN], r13d
+    jnz     6f
+    call    pipe_start                  # (the next one on its way)
+6:  mov     rax, r13
+9:  WLEAVE
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pipe_write(rax = a K_PIPE entry, rsi = bytes, rdx = how many) -> rax = how
+#   many written (all: it waits for room), or -errno (-EPIPE: no reader)
+pipe_write:
+    push    rbx
+    mov     rbx, rax
+    WENTER  32
+    mov     rcx, [rbx+FD_HANDLE]
+    mov     r8, rdx
+    mov     edx, 0x7ffff000
+    cmp     r8, rdx
+    cmova   r8, rdx
+    mov     rdx, rsi
+    xor     r9d, r9d
+    mov     rax, [rbx+FD_AUX]
+    lea     rax, [rax+PB_WOV]
+    mov     [rsp+32], rax
+    call    [rip+__imp_WriteFile]
+    test    eax, eax
+    jnz     1f
+    call    [rip+__imp_GetLastError]
+    cmp     eax, ERROR_IO_PENDING
+    jne     8f
+1:  mov     rcx, [rbx+FD_HANDLE]
+    mov     rdx, [rbx+FD_AUX]
+    lea     rdx, [rdx+PB_WOV]
+    lea     r8, [rsp+48]
+    mov     dword ptr [r8], 0
+    mov     r9d, 1
+    call    [rip+__imp_GetOverlappedResult]
+    test    eax, eax
+    jz      7f
+    mov     eax, [rsp+48]
+    jmp     9f
+7:  call    [rip+__imp_GetLastError]
+8:  call    w_errno_of
+9:  WLEAVE
+    pop     rbx
+    ret
+
+# pipe_close(rdi = a K_PIPE entry) - its read called off, its handles and
+#   block gone; from a WENTER frame (rbx kept)
+pipe_close:
+    push    rbx
+    sub     rsp, 48
+    mov     rbx, rdi
+    mov     rdx, [rbx+FD_AUX]
+    cmp     dword ptr [rdx+PB_PEND], 0
+    je      1f
+    mov     rcx, [rbx+FD_HANDLE]
+    lea     rdx, [rdx+PB_OV]
+    call    [rip+__imp_CancelIoEx]
+    mov     ecx, 1
+    call    pipe_done
+1:  mov     rcx, [rbx+FD_HANDLE]
+    call    [rip+__imp_CloseHandle]
+    mov     rdx, [rbx+FD_AUX]
+    mov     rcx, [rdx+PB_OV+OV_EVENT]
+    call    [rip+__imp_CloseHandle]
+    mov     rdx, [rbx+FD_AUX]
+    mov     rcx, [rdx+PB_WOV+OV_EVENT]
+    call    [rip+__imp_CloseHandle]
+    mov     rcx, [rbx+FD_AUX]
+    xor     edx, edx
+    mov     r8d, MEM_RELEASE
+    call    [rip+__imp_VirtualFree]
+    mov     rdi, rbx
+    add     rsp, 48
+    pop     rbx
+    ret
+
+# plat_fcntl(edi=fd, esi=cmd, rdx=arg): F_GETFL and F_SETFL's O_NONBLOCK on
+#   a pipe (aiproc.s); the rest says 0 (sockets: W6b)
+plat_fcntl:
+    call    fd_entry
+    test    rax, rax
+    jz      8f
+    cmp     dword ptr [rax+FD_KIND], K_PIPE
+    jne     7f
+    mov     rcx, [rax+FD_AUX]
+    cmp     esi, F_GETFL_
+    je      2f
+    cmp     esi, F_SETFL_
+    jne     7f
+    xor     eax, eax
+    test    edx, O_NONBLOCK_
+    setnz   al
+    mov     [rcx+PB_NONBLOCK], eax
+    xor     eax, eax
+    ret
+2:  xor     eax, eax
+    cmp     dword ptr [rcx+PB_NONBLOCK], 0
+    je      3f
+    mov     eax, O_NONBLOCK_
+3:  ret
+7:  xor     eax, eax
+    ret
+8:  mov     rax, -EBADF_
+    ret
+
+# plat_sendto(edi=fd, rsi=bytes, rdx=how many, r10d=flags, r8=to, r9d=its
+#   size): on a pipe (video.s's frames to ffmpeg) a write; sockets: W6b
+plat_sendto:
+    call    fd_entry
+    test    rax, rax
+    jz      8f
+    cmp     dword ptr [rax+FD_KIND], K_PIPE
+    je      pipe_write
+    cmp     dword ptr [rax+FD_KIND], K_FILE
+    je      plat_write
+    mov     rax, -ENOSYS_
+    ret
+8:  mov     rax, -EBADF_
+    ret
+
+# ---- child processes ------------------------------------------------------------
+# plat_spawn(rdi=path, rsi=argv, rdx=envp, rcx=fd map, r8=working directory
+#   or 0) -> rax = the child's pid, or -errno (an ordinary call, as on
+#   Linux). CreateProcessW, with argv joined into a command line by the
+#   rules the C runtime splits it by (win_start's), envp as a UTF-16 block,
+#   and the map's fds 0..2 as the child's standard handles: each an
+#   inheritable copy, and the only handles it inherits. A path without its
+#   .exe finds the one with. Arguments and the environment go in Windows'
+#   form of a drive's path (win_form: /C:/x as C:/x). fd 3 (the GPU helper's): W6c. The child gets no
+#   console window of its own. Its process handle waits in proc_tab for
+#   wait4 and kill.
+plat_spawn:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    mov     rbp, rsp
+    and     rsp, -16
+    sub     rsp, SPN_FRAME
+    mov     [rsp+SPN_PATH8], rdi
+    mov     r12, rsi
+    mov     r13, rdx
+    mov     r14, rcx
+    mov     [rsp+SPN_CWD8], r8
+    mov     qword ptr [rsp+SPN_DUP], 0
+    mov     qword ptr [rsp+SPN_DUP+8], 0
+    mov     qword ptr [rsp+SPN_DUP+16], 0
+    mov     qword ptr [rsp+SPN_ALIST], 0
+    xor     ecx, ecx                    # the scratch block
+    mov     edx, SP_SIZE
+    mov     r8d, MEM_COMMIT_RESERVE
+    mov     r9d, PAGE_READWRITE
+    call    [rip+__imp_VirtualAlloc]
+    test    rax, rax
+    jz      .Lsp_nomem
+    mov     rbx, rax
+    # the program: its path, or with .exe
+    mov     rdi, [rsp+SPN_PATH8]
+    lea     rsi, [rbx+SP_PATH]
+    call    u2w_at
+    test    eax, eax
+    jz      .Lsp_long
+    mov     r15d, eax
+    lea     rcx, [rbx+SP_PATH]
+    call    [rip+__imp_GetFileAttributesW]
+    cmp     eax, -1
+    je      1f
+    test    eax, FILE_ATTRIBUTE_DIRECTORY
+    jz      2f
+1:  cmp     r15d, WPATH_UNITS-4
+    jae     .Lsp_noent
+    lea     rdi, [rbx+SP_PATH+r15*2-2]
+    mov     dword ptr [rdi], 0x0065002e         # ".e"
+    mov     dword ptr [rdi+4], 0x00650078       # "xe"
+    mov     word ptr [rdi+8], 0
+    lea     rcx, [rbx+SP_PATH]
+    call    [rip+__imp_GetFileAttributesW]
+    cmp     eax, -1
+    je      .Lsp_noent
+    test    eax, FILE_ATTRIBUTE_DIRECTORY
+    jnz     .Lsp_noent
+2:  # the command line, in UTF-8 first
+    lea     rdi, [rbx+SP_U8]
+    lea     r15, [rbx+SP_U8+SP_U8_CAP-8]
+    mov     r8, r12
+.Lsp_arg:
+    mov     rsi, [r8]
+    test    rsi, rsi
+    jz      .Lsp_argend
+    cmp     r8, r12
+    je      3f
+    mov     byte ptr [rdi], ' '
+    inc     rdi
+3:  mov     r10, rdi
+    lea     rdi, [rbx+SP_ARG]
+    push    r15
+    lea     r15, [rbx+SP_ARG+SP_ARG_CAP]
+    call    win_form
+    pop     r15
+    jc      .Lsp_long
+    mov     rdi, r10
+    lea     rsi, [rbx+SP_ARG]
+    call    quote_arg
+    jc      .Lsp_long
+    add     r8, 8
+    jmp     .Lsp_arg
+.Lsp_argend:
+    mov     byte ptr [rdi], 0
+    lea     rax, [rbx+SP_U8]
+    sub     rdi, rax
+    lea     r9d, [rdi+1]                # (with its 0)
+    mov     ecx, CP_UTF8
+    xor     edx, edx
+    lea     r8, [rbx+SP_U8]
+    lea     rax, [rbx+SP_CMD]
+    mov     [rsp+32], rax
+    mov     dword ptr [rsp+40], SP_CMD_UNITS
+    call    [rip+__imp_MultiByteToWideChar]
+    test    eax, eax
+    jz      .Lsp_long
+    # the environment: "A=b" 0 ... 0, in UTF-8 first
+    mov     qword ptr [rsp+SPN_ENV], 0
+    test    r13, r13
+    jz      5f
+    lea     rdi, [rbx+SP_U8]
+    mov     r8, r13
+4:  mov     rsi, [r8]
+    test    rsi, rsi
+    jz      41f
+    call    win_form
+    jc      .Lsp_long
+    add     r8, 8
+    jmp     4b
+41: mov     byte ptr [rdi], 0
+    lea     rax, [rbx+SP_U8]
+    cmp     rdi, rax                    # (none at all: 0 0)
+    jne     43f
+    mov     byte ptr [rdi+1], 0
+    inc     rdi
+43: sub     rdi, rax
+    lea     r9d, [rdi+1]
+    mov     ecx, CP_UTF8
+    xor     edx, edx
+    lea     r8, [rbx+SP_U8]
+    lea     rax, [rbx+SP_ENVW]
+    mov     [rsp+32], rax
+    mov     dword ptr [rsp+40], SP_ENV_UNITS
+    call    [rip+__imp_MultiByteToWideChar]
+    test    eax, eax
+    jz      .Lsp_long
+    lea     rax, [rbx+SP_ENVW]
+    mov     [rsp+SPN_ENV], rax
+5:  # the working directory
+    mov     qword ptr [rsp+SPN_CWDW], 0
+    mov     rdi, [rsp+SPN_CWD8]
+    test    rdi, rdi
+    jz      6f
+    lea     rsi, [rbx+SP_CWD]
+    call    u2w_at
+    test    eax, eax
+    jz      .Lsp_long
+    lea     rax, [rbx+SP_CWD]
+    mov     [rsp+SPN_CWDW], rax
+6:  # the child's standard handles: inheritable copies
+    xor     r15d, r15d
+.Lsp_h:
+    mov     edi, [r14+r15*4]
+    cmp     edi, PS_NULL
+    je      .Lsp_null
+    cmp     edi, PS_KEEP
+    jne     61f
+    mov     edi, r15d                   # (ours: 0..2)
+61: call    fd_entry
+    test    rax, rax
+    jz      .Lsp_null
+    mov     rdx, [rax+FD_HANDLE]
+    test    rdx, rdx                    # (none: as from Explorer)
+    jz      .Lsp_null
+    cmp     rdx, -1
+    je      .Lsp_null
+    call    dup_inherit
+    test    rax, rax
+    jnz     .Lsp_got
+.Lsp_null:
+    lea     rcx, [rip+s_nul]
+    mov     edx, GENERIC_READ|GENERIC_WRITE
+    mov     r8d, FILE_SHARE_ALL
+    lea     r9, [rip+sa_inherit]
+    mov     qword ptr [rsp+32], OPEN_EXISTING
+    mov     qword ptr [rsp+40], 0
+    mov     qword ptr [rsp+48], 0
+    call    [rip+__imp_CreateFileW]
+    cmp     rax, -1
+    jne     .Lsp_got
+    xor     eax, eax
+.Lsp_got:
+    mov     [rsp+SPN_DUP+r15*8], rax
+    inc     r15d
+    cmp     r15d, 3
+    jb      .Lsp_h
+    # STARTUPINFOEXW: those handles, and the list of what it inherits
+    lea     rdi, [rsp+SPN_SI]
+    xor     eax, eax
+    mov     ecx, SI_SIZE/8
+    rep     stosq
+    mov     dword ptr [rsp+SPN_SI], SI_SIZE
+    mov     dword ptr [rsp+SPN_SI+SI_FLAGS], STARTF_USESTDHANDLES
+    mov     rax, [rsp+SPN_DUP]
+    mov     [rsp+SPN_SI+SI_STDIN], rax
+    mov     rax, [rsp+SPN_DUP+8]
+    mov     [rsp+SPN_SI+SI_STDOUT], rax
+    mov     rax, [rsp+SPN_DUP+16]
+    mov     [rsp+SPN_SI+SI_STDERR], rax
+    lea     rdi, [rsp+SPN_HLIST]        # (distinct, non-zero)
+    xor     r15d, r15d
+    xor     ecx, ecx
+7:  mov     rax, [rsp+SPN_DUP+rcx*8]
+    test    rax, rax
+    jz      71f
+    mov     [rdi+r15*8], rax
+    inc     r15d
+71: inc     ecx
+    cmp     ecx, 3
+    jb      7b
+    mov     qword ptr [rsp+SPN_ASIZE], ALIST_ROOM
+    lea     rcx, [rsp+SPN_ABUF]
+    mov     edx, 1
+    xor     r8d, r8d
+    lea     r9, [rsp+SPN_ASIZE]
+    call    [rip+__imp_InitializeProcThreadAttributeList]
+    test    eax, eax
+    jz      8f
+    lea     rcx, [rsp+SPN_ABUF]
+    mov     [rsp+SPN_ALIST], rcx
+    mov     [rsp+SPN_SI+SI_ALIST], rcx
+    test    r15d, r15d
+    jz      8f
+    xor     edx, edx
+    mov     r8d, PROC_THREAD_ATTRIBUTE_HANDLE_LIST
+    lea     r9, [rsp+SPN_HLIST]
+    lea     eax, [r15*8]
+    mov     [rsp+32], rax
+    mov     qword ptr [rsp+40], 0
+    mov     qword ptr [rsp+48], 0
+    call    [rip+__imp_UpdateProcThreadAttribute]
+8:  lea     rcx, [rbx+SP_PATH]          # and off it goes
+    lea     rdx, [rbx+SP_CMD]
+    xor     r8d, r8d
+    xor     r9d, r9d
+    mov     qword ptr [rsp+32], 1
+    mov     qword ptr [rsp+40], CREATE_UNICODE_ENVIRONMENT|EXTENDED_STARTUPINFO_PRESENT|CREATE_NO_WINDOW
+    mov     rax, [rsp+SPN_ENV]
+    mov     [rsp+48], rax
+    mov     rax, [rsp+SPN_CWDW]
+    mov     [rsp+56], rax
+    lea     rax, [rsp+SPN_SI]
+    mov     [rsp+64], rax
+    lea     rax, [rsp+SPN_PI]
+    mov     [rsp+72], rax
+    call    [rip+__imp_CreateProcessW]
+    test    eax, eax
+    jnz     9f
+    call    w_errno
+    mov     [rsp+SPN_RES], rax
+    jmp     .Lsp_clean
+9:  mov     rcx, [rsp+SPN_PI+8]         # (its thread: not needed)
+    call    [rip+__imp_CloseHandle]
+    mov     edi, [rsp+SPN_PI+16]        # pid, its handle -> proc_tab
+    mov     rsi, [rsp+SPN_PI]
+    call    proc_add
+    mov     eax, [rsp+SPN_PI+16]
+    mov     [rsp+SPN_RES], rax
+.Lsp_clean:
+    xor     r15d, r15d
+1:  mov     rcx, [rsp+SPN_DUP+r15*8]
+    test    rcx, rcx
+    jz      2f
+    call    [rip+__imp_CloseHandle]
+2:  inc     r15d
+    cmp     r15d, 3
+    jb      1b
+    mov     rcx, [rsp+SPN_ALIST]
+    test    rcx, rcx
+    jz      3f
+    call    [rip+__imp_DeleteProcThreadAttributeList]
+3:  mov     rcx, rbx
+    xor     edx, edx
+    mov     r8d, MEM_RELEASE
+    call    [rip+__imp_VirtualFree]
+    mov     rax, [rsp+SPN_RES]
+.Lsp_ret:
+    mov     rsp, rbp
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+.Lsp_long:
+    mov     qword ptr [rsp+SPN_RES], -E2BIG_
+    jmp     .Lsp_clean
+.Lsp_noent:
+    mov     qword ptr [rsp+SPN_RES], -ENOENT_
+    jmp     .Lsp_clean
+.Lsp_nomem:
+    mov     rax, -ENOMEM_
+    jmp     .Lsp_ret
+
+# dup_inherit(rdx = a handle) -> rax = an inheritable copy, or 0; from an
+#   aligned frame (rsp 16-byte aligned at the call)
+dup_inherit:
+    push    rbx
+    sub     rsp, 64
+    mov     rbx, rdx
+    call    [rip+__imp_GetCurrentProcess]
+    mov     rcx, rax
+    mov     rdx, rbx
+    mov     r8, rax
+    lea     r9, [rsp+56]
+    mov     qword ptr [r9], 0
+    mov     dword ptr [rsp+32], 0
+    mov     dword ptr [rsp+40], 1       # inheritable
+    mov     dword ptr [rsp+48], DUPLICATE_SAME_ACCESS
+    call    [rip+__imp_DuplicateHandle]
+    test    eax, eax
+    jz      1f
+    mov     rax, [rsp+56]
+1:  add     rsp, 64
+    pop     rbx
+    ret
+
+# win_form(rsi = a text, rdi = where, r15 = the room's end) -> rdi after
+#   its 0, CF set when it does not fit. The program's form of a drive's path
+#   (/C:/x, plat_path_in) as Windows writes it, C:/x, where one starts: at
+#   the start, after @ (curl's -H @file) or after = (--x=path, HOME=...).
+win_form:
+    xor     edx, edx                    # (the byte before: 0 at the start)
+1:  cmp     rdi, r15
+    jae     9f
+    mov     al, [rsi]
+    cmp     al, '/'
+    jne     3f
+    test    edx, edx
+    jz      2f
+    cmp     dl, '@'
+    je      2f
+    cmp     dl, '='
+    jne     3f
+2:  movzx   ecx, byte ptr [rsi+1]
+    or      ecx, 0x20
+    sub     ecx, 'a'
+    cmp     ecx, 'z'-'a'
+    ja      3f
+    cmp     byte ptr [rsi+2], ':'
+    jne     3f
+    mov     cl, [rsi+3]
+    test    cl, cl
+    jz      21f
+    cmp     cl, '/'
+    jne     3f
+21: inc     rsi                         # (the / dropped)
+    mov     al, [rsi]
+3:  mov     [rdi], al
+    inc     rdi
+    inc     rsi
+    test    al, al
+    jz      8f
+    mov     dl, al
+    jmp     1b
+8:  clc
+    ret
+9:  stc
+    ret
+
+# quote_arg(rsi = an argument, rdi = where, r15 = the room's end) -> rdi
+#   after it, CF set when it does not fit. Quoted when it is empty or has a
+#   space, tab or "; inside the quotes a " gets a \, as do the \s before one
+#   or before the closing quote (so the C runtime splits it back as it was).
+quote_arg:
+    push    rsi
+    xor     ecx, ecx                    # needs quotes?
+    cmp     byte ptr [rsi], 0
+    je      2f
+1:  mov     al, [rsi]
+    test    al, al
+    jz      5f                          # no: as it is
+    cmp     al, ' '
+    je      2f
+    cmp     al, 9
+    je      2f
+    cmp     al, '"'
+    je      2f
+    inc     rsi
+    jmp     1b
+5:  pop     rsi
+6:  lodsb
+    test    al, al
+    jz      8f
+    cmp     rdi, r15
+    jae     9f
+    stosb
+    jmp     6b
+2:  pop     rsi
+    cmp     rdi, r15
+    jae     9f
+    mov     byte ptr [rdi], '"'
+    inc     rdi
+3:  xor     edx, edx                    # \s in a row
+31: mov     al, [rsi]
+    cmp     al, '\\'
+    jne     32f
+    inc     edx
+    inc     rsi
+    jmp     31b
+32: lea     rcx, [rdi+rdx*2+4]
+    cmp     rcx, r15
+    jae     9f
+    mov     ecx, edx
+    test    al, al
+    jz      34f
+    cmp     al, '"'
+    jne     33f
+    lea     ecx, [rdx*2+1]              # before a ": doubled, and one for it
+33: test    ecx, ecx
+    jz      35f
+    mov     byte ptr [rdi], '\\'
+    inc     rdi
+    dec     ecx
+    jmp     33b
+35: mov     [rdi], al
+    inc     rdi
+    inc     rsi
+    jmp     3b
+34: lea     ecx, [rdx*2]                # before the closing quote: doubled
+36: test    ecx, ecx
+    jz      37f
+    mov     byte ptr [rdi], '\\'
+    inc     rdi
+    dec     ecx
+    jmp     36b
+37: mov     byte ptr [rdi], '"'
+    inc     rdi
+8:  clc
+    ret
+9:  stc
+    ret
+
+# proc_add(edi = pid, rsi = its process handle) - into proc_tab (full:
+#   the handle is closed, and wait4 will not know it)
+proc_add:
+    SPIN_LOCK proc_lock
+    lea     rax, [rip+proc_tab]
+    xor     ecx, ecx
+1:  cmp     dword ptr [rax+PT_PID], 0
+    je      2f
+    add     rax, 16
+    inc     ecx
+    cmp     ecx, PROC_MAX
+    jb      1b
+    mov     dword ptr [rip+proc_lock], 0
+    sub     rsp, 8
+    WENTER
+    mov     rcx, rsi
+    call    [rip+__imp_CloseHandle]
+    WLEAVE
+    add     rsp, 8
+    ret
+2:  mov     [rax+PT_HANDLE], rsi
+    mov     dword ptr [rax+PT_SIG], 0
+    mov     [rax+PT_PID], edi
+    mov     dword ptr [rip+proc_lock], 0
+    ret
+
+# proc_find(edi = pid) -> rax = its proc_tab entry, or 0; keeps all but
+#   rax, rcx
+proc_find:
+    test    edi, edi
+    jle     8f
+    lea     rax, [rip+proc_tab]
+    xor     ecx, ecx
+1:  cmp     [rax+PT_PID], edi
+    je      9f
+    add     rax, 16
+    inc     ecx
+    cmp     ecx, PROC_MAX
+    jb      1b
+8:  xor     eax, eax
+9:  ret
+
+# plat_wait4(edi=pid, rsi=int status or 0, edx=options, r10=rusage) -> rax
+#   = the pid when it has ended (its status as Linux gives it: the exit
+#   code << 8, or the signal kill sent), 0 with WNOHANG while it runs,
+#   -ECHILD when it is no child of ours
+plat_wait4:
+    call    proc_find
+    test    rax, rax
+    jz      8f
+    push    rbx
+    mov     rbx, rax
+    WENTER  16
+    mov     rcx, [rbx+PT_HANDLE]
+    mov     edx, -1
+    test    dword ptr [rbp+SV_RDX], 1   # WNOHANG
+    jz      1f
+    xor     edx, edx
+1:  call    [rip+__imp_WaitForSingleObject]
+    cmp     eax, WAIT_TIMEOUT
+    jne     2f
+    xor     eax, eax
+    jmp     9f
+2:  mov     rcx, [rbx+PT_HANDLE]
+    lea     rdx, [rsp+32]
+    mov     dword ptr [rdx], 0
+    call    [rip+__imp_GetExitCodeProcess]
+    mov     eax, [rsp+32]
+    and     eax, 0xff
+    shl     eax, 8
+    mov     ecx, [rbx+PT_SIG]
+    test    ecx, ecx
+    jz      3f
+    mov     eax, ecx
+3:  mov     rsi, [rbp+SV_RSI]
+    test    rsi, rsi
+    jz      4f
+    mov     [rsi], eax
+4:  mov     rcx, [rbx+PT_HANDLE]
+    call    [rip+__imp_CloseHandle]
+    mov     eax, [rbx+PT_PID]
+    mov     dword ptr [rbx+PT_PID], 0   # (free)
+9:  WLEAVE
+    pop     rbx
+    ret
+8:  mov     rax, -ECHILD_
+    ret
+
+# plat_kill(edi=pid, esi=signal) -> rax = 0: TERM and KILL alike end it
+#   (TerminateProcess; Windows has no signals), 0 asks if it is there
+plat_kill:
+    call    proc_find
+    test    rax, rax
+    jz      8f
+    test    esi, esi
+    jz      7f
+    push    rbx
+    mov     rbx, rax
+    WENTER
+    mov     [rbx+PT_SIG], esi
+    mov     rcx, [rbx+PT_HANDLE]
+    lea     edx, [rsi+128]              # (its exit code: 128 + the signal)
+    call    [rip+__imp_TerminateProcess]
+    WLEAVE
+    pop     rbx
+7:  xor     eax, eax
+    ret
+8:  mov     rax, -ESRCH_
+    ret
+
+# ---- the rest: W6b (sockets; symlink, used only by mcp.s), W6c (the
+#      GPU helper's shared memory and packets)
 NOSYS plat_symlink
 NOSYS plat_socket
-NOSYS plat_socketpair
 NOSYS plat_connect
 NOSYS plat_bind
 NOSYS plat_listen
 NOSYS plat_accept4
 NOSYS plat_setsockopt
-NOSYS plat_sendto
 NOSYS plat_sendmsg
 NOSYS plat_recvmsg
 NOSYS plat_memfd_create
 NOSYS plat_getrandom
-NOSYS plat_spawn
-NOSYS plat_pipe2
-NOSYS plat_wait4
-NOSYS plat_kill
 
 .section .bss
 .align 8
@@ -2743,9 +3868,23 @@ qpc_freq:       .skip 8                 # performance counts a second
 msg_wait:       .skip 8                 # the window's wait (plat_win_msgfd)
 poll_timer:     .skip 8                 # plat_poll's (high-resolution) timer
 plat_win_frame_due: .skip 8             # the window's next frame (ns, 0: none)
+.align 8
+proc_tab:       .skip PROC_MAX*16       # children: {pid, signal sent, handle}
+proc_lock:      .skip 4
+pipe_n:         .skip 4                 # pipes made (their names)
+
+.section .data
+.align 8
+sa_inherit:     .long 24, 0             # SECURITY_ATTRIBUTES: inheritable
+                .quad 0
+                .long 1, 0
 
 .section .rodata
+s_pipename:     .string16 "\\\\.\\pipe\\beemodel-"
+s_nul:          .string16 "NUL"
 s_bmhome:       .asciz "BEEMODEL_HOME="
+plat_path_sep:  .asciz ";"              # (between PATH's directories: aiproc.s)
+plat_exe_ext:   .asciz ".exe"            # (a program's file may end in it)
 s_homeq:        .asciz "HOME="
 s_uprof:        .asciz "USERPROFILE="
 s_xdgrt:        .asciz "XDG_RUNTIME_DIR="
@@ -2772,13 +3911,19 @@ err_map:
 # ---- the imports (the macros: plat_win.inc) ------------------------------------
 DLL 1, KERNEL32.dll
 IMPORT 1, AddVectoredExceptionHandler
+IMPORT 1, CancelIoEx
 IMPORT 1, CloseHandle
 IMPORT 1, CreateDirectoryW
+IMPORT 1, CreateEventW
 IMPORT 1, CreateFileMappingW
 IMPORT 1, CreateFileW
+IMPORT 1, CreateNamedPipeW
+IMPORT 1, CreateProcessW
 IMPORT 1, CreateThread
 IMPORT 1, CreateWaitableTimerExW
 IMPORT 1, DeleteFileW
+IMPORT 1, DeleteProcThreadAttributeList
+IMPORT 1, DuplicateHandle
 IMPORT 1, ExitProcess
 IMPORT 1, FindClose
 IMPORT 1, FindFirstFileW
@@ -2787,10 +3932,12 @@ IMPORT 1, FreeConsole
 IMPORT 1, GetActiveProcessorCount
 IMPORT 1, GetCommandLineW
 IMPORT 1, GetConsoleProcessList
+IMPORT 1, GetCurrentProcess
 IMPORT 1, GetCurrentProcessId
 IMPORT 1, GetCurrentThreadId
 IMPORT 1, GetDiskFreeSpaceExW
 IMPORT 1, GetEnvironmentStringsW
+IMPORT 1, GetExitCodeProcess
 IMPORT 1, GetFileAttributesExW
 IMPORT 1, GetFileAttributesW
 IMPORT 1, GetFileInformationByHandle
@@ -2798,12 +3945,14 @@ IMPORT 1, GetLastError
 IMPORT 1, GetLogicalDrives
 IMPORT 1, GetModuleFileNameW
 IMPORT 1, GetModuleHandleW
+IMPORT 1, GetOverlappedResult
 IMPORT 1, GetStdHandle
 IMPORT 1, GetSystemTimePreciseAsFileTime
 IMPORT 1, GlobalAlloc
 IMPORT 1, GlobalFree
 IMPORT 1, GlobalLock
 IMPORT 1, GlobalUnlock
+IMPORT 1, InitializeProcThreadAttributeList
 IMPORT 1, MapViewOfFile
 IMPORT 1, MoveFileExW
 IMPORT 1, MultiByteToWideChar
@@ -2818,11 +3967,14 @@ IMPORT 1, SetEndOfFile
 IMPORT 1, SetFilePointerEx
 IMPORT 1, SetWaitableTimer
 IMPORT 1, Sleep
+IMPORT 1, TerminateProcess
 IMPORT 1, UnmapViewOfFile
+IMPORT 1, UpdateProcThreadAttribute
 IMPORT 1, VirtualAlloc
 IMPORT 1, VirtualFree
 IMPORT 1, VirtualProtect
 IMPORT 1, VirtualQuery
+IMPORT 1, WaitForMultipleObjects
 IMPORT 1, WaitForSingleObject
 IMPORT 1, WideCharToMultiByte
 IMPORT 1, WriteFile

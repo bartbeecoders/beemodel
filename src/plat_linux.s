@@ -20,6 +20,8 @@
 
 .globl plat_self_path
 .globl plat_path_in
+.globl plat_path_sep
+.globl plat_exe_ext
 .globl plat_mmap
 .globl plat_munmap
 .globl plat_mprotect
@@ -143,6 +145,8 @@
 .section .rodata
 s_devnull_:     .asciz "/dev/null"
 s_self_:        .asciz "/proc/self/exe"
+plat_path_sep:  .asciz ":"              # (between PATH's directories: aiproc.s)
+plat_exe_ext:   .asciz ""                # (a program's file may end in it)
 
 .text
 
