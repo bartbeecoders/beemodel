@@ -2,7 +2,7 @@
 
 Describe a world, a model or a change in plain words, and BeeModel builds it
 in the open scene while you watch. The assistant runs inside the app. It
-uses one of three connections, all of which act through BeeModel's own MCP
+uses one of four connections, all of which act through BeeModel's own MCP
 tools (the same ones outside agents get, see [MCP.md](MCP.md)):
 
 | Connection | How it runs | What you need |
@@ -10,6 +10,7 @@ tools (the same ones outside agents get, see [MCP.md](MCP.md)):
 | **Claude Code** | `claude -p` as a child process, with an MCP configuration naming `beemodel --mcp-bridge` for this instance | [Claude Code](https://claude.com/claude-code) installed and logged in |
 | **Grok CLI** | `grok -p` as a child process, in its own agent directory with a `.grok/config.toml` naming the bridge | The Grok CLI installed and logged in |
 | **OpenRouter** | HTTPS chat completions through `curl`. BeeModel runs the tool loop itself, in-process | An OpenRouter API key (any OpenAI-compatible server works too) and `curl` |
+| **Ollama (local)** | The same as OpenRouter, sent to [Ollama](https://ollama.com) on this machine. No key is sent, and the model is asked not to think (`"reasoning_effort": "none"`) | Ollama running (`ollama serve`) with a model that calls tools, and `curl` |
 
 ## Using it
 
@@ -38,15 +39,15 @@ tools (the same ones outside agents get, see [MCP.md](MCP.md)):
    shows in **AI Activity**, like any agent's work.
 5. Follow-ups continue the same conversation:
    - Claude Code and Grok resume their session;
-   - OpenRouter is sent the whole conversation again.
+   - OpenRouter and Ollama are sent the whole conversation again.
 
    **New** starts a new conversation. It leaves the scene as it is.
 6. **Copy** (or **AI › Copy AI Conversation**, operator `ai.copy`) puts the
    whole conversation on the clipboard as it is shown, one line per entry,
    to paste into a bug report or another program.
 
-The connection picker at the top of the area chooses Claude Code, Grok or
-OpenRouter for the next request.
+The connection picker at the top of the area chooses Claude Code, Grok,
+OpenRouter or Ollama for the next request.
 
 ## Ask about the selection
 
@@ -128,7 +129,8 @@ Open **Edit › Preferences** (Ctrl+,) and pick the **AI** category:
 | Claude Code: Program, Model, Turns at most | The `claude` program (empty: the one on `PATH`), a model name or alias (empty: Claude Code's default), and how many rounds of tool calls one request may take (40) |
 | Grok CLI: Program, Model, Turns at most | The same for `grok` |
 | OpenRouter: API key, Model, Address, Steps at most | The key (masked), a model id with tool calling (`anthropic/claude-sonnet-4.5`), the API address (`https://openrouter.ai/api/v1`) and the step limit (30) |
-| Test Claude Code / Test Grok / Test OpenRouter | Runs `--version`, or asks OpenRouter whether the key works (this costs nothing). The answer shows as a message and in the transcript |
+| Ollama (local): Model, Address, Steps at most | A model as `ollama list` names it (`qwen3.5:4b`), Ollama's OpenAI-compatible address (`http://localhost:11434/v1`) and the step limit (30) |
+| Test Claude Code / Test Grok / Test OpenRouter / Test Ollama | Runs `--version`, asks OpenRouter whether the key works (this costs nothing), or asks Ollama whether it runs and has the model. The answer shows as a message and in the transcript |
 | Agents | What AI agents may do (read, edit, files), and whether the MCP server listens |
 
 ## Safety
@@ -147,7 +149,7 @@ Open **Edit › Preferences** (Ctrl+,) and pick the **AI** category:
     shell, file, sub-agent and web tools. It runs with `--trust` so it loads
     that configuration. MCP servers in your own `~/.grok/config.toml` stay
     visible to it.
-  - OpenRouter models get the curated tools (`scene_summary`,
+  - OpenRouter and Ollama models get the curated tools (`scene_summary`,
     `script_eval`, `viewport_capture`, `run_operator`, the material and
     node tools, ...). They do not get the 600 single-operator tools.
 - **Undo.** Each request is one undo step. Changes you make while a request
@@ -199,4 +201,5 @@ the conversation this way.
   `PATH`) read their arguments, talk to BeeModel through the bridge and
   print the real stream formats.
 - A localhost server plays OpenRouter. It answers with scripted tool calls
-  and checks what it is sent.
+  and checks what it is sent. Under another path it plays Ollama: the
+  same tool loop, no key, thinking off, and the model list for its Test.

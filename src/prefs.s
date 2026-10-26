@@ -53,6 +53,9 @@
 .globl ai_or_model
 .globl ai_or_url
 .globl ai_or_steps
+.globl ai_ol_url
+.globl ai_ol_model
+.globl ai_ol_steps
 .globl ai_gk_turns
 .globl ai_cl_turns
 .globl ai_prov
@@ -83,13 +86,18 @@ pr_rh:          .long 540               #  denoise
 pr_rspp:        .long 128
 pr_rdn:         .long 1
 ai_prov:        .long 0                 # AI: the connection (0 Claude Code, 1
-ai_cl_turns:    .long 100               #  Grok CLI, 2 OpenRouter), turn limits
+ai_cl_turns:    .long 100               #  Grok CLI, 2 OpenRouter, 3 Ollama), turn limits
 ai_gk_turns:    .long 100
 ai_or_steps:    .long 30
 ai_or_url:      .asciz "https://openrouter.ai/api/v1"
                 .skip 256-29
 ai_or_model:    .asciz "anthropic/claude-sonnet-4.5"
                 .skip 256-28
+ai_ol_steps:    .long 30                # Ollama on this machine
+ai_ol_url:      .asciz "http://localhost:11434/v1"
+                .skip 256-26
+ai_ol_model:    .asciz "qwen3.5:4b"
+                .skip 256-11
 
 .section .bss
 .align 8
@@ -147,9 +155,11 @@ s_tf:           .asciz "Edit and files"
 s_p_claude:     .asciz "Claude Code"
 s_p_grok:       .asciz "Grok CLI"
 s_p_or:         .asciz "OpenRouter"
+s_p_ol:         .asciz "Ollama (local)"
 s_h_cl:         .asciz "Claude Code"
 s_h_gk:         .asciz "Grok CLI"
 s_h_or:         .asciz "OpenRouter"
+s_h_ol:         .asciz "Ollama (local)"
 s_h_agents:     .asciz "Agents"
 c_prov:         .asciz "The AI Assistant uses"
 s_tenv:         .asciz "As started (BEEMODEL_AGENT_PERMISSION)"
@@ -194,6 +204,9 @@ w_gkturns:      .asciz "grok_turns"
 w_orurl:        .asciz "openrouter_url"
 w_ormodel:      .asciz "openrouter_model"
 w_orsteps:      .asciz "openrouter_steps"
+w_olurl:        .asciz "ollama_url"
+w_olmodel:      .asciz "ollama_model"
+w_olsteps:      .asciz "ollama_steps"
 w_aiextra:      .asciz "ai_prompt"
 w_aiscope:      .asciz "ai_only_selection"
 w_recent:       .asciz "recent_colours"
@@ -203,7 +216,7 @@ l_tabs:         .quad s_h_interface, s_h_input, s_h_keymap, s_h_system, s_h_file
 l_scale:        .quad s_75, s_100, s_125, s_150, s_175, s_200
 scales:         .long 75, 100, 125, 150, 175, 200
 l_tier:         .quad s_tenv, s_tr, s_te, s_tf
-l_prov:         .quad s_p_claude, s_p_grok, s_p_or
+l_prov:         .quad s_p_claude, s_p_grok, s_p_or, s_p_ol
 # word, variable, kind (0 int, 1 float)
 pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0, w_kmap, pr_kmap, 0
                 .quad w_orbit, pr_orbit, 1, w_autosave, pr_autosave, 0
@@ -214,11 +227,12 @@ pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0
                 .quad w_near, pr_near, 1, w_lvspp, pr_lvspp, 0, w_lvdn, pr_lvdn, 0, w_rw, pr_rw, 0, w_rh, pr_rh, 0
                 .quad w_rspp, pr_rspp, 0, w_rdn, pr_rdn, 0
                 .quad w_aiprov, ai_prov, 0, w_clturns, ai_cl_turns, 0, w_gkturns, ai_gk_turns, 0
-                .quad w_orsteps, ai_or_steps, 0, w_aiscope, ask_scope, 0
+                .quad w_orsteps, ai_or_steps, 0, w_olsteps, ai_ol_steps, 0, w_aiscope, ask_scope, 0
                 .quad w_blender, pr_blender, 2
                 .quad w_clpath, ai_cl_path, 2, w_clmodel, ai_cl_model, 2
                 .quad w_gkpath, ai_gk_path, 2, w_gkmodel, ai_gk_model, 2
                 .quad w_orurl, ai_or_url, 2, w_ormodel, ai_or_model, 2, w_aiextra, ai_extra, 2
+                .quad w_olurl, ai_ol_url, 2, w_olmodel, ai_ol_model, 2
                 .quad w_recent, cpk_recent, 2, w_accent, th_accent, 0, 0
 
 .section .data
@@ -950,7 +964,7 @@ WIDGET wd_pf_autosave, WK_INT, "prefs.autosave", "Autosave every N changes (0: n
 WIDGET wd_pf_libadd, WK_BUTTON, "prefs.library_add", "Add Library Folder...", aux=op_lb_add
 WIDGET wd_pf_tier, WK_ENUM, "prefs.agent_permission", cb=tier_cb, aux=l_tier, n=4, tip="What AI agents may do when BeeModel starts"
 WIDGET wd_pf_mcp,  WK_TOGGLE, "prefs.mcp", "Listen for MCP clients (AI agents)", cb=save_cb
-WIDGET wd_pf_aiprov, WK_ENUM, "prefs.ai_connection", cb=save_cb, aux=l_prov, n=3, tip="Which connection the AI Assistant uses"
+WIDGET wd_pf_aiprov, WK_ENUM, "prefs.ai_connection", cb=save_cb, aux=l_prov, n=4, tip="Which connection the AI Assistant uses"
 WIDGET wd_pf_blender, WK_TEXT, "prefs.blender_path", "Blender program", cb=cb_blender, tip="Blender, for saving .blend files (File > Export > Blender). Empty: the one on PATH"
 WIDGET wd_pf_clpath, WK_TEXT, "prefs.claude_path", "Program", cb=cb_clpath, tip="The claude program (empty: the one on PATH)"
 WIDGET wd_pf_clmodel, WK_TEXT, "prefs.claude_model", "Model", cb=cb_clmodel, tip="A model name or alias such as sonnet or opus (empty: Claude Code's default)"
@@ -965,6 +979,10 @@ WIDGET wd_pf_orsteps, WK_INT, "prefs.openrouter_steps", "Steps at most", 1.0, 50
 WIDGET wd_pf_cltest, WK_BUTTON, "prefs.claude_test", "Test Claude Code", tip="Run claude --version: the answer shows as a message"
 WIDGET wd_pf_gktest, WK_BUTTON, "prefs.grok_test", "Test Grok", tip="Run grok --version: the answer shows as a message"
 WIDGET wd_pf_ortest, WK_BUTTON, "prefs.openrouter_test", "Test OpenRouter", tip="Ask OpenRouter whether the key works (it costs nothing)"
+WIDGET wd_pf_olmodel, WK_TEXT, "prefs.ollama_model", "Model", cb=cb_olmodel, tip="An Ollama model with tool calling, as ollama list names it, such as qwen3.5:4b. It is asked not to think"
+WIDGET wd_pf_olurl, WK_TEXT, "prefs.ollama_url", "Address", cb=cb_olurl, tip="Ollama's OpenAI-compatible address (no key is sent)"
+WIDGET wd_pf_olsteps, WK_INT, "prefs.ollama_steps", "Steps at most", 1.0, 500.0, 0.2, 0, WGF_CLAMP, cb=save_cb, tip="How many rounds of tool calls one request may take"
+WIDGET wd_pf_oltest, WK_BUTTON, "prefs.ollama_test", "Test Ollama", tip="Ask Ollama whether it runs and has the model"
 WIDGET wd_pf_aiextra, WK_TEXT, "prefs.ai_prompt", "Also tell the AI", cb=cb_aiextra, tip="Text added to every request's instructions (a style, units, what to avoid)"
 
 .section .rodata
@@ -981,7 +999,7 @@ pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxe
                 .quad 5, pr_threads, 0, 5, pr_jit, 1, 5, pr_gpu_on, 1, 5, pr_gpu_dev, 0
                 .quad 6, pr_autosave, 25
                 .quad 7, pr_tier, -1, 7, pr_mcp, 1, 7, ai_prov, 0, 7, ai_cl_turns, 100
-                .quad 7, ai_gk_turns, 100, 7, ai_or_steps, 30, 7, ask_scope, 1
+                .quad 7, ai_gk_turns, 100, 7, ai_or_steps, 30, 7, ai_ol_steps, 30, 7, ask_scope, 1
                 .quad -1
 s_pf_title:     .asciz "Preferences"
 s_pf_found:     .asciz "Settings found"
@@ -1721,6 +1739,29 @@ pf_reset:
     mov     edi, 2
     call    ai_test
 73:
+    lea     rdx, [rip+s_h_ol]
+    call    pf_head
+    lea     rdi, [rip+wd_pf_olmodel]
+    lea     r8, [rip+ai_ol_model]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_olurl]
+    lea     r8, [rip+ai_ol_url]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_olsteps]
+    lea     r8, [rip+ai_ol_steps]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_oltest]
+    xor     r8d, r8d
+    xor     edx, edx
+    call    pf_item
+    test    eax, eax
+    jz      74f
+    mov     edi, 3
+    call    ai_test
+74:
     lea     rdx, [rip+s_h_agents]
     call    pf_head
     mov     eax, [rip+pr_tier]
@@ -1781,6 +1822,8 @@ TEXTCB cb_gkpath, ai_gk_path
 TEXTCB cb_gkmodel, ai_gk_model
 TEXTCB cb_ormodel, ai_or_model
 TEXTCB cb_orurl, ai_or_url
+TEXTCB cb_olmodel, ai_ol_model
+TEXTCB cb_olurl, ai_ol_url
 TEXTCB cb_aiextra, ai_extra
 text_cb:                                # rdi = the text, rsi = where (256)
     xor     ecx, ecx

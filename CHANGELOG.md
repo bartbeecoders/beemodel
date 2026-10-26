@@ -6,6 +6,22 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **AI Assistant: Ollama (local)**, a fourth connection next to OpenRouter.
+  It runs OpenRouter's in-process tool loop against Ollama on this machine
+  (Preferences › AI › Ollama (local): Model, Address, Steps at most; Test
+  Ollama says whether it runs and has the model). No key is sent, and the
+  model is asked not to think (`"reasoning_effort": "none"`): a thinking
+  model otherwise answered inside its reasoning, which is not shown, and a
+  fine-tuned BeeModel model built worse with it.
+
+### Changed
+- **AI instructions: the placeholder Cube.** The world-building
+  instructions (AI Assistant and MCP's `build_world`) now say what to do
+  with a new scene's 2 m Cube: delete it before building something new,
+  unless the request mentions it, and never build into objects that stay.
+  Models used to build around the origin, inside the Cube.
+
 ### Added (stage T, 3D text, #387-#390)
 - **Add › Text** and `text.add ["body"] [size] [depth] [font] ...`: 3D text
   from the system's TrueType fonts (or the built-in block font), standing

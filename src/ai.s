@@ -63,6 +63,7 @@ ai_reply_len:   .skip 8
 ai_tx_len:      .skip 4
 ai_busy:        .skip 4                 # 1 while a request runs
 ai_run:         .skip 4                 # its connection (0 1 2; 3 a test)
+ai_local:       .skip 4                 # 1: OpenRouter's way, to Ollama on this machine
 ai_test_which:  .skip 4
 ai_stopped:     .skip 4
 ai_grouped:     .skip 4                 # the request's undo group is open
@@ -97,6 +98,7 @@ s_bearer:       .asciz "Authorization: Bearer "
 s_or_env:       .asciz "OPENROUTER_API_KEY="
 s_chat:         .asciz "/chat/completions"
 s_keypath:      .asciz "/key"
+s_modelspath:   .asciz "/models"
 s_claude:       .asciz "claude"
 s_grok:         .asciz "grok"
 s_mcpjson:      .asciz "/mcp.json"
@@ -203,6 +205,11 @@ s_or_fail:      .asciz "The request to OpenRouter failed: "
 s_or_bad:       .asciz "OpenRouter's reply was not understood: "
 s_or_none:      .asciz "OpenRouter gave no answer."
 s_or_err:       .asciz "OpenRouter: "
+s_ol_fail:      .asciz "The request to Ollama failed (is it running? ollama serve): "
+s_ol_bad:       .asciz "Ollama's reply was not understood: "
+s_ol_none:      .asciz "Ollama gave no answer."
+s_ol_err:       .asciz "Ollama: "
+j_noreason:     .asciz ",\"reasoning_effort\":\"none\""
 s_steps_a:      .asciz "Stopped after "
 s_steps_b:      .asciz " steps (the limit is in Preferences > AI)."
 s_hint:         .asciz "Describe a world, a model or a change, and press Enter. The AI builds it in the scene; each request is one undo step."
@@ -217,9 +224,13 @@ s_nothing_copy: .asciz "  the AI conversation is empty"
 n_claude:       .asciz "Claude Code"
 n_grok:         .asciz "Grok"
 n_or:           .asciz "OpenRouter"
+n_ol:           .asciz "Ollama"
 s_test_none:    .asciz ": not found (install it, or set its program in Preferences > AI)"
 s_test_ok_key:  .asciz "  OpenRouter: the key works"
 s_test_bad:     .asciz "  OpenRouter: "
+s_test_bad_ol:  .asciz "  Ollama: "
+s_test_ok_ol:   .asciz "  Ollama: it answers and has the model"
+s_test_nomodel: .asciz "it answers, but has no model named "
 s_test_noans:   .asciz "no answer (check the address)"
 s_colon:        .asciz ": "
 s_sp2:          .asciz "  "
@@ -228,7 +239,7 @@ s_tr_idle:      .asciz "idle "
 s_tr_busy:      .asciz "busy "
 s_tr_kinds:     .ascii "?YATERN"
 .align 8
-prov_names:     .quad n_claude, n_grok, n_or
+prov_names:     .quad n_claude, n_grok, n_or, n_ol
 
 # -----------------------------------------------------------------------------
 # The world-building instructions (also MCP's prompt build_world)
@@ -238,7 +249,7 @@ s_world:
     .ascii "Conventions: meters; Y is up; the ground is the XZ plane at y = 0; rotation_deg is Euler XYZ in degrees (BeeScript's rotate takes radians: write 45deg).\n"
     .ascii "Work like this:\n"
     .ascii "1. Look first: scene_summary (and viewport_capture when it matters).\n"
-    .ascii "2. Plan briefly: the parts, their sizes and places.\n"
+    .ascii "2. Plan briefly: the parts, their sizes and places. A new scene holds a placeholder Cube (2 m, at the origin): when you build something new and the request does not mention the cube, delete(\"Cube\") first and say so. Never build into objects that stay: put new things beside them.\n"
     .ascii "3. Build in batches with script_eval (BeeScript), many objects a call: add(type, name, x, y, z) with cube, sphere, cylinder, cone, torus, plane, grid, light or camera; scale(n, x, y, z); rotate(n, rx, ry, rz); move(n, x, y, z); for i in 0..10 { ... } loops; fn name(a, b) { ... } helpers. There are no lists or arrays ([...]): write each call, or loop over numbers. Materials: m = material(\"Stone\"); matset(m, \"base\", 0.5, 0.5, 0.48); matset(m, \"roughness\", 0.8); assign(object, m); a preset look: m = material(\"Planks\"); op(\"material.preset\", \"wood Planks\") (gold silver copper chrome aluminium plastic rubber glass frosted_glass water ceramic car_paint skin clay emissive wood marble concrete fabric leather). add returns the name it gave (Cube.001 when Cube is taken): keep it.\n"
     .ascii "4. Terrain and many copies with geometry nodes: t = gtree(\"Land\"); n = gnode(t, \"terrain\", 60, 128, 6, 1) (size, resolution, height, seed); o = gnode(t, \"output\"); glink(t, n, o, 1); add(\"plane\", \"Ground\"); k = modifier(\"Ground\", \"geometry\"); modset(\"Ground\", k, \"tree\", t). The distribute and instance nodes scatter objects; lsystem nodes grow plants (node_types lists them all).\n"
     .ascii "Text (titles, signs, labels, counters) is real geometry: op(\"text.add\", \"'Hello world' size 0.5 depth 0.1\"); t = active(); move(t, 0, 1, 0). It stands in the XY plane read from +Z, the last line's baseline at its origin, centred (\\n starts a line). Change it: text_set(t, \"New words\") or, on the active text, op(\"text.set\", \"'New words' font 'DejaVu Serif Bold' bevel 0.01 align left\"); text(t) reads it, scene_summary shows it. Type it on letter by letter: op(\"anim.key\", \"text:Name:reveal 1 0\") and (\"text:Name:reveal 48 1\") (mode pop, scale, rise or drop); {frame} or {floor(time)} in the body counts.\n"
@@ -253,7 +264,7 @@ j_wp_b:         .asciz "}}]}"
 s_wp_goal:      .asciz "\n\nWhat to build: "
 
 # ---- widgets and operators ---------------------------------------------------
-WIDGET wd_ai_prov, WK_ENUM, "ai.connection", cb=ai_prov_cb, aux=l_ai_prov, n=3, tip="The connection this conversation uses (set them up in Preferences > AI)"
+WIDGET wd_ai_prov, WK_ENUM, "ai.connection", cb=ai_prov_cb, aux=l_ai_prov, n=4, tip="The connection this conversation uses (set them up in Preferences > AI)"
 WIDGET wd_ai_new, WK_BUTTON, "ai.new", "New", flags=WGF_COMPACT, tip="Start a new conversation (the scene stays as it is)"
 WIDGET wd_ai_revert, WK_BUTTON, "ai.revert", "Revert", flags=WGF_COMPACT, tip="Undo the AI's last request (one step)"
 WIDGET wd_ai_copy, WK_BUTTON, "ai.copy", "Copy", flags=WGF_COMPACT, tip="Copy the text selected in the conversation (drag over it, double-click: a whole message), or all of it"
@@ -265,7 +276,7 @@ WIDGET wd_ai_stop, WK_BUTTON, "ai.stop", "Stop", tip="Stop the AI (what it did s
 
 .section .rodata
 .align 8
-l_ai_prov:      .quad n_claude, n_grok, n_or
+l_ai_prov:      .quad n_claude, n_grok, n_or, n_ol
 
 OPERATOR op_ai_send, "ai.send", "Send to the AI", do_ai_send, flags=OPF_QUIET, doc="Send a prompt to the AI Assistant: ai.send <what to build>"
 OPERATOR op_ai_stop, "ai.stop", "Stop the AI", do_ai_stop, flags=OPF_QUIET, doc="Stop the AI Assistant's request"
@@ -581,10 +592,16 @@ ai_send_as:
     mov     dword ptr [rip+ai_stopped], 0
     mov     dword ptr [rip+dirty], 1
     mov     eax, [rip+ai_prov]
-    cmp     eax, 2
+    cmp     eax, 3
     jbe     5f
     xor     eax, eax
-5:  mov     [rip+ai_run], eax
+5:  xor     ecx, ecx                    # Ollama: OpenRouter's way, to the
+    cmp     eax, 3                      #  local server
+    jne     51f
+    mov     ecx, 1
+    mov     eax, 2
+51: mov     [rip+ai_local], ecx
+    mov     [rip+ai_run], eax
     mov     edi, eax                    # (Grok: its tools' full names too)
     call    ai_sys_for
     mov     edi, [rip+ai_run]
@@ -1434,11 +1451,15 @@ ai_key:
     ret
 
 # ai_url_make(rsi=path) - ai_url = the address setting (no trailing /) + path
+#   (Ollama's when ai_local)
 ai_url_make:
     push    rsi
     lea     rdi, [rip+ai_url]
     lea     rsi, [rip+ai_or_url]
-    call    ai_cpy
+    cmp     dword ptr [rip+ai_local], 0
+    je      3f
+    lea     rsi, [rip+ai_ol_url]
+3:  call    ai_cpy
     lea     rax, [rip+ai_url]
 1:  cmp     rdi, rax
     jbe     2f
@@ -1454,6 +1475,8 @@ ai_url_make:
 ai_or_start:
     push    rbx
     mov     rbx, rdi
+    cmp     dword ptr [rip+ai_local], 0 # (Ollama: no key)
+    jne     1f
     call    ai_key
     test    rax, rax
     jnz     1f
@@ -1596,7 +1619,10 @@ ai_or_post:
     lea     rsi, [rip+j_body_a]
     call    wb_str
     lea     rsi, [rip+ai_or_model]
-    call    jb_q
+    cmp     dword ptr [rip+ai_local], 0
+    je      2f
+    lea     rsi, [rip+ai_ol_model]
+2:  call    jb_q
     lea     rsi, [rip+j_body_b]
     call    wb_str
     mov     rsi, [rip+ai_hist_st]
@@ -1611,7 +1637,11 @@ ai_or_post:
     lea     rsi, [rip+s_empty_arr]
     mov     edx, 2
 1:  call    wb_bytes
-    mov     edi, '}'
+    cmp     dword ptr [rip+ai_local], 0 # Ollama: no thinking (the model would
+    je      3f                          #  answer in it, which is not shown)
+    lea     rsi, [rip+j_noreason]
+    call    wb_str
+3:  mov     edi, '}'
     call    wb_char
     xor     edi, edi
     call    wb_char
@@ -1626,7 +1656,10 @@ ai_or_post:
     lea     rdi, [rip+ai_url]
     mov     rsi, rbx
     lea     rdx, [rip+ai_hdr]
-    call    ai_curl
+    cmp     dword ptr [rip+ai_local], 0
+    je      4f
+    xor     edx, edx                    # (Ollama: no key)
+4:  call    ai_curl
     test    eax, eax
     jnz     9f
     mov     edi, K_ERR
@@ -1679,6 +1712,9 @@ ai_or_exit:
     jz      1f
     mov     edi, K_ERR                  # curl's own message
     lea     rsi, [rip+s_or_fail]
+    lea     rax, [rip+s_ol_fail]
+    cmp     dword ptr [rip+ai_local], 0
+    cmovne  rsi, rax
     lea     rdx, [rip+ai_reply]
     mov     ecx, 400
     call    ai_add
@@ -1712,6 +1748,9 @@ ai_or_exit:
     call    ai_text
 11: mov     edi, K_ERR
     lea     rsi, [rip+s_or_err]
+    lea     rax, [rip+s_ol_err]
+    cmp     dword ptr [rip+ai_local], 0
+    cmovne  rsi, rax
     lea     rdx, [rip+ai_tmp]
     mov     ecx, 400
     call    ai_add
@@ -1860,7 +1899,11 @@ ai_or_exit:
     cmp     dword ptr [rip+ai_stopped], 0
     jne     .Loe_stopped
     mov     eax, [rip+ai_or_n]
-    cmp     eax, [rip+ai_or_steps]
+    mov     ecx, [rip+ai_or_steps]
+    cmp     dword ptr [rip+ai_local], 0
+    je      7f
+    mov     ecx, [rip+ai_ol_steps]
+7:  cmp     eax, ecx
     jl      8f
     call    fmt_reset
     lea     rdi, [rip+s_steps_a]
@@ -1880,6 +1923,9 @@ ai_or_exit:
 .Loe_bad:
     mov     edi, K_ERR
     lea     rsi, [rip+s_or_bad]
+    lea     rax, [rip+s_ol_bad]
+    cmp     dword ptr [rip+ai_local], 0
+    cmovne  rsi, rax
     lea     rdx, [rip+ai_reply]
     mov     ecx, 300
     call    ai_add
@@ -1887,6 +1933,9 @@ ai_or_exit:
 .Loe_none:
     mov     edi, K_ERR
     lea     rsi, [rip+s_or_none]
+    lea     rax, [rip+s_ol_none]
+    cmp     dword ptr [rip+ai_local], 0
+    cmovne  rsi, rax
     call    ai_add_z
     jmp     .Loe_end
 .Loe_stopped:
@@ -2008,8 +2057,8 @@ ai_tool_run:
 # =============================================================================
 # Test a connection (Preferences > AI)
 # =============================================================================
-# ai_test(edi=0 Claude Code / 1 Grok / 2 OpenRouter) - its version, or the
-#   key's validity, as a toast
+# ai_test(edi=0 Claude Code / 1 Grok / 2 OpenRouter / 3 Ollama) - its
+#   version, the key's validity, or whether Ollama has the model, as a toast
 ai_test:
     push    rbx
     mov     ebx, edi
@@ -2023,6 +2072,11 @@ ai_test:
     mov     byte ptr [rip+ai_reply], 0
     lea     rax, [rip+ai_or_data]
     mov     [rip+ai_on_data], rax
+    xor     eax, eax
+    cmp     ebx, 3
+    sete    al
+    mov     [rip+ai_local], eax
+    je      21f
     cmp     ebx, 2
     je      2f
     mov     edi, ebx                    # <program> --version
@@ -2054,16 +2108,23 @@ ai_test:
     jmp     9f
 3:  lea     rsi, [rip+s_keypath]
     call    ai_url_make
-    lea     rax, [rip+ai_or_exit]
+    lea     rdx, [rip+ai_hdr]
+    jmp     22f
+21: lea     rsi, [rip+s_modelspath]     # GET <Ollama's address>/models
+    call    ai_url_make
+    xor     edx, edx
+22: lea     rax, [rip+ai_or_exit]
     mov     [rip+ai_on_exit], rax
     mov     dword ptr [rip+ai_run], 3
     lea     rdi, [rip+ai_url]
     xor     esi, esi
-    lea     rdx, [rip+ai_hdr]
     call    ai_curl
     test    eax, eax
     jnz     9f
     lea     rdi, [rip+s_test_bad]
+    lea     rax, [rip+s_test_bad_ol]
+    cmp     dword ptr [rip+ai_local], 0
+    cmovne  rdi, rax
     lea     rsi, [rip+s_no_curl]
     call    ai_test_pair
     jmp     9f
@@ -2080,7 +2141,7 @@ ai_test_exit:
     sub     rsp, 8
     mov     dword ptr [rip+ai_run], 0
     cmp     dword ptr [rip+ai_test_which], 2
-    je      .Ltx_or
+    jae     .Ltx_or
     lea     rbx, [rip+ai_reply]         # the first line: "2.1.0 (Claude Code)"
     xor     ecx, ecx
 1:  mov     al, [rbx+rcx]
@@ -2127,7 +2188,41 @@ ai_test_exit:
     call    j_find
     test    rax, rax
     jz      4f
+    cmp     dword ptr [rip+ai_local], 0
+    jne     .Ltx_ol
     lea     rdi, [rip+s_test_ok_key]
+    call    ai_test_say
+    jmp     9f
+.Ltx_ol:                                # {"data": [{"id": <model>}, ...]}
+    mov     rsi, rax
+    call    j_first
+    mov     r12, rax
+6:  test    r12, r12
+    jz      7f
+    mov     rsi, r12
+    lea     rdi, [rip+k_id]
+    lea     rdx, [rip+ai_name]
+    call    ai_field
+    lea     rdi, [rip+ai_name]
+    lea     rsi, [rip+ai_ol_model]
+    call    str_eq
+    test    eax, eax
+    jnz     8f
+    mov     rsi, r12
+    call    j_next
+    mov     r12, rax
+    jmp     6b
+8:  lea     rdi, [rip+s_test_ok_ol]
+    call    ai_test_say
+    jmp     9f
+7:  call    fmt_reset                   # "it answers, but has no model named x"
+    lea     rdi, [rip+s_test_bad_ol]
+    call    fmt_str
+    lea     rdi, [rip+s_test_nomodel]
+    call    fmt_str
+    lea     rdi, [rip+ai_ol_model]
+    call    fmt_str
+    lea     rdi, [rip+fmt_buf]
     call    ai_test_say
     jmp     9f
 4:  mov     rsi, rbx                    # its error's message
@@ -2141,10 +2236,16 @@ ai_test_exit:
     test    eax, eax
     jle     5f
     lea     rdi, [rip+s_test_bad]
+    lea     rax, [rip+s_test_bad_ol]
+    cmp     dword ptr [rip+ai_local], 0
+    cmovne  rdi, rax
     lea     rsi, [rip+ai_tmp]
     call    ai_test_pair
     jmp     9f
 5:  lea     rdi, [rip+s_test_bad]
+    lea     rax, [rip+s_test_bad_ol]
+    cmp     dword ptr [rip+ai_local], 0
+    cmovne  rdi, rax
     lea     rsi, [rip+s_test_noans]
     call    ai_test_pair
 9:  add     rsp, 8
@@ -2642,8 +2743,11 @@ ed_ai_draw:
     mov     eax, [rip+ai_run]
     and     eax, 3
     cmp     eax, 2
-    jbe     81f
-    xor     eax, eax
+    jb      81f
+    ja      82f
+    add     eax, [rip+ai_local]         # (OpenRouter, or Ollama)
+    jmp     81f
+82: xor     eax, eax
 81: lea     rcx, [rip+prov_names]
     mov     rdi, [rcx+rax*8]
     call    fmt_str
