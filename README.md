@@ -612,6 +612,13 @@ BeeScript. [docs/TEXT.md](docs/TEXT.md).
 PNG without it, or a folder of PNGs; the status bar shows how far it is and Esc stops it.
 [docs/VIDEO.md](docs/VIDEO.md).
 
+**Image to 3D (addon).** Add › Generate › Model from Image (Hi3D)... makes a mesh from a photo
+of one thing, and Object › Refine from Image (Hi3D)... carves a photo's detail into a block-out
+you modelled. It runs on an NVIDIA GPU while you keep working: TripoSR makes the rough shape and
+Hi3D v1.0 adds the detail. The models live in an optional Python helper that
+`addons/hi3d/install.sh` sets up (about 20 GB); BeeModel itself stays one assembly program.
+Powered by [Hi3D 1.0](http://hi3d.ai/). [docs/HI3D.md](docs/HI3D.md).
+
 **Particles and liquid.** Add › Particles makes rain, snow, sparks, confetti, a fountain or a
 water tank; any object can emit from its faces, volume, vertices, origin or another system's
 events, at a rate (smooth between frames) or all at once. Particles feel gravity, drag and the
@@ -1056,6 +1063,7 @@ src/physui.s    the Physics tab: rigid body, joints, shatter, world (sections of
 src/landui.s    the Landscape tab: size, the layer stack, paint layers, sea and files
 src/refimg.s    reference images: adding them, drawing them in screen space, their panel
 src/refset.s    reference images from a folder or PDFs: pages drawn by poppler, sorted, set up
+src/hi3d.s      Image to 3D: the Hi3D addon's helper run in the background, its mesh brought in
 src/simcache.s  the simulation cache: frames kept, played back, baked, saved
 src/vgeo.s      virtualized geometry: the cluster LOD DAG (meshlets, groups, simplification)
 src/vgdraw.s    virtualized geometry: per-frame cuts, frustum and occlusion culling, streaming
@@ -1077,6 +1085,12 @@ the built-in allocator, job-system and field-JIT tests and small benchmarks.
 Each `.s` file is a separate module linked by `ld`. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the calling convention, the
 operator spine and how to add an action.
+
+## Addons (optional)
+
+* `addons/hi3d/` Image to 3D: `install.sh` sets up `bee-hi3d` (Python 3.10, PyTorch,
+  TripoSR and Hi3D v1.0, their weights) in `~/.local/share/beemodel/hi3d`;
+  `bee_hi3d.py` is the helper BeeModel runs. [docs/HI3D.md](docs/HI3D.md).
 
 ## Dev tools (optional, Python; not needed to build or run)
 

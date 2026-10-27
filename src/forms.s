@@ -694,6 +694,8 @@ PATHFORM form_lmsave, "lightmap.save", 1, x_img, n_lightmap
 PATHFORM form_laimp, "landscape.import", 0, x_img
 PATHFORM form_refadd, "object.add_reference", 0, x_imgin
 PATHFORM form_refsadd, "object.add_references", 2, x_refs
+PATHFORM form_hznew, "object.from_image", 0, x_imgin
+PATHFORM form_hzref, "object.refine_from_image", 0, x_imgin
 PATHFORM form_laexp, "landscape.export", 1, x_img, n_heights
 PATHFORM form_ranim, "render.animation", 1, x_video, n_anim
 

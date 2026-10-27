@@ -6,6 +6,18 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Image to 3D (the Hi3D addon).** Add › Generate › Model from Image
+  (Hi3D)... (`object.from_image <image> [512 | 1024 | 1536]`) makes a mesh
+  from a photo, and Object › Refine from Image (Hi3D)...
+  (`object.refine_from_image`) carves a photo's detail into the active
+  mesh. `src/hi3d.s` runs the addon's helper in the background: a status
+  bar chip shows how far it is and stops it (`object.from_image_stop`), and
+  the mesh comes in as one undo step. The helper (`addons/hi3d/`,
+  `install.sh`) runs TripoSR for the rough shape and Hi3D v1.0 for the
+  detail on an NVIDIA GPU. Powered by Hi3D 1.0. See docs/HI3D.md.
+  `tests/hi3d.py` tests it with a stand-in helper.
+
 ## [1.2.0] - 2026-10-27
 
 BeeModel runs on Windows 11: every release now has a Windows build

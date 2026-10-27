@@ -2672,6 +2672,19 @@
    }
   },
   {
+   "name": "op_object_from_image_stop",
+   "description": "Stop Image to 3D - Stop the model being made from an image (object.from_image)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_render_image",
    "description": "Render Image - Path-trace the scene (camera object, or the viewport) into a PNG: render.image <path> [width height samples [denoise]]",
    "inputSchema": {

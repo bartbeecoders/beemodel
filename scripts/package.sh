@@ -10,6 +10,8 @@ NAME="beemodel-${VERSION}-linux-x86_64"
 scripts/build.sh release
 rm -rf dist && mkdir -p "dist/$NAME"
 cp build/beemodel README.md CHANGELOG.md LICENSE docs/mcp-tools.json "dist/$NAME/"
+mkdir -p "dist/$NAME/addons/hi3d"           # Image to 3D: installed by the user (docs/HI3D.md)
+cp addons/hi3d/install.sh addons/hi3d/bee_hi3d.py docs/HI3D.md "dist/$NAME/addons/hi3d/"
 tar -C dist --owner=0 --group=0 --sort=name --mtime='2026-01-01 00:00Z' \
     -czf "dist/$NAME.tar.gz" "$NAME"
 cp build/beemodel "dist/$NAME.bin"
