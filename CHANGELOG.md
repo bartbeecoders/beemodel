@@ -6,6 +6,10 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-27
+
+Image to 3D: a mesh from a photo, through the optional Hi3D addon.
+
 ### Added
 - **Image to 3D (the Hi3D addon).** AI › Model from Image (Hi3D)...
   (`object.from_image <image> [512 | 1024 | 1536]`) makes a mesh
@@ -2457,7 +2461,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/bartbeecoders/beemodel/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/bartbeecoders/beemodel/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bartbeecoders/beemodel/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bartbeecoders/beemodel/compare/v0.24.0...v1.0.0
