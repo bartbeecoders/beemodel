@@ -1,7 +1,7 @@
 # =============================================================================
 #  BeeModel - Image to 3D (the Hi3D addon): a mesh made from a photo.
 #
-#  Add > Generate > Model from Image... (object.from_image <image> [512 |
+#  AI > Model from Image... (object.from_image <image> [512 |
 #  1024 | 1536]) and Object > Refine from Image... (object.refine_from_image
 #  <image> [...]) hand the work to the addon's helper, bee-hi3d (addons/hi3d,
 #  docs/HI3D.md): a Python program with TripoSR, which makes a rough shape

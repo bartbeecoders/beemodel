@@ -612,7 +612,7 @@ BeeScript. [docs/TEXT.md](docs/TEXT.md).
 PNG without it, or a folder of PNGs; the status bar shows how far it is and Esc stops it.
 [docs/VIDEO.md](docs/VIDEO.md).
 
-**Image to 3D (addon).** Add › Generate › Model from Image (Hi3D)... makes a mesh from a photo
+**Image to 3D (addon).** AI › Model from Image (Hi3D)... makes a mesh from a photo
 of one thing, and Object › Refine from Image (Hi3D)... carves a photo's detail into a block-out
 you modelled. It runs on an NVIDIA GPU while you keep working: TripoSR makes the rough shape and
 Hi3D v1.0 adds the detail. The models live in an optional Python helper that

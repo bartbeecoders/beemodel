@@ -1,6 +1,6 @@
 # Image to 3D (the Hi3D addon)
 
-**Add › Generate › Model from Image (Hi3D)…** makes a 3D model from a
+**AI › Model from Image (Hi3D)…** makes a 3D model from a
 photo or drawing of one thing. **Object › Refine from Image (Hi3D)…**
 carves a photo's detail into a rough model you made yourself. Both run on
 your NVIDIA GPU while you keep working. The status bar shows how far it
