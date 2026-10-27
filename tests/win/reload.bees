@@ -1,0 +1,5 @@
+# The Windows smoke test, second run: smoke.bee (from smoke.bees) opened and
+# rendered again; the image must be smoke.png's.
+op('file.open', 'smoke.bee')
+op('render.image', 'reload.png 96 64 8')
+print('smoke reloaded')

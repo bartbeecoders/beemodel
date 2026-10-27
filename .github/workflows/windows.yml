@@ -1,0 +1,34 @@
+name: Windows smoke test
+
+# Called by ci.yml and release.yml once a Linux job has uploaded the kit
+# ci/winkit.sh makes (the Windows zip, build/test-*.exe, the Linux render).
+on:
+  workflow_call:
+    inputs:
+      kit:
+        description: name of the uploaded build/winkit artifact
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke test on Windows
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.kit }}
+          path: winkit
+
+      - name: The release zip on Windows (ci/check-windows.ps1)
+        shell: pwsh
+        run: |
+          $v = (Get-Content winkit/VERSION).Trim()
+          ci/check-windows.ps1 -Zip "winkit/beemodel-$v-windows-x86_64.zip" `
+            -Tests winkit -Ref winkit/smoke-linux.png -Version $v

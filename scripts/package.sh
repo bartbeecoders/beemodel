@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Package a release build: dist/beemodel-<version>-linux-x86_64.tar.gz, the
-# optional GPU helper as dist/beemodel-gpu-<version>-linux-x86_64.tar.gz, SHA256SUMS
+# optional GPU helper as dist/beemodel-gpu-<version>-linux-x86_64.tar.gz, the
+# Windows build (beemodel.exe and beemodel-gpu.exe) as
+# dist/beemodel-<version>-windows-x86_64.zip, SHA256SUMS
 set -euo pipefail
 cd "$(dirname "$0")/.."
 VERSION="$(tr -d '[:space:]' < VERSION)"
@@ -18,6 +20,15 @@ mkdir -p "dist/$GNAME"
 cp build/beemodel-gpu "dist/$GNAME/"
 tar -C "dist/$GNAME" --owner=0 --group=0 --sort=name --mtime='2026-01-01 00:00Z' \
     -czf "dist/$GNAME.tar.gz" beemodel-gpu
-(cd dist && sha256sum "$NAME.tar.gz" "$NAME.bin" "$GNAME.tar.gz" > SHA256SUMS)
-rm -rf "dist/$NAME" "dist/$GNAME"
+# Windows: one zip, the GPU helper inside (it loads vulkan-1.dll only when it runs)
+WNAME="beemodel-${VERSION}-windows-x86_64"
+[[ -f build/beemodel.exe && -f build/beemodel-gpu.exe ]] ||
+    { echo "build/beemodel.exe was not built (needs ld with the i386pep emulation)" >&2; exit 1; }
+mkdir -p "dist/$WNAME"
+cp build/beemodel.exe build/beemodel-gpu.exe README.md CHANGELOG.md LICENSE docs/mcp-tools.json \
+    docs/WINDOWS.md "dist/$WNAME/"
+touch -d '2026-01-01 00:00Z' "dist/$WNAME" "dist/$WNAME"/*
+(cd dist && TZ=UTC zip -qX -r "$WNAME.zip" "$WNAME")
+(cd dist && sha256sum "$NAME.tar.gz" "$NAME.bin" "$GNAME.tar.gz" "$WNAME.zip" > SHA256SUMS)
+rm -rf "dist/$NAME" "dist/$GNAME" "dist/$WNAME"
 ls -l dist

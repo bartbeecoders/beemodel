@@ -145,7 +145,7 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 <main>
 <header class="hero">
-  <div class="kicker">In progress · W6 done (child processes, pipes, sockets, the GPU helper; its exit met but a real GPU, by hand); W4's exit by hand, then W7 · branch win11-port · updated against v1.1.0 · Windows 11</div>
+  <div class="kicker">Released in v1.2.0 · W1&ndash;W7 done but code signing (W7) and a GPU render on real Windows hardware, by hand · merged to main · Windows 11</div>
   <h1>BeeModel on Windows 11</h1>
   <p class="lede">BeeModel is x86-64 assembly that talks to Linux through raw syscalls and to the compositor through its own Wayland client. Windows 11 runs on the same CPU, so the computation carries over unchanged: geometry, physics, the rasterizer and path tracer, BeeScript, and the file parsers. Everything that touches the OS has to be rewritten. This plan first puts the OS behind a platform layer on Linux, then writes a Windows version of that layer, developed on Omarchy with Wine and checked in a Windows 11 VM.</p>
   <div class="meta">BeeModel · Vibecoding/BeeModel-Win11-Port-Plan.html · Companion to the <a href="BeeModel-Masterplan.html">Masterplan</a> · Written 2026-10-19 against v0.19.0 · Updated 2026-10-26 against v1.1.0</div>
@@ -174,7 +174,7 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
     <tr><td>W6a</td><td>Child processes and pipes: <code>plat_spawn</code> on <code>CreateProcessW</code>, <code>pipe2</code> / <code>socketpair</code> as named pipes <code>poll</code> waits on, <code>wait4</code>, <code>kill</code>; <code>tests/win/procs.s</code></td><td><span class="tag g">done</span> Wine and VM, CI green; curl in the VM; zstd, ffmpeg and poppler (their Windows builds) under Wine and in the VM</td></tr>
     <tr><td>W6b</td><td>Sockets: TCP and <code>AF_UNIX</code> on Winsock, waited on by <code>poll</code>; <code>getrandom</code> (RDRAND), <code>symlink</code> for MCP; <code>tests/win/socks.s</code></td><td><span class="tag g">done</span> Wine and VM, CI green; the live link and co-editing between Windows and Linux; MCP in the VM</td></tr>
     <tr><td>W6c</td><td>The GPU helper: <code>beemodel-gpu.exe</code> (vulkan-1.dll loaded when it runs), its packets on a message-mode pipe, its slots in sections passed with <code>sendmsg</code>; <code>tests/win/shm.s</code></td><td><span class="tag g">done</span> Wine (lavapipe) and VM, CI green; a GPU path-traced render the CPU's image; real hardware: by hand</td></tr>
-    <tr><td>W7</td><td>The release</td><td><span class="tag">open</span></td></tr>
+    <tr><td>W7</td><td>The release</td><td><span class="tag g">done</span> v1.2.0: the zip, a <code>windows-latest</code> smoke test in CI and the release, <code>docs/WINDOWS.md</code>; signing open</td></tr>
     <tr><td>W0</td><td>WSLg check</td><td><span class="tag">optional, once the VM is up</span></td></tr>
   </table></div>
 </section>
@@ -331,7 +331,8 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
   <div class="phase"><div class="pn"><b>W7</b>ship</div><div class="card"><h3>CI, signing, release <span class="tag r">release</span></h3>
     <p>A GitHub <code>windows-latest</code> job runs the Windows smoke tests. The release adds <code>beemodel-&lt;ver&gt;-windows-x86_64.zip</code> with <code>beemodel.exe</code> and <code>beemodel-gpu.exe</code>. The executables are signed. Docs: a Windows section in the README and <code>docs/WINDOWS.md</code>, and the CHANGELOG.</p>
-    <div class="exit"><b>Exit:</b> a fresh Windows 11 machine downloads the zip and runs BeeModel with no SmartScreen block and no Defender alert.</div></div></div>
+    <p><b>Done</b> (2026-10-27, v1.2.0). <code>scripts/package.sh</code> makes <code>beemodel-&lt;ver&gt;-windows-x86_64.zip</code> (<code>beemodel.exe</code>, <code>beemodel-gpu.exe</code>, the README, CHANGELOG, LICENSE, <code>mcp-tools.json</code> and <code>WINDOWS.md</code>), and the release publishes it with the Linux assets and in <code>SHA256SUMS</code>. <code>ci/winkit.sh</code> gathers on Linux what the Windows runner needs (the zip, <code>build/test-*.exe</code>, the Linux render of <code>tests/win/smoke.bees</code>), and <code>.github/workflows/windows.yml</code>, called by CI and by the release (whose publish job waits for it), runs <code>ci/check-windows.ps1</code> on <code>windows-latest</code>: the zip's contents, <code>--version</code>, <code>--selftest</code>, the platform layer's 7 tests, and a render, a save and a reload (<code>tests/win/reload.bees</code>) that must give the Linux image byte for byte. The release job also runs <code>ci/check-exe.sh</code> under Wine, as CI does. Docs: <code>docs/WINDOWS.md</code>, the README (intro, download, source layout), the CHANGELOG's [1.2.0]. The About box's second line is the platform's (<code>s_about2</code>: "talks Wayland" / "calls Win32"). <b>Not done: signing.</b> There is no code-signing certificate yet, so the executables are unsigned and SmartScreen asks once (More info &rsaquo; Run anyway, in <code>docs/WINDOWS.md</code>); the exit below waits for it.</p>
+    <div class="exit"><b>Exit:</b> a fresh Windows 11 machine downloads the zip and runs BeeModel with no SmartScreen block and no Defender alert. <b>Open:</b> signing.</div></div></div>
 
   <div class="stage">Side check</div>
   <div class="phase"><div class="pn"><b>W0</b>check</div><div class="card"><h3>Run it through WSLg <span class="tag g">no code</span> <span class="tag">optional</span></h3>

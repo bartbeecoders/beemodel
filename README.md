@@ -6,7 +6,9 @@
 A shell for a 3D modeling tool, written entirely in x86-64 assembly (GNU as,
 Intel syntax). It uses no libc, no libwayland and no toolkit. The program talks to
 the Linux kernel through raw syscalls and to the compositor through the Wayland
-wire protocol on a UNIX socket.
+wire protocol on a UNIX socket. The same program runs on Windows 11, where only
+the platform layer changes: it calls Win32 and links nothing but Windows' own
+DLLs ([docs/WINDOWS.md](docs/WINDOWS.md)).
 
 ```
 scripts/build.sh        # assemble + link  -> build/beemodel  (~300 KB static ELF)
@@ -25,9 +27,13 @@ every later version, and BeeScript and the MCP tools change only by adding
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v1.1.0/beemodel-1.1.0-linux-x86_64.bin
-chmod +x beemodel-1.1.0-linux-x86_64.bin && ./beemodel-1.1.0-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v1.2.0/beemodel-1.2.0-linux-x86_64.bin
+chmod +x beemodel-1.2.0-linux-x86_64.bin && ./beemodel-1.2.0-linux-x86_64.bin
 ```
+
+On Windows 11, download
+[beemodel-1.2.0-windows-x86_64.zip](https://github.com/bartbeecoders/beemodel/releases/download/v1.2.0/beemodel-1.2.0-windows-x86_64.zip),
+unpack it and start `beemodel.exe` ([docs/WINDOWS.md](docs/WINDOWS.md)).
 
 ## What's in the shell
 
@@ -897,6 +903,10 @@ see every operator with its id, binding and description.
 ```
 src/main.s      entry point, CLI flags, event loop (a render slice per turn)
 src/wayland.s   socket, message encode/decode, SCM_RIGHTS, shm buffers, dispatch, tablets
+src/window.s    the window interface (wnd_*): wayland.s on Linux, plat_win_wnd.s on Windows
+src/plat_linux.s  the platform layer on Linux: every syscall (plat_*), _start in plat_linux_start.s
+src/plat_win.s  the platform layer on Windows: plat_* on kernel32 / ws2_32, the PE imports
+src/plat_win_wnd.s  the Win32 window: drawing, input, DPI, clipboard, drops, the pen
 src/draw.s      framebuffer primitives: rects, gradient, text, lines, clipping
 src/ui.s        layout, hit testing, input, menus, status bar
 src/areas.s     area tree, editors, splitting / closing / maximizing
