@@ -14,7 +14,7 @@ window (the fake compositor):
   - an error is reported with the helper's own words; a helper that dies
     without a word too;
   - one at a time; the status bar chip stops it;
-  - Add > Generate and Object have the operators; only the stop is open
+  - the AI menu and Object have the operators; only the stop is open
     to the AI.
 
     python3 tests/hi3d.py build/beemodel [outdir]
@@ -168,9 +168,9 @@ def main():
     check('op_object_from_image_stop' in tools and 'op_object_from_image' not in tools
           and 'op_object_refine_from_image' not in tools,
           'the AI may stop one, not start one (a long GPU job reading files)')
-    ok = fakewl.menu_pick(f, m, 'Add', 'Generate', 'Model from Image (Hi3D)...')
+    ok = fakewl.menu_pick(f, m, 'AI', 'Model from Image (Hi3D)...')
     f.pump(0.3)
-    check(ok, 'Add > Generate > Model from Image (Hi3D)...')
+    check(ok, 'AI > Model from Image (Hi3D)...')
     f.key(1); f.pump(0.2)
     check(fakewl.menu_pick(f, m, 'Object', 'Refine from Image (Hi3D)...'), 'Object > Refine from Image (Hi3D)...')
     f.key(1); f.pump(0.2)

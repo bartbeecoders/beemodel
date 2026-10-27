@@ -7,8 +7,8 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- **Image to 3D (the Hi3D addon).** Add › Generate › Model from Image
-  (Hi3D)... (`object.from_image <image> [512 | 1024 | 1536]`) makes a mesh
+- **Image to 3D (the Hi3D addon).** AI › Model from Image (Hi3D)...
+  (`object.from_image <image> [512 | 1024 | 1536]`) makes a mesh
   from a photo, and Object › Refine from Image (Hi3D)...
   (`object.refine_from_image`) carves a photo's detail into the active
   mesh. `src/hi3d.s` runs the addon's helper in the background: a status

@@ -164,7 +164,7 @@ items_render:   .quad op_render_start, op_render_stop, 0, op_render_anim, 0, op_
 .equ items_render_n, (. - items_render) / 8
 items_help:     .quad op_help_keys, op_welcome, op_area_type_help, 0, op_console_ops, op_help_about
 .equ items_help_n, (. - items_help) / 8
-items_ai:       .quad op_ai_mode, op_ai_ask, op_ai_stop, op_ai_new, op_ai_copy, 0, op_refs_ai
+items_ai:       .quad op_ai_mode, op_ai_ask, op_ai_stop, op_ai_new, op_ai_copy, 0, op_refs_ai, op_hz_new
                 .quad op_view_activity, op_agent_revert, 0
                 .quad op_agent_read, op_agent_edit, op_agent_files
 .equ items_ai_n, (. - items_ai) / 8
@@ -178,7 +178,7 @@ sub_curve_l:    .quad op_add_bezier, op_add_ccircle, op_add_path
 sub_normals_l:  .quad op_m_flip, op_m_recalc
 sub_feature_l:  .quad op_cad_pad, op_cad_pocket, op_cad_revolve, op_cad_hole, 0
                 .quad op_cad_shell, op_cad_fillet, op_cad_chamfer, op_cad_pattern, op_cad_infill
-sub_generate_l: .quad op_gen_lsystem, op_gen_wfc, op_hz_new
+sub_generate_l: .quad op_gen_lsystem, op_gen_wfc
 sub_landscape_l: .quad op_la_flat, op_la_hills, op_la_mount, op_la_canyon, op_la_dunes, op_la_island
 sub_ws_l:       .quad op_ws_next, op_ws_prev, 0, op_ws_new, op_ws_rename, op_ws_delete
 sub_uv_l:       .quad op_uv_unwrap, op_uv_smart, op_uv_pack, 0, op_uv_mark, op_uv_clear, op_uv_sharp
@@ -203,7 +203,7 @@ SUBMENU sub_theme, "Theme", sub_theme_l, 10
 SUBMENU sub_curve, "Curve", sub_curve_l, 3
 SUBMENU sub_normals, "Normals", sub_normals_l, 2
 SUBMENU sub_feature, "Part Feature", sub_feature_l, 10
-SUBMENU sub_generate, "Generate", sub_generate_l, 3
+SUBMENU sub_generate, "Generate", sub_generate_l, 2
 SUBMENU sub_landscape, "Landscape", sub_landscape_l, 6
 SUBMENU sub_mech, "Mechanism", sub_mech_l, 3
 SUBMENU sub_uv, "UV", sub_uv_l, 7
