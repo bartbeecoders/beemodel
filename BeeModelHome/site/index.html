@@ -11,7 +11,7 @@
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#0d0f13">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="assets/css/site.css?v=202610211343">
+<link rel="stylesheet" href="assets/css/site.css?v=202610272306">
 </head>
 <body>
 <header class="site-header">
@@ -42,12 +42,12 @@
       <span class="eyebrow">Free &amp; open source · MIT</span>
       <h1>3D creation,<br>written in <span class="grad">pure assembly</span>.</h1>
       <p class="lead">BeeModel models, sculpts, paints, rigs, animates, simulates and path-traces —
-        in one 1.5 MB static binary for Linux. No libc, no toolkit, no libraries:
-        x86-64 assembly talking straight to the kernel and the Wayland compositor.</p>
+        in one 1.5 MB static binary for Linux and Windows 11. No libc, no toolkit, no libraries:
+        x86-64 assembly talking straight to the kernel and the window system.</p>
       <div class="btn-row">
         <a class="btn primary" href="#download" data-latest="page-anchor">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16"/></svg>
-          <span>Download v<span data-latest="version">0.24.0</span></span>
+          <span>Download v<span data-latest="version">1.2.1</span></span>
         </a>
         <a class="btn ghost" href="https://github.com/bartbeecoders/beemodel">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.7 5.39-5.26 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z"/></svg>
@@ -55,9 +55,9 @@
         </a>
       </div>
       <div class="badges">
-        <span class="badge"><span class="dot"></span> Latest <b>v<span data-latest="version">0.24.0</span></b> · <span data-latest="date">21 October 2026</span></span>
-        <span class="badge">Linux x86-64 · Wayland</span>
-        <span class="badge">25 releases</span>
+        <span class="badge"><span class="dot"></span> Latest <b>v<span data-latest="version">1.2.1</span></b> · <span data-latest="date">27 October 2026</span></span>
+        <span class="badge">Linux · Windows 11</span>
+        <span class="badge">29 releases</span>
       </div>
     </div>
     <div class="hero-visual reveal">
@@ -75,11 +75,13 @@
     <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
     <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
     <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
+    <span><b>●</b> image to 3D</span><span><b>●</b> 3D text</span><span><b>●</b> render to video</span><span><b>●</b> Linux &amp; Windows 11</span>
     <span><b>●</b> path tracer on every core</span><span><b>●</b> RTX ray tracing on Vulkan</span><span><b>●</b> a GPU viewport</span><span><b>●</b> sculpting with dynamic topology</span>
     <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
     <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
     <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
     <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
+    <span><b>●</b> image to 3D</span><span><b>●</b> 3D text</span><span><b>●</b> render to video</span><span><b>●</b> Linux &amp; Windows 11</span>
   </div>
 </div>
 
@@ -89,8 +91,8 @@
     <div class="stats reveal">
       <div class="stat"><div class="num" data-count="1.5">0<small>MB</small></div><div class="lbl">one static binary</div></div>
       <div class="stat"><div class="num" data-count="0">0</div><div class="lbl">libraries linked</div></div>
-      <div class="stat"><div class="num" data-count="183">0</div><div class="lbl">assembly source files</div></div>
-      <div class="stat"><div class="num" data-count="25">0</div><div class="lbl">releases so far</div></div>
+      <div class="stat"><div class="num" data-count="195">0</div><div class="lbl">assembly source files</div></div>
+      <div class="stat"><div class="num" data-count="29">0</div><div class="lbl">releases so far</div></div>
       <div class="stat"><div class="num">MIT</div><div class="lbl">free, forever</div></div>
     </div>
   </div>
@@ -131,15 +133,21 @@
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><path d="m5 5 14 14M19 5 5 19" opacity=".5"/></svg></div>
         <h3>A billion triangles</h3><p>Nanite-style virtualized geometry draws huge meshes through a cluster LOD cut every frame; world partition streams big worlds by cell.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5"/><circle cx="12" cy="12" r="4"/></svg></div>
-        <h3>AI assistant &amp; MCP</h3><p>A built-in AI assistant (Claude Code, Grok or OpenRouter) and an MCP server, so agents can see the scene, run any command and propose changes you accept or revert.</p></div>
+        <h3>AI assistant &amp; MCP</h3><p>A built-in AI assistant (Claude Code, Grok, OpenRouter or a local model through Ollama) and an MCP server, so agents can see the scene, run any command and propose changes you accept or revert. Alt+right-click to ask about just the selection.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2" y="5" width="9" height="12" rx="1.5"/><path d="m4 15 2.5-3 2 2.5"/><path d="m17 6 5 3v6l-5 3-5-3V9Z"/><path d="m12 9 5 3 5-3M17 12v6"/></svg></div>
+        <h3>Image to 3D</h3><p>Turn a photo of one thing into a mesh, or carve a photo's detail into a block-out you modelled. TripoSR and Hi3D v1.0 run on your NVIDIA GPU as an optional addon while you keep working. <a href="https://github.com/bartbeecoders/beemodel/blob/main/docs/HI3D.md">Powered by Hi3D 1.0</a>.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.3 7.2l7.4 3.6"/></svg></div>
         <h3>Versions &amp; co-editing</h3><p>Every saved scene keeps a content-addressed history with diffs and merges; live co-editing sessions and a live link to other tools.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M13 6l-2 12"/></svg></div>
         <h3>BeeScript</h3><p>A small scripting language for everything: build scenes, run any operator, drive the viewport, test — from the console, files or agents.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M9 14l2 2 4-4"/></svg></div>
-        <h3>Files in, files out</h3><p>Its own .bee format, plus OBJ, STL, glTF/GLB, STEP, 3MF, DXF, SVG, PDF drawings and Blender .blend import and export.</p></div>
+        <h3>Files in, files out</h3><p>Its own .bee format, plus OBJ, STL, glTF/GLB, STEP, 3MF, DXF, SVG, PDF drawings and Blender .blend import and export. Point it at a folder of building drawings or PDFs and it sets them up around the building at their true scale.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h10v2M9 5v12M7 17h4"/><rect x="14" y="11" width="8" height="8" rx="1.5"/><path d="m17 13.5 3 1.5-3 1.5Z"/></svg></div>
+        <h3>3D text &amp; video</h3><p>Titles and labels from any TrueType font, bevelled and animated letter by letter. Render the animation straight to MP4, WebM, GIF or an animated PNG.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg></div>
         <h3>Fast &amp; frugal</h3><p>Event driven: 0% CPU when idle, a few MB of memory, a multithreaded software rasterizer, SIMD everywhere — and it starts in a blink.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
+        <h3>Linux &amp; Windows 11</h3><p>The same program from the same sources: a static binary for any Linux distribution and a beemodel.exe that needs only Windows' own DLLs. Scenes, scripts, MCP and co-editing work across both.</p></div>
     </div>
   </div>
 </section>
@@ -155,7 +163,7 @@
     <div class="tour-tabs" role="tablist">
       <button role="tab">Modeling</button><button role="tab">Materials</button><button role="tab">Sculpting</button>
       <button role="tab">CAD</button><button role="tab">Animation</button><button role="tab">Physics</button>
-      <button role="tab">Force fields</button><button role="tab">Particles</button><button role="tab">Landscapes</button><button role="tab">Procedural</button>
+      <button role="tab">Force fields</button><button role="tab">Particles</button><button role="tab">Landscapes</button><button role="tab">Procedural</button><button role="tab">Image to 3D</button>
     </div>
 
     <div class="tour-pane"><div class="spot">
@@ -257,6 +265,16 @@
       </div>
       <div class="spot-media" data-full="assets/img/valley.webp" data-caption="A procedural valley, path-traced"><img loading="lazy" src="assets/img/valley-sm.webp" alt="A procedural valley render" width="800" height="450"></div>
     </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>From a picture to a mesh</h3>
+        <p>AI › Model from Image: pick a photo or a render of one thing, and about 40 seconds later its mesh stands on the 3D cursor. The picture on the left is one of BeeModel's own renders, and the head on the right came out of it.</p>
+        <ul><li>TripoSR makes the rough shape, Hi3D v1.0 carves in the detail</li><li>Or refine a block-out you modelled yourself</li><li>Runs in the background on an NVIDIA GPU, one undo step</li></ul>
+        <div class="spot-tag">Image to 3D addon · Powered by Hi3D 1.0</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/hi3d.webp" data-caption="A render in, a mesh out: Image to 3D"><img loading="lazy" src="assets/img/hi3d-sm.webp" alt="A rendered picture of a horned head as a reference image, next to the mesh generated from it" width="800" height="500"></div>
+    </div></div>
   </div>
 </section>
 
@@ -325,27 +343,27 @@
         </thead>
         <tbody>
           <tr><th scope="row">Written in</th><td class="bee">x86-64 assembly</td><td>C, C++, Python</td><td>C++</td><td>C++</td></tr>
-          <tr><th scope="row">Download</th><td class="bee"><b>848 KB</b> <small>(one 1.5 MB binary)</small></td><td>383 MB</td><td>tens of GB installed</td><td>78 MB</td></tr>
+          <tr><th scope="row">Download</th><td class="bee"><b>928 KB</b> <small>(one 1.5 MB binary)</small></td><td>383 MB</td><td>tens of GB installed</td><td>78 MB</td></tr>
           <tr><th scope="row">Dependencies</th><td class="bee"><i class="y"></i>None: no libc, no libraries</td><td>Bundled libraries</td><td>Epic launcher, SDKs</td><td>Bundled libraries</td></tr>
           <tr><th scope="row">License</th><td class="bee"><i class="y"></i>MIT</td><td><i class="y"></i>GPL</td><td><i class="p"></i>Proprietary, source available; 5% royalty on game revenue over $1M</td><td><i class="y"></i>MIT</td></tr>
-          <tr><th scope="row">Runs on</th><td class="bee"><i class="p"></i>Linux x86-64 (Wayland)</td><td><i class="y"></i>Windows, macOS, Linux</td><td><i class="y"></i>Windows, macOS, Linux</td><td><i class="y"></i>Windows, macOS, Linux, Android, web</td></tr>
+          <tr><th scope="row">Runs on</th><td class="bee"><i class="p"></i>Linux x86-64 (Wayland), Windows 11</td><td><i class="y"></i>Windows, macOS, Linux</td><td><i class="y"></i>Windows, macOS, Linux</td><td><i class="y"></i>Windows, macOS, Linux, Android, web</td></tr>
           <tr><th scope="row">Modeling &amp; sculpting</th><td class="bee"><i class="y"></i>Modifiers, dyntopo sculpt, paint</td><td><i class="y"></i>Industry standard</td><td><i class="p"></i>Modeling mode</td><td><i class="n"></i>CSG shapes only</td></tr>
           <tr><th scope="row">Parametric CAD</th><td class="bee"><i class="y"></i>Sketches, B-rep, STEP</td><td><i class="p"></i>Through add-ons</td><td><i class="n"></i>No</td><td><i class="n"></i>No</td></tr>
           <tr><th scope="row">Path tracing</th><td class="bee"><i class="y"></i>Hive: CPU, Vulkan, RTX</td><td><i class="y"></i>Cycles</td><td><i class="y"></i>Path Tracer, Lumen</td><td><i class="n"></i>Real-time only</td></tr>
           <tr><th scope="row">Physics &amp; liquids</th><td class="bee"><i class="y"></i>Rigid, cloth, shatter, GPU liquids</td><td><i class="y"></i>Rigid, cloth, Mantaflow</td><td><i class="y"></i>Chaos, Niagara fluids</td><td><i class="p"></i>Rigid &amp; soft bodies</td></tr>
           <tr><th scope="row">Make a game</th><td class="bee"><i class="p"></i>Play mode &amp; logic graphs</td><td><i class="n"></i>No game engine</td><td><i class="y"></i>AAA engine</td><td><i class="y"></i>Full engine</td></tr>
           <tr><th scope="row">Scripting</th><td class="bee"><i class="y"></i>BeeScript</td><td><i class="y"></i>Python</td><td><i class="y"></i>Blueprints, C++, Python</td><td><i class="y"></i>GDScript, C#, C++</td></tr>
-          <tr><th scope="row">AI agents</th><td class="bee"><i class="y"></i>Assistant &amp; MCP server built in</td><td><i class="p"></i>MCP add-on</td><td><i class="p"></i>MCP plugins</td><td><i class="p"></i>MCP plugins</td></tr>
+          <tr><th scope="row">AI agents</th><td class="bee"><i class="y"></i>Assistant &amp; MCP server built in, image to 3D</td><td><i class="p"></i>MCP add-on</td><td><i class="p"></i>MCP plugins</td><td><i class="p"></i>MCP plugins</td></tr>
           <tr><th scope="row">Add-ons &amp; community</th><td class="bee"><i class="n"></i>Just getting started</td><td><i class="y"></i>Huge</td><td><i class="y"></i>Huge, plus Fab</td><td><i class="y"></i>Large</td></tr>
           <tr><th scope="row">Around since</th><td class="bee">2026</td><td>1994</td><td>1998</td><td>2014</td></tr>
         </tbody>
       </table>
     </div>
     <p class="cmp-key muted"><span><i class="y"></i>yes</span><span><i class="p"></i>partly</span><span><i class="n"></i>no</span>
-      Download sizes in October 2026: BeeModel 0.24.0 (tar.gz), Blender 5.2.2 and the Godot 4.7.2 editor for Linux; Unreal Engine installs through the Epic Games Launcher.</p>
+      Download sizes in October 2026: BeeModel 1.2.1 (tar.gz), Blender 5.2.2 and the Godot 4.7.2 editor for Linux; Unreal Engine installs through the Epic Games Launcher.</p>
 
     <div class="picks">
-      <div class="pick bee reveal"><h3>Pick BeeModel</h3><p>for one tool that models, sculpts, designs parts, simulates and renders — that downloads in a second, starts instantly, runs on a modest Linux machine and that you can read top to bottom.</p></div>
+      <div class="pick bee reveal"><h3>Pick BeeModel</h3><p>for one tool that models, sculpts, designs parts, simulates and renders — that downloads in a second, starts instantly, runs on a modest Linux or Windows machine and that you can read top to bottom.</p></div>
       <div class="pick reveal"><h3>Pick Blender</h3><p>for production work: film, animation and VFX pipelines, decades of tutorials, and an add-on for nearly everything.</p></div>
       <div class="pick reveal"><h3>Pick Unreal Engine</h3><p>for shipping high-end games and real-time experiences on every platform, with Nanite, Lumen and the Fab marketplace.</p></div>
       <div class="pick reveal"><h3>Pick Godot</h3><p>for small and mid-sized games with an open-source engine that exports to desktop, mobile and the web.</p></div>
@@ -360,31 +378,33 @@
       <div class="dl-grid">
         <div>
           <span class="eyebrow">Download</span>
-          <h2>Get BeeModel <span data-latest="version">0.24.0</span></h2>
+          <h2>Get BeeModel <span data-latest="version">1.2.1</span></h2>
           <p class="lead">One static binary. No installer, no dependencies, nothing to configure — download it, make it executable, run it.</p>
           <div class="dl-files">
-            <a class="dl-file" data-asset="bin" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.24.0/beemodel-0.24.0-linux-x86_64.bin"><span class="ext">BIN</span><span class="name">beemodel-0.24.0-linux-x86_64.bin</span><span class="size">1.5 MB</span></a>
-            <a class="dl-file" data-asset="tar" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.24.0/beemodel-0.24.0-linux-x86_64.tar.gz"><span class="ext">TAR.GZ</span><span class="name">beemodel-0.24.0-linux-x86_64.tar.gz</span><span class="size">848 KB</span></a>
-            <a class="dl-file" data-asset="gpu" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.24.0/beemodel-gpu-0.24.0-linux-x86_64.tar.gz"><span class="ext">GPU</span><span class="name">beemodel-gpu-0.24.0-linux-x86_64.tar.gz</span><span class="size">489 KB</span></a>
-            <a class="dl-file" data-asset="sums" href="https://github.com/bartbeecoders/beemodel/releases/download/v0.24.0/SHA256SUMS"><span class="ext">SHA256</span><span class="name">SHA256SUMS</span><span class="size">checksums</span></a>
+            <a class="dl-file" data-asset="bin" href="https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/beemodel-1.2.1-linux-x86_64.bin"><span class="ext">BIN</span><span class="name">beemodel-1.2.1-linux-x86_64.bin</span><span class="size">1.5 MB</span></a>
+            <a class="dl-file" data-asset="tar" href="https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/beemodel-1.2.1-linux-x86_64.tar.gz"><span class="ext">TAR.GZ</span><span class="name">beemodel-1.2.1-linux-x86_64.tar.gz</span><span class="size">928 KB</span></a>
+            <a class="dl-file" data-asset="gpu" href="https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/beemodel-gpu-1.2.1-linux-x86_64.tar.gz"><span class="ext">GPU</span><span class="name">beemodel-gpu-1.2.1-linux-x86_64.tar.gz</span><span class="size">490 KB</span></a>
+            <a class="dl-file" data-asset="win" href="https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/beemodel-1.2.1-windows-x86_64.zip"><span class="ext">ZIP</span><span class="name">beemodel-1.2.1-windows-x86_64.zip</span><span class="size">1.4 MB</span></a>
+            <a class="dl-file" data-asset="sums" href="https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/SHA256SUMS"><span class="ext">SHA256</span><span class="name">SHA256SUMS</span><span class="size">checksums</span></a>
           </div>
-          <p class="muted" style="margin-top:14px">Released <span data-latest="date">21 October 2026</span> ·
-            <a data-latest="page" href="https://github.com/bartbeecoders/beemodel/releases/tag/v0.24.0">release notes</a> · <a href="releases.html">all releases</a></p>
+          <p class="muted" style="margin-top:14px">Released <span data-latest="date">27 October 2026</span> ·
+            <a data-latest="page" href="https://github.com/bartbeecoders/beemodel/releases/tag/v1.2.1">release notes</a> · <a href="releases.html">all releases</a></p>
         </div>
         <div>
           <div class="terminal">
             <div class="bar"><i></i><i></i><i></i></div>
             <button class="copy" type="button">Copy</button>
-            <pre data-install data-copy="curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.24.0/beemodel-0.24.0-linux-x86_64.bin
-chmod +x beemodel-0.24.0-linux-x86_64.bin
-./beemodel-0.24.0-linux-x86_64.bin"><span class="c"># download, make executable, run</span>
-<span class="p">$</span> curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v0.24.0/beemodel-0.24.0-linux-x86_64.bin
-<span class="p">$</span> chmod +x beemodel-0.24.0-linux-x86_64.bin
-<span class="p">$</span> ./beemodel-0.24.0-linux-x86_64.bin</pre>
+            <pre data-install data-copy="curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/beemodel-1.2.1-linux-x86_64.bin
+chmod +x beemodel-1.2.1-linux-x86_64.bin
+./beemodel-1.2.1-linux-x86_64.bin"><span class="c"># download, make executable, run</span>
+<span class="p">$</span> curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/beemodel-1.2.1-linux-x86_64.bin
+<span class="p">$</span> chmod +x beemodel-1.2.1-linux-x86_64.bin
+<span class="p">$</span> ./beemodel-1.2.1-linux-x86_64.bin</pre>
           </div>
           <div class="reqs">
             <div class="req"><b>Linux x86-64</b>any distribution, static binary</div>
             <div class="req"><b>A Wayland compositor</b>GNOME, KDE, Hyprland, sway…</div>
+            <div class="req"><b>Or Windows 11 x64</b>the zip: <code>beemodel.exe</code> and its GPU helper</div>
             <div class="req"><b>Optional: Vulkan</b>the GPU helper for the GPU viewport, liquids and RTX rendering</div>
             <div class="req"><b>Build it yourself</b><code>scripts/build.sh</code> — binutils only</div>
           </div>
@@ -430,6 +450,6 @@ chmod +x beemodel-0.24.0-linux-x86_64.bin
   </div>
 </footer>
 
-<script src="assets/js/site.js?v=202610211343" defer></script>
+<script src="assets/js/site.js?v=202610272306" defer></script>
 </body>
 </html>

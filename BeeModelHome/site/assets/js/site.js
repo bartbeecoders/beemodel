@@ -110,6 +110,7 @@
           const kind = a.name.endsWith('.bin') ? 'bin'
             : a.name.startsWith('beemodel-gpu') ? 'gpu'
             : a.name.endsWith('.tar.gz') ? 'tar'
+            : a.name.endsWith('.zip') ? 'win'
             : a.name === 'SHA256SUMS' ? 'sums' : null;
           if (!kind) continue;
           $$(`[data-asset="${kind}"]`).forEach(el => {
