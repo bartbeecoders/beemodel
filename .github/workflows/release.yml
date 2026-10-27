@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   release:
-    name: Build, test & publish
+    name: Build & test (Linux, Windows under Wine)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +31,11 @@ jobs:
       - name: Binary policy checks
         run: ci/check-binary.sh build/beemodel
 
+      - name: Windows build checks (beemodel.exe under Wine)
+        run: |
+          sudo apt-get install -y --no-install-recommends wine wine64
+          ci/check-exe.sh build/beemodel.exe
+
       - name: Self-test
         run: ./build/beemodel --selftest
 
@@ -50,8 +55,8 @@ jobs:
           BEEMODEL_FONT=none BEEMODEL_MONO_FONT=none BEEMODEL_GOLDEN=check \
             timeout 1200 python tools/fakewl.py build/shots-bitmap
 
-      - name: Package
-        run: scripts/package.sh
+      - name: Package (Linux and Windows) and the Windows kit
+        run: scripts/package.sh && ci/winkit.sh
 
       - name: Release notes from CHANGELOG
         run: |
@@ -62,11 +67,41 @@ jobs:
           test -s dist/NOTES.md || { echo "no CHANGELOG entry for $VERSION"; exit 1; }
           cat dist/NOTES.md
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winkit
+          path: build/winkit/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: |
+            dist/
+            build/shots/01_initial.png
+
+  windows:
+    name: Windows
+    needs: release
+    uses: ./.github/workflows/windows.yml
+    with:
+      kit: winkit
+
+  publish:
+    name: Publish
+    needs: [release, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "BeeModel $VERSION" \
+          v="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "BeeModel $v" \
             --notes-file dist/NOTES.md \
-            dist/beemodel-*.tar.gz dist/beemodel-*.bin dist/SHA256SUMS build/shots/01_initial.png
+            dist/beemodel-*.tar.gz dist/beemodel-*.bin dist/beemodel-*.zip dist/SHA256SUMS \
+            build/shots/01_initial.png

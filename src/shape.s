@@ -67,8 +67,7 @@ sk_alloc:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     pop     rsi
     pop     rsi
     cmp     rax, -4096
@@ -88,8 +87,7 @@ sk_free:
     test    rdi, rdi
     jz      1f
     mov     rsi, [rdi+SK_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # sk_used(rdi=block) -> rcx = its bytes in use

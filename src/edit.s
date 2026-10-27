@@ -1920,16 +1920,14 @@ edit_tm_snapshot:
     test    rdi, rdi
     jz      2f
     mov     rsi, [rip+ev_cap]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 2:  xor     edi, edi
     mov     rsi, r14
     mov     edx, PROT_RW
     mov     r10d, 0x22
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      .Lts_fail
     mov     [rip+ev_buf], rax

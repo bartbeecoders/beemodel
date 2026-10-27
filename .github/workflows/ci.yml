@@ -34,6 +34,11 @@ jobs:
       - name: Binary policy checks
         run: ci/check-binary.sh build/beemodel
 
+      - name: Windows build checks (beemodel.exe under Wine)
+        run: |
+          sudo apt-get install -y --no-install-recommends wine wine64
+          ci/check-exe.sh build/beemodel.exe
+
       - name: Self-test (allocators, job system, benchmark)
         run: |
           ./build/beemodel --selftest
@@ -203,3 +208,29 @@ jobs:
             build/shots/
             build/shots-bitmap/
           if-no-files-found: ignore
+
+  windows-kit:
+    name: Windows build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vulkan loader (the GPU helper links it)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1
+
+      - name: Package (Linux and Windows) and the Windows kit
+        run: scripts/package.sh && ci/winkit.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: winkit
+          path: build/winkit/
+
+  windows:
+    name: Windows
+    needs: windows-kit
+    uses: ./.github/workflows/windows.yml
+    with:
+      kit: winkit

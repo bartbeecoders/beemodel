@@ -53,15 +53,6 @@
 .globl link_target
 .globl build_mesh
 
-.equ SYS_BIND,      49
-.equ SYS_LISTEN,    50
-.equ SYS_ACCEPT4,   288
-.equ SYS_SETSOCKOPT, 54
-.equ SYS_FCNTL,     72
-.equ SYS_UNLINK,    87
-.equ SYS_CLOCK,     228
-.equ SYS_SHUTDOWN,  48
-.equ SYS_GETPID,    39
 .equ AF_INET,       2
 .equ SOCK_NB,       0x80801             # STREAM | NONBLOCK | CLOEXEC
 .equ POLLOUT,       4
@@ -209,8 +200,7 @@ lk_reserve:
     mov     r10d, 0x4022                # PRIVATE | ANONYMOUS | NORESERVE
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -358,8 +348,7 @@ now_ns:
     sub     rsp, 24
     mov     edi, 1
     lea     rsi, [rsp]
-    mov     eax, SYS_CLOCK
-    syscall
+    call    plat_clock_gettime
     imul    rax, [rsp], 1000000000
     add     rax, [rsp+8]
     add     rsp, 24
@@ -414,8 +403,7 @@ do_link_serve:
     mov     edi, AF_INET
     mov     esi, SOCK_NB
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      .Lsv_bad
     mov     ebx, eax
@@ -424,8 +412,7 @@ do_link_serve:
     mov     edx, 2
     lea     r10, [rip+lk_one]
     mov     r8d, 4
-    mov     eax, SYS_SETSOCKOPT
-    syscall
+    call    plat_setsockopt
     lea     rdi, [rip+lk_addr]
     mov     word ptr [rdi], AF_INET
     mov     eax, r13d
@@ -451,13 +438,11 @@ do_link_serve:
     jnz     2b
 3:  mov     byte ptr [rdi], 0
     lea     rdi, [rip+lk_unixpath]
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     mov     edi, AF_UNIX
     mov     esi, SOCK_NB
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      .Lsv_bad
     mov     ebx, eax
@@ -472,14 +457,12 @@ do_link_serve:
 .Lsv_bind:
     mov     edi, ebx
     lea     rsi, [rip+lk_addr]
-    mov     eax, SYS_BIND
-    syscall
+    call    plat_bind
     test    eax, eax
     jnz     .Lsv_close
     mov     edi, ebx
     mov     esi, LK_MAXC
-    mov     eax, SYS_LISTEN
-    syscall
+    call    plat_listen
     test    eax, eax
     jnz     .Lsv_close
     mov     [rip+lk_lfd], ebx
@@ -500,8 +483,7 @@ do_link_serve:
     jmp     9f
 .Lsv_close:
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lsv_bad:
     lea     rdi, [rip+s_lk_bad]
     call    log_line
@@ -541,8 +523,7 @@ lk_stop_serving:
     cmp     dword ptr [rip+lk_serving], 0
     je      9f
     mov     edi, [rip+lk_lfd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+lk_lfd], -1
     mov     dword ptr [rip+lk_serving], 0
     xor     ebx, ebx
@@ -564,8 +545,7 @@ peer_drop:
     push    rbx
     mov     rbx, rdi
     mov     edi, [rbx+CL_FD]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rbx+CL_STATE], 0
     mov     dword ptr [rbx+CL_FD], -1
     mov     qword ptr [rbx+CL_HEAD], 0
@@ -1008,8 +988,7 @@ lk_accept:
     xor     esi, esi
     xor     edx, edx
     mov     r10d, 0x80800               # NONBLOCK | CLOEXEC
-    mov     eax, SYS_ACCEPT4
-    syscall
+    call    plat_accept4
     test    eax, eax
     js      9f
     mov     ebx, eax
@@ -1018,15 +997,13 @@ lk_accept:
     mov     edx, 1
     lea     r10, [rip+lk_one]
     mov     r8d, 4
-    mov     eax, SYS_SETSOCKOPT
-    syscall
+    call    plat_setsockopt
     mov     edi, ebx                    # a small kernel buffer: the backlog
     mov     esi, 1                      #  stays ours (to coalesce)
     mov     edx, 7                      # SO_SNDBUF
     lea     r10, [rip+lk_sndbuf]
     mov     r8d, 4
-    mov     eax, SYS_SETSOCKOPT
-    syscall
+    call    plat_setsockopt
     xor     ecx, ecx                    # a free slot
     lea     rdx, [rip+lk_cl]
 2:  cmp     ecx, LK_MAXC
@@ -1049,8 +1026,7 @@ lk_accept:
     call    log_line
     jmp     1b
 8:  mov     edi, ebx                    # full
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     jmp     1b
 9:  add     rsp, 8
     pop     r12
@@ -1074,8 +1050,7 @@ lk_read_peers:
 2:  mov     edi, [r12+CL_FD]            # read what is there
     lea     rsi, [rsp]
     mov     edx, 256
-    xor     eax, eax
-    syscall
+    call    plat_read
     cmp     rax, EAGAIN
     je      5f
     test    rax, rax
@@ -1141,8 +1116,7 @@ mk_hello:
     shl     esi, 16
     or      edi, esi
     call    op_u32
-    mov     eax, SYS_GETPID
-    syscall
+    call    plat_getpid
     mov     edi, eax
     call    op_u32
     sub     rsp, 32
@@ -1597,8 +1571,7 @@ lk_write:
     mov     r10d, MSG_NOSIGNAL
     xor     r8d, r8d
     xor     r9d, r9d
-    mov     eax, 44                     # sendto
-    syscall
+    call    plat_sendto
     cmp     rax, EAGAIN
     je      9f
     test    rax, rax
@@ -1664,8 +1637,7 @@ do_link_disconnect:
     cmp     dword ptr [rip+lk_mfd], 0
     je      9f
     mov     edi, [rip+lk_mfd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+lk_mfd], 0
 9:  add     rsp, 8
     ret
@@ -1711,8 +1683,7 @@ link_connect_arg:
     mov     edi, AF_INET
     mov     esi, SOCK_STREAM_CLOEXEC
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      .Lcn_bad
     mov     ebx, eax
@@ -1729,8 +1700,7 @@ link_connect_arg:
     mov     edi, AF_UNIX
     mov     esi, SOCK_STREAM_CLOEXEC
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      .Lcn_bad
     mov     ebx, eax
@@ -1744,8 +1714,7 @@ link_connect_arg:
 .Lcn_go:
     mov     edi, ebx
     lea     rsi, [rip+lk_addr]
-    mov     eax, SYS_CONNECT
-    syscall
+    call    plat_connect
     test    eax, eax
     jnz     .Lcn_close
     mov     edi, ebx                    # TCP_NODELAY, then non-blocking
@@ -1753,13 +1722,11 @@ link_connect_arg:
     mov     edx, 1
     lea     r10, [rip+lk_one]
     mov     r8d, 4
-    mov     eax, SYS_SETSOCKOPT
-    syscall
+    call    plat_setsockopt
     mov     edi, ebx
     mov     esi, 4                      # F_SETFL O_NONBLOCK
     mov     edx, 0x800
-    mov     eax, SYS_FCNTL
-    syscall
+    call    plat_fcntl
     mov     [rip+lk_mfd], ebx
     mov     dword ptr [rip+lk_mstate], 1
     mov     qword ptr [rip+lk_inlen], 0
@@ -1772,8 +1739,7 @@ link_connect_arg:
     mov     r10d, MSG_NOSIGNAL
     xor     r8d, r8d
     xor     r9d, r9d
-    mov     eax, 44
-    syscall
+    call    plat_sendto
     lea     rdi, [rip+s_lk_conn]
     lea     rsi, [rip+lk_target]
     call    log_pair
@@ -1781,8 +1747,7 @@ link_connect_arg:
     jmp     9f
 .Lcn_close:
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lcn_bad:
     lea     rdi, [rip+s_lk_noconn]
     lea     rsi, [rip+lk_target]
@@ -1941,8 +1906,7 @@ lk_mirror:
     mov     rdx, IN_CAP
     sub     rdx, [rip+lk_inlen]
     jz      3f
-    xor     eax, eax
-    syscall
+    call    plat_read
     cmp     rax, EAGAIN
     je      3f
     test    rax, rax

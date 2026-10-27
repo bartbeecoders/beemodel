@@ -197,8 +197,7 @@ sk_unref:
     dec     dword ptr [rdi+SK_REFS]
     jnz     1f
     mov     esi, [rdi+SK_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # alloc -> rax = a zeroed block or 0
@@ -209,8 +208,7 @@ alloc:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax

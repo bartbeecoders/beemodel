@@ -126,8 +126,7 @@ pb_unref:
     lock dec dword ptr [rdi+PB_REFS]
     jnz     1f
     mov     rsi, [rdi+PB_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 pb_reset:
@@ -166,8 +165,7 @@ pb_alloc:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax

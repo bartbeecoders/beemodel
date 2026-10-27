@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Verify the release binary honours the project rules: static, no libraries,
-# no interpreter, no RWX segments, and within the size budget.
+# no interpreter, no RWX segments, and within the size budget; and that the
+# source keeps every syscall in the platform layer (src/plat_linux.s).
 set -euo pipefail
 BIN="${1:-build/beemodel}"
 MAX_BYTES="${MAX_BYTES:-2000000}"  # 2 MB from stage C (the masterplan's limit at v1.0); 1.5 MiB from phase 11, 1 MiB in phase 8
@@ -22,4 +23,8 @@ dups=$(awk '{print $1}' <<<"$ops" | sort | uniq -d)
 [[ -z "$dups" ]] || fail "duplicate operator ids: $dups"
 grep -q '^file.exit  *Ctrl+Q ' <<<"$ops" || fail "file.exit should be bound to Ctrl+Q"
 echo "operators: $n registered"
+# the Windows port: the OS only through plat_* (Vibecoding/BeeModel-Win11-Port-Plan.html)
+cd "$(dirname "$0")/.."
+raw=$(grep -nE '^[[:space:]]*([.$[:alnum:]_]+:[[:space:]]*)?syscall\b' src/*.s src/gpu/*.s | grep -v '^src/plat_linux\.s:' || true)
+[[ -z "$raw" ]] || fail "syscall outside src/plat_linux.s (call a plat_* routine): $raw"
 echo "binary checks passed"

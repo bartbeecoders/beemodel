@@ -206,8 +206,7 @@ mat_unref:
     dec     dword ptr [rdi+MB_REFS]
     jnz     1f
     mov     esi, [rdi+MB_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # mat_count -> eax
@@ -249,8 +248,7 @@ mat_alloc:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     pop     rcx
     cmp     rax, -4096
     jbe     1f

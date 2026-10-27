@@ -35,7 +35,6 @@
 .globl dyn_commit
 .globl dyn_remesh
 
-.equ SYS_MREMAP, 25
 .equ DEAD,       -1                     # a triangle's first corner: removed
 
 .section .data
@@ -214,8 +213,7 @@ sgrow:
     jbe     4f
     mov     rdx, r13
     mov     r10d, 1                     # MREMAP_MAYMOVE
-    mov     eax, SYS_MREMAP
-    syscall
+    call    plat_mremap
     cmp     rax, -4096
     jae     8f
     mov     [rbx], rax

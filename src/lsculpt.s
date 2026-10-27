@@ -902,8 +902,7 @@ ls_erode_local:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      9f
     mov     r13, rax                    # the window
@@ -1027,8 +1026,7 @@ ls_erode_local:
     jmp     7b
 8:  mov     rdi, r13
     mov     esi, [rsp+24]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 9:  add     rsp, 72
     pop     rbp
     pop     r15

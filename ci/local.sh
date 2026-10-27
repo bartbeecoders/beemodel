@@ -114,10 +114,12 @@ elif [ $QUICK = 1 ]; then
     for f in $changed; do
         case $f in
             src/const.inc|src/macros.inc|src/mem.s|src/jobs.s|src/main.s|src/ops.s|src/scene.s|\
-            src/mesh.s|src/undo.s|src/script.s|src/wayland.s|scripts/build.sh|tools/fakewl.py|\
+            src/mesh.s|src/undo.s|src/script.s|src/wayland.s|src/window.s|scripts/build.sh|tools/fakewl.py|\
             .github/*|ci/check-binary.sh)
                 echo "quick: $f is shared by everything: the full run"
                 ALL=1 ;;
+            src/plat_win.s|src/plat_win_wnd.s|src/plat_win.inc|src/plat_win.ld|ci/check-exe.sh|tests/win/*|tools/winvm*)
+                ;;                          # the Windows build: its check always runs
             tests/golden/*)
                 PICK[fakewl_bitmap]=1 ;;
             tests/*)
@@ -144,6 +146,9 @@ fi
 
 step build scripts/build.sh
 step check-binary ci/check-binary.sh build/beemodel
+if [ -f build/beemodel.exe ] || [ $DRY = 1 ]; then
+    step check-exe ci/check-exe.sh build/beemodel.exe
+fi
 step selftest ./build/beemodel --selftest
 if [ $QUICK = 0 ] || [ $ALL = 1 ]; then
     step selftest-threads0 env BEEMODEL_THREADS=0 ./build/beemodel --selftest

@@ -68,8 +68,7 @@ vmap:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -81,8 +80,7 @@ vunmap:
     jz      1f
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # img_alloc(edi=w, esi=h, edx=fmt) -> rax = image or 0
@@ -141,8 +139,7 @@ img_free:
     call    lay_free
     pop     rdi
 2:  mov     rsi, [rdi+IM_MAPSZ]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # img_decode(rdi=file data, rsi=bytes) -> rax = image or 0 (img_err)

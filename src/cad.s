@@ -133,8 +133,7 @@ cad_unref:
     dec     dword ptr [rdi+CD_REFS]
     jnz     1f
     mov     esi, [rdi+CD_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # cad_sync - after the block changed (edit, undo, load): units, the cache
@@ -187,8 +186,7 @@ cad_cow:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      8f
     test    rbx, rbx

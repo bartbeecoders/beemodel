@@ -188,8 +188,7 @@ an_new:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     pop     rsi
     cmp     rax, -4096
     jb      2f
@@ -216,8 +215,7 @@ an_unref:
     dec     dword ptr [rdi+AN_REFS]
     jnz     1f
     mov     rsi, [rdi+AN_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # an_reset - no animation (a new scene)

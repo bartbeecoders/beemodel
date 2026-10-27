@@ -32,8 +32,6 @@
 .globl preset_labels
 .globl npresets
 
-.equ SYS_OPENAT, 257
-.equ SYS_GETDENTS64, 217
 .equ AT_FDCWD,  -100
 .equ O_DIRECTORY, 0x10000
 .equ GR_NODES,  160
@@ -339,8 +337,7 @@ do_import_tex:
     lea     rsi, [rip+ml_dir]
     mov     edx, O_DIRECTORY
     xor     r10d, r10d
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      .Lit_none
     mov     r12d, eax
@@ -348,8 +345,7 @@ do_import_tex:
     mov     edi, r12d
     lea     rsi, [rip+ml_dents]
     mov     edx, 16384
-    mov     eax, SYS_GETDENTS64
-    syscall
+    call    plat_getdents64
     test    eax, eax
     jle     .Lit_closed
     mov     r13d, eax
@@ -418,8 +414,7 @@ do_import_tex:
     jmp     .Lit_ent
 .Lit_closed:
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     cmp     dword ptr [rip+ml_nmaps], 0
     je      .Lit_none
     # the material: named, else after the prefix (separators at its end off)

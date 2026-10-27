@@ -62,16 +62,6 @@
 .globl gpu_img_into
 .globl hv_gpu
 
-.equ SYS_ACCESS,    21
-.equ SYS_DUP2,      33
-.equ SYS_SOCKETPAIR, 53
-.equ SYS_FORK,      57
-.equ SYS_EXECVE,    59
-.equ SYS_EXIT,      60
-.equ SYS_WAIT4,     61
-.equ SYS_KILL,      62
-.equ SYS_FCNTL,     72
-.equ SYS_READLINK,  89
 .equ SOCK_SEQPACKET_CLOEXEC, 0x80005
 .equ HELLO_MS,      15000               # a slow driver start is fine
 .equ RUN_MS,        120000
@@ -96,7 +86,6 @@
 s_gpu_env:      .asciz "BEEMODEL_GPU="
 s_helper_env:   .asciz "BEEMODEL_GPU_HELPER="
 s_raster_env:   .asciz "BEEMODEL_GPU_RASTER="
-s_self:         .asciz "/proc/self/exe"
 s_helper:       .asciz "beemodel-gpu"
 s_memfd:        .asciz "beemodel-gpu"
 s_g_on:         .asciz "  GPU helper: "
@@ -301,13 +290,11 @@ g_spawn:
     dec     ecx
     jnz     21b
     jmp     .Lgr_none
-3:  lea     rdi, [rip+s_self]
-    lea     rsi, [rip+g_path]
-    mov     edx, 480
-    mov     eax, SYS_READLINK
-    syscall
-    cmp     rax, 0
-    jle     .Lgr_none
+3:  lea     rdi, [rip+g_path]
+    mov     esi, 481
+    call    plat_self_path
+    test    rax, rax
+    jz      .Lgr_none
     lea     rdi, [rip+g_path]           # cut after the last '/'
     mov     rcx, rax
 31: dec     rcx
@@ -322,53 +309,46 @@ g_spawn:
     inc     rdi
     test    al, al
     jnz     32b
+    dec     rdi                         # and the platform's ending (.exe)
+    lea     rsi, [rip+plat_exe_ext]
+33: mov     al, [rsi]
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    test    al, al
+    jnz     33b
 4:  lea     rdi, [rip+g_path]           # executable?
     mov     esi, 1
-    mov     eax, SYS_ACCESS
-    syscall
+    call    plat_access
     test    eax, eax
     jnz     .Lgr_none
     mov     edi, AF_UNIX
     mov     esi, SOCK_SEQPACKET_CLOEXEC
     xor     edx, edx
     lea     r10, [rsp]
-    mov     eax, SYS_SOCKETPAIR
-    syscall
+    call    plat_socketpair
     test    eax, eax
     jnz     .Lgr_none
     lea     rax, [rip+g_path]
     mov     [rip+g_argv], rax
     mov     qword ptr [rip+g_argv+8], 0
-    mov     eax, SYS_FORK
-    syscall
-    test    rax, rax
-    jnz     5f
-    mov     edi, [rsp+4]                # the child: its end on fd 3
-    cmp     edi, 3
-    jne     41f
-    mov     esi, 2                      # (already 3: keep it across exec)
-    xor     edx, edx
-    mov     eax, SYS_FCNTL
-    syscall
-    jmp     42f
-41: mov     esi, 3
-    mov     eax, SYS_DUP2
-    syscall
-42: lea     rdi, [rip+g_path]
+    mov     eax, [rsp+4]                # the child: its end on fd 3
+    mov     dword ptr [rsp+8], PS_KEEP
+    mov     dword ptr [rsp+12], PS_KEEP
+    mov     dword ptr [rsp+16], PS_KEEP
+    mov     [rsp+20], eax
+    lea     rdi, [rip+g_path]
     lea     rsi, [rip+g_argv]
     mov     rdx, [rip+envp]
-    mov     eax, SYS_EXECVE
-    syscall
-    mov     edi, 127
-    mov     eax, SYS_EXIT
-    syscall
+    lea     rcx, [rsp+8]
+    xor     r8d, r8d
+    call    plat_spawn
 5:  mov     ebx, eax                    # the parent
     test    eax, eax
     js      .Lgr_close2
     mov     [rip+g_pid], eax
     mov     edi, [rsp+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     eax, [rsp]
     mov     [rip+g_fd], eax
     mov     dword ptr [rip+g_state], 2
@@ -376,11 +356,9 @@ g_spawn:
     jmp     9f
 .Lgr_close2:
     mov     edi, [rsp]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, [rsp+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lgr_none:
     mov     dword ptr [rip+g_state], -1
     lea     rdi, [rip+s_g_off]
@@ -546,21 +524,18 @@ gpu_stop:
     mov     edi, [rip+g_fd]
     test    edi, edi
     js      1f
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+g_fd], -1
 1:  mov     edi, [rip+g_pid]
     test    edi, edi
     jz      2f
     mov     esi, 9                      # SIGKILL
-    mov     eax, SYS_KILL
-    syscall
+    call    plat_kill
     mov     edi, [rip+g_pid]
     xor     esi, esi
     xor     edx, edx
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4
-    syscall
+    call    plat_wait4
     mov     dword ptr [rip+g_pid], 0
 2:  mov     dword ptr [rip+g_state], -1
     mov     dword ptr [rip+hv_gpu], 0
@@ -581,8 +556,7 @@ g_recv:
     mov     edx, edi
     lea     rdi, [rsp]
     mov     esi, 1
-    mov     eax, SYS_POLL
-    syscall
+    call    plat_poll
     cmp     eax, 1
     jne     8f
     test    word ptr [rsp+6], 1         # readable (not just hung up)
@@ -590,8 +564,7 @@ g_recv:
     mov     edi, [rip+g_fd]
     lea     rsi, [rip+g_msg]
     mov     edx, GM_SZ
-    mov     eax, SYS_READ
-    syscall
+    call    plat_read
     cmp     eax, GM_SZ
     jne     8f
     mov     eax, 1
@@ -627,8 +600,7 @@ g_send:
 1:  mov     edi, [rip+g_fd]
     lea     rsi, [rsp]
     mov     edx, MSG_NOSIGNAL
-    mov     eax, SYS_SENDMSG
-    syscall
+    call    plat_sendmsg
     xor     ecx, ecx
     cmp     rax, GM_SZ
     sete    cl
@@ -666,15 +638,13 @@ gpu_slot:
     and     r12, -0x100000
     lea     rdi, [rip+s_memfd]
     mov     esi, MFD_CLOEXEC
-    mov     eax, SYS_MEMFD_CREATE
-    syscall
+    call    plat_memfd_create
     test    eax, eax
     js      8f
     mov     r13d, eax
     mov     edi, r13d
     mov     rsi, r12
-    mov     eax, SYS_FTRUNCATE
-    syscall
+    call    plat_ftruncate
     test    eax, eax
     jnz     7f
     xor     edi, edi
@@ -683,8 +653,7 @@ gpu_slot:
     mov     r10d, MAP_SHARED
     mov     r8d, r13d
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      7f
     mov     r14, rax
@@ -696,8 +665,7 @@ gpu_slot:
     call    g_send
     mov     edi, r13d
     push    rax
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     pop     rax
     test    eax, eax
     jz      6f
@@ -713,8 +681,7 @@ gpu_slot:
     jz      2f
     lea     rax, [rip+g_size]
     mov     rsi, [rax+rbx*8]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 2:  lea     rax, [rip+g_base]
     mov     [rax+rbx*8], r14
     lea     rax, [rip+g_size]
@@ -728,13 +695,11 @@ gpu_slot:
     jmp     9f
 6:  mov     rdi, r14
     mov     rsi, r12
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     call    gpu_stop
     jmp     8f
 7:  mov     edi, r13d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  call    now_ms
     add     [rip+g_grow_ms], rax
     xor     eax, eax

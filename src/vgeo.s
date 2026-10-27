@@ -61,8 +61,6 @@
 .equ VK_MAX,    4096
 .equ MAP_NORES, 0x4022
 .equ MAP_ANON_PRIV, 0x22
-.equ SYS_CLOCK_GETTIME, 228
-.equ SYS_MPROTECT, 10
 
 .section .bss
 .align 16
@@ -173,8 +171,7 @@ vmap:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     8f
     mov     ecx, [rip+vm_n]
@@ -203,8 +200,7 @@ vfree_to:
     lea     rdx, [rip+vm_list]
     mov     rdi, [rdx+rcx]
     mov     rsi, [rdx+rcx+8]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     jmp     1b
 9:  pop     rbx
     ret
@@ -253,8 +249,7 @@ mix:
 now_ms:
     mov     edi, 1
     lea     rsi, [rip+vg_ts]
-    mov     eax, SYS_CLOCK_GETTIME
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rip+vg_ts]
     imul    rax, rax, 1000
     mov     rcx, rax
@@ -3714,8 +3709,7 @@ bd_pack:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      3f
     xor     eax, eax
@@ -4032,8 +4026,7 @@ vg_unref:
     call    vd_forget                   # (its drawing state)
     pop     rdi
     mov     rsi, [rdi+VH_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # vg_attach(rdi=mesh, rsi=dag) - the mesh's DAG (its reference taken over;
@@ -4306,8 +4299,7 @@ vg_check:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     .Lvc_out
     mov     [rsp+VC_SEL], rax
@@ -4435,8 +4427,7 @@ vg_check:
     mov     esi, [rax+VH_NCL]
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 .Lvc_out:
     mov     eax, [rsp+VC_OK]
     add     rsp, 80
@@ -4688,8 +4679,7 @@ vgeo_read:
     mov     rdi, rbx                    # the header page: written (references,
     mov     esi, 4096                   #  runtime state)
     mov     edx, PROT_RW
-    mov     eax, SYS_MPROTECT
-    syscall
+    call    plat_mprotect
     test    rax, rax
     jnz     5f
     mov     eax, [rip+vk_n]
@@ -4710,8 +4700,7 @@ vgeo_read:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     8f
     mov     rdi, rax
@@ -4760,8 +4749,7 @@ vg_unmap_file:
     jz      11f
     push    rdx
     push    rcx
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     pop     rcx
     pop     rdx
 11: mov     eax, ebx
@@ -4776,8 +4764,7 @@ vg_unmap_file:
     mov     rdi, r12
     mov     rsi, r13
     sub     rsi, r12
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 4:  mov     dword ptr [rip+vk_n], 0
     pop     r13
     pop     r12
@@ -5004,8 +4991,7 @@ do_vg_extract:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     .Lvx_none
     mov     [rsp+VX_SEL], rax
@@ -5162,8 +5148,7 @@ do_vg_extract:
     mov     esi, [rax+VH_NCL]
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     jmp     .Lvx_out
 .Lvx_none:
     lea     rdi, [rip+s_vg_nodag]
@@ -5248,8 +5233,7 @@ do_vg_proxy:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     .Lvy_none
     mov     [rsp+VY_TAB], rax
@@ -5426,8 +5410,7 @@ do_vg_proxy:
 .Lvy_free:
     mov     rdi, [rsp+VY_TAB]
     mov     rsi, [rsp+VY_TBYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     jmp     .Lvy_out
 .Lvy_none:
     lea     rdi, [rip+s_vg_nodag]

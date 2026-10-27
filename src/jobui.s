@@ -29,7 +29,6 @@
 .globl job_pending
 .globl wl_dispatching
 
-.equ SYS_GETTID, 186
 
 .section .data
 .align 4
@@ -44,7 +43,6 @@ job_t:          .quad 0
 wl_dispatching: .long 0                 # (main.s: Wayland events being dispatched)
 .section .bss
 .align 8
-job_pfd:        .skip 8
 job_q_op:       .skip 8                 # a job asked for during the dispatch
 job_q_hasarg:   .skip 8
 job_q_arg:      .skip 512
@@ -184,8 +182,7 @@ job_tick:
     sub     rax, [rip+job_t]
     cmp     rax, 100000000
     jb      8f
-    mov     eax, SYS_GETTID
-    syscall
+    call    plat_gettid
     cmp     eax, [rip+main_tid]
     jne     8f
     mov     [rip+job_t], rbx
@@ -199,26 +196,10 @@ job_present:
     sub     rsp, 8
     cmp     dword ptr [rip+configured], 0
     je      9f
-    mov     edi, -1
-    call    wl_flush
-1:  mov     eax, [rip+sock_fd]          # anything to read? (no waiting)
-    mov     [rip+job_pfd], eax
-    mov     dword ptr [rip+job_pfd+4], POLLIN
-    lea     rdi, [rip+job_pfd]
-    mov     esi, 1
-    xor     edx, edx
-    mov     eax, SYS_POLL
-    syscall
-    cmp     eax, 1
-    jne     2f
-    test    word ptr [rip+job_pfd+6], POLLIN
-    jz      2f
-    call    wl_read_dispatch
-    jmp     1b
-2:  mov     dword ptr [rip+dirty], 1
+    call    wnd_pump                    # (no waiting)
+    mov     dword ptr [rip+dirty], 1
     call    render
-    mov     edi, -1
-    call    wl_flush
+    call    wnd_flush
 9:  add     rsp, 8
     ret
 

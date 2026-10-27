@@ -287,8 +287,7 @@ sh_map:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      2f
     xor     eax, eax
@@ -301,8 +300,7 @@ sh_unmap:
     add     rsi, 4095
     and     rsi, -4096
     jz      1f
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # cx_alloc(rbx=cut, rsi=bytes) -> rax (0: out of room, CX_FAIL set)
@@ -3870,8 +3868,7 @@ sh_lap:
     sub     rsp, 16
     mov     edi, 1
     mov     rsi, rsp
-    mov     eax, 228
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rsp]
     imul    rax, rax, 1000000000
     add     rax, [rsp+8]

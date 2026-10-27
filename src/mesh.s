@@ -103,8 +103,7 @@ mesh_new:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -167,8 +166,7 @@ mesh_free:
     call    mesh_uv_free
     pop     rdi
     mov     rsi, [rdi+ME_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # mesh_uv_alloc(rdi=mesh) -> rax = its UVs (made, zero, when it had none;
@@ -230,8 +228,7 @@ uv_map:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      2f
     xor     eax, eax
@@ -310,8 +307,8 @@ uv_unmap:
     and     rsi, -4096
     jnz     1f
     mov     esi, 4096
-1:  mov     eax, SYS_MUNMAP
-    syscall
+1:
+    call    plat_munmap
     ret
 
 # mesh_copy(rdi=mesh) -> rax = independent copy
@@ -441,8 +438,7 @@ mesh_pin_alloc:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      2f
     xor     eax, eax
@@ -471,8 +467,7 @@ mesh_wgt_alloc:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      2f
     xor     eax, eax
@@ -509,8 +504,7 @@ mesh_pnrm_alloc:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      2f
     xor     eax, eax

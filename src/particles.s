@@ -542,8 +542,7 @@ ps_unref:
     lock dec dword ptr [rdi+PB_REFS]
     jnz     1f
     mov     rsi, [rdi+PB_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 ps_reset:
     mov     rdi, [rip+ps_cur]
@@ -557,8 +556,7 @@ ps_alloc:                               # -> rax = an empty block, or 0
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -1293,8 +1291,7 @@ pool_init:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax
@@ -1307,8 +1304,7 @@ pool_init:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      2f
     xor     eax, eax
@@ -1324,8 +1320,7 @@ ev_reserve:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax
@@ -1402,33 +1397,28 @@ pt_stop:
     jz      11f
     mov     esi, [r12+SR_CDFB]
     shl     rsi, 12
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 11: call    sf_free                     # its surface, its field
     mov     rdi, [r12+SR_SF]
     test    rdi, rdi
     jz      15f
     mov     rsi, SF_MAXP*4
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 15: mov     rdi, [r12+SR_EVH]           # its events
     test    rdi, rdi
     jz      12f
     mov     rsi, EV_CAP*EV_SZ
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 12: mov     rdi, [r12+SR_EVD]
     test    rdi, rdi
     jz      13f
     mov     rsi, EV_CAP*EV_SZ
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 13: mov     rdi, [r12+SR_FILLP]         # its lattice
     test    rdi, rdi
     jz      14f
     mov     esi, [r12+SR_FILLB]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 14: inc     ebx
     jmp     1b
 2:  lea     rdi, [rip+pt_sr]
@@ -1460,8 +1450,7 @@ pt_reset:
     test    rsi, rsi
     jz      9f
     mov     edx, MADV_DONTNEED
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
     mov     dword ptr [rip+pt_used], 0
 9:  add     rsp, 8
     ret
@@ -2523,8 +2512,7 @@ sys_cdf:
     jz      11f
     mov     esi, [r12+SR_CDFB]
     shl     rsi, 12
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 11: mov     qword ptr [r12+SR_CDF], 0
     mov     dword ptr [r12+SR_CDFB], 0
     pop     rsi
@@ -2536,8 +2524,7 @@ sys_cdf:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     8f
     mov     [r12+SR_CDF], rax
@@ -2781,8 +2768,7 @@ fill_build:
     test    rdi, rdi
     jz      11f
     mov     esi, [r12+SR_FILLB]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 11: pop     rsi
     pop     rsi
     mov     dword ptr [r12+SR_FILLB], 0
@@ -2793,8 +2779,7 @@ fill_build:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     .Lfb_none
     mov     [r12+SR_FILLP], rax
@@ -4679,8 +4664,7 @@ pt_iblock:
     lea     rcx, [rip+pd_icap]
     mov     esi, [rcx+rbx*4]
     shl     rsi, 4
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 11: lea     esi, [r13+r13*1]            # (twice: room to grow)
     lea     rcx, [rip+pd_icap]
     mov     [rcx+rbx*4], esi
@@ -4690,8 +4674,7 @@ pt_iblock:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      12f
     xor     eax, eax
@@ -5466,8 +5449,7 @@ pc_map:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax
@@ -5502,8 +5484,7 @@ pc_unmap:
     ret
 1:  test    rdi, rdi
     jz      2f
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 2:  ret
 
 # pc_build(edi=first, esi=end in pc_ix) -> eax = a node over them (made

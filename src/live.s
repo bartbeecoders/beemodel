@@ -527,8 +527,7 @@ lv_sized:
     test    rdi, rdi
     jz      1f
     mov     rsi, [rip+lv_img_sz]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rip+lv_img], 0
     mov     qword ptr [rip+lv_img_sz], 0
 1:  xor     edi, edi
@@ -537,8 +536,7 @@ lv_sized:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      8f
     mov     [rip+lv_img], rax
@@ -563,8 +561,7 @@ lv_sized:
 lv_unmap:
     test    rdi, rdi
     jz      1f
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # =============================================================================

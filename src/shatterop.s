@@ -330,8 +330,7 @@ so_now:
     sub     rsp, 24
     mov     edi, 1                      # CLOCK_MONOTONIC
     mov     rsi, rsp
-    mov     eax, 228
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rsp]
     imul    rax, rax, 1000000000
     add     rax, [rsp+8]
@@ -1607,8 +1606,7 @@ sh_map_g:
     mov     r10d, 0x22
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      2f
     xor     eax, eax
@@ -1618,8 +1616,7 @@ sh_unmap_g:
     jz      1f
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # so_basename(rsi=suffix) - so_nbase = the object's name (18 at most) + it

@@ -115,8 +115,7 @@ li_map:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -127,8 +126,7 @@ li_unmap:
     jz      1f
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # li_be32(rdi=bytes) -> eax (big-endian)

@@ -45,6 +45,8 @@ sp4: .asciz "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 sp5: .asciz "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf"
 sp6: .asciz "/usr/share/fonts/liberation/LiberationSans-Regular.ttf"
 sp7: .asciz "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
+sp8: .asciz "C:/Windows/Fonts/segoeui.ttf"         # (Windows)
+sp9: .asciz "C:/Windows/Fonts/arial.ttf"
 mp1: .asciz "/usr/share/fonts/noto/NotoSansMono-Regular.ttf"
 mp2: .asciz "/usr/share/fonts/truetype/noto/NotoSansMono-Regular.ttf"
 mp3: .asciz "/usr/share/fonts/TTF/DejaVuSansMono.ttf"
@@ -52,9 +54,11 @@ mp4: .asciz "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"
 mp5: .asciz "/usr/share/fonts/dejavu-sans-mono-fonts/DejaVuSansMono.ttf"
 mp6: .asciz "/usr/share/fonts/liberation/LiberationMono-Regular.ttf"
 mp7: .asciz "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf"
+mp8: .asciz "C:/Windows/Fonts/consola.ttf"
+mp9: .asciz "C:/Windows/Fonts/cour.ttf"
 .align 8
-sans_paths:     .quad sp1, sp2, sp3, sp4, sp5, sp6, sp7, 0
-mono_paths:     .quad mp1, mp2, mp3, mp4, mp5, mp6, mp7, 0
+sans_paths:     .quad sp1, sp2, sp3, sp4, sp5, sp6, sp7, sp8, sp9, 0
+mono_paths:     .quad mp1, mp2, mp3, mp4, mp5, mp6, mp7, mp8, mp9, 0
 
 .text
 

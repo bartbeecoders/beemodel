@@ -1,0 +1,5 @@
+# The Windows smoke test (ci/check-windows.ps1): the default scene rendered
+# and saved, in the current folder. reload.bees opens it again.
+op('render.image', 'smoke.png 96 64 8')
+op('file.save', 'smoke.bee')
+print('smoke saved')

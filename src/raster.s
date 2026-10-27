@@ -129,24 +129,20 @@ rs_ensure:
     test    rdi, rdi
     jz      1f
     mov     rsi, [rip+rs_cap]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     rdi, [rip+rs_id]
     mov     rsi, [rip+rs_cap]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     rdi, [rip+rs_tri]
     mov     rsi, [rip+rs_cap]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  xor     edi, edi
     mov     rsi, rbx
     mov     edx, PROT_RW
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     mov     [rip+rs_depth], rax
     xor     edi, edi
     mov     rsi, rbx
@@ -154,8 +150,7 @@ rs_ensure:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     mov     [rip+rs_id], rax
     xor     edi, edi
     mov     rsi, rbx
@@ -163,8 +158,7 @@ rs_ensure:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     mov     [rip+rs_tri], rax
     sub     rax, [rip+rs_id]
     mov     [rip+rs_tdelta], rax

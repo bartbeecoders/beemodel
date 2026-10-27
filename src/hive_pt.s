@@ -1387,8 +1387,7 @@ pt_map:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     pop     rsi
     cmp     rax, -4096
     jbe     1f
@@ -1414,8 +1413,7 @@ pt_unmap_all:
     lea     rdx, [rip+pt_maps]
     mov     rdi, [rdx+rax]
     mov     rsi, [rdx+rax+8]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     inc     ebx
     jmp     1b
 2:  mov     dword ptr [rip+pt_nmaps], 0
@@ -3884,8 +3882,7 @@ now_ms:
     sub     rsp, 24
     mov     edi, 1                      # CLOCK_MONOTONIC
     lea     rsi, [rsp]
-    mov     eax, 228                    # clock_gettime
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rsp]
     imul    rax, rax, 1000
     mov     rcx, [rsp+8]
@@ -4050,8 +4047,7 @@ hive_render_frames:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      .Lrf_no
     mov     [rip+rf_pix], rax
@@ -4069,8 +4065,7 @@ hive_render_frames:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      31f                         # (no room: no reuse)
     mov     [rip+rq_hin], rax
@@ -4218,8 +4213,7 @@ hive_render_frames:
     imul    eax, r13d
     imul    rax, rax, 2*RQ_SZ+4
     mov     rsi, rax
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     dword ptr [rip+rf_ron], 0
 34:
     mov     dword ptr [rip+rf_has], 0
@@ -4229,8 +4223,7 @@ hive_render_frames:
     mov     eax, r12d
     imul    eax, r13d
     lea     rsi, [rax*4+64]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     eax, ebp
     jmp     9f
 .Lrf_no:

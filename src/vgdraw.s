@@ -83,8 +83,6 @@
 .equ MAP_NORES, 0x4022
 .equ MADV_WILLNEED, 3
 .equ MADV_DONTNEED, 4
-.equ SYS_MINCORE, 27
-.equ SYS_CLOCK_GETTIME, 228
 
 .section .data
 .align 8
@@ -1114,8 +1112,7 @@ pool_take:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     8f
     mov     [rbx], rax
@@ -1321,16 +1318,14 @@ hz_build:
     test    rdi, rdi
     jz      21f
     mov     rsi, [rip+hz_cap]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 21: xor     edi, edi
     mov     rsi, r12
     mov     edx, PROT_RW
     mov     r10d, 0x22
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     8f
     mov     [rip+hz_map], rax
@@ -1741,8 +1736,7 @@ vd_prep:
     mov     r10d, 0x22
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     .Lvp_fail
     mov     [rbx+VR_RTMAP], rax
@@ -1898,8 +1892,7 @@ vd_tick_in:
     mov     rsi, rdx
     mov     rdx, rsp
     push    rsi
-    mov     eax, SYS_MINCORE
-    syscall
+    call    plat_mincore
     pop     rsi
     test    rax, rax
     jnz     3f
@@ -1921,8 +1914,7 @@ vd_tick_in:
     mov     rdi, rax
     mov     rsi, rdx
     mov     edx, MADV_WILLNEED
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
 31: inc     ebx
     jmp     1b
 4:  inc     r14d
@@ -2004,8 +1996,7 @@ vd_tick_out:
     pop     rsi
     mov     rdi, rax
     mov     edx, MADV_WILLNEED
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
     mov     eax, [rip+vd_nfl]
     inc     dword ptr [rip+vd_nfl]
     shl     rax, 4
@@ -2099,8 +2090,7 @@ vd_evict:
     mov     rdi, rax
     mov     rsi, rdx
     mov     edx, MADV_DONTNEED
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
     inc     qword ptr [rip+vs_evict]
     add     rsp, 8
     pop     rcx
@@ -2183,8 +2173,7 @@ vd_forget:
     mov     dword ptr [rbx+VR_REG], 0
 5:  mov     rdi, [rbx+VR_RTMAP]
     mov     rsi, [rbx+VR_RTBYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     dword ptr [rbx+VR_READY], 0
     add     rsp, 8
     pop     r12
@@ -2222,8 +2211,7 @@ vd_drop:
 2:  mov     rdi, rax
     mov     rsi, rdx
     mov     edx, MADV_DONTNEED
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
     pop     rcx
     jmp     1b
 3:  mov     rdi, [rbx+VH_ODATA]         # (never drawn: all of it)
@@ -2232,8 +2220,7 @@ vd_drop:
     add     rsi, 4095
     and     rsi, -4096
     mov     edx, MADV_DONTNEED
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
 4:  pop     rbx
 9:  ret
 
@@ -2241,8 +2228,7 @@ vd_drop:
 now_us:
     mov     edi, 1
     lea     rsi, [rip+vd_ts]
-    mov     eax, SYS_CLOCK_GETTIME
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rip+vd_ts]
     imul    rax, rax, 1000000
     mov     rcx, rax

@@ -558,8 +558,7 @@ hist_free:
     add     rsi, 4095
     and     rsi, -4096
     mov     qword ptr [rax+24], 0
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # do_pt_undo(edi = 0 undo, 1 redo) - the entry's pixels and the image's

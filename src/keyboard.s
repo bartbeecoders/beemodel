@@ -30,14 +30,13 @@
 .globl mods_latched
 .globl mods_locked
 .globl km_loaded
+.globl km_syms
 .globl kb_dead
 
 .equ KM_LEVELS,     4
 .equ NAMES_MAX,     2048
 .equ NAMES_BYTES,   NAMES_MAX*16
 .equ TFD_FLAGS,     0x80800             # TFD_CLOEXEC | TFD_NONBLOCK
-.equ SYS_TIMERFD_CREATE,  283
-.equ SYS_TIMERFD_SETTIME, 286
 .equ MAP_PRIVATE,   2
 .equ MAP_ANON_PRIV, 0x22
 .equ PROT_READ,     1
@@ -284,26 +283,22 @@ kb_keymap:
     mov     r10d, MAP_PRIVATE
     mov     r8d, r12d
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      .Lkm_close
     mov     r14, rax                    # text
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     rdi, r14
     mov     esi, r13d
     call    km_parse
     mov     rdi, r14
     mov     esi, r13d
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     jmp     .Lkm_done
 .Lkm_close:
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lkm_done:
     pop     r15
     pop     r14
@@ -330,8 +325,7 @@ km_parse:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      .Lkp_out
     mov     [rip+km_names], rax
@@ -584,8 +578,7 @@ km_parse:
 .Lkp_free:
     mov     rdi, [rip+km_names]
     mov     esi, NAMES_BYTES
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 .Lkp_out:
     pop     r15
     pop     r14
@@ -781,8 +774,7 @@ kb_compose:
 kb_timer_init:
     mov     edi, 1                      # CLOCK_MONOTONIC
     mov     esi, TFD_FLAGS
-    mov     eax, SYS_TIMERFD_CREATE
-    syscall
+    call    plat_timerfd_create
     mov     [rip+rep_fd], eax
     ret
 
@@ -808,8 +800,7 @@ kb_arm:
     xor     esi, esi
     mov     rdx, r8
     xor     r10d, r10d
-    mov     eax, SYS_TIMERFD_SETTIME
-    syscall
+    call    plat_timerfd_settime
 1:  ret
 
 # kb_repeat_start(edi=evdev code)
@@ -842,8 +833,7 @@ kb_on_timer:
     mov     edi, [rip+rep_fd]
     lea     rsi, [rip+tick_buf]
     mov     edx, 8
-    xor     eax, eax                    # SYS_READ
-    syscall
+    call    plat_read
     test    rax, rax
     jle     9f
     mov     edi, [rip+rep_code]

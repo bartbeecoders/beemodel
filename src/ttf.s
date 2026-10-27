@@ -32,8 +32,6 @@
 .globl gamma_lut
 .globl arena
 
-.equ SYS_OPEN,      2
-.equ SYS_FSTAT,     5
 .equ O_RDONLY_CLOEXEC, 0x80000
 .equ MAP_PRIVATE,   2
 .equ PROT_READ,     1
@@ -189,15 +187,13 @@ font_load_at:
     mov     rdi, rsi
     mov     esi, O_RDONLY_CLOEXEC
     xor     edx, edx
-    mov     eax, SYS_OPEN
-    syscall
+    call    plat_open
     test    eax, eax
     js      .Lfl_fail
     mov     r12d, eax
     mov     edi, eax
     lea     rsi, [rip+statbuf]
-    mov     eax, SYS_FSTAT
-    syscall
+    call    plat_fstat
     mov     r13, [rip+statbuf+48]       # st_size
     test    eax, eax
     jnz     .Lfl_close
@@ -209,14 +205,12 @@ font_load_at:
     mov     r10d, MAP_PRIVATE
     mov     r8d, r12d
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      .Lfl_close
     mov     r14, rax
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     [rbx+FNT_BASE], r14
     mov     [rbx+FNT_SIZE], r13
 
@@ -339,13 +333,11 @@ font_load_at:
 .Lfl_unmap:
     mov     rdi, [rbx+FNT_BASE]
     mov     rsi, [rbx+FNT_SIZE]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     jmp     .Lfl_fail
 .Lfl_close:
     mov     edi, r12d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lfl_fail:
     mov     dword ptr [rbx+FNT_LOADED], 0
     xor     eax, eax
@@ -654,8 +646,7 @@ glyph_render:
     mov     r10d, MAP_ARENA
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      2f
     mov     [rip+arena], rax

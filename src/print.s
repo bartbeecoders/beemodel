@@ -127,8 +127,7 @@ th_faces:
     test    rdi, rdi
     jz      3f
     mov     rsi, [rip+th_cbytes]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rip+th_cache], 0
 3:  mov     [rip+th_key], rbx
     mov     eax, [rbx+ME_NPOLYS]
@@ -221,8 +220,7 @@ th_faces:
 .Lth_failc:
     mov     rdi, [rip+th_cache]
     mov     rsi, [rip+th_cbytes]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rip+th_cache], 0
     mov     qword ptr [rip+th_key], 0
 .Lth_fail:
@@ -244,8 +242,7 @@ pmap:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax

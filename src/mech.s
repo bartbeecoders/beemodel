@@ -603,8 +603,7 @@ mc_pair:
     mov     r10d, 0x22
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     .Lmp_out
     mov     [rsp+CP_MAP], rax
@@ -740,8 +739,7 @@ mc_pair:
 .Lmp_free:
     mov     rdi, [rsp+CP_MAP]
     mov     rsi, [rsp+CP_SIZE]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 .Lmp_out:
     mov     eax, [rsp+168]
     lea     rsp, [rbp-40]

@@ -267,8 +267,7 @@ hv_map:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -310,8 +309,7 @@ hv_keep:
     jbe     9f
 1:  mov     rdi, rax
     mov     rsi, rcx
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rbx], 0
 2:  mov     rsi, r12
     shr     rsi, 2
@@ -324,8 +322,7 @@ hv_keep:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     3f
     xor     eax, eax
@@ -356,8 +353,7 @@ hv_keep_free:
     test    rdi, rdi
     jz      2f
     mov     rsi, [rbx+8]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rbx], 0
 2:  add     rbx, 16
     lea     rax, [rip+kp_tab+K_N*16]
@@ -376,8 +372,7 @@ hv_free_all:
     lea     rdx, [rip+hv_bufs]
     mov     rdi, [rdx+rax]
     mov     rsi, [rdx+rax+8]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     inc     ebx
     jmp     1b
 2:  mov     dword ptr [rip+hv_nbuf], 0
@@ -2654,8 +2649,7 @@ seg_store:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      .Lss_next
     mov     r13, rax                    # the entry
@@ -2784,8 +2778,7 @@ hc_drop:
     mov     rsi, [rax+HC_SIZE]
     sub     [rip+hc_bytes], rsi
     mov     rdi, rax
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 9:  ret
 
 # hc_end - a build ends: slots not seen (objects gone or hidden) let go

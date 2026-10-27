@@ -6,6 +6,56 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-27
+
+BeeModel runs on Windows 11: every release now has a Windows build
+(`beemodel-1.2.0-windows-x86_64.zip`, see [docs/WINDOWS.md](docs/WINDOWS.md))
+next to the Linux one. Also in 1.2.0: 3D text (stage T), render to video
+(stage C), reference images from a folder of drawings or a PDF, a local
+Ollama connection for the AI Assistant, and a UI review.
+
+### Added (Windows 11 port, W1-W7)
+- **beemodel.exe**: the same program from the same sources, only the
+  platform layer differs: `src/plat_win.s` (memory committed on fault,
+  UTF-16 files, threads and `WaitOnAddress`, child processes and pipes,
+  Winsock sockets including `AF_UNIX`, the event loop on a high-resolution
+  timer) and `src/plat_win_wnd.s` (a Win32 window: drawing, mouse,
+  keyboard layouts and dead keys, per-monitor DPI, the clipboard, dropped
+  files, the pen). It imports only Windows' own DLLs, no C runtime.
+  `.bee` files, BeeScript, MCP (`--mcp-bridge`), the live link and
+  co-editing work between Windows and Linux; a headless render is the
+  Linux image byte for byte.
+- **beemodel-gpu.exe**: the GPU helper, which loads `vulkan-1.dll` when it
+  runs; without it renders stay on the CPU.
+- Home, preferences and cache under `%USERPROFILE%` as on Linux
+  (`~/BeeModel`, `~/.config/beemodel`, `~/.cache/beemodel`), or
+  `BEEMODEL_HOME`; Segoe UI and Consolas as the UI fonts; curl, Claude
+  Code, zstd, ffmpeg and poppler found on `Path`.
+- The release has `beemodel-<version>-windows-x86_64.zip`
+  (`scripts/package.sh`). CI checks the build under Wine
+  (`ci/check-exe.sh`, the platform layer's `tests/win/`), and CI and the
+  release run `ci/check-windows.ps1` against the zip on GitHub's Windows
+  runner (`.github/workflows/windows.yml`). docs/WINDOWS.md.
+- The executables are not code-signed yet: SmartScreen may ask once
+  (More info › Run anyway).
+
+### Added (reference images from drawings)
+- **Add › Reference Images from Folder...** (`object.add_references`): a
+  folder of PDFs and images, or one PDF of many pages, as an architect's
+  office sends them. PDF pages are drawn and read through poppler; each
+  page is sorted by its name or title block (elevations and their side,
+  plans and their level, sections, site...), sized from its scale, and
+  set up around the building in a folder of its own. It runs as a job
+  with a progress chip.
+- **AI › Line Up References with AI** (`object.references_ai`), MCP
+  `reference_view`, `object.reference_pin` and `object.reference_kind`:
+  the AI checks a set and lines its drawings up.
+
+### Changed (AI prompt)
+- The AI Assistant's prompt takes several lines: it wraps, grows to 10
+  lines, keeps a paste's line breaks (Shift+Enter breaks a line) and
+  holds 4000 bytes (was one line of 240).
+
 ### Added
 - **AI Assistant: Ollama (local)**, a fourth connection next to OpenRouter.
   It runs OpenRouter's in-process tool loop against Ollama on this machine
@@ -2395,7 +2445,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/bartbeecoders/beemodel/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bartbeecoders/beemodel/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/bartbeecoders/beemodel/compare/v0.24.0...v1.0.0
 [0.24.0]: https://github.com/bartbeecoders/beemodel/compare/v0.23.0...v0.24.0

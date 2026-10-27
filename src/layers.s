@@ -108,8 +108,7 @@ lay_add:
     jmp     9f
 7:  mov     rdi, r12
     mov     esi, LB_SZ
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 8:  mov     eax, -1
 9:  pop     r13
     pop     r12
@@ -145,8 +144,7 @@ lay_free:
     mov     esi, LB_SZ
     add     esi, 4095
     and     esi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     qword ptr [rbx+IM_LAYERS], 0
 9:  pop     r13
     pop     r12
@@ -162,8 +160,7 @@ lay_unmap:
     shl     rsi, 2
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # lay_target(rdi=image) -> rax = the pixels painting writes: the active

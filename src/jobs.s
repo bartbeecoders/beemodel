@@ -1,5 +1,5 @@
 # =============================================================================
-#  BeeModel - job system: worker threads (raw clone), futex sleeping and
+#  BeeModel - job system: worker threads (plat_thread_start), futex sleeping and
 #  parallel_for with dynamic chunk claiming.
 #
 #  parallel_for(fn, ctx, count, grain) splits [0, count) into chunks; workers
@@ -22,17 +22,10 @@
 .globl job_spawn
 .globl bg_tid
 
-.equ SYS_CLONE,         56
-.equ SYS_EXIT,          60
-.equ SYS_FUTEX,         202
-.equ SYS_GETTID,        186
 .equ FUTEX_WAIT,        0
-.equ CLONE_TID_FLAGS,   0x01200000      # CHILD_SETTID | CHILD_CLEARTID
 .equ BG_STACK_BYTES,    0x100000        # 1 MiB for the background thread
-.equ SYS_GETAFFINITY,   204
 .equ FUTEX_WAIT_PRIV,   128
 .equ FUTEX_WAKE_PRIV,   129
-.equ CLONE_THREAD_FLAGS, 0x50f00        # VM|FS|FILES|SIGHAND|THREAD|SYSVSEM
 .equ MAP_STACK_FLAGS,   0x24022         # private|anon|noreserve|stack
 .equ STACK_BYTES,       0x40000         # 256 KiB per worker
 .equ MAX_THREADS,       64
@@ -74,8 +67,7 @@ futex:
     xor     r10d, r10d
     xor     r8d, r8d
     xor     r9d, r9d
-    mov     eax, SYS_FUTEX
-    syscall
+    call    plat_futex
     ret
 
 # -----------------------------------------------------------------------------
@@ -86,8 +78,7 @@ jobs_init:
     push    rbx
     push    r12
     push    r13
-    mov     eax, SYS_GETTID
-    syscall
+    call    plat_gettid
     mov     [rip+main_tid], eax
     lea     rdi, [rip+s_env_threads]
     call    getenv
@@ -114,8 +105,7 @@ jobs_init:
 1:  xor     edi, edi                    # sched_getaffinity(0, 128, mask)
     mov     esi, 128
     lea     rdx, [rip+cpumask]
-    mov     eax, SYS_GETAFFINITY
-    syscall
+    call    plat_sched_getaffinity
     xor     ebx, ebx
     test    eax, eax
     jle     3f
@@ -155,14 +145,14 @@ jobs_init:
     mov     r10d, MAP_STACK_FLAGS
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      8f
     lea     rdx, [rax+STACK_BYTES]
     lea     rdi, [rip+worker_main]
     mov     esi, r12d
-    call    spawn_thread
+    xor     ecx, ecx
+    call    plat_thread_start
     test    eax, eax
     js      8f
     inc     r12d
@@ -172,29 +162,6 @@ jobs_init:
     pop     r12
     pop     rbx
     ret
-
-# spawn_thread(rdi=entry, esi=arg, rdx=stack top) -> eax = tid (parent)
-spawn_thread:
-    sub     rdx, 16
-    mov     [rdx], rdi
-    mov     [rdx+8], rsi
-    mov     rsi, rdx
-    mov     edi, CLONE_THREAD_FLAGS
-    xor     edx, edx
-    xor     r10d, r10d
-    xor     r8d, r8d
-    mov     eax, SYS_CLONE
-    syscall
-    test    eax, eax
-    jnz     1f
-    pop     rax                         # child: entry
-    pop     rdi                         #        arg
-    and     rsp, -16
-    call    rax
-    xor     edi, edi
-    mov     eax, SYS_EXIT
-    syscall
-1:  ret
 
 # worker_main(edi=worker index) - sleep until a parallel_for is published
 worker_main:
@@ -291,8 +258,7 @@ pf_job_wait:
     lea     r10, [rip+pf_100ms]
     xor     r8d, r8d
     xor     r9d, r9d
-    mov     eax, SYS_FUTEX
-    syscall
+    call    plat_futex
     jmp     1b
 9:  pop     rbx
     ret
@@ -321,8 +287,7 @@ parallel_for:
     mov     eax, [rip+main_tid]         #   thread take turns; a worker (or
     cmp     dword ptr [rip+bg_tid], 0   #   the owner, nested) runs it inline
     je      5f                          #   (no background thread: the UI's,
-    mov     eax, SYS_GETTID             #   or a worker's while busy - no
-    syscall                             #   need to ask the kernel)
+    call    plat_gettid                             #   need to ask the kernel)
 5:
     cmp     eax, [rip+pf_owner]
     jne     6f
@@ -460,30 +425,16 @@ job_spawn:
     mov     r10d, MAP_STACK_FLAGS
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      9f
     mov     [rip+bg_stack], rax
-3:  mov     rsi, [rip+bg_stack]
-    add     rsi, BG_STACK_BYTES-16
-    mov     [rsi], rbx
-    mov     [rsi+8], r12
-    mov     edi, CLONE_THREAD_FLAGS|CLONE_TID_FLAGS
-    xor     edx, edx
-    lea     r10, [rip+bg_tid]
-    xor     r8d, r8d
-    mov     eax, SYS_CLONE
-    syscall
-    test    eax, eax
-    jnz     9f
-    pop     rax                         # child: fn
-    pop     rdi                         #        arg
-    and     rsp, -16
-    call    rax
-    xor     edi, edi
-    mov     eax, SYS_EXIT
-    syscall
+3:  mov     rdx, [rip+bg_stack]
+    add     rdx, BG_STACK_BYTES
+    mov     rdi, rbx
+    mov     rsi, r12
+    lea     rcx, [rip+bg_tid]           # 0 again, and a wake, when it ends
+    call    plat_thread_start
 9:  add     rsp, 8
     pop     r12
     pop     rbx

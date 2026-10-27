@@ -24,15 +24,6 @@
 .globl vid_close
 .globl vd_path
 
-.equ SYS_SENDTO,     44
-.equ SYS_SOCKETPAIR, 53
-.equ SYS_FORK,       57
-.equ SYS_EXECVE,     59
-.equ SYS_EXIT,       60
-.equ SYS_WAIT4,      61
-.equ SYS_DUP2,       33
-.equ SYS_PWRITE64,   18
-.equ SYS_OPENAT,     257
 .equ AT_FDCWD,       -100
 .equ O_WRCREAT,      0x80241            # WRONLY | CREAT | TRUNC | CLOEXEC
 
@@ -220,8 +211,7 @@ vid_open:
     lea     rsi, [rip+vd_path]
     mov     edx, O_WRCREAT
     mov     r10d, 0644
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      .Lvo_nofile
     mov     [rip+vd_fd], eax
@@ -304,8 +294,7 @@ vid_open:
     lea     rsi, [rip+vd_log]
     mov     edx, O_WRCREAT
     mov     r10d, 0644
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      .Lvo_nofile
     mov     r15d, eax
@@ -313,42 +302,27 @@ vid_open:
     mov     esi, SOCK_STREAM_CLOEXEC
     xor     edx, edx
     lea     r10, [rip+vd_sv]
-    mov     eax, SYS_SOCKETPAIR
-    syscall
+    call    plat_socketpair
     test    eax, eax
     js      .Lvo_closelog
-    mov     eax, SYS_FORK
-    syscall
-    test    rax, rax
-    js      .Lvo_closeall
-    jnz     8f
-    mov     edi, [rip+vd_sv+4]          # the child: stdin, stdout, stderr
-    xor     esi, esi
-    mov     eax, SYS_DUP2
-    syscall
-    mov     edi, r15d
-    mov     esi, 1
-    mov     eax, SYS_DUP2
-    syscall
-    mov     edi, r15d
-    mov     esi, 2
-    mov     eax, SYS_DUP2
-    syscall
+    mov     eax, [rip+vd_sv+4]          # the child: stdin the socket,
+    mov     [rsp+16], eax               #  stdout and stderr the log
+    mov     [rsp+20], r15d
+    mov     [rsp+24], r15d
+    mov     dword ptr [rsp+28], PS_KEEP
     lea     rdi, [rip+vd_exe]
     lea     rsi, [rip+vd_argv]
     mov     rdx, [rip+envp]
-    mov     eax, SYS_EXECVE
-    syscall
-    mov     edi, 127
-    mov     eax, SYS_EXIT
-    syscall
+    lea     rcx, [rsp+16]
+    xor     r8d, r8d
+    call    plat_spawn
+    test    rax, rax
+    js      .Lvo_closeall
 8:  mov     [rip+vd_pid], eax
     mov     edi, [rip+vd_sv+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, r15d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     eax, [rip+vd_sv]
     mov     [rip+vd_fd], eax
     lea     rax, [rip+vd_pipe]
@@ -357,15 +331,12 @@ vid_open:
     jmp     .Lvo_out
 .Lvo_closeall:
     mov     edi, [rip+vd_sv]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, [rip+vd_sv+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lvo_closelog:
     mov     edi, r15d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lvo_nofile:
     lea     rdi, [rip+s_vd_nofile]
     jmp     .Lvo_say
@@ -419,44 +390,38 @@ vid_close:
     lea     rsi, [rsp+4]
     mov     edx, 4
     mov     r10d, 41                    # (8 signature + 25 IHDR + 8)
-    mov     eax, SYS_PWRITE64
-    syscall
+    call    plat_pwrite64
     cmp     rax, 4
     jne     1f
     mov     edi, [rip+vd_fd]
     lea     rsi, [rsp+12]
     mov     edx, 4
     mov     r10d, 49
-    mov     eax, SYS_PWRITE64
-    syscall
+    call    plat_pwrite64
     cmp     rax, 4
     je      2f
 1:  mov     dword ptr [rip+vd_bad], 1
 2:  mov     edi, [rip+vd_fd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     cmp     dword ptr [rip+vd_bad], 0
     je      .Lvc_ok
     jmp     .Lvc_apsay
 .Lvc_apbad:
     mov     edi, [rip+vd_fd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lvc_apsay:
     lea     rdi, [rip+s_vd_nofile]
     call    log_line
     jmp     .Lvc_no
 .Lvc_ff:
     mov     edi, [rip+vd_fd]            # ffmpeg: the end of its input
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 1:  mov     edi, [rip+vd_pid]           # then it finishes
     lea     rsi, [rsp]
     mov     dword ptr [rsp], 0
     xor     edx, edx
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4
-    syscall
+    call    plat_wait4
     cmp     rax, -4                     # (EINTR)
     je      1b
     test    rax, rax
@@ -522,8 +487,7 @@ vd_pipe:
     mov     r10d, MSG_NOSIGNAL
     xor     r8d, r8d
     xor     r9d, r9d
-    mov     eax, SYS_SENDTO
-    syscall
+    call    plat_sendto
     pop     rdx
     pop     rsi
     cmp     rax, -4                     # (EINTR)
@@ -725,10 +689,9 @@ vd_put:
 1:  test    rdx, rdx
     jz      9f
     mov     edi, [rip+vd_fd]
-    mov     eax, SYS_WRITE
     push    rsi
     push    rdx
-    syscall
+    call    plat_write
     pop     rdx
     pop     rsi
     cmp     rax, -4

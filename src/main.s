@@ -1,36 +1,29 @@
 # =============================================================================
 #  BeeModel - 3D modeling tool shell
-#  Pure x86-64 Linux assembly (GNU as, Intel syntax). No libc, no libraries:
-#  raw syscalls + the Wayland wire protocol over a UNIX socket.
+#  Pure x86-64 assembly (GNU as, Intel syntax). No libc, no libraries: the
+#  platform layer's system calls, and the window through window.s's wnd_*
+#  (the Wayland wire protocol over a UNIX socket on Linux, Win32 on Windows).
 #
-#  Event loop: block in recvmsg() -> dispatch events -> redraw only when
-#  something changed and the compositor asked for a new frame. Idle = 0% CPU.
+#  Event loop: block in poll() -> dispatch events -> redraw only when
+#  something changed and the window may show a new frame. Idle = 0% CPU.
 # =============================================================================
 .intel_syntax noprefix
 
 .include "const.inc"
 
 .text
-.globl _start
+.globl bee_main
 .globl write_out
-_start:
-    lea     rdi, [rip+__bss_start]      # big, mostly idle buffers: keep THP
-    and     rdi, -4096                  # from backing them with 2 MiB pages
-    lea     rsi, [rip+_end]
-    sub     rsi, rdi
-    mov     edx, MADV_NOHUGEPAGE
-    mov     eax, SYS_MADVISE
-    syscall
-    mov     rax, [rsp]                  # argc
-    lea     rax, [rsp+rax*8+16]         # envp = argv + argc + 1
-    mov     [rip+envp], rax
-    cmp     qword ptr [rsp], 2
-    jb      1f
-    mov     rbx, [rsp+16]               # argv[1]
-    mov     r12, [rsp+24]               # argv[2] (0 if absent)
+# bee_main(edi=argc, rsi=argv) - the program, from the platform layer's
+#   start (envp is set); it does not return
+bee_main:
     and     rsp, -16
+    cmp     edi, 2
+    jb      1f
+    mov     rbx, [rsi+8]                # argv[1]
+    mov     r12, [rsi+16]               # argv[2] (0 if absent)
     call    handle_cli_args             # --version / --help exit here
-1:  and     rsp, -16
+1:
 
     call    text_init
     call    prefs_load                  # ~/.config/beemodel/prefs (env wins)
@@ -43,25 +36,7 @@ _start:
     call    arena_init
     call    scene_init
     call    jobs_init
-    call    wl_connect
-
-    call    alloc_id                    # wl_display.get_registry
-    mov     [rip+id_registry], eax
-    mov     edx, eax
-    mov     edi, 1
-    mov     esi, WL_DISPLAY_GET_REGISTRY
-    call    msg1
-    call    wl_roundtrip                # globals arrive -> bound on the fly
-
-    cmp     dword ptr [rip+id_compositor], 0
-    je      .Lmissing
-    cmp     dword ptr [rip+id_shm], 0
-    je      .Lmissing
-    cmp     dword ptr [rip+id_wm_base], 0
-    je      .Lmissing
-
-    call    create_window
-    call    clip_init                   # (the clipboard's data device)
+    call    wnd_open                    # the window (window.s)
     call    kb_timer_init
     call    mcp_init
     call    gpu_prewarm                 # (the GPU helper starts meanwhile)
@@ -89,11 +64,10 @@ _start:
     mov     dword ptr [rip+toast_on], 1 # (from now on messages are toasts)
     mov     dword ptr [rip+vg_async], 1 # (the window: DAGs build in the background)
 .Lloop:
-    mov     edi, -1
-    call    wl_flush
-    # sleep until the compositor talks to us or the key-repeat timer fires
+    call    wnd_flush
+    # sleep until the window has news or the key-repeat timer fires
+    call    wnd_fd
     lea     rdi, [rip+pollfds]
-    mov     eax, [rip+sock_fd]
     mov     [rdi], eax
     mov     dword ptr [rdi+4], POLLIN
     mov     eax, [rip+rep_fd]
@@ -201,14 +175,13 @@ _start:
     jge     0f
 35: mov     edx, eax
 0:  lea     rdi, [rip+pollfds]
-    mov     eax, SYS_POLL
-    syscall
+    call    plat_poll
     cmp     rax, -4                     # EINTR
     je      .Lloop
     test    word ptr [rip+pollfds+6], POLLIN|POLLERR|POLLHUP
     jz      1f
     mov     dword ptr [rip+wl_dispatching], 1   # (long jobs wait: jobui.s)
-    call    wl_read_dispatch
+    call    wnd_dispatch
     mov     dword ptr [rip+wl_dispatching], 0
     call    job_pending                 # a long job a key or click asked for
 1:  test    word ptr [rip+pollfds+14], POLLIN
@@ -244,12 +217,7 @@ _start:
     call    ai_proc_kill                # (an AI connection's child goes too)
     call    mcp_shutdown
     xor     edi, edi
-    mov     eax, SYS_EXIT_GROUP
-    syscall
-
-.Lmissing:
-    lea     rdi, [rip+e_globals]
-    call    fatal
+    call    plat_exit_group
 
 # handle_cli_args(rbx = argv[1], r12 = argv[2])
 handle_cli_args:
@@ -329,8 +297,7 @@ handle_cli_args:
 .Lcli_bridge:
     call    mcp_bridge
     mov     edi, eax
-    mov     eax, SYS_EXIT_GROUP
-    syscall
+    call    plat_exit_group
 .Lcli_selftest:
     sub     rsp, 8                      # (16-byte aligned calls)
     lea     rdi, [rip+frame_arena]      # (meshes made by the tests)
@@ -339,8 +306,7 @@ handle_cli_args:
     call    jobs_init
     call    selftest
     mov     edi, eax
-    mov     eax, SYS_EXIT_GROUP
-    syscall
+    call    plat_exit_group
 .Lcli_eval:                             # beemodel --eval 'code'
     sub     rsp, 8
     test    r12, r12
@@ -362,11 +328,9 @@ handle_cli_args:
     mov     edi, 1
     lea     rsi, [rip+script_out]
     mov     edx, [rip+script_out_len]
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     mov     edi, r13d
-    mov     eax, SYS_EXIT_GROUP
-    syscall
+    call    plat_exit_group
 .Lcli_need:
     lea     rdi, [rip+e_need_arg]
     call    fatal
@@ -375,6 +339,8 @@ handle_cli_args:
     jmp     .Lquit
 .Lcli_help:
     lea     rdi, [rip+s_help]
+    call    write_out
+    lea     rdi, [rip+s_help_plat]      # (the window's platform)
     call    write_out
     jmp     .Lquit
 
@@ -397,8 +363,7 @@ write_out:
     call    str_len
     mov     edx, eax
     mov     edi, 1
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     ret
 
 .section .bss
@@ -425,9 +390,7 @@ e_bad_arg:      .asciz "beemodel: unknown argument: "
 s_help:         .ascii "Usage: beemodel [scene.bee]   (open a scene in the window)\n"
                 .ascii "       beemodel --version | --list-ops | --selftest | --mcp-bridge | --help\n"
                 .ascii "       beemodel --eval 'BeeScript' | --run file.bees   (no window)\n"
-                .ascii "       beemodel --link host:port | unix:<path>   (mirror a session's live link)\n"
-                .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
-                .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
+                .asciz "       beemodel --link host:port | unix:<path>   (mirror a session's live link)\n"
 .include "version.inc"
 .text
 

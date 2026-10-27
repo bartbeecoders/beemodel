@@ -8,7 +8,6 @@
 # exports
 .globl selftest
 
-.equ SYS_CLOCK_GETTIME, 228
 .equ BENCH_N,           8000000
 
 .section .bss
@@ -160,8 +159,7 @@ check:
 now_us:
     mov     edi, 1
     lea     rsi, [rip+ts]
-    mov     eax, SYS_CLOCK_GETTIME
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rip+ts]
     imul    rax, rax, 1000000
     mov     rcx, rax

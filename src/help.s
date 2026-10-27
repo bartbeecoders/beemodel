@@ -63,7 +63,6 @@ s_h_samples:    .asciz "Samples"
 s_h_keys:       .asciz "Keyboard Shortcuts"
 s_ab_title:     .asciz "BeeModel"
 s_ab1:          .asciz "A 3D modeler, CAD and renderer in one small program."
-s_ab2:          .asciz "Written in x86-64 assembly: it talks Wayland directly,"
 s_ab3:          .asciz "with no libc and no toolkits."
 s_ab4:          .asciz "MIT License. Copyright (c) 2026 Bart Roelant"
 s_ab5:          .asciz "github.com/bartbeecoders/beemodel"
@@ -193,7 +192,7 @@ wl_start:       .quad wd_wl_default, 0, wd_wl_empty, k_empty, wd_wl_product, k_p
 wl_samples:     .quad wd_wl_tree, k_tree, wd_wl_ball, k_ball, 0
 ab_lines:       .quad s_ab1
                 .long COL_TEXT, 12
-                .quad s_ab2
+                .quad s_about2                 # the platform's window (wayland.s, plat_win_wnd.s)
                 .long COL_TEXT_DIM, 30
                 .quad s_ab3
                 .long COL_TEXT_DIM, 20

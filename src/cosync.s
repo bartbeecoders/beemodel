@@ -63,13 +63,6 @@
 .globl hmix
 .globl co_author
 
-.equ SYS_BIND,      49
-.equ SYS_LISTEN,    50
-.equ SYS_ACCEPT4,   288
-.equ SYS_SETSOCKOPT, 54
-.equ SYS_FCNTL,     72
-.equ SYS_GETPID,    39
-.equ SYS_CLOCK,     228
 .equ AF_INET,       2
 .equ SOCK_NB,       0x80801
 .equ POLLOUT,       4
@@ -148,7 +141,6 @@
 .equ M_MAT,         46
 .equ M_PRES,        47
 .equ M_AUTH,        53                  # (keyed sessions) the first tagged message
-.equ SYS_GETRANDOM, 318
 # registers
 .equ K_NAME,        1
 .equ K_MAT,         2
@@ -264,8 +256,7 @@ co_init:
     jne     9f
     push    rbx
     mov     dword ptr [rip+co_inited], 1
-    mov     eax, SYS_GETPID             # our peer: from the process id
-    syscall
+    call    plat_getpid
     imul    eax, eax, 0x9E3779B1
     shr     eax, 17
     and     eax, 0x7fff
@@ -308,8 +299,7 @@ co_reserve:
     mov     r10d, 0x4022
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -2329,8 +2319,7 @@ do_co_host:
 70: cmp     dword ptr [rip+co_lfd], 0
     je      71f
     mov     edi, [rip+co_lfd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+co_lfd], 0
 71:
     mov     r12d, 0x0100007f
@@ -2363,8 +2352,7 @@ do_co_host:
 2:  mov     edi, AF_INET
     mov     esi, SOCK_NB
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      8f
     mov     ebx, eax
@@ -2373,8 +2361,7 @@ do_co_host:
     mov     edx, 2                      # SO_REUSEADDR
     lea     r10, [rip+co_one]
     mov     r8d, 4
-    mov     eax, SYS_SETSOCKOPT
-    syscall
+    call    plat_setsockopt
     lea     rdi, [rip+co_addr]
     mov     word ptr [rdi], AF_INET
     mov     eax, r13d
@@ -2385,14 +2372,12 @@ do_co_host:
     mov     edi, ebx
     lea     rsi, [rip+co_addr]
     mov     edx, 16
-    mov     eax, SYS_BIND
-    syscall
+    call    plat_bind
     test    eax, eax
     jnz     7f
     mov     edi, ebx
     mov     esi, CC_MAX
-    mov     eax, SYS_LISTEN
-    syscall
+    call    plat_listen
     test    eax, eax
     jnz     7f
     mov     [rip+co_lfd], ebx
@@ -2410,8 +2395,7 @@ do_co_host:
     call    log_line
     jmp     9f
 7:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  lea     rdi, [rip+s_bad]
     call    log_line
 9:  pop     r13
@@ -2452,8 +2436,7 @@ do_co_key:
     mov     rdi, rsp                    # new: 20 random letters, in fives
     mov     esi, 20
     xor     edx, edx
-    mov     eax, SYS_GETRANDOM
-    syscall
+    call    plat_getrandom
     lea     rbx, [rip+co_tmp]
     xor     ecx, ecx
     xor     edx, edx
@@ -2539,8 +2522,7 @@ co_reset:
 2:  mov     edi, [rip+co_lfd]
     test    edi, edi
     jz      3f
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+co_lfd], 0
 3:  xor     ebx, ebx                    # stores let go
 4:  cmp     ebx, [rip+co_nce]
@@ -2573,8 +2555,7 @@ cc_drop:
     push    rbx
     mov     rbx, rdi
     mov     edi, [rbx+CC_FD]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rbx+CC_STATE], 0
     mov     qword ptr [rbx+CC_HEAD], 0
     mov     qword ptr [rbx+CC_LEN], 0
@@ -2600,8 +2581,7 @@ do_co_join:
     mov     edi, AF_INET
     mov     esi, SOCK_STREAM_CLOEXEC
     xor     edx, edx
-    mov     eax, SYS_SOCKET
-    syscall
+    call    plat_socket
     test    eax, eax
     js      8f
     mov     ebx, eax
@@ -2615,8 +2595,7 @@ do_co_join:
     mov     edi, ebx
     lea     rsi, [rip+co_addr]
     mov     edx, 16
-    mov     eax, SYS_CONNECT
-    syscall
+    call    plat_connect
     test    eax, eax
     jnz     7f
     mov     edi, ebx
@@ -2633,8 +2612,7 @@ do_co_join:
     call    log_pair
     jmp     9f
 7:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  lea     rdi, [rip+s_nojoin]
     mov     rsi, [rip+op_arg]
     test    rsi, rsi
@@ -2718,13 +2696,11 @@ cc_setup:
     mov     edx, 1
     lea     r10, [rip+co_one]
     mov     r8d, 4
-    mov     eax, SYS_SETSOCKOPT
-    syscall
+    call    plat_setsockopt
     mov     edi, ebx
     mov     esi, 4
     mov     edx, 0x800
-    mov     eax, SYS_FCNTL
-    syscall
+    call    plat_fcntl
     xor     ecx, ecx
     lea     rax, [rip+co_cc]
 1:  cmp     ecx, CC_MAX
@@ -2766,8 +2742,7 @@ cc_hello:
     lea     rdi, [rbx+CC_NOUR]          # keyed: a nonce; the document only
     mov     esi, 8                      #  once their AUTH checks out
     xor     edx, edx
-    mov     eax, SYS_GETRANDOM
-    syscall
+    call    plat_getrandom
     mov     rdi, [rbx+CC_NOUR]
     call    mo_u64
 1:  mov     rax, [rip+co_op]
@@ -3217,8 +3192,7 @@ co_accept:
     xor     esi, esi
     xor     edx, edx
     mov     r10d, 0x80000
-    mov     eax, SYS_ACCEPT4
-    syscall
+    call    plat_accept4
     test    eax, eax
     js      9f
     mov     edi, eax
@@ -3227,8 +3201,7 @@ co_accept:
     test    rax, rax
     jnz     2f
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     jmp     1b
 2:  mov     rdi, rax                    # ours to them now: HELLO, the state
     call    cc_hello
@@ -3262,8 +3235,7 @@ co_read:
     mov     rdx, BUF_CAP
     sub     rdx, [r12+CC_INLEN]
     jz      2f
-    xor     eax, eax
-    syscall
+    call    plat_read
     cmp     rax, EAGAIN
     je      2f
     test    rax, rax
@@ -3413,8 +3385,7 @@ co_flush:
     mov     r10d, MSG_NOSIGNAL
     xor     r8d, r8d
     xor     r9d, r9d
-    mov     eax, 44
-    syscall
+    call    plat_sendto
     cmp     rax, EAGAIN
     je      5f
     test    rax, rax

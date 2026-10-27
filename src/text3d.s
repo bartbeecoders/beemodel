@@ -67,9 +67,7 @@
 .equ TP_MAX,    64                      # texts keyed in one frame (more: built at once)
 .equ TFL_N,     4096                    # fonts found on the system
 .equ TFL_NAME,  64
-.equ SYS_OPEN_, 2
 .equ O_DIR_,    0x90000                 # read-only | directory | close-on-exec
-.equ SYS_GETDENTS64, 217
 
 .section .bss
 .align 16
@@ -176,6 +174,7 @@ s_fd1:          .asciz "/usr/share/fonts"
 s_fd2:          .asciz "/usr/local/share/fonts"
 s_fd3:          .asciz "/.local/share/fonts"
 s_fd4:          .asciz "/.fonts"
+s_fd5:          .asciz "C:/Windows/Fonts"       # (Windows)
 s_dot_ttf:      .asciz ".ttf"
 k_body:         .asciz "body"
 k_text:         .asciz "text"
@@ -267,8 +266,7 @@ tx_new:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax
@@ -315,8 +313,7 @@ tx_unref:
     lock dec dword ptr [rdi+TX_REFS]
     jnz     1f
     mov     esi, TX_SZ
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # tx_of(rdi=object or 0) -> rax = its text block, or 0
@@ -421,8 +418,7 @@ tx_font:
     je      31f
     mov     rdi, [r13+FNT_BASE]
     mov     rsi, [r13+FNT_SIZE]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     dword ptr [r13+FNT_LOADED], 0
 31: jmp     4f
 3:  inc     dword ptr [rip+tf_n]
@@ -524,6 +520,9 @@ tf_scan:
     xor     edi, edi
     call    tf_root
     lea     rsi, [rip+s_fd2]
+    xor     edi, edi
+    call    tf_root
+    lea     rsi, [rip+s_fd5]
     xor     edi, edi
     call    tf_root
     lea     rdi, [rip+s_env_home]
@@ -646,8 +645,7 @@ tf_walk:
     lea     rdi, [rip+tfl_pb]
     mov     esi, O_DIR_
     xor     edx, edx
-    mov     eax, SYS_OPEN_
-    syscall
+    call    plat_open
     test    eax, eax
     js      .Ltw_out
     mov     r14d, eax                   # fd
@@ -655,8 +653,7 @@ tf_walk:
     mov     edi, r14d
     lea     rsi, [rsp]
     mov     edx, 4096
-    mov     eax, SYS_GETDENTS64
-    syscall
+    call    plat_getdents64
     test    eax, eax
     jle     .Ltw_close
     mov     r15d, eax                   # bytes
@@ -731,8 +728,7 @@ tf_walk:
     jmp     .Ltw_ent
 .Ltw_close:
     mov     edi, r14d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Ltw_out:
     mov     byte ptr [r12], 0
     add     rsp, 4104
@@ -1025,8 +1021,7 @@ tb_map:                                 # esi = bytes -> rax (0: failed)
     mov     r10d, MAP_SCRATCH
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     1f
     xor     eax, eax

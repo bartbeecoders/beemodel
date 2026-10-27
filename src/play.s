@@ -258,7 +258,7 @@ do_play_start:
     call    ms_now
     mov     [rip+pl_t_last], rax
     mov     dword ptr [rip+pl_on], 1
-    call    wl_lock_pointer             # (the window: the mouse captured)
+    call    wnd_lock_pointer             # (the window: the mouse captured)
     mov     [rip+pl_locked], eax
     mov     dword ptr [rip+pl_lastx], -100000
     call    pl_camera
@@ -325,7 +325,7 @@ play_end:
     mov     ebx, edi
     mov     dword ptr [rip+pl_on], 0
     mov     dword ptr [rip+pl_keys], 0
-    call    wl_unlock_pointer
+    call    wnd_unlock_pointer
     mov     dword ptr [rip+pl_locked], 0
     call    pl_free_grids
     call    lg_end
@@ -412,7 +412,7 @@ play_key:
     mov     dword ptr [rip+pl_on], 2    # stopped: the question
     mov     dword ptr [rip+pl_keys], 0
     sub     rsp, 8
-    call    wl_unlock_pointer
+    call    wnd_unlock_pointer
     add     rsp, 8
     mov     dword ptr [rip+pl_locked], 0
     mov     dword ptr [rip+dirty], 1
@@ -2218,8 +2218,7 @@ pl_alloc:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jae     8f
     mov     ecx, [rip+pl_nmaps]         # remembered for pl_free_grids
@@ -2246,8 +2245,7 @@ pl_free_grids:
     lea     rdx, [rip+pl_maps]
     mov     rdi, [rdx+rax]
     mov     rsi, [rdx+rax+8]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     inc     ebx
     jmp     1b
 2:  mov     dword ptr [rip+pl_nmaps], 0
@@ -2435,8 +2433,7 @@ ms_now:
     sub     rsp, 24
     mov     edi, 1
     mov     rsi, rsp
-    mov     eax, 228
-    syscall
+    call    plat_clock_gettime
     mov     rax, [rsp]
     imul    rax, rax, 1000
     mov     rcx, rax

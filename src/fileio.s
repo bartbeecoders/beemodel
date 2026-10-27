@@ -33,11 +33,6 @@
 .globl cache_dir
 .globl basename
 
-.equ SYS_OPENAT,    257
-.equ SYS_RENAME,    82
-.equ SYS_MKDIR,     83
-.equ SYS_MREMAP,    25
-.equ SYS_FSTAT,     5
 .equ AT_FDCWD,      -100
 .equ O_WRITE_NEW,   0x80241             # WRONLY | CREAT | TRUNC | CLOEXEC
 .equ O_READ,        0x80000             # RDONLY | CLOEXEC
@@ -157,15 +152,13 @@ ensure_dir:
     mov     byte ptr [rbx], 0           # each parent in turn
     mov     rdi, r12
     mov     esi, 0755
-    mov     eax, SYS_MKDIR
-    syscall
+    call    plat_mkdir
     mov     byte ptr [rbx], '/'
 2:  inc     rbx
     jmp     1b
 3:  mov     rdi, r12
     mov     esi, 0755
-    mov     eax, SYS_MKDIR
-    syscall
+    call    plat_mkdir
     pop     r12
     pop     rbx
     ret
@@ -254,15 +247,13 @@ file_read:
     mov     edi, AT_FDCWD
     mov     edx, O_READ
     xor     r10d, r10d
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      8f
     mov     ebx, eax
     mov     edi, eax
     lea     rsi, [rip+statb]
-    mov     eax, SYS_FSTAT
-    syscall
+    call    plat_fstat
     mov     r12, [rip+statb+48]
     test    r12, r12
     jz      7f
@@ -272,20 +263,17 @@ file_read:
     mov     r10d, MAP_PRIVATE
     mov     r8d, ebx
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      7f
     push    rax
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     pop     rax
     mov     rdx, r12
     jmp     9f
 7:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 8:  xor     eax, eax
     xor     edx, edx
 9:  pop     r12
@@ -296,8 +284,7 @@ file_read:
 file_unmap:
     test    rdi, rdi
     jz      1f
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # file_write_atomic(rdi=path, rsi=data, rdx=bytes) -> eax = 0 ok, else -errno
@@ -339,8 +326,7 @@ file_write_atomic:
     lea     rsi, [rip+tmp_path]
     mov     edx, O_WRITE_NEW
     mov     r10d, [rip+fw_mode]
-    mov     eax, SYS_OPENAT
-    syscall
+    call    plat_openat
     test    eax, eax
     js      9f
     mov     ebx, eax
@@ -349,8 +335,7 @@ file_write_atomic:
     mov     edi, ebx
     mov     rsi, r13
     mov     rdx, r14
-    mov     eax, SYS_WRITE
-    syscall
+    call    plat_write
     cmp     rax, -4
     je      4b
     test    rax, rax
@@ -359,17 +344,14 @@ file_write_atomic:
     sub     r14, rax
     jmp     4b
 5:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     lea     rdi, [rip+tmp_path]
     mov     rsi, r12
-    mov     eax, SYS_RENAME
-    syscall
+    call    plat_rename
     jmp     9f
 6:  push    rax
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     pop     rax
     test    eax, eax
     jnz     9f
@@ -407,14 +389,12 @@ wb_reserve:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     jmp     2f
 1:  mov     rsi, [rip+wb_cap]
     mov     rdx, rbx
     mov     r10d, MREMAP_MAYMOVE
-    mov     eax, SYS_MREMAP
-    syscall
+    call    plat_mremap
 2:  cmp     rax, -4096
     ja      7f
     mov     [rip+wb_ptr], rax

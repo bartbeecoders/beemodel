@@ -798,8 +798,7 @@ pc_entry:
     mov     rsi, [rbx+PE_BYTES]
     test    rdi, rdi
     jz      61f
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 61: mov     qword ptr [rbx+PE_DATA], 0
     mov     qword ptr [rbx+PE_BYTES], 0
     pop     rsi
@@ -811,8 +810,7 @@ pc_entry:
     mov     r10d, 0x22
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     pop     rsi
     pop     rsi
     cmp     rax, -4096
@@ -932,8 +930,7 @@ pc_age:
     mov     rsi, [rcx+PE_BYTES]
     test    rdi, rdi
     jz      11f
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 11: pop     rdx
     pop     rcx
     xor     eax, eax

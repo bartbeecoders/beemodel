@@ -431,8 +431,7 @@ do_mr_down:
     pop     rsi
     add     rsi, 4095
     and     rsi, -4096
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     rdi, [rbx+OB_MRES]
     mov     [rbx+OB_MRES], r15
     call    mesh_unref

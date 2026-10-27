@@ -30,20 +30,6 @@
 .globl ai_exit_code
 .globl ai_dir_make
 
-.equ SYS_READ,      0
-.equ SYS_FORK,      57
-.equ SYS_EXECVE,    59
-.equ SYS_EXIT,      60
-.equ SYS_WAIT4,     61
-.equ SYS_KILL,      62
-.equ SYS_DUP2,      33
-.equ SYS_ACCESS,    21
-.equ SYS_CHDIR,     80
-.equ SYS_READLINK,  89
-.equ SYS_PIPE2,     293
-.equ SYS_OPENAT,    257
-.equ SYS_CHMOD,     90
-.equ AT_FDCWD,      -100
 .equ O_NONBLOCK,    0x800
 .equ O_CLOEXEC,     0x80000
 .equ WNOHANG,       1
@@ -78,8 +64,6 @@ ap_hdrtxt:      .skip 1024
 ap_url:         .skip 1024
 
 .section .rodata
-s_self:         .asciz "/proc/self/exe"
-s_null:         .asciz "/dev/null"
 s_path:         .asciz "PATH="
 s_cachedir:     .asciz "/.cache/beemodel/ai"
 s_curl:         .asciz "curl"
@@ -103,40 +87,39 @@ ai_dir_make:
     call    ap_cpy
     lea     rdi, [rip+ai_dir]           # (made by home_join): ours only
     mov     esi, 0700
-    mov     eax, SYS_CHMOD
-    syscall
-    lea     rdi, [rip+s_self]           # this program's path
-    lea     rsi, [rip+ai_exe]
-    mov     edx, 510
-    mov     eax, SYS_READLINK
-    syscall
-    test    eax, eax
-    jns     1f
-    xor     eax, eax
-1:  lea     rcx, [rip+ai_exe]
-    mov     byte ptr [rcx+rax], 0
+    call    plat_chmod
+    lea     rdi, [rip+ai_exe]           # this program's path
+    mov     esi, 511
+    call    plat_self_path
     pop     rbx
     ret
 
 # ai_which(rdi=program name or path) -> rax = its path (ap_which), or 0 when
-#   no such program can be run
+#   no such program can be run. PATH's directories are split at
+#   plat_path_sep (: on Linux, ; on Windows) and taken through plat_path_in
+#   (C:\x is /C:/x there); a program's file may also end in plat_exe_ext
+#   (.exe on Windows)
 ai_which:
     push    rbx
     push    r12
     push    r13
     mov     rbx, rdi
-    xor     ecx, ecx                    # a path (has a /): as it is
+    xor     ecx, ecx                    # a path (has a / or \\): as it is
 1:  mov     al, [rbx+rcx]
     test    al, al
     jz      3f
     cmp     al, '/'
+    je      2f
+    cmp     al, '\\'
     je      2f
     inc     ecx
     jmp     1b
 2:  lea     rdi, [rip+ap_which]
     mov     rsi, rbx
     call    ap_cpy
-    jmp     .Lwh_try
+    call    ap_try
+    jz      9f
+    jmp     8f
 3:  lea     rdi, [rip+s_path]           # each PATH directory
     call    getenv
     test    rax, rax
@@ -151,37 +134,59 @@ ai_which:
     test    al, al
     jz      5f
     inc     r12
-    cmp     al, ':'
+    cmp     al, [rip+plat_path_sep]
     je      5f
     cmp     ecx, 400
     jae     4b
     mov     [rdi+rcx], al
     inc     ecx
     jmp     4b
-5:  mov     byte ptr [rdi+rcx], '/'
+5:  test    ecx, ecx                    # (an empty one: skipped)
+    jz      .Lwh_dir
+    mov     byte ptr [rdi+rcx], '/'
     lea     rdi, [rdi+rcx+1]
     mov     rsi, rbx
     call    ap_cpy
-    lea     rdi, [rip+ap_which]         # executable?
-    mov     esi, 1                      # (X_OK)
-    mov     eax, SYS_ACCESS
-    syscall
-    test    eax, eax
+    call    ap_try
     jz      9f
     jmp     .Lwh_dir
-.Lwh_try:
-    lea     rdi, [rip+ap_which]
-    mov     esi, 1
-    mov     eax, SYS_ACCESS
-    syscall
-    test    eax, eax
-    jz      9f
 8:  xor     eax, eax
     jmp     10f
 9:  lea     rax, [rip+ap_which]
 10: pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# ap_try(rdi = the end of the path in ap_which) -> ZF set when it (or it
+#   with plat_exe_ext) can be run
+ap_try:
+    push    rdi
+    lea     rdi, [rip+ap_which]
+    call    plat_path_in
+    lea     rdi, [rip+ap_which]
+    mov     esi, 1                      # (X_OK)
+    call    plat_access
+    pop     rdi
+    test    eax, eax
+    jz      9f
+    cmp     byte ptr [rip+plat_exe_ext], 0
+    je      8f
+    lea     rdi, [rip+ap_which]         # (plat_path_in may have moved it)
+    xor     ecx, ecx
+1:  cmp     byte ptr [rdi+rcx], 0
+    je      2f
+    inc     ecx
+    jmp     1b
+2:  add     rdi, rcx
+    lea     rsi, [rip+plat_exe_ext]
+    call    ap_cpy
+    lea     rdi, [rip+ap_which]
+    mov     esi, 1
+    call    plat_access
+    test    eax, eax
+9:  ret
+8:  or      eax, 1                      # (ZF clear)
     ret
 
 # ai_proc_spawn(rdi=program path, rsi=argv (0-ended list of texts), rdx=
@@ -193,7 +198,7 @@ ai_proc_spawn:
     push    r13
     push    r14
     push    r15
-    sub     rsp, 16
+    sub     rsp, 32                     # the pipe, the child's fd map
     xor     eax, eax
     cmp     dword ptr [rip+ap_pid], 0
     jne     .Lsp_out
@@ -227,63 +232,30 @@ ai_proc_spawn:
 4:  mov     qword ptr [rdi+rcx*8], 0
     lea     rdi, [rsp]                  # the pipe: read end ours, nonblocking
     mov     esi, O_CLOEXEC
-    mov     eax, SYS_PIPE2
-    syscall
+    call    plat_pipe2
     test    eax, eax
     js      .Lsp_fail
-    mov     eax, SYS_FORK
-    syscall
-    test    rax, rax
-    js      .Lsp_close
-    jnz     .Lsp_parent
-    # ---- the child: stdout and stderr into the pipe, stdin from /dev/null
-    mov     edi, [rsp+4]
-    mov     esi, 1
-    mov     eax, SYS_DUP2
-    syscall
-    mov     edi, [rsp+4]
-    mov     esi, 2
-    mov     eax, SYS_DUP2
-    syscall
-    mov     edi, AT_FDCWD
-    lea     rsi, [rip+s_null]
-    xor     edx, edx
-    mov     eax, SYS_OPENAT
-    syscall
-    mov     edi, eax
-    xor     esi, esi
-    mov     eax, SYS_DUP2
-    syscall
-    mov     r14d, 3                     # nothing else of ours
-5:  mov     edi, r14d
-    mov     eax, SYS_CLOSE
-    syscall
-    inc     r14d
-    cmp     r14d, 1024
-    jb      5b
-    mov     rdi, [rip+ap_cwd]
-    test    rdi, rdi
-    jz      6f
-    mov     eax, SYS_CHDIR
-    syscall
-6:  mov     rdi, rbx
+    mov     eax, [rsp+4]                # the child: stdin nothing, stdout
+    mov     dword ptr [rsp+16], PS_NULL #  and stderr into the pipe
+    mov     [rsp+20], eax
+    mov     [rsp+24], eax
+    mov     dword ptr [rsp+28], PS_KEEP
+    mov     rdi, rbx
     mov     rsi, r12
     lea     rdx, [rip+ap_env]
-    mov     eax, SYS_EXECVE
-    syscall
-    mov     edi, 127
-    mov     eax, SYS_EXIT
-    syscall
+    lea     rcx, [rsp+16]
+    mov     r8, [rip+ap_cwd]
+    call    plat_spawn
+    test    rax, rax
+    js      .Lsp_close
 .Lsp_parent:
     mov     [rip+ap_pid], eax
     mov     edi, [rsp+4]                # (its end)
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, [rsp]                  # ours: without waiting
     mov     esi, 4                      # (F_SETFL)
     mov     edx, O_NONBLOCK
-    mov     eax, 72                     # (fcntl)
-    syscall
+    call    plat_fcntl
     mov     eax, [rsp]
     mov     [rip+ap_fd], eax
     mov     dword ptr [rip+ap_kill_at], 0
@@ -291,15 +263,13 @@ ai_proc_spawn:
     jmp     .Lsp_out
 .Lsp_close:
     mov     edi, [rsp]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     edi, [rsp+4]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
 .Lsp_fail:
     xor     eax, eax
 .Lsp_out:
-    add     rsp, 16
+    add     rsp, 32
     pop     r15
     pop     r14
     pop     r13
@@ -320,8 +290,7 @@ ai_proc_stop:
     test    edi, edi
     jz      9f
     mov     esi, SIGTERM
-    mov     eax, SYS_KILL
-    syscall
+    call    plat_kill
     mov     dword ptr [rip+ap_kill_at], 6
 9:  ret
 
@@ -331,8 +300,7 @@ ai_proc_kill:
     test    edi, edi
     jz      9f
     mov     esi, SIGKILL
-    mov     eax, SYS_KILL
-    syscall
+    call    plat_kill
 9:  ret
 
 # ai_pollfds(rdi=pollfd array) -> eax = how many added (the child's pipe)
@@ -361,15 +329,13 @@ ai_tick:
     jnz     1f
     mov     edi, [rip+ap_pid]
     mov     esi, SIGKILL
-    mov     eax, SYS_KILL
-    syscall
+    call    plat_kill
 1:  mov     edi, [rip+ap_fd]            # read what there is
     test    edi, edi
     js      5f
     lea     rsi, [rip+ap_buf]
     mov     edx, 65535
-    mov     eax, SYS_READ
-    syscall
+    call    plat_read
     test    rax, rax
     jz      4f                          # (EOF)
     js      5f                          # (nothing now)
@@ -382,16 +348,14 @@ ai_tick:
     call    rcx
     jmp     1b
 4:  mov     edi, [rip+ap_fd]            # its output is done
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+ap_fd], -1
 5:  mov     edi, [rip+ap_pid]           # ended?
     lea     rsi, [rsp]
     mov     dword ptr [rsp], 0
     mov     edx, WNOHANG
     xor     r10d, r10d
-    mov     eax, SYS_WAIT4
-    syscall
+    call    plat_wait4
     test    eax, eax
     jle     9f
     cmp     dword ptr [rip+ap_fd], 0    # (the pipe: drained first: what it
@@ -399,8 +363,7 @@ ai_tick:
 51: mov     edi, [rip+ap_fd]
     lea     rsi, [rip+ap_buf]
     mov     edx, 65535
-    mov     eax, SYS_READ
-    syscall
+    call    plat_read
     test    rax, rax
     jle     52f
     mov     rcx, [rip+ai_on_data]
@@ -412,8 +375,7 @@ ai_tick:
     call    rcx
     jmp     51b
 52: mov     edi, [rip+ap_fd]
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     mov     dword ptr [rip+ap_fd], -1
 6:  mov     dword ptr [rip+ap_pid], 0
     mov     dword ptr [rip+ap_kill_at], 0

@@ -222,8 +222,7 @@ la_unref:
     lock dec dword ptr [rdi+LB_REFS]
     jnz     1f
     mov     rsi, [rdi+LB_BYTES]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 1:  ret
 
 # la_of(rdi=object) -> rax = its landscape block, or 0
@@ -295,8 +294,7 @@ la_make:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     3f
     xor     eax, eax
@@ -748,8 +746,7 @@ lg_erode:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      9f
     mov     rbx, rax                    # heights 0..1
@@ -827,8 +824,7 @@ lg_erode:
     jmp     7b
 8:  mov     rdi, rbx
     mov     rsi, r13
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 9:  add     rsp, 40
     pop     r14
     pop     r13
@@ -1322,8 +1318,7 @@ la_load:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     ja      8f
     mov     rdi, rax
@@ -2294,8 +2289,7 @@ la_resize:
     mov     r10d, MAP_ANON_PRIV
     mov     r8d, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jbe     3f
     xor     eax, eax

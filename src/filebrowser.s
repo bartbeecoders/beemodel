@@ -46,7 +46,6 @@
 .equ NFAV,      16                      # favourites
 .equ NDRV,      12                      # drives
 .equ NHIST,     16                      # back / forward
-.equ SYS_STATFS,    137
 .equ IM_W_,     0                       # (imgread.s: an image's header)
 .equ IM_H_,     4
 .equ IM_FMT_,   8
@@ -62,9 +61,6 @@
 .equ PREV_W,    192                     # a scene's picture (thumb.s TW x TH)
 .equ PREV_H,    120
 .equ NRECENT,   4
-.equ SYS_OPEN,      2
-.equ SYS_STAT,      4
-.equ SYS_GETDENTS64, 217
 .equ O_DIRECTORY,   0x10000
 .equ DT_DIR,    4
 .equ DT_LNK,    10
@@ -72,10 +68,6 @@
 .equ KEY_UP,    103
 .equ KEY_DOWN,  108
 .equ KEY_BACKSPACE, 14
-.equ SYS_RENAME,    82
-.equ SYS_MKDIR,     83
-.equ SYS_RMDIR,     84
-.equ SYS_UNLINK,    87
 
 .section .bss
 .align 8
@@ -353,8 +345,7 @@ fb_load:
     lea     rdi, [rip+fb_dir]
     mov     esi, O_DIRECTORY            # (O_RDONLY)
     xor     edx, edx
-    mov     eax, SYS_OPEN
-    syscall
+    call    plat_open
     test    rax, rax
     js      .Lfl_done
     mov     ebx, eax                    # fd
@@ -363,8 +354,7 @@ fb_load:
     mov     edi, ebx
     lea     rsi, [rip+fb_dents]
     mov     edx, 32768
-    mov     eax, SYS_GETDENTS64
-    syscall
+    call    plat_getdents64
     test    rax, rax
     jle     .Lfl_close
     mov     r12, rax                    # bytes
@@ -434,8 +424,7 @@ fb_load:
     jmp     .Lfl_ent
 .Lfl_close:
     mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     call    fb_sort
 .Lfl_done:
     mov     dword ptr [rip+dirty], 1
@@ -457,8 +446,7 @@ is_dir_in:
 # is_dir(rdi=path) -> eax = 1 if it is a folder
 is_dir:
     lea     rsi, [rip+fb_stat]
-    mov     eax, SYS_STAT
-    syscall
+    call    plat_stat
     test    rax, rax
     js      8f
     mov     eax, [rip+fb_stat+24]       # st_mode
@@ -473,8 +461,7 @@ is_dir:
 # exists(rdi=path) -> eax = 1 if there is something there
 exists:
     lea     rsi, [rip+fb_stat]
-    mov     eax, SYS_STAT
-    syscall
+    call    plat_stat
     test    rax, rax
     setns   al
     movzx   eax, al
@@ -734,8 +721,7 @@ fb_mkdir:
     call    full_of_dir
     lea     rdi, [rip+fb_full]
     mov     esi, 0755
-    mov     eax, SYS_MKDIR
-    syscall
+    call    plat_mkdir
     test    rax, rax
     jns     3f
     inc     ebx
@@ -799,17 +785,14 @@ fb_ok_mode:
     call    full_of_dir
     mov     rdi, rsp
     lea     rsi, [rip+fb_full]
-    mov     eax, SYS_RENAME
-    syscall
+    call    plat_rename
     jmp     8f
 3:  mov     rdi, rsp                    # delete: a file, or an empty folder
-    mov     eax, SYS_UNLINK
-    syscall
+    call    plat_unlink
     test    rax, rax
     jns     8f
     mov     rdi, rsp
-    mov     eax, SYS_RMDIR
-    syscall
+    call    plat_rmdir
     test    rax, rax
     jns     8f
     lea     rdi, [rip+s_rm_fail]
@@ -874,8 +857,7 @@ fb_complete:
     lea     rdi, [rip+fb_cdir]
     mov     esi, O_DIRECTORY
     xor     edx, edx
-    mov     eax, SYS_OPEN
-    syscall
+    call    plat_open
     test    rax, rax
     js      .Lfc_out
     mov     r14d, eax                   # fd
@@ -883,8 +865,7 @@ fb_complete:
     mov     edi, r14d
     lea     rsi, [rip+fb_dents]
     mov     edx, 32768
-    mov     eax, SYS_GETDENTS64
-    syscall
+    call    plat_getdents64
     test    rax, rax
     jle     .Lfc_close
     mov     r15, rax                    # bytes
@@ -957,8 +938,7 @@ fb_complete:
     jmp     .Lfc_ent
 .Lfc_close:
     mov     edi, r14d
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     cmp     dword ptr [rip+fb_cn], 0
     je      .Lfc_out
     mov     ecx, [rip+fb_clen]          # something to add?
@@ -1245,6 +1225,7 @@ fb_place_cb:
 # fb_path_cb(rdi=typed text) - a folder opens, a file is taken
 fb_path_cb:
     push    rbx
+    call    plat_path_in                # (C:\x on Windows: /C:/x)
     call    path_expand
     mov     rbx, rax
     mov     rdi, rbx
@@ -1303,7 +1284,8 @@ fb_ok:
     lea     rsi, [rip+fb_dir]
     call    scpy
     jmp     7f
-0:    lea     rdi, [rip+fb_name]          # a typed full path counts as it is
+0:  lea     rdi, [rip+fb_name]          # a typed full path counts as it is
+    call    plat_path_in                #  (C:\x on Windows: /C:/x)
     cmp     byte ptr [rdi], '/'
     je      1f
     cmp     byte ptr [rdi], '~'
@@ -2542,8 +2524,7 @@ stat_in:
     pop     rdi
     lea     rdi, [rip+fb_full]
     lea     rsi, [rip+fb_stat]
-    mov     eax, SYS_STAT
-    syscall
+    call    plat_stat
     test    rax, rax
     js      8f
     mov     eax, [rip+fb_stat+24]
@@ -2934,8 +2915,7 @@ drives_scan:
     lea     rdi, [rip+s_mounts]         # (a proc file: read by read(2))
     xor     esi, esi
     xor     edx, edx
-    mov     eax, SYS_OPEN
-    syscall
+    call    plat_open
     test    rax, rax
     js      9f
     mov     ebx, eax
@@ -2946,15 +2926,13 @@ drives_scan:
     mov     edx, 16383
     sub     edx, r12d
     jle     2f
-    xor     eax, eax                    # SYS_READ
-    syscall
+    call    plat_read
     test    rax, rax
     jle     2f
     add     r12, rax
     jmp     1b
 2:  mov     edi, ebx
-    mov     eax, SYS_CLOSE
-    syscall
+    call    plat_close
     lea     rax, [rip+fb_mnt]
     mov     byte ptr [rax+r12], 0
     lea     r13, [rip+fb_mnt]           # each line: device mountpoint ...
@@ -3001,8 +2979,7 @@ drives_scan:
     call    scpy
     mov     rdi, r14                    # its free space
     lea     rsi, [rip+fb_statfs]
-    mov     eax, SYS_STATFS
-    syscall
+    call    plat_statfs
     xor     ecx, ecx
     test    rax, rax
     js      72f

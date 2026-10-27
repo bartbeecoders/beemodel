@@ -103,8 +103,7 @@ reserve:
     mov     r10d, MAP_NORES
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax
@@ -118,8 +117,7 @@ dontneed:
     and     rsi, -4096
     jz      9f
     mov     edx, MADV_DONTNEED
-    mov     eax, SYS_MADVISE
-    syscall
+    call    plat_madvise
 9:  ret
 
 # sc_mix(rax=hash, rdi=bytes at, rsi=count) -> rax

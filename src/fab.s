@@ -469,19 +469,16 @@ export_3mf:
     mov     ebx, eax
     mov     rdi, [rip+fb_comp]
     mov     rsi, [rip+fb_ccap]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     rdi, [rip+fb_model]
     mov     rsi, [rip+fb_mcap]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
     mov     eax, ebx
     jmp     .L3_out
 .L3_fail1:
     mov     rdi, [rip+fb_model]
     mov     rsi, [rip+fb_mcap]
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 .L3_fail:
     mov     eax, -12
     jmp     .L3_out
@@ -504,8 +501,7 @@ fmap:
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      1f
     xor     eax, eax

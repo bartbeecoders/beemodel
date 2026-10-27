@@ -410,16 +410,14 @@ nb_step:
     test    rdi, rdi
     jz      31f
     imul    rsi, [rip+nb_cap], NC_SZ
-    mov     eax, SYS_MUNMAP
-    syscall
+    call    plat_munmap
 31: imul    rsi, r13, NC_SZ
     xor     edi, edi
     mov     edx, PROT_RW
     mov     r10d, MAP_ANON_PRIV
     mov     r8, -1
     xor     r9d, r9d
-    mov     eax, SYS_MMAP
-    syscall
+    call    plat_mmap
     cmp     rax, -4096
     jb      32f
     mov     qword ptr [rip+nb_cells], 0
