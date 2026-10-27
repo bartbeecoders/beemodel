@@ -242,7 +242,7 @@ WIDGET wd_fb_cancel, WK_BUTTON, "files.cancel", "Cancel", aux=op_dlg_cancel
 WIDGET wd_fb_replace, WK_BUTTON, "files.replace", "Replace", flags=WGF_PRIMARY, aux=op_fb_ok
 WIDGET wd_fb_rename, WK_BUTTON, "files.ok", "Rename", flags=WGF_PRIMARY, aux=op_fb_ok
 WIDGET wd_fb_delete, WK_BUTTON, "files.ok", "Delete", flags=WGF_PRIMARY, aux=op_fb_ok
-WIDGET wd_fb_prev,   WK_BUTTON, "files.preview", "Preview", flags=WGF_NODRAW, tip="The scene as it was last saved"
+WIDGET wd_fb_prev,   WK_BUTTON, "files.preview", "Preview", flags=WGF_NODRAW, tip="Click to see it bigger and zoom in (a scene: as it was last saved)"
 WIDGET wd_fb_prev_no, WK_BUTTON, "files.preview", "No preview", flags=WGF_NODRAW, tip="This scene was saved without a picture (by a script, or before pictures were kept)"
 WIDGET wd_fb_prev_none, WK_BUTTON, "files.preview", "Pick a scene to see it", flags=WGF_NODRAW
 
@@ -255,6 +255,7 @@ fb_open:
     mov     [rip+fb_op], rdi
     mov     [rip+fb_desc], rsi
     mov     r13, rdx
+    call    fb_zoom_free
     mov     dword ptr [rip+fb_bee], 0   # .bee files in the filter: a preview
     mov     byte ptr [rip+fb_tpath], 0
     mov     rbx, [rsi+WD_AUX]
@@ -1458,6 +1459,17 @@ ext_in_list:
 fb_key:
     push    rbx
     mov     ebx, edi
+    cmp     dword ptr [rip+fb_zoom], 0  # the zoomed preview: Esc, Enter or
+    je      0f                          #  Space go back, other keys wait
+    cmp     ebx, KEY_ESC
+    je      98f
+    cmp     ebx, KEY_ENTER
+    je      98f
+    cmp     ebx, 57
+    jne     9f
+98: call    fb_zoom_free
+    jmp     9f
+0:
     call    kb_canon_mods               # Ctrl+H hidden; Alt+Left / Right
     test    eax, MOD_CTRL
     jz      31f
@@ -1614,7 +1626,11 @@ fb_draw:
     call    fb_crumbs                   # the folder's parts, the filter box
     call    fb_places                   # places, favourites, drives, recent
 6:  # the list
-    lea     r14d, [rbx+PLACES_W+14]     # x
+    cmp     dword ptr [rip+fb_zoom], 0  # (or the preview, zoomed)
+    je      63f
+    call    fb_zoom_draw
+    jmp     610f
+63: lea     r14d, [rbx+PLACES_W+14]     # x
     mov     r15d, FB_W-PLACES_W-32      # w (less the preview's column)
     mov     eax, [rip+fb_bee]
     or      eax, [rip+fb_img]
@@ -1688,7 +1704,8 @@ fb_draw:
     lea     esi, [r12+3]
     mov     rdx, [rsp+8]
     mov     ecx, COL_TEXT
-    call    draw_text
+    lea     r8d, [r15-28-10-DT_COL-8-SZ_COL-8]  # (up to the size column)
+    call    draw_text_fit
     mov     edi, r13d                   # its size (files) and date
     call    fb_row_meta
 .Lfd_next:
@@ -1898,6 +1915,10 @@ fb_preview:
     call    wg
     cmp     dword ptr [rip+fb_tok], 0
     je      4f
+    test    eax, eax                    # clicked: zoomed, over the list
+    jz      32f
+    call    fb_zoom_open
+32:
     lea     edi, [r12+1]
     mov     esi, r13d
     lea     rdx, [rip+th_view]
@@ -3167,5 +3188,468 @@ fmt_2d:                                 # edi = 0..99, two digits
     call    fmt_char
     pop     rdi
     jmp     fmt_int
+
+# ---- the preview, zoomed --------------------------------------------------------
+# A click on the preview shows the picture big, over the list: the wheel zooms
+# in about the pointer, a drag moves it, Fit / Close (or Esc) go back. An
+# image is read again at its full size; a scene shows its saved picture.
+.equ ZCOLS,     4096                    # (physical columns of the zoomed view)
+
+.section .bss
+.align 8
+fb_zoom:        .skip 4                 # 1 while the zoomed view shows
+fb_zw:          .skip 4                 # the picture: size, format (IM_FMT_),
+fb_zh:          .skip 4                 #  its pixels, the image to free
+fb_zfmt:        .skip 4
+fb_zx:          .skip 4                 # the view's box (logical)
+fb_zy:          .skip 4
+fb_zbw:         .skip 4
+fb_zbh:         .skip 4
+fb_zs:          .skip 4                 # float: the zoom (1 = the whole picture)
+fb_zcx:         .skip 4                 # float: the picture point at the centre
+fb_zcy:         .skip 4
+fb_zc0x:        .skip 4                 # (where a drag began)
+fb_zc0y:        .skip 4
+fb_zfit:        .skip 4                 # float: physical px a picture px at zoom 1
+fb_zmx:         .skip 4                 # float: the box's centre (physical)
+fb_zmy:         .skip 4
+fb_zpv:         .skip 8                 # (the pad's value)
+.align 8
+fb_zsrc:        .skip 8
+fb_zimg:        .skip 8
+fb_zcol:        .skip ZCOLS*4           # each column's picture x (-1: none)
+
+.section .rodata
+.align 4
+zf_one:         .float 1.0
+zf_half:        .float 0.5
+zf_in:          .float 1.25
+zf_out:         .float 0.8
+zf_max:         .float 64.0
+zf_255:         .float 255.0
+s_zx:           .asciz " x "
+s_zhint:        .asciz " px.  Wheel: zoom   Drag: move   Esc: back"
+.text
+
+WIDGET wd_fb_zpad,   WK_PAD, "files.zoom", cb=zpad_cb, n=100, tip="Wheel: zoom in or out. Drag: move the picture", sect=.data
+WIDGET wd_fb_zfit,   WK_BUTTON, "files.zoom_fit", "Fit", tip="The whole picture"
+WIDGET wd_fb_zclose, WK_BUTTON, "files.zoom_close", "Close", tip="Back to the files (Esc)"
+
+# fb_zoom_open - the zoomed view of the preview (fb_tpath, or th_view)
+fb_zoom_open:
+    push    rbx
+    call    fb_zoom_free
+    lea     rax, [rip+th_view]          # a scene: its picture
+    mov     [rip+fb_zsrc], rax
+    mov     dword ptr [rip+fb_zw], TW_
+    mov     dword ptr [rip+fb_zh], TH_
+    mov     dword ptr [rip+fb_zfmt], 0
+    lea     rdi, [rip+fb_tpath]
+    call    is_image
+    test    eax, eax
+    jz      5f
+    lea     rdi, [rip+fb_tpath]         # an image: all of it
+    call    file_read
+    test    rax, rax
+    jz      5f
+    push    rax
+    push    rdx
+    mov     rdi, rax
+    mov     rsi, rdx
+    call    img_decode
+    mov     rbx, rax
+    pop     rsi
+    pop     rdi
+    call    file_unmap
+    test    rbx, rbx
+    jz      5f
+    mov     eax, [rbx+IM_W_]
+    mov     ecx, [rbx+IM_H_]
+    test    eax, eax
+    jz      4f
+    test    ecx, ecx
+    jz      4f
+    mov     [rip+fb_zimg], rbx
+    mov     [rip+fb_zw], eax
+    mov     [rip+fb_zh], ecx
+    mov     eax, [rbx+IM_FMT_]
+    mov     [rip+fb_zfmt], eax
+    lea     rax, [rbx+IM_DATA_]
+    mov     [rip+fb_zsrc], rax
+    jmp     5f
+4:  mov     rdi, rbx
+    call    img_free
+5:  call    zoom_fit
+    mov     dword ptr [rip+fb_zoom], 1
+    mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    ret
+
+# zoom_fit - the whole picture, centred
+zoom_fit:
+    mov     eax, [rip+zf_one]
+    mov     [rip+fb_zs], eax
+    cvtsi2ss xmm0, dword ptr [rip+fb_zw]
+    mulss   xmm0, [rip+zf_half]
+    movss   [rip+fb_zcx], xmm0
+    cvtsi2ss xmm0, dword ptr [rip+fb_zh]
+    mulss   xmm0, [rip+zf_half]
+    movss   [rip+fb_zcy], xmm0
+    mov     dword ptr [rip+dirty], 1
+    ret
+
+# fb_zoom_free - back to the files (the image read for it freed)
+fb_zoom_free:
+    mov     dword ptr [rip+fb_zoom], 0
+    mov     dword ptr [rip+dirty], 1
+    mov     rdi, [rip+fb_zimg]
+    test    rdi, rdi
+    jz      9f
+    mov     qword ptr [rip+fb_zimg], 0
+    jmp     img_free
+9:  ret
+
+# fb_zoom_wheel(edi=wheel value) -> eax = 1 when the zoomed view took it: in
+#   (up) or out about the pointer
+.globl fb_zoom_wheel
+fb_zoom_wheel:
+    xor     eax, eax
+    cmp     dword ptr [rip+fb_zoom], 0
+    je      9f
+    cmp     dword ptr [rip+dlg_open], 0
+    je      9f
+    cmp     dword ptr [rip+dlg_kind], 3 # (DLG_FILE)
+    jne     9f
+    mov     ecx, [rip+ptr_x]            # over it?
+    sub     ecx, [rip+fb_zx]
+    js      9f
+    cmp     ecx, [rip+fb_zbw]
+    jae     9f
+    mov     ecx, [rip+ptr_y]
+    sub     ecx, [rip+fb_zy]
+    js      9f
+    cmp     ecx, [rip+fb_zbh]
+    jae     9f
+    push    rbx
+    mov     ebx, edi
+    mov     edi, [rip+ptr_x]            # the picture point under the pointer
+    call    to_px                       #  stays there
+    cvtsi2ss xmm4, eax
+    addss   xmm4, [rip+zf_half]
+    subss   xmm4, [rip+fb_zmx]          # (x from the centre, physical)
+    mov     edi, [rip+ptr_y]
+    call    to_px
+    cvtsi2ss xmm5, eax
+    addss   xmm5, [rip+zf_half]
+    subss   xmm5, [rip+fb_zmy]
+    movss   xmm0, [rip+fb_zfit]
+    mulss   xmm0, [rip+fb_zs]           # xmm0 = the old scale
+    movss   xmm1, [rip+fb_zs]
+    test    ebx, ebx
+    js      1f
+    mulss   xmm1, [rip+zf_out]
+    jmp     2f
+1:  mulss   xmm1, [rip+zf_in]
+2:  maxss   xmm1, [rip+zf_one]
+    minss   xmm1, [rip+zf_max]
+    movss   [rip+fb_zs], xmm1
+    ucomiss xmm1, [rip+zf_one]
+    jne     3f
+    call    zoom_fit                    # (all the way out: centred again)
+    jmp     8f
+3:  mulss   xmm1, [rip+fb_zfit]         # xmm1 = the new scale
+    movaps  xmm2, xmm4                  # c += d / old - d / new
+    divss   xmm2, xmm0
+    movaps  xmm3, xmm4
+    divss   xmm3, xmm1
+    subss   xmm2, xmm3
+    addss   xmm2, [rip+fb_zcx]
+    movss   [rip+fb_zcx], xmm2
+    movaps  xmm2, xmm5
+    divss   xmm2, xmm0
+    movaps  xmm3, xmm5
+    divss   xmm3, xmm1
+    subss   xmm2, xmm3
+    addss   xmm2, [rip+fb_zcy]
+    movss   [rip+fb_zcy], xmm2
+8:  mov     dword ptr [rip+dirty], 1
+    mov     eax, 1
+    pop     rbx
+9:  ret
+
+# zpad_cb - the zoomed view pressed or dragged: the picture moves with it
+zpad_cb:
+    sub     rsp, 8
+    mov     eax, [rip+ptr_x]            # a press: where the drag began
+    cmp     eax, [rip+wg_x0]
+    jne     1f
+    mov     eax, [rip+ptr_y]
+    cmp     eax, [rip+wg_y0]
+    jne     1f
+    mov     eax, [rip+fb_zcx]
+    mov     [rip+fb_zc0x], eax
+    mov     eax, [rip+fb_zcy]
+    mov     [rip+fb_zc0y], eax
+    jmp     9f
+1:  movss   xmm0, [rip+fb_zfit]
+    mulss   xmm0, [rip+fb_zs]
+    movss   [rsp], xmm0
+    mov     edi, [rip+ptr_x]
+    sub     edi, [rip+wg_x0]
+    call    to_px
+    cvtsi2ss xmm1, eax
+    divss   xmm1, [rsp]
+    movss   xmm0, [rip+fb_zc0x]
+    subss   xmm0, xmm1
+    movss   [rip+fb_zcx], xmm0
+    mov     edi, [rip+ptr_y]
+    sub     edi, [rip+wg_y0]
+    call    to_px
+    cvtsi2ss xmm1, eax
+    divss   xmm1, [rsp]
+    movss   xmm0, [rip+fb_zc0y]
+    subss   xmm0, xmm1
+    movss   [rip+fb_zcy], xmm0
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
+    ret
+
+# fb_zoom_draw (ebx = the browser's x, ebp = its y) - the zoomed view over
+#   the list and the preview's column
+fb_zoom_draw:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 56
+    lea     eax, [rbx+PLACES_W+14]
+    mov     [rip+fb_zx], eax
+    lea     eax, [rbp+LIST_Y-28]
+    mov     [rip+fb_zy], eax
+    mov     dword ptr [rip+fb_zbw], FB_W-PLACES_W-32
+    mov     dword ptr [rip+fb_zbh], LIST_H+28
+    mov     dword ptr [rip+wd_fb_zpad+WD_N], LIST_H+28
+    mov     edi, [rip+fb_zx]
+    mov     esi, [rip+fb_zy]
+    mov     edx, [rip+fb_zbw]
+    mov     ecx, [rip+fb_zbh]
+    mov     r8d, 0x101114
+    call    fill_rect
+    lea     rdi, [rip+wd_fb_zpad]       # (its hit area: drags, the wheel)
+    mov     esi, [rip+fb_zx]
+    mov     edx, [rip+fb_zy]
+    mov     ecx, [rip+fb_zbw]
+    lea     r8, [rip+fb_zpv]
+    xor     r9d, r9d
+    call    wg
+    mov     edi, [rip+fb_zx]            # the box, physical: x0 y0 x1 y1
+    call    to_px
+    mov     [rsp], eax
+    mov     edi, [rip+fb_zy]
+    call    to_px
+    mov     [rsp+4], eax
+    mov     edi, [rip+fb_zx]
+    add     edi, [rip+fb_zbw]
+    call    to_px
+    mov     [rsp+8], eax
+    mov     edi, [rip+fb_zy]
+    add     edi, [rip+fb_zbh]
+    call    to_px
+    mov     [rsp+12], eax
+    mov     eax, [rsp+8]                # the fit: the smaller of the two
+    sub     eax, [rsp]
+    cvtsi2ss xmm0, eax
+    cvtsi2ss xmm1, dword ptr [rip+fb_zw]
+    divss   xmm0, xmm1
+    mov     eax, [rsp+12]
+    sub     eax, [rsp+4]
+    cvtsi2ss xmm2, eax
+    cvtsi2ss xmm1, dword ptr [rip+fb_zh]
+    divss   xmm2, xmm1
+    minss   xmm0, xmm2
+    movss   [rip+fb_zfit], xmm0
+    mulss   xmm0, [rip+fb_zs]
+    movss   [rsp+16], xmm0              # the scale
+    mov     eax, [rsp]                  # the centre
+    add     eax, [rsp+8]
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+zf_half]
+    movss   [rip+fb_zmx], xmm0
+    mov     eax, [rsp+4]
+    add     eax, [rsp+12]
+    cvtsi2ss xmm0, eax
+    mulss   xmm0, [rip+zf_half]
+    movss   [rip+fb_zmy], xmm0
+    mov     eax, [rsp]                  # the columns drawn: in the clip
+    cmp     eax, [rip+clip_x0]
+    cmovl   eax, [rip+clip_x0]
+    mov     [rsp+20], eax
+    mov     eax, [rsp+8]
+    cmp     eax, [rip+clip_x1]
+    cmovg   eax, [rip+clip_x1]
+    mov     ecx, [rsp+20]
+    add     ecx, ZCOLS
+    cmp     eax, ecx
+    cmovg   eax, ecx
+    mov     [rsp+24], eax
+    mov     r12d, [rsp+20]              # each column's picture x
+    lea     r13, [rip+fb_zcol]
+1:  cmp     r12d, [rsp+24]
+    jge     2f
+    call    zoom_col
+    mov     ecx, r12d
+    sub     ecx, [rsp+20]
+    mov     [r13+rcx*4], eax
+    inc     r12d
+    jmp     1b
+2:  mov     r12d, [rsp+4]               # the rows
+    cmp     r12d, [rip+clip_y0]
+    cmovl   r12d, [rip+clip_y0]
+    mov     eax, [rsp+12]
+    cmp     eax, [rip+clip_y1]
+    cmovg   eax, [rip+clip_y1]
+    mov     [rsp+28], eax
+3:  cmp     r12d, [rsp+28]
+    jge     7f
+    cvtsi2ss xmm0, r12d                 # its picture y
+    addss   xmm0, [rip+zf_half]
+    subss   xmm0, [rip+fb_zmy]
+    divss   xmm0, [rsp+16]
+    addss   xmm0, [rip+fb_zcy]
+    xorps   xmm1, xmm1
+    ucomiss xmm0, xmm1
+    jb      6f
+    cvttss2si r14d, xmm0
+    cmp     r14d, [rip+fb_zh]
+    jae     6f
+    imul    r14d, [rip+fb_zw]           # (its first pixel)
+    mov     r15d, r12d
+    imul    r15d, [rip+fb_w]
+    mov     ebx, [rsp+20]
+4:  cmp     ebx, [rsp+24]
+    jge     6f
+    mov     ecx, ebx
+    sub     ecx, [rsp+20]
+    mov     eax, [r13+rcx*4]
+    test    eax, eax
+    js      5f
+    add     eax, r14d
+    call    zoom_px
+    lea     ecx, [r15+rbx]
+    mov     rdx, [rip+fb_ptr]
+    mov     [rdx+rcx*4], eax
+5:  inc     ebx
+    jmp     4b
+6:  inc     r12d
+    jmp     3b
+7:  mov     edi, [rip+fb_zx]            # (a dim strip under the bottom row)
+    mov     esi, [rip+fb_zy]
+    add     esi, [rip+fb_zbh]
+    sub     esi, 16+WG_H
+    mov     edx, [rip+fb_zbw]
+    mov     ecx, 16+WG_H
+    mov     r8d, COL_SHADOW
+    mov     r9d, 150
+    call    fill_rect_a
+    call    fmt_reset                   # the picture's size, how to use it
+    mov     edi, [rip+fb_zw]
+    call    fmt_int
+    lea     rdi, [rip+s_zx]
+    call    fmt_str
+    mov     edi, [rip+fb_zh]
+    call    fmt_int
+    lea     rdi, [rip+s_zhint]
+    call    fmt_str
+    mov     edi, [rip+fb_zx]
+    add     edi, 10
+    mov     esi, [rip+fb_zy]
+    add     esi, [rip+fb_zbh]
+    sub     esi, 26
+    lea     rdx, [rip+fmt_buf]
+    mov     ecx, COL_TEXT
+    call    draw_small
+    lea     rdi, [rip+wd_fb_zfit]       # Fit, Close
+    mov     esi, [rip+fb_zx]
+    add     esi, [rip+fb_zbw]
+    sub     esi, 8+80+6+80
+    mov     edx, [rip+fb_zy]
+    add     edx, [rip+fb_zbh]
+    sub     edx, 8+WG_H
+    mov     ecx, 80
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    test    eax, eax
+    jz      8f
+    call    zoom_fit
+8:  lea     rdi, [rip+wd_fb_zclose]
+    mov     esi, [rip+fb_zx]
+    add     esi, [rip+fb_zbw]
+    sub     esi, 8+80
+    mov     edx, [rip+fb_zy]
+    add     edx, [rip+fb_zbh]
+    sub     edx, 8+WG_H
+    mov     ecx, 80
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    test    eax, eax
+    jz      9f
+    call    fb_zoom_free
+9:  add     rsp, 56
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# zoom_col(r12d=physical x, [rsp+24]=the scale in the caller's frame)
+#   -> eax = the picture's column there, -1 outside it
+zoom_col:
+    cvtsi2ss xmm0, r12d
+    addss   xmm0, [rip+zf_half]
+    subss   xmm0, [rip+fb_zmx]
+    divss   xmm0, [rsp+24]              # (+8: the return address)
+    addss   xmm0, [rip+fb_zcx]
+    xorps   xmm1, xmm1
+    ucomiss xmm0, xmm1
+    jb      8f
+    cvttss2si eax, xmm0
+    cmp     eax, [rip+fb_zw]
+    jae     8f
+    ret
+8:  mov     eax, -1
+    ret
+
+# zoom_px(eax=pixel index) -> eax = its colour (0xRRGGBB)
+zoom_px:
+    mov     rdx, [rip+fb_zsrc]
+    cmp     dword ptr [rip+fb_zfmt], 0
+    jne     1f
+    mov     eax, [rdx+rax*4]            # 8-bit: as it is
+    and     eax, 0xffffff
+    ret
+1:  lea     rax, [rax+rax*2]            # HDR: linear floats, roughly sRGB
+    lea     rsi, [rdx+rax*4]
+    xor     edx, edx
+    xor     ecx, ecx
+2:  movss   xmm0, [rsi+rcx*4]
+    xorps   xmm1, xmm1
+    maxss   xmm0, xmm1
+    minss   xmm0, [rip+zf_one]
+    sqrtss  xmm0, xmm0
+    mulss   xmm0, [rip+zf_255]
+    cvtss2si eax, xmm0
+    shl     edx, 8
+    or      edx, eax
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
+    mov     eax, edx
+    ret
 
 .section .note.GNU-stack,"",@progbits

@@ -1437,7 +1437,14 @@ ui_axis:
     cmp     dword ptr [rip+etool], 0    # an edit tool (loop cut: cuts)
     je      0f
     jmp     etool_wheel
-0:  push    rsi
+0:  push    rsi                         # the file browser's zoomed preview
+    mov     edi, esi
+    call    fb_zoom_wheel
+    pop     rsi
+    test    eax, eax
+    jz      766f
+    ret
+766: push   rsi
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
     call    hit_test
@@ -1649,9 +1656,11 @@ ui_key:
 2:  pop     rbx
 9:  ret
 
-# typing -> eax = 1 while the console or a widget field takes text
+# typing -> eax = 1 while the console, the palette or a widget field takes
+#   text (held keys repeat: letters, Backspace, Up / Down through a list)
 typing:
     mov     eax, [rip+tf_focus]
+    or      eax, [rip+pal_open]
     test    eax, eax
     jnz     1f
     jmp     wg_editing
@@ -1851,10 +1860,11 @@ ui_draw:
     cmp     dword ptr [rip+menu_open], 0
     jl      5f
     call    mn_draw
-5:  call    wg_pop_draw                 # an enum's list (over a dialog: its
-                                        #  clicks go to it, so it shows)
+5:  call    ov_draw                     # the welcome screen, the shortcuts
+    call    wg_pop_draw                 # an enum's list (over a dialog or the
+                                        #  welcome screen: its clicks go to it,
+                                        #  so it shows)
     call    cpk_draw                     # the colour picker (over a dialog too)
-    call    ov_draw                     # the welcome screen, the shortcuts
     jmp     tip_draw                    # tooltips on top of everything
 
 # run_op_ui(rdi=op) - a menu item or a button: runs it, or when it cannot run

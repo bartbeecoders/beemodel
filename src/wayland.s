@@ -148,7 +148,7 @@ e_shm:          .asciz "beemodel: shared memory allocation failed\n"
 e_proto:        .asciz "beemodel: protocol error: "
 # what the program says about its platform (main.s, ops.s)
 s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Wayland, zero libraries"
-s_about2:       .asciz "  Talks the Wayland wire protocol directly; no libc, no toolkits"
+s_about2:       .asciz "Written in x86-64 assembly: it talks Wayland directly,"
 s_help_plat:    .ascii "BeeModel - 3D modeling shell in pure x86-64 assembly (Wayland).\n"
                 .asciz "Needs a Wayland session (WAYLAND_DISPLAY).\n"
 

@@ -72,6 +72,7 @@
 .equ MIN_AREA,  60
 .equ HDR_BTN_W, 22
 .equ TYPE_BTN_W, 130
+.equ HDR_TITLE_W, 100                   # (room kept for the title: hdr_nbtn)
 .equ CAM_SZ,    24
 
 .macro NODE kind, ed, parent, ratio, a, b
@@ -507,13 +508,18 @@ area_hit:
     cmp     r12d, ecx
     jge     .Lah_body
     # header: buttons from the right (close, stack, side, maximize)
+    push    rax
+    mov     rdi, rax
+    call    hdr_nbtn                    # (as many as leave the title room)
+    imul    edi, eax, HDR_BTN_W         # the row's width
+    pop     rax
     mov     ecx, [rax+N_X]
     add     ecx, [rax+N_W]
     sub     ecx, 4                      # right edge of the button row
     mov     edx, ecx
     sub     edx, ebx                    # distance from the right
     js      3f
-    cmp     edx, 4*HDR_BTN_W
+    cmp     edx, edi
     jae     3f
     mov     eax, edx
     xor     edx, edx
@@ -975,7 +981,9 @@ draw_leaf:
     mov     r8d, COL_ACCENT
 7:  call    draw_icon
 8:  inc     r13d
-    cmp     r13d, 4
+    mov     rdi, r12                    # (as many as leave the title room)
+    call    hdr_nbtn
+    cmp     r13d, eax
     jb      4b
 
     # body
@@ -1627,6 +1635,14 @@ ed_outliner_draw:
     inc     ebx
     jmp     .Lod_next
 .Lod_done:
+    mov     edi, [rip+ed_x]             # (on its own strip: a short outliner's
+    mov     esi, [rip+ed_y]             #  rows go under it)
+    add     esi, [rip+ed_h]
+    sub     esi, WG_H+4
+    mov     edx, [rip+ed_w]
+    mov     ecx, WG_H+4
+    mov     r8d, COL_PANE_BG
+    call    fill_rect
     lea     rdi, [rip+wd_outl_filter]   # the filter, at the bottom
     mov     esi, [rip+ed_x]
     add     esi, 6
@@ -3616,5 +3632,19 @@ WIDGET wd_obj_name,  WK_TEXT,  "object.name", , flags=WGF_COMPACT, cb=props_rena
 WIDGET wd_obj_loc,   WK_FLOAT, "object.location", , step=0.01, dec=3, flags=WGF_COMPACT, cb=props_xform, undo="Move", tip="Where the object is, in scene units. Drag sideways (Shift: finer, Ctrl: steps), or click and type a value or expression: 25mm, 2*pi", def=0.0
 WIDGET wd_obj_rot,   WK_FLOAT, "object.rotation", , step=0.00872665, dec=1, flags=WGF_COMPACT|WGF_DEG, cb=props_xform, undo="Rotate", tip="Euler XYZ rotation in degrees. Drag sideways, or click and type: 90, 45+15, 1.2rad", def=0.0
 WIDGET wd_obj_scale, WK_FLOAT, "object.scale", , step=0.005, dec=3, flags=WGF_COMPACT, cb=props_xform, undo="Scale", tip="Size along each axis (1 = as modelled). Drag sideways, or click and type a factor", def=1.0
+
+# hdr_nbtn(rdi=node) -> eax = the header buttons shown (1..4): from the right,
+#   close, stack, side by side, maximize - as many as leave the title room
+hdr_nbtn:
+    mov     ecx, [rdi+N_W]
+    mov     eax, 4
+1:  imul    edx, eax, HDR_BTN_W
+    add     edx, 4+HDR_TITLE_W
+    cmp     ecx, edx
+    jge     9f
+    dec     eax
+    cmp     eax, 1
+    jg      1b
+9:  ret
 
 .section .note.GNU-stack,"",@progbits

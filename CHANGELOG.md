@@ -6,6 +6,22 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **AI Assistant: Ollama (local)**, a fourth connection next to OpenRouter.
+  It runs OpenRouter's in-process tool loop against Ollama on this machine
+  (Preferences › AI › Ollama (local): Model, Address, Steps at most; Test
+  Ollama says whether it runs and has the model). No key is sent, and the
+  model is asked not to think (`"reasoning_effort": "none"`): a thinking
+  model otherwise answered inside its reasoning, which is not shown, and a
+  fine-tuned BeeModel model built worse with it.
+
+### Changed
+- **AI instructions: the placeholder Cube.** The world-building
+  instructions (AI Assistant and MCP's `build_world`) now say what to do
+  with a new scene's 2 m Cube: delete it before building something new,
+  unless the request mentions it, and never build into objects that stay.
+  Models used to build around the origin, inside the Cube.
+
 ### Added (stage T, 3D text, #387-#390)
 - **Add › Text** and `text.add ["body"] [size] [depth] [font] ...`: 3D text
   from the system's TrueType fonts (or the built-in block font), standing
@@ -47,6 +63,26 @@ project uses [Semantic Versioning](https://semver.org/).
 ### Changed
 - The release binary may be up to 2 MB (`ci/check-binary.sh`), as the
   masterplan allows from 1.0; it was 1.5 MiB.
+
+### Fixed (UI review)
+- The welcome screen's keymap list opened under the welcome screen, so
+  it seemed to do nothing; option lists now show over it.
+- Option lists are as wide as their longest option (and stay in the
+  window); a closed option field cuts its value short with "..." before
+  the arrow.
+- Menus and submenus are as wide as their longest label with its
+  shortcut (AI Assistant, Extrude Individual Faces ran into theirs).
+- **Help › About BeeModel** shows an About box (it only wrote to the
+  console).
+- Held keys repeat in the command palette: Up / Down keep moving,
+  Backspace keeps deleting.
+- The file browser cuts long names short before the Size column, and a
+  click on the preview shows the picture big: the wheel zooms in about
+  the pointer, a drag moves it, Fit / Close or Esc go back.
+- Panel hints wrap to the panel's width instead of running off it;
+  button captions and section titles too wide for their space end in "...".
+- A narrow area drops header buttons (maximize first) rather than cover
+  its title; a short outliner's rows no longer show through its filter.
 
 ## [1.1.0] - 2026-10-23
 

@@ -203,7 +203,7 @@ e_window:       .asciz "beemodel: cannot create the window\n"
 e_fb:           .asciz "beemodel: no memory for the frame\n"
 # what the program says about its platform (main.s, ops.s)
 s_log_hello:    .asciz "BeeModel shell started - x86-64 assembly, Win32, zero libraries"
-s_about2:       .asciz "  Calls Windows' own DLLs directly; no C runtime, no toolkits"
+s_about2:       .asciz "Written in x86-64 assembly: it calls Win32 directly,"
 s_help_plat:    .asciz "BeeModel - 3D modeling shell in pure x86-64 assembly (Windows).\n"
 # cursor-shape-v1 shapes (0..34) -> IDC_* - IDC_ARROW
 .balign 2

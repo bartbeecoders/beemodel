@@ -116,8 +116,9 @@ sel_f:          .asciz "face"
 n_claude:       .asciz "Claude Code"
 n_grok:         .asciz "Grok"
 n_or:           .asciz "OpenRouter"
+n_ol:           .asciz "Ollama"
 .align 8
-prov_names:     .quad n_claude, n_grok, n_or
+prov_names:     .quad n_claude, n_grok, n_or, n_ol
 sel_modes:      .quad sel_v, sel_e, sel_f
 chips_obj:      .quad s_q_bigger, s_q_smaller, s_q_material, s_q_around
 chips_edit:     .quad s_e_bigger, s_e_smaller, s_q_material, s_e_around
@@ -1173,7 +1174,7 @@ ask_draw:
     lea     rsi, [rip+s_via]
     call    cpy0
     mov     eax, [rip+ai_prov]
-    cmp     eax, 2
+    cmp     eax, 3
     jbe     13f
     xor     eax, eax
 13: lea     rcx, [rip+prov_names]

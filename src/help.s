@@ -22,9 +22,13 @@
 .globl vp_quick_draw
 .globl ed_help_draw
 .globl help_note
+.globl help_about
 
 .equ OV_WELCOME, 1
 .equ OV_KEYS,    2
+.equ OV_ABOUT,   3
+.equ AB_W,       460
+.equ AB_H,       230
 .equ WL_W,       720
 .equ WL_H,       420
 .equ KS_W,       560
@@ -57,6 +61,11 @@ s_h_start:      .asciz "Start"
 s_h_recent:     .asciz "Recent"
 s_h_samples:    .asciz "Samples"
 s_h_keys:       .asciz "Keyboard Shortcuts"
+s_ab_title:     .asciz "BeeModel"
+s_ab1:          .asciz "A 3D modeler, CAD and renderer in one small program."
+s_ab3:          .asciz "with no libc and no toolkits."
+s_ab4:          .asciz "MIT License. Copyright (c) 2026 Bart Roelant"
+s_ab5:          .asciz "github.com/bartbeecoders/beemodel"
 s_no_recent:    .asciz "Nothing opened yet."
 s_quick:        .asciz "This scene is empty."
 s_quick2:       .asciz "Add something, or open a scene."
@@ -116,6 +125,11 @@ do_welcome:
     mov     dword ptr [rip+ov_on], OV_WELCOME
     mov     dword ptr [rip+dirty], 1
     ret
+# help_about - the About box (help.about)
+help_about:
+    mov     dword ptr [rip+ov_on], OV_ABOUT
+    mov     dword ptr [rip+dirty], 1
+    ret
 do_keys:
     mov     dword ptr [rip+ov_on], OV_KEYS
     mov     byte ptr [rip+ks_search], 0
@@ -169,12 +183,24 @@ WIDGET wd_wl_close, WK_BUTTON, "welcome.close", "Close", tip="Esc"
 WIDGET wd_ks_search, WK_TEXT, "shortcuts.search", "Find", tip="Part of an operator's name or label"
 WIDGET wd_ks_scroll, WK_SCROLL, "shortcuts.list"
 WIDGET wd_ks_close, WK_BUTTON, "shortcuts.close", "Close", tip="Esc"
+WIDGET wd_ab_close, WK_BUTTON, "about.close", "Close", flags=WGF_PRIMARY, tip="Esc"
 
 .section .rodata
 .align 8
 wl_start:       .quad wd_wl_default, 0, wd_wl_empty, k_empty, wd_wl_product, k_product
                 .quad wd_wl_character, k_character, wd_wl_terrain, k_terrain, 0
 wl_samples:     .quad wd_wl_tree, k_tree, wd_wl_ball, k_ball, 0
+ab_lines:       .quad s_ab1
+                .long COL_TEXT, 12
+                .quad s_about2                 # the platform's window (wayland.s, plat_win_wnd.s)
+                .long COL_TEXT_DIM, 30
+                .quad s_ab3
+                .long COL_TEXT_DIM, 20
+                .quad s_ab4
+                .long COL_TEXT_DIM, 30
+                .quad s_ab5
+                .long COL_ACCENT, 20
+                .quad 0
 .text
 
 # ov_draw - an open overlay over everything (but tooltips)
@@ -199,6 +225,8 @@ ov_draw:
     mov     [rip+ov_floor], eax
     cmp     dword ptr [rip+ov_on], OV_KEYS
     je      .Lov_keys
+    cmp     dword ptr [rip+ov_on], OV_ABOUT
+    je      .Lov_about
 
     # ---- the welcome screen ----
     mov     eax, [rip+win_w]
@@ -328,7 +356,8 @@ ov_draw:
     lea     edi, [r12+8]
     lea     esi, [r15+1]
     mov     ecx, COL_TEXT
-    call    draw_text
+    mov     r8d, 210-16
+    call    draw_text_fit
     test    r14d, r14d
     jz      41f
     lea     rax, [rip+rec_ops]
@@ -372,7 +401,7 @@ ov_draw:
     lea     rdi, [rip+wd_wl_keymap]
     mov     esi, r12d
     mov     edx, r15d
-    mov     ecx, 220
+    mov     ecx, 200
     lea     r8, [rip+wl_keymap]
     xor     r9d, r9d
     call    wg
@@ -500,6 +529,75 @@ ov_draw:
     jmp     2b
 8:  mov     edi, r12d
     call    wg_scroll_end
+
+.Lov_about:                             # ---- About ----
+    mov     eax, [rip+win_w]
+    sub     eax, AB_W
+    sar     eax, 1
+    mov     [rip+ov_x], eax
+    mov     eax, [rip+win_h]
+    sub     eax, AB_H
+    sar     eax, 1
+    mov     [rip+ov_y], eax
+    mov     edi, [rip+ov_x]
+    mov     esi, [rip+ov_y]
+    mov     edx, AB_W
+    mov     ecx, AB_H
+    mov     r8d, COL_DROP_BORDER
+    call    popup_frame
+    mov     edi, [rip+ov_x]
+    add     edi, 24
+    mov     esi, [rip+ov_y]
+    add     esi, 18
+    lea     rdx, [rip+s_ab_title]
+    mov     ecx, COL_ACCENT
+    call    draw_heading
+    lea     rdi, [rip+s_version]        # the version, top right: "v1.1.0"
+    call    text_width_small
+    mov     ebx, [rip+ov_x]
+    add     ebx, AB_W-24
+    sub     ebx, eax
+    mov     edi, ebx
+    mov     esi, [rip+ov_y]
+    add     esi, 22
+    lea     rdx, [rip+s_version]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_small
+    lea     rdi, [rip+s_ver_v]
+    call    text_width_small
+    sub     ebx, eax
+    mov     edi, ebx
+    mov     esi, [rip+ov_y]
+    add     esi, 22
+    lea     rdx, [rip+s_ver_v]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_small
+    lea     r12, [rip+ab_lines]         # the lines: text, colour, gap above
+    mov     r13d, [rip+ov_y]
+    add     r13d, 38
+1:  mov     rdx, [r12]
+    test    rdx, rdx
+    jz      2f
+    add     r13d, [r12+12]
+    mov     edi, [rip+ov_x]
+    add     edi, 24
+    mov     esi, r13d
+    mov     ecx, [r12+8]
+    call    draw_text
+    add     r12, 16
+    jmp     1b
+2:  lea     rdi, [rip+wd_ab_close]
+    mov     esi, [rip+ov_x]
+    add     esi, AB_W-24-100
+    mov     edx, [rip+ov_y]
+    add     edx, AB_H-40
+    mov     ecx, 100
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    test    eax, eax
+    jz      .Lov_out
+    call    ov_close
 
 .Lov_out:
     pop     r15

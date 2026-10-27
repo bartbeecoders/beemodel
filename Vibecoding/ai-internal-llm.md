@@ -174,3 +174,31 @@ Create the tooling to be able to do this (under a seperate folder: beemodel-llm)
 As I'm new to all this, take me through the process step by step. 
 Download all you need to do this. Write the tooling in a programming language of you choice.
 Make sure that we can repeat the process, maybe later extend it to other models.
+
+## Proof of concept (2026-10-24)
+
+Done in the sibling project `../beemodel-llm` (Python, Unsloth; its README
+is the step-by-step walkthrough). Base: Qwen3.5 4B, 16-bit LoRA r=32 on an
+RTX 4080 Super, 10 GB of VRAM, 98 minutes for two epochs over 2979 generated
+and verified records (tiers 1 to 5 of the design above, every record run
+through `beemodel --eval` before it is kept). Merged to GGUF and registered
+in Ollama as `beemodel-ai:run1-q8_0` and `beemodel-ai:run1-q4_k_m`;
+BeeModel talks to it over the OpenRouter connection at
+`http://localhost:11434/v1`.
+
+Evaluation set of 110 hand-written requests, checked geometrically in
+headless BeeModel:
+
+| model | pass | Ask AI edits | single objects | scenes | edits in context | questions |
+|---|---|---|---|---|---|---|
+| stock qwen3.5:4b | 19.1% | 31% | 4% | 0% | 27% | 80% |
+| stock + cheat sheet (phase 0) | 22.7% | 43% | 7% | 10% | 20% | 60% |
+| tuned, Q8_0 | 80.9% | 91% | 78% | 60% | 80% | 80% |
+| tuned, Q4_K_M | 80.9% | 91% | 78% | 60% | 80% | 80% |
+
+Script errors fell from 299 to about 30. The remaining failures are shapes
+the data factory has no family for and small height sums, which confirms
+the expectation above: quality tracks the data. Not done yet: stage 2
+(rejection sampling against the verifier), error-and-recovery samples,
+vision grading, a held-out check for memorisation (final loss 0.003 to
+0.007 is suspiciously low).

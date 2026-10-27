@@ -18,7 +18,9 @@ answers with scripted tool calls and checks what it is sent. In a window
     in a header file only the user can read) until the model answers, or
     the step limit; the world recipe of the system prompt builds terrain,
     a house, materials, a light and a camera;
-  - Preferences > AI: the Test buttons; MCP's build_world prompt.
+  - Preferences > AI: the Test buttons; MCP's build_world prompt;
+  - Ollama (local): OpenRouter's tool loop against a local server, with no
+    key and with thinking off; its Test says whether it has the model.
 
     python3 tests/ai.py build/beemodel [outdir]
 """
@@ -63,6 +65,7 @@ op("camera.set", "active")
 print("world", count())'''
 
 SEEN = []
+LOCAL = []                                          # what the stand-in Ollama was sent
 
 
 def call(i, name, args):
@@ -86,6 +89,10 @@ class OpenRouter(http.server.BaseHTTPRequestHandler):
         return self.headers.get('Authorization') == 'Bearer ' + KEY
 
     def do_GET(self):
+        if self.path.startswith('/ollama/'):            # a stand-in Ollama: no key
+            if self.path.endswith('/models'):
+                return self.reply(200, {'object': 'list', 'data': [{'id': 'other:7b'}, {'id': 'test-local:1b'}]})
+            return self.reply(404, {'error': {'message': 'not found'}})
         if self.path.endswith('/key') and self.authorized():
             self.reply(200, {'data': {'label': 'test', 'usage': 0}})
         else:
@@ -93,8 +100,9 @@ class OpenRouter(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-        SEEN.append({'auth': self.authorized(), 'body': body})
-        if not self.authorized():
+        local = self.path.startswith('/ollama/')
+        (LOCAL if local else SEEN).append({'auth': self.headers.get('Authorization'), 'body': body, 'path': self.path})
+        if not local and not self.authorized():
             return self.reply(401, {'error': {'message': 'No auth credentials found', 'code': 401}})
         msgs = body['messages']
         user = [m['content'] for m in msgs if m['role'] == 'user'][-1]
@@ -137,6 +145,7 @@ def main():
     with open(os.path.join(cfg, 'prefs'), 'w') as fp:
         fp.write('openrouter_url http://127.0.0.1:%d/api/v1\nopenrouter_steps 4\n'
                  'openrouter_model test/model\n' % srv.server_port)
+        fp.write('ollama_url http://127.0.0.1:%d/ollama/v1/\nollama_model test-local:1b\n' % srv.server_port)
     bindir = os.path.join(home, 'bin')
     os.makedirs(bindir)
     for n in ('claude', 'grok'):
@@ -178,7 +187,7 @@ def main():
         f.key(28)                                   # Enter
         f.pump(0.2)
 
-    def connection(row):                            # 0 Claude Code, 1 Grok, 2 OpenRouter
+    def connection(row):                            # 0 Claude Code, 1 Grok, 2 OpenRouter, 3 Ollama
         fakewl.pick_enum(f, m, 'ai.connection', 0, row)
         return (fakewl.widget(m, 'ai.connection') or {}).get('value')
 
@@ -445,6 +454,49 @@ def main():
     text = pg['messages'][0]['content']['text']
     check('build_world' in [p['name'] for p in pl] and 'scene_summary' in text and text.endswith('a castle'),
           'MCP prompts: build_world gives other agents the same instructions')
+
+    # -- Ollama on this machine
+    print('  -- Ollama (local) --')
+    w = fakewl.widget(m, 'ai.new')
+    f.click(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2)
+    f.pump(0.2)
+    v = connection(3)
+    n0 = len(SEEN)
+    send('make a ring')
+    t = wait_idle()
+    tx = '\n'.join(t)
+    req = [x['body'] for x in LOCAL]
+    check(v == 3 and q('print(exists("Ring3"))') == '1' and 'A Made a ring of 4 spheres.' in tx
+          and len(req) == 3 and len(SEEN) == n0,
+          f'Ollama: the same tool loop, sent to the local address only ({len(req)} requests)')
+    check(all(x['path'] == '/ollama/v1/chat/completions' and x['auth'] is None for x in LOCAL)
+          and all(b['model'] == 'test-local:1b' and b.get('reasoning_effort') == 'none' for b in req)
+          and req[0]['messages'][0]['role'] == 'system',
+          'each request: the Ollama model, thinking off, no key sent')
+    f.mods(4); f.key(51); f.mods(0)                 # Ctrl+, : Preferences
+    f.pump(0.3)
+    x, y = fakewl.widget_xy(m, 'prefs.category.ai', 7)
+    f.click(x, y)
+    f.pump(0.3)
+    w = fakewl.wait_widget(f, m, 'prefs.ollama_test')
+    for d in (10, 10, 10, -10, -10, -10, -10, -10, -10):  # (the last of the page: scrolled into view)
+        if not w or w['y'] < 600:
+            break
+        f.move(w['x'] + w['w'] // 2, 400)
+        f.wheel(d)
+        f.pump(0.2)
+        w = fakewl.widget(m, 'prefs.ollama_test')
+    want = 'N Ollama: it answers and has the model'
+    if w:
+        f.click(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2)
+        for _ in range(30):
+            f.pump(0.1)
+            tx = '\n'.join(transcript())
+            if want in tx:
+                break
+    check(w and want in tx, f'Test: {want[2:]}')
+    f.key(1)                                        # Esc
+    f.pump(0.2)
     f.proc.kill()
     srv.shutdown()
     print(f'  {len(FAILS)} failed' if FAILS else '  all passed')
