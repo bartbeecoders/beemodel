@@ -25,8 +25,8 @@
       <span class="eyebrow">Free &amp; open source · MIT</span>
       <h1>3D creation,<br>written in <span class="grad">pure assembly</span>.</h1>
       <p class="lead">BeeModel models, sculpts, paints, rigs, animates, simulates and path-traces —
-        in one {{BIN_SIZE}} static binary for Linux. No libc, no toolkit, no libraries:
-        x86-64 assembly talking straight to the kernel and the Wayland compositor.</p>
+        in one {{BIN_SIZE}} static binary for Linux and Windows 11. No libc, no toolkit, no libraries:
+        x86-64 assembly talking straight to the kernel and the window system.</p>
       <div class="btn-row">
         <a class="btn primary" href="#download" data-latest="page-anchor">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 5-5m-5 5-5-5M4 19h16"/></svg>
@@ -39,7 +39,7 @@
       </div>
       <div class="badges">
         <span class="badge"><span class="dot"></span> Latest <b>v<span data-latest="version">{{VERSION}}</span></b> · <span data-latest="date">{{DATE}}</span></span>
-        <span class="badge">Linux x86-64 · Wayland</span>
+        <span class="badge">Linux · Windows 11</span>
         <span class="badge">{{N_RELEASES}} releases</span>
       </div>
     </div>
@@ -58,11 +58,13 @@
     <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
     <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
     <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
+    <span><b>●</b> image to 3D</span><span><b>●</b> 3D text</span><span><b>●</b> render to video</span><span><b>●</b> Linux &amp; Windows 11</span>
     <span><b>●</b> path tracer on every core</span><span><b>●</b> RTX ray tracing on Vulkan</span><span><b>●</b> a GPU viewport</span><span><b>●</b> sculpting with dynamic topology</span>
     <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
     <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
     <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
     <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
+    <span><b>●</b> image to 3D</span><span><b>●</b> 3D text</span><span><b>●</b> render to video</span><span><b>●</b> Linux &amp; Windows 11</span>
   </div>
 </div>
 
@@ -114,13 +116,17 @@
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/><path d="m5 5 14 14M19 5 5 19" opacity=".5"/></svg></div>
         <h3>A billion triangles</h3><p>Nanite-style virtualized geometry draws huge meshes through a cluster LOD cut every frame; world partition streams big worlds by cell.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M4.2 7.5l2.6 1.5M17.2 15l2.6 1.5M4.2 16.5l2.6-1.5M17.2 9l2.6-1.5"/><circle cx="12" cy="12" r="4"/></svg></div>
-        <h3>AI assistant &amp; MCP</h3><p>A built-in AI assistant (Claude Code, Grok or OpenRouter) and an MCP server, so agents can see the scene, run any command and propose changes you accept or revert.</p></div>
+        <h3>AI assistant &amp; MCP</h3><p>A built-in AI assistant (Claude Code, Grok, OpenRouter or a local model through Ollama) and an MCP server, so agents can see the scene, run any command and propose changes you accept or revert. Alt+right-click to ask about just the selection.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2" y="5" width="9" height="12" rx="1.5"/><path d="m4 15 2.5-3 2 2.5"/><path d="m17 6 5 3v6l-5 3-5-3V9Z"/><path d="m12 9 5 3 5-3M17 12v6"/></svg></div>
+        <h3>Image to 3D</h3><p>Turn a photo of one thing into a mesh, or carve a photo's detail into a block-out you modelled. TripoSR and Hi3D v1.0 run on your NVIDIA GPU as an optional addon while you keep working. <a href="https://github.com/bartbeecoders/beemodel/blob/main/docs/HI3D.md">Powered by Hi3D 1.0</a>.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.3 7.2l7.4 3.6"/></svg></div>
         <h3>Versions &amp; co-editing</h3><p>Every saved scene keeps a content-addressed history with diffs and merges; live co-editing sessions and a live link to other tools.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M13 6l-2 12"/></svg></div>
         <h3>BeeScript</h3><p>A small scripting language for everything: build scenes, run any operator, drive the viewport, test — from the console, files or agents.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M9 14l2 2 4-4"/></svg></div>
-        <h3>Files in, files out</h3><p>Its own .bee format, plus OBJ, STL, glTF/GLB, STEP, 3MF, DXF, SVG, PDF drawings and Blender .blend import and export.</p></div>
+        <h3>Files in, files out</h3><p>Its own .bee format, plus OBJ, STL, glTF/GLB, STEP, 3MF, DXF, SVG, PDF drawings and Blender .blend import and export. Point it at a folder of building drawings or PDFs and it sets them up around the building at their true scale.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h10v2M9 5v12M7 17h4"/><rect x="14" y="11" width="8" height="8" rx="1.5"/><path d="m17 13.5 3 1.5-3 1.5Z"/></svg></div>
+        <h3>3D text &amp; video</h3><p>Titles and labels from any TrueType font, bevelled and animated letter by letter. Render the animation straight to MP4, WebM, GIF or an animated PNG.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg></div>
         <h3>Fast &amp; frugal</h3><p>Event driven: 0% CPU when idle, a few MB of memory, a multithreaded software rasterizer, SIMD everywhere — and it starts in a blink.</p></div>
     </div>
@@ -138,7 +144,7 @@
     <div class="tour-tabs" role="tablist">
       <button role="tab">Modeling</button><button role="tab">Materials</button><button role="tab">Sculpting</button>
       <button role="tab">CAD</button><button role="tab">Animation</button><button role="tab">Physics</button>
-      <button role="tab">Force fields</button><button role="tab">Particles</button><button role="tab">Landscapes</button><button role="tab">Procedural</button>
+      <button role="tab">Force fields</button><button role="tab">Particles</button><button role="tab">Landscapes</button><button role="tab">Procedural</button><button role="tab">Image to 3D</button>
     </div>
 
     <div class="tour-pane"><div class="spot">
@@ -240,6 +246,16 @@
       </div>
       <div class="spot-media" data-full="assets/img/valley.webp" data-caption="A procedural valley, path-traced"><img loading="lazy" src="assets/img/valley-sm.webp" alt="A procedural valley render" width="800" height="450"></div>
     </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>From a picture to a mesh</h3>
+        <p>AI › Model from Image: pick a photo or a render of one thing, and about 40 seconds later its mesh stands on the 3D cursor. The picture on the left is one of BeeModel's own renders, and the head on the right came out of it.</p>
+        <ul><li>TripoSR makes the rough shape, Hi3D v1.0 carves in the detail</li><li>Or refine a block-out you modelled yourself</li><li>Runs in the background on an NVIDIA GPU, one undo step</li></ul>
+        <div class="spot-tag">Image to 3D addon · Powered by Hi3D 1.0</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/hi3d.webp" data-caption="A render in, a mesh out: Image to 3D"><img loading="lazy" src="assets/img/hi3d-sm.webp" alt="A rendered picture of a horned head as a reference image, next to the mesh generated from it" width="800" height="500"></div>
+    </div></div>
   </div>
 </section>
 
@@ -311,14 +327,14 @@
           <tr><th scope="row">Download</th><td class="bee"><b>{{TAR_SIZE}}</b> <small>(one {{BIN_SIZE}} binary)</small></td><td>383 MB</td><td>tens of GB installed</td><td>78 MB</td></tr>
           <tr><th scope="row">Dependencies</th><td class="bee"><i class="y"></i>None: no libc, no libraries</td><td>Bundled libraries</td><td>Epic launcher, SDKs</td><td>Bundled libraries</td></tr>
           <tr><th scope="row">License</th><td class="bee"><i class="y"></i>MIT</td><td><i class="y"></i>GPL</td><td><i class="p"></i>Proprietary, source available; 5% royalty on game revenue over $1M</td><td><i class="y"></i>MIT</td></tr>
-          <tr><th scope="row">Runs on</th><td class="bee"><i class="p"></i>Linux x86-64 (Wayland)</td><td><i class="y"></i>Windows, macOS, Linux</td><td><i class="y"></i>Windows, macOS, Linux</td><td><i class="y"></i>Windows, macOS, Linux, Android, web</td></tr>
+          <tr><th scope="row">Runs on</th><td class="bee"><i class="p"></i>Linux x86-64 (Wayland), Windows 11</td><td><i class="y"></i>Windows, macOS, Linux</td><td><i class="y"></i>Windows, macOS, Linux</td><td><i class="y"></i>Windows, macOS, Linux, Android, web</td></tr>
           <tr><th scope="row">Modeling &amp; sculpting</th><td class="bee"><i class="y"></i>Modifiers, dyntopo sculpt, paint</td><td><i class="y"></i>Industry standard</td><td><i class="p"></i>Modeling mode</td><td><i class="n"></i>CSG shapes only</td></tr>
           <tr><th scope="row">Parametric CAD</th><td class="bee"><i class="y"></i>Sketches, B-rep, STEP</td><td><i class="p"></i>Through add-ons</td><td><i class="n"></i>No</td><td><i class="n"></i>No</td></tr>
           <tr><th scope="row">Path tracing</th><td class="bee"><i class="y"></i>Hive: CPU, Vulkan, RTX</td><td><i class="y"></i>Cycles</td><td><i class="y"></i>Path Tracer, Lumen</td><td><i class="n"></i>Real-time only</td></tr>
           <tr><th scope="row">Physics &amp; liquids</th><td class="bee"><i class="y"></i>Rigid, cloth, shatter, GPU liquids</td><td><i class="y"></i>Rigid, cloth, Mantaflow</td><td><i class="y"></i>Chaos, Niagara fluids</td><td><i class="p"></i>Rigid &amp; soft bodies</td></tr>
           <tr><th scope="row">Make a game</th><td class="bee"><i class="p"></i>Play mode &amp; logic graphs</td><td><i class="n"></i>No game engine</td><td><i class="y"></i>AAA engine</td><td><i class="y"></i>Full engine</td></tr>
           <tr><th scope="row">Scripting</th><td class="bee"><i class="y"></i>BeeScript</td><td><i class="y"></i>Python</td><td><i class="y"></i>Blueprints, C++, Python</td><td><i class="y"></i>GDScript, C#, C++</td></tr>
-          <tr><th scope="row">AI agents</th><td class="bee"><i class="y"></i>Assistant &amp; MCP server built in</td><td><i class="p"></i>MCP add-on</td><td><i class="p"></i>MCP plugins</td><td><i class="p"></i>MCP plugins</td></tr>
+          <tr><th scope="row">AI agents</th><td class="bee"><i class="y"></i>Assistant &amp; MCP server built in, image to 3D</td><td><i class="p"></i>MCP add-on</td><td><i class="p"></i>MCP plugins</td><td><i class="p"></i>MCP plugins</td></tr>
           <tr><th scope="row">Add-ons &amp; community</th><td class="bee"><i class="n"></i>Just getting started</td><td><i class="y"></i>Huge</td><td><i class="y"></i>Huge, plus Fab</td><td><i class="y"></i>Large</td></tr>
           <tr><th scope="row">Around since</th><td class="bee">2026</td><td>1994</td><td>1998</td><td>2014</td></tr>
         </tbody>
@@ -328,7 +344,7 @@
       Download sizes in October 2026: BeeModel {{VERSION}} (tar.gz), Blender 5.2.2 and the Godot 4.7.2 editor for Linux; Unreal Engine installs through the Epic Games Launcher.</p>
 
     <div class="picks">
-      <div class="pick bee reveal"><h3>Pick BeeModel</h3><p>for one tool that models, sculpts, designs parts, simulates and renders — that downloads in a second, starts instantly, runs on a modest Linux machine and that you can read top to bottom.</p></div>
+      <div class="pick bee reveal"><h3>Pick BeeModel</h3><p>for one tool that models, sculpts, designs parts, simulates and renders — that downloads in a second, starts instantly, runs on a modest Linux or Windows machine and that you can read top to bottom.</p></div>
       <div class="pick reveal"><h3>Pick Blender</h3><p>for production work: film, animation and VFX pipelines, decades of tutorials, and an add-on for nearly everything.</p></div>
       <div class="pick reveal"><h3>Pick Unreal Engine</h3><p>for shipping high-end games and real-time experiences on every platform, with Nanite, Lumen and the Fab marketplace.</p></div>
       <div class="pick reveal"><h3>Pick Godot</h3><p>for small and mid-sized games with an open-source engine that exports to desktop, mobile and the web.</p></div>
@@ -349,6 +365,7 @@
             <a class="dl-file" data-asset="bin" href="{{BIN_URL}}"><span class="ext">BIN</span><span class="name">{{BIN_NAME}}</span><span class="size">{{BIN_SIZE}}</span></a>
             <a class="dl-file" data-asset="tar" href="{{TAR_URL}}"><span class="ext">TAR.GZ</span><span class="name">{{TAR_NAME}}</span><span class="size">{{TAR_SIZE}}</span></a>
             <a class="dl-file" data-asset="gpu" href="{{GPU_URL}}"><span class="ext">GPU</span><span class="name">{{GPU_NAME}}</span><span class="size">{{GPU_SIZE}}</span></a>
+            <a class="dl-file" data-asset="win" href="{{WIN_URL}}"><span class="ext">ZIP</span><span class="name">{{WIN_NAME}}</span><span class="size">{{WIN_SIZE}}</span></a>
             <a class="dl-file" data-asset="sums" href="{{SUMS_URL}}"><span class="ext">SHA256</span><span class="name">SHA256SUMS</span><span class="size">checksums</span></a>
           </div>
           <p class="muted" style="margin-top:14px">Released <span data-latest="date">{{DATE}}</span> ·
@@ -367,6 +384,7 @@ chmod +x {{BIN_NAME}}
           </div>
           <div class="reqs">
             <div class="req"><b>Linux x86-64</b>any distribution, static binary</div>
+            <div class="req"><b>Or Windows 11</b>the zip: <code>beemodel.exe</code> and its GPU helper</div>
             <div class="req"><b>A Wayland compositor</b>GNOME, KDE, Hyprland, sway…</div>
             <div class="req"><b>Optional: Vulkan</b>the GPU helper for the GPU viewport, liquids and RTX rendering</div>
             <div class="req"><b>Build it yourself</b><code>scripts/build.sh</code> — binutils only</div>

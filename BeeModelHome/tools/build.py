@@ -40,7 +40,7 @@ IMAGES = {
     'gallery': 'renders/gallery.png', 'modeling': 'shots/modeling.png', 'nodes': 'shots/nodes.png',
     'cad': 'shots/cad.png', 'animation': 'shots/animation.png', 'physics': 'shots/physics.png',
     'fields': 'shots/fields.png', 'landscape': 'shots/landscape.png', 'procedural': 'shots/procedural.png',
-    'sculpt': 'shots/sculpt.png', 'particles': 'renders/particles.png',
+    'sculpt': 'shots/sculpt.png', 'particles': 'renders/particles.png', 'hi3d': 'shots/hi3d.png',
 }
 VIDEOS = {
     'wrecking-ball': os.path.join(ROOT, 'Vibecoding', 'demos', 'out', 'wrecking-ball.mp4'),
@@ -188,7 +188,8 @@ def downloads(ver, gh):
     """The release's files: bin, tar, gpu, sums -> (url, name, size text)."""
     base = '%s/releases/download/v%s/' % (GH, ver)
     names = {'bin': 'beemodel-%s-linux-x86_64.bin' % ver, 'tar': 'beemodel-%s-linux-x86_64.tar.gz' % ver,
-             'gpu': 'beemodel-gpu-%s-linux-x86_64.tar.gz' % ver, 'sums': 'SHA256SUMS'}
+             'gpu': 'beemodel-gpu-%s-linux-x86_64.tar.gz' % ver, 'sums': 'SHA256SUMS',
+             'win': 'beemodel-%s-windows-x86_64.zip' % ver}
     assets = (gh.get(ver) or {}).get('assets', {})
     out = {}
     for k, name in names.items():
@@ -332,6 +333,7 @@ def main():
         'TAR_URL': d['tar'][0], 'TAR_NAME': d['tar'][1], 'TAR_SIZE': d['tar'][2] or '',
         'GPU_URL': d['gpu'][0], 'GPU_NAME': d['gpu'][1], 'GPU_SIZE': d['gpu'][2] or '',
         'SUMS_URL': d['sums'][0],
+        'WIN_URL': d['win'][0], 'WIN_NAME': d['win'][1], 'WIN_SIZE': d['win'][2] or '',
         'RELEASE_URL': (gh.get(latest) or {}).get('url', '%s/releases/tag/v%s' % (GH, latest)),
         'N_RELEASES': len(rels),
         'FIRST_DATE': dt.date.fromisoformat(rels[-1]['date']).strftime('%-d %B %Y'),
