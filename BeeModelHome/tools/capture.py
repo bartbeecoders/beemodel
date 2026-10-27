@@ -27,6 +27,8 @@ import fakewl                                               # noqa: E402
 sys.argv = _argv
 fakewl.BIN = BIN
 SIZE = (1600, 1000)
+if os.path.exists(os.path.expanduser('~/.local/share/beemodel/hi3d/bee-hi3d')):
+    os.environ.setdefault('BEEMODEL_HI3D', os.path.expanduser('~/.local/share/beemodel/hi3d/bee-hi3d'))
 
 
 def bees(name, drop=r'render\(|file\.save|file\.export|image\.save|lightmap|op\("lib\.'):
@@ -205,12 +207,51 @@ def physics(s):
     s.shot('physics', settle=3.0)
 
 
+HI3D = os.path.expanduser('~/.local/share/beemodel/hi3d/bee-hi3d')
+
+
+@shot
+def hi3d(s):
+    """AI > Model from Image: a BeeModel render (the sculpt render's horned head)
+    in, a mesh out, beside the picture as a reference image. Needs the Hi3D addon
+    installed (addons/hi3d/install.sh) and an NVIDIA GPU; skipped without it."""
+    if not os.path.exists(HI3D):
+        print('  (no Hi3D addon: skipped)')
+        return
+    from PIL import Image
+    pic = os.path.join(s.f.home, 'horned-head.png')
+    Image.open(os.path.join(HERE, '..', 'media', 'renders', 'sculpt.png')).convert('RGB') \
+        .crop((1120, 90, 1600, 690)).save(pic)
+    s.f.keymap(os.path.join(ROOT, 'tests', 'keymaps', 'us.xkb'))
+    s.q('delete("Cube")')
+    s.op('view.toggle_console')
+
+    def cmd(c):
+        s.f.key(28); s.f.type(c); s.f.key(28); s.f.key(1); s.f.pump(0.3)
+    cmd('object.from_image ' + pic)
+    end = time.time() + 600
+    while time.time() < end and 'horned-head' not in s.q('print(name(count() - 1))'):
+        s.f.pump(1.0)
+    cmd('object.add_reference ' + pic)
+    ref = s.q('print(name(count() - 1))')
+    s.q('set("%s", "x", -2.4)\nset("%s", "y", 1.1)\nset("%s", "z", 0)\nrotate("%s", 90deg, 0, 0)\nscale("%s", 1.1)'
+        % ((ref,) * 5))
+    s.op('view.toggle_console')
+    s.op('view.shading_material')
+    s.q('select()\nview(-10, 6, 7, -1.2, 1.05, 0)')
+    s.shot('hi3d', settle=6.0)
+
+
 def main():
     for fn in SHOTS:
         if ONLY and fn.__name__ not in ONLY:
             continue
         print('--', fn.__name__, flush=True)
         t = time.time()
+        if fn.__name__ == 'hi3d':                   # (the CPU viewport speckles a 300k-face mesh's edge)
+            os.environ['BEEMODEL_GPU_VIEW'] = 'on'
+        else:
+            os.environ.pop('BEEMODEL_GPU_VIEW', None)
         s = Session()
         try:
             fn(s)

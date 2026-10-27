@@ -36,6 +36,7 @@ New pictures (needs `build/beemodel`, Pillow, ffmpeg):
 
 ```
 python3 BeeModelHome/tools/capture.py              # media/shots/*.png  (or: capture.py fields cad)
+                                                   # (hi3d: needs the Image to 3D addon and an NVIDIA GPU)
 python3 BeeModelHome/tools/render.py               # media/renders/*.png
 python3 BeeModelHome/tools/screencast.py           # media/video/*.mp4
 Vibecoding/demos/render.sh wrecking-ball           # the demo films (Vibecoding/demos/out)
