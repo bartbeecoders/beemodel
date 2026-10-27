@@ -7,7 +7,8 @@
 #  docs/HI3D.md): a Python program with TripoSR, which makes a rough shape
 #  from the image, and Hi3D v1.0, which carves the image's detail into it.
 #  Refine sends the active mesh as the rough shape instead (an OBJ in
-#  ~/.cache/beemodel/hi3d), so a block-out modelled here gets the detail.
+#  ~/.cache/beemodel/hi3d, in the object's own space), so a block-out
+#  modelled here gets the detail.
 #
 #  The helper is ~/.local/share/beemodel/hi3d/bee-hi3d (install.sh puts it
 #  there) or $BEEMODEL_HI3D. It runs while you go on working: one at a
@@ -19,8 +20,9 @@
 #
 #  When it is done, object.from_image_place (one undo step) imports the OBJ
 #  as an object named after the image: at the 3D cursor standing on it (a
-#  new model, two units at its largest), or where the refined mesh was, at
-#  its size, that one hidden. Powered by Hi3D 1.0 (http://hi3d.ai/).
+#  new model, two units at its largest), or with the refined object's
+#  location, rotation and scale, the mesh at its size, that one hidden.
+#  Powered by Hi3D 1.0 (http://hi3d.ai/).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -60,7 +62,7 @@ hz_argv:        .skip 8*16
 hz_llen:        .skip 4
 hz_pmode:       .skip 4                 # (what the place operator does)
 hz_psrc:        .skip 4
-                .skip 4
+hz_xf:          .skip 36                # refine: the rough mesh's location, rotation, scale
 hz_exe:         .skip 512
 hz_img:         .skip 512
 hz_dir:         .skip 512               # ~/.cache/beemodel/hi3d
@@ -291,11 +293,33 @@ hz_start:
     mov     [rip+hz_src], edi
     xor     esi, esi
     call    obj_click_select
+    mov     edi, [rip+hz_src]           # its own space: its transform kept
+    call    obj_get                     #  for the refined one, the mesh
+    mov     r15, rax                    #  written without it
+    movups  xmm0, [r15+OB_LOC]
+    movups  [rip+hz_xf], xmm0
+    movups  xmm0, [r15+OB_LOC+16]
+    movups  [rip+hz_xf+16], xmm0
+    mov     eax, [r15+OB_LOC+32]
+    mov     [rip+hz_xf+32], eax
+    xorps   xmm0, xmm0
+    movups  [r15+OB_LOC], xmm0          # location, rotation 0; scale 1
+    movups  [r15+OB_LOC+16], xmm0
+    mov     eax, 0x3f800000
+    mov     [r15+OB_SCALE], eax
+    mov     [r15+OB_SCALE+4], eax
+    mov     [r15+OB_SCALE+8], eax
     mov     r14d, [rip+exp_sel_only]
     mov     dword ptr [rip+exp_sel_only], 1
     lea     rdi, [rip+hz_coarse]
     call    obj_export
     mov     [rip+exp_sel_only], r14d
+    movups  xmm0, [rip+hz_xf]
+    movups  [r15+OB_LOC], xmm0
+    movups  xmm0, [rip+hz_xf+16]
+    movups  [r15+OB_LOC+16], xmm0
+    mov     eax, [rip+hz_xf+32]
+    mov     [r15+OB_LOC+32], eax
     lea     rdi, [rip+hz_coarse]
     mov     esi, 4
     call    plat_access
@@ -699,8 +723,14 @@ do_hz_place:
     mov     ecx, [rip+cursor_pos+8]
     mov     [rbx+OB_LOC+8], ecx
     jmp     3f
-2:  mov     edi, [rip+hz_psrc]          # refined: in world space already;
-    test    edi, edi                    #  the rough one hidden
+2:  movups  xmm0, [rip+hz_xf]          # refined: the rough one's transform
+    movups  [rbx+OB_LOC], xmm0          #  (its mesh is in that one's space);
+    movups  xmm0, [rip+hz_xf+16]        #  the rough one hidden
+    movups  [rbx+OB_LOC+16], xmm0
+    mov     eax, [rip+hz_xf+32]
+    mov     [rbx+OB_LOC+32], eax
+    mov     edi, [rip+hz_psrc]
+    test    edi, edi
     jz      3f
     call    obj_get
     test    rax, rax

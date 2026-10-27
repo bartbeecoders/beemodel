@@ -14,7 +14,7 @@ Commands:
     bee-hi3d doctor
     bee-hi3d fetch                      download every model's weights
     bee-hi3d run --image IMG --out OUT.obj [--coarse MESH] [--resolution 512]
-                 [--steps 25] [--seed 0] [--faces 300000] [--offload]
+                 [--steps 25] [--seed 0] [--faces 300000] [--[no-]offload]
                  [--coarse-only] [--keep-background]
 
 Without --coarse, TripoSR makes the rough shape from the image. With it (an OBJ,
@@ -35,8 +35,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "src"
 HI3D_MODEL = "hi3d-official/Hi3Dv1.0"
+HI3D_DIR = HERE / "models" / "Hi3Dv1.0"   # real files: Hi3D's loader refuses the Hub cache's
+                                          #  symlinks once it defers transformer_1024
 TSR_MODEL = "stabilityai/TripoSR"
-ENCODERS = ("facebook/dinov2-large", "openai/clip-vit-large-patch14")
+ENCODERS = ("facebook/dinov2-large", "openai/clip-vit-large-patch14", "facebook/dino-vitb16")
 
 _out = sys.stdout
 sys.stdout = sys.stderr          # libraries print; only say() reaches BeeModel's parser cleanly
@@ -74,7 +76,9 @@ def cmd_doctor(_args) -> int:
         return 1
     name = torch.cuda.get_device_name(0)
     gb = torch.cuda.get_device_properties(0).total_memory / 2**30
-    missing = [m for m in (HI3D_MODEL, TSR_MODEL, *ENCODERS) if not _cached(m)]
+    missing = [m for m in (TSR_MODEL, *ENCODERS) if not _cached(m)]
+    if not (HI3D_DIR / "transformer_1024" / "model.safetensors").is_file():
+        missing.insert(0, HI3D_MODEL)
     if missing:
         say("error", f"weights not downloaded: {', '.join(missing)} (run: bee-hi3d fetch)")
         return 1
@@ -93,11 +97,13 @@ def _cached(repo: str) -> bool:
 # --------------------------------------------------------------------------- fetch
 def cmd_fetch(_args) -> int:
     from huggingface_hub import snapshot_download
+    progress(0.0, f"Downloading {HI3D_MODEL}")
+    snapshot_download(HI3D_MODEL, local_dir=HI3D_DIR, allow_patterns=["*.json", "*.safetensors"])
     jobs = [
-        (HI3D_MODEL, ["*.json", "*.safetensors"]),
         ("facebook/dinov2-large", ["*.json", "*.safetensors", "*.txt"]),
         ("openai/clip-vit-large-patch14", ["*.json", "*.safetensors", "*.txt"]),
         (TSR_MODEL, ["config.yaml", "model.ckpt"]),
+        ("facebook/dino-vitb16", ["config.json"]),     # (TripoSR builds its tokenizer from it)
     ]
     for i, (repo, allow) in enumerate(jobs):
         progress(i / (len(jobs) + 1), f"Downloading {repo}")
@@ -140,7 +146,8 @@ def _marching_cubes_shim() -> None:
 
 
 def coarse_from_image(rgba, device: str):
-    """TripoSR: the rough shape, turned to Y-up / front +Z like Hi3D's meshes."""
+    """TripoSR: the rough shape, turned to Y-up with the photo's side at +Z, as Hi3D's
+    training meshes (Hunyuan3D-2) are; seen from +Z it is the photo, not its mirror."""
     import numpy as np
     import torch
     import trimesh
@@ -163,7 +170,7 @@ def coarse_from_image(rgba, device: str):
     del model, codes
     torch.cuda.empty_cache()
     mesh.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [1, 0, 0]))
-    mesh.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0]))
+    mesh.apply_transform(trimesh.transformations.rotation_matrix(-np.pi / 2, [0, 1, 0]))
     trimesh.repair.fix_normals(mesh)
     return mesh
 
@@ -232,6 +239,11 @@ def cmd_run(args) -> int:
         say("error", "PyTorch sees no CUDA GPU")
         return 1
     device = "cuda"
+    gb = torch.cuda.get_device_properties(0).total_memory / 2**30
+    if args.resolution == 1536 and gb < 20 and not args.force:
+        # (measured: a 16 GB RTX 4080 SUPER runs out decoding the third pass, offloaded, after 12 min)
+        say("error", f"detail 1536 needs more than {gb:.0f} GB of GPU memory: use 1024")
+        return 1
 
     progress(0.01, "Reading the image")
     image = Image.open(args.image)
@@ -262,9 +274,13 @@ def cmd_run(args) -> int:
 
     progress(0.08, "Loading Hi3D")
     from sparc3d import Sparc3DPipeline
-    pipe = Sparc3DPipeline.from_pretrained(HI3D_MODEL, progress_callback=report,
+    pipe = Sparc3DPipeline.from_pretrained(str(HI3D_DIR), progress_callback=report,
                                            local_files_only=not args.online)
-    if args.offload:
+    offload = args.offload
+    if offload is None:     # (16 GB runs out decoding 1024's second pass with both transformers in)
+        offload = args.resolution > 512 and gb < 24
+    args.offloaded = offload
+    if offload:
         pipe.enable_sequential_cpu_offload(device)
     else:
         pipe.to(device)
@@ -299,10 +315,12 @@ def main(argv=None) -> int:
     r.add_argument("--steps", type=int, default=25)
     r.add_argument("--seed", type=int, default=0)
     r.add_argument("--faces", type=int, default=300000)
-    r.add_argument("--offload", action="store_true")
+    r.add_argument("--offload", action=argparse.BooleanOptionalAction, default=None,
+                   help="keep the models in system memory between uses (default: above 512 on GPUs under 24 GB)")
     r.add_argument("--coarse-only", action="store_true")
     r.add_argument("--keep-background", action="store_true")
     r.add_argument("--online", action="store_true")
+    r.add_argument("--force", action="store_true", help="try a detail this GPU is known to be too small for")
     args = p.parse_args(argv)
     try:
         return {"doctor": cmd_doctor, "fetch": cmd_fetch, "run": cmd_run}[args.cmd](args)
@@ -310,7 +328,8 @@ def main(argv=None) -> int:
         traceback.print_exc()
         msg = str(e).splitlines()[0] if str(e) else type(e).__name__
         if isinstance(e, MemoryError) or "out of memory" in msg.lower():
-            msg = "the GPU ran out of memory: try a lower detail or Offload"
+            msg = ("the GPU ran out of memory: try a lower detail" if getattr(args, "offloaded", False)
+                   else "the GPU ran out of memory: try a lower detail or --offload")
         say("error", msg)
         return 1
 

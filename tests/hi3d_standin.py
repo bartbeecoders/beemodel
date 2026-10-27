@@ -26,7 +26,7 @@ def main():
     if name.startswith('crash'):
         return 3
     if name.startswith('fail'):
-        say('error', 'the GPU ran out of memory: try a lower detail or Offload')
+        say('error', 'the GPU ran out of memory: try a lower detail or --offload')
         return 1
     for i in range(240 if name.startswith('slow') else 3):
         time.sleep(0.25)

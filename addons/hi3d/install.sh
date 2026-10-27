@@ -13,7 +13,8 @@
 #      venv/             Python 3.10, torch 2.5.0+cu124, flash-attn, spconv
 #      src/Hi3Dv1.0      github.com/hi3d-official/Hi3Dv1.0 at a pinned commit
 #      src/TripoSR       github.com/VAST-AI-Research/TripoSR at a pinned commit
-#      hf/               Hugging Face cache: Hi3D, DINOv2, CLIP, TripoSR weights
+#      models/Hi3Dv1.0   the Hi3D v1.0 weights (7.7 GB, real files)
+#      hf/               Hugging Face cache: DINOv2, CLIP, TripoSR weights
 #      u2net/            the background-removal model (rembg)
 #
 #  Needs: Linux, an NVIDIA GPU (compute capability 8.0+, driver for CUDA
@@ -75,7 +76,8 @@ step "TripoSR's needs and background removal"
 # TripoSR's own requirements pin old transformers/trimesh and want torchmcubes
 # (a CUDA source build); the bridge does its marching cubes with scikit-image.
 pipi --index-strategy unsafe-best-match --extra-index-url "$TORCH_INDEX" -c "$CONS" \
-    omegaconf einops scikit-image "rembg[cpu]<2.0.70" "onnxruntime<1.21"
+    omegaconf einops scikit-image "rembg[cpu]<2.0.70" "onnxruntime<1.21" \
+    "setuptools<81"     # (Triton 3.1 imports it to build its kernels' launchers; uv venvs have none)
 
 step "the bridge"
 install -m 0644 "$HERE/bee_hi3d.py" "$HOME_DIR/bee_hi3d.py"
