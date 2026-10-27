@@ -151,7 +151,7 @@ items_add:      .quad op_add_cube, op_add_sphere, op_add_cylinder, op_add_cone
                 .quad 0, op_add_light, op_add_camera, op_add_armature, sub_field, sub_part
 .equ items_add_n, (. - items_add) / 8
 items_object:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal, 0, op_edit_toggle, sub_snap, sub_parent, op_fd_move, 0
-                .quad sub_feature, sub_boolean, sub_mech, sub_physics, op_repair, op_print_check, op_obj_measure, op_tx_mesh
+                .quad sub_feature, sub_boolean, sub_mech, sub_physics, op_repair, op_print_check, op_obj_measure, op_tx_mesh, op_hz_refine
                 .quad 0, op_an_key, op_arm_parent
 .equ items_object_n, (. - items_object) / 8
 items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, op_m_bevel, 0
@@ -178,7 +178,7 @@ sub_curve_l:    .quad op_add_bezier, op_add_ccircle, op_add_path
 sub_normals_l:  .quad op_m_flip, op_m_recalc
 sub_feature_l:  .quad op_cad_pad, op_cad_pocket, op_cad_revolve, op_cad_hole, 0
                 .quad op_cad_shell, op_cad_fillet, op_cad_chamfer, op_cad_pattern, op_cad_infill
-sub_generate_l: .quad op_gen_lsystem, op_gen_wfc
+sub_generate_l: .quad op_gen_lsystem, op_gen_wfc, op_hz_new
 sub_landscape_l: .quad op_la_flat, op_la_hills, op_la_mount, op_la_canyon, op_la_dunes, op_la_island
 sub_ws_l:       .quad op_ws_next, op_ws_prev, 0, op_ws_new, op_ws_rename, op_ws_delete
 sub_uv_l:       .quad op_uv_unwrap, op_uv_smart, op_uv_pack, 0, op_uv_mark, op_uv_clear, op_uv_sharp
@@ -203,7 +203,7 @@ SUBMENU sub_theme, "Theme", sub_theme_l, 10
 SUBMENU sub_curve, "Curve", sub_curve_l, 3
 SUBMENU sub_normals, "Normals", sub_normals_l, 2
 SUBMENU sub_feature, "Part Feature", sub_feature_l, 10
-SUBMENU sub_generate, "Generate", sub_generate_l, 2
+SUBMENU sub_generate, "Generate", sub_generate_l, 3
 SUBMENU sub_landscape, "Landscape", sub_landscape_l, 6
 SUBMENU sub_mech, "Mechanism", sub_mech_l, 3
 SUBMENU sub_uv, "UV", sub_uv_l, 7

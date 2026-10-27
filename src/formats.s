@@ -26,6 +26,8 @@
 # =============================================================================
 .intel_syntax noprefix
 .globl mesh_tab
+.globl obj_import
+.globl import_name
 .globl result
 .globl has_arg
 .globl mesh_chunks

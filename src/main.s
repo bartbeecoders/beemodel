@@ -90,6 +90,11 @@ bee_main:
     lea     rdi, [rdi+rax*8]
     call    ai_pollfds
     add     eax, [rip+n_mcpfds]
+    mov     [rip+n_xfds], eax
+    lea     rdi, [rip+pollfds+16]       # + Image to 3D's helper (hi3d.s)
+    lea     rdi, [rdi+rax*8]
+    call    hz_pollfds
+    add     eax, [rip+n_xfds]
     lea     esi, [rax+2]
     lea     rdi, [rip+pollfds]
     mov     edx, -1
@@ -192,6 +197,7 @@ bee_main:
     call    link_tick                   # the live link: peers, changes out
     call    co_tick                     # co-editing: operations in and out
     call    ai_tick                     # the AI connection's child: its output
+    call    hz_tick                     # Image to 3D's helper: progress, the mesh
     cmp     dword ptr [rip+quit_flag], 0
     jne     .Lquit
     call    render_tick                 # a slice of the progressive render
@@ -215,6 +221,7 @@ bee_main:
 .Lquit:
     call    wsp_persist                 # (the layout, for next time)
     call    ai_proc_kill                # (an AI connection's child goes too)
+    call    hz_kill                     # (and Image to 3D's helper)
     call    mcp_shutdown
     xor     edi, edi
     call    plat_exit_group
@@ -369,6 +376,8 @@ write_out:
 .section .bss
 .align 8
 open_target:    .skip 8                 # (beemodel scene.bee: the file to open)
+.align 8
+n_xfds:         .skip 4
 .align 8
 pollfds:        .skip 8*32              # struct pollfd: Wayland, repeat timer, MCP, link
 n_mcpfds:       .skip 4

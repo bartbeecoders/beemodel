@@ -85,6 +85,7 @@ materials|600|material.s mat*.s mtl.s texture.s mcpmat.s|python3 tests/materials
 ai|300|ai.s aiproc.s aiask.s widgets.s widgets.inc textfield.s tooltip.s|python3 tests/ai.py build/beemodel build/shots
 askai|300|aiask.s ai.s|python3 tests/askai.py build/beemodel build/shots
 refs|300|refset.s refimg.s folder.s filebrowser.s|python3 tests/refs.py build/beemodel build/shots
+hi3d|300|hi3d.s formats.s export.s|python3 tests/hi3d.py build/beemodel build/shots
 mcp_schema|300|mcp.s mcpmat.s agent.s ops.s|python3 tests/mcp_schema.py build/beemodel
 blend|600|blend.s blendx.s|python3 tests/blend.py build/beemodel build/shots
 livelink|300|live.s link.s|python3 tests/livelink.py build/beemodel build/shots
