@@ -29,7 +29,8 @@ That fills `~/.local/share/beemodel/hi3d` (or `$BEEMODEL_HI3D_HOME`):
 | `bee-hi3d` | the helper BeeModel runs |
 | `venv/` | Python 3.10, torch 2.5.0+cu124, flash-attn 2.7.4, spconv |
 | `src/Hi3Dv1.0`, `src/TripoSR` | the two projects at pinned commits |
-| `hf/` | the weights: Hi3D v1.0 (7.7 GB), DINOv2-large, CLIP ViT-L/14, TripoSR |
+| `models/Hi3Dv1.0` | the Hi3D v1.0 weights (7.7 GB) |
+| `hf/` | the Hugging Face cache: DINOv2-large, CLIP ViT-L/14, TripoSR |
 | `u2net/` | the background-removal model |
 
 `bee-hi3d doctor` checks it. To remove it, delete the folder. Set
@@ -51,11 +52,12 @@ largest side. It is one undo step.
 
 **Refine from Image.** Your active mesh is the rough shape instead: a
 block-out of the same thing, facing +Z (the front view, Numpad 1, looks
-at the side the photo shows). The refined mesh takes its place and its
-size, and the original is hidden.
+at the side the photo shows). The refined object takes its location,
+rotation, scale and size, and the original is hidden.
 
 **Detail** is Hi3D's extraction grid: 512 runs one pass, 1024 two, 1536
-three. The result is simplified to 300,000 faces at most.
+three (more detail, more time: see below). The result is simplified to
+300,000 faces at most.
 
 **Images.** One object, the whole of it in view. A cut-out with a
 transparent background is best. Otherwise the background is removed
@@ -67,10 +69,22 @@ true size comes from you: scale it, or refine a block-out made to size.
 
 ## Time and memory
 
-On an RTX 4080 SUPER (16 GB) at detail 512, the first run also loads the
-models and compiles kernels. Hi3D is only validated by its makers on a 96
-GB GPU. At 1024 and 1536 a 16 GB card can run out of memory. Then the
-console says so; try a lower detail.
+Measured on an RTX 4080 SUPER (16 GB) with Hi3D's example image. The
+models load from disk each run:
+
+| Detail | Time | GPU memory (peak) | |
+|---|---|---|---|
+| rough shape only (`--coarse-only`) | 6 s | | TripoSR |
+| 512 | 41 s | 9.5 GB | one pass |
+| 1024 | 4 min 34 s | 7.7 GB | two passes, offloaded |
+| 1536 | | | runs out of memory on 16 GB |
+
+At 1024 and 1536 on a GPU under 24 GB, the helper keeps the models in
+system memory between uses (`--offload`; `--no-offload` turns it off).
+Without that, 1024 runs out of memory decoding its second pass on 16 GB.
+1536 runs out even offloaded, after 12 minutes, so the helper refuses it
+up front on GPUs under 20 GB. Hi3D's makers validated it only on a 96 GB
+GPU. When memory runs out, the console says so; try a lower detail.
 
 What the helper said is kept in `~/.cache/beemodel/hi3d/hi3d.log`. Its
 input and result are in the same folder (`coarse.obj`, `<image>.obj`).
@@ -87,8 +101,9 @@ BeeModel (hi3d.s) ──spawn──▶ bee-hi3d run --image I --out O --resoluti
 `src/hi3d.s` starts the helper like the AI connections start theirs
 (`plat_spawn`, a pipe read without waiting from the main loop). It
 parses only lines that start with `@bee `; everything goes to the log.
-For a refine, it first writes the active mesh alone, in world space, to
-`coarse.obj` with the OBJ exporter.
+For a refine, it first writes the active mesh alone, in its own space
+(its transform set aside for the export), to `coarse.obj` with the OBJ
+exporter; the refined object gets that transform back.
 
 `addons/hi3d/bee_hi3d.py` is the helper:
 

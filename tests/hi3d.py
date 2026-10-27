@@ -112,7 +112,7 @@ def main():
     check(num('count()') == n0, 'one undo step takes it away')
 
     print('  -- refining the active mesh --')
-    q('select("Cube")')
+    q('select("Cube")'); q('set("Cube", "x", 3)'); q('scale("Cube", 2)')
     cmd(f'object.refine_from_image {home}/my photo.png 1024')
     check(wait_log('Image to 3D made my photo'), 'the refined mesh comes in (an image name with a space)')
     a = args()
@@ -120,12 +120,15 @@ def main():
     vs = [ln for ln in open(co)] if co and os.path.exists(co) else []
     vs = [list(map(float, ln.split()[1:4])) for ln in vs if ln.startswith('v ')]
     check(a[a.index('--image') + 1] == f'{home}/my photo.png' and a[a.index('--resolution') + 1] == '1024'
-          and len(vs) == 8 and min(v[1] for v in vs) == 0 and max(v[1] for v in vs) == 2,
-          f'the helper got the cube alone, in world space, as the rough mesh, and detail 1024 ({len(vs)} vertices)')
-    xs = [num(f'vpos("my photo", {i}, "x")') + num('get("my photo", "x")') for i in range(6)]
-    ys = [num(f'vpos("my photo", {i}, "y")') + num('get("my photo", "y")') for i in range(6)]
-    check(abs(min(xs) + 1) < 1e-4 and abs(max(xs) - 1) < 1e-4 and abs(min(ys)) < 1e-4 and abs(max(ys) - 2) < 1e-4,
-          'it takes the rough mesh\'s place and size')
+          and len(vs) == 8 and min(v[1] for v in vs) == -1 and max(v[1] for v in vs) == 1,
+          f'the helper got the cube alone, in its own space, as the rough mesh, and detail 1024 ({len(vs)} vertices)')
+    check(num('get("my photo", "x")') == 3 and num('get("my photo", "y")') == 1 and num('get("my photo", "sx")') == 2
+          and num('get("Cube", "x")') == 3 and num('get("Cube", "sx")') == 2,
+          'the refined object takes the rough one\'s location and scale (the rough one\'s kept)')
+    xs = [num(f'vpos("my photo", {i}, "x")') for i in range(6)]
+    ys = [num(f'vpos("my photo", {i}, "y")') for i in range(6)]
+    check(abs(min(xs) + 1) < 1e-4 and abs(max(xs) - 1) < 1e-4 and abs(min(ys) + 1) < 1e-4 and abs(max(ys) - 1) < 1e-4,
+          'and its mesh the rough mesh\'s size')
     check(num('get("Cube", "hidden")') == 1 and num('get("my photo", "hidden")') == 0,
           'the rough mesh is hidden, the refined one shown')
     m.tool('undo')
@@ -134,7 +137,7 @@ def main():
 
     print('  -- when it goes wrong --')
     cmd(f'object.from_image {home}/fail.png')
-    check(wait_log('Image to 3D failed: the GPU ran out of memory: try a lower detail or Offload'),
+    check(wait_log('Image to 3D failed: the GPU ran out of memory: try a lower detail or --offload'),
           'an error is reported in the helper\'s words')
     cmd(f'object.from_image {home}/crash.png')
     check(wait_log('Image to 3D failed: the helper ended without a mesh'), 'and a helper that dies without a word')
