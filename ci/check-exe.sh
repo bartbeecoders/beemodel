@@ -42,10 +42,12 @@ if (( ${#wine[@]} )); then
     got=$(WINEDEBUG=-all "${wine[@]}" "$EXE" --version 2>/dev/null | tr -d '\r') || fail "--version under Wine exited with $?"
     [[ "$got" == "$want" ]] || fail "--version under Wine: '$got', not '$want'"
     echo "under Wine: $got"
+    # Wine hands the program the Linux environment: a desktop's (or GitHub's
+    # runner's) XDG_RUNTIME_DIR would stand, and test-env checks it is TEMP's
     for t in build/test-*.exe; do
         [[ -f "$t" ]] || continue
-        WINEDEBUG=-all "${wine[@]}" "$t" 2>/dev/null | tr -d '\r' | grep -v '^  ok ' || true
-        WINEDEBUG=-all "${wine[@]}" "$t" >/dev/null 2>&1 || fail "$t under Wine: $? checks failed"
+        WINEDEBUG=-all env -u XDG_RUNTIME_DIR "${wine[@]}" "$t" 2>/dev/null | tr -d '\r' | grep -v '^  ok ' || true
+        WINEDEBUG=-all env -u XDG_RUNTIME_DIR "${wine[@]}" "$t" >/dev/null 2>&1 || fail "$t under Wine: $? checks failed"
         echo "under Wine: $(basename "$t") passed"
     done
     ran+=" Wine"
