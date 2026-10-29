@@ -22,6 +22,11 @@
   mesh's faces and world bounding box (from the OBJ export) are OpenUSD's
   (golden.json, from tests/usd_stage_ref.py; checked again when pxr is
   there), and the objects land in a folder named after the file.
+- Materials (src/usdmat.s): UsdPreviewSurface values (Paint: colour,
+  metallic, roughness, opacity 0.4 -> transmission 0.6, ior) and textures
+  (Wood: a base map, metallic / roughness from one map's b and g, the
+  UsdTransform2d's 2 x 2 tiling); bound per object (Top: Wood, its subset:
+  Paint).
 
     python3 tests/usd.py build/beemodel [more.usdc ...]
 """
@@ -179,6 +184,23 @@ def main():
           'one object a material (Top: its subset apart), one an instance (Cup x2); %d objects' % len(objs))
     check(objs and all(o[1:] == ['root'] for o in objs), 'all in the folder "root"')
     check('Gone' not in got and 'Helper' not in got, 'inactive prims and guides are left out')
+    code = ('n = count()\nfor i in 0..n { delete(name(0)) }\nop("file.import_usd", "%s")\n'
+            'print("M", matof("Top"), matof("Top.001"))\n'
+            'print("P", matget("Paint", "base", 0), matget("Paint", "base", 1), matget("Paint", "base", 2), '
+            'matget("Paint", "metallic"), matget("Paint", "roughness"), matget("Paint", "transmission"), matget("Paint", "ior"))\n'
+            'print("W", nodeinfo("Wood", 0, "socket", 0), nodeinfo("Wood", 0, "socket", 1), nodeinfo("Wood", 0, "socket", 3), '
+            'nodeval("Wood", 1, 0, 0, 0, 0, 0.1, 0.3), nodeval("Wood", 1, 1, 0, 0, 0, 0.1, 0.3))'
+            % os.path.join(st, 'root.usda'))
+    out = subprocess.run([BIN, '--eval', code], capture_output=True, text=True, timeout=120).stdout
+    lines = {l.split()[0]: l.split()[1:] for l in out.splitlines() if l[:2] in ('M ', 'P ', 'W ')}
+    check(lines.get('M') == ['Wood', 'Paint'], 'materials bound per object: Top Wood, its subset Paint (%s)' % lines.get('M'))
+    p = [float(x) for x in lines.get('P', [])]
+    check(len(p) == 7 and all(abs(a - b) < 1e-4 for a, b in zip(p, [0.8, 0.1, 0.1, 1, 0.25, 0.6, 1.45])),
+          'Paint: colour, metallic, roughness, transmission (1 - opacity), ior (%s)' % p)
+    w = lines.get('W', [])
+    check(len(w) == 5 and w[0] != '0' and w[1] != '0' and w[1] == w[2] and w[0] != w[1]
+          and abs(float(w[3]) - 0.2) < 1e-4 and abs(float(w[4]) - 0.6) < 1e-4,
+          'Wood: a base map, metallic and roughness from one map, tiled 2 x 2 (%s)' % w)
     ref = pxr_reads(os.path.join(st, 'root.usda'))
     if ref is not None:
         same_ = set(ref) == set(want) and all(ref[k][0] == want[k][0] and all(
