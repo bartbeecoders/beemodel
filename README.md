@@ -280,7 +280,7 @@ Scripts and agents call the same operators with the value as the argument:
 
 Files: **Ctrl+S** saves (`.bee`), **Ctrl+O** opens, and File › Import / Export
 handle **OBJ** (with MTL materials), **STL**, **glTF 2.0** (`.glb` / `.gltf`, with PBR
-materials) and **Blender** (`.blend`). Blender files from 2.80 to 5.x open natively,
+materials), **Blender** (`.blend`) and **OpenUSD** (`.usd`, `.usda`, `.usdc`; [docs/USD.md](docs/USD.md)). The Asset Browser also browses online libraries - NVIDIA SimReady first ([docs/LIBRARIES.md](docs/LIBRARIES.md)). Blender files from 2.80 to 5.x open natively,
 compressed ones too: their meshes, UVs, cameras, lights, and materials with their images.
 They save through Blender, run in the background ([docs/BLEND.md](docs/BLEND.md)). Files
 dropped on the window are imported by their kind. For making things there is **3MF** for 3D printers (millimetres,
@@ -970,6 +970,9 @@ src/formats.s   .bee files, OBJ / STL import + export, file operators
 src/mtl.s       MTL import (OBJ materials)
 src/gltf.s      glTF 2.0 import / export
 src/blend.s     Blender files: the .blend reader (SDNA, blocks, meshes, materials)
+src/usdc.s      OpenUSD crate files; usda.s text files; usdlayer.s layers in memory
+src/usd.s       OpenUSD stages and import; usdmat.s materials; usdphys.s physics
+src/extlib.s    online model libraries (NVIDIA SimReady): catalogs, downloads
 src/blendx.s    saving .blend files through Blender
 src/expr.s      expressions with units
 src/cad.s       the CAD document: units, parameters, the feature records

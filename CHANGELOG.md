@@ -7,6 +7,21 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Online model libraries** (milestone 28, #407-#414): the Asset
+  Browser's sources go round the local library and online ones, starting
+  with NVIDIA SimReady (2673 CC-BY 4.0 assets on Hugging Face). Its
+  catalog and thumbnails load in the background; a double-click or a drag
+  downloads an asset (only what an import needs, cached under
+  ~/BeeModel/cache) and places it with its textured materials, masses,
+  colliders and joints, saved into the local library too. `lib.sources`,
+  `lib.source`, `lib.refresh`, `lib.get`, `lib.stop`;
+  ~/BeeModel/sources.txt adds datasets in SimReady's layout
+  ([docs/LIBRARIES.md](docs/LIBRARIES.md)).
+- **OpenUSD import** (File > Import > USD, `file.import_usd`): binary and
+  text layers read natively, stages composed (sublayers, references,
+  payloads, variants, instancing), meshes, UsdPreviewSurface materials and
+  UsdPhysics bodies and joints. Checked against OpenUSD itself
+  ([docs/USD.md](docs/USD.md)).
 - **Path-traced playback in Rendered shading.** While the animation plays,
   each new frame's scene goes up at once and is path-traced on the GPU,
   Preferences › Viewport › Rendered playback samples of it (4;
@@ -28,6 +43,10 @@ project uses [Semantic Versioning](https://semver.org/).
   chess pieces, dominoes, a bowling ball and a glass pawn that shatters.
 
 ### Fixed
+- **A crash in the joint solver** with big jointed islands (stage jobs
+  entered `jr_prestep` with the stack 8 bytes off 16).
+- **Library thumbnails** that are not square were sampled past their
+  rows, and one that failed to load marked the wrong asset.
 - **A crash when a body broke on impact** while the animation played,
   was scrubbed or was stepped through MCP: `an_apply` and MCP's
   `handle_message` called on with the stack 8 bytes off 16, and the
