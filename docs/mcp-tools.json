@@ -2088,7 +2088,7 @@
   },
   {
    "name": "op_lib_get",
-   "description": "Get Online Asset - Place an asset of the online source shown (lib.source <id>): its files are downloaded the first time, then it is imported at the 3D cursor (or x y z) with its materials and physics: lib.get <asset name> [x y z]",
+   "description": "Get Online Asset - Place an asset of the online source shown (lib.source <id>): its files are downloaded the first time, then it is imported at the 3D cursor (or x y z) with its materials and physics, and saved into the local library: lib.get <asset name> [x y z] [static] [nosave] (static: no rigid bodies or joints; nosave: not into the library)",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -6600,6 +6600,19 @@
   {
    "name": "op_file_import_usd",
    "description": "Import USD... - Import an OpenUSD file (.usd, .usda, .usdc): its meshes with their UVs and materials, composed (sublayers, references, payloads, variants), into a folder: file.import_usd <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_file_usd_texture_size",
+   "description": "USD Texture Size - The most an imported USD texture keeps a side; bigger ones are shrunk by halves once and kept beside the original as <name>.<size>.png: file.usd_texture_size <n> (1024 by default; 0: any size)",
    "inputSchema": {
     "type": "object",
     "properties": {

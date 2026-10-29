@@ -2210,7 +2210,7 @@ mats_json:
     jz      911f
     mov     edi, ','
     call    wb_char
-911:imul    eax, ebx, 256
+911:imul    eax, ebx, 1024              # (image.s IR_SZ)
     lea     rsi, [rip+img_tab]
     add     rsi, rax
     call    jb_q
@@ -2225,7 +2225,7 @@ mats_json:
     lea     rsi, [rip+j_null]
     call    wb_str
     jmp     94f
-93: imul    eax, eax, 256
+93: imul    eax, eax, 1024              # (image.s IR_SZ)
     lea     rsi, [rip+img_tab]
     add     rsi, rax
     call    jb_q
@@ -2372,7 +2372,7 @@ graph_json:
     js      2f
     cmp     edi, [rip+img_count]
     jae     2f
-    imul    r13d, edi, 256
+    imul    r13d, edi, 1024             # (image.s IR_SZ)
     mov     edi, ','
     call    wb_char
     lea     rsi, [rip+k_texture]

@@ -285,6 +285,8 @@ props:          .ascii "x\0\0\0\0\0\0\0"
                 .quad OB_COLOR
                 .ascii "hidden\0\0"           # 1 hidden (object.hide), 0 shown
                 .quad OB_FLAGS
+                .ascii "select\0\0"           # 1 selected (added to the selection)
+                .quad OB_FLAGS+2
                 .ascii "lens\0\0\0\0"           # cameras and lights (lcam.s):
                 .quad PR_LC+20              #  the lens (mm),
                 .ascii "power\0\0\0"          #  the power (x the default),
@@ -4259,7 +4261,14 @@ b_get:
     setnz   cl
     cvtsi2sd xmm0, ecx
     jmp     2f
-11: cvtss2sd xmm0, [rax+r12]
+11: cmp     r12d, OB_FLAGS+2            # (selected: the flag)
+    jne     12f
+    xor     ecx, ecx
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    setnz   cl
+    cvtsi2sd xmm0, ecx
+    jmp     2f
+12: cvtss2sd xmm0, [rax+r12]
 2:  add     rsp, 8
     pop     r12
     pop     rbx
@@ -4283,8 +4292,10 @@ b_set:
     mov     [rsp], eax
     jmp     2f
 1:  cmp     r12d, OB_FLAGS
+    je      11f
+    cmp     r12d, OB_FLAGS+2
     jne     12f
-    cvttsd2si eax, xmm0
+11: cvttsd2si eax, xmm0
     mov     [rsp], eax
     jmp     2f
 12: cvtsd2ss xmm0, xmm0
@@ -4303,7 +4314,14 @@ b_set:
     test    rax, rax
     jz      4f
     sub     r12d, PR_LC
-3:  cmp     r12d, OB_FLAGS          # (hidden: the flag)
+3:  cmp     r12d, OB_FLAGS+2        # (selected: the flag)
+    jne     30f
+    and     dword ptr [rax+OB_FLAGS], ~OBF_SELECTED
+    cmp     dword ptr [rsp], 0
+    je      4f
+    or      dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jmp     4f
+30: cmp     r12d, OB_FLAGS          # (hidden: the flag)
     jne     31f
     and     dword ptr [rax+OB_FLAGS], ~OBF_HIDDEN
     cmp     dword ptr [rsp], 0
@@ -6972,7 +6990,8 @@ b_image:
     call    image_load
     test    eax, eax
     js      8f
-    imul    eax, eax, 256               # its record starts with the name
+    imul    eax, eax, 1024              # its record (image.s IR_SZ) starts
+                                        #  with the name
     lea     rsi, [rip+img_tab]
     add     rsi, rax
     call    sh_dup

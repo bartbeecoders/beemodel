@@ -65,7 +65,7 @@ vec4 texel(uint base, int w, int x, int y, bool data) {
     return o;
 }
 vec4 tex_sample4(uint im, float u, float v, uint mode) {
-    uint base = img[im * 4u] + 256u;
+    uint base = img[im * 4u] + 4096u;
     int w = int(img[im * 4u + 1u]), h = int(img[im * 4u + 2u]);
     float x = u * float(w) - 0.5;
     float y = (1.0 - v) * float(h) - 0.5;
@@ -203,7 +203,7 @@ void graph_eval(uint m, uint64_t live) {
         switch (ty) {
         case 1u: case 39u: {                                    // texture sample
             int im = int(np(m, j, 0u)) - 1;
-            if (im < 0 || im >= 64 || img[uint(im) * 4u + 1u] == 0u) { put_val(j, 0.0); break; }
+            if (im < 0 || im >= 1024 || img[uint(im) * 4u + 1u] == 0u) { put_val(j, 0.0); break; }
             float sz = np(m, j, 1u); if (!(sz > 0.0)) sz = 1.0;
             vec2 uv = G_UV;
             if ((mwu(m, nw(m, j, 1u)) & 0xffffu) != 0u) uv = node_in(m, j, 0u).xy;

@@ -21,7 +21,7 @@
 .equ NPARAMS,   12
 .equ PR_SZ,     32
 .equ MAXL,      48                      # names in a picker
-.equ IR_SZ,     256                     # (image.s)
+.equ IR_SZ,     1024                    # (image.s)
 .equ IM_W,      0
 .equ IM_H,      4
 .equ CV_RES,    24                      # (curve.s)

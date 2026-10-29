@@ -769,10 +769,14 @@ obj_copy:
     mov     ebx, eax
     mov     edi, eax
     call    obj_get
-    lea     rsi, [r12+32]               # transform, colour, flags, type
+    lea     rsi, [r12+32]               # transform, colour
     lea     rdi, [rax+32]
     mov     ecx, 40
     rep     movsb
+    mov     ecx, [r12+OB_MAT]           # its material and folder too (a
+    mov     [rax+OB_MAT], ecx           #  duplicate looks as it did)
+    mov     ecx, [r12+OB_FOLDER]
+    mov     [rax+OB_FOLDER], ecx
     mov     rdi, [r12+OB_MODS]          # the modifier stack is shared too
     mov     [rax+OB_MODS], rdi
     push    rax

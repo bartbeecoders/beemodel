@@ -21,6 +21,10 @@ outliner folder named after the file. Online assets
 | Materials | UsdPreviewSurface: colour, metallic, roughness, emission, opacity (below 1: transmission), ior; UsdUVTexture maps (base, metallic-roughness from one texture's b and g - glTF's and SimReady's ORM -, normal, emission) with a UsdTransform2d's tiling |
 | Physics | UsdPhysics: rigid bodies, MassAPI masses, collision approximations (convexHull -> hull, boundingCube -> box, boundingSphere -> sphere, the rest compound), physics materials (friction, restitution), kinematic bodies passive; revolute, prismatic, fixed and spherical joints with pivots, axes and limits |
 
+Textures larger than `file.usd_texture_size` (1024 by default; 0: any)
+are box-filtered down by halves once and kept beside the original as
+`<name>.<size>.png`; that file is what the scene loads and saves.
+
 Not read: animation (time samples), skeletons, curves and points, MDL
 shaders (UsdPreviewSurface is used), `.usdz` archives. A driven joint
 (`PhysicsDriveAPI`) is held where it starts: BeeModel's motors are no

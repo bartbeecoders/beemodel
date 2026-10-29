@@ -28,11 +28,11 @@
 .globl image_adopt
 .globl im_int
 
-.equ MAX_IMAGES, 256
+.equ MAX_IMAGES, 2048                 # (online assets bring many: 15 or so each)
 .equ IR_NAME,  0
 .equ IR_IMG,   32
 .equ IR_PATH,  40
-.equ IR_SZ,    256
+.equ IR_SZ,    1024                   # (online assets' paths are long)
 .equ IM_W,     0
 .equ IM_H,     4
 .equ IM_FMT,   8
@@ -667,7 +667,7 @@ images_read:
     push    r12
     push    r13
     push    r14
-    sub     rsp, 264
+    sub     rsp, IR_SZ+8
     mov     r12, rdi
     lea     r13, [rdi+rsi]
     cmp     esi, 4
@@ -682,7 +682,7 @@ images_read:
     ja      9f
     mov     ecx, [r12]
     add     r12, 4
-    cmp     ecx, 255
+    cmp     ecx, IR_SZ-IR_PATH-1
     ja      9f
     lea     rax, [r12+rcx]
     cmp     rax, r13
@@ -702,7 +702,7 @@ images_read:
     call    image_load_keep
     inc     ebx
     jmp     1b
-9:  add     rsp, 264
+9:  add     rsp, IR_SZ+8
     pop     r14
     pop     r13
     pop     r12
