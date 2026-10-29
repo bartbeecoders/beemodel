@@ -90,6 +90,7 @@ hi3d|300|hi3d.s formats.s export.s|python3 tests/hi3d.py build/beemodel build/sh
 mcp_schema|300|mcp.s mcpmat.s agent.s ops.s|python3 tests/mcp_schema.py build/beemodel
 blend|600|blend.s blendx.s|python3 tests/blend.py build/beemodel build/shots
 usd|300|usd*.s usd.inc|python3 tests/usd.py build/beemodel
+extlib|300|extlib.s usd*.s library.s|python3 tests/extlib.py build/beemodel
 livelink|300|live.s link.s|python3 tests/livelink.py build/beemodel build/shots
 versions|300|vc.s|python3 tests/versions.py build/beemodel build/shots
 coedit|900|cosync.s cotree.s teamui.s copilot.s|python3 tests/coedit.py build/beemodel build/shots

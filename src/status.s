@@ -139,6 +139,7 @@ OPERATOR op_menu_ai, "menu.ai", "AI Menu", do_menu_ai, flags=OPF_QUIET|OPF_HIDDE
 WIDGET wd_st_ai,    WK_BUTTON, "status.ai", "AI permission", flags=WGF_NODRAW, aux=op_menu_ai, tip="What AI agents may do here (read only / edit the scene / files too). Click for the AI menu"
 WIDGET wd_st_link,  WK_BUTTON, "status.link", "Live link", flags=WGF_NODRAW, aux=op_area_type_versions, tip="The live link is on. Click for the Versions editor (serve, connect, stop)"
 WIDGET wd_st_aiwork, WK_BUTTON, "status.ai_working", "AI working", flags=WGF_NODRAW, aux=op_ai_stop, tip="The AI is working on this request (one undo step). Click to stop it"
+WIDGET wd_st_exlib, WK_BUTTON, "status.downloads", "Downloads", flags=WGF_NODRAW, aux=op_ex_stop, tip="An online library at work: its catalog or an asset's files. Click to stop"
 WIDGET wd_st_hi3d, WK_BUTTON, "status.hi3d", "Image to 3D", flags=WGF_NODRAW, aux=op_hz_stop, tip="A model being made from an image (the Hi3D addon). Click to stop it"
 WIDGET wd_st_job,   WK_BUTTON, "status.job", "Job", flags=WGF_NODRAW, tip="A long job: the window answers again when it is done"
 WIDGET wd_st_toast, WK_BUTTON, "status.toast", "Message", flags=WGF_NODRAW, aux=op_console_focus, tip="Click to open the console with every message"
@@ -498,7 +499,16 @@ draw_statusbar:
     lea     rdi, [rip+stat_buf]
     lea     rsi, [rip+wd_st_hi3d]
     call    chip
-54: call    fmt_reset                   # the AI's permission
+54: call    ex_chip                     # an online source at work: how far, Stop
+    test    rax, rax
+    jz      55f
+    lea     rdi, [rip+stat_buf]
+    mov     rsi, rax
+    call    cpy_s
+    lea     rdi, [rip+stat_buf]
+    lea     rsi, [rip+wd_st_exlib]
+    call    chip
+55: call    fmt_reset                   # the AI's permission
     lea     rdi, [rip+s_ai]
     call    fmt_str
     mov     edi, [rip+agent_tier]

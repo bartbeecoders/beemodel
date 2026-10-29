@@ -108,7 +108,15 @@ bee_main:
     jne     302f
     mov     edx, 8
 302:cmp     dword ptr [rip+lb_busy], 0  # a thumbnail being made: look
-    je      301f
+    je      303f
+    mov     edx, 50
+303:push    rdx                         # downloads running: look
+    push    rsi
+    call    ex_busy
+    pop     rsi
+    pop     rdx
+    test    eax, eax
+    jz      301f
     mov     edx, 50
 301:call    vd_streaming                # cluster pages on their way: look
     test    eax, eax                    #  every frame
@@ -207,6 +215,7 @@ bee_main:
     xor     edi, edi                    # world cells in and out for the camera
     call    wp_tick
     call    lb_tick                     # library thumbnails, one at a time
+    call    ex_tick                     # online sources: catalogs, thumbnails, files
     call    play_tick                   # play mode: the player, the scene on
     call    va_tick                     # a view gliding to its new place
     call    tip_tick                    # a tooltip whose time has come
@@ -222,6 +231,7 @@ bee_main:
     call    wsp_persist                 # (the layout, for next time)
     call    ai_proc_kill                # (an AI connection's child goes too)
     call    hz_kill                     # (and Image to 3D's helper)
+    call    ex_kill                     # (and the downloads)
     call    mcp_shutdown
     xor     edi, edi
     call    plat_exit_group
@@ -353,6 +363,7 @@ handle_cli_args:
 
 # headless_init - the scene without a window (--eval / --run)
 headless_init:
+    mov     dword ptr [rip+ex_sync], 1  # (online downloads: to the end)
     sub     rsp, 8
     call    text_init
     call    area_init

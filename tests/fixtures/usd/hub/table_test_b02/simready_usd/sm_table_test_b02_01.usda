@@ -1,0 +1,101 @@
+#usda 1.0
+(
+    defaultPrim = "Scene"
+    metersPerUnit = 0.01
+    upAxis = "Z"
+    subLayers = [@./over.usda@]
+)
+
+def Xform "Scene"
+{
+    double3 xformOp:translate = (100, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate"]
+
+    def Xform "Table" (
+        prepend references = @./parts.usdc@</Parts/Table>
+        variants = {
+            string legs = "four"
+        }
+    )
+    {
+        float3 xformOp:rotateXYZ = (0, 0, 30)
+        double3 xformOp:translate:pivot = (10, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:rotateXYZ", "xformOp:translate:pivot", "!invert!xformOp:translate:pivot"]
+    }
+
+    def Xform "CupA" (
+        instanceable = true
+        prepend references = @./parts.usdc@</Parts/Cup>
+    )
+    {
+        double3 xformOp:translate = (0, 40, 80)
+        quatf xformOp:orient = (0.70710677, 0.70710677, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+    }
+
+    def Xform "CupB" (
+        instanceable = true
+        prepend references = @./parts.usdc@</Parts/Cup>
+    )
+    {
+        matrix4d xformOp:transform = ( (2, 0, 0, 0), (0, 2, 0, 0), (0, 0, 2, 0), (-30, 10, 80, 1) )
+        uniform token[] xformOpOrder = ["xformOp:transform"]
+    }
+
+    def Xform "Local" (
+        prepend references = </Library/Plate>
+    )
+    {
+        double3 xformOp:translate = (0, -50, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+
+    def Xform "Gone" (
+        active = false
+        prepend references = @./parts.usdc@</Parts/Cup>
+    )
+    {
+    }
+
+    def Mesh "Helper"
+    {
+        uniform token purpose = "guide"
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (0, 1, 0)]
+    }
+
+    def Xform "Reset"
+    {
+        double3 xformOp:translate = (0, 0, 500)
+        uniform token[] xformOpOrder = ["!resetXformStack!", "xformOp:translate"]
+
+        def Mesh "Floater"
+        {
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            point3f[] points = [(0, 0, 0), (10, 0, 0), (10, 10, 0), (0, 10, 0)]
+            uniform token orientation = "leftHanded"
+        }
+    }
+}
+
+class "Library"
+{
+    def Xform "Plate"
+    {
+        def Mesh "Plate" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            int[] faceVertexCounts = [4, 4]
+            int[] faceVertexIndices = [0, 1, 2, 3, 3, 2, 4, 5]
+            point3f[] points = [(-20, -20, 0), (20, -20, 0), (20, 20, 0), (-20, 20, 0), (20, 40, 0), (-20, 40, 0)]
+            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+                interpolation = "faceVarying"
+            )
+            int[] primvars:st:indices = [0, 1, 2, 3, 3, 2, 1, 0]
+            rel material:binding = </Library/Looks/Blue>
+        }
+    }
+}

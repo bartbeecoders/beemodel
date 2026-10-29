@@ -2035,6 +2035,71 @@
    }
   },
   {
+   "name": "op_lib_sources",
+   "description": "Library Sources - List the asset libraries: the local one and the online sources (lib.source <id> shows one in the Asset Browser)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_source",
+   "description": "Library Source - Show an asset library in the Asset Browser: lib.source <id> (an online source: its catalog is fetched the first time) | local",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_refresh",
+   "description": "Refresh Catalog - Fetch the online source's catalog again (new assets)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_get",
+   "description": "Get Online Asset - Place an asset of the online source shown (lib.source <id>): its files are downloaded the first time, then it is imported at the 3D cursor (or x y z) with its materials and physics: lib.get <asset name> [x y z]",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_lib_stop",
+   "description": "Stop Downloads - Stop the online library's downloads (files fetched so far are kept)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_file_export_3mf",
    "description": "Export 3MF... - Export the mesh objects for 3D printing as 3MF (millimetres, Z up): file.export_3mf <path>",
    "inputSchema": {
