@@ -1,0 +1,275 @@
+# Auto factory: a static scene of a car assembly hall, built from NVIDIA
+# SimReady assets (huggingface.co/datasets/nvidia/simready-assets, CC-BY 4.0)
+# through BeeModel's online library (docs/LIBRARIES.md).
+#
+# A 48 x 28 m hall of SimReady wall panels and columns, open at the front
+# for the camera. Down the middle an assembly line: three car frames on a
+# skid conveyor, robot arms either side behind safety fences and gates, a
+# robot cell and a workstation where the line starts. Around it the engine
+# area (V8 and electric engines on pallets, an engine stand and hoist), the
+# wheel area (tire racks, rims, differentials), storage (stocked racks, a
+# forklift, a pallet jack, IBC tanks, drums), lockers, extinguishers, and
+# a staging area in front (racks, pallets of parts, a second forklift), and
+# overhead LED fixtures with area lights under them.
+#
+# Each asset is fetched once (lib.get ... static nosave: no physics, not
+# into the local library); its copies are duplicates sharing its meshes and
+# materials; textures are kept at 512 px (file.usd_texture_size). The
+# first run downloads about 6 GB of assets into ~/BeeModel/cache/simready
+# (the 4K textures are most of it) and takes several minutes; later runs
+# read the cache and take about a minute.
+#
+#   ./play.sh auto-factory      (or script.run Vibecoding/demos/auto-factory.bees)
+
+n = count()
+for i in 0..n { delete(name(0)) }
+op("lib.source", "simready")
+op("file.usd_texture_size", "512")             # (a whole hall: 512 px textures)
+
+# ---- helpers ----------------------------------------------------------------
+# place(asset, x, y, z, deg): the asset at x y z, turned deg about Y round
+# that point; returns its first object's index (its objects run to count())
+fn place(a, x, y, z, deg) {
+    i0 = count()
+    op("lib.get", a + " " + str(x) + " " + str(y) + " " + str(z) + " static nosave")
+    turn(i0, count(), x, z, deg)
+    return i0
+}
+
+# copy(i0, i1, px, pz, x, y, z, deg): objects i0 .. i1-1 (placed at px, pz)
+# duplicated, moved to x y z, turned deg about Y round it; returns the
+# copies' first index
+fn copy(i0, i1, px, pz, x, y, z, deg) {
+    select()
+    for i in i0..i1 { set(name(i), "select", 1) }
+    c0 = count()
+    op("object.duplicate")
+    for i in c0..count() { o = name(i)               # (from the originals:
+        t = name(i0 + i - c0)                        #  duplicate nudges copies)
+        move(o, get(t, "x") + x - px, get(t, "y") + y, get(t, "z") + z - pz) }
+    turn(c0, count(), x, z, deg)
+    return c0
+}
+
+# turn(i0, i1, px, pz, deg): objects about Y round (px, pz): places swung
+# round, each one's own turn composed with it (Euler X Y Z: R = Rz Ry Rx)
+fn turn(i0, i1, px, pz, deg) {
+    if deg == 0 { return 0 }
+    r = deg * pi / 180
+    c = cos(r)
+    s = sin(r)
+    for i in i0..i1 {
+        o = name(i)
+        dx = get(o, "x") - px
+        dz = get(o, "z") - pz
+        move(o, px + c * dx + s * dz, get(o, "y"), pz - s * dx + c * dz)
+        yturn(o, c, s)
+    }
+}
+
+fn yturn(o, c, s) {
+    ax = get(o, "rx")
+    ay = get(o, "ry")
+    az = get(o, "rz")
+    cx = cos(ax); sx = sin(ax); cy = cos(ay); sy = sin(ay); cz = cos(az); sz = sin(az)
+    m00 = cz * cy; m01 = cz * sy * sx - sz * cx; m02 = cz * sy * cx + sz * sx
+    m10 = sz * cy; m11 = sz * sy * sx + cz * cx; m12 = sz * sy * cx - cz * sx
+    m20 = 0 - sy;  m21 = cy * sx;                m22 = cy * cx
+    n00 = c * m00 + s * m20
+    n10 = m10
+    n20 = c * m20 - s * m00
+    n21 = c * m21 - s * m01
+    n22 = c * m22 - s * m02
+    set(o, "rx", atan2(n21, n22))
+    set(o, "ry", atan2(0 - n20, sqrt(n00 * n00 + n10 * n10)))
+    set(o, "rz", atan2(n10, n00))
+}
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+
+fn box(n, x, y, z, sx, sy, sz, m) {
+    add("cube", n, x, y, z); scale(n, sx / 2, sy / 2, sz / 2); select(n); op("material.assign", m)
+}
+
+# ---- the floor, markings, the skid conveyor ----------------------------------
+mat("Concrete", 0.34, 0.34, 0.33, 0.85, 0)
+mat("Epoxy", 0.18, 0.26, 0.24, 0.35, 0)
+mat("Safety Yellow", 0.95, 0.72, 0.05, 0.45, 0)
+mat("Steel Rail", 0.45, 0.46, 0.48, 0.3, 1)
+mat("Roof", 0.05, 0.05, 0.06, 0.9, 0)
+add("plane", "Floor", 0, 0, 0); scale("Floor", 26, 1, 16); select("Floor"); op("material.assign", "Concrete")
+box("Line Floor", -2, 0.004, 0, 40, 0.008, 9, "Epoxy")
+for k in 0..2 {                                  # walkway lines either side
+    z = 4.6 - k * 9.2
+    box("Lane " + str(k), -2, 0.01, z, 40, 0.01, 0.12, "Safety Yellow")
+}
+box("Lane Cross", 14.5, 0.01, 0, 0.12, 0.01, 22, "Safety Yellow")
+box("Rail A", -3, 0.22, -0.55, 38, 0.44, 0.16, "Steel Rail")   # the skid line
+box("Rail B", -3, 0.22, 0.55, 38, 0.44, 0.16, "Steel Rail")
+add("plane", "Roof", 0, 11.1, 0); scale("Roof", 25, 1, 15); select("Roof"); op("material.assign", "Roof")
+rotate("Roof", pi, 0, 0)
+
+# ---- walls and columns (SimReady panels: 6 m wide, 11.1 m tall) --------------
+w0 = place("structure_wall_straight_a01", -24, 0, 14, 0)        # left: along z
+w1 = count()
+for k in 1..5 { copy(w0, w1, -24, 14, -24, 0, 14 - k * 6, 0) }
+for k in 0..5 { copy(w0, w1, -24, 14, 24.3, 0, -14 + k * 6, 180) }  # right (the
+for k in 0..8 { copy(w0, w1, -24, 14, -24 + k * 6, 0, -14, -90) }    #  frames inside); back
+c0 = place("structure_wall_column_a01", -23.3, 0, 9, 0)
+c1 = count()
+for k in 1..4 { copy(c0, c1, -23.3, 9, -23.3, 0, 9 - k * 6, 0) }
+for k in 0..4 { copy(c0, c1, -23.3, 9, 23.3, 0, 9 - k * 6, 0) }
+
+# ---- the line: car frames, robots behind fences, a cell, a workstation -------
+f0 = place("carFrame_car_frame_assembled_a01", -12, 0.44, 0, 0)
+f1 = count()
+copy(f0, f1, -12, 0, -4, 0, 0, 0)
+copy(f0, f1, -12, 0, 4, 0, 0, 0)
+box("Pedestal 0", -4, 0.4, 2.3, 0.7, 0.8, 0.7, "Steel Rail")
+box("Pedestal 1", -4, 0.4, -2.3, 0.7, 0.8, 0.7, "Steel Rail")
+box("Pedestal 2", 4, 0.4, 2.3, 0.7, 0.8, 0.7, "Steel Rail")
+box("Pedestal 3", 4, 0.4, -2.3, 0.7, 0.8, 0.7, "Steel Rail")
+r0 = place("robotic_system_arm_b01", -4, 0.8, 2.3, 90)          # reaching to the line
+r1 = count()
+copy(r0, r1, -4, 2.3, -4, 0, -2.3, 180)
+copy(r0, r1, -4, 2.3, 4, 0, 2.3, 0)
+copy(r0, r1, -4, 2.3, 4, 0, -2.3, 180)
+place("robotic_system_a01", -12, 0, 2.6, 180)
+place("workstation_factory_a01", -20, 0, 0, 0)
+g0 = place("barrier_gate_safety_a02", 0, 0, 3.6, 0)              # the robot cells
+g1 = count()
+copy(g0, g1, 0, 3.6, 0, 0, -3.6, 0)
+fe0 = place("barrier_fence_metal_a02", -8.6, 0, 3.6, 0)
+fe1 = count()
+for k in 0..9 {
+    x = -8.6 + k * 1.22
+    if x < -3.2 or x > 3.0 {
+        if k > 0 { copy(fe0, fe1, -8.6, 3.6, x, 0, 3.6, 0) }
+        copy(fe0, fe1, -8.6, 3.6, x, 0, -3.6, 0)
+    }
+}
+for k in 0..5 {
+    x = 3.1 + k * 1.22
+    copy(fe0, fe1, -8.6, 3.6, x, 0, 3.6, 0)
+    copy(fe0, fe1, -8.6, 3.6, x, 0, -3.6, 0)
+}
+cv0 = place("warehouse_conveyorBelt_a01", 10, 0, 2.2, 0)        # parts in
+cv1 = count()
+copy(cv0, cv1, 10, 2.2, 10, 0, -3.8, 0)
+
+# ---- engines -------------------------------------------------------------------
+p0 = place("pallet_a01", 9, 0, 7, 0)
+p1 = count()
+copy(p0, p1, 9, 7, 9 + 1.6, 0, 7, 0)
+copy(p0, p1, 9, 7, 9 + 3.2, 0, 7, 0)
+copy(p0, p1, 9, 7, 9, 0, 9.2, 0)
+copy(p0, p1, 9, 7, 10.6, 0, 9.2, 0)
+copy(p0, p1, 9, 7, 12.2, 0, 9.2, 0)
+e0 = place("engineAssembly_v8_engine_a01", 9, 0.21, 7, 20)
+e1 = count()
+copy(e0, e1, 9, 7, 10.6, 0, 7, 0)
+copy(e0, e1, 9, 7, 12.2, 0, 7, -15)
+ee0 = place("engineAssembly_electric_engine_a01", 9, 0.21, 9.2, 0)
+ee1 = count()
+copy(ee0, ee1, 9, 9.2, 10.6, 0, 9.2, 40)
+copy(ee0, ee1, 9, 9.2, 12.2, 0, 9.2, 0)
+place("serviceTool_engine_stand_a01", 16, 0, 7, 0)
+place("serviceTool_engine_hoist_a01", 18.5, 0, 9, 200)
+place("equipment_mechanic_tool_cart_g01", 16, 0, 9.8, 90)
+place("equipment_airCompressor_a01", 21.5, 0, 12.4, 0)
+
+# ---- wheels and drivetrain -----------------------------------------------------
+t0 = place("storage_tire_rack_a01", 9, 0, -7, 0)
+t1 = count()
+copy(t0, t1, 9, -7, 10.5, 0, -7, 0)
+copy(t0, t1, 9, -7, 12, 0, -7, 0)
+copy(t0, t1, 9, -7, 9, 0, -9, 0)
+copy(t0, t1, 9, -7, 10.5, 0, -9, 0)
+copy(t0, t1, 9, -7, 12, 0, -9, 0)
+q0 = place("pallet_a01", 16, 0, -7, 0)
+q1 = count()
+copy(q0, q1, 16, -7, 17.6, 0, -7, 0)
+copy(q0, q1, 16, -7, 16, 0, -9.2, 0)
+w0 = place("wheelAssembly_wheel_rim_a01", 15.75, 0.21, -7, 90)
+w1 = count()
+copy(w0, w1, 15.75, -7, 16.25, 0, -7, 90)
+copy(w0, w1, 15.75, -7, 16.25, 0.0, -7.3, 90)
+d0 = place("drivetrain_differential_a01", 17.4, 0.21, -6.9, 0)
+d1 = count()
+copy(d0, d1, 17.4, -6.9, 17.9, 0, -7.1, 60)
+copy(d0, d1, 17.4, -6.9, 15.8, 0, -9.1, 120)
+ti0 = place("wheelAssembly_tire_a01", 19.5, 0, -6.5, 0)
+ti1 = count()
+for k in 1..5 { copy(ti0, ti1, 19.5, -6.5, 19.5, 0, -6.5 - k * 0.3, 0) }
+
+# ---- body parts by the line's start --------------------------------------------
+b0 = place("pallet_a01", -16, 0, 6.5, 0)
+b1 = count()
+copy(b0, b1, -16, 6.5, -14.4, 0, 6.5, 0)
+place("bodyPart_door_assembled_c01", -15.5, 0.21, 6.7, 0)
+place("bodyPart_bumper_front_a01", -14.4, 0.21, 6.5, 90)
+
+# ---- storage along the back wall -------------------------------------------------
+s0 = place("rack_composition_a04", -20, 0, -12.6, 0)
+s1 = count()
+for k in 1..5 { copy(s0, s1, -20, -12.6, -20 + k * 2.6, 0, -12.6, 0) }
+place("rack_large_empty_a01", -4.5, 0, -12.2, 0)
+place("vehicle_forklift_orange_a01", -9, 0, -8.6, 180)
+place("palletJack_heavyDuty_a01", -2.5, 0, -9, 160)
+k0 = place("ibcTank_a02", -21.5, 0, 9, 0)
+k1 = count()
+copy(k0, k1, -21.5, 9, -21.5, 0, 10.4, 0)
+copy(k0, k1, -21.5, 9, -20.3, 0, 9, 0)
+dr0 = place("drum_steel_a01", -19, 0, 11.8, 0)
+dr1 = count()
+copy(dr0, dr1, -19, 11.8, -18.3, 0, 11.8, 0)
+copy(dr0, dr1, -19, 11.8, -18.65, 0, 11.2, 0)
+db0 = place("drum_plastic_blue_a01", -17.4, 0, 11.9, 0)
+db1 = count()
+copy(db0, db1, -17.4, 11.9, -17.05, 0, 11.9, 0)
+copy(db0, db1, -17.4, 11.9, -17.2, 0.39, 11.9, 0)
+l0 = place("storage_locker_double_bench_b01", -23.1, 0, -4, 90)
+l1 = count()
+copy(l0, l1, -23.1, -4, -23.1, 0, -4.9, 90)
+copy(l0, l1, -23.1, -4, -23.1, 0, -5.8, 90)
+x0 = place("fireExtinguisher_stand_a01", -22.6, 0, 3, 0)
+x1 = count()
+copy(x0, x1, -22.6, 3, 22.6, 0, 3, 0)
+copy(x0, x1, -22.6, 3, 0, 0, -13.2, 0)
+cr0 = place("crate_black_a08", -4.5, 1.02, -12.2, 0)
+cr1 = count()
+for k in 1..6 { copy(cr0, cr1, -4.5, -12.2, -6 + k * 0.62, 1.02 * (k % 2), -12.2, 0) }
+
+# ---- staging in front: stocked racks, pallets of parts, a second forklift --------
+for k in 0..3 { copy(s0, s1, -20, -12.6, -21 + k * 2.6, 0, 11.6, 180) }
+for k in 0..4 {
+    copy(p0, p1, 9, 7, -12 + k * 1.6, 0, 9.5, 0)
+    if k % 2 == 0 { copy(cr0, cr1, -4.5, -12.2, -12 + k * 1.6, 0.21, 9.5, 0) }
+    else { copy(e0, e1, 9, 7, -12 + k * 1.6, 0, 9.5, 30 * k) }
+}
+for k in 0..3 { copy(t0, t1, 9, -7, -6 + k * 1.5, 0, 11.8, 180) }
+place("vehicle_forklift_orange_a01", -7.5, 0, 7.2, 90)
+
+# ---- overhead lights -------------------------------------------------------------
+li0 = place("lighting_overheadLed_rectangularFrame_a01", -12, 8.2, 0, 90)
+li1 = count()
+for k in 0..4 {
+    x = -12 + k * 8
+    if k > 0 { copy(li0, li1, -12, 0, x, 0, 0, 90) }
+    add("light", "Bay " + str(k), x, 8, 0); op("light.set", "type area"); op("light.set", "size 2.4"); op("light.set", "power 0.8")
+    add("light", "Side A " + str(k), x, 9, 8.5); op("light.set", "type area"); op("light.set", "size 3"); op("light.set", "power 0.5")
+    add("light", "Side B " + str(k), x, 9, -8.5); op("light.set", "type area"); op("light.set", "size 3"); op("light.set", "power 0.5")
+}
+op("world.strength", 0.06)
+
+# ---- the camera --------------------------------------------------------------------
+add("camera", "Cam", 11, 4.2, 12.5); set("Cam", "lens", 20)
+select("Cam"); op("camera.set", "active")
+dx = -6 - 11; dy = 1.2 - 4.2; dz = -2.5 - 12.5
+set("Cam", "ry", atan2(0 - dx, 0 - dz)); set("Cam", "rx", atan2(dy, sqrt(dx * dx + dz * dz)))
+view(atan2(0 - dx, 0 - dz) / 1deg, 0 - atan2(dy, sqrt(dx * dx + dz * dz)) / 1deg, 22, -6, 1.2, -2.5)
+op("render.settings", "1920 1080 256")
+select()
+print("auto factory: " + str(count()) + " objects")

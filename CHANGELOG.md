@@ -17,6 +17,11 @@ project uses [Semantic Versioning](https://semver.org/).
   `lib.source`, `lib.refresh`, `lib.get`, `lib.stop`;
   ~/BeeModel/sources.txt adds datasets in SimReady's layout
   ([docs/LIBRARIES.md](docs/LIBRARIES.md)).
+- **Auto factory demo** (`Vibecoding/demos/auto-factory.bees`): a car
+  assembly hall of NVIDIA SimReady assets. `lib.get ... static nosave`
+  places assets without physics or a library copy; USD textures are kept
+  at most `file.usd_texture_size` a side (1024; shrunk once, cached);
+  BeeScript's `get` / `set` read and add to the selection (`select`).
 - **OpenUSD import** (File > Import > USD, `file.import_usd`): binary and
   text layers read natively, stages composed (sublayers, references,
   payloads, variants, instancing), meshes, UsdPreviewSurface materials and
@@ -43,6 +48,11 @@ project uses [Semantic Versioning](https://semver.org/).
   chess pieces, dominoes, a bowling ball and a glass pawn that shatters.
 
 ### Fixed
+- **Duplicates lost their material** (and folder): Shift+D copies looked
+  plain grey.
+- **Image limits**: a scene held 256 images (now 2048) with paths of up
+  to 215 characters (now ~980: an online asset's are long), the GPU saw 64
+  (now 1024) - beyond them textures came out black or wrong.
 - **A crash in the joint solver** with big jointed islands (stage jobs
   entered `jr_prestep` with the stack 8 bytes off 16).
 - **Library thumbnails** that are not square were sampled past their
