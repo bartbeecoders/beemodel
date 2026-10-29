@@ -1488,7 +1488,9 @@ ui_axis:
     pop     rdi
     cmp     eax, ED_OUTLINER
     je      8f
-    jmp     9f
+    cmp     eax, ED_ASSETS              # the Asset Browser: an online
+    jne     9f                          #  source's rows
+    jmp     assets_wheel
 7:
 71: cmp     eax, HIT_CANVAS
     jne     9f

@@ -49,6 +49,9 @@
 .globl ex_src_id
 .globl ex_state
 .globl ex_get
+.globl ex_scroll
+.globl ex_progress
+.globl ex_src_lic
 
 .equ WNOHANG,   1
 .equ EX_MAXSRC, 8
@@ -166,6 +169,9 @@ s_credit_b: .asciz " - "
 s_credit_c: .asciz ", "
 s_chip_cat: .asciz "Fetching the catalog..."
 s_chip_dl:  .asciz "Downloading "
+s_lsobj:    .asciz "object "
+s_lshash:   .asciz " #"
+s_lbsave:   .asciz "lib.save"
 s_bad_get:  .asciz "  lib.get <asset> (in the current source; lib.source <id> first)"
 
 .section .data
@@ -202,6 +208,7 @@ ex_fall:    .skip 8
 ex_place:   .skip 4                     # 1: place it when it is here
 ex_ppos:    .skip 12                    # where
 ex_rbuf:    .skip 8                     # read-buffer of a downloaded file
+ex_scroll:  .skip 4                     # the browser's rows scrolled
 
 .text
 
@@ -420,6 +427,27 @@ ex_src_id:
     mov     eax, edi
     call    ex_src_rec
     ret
+ex_src_lic:
+    mov     eax, edi
+    call    ex_src_rec
+    add     rax, ES_LIC
+    ret
+
+# ex_progress -> eax = the download's progress, 0 .. 96 (a tile's width)
+ex_progress:
+    mov     rax, [rip+ex_fdone]
+    imul    rax, rax, 96
+    mov     rcx, [rip+ex_fall]
+    test    rcx, rcx
+    jz      8f
+    xor     edx, edx
+    div     rcx
+    cmp     eax, 96
+    jbe     9f
+    mov     eax, 96
+    ret
+8:  xor     eax, eax
+9:  ret
 
 # ---- text --------------------------------------------------------------------
 # ex_cpy0(rdi=out, rsi=text) - copied with its 0; rdi at the 0
@@ -2243,8 +2271,13 @@ ex_import:
     movsd   [rip+us_off+8], xmm0
     cvtss2sd xmm0, [rip+ex_ppos+8]
     movsd   [rip+us_off+16], xmm0
+    mov     eax, [rip+obj_count]        # (its objects: those after these)
+    mov     [rsp], eax
     lea     rdi, [rip+ex_path]
     call    usd_import
+    mov     edi, [rsp]                  # into the local library too
+    mov     rsi, r12
+    call    ex_to_library
     xorpd   xmm0, xmm0
     movsd   [rip+us_off], xmm0
     movsd   [rip+us_off+8], xmm0
@@ -2270,6 +2303,51 @@ ex_import:
     call    log_line
     mov     dword ptr [rip+dirty], 1
     add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_to_library(edi=objects before the import, rsi=asset record) - the
+#   objects it made, selected, saved as an object asset: lib.save object
+#   <name> #<source> #<category> (the same content is kept once)
+ex_to_library:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12, rsi
+    cmp     ebx, [rip+obj_count]
+    jae     9f
+    call    select_none
+    mov     r13d, ebx
+1:  cmp     r13d, [rip+obj_count]
+    jae     2f
+    mov     edi, r13d
+    call    obj_at
+    or      dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    inc     r13d
+    jmp     1b
+2:  lea     rdi, [rip+ex_word]          # "object <name> #<id> #<category>"
+    lea     rsi, [rip+s_lsobj]
+    call    ex_cpy0
+    lea     rsi, [r12+EX_NAME]
+    call    ex_cat0
+    lea     rsi, [rip+s_lshash]
+    call    ex_cat0
+    mov     eax, [rip+ex_cur]
+    push    rdi
+    call    ex_src_rec
+    pop     rdi
+    lea     rsi, [rax+ES_ID]
+    call    ex_cat0
+    lea     rsi, [rip+s_lshash]
+    call    ex_cat0
+    lea     rsi, [r12+EX_CAT]
+    call    ex_cat0
+    lea     rdi, [rip+s_lbsave]
+    lea     rsi, [rip+ex_word]
+    call    lb_run_op
+9:  pop     r13
     pop     r12
     pop     rbx
     ret
@@ -2390,11 +2468,13 @@ do_ex_source:
     jnz     3f
     inc     ebx
     jmp     2b
-3:  cmp     [rip+ex_loaded], ebx        # (already the one loaded)
+3:  lea     eax, [rbx+1]                # (already the one loaded)
+    cmp     [rip+ex_loaded], eax
     jne     31f
     cmp     [rip+ex_cur], ebx
     je      7f
 31: mov     [rip+ex_cur], ebx
+    mov     dword ptr [rip+ex_scroll], 0
     lea     eax, [rbx+1]
     mov     [rip+ex_loaded], eax
     call    ex_load
@@ -2417,6 +2497,29 @@ do_ex_source:
 8:  call    do_ex_sources
 9:  pop     rbx
     ret
+
+# lib.source_next - the next source in the browser (the local library, then
+#   each online one, round)
+OPERATOR op_ex_snext, "lib.source_next", "Next Library Source", do_ex_snext, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show the next asset library in the Asset Browser (the local library, then each online source)"
+do_ex_snext:
+    sub     rsp, 8
+    call    ex_init
+    mov     eax, [rip+ex_cur]
+    inc     eax
+    cmp     eax, [rip+ex_nsrc]
+    jb      1f
+    mov     dword ptr [rip+ex_cur], -1
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+1:  mov     edi, eax                    # as lib.source <id>
+    call    ex_src_rec_e
+    mov     [rip+op_arg], rax
+    call    do_ex_source
+9:  add     rsp, 8
+    ret
+ex_src_rec_e:
+    mov     eax, edi
+    jmp     ex_src_rec
 
 # lib.refresh - the current source's catalog fetched again
 OPERATOR op_ex_refresh, "lib.refresh", "Refresh Catalog", do_ex_refresh, flags=OPF_AI_SAFE|OPF_QUIET, doc="Fetch the online source's catalog again (new assets)"

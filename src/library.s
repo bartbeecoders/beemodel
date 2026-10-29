@@ -44,6 +44,8 @@
 .globl assets_press
 .globl lb_tick
 .globl thumb_load
+.globl assets_wheel
+.globl lb_run_op
 .globl blit_thumb
 .globl lb_busy
 .globl lb_drag
@@ -96,6 +98,10 @@
 .equ WNOHANG,   1
 .equ MAP_ANON_PRIV, 0x22
 .equ TILE_W,    112
+.equ EX_CAT,    192                     # (extlib.s: an online asset's record)
+.equ EX_HAVE,   228
+.equ EX_HIT,    240
+.equ EX_NAME,   0
 .equ TILE_H,    126
 .equ LB_HDR,    24
 .equ LB_INFO_H, 58
@@ -135,6 +141,7 @@ lb_list:        .skip 4*256             # objects saved (handles)
 lb_place:       .skip 16                # where to place
 lb_afr:         .skip 8                 # the action placed: its frames
 lb_last_t:      .skip 8                 # the last tile press (double clicks)
+lb_title_x1:    .skip 4                 # the header's source name ends here
 lb_tags2:       .skip 96
 lb_search:      .skip 128               # the browser's search
 lb_kind:        .skip 4                 #  and kind (0 all, K_*)
@@ -200,6 +207,15 @@ s_lb_sphere:    .asciz "create.sphere"
 s_lb_plane:     .asciz "create.plane"
 s_lb_cube:      .asciz "create.cube"
 s_lb_title:     .asciz "Library"
+s_lb_srcnext:   .asciz " >"
+s_lb_xmore:     .asciz " more (scroll, or search to narrow)"
+s_lb_xhint:     .asciz "double-click or drag a tile into a viewport (downloaded the first time)"
+s_lb_xcat:      .asciz "Fetching the catalog..."
+s_lb_xfail:     .asciz "The catalog could not be fetched (offline?): lib.refresh tries again"
+s_lb_xhere:     .asciz "  - downloaded"
+s_lb_xnot:      .asciz "  - not downloaded yet"
+s_op_get:       .asciz "lib.get"
+s_op_snext:     .asciz "lib.source_next"
 s_lb_search:    .asciz "search: "
 s_lb_click:     .asciz "(click to search)"
 s_lb_empty:     .asciz "No assets: lib.save object | material <name> | tree <name> | rig | action <name> | scene"
@@ -2296,6 +2312,12 @@ do_lb_search:
     jnz     2b
     mov     byte ptr [rdi], 0
 1:  call    lb_match
+    lea     rdi, [rip+lb_search]        # (and the online source's catalog)
+    cmp     byte ptr [rdi], 0
+    jne     11f
+    xor     edi, edi
+11: call    ex_match
+    mov     dword ptr [rip+ex_scroll], 0
     mov     dword ptr [rip+lb_sel], -1
     call    fmt_reset
     lea     rdi, [rip+s_sp]
@@ -3407,13 +3429,25 @@ ed_assets_draw:
     push    rbp
     sub     rsp, 24
     call    lb_init
-    mov     edi, [rip+ed_x]             # the header: title, search
+    lea     rdx, [rip+s_lb_title]       # the header: the source (a click: the
+    mov     edi, [rip+ex_cur]           #  next one), search
+    test    edi, edi
+    js      0f
+    call    ex_src_title
+    mov     rdx, rax
+0:  mov     edi, [rip+ed_x]
     add     edi, 8
     mov     esi, [rip+ed_y]
     add     esi, 4
-    lea     rdx, [rip+s_lb_title]
-    mov     ecx, COL_TEXT
+    mov     ecx, COL_ACCENT
     call    draw_text
+    mov     edi, eax
+    mov     esi, [rip+ed_y]
+    add     esi, 4
+    lea     rdx, [rip+s_lb_srcnext]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+    mov     [rip+lb_title_x1], eax
     mov     edi, eax
     add     edi, 16
     mov     esi, [rip+ed_y]
@@ -3436,7 +3470,10 @@ ed_assets_draw:
     mov     esi, [rip+ed_y]
     add     esi, 4
     lea     rdx, [rip+s_lb_hint]
-    mov     ecx, COL_TEXT_DIM
+    cmp     dword ptr [rip+ex_cur], 0
+    jl      0f
+    lea     rdx, [rip+s_lb_xhint]
+0:  mov     ecx, COL_TEXT_DIM
     call    draw_text
     mov     eax, [rip+ed_x]             # the grid
     add     eax, 8
@@ -3464,6 +3501,8 @@ ed_assets_draw:
 3:  imul    eax, [rip+lb_cols]
     mov     r15d, eax                   # tiles that fit
     mov     dword ptr [rip+lb_shown], 0
+    cmp     dword ptr [rip+ex_cur], 0   # an online source: its catalog
+    jge     .Lbd_ext
     cmp     dword ptr [rip+lb_hits], 0
     jne     4f
     mov     edi, [rip+ed_x]
@@ -3633,6 +3672,220 @@ ed_assets_draw:
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_TEXT_DIM
     call    draw_text
+    jmp     .Lbd_out
+    # ---- an online source: its catalog's hits from the scroll on ----------
+.Lbd_ext:
+    mov     eax, [rip+ex_state]
+    lea     rdx, [rip+s_lb_xcat]
+    cmp     eax, 1
+    je      .Lbx_msg
+    cmp     eax, 2
+    je      .Lbx_msg
+    lea     rdx, [rip+s_lb_xfail]
+    cmp     eax, 3
+    jne     .Lbx_grid
+    cmp     dword ptr [rip+ex_n], 0
+    jne     .Lbx_grid
+.Lbx_msg:
+    mov     edi, [rip+ed_x]
+    add     edi, 8
+    mov     esi, [rip+lb_y0]
+    add     esi, 4
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+    jmp     .Lbd_out
+.Lbx_grid:
+    call    tile_at                     # (hover)
+    mov     [rsp], eax
+    mov     eax, [rip+ex_scroll]        # hits to skip: the rows scrolled
+    imul    eax, [rip+lb_cols]
+    mov     [rsp+4], eax
+    mov     dword ptr [rsp+8], 0        # hits so far
+    xor     ebx, ebx                    # asset
+    xor     r12d, r12d                  # tile
+.Lbx_tile:
+    cmp     ebx, [rip+ex_n]
+    jae     .Lbx_more
+    mov     edi, ebx
+    call    ex_rec
+    mov     r13, rax
+    cmp     dword ptr [r13+EX_HIT], 0
+    je      .Lbx_next
+    inc     dword ptr [rsp+8]
+    mov     eax, [rsp+8]
+    cmp     eax, [rsp+4]
+    jbe     .Lbx_next
+    cmp     r12d, r15d
+    jae     .Lbx_next                   # (counted, not shown)
+    lea     rax, [rip+lb_shown_idx]
+    mov     [rax+r12*4], ebx
+    mov     eax, r12d
+    xor     edx, edx
+    div     dword ptr [rip+lb_cols]
+    imul    r14d, edx, TILE_W
+    add     r14d, [rip+lb_x0]
+    imul    ebp, eax, TILE_H
+    add     ebp, [rip+lb_y0]
+    cmp     ebx, [rip+lb_sel]
+    jne     1f
+    lea     edi, [r14-3]
+    lea     esi, [rbp-3]
+    mov     edx, TH+6
+    mov     ecx, TH+6
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+    jmp     2f
+1:  cmp     r12d, [rsp]
+    jne     2f
+    lea     edi, [r14-3]
+    lea     esi, [rbp-3]
+    mov     edx, TH+6
+    mov     ecx, TH+6
+    mov     r8d, COL_HOVER
+    call    fill_rect
+2:  mov     edi, ebx                    # its picture (asked for when first
+    call    ex_thumb                    #  shown), else its category
+    test    rax, rax
+    jz      3f
+    mov     edi, r14d
+    mov     esi, ebp
+    mov     rdx, rax
+    call    blit_thumb
+    jmp     4f
+3:  mov     edi, r14d
+    mov     esi, ebp
+    mov     edx, TH
+    mov     ecx, TH
+    mov     r8d, 0x2a2e36
+    call    fill_rect
+    lea     rdx, [r13+EX_CAT]
+    lea     edi, [r14+8]
+    lea     esi, [rbp+TH/2-8]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+4:  cmp     dword ptr [r13+EX_HAVE], 2  # downloaded: a mark; coming: a bar
+    jne     41f
+    lea     edi, [r14+TH-12]
+    lea     esi, [rbp+4]
+    mov     edx, 8
+    mov     ecx, 8
+    mov     r8d, 0x4caf50
+    call    fill_rect
+    jmp     5f
+41: cmp     dword ptr [r13+EX_HAVE], 1
+    jne     5f
+    lea     edi, [r14]
+    lea     esi, [rbp+TH-6]
+    mov     edx, TH
+    mov     ecx, 6
+    mov     r8d, 0x1d2027
+    call    fill_rect
+    call    ex_progress                 # -> eax = 0 .. TH
+    mov     edx, eax
+    test    edx, edx
+    jz      5f
+    lea     edi, [r14]
+    lea     esi, [rbp+TH-6]
+    mov     ecx, 6
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+5:  lea     rdi, [r13+EX_NAME]          # its name after the category
+    xor     ecx, ecx                    #  ("bowl_c01"), the first 12
+53: mov     al, [rdi+rcx]
+    test    al, al
+    jz      54f
+    inc     ecx
+    cmp     al, '_'
+    jne     53b
+    cmp     byte ptr [rdi+rcx], 0
+    je      54f
+    add     rdi, rcx
+54: lea     rsi, [rip+lb_buf]
+    mov     ecx, 12
+51: mov     al, [rdi]
+    mov     [rsi], al
+    test    al, al
+    jz      52f
+    inc     rdi
+    inc     rsi
+    dec     ecx
+    jnz     51b
+    mov     byte ptr [rsi], 0
+52: mov     edi, r14d
+    lea     esi, [rbp+TH+4]
+    lea     rdx, [rip+lb_buf]
+    mov     ecx, COL_TEXT
+    call    draw_text
+    inc     r12d
+.Lbx_next:
+    inc     ebx
+    jmp     .Lbx_tile
+.Lbx_more:
+    mov     [rip+lb_shown], r12d
+    mov     eax, [rsp+8]                # "n more" below
+    sub     eax, [rsp+4]
+    sub     eax, r12d
+    jle     .Lbx_info
+    call    fmt_reset
+    mov     edi, eax
+    call    fmt_int
+    lea     rdi, [rip+s_lb_xmore]
+    call    fmt_str
+    mov     edi, [rip+ed_x]
+    add     edi, [rip+ed_w]
+    sub     edi, 260
+    mov     esi, [rip+ed_y]
+    add     esi, 4
+    lea     rdx, [rip+fmt_buf]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
+.Lbx_info:
+    mov     ebx, [rip+lb_sel]           # the selected one: name, category,
+    test    ebx, ebx                    #  source, licence, here or not
+    js      .Lbd_out
+    cmp     ebx, [rip+ex_n]
+    jae     .Lbd_out
+    mov     edi, ebx
+    call    ex_rec
+    mov     r13, rax
+    mov     ebp, [rip+ed_y]
+    add     ebp, [rip+ed_h]
+    sub     ebp, LB_INFO_H-4
+    call    fmt_reset
+    lea     rdi, [r13+EX_NAME]
+    call    fmt_str
+    lea     rdi, [rip+s_lb_sep]
+    call    fmt_str
+    lea     rdi, [r13+EX_CAT]
+    call    fmt_str
+    lea     rdi, [rip+s_lb_xhere]
+    cmp     dword ptr [r13+EX_HAVE], 2
+    je      6f
+    lea     rdi, [rip+s_lb_xnot]
+6:  call    fmt_str
+    mov     edi, [rip+ed_x]
+    add     edi, 8
+    mov     esi, ebp
+    lea     rdx, [rip+fmt_buf]
+    mov     ecx, COL_TEXT
+    call    draw_text
+    call    fmt_reset
+    mov     edi, [rip+ex_cur]
+    call    ex_src_title
+    mov     rdi, rax
+    call    fmt_str
+    lea     rdi, [rip+s_lb_sep]
+    call    fmt_str
+    mov     edi, [rip+ex_cur]
+    call    ex_src_lic
+    mov     rdi, rax
+    call    fmt_str
+    mov     edi, [rip+ed_x]
+    add     edi, 8
+    lea     esi, [rbp+18]
+    lea     rdx, [rip+fmt_buf]
+    mov     ecx, COL_TEXT_DIM
+    call    draw_text
 .Lbd_out:
     add     rsp, 24
     pop     rbp
@@ -3642,6 +3895,27 @@ ed_assets_draw:
     pop     r12
     pop     rbx
     ret
+
+# assets_wheel(edi = >0 down, <0 up) - an online source's tiles scrolled a
+#   row a notch
+assets_wheel:
+    cmp     dword ptr [rip+ex_cur], 0
+    jl      9f
+    mov     eax, [rip+ex_scroll]
+    test    edi, edi
+    js      1f
+    inc     eax
+    jmp     2f
+1:  dec     eax
+2:  xor     ecx, ecx
+    cmp     eax, ecx
+    cmovl   eax, ecx
+    mov     ecx, [rip+ex_n]
+    cmp     eax, ecx
+    cmovg   eax, ecx
+    mov     [rip+ex_scroll], eax
+    mov     dword ptr [rip+dirty], 1
+9:  ret
 
 # blit_thumb(edi=x, esi=y logical, rdx=TH x TH pixels) - scaled to physical
 #   pixels, clipped
@@ -3749,7 +4023,16 @@ assets_press:
     mov     eax, [rip+ptr_y]
     cmp     eax, [rip+lb_y0]
     jge     1f
-    lea     rdi, [rip+s_lb_pf]          # the header: search
+    mov     eax, [rip+ptr_x]            # the header: the source's name - the
+    cmp     eax, [rip+lb_title_x1]      #  next source; else search
+    jg      12f
+    lea     rdi, [rip+s_op_snext]
+    xor     esi, esi
+    call    lb_run_op
+    mov     dword ptr [rip+lb_sel], -1
+    mov     eax, 1
+    jmp     9f
+12: lea     rdi, [rip+s_lb_pf]
     call    console_prefill
     mov     eax, 1
     jmp     9f
@@ -3769,7 +4052,16 @@ assets_press:
     jne     2f
     mov     qword ptr [rip+lb_last_t], 0
     mov     dword ptr [rip+lb_drag], 0
+    cmp     dword ptr [rip+ex_cur], 0   # online: lib.get <name>
+    jl      11f
     mov     edi, ebx
+    call    ex_rec
+    lea     rdi, [rip+s_op_get]
+    lea     rsi, [rax+EX_NAME]
+    call    lb_run_op
+    mov     eax, 1
+    jmp     9f
+11: mov     edi, ebx
     call    lb_rec
     mov     rax, [rax+LR_ID]
     lea     rdi, [rip+lb_hex]
@@ -3854,7 +4146,15 @@ lb_release:
     call    cursor_place
     call    reset_clip
     dec     ebx
+    cmp     dword ptr [rip+ex_cur], 0   # online: lib.get <name> there
+    jl      1f
     mov     edi, ebx
+    call    ex_rec
+    lea     rdi, [rip+s_op_get]
+    lea     rsi, [rax+EX_NAME]
+    call    lb_run_op
+    jmp     9f
+1:  mov     edi, ebx
     call    lb_rec
     lea     rsi, [rax+LR_NAME]          # as the user: lib.place <id>
     mov     rax, [rax+LR_ID]
@@ -3878,8 +4178,13 @@ lb_ghost:
     sub     rsp, 16
     mov     edi, [rip+lb_drag]
     dec     edi
-    call    lb_rec
-    mov     rbx, rax
+    cmp     dword ptr [rip+ex_cur], 0   # (online: its record, the name first
+    jl      1f                          #  in both)
+    call    ex_rec
+    jmp     2f
+1:  call    lb_rec
+    lea     rax, [rax+LR_NAME]
+2:  mov     rbx, rax
     mov     edi, [rip+ptr_x]
     add     edi, 10
     mov     esi, [rip+ptr_y]
@@ -3892,7 +4197,7 @@ lb_ghost:
     add     edi, 16
     mov     esi, [rip+ptr_y]
     add     esi, 9
-    lea     rdx, [rbx+LR_NAME]
+    mov     rdx, rbx
     mov     ecx, COL_TEXT
     call    draw_text
     add     rsp, 16
