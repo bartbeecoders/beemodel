@@ -799,6 +799,14 @@ up_joint:
     lea     rdx, [rsp+32]
     mov     ecx, 1
     call    up_xvec
+    xor     ecx, ecx                    # (and where the asset lands)
+31: movsd   xmm0, [rsp+64+rcx*8]
+    lea     rax, [rip+us_off]
+    addsd   xmm0, [rax+rcx*8]
+    movsd   [rsp+64+rcx*8], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      31b
     mov     edi, ebx                    # the axis: e_axis through localRot0
     call    up_axis                     #  -> [rsp+..] doubles at rdi
     lea     rdi, [rsp+96]

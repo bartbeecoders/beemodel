@@ -48,6 +48,7 @@
 .globl us_source
 .globl us_cm
 .globl us_pany
+.globl us_off
 
 .equ US_MAXLAY,  256                    # layers a stage opens
 .equ US_MAXSTK,  32                     # layers in a stack
@@ -168,6 +169,8 @@ us_nskip:   .skip 4
 us_folder:  .skip 4
 us_rootlc:  .skip 4
 us_cm:      .skip 128                   # C: the stage to BeeModel (axes, units)
+us_off:     .skip 24                    # where it lands: added to every place
+                                        #  (an online asset at the 3D cursor)
 us_ci:      .skip 128                   # C^-1
 us_tbuf:    .skip 4096                  # a path while it is looked up
 us_tbuf2:   .skip 4096
@@ -2518,11 +2521,22 @@ um_matrices:
     lea     rdi, [rip+um_m+128]
     lea     rsi, [rip+us_cm]
     call    m4_copy
-    jmp     9f
+    lea     rdi, [rip+um_m]             # (placed: moved by us_off)
+    jmp     8f
 1:  lea     rdi, [rip+um_m+128]
     lea     rsi, [rip+us_cm]
     mov     rdx, rbx
     call    m4_mul
+    lea     rdi, [rip+um_m+128]         # (baked: its vertices moved)
+8:  xor     ecx, ecx
+2:  lea     eax, [rcx*4+3]
+    movsd   xmm0, [rdi+rax*8]
+    lea     rdx, [rip+us_off]
+    addsd   xmm0, [rdx+rcx*8]
+    movsd   [rdi+rax*8], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      2b
 9:  add     rsp, 112
     pop     rbx
     ret

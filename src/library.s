@@ -43,6 +43,8 @@
 .globl ed_assets_draw
 .globl assets_press
 .globl lb_tick
+.globl thumb_load
+.globl blit_thumb
 .globl lb_busy
 .globl lb_drag
 .globl lb_motion
@@ -97,7 +99,8 @@
 .equ TILE_H,    126
 .equ LB_HDR,    24
 .equ LB_INFO_H, 58
-.equ IMW,       0                       # (an image: width, pixels)
+.equ IMW,       0                       # (an image: width, height, pixels)
+.equ IMH,       4
 .equ IMDATA,    64
 .equ MT_GEOMETRY_, 10
 .equ MT_ARMATURE_, 11
@@ -3301,10 +3304,6 @@ thumb_px:
     cmp     dword ptr [rdi+LR_THUMB], 2
     jne     8f
     push    rbx
-    push    r12
-    push    r13
-    push    r14
-    sub     rsp, 8
     mov     rbx, rdi
     mov     rax, [rbx+LR_ID]
     mov     edi, [rbx+LR_ROOT]
@@ -3312,6 +3311,26 @@ thumb_px:
     lea     rdx, [rip+s_png]
     call    lb_pathx
     mov     rdi, rax
+    call    thumb_load
+    mov     [rbx+LR_PX], rax
+    test    rax, rax
+    jnz     1f
+    mov     dword ptr [rbx+LR_THUMB], 3 # (it would not load: not again)
+1:  pop     rbx
+    ret
+8:  xor     eax, eax
+9:  ret
+
+# thumb_load(rdi=PNG / JPEG path) -> rax = TH x TH pixels (0xRRGGBB, an own
+#   mapping), 0 when it does not load. Nearest sampling of the whole image
+#   (extlib.s: online catalogs' thumbnails too)
+thumb_load:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    xor     ebx, ebx
     call    file_read
     test    rax, rax
     jz      7f
@@ -3335,13 +3354,12 @@ thumb_px:
     call    plat_mmap
     cmp     rax, -4096
     jae     6f
-    mov     [rbx+LR_PX], rax
-    mov     r12, rax
+    mov     rbx, rax
     xor     ecx, ecx                    # y
 1:  cmp     ecx, TH
     jae     6f
     mov     eax, ecx
-    imul    eax, [r14+IMW]
+    imul    eax, [r14+IMH]              # (rows by the height)
     xor     edx, edx
     mov     r8d, TH
     div     r8d
@@ -3350,7 +3368,7 @@ thumb_px:
 2:  cmp     r10d, TH
     jae     3f
     mov     eax, r10d
-    imul    eax, [r14+IMW+0]
+    imul    eax, [r14+IMW]
     xor     edx, edx
     div     r8d
     mov     r11d, r9d
@@ -3361,24 +3379,20 @@ thumb_px:
     mov     edx, ecx
     imul    edx, TH
     add     edx, r10d
-    mov     [r12+rdx*4], eax
+    mov     [rbx+rdx*4], eax
     inc     r10d
     jmp     2b
 3:  inc     ecx
     jmp     1b
 6:  mov     rdi, r14
     call    img_free
-7:  mov     rax, [rbx+LR_PX]
+7:  mov     rax, rbx
     add     rsp, 8
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
-    test    rax, rax
-    jnz     9f
-    mov     dword ptr [rdi+LR_THUMB], 3
-8:  xor     eax, eax
-9:  ret
+    ret
 
 # =============================================================================
 #  The browser
