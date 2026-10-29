@@ -90,7 +90,7 @@ def read(path):
             else:
                 k = etok[t]; prop = k < 0; nm = toks[abs(k)]
                 if prop: me = parent + '.' + nm
-                else: me = (parent.rstrip('/') + '/' + nm) if not nm.startswith('{') else parent + nm
+                else: me = parent + nm if nm.startswith('{') or parent[-1] in '/}' else parent + '/' + nm
                 paths[pidx[t]] = me
             hc = jumps[t] > 0 or jumps[t] == -1; hs = jumps[t] >= 0
             if hc:
@@ -141,8 +141,8 @@ def read(path):
             if fmt is None: return ('arr', ty, n)
             k = int(fmt[:-1]) if len(fmt) > 1 else 1; f = fmt[-1]
             vals = struct.unpack('<%d%s' % (n * k, f), rr.raw(n * k * struct.calcsize(f)))
-            if ty in (11, 12): return [toks[v] for v in vals]
-            if ty == 10: return [toks[strs[v]] for v in vals]
+            if ty == 11: return [toks[v] for v in vals]
+            if ty in (10, 12): return [toks[strs[v]] for v in vals]   # (asset arrays: string numbers)
             if ty in (5, 6): vals = [i32(v) for v in vals]
             if k > 1: return [tuple(vals[i:i + k]) for i in range(0, len(vals), k)]
             return list(vals)

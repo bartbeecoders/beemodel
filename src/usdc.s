@@ -126,7 +126,43 @@ uc_pbuf:    .skip 4096                  # a path's text while it is made
 # usd_open(rdi=file path) -> rax = its layer (0: usd_err says why): crate
 #   files by their magic, the rest as text (usda.s)
 usd_open:
-    jmp     usdc_read
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    call    file_read
+    test    rax, rax
+    jz      8f
+    mov     r12, rax
+    mov     r13, rdx
+    xor     ecx, ecx                    # crate?
+    cmp     rdx, 8
+    jb      1f
+    mov     rcx, UC_MAGIC
+    cmp     [rax], rcx
+    sete    cl
+    movzx   ecx, cl
+1:  push    rcx
+    sub     rsp, 8
+    mov     rdi, r12
+    mov     rsi, r13
+    call    file_unmap
+    add     rsp, 8
+    pop     rcx
+    mov     rdi, rbx
+    pop     r13
+    pop     r12
+    pop     rbx
+    test    ecx, ecx
+    jnz     usdc_read
+    jmp     usda_read
+8:  lea     rax, [rip+s_uc_open]
+    mov     [rip+usd_err], rax
+    xor     eax, eax
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
 
 # usdc_read(rdi=file path) -> rax = the layer (0: not read; usd_err says why)
 usdc_read:
@@ -981,12 +1017,9 @@ uc_paths:
     mov     [rsp+32], r8d
     jmp     34f
 33: mov     al, '/'
-    cmp     r12d, 0                     # (under "/": no second slash)
-    jne     32f
-    mov     rcx, [rip+uc_lay]
-    mov     rcx, [rcx+UL_PATHS]
-    mov     rcx, [rcx+UP_STR]
-    cmp     word ptr [rcx], '/'
+    cmp     byte ptr [rdi-1], '/'       # (under "/": no second slash; under
+    je      34f                         #  a variant "{set=sel}": none either)
+    cmp     byte ptr [rdi-1], '}'
     je      34f
 32: stosb
 34: lodsb
@@ -1486,6 +1519,8 @@ uc_value:
     jz      .Luv_done
     bt      rbx, 61
     jc      .Luv_carr
+    cmp     r13d, 12                    # (asset path arrays: string numbers,
+    je      .Luv_astr                   #  not tokens as a lone one is)
     cmp     edx, UE_TOK
     je      .Luv_atok
     cmp     edx, UE_STR
