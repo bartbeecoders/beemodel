@@ -80,6 +80,7 @@ shatter|600|shatter*.s|python3 tests/shatter.py build/beemodel
 fields|600|fields.s fieldui.s fieldvm.s fvjit.s|python3 tests/fields.py build/beemodel
 particles|1200|particles.s partui.s liquid.s simcache.s simui.s cloth.s nbody.s|python3 tests/particles.py build/beemodel
 viewport|600|viewport.s raster.s vpnav.s matcache.s preview.s|python3 tests/viewport.py build/beemodel
+camview|300|camview.s viewport.s viewanim.s lcam.s|python3 tests/camview.py build/beemodel
 lighting|600|lightmap.s probe.s env.s render.s hive.s denoise.s|python3 tests/lighting.py build/beemodel build/shots
 materials|600|material.s mat*.s mtl.s texture.s mcpmat.s|python3 tests/materials.py build/beemodel build/shots
 ai|300|ai.s aiproc.s aiask.s widgets.s widgets.inc textfield.s tooltip.s|python3 tests/ai.py build/beemodel build/shots

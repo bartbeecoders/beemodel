@@ -51,6 +51,7 @@ va_start:
     test    ebx, ebx
     js      9f
     call    cam_load                    # where it is now
+    call    cv_leave                    # (Camera View: from the camera)
     mov     dword ptr [rip+va_on], 0
     cmp     dword ptr [rip+pr_rmotion], 0
     jne     1f

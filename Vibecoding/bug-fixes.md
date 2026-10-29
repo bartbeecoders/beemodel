@@ -23,3 +23,6 @@ Some issues I found already. Do some UI testing yourself
 - add zoom to preview image in filedialog
 - in the command pallet, up/down works but not repeatatly
 - about screen does nothing (not implmented ?)
+
+
+The app crashed when creating a new material

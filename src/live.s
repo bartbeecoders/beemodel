@@ -12,7 +12,10 @@
 #      a slice of time a frame, up to Preferences > Viewport > Rendered
 #      samples (the raycast stays shown for the first few); denoised on
 #      the GPU every frame unless Rendered denoise is off (denoise.s's
-#      filter: pt.comp's dn_ stages after the samples).
+#      filter: pt.comp's dn_ stages after the samples);
+#    - while the animation plays: each new frame's scene goes up at once and
+#      is path-traced, Preferences > Viewport > Rendered playback samples
+#      of it, denoised, more while the frame stays (0: the raycast).
 #  The scene goes up again when its fingerprint changes (objects, their
 #  meshes' versions, lights, materials, undo steps, the edited mesh): every
 #  change when it builds quickly, else once the change is over (the view
@@ -75,6 +78,7 @@ lv_dn_ms:       .skip 4                 # the last denoise's time (gpu(14))
 
 .section .rodata
 OPERATOR op_lv_dn, "view.rendered_denoise", "Denoise Rendered", do_lv_dn, lv_dn_check, flags=OPF_AI_SAFE|OPF_QUIET, doc="Rendered shading: denoise the path-traced samples on the GPU every frame: view.rendered_denoise [0|1] (none: on or off; kept in the preferences)"
+OPERATOR op_lv_play, "view.rendered_playback", "Rendered Playback Samples", do_lv_play, flags=OPF_AI_SAFE|OPF_QUIET, doc="Rendered shading while the animation plays: path-traced samples each new frame gets, denoised: view.rendered_playback <0..64> (0: the raycast; kept in the preferences)"
 OPERATOR op_lv_spp, "view.rendered_samples", "Rendered Samples", do_lv_spp, flags=OPF_AI_SAFE|OPF_QUIET, doc="Rendered shading's path-traced samples once the view is still: view.rendered_samples <0..4096> (0: the raycast alone; kept in the preferences)"
 s_lv_none:      .asciz "  Rendered shading needs the GPU helper (beemodel-gpu): Material Preview meanwhile"
 s_lv_cpu:       .asciz "Rendered  |  no GPU: Material Preview"
@@ -156,6 +160,9 @@ lv_shade:
     jne     .Lls_draw
     cmp     r14, [rsp]                  # the change is over: now
     je      .Lls_build
+    call    lv_playing                  # playing path-traced: every frame's
+    test    eax, eax                    #  scene, now
+    jnz     .Lls_build
     cmp     dword ptr [rip+lv_build_ms], LV_QUICK_MS  # still changing: a slow
     ja      .Lls_draw                   #  build waits for its end, a quick
     mov     rax, rbx                    #  one follows (at most half the time)
@@ -187,6 +194,9 @@ lv_shade:
     mov     dword ptr [rip+lv_state], 0
 .Lls_draw:
     mov     [rip+lv_owner_at], rbx
+    call    lv_playing
+    test    eax, eax
+    jnz     .Lls_play
     cmp     dword ptr [rip+lv_state], 0 # a raycast when the view moved
     je      .Lls_ray
     lea     rsi, [rip+lv_ncam]
@@ -238,6 +248,38 @@ lv_shade:
     call    lv_dn_want
     mov     [rip+lv_dn], eax
     inc     dword ptr [rip+lv_nray]
+    jmp     .Lls_show
+.Lls_play:                              # playing: a new frame (the scene up
+    cmp     dword ptr [rip+lv_state], 0 #  again, the view moved, the denoiser
+    je      1f                          #  switched) path-traced at once; the
+    lea     rsi, [rip+lv_ncam]          #  same one: more samples
+    lea     rdi, [rip+lv_cam]
+    mov     ecx, 13
+    repe    cmpsd
+    jne     1f
+    call    lv_dn_want
+    cmp     eax, [rip+lv_dn]
+    jne     1f
+    call    lv_target
+    cmp     [rip+lv_spp], eax
+    jae     .Lls_show
+    call    lv_refine
+    test    rax, rax
+    jz      .Lls_fail
+    jmp     .Lls_show
+1:  lea     rsi, [rip+lv_ncam]
+    lea     rdi, [rip+lv_cam]
+    mov     ecx, 13
+    rep     movsd
+    mov     dword ptr [rip+lv_spp], 0
+    call    lv_dn_want
+    mov     [rip+lv_dn], eax
+    call    lv_playing
+    mov     [rip+lv_batch], eax
+    mov     edi, eax
+    call    lv_trace
+    test    rax, rax
+    jz      .Lls_fail
 .Lls_show:
     call    lv_target
     mov     ebx, eax
@@ -331,17 +373,52 @@ lv_refine:
     sub     rax, rbx
     cmp     eax, LV_SLICE_MS
     jb      1b
-8:  cmp     dword ptr [rip+lv_dn], 0    # denoised: the stages, the last one's
-    je      81f                         #  pixels back
+8:  call    lv_denoise
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# lv_trace(edi=samples) -> rax = the pixels: that many path-traced samples
+#   added to the image at once, denoised (0: the helper failed)
+lv_trace:
+    push    rbx
+    mov     edx, edi
+    mov     ebx, edi
+    mov     edi, 1
+    cmp     dword ptr [rip+lv_dn], 0    # (the denoiser's sums: its input,
+    je      1f                          #  not pixels)
+    mov     edi, 1|4|LV_NOREAD
+1:  mov     esi, [rip+lv_spp]
+    lea     rcx, [rip+lv_cam]
+    call    gpu_lv_run
+    test    rax, rax
+    jz      9f
+    mov     [rip+lv_pix], rax
+    add     [rip+lv_spp], ebx
+    mov     dword ptr [rip+lv_state], 2
+    call    lv_denoise
+9:  pop     rbx
+    ret
+
+# lv_denoise -> rax = the pixels: denoised (the stages, the last one's pixels
+#   back) when the samples carry the denoiser's sums, else as they are (0:
+#   the helper failed)
+lv_denoise:
+    push    r12
+    push    r13
+    sub     rsp, 8
+    cmp     dword ptr [rip+lv_dn], 0
+    je      8f
     call    now_ms
     mov     r13, rax
     mov     r12d, 1
-7:  mov     edi, r12d
+1:  mov     edi, r12d
     shl     edi, 8
     cmp     r12d, LV_DN_STAGES
-    je      71f
+    je      2f
     or      edi, LV_NOREAD
-71: mov     esi, [rip+lv_spp]
+2:  mov     esi, [rip+lv_spp]
     xor     edx, edx
     lea     rcx, [rip+lv_cam]
     call    gpu_lv_run
@@ -349,15 +426,15 @@ lv_refine:
     jz      9f
     inc     r12d
     cmp     r12d, LV_DN_STAGES
-    jbe     7b
+    jbe     1b
     mov     [rip+lv_pix], rax
     call    now_ms
     sub     rax, r13
     mov     [rip+lv_dn_ms], eax
-81: mov     rax, [rip+lv_pix]
-9:  pop     r13
+8:  mov     rax, [rip+lv_pix]
+9:  add     rsp, 8
+    pop     r13
     pop     r12
-    pop     rbx
     ret
 
 # lv_blit(rsi=XRGB, lv_w x lv_h) - into the canvas rows
@@ -822,10 +899,32 @@ lv_samples_shown:
     mov     ecx, LV_MIN_SPP
     cmp     eax, ecx
     cmova   eax, ecx
-    cmp     [rip+lv_spp], eax
+    mov     ecx, eax
+    call    lv_playing                  # (playing: its samples are enough)
+    test    eax, eax
+    jz      1f
+    cmp     ecx, eax
+    cmova   ecx, eax
+1:  cmp     [rip+lv_spp], ecx
     setae   dl
 9:  mov     eax, edx
     ret
+
+# lv_playing -> eax = the samples each new frame gets while the animation
+#   plays (Preferences > Viewport > Rendered playback samples, 0 .. 64);
+#   0 when it does not play, or they are 0 (the raycast then)
+lv_playing:
+    xor     eax, eax
+    cmp     dword ptr [rip+an_play], 0
+    je      9f
+    mov     eax, [rip+pr_lvplay]
+    test    eax, eax
+    jns     1f
+    xor     eax, eax
+1:  cmp     eax, 64
+    jbe     9f
+    mov     eax, 64
+9:  ret
 
 # view.rendered_samples <n> - Rendered shading's samples (the preference)
 do_lv_spp:
@@ -845,6 +944,34 @@ do_lv_spp:
     mov     [rip+pr_lvspp], eax
     call    lv_target
     mov     [rip+pr_lvspp], eax
+    call    prefs_save
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    ret
+
+# view.rendered_playback <n> - the samples each new frame gets while the
+#   animation plays (the preference)
+do_lv_play:
+    sub     rsp, 8
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      9f
+    mov     rdx, rsi                    # (to its end)
+1:  cmp     byte ptr [rdx], 0
+    je      2f
+    inc     rdx
+    jmp     1b
+2:  call    parse_float
+    test    eax, eax
+    jz      9f
+    cvttss2si eax, xmm0
+    test    eax, eax
+    jns     3f
+    xor     eax, eax
+3:  cmp     eax, 64
+    jbe     4f
+    mov     eax, 64
+4:  mov     [rip+pr_lvplay], eax
     call    prefs_save
     mov     dword ptr [rip+dirty], 1
 9:  add     rsp, 8

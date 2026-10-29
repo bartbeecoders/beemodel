@@ -139,7 +139,7 @@ items_edit:     .quad op_edit_undo, op_edit_redo, 0, op_palette_open, 0
 .equ items_edit_n, (. - items_edit) / 8
 items_view:     .quad op_view_tools, op_view_outliner, op_view_console, 0
                 .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close, 0
-                .quad op_view_wire, op_view_matprev, op_view_rendered, op_view_grid, op_view_reset_cam, op_console_clear, 0
+                .quad op_view_wire, op_view_matprev, op_view_rendered, op_view_grid, op_view_reset_cam, op_view_camera, op_console_clear, 0
                 .quad sub_analysis, op_view_measure, op_fl_arrows, op_fl_lines, 0, sub_theme, sub_workspace
 .equ items_view_n, (. - items_view) / 8
 items_select:   .quad op_select_all, 0, op_mesh_all, op_mesh_inv, op_mesh_linked, op_mesh_box, 0

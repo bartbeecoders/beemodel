@@ -1,0 +1,273 @@
+# Chess Cascade — BeeModel v1.2 demo
+# Physics, materials and modelled detail in one scene. A full chess set of
+# signed-distance pieces (smooth-blended lathe shapes, crenellated rooks, a
+# carved knight, crowns of spheres) stands on a lacquered board in a dark
+# marble hall. A chrome ball rolls down a ramp behind the board and starts a
+# spiral of 30 car-paint dominoes; the last one knocks over the white back
+# rank, piece by piece, and the h-rook falls on a glass pawn that shatters.
+# A copper gyroid sphere and a gold king share the light with emissive rings.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+sclear()
+op("anim.range", "1 360 30")
+op("rigid.world", "gravity 0 -9.81 0 rate 240 iterations 12 substeps 4")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+material("White"); op("material.preset", "marble White")
+m = mat("Black", 0.012, 0.012, 0.016, 0.06, 0); matset(m, "clearcoat", 1); matset(m, "coat_roughness", 0.02)
+material("Gold"); op("material.preset", "gold Gold")
+material("Chrome"); op("material.preset", "chrome Chrome")
+material("Crystal"); op("material.preset", "glass Crystal")
+material("Copper"); op("material.preset", "copper Copper")
+material("Hall"); op("material.preset", "marble Hall")
+matset("Hall", "roughness", 0.12)
+m = mat("Stone Floor", 0.018, 0.018, 0.022, 0.12, 0); matset(m, "clearcoat", 1); matset(m, "coat_roughness", 0.05)
+m = mat("Wall", 0.05, 0.045, 0.05, 0.85, 0)
+material("Walnut"); op("material.preset", "wood Walnut")
+m = mat("Ring", 1, 0.82, 0.6, 0.5, 0); matset(m, "emission", 1, 0.82, 0.6); matset(m, "strength", 8)
+m = mat("Plinth", 0.02, 0.02, 0.022, 0.3, 0)
+
+# the board: walnut frame, a lacquered checker top (a checker node graph,
+#   ivory and near-black, under a clear coat)
+m = mat("Squares", 0.8, 0.75, 0.65, 0.2, 0); matset(m, "clearcoat", 1); matset(m, "coat_roughness", 0.03)
+c = node(m, "checker", 4)
+d = node(m, "mix", 0)
+link(m, c, d, 1)
+nodeset(m, d, 2, 0.75, 0.68, 0.55)
+nodeset(m, d, 3, 0.03, 0.025, 0.02)
+socket(m, "base", d)
+
+S = 0.5                                       # a square
+BY = 0.08                                     # the board's top
+f = add("plane", "Floor", 0, 0, 0); scale(f, 40); assign(f, "Stone Floor")
+select(f); op("rigid.add", "passive plane friction 0.6")
+b = add("cube", "Board Frame", 0, BY / 2 - 0.005, 0); scale(b, 4 * S + 0.18, BY / 2 - 0.005, 4 * S + 0.18); assign(b, "Walnut")
+t = add("plane", "Board", 0, BY, 0); scale(t, 4 * S); assign(t, "Squares")
+select(b); op("rigid.add", "passive box friction 0.9")
+
+# ---- the pieces: signed-distance shapes, base at y 0, meshed once a kind
+fn sbase(r) {
+    return sunion(smove(scyl(r, 0.07), 0, 0.035, 0), smove(storus(r * 0.86, 0.04), 0, 0.075, 0), 0.03)
+}
+fn spawn_() {
+    g = sunion(sbase(0.16), smove(scyl(0.075, 0.26), 0, 0.22, 0), 0.07)
+    g = sunion(g, smove(storus(0.09, 0.022), 0, 0.34, 0), 0.02)
+    return sunion(g, smove(ssphere(0.105), 0, 0.45, 0), 0.03)
+}
+fn srook() {
+    g = sunion(sbase(0.19), smove(scyl(0.125, 0.46), 0, 0.3, 0), 0.08)
+    g = sunion(g, smove(scyl(0.165, 0.13), 0, 0.58, 0), 0.03)
+    g = ssub(g, smove(scyl(0.115, 0.2), 0, 0.68, 0), 0.01)
+    for i in 0..3 { g = ssub(g, srot(smove(sbox(0.06, 0.12, 0.5), 0, 0.66, 0), 0, i * 60deg, 0)) }
+    return g
+}
+fn sknight() {
+    g = sunion(sbase(0.18), smove(scyl(0.12, 0.14), 0, 0.15, 0), 0.05)
+    neck = smove(srot(sbox(0.17, 0.46, 0.17, 0.06), 0, 0, -18deg), 0.0, 0.38, 0)
+    head = smove(srot(sbox(0.32, 0.15, 0.15, 0.06), 0, 0, -28deg), 0.1, 0.56, 0)
+    mane = smove(srot(sbox(0.06, 0.4, 0.07, 0.03), 0, 0, -15deg), -0.08, 0.45, 0)
+    ears = smove(srot(sbox(0.05, 0.11, 0.12, 0.02), 0, 0, -10deg), -0.02, 0.68, 0)
+    g = sunion(g, sunion(neck, sunion(head, sunion(mane, ears, 0.03), 0.06), 0.05), 0.06)
+    eyes = smove(scyl(0.02, 0.3), 0.06, 0.6, 0)
+    return ssub(g, srot(eyes, 90deg, 0, 0), 0.01)
+}
+fn sbishop() {
+    g = sunion(sbase(0.17), smove(scyl(0.08, 0.36), 0, 0.27, 0), 0.08)
+    g = sunion(g, smove(storus(0.1, 0.024), 0, 0.46, 0), 0.02)
+    hd = sunion(smove(ssphere(0.115), 0, 0.6, 0), smove(ssphere(0.075), 0, 0.7, 0), 0.07)
+    g = sunion(g, hd, 0.03)
+    g = sunion(g, smove(ssphere(0.035), 0, 0.81, 0), 0.015)
+    return ssub(g, smove(srot(sbox(0.3, 0.028, 0.3), 0, 0, 40deg), 0.06, 0.66, 0), 0.005)
+}
+fn scrown(y) {
+    c = smove(scyl(0.13, 0.08), 0, y, 0)
+    c = ssub(c, smove(scyl(0.1, 0.1), 0, y + 0.03, 0), 0.01)
+    for i in 0..8 { c = sunion(c, smove(ssphere(0.028), cos(i * 45deg) * 0.12, y + 0.05, sin(i * 45deg) * 0.12), 0.015) }
+    return c
+}
+fn squeen() {
+    g = sunion(sbase(0.2), smove(scyl(0.09, 0.56), 0, 0.33, 0), 0.1)
+    g = sunion(g, smove(storus(0.11, 0.026), 0, 0.58, 0), 0.025)
+    g = sunion(g, smove(scyl(0.115, 0.06), 0, 0.64, 0), 0.06)
+    g = sunion(g, scrown(0.7), 0.03)
+    return sunion(g, smove(ssphere(0.05), 0, 0.79, 0), 0.02)
+}
+fn sking() {
+    g = sunion(sbase(0.21), smove(scyl(0.095, 0.66), 0, 0.38, 0), 0.1)
+    g = sunion(g, smove(storus(0.115, 0.027), 0, 0.67, 0), 0.025)
+    g = sunion(g, smove(scyl(0.12, 0.06), 0, 0.73, 0), 0.06)
+    g = sunion(g, scrown(0.79), 0.03)
+    g = sunion(g, smove(ssphere(0.06), 0, 0.86, 0), 0.03)
+    cross = sunion(smove(sbox(0.045, 0.17, 0.045, 0.01), 0, 0.98, 0), smove(sbox(0.13, 0.045, 0.045, 0.01), 0, 1.0, 0), 0.01)
+    return sunion(g, cross, 0.015)
+}
+fn shape(k) {
+    if k == 0 { return srook() } else if k == 1 { return sknight() } else if k == 2 { return sbishop() }
+    if k == 3 { return squeen() } else if k == 4 { return sking() }
+    return spawn_()
+}
+fn kname(k) {
+    if k == 0 { return "Rook" } else if k == 1 { return "Knight" } else if k == 2 { return "Bishop" }
+    if k == 3 { return "Queen" } else if k == 4 { return "King" }
+    return "Pawn"
+}
+fn backrank(file) {
+    if file == 0 or file == 7 { return 0 } else if file == 1 or file == 6 { return 1 }
+    if file == 2 or file == 5 { return 2 } else if file == 3 { return 3 }
+    return 4
+}
+fn sqx(file) { return (file - 3.5) * S }
+fn sqz(rank) { return (3.5 - rank) * S }
+
+# one master mesh a kind, hidden; the pieces are duplicates of it
+for k in 0..6 {
+    o = smesh("Master " + kname(k), shape(k), 112)
+    move(o, 0, -10, 0)
+}
+fn piece(k, n, x, z, turn, m) {
+    select("Master " + kname(k))
+    op("object.duplicate")
+    o = rename(active(), n)
+    move(o, x, BY, z); rotate(o, 0, turn, 0); assign(o, m)
+    select(o); op("rigid.add", "active hull mass 0.3 friction 0.6 bounce 0.05")
+    return o
+}
+
+for file in 0..8 {
+    wm = "White"
+    if file == 4 { wm = "Gold" }
+    k = backrank(file)
+    piece(k, "W " + kname(k) + " " + file, sqx(file), sqz(0), 90deg, wm)
+    piece(5, "W Pawn " + file, sqx(file), sqz(1), 0, "White")
+    piece(k, "B " + kname(k) + " " + file, sqx(file), sqz(7), -90deg, "Black")
+    piece(5, "B Pawn " + file, sqx(file), sqz(6), 0, "Black")
+}
+for k in 0..6 { select("Master " + kname(k)); op("object.hide") }
+
+# the glass pawn, off the board past h1, waiting on a low plinth: it breaks on impact
+p = add("cylinder", "Glass Plinth", 2.6, 0.05, sqz(0)); scale(p, 0.3, 0.05, 0.3); assign(p, "Plinth")
+select(p); op("rigid.add", "passive box")
+o = smesh("Glass Pawn", spawn_(), 112)
+scale(o, 1.25); move(o, 2.6, 0.1, sqz(0)); assign(o, "Crystal")
+select(o); op("object.shatter", "preset glass count 70 glue 400 impact 2 inner 0.85 0.95 0.92")
+print("glass pawn", shinfo(0), "shards")
+
+# ---- the dominoes: a lead-in along -x, a half circle on the a-file side,
+#   then four that grow (each can tip one a third taller) to a plank that
+#   pushes the bowling ball off its shelf
+ZR = sqz(0)                                   # rank 1: where the bowling ball runs
+CX = -6.24
+R = 2.3
+CZ = ZR - R
+N = 30
+DH = 0.46
+fn domino(i, x, z, tx, tz, h) {
+    d = add("cube", "Domino " + i, x, h / 2, z)
+    scale(d, 0.035 * sqrt(h / DH), h / 2, 0.12 * h / DH)       # (thin: big ones tip easily)
+    rotate(d, 0, atan2(0 - tz, tx), 0)
+    assign(d, "Paint" + (i % 6))
+    select(d); op("rigid.add", "active box mass " + (0.6 * pow(h / DH, 2.5)) + " friction 0.45 material wood")
+    return d
+}
+for i in 0..6 { m = material("Paint" + i); op("material.preset", "car_paint " + m) }
+matset("Paint0", "base", 0.7, 0.02, 0.02); matset("Paint1", "base", 0.85, 0.3, 0.0)
+matset("Paint2", "base", 0.85, 0.65, 0.0); matset("Paint3", "base", 0.05, 0.5, 0.1)
+matset("Paint4", "base", 0.02, 0.15, 0.7); matset("Paint5", "base", 0.35, 0.03, 0.55)
+SP = 0.29
+domino(0, CX + 2 * SP, CZ - R, -1, 0, DH)
+domino(1, CX + SP, CZ - R, -1, 0, DH)
+NA = N - 6
+for i in 0..NA {
+    a = i * pi / (NA - 1)
+    domino(i + 2, CX - R * sin(a), CZ - R * cos(a), -cos(a), sin(a), DH)
+}
+domino(N - 4, CX + 0.32, ZR, 1, 0, 0.6)
+domino(N - 3, CX + 0.72, ZR, 1, 0, 0.78)
+domino(N - 2, CX + 1.22, ZR, 1, 0, 1.0)
+domino(N - 1, CX + 1.84, ZR, 1, 0, 1.25)
+
+# ---- the first ramp and ball: a walnut chute down to the first domino
+fn chute(n, x0, y0, x1, y1, z, rails) {
+    L = sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0))
+    a = atan2(y1 - y0, x1 - x0)
+    if x1 < x0 { a = atan2(y0 - y1, x0 - x1) }
+    cx = (x0 + x1) / 2 + sin(a) * 0.025
+    cy = (y0 + y1) / 2 - cos(a) * 0.025
+    r = add("cube", n, cx, cy, z); scale(r, L / 2, 0.025, 0.22); rotate(r, 0, 0, a); assign(r, "Walnut")
+    select(r); op("rigid.add", "passive box friction 0.4")
+    for s in 0..2 {
+        w = add("cube", n + " Rail " + s, cx, cy + 0.07, z - rails + s * 2 * rails); scale(w, L / 2, 0.07, 0.02); rotate(w, 0, 0, a); assign(w, "Walnut")
+        select(w); op("rigid.add", "passive box friction 0.2")
+    }
+}
+RX0 = CX + 2 * SP + 0.45                      # where it meets the floor
+RA = 12deg
+RL = 3.0
+chute("Ramp", RX0 + cos(RA) * RL, sin(RA) * RL, RX0, 0, CZ - R, 0.2)
+p = add("cube", "Ramp Post", RX0 + cos(RA) * RL - 0.1, sin(RA) * RL / 2, CZ - R); scale(p, 0.08, sin(RA) * RL / 2, 0.18); assign(p, "Walnut")
+b = add("sphere", "Ball", RX0 + cos(RA) * (RL - 0.35), sin(RA) * (RL - 0.35) + 0.17, CZ - R); scale(b, 0.14); assign(b, "Chrome")
+select(b); op("rigid.add", "active sphere mass 4 material metal")
+
+# ---- the bowling ball: on a shelf the plank falls onto, then down a chute
+#   onto rank 1, through the white back rank and on into the glass pawn
+BB = 0.28                                     # its radius: it meets the pieces high enough to tip them
+BX = CX + 2.74                                # 0.8 m past the plank: it strikes fast
+SH = 0.6
+SX0 = BX - 0.16                               # (narrow: the plank swings clear of it)
+SX1 = BX + 0.03                               # the shelf's edge
+p = add("cube", "Shelf", (SX0 + SX1) / 2, SH / 2, ZR); scale(p, (SX1 - SX0) / 2, SH / 2, BB + 0.06); assign(p, "Walnut")
+select(p); op("rigid.add", "passive box friction 0.5")
+chute("Chute", SX1, SH, -2.2, BY, ZR, BB + 0.06)
+b = add("sphere", "Bowling Ball", BX, SH + BB, ZR); scale(b, BB); assign(b, "Chrome")
+select(b); op("rigid.add", "active sphere mass 40 material metal")
+
+# ---- the hall: a gyroid sphere on a plinth, rings of light, walls
+sp = add("cylinder", "Gyroid Plinth", 4.4, 0.45, -1.6); scale(sp, 0.55, 0.45, 0.55); assign(sp, "Plinth")
+gy = sisect(ssphere(0.62), sgyroid(0.3, 0.04))          # a lattice ball with a ring round it
+gy = sunion(gy, storus(0.64, 0.03), 0.02)
+o = smesh("Gyroid", gy, 150)
+move(o, 4.4, 1.55, -1.6); assign(o, "Copper")
+
+for i in 0..3 {
+    o = add("torus", "Light Ring " + i, -3 + i * 3, 4.2, -1); scale(o, 1.1, 1.1, 1.1); assign(o, "Ring")
+}
+for i in 0..9 {
+    w = add("cube", "Column " + i, -8 + i * 2, 3, -6); scale(w, 0.25, 3, 0.25); assign(w, "Hall")
+}
+w = add("cube", "Back Wall", -1, 3, -6.6); scale(w, 11, 3, 0.2); assign(w, "Wall")
+w = add("cube", "Left Wall", -11.8, 3, 2); scale(w, 0.2, 3, 8.8); assign(w, "Wall")
+w = add("cube", "Right Wall", 9.8, 3, 2); scale(w, 0.2, 3, 8.8); assign(w, "Wall")
+for i in 0..5 {
+    w = add("cube", "Left Column " + i, -11.4, 3, -4 + i * 3); scale(w, 0.25, 3, 0.25); assign(w, "Hall")
+    w = add("cube", "Right Column " + i, 9.4, 3, -4 + i * 3); scale(w, 0.25, 3, 0.25); assign(w, "Hall")
+}
+op("text.add", "'BeeModel' size 1.1 depth 0.15 bevel 0.02")
+t = rename(active(), "Title")
+move(t, 0, 4.3, -6.3); assign(t, "Gold")
+
+add("light", "Key", 4, 7, 5); op("light.set", "power 0.7")
+add("light", "Rim", -5, 5, -4); op("light.set", "power 0.3")
+op("world.strength", 0.15)
+
+# ---- the camera: the ball's run, along the dominoes, the cascade, the glass
+fn shot(f, x, y, z, tx, ty, tz) {
+    dx = x - tx; dy = y - ty; dz = z - tz
+    key("Cam:x", f, x); key("Cam:y", f, y); key("Cam:z", f, z)
+    key("Cam:ry", f, atan2(dx, dz)); key("Cam:rx", f, -atan2(dy, sqrt(dx * dx + dz * dz)))
+}
+add("camera", "Cam", 0, 3, 8); set("Cam", "lens", 32)
+shot(1, 3.0, 3.2, 3.5, -3.5, 0.4, -2.5)
+shot(70, -2.6, 1.6, 0.4, -5.4, 0.3, -2.6)
+shot(150, -4.0, 2.2, 3.6, -7.4, 0.3, -0.4)
+shot(215, -2.6, 1.5, 4.6, -4.4, 0.6, 1.75)
+shot(265, -1.0, 1.5, 5.0, -1.0, 0.4, 1.75)
+shot(300, 1.5, 1.4, 4.6, 1.0, 0.4, 1.7)
+shot(330, 3.8, 1.1, 3.9, 2.5, 0.3, 1.75)
+shot(360, 6.8, 3.2, 6.6, 0.6, 0.7, -0.6)
+select("Cam"); op("camera.set", "active")
+view(25, 30, 11, -0.5, 0.6, 0)
+frame(1)
+print("objects", count(), "bodies", rbinfo(0))

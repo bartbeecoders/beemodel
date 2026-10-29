@@ -1463,6 +1463,19 @@
    }
   },
   {
+   "name": "op_view_camera",
+   "description": "Camera View - Look through the scene's camera (the one that renders) in the viewport, following it while the animation plays; orbit, pan or zoom to leave (Numpad 0): view.camera [0|1] (none: switched)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_cloth_add",
    "description": "Add Cloth - Make the selected objects cloth, soft bodies or colliders (or change them): cloth.add [cloth|soft|collider] [stretch c] [bend c] [volume c] [mass m] [damping d] [thickness t] [friction f] [self] (c: compliance, m/N; 0 stiff)",
    "inputSchema": {
@@ -3168,6 +3181,19 @@
   {
    "name": "op_view_rendered_denoise",
    "description": "Denoise Rendered - Rendered shading: denoise the path-traced samples on the GPU every frame: view.rendered_denoise [0|1] (none: on or off; kept in the preferences)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_view_rendered_playback",
+   "description": "Rendered Playback Samples - Rendered shading while the animation plays: path-traced samples each new frame gets, denoised: view.rendered_playback <0..64> (0: the raycast; kept in the preferences)",
    "inputSchema": {
     "type": "object",
     "properties": {

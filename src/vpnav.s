@@ -144,6 +144,7 @@ WIDGET wd_vh_snap,  WK_BUTTON, "viewport.snap", "Snap", flags=WGF_ICON, aux=op_t
 WIDGET wd_nav_zoom,  WK_BUTTON, "viewport.nav_zoom", "Zoom (drag up and down)", flags=WGF_ICON, n=ICON_SEARCH
 WIDGET wd_nav_pan,   WK_BUTTON, "viewport.nav_pan", "Pan (drag)", flags=WGF_ICON, n=ICON_MOVE
 WIDGET wd_nav_ortho, WK_BUTTON, "viewport.nav_ortho", "Perspective / Orthographic (Numpad 5)", flags=WGF_ICON, aux=op_view_ortho, n=ICON_GRID
+WIDGET wd_nav_cam,   WK_BUTTON, "viewport.nav_camera", "Camera View (Numpad 0)", flags=WGF_ICON, aux=op_view_camera, n=ICON_CAMERA
 WIDGET wd_nav_px,   WK_BUTTON, "viewport.nav_right", "Right View (Numpad 3)", flags=WGF_NODRAW, aux=op_align_right
 WIDGET wd_nav_py,   WK_BUTTON, "viewport.nav_top", "Top View (Numpad 7)", flags=WGF_NODRAW, aux=op_align_top
 WIDGET wd_nav_pz,   WK_BUTTON, "viewport.nav_front", "Front View (Numpad 1)", flags=WGF_NODRAW, aux=op_align_front
@@ -350,12 +351,15 @@ nav_gizmo_draw:
     inc     ebp
     cmp     ebp, 2
     jb      .Lng_pass
-    lea     ebx, [r13+NAV_R+NAV_BALL+8] # under it: zoom, pan, perspective
+    lea     ebx, [r13+NAV_R+NAV_BALL+8] # under it: zoom, pan, perspective,
+                                        #  camera
     lea     rdi, [rip+wd_nav_zoom]
     call    nav_handle
     lea     rdi, [rip+wd_nav_pan]
     call    nav_handle
     lea     rdi, [rip+wd_nav_ortho]
+    call    nav_handle
+    lea     rdi, [rip+wd_nav_cam]
     call    nav_handle
     add     rsp, 24
     pop     r15

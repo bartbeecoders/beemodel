@@ -1016,12 +1016,18 @@ an_chan:
     ret
 
 # an_apply(xmm0=frame) - every curve's value there into its property
+#   It aligns its own stack: it is reached from the drawing (playback), the
+#   timeline and play mode as well as from scripts, not all of them 16-byte
+#   aligned, and the simulations under it keep vectors on the stack
 an_apply:
+    push    rbp
+    mov     rbp, rsp
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
+    and     rsp, -16
     sub     rsp, 32
     movss   [rip+an_frame], xmm0
     mov     dword ptr [rip+dirty], 1
@@ -1148,12 +1154,13 @@ an_apply:
     call    rig_eval                    # drivers, constraints (rig.s)
     call    tx_frame                    # texts keyed or counting (text3d.s)
     call    arm_refresh                 # armatures show their new pose
-    add     rsp, 32
+    lea     rsp, [rbp-40]
     pop     r15
     pop     r14
     pop     r13
     pop     r12
     pop     rbx
+    pop     rbp
     ret
 
 # an_set_frame(xmm0=frame) - the scene at that frame

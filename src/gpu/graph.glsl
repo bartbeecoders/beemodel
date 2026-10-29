@@ -1,5 +1,5 @@
 // BeeModel - material graphs on the GPU: a port of graph.s / matnodes.s for
-// the node types gpu.s lets through (textures, checker, gradient, noise, mix,
+// the node types gpu.s lets through (textures, checker, gradient, noise, wave, mix,
 // ramp, math, vector math, separate / combine, invert, constants,
 // parameters, bump and normal maps). Included by pt.comp (GRAPHS) and the
 // viewport's view.frag, which declare before it: the Params P (with the sRGB
@@ -9,7 +9,7 @@
 // its world edges, S_UV or box_uv(), S_HASUV, G_VC, G_WP) and calls
 // graph_run.
 // ---- material graphs (a port of graph.s / matnodes.s for the node types
-//   gpu.s lets through: textures, checker, gradient, noise, mix, ramp, math,
+//   gpu.s lets through: textures, checker, gradient, noise, wave, mix, ramp, math,
 //   vector math, separate / combine, invert, constants, parameters, bump and
 //   normal maps) --------------------------------------------------------------
 // a material record: 1024 words (the CPU's MA_SZ); its graph from word 32
@@ -232,6 +232,18 @@ void graph_eval(uint m, uint64_t live) {
             s &= 1;
             put_col(j, node_in(m, j, uint(s)).xyz);
             R[j * NO].w = float(s);
+            break; }
+        case 33u: {                                             // wave: 1/2 + sin(2 pi (s x + d noise)) / 2
+            vec3 p = (mwu(m, nw(m, j, 1u)) & 0xffffu) != 0u ? node_in(m, j, 0u).xyz : G_P;
+            float x;
+            if (int(np(m, j, 2u)) != 0) x = length(p);         // rings
+            else { int ax = int(np(m, j, 3u)); if (ax < 0 || ax > 2) ax = 0; x = p[ax]; }
+            x *= np(m, j, 0u);
+            float d = np(m, j, 1u);
+            if (d != 0.0) x = (fbm(p, np(m, j, 0u), 2, 0.5) - 0.5) * d + x;
+            float v = sin(x * 6.2831853) * 0.5 + 0.5;
+            put_val(j, v);
+            put_out(j, 1u, vec4(v));
             break; }
         case 4u: {                                              // gradient
             int ax = int(np(m, j, 0u));

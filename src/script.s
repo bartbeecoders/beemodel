@@ -6117,6 +6117,7 @@ b_view:
     inc     r12d
     cmp     r12d, 6
     jb      1b
+    mov     dword ptr [rip+cam_view], 0 # (out of Camera View)
     mov     edi, [rip+vp_area]
     call    cam_store
     mov     dword ptr [rip+dirty], 1

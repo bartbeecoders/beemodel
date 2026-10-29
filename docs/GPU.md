@@ -146,7 +146,9 @@ intersect from the closest approach (`k = oc.d / d.d`, `l = oc - k d`,
 for a 5 cm ball 10 m away and made the CPU and GPU disagree; emissive
 balls are lights sampled by the cone they fill.
 Scenes the shader does not cover stay on the CPU: a graph with another
-node type (Voronoi, bricks, wave, functions ...) or an HDR image in it.
+node type (Voronoi, bricks, functions ...) or an HDR image in it. The
+Wave node runs on the GPU now, so the wood preset (wave bands
+distorted by noise) no longer sends a scene to the CPU.
 
 On an RTX 4080 SUPER, 128 samples of that scene at 1920 x 1080 take 0.9 s,
 including the scene upload and readback. The CPU path takes 9.8 s on 32
@@ -320,6 +322,14 @@ the GPU, from the scene Hive snapshots (`src/live.s`):
   samples** (64; `view.rendered_samples <n>`). The raycast stays shown for
   the first 4. With 0 samples the raycast is all there is, and no frames
   are drawn while nothing changes.
+- **While the animation plays**, each new frame's scene goes up
+  at once and gets **Preferences › Viewport › Rendered playback samples**
+  (4; `view.rendered_playback <0..64>`) path-traced samples straight away,
+  denoised, instead of the raycast; a frame shown again (the window draws
+  faster than the scene's frame rate) gets more samples, up to Rendered
+  samples. A slow scene build no longer waits for the change to end while
+  it plays: every frame goes up. With 0 playback samples, playback shows
+  the raycast as before.
 - **Denoised** on the GPU every frame, unless **Preferences › Viewport ›
   Rendered denoise** is off (`view.rendered_denoise [0|1]`). It is the F12
   render's filter (`denoise.s`), ported to `pt.comp`'s `dn_` stages:
@@ -367,8 +377,21 @@ A camera move changes none of these. When the fingerprint changes:
   two frames running); meanwhile the camera stays live on the last
   snapshot.
 - samples begin 150 ms after the last build. Playback changes the scene
-  every other frame, so it shows a raycast every frame rather than
-  raycasts and samples in turn, which flickered.
+  every other frame, so with 0 playback samples it shows a raycast every
+  frame rather than raycasts and samples in turn, which flickered; with
+  playback samples, each frame is built and path-traced at once.
+
+**Path-traced playback** (`tools/playbench.py`'s scenes and the chess demo
+at 1920 x 1080 through their cameras, 4 playback samples denoised, RTX 4080
+SUPER): the wrecking ball plays at 74 window frames a second, fireworks
+at 85, both every scene frame at 30 fps. A scene that builds slowly stays
+on the clock but shows fewer frames: the chess cascade (7.3 million
+triangles, 2.3 million of them in the still gyroid) builds in about
+150 ms while it plays, so it shows 3.5 frames a second. Each build copies
+and compares the still triangles, and Hive's scene is one world-space
+triangle soup under one RTX structure, so a moving object's triangles go
+up and the structure is rebuilt each frame. A big mesh that moves costs
+the most: the gyroid turning sent 164 MB a frame and doubled the build.
 
 A build's time leaves out a slot's memory being made or grown (a first
 build's 80 ms in the dam break would otherwise keep it waiting for good).

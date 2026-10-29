@@ -105,6 +105,7 @@ vp_area:        .long 5                 # viewport whose camera Properties shows
 .align 8
 area_cams:      .skip MAX_NODES*CAM_SZ
 area_ortho:     .skip MAX_NODES*4           # each viewport: orthographic (not saved)
+area_camv:      .skip MAX_NODES*4           # each viewport: Camera View (not saved)
 ed_x:           .skip 4
 ed_y:           .skip 4
 ed_w:           .skip 4
@@ -218,6 +219,9 @@ cam_load:
     lea     rax, [rip+area_ortho]
     mov     ecx, [rax+rdi*4]
     mov     [rip+cam_ortho], ecx
+    lea     rax, [rip+area_camv]
+    mov     ecx, [rax+rdi*4]
+    mov     [rip+cam_view], ecx
     call    cam_ptr
     lea     rdx, [rip+cam_yaw]
     jmp     1f
@@ -226,6 +230,9 @@ cam_store:
     js      9f
     lea     rax, [rip+area_ortho]
     mov     ecx, [rip+cam_ortho]
+    mov     [rax+rdi*4], ecx
+    lea     rax, [rip+area_camv]
+    mov     ecx, [rip+cam_view]
     mov     [rax+rdi*4], ecx
     call    cam_ptr
     mov     rdx, rax

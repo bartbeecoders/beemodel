@@ -286,6 +286,15 @@ def main():
     check(gp[0] == 1 and gp[2] == 64 and mad < 0.5 and same > 0.9,
           f'path tracing a textured, bumped, normal-mapped and masked scene (shader graphs) on the GPU: the CPU\'s '
           f'image (mean difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical, {gp[2]} GPU samples)')
+    ws = ('material("W")\nop("material.preset", "wood W")\nassign("Cube", "W")\n'    # wave bands, rings
+          'm = material("R")\nw = node(m, "wave", 3, 0.6, 1)\nsocket(m, "base", w)\n'  #  (the wood preset's)
+          'add("sphere", "Ring Ball", 1.6, 0.5, 0)\nassign("Ring Ball", "R")\n')
+    c, _ = render('wave_cpu', ws, 64, BEEMODEL_GPU='off')
+    p, gp = render('wave_gpu', ws, 64, BEEMODEL_GPU='any')
+    mad, same = compare(c, p)
+    check(gp[0] == 1 and gp[2] == 64 and mad < 0.5 and same > 0.9,
+          f'the Wave node (the wood preset\'s bands; rings with distortion) on the GPU: the CPU\'s image '
+          f'(mean difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical, {gp[2]} GPU samples)')
     vs = 'm = material("V")\nv = node(m, "voronoi", 5)\nsocket(m, "base", v)\nassign("Cube", m)\n'
     c, _ = render('vor_cpu', vs, 16, BEEMODEL_GPU='off')
     p, gp = render('vor_gpu', vs, 16, BEEMODEL_GPU='any')
@@ -716,18 +725,35 @@ def live_view():
         moved = f.image().crop(BOX)
         check(st[0] == 2 and compare_img(conv, moved) > 0.5,
               f'an object moves: the scene goes up again ({st[0]} uploads) and the image follows')
-        q('op("view.rendered_samples", "64")\nop("anim.range", "1 60 30")\nframe(1)\n'
-          'key("Box:y", 1, 0)\nkey("Box:y", 60, 1.5)\nop("anim.play")')
-        shown = []                                      # playback: the scene changes every
-        for _ in range(30):                             #  other frame; the raycast stays
-            f.pump(0.03)                                #  (samples between the raycasts
-            shown += g(8)                               #  flickered)
+        q('op("view.rendered_samples", "64")\nop("view.rendered_playback", "0")\nop("anim.range", "1 60 30")\n'
+          'frame(1)\nkey("Box:y", 1, 0)\nkey("Box:y", 60, 1.5)\nop("anim.play")')
+        shown = []                                      # playback without samples: the scene
+        for _ in range(30):                             #  changes every other frame; the
+            f.pump(0.03)                                #  raycast stays (samples between the
+            shown += g(8)                               #  raycasts flickered)
         up = g(9)
         q('op("anim.play")\nunkey("Box:y", 1)\nunkey("Box:y", 60)\nmove("Box", 2, 0, -1.5)')
         settle(64)
         check(len(shown) == 30 and max(shown) == 0 and up[0] > 5 and (g(8) or [0])[0] == 64,
-              f'playing an animation: a raycast every frame ({up[0]} uploads, samples shown {max(shown or [-1])}),'
-              f' then the samples once it stops ({g(8)})')
+              f'playing an animation, playback samples 0: a raycast every frame ({up[0]} uploads, samples '
+              f'shown {max(shown or [-1])}), then the samples once it stops ({g(8)})')
+        q('op("view.rendered_playback", "4")\nframe(1)\nkey("Box:y", 1, 0)\nkey("Box:y", 60, 1.5)\n'
+          'op("anim.play")')
+        f.pump(0.3)
+        r0, u0 = g(7, 9)
+        shown, frs = [], []                             # path-traced playback: each new
+        for _ in range(30):                             #  frame's scene up at once, 4
+            f.pump(0.03)                                #  samples of it, denoised; no
+            shown += g(8)                               #  raycasts
+            frs.append(int(float(q('print(frame())') or 0)))
+        r1, u1 = g(7, 9)
+        q('op("anim.play")\nunkey("Box:y", 1)\nunkey("Box:y", 60)\nmove("Box", 2, 0, -1.5)')
+        settle(64)
+        check(len(shown) == 30 and min(shown) >= 4 and r1 == r0 and u1 - u0 > 5 and len(set(frs)) > 5
+              and (g(8) or [0])[0] == 64,
+              f'playing an animation, playback samples 4: every frame path-traced ({u1 - u0} uploads, '
+              f'{len(set(frs))} frames, samples shown {min(shown or [-1])} at least, {r1 - r0} raycasts), '
+              f'then 64 samples once it stops ({g(8)})')
         q('op("render.settings", "160 90 512")')
         f.key(88)                                       # F12 meanwhile (its area
         f.pump(0.2)                                     #  narrows the viewport)

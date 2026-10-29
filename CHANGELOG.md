@@ -6,6 +6,33 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Path-traced playback in Rendered shading.** While the animation plays,
+  each new frame's scene goes up at once and is path-traced on the GPU,
+  Preferences › Viewport › Rendered playback samples of it (4;
+  `view.rendered_playback <0..64>`), denoised, instead of the raycast; a
+  frame shown again gets more. Light scenes play every frame in real time
+  (the wrecking ball at 74 window frames a second at 1920 x 1080 on an RTX
+  4080 SUPER). 0 keeps the raycast.
+- **Camera View** (Numpad 0, View › Camera View, the camera button under
+  the navigation gizmo, `view.camera [0|1]`): the viewport looks through
+  the camera that renders - its lens and roll - and follows it while the
+  animation plays, so an animation is seen as it will render; with
+  Rendered shading, path-traced as it plays. The render's frame is fitted
+  into the viewport and the rest dimmed. Orbiting, panning, zooming or a
+  view change leaves it from where the camera is.
+- **The Wave node on the GPU** (`graph.glsl`), so the wood preset's
+  scenes trace there, in renders and in Rendered shading, instead of on
+  the CPU.
+- **Chess cascade demo** (`Vibecoding/demos/chess-cascade.bees`): SDF
+  chess pieces, dominoes, a bowling ball and a glass pawn that shatters.
+
+### Fixed
+- **A crash when a body broke on impact** while the animation played,
+  was scrubbed or was stepped through MCP: `an_apply` and MCP's
+  `handle_message` called on with the stack 8 bytes off 16, and the
+  solver keeps vectors on the stack. `an_apply` now aligns its own.
+
 ## [1.2.1] - 2026-10-27
 
 Image to 3D: a mesh from a photo, through the optional Hi3D addon.

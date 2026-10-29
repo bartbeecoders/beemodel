@@ -216,7 +216,8 @@ cam_setup:
     mulss   xmm1, [rip+f_ortho_k]
     movss   [rip+vp_focal], xmm1
 0:
-    cvtsi2ss xmm0, ebx
+    call    cv_apply                    # Camera View: the scene camera's
+    cvtsi2ss xmm0, ebx                  #  eye, axes and lens (camview.s)
     mulss   xmm0, [rip+f_half]
     movss   [rip+vp_cx], xmm0
     lea     eax, [r12+r13]
@@ -236,8 +237,11 @@ to_cam:
     subss   xmm1, [rip+eye+4]
     movss   xmm2, [rdi+8]
     subss   xmm2, [rip+eye+8]
-    movss   xmm3, xmm0                  # x = d . right   (right.y == 0)
-    mulss   xmm3, [rip+right]
+    movss   xmm3, xmm0                  # x = d . right   (right.y: a
+    mulss   xmm3, [rip+right]           #  camera's roll, a planet's turn)
+    movss   xmm4, xmm1
+    mulss   xmm4, [rip+right+4]
+    addss   xmm3, xmm4
     movss   xmm4, xmm2
     mulss   xmm4, [rip+right+8]
     addss   xmm3, xmm4
@@ -756,6 +760,7 @@ viewport_draw:
     call    rig_draw                    # motion paths, onion skins
     call    sculpt_overlay              # sculpt mode: the brush, settings
     call    paint_overlay               # texture paint: the same
+    call    cv_draw                     # Camera View: outside the frame dimmed
 
     # ---- orientation gizmo (bottom-left) -----------------------------------
     mov     r12d, [rip+cvs_x0]
@@ -898,7 +903,9 @@ draw_objects:
     pop     rax
     test    ecx, ecx
     jz      5f
-3:  mov     ecx, [rax+OB_FLAGS]
+3:  cmp     rax, [rip+cv_obj]           # (the camera looked through)
+    je      5f
+    mov     ecx, [rax+OB_FLAGS]
     and     ecx, OBF_SELECTED
     cmp     ecx, r12d
     jne     5f
@@ -1193,6 +1200,13 @@ vp_pick_bounds:
 # -----------------------------------------------------------------------------
 # vp_orbit(edi=dx, esi=dy)
 vp_orbit:
+    push    rdi                         # (Camera View: left, from where
+    push    rsi                         #  the camera is)
+    sub     rsp, 8
+    call    cv_leave
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
     cvtsi2ss xmm0, edi
     mulss   xmm0, [rip+f_orbit_k]
     movss   xmm1, [rip+cam_yaw]
@@ -1208,6 +1222,13 @@ vp_orbit:
 
 # vp_pan(edi=dx, esi=dy) - drag the scene with the pointer
 vp_pan:
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    cv_leave
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
     cvtsi2ss xmm0, edi
     mulss   xmm0, [rip+px_world]        # world dx
     cvtsi2ss xmm1, esi
@@ -1231,6 +1252,9 @@ vp_pan:
 
 # vp_label -> rdx = the corner text (perspective or orthographic)
 vp_label:
+    call    cv_label                    # (Camera View: the camera's name)
+    test    rdx, rdx
+    jnz     1f
     lea     rdx, [rip+s_vp_label]
     cmp     dword ptr [rip+cam_ortho], 0
     je      1f
@@ -1239,6 +1263,11 @@ vp_label:
 
 # vp_zoom_by(xmm0=factor) - the distance times that (kept in range)
 vp_zoom_by:
+    sub     rsp, 24
+    movss   [rsp], xmm0
+    call    cv_leave
+    movss   xmm0, [rsp]
+    add     rsp, 24
     mulss   xmm0, [rip+cam_dist]
     maxss   xmm0, [rip+f_dist_min]
     minss   xmm0, [rip+f_dist_max]
@@ -1247,6 +1276,9 @@ vp_zoom_by:
 
 # vp_zoom(edi = >0 zoom out, <0 zoom in)
 vp_zoom:
+    push    rdi
+    call    cv_leave
+    pop     rdi
     movss   xmm0, [rip+cam_dist]
     test    edi, edi
     js      1f

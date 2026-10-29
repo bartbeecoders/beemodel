@@ -4,7 +4,8 @@ Short scenes, each one BeeScript file that builds the whole scene (it
 replaces whatever is open). The first eight show the physics: the rigid body
 solver (v0.17), ground and landscapes (v0.18), shatter (v0.19), and particles
 and liquid (v0.22). The six after them show the rest of BeeModel: CAD,
-mechanisms, geometry nodes, materials, cloth and animation.
+mechanisms, geometry nodes, materials, cloth and animation. Chess cascade
+puts physics, materials and complex models in one scene.
 
 | Demo | Length | Shows |
 |---|---|---|
@@ -23,6 +24,7 @@ mechanisms, geometry nodes, materials, cloth and animation.
 | `cloth-and-wind.bees` | 6 s | The **cloth** solver: a 6 561-particle tablecloth drapes over a round table and a vase (**self-collision**, **colliders**), a flag **pinned** to its pole flies in a keyed **Wind field** with gusts, and three jelly **soft bodies** drop and wobble back into shape. |
 | `orrery.bees` | 12 s | A clockwork solar system with no keys on the planets: each hub is turned by a **driver** (an expression of the frame), arms and planets are **parented** to it, and the Moon has a hub of its own. Jupiter's bands and the Earth's seas are small **node graphs**. The Sun **emits** light, and the camera circles with a **Track To** constraint on it. |
 | `title-card.bees` | 6 s | **3D text** from the system's fonts: a bevelled gold title **typed on** letter by letter (reveal keyed, letters rising out of the stage), then a **wave** runs through it; a two-line subtitle **grows in**; a clock on the stage counts the seconds by itself (`{floor(time)}` in its body). |
+| `chess-cascade.bees` | 12 s | Physics, materials and modelled detail together. A full chess set of **signed-distance pieces** (smooth-blended lathe shapes, crenellated rooks, carved knights, crowns of spheres) on a clear-coated **checker node graph** board, in a hall with a polished floor. A chrome ball rolls down a chute into a half circle of 30 **car-paint** dominoes. The last four grow, to a plank that knocks a 40 kg chrome ball off its shelf and down onto rank 1. It ploughs through the white back rank (marble, the king gold), and the pieces it throws off the end break a **glass pawn** (`impact`, weak glue: it falls apart). A copper **gyroid** lattice sphere stands on a plinth (still: a moving 2.3 M-triangle mesh would go up to the GPU again every frame). |
 
 ## Running them
 

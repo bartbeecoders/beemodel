@@ -175,8 +175,8 @@ gp_fhdr:        .skip 16+HF_MAX*128     # the liquids' fields: header, records
 .align 8
 # the node types pt.comp evaluates: textures, noise, checker, gradient, mix,
 #   ramp, math, bump, normal map, texture coordinate, constant, color, vector
-#   math, separate, combine, invert, reroute, parameters
-gp_types:       .quad (1<<1)|(1<<2)|(1<<3)|(1<<4)|(1<<5)|(1<<6)|(1<<7)|(1<<8)|(1<<9)|(1<<10)|(1<<14)|(1<<16)|(1<<17)|(1<<19)|(1<<20)|(1<<21)|(1<<27)|(1<<36)|(1<<37)|(1<<38)|(1<<39)
+#   math, separate, combine, invert, wave, reroute, parameters
+gp_types:       .quad (1<<1)|(1<<2)|(1<<3)|(1<<4)|(1<<5)|(1<<6)|(1<<7)|(1<<8)|(1<<9)|(1<<10)|(1<<14)|(1<<16)|(1<<17)|(1<<19)|(1<<20)|(1<<21)|(1<<27)|(1<<33)|(1<<36)|(1<<37)|(1<<38)|(1<<39)
 .text
 
 # =============================================================================

@@ -190,8 +190,9 @@ material then samples them: what a game engine or another program reads.
 
 The path tracer (`render.image`) and the material preview (Shift+Z)
 evaluate graphs at every shading point. The GPU path tracer evaluates them
-too when the scene's graphs use textures, patterns, math, mixes, bump and
-normal maps (docs/GPU.md); other graphs render on the CPU.
+too when the scene's graphs use textures, patterns (noise, checker,
+gradient, wave), math, mixes, bump and normal maps (docs/GPU.md); other
+graphs render on the CPU.
 
 Graphs are compiled once per edit: nodes that do not depend on the shading
 point (constants, parameters and the math on them) are evaluated once, and

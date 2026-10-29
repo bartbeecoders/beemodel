@@ -55,6 +55,7 @@ stays private to the module.
 | `ui.s` | Layout, hit testing, pointer/keyboard handling, title bar, menus, panes, status bar |
 | `ops.s` | The operator spine: application operators, `run_op` (which realigns the stack for the operator, whoever calls), key dispatch, shortcut text, `--list-ops` |
 | `viewport.s` | Camera, projection, clipping, grid/axes/gizmo, plus the viewport's own operators |
+| `camview.s` | Camera View (`view.camera`, Numpad 0): `cv_apply` (from `cam_setup`) puts the eye, right, up, forward of the camera that renders (`lc_camera`'s matrix, roll and all) and the focal length that fits the render's frame (`rn_w` x `rn_h`) into the canvas; everything that projects, the GPU's raster and Rendered shading follow it. `cv_draw` dims the canvas outside the frame, the camera itself is not drawn. Per viewport (`area_camv`, beside `area_ortho`); `cv_leave` (orbit, pan, zoom, `va_start`) turns the orbit view to look the camera's way from where it stands. Play mode wins |
 | `keyboard.s` | XKB text-keymap parser, key → Unicode (Shift/Caps/AltGr levels, dead keys), layout-aware shortcut codes, key repeat (timerfd) |
 | `textfield.s` | Single-line UTF-8 text field: caret, selection, history, Tab completion; the console command line |
 | `ttf.s` | TrueType engine: cmap 4/12, loca/glyf (simple + composite), hmtx, anti-aliased rasterizer, glyph cache |

@@ -558,6 +558,7 @@ send_out:
 handle_message:
     push    rbx
     push    r12
+    sub     rsp, 8                      # (the calls below 16-byte aligned)
     mov     [rip+msg_start], rdi
     lea     rax, [rdi+rsi]
     mov     [rip+j_end], rax
@@ -812,7 +813,7 @@ handle_message:
     jmp     1f
 .Lhm_invalid:                           # -32600, with the id if there is one
     lea     rdi, [rip+r_err_invalid]
-1:  push    rdi
+1:  mov     [rsp], rdi
     lea     rdi, [rip+out_state]
     call    buf_swap
     call    wb_reset
@@ -826,14 +827,15 @@ handle_message:
     jmp     3f
 2:  lea     rsi, [rip+r_null]
     call    wb_str
-3:  pop     rsi
+3:  mov     rsi, [rsp]
     call    wb_str
 .Lhm_send:
     call    send_out
     lea     rdi, [rip+out_state]
     call    buf_swap
     mov     dword ptr [rip+dirty], 1
-9:  pop     r12
+9:  add     rsp, 8
+    pop     r12
     pop     rbx
     ret
 

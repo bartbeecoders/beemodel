@@ -8,6 +8,7 @@
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
+.include "macros.inc"
 .include "widgets.inc"
 
 .globl mats_props_draw
@@ -126,7 +127,9 @@ WIDGET wd_ip_ovr, WK_TOGGLE, "instance.override", "", cb=ip_ovr_cb, undo="Materi
 WIDGET wd_ip_num, WK_FLOAT, "instance.value", "", -1000000.0, 1000000.0, 0.01, 3, cb=ip_num_cb, undo="Material Parameter", tip="The parameter's value in this instance (overrides the parent's)"
 WIDGET wd_ip_col, WK_COLOR, "instance.color", "", cb=ip_col_cb, undo="Material Parameter", tip="The parameter's colour in this instance (overrides the parent's)"
 WIDGET wd_ip_img, WK_ENUM, "instance.image", flags=WGF_DYN, cb=ip_img_cb, undo="Material Parameter", aux=image_names, tip="The parameter's image in this instance (overrides the parent's)"
-WIDGET wd_mt_inst, WK_BUTTON, "material.new_instance", "New Instance", aux=op_mat_instance_ui, tip="A material instance of this one: the same graph, its parameters yours to override"
+# (a button's aux is an operator: its tooltip and greying poll it)
+OPERATOR op_mat_instance_ui, "material.new_instance", "New Instance", mat_instance_btn, flags=OPF_HIDDEN|OPF_QUIET, doc="A material instance of this one: the same graph, its parameters yours to override"
+WIDGET wd_mt_inst, WK_BUTTON, "material.new_instance", "New Instance", aux=op_mat_instance_ui
 WIDGET wd_nd_name, WK_TEXT, "node.name", "", cb=nd_name_cb, undo="Node Name", tip="The parameter's name: instances and scripts find it by this (Enter)"
 WIDGET wd_nd_num, WK_FLOAT, "node.value", "", -1000000.0, 1000000.0, 0.01, 3, cb=nd_num_cb, undo="Node Value", tip="The node's value (drag, or type a number or an expression)"
 WIDGET wd_nd_col, WK_COLOR, "node.color", "", cb=nd_col_cb, undo="Node Value", tip="The input's colour while nothing is linked to it"
@@ -138,7 +141,8 @@ WIDGET wd_nd_ch2, WK_ENUM, "node.choice2", flags=WGF_DYN, cb=nd_enum_cb, undo="N
 WIDGET wd_nd_ch3, WK_ENUM, "node.choice3", flags=WGF_DYN, cb=nd_enum_cb, undo="Node Value", aux=nd_ch3
 WIDGET wd_mt_tex,  WK_ENUM, "material.texture", flags=WGF_DYN, cb=tex_cb, aux=image_names, tip="An image as the base colour, projected from the sides of a box"
 WIDGET wd_mt_load, WK_BUTTON, "material.load_image", "Load Image...", aux=op_image_load
-WIDGET wd_mt_bake, WK_BUTTON, "material.bake", "Bake to Maps", aux=op_mat_bake_ui, tip="Bake this material's node graph through the object's UVs into base colour, ORM, normal and emissive maps (1024 x 1024) that the material then samples"
+OPERATOR op_mat_bake_ui, "material.bake_active", "Bake to Maps", mat_bake_btn, flags=OPF_HIDDEN|OPF_QUIET, doc="Bake this material's node graph through the object's UVs into base colour, ORM, normal and emissive maps (1024 x 1024) that the material then samples"
+WIDGET wd_mt_bake, WK_BUTTON, "material.bake", "Bake to Maps", aux=op_mat_bake_ui
 WIDGET wd_wl_sky,  WK_ENUM, "world.sky", flags=WGF_DYN, cb=sky_cb, aux=sky_names, tip="What lights the scene from around it: the studio sky or an HDRI image"
 WIDGET wd_cv_res,  WK_INT, "curve.resolution", "Resolution", 1.0, 64.0, 0.1, 0, WGF_CLAMP, cb=cv_cb, undo="Curve", tip="Points per span: more is smoother"
 WIDGET wd_cv_bevel, WK_FLOAT, "curve.bevel", "Tube radius", 0.0, 100.0, 0.005, 3, WGF_CLAMP, cb=cv_cb, undo="Curve", tip="Make it a tube this thick (0: a line)"
@@ -565,7 +569,7 @@ ip_img_cb:                              # rdi = &image + 1, esi = row
     ret
 
 # the Material tab's New Instance: material.instance <the material>
-op_mat_instance_ui:
+mat_instance_btn:
     push    rbx
     sub     rsp, 16
     mov     edi, [rip+mt_mat]
@@ -583,7 +587,7 @@ op_mat_instance_ui:
     ret
 
 # the Material tab's Bake to Maps: material.bake <the object> 1024 apply
-op_mat_bake_ui:
+mat_bake_btn:
     push    rbx
     sub     rsp, 16
     mov     edi, [rip+active_obj]
