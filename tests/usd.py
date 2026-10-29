@@ -7,6 +7,12 @@
   inlined, compressed (ints, floats as ints, float tables) and plain arrays,
   halfs, quaternions, matrices, list ops, payloads, variant selections,
   blocked values; more .usdc files can be given on the command line.
+- Text files (.usda, src/usda.s): types.usda reads as types.usdc does (the
+  crate usdcat makes of it) - every spec and field the same, quaternions
+  turned x y z w, floats and halfs rounded as the crate keeps them, list ops
+  merged, primChildren / properties / variant children from the paths.
+- Damaged crate and text files, and deeply nested text, read without a
+  crash.
 
     python3 tests/usd.py build/beemodel [more.usdc ...]
 """
@@ -80,11 +86,40 @@ def crate(path):
           % (name, len(w), len(bad), len(extra)))
 
 
+IGNORED = {'customLayerData', 'subLayerOffsets', 'assetInfo', 'customData',
+           'displayGroup', 'displayName'}        # (dictionaries and UI hints: not kept)
+
+
+def text_vs_crate(usda, usdc):
+    a, err = dump(usda)
+    if a is None:
+        check(False, '%s: read (%s)' % (os.path.relpath(usda), err))
+        return
+    c, _ = dump(usdc)
+    keys = [k for k in c if k[1] not in IGNORED and '[' not in k[0]]
+    missing = [k for k in keys if k not in a]
+    differ = [k for k in keys if k in a and a[k] != c[k]]
+    extra = [k for k in a if k not in c]
+    for k in (missing + differ)[:5]:
+        print('       %s %s\n         text  %s\n         crate %s' % (k[0], k[1], (a.get(k) or '-')[:100], c[k][:100]))
+    check(not missing and not differ and not extra,
+          '%s reads as %s: %d fields (%d missing, %d differ, %d extra)'
+          % (os.path.basename(usda), os.path.basename(usdc), len(keys), len(missing), len(differ), len(extra)))
+
+
 def main():
     print('-- crate files --')
     crate(os.path.join(FIX, 'types.usdc'))
     for p in EXTRA:
-        crate(p)
+        if p.endswith('.usda'):
+            c = os.path.join(tempfile.mkdtemp(prefix='bee-usd-'), 'x.usdc')
+            if subprocess.run(['usdcat', p, '-o', c], capture_output=True).returncode == 0:
+                text_vs_crate(p, c)
+        else:
+            crate(p)
+    print('-- text files --')
+    text_vs_crate(os.path.join(FIX, 'types.usda'), os.path.join(FIX, 'types.usdc'))
+    print('-- damaged files --')
     g, err = dump(os.path.join(FIX, 'types.usda') + '.missing')
     check(g is None, 'a missing file is not read (%s)' % err[:60])
     bad = os.path.join(tempfile.mkdtemp(prefix='bee-usd-'), 'bad.usdc')
@@ -102,6 +137,26 @@ def main():
         if dump.rc != 0:
             break
     check(dump.rc == 0, '200 crate files with damaged bytes: no crash (rc %d at %d)' % (dump.rc, k))
+    text = open(os.path.join(FIX, 'types.usda'), 'rb').read()
+    bad = bad[:-1] + 'a'
+    for k in range(200):
+        b = bytearray(text)
+        for j in range(3):
+            at = (k * 7919 + j * 104729) % len(b)
+            if k % 2:
+                b[at] = b'(){}[]<>@"=,#\n.-0'[(k + j) % 17]
+            else:
+                del b[at:at + 1 + (k + j) % 30]
+        open(bad, 'wb').write(bytes(b))
+        g, err = dump(bad)
+        if dump.rc != 0:
+            break
+    check(dump.rc == 0, '200 text files with damaged bytes: no crash (rc %d at %d)' % (dump.rc, k))
+    for name, body in (('a million "("', 'def "A" { float3 x = ' + '(' * 1000000 + '}'),
+                       ('100000 nested prims', 'def "A" {' * 100000)):
+        open(bad, 'w').write('#usda 1.0\n' + body + '\n')
+        g, err = dump(bad)
+        check(dump.rc == 0 and g is None, '%s: refused without a crash' % name)
 
 
 main()
