@@ -21,8 +21,12 @@ s_drop_what:    .asciz "  cannot open a dropped file of that kind: "
 drop_kinds:     .quad x_blend_s, op_import_blend, x_glb_s, op_import_gltf, x_gltf_s, op_import_gltf
                 .quad x_obj_s, op_import_obj, x_stl_s, op_import_stl, x_step_s, op_import_step
                 .quad x_stp_s, op_import_step, x_bee_s, op_file_open
+                .quad x_usd_s, op_import_usd, x_usda_s, op_import_usd, x_usdc_s, op_import_usd
                 .quad x_png_s, op_ref_add, x_jpg_s, op_ref_add, x_jpeg_s, op_ref_add, 0
 x_blend_s:      .asciz ".blend"
+x_usd_s:        .asciz ".usd"
+x_usda_s:       .asciz ".usda"
+x_usdc_s:       .asciz ".usdc"
 x_glb_s:        .asciz ".glb"
 x_gltf_s:       .asciz ".gltf"
 x_obj_s:        .asciz ".obj"
