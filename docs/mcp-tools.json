@@ -6520,6 +6520,19 @@
    }
   },
   {
+   "name": "op_file_import_usd",
+   "description": "Import USD... - Import an OpenUSD file (.usd, .usda, .usdc): its meshes with their UVs and materials, composed (sublayers, references, payloads, variants), into a folder: file.import_usd <path>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_uv_unwrap",
    "description": "Unwrap - UV: unwrap the mesh along its seams (least squares conformal maps), then pack the islands",
    "inputSchema": {

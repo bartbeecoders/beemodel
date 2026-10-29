@@ -191,8 +191,7 @@ usdc_read:
 1:  mov     [rip+uc_lay], rax
     mov     [rax+UL_MAP], r12
     mov     [rax+UL_MAPSZ], r13
-    mov     rdi, rax                    # its file's path
-    mov     rsi, rbx
+    mov     rdi, rbx                    # its file's path
     call    str_len
     mov     edx, eax
     mov     rdi, [rip+uc_lay]

@@ -29,6 +29,13 @@
 .include "macros.inc"
 
 .globl blend_import
+.globl m4_mul
+.globl m4_copy
+.globl m4_quat
+.globl m4_axisrot
+.globl m4_euler
+.globl m4_split
+.globl bl_place
 
 .equ AT_FDCWD,      -100
 .equ O_WRCREAT,     0x241               # O_WRONLY | O_CREAT | O_TRUNC

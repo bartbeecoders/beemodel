@@ -13,6 +13,15 @@
   merged, primChildren / properties / variant children from the paths.
 - Damaged crate and text files, and deeply nested text, read without a
   crash.
+- Import (file.import_usd, src/usd.s): tests/fixtures/usd/stage composes a
+  sublayer, references to text and crate layers, an internal reference to
+  a class, a variant that brings in a payload, instanceable prims, an
+  inactive prim and a guide; transforms with a pivot (!invert!), rotateXYZ,
+  orient, transform, resetXformStack; Z up in centimetres; GeomSubsets
+  binding a second material; leftHanded faces; indexed faceVarying UVs. Each
+  mesh's faces and world bounding box (from the OBJ export) are OpenUSD's
+  (golden.json, from tests/usd_stage_ref.py; checked again when pxr is
+  there), and the objects land in a folder named after the file.
 
     python3 tests/usd.py build/beemodel [more.usdc ...]
 """
@@ -107,6 +116,46 @@ def text_vs_crate(usda, usdc):
           % (os.path.basename(usda), os.path.basename(usdc), len(keys), len(missing), len(differ), len(extra)))
 
 
+def stage_import(root, golden):
+    """BeeModel's import of a stage: {object name (no .001): [faces, lo, hi]},
+    objects, and their folders."""
+    import json
+    tmp = tempfile.mkdtemp(prefix='bee-usd-')
+    obj = os.path.join(tmp, 'x.obj')
+    code = ('n = count()\nfor i in 0..n { delete(name(0)) }\nop("file.import_usd", "%s")\n'
+            'op("file.export_obj", "%s")\nfor i in 0..count() { print("OB", name(i), infolder(name(i))) }'
+            % (root, obj))
+    r = subprocess.run([BIN, '--eval', code], capture_output=True, text=True, timeout=300)
+    objs = [l.split()[1:] for l in r.stdout.splitlines() if l.startswith('OB ')]
+    got, g = {}, None
+    if os.path.exists(obj):
+        for line in open(obj):
+            if line.startswith('o '):
+                g = got.setdefault(line.split()[1].split('.')[0], [0, [1e30] * 3, [-1e30] * 3])
+            elif line.startswith('v ') and g:
+                w = list(map(float, line.split()[1:4]))
+                for i in range(3):
+                    g[1][i] = min(g[1][i], w[i])
+                    g[2][i] = max(g[2][i], w[i])
+            elif line.startswith('f ') and g:
+                g[0] += 1
+    want = json.load(open(golden))
+    bad = [k for k in want if k not in got or got[k][0] != want[k][0]
+           or any(abs(a - b) > 1e-4 for a, b in zip(got[k][1] + got[k][2], want[k][1] + want[k][2]))]
+    for k in bad[:4]:
+        print('       %s\n         got  %s\n         want %s' % (k, got.get(k), want[k]))
+    return got, want, bad, objs
+
+
+def pxr_reads(root):
+    """OpenUSD's reading of the stage, when pxr is there (else None)."""
+    import json
+    env = dict(os.environ, LD_PRELOAD='/usr/lib/libjemalloc.so.2') if os.path.exists('/usr/lib/libjemalloc.so.2') else None
+    r = subprocess.run([sys.executable, os.path.join(HERE, 'usd_stage_ref.py'), root],
+                       capture_output=True, text=True, env=env)
+    return json.loads(r.stdout) if r.returncode == 0 else None
+
+
 def main():
     print('-- crate files --')
     crate(os.path.join(FIX, 'types.usdc'))
@@ -119,7 +168,40 @@ def main():
             crate(p)
     print('-- text files --')
     text_vs_crate(os.path.join(FIX, 'types.usda'), os.path.join(FIX, 'types.usdc'))
+    print('-- import --')
+    st = os.path.join(FIX, 'stage')
+    got, want, bad, objs = stage_import(os.path.join(st, 'root.usda'), os.path.join(st, 'golden.json'))
+    check(not bad and set(got) == set(want),
+          'the stage: %d meshes with OpenUSD\'s faces and world bounds (%s)' % (len(want), ', '.join(sorted(got))))
+    names = [o[0] for o in objs]
+    check(len(objs) == 7 and sum(n.split('.')[0] == 'Top' for n in names) == 2
+          and sum(n.split('.')[0] == 'Cup' for n in names) == 2,
+          'one object a material (Top: its subset apart), one an instance (Cup x2); %d objects' % len(objs))
+    check(objs and all(o[1:] == ['root'] for o in objs), 'all in the folder "root"')
+    check('Gone' not in got and 'Helper' not in got, 'inactive prims and guides are left out')
+    ref = pxr_reads(os.path.join(st, 'root.usda'))
+    if ref is not None:
+        same_ = set(ref) == set(want) and all(ref[k][0] == want[k][0] and all(
+            abs(a - b) < 1e-9 for a, b in zip(ref[k][1] + ref[k][2], want[k][1] + want[k][2])) for k in ref)
+        check(same_, 'golden.json is what OpenUSD (pxr) reads now')
+    for p in EXTRA:
+        if p.endswith('.usd') and ref is not None:
+            r = pxr_reads(p)
+            tmpg = os.path.join(tempfile.mkdtemp(prefix='bee-usd-'), 'g.json')
+            open(tmpg, 'w').write(__import__('json').dumps(r))
+            got, want, bad, objs = stage_import(p, tmpg)
+            check(not bad, '%s: %d meshes as OpenUSD composes them' % (os.path.basename(p), len(want)))
     print('-- damaged files --')
+    cyc = tempfile.mkdtemp(prefix='bee-usd-')
+    mesh = 'def Mesh "M" { int[] faceVertexCounts = [3]\n int[] faceVertexIndices = [0, 1, 2]\n point3f[] points = [(0,0,0), (1,0,0), (0,1,0)] }'
+    open(os.path.join(cyc, 'a.usda'), 'w').write('#usda 1.0\n( subLayers = [@./a.usda@, @./b.usda@] )\n'
+        'def Xform "A" ( prepend references = @./b.usda@</B> ) { %s }\n' % mesh)
+    open(os.path.join(cyc, 'b.usda'), 'w').write('#usda 1.0\n( subLayers = [@./a.usda@] )\n'
+        'def Xform "B" ( prepend references = [@./a.usda@</A>, @./missing.usda@, </B>] ) { def Xform "C" ( prepend references = </B> ) {} }\n')
+    code = 'op("file.import_usd", "%s")\nprint("N", count())' % os.path.join(cyc, 'a.usda')
+    r = subprocess.run([BIN, '--eval', code], capture_output=True, text=True, timeout=60)
+    check(r.returncode == 0 and 'N ' in r.stdout,
+          'reference and sublayer cycles, a missing file: imported without a hang or crash (rc %d)' % r.returncode)
     g, err = dump(os.path.join(FIX, 'types.usda') + '.missing')
     check(g is None, 'a missing file is not read (%s)' % err[:60])
     bad = os.path.join(tempfile.mkdtemp(prefix='bee-usd-'), 'bad.usdc')
