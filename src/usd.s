@@ -41,6 +41,11 @@
 .globl us_nprim
 .globl us_mat_hook
 .globl us_phys_hook
+.globl us_st
+.globl us_map
+.globl us_resolve
+.globl us_done
+.globl us_source
 
 .equ US_MAXLAY,  256                    # layers a stage opens
 .equ US_MAXSTK,  32                     # layers in a stack
@@ -140,7 +145,7 @@ us_zup:     .double 1.0, 0.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0,  0.0, -1.0, 0.0, 0.
 
 .section .data
 .align 8
-us_mat_hook:  .quad 0                   # (rdi=material stage path text) ->
+us_mat_hook:  .quad usdmat_get          # (rdi=material stage path text) ->
                                         #  eax = material index, -1 (usdmat.s)
 us_phys_hook: .quad 0                   # (edi=prim, rsi=object record) (usdphys.s)
 
@@ -477,6 +482,39 @@ us_prec:
     ret
 8:  imul    rax, rax, PR_SZ
     add     rax, [rip+us_prims]
+    ret
+
+# us_done(edi=stage path) -> eax = 1 when it is a composed prim
+us_done:
+    mov     eax, edi
+    cmp     rax, [rip+us_pcap]
+    jae     8f
+    imul    rax, rax, PR_SZ
+    add     rax, [rip+us_prims]
+    mov     eax, [rax+PR_DONE]
+    ret
+8:  xor     eax, eax
+    ret
+
+# us_source(edi=prim) -> rax = its weakest node's layer, rdx = that node's
+#   path (where it is defined: instances of one definition share it), 0
+us_source:
+    sub     rsp, 8
+    call    us_prec
+    add     rsp, 8
+    test    rax, rax
+    jz      8f
+    mov     ecx, [rax+PR_NN]
+    test    ecx, ecx
+    jz      8f
+    dec     ecx
+    imul    rcx, rcx, N_SZ
+    add     rcx, [rax+PR_NODES]
+    mov     rax, [rcx+N_LAY]
+    mov     rdx, [rcx+N_PATH]
+    ret
+8:  xor     eax, eax
+    xor     edx, edx
     ret
 
 # us_prim_path(edi=prim) -> rax = its stage path text
@@ -1628,6 +1666,7 @@ usd_import:
     mov     dword ptr [rip+us_nobj], 0
     mov     dword ptr [rip+us_nmesh], 0
     mov     dword ptr [rip+us_nskip], 0
+    call    usdmat_reset
     call    us_stage
     test    eax, eax
     jnz     1f
