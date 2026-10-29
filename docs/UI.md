@@ -174,7 +174,7 @@ Right-click a colour field to copy it as `#rrggbb`, paste a hex code, or reset i
   - **Wires.** Drop a wire in empty space to pick the node it should feed. Double-click a wire for a reroute knot. Alt+click a wire to cut it, or Alt+drag a knife across several. Wires take the colour of what they carry.
 - **UV Editor.** Unwrap, Pack, Select All, the stretch heat map. More is in Mesh › UV.
 - **Render.** Render, Stop, Save, Denoise, the pass shown, the samples done, and GPU or CPU.
-- **Asset Browser.** Search, a kind filter, Save to Library. Right-click a tile to place it, tag it, show its dependencies or remove it.
+- **Asset Browser.** Search, a kind filter, Save to Library. Right-click a tile to place it, tag it, show its dependencies or remove it. The name in its header goes round the sources: the local library and online ones such as NVIDIA SimReady ([LIBRARIES.md](LIBRARIES.md)) - their tiles download on a double-click or a drag into a viewport, the wheel scrolls them.
 - **Versions.** Commit, branches, merge with conflict choices, history. It also handles collaboration (host, join, follow a peer, let an agent join) and the live link.
 - **AI Activity.** What agents did, their permission, and Accept / Revert for a waiting proposal.
 - **Help.** Everything about whatever the pointer last rested on.
