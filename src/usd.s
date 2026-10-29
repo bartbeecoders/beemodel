@@ -46,6 +46,8 @@
 .globl us_resolve
 .globl us_done
 .globl us_source
+.globl us_cm
+.globl us_pany
 
 .equ US_MAXLAY,  256                    # layers a stage opens
 .equ US_MAXSTK,  32                     # layers in a stack
@@ -147,7 +149,8 @@ us_zup:     .double 1.0, 0.0, 0.0, 0.0,  0.0, 0.0, 1.0, 0.0,  0.0, -1.0, 0.0, 0.
 .align 8
 us_mat_hook:  .quad usdmat_get          # (rdi=material stage path text) ->
                                         #  eax = material index, -1 (usdmat.s)
-us_phys_hook: .quad 0                   # (edi=prim, rsi=object record) (usdphys.s)
+us_phys_hook: .quad usdphys_object      # (edi=prim, rsi=object record,
+                                        #  edx=its handle) (usdphys.s)
 
 .section .bss
 .align 8
@@ -581,6 +584,54 @@ us_pget:
     jmp     1b
 8:  xor     eax, eax
 9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# us_pany(edi=prim, rsi=field, rdx=text) -> eax = 1 when any of its nodes'
+#   lists for that field (a list op: apiSchemas ...) has the text
+us_pany:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12, rsi
+    mov     r13, rdx
+    call    us_prec
+    test    rax, rax
+    jz      8f
+    mov     rbx, [rax+PR_NODES]
+    mov     r14d, [rax+PR_NN]
+1:  test    r14d, r14d
+    jz      8f
+    dec     r14d
+    imul    rdi, r14, N_SZ
+    add     rdi, rbx
+    mov     rsi, r12
+    call    us_nget
+    test    rax, rax
+    jz      1b
+    cmp     dword ptr [rax+UV_T], UT_SLIST
+    jne     1b
+    mov     r15, rax
+    xor     ecx, ecx
+2:  cmp     rcx, [r15+UV_N]
+    jae     1b
+    mov     rax, [r15+UV_P]
+    mov     rdi, [rax+rcx*8]
+    mov     rsi, r13
+    push    rcx
+    call    str_eq
+    pop     rcx
+    test    eax, eax
+    jnz     9f
+    inc     rcx
+    jmp     2b
+8:  xor     eax, eax
+9:  pop     r15
     pop     r14
     pop     r13
     pop     r12
@@ -1667,6 +1718,7 @@ usd_import:
     mov     dword ptr [rip+us_nmesh], 0
     mov     dword ptr [rip+us_nskip], 0
     call    usdmat_reset
+    call    usdphys_reset
     call    us_stage
     test    eax, eax
     jnz     1f
@@ -1704,7 +1756,8 @@ usd_import:
     call    us_walk
     inc     r12d
     jmp     3b
-2:  call    us_free
+2:  call    usdphys_finish              # bodies and joints (the stage still there)
+    call    us_free
     call    fmt_reset                   # "  usd: n objects from m meshes, k skipped"
     lea     rdi, [rip+s_got_a]
     call    fmt_str
@@ -1900,7 +1953,11 @@ us_walk:
     mov     rsi, r12
     lea     rdx, [rsp]
     call    m4_mul
-1:  mov     edi, ebx                    # a material bound here
+1:  mov     edi, ebx                    # a body or a joint (usdphys.s)
+    lea     rsi, [rsp]
+    call    usdphys_enter
+    mov     [rsp+128], eax              # (the body around it)
+    mov     edi, ebx                    # a material bound here
     lea     rsi, [rip+r_bind]
     call    us_rel
     test    rax, rax
@@ -1923,7 +1980,7 @@ us_walk:
 4:  mov     edi, ebx
     call    us_prec
     cmp     r14d, [rax+PR_NK]
-    jae     .Lwk_out
+    jae     .Lwk_left
     mov     rcx, [rax+PR_KIDS]
     mov     edi, [rcx+r14*4]
     lea     rsi, [rsp]
@@ -1931,6 +1988,9 @@ us_walk:
     call    us_walk
     inc     r14d
     jmp     4b
+.Lwk_left:
+    mov     edi, [rsp+128]
+    call    usdphys_leave
 .Lwk_out:
     add     rsp, 136
     pop     r14
@@ -2075,6 +2135,7 @@ us_mesh:
     call    mesh_unref
     jmp     3f
 23: inc     dword ptr [rip+us_nobj]
+    mov     [rsp+8], eax                # (its handle)
     mov     edi, eax
     call    obj_get
     mov     r15, rax
@@ -2106,6 +2167,7 @@ us_mesh:
     jz      3f
     mov     edi, ebx
     mov     rsi, r15
+    mov     edx, [rsp+8]
     call    rax
 3:  inc     r14d
     jmp     2b

@@ -27,6 +27,13 @@
   (Wood: a base map, metallic / roughness from one map's b and g, the
   UsdTransform2d's 2 x 2 tiling); bound per object (Top: Wood, its subset:
   Paint).
+- Physics (src/usdphys.s, tests/fixtures/usd/physics.usda): rigid bodies
+  from PhysicsRigidBodyAPI with MassAPI masses (on the body or its mesh),
+  approximations (convexHull -> hull, boundingCube -> box), a physics
+  material's friction and restitution, kinematic -> passive; a hinge with
+  its limits and a driven slider (held) as rigid.joint does them, a
+  disabled joint left out. Played 2 s: the crate falls, its lid stays on
+  its hinge, the drawer stays on the kinematic shelf.
 
     python3 tests/usd.py build/beemodel [more.usdc ...]
 """
@@ -201,6 +208,23 @@ def main():
     check(len(w) == 5 and w[0] != '0' and w[1] != '0' and w[1] == w[2] and w[0] != w[1]
           and abs(float(w[3]) - 0.2) < 1e-4 and abs(float(w[4]) - 0.6) < 1e-4,
           'Wood: a base map, metallic and roughness from one map, tiled 2 x 2 (%s)' % w)
+    code = ('n = count()\nfor i in 0..n { delete(name(0)) }\nop("file.import_usd", "%s")\n'
+            'for i in 0..count() { o = name(i)\n print("R", o, rigid(o, "type"), rigid(o, "shape"), rigid(o, "mass"), rigid(o, "friction"), rigid(o, "bounce")) }\n'
+            'print("T0", get("Box", "y"), get("Lid", "y"), get("Drawer", "x"), get("Drawer", "y"))\n'
+            'for f in 1..61 { op("anim.frame", f) }\n'
+            'print("T2", get("Box", "y"), get("Lid", "y"), get("Drawer", "x"), get("Drawer", "y"), get("Lid", "x") - get("Box", "x"))'
+            % os.path.join(FIX, 'physics.usda'))
+    out = subprocess.run([BIN, '--eval', code], capture_output=True, text=True, timeout=120).stdout
+    rb = {l.split()[1]: l.split()[2:] for l in out.splitlines() if l.startswith('R ')}
+    want_rb = {'Box': ['1', '3', '2', '0.3', '0.6'], 'Lid': ['1', '0', '0.5'], 'Shelf': ['2'], 'Drawer': ['1']}
+    check(all(rb.get(k, [])[:len(v)] == v for k, v in want_rb.items()),
+          'bodies: Box hull 2 kg friction 0.3 bounce 0.6, Lid box 0.5 kg, Shelf passive, Drawer active (%s)' % rb)
+    t = {l.split()[0]: [float(x) for x in l.split()[1:]] for l in out.splitlines() if l[:3] in ('T0 ', 'T2 ')}
+    t0, t2 = t.get('T0'), t.get('T2')
+    check(t0 and t2 and t2[0] < t0[0] - 5 and abs((t2[1] - t2[0]) - (t0[1] - t0[0])) < 0.05 and abs(t2[4]) < 0.05
+          and abs(t2[2] - t0[2]) < 0.02 and abs(t2[3] - t0[3]) < 0.02,
+          'played 2 s: the crate falls (y %.1f -> %.1f), the lid stays on its hinge, the drawer on the shelf (%s)'
+          % ((t0 or [0])[0], (t2 or [0])[0], t2))
     ref = pxr_reads(os.path.join(st, 'root.usda'))
     if ref is not None:
         same_ = set(ref) == set(want) and all(ref[k][0] == want[k][0] and all(
