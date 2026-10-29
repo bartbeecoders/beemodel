@@ -2061,6 +2061,19 @@
    }
   },
   {
+   "name": "op_lib_source_next",
+   "description": "Next Library Source - Show the next asset library in the Asset Browser (the local library, then each online source)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_lib_refresh",
    "description": "Refresh Catalog - Fetch the online source's catalog again (new assets)",
    "inputSchema": {

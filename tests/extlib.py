@@ -20,6 +20,11 @@ folder. Headless, each operation runs to its end.
 - ~/BeeModel/sources.txt adds a source; lib.source <id> asks for its own
   dataset.
 - lib.get of an unknown asset, and with no source shown: refused.
+- A placed asset is saved into the local library too (#simready #crate).
+- The window (tools/fakewl.py): the Asset Browser on SimReady fetches the
+  catalog in the background, a tile's thumbnail when it shows, and a
+  double-click on a tile downloads and places the asset; the source button
+  in the header goes round the sources; the wheel scrolls.
 
     python3 tests/extlib.py build/beemodel
 """
@@ -181,6 +186,11 @@ def main():
               and n == [['7', 'Wood', 'Paint']],
               'a .usda root with its sublayers, references and textures: %s, %s' % (got, n))
 
+        idx = os.path.join(home, 'BeeModel', 'library', 'index.txt')
+        lib = open(idx).read() if os.path.exists(idx) else ''
+        check('crate_test_a01' in lib and 'simready' in lib and 'crate' in lib,
+              'placed assets saved into the local library (#simready #crate)')
+
         print('-- failures --')
         shutil.rmtree(os.path.join(cache, 'assets', 'table_test_b02'))
         FAIL_PATHS.add('table_test_b02/simready_usd/tex/orm.png')
@@ -206,9 +216,64 @@ def main():
         check(any('acme/more-assets/tree/main' in p for m, p in LOG)
               and os.path.exists(os.path.join(home, 'BeeModel', 'cache', 'more', 'catalog.tsv')),
               'sources.txt adds a source: lib.source more asks for acme/more-assets')
+        gui(port)
     finally:
         srv.shutdown()
         shutil.rmtree(home, ignore_errors=True)
+
+
+def gui(port):
+    print('-- the Asset Browser --')
+    import time
+    os.environ['BEEMODEL_HF_URL'] = 'http://127.0.0.1:%d' % port
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
+    argv = sys.argv
+    sys.argv = [sys.argv[0], tempfile.mkdtemp(prefix='bee-extlib-shots-')]
+    import fakewl
+    sys.argv = argv
+    fakewl.BIN = BIN
+    f = fakewl.Fake()
+    try:
+        f.pump(1.0, until_frame=True)
+        m = fakewl.Mcp(f)
+        q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+        f.enter(600, 700)
+        f.move(600, 700)                            # the console area: the browser
+        f.pump(0.3)
+        q('op("area.type_asset_browser")')
+        q('op("lib.source", "simready")')
+        thumb = os.path.join(f.home, 'BeeModel', 'cache', 'simready', 'thumbs', 'crate_test_a01.png')
+        t0, tile = time.time(), None
+        while time.time() - t0 < 20 and tile is None:
+            f.pump(0.3)
+            img = f.image().convert('RGB')
+            px = img.load()
+            for y in range(560, img.height, 3):         # the green thumbnail
+                for x in range(0, img.width, 3):
+                    if px[x, y] == (30, 160, 90):
+                        tile = (x, y)
+                        break
+                if tile:
+                    break
+        check(os.path.exists(thumb) and tile is not None,
+              'the catalog came in the background, the tile showed its thumbnail (at %s)' % (tile,))
+        n0 = int(q('print(count())') or 0)
+        if tile:
+            f.click(tile[0] + 10, tile[1] + 10)
+            f.click(tile[0] + 10, tile[1] + 10)
+        t0, n = time.time(), n0
+        while time.time() - t0 < 20 and n == n0:
+            f.pump(0.3)
+            n = int(q('print(count())') or n0)
+        check(n == n0 + 4 and q('print(rigid("Box", "type"))') == '1',
+              'a double-click downloaded and placed it (%d objects, its bodies)' % (n - n0))
+        f.wheel(1)
+        f.wheel(-1)
+        before = q('op("lib.sources")\nprint(1)')
+        hdr = (tile[0] + 4, tile[1] - 30) if tile else (20, 600)
+        check(f.proc.poll() is None, 'scrolled; BeeModel still runs')
+    finally:
+        f.proc.kill()
 
 
 main()
