@@ -22,8 +22,15 @@ textured materials, masses, collision shapes and joints.
   dropped on - with its materials and physics, and saved into the local
   library (`#simready #<category>`). The console names its source and
   licence.
-- `lib.get <asset> [x y z]` does the same from the console, scripts and
-  agents (MCP: `op_lib_get`).
+- `lib.get <asset> [x y z] [static] [nosave]` does the same from the
+  console, scripts and agents (MCP: `op_lib_get`); `static` leaves out
+  rigid bodies and joints, `nosave` keeps it out of the local library.
+- SimReady textures are 4096 a side: imports keep them at most
+  `file.usd_texture_size` (1024 by default; a whole scene: 512), shrunk
+  once and cached beside the original. A scene can hold 2048 images, the
+  GPU sees 1024 of them.
+- `Vibecoding/demos/auto-factory.bees` builds a car assembly hall from
+  SimReady assets.
 - The status bar shows a download's progress; click it (or `lib.stop`) to
   stop. A tile with a green mark is downloaded.
 

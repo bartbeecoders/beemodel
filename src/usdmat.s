@@ -14,6 +14,10 @@
 #  A texture's st through a UsdTransform2d gives the maps' tiling and
 #  offset. Texture files are resolved beside the layer that names them;
 #  images are loaded once an import. ml_gltf (matlib.s) makes the graph.
+#  Textures bigger than file.usd_texture_size (1024 by default) are box-
+#  filtered down by a power of two once, kept beside the original as
+#  <name>.<size>.png and loaded from there (SimReady's are 4096 a side:
+#  30 GB for a scene of 40 assets at full size).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -22,6 +26,7 @@
 
 .globl usdmat_get
 .globl usdmat_reset
+.globl us_texcap
 
 .equ MP_BASE,   0                       # (material.s mat_set parameters)
 .equ MP_METAL,  1
@@ -75,8 +80,13 @@ o_g:        .asciz "outputs:g"
 f_one:      .float 1.0
 f_half:     .float 0.5
 
+.section .data
+.align 4
+us_texcap:  .long 1024                  # textures at most this a side (0: any)
+
 .section .bss
 .align 8
+um_cpath:   .skip 1100                  # the capped copy's path
 um_mpath:   .skip 8*UM_MAXMAT           # materials made: where defined (layer,
 um_mlay:    .skip 8*UM_MAXMAT           #  path), index
 um_mindex:  .skip 4*UM_MAXMAT
@@ -556,6 +566,8 @@ um_texture:
     mov     rsi, [rdx+0]                # the node's layer: its file
     mov     rsi, [rsi+UL_FILE]
     call    us_resolve
+    mov     rdi, rax                    # (its size capped: the small copy)
+    call    um_capped
     mov     r12, rax
     xor     r13d, r13d                  # loaded already?
 1:  cmp     r13d, [rip+um_ni]
@@ -603,6 +615,304 @@ um_texture:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# um_capped(rdi=texture file) -> rax = the file to load: it, or its copy
+#   <stem>.<cap>.png when it is bigger than us_texcap a side (made the first
+#   time: an f x f box filter, f the power of two that fits it)
+um_capped:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 24
+    mov     rbx, rdi
+    mov     ebp, [rip+us_texcap]
+    test    ebp, ebp
+    jz      .Lcp_orig
+    lea     rdi, [rip+um_cpath]         # the copy's name: up to the extension
+    xor     ecx, ecx
+    mov     edx, -1                     # (its '.': after the last '/')
+1:  mov     al, [rbx+rcx]
+    test    al, al
+    jz      2f
+    cmp     ecx, 1000
+    jae     .Lcp_orig
+    mov     [rdi+rcx], al
+    cmp     al, '/'
+    jne     11f
+    mov     edx, -1
+11: cmp     al, '.'
+    jne     12f
+    mov     edx, ecx
+12: inc     ecx
+    jmp     1b
+2:  test    edx, edx
+    js      21f
+    mov     ecx, edx
+21: lea     rdi, [rdi+rcx]
+    mov     byte ptr [rdi], '.'
+    inc     rdi
+    mov     eax, ebp
+    call    um_utoa
+    mov     dword ptr [rdi], 0x676e702e # ".png"
+    mov     byte ptr [rdi+4], 0
+    lea     rdi, [rip+um_cpath]         # made already?
+    call    file_read
+    test    rax, rax
+    jz      3f
+    mov     rdi, rax
+    mov     rsi, rdx
+    call    file_unmap
+    jmp     .Lcp_copy
+3:  mov     rdi, rbx                    # the original: decoded
+    call    file_read
+    test    rax, rax
+    jz      .Lcp_orig
+    mov     r12, rax
+    mov     r13, rdx
+    mov     rdi, rax
+    mov     rsi, rdx
+    call    img_decode
+    mov     r14, rax
+    mov     rdi, r12
+    mov     rsi, r13
+    call    file_unmap
+    test    r14, r14
+    jz      .Lcp_orig
+    cmp     dword ptr [r14+8], 0        # (8-bit ones only)
+    jne     .Lcp_free
+    mov     eax, [r14]                  # small enough: as it is
+    cmp     eax, ebp
+    ja      4f
+    mov     eax, [r14+4]
+    cmp     eax, ebp
+    jbe     .Lcp_free
+4:  mov     r15d, 1                     # f
+5:  mov     eax, [r14]
+    xor     edx, edx
+    div     r15d
+    cmp     eax, ebp
+    ja      51f
+    mov     eax, [r14+4]
+    xor     edx, edx
+    div     r15d
+    cmp     eax, ebp
+    jbe     6f
+51: add     r15d, r15d
+    jmp     5b
+6:  mov     eax, [r14]                  # the size it gets
+    xor     edx, edx
+    div     r15d
+    mov     [rsp], eax                  # nw
+    mov     eax, [r14+4]
+    xor     edx, edx
+    div     r15d
+    mov     [rsp+4], eax                # nh
+    cmp     dword ptr [rsp], 0
+    je      .Lcp_free
+    cmp     dword ptr [rsp+4], 0
+    je      .Lcp_free
+    mov     eax, [rsp]
+    imul    eax, [rsp+4]
+    lea     rdi, [rax*4]
+    mov     [rsp+8], rdi
+    call    vmap
+    test    rax, rax
+    jz      .Lcp_free
+    mov     [rsp+16], rax
+    mov     rdi, rax                    # boxes averaged
+    mov     rsi, r14
+    mov     edx, r15d
+    mov     ecx, [rsp]
+    mov     r8d, [rsp+4]
+    call    um_shrink
+    call    wb_reset
+    mov     rsi, [rsp+16]
+    mov     edx, [rsp]
+    mov     ecx, [rsp+4]
+    mov     r8d, [rsp]
+    call    png_encode_rgba
+    test    eax, eax
+    jz      7f
+    lea     rdi, [rip+um_cpath]
+    mov     rsi, [rip+wb_ptr]
+    mov     rdx, [rip+wb_len]
+    call    file_write_atomic
+    mov     r12d, eax
+7:  mov     rdi, [rsp+16]
+    mov     rsi, [rsp+8]
+    call    vunmap
+    mov     rdi, r14
+    call    img_free
+    test    r12d, r12d                  # (written: the copy)
+    jnz     .Lcp_orig
+.Lcp_copy:
+    lea     rax, [rip+um_cpath]
+    jmp     .Lcp_ret
+.Lcp_free:
+    mov     rdi, r14
+    call    img_free
+.Lcp_orig:
+    mov     rax, rbx
+.Lcp_ret:
+    add     rsp, 24
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# um_shrink(rdi=out ARGB, rsi=image (IM_*), edx=f, ecx=out w, r8d=out h) -
+#   each out pixel the average of its f x f source pixels, per channel
+um_shrink:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 40
+    mov     [rsp], rdi
+    mov     r12, rsi
+    mov     r13d, edx                   # f
+    mov     [rsp+8], ecx                # out w
+    mov     [rsp+12], r8d               # out h
+    mov     eax, r13d
+    imul    eax, r13d
+    mov     [rsp+16], eax               # f x f
+    xor     r14d, r14d                  # out y
+.Lsh_y:
+    cmp     r14d, [rsp+12]
+    jae     .Lsh_out
+    xor     r15d, r15d                  # out x
+.Lsh_x:
+    cmp     r15d, [rsp+8]
+    jae     .Lsh_ny
+    xor     ebx, ebx                    # sums: a r g b
+    xor     ecx, ecx
+    xor     edx, edx
+    xor     ebp, ebp
+    xor     r9d, r9d                    # dy
+1:  cmp     r9d, r13d
+    jae     4f
+    mov     eax, r14d                   # the source row
+    imul    eax, r13d
+    add     eax, r9d
+    imul    eax, [r12]
+    mov     r10d, r15d
+    imul    r10d, r13d
+    add     eax, r10d
+    lea     r10, [r12+64+rax*4]
+    xor     r11d, r11d                  # dx
+2:  cmp     r11d, r13d
+    jae     3f
+    mov     eax, [r10+r11*4]
+    mov     edi, eax
+    shr     edi, 24
+    add     ebx, edi
+    mov     edi, eax
+    shr     edi, 16
+    and     edi, 0xff
+    add     ecx, edi
+    mov     edi, eax
+    shr     edi, 8
+    and     edi, 0xff
+    add     edx, edi
+    and     eax, 0xff
+    add     ebp, eax
+    inc     r11d
+    jmp     2b
+3:  inc     r9d
+    jmp     1b
+4:  mov     [rsp+20], ecx               # each sum / (f x f)
+    mov     [rsp+24], edx
+    mov     eax, ebx
+    xor     edx, edx
+    div     dword ptr [rsp+16]
+    mov     ebx, eax
+    shl     ebx, 24
+    mov     eax, [rsp+20]
+    xor     edx, edx
+    div     dword ptr [rsp+16]
+    shl     eax, 16
+    or      ebx, eax
+    mov     eax, [rsp+24]
+    xor     edx, edx
+    div     dword ptr [rsp+16]
+    shl     eax, 8
+    or      ebx, eax
+    mov     eax, ebp
+    xor     edx, edx
+    div     dword ptr [rsp+16]
+    or      ebx, eax
+    mov     eax, r14d
+    imul    eax, [rsp+8]
+    add     eax, r15d
+    mov     rdi, [rsp]
+    mov     [rdi+rax*4], ebx
+    inc     r15d
+    jmp     .Lsh_x
+.Lsh_ny:
+    inc     r14d
+    jmp     .Lsh_y
+.Lsh_out:
+    add     rsp, 40
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# um_utoa(eax=value, rdi=out) - decimal; rdi after it
+um_utoa:
+    sub     rsp, 24
+    lea     rsi, [rsp+20]
+    mov     ecx, 10
+1:  xor     edx, edx
+    div     ecx
+    add     dl, '0'
+    dec     rsi
+    mov     [rsi], dl
+    test    eax, eax
+    jnz     1b
+    lea     rcx, [rsp+20]
+2:  cmp     rsi, rcx
+    jae     3f
+    mov     al, [rsi]
+    mov     [rdi], al
+    inc     rsi
+    inc     rdi
+    jmp     2b
+3:  add     rsp, 24
+    ret
+
+# file.usd_texture_size <n> - the most a USD texture keeps a side
+OPERATOR op_usd_texsize, "file.usd_texture_size", "USD Texture Size", do_usd_texsize, flags=OPF_AI_SAFE|OPF_QUIET, doc="The most an imported USD texture keeps a side; bigger ones are shrunk by halves once and kept beside the original as <name>.<size>.png: file.usd_texture_size <n> (1024 by default; 0: any size)"
+do_usd_texsize:
+    sub     rsp, 8
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      9f
+    call    im_next_word
+    test    eax, eax
+    jz      9f
+    lea     rsi, [rip+im_word]
+    lea     rdx, [rsi+rax]
+    call    parse_float
+    test    eax, eax
+    jz      9f
+    cvttss2si eax, xmm0
+    test    eax, eax
+    js      9f
+    mov     [rip+us_texcap], eax
+9:  add     rsp, 8
     ret
 
 # um_tiling(edi=texture) - its st from a UsdTransform2d: the maps' tiling

@@ -25,6 +25,7 @@
 #                     samples a pass, back as XRGB (gpu_lv_put, gpu_lv_run).
 # =============================================================================
 .intel_syntax noprefix
+.equ GP_NIMG, 1024                       # images the GPU sees (graph.glsl's table)
 .include "const.inc"
 .equ HF_MAX, 8                          # hive.s's liquid fields
 .equ HF_SZ, 112
@@ -166,7 +167,7 @@ pd_bytes:       .skip 8
 pd_chunk:       .skip 8
 pd_ext:         .skip 16*PD_MAXCH       # each chunk's changed bytes (from, to)
 pd_zero:        .skip PD_BLK
-gp_itab:        .skip 1024              # the images' table (gp_img_put)
+gp_itab:        .skip GP_NIMG*16        # the images' table (gp_img_put)
 gp_ehdr:        .skip 32                # the HDRI's header (gp_env_put)
 .align 16
 gp_fhdr:        .skip 16+HF_MAX*128     # the liquids' fields: header, records
@@ -2034,17 +2035,17 @@ gpu_img_into:
     pop     r13
     ret
 
-# gp_img_bytes -> rax = the images' buffer: 64 x (offset, w, h, format) and
-#   the 8-bit images' texels
+# gp_img_bytes -> rax = the images' buffer: GP_NIMG x (offset, w, h, format)
+#   and the 8-bit images' texels
 gp_img_bytes:
     push    rbx
     push    r12
     sub     rsp, 8
-    mov     r12d, 1024
+    mov     r12d, GP_NIMG*16
     xor     ebx, ebx
 1:  cmp     ebx, [rip+img_count]
     jae     9f
-    cmp     ebx, 64
+    cmp     ebx, GP_NIMG
     jae     9f
     mov     edi, ebx
     call    image_ptr
@@ -2070,14 +2071,14 @@ gp_img_put:
     push    r12
     push    r15
     lea     rdi, [rip+gp_itab]          # the table: zeros first
-    mov     ecx, 128
+    mov     ecx, GP_NIMG*2
     xor     eax, eax
     rep     stosq
-    mov     r12d, 256                   # texels after the table (words)
+    mov     r12d, GP_NIMG*4             # texels after the table (words)
     xor     ebx, ebx
 1:  cmp     ebx, [rip+img_count]
     jae     3f
-    cmp     ebx, 64
+    cmp     ebx, GP_NIMG
     jae     3f
     mov     edi, ebx
     call    image_ptr
@@ -2089,7 +2090,7 @@ gp_img_put:
     mov     edx, ebx
     shl     edx, 4
     mov     ecx, r12d
-    sub     ecx, 256
+    sub     ecx, GP_NIMG*4
     mov     [rdi+rdx], ecx
     mov     ecx, [rax]
     mov     [rdi+rdx+4], ecx
@@ -2108,7 +2109,7 @@ gp_img_put:
     jmp     1b
 3:  lea     rsi, [rip+gp_itab]
     mov     rdi, [r14+15*8]
-    mov     ecx, 1024
+    mov     ecx, GP_NIMG*16
     call    put_delta
     pop     r15
     pop     r12

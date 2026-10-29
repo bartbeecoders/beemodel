@@ -170,6 +170,8 @@ s_credit_c: .asciz ", "
 s_chip_cat: .asciz "Fetching the catalog..."
 s_chip_dl:  .asciz "Downloading "
 s_lsobj:    .asciz "object "
+k_static:   .asciz "static"
+k_nosave:   .asciz "nosave"
 s_lshash:   .asciz " #"
 s_lbsave:   .asciz "lib.save"
 s_bad_get:  .asciz "  lib.get <asset> (in the current source; lib.source <id> first)"
@@ -209,6 +211,8 @@ ex_place:   .skip 4                     # 1: place it when it is here
 ex_ppos:    .skip 12                    # where
 ex_rbuf:    .skip 8                     # read-buffer of a downloaded file
 ex_scroll:  .skip 4                     # the browser's rows scrolled
+ex_static:  .skip 4                     # lib.get ... static: no bodies, joints
+ex_nosave:  .skip 4                     # lib.get ... nosave: not into the library
 
 .text
 
@@ -2273,11 +2277,17 @@ ex_import:
     movsd   [rip+us_off+16], xmm0
     mov     eax, [rip+obj_count]        # (its objects: those after these)
     mov     [rsp], eax
+    mov     eax, [rip+ex_static]
+    mov     [rip+us_nophys], eax
     lea     rdi, [rip+ex_path]
     call    usd_import
+    mov     dword ptr [rip+us_nophys], 0
+    cmp     dword ptr [rip+ex_nosave], 0
+    jne     1f
     mov     edi, [rsp]                  # into the local library too
     mov     rsi, r12
     call    ex_to_library
+1:
     xorpd   xmm0, xmm0
     movsd   [rip+us_off], xmm0
     movsd   [rip+us_off+8], xmm0
@@ -2536,7 +2546,7 @@ do_ex_refresh:
     ret
 
 # lib.get <asset> [x y z] - an online asset placed (fetched first)
-OPERATOR op_ex_get, "lib.get", "Get Online Asset", do_ex_get, flags=OPF_AI_SAFE|OPF_UNDO, doc="Place an asset of the online source shown (lib.source <id>): its files are downloaded the first time, then it is imported at the 3D cursor (or x y z) with its materials and physics: lib.get <asset name> [x y z]"
+OPERATOR op_ex_get, "lib.get", "Get Online Asset", do_ex_get, flags=OPF_AI_SAFE|OPF_UNDO, doc="Place an asset of the online source shown (lib.source <id>): its files are downloaded the first time, then it is imported at the 3D cursor (or x y z) with its materials and physics, and saved into the local library: lib.get <asset name> [x y z] [static] [nosave] (static: no rigid bodies or joints; nosave: not into the library)"
 do_ex_get:
     push    rbx
     push    r12
@@ -2558,6 +2568,8 @@ do_ex_get:
     mov     ebx, eax
     mov     rsi, r12                    # x y z (else the cursor)
     call    ex_xyz
+    mov     rsi, r12                    # static, nosave (anywhere after)
+    call    ex_flags
     mov     edi, ebx
     mov     esi, 1
     call    ex_get
@@ -2592,6 +2604,33 @@ do_ex_stop:
     call    ex_fasset_fail
 2:  mov     dword ptr [rip+dirty], 1
     add     rsp, 8
+    ret
+
+# ex_flags(rsi=text) - ex_static / ex_nosave from its words
+ex_flags:
+    push    rbx
+    mov     rbx, rsi
+    mov     dword ptr [rip+ex_static], 0
+    mov     dword ptr [rip+ex_nosave], 0
+1:  mov     rsi, rbx
+    call    im_next_word
+    test    eax, eax
+    jz      9f
+    mov     rbx, rsi
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_static]
+    call    str_eq
+    test    eax, eax
+    jz      2f
+    mov     dword ptr [rip+ex_static], 1
+2:  lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_nosave]
+    call    str_eq
+    test    eax, eax
+    jz      1b
+    mov     dword ptr [rip+ex_nosave], 1
+    jmp     1b
+9:  pop     rbx
     ret
 
 # ex_xyz(rsi=text) - three numbers there: the 3D cursor set to them

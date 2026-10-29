@@ -49,6 +49,7 @@
 .globl us_cm
 .globl us_pany
 .globl us_off
+.globl us_nophys
 
 .equ US_MAXLAY,  256                    # layers a stage opens
 .equ US_MAXSTK,  32                     # layers in a stack
@@ -169,6 +170,7 @@ us_nskip:   .skip 4
 us_folder:  .skip 4
 us_rootlc:  .skip 4
 us_cm:      .skip 128                   # C: the stage to BeeModel (axes, units)
+us_nophys:  .skip 4                     # 1: no rigid bodies, no joints
 us_off:     .skip 24                    # where it lands: added to every place
                                         #  (an online asset at the 3D cursor)
 us_ci:      .skip 128                   # C^-1
@@ -1759,7 +1761,10 @@ usd_import:
     call    us_walk
     inc     r12d
     jmp     3b
-2:  call    usdphys_finish              # bodies and joints (the stage still there)
+2:  cmp     dword ptr [rip+us_nophys], 0
+    jne     21f
+    call    usdphys_finish              # bodies and joints (the stage still there)
+21:
     call    us_free
     call    fmt_reset                   # "  usd: n objects from m meshes, k skipped"
     lea     rdi, [rip+s_got_a]
