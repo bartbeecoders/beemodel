@@ -145,6 +145,9 @@ jobs:
       - name: Blender files (fixtures from Blender 5.2 and 4.2; no Blender needed)
         run: timeout 300 python tests/blend.py build/beemodel build/shots
 
+      - name: OpenUSD files (crate and text layers against a reference reader)
+        run: timeout 300 python tests/usd.py build/beemodel
+
       - name: Live link (the scene over a socket, a mirror, backpressure)
         run: timeout 300 python tests/livelink.py build/beemodel build/shots
 
