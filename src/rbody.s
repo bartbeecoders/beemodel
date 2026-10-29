@@ -7515,9 +7515,12 @@ fr_row:
     pop     r9
     ret
 
-# jr_prestep(rbx=joint) - anchors, errors, axes
+# jr_prestep(rbx=joint) - anchors, errors, axes. Aligns its own stack: big
+#   islands' stage jobs enter it 8 bytes off (as jr_solve)
 jr_prestep:
-    sub     rsp, 8
+    push    rbp
+    mov     rbp, rsp
+    and     rsp, -16
     test    dword ptr [rbx+JR_FL], 4    # (broken: nothing)
     jnz     9f
     mov     dword ptr [rbx+JR_MACC], 0
@@ -7606,7 +7609,8 @@ jr_prestep:
 3:  addps   xmm0, xmm0
     andps   xmm0, [rip+rx_xyz]
     movaps  [rbx+JR_ERR], xmm0
-9:  add     rsp, 8
+9:  mov     rsp, rbp
+    pop     rbp
     ret
 
 # rb_atan2(xmm0=y, xmm1=x) -> xmm0 (re-entrant: x87 on the stack)
