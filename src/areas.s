@@ -844,7 +844,23 @@ draw_leaf:
     mov     esi, [r12+N_Y]
     add     esi, 4
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    push    rdx                         # (cut short before the buttons
+    mov     rdi, r12                    #  shown)
+    call    hdr_nbtn
+    pop     rdx
+    imul    eax, HDR_BTN_W
+    mov     r8d, [r12+N_W]
+    sub     r8d, eax
+    sub     r8d, 12+20
+    mov     edi, [r12+N_X]
+    add     edi, 12
+    mov     esi, [r12+N_Y]
+    add     esi, 4
+    mov     ecx, COL_TEXT_DIM
+    cmp     r8d, 16
+    jge     21f
+    mov     r8d, 16
+21: call    draw_text_fit
     lea     edi, [rax+6]                # down-arrow after the name
     mov     esi, [r12+N_Y]
     add     esi, PANE_HDR_H/2-2
