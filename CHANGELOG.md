@@ -6,6 +6,11 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-30
+
+Online model libraries: NVIDIA SimReady in the Asset Browser, on a native
+OpenUSD reader; Camera View and path-traced playback.
+
 ### Added
 - **Online model libraries** (milestone 28, #407-#414): the Asset
   Browser's sources go round the local library and online ones, starting
@@ -2517,7 +2522,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/bartbeecoders/beemodel/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/bartbeecoders/beemodel/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/bartbeecoders/beemodel/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/bartbeecoders/beemodel/compare/v1.0.0...v1.1.0
