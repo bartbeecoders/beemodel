@@ -142,6 +142,7 @@ lb_place:       .skip 16                # where to place
 lb_afr:         .skip 8                 # the action placed: its frames
 lb_last_t:      .skip 8                 # the last tile press (double clicks)
 lb_title_x1:    .skip 4                 # the header's source name ends here
+lb_hdr_x:       .skip 4                 # the header: where its next text goes
 lb_tags2:       .skip 96
 lb_search:      .skip 128               # the browser's search
 lb_kind:        .skip 4                 #  and kind (0 all, K_*)
@@ -3437,44 +3438,28 @@ ed_assets_draw:
     mov     rdx, rax
 0:  mov     edi, [rip+ed_x]
     add     edi, 8
-    mov     esi, [rip+ed_y]
-    add     esi, 4
     mov     ecx, COL_ACCENT
-    call    draw_text
+    call    lb_hdr_text
     mov     edi, eax
-    mov     esi, [rip+ed_y]
-    add     esi, 4
     lea     rdx, [rip+s_lb_srcnext]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    call    lb_hdr_text
     mov     [rip+lb_title_x1], eax
     mov     edi, eax
     add     edi, 16
-    mov     esi, [rip+ed_y]
-    add     esi, 4
     lea     rdx, [rip+s_lb_search]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    call    lb_hdr_text
     mov     edi, eax
-    mov     esi, [rip+ed_y]
-    add     esi, 4
     lea     rdx, [rip+lb_search]
     mov     ecx, COL_TEXT
     cmp     byte ptr [rip+lb_search], 0
     jne     1f
     lea     rdx, [rip+s_lb_click]
     mov     ecx, COL_TEXT_DIM
-1:  call    draw_text
-    mov     edi, eax
-    add     edi, 24
-    mov     esi, [rip+ed_y]
-    add     esi, 4
-    lea     rdx, [rip+s_lb_hint]
-    cmp     dword ptr [rip+ex_cur], 0
-    jl      0f
-    lea     rdx, [rip+s_lb_xhint]
-0:  mov     ecx, COL_TEXT_DIM
-    call    draw_text
+1:  call    lb_hdr_text
+    add     eax, 24                     # then "n more", then the hint (at
+    mov     [rip+lb_hdr_x], eax         #  the end, in the room left)
     mov     eax, [rip+ed_x]             # the grid
     add     eax, 8
     mov     [rip+lb_x0], eax
@@ -3573,24 +3558,14 @@ ed_assets_draw:
     lea     edi, [r14+8]
     lea     esi, [rbp+TH/2-8]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
-7:  lea     rdi, [r13+LR_NAME]          # its name
-    lea     rsi, [rip+lb_buf]
-    mov     ecx, 14
-71: mov     al, [rdi]
-    mov     [rsi], al
-    test    al, al
-    jz      72f
-    inc     rdi
-    inc     rsi
-    dec     ecx
-    jnz     71b
-    mov     byte ptr [rsi], 0
-72: mov     edi, r14d
+    mov     r8d, TH-16
+    call    draw_text_fit
+7:  mov     edi, r14d                   # its name, as much as fits
     lea     esi, [rbp+TH+4]
-    lea     rdx, [rip+lb_buf]
+    lea     rdx, [r13+LR_NAME]
     mov     ecx, COL_TEXT
-    call    draw_text
+    mov     r8d, TILE_W-8
+    call    draw_text_fit
     inc     r12d
 8:  inc     ebx
     jmp     5b
@@ -3604,14 +3579,12 @@ ed_assets_draw:
     call    fmt_int
     lea     rdi, [rip+s_lb_more]
     call    fmt_str
-    mov     edi, [rip+ed_x]
-    add     edi, [rip+ed_w]
-    sub     edi, 260
-    mov     esi, [rip+ed_y]
-    add     esi, 4
+    mov     edi, [rip+lb_hdr_x]
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    call    lb_hdr_text
+    add     eax, 24
+    mov     [rip+lb_hdr_x], eax
 .Lbd_info:
     mov     ebx, [rip+lb_sel]           # the selected one: kind, tags, uses,
     test    ebx, ebx                    #  used by
@@ -3762,7 +3735,8 @@ ed_assets_draw:
     lea     edi, [r14+8]
     lea     esi, [rbp+TH/2-8]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    mov     r8d, TH-16
+    call    draw_text_fit
 4:  cmp     dword ptr [r13+EX_HAVE], 2  # downloaded: a mark; coming: a bar
     jne     41f
     lea     edi, [r14+TH-12]
@@ -3790,7 +3764,7 @@ ed_assets_draw:
     mov     r8d, COL_ACCENT
     call    fill_rect
 5:  lea     rdi, [r13+EX_NAME]          # its name after the category
-    xor     ecx, ecx                    #  ("bowl_c01"), the first 12
+    xor     ecx, ecx                    #  ("bowl_c01"), as much as fits
 53: mov     al, [rdi+rcx]
     test    al, al
     jz      54f
@@ -3800,22 +3774,12 @@ ed_assets_draw:
     cmp     byte ptr [rdi+rcx], 0
     je      54f
     add     rdi, rcx
-54: lea     rsi, [rip+lb_buf]
-    mov     ecx, 12
-51: mov     al, [rdi]
-    mov     [rsi], al
-    test    al, al
-    jz      52f
-    inc     rdi
-    inc     rsi
-    dec     ecx
-    jnz     51b
-    mov     byte ptr [rsi], 0
-52: mov     edi, r14d
+54: mov     rdx, rdi
+    mov     edi, r14d
     lea     esi, [rbp+TH+4]
-    lea     rdx, [rip+lb_buf]
     mov     ecx, COL_TEXT
-    call    draw_text
+    mov     r8d, TILE_W-8
+    call    draw_text_fit
     inc     r12d
 .Lbx_next:
     inc     ebx
@@ -3831,14 +3795,12 @@ ed_assets_draw:
     call    fmt_int
     lea     rdi, [rip+s_lb_xmore]
     call    fmt_str
-    mov     edi, [rip+ed_x]
-    add     edi, [rip+ed_w]
-    sub     edi, 260
-    mov     esi, [rip+ed_y]
-    add     esi, 4
+    mov     edi, [rip+lb_hdr_x]
     lea     rdx, [rip+fmt_buf]
     mov     ecx, COL_TEXT_DIM
-    call    draw_text
+    call    lb_hdr_text
+    add     eax, 24
+    mov     [rip+lb_hdr_x], eax
 .Lbx_info:
     mov     ebx, [rip+lb_sel]           # the selected one: name, category,
     test    ebx, ebx                    #  source, licence, here or not
@@ -3887,6 +3849,13 @@ ed_assets_draw:
     mov     ecx, COL_TEXT_DIM
     call    draw_text
 .Lbd_out:
+    mov     edi, [rip+lb_hdr_x]         # the hint, in what room is left
+    lea     rdx, [rip+s_lb_hint]
+    cmp     dword ptr [rip+ex_cur], 0
+    jl      0f
+    lea     rdx, [rip+s_lb_xhint]
+0:  mov     ecx, COL_TEXT_DIM
+    call    lb_hdr_text
     add     rsp, 24
     pop     rbp
     pop     r15
@@ -3894,6 +3863,22 @@ ed_assets_draw:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# lb_hdr_text(edi=x, rdx=text, ecx=colour) -> eax = x after it: a header
+#   text, cut short ("...") at the area's right edge, left out when not even
+#   a little of it fits
+lb_hdr_text:
+    mov     r8d, [rip+ed_x]
+    add     r8d, [rip+ed_w]
+    sub     r8d, 8
+    sub     r8d, edi                    # the room
+    cmp     r8d, 24
+    jl      1f
+    mov     esi, [rip+ed_y]
+    add     esi, 4
+    jmp     draw_text_fit
+1:  mov     eax, edi
     ret
 
 # assets_wheel(edi = >0 down, <0 up) - an online source's tiles scrolled a
