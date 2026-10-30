@@ -55,16 +55,18 @@
   <div class="ticker-track">
     <span><b>●</b> path tracer on every core</span><span><b>●</b> RTX ray tracing on Vulkan</span><span><b>●</b> a GPU viewport</span><span><b>●</b> sculpting with dynamic topology</span>
     <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
-    <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
+    <span><b>●</b> STEP · glTF · USD · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
     <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
     <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
     <span><b>●</b> image to 3D</span><span><b>●</b> 3D text</span><span><b>●</b> render to video</span><span><b>●</b> Linux &amp; Windows 11</span>
+    <span><b>●</b> OpenUSD</span><span><b>●</b> NVIDIA SimReady assets</span><span><b>●</b> Camera View</span><span><b>●</b> path-traced playback</span>
     <span><b>●</b> path tracer on every core</span><span><b>●</b> RTX ray tracing on Vulkan</span><span><b>●</b> a GPU viewport</span><span><b>●</b> sculpting with dynamic topology</span>
     <span><b>●</b> node-based materials</span><span><b>●</b> geometry nodes</span><span><b>●</b> parametric CAD &amp; B-rep</span>
-    <span><b>●</b> STEP · glTF · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
+    <span><b>●</b> STEP · glTF · USD · OBJ · STL · 3MF · .blend</span><span><b>●</b> armatures &amp; IK</span><span><b>●</b> rigid bodies, cloth, shatter</span>
     <span><b>●</b> attractors &amp; force fields</span><span><b>●</b> particles &amp; liquid</span><span><b>●</b> landscapes</span><span><b>●</b> play mode &amp; logic graphs</span>
     <span><b>●</b> a billion triangles</span><span><b>●</b> AI agents over MCP</span><span><b>●</b> versions &amp; co-editing</span>
     <span><b>●</b> image to 3D</span><span><b>●</b> 3D text</span><span><b>●</b> render to video</span><span><b>●</b> Linux &amp; Windows 11</span>
+    <span><b>●</b> OpenUSD</span><span><b>●</b> NVIDIA SimReady assets</span><span><b>●</b> Camera View</span><span><b>●</b> path-traced playback</span>
   </div>
 </div>
 
@@ -96,7 +98,7 @@
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20c4-1 6-4 7-8M15 3l6 6-8 8-6-6Z"/></svg></div>
         <h3>Sculpt &amp; paint</h3><p>Draw, clay strips, crease, grab, snake hook and more, with dynamic topology, multires and pen pressure. Texture, vertex and weight painting with layers, baking AO and normal maps.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18M3 12h18"/></svg></div>
-        <h3>Materials &amp; path tracing</h3><p>Principled materials with node graphs, HDRI lighting and Hive — a physically based path tracer with a denoiser on every core, and on the GPU through Vulkan, with hardware ray tracing on RTX cards. Animations render frame after frame while the next one is built, reusing samples between frames. The viewport draws on the GPU too, so animations play back in real time in Solid, Material Preview and Rendered.</p></div>
+        <h3>Materials &amp; path tracing</h3><p>Principled materials with node graphs, HDRI lighting and Hive — a physically based path tracer with a denoiser on every core, and on the GPU through Vulkan, with hardware ray tracing on RTX cards. Animations render frame after frame while the next one is built, reusing samples between frames. The viewport draws on the GPU too, so animations play back in real time in Solid, Material Preview and Rendered — path-traced as they play. Camera View (Numpad 0) looks through the render camera, so you see the animation as it will render.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="7" height="6" rx="1.5"/><rect x="14" y="14" width="7" height="6" rx="1.5"/><path d="M10 7h3a2 2 0 0 1 2 2v5"/></svg></div>
         <h3>Geometry nodes</h3><p>Procedural trees for terrain, erosion, scattering, instancing, curves and L-systems. A million blades of grass, placed not realized.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V9l7-5 7 5v12"/><path d="M9 21v-6h6v6"/></svg></div>
@@ -124,13 +126,13 @@
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M13 6l-2 12"/></svg></div>
         <h3>BeeScript</h3><p>A small scripting language for everything: build scenes, run any operator, drive the viewport, test — from the console, files or agents.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6M9 14l2 2 4-4"/></svg></div>
-        <h3>Files in, files out</h3><p>Its own .bee format, plus OBJ, STL, glTF/GLB, STEP, 3MF, DXF, SVG, PDF drawings and Blender .blend import and export. Point it at a folder of building drawings or PDFs and it sets them up around the building at their true scale.</p></div>
+        <h3>Files in, files out</h3><p>Its own .bee format, plus OBJ, STL, glTF/GLB, STEP, 3MF, DXF, SVG, PDF drawings, Blender .blend and OpenUSD (binary and text, read natively) import and export. Point it at a folder of building drawings or PDFs and it sets them up around the building at their true scale.</p></div>
+      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M7 18a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.5 1.5A3.75 3.75 0 0 1 17.5 18Z"/><path d="M12 10v6m0 0-2.5-2.5M12 16l2.5-2.5" stroke-linecap="round"/></svg></div>
+        <h3>Online asset libraries</h3><p>The Asset Browser browses NVIDIA SimReady — 2 673 free, physically accurate assets — next to your own library. Double-click or drag one in: it downloads in the background and arrives with its textured materials, masses, colliders and joints.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h10v2M9 5v12M7 17h4"/><rect x="14" y="11" width="8" height="8" rx="1.5"/><path d="m17 13.5 3 1.5-3 1.5Z"/></svg></div>
         <h3>3D text &amp; video</h3><p>Titles and labels from any TrueType font, bevelled and animated letter by letter. Render the animation straight to MP4, WebM, GIF or an animated PNG.</p></div>
       <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg></div>
-        <h3>Fast &amp; frugal</h3><p>Event driven: 0% CPU when idle, a few MB of memory, a multithreaded software rasterizer, SIMD everywhere — and it starts in a blink.</p></div>
-      <div class="feature reveal"><div class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></div>
-        <h3>Linux &amp; Windows 11</h3><p>The same program from the same sources: a static binary for any Linux distribution and a beemodel.exe that needs only Windows' own DLLs. Scenes, scripts, MCP and co-editing work across both.</p></div>
+        <h3>Fast, frugal, Linux &amp; Windows</h3><p>Event driven: 0% CPU when idle, a few MB of memory, SIMD everywhere — and it starts in a blink. The same program from the same sources: a static binary for any Linux distribution and a beemodel.exe that needs only Windows' own DLLs.</p></div>
     </div>
   </div>
 </section>
@@ -146,7 +148,7 @@
     <div class="tour-tabs" role="tablist">
       <button role="tab">Modeling</button><button role="tab">Materials</button><button role="tab">Sculpting</button>
       <button role="tab">CAD</button><button role="tab">Animation</button><button role="tab">Physics</button>
-      <button role="tab">Force fields</button><button role="tab">Particles</button><button role="tab">Landscapes</button><button role="tab">Procedural</button><button role="tab">Image to 3D</button>
+      <button role="tab">Force fields</button><button role="tab">Particles</button><button role="tab">Landscapes</button><button role="tab">Procedural</button><button role="tab">Image to 3D</button><button role="tab">Online assets</button>
     </div>
 
     <div class="tour-pane"><div class="spot">
@@ -258,6 +260,16 @@
       </div>
       <div class="spot-media" data-full="assets/img/hi3d.webp" data-caption="A render in, a mesh out: Image to 3D"><img loading="lazy" src="assets/img/hi3d-sm.webp" alt="A rendered picture of a horned head as a reference image, next to the mesh generated from it" width="800" height="500"></div>
     </div></div>
+
+    <div class="tour-pane" hidden><div class="spot">
+      <div class="spot-text">
+        <h3>A factory from the shelf</h3>
+        <p>Asset Browser › NVIDIA SimReady: 2 673 assets on Hugging Face, from pallets and racks to robot arms and car bodies. This car assembly hall is 2 163 of them — about 24 million faces — placed by one BeeScript and path-traced on the GPU with RTX.</p>
+        <ul><li>OpenUSD read natively: crate and text layers, references, variants, instancing</li><li>UsdPreviewSurface materials and UsdPhysics bodies and joints come along</li><li>Downloads only what an import needs, cached for next time</li></ul>
+        <div class="spot-tag">Vibecoding/demos/auto-factory.bees · assets CC-BY 4.0 NVIDIA</div>
+      </div>
+      <div class="spot-media" data-full="assets/img/factory.webp" data-caption="A car assembly hall of NVIDIA SimReady assets, path-traced"><img loading="lazy" src="assets/img/factory-sm.webp" alt="A path-traced factory hall with car bodies on an assembly line, robot arms, yellow safety fences, racks and engines" width="800" height="450"></div>
+    </div></div>
   </div>
 </section>
 
@@ -335,6 +347,7 @@
           <tr><th scope="row">Path tracing</th><td class="bee"><i class="y"></i>Hive: CPU, Vulkan, RTX</td><td><i class="y"></i>Cycles</td><td><i class="y"></i>Path Tracer, Lumen</td><td><i class="n"></i>Real-time only</td></tr>
           <tr><th scope="row">Physics &amp; liquids</th><td class="bee"><i class="y"></i>Rigid, cloth, shatter, GPU liquids</td><td><i class="y"></i>Rigid, cloth, Mantaflow</td><td><i class="y"></i>Chaos, Niagara fluids</td><td><i class="p"></i>Rigid &amp; soft bodies</td></tr>
           <tr><th scope="row">Make a game</th><td class="bee"><i class="p"></i>Play mode &amp; logic graphs</td><td><i class="n"></i>No game engine</td><td><i class="y"></i>AAA engine</td><td><i class="y"></i>Full engine</td></tr>
+          <tr><th scope="row">OpenUSD &amp; asset libraries</th><td class="bee"><i class="y"></i>USD import, NVIDIA SimReady in the Asset Browser</td><td><i class="y"></i>USD import &amp; export, asset libraries</td><td><i class="y"></i>USD stages, Fab</td><td><i class="p"></i>Asset Library; USD through plugins</td></tr>
           <tr><th scope="row">Scripting</th><td class="bee"><i class="y"></i>BeeScript</td><td><i class="y"></i>Python</td><td><i class="y"></i>Blueprints, C++, Python</td><td><i class="y"></i>GDScript, C#, C++</td></tr>
           <tr><th scope="row">AI agents</th><td class="bee"><i class="y"></i>Assistant &amp; MCP server built in, image to 3D</td><td><i class="p"></i>MCP add-on</td><td><i class="p"></i>MCP plugins</td><td><i class="p"></i>MCP plugins</td></tr>
           <tr><th scope="row">Add-ons &amp; community</th><td class="bee"><i class="n"></i>Just getting started</td><td><i class="y"></i>Huge</td><td><i class="y"></i>Huge, plus Fab</td><td><i class="y"></i>Large</td></tr>

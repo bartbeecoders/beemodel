@@ -41,6 +41,7 @@ IMAGES = {
     'cad': 'shots/cad.png', 'animation': 'shots/animation.png', 'physics': 'shots/physics.png',
     'fields': 'shots/fields.png', 'landscape': 'shots/landscape.png', 'procedural': 'shots/procedural.png',
     'sculpt': 'shots/sculpt.png', 'particles': 'renders/particles.png', 'hi3d': 'shots/hi3d.png',
+    'factory': 'renders/factory.png',
 }
 VIDEOS = {
     'wrecking-ball': os.path.join(ROOT, 'Vibecoding', 'demos', 'out', 'wrecking-ball.mp4'),
