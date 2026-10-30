@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#0d0f13">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="alternate" type="application/atom+xml" title="BeeModel releases" href="releases.xml">
-<link rel="stylesheet" href="assets/css/site.css?v=202610272306">
+<link rel="stylesheet" href="assets/css/site.css?v=202610301007">
 </head>
 <body>
 <header class="site-header">
@@ -34,7 +34,7 @@
   <div class="wrap">
     <span class="eyebrow">Changelog</span>
     <h2 style="font-size:clamp(2.2rem,4.5vw,3.4rem)">Releases</h2>
-    <p class="lead">29 releases since 12 October 2026. Each one is a static Linux binary on GitHub,
+    <p class="lead">30 releases since 12 October 2026. Each one is a static Linux binary on GitHub,
       built and tested by CI, with checksums — free to download and use under the MIT license.</p>
     <div class="rel-filter" style="margin-top:20px">
       <input id="rel-filter" type="search" placeholder="Search the release notes…  (e.g. shatter, STEP, sculpt)" aria-label="Search the release notes">
@@ -45,12 +45,20 @@
 </section>
 <section class="tight" style="padding-bottom:80px">
   <div class="wrap timeline">
-    <article class="release latest" id="v1.2.1">
+    <article class="release latest" id="v1.3.0">
       <div class="rel-card">
-        <div class="rel-head"><h3><span class="rel-ver">v1.2.1</span></h3><span class="rel-pill">LATEST</span><span class="rel-date">27 October 2026</span>
+        <div class="rel-head"><h3><span class="rel-ver">v1.3.0</span></h3><span class="rel-pill">LATEST</span><span class="rel-date">30 October 2026</span>
+          <div class="rel-links"><a href="https://github.com/bartbeecoders/beemodel/releases/download/v1.3.0/beemodel-1.3.0-linux-x86_64.bin">Download · 1.6 MB</a><a href="https://github.com/bartbeecoders/beemodel/releases/tag/v1.3.0">Release page</a><a href="https://github.com/bartbeecoders/beemodel/tree/v1.3.0">Source</a></div></div>
+        <div class="rel-sum">Online model libraries: NVIDIA SimReady in the Asset Browser, on a native OpenUSD reader; Camera View and path-traced playback.</div>
+        <details open><summary>Everything in this release</summary><div class="rel-body"><h4>Added</h4><ul><li><b>Online model libraries</b> (milestone 28, #407-#414): the Asset Browser's sources go round the local library and online ones, starting with NVIDIA SimReady (2673 CC-BY 4.0 assets on Hugging Face). Its catalog and thumbnails load in the background; a double-click or a drag downloads an asset (only what an import needs, cached under ~/BeeModel/cache) and places it with its textured materials, masses, colliders and joints, saved into the local library too. <code>lib.sources</code>, <code>lib.source</code>, <code>lib.refresh</code>, <code>lib.get</code>, <code>lib.stop</code>; ~/BeeModel/sources.txt adds datasets in SimReady's layout (<a href="https://github.com/bartbeecoders/beemodel/blob/main/docs/LIBRARIES.md">docs/LIBRARIES.md</a>).</li><li><b>Auto factory demo</b> (<code>Vibecoding/demos/auto-factory.bees</code>): a car assembly hall of NVIDIA SimReady assets. <code>lib.get ... static nosave</code> places assets without physics or a library copy; USD textures are kept at most <code>file.usd_texture_size</code> a side (1024; shrunk once, cached); BeeScript's <code>get</code> / <code>set</code> read and add to the selection (<code>select</code>).</li><li><b>OpenUSD import</b> (File &gt; Import &gt; USD, <code>file.import_usd</code>): binary and text layers read natively, stages composed (sublayers, references, payloads, variants, instancing), meshes, UsdPreviewSurface materials and UsdPhysics bodies and joints. Checked against OpenUSD itself (<a href="https://github.com/bartbeecoders/beemodel/blob/main/docs/USD.md">docs/USD.md</a>).</li><li><b>Path-traced playback in Rendered shading.</b> While the animation plays, each new frame's scene goes up at once and is path-traced on the GPU, Preferences › Viewport › Rendered playback samples of it (4; <code>view.rendered_playback &lt;0..64&gt;</code>), denoised, instead of the raycast; a frame shown again gets more. Light scenes play every frame in real time (the wrecking ball at 74 window frames a second at 1920 x 1080 on an RTX 4080 SUPER). 0 keeps the raycast.</li><li><b>Camera View</b> (Numpad 0, View › Camera View, the camera button under the navigation gizmo, <code>view.camera [0|1]</code>): the viewport looks through the camera that renders - its lens and roll - and follows it while the animation plays, so an animation is seen as it will render; with Rendered shading, path-traced as it plays. The render's frame is fitted into the viewport and the rest dimmed. Orbiting, panning, zooming or a view change leaves it from where the camera is.</li><li><b>The Wave node on the GPU</b> (<code>graph.glsl</code>), so the wood preset's scenes trace there, in renders and in Rendered shading, instead of on the CPU.</li><li><b>Chess cascade demo</b> (<code>Vibecoding/demos/chess-cascade.bees</code>): SDF chess pieces, dominoes, a bowling ball and a glass pawn that shatters.</li></ul><h4>Fixed</h4><ul><li><b>Duplicates lost their material</b> (and folder): Shift+D copies looked plain grey.</li><li><b>Image limits</b>: a scene held 256 images (now 2048) with paths of up to 215 characters (now ~980: an online asset's are long), the GPU saw 64 (now 1024) - beyond them textures came out black or wrong.</li><li><b>A crash in the joint solver</b> with big jointed islands (stage jobs entered <code>jr_prestep</code> with the stack 8 bytes off 16).</li><li><b>Library thumbnails</b> that are not square were sampled past their rows, and one that failed to load marked the wrong asset.</li><li><b>A crash when a body broke on impact</b> while the animation played, was scrubbed or was stepped through MCP: <code>an_apply</code> and MCP's <code>handle_message</code> called on with the stack 8 bytes off 16, and the solver keeps vectors on the stack. <code>an_apply</code> now aligns its own.</li></ul></div></details>
+      </div>
+    </article>
+    <article class="release" id="v1.2.1">
+      <div class="rel-card">
+        <div class="rel-head"><h3><span class="rel-ver">v1.2.1</span></h3><span class="rel-date">27 October 2026</span>
           <div class="rel-links"><a href="https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/beemodel-1.2.1-linux-x86_64.bin">Download · 1.5 MB</a><a href="https://github.com/bartbeecoders/beemodel/releases/tag/v1.2.1">Release page</a><a href="https://github.com/bartbeecoders/beemodel/tree/v1.2.1">Source</a></div></div>
         <div class="rel-sum">Image to 3D: a mesh from a photo, through the optional Hi3D addon.</div>
-        <details open><summary>Everything in this release</summary><div class="rel-body"><h4>Added</h4><ul><li><b>Image to 3D (the Hi3D addon).</b> AI › Model from Image (Hi3D)... (<code>object.from_image &lt;image&gt; [512 | 1024 | 1536]</code>) makes a mesh from a photo, and Object › Refine from Image (Hi3D)... (<code>object.refine_from_image</code>) carves a photo's detail into the active mesh. <code>src/hi3d.s</code> runs the addon's helper in the background: a status bar chip shows how far it is and stops it (<code>object.from_image_stop</code>), and the mesh comes in as one undo step. The helper (<code>addons/hi3d/</code>, <code>install.sh</code>) runs TripoSR for the rough shape and Hi3D v1.0 for the detail on an NVIDIA GPU. Powered by Hi3D 1.0. See docs/HI3D.md. <code>tests/hi3d.py</code> tests it with a stand-in helper.</li></ul></div></details>
+        <details><summary>Everything in this release</summary><div class="rel-body"><h4>Added</h4><ul><li><b>Image to 3D (the Hi3D addon).</b> AI › Model from Image (Hi3D)... (<code>object.from_image &lt;image&gt; [512 | 1024 | 1536]</code>) makes a mesh from a photo, and Object › Refine from Image (Hi3D)... (<code>object.refine_from_image</code>) carves a photo's detail into the active mesh. <code>src/hi3d.s</code> runs the addon's helper in the background: a status bar chip shows how far it is and stops it (<code>object.from_image_stop</code>), and the mesh comes in as one undo step. The helper (<code>addons/hi3d/</code>, <code>install.sh</code>) runs TripoSR for the rough shape and Hi3D v1.0 for the detail on an NVIDIA GPU. Powered by Hi3D 1.0. See docs/HI3D.md. <code>tests/hi3d.py</code> tests it with a stand-in helper.</li></ul></div></details>
       </div>
     </article>
     <article class="release" id="v1.2.0">
@@ -294,6 +302,6 @@
   </div>
 </footer>
 
-<script src="assets/js/site.js?v=202610272306" defer></script>
+<script src="assets/js/site.js?v=202610301007" defer></script>
 </body>
 </html>
