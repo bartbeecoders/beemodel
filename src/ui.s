@@ -1029,7 +1029,17 @@ ui_button:
     je      .Lbt_done
     cmp     ebx, HIT_DROPDOWN
     je      .Lbt_done
-    cmp     ebx, HIT_MENU_TITLE
+    cmp     ebx, HIT_AREA_TYPE          # another area's editor type: its
+    jne     3f                          #  menu instead (its own: closes)
+    cmp     eax, MENU_AREA
+    jne     4f
+    cmp     r12d, [rip+active_area]
+    je      1f
+4:  mov     [rip+active_area], r12d
+    mov     dword ptr [rip+menu_open], MENU_AREA
+    mov     dword ptr [rip+dirty], 1
+    jmp     .Lbt_done
+3:  cmp     ebx, HIT_MENU_TITLE
     jne     1f
     cmp     eax, r12d
     jne     2f

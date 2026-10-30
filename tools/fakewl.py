@@ -5996,7 +5996,12 @@ def areas_and_palette():
     f.shot('18_maximized_area.png')
     f.mods(4); f.key(57); f.mods(0)
     check(px(f, 4, 300) == PANE, 'Ctrl+Space again restores the layout')
-    f.click(680, 68)                     # right viewport: editor type menu
+    shut = px(f, 260, 140)
+    f.click(240, 68)                     # left viewport: editor type menu
+    opened = px(f, 260, 140) != shut
+    f.click(680, 68)                     # right viewport's: that one instead
+    check(opened and px(f, 260, 140) == shut and px(f, 700, 140) != px(f, 260, 140),
+          'with one editor type menu open, another area\'s opens in its place (#417)')
     f.shot('19_editor_type_menu.png')
     f.click(700, 140)                    # third entry: Outliner
     f.shot('20_viewport_became_outliner.png')
