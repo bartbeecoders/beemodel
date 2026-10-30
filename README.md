@@ -27,12 +27,12 @@ every later version, and BeeScript and the MCP tools change only by adding
 Prebuilt static binaries are attached to each [GitHub release](https://github.com/bartbeecoders/beemodel/releases):
 
 ```
-curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/beemodel-1.2.1-linux-x86_64.bin
-chmod +x beemodel-1.2.1-linux-x86_64.bin && ./beemodel-1.2.1-linux-x86_64.bin
+curl -LO https://github.com/bartbeecoders/beemodel/releases/download/v1.3.0/beemodel-1.3.0-linux-x86_64.bin
+chmod +x beemodel-1.3.0-linux-x86_64.bin && ./beemodel-1.3.0-linux-x86_64.bin
 ```
 
 On Windows 11, download
-[beemodel-1.2.1-windows-x86_64.zip](https://github.com/bartbeecoders/beemodel/releases/download/v1.2.1/beemodel-1.2.1-windows-x86_64.zip),
+[beemodel-1.3.0-windows-x86_64.zip](https://github.com/bartbeecoders/beemodel/releases/download/v1.3.0/beemodel-1.3.0-windows-x86_64.zip),
 unpack it and start `beemodel.exe` ([docs/WINDOWS.md](docs/WINDOWS.md)).
 
 ## What's in the shell
