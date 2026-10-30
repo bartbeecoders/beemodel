@@ -652,10 +652,10 @@ def prewarm():
     shader graphs' kernel), so a render a few seconds later finds it ready."""
     f, m, q = fake(BEEMODEL_GPU='any')
     try:
-        f.pump(6.0)
+        f.pump(10.0)                                    # a cold start on llvmpipe: ~6 s
         r = q('t = clock()\nr = gpu(0)\nprint("ready", r, clock() - t)').split()
         ok = len(r) == 3 and r[1] == '1' and float(r[2]) < 100
-        check(ok, f'the window starts the helper meanwhile: ready {r[2:] if len(r) == 3 else r} ms after 6 s '
+        check(ok, f'the window starts the helper meanwhile: ready {r[2:] if len(r) == 3 else r} ms after 10 s '
                   f'(a cold start takes seconds)')
     finally:
         f.proc.kill()
