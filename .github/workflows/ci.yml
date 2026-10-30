@@ -148,7 +148,7 @@ jobs:
       - name: OpenUSD files (crate and text layers against a reference reader)
         run: timeout 300 python tests/usd.py build/beemodel
 
-      - name: Online libraries (a stand-in Hugging Face: catalog, downloads, placing)
+      - name: Online libraries (a stand-in Hugging Face, catalog, downloads, placing)
         run: timeout 300 python tests/extlib.py build/beemodel
 
       - name: Live link (the scene over a socket, a mirror, backpressure)
