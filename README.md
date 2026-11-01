@@ -1127,8 +1127,12 @@ operator spine and how to add an action.
   `ci/…`) and is merged through a pull request once CI is green.
 * CI (`.github/workflows/ci.yml`) runs on every PR and push to `main`. It builds
   release and debug binaries, runs `ci/check-binary.sh` (static, no shared
-  libraries, no RWX segments, size budget of 1.5 MiB) and runs the headless UI test.
-  Screenshots are uploaded as a workflow artifact.
+  libraries, no RWX segments, size budget of 1.5 MiB) and runs the tests. The slow
+  ones run as jobs of their own, side by side: the GPU helper on llvmpipe in two
+  halves (`tests/gpu.py --part=render|window`) and the headless UI test with each
+  font. "Build & headless test", the check `main` requires, passes when all of them
+  do; a run takes about 20 minutes instead of 70. Screenshots are uploaded as
+  workflow artifacts.
 * **Releasing:** bump `VERSION`, move the `[Unreleased]` notes in `CHANGELOG.md`
   into a new version section, and merge via a PR. Then tag:
   `git tag -a v0.2.0 -m "BeeModel 0.2.0" && git push origin v0.2.0`.

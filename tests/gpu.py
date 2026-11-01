@@ -39,12 +39,17 @@ to the CPU paths and the same images.
 With no usable Vulkan device the GPU checks are skipped (--require fails
 instead: CI runs it on llvmpipe with BEEMODEL_GPU=any).
 
-    python3 tests/gpu.py build/beemodel [shots dir] [--require]
+    python3 tests/gpu.py build/beemodel [shots dir] [--require] [--part=render|window]
+
+--part=render runs the renders only, --part=window the windows (Rendered
+shading, the GPU viewport, the helper started early): CI runs the two side
+by side.
 """
 import os, subprocess, sys, tempfile, time
 
 ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
 REQUIRE = '--require' in sys.argv
+PART = next((a[7:] for a in sys.argv if a.startswith('--part=')), 'all')
 BIN = os.path.abspath(ARGS[0] if ARGS else 'build/beemodel')
 OUT = ARGS[1] if len(ARGS) > 1 else None
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -210,6 +215,8 @@ def render(name, scene, spp, denoise=0, **env):
 
 
 def main():
+    if PART == 'window':
+        return windows()
     print('  -- GPU helper --')
     # ---- fallbacks ---------------------------------------------------------------
     cpu, g = render('none', '', 16, BEEMODEL_GPU_HELPER='/nonexistent/beemodel-gpu', BEEMODEL_GPU='any')
@@ -622,6 +629,12 @@ def main():
               f'frame ({diff} pixels differ)')
     else:
         check(False, 'the window frames')
+    if PART == 'render':
+        return finish()
+    return windows()
+
+
+def windows():
     live_view()
     gpu_viewport()
     prewarm()
