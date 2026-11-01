@@ -10,6 +10,9 @@
   and playing the animation keeps changing the picture.
 - Leaving it (view.camera 0) gives an orbit view looking the camera's way
   from where it is; a view change (Front View) leaves it too.
+- Camera to View (#427), picked from the viewport's right-click wheel:
+  the camera goes where the view looks from, pointing where it looks, and
+  the viewport looks through it; with no camera, one is added.
 
     python3 tests/camview.py build/beemodel
 """
@@ -167,6 +170,43 @@ op("anim.frame", "1")''')
         y = q('print(viewinfo(0))')
         check(not dimmed(f.image()) and y.split()[-1:] == ['0'],
               'Front View leaves Camera View (yaw %s)' % y)
+
+        print('-- Camera to View (#427) --')
+        yaw, pitch, dist, t = 130.0, 35.0, 9.0, (1.0, 0.5, -2.0)
+        q('view(%g, %g, %g, %g, %g, %g)' % (yaw, pitch, dist, *t))
+        f.pump(0.5)
+        check(not dimmed(f.image()), 'a free view first (nothing dimmed)')
+        f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
+        ent = [w for w in fakewl.ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == 'Camera to View']
+        if ent:
+            f.click(ent[0]['x'] + ent[0]['w'] // 2, ent[0]['y'] + ent[0]['h'] // 2)
+        f.pump(1.0)
+        y, p = math.radians(yaw), math.radians(pitch)
+        fwd = (-math.cos(p) * math.sin(y), -math.sin(p), -math.cos(p) * math.cos(y))
+        eye = [t[i] - fwd[i] * dist for i in range(3)]
+
+        def placed(name):
+            v = q('print(get("%s", "x"), get("%s", "y"), get("%s", "z"), get("%s", "rx"), get("%s", "ry"), '
+                  'get("%s", "rz"))' % ((name,) * 6)).split()
+            try:
+                x, yy, z, rx, ry, rz = map(float, v[-6:])
+            except ValueError:
+                return 1e9, 1e9
+            cx, sx, cy, sy, cz, sz = (math.cos(rx), math.sin(rx), math.cos(ry), math.sin(ry), math.cos(rz),
+                                      math.sin(rz))
+            back = (cz * sy * cx + sz * sx, sz * sy * cx - cz * sx, cy * cx)    # R = Rz Ry Rx: its Z column
+            return (max(abs(a - b) for a, b in zip((x, yy, z), eye)),
+                    max(abs(-a - b) for a, b in zip(back, fwd)))
+        dp, df = placed('Cam')
+        check(ent and dp < 1e-3 and df < 1e-4,
+              'the wheel\'s Camera to View: the camera where the view looks from (off by %.2g m), '
+              'pointing where it looks (%.2g)' % (dp, df))
+        check(dimmed(f.image()) and q('print(viewinfo(0))') != '', 'and the viewport looks through it')
+        q('n = count()\nfor i in 0..n { delete(name(0)) }\nview(%g, %g, %g, %g, %g, %g)' % (yaw, pitch, dist, *t))
+        r = q('op("view.camera_to_view")\nprint(count(), name(0))')
+        dp, df = placed('Camera')
+        check(r.split()[-2:] == ['1', 'Camera'] and dp < 1e-3 and df < 1e-4,
+              'with no camera, view.camera_to_view adds one there (%s)' % r.split()[-2:])
         check(f.proc.poll() is None, 'BeeModel still runs')
     finally:
         f.proc.kill()

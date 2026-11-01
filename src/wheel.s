@@ -138,6 +138,7 @@ s_inset:        .asciz "Inset"
 s_objmode:      .asciz "Object"
 s_editmode:     .asciz "Edit"
 s_ask:          .asciz "Ask AI"
+s_setcam:       .asciz "Camera"
 s_hide:         .asciz "Hide"
 s_reveal:       .asciz "Reveal"
 s_union:        .asciz "Union"
@@ -176,6 +177,7 @@ wheel_object:
     WE wg_bool,         0,          ICON_BOOL_UNION, 0x6366f1
     WE op_repair,       s_repair,   ICON_REPAIR,     0x22a55b
     WE op_obj_measure,  s_measure,  ICON_WEIGHT,     0x0ea5e9
+    WE op_cam_to_view,  s_setcam,   ICON_CAMERA,     0xec4899
 .equ wheel_object_n, (. - wheel_object) / WE_SZ
 wheel_edit:
     WE op_ai_ask,       s_ask,      ICON_SPARKLE,    0x8b5cf6

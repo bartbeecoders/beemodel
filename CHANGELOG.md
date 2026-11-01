@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Camera to View** (#427): the right-click wheel's Camera entry, View ›
+  Camera to View or Ctrl+Alt+Numpad 0 (`view.camera_to_view`) moves the
+  camera that renders to where the viewport looks from, pointing where it
+  looks, and looks through it. A scene without a camera gets one.
+
 ## [1.3.1] - 2026-11-01
 
 Blender files come in more whole: collection instances (trees and props
