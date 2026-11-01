@@ -33,6 +33,9 @@ cv_pmax:    .float 1.55                 # (viewport.s's pitch range)
 cv_pmin:    .float -1.55
 s_cv_label: .asciz "Camera  |  "
 s_cv_none:  .asciz "  view.camera: the scene has no camera (Add > Camera)"
+s_ctv_none: .asciz "  view.camera_to_view: no 3D viewport"
+s_ctv_done: .asciz "  camera placed at the view: "
+s_ctv_name: .asciz "Camera"
 
 .section .bss
 .align 8
@@ -387,22 +390,9 @@ cv_label:
 OPERATOR op_view_camera, "view.camera", "Camera View", do_cam_view, check=chk_cam_view, key=82, flags=OPF_AI_SAFE|OPF_QUIET, doc="Look through the scene's camera (the one that renders) in the viewport, following it while the animation plays; orbit, pan or zoom to leave (Numpad 0): view.camera [0|1] (none: switched)"
 do_cam_view:
     push    rbx
-    mov     edi, [rip+ptr_x]            # the area under the pointer, if it is a
-    mov     esi, [rip+ptr_y]            #  3D viewport
-    call    area_hit
-    mov     ebx, [rip+hit_area]
-    test    ebx, ebx
-    js      0f
-    mov     edi, ebx
-    call    area_editor
-    cmp     eax, ED_VIEWPORT
-    jne     0f
-    mov     [rip+vp_area], ebx
-0:
-    mov     edi, [rip+vp_area]
-    test    edi, edi
+    call    cv_area
+    test    eax, eax
     js      9f
-    call    cam_load
     mov     ebx, [rip+cam_view]         # none: the other way
     xor     ebx, 1
     mov     rsi, [rip+op_arg]
@@ -430,6 +420,121 @@ do_cam_view:
     call    cam_store
     mov     dword ptr [rip+dirty], 1
 9:  pop     rbx
+    ret
+
+# cv_area -> eax = the viewport to work on, loaded (cam_load): the area under
+#   the pointer when it is a 3D viewport, else the last one used (-1: none)
+cv_area:
+    push    rbx
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    area_hit
+    mov     ebx, [rip+hit_area]
+    test    ebx, ebx
+    js      1f
+    mov     edi, ebx
+    call    area_editor
+    cmp     eax, ED_VIEWPORT
+    jne     1f
+    mov     [rip+vp_area], ebx
+1:  mov     ebx, [rip+vp_area]
+    test    ebx, ebx
+    js      9f
+    mov     edi, ebx
+    call    cam_load
+9:  mov     eax, ebx
+    pop     rbx
+    ret
+
+# view.camera_to_view - the scene's camera (one is added when there is none)
+#   put where the viewport looks from, turned as it looks (its roll level,
+#   as the view's); that viewport then looks through it. The lens is kept
+OPERATOR op_cam_to_view, "view.camera_to_view", "Camera to View", do_cam_to_view, key=82|KM_CTRL|KM_ALT, flags=OPF_AI_SAFE|OPF_UNDO, doc="Put the scene's camera (one is added when there is none) where the 3D viewport looks from, pointing where it looks, and look through it (Ctrl+Alt+Numpad 0)"
+do_cam_to_view:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    push    r12
+    and     rsp, -16
+    sub     rsp, 144
+    call    cv_area
+    test    eax, eax
+    jns     1f
+    lea     rdi, [rip+s_ctv_none]
+    call    log_line
+    jmp     9f
+1:  mov     dword ptr [rip+cam_view], 0 # (Camera View: its own view again)
+    call    cam_setup                   # the view's eye and axes
+    cmp     dword ptr [rip+cam_ortho], 0  # (orthographic: the eye at the
+    je      2f                          #  orbit's distance, not far away)
+    xor     ecx, ecx
+    lea     rdx, [rip+cam_tx]
+11: lea     rax, [rip+fwd]
+    movss   xmm0, [rax+rcx*4]
+    mulss   xmm0, [rip+cam_dist]
+    movss   xmm1, [rdx+rcx*4]
+    subss   xmm1, xmm0
+    lea     rax, [rip+eye]
+    movss   [rax+rcx*4], xmm1
+    inc     ecx
+    cmp     ecx, 3
+    jb      11b
+2:  call    lc_camera
+    test    rax, rax
+    jnz     3f
+    call    prim_camera                 # none: one is added
+    mov     rdx, rax
+    mov     edi, OT_CAMERA
+    lea     rsi, [rip+s_ctv_name]
+    call    obj_new
+    test    eax, eax
+    jz      9f
+    call    lc_camera
+    test    rax, rax
+    jz      9f
+3:  mov     rbx, rax
+    # its matrix (doubles, row-major): columns right, up, -forward, the eye
+    xor     ecx, ecx
+4:  imul    edx, ecx, 32
+    lea     rax, [rip+right]
+    cvtss2sd xmm0, [rax+rcx*4]
+    movsd   [rsp+rdx], xmm0
+    lea     rax, [rip+up]
+    cvtss2sd xmm0, [rax+rcx*4]
+    movsd   [rsp+rdx+8], xmm0
+    lea     rax, [rip+fwd]
+    movss   xmm1, [rax+rcx*4]
+    xorps   xmm1, [rip+cv_sign]
+    cvtss2sd xmm0, xmm1
+    movsd   [rsp+rdx+16], xmm0
+    lea     rax, [rip+eye]
+    cvtss2sd xmm0, [rax+rcx*4]
+    movsd   [rsp+rdx+24], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      4b
+    xorps   xmm0, xmm0
+    movsd   [rsp+96], xmm0
+    movsd   [rsp+104], xmm0
+    movsd   [rsp+112], xmm0
+    cvtss2sd xmm0, [rip+cv_one]
+    movsd   [rsp+120], xmm0
+    mov     rdi, rbx
+    lea     rsi, [rsp]
+    call    bl_place
+    mov     dword ptr [rip+cam_view], 1 # and through it
+    mov     edi, [rip+vp_area]
+    call    cam_store
+    mov     dword ptr [rip+dirty], 1
+    cmp     dword ptr [rip+op_quiet], 0
+    jne     9f
+    lea     rdi, [rip+s_ctv_done]
+    lea     rsi, [rbx+OB_NAME]
+    call    log_pair
+9:  lea     rsp, [rbp-16]
+    pop     r12
+    pop     rbx
+    pop     rbp
     ret
 
 chk_cam_view:

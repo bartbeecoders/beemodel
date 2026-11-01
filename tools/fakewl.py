@@ -6404,7 +6404,7 @@ def wheel_ui():
     before = f.image().crop(box)
     f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
     ring = items(0)
-    check(len(ring) == 8 and all(w.get('wheel') == 1 for w in ring) and ring[0]['label'] == 'Ask AI...',
+    check(len(ring) == 9 and all(w.get('wheel') == 1 for w in ring) and ring[0]['label'] == 'Ask AI...',
           f'right-click in the viewport opens the wheel ({[w["label"] for w in ring]})')
     xs = sorted(at(w)[0] for w in ring)
     check(xs[-1] - xs[0] > 150, f'its entries go round the pointer ({xs[0]}..{xs[-1]})')
@@ -6435,7 +6435,7 @@ def wheel_ui():
     f.key(1); f.pump(0.2)                      # (the duplicate's grab)
     f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
     f.mods(1); f.pump(0.1)
-    check(len(items()) == 8, 'Shift leaves it open')
+    check(len(items()) == 9, 'Shift leaves it open')
     f.mods(0); f.key(17); f.pump(0.2)          # W
     check(not items(), 'another key closes it')
     q('select("Cube")')

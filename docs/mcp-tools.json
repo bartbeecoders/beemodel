@@ -1476,6 +1476,19 @@
    }
   },
   {
+   "name": "op_view_camera_to_view",
+   "description": "Camera to View - Put the scene's camera (one is added when there is none) where the 3D viewport looks from, pointing where it looks, and look through it (Ctrl+Alt+Numpad 0)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_cloth_add",
    "description": "Add Cloth - Make the selected objects cloth, soft bodies or colliders (or change them): cloth.add [cloth|soft|collider] [stretch c] [bend c] [volume c] [mass m] [damping d] [thickness t] [friction f] [self] (c: compliance, m/N; 0 stiff)",
    "inputSchema": {
