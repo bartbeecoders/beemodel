@@ -25,6 +25,10 @@ project uses [Semantic Versioning](https://semver.org/).
   Value; a node group passes its input through) become the material's node
   graph, instead of the BSDF's flat colour. Trees and plants coloured by
   gradients through colour ramps now look as in Blender (`src/blendmat.s`).
+- **The GPU path tracer evaluates Position, Normal, Voronoi and
+  Hue/Saturation nodes** (`src/gpu/graph.glsl`), the CPU's results to the
+  pixel. A graph with one of them used to lose its graph in Rendered
+  shading (flat values) and send final renders to the CPU.
 
 ### Fixed
 - **.blend import: fog volumes** (a mesh with a volume-only material) are
