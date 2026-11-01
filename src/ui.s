@@ -91,6 +91,7 @@ drop_w:         .skip 4
 drop_h:         .skip 4
 
 .section .rodata
+wh_mod_keys:    .byte 29, 42, 54, 56, 97, 100, 125, 126, 0    # (they leave the wheel open)
 s_app_title:    .asciz "BeeModel"
 s_app_id:       .asciz "beemodel"
 s_title_sub:    .asciz "  -  "
@@ -339,7 +340,15 @@ hit_test:
     mov     eax, HIT_DIALOG
     xor     edx, edx
     jmp     .Lht_ret
-2:  cmp     dword ptr [rip+pie_on], 0   # a pie menu takes the pointer
+2:  cmp     dword ptr [rip+wh_on], 0    # the wheel menu takes the pointer
+    je      21f
+    mov     edi, ebx
+    mov     esi, r12d
+    call    wh_hit
+    mov     edx, eax
+    mov     eax, HIT_WHEEL
+    jmp     .Lht_ret
+21: cmp     dword ptr [rip+pie_on], 0   # a pie menu takes the pointer
     je      1f
     mov     edi, ebx
     mov     esi, r12d
@@ -775,7 +784,12 @@ ui_motion:
     mov     edi, [rip+ptr_x]
     mov     esi, [rip+ptr_y]
     call    pie_hover
-121: add     rsp, 8
+121: cmp     dword ptr [rip+wh_on], 0    #  or the wheel: what is lit
+    je      122f
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    wh_hover
+122: add     rsp, 8
     pop     rdx
     cmp     r13d, [rip+hover_id]
     jne     2f
@@ -896,6 +910,12 @@ ui_button:
     jz      .Lbt_release
 
     # ---------------- press ----------------
+    cmp     dword ptr [rip+wh_on], 0    # the wheel: a click on an entry picks
+    je      .Lbt_nowh                   #  it (on release), elsewhere closes it
+    mov     edi, r14d
+    call    wh_press
+    jmp     .Lbt_done
+.Lbt_nowh:
     cmp     dword ptr [rip+pie_on], 0   # a pie: a click picks or closes it
     je      .Lbt_nopie
     mov     edi, r14d
@@ -1321,7 +1341,12 @@ ui_button:
 
     # ---------------- release ----------------
 .Lbt_release:
-    cmp     dword ptr [rip+drag_mode], DRAG_AREA  # an area dropped on another
+    cmp     dword ptr [rip+wh_on], 0    # the wheel: a release over an entry
+    je      7697f                       #  runs it
+    mov     edi, r14d
+    call    wh_release
+    jmp     .Lbt_done
+7697: cmp   dword ptr [rip+drag_mode], DRAG_AREA  # an area dropped on another
     jne     7698f
     mov     dword ptr [rip+drag_mode], 0
     mov     edi, [rip+ptr_x]
@@ -1753,6 +1778,20 @@ ui_key_press:
     call    dlg_key
     test    eax, eax
     jnz     9f
+    cmp     dword ptr [rip+wh_on], 0    # a key closes the wheel (Esc only that;
+    je      .Lkp_nowh                   #  Shift, Ctrl, Alt, Super leave it)
+    lea     rax, [rip+wh_mod_keys]
+1:  movzx   ecx, byte ptr [rax]
+    test    ecx, ecx
+    jz      2f
+    inc     rax
+    cmp     ecx, ebx
+    jne     1b
+    jmp     .Lkp_nowh
+2:  call    wh_close
+    cmp     ebx, KEY_ESC
+    je      9f
+.Lkp_nowh:
     cmp     dword ptr [rip+pie_on], 0   # Esc closes a pie
     je      .Lkp_nopie
     cmp     ebx, KEY_ESC
@@ -1856,6 +1895,7 @@ ui_draw:
     call    mn_draw
 4:  call    palette_draw
     call    pie_draw
+    call    wh_draw                     # the wheel menu
     call    dlg_draw                    # a dialog over everything
     cmp     dword ptr [rip+dlg_open], 0 # (a context menu over a dialog: on top)
     je      5f

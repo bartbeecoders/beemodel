@@ -25,6 +25,7 @@
 
 .globl pr_scale
 .globl pr_emu3
+.globl pr_wheel
 .globl pr_kmap
 .globl km_preset
 .globl pr_orbit
@@ -69,6 +70,7 @@
 .align 4
 pr_scale:       .long 100               # the UI scale (%)
 pr_emu3:        .long 0                 # Alt + left = middle button
+pr_wheel:       .long 1                 # right-click in the viewport: the wheel menu
 pr_kmap:        .long 0                 # the keymap preset: 0 BeeModel, 1 Blender 4.x
 pr_orbit:       .float 1.0              # orbit speed
 pr_autosave:    .long 25                # changes between autosaves (0: never)
@@ -171,6 +173,7 @@ w_scale:        .asciz "scale"
 w_theme:        .asciz "theme"
 w_tip:          .asciz "tooltip_ms"
 w_emu3:         .asciz "emulate_middle"
+w_wheel:        .asciz "wheel_menu"
 w_kmap:         .asciz "keymap"
 w_orbit:        .asciz "orbit_speed"
 w_autosave:     .asciz "autosave"
@@ -222,6 +225,7 @@ l_tier:         .quad s_tenv, s_tr, s_te, s_tf
 l_prov:         .quad s_p_claude, s_p_grok, s_p_or, s_p_ol
 # word, variable, kind (0 int, 1 float)
 pr_vars:        .quad w_scale, pr_scale, 0, w_tip, tip_ms, 0, w_emu3, pr_emu3, 0, w_kmap, pr_kmap, 0
+                .quad w_wheel, pr_wheel, 0
                 .quad w_orbit, pr_orbit, 1, w_autosave, pr_autosave, 0
                 .quad w_threads, pr_threads, 0, w_jit, pr_jit, 0, w_mcp, pr_mcp, 0
                 .quad w_tier, pr_tier, 0, w_theme, th_id, 0, w_gpu, pr_gpu_on, 0, w_gpudev, pr_gpu_dev, 0
@@ -955,6 +959,7 @@ WIDGET wd_pf_rm,   WK_TOGGLE, "prefs.reduce_motion", "Reduce motion", cb=save_cb
 WIDGET wd_pf_cb,   WK_TOGGLE, "prefs.colorblind_axes", "Colour-blind-safe axis colours", cb=save_cb, tip="X, Y, Z in orange, sky blue and purple instead of red, green and blue"
 WIDGET wd_pf_tip,  WK_INT, "prefs.tooltip_ms", "Tooltip delay (ms)", 0.0, 5000.0, 2.0, 0, WGF_CLAMP, cb=save_cb
 WIDGET wd_pf_emu3, WK_TOGGLE, "prefs.emulate_middle", "Alt + left button is the middle button", cb=save_cb, tip="Orbit with Alt + drag on a touchpad or a two-button mouse"
+WIDGET wd_pf_wheel, WK_TOGGLE, "prefs.wheel_menu", "Right-click in the 3D viewport opens a wheel", cb=save_cb, tip="A ring of entries around the pointer: hover a group for its choices, click one, or drag onto it and let go. Off: the list menu"
 WIDGET wd_pf_orbit, WK_FLOAT, "prefs.orbit_speed", "Orbit speed", 0.1, 5.0, 0.005, 2, WGF_CLAMP, cb=save_cb
 WIDGET wd_pf_kmap, WK_ENUM, "prefs.keymap", cb=kmap_cb, aux=l_kmap, n=2, tip="Blender 4.x: Blender's keys where BeeModel's differ (docs/UI.md lists them). Keys you set yourself stay"
 WIDGET wd_pf_search, WK_TEXT, "prefs.key_search", "Find", tip="Part of an operator's name or label"
@@ -997,7 +1002,7 @@ pf_pages:       .quad .Lpf_interface, .Lpf_viewport, .Lpf_input, .Lpf_keymap, .L
 pf_defs:        .quad 0, th_id, 0, 0, pr_scale, 100, 0, tip_ms, 500, 0, pr_cbaxes, 0, 0, pr_rmotion, 0
                 .quad 1, show_grid, 1, 1, pr_grid, 0x3f800000, 1, pr_fov, 50, 1, pr_near, 0x3d4ccccd
                 .quad 1, pr_lvspp, 64, 1, pr_lvdn, 1, 1, pr_lvplay, 4
-                .quad 2, pr_emu3, 0, 2, pr_orbit, 0x3f800000
+                .quad 2, pr_emu3, 0, 2, pr_orbit, 0x3f800000, 2, pr_wheel, 1
                 .quad 3, pr_nkey, 0, 3, pr_kmap, 0
                 .quad 4, pr_rw, 960, 4, pr_rh, 540, 4, pr_rspp, 128, 4, pr_rdn, 1
                 .quad 5, pr_threads, 0, 5, pr_jit, 1, 5, pr_gpu_on, 1, 5, pr_gpu_dev, 0
@@ -1500,6 +1505,10 @@ pf_reset:
     call    pf_item
     lea     rdi, [rip+wd_pf_orbit]
     lea     r8, [rip+pr_orbit]
+    xor     edx, edx
+    call    pf_item
+    lea     rdi, [rip+wd_pf_wheel]
+    lea     r8, [rip+pr_wheel]
     xor     edx, edx
     call    pf_item
     pop     rbx
