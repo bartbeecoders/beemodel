@@ -14,6 +14,15 @@ project uses [Semantic Versioning](https://semver.org/).
   does a right drag that ends on an entry. Entries that cannot run now are
   greyed, with the reason above the wheel. Preferences > Input > "Right-click
   in the 3D viewport opens a wheel" (`wheel_menu`) turns the list back on.
+- **Collection instances in .blend files**: an empty set to Instance >
+  Collection now brings in that collection's objects (and its child
+  collections'), placed as Blender draws them, also when the collection is
+  excluded from the view layer. Scenes that scatter trees and props this
+  way (asset packs do) came in without them.
+
+### Fixed
+- **.blend import: fog volumes** (a mesh with a volume-only material) are
+  skipped instead of coming in as a solid box.
 
 ## [1.3.0] - 2026-10-30
 

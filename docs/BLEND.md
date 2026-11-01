@@ -25,14 +25,18 @@ The import is one undo step.
 | | |
 |---|---|
 | The scene | The file's current scene, and the objects of its view layer. Collections excluded from the view layer are skipped |
+| Collection instances | An empty set to Instance › Collection brings in that collection's objects and its child collections', placed by the empty and the collection's instance offset, as Blender draws them. The collection may be excluded from the view layer, as asset packs keep their trees and props. Each instance is a copy, named after its source (`Spruce01`, `Spruce01.001`...); instances inside instances come in too, 8 deep |
 | Places | Each object is placed by its world matrix: location, rotation in any rotation mode, scale, their deltas, and the parent chain with its inverse. Blender's Z up becomes BeeModel's Y up |
 | Meshes | Vertices, faces (n-gons kept) and the active UV map, as the file stores them. Modifiers are not applied, so a subdivided cube comes in as the cube. An object with several materials becomes one object per material (`Name`, `Name.001`...). Objects that share a mesh each get a copy |
 | Materials | From the Principled BSDF: base colour, metallic, roughness, IOR, alpha (see-through becomes translucent), transmission, emission colour and strength. Image Texture nodes on base colour and emission become texture maps, and so does a Normal Map node's image. Images come from the file (packed) or from beside it (`//` paths). A material without nodes uses its viewport colour |
 | Cameras | The lens, and which camera is the scene's |
 | Lights | Colour and power: 1000 W is BeeModel's default light. A sun becomes a point light |
 
-**Skipped and counted:** curves, text, empties, Grease Pencil, volumes,
-animation, constraints and geometry node trees. The console says how many
+**Skipped and counted:** curves, text, empties that instance nothing,
+Grease Pencil, volumes, animation, constraints and geometry node trees. A
+mesh whose material is a volume only (a Principled Volume on the output's
+Volume, nothing on its Surface), such as a fog cube, is skipped too: its
+faces would draw as a solid box. The console says how many
 objects came in, and how many were skipped.
 
 ## Saving
@@ -89,6 +93,7 @@ Meshes come in three layouts:
 | 5.x | `AttributeStorage` |
 
 `tests/blend.py` checks all of this against what Blender itself reports,
-using fixtures made by Blender 5.2 and 4.2 (`tests/fixtures/blend/make.py`).
+using fixtures made by Blender 5.2 and 4.2 (`tests/fixtures/blend/make.py`;
+collection instances and a fog volume: `make_instances.py`).
 No fixture was made with a Blender older than 3.4, so the `MVert`, `MPoly`
 and `MLoop` path follows the documented DNA but is untested.

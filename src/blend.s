@@ -12,6 +12,8 @@
 #  gzip ones (before 3.0) through our inflate.
 #
 #  Import: the current scene's view layer (excluded collections skipped);
+#  collection instances (an empty's Instance > Collection) expanded, placed
+#  by the empty x T(-the collection's offset), even when excluded;
 #  each object placed by its world matrix (loc / rotation mode / scale,
 #  their deltas, the parent chain with its inverse), turned from Z up to Y
 #  up and taken apart into place, Euler XYZ and scale (baked into the mesh
@@ -21,8 +23,8 @@
 #  one). Materials: the Principled BSDF's values, Image Texture nodes on
 #  base colour, emission and normal (through a Normal Map), images packed
 #  or beside the file; else the viewport colour. Cameras (lens, the scene's
-#  camera) and lights (colour, power). Modifiers, curves and the rest are
-#  counted as skipped.
+#  camera) and lights (colour, power). Modifiers, curves, volume-only
+#  meshes (fog) and the rest are counted as skipped.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -136,6 +138,9 @@ BF o_ob_rotmode, "Object", "rotmode"
 BF o_ob_mat,    "Object", "mat"
 BF o_ob_matbits, "Object", "matbits"
 BF o_ob_totcol, "Object", "totcol"
+BF o_ob_tflag,  "Object", "transflag"
+BF o_ob_dupgrp, "Object", "dup_group|instance_collection"
+BF o_coll_ofs,  "Collection", "dupli_ofs|instance_offset"
 BF o_me_totvert, "Mesh", "totvert"
 BF o_me_totpoly, "Mesh", "totpoly"
 BF o_me_totloop, "Mesh", "totloop"
@@ -261,11 +266,15 @@ bm_bytes:       .skip 8
 bm_buf:         .skip 8
 bm_slot:        .skip 4*MAXSLOT         # slot -> material index + 1
 bm_nslot:       .skip 4
+bm_vol:         .skip 4*MAXSLOT         # slot -> 1: a volume-only material
 bm_pick:        .skip 8                 # Attribute / layer search results
 bm_picklen:     .skip 8
 bm_pickone:     .skip 4                 # a single value for the domain
 # matrices (doubles, row-major 4x4)
 bl_m:           .skip 128*8
+bl_inst:        .skip 128                # inside a collection instance: the
+bl_idepth:      .skip 4                 #  instancer's world x T(-offset); depth
+.align 8
 bl_gt:          .skip GT_SZ
 
 .section .rodata
@@ -297,6 +306,9 @@ s_matidx:       .asciz "material_index"
 s_principled:   .asciz "ShaderNodeBsdfPrincipled"
 s_teximage:     .asciz "ShaderNodeTexImage"
 s_normalmap:    .asciz "ShaderNodeNormalMap"
+s_matout:       .asciz "ShaderNodeOutputMaterial"
+k_surface:      .asciz "Surface"
+k_volume:       .asciz "Volume"
 k_basecol:      .asciz "Base Color"
 k_metal:        .asciz "Metallic"
 k_rough:        .asciz "Roughness"
@@ -344,6 +356,7 @@ blend_import:
     mov     dword ptr [rip+bl_nobj], 0
     mov     dword ptr [rip+bl_nskip], 0
     mov     dword ptr [rip+bl_nmod], 0
+    mov     dword ptr [rip+bl_idepth], 0
     lea     rdi, [rip+bl_dir]           # its folder: up to the last /
     mov     rsi, rbx
     call    bl_cpy
@@ -1437,6 +1450,7 @@ bl_own_id:
 1:  ret
 
 # bl_coll_objects(rdi=Collection, rsi=its block) - each object of it, once
+#   (inside a collection instance: each time it is instanced)
 bl_coll_objects:
     push    rbx
     push    r12
@@ -1456,10 +1470,12 @@ bl_coll_objects:
     call    bl_rdp
     test    rax, rax
     jz      2f
+    cmp     dword ptr [rip+bl_idepth], 0  # (an instance's: every time)
+    jne     11f
     cmp     dword ptr [rdx+BK_MARK], 0
     jne     2f
     mov     dword ptr [rdx+BK_MARK], 1
-    mov     rdi, rax
+11: mov     rdi, rax
     mov     rsi, rdx
     call    bl_object
 2:  mov     rdi, [rbx]
@@ -1521,13 +1537,25 @@ bl_object:
     je      1f
     cmp     r12d, OB_LAMP_T
     je      1f
-    inc     dword ptr [rip+bl_nskip]
+    test    r12d, r12d                  # an empty: a collection instance?
+    jnz     12f
+    mov     rdi, rbx
+    call    bl_instance
+    test    eax, eax
+    jnz     9f
+12: inc     dword ptr [rip+bl_nskip]
     jmp     9f
 1:  lea     rdi, [rip+bl_m]             # its world matrix, Blender's axes
     mov     rsi, rbx
     xor     edx, edx
     call    bl_world
-    mov     rdi, rbx
+    cmp     dword ptr [rip+bl_idepth], 0  # instanced: the instancer's x it
+    je      13f
+    lea     rdi, [rip+bl_m]
+    lea     rsi, [rip+bl_inst]
+    lea     rdx, [rip+bl_m]
+    call    m4_mul
+13:    mov     rdi, rbx
     mov     eax, [rip+o_ob_data]
     call    bl_rdp
     test    rax, rax
@@ -1618,6 +1646,86 @@ bl_object:
     mov     [rip+bl_owner], eax
     add     rsp, 16
     pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bl_instance(rdi=Object data of an empty) -> eax = 1 when it instances a
+#   collection (Instance > Collection): the collection's objects and its
+#   children's come in, each placed by the empty's world x T(-the
+#   collection's instance offset) x its own world. The collection may be
+#   excluded from the view layer (the usual way to keep the sources out)
+bl_instance:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 392                    # world, T, the outer bl_inst
+    mov     rbx, rdi
+    xor     r13d, r13d
+    cmp     dword ptr [rip+bl_idepth], 8  # (instances in instances: 8 deep)
+    jae     9f
+    mov     eax, [rip+o_ob_tflag]
+    test    eax, eax
+    js      9f
+    test    word ptr [rbx+rax], 0x100   # OB_DUPLICOLLECTION
+    jz      9f
+    mov     rdi, rbx
+    mov     eax, [rip+o_ob_dupgrp]
+    call    bl_rdp
+    test    rax, rax
+    jz      9f
+    mov     r12, rax                    # the collection, r14 = its block
+    mov     r14, rdx
+    lea     rdi, [rsp]                  # the empty's world (in an instance:
+    mov     rsi, rbx                    #  the outer instancer's x it)
+    xor     edx, edx
+    call    bl_world
+    cmp     dword ptr [rip+bl_idepth], 0
+    je      1f
+    lea     rdi, [rsp]
+    lea     rsi, [rip+bl_inst]
+    lea     rdx, [rsp]
+    call    m4_mul
+1:  lea     rdi, [rsp+128]              # x T(-offset)
+    lea     rsi, [rip+id_m4]
+    call    m4_copy
+    mov     eax, [rip+o_coll_ofs]
+    test    eax, eax
+    js      2f
+    add     rax, r12
+    xor     ecx, ecx
+11: cvtss2sd xmm1, [rax+rcx*4]
+    xorpd   xmm0, xmm0
+    subsd   xmm0, xmm1
+    lea     edx, [rcx*4+3]
+    movsd   [rsp+128+rdx*8], xmm0
+    inc     ecx
+    cmp     ecx, 3
+    jb      11b
+2:  lea     rdi, [rsp]
+    lea     rsi, [rsp]
+    lea     rdx, [rsp+128]
+    call    m4_mul
+    lea     rdi, [rsp+256]              # the outer one kept; this one in
+    lea     rsi, [rip+bl_inst]
+    call    m4_copy
+    lea     rdi, [rip+bl_inst]
+    lea     rsi, [rsp]
+    call    m4_copy
+    inc     dword ptr [rip+bl_idepth]
+    mov     rdi, r12
+    mov     rsi, r14
+    call    bl_walk_coll
+    dec     dword ptr [rip+bl_idepth]
+    lea     rdi, [rip+bl_inst]
+    lea     rsi, [rsp+256]
+    call    m4_copy
+    mov     r13d, 1
+9:  mov     eax, r13d
+    add     rsp, 392
     pop     r14
     pop     r13
     pop     r12
@@ -2350,9 +2458,13 @@ bl_mesh_object:
     lea     rsi, [rip+c_m4]
     call    m4_copy
 2:  mov     r15, rbx                    # (the object, for its modifiers)
+    mov     dword ptr [rsp+104], 0      # objects made
     xor     r13d, r13d                  # each slot used: an object
 3:  cmp     r13d, MAXSLOT
     jae     .Lmo_done
+    lea     rax, [rip+bm_vol]           # a volume's faces: not drawn
+    cmp     dword ptr [rax+r13*4], 0
+    jne     5f
     mov     edi, r13d
     call    bl_group                    # -> rax = mesh or 0
     test    rax, rax
@@ -2364,6 +2476,7 @@ bl_mesh_object:
     test    eax, eax
     jz      5f
     inc     dword ptr [rip+bl_nobj]
+    inc     dword ptr [rsp+104]
     mov     edi, eax
     call    obj_get
     mov     r14, rax
@@ -2384,6 +2497,9 @@ bl_mesh_object:
     jb      3b
 .Lmo_done:
     call    bl_mesh_free
+    cmp     dword ptr [rsp+104], 0      # nothing drawn (a fog volume)
+    jne     .Lmo_out
+    inc     dword ptr [rip+bl_nskip]
     jmp     .Lmo_out
 .Lmo_skip:
     inc     dword ptr [rip+bl_nskip]
@@ -2593,7 +2709,7 @@ bl_xform:
 
 # bl_slots(rdi=Object data, rsi=Mesh data) - bm_slot / bm_nslot: each slot's
 #   material (the object's when its matbit is set, else the mesh's), made
-#   once a material
+#   once a material; bm_vol: the slots whose material is a volume only
 bl_slots:
     push    rbx
     push    r12
@@ -2605,6 +2721,9 @@ bl_slots:
     mov     r12, rsi
     lea     rdi, [rip+bm_slot]
     xor     eax, eax
+    mov     ecx, MAXSLOT
+    rep     stosd
+    lea     rdi, [rip+bm_vol]
     mov     ecx, MAXSLOT
     rep     stosd
     xor     r13d, r13d                  # slots: max(object, mesh)
@@ -2661,6 +2780,18 @@ bl_slots:
     call    bl_ptr
     test    rax, rax
     jz      8f
+    push    rax
+    push    rdx
+    mov     rdi, rax
+    mov     rsi, rdx
+    call    bl_volonly                  # fog and the like: not made
+    pop     rdx
+    pop     rcx
+    lea     rsi, [rip+bm_vol]
+    mov     [rsi+r14*4], eax
+    test    eax, eax
+    jnz     8f
+    mov     rax, rcx
     mov     ecx, [rdx+BK_MARK]          # made already?
     test    ecx, ecx
     jnz     71f
@@ -3474,6 +3605,72 @@ bl_material:
     mov     eax, 1
     ret
 8:  xor     eax, eax
+    ret
+
+# bl_volonly(rdi=Material data, rsi=its block) -> eax = 1 when its output
+#   node draws a volume only (Volume linked, Surface not): fog, smoke
+bl_volonly:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     eax, [rip+bl_owner]
+    mov     [rsp+8], eax
+    mov     rbx, rdi
+    mov     rdx, rsi
+    call    bl_setown
+    xor     r15d, r15d
+    mov     rdi, rbx
+    mov     eax, [rip+o_ma_ntree]
+    call    bl_rdp
+    test    rax, rax
+    jz      9f
+    mov     r13, rax                    # the tree
+    mov     rdi, r13
+    mov     eax, [rip+o_nt_nodes]
+    call    bl_rdp
+1:  test    rax, rax
+    jz      9f
+    mov     r14, rax
+    mov     eax, [rip+o_nd_idname]
+    test    eax, eax
+    js      9f
+    lea     rdi, [r14+rax]
+    lea     rsi, [rip+s_matout]
+    call    str_eq
+    test    eax, eax
+    jz      2f
+    lea     rsi, [rip+k_surface]        # a surface: not a volume only
+    call    bl_sock
+    mov     rdi, r13
+    mov     rsi, [rip+bl_sockold]
+    call    bl_linked_node
+    test    rax, rax
+    jnz     8f
+    lea     rsi, [rip+k_volume]
+    call    bl_sock
+    mov     rdi, r13
+    mov     rsi, [rip+bl_sockold]
+    call    bl_linked_node
+    test    rax, rax
+    jz      2f
+    mov     r15d, 1
+2:  mov     rdi, r14
+    mov     eax, [rip+o_nd_next]
+    call    bl_rdp
+    jmp     1b
+8:  xor     r15d, r15d
+9:  mov     eax, [rsp+8]
+    mov     [rip+bl_owner], eax
+    mov     eax, r15d
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
     ret
 
 # bl_sock(rsi=socket name; r14 = the node) -> rax = its default value (the
