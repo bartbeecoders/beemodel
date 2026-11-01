@@ -1,7 +1,8 @@
 // BeeModel - material graphs on the GPU: a port of graph.s / matnodes.s for
-// the node types gpu.s lets through (textures, checker, gradient, noise, wave, mix,
-// ramp, math, vector math, separate / combine, invert, constants,
-// parameters, bump and normal maps). Included by pt.comp (GRAPHS) and the
+// the node types gpu.s lets through (textures, checker, gradient, noise, wave,
+// Voronoi, mix, ramp, math, vector math, separate / combine, position,
+// normal, hue / saturation, invert, constants, parameters, bump and normal
+// maps). Included by pt.comp (GRAPHS) and the
 // viewport's view.frag, which declare before it: the Params P (with the sRGB
 // table lut), mats[] (the material records), img[] (the images), struct Mat
 // and bool g_vcol (set when a graph reads the vertex colour). The caller sets
@@ -9,9 +10,9 @@
 // its world edges, S_UV or box_uv(), S_HASUV, G_VC, G_WP) and calls
 // graph_run.
 // ---- material graphs (a port of graph.s / matnodes.s for the node types
-//   gpu.s lets through: textures, checker, gradient, noise, wave, mix, ramp, math,
-//   vector math, separate / combine, invert, constants, parameters, bump and
-//   normal maps) --------------------------------------------------------------
+//   gpu.s lets through: textures, checker, gradient, noise, wave, Voronoi,
+//   mix, ramp, math, vector math, separate / combine, position, normal,
+//   hue / saturation, invert, constants, parameters, bump and normal maps) ----
 // a material record: 1024 words (the CPU's MA_SZ); its graph from word 32
 const uint MW = 1024u, W_GRN = 32u, W_NODES = 40u, NODEW = 18u, W_PINS = 904u;
 const uint W_ALPHA = 22u, W_BLEND = 24u, W_SIDED = 25u, W_CLIP = 26u;
@@ -194,6 +195,39 @@ float mix_op(int mode, float a, float b) {
     return a;
 }
 
+// Voronoi's hashes (matnodes.s: ihash, hash3i, h01)
+uint ihash(uint x) { x ^= x >> 16; x *= 0x85ebca6bu; x ^= x >> 13; x *= 0xc2b2ae35u; x ^= x >> 16; return x; }
+uint hash3i(ivec3 c) { return ihash(uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u); }
+float h01(inout uint h) { h = ihash(h); return float(h >> 1) * 4.656613e-10; }
+// rgb <-> hsv (matnodes.s: rgb_hsv, hsv_rgb)
+vec3 rgb_hsv(vec3 c) {
+    float v = max(max(c.x, c.y), c.z), d = v - min(min(c.x, c.y), c.z);
+    float s = v > 1.0e-12 ? d / v : 0.0, h = 0.0;
+    if (d > 1.0e-12) {
+        if (c.x == v) h = (c.y - c.z) / d;
+        else if (c.y == v) h = (c.z - c.x) / d + 2.0;
+        else h = (c.x - c.y) / d + 4.0;
+        h /= 6.0;
+        if (h < 0.0) h += 1.0;
+    }
+    return vec3(h, s, v);
+}
+vec3 hsv_rgb(vec3 c) {
+    float h6 = c.x * 6.0, fi = floor(h6), f = h6 - fi;
+    int i = int(fi) % 6; if (i < 0) i += 6;
+    float v = c.z, p = v * (1.0 - c.y), q = v * (1.0 - c.y * f), t = v * (1.0 - c.y * (1.0 - f));
+    if (i == 0) return vec3(v, t, p);
+    if (i == 1) return vec3(q, v, p);
+    if (i == 2) return vec3(p, v, t);
+    if (i == 3) return vec3(p, q, v);
+    if (i == 4) return vec3(t, p, v);
+    return vec3(v, p, q);
+}
+void vec_out(uint j, vec3 v) {
+    for (uint k = 1u; k < 4u; k++) put_out(j, k, vec4(v[k - 1u]));
+    put_out(j, 0u, vec4(v, v.x));
+}
+
 // ---- evaluation: the nodes in mask, in order
 void graph_eval(uint m, uint64_t live) {
     uint n = min(mwu(m, W_GRN), 48u);
@@ -284,6 +318,8 @@ void graph_eval(uint m, uint64_t live) {
             for (uint k = 1u; k < 4u; k++) put_out(j, k, vec4(v[k - 1u]));
             put_out(j, 0u, vec4(v, v.x));
             break; }
+        case 11u: vec_out(j, np(m, j, 0u) >= 0.5 ? G_WP : G_P); break;  // position
+        case 12u: vec_out(j, G_N); break;                      // normal
         case 14u: put_col(j, G_VC); g_vcol = true; break;      // vertex colour
         case 16u: put_val(j, np(m, j, 0u)); break;              // constant
         case 17u: put_col(j, node_in(m, j, 0u).xyz); break;     // color
@@ -312,6 +348,36 @@ void graph_eval(uint m, uint64_t live) {
         case 21u:                                               // combine
             put_col(j, vec3(node_in(m, j, 0u).w, node_in(m, j, 1u).w, node_in(m, j, 2u).w));
             break;
+        case 25u: {                                             // Voronoi: F1, F2, edge; the cell's colour
+            vec3 p = ((mwu(m, nw(m, j, 1u)) & 0xffffu) != 0u ? node_in(m, j, 0u).xyz : G_P) * np(m, j, 0u);
+            ivec3 c = ivec3(floor(p));
+            float f1 = 1.0e30, f2 = 1.0e30, rnd = np(m, j, 1u);
+            uint near = 0u;
+            for (int dz = -1; dz <= 1; dz++) for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
+                ivec3 q = c + ivec3(dx, dy, dz);
+                uint id = hash3i(q);
+                float d2 = 0.0;
+                for (int k = 0; k < 3; k++) {
+                    uint h = (id + uint(k)) * 0x27d4eb2fu;
+                    float o = ((h01(h) - 0.5) * rnd + 0.5) + float(q[k]) - p[k];
+                    d2 += o * o;
+                }
+                float d = sqrt(d2);
+                if (d < f1) { f2 = f1; f1 = d; near = id; } else if (d < f2) f2 = d;
+            }
+            int ft = int(np(m, j, 2u));
+            uint h = near ^ 0x5bd1e995u;
+            float cr = h01(h), cg = h01(h), cb = h01(h);
+            put_out(j, 1u, vec4(cr, cg, cb, cr));
+            put_val(j, ft == 1 ? f2 : (ft == 2 ? f2 - f1 : f1));
+            break; }
+        case 26u: {                                             // hue / saturation / value
+            vec3 a = node_in(m, j, 0u).xyz, h = rgb_hsv(a);
+            h.x = fract(h.x + np(m, j, 0u));
+            h.y = clamp(h.y * np(m, j, 1u), 0.0, 1.0);
+            h.z = max(h.z * np(m, j, 2u), 0.0);
+            put_col(j, (hsv_rgb(h) - a) * np(m, j, 3u) + a);
+            break; }
         case 27u: {                                             // invert
             vec3 a = node_in(m, j, 0u).xyz;
             put_col(j, ((vec3(1.0) - a) - a) * np(m, j, 0u) + a);

@@ -11,6 +11,16 @@ project uses [Semantic Versioning](https://semver.org/).
   Camera to View or Ctrl+Alt+Numpad 0 (`view.camera_to_view`) moves the
   camera that renders to where the viewport looks from, pointing where it
   looks, and looks through it. A scene without a camera gets one.
+
+## [1.3.1] - 2026-11-01
+
+Blender files come in more whole: collection instances (trees and props
+scattered from an excluded collection), procedural materials as node
+graphs, fog volumes skipped; the GPU path tracer evaluates Position,
+Normal, Voronoi and Hue/Saturation nodes. The viewport's right-click menu
+becomes a wheel.
+
+### Added
 - **Wheel menu** (#420): a right-click in the 3D viewport opens a ring of
   coloured entries with icons and labels around the pointer instead of a
   list. Hovering a group (Visibility, Boolean; in edit mode Cut, Merge,
@@ -18,6 +28,25 @@ project uses [Semantic Versioning](https://semver.org/).
   does a right drag that ends on an entry. Entries that cannot run now are
   greyed, with the reason above the wheel. Preferences > Input > "Right-click
   in the 3D viewport opens a wheel" (`wheel_menu`) turns the list back on.
+- **Collection instances in .blend files**: an empty set to Instance >
+  Collection now brings in that collection's objects (and its child
+  collections'), placed as Blender draws them, also when the collection is
+  excluded from the view layer. Scenes that scatter trees and props this
+  way (asset packs do) came in without them.
+- **Procedural materials from .blend files**: shader nodes feeding the
+  Principled BSDF (Gradient, Color Ramp, Mix and MixRGB, Mapping, Texture
+  Coordinate, Math, Voronoi, Image Texture, Hue/Saturation, Invert, RGB,
+  Value; a node group passes its input through) become the material's node
+  graph, instead of the BSDF's flat colour. Trees and plants coloured by
+  gradients through colour ramps now look as in Blender (`src/blendmat.s`).
+- **The GPU path tracer evaluates Position, Normal, Voronoi and
+  Hue/Saturation nodes** (`src/gpu/graph.glsl`), the CPU's results to the
+  pixel. A graph with one of them used to lose its graph in Rendered
+  shading (flat values) and send final renders to the CPU.
+
+### Fixed
+- **.blend import: fog volumes** (a mesh with a volume-only material) are
+  skipped instead of coming in as a solid box.
 
 ## [1.3.0] - 2026-10-30
 
@@ -2535,7 +2564,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/bartbeecoders/beemodel/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/bartbeecoders/beemodel/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/bartbeecoders/beemodel/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/bartbeecoders/beemodel/compare/v1.1.0...v1.2.0
