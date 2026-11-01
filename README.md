@@ -1138,7 +1138,9 @@ operator spine and how to add an action.
   `git tag -a v0.2.0 -m "BeeModel 0.2.0" && git push origin v0.2.0`.
   The release workflow checks that the tag matches `VERSION`, builds, tests and
   packages the app (`scripts/package.sh`), and publishes a GitHub release with notes
-  taken from the changelog.
+  taken from the changelog. Its headless UI tests run side by side with the build
+  (about 16 minutes); run it by hand (Actions › Release › Run workflow) for a dry
+  run on any branch that publishes nothing.
 
 ## License
 
