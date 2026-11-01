@@ -6,6 +6,14 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-01
+
+Blender files come in more whole: collection instances (trees and props
+scattered from an excluded collection), procedural materials as node
+graphs, fog volumes skipped; the GPU path tracer evaluates Position,
+Normal, Voronoi and Hue/Saturation nodes. The viewport's right-click menu
+becomes a wheel.
+
 ### Added
 - **Wheel menu** (#420): a right-click in the 3D viewport opens a ring of
   coloured entries with icons and labels around the pointer instead of a
@@ -2550,7 +2558,8 @@ First release: the application shell that the 3D modeling tool will be built on.
 - Headless test harness (fake Wayland compositor) and GitHub Actions CI and release
   pipelines.
 
-[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/bartbeecoders/beemodel/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/bartbeecoders/beemodel/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/bartbeecoders/beemodel/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/bartbeecoders/beemodel/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/bartbeecoders/beemodel/compare/v1.1.0...v1.2.0
