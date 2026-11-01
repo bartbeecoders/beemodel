@@ -13,9 +13,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The slow parts (the GPU helper on llvmpipe, the two headless UI runs) are
+# jobs of their own, side by side; each builds the binary again (seconds).
+# "Build & headless test", the check main requires, passes when all of them do.
 jobs:
   build-test:
-    name: Build & headless test
+    name: Build & tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -195,30 +198,101 @@ jobs:
       - name: STEP (assemblies, units, colours; round trips through FreeCAD or OpenCASCADE)
         run: timeout 900 python tests/step.py build/beemodel
 
-      - name: GPU helper (Vulkan on llvmpipe, CPU fallback, the same images)
-        env:
-          BEEMODEL_GPU: any
-        run: timeout 2400 python -u tests/gpu.py build/beemodel build/shots --require   # (llvmpipe; 5.5 min on 4 local cores)
-
-      - name: Headless UI test (fake Wayland compositor, TrueType fonts)
-        run: timeout 1200 python tools/fakewl.py build/shots
-
-      - name: Headless UI test (bitmap font fallback + golden images)
-        env:
-          BEEMODEL_FONT: none
-          BEEMODEL_MONO_FONT: none
-          BEEMODEL_GOLDEN: check
-        run: timeout 1200 python tools/fakewl.py build/shots-bitmap
-
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: screenshots
-          path: |
-            build/shots/
-            build/shots-bitmap/
+          path: build/shots/
           if-no-files-found: ignore
+
+  gpu:
+    name: GPU helper (${{ matrix.part }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [render, window]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vulkan loader and llvmpipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers fonts-dejavu-core
+
+      - name: Build (release)
+        run: scripts/build.sh release && test -x build/beemodel-gpu
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: python -m pip install --quiet pillow numpy
+
+      - name: GPU helper (Vulkan on llvmpipe, CPU fallback, the same images)
+        env:
+          BEEMODEL_GPU: any
+        run: timeout 2400 python -u tests/gpu.py build/beemodel build/shots --require --part=${{ matrix.part }}   # (render 17 min, window 9 min on CI)
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-gpu-${{ matrix.part }}
+          path: build/shots/
+          if-no-files-found: ignore
+
+  ui:
+    name: Headless UI (${{ matrix.font }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - font: truetype
+          - font: bitmap
+            env: BEEMODEL_FONT=none BEEMODEL_MONO_FONT=none BEEMODEL_GOLDEN=check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vulkan loader and fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers fonts-dejavu-core
+
+      - name: Build (release)
+        run: scripts/build.sh release
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: python -m pip install --quiet pillow numpy
+
+      - name: Headless UI test (fake Wayland compositor${{ matrix.font == 'bitmap' && '; bitmap font fallback + golden images' || ', TrueType fonts' }})
+        run: env ${{ matrix.env }} timeout 1200 python tools/fakewl.py build/shots-${{ matrix.font }}
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-ui-${{ matrix.font }}
+          path: build/shots-${{ matrix.font }}/
+          if-no-files-found: ignore
+
+  all:
+    name: Build & headless test
+    if: always()
+    needs: [build-test, gpu, ui]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: All jobs passed
+        run: |
+          echo 'build-test: ${{ needs.build-test.result }}, gpu: ${{ needs.gpu.result }}, ui: ${{ needs.ui.result }}'
+          test '${{ needs.build-test.result }}' = success && test '${{ needs.gpu.result }}' = success && test '${{ needs.ui.result }}' = success
 
   windows-kit:
     name: Windows build
