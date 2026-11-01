@@ -19,6 +19,12 @@ project uses [Semantic Versioning](https://semver.org/).
   collections'), placed as Blender draws them, also when the collection is
   excluded from the view layer. Scenes that scatter trees and props this
   way (asset packs do) came in without them.
+- **Procedural materials from .blend files**: shader nodes feeding the
+  Principled BSDF (Gradient, Color Ramp, Mix and MixRGB, Mapping, Texture
+  Coordinate, Math, Voronoi, Image Texture, Hue/Saturation, Invert, RGB,
+  Value; a node group passes its input through) become the material's node
+  graph, instead of the BSDF's flat colour. Trees and plants coloured by
+  gradients through colour ramps now look as in Blender (`src/blendmat.s`).
 
 ### Fixed
 - **.blend import: fog volumes** (a mesh with a volume-only material) are

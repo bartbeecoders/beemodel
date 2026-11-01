@@ -11,7 +11,9 @@ split by material, the materials' values and image maps (packed and
 external), the camera's lens, the lights' colour and power. A third
 fixture (make_instances.py): collection instances, from an excluded
 collection, nested, with an offset, placed as Blender draws them; a fog
-cube (a volume-only material) skipped.
+cube (a volume-only material) skipped. A fourth (make_procedural.py):
+materials whose Base Color comes through shader nodes, each baked by
+material.bake and compared with what Blender baked of it.
 
 In a window (the fake compositor): File > Import offers Blender, and a
 .blend dropped on the window comes in as one undo step.
@@ -217,6 +219,55 @@ def instance_check(home, path, info, tag):
                    f'world matrix, as Blender has them ({bad})')
 
 
+def srgb_lin(c):
+    c /= 255
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def procedural_check(home, path, info, tag):
+    """Shader nodes feeding Base Color become the material's graph: each
+    material baked through the plane's UVs against what Blender baked."""
+    n = info['size']
+    code = 'n = count()\nfor i in 0..n { delete(name(0)) }\nop("file.import_blend", "%s")\n' % path
+    for m in info['bakes']:
+        code += f'op("material.bake", "{m} {n}")\n'
+        code += (f'for y in 0..{n} {{ for x in 0..{n} {{ print("PX", "{m}", x, y, imgpixel("{m}_base", x, y, 0), '
+                 f'imgpixel("{m}_base", x, y, 1), imgpixel("{m}_base", x, y, 2)) }} }}\n')
+    code += ('b = nodeinfo("Tiled", 0, "socket", 0)\nim = nodeinfo("Tiled", b, "link", 2)\n'
+             'print("TILED", nodeinfo("Tiled", b, "type"), nodeinfo("Tiled", im, "type"), '
+             'nodeinfo("Tiled", nodeinfo("Tiled", im, "link", 1), "type"), imgsize("stripes", 0))\n')
+    got, tiled = {}, None
+    for line in run(home, code, timeout=300).splitlines():
+        w = line.split()
+        if w and w[0] == 'PX':                 # (our images' rows run down)
+            got.setdefault(w[1], {})[(int(w[2]), n - 1 - int(w[3]))] = [srgb_lin(float(v)) for v in w[4:7]]
+        elif w and w[0] == 'TILED':
+            tiled = [int(float(v)) for v in w[1:]]
+    worst = {}
+    for m, px in info['bakes'].items():
+        if m in ('Cells', 'Tiled'):
+            continue
+        g = got.get(m, {})
+        worst[m] = max((max(abs(a - b) for a, b in zip(px[y * n + x], g[(x, y)])) if (x, y) in g else 1.0)
+                       for y in range(n) for x in range(n))
+    bad = {m: round(e, 3) for m, e in worst.items() if e > 0.02}
+    check(worst and not bad,
+          f'{tag}: gradients (linear, easing, radial, diagonal, quadratic, quadratic sphere), ramps (2 and 3 stops, '
+          f'constant), Mapping (point, texture), Math, Mix (colour, float, MixRGB), Hue/Saturation, RGB, Invert, a '
+          f'group: baked as Blender bakes them (worst {max(worst.values(), default=1):.3f}; {bad})')
+
+    def spread(vals):
+        mean = sum(vals) / len(vals)
+        return mean, (sum((v - mean) ** 2 for v in vals) / len(vals)) ** 0.5
+    want = spread([sum(p) / 3 for p in info['bakes']['Cells']])
+    have = spread([sum(p) / 3 for p in got.get('Cells', {}).values()] or [0])
+    check(have[1] > 0.5 * want[1] and abs(have[0] - want[0]) < 0.1,
+          f'{tag}: Voronoi cells (colour x distance): a pattern like Blender\'s (mean, spread {have[0]:.2f} {have[1]:.2f} '
+          f'against {want[0]:.2f} {want[1]:.2f}; our own hash)')
+    check(tiled == [5, 1, 21, 8],
+          f'{tag}: an Image Texture through a Mapping: an image node fed the mapped vector, into the mix ({tiled})')
+
+
 def main():
     home = tempfile.mkdtemp(prefix='bee-bl-')
     os.makedirs(os.path.join(home, 'BeeModel'))
@@ -241,6 +292,9 @@ def main():
     shutil.copy(os.path.join(FIX, 'instances52.blend'), tmp)
     instance_check(home, os.path.join(tmp, 'instances52.blend'),
                    json.load(open(os.path.join(FIX, 'instances52.json'))), 'Blender 5.2')
+    shutil.copy(os.path.join(FIX, 'procedural52.blend'), tmp)
+    procedural_check(home, os.path.join(tmp, 'procedural52.blend'),
+                     json.load(open(os.path.join(FIX, 'procedural52.json'))), 'Blender 5.2')
     junk = os.path.join(tmp, 'junk.blend')
     open(junk, 'wb').write(b'BLENDER-v279RENDjunk' + b'\0' * 64)
 

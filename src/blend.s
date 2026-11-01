@@ -22,8 +22,9 @@
 #  positions, n-gons, the active UV map; split by material (an object has
 #  one). Materials: the Principled BSDF's values, Image Texture nodes on
 #  base colour, emission and normal (through a Normal Map), images packed
-#  or beside the file; else the viewport colour. Cameras (lens, the scene's
-#  camera) and lights (colour, power). Modifiers, curves, volume-only
+#  or beside the file; else the viewport colour; what feeds the BSDF
+#  through other nodes (gradients, ramps, mixes ...): blendmat.s. Cameras
+#  (lens, the scene's camera) and lights (colour, power). Modifiers, curves, volume-only
 #  meshes (fog) and the rest are counted as skipped.
 # =============================================================================
 .intel_syntax noprefix
@@ -38,6 +39,11 @@
 .globl m4_euler
 .globl m4_split
 .globl bl_place
+# for blendmat.s (shader nodes into graphs)
+.globl bl_sock, bl_sockold, bl_ptr, bl_rdp, bl_image, bl_owner, bm_pos, bm_nv
+.globl id_m4, ci_m4, o_nt_links, o_nl_tosock, o_nl_next, o_nl_from
+.globl o_nd_idname, o_nd_inputs, o_nd_id, o_ns_name, o_ns_next, o_ns_value
+.globl o_sv_float
 
 .equ AT_FDCWD,      -100
 .equ O_WRCREAT,     0x241               # O_WRONLY | O_CREAT | O_TRUNC
@@ -3564,10 +3570,21 @@ bl_material:
 6:  mov     eax, [rip+bl_gt+GT_BASE]    # any map: a graph
     or      eax, [rip+bl_gt+GT_NRM]
     or      eax, [rip+bl_gt+GT_EMI]
-    jz      .Lma_done
+    jz      61f
     mov     edi, r12d
     lea     rsi, [rip+bl_gt]
     call    ml_gltf
+61: xor     ecx, ecx                    # inputs fed through other nodes:
+    cmp     dword ptr [rip+bl_gt+GT_BASE], 0  #  graphs (blendmat.s), but for
+    je      62f                         #  the images made above
+    or      ecx, 1 << PIN_BASE
+62: cmp     dword ptr [rip+bl_gt+GT_EMI], 0
+    je      63f
+    or      ecx, 1 << PIN_EMIT
+63: mov     edi, r12d
+    mov     rsi, r13
+    mov     rdx, r14
+    call    bn_build
 .Lma_done:
     mov     eax, r12d
 .Lma_out:
