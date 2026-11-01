@@ -295,11 +295,21 @@ def main():
     check(gp[0] == 1 and gp[2] == 64 and mad < 0.5 and same > 0.9,
           f'the Wave node (the wood preset\'s bands; rings with distortion) on the GPU: the CPU\'s image '
           f'(mean difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical, {gp[2]} GPU samples)')
-    vs = 'm = material("V")\nv = node(m, "voronoi", 5)\nsocket(m, "base", v)\nassign("Cube", m)\n'
-    c, _ = render('vor_cpu', vs, 16, BEEMODEL_GPU='off')
-    p, gp = render('vor_gpu', vs, 16, BEEMODEL_GPU='any')
+    vs = ('m = material("V")\np = node(m, "position", 1)\nv = node(m, "voronoi", 5, 0.8, 1)\nlink(m, p, v, 1)\n'
+          'h = node(m, "hsv", 0.3, 1.4, 0.9, 1)\nlink(m, v, h, 1, 1)\nn = node(m, "normal")\n'
+          'x = node(m, "mix", 2)\nnodeset(m, x, 1, 0.6)\nlink(m, h, x, 2)\nlink(m, n, x, 3)\n'
+          'socket(m, "base", x)\nassign("Cube", m)\n')       # (what .blend shader nodes make)
+    c, _ = render('vor_cpu', vs, 64, BEEMODEL_GPU='off')
+    p, gp = render('vor_gpu', vs, 64, BEEMODEL_GPU='any')
+    mad, same = compare(c, p)
+    check(gp[0] == 1 and gp[2] == 64 and mad < 0.5 and same > 0.9,
+          f'Position, Voronoi (F2, the cell colour), Hue/Saturation and Normal on the GPU: the CPU\'s image '
+          f'(mean difference {mad:.4f} levels, {100 * same:.2f}% of pixels identical, {gp[2]} GPU samples)')
+    bs = 'm = material("B")\nb = node(m, "brick", 5)\nsocket(m, "base", b)\nassign("Cube", m)\n'
+    c, _ = render('brick_cpu', bs, 16, BEEMODEL_GPU='off')
+    p, gp = render('brick_gpu', bs, 16, BEEMODEL_GPU='any')
     check(gp[2] == 0 and compare(c, p)[0] == 0,
-          f'a graph with a node the GPU does not evaluate (Voronoi): the CPU renders it, the same image ({gp})')
+          f'a graph with a node the GPU does not evaluate (Brick): the CPU renders it, the same image ({gp})')
     # ---- the render device and why a render is where it is (H1) -----------------
     r = run('op("render.device", "cpu")\nop("render.image", "%s/d1.png 64 48 4 0")\nprint("cpu", gpu(18), gpu(6))\n'
             'op("render.device", "gpu")\nop("render.image", "%s/d2.png 64 48 4 0")\nprint("gpu", gpu(18), gpu(6))\n'
