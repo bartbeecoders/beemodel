@@ -16,6 +16,9 @@
 #  the 3D cursor and snapping, not in sculpt mode) and the choices appear around the
 #  pointer; release over one to pick it. A quick tap still does the key's
 #  plain action, so nothing changes for people who never hold it.
+#
+#  A right-click in the 3D viewport opens the wheel menu (wheel.s) instead
+#  of a list, unless the preferences ask for the list.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -912,7 +915,11 @@ ctx_open_for:
     mov     ecx, ctx_object_n
     cmp     edi, HIT_CANVAS
     jne     1f
-    cmp     dword ptr [rip+edit_obj], 0
+    cmp     dword ptr [rip+pr_wheel], 0 # (the wheel, unless the list is wanted)
+    je      13f
+    call    wh_ctx_open
+    jmp     9f
+13: cmp     dword ptr [rip+edit_obj], 0
     je      5f
     lea     rbx, [rip+ctx_edit]
     mov     ecx, ctx_edit_n
@@ -968,7 +975,8 @@ ctx_open_list:
 
 # ---- ui_tree ----------------------------------------------------------------------
 # mn_json(edi = entries before) -> eax = entries written: the bar's menus,
-#   the open menu's entries (level 0, 1) and an open pie's choices
+#   the open menu's entries (level 0, 1), an open pie's choices and the
+#   wheel's entries
 mn_json:
     push    rbx
     push    r12
@@ -1061,7 +1069,10 @@ mn_json:
     call    wb_str
     inc     ebx
     jmp     6b
-8:  mov     eax, r14d
+8:  lea     edi, [r15+r14]              # the wheel's (wheel.s)
+    call    wh_json
+    add     r14d, eax
+    mov     eax, r14d
     pop     r15
     pop     r14
     pop     r13

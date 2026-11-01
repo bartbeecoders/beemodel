@@ -350,6 +350,7 @@
 .equ HIT_DIALOG,        34            # under a dialog: nothing
 .equ HIT_CPICK,         35            # the colour picker (index 1 inside it, 0 outside)
 .equ HIT_AREA_CORNER,   36            # an area's top-left corner (drag: join)
+.equ HIT_WHEEL,         37            # the wheel menu (wheel.s: index = what is there)
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
 

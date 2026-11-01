@@ -6,6 +6,15 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Wheel menu** (#420): a right-click in the 3D viewport opens a ring of
+  coloured entries with icons and labels around the pointer instead of a
+  list. Hovering a group (Visibility, Boolean; in edit mode Cut, Merge,
+  Delete, More) opens its choices on an outer arc. A click picks, and so
+  does a right drag that ends on an entry. Entries that cannot run now are
+  greyed, with the reason above the wheel. Preferences > Input > "Right-click
+  in the 3D viewport opens a wheel" (`wheel_menu`) turns the list back on.
+
 ## [1.3.0] - 2026-10-30
 
 Online model libraries: NVIDIA SimReady in the Asset Browser, on a native

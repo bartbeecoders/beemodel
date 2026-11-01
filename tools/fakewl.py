@@ -598,6 +598,7 @@ def main():
     tooltips()
     icons()
     menus_ui()
+    wheel_ui()
     pies_ui()
     ctx_menus_ui()
     dialogs()
@@ -6382,6 +6383,90 @@ def menus_ui():
     f.keyev(44, 0); f.pump(0.3)
     check(shade() == 2 and not any(w['kind'] == 'pieitem' for w in ui_tree(m)),
           'releasing over a choice picks it and closes the pie')
+    f.proc.kill()
+
+
+def wheel_ui():
+    """#420: the viewport's right-click menu is a wheel - groups open their
+    choices on an outer arc, a click or a right drag picks, Esc / the centre
+    / another key close it; Preferences > Input turns the list back on."""
+    print('  -- wheel menu --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    items = lambda lvl=None: [w for w in ui_tree(m) if w['kind'] == 'menuitem' and (lvl is None or w['level'] == lvl)]
+    at = lambda w: (w['x'] + w['w'] // 2, w['y'] + w['h'] // 2)
+    item = lambda label: ([w for w in items() if w['label'] == label] or [None])[0]
+    box = (450, 180, 750, 380)
+    before = f.image().crop(box)
+    f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
+    ring = items(0)
+    check(len(ring) == 8 and all(w.get('wheel') == 1 for w in ring) and ring[0]['label'] == 'Ask AI...',
+          f'right-click in the viewport opens the wheel ({[w["label"] for w in ring]})')
+    xs = sorted(at(w)[0] for w in ring)
+    check(xs[-1] - xs[0] > 150, f'its entries go round the pointer ({xs[0]}..{xs[-1]})')
+    f.move(*at(item('Boolean'))); f.pump(0.2)
+    kids = items(1)
+    check([w['label'] for w in kids] == ['Boolean Union', 'Boolean Difference', 'Boolean Intersect']
+          and all(w.get('why') for w in kids), 'hovering Boolean opens its choices, greyed with one mesh (and why)')
+    f.shot('wheel_boolean.png')
+    f.click(*at(kids[0])); f.pump(0.2)
+    check(items(1) and q('print(count())') == '3', 'a click on a choice that cannot run does nothing')
+    f.move(*at(item('Visibility'))); f.pump(0.2)
+    check([w['label'] for w in items(1)] == ['Hide', 'Reveal Hidden'], 'hovering another group swaps the choices')
+    f.click(*at(item('Hide'))); f.pump(0.3)
+    gone = sum(1 for a, b in zip(before.getdata(), f.image().crop(box).getdata()) if a != b)
+    check(not items() and gone > 500, f'its Hide runs and closes the wheel ({gone} px changed)')
+    q('op("object.reveal")')
+    f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
+    f.click(600, 420); f.pump(0.2)
+    check(not items(), 'a click on the centre closes it')
+    f.click(600, 420, 0x111); f.pump(0.2)
+    f.key(1); f.pump(0.2)
+    check(not items() and q('print(count())') == '3', 'Esc closes it')
+    f.button(True, 0x111); f.pump(0.2)         # a right drag onto Duplicate
+    dup = at(item('Duplicate'))
+    f.move(600 + (dup[0] - 600) // 2, 420 + (dup[1] - 420) // 2); f.move(*dup)
+    f.button(False, 0x111); f.pump(0.3)
+    check(q('print(count())') == '4' and not items(), 'press, drag onto Duplicate and let go: it duplicates')
+    f.key(1); f.pump(0.2)                      # (the duplicate's grab)
+    f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
+    f.mods(1); f.pump(0.1)
+    check(len(items()) == 8, 'Shift leaves it open')
+    f.mods(0); f.key(17); f.pump(0.2)          # W
+    check(not items(), 'another key closes it')
+    q('select("Cube")')
+    f.move(600, 300); f.key(15)                # edit mode: the mesh's wheel
+    f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
+    labels = [w['label'] for w in items(0)]
+    check(len(labels) == 9 and 'Extrude' in labels and 'More' in labels, f'in edit mode: the mesh wheel ({labels})')
+    f.move(*at(item('More'))); f.pump(0.2)
+    check(len(items(1)) == 5, f'More: five choices ({[w["label"] for w in items(1)]})')
+    f.shot('wheel_edit.png')
+    f.key(1); f.move(600, 300); f.key(15)
+    menu_pick(f, m, 'Edit', 'Preferences...')
+    click_w = lambda w: f.click(w['x'] + w['w'] // 2, w['y'] + w['h'] // 2)
+    cats = [w for w in ui_tree(m) if w.get('name') == 'prefs.category.input']
+    if cats:
+        click_w(cats[0]); f.pump(0.2)
+    w = widget(m, 'prefs.wheel_menu')
+    check(w is not None and w.get('value') == 1, 'Preferences > Input: the wheel, on')
+    if w:
+        f.click(w['x'] + 10, w['y'] + w['h'] // 2); f.pump(0.2)
+    f.key(1); f.pump(0.2)
+    home = f.home
+    f.proc.kill()
+    f = Fake(home=home)                        # (kept across a restart)
+    f.pump(1.0, until_frame=True)
+    f.enter(600, 300)
+    m = Mcp(f)
+    f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
+    got = [w for w in ui_tree(m) if w['kind'] == 'menuitem']
+    check(got and got[0]['label'] == 'Ask AI...' and not any(w.get('wheel') for w in got),
+          'turned off: the right-click list menu again (after a restart)')
     f.proc.kill()
 
 
