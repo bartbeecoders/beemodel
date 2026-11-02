@@ -185,7 +185,9 @@ Right-click a colour field to copy it as `#rrggbb`, paste a hex code, or reset i
 
 The left side shows what the mouse and keys do right now, as key chips. On the right are the scene's size, the AI permission (click it for the AI menu), the progress of a render, who is co-editing and the live link (serving or mirroring; click it for the Versions editor).
 
-Long jobs (baking maps, light probes, a lightmap or a simulation, imports, rendering an animation) get a chip with their name and a bar filling as they go. The window keeps drawing while they run but does not take input until they finish, except **Esc**, which stops a render of an animation (the frames done are kept).
+Long jobs get a chip with their name, from the first moment: baking maps, a material, light probes, a lightmap or a simulation; imports; opening, saving and exporting; rendering an image or an animation; booleans, shatter, applying a modifier, unwrapping, repairing, subdividing, landscape imports, thumbnails. Where the job knows how far it is, the chip shows the percentage and a bar filling along its bottom; where it does not, a short bar glides along instead. After a second the chip also shows how long it has taken ("Saving, 3 s"), and once a twentieth of the work is done and two seconds have passed, about how long is left ("Rendering the image 48%, 4 s, about 4 s left"). The window keeps drawing while they run but does not take input until they finish, except **Esc**, which stops a render of an animation (the frames done are kept).
+
+Work that runs in the background has a chip too, with how long it has been at it, while you go on working: the AI Assistant ("AI: <your prompt>... 12 s, Stop"), Image to 3D, an online library's catalog or download, a mesh being virtualized, and the library's thumbnails being made. Click the AI, Image to 3D or download chip to stop it.
 
 Messages show as **toasts** above the status bar for four seconds:
 

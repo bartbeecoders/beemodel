@@ -119,7 +119,8 @@ OPERATOR op_an_nonman, "view.show_nonmanifold", "Show Non-manifold", do_an_toggl
 OPERATOR op_an_bound, "view.show_boundary", "Show Boundary Edges", do_an_toggle, check=an_check, arg=AN_BOUND, flags=OPF_AI_SAFE|OPF_QUIET, doc="Mark edges used by one face only (holes)"
 OPERATOR op_an_degen, "view.show_degenerate", "Show Degenerate Faces", do_an_toggle, check=an_check, arg=AN_DEGEN, flags=OPF_AI_SAFE|OPF_QUIET, doc="Mark faces without area"
 OPERATOR op_an_over, "view.show_overhangs", "Show Overhangs", do_an_overhang, check=an_check, arg=AN_OVER, flags=OPF_AI_SAFE|OPF_QUIET, doc="Mark faces facing down steeper than an angle (for 3D printing): view.show_overhangs [degrees, default 45]"
-OPERATOR op_repair, "mesh.repair", "Repair Mesh", do_repair, flags=OPF_AI_SAFE|OPF_UNDO, doc="Merge by distance, remove degenerate and duplicate faces, fill holes, fix normals, drop loose vertices: mesh.repair [distance, default 0.0001]"
+OPERATOR op_repair, "mesh.repair", "Repair Mesh", job_op_repair, flags=OPF_AI_SAFE|OPF_UNDO, doc="Merge by distance, remove degenerate and duplicate faces, fill holes, fix normals, drop loose vertices: mesh.repair [distance, default 0.0001]"
+JOB_NOW job_op_repair, do_repair, "Repairing the mesh"
 
 .text
 

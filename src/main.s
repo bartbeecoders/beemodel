@@ -175,7 +175,19 @@ bee_main:
     cmp     eax, edx
     jge     36f
 37: mov     edx, eax
-36: push    rdx                         # (and a held pie key)
+36: push    rdx                         # (and work going on: its chip's time)
+    push    rsi
+    call    busy_wait
+    pop     rsi
+    pop     rdx
+    test    eax, eax
+    js      343f
+    cmp     edx, -1
+    je      344f
+    cmp     eax, edx
+    jge     343f
+344:mov     edx, eax
+343:push    rdx                         # (and a held pie key)
     push    rsi
     call    pie_wait
     pop     rsi
@@ -221,6 +233,7 @@ bee_main:
     call    tip_tick                    # a tooltip whose time has come
     call    pie_tick                    # a pie key held long enough
     call    toast_tick                  # a toast whose time is up
+    call    busy_tick                   # (work going on: its time, a second on)
     call    team_pending                # a button's operator, between frames
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop

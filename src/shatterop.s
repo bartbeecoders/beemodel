@@ -238,8 +238,10 @@ so_innerc:      .skip 4
 sh_ncell_used:  .skip 4
 
 .text
-OPERATOR op_shatter, "object.shatter", "Shatter...", do_shatter, flags=OPF_AI_SAFE|OPF_UNDO, form=form_shatter, doc="Break the active mesh object into pieces, each an object (the original is hidden): object.shatter <shards|bricks|balls> [count n] [seed s] - shards: Voronoi cells [at x y z | cursor | surface] [spread f]; bricks: a running bond [counts a b c | size x y z] [offset f|random] [gap g] [jitter f]; balls: [radius r] [spread f]; [inner r g b] colours the cut faces; [glue N/m2 [paint]] ties neighbours; [impact N s]: whole until hit that hard; [preset brickwall|glass|stone|gravel]; [again]: a piece or the original: the pieces made before go first"
-OPERATOR op_sep_loose, "mesh.separate_loose", "Separate By Loose Parts", do_sep_loose, flags=OPF_AI_SAFE|OPF_UNDO, doc="Split each selected mesh object into one object per loose part (parts that share no vertex)"
+OPERATOR op_shatter, "object.shatter", "Shatter...", job_op_shatter, flags=OPF_AI_SAFE|OPF_UNDO, form=form_shatter, doc="Break the active mesh object into pieces, each an object (the original is hidden): object.shatter <shards|bricks|balls> [count n] [seed s] - shards: Voronoi cells [at x y z | cursor | surface] [spread f]; bricks: a running bond [counts a b c | size x y z] [offset f|random] [gap g] [jitter f]; balls: [radius r] [spread f]; [inner r g b] colours the cut faces; [glue N/m2 [paint]] ties neighbours; [impact N s]: whole until hit that hard; [preset brickwall|glass|stone|gravel]; [again]: a piece or the original: the pieces made before go first"
+JOB_NOW job_op_shatter, do_shatter, "Shattering"
+OPERATOR op_sep_loose, "mesh.separate_loose", "Separate By Loose Parts", job_op_sep_loose, flags=OPF_AI_SAFE|OPF_UNDO, doc="Split each selected mesh object into one object per loose part (parts that share no vertex)"
+JOB_NOW job_op_sep_loose, do_sep_loose, "Separating loose parts"
 
 # sh_info(edi=k) -> xmm0 (double): the last shatter's 0 pieces, 1 cells, 2
 #   the pieces' volume, 3 the original's, 4 the smallest piece's, 5 open

@@ -65,7 +65,8 @@ e_bx_fail:      .asciz "  export .blend: Blender could not save it: "
 s_bx_start:     .asciz "  saving through Blender: "
 s_bx_done:      .asciz "  saved "
 .text
-OPERATOR op_export_blend, "file.export_blend", "Export Blender...", op_eblend, doc="Save the scene as a Blender file (.blend), through Blender run in the background: file.export_blend <path>", form=form_eblend
+OPERATOR op_export_blend, "file.export_blend", "Export Blender...", job_op_export_blend, doc="Save the scene as a Blender file (.blend), through Blender run in the background: file.export_blend <path>", form=form_eblend
+JOB_NOW job_op_export_blend, op_eblend, "Exporting a Blender file"
 
 op_eblend:
     push    rbx

@@ -70,6 +70,7 @@ class Fake:
         self.wcbs = {}             #  their frame callbacks
         self.xdg_of, self.top_of = {}, {}   # xdg_surface -> surface, toplevel -> xdg
         self.ptr_surf = None
+        self.keep = None           # a list: every frame kept in it (#433)
         self.frame = None          # (w, h, bytes)
         self.frames = 0
         self.serial = 100
@@ -221,6 +222,8 @@ class Fake:
             pid, off, w, h, stride = self.buffers[self.attached]
             mem = self.pools[pid][1]
             self.frame = (w, h, bytes(mem[off:off + stride * h]))
+            if self.keep is not None:
+                self.keep.append(self.frame)
             self.frames += 1
             if self.first_frame_ms is None:
                 self.first_frame_ms = (time.time() - self.t0) * 1000
@@ -702,6 +705,7 @@ def main():
     workspaces_ui()
     dock_ui()
     panel_windows_ui()
+    progress_ui()
     help_ui()
     ui_review()
     a11y_ui()
@@ -5719,7 +5723,7 @@ def virtual_geometry():
     q('delete("Cube")\nadd("sphere", "S", 0, 1, 0)\nmodifier("S", "subsurf")\nmodset("S", 0, "levels", 6)\nmodapply("S", 0)\nselect("S")')
     q('op("vgeo.build")')
     st = q('print(vgeo("S", 0))')
-    lat, polls = [], 0
+    lat, polls, chip = [], 0, False
     t0 = time.time()
     while time.time() - t0 < 60:
         f.latencies = []
@@ -5727,8 +5731,11 @@ def virtual_geometry():
         f.key(106)                                  # Right: a frame on
         lat += f.latencies
         polls += 1
+        chip = chip or any(w['name'] == 'status.virtualizing' for w in ui_tree(m))   # (#433)
         if q('print(vgeo("S", 0))') != '1':
             break
+    check(chip and not any(w['name'] == 'status.virtualizing' for w in ui_tree(m)),
+          'the status bar shows "Virtualizing the mesh" while it builds, and not after (#433)')
     secs = time.time() - t0
     fin = q('print(vgeo("S", 0), vgeo("S", 4), vgeo("S", 9))').split()
     lat = sorted(lat)
@@ -9058,6 +9065,42 @@ def panel_windows_ui():
     q('op("workspace.set", "1")'); f.pump(0.3)
     check(not f.windows() and A()['Properties']['value'] == 'float',
           'another workspace: the window closes, its area a panel in the main window again')
+    f.proc.kill()
+
+
+def progress_ui():
+    """#433: long work shows in the status bar. An operator that blocks the
+    window (here file.save) shows its job chip at once, in a frame before the
+    work; a job inside another (an export that saves) leaves the outer one's
+    chip; background work (Image to 3D, the AI, downloads, a virtualized
+    mesh, library thumbnails) has a chip with how long it has been at it."""
+    print('  -- progress of long work --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    path = os.path.join(f.home, 'p.bee')
+    f.key(28); f.type('agent.permission_files'); f.key(28); f.pump(0.2)   # (the console)
+    f.pump(0.3)
+    before = f.frame
+    f.keep = []
+    f.type('file.save ' + path); f.key(28)
+    f.pump(1.0)
+    kept, f.keep = f.keep, None
+    f.key(1)
+    W, H = f.frame[0], f.frame[1]
+    def strip(fr):                              # the status bar's right half
+        from PIL import Image
+        img = Image.frombuffer('RGBX', (fr[0], fr[1]), fr[2], 'raw', 'BGRX', 0, 1).convert('RGB')
+        return img.crop((W // 2, H - 20, W, H)).tobytes()
+    final = strip(kept[-1]) if kept else b''
+    chip = sum(1 for fr in kept if strip(fr) != final and strip(fr) != strip(before))
+    check(os.path.exists(path) and chip >= 1,
+          f'file.save from the console: a frame with its job chip ("Saving") before the work ({chip} of '
+          f'{len(kept)} frames), then the chip gone')
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    check('status.job' not in names(), 'no job chip once it is done')
     f.proc.kill()
 
 

@@ -96,7 +96,7 @@ k_done:         .asciz "done "
 k_error:        .asciz "error "
 s_hz_starting:  .asciz "Starting"
 s_hz_chip:      .asciz "Image to 3D: "
-s_hz_pct:       .asciz "% (click: stop)"
+s_hz_pct:       .asciz "%"            # (status.s adds its time, "(click: stop)")
 s_hz_need:      .asciz "  object.from_image <image file> [512 | 1024 | 1536]"
 s_hz_needr:     .asciz "  object.refine_from_image <image file> [512 | 1024 | 1536] (the active mesh)"
 s_hz_noimg:     .asciz "  Image to 3D: cannot read the image "
@@ -117,7 +117,8 @@ s_hz_made:      .asciz "  Image to 3D made "
 OPERATOR op_hz_new, "object.from_image", "Model from Image (Hi3D)...", do_hz_new, flags=0, doc="A 3D model from a photo or drawing of one thing (the Hi3D addon, docs/HI3D.md): object.from_image <image> [512 | 1024 | 1536] (detail; 512 when not given). TripoSR makes the rough shape, Hi3D v1.0 the detail, on the GPU while you work; the model comes in at the 3D cursor", form=form_hznew
 OPERATOR op_hz_refine, "object.refine_from_image", "Refine from Image (Hi3D)...", do_hz_refine, poll_hz_mesh, flags=0, doc="Carve a photo's detail into the active mesh (a rough block-out of the same thing, facing +Z) with the Hi3D addon: object.refine_from_image <image> [512 | 1024 | 1536]. The refined mesh takes its place; the original is hidden", form=form_hzref
 OPERATOR op_hz_stop, "object.from_image_stop", "Stop Image to 3D", do_hz_stop, flags=OPF_AI_SAFE, doc="Stop the model being made from an image (object.from_image)"
-OPERATOR op_hz_place, "object.from_image_place", "Model from Image", do_hz_place, flags=OPF_UNDO|OPF_HIDDEN|OPF_QUIET, doc="(Image to 3D, when the helper is done) bring its mesh in: object.from_image_place <obj>"
+OPERATOR op_hz_place, "object.from_image_place", "Model from Image", job_op_hz_place, flags=OPF_UNDO|OPF_HIDDEN|OPF_QUIET, doc="(Image to 3D, when the helper is done) bring its mesh in: object.from_image_place <obj>"
+JOB_NOW job_op_hz_place, do_hz_place, "Importing the model from the image"
 
 .text
 # poll_hz_mesh -> rax = 0 when the active object is a mesh, else why not
@@ -744,7 +745,7 @@ do_hz_place:
     ret
 
 # hz_chip -> rax = the status bar chip's text (fmt_buf): "Image to 3D:
-#   <what it is doing> 42% (click: stop)"
+#   <what it is doing> 42%" (status.s: its time, then "(click: stop)")
 hz_chip:
     sub     rsp, 8
     call    fmt_reset

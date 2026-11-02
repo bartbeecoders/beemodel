@@ -1160,7 +1160,8 @@ OPERATOR op_lb_pack,   "lib.pack",   "Pack Assets",     do_lb_pack, flags=OPF_AI
 OPERATOR op_lb_import, "lib.import", "Import Asset Pack", do_lb_import, flags=OPF_AI_SAFE, doc="Merge an asset pack into the library: lib.import <path>"
 OPERATOR op_lb_add,    "lib.add",    "Add Library",     do_lb_addroot, flags=OPF_AI_SAFE, doc="List another library folder's assets too: lib.add <folder>"
 OPERATOR op_lb_list,   "lib.list",   "List Library",    do_lb_list, flags=OPF_AI_SAFE, doc="List the library's assets (kind, name, tags)"
-OPERATOR op_lb_thumbs, "lib.thumbnails", "Make Thumbnails", do_lb_thumbs, flags=OPF_AI_SAFE, doc="Path-trace every missing thumbnail now (the window makes them in the background)"
+OPERATOR op_lb_thumbs, "lib.thumbnails", "Make Thumbnails", job_op_lb_thumbs, flags=OPF_AI_SAFE, doc="Path-trace every missing thumbnail now (the window makes them in the background)"
+JOB_NOW job_op_lb_thumbs, do_lb_thumbs, "Making thumbnails"
 OPERATOR op_lb_thumb,  "lib.thumbnail", "Make a Thumbnail", do_lb_thumb, flags=OPF_AI_SAFE|OPF_HIDDEN, doc="(a child process) path-trace one asset's thumbnail: lib.thumbnail <id>"
 
 # lb_words(rsi=text) - lb_name = the first word not a #tag (or ""), lb_tags =

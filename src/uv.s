@@ -91,9 +91,11 @@ ut_ipoly:       .skip 8
 ut_mark:        .skip 8
 
 .text
-OPERATOR op_uv_unwrap, "uv.unwrap", "Unwrap", do_unwrap, arg=0, key=KEY_U, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="UV: unwrap the mesh along its seams (least squares conformal maps), then pack the islands"
+OPERATOR op_uv_unwrap, "uv.unwrap", "Unwrap", job_op_uv_unwrap, arg=0, key=KEY_U, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="UV: unwrap the mesh along its seams (least squares conformal maps), then pack the islands"
+JOB_NOW job_op_uv_unwrap, do_unwrap, "Unwrapping"
 OPERATOR op_uv_smart, "uv.smart_project", "Smart UV Project", do_unwrap, arg=1, key=KEY_U|KM_SHIFT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="UV: project groups of faces facing alike (within 66 degrees) flat, then pack"
-OPERATOR op_uv_pack, "uv.pack", "Pack Islands", do_pack, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="UV: same texel density, smallest boxes, packed into the unit square"
+OPERATOR op_uv_pack, "uv.pack", "Pack Islands", job_op_uv_pack, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="UV: same texel density, smallest boxes, packed into the unit square"
+JOB_NOW job_op_uv_pack, do_pack, "Packing UV islands"
 OPERATOR op_uv_mark, "uv.seam_mark", "Mark Seam", do_seams, arg=0, key=KEY_E|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="UV: the edges between selected vertices become seams"
 OPERATOR op_uv_clear, "uv.seam_clear", "Clear Seam", do_seams, arg=1, key=KEY_E|KM_CTRL|KM_SHIFT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="UV: the edges between selected vertices are no seams"
 OPERATOR op_uv_sharp, "uv.seams_from_sharp", "Seams from Sharp Edges", do_seams, arg=2, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="UV: every edge sharper than 30 degrees becomes a seam"
