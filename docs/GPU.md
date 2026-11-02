@@ -318,6 +318,12 @@ the GPU, from the scene Hive snapshots (`src/live.s`):
     sky and the unshadowed sun);
   - mirrors (metal under roughness 0.3) and glass followed, four deep;
     other surfaces reflect the sky.
+
+  Or, with **Preferences › Viewport › Rendered motion samples** 1 to 4
+  (default 0, the raycast; `view.rendered_motion <0..4>`, #421), that many
+  path-traced samples a frame, denoised, as playback has: the light that
+  bounces (a red wall's glow on the floor, soft shadows) shows while you
+  move. See *Moving with path-traced samples* below.
 - **Once the view is still**, Hive's path-traced samples accumulate on the
   GPU, a 12 ms slice a frame, up to **Preferences › Viewport › Rendered
   samples** (64; `view.rendered_samples <n>`). The raycast stays shown for
@@ -341,6 +347,11 @@ the GPU, from the scene Hive snapshots (`src/live.s`):
   - five edge-avoiding à-trous passes (steps 1 to 16) weigh each tap by
     normals, depth and luminance;
   - the albedo is multiplied back in.
+
+  With a single sample the samples' spread gives no variance (it is 0),
+  which would leave that frame as noisy as it came: its variance is taken
+  from the 5 × 5 pixels around it that face the same way instead (as SVGF
+  does without history).
 
   That is six more dispatches after the frame's samples; only the last one
   reads pixels back. In the test scene, 4 denoised samples are 1.3 levels
@@ -424,6 +435,27 @@ including the readback. That holds for the 1,600-triangle test scene and
 for one million triangles. 1024 samples of the small scene take 1.5 s
 (3.3 s with the million triangles). Building the million-triangle scene
 takes 0.55 s; the small one, 4 ms.
+
+**Moving with path-traced samples** (#421, stage 0). `tests/gpu.py`'s
+Cornell-style room (one bulb, no sky, a red and a green wall, a block), the
+frame drawn as the camera arrives, against the room at 512 samples (mean
+difference in levels, the room's inside), at an 800 x 540 viewport with the
+denoiser and the readback:
+
+| While moving | RTX 4080 SUPER | llvmpipe, 4 threads | Off the reference |
+|---|---|---|---|
+| raycast (0) | 3 ms | 137 ms | 19.2 levels |
+| 1 sample, denoised | 10 ms | 321 ms | 7.1 |
+| 2 samples | 13 ms | 557 ms | 7.6 |
+| 4 samples | 22 ms (p90 63) | 1043 ms | 4.6 |
+
+The raycast misses the bounced light: the walls' colours on the floor and
+the back wall, and its shadows are black. One denoised sample is 2.7 times
+nearer the reference for about 7 ms more a frame on an RTX card, so it keeps
+a 60 Hz view; on llvmpipe even the raycast is not interactive. (Two samples
+were no better than one here: the one-sample variance comes from the
+neighbourhood, which smooths more.) `tests/gpu.py` prints these times on
+every run.
 
 ### Animations (v0.23)
 

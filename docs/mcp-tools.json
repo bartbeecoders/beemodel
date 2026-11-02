@@ -3335,6 +3335,19 @@
    }
   },
   {
+   "name": "op_view_rendered_motion",
+   "description": "Rendered Motion Samples - Rendered shading while the view or the scene changes: path-traced samples each frame gets, denoised, instead of the raycast: view.rendered_motion <0..4> (0: the raycast; kept in the preferences)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_view_rendered_samples",
    "description": "Rendered Samples - Rendered shading's path-traced samples once the view is still: view.rendered_samples <0..4096> (0: the raycast alone; kept in the preferences)",
    "inputSchema": {

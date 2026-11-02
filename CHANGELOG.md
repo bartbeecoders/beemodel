@@ -24,7 +24,16 @@ project uses [Semantic Versioning](https://semver.org/).
   monitor, on Wayland and on Windows. Its menus, option lists and tooltips
   open in it; closing it or its dock button docks the area back.
 
+- **Rendered motion samples** (#421): Preferences › Viewport › Rendered
+  motion samples 1 to 4 (`view.rendered_motion`) path-trace that many
+  samples a frame, denoised, while the view or the scene changes, instead of
+  the raycast, so bounced light shows while you move. One sample is 2.7
+  times nearer a 512-sample image than the raycast for about 7 ms more a
+  frame on an RTX 4080 SUPER (docs/GPU.md). Default 0: the raycast.
+
 ### Fixed
+- Rendered's denoiser left a single-sample frame as noisy as it came (its
+  variance was 0): one sample's variance now comes from its neighbourhood.
 - After passing over a widget scrolled out of view, the widget hit test
   could look past a dialog's own widgets and past the start of the list.
 - A viewport moved by a split or a close keeps whether it was
