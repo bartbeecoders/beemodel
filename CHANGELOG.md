@@ -80,6 +80,14 @@ project uses [Semantic Versioning](https://semver.org/).
   virtualized and the library's thumbnails.
 
 ### Fixed
+- Soft bodies and cloth against box-like colliders: a soft ball rolling off
+  a ramp's end wrapped round it and hung there, and on a narrow ramp it
+  veered off sideways. A particle near a collider is now pushed once, from
+  the nearest triangle, along its normal or straight away from an edge it
+  is past; particles can no longer end up inside a collider thicker than
+  their thickness; and the colliders' corner edges are kept out of the
+  cloth's triangles. A softness demo (Vibecoding/demos/softness.bees): five
+  balls from rigid to 100 % soft down glass zig-zags onto discs with holes.
 - A dialog opened while the welcome screen showed was drawn under it, and
   the welcome screen took the clicks (#444): a dialog now closes it.
 - A long path pasted or typed in the file dialog ran over everything beside

@@ -5591,6 +5591,17 @@ def cloth():
     sim = float(w[1]) if len(w) == 2 else 1e9
     check(len(w) == 2 and w[0] == '6561' and sim < 4000 * (3 if os.environ.get('CI') else 1),
           f'a 6561-particle sheet colliding with a ball, the floor and itself: 4 s simulated in {sim / 1000:.1f} s')
+    code = ('while count() > 0 { delete(name(0)) }\nop("cloth.world", "substeps 40")\n'   # (the softness demo's bug)
+            'r = add("cube", "R", -0.2, 3.75, 0)\nscale(r, 0.56, 0.09, 0.3)\nrotate(r, 0, 0, -30deg)\n'
+            'select("R")\nop("cloth.add", "collider friction 0 thickness 0.03")\n'
+            'b = add("sphere", "B", -0.5, 4.2, 0)\nscale(b, 0.15)\nselect("B")\n'
+            'op("cloth.add", "soft stretch 0.00001 volume 0.000005 bend 0.001 mass 1 damping 0 friction 0")\n'
+            'fn c(a) {\n s = 0\n for i in 0..verts("B") { s += evpos("B", i, a) }\n return get("B", a) + s / verts("B") * 0.15\n}\n'
+            'for f in 2..41 { frame(f) }\nprint(round(c("x") * 100), round(c("y") * 100), round(abs(c("z")) * 100))\n')
+    r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
+    w = (r.stdout.strip().split('\n') or [''])[-1].split()
+    ok = len(w) == 3 and int(w[0]) > 150 and int(w[1]) < 150 and int(w[2]) <= 2
+    check(ok, f'a soft ball slides down a narrow ramp and off its end, straight (it veered to the side and hung from the end): x y |z| cm {w}')
     f = Fake()
     f.pump(1.0, until_frame=True)
     f.keymap('tests/keymaps/us.xkb')
