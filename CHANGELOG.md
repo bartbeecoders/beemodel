@@ -29,7 +29,10 @@ project uses [Semantic Versioning](https://semver.org/).
   samples a frame, denoised, while the view or the scene changes, instead of
   the raycast, so bounced light shows while you move. One sample is 2.7
   times nearer a 512-sample image than the raycast for about 7 ms more a
-  frame on an RTX 4080 SUPER (docs/GPU.md). Default 0: the raycast.
+  frame on an RTX 4080 SUPER (docs/GPU.md). Default 0: the raycast; on a
+  fast GPU, samples already replace it whenever the camera rests a frame,
+  so the option matters most for continuous motion and slower GPUs.
+- `Vibecoding/demos/cornell_room.bee`: the Cornell-style room of the test.
 
 ### Fixed
 - Rendered's denoiser left a single-sample frame as noisy as it came (its

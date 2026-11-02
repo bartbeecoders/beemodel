@@ -457,6 +457,19 @@ were no better than one here: the one-sample variance comes from the
 neighbourhood, which smooths more.) `tests/gpu.py` prints these times on
 every run.
 
+**In use the difference is small on a fast GPU.** The table measures the
+frame drawn as the camera arrives, with no samples after it. With Rendered
+samples at their default (64), any frame the camera does not move counts as
+still, and samples accumulate: on an RTX card the first 4 come within a few
+milliseconds and replace the raycast. So while you orbit, even with motion
+samples 0, most frames shown are already path-traced and denoised, and the
+raycast only flashes between them. Motion samples matter when the camera
+moves every frame (a fast, continuous orbit) and on slower GPUs, where the
+samples do not keep up and the raycast stays. To see the two side by side,
+set Rendered samples to 1 (each frame is then the frame of a move). This is
+why the default stays 0, and why #421 stopped here rather than adding a
+radiance cache (its stages 1 and 2).
+
 ### Animations (v0.23)
 
 `render_frames(folder, first, last, ...)` and `render.animation <folder>
