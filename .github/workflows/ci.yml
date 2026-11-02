@@ -64,6 +64,8 @@ jobs:
 
       - name: Files from 1.0 open as they were (tests/fixtures/compat)
         run: timeout 300 python tests/compat.py build/beemodel
+      - name: Smaller .bee files (deflated chunks, JPEG textures kept)
+        run: timeout 300 python tests/beesize.py build/beemodel
 
       - name: Boolean stress corpus (exact identities, closed results)
         run: timeout 300 python tests/bool_stress.py build/beemodel --cases 300

@@ -59,6 +59,9 @@
 
 .equ BEE_MAGIC,     0x4d454542          # "BEEM"
 .equ BEE_VERSION,   1
+.equ BEE_PACKED,    2                   # (#442) chunks deflated: ZCHK
+.equ TAG_ZCHK,      0x4B48435A          # "ZCHK": tag, raw size, raw deflate
+.equ TAG_THMB_,     0x424d4854          # "THMB" (thumb.s reads it from disk)
 .equ TAG_MESH,      0x4853454d          # "MESH"
 .equ TAG_OBJS,      0x534a424f          # "OBJS"
 .equ TAG_VIEW,      0x57454956          # "VIEW"
@@ -104,6 +107,8 @@
 .section .bss
 .align 8
 cur_path:       .skip 512               # current .bee file ("" = untitled)
+pk_buf:         .skip 8                 # bee_pack's output (0: none)
+pk_size:        .skip 8
 mesh_tab:       .skip 8*MAX_FILE_MESHES
 fbase:          .skip 8                 # mapped input file
 wrlp_chunk:     .skip 8
@@ -410,6 +415,212 @@ vgeo_chunks:
     ret
 
 
+# bee_pack -> rsi = the bytes to write, rdx = how many (#442): the file in
+#   wb with each chunk of 4 KiB or more deflated into a ZCHK chunk (its tag,
+#   its size, raw deflate) when that saves a tenth, and version 2 in its
+#   header. THMB stays (thumb.s reads it from the disk) and IMGD (PNG and
+#   JPEG: compressed already). A scene with virtualized geometry is written
+#   as it was: VGEO blocks stay on pages of the file, read in place
+bee_pack:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     qword ptr [rip+pk_buf], 0
+    mov     r12, [rip+wb_ptr]
+    mov     r13, [rip+wb_len]
+    lea     r14, [r12+r13]
+    lea     rbx, [r12+8]                # any VGEO: as it is
+1:  lea     rax, [rbx+8]
+    cmp     rax, r14
+    ja      2f
+    cmp     dword ptr [rbx], TAG_VGEO
+    je      .Lpk_plain
+    mov     eax, [rbx+4]
+    lea     rbx, [rbx+rax+8]
+    jmp     1b
+2:  mov     rdi, r13                    # room: a ninth more, and some
+    shr     rdi, 3
+    add     rdi, r13
+    add     rdi, 1 << 20
+    mov     [rip+pk_size], rdi
+    call    vmap
+    test    rax, rax
+    jz      .Lpk_plain
+    mov     [rip+pk_buf], rax
+    mov     r15, rax
+    mov     eax, [r12]
+    mov     [r15], eax
+    mov     dword ptr [r15+4], BEE_PACKED
+    add     r15, 8
+    lea     rbx, [r12+8]
+3:  lea     rax, [rbx+8]
+    cmp     rax, r14
+    ja      .Lpk_done
+    mov     eax, [rbx]
+    mov     ecx, [rbx+4]
+    mov     [rsp], rcx
+    cmp     ecx, 4096
+    jb      .Lpk_copy
+    cmp     eax, TAG_THMB_
+    je      .Lpk_copy
+    cmp     eax, TAG_IMGD
+    je      .Lpk_copy
+    mov     dword ptr [r15], TAG_ZCHK
+    mov     [r15+8], eax
+    mov     [r15+12], ecx
+    lea     rsi, [rbx+8]
+    mov     edx, ecx
+    lea     rdi, [r15+16]
+    call    deflate_buf
+    lea     rdx, [r15+16]
+    sub     rax, rdx                    # its deflated size
+    mov     rcx, [rsp]
+    lea     rdx, [rax*4+rax]            # worth it: (d + 8) * 10 <= raw * 9
+    lea     rdx, [rdx*2+80]
+    imul    r8, rcx, 9
+    cmp     rdx, r8
+    ja      .Lpk_copy
+    lea     edx, [rax+8]
+    mov     [r15+4], edx
+    lea     r15, [r15+rax+16]
+    lea     rbx, [rbx+rcx+8]
+    jmp     3b
+.Lpk_copy:
+    mov     rcx, [rsp]
+    lea     rcx, [rcx+8]
+    mov     rsi, rbx
+    mov     rdi, r15
+    rep     movsb
+    mov     r15, rdi
+    mov     rbx, rsi
+    jmp     3b
+.Lpk_done:
+    mov     rsi, [rip+pk_buf]
+    mov     rdx, r15
+    sub     rdx, rsi
+    jmp     9f
+.Lpk_plain:
+    mov     rsi, r12
+    mov     rdx, r13
+9:  add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# bee_pack_free - bee_pack's output let go
+bee_pack_free:
+    mov     rdi, [rip+pk_buf]
+    test    rdi, rdi
+    jz      1f
+    mov     rsi, [rip+pk_size]
+    mov     qword ptr [rip+pk_buf], 0
+    jmp     vunmap
+1:  ret
+
+# bee_unpack -> eax = 1: fbase / fsize are the file (version 2) with its
+#   ZCHK chunks inflated into a copy (the mapping let go); 0: damaged
+bee_unpack:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 32
+    mov     r12, [rip+fbase]
+    mov     r13, [rip+fsize]
+    lea     r14, [r12+r13]
+    mov     qword ptr [rsp+8], 0
+    mov     r15d, 8                     # the size it takes
+    lea     rbx, [r12+8]
+1:  lea     rax, [rbx+8]
+    cmp     rax, r14
+    ja      2f
+    mov     ecx, [rbx+4]
+    lea     rax, [rbx+rcx+8]
+    cmp     rax, r14
+    ja      .Lpu_bad
+    cmp     dword ptr [rbx], TAG_ZCHK
+    jne     11f
+    cmp     ecx, 8
+    jb      .Lpu_bad
+    mov     eax, [rbx+12]
+    lea     r15, [r15+rax+8]
+    jmp     12f
+11: lea     r15, [r15+rcx+8]
+12: lea     rbx, [rbx+rcx+8]
+    jmp     1b
+2:  mov     [rsp], r15
+    mov     rdi, r15
+    call    vmap
+    test    rax, rax
+    jz      .Lpu_bad
+    mov     [rsp+8], rax
+    mov     r15, rax
+    mov     eax, [r12]
+    mov     [r15], eax
+    mov     dword ptr [r15+4], BEE_VERSION
+    add     r15, 8
+    lea     rbx, [r12+8]
+3:  lea     rax, [rbx+8]
+    cmp     rax, r14
+    ja      4f
+    mov     ecx, [rbx+4]
+    mov     [rsp+16], rcx
+    cmp     dword ptr [rbx], TAG_ZCHK
+    jne     31f
+    mov     eax, [rbx+8]                # its tag and size, then inflated
+    mov     [r15], eax
+    mov     eax, [rbx+12]
+    mov     [r15+4], eax
+    lea     rdi, [rbx+16]
+    lea     rsi, [rcx-8]
+    lea     rdx, [r15+8]
+    mov     ecx, [rbx+12]
+    call    inflate
+    mov     ecx, [rbx+12]
+    cmp     rax, rcx
+    jne     .Lpu_bad
+    lea     r15, [r15+rcx+8]
+    mov     rcx, [rsp+16]
+    lea     rbx, [rbx+rcx+8]
+    jmp     3b
+31: lea     rcx, [rcx+8]                # as it is
+    mov     rsi, rbx
+    mov     rdi, r15
+    rep     movsb
+    mov     r15, rdi
+    mov     rbx, rsi
+    jmp     3b
+4:  mov     rdi, r12                    # the copy instead of the file
+    mov     rsi, r13
+    call    file_unmap
+    mov     rax, [rsp+8]
+    mov     [rip+fbase], rax
+    mov     rax, [rsp]
+    mov     [rip+fsize], rax
+    mov     eax, 1
+    jmp     9f
+.Lpu_bad:
+    mov     rdi, [rsp+8]
+    test    rdi, rdi
+    jz      8f
+    mov     rsi, [rsp]
+    call    vunmap
+8:  xor     eax, eax
+9:  add     rsp, 32
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
 # mesh_index(rdi=mesh) -> eax = index in mesh_tab (added when new)
 mesh_index:
     xor     eax, eax
@@ -665,12 +876,12 @@ bee_save:
     mov     edx, 24
     call    wb_bytes
     call    chunk_end
+    call    bee_pack                    # (#442: its big chunks deflated)
     mov     rdi, r14
-    mov     rsi, [rip+wb_ptr]
-    mov     rdx, [rip+wb_len]
     call    file_write_atomic
     push    rax
     sub     rsp, 8
+    call    bee_pack_free
     call    wp_save_end                 # (the world's objects back in)
     add     rsp, 8
     pop     rax
@@ -1315,7 +1526,14 @@ bee_load:
     cmp     dword ptr [rax], BEE_MAGIC
     jne     .Lbl_bad
     cmp     dword ptr [rax+4], BEE_VERSION
-    jne     .Lbl_bad
+    je      11f
+    cmp     dword ptr [rax+4], BEE_PACKED   # (#442: its chunks inflated
+    jne     .Lbl_bad                        #  into a copy, read from it)
+    call    bee_unpack
+    test    eax, eax
+    jz      .Lbl_bad
+    mov     rax, [rip+fbase]
+11:
     xor     r14, r14                    # OBJS chunk
     xor     r15, r15                    # VIEW chunk
     mov     qword ptr [rip+mods_chunk], 0

@@ -671,6 +671,8 @@ def main():
     wheel_groups_ui()
     wheel_keys_ui()
     fps_ui()
+    dialogs_render_view_ui()
+    outliner_tidy_ui()
     pies_ui()
     ctx_menus_ui()
     dialogs()
@@ -6713,6 +6715,139 @@ def fps_ui():
         f.click(w['x'] + 10, w['y'] + w['h'] // 2); f.pump(0.2)
     f.key(1); f.pump(0.3)
     check(widget(m, 'status.fps') is None, 'turned off: not shown')
+    f.proc.kill()
+
+
+def dialogs_render_view_ui():
+    """#444: a dialog opened while the welcome screen shows takes its place
+    (it was drawn under it, and the welcome took the clicks). #445: a long
+    path in the file dialog's field scrolls inside it (it ran over what is
+    beside it). #446: the Render area zooms with the wheel about the
+    pointer, a drag pans it, Fit shows it whole again; Settings shows the
+    Properties' Render tab."""
+    print('  -- welcome and dialogs, a long path, the Render area\'s view --')
+    f = Fake(welcome=True)
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    names = lambda: {w['name'] for w in ui_tree(m)}
+    check('welcome.default' in names(), 'the welcome screen shows at start')
+    f.mods(4); f.key(24); f.mods(0); f.pump(0.3)      # Ctrl+O
+    n = names()
+    check('files.path' in n and 'welcome.default' not in n, 'Ctrl+O: the file dialog, the welcome screen gone')
+    fp, fav = widget(m, 'files.path'), widget(m, 'files.favorite')
+    box = (fav['x'] - 2, fav['y'], fav['x'] + fav['w'], fav['y'] + fav['h'])   # (+ Favorite, beside it)
+    before = f.image().crop(box)
+    f.click(fp['x'] + fp['w'] // 2, fp['y'] + fp['h'] // 2); f.pump(0.2)
+    f.mods(4); f.key(30); f.mods(0)                   # Ctrl+A, then a long path
+    f.type('/tmp/a-rather-long-folder-name/with-more-folders-in-it/and-still-more-of-them/' * 3 + 'scene.blend')
+    f.pump(0.3)
+    after = f.image().crop(box)
+    diff = sum(1 for a, b in zip(before.getdata(), after.getdata()) if a != b)
+    check(diff == 0, f'a long path stays inside its field (beside it: {diff} px changed)')
+    f.shot('long_path.png')
+    f.key(1); f.pump(0.2); f.key(1); f.pump(0.2)
+    check('files.path' not in names(), 'Esc, Esc: the dialog closes')
+    q('op("render.settings", "320 180 4")\nadd("sphere", "Ball", 0, 1, 2)')
+    q('op("render.start")')
+    prev = None
+    for _ in range(40):                        # (4 samples: done when the
+        f.pump(0.25)                           #  frames stop changing)
+        img = f.image()
+        if prev is not None and img.tobytes() == prev:
+            break
+        prev = img.tobytes()
+    ra = [a for a in areas(m) if a['label'] == 'Render']
+    if ra:                                     # (its header's tools need room:
+        a = ra[0]                              #  maximized, Ctrl+Space)
+        f.move(a['x'] + a['w'] // 2, a['y'] + a['h'] // 2); f.pump(0.1)
+        f.mods(4); f.key(57); f.mods(0); f.pump(0.3)
+        ra = [a for a in areas(m) if a['label'] == 'Render']
+    check(ra and {'render.header.fit', 'render.header.settings'} <= names(), 'the Render area: Fit and Settings in its header')
+    if not ra:
+        f.proc.kill(); return
+    a = ra[0]
+    cx, cy = a['x'] + a['w'] // 2, a['y'] + a['h'] // 2 + 10
+    rbox = (a['x'] + 10, a['y'] + 60, a['x'] + a['w'] - 10, a['y'] + a['h'] - 10)
+    fit = f.image().crop(rbox)
+    f.move(cx, cy); f.wheel(-1); f.wheel(-1); f.pump(0.2)
+    zoomed = f.image().crop(rbox)
+    dz = sum(1 for x, y in zip(fit.getdata(), zoomed.getdata()) if x != y)
+    check(dz > 2000, f'the wheel zooms in ({dz} px changed)')
+    f.drag(cx, cy, cx + 60, cy + 30, steps=4); f.pump(0.2)
+    panned = f.image().crop(rbox)
+    dp = sum(1 for x, y in zip(zoomed.getdata(), panned.getdata()) if x != y)
+    check(dp > 2000, f'a drag pans it ({dp} px changed)')
+    f.shot('render_zoomed.png')
+    x, y = widget_xy(m, 'render.header.fit'); f.click(x, y); f.pump(0.3)
+    back = f.image().crop(rbox)
+    db = sum(1 for x, y in zip(fit.getdata(), back.getdata()) if x != y)
+    check(db == 0, f'Fit: the whole image again, as before ({db} px differ)')
+    f.mods(4); f.key(57); f.mods(0); f.pump(0.3)   # (back from maximized)
+    q('op("area.type_render")') if not [a for a in areas(m) if a['label'] == 'Render'] else None
+    x, y = widget_xy(m, 'render.header.settings')
+    if x:
+        f.click(x, y); f.pump(0.3)
+    else:                                      # (a narrow Render area: its tools
+        q('op("render.view_settings")'); f.pump(0.3)   #  hidden; the operator)
+    check('render.bounces' in names(), 'Settings: the Properties\' Render tab')
+    f.proc.kill()
+
+
+def outliner_tidy_ui():
+    """#441: the outliner's Tidy groups the loose objects into coloured
+    folders (lights, cameras, objects named alike; one of a kind stays; a
+    child stays with its parent), and folders left empty go; a click on a
+    folder's icon gives it the next colour (kept in the file); AI asks the
+    AI Assistant to do it."""
+    print('  -- outliner: Tidy, folder colours --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    f.key(28); f.type('agent.permission_files'); f.key(28); f.pump(0.2); f.key(1)   # (scripts may save)
+    q('add("cube", "Chair", 2, 0, 0)\nadd("cube", "Chair.001", 3, 0, 0)\nadd("cube", "Chair_2", 4, 0, 0)\n'
+      'add("cube", "Table", 0, 0, 3)\nadd("cube", "Leg", 0, 0, 3)\nop("object.parent_set", "Leg Table")\n'
+      'add("light", "Lamp.001", 0, 3, 0)\nfolder("Old")\nfolder("Empty")\ninfolder("Cube", "Old")')
+    check(all(widget(m, n) for n in ('outliner.tidy', 'outliner.tidy_ai', 'outliner.new_folder')),
+          'the outliner: Tidy and AI beside +')
+    x, y = widget_xy(m, 'outliner.tidy'); f.click(x, y); f.pump(0.3)
+    got = q('print(infolder("Chair"), infolder("Chair.001"), infolder("Chair_2"), infolder("Light"), infolder("Lamp.001"), '
+            'infolder("Table"), infolder("Leg"), infolder("Cube"), infolder("Camera"), folders())')
+    check(got == 'Chair Chair Chair Lights Lights nil nil Old nil 3',
+          f'Tidy: Chair x3, Lights x2; one table, its child, the camera stay; Cube stays in Old; Empty goes ({got})')
+    rows = {w['label']: w for w in ui_tree(m) if w['name'] == 'outliner.folder'}
+    f.shot('outliner_tidy.png')
+    img = f.image()
+    lr = rows.get('Lights')
+    edge = lr and img.getpixel((lr['x'] - 40 + 1 if False else widget(m, 'outliner.filter')['x'] - 5, lr['y'] + lr['h'] // 2))
+    check(lr is not None, 'the Lights folder row')
+    cols = [w for w in ui_tree(m) if w['name'] == 'outliner.folder_color']
+    lc = [c for c in cols if abs(c['y'] - lr['y']) < 6] if lr else []
+    if lc:
+        before = f.image().crop((lc[0]['x'], lc[0]['y'], lc[0]['x'] + lc[0]['w'], lc[0]['y'] + lc[0]['h']))
+        f.click(lc[0]['x'] + lc[0]['w'] // 2, lc[0]['y'] + lc[0]['h'] // 2); f.pump(0.3)
+        after = f.image().crop((lc[0]['x'], lc[0]['y'], lc[0]['x'] + lc[0]['w'], lc[0]['y'] + lc[0]['h']))
+        d = sum(1 for a, b in zip(before.getdata(), after.getdata()) if a != b)
+        check(d > 10, f'a click on its icon: the next colour ({d} px changed)')
+    else:
+        check(False, 'the folder\'s icon is a button')
+    path = os.path.join(f.home, 'tidy.bee')
+    q(f'op("file.save_as", "{path}")')
+    shot1 = f.image().crop((1020, 80, 1280, 180))
+    q(f'op("file.new")\nop("file.open", "{path}")'); f.pump(0.5)
+    shot2 = f.image().crop((1020, 80, 1280, 180))
+    check(q('print(folders(), infolder("Chair"))') == '3 Chair' and shot1.tobytes() == shot2.tobytes(),
+          'saved and opened: the folders and their colours as they were')
+    q('op("file.new")\nadd("cube", "Box", 0, 0, 0)\nadd("cube", "Box.001", 1, 0, 0)')
+    q('op("outliner.tidy")')
+    check(q('print(infolder("Box"))') == 'Box', 'outliner.tidy from a script')
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.3)
+    check(q('print(infolder("Box"), folders())') == 'nil 0', 'Ctrl+Z: one undo step back')
     f.proc.kill()
 
 

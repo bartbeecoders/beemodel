@@ -98,6 +98,7 @@ dlg_open_form:
     call    fb_open
     mov     dword ptr [rip+dlg_kind], DLG_FILE
     mov     dword ptr [rip+dlg_open], 1
+    mov     dword ptr [rip+ov_on], 0    # (the welcome screen, a help overlay: gone, #444)
     mov     dword ptr [rip+dirty], 1
     pop     r13
     pop     r12
@@ -183,6 +184,7 @@ dlg_open_form:
     jmp     6b
 8:  mov     dword ptr [rip+dlg_kind], DLG_FORM
     mov     dword ptr [rip+dlg_open], 1
+    mov     dword ptr [rip+ov_on], 0    # (the welcome screen, a help overlay: gone, #444)
     mov     dword ptr [rip+dirty], 1
     pop     r13
     pop     r12
@@ -193,6 +195,7 @@ dlg_open_form:
 dlg_open_prefs:
     mov     dword ptr [rip+dlg_kind], DLG_PREFS
     mov     dword ptr [rip+dlg_open], 1
+    mov     dword ptr [rip+ov_on], 0    # (the welcome screen, a help overlay: gone, #444)
     mov     dword ptr [rip+dirty], 1
     ret
 
@@ -217,6 +220,7 @@ dlg_open_confirm:
 1:
     mov     dword ptr [rip+dlg_kind], DLG_CONFIRM
     mov     dword ptr [rip+dlg_open], 1
+    mov     dword ptr [rip+ov_on], 0    # (the welcome screen, a help overlay: gone, #444)
     mov     dword ptr [rip+dirty], 1
     ret
 

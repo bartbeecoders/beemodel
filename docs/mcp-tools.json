@@ -2412,6 +2412,32 @@
    }
   },
   {
+   "name": "op_outliner_folder_color",
+   "description": "Folder Colour - Colour a folder in the outliner (the one picked, or the one named): outliner.folder_color <none|red|orange|yellow|green|teal|blue|purple|pink|next> [folder name]. A click on a folder's icon goes to the next colour",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_outliner_tidy",
+   "description": "Tidy Outliner - Group the objects that are in no folder: lights, cameras, reference images, and objects named alike (Chair, Chair.001, Chair_2 ...) each into a coloured folder of their own (two or more of a kind, children staying with their parents), then folders left empty go",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_outliner_folder_select",
    "description": "Select Folder's Objects - Select every object in the folder picked (and its folders)",
    "inputSchema": {
@@ -5378,6 +5404,32 @@
   {
    "name": "op_render_motion_blur",
    "description": "Motion Blur - Motion blur: render.motion_blur <shutter> - how long the shutter is open, as a part of a frame (0.5: half of it; 0: off). Particle balls are drawn where they are at each sample's time: rain streaks",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_view_fit",
+   "description": "Fit Render - The Render area shows the whole image again (after the wheel zoomed or a drag panned it)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_render_view_settings",
+   "description": "Render Settings Tab - Show every render setting: the Properties' Render tab (a Properties area opens beside the Render area when none shows)",
    "inputSchema": {
     "type": "object",
     "properties": {

@@ -13,6 +13,14 @@
 .globl render_tick
 .globl render_abort
 .globl ed_render_draw
+.globl rn_view_press
+.globl rn_view_motion
+.globl rn_view_release
+.globl rn_view_wheel
+.globl rn_view_fit
+.globl rn_zoom
+.globl rn_pan_on
+.globl rn_view_settings
 .globl rn_w
 .globl rn_h
 .globl rn_spp
@@ -39,6 +47,8 @@ rn_w:           .long 960               # render settings (saved in .bee)
 rn_h:           .long 540
 rn_spp:         .long 128
 rn_denoise:     .long 1                 # denoise when the render ends
+rn_zoom:        .long 65536             # the Render area's view (#446): zoom over
+                                        #  the fit, 16.16 (65536: fitted)
 
 .section .bss
 .align 8
@@ -46,6 +56,15 @@ rn_img:         .skip 8                 # XRGB of the shown pass
 rn_img_sz:      .skip 8
 rn_have:        .skip 4                 # an image exists
 rn_stale:       .skip 4                 # rn_img needs a resolve
+rn_panx:        .skip 4                 # its pan: the image's centre from the
+rn_pany:        .skip 4                 #  box's (physical px)
+rn_pan_on:      .skip 4                 # a drag pans it
+rn_px0:         .skip 4                 #  from here (physical)
+rn_py0:         .skip 4
+rn_pan0x:       .skip 4                 #  and this pan
+rn_pan0y:       .skip 4
+rn_bcx:         .skip 4                 # the box's centre, as last drawn
+rn_bcy:         .skip 4
 rn_wordbuf:     .skip 264
 
 .section .rodata
@@ -142,6 +161,8 @@ OPERATOR op_render_anim, "render.animation", "Render Animation...", job_render_a
 JOB_OP job_render_anim, do_render_anim, "Rendering the animation (Esc stops)"
 OPERATOR op_render_reuse, "render.sample_reuse", "Sample Reuse", do_render_reuse, flags=OPF_AI_SAFE, doc="Animation renders (render.animation, render_frames) reuse samples from up to so many frames before where a pixel sees the same surface, tracing only samples / (frames + 1) new ones: render.sample_reuse <frames> (0: off, up to 16)"
 OPERATOR op_render_mblur, "render.motion_blur", "Motion Blur", do_render_mblur, flags=OPF_AI_SAFE, doc="Motion blur: render.motion_blur <shutter> - how long the shutter is open, as a part of a frame (0.5: half of it; 0: off). Particle balls are drawn where they are at each sample's time: rain streaks"
+OPERATOR op_rn_fit, "render.view_fit", "Fit Render", rn_view_fit, flags=OPF_AI_SAFE|OPF_QUIET, doc="The Render area shows the whole image again (after the wheel zoomed or a drag panned it)"
+OPERATOR op_rn_settings, "render.view_settings", "Render Settings Tab", rn_view_settings, flags=OPF_AI_SAFE|OPF_QUIET, doc="Show every render setting: the Properties' Render tab (a Properties area opens beside the Render area when none shows)"
 OPERATOR op_render_settings, "render.settings", "Render Settings", do_render_settings, flags=OPF_AI_SAFE, doc="Set the render size and samples: render.settings <width> <height> <samples>", form=form_render
 OPERATOR op_render_denoise, "render.denoise", "Denoise", do_render_denoise, check_denoise, flags=OPF_AI_SAFE|OPF_QUIET, doc="Toggle denoising the beauty pass when a render ends (guided by albedo, normal, depth)", poll=poll_render
 
@@ -1026,7 +1047,10 @@ ed_render_draw:
     mov     ecx, [rip+hv_h]
     div     rcx
     cmp     rax, rbx
-    cmovb   rbx, rax                    # scale 16.16
+    cmovb   rbx, rax                    # scale 16.16 (fitted)
+    mov     eax, [rip+rn_zoom]          # (#446: zoomed)
+    imul    rbx, rax
+    shr     rbx, 16
     test    rbx, rbx
     jz      .Lrd_out
     mov     eax, [rip+hv_w]             # dst size
@@ -1037,15 +1061,25 @@ ed_render_draw:
     imul    rax, rbx
     shr     rax, 16
     mov     [rsp+20], eax               # dh
-    mov     eax, [rsp+8]                # centred
+    mov     eax, [rsp+8]                # the box's centre (the wheel zooms
+    sar     eax, 1                      #  about the pointer from it)
+    add     eax, [rsp]
+    mov     [rip+rn_bcx], eax
+    mov     eax, [rsp+12]
+    sar     eax, 1
+    add     eax, [rsp+4]
+    mov     [rip+rn_bcy], eax
+    mov     eax, [rsp+8]                # centred, then panned
     sub     eax, [rsp+16]
     sar     eax, 1
     add     eax, [rsp]
+    add     eax, [rip+rn_panx]
     mov     [rsp+24], eax               # dx0
     mov     eax, [rsp+12]
     sub     eax, [rsp+20]
     sar     eax, 1
     add     eax, [rsp+4]
+    add     eax, [rip+rn_pany]
     mov     [rsp+28], eax               # dy0
     mov     eax, 1                      # step = 65536 * 65536 / scale
     shl     rax, 32
@@ -1062,15 +1096,31 @@ ed_render_draw:
 5:  cmp     r13d, [rip+clip_y1]
     jle     6f
     mov     r13d, [rip+clip_y1]
-6:  mov     r14d, [rsp+24]              # x range
+6:  cmp     r12d, [rsp+4]               # (zoomed: within the box too)
+    jge     63f
+    mov     r12d, [rsp+4]
+63: mov     eax, [rsp+4]
+    add     eax, [rsp+12]
+    cmp     r13d, eax
+    jle     64f
+    mov     r13d, eax
+64: mov     r14d, [rsp+24]              # x range
     mov     r15d, r14d
     add     r15d, [rsp+16]
     cmp     r14d, [rip+clip_x0]
     jge     61f
     mov     r14d, [rip+clip_x0]
 61: cmp     r15d, [rip+clip_x1]
-    jle     62f
+    jle     65f
     mov     r15d, [rip+clip_x1]
+65: cmp     r14d, [rsp]
+    jge     66f
+    mov     r14d, [rsp]
+66: mov     eax, [rsp]
+    add     eax, [rsp+8]
+    cmp     r15d, eax
+    jle     62f
+    mov     r15d, eax
 62: cmp     r14d, r15d
     jge     .Lrd_out
 .Lrd_row:
@@ -1156,6 +1206,151 @@ ed_render_draw:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+
+# =============================================================================
+#  The Render area's view (#446): the wheel zooms about the pointer, a drag
+#  (left or middle) pans, Fit goes back; Settings shows the Render tab
+# =============================================================================
+# rn_view_press(edi=button, esi=x, edx=y logical) -> eax = 1 when taken
+rn_view_press:
+    xor     eax, eax
+    cmp     dword ptr [rip+rn_have], 0
+    je      9f
+    cmp     edi, BTN_LEFT
+    je      1f
+    cmp     edi, BTN_MIDDLE
+    jne     9f
+1:  push    rbx
+    mov     ebx, edx
+    mov     edi, esi
+    call    to_px
+    mov     [rip+rn_px0], eax
+    mov     edi, ebx
+    call    to_px
+    mov     [rip+rn_py0], eax
+    mov     eax, [rip+rn_panx]
+    mov     [rip+rn_pan0x], eax
+    mov     eax, [rip+rn_pany]
+    mov     [rip+rn_pan0y], eax
+    mov     dword ptr [rip+rn_pan_on], 1
+    pop     rbx
+    mov     eax, 1
+9:  ret
+
+# rn_view_motion(edi, esi = pointer, logical) -> eax = 1 while it pans
+rn_view_motion:
+    xor     eax, eax
+    cmp     dword ptr [rip+rn_pan_on], 0
+    je      9f
+    push    rbx
+    mov     ebx, esi
+    call    to_px
+    sub     eax, [rip+rn_px0]
+    add     eax, [rip+rn_pan0x]
+    mov     [rip+rn_panx], eax
+    mov     edi, ebx
+    call    to_px
+    sub     eax, [rip+rn_py0]
+    add     eax, [rip+rn_pan0y]
+    mov     [rip+rn_pany], eax
+    mov     dword ptr [rip+dirty], 1
+    pop     rbx
+    mov     eax, 1
+9:  ret
+
+rn_view_release:
+    mov     dword ptr [rip+rn_pan_on], 0
+    ret
+
+# rn_view_wheel(edi = notches, + in) - zoom by 5/4 a notch about the pointer
+#   (what is under it stays there), 1/10 to 32 times the fit
+rn_view_wheel:
+    push    rbx
+    push    r12
+    push    r13
+    test    edi, edi
+    jz      9f
+    mov     r12d, [rip+rn_zoom]         # old
+    mov     eax, r12d
+    js      1f
+    imul    rax, rax, 5
+    shr     rax, 2
+    jmp     2f
+1:  shl     rax, 2
+    xor     edx, edx
+    mov     ecx, 5
+    div     rcx
+2:  cmp     eax, 6554
+    jge     3f
+    mov     eax, 6554
+3:  cmp     eax, 32*65536
+    jle     4f
+    mov     eax, 32*65536
+4:  mov     r13d, eax                   # new
+    mov     [rip+rn_zoom], eax
+    mov     edi, [rip+ptr_x]            # pan' = q - (q - pan) * new / old,
+    call    to_px                       #  q = the pointer from the centre
+    sub     eax, [rip+rn_bcx]
+    mov     ebx, eax
+    mov     esi, [rip+rn_panx]
+    call    .Lzp
+    mov     [rip+rn_panx], eax
+    mov     edi, [rip+ptr_y]
+    call    to_px
+    sub     eax, [rip+rn_bcy]
+    mov     ebx, eax
+    mov     esi, [rip+rn_pany]
+    call    .Lzp
+    mov     [rip+rn_pany], eax
+    mov     dword ptr [rip+dirty], 1
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+.Lzp:                                   # ebx = q, esi = pan -> eax
+    mov     eax, ebx
+    sub     eax, esi
+    movsxd  rax, eax
+    movsxd  rcx, r13d
+    imul    rax, rcx
+    movsxd  rcx, r12d
+    cqo
+    idiv    rcx
+    mov     ecx, ebx
+    sub     ecx, eax
+    mov     eax, ecx
+    ret
+
+# rn_view_fit - the whole image again (the header's Fit)
+rn_view_fit:
+    mov     dword ptr [rip+rn_zoom], 65536
+    mov     dword ptr [rip+rn_panx], 0
+    mov     dword ptr [rip+rn_pany], 0
+    mov     dword ptr [rip+dirty], 1
+    ret
+
+# rn_view_settings - the header's Settings: the Properties' Render tab (a
+#   Properties area beside the Render area when none shows)
+rn_view_settings:
+    sub     rsp, 8
+    mov     dword ptr [rip+props_tab], 6
+    mov     edi, ED_PROPS
+    call    find_editor
+    test    eax, eax
+    jns     9f
+    mov     edi, ED_RENDER
+    call    find_editor
+    test    eax, eax
+    js      9f
+    mov     edi, eax
+    mov     esi, K_HSPLIT
+    mov     edx, 45875                  # (70% the render, 30% the settings)
+    mov     ecx, ED_PROPS
+    xor     r8d, r8d
+    call    split_with
+9:  mov     dword ptr [rip+dirty], 1
+    add     rsp, 8
     ret
 
 .section .note.GNU-stack,"",@progbits

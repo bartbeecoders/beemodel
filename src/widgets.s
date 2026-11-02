@@ -1427,26 +1427,83 @@ wg_text_h:
     ret
 
 # edit_draw(edi=x, esi=y of the text row, edx=w) - the text being typed:
-#   selection, text, caret
+#   selection, text, caret - scrolled to keep the caret in view and clipped
+#   to the field (#445: a long path stayed whole, over what was beside it)
 edit_draw:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
+    sub     rsp, 16
     mov     ebx, edi
     mov     r12d, esi
     mov     r13d, edx
     lea     rdi, [rip+tfi_widget]
     call    tf_select
-    lea     r14d, [rbx+7]               # text origin
-    mov     edi, [rip+tf_anchor]        # selection
+    mov     edi, [rip+tf_caret]         # keep the caret in view (pixels)
+    call    tf_px
+    lea     edx, [r13-14]               # the width the text has
+    mov     ecx, [rip+tf_scroll]
+    cmp     eax, ecx
+    jge     1f
+    mov     ecx, eax
+1:  mov     esi, eax
+    sub     esi, ecx
+    cmp     esi, edx
+    jle     2f
+    mov     ecx, eax
+    sub     ecx, edx
+2:  mov     [rsp], ecx                  # no further than the text's end
+    mov     [rsp+4], edx                #  allows (a scroll left from
+    mov     edi, [rip+tf_len]           #  another field's text)
+    call    tf_px
+    sub     eax, [rsp+4]
+    mov     ecx, [rsp]
+    cmp     ecx, eax
+    cmovg   ecx, eax
+    test    ecx, ecx
+    jns     3f
+    xor     ecx, ecx
+3:  mov     [rip+tf_scroll], ecx
+    lea     r14d, [rbx+7]               # text origin, scrolled
+    sub     r14d, ecx
+    mov     eax, [rip+clip_x0]          # the field's inside, within the clip
+    mov     [rsp], eax                  #  there was (kept, put back after)
+    mov     eax, [rip+clip_x1]
+    mov     [rsp+4], eax
+    mov     eax, [rip+clip_y0]
+    mov     [rsp+8], eax
+    mov     eax, [rip+clip_y1]
+    mov     [rsp+12], eax
+    lea     edi, [rbx+3]
+    lea     esi, [r12-4]
+    lea     edx, [rbx+r13-3]
+    lea     ecx, [r12+CHAR_H+4]
+    call    set_clip
+    mov     eax, [rsp]
+    cmp     [rip+clip_x0], eax
+    jge     4f
+    mov     [rip+clip_x0], eax
+4:  mov     eax, [rsp+8]
+    cmp     [rip+clip_y0], eax
+    jge     5f
+    mov     [rip+clip_y0], eax
+5:  mov     eax, [rsp+4]
+    cmp     [rip+clip_x1], eax
+    jle     6f
+    mov     [rip+clip_x1], eax
+6:  mov     eax, [rsp+12]
+    cmp     [rip+clip_y1], eax
+    jle     7f
+    mov     [rip+clip_y1], eax
+7:  mov     edi, [rip+tf_anchor]        # selection
     mov     esi, [rip+tf_caret]
     cmp     edi, esi
-    je      2f
-    jb      1f
+    je      12f
+    jb      11f
     xchg    edi, esi
-1:  push    rsi
+11: push    rsi
     push    rdi
     call    tf_px
     mov     r15d, eax
@@ -1461,7 +1518,7 @@ edit_draw:
     mov     ecx, CHAR_H
     mov     r8d, COL_SELECTION
     call    fill_rect
-2:  mov     edi, r14d
+12: mov     edi, r14d
     mov     esi, r12d
     lea     rdx, [rip+tf_buf]
     mov     ecx, COL_TEXT
@@ -1474,6 +1531,15 @@ edit_draw:
     mov     ecx, CHAR_H
     mov     r8d, COL_FOCUS
     call    fill_rect
+    mov     eax, [rsp]                  # the clip as it was
+    mov     [rip+clip_x0], eax
+    mov     eax, [rsp+4]
+    mov     [rip+clip_x1], eax
+    mov     eax, [rsp+8]
+    mov     [rip+clip_y0], eax
+    mov     eax, [rsp+12]
+    mov     [rip+clip_y1], eax
+    add     rsp, 16
     pop     r15
     pop     r14
     pop     r13

@@ -93,6 +93,11 @@ select("Cam"); op("camera.set", "active")
 op("view.camera", "1")
 op("render.image", "%s 800 600 8")''' % out)
         f.pump(2.0)
+        for _ in range(65):                     # (the render: on a busy machine
+            if os.path.exists(out):             #  it can take longer)
+                break
+            f.pump(0.2)
+        f.pump(0.3)
         img = f.image()
         fr = frame_of(img)
         check(fr is not None and abs((fr[1] - fr[0] + 1) / max(fr[3] - fr[2] + 1, 1) - 4 / 3) < 0.02,
