@@ -19,6 +19,20 @@
 #                             play_look; wnd_unlock_pointer frees it
 #    set_cursor(edi=shape)    a cursor-shape-v1 shape
 #
+#  and the panels' windows (dock.s, #419): a slot each, PW_MAX of them -
+#
+#    pw_supported -> eax      1 when there are such windows
+#    pw_open(edi=slot, esi=w, edx=h: logical, rcx=title) -> eax 0, -1
+#    pw_close(edi=slot)       gone
+#    pw_ready(edi=slot) -> eax  1 when a frame may be drawn into it
+#    pw_buffer(edi=slot, esi=w, edx=h: pixels) -> rax  XRGB pixels, 0: none
+#    pw_present(edi=slot)     show the buffer pw_buffer gave
+#    pw_move(edi=slot, esi=serial), pw_resize(edi=slot, esi=serial, edx=edges)
+#
+#  calling pw_configure(edi=slot, esi=w, edx=h) when its size is known,
+#  pw_closed(edi=slot) when the user closes one, and wnd_enter(edi=window:
+#  0 the main one, slot + 1 a panel's) before the input of another window.
+#
 #  and calls the UI (ui_motion, ui_button, ui_axis, ui_key, ui_leave,
 #  request_quit, play_look) as events come in, after comp_w / comp_h,
 #  win_from_comp, set_ui_scale and configured when the size or scale changes.
@@ -202,6 +216,7 @@ render:
     mov     qword ptr [rip+fr_work], 0
     inc     dword ptr [rip+fr_count]
     call    wnd_present
+    call    pw_present_all              # (the panels' windows, drawn with it)
     mov     dword ptr [rip+dirty], 0
     mov     eax, [rip+an_play]          # playing: the next frame too
     or      eax, [rip+redraw_again]     # (or drawing asked for one)

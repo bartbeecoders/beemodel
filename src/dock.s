@@ -41,6 +41,9 @@
 .equ NO_NODE,   0xff
 .equ CAM_SZ,    24
 .equ NF_FLOAT,  1
+.equ NF_WINDOW, 2                       # (and in a window of its own)
+.equ N_WND,     11                      # that window's slot
+.equ PW_MAX,    4
 
 .equ FL_MINW,   220                     # a floating panel's smallest size
 .equ FL_MINH,   140
@@ -103,6 +106,7 @@ j_area_k:       .asciz ",\"kind\":\"area\""
 j_area_lbl:     .asciz ",\"label\":"
 j_area_fl:      .asciz ",\"value\":\"float\"}"
 j_area_dk:      .asciz ",\"value\":\"docked\"}"
+j_area_wn:      .asciz ",\"value\":\"window\"}"
 j_area_x:       .asciz ",\"x\":"
 j_area_y:       .asciz ",\"y\":"
 j_area_w:       .asciz ",\"w\":"
@@ -139,6 +143,8 @@ float_next:
     jne     2f
     test    byte ptr [r10+N_FLAGS], NF_FLOAT
     jz      2f
+    test    byte ptr [r10+N_FLAGS], NF_WINDOW   # (in a window of its own)
+    jnz     2f
     movzx   eax, byte ptr [r10+N_Z]
     shl     eax, 6
     or      eax, ecx
@@ -304,7 +310,15 @@ float_hit:
 #   2 all but [edx, ecx) (widgets.s wg_hit: a panel hides what is under it)
 float_wg_filter:
     push    rbx
+    push    rdi
+    push    rsi
+    call    pw_cur_node                 # (a panel's window: that panel's)
+    pop     rsi
+    pop     rdi
+    test    eax, eax
+    jns     0f
     call    float_hit
+0:
     test    eax, eax
     js      1f
     lea     rcx, [rip+flt_wlo]
@@ -333,6 +347,8 @@ dock_clamp:
     jz      8f
     mov     edi, ebx
     call    node_ptr
+    test    byte ptr [rax+N_FLAGS], NF_WINDOW   # (its own window's size)
+    jnz     8f
     mov     r8d, [rip+win_w]            # the room: w, h
     mov     r9d, [rip+cont_y1]
     sub     r9d, [rip+cont_y0]
@@ -426,7 +442,8 @@ dock_draw:
     mov     ecx, [rip+wg_n]
     mov     [rax+r12*4], ecx
     jmp     1b
-8:  mov     eax, [rip+wg_n]
+8:  call    pw_draw_all                 # the panels in windows of their own
+    mov     eax, [rip+wg_n]
     mov     [rip+flt_wall_hi], eax
     call    dock_overlay
     pop     r13
@@ -698,6 +715,17 @@ dock_press:
 dock_begin_move:
     push    rbx
     mov     ebx, edi
+    call    area_is_window              # (a window of its own: moved by the
+    test    eax, eax                    #  compositor)
+    jz      0f
+    mov     edi, ebx
+    call    node_ptr
+    movzx   edi, byte ptr [rax+N_WND]
+    mov     esi, [rip+press_serial]
+    call    pw_move
+    pop     rbx
+    ret
+0:
     call    float_raise
     mov     edi, ebx
     call    node_ptr
@@ -717,6 +745,19 @@ dock_begin_resize:
     shr     edi, 8
     mov     [rip+fl_edges], edi
     and     ebx, 0xff
+    mov     edi, ebx                    # (a window of its own: resized by
+    call    area_is_window              #  the compositor)
+    test    eax, eax
+    jz      0f
+    mov     edi, ebx
+    call    node_ptr
+    movzx   edi, byte ptr [rax+N_WND]
+    mov     esi, [rip+press_serial]
+    mov     edx, [rip+fl_edges]
+    call    pw_resize
+    pop     rbx
+    ret
+0:
     mov     edi, ebx
     call    float_raise
     mov     edi, ebx
@@ -739,6 +780,21 @@ dock_begin:                             # (rbx pushed: the panel)
     mov     dword ptr [rip+dirty], 1
     pop     rbx
     ret
+
+# outside_main(edi=x, esi=y) -> eax = 1 when the point is out of the main
+#   window (a drag goes on outside it)
+outside_main:
+    mov     eax, 1
+    test    edi, edi
+    js      9f
+    test    esi, esi
+    js      9f
+    cmp     edi, [rip+win_w]
+    jge     9f
+    cmp     esi, [rip+win_h]
+    jge     9f
+    xor     eax, eax
+9:  ret
 
 # tree_leaf_at(edi=x, esi=y) -> eax = the tree's area there (panels aside)
 tree_leaf_at:
@@ -776,6 +832,13 @@ dock_motion:
     mov     [rax+N_Y], ecx
     call    dock_clamp
 .Ldm_target:                            # the area under the pointer, the zone
+    mov     dword ptr [rip+dk_tgt], -1
+    mov     dword ptr [rip+dk_zone], -1
+    mov     edi, ebx
+    mov     esi, r12d
+    call    outside_main                # (out of the window: a window of its
+    test    eax, eax                    #  own when released)
+    jnz     8f
     mov     edi, ebx
     mov     esi, r12d
     call    tree_leaf_at
@@ -866,7 +929,20 @@ dock_drop:
     mov     eax, [rip+wsp_drag_kind]
     cmp     eax, 3
     je      8f
+    cmp     eax, 2                      # a panel out of the main window: its
+    jne     0f                          #  own window
     mov     edi, ebx
+    mov     esi, r12d
+    call    outside_main
+    test    eax, eax
+    jz      0f
+    call    pw_supported
+    test    eax, eax
+    jz      8f
+    mov     edi, [rip+wsp_drag_src]
+    call    pw_open_node
+    jmp     8f
+0:  mov     edi, ebx
     mov     esi, r12d
     call    tree_leaf_at
     mov     r13d, eax
@@ -1234,6 +1310,14 @@ op_dock_x:
     push    r13
     mov     ebx, [rip+active_area]
     mov     edi, ebx
+    call    area_is_window
+    test    eax, eax
+    jz      0f
+    mov     edi, ebx
+    call    pw_dock_node
+    jmp     9f
+0:
+    mov     edi, ebx
     call    area_is_float
     test    eax, eax
     jz      9f
@@ -1328,6 +1412,9 @@ area_json:
     test    byte ptr [r12+N_FLAGS], NF_FLOAT
     jz      3f
     lea     rsi, [rip+j_area_fl]
+    test    byte ptr [r12+N_FLAGS], NF_WINDOW
+    jz      3f
+    lea     rsi, [rip+j_area_wn]
 3:  call    wb_str
 8:  inc     ebx
     cmp     ebx, MAX_NODES
@@ -1336,6 +1423,548 @@ area_json:
     pop     r15
     pop     r14
     pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+
+# =============================================================================
+#  Panel windows (#419 stage 2): a floating panel in a window of its own
+#  (NF_WINDOW, its slot in N_WND), which can go to another monitor. Area >
+#  Open in New Window, or a panel dragged out of the main window, makes one;
+#  its header moves the window, its edges resize it, closing it (or its dock
+#  button) docks the area back. Its area is drawn in the same frame as the
+#  main window, into the panel window's buffer (fb swapped), and the windows
+#  are shown after (pw_present_all). Input says which window it is in
+#  (wnd_enter: cur_wnd 0 the main window, slot + 1 a panel's); menus, lists,
+#  pies and tooltips opened there are drawn there (ovl_wnd, ovl_enter).
+# =============================================================================
+.globl cur_wnd
+.globl ovl_wnd
+.globl ht_ovl
+.globl wnd_enter
+.globl pw_configure
+.globl pw_closed
+.globl pw_present_all
+.globl pw_close_all
+.globl pw_scrub
+.globl pw_cur_node
+.globl pw_edge_hit
+.globl area_is_window
+.globl ovl_enter
+.globl ovl_leave
+.globl op_area_window
+.globl pw_release
+
+.section .data
+.align 4
+pw_node:        .long -1, -1, -1, -1    # each slot's area (-1: free)
+
+.section .bss
+.align 8
+cur_wnd:        .skip 4                 # the window input is in
+ovl_wnd:        .skip 4                 #  and the one menus and the like are in
+ht_ovl:         .skip 4                 # (hit_test: they are in this one)
+pw_cw:          .skip PW_MAX*4          # each slot's logical size (configured)
+pw_ch:          .skip PW_MAX*4
+pw_drawn:       .skip PW_MAX*4          # drawn this frame: shown after
+pw_fb:          .skip PW_MAX*8          #  into this buffer, of
+pw_pw:          .skip PW_MAX*4          #  these pixels
+pw_ph:          .skip PW_MAX*4
+pw_sv:          .skip 32                # the main window's fb, size (swapped)
+pw_svon:        .skip 4
+
+.section .rodata
+s_no_window:    .asciz "  no window for it (four panel windows at most)"
+s_pw_none:      .asciz "panels in windows of their own are not on this system yet"
+s_pw_why:       .asciz "the active area is already in a window of its own"
+
+OPERATOR op_area_window, "area.new_window", "Open in New Window", op_window_x, poll=poll_window, doc="Put the active area in a window of its own, which you can move to another monitor; closing that window puts the area back"
+
+.text
+
+# area_is_window(edi=node) -> eax = 1 for a panel in a window of its own
+area_is_window:
+    xor     eax, eax
+    cmp     edi, MAX_NODES
+    jae     9f
+    call    node_ptr
+    cmp     byte ptr [rax+N_KIND], K_LEAF
+    jne     8f
+    test    byte ptr [rax+N_FLAGS], NF_WINDOW
+    jz      8f
+    mov     eax, 1
+    ret
+8:  xor     eax, eax
+9:  ret
+
+# ovl_open -> eax = 1 while a menu, an option list, a pie, the wheel or the
+#   colour picker is open (they stay in the window they opened in)
+ovl_open:
+    mov     eax, 1
+    cmp     dword ptr [rip+menu_open], 0
+    jge     9f
+    cmp     dword ptr [rip+wg_pop_open], 0
+    jne     9f
+    cmp     dword ptr [rip+pie_on], 0
+    jne     9f
+    cmp     dword ptr [rip+wh_on], 0
+    jne     9f
+    cmp     dword ptr [rip+cpk_on], 0
+    jne     9f
+    xor     eax, eax
+9:  ret
+
+# wnd_enter(edi=window) - the pointer is in that window now (the platform)
+wnd_enter:
+    mov     [rip+cur_wnd], edi
+    sub     rsp, 8
+    call    ovl_open
+    add     rsp, 8
+    test    eax, eax
+    jnz     9f
+    mov     eax, [rip+cur_wnd]
+    mov     [rip+ovl_wnd], eax
+9:  ret
+
+# pw_cur_node -> eax = the panel of the window input is in, -1: the main one
+pw_cur_node:
+    mov     eax, [rip+cur_wnd]
+    dec     eax
+    js      8f
+    cmp     eax, PW_MAX
+    jae     8f
+    lea     rcx, [rip+pw_node]
+    mov     eax, [rcx+rax*4]
+    ret
+8:  mov     eax, -1
+    ret
+
+# pw_configure(edi=slot, esi=w, edx=h) - the platform: its size (logical)
+pw_configure:
+    cmp     edi, PW_MAX
+    jae     9f
+    lea     rax, [rip+pw_cw]
+    mov     [rax+rdi*4], esi
+    lea     rax, [rip+pw_ch]
+    mov     [rax+rdi*4], edx
+    mov     dword ptr [rip+dirty], 1
+9:  ret
+
+# pw_closed(edi=slot) - the user closed it: its area docks back
+pw_closed:
+    cmp     edi, PW_MAX
+    jae     9f
+    lea     rax, [rip+pw_node]
+    mov     edi, [rax+rdi*4]
+    test    edi, edi
+    js      9f
+    jmp     pw_dock_node
+9:  ret
+
+# pw_release(edi=node) - its window closed; it is a panel in the main window
+#   again (or about to dock: the caller's)
+pw_release:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    call    area_is_window
+    test    eax, eax
+    jz      9f
+    mov     edi, ebx
+    call    node_ptr
+    movzx   r12d, byte ptr [rax+N_WND]
+    and     byte ptr [rax+N_FLAGS], ~NF_WINDOW
+    mov     dword ptr [rax+N_X], 40     # (somewhere in the main window)
+    mov     ecx, [rip+cont_y0]
+    add     ecx, 40
+    mov     [rax+N_Y], ecx
+    cmp     r12d, PW_MAX
+    jae     9f
+    lea     rax, [rip+pw_node]
+    mov     dword ptr [rax+r12*4], -1
+    lea     rax, [rip+pw_drawn]
+    mov     dword ptr [rax+r12*4], 0
+    mov     edi, r12d
+    call    pw_close
+    lea     eax, [r12+1]                # (input in it: the main window's now)
+    cmp     eax, [rip+cur_wnd]
+    jne     1f
+    xor     edi, edi
+    call    wnd_enter
+1:  lea     eax, [r12+1]
+    cmp     eax, [rip+ovl_wnd]
+    jne     2f
+    mov     dword ptr [rip+ovl_wnd], 0
+2:  call    dock_clamp
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# pw_dock_node(edi=node) - its window closed, it docks beside the area in
+#   the middle of the main window
+pw_dock_node:
+    push    rbx
+    mov     ebx, edi
+    call    pw_release
+    mov     edi, [rip+win_w]
+    shr     edi, 1
+    mov     esi, [rip+cont_y0]
+    add     esi, [rip+cont_y1]
+    shr     esi, 1
+    call    tree_leaf_at
+    test    eax, eax
+    js      9f
+    mov     esi, eax
+    mov     edi, ebx
+    mov     edx, 2
+    call    dock_into
+    call    area_layout
+9:  pop     rbx
+    ret
+
+# pw_close_all - every panel window closed, its area a panel in the main
+#   window (the workspace changes)
+pw_close_all:
+    push    rbx
+    xor     ebx, ebx
+1:  lea     rax, [rip+pw_node]
+    mov     edi, [rax+rbx*4]
+    test    edi, edi
+    js      2f
+    call    pw_release
+2:  inc     ebx
+    cmp     ebx, PW_MAX
+    jb      1b
+    pop     rbx
+    ret
+
+# pw_scrub - no area in a window (a layout just read: its windows are gone)
+pw_scrub:
+    lea     rcx, [rip+nodes]
+    xor     eax, eax
+1:  and     byte ptr [rcx+N_FLAGS], ~NF_WINDOW
+    add     rcx, N_SZ
+    inc     eax
+    cmp     eax, MAX_NODES
+    jb      1b
+    ret
+
+# pw_open_node(edi=node) -> eax = 0, -1: that floating panel into a window
+pw_open_node:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    xor     r12d, r12d                  # a free slot
+    lea     rax, [rip+pw_node]
+1:  cmp     dword ptr [rax+r12*4], 0
+    jl      2f
+    inc     r12d
+    cmp     r12d, PW_MAX
+    jb      1b
+3:  lea     rdi, [rip+s_no_window]
+    call    log_line
+    mov     eax, -1
+    jmp     9f
+2:  mov     edi, ebx
+    call    node_ptr
+    mov     r13, rax
+    mov     eax, [r13+N_W]              # its size, in the platform's units
+    imul    eax, [rip+pr_scale]
+    xor     edx, edx
+    mov     ecx, 100
+    div     ecx
+    mov     esi, eax
+    mov     eax, [r13+N_H]
+    imul    eax, [rip+pr_scale]
+    xor     edx, edx
+    div     ecx
+    mov     edx, eax
+    lea     rax, [rip+pw_cw]
+    mov     [rax+r12*4], esi
+    lea     rax, [rip+pw_ch]
+    mov     [rax+r12*4], edx
+    movzx   eax, byte ptr [r13+N_ED]    # titled by its editor
+    lea     rcx, [rip+editor_names]
+    mov     rcx, [rcx+rax*8]
+    mov     edi, r12d
+    call    pw_open
+    test    eax, eax
+    jnz     3b
+    lea     rax, [rip+pw_node]
+    mov     [rax+r12*4], ebx
+    or      byte ptr [r13+N_FLAGS], NF_WINDOW
+    mov     [r13+N_WND], r12b
+    mov     [rip+active_area], ebx
+    mov     dword ptr [rip+dirty], 1
+    xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+poll_window:
+    sub     rsp, 8
+    call    pw_supported
+    test    eax, eax
+    lea     rax, [rip+s_pw_none]
+    jz      9f
+    mov     edi, [rip+active_area]
+    call    area_is_window
+    test    eax, eax
+    lea     rax, [rip+s_pw_why]
+    jnz     9f
+    mov     edi, [rip+active_area]      # a panel, or an area that can float
+    call    area_is_float
+    test    eax, eax
+    jnz     8f
+    call    poll_float
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    ret
+
+# op_window_x - the active area in a window of its own (floated first)
+op_window_x:
+    sub     rsp, 8
+    mov     edi, [rip+active_area]
+    call    area_is_window
+    test    eax, eax
+    jnz     9f
+    mov     edi, [rip+active_area]
+    call    area_is_float
+    test    eax, eax
+    jnz     1f
+    call    op_float_x
+    mov     edi, [rip+active_area]
+    call    area_is_float
+    test    eax, eax
+    jz      9f
+1:  mov     edi, [rip+active_area]
+    call    pw_open_node
+9:  add     rsp, 8
+    ret
+
+# pw_logical(edi=slot) -> eax = w, edx = h in the UI's units
+pw_logical:
+    lea     rax, [rip+pw_ch]
+    mov     ecx, [rax+rdi*4]
+    lea     rax, [rip+pw_cw]
+    mov     eax, [rax+rdi*4]
+    push    rcx
+    imul    eax, eax, 100
+    xor     edx, edx
+    div     dword ptr [rip+pr_scale]
+    pop     rcx
+    push    rax
+    mov     eax, ecx
+    imul    eax, eax, 100
+    xor     edx, edx
+    div     dword ptr [rip+pr_scale]
+    mov     edx, eax
+    pop     rax
+    ret
+
+# fb_save / fb_restore - the main window's framebuffer and size aside
+fb_save:
+    cmp     dword ptr [rip+pw_svon], 0
+    jne     9f
+    mov     rax, [rip+fb_ptr]
+    mov     [rip+pw_sv], rax
+    mov     eax, [rip+fb_w]
+    mov     [rip+pw_sv+8], eax
+    mov     eax, [rip+fb_h]
+    mov     [rip+pw_sv+12], eax
+    mov     eax, [rip+win_w]
+    mov     [rip+pw_sv+16], eax
+    mov     eax, [rip+win_h]
+    mov     [rip+pw_sv+20], eax
+    mov     dword ptr [rip+pw_svon], 1
+9:  ret
+fb_restore:
+    cmp     dword ptr [rip+pw_svon], 0
+    je      9f
+    mov     rax, [rip+pw_sv]
+    mov     [rip+fb_ptr], rax
+    mov     eax, [rip+pw_sv+8]
+    mov     [rip+fb_w], eax
+    mov     eax, [rip+pw_sv+12]
+    mov     [rip+fb_h], eax
+    mov     eax, [rip+pw_sv+16]
+    mov     [rip+win_w], eax
+    mov     eax, [rip+pw_sv+20]
+    mov     [rip+win_h], eax
+    mov     dword ptr [rip+pw_svon], 0
+    sub     rsp, 8
+    call    reset_clip
+    add     rsp, 8
+9:  ret
+
+# fb_use(edi=slot) - draw into that panel window (its buffer, its size)
+fb_use:
+    push    rbx
+    mov     ebx, edi
+    call    fb_save
+    lea     rax, [rip+pw_fb]
+    mov     rax, [rax+rbx*8]
+    mov     [rip+fb_ptr], rax
+    lea     rax, [rip+pw_pw]
+    mov     eax, [rax+rbx*4]
+    mov     [rip+fb_w], eax
+    lea     rax, [rip+pw_ph]
+    mov     eax, [rax+rbx*4]
+    mov     [rip+fb_h], eax
+    mov     edi, ebx
+    call    pw_logical
+    mov     [rip+win_w], eax
+    mov     [rip+win_h], edx
+    call    reset_clip
+    pop     rbx
+    ret
+
+# pw_draw_all - each panel window's area into its buffer (dock_draw: after
+#   the main window's panels; shown by pw_present_all)
+pw_draw_all:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    xor     ebx, ebx
+1:  lea     rax, [rip+pw_drawn]
+    mov     dword ptr [rax+rbx*4], 0
+    lea     rax, [rip+pw_node]
+    mov     r12d, [rax+rbx*4]
+    test    r12d, r12d
+    js      8f
+    mov     edi, ebx
+    call    pw_ready
+    test    eax, eax
+    jnz     2f
+    mov     dword ptr [rip+redraw_again], 1     # (its frame later)
+    jmp     8f
+2:  mov     edi, ebx
+    call    pw_logical
+    mov     r13d, eax                   # w, h (the UI's units)
+    mov     r14d, edx
+    mov     edi, r13d
+    call    to_px
+    mov     r15d, eax
+    mov     edi, r14d
+    call    to_px
+    lea     rcx, [rip+pw_pw]
+    mov     [rcx+rbx*4], r15d
+    lea     rcx, [rip+pw_ph]
+    mov     [rcx+rbx*4], eax
+    mov     edi, ebx
+    mov     esi, r15d
+    mov     edx, eax
+    call    pw_buffer
+    test    rax, rax
+    jnz     3f
+    mov     dword ptr [rip+redraw_again], 1
+    jmp     8f
+3:  lea     rcx, [rip+pw_fb]
+    mov     [rcx+rbx*8], rax
+    mov     edi, r12d                   # its area: all of the window
+    call    node_ptr
+    mov     dword ptr [rax+N_X], 0
+    mov     dword ptr [rax+N_Y], 0
+    mov     [rax+N_W], r13d
+    mov     [rax+N_H], r14d
+    mov     edi, ebx
+    call    fb_use
+    lea     rax, [rip+flt_wlo]
+    mov     ecx, [rip+wg_n]
+    mov     [rax+r12*4], ecx
+    mov     edi, r12d
+    call    draw_leaf
+    lea     rax, [rip+flt_whi]
+    mov     ecx, [rip+wg_n]
+    mov     [rax+r12*4], ecx
+    call    fb_restore
+    lea     rax, [rip+pw_drawn]
+    mov     dword ptr [rax+rbx*4], 1
+8:  inc     ebx
+    cmp     ebx, PW_MAX
+    jb      1b
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pw_present_all - the panel windows drawn this frame shown (window.s render)
+pw_present_all:
+    push    rbx
+    xor     ebx, ebx
+1:  lea     rax, [rip+pw_drawn]
+    cmp     dword ptr [rax+rbx*4], 0
+    je      2f
+    mov     dword ptr [rax+rbx*4], 0
+    mov     edi, ebx
+    call    pw_present
+2:  inc     ebx
+    cmp     ebx, PW_MAX
+    jb      1b
+    pop     rbx
+    ret
+
+# ovl_enter / ovl_leave - menus and the like drawn in the window they are
+#   in (ui_draw); nothing to do for the main window's
+ovl_enter:
+    mov     edi, [rip+ovl_wnd]
+    dec     edi
+    js      9f
+    cmp     edi, PW_MAX
+    jae     9f
+    lea     rax, [rip+pw_drawn]
+    cmp     dword ptr [rax+rdi*4], 0
+    je      9f
+    jmp     fb_use
+9:  ret
+ovl_leave:
+    jmp     fb_restore
+
+# pw_edge_hit(edi=x, esi=y) -> eax = the edges of the panel window input is
+#   in that the point is on (2 bottom, 4 left, 8 right), edx = its node
+pw_edge_hit:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    mov     r12d, esi
+    call    pw_cur_node
+    mov     r8d, eax
+    xor     eax, eax
+    test    r8d, r8d
+    js      9f
+    push    r8
+    mov     edi, r8d
+    call    node_ptr
+    pop     r8
+    xor     edx, edx
+    cmp     ebx, FL_EDGE
+    jge     1f
+    or      edx, 4
+1:  mov     ecx, [rax+N_W]
+    sub     ecx, ebx
+    cmp     ecx, FL_EDGE
+    jg      2f
+    or      edx, 8
+2:  mov     ecx, [rax+N_H]
+    sub     ecx, r12d
+    cmp     ecx, FL_EDGE
+    jg      3f
+    or      edx, 2
+3:  mov     eax, edx
+9:  mov     edx, r8d
+    add     rsp, 8
     pop     r12
     pop     rbx
     ret

@@ -189,6 +189,9 @@ wsp_take:
 # wsp_give(edi=index) - that record becomes the layout in use
 wsp_give:
     push    rbx
+    push    rdi
+    call    pw_close_all                # (panel windows: back in the window)
+    pop     rdi
     call    wsp_rec
     mov     rbx, rax
     mov     eax, [rbx+WS_ROOT]
@@ -209,6 +212,7 @@ wsp_give:
     lea     rdi, [rip+area_cams]
     mov     ecx, MAX_NODES*CAM_SZ
     rep     movsb
+    call    pw_scrub                    # (its windows are not there)
     mov     dword ptr [rip+dirty], 1
     pop     rbx
     ret

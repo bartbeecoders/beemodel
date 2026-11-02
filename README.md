@@ -41,7 +41,7 @@ unpack it and start `beemodel.exe` ([docs/WINDOWS.md](docs/WINDOWS.md)).
 |------|---------|
 | Title bar | Client-side decoration: logo, title, minimize / maximize-restore / close. Drag to move; double-click to maximize. Edges resize floating windows. |
 | Menu bar | File, Edit, View, Select, Add, Object, Mesh, Render, AI, Help, with submenus, then the workspace tabs (Modeling, Sculpt, CAD, Shading, Animation, World, your own). F10 / Alt+letter open them from the keyboard. |
-| Areas | Any area can be any editor: 3D Viewport, Tools, Outliner, Properties, Console, Timeline, Dope Sheet, Graph, Node, UV, Render, Asset Browser, AI Activity, Versions, Preferences, Help. Split, join (drag a corner), dock (drag a header onto another area's side, or its middle to swap), float as a movable, resizable panel, maximize. |
+| Areas | Any area can be any editor: 3D Viewport, Tools, Outliner, Properties, Console, Timeline, Dope Sheet, Graph, Node, UV, Render, Asset Browser, AI Activity, Versions, Preferences, Help. Split, join (drag a corner), dock (drag a header onto another area's side, or its middle to swap), float as a movable, resizable panel or in a window of its own (another monitor), maximize. |
 | 3D Viewport | Software renderer with a header (mode, select mode, shading, grid, snap), a navigation gizmo, quick actions in an empty scene, right-click menus, a Z pie. |
 | Properties | Object, Modifiers, Material, Physics, CAD, Scene, Render, Viewport, Animation and Rig tabs (and Landscape for a landscape): every feature as fields, buttons and pickers, in sections that fold. |
 | Status bar | What the mouse and keys do now; scene size, AI permission, render progress, peers; toasts for messages. |

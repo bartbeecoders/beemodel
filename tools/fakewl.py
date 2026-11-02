@@ -65,6 +65,11 @@ class Fake:
         self.objs = {1: 'wl_display'}
         self.pools, self.buffers = {}, {}
         self.attached = None
+        self.att = {}              # the panels' windows (#419): surface -> buffer
+        self.wframes = {}          #  their last frames: surface -> (w, h, bytes)
+        self.wcbs = {}             #  their frame callbacks
+        self.xdg_of, self.top_of = {}, {}   # xdg_surface -> surface, toplevel -> xdg
+        self.ptr_surf = None
         self.frame = None          # (w, h, bytes)
         self.frames = 0
         self.serial = 100
@@ -130,8 +135,14 @@ class Fake:
             self.objs[u(0)] = 'wl_surface'
         elif iface == 'xdg_wm_base' and op == 2:
             self.objs[u(0)] = 'xdg_surface'
+            self.xdg_of[u(0)] = u(1)
         elif iface == 'xdg_surface' and op == 1:
             self.objs[u(0)] = 'xdg_toplevel'
+            self.top_of[u(0)] = obj
+        elif iface in ('wl_surface', 'xdg_surface', 'xdg_toplevel', 'wp_viewport') and op == 0 \
+                and obj != self.surf():                   # destroy (a panel's window)
+            self.objs[obj] = 'destroyed'
+            self.wframes.pop(obj, None)
         elif iface == 'wl_seat' and op == 0:
             self.objs[u(0)] = 'wl_pointer'
         elif iface == 'wl_seat' and op == 1:
@@ -196,6 +207,8 @@ class Fake:
         elif iface == 'wl_shm_pool' and op == 0:          # create_buffer
             self.buffers[u(0)] = (obj, u(1), u(2), u(3), u(4))
             self.objs[u(0)] = 'wl_buffer'
+        elif iface == 'wl_surface' and obj != self.surf() and op in (1, 3, 6):
+            self.panel_surface(obj, op, u)                 # a panel's window
         elif iface == 'wl_surface' and op == 1:           # attach
             self.attached = u(0)
         elif iface == 'wl_surface' and op == 3:           # frame
@@ -219,6 +232,58 @@ class Fake:
             if getattr(self, 'pending_cb', None):
                 self.send(self.pending_cb, 0, struct.pack('<I', int(time.time() * 1000) & 0xffffffff))
                 self.pending_cb = None
+
+    def panel_surface(self, sid, op, u):
+        """A panel's own window: attach, frame, commit (the first commit,
+        with no buffer: a configure of 0 x 0, the client's size)."""
+        if op == 1:
+            self.att[sid] = u(0)
+        elif op == 3:
+            self.objs[u(0)] = 'wl_callback'
+            self.wcbs[sid] = u(0)
+        elif self.att.get(sid) is None:
+            xs = [x for x, sf in self.xdg_of.items() if sf == sid]
+            tl = [t for t, x in self.top_of.items() if xs and x == xs[0]]
+            if xs and tl:
+                self.send(tl[0], 0, struct.pack('<iiI', 0, 0, 0))
+                self.serial += 1
+                self.send(xs[0], 0, struct.pack('<I', self.serial))
+        else:
+            b = self.att.pop(sid)
+            pid, off, w, h, stride = self.buffers[b]
+            self.wframes[sid] = (w, h, bytes(self.pools[pid][1][off:off + stride * h]))
+            self.send(b, 0)                               # release
+            cb = self.wcbs.pop(sid, None)
+            if cb:
+                self.send(cb, 0, struct.pack('<I', int(time.time() * 1000) & 0xffffffff))
+
+    def windows(self):
+        """The panels' windows (their surfaces), oldest first."""
+        return [x for x in self.xdg_of.values() if x != self.surf() and self.objs.get(x) == 'wl_surface']
+
+    def enter_win(self, k, x, y):
+        """The pointer leaves the window it is in for window k (0 the main
+        one, 1.. the panels' windows), at x, y there."""
+        sid = self.surf() if k == 0 else self.windows()[k - 1]
+        self.serial += 1
+        self.send(self.ptr(), 1, struct.pack('<II', self.serial, self.ptr_surf or self.surf()))
+        self.serial += 1
+        self.send(self.ptr(), 0, struct.pack('<IIii', self.serial, sid, x * 256, y * 256))
+        self.ptr_surf = sid
+        self.pump(0.3)
+
+    def close_win(self, k):
+        """The compositor's close for panel window k."""
+        sid = self.windows()[k - 1]
+        xs = [x for x, sf in self.xdg_of.items() if sf == sid][0]
+        tl = [t for t, x in self.top_of.items() if x == xs][0]
+        self.send(tl, 1)
+        self.pump(0.5)
+
+    def win_image(self, k):
+        from PIL import Image
+        w, h, data = self.wframes[self.windows()[k - 1]]
+        return Image.frombuffer('RGBX', (w, h), data, 'raw', 'BGRX', 0, 1).convert('RGB')
 
     def configure(self, w=None, h=None, states=()):
         if w: self.size = (w, h)
@@ -636,6 +701,7 @@ def main():
     prefs_ui()
     workspaces_ui()
     dock_ui()
+    panel_windows_ui()
     help_ui()
     ui_review()
     a11y_ui()
@@ -8893,6 +8959,97 @@ def dock_ui():
     c = A()['Console']
     check(c['value'] == 'docked', 'its header\'s dock button puts a panel back')
     f.shot('dock_4_end.png')
+    f.proc.kill()
+
+
+def panel_windows_ui():
+    """#419 stage 2: Area > Open in New Window puts an area in a toplevel of
+    its own (another monitor); its header moves that window, its widgets and
+    menus work in it, closing it or its dock button docks the area back, and a
+    floating panel dragged out of the main window becomes one."""
+    print('  -- panels in windows of their own --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    A = lambda: {a['label']: a for a in areas(m)}
+    def ctx(area, label, k=0):                 # the header's menu (window k)
+        x, y = (area['x'] + min(150, area['w'] - 30), area['y'] + 10)
+        if k:
+            f.enter_win(k, x, y)
+        f.click(x, y, btn=0x111); f.pump(0.3)
+        it = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == label]
+        if it:
+            f.click(it[0]['x'] + 30, it[0]['y'] + it[0]['h'] // 2); f.pump(0.5)
+        else:
+            f.key(1)
+        return it[0] if it else None
+    o = A()['Outliner']
+    ctx(o, 'Open in New Window')
+    f.pump(0.5)
+    a = A(); o = a['Outliner']
+    check(len(f.windows()) == 1 and o['value'] == 'window', f'Open in New Window: a window of its own ({len(f.windows())}, {o["value"]})')
+    img = f.win_image(1) if f.windows() and f.wframes.get(f.windows()[0]) else None
+    check(img is not None and img.size[0] >= 200, f'the outliner is drawn in it ({img and img.size})')
+    if img:
+        img.save(os.path.join(OUT, 'win_1_outliner.png'))
+    check(a['Properties']['y'] < 100, 'the main window\'s layout closes up without it')
+    f.enter_win(1, 40, 36)                     # its rows: Camera, Light, Cube
+    hi = f.win_image(1).getpixel((150, 78))    # (the Cube's row: selected)
+    f.click(40, 36); f.pump(0.5)
+    i1 = f.win_image(1)
+    f.pump(0.6)                                # (not a double click)
+    f.click(40, 76); f.pump(0.5)
+    i2 = f.win_image(1)
+    check(i1.getpixel((150, 38)) == hi and i1.getpixel((150, 78)) != hi and i2.getpixel((150, 78)) == hi,
+          'clicks on its rows select the Camera, then the Cube (its own rows, drawn in it)')
+    n0 = len([r for r in f.requests if r == ('xdg_toplevel', 5)])
+    f.move(150, 10); f.button(True); f.pump(0.2); f.button(False); f.pump(0.2)
+    moves = len([r for r in f.requests if r == ('xdg_toplevel', 5)]) - n0
+    check(moves >= 1, f'its header asks the compositor to move the window ({moves})')
+    it = ctx(A()['Outliner'], 'Dock Area', k=1)
+    a = A()
+    check(it is not None and a['Outliner']['value'] == 'docked' and not f.windows(),
+          'its menu opens in it, and Dock Area puts the outliner back')
+    f.enter_win(0, 600, 300)
+    ctx(A()['Console'], 'Open in New Window')
+    check(len(f.windows()) == 1, 'the console in a window')
+    f.close_win(1)
+    a = A()
+    check(a['Console']['value'] == 'docked' and not f.windows(), 'closing its window docks the console back')
+    p = A()['Properties']                      # a floating panel dragged out
+    ctx(p, 'Float Area')
+    p = A()['Properties']
+    f.drag(p['x'] + 150, p['y'] + 10, 1400, p['y'] + 10, steps=6); f.pump(0.5)
+    check(A()['Properties']['value'] == 'window' and len(f.windows()) == 1,
+          'a floating panel dragged out of the main window gets a window of its own')
+    f.enter_win(0, 600, 300)                   # a 3D viewport in a window: it draws,
+    v = A()['3D Viewport']                     #  orbits there
+    ov = widget(m, 'viewport.overlays')
+    hx = ov['x'] + ov['w'] + 8 if ov else v['x'] + v['w'] - 4 * 22 - 20
+    f.click(hx, v['y'] + 10, btn=0x111); f.pump(0.3)
+    it = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == 'Open in New Window']
+    if it:
+        f.click(it[0]['x'] + 30, it[0]['y'] + it[0]['h'] // 2); f.pump(0.8)
+    k = len(f.windows())
+    img = f.win_image(k) if k and f.wframes.get(f.windows()[-1]) else None
+    cube = img and sum(1 for p in img.crop((img.size[0] // 2 - 40, img.size[1] // 2 - 40, img.size[0] // 2 + 40,
+                                            img.size[1] // 2 + 40)).getdata() if min(p) > 100)
+    yaw0 = q('print(viewinfo(0))')
+    if img:
+        w, h = img.size
+        f.enter_win(k, w // 2, h // 2)
+        f.drag(w // 2 - 100, h // 2 + 100, w // 2 + 20, h // 2 + 100, steps=6); f.pump(0.5)
+    yaw1 = q('print(viewinfo(0))')
+    check(k == 2 and cube and cube > 300 and yaw1 != yaw0,
+          f'a 3D viewport in a window draws the scene ({cube} cube px) and orbits there (yaw {yaw0} -> {yaw1})')
+    f.enter_win(0, 600, 300)
+    q('op("workspace.set", "2")'); f.pump(0.3)
+    q('op("workspace.set", "1")'); f.pump(0.3)
+    check(not f.windows() and A()['Properties']['value'] == 'float',
+          'another workspace: the window closes, its area a panel in the main window again')
     f.proc.kill()
 
 
