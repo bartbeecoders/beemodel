@@ -9022,9 +9022,17 @@ def panel_windows_ui():
     p = A()['Properties']                      # a floating panel dragged out
     ctx(p, 'Float Area')
     p = A()['Properties']
-    f.drag(p['x'] + 150, p['y'] + 10, 1400, p['y'] + 10, steps=6); f.pump(0.5)
-    check(A()['Properties']['value'] == 'window' and len(f.windows()) == 1,
-          'a floating panel dragged out of the main window gets a window of its own')
+    n0 = len([r for r in f.requests if r == ('xdg_toplevel', 5)])
+    f.move(p['x'] + 150, p['y'] + 10); f.button(True)
+    for x in (p['x'] + 300, 1100, 1250, 1300, 1400):           # out of the window
+        f.move(x, p['y'] + 10)
+    f.pump(0.5)
+    moved = len([r for r in f.requests if r == ('xdg_toplevel', 5)]) - n0
+    f.button(False); f.pump(0.3)
+    parented = ('xdg_toplevel', 1) in f.requests
+    check(A()['Properties']['value'] == 'window' and len(f.windows()) == 1 and moved == 1 and parented,
+          f'a floating panel dragged out of the main window is torn off: a window of its own (the main one its parent), '
+          f'which the compositor moves on with the pointer ({moved} move)')
     f.enter_win(0, 600, 300)                   # a 3D viewport in a window: it draws,
     v = A()['3D Viewport']                     #  orbits there
     ov = widget(m, 'viewport.overlays')
