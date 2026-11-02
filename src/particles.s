@@ -525,7 +525,8 @@ pp_tab:         .quad k_from
 .text
 OPERATOR op_ps_add,    "particles.add",    "Particle System", do_ps_add, flags=OPF_AI_SAFE|OPF_UNDO, doc="Add a particle system to the active object: particles.add [rain|snow|sparks|confetti|fountain|tank (a preset, then:)] [from faces|volume|verts|point] [rate n | burst n] [start f] [end f] [life s] [life_random 0..1] [speed m/s] [speed_random 0..1] [normal | direction x y z] [spread deg] [size m] [size_random 0..1] [drag k] [gravity k] [color RRGGBB] [seed n] [group 0..15] [max n] [name text] [on|off]"
 OPERATOR op_ps_set,    "particles.set",    "Particle Settings", do_ps_set, flags=OPF_AI_SAFE|OPF_UNDO, doc="A particle system's settings on the active object: particles.set [system n] then the words particles.add takes"
-OPERATOR op_ps_export, "file.export_liquid", "Export Liquid Surface...", do_ps_export, doc="Export the active object's liquid surface (or its mesh) at each frame as OBJ files: file.export_liquid <prefix> [first last] (prefix_0001.obj ..., the scene's frames when not said)"
+OPERATOR op_ps_export, "file.export_liquid", "Export Liquid Surface...", job_op_ps_export, doc="Export the active object's liquid surface (or its mesh) at each frame as OBJ files: file.export_liquid <prefix> [first last] (prefix_0001.obj ..., the scene's frames when not said)"
+JOB_NOW job_op_ps_export, do_ps_export, "Exporting the liquid surface"
 OPERATOR op_ps_remove, "particles.remove", "Remove Particle System", do_ps_remove, flags=OPF_AI_SAFE|OPF_UNDO, doc="Remove a particle system from the active object: particles.remove [system n] (the first when not said)"
 
 # =============================================================================

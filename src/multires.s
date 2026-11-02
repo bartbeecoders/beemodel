@@ -66,7 +66,8 @@ mr_n:           .skip 4                 #  how many, the end of them
 mr_end:         .skip 4
 
 .text
-OPERATOR op_mr_down, "multires.propagate_down", "Propagate Down", do_mr_down, flags=OPF_AI_SAFE|OPF_UNDO, doc="Multires: the coarser levels take the shape of the finest (which stays exact)"
+OPERATOR op_mr_down, "multires.propagate_down", "Propagate Down", job_op_mr_down, flags=OPF_AI_SAFE|OPF_UNDO, doc="Multires: the coarser levels take the shape of the finest (which stays exact)"
+JOB_NOW job_op_mr_down, do_mr_down, "Propagating the levels"
 
 # mr_find(rdi=object) -> rax = its first enabled modifier when that is a
 #   multires one (0: none)

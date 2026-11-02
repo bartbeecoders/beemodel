@@ -134,7 +134,8 @@ s_exported:     .asciz "  exported "
 s_err_write:    .asciz "  could not write "
 s_err_none:     .asciz "  no B-rep solids to export (cad.kernel on): "
 
-OPERATOR op_export_step, "file.export_step", "Export STEP...", do_estep, doc="Export the B-rep solids (cad.kernel on, imported STEP parts) as STEP AP214: one part, or an assembly placed by the objects' transforms: file.export_step <path>", form=form_estep
+OPERATOR op_export_step, "file.export_step", "Export STEP...", job_op_export_step, doc="Export the B-rep solids (cad.kernel on, imported STEP parts) as STEP AP214: one part, or an assembly placed by the objects' transforms: file.export_step <path>", form=form_estep
+JOB_NOW job_op_export_step, do_estep, "Exporting STEP"
 
 .equ MAXSO,     256                     # solids written
 

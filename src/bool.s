@@ -5256,10 +5256,14 @@ polya:          .skip 4
 # =============================================================================
 #  object.boolean, closed-manifold check
 # =============================================================================
-OPERATOR op_boolean, "object.boolean", "Boolean", do_boolean, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Combine the active mesh with another selected one: object.boolean union|difference|intersect [keep]", form=form_boolean
-OPERATOR op_bool_union, "object.boolean_union", "Boolean Union", do_boolean_n, arg=BOOL_UNION, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Boolean union of the active and the selected mesh", poll=poll_two
-OPERATOR op_bool_diff, "object.boolean_difference", "Boolean Difference", do_boolean_n, arg=BOOL_DIFF, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Subtract the selected mesh from the active one", poll=poll_two
-OPERATOR op_bool_isect, "object.boolean_intersect", "Boolean Intersect", do_boolean_n, arg=BOOL_ISECT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Keep what the active and the selected mesh share", poll=poll_two
+OPERATOR op_boolean, "object.boolean", "Boolean", job_op_boolean, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="Combine the active mesh with another selected one: object.boolean union|difference|intersect [keep]", form=form_boolean
+JOB_NOW job_op_boolean, do_boolean, "Boolean"
+OPERATOR op_bool_union, "object.boolean_union", "Boolean Union", job_op_bool_union, arg=BOOL_UNION, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Boolean union of the active and the selected mesh", poll=poll_two
+JOB_NOW job_op_bool_union, do_boolean_n, "Boolean union"
+OPERATOR op_bool_diff, "object.boolean_difference", "Boolean Difference", job_op_bool_diff, arg=BOOL_DIFF, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Subtract the selected mesh from the active one", poll=poll_two
+JOB_NOW job_op_bool_diff, do_boolean_n, "Boolean difference"
+OPERATOR op_bool_isect, "object.boolean_intersect", "Boolean Intersect", job_op_bool_isect, arg=BOOL_ISECT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT|OPF_HIDDEN, doc="Keep what the active and the selected mesh share", poll=poll_two
+JOB_NOW job_op_bool_isect, do_boolean_n, "Boolean intersect"
 
 .section .rodata
 s_bo_need:      .asciz "boolean: select two meshes (the active one is kept)"

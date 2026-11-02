@@ -19,12 +19,20 @@
 .globl draw_statusbar
 .globl toast_note
 .globl toast_wait
+.globl busy_wait
+.globl busy_tick
 .globl toast_tick
 .globl toast_on
 .globl toast_warn
 
 .equ TOAST_MS,  4000
 
+.equ ST_AI, 0                           # (st_seen's tasks)
+.equ ST_HZ, 1
+.equ ST_EX, 2
+.equ ST_VG, 3
+.equ ST_LB, 4
+.equ ST_SEEN_N, 5
 .section .bss
 .align 8
 toast_t0:       .skip 8
@@ -35,12 +43,27 @@ toast_dummy:    .skip 4
 toast_warn:     .skip 4                 # the next toast is a warning (set by run_op_ui)
 toast_bad:      .skip 4                 # the toast shown is one
 stat_buf:       .skip 96
+st_seen:        .skip 8*ST_SEEN_N       # when each background task was first
+                                        #  seen at work (0: idle): its time
+st_busy_t:      .skip 8                 # the last redraw for those times
 
 .section .rodata
 s_lk_serve:     .asciz "Live link: serving"
+s_since:        .asciz ", "
+s_secs:         .asciz " s"
+s_mins:         .asciz " min "
+s_left_a:       .asciz ", about "
+s_left_b:       .asciz " left"
+s_dots:         .asciz "..."
+s_hz_stop:      .asciz " (click: stop)"
+s_vg_chip:      .asciz "Virtualizing the mesh"
+s_lb_chip:      .asciz "Making library thumbnails"
 s_lk_mirror:    .asciz "Live link: mirroring"
 .align 4
 sf_100:         .float 100.0
+sf_twentieth:   .float 0.05
+sf_almost:      .float 0.999
+sf_one_st:      .float 1.0
 
 # hints: key, word, ... 0
 h_object:       .quad k_lmb, w_select, k_drag, w_orbit, k_mmb, w_pan, k_wheel, w_zoom
@@ -114,7 +137,7 @@ s_objects:      .asciz " objects  "
 s_object1:      .asciz " object  "
 s_faces:        .asciz " faces"
 s_ai:           .asciz "AI: "
-s_ai_stop:      .asciz "...   Stop"
+s_ai_stop:      .asciz "   Stop"
 s_render:       .asciz "Render "
 s_pct:          .asciz "%"
 s_coedit:       .asciz "Co-editing"
@@ -141,6 +164,8 @@ WIDGET wd_st_link,  WK_BUTTON, "status.link", "Live link", flags=WGF_NODRAW, aux
 WIDGET wd_st_aiwork, WK_BUTTON, "status.ai_working", "AI working", flags=WGF_NODRAW, aux=op_ai_stop, tip="The AI is working on this request (one undo step). Click to stop it"
 WIDGET wd_st_exlib, WK_BUTTON, "status.downloads", "Downloads", flags=WGF_NODRAW, aux=op_ex_stop, tip="An online library at work: its catalog or an asset's files. Click to stop"
 WIDGET wd_st_hi3d, WK_BUTTON, "status.hi3d", "Image to 3D", flags=WGF_NODRAW, aux=op_hz_stop, tip="A model being made from an image (the Hi3D addon). Click to stop it"
+WIDGET wd_st_vg,    WK_BUTTON, "status.virtualizing", "Virtualizing", flags=WGF_NODRAW, tip="A mesh being made into clusters for virtualized geometry (in the background: you can go on working)"
+WIDGET wd_st_lb,    WK_BUTTON, "status.thumbnails", "Library thumbnails", flags=WGF_NODRAW, tip="The content library's missing thumbnails being path-traced, one asset at a time (in the background)"
 WIDGET wd_st_job,   WK_BUTTON, "status.job", "Job", flags=WGF_NODRAW, tip="A long job: the window answers again when it is done"
 WIDGET wd_st_toast, WK_BUTTON, "status.toast", "Message", flags=WGF_NODRAW, aux=op_console_focus, tip="Click to open the console with every message"
 
@@ -185,6 +210,169 @@ toast_note:
     mov     [rip+toast_t0], rax
 8:  pop     rbx
 9:  ret
+
+# ---- how long things take (#433) ---------------------------------------------------
+# fmt_secs(edi=seconds) - "12 s", "3 min 05 s" into fmt_buf
+fmt_secs:
+    push    rbx
+    mov     ebx, edi
+    cmp     ebx, 60
+    jb      1f
+    mov     eax, ebx
+    xor     edx, edx
+    mov     ecx, 60
+    div     ecx
+    mov     ebx, edx
+    mov     edi, eax
+    call    fmt_int
+    lea     rdi, [rip+s_mins]
+    call    fmt_str
+    cmp     ebx, 10
+    jae     1f
+    mov     edi, '0'
+    call    fmt_char
+1:  mov     edi, ebx
+    call    fmt_int
+    lea     rdi, [rip+s_secs]
+    call    fmt_str
+    pop     rbx
+    ret
+
+# fmt_dur(rdi=ns) - ", 12 s" into fmt_buf, from a second on
+fmt_dur:
+    cmp     rdi, 1000000000
+    jb      9f
+    push    rdi
+    lea     rdi, [rip+s_since]
+    call    fmt_str
+    pop     rax
+    xor     edx, edx
+    mov     ecx, 1000000000
+    div     rcx
+    mov     edi, eax
+    jmp     fmt_secs
+9:  ret
+
+# fmt_since(edi=task, esi=1 at work) - its time since it was first seen at
+#   work, into fmt_buf (", 12 s"); idle: forgotten
+fmt_since:
+    push    rbx
+    lea     rbx, [rip+st_seen]
+    lea     rbx, [rbx+rdi*8]
+    test    esi, esi
+    jnz     1f
+    mov     qword ptr [rbx], 0
+    pop     rbx
+    ret
+1:  call    mono_ns
+    cmp     qword ptr [rbx], 0
+    jne     2f
+    mov     [rbx], rax
+2:  sub     rax, [rbx]
+    mov     rdi, rax
+    pop     rbx
+    jmp     fmt_dur
+
+# chip_timed_hz (fmt_buf: Image to 3D's text, hz_chip) - its time and
+#   "(click: stop)" after it
+chip_timed_hz:
+    sub     rsp, 8
+    mov     edi, ST_HZ
+    mov     esi, 1
+    call    fmt_since
+    lea     rdi, [rip+s_hz_stop]
+    call    fmt_str
+    add     rsp, 8
+    ret
+
+# timed_chip(rdi=label, esi=task, edx=1 at work, rcx=its widget) (r12d:
+#   the chips' edge) - a chip with the label and how long it has been at work
+timed_chip:
+    push    rbx
+    push    r13
+    push    r14
+    mov     r14, rcx
+    mov     rbx, rdi
+    mov     r13d, esi
+    mov     edi, esi
+    mov     esi, edx
+    test    edx, edx
+    jnz     1f
+    call    fmt_since                   # (idle: forgotten, no chip)
+    jmp     9f
+1:  call    fmt_reset
+    mov     rdi, rbx
+    call    fmt_str
+    mov     edi, r13d
+    mov     esi, 1
+    call    fmt_since
+    lea     rdi, [rip+stat_buf]
+    lea     rsi, [rip+fmt_buf]
+    call    cpy_s
+    lea     rdi, [rip+stat_buf]
+    mov     rsi, r14
+    call    chip
+9:  pop     r14
+    pop     r13
+    pop     rbx
+    ret
+
+# busy_any -> eax = 1 while a background task is at work (its chip's time
+#   goes on)
+busy_any:
+    mov     eax, [rip+ai_busy]
+    or      eax, [rip+hz_pid]
+    or      eax, [rip+lb_busy]
+    cmp     dword ptr [rip+vg_state], 1
+    jne     1f
+    or      eax, 1
+1:  test    eax, eax
+    jnz     8f
+    sub     rsp, 8
+    call    ex_chip
+    add     rsp, 8
+    test    rax, rax
+    jz      9f
+8:  mov     eax, 1
+    ret
+9:  xor     eax, eax
+    ret
+
+# busy_wait -> eax = ms until the chips' times should be drawn again (a
+#   second apart), -1 when nothing is at work (main.s's wait)
+busy_wait:
+    sub     rsp, 8
+    call    busy_any
+    test    eax, eax
+    jz      8f
+    call    mono_ns
+    sub     rax, [rip+st_busy_t]
+    xor     edx, edx
+    mov     ecx, 1000000
+    div     rcx
+    mov     ecx, 1000
+    sub     ecx, eax
+    xor     eax, eax
+    test    ecx, ecx
+    cmovg   eax, ecx
+    inc     eax
+    add     rsp, 8
+    ret
+8:  mov     eax, -1
+    add     rsp, 8
+    ret
+
+# busy_tick - a frame a second while something is at work (its time)
+busy_tick:
+    sub     rsp, 8
+    call    busy_wait
+    cmp     eax, 1
+    ja      9f
+    call    mono_ns
+    mov     [rip+st_busy_t], rax
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    ret
 
 # toast_wait -> eax = ms until the toast goes, -1 if none
 toast_wait:
@@ -464,7 +652,12 @@ draw_statusbar:
     xor     esi, esi
     call    chip
 5:  cmp     dword ptr [rip+ai_busy], 0  # the AI at work: its prompt, Stop
-    je      51f
+    jne     50f
+    mov     edi, ST_AI
+    xor     esi, esi
+    call    fmt_since                   # (idle: its time forgotten)
+    jmp     51f
+50:
     call    fmt_reset
     lea     rdi, [rip+s_ai]
     call    fmt_str
@@ -482,6 +675,11 @@ draw_statusbar:
     mov     byte ptr [rdi], 0
 53: lea     rdi, [rip+stat_buf]
     call    fmt_str
+    lea     rdi, [rip+s_dots]
+    call    fmt_str
+    mov     edi, ST_AI                  # (how long it has been at it)
+    mov     esi, 1
+    call    fmt_since
     lea     rdi, [rip+s_ai_stop]
     call    fmt_str
     lea     rdi, [rip+stat_buf]
@@ -491,23 +689,52 @@ draw_statusbar:
     lea     rsi, [rip+wd_st_aiwork]
     call    chip
 51: cmp     dword ptr [rip+hz_pid], 0   # Image to 3D at work: how far, Stop
-    je      54f
-    call    hz_chip
+    jne     56f
+    mov     edi, ST_HZ
+    xor     esi, esi
+    call    fmt_since
+    jmp     54f
+56: call    hz_chip
+    call    chip_timed_hz
     lea     rdi, [rip+stat_buf]
-    mov     rsi, rax
+    lea     rsi, [rip+fmt_buf]
     call    cpy_s
     lea     rdi, [rip+stat_buf]
     lea     rsi, [rip+wd_st_hi3d]
     call    chip
 54: call    ex_chip                     # an online source at work: how far, Stop
     test    rax, rax
-    jz      55f
+    jnz     57f
+    mov     edi, ST_EX
+    xor     esi, esi
+    call    fmt_since
+    jmp     58f
+57: call    fmt_reset
+    mov     rdi, rax
+    call    fmt_str
+    mov     edi, ST_EX
+    mov     esi, 1
+    call    fmt_since
     lea     rdi, [rip+stat_buf]
-    mov     rsi, rax
+    lea     rsi, [rip+fmt_buf]
     call    cpy_s
     lea     rdi, [rip+stat_buf]
     lea     rsi, [rip+wd_st_exlib]
     call    chip
+58: lea     rdi, [rip+s_vg_chip]        # a mesh being virtualized (vgeo.s,
+    mov     esi, ST_VG                  #  in the background)
+    xor     edx, edx
+    cmp     dword ptr [rip+vg_state], 1
+    sete    dl
+    lea     rcx, [rip+wd_st_vg]
+    call    timed_chip
+    lea     rdi, [rip+s_lb_chip]        # library thumbnails (library.s, a
+    mov     esi, ST_LB                  #  child at a time)
+    xor     edx, edx
+    cmp     dword ptr [rip+lb_busy], 0
+    setne   dl
+    lea     rcx, [rip+wd_st_lb]
+    call    timed_chip
 55: call    fmt_reset                   # the AI's permission
     lea     rdi, [rip+s_ai]
     call    fmt_str
@@ -554,7 +781,40 @@ job_chip:
     call    fmt_int
     lea     rdi, [rip+s_pct]
     call    fmt_str
-1:  lea     rdi, [rip+stat_buf]
+1:  call    mono_ns                     # how long, and how long still (once
+    sub     rax, [rip+job_t0]           #  a twentieth is done, after 2 s)
+    mov     r14, rax
+    mov     rdi, rax
+    call    fmt_dur
+    movss   xmm0, [rip+job_frac]
+    comiss  xmm0, [rip+sf_twentieth]
+    jb      11f
+    comiss  xmm0, [rip+sf_almost]
+    ja      11f
+    cmp     r14, 2000000000
+    jb      11f
+    cvtsi2ss xmm1, r14                  # left = elapsed (1 - f) / f
+    movss   xmm2, [rip+sf_one_st]
+    subss   xmm2, xmm0
+    mulss   xmm1, xmm2
+    divss   xmm1, xmm0
+    cvttss2si rax, xmm1
+    add     rax, 999999999              # (whole seconds, rounded up)
+    lea     rdi, [rip+s_left_a]
+    push    rax
+    push    rax
+    call    fmt_str
+    pop     rdi
+    pop     rax
+    xor     edx, edx
+    mov     rax, rdi
+    mov     ecx, 1000000000
+    div     rcx
+    mov     edi, eax
+    call    fmt_secs
+    lea     rdi, [rip+s_left_b]
+    call    fmt_str
+11: lea     rdi, [rip+stat_buf]
     lea     rsi, [rip+fmt_buf]
     call    cpy_s
     lea     rdi, [rip+stat_buf]
@@ -572,7 +832,38 @@ job_chip:
     movss   xmm0, [rip+job_frac]        # the bar along its bottom
     xorps   xmm1, xmm1
     comiss  xmm0, xmm1
-    jb      2f
+    jae     12f
+    mov     rax, r14                    # unknown: a piece of it gliding
+    xor     edx, edx                    #  along (a frame at least every
+    mov     ecx, 8000000                #  100 ms while the job reports)
+    div     rcx
+    mov     ecx, r13d
+    shr     ecx, 2                      # (a quarter of the chip)
+    lea     r8d, [r13+rcx]
+    xor     edx, edx
+    div     r8d
+    mov     edi, edx
+    sub     edi, ecx                    # x: -piece .. width
+    mov     edx, ecx
+    test    edi, edi
+    jns     13f
+    add     edx, edi
+    xor     edi, edi
+13: lea     eax, [rdi+rdx]
+    cmp     eax, r13d
+    jle     14f
+    mov     edx, r13d
+    sub     edx, edi
+14: test    edx, edx
+    jle     2f
+    add     edi, r12d
+    mov     esi, [rip+cont_y1]
+    add     esi, STATUS_H-6
+    mov     ecx, 3
+    mov     r8d, COL_ACCENT
+    call    fill_rect
+    jmp     2f
+12:
     cvtsi2ss xmm1, r13d
     mulss   xmm0, xmm1
     cvttss2si edx, xmm0

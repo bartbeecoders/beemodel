@@ -191,7 +191,8 @@ s_rendered_ms:  .asciz " samples, ms: "
 s_render_need:  .asciz "  render.image <path.png> [width height samples [denoise 0|1]]"
 s_render_fail:  .asciz "  render: out of memory"
 
-OPERATOR op_render_image, "render.image", "Render Image", do_render_image, flags=OPF_AI_SAFE, doc="Path-trace the scene (camera object, or the viewport) into a PNG: render.image <path> [width height samples [denoise]]", form=form_rimage
+OPERATOR op_render_image, "render.image", "Render Image", job_op_render_image, flags=OPF_AI_SAFE, doc="Path-trace the scene (camera object, or the viewport) into a PNG: render.image <path> [width height samples [denoise]]", form=form_rimage
+JOB_NOW job_op_render_image, do_render_image, "Rendering the image"
 
 .text
 
@@ -3925,9 +3926,16 @@ hive_render_file:
     jz      8f
     call    now_ms
     mov     r12, rax
+    push    qword ptr [rip+job_nopf]    # (a long job: its share by the samples,
+    push    rax                         #  not each pass's chunks)
+    mov     dword ptr [rip+job_nopf], 1
 1:  mov     eax, [rip+hv_spp]
     cmp     eax, [rip+hv_target]
     jae     2f
+    cvtsi2ss xmm0, eax                  # (the job: how far, in samples)
+    cvtsi2ss xmm1, dword ptr [rip+hv_target]
+    divss   xmm0, xmm1
+    call    job_set
     cmp     dword ptr [rip+hv_gpu], 0   # on the GPU: batches of about 16M
     je      11f                         #  samples (one dispatch stays short)
     mov     eax, [rip+hv_w]
@@ -3951,7 +3959,10 @@ hive_render_file:
     jnz     1b
 11: call    hive_pass
     jmp     1b
-2:  test    r14d, r14d
+2:  pop     rax
+    pop     rax
+    mov     [rip+job_nopf], eax
+    test    r14d, r14d
     jz      21f
     call    hive_denoise
 21: call    now_ms

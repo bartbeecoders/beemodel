@@ -34,6 +34,18 @@ project uses [Semantic Versioning](https://semver.org/).
   so the option matters most for continuous motion and slower GPUs.
 - `Vibecoding/demos/cornell_room.bee`: the Cornell-style room of the test.
 
+- **Clearer progress on long work** (#433): opening, saving and exporting,
+  rendering an image, baking a material, booleans, shatter, applying a
+  modifier, unwrapping and packing UVs, repair, subdivide, landscape
+  imports and thumbnails now show the status bar's job chip from their first
+  moment (they froze the window without a word before), as do placing a
+  model from Image to 3D and a downloaded asset. The chip shows how long the
+  job has taken, about how long is left once that can be told, and a gliding
+  bar when the share is unknown; a rendered image counts its samples (it
+  read 100% for most of the render). Background work has a chip with its
+  time: the AI Assistant, Image to 3D, downloads, and now a mesh being
+  virtualized and the library's thumbnails.
+
 ### Fixed
 - Rendered's denoiser left a single-sample frame as noisy as it came (its
   variance was 0): one sample's variance now comes from its neighbourhood.

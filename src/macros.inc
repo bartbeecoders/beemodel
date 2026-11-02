@@ -102,6 +102,28 @@
     .popsection
 .endm
 
+# A long job that runs at once, even from a key or a click (#433): the
+# status bar's chip in a frame before the work (inside the event dispatch
+# that frame is drawn without reading the compositor's news), no deferral -
+# for operators other flows call and go on from (Save before New, a form's
+# export)
+.macro JOB_NOW sym, inner, label
+    .pushsection .rodata
+.Ljn\@: .asciz "\label"
+    .popsection
+    .pushsection .text
+\sym:
+    push    rdi
+    lea     rdi, [rip+.Ljn\@]
+    call    job_begin
+    mov     rdi, [rsp]
+    call    \inner
+    call    job_end
+    pop     rdi
+    ret
+    .popsection
+.endm
+
 # A long job (jobui.s): sym runs inner between job_begin("label") and
 # job_end, so the status bar shows it while it runs (rdi passed through)
 .macro JOB_OP sym, inner, label

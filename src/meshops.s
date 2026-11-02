@@ -96,7 +96,8 @@ items_mesh:     .quad op_m_extrude, op_m_extrude_ind, op_m_inset, 0
 OPERATOR op_m_extrude, "mesh.extrude", "Extrude", do_extrude, key=KEY_E, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Extrude the selected faces (or edges) and move them along the normal: mesh.extrude [distance]", params=p_extrude
 OPERATOR op_m_extrude_ind, "mesh.extrude_individual", "Extrude Individual Faces", do_extrude_ind, key=KEY_E|KM_ALT, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Extrude every selected face along its own normal: mesh.extrude_individual [distance]", params=p_extrude_ind
 OPERATOR op_m_inset, "mesh.inset", "Inset Faces", do_inset, key=KEY_I, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Inset every selected face: mesh.inset [thickness]", params=p_inset
-OPERATOR op_m_subdivide, "mesh.subdivide", "Subdivide", do_subdivide, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Split the selected faces (quads into four)"
+OPERATOR op_m_subdivide, "mesh.subdivide", "Subdivide", job_op_m_subdivide, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Split the selected faces (quads into four)"
+JOB_NOW job_op_m_subdivide, do_subdivide, "Subdividing"
 OPERATOR op_m_fill, "mesh.fill", "Fill / Make Face", do_fill, key=KEY_F, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Make a face from the selected vertices (fills holes)"
 OPERATOR op_m_dissolve, "mesh.dissolve", "Dissolve", do_dissolve, key=KEY_X|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Dissolve the selection by select mode: merge the faces around it into n-gons"
 OPERATOR op_m_merge_c, "mesh.merge_center", "Merge at Center", do_merge_c, key=KEY_M, flags=OPF_AI_SAFE|OPF_UNDO|OPF_EDIT, doc="Merge all selected vertices into one at their centre"

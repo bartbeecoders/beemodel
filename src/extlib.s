@@ -102,6 +102,7 @@
 .equ EF_SZ,     272
 
 .section .rodata
+s_ex_job:       .asciz "Placing the downloaded asset"
 .align 8
 s_hf:       .asciz "https://huggingface.co"
 s_hfenv:    .asciz "BEEMODEL_HF_URL="
@@ -181,6 +182,7 @@ s_bad_get:  .asciz "  lib.get <asset> (in the current source; lib.source <id> fi
 ex_cur:     .long -1                    # the source shown (-1: the local library)
 
 .section .bss
+ex_jobon:       .skip 4                 # (ex_import: its job chip is up)
 .align 8
 ex_src:     .skip ES_SZ*EX_MAXSRC
 ex_nsrc:    .skip 4
@@ -2279,9 +2281,18 @@ ex_import:
     mov     [rsp], eax
     mov     eax, [rip+ex_static]
     mov     [rip+us_nophys], eax
-    lea     rdi, [rip+ex_path]
+    mov     dword ptr [rip+ex_jobon], 0 # the import: a job's chip while it
+    cmp     dword ptr [rip+wl_dispatching], 0   #  reads (not inside the event
+    jne     3f                                  #  dispatch: no frames there)
+    mov     dword ptr [rip+ex_jobon], 1
+    lea     rdi, [rip+s_ex_job]
+    call    job_begin
+3:  lea     rdi, [rip+ex_path]
     call    usd_import
-    mov     dword ptr [rip+us_nophys], 0
+    cmp     dword ptr [rip+ex_jobon], 0
+    je      4f
+    call    job_end
+4:  mov     dword ptr [rip+us_nophys], 0
     cmp     dword ptr [rip+ex_nosave], 0
     jne     1f
     mov     edi, [rsp]                  # into the local library too

@@ -161,8 +161,10 @@ bs_orm:         .asciz "_orm"
 bs_normal:      .asciz "_normal"
 bs_emit:        .asciz "_emissive"
 
-OPERATOR op_mat_import_tex, "material.import_textures", "Import Texture Set...", do_import_tex, flags=OPF_AI_SAFE|OPF_UNDO, doc="A PBR material from a texture set: pick any one of its images (base colour, normal, roughness, metallic, AO, height, emission, opacity, ORM are found by name): material.import_textures <image> [name]", form=form_itex
-OPERATOR op_mat_bake, "material.bake", "Bake Material", do_mat_bake, flags=OPF_AI_SAFE|OPF_UNDO, doc="Bake an object's material (its node graph) through its UVs into images <material>_base, _orm (occlusion, roughness, metallic), _normal and _emissive; apply: the material then samples them: material.bake <object> [size] [apply]"
+OPERATOR op_mat_import_tex, "material.import_textures", "Import Texture Set...", job_op_mat_import_tex, flags=OPF_AI_SAFE|OPF_UNDO, doc="A PBR material from a texture set: pick any one of its images (base colour, normal, roughness, metallic, AO, height, emission, opacity, ORM are found by name): material.import_textures <image> [name]", form=form_itex
+JOB_NOW job_op_mat_import_tex, do_import_tex, "Importing the texture set"
+OPERATOR op_mat_bake, "material.bake", "Bake Material", job_op_mat_bake, flags=OPF_AI_SAFE|OPF_UNDO, doc="Bake an object's material (its node graph) through its UVs into images <material>_base, _orm (occlusion, roughness, metallic), _normal and _emissive; apply: the material then samples them: material.bake <object> [size] [apply]"
+JOB_NOW job_op_mat_bake, do_mat_bake, "Baking the material"
 OPERATOR op_mat_preset, "material.preset", "Material Preset", do_preset, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give a material a preset look (none named: a new one for the active mesh): material.preset <gold|silver|copper|chrome|aluminium|plastic|rubber|glass|frosted_glass|water|ceramic|car_paint|wood|marble|concrete|fabric|leather|skin|clay|emissive> [material]"
 
 .text

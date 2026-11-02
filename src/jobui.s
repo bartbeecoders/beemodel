@@ -15,6 +15,8 @@
 .include "macros.inc"
 
 .globl job_on
+.globl job_t0
+.globl job_nopf
 .globl job_label
 .globl job_frac
 .globl job_begin
@@ -40,6 +42,10 @@ job_span:       .float 1.0              #  and how much of the job it is
 .align 8
 job_label:      .quad 0
 job_t:          .quad 0
+job_t0:         .quad 0                 # when the (outermost) job began
+job_depth:      .long 0                 # jobs inside it (an export saving...)
+job_nopf:       .long 0                 # 1: parallel_for's chunks do not report
+                                        #  (the work reports itself: a render)
 wl_dispatching: .long 0                 # (main.s: Wayland events being dispatched)
 .section .bss
 .align 8
@@ -64,10 +70,19 @@ job_key:
     mov     dword ptr [rip+job_stop], 1
 9:  ret
 
-# job_begin(rdi=label) - a job starts: its chip, at once
+# job_begin(rdi=label) - a job starts: its chip, at once. One inside another
+#   keeps the outer one's chip and progress
 job_begin:
-    sub     rsp, 8
+    cmp     dword ptr [rip+job_on], 0
+    je      0f
+    inc     dword ptr [rip+job_depth]
+    ret
+0:  sub     rsp, 8
     mov     [rip+job_label], rdi
+    push    rdi
+    call    mono_ns
+    mov     [rip+job_t0], rax
+    pop     rdi
     mov     dword ptr [rip+job_on], 1
     mov     dword ptr [rip+job_stop], 0
     mov     eax, [rip+jf_zero]
@@ -81,9 +96,14 @@ job_begin:
     add     rsp, 8
     ret
 
-# job_end - it is over: the chip goes, the window draws again
+# job_end - it is over: the chip goes, the window draws again (an inner
+#   job's end: the outer one goes on)
 job_end:
-    mov     dword ptr [rip+job_on], 0
+    cmp     dword ptr [rip+job_depth], 0
+    je      0f
+    dec     dword ptr [rip+job_depth]
+    ret
+0:  mov     dword ptr [rip+job_on], 0
     mov     dword ptr [rip+job_stop], 0
     mov     dword ptr [rip+dirty], 1
     ret
@@ -112,6 +132,8 @@ job_set:
 job_pf:
     cmp     dword ptr [rip+job_on], 0
     je      9f
+    cmp     dword ptr [rip+job_nopf], 0
+    jne     9f
     test    esi, esi
     jz      9f
     cvtsi2ss xmm0, edi
@@ -196,7 +218,10 @@ job_present:
     sub     rsp, 8
     cmp     dword ptr [rip+configured], 0
     je      9f
+    cmp     dword ptr [rip+wl_dispatching], 0   # (inside the event dispatch,
+    jne     1f                                  #  a JOB_NOW: nothing read)
     call    wnd_pump                    # (no waiting)
+1:
     mov     dword ptr [rip+dirty], 1
     call    render
     call    wnd_flush
