@@ -1926,12 +1926,18 @@ pw_open:
     mov     eax, [rip+pw_rect+12]
     sub     eax, [rip+pw_rect+4]
     mov     [rsp+56], eax
+    lea     rcx, [rip+pt]               # at the pointer (its title bar under
+    call    [rip+__imp_GetCursorPos]    #  it: a drag carries it on)
+    mov     eax, [rip+pt]
+    sub     eax, 120
+    mov     [rsp+32], eax
+    mov     eax, [rip+pt+4]
+    sub     eax, 12
+    mov     [rsp+40], eax
     mov     ecx, WS_EX_APPWINDOW        # (its own button on the taskbar)
     lea     rdx, [rip+s_class]
     lea     r8, [rip+pw_title]
     mov     r9d, WS_OVERLAPPEDWINDOW
-    mov     dword ptr [rsp+32], CW_USEDEFAULT
-    mov     dword ptr [rsp+40], CW_USEDEFAULT
     xor     eax, eax
     mov     [rsp+64], rax
     mov     [rsp+72], rax

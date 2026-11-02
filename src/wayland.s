@@ -1662,6 +1662,7 @@ set_cursor:
 .equ PW_PENDH,  84                      #  xdg_surface's
 .equ PW_SZ,     88
 .equ XDG_TOPLEVEL_DESTROY, 0
+.equ XDG_TOPLEVEL_SET_PARENT, 1
 .equ XDG_SURFACE_DESTROY,  0
 .equ WL_SURFACE_DESTROY,   0
 .equ WP_VIEWPORT_DESTROY,  0
@@ -1748,6 +1749,10 @@ pw_open:
     lea     rdi, [rip+s_app_id]
     call    put_str
     call    msg_end
+    mov     edi, [r15+PW_TOP]           # the main window its parent: a panel
+    mov     esi, XDG_TOPLEVEL_SET_PARENT    #  of it (tiling compositors float it)
+    mov     edx, [rip+id_toplevel]
+    call    msg1
     mov     edi, [r15+PW_TOP]
     mov     esi, XDG_TOPLEVEL_SET_MIN_SIZE
     mov     edx, 200

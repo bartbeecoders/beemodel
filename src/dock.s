@@ -837,8 +837,24 @@ dock_motion:
     mov     edi, ebx
     mov     esi, r12d
     call    outside_main                # (out of the window: a window of its
-    test    eax, eax                    #  own when released)
+    test    eax, eax                    #  own, carried on by the compositor)
+    jz      0f
+    cmp     dword ptr [rip+wsp_drag_kind], 2
+    jne     8f
+    call    pw_supported
+    test    eax, eax
+    jz      8f
+    mov     edi, [rip+wsp_drag_src]
+    call    pw_open_node
+    test    eax, eax
     jnz     8f
+    mov     edi, [rip+wsp_drag_src]
+    call    node_ptr
+    movzx   eax, byte ptr [rax+N_WND]
+    mov     [rip+pw_tear], eax
+    mov     dword ptr [rip+drag_mode], 0    # (the drag is the compositor's now)
+    jmp     8f
+0:
     mov     edi, ebx
     mov     esi, r12d
     call    tree_leaf_at
@@ -1459,6 +1475,8 @@ area_json:
 .section .data
 .align 4
 pw_node:        .long -1, -1, -1, -1    # each slot's area (-1: free)
+pw_tear:        .long -1                # torn off in a drag: the compositor
+                                        #  moves it once it is shown
 
 .section .bss
 .align 8
@@ -1909,6 +1927,12 @@ pw_present_all:
     mov     dword ptr [rax+rbx*4], 0
     mov     edi, ebx
     call    pw_present
+    cmp     ebx, [rip+pw_tear]          # torn off: shown now, so it can move
+    jne     2f                          #  with the pointer, the button still down
+    mov     dword ptr [rip+pw_tear], -1
+    mov     edi, ebx
+    mov     esi, [rip+press_serial]
+    call    pw_move
 2:  inc     ebx
     cmp     ebx, PW_MAX
     jb      1b
