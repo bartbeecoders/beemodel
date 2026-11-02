@@ -1346,6 +1346,34 @@ const float DN_H3[3] = float[3](0.25, 0.5, 0.25);
 // 2.-4. a stage: the variance blurred 3 x 3 (A -> B), or a-trous pass k
 //   (B -> A, A -> B, ...; the last remodulated and packed into m2)
 void dn_stage(uint stage, uint x, uint y, uint px) {
+    if (stage == 1u && P.spp < 2u) {    // one sample: no variance of its own
+        vec4 a = dn_get(dn_a(), px);    //  (the samples' spread is 0), so the
+        vec4 g = dn_get(dn_g(), px);    //  neighbourhood's (5 x 5, facing the
+        if (g.w > 0.0) {                //  same way), as SVGF without history
+            float sw = 0.0, s1 = 0.0, s2 = 0.0;
+            for (int dy = -2; dy <= 2; dy++) {
+                uint qy = uint(int(y) + dy);
+                if (qy >= P.h) continue;
+                for (int dx = -2; dx <= 2; dx++) {
+                    uint qx = uint(int(x) + dx);
+                    if (qx >= P.w) continue;
+                    uint q = qy * P.w + qx;
+                    vec4 gq = dn_get(dn_g(), q);
+                    if (!(gq.w > 0.0) || dot(gq.xyz, g.xyz) < 0.9) continue;
+                    float l = lum(dn_get(dn_a(), q).xyz);
+                    sw += 1.0;
+                    s1 += l;
+                    s2 += l * l;
+                }
+            }
+            if (sw > 1.0) {
+                float m = s1 / sw;
+                a.w = max(s2 / sw - m * m, 0.0);
+            }
+        }
+        dn_put(dn_b(), px, a);
+        return;
+    }
     if (stage == 1u) {
         vec4 a = dn_get(dn_a(), px);
         float sw = 0.0, sv = 0.0;

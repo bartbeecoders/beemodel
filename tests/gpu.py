@@ -643,6 +643,7 @@ def main():
 
 def windows():
     live_view()
+    rendered_motion()
     gpu_viewport()
     prewarm()
     return finish()
@@ -675,6 +676,75 @@ def fake(args=(), **env):
     f.pump(1.0, until_frame=True)
     m = fakewl.Mcp(f)
     return f, m, (lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip())
+
+
+
+# A Cornell-style room (#421): one bulb, no sky, red and green walls whose
+# light bounces onto the white ones, the floor and a block
+ROOM = '''delete("Cube")
+delete("Light")
+fn wall(n, x, y, z, sx, sy, sz, r, g, b) {
+  add("cube", n, x, y, z)
+  scale(n, sx, sy, sz)
+  m = material(n)
+  matset(m, "base", r, g, b)
+  matset(m, "roughness", 0.9)
+  assign(n, m)
+}
+wall("Floor", 0, -0.1, 0, 2.2, 0.1, 2.2, 0.75, 0.75, 0.75)
+wall("Ceiling", 0, 3.1, 0, 2.2, 0.1, 2.2, 0.75, 0.75, 0.75)
+wall("Back", 0, 1.5, -2.1, 2.2, 1.6, 0.1, 0.75, 0.75, 0.75)
+wall("Red", -2.1, 1.5, 0, 0.1, 1.6, 2.2, 0.8, 0.1, 0.1)
+wall("Green", 2.1, 1.5, 0, 0.1, 1.6, 2.2, 0.1, 0.7, 0.15)
+wall("Block", 0.6, 0.7, -0.6, 0.6, 0.7, 0.6, 0.75, 0.75, 0.75)
+add("light", "Bulb", -0.5, 2.4, 0.5)
+set("Bulb", "power", 0.15)
+op("world.strength", "0")
+view(0, 8, 7.5, 0, 1.4, 0)
+'''
+ROOM_IN = (190, 130, 610, 450)                          # (its inside, in BOX)
+
+
+def rendered_motion():
+    """#421 stage 0: Rendered motion samples - while the view moves, a few
+    path-traced samples a frame, denoised, instead of the raycast: the bounced
+    light (the walls' colours) shows while moving. Measured against the room
+    at 64 samples; the times are printed (CI: llvmpipe)."""
+    print('  -- Rendered motion samples (#421) --')
+    f, m, q = fake(BEEMODEL_GPU='any')
+    try:
+        q(ROOM + 'op("view.shading_rendered")\nop("view.rendered_samples", "64")')
+        t = time.time()
+        while time.time() - t < 600 and q('print(gpu(8))') != '64':
+            f.pump(0.2)
+        f.pump(0.5)
+        ref = f.image().crop(BOX).crop(ROOM_IN)
+        if OUT:
+            f.shot('gpu_motion_ref.png')
+        res = {}
+        for n in (0, 1, 2, 4):                          # n samples (0: the raycast) and no
+            q('op("view.rendered_motion", "%d")\nop("view.rendered_samples", "%d")' % (n, n))   # more
+            ms, mads = [], []
+            for k in range(3):
+                q('view(%d, 8, 7.5, 0, 1.4, 0)' % (3 + k))       # away, and back: the
+                f.pump(0.2)                                       #  frame of a move
+                q('view(0, 8, 7.5, 0, 1.4, 0)')
+                f.pump(0.3)
+                ms.append(int(float(q('print(gpu(11))') or 0)))
+                mads.append(compare_img(f.image().crop(BOX).crop(ROOM_IN), ref))
+            res[n] = (sorted(ms)[1], sum(mads) / 3, q('print(gpu(8), gpu(13))').split())
+            if OUT:
+                f.shot('gpu_motion_%d.png' % n)
+        print('       while moving: ' + ', '.join('%s %d ms %.1f levels off' % (
+              'raycast' if n == 0 else '%d spp' % n, res[n][0], res[n][1]) for n in res))
+        check(res[1][2] == ['1', '1'] and res[4][2] == ['4', '1'] and res[1][1] < res[0][1] * 0.6
+              and res[4][1] < res[1][1],
+              f'moving with motion samples: 1 sample a frame, denoised ({res[1][2]}), is nearer the 64-sample '
+              f'room than the raycast ({res[1][1]:.1f} against {res[0][1]:.1f} levels: the walls\' light '
+              f'bounced), 4 nearer still ({res[4][1]:.1f})')
+        q('op("view.rendered_motion", "0")')
+    finally:
+        f.proc.kill()
 
 
 def prewarm():

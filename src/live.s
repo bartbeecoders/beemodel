@@ -7,7 +7,9 @@
 #  snapshotted, kept in a slot of its own (src/gpu.s, pt.comp's live flags):
 #    - while the view or the scene changes: one raycast a frame (the lights'
 #      direct light with hard shadows, the sky with short-range occlusion,
-#      mirrors and glass followed);
+#      mirrors and glass followed); or, with Preferences > Viewport >
+#      Rendered motion samples 1..4 (#421), that many path-traced samples
+#      a frame, denoised, as playback has (the bounced light while moving);
 #    - when it is still: Hive's path-traced samples, accumulated on the GPU,
 #      a slice of time a frame, up to Preferences > Viewport > Rendered
 #      samples (the raycast stays shown for the first few); denoised on
@@ -79,6 +81,7 @@ lv_dn_ms:       .skip 4                 # the last denoise's time (gpu(14))
 .section .rodata
 OPERATOR op_lv_dn, "view.rendered_denoise", "Denoise Rendered", do_lv_dn, lv_dn_check, flags=OPF_AI_SAFE|OPF_QUIET, doc="Rendered shading: denoise the path-traced samples on the GPU every frame: view.rendered_denoise [0|1] (none: on or off; kept in the preferences)"
 OPERATOR op_lv_play, "view.rendered_playback", "Rendered Playback Samples", do_lv_play, flags=OPF_AI_SAFE|OPF_QUIET, doc="Rendered shading while the animation plays: path-traced samples each new frame gets, denoised: view.rendered_playback <0..64> (0: the raycast; kept in the preferences)"
+OPERATOR op_lv_move, "view.rendered_motion", "Rendered Motion Samples", do_lv_move, flags=OPF_AI_SAFE|OPF_QUIET, doc="Rendered shading while the view or the scene changes: path-traced samples each frame gets, denoised, instead of the raycast: view.rendered_motion <0..4> (0: the raycast; kept in the preferences)"
 OPERATOR op_lv_spp, "view.rendered_samples", "Rendered Samples", do_lv_spp, flags=OPF_AI_SAFE|OPF_QUIET, doc="Rendered shading's path-traced samples once the view is still: view.rendered_samples <0..4096> (0: the raycast alone; kept in the preferences)"
 s_lv_none:      .asciz "  Rendered shading needs the GPU helper (beemodel-gpu): Material Preview meanwhile"
 s_lv_cpu:       .asciz "Rendered  |  no GPU: Material Preview"
@@ -219,6 +222,9 @@ lv_shade:
     jz      .Lls_fail
     jmp     .Lls_show
 .Lls_ray:
+    call    lv_moving                   # (Preferences: a few samples a frame,
+    test    eax, eax                    #  denoised, instead of the raycast)
+    jnz     .Lls_mtrace
     lea     rsi, [rip+lv_ncam]
     lea     rdi, [rip+lv_cam]
     mov     ecx, 13
@@ -247,6 +253,27 @@ lv_shade:
     mov     dword ptr [rip+lv_batch], 1
     call    lv_dn_want
     mov     [rip+lv_dn], eax
+    inc     dword ptr [rip+lv_nray]
+    jmp     .Lls_show
+.Lls_mtrace:                            # moving, path-traced: eax samples of
+    mov     [rsp+8], eax                #  this view at once, denoised (timed
+    lea     rsi, [rip+lv_ncam]          #  as the raycast is: gpu(11); counted
+    lea     rdi, [rip+lv_cam]           #  with them: gpu(7))
+    mov     ecx, 13
+    rep     movsd
+    call    now_ms
+    mov     r14, rax
+    mov     dword ptr [rip+lv_spp], 0
+    call    lv_dn_want
+    mov     [rip+lv_dn], eax
+    mov     edi, [rsp+8]
+    mov     [rip+lv_batch], edi
+    call    lv_trace
+    test    rax, rax
+    jz      .Lls_fail
+    call    now_ms
+    sub     rax, r14
+    mov     [rip+lv_ray_ms], eax
     inc     dword ptr [rip+lv_nray]
     jmp     .Lls_show
 .Lls_play:                              # playing: a new frame (the scene up
@@ -900,12 +927,17 @@ lv_samples_shown:
     cmp     eax, ecx
     cmova   eax, ecx
     mov     ecx, eax
-    call    lv_playing                  # (playing: its samples are enough)
-    test    eax, eax
+    call    lv_playing                  # (playing: its samples are enough,
+    test    eax, eax                    #  as are moving's)
     jz      1f
     cmp     ecx, eax
     cmova   ecx, eax
-1:  cmp     [rip+lv_spp], ecx
+1:  call    lv_moving
+    test    eax, eax
+    jz      2f
+    cmp     ecx, eax
+    cmova   ecx, eax
+2:  cmp     [rip+lv_spp], ecx
     setae   dl
 9:  mov     eax, edx
     ret
@@ -925,6 +957,44 @@ lv_playing:
     jbe     9f
     mov     eax, 64
 9:  ret
+
+# lv_moving -> eax = the samples a frame gets while the view or the scene
+#   changes (Preferences > Viewport > Rendered motion samples, 0 .. 4; 0:
+#   the raycast)
+lv_moving:
+    mov     eax, [rip+pr_lvmove]
+    test    eax, eax
+    jns     1f
+    xor     eax, eax
+1:  cmp     eax, 4
+    jbe     9f
+    mov     eax, 4
+9:  ret
+
+# view.rendered_motion <n> - the samples a frame gets while the view moves
+#   (the preference)
+do_lv_move:
+    sub     rsp, 8
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      9f
+    mov     rdx, rsi                    # (to its end)
+1:  cmp     byte ptr [rdx], 0
+    je      2f
+    inc     rdx
+    jmp     1b
+2:  call    parse_float
+    test    eax, eax
+    jz      9f
+    cvttss2si eax, xmm0
+    mov     [rip+pr_lvmove], eax
+    call    lv_moving
+    mov     [rip+pr_lvmove], eax
+    call    prefs_save
+    mov     dword ptr [rip+lv_state], 0 # (the view drawn the new way)
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
+    ret
 
 # view.rendered_samples <n> - Rendered shading's samples (the preference)
 do_lv_spp:
@@ -991,10 +1061,11 @@ live_tick:
     mov     eax, 1
 9:  ret
 
-# lv_query(edi=k) -> eax (gpu(k)): 7 raycasts drawn, 8 samples in the
+# lv_query(edi=k) -> eax (gpu(k)): 7 frames drawn while the view or the
+#   scene changed (raycasts, or motion samples' frames), 8 samples in the
 #   image, 9 scene uploads, 10 the last Rendered frame: 1 the GPU's, 2
-#   another viewport's live view, 0 Material Preview; 11 the last raycast's
-#   milliseconds (with its readback), 12 the last scene build's; 13 1 when
+#   another viewport's live view, 0 Material Preview; 11 the last such
+#   frame's milliseconds (with its readback), 12 the last scene build's; 13 1 when
 #   the image shown is denoised, 14 the last denoise's milliseconds; 15..
 #   hv_query's
 lv_query:

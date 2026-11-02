@@ -213,7 +213,7 @@ Connections are set up and tested in Preferences › AI. The guide is [AI.md](AI
 | Category | Settings |
 |---|---|
 | **Interface** | Accent colour (any theme; **Theme's Accent** goes back), theme (Dark, Light, High contrast, Honey, Graphite, Nord, Solarized Dark, Solarized Light, Dracula; the list shows a strip of each one's colours), UI scale 75–200 %, tooltip delay, colour-blind-safe axis colours, the welcome screen |
-| **Viewport** | The ground grid and its spacing, the field of view, the clip start, Rendered shading's samples and denoise, and its samples a frame while the animation plays (Rendered playback samples) |
+| **Viewport** | The ground grid and its spacing, the field of view, the clip start, Rendered shading's samples and denoise, its samples a frame while the animation plays (Rendered playback samples), and while the view moves (Rendered motion samples: 0 the quick raycast, 1 to 4 path-traced with bounced light) |
 | **Input** | Alt + left button as the middle button, orbit speed |
 | **Keymap** | The preset (BeeModel or Blender 4.x, below), then Search, Set (then press the key), Clear, Reset All Keys. It warns you when a key is already taken |
 | **Rendering** | New scenes' render width, height, samples and denoise (each scene keeps its own) |
