@@ -32,17 +32,18 @@
 .globl wh_release
 .globl wh_draw
 .globl wh_json
+.globl wh_key
 
 # the rings (logical px): the hole, the entries, a gap, the group's choices
-.equ R0,        46
-.equ R1,        138
-.equ R2,        144
-.equ R3,        212
+.equ R0,        50                      # (#440: a little bigger, small labels,
+.equ R1,        156                     #  so eleven entries' words fit)
+.equ R2,        162
+.equ R3,        238
 .equ SH,        12                      # the shadow outside the ring
-.equ R_MID,     92                      # an entry: its icon over its label here
-.equ R_KMID,    178                     #  (a choice: here)
-.equ ROOM,      80                      # a label's width at most (a choice's:
-.equ KROOM,     80                      #  this; both: less where the arc is narrower)
+.equ R_MID,     104                     # an entry: its icon over its label here
+.equ R_KMID,    200                    #  (a choice: here)
+.equ ROOM,      88                      # a label's width at most (a choice's:
+.equ KROOM,     88                      #  this; both: less where the arc is narrower)
 .equ R_HIT,     R_MID                   # where ui_tree says an entry is
 .equ R_KHIT,    R_KMID
 .equ INFO_H,    22                      # the line above the wheel
@@ -50,7 +51,9 @@
 .equ MARGIN_T,  R3+INFO_H+10            #  the window
 .equ MARGIN_B,  R3+4
 .equ DRAG_MIN,  6                       # a right drag this long picks on release
-.equ WE_SZ,     24                      # an entry: target, short label, icon, colour
+.equ WE_SZ,     40                      # an entry: target, short label, icon, colour,
+.equ WE_ARG,    24                      #  the operator's argument (0: none),
+.equ WE_POLL,   32                      #  a poll asked before the operator's (0: none)
 .equ ICON_INK,  0xfafafb                # (no theme maps it)
 
 # hit: an entry's index, KID+choice, or one of these
@@ -68,9 +71,10 @@
     .popsection
 .endm
 
-.macro WE target, short, icon, colour
+.macro WE target, short, icon, colour, arg=0, poll=0
     .quad \target, \short
     .long \icon, \colour
+    .quad \arg, \poll
 .endm
 
 .section .bss
@@ -115,6 +119,7 @@ t_rad:          .skip 4
 t_x:            .skip 4
 t_y:            .skip 4
 info_buf:       .skip 256
+badge_buf:      .skip 4                 # a key's character
 
 .section .rodata
 .align 16
@@ -154,6 +159,35 @@ s_fill:         .asciz "Fill"
 s_bridge:       .asciz "Bridge"
 s_flip:         .asciz "Flip"
 s_normals:      .asciz "Normals"
+s_active:       .asciz "Active"
+s_passive:      .asciz "Passive"
+s_remove:       .asciz "Remove"
+a_active:       .asciz "active fit"
+a_passive:      .asciz "passive fit"
+s_rubber:       .asciz "Rubber"
+s_ice:          .asciz "Ice"
+s_wood:         .asciz "Wood"
+s_metal:        .asciz "Metal"
+s_stone:        .asciz "Stone"
+a_rubber:       .asciz "material rubber"
+a_ice:          .asciz "material ice"
+a_wood:         .asciz "material wood"
+a_metal:        .asciz "material metal"
+a_stone:        .asciz "material stone"
+s_gold:         .asciz "Gold"
+s_chrome:       .asciz "Chrome"
+s_plastic:      .asciz "Plastic"
+s_glass:        .asciz "Glass"
+s_marble:       .asciz "Marble"
+s_emissive:     .asciz "Emissive"
+p_gold:         .asciz "gold"
+p_chrome:       .asciz "chrome"
+p_plastic:      .asciz "plastic"
+p_rubber:       .asciz "rubber"
+p_glass:        .asciz "glass"
+p_wood:         .asciz "wood"
+p_marble:       .asciz "marble"
+p_emissive:     .asciz "emissive"
 s_sep:          .asciz ": "
 j_a:            .asciz "{\"name\":"
 j_sub:          .asciz "\"submenu\""
@@ -165,19 +199,29 @@ j_wh:           .asciz ",\"w\":80,\"h\":24,\"label\":"
 j_why:          .asciz ",\"why\":"
 j_null:         .asciz "null"
 j_end:          .asciz "}"
+j_key:          .asciz ",\"key\":\""
+j_q:            .asciz "\""
+key_chars:      .ascii "1234567890-"        # entry / choice i's key (#440)
+.equ NKEYS, 11
+# evdev code, the entry it picks: 1-9 0 - on the top row and the keypad
+key_map:        .byte 2,0, 3,1, 4,2, 5,3, 6,4, 7,5, 8,6, 9,7, 10,8, 11,9, 12,10
+                .byte 79,0, 80,1, 81,2, 75,3, 76,4, 77,5, 71,6, 72,7, 73,8, 82,9, 74,10, 0
 
 # ---- the wheels -------------------------------------------------------------------
 .align 8
-wheel_object:
+wheel_object:                           # (short labels where neighbours share a row:
+                                        #  the top and the bottom)
     WE op_ai_ask,       s_ask,      ICON_SPARKLE,    0x8b5cf6
-    WE op_duplicate,    0,          ICON_DUPLICATE,  0x3b82f6
     WE op_delete,       0,          ICON_TRASH,      0xe5484d
+    WE op_duplicate,    0,          ICON_DUPLICATE,  0x3b82f6
     WE wg_vis,          0,          ICON_EYE,        0x14b8a6
-    WE op_edit_toggle,  s_editmode, ICON_EDIT,       0xf59e0b
     WE wg_bool,         0,          ICON_BOOL_UNION, 0x6366f1
-    WE op_repair,       s_repair,   ICON_REPAIR,     0x22a55b
+    WE op_edit_toggle,  s_editmode, ICON_EDIT,       0xf59e0b
+    WE wg_mat,          0,          ICON_MATERIAL,   0xd946ef
+    WE wg_phys,         0,          ICON_PHYSICS,    0xf97316
     WE op_obj_measure,  s_measure,  ICON_WEIGHT,     0x0ea5e9
     WE op_cam_to_view,  s_setcam,   ICON_CAMERA,     0xec4899
+    WE op_repair,       s_repair,   ICON_REPAIR,     0x22a55b
 .equ wheel_object_n, (. - wheel_object) / WE_SZ
 wheel_edit:
     WE op_ai_ask,       s_ask,      ICON_SPARKLE,    0x8b5cf6
@@ -198,6 +242,24 @@ wk_bool:
     WE op_bool_union,   s_union,    ICON_BOOL_UNION, 0
     WE op_bool_diff,    s_diff,     ICON_BOOL_DIFF,  0
     WE op_bool_isect,   s_isect,    ICON_BOOL_ISECT, 0
+wk_mat:                                 # (#438: a preset look, one material each)
+    WE op_mat_apply,    s_gold,     ICON_MATERIAL,   0, p_gold
+    WE op_mat_apply,    s_chrome,   ICON_MATERIAL,   0, p_chrome
+    WE op_mat_apply,    s_plastic,  ICON_MATERIAL,   0, p_plastic
+    WE op_mat_apply,    s_rubber,   ICON_MATERIAL,   0, p_rubber
+    WE op_mat_apply,    s_glass,    ICON_MATERIAL,   0, p_glass
+    WE op_mat_apply,    s_wood,     ICON_MATERIAL,   0, p_wood
+    WE op_mat_apply,    s_marble,   ICON_MATERIAL,   0, p_marble
+    WE op_mat_apply,    s_emissive, ICON_MATERIAL,   0, p_emissive
+wk_phys:                                # (#437: Active / Passive make it a body;
+    WE op_rb_add,       s_active,   ICON_PHYSICS,    0, a_active     #  the rest
+    WE op_rb_add,       s_passive,  ICON_LOCK,       0, a_passive    #  change one)
+    WE op_rb_add,       s_rubber,   ICON_DOT,        0, a_rubber, poll_body
+    WE op_rb_add,       s_ice,      ICON_DOT,        0, a_ice, poll_body
+    WE op_rb_add,       s_wood,     ICON_DOT,        0, a_wood, poll_body
+    WE op_rb_add,       s_metal,    ICON_DOT,        0, a_metal, poll_body
+    WE op_rb_add,       s_stone,    ICON_DOT,        0, a_stone, poll_body
+    WE op_rb_rem,       s_remove,   ICON_TRASH,      0, 0, poll_body
 wk_cut:
     WE op_m_loopcut,    0,          ICON_LOOPCUT,    0
     WE op_m_knife,      0,          ICON_KNIFE,      0
@@ -218,6 +280,8 @@ wk_more:
 
 WGROUP wg_vis,   "Visibility", wk_vis, 2
 WGROUP wg_bool,  "Boolean", wk_bool, 3
+WGROUP wg_mat,   "Material", wk_mat, 8
+WGROUP wg_phys,  "Physics", wk_phys, 8
 WGROUP wg_cut,   "Cut", wk_cut, 2
 WGROUP wg_merge, "Merge", wk_merge, 3
 WGROUP wg_mdel,  "Delete", wk_mdel, 3
@@ -309,13 +373,18 @@ entry:
 
 # full_label(rdi = WE) -> rax ; short_label(rdi = WE) -> rax
 full_label:
-    mov     rax, [rdi]
+    cmp     qword ptr [rdi+WE_ARG], 0   # (one operator, several arguments:
+    je      2f                          #  the entry's own label)
+    mov     rax, [rdi+8]
+    test    rax, rax
+    jnz     9f
+2:  mov     rax, [rdi]
     cmp     qword ptr [rax], SUBTAG
     jne     1f
     mov     rax, [rax+SUB_LABEL]
     ret
 1:  mov     rax, [rax+OP_LABEL]
-    ret
+9:  ret
 short_label:
     mov     rax, [rdi+8]
     test    rax, rax
@@ -324,8 +393,16 @@ short_label:
 
 # why(rdi = WE) -> rax = why it cannot run now, 0 if it can (groups can)
 why:
+    mov     rax, [rdi+WE_POLL]          # the entry's own poll first
     mov     rdi, [rdi]
-    xor     eax, eax
+    test    rax, rax
+    jz      1f
+    push    rdi
+    call    rax
+    pop     rdi
+    test    rax, rax
+    jnz     9f
+1:  xor     eax, eax
     cmp     qword ptr [rdi], SUBTAG
     je      9f
     sub     rsp, 8
@@ -563,9 +640,12 @@ wh_hover:
 #   run); a greyed one leaves the wheel open
 run:
     push    rbx
+    push    r12
+    sub     rsp, 8
     call    entry
     test    rax, rax
     jz      8f
+    mov     r12, rax
     mov     rbx, [rax]
     cmp     qword ptr [rbx], SUBTAG
     je      8f
@@ -573,13 +653,22 @@ run:
     call    why
     test    rax, rax
     jnz     8f
-    call    wh_close
+    mov     rax, [rip+op_arg]           # its argument, if any (then back)
+    mov     [rsp], rax
+    mov     rax, [r12+WE_ARG]
+    test    rax, rax
+    jz      1f
+    mov     [rip+op_arg], rax
+1:  call    wh_close
     mov     rdi, rbx
     call    run_op_ui
+    mov     rax, [rsp]
+    mov     [rip+op_arg], rax
     mov     eax, 1
-    pop     rbx
-    ret
+    jmp     9f
 8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
     pop     rbx
     ret
 
@@ -985,7 +1074,13 @@ wh_draw:
     mov     edx, [r12+16]
     mov     r8d, ICON_INK
     call    draw_icon
-    cmp     ebx, [rip+wh_grp]           # a group: two dots at its outer edge
+    cmp     dword ptr [rip+wh_grp], 0   # its key (the choices' while a group
+    jge     11f                         #  is open)
+    mov     edi, ebx
+    mov     esi, [rsp+24]
+    mov     edx, [rsp+28]
+    call    key_badge
+11: cmp     ebx, [rip+wh_grp]           # a group: two dots at its outer edge
     je      2f                          #  (when closed)
     mov     rax, [r12]
     cmp     qword ptr [rax], SUBTAG
@@ -998,10 +1093,8 @@ wh_draw:
     mov     edx, 2
     mov     r8d, COL_TEXT_DIM
     call    fill_circle
-2:  movss   xmm0, [rip+f_step]          # the room: the sector's chord there
-    mov     esi, R_MID+16
-    mov     edx, ROOM
-    call    label_room
+2:  mov     edi, ebx                    # the room: up to its neighbours'
+    call    ring_room                   #  labels on the same row
     mov     [rsp+32], eax
     mov     rdi, r12
     call    why
@@ -1063,6 +1156,10 @@ wh_draw:
     mov     edx, [r12+16]
     mov     r8d, ICON_INK
     call    draw_icon
+    mov     edi, ebx                    # its key
+    mov     esi, [rsp+24]
+    mov     edx, [rsp+28]
+    call    key_badge
     movss   xmm0, [rip+f_kdeg]
     mov     esi, R_KMID+14
     mov     edx, KROOM
@@ -1138,6 +1235,184 @@ under:
     mov     r8d, r11d
 9:  ret
 
+# key_badge(edi = entry or choice, esi = x, edx = y: its icon's centre) -
+#   the key that picks it, in a small disc on the icon's upper right edge
+#   (#440)
+key_badge:
+    cmp     edi, NKEYS
+    jae     9f
+    push    rbx
+    push    r12
+    push    r13
+    lea     rax, [rip+key_chars]
+    movzx   eax, byte ptr [rax+rdi]
+    mov     [rip+badge_buf], al
+    mov     byte ptr [rip+badge_buf+1], 0
+    lea     ebx, [rsi+11]               # the disc's centre
+    lea     r12d, [rdx-11]
+    mov     edi, ebx
+    mov     esi, r12d
+    mov     edx, 8
+    mov     r8d, [rip+c_bg]
+    call    fill_circle
+    lea     rdi, [rip+badge_buf]
+    call    text_width_small
+    shr     eax, 1
+    mov     edi, ebx
+    sub     edi, eax
+    lea     esi, [r12-8]
+    lea     rdx, [rip+badge_buf]
+    mov     ecx, COL_TEXT
+    call    draw_small
+    pop     r13
+    pop     r12
+    pop     rbx
+9:  ret
+
+# wh_key(edi = evdev) -> eax = 1 when the wheel took it (#440): 1-9, 0 and -
+#   (or the keypad's) pick that entry - a group opens its choices, which the
+#   same keys then pick; Backspace closes the group again. A choice or entry
+#   that cannot run leaves the wheel open (lit, its reason above it)
+wh_key:
+    push    rbx
+    cmp     edi, 14                     # Backspace
+    jne     1f
+    cmp     dword ptr [rip+wh_grp], 0
+    jl      7f
+    mov     dword ptr [rip+wh_grp], -1
+    mov     dword ptr [rip+wh_nk], 0
+    mov     dword ptr [rip+wh_ksel], -1
+    jmp     6f
+1:  lea     rax, [rip+key_map]
+2:  movzx   ecx, byte ptr [rax]
+    test    ecx, ecx
+    jz      8f                          # (not a key of ours)
+    cmp     ecx, edi
+    je      3f
+    add     rax, 2
+    jmp     2b
+3:  movzx   ebx, byte ptr [rax+1]
+    cmp     dword ptr [rip+wh_grp], 0   # a group open: its choices
+    jl      4f
+    cmp     ebx, [rip+wh_nk]
+    jae     7f
+    mov     [rip+wh_ksel], ebx
+    lea     edi, [rbx+KID]
+    call    run
+    jmp     6f
+4:  cmp     ebx, [rip+wh_n]
+    jae     7f
+    mov     [rip+wh_sel], ebx
+    mov     edi, ebx
+    call    entry
+    mov     rax, [rax]
+    cmp     qword ptr [rax], SUBTAG
+    je      5f
+    mov     edi, ebx
+    call    run
+    jmp     6f
+5:  mov     rdi, [rax+SUB_ITEMS]        # a group: its choices open
+    mov     [rip+wh_kids], rdi
+    mov     edi, [rax+SUB_COUNT]
+    mov     [rip+wh_nk], edi
+    mov     [rip+wh_grp], ebx
+    mov     dword ptr [rip+wh_ksel], -1
+6:  mov     dword ptr [rip+dirty], 1
+7:  mov     eax, 1
+    pop     rbx
+    ret
+8:  xor     eax, eax
+    pop     rbx
+    ret
+
+# ring_room(edi = entry) -> eax = the width its label has: ROOM, less where
+#   a neighbour's label is on the same row and the two texts do not both fit
+#   in the distance across between them - then they share it in proportion
+#   to their widths (so they never meet). At the sides the neighbours are
+#   above and below: the whole ROOM
+ring_room:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 24
+    mov     ebx, edi
+    call    text_w                      # its own text
+    mov     [rsp], eax
+    mov     edi, ebx
+    mov     esi, R_MID
+    call    at_entry
+    mov     r12d, eax
+    mov     r13d, edx
+    mov     r14d, ROOM
+    mov     r15d, -1
+1:  lea     edi, [rbx+r15]              # (-1 and n: the angle goes round)
+    mov     esi, R_MID
+    call    at_entry
+    sub     eax, r12d
+    mov     ecx, eax
+    sar     ecx, 31
+    xor     eax, ecx
+    sub     eax, ecx                    # |dx|
+    sub     edx, r13d
+    mov     ecx, edx
+    sar     ecx, 31
+    xor     edx, ecx
+    sub     edx, ecx                    # |dy|
+    cmp     edx, CHAR_H+4
+    jge     2f
+    lea     ebp, [rax+rax-8]            # what both have: 2 dx, less a margin
+    lea     edi, [rbx+r15]
+    call    text_w                      # the neighbour's text
+    mov     ecx, [rsp]
+    add     eax, ecx                    # both
+    cmp     eax, ebp
+    jle     2f                          # (they fit)
+    mov     r8d, eax
+    mov     eax, ebp                    # its share: room * its / both
+    imul    eax, ecx
+    cdq
+    idiv    r8d
+    cmp     eax, r14d
+    cmovl   r14d, eax
+2:  add     r15d, 2
+    cmp     r15d, 1
+    jle     1b
+    mov     eax, r14d
+    add     rsp, 24
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+
+# text_w(edi = entry, any: it goes round) -> eax = its label's text width,
+#   ROOM at most
+text_w:
+    sub     rsp, 8
+    test    edi, edi
+    jns     1f
+    add     edi, [rip+wh_n]
+1:  cmp     edi, [rip+wh_n]
+    jb      2f
+    sub     edi, [rip+wh_n]
+2:  call    entry
+    test    rax, rax
+    jz      8f
+    mov     rdi, rax
+    call    short_label
+    mov     rdi, rax
+    call    text_width_small            # (as label_at draws it)
+    cmp     eax, ROOM
+    jle     9f
+8:  mov     eax, ROOM
+9:  add     rsp, 8
+    ret
+
 # label_room(esi = radius, xmm0 = the sector's angle, edx = at most) ->
 #   eax = the width a label has there: the chord, less a margin
 label_room:
@@ -1164,6 +1439,9 @@ label_at:
     push    r13
     push    r14
     push    r15
+    push    qword ptr [rip+cur_font]    # (the small font)
+    mov     dword ptr [rip+cur_font], FONT_SMALL
+    sub     rsp, 8
     mov     rbx, rdi
     mov     r12d, esi
     mov     r13d, edx
@@ -1181,6 +1459,9 @@ label_at:
     mov     ecx, r14d
     mov     r8d, r15d
     call    draw_text_fit
+    add     rsp, 8
+    pop     rax
+    mov     [rip+cur_font], eax
     pop     r15
     pop     r14
     pop     r13
@@ -1382,7 +1663,16 @@ jentry:
     jmp     7f
 6:  lea     rsi, [rip+j_null]
     call    wb_str
-7:  lea     rsi, [rip+j_end]
+7:  cmp     r12d, NKEYS                 # ,"key":"1" (#440)
+    jae     71f
+    lea     rsi, [rip+j_key]
+    call    wb_str
+    lea     rax, [rip+key_chars]
+    movzx   edi, byte ptr [rax+r12]
+    call    wb_char
+    lea     rsi, [rip+j_q]
+    call    wb_str
+71: lea     rsi, [rip+j_end]
     call    wb_str
     add     rsp, 8
     pop     rbp

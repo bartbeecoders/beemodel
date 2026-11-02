@@ -61,8 +61,10 @@ opens at the pointer.
   *about the scene* when nothing is selected. An object you Alt+right-click
   that was not selected is selected first.
 - Type what to do (*make it twice as tall*, *brushed steel*, *bevel these
-  edges 2 mm*) and press **Enter**. **Esc**, or a click outside the box,
-  closes it. **Up** and **Down** bring back your last 8 prompts.
+  edges 2 mm*) and press **Enter**. **Shift+Enter** starts a new line; a
+  long prompt wraps, and the box grows with it up to six lines (then the
+  field scrolls). **Esc**, or a click outside the box, closes it. **Up** on
+  the first line and **Down** on the last bring back your last 8 prompts.
 - The quick buttons ask the common things at once: **Bigger**, **Smaller**,
   **Copy Around** (eight copies in a circle). **Material...** starts the
   prompt with *Change the material to* for you to finish. In edit mode they

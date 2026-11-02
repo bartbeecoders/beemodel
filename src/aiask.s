@@ -26,7 +26,8 @@
 
 .equ ASK_W,     460
 .equ ASK_H,     134
-.equ TEXT_SZ,   256
+.equ TEXT_SZ,   4096                    # (a prompt of several lines: ML_CAP and more)
+.equ ASK_LINES, 6                       # the prompt grows to this many lines
 .equ HIST_N,    8
 .equ KEY_UP_,   103
 .equ KEY_DOWN_, 108
@@ -41,6 +42,7 @@
 
 .section .data
 .align 4
+ask_ph:         .long WG_H              # the prompt's height (its lines)
 ask_scope:      .long 1                 # Only the selection (prefs: ai_only_selection)
 
 .section .bss
@@ -123,7 +125,7 @@ sel_modes:      .quad sel_v, sel_e, sel_f
 chips_obj:      .quad s_q_bigger, s_q_smaller, s_q_material, s_q_around
 chips_edit:     .quad s_e_bigger, s_e_smaller, s_q_material, s_e_around
 
-WIDGET wd_ask_prompt, WK_TEXT, "ask.prompt", cb=ask_prompt_cb, tip="What the AI should do with the selection. Enter sends it, Up and Down bring back the last prompts"
+WIDGET wd_ask_prompt, WK_TEXT, "ask.prompt", flags=WGF_MULTI, cb=ask_prompt_cb, tip="What the AI should do with the selection. Enter sends it, Shift+Enter starts a new line, Up on the first line and Down on the last bring back the last prompts", sect=.data
 WIDGET wd_ask_send, WK_BUTTON, "ask.send", "Send", flags=WGF_PRIMARY, tip="Send the prompt (Enter)"
 WIDGET wd_ask_stop, WK_BUTTON, "ask.stop", "Stop", tip="Stop the AI (what it did so far stays, as one undo step)"
 WIDGET wd_ask_c0, WK_BUTTON, "ask.bigger", "Bigger", flags=WGF_COMPACT, tip="Make it 50% bigger (edit mode: extrude the faces 20 cm)"
@@ -715,7 +717,7 @@ ask_remember:
 1:  cmp     ebx, [rip+ask_hn]
     jae     4f
     mov     eax, ebx
-    shl     eax, 8
+    shl     eax, 12                     # (TEXT_SZ)
     lea     rdi, [rip+ask_hist]
     add     rdi, rax
     lea     rsi, [rip+ask_text]
@@ -728,7 +730,7 @@ ask_remember:
 3:  cmp     r12d, [rip+ask_hn]
     jae     31f
     mov     eax, r12d
-    shl     eax, 8
+    shl     eax, 12                     # (TEXT_SZ)
     lea     rsi, [rip+ask_hist]
     add     rsi, rax
     lea     rdi, [rsi-TEXT_SZ]
@@ -744,7 +746,7 @@ ask_remember:
 5:  test    ebx, ebx
     jz      6f
     mov     eax, ebx
-    shl     eax, 8
+    shl     eax, 12                     # (TEXT_SZ)
     lea     rdi, [rip+ask_hist]
     add     rdi, rax
     lea     rsi, [rdi-TEXT_SZ]
@@ -789,6 +791,16 @@ ask_key:
 2:  call    wg_editing                  # the text as typed so far
     test    eax, eax
     jz      21f
+    call    ml_edge                     # (inside the lines: the caret moves)
+    test    eax, 1
+    jz      22f
+    cmp     ebx, KEY_UP_
+    je      23f
+22: test    eax, 2
+    jz      7f
+    cmp     ebx, KEY_DOWN_
+    jne     7f
+23:
     lea     rdi, [rip+tfi_widget]
     call    tf_select
     lea     rdi, [rip+ask_text]
@@ -817,7 +829,7 @@ ask_key:
     lea     rsi, [rip+ask_draft]
     test    eax, eax
     js      5f
-    shl     eax, 8
+    shl     eax, 12                     # (TEXT_SZ)
     lea     rsi, [rip+ask_hist]
     add     rsi, rax
 5:  lea     rdi, [rip+ask_text]
@@ -848,7 +860,8 @@ ask_outside:
     mov     ecx, [rip+ask_by]
     cmp     esi, ecx
     jl      1f
-    add     ecx, ASK_H
+    add     ecx, ASK_H-WG_H
+    add     ecx, [rip+ask_ph]
     cmp     esi, ecx
     jl      9f
 1:  sub     rsp, 8
@@ -1043,6 +1056,15 @@ ask_draw:
     push    r15
     sub     rsp, 24
     call    reset_clip
+    lea     rdi, [rip+wd_ask_prompt]    # the prompt: as tall as its lines
+    lea     rsi, [rip+ask_text]
+    mov     edx, ASK_W-28-SEND_W-6
+    mov     ecx, ASK_LINES
+    call    wg_text_h
+    mov     [rip+wd_ask_prompt+WD_N], eax
+    mov     [rip+ask_ph], eax
+    sub     eax, WG_H
+    mov     [rsp+16], eax               # the box: that much taller
     mov     ebx, [rip+ask_x]            # below and right of the pointer,
     sub     ebx, 24                     #  inside the window
     mov     eax, [rip+win_w]
@@ -1057,10 +1079,12 @@ ask_draw:
     add     ebp, 12
     mov     eax, [rip+win_h]
     sub     eax, ASK_H+8
+    sub     eax, [rsp+16]
     cmp     ebp, eax
     jle     3f
     mov     ebp, [rip+ask_y]            # (no room below: above it)
     sub     ebp, ASK_H+12
+    sub     ebp, [rsp+16]
 3:  cmp     ebp, 8
     jge     4f
     mov     ebp, 8
@@ -1070,6 +1094,7 @@ ask_draw:
     mov     esi, ebp
     mov     edx, ASK_W
     mov     ecx, ASK_H
+    add     ecx, [rsp+16]
     mov     r8d, COL_ACCENT
     call    popup_frame
     call    ask_title_make              # the title
@@ -1129,7 +1154,8 @@ ask_draw:
 71: call    wg_commit                   # (the text as typed)
     call    ask_send_box
     jmp     .Lad_out
-8:  add     r12d, WG_H+8                # the quick buttons
+8:  add     r12d, [rip+ask_ph]          # the quick buttons
+    add     r12d, 8
     xor     r13d, r13d
 9:  cmp     r13d, 4
     jae     12f

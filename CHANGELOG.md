@@ -7,6 +7,24 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Number keys in the wheel menu** (#440): each entry shows a number;
+  1-9, 0 and - (or the keypad's) pick it, a group's number opens its
+  choices (numbered the same way), Backspace goes back to the ring. ui_tree
+  gives each entry its "key".
+- **Frame rate in the status bar** (#439): frames drawn in the last second
+  while something moves, idle a second after; Preferences › Interface ›
+  Show the frame rate (`show_frame_rate`) turns it off. `BEEMODEL_FPS=0`
+  hides it (the tests' screenshots).
+- **Material and Physics on the viewport wheel** (#437, #438): Material
+  gives the selected objects a preset look (Gold, Chrome, Plastic, Rubber,
+  Glass, Wood, Marble, Emissive; one shared material per preset,
+  `material.apply_preset`). Physics makes them rigid bodies (Active,
+  Passive) and, once they are, sets their physics material (Rubber, Ice,
+  Wood, Metal, Stone) or removes the body. `rigid.add fit`: a new body is a
+  convex hull, an existing one keeps its shape. The wheel is a little
+  bigger with smaller labels, which use the room their neighbours leave;
+  its entries are reordered so the short ones sit where neighbours share a
+  row.
 - **Camera to View** (#427): the right-click wheel's Camera entry, View ›
   Camera to View or Ctrl+Alt+Numpad 0 (`view.camera_to_view`) moves the
   camera that renders to where the viewport looks from, pointing where it
@@ -47,6 +65,10 @@ project uses [Semantic Versioning](https://semver.org/).
   virtualized and the library's thumbnails.
 
 ### Fixed
+- **Ask AI box: prompts of several lines** (#436): the prompt wraps and
+  the box grows with it (up to six lines, then it scrolls); Shift+Enter
+  starts a new line, and a prompt can be about 4000 characters instead of
+  255. Up and Down bring back recent prompts from the first and last line.
 - Rendered's denoiser left a single-sample frame as noisy as it came (its
   variance was 0): one sample's variance now comes from its neighbourhood.
 - After passing over a widget scrolled out of view, the widget hit test

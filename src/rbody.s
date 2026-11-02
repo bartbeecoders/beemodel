@@ -9962,6 +9962,7 @@ k_velocity:     .asciz "velocity"
 k_group:        .asciz "group"
 k_collide:      .asciz "collide"
 k_attracts:     .asciz "attracts"
+k_fit:          .asciz "fit"
 k_noattr:       .asciz "noattract"
 k_g:            .asciz "g"
 k_material:     .asciz "material"
@@ -10195,7 +10196,14 @@ do_rb_add:
     mov     [rsp+16], edx               # bounce
     or      dword ptr [rsp+24], 8|16
     jmp     1b
-36: lea     rdi, [rip+im_word]
+36: lea     rdi, [rip+im_word]          # fit: a new body is a convex hull
+    lea     rsi, [rip+k_fit]            #  (a body keeps its shape: the wheel)
+    call    str_eq
+    test    eax, eax
+    jz      361f
+    or      dword ptr [rsp+24], 2048
+    jmp     1b
+361: lea    rdi, [rip+im_word]
     lea     rsi, [rip+k_attracts]
     call    str_eq
     mov     ecx, RBF_ATTR
@@ -10278,6 +10286,9 @@ do_rb_add:
     mov     [rdi+RB_MASS], edx
     mov     edx, [rip+rx_fric]
     mov     [rdi+RB_FRIC], edx
+    test    dword ptr [rsp+24], 2048    # (fit: a convex hull)
+    jz      62f
+    mov     dword ptr [rdi+RB_SHAPE], 3
 62: imul    rcx, rax, RB_SZ_            # what was given
     lea     rdi, [rbx+AN_RB_+rcx]
     mov     edx, [rsp+24]

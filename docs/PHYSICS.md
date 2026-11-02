@@ -41,6 +41,7 @@ frame(120)
 | material | `material default\|rubber\|ice\|wood\|metal\|stone` | sets friction and bounce |
 | start | `velocity x y z` | its velocity when the run begins |
 | groups | `group n` (0-15), `collide m` | m: a bit mask of the groups it meets (all by default) |
+| new shape | `fit` | a new body is a convex hull; an existing one keeps its shape (the wheel's Physics choices) |
 | attraction | `attracts`, `noattract` | it pulls every other moving body by its mass (`rigid.world g n`: G, 1 by default) |
 
 Shapes:
