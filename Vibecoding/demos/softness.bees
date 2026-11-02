@@ -1,0 +1,103 @@
+# Softness — BeeModel demo (after the "0% / 25% / 50% / 75% / 100% Soft" ASMR clips)
+# Five lanes side by side, the same drop in each: a glossy pink ball falls
+# through a zig-zag of glass ramps onto a concrete disc with a hole in it.
+# 0% Soft is a rigid, bouncy ball; 25% to 100% are soft bodies, each looser
+# than the last: the harder ones bounce off the ramps and sit on the hole,
+# the softest sags round the ramps and oozes into the hole.
+# Run: script.run <this file>  (it replaces the scene), then press Space.
+
+while count() > 0 { delete(name(0)) }
+sclear()
+op("anim.range", "1 240 30")
+op("rigid.world", "gravity 0 -9.81 0 rate 240 iterations 12 substeps 4")
+op("cloth.world", "substeps 40")
+
+fn mat(n, r, g, b, rough, metal) {
+    m = material(n); matset(m, "base", r, g, b); matset(m, "roughness", rough); matset(m, "metallic", metal); return m
+}
+m = mat("Pink", 0.85, 0.03, 0.32, 0.1, 0); matset(m, "clearcoat", 1); matset(m, "coat_roughness", 0.03)
+material("Glass"); op("material.preset", "glass Glass")
+material("Concrete"); op("material.preset", "concrete Concrete")
+mat("Backdrop", 0.33, 0.34, 0.36, 0.85, 0)
+mat("Rail", 0.75, 0.75, 0.78, 0.35, 1)
+mat("Label", 0.97, 0.97, 0.97, 0.6, 0)
+
+# the backdrop: a floor and a wall, both colliders for everything
+g = add("plane", "Floor", 0, 0, 0); scale(g, 16); assign(g, "Backdrop")
+w = add("plane", "Wall", 0, 6, -1.6); scale(w, 16, 1, 7); rotate(w, 90deg, 0, 0); assign(w, "Backdrop")
+
+LANES = 5
+GAP = 2.1
+# soft bodies: compliance (m/N) of their edges and of their volume, looser lane by lane
+# (as text: numbers this small would be joined as "1e-05")
+fn c_stretch(L) { if L == 1 { return "0.00001" }; if L == 2 { return "0.00005" }; if L == 3 { return "0.0002" }; return "0.0005" }
+fn c_volume(L) { if L == 1 { return "0.000005" }; if L == 2 { return "0.00003" }; if L == 3 { return "0.00015" }; return "0.0005" }
+fn c_fric(L) { if L == 4 { return "0.02" }; return "0.03" }
+fn c_bend(L) { if L == 1 { return "0.001" }; if L == 2 { return "0.005" }; if L == 3 { return "0.02" }; return "0.05" }
+
+for L in 0..LANES {
+    x = (L - (LANES - 1) / 2) * GAP
+    # four glass ramps, each sloping the other way, from one side pane to a
+    # gap short of the other: the ball rolls down one, drops through the gap
+    # at its low end onto the high end of the next - a zig-zag. Ramps and
+    # panes are one object, the lane's chute (one collider)
+    for k in 0..4 {
+        y = 3.75 - 0.85 * k
+        side = 1 - 2 * (k % 2)
+        r = add("cube", "Ramp " + L + "." + k, x - 0.1975 * side, y, 0)
+        scale(r, 0.563, 0.09, 0.3)
+        rotate(r, 0, 0, -30deg * side)
+    }
+    for sd in 0..2 {
+        p = add("cube", "Pane " + L + "." + sd, x + (2 * sd - 1) * 0.7, 2.6, 0)
+        scale(p, 0.015, 1.6, 0.3)
+    }
+    ch = "Chute " + L
+    rename("Ramp " + L + ".0", ch)
+    for k in 1..4 { select("Ramp " + L + "." + k, ch); op("object.boolean_union") }
+    for sd in 0..2 { select("Pane " + L + "." + sd, ch); op("object.boolean_union") }
+    assign(ch, "Glass")
+    # a rail behind the ramps, as in the clip
+    rl = add("cylinder", "Rail " + L, x, 2.5, -0.45); scale(rl, 0.02, 1.6, 0.02); assign(rl, "Rail")
+    # the concrete disc with a hole a little narrower than the ball
+    # (under the last ramp's gap)
+    d = add("cylinder", "Disc " + L, x - 0.49, 0.14, 0); scale(d, 0.9, 0.14, 0.9)
+    c = add("cylinder", "Cut " + L, x - 0.49, 0.14, 0); scale(c, 0.145, 0.4, 0.145)
+    select(c, d)
+    op("object.boolean_difference")
+    if exists(c) { delete(c) }
+    assign(d, "Concrete")
+    # the ball, above the first ramp
+    b = add("sphere", "Ball " + L, x - 0.5, 4.2, 0); scale(b, 0.15); assign(b, "Pink")
+    # the caption
+    op("text.add", "'" + (L * 25) + "% Soft' size 0.26 depth 0.02 align center")
+    t = active(); move(t, x, 4.8, 0); assign(t, "Label")
+}
+
+# colliders: the rigid ball meets passive bodies, the soft ones cloth
+# colliders (the cloth solver takes 32 objects at most: one chute a lane)
+for L in 0..LANES {
+    select("Chute " + L); op("rigid.add", "passive mesh friction 0.2 bounce 0.3")
+    select("Disc " + L); op("rigid.add", "passive mesh friction 0.8 bounce 0.1")
+    select("Chute " + L); op("cloth.add", "collider friction 0 thickness 0.03")
+    select("Disc " + L); op("cloth.add", "collider friction 0.3 thickness 0.02")
+}
+select("Floor"); op("rigid.add", "passive plane")
+select("Floor"); op("cloth.add", "collider friction 0.4 thickness 0.02")
+
+# 0% Soft: a rigid ball that bounces
+select("Ball 0"); op("rigid.add", "active sphere mass 1 bounce 0.15 friction 0.5 damping 0.8")
+# 25% .. 100%: soft bodies
+for L in 1..LANES {
+    select("Ball " + L)
+    op("cloth.add", "soft stretch " + c_stretch(L) + " volume " + c_volume(L) + " bend " + c_bend(L) + " mass 1 damping 0 friction " + c_fric(L))
+}
+
+# light and camera
+s = add("light", "Key", -3, 7, 5); set(s, "power", 0.9)
+s2 = add("light", "Fill", 5, 4, 6); set(s2, "power", 0.35)
+cam = add("camera", "Cam", 0, 2.6, 11.2); set(cam, "lens", 35)
+rotate(cam, -atan2(0.1, 11.2), 0, 0)
+select(cam); op("camera.set", "active")
+op("anim.frame", "1")
+select()

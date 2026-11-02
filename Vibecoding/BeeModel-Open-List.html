@@ -262,6 +262,7 @@ kbd { font-family: ui-monospace, monospace; font-size: .85em; background: var(--
   <p class="sub">Moved here when done, with where it was done. The oldest entries drop off after a few releases.</p>
   <div class="table-wrap"><table>
     <tr><th>Item</th><th>Closed by</th><th>Date</th></tr>
+    <tr><td>Soft bodies vs box edges (found recreating the softness ASMR clip): nearest-triangle collision push, crossing check, collider corner edges vs cloth edges (cl_edges). Still open: the cloth solver takes 32 objects (CR_MAX / CL_MAX_ in the anim block); multi-select boolean union dropped one of three disjoint cubes; softness.bees' 75% ball rolls off the front of its disc; the corner flags search is O(n^2) per frame (meshes up to 2048 triangles)</td><td>-</td><td class="num">2026-11-02</td></tr>
     <tr><td>#446 the Render area: wheel zoom about the pointer, drag pan, Fit, Settings (Properties' Render tab); a narrow header shows what fits</td><td><a href="https://github.com/bartbeecoders/beemodel/issues/446">#446</a></td><td class="num">2026-11-02</td></tr>
     <tr><td>#445 text fields scroll and clip a long text (the file dialog's path ran over the dialog)</td><td><a href="https://github.com/bartbeecoders/beemodel/issues/445">#445</a></td><td class="num">2026-11-02</td></tr>
     <tr><td>#444 a dialog closes the welcome screen (it was drawn over the dialog and took its clicks)</td><td><a href="https://github.com/bartbeecoders/beemodel/issues/444">#444</a></td><td class="num">2026-11-02</td></tr>

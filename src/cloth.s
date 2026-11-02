@@ -108,6 +108,12 @@ cq_q16i:        .long 65535, 65535, 65535, 0
 cq_grav:        .float 0, -9.81, 0, 0
 cq_one:         .float 1.0
 cq_tiny:        .float 1.0e-9
+cq_cross:       .float 1.0e-8               # (1e-4 m)^2: s on the triangle
+cq_inside:      .float 0.999
+cq_smooth:      .float 0.9                  # cos 25 degrees: an edge, not a corner
+cq_ecap:        .float 0.01                 # cl_edges: a push a substep at most
+cq_emarg:       .float 0.01                 #  and the boxes' margin
+cq_eps:         .float 1.0e-12                # (v.n)^2 / |v|^2: a face's inside
 cq_third:       .float 0.33333334
 cq_sixth:       .float 0.16666667
 cq_half:        .float 0.5
@@ -992,6 +998,9 @@ cl_step:
     mov     edx, [rip+cx_np]
     mov     ecx, 1024
     call    parallel_for
+    cmp     dword ptr [rip+cx_nct], 0
+    je      6f
+    call    cl_edges                    # (and the colliders' edges)
 6:  cmp     dword ptr [rip+cx_self], 0
     je      7f
     call    cl_selfcol
@@ -1494,11 +1503,13 @@ cl_colliders:
     jz      4f
     mov     r15, rax
     xor     r12d, r12d
+    mov     eax, [rip+cx_nct]           # (its first: the edges' kinds after)
+    mov     [rsp+16], eax
 2:  cmp     r12d, [r15+ME_NTRIS]
-    jae     4f
+    jae     45f
     mov     eax, [rip+cx_nct]
     cmp     eax, [rip+cx_capct]
-    jae     4f
+    jae     45f
     shl     rax, 6
     add     rax, [rip+cx_ct]
     mov     [rsp+104], rax
@@ -1557,6 +1568,77 @@ cl_colliders:
 41: inc     dword ptr [rip+cx_nct]
     inc     r12d
     jmp     2b
+45: mov     eax, [r15+ME_NTRIS]         # its edges: a corner (bit k of the
+    cmp     eax, 2048                   #  normal's w: edge k, k+1) unless the
+    ja      4f                          #  triangle across it faces the same
+    mov     ecx, [rsp+16]               #  way (a flat face's diagonal: none
+    mov     [rsp+20], ecx               #  for cl_edges). Big meshes: none
+46: mov     ecx, [rsp+20]
+    cmp     ecx, [rip+cx_nct]
+    jae     4f
+    mov     r12d, ecx
+    sub     r12d, [rsp+16]              # its index in the mesh
+    imul    rdx, r12, 12
+    add     rdx, [r15+ME_TRIS]
+    mov     r11, rcx
+    shl     r11, 6
+    add     r11, [rip+cx_ct]
+    xor     r10d, r10d                  # the corners found
+    xor     r9d, r9d                    # edge k
+47: mov     edi, [rdx+r9*4]
+    lea     r8d, [r9+1]
+    cmp     r8d, 3
+    jb      471f
+    xor     r8d, r8d
+471: mov    esi, [rdx+r8*4]
+    xor     r8d, r8d                    # the triangle across it
+48: cmp     r8d, [r15+ME_NTRIS]
+    jae     49f                         # (none: an open edge, a corner)
+    cmp     r8d, r12d
+    je      482f
+    imul    rcx, r8, 12
+    add     rcx, [r15+ME_TRIS]
+    xor     eax, eax
+    cmp     [rcx], edi
+    jne     4801f
+    or      eax, 1
+4801: cmp   [rcx+4], edi
+    jne     4802f
+    or      eax, 1
+4802: cmp   [rcx+8], edi
+    jne     4803f
+    or      eax, 1
+4803: cmp   [rcx], esi
+    jne     4804f
+    or      eax, 2
+4804: cmp   [rcx+4], esi
+    jne     4805f
+    or      eax, 2
+4805: cmp   [rcx+8], esi
+    jne     4806f
+    or      eax, 2
+4806: cmp   eax, 3
+    je      483f
+482: inc    r8d
+    jmp     48b
+483: mov    eax, [rsp+16]               # found: the same way?
+    add     eax, r8d
+    cmp     eax, [rip+cx_nct]
+    jae     49f
+    shl     rax, 6
+    add     rax, [rip+cx_ct]
+    movaps  xmm0, [r11+48]
+    DOT3    xmm0, [rax+48]
+    comiss  xmm0, [rip+cq_smooth]
+    jae     491f                        # (flat, or a smooth surface's: under
+                                        #  25 degrees - a sphere's are many)
+49: bts     r10d, r9d
+491: inc    r9d
+    cmp     r9d, 3
+    jb      47b
+    mov     [r11+60], r10d
+    inc     dword ptr [rsp+20]
+    jmp     46b
 4:  inc     r13d
     jmp     1b
 5:  cmp     dword ptr [rsp+40], 0       # then the Ground, a collider always
@@ -1738,6 +1820,10 @@ col_job:
     jmp     21b
 22: cmp     dword ptr [rip+cx_nct], 0
     je      8f
+    movss   xmm0, [rsp+144]             # (the nearest: within the thickness)
+    mulss   xmm0, xmm0
+    movss   [rsp+132], xmm0
+    mov     dword ptr [rsp+136], -1
     xor     r15d, r15d                  # the big ones
 2:  cmp     r15d, [rip+cx_nbig]
     jae     3f
@@ -1754,12 +1840,15 @@ col_job:
     mov     r14d, [rcx+rax*4]
     mov     r15d, [rcx+rax*4+4]
 4:  cmp     r14d, r15d
-    jae     8f
+    jae     81f
     mov     rax, [rip+cx_ent]
     mov     edi, [rax+r14*4]
     call    pt_tri
     inc     r14d
     jmp     4b
+81: cmp     dword ptr [rsp+136], 0      # out of the nearest, once
+    jl      8f
+    call    pt_resolve
 8:  inc     r12d
     jmp     1b
 9:  lea     rsp, [rbp-40]
@@ -1770,10 +1859,16 @@ col_job:
     pop     rbx
     pop     rbp
     ret
-# pt_tri(edi=collider triangle; rbx=particle, r12d its number, the
-#   caller's [rsp+144] thickness, [rsp+148] friction (here +8))
+# pt_tri(edi=collider triangle; rbx=particle, r12d its number; the caller's
+#   [rsp+144] thickness, [rsp+132] the nearest so far (|v|^2, from the
+#   thickness squared), [rsp+96] its v, [rsp+136] its triangle (here +16)) -
+#   the nearer triangle kept; one gone through this step (from xp to x)
+#   puts the particle back on the side it came from at once. A particle is
+#   then pushed once, from the nearest triangle (pt_resolve): over a flat
+#   face that is the face it is over, past a box's edge the edge.
 pt_tri:
     push    r13
+    mov     [rsp+16+140], edi
     mov     rax, rdi
     shl     rax, 6
     add     rax, [rip+cx_ct]
@@ -1793,14 +1888,100 @@ pt_tri:
     lea     rsi, [rsp+16+32]
     lea     rdx, [rsp+16+48]
     lea     rcx, [rsp+16+64]
-    call    tri_closest                 # v: the nearest point - x
+    call    tri_closest                 # v: the nearest point - x (32 bytes)
     movaps  xmm0, [rsp+16+64]
     movaps  xmm1, xmm0
     DOT3    xmm1, xmm1
-    movss   xmm2, [rsp+16+144]
-    mulss   xmm2, xmm2
-    comiss  xmm1, xmm2
-    jae     9f
+    comiss  xmm1, [rsp+16+132]
+    jae     .Lpt_cross
+    andps   xmm0, [rip+cq_xyz]          # the nearest so far
+    movaps  [rsp+16+96], xmm0
+    movss   [rsp+16+132], xmm1
+    mov     eax, [rsp+16+140]
+    mov     [rsp+16+136], eax
+9:  pop     r13
+    ret
+.Lpt_cross:                             # farther: did it go through it this
+    mov     rax, r12                    #  step? (A soft body's volume pushed
+    shl     rax, 4                      #  particles deeper into a thick
+    add     rax, [rip+cx_xp]            #  collider than its thickness, and
+    movaps  xmm4, [rax]                 #  nothing brought them out again)
+    andps   xmm4, [rip+cq_xyz]
+    movaps  xmm5, xmm4                  # dp = (xp - a) . n
+    subps   xmm5, [r13]
+    DOT3    xmm5, [r13+48]
+    movaps  xmm6, [rbx]                 # dx = (x - a) . n
+    andps   xmm6, [rip+cq_xyz]
+    movaps  xmm7, xmm6
+    subps   xmm7, [r13]
+    DOT3    xmm7, [r13+48]
+    movss   xmm2, xmm5
+    mulss   xmm2, xmm7
+    xorps   xmm1, xmm1
+    comiss  xmm2, xmm1                  # the same side: no
+    jae     9b
+    movss   xmm2, xmm5                  # s = xp + (x - xp) dp / (dp - dx)
+    subss   xmm2, xmm7
+    movss   xmm1, xmm5
+    divss   xmm1, xmm2
+    shufps  xmm1, xmm1, 0
+    subps   xmm6, xmm4
+    mulps   xmm6, xmm1
+    addps   xmm6, xmm4
+    andps   xmm6, [rip+cq_xyz]
+    movaps  [rsp+16+112], xmm6          # (s)
+    movss   [rsp+16+128], xmm5          # (dp: the side it came from)
+    movaps  xmm1, [r13]                 # inside the triangle: s its own
+    subps   xmm1, xmm6                  #  nearest point
+    movaps  [rsp+16+16], xmm1
+    movaps  xmm1, [r13+16]
+    subps   xmm1, xmm6
+    movaps  [rsp+16+32], xmm1
+    movaps  xmm1, [r13+32]
+    subps   xmm1, xmm6
+    movaps  [rsp+16+48], xmm1
+    lea     rdi, [rsp+16+16]
+    lea     rsi, [rsp+16+32]
+    lea     rdx, [rsp+16+48]
+    lea     rcx, [rsp+16+64]
+    call    tri_closest
+    movaps  xmm0, [rsp+16+64]
+    DOT3    xmm0, xmm0
+    comiss  xmm0, [rip+cq_cross]
+    jae     9b
+    movaps  xmm6, [r13+48]              # x = s + n t, n towards where it
+    xorps   xmm1, xmm1                  #  came from
+    comiss  xmm1, [rsp+16+128]
+    jbe     1f
+    xorps   xmm6, [rip+cq_neg]
+1:  movss   xmm2, [rsp+16+144]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm2, xmm6
+    addps   xmm2, [rsp+16+112]
+    andps   xmm2, [rip+cq_xyz]
+    movaps  xmm0, [rbx]
+    andps   xmm0, [rip+cq_w]
+    orps    xmm2, xmm0
+    movaps  [rbx], xmm2
+    lock inc dword ptr [rip+cx_hits]
+    pop     r13
+    ret
+
+# pt_resolve(rbx=particle, r12d its number; the caller's [rsp+96] v to the
+#   nearest triangle, [rsp+136] which, [rsp+144] thickness, [rsp+148]
+#   friction (here +16)) - the particle out of it to its thickness. The
+#   face's inside: along its normal, to the side the particle came from (x +
+#   n (t - (x - q).n): not onto q, which moved it sideways near a flat
+#   face's diagonal). An edge or a corner, the particle not through the
+#   face's plane: straight away from that point (along the face's normal it
+#   was held up past a box's edge - a soft ball hung from a ramp's end)
+pt_resolve:
+    push    r13
+    mov     eax, [rsp+16+136]
+    shl     rax, 6
+    add     rax, [rip+cx_ct]
+    mov     r13, rax
+    movaps  xmm0, [rsp+16+96]           # v
     movaps  xmm3, [rbx]                 # q = x + v; the side it came from
     andps   xmm3, [rip+cq_xyz]
     addps   xmm3, xmm0
@@ -1817,11 +1998,44 @@ pt_tri:
     comiss  xmm5, xmm2
     jae     1f
     xorps   xmm6, [rip+cq_neg]
-1:  movss   xmm2, [rsp+16+144]          # x = q + n t
+1:  movaps  xmm7, xmm0                  # an edge or a corner: v not along n
+    DOT3    xmm7, [r13+48]
+    mulss   xmm7, xmm7
+    movaps  xmm5, xmm0
+    DOT3    xmm5, xmm5
+    comiss  xmm5, [rip+cq_tiny]
+    jbe     2f
+    movss   xmm2, xmm5
+    mulss   xmm2, [rip+cq_inside]
+    comiss  xmm7, xmm2                  # (v.n)^2 >= 0.999 |v|^2: the inside
+    jae     2f
+    movaps  xmm7, xmm0                  # v.n_side >= 0: through the plane
+    DOT3    xmm7, xmm6                  #  (the face's normal brings it back)
+    xorps   xmm2, xmm2
+    comiss  xmm7, xmm2
+    jae     2f
+    sqrtss  xmm5, xmm5                  # n = -v / |v|: x = q + n t
+    shufps  xmm5, xmm5, 0
+    movaps  xmm6, xmm0
+    xorps   xmm6, [rip+cq_neg]
+    divps   xmm6, xmm5
+    andps   xmm6, [rip+cq_xyz]
+    movss   xmm2, [rsp+16+144]
     shufps  xmm2, xmm2, 0
     mulps   xmm2, xmm6
-    addps   xmm2, xmm3                  # the new place
-    movaps  xmm1, xmm2                  # friction: less of the sliding
+    addps   xmm2, xmm3
+    jmp     3f
+2:  movaps  xmm7, [rbx]                 # along the face's normal only
+    andps   xmm7, [rip+cq_xyz]
+    movaps  xmm2, xmm7
+    subps   xmm7, xmm3
+    DOT3    xmm7, xmm6
+    movss   xmm5, [rsp+16+144]
+    subss   xmm5, xmm7
+    shufps  xmm5, xmm5, 0
+    mulps   xmm5, xmm6
+    addps   xmm2, xmm5                  # the new place
+3:  movaps  xmm1, xmm2                  # friction: less of the sliding
     subps   xmm1, xmm4                  #  (x - xp along the surface)
     movaps  xmm5, xmm1
     DOT3    xmm5, xmm6
@@ -1838,7 +2052,333 @@ pt_tri:
     orps    xmm2, xmm0
     movaps  [rbx], xmm2
     lock inc dword ptr [rip+cx_hits]
-9:  pop     r13
+    pop     r13
+    ret
+
+# cl_edges - the colliders' edges against the edges of the cloths' and soft
+#   bodies' triangles: closer than the thickness, the cloth's edge is pushed
+#   off, along the line between their nearest points as it was before the
+#   substep (the side it came from; a centimetre a substep at most).
+#   Particles only meet triangles: a box's edge went in between them, and a
+#   soft ball wrapped round a ramp's end and hung from it
+cl_edges:
+    push    rbx
+    push    rbp
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 248
+    xor     eax, eax
+    mov     [rsp+224], eax              # the cloth
+.Le_cloth:
+    mov     eax, [rsp+224]
+    cmp     eax, [rip+cx_nc]
+    jae     .Le_out
+    imul    r12, rax, CR_SZ
+    lea     rcx, [rip+cx_rec]
+    add     r12, rcx
+    cmp     dword ptr [r12+CR_TYPE], 3  # (a collider: none)
+    je      .Le_nextc
+    cmp     dword ptr [r12+CR_NT], 0
+    je      .Le_nextc
+    movss   xmm0, [r12+CR_THICK]        # its thickness, and its box (with it
+    maxss   xmm0, [rip+cq_emarg]        #  and a margin)
+    movss   [rsp+208], xmm0
+    mulss   xmm0, xmm0
+    movss   [rsp+212], xmm0
+    mov     eax, [r12+CR_P0]
+    shl     rax, 4
+    add     rax, [rip+cx_x]
+    movaps  xmm0, [rax]
+    movaps  xmm1, xmm0
+    mov     ecx, [r12+CR_NP]
+1:  dec     ecx
+    jle     2f
+    add     rax, 16
+    minps   xmm0, [rax]
+    maxps   xmm1, [rax]
+    jmp     1b
+2:  movss   xmm2, [rsp+208]
+    addss   xmm2, [rip+cq_emarg]
+    shufps  xmm2, xmm2, 0
+    subps   xmm0, xmm2
+    addps   xmm1, xmm2
+    movaps  [rsp+0], xmm0
+    movaps  [rsp+16], xmm1
+    xor     r13d, r13d                  # each collider triangle
+.Le_tri:
+    cmp     r13d, [rip+cx_nct]
+    jae     .Le_nextc
+    mov     r14, r13
+    shl     r14, 6
+    add     r14, [rip+cx_ct]
+    xor     r15d, r15d                  # its edges
+.Le_edge:
+    cmp     r15d, 3
+    jae     .Le_nextt
+    bt      dword ptr [r14+60], r15d    # (a corner: not a flat face's diagonal)
+    jnc     .Le_nexte
+    mov     eax, r15d
+    shl     eax, 4
+    movaps  xmm0, [r14+rax]             # p1
+    lea     eax, [r15+1]
+    cmp     eax, 3
+    jb      3f
+    xor     eax, eax
+3:  shl     eax, 4
+    movaps  xmm1, [r14+rax]             # q1
+    andps   xmm0, [rip+cq_xyz]
+    andps   xmm1, [rip+cq_xyz]
+    movaps  [rsp+64], xmm0
+    movaps  xmm2, xmm1
+    subps   xmm2, xmm0
+    movaps  [rsp+80], xmm2              # d1
+    movaps  xmm3, xmm2                  # a = d1.d1
+    DOT3    xmm3, xmm3
+    comiss  xmm3, [rip+cq_eps]
+    jbe     .Le_nexte
+    movss   [rsp+192], xmm3
+    movaps  xmm2, xmm0                  # its box, against the cloth's
+    minps   xmm2, xmm1
+    maxps   xmm1, xmm0
+    movss   xmm3, [rsp+208]
+    shufps  xmm3, xmm3, 0
+    subps   xmm2, xmm3
+    addps   xmm1, xmm3
+    movaps  [rsp+32], xmm2
+    movaps  [rsp+48], xmm1
+    movaps  xmm4, [rsp+16]
+    cmpleps xmm4, xmm2
+    movaps  xmm5, xmm1
+    cmpleps xmm5, [rsp+0]
+    orps    xmm4, xmm5
+    movmskps eax, xmm4
+    test    eax, 7
+    jnz     .Le_nexte
+    mov     ebx, [r12+CR_T0]            # each of the cloth's triangles
+    mov     ebp, [r12+CR_NT]
+    add     ebp, ebx
+.Le_ct:
+    cmp     ebx, ebp
+    jae     .Le_nexte
+    imul    rax, rbx, 12
+    add     rax, [rip+cx_tr]
+    mov     [rsp+232], rax
+    mov     rdx, [rip+cx_x]
+    mov     ecx, [rax]                  # its box against the edge's
+    shl     rcx, 4
+    movaps  xmm0, [rdx+rcx]
+    mov     ecx, [rax+4]
+    shl     rcx, 4
+    movaps  xmm1, [rdx+rcx]
+    mov     ecx, [rax+8]
+    shl     rcx, 4
+    movaps  xmm2, [rdx+rcx]
+    movaps  xmm3, xmm0
+    minps   xmm3, xmm1
+    minps   xmm3, xmm2
+    maxps   xmm0, xmm1
+    maxps   xmm0, xmm2
+    cmpleps xmm0, [rsp+32]
+    movaps  xmm5, [rsp+48]
+    cmpleps xmm5, xmm3
+    orps    xmm0, xmm5
+    movmskps eax, xmm0
+    test    eax, 7
+    jnz     .Le_nextct
+    xor     ecx, ecx                    # its three edges
+    mov     [rsp+228], ecx
+.Le_ce:
+    mov     ecx, [rsp+228]
+    cmp     ecx, 3
+    jae     .Le_nextct
+    mov     rax, [rsp+232]
+    mov     r8d, [rax+rcx*4]            # i, j
+    lea     edx, [rcx+1]
+    cmp     edx, 3
+    jb      4f
+    xor     edx, edx
+4:  mov     r9d, [rax+rdx*4]
+    cmp     r8d, r9d                    # (each edge once: the lower first)
+    jae     .Le_nextce
+    mov     [rsp+216], r8d
+    mov     [rsp+220], r9d
+    shl     r8, 4
+    shl     r9, 4
+    mov     rdx, [rip+cx_x]
+    movaps  xmm0, [rdx+r8]              # p2
+    movaps  xmm1, [rdx+r9]
+    andps   xmm0, [rip+cq_xyz]
+    andps   xmm1, [rip+cq_xyz]
+    subps   xmm1, xmm0                  # d2
+    movaps  [rsp+96], xmm0
+    movaps  [rsp+112], xmm1
+    movaps  xmm2, xmm1                  # e = d2.d2
+    DOT3    xmm2, xmm2
+    comiss  xmm2, [rip+cq_eps]
+    jbe     .Le_nextce
+    movaps  xmm3, [rsp+64]              # r = p1 - p2
+    subps   xmm3, xmm0
+    movaps  xmm4, xmm1                  # f = d2.r
+    DOT3    xmm4, xmm3
+    movaps  xmm5, [rsp+80]              # c = d1.r
+    DOT3    xmm5, xmm3
+    movaps  xmm6, [rsp+80]              # b = d1.d2
+    DOT3    xmm6, xmm1
+    movss   xmm7, [rsp+192]             # denom = a e - b^2
+    mulss   xmm7, xmm2
+    movss   xmm0, xmm6
+    mulss   xmm0, xmm6
+    subss   xmm7, xmm0
+    xorps   xmm0, xmm0                  # s (on the collider's edge)
+    comiss  xmm7, [rip+cq_eps]
+    jbe     5f
+    movss   xmm0, xmm6                  # (b f - c e) / denom, in [0, 1]
+    mulss   xmm0, xmm4
+    movss   xmm3, xmm5
+    mulss   xmm3, xmm2
+    subss   xmm0, xmm3
+    divss   xmm0, xmm7
+    call    .Le_clamp
+5:  movss   xmm3, xmm6                  # t = (b s + f) / e
+    mulss   xmm3, xmm0
+    addss   xmm3, xmm4
+    divss   xmm3, xmm2
+    xorps   xmm7, xmm7
+    comiss  xmm3, xmm7
+    jae     6f
+    xorps   xmm3, xmm3                  # t < 0: t = 0, s = -c / a
+    xorps   xmm0, xmm0
+    subss   xmm0, xmm5
+    divss   xmm0, [rsp+192]
+    call    .Le_clamp
+    jmp     7f
+6:  comiss  xmm3, [rip+cq_one]
+    jbe     7f
+    movss   xmm3, [rip+cq_one]          # t > 1: t = 1, s = (b - c) / a
+    movss   xmm0, xmm6
+    subss   xmm0, xmm5
+    divss   xmm0, [rsp+192]
+    call    .Le_clamp
+7:  movss   [rsp+196], xmm0             # (s, t)
+    movss   [rsp+200], xmm3
+    shufps  xmm0, xmm0, 0               # c1 = p1 + d1 s
+    mulps   xmm0, [rsp+80]
+    addps   xmm0, [rsp+64]
+    movaps  [rsp+128], xmm0
+    shufps  xmm3, xmm3, 0               # c2 = p2 + d2 t
+    mulps   xmm3, [rsp+112]
+    addps   xmm3, [rsp+96]
+    subps   xmm3, xmm0                  # delta = c2 - c1
+    movaps  xmm4, xmm3
+    DOT3    xmm4, xmm4
+    comiss  xmm4, [rsp+212]
+    jae     .Le_nextce                  # (apart: farther than the thickness)
+    movaps  [rsp+144], xmm3
+    mov     r8d, [rsp+216]              # the same before the substep: the
+    mov     r9d, [rsp+220]              #  side it came from
+    shl     r8, 4
+    shl     r9, 4
+    mov     rdx, [rip+cx_xp]
+    movaps  xmm0, [rdx+r8]
+    movaps  xmm1, [rdx+r9]
+    andps   xmm0, [rip+cq_xyz]
+    andps   xmm1, [rip+cq_xyz]
+    subps   xmm1, xmm0
+    movss   xmm2, [rsp+200]
+    shufps  xmm2, xmm2, 0
+    mulps   xmm1, xmm2
+    addps   xmm1, xmm0
+    subps   xmm1, [rsp+128]             # delta before
+    movaps  xmm2, xmm1
+    DOT3    xmm2, xmm2
+    comiss  xmm2, [rip+cq_eps]
+    ja      8f
+    movaps  xmm1, [rsp+144]             # (no telling: delta now)
+    movaps  xmm2, xmm1
+    DOT3    xmm2, xmm2
+    comiss  xmm2, [rip+cq_eps]
+    jbe     .Le_nextce
+8:  sqrtss  xmm2, xmm2                  # n
+    shufps  xmm2, xmm2, 0
+    divps   xmm1, xmm2
+    andps   xmm1, [rip+cq_xyz]
+    movaps  xmm4, [rsp+144]             # corr = thickness - delta.n, capped
+    DOT3    xmm4, xmm1
+    movss   xmm5, [rsp+208]
+    subss   xmm5, xmm4
+    minss   xmm5, [rip+cq_ecap]
+    comiss  xmm5, [rip+cq_tiny]
+    jbe     .Le_nextce
+    mov     r8d, [rsp+216]              # weights 1 - t, t; inverse masses
+    mov     r9d, [rsp+220]
+    shl     r8, 4
+    shl     r9, 4
+    mov     rdx, [rip+cx_x]
+    movss   xmm6, [rip+cq_one]
+    subss   xmm6, [rsp+200]             # w0
+    movss   xmm7, [rsp+200]             # w1
+    movss   xmm2, [rdx+r8+12]           # m0 w0
+    mulss   xmm2, xmm6
+    movss   xmm3, [rdx+r9+12]           # m1 w1
+    mulss   xmm3, xmm7
+    movss   xmm0, xmm2                  # sum m w^2
+    mulss   xmm0, xmm6
+    movss   xmm4, xmm3
+    mulss   xmm4, xmm7
+    addss   xmm0, xmm4
+    comiss  xmm0, [rip+cq_tiny]
+    jbe     .Le_nextce
+    divss   xmm5, xmm0                  # lambda
+    mulss   xmm2, xmm5
+    mulss   xmm3, xmm5
+    shufps  xmm2, xmm2, 0
+    shufps  xmm3, xmm3, 0
+    mulps   xmm2, xmm1
+    mulps   xmm3, xmm1
+    movaps  xmm0, [rdx+r8]
+    addps   xmm0, xmm2
+    movaps  [rdx+r8], xmm0
+    movaps  xmm0, [rdx+r9]
+    addps   xmm0, xmm3
+    movaps  [rdx+r9], xmm0
+    mov     rdx, [rip+cx_xp]            # (and where they were: moved off,
+    movaps  xmm0, [rdx+r8]              #  not sent off - x - xp is their
+    addps   xmm0, xmm2                  #  speed, and a push a substep bounced
+    movaps  [rdx+r8], xmm0              #  the ball back up the ramp)
+    movaps  xmm0, [rdx+r9]
+    addps   xmm0, xmm3
+    movaps  [rdx+r9], xmm0
+    lock inc dword ptr [rip+cx_hits]
+.Le_nextce:
+    inc     dword ptr [rsp+228]
+    jmp     .Le_ce
+.Le_nextct:
+    inc     ebx
+    jmp     .Le_ct
+.Le_nexte:
+    inc     r15d
+    jmp     .Le_edge
+.Le_nextt:
+    inc     r13d
+    jmp     .Le_tri
+.Le_nextc:
+    inc     dword ptr [rsp+224]
+    jmp     .Le_cloth
+.Le_out:
+    add     rsp, 248
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbp
+    pop     rbx
+    ret
+.Le_clamp:                              # xmm0 into [0, 1]
+    xorps   xmm7, xmm7
+    maxss   xmm0, xmm7
+    minss   xmm0, [rip+cq_one]
     ret
 
 # pt_hf(edi=landscape collider; rbx=particle, r12d its number, the
