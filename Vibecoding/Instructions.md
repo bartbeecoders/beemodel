@@ -62,5 +62,3 @@ Usually I have reference images of a building in a folder or in pdf file(s).
 I want beemodel to be smart enough to open the folder, extract the files that are useful (even extract images from bitmaps etc). You can use the AI assistent for that if needed.
 So: user shows you the folder where the files are, you analyse (with ai?) and import the usefull images, add them to the canvas.
 Create a seperate branch for this change.
-
-
