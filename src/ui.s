@@ -466,6 +466,12 @@ cursor_for:
     jne     1f
     mov     edi, esi
     jmp     splitter_cursor
+1:  cmp     edi, HIT_FLOAT_EDGE         # a floating panel's edges
+    jne     1f
+    shr     esi, 8
+    lea     rax, [rip+edge_cursors]
+    movzx   eax, byte ptr [rax+rsi]
+    ret
 1:
     mov     eax, CUR_CROSSHAIR
     cmp     edi, HIT_CANVAS
@@ -567,6 +573,14 @@ ui_motion:
     mov     eax, [rip+drag_mode]
     test    eax, eax
     jz      .Lmo_hover
+    cmp     eax, DRAG_AREA              # an area dragged (dock.s)
+    jne     7639f
+    mov     edi, [rip+ptr_x]
+    mov     esi, [rip+ptr_y]
+    call    dock_motion
+    mov     edi, eax
+    jmp     .Lmo_cursor
+7639:
     cmp     eax, DRAG_WIDGET            # scrubbing a widget
     jne     7640f
     mov     edi, [rip+ptr_x]
@@ -1068,6 +1082,9 @@ ui_button:
     jmp     .Lbt_done
 
 .Lbt_nomenu:
+    mov     edi, [rip+ptr_x]            # a floating panel pressed: on top
+    mov     esi, [rip+ptr_y]
+    call    dock_press
     cmp     r14d, BTN_MIDDLE
     jne     1f
     cmp     ebx, HIT_CANVAS
@@ -1194,13 +1211,25 @@ ui_button:
     mov     rdi, [rax+r12*8]
     call    run_op
     jmp     .Lbt_done
-42: cmp     ebx, HIT_AREA_HDR           # a header dragged: swap areas
+42: cmp     ebx, HIT_AREA_HDR           # a header dragged: dock it elsewhere
     je      43f
-    cmp     ebx, HIT_AREA_CORNER        # a corner dragged: join areas
+    cmp     ebx, HIT_FLOAT_EDGE         # a floating panel's edge: resize it
+    jne     420f
+    mov     edi, r12d
+    call    dock_begin_resize
+    jmp     .Lbt_done
+420: cmp    ebx, HIT_AREA_CORNER        # a corner dragged: join areas
     jne     44f
     mov     dword ptr [rip+wsp_drag_kind], 1
     jmp     45f
-43: mov     dword ptr [rip+wsp_drag_kind], 0
+43: mov     edi, r12d                   # a floating panel's header: move it
+    call    area_is_float
+    test    eax, eax
+    jz      430f
+    mov     edi, r12d
+    call    dock_begin_move
+    jmp     .Lbt_done
+430: mov    dword ptr [rip+wsp_drag_kind], 0
 45: mov     [rip+wsp_drag_src], r12d
     mov     dword ptr [rip+drag_mode], DRAG_AREA
     jmp     .Lbt_done

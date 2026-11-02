@@ -635,6 +635,7 @@ def main():
     team_ui()
     prefs_ui()
     workspaces_ui()
+    dock_ui()
     help_ui()
     ui_review()
     a11y_ui()
@@ -980,6 +981,12 @@ def widget_xy(m, name, sub=0):
     """Centre of a widget, found by name (no hard-coded coordinates)."""
     w = widget(m, name, sub)
     return (w['x'] + w['w'] // 2, w['y'] + w['h'] // 2) if w else (0, 0)
+
+
+def areas(m):
+    """The areas (ui_tree kind "area"): label = the editor, value = "docked"
+    or "float", sub = the area's node."""
+    return [w for w in ui_tree(m) if w.get('kind') == 'area']
 
 
 def menu_pick(f, m, *path):
@@ -8795,6 +8802,100 @@ def prefs_ui():
     g.proc.kill()
 
 
+def dock_ui():
+    """#419: an area's header dragged onto another docks it on that side (the
+    middle: a swap), with an overlay showing where; Area > Float takes an area
+    out as a panel that moves, resizes, hides the widgets under it, docks back
+    by its button or the guides, and stays with the workspace."""
+    print('  -- docking and floating panels --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    A = lambda: {a['label']: a for a in areas(m)}
+    def press_to(x0, y0, x1, y1, steps=6):     # a drag left pressed at the end
+        f.move(x0, y0); f.button(True)
+        for i in range(1, steps + 1):
+            f.move(x0 + (x1 - x0) * i // steps, y0 + (y1 - y0) * i // steps)
+        f.pump(0.2)
+    def ctx(area, label):                     # the header's menu
+        f.click(area['x'] + min(150, area['w'] - 30), area['y'] + 10, btn=0x111); f.pump(0.2)
+        it = [w for w in ui_tree(m) if w['kind'] == 'menuitem' and w['label'] == label]
+        if it:
+            f.click(it[0]['x'] + 30, it[0]['y'] + it[0]['h'] // 2); f.pump(0.3)
+        else:
+            f.key(1)
+        return it[0] if it else None
+    a = A()
+    check(set(a) == {'Tools', '3D Viewport', 'Console', 'Outliner', 'Properties'} and
+          all(v['value'] == 'docked' for v in a.values()), f'ui_tree lists the areas ({sorted(a)})')
+    q('view(30, 20, 12, 0, 1, 0)')
+    f.pump(0.3)
+    vp, tools = a['3D Viewport'], a['Tools']   # the viewport's header onto the Tools' bottom band
+    ov = widget(m, 'viewport.overlays')        # (its header: empty right of its tools)
+    hx = ov['x'] + ov['w'] + 8 if ov else vp['x'] + vp['w'] - 4 * 22 - 20
+    f.drag(hx, vp['y'] + 10, tools['x'] + tools['w'] // 2, tools['y'] + tools['h'] - 20); f.pump(0.3)
+    a = A(); vp, tools = a['3D Viewport'], a['Tools']
+    yaw, dist = (q('print(viewinfo(0), viewinfo(2))').split() + ['0', '0'])[:2]
+    check(vp['x'] == tools['x'] and vp['y'] > tools['y'] and abs(float(yaw) - 30) < 0.1 and abs(float(dist) - 12) < 0.01,
+          f'a viewport docked below the tools keeps its view ({vp["x"]},{vp["y"]}: yaw {yaw}, distance {dist})')
+    vp, con = a['3D Viewport'], a['Console']
+    tx, ty = vp['x'] + vp['w'] - 30, vp['y'] + vp['h'] // 2       # the viewport's right band
+    before = px(f, tx, ty)
+    press_to(con['x'] + 150, con['y'] + 10, tx, ty)
+    f.shot('dock_1_overlay.png')
+    check(px(f, tx, ty) != before, f'dragging a header over an area\'s right band tints it ({before:06x} -> {px(f, tx, ty):06x})')
+    f.button(False); f.pump(0.3)
+    a = A(); vp, con = a['3D Viewport'], a['Console']
+    check(con['x'] > vp['x'] and con['y'] == vp['y'] and con['h'] == vp['h'],
+          f'dropped there, the console docks to the right of the viewport ({con["x"]},{con["y"]} {con["w"]}x{con["h"]})')
+    pr, tl = a['Properties'], a['Tools']        # the middle: a swap
+    f.drag(pr['x'] + 150, pr['y'] + 10, tl['x'] + tl['w'] // 2, tl['y'] + tl['h'] // 2); f.pump(0.3)
+    a = A()
+    check(a['Properties']['x'] == tl['x'] and a['Tools']['x'] == pr['x'], 'dropped in an area\'s middle, the two swap')
+    it = ctx(a['Outliner'], 'Float Area')
+    a = A(); o = a['Outliner']
+    check(it is not None and o['value'] == 'float', 'Area > Float: the outliner floats over the window')
+    fl = ctx(a['Console'], 'Dock Area')
+    check(fl is None or fl.get('why'), 'Dock Area is off for an area in the layout')
+    f.shot('dock_2_float.png')
+    f.drag(o['x'] + 150, o['y'] + 10, o['x'] - 50, o['y'] + 160, steps=6); f.pump(0.3)
+    o2 = A()['Outliner']
+    check((o2['x'], o2['y']) == (o['x'] - 200, o['y'] + 150), f'its header moves it ({o["x"]},{o["y"]} -> {o2["x"]},{o2["y"]})')
+    o = o2
+    f.drag(o['x'] + o['w'] - 2, o['y'] + o['h'] - 2, o['x'] + o['w'] + 58, o['y'] + o['h'] + 38, steps=4); f.pump(0.3)
+    o2 = A()['Outliner']
+    check(o2['w'] == o['w'] + 60 and o2['h'] == o['h'] + 40, f'its corner resizes it ({o["w"]}x{o["h"]} -> {o2["w"]}x{o2["h"]})')
+    vis = widget(m, 'object.visible')          # over the Visible box: the panel's body
+    f.drag(o2['x'] + 150, o2['y'] + 10, vis['x'] + 150, vis['y'] - 40, steps=6); f.pump(0.3)
+    o = A()['Outliner']
+    covered = o['x'] <= vis['x'] and o['y'] + 30 <= vis['y'] and vis['y'] + vis['h'] <= o['y'] + o['h']
+    f.click(vis['x'] + 8, vis['y'] + vis['h'] // 2); f.pump(0.3)
+    v2 = widget(m, 'object.visible')
+    check(covered and v2 and v2.get('value') == vis.get('value'),
+          f'a click on the panel does not reach the widget under it (Visible {vis.get("value")} -> {v2 and v2.get("value")})')
+    q('op("workspace.set", "2")'); f.pump(0.3)
+    q('op("workspace.set", "1")'); f.pump(0.3)
+    o2 = A().get('Outliner')
+    check(o2 and o2['value'] == 'float' and o2['x'] == o['x'] and o2['w'] == o['w'], 'the panel stays with its workspace')
+    vp = A()['3D Viewport']
+    cx, cy = vp['x'] + vp['w'] // 2, vp['y'] + vp['h'] // 2
+    press_to(o['x'] + 150, o['y'] + 10, cx + 34, cy)            # the right guide
+    f.shot('dock_3_guides.png')
+    f.button(False); f.pump(0.3)
+    a = A(); o, vp = a['Outliner'], a['3D Viewport']
+    check(o['value'] == 'docked' and o['x'] > vp['x'] and o['y'] == vp['y'], 'released on a guide, the panel docks beside that area')
+    ctx(a['Console'], 'Float Area')
+    c = A()['Console']
+    f.click(c['x'] + c['w'] - 4 - 22 - 11, c['y'] + 12); f.pump(0.3)
+    c = A()['Console']
+    check(c['value'] == 'docked', 'its header\'s dock button puts a panel back')
+    f.shot('dock_4_end.png')
+    f.proc.kill()
+
+
 def workspaces_ui():
     """UI plan U24: workspace tabs (built-in and custom), Ctrl+PageUp /
     PageDown, swapping areas by their headers, joining them by a corner,
@@ -8825,7 +8926,8 @@ def workspaces_ui():
     hy = vm['y'] + 11                                          # (the header row; empty right of its tools)
     ov = widget(m, 'viewport.overlays')
     hx = ov['x'] + ov['w'] + 8 if ov else of['x'] - 140
-    f.drag(hx, hy, of['x'] + 60, of['y'] - 40, steps=4); f.pump(0.3)
+    oa = [a for a in areas(m) if a['label'] == 'Outliner'][0]     # (its middle: a swap, #419)
+    f.drag(hx, hy, oa['x'] + oa['w'] // 2, oa['y'] + oa['h'] // 2, steps=4); f.pump(0.3)
     w = wait_widget(f, m, 'outliner.filter')
     check(w is not None and w['x'] < of['x'] - 200, f'a header dragged onto another area swaps them (the outliner now at x {w and w["x"]})')
     q('op("workspace.set", "1")')                               # (Modeling, as it was)

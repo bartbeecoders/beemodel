@@ -7,7 +7,7 @@
 #  for a new scene).
 #
 #  Areas are also joined by dragging an area's top-left corner into its
-#  neighbour, and swapped by dragging one's header onto another.
+#  neighbour; a header dragged onto another area docks there (dock.s).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -62,7 +62,7 @@ wsp_tab:        .skip WS_MAX*WS_SZ
 wsp_n:          .skip 4
 wsp_cur:        .skip 4
 wsp_drag_src:   .skip 4                 # an area dragged (its header / corner)
-wsp_drag_kind:  .skip 4                 # 0 swap, 1 join
+wsp_drag_kind:  .skip 4                 # 0 dock, 1 join, 2 a panel moved, 3 resized
 wsp_path:       .skip 512
 wsp_name:       .skip 32
 wsp_sel:        .skip 4
@@ -769,14 +769,18 @@ wcpy:                                   # rdi = dest, rsi = text -> rdi at its 0
 # =============================================================================
 #  Joining and swapping areas by dragging
 # =============================================================================
-# wsp_area_drop(edi=x, esi=y) - the drag ends over another area: swap the
-#   two (a header was dragged) or join them (a corner: the other one goes
-#   when it is this one's sibling)
+# wsp_area_drop(edi=x, esi=y) - the drag ends over another area: a corner
+#   joins them (the other one goes when it is this one's sibling); a header
+#   or a floating panel: dock.s dock_drop
 wsp_area_drop:
+    cmp     dword ptr [rip+wsp_drag_kind], 1    # (a header, a panel: dock.s)
+    jne     dock_drop
     push    rbx
     push    r12
     sub     rsp, 8
+    mov     dword ptr [rip+ah_tree], 1  # (the tree's areas: not a panel)
     call    area_hit
+    mov     dword ptr [rip+ah_tree], 0
     mov     ebx, [rip+hit_area]         # the area under the pointer
     mov     r12d, [rip+wsp_drag_src]
     test    ebx, ebx
@@ -794,29 +798,6 @@ wsp_area_drop:
     pop     rdx
     cmp     byte ptr [rax+N_KIND], K_LEAF
     jne     9f
-    cmp     dword ptr [rip+wsp_drag_kind], 1
-    je      .Ldrop_join
-    mov     cl, [rdx+N_ED]              # swap: the editors and the cameras
-    mov     ch, [rax+N_ED]
-    mov     [rdx+N_ED], ch
-    mov     [rax+N_ED], cl
-    mov     edi, r12d
-    call    cam_ptr
-    push    rax
-    mov     edi, ebx
-    call    cam_ptr
-    pop     rdx
-    mov     ecx, CAM_SZ
-1:  mov     r8b, [rax]
-    mov     r9b, [rdx]
-    mov     [rax], r9b
-    mov     [rdx], r8b
-    inc     rax
-    inc     rdx
-    dec     ecx
-    jnz     1b
-    mov     [rip+active_area], ebx
-    jmp     8f
 .Ldrop_join:                            # join: the other one must be the sibling
     mov     cl, [rdx+N_PARENT]
     cmp     cl, [rax+N_PARENT]

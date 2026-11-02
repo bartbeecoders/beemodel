@@ -150,7 +150,7 @@ ctx_edit:       .quad op_ai_ask, 0, op_m_extrude, op_m_inset, op_m_bevel, op_m_l
 .equ ctx_edit_n, (. - ctx_edit) / 8
 ctx_outliner:   .quad op_duplicate, op_delete, 0, op_hide, op_reveal
 .equ ctx_outliner_n, (. - ctx_outliner) / 8
-ctx_header:     .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_close
+ctx_header:     .quad op_area_split_side, op_area_split_stack, op_area_maximize, op_area_float, op_area_dock, op_area_close
 .equ ctx_header_n, (. - ctx_header) / 8
 ctx_nodes:      .quad op_ne_add, 0, op_ne_dup, op_ne_copy, op_ne_paste, op_ne_cut, op_ne_del, 0
                 .quad op_ne_coll, op_ne_comment, 0, op_ne_alil, op_ne_alit, op_ne_disx, op_ne_disy, 0
@@ -1016,7 +1016,10 @@ mn_json:
     call    wb_str
     inc     ebx
     jmp     1b
-2:  cmp     dword ptr [rip+menu_open], 0
+2:  lea     edi, [r14+r15]          # the areas (dock.s)
+    call    area_json
+    add     r14d, eax
+    cmp     dword ptr [rip+menu_open], 0
     jl      5f
     call    level0
     mov     rdi, rax
