@@ -1,0 +1,41 @@
+name: PR check
+
+# The quick check on every pull request (about 3 minutes): it builds, checks the
+# binary and runs the self-test, so a PR that doesn't build can't reach main.
+# The full suite (ci.yml) runs at night on main (nightly.yml); run it by hand on
+# a branch (Actions > Full tests > Run workflow) when a change needs it before
+# merging. "Quick build" is the check main requires.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick:
+    name: Quick build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vulkan loader (the GPU helper links it)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1
+
+      - name: Build (debug, then release)
+        run: scripts/build.sh debug && scripts/build.sh release && test -x build/beemodel-gpu && test -f build/beemodel.exe
+
+      - name: Binary policy checks
+        run: ci/check-binary.sh build/beemodel
+
+      - name: Self-test (allocators, job system, benchmark)
+        run: |
+          ./build/beemodel --selftest
+          BEEMODEL_THREADS=0 ./build/beemodel --selftest

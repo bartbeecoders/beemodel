@@ -1,6 +1,6 @@
 # BeeModel
 
-[![CI](https://github.com/bartbeecoders/beemodel/actions/workflows/ci.yml/badge.svg)](https://github.com/bartbeecoders/beemodel/actions/workflows/ci.yml)
+[![Nightly](https://github.com/bartbeecoders/beemodel/actions/workflows/nightly.yml/badge.svg)](https://github.com/bartbeecoders/beemodel/actions/workflows/nightly.yml)
 [![Release](https://img.shields.io/github/v/release/bartbeecoders/beemodel)](https://github.com/bartbeecoders/beemodel/releases)
 
 A shell for a 3D modeling tool, written entirely in x86-64 assembly (GNU as,
@@ -1123,24 +1123,30 @@ operator spine and how to add an action.
 
 ## Development workflow
 
-* `main` is always releasable. All work happens on a branch (`feat/…`, `fix/…`,
-  `ci/…`) and is merged through a pull request once CI is green.
-* CI (`.github/workflows/ci.yml`) runs on every PR and push to `main`. It builds
-  release and debug binaries, runs `ci/check-binary.sh` (static, no shared
-  libraries, no RWX segments, size budget of 1.5 MiB) and runs the tests. The slow
-  ones run as jobs of their own, side by side: the GPU helper on llvmpipe in two
-  halves (`tests/gpu.py --part=render|window`) and the headless UI test with each
-  font. "Build & headless test", the check `main` requires, passes when all of them
-  do; a run takes about 20 minutes instead of 70. Screenshots are uploaded as
-  workflow artifacts.
+* All work happens on a branch (`feat/…`, `fix/…`, `ci/…`) and is merged through a
+  pull request. A PR gets only the quick check (`.github/workflows/pr.yml`, about
+  3 minutes): debug and release builds, `ci/check-binary.sh` (static, no shared
+  libraries, no RWX segments, size budget of 1.5 MiB) and `--selftest`. "Quick
+  build" is the check `main` requires. Run `ci/local.sh` before opening the PR.
+* **Nightly** (`.github/workflows/nightly.yml`, 02:00 UTC): when `main` has changed
+  since the last nightly, the full suite (`.github/workflows/ci.yml`) runs: every
+  test, the slow ones as jobs of their own side by side (the GPU helper on llvmpipe
+  in two halves, the headless UI test with each font), the Windows build under Wine
+  and on a Windows runner, packaging. About 20 minutes. When all of it passes the
+  rolling `nightly` pre-release is replaced with the new files and the list of
+  commits since the previous one. A failed night publishes nothing, and the next
+  night tries again. To run the full suite on a branch before merging, use
+  Actions › Full tests › Run workflow; Actions › Nightly › Run workflow on `main`
+  (with *force*) rebuilds the nightly by hand.
 * **Releasing:** bump `VERSION`, move the `[Unreleased]` notes in `CHANGELOG.md`
   into a new version section, and merge via a PR. Then tag:
   `git tag -a v0.2.0 -m "BeeModel 0.2.0" && git push origin v0.2.0`.
-  The release workflow checks that the tag matches `VERSION`, builds, tests and
-  packages the app (`scripts/package.sh`), and publishes a GitHub release with notes
-  taken from the changelog. Its headless UI tests run side by side with the build
-  (about 16 minutes); run it by hand (Actions › Release › Run workflow) for a dry
-  run on any branch that publishes nothing.
+  The release workflow checks that the tag matches `VERSION` and has a changelog
+  entry. If the tag is on the commit the last nightly tested (tag the morning after
+  the merge, or run the nightly by hand first), it publishes that night's files
+  without building or testing again (a minute). On any other commit it runs the
+  full suite first (about 20 minutes). Run it by hand on a branch for a dry run
+  that publishes nothing.
 
 ## License
 

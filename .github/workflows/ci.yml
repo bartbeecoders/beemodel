@@ -1,21 +1,20 @@
-name: CI
+name: Full tests
 
+# The whole suite, about 20 minutes. Not run on pull requests (pr.yml is the
+# quick check there): nightly.yml calls it every night main has changed, and
+# release.yml for a tag on a commit no nightly has tested. Run it by hand
+# (Actions > Full tests > Run workflow) on any branch.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 # The slow parts (the GPU helper on llvmpipe, the two headless UI runs) are
 # jobs of their own, side by side; each builds the binary again (seconds).
-# "Build & headless test", the check main requires, passes when all of them do.
+# "All tests" passes when all of them do. "Package" uploads dist/ (the release
+# files) and the Windows kit, which the Windows job smoke-tests.
 jobs:
   build-test:
     name: Build & tests
@@ -284,7 +283,7 @@ jobs:
           if-no-files-found: ignore
 
   all:
-    name: Build & headless test
+    name: All tests
     if: always()
     needs: [build-test, gpu, ui]
     runs-on: ubuntu-24.04
@@ -295,7 +294,7 @@ jobs:
           test '${{ needs.build-test.result }}' = success && test '${{ needs.gpu.result }}' = success && test '${{ needs.ui.result }}' = success
 
   windows-kit:
-    name: Windows build
+    name: Package (Linux and Windows)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -305,6 +304,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libvulkan1
 
+      - name: Build
+        run: scripts/build.sh release && test -x build/beemodel-gpu && ci/check-binary.sh build/beemodel
+
       - name: Package (Linux and Windows) and the Windows kit
         run: scripts/package.sh && ci/winkit.sh
 
@@ -312,6 +314,11 @@ jobs:
         with:
           name: winkit
           path: build/winkit/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
 
   windows:
     name: Windows

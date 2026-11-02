@@ -1,0 +1,105 @@
+name: Nightly
+
+# Every night, when main has changed since the last nightly: the full suite
+# (ci.yml: build, every test, the Windows smoke test, packaging), then the
+# rolling "nightly" pre-release is replaced with the new files. A night with no
+# new commits does nothing; a failed night publishes nothing and the next night
+# tries again. Run by hand on main (with "force" to rebuild an unchanged main),
+# or on any other branch as a dry run that publishes nothing.
+#
+# Versioned releases stay tag-driven (release.yml): a tag on the commit the
+# last nightly tested republishes that night's files without testing again.
+on:
+  schedule:
+    - cron: "0 2 * * *"            # 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Run even if main hasn't changed since the last nightly
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  changes:
+    name: Anything new?
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.c.outputs.run }}
+      last: ${{ steps.c.outputs.last }}
+    steps:
+      - id: c
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          last="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" --jq .object.sha 2>/dev/null || true)"
+          echo "last=$last" >> "$GITHUB_OUTPUT"
+          echo "this commit $GITHUB_SHA, last nightly ${last:-none}"
+          if [ "$GITHUB_REF" = refs/heads/main ] && [ "$last" = "$GITHUB_SHA" ] && [ "$FORCE" != true ]; then
+            echo "main hasn't changed since the last nightly: nothing to do"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  tests:
+    name: Tests
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Publish the nightly
+    needs: [changes, tests]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: screenshots-ui-truetype
+          path: shots
+
+      - name: Notes (the commits since the last nightly)
+        env:
+          LAST: ${{ needs.changes.outputs.last }}
+        run: |
+          v="$(tr -d '[:space:]' < VERSION)"
+          {
+            echo "Built and tested from \`main\` at ${GITHUB_SHA:0:7} on $(date -u '+%F'). Not a versioned release: VERSION $v plus the commits below."
+            echo
+            if [ -n "$LAST" ] && git cat-file -e "$LAST^{commit}" 2>/dev/null; then
+              echo "### Since the previous nightly (${LAST:0:7})"
+              git log --no-merges --format='* %s (%h)' "$LAST..$GITHUB_SHA"
+            else
+              echo "### Latest commits"
+              git log --no-merges --format='* %s (%h)' -20 "$GITHUB_SHA"
+            fi
+          } > NOTES.md
+          cat NOTES.md
+
+      - name: Replace the nightly pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          gh release delete nightly --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create nightly --repo "$GITHUB_REPOSITORY" --prerelease --latest=false \
+            --target "$GITHUB_SHA" --title "BeeModel nightly $(date -u '+%F')" --notes-file NOTES.md \
+            dist/beemodel-*.tar.gz dist/beemodel-*.bin dist/beemodel-*.zip dist/SHA256SUMS \
+            shots/01_initial.png
