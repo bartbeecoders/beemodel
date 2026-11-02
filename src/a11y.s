@@ -201,6 +201,10 @@ kbnav_ring:
     mov     edi, [rip+active_area]
     test    edi, edi
     js      9f
+    call    area_is_window              # (in a window of its own: not here)
+    test    eax, eax
+    jnz     9f
+    mov     edi, [rip+active_area]
     push    rbx
     call    node_ptr
     mov     rbx, rax

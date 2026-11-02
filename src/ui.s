@@ -42,6 +42,7 @@
 .globl enter_serial
 .globl key_mods
 .globl s_app_id
+.globl press_serial
 .globl s_app_title
 .globl s_log_hello2
 .globl show_grid
@@ -274,6 +275,13 @@ hit_test:
     mov     ebx, edi
     mov     r12d, esi
     call    ui_layout
+    mov     eax, [rip+cur_wnd]          # menus and lists open in this window?
+    xor     ecx, ecx
+    cmp     eax, [rip+ovl_wnd]
+    sete    cl
+    mov     [rip+ht_ovl], ecx
+    test    eax, eax                    # a panel's own window
+    jnz     .Lht_pwin
     cmp     dword ptr [rip+pal_open], 0 # the palette is the topmost layer
     je      0f
     call    palette_hit
@@ -282,7 +290,9 @@ hit_test:
     mov     edx, eax
     mov     eax, HIT_PALETTE
     jmp     .Lht_ret
-0:  cmp     dword ptr [rip+wg_pop_open], 0  # an enum's open option list
+0:  cmp     dword ptr [rip+ht_ovl], 0   # (in another window)
+    je      .Lht_nopop
+    cmp     dword ptr [rip+wg_pop_open], 0  # an enum's open option list
     je      .Lht_nopop
     mov     edi, ebx
     mov     esi, r12d
@@ -305,6 +315,8 @@ hit_test:
     mov     eax, HIT_DIALOG
     jmp     .Lht_ret
 .Lht_noov:
+    cmp     dword ptr [rip+ht_ovl], 0
+    je      .Lht_nocp
     cmp     dword ptr [rip+cpk_on], 0    # the colour picker: its widgets, or
     je      .Lht_nocp                   #  itself (outside: a click closes it)
     mov     edi, ebx
@@ -340,7 +352,9 @@ hit_test:
     mov     eax, HIT_DIALOG
     xor     edx, edx
     jmp     .Lht_ret
-2:  cmp     dword ptr [rip+wh_on], 0    # the wheel menu takes the pointer
+2:  cmp     dword ptr [rip+ht_ovl], 0   # (the wheel, a pie, a menu: in
+    je      .Lht_edges                  #  another window)
+    cmp     dword ptr [rip+wh_on], 0    # the wheel menu takes the pointer
     je      21f
     mov     edi, ebx
     mov     esi, r12d
@@ -444,6 +458,84 @@ hit_test:
     cmp     r12d, [rip+cont_y1]
     jge     .Lht_ret
     mov     edi, ebx
+    mov     esi, r12d
+    call    area_hit
+    jmp     .Lht_ret
+
+# a panel's own window: a dialog (in the main window) keeps it; else its
+#   menus and lists, its edges (the compositor resizes), its widgets, its area
+.Lht_pwin:
+    mov     eax, HIT_DIALOG
+    xor     edx, edx
+    cmp     dword ptr [rip+dlg_open], 0
+    jne     .Lht_ret
+    cmp     dword ptr [rip+ht_ovl], 0
+    je      .Lht_pwarea
+    cmp     dword ptr [rip+wg_pop_open], 0
+    je      1f
+    mov     edi, ebx
+    mov     esi, r12d
+    call    wg_pop_hit
+    cmp     eax, -2
+    je      1f
+    mov     edx, eax
+    mov     eax, HIT_WGPOP
+    jmp     .Lht_ret
+1:  cmp     dword ptr [rip+cpk_on], 0
+    je      2f
+    mov     edi, ebx
+    mov     esi, r12d
+    call    wg_hit
+    mov     edx, eax
+    test    eax, eax
+    mov     eax, HIT_WIDGET
+    jnz     .Lht_ret
+    mov     edi, ebx
+    mov     esi, r12d
+    call    cpk_inside
+    mov     edx, eax
+    mov     eax, HIT_CPICK
+    jmp     .Lht_ret
+2:  cmp     dword ptr [rip+wh_on], 0
+    je      3f
+    mov     edi, ebx
+    mov     esi, r12d
+    call    wh_hit
+    mov     edx, eax
+    mov     eax, HIT_WHEEL
+    jmp     .Lht_ret
+3:  cmp     dword ptr [rip+pie_on], 0
+    je      4f
+    mov     edi, ebx
+    mov     esi, r12d
+    call    pie_hit
+    mov     edx, eax
+    mov     eax, HIT_PIE
+    jmp     .Lht_ret
+4:  mov     edi, ebx
+    mov     esi, r12d
+    call    mn_hit
+    test    eax, eax
+    jnz     .Lht_ret
+.Lht_pwarea:
+    mov     edi, ebx
+    mov     esi, r12d
+    call    pw_edge_hit
+    test    eax, eax
+    jz      5f
+    shl     eax, 8
+    or      edx, eax
+    mov     eax, HIT_FLOAT_EDGE
+    jmp     .Lht_ret
+5:  mov     edi, ebx
+    mov     esi, r12d
+    call    wg_hit
+    test    eax, eax
+    jz      6f
+    mov     edx, eax
+    mov     eax, HIT_WIDGET
+    jmp     .Lht_ret
+6:  mov     edi, ebx
     mov     esi, r12d
     call    area_hit
 .Lht_ret:
@@ -1931,10 +2023,14 @@ ui_draw:
     call    outl_drag_draw              # an outliner row dragged: its label
     cmp     dword ptr [rip+menu_open], 0
     jl      4f
-    call    mn_draw
+    call    ovl_enter                   # (menus and the like: in the window
+    call    mn_draw                     #  they opened in, ovl_wnd)
+    call    ovl_leave
 4:  call    palette_draw
+    call    ovl_enter
     call    pie_draw
     call    wh_draw                     # the wheel menu
+    call    ovl_leave
     call    dlg_draw                    # a dialog over everything
     cmp     dword ptr [rip+dlg_open], 0 # (a context menu over a dialog: on top)
     je      5f
@@ -1942,11 +2038,13 @@ ui_draw:
     jl      5f
     call    mn_draw
 5:  call    ov_draw                     # the welcome screen, the shortcuts
+    call    ovl_enter
     call    wg_pop_draw                 # an enum's list (over a dialog or the
                                         #  welcome screen: its clicks go to it,
                                         #  so it shows)
     call    cpk_draw                     # the colour picker (over a dialog too)
-    jmp     tip_draw                    # tooltips on top of everything
+    call    tip_draw                    # tooltips on top of everything
+    jmp     ovl_leave
 
 # run_op_ui(rdi=op) - a menu item or a button: runs it, or when it cannot run
 #   now says why on the status line

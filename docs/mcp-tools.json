@@ -1879,6 +1879,19 @@
    }
   },
   {
+   "name": "op_area_new_window",
+   "description": "Open in New Window - Put the active area in a window of its own, which you can move to another monitor; closing that window puts the area back",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_file_export_pdf",
    "description": "Export Drawing (PDF)... - A drawing of the selected meshes (or all): front, top and right views with hidden lines dashed, overall dimensions and a title block, on A4 as PDF: file.export_pdf <path>",
    "inputSchema": {

@@ -43,8 +43,17 @@
 .globl s_log_hello
 .globl s_about2
 .globl s_help_plat
+.globl pw_supported
+.globl pw_open
+.globl pw_close
+.globl pw_ready
+.globl pw_buffer
+.globl pw_present
+.globl pw_move
+.globl pw_resize
 
 .equ CP_UTF8,           65001
+.equ WM_DESTROY,        0x02
 .equ WM_SIZE,           0x05
 .equ WM_SETFOCUS,       0x07
 .equ WM_KILLFOCUS,      0x08
@@ -715,21 +724,28 @@ blit:
 #   button goes up; that release then reaches the UI as usual)
 wnd_move:
     push    rbx
+    mov     rax, [rip+hwnd]
+    mov     [rip+mv_hwnd], rax
     mov     ebx, HTCAPTION
     jmp     1f
 wnd_resize:
     push    rbx
+    mov     rax, [rip+hwnd]
+    mov     [rip+mv_hwnd], rax
+.Lmv_edges:
     and     esi, 15
     lea     rax, [rip+resize_ht]
     movzx   ebx, byte ptr [rax+rsi]
     test    ebx, ebx
     jz      9f
-1:  WENTER
+1:
+.Lmv_go:
+    WENTER
     call    [rip+__imp_ReleaseCapture]
     mov     dword ptr [rip+buttons], 0
     lea     rcx, [rip+pt]
     call    [rip+__imp_GetCursorPos]
-    mov     rcx, [rip+hwnd]
+    mov     rcx, [rip+mv_hwnd]
     mov     edx, WM_NCLBUTTONDOWN
     mov     r8d, ebx
     call    pt_lparam
@@ -737,10 +753,10 @@ wnd_resize:
     call    [rip+__imp_SendMessageW]
     lea     rcx, [rip+pt]               # (the release, where it happened)
     call    [rip+__imp_GetCursorPos]
-    mov     rcx, [rip+hwnd]
+    mov     rcx, [rip+mv_hwnd]
     lea     rdx, [rip+pt]
     call    [rip+__imp_ScreenToClient]
-    mov     rcx, [rip+hwnd]
+    mov     rcx, [rip+mv_hwnd]
     mov     edx, WM_LBUTTONUP
     xor     r8d, r8d
     call    pt_lparam
@@ -1042,6 +1058,12 @@ wnd_proc:
     mov     r13d, edx
     mov     r14, r8
     mov     r15, r9
+    mov     rax, [rip+hwnd]             # a panel's window (#419)?
+    test    rax, rax
+    jz      .Lp_dispatch
+    cmp     r12, rax
+    jne     .Lp_panel
+.Lp_dispatch:
     cmp     r13d, WM_MOUSEMOVE
     je      .Lp_motion
     cmp     r13d, WM_INPUT
@@ -1329,6 +1351,85 @@ mouse_or_pen:
 
 .Lp_close:
     call    request_quit                # (unsaved changes: asks first)
+    jmp     .Lp_zero
+
+# a panel's own window (#419): its size, its frame, closing it are its own;
+#   its input goes to the UI as the main window's, which is told the window
+.Lp_panel:
+    mov     rcx, r12
+    call    pw_slot_of
+    test    eax, eax
+    js      .Lp_def                     # (being made, or gone)
+    mov     ebx, eax
+    cmp     r13d, WM_SIZE
+    je      .Lpp_size
+    cmp     r13d, WM_PAINT
+    je      .Lpp_paint
+    cmp     r13d, WM_CLOSE
+    je      .Lpp_close
+    cmp     r13d, WM_DESTROY            # (gone some other way: as closed)
+    je      .Lpp_destroy
+    cmp     r13d, WM_ERASEBKGND
+    je      .Lp_one
+    cmp     r13d, WM_SETCURSOR
+    je      .Lp_setcursor
+    cmp     r13d, WM_KILLFOCUS
+    je      .Lp_killfocus
+    cmp     r13d, WM_INPUT
+    je      .Lp_dispatch
+    cmp     r13d, WM_KEYDOWN
+    jb      1f
+    cmp     r13d, WM_SYSKEYUP
+    jbe     .Lp_dispatch
+1:  cmp     r13d, WM_MOUSEMOVE          # the pointer: this window's
+    je      2f
+    cmp     r13d, WM_MOUSELEAVE
+    je      .Lp_dispatch
+    cmp     r13d, WM_LBUTTONDOWN
+    jb      3f
+    cmp     r13d, WM_MOUSEHWHEEL
+    jbe     2f
+3:  cmp     r13d, WM_POINTERUPDATE
+    jb      .Lp_def
+    cmp     r13d, WM_POINTERUP
+    ja      .Lp_def
+2:  lea     edi, [rbx+1]
+    cmp     edi, [rip+cur_wnd]
+    je      .Lp_dispatch
+    call    wnd_enter
+    jmp     .Lp_dispatch
+.Lpp_size:
+    cmp     r14d, SIZE_MINIMIZED
+    je      .Lp_zero
+    lea     rax, [rip+pw_cliw]
+    movzx   ecx, r15w
+    mov     [rax+rbx*4], ecx
+    lea     rax, [rip+pw_clih]
+    mov     ecx, r15d
+    shr     ecx, 16
+    mov     [rax+rbx*4], ecx
+    call    pw_tell_size
+    jmp     .Lp_zero
+.Lpp_paint:
+    mov     rcx, r12
+    lea     rdx, [rip+ps]
+    call    [rip+__imp_BeginPaint]
+    mov     rcx, rax
+    mov     edx, ebx
+    call    pw_blit
+    mov     rcx, r12
+    lea     rdx, [rip+ps]
+    call    [rip+__imp_EndPaint]
+    jmp     .Lp_zero
+.Lpp_close:                             # the UI docks its area back
+    mov     edi, ebx
+    call    pw_closed
+    jmp     .Lp_zero
+.Lpp_destroy:
+    lea     rax, [rip+pw_hwnd]          # (no DestroyWindow again)
+    mov     qword ptr [rax+rbx*8], 0
+    mov     edi, ebx
+    call    pw_closed
     jmp     .Lp_zero
 
 .Lp_killfocus:
@@ -1661,11 +1762,13 @@ pen_scale:      .float 0.0009765625     # 1 / 1024
 
 # ---- the imports ------------------------------------------------------------------
 DLL 3, USER32.dll
+IMPORT 3, AdjustWindowRectEx
 IMPORT 3, BeginPaint
 IMPORT 3, ClipCursor
 IMPORT 3, CloseClipboard
 IMPORT 3, CreateWindowExW
 IMPORT 3, DefWindowProcW
+IMPORT 3, DestroyWindow
 IMPORT 3, DispatchMessageW
 IMPORT 3, EnumDisplaySettingsW
 IMPORT 3, EmptyClipboard
@@ -1718,5 +1821,344 @@ DLL_END 3
 DLL 4, GDI32.dll
 IMPORT 4, StretchDIBits
 DLL_END 4
+
+# =============================================================================
+#  The panels' windows (#419 stage 2): a top-level window each, with Windows'
+#  own frame (Windows moves, resizes and snaps them, to any monitor), of the
+#  main window's class: wnd_proc gives their input to the UI as the main
+#  window's, after wnd_enter. Each has a buffer, shown with StretchDIBits.
+#  Sizes are 96-dpi units, at the main window's dpi.
+# =============================================================================
+.equ PW_MAX,            4
+.equ WS_EX_APPWINDOW,   0x40000
+
+.section .bss
+.balign 8
+pw_hwnd:        .skip PW_MAX*8
+pw_buf:         .skip PW_MAX*8          # its buffer, pw_cap bytes
+pw_cap:         .skip PW_MAX*8
+pw_bw:          .skip PW_MAX*4          # the frame in it (pixels)
+pw_bh:          .skip PW_MAX*4
+pw_cliw:        .skip PW_MAX*4          # the client area (pixels)
+pw_clih:        .skip PW_MAX*4
+pw_title:       .skip 128
+pw_rect:        .skip 16
+mv_hwnd:        .skip 8                 # (wnd_move's: this window)
+
+.text
+pw_supported:
+    mov     eax, 1
+    ret
+
+# pw_slot_of(rcx=hwnd) -> eax = its slot, -1; keeps all but rax, rdx
+pw_slot_of:
+    xor     eax, eax
+    lea     rdx, [rip+pw_hwnd]
+    test    rcx, rcx
+    jz      8f
+1:  cmp     rcx, [rdx+rax*8]
+    je      9f
+    inc     eax
+    cmp     eax, PW_MAX
+    jb      1b
+8:  mov     eax, -1
+9:  ret
+
+# pw_tell_size (ebx = slot) - its client area, to the UI
+pw_tell_size:
+    push    rbx
+    lea     rax, [rip+pw_cliw]
+    mov     edi, [rax+rbx*4]
+    call    to_96
+    push    rax
+    lea     rax, [rip+pw_clih]
+    mov     edi, [rax+rbx*4]
+    call    to_96
+    mov     edx, eax
+    pop     rsi
+    mov     edi, ebx
+    call    pw_configure
+    pop     rbx
+    ret
+
+# pw_open(edi=slot, esi=w, edx=h: 96-dpi units, rcx=title) -> eax = 0, -1
+pw_open:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    mov     ebx, edi
+    mov     r13d, edx
+    mov     r14, rcx
+    mov     eax, -1
+    cmp     ebx, PW_MAX
+    jae     9f
+    lea     rax, [rip+pw_hwnd]
+    cmp     qword ptr [rax+rbx*8], 0
+    mov     eax, -1
+    jne     9f
+    mov     edi, esi                    # the client area, pixels
+    call    from_96
+    mov     r12d, eax
+    mov     edi, r13d
+    call    from_96
+    mov     r13d, eax
+    WENTER  64
+    mov     ecx, CP_UTF8                # the title, in UTF-16
+    xor     edx, edx
+    mov     r8, r14
+    mov     r9d, -1
+    lea     rax, [rip+pw_title]
+    mov     [rsp+32], rax
+    mov     dword ptr [rsp+40], 64
+    call    [rip+__imp_MultiByteToWideChar]
+    lea     rcx, [rip+pw_rect]          # the window for that client area
+    mov     qword ptr [rcx], 0
+    mov     [rcx+8], r12d
+    mov     [rcx+12], r13d
+    mov     edx, WS_OVERLAPPEDWINDOW
+    xor     r8d, r8d
+    mov     r9d, WS_EX_APPWINDOW
+    call    [rip+__imp_AdjustWindowRectEx]
+    mov     eax, [rip+pw_rect+8]
+    sub     eax, [rip+pw_rect]
+    mov     [rsp+48], eax
+    mov     eax, [rip+pw_rect+12]
+    sub     eax, [rip+pw_rect+4]
+    mov     [rsp+56], eax
+    mov     ecx, WS_EX_APPWINDOW        # (its own button on the taskbar)
+    lea     rdx, [rip+s_class]
+    lea     r8, [rip+pw_title]
+    mov     r9d, WS_OVERLAPPEDWINDOW
+    mov     dword ptr [rsp+32], CW_USEDEFAULT
+    mov     dword ptr [rsp+40], CW_USEDEFAULT
+    xor     eax, eax
+    mov     [rsp+64], rax
+    mov     [rsp+72], rax
+    mov     rax, [rip+hinst]
+    mov     [rsp+80], rax
+    mov     qword ptr [rsp+88], 0
+    call    [rip+__imp_CreateWindowExW]
+    test    rax, rax
+    jz      8f
+    lea     rcx, [rip+pw_hwnd]
+    mov     [rcx+rbx*8], rax
+    mov     rcx, rax
+    mov     edx, SW_SHOWNORMAL
+    call    [rip+__imp_ShowWindow]
+    lea     rax, [rip+pw_hwnd]
+    mov     rcx, [rax+rbx*8]
+    lea     rdx, [rip+pw_rect]
+    call    [rip+__imp_GetClientRect]
+    mov     eax, [rip+pw_rect+8]
+    lea     rcx, [rip+pw_cliw]
+    mov     [rcx+rbx*4], eax
+    mov     eax, [rip+pw_rect+12]
+    lea     rcx, [rip+pw_clih]
+    mov     [rcx+rbx*4], eax
+    WLEAVE
+    call    pw_tell_size
+    xor     eax, eax
+    jmp     9f
+8:  WLEAVE
+    mov     eax, -1
+9:  pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pw_close(edi=slot) - its window and buffer gone
+pw_close:
+    push    rbx
+    mov     ebx, edi
+    cmp     ebx, PW_MAX
+    jae     9f
+    lea     rax, [rip+pw_hwnd]
+    mov     rcx, [rax+rbx*8]
+    test    rcx, rcx
+    jz      1f
+    mov     qword ptr [rax+rbx*8], 0    # (its last messages: DefWindowProc)
+    WENTER
+    call    [rip+__imp_DestroyWindow]
+    WLEAVE
+1:  lea     rax, [rip+pw_cliw]
+    mov     dword ptr [rax+rbx*4], 0
+    lea     rax, [rip+pw_buf]
+    mov     rdi, [rax+rbx*8]
+    test    rdi, rdi
+    jz      9f
+    mov     qword ptr [rax+rbx*8], 0
+    lea     rax, [rip+pw_cap]
+    mov     rsi, [rax+rbx*8]
+    mov     qword ptr [rax+rbx*8], 0
+    call    plat_munmap
+9:  pop     rbx
+    ret
+
+# pw_ready(edi=slot) -> eax = 1 when it can take a frame
+pw_ready:
+    xor     eax, eax
+    cmp     edi, PW_MAX
+    jae     9f
+    lea     rcx, [rip+pw_hwnd]
+    cmp     qword ptr [rcx+rdi*8], 0
+    je      9f
+    lea     rcx, [rip+pw_cliw]
+    cmp     dword ptr [rcx+rdi*4], 0
+    je      9f
+    mov     eax, 1
+9:  ret
+
+# pw_buffer(edi=slot, esi=w, edx=h: pixels) -> rax = its buffer, that big
+pw_buffer:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    lea     rax, [rip+pw_bw]
+    mov     [rax+rbx*4], esi
+    lea     rax, [rip+pw_bh]
+    mov     [rax+rbx*4], edx
+    mov     eax, esi
+    imul    eax, edx
+    shl     rax, 2
+    lea     rcx, [rip+pw_cap]
+    cmp     rax, [rcx+rbx*8]
+    jbe     2f
+    add     rax, 0x1FFFFF               # (in 2 MiB steps)
+    and     rax, -0x200000
+    mov     r12, rax
+    lea     rax, [rip+pw_buf]
+    mov     rdi, [rax+rbx*8]
+    test    rdi, rdi
+    jz      1f
+    lea     rax, [rip+pw_cap]
+    mov     rsi, [rax+rbx*8]
+    call    plat_munmap
+1:  xor     edi, edi
+    mov     rsi, r12
+    mov     edx, PROT_RW
+    mov     r10d, 0x22                  # MAP_PRIVATE | MAP_ANONYMOUS
+    mov     r8d, -1
+    xor     r9d, r9d
+    call    plat_mmap
+    cmp     rax, -4096
+    ja      8f
+    lea     rcx, [rip+pw_buf]
+    mov     [rcx+rbx*8], rax
+    lea     rcx, [rip+pw_cap]
+    mov     [rcx+rbx*8], r12
+2:  lea     rax, [rip+pw_buf]
+    mov     rax, [rax+rbx*8]
+    jmp     9f
+8:  lea     rax, [rip+pw_buf]
+    mov     qword ptr [rax+rbx*8], 0
+    lea     rax, [rip+pw_cap]
+    mov     qword ptr [rax+rbx*8], 0
+    xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pw_present(edi=slot) - its frame onto its window
+pw_present:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    lea     rax, [rip+pw_hwnd]
+    mov     rcx, [rax+rbx*8]
+    test    rcx, rcx
+    jz      9f
+    WENTER  16
+    call    [rip+__imp_GetDC]
+    mov     r12, rax                    # (Windows keeps r12)
+    mov     rcx, rax
+    mov     edx, ebx
+    call    pw_blit
+    lea     rax, [rip+pw_hwnd]
+    mov     rcx, [rax+rbx*8]
+    mov     rdx, r12
+    call    [rip+__imp_ReleaseDC]
+    WLEAVE
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# pw_blit(rcx = DC, edx = slot) - its last frame onto its client area;
+#   keeps rbx, rsi, rdi, r12-r15
+pw_blit:
+    push    rbp
+    mov     rbp, rsp
+    push    rbx
+    and     rsp, -16
+    sub     rsp, 112
+    mov     ebx, edx
+    lea     rax, [rip+pw_buf]
+    mov     r10, [rax+rbx*8]
+    test    r10, r10
+    jz      9f
+    lea     rax, [rip+pw_bw]
+    mov     r11d, [rax+rbx*4]
+    test    r11d, r11d
+    jz      9f
+    lea     rax, [rip+bmi]
+    mov     dword ptr [rax], 40
+    mov     [rax+4], r11d
+    lea     rdx, [rip+pw_bh]
+    mov     edx, [rdx+rbx*4]
+    neg     edx                         # top-down
+    mov     [rax+8], edx
+    mov     dword ptr [rax+12], 0x200001   # 1 plane, 32 bits
+    mov     dword ptr [rax+16], 0       # BI_RGB
+    xor     edx, edx
+    xor     r8d, r8d
+    lea     rax, [rip+pw_cliw]
+    mov     r9d, [rax+rbx*4]
+    lea     rax, [rip+pw_clih]
+    mov     eax, [rax+rbx*4]
+    mov     [rsp+32], eax
+    mov     dword ptr [rsp+40], 0
+    mov     dword ptr [rsp+48], 0
+    mov     [rsp+56], r11d
+    lea     rax, [rip+pw_bh]
+    mov     eax, [rax+rbx*4]
+    mov     [rsp+64], eax
+    mov     [rsp+72], r10
+    lea     rax, [rip+bmi]
+    mov     [rsp+80], rax
+    mov     dword ptr [rsp+88], 0       # DIB_RGB_COLORS
+    mov     dword ptr [rsp+96], SRCCOPY
+    call    [rip+__imp_StretchDIBits]
+9:  lea     rsp, [rbp-8]
+    pop     rbx
+    pop     rbp
+    ret
+
+# pw_move(edi=slot, esi=serial), pw_resize(edi=slot, esi=serial, edx=edges):
+#   Windows moves or resizes that window with the pointer, as wnd_move does
+pw_move:
+    push    rbx
+    lea     rax, [rip+pw_hwnd]
+    mov     rax, [rax+rdi*8]
+    mov     [rip+mv_hwnd], rax
+    mov     ebx, HTCAPTION
+    test    rax, rax
+    jnz     .Lmv_go
+    pop     rbx
+    ret
+pw_resize:
+    push    rbx
+    lea     rax, [rip+pw_hwnd]
+    mov     rax, [rax+rdi*8]
+    mov     [rip+mv_hwnd], rax
+    mov     esi, edx
+    test    rax, rax
+    jnz     .Lmv_edges
+    pop     rbx
+    ret
 
 .section .note.GNU-stack,"",@progbits

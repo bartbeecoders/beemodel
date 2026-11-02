@@ -18,6 +18,11 @@ project uses [Semantic Versioning](https://semver.org/).
   edges; the dock button in its header, Area › Dock Area or five guides
   shown over the area under it put it back. Panels are kept with their
   workspace, and ui_tree lists the areas.
+- **Panels in windows of their own** (#419): Area › Open in New Window
+  (right-click a header), or a floating panel dragged out of the main
+  window, puts an area in a top-level window you can move to another
+  monitor, on Wayland and on Windows. Its menus, option lists and tooltips
+  open in it; closing it or its dock button docks the area back.
 
 ### Fixed
 - After passing over a widget scrolled out of view, the widget hit test

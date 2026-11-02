@@ -38,6 +38,14 @@
 .globl s_log_hello
 .globl s_about2
 .globl s_help_plat
+.globl pw_supported
+.globl pw_open
+.globl pw_close
+.globl pw_ready
+.globl pw_buffer
+.globl pw_present
+.globl pw_move
+.globl pw_resize
 
 .section .data
 .align 4
@@ -612,7 +620,14 @@ wl_dispatch:
     je      0f
     cmp     edi, [rip+id_relptr]
     je      ev_relptr
-0:  push    rdi                         # the clipboard's objects
+0:  push    rdi                         # the panels' windows (#419)
+    mov     esi, r13d
+    mov     rdx, r12
+    call    pw_event
+    pop     rdi
+    test    eax, eax
+    jnz     ev_done
+    push    rdi                         # the clipboard's objects
     mov     esi, r13d
     mov     rdx, r12
     call    clip_event
@@ -934,6 +949,10 @@ ev_pointer:
     jmp     ev_done
 10: mov     eax, [r12]                  # enter(serial, surface, x, y)
     mov     [rip+enter_serial], eax
+    mov     edi, [r12+4]                # (which window: the main one, a panel's)
+    call    wnd_of_surface
+    mov     edi, eax
+    call    wnd_enter
     mov     dword ptr [rip+cur_shape], 0
     mov     edi, [r12+8]
     sar     edi, 8
@@ -1612,5 +1631,507 @@ set_cursor:
     mov     esi, CURSOR_DEV_SET_SHAPE
     jmp     msg2
 9:  ret
+
+
+# =============================================================================
+#  Panel windows (#419 stage 2): a toplevel of its own for each panel the UI
+#  takes out of the main window (dock.s). Each has a surface, its xdg objects,
+#  a viewport (the main window's scale), a frame callback and a pool with two
+#  buffers. The UI calls pw_*; the compositor's events go to pw_configure and
+#  pw_closed, and wnd_enter says which window the pointer is in.
+# =============================================================================
+.equ PW_MAX,    4
+.equ PW_SURF,   0                       # a slot's record
+.equ PW_XDG,    4
+.equ PW_TOP,    8
+.equ PW_VIEW,   12
+.equ PW_CB,     16                      # the frame callback pending (0: none)
+.equ PW_POOL,   20
+.equ PW_FD,     24
+.equ PW_PSIZE,  28
+.equ PW_BUF,    32                      # two wl_buffers
+.equ PW_BUSY,   40                      #  and whether the compositor has them
+.equ PW_BW,     48                      # their size (pixels)
+.equ PW_BH,     52
+.equ PW_CUR,    56                      # the one pw_buffer gave
+.equ PW_LW,     60                      # the logical size (the surface's)
+.equ PW_LH,     64
+.equ PW_CFG,    68                      # configured: frames may be drawn
+.equ PW_PTR,    72                      # the pool's mapping
+.equ PW_PENDW,  80                      # the toplevel's configure, until the
+.equ PW_PENDH,  84                      #  xdg_surface's
+.equ PW_SZ,     88
+.equ XDG_TOPLEVEL_DESTROY, 0
+.equ XDG_SURFACE_DESTROY,  0
+.equ WL_SURFACE_DESTROY,   0
+.equ WP_VIEWPORT_DESTROY,  0
+.equ WL_SHM_POOL_DESTROY,  1
+
+.section .bss
+.align 8
+pw_tab:         .skip PW_MAX*PW_SZ
+
+.section .rodata
+s_pw_fd:        .asciz "beemodel-panel"
+
+.text
+# pw_rec(edi=slot) -> rax = its record
+pw_rec:
+    imul    eax, edi, PW_SZ
+    lea     rcx, [rip+pw_tab]
+    add     rax, rcx
+    ret
+
+# pw_open(edi=slot, esi=w, edx=h: logical, rcx=title) -> eax = 0, -1: none
+pw_open:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     ebx, edi
+    mov     r12d, esi
+    mov     r13d, edx
+    mov     r14, rcx
+    mov     eax, -1
+    cmp     ebx, PW_MAX
+    jae     9f
+    call    pw_rec
+    mov     r15, rax
+    cmp     dword ptr [r15+PW_SURF], 0  # (in use)
+    mov     eax, -1
+    jne     9f
+    mov     rdi, r15
+    xor     eax, eax
+    mov     ecx, PW_SZ
+    rep     stosb
+    mov     dword ptr [r15+PW_FD], -1
+    mov     [r15+PW_LW], r12d
+    mov     [r15+PW_LH], r13d
+    call    alloc_id                    # the surface
+    mov     [r15+PW_SURF], eax
+    mov     edx, eax
+    mov     edi, [rip+id_compositor]
+    mov     esi, WL_COMPOSITOR_CREATE_SURFACE
+    call    msg1
+    cmp     dword ptr [rip+id_viewporter], 0
+    je      1f
+    call    alloc_id
+    mov     [r15+PW_VIEW], eax
+    mov     edx, eax
+    mov     ecx, [r15+PW_SURF]
+    mov     edi, [rip+id_viewporter]
+    mov     esi, WP_VIEWPORTER_GET
+    call    msg2
+1:  call    alloc_id
+    mov     [r15+PW_XDG], eax
+    mov     edx, eax
+    mov     ecx, [r15+PW_SURF]
+    mov     edi, [rip+id_wm_base]
+    mov     esi, XDG_WM_BASE_GET_XDG_SURFACE
+    call    msg2
+    call    alloc_id
+    mov     [r15+PW_TOP], eax
+    mov     edx, eax
+    mov     edi, [r15+PW_XDG]
+    mov     esi, XDG_SURFACE_GET_TOPLEVEL
+    call    msg1
+    mov     edi, [r15+PW_TOP]
+    mov     esi, XDG_TOPLEVEL_SET_TITLE
+    call    msg_begin
+    mov     rdi, r14
+    call    put_str
+    call    msg_end
+    mov     edi, [r15+PW_TOP]
+    mov     esi, XDG_TOPLEVEL_SET_APP_ID
+    call    msg_begin
+    lea     rdi, [rip+s_app_id]
+    call    put_str
+    call    msg_end
+    mov     edi, [r15+PW_TOP]
+    mov     esi, XDG_TOPLEVEL_SET_MIN_SIZE
+    mov     edx, 200
+    mov     ecx, 120
+    call    msg2
+    mov     edi, [r15+PW_SURF]          # (no buffer yet: the configure comes)
+    mov     esi, WL_SURFACE_COMMIT
+    call    msg0
+    xor     eax, eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pw_free_bufs(rbx=record) - its buffers and pool gone
+pw_free_bufs:
+    mov     edi, [rbx+PW_BUF]
+    test    edi, edi
+    jz      1f
+    mov     esi, WL_BUFFER_DESTROY
+    call    msg0
+    mov     edi, [rbx+PW_BUF+4]
+    mov     esi, WL_BUFFER_DESTROY
+    call    msg0
+    mov     qword ptr [rbx+PW_BUF], 0
+1:  mov     edi, [rbx+PW_POOL]
+    test    edi, edi
+    jz      2f
+    mov     esi, WL_SHM_POOL_DESTROY
+    call    msg0
+    mov     dword ptr [rbx+PW_POOL], 0
+2:  mov     rdi, [rbx+PW_PTR]
+    test    rdi, rdi
+    jz      3f
+    mov     esi, [rbx+PW_PSIZE]
+    call    plat_munmap
+    mov     qword ptr [rbx+PW_PTR], 0
+3:  mov     edi, [rbx+PW_FD]
+    test    edi, edi
+    js      4f
+    call    plat_close
+    mov     dword ptr [rbx+PW_FD], -1
+4:  mov     qword ptr [rbx+PW_BUSY], 0
+    mov     dword ptr [rbx+PW_BW], 0
+    mov     dword ptr [rbx+PW_BH], 0
+    ret
+
+# pw_close(edi=slot) - its window gone
+pw_close:
+    push    rbx
+    cmp     edi, PW_MAX
+    jae     9f
+    call    pw_rec
+    mov     rbx, rax
+    cmp     dword ptr [rbx+PW_SURF], 0
+    je      9f
+    call    pw_free_bufs
+    mov     edi, [rbx+PW_TOP]
+    mov     esi, XDG_TOPLEVEL_DESTROY
+    call    msg0
+    mov     edi, [rbx+PW_XDG]
+    mov     esi, XDG_SURFACE_DESTROY
+    call    msg0
+    mov     edi, [rbx+PW_VIEW]
+    test    edi, edi
+    jz      1f
+    mov     esi, WP_VIEWPORT_DESTROY
+    call    msg0
+1:  mov     edi, [rbx+PW_SURF]
+    mov     esi, WL_SURFACE_DESTROY
+    call    msg0
+    mov     rdi, rbx
+    xor     eax, eax
+    mov     ecx, PW_SZ
+    rep     stosb
+9:  pop     rbx
+    ret
+
+# pw_ready(edi=slot) -> eax = 1 when a frame may be drawn into it
+pw_ready:
+    xor     eax, eax
+    cmp     edi, PW_MAX
+    jae     9f
+    call    pw_rec
+    mov     rcx, rax
+    xor     eax, eax
+    cmp     dword ptr [rcx+PW_SURF], 0
+    je      9f
+    cmp     dword ptr [rcx+PW_CFG], 0
+    je      9f
+    cmp     dword ptr [rcx+PW_CB], 0
+    jne     9f
+    mov     eax, 1
+9:  ret
+
+# pw_size(edi=slot) -> eax = w, edx = h: its logical size
+pw_size:
+    call    pw_rec
+    mov     edx, [rax+PW_LH]
+    mov     eax, [rax+PW_LW]
+    ret
+
+# pw_buffer(edi=slot, esi=w, edx=h: pixels) -> rax = a free buffer, 0: none
+pw_buffer:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, esi
+    mov     r13d, edx
+    call    pw_rec
+    mov     rbx, rax
+    cmp     [rbx+PW_BW], r12d
+    jne     1f
+    cmp     [rbx+PW_BH], r13d
+    jne     1f
+    cmp     dword ptr [rbx+PW_BUF], 0
+    jne     5f
+1:  call    pw_free_bufs                # (re)made for this size
+    mov     r14d, r12d
+    shl     r14d, 2                     # the stride
+    mov     r15d, r14d
+    imul    r15d, r13d                  # a buffer's bytes
+    lea     eax, [r15+r15]
+    add     eax, 4095
+    and     eax, -4096
+    mov     [rbx+PW_PSIZE], eax
+    lea     rdi, [rip+s_pw_fd]
+    mov     esi, MFD_CLOEXEC
+    call    plat_memfd_create
+    test    eax, eax
+    js      8f
+    mov     [rbx+PW_FD], eax
+    mov     edi, eax
+    mov     esi, [rbx+PW_PSIZE]
+    call    plat_ftruncate
+    test    eax, eax
+    jnz     8f
+    xor     edi, edi
+    mov     esi, [rbx+PW_PSIZE]
+    mov     edx, PROT_RW
+    mov     r10d, MAP_SHARED
+    mov     r8d, [rbx+PW_FD]
+    xor     r9d, r9d
+    call    plat_mmap
+    cmp     rax, -4096
+    ja      8f
+    mov     [rbx+PW_PTR], rax
+    call    alloc_id
+    mov     [rbx+PW_POOL], eax
+    mov     edi, [rip+id_shm]
+    mov     esi, WL_SHM_CREATE_POOL
+    call    msg_begin
+    mov     edi, [rbx+PW_POOL]
+    call    put_u32
+    mov     edi, [rbx+PW_PSIZE]
+    call    put_u32
+    call    msg_end
+    mov     edi, [rbx+PW_FD]            # (the fd rides with this message)
+    call    wl_flush
+    xor     ecx, ecx
+2:  push    rcx
+    push    rcx
+    call    alloc_id
+    mov     rcx, [rsp]
+    mov     [rbx+PW_BUF+rcx*4], eax
+    push    rax
+    sub     rsp, 8
+    mov     edi, [rbx+PW_POOL]
+    mov     esi, WL_SHM_POOL_CREATE_BUFFER
+    call    msg_begin
+    mov     edi, [rsp+8]
+    call    put_u32                     # new id
+    mov     edi, r15d
+    imul    edi, [rsp+16]
+    call    put_u32                     # offset
+    mov     edi, r12d
+    call    put_u32
+    mov     edi, r13d
+    call    put_u32
+    mov     edi, r14d
+    call    put_u32
+    mov     edi, WL_SHM_FORMAT_XRGB8888
+    call    put_u32
+    call    msg_end
+    add     rsp, 16
+    pop     rcx
+    pop     rcx
+    inc     ecx
+    cmp     ecx, 2
+    jb      2b
+    mov     [rbx+PW_BW], r12d
+    mov     [rbx+PW_BH], r13d
+5:  xor     ecx, ecx                    # a free one
+    cmp     dword ptr [rbx+PW_BUSY], 0
+    je      6f
+    inc     ecx
+    cmp     dword ptr [rbx+PW_BUSY+4], 0
+    jne     7f
+6:  mov     [rbx+PW_CUR], ecx
+    mov     eax, r12d
+    imul    eax, r13d
+    shl     rax, 2
+    imul    rax, rcx
+    add     rax, [rbx+PW_PTR]
+    jmp     9f
+7:  xor     eax, eax
+    jmp     9f
+8:  call    pw_free_bufs
+    xor     eax, eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pw_present(edi=slot) - pw_buffer's buffer shown, the next frame asked for
+pw_present:
+    push    rbx
+    call    pw_rec
+    mov     rbx, rax
+    cmp     dword ptr [rbx+PW_BUF], 0
+    je      9f
+    mov     ecx, [rbx+PW_CUR]
+    mov     dword ptr [rbx+PW_BUSY+rcx*4], 1
+    mov     edx, [rbx+PW_BUF+rcx*4]
+    mov     edi, [rbx+PW_SURF]
+    mov     esi, WL_SURFACE_ATTACH
+    xor     ecx, ecx
+    xor     r8d, r8d
+    call    msg3
+    mov     edi, [rbx+PW_VIEW]          # the buffer onto the logical size
+    test    edi, edi
+    jz      1f
+    mov     esi, WP_VIEWPORT_SET_DESTINATION
+    mov     edx, [rbx+PW_LW]
+    mov     ecx, [rbx+PW_LH]
+    call    msg2
+1:  mov     edi, [rbx+PW_SURF]
+    mov     esi, WL_SURFACE_DAMAGE
+    call    msg_begin
+    xor     edi, edi
+    call    put_u32
+    xor     edi, edi
+    call    put_u32
+    mov     edi, [rbx+PW_LW]
+    call    put_u32
+    mov     edi, [rbx+PW_LH]
+    call    put_u32
+    call    msg_end
+    call    alloc_id
+    mov     [rbx+PW_CB], eax
+    mov     edx, eax
+    mov     edi, [rbx+PW_SURF]
+    mov     esi, WL_SURFACE_FRAME
+    call    msg1
+    mov     edi, [rbx+PW_SURF]
+    mov     esi, WL_SURFACE_COMMIT
+    call    msg0
+9:  pop     rbx
+    ret
+
+# pw_move(edi=slot, esi=serial) / pw_resize(edi=slot, esi=serial, edx=edges)
+#   - the compositor moves or resizes it with the pointer
+pw_move:
+    push    rsi
+    call    pw_rec
+    pop     rcx
+    mov     edi, [rax+PW_TOP]
+    mov     esi, XDG_TOPLEVEL_MOVE
+    mov     edx, [rip+id_seat]
+    jmp     msg2
+pw_resize:
+    push    rdx
+    push    rsi
+    call    pw_rec
+    pop     rcx
+    pop     r8
+    mov     edi, [rax+PW_TOP]
+    mov     esi, XDG_TOPLEVEL_RESIZE
+    mov     edx, [rip+id_seat]
+    jmp     msg3
+
+# wnd_of_surface(edi=surface) -> eax = 0 the main window, slot + 1 a panel's
+wnd_of_surface:
+    xor     eax, eax
+    lea     rcx, [rip+pw_tab]
+1:  cmp     edi, [rcx+PW_SURF]
+    je      2f
+    add     rcx, PW_SZ
+    inc     eax
+    cmp     eax, PW_MAX
+    jb      1b
+    xor     eax, eax
+    ret
+2:  inc     eax
+    ret
+
+# pw_event(edi=object, esi=opcode, rdx=payload) -> eax = 1 when it was a
+#   panel window's (wl_dispatch)
+pw_event:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12d, edi
+    mov     r13d, esi
+    mov     r14, rdx
+    xor     r15d, r15d                  # the slot
+1:  mov     edi, r15d
+    call    pw_rec
+    mov     rbx, rax
+    cmp     dword ptr [rbx+PW_SURF], 0
+    je      8f
+    cmp     r12d, [rbx+PW_XDG]
+    je      .Lpe_xdg
+    cmp     r12d, [rbx+PW_TOP]
+    je      .Lpe_top
+    cmp     r12d, [rbx+PW_CB]
+    je      .Lpe_cb
+    cmp     r12d, [rbx+PW_BUF]
+    je      .Lpe_buf0
+    cmp     r12d, [rbx+PW_BUF+4]
+    je      .Lpe_buf1
+8:  inc     r15d
+    cmp     r15d, PW_MAX
+    jb      1b
+    xor     eax, eax
+    jmp     9f
+.Lpe_xdg:                               # configure(serial): ack, the size
+    mov     edi, [rbx+PW_XDG]
+    mov     esi, XDG_SURFACE_ACK_CONFIGURE
+    mov     edx, [r14]
+    call    msg1
+    mov     eax, [rbx+PW_PENDW]
+    test    eax, eax                    # (0: ours to choose, as asked)
+    jz      2f
+    mov     [rbx+PW_LW], eax
+    mov     eax, [rbx+PW_PENDH]
+    mov     [rbx+PW_LH], eax
+2:  mov     dword ptr [rbx+PW_CFG], 1
+    mov     edi, r15d
+    mov     esi, [rbx+PW_LW]
+    mov     edx, [rbx+PW_LH]
+    call    pw_configure
+    jmp     7f
+.Lpe_top:
+    cmp     r13d, 1                     # close: the UI docks it
+    jne     3f
+    mov     edi, r15d
+    call    pw_closed
+    jmp     7f
+3:  test    r13d, r13d                  # configure(w, h, states)
+    jnz     7f
+    mov     eax, [r14]
+    mov     [rbx+PW_PENDW], eax
+    mov     eax, [r14+4]
+    mov     [rbx+PW_PENDH], eax
+    jmp     7f
+.Lpe_cb:
+    mov     dword ptr [rbx+PW_CB], 0
+    mov     dword ptr [rip+dirty], 1
+    jmp     7f
+.Lpe_buf0:
+    mov     dword ptr [rbx+PW_BUSY], 0
+    jmp     7f
+.Lpe_buf1:
+    mov     dword ptr [rbx+PW_BUSY+4], 0
+7:  mov     eax, 1
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# pw_supported -> eax = 1: panels in windows of their own
+pw_supported:
+    mov     eax, 1
+    ret
 
 .section .note.GNU-stack,"",@progbits

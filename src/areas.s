@@ -484,6 +484,13 @@ area_hit:
     mov     dword ptr [rip+hit_area], -1
     cmp     dword ptr [rip+ah_tree], 0  # a floating panel over the tree first
     jne     0f
+    call    pw_cur_node                 # (a panel's window: that panel)
+    test    eax, eax
+    js      32f
+    mov     r13d, eax
+    jmp     .Lah_leaf
+32: mov     edi, ebx
+    mov     esi, r12d
     call    float_hit                   # (edi, esi: the point)
     test    eax, eax
     js      0f
@@ -3182,6 +3189,10 @@ close_leaf:
     call    node_ptr                    # a floating panel: its slot freed
     test    byte ptr [rax+N_FLAGS], NF_FLOAT
     jz      0f
+    mov     edi, ebx                    # (in a window of its own: closed)
+    call    pw_release
+    mov     edi, ebx
+    call    node_ptr
     mov     byte ptr [rax+N_KIND], 0
     mov     byte ptr [rax+N_FLAGS], 0
     mov     ebp, -2                     # (no sibling, no parent)
