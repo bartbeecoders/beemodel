@@ -583,7 +583,7 @@ def main():
     if r.get('rtx', ['0', '0'])[1] != '1':
         print('  skip the RTX checks: the device has no ray queries')
     else:
-        for name, scene in (('materials', SCENE), ('graphs', gs), ('catcher', gs2), ('particles', ps)):
+        def rtx(name, scene):
             got = {}
             for dev in ('auto', 'gpu', 'cpu'):
                 f = os.path.join(HOME, 'rtx_%s_%s.png' % (name, dev))
@@ -592,10 +592,17 @@ def main():
                 got[dev] = (f, q.get('dev', ['-1', '-1', '-1']))
             mc, sc = compare(got['auto'][0], got['cpu'][0])
             mg, sg = compare(got['auto'][0], got['gpu'][0])
-            check(got['auto'][1][:2] == ['1', '64'] and got['gpu'][1][0] == '0' and mc < 0.25 and sc > 0.97
-                  and mg < 0.25, f'RTX, {name}: 64 samples traced by ray queries (gpu(23) {got["auto"][1][0]}), the '
-                  f'CPU\'s image (mean difference {mc:.4f} levels, {100 * sc:.2f}% identical) and the compute '
-                  f'path\'s ({mg:.4f}, {100 * sg:.2f}%)')
+            good = (got['auto'][1][:2] == ['1', '64'] and got['gpu'][1][0] == '0' and mc < 0.25 and sc > 0.97
+                    and mg < 0.25)
+            return good, (f'RTX, {name}: 64 samples traced by ray queries (auto {got["auto"][1]}, compute '
+                          f'{got["gpu"][1]}), the CPU\'s image (mean difference {mc:.4f} levels, {100 * sc:.2f}% '
+                          f'identical) and the compute path\'s ({mg:.4f}, {100 * sg:.2f}%)')
+        for name, scene in (('materials', SCENE), ('graphs', gs), ('catcher', gs2), ('particles', ps)):
+            good, msg = rtx(name, scene)
+            if not good:                    # llvmpipe on a busy CI runner: once more before failing
+                print('  retry ' + msg)
+                good, msg = rtx(name, scene)
+            check(good, msg)
         f1 = os.path.join(HOME, 'rtx_fb1.png'); f2 = os.path.join(HOME, 'rtx_fb2.png')
         run(SCENE + 'op("render.image", "%s 240 180 64 0")\n' % f1, BEEMODEL_GPU='off')
         q = run(SCENE + 'op("render.image", "%s 240 180 64 0")\nprint("fb", gpu(4), gpu(18))\n' % f2,

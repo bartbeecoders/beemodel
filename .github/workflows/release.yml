@@ -1,19 +1,24 @@
 name: Release
 
+# A tag vX.Y.Z publishes BeeModel X.Y.Z with the notes from CHANGELOG.md. When
+# the tag is on the commit the last nightly tested (nightly.yml), the files are
+# that night's, checked against its SHA256SUMS: nothing is built or tested
+# again. Otherwise the full suite (ci.yml) runs first, about 20 minutes. Run it
+# by hand for a dry run on any branch: the full suite, nothing published.
 on:
   push:
     tags: ["v*.*.*"]
-  workflow_dispatch:          # a dry run on any branch: builds, tests, packages, publishes nothing
+  workflow_dispatch:
 
 permissions:
   contents: write
 
-# The headless UI test with each font (15 min each) runs as jobs of its own,
-# side by side with the build and packaging; Publish waits for all of them.
 jobs:
-  release:
-    name: Build & test (Linux, Windows under Wine)
+  prep:
+    name: Tag, VERSION and changelog
     runs-on: ubuntu-24.04
+    outputs:
+      tested: ${{ steps.n.outputs.tested }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,125 +28,83 @@ jobs:
           [ "${GITHUB_EVENT_NAME}" = workflow_dispatch ] || [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != VERSION v$v"; exit 1; }
           echo "VERSION=$v" >> "$GITHUB_ENV"
 
-      - name: Vulkan loader (the GPU helper links it)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvulkan1
-
-      - name: Build
-        run: scripts/build.sh release && test -x build/beemodel-gpu
-
-      - name: Binary policy checks
-        run: ci/check-binary.sh build/beemodel
-
-      - name: Windows build checks (beemodel.exe under Wine)
-        run: |
-          sudo apt-get install -y --no-install-recommends wine wine64
-          ci/check-exe.sh build/beemodel.exe
-
-      - name: Self-test
-        run: ./build/beemodel --selftest
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Boolean stress corpus
-        run: timeout 300 python tests/bool_stress.py build/beemodel --cases 300
-
-      - name: Image readers and writers
-        run: |
-          python -m pip install --quiet pillow
-          timeout 300 python tests/image_io.py build/beemodel
-
-      - name: Package (Linux and Windows) and the Windows kit
-        run: scripts/package.sh && ci/winkit.sh
-
       - name: Release notes from CHANGELOG
         run: |
           awk -v v="$VERSION" '
             $0 ~ "^## \\[" v "\\]" {on=1; next}
             on && /^## \[/ {exit}
-            on {print}' CHANGELOG.md > dist/NOTES.md
-          test -s dist/NOTES.md || { echo "no CHANGELOG entry for $VERSION"; exit 1; }
-          cat dist/NOTES.md
+            on {print}' CHANGELOG.md > NOTES.md
+          test -s NOTES.md || { echo "no CHANGELOG entry for $VERSION"; exit 1; }
+          cat NOTES.md
 
       - uses: actions/upload-artifact@v4
         with:
-          name: winkit
-          path: build/winkit/
+          name: notes
+          path: NOTES.md
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-
-  ui:
-    name: Headless UI (${{ matrix.font }})
-    runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        include:
-          - font: truetype
-          - font: bitmap
-            env: BEEMODEL_FONT=none BEEMODEL_MONO_FONT=none BEEMODEL_GOLDEN=check
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Vulkan loader and fonts
+      - name: Did the last nightly test this commit?
+        id: n
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvulkan1 fonts-dejavu-core
+          head="$(git rev-parse HEAD)"
+          n="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/nightly" --jq .object.sha 2>/dev/null || true)"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$n" = "$head" ]; then
+            echo "yes: publishing the nightly's files for ${head:0:7}"
+            echo "tested=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no (nightly ${n:-none}, this ${head:0:7}): running the full suite first"
+            echo "tested=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Build
-        run: scripts/build.sh release
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Headless UI test
-        run: |
-          python -m pip install --quiet pillow
-          env ${{ matrix.env }} timeout 1200 python tools/fakewl.py build/shots
-
-      - name: The release's screenshot
-        if: matrix.font == 'truetype'
-        uses: actions/upload-artifact@v4
-        with:
-          name: shot
-          path: build/shots/01_initial.png
-
-  windows:
-    name: Windows
-    needs: release
-    uses: ./.github/workflows/windows.yml
-    with:
-      kit: winkit
+  tests:
+    name: Tests
+    needs: prep
+    if: needs.prep.outputs.tested != 'true'
+    uses: ./.github/workflows/ci.yml
 
   publish:
     name: Publish
-    if: github.event_name == 'push'
-    needs: [release, ui, windows]
+    needs: [prep, tests]
+    if: >-
+      always() && github.event_name == 'push' && needs.prep.result == 'success' &&
+      (needs.tests.result == 'success' || needs.tests.result == 'skipped')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
+        with:
+          name: notes
+
+      - name: The nightly's files
+        if: needs.prep.outputs.tested == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download nightly --repo "$GITHUB_REPOSITORY" --dir dist \
+            --pattern 'beemodel-*' --pattern SHA256SUMS --pattern 01_initial.png
+          mkdir -p shots && mv dist/01_initial.png shots/
+
+      - uses: actions/download-artifact@v4
+        if: needs.prep.outputs.tested != 'true'
         with:
           name: dist
           path: dist
 
       - uses: actions/download-artifact@v4
+        if: needs.prep.outputs.tested != 'true'
         with:
-          name: shot
-          path: build/shots
+          name: screenshots-ui-truetype
+          path: shots
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="${GITHUB_REF_NAME#v}"
+          (cd dist && sha256sum -c SHA256SUMS)
+          ls dist/beemodel-"$v"-* >/dev/null || { echo "the files are not version $v"; exit 1; }
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "BeeModel $v" \
-            --notes-file dist/NOTES.md \
+            --notes-file NOTES.md \
             dist/beemodel-*.tar.gz dist/beemodel-*.bin dist/beemodel-*.zip dist/SHA256SUMS \
-            build/shots/01_initial.png
+            shots/01_initial.png
