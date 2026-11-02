@@ -3816,6 +3816,19 @@
    }
   },
   {
+   "name": "op_material_apply_preset",
+   "description": "Apply Material Preset - Give the selected mesh objects a preset look (the wheel's Material choices): the material named like the preset, made the first time and set to the preset again after: material.apply_preset <preset>",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_material_preset",
    "description": "Material Preset - Give a material a preset look (none named: a new one for the active mesh): material.preset <gold|silver|copper|chrome|aluminium|plastic|rubber|glass|frosted_glass|water|ceramic|car_paint|wood|marble|concrete|fabric|leather|skin|clay|emissive> [material]",
    "inputSchema": {

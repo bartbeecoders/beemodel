@@ -63,6 +63,7 @@ ml_name:        .skip 64
 ml_found:       .skip 4*NKINDS          # per kind: image + 1 (0: none)
 ml_dx:          .skip 4                 # the normal map is DirectX
 ml_lower:       .skip 128
+ml_apbuf:       .skip 136               # material.apply_preset: "<preset> <preset>"
 ml_mat:         .skip 4
 ml_nmaps:       .skip 4
 ml_noao:        .skip 4                 # ORM: no occlusion from it
@@ -165,6 +166,7 @@ OPERATOR op_mat_import_tex, "material.import_textures", "Import Texture Set...",
 JOB_NOW job_op_mat_import_tex, do_import_tex, "Importing the texture set"
 OPERATOR op_mat_bake, "material.bake", "Bake Material", job_op_mat_bake, flags=OPF_AI_SAFE|OPF_UNDO, doc="Bake an object's material (its node graph) through its UVs into images <material>_base, _orm (occlusion, roughness, metallic), _normal and _emissive; apply: the material then samples them: material.bake <object> [size] [apply]"
 JOB_NOW job_op_mat_bake, do_mat_bake, "Baking the material"
+OPERATOR op_mat_apply, "material.apply_preset", "Apply Material Preset", do_mat_apply, flags=OPF_AI_SAFE|OPF_UNDO, poll=poll_sel, doc="Give the selected mesh objects a preset look (the wheel's Material choices): the material named like the preset, made the first time and set to the preset again after: material.apply_preset <preset>"
 OPERATOR op_mat_preset, "material.preset", "Material Preset", do_preset, flags=OPF_AI_SAFE|OPF_UNDO, doc="Give a material a preset look (none named: a new one for the active mesh): material.preset <gold|silver|copper|chrome|aluminium|plastic|rubber|glass|frosted_glass|water|ceramic|car_paint|wood|marble|concrete|fabric|leather|skin|clay|emissive> [material]"
 
 .text
@@ -1534,6 +1536,57 @@ pv_fab1:        .float 0.24, 0.35, 0.62
 pv_leath:       .float 40.0, 1.0
 pv_bump:        .float 0.4, 0.01
 .text
+
+# material.apply_preset <preset> - material.preset <preset> <preset> (the
+#   material named like the preset: made the first time), then every
+#   selected mesh object gets it (#438)
+do_mat_apply:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rsi, [rip+op_arg]
+    test    rsi, rsi
+    jz      do_preset_x                 # (no preset: material.preset says so)
+    lea     rdi, [rip+ml_lower]
+    call    ml_word
+    lea     rdi, [rip+ml_apbuf]
+    lea     rsi, [rip+ml_lower]
+    call    ml_cpy
+    mov     byte ptr [rdi], ' '
+    inc     rdi
+    lea     rsi, [rip+ml_lower]
+    call    ml_cpy
+    mov     rbx, [rip+op_arg]
+    lea     rax, [rip+ml_apbuf]
+    mov     [rip+op_arg], rax
+    mov     dword ptr [rip+ml_mat], -1
+    call    do_preset
+    mov     [rip+op_arg], rbx
+    cmp     dword ptr [rip+ml_mat], 0   # (no such preset: said, nothing done)
+    jl      9f
+    xor     r12d, r12d
+1:  cmp     r12d, [rip+obj_count]
+    jae     9f
+    mov     edi, r12d
+    call    obj_at
+    inc     r12d
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      1b
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    jne     1b
+    mov     rdi, rax
+    mov     esi, [rip+ml_mat]
+    call    mat_assign
+    jmp     1b
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+do_preset_x:
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    jmp     do_preset
 
 # material.preset <preset> [material]
 do_preset:

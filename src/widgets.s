@@ -57,6 +57,7 @@
 .globl wg_edit_named
 .globl wg_op_of
 .globl wg_text_h
+.globl ml_edge
 .globl wg_clip_key
 
 .equ WG_MAX,    768
@@ -1336,6 +1337,34 @@ ml_vert:
     pop     r12
     pop     rbx
     ret
+
+# ml_edge -> eax: bit 0 the caret is on the first line of the field being
+#   typed in, bit 1 on its last (a single-line field: both), so Up / Down
+#   can do something else there (Ask AI: the last prompts)
+ml_edge:
+    mov     eax, 3
+    cmp     dword ptr [rip+wg_edit], 0
+    je      9f
+    mov     rdi, [rip+wg_edit_e+E_DESC]
+    test    dword ptr [rdi+WD_FLAGS], WGF_MULTI
+    jz      9f
+    push    rbx
+    call    ml_lay_edit
+    mov     ebx, eax
+    mov     edi, [rip+tf_caret]
+    mov     esi, eax
+    call    ml_line_of
+    xor     ecx, ecx
+    test    eax, eax
+    jnz     1f
+    or      ecx, 1
+1:  inc     eax
+    cmp     eax, ebx
+    jl      2f
+    or      ecx, 2
+2:  mov     eax, ecx
+    pop     rbx
+9:  ret
 
 # ml_home_end(edi=0 Home / 1 End) - the caret to its line's start / end
 ml_home_end:

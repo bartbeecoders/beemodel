@@ -21,6 +21,8 @@
 .globl toast_wait
 .globl busy_wait
 .globl busy_tick
+.globl fps_wait
+.globl fps_tick
 .globl toast_tick
 .globl toast_on
 .globl toast_warn
@@ -33,6 +35,12 @@
 .equ ST_VG, 3
 .equ ST_LB, 4
 .equ ST_SEEN_N, 5
+.equ FPS_N, 512                         # (a 500 Hz display counted whole)
+
+.section .data
+.align 4
+fps_env:        .long -1                # BEEMODEL_FPS=0 (tests): never shown; -1 not asked yet
+
 .section .bss
 .align 8
 toast_t0:       .skip 8
@@ -45,6 +53,11 @@ toast_bad:      .skip 4                 # the toast shown is one
 stat_buf:       .skip 96
 st_seen:        .skip 8*ST_SEEN_N       # when each background task was first
                                         #  seen at work (0: idle): its time
+fps_ts:         .skip 8*FPS_N           # the frame rate (#439): the last frames' times
+fps_txt:        .skip 24                #  as shown ("60 fps", "idle")
+fps_last:       .skip 8                 #  the last one
+fps_i:          .skip 4
+fps_n:          .skip 4                 #  frames in the second before it
 st_busy_t:      .skip 8                 # the last redraw for those times
 
 .section .rodata
@@ -140,6 +153,9 @@ s_ai:           .asciz "AI: "
 s_ai_stop:      .asciz "   Stop"
 s_render:       .asciz "Render "
 s_pct:          .asciz "%"
+s_fps:          .asciz " fps"
+s_fps_idle:     .asciz "idle"
+s_env_fps:      .asciz "BEEMODEL_FPS="
 s_coedit:       .asciz "Co-editing"
 s_rec:          .asciz "Recording macro"
 s_dot3:         .asciz "..."
@@ -167,6 +183,7 @@ WIDGET wd_st_hi3d, WK_BUTTON, "status.hi3d", "Image to 3D", flags=WGF_NODRAW, au
 WIDGET wd_st_vg,    WK_BUTTON, "status.virtualizing", "Virtualizing", flags=WGF_NODRAW, tip="A mesh being made into clusters for virtualized geometry (in the background: you can go on working)"
 WIDGET wd_st_lb,    WK_BUTTON, "status.thumbnails", "Library thumbnails", flags=WGF_NODRAW, tip="The content library's missing thumbnails being path-traced, one asset at a time (in the background)"
 WIDGET wd_st_job,   WK_BUTTON, "status.job", "Job", flags=WGF_NODRAW, tip="A long job: the window answers again when it is done"
+WIDGET wd_st_fps,   WK_BUTTON, "status.fps", "Frame rate", flags=WGF_NODRAW, tip="Frames drawn in the last second. BeeModel draws only when something changes: idle when nothing moves (Preferences > Interface turns it off)"
 WIDGET wd_st_toast, WK_BUTTON, "status.toast", "Message", flags=WGF_NODRAW, aux=op_console_focus, tip="Click to open the console with every message"
 
 do_menu_ai:
@@ -360,6 +377,111 @@ busy_wait:
     ret
 8:  mov     eax, -1
     add     rsp, 8
+    ret
+
+# fps_on -> eax = 1 when the frame rate is shown (the preference, unless
+#   BEEMODEL_FPS=0)
+fps_on:
+    mov     eax, [rip+fps_env]
+    test    eax, eax
+    jns     1f
+    sub     rsp, 8
+    lea     rdi, [rip+s_env_fps]
+    call    getenv
+    add     rsp, 8
+    mov     ecx, 1
+    test    rax, rax
+    jz      2f
+    cmp     byte ptr [rax], '0'
+    jne     2f
+    xor     ecx, ecx
+2:  mov     [rip+fps_env], ecx
+    mov     eax, ecx
+1:  and     eax, [rip+pr_fps]
+    ret
+
+# fps_chip (r12d = right edge, moved left) - the frame rate (#439): this
+#   frame's time kept, the frames in the second before it counted; "idle"
+#   when it is the only one (BeeModel draws only when something changes)
+fps_chip:
+    push    rbx
+    call    fps_on
+    test    eax, eax
+    jz      9f
+    call    mono_ns
+    mov     rbx, rax
+    mov     [rip+fps_last], rax
+    lea     rdx, [rip+fps_ts]
+    mov     ecx, [rip+fps_i]
+    and     ecx, FPS_N-1
+    mov     [rdx+rcx*8], rax
+    inc     dword ptr [rip+fps_i]
+    xor     ecx, ecx
+    xor     esi, esi
+1:  mov     rax, rbx
+    sub     rax, [rdx+rcx*8]
+    cmp     rax, 1000000000
+    jae     2f
+    inc     esi
+2:  inc     ecx
+    cmp     ecx, FPS_N
+    jb      1b
+    mov     [rip+fps_n], esi
+    call    fmt_reset
+    mov     esi, [rip+fps_n]
+    cmp     esi, 1
+    ja      3f
+    lea     rdi, [rip+s_fps_idle]
+    call    fmt_str
+    jmp     4f
+3:  mov     edi, esi
+    call    fmt_int
+    lea     rdi, [rip+s_fps]
+    call    fmt_str
+4:  lea     rdi, [rip+fps_txt]
+    lea     rsi, [rip+fmt_buf]
+    call    cpy_s
+    lea     rdi, [rip+fps_txt]
+    lea     rsi, [rip+wd_st_fps]
+    call    chip
+    lea     rdi, [rip+fps_txt]          # (ui_tree: the rate)
+    call    wg_set_label
+9:  pop     rbx
+    ret
+
+# fps_wait -> eax = ms until a frame that lets the frame rate settle (a
+#   second after the last frame, when it showed frames flowing), -1 none
+fps_wait:
+    sub     rsp, 8
+    mov     eax, -1
+    cmp     dword ptr [rip+fps_n], 1
+    jbe     9f
+    call    fps_on
+    test    eax, eax
+    mov     eax, -1
+    jz      9f
+    call    mono_ns
+    sub     rax, [rip+fps_last]
+    xor     edx, edx
+    mov     ecx, 1000000
+    div     rcx
+    mov     ecx, 1050
+    sub     ecx, eax
+    xor     eax, eax
+    test    ecx, ecx
+    cmovg   eax, ecx
+9:  add     rsp, 8
+    ret
+
+# fps_tick - that frame, when it is due
+fps_tick:
+    sub     rsp, 8
+    call    fps_wait
+    test    eax, eax
+    jnz     9f
+    mov     dword ptr [rip+fps_n], 0
+    mov     dword ptr [rip+dirty], 1
+9:  add     rsp, 8
     ret
 
 # busy_tick - a frame a second while something is at work (its time)
@@ -752,6 +874,7 @@ draw_statusbar:
     lea     rdi, [rip+stat_buf]
     xor     esi, esi
     call    chip
+    call    fps_chip                    # the frame rate
     call    draw_toast
     add     rsp, 8
     pop     r14

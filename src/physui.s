@@ -28,6 +28,7 @@
 
 .globl rb_props_draw
 .globl rb_get
+.globl poll_body
 .globl sp_sync
 
 .equ RB_UID,    0
@@ -61,6 +62,7 @@
 .section .rodata
 s_undo:         .asciz "Physics"
 s_st_none:      .asciz "Not a rigid body"
+s_need_body:    .asciz "not a rigid body: pick Active or Passive first"
 s_st_piece:     .asciz "Piece of "
 s_st_sep:       .asciz ", "
 s_st_kg:        .asciz " kg"
@@ -304,6 +306,35 @@ rp_entry:
     jmp     1b
 8:  xor     eax, eax
 9:  ret
+
+# poll_body -> rax = 0 when a selected mesh object is a rigid body, else why
+#   not (the wheel's Physics choices that change a body: #437)
+poll_body:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    xor     r12d, r12d
+1:  cmp     r12d, [rip+obj_count]
+    jae     8f
+    mov     edi, r12d
+    call    obj_at
+    inc     r12d
+    test    dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    jz      1b
+    cmp     dword ptr [rax+OB_TYPE], OT_MESH
+    jne     1b
+    mov     esi, [rax+OB_UID]
+    mov     rdi, [rip+an_cur]
+    call    rp_entry
+    test    rax, rax
+    jz      1b
+    xor     eax, eax
+    jmp     9f
+8:  lea     rax, [rip+s_need_body]
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
 
 # rb_get(edi=object uid, rsi=property name) -> xmm0 = its rigid body's
 #   type (1 active, 2 passive), shape (0 box .. 4 compound), mass,

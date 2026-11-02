@@ -164,6 +164,11 @@ Resolution words such as `2k` are skipped.
 frosted glass, water, ceramic, car paint, skin, clay, emissive, and the
 procedural wood, marble, concrete, fabric and leather.
 
+The viewport wheel's **Material** group (`material.apply_preset <name>`)
+gives every selected mesh object a preset's look through one material
+named like the preset: made the first time, set to the preset again (and
+shared) after that.
+
 ## Baking
 
 **Bake to Maps** in the Material tab (`material.bake <object> [size] [apply]`)

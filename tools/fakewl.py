@@ -41,7 +41,7 @@ def wstr(s):
 
 
 class Fake:
-    def __init__(self, args=(), home=None, welcome=False):
+    def __init__(self, args=(), home=None, welcome=False, fps=False):
         self.dir = tempfile.mkdtemp()
         self.path = os.path.join(self.dir, 'wl')
         srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -51,7 +51,8 @@ class Fake:
         env = dict(os.environ, WAYLAND_DISPLAY=self.path, HOME=self.home,
                    XDG_CACHE_HOME=os.path.join(self.home, 'cache'),
                    XDG_RUNTIME_DIR=self.home,       # MCP socket lands here
-                   BEEMODEL_WELCOME='1' if welcome else '0')
+                   BEEMODEL_WELCOME='1' if welcome else '0',
+                   BEEMODEL_FPS='1' if fps else '0')   # (#439: shots stay the same)
         env.setdefault('BEEMODEL_GPU_VIEW', 'off')     # (the CPU's viewport, as CI's;
         self.env = env                                  #  tests/gpu.py turns it on)
         self.t0 = time.time()
@@ -667,6 +668,9 @@ def main():
     icons()
     menus_ui()
     wheel_ui()
+    wheel_groups_ui()
+    wheel_keys_ui()
+    fps_ui()
     pies_ui()
     ctx_menus_ui()
     dialogs()
@@ -6438,7 +6442,7 @@ def menus_ui():
     check(q('print(count())') == '4', 'Add > Curve > Bezier Curve (a submenu by the mouse)')
     f.click(600, 420, 0x111)                   # RMB on the viewport: a context menu
     labels = [w['label'] for w in items()]
-    check(labels[:3] == ['Ask AI...', 'Duplicate', 'Delete'] and 'Boolean' in labels,
+    check(labels[:3] == ['Ask AI...', 'Delete', 'Duplicate'] and 'Boolean' in labels,
           f'right-click in the viewport: the object menu, Ask AI... first ({len(labels)})')
     w = [w for w in items() if w['label'] == 'Duplicate'][0]
     f.click(w['x'] + 40, w['y'] + 12)
@@ -6489,7 +6493,7 @@ def wheel_ui():
     before = f.image().crop(box)
     f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
     ring = items(0)
-    check(len(ring) == 9 and all(w.get('wheel') == 1 for w in ring) and ring[0]['label'] == 'Ask AI...',
+    check(len(ring) == 11 and all(w.get('wheel') == 1 for w in ring) and ring[0]['label'] == 'Ask AI...',
           f'right-click in the viewport opens the wheel ({[w["label"] for w in ring]})')
     xs = sorted(at(w)[0] for w in ring)
     check(xs[-1] - xs[0] > 150, f'its entries go round the pointer ({xs[0]}..{xs[-1]})')
@@ -6520,7 +6524,7 @@ def wheel_ui():
     f.key(1); f.pump(0.2)                      # (the duplicate's grab)
     f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
     f.mods(1); f.pump(0.1)
-    check(len(items()) == 9, 'Shift leaves it open')
+    check(len(items()) == 11, 'Shift leaves it open')
     f.mods(0); f.key(17); f.pump(0.2)          # W
     check(not items(), 'another key closes it')
     q('select("Cube")')
@@ -6552,6 +6556,163 @@ def wheel_ui():
     got = [w for w in ui_tree(m) if w['kind'] == 'menuitem']
     check(got and got[0]['label'] == 'Ask AI...' and not any(w.get('wheel') for w in got),
           'turned off: the right-click list menu again (after a restart)')
+    f.proc.kill()
+
+
+def wheel_groups_ui():
+    """#437 / #438: the object wheel's Physics group makes the selection a
+    rigid body and changes its type and material (those greyed until it is
+    one), and its Material group gives it a preset look - one material for
+    each preset, shared by the objects that use it."""
+    print('  -- wheel: Physics and Material --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    items = lambda lvl=None: [w for w in ui_tree(m) if w['kind'] == 'menuitem' and (lvl is None or w['level'] == lvl)]
+    at = lambda w: (w['x'] + w['w'] // 2, w['y'] + w['h'] // 2)
+    item = lambda label, lvl=None: ([w for w in items(lvl) if w['label'] == label] or [None])[0]
+    def group(name):
+        f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
+        g = item(name, 0)
+        if g:
+            f.move(*at(g)); f.pump(0.2)
+        return g
+    def pick(name, label):
+        group(name)
+        it = item(label, 1)
+        if it:
+            f.click(*at(it)); f.pump(0.3)
+        else:
+            f.key(1); f.pump(0.2)
+        return it
+    q('select("Cube")')
+    group('Physics')
+    kids = items(1)
+    check([w['label'] for w in kids] == ['Active', 'Passive', 'Rubber', 'Ice', 'Wood', 'Metal', 'Stone', 'Remove Rigid Body'],
+          f'Physics: Active, Passive, five materials, Remove ({[w["label"] for w in kids]})')
+    check(not kids[0].get('why') and not kids[1].get('why') and all(w.get('why') for w in kids[2:]),
+          f'not a body yet: only Active and Passive can run ({kids[2].get("why") if len(kids) > 2 else None!r})')
+    f.shot('wheel_physics.png')
+    f.key(1); f.pump(0.2)
+    pick('Physics', 'Active')
+    check(q('print(rigid("Cube", "type"), rigid("Cube", "shape"))') == '1 3',
+          'Active makes it an active body, a convex hull (as the Physics panel adds one)')
+    q('op("rigid.add", "sphere")')
+    pick('Physics', 'Rubber')
+    check(q('print(rigid("Cube", "shape"))') == '1' and q('print(rigid("Cube", "bounce"))') not in ('0', ''),
+          f'Rubber: its friction and bounce, its shape kept ({q("print(rigid(\"Cube\", \"friction\"), rigid(\"Cube\", \"bounce\"))")})')
+    pick('Physics', 'Passive')
+    check(q('print(rigid("Cube", "type"), rigid("Cube", "shape"))') == '2 1', 'Passive: a passive body, its shape kept')
+    pick('Physics', 'Remove Rigid Body')
+    check(q('print(rigid("Cube", "type"))') in ('nil', ''), 'Remove: not a body any more')
+    q('add("sphere", "Ball", 3, 1, 0)\nselect("Cube", "Ball")')
+    group('Material')
+    labels = [w['label'] for w in items(1)]
+    check(labels == ['Gold', 'Chrome', 'Plastic', 'Rubber', 'Glass', 'Wood', 'Marble', 'Emissive'],
+          f'Material: eight preset looks ({labels})')
+    f.shot('wheel_material.png')
+    f.key(1); f.pump(0.2)
+    pick('Material', 'Gold')
+    check(q('print(matof("Cube"), matof("Ball"))') == 'gold gold'
+          and q('print(matget("gold", "metallic"))') == '1', 'Gold: both selected objects get the gold material')
+    q('matset("gold", "roughness", 0.9)\nselect("Ball")')
+    pick('Material', 'Gold')
+    check(q('print(matof("Cube"), matof("Ball"), matget("gold", "roughness") < 0.5)') == 'gold gold 1',
+          'Gold again: the same material (not another), set to the preset again')
+    pick('Material', 'Wood')
+    check(q('print(matof("Cube"), matof("Ball"))') == 'gold wood', 'Wood on the Ball alone: its own material')
+    f.mods(4); f.key(44); f.mods(0); f.pump(0.3)
+    check(q('print(matof("Ball"))') == 'gold', 'one undo step')
+    f.proc.kill()
+
+
+def wheel_keys_ui():
+    """#440: with the wheel open, 1-9, 0 and - pick its entries (the keypad's
+    too); a group's key opens its choices, which the same keys then pick;
+    Backspace goes back to the ring. Each entry shows its key."""
+    print('  -- wheel: number keys --')
+    f = Fake()
+    f.pump(1.0, until_frame=True)
+    f.keymap('tests/keymaps/us.xkb')
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    items = lambda lvl=None: [w for w in ui_tree(m) if w['kind'] == 'menuitem' and (lvl is None or w['level'] == lvl)]
+    def wheel():
+        f.move(600, 420); f.click(600, 420, 0x111); f.pump(0.2)
+    q('select("Cube")')
+    wheel()
+    ring = items(0)
+    check([w.get('key') for w in ring] == list('1234567890-'),
+          f'each entry has its key, 1 to 0 and - ({[w.get("key") for w in ring]})')
+    f.shot('wheel_keys.png')
+    n = q('print(count())')
+    f.key(4); f.pump(0.3)                      # 3: Duplicate
+    check(not items() and q('print(count())') == str(int(n) + 1), 'its key runs an entry (3: Duplicate) and closes the wheel')
+    f.key(1); f.pump(0.2)                      # (the duplicate's grab)
+    q('select("Cube")')
+    wheel()
+    f.key(8); f.pump(0.2)                      # 7: Material
+    kids = items(1)
+    check([w['label'] for w in kids][:2] == ['Gold', 'Chrome'] and [w.get('key') for w in kids] == list('12345678'),
+          f'a group\'s key opens its choices, numbered ({[w.get("key") for w in kids]})')
+    f.shot('wheel_keys_group.png')
+    f.key(14); f.pump(0.2)                     # Backspace
+    check(items(0) and not items(1), 'Backspace: back to the ring')
+    f.key(8); f.pump(0.2)
+    f.key(3); f.pump(0.3)                      # 2: Chrome
+    check(not items() and q('print(matof("Cube"))') == 'chrome', 'then a choice\'s key picks it (7, 2: Chrome)')
+    wheel()
+    f.key(9); f.pump(0.2)                      # 8: Physics
+    f.key(4); f.pump(0.2)                      # 3: Rubber - not a body yet
+    check(items(1) and q('print(rigid("Cube", "type"))') in ('nil', ''), 'a choice that cannot run leaves the wheel open')
+    f.key(2); f.pump(0.3)                      # 1: Active
+    check(not items() and q('print(rigid("Cube", "type"))') == '1', '1: Active')
+    wheel()
+    f.key(76); f.pump(0.2)                     # keypad 5: Boolean
+    check(len(items(1)) == 3, 'the keypad\'s digits too (5: Boolean)')
+    f.key(1); f.pump(0.2)
+    check(not items(), 'Esc closes it')
+    f.proc.kill()
+
+
+def fps_ui():
+    """#439: the status bar shows the frame rate: frames drawn in the last
+    second while something moves, idle a second after it stops; Preferences
+    > Interface turns it off."""
+    print('  -- frame rate --')
+    f = Fake(fps=True)
+    f.pump(1.0, until_frame=True)
+    f.enter(600, 300)
+    m = Mcp(f)
+    q = lambda code: (m.tool('script_eval', {'code': code})[0] or '').strip()
+    fps = lambda: (widget(m, 'status.fps') or {}).get('label')
+    idle = lambda v: v == 'idle' or (v or '').endswith(' fps') and int(v.split()[0]) <= 3   # (the queries draw)
+    f.pump(1.5)
+    v = fps()
+    check(idle(v), f'nothing moving: idle (or the few frames the test\'s queries draw: {v!r})')
+    seen = []
+    f.button(True, 0x112); f.pump(0.05)        # orbit for a second (middle drag)
+    for i in range(40):
+        f.move(600 + 5 * i, 300); f.pump(0.03)
+        seen.append(fps())
+    f.button(False, 0x112)
+    rates = [int(v.split()[0]) for v in seen if v and v.endswith(' fps')]
+    check(rates and max(rates) >= 10, f'orbiting: the frames a second ({max(rates) if rates else seen[-3:]})')
+    f.shot('fps_moving.png')
+    f.pump(1.6)
+    v = fps()
+    check(idle(v), f'a second after: idle again ({v!r})')
+    menu_pick(f, m, 'Edit', 'Preferences...')
+    w = widget(m, 'prefs.show_frame_rate')
+    check(w is not None and w.get('value') == 1, 'Preferences > Interface: Show the frame rate, on')
+    if w:
+        f.click(w['x'] + 10, w['y'] + w['h'] // 2); f.pump(0.2)
+    f.key(1); f.pump(0.3)
+    check(widget(m, 'status.fps') is None, 'turned off: not shown')
     f.proc.kill()
 
 

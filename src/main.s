@@ -187,7 +187,19 @@ bee_main:
     cmp     eax, edx
     jge     343f
 344:mov     edx, eax
-343:push    rdx                         # (and a held pie key)
+343:push    rdx                         # (and the frame rate settling to idle)
+    push    rsi
+    call    fps_wait
+    pop     rsi
+    pop     rdx
+    test    eax, eax
+    js      345f
+    cmp     edx, -1
+    je      346f
+    cmp     eax, edx
+    jge     345f
+346:mov     edx, eax
+345:push    rdx                         # (and a held pie key)
     push    rsi
     call    pie_wait
     pop     rsi
@@ -234,6 +246,7 @@ bee_main:
     call    pie_tick                    # a pie key held long enough
     call    toast_tick                  # a toast whose time is up
     call    busy_tick                   # (work going on: its time, a second on)
+    call    fps_tick                    # (the frame rate: idle a second after)
     call    team_pending                # a button's operator, between frames
     cmp     dword ptr [rip+dirty], 0
     je      .Lloop

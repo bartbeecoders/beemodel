@@ -231,6 +231,38 @@ def main():
     wait_idle()
     check(sent().startswith('Change the material to gold\n'), f'Material... starts the prompt; the rest is typed ({sent()[:40]!r})')
 
+    # -- a prompt of several lines (#436)
+    print('  -- several lines --')
+    alt_rclick(cube)
+    w0 = fakewl.widget(m, 'ask.prompt')
+    b0 = fakewl.widget(m, 'ask.bigger')
+    long1 = 'can you make it from a material and physics that let it bounce like a rubber ball ' * 4
+    f.type(long1.strip())
+    f.mods(1); f.key(28); f.mods(0)                 # Shift+Enter: a new line
+    f.type('and paint it red')
+    f.pump(0.3)
+    w1 = fakewl.widget(m, 'ask.prompt')
+    b1 = fakewl.widget(m, 'ask.bigger')
+    check(w0 and w1 and w1['h'] >= w0['h'] + 3 * 18 and b1['y'] - b0['y'] == w1['h'] - w0['h'],
+          f'the prompt wraps and grows with its lines, the box with it ({w0 and w0["h"]} -> {w1 and w1["h"]})')
+    if OUT:
+        f.shot('152_ask_lines.png')
+    f.key(103); f.pump(0.2)                         # Up inside the text: the caret moves
+    f.type('X')
+    f.key(28)
+    wait_idle()
+    p = sent()
+    body = p.split('\n\n--- What this request is about')[0]
+    check(len(body) > 300 and '\nand paint it red' in body and 'X' in body and body.startswith('can you make it'),
+          f'all of it is sent, its line break kept; Up moved the caret rather than bringing back a prompt ({len(body)} bytes)')
+    f.mods(4); f.key(44); f.mods(0)
+    f.pump(0.3)
+    alt_rclick(cube)
+    f.key(103); f.pump(0.2)                         # Up on the first line: the last prompt
+    w2 = fakewl.widget(m, 'ask.prompt')
+    check(w2 and w2['h'] == w1['h'], f'Up on the first line brings back that prompt, all its lines ({w2 and w2["h"]})')
+    f.key(1); f.pump(0.2)
+
     # -- edit mode
     print('  -- edit mode --')
     q('scale("Cube", 1)\nedit("Cube")\nvselect("Cube")\n'

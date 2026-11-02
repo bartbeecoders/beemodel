@@ -1919,7 +1919,11 @@ ui_key_press:
     cmp     ecx, ebx
     jne     1b
     jmp     .Lkp_nowh
-2:  call    wh_close
+2:  mov     edi, ebx                    # its number keys (#440)
+    call    wh_key
+    test    eax, eax
+    jnz     9f
+    call    wh_close
     cmp     ebx, KEY_ESC
     je      9f
 .Lkp_nowh:
