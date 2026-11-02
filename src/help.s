@@ -111,6 +111,8 @@ help_start:
     je      9f
     cmp     byte ptr [rip+cur_path], 0
     jne     9f
+    cmp     dword ptr [rip+dlg_open], 0 # (a dialog already asks: not over it, #444)
+    jne     9f
     lea     rdi, [rip+s_env_welcome]
     call    getenv
     test    rax, rax

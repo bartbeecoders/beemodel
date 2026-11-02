@@ -142,6 +142,8 @@ WIDGET wd_rh_go,   WK_BUTTON, "render.header.start", "Render", flags=WGF_PRIMARY
 WIDGET wd_rh_stop, WK_BUTTON, "render.header.stop", "Stop", aux=op_render_stop
 WIDGET wd_rh_save, WK_BUTTON, "render.header.save", "Save...", aux=op_render_save
 WIDGET wd_rh_dn,   WK_TOGGLE, "render.header.denoise", "Denoise", flags=WGF_COMPACT, cb=dn_cb
+WIDGET wd_rh_fit,  WK_BUTTON, "render.header.fit", "Fit", aux=op_rn_fit, tip="The whole image again (the wheel zooms about the pointer, a drag pans)"
+WIDGET wd_rh_set,  WK_BUTTON, "render.header.settings", "Settings", aux=op_rn_settings, tip="Every render setting: the Properties' Render tab"
 WIDGET wd_rh_pass, WK_ENUM, "render.header.pass", cb=pass_cb, aux=l_pass, n=4, tip="Which pass is shown (and saved)"
 # lights and cameras
 WIDGET wd_lc_power, WK_FLOAT, "light.power", "Power", 0.0, 100000.0, 0.01, 2, WGF_CLAMP, cb=lpow_cb, undo="Light", tip="How strong the light is (1: the default)"
@@ -501,30 +503,56 @@ rn_header_tools:
     mov     ebx, edi
     lea     r12d, [rsi+1]
     mov     r13d, edx
-    lea     eax, [rbx+400]
-    cmp     eax, r13d
-    jg      9f
-    lea     rdi, [rip+wd_rh_go]
-    mov     ecx, 70
-    call    hdr_w
-    lea     rdi, [rip+wd_rh_stop]
-    mov     ecx, 50
-    call    hdr_w
+    lea     rdi, [rip+wd_rh_go]         # as many as there is room for, in
+    mov     ecx, 64                     #  this order (a narrow area: the
+    call    hdr_fit                     #  first ones; #446)
+    jz      9f
+    lea     rdi, [rip+wd_rh_set]        # then Settings and Stop (Stop
+    mov     ecx, 64                     #  first while a render runs)
+    lea     r14, [rip+wd_rh_stop]
+    cmp     dword ptr [rip+hv_active], 0
+    je      3f
+    xchg    rdi, r14
+    mov     ecx, 46
+3:  call    hdr_fit
+    jz      9f
+    mov     rdi, r14
+    mov     ecx, 46
+    lea     rax, [rip+wd_rh_set]
+    cmp     rdi, rax
+    jne     4f
+    mov     ecx, 64
+4:  call    hdr_fit
+    jz      9f
+    lea     rdi, [rip+wd_rh_fit]
+    mov     ecx, 44
+    call    hdr_fit
+    jz      9f
     lea     rdi, [rip+wd_rh_save]
     mov     ecx, 60
-    call    hdr_w
+    call    hdr_fit
+    jz      9f
+    lea     eax, [rbx+86]
+    cmp     eax, r13d
+    jg      9f
     mov     eax, [rip+rn_denoise]
     mov     [rip+ru_dn], eax
     lea     rdi, [rip+wd_rh_dn]
     lea     r8, [rip+ru_dn]
     mov     ecx, 86
     call    hdr_wp
+    lea     eax, [rbx+90]
+    cmp     eax, r13d
+    jg      9f
     mov     eax, [rip+hv_pass]
     mov     [rip+ru_pass], eax
     lea     rdi, [rip+wd_rh_pass]
     lea     r8, [rip+ru_pass]
     mov     ecx, 90
     call    hdr_wp
+    lea     eax, [rbx+150]              # the samples, when they fit
+    cmp     eax, r13d
+    jg      9f
     cmp     dword ptr [rip+hv_target], 0  # "12 / 128 samples"
     je      9f
     call    fmt_reset
@@ -554,6 +582,17 @@ rn_header_tools:
     pop     r13
     pop     r12
     pop     rbx
+    ret
+hdr_fit:                                # rdi = desc, ecx = width: a button
+    lea     eax, [rbx+rcx]              #  when it fits -> ZF set when not
+    cmp     eax, r13d
+    jg      8f
+    push    rcx
+    call    hdr_w
+    pop     rcx
+    or      eax, 1                      # (ZF clear: drawn)
+    ret
+8:  xor     eax, eax                    # (ZF set)
     ret
 hdr_w:                                  # rdi = desc, ecx = width: a button
     xor     r8d, r8d

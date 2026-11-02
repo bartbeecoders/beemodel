@@ -3924,13 +3924,15 @@ gimage:
     jz      7f
     mov     rdi, rax
     mov     rsi, rdx
+    mov     [rip+im_src_p], rdi         # (its bytes kept: saved as they are)
+    mov     [rip+im_src_n], rsi
     call    img_decode
     mov     r14, rax
 6:  test    r14, r14
     jz      7f
     mov     rdi, r14
     lea     rsi, [rip+gi_name]
-    call    image_adopt
+    call    image_adopt_src
     jmp     71f
 7:  mov     eax, -1
 71: lea     ecx, [rax+1]                # (remembered: index + 1, or -1)

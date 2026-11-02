@@ -62,6 +62,7 @@ step() {                                # step <name> <command...>
 SUITES=$(cat <<'EOF'
 beescript|300|script.s expr.s|python3 tests/beescript.py build/beemodel
 compat|300|fileio.s formats.s scene.s|python3 tests/compat.py build/beemodel
+beesize|300|formats.s image.s png.s inflate.s gltf.s blend.s|python3 tests/beesize.py build/beemodel
 bool_stress|300|bool.s bbool.s|python3 tests/bool_stress.py build/beemodel --cases 300
 image_io|300|png.s jpeg.s exr.s imgread.s image.s inflate.s|python3 tests/image_io.py build/beemodel
 enclosure|600|cad.s cadui.s sketch*.s feature.s measure.s print*.s fab.s export.s mods*.s shapes.s|python3 tests/enclosure.py build/beemodel

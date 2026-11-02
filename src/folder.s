@@ -37,6 +37,7 @@
 .globl fd_select
 .globl fd_inside
 .globl fd_make
+.globl fd_colours
 
 .equ FD_REFS,   0
 .equ FD_N,      4
@@ -46,6 +47,7 @@
 .equ FR_UID,    0
 .equ FR_PAR,    4                       # the folder it is in (0: none)
 .equ FR_FLG,    8                       # 1 folded, 2 hidden, 4 not rendered, 8 locked
+.equ FR_COL,    12                      # its colour (#441): 0 none, 1-8 fd_colours
 .equ FR_NAME,   16
 .equ FR_SZ,     48
 .equ FD_MAX,    256
@@ -56,6 +58,8 @@
 .align 8
 fd_cur:         .skip 8
 fd_tmp:         .skip 64
+fd_keys:        .skip 32*MAX_OBJECTS     # outliner.tidy: each object's group ("" none)
+tidy_key:       .skip 32                #  the group being made
 .align 4
 fd_active:      .skip 4                 # the folder picked in the outliner (uid)
 
@@ -67,12 +71,40 @@ s_fd_full:      .asciz "  folders: 256 at most"
 s_fd_nosel:     .asciz "  pick a folder in the outliner first"
 s_fd_unknown:   .asciz "  no folder named "
 s_fd_made:      .asciz "  folder: "
+s_fd_lights:    .asciz "Lights"
+s_fd_cams:      .asciz "Cameras"
+s_fd_refs:      .asciz "References"
+s_fd_tidied:    .asciz "  tidied: objects in folders "
+s_fd_badcol:    .asciz "  folder colours: none red orange yellow green teal blue purple pink next"
+s_fd_aibusy:    .asciz "  the AI is busy: try again when it is done"
+s_fd_ainote:    .asciz "tidy the outliner"
+s_fd_aiprompt:  .ascii "Tidy the outliner: sort the scene's objects into folders by what they are (furniture, walls, lights, cameras, props ...). "
+                .ascii "Use outliner.folder_new or object.move_to_folder <name> on selections, give each folder a short clear name, colour each with outliner.folder_color, "
+                .ascii "keep children with their parents, and delete folders left empty (outliner.folder_delete). Do not move, rename or change the objects themselves. "
+                .asciz "Answer in one short sentence: the folders you made."
+k_next:         .asciz "next"
+s_fd_empty:     .asciz ""
+tidy_cols:      .byte 6, 4, 2, 7, 5, 1, 3, 8
+col_words:      .quad s_none, k_red, k_orange, k_yellow, k_green, k_teal, k_blue, k_purple, k_pink
+k_red:          .asciz "red"
+k_orange:       .asciz "orange"
+k_yellow:       .asciz "yellow"
+k_green:        .asciz "green"
+k_teal:         .asciz "teal"
+k_blue:         .asciz "blue"
+k_purple:       .asciz "purple"
+k_pink:         .asciz "pink"
+.align 4
+fd_colours:     .long 0, 0xe5484d, 0xf97316, 0xeab308, 0x22a55b, 0x14b8a6, 0x3b82f6, 0x8b5cf6, 0xec4899
 
 .text
 OPERATOR op_fd_new, "outliner.folder_new", "New Folder", do_fd_new, key=KEY_G|KM_CTRL, flags=OPF_AI_SAFE|OPF_UNDO|OPF_OBJECT, doc="A new folder (inside the folder picked), the selected objects moved into it: outliner.folder_new [name]"
 OPERATOR op_fd_move, "object.move_to_folder", "Move to Folder...", do_fd_move, flags=OPF_AI_SAFE|OPF_UNDO, doc="The selected objects into a folder (made when there is none of that name), or out of theirs: object.move_to_folder <name | none>", form=form_fdmove
 OPERATOR op_fd_ren, "outliner.folder_rename", "Rename Folder", do_fd_ren, flags=OPF_AI_SAFE|OPF_UNDO|OPF_HIDDEN, doc="The folder picked gets a new name: outliner.folder_rename <name>"
 OPERATOR op_fd_del, "outliner.folder_delete", "Delete Folder", do_fd_del, flags=OPF_AI_SAFE|OPF_UNDO, doc="The folder picked goes; what was in it moves up a level (contents: its objects are deleted too): outliner.folder_delete [contents]"
+OPERATOR op_fd_col, "outliner.folder_color", "Folder Colour", do_fd_col, flags=OPF_AI_SAFE|OPF_UNDO, doc="Colour a folder in the outliner (the one picked, or the one named): outliner.folder_color <none|red|orange|yellow|green|teal|blue|purple|pink|next> [folder name]. A click on a folder's icon goes to the next colour"
+OPERATOR op_fd_tidy, "outliner.tidy", "Tidy Outliner", do_fd_tidy, flags=OPF_AI_SAFE|OPF_UNDO, doc="Group the objects that are in no folder: lights, cameras, reference images, and objects named alike (Chair, Chair.001, Chair_2 ...) each into a coloured folder of their own (two or more of a kind, children staying with their parents), then folders left empty go"
+OPERATOR op_fd_tidy_ai, "outliner.tidy_ai", "Tidy Outliner with AI", do_fd_tidy_ai, flags=OPF_QUIET, doc="Ask the AI Assistant to sort the scene's objects into named, coloured folders by what they are (one undo step)"
 OPERATOR op_fd_sel, "outliner.folder_select", "Select Folder's Objects", do_fd_sel, flags=OPF_AI_SAFE, doc="Select every object in the folder picked (and its folders)"
 
 # ---- the block ----------------------------------------------------------------------
@@ -674,6 +706,390 @@ do_fd_ren:
     call    log_line
 9:  add     rsp, 16
     pop     rbx
+    ret
+
+# do_fd_col - outliner.folder_color <colour | next> [name] (#441)
+do_fd_col:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rsi, [rip+op_arg]
+    call    im_next_word
+    mov     r12, rsi                    # (the name, if any, after it)
+    test    eax, eax
+    jz      .Lfc_bad
+    mov     r13d, -1                    # the colour: a word, or next
+    lea     rdi, [rip+im_word]
+    lea     rsi, [rip+k_next]
+    call    str_eq
+    test    eax, eax
+    jnz     2f
+    xor     ebx, ebx
+1:  cmp     ebx, 9
+    jae     .Lfc_bad
+    lea     rax, [rip+col_words]
+    mov     rsi, [rax+rbx*8]
+    lea     rdi, [rip+im_word]
+    call    str_eq
+    test    eax, eax
+    jnz     11f
+    inc     ebx
+    jmp     1b
+11: mov     r13d, ebx
+2:  mov     eax, [rip+fd_active]        # the folder: named, else the one picked
+    test    r12, r12
+    jz      4f
+3:  cmp     byte ptr [r12], ' '
+    jne     31f
+    inc     r12
+    jmp     3b
+31: cmp     byte ptr [r12], 0
+    je      4f
+    mov     rdi, r12
+    call    fd_find
+    test    eax, eax
+    jnz     4f
+    lea     rdi, [rip+s_fd_unknown]
+    mov     rsi, r12
+    call    log_pair
+    jmp     9f
+4:  mov     edi, eax
+    call    fd_index
+    test    eax, eax
+    js      .Lfc_nosel
+    mov     ebx, eax
+    call    fd_own
+    test    rax, rax
+    jz      9f
+    imul    ecx, ebx, FR_SZ
+    lea     rdx, [rax+FD_HDR+rcx]
+    mov     eax, r13d
+    test    eax, eax
+    jns     5f
+    mov     eax, [rdx+FR_COL]           # next: 1 .. 8, then none
+    inc     eax
+    cmp     eax, 9
+    jb      5f
+    xor     eax, eax
+5:  mov     [rdx+FR_COL], eax
+    mov     dword ptr [rip+dirty], 1
+    jmp     9f
+.Lfc_nosel:
+    lea     rdi, [rip+s_fd_nosel]
+    call    log_line
+    jmp     9f
+.Lfc_bad:
+    lea     rdi, [rip+s_fd_badcol]
+    call    log_line
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# fd_key(rdi=object, rsi=32-byte dest) - its tidy group: Lights, Cameras,
+#   References, else its name less a ".001" and trailing digits, _ - and
+#   spaces ("Chair.002" and "Chair_12" -> "Chair"; all of it when that is
+#   all there is); "" for what stays where it is (a child, the Ground)
+fd_key:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     byte ptr [r12], 0
+    test    dword ptr [rbx+OB_FLAGS], OBF_GROUND
+    jnz     9f
+    mov     rdi, rbx
+    call    par_of
+    test    rax, rax
+    jnz     9f
+    lea     rsi, [rip+s_fd_lights]
+    cmp     dword ptr [rbx+OB_TYPE], OT_LIGHT
+    je      7f
+    lea     rsi, [rip+s_fd_cams]
+    cmp     dword ptr [rbx+OB_TYPE], OT_CAMERA
+    je      7f
+    lea     rsi, [rip+s_fd_refs]
+    test    dword ptr [rbx+OB_FLAGS], OBF_REFIMG
+    jnz     7f
+    mov     rsi, rbx                    # the name, then its tail off
+7:  mov     rdi, r12
+    mov     ecx, 31
+71: mov     al, [rsi]
+    mov     [rdi], al
+    test    al, al
+    jz      72f
+    inc     rsi
+    inc     rdi
+    dec     ecx
+    jnz     71b
+    mov     byte ptr [rdi], 0
+72: cmp     rsi, rbx                    # (a kind's name: as it is)
+    jb      9f
+    lea     rax, [rbx+32]
+    cmp     rsi, rax
+    jae     9f
+    mov     rdi, r12                    # its end
+    xor     ecx, ecx
+1:  cmp     byte ptr [rdi+rcx], 0
+    je      2f
+    inc     ecx
+    jmp     1b
+2:  mov     edx, ecx                    # strip digits . _ - and spaces off
+3:  test    edx, edx                    #  the end (not all of it)
+    jz      5f
+    movzx   eax, byte ptr [rdi+rdx-1]
+    cmp     al, '0'
+    jb      4f
+    cmp     al, '9'
+    jbe     41f
+4:  cmp     al, '.'
+    je      41f
+    cmp     al, '_'
+    je      41f
+    cmp     al, '-'
+    je      41f
+    cmp     al, ' '
+    jne     5f
+41: dec     edx
+    jmp     3b
+5:  test    edx, edx
+    jz      9f                          # (only digits: kept whole)
+    mov     byte ptr [rdi+rdx], 0
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# do_fd_tidy - outliner.tidy (#441): the objects in no folder, grouped by
+#   fd_key into a folder each (two or more of a kind), coloured; then the
+#   folders left empty go
+do_fd_tidy:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     r12d, [rip+obj_count]       # (the objects looked at)
+    cmp     r12d, MAX_OBJECTS
+    jbe     1f
+    mov     r12d, MAX_OBJECTS
+1:  xor     ebx, ebx                    # each object's key ("" in a folder)
+2:  cmp     ebx, r12d
+    jae     3f
+    mov     edi, ebx
+    call    obj_at
+    mov     rdi, rax
+    mov     eax, ebx
+    shl     eax, 5
+    lea     rsi, [rip+fd_keys]
+    add     rsi, rax
+    mov     byte ptr [rsi], 0
+    cmp     dword ptr [rdi+OB_FOLDER], 0
+    jne     21f
+    call    fd_key
+21: inc     ebx
+    jmp     2b
+3:  xor     r15d, r15d                  # objects moved
+    xor     r14d, r14d                  # folders coloured round the eight
+    xor     ebx, ebx
+4:  cmp     ebx, r12d                   # each key not done yet
+    jae     .Lft_prune
+    mov     eax, ebx
+    shl     eax, 5
+    lea     rsi, [rip+fd_keys]
+    add     rsi, rax
+    cmp     byte ptr [rsi], 0
+    je      9f
+    lea     rdi, [rip+tidy_key]         # (a copy: the keys are cleared
+    mov     ecx, 32                     #  as they are done)
+    rep     movsb
+    xor     r13d, r13d                  # how many share it
+    xor     ecx, ecx
+5:  cmp     ecx, r12d
+    jae     6f
+    mov     [rsp], ecx
+    mov     eax, ecx
+    shl     eax, 5
+    lea     rdi, [rip+fd_keys]
+    add     rdi, rax
+    lea     rsi, [rip+tidy_key]
+    call    str_eq
+    add     r13d, eax
+    mov     ecx, [rsp]
+    inc     ecx
+    jmp     5b
+6:  cmp     r13d, 2                     # one alone: stays where it is
+    jb      9f
+    lea     rdi, [rip+tidy_key]         # its folder (one of that name, or
+    call    fd_find                     #  a new one, coloured)
+    test    eax, eax
+    jnz     7f
+    lea     rdi, [rip+tidy_key]
+    xor     esi, esi
+    call    fd_ensure
+    test    eax, eax
+    jz      .Lft_prune                  # (no room)
+    mov     [rsp+8], eax
+    lea     rdi, [rip+tidy_key]
+    call    tidy_colour
+    mov     [rsp+4], eax
+    mov     edi, [rsp+8]
+    call    fd_index
+    mov     [rsp], eax
+    call    fd_own
+    imul    ecx, dword ptr [rsp], FR_SZ
+    mov     edx, [rsp+4]
+    mov     [rax+FD_HDR+rcx+FR_COL], edx
+    mov     eax, [rsp+8]
+7:  mov     [rsp+8], eax                # every object of the key into it
+    xor     r13d, r13d
+8:  cmp     r13d, r12d
+    jae     9f
+    mov     eax, r13d
+    shl     eax, 5
+    lea     rdi, [rip+fd_keys]
+    add     rdi, rax
+    mov     [rsp], rdi
+    lea     rsi, [rip+tidy_key]
+    call    str_eq
+    test    eax, eax
+    jz      81f
+    mov     rdi, [rsp]
+    mov     byte ptr [rdi], 0
+    mov     edi, r13d
+    call    obj_at
+    mov     rdi, rax
+    mov     esi, [rsp+8]
+    call    fd_set_obj
+    inc     r15d
+81: inc     r13d
+    jmp     8b
+9:  inc     ebx
+    jmp     4b
+.Lft_prune:                             # folders with nothing in them go
+    call    fd_prune
+    mov     dword ptr [rip+dirty], 1
+    call    fmt_reset
+    lea     rdi, [rip+s_fd_tidied]
+    call    fmt_str
+    mov     edi, r15d
+    call    fmt_int
+    lea     rdi, [rip+fmt_buf]
+    call    log_line
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# tidy_colour(rdi=key; r14d counts) -> eax = a new folder's colour: Lights
+#   yellow, Cameras pink, References teal, the rest round the others
+tidy_colour:
+    push    rbx
+    mov     rbx, rdi
+    lea     rsi, [rip+s_fd_lights]
+    call    str_eq
+    mov     edx, 3
+    test    eax, eax
+    jnz     8f
+    mov     rdi, rbx
+    lea     rsi, [rip+s_fd_cams]
+    call    str_eq
+    mov     edx, 8
+    test    eax, eax
+    jnz     8f
+    mov     rdi, rbx
+    lea     rsi, [rip+s_fd_refs]
+    call    str_eq
+    mov     edx, 5
+    test    eax, eax
+    jnz     8f
+    mov     eax, r14d
+    and     eax, 7
+    lea     rcx, [rip+tidy_cols]
+    movzx   edx, byte ptr [rcx+rax]
+    inc     r14d
+8:  mov     eax, edx
+    pop     rbx
+    ret
+
+# fd_prune - the folders with no object and no folder in them go (again,
+#   till none is left: a folder of empty folders goes too)
+fd_prune:
+    push    rbx
+    push    r12
+    push    r13
+1:  call    fd_count
+    mov     r12d, eax
+    xor     ebx, ebx
+2:  cmp     ebx, r12d
+    jae     9f
+    mov     edi, ebx
+    call    fd_rec
+    mov     r13d, [rax+FR_UID]
+    xor     ecx, ecx                    # a folder in it?
+3:  cmp     ecx, r12d
+    jae     4f
+    mov     rax, [rip+fd_cur]
+    imul    edx, ecx, FR_SZ
+    cmp     [rax+FD_HDR+rdx+FR_PAR], r13d
+    je      8f
+    inc     ecx
+    jmp     3b
+4:  xor     ecx, ecx                    # an object?
+5:  cmp     ecx, [rip+obj_count]
+    jae     6f
+    push    rcx
+    push    rcx
+    mov     edi, ecx
+    call    obj_at
+    pop     rcx
+    pop     rcx
+    cmp     [rax+OB_FOLDER], r13d
+    je      8f
+    inc     ecx
+    jmp     5b
+6:  call    fd_own                      # empty: out of the list
+    test    rax, rax
+    jz      9f
+    imul    ecx, ebx, FR_SZ
+    lea     rdi, [rax+FD_HDR+rcx]
+    lea     rsi, [rdi+FR_SZ]
+    mov     ecx, r12d
+    sub     ecx, ebx
+    dec     ecx
+    imul    ecx, ecx, FR_SZ
+    rep     movsb
+    dec     dword ptr [rax+FD_N]
+    cmp     [rip+fd_active], r13d
+    jne     1b
+    mov     dword ptr [rip+fd_active], 0
+    jmp     1b
+8:  inc     ebx
+    jmp     2b
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# do_fd_tidy_ai - outliner.tidy_ai: the AI Assistant asked to sort the
+#   scene into folders (#441)
+do_fd_tidy_ai:
+    sub     rsp, 8
+    cmp     dword ptr [rip+ai_busy], 0
+    je      1f
+    lea     rdi, [rip+s_fd_aibusy]
+    call    log_line
+    jmp     9f
+1:  lea     rdi, [rip+s_fd_aiprompt]
+    lea     rsi, [rip+s_fd_empty]
+    lea     rdx, [rip+s_fd_ainote]
+    call    ai_send_as
+9:  add     rsp, 8
     ret
 
 # do_fd_del - outliner.folder_delete [contents]: the folder picked goes; its

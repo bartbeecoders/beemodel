@@ -1650,13 +1650,54 @@ ed_outliner_draw:
     mov     edx, ICON_CHEVRON_RIGHT
 24: mov     r8d, COL_TEXT_DIM
     call    draw_icon
-    mov     edi, [rip+ed_x]             # its icon
+    mov     eax, [r14+12]           # its colour (FR_COL, #441): a bar at
+    test    eax, eax                    #  the row's edge, the icon in it
+    jz      241f
+    cmp     eax, 8
+    ja      241f
+    lea     rcx, [rip+fd_colours]
+    mov     r8d, [rcx+rax*4]
+    mov     edi, [rip+ed_x]
+    add     edi, 1
+    mov     esi, r12d
+    mov     edx, 3
+    mov     ecx, ROW_H
+    call    fill_rect
+241: lea    rdi, [rip+wd_outl_fcol]     # a click on the icon: the next colour
+    mov     esi, [rip+ed_x]
+    add     esi, 12
+    add     esi, [rsp+12]
+    lea     edx, [r12-1]
+    mov     ecx, 20
+    xor     r8d, r8d
+    mov     r9d, r13d
+    call    wg
+    test    eax, eax
+    jz      242f
+    lea     rdi, [rip+outl_colarg]      # outliner.folder_color next <name>
+    lea     rsi, [rip+s_col_next]
+    call    outl_cpy
+    lea     rsi, [r14+16]
+    call    outl_cpy
+    lea     rax, [rip+outl_colarg]
+    lea     rdi, [rip+op_fd_col]
+    call    run_with_arg
+    mov     dword ptr [rip+redraw_again], 1
+    jmp     .Lod_fnext                  # (the block may have moved)
+242: mov    edi, [rip+ed_x]             # its icon
     add     edi, 14
     add     edi, [rsp+12]
     lea     esi, [r12+2]
     mov     edx, ICON_FOLDER
     mov     r8d, COL_ACCENT
-    call    draw_icon
+    mov     eax, [r14+12]
+    test    eax, eax
+    jz      243f
+    cmp     eax, 8
+    ja      243f
+    lea     rcx, [rip+fd_colours]
+    mov     r8d, [rcx+rax*4]
+243: call   draw_icon
     lea     eax, [r13+1]                # being renamed: a text field
     cmp     eax, [rip+outl_fren]
     jne     25f
@@ -1748,7 +1789,7 @@ ed_outliner_draw:
     add     edx, [rip+ed_h]
     sub     edx, WG_H+4
     mov     ecx, [rip+ed_w]
-    sub     ecx, 12+32
+    sub     ecx, 12+32+88               # (+, AI and Tidy beside it)
     lea     r8, [rip+outl_filter]
     xor     r9d, r9d
     call    wg
@@ -1765,6 +1806,28 @@ ed_outliner_draw:
     lea     rdx, [rip+s_filter_hint]
     mov     ecx, COL_TEXT_OFF
     call    draw_small
+    lea     rdi, [rip+wd_outl_tidy]     # Tidy, AI (#441)
+    mov     esi, [rip+ed_x]
+    add     esi, [rip+ed_w]
+    sub     esi, 34+88
+    mov     edx, [rip+ed_y]
+    add     edx, [rip+ed_h]
+    sub     edx, WG_H+4
+    mov     ecx, 46
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
+    lea     rdi, [rip+wd_outl_tidyai]
+    mov     esi, [rip+ed_x]
+    add     esi, [rip+ed_w]
+    sub     esi, 34+38
+    mov     edx, [rip+ed_y]
+    add     edx, [rip+ed_h]
+    sub     edx, WG_H+4
+    mov     ecx, 32
+    xor     r8d, r8d
+    xor     r9d, r9d
+    call    wg
     lea     rdi, [rip+wd_outl_fnew]     # + a folder (the selection into it)
     mov     esi, [rip+ed_x]
     add     esi, [rip+ed_w]
@@ -2915,6 +2978,17 @@ props_render:
     add     rsp, 8
     ret
 
+# outl_cpy(rdi=dest, rsi=text) -> rdi at its 0
+outl_cpy:
+1:  mov     al, [rsi]
+    mov     [rdi], al
+    test    al, al
+    jz      2f
+    inc     rsi
+    inc     rdi
+    jmp     1b
+2:  ret
+
 # page_heading(rdx=title; r12d = y, on)
 page_heading:
     mov     edi, [rip+ed_x]
@@ -3689,12 +3763,14 @@ outl_fsel:      .skip 4                 # (folder rows: none stays lit)
 outl_fclick:    .skip 4                 # the folder row clicked last,
 outl_fclick_t:  .skip 8                 #  when (a second click: rename)
 outl_fname:     .skip 64
+outl_colarg:    .skip 48                # "next <folder>" (#441)
 outl_x0:        .skip 4                 # the outliner last drawn: its rows' place
 outl_y0:        .skip 4
 outl_w0:        .skip 4
 outl_ghost:     .skip 128               # the drag's label
 outl_filter:    .skip 32
 .section .rodata
+s_col_next:     .asciz "next "
 s_u_parent:     .asciz "Parent"
 s_u_folder:     .asciz "Folder"
 s_dg_more:      .asciz " and "
@@ -3722,6 +3798,9 @@ WIDGET wd_outl_feye, WK_BUTTON, "outliner.folder_visible", "Show / Hide", flags=
 WIDGET wd_outl_fcam, WK_BUTTON, "outliner.folder_render", "Render / Leave Out", flags=WGF_NODRAW, tip="Render everything in this folder, or leave it out"
 WIDGET wd_outl_flock, WK_BUTTON, "outliner.folder_lock", "Lock / Unlock", flags=WGF_NODRAW, tip="Lock everything in this folder against selection and edits"
 WIDGET wd_outl_fnew, WK_BUTTON, "outliner.new_folder", "+", aux=op_fd_new, tip="A new folder, the selected objects in it (Ctrl+G)"
+WIDGET wd_outl_tidy, WK_BUTTON, "outliner.tidy", "Tidy", aux=op_fd_tidy, tip="Group the loose objects into coloured folders: lights, cameras, reference images and objects named alike (Chair, Chair.001 ...), and empty folders go"
+WIDGET wd_outl_tidyai, WK_BUTTON, "outliner.tidy_ai", "AI", aux=op_fd_tidy_ai, tip="Ask the AI Assistant to sort the scene into named, coloured folders by what the objects are"
+WIDGET wd_outl_fcol, WK_BUTTON, "outliner.folder_color", "Colour", flags=WGF_NODRAW, tip="The folder's colour: click for the next one (outliner.folder_color)"
 WIDGET wd_outl_cam,  WK_ROW, "outliner.render", "Render / Leave Out", cb=outl_cam_cb, tip="Include this object in renders, or leave it out (it still shows in the viewport)"
 WIDGET wd_outl_lock, WK_ROW, "outliner.lock", "Lock / Unlock", cb=outl_lock_cb, tip="Lock: clicks in the viewport pass through it (select it here instead)"
 WIDGET wd_outl_filter, WK_TEXT, "outliner.filter", "Filter", cb=outl_filter_cb, tip="Show only the objects whose name contains this (Enter)"

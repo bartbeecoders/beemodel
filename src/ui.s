@@ -636,6 +636,11 @@ ui_motion:
     sub     r12d, [rip+ptr_y]           # dy
     mov     [rip+ptr_x], edi
     mov     [rip+ptr_y], esi
+    cmp     dword ptr [rip+rn_pan_on], 0  # the Render area's pan (#446)
+    je      7609f
+    call    rn_view_motion
+    jmp     .Lmo_out
+7609:
     cmp     dword ptr [rip+uved_tm], 0  # UV editor: a transform, a pan, a
     jne     761f                        #  paint stroke
     cmp     dword ptr [rip+uved_paint_on], 0
@@ -1126,7 +1131,23 @@ ui_button:
     call    uved_press
     test    eax, eax
     jnz     .Lbt_done
-762: cmp     dword ptr [rip+pal_open], 0
+762: cmp     ebx, HIT_PANE               # the Render area: a drag pans (#446)
+    jne     7653f
+    cmp     dword ptr [rip+pal_open], 0
+    jne     7653f
+    cmp     dword ptr [rip+menu_open], 0
+    jge     7653f
+    mov     edi, [rip+active_area]
+    call    area_editor
+    cmp     eax, ED_RENDER
+    jne     7653f
+    mov     edi, r14d
+    mov     esi, [rip+ptr_x]
+    mov     edx, [rip+ptr_y]
+    call    rn_view_press
+    test    eax, eax
+    jnz     .Lbt_done
+7653: cmp     dword ptr [rip+pal_open], 0
     je      0f
     cmp     ebx, HIT_PALETTE            # click a result to run it
     jne     .Lbt_palclose
@@ -1497,6 +1518,7 @@ ui_button:
     jmp     .Lbt_done
 7700:
     call    uved_release                # (a UV pan ends)
+    call    rn_view_release             # (a Render area's pan)
     call    nodeed_release              # (a node editor drag too)
     call    tl_release                  # (and a timeline scrub)
     call    ae_release                  # (and key drags)
@@ -1644,7 +1666,11 @@ ui_axis:
     pop     rdi
     cmp     eax, ED_OUTLINER
     je      8f
-    cmp     eax, ED_ASSETS              # the Asset Browser: an online
+    cmp     eax, ED_RENDER              # the Render area zooms (#446)
+    jne     7611f
+    neg     edi
+    jmp     rn_view_wheel
+7611: cmp   eax, ED_ASSETS              # the Asset Browser: an online
     jne     9f                          #  source's rows
     jmp     assets_wheel
 7:

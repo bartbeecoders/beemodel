@@ -84,7 +84,7 @@ stays private to the module.
 | `imgread.s` | Images in memory (header + pixels), the PNG reader (all colour types, depths, filters, Adam7, tRNS) and the Radiance HDR reader |
 | `jpeg.s` | Baseline JPEG: Huffman, SSE float IDCT, bilinear chroma upsampling, YCbCr |
 | `exr.s` | OpenEXR writer: half-float scanlines, ZIP blocks through png.s's deflate |
-| `image.s` | The scene's images: load, name, save, `image.*` operators |
+| `image.s` | The scene's images: load, name, save, `image.*` operators. An image decoded from a file inside another (a .blend's packed one, a .glb's) or from a .bee keeps those bytes (`IR_SRC`, `image_adopt_src`) and `IM_DIRTY` 2: IMGD saves them as they are (a JPEG stays a JPEG) until painting sets it to 1 and it is saved as a PNG |
 | `expr.s` | Expressions with units (recursive descent, doubles): lengths to scene units, angles to radians, functions, parameter names |
 | `cad.s` | The CAD document (copy-on-write, shared with undo): scene units, parameters with cached evaluation and cycle detection, `param.*` / `scene.units` operators, the CADD chunk |
 | `sketch.s` | Sketch blocks (points, lines, circles, arcs, constraints), the residual equations, the Levenberg-Marquardt solver per component, rank / null-space DOF analysis, deletion with compaction |
@@ -200,7 +200,7 @@ stays private to the module.
 | `agent.s` | Agent safety: permission tiers (read-only / edit / files) and their operators, the activity ring, the AI Activity editor, one-click revert |
 | `script.s` | BeeScript: lexer, one-pass bytecode compiler, stack VM (doubles, texts, nil), semispace text heap, scene builtins, macro recorder |
 | `png.s` | PNG encoder: Sub/Up row filters, deflate (LZ77 hash matching, fixed Huffman), CRC-32, Adler-32 |
-| `formats.s` | `.bee`, OBJ and STL import/export, file operators, autosave |
+| `formats.s` | `.bee`, OBJ and STL import/export, file operators, autosave. `bee_pack` (#442) deflates every chunk of 4 KiB or more but THMB and IMGD into a ZCHK chunk (inner tag, raw size, raw deflate) when that saves a tenth, and writes version 2; `bee_unpack` inflates a version 2 file into a copy that the loader then reads as before. A scene with VGEO chunks (read in place from the file's pages) is written as version 1, as it was |
 | `json.s` | Lazy JSON reader (walks text on demand) and writer on the growable buffer |
 | `mcp.s` | MCP server: unix socket, JSON-RPC dispatch, tools, resources; `--mcp-bridge` relay |
 | `log.s` | String builder (`fmt_*`) and the console ring buffer |

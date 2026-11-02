@@ -7,6 +7,21 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Tidy the outliner** (#441): Tidy beside the outliner's filter groups
+  loose objects into coloured folders (lights, cameras, reference images,
+  objects named alike); AI asks the AI Assistant to sort the scene into
+  named folders. Folders have colours (click a folder's icon for the next
+  one, `outliner.folder_color`), saved in `.bee` files.
+- **Zoom and pan in the Render area** (#446): the wheel zooms about the
+  pointer, a drag pans, Fit shows the whole image; Settings opens the
+  Properties' Render tab. A narrow Render area's header shows the buttons
+  that fit instead of none.
+- **Smaller .bee files** (#442): big chunks (meshes, UVs, ...) are deflated
+  (the file says version 2; older BeeModels refuse it rather than lose
+  meshes), and a texture that came in as a JPEG (a .blend's packed one, a
+  .glb's) is saved as that JPEG, not as a PNG many times its size, until it
+  is painted. bender_import1.bee: 190 MB to 155 MB as it is (its textures
+  were saved as PNGs before); imported anew, its JPEG textures stay small.
 - **Number keys in the wheel menu** (#440): each entry shows a number;
   1-9, 0 and - (or the keypad's) pick it, a group's number opens its
   choices (numbered the same way), Backspace goes back to the ring. ui_tree
@@ -65,6 +80,11 @@ project uses [Semantic Versioning](https://semver.org/).
   virtualized and the library's thumbnails.
 
 ### Fixed
+- A dialog opened while the welcome screen showed was drawn under it, and
+  the welcome screen took the clicks (#444): a dialog now closes it.
+- A long path pasted or typed in the file dialog ran over everything beside
+  the field (#445): text fields scroll their text to keep the caret in view
+  and clip it.
 - **Ask AI box: prompts of several lines** (#436): the prompt wraps and
   the box grows with it (up to six lines, then it scrolls); Shift+Enter
   starts a new line, and a prompt can be about 4000 characters instead of

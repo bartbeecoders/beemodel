@@ -3854,12 +3854,14 @@ bl_image:
     ja      2f
     mov     rsi, rcx
 2:  mov     rdi, rax
+    mov     [rip+im_src_p], rdi         # (its bytes kept: saved as they are)
+    mov     [rip+im_src_n], rsi
     call    img_decode
     test    rax, rax
     jz      3f
     mov     rdi, rax
     lea     rsi, [rip+bl_name]
-    call    image_adopt
+    call    image_adopt_src
     test    eax, eax
     js      3f
     jmp     .Lim_got

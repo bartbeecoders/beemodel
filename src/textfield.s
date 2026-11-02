@@ -26,6 +26,7 @@
 .globl tfi_palette
 .globl tfi_widget
 .globl tf_caret
+.globl tf_scroll
 .globl tf_anchor
 .globl tf_px
 .globl tf_cap

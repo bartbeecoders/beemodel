@@ -12,6 +12,11 @@
 .globl img_count
 .globl img_tab
 .globl image_load
+.globl image_adopt_src
+.globl im_src_p
+.globl im_src_n
+.globl im_src_p
+.globl im_src_n
 .globl image_find
 .globl image_ptr
 .globl image_clear
@@ -33,6 +38,8 @@
 .equ IR_IMG,   32
 .equ IR_PATH,  40
 .equ IR_SZ,    1024                   # (online assets' paths are long)
+.equ IR_SRC,   IR_SZ-16               # the file it was decoded from, kept (#442:
+.equ IR_SRCN,  IR_SZ-8                #  saved as it was while IM_DIRTY is 2)
 .equ IM_W,     0
 .equ IM_H,     4
 .equ IM_FMT,   8
@@ -45,6 +52,9 @@
 img_tab:        .skip IR_SZ*MAX_IMAGES
 img_count:      .skip 4
 im_name:        .skip 32
+.align 8
+im_src_p:       .skip 8                 # image_adopt_src: the encoded bytes
+im_src_n:       .skip 8
 im_name_arg:    .skip 32
 im_word:        .skip 264
 
@@ -119,8 +129,11 @@ image_clear:
     jae     2f
     mov     edi, ebx
     call    rec
+    push    rax
     mov     rdi, [rax+IR_IMG]
     call    img_free
+    pop     rdi
+    call    src_drop                    # (and the file kept with it)
     inc     ebx
     jmp     1b
 2:  mov     dword ptr [rip+img_count], 0
@@ -237,7 +250,7 @@ image_load:
     mov     rsi, r12
     xor     ecx, ecx
 1:  mov     al, [rsi+rcx]
-    cmp     ecx, IR_SZ-IR_PATH-1
+    cmp     ecx, IR_SZ-IR_PATH-17
     jae     2f
     mov     [rdi+rcx], al
     inc     ecx
@@ -330,6 +343,78 @@ image_adopt:
     pop     rbx
     ret
 
+# image_adopt_src(rdi=decoded image, rsi=name; im_src_p / im_src_n = the
+#   bytes it was decoded from) -> eax = image_adopt's: and those bytes are
+#   kept, to be saved as they are while it is not painted (#442: a JPEG from
+#   a .blend or a .glb stays a JPEG in the .bee, not a PNG 8 times its size)
+image_adopt_src:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    image_adopt
+    mov     r12d, eax
+    test    eax, eax
+    js      9f
+    cmp     qword ptr [rip+im_src_p], 0
+    je      9f
+    mov     edi, eax
+    call    rec
+    mov     rdi, rax
+    mov     rsi, [rip+im_src_p]
+    mov     rdx, [rip+im_src_n]
+    call    src_keep
+    test    eax, eax
+    jz      9f
+    mov     dword ptr [rbx+IM_DIRTY], 2
+9:  mov     qword ptr [rip+im_src_p], 0
+    mov     eax, r12d
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# src_keep(rdi=record, rsi=bytes, rdx=length) -> eax = 1: a copy of them
+#   kept with the image (the one before let go)
+src_keep:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     r13, rdx
+    call    src_drop
+    xor     eax, eax
+    test    r13, r13
+    jz      9f
+    mov     rdi, r13
+    call    vmap
+    test    rax, rax
+    jz      9f
+    mov     [rbx+IR_SRC], rax
+    mov     [rbx+IR_SRCN], r13
+    mov     rdi, rax
+    mov     rsi, r12
+    mov     rcx, r13
+    rep     movsb
+    mov     eax, 1
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# src_drop(rdi=record) - its kept bytes let go
+src_drop:
+    mov     rax, rdi
+    mov     rdi, [rax+IR_SRC]
+    test    rdi, rdi
+    jz      1f
+    mov     rsi, [rax+IR_SRCN]
+    mov     qword ptr [rax+IR_SRC], 0
+    mov     qword ptr [rax+IR_SRCN], 0
+    jmp     vunmap
+1:  ret
+
 # image_load_keep(rdi=path) - load, or keep a place (no pixels) for a file
 #   that is missing now: materials and the world refer to images by index
 image_load_keep:
@@ -357,7 +442,7 @@ image_load_keep:
     mov     rsi, r12
     xor     ecx, ecx
 1:  mov     al, [rsi+rcx]
-    cmp     ecx, IR_SZ-IR_PATH-1
+    cmp     ecx, IR_SZ-IR_PATH-17
     jae     2f
     mov     [rdi+rcx], al
     inc     ecx
@@ -538,6 +623,8 @@ imgd_write:
     push    rbx
     push    r12
     push    r13
+    push    r14
+    sub     rsp, 8
     xor     ebx, ebx
 1:  cmp     ebx, [rip+img_count]
     jae     9f
@@ -547,9 +634,21 @@ imgd_write:
     jz      2f
     mov     edi, ebx
     call    rec
+    mov     r14, rax
     mov     r12, [rax+IR_IMG]
     mov     edi, ebx
     call    wb_u32
+    cmp     dword ptr [r12+IM_DIRTY], 2 # not painted since it was decoded:
+    jne     3f                          #  the file it came from (#442)
+    cmp     qword ptr [r14+IR_SRC], 0
+    je      3f
+    mov     edi, [r14+IR_SRCN]
+    call    wb_u32
+    mov     rsi, [r14+IR_SRC]
+    mov     rdx, [r14+IR_SRCN]
+    call    wb_bytes
+    jmp     2f
+3:
     mov     r13, [rip+wb_len]           # (the length, filled in after)
     xor     edi, edi
     call    wb_u32
@@ -565,7 +664,9 @@ imgd_write:
     mov     [rcx+r13], eax
 2:  inc     ebx
     jmp     1b
-9:  pop     r13
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -593,11 +694,19 @@ imgd_read:
     call    img_decode
     test    rax, rax
     jz      2f
-    mov     dword ptr [rax+IM_DIRTY], 1 # (stays inside the file)
-    push    rax
+    mov     dword ptr [rax+IM_DIRTY], 2 # (stays inside the file, its bytes
+    push    rax                         #  kept to be saved as they are)
     mov     edi, ebx
     call    rec
     pop     rcx
+    push    rax
+    push    rcx
+    mov     rdi, rax
+    lea     rsi, [r12+8]
+    mov     edx, r14d
+    call    src_keep
+    pop     rcx
+    pop     rax
     mov     rdi, [rax+IR_IMG]           # (a placeholder before)
     mov     [rax+IR_IMG], rcx
     test    rdi, rdi
@@ -682,7 +791,7 @@ images_read:
     ja      9f
     mov     ecx, [r12]
     add     r12, 4
-    cmp     ecx, IR_SZ-IR_PATH-1
+    cmp     ecx, IR_SZ-IR_PATH-17
     ja      9f
     lea     rax, [r12+rcx]
     cmp     rax, r13
