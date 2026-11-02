@@ -1456,6 +1456,7 @@ area_json:
 #  pies and tooltips opened there are drawn there (ovl_wnd, ovl_enter).
 # =============================================================================
 .globl cur_wnd
+.globl pw_waiting
 .globl ovl_wnd
 .globl ht_ovl
 .globl wnd_enter
@@ -1483,6 +1484,8 @@ pw_tear:        .long -1                # torn off in a drag: the compositor
 cur_wnd:        .skip 4                 # the window input is in
 ovl_wnd:        .skip 4                 #  and the one menus and the like are in
 ht_ovl:         .skip 4                 # (hit_test: they are in this one)
+pw_waiting:     .skip 4                 # a panel window skipped a frame: its
+                                        #  frame callback or buffer redraws
 pw_cw:          .skip PW_MAX*4          # each slot's logical size (configured)
 pw_ch:          .skip PW_MAX*4
 pw_drawn:       .skip PW_MAX*4          # drawn this frame: shown after
@@ -1853,6 +1856,7 @@ pw_draw_all:
     push    r14
     push    r15
     xor     ebx, ebx
+    mov     dword ptr [rip+pw_waiting], 0
 1:  lea     rax, [rip+pw_drawn]
     mov     dword ptr [rax+rbx*4], 0
     lea     rax, [rip+pw_node]
@@ -1863,7 +1867,7 @@ pw_draw_all:
     call    pw_ready
     test    eax, eax
     jnz     2f
-    mov     dword ptr [rip+redraw_again], 1     # (its frame later)
+    mov     dword ptr [rip+pw_waiting], 1       # (its frame later)
     jmp     8f
 2:  mov     edi, ebx
     call    pw_logical
@@ -1884,7 +1888,7 @@ pw_draw_all:
     call    pw_buffer
     test    rax, rax
     jnz     3f
-    mov     dword ptr [rip+redraw_again], 1
+    mov     dword ptr [rip+pw_waiting], 1
     jmp     8f
 3:  lea     rcx, [rip+pw_fb]
     mov     [rcx+rbx*8], rax

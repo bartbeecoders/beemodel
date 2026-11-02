@@ -1753,11 +1753,6 @@ pw_open:
     mov     esi, XDG_TOPLEVEL_SET_PARENT    #  of it (tiling compositors float it)
     mov     edx, [rip+id_toplevel]
     call    msg1
-    mov     edi, [r15+PW_TOP]
-    mov     esi, XDG_TOPLEVEL_SET_MIN_SIZE
-    mov     edx, 200
-    mov     ecx, 120
-    call    msg2
     mov     edi, [r15+PW_SURF]          # (no buffer yet: the configure comes)
     mov     esi, WL_SURFACE_COMMIT
     call    msg0
@@ -2117,15 +2112,16 @@ pw_event:
     mov     eax, [r14+4]
     mov     [rbx+PW_PENDH], eax
     jmp     7f
-.Lpe_cb:
-    mov     dword ptr [rbx+PW_CB], 0
-    mov     dword ptr [rip+dirty], 1
-    jmp     7f
+.Lpe_cb:                                # (a frame waits for it: drawn now;
+    mov     dword ptr [rbx+PW_CB], 0    #  else nothing to do - no redraw loop)
+    jmp     6f
 .Lpe_buf0:
     mov     dword ptr [rbx+PW_BUSY], 0
-    jmp     7f
+    jmp     6f
 .Lpe_buf1:
     mov     dword ptr [rbx+PW_BUSY+4], 0
+6:  mov     eax, [rip+pw_waiting]
+    or      [rip+dirty], eax
 7:  mov     eax, 1
 9:  pop     r15
     pop     r14
