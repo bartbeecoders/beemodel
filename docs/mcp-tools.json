@@ -1853,6 +1853,32 @@
    }
   },
   {
+   "name": "op_area_float",
+   "description": "Float Area - Take the active area out of the layout: it floats over the window as a panel you can move and resize (its header's dock button puts it back)",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
+   "name": "op_area_dock",
+   "description": "Dock Area - Put the active floating panel back into the layout, beside the area under it",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "arg": {
+      "type": "string",
+      "description": "optional argument, e.g. a file path"
+     }
+    }
+   }
+  },
+  {
    "name": "op_file_export_pdf",
    "description": "Export Drawing (PDF)... - A drawing of the selected meshes (or all): front, top and right views with hidden lines dashed, overall dimensions and a title block, on A4 as PDF: file.export_pdf <path>",
    "inputSchema": {

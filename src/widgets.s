@@ -90,6 +90,7 @@
 .align 8
 wg_list:        .skip WG_MAX*WG_SZ
 wg_n:           .skip 4
+wg_fmode:       .skip 4                 # wg_hit: the floating panels' filter
 wg_active:      .skip 4             # id pressed (0 = none)
 wg_scrubbed:    .skip 4
 wg_kfocus:      .skip 4             # the widget with the keyboard focus (0: none)
@@ -1625,7 +1626,20 @@ closed_toggle:                          # edi = id
 #   wins: it is on top), 0 if none. Scrolled regions themselves only take
 #   the wheel, so they are not hits.
 wg_hit:
-    lea     rax, [rip+wg_list]
+    push    rdi
+    push    rsi
+    sub     rsp, 8
+    call    float_wg_filter             # a floating panel hides what is under
+    mov     [rip+wg_fmode], eax         #  it (dock.s): r10..r9, the widgets
+    imul    edx, edx, WG_SZ             #  kept (1) or left out (2)
+    imul    ecx, ecx, WG_SZ
+    lea     r10, [rip+wg_list]
+    lea     r9, [r10+rcx]
+    add     r10, rdx
+    add     rsp, 8
+    pop     rsi
+    pop     rdi
+    lea     r11, [rip+wg_list]          # the floor (wg_visible keeps r9..r11)
     xor     ecx, ecx
     cmp     dword ptr [rip+dlg_open], 0 # a dialog: only its own widgets
     je      71f
@@ -1637,12 +1651,12 @@ wg_hit:
     je      73f
     mov     ecx, [rip+ov_floor]
 73: imul    ecx, ecx, WG_SZ
-    add     rax, rcx
+    add     r11, rcx
 0:  mov     ecx, [rip+wg_n]
     imul    ecx, ecx, WG_SZ
     lea     rdx, [rip+wg_list]
     add     rcx, rdx                    # one past the end
-1:  cmp     rcx, rax
+1:  cmp     rcx, r11
     jbe     8f
     sub     rcx, WG_SZ
     cmp     dword ptr [rcx+E_KIND], WK_SCROLL
@@ -1668,7 +1682,21 @@ wg_hit:
     pop     rcx
     test    eax, eax
     jz      1b
-    mov     eax, [rcx+E_ID]
+    mov     eax, [rip+wg_fmode]
+    cmp     eax, 1
+    jne     6f
+    cmp     rcx, r10                    # on a panel: its widgets alone
+    jb      1b
+    cmp     rcx, r9
+    jae     1b
+    jmp     7f
+6:  test    eax, eax                    # elsewhere: none of the panels'
+    jz      7f
+    cmp     rcx, r10
+    jb      7f
+    cmp     rcx, r9
+    jb      1b
+7:  mov     eax, [rcx+E_ID]
     ret
 8:  xor     eax, eax
     ret

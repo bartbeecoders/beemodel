@@ -11,6 +11,19 @@ project uses [Semantic Versioning](https://semver.org/).
   Camera to View or Ctrl+Alt+Numpad 0 (`view.camera_to_view`) moves the
   camera that renders to where the viewport looks from, pointing where it
   looks, and looks through it. A scene without a camera gets one.
+- **Docking and floating panels** (#419): drag an area's header onto
+  another area to dock it on that side (a tint shows where; the middle
+  swaps the two). Area › Float Area (right-click a header) floats an area
+  over the window as a panel you move by its header and resize by its
+  edges; the dock button in its header, Area › Dock Area or five guides
+  shown over the area under it put it back. Panels are kept with their
+  workspace, and ui_tree lists the areas.
+
+### Fixed
+- After passing over a widget scrolled out of view, the widget hit test
+  could look past a dialog's own widgets and past the start of the list.
+- A viewport moved by a split or a close keeps whether it was
+  orthographic and in Camera View.
 
 ## [1.3.1] - 2026-11-01
 

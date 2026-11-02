@@ -22,7 +22,8 @@ Everything BeeModel can do has a place in the window. The console, scripts and a
 
 The window is split into **areas**. Each area has a header with its editor type (click it to pick another), and buttons to split it, maximize it and close it. Drag the border between two areas to resize them.
 
-- **Swap** two areas: drag one's header onto the other.
+- **Dock** an area somewhere else: drag its header onto another area. A tint shows where it goes: near an edge (the outer 30%), it goes on that side and the other area is split in two; in the middle, the two swap. Editors keep what they show, and a viewport keeps its view.
+- **Float** an area: right-click its header › **Float Area**. It leaves the layout and floats over the window as a panel. Drag its header to move it and its left, right or bottom edge to resize it. While you drag it over an area, five guides show in that area's middle: release on one to dock the panel there (on that side, or swapped in the middle). The dock button in its header (or right-click › **Dock Area**) puts it back beside the area under it. Panels stay with their workspace.
 - **Join** two areas: drag an area's top-left corner into its neighbour.
 - **Workspaces** are saved layouts: Modeling, Sculpt, CAD, Shading, Animation and World, plus your own (**+** after the tabs). Switch with a click on a tab or with Ctrl+PageUp / PageDown. They are saved in `.bee` files and remembered for the next session.
 

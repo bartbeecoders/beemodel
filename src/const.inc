@@ -351,6 +351,7 @@
 .equ HIT_CPICK,         35            # the colour picker (index 1 inside it, 0 outside)
 .equ HIT_AREA_CORNER,   36            # an area's top-left corner (drag: join)
 .equ HIT_WHEEL,         37            # the wheel menu (wheel.s: index = what is there)
+.equ HIT_FLOAT_EDGE,    38            # a floating panel's edge (dock.s: index = panel | edges << 8)
 .equ KEY_SPACE,         57
 .equ KEY_F3,            61
 

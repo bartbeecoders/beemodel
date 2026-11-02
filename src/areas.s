@@ -51,14 +51,20 @@
 .globl console_ensure
 .globl area_editor
 .globl area_btn_ops
+.globl area_ortho
+.globl area_camv
+.globl editor_names
+.globl node_alloc
 
 # node layout (32 bytes)
 .equ N_KIND,    0
 .equ N_ED,      1
 .equ N_PARENT,  2
+.equ N_FLAGS,   3                       # NF_FLOAT: a floating panel (dock.s)
 .equ N_RATIO,   4                       # share of child a, 16.16
 .equ N_A,       8
 .equ N_B,       9
+.equ N_Z,       10                      # a panel's place in the stack (dock.s)
 .equ N_X,       12
 .equ N_Y,       16
 .equ N_W,       20
@@ -74,6 +80,7 @@
 .equ TYPE_BTN_W, 130
 .equ HDR_TITLE_W, 100                   # (room kept for the title: hdr_nbtn)
 .equ CAM_SZ,    24
+.equ NF_FLOAT,  1
 
 .macro NODE kind, ed, parent, ratio, a, b
     .byte \kind, \ed, \parent, 0
@@ -113,6 +120,7 @@ ed_h:           .skip 4
 ed_node:        .skip 4
 hit_area:       .skip 4
 drag_node:      .skip 4
+dl_oi:          .skip 4                 # draw_leaf: the header button's operator
 
 .section .rodata
 s_ed_viewport:  .asciz "3D Viewport"
@@ -159,6 +167,7 @@ s_no_room:      .asciz "  no room for more areas"
 editor_names:   .quad s_ed_viewport, s_ed_tools, s_ed_outliner, s_ed_props, s_ed_console, s_ed_activity, s_ed_render, s_ed_uved, s_ed_nodes, s_ed_assets, s_ed_timeline, s_ed_dopesheet, s_ed_graph, s_ed_versions, s_ed_prefs, s_ed_help, s_ed_ai
 editor_draw:    .quad ed_viewport_draw, ed_tools_draw, ed_outliner_draw, ed_props_draw, ed_console_draw, ed_activity_draw, ed_render_draw, ed_uved_draw, ed_nodes_draw, ed_assets_draw, ed_timeline_draw, ed_dopesheet_draw, ed_graph_draw, ed_versions_draw, ed_prefs_draw, ed_help_draw, ed_ai_draw
 area_btn_ops:   .quad op_area_close, op_area_split_stack, op_area_split_side, op_area_maximize
+                .quad op_area_dock      # (a floating panel's second button)
 items_area:     .quad op_area_type_vp, op_area_type_tools, op_area_type_outl
                 .quad op_area_type_props, op_area_type_console, op_area_type_activity, op_area_type_render
                 .quad op_area_type_uved, op_area_type_nodes, op_area_type_assets, op_area_type_timeline
@@ -245,6 +254,30 @@ cam_store:
     mov     [rdx+16], rcx
 9:  ret
 
+# cam_move(edi=from, esi=to) - a viewport's camera, orthographic and Camera
+#   View follow its content to another slot
+cam_move:
+    mov     edi, edi
+    mov     esi, esi
+    imul    eax, edi, CAM_SZ
+    lea     rcx, [rip+area_cams]
+    lea     rdx, [rcx+rax]
+    imul    eax, esi, CAM_SZ
+    lea     r8, [rcx+rax]
+    mov     rax, [rdx]
+    mov     [r8], rax
+    mov     rax, [rdx+8]
+    mov     [r8+8], rax
+    mov     rax, [rdx+16]
+    mov     [r8+16], rax
+    lea     rcx, [rip+area_ortho]
+    mov     eax, [rcx+rdi*4]
+    mov     [rcx+rsi*4], eax
+    lea     rcx, [rip+area_camv]
+    mov     eax, [rcx+rdi*4]
+    mov     [rcx+rsi*4], eax
+    ret
+
 # area_init - every area starts with the default camera
 area_init:
     push    rbx
@@ -294,7 +327,7 @@ area_layout:
     mov     ecx, [rip+cont_y1]
     sub     ecx, [rip+cont_y0]
     mov     [rax+N_H], ecx
-9:  ret
+9:  jmp     dock_clamp                  # the floating panels inside the window
 
 # split_size(edi=available, esi=ratio) -> eax = size of child a
 split_size:
@@ -449,7 +482,20 @@ area_hit:
     mov     ebx, edi
     mov     r12d, esi
     mov     dword ptr [rip+hit_area], -1
-    mov     r13d, [rip+area_maxed]
+    cmp     dword ptr [rip+ah_tree], 0  # a floating panel over the tree first
+    jne     0f
+    call    float_hit                   # (edi, esi: the point)
+    test    eax, eax
+    js      0f
+    mov     r13d, eax
+    test    edx, edx                    # on its edges: a resize
+    jz      .Lah_leaf
+    mov     [rip+hit_area], eax
+    shl     edx, 8
+    or      edx, eax
+    mov     eax, HIT_FLOAT_EDGE
+    jmp     .Lah_ret
+0:  mov     r13d, [rip+area_maxed]
     test    r13d, r13d
     jns     .Lah_leaf
     mov     r13d, [rip+area_root]
@@ -498,6 +544,8 @@ area_hit:
     call    set_body
     mov     edi, r13d
     call    node_ptr
+    test    byte ptr [rax+N_FLAGS], NF_FLOAT    # (not a panel's)
+    jnz     1f
     mov     ecx, ebx                    # the top-left corner (8 px): join
     sub     ecx, [rax+N_X]
     cmp     ecx, 8
@@ -534,6 +582,14 @@ area_hit:
     div     ecx
     mov     edx, eax
     mov     eax, HIT_AREA_BTN
+    mov     edi, r13d                   # a panel's second button: dock
+    call    node_ptr
+    test    byte ptr [rax+N_FLAGS], NF_FLOAT
+    mov     eax, HIT_AREA_BTN
+    jz      .Lah_ret
+    cmp     edx, 1
+    jne     .Lah_ret
+    mov     edx, 4
     jmp     .Lah_ret
 3:  mov     ecx, [rax+N_X]
     add     ecx, TYPE_BTN_W
@@ -749,13 +805,16 @@ area_draw_all:
     mov     edi, ebx
     cmp     ecx, K_LEAF
     jne     3f
+    test    byte ptr [rax+N_FLAGS], NF_FLOAT    # (the panels: after, on top)
+    jnz     4f
     call    draw_leaf
     jmp     4f
 3:  call    draw_splitter
 4:  inc     ebx
     cmp     ebx, MAX_NODES
     jb      2b
-9:  pop     r12
+9:  call    dock_draw                   # the floating panels
+    pop     r12
     pop     rbx
     ret
 
@@ -965,7 +1024,14 @@ draw_leaf:
 5:
     # header buttons: 0 close, 1 split stacked, 2 split side by side, 3 maximize
     xor     r13d, r13d
-4:  mov     r14d, [r12+N_X]
+4:  mov     eax, r13d                   # its operator (a panel: close, dock)
+    test    byte ptr [r12+N_FLAGS], NF_FLOAT
+    jz      40f
+    cmp     eax, 1
+    jne     40f
+    mov     eax, 4
+40: mov     [rip+dl_oi], eax
+    mov     r14d, [r12+N_X]
     add     r14d, [r12+N_W]
     sub     r14d, 4
     mov     eax, r13d
@@ -978,7 +1044,8 @@ draw_leaf:
     jne     5f
     cmp     ebx, [rip+hit_area]
     jne     5f
-    cmp     r13d, [rip+hover_idx]
+    mov     eax, [rip+dl_oi]
+    cmp     eax, [rip+hover_idx]
     jne     5f
     mov     edi, r14d
     mov     esi, [r12+N_Y]
@@ -995,9 +1062,10 @@ draw_leaf:
     add     edi, r14d
     lea     esi, [r15-8]
     lea     rax, [rip+hdr_icons]
-    mov     edx, [rax+r13*4]
+    mov     ecx, [rip+dl_oi]
+    mov     edx, [rax+rcx*4]
     mov     r8d, COL_TEXT
-    cmp     r13d, 3                     # maximize: accent while maximized
+    cmp     ecx, 3                      # maximize: accent while maximized
     jne     7f
     cmp     ebx, [rip+area_maxed]
     jne     7f
@@ -3050,28 +3118,16 @@ split_with:
     movzx   edi, byte ptr [rdi+N_B]
     call    node_ptr
     mov     [rax+N_PARENT], bpl
-1:  mov     edi, ebx                    # move the camera with the content
-    call    cam_ptr
-    mov     rsi, rax
-    mov     edi, ebp
-    call    cam_ptr
-    mov     rcx, [rsi]
-    mov     [rax], rcx
-    mov     rcx, [rsi+8]
-    mov     [rax+8], rcx
-    mov     rcx, [rsi+16]
-    mov     [rax+16], rcx
-    mov     edi, r15d                   # the new leaf starts with the same view
-    call    cam_ptr
-    mov     rdx, [rsi]
-    mov     [rax], rdx
-    mov     rdx, [rsi+8]
-    mov     [rax+8], rdx
-    mov     rdx, [rsi+16]
-    mov     [rax+16], rdx
+1:  mov     edi, ebx                    # move the view with the content
+    mov     esi, ebp
+    call    cam_move
+    mov     edi, ebx                    # the new leaf starts with the same view
+    mov     esi, r15d
+    call    cam_move
     mov     edi, r15d                   # new leaf
     call    node_ptr
     mov     byte ptr [rax+N_KIND], K_LEAF
+    mov     byte ptr [rax+N_FLAGS], 0
     mov     [rax+N_ED], r14b
     mov     [rax+N_PARENT], bl
     mov     edi, ebx                    # node becomes the split
@@ -3123,8 +3179,17 @@ close_leaf:
     push    r12
     push    r13
     mov     ebx, edi
-    cmp     ebx, [rip+area_root]
+    call    node_ptr                    # a floating panel: its slot freed
+    test    byte ptr [rax+N_FLAGS], NF_FLOAT
+    jz      0f
+    mov     byte ptr [rax+N_KIND], 0
+    mov     byte ptr [rax+N_FLAGS], 0
+    mov     ebp, -2                     # (no sibling, no parent)
+    mov     r12d, -2
+    jmp     .Lcl_refs
+0:  cmp     ebx, [rip+area_root]
     je      .Lcl_root
+    mov     edi, ebx
     call    node_ptr
     movzx   r12d, byte ptr [rax+N_PARENT]
     mov     edi, r12d
@@ -3153,24 +3218,19 @@ close_leaf:
     movzx   edi, byte ptr [r13+N_B]
     call    node_ptr
     mov     [rax+N_PARENT], r12b
-2:  mov     edi, ebp                    # sibling camera moves with it
-    call    cam_ptr
-    mov     rsi, rax
-    mov     edi, r12d
-    call    cam_ptr
-    mov     rcx, [rsi]
-    mov     [rax], rcx
-    mov     rcx, [rsi+8]
-    mov     [rax+8], rcx
-    mov     rcx, [rsi+16]
-    mov     [rax+16], rcx
+2:  mov     edi, ebp                    # sibling view moves with it
+    mov     esi, r12d
+    call    cam_move
     mov     edi, ebx                    # free both slots
     call    node_ptr
     mov     byte ptr [rax+N_KIND], 0
     mov     edi, ebp
     call    node_ptr
     mov     byte ptr [rax+N_KIND], 0
+.Lcl_refs:
     lea     rdi, [rip+active_area]      # fix references
+    call    fix_ref
+    lea     rdi, [rip+dk_ref]           # (dock.s: the area it docks beside)
     call    fix_ref
     lea     rdi, [rip+vp_area]
     call    fix_ref
@@ -3264,6 +3324,13 @@ op_area_split:                          # rdi = split kind
     mov     edi, [rip+active_area]
     test    edi, edi
     js      9f
+    push    rsi                         # (not a floating panel)
+    push    rdi
+    call    area_is_float
+    pop     rdi
+    pop     rsi
+    test    eax, eax
+    jnz     9f
     push    rsi
     push    rdi
     call    node_ptr
@@ -3286,12 +3353,16 @@ op_area_close_x:
 9:  ret
 
 op_area_max:
+    mov     edi, [rip+active_area]      # (not a floating panel)
+    call    area_is_float
+    test    eax, eax
+    jnz     9f
     mov     eax, [rip+active_area]
     cmp     eax, [rip+area_maxed]
     jne     1f
     mov     eax, -1
 1:  mov     [rip+area_maxed], eax
-    ret
+9:  ret
 op_check_maxed:
     xor     eax, eax
     cmp     dword ptr [rip+area_maxed], -1
@@ -3438,7 +3509,7 @@ op_toggle_console:
 
 .section .rodata
 .align 4
-hdr_icons:      .long ICON_CLOSE, ICON_SPLIT_V, ICON_SPLIT_H, ICON_MAXIMIZE
+hdr_icons:      .long ICON_CLOSE, ICON_SPLIT_V, ICON_SPLIT_H, ICON_MAXIMIZE, ICON_DOCK
 tool_icons:     .long ICON_SELECT, ICON_MOVE, ICON_ROTATE, ICON_SCALE, ICON_CUBE
                 .long ICON_SPHERE, ICON_CYLINDER, ICON_PLANE, ICON_LIGHT, ICON_CAMERA
 .align 8
@@ -3659,6 +3730,9 @@ WIDGET wd_obj_scale, WK_FLOAT, "object.scale", , step=0.005, dec=3, flags=WGF_CO
 # hdr_nbtn(rdi=node) -> eax = the header buttons shown (1..4): from the right,
 #   close, stack, side by side, maximize - as many as leave the title room
 hdr_nbtn:
+    mov     eax, 2                      # a floating panel: close, dock
+    test    byte ptr [rdi+N_FLAGS], NF_FLOAT
+    jnz     9f
     mov     ecx, [rdi+N_W]
     mov     eax, 4
 1:  imul    edx, eax, HDR_BTN_W
