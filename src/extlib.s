@@ -4,15 +4,22 @@
 #
 #  A source has a kind, an id, a title, where it lives and its licence. The
 #  first one is NVIDIA SimReady (huggingface.co/datasets/nvidia/simready-
-#  assets, CC-BY 4.0); ~/BeeModel/sources.txt adds more, a line each:
+#  assets, CC-BY 4.0), the second SimReady Central (github.com/NVIDIA-
+#  Omniverse/simready-central: an index of other makers' datasets, each
+#  asset pinned to a commit; see "kind Central" below); ~/BeeModel/
+#  sources.txt adds more, a line each:
 #      simready <id> <owner/dataset> <title ...>
+#      central  <id> <github owner/repo> <title ...>
 #  (a Hugging Face dataset in SimReady's layout: an asset a folder, its USD
 #  root simready_usd/sm_<asset>_01.usd(a), thumbnails in .thumbs/256x256).
-#  New kinds plug in at ex_kind_*: the catalog's URLs, a thumbnail's, the
-#  files an asset needs.
+#  A kind is the catalog's steps (ex_cat_next), a thumbnail's URL, the
+#  files an asset needs (ex_file_next) and where they come from.
 #
 #  Everything a source gives is kept under ~/BeeModel/cache/<id>/:
-#    catalog.tsv     name TAB root (path in the dataset) TAB category
+#    catalog.tsv     name TAB root (path in the cache) TAB category; central:
+#                    TAB dataset TAB commit TAB folder TAB licence TAB thumbnail
+#    bom/<name>.json (central) an asset's package's file list
+#    idx/            (central) the datasets' index files
 #    thumbs/<name>.png
 #    assets/<name>/...  the files its USD needs, as in the dataset
 #  The catalog is made once (lib.refresh again): the dataset's folders
@@ -28,7 +35,8 @@
 #  Windows 11), reaped by ex_tick from the main loop; the status bar shows
 #  a download's progress. Without a window (--eval, --run) each operation
 #  runs to its end before it returns.
-#  BEEMODEL_HF_URL replaces https://huggingface.co (tests serve a fixture).
+#  BEEMODEL_HF_URL replaces https://huggingface.co, BEEMODEL_GH_URL GitHub's
+#  API and raw files (tests serve fixtures).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -52,6 +60,8 @@
 .globl ex_scroll
 .globl ex_progress
 .globl ex_src_lic
+.globl ex_a_title
+.globl ex_a_lic
 
 .equ WNOHANG,   1
 .equ EX_MAXSRC, 8
@@ -67,6 +77,8 @@
 .equ ES_LIC,    188                     # 48
 .equ ES_SZ,     240
 .equ EK_SIMREADY, 1
+.equ EK_CENTRAL, 2                      # SimReady Central: a GitHub index of
+                                        #  Hugging Face datasets
 
 # an asset of the catalog
 .equ EX_NAME,   0                       # 64
@@ -77,7 +89,14 @@
 .equ EX_HAVE,   228                     # files: 0 not here, 1 coming, 2 here
 .equ EX_PX,     232                     # the tile's pixels (thumb_load), 0
 .equ EX_HIT,    240                     # shown by the search
-.equ EX_SZ,     256
+.equ EX_BOM,    244                     # (central) its package's file list:
+                                        #  0 not asked, 1 coming, 2 here, 3 none
+.equ EX_REPO,   256                     # 64 (central) its dataset (owner/name)
+.equ EX_REV,    320                     # 48 the commit it was reviewed at
+.equ EX_LIC,    368                     # 24 its licence
+.equ EX_FOLDER, 392                     # 64 its folder in the dataset
+.equ EX_THP,    456                     # 128 its thumbnail (in the folder)
+.equ EX_SZ,     640
 
 # a child
 .equ SL_PID,    0
@@ -94,6 +113,19 @@
 .equ SW_THUMB,  3
 .equ SW_LIST,   4                       # an asset's listing page
 .equ SW_FILE,   5                       # an asset's file
+.equ SW_GHTREE, 6                       # (central) the index's files
+.equ SW_DSINFO, 7                       # a dataset's licence, gating
+.equ SW_DSIDX,  8                       # a dataset's index file
+.equ SW_BOM,    9                       # an asset's bill of materials
+
+# a dataset of SimReady Central
+.equ EX_MAXDS,  64
+.equ DS_REPO,   0                       # 96 (owner/name)
+.equ DS_LIC,    96                      # 24
+.equ DS_STATE,  120                     # 0 new, 1 info coming, 2 open, 3 index
+                                        #  coming, 4 index here, 8 failed,
+                                        #  9 left out (not public / open)
+.equ DS_SZ,     128
 
 # a file to fetch
 .equ EF_PATH,   0                       # 256 (dataset path)
@@ -121,6 +153,57 @@ s_sr_id:    .asciz "simready"
 s_sr_title: .asciz "NVIDIA SimReady"
 s_sr_repo:  .asciz "nvidia/simready-assets"
 s_sr_lic:   .asciz "CC-BY 4.0"
+s_sc_id:    .asciz "central"
+s_sc_title: .asciz "SimReady Central"
+s_sc_repo:  .asciz "NVIDIA-Omniverse/simready-central"
+s_sc_lic:   .asciz "per dataset"
+s_gh:       .asciz "https://api.github.com"
+s_ghraw:    .asciz "https://raw.githubusercontent.com"
+s_ghenv:    .asciz "BEEMODEL_GH_URL="
+s_repos:    .asciz "/repos/"
+s_gtree:    .asciz "/git/trees/main?recursive=1"
+s_rawsub:   .asciz "/main/submissions/"
+s_subm:     .asciz "submissions/"
+s_resrev:   .asciz "/resolve/"
+s_bomrel:   .asciz ".metadata/com.nvidia.simready.packaging.bom.json"
+s_bomdir:   .asciz "/bom/"
+s_json:     .asciz ".json"
+s_idxdir:   .asciz "/idx/"
+s_infoext:  .asciz ".info"
+s_txtext:   .asciz ".txt"
+s_ghjson:   .asciz "/index.json"
+s_slash:    .asciz "/"
+s_thdir:    .asciz "simready_usd/.thumbs/"
+s_srdir:    .asciz "simready_usd/"
+s_th256:    .asciz "/256x256/"
+s_lic_pre:  .asciz "license:"
+s_ds_skip:  .asciz "  left out (not public, or not an open licence): "
+s_no_root:  .asciz "  no USD root in the asset's package: "
+s_open_a:   .asciz " ("
+s_open_b:   .asciz ")"
+k_tree:     .asciz "tree"
+k_items:    .asciz "items"
+k_relpath:  .asciz "relative_path"
+k_gated:    .asciz "gated"
+k_private:  .asciz "private"
+k_tags:     .asciz "tags"
+v_blob:     .asciz "blob"
+x_usd:      .asciz ".usd"
+x_usda:     .asciz ".usda"
+x_usdc:     .asciz ".usdc"
+x_nc:       .asciz "-nc"
+x_nd:       .asciz "-nd"
+ex_open_lic:                            # licences taken in (prefixes)
+    .asciz "cc0"
+    .asciz "cc-by"
+    .asciz "apache"
+    .asciz "mit"
+    .asciz "bsd"
+    .asciz "cdla-permissive"
+    .asciz "odc-by"
+    .asciz "pddl"
+    .asciz "unlicense"
+    .byte 0
 s_sources:  .asciz "/sources.txt"
 s_cache:    .asciz "/cache/"
 s_catalog:  .asciz "/catalog.tsv"
@@ -215,6 +298,14 @@ ex_rbuf:    .skip 8                     # read-buffer of a downloaded file
 ex_scroll:  .skip 4                     # the browser's rows scrolled
 ex_static:  .skip 4                     # lib.get ... static: no bodies, joints
 ex_nosave:  .skip 4                     # lib.get ... nosave: not into the library
+ex_gh:      .skip 256                   # https://api.github.com (or the test's)
+ex_ghraw:   .skip 256                   # https://raw.githubusercontent.com
+ex_ds:      .skip DS_SZ*EX_MAXDS        # SimReady Central's datasets
+ex_nds:     .skip 4
+ex_bp1:     .skip 512
+ex_bp2:     .skip 512
+ex_bp3:     .skip 512
+ex_bp4:     .skip 512
 
 .text
 
@@ -235,8 +326,36 @@ ex_init:
     lea     rdx, [rip+s_sr_title]
     lea     rcx, [rip+s_sr_repo]
     call    ex_src_set
-    mov     dword ptr [rip+ex_nsrc], 1
-    lea     rdi, [rip+ex_base]          # the base URL
+    lea     rdi, [rip+ex_src+ES_SZ]     # SimReady Central
+    lea     rsi, [rip+s_sc_id]
+    lea     rdx, [rip+s_sc_title]
+    lea     rcx, [rip+s_sc_repo]
+    call    ex_src_set
+    lea     rdi, [rip+ex_src+ES_SZ]
+    call    ex_src_central
+    mov     dword ptr [rip+ex_nsrc], 2
+    lea     rdi, [rip+ex_gh]            # GitHub (its API, its raw files)
+    lea     rsi, [rip+s_gh]
+    call    ex_cpy0
+    lea     rdi, [rip+ex_ghraw]
+    lea     rsi, [rip+s_ghraw]
+    call    ex_cpy0
+    lea     rdi, [rip+s_ghenv]
+    call    getenv
+    test    rax, rax
+    jz      2f
+    cmp     byte ptr [rax], 0
+    je      2f
+    push    rax
+    push    rax
+    lea     rdi, [rip+ex_gh]
+    mov     rsi, rax
+    call    ex_cpy0
+    pop     rax
+    pop     rsi
+    lea     rdi, [rip+ex_ghraw]
+    call    ex_cpy0
+2:  lea     rdi, [rip+ex_base]          # the base URL
     lea     rsi, [rip+s_hf]
     call    ex_cpy0
     lea     rdi, [rip+s_hfenv]
@@ -301,15 +420,25 @@ ex_src_set:
     pop     rbx
     ret
 
+# ex_src_central(rdi=source record) - made a SimReady Central kind source
+#   (its repo: the GitHub index; licences per dataset)
+ex_src_central:
+    mov     dword ptr [rdi+ES_KIND], EK_CENTRAL
+    lea     rdi, [rdi+ES_LIC]
+    lea     rsi, [rip+s_sc_lic]
+    mov     edx, 47
+    jmp     ex_ncpy
+
 # ex_sources_parse(rdi=text, rsi=end) - "simready <id> <repo> <title...>"
-#   lines (# comments) into more sources
+#   and "central <id> <github owner/repo> <title...>" lines (# comments)
+#   into more sources
 ex_sources_parse:
     push    rbx
     push    r12
     push    r13
     push    r14
     push    r15
-    sub     rsp, 112
+    sub     rsp, 208
     mov     rbx, rdi
     mov     r12, rsi
 .Lsp_line:
@@ -319,11 +448,14 @@ ex_sources_parse:
     jae     .Lsp_out
     mov     rsi, rbx                    # its four words (the title: the rest)
     lea     rdi, [rsp]
+    mov     edx, 23
     call    ex_lword                    # kind
     lea     rdi, [rsp+24]
+    mov     edx, 23
     call    ex_lword                    # id
     lea     rdi, [rsp+48]
-    call    ex_lword                    # repo (first 48 bytes)
+    mov     edx, 95
+    call    ex_lword                    # repo
     mov     r13, rsi                    # title: to the line's end
     mov     r14, rsi
 1:  cmp     r14, r12
@@ -333,16 +465,24 @@ ex_sources_parse:
     inc     r14
     jmp     1b
 2:  lea     rbx, [r14+1]
+    mov     r15d, EK_CENTRAL
+    lea     rdi, [rsp]
+    lea     rsi, [rip+s_sc_id]
+    call    str_eq
+    test    eax, eax
+    jnz     21f
+    mov     r15d, EK_SIMREADY
     lea     rdi, [rsp]
     lea     rsi, [rip+s_sr_id]
     call    str_eq
     test    eax, eax
     jz      .Lsp_line
+21:
     cmp     byte ptr [rsp+24], 0
     je      .Lsp_line
     cmp     byte ptr [rsp+48], 0
     je      .Lsp_line
-    lea     rdi, [rsp+72]               # the title (trimmed, at most 39)
+    lea     rdi, [rsp+144]               # the title (trimmed, at most 39)
     mov     rsi, r13
     xor     ecx, ecx
 3:  cmp     rsi, r14
@@ -362,16 +502,23 @@ ex_sources_parse:
     lea     rax, [rip+ex_src]
     add     rdi, rax
     lea     rsi, [rsp+24]
-    lea     rdx, [rsp+72]
+    lea     rdx, [rsp+144]
     cmp     byte ptr [rdx], 0
     jne     5f
     mov     rdx, rsi
 5:  lea     rcx, [rsp+48]
+    push    rdi
+    push    rdi
     call    ex_src_set
-    inc     dword ptr [rip+ex_nsrc]
+    pop     rdi
+    pop     rdi
+    cmp     r15d, EK_CENTRAL
+    jne     6f
+    call    ex_src_central
+6:  inc     dword ptr [rip+ex_nsrc]
     jmp     .Lsp_line
 .Lsp_out:
-    add     rsp, 112
+    add     rsp, 208
     pop     r15
     pop     r14
     pop     r13
@@ -379,7 +526,7 @@ ex_sources_parse:
     pop     rbx
     ret
 
-# ex_lword(rsi=text, rdi=out (24 bytes), r12=end) - the next word of the line
+# ex_lword(rsi=text, rdi=out, edx=at most, r12=end) - the next word of the line
 #   (spaces skipped; a # starts a comment: no more words), rsi after it
 ex_lword:
     xor     ecx, ecx
@@ -407,7 +554,7 @@ ex_lword:
     je      8f
     cmp     al, 13
     je      5f
-    cmp     ecx, 23
+    cmp     ecx, edx
     jae     5f
     mov     [rdi+rcx], al
     inc     ecx
@@ -683,6 +830,34 @@ ex_load:
     mov     edx, 127
     call    ex_field
     mov     r14, rsi
+    lea     rdi, [rip+ex_word]          # category (else: from the name)
+    mov     rsi, r14
+    mov     edx, 31
+    call    ex_field
+    mov     r14, rsi
+    cmp     byte ptr [rip+ex_word], 0
+    je      1f
+    lea     rdi, [r15+EX_CAT]
+    lea     rsi, [rip+ex_word]
+    mov     edx, 31
+    call    ex_ncpy
+1:  lea     rdi, [r15+EX_REPO]          # (central) dataset, commit, folder,
+    mov     rsi, r14                    #  licence, thumbnail
+    mov     edx, 63
+    call    ex_field
+    lea     rdi, [r15+EX_REV]
+    mov     edx, 47
+    call    ex_field
+    lea     rdi, [r15+EX_FOLDER]
+    mov     edx, 63
+    call    ex_field
+    lea     rdi, [r15+EX_LIC]
+    mov     edx, 23
+    call    ex_field
+    lea     rdi, [r15+EX_THP]
+    mov     edx, 127
+    call    ex_field
+    mov     r14, rsi
 .Lld_next:                              # to the next line
     cmp     r14, r13
     jae     .Lld_done
@@ -812,6 +987,8 @@ ex_save:
     push    rbx
     push    r12
     sub     rsp, 8
+    call    ex_iscentral
+    mov     [rsp], eax
     call    wb_reset
     xor     ebx, ebx
 1:  cmp     ebx, [rip+ex_n]
@@ -829,7 +1006,19 @@ ex_save:
     call    wb_char
     lea     rsi, [r12+EX_CAT]
     call    wb_str
-    mov     edi, 10
+    cmp     dword ptr [rsp], 0
+    je      3f
+    lea     rsi, [r12+EX_REPO]          # (central) dataset, commit, folder,
+    call    ex_wb_tab                   #  licence, thumbnail
+    lea     rsi, [r12+EX_REV]
+    call    ex_wb_tab
+    lea     rsi, [r12+EX_FOLDER]
+    call    ex_wb_tab
+    lea     rsi, [r12+EX_LIC]
+    call    ex_wb_tab
+    lea     rsi, [r12+EX_THP]
+    call    ex_wb_tab
+3:  mov     edi, 10
     call    wb_char
     inc     ebx
     jmp     1b
@@ -846,8 +1035,16 @@ ex_save:
     pop     rbx
     ret
 
-# ex_match(rdi=search words (0: all)) - EX_HIT on the assets whose name or
-#   category has every word (any case)
+# ex_wb_tab(rsi=text) - a TAB, then the text, into wb
+ex_wb_tab:
+    push    rsi
+    mov     edi, 9
+    call    wb_char
+    pop     rsi
+    jmp     wb_str
+
+# ex_match(rdi=search words (0: all)) - EX_HIT on the assets whose name,
+#   category and dataset have every word (any case)
 ex_match:
     push    rbx
     push    r12
@@ -862,7 +1059,18 @@ ex_match:
     mov     dword ptr [r13+EX_HIT], 1
     test    r12, r12
     jz      3f
-    lea     rdi, [r13+EX_NAME]
+    lea     rdi, [rip+ex_bp4]           # "name category dataset"
+    lea     rsi, [r13+EX_NAME]
+    call    ex_cpy0
+    mov     byte ptr [rdi], ' '
+    inc     rdi
+    lea     rsi, [r13+EX_CAT]
+    call    ex_cpy0
+    mov     byte ptr [rdi], ' '
+    inc     rdi
+    lea     rsi, [r13+EX_REPO]
+    call    ex_cpy0
+    lea     rdi, [rip+ex_bp4]
     mov     rsi, r12
     call    ex_words_in
     mov     [r13+EX_HIT], eax
@@ -1224,6 +1432,14 @@ ex_done:
     je      ex_list_done
     cmp     eax, SW_FILE
     je      ex_file_done
+    cmp     eax, SW_GHTREE
+    je      ex_gt_done
+    cmp     eax, SW_DSINFO
+    je      ex_dsinfo_done
+    cmp     eax, SW_DSIDX
+    je      ex_dsidx_done
+    cmp     eax, SW_BOM
+    je      ex_bom_done
     ret
 
 # =============================================================================
@@ -1241,6 +1457,7 @@ ex_refresh:
     mov     dword ptr [rip+ex_n], 0
     mov     dword ptr [rip+ex_state], 1
     mov     dword ptr [rip+ex_batch], 0
+    mov     dword ptr [rip+ex_nds], 0
     lea     rdi, [rip+ex_nexturl]       # the first page
     lea     rsi, [rip+ex_base]
     call    ex_cpy0
@@ -1258,16 +1475,45 @@ ex_refresh:
     ret
 
 # ex_cat_next(ebx=free slot) -> eax = 1 when a catalog step started
+#   (SimReady: one step at a time; Central: its datasets side by side)
 ex_cat_next:
+    mov     ecx, [rip+ex_state]
+    cmp     ecx, 1
+    je      1f
+    cmp     ecx, 2
+    je      1f
+    xor     eax, eax
+    ret
+1:  call    ex_iscentral
+    test    eax, eax
+    jnz     5f
     xor     eax, eax
     cmp     dword ptr [rip+ex_catbusy], 0
     jne     9f
     mov     ecx, [rip+ex_state]
     cmp     ecx, 1
     je      ex_tree_start
-    cmp     ecx, 2
-    je      ex_info_start
+    jmp     ex_info_start
+5:  xor     eax, eax
+    cmp     dword ptr [rip+ex_state], 2
+    je      ex_ds_next
+    cmp     dword ptr [rip+ex_catbusy], 0
+    jne     9f
+    jmp     ex_gt_start
 9:  ret
+
+# ex_iscentral -> eax = 1 when the source shown is a SimReady Central one
+ex_iscentral:
+    mov     eax, [rip+ex_cur]
+    test    eax, eax
+    js      8f
+    call    ex_src_rec
+    cmp     dword ptr [rax+ES_KIND], EK_CENTRAL
+    sete    al
+    movzx   eax, al
+    ret
+8:  xor     eax, eax
+    ret
 
 # ex_tree_start - a page of the dataset's top folders
 ex_tree_start:
@@ -1652,6 +1898,1345 @@ ex_info_done:
     pop     rbx
     ret
 
+# =============================================================================
+#  Catalog building (kind Central: SimReady Central's GitHub index)
+#
+#  github.com/<repo>/submissions/<owner>/<dataset>: one line an asset, a link
+#  to its package pinned to the commit it was reviewed at
+#    https://huggingface.co/datasets/<owner>/<dataset>/resolve/<commit>/
+#        <folder>/com.nvidia.simready.packaging.json
+#  The index's files come from one tree request (GitHub's API), then for
+#  each dataset side by side: its licence and gating (the Hugging Face API:
+#  only public datasets under an open licence are taken in) and its index
+#  file (raw.githubusercontent.com). Datasets that are already a source of
+#  their own (nvidia/simready-assets) are left out. The assets are added in
+#  the index's order once all are here; an asset whose folder name another
+#  dataset has already is named <folder>_<owner>.
+#  An asset's package says which files it has (.metadata/com.nvidia.
+#  simready.packaging.bom.json): fetched when its tile shows or it is
+#  placed, it gives the USD root (the USD a thumbnail is made of, beside it
+#  in simready_usd/), the thumbnail (256x256 first) and the files with their
+#  sizes. Everything comes from the pinned commit.
+# =============================================================================
+# ex_ds_rec(eax=dataset) -> rax = its record
+ex_ds_rec:
+    imul    rax, rax, DS_SZ
+    lea     rcx, [rip+ex_ds]
+    add     rax, rcx
+    ret
+
+# ex_gt_start(ebx=free slot) - the index's file list (GitHub's tree API)
+ex_gt_start:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     eax, ebx
+    call    ex_slotp
+    mov     r12, rax
+    mov     dword ptr [r12+SL_WHAT], SW_GHTREE
+    lea     rdi, [r12+SL_URL]           # <api>/repos/<repo>/git/trees/main?recursive=1
+    lea     rsi, [rip+ex_gh]
+    call    ex_cpy0
+    lea     rsi, [rip+s_repos]
+    call    ex_cat0
+    mov     eax, [rip+ex_cur]
+    push    rdi
+    call    ex_src_rec
+    pop     rdi
+    lea     rsi, [rax+ES_REPO]
+    call    ex_cat0
+    lea     rsi, [rip+s_gtree]
+    call    ex_cat0
+    call    ex_srcdir
+    lea     rdi, [r12+SL_OUT]
+    lea     rsi, [rip+s_ghjson]
+    call    ex_in
+    mov     edi, ebx
+    xor     esi, esi
+    call    ex_spawn
+    test    eax, eax
+    jz      8f
+    mov     dword ptr [rip+ex_catbusy], 1
+    mov     eax, 1
+    jmp     9f
+8:  mov     dword ptr [rip+ex_state], 3
+    lea     rdi, [rip+s_no_curl]
+    call    log_line
+    xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_gt_done(rdi=slot) - each submissions/<owner>/<dataset> file: a dataset
+#   (not one that is a source of its own); then the datasets' turn
+ex_gt_done:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     dword ptr [rip+ex_catbusy], 0
+    cmp     dword ptr [rbx+SL_STAT], 0
+    jne     .Lgt_fail
+    lea     rdi, [rbx+SL_OUT]
+    call    ex_jread
+    test    rax, rax
+    jz      .Lgt_fail
+    mov     rsi, rax
+    lea     rdi, [rip+k_tree]
+    call    j_find
+    test    rax, rax
+    jz      .Lgt_bad
+    mov     rsi, rax
+    call    j_first
+.Lgt_el:
+    test    rax, rax
+    jz      .Lgt_end
+    mov     r12, rax
+    mov     rsi, r12                    # a file ("blob")
+    lea     rdi, [rip+k_type]
+    call    j_find
+    test    rax, rax
+    jz      .Lgt_nx
+    mov     rsi, rax
+    lea     rdi, [rip+ex_word]
+    mov     edx, 64
+    call    j_str
+    lea     rdi, [rip+ex_word]
+    lea     rsi, [rip+v_blob]
+    call    str_eq
+    test    eax, eax
+    jz      .Lgt_nx
+    mov     rsi, r12                    # submissions/<owner>/<dataset>
+    lea     rdi, [rip+k_path]
+    call    j_find
+    test    rax, rax
+    jz      .Lgt_nx
+    mov     rsi, rax
+    lea     rdi, [rip+ex_bp1]
+    mov     edx, 200
+    call    j_str
+    test    eax, eax
+    jle     .Lgt_nx
+    lea     rdi, [rip+ex_bp1]
+    lea     rsi, [rip+s_subm]
+    call    ex_prefix
+    test    eax, eax
+    jz      .Lgt_nx
+    lea     r13, [rip+ex_bp1+12]        # <owner>/<dataset>: one '/', inside
+    mov     rdi, r13
+    lea     rsi, [rip+s_slash]
+    call    ex_strstr
+    test    rax, rax
+    jz      .Lgt_nx
+    cmp     rax, r13
+    je      .Lgt_nx
+    cmp     byte ptr [rax+1], 0
+    je      .Lgt_nx
+    lea     rdi, [rax+1]
+    lea     rsi, [rip+s_slash]
+    call    ex_strstr
+    test    rax, rax
+    jnz     .Lgt_nx
+    mov     rdi, r13
+    call    ex_dup_repo
+    test    eax, eax
+    jnz     .Lgt_nx
+    mov     eax, [rip+ex_nds]
+    cmp     eax, EX_MAXDS
+    jae     .Lgt_nx
+    call    ex_ds_rec
+    mov     r14, rax
+    mov     rdi, rax
+    mov     ecx, DS_SZ/8
+    xor     eax, eax
+    rep     stosq
+    lea     rdi, [r14+DS_REPO]
+    mov     rsi, r13
+    mov     edx, 95
+    call    ex_ncpy
+    inc     dword ptr [rip+ex_nds]
+.Lgt_nx:
+    mov     rsi, r12
+    call    j_next
+    jmp     .Lgt_el
+.Lgt_end:
+    call    ex_junmap
+    mov     dword ptr [rip+ex_state], 2  # the datasets, next
+    jmp     .Lgt_out
+.Lgt_bad:
+    call    ex_junmap
+.Lgt_fail:
+    mov     dword ptr [rip+ex_state], 3
+    lea     rdi, [rip+s_cat_fail]
+    lea     rsi, [rbx+SL_URL]
+    call    log_pair
+.Lgt_out:
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_dup_repo(rdi=owner/dataset) -> eax = 1 when a SimReady source has it
+ex_dup_repo:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     r12, rdi
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+ex_nsrc]
+    jae     8f
+    mov     eax, ebx
+    call    ex_src_rec
+    cmp     dword ptr [rax+ES_KIND], EK_SIMREADY
+    jne     2f
+    lea     rdi, [rax+ES_REPO]
+    mov     rsi, r12
+    call    str_eq
+    test    eax, eax
+    jnz     7f
+2:  inc     ebx
+    jmp     1b
+7:  mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_ds_next(ebx=free slot) -> eax = 1 when a dataset's step started; none
+#   left to start and none coming: the catalog is made
+ex_ds_next:
+    push    rbx
+    push    r12
+    push    r13
+    xor     r12d, r12d
+1:  cmp     r12d, [rip+ex_nds]
+    jae     5f
+    mov     eax, r12d
+    call    ex_ds_rec
+    mov     r13, rax
+    mov     eax, [r13+DS_STATE]
+    test    eax, eax
+    jz      2f
+    cmp     eax, 2
+    je      3f
+4:  inc     r12d
+    jmp     1b
+2:  mov     edi, ebx                    # its licence first
+    mov     esi, r12d
+    call    ex_dsinfo_start
+    test    eax, eax
+    jz      4b
+    jmp     9f
+3:  mov     edi, ebx                    # then its index file
+    mov     esi, r12d
+    call    ex_dsidx_start
+    test    eax, eax
+    jz      4b
+    jmp     9f
+5:  xor     r12d, r12d                  # all started: any still coming?
+6:  cmp     r12d, [rip+ex_nds]
+    jae     7f
+    mov     eax, r12d
+    call    ex_ds_rec
+    mov     eax, [rax+DS_STATE]
+    cmp     eax, 1
+    je      8f
+    cmp     eax, 3
+    je      8f
+    inc     r12d
+    jmp     6b
+7:  call    ex_central_finish
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_ds_out(rdi=slot record, esi=dataset, rdx=extension) - SL_OUT =
+#   <cache>/idx/<dataset><extension> (its folder made)
+ex_ds_out:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12d, esi
+    mov     r13, rdx
+    call    ex_srcdir
+    lea     rdi, [rbx+SL_OUT]
+    lea     rsi, [rip+s_idxdir]
+    call    ex_in
+    mov     esi, r12d
+    call    ex_utoa
+    mov     rsi, r13
+    call    ex_cat0
+    lea     rdi, [rbx+SL_OUT]
+    call    ex_fdirs
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_dsinfo_start(edi=slot, esi=dataset) -> eax = 1 started: the Hugging
+#   Face API's word on the dataset (licence, gated, private)
+ex_dsinfo_start:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12d, esi
+    mov     eax, ebx
+    call    ex_slotp
+    mov     r13, rax
+    mov     dword ptr [r13+SL_WHAT], SW_DSINFO
+    mov     [r13+SL_IDX], r12d
+    lea     rdi, [r13+SL_URL]           # <hf>/api/datasets/<owner>/<dataset>
+    lea     rsi, [rip+ex_base]
+    call    ex_cpy0
+    lea     rsi, [rip+s_api_tree]
+    call    ex_cat0
+    push    rdi
+    mov     eax, r12d
+    call    ex_ds_rec
+    pop     rdi
+    lea     rsi, [rax+DS_REPO]
+    call    ex_cat0
+    mov     rdi, r13
+    mov     esi, r12d
+    lea     rdx, [rip+s_infoext]
+    call    ex_ds_out
+    mov     ecx, 1
+    jmp     ex_ds_spawn
+
+# ex_dsidx_start(edi=slot, esi=dataset) -> eax = 1 started: its index file
+#   (<raw>/<repo>/main/submissions/<owner>/<dataset>)
+ex_dsidx_start:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12d, esi
+    mov     eax, ebx
+    call    ex_slotp
+    mov     r13, rax
+    mov     dword ptr [r13+SL_WHAT], SW_DSIDX
+    mov     [r13+SL_IDX], r12d
+    lea     rdi, [r13+SL_URL]
+    lea     rsi, [rip+ex_ghraw]
+    call    ex_cpy0
+    mov     byte ptr [rdi], '/'
+    inc     rdi
+    mov     eax, [rip+ex_cur]
+    push    rdi
+    call    ex_src_rec
+    pop     rdi
+    lea     rsi, [rax+ES_REPO]
+    call    ex_cat0
+    lea     rsi, [rip+s_rawsub]
+    call    ex_cat0
+    push    rdi
+    mov     eax, r12d
+    call    ex_ds_rec
+    pop     rdi
+    lea     rsi, [rax+DS_REPO]
+    call    ex_cat0
+    mov     rdi, r13
+    mov     esi, r12d
+    lea     rdx, [rip+s_txtext]
+    call    ex_ds_out
+    mov     ecx, 3
+    # (on to ex_ds_spawn)
+
+# ex_ds_spawn(ebx=slot, r12d=dataset, ecx=its state while it comes; rbx,
+#   r12, r13 pushed) -> eax = 1 started (else the dataset failed)
+ex_ds_spawn:
+    mov     r13d, ecx
+    mov     edi, ebx
+    xor     esi, esi
+    call    ex_spawn
+    mov     edx, eax
+    mov     eax, r12d
+    call    ex_ds_rec
+    mov     dword ptr [rax+DS_STATE], 8
+    test    edx, edx
+    jz      8f
+    mov     [rax+DS_STATE], r13d
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_dsinfo_done(rdi=slot) - the dataset taken in (public, an open licence:
+#   its licence kept) or left out (logged)
+ex_dsinfo_done:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     eax, [rbx+SL_IDX]
+    call    ex_ds_rec
+    mov     r12, rax
+    mov     dword ptr [r12+DS_STATE], 8
+    cmp     dword ptr [rbx+SL_STAT], 0
+    jne     .Ldi_fail
+    lea     rdi, [rbx+SL_OUT]
+    call    ex_jread
+    test    rax, rax
+    jz      .Ldi_fail
+    mov     r13, rax
+    mov     byte ptr [r12+DS_LIC], 0
+    xor     r15d, r15d                  # 1: not public
+    mov     rsi, r13                    # "gated": false, else "auto"/"manual"
+    lea     rdi, [rip+k_gated]
+    call    j_find
+    test    rax, rax
+    jz      2f
+1:  mov     cl, [rax]
+    cmp     cl, ' '
+    je      11f
+    cmp     cl, 9
+    je      11f
+    cmp     cl, 10
+    je      11f
+    cmp     cl, 13
+    jne     12f
+11: inc     rax
+    jmp     1b
+12: cmp     cl, 'f'
+    je      2f
+    mov     r15d, 1
+2:  mov     rsi, r13                    # "private": true
+    lea     rdi, [rip+k_private]
+    call    j_find
+    test    rax, rax
+    jz      3f
+    mov     rsi, rax
+    call    j_bool
+    test    eax, eax
+    jz      3f
+    mov     r15d, 1
+3:  mov     rsi, r13                    # "tags": [..., "license:cc-by-4.0", ...]
+    lea     rdi, [rip+k_tags]
+    call    j_find
+    test    rax, rax
+    jz      5f
+    mov     rsi, rax
+    call    j_first
+4:  test    rax, rax
+    jz      5f
+    mov     r14, rax
+    mov     rsi, r14
+    lea     rdi, [rip+ex_bp1]
+    mov     edx, 64
+    call    j_str
+    test    eax, eax
+    jle     41f
+    lea     rdi, [rip+ex_bp1]
+    lea     rsi, [rip+s_lic_pre]
+    call    ex_prefix
+    test    eax, eax
+    jz      41f
+    lea     rdi, [r12+DS_LIC]
+    lea     rsi, [rip+ex_bp1+8]
+    mov     edx, 23
+    call    ex_ncpy
+41: mov     rsi, r14
+    call    j_next
+    jmp     4b
+5:  call    ex_junmap
+    test    r15d, r15d
+    jnz     .Ldi_skip
+    lea     rdi, [r12+DS_LIC]
+    call    ex_lic_ok
+    test    eax, eax
+    jz      .Ldi_skip
+    mov     dword ptr [r12+DS_STATE], 2
+    jmp     .Ldi_out
+.Ldi_skip:                              # "  left out ...: owner/dataset (licence)"
+    mov     dword ptr [r12+DS_STATE], 9
+    call    fmt_reset
+    lea     rdi, [rip+s_ds_skip]
+    call    fmt_str
+    lea     rdi, [r12+DS_REPO]
+    call    fmt_str
+    cmp     byte ptr [r12+DS_LIC], 0
+    je      6f
+    lea     rdi, [rip+s_open_a]
+    call    fmt_str
+    lea     rdi, [r12+DS_LIC]
+    call    fmt_str
+    lea     rdi, [rip+s_open_b]
+    call    fmt_str
+6:  lea     rdi, [rip+fmt_buf]
+    call    log_line
+    jmp     .Ldi_out
+.Ldi_fail:
+    lea     rdi, [rip+s_cat_fail]
+    lea     rsi, [rbx+SL_URL]
+    call    log_pair
+.Ldi_out:
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_lic_ok(rdi=licence id) -> eax = 1 when it is an open one (cc0, cc-by
+#   without -nc / -nd, apache, mit, bsd, ...)
+ex_lic_ok:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    cmp     byte ptr [rbx], 0
+    je      8f
+    mov     rdi, rbx
+    lea     rsi, [rip+x_nc]
+    call    ex_has
+    test    eax, eax
+    jnz     8f
+    mov     rdi, rbx
+    lea     rsi, [rip+x_nd]
+    call    ex_has
+    test    eax, eax
+    jnz     8f
+    lea     r12, [rip+ex_open_lic]
+1:  cmp     byte ptr [r12], 0
+    je      8f
+    mov     rdi, rbx
+    mov     rsi, r12
+    call    ex_prefix
+    test    eax, eax
+    jnz     7f
+    mov     rdi, r12
+    call    ex_end
+    lea     r12, [rdi+1]
+    jmp     1b
+7:  mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_dsidx_done(rdi=slot) - the dataset's index file here (or it failed)
+ex_dsidx_done:
+    push    rbx
+    mov     rbx, rdi
+    mov     eax, [rbx+SL_IDX]
+    call    ex_ds_rec
+    mov     dword ptr [rax+DS_STATE], 4
+    cmp     dword ptr [rbx+SL_STAT], 0
+    je      9f
+    mov     dword ptr [rax+DS_STATE], 8
+    lea     rdi, [rip+s_cat_fail]
+    lea     rsi, [rbx+SL_URL]
+    call    log_pair
+9:  pop     rbx
+    ret
+
+# ex_central_finish - every index file here: their assets, in order; the
+#   catalog saved
+ex_central_finish:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    xor     r12d, r12d
+.Lcf_ds:
+    cmp     r12d, [rip+ex_nds]
+    jae     .Lcf_done
+    mov     eax, r12d
+    call    ex_ds_rec
+    mov     r13, rax
+    cmp     dword ptr [r13+DS_STATE], 4
+    jne     .Lcf_nx
+    call    ex_srcdir                   # <cache>/idx/<n>.txt
+    lea     rdi, [rip+ex_path]
+    lea     rsi, [rip+s_idxdir]
+    call    ex_in
+    mov     esi, r12d
+    call    ex_utoa
+    lea     rsi, [rip+s_txtext]
+    call    ex_cat0
+    lea     rdi, [rip+ex_path]
+    call    file_read
+    test    rax, rax
+    jz      .Lcf_nx
+    mov     rbx, rax
+    mov     r14, rdx
+    mov     r15, rax
+.Lcf_line:
+    lea     rdx, [rbx+r14]
+    cmp     r15, rdx
+    jae     .Lcf_unmap
+    lea     rdi, [rip+ex_path2]         # the line (CR, LF off)
+    xor     ecx, ecx
+1:  cmp     r15, rdx
+    jae     2f
+    mov     al, [r15]
+    inc     r15
+    cmp     al, 10
+    je      2f
+    cmp     al, 13
+    je      1b
+    cmp     ecx, 2000
+    jae     1b
+    mov     [rdi+rcx], al
+    inc     ecx
+    jmp     1b
+2:  mov     byte ptr [rdi+rcx], 0
+    lea     rdi, [rip+ex_path2]
+    mov     rsi, r13
+    call    ex_index_line
+    jmp     .Lcf_line
+.Lcf_unmap:
+    mov     rdi, rbx
+    mov     rsi, r14
+    call    file_unmap
+.Lcf_nx:
+    inc     r12d
+    jmp     .Lcf_ds
+.Lcf_done:
+    mov     dword ptr [rip+ex_state], 0
+    call    ex_save
+    call    ex_have_scan
+    call    ex_cat_report
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_index_line(rdi=line, rsi=dataset record) - its asset added: .../resolve/
+#   <commit>/<folder>/...; the same folder again (a later review): its commit
+ex_index_line:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rbx, rdi
+    mov     r12, rsi
+    mov     rdi, rbx
+    lea     rsi, [rip+s_resrev]
+    call    ex_strstr
+    test    rax, rax
+    jz      9f
+    lea     rsi, [rax+9]
+    lea     rdi, [rip+ex_bp1]           # the commit
+    mov     edx, 47
+    call    ex_upto_slash
+    test    eax, eax
+    jz      9f
+    lea     rdi, [rip+ex_bp2]           # the folder
+    mov     edx, 63
+    call    ex_upto_slash
+    test    eax, eax
+    jz      9f
+    lea     rdi, [r12+DS_REPO]
+    lea     rsi, [rip+ex_bp2]
+    call    ex_find_rf
+    test    eax, eax
+    js      1f
+    mov     edi, eax
+    call    ex_rec
+    lea     rdi, [rax+EX_REV]
+    lea     rsi, [rip+ex_bp1]
+    mov     edx, 47
+    call    ex_ncpy
+    jmp     9f
+1:  lea     rdi, [rip+ex_bp3]           # its name: the folder, or
+    lea     rsi, [rip+ex_bp2]           #  <folder>_<owner> when taken
+    call    ex_cpy0
+    lea     rdi, [rip+ex_bp3]
+    call    ex_find
+    test    eax, eax
+    js      2f
+    lea     rdi, [rip+ex_bp3]
+    call    ex_end
+    mov     byte ptr [rdi], '_'
+    inc     rdi
+    lea     rsi, [r12+DS_REPO]
+    mov     edx, 63
+    call    ex_ncpy_owner
+    mov     byte ptr [rip+ex_bp3+63], 0
+    lea     rdi, [rip+ex_bp3]
+    call    ex_find
+    test    eax, eax
+    jns     9f
+2:  lea     rsi, [rip+ex_bp3]
+    call    ex_add
+    test    rax, rax
+    jz      9f
+    mov     r13, rax
+    lea     rdi, [r13+EX_CAT]           # its category: the dataset's owner
+    lea     rsi, [r12+DS_REPO]
+    mov     edx, 31
+    call    ex_ncpy_owner
+    lea     rdi, [r13+EX_REPO]
+    lea     rsi, [r12+DS_REPO]
+    mov     edx, 63
+    call    ex_ncpy
+    lea     rdi, [r13+EX_REV]
+    lea     rsi, [rip+ex_bp1]
+    mov     edx, 47
+    call    ex_ncpy
+    lea     rdi, [r13+EX_FOLDER]
+    lea     rsi, [rip+ex_bp2]
+    mov     edx, 63
+    call    ex_ncpy
+    lea     rdi, [r13+EX_LIC]
+    lea     rsi, [r12+DS_LIC]
+    mov     edx, 23
+    call    ex_ncpy
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_find_rf(rdi=dataset, rsi=folder) -> eax = the asset from there, -1
+ex_find_rf:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    sub     rsp, 8
+    mov     r12, rdi
+    mov     r13, rsi
+    xor     ebx, ebx
+1:  cmp     ebx, [rip+ex_n]
+    jae     8f
+    mov     edi, ebx
+    call    ex_rec
+    mov     r14, rax
+    lea     rdi, [r14+EX_FOLDER]
+    mov     rsi, r13
+    call    str_eq
+    test    eax, eax
+    jz      2f
+    lea     rdi, [r14+EX_REPO]
+    mov     rsi, r12
+    call    str_eq
+    test    eax, eax
+    jnz     7f
+2:  inc     ebx
+    jmp     1b
+7:  mov     eax, ebx
+    jmp     9f
+8:  mov     eax, -1
+9:  add     rsp, 8
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ---- an asset's package (central) -------------------------------------------
+# ex_bomfile(rdi=asset record) - ex_path = <cache>/bom/<name>.json
+ex_bomfile:
+    push    rbx
+    mov     rbx, rdi
+    call    ex_srcdir
+    lea     rdi, [rip+ex_path]
+    lea     rsi, [rip+s_bomdir]
+    call    ex_in
+    lea     rsi, [rbx+EX_NAME]
+    call    ex_cat0
+    lea     rsi, [rip+s_json]
+    call    ex_cat0
+    pop     rbx
+    ret
+
+# ex_url_rev(rdi=slot record, rsi=asset record) - SL_URL = <hf>/datasets/
+#   <dataset>/resolve/<commit>/<folder>/ (rdi at its 0)
+ex_url_rev:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12, rsi
+    lea     rdi, [rbx+SL_URL]
+    lea     rsi, [rip+ex_base]
+    call    ex_cpy0
+    lea     rsi, [rip+s_resolve]
+    call    ex_cat0
+    lea     rsi, [r12+EX_REPO]
+    call    ex_cat0
+    lea     rsi, [rip+s_resrev]
+    call    ex_cat0
+    lea     rsi, [r12+EX_REV]
+    call    ex_cat0
+    mov     byte ptr [rdi], '/'
+    inc     rdi
+    lea     rsi, [r12+EX_FOLDER]
+    call    ex_cat0
+    mov     byte ptr [rdi], '/'
+    inc     rdi
+    mov     byte ptr [rdi], 0
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_bom_start(edi=slot, rsi=asset record) -> eax = 1: its package's file
+#   list asked for
+ex_bom_start:
+    push    rbx
+    push    r12
+    push    r13
+    mov     ebx, edi
+    mov     r12, rsi
+    mov     eax, ebx
+    call    ex_slotp
+    mov     r13, rax
+    mov     dword ptr [r13+SL_WHAT], SW_BOM
+    mov     rax, r12                    # (its asset)
+    sub     rax, [rip+ex_tab]
+    xor     edx, edx
+    mov     ecx, EX_SZ
+    div     rcx
+    mov     [r13+SL_IDX], eax
+    mov     rdi, r13
+    mov     rsi, r12
+    call    ex_url_rev
+    lea     rsi, [rip+s_bomrel]
+    call    ex_cat0
+    mov     rdi, r12
+    call    ex_bomfile
+    lea     rdi, [r13+SL_OUT]
+    lea     rsi, [rip+ex_path]
+    call    ex_cpy0
+    lea     rsi, [rip+s_tmp]
+    call    ex_cat0
+    lea     rdi, [r13+SL_OUT]
+    call    ex_fdirs
+    mov     edi, ebx
+    xor     esi, esi
+    call    ex_spawn
+    test    eax, eax
+    jz      8f
+    mov     dword ptr [r12+EX_BOM], 1
+    mov     eax, 1
+    jmp     9f
+8:  mov     dword ptr [r12+EX_BOM], 3
+    xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_bom_done(rdi=slot) - the package's file list here: its root and
+#   thumbnail (kept in the catalog)
+ex_bom_done:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     edi, [rbx+SL_IDX]
+    cmp     edi, [rip+ex_n]
+    jae     9f
+    call    ex_rec
+    mov     r12, rax
+    mov     dword ptr [r12+EX_BOM], 3
+    cmp     dword ptr [rbx+SL_STAT], 0
+    jne     9f
+    lea     rdi, [rip+ex_path2]         # the .part into place
+    lea     rsi, [rbx+SL_OUT]
+    call    ex_cpy0
+    sub     rdi, 5
+    mov     byte ptr [rdi], 0
+    lea     rdi, [rbx+SL_OUT]
+    lea     rsi, [rip+ex_path2]
+    call    plat_rename
+    mov     rdi, r12
+    call    ex_bom_parse
+    test    eax, eax
+    jz      9f
+    mov     dword ptr [r12+EX_BOM], 2
+    cmp     dword ptr [rip+ex_state], 0 # (a catalog being made saves itself)
+    jne     9f
+    call    ex_save
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_bom_ready(rdi=asset record) -> eax = its package's state (EX_BOM): one
+#   in the cache is read the first time
+ex_bom_ready:
+    push    rbx
+    mov     rbx, rdi
+    mov     eax, [rbx+EX_BOM]
+    test    eax, eax
+    jnz     9f
+    mov     rdi, rbx
+    call    ex_bomfile
+    lea     rdi, [rip+ex_path]
+    call    ex_exists
+    test    eax, eax
+    jz      9f
+    mov     rdi, rbx
+    call    ex_bom_parse
+    mov     ecx, 3
+    mov     edx, 2
+    test    eax, eax
+    cmovnz  ecx, edx
+    mov     [rbx+EX_BOM], ecx
+    mov     eax, ecx
+9:  pop     rbx
+    ret
+
+# ex_relpath(rdi=package item, rsi=out (190)) -> eax = its relative_path's
+#   length, -1
+ex_relpath:
+    push    rbx
+    mov     rbx, rsi
+    mov     rsi, rdi
+    lea     rdi, [rip+k_relpath]
+    call    j_find
+    test    rax, rax
+    jz      8f
+    mov     rsi, rax
+    mov     rdi, rbx
+    mov     edx, 190
+    call    j_str
+    jmp     9f
+8:  mov     eax, -1
+9:  pop     rbx
+    ret
+
+# ex_bom_parse(rdi=asset record) -> eax = 1 when its package's file list was
+#   read: EX_ROOT = <name>/simready_usd/<root> (the USD a thumbnail in
+#   simready_usd/.thumbs/<size>/<root>.png is of, 256x256 first; else the
+#   first USD in simready_usd/), EX_THP = that thumbnail (or none)
+ex_bom_parse:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     rdi, rbx
+    call    ex_bomfile
+    lea     rdi, [rip+ex_path]
+    call    ex_jread
+    test    rax, rax
+    jz      .Lbp_no
+    mov     rsi, rax
+    lea     rdi, [rip+k_items]
+    call    j_find
+    test    rax, rax
+    jz      .Lbp_bad
+    mov     r12, rax                    # the items
+    mov     byte ptr [rbx+EX_ROOT], 0
+    mov     byte ptr [rbx+EX_THP], 0
+    mov     rsi, r12
+    call    j_first
+    mov     r13, rax
+.Lbp_th:                                # each thumbnail ...
+    test    r13, r13
+    jz      .Lbp_first
+    mov     rdi, r13
+    lea     rsi, [rip+ex_bp1]
+    call    ex_relpath
+    test    eax, eax
+    jle     .Lbp_thn
+    lea     rdi, [rip+ex_bp1]
+    lea     rsi, [rip+s_thdir]
+    call    ex_prefix
+    test    eax, eax
+    jz      .Lbp_thn
+    lea     rdi, [rip+ex_bp1]
+    lea     rsi, [rip+s_png]
+    call    ex_suffix
+    test    eax, eax
+    jz      .Lbp_thn
+    lea     rsi, [rip+ex_bp1]           # ... of simready_usd/<its name>.usd*
+    call    ex_basename
+    mov     r14, rax
+    lea     rdi, [rip+ex_bp2]
+    lea     rsi, [rip+s_srdir]
+    call    ex_cpy0
+    mov     rsi, r14
+    call    ex_cat0
+    sub     rdi, 4
+    mov     byte ptr [rdi], 0
+    lea     rdi, [rip+ex_bp2]
+    call    ex_isusd
+    test    eax, eax
+    jz      .Lbp_thn
+    mov     rsi, r12                    # ... that is in the package
+    call    j_first
+    mov     r15, rax
+1:  test    r15, r15
+    jz      .Lbp_thn
+    mov     rdi, r15
+    lea     rsi, [rip+ex_bp3]
+    call    ex_relpath
+    test    eax, eax
+    jle     2f
+    lea     rdi, [rip+ex_bp3]
+    lea     rsi, [rip+ex_bp2]
+    call    str_eq
+    test    eax, eax
+    jnz     3f
+2:  mov     rsi, r15
+    call    j_next
+    mov     r15, rax
+    jmp     1b
+3:  cmp     byte ptr [rbx+EX_ROOT], 0   # the first; a 256x256 one before others
+    je      4f
+    lea     rdi, [rbx+EX_THP]
+    lea     rsi, [rip+s_th256]
+    call    ex_has
+    test    eax, eax
+    jnz     .Lbp_thn
+    lea     rdi, [rip+ex_bp1]
+    lea     rsi, [rip+s_th256]
+    call    ex_has
+    test    eax, eax
+    jz      .Lbp_thn
+4:  mov     rdi, rbx
+    lea     rsi, [rip+ex_bp2]
+    call    ex_setroot
+    lea     rdi, [rbx+EX_THP]
+    lea     rsi, [rip+ex_bp1]
+    mov     edx, 127
+    call    ex_ncpy
+.Lbp_thn:
+    mov     rsi, r13
+    call    j_next
+    mov     r13, rax
+    jmp     .Lbp_th
+.Lbp_first:                             # no thumbnail: the first USD there
+    cmp     byte ptr [rbx+EX_ROOT], 0
+    jne     .Lbp_ok
+    mov     rsi, r12
+    call    j_first
+    mov     r13, rax
+5:  test    r13, r13
+    jz      .Lbp_ok
+    mov     rdi, r13
+    lea     rsi, [rip+ex_bp1]
+    call    ex_relpath
+    test    eax, eax
+    jle     6f
+    lea     rdi, [rip+ex_bp1]
+    lea     rsi, [rip+s_srdir]
+    call    ex_prefix
+    test    eax, eax
+    jz      6f
+    lea     rdi, [rip+ex_bp1+13]        # (right in simready_usd/)
+    lea     rsi, [rip+s_slash]
+    call    ex_strstr
+    test    rax, rax
+    jnz     6f
+    lea     rdi, [rip+ex_bp1]
+    call    ex_isusd
+    test    eax, eax
+    jz      6f
+    mov     rdi, rbx
+    lea     rsi, [rip+ex_bp1]
+    call    ex_setroot
+    jmp     .Lbp_ok
+6:  mov     rsi, r13
+    call    j_next
+    mov     r13, rax
+    jmp     5b
+.Lbp_ok:
+    call    ex_junmap
+    mov     eax, 1
+    jmp     9f
+.Lbp_bad:
+    call    ex_junmap
+.Lbp_no:
+    xor     eax, eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_setroot(rdi=asset record, rsi=path in its folder) - EX_ROOT =
+#   <name>/<path> (as in the cache)
+ex_setroot:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12, rsi
+    lea     rdi, [rip+ex_bp4]
+    lea     rsi, [rbx+EX_NAME]
+    call    ex_cpy0
+    mov     byte ptr [rdi], '/'
+    inc     rdi
+    mov     rsi, r12
+    call    ex_cpy0
+    lea     rdi, [rbx+EX_ROOT]
+    lea     rsi, [rip+ex_bp4]
+    mov     edx, 127
+    call    ex_ncpy
+    add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_bom_files(rdi=asset record) -> eax = 1: ex_files = the files of its
+#   package an import needs (EF_PATH <name>/<path>, as in the cache), those
+#   here at their size kept
+ex_bom_files:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     rdi, rbx
+    call    ex_bomfile
+    lea     rdi, [rip+ex_path]
+    call    ex_jread
+    test    rax, rax
+    jz      .Lbf_no
+    mov     rsi, rax
+    lea     rdi, [rip+k_items]
+    call    j_find
+    test    rax, rax
+    jz      .Lbf_bad
+    mov     rsi, rax
+    call    j_first
+.Lbf_el:
+    test    rax, rax
+    jz      .Lbf_ok
+    mov     r12, rax
+    mov     eax, [rip+ex_nf]
+    cmp     eax, EX_FILES
+    jae     .Lbf_nx
+    imul    r13, rax, EF_SZ
+    add     r13, [rip+ex_files]
+    mov     rdi, r12
+    lea     rsi, [rip+ex_bp1]
+    call    ex_relpath
+    test    eax, eax
+    jle     .Lbf_nx
+    lea     rdi, [r13+EF_PATH]
+    lea     rsi, [rbx+EX_NAME]
+    call    ex_cpy0
+    mov     byte ptr [rdi], '/'
+    inc     rdi
+    lea     rsi, [rip+ex_bp1]
+    call    ex_cpy0
+    lea     rdi, [r13+EF_PATH]
+    call    ex_keep
+    test    eax, eax
+    jz      .Lbf_nx
+    mov     qword ptr [r13+EF_SIZE], 0
+    mov     rsi, r12
+    lea     rdi, [rip+k_size]
+    call    j_find
+    test    rax, rax
+    jz      1f
+    mov     rsi, rax
+    call    j_num
+    cvttsd2si rax, xmm0
+    mov     [r13+EF_SIZE], rax
+1:  mov     dword ptr [r13+EF_STATE], 0
+    mov     rax, [r13+EF_SIZE]
+    add     [rip+ex_fall], rax
+    lea     rdi, [r13+EF_PATH]          # here already at that size: kept
+    mov     rsi, [r13+EF_SIZE]
+    call    ex_here
+    test    eax, eax
+    jz      2f
+    mov     dword ptr [r13+EF_STATE], 2
+    mov     rax, [r13+EF_SIZE]
+    add     [rip+ex_fdone], rax
+2:  inc     dword ptr [rip+ex_nf]
+.Lbf_nx:
+    mov     rsi, r12
+    call    j_next
+    jmp     .Lbf_el
+.Lbf_ok:
+    call    ex_junmap
+    mov     eax, 1
+    jmp     9f
+.Lbf_bad:
+    call    ex_junmap
+.Lbf_no:
+    xor     eax, eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_a_title(edi=asset) -> rax = where it comes from: its dataset (central),
+#   else the source's title; ex_a_lic: its licence
+ex_a_title:
+    call    ex_rec
+    cmp     byte ptr [rax+EX_REPO], 0
+    je      1f
+    add     rax, EX_REPO
+    ret
+1:  mov     edi, [rip+ex_cur]
+    jmp     ex_src_title
+ex_a_lic:
+    call    ex_rec
+    cmp     byte ptr [rax+EX_LIC], 0
+    je      1f
+    add     rax, EX_LIC
+    ret
+1:  mov     edi, [rip+ex_cur]
+    jmp     ex_src_lic
+
+# ---- text helpers ------------------------------------------------------------
+# ex_prefix(rdi=text, rsi=start) -> eax = 1 when the text starts so
+ex_prefix:
+    xor     ecx, ecx
+1:  mov     al, [rsi+rcx]
+    test    al, al
+    jz      8f
+    cmp     al, [rdi+rcx]
+    jne     9f
+    inc     ecx
+    jmp     1b
+8:  mov     eax, 1
+    ret
+9:  xor     eax, eax
+    ret
+
+# ex_suffix(rdi=text, rsi=end) -> eax = 1 when the text ends so
+ex_suffix:
+    xor     ecx, ecx
+1:  cmp     byte ptr [rdi+rcx], 0
+    je      2f
+    inc     rcx
+    jmp     1b
+2:  xor     edx, edx
+3:  cmp     byte ptr [rsi+rdx], 0
+    je      4f
+    inc     rdx
+    jmp     3b
+4:  cmp     rdx, rcx
+    ja      9f
+    sub     rcx, rdx
+    add     rdi, rcx
+    jmp     ex_prefix
+9:  xor     eax, eax
+    ret
+
+# ex_isusd(rdi=path) -> eax = 1 for .usd, .usda, .usdc
+ex_isusd:
+    push    rbx
+    mov     rbx, rdi
+    lea     rsi, [rip+x_usd]
+    call    ex_suffix
+    test    eax, eax
+    jnz     9f
+    mov     rdi, rbx
+    lea     rsi, [rip+x_usda]
+    call    ex_suffix
+    test    eax, eax
+    jnz     9f
+    mov     rdi, rbx
+    lea     rsi, [rip+x_usdc]
+    call    ex_suffix
+9:  pop     rbx
+    ret
+
+# ex_strstr(rdi=text, rsi=part) -> rax = where the part is in it, 0
+ex_strstr:
+1:  cmp     byte ptr [rdi], 0
+    je      8f
+    xor     ecx, ecx
+2:  mov     al, [rsi+rcx]
+    test    al, al
+    jz      7f
+    cmp     al, [rdi+rcx]
+    jne     3f
+    inc     ecx
+    jmp     2b
+3:  inc     rdi
+    jmp     1b
+7:  mov     rax, rdi
+    ret
+8:  xor     eax, eax
+    ret
+
+# ex_upto_slash(rsi=text, rdi=out, edx=at most) -> eax = 1 when a '/' ended
+#   a part that is not empty; rsi after it
+ex_upto_slash:
+    xor     ecx, ecx
+1:  mov     al, [rsi]
+    test    al, al
+    jz      8f
+    inc     rsi
+    cmp     al, '/'
+    je      7f
+    cmp     ecx, edx
+    jae     1b
+    mov     [rdi+rcx], al
+    inc     ecx
+    jmp     1b
+7:  mov     byte ptr [rdi+rcx], 0
+    xor     eax, eax
+    test    ecx, ecx
+    setnz   al
+    ret
+8:  mov     byte ptr [rdi+rcx], 0
+    xor     eax, eax
+    ret
+
+# ex_ncpy_owner(rdi=out, rsi=owner/name, edx=at most) - the owner, 0-ended
+ex_ncpy_owner:
+    xor     ecx, ecx
+1:  cmp     ecx, edx
+    jae     2f
+    mov     al, [rsi+rcx]
+    test    al, al
+    jz      2f
+    cmp     al, '/'
+    je      2f
+    mov     [rdi+rcx], al
+    inc     ecx
+    jmp     1b
+2:  mov     byte ptr [rdi+rcx], 0
+    ret
+
+# ex_utoa(rdi=out, esi=number) - its digits, 0-ended; rdi at the 0
+ex_utoa:
+    sub     rsp, 24
+    mov     eax, esi
+    lea     r8, [rsp+20]
+    mov     byte ptr [r8], 0
+    mov     ecx, 10
+1:  xor     edx, edx
+    div     ecx
+    add     dl, '0'
+    dec     r8
+    mov     [r8], dl
+    test    eax, eax
+    jnz     1b
+    mov     rsi, r8
+    call    ex_cpy0
+    add     rsp, 24
+    ret
+
 # ex_cat_report - "  catalog: n assets in <title>"
 ex_cat_report:
     sub     rsp, 8
@@ -1719,17 +3304,46 @@ ex_thumb_next:
     inc     r12d
     jmp     1b
 2:  mov     r13, rax
+    call    ex_iscentral
+    test    eax, eax
+    jnz     21f
     cmp     byte ptr [r13+EX_ROOT], 0   # (no root: no thumbnail)
     jne     3f
-    mov     dword ptr [r13+EX_THUMB], 4
-    inc     r12d
+    jmp     24f
+21: mov     rdi, r13                    # (central: its package says which,
+    call    ex_bom_ready                #  asked for first)
+    cmp     eax, 2
+    je      22f
+    cmp     eax, 1
+    je      23f
+    cmp     eax, 3
+    je      24f
+    mov     edi, ebx
+    mov     rsi, r13
+    call    ex_bom_start
+    test    eax, eax
+    jz      24f
+    jmp     9f
+22: cmp     byte ptr [r13+EX_THP], 0
+    jne     3f
+24: mov     dword ptr [r13+EX_THUMB], 4
+23: inc     r12d
     jmp     1b
 3:  mov     eax, ebx
     call    ex_slotp
     mov     rbx, rax
     mov     dword ptr [rbx+SL_WHAT], SW_THUMB
     mov     [rbx+SL_IDX], r12d
-    mov     rdi, rbx                    # <name>/simready_usd/.thumbs/256x256/<root file>.png
+    call    ex_iscentral
+    test    eax, eax
+    jz      31f
+    mov     rdi, rbx                    # <dataset>@<commit>/<folder>/<thumbnail>
+    mov     rsi, r13
+    call    ex_url_rev
+    lea     rsi, [r13+EX_THP]
+    call    ex_cat0
+    jmp     32f
+31: mov     rdi, rbx                    # <name>/simready_usd/.thumbs/256x256/<root file>.png
     call    ex_url_res
     lea     rsi, [r13+EX_NAME]
     call    ex_cat0
@@ -1741,7 +3355,7 @@ ex_thumb_next:
     call    ex_cat0
     lea     rsi, [rip+s_png]
     call    ex_cat0
-    call    ex_srcdir
+32: call    ex_srcdir
     lea     rdi, [rbx+SL_OUT]           # thumbs/<name>.png.part
     lea     rsi, [rip+s_thumbs]
     call    ex_in
@@ -1861,7 +3475,12 @@ ex_get:
     mov     edi, EF_SZ*EX_FILES
     call    vmap
     mov     [rip+ex_files], rax
-3:  lea     rdi, [rip+ex_nexturl]       # its listing: tree/main/<name>?recursive=true
+3:  call    ex_iscentral                # (central: its package's list)
+    test    eax, eax
+    jz      4f
+    mov     dword ptr [rip+ex_fstate], 4
+    jmp     9f
+4:  lea     rdi, [rip+ex_nexturl]       # its listing: tree/main/<name>?recursive=true
     lea     rsi, [rip+ex_base]
     call    ex_cpy0
     lea     rsi, [rip+s_api_tree]
@@ -1906,6 +3525,52 @@ ex_file_next:
     je      .Lfn_list
     cmp     eax, 2
     je      .Lfn_file
+    cmp     eax, 4
+    je      .Lfn_bom
+    xor     eax, eax
+    jmp     .Lfn_out
+.Lfn_bom:                               # (central) its package's file list
+    mov     edi, [rip+ex_fasset]
+    call    ex_rec
+    mov     r13, rax
+    mov     rdi, r13
+    call    ex_bom_ready
+    cmp     eax, 2
+    je      2f
+    cmp     eax, 1
+    je      1f
+    cmp     eax, 3
+    je      3f
+    mov     edi, ebx                    # asked for
+    mov     rsi, r13
+    call    ex_bom_start
+    test    eax, eax
+    jnz     .Lfn_out
+3:  mov     dword ptr [r13+EX_BOM], 0   # (none: asked again the next time)
+    mov     dword ptr [rip+ex_fstate], 3
+    call    ex_fasset_fail
+    xor     eax, eax
+    jmp     .Lfn_out
+1:  xor     eax, eax                    # coming
+    jmp     .Lfn_out
+2:  cmp     byte ptr [r13+EX_ROOT], 0
+    je      4f
+    mov     rdi, r13
+    call    ex_bom_files
+    test    eax, eax
+    jz      3b
+    mov     dword ptr [rip+ex_fstate], 2
+    call    ex_files_check
+    cmp     dword ptr [rip+ex_fstate], 2
+    je      .Lfn_file
+    xor     eax, eax
+    jmp     .Lfn_out
+4:  lea     rdi, [rip+s_no_root]        # no USD in it
+    lea     rsi, [r13+EX_NAME]
+    call    log_pair
+    mov     dword ptr [r13+EX_HAVE], 0
+    mov     dword ptr [rip+ex_fasset], -1
+    mov     dword ptr [rip+ex_fstate], 3
     xor     eax, eax
     jmp     .Lfn_out
 .Lfn_list:
@@ -1951,10 +3616,28 @@ ex_file_next:
     mov     r12, rax
     mov     dword ptr [r12+SL_WHAT], SW_FILE
     mov     [r12+SL_IDX], r13d
+    call    ex_iscentral
+    test    eax, eax
+    jz      3f
+    mov     edi, [rip+ex_fasset]        # (central: <dataset>@<commit>/<folder>/
+    call    ex_rec                      #  + the path after <name>/)
     mov     rdi, r12
+    mov     rsi, rax
+    call    ex_url_rev
+    mov     rsi, [rsp]
+4:  mov     al, [rsi]
+    test    al, al
+    jz      5f
+    inc     rsi
+    cmp     al, '/'
+    jne     4b
+5:  call    ex_cat0
+    jmp     6f
+3:  mov     rdi, r12
     call    ex_url_res
     mov     rsi, [rsp]
     call    ex_cat0
+6:
     call    ex_srcdir
     lea     rdi, [r12+SL_OUT]           # assets/<path>.part
     lea     rsi, [rip+s_assets]
@@ -2314,11 +3997,19 @@ ex_import:
     call    ex_src_title
     mov     rdi, rax
     call    fmt_str
-    lea     rdi, [rip+s_credit_c]
+    cmp     byte ptr [r12+EX_REPO], 0   # (central: " (<dataset>)")
+    je      2f
+    lea     rdi, [rip+s_open_a]
     call    fmt_str
-    mov     eax, [rip+ex_cur]
-    call    ex_src_rec
-    lea     rdi, [rax+ES_LIC]
+    lea     rdi, [r12+EX_REPO]
+    call    fmt_str
+    lea     rdi, [rip+s_open_b]
+    call    fmt_str
+2:  lea     rdi, [rip+s_credit_c]
+    call    fmt_str
+    mov     edi, ebx
+    call    ex_a_lic
+    mov     rdi, rax
     call    fmt_str
     lea     rdi, [rip+fmt_buf]
     call    log_line
@@ -2386,6 +4077,8 @@ ex_chip:
     jmp     9f
 2:  mov     eax, [rip+ex_fstate]
     cmp     eax, 1
+    je      3f
+    cmp     eax, 4
     je      3f
     cmp     eax, 2
     jne     8f
@@ -2613,7 +4306,18 @@ do_ex_stop:
     je      2f
     mov     dword ptr [rip+ex_fstate], 3
     call    ex_fasset_fail
-2:  mov     dword ptr [rip+dirty], 1
+2:  xor     ecx, ecx                    # packages that were coming: asked
+3:  cmp     ecx, [rip+ex_n]             #  again the next time
+    jae     4f
+    mov     eax, ecx
+    imul    rax, rax, EX_SZ
+    add     rax, [rip+ex_tab]
+    cmp     dword ptr [rax+EX_BOM], 1
+    jne     31f
+    mov     dword ptr [rax+EX_BOM], 0
+31: inc     ecx
+    jmp     3b
+4:  mov     dword ptr [rip+dirty], 1
     add     rsp, 8
     ret
 

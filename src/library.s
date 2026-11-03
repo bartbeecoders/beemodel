@@ -3765,16 +3765,19 @@ ed_assets_draw:
     mov     r8d, COL_ACCENT
     call    fill_rect
 5:  lea     rdi, [r13+EX_NAME]          # its name after the category
-    xor     ecx, ecx                    #  ("bowl_c01"), as much as fits
-53: mov     al, [rdi+rcx]
-    test    al, al
-    jz      54f
+    xor     ecx, ecx                    #  ("bowl_c01" of bowl_c01... when its
+53: mov     al, [r13+EX_CAT+rcx]        #  name starts "<category>_"), as much
+    test    al, al                      #  as fits
+    jz      55f
+    cmp     al, [rdi+rcx]
+    jne     54f
     inc     ecx
-    cmp     al, '_'
-    jne     53b
-    cmp     byte ptr [rdi+rcx], 0
+    jmp     53b
+55: cmp     byte ptr [rdi+rcx], '_'
+    jne     54f
+    cmp     byte ptr [rdi+rcx+1], 0
     je      54f
-    add     rdi, rcx
+    lea     rdi, [rdi+rcx+1]
 54: mov     rdx, rdi
     mov     edi, r14d
     lea     esi, [rbp+TH+4]
@@ -3833,14 +3836,14 @@ ed_assets_draw:
     mov     ecx, COL_TEXT
     call    draw_text
     call    fmt_reset
-    mov     edi, [rip+ex_cur]
-    call    ex_src_title
+    mov     edi, ebx                    # (its dataset, its licence)
+    call    ex_a_title
     mov     rdi, rax
     call    fmt_str
     lea     rdi, [rip+s_lb_sep]
     call    fmt_str
-    mov     edi, [rip+ex_cur]
-    call    ex_src_lic
+    mov     edi, ebx
+    call    ex_a_lic
     mov     rdi, rax
     call    fmt_str
     mov     edi, [rip+ed_x]

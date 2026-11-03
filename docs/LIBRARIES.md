@@ -10,6 +10,15 @@ CC-BY 4.0): 2673 simulation-ready props - food, kitchenware, boxes and
 crates, tools, warehouse and hospital equipment - in OpenUSD, with
 textured materials, masses, collision shapes and joints.
 
+The second is **SimReady Central** (`lib.source central`): NVIDIA's index
+of reviewed Hugging Face datasets from other makers
+([github.com/NVIDIA-Omniverse/simready-central](https://github.com/NVIDIA-Omniverse/simready-central)),
+about 1,200 assets in November 2026: PalatialSim's household props (957),
+ForgeCAD's appliances, tools and furniture, ALLSIDES's scanned objects,
+Vertiv's data-centre racks, LG's appliances, and robot arms and grippers
+(FANUC, Franka, Robotiq, OnRobot, Comau, Deep Robotics, AgiBot, Standard
+Bots). See [SimReady Central](#simready-central) below.
+
 ## Using it
 
 - The catalog is fetched the first time a source is shown (about three
@@ -40,12 +49,48 @@ Everything a source gives is kept under `~/BeeModel/cache/<id>/`:
 Downloads run in up to four `curl` processes in the background; curl
 ships with Linux distributions and Windows 11.
 
+## SimReady Central
+
+- The catalog comes from the index: one request lists its
+  `submissions/<owner>/<dataset>` files. Then each dataset's licence and
+  gating come from the Hugging Face API, and its index file from GitHub.
+  That's about three seconds for the whole index. New datasets come in with
+  `lib.refresh`.
+- Only **public datasets under an open licence** are taken in (CC0,
+  CC-BY, Apache, MIT, BSD, ...; not -NC or -ND, "other" or gated ones);
+  the console names each one left out. `nvidia/simready-assets` is left out
+  too: it is the NVIDIA SimReady source already.
+- Each asset is the one the index names, **at the commit it was reviewed
+  at**; when the index names a folder again at a later commit, that one is
+  taken. Its category is the dataset's owner (search "forgecad", "vertiv",
+  ...); the search also looks in the dataset's name. A folder name that
+  another dataset already has gets `_<owner>` added (`crate_beta`).
+- An asset's **package** says which files it has (its bill of materials,
+  `.metadata/com.nvidia.simready.packaging.bom.json`). It is fetched when
+  the tile shows or the asset is placed, and kept in `bom/`. Its USD root
+  is the USD that a thumbnail in `simready_usd/.thumbs/<size>/` shows
+  (256x256 first), else the first USD in `simready_usd/`. The thumbnail
+  is that one, and the files to fetch are the package's, without
+  `.thumbs/`, `source_assets/` or MDL.
+- The Asset Browser's line for the selected asset, and the console's
+  credit when it is placed, name its dataset and licence
+  (`ForgeCAD/simready-assets  cc-by-4.0`); placed assets are saved into
+  the local library as `#central #<owner>`.
+- **Robots and grippers** come in with their bodies and joints, but these
+  long chains don't hold together under physics yet: the arm sags and
+  folds. Place them with `lib.get <name> static` for now.
+
 ## More sources
 
 `~/BeeModel/sources.txt` adds Hugging Face datasets in SimReady's layout,
-one a line (`#` comments):
+and indexes in SimReady Central's, one a line (`#` comments):
 
     simready <id> <owner/dataset> <title>
+    central  <id> <github owner/repo> <title>
+
+A `simready` line wants NVIDIA's naming (an asset's root
+`simready_usd/sm_<asset>_01.usd`); other makers' datasets come through
+SimReady Central, or through a `central` line naming a copy of its index.
 
 A source kind is a few functions in `src/extlib.s`: the catalog's URLs, a
 thumbnail's URL, which files an asset needs and its root. Other libraries
@@ -56,5 +101,7 @@ thumbnail's URL, which files an asset needs and its root. Other libraries
 `tests/extlib.py` runs a stand-in Hugging Face (paged listings,
 paths-info, redirects to a "CDN", a failing file) and checks the catalog,
 placing, the cache, retries, extra sources and, in a window, the Asset
-Browser's thumbnails and double-click. `BEEMODEL_HF_URL` points BeeModel at
-another server.
+Browser's thumbnails and double-click. A stand-in SimReady Central (a
+GitHub index, datasets pinned to commits, packages) checks what is taken
+in and left out, the commits, the roots and the files fetched.
+`BEEMODEL_HF_URL` and `BEEMODEL_GH_URL` point BeeModel at other servers.

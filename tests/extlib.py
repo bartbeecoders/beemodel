@@ -25,6 +25,15 @@ folder. Headless, each operation runs to its end.
   catalog in the background, a tile's thumbnail when it shows, and a
   double-click on a tile downloads and places the asset; the source button
   in the header goes round the sources; the wheel scrolls.
+- SimReady Central (a stand-in GitHub index, BEEMODEL_GH_URL, and datasets
+  pinned to commits): lib.source central reads the index's files, takes in
+  public datasets under an open licence (not one gated or "other", nor
+  nvidia/simready-assets, a source of its own), names a folder another
+  dataset has <folder>_<owner>, keeps an asset's latest commit; lib.get
+  reads the asset's package (its bill of materials) at that commit: the
+  root is the USD its thumbnail shows (else the first USD), only what an
+  import needs is fetched. In the window, a tile's thumbnail comes through
+  its package.
 
     python3 tests/extlib.py build/beemodel
 """
@@ -35,6 +44,16 @@ HUB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'usd'
 FAILS = []
 LOG = []                                # (method, path) the server was asked
 FAIL_PATHS = set()                      # dataset paths answered with 500
+CENTRAL = None                          # SimReady Central's stand-in datasets
+CREPO = 'NVIDIA-Omniverse/simready-central'
+REVS = {}                               # (dataset, folder) -> its commit
+INDEX = {}                              # dataset -> its index file
+INFO = {                                # dataset -> the Hugging Face API's word
+    'acme/props': {'gated': False, 'private': False, 'tags': ['format:usd', 'license:cc-by-4.0']},
+    'beta/kit': {'gated': False, 'tags': ['license:apache-2.0']},
+    'closed/stuff': {'gated': False, 'tags': ['license:other']},
+    'locked/stuff': {'gated': 'manual', 'tags': ['license:cc-by-4.0']},
+}
 
 
 def check(cond, msg):
@@ -55,6 +74,7 @@ class Hub(http.server.BaseHTTPRequestHandler):
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
+        return True
 
     def repo_rest(self, path, marker):
         # /api/datasets/<owner>/<name>/<marker>...
@@ -67,10 +87,36 @@ class Hub(http.server.BaseHTTPRequestHandler):
             return None, None
         return repo, rest[len(marker):].lstrip('/')
 
+    def central(self, u):
+        # GitHub's API and raw files, the dataset API, resolve/<commit>/
+        if u.path == '/repos/%s/git/trees/main' % CREPO:
+            tree = [{'path': 'README.md', 'type': 'blob'}, {'path': 'submissions', 'type': 'tree'},
+                    {'path': 'submissions/acme', 'type': 'tree'}, {'path': 'submissions/README.md', 'type': 'blob'}]
+            tree += [{'path': 'submissions/' + d, 'type': 'blob'} for d in sorted(INDEX)]
+            return self.send(200, json.dumps({'sha': 'x', 'tree': tree, 'truncated': False}).encode())
+        pre = '/%s/main/submissions/' % CREPO
+        if u.path.startswith(pre):
+            d = u.path[len(pre):]
+            return self.send(200, INDEX[d].encode(), 'text/plain') if d in INDEX else self.send(404, b'404')
+        p = u.path.split('/')
+        if len(p) == 5 and p[1] == 'api' and p[2] == 'datasets':
+            d = p[3] + '/' + p[4]
+            return self.send(200, json.dumps(dict(INFO[d], id=d)).encode()) if d in INFO else self.send(404, b'{}')
+        if len(p) > 7 and p[1] == 'datasets' and p[4] == 'resolve' and p[5] != 'main':
+            d, rev, folder = p[2] + '/' + p[3], p[5], p[6]
+            if REVS.get((d, folder)) != rev:
+                return self.send(404, b'not at that commit', 'text/plain')
+            f = os.path.join(CENTRAL, d, *p[6:])
+            return self.send(200, open(f, 'rb').read(), 'application/octet-stream') if os.path.isfile(f) \
+                else self.send(404, b'{}')
+        return None
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         LOG.append(('GET', u.path))
+        if self.central(u):
+            return
         if u.path.startswith('/cdn/'):                     # the "CDN"
             rel = urllib.parse.unquote(u.path[5:])
             if rel in FAIL_PATHS:
@@ -127,8 +173,130 @@ class Hub(http.server.BaseHTTPRequestHandler):
         self.send(200, json.dumps(out).encode())
 
 
+def make_central(root):
+    """Three datasets in SimReady's package layout, each asset with its bill of
+    materials; the index files pin each asset to a commit."""
+    global CENTRAL
+    CENTRAL = root
+    crate = os.path.join(HUB, 'crate_test_a01', 'simready_usd')
+    table = os.path.join(HUB, 'table_test_b02', 'simready_usd')
+    png = os.path.join(crate, '.thumbs', '256x256', 'sm_crate_test_a01_01.usd.png')
+
+    def asset(d, folder, rev, files):
+        # files: (path in the folder, source file); the bill of materials lists them
+        base = os.path.join(root, d, folder)
+        items = []
+        for rel, src in files:
+            os.makedirs(os.path.dirname(os.path.join(base, rel)), exist_ok=True)
+            shutil.copyfile(src, os.path.join(base, rel))
+            items.append({'relative_path': rel, 'size': os.path.getsize(src), 'hash': {'sha256': 'x'}})
+        os.makedirs(os.path.join(base, '.metadata'), exist_ok=True)
+        json.dump({'format_version': '1.0', 'items': items},
+                  open(os.path.join(base, '.metadata', 'com.nvidia.simready.packaging.bom.json'), 'w'), indent=2)
+        REVS[(d, folder)] = rev
+        return 'https://huggingface.co/datasets/%s/resolve/%s/%s/com.nvidia.simready.packaging.json\n' % (d, rev, folder)
+
+    usd = os.path.join(crate, 'sm_crate_test_a01_01.usd')
+    INDEX['acme/props'] = (
+        'https://huggingface.co/datasets/acme/props/resolve/0ld0000/crate/com.nvidia.simready.packaging.json\n'
+        + asset('acme/props', 'crate', 'aaaa1111', [
+            ('simready_usd/.thumbs/256x256/crate.usd.png', png), ('simready_usd/crate.usd', usd),
+            ('simready_usd/OmniPBR.mdl', os.path.join(crate, 'OmniPBR.mdl')),
+            ('simready_usd/source_assets/huge.bin', os.path.join(crate, 'source_assets', 'huge.bin'))])
+        + '\n# a comment, and a line that is no package\nhello\n'
+        + asset('acme/props', 'table_b', 'bbbb2222', [         # legs.usda first: the thumbnail picks the root
+            ('simready_usd/legs.usda', os.path.join(table, 'legs.usda')),
+            ('simready_usd/over.usda', os.path.join(table, 'over.usda')),
+            ('simready_usd/parts.usdc', os.path.join(table, 'parts.usdc')),
+            ('simready_usd/sm_table_test_b02_01.usda', os.path.join(table, 'sm_table_test_b02_01.usda')),
+            ('simready_usd/tex/check.png', os.path.join(table, 'tex', 'check.png')),
+            ('simready_usd/tex/orm.png', os.path.join(table, 'tex', 'orm.png')),
+            ('simready_usd/.thumbs/1024x1024/sm_table_test_b02_01.usda.png', png)]))
+    INDEX['beta/kit'] = asset('beta/kit', 'crate', 'cccc3333', [   # no thumbnail: the first USD
+        ('README.md', os.path.join(HUB, 'noroot_x01', 'stuff', 'readme.txt')),
+        ('simready_usd/crate.usd', usd)])
+    INDEX['closed/stuff'] = asset('closed/stuff', 'secret', 'dddd4444', [('simready_usd/a.usd', usd)])
+    INDEX['locked/stuff'] = asset('locked/stuff', 'secret2', 'eeee5555', [('simready_usd/a.usd', usd)])
+    INDEX['nvidia/simready-assets'] = asset('nvidia/simready-assets', 'crate_test_a01', 'ffff6666',
+                                            [('simready_usd/a.usd', usd)])
+
+
+def central(home, port):
+    print('-- SimReady Central --')
+    cache = os.path.join(home, 'BeeModel', 'cache', 'central')
+    cat = os.path.join(cache, 'catalog.tsv')
+    rows = lambda: [l.split('\t') for l in open(cat).read().splitlines()] if os.path.exists(cat) else []
+    LOG.clear()
+    rc, out = run(home, 'op("lib.source", "central")', port)
+    got = [(r[0], r[2], r[3], r[4], r[5], r[6]) for r in rows()]
+    want = [('crate', 'acme', 'acme/props', 'aaaa1111', 'crate', 'cc-by-4.0'),
+            ('table_b', 'acme', 'acme/props', 'bbbb2222', 'table_b', 'cc-by-4.0'),
+            ('crate_beta', 'beta', 'beta/kit', 'cccc3333', 'crate', 'apache-2.0')]
+    check(rc == 0 and got == want,
+          'the index read: open, public datasets; a later commit kept; a folder taken: <folder>_<owner> (%s)' % got)
+    asked = [p for m, p in LOG]
+    check(sum(p == '/repos/%s/git/trees/main' % CREPO for p in asked) == 1
+          and not any('submissions/closed' in p or 'submissions/locked' in p for p in asked)
+          and '/api/datasets/locked/stuff' in asked and '/api/datasets/closed/stuff' in asked
+          and not any('nvidia/simready-assets' in p for p in asked),
+          'left out: a gated dataset, one under "other", nvidia/simready-assets (a source of its own)')
+    LOG.clear()
+    rc, out = run(home, 'op("lib.source", "central")', port)
+    check(rc == 0 and not LOG, 'the next time: catalog.tsv read, the server not asked (%d requests)' % len(LOG))
+
+    def place(asset, xyz='0 0 0'):
+        LOG.clear()
+        code = ('op("lib.source", "central")\nn = count()\nfor i in 0..n { delete(name(0)) }\n'
+                'op("lib.get", "%s %s")\nprint("N", count())\n'
+                'for i in 0..count() { o = name(i)\n print("OB", o, get(o, "x"), get(o, "y"), get(o, "z"), rigid(o, "type"), matof(o)) }'
+                % (asset, xyz))
+        rc, out = run(home, code, port)
+        obs = {l.split()[1]: l.split()[2:] for l in out.splitlines() if l.startswith('OB ')}
+        fetched = sorted(p.split('/resolve/', 1)[1] for m, p in LOG if '/resolve/' in p)
+        return rc, obs, fetched
+
+    rc, obs, fetched = place('crate', '2 0 -1')
+    check(fetched == ['aaaa1111/crate/.metadata/com.nvidia.simready.packaging.bom.json',
+                      'aaaa1111/crate/simready_usd/crate.usd'],
+          'placing: its package at its commit, then only what an import needs (%s)' % fetched)
+    box = obs.get('Box')
+    check(rc == 0 and box is not None and abs(float(box[0]) - 2) < 1e-4 and abs(float(box[2]) + 1) < 1e-4
+          and box[3] == '1' and len(obs) == 4, 'placed at 2 0 -1 with its bodies (Box at %s; %d objects)' % (box, len(obs)))
+    r = {x[0]: x for x in rows()}
+    check(r.get('crate', [''] * 8)[1] == 'crate/simready_usd/crate.usd'
+          and r['crate'][7] == 'simready_usd/.thumbs/256x256/crate.usd.png',
+          'its root and thumbnail kept in the catalog (%s)' % r.get('crate'))
+    rc, obs, fetched = place('crate', '2 0 -1')
+    check(rc == 0 and fetched == [] and 'Box' in obs, 'a second lib.get: placed again, nothing fetched')
+    rc, obs, fetched = place('table_b')
+    check(rc == 0 and len(obs) == 7 and obs.get('Top', [''] * 5)[4] == 'Wood'
+          and 'bbbb2222/table_b/simready_usd/sm_table_test_b02_01.usda' in fetched
+          and r.get('table_b') is not None and rows()[1][1] == 'table_b/simready_usd/sm_table_test_b02_01.usda',
+          'the root: the USD its thumbnail shows (not the first one), sublayers and textures (%d objects, %s)'
+          % (len(obs), rows()[1][1] if len(rows()) > 1 else '-'))
+    rc, obs, fetched = place('crate_beta')
+    check(rc == 0 and 'Box' in obs and 'cccc3333/crate/simready_usd/crate.usd' in fetched
+          and not any('README' in f for f in fetched),
+          'no thumbnail: the first USD in simready_usd/, from its own dataset (%s)' % fetched)
+    idx = os.path.join(home, 'BeeModel', 'library', 'index.txt')
+    lib = open(idx).read() if os.path.exists(idx) else ''
+    check('central' in lib and 'acme' in lib, 'placed assets saved into the local library (#central #acme)')
+
+    open(os.path.join(home, 'BeeModel', 'sources.txt'), 'w').write(
+        'central mirror acme/index-mirror  A Mirror\n'
+        'simready long PalatialSim/palatial-nv-asset-library Long Name\n')
+    LOG.clear()
+    run(home, 'op("lib.source", "mirror")\nop("lib.source", "long")', port)
+    asked = [p for m, p in LOG]
+    check('/repos/acme/index-mirror/git/trees/main' in asked
+          and '/api/datasets/PalatialSim/palatial-nv-asset-library/tree/main' in asked,
+          'sources.txt: a central kind source, and a long dataset name in full')
+    os.remove(os.path.join(home, 'BeeModel', 'sources.txt'))
+
+
 def run(home, code, port):
-    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='', BEEMODEL_HF_URL='http://127.0.0.1:%d' % port)
+    env = dict(os.environ, HOME=home, XDG_CACHE_HOME='', BEEMODEL_HF_URL='http://127.0.0.1:%d' % port,
+               BEEMODEL_GH_URL='http://127.0.0.1:%d' % port)
     r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
     return r.returncode, r.stdout
 
@@ -216,6 +384,9 @@ def main():
         check(any('acme/more-assets/tree/main' in p for m, p in LOG)
               and os.path.exists(os.path.join(home, 'BeeModel', 'cache', 'more', 'catalog.tsv')),
               'sources.txt adds a source: lib.source more asks for acme/more-assets')
+        os.remove(os.path.join(home, 'BeeModel', 'sources.txt'))
+        make_central(os.path.join(home, 'central-hub'))
+        central(home, port)
         gui(port)
     finally:
         srv.shutdown()
@@ -226,6 +397,7 @@ def gui(port):
     print('-- the Asset Browser --')
     import time
     os.environ['BEEMODEL_HF_URL'] = 'http://127.0.0.1:%d' % port
+    os.environ['BEEMODEL_GH_URL'] = 'http://127.0.0.1:%d' % port
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
     argv = sys.argv
     sys.argv = [sys.argv[0], tempfile.mkdtemp(prefix='bee-extlib-shots-')]
@@ -272,6 +444,13 @@ def gui(port):
         before = q('op("lib.sources")\nprint(1)')
         hdr = (tile[0] + 4, tile[1] - 30) if tile else (20, 600)
         check(f.proc.poll() is None, 'scrolled; BeeModel still runs')
+        q('op("lib.source", "central")')
+        thumb = os.path.join(f.home, 'BeeModel', 'cache', 'central', 'thumbs', 'crate.png')
+        t0 = time.time()
+        while time.time() - t0 < 20 and not os.path.exists(thumb):
+            f.pump(0.3)
+        check(os.path.exists(thumb) and f.proc.poll() is None,
+              'SimReady Central in the browser: a tile\'s thumbnail came through its package')
     finally:
         f.proc.kill()
 
