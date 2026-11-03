@@ -29,10 +29,14 @@ taken from the same name as `.png` or `.jpg` when that is there.
 
 Not read: animation (time samples), skeletons, curves and points, MDL
 shaders (UsdPreviewSurface is used), `.usdz` archives. A driven joint
-(`PhysicsDriveAPI`) is held where it starts: BeeModel's motors are no
-position springs. Parts of an articulated asset share a collision group
-that skips itself, and none is lighter than a tenth of the heaviest, so
-long joint chains hold together.
+(`PhysicsDriveAPI`), and a mimic joint following one (`NewtonMimicAPI`,
+`PhysxMimicJointAPI`), is held where it starts: BeeModel's motors are no
+position springs. A body with several parts (one a material) is one rigid
+body: its largest part, the others its children. Bodies may nest, as a
+URDF's links do (a joint's body is the nearest one above its target).
+Parts of an articulated asset share a collision group that skips itself,
+and no body is lighter than a tenth of the heaviest, so long joint chains
+hold together (robot arms: within a centimetre).
 
 ## Checked against OpenUSD
 

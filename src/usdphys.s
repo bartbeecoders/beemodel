@@ -4,11 +4,14 @@
 #  they behave as hand-made ones do.
 #
 #  A prim with PhysicsRigidBodyAPI is a body; the objects imported under it
-#  are its parts (more than one - one a material: the others joined to the
-#  first by fixed joints). Its mass: physics:mass (MassAPI) on the body or
-#  summed over its meshes (else BeeModel's density), shared by its parts;
-#  no part lighter than 1/10 of the heaviest (joint chains with 1000:1
-#  mass ratios do not hold together in an iterative solver). Its shape from the
+#  are its parts (more than one - one a material). The largest part (its
+#  mesh's box) is the rigid body, the others its children: they follow it
+#  (#453: parts tied by fixed joints - a robot's 2 cm screw head as heavy as
+#  its housing, 11 cm from the pivot - let an arm sag and fold). Its mass:
+#  physics:mass (MassAPI) on the body or summed over its meshes (else
+#  BeeModel's density); no body lighter than 1/10 of the heaviest (joint
+#  chains with 1000:1 mass ratios do not hold together in an iterative
+#  solver). Its shape (that part's) from the
 #  meshes' physics:approximation: convexHull -> hull, boundingCube -> box,
 #  boundingSphere -> sphere, the rest (sdf, convexDecomposition,
 #  meshSimplification, none) -> compound. kinematicEnabled -> passive.
@@ -18,8 +21,11 @@
 #  FixedJoint -> fixed, SphericalJoint -> point): body0 / body1 (no body:
 #  the world), the pivot localPos0 in body0's frame, the axis (X / Y / Z
 #  through localRot0), limits (degrees for hinges, metres for sliders); a
-#  joint with a drive (PhysicsDriveAPI) is held where it starts (limits 0 0:
-#  BeeModel's motors are no position springs); disabled ones are left out.
+#  joint with a drive (PhysicsDriveAPI), or a mimic joint following one, is
+#  held where it starts (limits 0 0, solved as a locked row: BeeModel's
+#  motors are no position springs); disabled ones are left out. Bodies can
+#  nest (a URDF's links): a joint's body is the nearest one above its
+#  target.
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -80,6 +86,15 @@ v_bcube:    .asciz "boundingCube"
 v_bsph:     .asciz "boundingSphere"
 v_drivel:   .asciz "PhysicsDriveAPI:linear"
 v_drivea:   .asciz "PhysicsDriveAPI:angular"
+v_mimics:                               # mimic joints (they follow a driven
+    .asciz "NewtonMimicAPI"             #  one, held: held too)
+    .asciz "PhysxMimicJointAPI:rotX"
+    .asciz "PhysxMimicJointAPI:rotY"
+    .asciz "PhysxMimicJointAPI:rotZ"
+    .asciz "PhysxMimicJointAPI:transX"
+    .asciz "PhysxMimicJointAPI:transY"
+    .asciz "PhysxMimicJointAPI:transZ"
+    .byte 0
 s_shapes:   .quad s_compound, s_hull, s_box, s_sphere
 s_compound: .asciz "compound"
 s_hull:     .asciz "hull"
@@ -106,7 +121,7 @@ s_rbjoint:  .asciz "rigid.joint"
 .align 8
 d_lim:      .double 1.0e30              # limits beyond: none
 d_deg:      .double 1.0
-d_ratio:    .double 0.1                 # parts weigh at least 1/10 of the
+d_ratio:    .double 0.1                 # bodies weigh at least 1/10 of the
                                         #  heaviest (joint chains stay stable)
 
 .section .bss
@@ -148,6 +163,32 @@ up_has_api:
     mov     rdx, rsi
     lea     rsi, [rip+a_api]
     jmp     us_pany
+
+# up_mimic(edi=joint prim) -> eax = 1 when it is a mimic joint (Newton's,
+#   PhysX's): it follows a driven joint, which is held where it starts -
+#   so is it (#453: a gripper's other finger joints flopped)
+up_mimic:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     ebx, edi
+    lea     r12, [rip+v_mimics]
+1:  cmp     byte ptr [r12], 0
+    je      8f
+    mov     edi, ebx
+    mov     rsi, r12
+    call    up_has_api
+    test    eax, eax
+    jnz     9f
+    mov     rdi, r12
+    call    str_len
+    lea     r12, [r12+rax+1]
+    jmp     1b
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
 
 # up_attr(edi=prim, rsi=attribute) -> rax = its default value (0)
 up_attr:
@@ -426,31 +467,76 @@ up_run:
     pop     rbx
     ret
 
-# up_select(edi=body) - exactly its objects selected (the first active)
+# up_select(edi=body) - exactly its rigid part (PB_FIRST) selected, active
 up_select:
     push    rbx
-    push    r12
-    sub     rsp, 8
     mov     ebx, edi
     call    select_none
+    imul    rax, rbx, PB_SZ
+    lea     rcx, [rip+up_b]
+    mov     ebx, [rcx+rax+PB_FIRST]
+    mov     edi, ebx
+    call    obj_get
+    test    rax, rax
+    jz      9f
+    or      dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    mov     [rip+active_obj], ebx
+9:  pop     rbx
+    ret
+
+# up_main(edi=body) -> eax = its largest part (handle): the longest diagonal
+#   of its mesh's box (not its vertices: a screw head can have as many as a
+#   housing); its first when none has a mesh
+up_main:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     ebx, edi
+    imul    rax, rbx, PB_SZ
+    lea     rcx, [rip+up_b]
+    mov     r14d, [rcx+rax+PB_FIRST]    # the best so far
+    mov     dword ptr [rsp], 0xbf800000 # its size (-1)
     xor     r12d, r12d
 1:  cmp     r12d, [rip+up_no]
     jae     9f
     lea     rax, [rip+up_obj]
     cmp     [rax+r12*8+4], ebx
     jne     2f
-    mov     edi, [rax+r12*8]
+    mov     r13d, [rax+r12*8]
+    mov     edi, r13d
     call    obj_get
     test    rax, rax
     jz      2f
-    or      dword ptr [rax+OB_FLAGS], OBF_SELECTED
+    mov     r15, [rax+OB_MESH]
+    test    r15, r15
+    jz      2f
+    mov     rdi, r15
+    call    mesh_bbox
+    movss   xmm0, [r15+ME_BMAX]
+    subss   xmm0, [r15+ME_BMIN]
+    mulss   xmm0, xmm0
+    movss   xmm1, [r15+ME_BMAX+4]
+    subss   xmm1, [r15+ME_BMIN+4]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    movss   xmm1, [r15+ME_BMAX+8]
+    subss   xmm1, [r15+ME_BMIN+8]
+    mulss   xmm1, xmm1
+    addss   xmm0, xmm1
+    comiss  xmm0, [rsp]
+    jbe     2f
+    movss   [rsp], xmm0
+    mov     r14d, r13d
 2:  inc     r12d
     jmp     1b
-9:  imul    rax, rbx, PB_SZ
-    lea     rcx, [rip+up_b]
-    mov     eax, [rcx+rax+PB_FIRST]
-    mov     [rip+active_obj], eax
-    add     rsp, 8
+9:  mov     eax, r14d
+    add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -483,7 +569,7 @@ usdphys_finish:
     push    r14
     push    r15
     sub     rsp, 64
-    xorpd   xmm2, xmm2                  # the heaviest part (mass / parts)
+    xorpd   xmm2, xmm2                  # the heaviest body
     xor     ebx, ebx
 1:  cmp     ebx, [rip+up_nb]
     jae     2f
@@ -493,13 +579,10 @@ usdphys_finish:
     inc     ebx
     cmp     dword ptr [r12+PB_NOBJ], 0
     je      1b
-    movsd   xmm0, [r12+PB_MASS]
-    cvtsi2sd xmm1, dword ptr [r12+PB_NOBJ]
-    divsd   xmm0, xmm1
-    maxsd   xmm2, xmm0
+    maxsd   xmm2, [r12+PB_MASS]
     jmp     1b
 2:  mulsd   xmm2, [rip+d_ratio]
-    movsd   [rsp+8], xmm2               # the lightest a part may be
+    movsd   [rsp+8], xmm2               # the lightest a body may be
     xor     ebx, ebx
 .Lpf_body:
     cmp     ebx, [rip+up_nb]
@@ -509,6 +592,9 @@ usdphys_finish:
     add     r12, rax
     cmp     dword ptr [r12+PB_NOBJ], 0
     je      .Lpf_nextb
+    mov     edi, ebx                    # its largest part: the rigid body
+    call    up_main
+    mov     [r12+PB_FIRST], eax
     call    wb_reset                    # "active compound mass m friction f bounce b"
     lea     rsi, [rip+s_active]
     cmp     dword ptr [r12+PB_PASS], 0
@@ -519,12 +605,10 @@ usdphys_finish:
     lea     rcx, [rip+s_shapes]
     mov     rsi, [rcx+rax*8]
     call    wb_str
-    movsd   xmm0, [r12+PB_MASS]         # (shared by its parts)
+    movsd   xmm0, [r12+PB_MASS]         # (all of it: one rigid body)
     xorpd   xmm1, xmm1
     comisd  xmm0, xmm1
     jbe     2f
-    cvtsi2sd xmm1, dword ptr [r12+PB_NOBJ]
-    divsd   xmm0, xmm1
     maxsd   xmm0, [rsp+8]
     movsd   [rsp], xmm0
     lea     rsi, [rip+s_k_mass]
@@ -589,7 +673,12 @@ usdphys_finish:
     lea     rsi, [rip+up_txt]
     call    up_run
     inc     dword ptr [rip+usd_nbodies]
-    # its other parts: fixed to the first
+    # its other parts: its children (they follow it)
+    mov     edi, [r12+PB_FIRST]
+    call    obj_get
+    test    rax, rax
+    jz      .Lpf_nextb
+    mov     r15, rax
     xor     r13d, r13d
 5:  cmp     r13d, [rip+up_no]
     jae     .Lpf_nextb
@@ -599,20 +688,13 @@ usdphys_finish:
     mov     r14d, [rax+r13*8]
     cmp     r14d, [r12+PB_FIRST]
     je      6f
-    call    wb_reset
-    lea     rsi, [rip+s_jfixed]
-    call    wb_str
-    mov     edi, ' '
-    call    wb_char
     mov     edi, r14d
-    call    up_name
-    mov     edi, ' '
-    call    wb_char
-    mov     edi, [r12+PB_FIRST]
-    call    up_name
-    xor     edi, edi
-    call    wb_char
-    call    up_wb_run_joint
+    call    obj_get
+    test    rax, rax
+    jz      6f
+    mov     rdi, rax
+    mov     rsi, r15
+    call    par_set
 6:  inc     r13d
     jmp     5b
 .Lpf_nextb:
@@ -673,37 +755,53 @@ up_primof:
     ret
 
 # up_bodyof(edi=prim of a joint, rsi=rel name) -> eax = the body its target
-#   is (or is inside: the nearest body above), -1 the world
+#   is (or is inside: the nearest body above - the longest path; bodies can
+#   nest, as a URDF's links do), -1 the world
 up_bodyof:
     push    rbx
     push    r12
-    sub     rsp, 8
+    push    r13
+    push    r14
+    push    r15
     call    us_rel
     test    rax, rax
     jz      8f
     mov     rbx, rax
+    mov     r13d, -1                    # the best so far, its path's length
+    xor     r14d, r14d
     xor     r12d, r12d                  # the body whose prim's path is it, or
 1:  cmp     r12d, [rip+up_nb]           #  a prefix of it
-    jae     8f
+    jae     6f
     imul    rax, r12, PB_SZ
     lea     rcx, [rip+up_b]
     mov     edi, [rcx+rax+PB_PRIM]
     call    us_prim_path
+    mov     r15, rax
     mov     rdi, rbx
     mov     rsi, rax
     call    up_under
     test    eax, eax
-    jnz     7f
-    inc     r12d
+    jz      2f
+    mov     rdi, r15
+    call    str_len
+    cmp     eax, r14d
+    jbe     2f
+    mov     r14d, eax
+    mov     r13d, r12d
+2:  inc     r12d
     jmp     1b
-7:  imul    rax, r12, PB_SZ             # (a body without objects: the world)
+6:  test    r13d, r13d
+    js      8f
+    imul    rax, r13, PB_SZ             # (a body without objects: the world)
     lea     rcx, [rip+up_b]
     cmp     dword ptr [rcx+rax+PB_NOBJ], 0
     je      8f
-    mov     eax, r12d
+    mov     eax, r13d
     jmp     9f
 8:  mov     eax, -1
-9:  add     rsp, 8
+9:  pop     r15
+    pop     r14
+    pop     r13
     pop     r12
     pop     rbx
     ret
@@ -868,6 +966,10 @@ up_joint:
     mov     edi, ebx
     lea     rsi, [rip+v_drivea]
     call    up_has_api
+    test    eax, eax
+    jnz     65f
+    mov     edi, ebx                    # a mimic joint: as its driven one
+    call    up_mimic
     test    eax, eax
     jnz     65f
     mov     edi, ebx                    # limits, when both are finite

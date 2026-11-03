@@ -83,9 +83,11 @@ ships with Linux distributions and Windows 11.
   credit when it is placed, name its dataset and licence
   (`ForgeCAD/simready-assets  cc-by-4.0`); placed assets are saved into
   the local library as `#central #<owner>`.
-- **Robots and grippers** come in with their bodies and joints, but these
-  long chains don't hold together under physics yet: the arm sags and
-  folds. Place them with `lib.get <name> static` for now.
+- **Robots and grippers** come in with their bodies and joints, held in
+  the pose they come in (their drives, and a gripper's mimic joints, held
+  where they start): FANUC's, Franka's, Comau's arms, Robotiq's, OnRobot's
+  and AgiBot's grippers stay within a centimetre under physics. `lib.get
+  <name> static` places one without bodies or joints.
 
 ## Poly Haven
 
@@ -107,9 +109,9 @@ ships with Linux distributions and Windows 11.
   `#polyhaven #<category>`; the console's credit says "Poly Haven, CC0".
 - **Terms.** The models are CC0. Poly Haven's
   [API terms](https://polyhaven.com/our-api) make the API free for
-  non-commercial projects and research; commercial use needs their
-  permission (usually a sponsorship). Every request BeeModel makes says
-  `User-Agent: BeeModel/<version>`, as they ask.
+  non-commercial projects and research, which BeeModel is (commercial use
+  would need their permission, usually a sponsorship). Every request
+  BeeModel makes says `User-Agent: BeeModel/<version>`, as they ask.
 
 ## More sources
 

@@ -34,6 +34,11 @@
   its limits and a driven slider (held) as rigid.joint does them, a
   disabled joint left out. Played 2 s: the crate falls, its lid stays on
   its hinge, the drawer stays on the kinematic shelf.
+- A robot (tests/fixtures/usd/arm.usda, #453): bodies nested as a URDF's
+  links, each a large part and a small one (the large one the rigid body,
+  the small its child), links' meshes in millimetres and turned against the
+  base's, driven joints and a mimic finger joint held where they start.
+  Played 2 s, the arm held out stays where it is.
 
     python3 tests/usd.py build/beemodel [more.usdc ...]
 """
@@ -225,6 +230,20 @@ def main():
           and abs(t2[2] - t0[2]) < 0.02 and abs(t2[3] - t0[3]) < 0.02,
           'played 2 s: the crate falls (y %.1f -> %.1f), the lid stays on its hinge, the drawer on the shelf (%s)'
           % ((t0 or [0])[0], (t2 or [0])[0], t2))
+    code = ('n = count()\nfor i in 0..n { delete(name(0)) }\nop("file.import_usd", "%s")\n'
+            'nb = 0\nfor i in 0..count() { o = name(i)\n if rigid(o, "type") == 1 { nb = nb + 1 } }\n'
+            'print("ARM", nb, parent("base_screw"), parent("link2_screw"), parent("finger_tip"), rigid("link1_screw", "type"))\n'
+            'y0 = centroid("finger_pad", 1)\nx0 = centroid("link3_shell", 0)\ns0 = centroid("link2_screw", 1)\n'
+            'for f in 1..61 { op("anim.frame", f) }\n'
+            'print("HELD", y0 - centroid("finger_pad", 1), centroid("link3_shell", 0) - x0, '
+            'centroid("link2_screw", 1) - s0, rbinfo(17))' % os.path.join(FIX, 'arm.usda'))
+    out = subprocess.run([BIN, '--eval', code], capture_output=True, text=True, timeout=120).stdout
+    arm = next((l.split()[1:] for l in out.splitlines() if l.startswith('ARM ')), [])
+    held = next(([float(x) for x in l.split()[1:]] for l in out.splitlines() if l.startswith('HELD ')), [])
+    check(arm == ['5', 'base_shell', 'link2_shell', 'finger_pad', 'nil'],
+          'a robot: 5 bodies (nested), each its largest part, the small ones its children (%s)' % arm)
+    check(len(held) == 4 and all(abs(v) < 0.01 for v in held[:3]) and held[3] < 0.05,
+          'played 2 s, the arm held out holds: finger, link 3, a screw within 1 cm (%s)' % held)
     ref = pxr_reads(os.path.join(st, 'root.usda'))
     if ref is not None:
         same_ = set(ref) == set(want) and all(ref[k][0] == want[k][0] and all(

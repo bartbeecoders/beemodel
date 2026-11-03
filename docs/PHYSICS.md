@@ -146,7 +146,8 @@ frame runs the steps up to its time. Each step does the following:
 6. **Solving, in substeps** ("soft step", 4 by default). Once a step: the
    masses and each point's gap base. Each substep:
    - Gravity and damping.
-   - Warm start: last time's impulses again.
+   - Warm start: last time's impulses again, the contacts' and the joints'
+     (every joint's before any is solved).
    - The iterations, spread over the substeps. Each runs the joint rows,
      then friction, then the normal. The normal is speculative while the
      bodies are apart. Once they overlap, it is a soft push: a damped spring
@@ -171,21 +172,40 @@ products per point.
 
 ### Joints
 
-Joints are rows solved with the contacts. Each row works against its error
-(Baumgarte), without accumulation.
+Joints are rows solved with the contacts. Unbreakable joints are **soft
+and warm started**, as Box2D v3's are (#453): each row's impulses add up
+(kept as two vectors, linear and angular, given again at the start of each
+substep), and the solve pass pulls the error back as a stiff damped spring
+- `ms m (-rate C - v) - is acc`, at a quarter of the substep rate (120 Hz
+at 120 steps x 4) and damping ratio 5 - while the relax pass is rigid. A
+loaded chain then holds: a robot arm stays put within a centimetre. Seven
+2 kg links held out straight on locked hinges sag about 11 cm at the end
+(the stiffness is the rows', not the load's: a light link near the base
+carrying the arm beyond gives a little).
+
+**Breakable joints** (`break f`) keep the rigid rows of before: pulled back
+by Baumgarte, without accumulation. Their breaking measures a blow, which a
+soft joint would spread over steps (shattered glue would hold where it is
+hit).
 
 | Joint | Rows |
 |---|---|
 | point | three linear |
-| fixed | three linear, three angular (2 vec(qB qA* q0*)) |
+| fixed | three linear, three angular (2 vec(qB Q0 qA*), Q0 = qB* qA at the start: the bodies' turns since, in the world) |
 | hinge | three linear, two angular (square to the axis) |
 | slider | two linear (square to the axis), three angular |
+
+Bodies that start at different angles hold the same as bodies that start
+alike (before #453 the error was turned by their starting angle, and such a
+joint fought itself).
 
 A hinge or slider keeps where it is: the hinge's angle (2 atan2 of the
 relative turn about the axis) or the slider's distance along its axis.
 
 - **Limits** work one way: they only push the joint back in, with the speed
-  that takes it back to the limit.
+  that takes it back to the limit. Limits that are the same (`limits 0 0`:
+  an imported drive, held) are a row of their own both ways, soft and warm
+  started like the others: the hinge or slider is held as a fixed joint is.
 - **A motor** drives towards its target speed. Its impulse over a substep
   is clamped by the torque or force times the substep.
 - **Breaking.** Each joint sums its row impulses over a step. Past its

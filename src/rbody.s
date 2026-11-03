@@ -20,7 +20,8 @@
 #  their anchors on each body, and on boxes and hulls more found by tilting
 #  one a little), then islands (bodies touching or jointed, through moving
 #  bodies only) solved in parallel. Each island takes the step in substeps
-#  (4 by default; "soft step"): forces, warm start, sequential impulses
+#  (4 by default; "soft step"): forces, warm start (contacts and joints:
+#  last substep's impulses given again), sequential impulses
 #  (friction, speculative contacts, soft contacts that push overlaps apart
 #  as a damped spring), the bodies moved, then a relax pass without the
 #  push (no bounce from it); restitution once at the end. A contact's gap
@@ -225,7 +226,9 @@
 .equ JR_LB,     32
 .equ JR_AXA,    48
 .equ JR_AXB,    64
-.equ JR_Q0,     80                      # B's orientation relative to A at the start
+.equ JR_Q0,     80                      # conj(qB) qA at the start (the error
+                                        #  qB Q0 conj(qA) = dB conj(dA): the
+                                        #  bodies' turns since, in the world)
 .equ JR_RA,     96
 .equ JR_RB,     112
 .equ JR_ERR,    128                     # angular error (fixed) / axes (hinge)
@@ -243,7 +246,11 @@
 .equ JR_POS,    240                     # where it is: the hinge's angle, the
                                         #  slider's distance
 .equ JR_IMP,    244                     # the impulse it took this step (by row)
-.equ JR_SZ,     256
+.equ JR_WL,     256                     # warm start (#453): the impulses its
+.equ JR_WA,     272                     #  rows took, summed (world vectors:
+                                        #  linear at the anchors, angular),
+                                        #  given again as each substep starts
+.equ JR_SZ,     288
 .equ MARGIN,    0                       # (as floats in rodata)
 .equ RBI_OBJ,   0                       # an object whose instances are bodies:
 .equ RBI_OUT,   8                       #  the mesh shown while they move (its
@@ -382,6 +389,8 @@ rx_hzmax:       .float 60.0                 # soft contacts: at most this stiff,
 rx_zeta:        .float 10.0                 #  damped this much
 rx_twopi:       .float 6.2831853
 rx_beta:        .float 0.2
+rx_jzeta:       .float 5.0                  # soft joints: damped this much (2:
+                                        #  a long arm rings for seconds)
 rx_bounce:      .float 1.0                  # restitution above 1 m/s
 rx_rest2:       .float 0.0025               # at rest under 5 cm/s
 rx_sleep:       .float 0.5                  # seconds at rest to sleep
@@ -495,6 +504,12 @@ rb_time:        .skip 4                 # seconds simulated
 rb_dt:          .skip 4
 rb_h:           .skip 4                 # a substep
 rb_nsub:        .skip 4
+rb_jsoft:       .skip 12                # soft joints (#453): bias rate, mass
+                                        #  scale, impulse scale (the solve
+                                        #  pass; relax: rigid)
+rb_jhard:       .skip 4                 # breakable ones: rigid, beta / h (their
+                                        #  breaking measures a blow, which a
+                                        #  soft joint spreads out)
 rb_brate:       .skip 4                 # soft contacts: bias rate,
 rb_mscale:      .skip 4                 #  mass scale,
 rb_iscale:      .skip 4                 #  impulse scale
@@ -1805,12 +1820,24 @@ rb_settings:
     movss   xmm0, xmm8
     addss   xmm0, xmm0
     lea     rdi, [rip+rb_brate_s]
-    jmp     rb_soft
-# rb_soft(xmm0=w, xmm1=h, rdi=out: bias rate, mass scale, impulse scale)
+    call    rb_soft
+    movss   xmm0, [rip+rx_beta]         # breakable joints: beta / h
+    divss   xmm0, xmm1
+    movss   [rip+rb_jhard], xmm0
+    movss   xmm0, [rip+rx_twopi]        # joints: w = 2 pi substeps a second
+    mulss   xmm0, [rip+rx_quarter]      #  / 4 (120 Hz at 120 x 4; Box2D's
+    divss   xmm0, xmm1                  #  ratio: as stiff as is stable), z 2
+    movss   xmm9, [rip+rx_jzeta]
+    lea     rdi, [rip+rb_jsoft]
+    jmp     rb_soft_z
+# rb_soft(xmm0=w, xmm1=h, rdi=out: bias rate, mass scale, impulse scale);
+#   rb_soft_z: xmm9 = the damping ratio (rb_soft: rx_zeta)
 rb_soft:
+    movss   xmm9, [rip+rx_zeta]
+rb_soft_z:
     movss   xmm3, xmm1
     mulss   xmm3, xmm0                  # hw
-    movss   xmm4, [rip+rx_zeta]
+    movss   xmm4, xmm9
     addss   xmm4, xmm4
     addss   xmm4, xmm3                  # a1
     movss   xmm5, xmm3
@@ -3337,6 +3364,9 @@ make_joints:
     mov     dword ptr [rdi+JR_IMP], 0
     mov     dword ptr [rdi+JR_IMP+4], 0
     mov     dword ptr [rdi+JR_IMP+8], 0
+    xorps   xmm0, xmm0                  # (nothing to warm start with yet)
+    movaps  [rdi+JR_WL], xmm0
+    movaps  [rdi+JR_WA], xmm0
     push    rdi
     mov     r8d, r14d                   # (the pair, for jointed)
     mov     r9d, r15d
@@ -3388,11 +3418,11 @@ make_joints:
     MTV3    xmm2, rax, xmm0, xmm3
     andps   xmm2, [rip+rx_xyz]
     movaps  [rdi+JR_AXB], xmm2
-    push    rdi                         # q0 = qB conj(qA)
-    sub     rsp, 8
-    movaps  xmm0, [r9+BD_Q]
-    movaps  xmm1, [r8+BD_Q]
-    xorps   xmm1, [rip+rx_sign]
+    push    rdi                         # Q0 = conj(qB) qA (#453: qB conj(qA)
+    sub     rsp, 8                      #  turned A's error by the bodies'
+    movaps  xmm0, [r9+BD_Q]             #  starting angle - bodies set at
+    xorps   xmm0, [rip+rx_sign]         #  different angles fought their
+    movaps  xmm1, [r8+BD_Q]             #  joints)
     call    q_mul
     add     rsp, 8
     pop     rdi
@@ -7578,12 +7608,11 @@ jr_prestep:
     je      9f
 1:  cmp     dword ptr [rbx+JR_TYPE], 3
     je      9f
-    movaps  xmm0, [r13+BD_Q]            # 2 vec(qB conj(qA) conj(q0)) (fixed,
+    movaps  xmm0, [r13+BD_Q]            # 2 vec(qB Q0 conj(qA)) (fixed,
                                         #  slider: the error; hinge: its angle)
-    movaps  xmm1, [r12+BD_Q]
-    xorps   xmm1, [rip+rx_sign]
-    call    q_mul
     movaps  xmm1, [rbx+JR_Q0]
+    call    q_mul
+    movaps  xmm1, [r12+BD_Q]
     xorps   xmm1, [rip+rx_sign]
     call    q_mul
     movaps  xmm1, xmm0
@@ -7635,8 +7664,12 @@ jr_relax:
     push    rbp                         # (aligned: the stages' jobs come in
     mov     rbp, rsp                    #  with the other parity)
     and     rsp, -16
-    sub     rsp, 32
+    sub     rsp, 48
     mov     dword ptr [rsp+20], 0
+    mov     eax, [rip+rx_one]           # (rigid: mass scale 1, no impulse
+    mov     [rsp+24], eax               #  scale)
+    mov     dword ptr [rsp+28], 0
+    mov     dword ptr [rsp+32], 0
     jmp     jr_solve_in
 jr_solve:
     push    r14
@@ -7644,9 +7677,23 @@ jr_solve:
     push    rbp
     mov     rbp, rsp
     and     rsp, -16
-    sub     rsp, 32
+    sub     rsp, 48
     mov     eax, [rip+rx_one]
     mov     [rsp+20], eax               # (how much of the error to pull back)
+    mov     eax, [rip+rb_jsoft]         # (soft: its bias rate, mass and
+    mov     [rsp+32], eax               #  impulse scales; breakable: rigid,
+    mov     eax, [rip+rb_jsoft+4]       #  as it was)
+    mov     [rsp+24], eax
+    mov     eax, [rip+rb_jsoft+8]
+    mov     [rsp+28], eax
+    xorps   xmm0, xmm0
+    comiss  xmm0, [rbx+JR_BRK]
+    jae     jr_solve_in
+    mov     eax, [rip+rb_jhard]
+    mov     [rsp+32], eax
+    mov     eax, [rip+rx_one]
+    mov     [rsp+24], eax
+    mov     dword ptr [rsp+28], 0
 jr_solve_in:
     test    dword ptr [rbx+JR_FL], 4    # (broken: nothing)
     jnz     9f
@@ -7678,20 +7725,26 @@ jr_solve_in:
     lea     rsi, [rbx+JR_RB]
     call    relvel
     DOT3    xmm0, [rsp]                 # velocity along it
-    movaps  xmm1, [rbx+JR_C]            # target: -beta (C . d) / h
-    DOT3    xmm1, [rsp]
-    mulss   xmm1, [rip+rx_beta]
-    mulss   xmm1, [rsp+20]
-    divss   xmm1, [rip+rb_h]
+    movaps  xmm1, [rbx+JR_C]            # target: -rate (C . d) (soft); the
+    DOT3    xmm1, [rsp]                 #  impulse ms m (target - v) - is acc
+    mulss   xmm1, [rsp+32]              #  (acc: this row's so far, the warm
+    mulss   xmm1, [rsp+20]              #  start's along it)
     xorps   xmm1, [rip+rx_sign]
     subss   xmm1, xmm0
     mulss   xmm1, [rsp+16]
+    mulss   xmm1, [rsp+24]
+    movaps  xmm2, [rbx+JR_WL]
+    DOT3    xmm2, [rsp]
+    mulss   xmm2, [rsp+28]
+    subss   xmm1, xmm2
     movss   xmm2, xmm1                  # (the joint's load, by row)
     addss   xmm2, [rbx+JR_IMP+r14*4]
     movss   [rbx+JR_IMP+r14*4], xmm2
     shufps  xmm1, xmm1, 0
     mulps   xmm1, [rsp]
     movaps  xmm0, xmm1
+    addps   xmm1, [rbx+JR_WL]           # (summed: the warm start)
+    movaps  [rbx+JR_WL], xmm1
     lea     rdi, [rbx+JR_RA]
     lea     rsi, [rbx+JR_RB]
     call    impulse
@@ -7722,10 +7775,9 @@ jr_solve_in:
     lea     rcx, [rip+rx_ident]
     movaps  xmm0, [rcx+rax]
     movss   xmm1, [rbx+JR_ERR+r14*4]
-33: movaps  [rsp], xmm0                 # d; target -beta err / h
-    mulss   xmm1, [rip+rx_beta]
+33: movaps  [rsp], xmm0                 # d; target -rate err (soft)
+    mulss   xmm1, [rsp+32]
     mulss   xmm1, [rsp+20]
-    divss   xmm1, [rip+rb_h]
     xorps   xmm1, [rip+rx_sign]
     movss   [rsp+16], xmm1
     MV3     xmm1, r12+BD_IIW, xmm0, xmm2, xmm3   # k = d IA d + d IB d
@@ -7740,9 +7792,16 @@ jr_solve_in:
     movss   xmm3, [rsp+16]
     subss   xmm3, xmm2
     divss   xmm3, xmm1
+    mulss   xmm3, [rsp+24]              # ms m (target - v) - is acc
+    movaps  xmm2, [rbx+JR_WA]
+    DOT3    xmm2, [rsp]
+    mulss   xmm2, [rsp+28]
+    subss   xmm3, xmm2
     shufps  xmm3, xmm3, 0
     mulps   xmm3, [rsp]
     movaps  xmm0, xmm3
+    addps   xmm3, [rbx+JR_WA]           # (summed: the warm start)
+    movaps  [rbx+JR_WA], xmm3
     call    ang_impulse
     inc     r14d
     jmp     3b
@@ -7750,6 +7809,109 @@ jr_solve_in:
     pop     rbp
     pop     r15
     pop     r14
+    ret
+
+# jr_warmstart(rbx=joint) - jr_warm on its bodies: every joint's before any
+#   is solved (a joint warm started as its turn came would hold the load
+#   alone, then the next one's would add to it: double, and growing). Each
+#   substep, after jr_prestep, with the contacts' (big islands: in their
+#   coloured stage; the anchors then are the relax pass's, where the bodies
+#   still are)
+jr_warmstart:
+    push    rbp
+    mov     rbp, rsp
+    and     rsp, -16
+    test    dword ptr [rbx+JR_FL], 4    # (broken: nothing)
+    jnz     9f
+    xorps   xmm0, xmm0                  # (breakable: rigid, from nothing -
+    comiss  xmm0, [rbx+JR_BRK]          #  as it was)
+    jb      9f
+    mov     eax, [rbx+JR_A]
+    BODY    r12, rax
+    mov     eax, [rbx+JR_B]
+    BODY    r13, rax
+    call    jr_warm
+9:  mov     rsp, rbp
+    pop     rbp
+    ret
+
+# jr_warm(rbx=joint, r12, r13 its bodies) - the impulses its rows took
+#   before, given again (#453: a joint starting each substep from nothing
+#   holds a loaded chain - a robot arm - only as a soft spring). What its
+#   rows can't push is left out: a slider's linear along its axis, a
+#   hinge's angular about its axis (the axes as they are now); a point
+#   joint has no angular rows
+jr_warm:
+    sub     rsp, 8
+    movaps  xmm0, [rbx+JR_WL]
+    cmp     dword ptr [rbx+JR_TYPE], 4
+    jne     1f
+    call    jr_locked                   # (held: its axis's row too)
+    movaps  xmm0, [rbx+JR_WL]
+    jnz     1f
+    movaps  xmm1, xmm0                  # slider: P - (P . a) a
+    DOT3    xmm1, [rbx+JR_AW]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rbx+JR_AW]
+    subps   xmm0, xmm1
+    movaps  [rbx+JR_WL], xmm0
+1:  cmp     dword ptr [rbx+JR_TYPE], 4  # (its load this step: the rows'
+    jne     11f                         #  sums - a slider's along P, Q)
+    movaps  xmm1, xmm0
+    DOT3    xmm1, [rbx+JR_P]
+    addss   xmm1, [rbx+JR_IMP]
+    movss   [rbx+JR_IMP], xmm1
+    movaps  xmm1, xmm0
+    DOT3    xmm1, [rbx+JR_Q]
+    addss   xmm1, [rbx+JR_IMP+4]
+    movss   [rbx+JR_IMP+4], xmm1
+    jmp     12f
+11: movaps  xmm1, xmm0
+    addss   xmm1, [rbx+JR_IMP]
+    movss   [rbx+JR_IMP], xmm1
+    movaps  xmm1, xmm0
+    shufps  xmm1, xmm1, 0x55
+    addss   xmm1, [rbx+JR_IMP+4]
+    movss   [rbx+JR_IMP+4], xmm1
+    movaps  xmm1, xmm0
+    shufps  xmm1, xmm1, 0xAA
+    addss   xmm1, [rbx+JR_IMP+8]
+    movss   [rbx+JR_IMP+8], xmm1
+12: lea     rdi, [rbx+JR_RA]
+    lea     rsi, [rbx+JR_RB]
+    call    impulse
+    cmp     dword ptr [rbx+JR_TYPE], 3  # (point: no rotation held)
+    je      9f
+    movaps  xmm0, [rbx+JR_WA]
+    cmp     dword ptr [rbx+JR_TYPE], 2
+    jne     2f
+    call    jr_locked                   # (held: its axis's row too)
+    movaps  xmm0, [rbx+JR_WA]
+    jnz     2f
+    movaps  xmm1, xmm0                  # hinge: L - (L . a) a
+    DOT3    xmm1, [rbx+JR_AW]
+    shufps  xmm1, xmm1, 0
+    mulps   xmm1, [rbx+JR_AW]
+    subps   xmm0, xmm1
+    movaps  [rbx+JR_WA], xmm0
+2:  call    ang_impulse
+9:  add     rsp, 8
+    ret
+
+# jr_locked(rbx=joint) -> ZF clear when it is held: limited, lo = hi (an
+#   imported drive: held where it starts); keeps xmm2-15
+jr_locked:
+    test    dword ptr [rbx+JR_FL], 1
+    jz      8f
+    movss   xmm0, [rbx+JR_LO]
+    ucomiss xmm0, [rbx+JR_HI]
+    jne     8f
+    jp      8f
+    test    ebx, ebx                    # (ZF clear: rbx is never 0)
+    jnz     9f
+    test    rbx, rbx
+9:  ret
+8:  cmp     eax, eax                    # (ZF set)
     ret
 
 # jr_extra(rbx=joint, r12, r13 its bodies) - a hinge's or slider's limits
@@ -7768,6 +7930,8 @@ jr_extra:
     jne     9f
 1:  test    eax, 1                      # limits
     jz      5f
+    call    jr_locked                   # lo = hi: held there (#453) - a row
+    jnz     .Ljx_lock                   #  both ways, warm started
     movss   xmm0, [rbx+JR_LO]           # below: push up (the speed it needs
     subss   xmm0, [rbx+JR_POS]          #  to be back, beta-damped)
     xorps   xmm1, xmm1
@@ -7799,6 +7963,38 @@ jr_extra:
     jae     5f
 32: mulss   xmm2, xmm1
     movss   xmm0, xmm2
+    call    jr_axis_push
+    jmp     5f
+.Ljx_lock:
+    movss   xmm0, [rbx+JR_LO]           # target: back to it (soft)
+    subss   xmm0, [rbx+JR_POS]
+    mulss   xmm0, [rsp+64]              # (its rate; none in the relax pass)
+    mulss   xmm0, [rsp+52]
+    movss   [rsp], xmm0
+    call    jr_axis_speed
+    movss   xmm2, [rsp]
+    subss   xmm2, xmm0
+    mulss   xmm2, xmm1                  # the impulse (+ on A along the axis):
+    mulss   xmm2, [rsp+56]              #  ms m (target - v) - is acc (acc
+    movaps  xmm3, [rbx+JR_WA]           #  + along the axis: -W . a)
+    cmp     dword ptr [rbx+JR_TYPE], 2
+    je      35f
+    movaps  xmm3, [rbx+JR_WL]
+35: DOT3    xmm3, [rbx+JR_AW]
+    mulss   xmm3, [rsp+60]
+    addss   xmm2, xmm3
+    movss   [rsp+4], xmm2
+    xorps   xmm2, [rip+rx_sign]         # summed for the warm start (as
+    shufps  xmm2, xmm2, 0               #  impulse / ang_impulse give it:
+    mulps   xmm2, [rbx+JR_AW]           #  - on A)
+    cmp     dword ptr [rbx+JR_TYPE], 2
+    jne     33f
+    addps   xmm2, [rbx+JR_WA]
+    movaps  [rbx+JR_WA], xmm2
+    jmp     34f
+33: addps   xmm2, [rbx+JR_WL]
+    movaps  [rbx+JR_WL], xmm2
+34: movss   xmm0, [rsp+4]
     call    jr_axis_push
 5:  test    dword ptr [rbx+JR_FL], 2    # a motor
     jz      9f
@@ -8002,6 +8198,9 @@ solve_island:
     call    isl_each_mf
     mov     edi, [rsp]
     lea     rsi, [rip+jr_prestep]
+    call    isl_each_jr
+    mov     edi, [rsp]                  # (the joints' warm start: all first)
+    lea     rsi, [rip+jr_warmstart]
     call    isl_each_jr
     mov     dword ptr [rsp+4], 0        # iterations
 3:  mov     eax, [rsp+4]
@@ -8323,7 +8522,7 @@ solve_big:
     lea     rsi, [rip+body_force]
     call    st_bodies
     lea     rsi, [rip+mf_warm]
-    xor     edx, edx
+    lea     rdx, [rip+jr_warmstart]     # (the joints' too)
     call    st_colours
     cmp     dword ptr [rsp+12], 0       # (the first substep's joints: the
     je      90f                         #  prestep did them)

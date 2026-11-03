@@ -23,6 +23,13 @@ tumbling 10 cm box at 60 m/s stop at a 1 cm wall (speculative contacts,
 continuous collision); two groups that ignore each other pass through
 each other but not the ground; rubber bounces higher than wood.
 
+Joints: chains that break past their strength and hold below it, motors,
+limits; loaded joints (#453: soft and warm started) - a 10 kg bar fixed to
+a block fixed to the world 1 m below it holds still, and holds the same
+with the block turned 90 degrees (the bodies' angle at the start no longer
+turns the joint's error); seven 2 kg links held out on locked hinges (an
+imported robot's drives) sag a few cm, not 30, and come to rest.
+
     python3 tests/solver.py build/beemodel
 """
 import os, subprocess, sys, tempfile
@@ -243,6 +250,24 @@ JOINTS = GROUND + (
     'print("motor", (get("Arm", "rz") - a0) * 57.29578, get("Sm", "x") - s0, get("Sm", "y"))\n'
     'print("limits", lim * 57.29578, get("Lim", "rz") * 57.29578, get("Sl", "y"), get("Sl", "x"))\n')
 
+# loaded joints (#453): a 10 kg bar on a 2.4 kg block fixed to the world 1 m below it, the block as it is (S)
+# and turned 90 degrees about X (T); seven 2 kg links held out on locked hinges off a 2.4 kg base
+ARMS = GROUND + (
+    'fn cant(c, z, rx) {\n a = c + "A"\n b = c + "B"\n add("cube", a, 0, 3, z)\n scale(a, 0.1)\n rotate(a, rx, 0, 0)\n'
+    ' add("cube", b, 0.6, 3, z)\n scale(b, 0.5, 0.05, 0.05)\n select(a)\n op("rigid.add", "active box mass 2.4")\n'
+    ' select(b)\n op("rigid.add", "active box mass 10")\n'
+    ' op("rigid.joint", "fixed " + b + " " + a + " pivot 0.1 3 " + str(z))\n'
+    ' op("rigid.joint", "fixed " + a + " world pivot 0 2 " + str(z))\n}\n'
+    'cant("S", 0, 0)\ncant("T", 3, 1.5707963)\n'
+    'add("cube", "Base", 0, 5, -3)\nscale("Base", 0.06)\nselect("Base")\nop("rigid.add", "active box mass 2.4")\n'
+    'op("rigid.joint", "fixed Base world pivot 0 4.5 -3")\n'
+    'prev = "Base"\nfor i in 0..7 {\n n = "L" + str(i)\n x = 0.06 + 0.12 * i\n add("cube", n, x + 0.06, 5, -3)\n'
+    ' scale(n, 0.06, 0.04, 0.04)\n select(n)\n op("rigid.add", "active box mass 2")\n'
+    ' op("rigid.joint", "hinge " + n + " " + prev + " pivot " + str(x) + " 5 -3 axis 0 0 1 limits 0 0")\n prev = n\n}\n'
+    'for f in 1..241 { frame(f) }\n'
+    'print("cant", get("SB", "rz"), get("TB", "rz"), get("SB", "y"), get("TB", "y"))\n'
+    'print("arm", 5 - get("L6", "y"), rbinfo(17), rbinfo(15))\n')
+
 
 def drift(rows):
     """(settling: the largest move start -> 1 s, standing: 1 s -> 10 s,
@@ -375,6 +400,14 @@ def main():
     check(lm[0] < 31 and abs(lm[1] + 30) < 0.5 and abs(lm[2] - 4) < 0.01 and abs(lm[3] - 5) < 1e-4,
           f'limits: a hinge swings to {lm[1]:.1f} degrees (no further than {lm[0]:.1f}; -30), a slider drops to '
           f'{lm[2]:.3f} m (4)')
+    r = {x[0]: [float(v) for v in x[1:]] for x in run(ARMS) if x}
+    ct, a = r.get('cant', [9] * 4), r.get('arm', [9] * 3)
+    check(abs(ct[0]) < 0.03 and abs(ct[1] - ct[0]) < 1e-3 and abs(ct[3] - ct[2]) < 1e-3,
+          f'a 10 kg bar fixed to a block fixed to the world 1 m below holds (turned {ct[0]:.4f}), the same with '
+          f'the block turned 90 degrees ({ct[1]:.4f})')
+    check(a[0] < 0.2 and a[1] < 0.05 and a[2] == 0,
+          f'seven 2 kg links held out on locked hinges: the end sags {a[0] * 1000:.0f} mm (was 316), at rest '
+          f'({a[1]:.3f} m/s)')
     print(f'\n{len(FAILS)} failure(s)' if FAILS else '\nthe solver: all checks passed')
     sys.exit(1 if FAILS else 0)
 

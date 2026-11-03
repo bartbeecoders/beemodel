@@ -1,0 +1,179 @@
+#usda 1.0
+(
+    defaultPrim = "arm"
+    doc = "A small robot as SimReady Central's come (#453): bodies nested as a URDF's links, each body a large part and a small one, links' meshes in millimetres and turned (the base's not), driven joints held where they start, a finger on a mimic joint, the base fixed to the world"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "arm"
+{
+    def Xform "base" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        float physics:mass = 4
+        def Mesh "base_shell"
+        {
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+            point3f[] points = [(-0.1, -0.1, 0), (0.1, -0.1, 0), (-0.1, 0.1, 0), (0.1, 0.1, 0), (-0.1, -0.1, 0.1), (0.1, -0.1, 0.1), (-0.1, 0.1, 0.1), (0.1, 0.1, 0.1)]
+        }
+        def Mesh "base_screw"
+        {
+            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+            int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+            point3f[] points = [(0.1, -0.005, 0.045), (0.11, -0.005, 0.045), (0.1, 0.005, 0.045), (0.11, 0.005, 0.045), (0.1, -0.005, 0.055), (0.11, -0.005, 0.055), (0.1, 0.005, 0.055), (0.11, 0.005, 0.055)]
+        }
+        def Xform "link1" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+        )
+        {
+            float physics:mass = 2.5
+            def Mesh "link1_shell"
+            {
+                int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+                point3f[] points = [(-60, 100, 60), (60, 100, 60), (-60, 100, -60), (60, 100, -60), (-60, 500, 60), (60, 500, 60), (-60, 500, -60), (60, 500, -60)]
+                quatf xformOp:orient = (0.70710677, 0.70710677, 0, 0)
+                float3 xformOp:scale = (0.001, 0.001, 0.001)
+                uniform token[] xformOpOrder = ["xformOp:orient", "xformOp:scale"]
+            }
+            def Mesh "link1_screw"
+            {
+                int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+                point3f[] points = [(60, 295, 5), (70, 295, 5), (60, 295, -5), (70, 295, -5), (60, 305, 5), (70, 305, 5), (60, 305, -5), (70, 305, -5)]
+                quatf xformOp:orient = (0.70710677, 0.70710677, 0, 0)
+                float3 xformOp:scale = (0.001, 0.001, 0.001)
+                uniform token[] xformOpOrder = ["xformOp:orient", "xformOp:scale"]
+            }
+            def Xform "link2" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+            )
+            {
+                float physics:mass = 1.5
+                def Mesh "link2_shell"
+                {
+                    int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                    int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+                    point3f[] points = [(200, 400, 50), (500, 400, 50), (200, 400, -50), (500, 400, -50), (200, 500, 50), (500, 500, 50), (200, 500, -50), (500, 500, -50)]
+                    quatf xformOp:orient = (0.70710677, 0.70710677, 0, 0)
+                    float3 xformOp:scale = (0.001, 0.001, 0.001)
+                    uniform token[] xformOpOrder = ["xformOp:orient", "xformOp:scale"]
+                }
+                def Mesh "link2_screw"
+                {
+                    int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                    int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+                    point3f[] points = [(345, 445, -50), (355, 445, -50), (345, 445, -60), (355, 445, -60), (345, 455, -50), (355, 455, -50), (345, 455, -60), (355, 455, -60)]
+                    quatf xformOp:orient = (0.70710677, 0.70710677, 0, 0)
+                    float3 xformOp:scale = (0.001, 0.001, 0.001)
+                    uniform token[] xformOpOrder = ["xformOp:orient", "xformOp:scale"]
+                }
+                def Xform "link3" (
+                    prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                )
+                {
+                    float physics:mass = 0.6
+                    def Mesh "link3_shell"
+                    {
+                        int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                        int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+                        point3f[] points = [(500, 410, 40), (600, 410, 40), (500, 410, -40), (600, 410, -40), (500, 490, 40), (600, 490, 40), (500, 490, -40), (600, 490, -40)]
+                        quatf xformOp:orient = (0.70710677, 0.70710677, 0, 0)
+                        float3 xformOp:scale = (0.001, 0.001, 0.001)
+                        uniform token[] xformOpOrder = ["xformOp:orient", "xformOp:scale"]
+                    }
+                    def Mesh "link3_screw"
+                    {
+                        int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                        int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+                        point3f[] points = [(545, 445, -40), (555, 445, -40), (545, 445, -50), (555, 445, -50), (545, 455, -40), (555, 455, -40), (545, 455, -50), (555, 455, -50)]
+                        quatf xformOp:orient = (0.70710677, 0.70710677, 0, 0)
+                        float3 xformOp:scale = (0.001, 0.001, 0.001)
+                        uniform token[] xformOpOrder = ["xformOp:orient", "xformOp:scale"]
+                    }
+                    def Xform "finger" (
+                        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+                    )
+                    {
+                        float physics:mass = 0.2
+                        def Mesh "finger_pad"
+                        {
+                            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                            int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+                            point3f[] points = [(600, 390, 10), (640, 390, 10), (600, 390, -10), (640, 390, -10), (600, 450, 10), (640, 450, 10), (600, 450, -10), (640, 450, -10)]
+                            quatf xformOp:orient = (0.70710677, 0.70710677, 0, 0)
+                            float3 xformOp:scale = (0.001, 0.001, 0.001)
+                            uniform token[] xformOpOrder = ["xformOp:orient", "xformOp:scale"]
+                        }
+                        def Mesh "finger_tip"
+                        {
+                            int[] faceVertexCounts = [4, 4, 4, 4, 4, 4]
+                            int[] faceVertexIndices = [0, 1, 3, 2, 4, 6, 7, 5, 0, 4, 5, 1, 2, 3, 7, 6, 0, 2, 6, 4, 1, 5, 7, 3]
+                            point3f[] points = [(615, 380, 5), (625, 380, 5), (615, 380, -5), (625, 380, -5), (615, 390, 5), (625, 390, 5), (615, 390, -5), (625, 390, -5)]
+                            quatf xformOp:orient = (0.70710677, 0.70710677, 0, 0)
+                            float3 xformOp:scale = (0.001, 0.001, 0.001)
+                            uniform token[] xformOpOrder = ["xformOp:orient", "xformOp:scale"]
+                        }
+                    }
+                }
+            }
+        }
+    }
+    def PhysicsRevoluteJoint "j1" (
+        prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+    )
+    {
+        rel physics:body0 = </arm/base>
+        rel physics:body1 = </arm/base/link1>
+        point3f physics:localPos0 = (0, 0, 0.1)
+        point3f physics:localPos1 = (0, 0, 0.1)
+        uniform token physics:axis = "Z"
+        float physics:lowerLimit = -170
+        float physics:upperLimit = 170
+    }
+    def PhysicsRevoluteJoint "j2" (
+        prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+    )
+    {
+        rel physics:body0 = </arm/base/link1>
+        rel physics:body1 = </arm/base/link1/link2>
+        point3f physics:localPos0 = (0, 0, 0.45)
+        point3f physics:localPos1 = (0, 0, 0.45)
+        uniform token physics:axis = "Y"
+        float physics:lowerLimit = -170
+        float physics:upperLimit = 170
+    }
+    def PhysicsRevoluteJoint "j3" (
+        prepend apiSchemas = ["PhysicsDriveAPI:angular"]
+    )
+    {
+        rel physics:body0 = </arm/base/link1/link2>
+        rel physics:body1 = </arm/base/link1/link2/link3>
+        point3f physics:localPos0 = (0.5, 0, 0.45)
+        point3f physics:localPos1 = (0.5, 0, 0.45)
+        uniform token physics:axis = "X"
+        float physics:lowerLimit = -170
+        float physics:upperLimit = 170
+    }
+    def PhysicsRevoluteJoint "finger_joint" (
+        prepend apiSchemas = ["NewtonMimicAPI"]
+    )
+    {
+        rel physics:body0 = </arm/base/link1/link2/link3>
+        rel physics:body1 = </arm/base/link1/link2/link3/finger>
+        point3f physics:localPos0 = (0.6, 0, 0.45)
+        point3f physics:localPos1 = (0.6, 0, 0.45)
+        uniform token physics:axis = "Y"
+        float physics:lowerLimit = -170
+        float physics:upperLimit = 170
+    }
+    def PhysicsFixedJoint "root" (
+        prepend apiSchemas = ["PhysicsArticulationRootAPI"]
+    )
+    {
+        rel physics:body1 = </arm/base>
+    }
+}
