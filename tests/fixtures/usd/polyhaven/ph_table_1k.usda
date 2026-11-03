@@ -1,0 +1,79 @@
+#usda 1.0
+(
+    defaultPrim = "ph_table"
+    doc = "Poly Haven's layout (Blender's USD export): Z up, metres, separate metallic and roughness maps, EXRs named"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "ph_table"
+{
+    def Xform "ph_table"
+    {
+        def Mesh "Top" (
+            prepend apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            int[] faceVertexCounts = [4]
+            int[] faceVertexIndices = [0, 1, 2, 3]
+            rel material:binding = </ph_table/_materials/ph_table>
+            point3f[] points = [(-0.5, -0.3, 0.7), (0.5, -0.3, 0.7), (0.5, 0.3, 0.7), (-0.5, 0.3, 0.7)]
+            texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1), (0, 1)] (
+                interpolation = "faceVarying"
+            )
+            int[] primvars:st:indices = [0, 1, 2, 3]
+        }
+    }
+
+    def Scope "_materials"
+    {
+        def Material "ph_table"
+        {
+            token outputs:surface.connect = </ph_table/_materials/ph_table/Principled_BSDF.outputs:surface>
+
+            def Shader "Principled_BSDF"
+            {
+                uniform token info:id = "UsdPreviewSurface"
+                color3f inputs:diffuseColor.connect = </ph_table/_materials/ph_table/Image_Texture.outputs:rgb>
+                float inputs:metallic.connect = </ph_table/_materials/ph_table/Image_Texture_001.outputs:r>
+                normal3f inputs:normal.connect = </ph_table/_materials/ph_table/Image_Texture_003.outputs:rgb>
+                float inputs:roughness.connect = </ph_table/_materials/ph_table/Image_Texture_002.outputs:r>
+                token outputs:surface
+            }
+
+            def Shader "Image_Texture"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @./textures/ph_table_diff_1k.jpg@
+                token inputs:sourceColorSpace = "sRGB"
+                float3 outputs:rgb
+            }
+
+            def Shader "Image_Texture_001"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @./textures/ph_table_metal_1k.exr@
+                token inputs:sourceColorSpace = "raw"
+                float outputs:r
+            }
+
+            def Shader "Image_Texture_002"
+            {
+                uniform token info:id = "UsdUVTexture"
+                asset inputs:file = @./textures/ph_table_rough_1k.exr@
+                token inputs:sourceColorSpace = "raw"
+                float outputs:r
+            }
+
+            def Shader "Image_Texture_003"
+            {
+                uniform token info:id = "UsdUVTexture"
+                float4 inputs:bias = (-1, -1, -1, -1)
+                asset inputs:file = @./textures/ph_table_nor_gl_1k.exr@
+                float4 inputs:scale = (2, 2, 2, 2)
+                token inputs:sourceColorSpace = "raw"
+                float3 outputs:rgb
+            }
+        }
+    }
+}

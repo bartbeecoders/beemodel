@@ -6,8 +6,10 @@
 #  first one is NVIDIA SimReady (huggingface.co/datasets/nvidia/simready-
 #  assets, CC-BY 4.0), the second SimReady Central (github.com/NVIDIA-
 #  Omniverse/simready-central: an index of other makers' datasets, each
-#  asset pinned to a commit; see "kind Central" below); ~/BeeModel/
-#  sources.txt adds more, a line each:
+#  asset pinned to a commit; see "kind Central" below), the third Poly
+#  Haven (polyhaven.com, CC0 models served as USD: its API's catalog, an
+#  asset's files from /files/<id>, the 1k ones; see "kind Poly Haven");
+#  ~/BeeModel/sources.txt adds more, a line each:
 #      simready <id> <owner/dataset> <title ...>
 #      central  <id> <github owner/repo> <title ...>
 #  (a Hugging Face dataset in SimReady's layout: an asset a folder, its USD
@@ -16,9 +18,12 @@
 #  files an asset needs (ex_file_next) and where they come from.
 #
 #  Everything a source gives is kept under ~/BeeModel/cache/<id>/:
-#    catalog.tsv     name TAB root (path in the cache) TAB category; central:
-#                    TAB dataset TAB commit TAB folder TAB licence TAB thumbnail
-#    bom/<name>.json (central) an asset's package's file list
+#    catalog.tsv     name TAB root (path in the cache) TAB category; central,
+#                    Poly Haven: TAB dataset TAB commit TAB folder TAB licence
+#                    TAB thumbnail TAB tags
+#    bom/<name>.json (central) an asset's package's file list; (Poly Haven)
+#                    its /files/<id> answer
+#    assets.json     (Poly Haven) the catalog as the API gave it
 #    idx/            (central) the datasets' index files
 #    thumbs/<name>.png
 #    assets/<name>/...  the files its USD needs, as in the dataset
@@ -34,9 +39,11 @@
 #  Work runs in up to four curl children (curl ships with Linux and
 #  Windows 11), reaped by ex_tick from the main loop; the status bar shows
 #  a download's progress. Without a window (--eval, --run) each operation
-#  runs to its end before it returns.
+#  runs to its end before it returns. Every request says User-Agent:
+#  BeeModel/<version> (Poly Haven's API asks for one).
 #  BEEMODEL_HF_URL replaces https://huggingface.co, BEEMODEL_GH_URL GitHub's
-#  API and raw files (tests serve fixtures).
+#  API and raw files, BEEMODEL_PH_URL https://api.polyhaven.com (tests serve
+#  fixtures).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -79,6 +86,7 @@
 .equ EK_SIMREADY, 1
 .equ EK_CENTRAL, 2                      # SimReady Central: a GitHub index of
                                         #  Hugging Face datasets
+.equ EK_POLYHAVEN, 3                    # Poly Haven's API
 
 # an asset of the catalog
 .equ EX_NAME,   0                       # 64
@@ -95,8 +103,11 @@
 .equ EX_REV,    320                     # 48 the commit it was reviewed at
 .equ EX_LIC,    368                     # 24 its licence
 .equ EX_FOLDER, 392                     # 64 its folder in the dataset
-.equ EX_THP,    456                     # 128 its thumbnail (in the folder)
-.equ EX_SZ,     640
+.equ EX_THP,    456                     # 128 its thumbnail (in the folder;
+                                        #  Poly Haven: its URL, no query)
+.equ EX_TAGS,   584                     # 128 (Poly Haven) more categories,
+                                        #  its tags: words the search finds
+.equ EX_SZ,     712
 
 # a child
 .equ SL_PID,    0
@@ -117,6 +128,8 @@
 .equ SW_DSINFO, 7                       # a dataset's licence, gating
 .equ SW_DSIDX,  8                       # a dataset's index file
 .equ SW_BOM,    9                       # an asset's bill of materials
+                                        #  (Poly Haven: its /files/<id>)
+.equ SW_PHCAT,  10                      # (Poly Haven) the catalog
 
 # a dataset of SimReady Central
 .equ EX_MAXDS,  64
@@ -131,7 +144,8 @@
 .equ EF_PATH,   0                       # 256 (dataset path)
 .equ EF_SIZE,   256                     # (8)
 .equ EF_STATE,  264                     # 0 to get, 1 coming, 2 here, 3 failed
-.equ EF_SZ,     272
+.equ EF_URL,    272                     # 256 (Poly Haven) where it is
+.equ EF_SZ,     528
 
 .section .rodata
 s_ex_job:       .asciz "Placing the downloaded asset"
@@ -149,6 +163,32 @@ a_D:        .asciz "-D"
 a_H:        .asciz "-H"
 a_form:     .asciz "Content-Type: application/x-www-form-urlencoded"
 a_data:     .asciz "--data-binary"
+a_A:        .asciz "-A"
+s_ua:       .asciz "BeeModel/"
+s_ph_id:    .asciz "polyhaven"
+s_ph_title: .asciz "Poly Haven"
+s_ph_repo:  .asciz "api.polyhaven.com"
+s_ph_lic:   .asciz "CC0"
+s_ph:       .asciz "https://api.polyhaven.com"
+s_phenv:    .asciz "BEEMODEL_PH_URL="
+s_ph_cat:   .asciz "/assets?t=models"
+s_ph_files: .asciz "/files/"
+s_ph_thq:   .asciz "?width=256&height=256&format=png"
+s_ph_json:  .asciz "/assets.json"
+k_categories: .asciz "categories"
+k_thumburl: .asciz "thumbnail_url"
+k_usd:      .asciz "usd"
+k_url:      .asciz "url"
+k_include:  .asciz "include"
+k_jpg:      .asciz "jpg"
+k_exr:      .asciz "exr"
+x_exr:      .asciz ".exr"
+ex_ph_res:                              # resolutions taken, in order
+    .asciz "1k"
+    .asciz "2k"
+    .asciz "4k"
+    .asciz "8k"
+    .byte 0
 s_sr_id:    .asciz "simready"
 s_sr_title: .asciz "NVIDIA SimReady"
 s_sr_repo:  .asciz "nvidia/simready-assets"
@@ -306,6 +346,9 @@ ex_bp1:     .skip 512
 ex_bp2:     .skip 512
 ex_bp3:     .skip 512
 ex_bp4:     .skip 512
+ex_ph:      .skip 256                   # https://api.polyhaven.com (or the test's)
+ex_ua:      .skip 64                    # BeeModel/<version>
+ex_res:     .skip 8                     # (Poly Haven) the resolution taken
 
 .text
 
@@ -333,7 +376,34 @@ ex_init:
     call    ex_src_set
     lea     rdi, [rip+ex_src+ES_SZ]
     call    ex_src_central
-    mov     dword ptr [rip+ex_nsrc], 2
+    lea     rdi, [rip+ex_src+2*ES_SZ]   # Poly Haven
+    lea     rsi, [rip+s_ph_id]
+    lea     rdx, [rip+s_ph_title]
+    lea     rcx, [rip+s_ph_repo]
+    call    ex_src_set
+    mov     dword ptr [rip+ex_src+2*ES_SZ+ES_KIND], EK_POLYHAVEN
+    lea     rdi, [rip+ex_src+2*ES_SZ+ES_LIC]
+    lea     rsi, [rip+s_ph_lic]
+    call    ex_cpy0
+    mov     dword ptr [rip+ex_nsrc], 3
+    lea     rdi, [rip+ex_ua]            # User-Agent: BeeModel/<version>
+    lea     rsi, [rip+s_ua]
+    call    ex_cpy0
+    lea     rsi, [rip+s_version]
+    call    ex_cat0
+    lea     rdi, [rip+ex_ph]            # Poly Haven's API
+    lea     rsi, [rip+s_ph]
+    call    ex_cpy0
+    lea     rdi, [rip+s_phenv]
+    call    getenv
+    test    rax, rax
+    jz      3f
+    cmp     byte ptr [rax], 0
+    je      3f
+    lea     rdi, [rip+ex_ph]
+    mov     rsi, rax
+    call    ex_cpy0
+3:
     lea     rdi, [rip+ex_gh]            # GitHub (its API, its raw files)
     lea     rsi, [rip+s_gh]
     call    ex_cpy0
@@ -841,8 +911,8 @@ ex_load:
     lea     rsi, [rip+ex_word]
     mov     edx, 31
     call    ex_ncpy
-1:  lea     rdi, [r15+EX_REPO]          # (central) dataset, commit, folder,
-    mov     rsi, r14                    #  licence, thumbnail
+1:  lea     rdi, [r15+EX_REPO]          # (central, Poly Haven) dataset, commit,
+    mov     rsi, r14                    #  folder, licence, thumbnail
     mov     edx, 63
     call    ex_field
     lea     rdi, [r15+EX_REV]
@@ -855,6 +925,9 @@ ex_load:
     mov     edx, 23
     call    ex_field
     lea     rdi, [r15+EX_THP]
+    mov     edx, 127
+    call    ex_field
+    lea     rdi, [r15+EX_TAGS]          # (Poly Haven) its tags
     mov     edx, 127
     call    ex_field
     mov     r14, rsi
@@ -987,7 +1060,10 @@ ex_save:
     push    rbx
     push    r12
     sub     rsp, 8
-    call    ex_iscentral
+    call    ex_kind                     # (central, Poly Haven: more columns)
+    cmp     eax, EK_CENTRAL
+    setae   al
+    movzx   eax, al
     mov     [rsp], eax
     call    wb_reset
     xor     ebx, ebx
@@ -1018,6 +1094,8 @@ ex_save:
     call    ex_wb_tab
     lea     rsi, [r12+EX_THP]
     call    ex_wb_tab
+    lea     rsi, [r12+EX_TAGS]
+    call    ex_wb_tab
 3:  mov     edi, 10
     call    wb_char
     inc     ebx
@@ -1044,7 +1122,7 @@ ex_wb_tab:
     jmp     wb_str
 
 # ex_match(rdi=search words (0: all)) - EX_HIT on the assets whose name,
-#   category and dataset have every word (any case)
+#   category, dataset and tags have every word (any case)
 ex_match:
     push    rbx
     push    r12
@@ -1059,7 +1137,7 @@ ex_match:
     mov     dword ptr [r13+EX_HIT], 1
     test    r12, r12
     jz      3f
-    lea     rdi, [rip+ex_bp4]           # "name category dataset"
+    lea     rdi, [rip+ex_bp4]           # "name category dataset tags"
     lea     rsi, [r13+EX_NAME]
     call    ex_cpy0
     mov     byte ptr [rdi], ' '
@@ -1069,6 +1147,10 @@ ex_match:
     mov     byte ptr [rdi], ' '
     inc     rdi
     lea     rsi, [r13+EX_REPO]
+    call    ex_cpy0
+    mov     byte ptr [rdi], ' '
+    inc     rdi
+    lea     rsi, [r13+EX_TAGS]
     call    ex_cpy0
     lea     rdi, [rip+ex_bp4]
     mov     rsi, r12
@@ -1197,7 +1279,7 @@ ex_spawn:
     lea     rdi, [rip+ex_curl]
     mov     rsi, rax
     call    ex_cpy0
-1:  lea     rdi, [rbx+SL_ARGV]          # curl -sSfL -m 600 --retry 2 -o out
+1:  lea     rdi, [rbx+SL_ARGV]          # curl -sSfL -m 600 --retry 2 -o out -A ua
     lea     rax, [rip+ex_curl]
     mov     [rdi], rax
     lea     rax, [rip+a_s]
@@ -1214,7 +1296,11 @@ ex_spawn:
     mov     [rdi+48], rax
     lea     rax, [rbx+SL_OUT]
     mov     [rdi+56], rax
-    add     rdi, 64
+    lea     rax, [rip+a_A]
+    mov     [rdi+64], rax
+    lea     rax, [rip+ex_ua]
+    mov     [rdi+72], rax
+    add     rdi, 80
     cmp     r12d, 1                     # -D headers
     jne     2f
     lea     rax, [rip+a_D]
@@ -1440,6 +1526,8 @@ ex_done:
     je      ex_dsidx_done
     cmp     eax, SW_BOM
     je      ex_bom_done
+    cmp     eax, SW_PHCAT
+    je      ex_phcat_done
     ret
 
 # =============================================================================
@@ -1484,9 +1572,11 @@ ex_cat_next:
     je      1f
     xor     eax, eax
     ret
-1:  call    ex_iscentral
-    test    eax, eax
-    jnz     5f
+1:  call    ex_kind
+    cmp     eax, EK_POLYHAVEN
+    je      6f
+    cmp     eax, EK_CENTRAL
+    je      5f
     xor     eax, eax
     cmp     dword ptr [rip+ex_catbusy], 0
     jne     9f
@@ -1494,6 +1584,12 @@ ex_cat_next:
     cmp     ecx, 1
     je      ex_tree_start
     jmp     ex_info_start
+6:  xor     eax, eax                    # (Poly Haven: one request)
+    cmp     dword ptr [rip+ex_state], 1
+    jne     9f
+    cmp     dword ptr [rip+ex_catbusy], 0
+    jne     9f
+    jmp     ex_phcat_start
 5:  xor     eax, eax
     cmp     dword ptr [rip+ex_state], 2
     je      ex_ds_next
@@ -1501,6 +1597,17 @@ ex_cat_next:
     jne     9f
     jmp     ex_gt_start
 9:  ret
+
+# ex_kind -> eax = the kind of the source shown (EK_*), 0: the local library
+ex_kind:
+    mov     eax, [rip+ex_cur]
+    test    eax, eax
+    js      8f
+    call    ex_src_rec
+    mov     eax, [rax+ES_KIND]
+    ret
+8:  xor     eax, eax
+    ret
 
 # ex_iscentral -> eax = 1 when the source shown is a SimReady Central one
 ex_iscentral:
@@ -2710,12 +2817,23 @@ ex_bom_start:
     mov     ecx, EX_SZ
     div     rcx
     mov     [r13+SL_IDX], eax
-    mov     rdi, r13
+    call    ex_kind
+    cmp     eax, EK_POLYHAVEN
+    jne     1f
+    lea     rdi, [r13+SL_URL]           # (Poly Haven: <api>/files/<id>)
+    lea     rsi, [rip+ex_ph]
+    call    ex_cpy0
+    lea     rsi, [rip+s_ph_files]
+    call    ex_cat0
+    lea     rsi, [r12+EX_NAME]
+    call    ex_cat0
+    jmp     2f
+1:  mov     rdi, r13
     mov     rsi, r12
     call    ex_url_rev
     lea     rsi, [rip+s_bomrel]
     call    ex_cat0
-    mov     rdi, r12
+2:  mov     rdi, r12
     call    ex_bomfile
     lea     rdi, [r13+SL_OUT]
     lea     rsi, [rip+ex_path]
@@ -2822,8 +2940,12 @@ ex_relpath:
 # ex_bom_parse(rdi=asset record) -> eax = 1 when its package's file list was
 #   read: EX_ROOT = <name>/simready_usd/<root> (the USD a thumbnail in
 #   simready_usd/.thumbs/<size>/<root>.png is of, 256x256 first; else the
-#   first USD in simready_usd/), EX_THP = that thumbnail (or none)
+#   first USD in simready_usd/), EX_THP = that thumbnail (or none);
+#   Poly Haven: ex_ph_parse
 ex_bom_parse:
+    call    ex_kind
+    cmp     eax, EK_POLYHAVEN
+    je      ex_ph_parse
     push    rbx
     push    r12
     push    r13
@@ -2998,8 +3120,11 @@ ex_setroot:
 
 # ex_bom_files(rdi=asset record) -> eax = 1: ex_files = the files of its
 #   package an import needs (EF_PATH <name>/<path>, as in the cache), those
-#   here at their size kept
+#   here at their size kept; Poly Haven: ex_ph_files
 ex_bom_files:
+    call    ex_kind
+    cmp     eax, EK_POLYHAVEN
+    je      ex_ph_files
     push    rbx
     push    r12
     push    r13
@@ -3078,6 +3203,660 @@ ex_bom_files:
     call    ex_junmap
 .Lbf_no:
     xor     eax, eax
+9:  pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# =============================================================================
+#  Kind Poly Haven: its API (api.polyhaven.com, CC0)
+#    /assets?t=models  the catalog: an object, a model each (its id: the
+#                      name; categories: the first the category, the rest
+#                      and its tags searched; thumbnail_url: its tile, asked
+#                      for as a 256 px PNG)
+#    /files/<id>       per format and resolution its files: usd.<res>.usd
+#                      the .usdc and an include map (path -> url, size) of
+#                      the textures it needs. 1k taken (else 2k, 4k, 8k).
+#                      An EXR there (our readers take none) comes as the JPEG
+#                      the same answer lists for that map (<map>.<res>.jpg)
+#                      and the importer finds it beside the .exr it names.
+# =============================================================================
+# ex_phcat_start(ebx=free slot) -> eax = 1: the catalog asked for
+ex_phcat_start:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     eax, ebx
+    call    ex_slotp
+    mov     r12, rax
+    mov     dword ptr [r12+SL_WHAT], SW_PHCAT
+    lea     rdi, [r12+SL_URL]
+    lea     rsi, [rip+ex_ph]
+    call    ex_cpy0
+    lea     rsi, [rip+s_ph_cat]
+    call    ex_cat0
+    call    ex_srcdir
+    lea     rdi, [r12+SL_OUT]
+    lea     rsi, [rip+s_ph_json]
+    call    ex_in
+    mov     edi, ebx
+    xor     esi, esi
+    call    ex_spawn
+    test    eax, eax
+    jz      8f
+    mov     dword ptr [rip+ex_catbusy], 1
+    mov     eax, 1
+    jmp     9f
+8:  mov     dword ptr [rip+ex_state], 3
+    lea     rdi, [rip+s_no_curl]
+    call    log_line
+    xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_phcat_done(rdi=slot) - each model of the answer an asset: its name,
+#   category, tags, thumbnail; the catalog saved
+ex_phcat_done:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     rbx, rdi
+    mov     dword ptr [rip+ex_catbusy], 0
+    cmp     dword ptr [rbx+SL_STAT], 0
+    jne     .Lpc_fail
+    lea     rdi, [rbx+SL_OUT]
+    call    ex_jread
+    test    rax, rax
+    jz      .Lpc_fail
+    mov     rsi, rax
+    call    ex_jo_first
+.Lpc_el:
+    test    rax, rax
+    jz      .Lpc_end
+    mov     r12, rax                    # its id
+    mov     rsi, r12
+    lea     rdi, [rip+ex_word]
+    mov     edx, 64
+    call    j_str
+    test    eax, eax
+    jle     .Lpc_nx
+    lea     rsi, [rip+ex_word]
+    call    ex_add
+    test    rax, rax
+    jz      .Lpc_end
+    mov     r13, rax
+    mov     byte ptr [r13+EX_CAT], 0
+    mov     rsi, r12
+    call    ex_jo_val
+    test    rax, rax
+    jz      .Lpc_nx
+    mov     r14, rax                    # its record
+    mov     rsi, r14                    # categories: the first, then tags
+    lea     rdi, [rip+k_categories]
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     rsi, rax
+    call    j_first
+    mov     r15, rax
+    test    r15, r15
+    jz      2f
+    mov     rsi, r15
+    lea     rdi, [r13+EX_CAT]
+    mov     edx, 32
+    call    j_str
+1:  mov     rsi, r15
+    call    j_next
+    mov     r15, rax
+    test    r15, r15
+    jz      2f
+    mov     rdi, r13
+    mov     rsi, r15
+    call    ex_tag_add
+    jmp     1b
+2:  mov     rsi, r14                    # its tags
+    lea     rdi, [rip+k_tags]
+    call    j_find
+    test    rax, rax
+    jz      4f
+    mov     rsi, rax
+    call    j_first
+    mov     r15, rax
+3:  test    r15, r15
+    jz      4f
+    mov     rdi, r13
+    mov     rsi, r15
+    call    ex_tag_add
+    mov     rsi, r15
+    call    j_next
+    mov     r15, rax
+    jmp     3b
+4:  mov     rsi, r14                    # its thumbnail: up to the query
+    lea     rdi, [rip+k_thumburl]
+    call    j_find
+    test    rax, rax
+    jz      .Lpc_nx
+    mov     rsi, rax
+    lea     rdi, [rip+ex_bp1]
+    mov     edx, 512
+    call    j_str
+    test    eax, eax
+    jle     .Lpc_nx
+    lea     rsi, [rip+ex_bp1]
+    lea     rdi, [r13+EX_THP]
+    xor     ecx, ecx
+5:  mov     al, [rsi+rcx]
+    test    al, al
+    jz      6f
+    cmp     al, '?'
+    je      6f
+    cmp     ecx, 127
+    jae     7f                          # (too long: none)
+    mov     [rdi+rcx], al
+    inc     ecx
+    jmp     5b
+7:  xor     ecx, ecx
+6:  mov     byte ptr [rdi+rcx], 0
+.Lpc_nx:
+    mov     rsi, r12
+    call    ex_jo_next
+    jmp     .Lpc_el
+.Lpc_end:
+    call    ex_junmap
+    mov     dword ptr [rip+ex_state], 0
+    call    ex_save
+    call    ex_have_scan
+    call    ex_cat_report
+    jmp     .Lpc_out
+.Lpc_fail:
+    mov     dword ptr [rip+ex_state], 3
+    lea     rdi, [rip+s_cat_fail]
+    lea     rsi, [rbx+SL_URL]
+    call    log_pair
+.Lpc_out:
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_tag_add(rdi=asset record, rsi=a JSON string) - the word appended to its
+#   tags (a space between; at most 127 bytes)
+ex_tag_add:
+    push    rbx
+    mov     rbx, rdi
+    lea     rdi, [rip+ex_bp2]
+    mov     edx, 128
+    call    j_str
+    test    eax, eax
+    jle     9f
+    lea     rdi, [rbx+EX_TAGS]
+    call    ex_end
+    lea     rcx, [rbx+EX_TAGS]
+    mov     rax, rdi
+    sub     rax, rcx                    # its length
+    cmp     rax, 125
+    jae     9f
+    test    rax, rax
+    jz      1f
+    mov     byte ptr [rdi], ' '
+    inc     rdi
+    inc     rax
+1:  lea     rsi, [rip+ex_bp2]
+2:  mov     dl, [rsi]
+    test    dl, dl
+    jz      3f
+    cmp     rax, 127
+    jae     3f
+    mov     [rdi], dl
+    inc     rdi
+    inc     rsi
+    inc     rax
+    jmp     2b
+3:  mov     byte ptr [rdi], 0
+9:  pop     rbx
+    ret
+
+# ---- JSON objects --------------------------------------------------------------
+# ex_jo_first(rsi=object ('{')) -> rax = its first key ('"'), 0
+ex_jo_first:
+    call    j_ws
+    cmp     rsi, [rip+j_end]
+    jae     8f
+    cmp     byte ptr [rsi], '{'
+    jne     8f
+    inc     rsi
+    call    j_ws
+    cmp     rsi, [rip+j_end]
+    jae     8f
+    cmp     byte ptr [rsi], '"'
+    jne     8f
+    mov     rax, rsi
+    ret
+8:  xor     eax, eax
+    ret
+
+# ex_jo_val(rsi=key) -> rax = its value, 0
+ex_jo_val:
+    call    j_skip
+    call    j_ws
+    cmp     rsi, [rip+j_end]
+    jae     8f
+    cmp     byte ptr [rsi], ':'
+    jne     8f
+    inc     rsi
+    call    j_ws
+    mov     rax, rsi
+    ret
+8:  xor     eax, eax
+    ret
+
+# ex_jo_next(rsi=key) -> rax = the next key of its object, 0
+ex_jo_next:
+    sub     rsp, 8
+    call    ex_jo_val
+    test    rax, rax
+    jz      8f
+    mov     rsi, rax
+    call    j_skip
+    call    j_ws
+    cmp     rsi, [rip+j_end]
+    jae     8f
+    cmp     byte ptr [rsi], ','
+    jne     8f
+    inc     rsi
+    call    j_ws
+    cmp     rsi, [rip+j_end]
+    jae     8f
+    cmp     byte ptr [rsi], '"'
+    jne     8f
+    mov     rax, rsi
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    ret
+
+# ---- an asset's files ----------------------------------------------------------
+# ex_ph_usd(rsi=the /files/<id> answer) -> rax = usd.<res>.usd (its url,
+#   size, include), 0; ex_res = the resolution (1k first)
+ex_ph_usd:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    lea     rdi, [rip+k_usd]
+    call    j_find
+    test    rax, rax
+    jz      8f
+    mov     rbx, rax
+    lea     r12, [rip+ex_ph_res]
+1:  cmp     byte ptr [r12], 0
+    je      8f
+    mov     rsi, rbx
+    mov     rdi, r12
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     rsi, rax
+    lea     rdi, [rip+k_usd]
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     [rsp], rax
+    mov     rsi, rax
+    lea     rdi, [rip+k_url]
+    call    j_find
+    test    rax, rax
+    jz      2f
+    lea     rdi, [rip+ex_res]
+    mov     rsi, r12
+    call    ex_cpy0
+    mov     rax, [rsp]
+    jmp     9f
+2:  mov     rdi, r12                    # the next resolution
+    call    ex_end
+    lea     r12, [rdi+1]
+    jmp     1b
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_ph_size(rsi=object) -> rax = its "size", 0
+ex_ph_size:
+    sub     rsp, 8
+    lea     rdi, [rip+k_size]
+    call    j_find
+    test    rax, rax
+    jz      8f
+    mov     rsi, rax
+    call    j_num
+    test    eax, eax
+    jz      8f
+    cvttsd2si rax, xmm0
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    ret
+
+# ex_ph_parse(rdi=asset record) -> eax = 1 when its /files/<id> answer was
+#   read: EX_ROOT = <name>/<the .usdc's file name> (none: no USD)
+ex_ph_parse:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    call    ex_bomfile
+    lea     rdi, [rip+ex_path]
+    call    ex_jread
+    test    rax, rax
+    jz      8f
+    mov     byte ptr [rbx+EX_ROOT], 0
+    mov     rsi, rax
+    call    ex_ph_usd
+    test    rax, rax
+    jz      7f
+    mov     rsi, rax
+    lea     rdi, [rip+k_url]
+    call    j_find
+    test    rax, rax
+    jz      7f
+    mov     rsi, rax
+    lea     rdi, [rip+ex_bp1]
+    mov     edx, 512
+    call    j_str
+    test    eax, eax
+    jle     7f
+    lea     rsi, [rip+ex_bp1]
+    call    ex_basename
+    mov     rdi, rax
+    call    ex_ph_safe
+    test    eax, eax
+    jz      7f
+    mov     rsi, rdi
+    mov     rdi, rbx
+    call    ex_setroot
+7:  call    ex_junmap
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_ph_safe(rdi=path) -> eax = 1 when it stays in the asset's folder (not
+#   empty, no leading '/', no "..", no '\'); rdi kept
+ex_ph_safe:
+    xor     eax, eax
+    cmp     byte ptr [rdi], 0
+    je      9f
+    cmp     byte ptr [rdi], '/'
+    je      9f
+    xor     ecx, ecx
+1:  mov     dl, [rdi+rcx]
+    test    dl, dl
+    jz      8f
+    cmp     dl, '\\'
+    je      9f
+    cmp     dl, '.'
+    jne     2f
+    cmp     byte ptr [rdi+rcx+1], '.'
+    je      9f
+2:  inc     ecx
+    jmp     1b
+8:  mov     eax, 1
+9:  ret
+
+# ex_ph_files(rdi=asset record) -> eax = 1: ex_files = its .usdc and the
+#   include map's textures (an EXR: its map's JPEG), those here at their
+#   size kept
+ex_ph_files:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    sub     rsp, 16
+    mov     rbx, rdi
+    call    ex_bomfile
+    lea     rdi, [rip+ex_path]
+    call    ex_jread
+    test    rax, rax
+    jz      .Lpf_no
+    mov     [rsp], rax                  # the answer
+    mov     rsi, rax
+    call    ex_ph_usd
+    test    rax, rax
+    jz      .Lpf_bad
+    mov     r12, rax
+    mov     rsi, r12                    # the .usdc
+    lea     rdi, [rip+k_url]
+    call    j_find
+    test    rax, rax
+    jz      .Lpf_bad
+    mov     rsi, rax
+    lea     rdi, [rip+ex_bp1]
+    mov     edx, 256
+    call    j_str
+    test    eax, eax
+    jle     .Lpf_bad
+    lea     rsi, [rip+ex_bp1]
+    call    ex_basename
+    lea     rdi, [rip+ex_bp3]
+    mov     rsi, rax
+    call    ex_cpy0
+    mov     rsi, r12
+    call    ex_ph_size
+    lea     rdi, [rip+ex_bp3]
+    lea     rsi, [rip+ex_bp1]
+    mov     rdx, rax
+    mov     rcx, rbx
+    call    ex_ph_addfile
+    mov     rsi, r12                    # the textures
+    lea     rdi, [rip+k_include]
+    call    j_find
+    test    rax, rax
+    jz      .Lpf_ok
+    mov     rsi, rax
+    call    ex_jo_first
+    mov     r13, rax
+.Lpf_inc:
+    test    r13, r13
+    jz      .Lpf_ok
+    mov     rsi, r13                    # its path
+    lea     rdi, [rip+ex_bp3]
+    mov     edx, 200
+    call    j_str
+    test    eax, eax
+    jle     .Lpf_nx
+    mov     rsi, r13
+    call    ex_jo_val
+    test    rax, rax
+    jz      .Lpf_nx
+    mov     r14, rax
+    mov     rsi, r14                    # its URL, size
+    lea     rdi, [rip+k_url]
+    call    j_find
+    test    rax, rax
+    jz      .Lpf_nx
+    mov     rsi, rax
+    lea     rdi, [rip+ex_bp1]
+    mov     edx, 256
+    call    j_str
+    test    eax, eax
+    jle     .Lpf_nx
+    mov     rsi, r14
+    call    ex_ph_size
+    mov     r15, rax
+    lea     rdi, [rip+ex_bp3]           # an EXR: its map's JPEG instead
+    lea     rsi, [rip+x_exr]
+    call    ex_suffix
+    test    eax, eax
+    jz      1f
+    mov     rdi, [rsp]
+    call    ex_ph_jpg
+    test    eax, eax
+    jz      1f
+    mov     r15, rdx
+    lea     rdi, [rip+ex_bp3]
+    call    ex_end
+    mov     dword ptr [rdi-4], 0x67706a2e   # ".jpg"
+1:  lea     rdi, [rip+ex_bp3]
+    lea     rsi, [rip+ex_bp1]
+    mov     rdx, r15
+    mov     rcx, rbx
+    call    ex_ph_addfile
+.Lpf_nx:
+    mov     rsi, r13
+    call    ex_jo_next
+    mov     r13, rax
+    jmp     .Lpf_inc
+.Lpf_ok:
+    call    ex_junmap
+    mov     eax, 1
+    jmp     9f
+.Lpf_bad:
+    call    ex_junmap
+.Lpf_no:
+    xor     eax, eax
+9:  add     rsp, 16
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_ph_jpg(rdi=the /files/<id> answer; ex_bp1 = an EXR's URL) -> eax = 1:
+#   ex_bp1 = the JPEG of the same map and resolution, rdx its size
+ex_ph_jpg:
+    push    rbx
+    push    r12
+    push    r13
+    mov     rsi, rdi
+    call    ex_jo_first
+    mov     rbx, rax
+1:  test    rbx, rbx
+    jz      8f
+    mov     rsi, rbx                    # <map>.<res>.exr.url the same?
+    call    ex_jo_val
+    test    rax, rax
+    jz      2f
+    mov     rsi, rax
+    lea     rdi, [rip+ex_res]
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     r12, rax
+    mov     rsi, rax
+    lea     rdi, [rip+k_exr]
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     rsi, rax
+    lea     rdi, [rip+k_url]
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     rsi, rax
+    lea     rdi, [rip+ex_bp2]
+    mov     edx, 256
+    call    j_str
+    test    eax, eax
+    jle     2f
+    lea     rdi, [rip+ex_bp2]
+    lea     rsi, [rip+ex_bp1]
+    call    str_eq
+    test    eax, eax
+    jz      2f
+    mov     rsi, r12                    # its .jpg
+    lea     rdi, [rip+k_jpg]
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     r13, rax
+    mov     rsi, rax
+    lea     rdi, [rip+k_url]
+    call    j_find
+    test    rax, rax
+    jz      2f
+    mov     rsi, rax
+    lea     rdi, [rip+ex_bp2]
+    mov     edx, 256
+    call    j_str
+    test    eax, eax
+    jle     2f
+    mov     rsi, r13
+    call    ex_ph_size
+    mov     r13, rax
+    lea     rdi, [rip+ex_bp1]
+    lea     rsi, [rip+ex_bp2]
+    call    ex_cpy0
+    mov     rdx, r13
+    mov     eax, 1
+    jmp     9f
+2:  mov     rsi, rbx
+    call    ex_jo_next
+    mov     rbx, rax
+    jmp     1b
+8:  xor     eax, eax
+9:  pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# ex_ph_addfile(rdi=path in the asset's folder, rsi=URL, rdx=size, rcx=asset
+#   record) - a file to fetch (EF_PATH <name>/<path>); one here at that size
+#   kept; a path that would leave the folder not taken
+ex_ph_addfile:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    mov     r12, rdi
+    mov     r13, rsi
+    mov     r14, rdx
+    mov     r15, rcx
+    call    ex_ph_safe
+    test    eax, eax
+    jz      9f
+    mov     eax, [rip+ex_nf]
+    cmp     eax, EX_FILES
+    jae     9f
+    imul    rbx, rax, EF_SZ
+    add     rbx, [rip+ex_files]
+    lea     rdi, [rbx+EF_PATH]
+    lea     rsi, [r15+EX_NAME]
+    call    ex_cpy0
+    mov     byte ptr [rdi], '/'
+    inc     rdi
+    mov     rsi, r12
+    mov     edx, 190
+    call    ex_ncpy
+    lea     rdi, [rbx+EF_URL]
+    mov     rsi, r13
+    mov     edx, 255
+    call    ex_ncpy
+    mov     [rbx+EF_SIZE], r14
+    mov     dword ptr [rbx+EF_STATE], 0
+    add     [rip+ex_fall], r14
+    lea     rdi, [rbx+EF_PATH]          # here already at that size: kept
+    mov     rsi, r14
+    call    ex_here
+    test    eax, eax
+    jz      1f
+    mov     dword ptr [rbx+EF_STATE], 2
+    add     [rip+ex_fdone], r14
+1:  inc     dword ptr [rip+ex_nf]
 9:  pop     r15
     pop     r14
     pop     r13
@@ -3304,9 +4083,11 @@ ex_thumb_next:
     inc     r12d
     jmp     1b
 2:  mov     r13, rax
-    call    ex_iscentral
-    test    eax, eax
-    jnz     21f
+    call    ex_kind
+    cmp     eax, EK_POLYHAVEN           # (Poly Haven: from the catalog)
+    je      22f
+    cmp     eax, EK_CENTRAL
+    je      21f
     cmp     byte ptr [r13+EX_ROOT], 0   # (no root: no thumbnail)
     jne     3f
     jmp     24f
@@ -3334,9 +4115,17 @@ ex_thumb_next:
     mov     rbx, rax
     mov     dword ptr [rbx+SL_WHAT], SW_THUMB
     mov     [rbx+SL_IDX], r12d
-    call    ex_iscentral
-    test    eax, eax
-    jz      31f
+    call    ex_kind
+    cmp     eax, EK_POLYHAVEN
+    jne     33f
+    lea     rdi, [rbx+SL_URL]           # its URL, as a 256 px PNG
+    lea     rsi, [r13+EX_THP]
+    call    ex_cpy0
+    lea     rsi, [rip+s_ph_thq]
+    call    ex_cat0
+    jmp     32f
+33: cmp     eax, EK_CENTRAL
+    jne     31f
     mov     rdi, rbx                    # <dataset>@<commit>/<folder>/<thumbnail>
     mov     rsi, r13
     call    ex_url_rev
@@ -3475,9 +4264,9 @@ ex_get:
     mov     edi, EF_SZ*EX_FILES
     call    vmap
     mov     [rip+ex_files], rax
-3:  call    ex_iscentral                # (central: its package's list)
-    test    eax, eax
-    jz      4f
+3:  call    ex_kind                     # (central: its package's list; Poly
+    cmp     eax, EK_CENTRAL             #  Haven: its /files/<id>)
+    jb      4f
     mov     dword ptr [rip+ex_fstate], 4
     jmp     9f
 4:  lea     rdi, [rip+ex_nexturl]       # its listing: tree/main/<name>?recursive=true
@@ -3529,7 +4318,8 @@ ex_file_next:
     je      .Lfn_bom
     xor     eax, eax
     jmp     .Lfn_out
-.Lfn_bom:                               # (central) its package's file list
+.Lfn_bom:                               # (central) its package's file list;
+                                        #  (Poly Haven) its /files/<id>
     mov     edi, [rip+ex_fasset]
     call    ex_rec
     mov     r13, rax
@@ -3616,9 +4406,16 @@ ex_file_next:
     mov     r12, rax
     mov     dword ptr [r12+SL_WHAT], SW_FILE
     mov     [r12+SL_IDX], r13d
-    call    ex_iscentral
-    test    eax, eax
-    jz      3f
+    call    ex_kind
+    cmp     eax, EK_POLYHAVEN           # (Poly Haven: the URL it came with)
+    jne     7f
+    lea     rdi, [r12+SL_URL]
+    mov     rsi, [rsp]
+    lea     rsi, [rsi+EF_URL]
+    call    ex_cpy0
+    jmp     6f
+7:  cmp     eax, EK_CENTRAL
+    jne     3f
     mov     edi, [rip+ex_fasset]        # (central: <dataset>@<commit>/<folder>/
     call    ex_rec                      #  + the path after <name>/)
     mov     rdi, r12

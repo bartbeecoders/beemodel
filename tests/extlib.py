@@ -34,6 +34,15 @@ folder. Headless, each operation runs to its end.
   root is the USD its thumbnail shows (else the first USD), only what an
   import needs is fetched. In the window, a tile's thumbnail comes through
   its package.
+- Poly Haven (a stand-in API, BEEMODEL_PH_URL; tests/fixtures/usd/polyhaven):
+  lib.source polyhaven reads /assets?t=models once (the first category the
+  category, the others and the tags kept for the search, the thumbnail's URL
+  without its query); lib.get reads /files/<id>: the 1k USD and its include
+  map, an EXR there fetched as its map's JPEG, a path leaving the folder
+  refused; imported with the separate metallic and roughness maps made one
+  map, the EXRs the USD names read from their JPEGs. Every request says
+  User-Agent: BeeModel/<version>. In the window the tile's thumbnail is asked
+  for as a PNG and drawn fitted over a backdrop (it is cut out, portrait).
 
     python3 tests/extlib.py build/beemodel
 """
@@ -41,6 +50,9 @@ import http.server, json, os, shutil, subprocess, sys, tempfile, threading, urll
 
 BIN = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else 'build/beemodel')
 HUB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'usd', 'hub')
+PH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixtures', 'usd', 'polyhaven')
+PH_UA = []                              # User-Agents of Poly Haven's requests
+PH_DL = {}                              # download path -> its file
 FAILS = []
 LOG = []                                # (method, path) the server was asked
 FAIL_PATHS = set()                      # dataset paths answered with 500
@@ -111,11 +123,32 @@ class Hub(http.server.BaseHTTPRequestHandler):
                 else self.send(404, b'{}')
         return None
 
+    def polyhaven(self, u):
+        # Poly Haven's API (/ph), its downloads (/phdl), its thumbnails (/phcdn)
+        if not u.path.startswith('/ph'):
+            return None
+        PH_UA.append(self.headers.get('User-Agent', ''))
+        host = 'http://' + self.headers['Host']
+        if u.path == '/ph/assets':
+            if urllib.parse.parse_qs(u.query).get('t') != ['models']:
+                return self.send(400, b'{"error":"t"}')
+            return self.send(200, json.dumps(ph_assets(host)).encode())
+        if u.path.startswith('/ph/files/'):
+            f = ph_files(host).get(u.path[len('/ph/files/'):])
+            return self.send(200, json.dumps(f).encode()) if f else self.send(404, b'{}')
+        if u.path.startswith('/phcdn/'):
+            if 'format=png' not in u.query:
+                return self.send(200, b'RIFF....WEBP', 'image/webp')
+            return self.send(200, open(os.path.join(PH, 'thumb.png'), 'rb').read(), 'image/png')
+        ph_files(host)
+        f = PH_DL.get(u.path)
+        return self.send(200, open(f, 'rb').read(), 'application/octet-stream') if f else self.send(404, b'{}')
+
     def do_GET(self):
         u = urllib.parse.urlparse(self.path)
         q = urllib.parse.parse_qs(u.query)
         LOG.append(('GET', u.path))
-        if self.central(u):
+        if self.central(u) or self.polyhaven(u):
             return
         if u.path.startswith('/cdn/'):                     # the "CDN"
             rel = urllib.parse.unquote(u.path[5:])
@@ -171,6 +204,118 @@ class Hub(http.server.BaseHTTPRequestHandler):
         out = [{'type': 'file', 'oid': 'x', 'size': os.path.getsize(os.path.join(HUB, p)), 'path': p}
                for p in form.get('paths', []) if os.path.isfile(os.path.join(HUB, p))]
         self.send(200, json.dumps(out).encode())
+
+
+def ph_assets(host):
+    th = lambda i: '%s/phcdn/asset_img/thumbs/%s.png?width=256&height=256&format=webp&v=1' % (host, i)
+    return {
+        'crate_ph': {'name': 'Crate', 'type': 2, 'categories': ['props', 'containers'],
+                     'tags': ['wood', 'box'], 'authors': {'Someone': 'All'}, 'thumbnail_url': th('crate_ph')},
+        'nousd_ph': {'name': 'No USD', 'type': 2, 'categories': ['props'], 'tags': [], 'thumbnail_url': th('nousd_ph')},
+        'table_ph': {'name': 'Table', 'type': 2, 'categories': ['furniture', 'tables'],
+                     'tags': ['Table', 'wooden'], 'dimensions': [1000, 600, 700], 'thumbnail_url': th('table_ph')},
+    }
+
+
+def ph_files(host):
+    """/files/<id> as Poly Haven answers it: per format and resolution; the
+    USD's include map names EXRs for maps the answer also has as JPEG."""
+    def f(kind, res, i, name, src):
+        path = '/phdl/%s/%s/%s/%s' % (kind, res, i, name)
+        PH_DL[path] = src
+        return {'url': host + path, 'size': os.path.getsize(src), 'md5': 'x'}
+    tex = lambda n: os.path.join(PH, 'textures', n)
+    crate = os.path.join(HUB, 'crate_test_a01', 'simready_usd', 'sm_crate_test_a01_01.usd')
+    t = 'ph_table_%s_1k.'
+    maps = {k: {'1k': {'jpg': f('jpg', '1k', 'table_ph', t % m + 'jpg', tex(t % m + 'jpg')),
+                       'exr': f('exr', '1k', 'table_ph', t % m + 'exr', tex('ph_table_metal_1k.exr'))}}
+            for k, m in (('Diffuse', 'diff'), ('Metal', 'metal'), ('Rough', 'rough'), ('nor_gl', 'nor_gl'))}
+    inc = {'textures/' + t % 'diff' + 'jpg': maps['Diffuse']['1k']['jpg'],
+           'textures/' + t % 'rough' + 'jpg': maps['Rough']['1k']['jpg'],    # (the USD names its .exr)
+           'textures/' + t % 'metal' + 'exr': maps['Metal']['1k']['exr'],
+           'textures/' + t % 'nor_gl' + 'exr': maps['nor_gl']['1k']['exr'],
+           '../../escape.txt': f('jpg', '1k', 'table_ph', 'escape.txt', tex(t % 'diff' + 'jpg'))}
+    table = dict(maps)
+    table['blend'] = {'1k': {'blend': f('blend', '1k', 'table_ph', 'x.blend', crate)}}
+    table['usd'] = {'2k': {'usd': dict(f('usd', '2k', 'table_ph', 'ph_table_2k.usda', os.path.join(PH, 'ph_table_1k.usda')),
+                                       include={})},
+                    '1k': {'usd': dict(f('usd', '1k', 'table_ph', 'ph_table_1k.usda', os.path.join(PH, 'ph_table_1k.usda')),
+                                       include=inc)}}
+    return {
+        'crate_ph': {'usd': {'1k': {'usd': dict(f('usd', '1k', 'crate_ph', 'crate_ph_1k.usd', crate), include={})}}},
+        'nousd_ph': {'blend': {'1k': {'blend': f('blend', '1k', 'nousd_ph', 'x.blend', crate)}}},
+        'table_ph': table,
+    }
+
+
+def polyhaven(home, port):
+    print('-- Poly Haven --')
+    host = 'http://127.0.0.1:%d' % port
+    cache = os.path.join(home, 'BeeModel', 'cache', 'polyhaven')
+    cat = os.path.join(cache, 'catalog.tsv')
+    rows = lambda: [l.split('\t') for l in open(cat).read().splitlines()] if os.path.exists(cat) else []
+    LOG.clear()
+    PH_UA.clear()
+    rc, out = run(home, 'op("lib.source", "polyhaven")', port)
+    got = [(r[0], r[1], r[2], r[7], r[8]) for r in rows() if len(r) >= 9]
+    th = host + '/phcdn/asset_img/thumbs/%s.png'
+    check(rc == 0 and got == [('crate_ph', '', 'props', th % 'crate_ph', 'containers wood box'),
+                              ('nousd_ph', '', 'props', th % 'nousd_ph', ''),
+                              ('table_ph', '', 'furniture', th % 'table_ph', 'tables Table wooden')],
+          'the catalog: the first category, the rest and the tags, the thumbnail without its query (%s)' % got)
+    check([p for m, p in LOG] == ['/ph/assets'], 'one request (%s)' % LOG)
+    LOG.clear()
+    rc, out = run(home, 'op("lib.source", "polyhaven")', port)
+    check(rc == 0 and not LOG, 'the next time: catalog.tsv read, the server not asked (%d requests)' % len(LOG))
+
+    def place(asset, xyz='0 0 0', more=''):
+        LOG.clear()
+        code = ('op("lib.source", "polyhaven")\nn = count()\nfor i in 0..n { delete(name(0)) }\n'
+                'op("lib.get", "%s %s")\nprint("N", count())\n'
+                'for i in 0..count() { o = name(i)\n print("OB", o, get(o, "x"), get(o, "y"), get(o, "z"), rigid(o, "type"), matof(o)) }\n'
+                % (asset, xyz)) + more
+        rc, out = run(home, code, port)
+        obs = {l.split()[1]: l.split()[2:] for l in out.splitlines() if l.startswith('OB ')}
+        return rc, obs, [p for m, p in LOG], out
+
+    rc, obs, fetched, out = place('crate_ph', '2 0 -1')
+    box = obs.get('Box')
+    check(fetched == ['/ph/files/crate_ph', '/phdl/usd/1k/crate_ph/crate_ph_1k.usd'],
+          'placing: /files/<id>, then its USD (%s)' % fetched)
+    check(rc == 0 and box is not None and abs(float(box[0]) - 2) < 1e-4 and abs(float(box[2]) + 1) < 1e-4
+          and box[3] == '1', 'placed at 2 0 -1 with its bodies (Box at %s)' % box)
+    r = {x[0]: x for x in rows()}
+    check(r.get('crate_ph', [''] * 2)[1] == 'crate_ph/crate_ph_1k.usd', 'its root kept in the catalog (%s)' % r.get('crate_ph'))
+
+    mr = ('m = matof("Top")\nb = nodeinfo(m, 0, "socket", 0)\nk = nodeinfo(m, 0, "socket", 1)\n'
+          'g = nodeinfo(m, 0, "socket", 3)\nprint("MAT", m, b, k, g, nodeinfo(m, 0, "socket", 6), '
+          'nodeval(m, k, 4 * nodeinfo(m, 0, "socketout", 1) + 3, 0, 0, 0, 0.5, 0.5), '
+          'nodeval(m, g, 4 * nodeinfo(m, 0, "socketout", 3) + 3, 0, 0, 0, 0.5, 0.5))\n')
+    rc, obs, fetched, out = place('table_ph', '0 0 0', mr)
+    mat = next((l.split()[1:] for l in out.splitlines() if l.startswith('MAT ')), [])
+    want = ['/ph/files/table_ph', '/phdl/jpg/1k/table_ph/ph_table_diff_1k.jpg', '/phdl/jpg/1k/table_ph/ph_table_metal_1k.jpg',
+            '/phdl/jpg/1k/table_ph/ph_table_nor_gl_1k.jpg', '/phdl/jpg/1k/table_ph/ph_table_rough_1k.jpg',
+            '/phdl/usd/1k/table_ph/ph_table_1k.usda']
+    check(sorted(fetched) == want, 'the 1k USD, its textures, an EXR as its map\'s JPEG; not 2k, not a path '
+          'leaving the folder (%s)' % fetched)
+    tx = os.path.join(cache, 'assets', 'table_ph', 'textures')
+    check((sorted(os.listdir(tx)) if os.path.isdir(tx) else []) == [
+        'ph_table_diff_1k.jpg', 'ph_table_metal_1k.jpg', 'ph_table_nor_gl_1k.jpg', 'ph_table_rough_1k.jpg']
+          and not os.path.exists(os.path.join(cache, 'escape.txt')),
+          'kept as <id>/textures/*.jpg (%s)' % (os.listdir(tx) if os.path.isdir(tx) else '-'))
+    ok = (len(mat) == 7 and mat[0] == 'ph_table' and int(mat[1]) > 0 and mat[2] == mat[3] and int(mat[2]) > 0
+          and int(mat[4]) > 0 and abs(float(mat[5]) - 50 / 255) < 0.02 and abs(float(mat[6]) - 200 / 255) < 0.02)
+    check(rc == 0 and 'Top' in obs and ok, 'imported: a base map, metallic (0.2) and roughness (0.78) from their '
+          'own maps made one, a normal map; the EXRs the USD names read as JPEGs (%s)' % mat)
+    rc, obs, fetched, out = place('table_ph')
+    check(rc == 0 and fetched == [] and 'Top' in obs, 'a second lib.get: placed again, nothing fetched')
+    rc, obs, fetched, out = place('nousd_ph')
+    check(rc == 0 and obs == {} and fetched == ['/ph/files/nousd_ph'], 'no USD offered: nothing placed, no crash')
+    check(PH_UA and all(u.startswith('BeeModel/') for u in PH_UA),
+          'every request says User-Agent: BeeModel/<version> (%s)' % sorted(set(PH_UA)))
+    idx = os.path.join(home, 'BeeModel', 'library', 'index.txt')
+    lib = open(idx).read() if os.path.exists(idx) else ''
+    check('polyhaven' in lib and 'furniture' in lib, 'placed assets saved into the local library (#polyhaven #furniture)')
 
 
 def make_central(root):
@@ -296,7 +441,7 @@ def central(home, port):
 
 def run(home, code, port):
     env = dict(os.environ, HOME=home, XDG_CACHE_HOME='', BEEMODEL_HF_URL='http://127.0.0.1:%d' % port,
-               BEEMODEL_GH_URL='http://127.0.0.1:%d' % port)
+               BEEMODEL_GH_URL='http://127.0.0.1:%d' % port, BEEMODEL_PH_URL='http://127.0.0.1:%d/ph' % port)
     r = subprocess.run([BIN, '--eval', code], env=env, capture_output=True, text=True, timeout=300)
     return r.returncode, r.stdout
 
@@ -387,6 +532,7 @@ def main():
         os.remove(os.path.join(home, 'BeeModel', 'sources.txt'))
         make_central(os.path.join(home, 'central-hub'))
         central(home, port)
+        polyhaven(home, port)
         gui(port)
     finally:
         srv.shutdown()
@@ -398,6 +544,7 @@ def gui(port):
     import time
     os.environ['BEEMODEL_HF_URL'] = 'http://127.0.0.1:%d' % port
     os.environ['BEEMODEL_GH_URL'] = 'http://127.0.0.1:%d' % port
+    os.environ['BEEMODEL_PH_URL'] = 'http://127.0.0.1:%d/ph' % port
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'tools'))
     argv = sys.argv
     sys.argv = [sys.argv[0], tempfile.mkdtemp(prefix='bee-extlib-shots-')]
@@ -451,6 +598,31 @@ def gui(port):
             f.pump(0.3)
         check(os.path.exists(thumb) and f.proc.poll() is None,
               'SimReady Central in the browser: a tile\'s thumbnail came through its package')
+        LOG.clear()
+        q('op("lib.source", "polyhaven")')
+        t0, tile = time.time(), None
+        while time.time() - t0 < 20 and tile is None:
+            f.pump(0.3)
+            img = f.image().convert('RGB')
+            px = img.load()
+            for y in range(560, img.height, 2):         # the magenta thumbnail
+                for x in range(0, img.width, 2):
+                    if px[x, y] == (200, 60, 160):
+                        tile = (x, y)
+                        break
+                if tile:
+                    break
+        left = None
+        if tile:                                        # its first column, then to its left
+            x = tile[0]
+            while x > 0 and px[x - 1, tile[1]] == (200, 60, 160):
+                x -= 1
+            left = px[x - 3, tile[1]]
+        asked = [p for m, p in LOG if p.startswith('/phcdn/')]
+        check(tile is not None and left is not None and all(abs(a - b) <= 2 for a, b in zip(left, (138, 135, 128)))
+              and asked and f.proc.poll() is None,
+              'Poly Haven in the browser: the thumbnail asked for as a PNG, cut out over the backdrop (%s; left of it %s)'
+              % (tile, left))
     finally:
         f.proc.kill()
 

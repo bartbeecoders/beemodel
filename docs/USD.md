@@ -18,12 +18,14 @@ outliner folder named after the file. Online assets
 | Composition | sublayers, references and payloads (other files, internal prims, default prims), variant selections, instanceable prims; relationship targets mapped through each reference; inactive prims and classes left out |
 | Transforms | `xformOpOrder` with translate, scale, rotateX/Y/Z, rotate in all six orders, orient, transform; `!invert!` pivots; `!resetXformStack!`; Z up and `metersPerUnit` |
 | Meshes | polygons, `leftHanded` winding, `primvars:st` (vertex or faceVarying, indexed or not); GeomSubsets: an object for each bound material |
-| Materials | UsdPreviewSurface: colour, metallic, roughness, emission, opacity (below 1: transmission), ior; UsdUVTexture maps (base, metallic-roughness from one texture's b and g - glTF's and SimReady's ORM -, normal, emission) with a UsdTransform2d's tiling |
+| Materials | UsdPreviewSurface: colour, metallic, roughness, emission, opacity (below 1: transmission), ior; UsdUVTexture maps (base, metallic-roughness from one texture's b and g - glTF's and SimReady's ORM - or from a texture each, one channel - Blender's exports, Poly Haven's -, made into one map; normal, emission) with a UsdTransform2d's tiling |
 | Physics | UsdPhysics: rigid bodies, MassAPI masses, collision approximations (convexHull -> hull, boundingCube -> box, boundingSphere -> sphere, the rest compound), physics materials (friction, restitution), kinematic bodies passive; revolute, prismatic, fixed and spherical joints with pivots, axes and limits |
 
 Textures larger than `file.usd_texture_size` (1024 by default; 0: any)
 are box-filtered down by halves once and kept beside the original as
 `<name>.<size>.png`; that file is what the scene loads and saves.
+A texture that can't be read, or an OpenEXR one (BeeModel reads none), is
+taken from the same name as `.png` or `.jpg` when that is there.
 
 Not read: animation (time samples), skeletons, curves and points, MDL
 shaders (UsdPreviewSurface is used), `.usdz` archives. A driven joint

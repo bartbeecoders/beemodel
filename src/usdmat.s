@@ -6,7 +6,10 @@
 #  Each input is a value, or a connection to another shader's output:
 #    diffuseColor   value -> base colour; a UsdUVTexture -> the base map
 #    metallic,      values; both from one texture's b and g outputs (an
-#    roughness       ORM / glTF metallic-roughness map) -> that map
+#    roughness       ORM / glTF metallic-roughness map) -> that map; each
+#                    from a texture of its own (one channel; Blender's
+#                    exports, Poly Haven's), or one of them a value -> a
+#                    metallic-roughness map made of them (B, G)
 #    normal         a UsdUVTexture -> the normal map (its scale)
 #    emissiveColor  value -> emission; a texture -> the emission map
 #    opacity        below 1 (glass): transmission 1 - opacity; ior
@@ -17,7 +20,9 @@
 #  Textures bigger than file.usd_texture_size (1024 by default) are box-
 #  filtered down by a power of two once, kept beside the original as
 #  <name>.<size>.png and loaded from there (SimReady's are 4096 a side:
-#  30 GB for a scene of 40 assets at full size).
+#  30 GB for a scene of 40 assets at full size). A texture that cannot be
+#  read, or an OpenEXR one (no reader here), is taken from the same name as
+#  .png or .jpg when that is there (Poly Haven ships JPEGs of its EXRs).
 # =============================================================================
 .intel_syntax noprefix
 .include "const.inc"
@@ -50,6 +55,10 @@
 .equ GT_SZ,     96
 .equ UM_MAXMAT, 256
 .equ UM_MAXIMG, 256
+.equ IM_W,      0                       # (imgread.s images)
+.equ IM_H,      4
+.equ IM_FMT,    8
+.equ IM_DATA,   64
 
 .section .rodata
 .align 8
@@ -79,6 +88,11 @@ o_g:        .asciz "outputs:g"
 .align 4
 f_one:      .float 1.0
 f_half:     .float 0.5
+f_255:      .float 255.0
+x_exr:      .asciz ".exr"
+x_apng:     .asciz ".png"
+x_ajpg:     .asciz ".jpg"
+s_mrsuf:    .asciz "_mr"
 
 .section .data
 .align 4
@@ -87,6 +101,9 @@ us_texcap:  .long 1024                  # textures at most this a side (0: any)
 .section .bss
 .align 8
 um_cpath:   .skip 1100                  # the capped copy's path
+um_apath:   .skip 1100                  # a texture's stand-in (.png / .jpg)
+um_ow:      .skip 4                     # (um_mr2) the map made: its size
+um_oh:      .skip 4
 um_mpath:   .skip 8*UM_MAXMAT           # materials made: where defined (layer,
 um_mlay:    .skip 8*UM_MAXMAT           #  path), index
 um_mindex:  .skip 4*UM_MAXMAT
@@ -198,6 +215,7 @@ usdmat_get:
     mov     edx, MP_ROUGH
     call    um_scalar
     call    um_mr
+    call    um_mr2
     # ---- normal
     mov     edi, r14d
     lea     rsi, [rip+i_normal]
@@ -539,6 +557,337 @@ um_mr:
     pop     rbx
     ret
 
+# um_mr2 - r14d = the shader; no metallic-roughness map yet: metallic and
+#   roughness each from a texture of its own (the channel connected: r, g or
+#   b) or a value (defaults 0 and 0.5), at least one a texture: a map made
+#   of them (B metallic, G roughness; the size of the roughness texture,
+#   else the metallic one), adopted as an image of the scene
+um_mr2:
+    push    rbx
+    push    r12
+    push    r13
+    push    r14
+    push    r15
+    push    rbp
+    sub     rsp, 40
+    cmp     dword ptr [rip+um_gt+GT_MR], 0
+    jne     .Lm2_out
+    mov     ebp, r14d
+    mov     edi, ebp
+    lea     rsi, [rip+i_metal]
+    call    um_chan
+    mov     [rsp], eax                  # metallic: image + 1, its shift
+    mov     [rsp+4], edx
+    mov     edi, ebp
+    lea     rsi, [rip+i_rough]
+    call    um_chan
+    mov     [rsp+8], eax                # roughness: image + 1, its shift
+    mov     [rsp+12], edx
+    mov     eax, [rsp]
+    or      eax, [rsp+8]
+    jz      .Lm2_out
+    mov     edi, ebp                    # the values (no texture)
+    lea     rsi, [rip+i_metal]
+    xor     edx, edx
+    call    um_cbyte
+    mov     [rsp+16], eax
+    mov     edi, ebp
+    lea     rsi, [rip+i_rough]
+    mov     edx, 128
+    call    um_cbyte
+    mov     [rsp+20], eax
+    mov     edi, [rsp]
+    call    um_img8
+    mov     r12, rax                    # metallic's image (0: its value)
+    mov     edi, [rsp+8]
+    call    um_img8
+    mov     r13, rax                    # roughness's
+    mov     rax, r13
+    test    rax, rax
+    jnz     1f
+    mov     rax, r12
+    test    rax, rax
+    jz      .Lm2_out
+1:  mov     edi, [rax+IM_W]
+    mov     esi, [rax+IM_H]
+    mov     [rip+um_ow], edi
+    mov     [rip+um_oh], esi
+    xor     edx, edx
+    call    img_alloc
+    test    rax, rax
+    jz      .Lm2_out
+    mov     [rsp+24], rax
+    xor     ebx, ebx                    # y
+.Lm2_y:
+    cmp     ebx, [rip+um_oh]
+    jae     .Lm2_made
+    xor     r15d, r15d                  # x
+.Lm2_x:
+    cmp     r15d, [rip+um_ow]
+    jae     .Lm2_ny
+    mov     eax, [rsp+16]
+    test    r12, r12
+    jz      2f
+    mov     rdi, r12
+    mov     esi, r15d
+    mov     edx, ebx
+    mov     ecx, [rsp+4]
+    call    um_sample
+2:  mov     [rsp+32], eax
+    mov     eax, [rsp+20]
+    test    r13, r13
+    jz      3f
+    mov     rdi, r13
+    mov     esi, r15d
+    mov     edx, ebx
+    mov     ecx, [rsp+12]
+    call    um_sample
+3:  shl     eax, 8
+    or      eax, [rsp+32]
+    or      eax, 0xff000000
+    mov     rcx, [rsp+24]
+    mov     edx, ebx
+    imul    edx, [rip+um_ow]
+    add     edx, r15d
+    mov     [rcx+IM_DATA+rdx*4], eax
+    inc     r15d
+    jmp     .Lm2_x
+.Lm2_ny:
+    inc     ebx
+    jmp     .Lm2_y
+.Lm2_made:
+    mov     edi, [rsp+8]                # named <texture>_mr
+    test    edi, edi
+    jnz     4f
+    mov     edi, [rsp]
+4:  dec     edi
+    call    image_rec
+    lea     rdi, [rip+um_tbuf]
+    mov     rsi, rax
+    mov     edx, 27
+    xor     ecx, ecx
+5:  cmp     ecx, edx
+    jae     6f
+    mov     al, [rsi+rcx]
+    test    al, al
+    jz      6f
+    mov     [rdi+rcx], al
+    inc     ecx
+    jmp     5b
+6:  lea     rdi, [rdi+rcx]
+    lea     rsi, [rip+s_mrsuf]
+    mov     ecx, 4
+    rep     movsb
+    mov     rdi, [rsp+24]
+    lea     rsi, [rip+um_tbuf]
+    call    image_adopt
+    test    eax, eax
+    js      .Lm2_out
+    inc     eax
+    mov     [rip+um_gt+GT_MR], eax
+.Lm2_out:
+    add     rsp, 40
+    pop     rbp
+    pop     r15
+    pop     r14
+    pop     r13
+    pop     r12
+    pop     rbx
+    ret
+
+# um_chan(edi=shader, rsi=input) -> eax = the image + 1 of the UsdUVTexture
+#   connected (0: none), edx = the channel's shift (r 16, g 8, b 0)
+um_chan:
+    push    rbx
+    sub     rsp, 16
+    call    um_conn
+    test    eax, eax
+    js      8f
+    mov     ebx, eax
+    mov     [rsp], rdx
+    mov     rdi, rdx
+    lea     rsi, [rip+o_g]
+    call    str_eq
+    mov     ecx, 8
+    test    eax, eax
+    jnz     1f
+    mov     rdi, [rsp]
+    lea     rsi, [rip+o_b]
+    call    str_eq
+    xor     ecx, ecx
+    test    eax, eax
+    jnz     1f
+    mov     ecx, 16
+1:  mov     [rsp+8], ecx
+    mov     edi, ebx
+    call    um_texture
+    mov     edx, [rsp+8]
+    jmp     9f
+8:  xor     eax, eax
+    xor     edx, edx
+9:  add     rsp, 16
+    pop     rbx
+    ret
+
+# um_cbyte(edi=shader, rsi=input, edx=default) -> eax = its float value as a
+#   byte (x 255), else the default
+um_cbyte:
+    push    rbx
+    mov     ebx, edx
+    call    um_value
+    test    rax, rax
+    jz      9f
+    cmp     dword ptr [rax+UV_T], UT_DBL
+    jne     9f
+    cvtsd2ss xmm0, [rax+UV_D]
+    mulss   xmm0, [rip+f_255]
+    addss   xmm0, [rip+f_half]
+    cvttss2si eax, xmm0
+    xor     ebx, ebx
+    test    eax, eax
+    js      9f
+    mov     ebx, 255
+    cmp     eax, 255
+    ja      9f
+    mov     ebx, eax
+9:  mov     eax, ebx
+    pop     rbx
+    ret
+
+# um_img8(edi=image + 1) -> rax = its pixels' image when it is 8-bit, 0
+um_img8:
+    xor     eax, eax
+    test    edi, edi
+    jz      9f
+    dec     edi
+    sub     rsp, 8
+    call    image_ptr
+    add     rsp, 8
+    test    rax, rax
+    jz      9f
+    cmp     dword ptr [rax+IM_FMT], 0
+    je      9f
+    xor     eax, eax
+9:  ret
+
+# um_sample(rdi=image, esi=x, edx=y of the map made (um_ow x um_oh), ecx=
+#   shift) -> eax = the image's byte there (nearest)
+um_sample:
+    mov     r8d, edx
+    mov     eax, esi
+    mul     dword ptr [rdi+IM_W]
+    div     dword ptr [rip+um_ow]
+    mov     r9d, eax
+    mov     eax, r8d
+    mul     dword ptr [rdi+IM_H]
+    div     dword ptr [rip+um_oh]
+    imul    eax, [rdi+IM_W]
+    add     eax, r9d
+    mov     eax, [rdi+IM_DATA+rax*4]
+    shr     eax, cl
+    and     eax, 255
+    ret
+
+# um_alt(rdi=texture file) -> rax = the file to load: it, or when it cannot
+#   be read or is an OpenEXR (no reader here) the same name as .png, else
+#   .jpg, when that is there
+um_alt:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    lea     rsi, [rip+x_exr]            # an .exr: its stand-in first
+    call    um_ends
+    test    eax, eax
+    jnz     1f
+    mov     rdi, rbx
+    call    um_readable
+    test    eax, eax
+    jnz     .Lal_orig
+1:  lea     rdi, [rip+um_apath]         # <stem>
+    xor     ecx, ecx
+    mov     edx, -1
+2:  mov     al, [rbx+rcx]
+    test    al, al
+    jz      3f
+    cmp     ecx, 1080
+    jae     .Lal_orig
+    mov     [rdi+rcx], al
+    cmp     al, '/'
+    jne     21f
+    mov     edx, -1
+21: cmp     al, '.'
+    jne     22f
+    mov     edx, ecx
+22: inc     ecx
+    jmp     2b
+3:  test    edx, edx
+    js      .Lal_orig
+    lea     r12, [rdi+rdx]
+    mov     eax, [rip+x_apng]           # .png
+    mov     [r12], eax
+    mov     byte ptr [r12+4], 0
+    lea     rdi, [rip+um_apath]
+    call    um_readable
+    test    eax, eax
+    jnz     .Lal_alt
+    mov     eax, [rip+x_ajpg]           # .jpg
+    mov     [r12], eax
+    lea     rdi, [rip+um_apath]
+    call    um_readable
+    test    eax, eax
+    jnz     .Lal_alt
+.Lal_orig:
+    mov     rax, rbx
+    jmp     9f
+.Lal_alt:
+    lea     rax, [rip+um_apath]
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# um_ends(rdi=text, rsi=end) -> eax = 1 when the text ends so
+um_ends:
+    push    rbx
+    push    r12
+    sub     rsp, 8
+    mov     rbx, rdi
+    mov     r12, rsi
+    call    str_len
+    push    rax
+    mov     rdi, r12
+    call    str_len
+    mov     ecx, eax
+    pop     rax
+    cmp     eax, ecx
+    jb      8f
+    sub     eax, ecx
+    lea     rdi, [rbx+rax]
+    mov     rsi, r12
+    call    str_eq
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    pop     r12
+    pop     rbx
+    ret
+
+# um_readable(rdi=path) -> eax = 1 when the file can be read
+um_readable:
+    sub     rsp, 8
+    call    file_read
+    test    rax, rax
+    jz      8f
+    mov     rdi, rax
+    mov     rsi, rdx
+    call    file_unmap
+    mov     eax, 1
+    jmp     9f
+8:  xor     eax, eax
+9:  add     rsp, 8
+    ret
+
 # um_texture(edi=a UsdUVTexture prim) -> eax = its image + 1 (0: none):
 #   inputs:file resolved beside the layer that names it, loaded once; its
 #   st's UsdTransform2d sets the tiling (the first map's)
@@ -566,6 +915,8 @@ um_texture:
     mov     rsi, [rdx+0]                # the node's layer: its file
     mov     rsi, [rsi+UL_FILE]
     call    us_resolve
+    mov     rdi, rax                    # (an EXR, or missing: a .png / .jpg
+    call    um_alt                      #  of it)
     mov     rdi, rax                    # (its size capped: the small copy)
     call    um_capped
     mov     r12, rax

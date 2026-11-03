@@ -3346,14 +3346,17 @@ thumb_px:
 9:  ret
 
 # thumb_load(rdi=PNG / JPEG path) -> rax = TH x TH pixels (0xRRGGBB, an own
-#   mapping), 0 when it does not load. Nearest sampling of the whole image
+#   mapping), 0 when it does not load. Nearest sampling of the whole image,
+#   fitted (its sides kept in proportion, centred) and its alpha over a
+#   neutral backdrop (Poly Haven's thumbnails: cut out, not square)
 #   (extlib.s: online catalogs' thumbnails too)
+.equ TH_BG, 0x8a8780
 thumb_load:
     push    rbx
     push    r12
     push    r13
     push    r14
-    sub     rsp, 8
+    sub     rsp, 40
     xor     ebx, ebx
     call    file_read
     test    rax, rax
@@ -3379,31 +3382,100 @@ thumb_load:
     cmp     rax, -4096
     jae     6f
     mov     rbx, rax
+    mov     eax, [r14+IMW]              # the longer side: m; the image's
+    mov     ecx, [r14+IMH]              #  size in the tile, where it starts
+    cmp     eax, ecx
+    cmovb   eax, ecx
+    mov     [rsp], eax
+    mov     eax, [r14+IMW]
+    imul    eax, eax, TH
+    xor     edx, edx
+    div     dword ptr [rsp]
+    mov     [rsp+4], eax                # w in the tile
+    mov     eax, [r14+IMH]
+    imul    eax, eax, TH
+    xor     edx, edx
+    div     dword ptr [rsp]
+    mov     [rsp+8], eax                # h
+    mov     eax, TH
+    sub     eax, [rsp+4]
+    shr     eax, 1
+    mov     [rsp+12], eax               # x0
+    mov     eax, TH
+    sub     eax, [rsp+8]
+    shr     eax, 1
+    mov     [rsp+16], eax               # y0
     xor     ecx, ecx                    # y
 1:  cmp     ecx, TH
     jae     6f
-    mov     eax, ecx
-    imul    eax, [r14+IMH]              # (rows by the height)
-    xor     edx, edx
-    mov     r8d, TH
-    div     r8d
-    mov     r9d, eax                    # source row
     xor     r10d, r10d                  # x
 2:  cmp     r10d, TH
     jae     3f
-    mov     eax, r10d
-    imul    eax, [r14+IMW]
+    mov     r12d, TH_BG
+    mov     eax, ecx                    # its row
+    sub     eax, [rsp+16]
+    js      5f
+    cmp     eax, [rsp+8]
+    jae     5f
+    imul    eax, [rsp]
     xor     edx, edx
+    mov     r8d, TH
     div     r8d
-    mov     r11d, r9d
+    cmp     eax, [r14+IMH]
+    jb      21f
+    mov     eax, [r14+IMH]
+    dec     eax
+21: mov     r9d, eax
+    mov     eax, r10d                   # its column
+    sub     eax, [rsp+12]
+    js      5f
+    cmp     eax, [rsp+4]
+    jae     5f
+    imul    eax, [rsp]
+    xor     edx, edx
+    mov     r8d, TH
+    div     r8d
+    cmp     eax, [r14+IMW]
+    jb      22f
+    mov     eax, [r14+IMW]
+    dec     eax
+22: mov     r11d, r9d
     imul    r11d, [r14+IMW]
     add     r11d, eax
     mov     eax, [r14+IMDATA+r11*4]     # 0xAARRGGBB
+    mov     r13d, eax
+    shr     r13d, 24                    # its alpha over the backdrop
+    cmp     r13d, 255
+    jne     23f
     and     eax, 0xffffff
-    mov     edx, ecx
-    imul    edx, TH
+    mov     r12d, eax
+    jmp     5f
+23: test    r13d, r13d
+    jz      5f
+    mov     r11d, eax
+    xor     r9d, r9d
+.irp sh, 16, 8, 0
+    mov     eax, r11d
+    shr     eax, \sh
+    and     eax, 255
+    imul    eax, r13d
+    mov     edx, r12d
+    shr     edx, \sh
+    and     edx, 255
+    mov     r8d, 255
+    sub     r8d, r13d
+    imul    edx, r8d
+    add     eax, edx
+    imul    eax, eax, 0x8081            # / 255
+    shr     eax, 23
+    shl     eax, \sh
+    or      r9d, eax
+.endr
+    mov     r12d, r9d
+5:  mov     edx, ecx
+    imul    edx, edx, TH
     add     edx, r10d
-    mov     [rbx+rdx*4], eax
+    mov     [rbx+rdx*4], r12d
     inc     r10d
     jmp     2b
 3:  inc     ecx
@@ -3411,7 +3483,7 @@ thumb_load:
 6:  mov     rdi, r14
     call    img_free
 7:  mov     rax, rbx
-    add     rsp, 8
+    add     rsp, 40
     pop     r14
     pop     r13
     pop     r12

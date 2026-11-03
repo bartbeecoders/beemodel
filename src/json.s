@@ -282,16 +282,17 @@ j_bool:
 
 # j_first(rsi=array ('[')) -> rax = first element or 0
 j_first:
-    call    j_ws
-    xor     eax, eax
+    call    j_ws                        # (j_ws uses al: 0 set after it)
     cmp     byte ptr [rsi], '['
-    jne     9f
+    jne     8f
     inc     rsi
     call    j_ws
     cmp     byte ptr [rsi], ']'
-    je      9f
+    je      8f
     mov     rax, rsi
-9:  ret
+    ret
+8:  xor     eax, eax
+    ret
 
 # j_next(rsi=element) -> rax = next element of the same array or 0
 j_next:

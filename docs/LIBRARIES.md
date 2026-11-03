@@ -19,12 +19,19 @@ Vertiv's data-centre racks, LG's appliances, and robot arms and grippers
 (FANUC, Franka, Robotiq, OnRobot, Comau, Deep Robotics, AgiBot, Standard
 Bots). See [SimReady Central](#simready-central) below.
 
+The third is **Poly Haven** (`lib.source polyhaven`,
+[polyhaven.com](https://polyhaven.com), CC0): 521 models in November 2026
+- furniture, props, plants, food, tools, lights - with textured
+materials, served as USD. No physics: they come in as plain objects. See
+[Poly Haven](#poly-haven) below.
+
 ## Using it
 
 - The catalog is fetched the first time a source is shown (about three
   seconds) and kept; `lib.refresh` fetches it again for new assets.
 - Thumbnails come as their tiles show. The wheel scrolls; the search box
-  (or `lib.search <words>`) narrows by name and category.
+  (or `lib.search <words>`) narrows by name and category (Poly Haven:
+  its tags too).
 - Double-click a tile, or drag it into a viewport: the asset's files are
   downloaded the first time (only what an import needs), then it is
   imported ([USD.md](USD.md)) at the 3D cursor - or on the surface it is
@@ -80,6 +87,30 @@ ships with Linux distributions and Windows 11.
   long chains don't hold together under physics yet: the arm sags and
   folds. Place them with `lib.get <name> static` for now.
 
+## Poly Haven
+
+- The catalog is one request to Poly Haven's API
+  (`api.polyhaven.com/assets?t=models`). An asset's category is its first
+  one; its other categories and its tags go into the search ("chair"
+  finds the sofas too).
+- Thumbnails are Poly Haven's renders (asked for as PNG), cut out and not
+  square: the tile fits them in, over a neutral backdrop.
+- Placing an asset asks `/files/<id>` which files it has, kept in `bom/`.
+  BeeModel takes the **1k** set (else 2k, 4k): the `.usdc` and the
+  textures its `include` list names. Textures that list gives as
+  OpenEXR (normal and metal maps, compressed in ways BeeModel doesn't
+  read) come as the JPEG of the same map, which the same answer lists; the
+  importer finds the JPEG beside the `.exr` the USD names.
+- The models come from Blender: Z up, metres, separate metallic and
+  roughness maps, which the importer makes one map.
+- Placed assets are saved into the local library as
+  `#polyhaven #<category>`; the console's credit says "Poly Haven, CC0".
+- **Terms.** The models are CC0. Poly Haven's
+  [API terms](https://polyhaven.com/our-api) make the API free for
+  non-commercial projects and research; commercial use needs their
+  permission (usually a sponsorship). Every request BeeModel makes says
+  `User-Agent: BeeModel/<version>`, as they ask.
+
 ## More sources
 
 `~/BeeModel/sources.txt` adds Hugging Face datasets in SimReady's layout,
@@ -92,6 +123,8 @@ A `simready` line wants NVIDIA's naming (an asset's root
 `simready_usd/sm_<asset>_01.usd`); other makers' datasets come through
 SimReady Central, or through a `central` line naming a copy of its index.
 
+Poly Haven has no `sources.txt` kind: it's one API, built in.
+
 A source kind is a few functions in `src/extlib.s`: the catalog's URLs, a
 thumbnail's URL, which files an asset needs and its root. Other libraries
 (other hubs, a folder of files) plug in there.
@@ -103,5 +136,8 @@ paths-info, redirects to a "CDN", a failing file) and checks the catalog,
 placing, the cache, retries, extra sources and, in a window, the Asset
 Browser's thumbnails and double-click. A stand-in SimReady Central (a
 GitHub index, datasets pinned to commits, packages) checks what is taken
-in and left out, the commits, the roots and the files fetched.
-`BEEMODEL_HF_URL` and `BEEMODEL_GH_URL` point BeeModel at other servers.
+in and left out, the commits, the roots and the files fetched. A
+stand-in Poly Haven API checks the catalog, the 1k set, EXRs fetched as
+JPEGs, the combined metallic-roughness map, the User-Agent and, in a
+window, a cut-out thumbnail over the backdrop. `BEEMODEL_HF_URL`,
+`BEEMODEL_GH_URL` and `BEEMODEL_PH_URL` point BeeModel at other servers.
